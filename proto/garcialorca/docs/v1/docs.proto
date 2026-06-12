@@ -1,0 +1,35 @@
+// Docs / Trámites (M09) — document/procedure requests tracked per student.
+// FASE 0 contract-first stub.
+syntax = "proto3";
+
+package garcialorca.docs.v1;
+
+// DocsService is the documents/procedures API surface.
+service DocsService {
+  // Health is the liveness/ping probe present on every service.
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // TODO(M09): RequestDocument, GetRequest, ListRequests.
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+}
+
+// DocumentRequest references a student. TODO(M09): doc_type, status, requested_at.
+message DocumentRequest {
+  string id = 1;
+  string student_id = 2;
+}
+
+// --- Domain events (published) ---
+
+// DocumentRequested fires when a student requests a document/procedure.
+// TODO(M09): doc_type, requested_at.
+message DocumentRequested {
+  string request_id = 1;
+  string student_id = 2;
+  string tenant_id = 3;
+}

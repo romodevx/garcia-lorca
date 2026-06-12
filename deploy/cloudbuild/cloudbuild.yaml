@@ -1,0 +1,173 @@
+# García Lorca CI/CD — Cloud Build.
+#
+# Fail-fast order (cheap gates first): lint -> contracts -> vet -> tests ->
+# frontend -> security -> build-hardening gate -> images -> deploy.
+#
+# Trigger substitutions (set on the trigger):
+#   _REGION       deployment region                (e.g. us-central1)
+#   _AR_REPO      Artifact Registry repo id         (e.g. garcia-lorca)
+#   _DEPLOY       "true" to run gcloud run deploy   (only on main / release)
+# Built-ins: $PROJECT_ID, $SHORT_SHA.
+#
+# Images are tagged with $SHORT_SHA. The same tag is what Terraform receives via
+# image_tags so infra and the deployed revision always agree.
+
+substitutions:
+  _REGION: us-central1
+  _AR_REPO: garcia-lorca
+  _DEPLOY: "false"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+steps:
+  # ---- 1. Proto: lint + generate (gen/ is regenerated, never committed) ----
+  - id: buf-lint
+    name: bufbuild/buf:1.50.0
+    entrypoint: buf
+    args: ["lint"]
+
+  - id: buf-generate
+    name: bufbuild/buf:1.50.0
+    entrypoint: buf
+    args: ["generate"]
+    waitFor: ["buf-lint"]
+
+  # ---- 2. Go: vet + tests across the workspace ----------------------------
+  - id: go-vet
+    name: golang:1.25-bookworm
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        go work sync
+        go vet ./...
+    waitFor: ["buf-generate"]
+
+  - id: go-test
+    name: golang:1.25-bookworm
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        go test ./... -race -count=1
+    waitFor: ["go-vet"]
+
+  # ---- 3. Security gate: govulncheck + module audit -----------------------
+  - id: govulncheck
+    name: golang:1.25-bookworm
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        go install golang.org/x/vuln/cmd/govulncheck@latest
+        $(go env GOPATH)/bin/govulncheck ./...
+        # Dependency audit: verify checksums and that go.mod is tidy/pinned.
+        go mod verify
+    waitFor: ["buf-generate"]
+
+  # ---- 4. Frontend: install + turbo test/lint/build -----------------------
+  - id: web-build
+    name: node:22-bookworm
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        npm ci
+        npx turbo run test lint build
+    waitFor: ["buf-generate"]
+
+  # ---- 5. Build-hardening gate: NO source maps in client artifacts --------
+  # Prefer the frontend-owned check script when present; otherwise use the
+  # grep-based fallback shipped alongside this pipeline. Either FAILS the build
+  # if *.map files or sourceMappingURL comments exist in production bundles.
+  - id: sourcemap-gate
+    name: node:22-bookworm
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ -f apps/web/scripts/check-no-sourcemaps.mjs ]; then
+          echo "Using frontend-owned source-map check (npm run check:no-sourcemaps)."
+          npm --workspace apps/web run check:no-sourcemaps
+        else
+          echo "Frontend check script absent; using pipeline fallback gate."
+          bash deploy/cloudbuild/check-no-sourcemaps.sh
+        fi
+    waitFor: ["web-build"]
+
+  # ---- 6. Build + push images (parallel; only the wired services here) ----
+  # Build context is the repo root; -f points at each service Dockerfile.
+  - id: image-gateway
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/gateway:$SHORT_SHA"
+        docker build -f services/gateway/Dockerfile -t "$IMG" .
+        docker push "$IMG"
+    waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
+
+  - id: image-iam
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/iam:$SHORT_SHA"
+        docker build -f services/iam/Dockerfile -t "$IMG" .
+        docker push "$IMG"
+    waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
+
+  - id: image-students
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/students:$SHORT_SHA"
+        docker build -f services/students/Dockerfile -t "$IMG" .
+        docker push "$IMG"
+    waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
+
+  # ---- 7. Deploy (only when _DEPLOY=true; main/release triggers) ----------
+  # Cloud Run deploy preserves each service's scaling profile set by Terraform.
+  # Terraform owns the desired-state config; this updates the running image to
+  # the freshly built $SHORT_SHA. New images roll out; rollback = redeploy a
+  # prior SHA (see deploy/README.md).
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ "${_DEPLOY}" != "true" ]; then
+          echo "Skipping deploy (_DEPLOY != true)."
+          exit 0
+        fi
+        for svc in gateway iam students; do
+          gcloud run deploy "$svc" \
+            --project="$PROJECT_ID" \
+            --region="${_REGION}" \
+            --image="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/$svc:$SHORT_SHA"
+        done
+    waitFor: ["image-gateway", "image-iam", "image-students"]
+
+# Record built images in the build metadata.
+images:
+  - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/gateway:$SHORT_SHA"
+  - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/iam:$SHORT_SHA"
+  - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/students:$SHORT_SHA"
+
+timeout: 1800s

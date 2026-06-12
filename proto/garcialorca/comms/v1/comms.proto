@@ -1,0 +1,33 @@
+// Comms / Agenda / Push (M10) — consumes events, pushes FCM + agenda.
+// Primarily an event consumer; minimal published surface.
+// FASE 0 contract-first stub.
+syntax = "proto3";
+
+package garcialorca.comms.v1;
+
+// CommsService is the communications API surface.
+service CommsService {
+  // Health is the liveness/ping probe present on every service.
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // TODO(M10): SendNotification, ListAgenda, RegisterDevice (FCM token).
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+}
+
+// Notification is an outbound push/agenda item. TODO(M10): channel, payload, sent_at.
+message Notification {
+  string id = 1;
+  string recipient_id = 2;
+}
+
+// AgendaEntry is a calendar/agenda item surfaced to families.
+// TODO(M10): title, date, audience.
+message AgendaEntry {
+  string id = 1;
+  string tenant_id = 2;
+}

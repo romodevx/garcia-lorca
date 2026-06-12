@@ -1,0 +1,47 @@
+// Billing CFDI 4.0 + IEDU (M11).
+//
+// FUTURE / post-MVP — contract reserved, NOT implemented.
+//
+// This file exists only to freeze the service boundary in the monorepo layout
+// (see MODULES.md M11 + CLAUDE.md "Fuera del MVP"). No service implementation,
+// no PAC integration, no CSD dependency this cycle. The `module_billing` flag
+// stays registered and default OFF. Promotion to a real build is a post-MVP
+// decision gated by spike S01 (CFDI/IEDU PAC sandbox) + CSD del colegio.
+//
+// Do not flesh this out until billing is promoted out of post-MVP.
+syntax = "proto3";
+
+package garcialorca.billing.v1;
+
+// BillingService — FUTURE. Health only; everything else is reserved.
+service BillingService {
+  // Health is the liveness/ping probe present on every service.
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // TODO(M11, FUTURE): IssueInvoice (CFDI 4.0 stamp via PAC), GetInvoice,
+  // CancelInvoice. Requires CSD del colegio + PAC integration — out of MVP.
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+}
+
+// Invoice — FUTURE. CFDI 4.0 fiscal document with IEDU education complement.
+// TODO(M11, FUTURE): uuid (timbre), cfdi xml, iedu complement fields
+// (autorización RVOE, nivel educativo, CURP del alumno), total, status.
+message Invoice {
+  string id = 1;
+  string student_id = 2;
+}
+
+// --- Domain events (published) — FUTURE ---
+
+// InvoiceIssued fires when a CFDI is successfully stamped. FUTURE.
+// TODO(M11, FUTURE): uuid, issued_at, total, complement summary.
+message InvoiceIssued {
+  string invoice_id = 1;
+  string student_id = 2;
+  string tenant_id = 3;
+}

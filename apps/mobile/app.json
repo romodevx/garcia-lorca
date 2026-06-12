@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "García Lorca",
+    "slug": "garcia-lorca",
+    "scheme": "garcialorca",
+    "version": "0.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "jsEngine": "hermes",
+    "plugins": ["expo-router"],
+    "ios": {
+      "supportsTablet": true,
+      "jsEngine": "hermes"
+    },
+    "android": {
+      "jsEngine": "hermes"
+    },
+    "updates": {
+      "enabled": true
+    }
+  }
+}

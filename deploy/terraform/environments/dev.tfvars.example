@@ -1,0 +1,11 @@
+# Per-environment overrides for dev. Copy to dev.tfvars (gitignored) and apply:
+#   terraform apply -var-file=environments/dev.tfvars
+project_id            = "garcia-lorca-dev"
+region                = "us-central1"
+env                   = "dev"
+image_tag             = "latest"
+db_tier               = "db-g1-small"
+db_availability_type  = "ZONAL"
+billing_account_id    = "000000-000000-000000"
+monthly_budget_amount = 100
+budget_alert_emails   = ["andres.roqa93@gmail.com"]

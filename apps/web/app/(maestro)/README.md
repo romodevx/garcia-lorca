@@ -1,0 +1,8 @@
+# `(maestro)` route group
+
+Teacher (maestro) surface — attendance, grade capture, etc. Routes here are
+gated per module via `FeatureGate` / `useFlag` and lazy-loaded so disabled
+module chunks are never downloaded.
+
+FASE 0: empty stub. Module routes are added by their respective module cycles.
+A disabled module must not register its route.

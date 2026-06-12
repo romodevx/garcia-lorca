@@ -1,0 +1,33 @@
+{
+  "name": "@garcia-lorca/config",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Shared ESLint / TypeScript / Tailwind presets for the García Lorca monorepo.",
+  "type": "module",
+  "exports": {
+    "./eslint": "./eslint.preset.js",
+    "./tailwind": "./tailwind.preset.js",
+    "./tsconfig.base.json": "./tsconfig.base.json",
+    "./tsconfig.react.json": "./tsconfig.react.json"
+  },
+  "files": [
+    "eslint.preset.js",
+    "tailwind.preset.js",
+    "tsconfig.base.json",
+    "tsconfig.react.json"
+  ],
+  "scripts": {
+    "build": "echo \"@garcia-lorca/config: presets only, nothing to build\" && exit 0",
+    "test": "echo \"@garcia-lorca/config: no tests\" && exit 0",
+    "lint": "echo \"@garcia-lorca/config: presets only\" && exit 0"
+  },
+  "dependencies": {
+    "@eslint/js": "9.39.4",
+    "globals": "17.6.0",
+    "typescript-eslint": "8.61.0"
+  },
+  "peerDependencies": {
+    "eslint": ">=9",
+    "tailwindcss": ">=4"
+  }
+}

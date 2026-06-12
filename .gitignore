@@ -1,0 +1,44 @@
+# Generated code — regenerated from proto/ via `buf generate`, never committed
+/gen/
+
+# Go
+*.exe
+*.test
+*.out
+/bin/
+vendor/
+
+# Node / TS / Turborepo
+node_modules/
+.next/
+out/
+dist/
+.turbo/
+*.tsbuildinfo
+.expo/
+web-build/
+
+# Frontend build hardening: source maps must never be committed or shipped
+*.map
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*-key.json
+*.pem
+service-account*.json
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.log

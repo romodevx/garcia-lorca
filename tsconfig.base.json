@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "García Lorca base",
+  "compilerOptions": {
+    "ignoreDeprecations": "6.0",
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "esModuleInterop": true,
+    "allowJs": false,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "declaration": true,
+    "declarationMap": false,
+    "sourceMap": false,
+    "incremental": true,
+
+    "baseUrl": ".",
+    "paths": {
+      "@garcia-lorca/domain": ["packages/domain/index.ts"],
+      "@garcia-lorca/ui": ["packages/ui/index.ts"],
+      "@garcia-lorca/api-client": ["packages/api-client/index.ts"],
+      "@garcia-lorca/config/*": ["packages/config/*"],
+      "@garcia-lorca/gen": ["gen/ts/index.ts"],
+      "@garcia-lorca/gen/*": ["gen/ts/*"]
+    }
+  },
+  "exclude": ["node_modules", "dist", ".next", ".expo", ".turbo"]
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@garcia-lorca/api-client",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Thin wrapper over the generated Connect-Query clients (gen/ts) + a Connect transport factory. Re-exports generated hooks.",
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "2.12.0",
+    "@connectrpc/connect": "2.1.1",
+    "@connectrpc/connect-query": "2.2.0",
+    "@connectrpc/connect-web": "2.1.1",
+    "@tanstack/react-query": "5.101.0"
+  },
+  "devDependencies": {
+    "@garcia-lorca/config": "*",
+    "eslint": "10.4.1",
+    "vitest": "4.1.8"
+  }
+}

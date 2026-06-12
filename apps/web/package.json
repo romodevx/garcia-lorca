@@ -1,0 +1,38 @@
+{
+  "name": "@garcia-lorca/web",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check:no-sourcemaps": "node scripts/check-no-sourcemaps.mjs .next/static"
+  },
+  "dependencies": {
+    "@garcia-lorca/api-client": "*",
+    "@garcia-lorca/domain": "*",
+    "@garcia-lorca/ui": "*",
+    "@tanstack/react-query": "5.101.0",
+    "next": "16.2.9",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@garcia-lorca/config": "*",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
+    "@types/node": "25.9.3",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "eslint": "10.4.1",
+    "eslint-config-next": "16.2.9",
+    "jsdom": "29.1.1",
+    "tailwindcss": "4.3.0",
+    "typescript": "6.0.3",
+    "vitest": "4.1.8"
+  }
+}

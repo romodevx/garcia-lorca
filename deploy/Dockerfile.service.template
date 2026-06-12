@@ -1,0 +1,42 @@
+# Shared Go-service Dockerfile template for García Lorca.
+#
+# Every service uses an identical image. To add one, copy this file to
+# services/<name>/Dockerfile and replace the two SERVICE occurrences below.
+# services/gateway/Dockerfile and services/iam/Dockerfile are the live copies.
+#
+# Build context is ALWAYS the repo root (services are go.work modules that
+# import ./pkg and ./gen/go):
+#   docker build -f services/<name>/Dockerfile -t <name> .
+#
+# Design choices:
+#   - golang:1.25-bookworm builder -> distroless/static-debian12:nonroot runtime
+#   - CGO_ENABLED=0, -trimpath, -ldflags="-s -w"  (small, static, reproducible)
+#   - runs as nonroot (uid 65532); no shell / package manager in the final image
+#   - listens on $PORT (Cloud Run convention)
+
+# ---- builder --------------------------------------------------------------
+FROM golang:1.25-bookworm AS builder
+
+ENV CGO_ENABLED=0 GOOS=linux
+WORKDIR /src
+
+COPY go.work go.work.sum* ./
+COPY pkg/go.mod pkg/go.sum* ./pkg/
+COPY gen/go/go.mod gen/go/go.sum* ./gen/go/
+COPY services/SERVICE/go.mod services/SERVICE/go.sum* ./services/SERVICE/
+RUN go work sync || true
+
+COPY pkg ./pkg
+COPY gen ./gen
+COPY services/SERVICE ./services/SERVICE
+
+RUN go build -trimpath -ldflags="-s -w" -o /out/server ./services/SERVICE/cmd
+
+# ---- runtime --------------------------------------------------------------
+FROM gcr.io/distroless/static-debian12:nonroot
+WORKDIR /
+COPY --from=builder /out/server /server
+USER nonroot:nonroot
+ENV PORT=8080
+EXPOSE 8080
+ENTRYPOINT ["/server"]

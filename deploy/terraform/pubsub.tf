@@ -1,0 +1,80 @@
+# Pub/Sub with the dead-letter (DLQ) pattern. payment-events is the canonical
+# example; finance publishes overdue/payment events consumed by comms (push).
+# Other domain topics follow the same topic + subscription + DLQ shape.
+
+resource "google_pubsub_topic" "payment_events" {
+  project = var.project_id
+  name    = "payment-events"
+  labels  = local.labels
+
+  depends_on = [google_project_service.apis]
+}
+
+# Dead-letter topic: messages that exhaust delivery attempts land here for
+# inspection/replay instead of being lost or retried forever.
+resource "google_pubsub_topic" "payment_events_dlq" {
+  project = var.project_id
+  name    = "payment-events-dlq"
+  labels  = local.labels
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_pubsub_subscription" "payment_events_comms" {
+  project = var.project_id
+  name    = "payment-events-comms"
+  topic   = google_pubsub_topic.payment_events.id
+
+  ack_deadline_seconds = 30
+
+  # Redeliver with backoff; after max_delivery_attempts, route to the DLQ.
+  retry_policy {
+    minimum_backoff = "10s"
+    maximum_backoff = "600s"
+  }
+
+  dead_letter_policy {
+    dead_letter_topic     = google_pubsub_topic.payment_events_dlq.id
+    max_delivery_attempts = 5
+  }
+
+  # Replay window for at-least-once consumers that need to recover.
+  message_retention_duration = "604800s" # 7 days
+  expiration_policy {
+    ttl = "" # never expire the subscription
+  }
+}
+
+# A subscription on the DLQ so operators can drain/inspect failed messages.
+resource "google_pubsub_subscription" "payment_events_dlq_drain" {
+  project = var.project_id
+  name    = "payment-events-dlq-drain"
+  topic   = google_pubsub_topic.payment_events_dlq.id
+
+  ack_deadline_seconds       = 60
+  message_retention_duration = "604800s" # 7 days
+}
+
+# Pub/Sub's service agent needs publish rights on the DLQ and subscribe rights
+# on the source subscription for dead-lettering to work.
+data "google_project" "current" {
+  project_id = var.project_id
+}
+
+locals {
+  pubsub_sa = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+}
+
+resource "google_pubsub_topic_iam_member" "dlq_publisher" {
+  project = var.project_id
+  topic   = google_pubsub_topic.payment_events_dlq.id
+  role    = "roles/pubsub.publisher"
+  member  = local.pubsub_sa
+}
+
+resource "google_pubsub_subscription_iam_member" "dlq_subscriber" {
+  project      = var.project_id
+  subscription = google_pubsub_subscription.payment_events_comms.id
+  role         = "roles/pubsub.subscriber"
+  member       = local.pubsub_sa
+}

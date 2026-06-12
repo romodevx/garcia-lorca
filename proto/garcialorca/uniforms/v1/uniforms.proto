@@ -1,0 +1,43 @@
+// Uniforms store (M12) — reservation lifecycle via State pattern.
+// FASE 0 contract-first stub.
+syntax = "proto3";
+
+package garcialorca.uniforms.v1;
+
+// UniformsService is the uniforms store API surface.
+service UniformsService {
+  // Health is the liveness/ping probe present on every service.
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // TODO(M12): ReserveUniform, CancelReservation, GetReservation.
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+}
+
+// Reservation references a student. TODO(M12): item_sku, size, state, expires_at.
+message Reservation {
+  string id = 1;
+  string student_id = 2;
+}
+
+// --- Domain events (published) ---
+
+// UniformReserved fires when a uniform item is reserved.
+// TODO(M12): item_sku, size, expires_at.
+message UniformReserved {
+  string reservation_id = 1;
+  string student_id = 2;
+  string tenant_id = 3;
+}
+
+// ReservationExpired fires when a reservation lapses without pickup/payment.
+// TODO(M12): expired_at.
+message ReservationExpired {
+  string reservation_id = 1;
+  string student_id = 2;
+  string tenant_id = 3;
+}

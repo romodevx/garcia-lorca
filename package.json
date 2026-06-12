@@ -1,0 +1,25 @@
+{
+  "name": "garcia-lorca",
+  "private": true,
+  "version": "0.0.0",
+  "description": "García Lorca — Sistema de Gestión Escolar (frontend monorepo)",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "dev": "turbo run dev",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "turbo": "2.9.18",
+    "typescript": "6.0.3"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "npm@11.6.2"
+}

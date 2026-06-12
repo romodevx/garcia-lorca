@@ -1,0 +1,20 @@
+go 1.24
+
+// García Lorca monorepo Go workspace.
+// Members: shared libs (pkg), generated code (gen/go), and each service module.
+// `gen/go` is produced by `buf generate`; it may be empty until that runs.
+use (
+	./gen/go
+	./pkg
+	./services/attendance
+	./services/billing
+	./services/comms
+	./services/docs
+	./services/finance
+	./services/gateway
+	./services/grades
+	./services/iam
+	./services/scholarships
+	./services/students
+	./services/uniforms
+)

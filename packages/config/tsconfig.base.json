@@ -1,0 +1,5 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "García Lorca config — base (re-export of root tsconfig.base.json)",
+  "extends": "../../tsconfig.base.json"
+}

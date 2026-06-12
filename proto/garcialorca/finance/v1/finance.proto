@@ -1,0 +1,60 @@
+// Finance / Adeudos (M05) — debt + payment ledger per student.
+// Includes CONTPAQi XML export stub (spike S02, in-MVP scope).
+// FASE 0 contract-first stub.
+syntax = "proto3";
+
+package garcialorca.finance.v1;
+
+// FinanceService is the finance/debt API surface.
+service FinanceService {
+  // Health is the liveness/ping probe present on every service.
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // ExportContpaqi produces a CONTPAQi-format XML export (spike S02).
+  // TODO(M05/S02): real field mapping + period/account filters.
+  rpc ExportContpaqi(ExportContpaqiRequest) returns (ExportContpaqiResponse);
+
+  // TODO(M05): RegisterPayment, GetAccount, ListOverdue.
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+}
+
+// FinanceAccount is a per-student ledger. TODO(M05): balance, currency, tenant_id.
+message FinanceAccount {
+  string id = 1;
+  string student_id = 2;
+}
+
+// --- CONTPAQi export (S02) ---
+
+message ExportContpaqiRequest {
+  string tenant_id = 1;
+  // TODO(S02): period (from/to), account filter.
+}
+
+message ExportContpaqiResponse {
+  // xml is the CONTPAQi-format export payload. TODO(S02): validate against schema.
+  bytes xml = 1;
+}
+
+// --- Domain events (published) ---
+
+// PaymentRegistered fires when a payment is applied to an account.
+// TODO(M05): amount, method, registered_at.
+message PaymentRegistered {
+  string payment_id = 1;
+  string student_id = 2;
+  string tenant_id = 3;
+}
+
+// DebtOverdue fires when an account crosses its due date unpaid.
+// TODO(M05): amount_due, due_date, days_overdue.
+message DebtOverdue {
+  string account_id = 1;
+  string student_id = 2;
+  string tenant_id = 3;
+}

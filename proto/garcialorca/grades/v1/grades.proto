@@ -1,0 +1,35 @@
+// Grades / Boletas (M07) — grade capture + boleta (Strategy per SEP level).
+// FASE 0 contract-first stub.
+syntax = "proto3";
+
+package garcialorca.grades.v1;
+
+// GradesService is the grades/boletas API surface.
+service GradesService {
+  // Health is the liveness/ping probe present on every service.
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // TODO(M07): CaptureGrade, PublishGrades, GenerateBoleta.
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+}
+
+// Grade references a student. TODO(M07): subject_id, period, value, sep_level.
+message Grade {
+  string id = 1;
+  string student_id = 2;
+}
+
+// --- Domain events (published) ---
+
+// GradesPublished fires when grades for a period are released.
+// TODO(M07): cycle_id, period, published_at.
+message GradesPublished {
+  string student_id = 1;
+  string cycle_id = 2;
+  string tenant_id = 3;
+}

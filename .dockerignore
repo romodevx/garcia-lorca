@@ -1,0 +1,47 @@
+# Keep build context small and leak-free. Source is copied explicitly in the
+# Dockerfiles; this excludes everything that should never enter an image.
+
+# VCS / CI / IaC
+.git
+.github
+deploy
+
+# Node / frontend (Go images never need these)
+node_modules
+**/node_modules
+.next
+out
+dist
+.turbo
+.expo
+web-build
+apps
+packages
+
+# Go build artifacts / test output
+bin
+*.exe
+*.test
+*.out
+
+# Secrets / env — must never enter an image
+.env
+.env.*
+!.env.example
+*-key.json
+*.pem
+service-account*.json
+*.tfvars
+*.tfstate
+*.tfstate.*
+
+# Source maps must never ship
+*.map
+
+# Docs / local
+docs
+*.md
+.DS_Store
+.idea
+.vscode
+*.log

@@ -1,0 +1,42 @@
+// IAM (M01) — auth, roles, permissions. Everything downstream authorizes here.
+// FASE 0 contract-first stub: enough to compile + generate. Flesh out per-module.
+syntax = "proto3";
+
+package garcialorca.iam.v1;
+
+// IamService is the IAM API surface. Only Health is real in Fase 0.
+service IamService {
+  // Health is the liveness/ping probe present on every service.
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // TODO(M01): Login, ValidateToken, AssignRole, CheckPermission.
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  // status is a coarse health string, e.g. "ok".
+  string status = 1;
+}
+
+// User is the IAM principal. TODO(M01): tenant_id, status, timestamps.
+message User {
+  string id = 1;
+  string email = 2;
+}
+
+// Role groups permissions. TODO(M01): permissions, scope.
+message Role {
+  string id = 1;
+  string name = 2;
+}
+
+// --- Domain events (published; see MODULES.md M04) ---
+
+// CycleRolled signals a school-cycle roll-over that downstream modules react to.
+// Owned by config (M04) which shares area 11 with IAM.
+// TODO(M04): previous_cycle_id, effective_at.
+message CycleRolled {
+  string new_cycle_id = 1;
+  string tenant_id = 2;
+}

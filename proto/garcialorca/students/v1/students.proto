@@ -1,0 +1,43 @@
+// Students / Admisión (M03) — first vertical slice (enroll end-to-end).
+// FASE 0 contract-first stub.
+syntax = "proto3";
+
+package garcialorca.students.v1;
+
+// StudentsService is the students/admission API surface.
+service StudentsService {
+  // Health is the liveness/ping probe present on every service.
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // TODO(M03): EnrollStudent, GetStudent, ChangeAdmissionStatus.
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+}
+
+// Student is the core entity. TODO(M03): curp, level, group, tenant_id, status.
+message Student {
+  string id = 1;
+  string first_name = 2;
+  string last_name = 3;
+}
+
+// --- Domain events (published) ---
+
+// StudentEnrolled fires when a student is admitted into a cycle.
+// TODO(M03): cycle_id, level, enrolled_at.
+message StudentEnrolled {
+  string student_id = 1;
+  string tenant_id = 2;
+}
+
+// AdmissionStatusChanged fires on any admission state transition.
+// TODO(M03): previous_status, reason, changed_at.
+message AdmissionStatusChanged {
+  string student_id = 1;
+  string new_status = 2;
+  string tenant_id = 3;
+}

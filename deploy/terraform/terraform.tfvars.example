@@ -1,0 +1,31 @@
+# Copy to environments/<env>.tfvars and fill in. NEVER commit the real file —
+# *.tfvars is gitignored (only *.tfvars.example is tracked).
+#
+# Secrets (DB password, API keys) are NOT set here. They live in Secret Manager;
+# see secrets.tf. db_app_password may be injected by CI for first bootstrap only.
+
+project_id = "garcia-lorca-dev"
+region     = "us-central1"
+env        = "dev"
+
+# ---- Images ---------------------------------------------------------------
+# CI rewrites image_tag (and optionally per-service image_tags) to the built
+# commit SHA before apply. "latest" is fine for a first manual bring-up.
+image_tag = "latest"
+# image_tags = {
+#   gateway  = "a1b2c3d"
+#   iam      = "a1b2c3d"
+#   students = "a1b2c3d"
+# }
+
+# ---- Cloud SQL ------------------------------------------------------------
+db_tier              = "db-g1-small"
+db_name              = "garcia_lorca"
+db_app_user          = "app"
+db_availability_type = "ZONAL" # use REGIONAL for prod
+
+# ---- Budget ---------------------------------------------------------------
+billing_account_id    = "000000-000000-000000"
+monthly_budget_amount = 200
+budget_currency       = "USD"
+budget_alert_emails   = ["andres.roqa93@gmail.com"]

@@ -1,0 +1,43 @@
+// Attendance (M06) — QR check-in; absence events feed comms.
+// FASE 0 contract-first stub.
+syntax = "proto3";
+
+package garcialorca.attendance.v1;
+
+// AttendanceService is the attendance API surface.
+service AttendanceService {
+  // Health is the liveness/ping probe present on every service.
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // TODO(M06): MarkAttendance (QR), GetAttendance, ListByStudent.
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+}
+
+// AttendanceRecord references a student. TODO(M06): date, status, marked_by.
+message AttendanceRecord {
+  string id = 1;
+  string student_id = 2;
+}
+
+// --- Domain events (published) ---
+
+// AttendanceMarked fires when a student is checked in.
+// TODO(M06): marked_at, method (qr/manual).
+message AttendanceMarked {
+  string record_id = 1;
+  string student_id = 2;
+  string tenant_id = 3;
+}
+
+// AbsenceRecorded fires when a student is recorded absent (feeds comms M10).
+// TODO(M06): date, reason.
+message AbsenceRecorded {
+  string record_id = 1;
+  string student_id = 2;
+  string tenant_id = 3;
+}

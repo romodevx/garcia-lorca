@@ -1,0 +1,19 @@
+# buf v2 configuration — single module rooted at proto/.
+# Contracts live here; gen/ is 100% generated (never committed).
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  # Our directories already follow garcialorca/<domain>/v1/<domain>.proto and
+  # packages garcialorca.<domain>.v1, so the default package layout rules hold.
+breaking:
+  use:
+    - FILE
+# Managed mode injects go_package so individual .proto files never hardcode it.
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/garcia-lorca/gen/go
