@@ -78,8 +78,9 @@ steps:
       - -c
       - |
         set -euo pipefail
-        npm ci
-        npx turbo run test lint build
+        corepack enable pnpm
+        pnpm install --frozen-lockfile
+        pnpm turbo run test lint build
     waitFor: ["buf-generate"]
 
   # ---- 5. Build-hardening gate: NO source maps in client artifacts --------
@@ -93,9 +94,10 @@ steps:
       - -c
       - |
         set -euo pipefail
+        corepack enable pnpm
         if [ -f apps/web/scripts/check-no-sourcemaps.mjs ]; then
-          echo "Using frontend-owned source-map check (npm run check:no-sourcemaps)."
-          npm --workspace apps/web run check:no-sourcemaps
+          echo "Using frontend-owned source-map check (pnpm --filter web check:no-sourcemaps)."
+          pnpm --filter @garcia-lorca/web run check:no-sourcemaps
         else
           echo "Frontend check script absent; using pipeline fallback gate."
           bash deploy/cloudbuild/check-no-sourcemaps.sh

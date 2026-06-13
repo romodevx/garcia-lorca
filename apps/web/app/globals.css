@@ -1,0 +1,135 @@
+/* ============================================================
+   Centro Educativo García Lorca — Design Tokens
+   Friendly K-12 school management system
+
+   Ported verbatim from the design handoff (project/styles.css). The only
+   intentional deviation: the prototype's `@import` Google Fonts is removed —
+   Poppins + DM Sans are self-hosted via next/font/google and exposed to these
+   tokens through `--font-display` / `--font-ui` (set on <html> by layout.tsx).
+   ============================================================ */
+
+:root {
+  /* Brand (logo) — stable across themes */
+  --lime:        #7AC400;
+  --lime-deep:   #6BB000;
+  --forest:      #0A7A2F;
+  --yellow:      #F2D600;
+  --orange:      #F39200;
+  --red:         #E00000;
+  --purple:      #8E2E8E;
+
+  /* Type — wired to next/font CSS variables (see layout.tsx). Fallbacks keep
+     the page legible before/without the self-hosted fonts. */
+  --font-display: var(--font-poppins), system-ui, sans-serif;
+  --font-ui: var(--font-dm-sans), system-ui, sans-serif;
+
+  /* Radii */
+  --r-sm: 10px;
+  --r-md: 16px;
+  --r-lg: 22px;
+  --r-xl: 28px;
+  --r-pill: 999px;
+
+  /* Motion */
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+/* ---------------- LIGHT THEME ---------------- */
+:root, [data-theme="light"] {
+  --bg:          #F5F7F5;
+  --bg-grad:     radial-gradient(1200px 600px at 12% -8%, #EAF4E1 0%, rgba(234,244,225,0) 55%),
+                 radial-gradient(1000px 520px at 105% 0%, #FBF6E0 0%, rgba(251,246,224,0) 50%);
+  --surface:     #FFFFFF;
+  --surface-2:   #FAFBF8;
+  --surface-3:   #F1F4EF;
+  --text:        #0C2417;
+  --text-muted:  #5C6B61;
+  --text-faint:  #8A988E;
+  --border:      #E7ECE5;
+  --border-strong:#D6DED2;
+
+  --primary:     var(--lime);
+  --primary-press: var(--lime-deep);
+  --primary-ink: #0C3318;   /* text/icon on lime */
+  --on-color-ink:#FFFFFF;
+
+  --shadow-card: 0 1px 2px rgba(16,40,24,.04), 0 6px 18px rgba(16,40,24,.05);
+  --shadow-hover: 0 4px 10px rgba(16,40,24,.07), 0 18px 40px rgba(16,40,24,.10);
+  --shadow-pop: 0 12px 40px rgba(16,40,24,.16);
+
+  --topbar-bg: rgba(255,255,255,.82);
+
+  /* status tints */
+  --ok-bg:#E8F6E2;   --ok-fg:#0A7A2F;
+  --warn-bg:#FDF3D6;  --warn-fg:#9A7A00;
+  --bad-bg:#FCE4E4;   --bad-fg:#C20000;
+}
+
+/* ---------------- DARK THEME ---------------- */
+[data-theme="dark"] {
+  --bg:          #07150D;
+  --bg-grad:     radial-gradient(1200px 620px at 10% -10%, rgba(10,122,47,.22) 0%, rgba(10,122,47,0) 55%),
+                 radial-gradient(1000px 560px at 108% -4%, rgba(142,46,142,.16) 0%, rgba(142,46,142,0) 52%);
+  --surface:     #0E2016;
+  --surface-2:   #122A1C;
+  --surface-3:   #16331F;
+  --text:        #EAF4EC;
+  --text-muted:  #9BB4A4;
+  --text-faint:  #6E8678;
+  --border:      #1E3727;
+  --border-strong:#27452F;
+
+  --primary:     var(--lime);
+  --primary-press: #88D40A;
+  --primary-ink: #06270F;
+  --on-color-ink:#06270F;
+
+  --shadow-card: 0 1px 2px rgba(0,0,0,.4), 0 8px 22px rgba(0,0,0,.35);
+  --shadow-hover: 0 6px 14px rgba(0,0,0,.45), 0 22px 50px rgba(0,0,0,.5);
+  --shadow-pop: 0 16px 50px rgba(0,0,0,.6);
+
+  --topbar-bg: rgba(11,26,17,.72);
+
+  --ok-bg:rgba(10,122,47,.20);   --ok-fg:#7AE06A;
+  --warn-bg:rgba(242,214,0,.16);  --warn-fg:#F2D600;
+  --bad-bg:rgba(224,0,0,.18);    --bad-fg:#FF6B6B;
+}
+
+/* ---------------- BASE ---------------- */
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font-ui);
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,h2,h3,h4 { font-family: var(--font-display); margin: 0; letter-spacing: -.02em; }
+button { font-family: var(--font-ui); cursor: pointer; border: none; background: none; }
+input { font-family: var(--font-ui); }
+
+::selection { background: color-mix(in oklab, var(--lime) 35%, transparent); }
+
+.app-root {
+  min-height: 100vh;
+  background: var(--bg);
+  background-image: var(--bg-grad);
+  transition: background-color .4s var(--ease);
+}
+
+/* scrollbars */
+*::-webkit-scrollbar { width: 11px; height: 11px; }
+*::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 99px; border: 3px solid transparent; background-clip: content-box; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* focus ring */
+:focus-visible { outline: 3px solid color-mix(in oklab, var(--lime) 55%, transparent); outline-offset: 2px; }
+
+/* utility animations — transform-only so content is ALWAYS visible
+   even if the animation is paused/throttled at frame 0 (no opacity:0 trap) */
+@keyframes fadeUp { from { transform: translateY(12px); } to { transform: none; } }
+@keyframes pop { from { transform: scale(.95); } to { transform: none; } }
+.fade-up { animation: fadeUp .5s var(--ease) both; }
+@media (prefers-reduced-motion: reduce) { .fade-up { animation: none; } }

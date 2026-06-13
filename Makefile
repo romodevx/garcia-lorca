@@ -27,18 +27,18 @@ generate: ## Regenerate gen/ from proto/ (buf)
 test: ## Run Go + frontend tests
 	go work sync
 	go test ./... -race -count=1
-	npx turbo run test
+	pnpm turbo run test
 
 .PHONY: lint
 lint: ## Lint proto, Go, and frontend
 	buf lint
 	go vet ./...
-	npx turbo run lint
+	pnpm turbo run lint
 
 .PHONY: build
 build: ## Build Go binaries and frontend artifacts
 	go build ./...
-	npx turbo run build
+	pnpm turbo run build
 
 # ---- Local ----------------------------------------------------------------
 .PHONY: up

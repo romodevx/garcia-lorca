@@ -3,11 +3,8 @@
   "private": true,
   "version": "0.0.0",
   "description": "García Lorca — Sistema de Gestión Escolar (frontend monorepo)",
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
   "scripts": {
+    "preinstall": "npx only-allow pnpm",
     "build": "turbo run build",
     "test": "turbo run test",
     "lint": "turbo run lint",
@@ -21,5 +18,5 @@
   "engines": {
     "node": ">=22"
   },
-  "packageManager": "npm@11.6.2"
+  "packageManager": "pnpm@9.15.0"
 }

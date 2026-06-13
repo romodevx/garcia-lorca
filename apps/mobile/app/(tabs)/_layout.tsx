@@ -1,17 +1,34 @@
 import { Tabs } from "expo-router";
-import type { ReactNode } from "react";
+import { type ReactNode } from "react";
+import { View } from "react-native";
+import { AppHeader } from "@/src/components/AppHeader";
+import { TabBar } from "@/src/components/TabBar";
+import { useTheme } from "@/src/theme";
 
 /**
- * Parent/student bottom-tab navigation. FASE 0 stub: tabs are declared but each
- * screen is an empty placeholder. Per-module tabs must be gated (FeatureGate /
- * useFlag) and their screens lazy-loaded so disabled module code never ships.
+ * Parent-app bottom-tab navigation: Inicio, Asistencia, Notas, Cuenta, Avisos
+ * (+ a "Más" entry in the bar that pushes the module grid). The persistent
+ * child-context header sits above the tab content; the bar itself is the custom
+ * Moderno bottom bar (TabBar).
+ *
+ * Module tabs are UX-gated by their flag in the screen bodies; the backend
+ * gateway remains the security boundary.
  */
 export default function TabsLayout(): ReactNode {
+  const theme = useTheme();
   return (
-    <Tabs screenOptions={{ headerShown: true }}>
-      <Tabs.Screen name="asistencia" options={{ title: "Asistencia" }} />
-      <Tabs.Screen name="calificaciones" options={{ title: "Calificaciones" }} />
-      <Tabs.Screen name="estado-cuenta" options={{ title: "Estado de cuenta" }} />
-    </Tabs>
+    <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+      <AppHeader />
+      <Tabs
+        tabBar={(props) => <TabBar {...props} />}
+        screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: theme.colors.bg } }}
+      >
+        <Tabs.Screen name="index" options={{ title: "Inicio" }} />
+        <Tabs.Screen name="asistencia" options={{ title: "Asistencia" }} />
+        <Tabs.Screen name="calificaciones" options={{ title: "Calificaciones" }} />
+        <Tabs.Screen name="cuenta" options={{ title: "Cuenta" }} />
+        <Tabs.Screen name="avisos" options={{ title: "Avisos" }} />
+      </Tabs>
+    </View>
   );
 }

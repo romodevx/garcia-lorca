@@ -1,11 +1,12 @@
-import { Text, View } from "react-native";
-import type { ReactNode } from "react";
+import { type ReactNode } from "react";
+import { GatedScreen } from "@/src/components/GatedScreen";
+import { GradesScreen } from "@/src/screens/GradesScreen";
 
-/** Calificaciones tab stub — gated by `module_grades` once the module lands. */
-export default function CalificacionesScreen(): ReactNode {
+/** Calificaciones tab — gated by `module_grades` (UX only). */
+export default function CalificacionesRoute(): ReactNode {
   return (
-    <View>
-      <Text>Calificaciones</Text>
-    </View>
+    <GatedScreen flag="module_grades">
+      <GradesScreen />
+    </GatedScreen>
   );
 }

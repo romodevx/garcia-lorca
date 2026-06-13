@@ -1,11 +1,12 @@
-import { Text, View } from "react-native";
-import type { ReactNode } from "react";
+import { type ReactNode } from "react";
+import { GatedScreen } from "@/src/components/GatedScreen";
+import { AttendanceScreen } from "@/src/screens/AttendanceScreen";
 
-/** Asistencia tab stub — gated by `module_attendance` once the module lands. */
-export default function AsistenciaScreen(): ReactNode {
+/** Asistencia tab — gated by `module_attendance` (UX only). */
+export default function AsistenciaRoute(): ReactNode {
   return (
-    <View>
-      <Text>Asistencia</Text>
-    </View>
+    <GatedScreen flag="module_attendance">
+      <AttendanceScreen />
+    </GatedScreen>
   );
 }

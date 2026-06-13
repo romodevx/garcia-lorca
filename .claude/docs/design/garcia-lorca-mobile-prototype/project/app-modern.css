@@ -1,0 +1,249 @@
+/* ============================================================
+   García Lorca — "Moderno" skin (estilo apps de Meta)
+   Overrides scoped to .gl-app[data-skin="modern"].
+   Plano, aireado, bordes finos en vez de sombras, tipografía
+   grande y neutra, barra inferior tipo app. Reutiliza el markup.
+   ============================================================ */
+
+.gl-app[data-skin="modern"] {
+  --font-display: "Nunito", system-ui, -apple-system, sans-serif;
+}
+
+/* ---- Light: feed blanco, tarjetas planas con borde fino ---- */
+.gl-app[data-skin="modern"][data-theme="light"] {
+  --bg: #FFFFFF;
+  --bg-grad-a: #FFFFFF;
+  --bg-grad-b: #FFFFFF;
+  --surface: #FFFFFF;
+  --surface-2: #F2F5F1;
+  --surface-sunken: #EEF2ED;
+  --line: #E7ECE5;
+  --line-strong: #DCE3D9;
+
+  --text: #111A14;
+  --text-2: #5A6B5F;
+  --text-3: #8A988E;
+
+  --primary-soft: #EAF6D6;
+  --card-shadow: none;
+  --card-shadow-lg: 0 12px 34px -18px rgba(16,42,25,0.22);
+  --tab-shadow: none;
+}
+
+/* ---- Dark: verde muy profundo, plano, contraste limpio ---- */
+.gl-app[data-skin="modern"][data-theme="dark"] {
+  --bg: #051A0E;
+  --bg-grad-a: #051A0E;
+  --bg-grad-b: #051A0E;
+  --surface: #0A2B17;
+  --surface-2: #0E3520;
+  --surface-sunken: #082413;
+  --line: rgba(255,255,255,0.08);
+  --line-strong: rgba(255,255,255,0.14);
+
+  --text: #ECF7EE;
+  --text-2: #9FBEA9;
+  --text-3: #6F9079;
+
+  --card-shadow: none;
+  --card-shadow-lg: 0 16px 40px -18px rgba(0,0,0,0.6);
+  --tab-shadow: none;
+}
+
+/* ============================================================
+   Estructura general
+   ============================================================ */
+.gl-app[data-skin="modern"] .gl-scroll { padding: 2px 16px 28px; }
+
+/* Header grande tipo app */
+.gl-app[data-skin="modern"] .gl-header {
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid transparent;
+  transition: border-color .2s ease, background .2s ease;
+}
+.gl-app[data-skin="modern"][data-device="ios"] .gl-header { padding-top: 56px; }
+.gl-app[data-skin="modern"] .gl-header.scrolled {
+  box-shadow: none;
+  border-bottom-color: var(--line);
+  background: var(--bg);
+}
+.gl-app[data-skin="modern"] .gl-greet { font-size: 12px; color: var(--text-3); font-weight: 700; }
+.gl-app[data-skin="modern"] .gl-childname { font-size: 20px; font-weight: 800; letter-spacing: -0.4px; }
+
+/* Avatar circular con anillo (story-style) */
+.gl-app[data-skin="modern"] .gl-avatar,
+.gl-app[data-skin="modern"] .gl-avatar.sm {
+  border-radius: 50% !important;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--primary);
+}
+.gl-app[data-skin="modern"][data-theme="dark"] .gl-avatar {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--primary);
+}
+
+/* Iconos del header: planos, redondos, sin sombra */
+.gl-app[data-skin="modern"] .gl-iconbtn {
+  background: var(--surface-2);
+  border-radius: 50%;
+  box-shadow: none;
+}
+.gl-app[data-skin="modern"] .gl-dot-badge { box-shadow: 0 0 0 2.5px var(--bg); }
+
+/* ============================================================
+   Tarjetas planas
+   ============================================================ */
+.gl-app[data-skin="modern"] .gl-card {
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  box-shadow: none;
+  background: var(--surface);
+}
+.gl-app[data-skin="modern"] .gl-card.tap:active { transform: scale(0.985); }
+
+.gl-app[data-skin="modern"] .gl-row2 { gap: 12px; }
+
+/* Encabezado de sección: subtítulo grande, no mayúsculas diminutas */
+.gl-app[data-skin="modern"] .gl-section-label {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+  text-transform: none;
+  color: var(--text);
+  margin: 24px 2px 12px;
+}
+
+/* Títulos de pantalla más grandes */
+.gl-app[data-skin="modern"] .gl-detail-title { font-size: 27px; font-weight: 800; letter-spacing: -0.6px; }
+
+/* Hero: plano, círculo de estado más sobrio */
+.gl-app[data-skin="modern"] .gl-hero-value { font-size: 25px; font-weight: 800; letter-spacing: -0.5px; }
+.gl-app[data-skin="modern"] .gl-statuscircle { border-radius: 18px; }
+
+/* ============================================================
+   Botones — planos, radios suaves, sin sombra de color
+   ============================================================ */
+.gl-app[data-skin="modern"] .gl-btn {
+  border-radius: 16px;
+  font-weight: 800;
+  letter-spacing: -0.1px;
+}
+.gl-app[data-skin="modern"] .gl-btn.primary { box-shadow: none; }
+.gl-app[data-skin="modern"] .gl-btn.sm { border-radius: 13px; }
+
+/* ============================================================
+   Chips / pills — más planas
+   ============================================================ */
+.gl-app[data-skin="modern"] .gl-chip { font-weight: 800; height: 27px; }
+
+/* Segmented control estilo pill app */
+.gl-app[data-skin="modern"] .gl-segment {
+  background: var(--surface-2);
+  border-radius: 999px;
+  padding: 4px;
+}
+.gl-app[data-skin="modern"] .gl-segment button { border-radius: 999px; font-weight: 800; }
+.gl-app[data-skin="modern"] .gl-segment button.active {
+  box-shadow: none;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.gl-app[data-skin="modern"][data-theme="dark"] .gl-segment button.active {
+  background: var(--primary-soft); color: var(--text);
+}
+
+/* ============================================================
+   Filas de lista — más aire
+   ============================================================ */
+.gl-app[data-skin="modern"] .gl-listrow { padding: 15px 16px; }
+.gl-app[data-skin="modern"] .gl-listrow-title { font-weight: 800; }
+.gl-app[data-skin="modern"] .gl-listrow-icon,
+.gl-app[data-skin="modern"] .gl-listrow .tint-lime,
+.gl-app[data-skin="modern"] .gl-listrow .tint-forest,
+.gl-app[data-skin="modern"] .gl-listrow .tint-orange,
+.gl-app[data-skin="modern"] .gl-listrow .tint-purple,
+.gl-app[data-skin="modern"] .gl-listrow .tint-red,
+.gl-app[data-skin="modern"] .gl-listrow .tint-yellow { border-radius: 50%; }
+
+/* ============================================================
+   Calendario — celdas redondas tipo app
+   ============================================================ */
+.gl-app[data-skin="modern"] .gl-cal-cell { border-radius: 50%; font-weight: 800; }
+.gl-app[data-skin="modern"] .gl-cal-cell.today { box-shadow: inset 0 0 0 2px var(--primary); }
+
+/* ============================================================
+   Calificaciones
+   ============================================================ */
+.gl-app[data-skin="modern"] .gl-grade-badge { border-radius: 50%; font-weight: 800; }
+.gl-app[data-skin="modern"] .gl-avg-num { font-weight: 800; }
+
+/* ============================================================
+   Balance
+   ============================================================ */
+.gl-app[data-skin="modern"] .gl-balance-amount { font-weight: 800; letter-spacing: -1.5px; }
+
+/* ============================================================
+   Módulos (More) — tiles planos
+   ============================================================ */
+.gl-app[data-skin="modern"] .gl-mod {
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  box-shadow: none;
+}
+.gl-app[data-skin="modern"] .gl-mod-icon { border-radius: 50%; }
+.gl-app[data-skin="modern"] .gl-mod-title { font-weight: 800; }
+
+/* ============================================================
+   Avatares de avisos / tiles tintados → redondos
+   ============================================================ */
+.gl-app[data-skin="modern"] .gl-ann-row .tint-lime,
+.gl-app[data-skin="modern"] .gl-ann-row .tint-forest,
+.gl-app[data-skin="modern"] .gl-ann-row .tint-orange,
+.gl-app[data-skin="modern"] .gl-ann-row .tint-purple,
+.gl-app[data-skin="modern"] .gl-ann-row .tint-red { border-radius: 50%; }
+.gl-app[data-skin="modern"] .gl-ann-title.unread { font-weight: 800; }
+
+/* ============================================================
+   Barra inferior — app-like, hairline, pill activo
+   ============================================================ */
+.gl-app[data-skin="modern"] .gl-tabbar {
+  background: var(--bg);
+  box-shadow: none;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.gl-app[data-skin="modern"] .gl-tab-ico { z-index: 1; }
+.gl-app[data-skin="modern"] .gl-tab-ico::before {
+  content: "";
+  position: absolute;
+  inset: -6px -16px;
+  border-radius: 999px;
+  background: transparent;
+  transition: background .18s ease;
+  z-index: -1;
+}
+.gl-app[data-skin="modern"] .gl-tab.active .gl-tab-ico::before { background: var(--primary-soft); }
+.gl-app[data-skin="modern"] .gl-tab-label { font-weight: 800; }
+.gl-app[data-skin="modern"] .gl-tab-badge { box-shadow: 0 0 0 2.5px var(--bg); }
+
+/* ============================================================
+   Bottom sheets — radios más grandes, planos
+   ============================================================ */
+.gl-app[data-skin="modern"] .gl-sheet { border-radius: 28px 28px 0 0; }
+.gl-app[data-skin="modern"] .gl-sheet-title { font-weight: 800; letter-spacing: -0.4px; }
+.gl-app[data-skin="modern"] .gl-reason { border-radius: 18px; }
+
+/* ============================================================
+   Campos (login) — planos con foco limpio
+   ============================================================ */
+.gl-app[data-skin="modern"] .gl-field {
+  border-radius: 14px;
+  background: var(--surface-2);
+  border: 1.6px solid transparent;
+}
+.gl-app[data-skin="modern"] .gl-field:focus-within {
+  background: var(--surface);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px var(--primary-soft);
+}
+
+/* Toast plano */
+.gl-app[data-skin="modern"] .gl-toast { border-radius: 14px; }

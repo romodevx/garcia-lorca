@@ -12,18 +12,19 @@
     "check:no-sourcemaps": "node scripts/check-no-sourcemaps.mjs .next/static"
   },
   "dependencies": {
-    "@garcia-lorca/api-client": "*",
-    "@garcia-lorca/domain": "*",
-    "@garcia-lorca/ui": "*",
+    "@garcia-lorca/api-client": "workspace:*",
+    "@garcia-lorca/domain": "workspace:*",
+    "@garcia-lorca/ui": "workspace:*",
     "@tanstack/react-query": "5.101.0",
     "next": "16.2.9",
     "react": "19.2.7",
     "react-dom": "19.2.7"
   },
   "devDependencies": {
-    "@garcia-lorca/config": "*",
+    "@garcia-lorca/config": "workspace:*",
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.1",
     "@types/node": "25.9.3",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",

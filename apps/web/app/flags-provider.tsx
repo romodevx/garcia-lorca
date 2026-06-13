@@ -6,13 +6,21 @@ import type { ReactNode } from "react";
 /**
  * App-level flag bootstrap.
  *
- * FASE 0 stub: flags start empty (everything OFF — flags default OFF). Once the
- * gateway is up, fetch GET `<NEXT_PUBLIC_API_URL>/features` on boot and pass the
- * resolved map here as the single source of truth. The backend remains the
- * security boundary; this is UX-only.
+ * SECURITY BOUNDARY: this is UX-only. The authoritative enforcement of a
+ * disabled module lives in the backend gateway (disabled module routes return
+ * 404 / PermissionDenied). These flags only decide what navigation/surfaces the
+ * frontend renders. Once the gateway is up, replace `DEMO_FLAGS` by fetching
+ * GET `<NEXT_PUBLIC_API_URL>/features` on boot and passing the resolved map.
+ *
+ * PRESENTATION SEED: for this design demo we turn ON only the surfaces that are
+ * actually implemented in the web build (dashboard is always reachable; the
+ * finance surface is gated by `module_finance`). Everything else stays OFF and
+ * falls through to the friendly ModulePlaceholder — flags default OFF.
  */
-const bootstrapFlags: FlagSet = {};
+const DEMO_FLAGS: FlagSet = {
+  module_finance: true
+};
 
 export function AppFlagsProvider({ children }: { children: ReactNode }): ReactNode {
-  return <FlagsProvider flags={bootstrapFlags}>{children}</FlagsProvider>;
+  return <FlagsProvider flags={DEMO_FLAGS}>{children}</FlagsProvider>;
 }

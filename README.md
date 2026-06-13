@@ -39,7 +39,8 @@ docs/adr/     Architecture Decision Records.
 ```sh
 buf generate          # genera gen/ desde proto/
 go work sync          # sincroniza workspace Go
-npm install           # instala workspaces TS
+corepack enable pnpm  # activa pnpm (gestor de paquetes ÚNICO; npm/yarn prohibidos)
+pnpm install          # instala workspaces TS
 ```
 
 ## Reglas de desarrollo
@@ -49,6 +50,10 @@ GORM solo en adapters, RLS, front sin source maps).
 
 ## Documentos de proyecto
 
-- Backlog: [`MODULES.md`](./MODULES.md)
-- Feature flags: [`FLAGS.md`](./FLAGS.md)
-- Plan de sprint: [`PLAN-sprint-01.md`](./PLAN-sprint-01.md)
+Memoria, documentos y tareas viven en [`.claude/`](./.claude/README.md)
+(la raíz mantiene solo `CLAUDE.md` y `README.md`).
+
+- Backlog: [`.claude/docs/MODULES.md`](./.claude/docs/MODULES.md)
+- Feature flags: [`.claude/docs/FLAGS.md`](./.claude/docs/FLAGS.md)
+- Plan de sprint: [`.claude/docs/PLAN-sprint-01.md`](./.claude/docs/PLAN-sprint-01.md)
+- Referencia de diseño: [`.claude/docs/design/`](./.claude/docs/design/)

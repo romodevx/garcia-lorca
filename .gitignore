@@ -10,6 +10,11 @@ vendor/
 
 # Node / TS / Turborepo
 node_modules/
+
+# Package manager: pnpm ONLY — npm/yarn lockfiles must never be committed
+package-lock.json
+yarn.lock
+
 .next/
 out/
 dist/

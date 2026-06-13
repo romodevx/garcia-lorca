@@ -1,20 +1,39 @@
-import { FlagsProvider, type FlagSet } from "@garcia-lorca/ui/flags";
 import { Stack } from "expo-router";
-import type { ReactNode } from "react";
+import { type ReactNode } from "react";
+import { ActivityIndicator, View } from "react-native";
+import { Providers } from "@/src/Providers";
+import { useAppFonts } from "@/src/theme/useAppFonts";
 
 /**
- * Root layout. Bootstraps the single FlagsProvider for the mobile surface.
+ * Root layout. Composes the app-wide providers (theme, flags, app state, toast,
+ * safe area) and gates first paint on the warm/rounded font families being
+ * ready, so titles never flash in a fallback face.
  *
- * FASE 0 stub: flags start empty (everything OFF — flags default OFF). Once the
- * gateway is up, fetch GET `<EXPO_PUBLIC_API_URL>/features` on boot and pass the
- * resolved map here. Backend is the security boundary; this is UX-only.
+ * Flags: on boot the real app fetches GET `<EXPO_PUBLIC_API_URL>/features` into
+ * the FlagsProvider (single source). The backend gateway is the security
+ * boundary; these flags are UX-only. The demo seed lives in src/flags/bootstrap.
  */
-const bootstrapFlags: FlagSet = {};
+function RootNavigator(): ReactNode {
+  const fontsReady = useAppFonts();
+  if (!fontsReady) {
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+  return (
+    <Stack screenOptions={{ headerShown: false, animation: "fade" }}>
+      <Stack.Screen name="index" />
+      <Stack.Screen name="(tabs)" />
+    </Stack>
+  );
+}
 
 export default function RootLayout(): ReactNode {
   return (
-    <FlagsProvider flags={bootstrapFlags}>
-      <Stack screenOptions={{ headerShown: false }} />
-    </FlagsProvider>
+    <Providers>
+      <RootNavigator />
+    </Providers>
   );
 }

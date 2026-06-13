@@ -19,7 +19,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@garcia-lorca/config": "*",
+    "@garcia-lorca/config": "workspace:*",
     "eslint": "10.4.1",
     "vitest": "4.1.8"
   }
