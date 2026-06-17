@@ -40,10 +40,95 @@ build: ## Build Go binaries and frontend artifacts
 	go build ./...
 	pnpm turbo run build
 
-# ---- Local ----------------------------------------------------------------
+# ---- Local Docker stack ---------------------------------------------------
+# Full backend + web on one network (11 Go services hot-reloaded with air,
+# Postgres, Pub/Sub emulator, Next.js web). Mobile runs natively against it.
+COMPOSE ?= docker compose
+
+# Local dev creds for compose interpolation. Never committed (.env is gitignored);
+# `make run` materialises it from .env.example on first use.
+.env:
+	@cp .env.example .env
+	@echo "created .env from .env.example (edit for non-default local creds)"
+
+# gen/go is gitignored (produced by `buf generate`); go.work needs the module to
+# exist. Drop an offline stub so the stack builds without buf. `make gen` writes
+# the real generated code over it.
+gen/go/go.mod:
+	@mkdir -p gen/go
+	@printf 'module github.com/garcia-lorca/gen/go\n\ngo 1.24\n' > $@
+	@echo "created gen/go/go.mod stub (run 'make gen' for real codegen)"
+
+.PHONY: run
+run: .env gen/go/go.mod ## Levanta TODO el stack (build + up en segundo plano)
+	$(COMPOSE) up -d --build
+	@echo "→ web http://localhost:3000 · gateway http://localhost:8080 · postgres :5432"
+
+.PHONY: run-fg
+run-fg: .env gen/go/go.mod ## Igual que run pero en primer plano (logs en vivo)
+	$(COMPOSE) up --build
+
+.PHONY: run-new
+run-new: .env gen/go/go.mod ## Borra TODO (contenedores + volúmenes) y reconstruye desde cero
+	$(COMPOSE) down -v --remove-orphans
+	$(COMPOSE) build --no-cache
+	$(COMPOSE) up -d
+	@echo "→ stack recreado desde cero"
+
 .PHONY: up
-up: ## Start the local dev stack (docker compose)
-	docker compose up --build
+up: run ## Alias de run (compat)
+
+.PHONY: stop
+stop: ## Detiene todos los contenedores (conserva datos y volúmenes)
+	$(COMPOSE) stop
+
+.PHONY: down
+down: ## Detiene y elimina contenedores (conserva volúmenes/datos)
+	$(COMPOSE) down --remove-orphans
+
+.PHONY: restart
+restart: ## Reinicia todo el stack
+	$(COMPOSE) restart
+
+.PHONY: ps
+ps: ## Estado de los servicios
+	$(COMPOSE) ps
+
+.PHONY: logs
+logs: ## Logs de todo el stack (follow)
+	$(COMPOSE) logs -f --tail=120
+
+.PHONY: gen
+gen: ## buf generate dentro de un contenedor (no requiere buf en el host)
+	docker run --rm -v "$(CURDIR)":/work -w /work bufbuild/buf:latest generate
+
+.PHONY: psql
+psql: ## Abre psql en la base local (rol app)
+	$(COMPOSE) exec postgres psql -U app -d garcia_lorca
+
+.PHONY: clean
+clean: ## down -v + borra imágenes locales del proyecto
+	$(COMPOSE) down -v --remove-orphans --rmi local
+
+# ---- Per-service targets (usa _ : make start_iam, restart_gateway, logs_web) -
+.PHONY: start_% stop_% restart_% rebuild_% logs_% sh_%
+start_%: .env gen/go/go.mod ## Levanta un servicio: make start_iam
+	$(COMPOSE) up -d $*
+
+stop_%: ## Detiene un servicio: make stop_iam
+	$(COMPOSE) stop $*
+
+restart_%: ## Reinicia un servicio: make restart_gateway
+	$(COMPOSE) restart $*
+
+rebuild_%: .env gen/go/go.mod ## Reconstruye y relevanta un servicio: make rebuild_web
+	$(COMPOSE) up -d --build --force-recreate --no-deps $*
+
+logs_%: ## Logs de un servicio (follow): make logs_gateway
+	$(COMPOSE) logs -f --tail=120 $*
+
+sh_%: ## Shell dentro de un servicio: make sh_iam
+	$(COMPOSE) exec $* bash
 
 # ---- Container images -----------------------------------------------------
 # Build a single service image from the repo root. Usage: make image-gateway
