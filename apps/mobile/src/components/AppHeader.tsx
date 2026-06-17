@@ -3,6 +3,7 @@ import { type ReactElement } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Icon } from "../icons";
+import { LanguageToggle } from "../i18n/LanguageToggle";
 import { useAppState } from "../state/AppState";
 import { useTheme, useThemeControls } from "../theme";
 import { Avatar } from "../ui";
@@ -41,6 +42,7 @@ export function AppHeader(): ReactElement {
       </View>
 
       <View style={styles.actions}>
+        <LanguageToggle />
         <IconButton
           label="Cambiar tema"
           onPress={toggleTheme}

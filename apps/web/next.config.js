@@ -15,6 +15,11 @@
  * file or `sourceMappingURL` comment is found in the production output.
  */
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- CommonJS Next config
+const createNextIntlPlugin = require("next-intl/plugin");
+// next-intl request config: resolves locale (cookie) + messages for SSR.
+const withNextIntl = createNextIntlPlugin("./app/i18n/request.ts");
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -33,8 +38,9 @@ const nextConfig = {
   transpilePackages: [
     "@garcia-lorca/ui",
     "@garcia-lorca/domain",
+    "@garcia-lorca/i18n",
     "@garcia-lorca/api-client"
   ]
 };
 
-module.exports = nextConfig;
+module.exports = withNextIntl(nextConfig);

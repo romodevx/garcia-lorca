@@ -9,6 +9,7 @@ export default defineConfig({
       "@garcia-lorca/ui/flags": resolve(__dirname, "../../packages/ui/src/flags/index.ts"),
       "@garcia-lorca/ui": resolve(__dirname, "../../packages/ui/index.ts"),
       "@garcia-lorca/domain": resolve(__dirname, "../../packages/domain/index.ts"),
+      "@garcia-lorca/i18n": resolve(__dirname, "../../packages/i18n/index.ts"),
       "@garcia-lorca/api-client": resolve(__dirname, "../../packages/api-client/index.ts")
     }
   },

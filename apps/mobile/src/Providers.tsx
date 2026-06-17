@@ -1,7 +1,9 @@
 import { FlagsProvider, type FlagSet } from "@garcia-lorca/ui/flags";
 import { type ReactNode } from "react";
+import { I18nextProvider } from "react-i18next";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { demoFlags } from "./flags/bootstrap";
+import i18n from "./i18n/i18n";
 import { AppStateProvider } from "./state/AppState";
 import { ToastProvider } from "./state/Toast";
 import { ThemeProvider, type ThemeName } from "./theme";
@@ -17,7 +19,7 @@ export interface ProvidersProps {
 
 /**
  * Composes every app-wide provider in the correct order:
- * SafeArea → Theme → Flags → AppState → Toast.
+ * SafeArea → I18n → Theme → Flags → AppState → Toast.
  *
  * Reused by the Expo Router root layout and by tests, so a screen rendered in
  * isolation has the same context the real app gives it.
@@ -35,13 +37,15 @@ export function Providers({
         insets: { top: 0, left: 0, right: 0, bottom: 0 },
       }}
     >
-      <ThemeProvider initial={initialTheme}>
-        <FlagsProvider flags={flags}>
-          <AppStateProvider initialLevelId={initialLevelId}>
-            <ToastProvider>{children}</ToastProvider>
-          </AppStateProvider>
-        </FlagsProvider>
-      </ThemeProvider>
+      <I18nextProvider i18n={i18n}>
+        <ThemeProvider initial={initialTheme}>
+          <FlagsProvider flags={flags}>
+            <AppStateProvider initialLevelId={initialLevelId}>
+              <ToastProvider>{children}</ToastProvider>
+            </AppStateProvider>
+          </FlagsProvider>
+        </ThemeProvider>
+      </I18nextProvider>
     </SafeAreaProvider>
   );
 }
