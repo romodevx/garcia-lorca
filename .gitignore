@@ -47,3 +47,6 @@ crash.log
 .idea/
 .vscode/
 *.log
+
+# pnpm store written by the dockerized web container (bind mount)
+.pnpm-store/

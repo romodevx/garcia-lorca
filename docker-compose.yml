@@ -1,0 +1,181 @@
+# García Lorca — local dev stack (hot reload).
+#
+# Brings up the whole backend + web on one network:
+#   postgres (hardened app role) · pubsub emulator · 11 Go services · web (Next.js)
+#
+# Mobile (Expo) is NOT here by design — it runs natively against this stack.
+# Use the Makefile: `make run`, `make run-new`, `make stop`, `make restart_<svc>`,
+# `make start_<svc>`, `make logs_<svc>`, etc.
+
+name: garcia-lorca
+
+# ----------------------------------------------------------------------------
+# Shared definitions for the 11 Go services. Each container runs the same dev
+# image and is specialised by the SERVICE env var (the air entrypoint builds
+# ./services/$SERVICE/cmd). Source is mounted, so edits hot-reload.
+# ----------------------------------------------------------------------------
+x-go-env: &go-env
+  PORT: "8080"
+  ADDR: ":8080"
+  DATABASE_URL: "postgres://app:${APP_DB_PASSWORD}@postgres:5432/garcia_lorca?sslmode=disable"
+  PUBSUB_EMULATOR_HOST: "pubsub:8085"
+  GOFLAGS: "-buildvcs=false"
+
+x-go-service: &go-service
+  build:
+    context: .
+    dockerfile: docker/go-dev.Dockerfile
+  image: garcia-lorca-go-dev:local
+  volumes:
+    - .:/workspace
+    - go-mod-cache:/go/pkg/mod
+    - go-build-cache:/root/.cache/go-build
+  depends_on:
+    postgres:
+      condition: service_healthy
+  networks: [gl]
+  restart: unless-stopped
+
+services:
+  # ---- Infra ---------------------------------------------------------------
+  postgres:
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: garcia_lorca
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres-init.sh:/docker-entrypoint-initdb.d/10-init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d garcia_lorca"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [gl]
+    restart: unless-stopped
+
+  pubsub:
+    image: google/cloud-sdk:emulators
+    command: >
+      gcloud beta emulators pubsub start
+      --project=garcia-lorca-local --host-port=0.0.0.0:8085
+    ports: ["8085:8085"]
+    networks: [gl]
+    restart: unless-stopped
+
+  # ---- Go services (alpha order; gateway is the public edge) ---------------
+  gateway:
+    <<: *go-service
+    environment:
+      <<: *go-env
+      SERVICE: gateway
+      IAM_BASE_URL: "http://iam:8080"
+    ports: ["8080:8080"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      iam:
+        condition: service_started
+
+  iam:
+    <<: *go-service
+    environment: { <<: *go-env, SERVICE: iam }
+    ports: ["8091:8080"]
+
+  students:
+    <<: *go-service
+    environment: { <<: *go-env, SERVICE: students }
+    ports: ["8092:8080"]
+
+  finance:
+    <<: *go-service
+    environment: { <<: *go-env, SERVICE: finance }
+    ports: ["8093:8080"]
+
+  grades:
+    <<: *go-service
+    environment: { <<: *go-env, SERVICE: grades }
+    ports: ["8094:8080"]
+
+  attendance:
+    <<: *go-service
+    environment: { <<: *go-env, SERVICE: attendance }
+    ports: ["8095:8080"]
+
+  comms:
+    <<: *go-service
+    environment: { <<: *go-env, SERVICE: comms }
+    ports: ["8096:8080"]
+
+  docs:
+    <<: *go-service
+    environment: { <<: *go-env, SERVICE: docs }
+    ports: ["8097:8080"]
+
+  scholarships:
+    <<: *go-service
+    environment: { <<: *go-env, SERVICE: scholarships }
+    ports: ["8098:8080"]
+
+  uniforms:
+    <<: *go-service
+    environment: { <<: *go-env, SERVICE: uniforms }
+    ports: ["8099:8080"]
+
+  billing:
+    <<: *go-service
+    environment: { <<: *go-env, SERVICE: billing }
+    ports: ["8100:8080"]
+
+  # ---- Web (Next.js, hot reload) -------------------------------------------
+  # Node image + install-at-start so no host node_modules leak into the linux
+  # container (named volumes mask every node_modules path the monorepo uses).
+  web:
+    image: node:22-bookworm
+    working_dir: /workspace
+    command:
+      - bash
+      - -lc
+      - "corepack enable pnpm && pnpm install --filter @garcia-lorca/web... --no-frozen-lockfile && pnpm --filter @garcia-lorca/web exec next dev -H 0.0.0.0 -p 3000"
+    environment:
+      NEXT_PUBLIC_API_URL: "http://localhost:8080"
+      WATCHPACK_POLLING: "true"
+    ports: ["3000:3000"]
+    volumes:
+      - .:/workspace
+      - web-nm-root:/workspace/node_modules
+      - web-nm-web:/workspace/apps/web/node_modules
+      - web-nm-ui:/workspace/packages/ui/node_modules
+      - web-nm-domain:/workspace/packages/domain/node_modules
+      - web-nm-apiclient:/workspace/packages/api-client/node_modules
+      - web-nm-config:/workspace/packages/config/node_modules
+      - pnpm-store:/root/.local/share/pnpm/store
+      # pnpm puts its content-addressable store project-local (same FS as
+      # node_modules, for hardlinks). Mask it with a volume so it never lands in
+      # the bind-mounted host worktree.
+      - web-pnpm-store-local:/workspace/.pnpm-store
+    depends_on:
+      gateway:
+        condition: service_started
+    networks: [gl]
+    restart: unless-stopped
+
+networks:
+  gl:
+    driver: bridge
+
+volumes:
+  pgdata:
+  go-mod-cache:
+  go-build-cache:
+  pnpm-store:
+  web-nm-root:
+  web-nm-web:
+  web-nm-ui:
+  web-nm-domain:
+  web-nm-apiclient:
+  web-nm-config:
+  web-pnpm-store-local:
