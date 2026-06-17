@@ -29,6 +29,7 @@
     "baseUrl": ".",
     "paths": {
       "@garcia-lorca/domain": ["packages/domain/index.ts"],
+      "@garcia-lorca/i18n": ["packages/i18n/index.ts"],
       "@garcia-lorca/ui": ["packages/ui/index.ts"],
       "@garcia-lorca/api-client": ["packages/api-client/index.ts"],
       "@garcia-lorca/config/*": ["packages/config/*"],

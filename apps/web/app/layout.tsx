@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { DM_Sans, Poppins } from "next/font/google";
+import { NextIntlClientProvider } from "next-intl";
 import { AppFlagsProvider } from "./flags-provider";
+import { buildMessages } from "./i18n/config";
+import { getServerLocale } from "./i18n/server";
 import { ThemeProvider } from "./theme/ThemeProvider";
 import { themeBootstrapScript } from "./theme/theme-script";
 import "./globals.css";
@@ -30,13 +33,18 @@ export const metadata: Metadata = {
   description: "Sistema de Gestión Escolar García Lorca"
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children
 }: {
   children: ReactNode;
-}): ReactNode {
+}): Promise<ReactNode> {
+  // Server-authoritative locale: read from the cookie so the first paint is in
+  // the right language (no hydration text mismatch, no `[locale]` route segment).
+  const locale = await getServerLocale();
+  const messages = buildMessages(locale);
+
   return (
-    <html lang="es" className={`${poppins.variable} ${dmSans.variable}`}>
+    <html lang={locale} className={`${poppins.variable} ${dmSans.variable}`}>
       <head>
         {/*
           No-flash theme bootstrap. Runs before paint to set `data-theme` on
@@ -47,9 +55,11 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeBootstrapScript }} />
       </head>
       <body>
-        <ThemeProvider>
-          <AppFlagsProvider>{children}</AppFlagsProvider>
-        </ThemeProvider>
+        <NextIntlClientProvider locale={locale} messages={messages}>
+          <ThemeProvider>
+            <AppFlagsProvider>{children}</AppFlagsProvider>
+          </ThemeProvider>
+        </NextIntlClientProvider>
       </body>
     </html>
   );

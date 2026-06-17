@@ -20,7 +20,7 @@ module.exports = {
   // transforms them. expo-modules-core, expo-*, async-storage, safe-area,
   // svg and worklets are all consumed transitively by the providers under test.
   transformIgnorePatterns: [
-    "node_modules/(?!(?:.pnpm/[^/]+/node_modules/)?((jest-)?react-native|@react-native(-community)?|@react-native-async-storage/.*|expo|expo-.*|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|react-native-safe-area-context|react-native-svg|react-native-worklets|@unimodules/.*|unimodules|sentry-expo|native-base|@garcia-lorca/.*))"
+    "node_modules/(?!(?:.pnpm/[^/]+/node_modules/)?((jest-)?react-native|@react-native(-community)?|@react-native-async-storage/.*|expo|expo-.*|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|react-native-safe-area-context|react-native-svg|react-native-worklets|@unimodules/.*|unimodules|sentry-expo|native-base|@garcia-lorca/.*|@formatjs/.*|intl-messageformat(-parser)?|i18next|react-i18next|i18next-icu))"
   ],
   testMatch: ["**/*.test.{ts,tsx}"],
   // pnpm's symlinked store can surface two physical React module instances to

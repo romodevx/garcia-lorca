@@ -1,10 +1,12 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import type { ReactElement } from "react";
 import { Avatar, Wordmark } from "./Brand";
 import { IconBtn, ThemeToggle } from "./Controls";
 import { Icon } from "./Icon";
 import type { UserProfile } from "./data";
+import { LanguageToggle } from "../i18n/LanguageToggle";
 import type { Theme } from "../theme/theme-script";
 
 export interface TopBarProps {
@@ -26,6 +28,7 @@ export function TopBar({
   search,
   onSearch
 }: TopBarProps): ReactElement {
+  const t = useTranslations("common");
   return (
     <header
       style={{
@@ -43,7 +46,7 @@ export function TopBar({
         borderBottom: "1px solid var(--border)"
       }}
     >
-      <button onClick={onHome} style={{ display: "flex", alignItems: "center" }} aria-label="Inicio">
+      <button onClick={onHome} style={{ display: "flex", alignItems: "center" }} aria-label={t("nav.dashboard")}>
         <Wordmark size={42} />
       </button>
       <div style={{ flex: 1, maxWidth: 520, marginLeft: 8, position: "relative" }}>
@@ -62,8 +65,8 @@ export function TopBar({
         <input
           value={search}
           onChange={(e) => onSearch(e.target.value)}
-          placeholder="Buscar alumno, factura, documento…"
-          aria-label="Buscar"
+          placeholder={t("search.placeholder")}
+          aria-label={t("action.search")}
           style={{
             width: "100%",
             height: 50,
@@ -80,7 +83,8 @@ export function TopBar({
       </div>
       <div style={{ flex: 1 }} />
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <IconBtn name="bell" badge={3} label="Notificaciones" />
+        <IconBtn name="bell" badge={3} label={t("action.notifications")} />
+        <LanguageToggle />
         <ThemeToggle theme={theme} onToggle={onToggle} />
         <button
           onClick={onLogout}
