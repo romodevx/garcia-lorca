@@ -11,6 +11,9 @@ end-to-end slice (`iam` → `students`) deployed and integration-tested before w
 - **RLS**: sensitive tables get `ENABLE + FORCE ROW LEVEL SECURITY` from their first migration.
 - **GORM only in adapters**; domain imports no framework.
 - **Front build blindado**: minified, no source maps shipped.
+- **Command Palette (cross-cutting)**: cada módulo registra sus comandos en el buscador Cmd+K
+  (nav + crear + acciones rápidas + records con `Search` RPC scoped por permisos). Parte del DoD —
+  un módulo que no aparece en el palette no está terminado. Ver `.claude/docs/design/PLAN-command-palette.md` y [[command-palette]].
 - **DoD baseline** (in addition to the per-module reminder): OpenAPI contract frozen + linted; ≥80% coverage on business logic; flag-ON and flag-OFF suites green; RLS isolation tests where applicable; tech-lead gate + security gate both pass; docs generated from contract. Only then may the flag be enabled in a shared env.
 
 ## MoSCoW lens (6-month MVP)
