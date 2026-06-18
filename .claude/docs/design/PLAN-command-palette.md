@@ -9,14 +9,20 @@ Cmd+K abre un palette que entiende lo que el usuario quiere y lo **lleva directo
 **ejecuta**: `crear alumno` → form; `Juan Pérez` → perfil; `tomar asistencia` → asistencia
 de hoy; `pago Juan` → cobrar. Reemplaza el buscador cosmético del TopBar.
 
-## Decisiones de arquitectura (resumen; detalle en la memoria)
-- **Dos capas:** (A) comandos estáticos client-side instantáneos (módulos + crear + rápidas),
-  fuzzy local; (B) registros server-backed vía gateway `/search` (debounced, permission/RLS-scoped).
-- **Contrato `ModuleCommands`** que cada módulo aporta (nav + create + quick + records?) y un
-  RPC `Search` por servicio dueño de registros. Es el mecanismo que mantiene el palette
-  completo conforme crecen los módulos.
-- **i18n** ([[i18n-bilingual]]): títulos + **sinónimos de búsqueda en es+en**. **Flags**
-  (FLAGS.md): módulo OFF → 0 comandos (server autoritativo). **Iconos/colores** del dashboard.
+## Decisiones de arquitectura (revisadas — `/plan-eng-review` 2026-06-17; detalle en [[command-palette]])
+- **Shell sobre `cmdk`** (headless estándar: teclado/foco/ARIA/fuzzy). No hand-roll.
+- **Dos capas:** (A) comandos (módulos+crear+rápidas) con el **registro ensamblado server-side
+  (RSC) por usuario+flags+rol** — el fuzzy corre en cliente sobre lo ya autorizado (no se filtra
+  el mapa de acciones en el bundle); (B) registros vía un **índice de búsqueda propio** (Postgres
+  FTS/`pg_trgm`) alimentado por **eventos** — **NO federación por-servicio, los módulos no exponen
+  `Search` RPC**.
+- **Contrato `ModuleCommands`:** estático (nav/create/quick) **firme**; `records` **PROVISIONAL**
+  hasta que students/M03 lo valide y se extraiga. No se congela a ciegas.
+- **Matching:** título i18n + alias chico + fuzzy con **folding de acentos**; sin listas grandes
+  de sinónimos. **i18n** ([[i18n-bilingual]]) es+en. **Flags** (FLAGS.md): OFF → no se envía el comando.
+- **Seguridad:** acciones **navegan a form prellenado, nunca mutan**; búsqueda de registros
+  filtrada por IAM+RLS server-side (sin fuga por conteo/timing); rate-limit; historial guarda
+  solo IDs de comando, nunca datos de registros. **Iconos/colores** del dashboard.
 
 ## PM — alcance MoSCoW
 **Must (MVP del palette — infra cross-cutting, construible YA, sin depender de módulos):**
@@ -29,11 +35,11 @@ de hoy; `pago Juan` → cobrar. Reemplaza el buscador cosmético del TopBar.
 - *Entrega el valor central (navegar + ejecutar, min clics) aun antes de que existan registros reales.*
 
 **Should:**
-- Capa B vía gateway `/search`, empezando por **estudiantes** (primer slice vertical, M03),
-  scoped por permisos/RLS. Quick-actions de registro ("Juan → adeudos/calificaciones/documentos").
+- Capa B vía **índice de búsqueda propio** (Postgres FTS/`pg_trgm`), empezando por **estudiantes**
+  (una sola fuente, M03), filtrado server-side por IAM+RLS. Quick-actions de registro ("Juan → adeudos…").
 
 **Could:**
-- Federación a más tipos conforme aterrizan módulos (finanzas, asistencia, calificaciones…).
+- Más tipos al índice conforme aterrizan módulos (cada uno emite eventos: finanzas, asistencia…).
 - Parsing de query ("Juan deuda", "$128,300", "adeudo enero") e info-queries ("total estudiantes",
   "ingresos junio"). Comandos contextuales (el palette sabe en qué pantalla estás).
 
@@ -42,23 +48,25 @@ de hoy; `pago Juan` → cobrar. Reemplaza el buscador cosmético del TopBar.
 ## Eng-Manager — secuencia, dependencias y estimación
 - **No es un módulo vertical**; es infra como i18n. La **Capa A** depende solo del frontend +
   i18n (ya en master) → **construible ahora**, idealmente junto con/después del spine (M01→M03).
-- La **Capa B** depende del **gateway (M02)** + que cada servicio dueño exponga `Search`. Aterriza
-  incremental: el **contrato se define ahora** y cada módulo añade su `records` + RPC `Search` al
-  construirse → **cero retrabajo**.
+- La **Capa B** depende del **gateway (M02)** + un **índice de búsqueda propio** alimentado por
+  eventos. La parte **estática** del contrato se fija ahora; la de **`records` se EXTRAE** de
+  students/M03 (no se congela a ciegas → evita el churn que la voz externa marcó como el mayor riesgo).
 
 | Fase | Entregable | Size | IED | Depende de |
 |------|-----------|------|-----|-----------|
-| CP-1 | Shell + registro + contrato + Capa A (Must) | **M** | 4–6 ⚠️ | i18n (listo), patrón de slices |
-| CP-2 | Gateway `/search` (skeleton federador) + records de **students** (Should) | **M** | 3–5 | M02, M03 |
-| CP-n | Wiring de records por módulo (Could, recurrente) | **S** c/u | 1–2 | el módulo respectivo |
+| CP-1 | Shell `cmdk` + registro server-assembled + Capa A estática (Must) | **M** | 4–7 ⚠️ | i18n (listo), `cmdk` |
+| CP-2 | Índice de búsqueda + records de **students** (una fuente) → extraer contrato (Should) | **M** | 3–5 | M02, M03 |
+| CP-n | Cada módulo emite eventos al índice + registra comandos (Could, recurrente) | **S** c/u | 1–2 | el módulo respectivo |
 
-> Soft top en CP-1 por el pulido de accesibilidad y el motor fuzzy + el binding de keywords i18n.
-> CP-n se **absorbe dentro del build de cada módulo** (parte de su DoD), no es trabajo suelto.
+> Soft top en CP-1: a11y (cmdk lo baja), fuzzy con folding de acentos, binding i18n, y el
+> **ensamblado server-side del registro** (por flags/rol). CP-n se **absorbe en el DoD de cada módulo**.
 
 ## DoD del Command Palette (se añade al DoD de cada módulo)
 Un módulo NO está terminado hasta que registró en el palette: su `nav`, sus `create`, sus `quick`
-relevantes, y (si tiene registros) su `records` + el RPC `Search` scoped por permisos. Tests:
-keyword es+en resuelve el comando; flag OFF oculta y el server responde NotFound.
+(que **navegan a forms prellenados, nunca mutan**), y (si tiene registros) **emite sus eventos al
+índice** + define su `records.toResult`. Tests: alias es+en (con acentos plegados) resuelve el
+comando; flag OFF → el comando no se ensambla server-side; búsqueda de registros aislada por RLS
+(un rol no ve lo que no le toca, ni por conteo/timing).
 
 ---
 
@@ -100,5 +108,47 @@ recientes. quick de registro: estado, calificaciones.
 **11. Configuración** (⚙️ neutral, `module_config`) — nav: `configuración`, `ajustes`. acciones: `permisos`,
 `usuarios`, `crear usuario`, `roles`, `backup`, `centro`.
 
+## Tests (objetivo del palette — se afinan en CP-1/CP-2)
+```
+[CP-1] registro/matching
+  ├── alias es+en resuelve el comando (crear alumno / new student)   [TEST]
+  ├── folding de acentos (maria→María, nino→niño)                    [TEST]
+  ├── flag OFF → el comando NO se ensambla server-side               [TEST]
+  ├── teclado: ↑↓/Enter/Esc (vía cmdk)                               [TEST]
+  ├── historial guarda solo IDs de comando (no datos de registro)    [TEST]
+  └── estados vacío / sin-resultados / error                         [TEST]
+[CP-2] índice de registros
+  ├── students aparece por nombre/grupo/email                        [TEST]
+  ├── RLS: rol A no ve registros de rol B (ni por conteo/timing)     [TEST → integración]
+  ├── acción de registro NAVEGA a form prellenado (no muta)          [TEST]
+  └── rate-limit de búsqueda                                         [TEST]
+```
+
+## NOT in scope (deferidos, con razón)
+- **Federación por-servicio / `Search` RPC por servicio** — descartado a favor del índice propio.
+- **Mutaciones desde el palette** — siempre navega a form; nunca ejecuta.
+- **Parsing de query e info-queries** ("Juan deuda", "ingresos junio") — Could, post-CP-2.
+- **Búsqueda semántica/NL/voz** — futuro.
+- **Congelar `records` del contrato ahora** — se extrae de M03.
+
 ## GSTACK REVIEW REPORT
-_(Pendiente: este PLAN aún no pasó `/plan-eng-review`. Correr antes de implementar CP-1.)_
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | — |
+| Codex Review | `/codex review` | Independent 2nd opinion | 0 | — | — |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | issues_open | 5 arch + outside-voice; folded or surfaced |
+| Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | — |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
+
+- **CODEX:** not installed — outside voice ran via Claude subagent (independent context).
+- **CROSS-MODEL:** convergencia fuerte en (1) no congelar el contrato → records PROVISIONAL extraído
+  de M03; (2) no federación → **índice propio** (la voz externa lo marcó como el mayor riesgo; el
+  usuario lo eligió como dirección); (3) shell sobre `cmdk`; (4) acciones navegan, nunca mutan.
+  Folds adicionales (seguridad/correctitud): registro ensamblado server-side por flag/rol (no leak de
+  bundle), historial sin datos de registro, folding de acentos, matching por título+alias (no
+  sinónimos), rate-limit, core agnóstico de plataforma, keying canónico por flag, estados vacío/error.
+- **VERDICT:** ENG reviewed — listo para implementar **CP-1** (Capa A estática). CP-2 espera M03.
+  No flags se encienden; es infra cross-cutting (sin gate de módulo).
+
+NO UNRESOLVED DECISIONS
