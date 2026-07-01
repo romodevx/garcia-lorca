@@ -7,6 +7,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@garcia-lorca/ui/flags": resolve(__dirname, "../../packages/ui/src/flags/index.ts"),
+      "@garcia-lorca/ui/command-core": resolve(__dirname, "../../packages/ui/src/command/core.ts"),
       "@garcia-lorca/ui": resolve(__dirname, "../../packages/ui/index.ts"),
       "@garcia-lorca/domain": resolve(__dirname, "../../packages/domain/index.ts"),
       "@garcia-lorca/i18n": resolve(__dirname, "../../packages/i18n/index.ts"),

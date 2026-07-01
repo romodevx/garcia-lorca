@@ -15,8 +15,8 @@ export interface TopBarProps {
   onToggle: () => void;
   onHome: () => void;
   onLogout: () => void;
-  search: string;
-  onSearch: (value: string) => void;
+  /** Opens the Command Palette (the search box is a trigger, not an input). */
+  onOpenPalette: () => void;
 }
 
 export function TopBar({
@@ -25,10 +25,10 @@ export function TopBar({
   onToggle,
   onHome,
   onLogout,
-  search,
-  onSearch
+  onOpenPalette
 }: TopBarProps): ReactElement {
   const t = useTranslations("common");
+  const tp = useTranslations("palette");
   return (
     <header
       style={{
@@ -49,37 +49,48 @@ export function TopBar({
       <button onClick={onHome} style={{ display: "flex", alignItems: "center" }} aria-label={t("nav.dashboard")}>
         <Wordmark size={42} />
       </button>
-      <div style={{ flex: 1, maxWidth: 520, marginLeft: 8, position: "relative" }}>
-        <span
+      {/*
+        The search box is a TRIGGER for the Command Palette (Cmd+K), not an
+        input: click or ⌘K opens the omnidirectional navigate+execute palette.
+      */}
+      <div style={{ flex: 1, maxWidth: 520, marginLeft: 8 }}>
+        <button
+          type="button"
+          onClick={onOpenPalette}
+          aria-label={tp("ui.placeholder")}
           style={{
-            position: "absolute",
-            left: 18,
-            top: "50%",
-            transform: "translateY(-50%)",
-            color: "var(--text-faint)",
-            pointerEvents: "none"
-          }}
-        >
-          <Icon name="search" size={20} />
-        </span>
-        <input
-          value={search}
-          onChange={(e) => onSearch(e.target.value)}
-          placeholder={t("search.placeholder")}
-          aria-label={t("action.search")}
-          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
             width: "100%",
             height: 50,
-            paddingLeft: 48,
-            paddingRight: 18,
+            padding: "0 14px 0 18px",
             borderRadius: "var(--r-pill)",
             border: "1px solid var(--border)",
             background: "var(--surface)",
-            color: "var(--text)",
+            color: "var(--text-faint)",
             fontSize: 15.5,
-            outline: "none"
+            cursor: "text",
+            textAlign: "left"
           }}
-        />
+        >
+          <Icon name="search" size={20} />
+          <span style={{ flex: 1 }}>{tp("ui.placeholder")}</span>
+          <kbd
+            style={{
+              fontFamily: "var(--font-ui)",
+              fontSize: 12,
+              fontWeight: 600,
+              color: "var(--text-muted)",
+              background: "var(--surface-3)",
+              border: "1px solid var(--border)",
+              borderRadius: 7,
+              padding: "3px 7px"
+            }}
+          >
+            ⌘K
+          </kbd>
+        </button>
       </div>
       <div style={{ flex: 1 }} />
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>

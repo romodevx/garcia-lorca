@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState, type ReactElement } from "react";
+import { useCallback, useMemo, useState, type ReactElement } from "react";
 import { useFlag } from "@garcia-lorca/ui/flags";
+import { CommandPaletteHost } from "./command/CommandPaletteHost";
 import { TopBar } from "./_design/TopBar";
 import { MODULES, USERS, type ModuleDef, type Role } from "./_design/data";
 import { Dashboard } from "./_screens/Dashboard";
@@ -27,7 +28,7 @@ export function AppShell(): ReactElement {
   const { theme, toggle } = useTheme();
   const [view, setView] = useState<View>({ screen: "login" });
   const [role, setRole] = useState<Role>("admin");
-  const [search, setSearch] = useState("");
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   // The single flag read for the finance surface (UX-only; the gateway is the
   // security boundary). Hooks must run unconditionally, so we read it here.
@@ -39,8 +40,19 @@ export function AppShell(): ReactElement {
   };
   const logout = (): void => setView({ screen: "login" });
   const home = (): void => setView({ screen: "dashboard" });
-  const open = (id: string): void =>
+  const open = useCallback((id: string): void => {
     setView(id === "finance" ? { screen: "finance" } : { screen: "module", moduleId: id });
+  }, []);
+
+  // Command Palette navigation: a command route is `module:<id>`. Navigating IS
+  // executing (the palette never mutates), so we just open the target surface.
+  const navigate = useCallback(
+    (route: string): void => {
+      const [kind, id] = route.split(":");
+      if (kind === "module" && id !== undefined && id !== "") open(id);
+    },
+    [open],
+  );
 
   const user = USERS[role];
   const activeModule: ModuleDef | undefined = useMemo(
@@ -54,7 +66,8 @@ export function AppShell(): ReactElement {
 
   return (
     <div className="app-root" style={{ minHeight: "100vh" }}>
-      <TopBar user={user} theme={theme} onToggle={toggle} onHome={home} onLogout={logout} search={search} onSearch={setSearch} />
+      <TopBar user={user} theme={theme} onToggle={toggle} onHome={home} onLogout={logout} onOpenPalette={() => setPaletteOpen(true)} />
+      <CommandPaletteHost open={paletteOpen} onOpenChange={setPaletteOpen} onNavigate={navigate} />
       {view.screen === "dashboard" && <Dashboard user={user} onOpen={open} />}
       {view.screen === "finance" &&
         (financeEnabled ? (

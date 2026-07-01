@@ -8,3 +8,19 @@
  */
 export * from "./src/flags";
 export { Button, type ButtonProps } from "./src/components/Button";
+
+// Command Palette — shell + platform-agnostic match core.
+export {
+  CommandPalette,
+  type CommandPaletteLabels,
+  type CommandPaletteProps,
+} from "./src/command/CommandPalette";
+export { matchCommands } from "./src/command/match";
+export { fold } from "./src/command/fold";
+export {
+  type Command,
+  type CommandKind,
+  type ScoredCommand,
+  type MatchOptions,
+  KIND_ORDER,
+} from "./src/command/types";

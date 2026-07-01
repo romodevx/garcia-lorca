@@ -38,3 +38,16 @@ export function useFlag(flag: FlagKey): boolean {
   }
   return flags[flag] === true;
 }
+
+/**
+ * Read the whole flag set (e.g. to assemble the command registry, which filters
+ * many modules at once). Prefer `useFlag` for a single gate; use this only when
+ * you genuinely need the full map.
+ */
+export function useFlags(): FlagSet {
+  const flags = useContext(FlagsContext);
+  if (flags === null) {
+    throw new Error("useFlags must be used within a <FlagsProvider>.");
+  }
+  return flags;
+}

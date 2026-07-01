@@ -1,0 +1,116 @@
+"use client";
+
+import { Command } from "cmdk";
+import { type ReactNode, useMemo, useState } from "react";
+
+import { matchCommands } from "./match";
+import { type Command as GLCommand, type CommandKind, KIND_ORDER } from "./types";
+
+/**
+ * CommandPalette — the "todo a un buscador" surface. Built on `cmdk` (proven
+ * keyboard/focus/ARIA), but ranking + grouping + accent-folding come from our
+ * own `matchCommands` core (cmdk's own filter is disabled). Presentation-only:
+ * selecting a command hands it back via `onSelect`; the app NAVIGATES to its
+ * route (never mutates from here).
+ *
+ *   query ──> matchCommands (fold+fuzzy+kind-rank) ──> groups by kind ──> cmdk items
+ */
+
+export interface CommandPaletteLabels {
+  readonly placeholder: string;
+  readonly empty: string;
+  /** Heading per kind, e.g. { module: "Módulos", create: "Crear", … }. */
+  readonly groups: Record<CommandKind, string>;
+}
+
+export interface CommandPaletteProps {
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly commands: readonly GLCommand[];
+  readonly labels: CommandPaletteLabels;
+  /** Called with the selected command; the caller navigates to its route. */
+  readonly onSelect: (command: GLCommand) => void;
+  /** Optional icon renderer (app supplies its design-system icon). */
+  readonly renderIcon?: (icon: string, color?: string) => ReactNode;
+  /** Controlled query (optional); uncontrolled otherwise. */
+  readonly query?: string;
+  readonly onQueryChange?: (query: string) => void;
+  readonly limit?: number;
+}
+
+/** Kinds in display order, filtered to those with results. */
+const KINDS_IN_ORDER = (Object.keys(KIND_ORDER) as CommandKind[]).sort(
+  (a, b) => KIND_ORDER[a] - KIND_ORDER[b],
+);
+
+export function CommandPalette({
+  open,
+  onOpenChange,
+  commands,
+  labels,
+  onSelect,
+  renderIcon,
+  query,
+  onQueryChange,
+  limit = 10,
+}: CommandPaletteProps): ReactNode {
+  // Controlled when `query` is provided; otherwise manage it internally.
+  const [internalQuery, setInternalQuery] = useState("");
+  const activeQuery = query ?? internalQuery;
+  const setQuery = (next: string): void => {
+    if (query === undefined) setInternalQuery(next);
+    onQueryChange?.(next);
+  };
+
+  const results = useMemo(
+    () => matchCommands(commands, activeQuery, { limit }),
+    [commands, activeQuery, limit],
+  );
+
+  const byKind = useMemo(() => {
+    const map = new Map<CommandKind, GLCommand[]>();
+    for (const { command } of results) {
+      const list = map.get(command.kind) ?? [];
+      list.push(command);
+      map.set(command.kind, list);
+    }
+    return map;
+  }, [results]);
+
+  const choose = (command: GLCommand): void => {
+    onSelect(command);
+    onOpenChange(false);
+  };
+
+  return (
+    <Command.Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      shouldFilter={false}
+      label={labels.placeholder}
+    >
+      <Command.Input
+        placeholder={labels.placeholder}
+        value={activeQuery}
+        onValueChange={setQuery}
+      />
+      <Command.List>
+        {results.length === 0 ? (
+          <Command.Empty>{labels.empty}</Command.Empty>
+        ) : (
+          KINDS_IN_ORDER.filter((kind) => byKind.has(kind)).map((kind) => (
+            <Command.Group key={kind} heading={labels.groups[kind]}>
+              {(byKind.get(kind) ?? []).map((command) => (
+                <Command.Item key={command.id} value={command.id} onSelect={() => choose(command)}>
+                  {renderIcon?.(command.icon, command.color)}
+                  <span>{command.title}</span>
+                  {command.subtitle !== undefined ? <span data-subtitle>{command.subtitle}</span> : null}
+                </Command.Item>
+              ))}
+            </Command.Group>
+          ))
+        )}
+      </Command.List>
+    </Command.Dialog>
+  );
+}

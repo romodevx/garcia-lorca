@@ -1,8 +1,10 @@
 import { type Locale } from "../locales";
 import enAuth from "./en/auth.json";
 import enCommon from "./en/common.json";
+import enPalette from "./en/palette.json";
 import esAuth from "./es/auth.json";
 import esCommon from "./es/common.json";
+import esPalette from "./es/palette.json";
 
 /**
  * Typed catalog assembly + key derivation.
@@ -18,28 +20,31 @@ import esCommon from "./es/common.json";
  *   MessageKey = `common.${CommonKey}` | `auth.${AuthKey}`   (fully-qualified)
  */
 
-export const NAMESPACES = ["common", "auth"] as const;
+export const NAMESPACES = ["common", "auth", "palette"] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 
 /** All raw ICU catalogs, keyed by locale then namespace. `es` is the reference. */
 export const messages = {
-  es: { common: esCommon, auth: esAuth },
-  en: { common: enCommon, auth: enAuth },
+  es: { common: esCommon, auth: esAuth, palette: esPalette },
+  en: { common: enCommon, auth: enAuth, palette: enPalette },
 } as const satisfies Record<Locale, Record<Namespace, Record<string, string>>>;
 
 /** Literal key unions derived from the reference (`es`) catalogs. */
 export type CommonKey = keyof typeof esCommon;
 export type AuthKey = keyof typeof esAuth;
+export type PaletteKey = keyof typeof esPalette;
 
 /** Per-namespace key lookup: `NamespaceKey<"auth">` = the auth catalog's keys. */
 export type NamespaceKey<N extends Namespace> = N extends "common"
   ? CommonKey
   : N extends "auth"
     ? AuthKey
-    : never;
+    : N extends "palette"
+      ? PaletteKey
+      : never;
 
-/** Fully-qualified message key, e.g. `"common.action.save"` | `"auth.login.title"`. */
-export type MessageKey = `common.${CommonKey}` | `auth.${AuthKey}`;
+/** Fully-qualified message key, e.g. `"common.action.save"` | `"palette.nav.students"`. */
+export type MessageKey = `common.${CommonKey}` | `auth.${AuthKey}` | `palette.${PaletteKey}`;
 
 /** The raw ICU catalog for one locale + namespace. */
 export function catalog<N extends Namespace>(locale: Locale, namespace: N): Record<NamespaceKey<N>, string> {
