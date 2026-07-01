@@ -1,5 +1,12 @@
-# Generated code — regenerated from proto/ via `buf generate`, never committed
-/gen/
+# Generated code — regenerated from proto/ via `buf generate`, never committed.
+# EXCEPTION: gen/go's module manifest (go.mod/go.sum) is hand-maintained
+# infrastructure, not generated output — track it so CI (and the workspace) can
+# build after `buf generate`. Everything else under gen/ stays ignored.
+/gen/*
+!/gen/go/
+/gen/go/*
+!/gen/go/go.mod
+!/gen/go/go.sum
 
 # Go
 *.exe

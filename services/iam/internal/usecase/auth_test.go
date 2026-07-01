@@ -191,6 +191,24 @@ func TestCheckPermissionInvalidToken(t *testing.T) {
 	}
 }
 
+func TestValidateTokenReturnsClaims(t *testing.T) {
+	svc, _ := fixtureService(t, domain.StatusActive)
+	claims, err := svc.ValidateToken(context.Background(), "access:u1")
+	if err != nil {
+		t.Fatalf("ValidateToken: %v", err)
+	}
+	if claims.Subject != "u1" || !claims.Allows("students:read") {
+		t.Errorf("claims mismatch: %+v", claims)
+	}
+}
+
+func TestValidateTokenInvalid(t *testing.T) {
+	svc, _ := fixtureService(t, domain.StatusActive)
+	if _, err := svc.ValidateToken(context.Background(), "garbage"); glerrors.KindOf(err) != glerrors.KindUnauthorized {
+		t.Errorf("want KindUnauthorized, got %v", err)
+	}
+}
+
 // --- RefreshToken ----------------------------------------------------------
 
 func TestRefreshTokenRotates(t *testing.T) {

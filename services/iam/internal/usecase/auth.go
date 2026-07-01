@@ -103,6 +103,16 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (Au
 	return s.issueFor(ctx, user)
 }
 
+// ValidateToken verifies an access token and returns its claims (principal +
+// effective permissions). An invalid/expired token is a generic Unauthorized.
+func (s *AuthService) ValidateToken(ctx context.Context, accessToken string) (domain.Claims, error) {
+	claims, err := s.validator.ValidateAccessToken(ctx, accessToken)
+	if err != nil {
+		return domain.Claims{}, glerrors.New(glerrors.KindUnauthorized, "invalid access token")
+	}
+	return claims, nil
+}
+
 // CheckPermission validates an access token and reports whether its principal
 // holds the given "resource:action" permission.
 func (s *AuthService) CheckPermission(ctx context.Context, accessToken, permission string) (bool, error) {
