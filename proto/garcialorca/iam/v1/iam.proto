@@ -1,16 +1,51 @@
-// IAM (M01) — auth, roles, permissions. Everything downstream authorizes here.
-// FASE 0 contract-first stub: enough to compile + generate. Flesh out per-module.
+// IAM (M01) — authentication (JWT: short-lived access + refresh) and the
+// permission-based authorization model every other service checks against.
+// iam is the spine and the ONLY token issuer.
+//
+// FROZEN CONTRACT (M01, 2026-07-01): the auth + authz surface below is stable;
+// downstream services depend on it. Admin CRUD (CreateUser/CreateRole/…) is
+// intentionally NOT frozen yet — it is added when the admin module needs it.
 syntax = "proto3";
 
 package garcialorca.iam.v1;
 
-// IamService is the IAM API surface. Only Health is real in Fase 0.
+import "google/protobuf/timestamp.proto";
+
+// IamService is the IAM API surface: liveness, authentication, and
+// authorization. Authorization is permission-based — callers resolve a
+// principal's effective permissions (via ValidateToken) or ask CheckPermission;
+// they never compare role names.
 service IamService {
   // Health is the liveness/ping probe present on every service.
   rpc Health(HealthRequest) returns (HealthResponse);
 
-  // TODO(M01): Login, ValidateToken, AssignRole, CheckPermission.
+  // Login exchanges email + password for an access token (short-lived) and a
+  // refresh token. iam is the only issuer of both.
+  rpc Login(LoginRequest) returns (LoginResponse);
+
+  // RefreshToken exchanges a valid refresh token for a fresh access token (and a
+  // rotated refresh token). Lets sessions outlive the short access TTL without
+  // re-entering credentials.
+  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
+
+  // ValidateToken verifies an access token and returns its claims (principal +
+  // effective permissions). The gateway/services call this to authorize a
+  // request; an invalid/expired token is an Unauthenticated error.
+  rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+
+  // CheckPermission answers whether the access token's principal holds a
+  // specific permission (e.g. "students:create"). Convenience over
+  // ValidateToken for a single-permission gate.
+  rpc CheckPermission(CheckPermissionRequest) returns (CheckPermissionResponse);
+
+  // AssignRole grants a role to a user (admin operation, permission-gated).
+  rpc AssignRole(AssignRoleRequest) returns (AssignRoleResponse);
+
+  // RevokeRole removes a role from a user (admin operation, permission-gated).
+  rpc RevokeRole(RevokeRoleRequest) returns (RevokeRoleResponse);
 }
+
+// --- Health ---------------------------------------------------------------
 
 message HealthRequest {}
 
@@ -19,19 +54,104 @@ message HealthResponse {
   string status = 1;
 }
 
-// User is the IAM principal. TODO(M01): tenant_id, status, timestamps.
-message User {
-  string id = 1;
-  string email = 2;
+// --- Core types -----------------------------------------------------------
+
+// UserStatus is the account lifecycle state. A non-ACTIVE user cannot log in.
+enum UserStatus {
+  USER_STATUS_UNSPECIFIED = 0;
+  USER_STATUS_ACTIVE = 1;
+  USER_STATUS_SUSPENDED = 2;
 }
 
-// Role groups permissions. TODO(M01): permissions, scope.
+// User is the IAM principal. `email` is unique per tenant. `tenant_id` is
+// reserved for multi-tenant scoping; M01 operates single-tenant and RLS is
+// user-scoped via app.current_user.
+message User {
+  string id = 1;
+  string tenant_id = 2;
+  string email = 3;
+  string display_name = 4;
+  UserStatus status = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+// Role is a named bundle of permissions. `permissions` are "resource:action"
+// strings, e.g. "students:read", "finance:payment:create".
 message Role {
   string id = 1;
   string name = 2;
+  repeated string permissions = 3;
 }
 
-// --- Domain events (published; see MODULES.md M04) ---
+// Claims is the verified content of an access token: the principal plus the
+// effective permission set the gateway/services authorize against.
+message Claims {
+  string subject = 1;              // user id
+  string tenant_id = 2;
+  string email = 3;
+  repeated string permissions = 4; // effective (union across the user's roles)
+  google.protobuf.Timestamp expires_at = 5;
+}
+
+// --- Login / tokens -------------------------------------------------------
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  int64 expires_in = 3; // access token TTL in seconds
+  User user = 4;
+}
+
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message RefreshTokenResponse {
+  string access_token = 1;
+  string refresh_token = 2; // rotated
+  int64 expires_in = 3;
+}
+
+message ValidateTokenRequest {
+  string access_token = 1;
+}
+
+message ValidateTokenResponse {
+  Claims claims = 1;
+}
+
+message CheckPermissionRequest {
+  string access_token = 1;
+  string permission = 2; // "resource:action"
+}
+
+message CheckPermissionResponse {
+  bool allowed = 1;
+}
+
+// --- Role assignment ------------------------------------------------------
+
+message AssignRoleRequest {
+  string user_id = 1;
+  string role_id = 2;
+}
+
+message AssignRoleResponse {}
+
+message RevokeRoleRequest {
+  string user_id = 1;
+  string role_id = 2;
+}
+
+message RevokeRoleResponse {}
+
+// --- Domain events (published; see MODULES.md M04) ------------------------
 
 // CycleRolled signals a school-cycle roll-over that downstream modules react to.
 // Owned by config (M04) which shares area 11 with IAM.

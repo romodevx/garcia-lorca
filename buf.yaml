@@ -11,9 +11,6 @@ lint:
 breaking:
   use:
     - FILE
-# Managed mode injects go_package so individual .proto files never hardcode it.
-managed:
-  enabled: true
-  override:
-    - file_option: go_package_prefix
-      value: github.com/garcia-lorca/gen/go
+# NOTE: managed mode (go_package injection) is configured in buf.gen.yaml, NOT
+# here — the v2 buf.yaml schema has no `managed` field (it lives in the gen
+# config). Keeping it here breaks `buf lint`/`buf generate`.
