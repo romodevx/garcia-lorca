@@ -8,7 +8,8 @@
   "types": "index.ts",
   "exports": {
     ".": "./index.ts",
-    "./flags": "./src/flags/index.ts"
+    "./flags": "./src/flags/index.ts",
+    "./command-core": "./src/command/core.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p tsconfig.json",
@@ -30,5 +31,8 @@
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "vitest": "4.1.8"
+  },
+  "dependencies": {
+    "cmdk": "1.1.1"
   }
 }
