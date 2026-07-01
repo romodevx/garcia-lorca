@@ -11,6 +11,8 @@ package postgres_test
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"testing"
@@ -31,7 +33,6 @@ import (
 
 const (
 	dbName        = "garcia_lorca"
-	appPass       = "app-local-test"
 	tenantA       = "11111111-1111-1111-1111-111111111111"
 	tenantB       = "22222222-2222-2222-2222-222222222222"
 	migrationFile = "../../../../../migrations/iam/0001_init.sql"
@@ -40,7 +41,19 @@ const (
 var (
 	superDB *gorm.DB // postgres superuser (bypasses RLS) — for seeding.
 	appDSN  string   // connection string for the non-owner app role.
+	// Ephemeral credentials for the throwaway test container, generated at
+	// runtime so no password literal is ever committed.
+	superPass = randToken()
+	appPass   = randToken()
 )
+
+func randToken() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(b)
+}
 
 func TestMain(m *testing.M) {
 	ctx := context.Background()
@@ -48,7 +61,7 @@ func TestMain(m *testing.M) {
 		"postgres:16-bookworm",
 		tcpostgres.WithDatabase(dbName),
 		tcpostgres.WithUsername("postgres"),
-		tcpostgres.WithPassword("postgres"),
+		tcpostgres.WithPassword(superPass),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).WithStartupTimeout(60*time.Second)),
@@ -61,7 +74,7 @@ func TestMain(m *testing.M) {
 
 	host, _ := container.Host(ctx)
 	port, _ := container.MappedPort(ctx, "5432")
-	superDSN := fmt.Sprintf("host=%s port=%s user=postgres password=postgres dbname=%s sslmode=disable", host, port.Port(), dbName)
+	superDSN := fmt.Sprintf("host=%s port=%s user=postgres password=%s dbname=%s sslmode=disable", host, port.Port(), superPass, dbName)
 	appDSN = fmt.Sprintf("host=%s port=%s user=app password=%s dbname=%s sslmode=disable", host, port.Port(), appPass, dbName)
 
 	superDB, err = open(superDSN)
