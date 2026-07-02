@@ -11,10 +11,11 @@ import (
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
 )
 
-// LoginService is the auth surface the login proxy needs (consumer-defined, so
-// the handler is testable with a fake). The Connect AuthClient implements it.
+// LoginService is the auth surface the proxy needs (consumer-defined, so the
+// handler is testable with a fake). The Connect AuthClient implements it.
 type LoginService interface {
 	Login(ctx context.Context, email, password string) (client.LoginResult, error)
+	Refresh(ctx context.Context, refreshToken string) (client.LoginResult, error)
 }
 
 // AuthHandler exposes the front-facing (HTTP/JSON) auth endpoints, proxying to
@@ -47,6 +48,30 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := h.auth.Login(r.Context(), req.Email, req.Password)
+	if err != nil {
+		http.Error(w, http.StatusText(httpStatusFor(err)), httpStatusFor(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, loginResponse{
+		AccessToken:  res.AccessToken,
+		RefreshToken: res.RefreshToken,
+		ExpiresIn:    res.ExpiresIn,
+	})
+}
+
+type refreshRequest struct {
+	RefreshToken string `json:"refreshToken"`
+}
+
+// Refresh handles POST /api/v1/auth/refresh: exchanges a refresh token for a
+// fresh, rotated pair via iam.
+func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
+	var req refreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	res, err := h.auth.Refresh(r.Context(), req.RefreshToken)
 	if err != nil {
 		http.Error(w, http.StatusText(httpStatusFor(err)), httpStatusFor(err))
 		return

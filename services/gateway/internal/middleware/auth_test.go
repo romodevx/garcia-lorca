@@ -63,6 +63,51 @@ func TestRequireAuthValidToken(t *testing.T) {
 	}
 }
 
+func TestRequirePermission(t *testing.T) {
+	cases := []struct {
+		name  string
+		perms []string
+		want  int
+	}{
+		{"has permission → 200", []string{"students:read", "finance:read"}, http.StatusOK},
+		{"lacks permission → 403", []string{"finance:read"}, http.StatusForbidden},
+		{"no permissions → 403", nil, http.StatusForbidden},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var ran bool
+			var seen middleware.Principal
+			h := middleware.RequirePermission("students:read")(ok200(&seen, &ran))
+
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/students", nil)
+			ctx := middleware.WithPrincipal(req.Context(), middleware.Principal{UserID: "u1", Permissions: tc.perms})
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req.WithContext(ctx))
+
+			if rec.Code != tc.want {
+				t.Errorf("code = %d, want %d", rec.Code, tc.want)
+			}
+			if (rec.Code == http.StatusOK) != ran {
+				t.Errorf("next ran=%v but code=%d", ran, rec.Code)
+			}
+		})
+	}
+}
+
+func TestRequirePermissionWithoutPrincipalIs401(t *testing.T) {
+	var ran bool
+	var seen middleware.Principal
+	h := middleware.RequirePermission("students:read")(ok200(&seen, &ran))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/students", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("code = %d, want 401 (fail-closed)", rec.Code)
+	}
+	if ran {
+		t.Error("next must not run without a principal")
+	}
+}
+
 func TestRequireAuthRejects(t *testing.T) {
 	cases := []struct {
 		name   string

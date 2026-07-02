@@ -49,6 +49,19 @@ func (c *AuthClient) Login(ctx context.Context, email, password string) (LoginRe
 	}, nil
 }
 
+// Refresh exchanges a refresh token for a fresh, rotated token pair via iam.
+func (c *AuthClient) Refresh(ctx context.Context, refreshToken string) (LoginResult, error) {
+	res, err := c.rpc.RefreshToken(ctx, connect.NewRequest(&iamv1.RefreshTokenRequest{RefreshToken: refreshToken}))
+	if err != nil {
+		return LoginResult{}, err
+	}
+	return LoginResult{
+		AccessToken:  res.Msg.GetAccessToken(),
+		RefreshToken: res.Msg.GetRefreshToken(),
+		ExpiresIn:    res.Msg.GetExpiresIn(),
+	}, nil
+}
+
 // ValidateToken verifies an access token with iam and returns the principal.
 // It implements middleware.Authenticator.
 func (c *AuthClient) ValidateToken(ctx context.Context, accessToken string) (middleware.Principal, error) {
