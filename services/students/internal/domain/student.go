@@ -1,0 +1,151 @@
+package domain
+
+import (
+	"strings"
+
+	glerrors "github.com/garcia-lorca/pkg/errors"
+)
+
+// Student is the core entity: an applicant/student moving through the admission
+// state machine. Transition methods (Accept/Reject/Enroll/Withdraw) enforce the
+// machine and return the domain events to publish — the entity is the single
+// place admission rules live.
+type Student struct {
+	id           string
+	tenantID     string
+	curp         CURP
+	firstName    string
+	lastName     string
+	level        Level
+	gradeGroup   string
+	guardianName string
+	status       AdmissionStatus
+}
+
+// NewApplicantParams carries the fields to create an applicant.
+type NewApplicantParams struct {
+	ID           string
+	TenantID     string
+	CURP         CURP
+	FirstName    string
+	LastName     string
+	Level        Level
+	GradeGroup   string
+	GuardianName string
+}
+
+// AdmissionChangedEvent is emitted on every admission transition (maps to the
+// AdmissionStatusChanged proto event).
+type AdmissionChangedEvent struct {
+	StudentID string
+	TenantID  string
+	Previous  AdmissionStatus
+	New       AdmissionStatus
+	Reason    string
+}
+
+// StudentEnrolledEvent is emitted when a student is enrolled into a cycle (maps
+// to the StudentEnrolled proto event).
+type StudentEnrolledEvent struct {
+	StudentID string
+	TenantID  string
+	CycleID   string
+	Level     Level
+}
+
+// NewApplicant creates a student in the pending admission state.
+func NewApplicant(p NewApplicantParams) (*Student, error) {
+	if strings.TrimSpace(p.ID) == "" {
+		return nil, glerrors.New(glerrors.KindInvalid, "student id is required")
+	}
+	if strings.TrimSpace(p.TenantID) == "" {
+		return nil, glerrors.New(glerrors.KindInvalid, "tenant id is required")
+	}
+	if strings.TrimSpace(p.FirstName) == "" || strings.TrimSpace(p.LastName) == "" {
+		return nil, glerrors.New(glerrors.KindInvalid, "first and last name are required")
+	}
+	if !p.Level.Valid() {
+		return nil, glerrors.New(glerrors.KindInvalid, "a valid SEP level is required")
+	}
+	return &Student{
+		id:           p.ID,
+		tenantID:     p.TenantID,
+		curp:         p.CURP,
+		firstName:    strings.TrimSpace(p.FirstName),
+		lastName:     strings.TrimSpace(p.LastName),
+		level:        p.Level,
+		gradeGroup:   strings.TrimSpace(p.GradeGroup),
+		guardianName: strings.TrimSpace(p.GuardianName),
+		status:       AdmissionPending,
+	}, nil
+}
+
+// Rehydrate rebuilds a Student from persisted state (used by the repository; it
+// does NOT run the applicant validations, since the row was already valid).
+func Rehydrate(p NewApplicantParams, status AdmissionStatus) *Student {
+	return &Student{
+		id: p.ID, tenantID: p.TenantID, curp: p.CURP,
+		firstName: p.FirstName, lastName: p.LastName, level: p.Level,
+		gradeGroup: p.GradeGroup, guardianName: p.GuardianName, status: status,
+	}
+}
+
+// Accept moves a pending applicant to accepted.
+func (s *Student) Accept() (AdmissionChangedEvent, error) {
+	return s.transition(AdmissionAccepted, "")
+}
+
+// Reject terminally rejects a pending applicant.
+func (s *Student) Reject(reason string) (AdmissionChangedEvent, error) {
+	return s.transition(AdmissionRejected, reason)
+}
+
+// Withdraw terminally withdraws an accepted or enrolled student.
+func (s *Student) Withdraw(reason string) (AdmissionChangedEvent, error) {
+	return s.transition(AdmissionWithdrawn, reason)
+}
+
+// Enroll enrolls an accepted student into a cycle, returning both the
+// StudentEnrolled event and the AdmissionStatusChanged event.
+func (s *Student) Enroll(cycleID string) (StudentEnrolledEvent, AdmissionChangedEvent, error) {
+	changed, err := s.transition(AdmissionEnrolled, "")
+	if err != nil {
+		return StudentEnrolledEvent{}, AdmissionChangedEvent{}, err
+	}
+	enrolled := StudentEnrolledEvent{
+		StudentID: s.id,
+		TenantID:  s.tenantID,
+		CycleID:   cycleID,
+		Level:     s.level,
+	}
+	return enrolled, changed, nil
+}
+
+// transition validates a move against the state machine, applies it, and returns
+// the change event. An illegal move is a KindConflict (FailedPrecondition).
+func (s *Student) transition(to AdmissionStatus, reason string) (AdmissionChangedEvent, error) {
+	if !s.status.CanTransitionTo(to) {
+		return AdmissionChangedEvent{}, glerrors.New(glerrors.KindConflict,
+			"illegal admission transition: "+s.status.String()+" → "+to.String())
+	}
+	previous := s.status
+	s.status = to
+	return AdmissionChangedEvent{
+		StudentID: s.id,
+		TenantID:  s.tenantID,
+		Previous:  previous,
+		New:       to,
+		Reason:    reason,
+	}, nil
+}
+
+// Accessors.
+func (s *Student) ID() string              { return s.id }
+func (s *Student) TenantID() string        { return s.tenantID }
+func (s *Student) CURP() CURP              { return s.curp }
+func (s *Student) FirstName() string       { return s.firstName }
+func (s *Student) LastName() string        { return s.lastName }
+func (s *Student) Level() Level            { return s.level }
+func (s *Student) GradeGroup() string      { return s.gradeGroup }
+func (s *Student) GuardianName() string    { return s.guardianName }
+func (s *Student) Status() AdmissionStatus { return s.status }
