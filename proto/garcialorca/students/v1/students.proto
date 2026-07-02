@@ -1,16 +1,36 @@
-// Students / Admisión (M03) — first vertical slice (enroll end-to-end).
-// FASE 0 contract-first stub.
+// Students / Admisión (M03) — the first business vertical slice: enroll a student
+// end-to-end through the gateway.
+//
+// FROZEN CONTRACT (M03, 2026-07-02). Admission is a state machine:
+//   pending → accepted → enrolled   (+ rejected from pending, withdrawn from
+//   accepted/enrolled). ChangeAdmissionStatus drives every transition;
+//   StudentEnrolled fires on enroll, AdmissionStatusChanged on every transition.
 syntax = "proto3";
 
 package garcialorca.students.v1;
+
+import "google/protobuf/timestamp.proto";
 
 // StudentsService is the students/admission API surface.
 service StudentsService {
   // Health is the liveness/ping probe present on every service.
   rpc Health(HealthRequest) returns (HealthResponse);
 
-  // TODO(M03): EnrollStudent, GetStudent, ChangeAdmissionStatus.
+  // CreateApplicant registers a new applicant (admission status = pending).
+  rpc CreateApplicant(CreateApplicantRequest) returns (CreateApplicantResponse);
+
+  // GetStudent fetches a student by id.
+  rpc GetStudent(GetStudentRequest) returns (GetStudentResponse);
+
+  // ListStudents lists students, optionally filtered by level/group/status.
+  rpc ListStudents(ListStudentsRequest) returns (ListStudentsResponse);
+
+  // ChangeAdmissionStatus advances the admission state machine (accept, reject,
+  // enroll, withdraw). An invalid transition is a FailedPrecondition error.
+  rpc ChangeAdmissionStatus(ChangeAdmissionStatusRequest) returns (ChangeAdmissionStatusResponse);
 }
+
+// --- Health ---------------------------------------------------------------
 
 message HealthRequest {}
 
@@ -18,26 +38,107 @@ message HealthResponse {
   string status = 1;
 }
 
-// Student is the core entity. TODO(M03): curp, level, group, tenant_id, status.
-message Student {
-  string id = 1;
-  string first_name = 2;
-  string last_name = 3;
+// --- Core types -----------------------------------------------------------
+
+// Level is the SEP education level.
+enum Level {
+  LEVEL_UNSPECIFIED = 0;
+  LEVEL_KINDER = 1;
+  LEVEL_PRIMARIA = 2;
+  LEVEL_SECUNDARIA = 3;
+  LEVEL_PREPARATORIA = 4;
 }
 
-// --- Domain events (published) ---
+// AdmissionStatus is the applicant/student lifecycle state.
+enum AdmissionStatus {
+  ADMISSION_STATUS_UNSPECIFIED = 0;
+  ADMISSION_STATUS_PENDING = 1;    // applied, awaiting decision
+  ADMISSION_STATUS_ACCEPTED = 2;   // admitted, not yet enrolled
+  ADMISSION_STATUS_ENROLLED = 3;   // enrolled into a cycle
+  ADMISSION_STATUS_REJECTED = 4;   // terminal (from pending)
+  ADMISSION_STATUS_WITHDRAWN = 5;  // terminal (from accepted/enrolled)
+}
 
-// StudentEnrolled fires when a student is admitted into a cycle.
-// TODO(M03): cycle_id, level, enrolled_at.
+// Student is the core entity. `curp` (Clave Única de Registro de Población) is
+// the Mexican national id, unique per tenant. `tenant_id` scopes RLS.
+message Student {
+  string id = 1;
+  string tenant_id = 2;
+  string curp = 3;
+  string first_name = 4;
+  string last_name = 5;
+  Level level = 6;
+  string grade_group = 7;   // e.g. "4° A"
+  string guardian_name = 8;
+  AdmissionStatus admission_status = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp updated_at = 11;
+}
+
+// --- RPC messages ---------------------------------------------------------
+
+message CreateApplicantRequest {
+  string curp = 1;
+  string first_name = 2;
+  string last_name = 3;
+  Level level = 4;
+  string grade_group = 5;
+  string guardian_name = 6;
+}
+
+message CreateApplicantResponse {
+  Student student = 1;
+}
+
+message GetStudentRequest {
+  string id = 1;
+}
+
+message GetStudentResponse {
+  Student student = 1;
+}
+
+message ListStudentsRequest {
+  Level level = 1;             // optional filter (UNSPECIFIED = any)
+  AdmissionStatus status = 2;  // optional filter (UNSPECIFIED = any)
+  string grade_group = 3;      // optional filter (empty = any)
+  int32 page_size = 4;
+  string page_token = 5;
+}
+
+message ListStudentsResponse {
+  repeated Student students = 1;
+  string next_page_token = 2;
+}
+
+message ChangeAdmissionStatusRequest {
+  string id = 1;
+  AdmissionStatus target = 2;
+  string reason = 3;     // for reject/withdraw
+  string cycle_id = 4;   // for enroll (which school cycle); optional until M04
+}
+
+message ChangeAdmissionStatusResponse {
+  Student student = 1;
+}
+
+// --- Domain events (published) --------------------------------------------
+
+// StudentEnrolled fires when a student is enrolled into a cycle.
 message StudentEnrolled {
   string student_id = 1;
   string tenant_id = 2;
+  string cycle_id = 3;
+  Level level = 4;
+  google.protobuf.Timestamp enrolled_at = 5;
 }
 
-// AdmissionStatusChanged fires on any admission state transition.
-// TODO(M03): previous_status, reason, changed_at.
+// AdmissionStatusChanged fires on every admission state transition.
 message AdmissionStatusChanged {
   string student_id = 1;
-  string new_status = 2;
-  string tenant_id = 3;
+  string tenant_id = 2;
+  AdmissionStatus previous_status = 3;
+  AdmissionStatus new_status = 4;
+  string reason = 5;
+  google.protobuf.Timestamp changed_at = 6;
 }
