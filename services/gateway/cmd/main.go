@@ -14,6 +14,7 @@ import (
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/handler"
+	"github.com/garcia-lorca/services/gateway/internal/middleware"
 
 	"github.com/garcia-lorca/pkg/featureflag"
 	"github.com/garcia-lorca/pkg/logger"
@@ -33,13 +34,14 @@ func main() {
 		iamBaseURL = "http://localhost:8081"
 	}
 
-	// flags is the source of truth for module visibility. FASE 0 wires an empty
-	// in-memory set (default-deny); a real backend replaces it later.
+	// flags is the source of truth for module visibility (default-deny). A real
+	// backend (iam/config) replaces the static set later; each module wires its
+	// routes behind middleware.NewModuleGuard(flags) as it lands.
 	flags := featureflag.NewInMemory(map[string]bool{})
-	_ = flags // consumed by middleware.NewModuleGuard once modules register routes
 
-	iamClient := client.NewIAMClient(iamBaseURL, http.DefaultClient)
-	mux := newMux(iamClient)
+	iamHealth := client.NewIAMClient(iamBaseURL, http.DefaultClient)
+	authClient := client.NewAuthClient(iamBaseURL, http.DefaultClient)
+	mux := newMux(iamHealth, authClient, flags)
 
 	log.Info("gateway starting", slog.String("addr", addr), slog.String("iam", iamBaseURL))
 	srv := &http.Server{Addr: addr, Handler: mux}
@@ -49,11 +51,24 @@ func main() {
 	}
 }
 
-// newMux builds the gateway HTTP handler given an iam pinger. Extracted from
-// main so the integration test can assemble the exact production routes against
-// a test iam server.
-func newMux(iam *client.IAMClient) *http.ServeMux {
+// newMux builds the gateway HTTP handler. Extracted from main so an integration
+// test can assemble the exact production routes against a test iam server.
+//
+//	POST /api/v1/auth/login   → proxy to iam Login (unauthenticated)
+//	GET  /api/v1/me           → RequireAuth → the caller's principal
+//	/healthz, /readyz         → liveness + iam reachability
+//
+// `flags` (via middleware.NewModuleGuard) is the module-visibility boundary used
+// by module routes as they land (disabled module ⇒ 404).
+func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, flags featureflag.Checker) *http.ServeMux {
+	_ = flags // module route guards plug in from M03 onward.
 	mux := http.NewServeMux()
-	handler.NewHealthHandler(iam).Register(mux)
+	handler.NewHealthHandler(iamHealth).Register(mux)
+
+	authH := handler.NewAuthHandler(authClient)
+	requireAuth := middleware.RequireAuth(authClient)
+
+	mux.HandleFunc("POST /api/v1/auth/login", authH.Login)
+	mux.Handle("GET /api/v1/me", requireAuth(http.HandlerFunc(authH.Me)))
 	return mux
 }

@@ -1,0 +1,104 @@
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+
+	connect "connectrpc.com/connect"
+
+	"github.com/garcia-lorca/services/gateway/internal/client"
+	"github.com/garcia-lorca/services/gateway/internal/middleware"
+)
+
+// LoginService is the auth surface the login proxy needs (consumer-defined, so
+// the handler is testable with a fake). The Connect AuthClient implements it.
+type LoginService interface {
+	Login(ctx context.Context, email, password string) (client.LoginResult, error)
+}
+
+// AuthHandler exposes the front-facing (HTTP/JSON) auth endpoints, proxying to
+// iam. It translates JSON ↔ the AuthClient and Connect error codes ↔ HTTP status.
+type AuthHandler struct {
+	auth LoginService
+}
+
+// NewAuthHandler wires the handler to a login service.
+func NewAuthHandler(auth LoginService) *AuthHandler {
+	return &AuthHandler{auth: auth}
+}
+
+type loginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type loginResponse struct {
+	AccessToken  string `json:"accessToken"`
+	RefreshToken string `json:"refreshToken"`
+	ExpiresIn    int64  `json:"expiresIn"`
+}
+
+// Login handles POST /api/v1/auth/login.
+func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+	var req loginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	res, err := h.auth.Login(r.Context(), req.Email, req.Password)
+	if err != nil {
+		http.Error(w, http.StatusText(httpStatusFor(err)), httpStatusFor(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, loginResponse{
+		AccessToken:  res.AccessToken,
+		RefreshToken: res.RefreshToken,
+		ExpiresIn:    res.ExpiresIn,
+	})
+}
+
+type meResponse struct {
+	UserID      string   `json:"userId"`
+	TenantID    string   `json:"tenantId"`
+	Email       string   `json:"email"`
+	Permissions []string `json:"permissions"`
+}
+
+// Me handles GET /api/v1/me: returns the authenticated principal. It must run
+// behind middleware.RequireAuth, which injects the principal.
+func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
+	p, ok := middleware.PrincipalFrom(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	writeJSON(w, http.StatusOK, meResponse{
+		UserID:      p.UserID,
+		TenantID:    p.TenantID,
+		Email:       p.Email,
+		Permissions: p.Permissions,
+	})
+}
+
+// httpStatusFor maps a Connect error code (from iam) to an HTTP status.
+func httpStatusFor(err error) int {
+	switch connect.CodeOf(err) {
+	case connect.CodeInvalidArgument:
+		return http.StatusBadRequest
+	case connect.CodeUnauthenticated:
+		return http.StatusUnauthorized
+	case connect.CodePermissionDenied:
+		return http.StatusForbidden
+	case connect.CodeNotFound:
+		return http.StatusNotFound
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+func writeJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
