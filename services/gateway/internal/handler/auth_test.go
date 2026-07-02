@@ -24,6 +24,36 @@ func (f fakeLogin) Login(context.Context, string, string) (client.LoginResult, e
 	return f.res, f.err
 }
 
+func (f fakeLogin) Refresh(context.Context, string) (client.LoginResult, error) {
+	return f.res, f.err
+}
+
+func TestRefreshProxySuccess(t *testing.T) {
+	h := handler.NewAuthHandler(fakeLogin{res: client.LoginResult{AccessToken: "new-acc", RefreshToken: "new-ref", ExpiresIn: 900}})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(`{"refreshToken":"old-ref"}`))
+	h.Refresh(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200", rec.Code)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body["accessToken"] != "new-acc" || body["refreshToken"] != "new-ref" {
+		t.Errorf("body = %v", body)
+	}
+}
+
+func TestRefreshProxyInvalidIs401(t *testing.T) {
+	h := handler.NewAuthHandler(fakeLogin{err: connect.NewError(connect.CodeUnauthenticated, errString("bad"))})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(`{"refreshToken":"garbage"}`))
+	h.Refresh(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("code = %d, want 401", rec.Code)
+	}
+}
+
 func TestLoginProxySuccess(t *testing.T) {
 	h := handler.NewAuthHandler(fakeLogin{res: client.LoginResult{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 900}})
 	rec := httptest.NewRecorder()

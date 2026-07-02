@@ -27,6 +27,13 @@ func (stubIAM) Login(_ context.Context, req *connect.Request[iamv1.LoginRequest]
 	return connect.NewResponse(&iamv1.LoginResponse{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 900}), nil
 }
 
+func (stubIAM) RefreshToken(_ context.Context, req *connect.Request[iamv1.RefreshTokenRequest]) (*connect.Response[iamv1.RefreshTokenResponse], error) {
+	if req.Msg.GetRefreshToken() != "good-ref" {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errString("invalid refresh"))
+	}
+	return connect.NewResponse(&iamv1.RefreshTokenResponse{AccessToken: "acc2", RefreshToken: "ref2", ExpiresIn: 900}), nil
+}
+
 func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.ValidateTokenRequest]) (*connect.Response[iamv1.ValidateTokenResponse], error) {
 	if req.Msg.GetAccessToken() != "valid" {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errString("invalid token"))
@@ -69,6 +76,22 @@ func TestAuthClientLoginBadCredentials(t *testing.T) {
 	_, err := c.Login(context.Background(), "ana@garcialorca.mx", "wrong")
 	if connect.CodeOf(err) != connect.CodeUnauthenticated {
 		t.Errorf("code = %v, want Unauthenticated", connect.CodeOf(err))
+	}
+}
+
+func TestAuthClientRefresh(t *testing.T) {
+	c, stop := newStubServer(t)
+	defer stop()
+
+	res, err := c.Refresh(context.Background(), "good-ref")
+	if err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	if res.AccessToken != "acc2" || res.RefreshToken != "ref2" {
+		t.Errorf("rotated pair mismatch: %+v", res)
+	}
+	if _, err := c.Refresh(context.Background(), "stale"); connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Errorf("stale refresh: want Unauthenticated, got %v", connect.CodeOf(err))
 	}
 }
 
