@@ -2,6 +2,8 @@
 
 One line per memory file. Load this first; open the file when relevant.
 
+- [project-status](project-status.md) — **EMPIEZA AQUÍ**: progreso real (M01✅ M02✅ M03🚧), qué falta y el próximo paso. Snapshot 2026-07-02.
+- [build-lessons](build-lessons.md) — gotchas no obvios (GitGuardian runtime-creds, gen/go tracking, go 1.24 pin, RLS app-role, buf/i18n quirks, flujo de PR).
 - [web-frontend-design](web-frontend-design.md) — design source, palette/type/themes, and the web=admin+teacher-only scope decision.
 - [mobile-app-design](mobile-app-design.md) — parent (padres) Expo/RN app design: nav, screens, Baloo2+Nunito, "Moderno" skin.
 - [package-manager-pnpm](package-manager-pnpm.md) — pnpm is the ONLY package manager; npm/yarn forbidden.
