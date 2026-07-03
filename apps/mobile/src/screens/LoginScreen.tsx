@@ -1,6 +1,5 @@
 import { useState, type ReactElement } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
-import Svg, { Path } from "react-native-svg";
+import { Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Icon } from "../icons";
 import { useTheme } from "../theme";
 import { Button } from "../ui";
@@ -10,21 +9,21 @@ export interface LoginScreenProps {
   onLogin: () => void;
 }
 
-/** School brandmark: lime→forest rounded tile with a faint leaf glyph + "GL". */
-function Brandmark({ size = 76 }: { size?: number }): ReactElement {
-  const theme = useTheme();
+// The official school logo (299×168 lockup). Shown on a white rounded backing so
+// the dark-green wordmark reads on any theme background.
+const LOGO_ASPECT = 299 / 168;
+
+/** School brandmark: the real logo on a white rounded card. */
+function Brandmark({ height = 64 }: { height?: number }): ReactElement {
   return (
-    <View
-      style={[
-        styles.brand,
-        { width: size, height: size, borderRadius: size * 0.32, backgroundColor: theme.palette.lime },
-      ]}
-    >
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.palette.forest, opacity: 0.55, borderRadius: size * 0.32 }]} />
-      <Svg width={size} height={size} viewBox="0 0 76 76" style={[StyleSheet.absoluteFill, { opacity: 0.22 }]}>
-        <Path d="M16 60s-3-22 13-34 33-9 33-9 1.5 22-14 34S16 60 16 60Z" fill="#fff" />
-      </Svg>
-      <Text style={[styles.brandText, { fontSize: size * 0.42, fontFamily: theme.fonts.display }]}>GL</Text>
+    <View style={styles.brand}>
+      <Image
+        // eslint-disable-next-line @typescript-eslint/no-require-imports -- Metro resolves static image assets via require()
+        source={require("../../assets/logo.png")}
+        style={{ width: height * LOGO_ASPECT, height }}
+        resizeMode="contain"
+        accessibilityLabel="Centro Educativo García Lorca"
+      />
     </View>
   );
 }
@@ -42,9 +41,6 @@ export function LoginScreen({ onLogin }: LoginScreenProps): ReactElement {
     <View style={[styles.root, { backgroundColor: theme.colors.bg }]}>
       <View style={styles.brandWrap}>
         <Brandmark />
-        <Text style={[styles.heading, { color: theme.colors.text, fontFamily: theme.fonts.display }]}>
-          Centro Educativo{"\n"}García Lorca
-        </Text>
         <Text style={[styles.subtitle, { color: theme.colors.text3, fontFamily: theme.fonts.ui }]}>
           Portal para padres y tutores
         </Text>
@@ -112,10 +108,15 @@ export function LoginScreen({ onLogin }: LoginScreenProps): ReactElement {
 const styles = StyleSheet.create({
   root: { flexGrow: 1, justifyContent: "center", paddingHorizontal: 20, paddingVertical: 30 },
   brandWrap: { alignItems: "center", marginBottom: 26 },
-  brand: { alignItems: "center", justifyContent: "center", overflow: "hidden" },
-  brandText: { color: "#FFFFFF", fontWeight: "700", letterSpacing: 1 },
-  heading: { textAlign: "center", marginTop: 18, fontSize: 23, fontWeight: "700", lineHeight: 28, letterSpacing: -0.4 },
-  subtitle: { fontSize: 13.5, fontWeight: "700", marginTop: 8 },
+  brand: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  subtitle: { fontSize: 13.5, fontWeight: "700", marginTop: 14 },
   label: { fontSize: 12.5, fontWeight: "800", marginHorizontal: 4, marginBottom: 7 },
   field: {
     flexDirection: "row",

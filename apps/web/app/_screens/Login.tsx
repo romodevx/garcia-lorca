@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type CSSProperties, type ReactElement } from "react";
-import { Emblem } from "../_design/Brand";
+import { LogoBadge } from "../_design/Brand";
 import { Btn, ThemeToggle } from "../_design/Controls";
 import { Icon, type IconName } from "../_design/Icon";
 import type { Role } from "../_design/data";
@@ -91,11 +91,8 @@ export function Login({ theme, onToggle, onLogin }: LoginProps): ReactElement {
         <Rosette petals={ROSETTE_TOP} style={{ position: "absolute", right: "-12%", top: "8%", width: "78%", opacity: 0.16, filter: "blur(.3px)" }} />
         <Rosette petals={ROSETTE_BOTTOM} style={{ position: "absolute", left: "-18%", bottom: "-16%", width: "52%", opacity: 0.1 }} />
 
-        <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 14 }}>
-          <Emblem size={56} />
-          <div style={{ color: "#fff", fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 20, letterSpacing: "-.02em" }}>
-            García&nbsp;Lorca
-          </div>
+        <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+          <LogoBadge height={46} />
         </div>
 
         <div style={{ position: "relative", color: "#fff", maxWidth: 460 }}>

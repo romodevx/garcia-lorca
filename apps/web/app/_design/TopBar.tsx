@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import type { ReactElement } from "react";
-import { Avatar, Wordmark } from "./Brand";
+import { Avatar, Logo } from "./Brand";
 import { IconBtn, ThemeToggle } from "./Controls";
 import { Icon } from "./Icon";
 import type { UserProfile } from "./data";
@@ -47,7 +47,7 @@ export function TopBar({
       }}
     >
       <button onClick={onHome} style={{ display: "flex", alignItems: "center" }} aria-label={t("nav.dashboard")}>
-        <Wordmark size={42} />
+        <Logo height={40} />
       </button>
       {/*
         The search box is a TRIGGER for the Command Palette (Cmd+K), not an
