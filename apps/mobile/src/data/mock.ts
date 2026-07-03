@@ -84,6 +84,13 @@ export interface ModuleTile {
   sub: string;
   icon: IconName;
   tint: TintName;
+  /**
+   * Deactivated from the product (the school doesn't offer this module). Hidden
+   * from the "Más" grid entirely — distinct from a flag being OFF, which shows
+   * the tile as "Próximamente". Nothing is deleted; re-enabling is just removing
+   * this marker. See project memory [[module-docs-deactivated]].
+   */
+  hidden?: boolean;
 }
 
 export interface ExcuseReason {
@@ -227,7 +234,8 @@ export const events: SchoolEvent[] = [
 ];
 
 export const modules: ModuleTile[] = [
-  { id: "documentos", title: "Documentos", sub: "Boletas y constancias", icon: "document", tint: "forest" },
+  // Deactivated from the panel per the school (kept future-ready; nothing deleted). See [[module-docs-deactivated]].
+  { id: "documentos", title: "Documentos", sub: "Boletas y constancias", icon: "document", tint: "forest", hidden: true },
   { id: "uniformes", title: "Uniformes", sub: "Tienda y tallas", icon: "shirt", tint: "lime" },
   { id: "facturas", title: "Facturas", sub: "CFDI y recibos", icon: "receipt", tint: "orange" },
   { id: "becas", title: "Becas", sub: "Estado de tu beca", icon: "cap", tint: "purple" },

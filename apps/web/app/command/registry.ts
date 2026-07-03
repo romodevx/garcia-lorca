@@ -60,6 +60,7 @@ export function buildCommandRegistry(flags: FlagSet, t: Translate): Command[] {
   const commands: Command[] = [];
 
   for (const module of MODULES) {
+    if (module.hidden) continue; // deactivated from the product → never surfaced.
     if (flags[module.flag] !== true) continue; // flag OFF → module contributes nothing.
     commands.push({
       id: `${module.id}.nav`,
@@ -75,7 +76,7 @@ export function buildCommandRegistry(flags: FlagSet, t: Translate): Command[] {
 
   for (const action of ACTIONS) {
     const module = moduleById.get(action.moduleId);
-    if (module === undefined || flags[module.flag] !== true) continue;
+    if (module === undefined || module.hidden || flags[module.flag] !== true) continue;
     commands.push({
       id: `${module.id}.${action.kind}`,
       kind: action.kind,
