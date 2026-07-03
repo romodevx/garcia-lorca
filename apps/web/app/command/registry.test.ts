@@ -40,6 +40,13 @@ describe("buildCommandRegistry", () => {
     expect(buildCommandRegistry({}, t)).toEqual([]);
   });
 
+  it("never surfaces a module deactivated from the panel, even with its flag ON", () => {
+    // "documents" is hidden (school doesn't offer it) — kept future-ready, but the
+    // palette must not expose its nav/create commands regardless of the flag value.
+    const got = ids({ module_docs: true });
+    expect(got.some((id) => id.startsWith("documents."))).toBe(false);
+  });
+
   it("localizes titles and splits aliases from i18n", () => {
     const students = buildCommandRegistry({ module_students: true }, t);
     const create = students.find((c) => c.id === "students.create");

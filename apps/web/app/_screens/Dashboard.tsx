@@ -200,7 +200,7 @@ export function Dashboard({ user, onOpen, now = new Date() }: DashboardProps): R
         <span style={{ fontSize: 14, color: "var(--text-faint)" }}>Todo el sistema, a la vista</span>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(236px, 1fr))", gap: 18 }}>
-        {MODULES.map((m, i) => (
+        {MODULES.filter((m) => !m.hidden).map((m, i) => (
           <ModuleCard key={m.id} m={m} i={i} onOpen={onOpen} />
         ))}
       </div>

@@ -41,9 +41,11 @@ export function MoreScreen({ onLogout }: { onLogout: () => void }): ReactElement
 
       <SectionLabel>Módulos</SectionLabel>
       <View style={styles.grid}>
-        {modules.map((m) => (
-          <ModuleCard key={m.id} module={m} />
-        ))}
+        {modules
+          .filter((m) => !m.hidden)
+          .map((m) => (
+            <ModuleCard key={m.id} module={m} />
+          ))}
       </View>
 
       <SectionLabel>Cuenta</SectionLabel>

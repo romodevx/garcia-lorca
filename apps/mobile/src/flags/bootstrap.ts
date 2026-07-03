@@ -18,7 +18,7 @@ export const demoFlags: FlagSet = {
   module_grades: true,
   module_finance: true,
   module_comms: true, // avisos / announcements
-  module_docs: true, // Más → Documentos
+  module_docs: false, // Deactivated: school doesn't offer Documents; tile hidden from "Más" (kept future-ready).
   module_uniforms: true, // Más → Uniformes
   module_scholarships: true, // Más → Becas
   // module_billing stays OFF (out of MVP) → "Facturas" tile renders disabled.

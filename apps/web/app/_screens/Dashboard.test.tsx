@@ -4,18 +4,30 @@ import { describe, expect, it, vi } from "vitest";
 import { MODULES, USERS } from "../_design/data";
 import { Dashboard } from "./Dashboard";
 
+const VISIBLE_MODULES = MODULES.filter((m) => !m.hidden);
+const HIDDEN_MODULES = MODULES.filter((m) => m.hidden);
+
 describe("Dashboard", () => {
-  it("renders a card for all 11 modules", () => {
+  it("renders a launcher card for every visible module", () => {
     render(<Dashboard user={USERS.admin} onOpen={() => {}} now={new Date("2026-06-12T09:00:00")} />);
 
-    expect(MODULES).toHaveLength(11);
-    // Each module card surfaces its unique description text — assert one per module.
-    for (const m of MODULES) {
+    // Each visible module card surfaces its unique description text — assert one per module.
+    for (const m of VISIBLE_MODULES) {
       expect(screen.getByText(m.desc)).toBeInTheDocument();
     }
-    // And exactly 11 module-launcher cards exist alongside the 3 KPI cards.
-    const launcherCards = MODULES.map((m) => screen.getByText(m.label));
-    expect(launcherCards).toHaveLength(11);
+    const launcherCards = VISIBLE_MODULES.map((m) => screen.getByText(m.label));
+    expect(launcherCards).toHaveLength(VISIBLE_MODULES.length);
+  });
+
+  it("does not render modules deactivated from the panel (e.g. Documentos)", () => {
+    render(<Dashboard user={USERS.admin} onOpen={() => {}} now={new Date("2026-06-12T09:00:00")} />);
+
+    // "Documentos" is deactivated (hidden) — kept future-ready, but never shown in the panel.
+    expect(HIDDEN_MODULES.some((m) => m.id === "documents")).toBe(true);
+    for (const m of HIDDEN_MODULES) {
+      expect(screen.queryByText(m.label)).not.toBeInTheDocument();
+      expect(screen.queryByText(m.desc)).not.toBeInTheDocument();
+    }
   });
 
   it("greets by time of day", () => {
