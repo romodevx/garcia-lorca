@@ -1,0 +1,62 @@
+# students — Students / Admisión (M03)
+
+> Per-service context. Global team rules (`~/.claude/`) and the repo root
+> `CLAUDE.md` always apply. This file is the repo-specific context for the
+> students service. iam's CLAUDE.md is the template all services copy.
+
+## Purpose
+The first business vertical slice: register applicants and drive them through the
+admission state machine, ending in enrollment. Enroll a student end-to-end
+through the gateway. Everything student-scoped downstream (finance, attendance,
+grades) references students.
+
+## Architecture — Clean (rich domain)
+`cmd/main.go` + `internal/{domain,usecase,ports,adapters/{postgres,grpc,pubsub,protoconv}}`.
+Dependency direction: `adapters → usecase → domain`. The domain imports no
+framework (no GORM, no Connect). GORM lives ONLY in `adapters/postgres` (double
+model + `mapper.go`). Proto ↔ domain enum mapping lives ONLY in adapters
+(`adapters/protoconv`, shared by the gRPC and Pub/Sub adapters so they never
+drift).
+
+## Domain invariants
+- A `Student` has a stable identity and a `CURP` unique per tenant (boundary
+  shape-check in the domain; the DB owns the authoritative uniqueness constraint).
+- Admission is a state machine — the single source of truth is
+  `allowedTransitions` in `domain/admission.go`:
+  `pending → accepted → enrolled`, plus `rejected` (from pending) and
+  `withdrawn` (from accepted/enrolled). `rejected`/`withdrawn` are terminal.
+- Transition methods (`Accept`/`Reject`/`Enroll`/`Withdraw`) are the only place
+  admission rules live; an illegal move is `KindConflict`, surfaced by the gRPC
+  adapter as `FailedPrecondition` (a duplicate CURP on create is `AlreadyExists`).
+- Events are published only AFTER a successful persist, so a failed write
+  publishes nothing.
+
+## Events (published)
+- `StudentEnrolled` — on enroll into a cycle.
+- `AdmissionStatusChanged` — on every admission transition.
+
+Both go to the single per-domain topic **`student-events`** (mirrors finance's
+`payment-events`), proto-marshaled, with `type` + `tenant_id` attributes.
+
+> TRANSPORT: `cmd/main.go` currently wires a dev-only logging publisher (`devBus`,
+> metadata only — no PII). The Cloud Pub/Sub adapter lands with the first
+> consumer (comms, M10); the `ports.EventPublisher` port stays unchanged when it
+> does.
+
+## RLS-sensitive tables
+`students` — `ENABLE + FORCE ROW LEVEL SECURITY` from the first migration. All
+access is tenant-scoped through `adapters/postgres` (SET LOCAL per transaction);
+isolation is covered by testcontainers tests as the app (non-owner) role. M03 is
+single-tenant (tenant fixed at the composition root); RLS is tenant-scoped —
+see `ADR 0001`.
+
+## Feature flag
+`module_students` — default OFF. The boundary is enforced at the gateway
+(`ModuleGuard(students)` ⇒ 404 for a disabled module, evaluated before auth so a
+hidden module is invisible). The gateway route is
+`POST /api/v1/students` → RequireAuth → RequirePermission("students:create").
+
+## Command palette
+Registered in `apps/web/app/command/registry.ts`: a nav command plus
+`create.student`, both flag-gated by `module_students`. Layer-B record search is
+CP-2 (post-M03).
