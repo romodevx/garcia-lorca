@@ -8,9 +8,11 @@
 package main
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/config"
@@ -21,7 +23,13 @@ import (
 	"github.com/garcia-lorca/pkg/logger"
 )
 
-const defaultAddr = ":8080"
+const (
+	defaultAddr       = ":8080"
+	readHeaderTimeout = 10 * time.Second
+	readTimeout       = 30 * time.Second
+	writeTimeout      = 30 * time.Second
+	idleTimeout       = 120 * time.Second
+)
 
 func main() {
 	log := logger.Default()
@@ -34,6 +42,10 @@ func main() {
 	if iamBaseURL == "" {
 		iamBaseURL = "http://localhost:8081"
 	}
+	studentsBaseURL := os.Getenv("STUDENTS_BASE_URL")
+	if studentsBaseURL == "" {
+		studentsBaseURL = "http://localhost:8083"
+	}
 
 	// flags is the authoritative source of module visibility (default-deny),
 	// loaded from ENABLED_MODULES (comma-separated module names). The gateway
@@ -43,11 +55,22 @@ func main() {
 
 	iamHealth := client.NewIAMClient(iamBaseURL, http.DefaultClient)
 	authClient := client.NewAuthClient(iamBaseURL, http.DefaultClient)
-	mux := newMux(iamHealth, authClient, flags)
+	studentsClient := client.NewStudentsClient(studentsBaseURL, http.DefaultClient)
+	mux := newMux(iamHealth, authClient, studentsClient, flags)
 
-	log.Info("gateway starting", slog.String("addr", addr), slog.String("iam", iamBaseURL))
-	srv := &http.Server{Addr: addr, Handler: mux}
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	log.Info("gateway starting",
+		slog.String("addr", addr),
+		slog.String("iam", iamBaseURL),
+		slog.String("students", studentsBaseURL))
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+	}
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error("gateway server stopped", slog.Any("error", err))
 		os.Exit(1)
 	}
@@ -60,20 +83,28 @@ func main() {
 //	POST /api/v1/auth/refresh  → proxy to iam RefreshToken
 //	GET  /api/v1/me            → RequireAuth → the caller's principal
 //	GET  /api/v1/features      → resolved module-flag map (frontend gating)
+//	POST /api/v1/students      → ModuleGuard(students) → RequireAuth →
+//	                             RequirePermission(students:create) → students service
 //	/healthz, /readyz          → liveness + iam reachability
 //
-// `flags` (via middleware.NewModuleGuard) is the module-visibility boundary used
-// by module routes as they land (disabled module ⇒ 404).
-func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, flags featureflag.Checker) *http.ServeMux {
+// `flags` (via middleware.NewModuleGuard) is the module-visibility boundary:
+// disabled module ⇒ 404, evaluated before auth so a hidden module is invisible.
+func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, flags featureflag.Checker) *http.ServeMux {
 	mux := http.NewServeMux()
 	handler.NewHealthHandler(iamHealth).Register(mux)
 
 	authH := handler.NewAuthHandler(authClient)
 	requireAuth := middleware.RequireAuth(authClient)
+	guard := middleware.NewModuleGuard(flags)
 
 	mux.HandleFunc("POST /api/v1/auth/login", authH.Login)
 	mux.HandleFunc("POST /api/v1/auth/refresh", authH.Refresh)
 	mux.Handle("GET /api/v1/me", requireAuth(http.HandlerFunc(authH.Me)))
 	mux.HandleFunc("GET /api/v1/features", handler.NewFeaturesHandler(flags).Features)
+
+	// M03 students: flag-guarded, authenticated, permission-gated.
+	studentsCreate := requireAuth(middleware.RequirePermission("students:create")(
+		http.HandlerFunc(handler.NewStudentsHandler(studentsClient).Create)))
+	mux.Handle("POST /api/v1/students", guard.Protect("students", studentsCreate))
 	return mux
 }
