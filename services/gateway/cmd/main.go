@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/config"
@@ -22,7 +23,13 @@ import (
 	"github.com/garcia-lorca/pkg/logger"
 )
 
-const defaultAddr = ":8080"
+const (
+	defaultAddr       = ":8080"
+	readHeaderTimeout = 10 * time.Second
+	readTimeout       = 30 * time.Second
+	writeTimeout      = 30 * time.Second
+	idleTimeout       = 120 * time.Second
+)
 
 func main() {
 	log := logger.Default()
@@ -55,7 +62,14 @@ func main() {
 		slog.String("addr", addr),
 		slog.String("iam", iamBaseURL),
 		slog.String("students", studentsBaseURL))
-	srv := &http.Server{Addr: addr, Handler: mux}
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+	}
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error("gateway server stopped", slog.Any("error", err))
 		os.Exit(1)

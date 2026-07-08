@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	connect "connectrpc.com/connect"
 	"github.com/google/uuid"
@@ -39,6 +40,11 @@ const (
 	serviceName   = "students"
 	defaultAddr   = ":8080"
 	defaultTenant = "00000000-0000-0000-0000-000000000001"
+
+	readHeaderTimeout = 10 * time.Second
+	readTimeout       = 30 * time.Second
+	writeTimeout      = 30 * time.Second
+	idleTimeout       = 120 * time.Second
 )
 
 var errMissingDatabaseURL = errors.New("DATABASE_URL is required")
@@ -55,7 +61,14 @@ func main() {
 	addr := envOr("ADDR", defaultAddr)
 	log.Info("students starting", slog.String("addr", addr))
 	// h2c: serve HTTP/2 cleartext so both gRPC and Connect clients work.
-	srv := &http.Server{Addr: addr, Handler: h2c.NewHandler(mux, &http2.Server{})}
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           h2c.NewHandler(mux, &http2.Server{}),
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+	}
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error("students server stopped", slog.Any("error", err))
 		os.Exit(1)
@@ -65,6 +78,10 @@ func main() {
 // buildMux is the composition root: config → adapters → use case → Connect
 // handler, returning the mounted routes.
 func buildMux(log *slog.Logger) (*http.ServeMux, error) {
+	// M03 is single-tenant: the tenant is fixed here (not derived from the
+	// caller), so RLS binds this one tenant for every request. When multi-tenant
+	// lands, the gateway must forward the authenticated principal's TenantID and
+	// this must stop being a process-wide constant. See ADR 0001.
 	tenantID := envOr("STUDENTS_TENANT_ID", defaultTenant)
 
 	db, err := openDB()

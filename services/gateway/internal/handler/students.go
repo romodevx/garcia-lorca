@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
@@ -50,7 +49,7 @@ type studentResponse struct {
 // Create handles POST /api/v1/students: registers a new applicant (pending).
 func (h *StudentsHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req createStudentRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}

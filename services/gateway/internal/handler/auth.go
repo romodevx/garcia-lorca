@@ -43,7 +43,7 @@ type loginResponse struct {
 // Login handles POST /api/v1/auth/login.
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -67,7 +67,7 @@ type refreshRequest struct {
 // fresh, rotated pair via iam.
 func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	var req refreshRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -128,4 +128,15 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// maxRequestBytes caps a decoded JSON request body (1 MiB) so an authenticated
+// caller cannot exhaust gateway memory with an oversized payload.
+const maxRequestBytes = 1 << 20
+
+// decodeJSONBody bounds r.Body and decodes it into dst. A body over the cap or
+// malformed JSON returns an error the caller maps to 400.
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBytes)
+	return json.NewDecoder(r.Body).Decode(dst)
 }
