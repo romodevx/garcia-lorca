@@ -24,8 +24,10 @@ const (
 // --- fakes (only what the handler exercises) -------------------------------
 
 type fakeRepo struct {
-	byID   map[string]*domain.Student
-	byCURP map[string]bool
+	byID       map[string]*domain.Student
+	byCURP     map[string]bool
+	lastFilter ports.ListFilter
+	nextToken  string
 }
 
 func newFakeRepo() *fakeRepo {
@@ -53,12 +55,13 @@ func (r *fakeRepo) FindByID(_ context.Context, id string) (*domain.Student, erro
 	return nil, glerrors.ErrNotFound
 }
 
-func (r *fakeRepo) List(_ context.Context, _ ports.ListFilter) ([]*domain.Student, string, error) {
+func (r *fakeRepo) List(_ context.Context, f ports.ListFilter) ([]*domain.Student, string, error) {
+	r.lastFilter = f
 	out := make([]*domain.Student, 0, len(r.byID))
 	for _, s := range r.byID {
 		out = append(out, s)
 	}
-	return out, "", nil
+	return out, r.nextToken, nil
 }
 
 type fakePublisher struct {
@@ -230,6 +233,41 @@ func TestListStudents(t *testing.T) {
 	if len(res.Msg.GetStudents()) != 1 {
 		t.Errorf("students = %d, want 1", len(res.Msg.GetStudents()))
 	}
+}
+
+func TestListStudentsMapsFilterAndToken(t *testing.T) {
+	repo := newFakeRepo()
+	repo.nextToken = "next-42"
+	svc := usecase.NewStudentService(repo, &fakePublisher{}, testTenant, func() string { return "stu-1" })
+	h := grpcadapter.NewStudentsHandler(svc, usecase.NewHealthService("students"))
+
+	res, err := h.ListStudents(context.Background(), connect.NewRequest(&studentsv1.ListStudentsRequest{
+		Level:      studentsv1.Level_LEVEL_SECUNDARIA,
+		Status:     studentsv1.AdmissionStatus_ADMISSION_STATUS_ACCEPTED,
+		GradeGroup: "3° B",
+		PageSize:   25,
+		PageToken:  "tok-1",
+	}))
+	if err != nil {
+		t.Fatalf("ListStudents: %v", err)
+	}
+	got := repo.lastFilter
+	if got.Level != domain.LevelSecundaria || got.Status != domain.AdmissionAccepted ||
+		got.GradeGroup != "3° B" || got.PageSize != 25 || got.PageToken != "tok-1" {
+		t.Errorf("filter not mapped 1:1 from the wire: %+v", got)
+	}
+	if res.Msg.GetNextPageToken() != "next-42" {
+		t.Errorf("next_page_token = %q, want next-42", res.Msg.GetNextPageToken())
+	}
+}
+
+func TestChangeAdmissionUnknownIDIsNotFound(t *testing.T) {
+	h, _ := newHandler(t)
+	_, err := h.ChangeAdmissionStatus(context.Background(), connect.NewRequest(&studentsv1.ChangeAdmissionStatusRequest{
+		Id:     "nope",
+		Target: studentsv1.AdmissionStatus_ADMISSION_STATUS_ACCEPTED,
+	}))
+	assertCode(t, err, connect.CodeNotFound)
 }
 
 // explodingRepo returns a raw internal error carrying a sensitive detail, to

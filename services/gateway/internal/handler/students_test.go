@@ -85,3 +85,12 @@ func TestCreateStudentInvalidArgumentIs400(t *testing.T) {
 		t.Errorf("status = %d, want 400", rec.Code)
 	}
 }
+
+func TestCreateStudentInternalErrorIs500(t *testing.T) {
+	svc := &fakeCreator{err: connect.NewError(connect.CodeUnavailable, nil)}
+	h := handler.NewStudentsHandler(svc)
+	rec := postStudents(t, h, `{"curp":"HEGA050312MDFRNN08","firstName":"Ana","lastName":"Herrera","level":"primaria"}`)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", rec.Code)
+	}
+}

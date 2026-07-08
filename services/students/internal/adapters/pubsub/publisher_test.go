@@ -68,8 +68,8 @@ func TestPublishAdmissionChangedMarshalsProtoToStudentEventsTopic(t *testing.T) 
 		StudentID: "stu-1",
 		TenantID:  "t1",
 		Previous:  domain.AdmissionPending,
-		New:       domain.AdmissionAccepted,
-		Reason:    "",
+		New:       domain.AdmissionRejected,
+		Reason:    "incomplete documents",
 	})
 	if err != nil {
 		t.Fatalf("PublishAdmissionChanged: %v", err)
@@ -93,7 +93,10 @@ func TestPublishAdmissionChangedMarshalsProtoToStudentEventsTopic(t *testing.T) 
 	if got.GetPreviousStatus() != studentsv1.AdmissionStatus_ADMISSION_STATUS_PENDING {
 		t.Errorf("previous = %v", got.GetPreviousStatus())
 	}
-	if got.GetNewStatus() != studentsv1.AdmissionStatus_ADMISSION_STATUS_ACCEPTED {
+	if got.GetNewStatus() != studentsv1.AdmissionStatus_ADMISSION_STATUS_REJECTED {
 		t.Errorf("new = %v", got.GetNewStatus())
+	}
+	if got.GetReason() != "incomplete documents" {
+		t.Errorf("reason = %q, want %q", got.GetReason(), "incomplete documents")
 	}
 }
