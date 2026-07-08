@@ -58,10 +58,25 @@ Añadido en esta sesión (TDD estricto, todo verde + gofmt/vet limpios):
 - **Transporte Cloud Pub/Sub** real → a **M10 (comms)**, cuando exista consumidor (así lo indica el TODO de
   `pkg/pubsub`). Hoy `devBus` loguea solo metadatos; el port `EventPublisher` no cambia cuando aterrice.
 
-**Para encender `module_students` en entornos compartidos (condiciones de CI del gate de security):**
-- Tests de aislamiento RLS verdes en CI (testcontainers) + `govulncheck ./...` en el merge gate.
-- Advisories low pendientes (no bloqueantes): `MaxBytesReader` en el gateway, rate-limit en `/auth/*`.
-- Encender vía `ENABLED_MODULES` (default sigue OFF) → habilita `preset_spine` (iam+gateway+students).
+**Fixes aplicados en `/review` (revisión de 4 agentes: testing, maintainability, security, adversarial):**
+`MaxBytesReader` en POST students + `/auth/*`; timeouts (ReadHeader/Read/Write/Idle) en ambos
+`http.Server`; 4 aserciones de test añadidas (mapeo de filtro+NextPageToken, ChangeAdmission not-found,
+Reason round-trip, default→500); comentario de invariante single-tenant en el composition root.
+
+**BLOQUEANTES antes de encender `module_students` con tráfico real** (hallazgos adversariales,
+en código pre-existente `usecase/student.go` + `postgres/repository.go`, NO en este PR; el flag OFF los
+hace no explotables hoy):
+- **P1 — race read-modify-write en la máquina de admisión**: `FindByID` + `Update` en transacciones
+  separadas sin lock ni CAS; `Update` es overwrite `WHERE id=?`. Dos transiciones concurrentes → lost
+  update + evento espurio (`StudentEnrolled` de un alumno que la DB marca `withdrawn`). **Fix:** CAS
+  `Update(...).Where("id=? AND admission_status=?", id, previous)`, `RowsAffected==0` → `KindConflict`.
+- **P2 — dual-write sin outbox**: `repo.Update` commitea y luego `pub.Publish*`; si el publish falla el
+  evento se pierde (hoy `devBus` lo enmascara; muerde con el transporte real Cloud Pub/Sub de M10).
+  **Fix:** outbox transaccional o transiciones idempotentes. Va junto con el transporte Cloud Pub/Sub (M10).
+
+**Otras condiciones del gate de security (CI):** tests de aislamiento RLS verdes (testcontainers) +
+`govulncheck ./...`. **Follow-up cross-cutting:** interceptor de logging de errores internos (iam/gateway/
+students no lo tienen). Encender vía `ENABLED_MODULES` (default OFF) → habilita `preset_spine`.
 
 ## Módulos posteriores — NO iniciados
 M04 config, M05 finance, M06 attendance, M07 grades (Must) · M08 becas, M09 docs, M10 comms (Should)
