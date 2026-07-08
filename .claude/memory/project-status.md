@@ -28,16 +28,40 @@ contra iam real, **authz** (permission gate + refresh proxy), **middleware de fe
 autoritativa de flags (config-driven vía `ENABLED_MODULES`). El web ya consume `/features`
 (dropeado el DEMO hardcoded). `gateway` e `iam` = `min-instances=1` (calientes).
 
-### M03 — Students / Admisión 🚧 EN PROGRESO (`module_students`)
-Hecho: **proto congelado**, **domain** (máquina de estados de admisión, CURP, nivel — TDD),
-**usecase** `StudentService` (crear aspirante + transiciones de admisión), **postgres adapter
-+ RLS migration + testcontainers isolation**.
-**Falta (siguiente tarea):**
-- `internal/adapters/grpc/` — handler gRPC (hoy solo `doc.go` placeholder)
-- `internal/adapters/pubsub/` — emitir `StudentEnrolled` / `AdmissionStatusChanged` (hoy solo `doc.go`)
-- `cmd/main.go` — cablear todo (hoy esqueleto)
-- **gateway**: ruta `POST /api/v1/students` detrás de flag + auth + permiso
-- Al cerrar esto se **enciende `preset_spine`** (iam+gateway+students end-to-end).
+### M03 — Students / Admisión ✅ COMPLETO (`module_students`) — rama `feature/m03-students-grpc-pubsub`
+**Ambos gates pasados:** tech-lead **PASS** (canon, sin bloqueantes) · security **APPROVED**
+(flag cleared para entornos compartidos). Cobertura de negocio ≥80% (protoconv 100%, grpc 86.5%,
+handler gateway 92.1%, middleware 100%, domain 88.5%, usecase 87.5%). Fixes de gate aplicados:
+`protoconv_test.go` + `students_map_test.go` (table-driven), wrap `%w` en publisher, `errors.Is`
+en gateway main, y test de regresión no-fuga (error interno→mensaje genérico).
+Hecho: **proto congelado**, **domain** (máquina de admisión, CURP, nivel — TDD),
+**usecase** `StudentService` + `HealthService`, **postgres adapter + RLS + testcontainers**.
+Añadido en esta sesión (TDD estricto, todo verde + gofmt/vet limpios):
+- **`internal/adapters/grpc/students_handler.go`** — implementa el `StudentsServiceHandler` generado;
+  mapeo de errores **por-RPC** (transición ilegal `KindConflict`→`FailedPrecondition` por contrato
+  congelado; CURP duplicado→`AlreadyExists`). 8 tests.
+- **`internal/adapters/pubsub/publisher.go`** — `EventPublisher` → topic **`student-events`** (uno por
+  dominio, estilo `payment-events`), payload proto-marshaled, attrs `type`/`tenant_id`. 2 tests.
+- **`internal/adapters/protoconv/`** — mappers Level/AdmissionStatus dominio↔proto compartidos por
+  ambos adapters (DRY; el dominio no importa proto).
+- **`cmd/main.go`** — composition root (repo pg + eventos + StudentService + Connect handler, h2c).
+- **gateway**: `StudentsClient` (Connect), `StudentsHandler` (JSON, 4 tests), ruta
+  **`POST /api/v1/students`** detrás de `ModuleGuard(students)` → `RequireAuth` →
+  `RequirePermission(students:create)`; `httpStatusFor` extendido (409 para AlreadyExists/FailedPrecondition).
+- **Test de integración `newMux`** ✅ (`services/gateway/cmd/main_test.go`) — monta stubs Connect de iam +
+  students y ejercita la cadena de seguridad completa: flag OFF→404, sin token→401, sin permiso→403,
+  con `students:create`→201. Blinda el orden guard→auth→permiso.
+- **Docs** ✅ — `services/students/CLAUDE.md` (propósito, arquitectura, invariantes, eventos, RLS, flag, palette).
+- **Command Palette** ✅ — students ya registrado en `registry.ts` (nav + `create.student`, gated por flag).
+
+**Diferido explícitamente (NO bloquea M03):**
+- **Transporte Cloud Pub/Sub** real → a **M10 (comms)**, cuando exista consumidor (así lo indica el TODO de
+  `pkg/pubsub`). Hoy `devBus` loguea solo metadatos; el port `EventPublisher` no cambia cuando aterrice.
+
+**Para encender `module_students` en entornos compartidos (condiciones de CI del gate de security):**
+- Tests de aislamiento RLS verdes en CI (testcontainers) + `govulncheck ./...` en el merge gate.
+- Advisories low pendientes (no bloqueantes): `MaxBytesReader` en el gateway, rate-limit en `/auth/*`.
+- Encender vía `ENABLED_MODULES` (default sigue OFF) → habilita `preset_spine` (iam+gateway+students).
 
 ## Módulos posteriores — NO iniciados
 M04 config, M05 finance, M06 attendance, M07 grades (Must) · M08 becas, M09 docs, M10 comms (Should)
