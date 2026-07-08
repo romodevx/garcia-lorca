@@ -117,6 +117,8 @@ func httpStatusFor(err error) int {
 		return http.StatusForbidden
 	case connect.CodeNotFound:
 		return http.StatusNotFound
+	case connect.CodeAlreadyExists, connect.CodeFailedPrecondition:
+		return http.StatusConflict
 	default:
 		return http.StatusInternalServerError
 	}
