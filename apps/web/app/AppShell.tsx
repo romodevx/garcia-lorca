@@ -8,36 +8,69 @@ import { MODULES, USERS, type ModuleDef, type Role } from "./_design/data";
 import { Dashboard } from "./_screens/Dashboard";
 import { Finances } from "./_screens/Finances";
 import { Login } from "./_screens/Login";
+import { ChangePassword } from "./_screens/ChangePassword";
 import { ModulePlaceholder } from "./_screens/ModulePlaceholder";
 import { useTheme } from "./theme/ThemeProvider";
+import { login as apiLogin, changePassword as apiChangePassword } from "./auth/api";
 
 type View =
   | { screen: "login" }
+  | { screen: "changePassword" }
   | { screen: "dashboard" }
   | { screen: "finance" }
   | { screen: "module"; moduleId: string };
 
+// Gateway base URL for the browser (public env; matches compose NEXT_PUBLIC_API_URL).
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+
+// Single-user demo chrome: the dashboard/top-bar identity is fixed to the owner
+// until per-user profiles land. Login is now credential-driven (no role picker).
+const CHROME_ROLE: Role = "admin";
+
 /**
- * Navigation shell — replicates the prototype's SPA flow (project/app.jsx):
- * login → dashboard → finance/module → back home; logout → login. Kept as
- * client-side state (not Next routes) so the demo flow is instant and matches
- * the handoff exactly. Real module surfaces will graduate to App Router routes
- * gated by `FeatureGate` when their backends land.
+ * Navigation shell — real auth flow: login → (forced change-password, if the
+ * gateway reports it) → dashboard → finance/module → back home; logout → login.
+ * Kept as client-side state (not Next routes) so the demo flow is instant. Real
+ * module surfaces will graduate to App Router routes gated by `FeatureGate` when
+ * their backends land.
  */
 export function AppShell(): ReactElement {
   const { theme, toggle } = useTheme();
   const [view, setView] = useState<View>({ screen: "login" });
-  const [role, setRole] = useState<Role>("admin");
+  const [authError, setAuthError] = useState<string | undefined>(undefined);
+  const [pending, setPending] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   // The single flag read for the finance surface (UX-only; the gateway is the
   // security boundary). Hooks must run unconditionally, so we read it here.
   const financeEnabled = useFlag("module_finance");
 
-  const login = (r: Role): void => {
-    setRole(r);
-    setView({ screen: "dashboard" });
+  const handleLogin = async (email: string, password: string): Promise<void> => {
+    setPending(true);
+    setAuthError(undefined);
+    try {
+      const res = await apiLogin(API_URL, email, password);
+      setView(res.mustChangePassword ? { screen: "changePassword" } : { screen: "dashboard" });
+    } catch {
+      setAuthError("Correo o contraseña incorrectos.");
+    } finally {
+      setPending(false);
+    }
   };
+
+  const handleChangePassword = async (current: string, next: string): Promise<void> => {
+    setPending(true);
+    setAuthError(undefined);
+    try {
+      await apiChangePassword(API_URL, current, next);
+      setView({ screen: "dashboard" });
+    } catch {
+      setAuthError("No se pudo cambiar la contraseña. Verifica la actual.");
+    } finally {
+      setPending(false);
+    }
+  };
+
   const logout = (): void => setView({ screen: "login" });
   const home = (): void => setView({ screen: "dashboard" });
   const open = useCallback((id: string): void => {
@@ -54,14 +87,17 @@ export function AppShell(): ReactElement {
     [open],
   );
 
-  const user = USERS[role];
+  const user = USERS[CHROME_ROLE];
   const activeModule: ModuleDef | undefined = useMemo(
     () => (view.screen === "module" ? MODULES.find((m) => m.id === view.moduleId) : undefined),
     [view]
   );
 
   if (view.screen === "login") {
-    return <Login theme={theme} onToggle={toggle} onLogin={login} />;
+    return <Login theme={theme} onToggle={toggle} onSubmit={handleLogin} error={authError} pending={pending} />;
+  }
+  if (view.screen === "changePassword") {
+    return <ChangePassword theme={theme} onToggle={toggle} onSubmit={handleChangePassword} error={authError} pending={pending} />;
   }
 
   return (

@@ -3,14 +3,15 @@
 import { useState, type CSSProperties, type ReactElement } from "react";
 import { LogoBadge } from "../_design/Brand";
 import { Btn, ThemeToggle } from "../_design/Controls";
-import { Icon, type IconName } from "../_design/Icon";
-import type { Role } from "../_design/data";
+import { Icon } from "../_design/Icon";
 import type { Theme } from "../theme/theme-script";
 
 export interface LoginProps {
   theme: Theme;
   onToggle: () => void;
-  onLogin: (role: Role) => void;
+  onSubmit: (email: string, password: string) => Promise<void>;
+  error?: string;
+  pending?: boolean;
 }
 
 const inp: CSSProperties = {
@@ -25,19 +26,6 @@ const inp: CSSProperties = {
   fontSize: 16,
   outline: "none"
 };
-
-interface RoleOption {
-  id: Role;
-  label: string;
-  icon: IconName;
-}
-
-const ROLES: readonly RoleOption[] = [
-  { id: "admin", label: "Administración", icon: "shield" },
-  { id: "teacher", label: "Maestro", icon: "graduation" }
-];
-
-const PLACEHOLDER_USER: Record<Role, string> = { admin: "director", teacher: "mvazquez" };
 
 const ROSETTE_TOP: ReadonlyArray<[string, number]> = [
   ["var(--lime)", -90],
@@ -67,10 +55,9 @@ function Rosette({ petals, style }: { petals: ReadonlyArray<[string, number]>; s
   );
 }
 
-export function Login({ theme, onToggle, onLogin }: LoginProps): ReactElement {
-  const [role, setRole] = useState<Role>("admin");
-  const [user, setUser] = useState("director");
-  const [pwd, setPwd] = useState("••••••••");
+export function Login({ theme, onToggle, onSubmit, error, pending }: LoginProps): ReactElement {
+  const [email, setEmail] = useState("");
+  const [pwd, setPwd] = useState("");
   const [show, setShow] = useState(false);
 
   return (
@@ -137,53 +124,25 @@ export function Login({ theme, onToggle, onLogin }: LoginProps): ReactElement {
         </div>
         <div className="fade-up" style={{ width: "100%", maxWidth: 412 }}>
           <h2 style={{ fontSize: 30, fontWeight: 700, color: "var(--text)" }}>Bienvenido de nuevo 👋</h2>
-          <p style={{ color: "var(--text-muted)", fontSize: 16, marginTop: 8 }}>Elige tu perfil para entrar.</p>
-
-          {/* role segmented */}
-          <div role="group" aria-label="Perfil" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 26 }}>
-            {ROLES.map((r) => {
-              const on = role === r.id;
-              return (
-                <button
-                  key={r.id}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() => {
-                    setRole(r.id);
-                    setUser(PLACEHOLDER_USER[r.id]);
-                  }}
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: 7,
-                    padding: "15px 6px",
-                    borderRadius: "var(--r-md)",
-                    border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`,
-                    background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)",
-                    color: on ? "var(--forest)" : "var(--text-muted)",
-                    transition: "all .18s var(--ease)",
-                    fontFamily: "var(--font-display)",
-                    fontWeight: 600,
-                    fontSize: 13
-                  }}
-                >
-                  <Icon name={r.icon} size={24} />
-                  {r.label}
-                </button>
-              );
-            })}
-          </div>
+          <p style={{ color: "var(--text-muted)", fontSize: 16, marginTop: 8 }}>Ingresa con tu correo institucional.</p>
 
           {/* fields */}
-          <div style={{ marginTop: 22, display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ marginTop: 26, display: "flex", flexDirection: "column", gap: 14 }}>
             <label style={{ display: "block" }}>
-              <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 4 }}>Usuario</span>
+              <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 4 }}>Correo</span>
               <div style={{ position: "relative", marginTop: 7 }}>
                 <span style={{ position: "absolute", left: 16, top: "50%", transform: "translateY(-50%)", color: "var(--text-faint)" }}>
                   <Icon name="user" size={20} />
                 </span>
-                <input aria-label="Usuario" value={user} onChange={(e) => setUser(e.target.value)} style={inp} />
+                <input
+                  aria-label="Correo"
+                  type="email"
+                  autoComplete="username"
+                  placeholder="director@garcialorca.edu.mx"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  style={inp}
+                />
               </div>
             </label>
             <label style={{ display: "block" }}>
@@ -195,6 +154,7 @@ export function Login({ theme, onToggle, onLogin }: LoginProps): ReactElement {
                 <input
                   aria-label="Contraseña"
                   type={show ? "text" : "password"}
+                  autoComplete="current-password"
                   value={pwd}
                   onChange={(e) => setPwd(e.target.value)}
                   style={{ ...inp, paddingRight: 48 }}
@@ -237,9 +197,14 @@ export function Login({ theme, onToggle, onLogin }: LoginProps): ReactElement {
             </a>
           </div>
 
-          <Btn full icon="logout" onClick={() => onLogin(role)} style={{ height: 54, fontSize: 17 }}>
-            Entrar al sistema
+          <Btn full icon="logout" onClick={() => void onSubmit(email, pwd)} disabled={pending} style={{ height: 54, fontSize: 17 }}>
+            {pending ? "Entrando…" : "Entrar al sistema"}
           </Btn>
+          {error ? (
+            <p role="alert" style={{ color: "var(--orange)", fontSize: 14, marginTop: 12, textAlign: "center" }}>
+              {error}
+            </p>
+          ) : null}
 
           <p style={{ textAlign: "center", color: "var(--text-faint)", fontSize: 13, marginTop: 24 }}>
             ¿Problemas para entrar? Escribe a{" "}

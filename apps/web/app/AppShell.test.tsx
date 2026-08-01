@@ -1,11 +1,29 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
 import { Providers } from "./test-utils";
+import { changePassword as apiChangePassword, login as apiLogin } from "./auth/api";
+
+vi.mock("./auth/api", () => ({
+  login: vi.fn(),
+  changePassword: vi.fn(),
+}));
+
+const mockLogin = vi.mocked(apiLogin);
+const mockChangePassword = vi.mocked(apiChangePassword);
+
+afterEach(() => vi.clearAllMocks());
+
+async function submitLogin(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.type(screen.getByLabelText("Correo"), "director@garcialorca.edu.mx");
+  await user.type(screen.getByLabelText("Contraseña"), "GarciaLorca2026!");
+  await user.click(screen.getByRole("button", { name: "Entrar al sistema" }));
+}
 
 describe("AppShell navigation flow", () => {
   it("goes login → dashboard → finance → back, then logs out", async () => {
+    mockLogin.mockResolvedValue({ accessToken: "a", refreshToken: "r", expiresIn: 900, mustChangePassword: false });
     const user = userEvent.setup();
     render(
       <Providers flags={{ module_finance: true }}>
@@ -13,8 +31,7 @@ describe("AppShell navigation flow", () => {
       </Providers>
     );
 
-    // Login.
-    await user.click(screen.getByRole("button", { name: "Entrar al sistema" }));
+    await submitLogin(user);
     expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
 
     // Open Finanzas (KPI shortcut) — finance flag is ON, so the real surface shows.
@@ -30,24 +47,9 @@ describe("AppShell navigation flow", () => {
     expect(await screen.findByRole("button", { name: "Entrar al sistema" })).toBeInTheDocument();
   });
 
-  it("falls back to the placeholder when module_finance is OFF (UX gating)", async () => {
-    const user = userEvent.setup();
-    render(
-      <Providers flags={{}}>
-        <AppShell />
-      </Providers>
-    );
-
-    await user.click(screen.getByRole("button", { name: "Entrar al sistema" }));
-    await user.click(screen.getByRole("button", { name: /Adeudos del mes/ }));
-
-    // Flag OFF → friendly stub, not the real finance table. The placeholder
-    // shows the "Módulo «...»" heading; the real surface shows the status tablist.
-    expect(await screen.findByRole("heading", { name: /Módulo «Finanzas y Adeudos»/ })).toBeInTheDocument();
-    expect(screen.queryByRole("tablist", { name: "Filtrar por estado" })).not.toBeInTheDocument();
-  });
-
-  it("shows the teacher identity in the top bar when logging in as Maestro", async () => {
+  it("routes to the forced change-password screen and then to the dashboard", async () => {
+    mockLogin.mockResolvedValue({ accessToken: "a", refreshToken: "r", expiresIn: 900, mustChangePassword: true });
+    mockChangePassword.mockResolvedValue(undefined);
     const user = userEvent.setup();
     render(
       <Providers flags={{ module_finance: true }}>
@@ -55,9 +57,50 @@ describe("AppShell navigation flow", () => {
       </Providers>
     );
 
-    await user.click(screen.getByRole("button", { name: "Maestro" }));
-    await user.click(screen.getByRole("button", { name: "Entrar al sistema" }));
+    await submitLogin(user);
 
-    expect(await screen.findByText("Miguel Vázquez")).toBeInTheDocument();
+    // mustChangePassword=true → forced rotation screen.
+    expect(await screen.findByRole("heading", { name: "Crea tu contraseña" })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Contraseña actual"), "GarciaLorca2026!");
+    await user.type(screen.getByLabelText("Nueva contraseña"), "Direccion#2026");
+    await user.type(screen.getByLabelText("Confirmar contraseña"), "Direccion#2026");
+    await user.click(screen.getByRole("button", { name: "Guardar y entrar" }));
+
+    expect(mockChangePassword).toHaveBeenCalledWith(expect.any(String), "GarciaLorca2026!", "Direccion#2026");
+    expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
+  });
+
+  it("shows an inline error when login fails", async () => {
+    mockLogin.mockRejectedValue(new Error("HTTP 401"));
+    const user = userEvent.setup();
+    render(
+      <Providers flags={{}}>
+        <AppShell />
+      </Providers>
+    );
+
+    await submitLogin(user);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Correo o contraseña incorrectos.");
+    expect(screen.getByRole("button", { name: "Entrar al sistema" })).toBeInTheDocument();
+  });
+
+  it("falls back to the placeholder when module_finance is OFF (UX gating)", async () => {
+    mockLogin.mockResolvedValue({ accessToken: "a", refreshToken: "r", expiresIn: 900, mustChangePassword: false });
+    const user = userEvent.setup();
+    render(
+      <Providers flags={{}}>
+        <AppShell />
+      </Providers>
+    );
+
+    await submitLogin(user);
+    await user.click(screen.getByRole("button", { name: /Adeudos del mes/ }));
+
+    // Flag OFF → friendly stub, not the real finance table. The placeholder
+    // shows the "Módulo «...»" heading; the real surface shows the status tablist.
+    expect(await screen.findByRole("heading", { name: /Módulo «Finanzas y Adeudos»/ })).toBeInTheDocument();
+    expect(screen.queryByRole("tablist", { name: "Filtrar por estado" })).not.toBeInTheDocument();
   });
 });
