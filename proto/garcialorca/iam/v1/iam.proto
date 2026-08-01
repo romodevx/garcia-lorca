@@ -28,6 +28,11 @@ service IamService {
   // re-entering credentials.
   rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
 
+  // ChangePassword sets a new password for the principal, verifying the current
+  // one first. Clears must_change_password. Used for the forced first-login
+  // rotation and ordinary password changes.
+  rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
+
   // ValidateToken verifies an access token and returns its claims (principal +
   // effective permissions). The gateway/services call this to authorize a
   // request; an invalid/expired token is an Unauthenticated error.
@@ -74,6 +79,9 @@ message User {
   UserStatus status = 5;
   google.protobuf.Timestamp created_at = 6;
   google.protobuf.Timestamp updated_at = 7;
+  // must_change_password is true while the account still holds a temporary
+  // password; the only allowed action until it clears is ChangePassword.
+  bool must_change_password = 8;
 }
 
 // Role is a named bundle of permissions. `permissions` are "resource:action"
@@ -106,6 +114,9 @@ message LoginResponse {
   string refresh_token = 2;
   int64 expires_in = 3; // access token TTL in seconds
   User user = 4;
+  // Mirrors User.must_change_password for convenience: the client routes to the
+  // change-password flow when true.
+  bool must_change_password = 5;
 }
 
 message RefreshTokenRequest {
@@ -117,6 +128,14 @@ message RefreshTokenResponse {
   string refresh_token = 2; // rotated
   int64 expires_in = 3;
 }
+
+message ChangePasswordRequest {
+  string user_id = 1;
+  string current_password = 2;
+  string new_password = 3;
+}
+
+message ChangePasswordResponse {}
 
 message ValidateTokenRequest {
   string access_token = 1;
