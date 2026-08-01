@@ -24,12 +24,12 @@ type fakeUsers struct {
 	removed [][2]string
 }
 
-func (f *fakeUsers) FindAuthByEmail(_ context.Context, _ string, email domain.Email) (domain.User, string, error) {
+func (f *fakeUsers) FindAuthByEmail(_ context.Context, _ string, email domain.Email) (domain.User, string, bool, error) {
 	rec, ok := f.byEmail[email]
 	if !ok {
-		return domain.User{}, "", glerrors.ErrNotFound
+		return domain.User{}, "", false, glerrors.ErrNotFound
 	}
-	return rec.user, rec.hash, nil
+	return rec.user, rec.hash, rec.user.MustChangePassword(), nil
 }
 
 func (f *fakeUsers) FindByID(_ context.Context, userID string) (domain.User, error) {
@@ -39,6 +39,16 @@ func (f *fakeUsers) FindByID(_ context.Context, userID string) (domain.User, err
 	}
 	return u, nil
 }
+
+func (f *fakeUsers) FindAuthByID(_ context.Context, userID string) (domain.User, string, error) {
+	rec, ok := f.byEmail[f.byID[userID].Email()]
+	if !ok {
+		return domain.User{}, "", glerrors.ErrNotFound
+	}
+	return rec.user, rec.hash, nil
+}
+
+func (f *fakeUsers) UpdatePassword(_ context.Context, _, _ string) error { return nil }
 
 func (f *fakeUsers) AddRole(_ context.Context, userID, roleID string) error {
 	f.added = append(f.added, [2]string{userID, roleID})
@@ -103,7 +113,7 @@ func fixtureService(t *testing.T, status domain.Status) (*usecase.AuthService, *
 	t.Helper()
 	email, _ := domain.NewEmail("ana@garcialorca.mx")
 	role, _ := domain.NewRole("r1", "Docente", []string{"students:read"})
-	user, _ := domain.NewUser("u1", testTenant, email, "Ana", status, []domain.Role{role})
+	user, _ := domain.NewUser("u1", testTenant, email, "Ana", status, false, []domain.Role{role})
 	users := &fakeUsers{
 		byEmail: map[domain.Email]struct {
 			user domain.User
@@ -280,7 +290,7 @@ func (failingIssuer) IssueRefreshToken(context.Context, string) (string, error) 
 
 func TestAuthenticatePropagatesIssuerError(t *testing.T) {
 	email, _ := domain.NewEmail("ana@garcialorca.mx")
-	user, _ := domain.NewUser("u1", testTenant, email, "Ana", domain.StatusActive, nil)
+	user, _ := domain.NewUser("u1", testTenant, email, "Ana", domain.StatusActive, false, nil)
 	users := &fakeUsers{
 		byEmail: map[domain.Email]struct {
 			user domain.User
