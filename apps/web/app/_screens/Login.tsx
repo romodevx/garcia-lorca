@@ -138,7 +138,7 @@ export function Login({ theme, onToggle, onSubmit, error, pending }: LoginProps)
                   aria-label="Correo"
                   type="email"
                   autoComplete="username"
-                  placeholder="director@garcialorca.edu.mx"
+                  placeholder="correo@colegio.mx"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   style={inp}

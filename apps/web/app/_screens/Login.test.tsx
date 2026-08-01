@@ -9,11 +9,11 @@ describe("Login", () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(<Login theme="light" onToggle={() => {}} onSubmit={onSubmit} />);
 
-    await user.type(screen.getByLabelText("Correo"), "director@garcialorca.edu.mx");
+    await user.type(screen.getByLabelText("Correo"), "owner@example.com");
     await user.type(screen.getByLabelText("Contraseña"), "test-owner-pw");
     await user.click(screen.getByRole("button", { name: "Entrar al sistema" }));
 
-    expect(onSubmit).toHaveBeenCalledExactlyOnceWith("director@garcialorca.edu.mx", "test-owner-pw");
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith("owner@example.com", "test-owner-pw");
   });
 
   it("reveals and hides the password via the show-password toggle", async () => {
