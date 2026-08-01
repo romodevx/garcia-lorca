@@ -77,7 +77,7 @@ func (s *AuthService) Authenticate(ctx context.Context, rawEmail, password strin
 		return AuthResult{}, err // KindInvalid: malformed input, not an auth attempt.
 	}
 
-	user, hash, mustChange, err := s.users.FindAuthByEmail(ctx, s.tenantID, email)
+	user, hash, err := s.users.FindAuthByEmail(ctx, s.tenantID, email)
 	if err != nil {
 		// Unknown email → generic auth failure (do not leak existence).
 		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid credentials")
@@ -93,7 +93,7 @@ func (s *AuthService) Authenticate(ctx context.Context, rawEmail, password strin
 	if err != nil {
 		return AuthResult{}, err
 	}
-	res.MustChangePassword = mustChange
+	res.MustChangePassword = user.MustChangePassword()
 	return res, nil
 }
 

@@ -18,8 +18,8 @@ type cpUsers struct {
 	findErr error
 }
 
-func (f *cpUsers) FindAuthByEmail(context.Context, string, domain.Email) (domain.User, string, bool, error) {
-	return domain.User{}, "", false, glerrors.ErrNotFound
+func (f *cpUsers) FindAuthByEmail(context.Context, string, domain.Email) (domain.User, string, error) {
+	return domain.User{}, "", glerrors.ErrNotFound
 }
 func (f *cpUsers) FindByID(context.Context, string) (domain.User, error) { return f.user, f.findErr }
 func (f *cpUsers) FindAuthByID(context.Context, string) (domain.User, string, error) {

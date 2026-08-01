@@ -52,11 +52,10 @@ func NewUserRepo(db *gorm.DB, tenantID string) *UserRepo {
 // FindAuthByEmail returns the user (with roles) and their password hash for
 // login. A missing user is KindNotFound; the use case maps that to a generic
 // auth failure so email existence is never leaked.
-func (r *UserRepo) FindAuthByEmail(ctx context.Context, _ string, email domain.Email) (domain.User, string, bool, error) {
+func (r *UserRepo) FindAuthByEmail(ctx context.Context, _ string, email domain.Email) (domain.User, string, error) {
 	var (
-		user       domain.User
-		hash       string
-		mustChange bool
+		user domain.User
+		hash string
 	)
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var um userModel
@@ -67,13 +66,13 @@ func (r *UserRepo) FindAuthByEmail(ctx context.Context, _ string, email domain.E
 		if err != nil {
 			return err
 		}
-		user, hash, mustChange, err = toDomainUser(um, roleRows)
+		user, hash, err = toDomainUser(um, roleRows)
 		return err
 	})
 	if err != nil {
-		return domain.User{}, "", false, err
+		return domain.User{}, "", err
 	}
-	return user, hash, mustChange, nil
+	return user, hash, nil
 }
 
 // FindByID returns a user with roles resolved, or KindNotFound.
@@ -88,7 +87,7 @@ func (r *UserRepo) FindByID(ctx context.Context, userID string) (domain.User, er
 		if err != nil {
 			return err
 		}
-		user, _, _, err = toDomainUser(um, roleRows)
+		user, _, err = toDomainUser(um, roleRows)
 		return err
 	})
 	if err != nil {
@@ -112,7 +111,7 @@ func (r *UserRepo) FindAuthByID(ctx context.Context, userID string) (domain.User
 		if err != nil {
 			return err
 		}
-		user, hash, _, err = toDomainUser(um, roleRows)
+		user, hash, err = toDomainUser(um, roleRows)
 		return err
 	})
 	if err != nil {

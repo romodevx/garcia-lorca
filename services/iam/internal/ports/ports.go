@@ -16,11 +16,12 @@ import (
 // RLS-bound transactions (pkg/authctx) in the adapter; the tenant scoping is a
 // parameter here so the use case stays explicit.
 type UserRepository interface {
-	// FindAuthByEmail returns the user, their stored password hash, and whether
-	// they must change their password, for login. A missing user is a
+	// FindAuthByEmail returns the user and their stored password hash for login.
+	// The must-change-password flag rides on the domain User itself
+	// (user.MustChangePassword()) — a single source of truth. A missing user is a
 	// KindNotFound error (do not leak whether the email exists — the use case
 	// maps it to a generic auth failure).
-	FindAuthByEmail(ctx context.Context, tenantID string, email domain.Email) (user domain.User, passwordHash string, mustChange bool, err error)
+	FindAuthByEmail(ctx context.Context, tenantID string, email domain.Email) (user domain.User, passwordHash string, err error)
 
 	// FindByID returns a user (with roles resolved) or KindNotFound.
 	FindByID(ctx context.Context, userID string) (domain.User, error)

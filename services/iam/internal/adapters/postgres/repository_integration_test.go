@@ -192,7 +192,7 @@ func TestFindAuthByEmailReturnsUserAndHash(t *testing.T) {
 
 	repo := pgadapter.NewUserRepo(appDB(t), tenantA)
 	email, _ := domain.NewEmail("ana@garcialorca.mx")
-	user, gotHash, _, err := repo.FindAuthByEmail(context.Background(), tenantA, email)
+	user, gotHash, err := repo.FindAuthByEmail(context.Background(), tenantA, email)
 	if err != nil {
 		t.Fatalf("FindAuthByEmail: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestRLSIsolatesTenants(t *testing.T) {
 		t.Errorf("tenant A saw tenant B's user (RLS breach): err=%v", err)
 	}
 	emailB, _ := domain.NewEmail("beto@garcialorca.mx")
-	if _, _, _, err := repoA.FindAuthByEmail(context.Background(), tenantA, emailB); glerrors.KindOf(err) != glerrors.KindNotFound {
+	if _, _, err := repoA.FindAuthByEmail(context.Background(), tenantA, emailB); glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Errorf("tenant A found tenant B by email (RLS breach): err=%v", err)
 	}
 
@@ -271,25 +271,36 @@ func TestOwnerSeedAndPasswordUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEmail: %v", err)
 	}
-	user, hash, mustChange, err := repo.FindAuthByEmail(context.Background(), ownerTenant, email)
+	user, hash, err := repo.FindAuthByEmail(context.Background(), ownerTenant, email)
 	if err != nil {
 		t.Fatalf("FindAuthByEmail: %v", err)
 	}
-	if !mustChange {
+	if !user.MustChangePassword() {
 		t.Error("owner must_change_password = false, want true")
 	}
 	if err := bcrypt.NewHasher(0).Verify(hash, "GarciaLorca2026!"); err != nil {
 		t.Errorf("seeded temp password does not verify: %v", err)
 	}
 
+	// This test mutates the shared seeded owner row. Restore it (original hash +
+	// must_change_password=true) via the superuser handle so later tests observe
+	// the seeded state — keep the mutation hermetic.
+	t.Cleanup(func() {
+		if err := superDB.Exec(
+			"UPDATE users SET password_hash = ?, must_change_password = true WHERE id = ?",
+			hash, user.ID()).Error; err != nil {
+			t.Errorf("restore seeded owner row: %v", err)
+		}
+	})
+
 	if err := repo.UpdatePassword(context.Background(), user.ID(), "H-new"); err != nil {
 		t.Fatalf("UpdatePassword: %v", err)
 	}
-	_, _, mustChangeAfter, err := repo.FindAuthByEmail(context.Background(), ownerTenant, email)
+	userAfter, _, err := repo.FindAuthByEmail(context.Background(), ownerTenant, email)
 	if err != nil {
 		t.Fatalf("FindAuthByEmail after update: %v", err)
 	}
-	if mustChangeAfter {
+	if userAfter.MustChangePassword() {
 		t.Error("must_change_password still true after UpdatePassword")
 	}
 }

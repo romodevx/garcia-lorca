@@ -25,11 +25,11 @@ type fakeUsers struct {
 	updated bool
 }
 
-func (f *fakeUsers) FindAuthByEmail(_ context.Context, _ string, email domain.Email) (domain.User, string, bool, error) {
+func (f *fakeUsers) FindAuthByEmail(_ context.Context, _ string, email domain.Email) (domain.User, string, error) {
 	if email == f.user.Email() {
-		return f.user, f.hash, f.user.MustChangePassword(), nil
+		return f.user, f.hash, nil
 	}
-	return domain.User{}, "", false, glerrors.ErrNotFound
+	return domain.User{}, "", glerrors.ErrNotFound
 }
 func (f *fakeUsers) FindByID(_ context.Context, id string) (domain.User, error) {
 	if id == f.user.ID() {
