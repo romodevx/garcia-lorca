@@ -27,10 +27,7 @@ echo "[migrate] applying migrations to ${PGDATABASE}@${PGHOST} as ${PGUSER}"
 # /migrations, e.g. 'iam/0001_init.sql'.
 psql_do -c "CREATE TABLE IF NOT EXISTS schema_migrations (filename text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());"
 
-applied=0
-found=0
 find /migrations -name '*.sql' | sort | while IFS= read -r f; do
-  found=$((found + 1))
   name="${f#/migrations/}"
   already="$(psql_do -tAc "SELECT 1 FROM schema_migrations WHERE filename = '${name}';")"
   if [ "$already" = "1" ]; then
@@ -40,7 +37,6 @@ find /migrations -name '*.sql' | sort | while IFS= read -r f; do
   echo "[migrate] apply -> ${name}"
   psql_do -f "$f"
   psql_do -c "INSERT INTO schema_migrations (filename) VALUES ('${name}');"
-  applied=$((applied + 1))
 done
 
 # The while loop runs in a subshell (pipeline), so re-derive the count here to
