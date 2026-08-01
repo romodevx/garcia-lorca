@@ -45,6 +45,7 @@ have passed.
 | `preset_full_mvp` | core_ops + `module_scholarships`, `module_docs`, `module_comms` | Full Must+Should MVP surface. |
 | `preset_finance_demo` | spine + `module_finance`, `module_scholarships` | Finance story: debts, payments, overdue, scholarships + CONTPAQi export (S02). Billing/CFDI is out of MVP. |
 | `preset_family_app` | spine + `module_attendance`, `module_grades`, `module_comms` | Parent-facing experience: attendance, grades, push notifications. |
+| `preset_academic_spine` | `module_iam`, `module_gateway`, `module_students`, `module_config`, `module_grades` | The academic spine: owner login (forced first-login password change) through grade capture. |
 
 > Note: no preset is "all flags on by default." Demos opt in explicitly; the
 > default state of every flag in every environment remains **OFF**.
