@@ -100,6 +100,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.HandleFunc("POST /api/v1/auth/login", authH.Login)
 	mux.HandleFunc("POST /api/v1/auth/refresh", authH.Refresh)
 	mux.Handle("GET /api/v1/me", requireAuth(http.HandlerFunc(authH.Me)))
+	mux.Handle("POST /api/v1/auth/change-password", requireAuth(http.HandlerFunc(authH.ChangePassword)))
 	mux.HandleFunc("GET /api/v1/features", handler.NewFeaturesHandler(flags).Features)
 
 	// M03 students: flag-guarded, authenticated, permission-gated.

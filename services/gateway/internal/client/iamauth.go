@@ -21,9 +21,10 @@ type AuthClient struct {
 
 // LoginResult is the gateway's view of a successful login.
 type LoginResult struct {
-	AccessToken  string
-	RefreshToken string
-	ExpiresIn    int64
+	AccessToken        string
+	RefreshToken       string
+	ExpiresIn          int64
+	MustChangePassword bool
 }
 
 // NewAuthClient builds an AuthClient targeting the iam base URL (e.g.
@@ -43,9 +44,10 @@ func (c *AuthClient) Login(ctx context.Context, email, password string) (LoginRe
 		return LoginResult{}, err
 	}
 	return LoginResult{
-		AccessToken:  res.Msg.GetAccessToken(),
-		RefreshToken: res.Msg.GetRefreshToken(),
-		ExpiresIn:    res.Msg.GetExpiresIn(),
+		AccessToken:        res.Msg.GetAccessToken(),
+		RefreshToken:       res.Msg.GetRefreshToken(),
+		ExpiresIn:          res.Msg.GetExpiresIn(),
+		MustChangePassword: res.Msg.GetMustChangePassword(),
 	}, nil
 }
 
@@ -60,6 +62,16 @@ func (c *AuthClient) Refresh(ctx context.Context, refreshToken string) (LoginRes
 		RefreshToken: res.Msg.GetRefreshToken(),
 		ExpiresIn:    res.Msg.GetExpiresIn(),
 	}, nil
+}
+
+// ChangePassword rotates the password for userID via iam.
+func (c *AuthClient) ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error {
+	_, err := c.rpc.ChangePassword(ctx, connect.NewRequest(&iamv1.ChangePasswordRequest{
+		UserId:          userID,
+		CurrentPassword: currentPassword,
+		NewPassword:     newPassword,
+	}))
+	return err
 }
 
 // ValidateToken verifies an access token with iam and returns the principal.

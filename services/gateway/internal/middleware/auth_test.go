@@ -63,6 +63,60 @@ func TestRequireAuthValidToken(t *testing.T) {
 	}
 }
 
+func TestRequireAuthAcceptsCookie(t *testing.T) {
+	auth := &fakeAuth{principal: middleware.Principal{UserID: "u1"}}
+	var seen middleware.Principal
+	var ran bool
+	h := middleware.RequireAuth(auth)(ok200(&seen, &ran))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	req.AddCookie(&http.Cookie{Name: "gl_access", Value: "cookie-token"})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200", rec.Code)
+	}
+	if !ran {
+		t.Fatal("next handler should have run")
+	}
+	if auth.gotToken != "cookie-token" {
+		t.Errorf("token passed = %q, want cookie-token", auth.gotToken)
+	}
+}
+
+func TestRequireAuthHeaderWinsOverCookie(t *testing.T) {
+	auth := &fakeAuth{principal: middleware.Principal{UserID: "u1"}}
+	var seen middleware.Principal
+	var ran bool
+	h := middleware.RequireAuth(auth)(ok200(&seen, &ran))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer header-token")
+	req.AddCookie(&http.Cookie{Name: "gl_access", Value: "cookie-token"})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if auth.gotToken != "header-token" {
+		t.Errorf("token passed = %q, want header-token", auth.gotToken)
+	}
+}
+
+func TestRequireAuthNoTokenIs401(t *testing.T) {
+	auth := &fakeAuth{principal: middleware.Principal{UserID: "u1"}}
+	var seen middleware.Principal
+	var ran bool
+	h := middleware.RequireAuth(auth)(ok200(&seen, &ran))
+
+	rec := do(h, "")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("code = %d, want 401", rec.Code)
+	}
+	if ran {
+		t.Error("next handler must not run without a token")
+	}
+}
+
 func TestRequirePermission(t *testing.T) {
 	cases := []struct {
 		name  string
