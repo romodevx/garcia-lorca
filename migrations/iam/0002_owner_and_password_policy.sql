@@ -1,10 +1,17 @@
 -- iam (M01) — password policy + owner/director seed.
 --
 -- Adds must_change_password (forces a rotation at first login) and seeds the
--- single owner account for the default tenant. Applied by the migrator
--- (superuser), so RLS does not block these INSERTs. Idempotent: safe to re-run.
+-- single owner account for the default tenant. Idempotent: safe to re-run.
+--
+-- RLS: the iam tables are FORCE ROW LEVEL SECURITY, so policies apply even to
+-- the table owner. The SET LOCAL below binds app.current_tenant so the seed
+-- INSERTs satisfy the tenant_isolation WITH CHECK under a non-superuser owner
+-- (e.g. Cloud SQL, which grants no BYPASSRLS). Harmless where the migrator is a
+-- superuser (superusers ignore RLS regardless).
 
 BEGIN;
+
+SET LOCAL app.current_tenant = '00000000-0000-0000-0000-000000000001';
 
 -- --- password policy ------------------------------------------------------
 
