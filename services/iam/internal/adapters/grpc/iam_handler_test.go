@@ -20,21 +20,32 @@ import (
 // --- fake repos (only what the handler exercises) --------------------------
 
 type fakeUsers struct {
-	user domain.User
-	hash string
+	user    domain.User
+	hash    string
+	updated bool
 }
 
-func (f *fakeUsers) FindAuthByEmail(_ context.Context, _ string, email domain.Email) (domain.User, string, error) {
+func (f *fakeUsers) FindAuthByEmail(_ context.Context, _ string, email domain.Email) (domain.User, string, bool, error) {
 	if email == f.user.Email() {
-		return f.user, f.hash, nil
+		return f.user, f.hash, f.user.MustChangePassword(), nil
 	}
-	return domain.User{}, "", glerrors.ErrNotFound
+	return domain.User{}, "", false, glerrors.ErrNotFound
 }
 func (f *fakeUsers) FindByID(_ context.Context, id string) (domain.User, error) {
 	if id == f.user.ID() {
 		return f.user, nil
 	}
 	return domain.User{}, glerrors.ErrNotFound
+}
+func (f *fakeUsers) FindAuthByID(_ context.Context, id string) (domain.User, string, error) {
+	if id == f.user.ID() {
+		return f.user, f.hash, nil
+	}
+	return domain.User{}, "", glerrors.ErrNotFound
+}
+func (f *fakeUsers) UpdatePassword(_ context.Context, _, _ string) error {
+	f.updated = true
+	return nil
 }
 func (f *fakeUsers) AddRole(context.Context, string, string) error    { return nil }
 func (f *fakeUsers) RemoveRole(context.Context, string, string) error { return nil }
@@ -51,15 +62,25 @@ func (f *fakeRoles) FindByID(_ context.Context, id string) (domain.Role, error) 
 
 func newHandler(t *testing.T) *grpcadapter.IAMHandler {
 	t.Helper()
+	h, _ := newHandlerWithUsers(t, false)
+	return h
+}
+
+// newHandlerWithUsers builds a handler over a single seeded user (password
+// "secret") and returns the fake repo so tests can assert side effects. When
+// mustChange is true the user still holds a temporary password.
+func newHandlerWithUsers(t *testing.T, mustChange bool) (*grpcadapter.IAMHandler, *fakeUsers) {
+	t.Helper()
 	hasher := bcrypt.NewHasher(4)
 	hash, _ := hasher.Hash("secret")
 	email, _ := domain.NewEmail("ana@garcialorca.mx")
 	role, _ := domain.NewRole("r1", "Docente", []string{"students:read", "grades:create"})
-	user, _ := domain.NewUser("u1", "t1", email, "Ana", domain.StatusActive, []domain.Role{role})
+	user, _ := domain.NewUser("u1", "t1", email, "Ana", domain.StatusActive, mustChange, []domain.Role{role})
 
+	users := &fakeUsers{user: user, hash: hash}
 	tokens := jwt.NewHMAC([]byte(strings.Repeat("gl-key-", 6)), "garcia-lorca", time.Hour, time.Now)
-	auth := usecase.NewAuthService(&fakeUsers{user: user, hash: hash}, &fakeRoles{known: "r1"}, hasher, tokens, tokens, "t1", 15*time.Minute, time.Now)
-	return grpcadapter.NewIAMHandler(auth, usecase.NewHealthService("iam"))
+	auth := usecase.NewAuthService(users, &fakeRoles{known: "r1"}, hasher, tokens, tokens, "t1", 15*time.Minute, time.Now)
+	return grpcadapter.NewIAMHandler(auth, usecase.NewHealthService("iam")), users
 }
 
 // --- tests -----------------------------------------------------------------
@@ -110,6 +131,45 @@ func TestLoginThenValidateAndCheckPermission(t *testing.T) {
 	if deny.Msg.GetAllowed() {
 		t.Error("students:delete should be denied")
 	}
+}
+
+func TestLoginResponseCarriesMustChangePassword(t *testing.T) {
+	h, _ := newHandlerWithUsers(t, true)
+	res, err := h.Login(context.Background(), connect.NewRequest(&iamv1.LoginRequest{Email: "ana@garcialorca.mx", Password: "secret"}))
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if !res.Msg.GetMustChangePassword() {
+		t.Error("LoginResponse.MustChangePassword = false, want true")
+	}
+	if !res.Msg.GetUser().GetMustChangePassword() {
+		t.Error("User.MustChangePassword = false, want true")
+	}
+}
+
+func TestChangePasswordClearsFlagAndPersists(t *testing.T) {
+	h, users := newHandlerWithUsers(t, true)
+	_, err := h.ChangePassword(context.Background(), connect.NewRequest(&iamv1.ChangePasswordRequest{
+		UserId:          "u1",
+		CurrentPassword: "secret",
+		NewPassword:     "NuevaClave#2026",
+	}))
+	if err != nil {
+		t.Fatalf("ChangePassword: %v", err)
+	}
+	if !users.updated {
+		t.Error("expected UpdatePassword to be called")
+	}
+}
+
+func TestChangePasswordWrongCurrentIsUnauthenticated(t *testing.T) {
+	h, _ := newHandlerWithUsers(t, true)
+	_, err := h.ChangePassword(context.Background(), connect.NewRequest(&iamv1.ChangePasswordRequest{
+		UserId:          "u1",
+		CurrentPassword: "wrong",
+		NewPassword:     "NuevaClave#2026",
+	}))
+	assertCode(t, err, connect.CodeUnauthenticated)
 }
 
 func TestLoginWrongPasswordIsUnauthenticated(t *testing.T) {

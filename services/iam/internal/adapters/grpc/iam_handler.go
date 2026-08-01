@@ -43,10 +43,11 @@ func (h *IAMHandler) Login(ctx context.Context, req *connect.Request[iamv1.Login
 		return nil, connectErr(err)
 	}
 	return connect.NewResponse(&iamv1.LoginResponse{
-		AccessToken:  res.AccessToken,
-		RefreshToken: res.RefreshToken,
-		ExpiresIn:    res.ExpiresIn,
-		User:         toProtoUser(res.User),
+		AccessToken:        res.AccessToken,
+		RefreshToken:       res.RefreshToken,
+		ExpiresIn:          res.ExpiresIn,
+		User:               toProtoUser(res.User),
+		MustChangePassword: res.MustChangePassword,
 	}), nil
 }
 
@@ -92,15 +93,23 @@ func (h *IAMHandler) RevokeRole(ctx context.Context, req *connect.Request[iamv1.
 	return connect.NewResponse(&iamv1.RevokeRoleResponse{}), nil
 }
 
+func (h *IAMHandler) ChangePassword(ctx context.Context, req *connect.Request[iamv1.ChangePasswordRequest]) (*connect.Response[iamv1.ChangePasswordResponse], error) {
+	if err := h.auth.ChangePassword(ctx, req.Msg.GetUserId(), req.Msg.GetCurrentPassword(), req.Msg.GetNewPassword()); err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&iamv1.ChangePasswordResponse{}), nil
+}
+
 // --- mapping ---------------------------------------------------------------
 
 func toProtoUser(u domain.User) *iamv1.User {
 	return &iamv1.User{
-		Id:          u.ID(),
-		TenantId:    u.TenantID(),
-		Email:       u.Email().String(),
-		DisplayName: u.DisplayName(),
-		Status:      toProtoStatus(u.Status()),
+		Id:                 u.ID(),
+		TenantId:           u.TenantID(),
+		Email:              u.Email().String(),
+		DisplayName:        u.DisplayName(),
+		Status:             toProtoStatus(u.Status()),
+		MustChangePassword: u.MustChangePassword(),
 	}
 }
 
