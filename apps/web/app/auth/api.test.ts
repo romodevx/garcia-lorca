@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { changePassword, login } from "./api";
+import { changePassword, login, logout } from "./api";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -30,5 +30,15 @@ describe("changePassword", () => {
     vi.stubGlobal("fetch", fetchMock);
     await expect(changePassword("http://gw", "old", "newlongpass")).resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledWith("http://gw/api/v1/auth/change-password", expect.objectContaining({ method: "POST", credentials: "include" }));
+  });
+});
+
+describe("logout", () => {
+  it("posts to the logout endpoint and resolves on 204", async () => {
+    // A 204 response must have a null body per the Fetch spec (undici enforces it).
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(logout("http://gw")).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith("http://gw/api/v1/auth/logout", expect.objectContaining({ method: "POST", credentials: "include" }));
   });
 });

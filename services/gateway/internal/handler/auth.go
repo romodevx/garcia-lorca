@@ -71,6 +71,21 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Logout expires the gl_access cookie. It requires no valid token so a stale
+// session can always be cleared; it only overwrites the cookie, no iam call.
+func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "gl_access",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1,
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
 type refreshRequest struct {
 	RefreshToken string `json:"refreshToken"`
 }

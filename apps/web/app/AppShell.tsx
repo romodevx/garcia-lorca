@@ -11,7 +11,7 @@ import { Login } from "./_screens/Login";
 import { ChangePassword } from "./_screens/ChangePassword";
 import { ModulePlaceholder } from "./_screens/ModulePlaceholder";
 import { useTheme } from "./theme/ThemeProvider";
-import { login as apiLogin, changePassword as apiChangePassword } from "./auth/api";
+import { login as apiLogin, changePassword as apiChangePassword, logout as apiLogout } from "./auth/api";
 
 type View =
   | { screen: "login" }
@@ -71,7 +71,10 @@ export function AppShell(): ReactElement {
     }
   };
 
-  const logout = (): void => setView({ screen: "login" });
+  const logout = (): void => {
+    void apiLogout(API_URL).catch(() => {});
+    setView({ screen: "login" });
+  };
   const home = (): void => setView({ screen: "dashboard" });
   const open = useCallback((id: string): void => {
     setView(id === "finance" ? { screen: "finance" } : { screen: "module", moduleId: id });

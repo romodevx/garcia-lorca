@@ -38,3 +38,13 @@ export async function changePassword(baseURL: string, currentPassword: string, n
     throw new Error(`changePassword: HTTP ${res.status}`);
   }
 }
+
+export async function logout(baseURL: string): Promise<void> {
+  const res = await fetch(url(baseURL, "/api/v1/auth/logout"), {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw new Error(`logout: HTTP ${res.status}`);
+  }
+}

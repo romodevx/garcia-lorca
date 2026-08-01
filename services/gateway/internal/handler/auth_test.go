@@ -180,6 +180,20 @@ func TestChangePasswordPropagatesErrorKind(t *testing.T) {
 	}
 }
 
+func TestLogoutClearsCookie(t *testing.T) {
+	h := handler.NewAuthHandler(fakeLogin{})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	h.Logout(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("code = %d, want 204", rec.Code)
+	}
+	cs := rec.Result().Cookies()
+	if len(cs) == 0 || cs[0].Name != "gl_access" || cs[0].MaxAge >= 0 || !cs[0].HttpOnly {
+		t.Errorf("expected HttpOnly gl_access deletion cookie, got %v", cs)
+	}
+}
+
 type errString string
 
 func (e errString) Error() string { return string(e) }
