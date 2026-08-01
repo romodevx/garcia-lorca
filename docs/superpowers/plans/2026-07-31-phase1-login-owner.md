@@ -1545,6 +1545,18 @@ git commit -m "docs(flags): academic-spine preset + owner login note"
 - **Forced-rotation enforcement is UX-side in Phase 1:** login returns full-permission tokens plus `must_change_password`, and the web routes to the change-password screen. A determined caller could ignore the flag. Hardening (carry `must_change` in the access-token claims and have the gateway 403 everything except change-password until it clears) is a follow-up required before the security gate passes for a shared env. Documented, not built here.
 - **Cookie:** `gl_access` is `HttpOnly + Secure + SameSite=Strict`. `Secure` requires HTTPS; for plain-HTTP localhost the browser still stores it on `http://localhost` (allowed exception), and curl works over the cookie jar. Confirm behavior in the target browser during Step 4.
 
+## Phase 1 review follow-ups (carry into Phase 2)
+
+Recorded from the two-stage per-task reviews and the final holistic review. None block Phase-1 local use; all are required before enabling flags in a shared env (security gate).
+
+1. **Forced-rotation enforcement server-side.** Login issues full-permission tokens + the `must_change_password` flag; a determined caller can ignore it. Carry `must_change` in the access-token claims and have the gateway 403 everything except change-password until it clears. *(security gate)*
+2. **Owner secret from a secret manager** in staging/prod — no committed bcrypt hash; enforce `must_change_password=true`. *(security gate)*
+3. **Cookie lifecycle** — logout clear (built in Task 10); also rotate `gl_access` on `/auth/refresh` (currently refresh returns a fresh token in the body but does not re-set the cookie) and stop returning raw `accessToken`/`refreshToken` in the login JSON body once the cookie flow is canonical (give refresh its own HttpOnly cookie).
+4. **`pkg/authctx` consolidation** onto `app.current_tenant`, replacing each service's per-repo `withTenant`. *(deferred to the config-service phase)*
+5. **Edge hardening** — rate-limit `POST /api/v1/auth/login`; optional gateway-side `newPassword` validation (iam already enforces `minPasswordLen=8`). *(security gate)*
+6. **Doc fix** — `services/iam/CLAUDE.md` still describes RLS via `pkg/authctx.WithUserContext` binding `app.current_user`; the code binds `app.current_tenant` via a per-repo `withTenant`. Reconcile when doing #4.
+7. **`ChangePasswordRequest.user_id`** on the wire is unused by the secure path (the gateway sources the id from the validated principal); drop it from the proto once token-claim enforcement (#1) lands.
+
 ## Deferred from the spec (not blocking Phase 1)
 
 - **RLS session-var consolidation (spec §3.1 defect #1).** The migrations and every
