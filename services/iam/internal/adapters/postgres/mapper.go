@@ -19,27 +19,28 @@ func toDomainRole(m roleModel) (domain.Role, error) {
 }
 
 // toDomainUser builds a domain User from its row + resolved roles, and returns
-// the stored password hash separately (a credential the domain never holds).
-func toDomainUser(m userModel, roleRows []roleModel) (domain.User, string, error) {
+// the stored password hash and the must-change-password flag separately (a
+// credential and a policy flag the domain either never holds or carries by value).
+func toDomainUser(m userModel, roleRows []roleModel) (domain.User, string, bool, error) {
 	email, err := domain.NewEmail(m.Email)
 	if err != nil {
-		return domain.User{}, "", err
+		return domain.User{}, "", false, err
 	}
 	roles := make([]domain.Role, 0, len(roleRows))
 	for _, rr := range roleRows {
 		role, err := toDomainRole(rr)
 		if err != nil {
-			return domain.User{}, "", err
+			return domain.User{}, "", false, err
 		}
 		roles = append(roles, role)
 	}
 	status, ok := statusToDomain[m.Status]
 	if !ok {
-		return domain.User{}, "", glerrors.New(glerrors.KindInternal, "unknown user status: "+m.Status)
+		return domain.User{}, "", false, glerrors.New(glerrors.KindInternal, "unknown user status: "+m.Status)
 	}
-	user, err := domain.NewUser(m.ID, m.TenantID, email, m.DisplayName, status, roles)
+	user, err := domain.NewUser(m.ID, m.TenantID, email, m.DisplayName, status, m.MustChangePassword, roles)
 	if err != nil {
-		return domain.User{}, "", err
+		return domain.User{}, "", false, err
 	}
-	return user, m.PasswordHash, nil
+	return user, m.PasswordHash, m.MustChangePassword, nil
 }

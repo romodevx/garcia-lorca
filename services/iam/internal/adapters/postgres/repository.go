@@ -52,10 +52,11 @@ func NewUserRepo(db *gorm.DB, tenantID string) *UserRepo {
 // FindAuthByEmail returns the user (with roles) and their password hash for
 // login. A missing user is KindNotFound; the use case maps that to a generic
 // auth failure so email existence is never leaked.
-func (r *UserRepo) FindAuthByEmail(ctx context.Context, _ string, email domain.Email) (domain.User, string, error) {
+func (r *UserRepo) FindAuthByEmail(ctx context.Context, _ string, email domain.Email) (domain.User, string, bool, error) {
 	var (
-		user domain.User
-		hash string
+		user       domain.User
+		hash       string
+		mustChange bool
 	)
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var um userModel
@@ -66,13 +67,13 @@ func (r *UserRepo) FindAuthByEmail(ctx context.Context, _ string, email domain.E
 		if err != nil {
 			return err
 		}
-		user, hash, err = toDomainUser(um, roleRows)
+		user, hash, mustChange, err = toDomainUser(um, roleRows)
 		return err
 	})
 	if err != nil {
-		return domain.User{}, "", err
+		return domain.User{}, "", false, err
 	}
-	return user, hash, nil
+	return user, hash, mustChange, nil
 }
 
 // FindByID returns a user with roles resolved, or KindNotFound.
@@ -87,13 +88,53 @@ func (r *UserRepo) FindByID(ctx context.Context, userID string) (domain.User, er
 		if err != nil {
 			return err
 		}
-		user, _, err = toDomainUser(um, roleRows)
+		user, _, _, err = toDomainUser(um, roleRows)
 		return err
 	})
 	if err != nil {
 		return domain.User{}, err
 	}
 	return user, nil
+}
+
+// FindAuthByID returns a user and their password hash by id (for ChangePassword).
+func (r *UserRepo) FindAuthByID(ctx context.Context, userID string) (domain.User, string, error) {
+	var (
+		user domain.User
+		hash string
+	)
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var um userModel
+		if err := tx.Where("id = ?", userID).First(&um).Error; err != nil {
+			return translateFindErr(err)
+		}
+		roleRows, err := loadRoles(tx, um.ID)
+		if err != nil {
+			return err
+		}
+		user, hash, _, err = toDomainUser(um, roleRows)
+		return err
+	})
+	if err != nil {
+		return domain.User{}, "", err
+	}
+	return user, hash, nil
+}
+
+// UpdatePassword sets a new hash and clears must_change_password in one write.
+func (r *UserRepo) UpdatePassword(ctx context.Context, userID, newHash string) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Model(&userModel{}).
+			Where("id = ?", userID).
+			Updates(map[string]any{"password_hash": newHash, "must_change_password": false})
+		if res.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "updating password", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return glerrors.ErrNotFound
+		}
+		return nil
+	})
 }
 
 // AddRole assigns a role to a user (idempotent: a duplicate assignment is a no-op).

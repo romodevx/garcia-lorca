@@ -15,6 +15,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,7 +38,7 @@ const (
 	dbName        = "garcia_lorca"
 	tenantA       = "11111111-1111-1111-1111-111111111111"
 	tenantB       = "22222222-2222-2222-2222-222222222222"
-	migrationFile = "../../../../../migrations/iam/0001_init.sql"
+	migrationsDir = "../../../../../migrations/iam"
 )
 
 var (
@@ -95,12 +98,25 @@ func open(dsn string) (*gorm.DB, error) {
 }
 
 func migrate(db *gorm.DB) error {
-	sql, err := os.ReadFile(migrationFile)
+	entries, err := os.ReadDir(migrationsDir)
 	if err != nil {
-		return fmt.Errorf("read migration: %w", err)
+		return fmt.Errorf("read migrations dir: %w", err)
 	}
-	if err := db.Exec(string(sql)).Error; err != nil {
-		return fmt.Errorf("apply migration: %w", err)
+	files := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
+			files = append(files, e.Name())
+		}
+	}
+	sort.Strings(files) // lexical order: 0001 before 0002.
+	for _, name := range files {
+		sql, err := os.ReadFile(filepath.Join(migrationsDir, name))
+		if err != nil {
+			return fmt.Errorf("read migration %s: %w", name, err)
+		}
+		if err := db.Exec(string(sql)).Error; err != nil {
+			return fmt.Errorf("apply migration %s: %w", name, err)
+		}
 	}
 	// Non-owner, non-BYPASSRLS app role with DML only (mirrors setup_app_role.sql).
 	setup := []string{
@@ -176,7 +192,7 @@ func TestFindAuthByEmailReturnsUserAndHash(t *testing.T) {
 
 	repo := pgadapter.NewUserRepo(appDB(t), tenantA)
 	email, _ := domain.NewEmail("ana@garcialorca.mx")
-	user, gotHash, err := repo.FindAuthByEmail(context.Background(), tenantA, email)
+	user, gotHash, _, err := repo.FindAuthByEmail(context.Background(), tenantA, email)
 	if err != nil {
 		t.Fatalf("FindAuthByEmail: %v", err)
 	}
@@ -206,7 +222,7 @@ func TestRLSIsolatesTenants(t *testing.T) {
 		t.Errorf("tenant A saw tenant B's user (RLS breach): err=%v", err)
 	}
 	emailB, _ := domain.NewEmail("beto@garcialorca.mx")
-	if _, _, err := repoA.FindAuthByEmail(context.Background(), tenantA, emailB); glerrors.KindOf(err) != glerrors.KindNotFound {
+	if _, _, _, err := repoA.FindAuthByEmail(context.Background(), tenantA, emailB); glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Errorf("tenant A found tenant B by email (RLS breach): err=%v", err)
 	}
 
@@ -244,6 +260,37 @@ func TestAddAndRemoveRole(t *testing.T) {
 	user, _ = repo.FindByID(ctx, uid)
 	if user.HasPermission(perm) {
 		t.Errorf("role still present after RemoveRole")
+	}
+}
+
+func TestOwnerSeedAndPasswordUpdate(t *testing.T) {
+	const ownerTenant = "00000000-0000-0000-0000-000000000001"
+	repo := pgadapter.NewUserRepo(appDB(t), ownerTenant)
+
+	email, err := domain.NewEmail("director@garcialorca.edu.mx")
+	if err != nil {
+		t.Fatalf("NewEmail: %v", err)
+	}
+	user, hash, mustChange, err := repo.FindAuthByEmail(context.Background(), ownerTenant, email)
+	if err != nil {
+		t.Fatalf("FindAuthByEmail: %v", err)
+	}
+	if !mustChange {
+		t.Error("owner must_change_password = false, want true")
+	}
+	if err := bcrypt.NewHasher(0).Verify(hash, "GarciaLorca2026!"); err != nil {
+		t.Errorf("seeded temp password does not verify: %v", err)
+	}
+
+	if err := repo.UpdatePassword(context.Background(), user.ID(), "H-new"); err != nil {
+		t.Fatalf("UpdatePassword: %v", err)
+	}
+	_, _, mustChangeAfter, err := repo.FindAuthByEmail(context.Background(), ownerTenant, email)
+	if err != nil {
+		t.Fatalf("FindAuthByEmail after update: %v", err)
+	}
+	if mustChangeAfter {
+		t.Error("must_change_password still true after UpdatePassword")
 	}
 }
 

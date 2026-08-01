@@ -19,8 +19,10 @@ type userModel struct {
 	DisplayName  string `gorm:"column:display_name"`
 	PasswordHash string `gorm:"column:password_hash"`
 	Status       string `gorm:"column:status"`
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// MustChangePassword forces a rotation at first login (temporary password).
+	MustChangePassword bool `gorm:"column:must_change_password"`
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 func (userModel) TableName() string { return "users" }
