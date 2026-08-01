@@ -18,7 +18,7 @@ const mockLogout = vi.mocked(apiLogout);
 afterEach(() => vi.clearAllMocks());
 
 async function submitLogin(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-  await user.type(screen.getByLabelText("Correo"), "director@garcialorca.edu.mx");
+  await user.type(screen.getByLabelText("Correo"), "owner@example.com");
   await user.type(screen.getByLabelText("Contraseña"), "test-owner-pw");
   await user.click(screen.getByRole("button", { name: "Entrar al sistema" }));
 }
