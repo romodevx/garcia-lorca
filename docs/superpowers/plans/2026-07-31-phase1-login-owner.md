@@ -348,7 +348,7 @@ Run:
 ```bash
 make gen
 buf lint
-buf breaking --against '.git#branch=main'
+buf breaking --against '.git#branch=master'
 ```
 
 Expected: `buf lint` clean; `buf breaking` reports NO breaking changes (all additions are new field numbers / a new RPC).
