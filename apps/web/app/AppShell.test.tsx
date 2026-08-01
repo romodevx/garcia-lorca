@@ -19,7 +19,7 @@ afterEach(() => vi.clearAllMocks());
 
 async function submitLogin(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   await user.type(screen.getByLabelText("Correo"), "director@garcialorca.edu.mx");
-  await user.type(screen.getByLabelText("Contraseña"), "GarciaLorca2026!");
+  await user.type(screen.getByLabelText("Contraseña"), "test-owner-pw");
   await user.click(screen.getByRole("button", { name: "Entrar al sistema" }));
 }
 
@@ -66,12 +66,12 @@ describe("AppShell navigation flow", () => {
     // mustChangePassword=true → forced rotation screen.
     expect(await screen.findByRole("heading", { name: "Crea tu contraseña" })).toBeInTheDocument();
 
-    await user.type(screen.getByLabelText("Contraseña actual"), "GarciaLorca2026!");
-    await user.type(screen.getByLabelText("Nueva contraseña"), "Direccion#2026");
-    await user.type(screen.getByLabelText("Confirmar contraseña"), "Direccion#2026");
+    await user.type(screen.getByLabelText("Contraseña actual"), "test-owner-pw");
+    await user.type(screen.getByLabelText("Nueva contraseña"), "test-new-pw-123");
+    await user.type(screen.getByLabelText("Confirmar contraseña"), "test-new-pw-123");
     await user.click(screen.getByRole("button", { name: "Guardar y entrar" }));
 
-    expect(mockChangePassword).toHaveBeenCalledWith(expect.any(String), "GarciaLorca2026!", "Direccion#2026");
+    expect(mockChangePassword).toHaveBeenCalledWith(expect.any(String), "test-owner-pw", "test-new-pw-123");
     expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
   });
 

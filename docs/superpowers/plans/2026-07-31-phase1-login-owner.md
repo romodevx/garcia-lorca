@@ -17,7 +17,7 @@
 - Integration tests need Docker: `go test -tags=integration ./internal/adapters/postgres/`.
 - **Never edit `gen/`.** After any `.proto` change: `make gen` (or `buf generate`), then `buf lint` and `buf breaking` against `main`.
 - Default tenant (single-tenant M01): `00000000-0000-0000-0000-000000000001`.
-- Chosen temp password for the owner (local/dev): `GarciaLorca2026!` — the owner MUST change it at first login.
+- Owner temp password: sourced from `OWNER_TEMP_PASSWORD` (env). Locally it comes from `.env` (see `.env.example`); shared envs source it from the secret manager. Never committed. The owner MUST change it at first login.
 - Owner email (local/dev): `director@garcialorca.edu.mx`.
 
 ---
@@ -25,9 +25,10 @@
 ## File structure (created/modified in this phase)
 
 **Infra / migrations**
-- Create: `migrations/iam/0002_owner_and_password_policy.sql` — `must_change_password` column + owner role + owner user seed.
-- Modify: `docker-compose.yml` — add one-shot `migrate` service; services depend on it.
-- Create: `docker/apply-migrations.sh` — ordered psql applier run by the `migrate` service.
+- Create: `migrations/iam/0002_owner_and_password_policy.sql` — `must_change_password` column + owner role (schema + role only; NO credentials).
+- Create: `docker/seed-owner.sql` — env-driven owner USER seed, hashed at apply time via pgcrypto from `OWNER_TEMP_PASSWORD`.
+- Modify: `docker-compose.yml` — add one-shot `migrate` service (passes `OWNER_TEMP_PASSWORD`, mounts the seed); services depend on it.
+- Create: `docker/apply-migrations.sh` — ordered psql applier run by the `migrate` service; runs the owner seed when `OWNER_TEMP_PASSWORD` is set.
 - Modify: `Makefile` — add `migrate` target.
 
 **proto**
@@ -196,99 +197,61 @@ git commit -m "feat(dev): apply migrations at local startup via one-shot migrate
 
 ---
 
-## Task 1: Owner seed migration + password-policy column
+## Task 1: Owner role migration (schema) + env-driven owner user seed (secret-free)
+
+No credential is ever committed. The migration carries schema + the owner ROLE
+only; the owner USER is seeded at apply time from `OWNER_TEMP_PASSWORD`, hashed
+in-database with pgcrypto (`crypt(pw, gen_salt('bf'))`).
 
 **Files:**
 - Create: `migrations/iam/0002_owner_and_password_policy.sql`
+- Create: `docker/seed-owner.sql`
+- Modify: `docker/apply-migrations.sh`, `docker-compose.yml`, `.env.example`
 
-- [ ] **Step 1: Generate a bcrypt hash for the temp password**
+- [ ] **Step 1: Write the schema + role migration (no secret)**
 
-bcrypt salts randomly, so the hash cannot be hardcoded blindly — generate one now and paste it into the migration in Step 2. Run:
+Create `migrations/iam/0002_owner_and_password_policy.sql` with ONLY the
+`must_change_password` column and the owner ROLE seed (fixed UUID
+`…a1`), wrapped in `BEGIN; SET LOCAL app.current_tenant = '…0001'; … COMMIT;`.
+Plain SQL only (no psql `:'var'`): the Go integration test execs this file via
+GORM. It must NOT contain the owner USER insert or any password hash.
 
-```bash
-cd services/iam && go run - <<'EOF'
-package main
-import ("fmt"; "golang.org/x/crypto/bcrypt")
-func main() {
-	h, _ := bcrypt.GenerateFromPassword([]byte("GarciaLorca2026!"), bcrypt.DefaultCost)
-	fmt.Println(string(h))
-}
-EOF
-```
+- [ ] **Step 2: Write the env-driven owner user seed**
 
-Expected: a line like `$2a$10$....` (60 chars). Copy it; it replaces `<BCRYPT_HASH>` below.
+Create `docker/seed-owner.sql`: `CREATE EXTENSION IF NOT EXISTS pgcrypto;`,
+`SET LOCAL app.current_tenant = '…0001';`, then INSERT the owner user
+(`…d1`) with `password_hash = crypt(:'owner_temp_password', gen_salt('bf'))` and
+`must_change_password = true`, plus the `user_roles` link to the owner role — all
+`ON CONFLICT DO NOTHING` (idempotent). The `:'owner_temp_password'` psql variable
+is supplied by the runner from `$OWNER_TEMP_PASSWORD`; nothing secret is in git.
 
-- [ ] **Step 2: Write the migration**
+- [ ] **Step 3: Wire the runner + compose + env docs**
 
-Create `migrations/iam/0002_owner_and_password_policy.sql`:
+In `docker/apply-migrations.sh`, after the migration loop, run the seed only when
+`OWNER_TEMP_PASSWORD` is set (`psql_do -v owner_temp_password="$OWNER_TEMP_PASSWORD" -f /seed/owner.sql`),
+skipping with a notice otherwise. In `docker-compose.yml`, on the `migrate`
+service add `OWNER_TEMP_PASSWORD: ${OWNER_TEMP_PASSWORD:-}` and mount
+`./docker/seed-owner.sql:/seed/owner.sql:ro`. In `.env.example`, document
+`OWNER_TEMP_PASSWORD` (local seed only; secret manager in shared envs).
 
-```sql
--- iam (M01) — password policy + owner/director seed.
---
--- Adds must_change_password (forces a rotation at first login) and seeds the
--- single owner account for the default tenant. Applied by the migrator
--- (superuser), so RLS does not block these INSERTs. Idempotent: safe to re-run.
-
-BEGIN;
-
--- --- password policy ------------------------------------------------------
-
-ALTER TABLE users
-    ADD COLUMN IF NOT EXISTS must_change_password boolean NOT NULL DEFAULT false;
-
--- --- owner seed (default tenant, single-tenant M01) -----------------------
--- Fixed UUIDs so re-running is a no-op and later migrations can reference them.
-
-INSERT INTO roles (id, tenant_id, name, permissions)
-VALUES (
-    '00000000-0000-0000-0000-0000000000a1',
-    '00000000-0000-0000-0000-000000000001',
-    'owner',
-    -- Spine permissions the owner needs today; later phases append their own.
-    ARRAY['students:create', 'students:read', 'students:list', 'students:update']
-)
-ON CONFLICT (tenant_id, name) DO NOTHING;
-
-INSERT INTO users (id, tenant_id, email, display_name, password_hash, status, must_change_password)
-VALUES (
-    '00000000-0000-0000-0000-0000000000d1',
-    '00000000-0000-0000-0000-000000000001',
-    'director@garcialorca.edu.mx',
-    'Director',
-    '<BCRYPT_HASH>',   -- bcrypt of GarciaLorca2026! (from Task 1 Step 1)
-    'active',
-    true
-)
-ON CONFLICT (tenant_id, email) DO NOTHING;
-
-INSERT INTO user_roles (user_id, role_id, tenant_id)
-VALUES (
-    '00000000-0000-0000-0000-0000000000d1',
-    '00000000-0000-0000-0000-0000000000a1',
-    '00000000-0000-0000-0000-000000000001'
-)
-ON CONFLICT (user_id, role_id) DO NOTHING;
-
-COMMIT;
-```
-
-- [ ] **Step 3: Apply and verify the seed**
+- [ ] **Step 4: Apply and verify the seed**
 
 Run:
 
 ```bash
-docker compose run --rm migrate
+[ -f .env ] || cp .env.example .env
+docker compose run --rm migrate   # logs "[migrate] seeding owner user from OWNER_TEMP_PASSWORD"
 docker compose exec -T postgres psql -U postgres -d garcia_lorca -c \
   "SELECT email, status, must_change_password FROM users WHERE email='director@garcialorca.edu.mx';"
 ```
 
 Expected: one row, `status=active`, `must_change_password=t`.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add migrations/iam/0002_owner_and_password_policy.sql
-git commit -m "feat(iam): owner seed + must_change_password column"
+git add migrations/iam/0002_owner_and_password_policy.sql docker/seed-owner.sql docker/apply-migrations.sh docker-compose.yml .env.example
+git commit -m "feat(iam): schema+role migration + env-driven owner seed (pgcrypto)"
 ```
 
 ---
@@ -539,14 +502,14 @@ func newCPService(users *cpUsers) *usecase.AuthService {
 func TestChangePasswordSuccessClearsFlag(t *testing.T) {
 	email, _ := domain.NewEmail("director@garcialorca.edu.mx")
 	u, _ := domain.NewUser("d1", "00000000-0000-0000-0000-000000000001", email, "Director", domain.StatusActive, true, nil)
-	users := &cpUsers{user: u, hash: "H:GarciaLorca2026!"}
+	users := &cpUsers{user: u, hash: "H:test-owner-pw"}
 	svc := newCPService(users)
 
-	err := svc.ChangePassword(context.Background(), "d1", "GarciaLorca2026!", "NuevaClave#2026")
+	err := svc.ChangePassword(context.Background(), "d1", "test-owner-pw", "test-new-pw-123")
 	if err != nil {
 		t.Fatalf("ChangePassword: %v", err)
 	}
-	if !users.updated || users.newHash != "H:NuevaClave#2026" {
+	if !users.updated || users.newHash != "H:test-new-pw-123" {
 		t.Errorf("updated=%v newHash=%q", users.updated, users.newHash)
 	}
 }
@@ -554,10 +517,10 @@ func TestChangePasswordSuccessClearsFlag(t *testing.T) {
 func TestChangePasswordWrongCurrentIsUnauthorized(t *testing.T) {
 	email, _ := domain.NewEmail("director@garcialorca.edu.mx")
 	u, _ := domain.NewUser("d1", "00000000-0000-0000-0000-000000000001", email, "Director", domain.StatusActive, true, nil)
-	users := &cpUsers{user: u, hash: "H:GarciaLorca2026!"}
+	users := &cpUsers{user: u, hash: "H:test-owner-pw"}
 	svc := newCPService(users)
 
-	err := svc.ChangePassword(context.Background(), "d1", "wrong", "NuevaClave#2026")
+	err := svc.ChangePassword(context.Background(), "d1", "wrong", "test-new-pw-123")
 	if glerrors.KindOf(err) != glerrors.KindUnauthorized {
 		t.Errorf("KindOf = %v, want Unauthorized", glerrors.KindOf(err))
 	}
@@ -569,10 +532,10 @@ func TestChangePasswordWrongCurrentIsUnauthorized(t *testing.T) {
 func TestChangePasswordRejectsShortNew(t *testing.T) {
 	email, _ := domain.NewEmail("director@garcialorca.edu.mx")
 	u, _ := domain.NewUser("d1", "00000000-0000-0000-0000-000000000001", email, "Director", domain.StatusActive, true, nil)
-	users := &cpUsers{user: u, hash: "H:GarciaLorca2026!"}
+	users := &cpUsers{user: u, hash: "H:test-owner-pw"}
 	svc := newCPService(users)
 
-	err := svc.ChangePassword(context.Background(), "d1", "GarciaLorca2026!", "short")
+	err := svc.ChangePassword(context.Background(), "d1", "test-owner-pw", "short")
 	if glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("KindOf = %v, want Invalid", glerrors.KindOf(err))
 	}
@@ -827,7 +790,7 @@ func TestOwnerSeedAndPasswordUpdate(t *testing.T) {
 	if !mustChange {
 		t.Error("owner must_change_password = false, want true")
 	}
-	if err := bcrypt.NewHasher(0).Verify(hash, "GarciaLorca2026!"); err != nil {
+	if err := bcrypt.NewHasher(0).Verify(hash, "test-owner-pw"); err != nil {
 		t.Errorf("seeded temp password does not verify: %v", err)
 	}
 
@@ -1482,30 +1445,31 @@ Expected JSON includes `"module_iam":true`, `"module_gateway":true`, `"module_st
 - [ ] **Step 3: Exercise the login → forced change → me flow via curl**
 
 ```bash
+# OWNER_TEMP_PASSWORD is the seed password (from .env / secret manager).
 # 1) First login: expect mustChangePassword=true and a Set-Cookie: gl_access
 curl -s -i -X POST localhost:8080/api/v1/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"director@garcialorca.edu.mx","password":"GarciaLorca2026!"}'
+  -d '{"email":"director@garcialorca.edu.mx","password":"'"$OWNER_TEMP_PASSWORD"'"}'
 
 # Save the cookie jar for the authenticated calls:
 curl -s -c /tmp/gl.cookies -X POST localhost:8080/api/v1/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"director@garcialorca.edu.mx","password":"GarciaLorca2026!"}' >/dev/null
+  -d '{"email":"director@garcialorca.edu.mx","password":"'"$OWNER_TEMP_PASSWORD"'"}' >/dev/null
 
 # 2) Change the password (authenticated by cookie):
 curl -s -i -b /tmp/gl.cookies -X POST localhost:8080/api/v1/auth/change-password \
   -H 'Content-Type: application/json' \
-  -d '{"currentPassword":"GarciaLorca2026!","newPassword":"Direccion#2026"}'
+  -d '{"currentPassword":"'"$OWNER_TEMP_PASSWORD"'","newPassword":"<new-password>"}'
 
 # 3) Re-login with the NEW password: expect mustChangePassword=false
 curl -s -X POST localhost:8080/api/v1/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"director@garcialorca.edu.mx","password":"Direccion#2026"}'
+  -d '{"email":"director@garcialorca.edu.mx","password":"<new-password>"}'
 
 # 4) /me works with the fresh cookie:
 curl -s -c /tmp/gl2.cookies -X POST localhost:8080/api/v1/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"director@garcialorca.edu.mx","password":"Direccion#2026"}' >/dev/null
+  -d '{"email":"director@garcialorca.edu.mx","password":"<new-password>"}' >/dev/null
 curl -s -b /tmp/gl2.cookies localhost:8080/api/v1/me
 ```
 

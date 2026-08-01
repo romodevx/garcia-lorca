@@ -79,9 +79,11 @@ services:
       PGUSER: postgres
       PGDATABASE: garcia_lorca
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      OWNER_TEMP_PASSWORD: ${OWNER_TEMP_PASSWORD:-}
     volumes:
       - ./migrations:/migrations:ro
       - ./docker/apply-migrations.sh:/apply-migrations.sh:ro
+      - ./docker/seed-owner.sql:/seed/owner.sql:ro
     depends_on:
       postgres:
         condition: service_healthy

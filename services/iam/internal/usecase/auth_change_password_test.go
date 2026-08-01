@@ -52,14 +52,14 @@ func newCPService(users *cpUsers) *usecase.AuthService {
 func TestChangePasswordSuccessClearsFlag(t *testing.T) {
 	email, _ := domain.NewEmail("director@garcialorca.edu.mx")
 	u, _ := domain.NewUser("d1", "00000000-0000-0000-0000-000000000001", email, "Director", domain.StatusActive, true, nil)
-	users := &cpUsers{user: u, hash: "H:GarciaLorca2026!"}
+	users := &cpUsers{user: u, hash: "H:test-owner-pw"}
 	svc := newCPService(users)
 
-	err := svc.ChangePassword(context.Background(), "d1", "GarciaLorca2026!", "NuevaClave#2026")
+	err := svc.ChangePassword(context.Background(), "d1", "test-owner-pw", "test-new-pw-123")
 	if err != nil {
 		t.Fatalf("ChangePassword: %v", err)
 	}
-	if !users.updated || users.newHash != "H:NuevaClave#2026" {
+	if !users.updated || users.newHash != "H:test-new-pw-123" {
 		t.Errorf("updated=%v newHash=%q", users.updated, users.newHash)
 	}
 }
@@ -67,10 +67,10 @@ func TestChangePasswordSuccessClearsFlag(t *testing.T) {
 func TestChangePasswordWrongCurrentIsUnauthorized(t *testing.T) {
 	email, _ := domain.NewEmail("director@garcialorca.edu.mx")
 	u, _ := domain.NewUser("d1", "00000000-0000-0000-0000-000000000001", email, "Director", domain.StatusActive, true, nil)
-	users := &cpUsers{user: u, hash: "H:GarciaLorca2026!"}
+	users := &cpUsers{user: u, hash: "H:test-owner-pw"}
 	svc := newCPService(users)
 
-	err := svc.ChangePassword(context.Background(), "d1", "wrong", "NuevaClave#2026")
+	err := svc.ChangePassword(context.Background(), "d1", "wrong", "test-new-pw-123")
 	if glerrors.KindOf(err) != glerrors.KindUnauthorized {
 		t.Errorf("KindOf = %v, want Unauthorized", glerrors.KindOf(err))
 	}
@@ -82,10 +82,10 @@ func TestChangePasswordWrongCurrentIsUnauthorized(t *testing.T) {
 func TestChangePasswordRejectsShortNew(t *testing.T) {
 	email, _ := domain.NewEmail("director@garcialorca.edu.mx")
 	u, _ := domain.NewUser("d1", "00000000-0000-0000-0000-000000000001", email, "Director", domain.StatusActive, true, nil)
-	users := &cpUsers{user: u, hash: "H:GarciaLorca2026!"}
+	users := &cpUsers{user: u, hash: "H:test-owner-pw"}
 	svc := newCPService(users)
 
-	err := svc.ChangePassword(context.Background(), "d1", "GarciaLorca2026!", "short")
+	err := svc.ChangePassword(context.Background(), "d1", "test-owner-pw", "short")
 	if glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("KindOf = %v, want Invalid", glerrors.KindOf(err))
 	}

@@ -263,11 +263,40 @@ func TestAddAndRemoveRole(t *testing.T) {
 	}
 }
 
-func TestOwnerSeedAndPasswordUpdate(t *testing.T) {
-	const ownerTenant = "00000000-0000-0000-0000-000000000001"
-	repo := pgadapter.NewUserRepo(appDB(t), ownerTenant)
+// TestOwnerUserAuthAndPasswordUpdate self-seeds the owner user (the migration
+// seeds only the owner ROLE now — the owner USER is env-driven and never
+// committed). It seeds a runtime-hashed temp password via superDB (bypasses
+// RLS), then proves the app-role repo reads must_change_password=true, verifies
+// the temp password, and clears the flag on UpdatePassword.
+func TestOwnerUserAuthAndPasswordUpdate(t *testing.T) {
+	const (
+		ownerTenant = "00000000-0000-0000-0000-000000000001"
+		ownerID     = "00000000-0000-0000-0000-0000000000d1"
+		ownerRoleID = "00000000-0000-0000-0000-0000000000a1" // migration-seeded owner role.
+		ownerEmail  = "director@garcialorca.edu.mx"
+	)
 
-	email, err := domain.NewEmail("director@garcialorca.edu.mx")
+	// bcrypt a neutral test constant at runtime — no committed credential.
+	tempHash, err := bcrypt.NewHasher(0).Hash("test-owner-pw")
+	if err != nil {
+		t.Fatalf("hash temp password: %v", err)
+	}
+
+	// Seed the owner user + role assignment as the superuser (bypasses RLS).
+	if err := superDB.Exec(
+		"INSERT INTO users (id, tenant_id, email, display_name, password_hash, status, must_change_password) VALUES (?, ?, ?, ?, ?, ?, true)",
+		ownerID, ownerTenant, ownerEmail, "Director", tempHash, "active").Error; err != nil {
+		t.Fatalf("seed owner user: %v", err)
+	}
+	assign(t, ownerID, ownerRoleID, ownerTenant)
+	t.Cleanup(func() {
+		// Hermetic: remove the row (and its assignment) this test created.
+		_ = superDB.Exec("DELETE FROM user_roles WHERE user_id = ?", ownerID).Error
+		_ = superDB.Exec("DELETE FROM users WHERE id = ?", ownerID).Error
+	})
+
+	repo := pgadapter.NewUserRepo(appDB(t), ownerTenant)
+	email, err := domain.NewEmail(ownerEmail)
 	if err != nil {
 		t.Fatalf("NewEmail: %v", err)
 	}
@@ -278,20 +307,9 @@ func TestOwnerSeedAndPasswordUpdate(t *testing.T) {
 	if !user.MustChangePassword() {
 		t.Error("owner must_change_password = false, want true")
 	}
-	if err := bcrypt.NewHasher(0).Verify(hash, "GarciaLorca2026!"); err != nil {
+	if err := bcrypt.NewHasher(0).Verify(hash, "test-owner-pw"); err != nil {
 		t.Errorf("seeded temp password does not verify: %v", err)
 	}
-
-	// This test mutates the shared seeded owner row. Restore it (original hash +
-	// must_change_password=true) via the superuser handle so later tests observe
-	// the seeded state — keep the mutation hermetic.
-	t.Cleanup(func() {
-		if err := superDB.Exec(
-			"UPDATE users SET password_hash = ?, must_change_password = true WHERE id = ?",
-			hash, user.ID()).Error; err != nil {
-			t.Errorf("restore seeded owner row: %v", err)
-		}
-	})
 
 	if err := repo.UpdatePassword(context.Background(), user.ID(), "H-new"); err != nil {
 		t.Fatalf("UpdatePassword: %v", err)

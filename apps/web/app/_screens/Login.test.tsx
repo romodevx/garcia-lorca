@@ -10,10 +10,10 @@ describe("Login", () => {
     render(<Login theme="light" onToggle={() => {}} onSubmit={onSubmit} />);
 
     await user.type(screen.getByLabelText("Correo"), "director@garcialorca.edu.mx");
-    await user.type(screen.getByLabelText("Contraseña"), "GarciaLorca2026!");
+    await user.type(screen.getByLabelText("Contraseña"), "test-owner-pw");
     await user.click(screen.getByRole("button", { name: "Entrar al sistema" }));
 
-    expect(onSubmit).toHaveBeenCalledExactlyOnceWith("director@garcialorca.edu.mx", "GarciaLorca2026!");
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith("director@garcialorca.edu.mx", "test-owner-pw");
   });
 
   it("reveals and hides the password via the show-password toggle", async () => {

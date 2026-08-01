@@ -152,7 +152,7 @@ func TestChangePasswordClearsFlagAndPersists(t *testing.T) {
 	_, err := h.ChangePassword(context.Background(), connect.NewRequest(&iamv1.ChangePasswordRequest{
 		UserId:          "u1",
 		CurrentPassword: "secret",
-		NewPassword:     "NuevaClave#2026",
+		NewPassword:     "test-new-pw-123",
 	}))
 	if err != nil {
 		t.Fatalf("ChangePassword: %v", err)
@@ -167,7 +167,7 @@ func TestChangePasswordWrongCurrentIsUnauthenticated(t *testing.T) {
 	_, err := h.ChangePassword(context.Background(), connect.NewRequest(&iamv1.ChangePasswordRequest{
 		UserId:          "u1",
 		CurrentPassword: "wrong",
-		NewPassword:     "NuevaClave#2026",
+		NewPassword:     "test-new-pw-123",
 	}))
 	assertCode(t, err, connect.CodeUnauthenticated)
 }

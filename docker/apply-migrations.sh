@@ -46,4 +46,15 @@ if [ "$(find /migrations -name '*.sql' | wc -l | tr -d ' ')" -eq 0 ]; then
   exit 1
 fi
 
+# Owner/director user seed. Runs only when OWNER_TEMP_PASSWORD is set; the seed
+# hashes it with pgcrypto (bcrypt) at apply time, so no credential is committed.
+# It is idempotent (ON CONFLICT DO NOTHING), so re-runs are a no-op; it is NOT
+# recorded in schema_migrations (it is an env-driven seed, not schema).
+if [ -n "${OWNER_TEMP_PASSWORD:-}" ]; then
+  echo "[migrate] seeding owner user from OWNER_TEMP_PASSWORD"
+  psql_do -v owner_temp_password="$OWNER_TEMP_PASSWORD" -f /seed/owner.sql
+else
+  echo "[migrate] OWNER_TEMP_PASSWORD not set — skipping owner seed" >&2
+fi
+
 echo "[migrate] done"
