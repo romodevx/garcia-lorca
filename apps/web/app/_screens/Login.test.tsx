@@ -4,38 +4,21 @@ import { describe, expect, it, vi } from "vitest";
 import { Login } from "./Login";
 
 describe("Login", () => {
-  it("toggles the selected profile and prefills the user field", async () => {
+  it("calls onSubmit with the typed email and password", async () => {
     const user = userEvent.setup();
-    render(<Login theme="light" onToggle={() => {}} onLogin={() => {}} />);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<Login theme="light" onToggle={() => {}} onSubmit={onSubmit} />);
 
-    const adminBtn = screen.getByRole("button", { name: "Administración" });
-    const teacherBtn = screen.getByRole("button", { name: "Maestro" });
-    const userField = screen.getByLabelText<HTMLInputElement>("Usuario");
-
-    expect(adminBtn).toHaveAttribute("aria-pressed", "true");
-    expect(userField.value).toBe("director");
-
-    await user.click(teacherBtn);
-
-    expect(teacherBtn).toHaveAttribute("aria-pressed", "true");
-    expect(adminBtn).toHaveAttribute("aria-pressed", "false");
-    expect(userField.value).toBe("mvazquez");
-  });
-
-  it("calls onLogin with the selected role on submit", async () => {
-    const user = userEvent.setup();
-    const onLogin = vi.fn();
-    render(<Login theme="light" onToggle={() => {}} onLogin={onLogin} />);
-
-    await user.click(screen.getByRole("button", { name: "Maestro" }));
+    await user.type(screen.getByLabelText("Correo"), "director@garcialorca.edu.mx");
+    await user.type(screen.getByLabelText("Contraseña"), "test-owner-pw");
     await user.click(screen.getByRole("button", { name: "Entrar al sistema" }));
 
-    expect(onLogin).toHaveBeenCalledExactlyOnceWith("teacher");
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith("director@garcialorca.edu.mx", "test-owner-pw");
   });
 
   it("reveals and hides the password via the show-password toggle", async () => {
     const user = userEvent.setup();
-    render(<Login theme="light" onToggle={() => {}} onLogin={() => {}} />);
+    render(<Login theme="light" onToggle={() => {}} onSubmit={vi.fn()} />);
 
     const pwd = screen.getByLabelText<HTMLInputElement>("Contraseña");
     expect(pwd.type).toBe("password");
@@ -45,5 +28,12 @@ describe("Login", () => {
 
     await user.click(screen.getByRole("button", { name: "Ocultar contraseña" }));
     expect(pwd.type).toBe("password");
+  });
+
+  it("renders the error as an alert and shows a pending label", () => {
+    render(<Login theme="light" onToggle={() => {}} onSubmit={vi.fn()} error="Correo o contraseña incorrectos." pending />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Correo o contraseña incorrectos.");
+    expect(screen.getByRole("button", { name: "Entrando…" })).toBeDisabled();
   });
 });

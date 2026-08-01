@@ -96,6 +96,46 @@ func (r *UserRepo) FindByID(ctx context.Context, userID string) (domain.User, er
 	return user, nil
 }
 
+// FindAuthByID returns a user and their password hash by id (for ChangePassword).
+func (r *UserRepo) FindAuthByID(ctx context.Context, userID string) (domain.User, string, error) {
+	var (
+		user domain.User
+		hash string
+	)
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var um userModel
+		if err := tx.Where("id = ?", userID).First(&um).Error; err != nil {
+			return translateFindErr(err)
+		}
+		roleRows, err := loadRoles(tx, um.ID)
+		if err != nil {
+			return err
+		}
+		user, hash, err = toDomainUser(um, roleRows)
+		return err
+	})
+	if err != nil {
+		return domain.User{}, "", err
+	}
+	return user, hash, nil
+}
+
+// UpdatePassword sets a new hash and clears must_change_password in one write.
+func (r *UserRepo) UpdatePassword(ctx context.Context, userID, newHash string) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Model(&userModel{}).
+			Where("id = ?", userID).
+			Updates(map[string]any{"password_hash": newHash, "must_change_password": false})
+		if res.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "updating password", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return glerrors.ErrNotFound
+		}
+		return nil
+	})
+}
+
 // AddRole assigns a role to a user (idempotent: a duplicate assignment is a no-op).
 func (r *UserRepo) AddRole(ctx context.Context, userID, roleID string) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {

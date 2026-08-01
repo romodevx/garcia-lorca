@@ -34,11 +34,25 @@ func TestNewUserRequiresIdAndTenant(t *testing.T) {
 		{"blank tenant", "u1", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := domain.NewUser(tc.id, tc.tenant, email, "Dir", domain.StatusActive, nil)
+			_, err := domain.NewUser(tc.id, tc.tenant, email, "Dir", domain.StatusActive, false, nil)
 			if err == nil || glerrors.KindOf(err) != glerrors.KindInvalid {
 				t.Errorf("want KindInvalid, got %v", err)
 			}
 		})
+	}
+}
+
+func TestUserMustChangePassword(t *testing.T) {
+	email, err := domain.NewEmail("director@garcialorca.edu.mx")
+	if err != nil {
+		t.Fatalf("NewEmail: %v", err)
+	}
+	u, err := domain.NewUser("u1", "t1", email, "Director", domain.StatusActive, true, nil)
+	if err != nil {
+		t.Fatalf("NewUser: %v", err)
+	}
+	if !u.MustChangePassword() {
+		t.Error("MustChangePassword() = false, want true")
 	}
 }
 
@@ -47,7 +61,7 @@ func TestUserEffectivePermissionsUnionAcrossRoles(t *testing.T) {
 	teacher := mustRole(t, "r1", "Docente", []string{"students:read", "grades:create"})
 	tutor := mustRole(t, "r2", "Tutor", []string{"students:read", "attendance:read"})
 
-	u, err := domain.NewUser("u1", "t1", email, "Ana", domain.StatusActive, []domain.Role{teacher, tutor})
+	u, err := domain.NewUser("u1", "t1", email, "Ana", domain.StatusActive, false, []domain.Role{teacher, tutor})
 	if err != nil {
 		t.Fatalf("NewUser: %v", err)
 	}
@@ -70,8 +84,8 @@ func TestUserEffectivePermissionsUnionAcrossRoles(t *testing.T) {
 
 func TestUserCanAuthenticateOnlyWhenActive(t *testing.T) {
 	email := mustEmail(t, "sus@garcialorca.mx")
-	active, _ := domain.NewUser("u1", "t1", email, "A", domain.StatusActive, nil)
-	suspended, _ := domain.NewUser("u2", "t1", email, "S", domain.StatusSuspended, nil)
+	active, _ := domain.NewUser("u1", "t1", email, "A", domain.StatusActive, false, nil)
+	suspended, _ := domain.NewUser("u2", "t1", email, "S", domain.StatusSuspended, false, nil)
 
 	if !active.CanAuthenticate() {
 		t.Errorf("active user should be able to authenticate")
@@ -83,7 +97,7 @@ func TestUserCanAuthenticateOnlyWhenActive(t *testing.T) {
 
 func TestUserAccessorsAreStable(t *testing.T) {
 	email := mustEmail(t, "x@garcialorca.mx")
-	u, _ := domain.NewUser("u9", "t1", email, "Equis", domain.StatusActive, nil)
+	u, _ := domain.NewUser("u9", "t1", email, "Equis", domain.StatusActive, false, nil)
 	if u.ID() != "u9" || u.TenantID() != "t1" || u.Email() != email || u.DisplayName() != "Equis" {
 		t.Errorf("accessors mismatch: %q/%q/%q/%q", u.ID(), u.TenantID(), u.Email(), u.DisplayName())
 	}

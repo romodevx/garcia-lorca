@@ -45,6 +45,7 @@ export interface BtnProps {
   onClick?: (e: MouseEvent<HTMLButtonElement>) => void;
   full?: boolean;
   danger?: boolean;
+  disabled?: boolean;
   type?: "button" | "submit";
   style?: CSSProperties;
 }
@@ -56,6 +57,7 @@ export function Btn({
   onClick,
   full,
   danger,
+  disabled,
   type = "button",
   style = {}
 }: BtnProps): ReactElement {
@@ -73,6 +75,8 @@ export function Btn({
     width: full ? "100%" : "auto",
     transition: "all .18s var(--ease)",
     whiteSpace: "nowrap",
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.6 : 1,
     ...style
   };
   const kinds: Record<BtnKind, CSSProperties> = {
@@ -90,12 +94,15 @@ export function Btn({
     <button
       type={type}
       onClick={onClick}
+      disabled={disabled}
       style={{ ...base, ...k }}
       onMouseEnter={(e) => {
+        if (disabled) return;
         e.currentTarget.style.transform = "translateY(-1px)";
         e.currentTarget.style.filter = "brightness(1.04)";
       }}
       onMouseLeave={(e) => {
+        if (disabled) return;
         e.currentTarget.style.transform = "none";
         e.currentTarget.style.filter = "none";
       }}

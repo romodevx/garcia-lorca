@@ -9,6 +9,10 @@ import (
 	"github.com/garcia-lorca/services/iam/internal/ports"
 )
 
+// minPasswordLen is the smallest acceptable new password (defense-in-depth; the
+// gateway/UI also validate).
+const minPasswordLen = 8
+
 // AuthService orchestrates authentication and authorization. It depends only on
 // the ports (repositories, hasher, token issuer/validator) and the domain — the
 // composition root injects concrete adapters (postgres, bcrypt, jwt).
@@ -59,10 +63,11 @@ func NewAuthService(
 
 // AuthResult is the outcome of a successful Authenticate/RefreshToken.
 type AuthResult struct {
-	AccessToken  string
-	RefreshToken string
-	ExpiresIn    int64 // access token TTL in seconds
-	User         domain.User
+	AccessToken        string
+	RefreshToken       string
+	ExpiresIn          int64 // access token TTL in seconds
+	User               domain.User
+	MustChangePassword bool
 }
 
 // Authenticate verifies credentials and issues an access + refresh token pair.
@@ -84,7 +89,12 @@ func (s *AuthService) Authenticate(ctx context.Context, rawEmail, password strin
 		return AuthResult{}, glerrors.New(glerrors.KindForbidden, "account is not active")
 	}
 
-	return s.issueFor(ctx, user)
+	res, err := s.issueFor(ctx, user)
+	if err != nil {
+		return AuthResult{}, err
+	}
+	res.MustChangePassword = user.MustChangePassword()
+	return res, nil
 }
 
 // RefreshToken exchanges a valid refresh token for a fresh, rotated pair.
@@ -101,6 +111,27 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (Au
 		return AuthResult{}, glerrors.New(glerrors.KindForbidden, "account is not active")
 	}
 	return s.issueFor(ctx, user)
+}
+
+// ChangePassword sets a new password for userID after verifying the current one.
+// It clears must_change_password (the forced-rotation flag). A wrong current
+// password is Unauthorized; a too-short new password is Invalid.
+func (s *AuthService) ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error {
+	if len(newPassword) < minPasswordLen {
+		return glerrors.New(glerrors.KindInvalid, "new password is too short")
+	}
+	_, hash, err := s.users.FindAuthByID(ctx, userID)
+	if err != nil {
+		return glerrors.New(glerrors.KindUnauthorized, "invalid credentials")
+	}
+	if err := s.hasher.Verify(hash, currentPassword); err != nil {
+		return glerrors.New(glerrors.KindUnauthorized, "invalid credentials")
+	}
+	newHash, err := s.hasher.Hash(newPassword)
+	if err != nil {
+		return err
+	}
+	return s.users.UpdatePassword(ctx, userID, newHash)
 }
 
 // ValidateToken verifies an access token and returns its claims (principal +

@@ -15,6 +15,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,7 +38,7 @@ const (
 	dbName        = "garcia_lorca"
 	tenantA       = "11111111-1111-1111-1111-111111111111"
 	tenantB       = "22222222-2222-2222-2222-222222222222"
-	migrationFile = "../../../../../migrations/iam/0001_init.sql"
+	migrationsDir = "../../../../../migrations/iam"
 )
 
 var (
@@ -95,12 +98,25 @@ func open(dsn string) (*gorm.DB, error) {
 }
 
 func migrate(db *gorm.DB) error {
-	sql, err := os.ReadFile(migrationFile)
+	entries, err := os.ReadDir(migrationsDir)
 	if err != nil {
-		return fmt.Errorf("read migration: %w", err)
+		return fmt.Errorf("read migrations dir: %w", err)
 	}
-	if err := db.Exec(string(sql)).Error; err != nil {
-		return fmt.Errorf("apply migration: %w", err)
+	files := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
+			files = append(files, e.Name())
+		}
+	}
+	sort.Strings(files) // lexical order: 0001 before 0002.
+	for _, name := range files {
+		sql, err := os.ReadFile(filepath.Join(migrationsDir, name))
+		if err != nil {
+			return fmt.Errorf("read migration %s: %w", name, err)
+		}
+		if err := db.Exec(string(sql)).Error; err != nil {
+			return fmt.Errorf("apply migration %s: %w", name, err)
+		}
 	}
 	// Non-owner, non-BYPASSRLS app role with DML only (mirrors setup_app_role.sql).
 	setup := []string{
@@ -244,6 +260,66 @@ func TestAddAndRemoveRole(t *testing.T) {
 	user, _ = repo.FindByID(ctx, uid)
 	if user.HasPermission(perm) {
 		t.Errorf("role still present after RemoveRole")
+	}
+}
+
+// TestOwnerUserAuthAndPasswordUpdate self-seeds the owner user (the migration
+// seeds only the owner ROLE now — the owner USER is env-driven and never
+// committed). It seeds a runtime-hashed temp password via superDB (bypasses
+// RLS), then proves the app-role repo reads must_change_password=true, verifies
+// the temp password, and clears the flag on UpdatePassword.
+func TestOwnerUserAuthAndPasswordUpdate(t *testing.T) {
+	const (
+		ownerTenant = "00000000-0000-0000-0000-000000000001"
+		ownerID     = "00000000-0000-0000-0000-0000000000d1"
+		ownerRoleID = "00000000-0000-0000-0000-0000000000a1" // migration-seeded owner role.
+		ownerEmail  = "director@garcialorca.edu.mx"
+	)
+
+	// bcrypt a neutral test constant at runtime — no committed credential.
+	tempHash, err := bcrypt.NewHasher(0).Hash("test-owner-pw")
+	if err != nil {
+		t.Fatalf("hash temp password: %v", err)
+	}
+
+	// Seed the owner user + role assignment as the superuser (bypasses RLS).
+	if err := superDB.Exec(
+		"INSERT INTO users (id, tenant_id, email, display_name, password_hash, status, must_change_password) VALUES (?, ?, ?, ?, ?, ?, true)",
+		ownerID, ownerTenant, ownerEmail, "Director", tempHash, "active").Error; err != nil {
+		t.Fatalf("seed owner user: %v", err)
+	}
+	assign(t, ownerID, ownerRoleID, ownerTenant)
+	t.Cleanup(func() {
+		// Hermetic: remove the row (and its assignment) this test created.
+		_ = superDB.Exec("DELETE FROM user_roles WHERE user_id = ?", ownerID).Error
+		_ = superDB.Exec("DELETE FROM users WHERE id = ?", ownerID).Error
+	})
+
+	repo := pgadapter.NewUserRepo(appDB(t), ownerTenant)
+	email, err := domain.NewEmail(ownerEmail)
+	if err != nil {
+		t.Fatalf("NewEmail: %v", err)
+	}
+	user, hash, err := repo.FindAuthByEmail(context.Background(), ownerTenant, email)
+	if err != nil {
+		t.Fatalf("FindAuthByEmail: %v", err)
+	}
+	if !user.MustChangePassword() {
+		t.Error("owner must_change_password = false, want true")
+	}
+	if err := bcrypt.NewHasher(0).Verify(hash, "test-owner-pw"); err != nil {
+		t.Errorf("seeded temp password does not verify: %v", err)
+	}
+
+	if err := repo.UpdatePassword(context.Background(), user.ID(), "H-new"); err != nil {
+		t.Fatalf("UpdatePassword: %v", err)
+	}
+	userAfter, _, err := repo.FindAuthByEmail(context.Background(), ownerTenant, email)
+	if err != nil {
+		t.Fatalf("FindAuthByEmail after update: %v", err)
+	}
+	if userAfter.MustChangePassword() {
+		t.Error("must_change_password still true after UpdatePassword")
 	}
 }
 

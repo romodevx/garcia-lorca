@@ -20,6 +20,8 @@ func toDomainRole(m roleModel) (domain.Role, error) {
 
 // toDomainUser builds a domain User from its row + resolved roles, and returns
 // the stored password hash separately (a credential the domain never holds).
+// The must-change-password flag is carried on the User itself via NewUser, so it
+// has a single source of truth.
 func toDomainUser(m userModel, roleRows []roleModel) (domain.User, string, error) {
 	email, err := domain.NewEmail(m.Email)
 	if err != nil {
@@ -37,7 +39,7 @@ func toDomainUser(m userModel, roleRows []roleModel) (domain.User, string, error
 	if !ok {
 		return domain.User{}, "", glerrors.New(glerrors.KindInternal, "unknown user status: "+m.Status)
 	}
-	user, err := domain.NewUser(m.ID, m.TenantID, email, m.DisplayName, status, roles)
+	user, err := domain.NewUser(m.ID, m.TenantID, email, m.DisplayName, status, m.MustChangePassword, roles)
 	if err != nil {
 		return domain.User{}, "", err
 	}

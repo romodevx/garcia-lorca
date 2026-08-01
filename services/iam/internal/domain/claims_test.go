@@ -10,7 +10,7 @@ import (
 func TestNewAccessClaimsFromUser(t *testing.T) {
 	email := mustEmail(t, "ana@garcialorca.mx")
 	teacher := mustRole(t, "r1", "Docente", []string{"students:read", "grades:create"})
-	u, err := domain.NewUser("u1", "t1", email, "Ana", domain.StatusActive, []domain.Role{teacher})
+	u, err := domain.NewUser("u1", "t1", email, "Ana", domain.StatusActive, false, []domain.Role{teacher})
 	if err != nil {
 		t.Fatalf("NewUser: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestNewAccessClaimsFromUser(t *testing.T) {
 func TestClaimsPermissionsAreCanonicalStrings(t *testing.T) {
 	email := mustEmail(t, "b@garcialorca.mx")
 	role := mustRole(t, "r", "R", []string{"students:read"})
-	u, _ := domain.NewUser("u", "t", email, "B", domain.StatusActive, []domain.Role{role})
+	u, _ := domain.NewUser("u", "t", email, "B", domain.StatusActive, false, []domain.Role{role})
 	claims := domain.NewAccessClaims(u, time.Unix(0, 0).UTC(), time.Hour)
 	if claims.Permissions[0] != "students:read" {
 		t.Errorf("permission string = %q, want students:read", claims.Permissions[0])

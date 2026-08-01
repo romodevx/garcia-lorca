@@ -27,17 +27,18 @@ const (
 //	       └─ Tutor   {students:read, attendance:read}
 //	EffectivePermissions = {students:read, grades:create, attendance:read}
 type User struct {
-	id          string
-	tenantID    string
-	email       Email
-	displayName string
-	status      Status
-	roles       []Role
+	id                 string
+	tenantID           string
+	email              Email
+	displayName        string
+	status             Status
+	mustChangePassword bool
+	roles              []Role
 }
 
 // NewUser constructs a principal. `id` and `tenantID` are required; the email is
 // already a validated value object.
-func NewUser(id, tenantID string, email Email, displayName string, status Status, roles []Role) (User, error) {
+func NewUser(id, tenantID string, email Email, displayName string, status Status, mustChangePassword bool, roles []Role) (User, error) {
 	if strings.TrimSpace(id) == "" {
 		return User{}, glerrors.New(glerrors.KindInvalid, "user id is required")
 	}
@@ -47,12 +48,13 @@ func NewUser(id, tenantID string, email Email, displayName string, status Status
 	assigned := make([]Role, len(roles))
 	copy(assigned, roles)
 	return User{
-		id:          id,
-		tenantID:    tenantID,
-		email:       email,
-		displayName: displayName,
-		status:      status,
-		roles:       assigned,
+		id:                 id,
+		tenantID:           tenantID,
+		email:              email,
+		displayName:        displayName,
+		status:             status,
+		mustChangePassword: mustChangePassword,
+		roles:              assigned,
 	}, nil
 }
 
@@ -73,6 +75,10 @@ func (u User) Status() Status { return u.status }
 
 // CanAuthenticate reports whether the account may log in (active only).
 func (u User) CanAuthenticate() bool { return u.status == StatusActive }
+
+// MustChangePassword reports whether the account still holds a temporary
+// password and must rotate it before doing anything else.
+func (u User) MustChangePassword() bool { return u.mustChangePassword }
 
 // EffectivePermissions returns the deduplicated union of permissions across all
 // of the user's roles — the authoritative set every authorization check uses.

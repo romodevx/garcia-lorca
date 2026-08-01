@@ -40,6 +40,16 @@ func (f *fakeUsers) FindByID(_ context.Context, userID string) (domain.User, err
 	return u, nil
 }
 
+func (f *fakeUsers) FindAuthByID(_ context.Context, userID string) (domain.User, string, error) {
+	rec, ok := f.byEmail[f.byID[userID].Email()]
+	if !ok {
+		return domain.User{}, "", glerrors.ErrNotFound
+	}
+	return rec.user, rec.hash, nil
+}
+
+func (f *fakeUsers) UpdatePassword(_ context.Context, _, _ string) error { return nil }
+
 func (f *fakeUsers) AddRole(_ context.Context, userID, roleID string) error {
 	f.added = append(f.added, [2]string{userID, roleID})
 	return nil
@@ -103,7 +113,7 @@ func fixtureService(t *testing.T, status domain.Status) (*usecase.AuthService, *
 	t.Helper()
 	email, _ := domain.NewEmail("ana@garcialorca.mx")
 	role, _ := domain.NewRole("r1", "Docente", []string{"students:read"})
-	user, _ := domain.NewUser("u1", testTenant, email, "Ana", status, []domain.Role{role})
+	user, _ := domain.NewUser("u1", testTenant, email, "Ana", status, false, []domain.Role{role})
 	users := &fakeUsers{
 		byEmail: map[domain.Email]struct {
 			user domain.User
@@ -133,6 +143,32 @@ func TestAuthenticateSuccess(t *testing.T) {
 	}
 	if res.User.ID() != "u1" {
 		t.Errorf("User.ID = %q", res.User.ID())
+	}
+}
+
+func TestAuthenticateSurfacesMustChangePassword(t *testing.T) {
+	// The flag now has a single source of truth: the domain User. Authenticate
+	// must read it off the returned user, not a separate repository return value.
+	email, _ := domain.NewEmail("ana@garcialorca.mx")
+	role, _ := domain.NewRole("r1", "Docente", []string{"students:read"})
+	user, _ := domain.NewUser("u1", testTenant, email, "Ana", domain.StatusActive, true, []domain.Role{role})
+	users := &fakeUsers{
+		byEmail: map[domain.Email]struct {
+			user domain.User
+			hash string
+		}{email: {user: user, hash: "h:secret"}},
+		byID: map[string]domain.User{"u1": user},
+	}
+	roles := &fakeRoles{byID: map[string]domain.Role{"r1": role}}
+	now := func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) }
+	svc := usecase.NewAuthService(users, roles, fakeHasher{}, &fakeTokens{}, &fakeTokens{}, testTenant, 15*time.Minute, now)
+
+	res, err := svc.Authenticate(context.Background(), "ana@garcialorca.mx", "secret")
+	if err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	if !res.MustChangePassword {
+		t.Error("AuthResult.MustChangePassword = false, want true")
 	}
 }
 
@@ -280,7 +316,7 @@ func (failingIssuer) IssueRefreshToken(context.Context, string) (string, error) 
 
 func TestAuthenticatePropagatesIssuerError(t *testing.T) {
 	email, _ := domain.NewEmail("ana@garcialorca.mx")
-	user, _ := domain.NewUser("u1", testTenant, email, "Ana", domain.StatusActive, nil)
+	user, _ := domain.NewUser("u1", testTenant, email, "Ana", domain.StatusActive, false, nil)
 	users := &fakeUsers{
 		byEmail: map[domain.Email]struct {
 			user domain.User

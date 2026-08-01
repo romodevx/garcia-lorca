@@ -43,8 +43,13 @@ func PrincipalFrom(ctx context.Context) (p Principal, ok bool) {
 func RequireAuth(auth Authenticator) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			token, ok := bearerToken(r.Header.Get("Authorization"))
-			if !ok {
+			token := bearerToken(r) // header "Authorization: Bearer <token>" → "" if absent
+			if token == "" {
+				if c, err := r.Cookie("gl_access"); err == nil {
+					token = c.Value
+				}
+			}
+			if token == "" {
 				unauthorized(w)
 				return
 			}
@@ -89,14 +94,15 @@ func hasPermission(p Principal, permission string) bool {
 	return false
 }
 
-// bearerToken extracts the token from an "Authorization: Bearer <token>" header.
-func bearerToken(header string) (string, bool) {
+// bearerToken extracts the token from a request's "Authorization: Bearer <token>"
+// header, returning "" when the header is absent or malformed.
+func bearerToken(r *http.Request) string {
 	const prefix = "Bearer "
+	header := r.Header.Get("Authorization")
 	if len(header) <= len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
-		return "", false
+		return ""
 	}
-	token := strings.TrimSpace(header[len(prefix):])
-	return token, token != ""
+	return strings.TrimSpace(header[len(prefix):])
 }
 
 func unauthorized(w http.ResponseWriter) {

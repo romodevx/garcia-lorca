@@ -106,6 +106,10 @@ gen: ## buf generate dentro de un contenedor (no requiere buf en el host)
 psql: ## Abre psql en la base local (rol app)
 	$(COMPOSE) exec postgres psql -U app -d garcia_lorca
 
+.PHONY: migrate
+migrate: ## Aplica migrations/**/*.sql en la base local (orden léxico)
+	$(COMPOSE) run --rm migrate
+
 .PHONY: clean
 clean: ## down -v + borra imágenes locales del proyecto
 	$(COMPOSE) down -v --remove-orphans --rmi local
