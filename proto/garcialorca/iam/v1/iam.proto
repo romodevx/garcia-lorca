@@ -100,6 +100,9 @@ message Claims {
   string email = 3;
   repeated string permissions = 4; // effective (union across the user's roles)
   google.protobuf.Timestamp expires_at = 5;
+  // must_change_password mirrors the account flag so the gateway can enforce the
+  // forced first-login rotation without an extra round-trip to iam.
+  bool must_change_password = 6;
 }
 
 // --- Login / tokens -------------------------------------------------------
@@ -130,7 +133,9 @@ message RefreshTokenResponse {
 }
 
 message ChangePasswordRequest {
-  string user_id = 1;
+  // access_token identifies the principal (iam derives the subject from it);
+  // the current password is re-verified before the change.
+  string access_token = 1;
   string current_password = 2;
   string new_password = 3;
 }
