@@ -32,7 +32,9 @@ ledger operations run in a single transaction (Unit of Work).
 
 ## RLS-sensitive tables
 `finance_accounts` — `ENABLE + FORCE ROW LEVEL SECURITY` from the first
-migration. All access goes through `pkg/authctx.WithUserContext`.
+migration. All access goes through `pkg/authctx.WithTenantContext`, which binds
+`app.current_tenant` via `set_config(..., true)` (SET LOCAL semantics) inside the
+transaction. Policies filter on `current_setting('app.current_tenant')`.
 
 ## Feature flag
 `module_finance` — default OFF. Disabled ⇒ gateway returns 404 for finance routes.

@@ -42,3 +42,16 @@ grades). It does **not** work for the iam auth backbone:
 - `pkg/authctx` (per-`app.current_user`) is unchanged; it remains the primitive
   for downstream per-student/-tenant tables. iam adds its own tenant binding
   rather than widening the shared helper (smaller blast radius for M01).
+  _(Superseded — see "Update (2026-08-03, Phase D)" below.)_
+
+## Update (2026-08-03, Phase D)
+
+The decision above (tenant-scoped RLS, `app.current_tenant`) stands unchanged.
+What changed is the plumbing: Phase D **consolidated `pkg/authctx` onto
+`app.current_tenant`** via `WithTenantContext` (`set_config(..., true)` = SET
+LOCAL). The shared helper is now the single RLS primitive, and both iam and
+students bind the tenant var through it — resolving the earlier mismatch where
+`pkg/authctx` bound `app.current_user` while the iam adapter rolled its own
+`app.current_tenant` binding. The last consequence bullet ("`pkg/authctx`
+(per-`app.current_user`) is unchanged … iam adds its own tenant binding") no
+longer describes the code.

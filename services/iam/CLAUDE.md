@@ -28,8 +28,9 @@ domain entities ↔ GORM models (double model + `mapper.go`).
 
 ## RLS-sensitive tables
 `users`, `roles`, `user_roles` — `ENABLE + FORCE ROW LEVEL SECURITY` from the
-first migration. All access goes through `pkg/authctx.WithUserContext`, which
-sets `app.current_user` via `SET LOCAL` inside the transaction.
+first migration. All access goes through `pkg/authctx.WithTenantContext`, which
+binds `app.current_tenant` via `set_config(..., true)` (SET LOCAL semantics)
+inside the transaction. Policies filter on `current_setting('app.current_tenant')`.
 
 ## Feature flag
 `module_iam` — default OFF. Disabled ⇒ gateway returns 404 for iam routes.

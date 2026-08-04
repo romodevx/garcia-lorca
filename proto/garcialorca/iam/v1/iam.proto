@@ -70,7 +70,7 @@ enum UserStatus {
 
 // User is the IAM principal. `email` is unique per tenant. `tenant_id` is
 // reserved for multi-tenant scoping; M01 operates single-tenant and RLS is
-// user-scoped via app.current_user.
+// tenant-scoped via app.current_tenant.
 message User {
   string id = 1;
   string tenant_id = 2;

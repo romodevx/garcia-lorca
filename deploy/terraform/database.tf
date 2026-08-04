@@ -51,8 +51,9 @@ resource "google_sql_database" "app" {
 #   * This role is NOT the instance owner.
 #   * It must NOT have the BYPASSRLS attribute.
 #   * Cloud SQL does not grant SUPERUSER/BYPASSRLS to user-created roles, so this
-#     role is already constrained; RLS policies apply to it. The backend sets
-#     SET LOCAL app.current_* per transaction (pkg/authctx.WithUserContext).
+#     role is already constrained; RLS policies apply to it. The backend binds
+#     app.current_tenant per transaction (set_config(..., true) = SET LOCAL) via
+#     pkg/authctx.WithTenantContext.
 #
 # Terraform creates the login role with a password; the privilege grants and the
 # explicit "ALTER ROLE app NOBYPASSRLS" intent are applied by the SQL setup
