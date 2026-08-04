@@ -9,3 +9,10 @@ db_availability_type  = "ZONAL"
 billing_account_id    = "000000-000000-000000"
 monthly_budget_amount = 100
 budget_alert_emails   = ["andres.roqa93@gmail.com"]
+
+# ---- Owner temp password (shared envs only) -------------------------------
+# Leave false for local-parity / throwaway dev. Set true ONLY in a real shared
+# env, and inject owner_temp_password out of band at apply time (never here):
+#   seed_owner_secret  = true
+#   TF_VAR_owner_temp_password=... terraform apply -var-file=environments/dev.tfvars
+seed_owner_secret = false
