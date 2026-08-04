@@ -49,12 +49,12 @@ func (r *fakeRunner) Transaction(ctx context.Context, fn func(tx authctx.Tx) err
 	return nil
 }
 
-func TestWithUserContext_BindsRLSUserThenRunsCallback(t *testing.T) {
+func TestWithTenantContext_BindsRLSTenantThenRunsCallback(t *testing.T) {
 	tx := &fakeTx{}
 	runner := &fakeRunner{tx: tx}
 	callbackRan := false
 
-	err := authctx.WithUserContext(context.Background(), runner, "user-123", func(got authctx.Tx) error {
+	err := authctx.WithTenantContext(context.Background(), runner, "tenant-123", func(got authctx.Tx) error {
 		callbackRan = true
 		if got != tx {
 			t.Fatalf("callback received a different Tx than the runner provided")
@@ -71,7 +71,7 @@ func TestWithUserContext_BindsRLSUserThenRunsCallback(t *testing.T) {
 		t.Fatal("expected transaction to commit")
 	}
 
-	// The very first statement must bind the RLS identity.
+	// The very first statement must bind the RLS tenant.
 	if len(tx.calls) != 1 {
 		t.Fatalf("expected exactly 1 setup statement, got %d", len(tx.calls))
 	}
@@ -79,37 +79,50 @@ func TestWithUserContext_BindsRLSUserThenRunsCallback(t *testing.T) {
 	if call.sql != "SELECT set_config(?, ?, true)" {
 		t.Fatalf("unexpected RLS bind SQL: %q", call.sql)
 	}
-	if len(call.args) != 2 || call.args[0] != authctx.SessionVar() || call.args[1] != "user-123" {
-		t.Fatalf("RLS bind args = %v, want [%q user-123]", call.args, authctx.SessionVar())
+	if len(call.args) != 2 || call.args[0] != authctx.SessionVar() || call.args[1] != "tenant-123" {
+		t.Fatalf("RLS bind args = %v, want [%q tenant-123]", call.args, authctx.SessionVar())
+	}
+	if authctx.SessionVar() != "app.current_tenant" {
+		t.Fatalf("SessionVar() = %q, want app.current_tenant", authctx.SessionVar())
 	}
 }
 
-func TestWithUserContext_EmptyUserIDFailsClosed(t *testing.T) {
+func TestWithTenantContext_EmptyTenantIDFailsClosed(t *testing.T) {
 	runner := &fakeRunner{tx: &fakeTx{}}
-	err := authctx.WithUserContext(context.Background(), runner, "", func(authctx.Tx) error {
+	err := authctx.WithTenantContext(context.Background(), runner, "", func(authctx.Tx) error {
 		t.Fatal("callback must not run without an RLS identity")
 		return nil
 	})
 	if err == nil {
-		t.Fatal("expected error for empty userID")
+		t.Fatal("expected error for empty tenantID")
 	}
 	if runner.transactions != 0 {
 		t.Fatal("must not open a transaction without an identity")
 	}
 }
 
-func TestWithUserContext_NilRunner(t *testing.T) {
-	if err := authctx.WithUserContext(context.Background(), nil, "u", func(authctx.Tx) error { return nil }); err == nil {
+func TestWithTenantContext_NilRunner(t *testing.T) {
+	if err := authctx.WithTenantContext(context.Background(), nil, "t", func(authctx.Tx) error { return nil }); err == nil {
 		t.Fatal("expected error for nil runner")
 	}
 }
 
-func TestWithUserContext_BindFailureRollsBack(t *testing.T) {
+func TestWithTenantContext_NilCallback(t *testing.T) {
+	runner := &fakeRunner{tx: &fakeTx{}}
+	if err := authctx.WithTenantContext(context.Background(), runner, "t", nil); err == nil {
+		t.Fatal("expected error for nil callback")
+	}
+	if runner.transactions != 0 {
+		t.Fatal("must not open a transaction without a callback")
+	}
+}
+
+func TestWithTenantContext_BindFailureRollsBack(t *testing.T) {
 	wantErr := errors.New("connection reset")
 	tx := &fakeTx{execErr: wantErr}
 	runner := &fakeRunner{tx: tx}
 
-	err := authctx.WithUserContext(context.Background(), runner, "user-1", func(authctx.Tx) error {
+	err := authctx.WithTenantContext(context.Background(), runner, "tenant-1", func(authctx.Tx) error {
 		t.Fatal("callback must not run when RLS bind fails")
 		return nil
 	})

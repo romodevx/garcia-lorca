@@ -6,6 +6,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/garcia-lorca/pkg/authctx"
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/iam/internal/domain"
 	"github.com/garcia-lorca/services/iam/internal/ports"
@@ -28,14 +29,12 @@ type base struct {
 	tenantID string
 }
 
-// withTenant runs fn inside a transaction that has bound app.current_tenant.
-// Mirrors pkg/authctx's SET LOCAL pattern (set_config(..., true)).
+// withTenant runs fn inside a transaction that has bound app.current_tenant,
+// delegating to the shared pkg/authctx RLS primitive so tenant binding lives in
+// exactly one place across every service.
 func (b base) withTenant(ctx context.Context, fn func(tx *gorm.DB) error) error {
-	return b.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec("SELECT set_config('app.current_tenant', ?, true)", b.tenantID).Error; err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "binding RLS tenant", err)
-		}
-		return fn(tx)
+	return authctx.WithTenantContext(ctx, gormTxRunner{b.db}, b.tenantID, func(tx authctx.Tx) error {
+		return fn(txGorm(tx))
 	})
 }
 
