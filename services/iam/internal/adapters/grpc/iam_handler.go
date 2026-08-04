@@ -94,7 +94,7 @@ func (h *IAMHandler) RevokeRole(ctx context.Context, req *connect.Request[iamv1.
 }
 
 func (h *IAMHandler) ChangePassword(ctx context.Context, req *connect.Request[iamv1.ChangePasswordRequest]) (*connect.Response[iamv1.ChangePasswordResponse], error) {
-	if err := h.auth.ChangePassword(ctx, req.Msg.GetUserId(), req.Msg.GetCurrentPassword(), req.Msg.GetNewPassword()); err != nil {
+	if err := h.auth.ChangePassword(ctx, req.Msg.GetAccessToken(), req.Msg.GetCurrentPassword(), req.Msg.GetNewPassword()); err != nil {
 		return nil, connectErr(err)
 	}
 	return connect.NewResponse(&iamv1.ChangePasswordResponse{}), nil
@@ -115,11 +115,12 @@ func toProtoUser(u domain.User) *iamv1.User {
 
 func toProtoClaims(c domain.Claims) *iamv1.Claims {
 	return &iamv1.Claims{
-		Subject:     c.Subject,
-		TenantId:    c.TenantID,
-		Email:       c.Email,
-		Permissions: c.Permissions,
-		ExpiresAt:   timestamppb.New(c.ExpiresAt),
+		Subject:            c.Subject,
+		TenantId:           c.TenantID,
+		Email:              c.Email,
+		Permissions:        c.Permissions,
+		MustChangePassword: c.MustChangePassword,
+		ExpiresAt:          timestamppb.New(c.ExpiresAt),
 	}
 }
 

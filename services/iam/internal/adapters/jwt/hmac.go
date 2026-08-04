@@ -31,10 +31,11 @@ const (
 // claims (sub, exp, iat, iss) plus the principal + effective permissions.
 type accessClaims struct {
 	gojwt.RegisteredClaims
-	TenantID    string   `json:"tid"`
-	Email       string   `json:"email"`
-	Permissions []string `json:"perms"`
-	TokenType   string   `json:"typ"`
+	TenantID           string   `json:"tid"`
+	Email              string   `json:"email"`
+	Permissions        []string `json:"perms"`
+	MustChangePassword bool     `json:"mcp"`
+	TokenType          string   `json:"typ"`
 }
 
 // refreshClaims is a minimal token that only carries the subject to re-mint.
@@ -70,10 +71,11 @@ func (h *HMAC) IssueAccessToken(_ context.Context, claims domain.Claims) (string
 			IssuedAt:  gojwt.NewNumericDate(h.now()),
 			ExpiresAt: gojwt.NewNumericDate(claims.ExpiresAt),
 		},
-		TenantID:    claims.TenantID,
-		Email:       claims.Email,
-		Permissions: claims.Permissions,
-		TokenType:   typeAccess,
+		TenantID:           claims.TenantID,
+		Email:              claims.Email,
+		Permissions:        claims.Permissions,
+		MustChangePassword: claims.MustChangePassword,
+		TokenType:          typeAccess,
 	}
 	return h.sign(body)
 }
@@ -107,11 +109,12 @@ func (h *HMAC) ValidateAccessToken(_ context.Context, token string) (domain.Clai
 		expiresAt = body.ExpiresAt.Time
 	}
 	return domain.Claims{
-		Subject:     body.Subject,
-		TenantID:    body.TenantID,
-		Email:       body.Email,
-		Permissions: body.Permissions,
-		ExpiresAt:   expiresAt,
+		Subject:            body.Subject,
+		TenantID:           body.TenantID,
+		Email:              body.Email,
+		Permissions:        body.Permissions,
+		MustChangePassword: body.MustChangePassword,
+		ExpiresAt:          expiresAt,
 	}, nil
 }
 

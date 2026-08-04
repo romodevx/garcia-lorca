@@ -36,6 +36,15 @@ func TestNewAccessClaimsFromUser(t *testing.T) {
 	}
 }
 
+func TestNewAccessClaimsCarriesMustChangePassword(t *testing.T) {
+	email, _ := domain.NewEmail("owner@example.com")
+	u, _ := domain.NewUser("u1", "t1", email, "Owner", domain.StatusActive, true, nil)
+	c := domain.NewAccessClaims(u, time.Unix(0, 0), time.Minute)
+	if !c.MustChangePassword {
+		t.Error("Claims.MustChangePassword = false, want true")
+	}
+}
+
 func TestClaimsPermissionsAreCanonicalStrings(t *testing.T) {
 	email := mustEmail(t, "b@garcialorca.mx")
 	role := mustRole(t, "r", "R", []string{"students:read"})
