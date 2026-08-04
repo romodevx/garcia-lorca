@@ -29,3 +29,10 @@ billing_account_id    = "000000-000000-000000"
 monthly_budget_amount = 200
 budget_currency       = "USD"
 budget_alert_emails   = ["andres.roqa93@gmail.com"]
+
+# ---- Owner temp password (shared envs only) -------------------------------
+# false = inert (local/dev). Set true ONLY in a real shared env and inject the
+# value out of band at apply time (never commit it):
+#   seed_owner_secret = true
+#   TF_VAR_owner_temp_password=... terraform apply -var-file=environments/<env>.tfvars
+seed_owner_secret = false

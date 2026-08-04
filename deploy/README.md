@@ -82,6 +82,58 @@ of actual spend and 100% of forecast. Alerts warn — they do not cap spend.
   `INGRESS_TRAFFIC_INTERNAL_ONLY`.
 - `govulncheck` + `go mod verify` gate every build.
 
+## Owner temporary password
+
+The owner/director account is seeded with a one-time **temporary** password that
+the owner is required to rotate at first login (enforced server-side by the
+`must_change_password` claim; see the gateway). Sourcing differs by environment:
+
+| Environment | Source of `OWNER_TEMP_PASSWORD`                                                   |
+| ----------- | -------------------------------------------------------------------------------- |
+| Local       | `.env` `OWNER_TEMP_PASSWORD` (see repo-root `.env.example`, default `change-me-owner`). `docker/seed-owner.sql` consumes it via pgcrypto `crypt(...)`. |
+| Shared envs | **Secret Manager → Cloud Run env → the migrate/seed step.**                      |
+
+**Shared-env flow (stub today — not a live deployment):**
+
+1. Terraform manages the secret when the env opts in: set `seed_owner_secret = true`
+   in the env tfvars and inject the value out of band at apply time
+   (`TF_VAR_owner_temp_password=... terraform apply -var-file=...`). This creates
+   `owner-temp-password-<env>` in Secret Manager (`deploy/terraform/secrets.tf`,
+   var-gated). The value is **never** committed to code or tfvars.
+2. Cloud Run injects the secret's `latest` version as the `OWNER_TEMP_PASSWORD`
+   env on the **migrate/seed step** — the same `secret_env` mechanism
+   `services.tf` uses for `DB_PASSWORD` (`local.common_secret_env`). The seed
+   step runs `docker/seed-owner.sql`.
+3. The owner rotates the password at first login; it is a one-time credential.
+   `ignore_changes = [secret_data]` keeps later applies from clobbering it.
+
+> The Terraform block is a **var-gated stub**: with `seed_owner_secret = false`
+> (the default) nothing is created and the local path is unchanged.
+
+## Auth deployment requirements
+
+The gateway issues auth tokens **only** as cookies `gl_access` / `gl_refresh`
+with `HttpOnly; Secure; SameSite=Strict` (Phase B). This constrains deployment:
+
+- **Same-site topology (required).** The web app and the gateway MUST be
+  same-site — a shared registrable domain via reverse-proxy / path routing
+  (e.g. `app.example.com` + `app.example.com/api`, or an edge that fronts both).
+  With `SameSite=Strict`, cross-site cookies are NOT sent on the SPA's `fetch`
+  calls, so a split-domain deployment breaks the auth flow.
+- **TLS everywhere (required).** `Secure` cookies are only sent over HTTPS.
+  Shared envs are HTTPS on Cloud Run; **local dev must run behind TLS** (or a
+  TLS-terminating proxy) for the cookie flow to work end to end.
+- **CSRF posture.** Auth is cookie-ambient; CSRF is mitigated by
+  `SameSite=Strict`. Relaxing to `Lax` in the future would REQUIRE explicit
+  CSRF tokens on state-changing endpoints — do not relax it without them.
+- **Login rate limiter is in-process, per instance** (Phase C). It is correct
+  only at `min-instances=1` (the gateway's profile). Scaling the gateway out
+  needs a shared store (e.g. Redis) or the per-instance budget multiplies.
+- **`TRUST_PROXY` stays OFF** until X-Forwarded-For parsing is confirmed for the
+  real proxy topology. With it off, the limiter keys on `RemoteAddr`; turning it
+  on before the trusted-hop position is verified lets clients spoof their IP and
+  bypass the limit.
+
 ## Common commands
 
 ```bash

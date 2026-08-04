@@ -39,6 +39,17 @@ variable "image_tags" {
   default     = {}
 }
 
+# ---- Owner temporary password (shared envs) -------------------------------
+# Off by default so local-parity applies stay inert. Set true in a SHARED env's
+# tfvars to have Terraform manage the owner-temp-password secret container +
+# version (value from var.owner_temp_password, defined in secrets.tf). See
+# secrets.tf and deploy/README.md ("Owner temporary password").
+variable "seed_owner_secret" {
+  description = "When true, create the owner-temp-password Secret Manager secret + version for a shared env (value from var.owner_temp_password). Default false keeps local/dev applies inert."
+  type        = bool
+  default     = false
+}
+
 # ---- Cloud SQL ------------------------------------------------------------
 variable "db_tier" {
   description = "Cloud SQL machine tier. Start small (db-g1-small) and scale up later."

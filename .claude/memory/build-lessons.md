@@ -21,7 +21,7 @@ Consúltalas antes de re-pisar el mismo rastrillo.
 - **Fijar `go 1.24`** en go.mod/go.work. Las toolchains bumpean solo a `go 1.25.0`; revertir siempre.
 - **RLS: probar como el rol `app` no-owner NOBYPASSRLS** en testcontainers (no como owner, o las
   policies no se ejercen). RLS **tenant-scoped** vía `app.current_tenant` (SET LOCAL por transacción,
-  helper `pkg/authctx.WithUserContext`). Ver `ADR 0001`.
+  helper `pkg/authctx.WithTenantContext`). Ver `ADR 0001`.
 - JWT: `golang-jwt/jwt/v5`, HS256, `WithValidMethods` (anti alg-confusion), `WithTimeFunc` en tests.
 
 ## buf / proto
