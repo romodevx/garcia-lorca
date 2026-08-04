@@ -1,0 +1,19 @@
+# GitGuardian scan configuration.
+#
+# Test files and example/template config contain INTENTIONAL fake credentials —
+# in-memory fake users, neutral placeholder passwords ("test-owner-pw"), and
+# curl examples with env-var/placeholder values. These repeatedly trip the
+# generic-password / company-email-password detectors even though no real secret
+# is present. Exclude those non-production paths so scanning focuses on real
+# application and infrastructure code (which stays fully scanned).
+#
+# NOTE: real credentials must NEVER live in these paths — the exclusion assumes
+# they only ever hold test/placeholder data. Docs: https://docs.gitguardian.com
+version: 2
+secret:
+  ignored-paths:
+    - "**/*_test.go"          # Go test fixtures (fake users, placeholder passwords)
+    - "**/*.test.ts"          # web/vitest specs
+    - "**/*.test.tsx"
+    - ".env.example"          # template only; real .env is gitignored
+    - "docs/superpowers/**"   # historical planning/spec docs (curl examples, placeholders)

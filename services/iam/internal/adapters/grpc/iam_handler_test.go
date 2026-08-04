@@ -67,12 +67,12 @@ func newHandler(t *testing.T) *grpcadapter.IAMHandler {
 }
 
 // newHandlerWithUsers builds a handler over a single seeded user (password
-// "secret") and returns the fake repo so tests can assert side effects. When
+// "test-owner-pw") and returns the fake repo so tests can assert side effects. When
 // mustChange is true the user still holds a temporary password.
 func newHandlerWithUsers(t *testing.T, mustChange bool) (*grpcadapter.IAMHandler, *fakeUsers) {
 	t.Helper()
 	hasher := bcrypt.NewHasher(4)
-	hash, _ := hasher.Hash("secret")
+	hash, _ := hasher.Hash("test-owner-pw")
 	email, _ := domain.NewEmail("ana@garcialorca.mx")
 	role, _ := domain.NewRole("r1", "Docente", []string{"students:read", "grades:create"})
 	user, _ := domain.NewUser("u1", "t1", email, "Ana", domain.StatusActive, mustChange, []domain.Role{role})
@@ -99,7 +99,7 @@ func TestLoginThenValidateAndCheckPermission(t *testing.T) {
 	h := newHandler(t)
 	ctx := context.Background()
 
-	login, err := h.Login(ctx, connect.NewRequest(&iamv1.LoginRequest{Email: "ana@garcialorca.mx", Password: "secret"}))
+	login, err := h.Login(ctx, connect.NewRequest(&iamv1.LoginRequest{Email: "ana@garcialorca.mx", Password: "test-owner-pw"}))
 	if err != nil {
 		t.Fatalf("Login: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestLoginThenValidateAndCheckPermission(t *testing.T) {
 
 func TestLoginResponseCarriesMustChangePassword(t *testing.T) {
 	h, _ := newHandlerWithUsers(t, true)
-	res, err := h.Login(context.Background(), connect.NewRequest(&iamv1.LoginRequest{Email: "ana@garcialorca.mx", Password: "secret"}))
+	res, err := h.Login(context.Background(), connect.NewRequest(&iamv1.LoginRequest{Email: "ana@garcialorca.mx", Password: "test-owner-pw"}))
 	if err != nil {
 		t.Fatalf("Login: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestLoginResponseCarriesMustChangePassword(t *testing.T) {
 // ChangePassword (which now derives the subject from the token) can be exercised.
 func loginAccessToken(t *testing.T, h *grpcadapter.IAMHandler) string {
 	t.Helper()
-	login, err := h.Login(context.Background(), connect.NewRequest(&iamv1.LoginRequest{Email: "ana@garcialorca.mx", Password: "secret"}))
+	login, err := h.Login(context.Background(), connect.NewRequest(&iamv1.LoginRequest{Email: "ana@garcialorca.mx", Password: "test-owner-pw"}))
 	if err != nil {
 		t.Fatalf("Login: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestChangePasswordClearsFlagAndPersists(t *testing.T) {
 	h, users := newHandlerWithUsers(t, true)
 	_, err := h.ChangePassword(context.Background(), connect.NewRequest(&iamv1.ChangePasswordRequest{
 		AccessToken:     loginAccessToken(t, h),
-		CurrentPassword: "secret",
+		CurrentPassword: "test-owner-pw",
 		NewPassword:     "test-new-pw-123",
 	}))
 	if err != nil {
@@ -187,7 +187,7 @@ func TestChangePasswordInvalidTokenIsUnauthenticated(t *testing.T) {
 	h, _ := newHandlerWithUsers(t, true)
 	_, err := h.ChangePassword(context.Background(), connect.NewRequest(&iamv1.ChangePasswordRequest{
 		AccessToken:     "garbage",
-		CurrentPassword: "secret",
+		CurrentPassword: "test-owner-pw",
 		NewPassword:     "test-new-pw-123",
 	}))
 	assertCode(t, err, connect.CodeUnauthenticated)
@@ -201,7 +201,7 @@ func TestLoginWrongPasswordIsUnauthenticated(t *testing.T) {
 
 func TestLoginMalformedEmailIsInvalidArgument(t *testing.T) {
 	h := newHandler(t)
-	_, err := h.Login(context.Background(), connect.NewRequest(&iamv1.LoginRequest{Email: "nope", Password: "secret"}))
+	_, err := h.Login(context.Background(), connect.NewRequest(&iamv1.LoginRequest{Email: "nope", Password: "test-owner-pw"}))
 	assertCode(t, err, connect.CodeInvalidArgument)
 }
 
