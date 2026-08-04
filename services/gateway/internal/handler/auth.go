@@ -30,19 +30,58 @@ func NewAuthHandler(auth LoginService) *AuthHandler {
 	return &AuthHandler{auth: auth}
 }
 
+// Auth cookie conventions. Both tokens live ONLY in HttpOnly cookies — they are
+// never returned in a JSON body — so browser JS cannot read them (XSS-resistant).
+const (
+	accessCookie  = "gl_access"
+	refreshCookie = "gl_refresh"
+	refreshPath   = "/api/v1/auth" // refresh cookie only sent to auth endpoints
+	refreshMaxAge = 24 * 3600      // seconds; refresh cookie lifetime
+)
+
 type loginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
 
 type loginResponse struct {
-	AccessToken        string `json:"accessToken"`
-	RefreshToken       string `json:"refreshToken"`
-	ExpiresIn          int64  `json:"expiresIn"`
-	MustChangePassword bool   `json:"mustChangePassword"`
+	ExpiresIn          int64 `json:"expiresIn"`
+	MustChangePassword bool  `json:"mustChangePassword"`
 }
 
-// Login handles POST /api/v1/auth/login.
+// refreshResponse carries only the access-token lifetime; the rotated tokens
+// themselves are delivered via Set-Cookie, never the body.
+type refreshResponse struct {
+	ExpiresIn int64 `json:"expiresIn"`
+}
+
+// setAuthCookies writes both HttpOnly session cookies from a login/refresh
+// result: gl_access (Path /, lifetime = res.ExpiresIn) and gl_refresh
+// (Path refreshPath so it is only sent to the auth endpoints). Both are
+// Secure + SameSite=Strict.
+func setAuthCookies(w http.ResponseWriter, res client.LoginResult) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     accessCookie,
+		Value:    res.AccessToken,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   int(res.ExpiresIn),
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     refreshCookie,
+		Value:    res.RefreshToken,
+		Path:     refreshPath,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   refreshMaxAge,
+	})
+}
+
+// Login handles POST /api/v1/auth/login. On success it sets both auth cookies
+// and returns only the access lifetime + forced-rotation flag (no tokens).
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
 	if err := decodeJSONBody(w, r, &req); err != nil {
@@ -54,30 +93,29 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(httpStatusFor(err)), httpStatusFor(err))
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     "gl_access",
-		Value:    res.AccessToken,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   int(res.ExpiresIn),
-	})
+	setAuthCookies(w, res)
 	writeJSON(w, http.StatusOK, loginResponse{
-		AccessToken:        res.AccessToken,
-		RefreshToken:       res.RefreshToken,
 		ExpiresIn:          res.ExpiresIn,
 		MustChangePassword: res.MustChangePassword,
 	})
 }
 
-// Logout expires the gl_access cookie. It requires no valid token so a stale
-// session can always be cleared; it only overwrites the cookie, no iam call.
+// Logout expires BOTH auth cookies. It requires no valid token so a stale
+// session can always be cleared; it only overwrites the cookies, no iam call.
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     "gl_access",
+		Name:     accessCookie,
 		Value:    "",
 		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     refreshCookie,
+		Value:    "",
+		Path:     refreshPath,
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: http.SameSiteStrictMode,
@@ -86,28 +124,22 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type refreshRequest struct {
-	RefreshToken string `json:"refreshToken"`
-}
-
-// Refresh handles POST /api/v1/auth/refresh: exchanges a refresh token for a
-// fresh, rotated pair via iam.
+// Refresh handles POST /api/v1/auth/refresh: it reads the refresh token from the
+// gl_refresh cookie, exchanges it for a fresh rotated pair via iam, and rotates
+// BOTH cookies. A missing refresh cookie is 401. Tokens never touch the body.
 func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
-	var req refreshRequest
-	if err := decodeJSONBody(w, r, &req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+	c, err := r.Cookie(refreshCookie)
+	if err != nil || c.Value == "" {
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
-	res, err := h.auth.Refresh(r.Context(), req.RefreshToken)
+	res, err := h.auth.Refresh(r.Context(), c.Value)
 	if err != nil {
 		http.Error(w, http.StatusText(httpStatusFor(err)), httpStatusFor(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, loginResponse{
-		AccessToken:  res.AccessToken,
-		RefreshToken: res.RefreshToken,
-		ExpiresIn:    res.ExpiresIn,
-	})
+	setAuthCookies(w, res)
+	writeJSON(w, http.StatusOK, refreshResponse{ExpiresIn: res.ExpiresIn})
 }
 
 type meResponse struct {
