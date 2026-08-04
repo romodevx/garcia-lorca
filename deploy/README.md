@@ -134,6 +134,26 @@ with `HttpOnly; Secure; SameSite=Strict` (Phase B). This constrains deployment:
   on before the trusted-hop position is verified lets clients spoof their IP and
   bypass the limit.
 
+## Pre-shared-env checklist (blockers before enabling a module flag in staging/prod)
+
+From the Phase-1 hardening security gate (2026-08-03). None block local/MVP use; all
+must be resolved before turning a flag ON in a shared environment.
+
+1. **`govulncheck` clean in CI.** As of the gate, code-reachable vulns come from the
+   Go toolchain and one dependency (pre-existing, not first-party): bump the toolchain
+   to **Go 1.25.12** and **`golang.org/x/text` → v0.39.0** (fixes GO-2026-5970 and the
+   stdlib advisories), then confirm `govulncheck ./...` is clean per module.
+2. **`TRUST_PROXY` set + XFF verified** against the real Cloud Run / load-balancer
+   header format (the limiter reads the trusted right-most hop — confirm that matches
+   the topology, or per-IP isolation is wrong).
+3. **Gateway `max-instances=1`** (or move the login rate limiter to a shared store)
+   so the per-instance budget isn't multiplied.
+4. **Owner secret from Secret Manager** (not a local `.env`); set `seed_owner_secret`
+   + `owner_temp_password` (see "Owner temporary password" above).
+5. Frontend rotates the session after a forced password change — **done** (the web
+   calls `/auth/refresh` immediately after `change-password` so the cookie picks up
+   `must_change_password=false`).
+
 ## Common commands
 
 ```bash
