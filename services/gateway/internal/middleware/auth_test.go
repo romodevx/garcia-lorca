@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
@@ -159,6 +160,87 @@ func TestRequirePermissionWithoutPrincipalIs401(t *testing.T) {
 	}
 	if ran {
 		t.Error("next must not run without a principal")
+	}
+}
+
+func TestRequirePasswordChangedBlocksWhenMustChange(t *testing.T) {
+	var ran bool
+	var seen middleware.Principal
+	h := middleware.RequirePasswordChanged(ok200(&seen, &ran))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	ctx := middleware.WithPrincipal(req.Context(), middleware.Principal{UserID: "u1", MustChangePassword: true})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req.WithContext(ctx))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("code = %d, want 403", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "password_change_required") {
+		t.Errorf("body = %q, want it to contain password_change_required", rec.Body.String())
+	}
+	if ran {
+		t.Error("next must not run while a password change is required")
+	}
+}
+
+func TestRequirePasswordChangedPassesWhenCleared(t *testing.T) {
+	var ran bool
+	var seen middleware.Principal
+	h := middleware.RequirePasswordChanged(ok200(&seen, &ran))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	ctx := middleware.WithPrincipal(req.Context(), middleware.Principal{UserID: "u1", MustChangePassword: false})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req.WithContext(ctx))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200", rec.Code)
+	}
+	if !ran {
+		t.Error("next should run once the password is changed")
+	}
+}
+
+func TestRequirePasswordChangedWithoutPrincipalIs401(t *testing.T) {
+	var ran bool
+	var seen middleware.Principal
+	h := middleware.RequirePasswordChanged(ok200(&seen, &ran))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/me", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("code = %d, want 401 (fail-closed)", rec.Code)
+	}
+	if ran {
+		t.Error("next must not run without a principal")
+	}
+}
+
+func TestTokenFrom(t *testing.T) {
+	cases := []struct {
+		name   string
+		header string
+		cookie string
+		want   string
+	}{
+		{"header only", "Bearer header-token", "", "header-token"},
+		{"cookie only", "", "cookie-token", "cookie-token"},
+		{"header wins over cookie", "Bearer header-token", "cookie-token", "header-token"},
+		{"neither", "", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+			if tc.header != "" {
+				req.Header.Set("Authorization", tc.header)
+			}
+			if tc.cookie != "" {
+				req.AddCookie(&http.Cookie{Name: "gl_access", Value: tc.cookie})
+			}
+			if got := middleware.TokenFrom(req); got != tc.want {
+				t.Errorf("TokenFrom = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

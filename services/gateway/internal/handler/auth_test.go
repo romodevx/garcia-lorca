@@ -16,9 +16,11 @@ import (
 )
 
 type fakeLogin struct {
-	res   client.LoginResult
-	err   error
-	cpErr error
+	res         client.LoginResult
+	err         error
+	cpErr       error
+	cpGotToken  string
+	cpGotCalled bool
 }
 
 func (f fakeLogin) Login(context.Context, string, string) (client.LoginResult, error) {
@@ -29,10 +31,14 @@ func (f fakeLogin) Refresh(context.Context, string) (client.LoginResult, error) 
 	return f.res, f.err
 }
 
-func (f fakeLogin) ChangePassword(context.Context, string, string, string) error { return f.cpErr }
+func (f *fakeLogin) ChangePassword(_ context.Context, accessToken, _, _ string) error {
+	f.cpGotCalled = true
+	f.cpGotToken = accessToken
+	return f.cpErr
+}
 
 func TestRefreshProxySuccess(t *testing.T) {
-	h := handler.NewAuthHandler(fakeLogin{res: client.LoginResult{AccessToken: "new-acc", RefreshToken: "new-ref", ExpiresIn: 900}})
+	h := handler.NewAuthHandler(&fakeLogin{res: client.LoginResult{AccessToken: "new-acc", RefreshToken: "new-ref", ExpiresIn: 900}})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(`{"refreshToken":"old-ref"}`))
 	h.Refresh(rec, req)
@@ -48,7 +54,7 @@ func TestRefreshProxySuccess(t *testing.T) {
 }
 
 func TestRefreshProxyInvalidIs401(t *testing.T) {
-	h := handler.NewAuthHandler(fakeLogin{err: connect.NewError(connect.CodeUnauthenticated, errString("bad"))})
+	h := handler.NewAuthHandler(&fakeLogin{err: connect.NewError(connect.CodeUnauthenticated, errString("bad"))})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(`{"refreshToken":"garbage"}`))
 	h.Refresh(rec, req)
@@ -58,7 +64,7 @@ func TestRefreshProxyInvalidIs401(t *testing.T) {
 }
 
 func TestLoginProxySuccess(t *testing.T) {
-	h := handler.NewAuthHandler(fakeLogin{res: client.LoginResult{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 900}})
+	h := handler.NewAuthHandler(&fakeLogin{res: client.LoginResult{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 900}})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"email":"ana@garcialorca.mx","password":"secret"}`))
 	h.Login(rec, req)
@@ -74,7 +80,7 @@ func TestLoginProxySuccess(t *testing.T) {
 }
 
 func TestLoginProxyBadCredentialsIs401(t *testing.T) {
-	h := handler.NewAuthHandler(fakeLogin{err: connect.NewError(connect.CodeUnauthenticated, errString("bad"))})
+	h := handler.NewAuthHandler(&fakeLogin{err: connect.NewError(connect.CodeUnauthenticated, errString("bad"))})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"email":"a@b.mx","password":"x"}`))
 	h.Login(rec, req)
@@ -84,7 +90,7 @@ func TestLoginProxyBadCredentialsIs401(t *testing.T) {
 }
 
 func TestLoginProxyMalformedBodyIs400(t *testing.T) {
-	h := handler.NewAuthHandler(fakeLogin{})
+	h := handler.NewAuthHandler(&fakeLogin{})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`not json`))
 	h.Login(rec, req)
@@ -94,7 +100,7 @@ func TestLoginProxyMalformedBodyIs400(t *testing.T) {
 }
 
 func TestMeReturnsPrincipal(t *testing.T) {
-	h := handler.NewAuthHandler(fakeLogin{})
+	h := handler.NewAuthHandler(&fakeLogin{})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
 	ctx := middleware.WithPrincipal(req.Context(), middleware.Principal{UserID: "u1", Email: "ana@garcialorca.mx", Permissions: []string{"students:read"}})
@@ -111,7 +117,7 @@ func TestMeReturnsPrincipal(t *testing.T) {
 }
 
 func TestMeWithoutPrincipalIs401(t *testing.T) {
-	h := handler.NewAuthHandler(fakeLogin{})
+	h := handler.NewAuthHandler(&fakeLogin{})
 	rec := httptest.NewRecorder()
 	h.Me(rec, httptest.NewRequest(http.MethodGet, "/api/v1/me", nil))
 	if rec.Code != http.StatusUnauthorized {
@@ -120,7 +126,7 @@ func TestMeWithoutPrincipalIs401(t *testing.T) {
 }
 
 func TestLoginResponseIncludesMustChange(t *testing.T) {
-	h := handler.NewAuthHandler(fakeLogin{res: client.LoginResult{AccessToken: "a", RefreshToken: "r", ExpiresIn: 900, MustChangePassword: true}})
+	h := handler.NewAuthHandler(&fakeLogin{res: client.LoginResult{AccessToken: "a", RefreshToken: "r", ExpiresIn: 900, MustChangePassword: true}})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"email":"d@x","password":"p"}`))
 	h.Login(rec, req)
@@ -138,7 +144,7 @@ func TestLoginResponseIncludesMustChange(t *testing.T) {
 }
 
 func TestChangePasswordSuccessIs204(t *testing.T) {
-	h := handler.NewAuthHandler(fakeLogin{})
+	h := handler.NewAuthHandler(&fakeLogin{})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password", strings.NewReader(`{"currentPassword":"old","newPassword":"newlongpass"}`))
 	ctx := middleware.WithPrincipal(req.Context(), middleware.Principal{UserID: "u1"})
@@ -148,8 +154,28 @@ func TestChangePasswordSuccessIs204(t *testing.T) {
 	}
 }
 
+func TestChangePasswordForwardsAccessTokenNotUserID(t *testing.T) {
+	fake := &fakeLogin{}
+	h := handler.NewAuthHandler(fake)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password", strings.NewReader(`{"currentPassword":"old","newPassword":"newlongpass"}`))
+	req.Header.Set("Authorization", "Bearer caller-access-token")
+	ctx := middleware.WithPrincipal(req.Context(), middleware.Principal{UserID: "u1"})
+	h.ChangePassword(rec, req.WithContext(ctx))
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("code=%d, want 204", rec.Code)
+	}
+	if !fake.cpGotCalled {
+		t.Fatal("ChangePassword was not called")
+	}
+	if fake.cpGotToken != "caller-access-token" {
+		t.Errorf("forwarded token = %q, want the caller's access token (not a user id)", fake.cpGotToken)
+	}
+}
+
 func TestChangePasswordWithoutPrincipalIs401(t *testing.T) {
-	h := handler.NewAuthHandler(fakeLogin{})
+	h := handler.NewAuthHandler(&fakeLogin{})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password", strings.NewReader(`{"currentPassword":"old","newPassword":"newlongpass"}`))
 	h.ChangePassword(rec, req)
@@ -159,7 +185,7 @@ func TestChangePasswordWithoutPrincipalIs401(t *testing.T) {
 }
 
 func TestChangePasswordMalformedBodyIs400(t *testing.T) {
-	h := handler.NewAuthHandler(fakeLogin{})
+	h := handler.NewAuthHandler(&fakeLogin{})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password", strings.NewReader(`not json`))
 	ctx := middleware.WithPrincipal(req.Context(), middleware.Principal{UserID: "u1"})
@@ -170,7 +196,7 @@ func TestChangePasswordMalformedBodyIs400(t *testing.T) {
 }
 
 func TestChangePasswordPropagatesErrorKind(t *testing.T) {
-	h := handler.NewAuthHandler(fakeLogin{cpErr: connect.NewError(connect.CodeInvalidArgument, errString("weak"))})
+	h := handler.NewAuthHandler(&fakeLogin{cpErr: connect.NewError(connect.CodeInvalidArgument, errString("weak"))})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password", strings.NewReader(`{"currentPassword":"old","newPassword":"x"}`))
 	ctx := middleware.WithPrincipal(req.Context(), middleware.Principal{UserID: "u1"})
@@ -181,7 +207,7 @@ func TestChangePasswordPropagatesErrorKind(t *testing.T) {
 }
 
 func TestLogoutClearsCookie(t *testing.T) {
-	h := handler.NewAuthHandler(fakeLogin{})
+	h := handler.NewAuthHandler(&fakeLogin{})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
 	h.Logout(rec, req)

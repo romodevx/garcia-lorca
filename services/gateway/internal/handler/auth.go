@@ -16,7 +16,7 @@ import (
 type LoginService interface {
 	Login(ctx context.Context, email, password string) (client.LoginResult, error)
 	Refresh(ctx context.Context, refreshToken string) (client.LoginResult, error)
-	ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error
+	ChangePassword(ctx context.Context, accessToken, currentPassword, newPassword string) error
 }
 
 // AuthHandler exposes the front-facing (HTTP/JSON) auth endpoints, proxying to
@@ -139,11 +139,11 @@ type changePasswordRequest struct {
 }
 
 // ChangePassword handles POST /api/v1/auth/change-password for the authenticated
-// principal. RequireAuth injects the principal; the user id is never taken from
-// the request body.
+// principal. RequireAuth injects the principal; iam derives the subject from the
+// forwarded access token, so the gateway forwards the caller's token — never a
+// user id from the request body or principal.
 func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
-	p, ok := middleware.PrincipalFrom(r.Context())
-	if !ok {
+	if _, ok := middleware.PrincipalFrom(r.Context()); !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -152,7 +152,7 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if err := h.auth.ChangePassword(r.Context(), p.UserID, req.CurrentPassword, req.NewPassword); err != nil {
+	if err := h.auth.ChangePassword(r.Context(), middleware.TokenFrom(r), req.CurrentPassword, req.NewPassword); err != nil {
 		http.Error(w, http.StatusText(httpStatusFor(err)), httpStatusFor(err))
 		return
 	}
