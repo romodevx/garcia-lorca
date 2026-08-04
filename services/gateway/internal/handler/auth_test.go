@@ -255,13 +255,34 @@ func TestChangePasswordMalformedBodyIs400(t *testing.T) {
 }
 
 func TestChangePasswordPropagatesErrorKind(t *testing.T) {
+	// A long-enough newPassword clears the edge guard so the request reaches iam,
+	// whose InvalidArgument (e.g. a policy rejection) must surface as 400.
 	h := handler.NewAuthHandler(&fakeLogin{cpErr: connect.NewError(connect.CodeInvalidArgument, errString("weak"))})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password", strings.NewReader(`{"currentPassword":"old","newPassword":"x"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password", strings.NewReader(`{"currentPassword":"old","newPassword":"newlongpass"}`))
 	ctx := middleware.WithPrincipal(req.Context(), middleware.Principal{UserID: "u1"})
 	h.ChangePassword(rec, req.WithContext(ctx))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("code=%d, want 400", rec.Code)
+	}
+}
+
+func TestChangePasswordShortNewPasswordRejectedAtEdge(t *testing.T) {
+	// The edge guard must reject a too-short newPassword with 400 BEFORE calling
+	// iam (defense-in-depth + avoids a needless round-trip). iam still enforces
+	// server-side; this only saves the round-trip.
+	fake := &fakeLogin{}
+	h := handler.NewAuthHandler(fake)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password", strings.NewReader(`{"currentPassword":"old","newPassword":"short"}`))
+	ctx := middleware.WithPrincipal(req.Context(), middleware.Principal{UserID: "u1"})
+	h.ChangePassword(rec, req.WithContext(ctx))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("code=%d, want 400", rec.Code)
+	}
+	if fake.cpGotCalled {
+		t.Error("iam ChangePassword was called; the edge guard must short-circuit before iam")
 	}
 }
 

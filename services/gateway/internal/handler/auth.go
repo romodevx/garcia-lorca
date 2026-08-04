@@ -170,6 +170,12 @@ type changePasswordRequest struct {
 	NewPassword     string `json:"newPassword"`
 }
 
+// minNewPasswordLen is the edge floor for a new password. It mirrors iam's
+// server-side policy so an obviously too-short password is rejected at the
+// gateway (defense-in-depth) without a needless round-trip; iam remains the
+// authoritative validator.
+const minNewPasswordLen = 8
+
 // ChangePassword handles POST /api/v1/auth/change-password for the authenticated
 // principal. RequireAuth injects the principal; iam derives the subject from the
 // forwarded access token, so the gateway forwards the caller's token — never a
@@ -182,6 +188,10 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	var req changePasswordRequest
 	if err := decodeJSONBody(w, r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if len(req.NewPassword) < minNewPasswordLen {
+		http.Error(w, "new password is too short", http.StatusBadRequest)
 		return
 	}
 	if err := h.auth.ChangePassword(r.Context(), middleware.TokenFrom(r), req.CurrentPassword, req.NewPassword); err != nil {
