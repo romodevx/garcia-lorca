@@ -147,10 +147,21 @@ func TestLoginResponseCarriesMustChangePassword(t *testing.T) {
 	}
 }
 
+// loginAccessToken logs the seeded user in and returns a valid access token so
+// ChangePassword (which now derives the subject from the token) can be exercised.
+func loginAccessToken(t *testing.T, h *grpcadapter.IAMHandler) string {
+	t.Helper()
+	login, err := h.Login(context.Background(), connect.NewRequest(&iamv1.LoginRequest{Email: "ana@garcialorca.mx", Password: "secret"}))
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	return login.Msg.GetAccessToken()
+}
+
 func TestChangePasswordClearsFlagAndPersists(t *testing.T) {
 	h, users := newHandlerWithUsers(t, true)
 	_, err := h.ChangePassword(context.Background(), connect.NewRequest(&iamv1.ChangePasswordRequest{
-		UserId:          "u1",
+		AccessToken:     loginAccessToken(t, h),
 		CurrentPassword: "secret",
 		NewPassword:     "test-new-pw-123",
 	}))
@@ -165,8 +176,18 @@ func TestChangePasswordClearsFlagAndPersists(t *testing.T) {
 func TestChangePasswordWrongCurrentIsUnauthenticated(t *testing.T) {
 	h, _ := newHandlerWithUsers(t, true)
 	_, err := h.ChangePassword(context.Background(), connect.NewRequest(&iamv1.ChangePasswordRequest{
-		UserId:          "u1",
+		AccessToken:     loginAccessToken(t, h),
 		CurrentPassword: "wrong",
+		NewPassword:     "test-new-pw-123",
+	}))
+	assertCode(t, err, connect.CodeUnauthenticated)
+}
+
+func TestChangePasswordInvalidTokenIsUnauthenticated(t *testing.T) {
+	h, _ := newHandlerWithUsers(t, true)
+	_, err := h.ChangePassword(context.Background(), connect.NewRequest(&iamv1.ChangePasswordRequest{
+		AccessToken:     "garbage",
+		CurrentPassword: "secret",
 		NewPassword:     "test-new-pw-123",
 	}))
 	assertCode(t, err, connect.CodeUnauthenticated)

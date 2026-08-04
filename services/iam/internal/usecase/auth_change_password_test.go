@@ -10,6 +10,14 @@ import (
 	"github.com/garcia-lorca/services/iam/internal/usecase"
 )
 
+const (
+	cpTenantID    = "00000000-0000-0000-0000-000000000001"
+	cpSubject     = "d1"
+	cpValidToken  = "valid-token"
+	cpCurrentPass = "test-owner-pw"
+	cpNewPass     = "test-new-pw-123"
+)
+
 type cpUsers struct {
 	user    domain.User
 	hash    string
@@ -43,34 +51,52 @@ func (cpHasher) Verify(hash, plain string) error {
 	return glerrors.New(glerrors.KindUnauthorized, "invalid credentials")
 }
 
+// cpValidator resolves cpValidToken to a fixed subject; anything else is
+// Unauthorized. ChangePassword derives the subject from the verified token, never
+// from a caller-supplied id.
+type cpValidator struct{}
+
+func (cpValidator) ValidateAccessToken(_ context.Context, token string) (domain.Claims, error) {
+	if token == cpValidToken {
+		return domain.Claims{Subject: cpSubject, TenantID: cpTenantID}, nil
+	}
+	return domain.Claims{}, glerrors.New(glerrors.KindUnauthorized, "invalid access token")
+}
+func (cpValidator) ParseRefreshToken(context.Context, string) (string, error) {
+	return "", glerrors.New(glerrors.KindUnauthorized, "not a refresh token")
+}
+
 func newCPService(users *cpUsers) *usecase.AuthService {
-	// roles/issuer/validator are unused by ChangePassword; pass nil where safe.
-	return usecase.NewAuthService(users, nil, cpHasher{}, nil, nil,
-		"00000000-0000-0000-0000-000000000001", 15*time.Minute, time.Now)
+	// roles/issuer are unused by ChangePassword; pass nil where safe.
+	return usecase.NewAuthService(users, nil, cpHasher{}, nil, cpValidator{},
+		cpTenantID, 15*time.Minute, time.Now)
+}
+
+func newCPUser(t *testing.T) domain.User {
+	t.Helper()
+	email, _ := domain.NewEmail("owner@example.com")
+	u, _ := domain.NewUser(cpSubject, cpTenantID, email, "Owner", domain.StatusActive, true, nil)
+	return u
 }
 
 func TestChangePasswordSuccessClearsFlag(t *testing.T) {
-	email, _ := domain.NewEmail("director@garcialorca.edu.mx")
-	u, _ := domain.NewUser("d1", "00000000-0000-0000-0000-000000000001", email, "Director", domain.StatusActive, true, nil)
-	users := &cpUsers{user: u, hash: "H:test-owner-pw"}
+	users := &cpUsers{user: newCPUser(t), hash: "H:" + cpCurrentPass}
 	svc := newCPService(users)
 
-	err := svc.ChangePassword(context.Background(), "d1", "test-owner-pw", "test-new-pw-123")
+	err := svc.ChangePassword(context.Background(), cpValidToken, cpCurrentPass, cpNewPass)
 	if err != nil {
 		t.Fatalf("ChangePassword: %v", err)
 	}
-	if !users.updated || users.newHash != "H:test-new-pw-123" {
+	if !users.updated || users.newHash != "H:"+cpNewPass {
 		t.Errorf("updated=%v newHash=%q", users.updated, users.newHash)
 	}
 }
 
 func TestChangePasswordWrongCurrentIsUnauthorized(t *testing.T) {
-	email, _ := domain.NewEmail("director@garcialorca.edu.mx")
-	u, _ := domain.NewUser("d1", "00000000-0000-0000-0000-000000000001", email, "Director", domain.StatusActive, true, nil)
-	users := &cpUsers{user: u, hash: "H:test-owner-pw"}
+	users := &cpUsers{user: newCPUser(t), hash: "H:" + cpCurrentPass}
 	svc := newCPService(users)
 
-	err := svc.ChangePassword(context.Background(), "d1", "wrong", "test-new-pw-123")
+	err := svc.ChangePassword(context.Background(), cpValidToken, "wrong", cpNewPass)
 	if glerrors.KindOf(err) != glerrors.KindUnauthorized {
 		t.Errorf("KindOf = %v, want Unauthorized", glerrors.KindOf(err))
 	}
@@ -79,13 +105,24 @@ func TestChangePasswordWrongCurrentIsUnauthorized(t *testing.T) {
 	}
 }
 
-func TestChangePasswordRejectsShortNew(t *testing.T) {
-	email, _ := domain.NewEmail("director@garcialorca.edu.mx")
-	u, _ := domain.NewUser("d1", "00000000-0000-0000-0000-000000000001", email, "Director", domain.StatusActive, true, nil)
-	users := &cpUsers{user: u, hash: "H:test-owner-pw"}
+func TestChangePasswordInvalidTokenIsUnauthorized(t *testing.T) {
+	users := &cpUsers{user: newCPUser(t), hash: "H:" + cpCurrentPass}
 	svc := newCPService(users)
 
-	err := svc.ChangePassword(context.Background(), "d1", "test-owner-pw", "short")
+	err := svc.ChangePassword(context.Background(), "bogus-token", cpCurrentPass, cpNewPass)
+	if glerrors.KindOf(err) != glerrors.KindUnauthorized {
+		t.Errorf("KindOf = %v, want Unauthorized", glerrors.KindOf(err))
+	}
+	if users.updated {
+		t.Error("password updated despite invalid access token")
+	}
+}
+
+func TestChangePasswordRejectsShortNew(t *testing.T) {
+	users := &cpUsers{user: newCPUser(t), hash: "H:" + cpCurrentPass}
+	svc := newCPService(users)
+
+	err := svc.ChangePassword(context.Background(), cpValidToken, cpCurrentPass, "short")
 	if glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("KindOf = %v, want Invalid", glerrors.KindOf(err))
 	}

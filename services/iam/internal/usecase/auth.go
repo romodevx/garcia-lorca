@@ -113,14 +113,20 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (Au
 	return s.issueFor(ctx, user)
 }
 
-// ChangePassword sets a new password for userID after verifying the current one.
-// It clears must_change_password (the forced-rotation flag). A wrong current
-// password is Unauthorized; a too-short new password is Invalid.
-func (s *AuthService) ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error {
+// ChangePassword sets a new password for the principal identified by accessToken
+// (the subject is derived from the verified token — never a caller-supplied id),
+// after verifying the current password. It clears must_change_password (the
+// forced-rotation flag). An invalid token or a wrong current password is
+// Unauthorized; a too-short new password is Invalid.
+func (s *AuthService) ChangePassword(ctx context.Context, accessToken, currentPassword, newPassword string) error {
 	if len(newPassword) < minPasswordLen {
 		return glerrors.New(glerrors.KindInvalid, "new password is too short")
 	}
-	_, hash, err := s.users.FindAuthByID(ctx, userID)
+	claims, err := s.validator.ValidateAccessToken(ctx, accessToken)
+	if err != nil {
+		return glerrors.New(glerrors.KindUnauthorized, "invalid access token")
+	}
+	_, hash, err := s.users.FindAuthByID(ctx, claims.Subject)
 	if err != nil {
 		return glerrors.New(glerrors.KindUnauthorized, "invalid credentials")
 	}
@@ -131,7 +137,7 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID, currentPasswor
 	if err != nil {
 		return err
 	}
-	return s.users.UpdatePassword(ctx, userID, newHash)
+	return s.users.UpdatePassword(ctx, claims.Subject, newHash)
 }
 
 // ValidateToken verifies an access token and returns its claims (principal +
