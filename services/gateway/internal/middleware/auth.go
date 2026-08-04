@@ -10,10 +10,11 @@ import (
 // verified iam access token. The gateway injects it into the request context so
 // downstream handlers know who is calling and what they may do.
 type Principal struct {
-	UserID      string
-	TenantID    string
-	Email       string
-	Permissions []string
+	UserID             string
+	TenantID           string
+	Email              string
+	Permissions        []string
+	MustChangePassword bool
 }
 
 // Authenticator verifies an access token and returns its principal. The gateway
@@ -43,12 +44,7 @@ func PrincipalFrom(ctx context.Context) (p Principal, ok bool) {
 func RequireAuth(auth Authenticator) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			token := bearerToken(r) // header "Authorization: Bearer <token>" → "" if absent
-			if token == "" {
-				if c, err := r.Cookie("gl_access"); err == nil {
-					token = c.Value
-				}
-			}
+			token := TokenFrom(r)
 			if token == "" {
 				unauthorized(w)
 				return
@@ -85,6 +81,26 @@ func RequirePermission(permission string) func(http.Handler) http.Handler {
 	}
 }
 
+// RequirePasswordChanged blocks a principal that still must rotate its temporary
+// password from doing anything except changing it. It MUST run after RequireAuth.
+// Fail-closed: no principal ⇒ 401. Returns 403 with a stable
+// "password_change_required" marker so clients can route to the change-password
+// screen.
+func RequirePasswordChanged(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := PrincipalFrom(r.Context())
+		if !ok {
+			unauthorized(w)
+			return
+		}
+		if p.MustChangePassword {
+			http.Error(w, "password_change_required", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func hasPermission(p Principal, permission string) bool {
 	for _, granted := range p.Permissions {
 		if granted == permission {
@@ -92,6 +108,19 @@ func hasPermission(p Principal, permission string) bool {
 		}
 	}
 	return false
+}
+
+// TokenFrom returns the caller's access token from the Authorization header or
+// the gl_access cookie ("" if neither). Shared with RequireAuth's sourcing so the
+// change-password handler forwards the exact same token to iam.
+func TokenFrom(r *http.Request) string {
+	token := bearerToken(r)
+	if token == "" {
+		if c, err := r.Cookie("gl_access"); err == nil {
+			token = c.Value
+		}
+	}
+	return token
 }
 
 // bearerToken extracts the token from a request's "Authorization: Bearer <token>"

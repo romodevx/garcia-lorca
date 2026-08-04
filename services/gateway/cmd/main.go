@@ -96,17 +96,25 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 
 	authH := handler.NewAuthHandler(authClient)
 	requireAuth := middleware.RequireAuth(authClient)
+	// requireAuthChanged is the DEFAULT building block for authenticated routes:
+	// it authenticates AND enforces the forced password rotation, so a new route
+	// is safe unless it deliberately opts out (only change-password does, below).
+	requireAuthChanged := func(h http.Handler) http.Handler {
+		return requireAuth(middleware.RequirePasswordChanged(h))
+	}
 	guard := middleware.NewModuleGuard(flags)
 
 	mux.HandleFunc("POST /api/v1/auth/login", authH.Login)
 	mux.HandleFunc("POST /api/v1/auth/refresh", authH.Refresh)
-	mux.Handle("GET /api/v1/me", requireAuth(http.HandlerFunc(authH.Me)))
+	mux.Handle("GET /api/v1/me", requireAuthChanged(http.HandlerFunc(authH.Me)))
+	// change-password is the one deliberate exception: it stays reachable while
+	// the must-change flag is set, so it authenticates but does NOT enforce.
 	mux.Handle("POST /api/v1/auth/change-password", requireAuth(http.HandlerFunc(authH.ChangePassword)))
 	mux.HandleFunc("POST /api/v1/auth/logout", authH.Logout)
 	mux.HandleFunc("GET /api/v1/features", handler.NewFeaturesHandler(flags).Features)
 
-	// M03 students: flag-guarded, authenticated, permission-gated.
-	studentsCreate := requireAuth(middleware.RequirePermission("students:create")(
+	// M03 students: flag-guarded, authenticated+rotation-enforced, permission-gated.
+	studentsCreate := requireAuthChanged(middleware.RequirePermission("students:create")(
 		http.HandlerFunc(handler.NewStudentsHandler(studentsClient).Create)))
 	mux.Handle("POST /api/v1/students", guard.Protect("students", studentsCreate))
 	return mux
