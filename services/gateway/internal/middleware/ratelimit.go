@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,13 +14,18 @@ import (
 
 // RateLimiter is a per-key (client IP) token-bucket limiter for a single gateway
 // instance. It is in-process (no shared state across instances) — sufficient for
-// the MVP gateway (min-instances=1). Each Allow is O(1) under a single mutex and
-// allocation-free in steady state (an existing key touches no heap). Stale
-// buckets are evicted lazily so long-lived processes stay bounded in memory.
+// the MVP gateway (min-instances=1). Each Allow on an existing key is O(1) under a
+// single mutex and allocation-free (an existing key touches no heap).
 //
-// An unparseable client IP is NOT fail-open: it collapses to a single shared
-// bucket (the raw RemoteAddr string), so malformed callers throttle together
-// rather than each escaping the limit.
+// Memory is a HARD bound: the bucket map never exceeds maxKeys. Idle buckets are
+// reclaimed by a time-throttled sweep that runs at most once per evictWindow, so a
+// within-window flood of distinct IPs does NOT pay an O(maxKeys) scan on every new
+// key — amortized new-key cost stays O(1). If a burst of all-fresh keys outpaces the
+// sweep, the oldest buckets (by last-touch) are dropped in a batch to hold the cap.
+//
+// An unparseable RemoteAddr is NOT fail-open: it collapses to a single shared bucket
+// (the raw RemoteAddr string), so malformed callers throttle together rather than
+// each escaping the limit.
 type RateLimiter struct {
 	mu           sync.Mutex
 	buckets      map[string]*bucket
@@ -28,6 +34,8 @@ type RateLimiter struct {
 	now          func() time.Time
 	maxKeys      int
 	evictWindow  time.Duration
+	nextSweep    time.Time
+	sweeps       int
 	trustProxy   bool
 }
 
@@ -43,6 +51,10 @@ const (
 	defaultMaxKeys = 10000
 	// defaultEvictWindow is how long an untouched bucket survives a sweep.
 	defaultEvictWindow = 10 * time.Minute
+	// evictBatchDivisor sets the hard-cap batch size: when the map is full of fresh
+	// keys the oldest 1/N are dropped at once, leaving headroom so the O(n) oldest-
+	// selection amortizes to O(1) per insert instead of firing on every new key.
+	evictBatchDivisor = 8
 )
 
 // Option customizes a RateLimiter at construction (functional options keep the
@@ -104,7 +116,7 @@ func (rl *RateLimiter) Allow(key string) (ok bool, retryAfter time.Duration) {
 	b := rl.buckets[key]
 	if b == nil {
 		if len(rl.buckets) >= rl.maxKeys {
-			rl.evictLocked(now)
+			rl.enforceCapLocked(now)
 		}
 		rl.buckets[key] = &bucket{tokens: rl.capacity, last: now}
 		b = rl.buckets[key]
@@ -134,14 +146,71 @@ func (rl *RateLimiter) timeToNextToken(tokens float64) time.Duration {
 	return time.Duration(seconds * float64(time.Second))
 }
 
-// evictLocked drops every bucket untouched for longer than evictWindow. The
-// caller must hold rl.mu. It is O(n) but runs only when the map crosses maxKeys.
-func (rl *RateLimiter) evictLocked(now time.Time) {
+// enforceCapLocked keeps the bucket map within maxKeys. The caller must hold rl.mu
+// and call it only on the new-key path (never on the O(1) existing-key hot path).
+//
+// It first runs a time-throttled idle sweep — at most once per evictWindow — which
+// is the common case: buckets that went idle age out and are reclaimed cheaply. The
+// throttle is what bounds WORK: a within-window flood of distinct IPs no longer
+// triggers an O(maxKeys) scan on every new key, so amortized new-key cost is O(1).
+//
+// The idle sweep cannot free a burst of all-fresh keys (none are old enough), so a
+// hard-cap fallback drops the oldest buckets (by last-touch) in a batch down to a
+// low-water mark below maxKeys. Batching amortizes the O(n) oldest-selection across
+// many inserts, so even a sustained fresh-key flood stays O(1) per request while the
+// map remains a HARD cap — never more than maxKeys entries.
+func (rl *RateLimiter) enforceCapLocked(now time.Time) {
+	if !now.Before(rl.nextSweep) {
+		rl.sweepIdleLocked(now)
+		rl.nextSweep = now.Add(rl.evictWindow)
+	}
+	if len(rl.buckets) >= rl.maxKeys {
+		headroom := rl.maxKeys / evictBatchDivisor
+		if headroom < 1 {
+			headroom = 1
+		}
+		target := rl.maxKeys - headroom
+		rl.dropOldestLocked(len(rl.buckets) - target)
+	}
+}
+
+// sweepIdleLocked drops every bucket untouched for longer than evictWindow. The
+// caller must hold rl.mu. It is O(n) but the throttle in enforceCapLocked bounds how
+// often it runs. sweeps is incremented for observability in tests.
+func (rl *RateLimiter) sweepIdleLocked(now time.Time) {
+	rl.sweeps++
 	cutoff := now.Add(-rl.evictWindow)
 	for key, b := range rl.buckets {
 		if b.last.Before(cutoff) {
 			delete(rl.buckets, key)
 		}
+	}
+}
+
+// dropOldestLocked evicts the count least-recently-touched buckets. The caller must
+// hold rl.mu. It allocates and sorts, but runs only on the hard-cap fallback path
+// (never the hot path) and, because enforceCapLocked drops in batches to a low-water
+// mark, only once per batch of inserts.
+func (rl *RateLimiter) dropOldestLocked(count int) {
+	if count <= 0 {
+		return
+	}
+	type keyed struct {
+		key  string
+		last time.Time
+	}
+	entries := make([]keyed, 0, len(rl.buckets))
+	for key, b := range rl.buckets {
+		entries = append(entries, keyed{key: key, last: b.last})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].last.Before(entries[j].last)
+	})
+	if count > len(entries) {
+		count = len(entries)
+	}
+	for i := 0; i < count; i++ {
+		delete(rl.buckets, entries[i].key)
 	}
 }
 
@@ -172,16 +241,27 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 
 // clientIP is the limiter key for a request. By default it is the connection's
 // remote host (RemoteAddr minus port). Only when TRUST_PROXY is set does it honor
-// the left-most X-Forwarded-For entry — the address the trusted proxy recorded
-// for the real client. Trusting XFF without a proxy would let any caller spoof a
-// fresh key per request and bypass the limit, so it stays off by default.
+// X-Forwarded-For, and then it takes the RIGHT-most entry: with a single trusted
+// proxy, that proxy appends the address it actually observed (the real client) to
+// the end of the list, while every value to its left is supplied by the caller and
+// is therefore spoofable. Keying on the left-most would let a client rotate a fake
+// token per request and slip the limit; the right-most is the only hop we trust.
+//
+// The right-most value must parse as an IP; a missing, blank, or unparseable XFF
+// falls back to the RemoteAddr host — never a blank or bogus shared bucket. Trusting
+// XFF without a proxy would let any caller spoof a fresh key, so it stays off by
+// default.
 func (rl *RateLimiter) clientIP(r *http.Request) string {
 	if rl.trustProxy {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			if comma := strings.IndexByte(xff, ','); comma >= 0 {
-				return strings.TrimSpace(xff[:comma])
+			candidate := xff
+			if comma := strings.LastIndexByte(xff, ','); comma >= 0 {
+				candidate = xff[comma+1:]
 			}
-			return strings.TrimSpace(xff)
+			candidate = strings.TrimSpace(candidate)
+			if net.ParseIP(candidate) != nil {
+				return candidate
+			}
 		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
