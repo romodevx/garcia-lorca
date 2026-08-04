@@ -3,17 +3,19 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
 import { Providers } from "./test-utils";
-import { changePassword as apiChangePassword, login as apiLogin, logout as apiLogout } from "./auth/api";
+import { changePassword as apiChangePassword, login as apiLogin, logout as apiLogout, refresh as apiRefresh } from "./auth/api";
 
 vi.mock("./auth/api", () => ({
   login: vi.fn(),
   changePassword: vi.fn(),
   logout: vi.fn(),
+  refresh: vi.fn(),
 }));
 
 const mockLogin = vi.mocked(apiLogin);
 const mockChangePassword = vi.mocked(apiChangePassword);
 const mockLogout = vi.mocked(apiLogout);
+const mockRefresh = vi.mocked(apiRefresh);
 
 afterEach(() => vi.clearAllMocks());
 
@@ -54,6 +56,7 @@ describe("AppShell navigation flow", () => {
   it("routes to the forced change-password screen and then to the dashboard", async () => {
     mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: true });
     mockChangePassword.mockResolvedValue(undefined);
+    mockRefresh.mockResolvedValue({ expiresIn: 900 });
     const user = userEvent.setup();
     render(
       <Providers flags={{ module_finance: true }}>
@@ -72,6 +75,8 @@ describe("AppShell navigation flow", () => {
     await user.click(screen.getByRole("button", { name: "Guardar y entrar" }));
 
     expect(mockChangePassword).toHaveBeenCalledWith(expect.any(String), "test-owner-pw", "test-new-pw-123");
+    // The cookie must be rotated after the change so it carries mcp=false.
+    expect(mockRefresh).toHaveBeenCalledWith(expect.any(String));
     expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
   });
 
