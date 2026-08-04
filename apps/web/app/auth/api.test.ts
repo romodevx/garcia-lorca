@@ -1,25 +1,49 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { changePassword, login, logout } from "./api";
+import { changePassword, login, logout, refresh } from "./api";
 
 afterEach(() => vi.restoreAllMocks());
 
 describe("login", () => {
-  it("posts credentials and returns mustChangePassword", async () => {
+  it("posts credentials and returns only expiresIn + mustChangePassword (no tokens)", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ accessToken: "a", refreshToken: "r", expiresIn: 900, mustChangePassword: true }), {
+      new Response(JSON.stringify({ expiresIn: 900, mustChangePassword: true }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const res = await login("http://gw", "d@x", "p");
-    expect(res.mustChangePassword).toBe(true);
+    const res = await login("http://gw", "owner@example.com", "pw");
+    expect(res).toEqual({ expiresIn: 900, mustChangePassword: true });
+    expect(res).not.toHaveProperty("accessToken");
+    expect(res).not.toHaveProperty("refreshToken");
     expect(fetchMock).toHaveBeenCalledWith("http://gw/api/v1/auth/login", expect.objectContaining({ method: "POST", credentials: "include" }));
   });
 
   it("throws on 401", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 401 })));
-    await expect(login("http://gw", "d@x", "bad")).rejects.toThrow();
+    await expect(login("http://gw", "owner@example.com", "bad")).rejects.toThrow();
+  });
+});
+
+describe("refresh", () => {
+  it("posts with credentials and no body, returning the new access lifetime", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ expiresIn: 900 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await refresh("http://gw");
+    expect(res.expiresIn).toBe(900);
+    expect(fetchMock).toHaveBeenCalledWith("http://gw/api/v1/auth/refresh", expect.objectContaining({ method: "POST", credentials: "include" }));
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.body).toBeUndefined();
+  });
+
+  it("throws on 401", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 401 })));
+    await expect(refresh("http://gw")).rejects.toThrow();
   });
 });
 

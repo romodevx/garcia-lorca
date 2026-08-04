@@ -80,8 +80,8 @@ func main() {
 // test can assemble the exact production routes against a test iam server.
 //
 //	POST /api/v1/auth/login    → proxy to iam Login (unauthenticated)
-//	POST /api/v1/auth/refresh  → proxy to iam RefreshToken
-//	POST /api/v1/auth/logout   → expire the gl_access cookie (unauthenticated)
+//	POST /api/v1/auth/refresh  → rotate both auth cookies via iam RefreshToken
+//	POST /api/v1/auth/logout   → expire both auth cookies (unauthenticated)
 //	GET  /api/v1/me            → RequireAuth → the caller's principal
 //	GET  /api/v1/features      → resolved module-flag map (frontend gating)
 //	POST /api/v1/students      → ModuleGuard(students) → RequireAuth →

@@ -25,7 +25,7 @@ async function submitLogin(user: ReturnType<typeof userEvent.setup>): Promise<vo
 
 describe("AppShell navigation flow", () => {
   it("goes login → dashboard → finance → back, then logs out", async () => {
-    mockLogin.mockResolvedValue({ accessToken: "a", refreshToken: "r", expiresIn: 900, mustChangePassword: false });
+    mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: false });
     mockLogout.mockResolvedValue(undefined);
     const user = userEvent.setup();
     render(
@@ -52,7 +52,7 @@ describe("AppShell navigation flow", () => {
   });
 
   it("routes to the forced change-password screen and then to the dashboard", async () => {
-    mockLogin.mockResolvedValue({ accessToken: "a", refreshToken: "r", expiresIn: 900, mustChangePassword: true });
+    mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: true });
     mockChangePassword.mockResolvedValue(undefined);
     const user = userEvent.setup();
     render(
@@ -91,7 +91,7 @@ describe("AppShell navigation flow", () => {
   });
 
   it("falls back to the placeholder when module_finance is OFF (UX gating)", async () => {
-    mockLogin.mockResolvedValue({ accessToken: "a", refreshToken: "r", expiresIn: 900, mustChangePassword: false });
+    mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: false });
     const user = userEvent.setup();
     render(
       <Providers flags={{}}>

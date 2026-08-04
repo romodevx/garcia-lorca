@@ -37,10 +37,21 @@ func (f *fakeLogin) ChangePassword(_ context.Context, accessToken, _, _ string) 
 	return f.cpErr
 }
 
-func TestRefreshProxySuccess(t *testing.T) {
+// cookieByName returns the Set-Cookie matching name, or nil.
+func cookieByName(cs []*http.Cookie, name string) *http.Cookie {
+	for _, c := range cs {
+		if c.Name == name {
+			return c
+		}
+	}
+	return nil
+}
+
+func TestRefreshRotatesBothCookiesNoBodyTokens(t *testing.T) {
 	h := handler.NewAuthHandler(&fakeLogin{res: client.LoginResult{AccessToken: "new-acc", RefreshToken: "new-ref", ExpiresIn: 900}})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(`{"refreshToken":"old-ref"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
+	req.AddCookie(&http.Cookie{Name: "gl_refresh", Value: "old-ref"})
 	h.Refresh(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -48,15 +59,38 @@ func TestRefreshProxySuccess(t *testing.T) {
 	}
 	var body map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &body)
-	if body["accessToken"] != "new-acc" || body["refreshToken"] != "new-ref" {
-		t.Errorf("body = %v", body)
+	if _, ok := body["accessToken"]; ok {
+		t.Errorf("body must not contain accessToken, got %v", body)
+	}
+	if _, ok := body["refreshToken"]; ok {
+		t.Errorf("body must not contain refreshToken, got %v", body)
+	}
+	cs := rec.Result().Cookies()
+	acc := cookieByName(cs, "gl_access")
+	ref := cookieByName(cs, "gl_refresh")
+	if acc == nil || acc.Value != "new-acc" || !acc.HttpOnly || acc.Path != "/" {
+		t.Errorf("gl_access rotation cookie = %v", acc)
+	}
+	if ref == nil || ref.Value != "new-ref" || !ref.HttpOnly || ref.Path != "/api/v1/auth" {
+		t.Errorf("gl_refresh rotation cookie = %v", ref)
+	}
+}
+
+func TestRefreshMissingCookieIs401(t *testing.T) {
+	h := handler.NewAuthHandler(&fakeLogin{res: client.LoginResult{AccessToken: "a", RefreshToken: "r", ExpiresIn: 900}})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
+	h.Refresh(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("code = %d, want 401", rec.Code)
 	}
 }
 
 func TestRefreshProxyInvalidIs401(t *testing.T) {
 	h := handler.NewAuthHandler(&fakeLogin{err: connect.NewError(connect.CodeUnauthenticated, errString("bad"))})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(`{"refreshToken":"garbage"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
+	req.AddCookie(&http.Cookie{Name: "gl_refresh", Value: "garbage"})
 	h.Refresh(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("code = %d, want 401", rec.Code)
@@ -74,8 +108,18 @@ func TestLoginProxySuccess(t *testing.T) {
 	}
 	var body map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &body)
-	if body["accessToken"] != "acc" || body["refreshToken"] != "ref" {
-		t.Errorf("body = %v", body)
+	if _, ok := body["accessToken"]; ok {
+		t.Errorf("body must not contain accessToken, got %v", body)
+	}
+	if _, ok := body["refreshToken"]; ok {
+		t.Errorf("body must not contain refreshToken, got %v", body)
+	}
+	cs := rec.Result().Cookies()
+	if acc := cookieByName(cs, "gl_access"); acc == nil || acc.Value != "acc" {
+		t.Errorf("gl_access cookie = %v", acc)
+	}
+	if ref := cookieByName(cs, "gl_refresh"); ref == nil || ref.Value != "ref" {
+		t.Errorf("gl_refresh cookie = %v", ref)
 	}
 }
 
@@ -138,8 +182,23 @@ func TestLoginResponseIncludesMustChange(t *testing.T) {
 	if body["mustChangePassword"] != true {
 		t.Errorf("mustChangePassword=%v, want true", body["mustChangePassword"])
 	}
-	if c := rec.Result().Cookies(); len(c) == 0 || c[0].Name != "gl_access" || !c[0].HttpOnly {
-		t.Errorf("expected HttpOnly gl_access cookie, got %v", rec.Result().Cookies())
+	if _, ok := body["expiresIn"]; !ok {
+		t.Errorf("body must contain expiresIn, got %v", body)
+	}
+	if _, ok := body["accessToken"]; ok {
+		t.Errorf("body must not contain accessToken, got %v", body)
+	}
+	if _, ok := body["refreshToken"]; ok {
+		t.Errorf("body must not contain refreshToken, got %v", body)
+	}
+	cs := rec.Result().Cookies()
+	acc := cookieByName(cs, "gl_access")
+	if acc == nil || !acc.HttpOnly || acc.Path != "/" {
+		t.Errorf("expected HttpOnly gl_access cookie (Path /), got %v", acc)
+	}
+	ref := cookieByName(cs, "gl_refresh")
+	if ref == nil || !ref.HttpOnly || ref.Path != "/api/v1/auth" {
+		t.Errorf("expected HttpOnly gl_refresh cookie (Path /api/v1/auth), got %v", ref)
 	}
 }
 
@@ -215,8 +274,13 @@ func TestLogoutClearsCookie(t *testing.T) {
 		t.Fatalf("code = %d, want 204", rec.Code)
 	}
 	cs := rec.Result().Cookies()
-	if len(cs) == 0 || cs[0].Name != "gl_access" || cs[0].MaxAge >= 0 || !cs[0].HttpOnly {
-		t.Errorf("expected HttpOnly gl_access deletion cookie, got %v", cs)
+	acc := cookieByName(cs, "gl_access")
+	if acc == nil || acc.MaxAge >= 0 || !acc.HttpOnly || acc.Path != "/" {
+		t.Errorf("expected HttpOnly gl_access deletion cookie (Path /), got %v", acc)
+	}
+	ref := cookieByName(cs, "gl_refresh")
+	if ref == nil || ref.MaxAge >= 0 || !ref.HttpOnly || ref.Path != "/api/v1/auth" {
+		t.Errorf("expected HttpOnly gl_refresh deletion cookie (Path /api/v1/auth), got %v", ref)
 	}
 }
 
