@@ -1,0 +1,422 @@
+package client
+
+import (
+	"context"
+	"net/http"
+	"time"
+
+	connect "connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	configv1 "github.com/garcia-lorca/gen/go/garcialorca/config/v1"
+	"github.com/garcia-lorca/gen/go/garcialorca/config/v1/configv1connect"
+)
+
+// ConfigClient is the gateway's typed client for the config (academic catalog)
+// service over the generated Connect client. Handlers depend on its small
+// methods and the plain structs below, never on the generated proto types.
+// Enums are flattened to canonical lowercase strings and timestamps to
+// time.Time so the JSON layer stays framework-free.
+type ConfigClient struct {
+	rpc configv1connect.ConfigServiceClient
+}
+
+// NewConfigClient builds a ConfigClient targeting the config base URL over
+// httpClient.
+func NewConfigClient(baseURL string, httpClient connect.HTTPClient) *ConfigClient {
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	return &ConfigClient{rpc: configv1connect.NewConfigServiceClient(httpClient, baseURL)}
+}
+
+// --- edge structs ---------------------------------------------------------
+
+// CreateCycleInput is the edge's view of a new-cycle request. Status is a
+// canonical lowercase name ("draft"/"active"/"closed"); an unknown value maps
+// to the unspecified wire enum, which the config service rejects as invalid.
+type CreateCycleInput struct {
+	Name     string
+	Status   string
+	StartsOn time.Time
+	EndsOn   time.Time
+}
+
+// CycleResult is the edge's view of a cycle.
+type CycleResult struct {
+	ID       string
+	Name     string
+	Status   string
+	StartsOn time.Time
+	EndsOn   time.Time
+}
+
+// CreateLevelInput is the edge's view of a new-level request. Granularity is a
+// canonical lowercase name ("cycle"/"term").
+type CreateLevelInput struct {
+	Name        string
+	SEPCode     string
+	Granularity string
+}
+
+// LevelResult is the edge's view of a catalog level.
+type LevelResult struct {
+	ID          string
+	Name        string
+	SEPCode     string
+	Granularity string
+}
+
+// CreateGradeLevelInput is the edge's view of a new grade-within-a-level.
+type CreateGradeLevelInput struct {
+	LevelID string
+	Name    string
+	Ordinal int
+}
+
+// GradeLevelResult is the edge's view of a grade_level.
+type GradeLevelResult struct {
+	ID      string
+	LevelID string
+	Name    string
+	Ordinal int
+}
+
+// CreateSubjectInput is the edge's view of a new subject at a grade.
+type CreateSubjectInput struct {
+	GradeLevelID string
+	Name         string
+}
+
+// SubjectResult is the edge's view of a subject.
+type SubjectResult struct {
+	ID           string
+	GradeLevelID string
+	Name         string
+}
+
+// CreateTermInput is the edge's view of a new period within a cycle for a level.
+type CreateTermInput struct {
+	CycleID  string
+	LevelID  string
+	Name     string
+	Ordinal  int
+	StartsOn time.Time
+	EndsOn   time.Time
+}
+
+// TermResult is the edge's view of a term.
+type TermResult struct {
+	ID       string
+	CycleID  string
+	LevelID  string
+	Name     string
+	Ordinal  int
+	StartsOn time.Time
+	EndsOn   time.Time
+}
+
+// CreateGroupInput is the edge's view of a new class group within a cycle for a
+// grade.
+type CreateGroupInput struct {
+	CycleID      string
+	GradeLevelID string
+	Name         string
+	Capacity     int
+}
+
+// GroupResult is the edge's view of a group.
+type GroupResult struct {
+	ID           string
+	CycleID      string
+	GradeLevelID string
+	Name         string
+	Capacity     int
+}
+
+// --- cycles ---------------------------------------------------------------
+
+// CreateCycle adds a school-year cycle via the config service.
+func (c *ConfigClient) CreateCycle(ctx context.Context, in CreateCycleInput) (CycleResult, error) {
+	res, err := c.rpc.CreateCycle(ctx, connect.NewRequest(&configv1.CreateCycleRequest{
+		Name:     in.Name,
+		Status:   cycleStatusFromName(in.Status),
+		StartsOn: tsFromTime(in.StartsOn),
+		EndsOn:   tsFromTime(in.EndsOn),
+	}))
+	if err != nil {
+		return CycleResult{}, err
+	}
+	return toCycleResult(res.Msg.GetCycle()), nil
+}
+
+// ListCycles lists every cycle in the tenant.
+func (c *ConfigClient) ListCycles(ctx context.Context) ([]CycleResult, error) {
+	res, err := c.rpc.ListCycles(ctx, connect.NewRequest(&configv1.ListCyclesRequest{}))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CycleResult, 0, len(res.Msg.GetCycles()))
+	for _, cyc := range res.Msg.GetCycles() {
+		out = append(out, toCycleResult(cyc))
+	}
+	return out, nil
+}
+
+// --- levels ---------------------------------------------------------------
+
+// CreateLevel adds a catalog level via the config service.
+func (c *ConfigClient) CreateLevel(ctx context.Context, in CreateLevelInput) (LevelResult, error) {
+	res, err := c.rpc.CreateLevel(ctx, connect.NewRequest(&configv1.CreateLevelRequest{
+		Name:                  in.Name,
+		SepCode:               in.SEPCode,
+		EnrollmentGranularity: granularityFromName(in.Granularity),
+	}))
+	if err != nil {
+		return LevelResult{}, err
+	}
+	return toLevelResult(res.Msg.GetLevel()), nil
+}
+
+// ListLevels lists every level in the tenant catalog.
+func (c *ConfigClient) ListLevels(ctx context.Context) ([]LevelResult, error) {
+	res, err := c.rpc.ListLevels(ctx, connect.NewRequest(&configv1.ListLevelsRequest{}))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]LevelResult, 0, len(res.Msg.GetLevels()))
+	for _, l := range res.Msg.GetLevels() {
+		out = append(out, toLevelResult(l))
+	}
+	return out, nil
+}
+
+// --- grade_levels ---------------------------------------------------------
+
+// CreateGradeLevel adds a grade within a level.
+func (c *ConfigClient) CreateGradeLevel(ctx context.Context, in CreateGradeLevelInput) (GradeLevelResult, error) {
+	res, err := c.rpc.CreateGradeLevel(ctx, connect.NewRequest(&configv1.CreateGradeLevelRequest{
+		LevelId: in.LevelID,
+		Name:    in.Name,
+		Ordinal: int32(in.Ordinal),
+	}))
+	if err != nil {
+		return GradeLevelResult{}, err
+	}
+	return toGradeLevelResult(res.Msg.GetGradeLevel()), nil
+}
+
+// ListGradeLevels lists the grades of a level (scoped by levelID).
+func (c *ConfigClient) ListGradeLevels(ctx context.Context, levelID string) ([]GradeLevelResult, error) {
+	res, err := c.rpc.ListGradeLevels(ctx, connect.NewRequest(&configv1.ListGradeLevelsRequest{LevelId: levelID}))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]GradeLevelResult, 0, len(res.Msg.GetGradeLevels()))
+	for _, g := range res.Msg.GetGradeLevels() {
+		out = append(out, toGradeLevelResult(g))
+	}
+	return out, nil
+}
+
+// --- subjects -------------------------------------------------------------
+
+// CreateSubject adds a subject taught at a grade.
+func (c *ConfigClient) CreateSubject(ctx context.Context, in CreateSubjectInput) (SubjectResult, error) {
+	res, err := c.rpc.CreateSubject(ctx, connect.NewRequest(&configv1.CreateSubjectRequest{
+		GradeLevelId: in.GradeLevelID,
+		Name:         in.Name,
+	}))
+	if err != nil {
+		return SubjectResult{}, err
+	}
+	return toSubjectResult(res.Msg.GetSubject()), nil
+}
+
+// ListSubjects lists the subjects of a grade (scoped by gradeLevelID).
+func (c *ConfigClient) ListSubjects(ctx context.Context, gradeLevelID string) ([]SubjectResult, error) {
+	res, err := c.rpc.ListSubjects(ctx, connect.NewRequest(&configv1.ListSubjectsRequest{GradeLevelId: gradeLevelID}))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SubjectResult, 0, len(res.Msg.GetSubjects()))
+	for _, s := range res.Msg.GetSubjects() {
+		out = append(out, toSubjectResult(s))
+	}
+	return out, nil
+}
+
+// --- terms ----------------------------------------------------------------
+
+// CreateTerm adds a period within a cycle for a level.
+func (c *ConfigClient) CreateTerm(ctx context.Context, in CreateTermInput) (TermResult, error) {
+	res, err := c.rpc.CreateTerm(ctx, connect.NewRequest(&configv1.CreateTermRequest{
+		CycleId:  in.CycleID,
+		LevelId:  in.LevelID,
+		Name:     in.Name,
+		Ordinal:  int32(in.Ordinal),
+		StartsOn: tsFromTime(in.StartsOn),
+		EndsOn:   tsFromTime(in.EndsOn),
+	}))
+	if err != nil {
+		return TermResult{}, err
+	}
+	return toTermResult(res.Msg.GetTerm()), nil
+}
+
+// ListTerms lists the terms of a cycle, optionally filtered by level.
+func (c *ConfigClient) ListTerms(ctx context.Context, cycleID, levelID string) ([]TermResult, error) {
+	res, err := c.rpc.ListTerms(ctx, connect.NewRequest(&configv1.ListTermsRequest{CycleId: cycleID, LevelId: levelID}))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TermResult, 0, len(res.Msg.GetTerms()))
+	for _, tm := range res.Msg.GetTerms() {
+		out = append(out, toTermResult(tm))
+	}
+	return out, nil
+}
+
+// --- groups ---------------------------------------------------------------
+
+// CreateGroup adds a class group within a cycle for a grade.
+func (c *ConfigClient) CreateGroup(ctx context.Context, in CreateGroupInput) (GroupResult, error) {
+	res, err := c.rpc.CreateGroup(ctx, connect.NewRequest(&configv1.CreateGroupRequest{
+		CycleId:      in.CycleID,
+		GradeLevelId: in.GradeLevelID,
+		Name:         in.Name,
+		Capacity:     int32(in.Capacity),
+	}))
+	if err != nil {
+		return GroupResult{}, err
+	}
+	return toGroupResult(res.Msg.GetGroup()), nil
+}
+
+// ListGroups lists the groups of a cycle, optionally filtered by grade.
+func (c *ConfigClient) ListGroups(ctx context.Context, cycleID, gradeLevelID string) ([]GroupResult, error) {
+	res, err := c.rpc.ListGroups(ctx, connect.NewRequest(&configv1.ListGroupsRequest{CycleId: cycleID, GradeLevelId: gradeLevelID}))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]GroupResult, 0, len(res.Msg.GetGroups()))
+	for _, g := range res.Msg.GetGroups() {
+		out = append(out, toGroupResult(g))
+	}
+	return out, nil
+}
+
+// --- proto ↔ edge mappers -------------------------------------------------
+
+func toCycleResult(c *configv1.Cycle) CycleResult {
+	return CycleResult{
+		ID:       c.GetId(),
+		Name:     c.GetName(),
+		Status:   cycleStatusName(c.GetStatus()),
+		StartsOn: timeFromTS(c.GetStartsOn()),
+		EndsOn:   timeFromTS(c.GetEndsOn()),
+	}
+}
+
+func toLevelResult(l *configv1.Level) LevelResult {
+	return LevelResult{
+		ID:          l.GetId(),
+		Name:        l.GetName(),
+		SEPCode:     l.GetSepCode(),
+		Granularity: granularityName(l.GetEnrollmentGranularity()),
+	}
+}
+
+func toGradeLevelResult(g *configv1.GradeLevel) GradeLevelResult {
+	return GradeLevelResult{
+		ID:      g.GetId(),
+		LevelID: g.GetLevelId(),
+		Name:    g.GetName(),
+		Ordinal: int(g.GetOrdinal()),
+	}
+}
+
+func toSubjectResult(s *configv1.Subject) SubjectResult {
+	return SubjectResult{
+		ID:           s.GetId(),
+		GradeLevelID: s.GetGradeLevelId(),
+		Name:         s.GetName(),
+	}
+}
+
+func toTermResult(t *configv1.Term) TermResult {
+	return TermResult{
+		ID:       t.GetId(),
+		CycleID:  t.GetCycleId(),
+		LevelID:  t.GetLevelId(),
+		Name:     t.GetName(),
+		Ordinal:  int(t.GetOrdinal()),
+		StartsOn: timeFromTS(t.GetStartsOn()),
+		EndsOn:   timeFromTS(t.GetEndsOn()),
+	}
+}
+
+func toGroupResult(g *configv1.Group) GroupResult {
+	return GroupResult{
+		ID:           g.GetId(),
+		CycleID:      g.GetCycleId(),
+		GradeLevelID: g.GetGradeLevelId(),
+		Name:         g.GetName(),
+		Capacity:     int(g.GetCapacity()),
+	}
+}
+
+// --- enum ↔ string --------------------------------------------------------
+
+var cycleStatusNames = map[configv1.CycleStatus]string{
+	configv1.CycleStatus_CYCLE_STATUS_DRAFT:  "draft",
+	configv1.CycleStatus_CYCLE_STATUS_ACTIVE: "active",
+	configv1.CycleStatus_CYCLE_STATUS_CLOSED: "closed",
+}
+
+func cycleStatusName(s configv1.CycleStatus) string { return cycleStatusNames[s] }
+
+func cycleStatusFromName(name string) configv1.CycleStatus {
+	for status, n := range cycleStatusNames {
+		if n == name {
+			return status
+		}
+	}
+	return configv1.CycleStatus_CYCLE_STATUS_UNSPECIFIED
+}
+
+var granularityNames = map[configv1.EnrollmentGranularity]string{
+	configv1.EnrollmentGranularity_ENROLLMENT_GRANULARITY_CYCLE: "cycle",
+	configv1.EnrollmentGranularity_ENROLLMENT_GRANULARITY_TERM:  "term",
+}
+
+func granularityName(g configv1.EnrollmentGranularity) string { return granularityNames[g] }
+
+func granularityFromName(name string) configv1.EnrollmentGranularity {
+	for gran, n := range granularityNames {
+		if n == name {
+			return gran
+		}
+	}
+	return configv1.EnrollmentGranularity_ENROLLMENT_GRANULARITY_UNSPECIFIED
+}
+
+// --- time ↔ timestamp -----------------------------------------------------
+
+// tsFromTime converts a wall-clock time to a proto timestamp, mapping the zero
+// time to nil so an unset date is not sent as the Unix epoch.
+func tsFromTime(t time.Time) *timestamppb.Timestamp {
+	if t.IsZero() {
+		return nil
+	}
+	return timestamppb.New(t)
+}
+
+// timeFromTS converts a proto timestamp to a wall-clock time, mapping nil to the
+// zero time.
+func timeFromTS(ts *timestamppb.Timestamp) time.Time {
+	if ts == nil {
+		return time.Time{}
+	}
+	return ts.AsTime()
+}
