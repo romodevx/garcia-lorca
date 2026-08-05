@@ -397,16 +397,19 @@ func TestCreateCycle(t *testing.T) {
 	}
 }
 
-func TestCreateCycleUnspecifiedStatusIsInvalid(t *testing.T) {
+func TestCreateCycleUnspecifiedStatusDefaultsToDraft(t *testing.T) {
 	h, _ := newHandler(t)
-	_, err := h.CreateCycle(ctx(), connect.NewRequest(&configv1.CreateCycleRequest{
+	res, err := h.CreateCycle(ctx(), connect.NewRequest(&configv1.CreateCycleRequest{
 		Name:     "2026-2027",
 		Status:   configv1.CycleStatus_CYCLE_STATUS_UNSPECIFIED,
 		StartsOn: timestamppb.New(someDate),
 		EndsOn:   timestamppb.New(laterDate),
 	}))
-	if got := codeOf(err); got != connect.CodeInvalidArgument {
-		t.Errorf("unspecified status: code = %v, want InvalidArgument", got)
+	if err != nil {
+		t.Fatalf("CreateCycle with unspecified status: %v", err)
+	}
+	if got := res.Msg.GetCycle().GetStatus(); got != configv1.CycleStatus_CYCLE_STATUS_DRAFT {
+		t.Errorf("status = %v, want CYCLE_STATUS_DRAFT", got)
 	}
 }
 

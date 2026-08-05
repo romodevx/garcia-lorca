@@ -289,6 +289,25 @@ func TestCreateCycle(t *testing.T) {
 	}
 }
 
+func TestCreateCycleDefaultsUnspecifiedToDraft(t *testing.T) {
+	svc, repo := newService(t)
+	// Creating with an unspecified status defaults to draft (matches the proto
+	// contract, the DDL DEFAULT 'draft', and the fewest-clicks UX).
+	c, err := svc.CreateCycle(ctx(), "2026-2027", domain.CycleStatusUnspecified, someDate, laterDate)
+	if err != nil {
+		t.Fatalf("CreateCycle with unspecified status: %v", err)
+	}
+	if c.Status() != domain.CycleStatusDraft {
+		t.Errorf("status = %v, want CycleStatusDraft", c.Status())
+	}
+	if len(repo.cycles) != 1 {
+		t.Errorf("expected 1 persisted cycle, got %d", len(repo.cycles))
+	}
+	if got := repo.cycles[c.ID()]; got.Status() != domain.CycleStatusDraft {
+		t.Errorf("persisted status = %v, want CycleStatusDraft", got.Status())
+	}
+}
+
 func TestCreateCycleInvalidArg(t *testing.T) {
 	svc, repo := newService(t)
 	// empty name → constructor KindInvalid.

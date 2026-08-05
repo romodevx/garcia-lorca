@@ -313,10 +313,15 @@ func toProtoGranularity(g domain.EnrollmentGranularity) configv1.EnrollmentGranu
 	}
 }
 
-// toDomainCycleStatus maps a proto CycleStatus to the domain enum, rejecting
-// UNSPECIFIED (and any unknown value) as KindInvalid.
+// toDomainCycleStatus maps a proto CycleStatus to the domain enum. UNSPECIFIED
+// passes through as CycleStatusUnspecified — the use case defaults it to draft
+// (matching the proto contract and the DDL DEFAULT 'draft'). Genuinely unknown /
+// out-of-range enum values are rejected as KindInvalid so the boundary never
+// forwards a garbage enum inward.
 func toDomainCycleStatus(s configv1.CycleStatus) (domain.CycleStatus, error) {
 	switch s {
+	case configv1.CycleStatus_CYCLE_STATUS_UNSPECIFIED:
+		return domain.CycleStatusUnspecified, nil
 	case configv1.CycleStatus_CYCLE_STATUS_DRAFT:
 		return domain.CycleStatusDraft, nil
 	case configv1.CycleStatus_CYCLE_STATUS_ACTIVE:
@@ -324,7 +329,7 @@ func toDomainCycleStatus(s configv1.CycleStatus) (domain.CycleStatus, error) {
 	case configv1.CycleStatus_CYCLE_STATUS_CLOSED:
 		return domain.CycleStatusClosed, nil
 	default:
-		return domain.CycleStatusUnspecified, glerrors.New(glerrors.KindInvalid, "status is required")
+		return domain.CycleStatusUnspecified, glerrors.New(glerrors.KindInvalid, "status is invalid")
 	}
 }
 

@@ -58,8 +58,9 @@ type Cycle struct {
 	endsOn   time.Time
 }
 
-// NewCycle constructs a cycle. `id`, `tenantID`, and `name` are required, and
-// `endsOn` must not be before `startsOn`.
+// NewCycle constructs a cycle. `id`, `tenantID`, and `name` are required,
+// `status` must be a real status (not unspecified), and `endsOn` must not be
+// before `startsOn`.
 func NewCycle(id, tenantID, name string, status CycleStatus, startsOn, endsOn time.Time) (Cycle, error) {
 	if strings.TrimSpace(id) == "" {
 		return Cycle{}, glerrors.New(glerrors.KindInvalid, "cycle id is required")
@@ -69,6 +70,9 @@ func NewCycle(id, tenantID, name string, status CycleStatus, startsOn, endsOn ti
 	}
 	if strings.TrimSpace(name) == "" {
 		return Cycle{}, glerrors.New(glerrors.KindInvalid, "cycle name is required")
+	}
+	if !status.Valid() {
+		return Cycle{}, glerrors.New(glerrors.KindInvalid, "cycle status is invalid")
 	}
 	if endsOn.Before(startsOn) {
 		return Cycle{}, glerrors.New(glerrors.KindInvalid, "cycle ends_on must not be before starts_on")

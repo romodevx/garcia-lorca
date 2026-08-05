@@ -46,9 +46,14 @@ func requireParent(err error, msg string) error {
 
 // --- cycles ----------------------------------------------------------------
 
-// CreateCycle validates and persists a new cycle. A duplicate name (per tenant)
-// surfaces as KindConflict from the repo.
+// CreateCycle validates and persists a new cycle. An unspecified status defaults
+// to draft (matching the proto contract, the DDL DEFAULT 'draft', and the
+// fewest-clicks UX) — a new cycle always begins as a draft. A duplicate name
+// (per tenant) surfaces as KindConflict from the repo.
 func (s *CatalogService) CreateCycle(ctx context.Context, name string, status domain.CycleStatus, startsOn, endsOn time.Time) (domain.Cycle, error) {
+	if status == domain.CycleStatusUnspecified {
+		status = domain.CycleStatusDraft
+	}
 	c, err := domain.NewCycle(s.newID(), s.tenant, name, status, startsOn, endsOn)
 	if err != nil {
 		return domain.Cycle{}, err
