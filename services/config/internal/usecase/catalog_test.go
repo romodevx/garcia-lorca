@@ -238,7 +238,6 @@ func newService(t *testing.T) (*usecase.CatalogService, *fakeCatalog) {
 		repo,
 		tenant,
 		func() string { ids++; return "id-" + itoa(ids) },
-		func() time.Time { return someDate },
 	)
 	return svc, repo
 }

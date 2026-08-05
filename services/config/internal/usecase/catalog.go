@@ -16,20 +16,19 @@ import (
 // KindInvalid at the boundary rather than as an opaque FK error from the DB.
 //
 // It depends only on ports + domain. Ids come from an injected mint (uuid in
-// production, a counter in tests) and the clock is injected too, so use cases
-// are deterministic under test.
+// production, a counter in tests), so use cases are deterministic under test.
+// created_at/updated_at are owned by the DB, so no clock is injected here.
 type CatalogService struct {
 	repo   ports.CatalogRepository
 	tenant string
 	newID  func() string
-	now    func() time.Time
 }
 
 // NewCatalogService wires the use case. `tenant` is the single-tenant scope for
 // the M-phase (fixed at construction, as in iam/students); `newID` mints entity
-// ids and `now` supplies the clock — both injected for deterministic tests.
-func NewCatalogService(repo ports.CatalogRepository, tenant string, newID func() string, now func() time.Time) *CatalogService {
-	return &CatalogService{repo: repo, tenant: tenant, newID: newID, now: now}
+// ids — injected for deterministic tests.
+func NewCatalogService(repo ports.CatalogRepository, tenant string, newID func() string) *CatalogService {
+	return &CatalogService{repo: repo, tenant: tenant, newID: newID}
 }
 
 // requireParent maps a parent-existence probe into a create precondition. A
