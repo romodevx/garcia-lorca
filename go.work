@@ -9,6 +9,7 @@ use (
 	./services/attendance
 	./services/billing
 	./services/comms
+	./services/config
 	./services/docs
 	./services/finance
 	./services/gateway
