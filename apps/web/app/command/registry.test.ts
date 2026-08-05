@@ -55,6 +55,22 @@ describe("buildCommandRegistry", () => {
     expect(create?.aliases).toContain("agregar alumno");
   });
 
+  it("registers the config academic-catalog commands under module_config", () => {
+    const got = ids({ module_config: true });
+    // Nav to the catalog plus the fewest-clicks create shortcuts.
+    expect(got).toContain("settings.nav");
+    expect(got).toContain("settings.create.cycle");
+    expect(got).toContain("settings.create.level");
+    expect(got).toContain("settings.create.group");
+    // All route back to the config surface.
+    const cmds = buildCommandRegistry({ module_config: true }, t);
+    expect(cmds.find((c) => c.id === "settings.create.cycle")?.route).toBe("module:settings");
+  });
+
+  it("emits zero config commands when module_config is OFF", () => {
+    expect(ids({ module_students: true }).some((id) => id.startsWith("settings."))).toBe(false);
+  });
+
   it("keys each command's route to its module for navigation", () => {
     const [nav] = buildCommandRegistry({ module_students: true }, t);
     expect(nav?.route).toBe("module:students");
