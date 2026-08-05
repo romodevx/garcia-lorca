@@ -18,8 +18,10 @@ GCP Cloud Run + Cloud SQL (Postgres) + Pub/Sub · contratos en `proto/` vía buf
 4. **GORM solo en `adapters/postgres`.** El dominio (`internal/domain/`) jamás importa GORM
    ni ningún framework. Doble modelo + `mapper.go`.
 5. **RLS en tablas sensibles** (`students`, `grades`, `attendance`, `finance_accounts`,
-   `invoices`). Siempre `SET LOCAL` dentro de transacción vía el helper `pkg/authctx`
-   (`WithUserContext`). Las policies RLS son SQL puro en `migrations/`.
+   `invoices`). Siempre `SET LOCAL` (`set_config(..., true)`) dentro de transacción
+   vía el helper `pkg/authctx` (`WithTenantContext`, enlaza `app.current_tenant`).
+   Las policies RLS son SQL puro en `migrations/` y filtran por
+   `current_setting('app.current_tenant')`.
 6. **Front blindado:** build de producción sin source maps. CI falla si aparecen `*.map`
    o `sourceMappingURL` en artefactos de cliente.
 7. **Gestor de paquetes = `pnpm` (ÚNICO).** `npm` y `yarn` están **prohibidos** en este

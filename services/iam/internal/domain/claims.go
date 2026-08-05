@@ -10,11 +10,12 @@ import "time"
 // Permissions are canonical "resource:action" strings so the value is
 // transport-friendly (it maps 1:1 to the proto Claims message).
 type Claims struct {
-	Subject     string // user id
-	TenantID    string
-	Email       string
-	Permissions []string
-	ExpiresAt   time.Time
+	Subject            string // user id
+	TenantID           string
+	Email              string
+	Permissions        []string
+	MustChangePassword bool
+	ExpiresAt          time.Time
 }
 
 // NewAccessClaims builds the claims for a user's access token, expiring ttl
@@ -26,11 +27,12 @@ func NewAccessClaims(user User, now time.Time, ttl time.Duration) Claims {
 		permissions[i] = perm.String()
 	}
 	return Claims{
-		Subject:     user.ID(),
-		TenantID:    user.TenantID(),
-		Email:       user.Email().String(),
-		Permissions: permissions,
-		ExpiresAt:   now.Add(ttl),
+		Subject:            user.ID(),
+		TenantID:           user.TenantID(),
+		Email:              user.Email().String(),
+		Permissions:        permissions,
+		MustChangePassword: user.MustChangePassword(),
+		ExpiresAt:          now.Add(ttl),
 	}
 }
 

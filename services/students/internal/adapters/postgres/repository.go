@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 
+	"github.com/garcia-lorca/pkg/authctx"
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/students/internal/domain"
 	"github.com/garcia-lorca/services/students/internal/ports"
@@ -34,12 +35,12 @@ func NewRepository(db *gorm.DB, tenantID string) *Repository {
 	return &Repository{db: db, tenantID: tenantID}
 }
 
+// withTenant runs fn inside a transaction that has bound app.current_tenant,
+// delegating to the shared pkg/authctx RLS primitive so tenant binding lives in
+// exactly one place across every service.
 func (r *Repository) withTenant(ctx context.Context, fn func(tx *gorm.DB) error) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec("SELECT set_config('app.current_tenant', ?, true)", r.tenantID).Error; err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "binding RLS tenant", err)
-		}
-		return fn(tx)
+	return authctx.WithTenantContext(ctx, gormTxRunner{r.db}, r.tenantID, func(tx authctx.Tx) error {
+		return fn(txGorm(tx))
 	})
 }
 

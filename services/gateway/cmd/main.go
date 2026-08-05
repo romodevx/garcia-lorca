@@ -56,7 +56,14 @@ func main() {
 	iamHealth := client.NewIAMClient(iamBaseURL, http.DefaultClient)
 	authClient := client.NewAuthClient(iamBaseURL, http.DefaultClient)
 	studentsClient := client.NewStudentsClient(studentsBaseURL, http.DefaultClient)
-	mux := newMux(iamHealth, authClient, studentsClient, flags)
+
+	// loginLimiter fronts POST /auth/login with a per-IP token bucket so an
+	// attacker cannot brute-force credentials from a single source. It is
+	// in-process (fine while the gateway runs at min-instances=1).
+	loginRL := config.ParseLoginRateLimit(os.Getenv)
+	loginLimiter := middleware.NewRateLimiter(loginRL.Burst, loginRL.RefillPerSec(), time.Now)
+
+	mux := newMux(iamHealth, authClient, studentsClient, flags, loginLimiter)
 
 	log.Info("gateway starting",
 		slog.String("addr", addr),
@@ -79,9 +86,9 @@ func main() {
 // newMux builds the gateway HTTP handler. Extracted from main so an integration
 // test can assemble the exact production routes against a test iam server.
 //
-//	POST /api/v1/auth/login    → proxy to iam Login (unauthenticated)
-//	POST /api/v1/auth/refresh  → proxy to iam RefreshToken
-//	POST /api/v1/auth/logout   → expire the gl_access cookie (unauthenticated)
+//	POST /api/v1/auth/login    → per-IP rate limit → proxy to iam Login (unauthenticated)
+//	POST /api/v1/auth/refresh  → rotate both auth cookies via iam RefreshToken
+//	POST /api/v1/auth/logout   → expire both auth cookies (unauthenticated)
 //	GET  /api/v1/me            → RequireAuth → the caller's principal
 //	GET  /api/v1/features      → resolved module-flag map (frontend gating)
 //	POST /api/v1/students      → ModuleGuard(students) → RequireAuth →
@@ -90,23 +97,31 @@ func main() {
 //
 // `flags` (via middleware.NewModuleGuard) is the module-visibility boundary:
 // disabled module ⇒ 404, evaluated before auth so a hidden module is invisible.
-func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, flags featureflag.Checker) *http.ServeMux {
+func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, flags featureflag.Checker, loginLimiter *middleware.RateLimiter) *http.ServeMux {
 	mux := http.NewServeMux()
 	handler.NewHealthHandler(iamHealth).Register(mux)
 
 	authH := handler.NewAuthHandler(authClient)
 	requireAuth := middleware.RequireAuth(authClient)
+	// requireAuthChanged is the DEFAULT building block for authenticated routes:
+	// it authenticates AND enforces the forced password rotation, so a new route
+	// is safe unless it deliberately opts out (only change-password does, below).
+	requireAuthChanged := func(h http.Handler) http.Handler {
+		return requireAuth(middleware.RequirePasswordChanged(h))
+	}
 	guard := middleware.NewModuleGuard(flags)
 
-	mux.HandleFunc("POST /api/v1/auth/login", authH.Login)
+	mux.Handle("POST /api/v1/auth/login", loginLimiter.Middleware(http.HandlerFunc(authH.Login)))
 	mux.HandleFunc("POST /api/v1/auth/refresh", authH.Refresh)
-	mux.Handle("GET /api/v1/me", requireAuth(http.HandlerFunc(authH.Me)))
+	mux.Handle("GET /api/v1/me", requireAuthChanged(http.HandlerFunc(authH.Me)))
+	// change-password is the one deliberate exception: it stays reachable while
+	// the must-change flag is set, so it authenticates but does NOT enforce.
 	mux.Handle("POST /api/v1/auth/change-password", requireAuth(http.HandlerFunc(authH.ChangePassword)))
 	mux.HandleFunc("POST /api/v1/auth/logout", authH.Logout)
 	mux.HandleFunc("GET /api/v1/features", handler.NewFeaturesHandler(flags).Features)
 
-	// M03 students: flag-guarded, authenticated, permission-gated.
-	studentsCreate := requireAuth(middleware.RequirePermission("students:create")(
+	// M03 students: flag-guarded, authenticated+rotation-enforced, permission-gated.
+	studentsCreate := requireAuthChanged(middleware.RequirePermission("students:create")(
 		http.HandlerFunc(handler.NewStudentsHandler(studentsClient).Create)))
 	mux.Handle("POST /api/v1/students", guard.Protect("students", studentsCreate))
 	return mux

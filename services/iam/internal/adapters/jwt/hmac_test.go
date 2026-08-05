@@ -55,6 +55,27 @@ func TestAccessTokenRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAccessTokenCarriesMustChangePassword(t *testing.T) {
+	a := adapterAt(t0)
+	ctx := context.Background()
+
+	claims := sampleClaims()
+	claims.MustChangePassword = true
+
+	token, err := a.IssueAccessToken(ctx, claims)
+	if err != nil {
+		t.Fatalf("IssueAccessToken: %v", err)
+	}
+
+	got, err := a.ValidateAccessToken(ctx, token)
+	if err != nil {
+		t.Fatalf("ValidateAccessToken: %v", err)
+	}
+	if !got.MustChangePassword {
+		t.Error("MustChangePassword = false, want true after issue→validate round-trip")
+	}
+}
+
 func TestExpiredAccessTokenIsUnauthorized(t *testing.T) {
 	issuer := adapterAt(t0)
 	token, _ := issuer.IssueAccessToken(context.Background(), sampleClaims())

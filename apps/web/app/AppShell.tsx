@@ -11,7 +11,7 @@ import { Login } from "./_screens/Login";
 import { ChangePassword } from "./_screens/ChangePassword";
 import { ModulePlaceholder } from "./_screens/ModulePlaceholder";
 import { useTheme } from "./theme/ThemeProvider";
-import { login as apiLogin, changePassword as apiChangePassword, logout as apiLogout } from "./auth/api";
+import { login as apiLogin, changePassword as apiChangePassword, logout as apiLogout, refresh as apiRefresh } from "./auth/api";
 
 type View =
   | { screen: "login" }
@@ -63,6 +63,9 @@ export function AppShell(): ReactElement {
     setAuthError(undefined);
     try {
       await apiChangePassword(API_URL, current, next);
+      // Rotate the session cookie so it carries the cleared must_change_password
+      // flag (mcp=false); otherwise the stale token keeps protected routes at 403.
+      await apiRefresh(API_URL);
       setView({ screen: "dashboard" });
     } catch {
       setAuthError("No se pudo cambiar la contraseña. Verifica la actual.");

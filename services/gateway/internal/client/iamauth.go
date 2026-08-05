@@ -64,10 +64,12 @@ func (c *AuthClient) Refresh(ctx context.Context, refreshToken string) (LoginRes
 	}, nil
 }
 
-// ChangePassword rotates the password for userID via iam.
-func (c *AuthClient) ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error {
+// ChangePassword rotates the caller's password via iam. iam derives the subject
+// from accessToken (never a caller-supplied id), so the gateway forwards the
+// caller's own access token, not a user id.
+func (c *AuthClient) ChangePassword(ctx context.Context, accessToken, currentPassword, newPassword string) error {
 	_, err := c.rpc.ChangePassword(ctx, connect.NewRequest(&iamv1.ChangePasswordRequest{
-		UserId:          userID,
+		AccessToken:     accessToken,
 		CurrentPassword: currentPassword,
 		NewPassword:     newPassword,
 	}))
@@ -83,10 +85,11 @@ func (c *AuthClient) ValidateToken(ctx context.Context, accessToken string) (mid
 	}
 	claims := res.Msg.GetClaims()
 	return middleware.Principal{
-		UserID:      claims.GetSubject(),
-		TenantID:    claims.GetTenantId(),
-		Email:       claims.GetEmail(),
-		Permissions: claims.GetPermissions(),
+		UserID:             claims.GetSubject(),
+		TenantID:           claims.GetTenantId(),
+		Email:              claims.GetEmail(),
+		Permissions:        claims.GetPermissions(),
+		MustChangePassword: claims.GetMustChangePassword(),
 	}, nil
 }
 

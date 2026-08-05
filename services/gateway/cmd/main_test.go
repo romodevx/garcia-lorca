@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	connect "connectrpc.com/connect"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/garcia-lorca/gen/go/garcialorca/students/v1/studentsv1connect"
 	"github.com/garcia-lorca/pkg/featureflag"
 	"github.com/garcia-lorca/services/gateway/internal/client"
+	"github.com/garcia-lorca/services/gateway/internal/middleware"
 )
 
 // These tests assemble the exact production routes (newMux) against stub iam and
@@ -78,11 +80,15 @@ func newTestGateway(t *testing.T, flags map[string]bool) *httptest.Server {
 	stuPath, stuHandler := studentsv1connect.NewStudentsServiceHandler(stubStudents{})
 	stuSrv := connectServer(t, stuPath, stuHandler)
 
+	// A generous burst keeps the limiter out of the way of these route tests;
+	// rate-limit behavior is covered directly in the middleware package.
+	loginLimiter := middleware.NewRateLimiter(1000, 1000, time.Now)
 	mux := newMux(
 		client.NewIAMClient(iamSrv.URL, iamSrv.Client()),
 		client.NewAuthClient(iamSrv.URL, iamSrv.Client()),
 		client.NewStudentsClient(stuSrv.URL, stuSrv.Client()),
 		featureflag.NewInMemory(flags),
+		loginLimiter,
 	)
 	gw := httptest.NewServer(mux)
 	t.Cleanup(gw.Close)

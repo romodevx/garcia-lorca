@@ -1,17 +1,17 @@
 // Package authctx carries the authenticated principal through context and
-// provides WithUserContext: the single, security-critical primitive that binds
-// a database transaction to a user so PostgreSQL Row Level Security policies
-// apply to every statement inside it.
+// provides WithTenantContext: the single, security-critical primitive that binds
+// a database transaction to a tenant so PostgreSQL Row Level Security policies
+// (tenant isolation) apply to every statement inside it.
 //
 // Every read or write against an RLS-protected table MUST go through
-// WithUserContext. The helper opens a transaction and issues
+// WithTenantContext. The helper opens a transaction and issues
 //
-//	SET LOCAL app.current_user = '<userID>'
+//	SET LOCAL app.current_tenant = '<tenantID>'
 //
-// so that policies referencing current_setting('app.current_user') see the
-// caller's identity. SET LOCAL scopes the setting to the surrounding
-// transaction, so it is automatically reset on commit or rollback — there is no
-// session-leak risk across pooled connections.
+// so that policies referencing current_setting('app.current_tenant') see the
+// caller's tenant. SET LOCAL scopes the setting to the surrounding transaction,
+// so it is automatically reset on commit or rollback — there is no session-leak
+// risk across pooled connections.
 //
 // The helper is defined against the small TxRunner / Tx interfaces below rather
 // than against *gorm.DB directly, so it lives in domain-adjacent code without
@@ -27,9 +27,9 @@ import (
 // sessionVar is the PostgreSQL session variable read by RLS policies. It is
 // intentionally the only place this string is written, so policies and the
 // application can never drift.
-const sessionVar = "app.current_user"
+const sessionVar = "app.current_tenant"
 
-// Tx is the minimal transaction surface WithUserContext needs. The concrete
+// Tx is the minimal transaction surface WithTenantContext needs. The concrete
 // implementation (e.g. a *gorm.DB bound to a transaction) lives in the
 // infrastructure layer.
 type Tx interface {
@@ -44,20 +44,20 @@ type TxRunner interface {
 	Transaction(ctx context.Context, fn func(tx Tx) error) error
 }
 
-// WithUserContext runs fn inside a transaction that has been bound to userID for
-// Row Level Security. It is the mandatory entry point for any data access on an
-// RLS-protected table.
+// WithTenantContext runs fn inside a transaction that has been bound to tenantID
+// for Row Level Security. It is the mandatory entry point for any data access on
+// an RLS-protected table.
 //
-// The user identity is bound via "SET LOCAL app.current_user = ?" using a bound
-// parameter (never string concatenation) so the value cannot break out of the
-// statement. An empty userID is rejected: an unset RLS variable would silently
-// expose or hide rows depending on policy phrasing, so we fail closed.
-func WithUserContext(ctx context.Context, runner TxRunner, userID string, fn func(tx Tx) error) error {
+// The tenant identity is bound via "SET LOCAL app.current_tenant = ?" using a
+// bound parameter (never string concatenation) so the value cannot break out of
+// the statement. An empty tenantID is rejected: an unset RLS variable would
+// silently expose or hide rows depending on policy phrasing, so we fail closed.
+func WithTenantContext(ctx context.Context, runner TxRunner, tenantID string, fn func(tx Tx) error) error {
 	if runner == nil {
 		return fmt.Errorf("authctx: nil TxRunner")
 	}
-	if userID == "" {
-		return fmt.Errorf("authctx: empty userID; refusing to run without an RLS identity")
+	if tenantID == "" {
+		return fmt.Errorf("authctx: empty tenantID; refusing to run without an RLS identity")
 	}
 	if fn == nil {
 		return fmt.Errorf("authctx: nil callback")
@@ -67,8 +67,8 @@ func WithUserContext(ctx context.Context, runner TxRunner, userID string, fn fun
 		// SET LOCAL with a bound parameter keeps the identity inside the
 		// transaction and safe from injection. set_config(..., true) is the
 		// parameterizable equivalent of "SET LOCAL".
-		if err := tx.Exec(ctx, "SELECT set_config(?, ?, true)", sessionVar, userID); err != nil {
-			return fmt.Errorf("authctx: binding RLS user: %w", err)
+		if err := tx.Exec(ctx, "SELECT set_config(?, ?, true)", sessionVar, tenantID); err != nil {
+			return fmt.Errorf("authctx: binding RLS tenant: %w", err)
 		}
 		return fn(tx)
 	})
