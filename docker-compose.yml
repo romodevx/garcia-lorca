@@ -116,6 +116,11 @@ services:
     environment: { <<: *go-env, SERVICE: students }
     ports: ["8092:8080"]
 
+  config:
+    <<: *go-service
+    environment: { <<: *go-env, SERVICE: config }
+    ports: ["8101:8080"]
+
   finance:
     <<: *go-service
     environment: { <<: *go-env, SERVICE: finance }

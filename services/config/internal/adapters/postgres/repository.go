@@ -1,0 +1,406 @@
+package postgres
+
+import (
+	"context"
+	"errors"
+
+	"github.com/jackc/pgx/v5/pgconn"
+	"gorm.io/gorm"
+
+	"github.com/garcia-lorca/pkg/authctx"
+	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/services/config/internal/domain"
+	"github.com/garcia-lorca/services/config/internal/ports"
+)
+
+// Compile-time proof the adapter satisfies its port.
+var _ ports.CatalogRepository = (*Repository)(nil)
+
+const (
+	uniqueViolation     = "23505"
+	foreignKeyViolation = "23503"
+)
+
+// Repository is the GORM-backed config CatalogRepository. Every operation runs
+// in a transaction bound to a tenant so Row Level Security applies (mirrors iam
+// / students, ADR 0001). In M04 the tenant is fixed at construction
+// (single-tenant).
+type Repository struct {
+	db       *gorm.DB
+	tenantID string
+}
+
+// NewRepository builds the repository scoped to tenantID.
+func NewRepository(db *gorm.DB, tenantID string) *Repository {
+	return &Repository{db: db, tenantID: tenantID}
+}
+
+// withTenant runs fn inside a transaction that has bound app.current_tenant,
+// delegating to the shared pkg/authctx RLS primitive so tenant binding lives in
+// exactly one place across every service.
+func (r *Repository) withTenant(ctx context.Context, fn func(tx *gorm.DB) error) error {
+	return authctx.WithTenantContext(ctx, gormTxRunner{r.db}, r.tenantID, func(tx authctx.Tx) error {
+		return fn(txGorm(tx))
+	})
+}
+
+// --- cycles ---------------------------------------------------------------
+
+// CreateCycle persists a new cycle. A duplicate name (per tenant) is KindConflict.
+func (r *Repository) CreateCycle(ctx context.Context, c domain.Cycle) error {
+	model := fromDomainCycle(c)
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		return translateCreateErr(tx.Create(&model).Error, "creating cycle", "a cycle with this name already exists")
+	})
+}
+
+// GetCycle returns a cycle by id, or KindNotFound.
+func (r *Repository) GetCycle(ctx context.Context, id string) (domain.Cycle, error) {
+	var out domain.Cycle
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var m cycleModel
+		if err := tx.Where("id = ?", id).First(&m).Error; err != nil {
+			return translateFindErr(err)
+		}
+		var derr error
+		out, derr = toDomainCycle(m)
+		return derr
+	})
+	if err != nil {
+		return domain.Cycle{}, err
+	}
+	return out, nil
+}
+
+// ListCycles returns every cycle in the tenant, ordered by name.
+func (r *Repository) ListCycles(ctx context.Context) ([]domain.Cycle, error) {
+	var out []domain.Cycle
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var rows []cycleModel
+		if err := tx.Order("name").Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing cycles", err)
+		}
+		out = make([]domain.Cycle, 0, len(rows))
+		for _, m := range rows {
+			c, derr := toDomainCycle(m)
+			if derr != nil {
+				return derr
+			}
+			out = append(out, c)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// --- levels ---------------------------------------------------------------
+
+// CreateLevel persists a new level. A duplicate name (per tenant) is KindConflict.
+func (r *Repository) CreateLevel(ctx context.Context, l domain.Level) error {
+	model := fromDomainLevel(l)
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		return translateCreateErr(tx.Create(&model).Error, "creating level", "a level with this name already exists")
+	})
+}
+
+// GetLevel returns a level by id, or KindNotFound.
+func (r *Repository) GetLevel(ctx context.Context, id string) (domain.Level, error) {
+	var out domain.Level
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var m levelModel
+		if err := tx.Where("id = ?", id).First(&m).Error; err != nil {
+			return translateFindErr(err)
+		}
+		var derr error
+		out, derr = toDomainLevel(m)
+		return derr
+	})
+	if err != nil {
+		return domain.Level{}, err
+	}
+	return out, nil
+}
+
+// ListLevels returns every level in the tenant catalog, ordered by name.
+func (r *Repository) ListLevels(ctx context.Context) ([]domain.Level, error) {
+	var out []domain.Level
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var rows []levelModel
+		if err := tx.Order("name").Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing levels", err)
+		}
+		out = make([]domain.Level, 0, len(rows))
+		for _, m := range rows {
+			l, derr := toDomainLevel(m)
+			if derr != nil {
+				return derr
+			}
+			out = append(out, l)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// --- grade levels ---------------------------------------------------------
+
+// CreateGradeLevel persists a new grade level. A duplicate (level_id, ordinal)
+// is KindConflict; a missing parent level surfaces as KindInvalid.
+func (r *Repository) CreateGradeLevel(ctx context.Context, g domain.GradeLevel) error {
+	model := fromDomainGradeLevel(g)
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		return translateCreateErr(tx.Create(&model).Error, "creating grade level", "a grade level with this ordinal already exists in the level")
+	})
+}
+
+// GetGradeLevel returns a grade level by id, or KindNotFound.
+func (r *Repository) GetGradeLevel(ctx context.Context, id string) (domain.GradeLevel, error) {
+	var out domain.GradeLevel
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var m gradeLevelModel
+		if err := tx.Where("id = ?", id).First(&m).Error; err != nil {
+			return translateFindErr(err)
+		}
+		var derr error
+		out, derr = toDomainGradeLevel(m)
+		return derr
+	})
+	if err != nil {
+		return domain.GradeLevel{}, err
+	}
+	return out, nil
+}
+
+// ListGradeLevels returns the grade levels of levelID, ordered by ordinal.
+func (r *Repository) ListGradeLevels(ctx context.Context, levelID string) ([]domain.GradeLevel, error) {
+	var out []domain.GradeLevel
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var rows []gradeLevelModel
+		if err := tx.Where("level_id = ?", levelID).Order("ordinal").Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing grade levels", err)
+		}
+		out = make([]domain.GradeLevel, 0, len(rows))
+		for _, m := range rows {
+			g, derr := toDomainGradeLevel(m)
+			if derr != nil {
+				return derr
+			}
+			out = append(out, g)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// --- subjects -------------------------------------------------------------
+
+// CreateSubject persists a new subject. A duplicate (grade_level_id, name) is
+// KindConflict; a missing parent grade level surfaces as KindInvalid.
+func (r *Repository) CreateSubject(ctx context.Context, s domain.Subject) error {
+	model := fromDomainSubject(s)
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		return translateCreateErr(tx.Create(&model).Error, "creating subject", "a subject with this name already exists in the grade level")
+	})
+}
+
+// GetSubject returns a subject by id, or KindNotFound.
+func (r *Repository) GetSubject(ctx context.Context, id string) (domain.Subject, error) {
+	var out domain.Subject
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var m subjectModel
+		if err := tx.Where("id = ?", id).First(&m).Error; err != nil {
+			return translateFindErr(err)
+		}
+		var derr error
+		out, derr = toDomainSubject(m)
+		return derr
+	})
+	if err != nil {
+		return domain.Subject{}, err
+	}
+	return out, nil
+}
+
+// ListSubjects returns the subjects of gradeLevelID, ordered by name.
+func (r *Repository) ListSubjects(ctx context.Context, gradeLevelID string) ([]domain.Subject, error) {
+	var out []domain.Subject
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var rows []subjectModel
+		if err := tx.Where("grade_level_id = ?", gradeLevelID).Order("name").Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing subjects", err)
+		}
+		out = make([]domain.Subject, 0, len(rows))
+		for _, m := range rows {
+			s, derr := toDomainSubject(m)
+			if derr != nil {
+				return derr
+			}
+			out = append(out, s)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// --- terms ----------------------------------------------------------------
+
+// CreateTerm persists a new term. A duplicate (cycle_id, level_id, ordinal) is
+// KindConflict; a missing parent cycle or level surfaces as KindInvalid.
+func (r *Repository) CreateTerm(ctx context.Context, t domain.Term) error {
+	model := fromDomainTerm(t)
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		return translateCreateErr(tx.Create(&model).Error, "creating term", "a term with this ordinal already exists in the cycle and level")
+	})
+}
+
+// GetTerm returns a term by id, or KindNotFound.
+func (r *Repository) GetTerm(ctx context.Context, id string) (domain.Term, error) {
+	var out domain.Term
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var m termModel
+		if err := tx.Where("id = ?", id).First(&m).Error; err != nil {
+			return translateFindErr(err)
+		}
+		var derr error
+		out, derr = toDomainTerm(m)
+		return derr
+	})
+	if err != nil {
+		return domain.Term{}, err
+	}
+	return out, nil
+}
+
+// ListTerms returns the terms of cycleID, optionally narrowed to levelID
+// ("" = all levels of the cycle), ordered by ordinal.
+func (r *Repository) ListTerms(ctx context.Context, cycleID string, levelID string) ([]domain.Term, error) {
+	var out []domain.Term
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		q := tx.Where("cycle_id = ?", cycleID)
+		if levelID != "" {
+			q = q.Where("level_id = ?", levelID)
+		}
+		var rows []termModel
+		if err := q.Order("ordinal").Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing terms", err)
+		}
+		out = make([]domain.Term, 0, len(rows))
+		for _, m := range rows {
+			t, derr := toDomainTerm(m)
+			if derr != nil {
+				return derr
+			}
+			out = append(out, t)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// --- groups ---------------------------------------------------------------
+
+// CreateGroup persists a new group. A duplicate (cycle_id, grade_level_id, name)
+// is KindConflict; a missing parent cycle or grade level surfaces as KindInvalid.
+func (r *Repository) CreateGroup(ctx context.Context, g domain.Group) error {
+	model := fromDomainGroup(g)
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		return translateCreateErr(tx.Create(&model).Error, "creating group", "a group with this name already exists in the cycle and grade level")
+	})
+}
+
+// GetGroup returns a group by id, or KindNotFound.
+func (r *Repository) GetGroup(ctx context.Context, id string) (domain.Group, error) {
+	var out domain.Group
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var m groupModel
+		if err := tx.Where("id = ?", id).First(&m).Error; err != nil {
+			return translateFindErr(err)
+		}
+		var derr error
+		out, derr = toDomainGroup(m)
+		return derr
+	})
+	if err != nil {
+		return domain.Group{}, err
+	}
+	return out, nil
+}
+
+// ListGroups returns the groups of cycleID, optionally narrowed to gradeLevelID
+// ("" = all grade levels of the cycle), ordered by name.
+func (r *Repository) ListGroups(ctx context.Context, cycleID string, gradeLevelID string) ([]domain.Group, error) {
+	var out []domain.Group
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		q := tx.Where("cycle_id = ?", cycleID)
+		if gradeLevelID != "" {
+			q = q.Where("grade_level_id = ?", gradeLevelID)
+		}
+		var rows []groupModel
+		if err := q.Order("name").Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing groups", err)
+		}
+		out = make([]domain.Group, 0, len(rows))
+		for _, m := range rows {
+			g, derr := toDomainGroup(m)
+			if derr != nil {
+				return derr
+			}
+			out = append(out, g)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// --- shared helpers -------------------------------------------------------
+
+// translateCreateErr maps a GORM insert error to the port's error contract: a
+// unique violation is KindConflict (conflictMsg), a foreign-key violation is
+// KindInvalid (the referenced parent is missing), anything else is KindInternal.
+func translateCreateErr(err error, internalMsg, conflictMsg string) error {
+	if err == nil {
+		return nil
+	}
+	switch pgCode(err) {
+	case uniqueViolation:
+		return glerrors.Wrap(glerrors.KindConflict, conflictMsg, err)
+	case foreignKeyViolation:
+		return glerrors.Wrap(glerrors.KindInvalid, "referenced parent does not exist", err)
+	default:
+		return glerrors.Wrap(glerrors.KindInternal, internalMsg, err)
+	}
+}
+
+// pgCode extracts the SQLSTATE code from a driver error, or "" if it is not one.
+func pgCode(err error) string {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code
+	}
+	return ""
+}
+
+func translateFindErr(err error) error {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return glerrors.ErrNotFound
+	}
+	return glerrors.Wrap(glerrors.KindInternal, "query failed", err)
+}
