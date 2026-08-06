@@ -85,7 +85,7 @@ func newHandler(t *testing.T) (*grpcadapter.StudentsHandler, *fakePublisher) {
 	ids := 0
 	newID := func() string { ids++; return "stu-1" }
 	svc := usecase.NewStudentService(newFakeRepo(), pub, testTenant, newID)
-	return grpcadapter.NewStudentsHandler(svc, usecase.NewHealthService("students")), pub
+	return grpcadapter.NewStudentsHandler(svc, nil, usecase.NewHealthService("students")), pub
 }
 
 func createValid(t *testing.T, h *grpcadapter.StudentsHandler) *studentsv1.Student {
@@ -239,7 +239,7 @@ func TestListStudentsMapsFilterAndToken(t *testing.T) {
 	repo := newFakeRepo()
 	repo.nextToken = "next-42"
 	svc := usecase.NewStudentService(repo, &fakePublisher{}, testTenant, func() string { return "stu-1" })
-	h := grpcadapter.NewStudentsHandler(svc, usecase.NewHealthService("students"))
+	h := grpcadapter.NewStudentsHandler(svc, nil, usecase.NewHealthService("students"))
 
 	res, err := h.ListStudents(context.Background(), connect.NewRequest(&studentsv1.ListStudentsRequest{
 		Level:      studentsv1.Level_LEVEL_SECUNDARIA,
@@ -280,7 +280,7 @@ func (explodingRepo) FindByID(context.Context, string) (*domain.Student, error) 
 
 func TestInternalErrorIsGenericAndDoesNotLeak(t *testing.T) {
 	svc := usecase.NewStudentService(explodingRepo{newFakeRepo()}, &fakePublisher{}, testTenant, func() string { return "stu-1" })
-	h := grpcadapter.NewStudentsHandler(svc, usecase.NewHealthService("students"))
+	h := grpcadapter.NewStudentsHandler(svc, nil, usecase.NewHealthService("students"))
 
 	_, err := h.GetStudent(context.Background(), connect.NewRequest(&studentsv1.GetStudentRequest{Id: "stu-1"}))
 	assertCode(t, err, connect.CodeInternal)
