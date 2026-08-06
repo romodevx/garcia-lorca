@@ -18,6 +18,7 @@ import (
 	"time"
 
 	connect "connectrpc.com/connect"
+	"github.com/google/uuid"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"gorm.io/driver/postgres"
@@ -79,8 +80,9 @@ func buildMux(log *slog.Logger) (*http.ServeMux, error) {
 	tokens := jwt.NewHMAC(jwtSecret(log), tokenIssuer, refreshTTL, time.Now)
 
 	auth := usecase.NewAuthService(userRepo, roleRepo, hasher, tokens, tokens, tenantID, accessTokenTTL, time.Now)
+	admin := usecase.NewAdminService(userRepo, roleRepo, hasher, tenantID, func() string { return uuid.NewString() })
 	health := usecase.NewHealthService(serviceName)
-	iamHandler := grpcadapter.NewIAMHandler(auth, health)
+	iamHandler := grpcadapter.NewIAMHandler(auth, admin, health)
 
 	mux := http.NewServeMux()
 	// Generated Connect service (Login, ValidateToken, …, Health).

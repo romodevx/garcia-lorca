@@ -98,6 +98,11 @@ func (s *AdminService) resolveRoles(ctx context.Context, roleIDs []string) ([]do
 	return resolved, nil
 }
 
+// GetUser returns a single principal (with roles resolved), or KindNotFound.
+func (s *AdminService) GetUser(ctx context.Context, userID string) (domain.User, error) {
+	return s.users.FindByID(ctx, userID)
+}
+
 // ListUsers returns every principal in the tenant with roles resolved.
 func (s *AdminService) ListUsers(ctx context.Context) ([]domain.User, error) {
 	return s.users.ListUsers(ctx)
@@ -124,6 +129,11 @@ func (s *AdminService) CreateRole(ctx context.Context, name string, permissions 
 		return domain.Role{}, err // KindConflict on duplicate name
 	}
 	return role, nil
+}
+
+// GetRole returns a single role (with its permissions), or KindNotFound.
+func (s *AdminService) GetRole(ctx context.Context, roleID string) (domain.Role, error) {
+	return s.roles.FindByID(ctx, roleID)
 }
 
 // ListRoles returns every role in the tenant.

@@ -21,12 +21,13 @@ var _ iamv1connect.IamServiceHandler = (*IAMHandler)(nil)
 // and domain error Kinds ↔ Connect codes. All logic lives in usecase/domain.
 type IAMHandler struct {
 	auth   *usecase.AuthService
+	admin  *usecase.AdminService
 	health *usecase.HealthService
 }
 
-// NewIAMHandler wires the handler to the auth + health use cases.
-func NewIAMHandler(auth *usecase.AuthService, health *usecase.HealthService) *IAMHandler {
-	return &IAMHandler{auth: auth, health: health}
+// NewIAMHandler wires the handler to the auth + admin + health use cases.
+func NewIAMHandler(auth *usecase.AuthService, admin *usecase.AdminService, health *usecase.HealthService) *IAMHandler {
+	return &IAMHandler{auth: auth, admin: admin, health: health}
 }
 
 func (h *IAMHandler) Health(ctx context.Context, _ *connect.Request[iamv1.HealthRequest]) (*connect.Response[iamv1.HealthResponse], error) {
@@ -100,6 +101,90 @@ func (h *IAMHandler) ChangePassword(ctx context.Context, req *connect.Request[ia
 	return connect.NewResponse(&iamv1.ChangePasswordResponse{}), nil
 }
 
+// --- admin surface (user/role CRUD) ----------------------------------------
+
+func (h *IAMHandler) CreateUser(ctx context.Context, req *connect.Request[iamv1.CreateUserRequest]) (*connect.Response[iamv1.CreateUserResponse], error) {
+	user, err := h.admin.CreateUser(ctx, req.Msg.GetEmail(), req.Msg.GetDisplayName(), req.Msg.GetTempPassword(), req.Msg.GetRoleIds())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&iamv1.CreateUserResponse{User: toProtoUser(user)}), nil
+}
+
+func (h *IAMHandler) GetUser(ctx context.Context, req *connect.Request[iamv1.GetUserRequest]) (*connect.Response[iamv1.GetUserResponse], error) {
+	user, err := h.admin.GetUser(ctx, req.Msg.GetId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&iamv1.GetUserResponse{User: toProtoUser(user)}), nil
+}
+
+func (h *IAMHandler) ListUsers(ctx context.Context, _ *connect.Request[iamv1.ListUsersRequest]) (*connect.Response[iamv1.ListUsersResponse], error) {
+	users, err := h.admin.ListUsers(ctx)
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	out := make([]*iamv1.User, 0, len(users))
+	for _, u := range users {
+		out = append(out, toProtoUser(u))
+	}
+	return connect.NewResponse(&iamv1.ListUsersResponse{Users: out}), nil
+}
+
+func (h *IAMHandler) SetUserStatus(ctx context.Context, req *connect.Request[iamv1.SetUserStatusRequest]) (*connect.Response[iamv1.SetUserStatusResponse], error) {
+	status, err := fromProtoStatus(req.Msg.GetStatus())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	if err := h.admin.SetUserStatus(ctx, req.Msg.GetUserId(), status); err != nil {
+		return nil, connectErr(err)
+	}
+	user, err := h.admin.GetUser(ctx, req.Msg.GetUserId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&iamv1.SetUserStatusResponse{User: toProtoUser(user)}), nil
+}
+
+func (h *IAMHandler) CreateRole(ctx context.Context, req *connect.Request[iamv1.CreateRoleRequest]) (*connect.Response[iamv1.CreateRoleResponse], error) {
+	role, err := h.admin.CreateRole(ctx, req.Msg.GetName(), req.Msg.GetPermissions())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&iamv1.CreateRoleResponse{Role: toProtoRole(role)}), nil
+}
+
+func (h *IAMHandler) GetRole(ctx context.Context, req *connect.Request[iamv1.GetRoleRequest]) (*connect.Response[iamv1.GetRoleResponse], error) {
+	role, err := h.admin.GetRole(ctx, req.Msg.GetId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&iamv1.GetRoleResponse{Role: toProtoRole(role)}), nil
+}
+
+func (h *IAMHandler) ListRoles(ctx context.Context, _ *connect.Request[iamv1.ListRolesRequest]) (*connect.Response[iamv1.ListRolesResponse], error) {
+	roles, err := h.admin.ListRoles(ctx)
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	out := make([]*iamv1.Role, 0, len(roles))
+	for _, r := range roles {
+		out = append(out, toProtoRole(r))
+	}
+	return connect.NewResponse(&iamv1.ListRolesResponse{Roles: out}), nil
+}
+
+func (h *IAMHandler) SetRolePermissions(ctx context.Context, req *connect.Request[iamv1.SetRolePermissionsRequest]) (*connect.Response[iamv1.SetRolePermissionsResponse], error) {
+	if err := h.admin.SetRolePermissions(ctx, req.Msg.GetRoleId(), req.Msg.GetPermissions()); err != nil {
+		return nil, connectErr(err)
+	}
+	role, err := h.admin.GetRole(ctx, req.Msg.GetRoleId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&iamv1.SetRolePermissionsResponse{Role: toProtoRole(role)}), nil
+}
+
 // --- mapping ---------------------------------------------------------------
 
 func toProtoUser(u domain.User) *iamv1.User {
@@ -110,6 +195,20 @@ func toProtoUser(u domain.User) *iamv1.User {
 		DisplayName:        u.DisplayName(),
 		Status:             toProtoStatus(u.Status()),
 		MustChangePassword: u.MustChangePassword(),
+		RoleIds:            u.RoleIDs(),
+	}
+}
+
+func toProtoRole(r domain.Role) *iamv1.Role {
+	perms := r.Permissions()
+	raw := make([]string, 0, len(perms))
+	for _, p := range perms {
+		raw = append(raw, p.String())
+	}
+	return &iamv1.Role{
+		Id:          r.ID(),
+		Name:        r.Name(),
+		Permissions: raw,
 	}
 }
 
@@ -132,6 +231,20 @@ func toProtoStatus(s domain.Status) iamv1.UserStatus {
 		return iamv1.UserStatus_USER_STATUS_SUSPENDED
 	default:
 		return iamv1.UserStatus_USER_STATUS_UNSPECIFIED
+	}
+}
+
+// fromProtoStatus maps a wire UserStatus to the domain enum, rejecting
+// UNSPECIFIED (and any unknown value) as KindInvalid so the boundary never
+// forwards an unset status into a lifecycle change.
+func fromProtoStatus(s iamv1.UserStatus) (domain.Status, error) {
+	switch s {
+	case iamv1.UserStatus_USER_STATUS_ACTIVE:
+		return domain.StatusActive, nil
+	case iamv1.UserStatus_USER_STATUS_SUSPENDED:
+		return domain.StatusSuspended, nil
+	default:
+		return domain.StatusUnspecified, glerrors.New(glerrors.KindInvalid, "user status is required")
 	}
 }
 

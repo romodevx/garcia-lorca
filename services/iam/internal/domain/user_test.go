@@ -82,6 +82,28 @@ func TestUserEffectivePermissionsUnionAcrossRoles(t *testing.T) {
 	}
 }
 
+func TestUserRoleIDsProjectsAssignedRoles(t *testing.T) {
+	email := mustEmail(t, "ana@garcialorca.mx")
+	teacher := mustRole(t, "r1", "Docente", []string{"students:read"})
+	tutor := mustRole(t, "r2", "Tutor", []string{"attendance:read"})
+
+	u, err := domain.NewUser("u1", "t1", email, "Ana", domain.StatusActive, false, []domain.Role{teacher, tutor})
+	if err != nil {
+		t.Fatalf("NewUser: %v", err)
+	}
+
+	ids := u.RoleIDs()
+	if len(ids) != 2 || ids[0] != "r1" || ids[1] != "r2" {
+		t.Errorf("RoleIDs() = %v, want [r1 r2]", ids)
+	}
+
+	// A role-less user projects an empty (non-nil) slice.
+	roleless, _ := domain.NewUser("u2", "t1", email, "B", domain.StatusActive, false, nil)
+	if got := roleless.RoleIDs(); len(got) != 0 {
+		t.Errorf("RoleIDs() for role-less user = %v, want empty", got)
+	}
+}
+
 func TestUserCanAuthenticateOnlyWhenActive(t *testing.T) {
 	email := mustEmail(t, "sus@garcialorca.mx")
 	active, _ := domain.NewUser("u1", "t1", email, "A", domain.StatusActive, false, nil)

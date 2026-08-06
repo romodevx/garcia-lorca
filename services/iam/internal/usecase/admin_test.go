@@ -142,6 +142,44 @@ func TestAdminListUsers(t *testing.T) {
 	}
 }
 
+func TestAdminGetUser(t *testing.T) {
+	email, _ := domain.NewEmail("ana@garcialorca.mx")
+	u, _ := domain.NewUser("u1", testTenant, email, "Ana", domain.StatusActive, false, nil)
+	users := &fakeUsers{byID: map[string]domain.User{"u1": u}}
+	svc := newAdmin(users, &fakeRoles{}, func() string { return "x" })
+
+	got, err := svc.GetUser(context.Background(), "u1")
+	if err != nil {
+		t.Fatalf("GetUser error: %v", err)
+	}
+	if got.ID() != "u1" {
+		t.Errorf("GetUser = %q, want u1", got.ID())
+	}
+
+	if _, err := svc.GetUser(context.Background(), "ghost"); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("GetUser(ghost): want KindNotFound, got %v", err)
+	}
+}
+
+func TestAdminGetRole(t *testing.T) {
+	roles := &fakeRoles{byID: map[string]domain.Role{
+		"r1": mustRole(t, "r1", "Docente", []string{"students:read"}),
+	}}
+	svc := newAdmin(&fakeUsers{}, roles, func() string { return "x" })
+
+	got, err := svc.GetRole(context.Background(), "r1")
+	if err != nil {
+		t.Fatalf("GetRole error: %v", err)
+	}
+	if got.ID() != "r1" || got.Name() != "Docente" {
+		t.Errorf("GetRole = {%q,%q}, want {r1,Docente}", got.ID(), got.Name())
+	}
+
+	if _, err := svc.GetRole(context.Background(), "ghost"); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("GetRole(ghost): want KindNotFound, got %v", err)
+	}
+}
+
 func TestAdminCreateRole(t *testing.T) {
 	roles := &fakeRoles{}
 	svc := newAdmin(&fakeUsers{}, roles, func() string { return "role-new" })
