@@ -28,6 +28,8 @@
   "alias.payment": "create payment, charge, generate receipt",
   "create.evaluation": "Create evaluation",
   "alias.evaluation": "upload grades, new grade",
+  "create.captureGrades": "Capture grades",
+  "alias.captureGrades": "upload grades, record grade, enter grades",
   "create.announcement": "Create announcement",
   "alias.announcement": "send notice, notify parents",
   "create.scholarship": "Assign scholarship",

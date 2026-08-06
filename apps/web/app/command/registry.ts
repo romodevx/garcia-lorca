@@ -41,6 +41,8 @@ const ACTIONS: readonly ActionSpec[] = [
   { moduleId: "students", kind: "create", key: "transfer", titleKey: "create.transfer", aliasKey: "alias.transfer" },
   { moduleId: "finance", kind: "create", titleKey: "create.payment", aliasKey: "alias.payment" },
   { moduleId: "grades", kind: "create", titleKey: "create.evaluation", aliasKey: "alias.evaluation" },
+  // Grade-capture surface (Phase 5) — fewest-clicks shortcut into the roster grid.
+  { moduleId: "grades", kind: "create", key: "capture", titleKey: "create.captureGrades", aliasKey: "alias.captureGrades" },
   { moduleId: "announcements", kind: "create", titleKey: "create.announcement", aliasKey: "alias.announcement" },
   { moduleId: "scholarships", kind: "create", titleKey: "create.scholarship", aliasKey: "alias.scholarship" },
   { moduleId: "documents", kind: "create", titleKey: "create.document", aliasKey: "alias.document" },
