@@ -124,3 +124,51 @@ func fromDomainGroup(g domain.Group) groupModel {
 func toDomainGroup(m groupModel) (domain.Group, error) {
 	return domain.NewGroup(m.ID, m.TenantID, m.CycleID, m.GradeLevelID, m.Name, m.Capacity)
 }
+
+// --- teachers -------------------------------------------------------------
+
+// fromDomainTeacher maps a teacher to its row. The domain's optional userID
+// ("" = not yet linked) becomes a SQL NULL (*string nil), matching the DDL's
+// nullable user_id; a set userID is stored verbatim.
+func fromDomainTeacher(t domain.Teacher) teacherModel {
+	var userID *string
+	if t.HasUser() {
+		u := t.UserID()
+		userID = &u
+	}
+	return teacherModel{
+		ID:        t.ID(),
+		TenantID:  t.TenantID(),
+		FirstName: t.FirstName(),
+		LastName:  t.LastName(),
+		Email:     t.Email(),
+		UserID:    userID,
+	}
+}
+
+// toDomainTeacher maps a row back to a teacher, bridging a SQL NULL user_id back
+// to the domain's "" (no IAM link).
+func toDomainTeacher(m teacherModel) (domain.Teacher, error) {
+	userID := ""
+	if m.UserID != nil {
+		userID = *m.UserID
+	}
+	return domain.NewTeacher(m.ID, m.TenantID, m.FirstName, m.LastName, m.Email, userID)
+}
+
+// --- teaching assignments -------------------------------------------------
+
+func fromDomainTeachingAssignment(a domain.TeachingAssignment) teachingAssignmentModel {
+	return teachingAssignmentModel{
+		ID:        a.ID(),
+		TenantID:  a.TenantID(),
+		CycleID:   a.CycleID(),
+		GroupID:   a.GroupID(),
+		SubjectID: a.SubjectID(),
+		TeacherID: a.TeacherID(),
+	}
+}
+
+func toDomainTeachingAssignment(m teachingAssignmentModel) (domain.TeachingAssignment, error) {
+	return domain.NewTeachingAssignment(m.ID, m.TenantID, m.CycleID, m.GroupID, m.SubjectID, m.TeacherID)
+}

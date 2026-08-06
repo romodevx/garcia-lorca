@@ -222,3 +222,81 @@ func (s *CatalogService) GetGroup(ctx context.Context, id string) (domain.Group,
 func (s *CatalogService) ListGroups(ctx context.Context, cycleID, gradeLevelID string) ([]domain.Group, error) {
 	return s.repo.ListGroups(ctx, cycleID, gradeLevelID)
 }
+
+// --- teachers --------------------------------------------------------------
+
+// CreateTeacher validates and persists a new teacher (a catalog person record,
+// not a login account). `userID` is optional ("" = no IAM link yet). A duplicate
+// email (per tenant) surfaces as KindConflict from the repo.
+func (s *CatalogService) CreateTeacher(ctx context.Context, firstName, lastName, email, userID string) (domain.Teacher, error) {
+	te, err := domain.NewTeacher(s.newID(), s.tenant, firstName, lastName, email, userID)
+	if err != nil {
+		return domain.Teacher{}, err
+	}
+	if err := s.repo.CreateTeacher(ctx, te); err != nil {
+		return domain.Teacher{}, err
+	}
+	return te, nil
+}
+
+// GetTeacher returns a teacher by id (KindNotFound if absent).
+func (s *CatalogService) GetTeacher(ctx context.Context, id string) (domain.Teacher, error) {
+	return s.repo.GetTeacher(ctx, id)
+}
+
+// ListTeachers returns every teacher in the tenant.
+func (s *CatalogService) ListTeachers(ctx context.Context) ([]domain.Teacher, error) {
+	return s.repo.ListTeachers(ctx)
+}
+
+// --- teaching assignments (the knot) ---------------------------------------
+
+// CreateTeachingAssignment ties a teacher to a group and a subject within a
+// cycle. It enforces the relational invariants the school cares about, in order,
+// before writing — so a violation is a precise KindInvalid at the boundary
+// rather than an opaque FK error:
+//
+//  1. the group exists (missing → KindInvalid);
+//  2. the subject exists (missing → KindInvalid);
+//  3. the subject is teachable for the group — its grade level matches the
+//     group's grade level (mismatch → KindInvalid);
+//  4. the teacher exists (missing → KindInvalid).
+//
+// The assignment's cycle is DERIVED from the group (never taken from the caller),
+// so it cannot drift from the group it belongs to. A duplicate
+// (cycle, group, subject) surfaces as KindConflict from the repo.
+func (s *CatalogService) CreateTeachingAssignment(ctx context.Context, groupID, subjectID, teacherID string) (domain.TeachingAssignment, error) {
+	grp, err := s.repo.GetGroup(ctx, groupID)
+	if err != nil {
+		return domain.TeachingAssignment{}, requireParent(err, "group not found")
+	}
+	subj, err := s.repo.GetSubject(ctx, subjectID)
+	if err != nil {
+		return domain.TeachingAssignment{}, requireParent(err, "subject not found")
+	}
+	if subj.GradeLevelID() != grp.GradeLevelID() {
+		return domain.TeachingAssignment{}, glerrors.New(glerrors.KindInvalid, "subject does not belong to the group's grade level")
+	}
+	if _, err := s.repo.GetTeacher(ctx, teacherID); err != nil {
+		return domain.TeachingAssignment{}, requireParent(err, "teacher not found")
+	}
+	a, err := domain.NewTeachingAssignment(s.newID(), s.tenant, grp.CycleID(), groupID, subjectID, teacherID)
+	if err != nil {
+		return domain.TeachingAssignment{}, err
+	}
+	if err := s.repo.CreateTeachingAssignment(ctx, a); err != nil {
+		return domain.TeachingAssignment{}, err
+	}
+	return a, nil
+}
+
+// GetTeachingAssignment returns an assignment by id (KindNotFound if absent).
+func (s *CatalogService) GetTeachingAssignment(ctx context.Context, id string) (domain.TeachingAssignment, error) {
+	return s.repo.GetTeachingAssignment(ctx, id)
+}
+
+// ListTeachingAssignments returns assignments filtered by any of cycleID,
+// groupID, and teacherID ("" = do not filter on that field).
+func (s *CatalogService) ListTeachingAssignments(ctx context.Context, cycleID, groupID, teacherID string) ([]domain.TeachingAssignment, error) {
+	return s.repo.ListTeachingAssignments(ctx, cycleID, groupID, teacherID)
+}
