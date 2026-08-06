@@ -76,3 +76,33 @@ func ToProtoStatus(s domain.AdmissionStatus) studentsv1.AdmissionStatus {
 		return studentsv1.AdmissionStatus_ADMISSION_STATUS_UNSPECIFIED
 	}
 }
+
+// ToDomainEnrollmentStatus maps a wire EnrollmentStatus to the domain status
+// (unknown → Unspecified).
+func ToDomainEnrollmentStatus(s studentsv1.EnrollmentStatus) domain.EnrollmentStatus {
+	switch s {
+	case studentsv1.EnrollmentStatus_ENROLLMENT_STATUS_ACTIVE:
+		return domain.EnrollmentStatusActive
+	case studentsv1.EnrollmentStatus_ENROLLMENT_STATUS_TRANSFERRED:
+		return domain.EnrollmentStatusTransferred
+	case studentsv1.EnrollmentStatus_ENROLLMENT_STATUS_WITHDRAWN:
+		return domain.EnrollmentStatusWithdrawn
+	default:
+		return domain.EnrollmentStatusUnspecified
+	}
+}
+
+// ToProtoEnrollmentStatus maps a domain EnrollmentStatus to the wire status
+// (unknown → UNSPECIFIED).
+func ToProtoEnrollmentStatus(s domain.EnrollmentStatus) studentsv1.EnrollmentStatus {
+	switch s {
+	case domain.EnrollmentStatusActive:
+		return studentsv1.EnrollmentStatus_ENROLLMENT_STATUS_ACTIVE
+	case domain.EnrollmentStatusTransferred:
+		return studentsv1.EnrollmentStatus_ENROLLMENT_STATUS_TRANSFERRED
+	case domain.EnrollmentStatusWithdrawn:
+		return studentsv1.EnrollmentStatus_ENROLLMENT_STATUS_WITHDRAWN
+	default:
+		return studentsv1.EnrollmentStatus_ENROLLMENT_STATUS_UNSPECIFIED
+	}
+}
