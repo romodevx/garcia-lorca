@@ -9,6 +9,7 @@ import { Dashboard } from "./_screens/Dashboard";
 import { Finances } from "./_screens/Finances";
 import { Catalog } from "./_screens/config/Catalog";
 import { Enrollment } from "./_screens/students/Enrollment";
+import { GradeCapture } from "./_screens/grades/GradeCapture";
 import { Login } from "./_screens/Login";
 import { ChangePassword } from "./_screens/ChangePassword";
 import { ModulePlaceholder } from "./_screens/ModulePlaceholder";
@@ -22,6 +23,7 @@ type View =
   | { screen: "finance" }
   | { screen: "config" }
   | { screen: "students" }
+  | { screen: "grades" }
   | { screen: "module"; moduleId: string };
 
 // Gateway base URL for the browser (public env; matches compose NEXT_PUBLIC_API_URL).
@@ -54,6 +56,9 @@ export function AppShell(): ReactElement {
   // The enrollment surface is gated by module_students (UX-only; the gateway is
   // the boundary). The "students" module (Estudiantes) opens this surface.
   const studentsEnabled = useFlag("module_students");
+  // The grade-capture surface is gated by module_grades (UX-only; the gateway is
+  // the boundary). The "grades" module (Calificaciones) opens this surface.
+  const gradesEnabled = useFlag("module_grades");
 
   const handleLogin = async (email: string, password: string): Promise<void> => {
     setPending(true);
@@ -100,6 +105,10 @@ export function AppShell(): ReactElement {
     }
     if (id === "students") {
       setView({ screen: "students" });
+      return;
+    }
+    if (id === "grades") {
+      setView({ screen: "grades" });
       return;
     }
     setView({ screen: "module", moduleId: id });
@@ -156,6 +165,14 @@ export function AppShell(): ReactElement {
           // Flag OFF: never render the enrollment surface; show the friendly stub
           // so navigation never dead-ends. (Backend 404 is authoritative.)
           <ModulePlaceholder m={MODULES.find((m) => m.id === "students") as ModuleDef} onBack={home} />
+        ))}
+      {view.screen === "grades" &&
+        (gradesEnabled ? (
+          <GradeCapture onBack={home} />
+        ) : (
+          // Flag OFF: never render the grade-capture surface; show the friendly stub
+          // so navigation never dead-ends. (Backend 404 is authoritative.)
+          <ModulePlaceholder m={MODULES.find((m) => m.id === "grades") as ModuleDef} onBack={home} />
         ))}
       {view.screen === "module" && activeModule && <ModulePlaceholder m={activeModule} onBack={home} />}
     </div>

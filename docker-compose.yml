@@ -99,7 +99,8 @@ services:
       IAM_BASE_URL: "http://iam:8080"
       STUDENTS_BASE_URL: "http://students:8080"
       CONFIG_BASE_URL: "http://config:8080"
-      ENABLED_MODULES: "iam,gateway,students,config"
+      GRADES_BASE_URL: "http://grades:8080"
+      ENABLED_MODULES: "iam,gateway,students,config,grades"
     ports: ["8080:8080"]
     depends_on:
       postgres:
@@ -109,6 +110,8 @@ services:
       iam:
         condition: service_started
       config:
+        condition: service_started
+      grades:
         condition: service_started
 
   iam:
@@ -144,8 +147,23 @@ services:
 
   grades:
     <<: *go-service
-    environment: { <<: *go-env, SERVICE: grades }
+    environment:
+      <<: *go-env
+      SERVICE: grades
+      # The capture knot + roster read config (teaching assignment + term) and
+      # students (enrollments) by RPC — server-to-server, network-private.
+      CONFIG_BASE_URL: "http://config:8080"
+      STUDENTS_BASE_URL: "http://students:8080"
     ports: ["8094:8080"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      config:
+        condition: service_started
+      students:
+        condition: service_started
 
   attendance:
     <<: *go-service

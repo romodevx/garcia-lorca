@@ -98,6 +98,23 @@ describe("buildCommandRegistry", () => {
     expect(got.some((id) => id.startsWith("students."))).toBe(false);
   });
 
+  it("registers the capture-grades command under module_grades", () => {
+    const got = ids({ module_grades: true });
+    expect(got).toContain("grades.create.capture");
+    const cmds = buildCommandRegistry({ module_grades: true }, t);
+    // Routes to the grades surface (the roster grid).
+    expect(cmds.find((c) => c.id === "grades.create.capture")?.route).toBe("module:grades");
+    // Localized + alias-split from i18n.
+    const capture = cmds.find((c) => c.id === "grades.create.capture");
+    expect(capture?.title).toBe("Capturar calificaciones");
+    expect(capture?.aliases).toContain("cargar notas");
+  });
+
+  it("emits zero grades commands when module_grades is OFF", () => {
+    const got = ids({ module_students: true });
+    expect(got.some((id) => id.startsWith("grades."))).toBe(false);
+  });
+
   it("keys each command's route to its module for navigation", () => {
     const [nav] = buildCommandRegistry({ module_students: true }, t);
     expect(nav?.route).toBe("module:students");

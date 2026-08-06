@@ -28,6 +28,8 @@
   "alias.payment": "crear pago, cobrar, generar recibo",
   "create.evaluation": "Crear evaluación",
   "alias.evaluation": "cargar notas, nueva calificación",
+  "create.captureGrades": "Capturar calificaciones",
+  "alias.captureGrades": "cargar notas, registrar calificación, capturar notas, poner calificaciones",
   "create.announcement": "Crear aviso",
   "alias.announcement": "enviar comunicado, notificar a padres",
   "create.scholarship": "Asignar beca",

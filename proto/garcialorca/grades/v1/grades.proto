@@ -1,16 +1,44 @@
-// Grades / Boletas (M07) — grade capture + boleta (Strategy per SEP level).
-// FASE 0 contract-first stub.
+// Grades / Boletas (M07) — grade capture (roster + grade_entries).
+//
+// Phase 5 (capture): a teacher opens a teaching assignment (group+subject),
+// sees the roster (students enrolled in the group), and captures/edits a
+// numeric grade (0–10) per student for a term. subject_id / teacher_id / cycle
+// are DERIVED server-side from the assignment — never client-supplied.
+// Cross-service references (enrollment_id, subject_id, term_id, teacher_id) are
+// plain UUIDs validated by RPC, NOT foreign keys.
+//
+// Boleta generation + the SEP-level grading Strategy + the publish/boleta flow
+// (GradesPublished / published_at) are OUT of scope for this phase.
 syntax = "proto3";
 
 package garcialorca.grades.v1;
+
+import "google/protobuf/timestamp.proto";
 
 // GradesService is the grades/boletas API surface.
 service GradesService {
   // Health is the liveness/ping probe present on every service.
   rpc Health(HealthRequest) returns (HealthResponse);
 
-  // TODO(M07): CaptureGrade, PublishGrades, GenerateBoleta.
+  // CaptureGrade records or edits a student's numeric grade (0–10) for a term.
+  // The subject and teacher are DERIVED from the assignment (never client
+  // args); the enrollment, term, and assignment are validated by RPC against
+  // the students/config services. Re-capturing the same (enrollment, subject,
+  // term) updates the value (upsert). Out-of-range value is InvalidArgument.
+  rpc CaptureGrade(CaptureGradeRequest) returns (CaptureGradeResponse);
+
+  // GetRoster returns one row per active enrollment in the assignment's group,
+  // each with the current grade value for the term (has_value=false when the
+  // student has no grade captured yet). Student names are NOT returned — grades
+  // stays free of student PII; the web resolves names from the students list.
+  rpc GetRoster(GetRosterRequest) returns (GetRosterResponse);
+
+  // ListGradeEntries lists grade entries, optionally filtered by enrollment
+  // and/or term (each filter is independent; empty = any).
+  rpc ListGradeEntries(ListGradeEntriesRequest) returns (ListGradeEntriesResponse);
 }
+
+// --- Health ---------------------------------------------------------------
 
 message HealthRequest {}
 
@@ -18,16 +46,69 @@ message HealthResponse {
   string status = 1;
 }
 
-// Grade references a student. TODO(M07): subject_id, period, value, sep_level.
-message Grade {
+// --- Core types -----------------------------------------------------------
+
+// GradeEntry is one captured grade for a student's subject in a term. All ids
+// except `id` are cross-service references (validated by RPC, not FKs).
+// `value` is the numeric grade in [0, 10]. `published_at` is reserved for the
+// future boleta/publish flow and is unset in this phase.
+message GradeEntry {
   string id = 1;
-  string student_id = 2;
+  string enrollment_id = 2;
+  string subject_id = 3;
+  string term_id = 4;
+  string teacher_id = 5;
+  double value = 6;
+  google.protobuf.Timestamp published_at = 7;
 }
 
-// --- Domain events (published) ---
+// RosterRow is one student's slot in a roster: the enrollment, the student it
+// belongs to, and the current grade value (has_value=false ⇒ not captured yet,
+// and `value` is meaningless).
+message RosterRow {
+  string enrollment_id = 1;
+  string student_id = 2;
+  double value = 3;
+  bool has_value = 4;
+}
+
+// --- RPC messages ---------------------------------------------------------
+
+// CaptureGradeRequest captures/edits a grade. subject_id / teacher_id / cycle
+// are deliberately absent — they are DERIVED from the assignment server-side.
+message CaptureGradeRequest {
+  string assignment_id = 1;
+  string enrollment_id = 2;
+  string term_id = 3;
+  double value = 4;
+}
+
+message CaptureGradeResponse {
+  GradeEntry entry = 1;
+}
+
+message GetRosterRequest {
+  string assignment_id = 1;
+  string term_id = 2;
+}
+
+message GetRosterResponse {
+  repeated RosterRow rows = 1;
+}
+
+message ListGradeEntriesRequest {
+  string enrollment_id = 1;  // optional filter (empty = any)
+  string term_id = 2;        // optional filter (empty = any)
+}
+
+message ListGradeEntriesResponse {
+  repeated GradeEntry entries = 1;
+}
+
+// --- Domain events (published) --------------------------------------------
 
 // GradesPublished fires when grades for a period are released.
-// TODO(M07): cycle_id, period, published_at.
+// Reserved for a future phase (boleta/publish flow) — NOT emitted yet.
 message GradesPublished {
   string student_id = 1;
   string cycle_id = 2;
