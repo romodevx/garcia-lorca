@@ -36,6 +36,9 @@ interface ActionSpec {
 /** Curated create/quick actions (seed; each module extends this as it's built). */
 const ACTIONS: readonly ActionSpec[] = [
   { moduleId: "students", kind: "create", titleKey: "create.student", aliasKey: "alias.student" },
+  // Enrollment surface (Phase 4) — fewest-clicks shortcuts into the students surface.
+  { moduleId: "students", kind: "create", key: "enroll", titleKey: "create.enroll", aliasKey: "alias.enroll" },
+  { moduleId: "students", kind: "create", key: "transfer", titleKey: "create.transfer", aliasKey: "alias.transfer" },
   { moduleId: "finance", kind: "create", titleKey: "create.payment", aliasKey: "alias.payment" },
   { moduleId: "grades", kind: "create", titleKey: "create.evaluation", aliasKey: "alias.evaluation" },
   { moduleId: "announcements", kind: "create", titleKey: "create.announcement", aliasKey: "alias.announcement" },

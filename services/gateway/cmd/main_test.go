@@ -69,6 +69,20 @@ func (stubStudents) CreateApplicant(_ context.Context, req *connect.Request[stud
 	}}), nil
 }
 
+func (stubStudents) ListStudents(_ context.Context, req *connect.Request[studentsv1.ListStudentsRequest]) (*connect.Response[studentsv1.ListStudentsResponse], error) {
+	return connect.NewResponse(&studentsv1.ListStudentsResponse{Students: []*studentsv1.Student{
+		{Id: "stu-1", FirstName: "Ana", AdmissionStatus: studentsv1.AdmissionStatus_ADMISSION_STATUS_PENDING},
+	}}), nil
+}
+
+func (stubStudents) GetStudent(_ context.Context, req *connect.Request[studentsv1.GetStudentRequest]) (*connect.Response[studentsv1.GetStudentResponse], error) {
+	return connect.NewResponse(&studentsv1.GetStudentResponse{Student: &studentsv1.Student{
+		Id:              req.Msg.GetId(),
+		FirstName:       "Ana",
+		AdmissionStatus: studentsv1.AdmissionStatus_ADMISSION_STATUS_ACCEPTED,
+	}}), nil
+}
+
 func (stubStudents) Enroll(_ context.Context, req *connect.Request[studentsv1.EnrollRequest]) (*connect.Response[studentsv1.EnrollResponse], error) {
 	// Echo a canned enrollment with a server-derived cycleId, proving the edge
 	// surfaces the derived cycle without ever accepting one from the client.
@@ -215,6 +229,75 @@ func TestStudentsRouteEnabledWithPermissionCreates201(t *testing.T) {
 	res := postStudent(t, gw, "with-perm", validBody)
 	if res.StatusCode != http.StatusCreated {
 		t.Errorf("status = %d, want 201", res.StatusCode)
+	}
+}
+
+// --- students read routes (list/get): ModuleGuard(students) → RequireAuth →
+// RequirePermission(students:read). These back the enroll UI's student picker
+// and reuse the exact studentsRead helper, so the whole guard chain applies.
+
+func TestListStudentsRouteDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_students OFF
+	// Even a caller with students:read must not learn the module exists.
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/students", "student-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestListStudentsRouteNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/students", "", "")
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+func TestListStudentsRouteWithReadPermissionLists200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/students?status=pending", "student-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out struct {
+		Students []map[string]any `json:"students"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Students) != 1 || out.Students[0]["id"] != "stu-1" {
+		t.Errorf("body = %v", out)
+	}
+}
+
+func TestGetStudentRouteDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_students OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/students/stu-1", "student-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestGetStudentRouteNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/students/stu-1", "", "")
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+func TestGetStudentRouteWithReadPermission200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/students/stu-9", "student-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out["id"] != "stu-9" {
+		t.Errorf("body = %v", out)
 	}
 }
 

@@ -85,6 +85,34 @@ func (c *StudentsClient) CreateApplicant(ctx context.Context, in CreateApplicant
 	return toStudentResult(res.Msg.GetStudent()), nil
 }
 
+// ListStudents lists students, optionally filtered by admission status (""
+// = all). Pagination and the level/grade filters are not exposed at the edge
+// yet; the students service returns its default page. Connect error codes
+// propagate so the handler maps them to HTTP status.
+func (c *StudentsClient) ListStudents(ctx context.Context, status string) ([]StudentResult, error) {
+	res, err := c.rpc.ListStudents(ctx, connect.NewRequest(&studentsv1.ListStudentsRequest{
+		Status: admissionFromName(status),
+	}))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]StudentResult, 0, len(res.Msg.GetStudents()))
+	for _, s := range res.Msg.GetStudents() {
+		out = append(out, toStudentResult(s))
+	}
+	return out, nil
+}
+
+// GetStudent fetches a single student by id. Connect error codes propagate
+// (NotFound for an unknown id) so the handler maps them to HTTP status.
+func (c *StudentsClient) GetStudent(ctx context.Context, id string) (StudentResult, error) {
+	res, err := c.rpc.GetStudent(ctx, connect.NewRequest(&studentsv1.GetStudentRequest{Id: id}))
+	if err != nil {
+		return StudentResult{}, err
+	}
+	return toStudentResult(res.Msg.GetStudent()), nil
+}
+
 // --- enrollments ----------------------------------------------------------
 
 // Enroll places a student into a group of a cycle. The server derives the cycle
@@ -206,6 +234,17 @@ var admissionNames = map[studentsv1.AdmissionStatus]string{
 }
 
 func admissionName(s studentsv1.AdmissionStatus) string { return admissionNames[s] }
+
+// admissionFromName is the reverse of admissionName; an empty or unknown name
+// maps to UNSPECIFIED, which the students service treats as "no status filter".
+func admissionFromName(name string) studentsv1.AdmissionStatus {
+	for status, n := range admissionNames {
+		if n == name {
+			return status
+		}
+	}
+	return studentsv1.AdmissionStatus_ADMISSION_STATUS_UNSPECIFIED
+}
 
 var enrollmentStatusNames = map[studentsv1.EnrollmentStatus]string{
 	studentsv1.EnrollmentStatus_ENROLLMENT_STATUS_ACTIVE:      "active",
