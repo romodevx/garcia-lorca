@@ -40,7 +40,7 @@ end-to-end slice (`iam` → `students`) deployed and integration-tested before w
 |----|--------|--------------|------|-----------|--------|-----------|------------------|---------------------|----------|--------------|
 | M01 | **IAM (auth/roles/permisos)** | iam | 11 | **Yes** (permisos) | **Must** | M00 | — | `users`, `roles`, `user_roles` | `module_iam` | JWT issuance/validation, role+permission model; everything downstream authorizes against it. RLS session vars set per transaction. |
 | M02 | **Gateway / BFF** | gateway | 10 | — | **Must** | M01 | — | — | `module_gateway` | Connect edge; **feature-flag middleware** (disabled module → 404); read-model plumbing for dashboard. The flag boundary lives here. |
-| M03 | **Students / Admisión** | students | 1 | **Yes** | **Must** | M01, M02 | `StudentEnrolled`, `AdmissionStatusChanged` | `students` | `module_students` | First vertical slice: enroll a student end-to-end through the gateway with integration test. RLS per student. |
+| M03 | **Students / Admisión** ✅ _+ enrollment_ | students | 1 | **Yes** | **Must** | M01, M02 | `StudentEnrolled`, `AdmissionStatusChanged` | `students`, `enrollments`, `enrollment_transfers` | `module_students` | First vertical slice (admission) + **Phase 4 (2026-08): enrollment shipped** — place a student in a group of a cycle (`enrollments`) with the cycle DERIVED from the group and group/term validated by RPC to `config` (first service-to-service call); **transfer between groups** with dated/reasoned history (`enrollment_transfers`, atomic) + withdraw. Gateway routes behind `module_students` + `students:enroll/read`. RLS on all three tables. |
 
 ### Core operations (Must — the school runs on these)
 
