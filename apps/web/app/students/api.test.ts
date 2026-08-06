@@ -1,0 +1,197 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  enroll,
+  getStudent,
+  listEnrollments,
+  listStudents,
+  transfer,
+  withdraw,
+} from "./api";
+
+const BASE = "http://gw";
+
+afterEach(() => vi.restoreAllMocks());
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+/** Returns the [url, init] of the single fetch call the helper made. */
+function lastCall(mock: ReturnType<typeof vi.fn>): [string, RequestInit] {
+  const call = mock.mock.calls[0] as [string, RequestInit];
+  return [call[0], call[1]];
+}
+
+const student = {
+  id: "st1",
+  curp: "AAAA000000AAAAAA01",
+  firstName: "Ada",
+  lastName: "Lovelace",
+  level: "Primaria",
+  gradeGroup: "4° A",
+  guardianName: "Marisol Ríos",
+  admissionStatus: "accepted",
+};
+
+const enrollment = {
+  id: "en1",
+  studentId: "st1",
+  cycleId: "c1",
+  groupId: "grp1",
+  termId: "",
+  status: "active",
+  enrolledAt: "2026-08-06T00:00:00Z",
+};
+
+describe("listStudents", () => {
+  it("GETs with credentials and unwraps the {students} envelope", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ students: [student] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await listStudents(BASE);
+
+    expect(res).toEqual([student]);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/students");
+    expect(init.credentials).toBe("include");
+    expect(init.method ?? "GET").toBe("GET");
+  });
+
+  it("filters by the status query param when given", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ students: [student] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listStudents(BASE, "accepted");
+    expect(lastCall(fetchMock)[0]).toBe("http://gw/api/v1/students?status=accepted");
+  });
+
+  it("returns [] when the envelope key is absent", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({})));
+    await expect(listStudents(BASE)).resolves.toEqual([]);
+  });
+
+  it("throws on a non-ok response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 403 })));
+    await expect(listStudents(BASE)).rejects.toThrow();
+  });
+});
+
+describe("getStudent", () => {
+  it("GETs /students/{id} with credentials and returns the student", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(student));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await getStudent(BASE, "st1");
+
+    expect(res).toEqual(student);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/students/st1");
+    expect(init.credentials).toBe("include");
+  });
+});
+
+describe("enroll", () => {
+  it("POSTs {studentId, groupId} and NEVER sends cycleId", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(enrollment, 201));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await enroll(BASE, { studentId: "st1", groupId: "grp1" });
+
+    expect(res).toEqual(enrollment);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/enrollments");
+    expect(init.method).toBe("POST");
+    expect(init.credentials).toBe("include");
+    const body = JSON.parse(init.body as string);
+    expect(body).toEqual({ studentId: "st1", groupId: "grp1" });
+    expect(body).not.toHaveProperty("cycleId");
+  });
+
+  it("includes termId only when provided, still never cycleId", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(enrollment, 201));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await enroll(BASE, { studentId: "st1", groupId: "grp1", termId: "t1" });
+    const body = JSON.parse(lastCall(fetchMock)[1].body as string);
+    expect(body).toEqual({ studentId: "st1", groupId: "grp1", termId: "t1" });
+    expect(body).not.toHaveProperty("cycleId");
+  });
+
+  it("throws on a non-ok response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 409 })));
+    await expect(enroll(BASE, { studentId: "st1", groupId: "grp1" })).rejects.toThrow();
+  });
+});
+
+describe("listEnrollments", () => {
+  it("GETs with credentials and unwraps the {enrollments} envelope", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ enrollments: [enrollment] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await listEnrollments(BASE, { groupId: "grp1" });
+
+    expect(res).toEqual([enrollment]);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/enrollments?groupId=grp1");
+    expect(init.credentials).toBe("include");
+  });
+
+  it("applies studentId/cycleId/groupId filters and drops empty ones", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ enrollments: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listEnrollments(BASE, { studentId: "st1", cycleId: "c1", groupId: "grp1" });
+    expect(lastCall(fetchMock)[0]).toBe(
+      "http://gw/api/v1/enrollments?studentId=st1&cycleId=c1&groupId=grp1",
+    );
+  });
+
+  it("sends no query string when no filters are given", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ enrollments: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listEnrollments(BASE);
+    expect(lastCall(fetchMock)[0]).toBe("http://gw/api/v1/enrollments");
+  });
+});
+
+describe("transfer", () => {
+  it("POSTs {enrollmentId, toGroupId, reason} with credentials", async () => {
+    const moved = { ...enrollment, groupId: "grp2", status: "active" };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(moved));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await transfer(BASE, { enrollmentId: "en1", toGroupId: "grp2", reason: "cambio de turno" });
+
+    expect(res).toEqual(moved);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/enrollments/transfer");
+    expect(init.method).toBe("POST");
+    expect(init.credentials).toBe("include");
+    expect(JSON.parse(init.body as string)).toEqual({
+      enrollmentId: "en1",
+      toGroupId: "grp2",
+      reason: "cambio de turno",
+    });
+  });
+});
+
+describe("withdraw", () => {
+  it("POSTs {enrollmentId} with credentials", async () => {
+    const gone = { ...enrollment, status: "withdrawn" };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(gone));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await withdraw(BASE, "en1");
+
+    expect(res).toEqual(gone);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/enrollments/withdraw");
+    expect(init.method).toBe("POST");
+    expect(init.credentials).toBe("include");
+    expect(JSON.parse(init.body as string)).toEqual({ enrollmentId: "en1" });
+  });
+});
