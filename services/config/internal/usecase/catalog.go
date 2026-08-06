@@ -249,6 +249,26 @@ func (s *CatalogService) ListTeachers(ctx context.Context) ([]domain.Teacher, er
 	return s.repo.ListTeachers(ctx)
 }
 
+// SetTeacherUser links a teacher catalog record to an IAM user, or unlinks it
+// when userID is "" (stored as SQL NULL). The teacher is loaded first so a
+// missing teacher surfaces as KindNotFound before any write. The IAM user is NOT
+// validated here — the gateway checks it exists (via iam GetUser) before calling
+// this; config just stores the link.
+func (s *CatalogService) SetTeacherUser(ctx context.Context, teacherID, userID string) (domain.Teacher, error) {
+	te, err := s.repo.GetTeacher(ctx, teacherID)
+	if err != nil {
+		return domain.Teacher{}, err // KindNotFound propagates
+	}
+	var stored *string
+	if userID != "" {
+		stored = &userID
+	}
+	if err := s.repo.SetTeacherUserID(ctx, teacherID, stored); err != nil {
+		return domain.Teacher{}, err
+	}
+	return te.WithUserID(userID), nil
+}
+
 // --- teaching assignments (the knot) ---------------------------------------
 
 // CreateTeachingAssignment ties a teacher to a group and a subject within a

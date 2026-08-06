@@ -423,6 +423,23 @@ func (r *Repository) ListTeachers(ctx context.Context) ([]domain.Teacher, error)
 	return out, nil
 }
 
+// SetTeacherUserID links a teacher to an IAM user, or unlinks it when userID is
+// nil (persisting SQL NULL). An id that matches no row is KindNotFound.
+func (r *Repository) SetTeacherUserID(ctx context.Context, teacherID string, userID *string) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Model(&teacherModel{}).
+			Where("id = ?", teacherID).
+			Update("user_id", userID)
+		if res.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "linking teacher to user", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return glerrors.ErrNotFound
+		}
+		return nil
+	})
+}
+
 // --- teaching assignments (the knot) --------------------------------------
 
 // CreateTeachingAssignment persists a new assignment. A duplicate

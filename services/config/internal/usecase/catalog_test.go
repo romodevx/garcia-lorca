@@ -235,6 +235,19 @@ func (f *fakeCatalog) ListTeachers(_ context.Context) ([]domain.Teacher, error) 
 	return out, nil
 }
 
+func (f *fakeCatalog) SetTeacherUserID(_ context.Context, teacherID string, userID *string) error {
+	te, ok := f.teachers[teacherID]
+	if !ok {
+		return glerrors.ErrNotFound
+	}
+	link := ""
+	if userID != nil {
+		link = *userID
+	}
+	f.teachers[teacherID] = te.WithUserID(link)
+	return nil
+}
+
 func (f *fakeCatalog) CreateTeachingAssignment(_ context.Context, a domain.TeachingAssignment) error {
 	if err := f.claim("assignment|" + a.CycleID() + "|" + a.GroupID() + "|" + a.SubjectID()); err != nil {
 		return err

@@ -62,3 +62,24 @@ func TestNewTeacherValidWithUser(t *testing.T) {
 		t.Errorf("expected user link, got UserID=%q HasUser=%v", te.UserID(), te.HasUser())
 	}
 }
+
+func TestTeacherWithUserIDLinksAndUnlinks(t *testing.T) {
+	base, err := domain.NewTeacher("te1", "t1", "Ada", "Lovelace", "ada@example.com", "")
+	if err != nil {
+		t.Fatalf("NewTeacher: %v", err)
+	}
+
+	linked := base.WithUserID("user-9")
+	if linked.UserID() != "user-9" || !linked.HasUser() {
+		t.Errorf("WithUserID(link): UserID=%q HasUser=%v, want user-9/true", linked.UserID(), linked.HasUser())
+	}
+	// The original is unchanged (value semantics): WithUserID returns a copy.
+	if base.HasUser() {
+		t.Error("WithUserID must not mutate the original teacher")
+	}
+
+	unlinked := linked.WithUserID("")
+	if unlinked.HasUser() || unlinked.UserID() != "" {
+		t.Errorf("WithUserID(unlink): UserID=%q HasUser=%v, want \"\"/false", unlinked.UserID(), unlinked.HasUser())
+	}
+}
