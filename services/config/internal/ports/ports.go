@@ -88,4 +88,28 @@ type CatalogRepository interface {
 	// ListGroups returns the groups of cycleID, optionally narrowed to
 	// gradeLevelID ("" = all grade levels of the cycle).
 	ListGroups(ctx context.Context, cycleID string, gradeLevelID string) ([]domain.Group, error)
+
+	// --- teachers (catalog person records; NOT login accounts) ---
+
+	// CreateTeacher persists a new teacher. A duplicate email (per tenant) is
+	// KindConflict.
+	CreateTeacher(ctx context.Context, t domain.Teacher) error
+	// GetTeacher returns a teacher by id, or KindNotFound.
+	GetTeacher(ctx context.Context, id string) (domain.Teacher, error)
+	// ListTeachers returns every teacher in the tenant.
+	ListTeachers(ctx context.Context) ([]domain.Teacher, error)
+
+	// --- teaching assignments (the knot: teacher ↔ group ↔ subject ↔ cycle) ---
+
+	// CreateTeachingAssignment persists a new assignment. A duplicate
+	// (cycle_id, group_id, subject_id) is KindConflict; a missing referenced row
+	// surfaces as an FK violation, which the use case forestalls by checking the
+	// group, subject, and teacher exist up front (mapping a miss to KindInvalid).
+	CreateTeachingAssignment(ctx context.Context, a domain.TeachingAssignment) error
+	// GetTeachingAssignment returns an assignment by id, or KindNotFound.
+	GetTeachingAssignment(ctx context.Context, id string) (domain.TeachingAssignment, error)
+	// ListTeachingAssignments returns assignments filtered by any of cycleID,
+	// groupID, and teacherID ("" = do not filter on that field; all "" = every
+	// assignment in the tenant).
+	ListTeachingAssignments(ctx context.Context, cycleID string, groupID string, teacherID string) ([]domain.TeachingAssignment, error)
 }

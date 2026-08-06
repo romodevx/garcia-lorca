@@ -30,6 +30,8 @@ type fakeCatalog struct {
 	subjects    map[string]domain.Subject
 	terms       map[string]domain.Term
 	groups      map[string]domain.Group
+	teachers    map[string]domain.Teacher
+	assignments map[string]domain.TeachingAssignment
 	unique      map[string]bool // scope-qualified unique keys across all entities
 }
 
@@ -41,6 +43,8 @@ func newFake() *fakeCatalog {
 		subjects:    map[string]domain.Subject{},
 		terms:       map[string]domain.Term{},
 		groups:      map[string]domain.Group{},
+		teachers:    map[string]domain.Teacher{},
+		assignments: map[string]domain.TeachingAssignment{},
 		unique:      map[string]bool{},
 	}
 }
@@ -204,6 +208,61 @@ func (f *fakeCatalog) ListGroups(_ context.Context, cycleID string, gradeLevelID
 			continue
 		}
 		out = append(out, g)
+	}
+	return out, nil
+}
+
+func (f *fakeCatalog) CreateTeacher(_ context.Context, te domain.Teacher) error {
+	if err := f.claim("teacher|" + te.Email()); err != nil {
+		return err
+	}
+	f.teachers[te.ID()] = te
+	return nil
+}
+
+func (f *fakeCatalog) GetTeacher(_ context.Context, id string) (domain.Teacher, error) {
+	if te, ok := f.teachers[id]; ok {
+		return te, nil
+	}
+	return domain.Teacher{}, glerrors.ErrNotFound
+}
+
+func (f *fakeCatalog) ListTeachers(_ context.Context) ([]domain.Teacher, error) {
+	out := make([]domain.Teacher, 0, len(f.teachers))
+	for _, te := range f.teachers {
+		out = append(out, te)
+	}
+	return out, nil
+}
+
+func (f *fakeCatalog) CreateTeachingAssignment(_ context.Context, a domain.TeachingAssignment) error {
+	if err := f.claim("assignment|" + a.CycleID() + "|" + a.GroupID() + "|" + a.SubjectID()); err != nil {
+		return err
+	}
+	f.assignments[a.ID()] = a
+	return nil
+}
+
+func (f *fakeCatalog) GetTeachingAssignment(_ context.Context, id string) (domain.TeachingAssignment, error) {
+	if a, ok := f.assignments[id]; ok {
+		return a, nil
+	}
+	return domain.TeachingAssignment{}, glerrors.ErrNotFound
+}
+
+func (f *fakeCatalog) ListTeachingAssignments(_ context.Context, cycleID, groupID, teacherID string) ([]domain.TeachingAssignment, error) {
+	out := make([]domain.TeachingAssignment, 0)
+	for _, a := range f.assignments {
+		if cycleID != "" && a.CycleID() != cycleID {
+			continue
+		}
+		if groupID != "" && a.GroupID() != groupID {
+			continue
+		}
+		if teacherID != "" && a.TeacherID() != teacherID {
+			continue
+		}
+		out = append(out, a)
 	}
 	return out, nil
 }
