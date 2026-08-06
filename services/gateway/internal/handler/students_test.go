@@ -15,13 +15,26 @@ import (
 )
 
 type fakeCreator struct {
-	got client.CreateApplicantInput
-	res client.StudentResult
-	err error
+	got         client.CreateApplicantInput
+	gotListStat string
+	gotGetID    string
+	res         client.StudentResult
+	list        []client.StudentResult
+	err         error
 }
 
 func (f *fakeCreator) CreateApplicant(_ context.Context, in client.CreateApplicantInput) (client.StudentResult, error) {
 	f.got = in
+	return f.res, f.err
+}
+
+func (f *fakeCreator) ListStudents(_ context.Context, status string) ([]client.StudentResult, error) {
+	f.gotListStat = status
+	return f.list, f.err
+}
+
+func (f *fakeCreator) GetStudent(_ context.Context, id string) (client.StudentResult, error) {
+	f.gotGetID = id
 	return f.res, f.err
 }
 
@@ -92,6 +105,94 @@ func TestCreateStudentInternalErrorIs500(t *testing.T) {
 	rec := postStudents(t, h, `{"curp":"HEGA050312MDFRNN08","firstName":"Ana","lastName":"Herrera","level":"primaria"}`)
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", rec.Code)
+	}
+}
+
+func TestListStudentsForwardsStatusAndWrapsList(t *testing.T) {
+	svc := &fakeCreator{list: []client.StudentResult{
+		{ID: "stu-1", FirstName: "Ana", AdmissionStatus: "pending"},
+		{ID: "stu-2", FirstName: "Beto", AdmissionStatus: "pending"},
+	}}
+	h := handler.NewStudentsHandler(svc)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/students?status=pending", nil)
+	rec := httptest.NewRecorder()
+	h.List(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if svc.gotListStat != "pending" {
+		t.Errorf("forwarded status = %q, want pending", svc.gotListStat)
+	}
+	var out struct {
+		Students []map[string]any `json:"students"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Students) != 2 || out.Students[0]["id"] != "stu-1" {
+		t.Errorf("body = %v", out)
+	}
+}
+
+func TestListStudentsNoStatusForwardsEmpty(t *testing.T) {
+	svc := &fakeCreator{}
+	h := handler.NewStudentsHandler(svc)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/students", nil)
+	rec := httptest.NewRecorder()
+	h.List(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if svc.gotListStat != "" {
+		t.Errorf("forwarded status = %q, want empty", svc.gotListStat)
+	}
+}
+
+func TestListStudentsUpstreamErrorIs500(t *testing.T) {
+	svc := &fakeCreator{err: connect.NewError(connect.CodeUnavailable, nil)}
+	h := handler.NewStudentsHandler(svc)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/students", nil)
+	rec := httptest.NewRecorder()
+	h.List(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", rec.Code)
+	}
+}
+
+func TestGetStudentByPathValue(t *testing.T) {
+	svc := &fakeCreator{res: client.StudentResult{ID: "stu-9", FirstName: "Ana", AdmissionStatus: "accepted"}}
+	h := handler.NewStudentsHandler(svc)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/students/stu-9", nil)
+	req.SetPathValue("id", "stu-9")
+	rec := httptest.NewRecorder()
+	h.Get(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if svc.gotGetID != "stu-9" {
+		t.Errorf("gotGetID = %q", svc.gotGetID)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out["id"] != "stu-9" || out["admissionStatus"] != "accepted" {
+		t.Errorf("body = %v", out)
+	}
+}
+
+func TestGetStudentNotFoundIs404(t *testing.T) {
+	svc := &fakeCreator{err: connect.NewError(connect.CodeNotFound, nil)}
+	h := handler.NewStudentsHandler(svc)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/students/missing", nil)
+	req.SetPathValue("id", "missing")
+	rec := httptest.NewRecorder()
+	h.Get(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
 	}
 }
 

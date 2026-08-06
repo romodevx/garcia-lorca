@@ -8,22 +8,25 @@ import (
 	"github.com/garcia-lorca/services/gateway/internal/client"
 )
 
-// StudentCreator is the students surface the edge needs (consumer-defined, so the
-// handler is testable with a fake). The Connect StudentsClient implements it.
-type StudentCreator interface {
+// StudentsService is the students surface the edge needs (consumer-defined, so
+// the handler is testable with a fake). The Connect StudentsClient implements it.
+type StudentsService interface {
 	CreateApplicant(ctx context.Context, in client.CreateApplicantInput) (client.StudentResult, error)
+	ListStudents(ctx context.Context, status string) ([]client.StudentResult, error)
+	GetStudent(ctx context.Context, id string) (client.StudentResult, error)
 }
 
 // StudentsHandler exposes the front-facing (HTTP/JSON) students endpoints,
 // proxying to the students service. It translates JSON ↔ the StudentsClient and
-// Connect error codes ↔ HTTP status. It must run behind the module guard
-// (module_students) plus RequireAuth + RequirePermission("students:create").
+// Connect error codes ↔ HTTP status. Every route must run behind the module
+// guard (module_students) plus RequireAuth + rotation-enforcement, with the
+// write (create) gated on students:create and reads (list/get) on students:read.
 type StudentsHandler struct {
-	svc StudentCreator
+	svc StudentsService
 }
 
-// NewStudentsHandler wires the handler to a student creator.
-func NewStudentsHandler(svc StudentCreator) *StudentsHandler {
+// NewStudentsHandler wires the handler to a students service.
+func NewStudentsHandler(svc StudentsService) *StudentsHandler {
 	return &StudentsHandler{svc: svc}
 }
 
@@ -47,6 +50,19 @@ type studentResponse struct {
 	AdmissionStatus string `json:"admissionStatus"`
 }
 
+func toStudentResponse(s client.StudentResult) studentResponse {
+	return studentResponse{
+		ID:              s.ID,
+		CURP:            s.CURP,
+		FirstName:       s.FirstName,
+		LastName:        s.LastName,
+		Level:           s.Level,
+		GradeGroup:      s.GradeGroup,
+		GuardianName:    s.GuardianName,
+		AdmissionStatus: s.AdmissionStatus,
+	}
+}
+
 // Create handles POST /api/v1/students: registers a new applicant (pending).
 func (h *StudentsHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req createStudentRequest
@@ -63,20 +79,35 @@ func (h *StudentsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		GuardianName: req.GuardianName,
 	})
 	if err != nil {
-		status := httpStatusFor(err)
-		http.Error(w, http.StatusText(status), status)
+		writeConnectError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, studentResponse{
-		ID:              res.ID,
-		CURP:            res.CURP,
-		FirstName:       res.FirstName,
-		LastName:        res.LastName,
-		Level:           res.Level,
-		GradeGroup:      res.GradeGroup,
-		GuardianName:    res.GuardianName,
-		AdmissionStatus: res.AdmissionStatus,
-	})
+	writeJSON(w, http.StatusCreated, toStudentResponse(res))
+}
+
+// List handles GET /api/v1/students?status=... : lists students, optionally
+// filtered by admission status (empty = all).
+func (h *StudentsHandler) List(w http.ResponseWriter, r *http.Request) {
+	res, err := h.svc.ListStudents(r.Context(), r.URL.Query().Get("status"))
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	out := make([]studentResponse, 0, len(res))
+	for _, s := range res {
+		out = append(out, toStudentResponse(s))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"students": out})
+}
+
+// Get handles GET /api/v1/students/{id}: fetches a single student.
+func (h *StudentsHandler) Get(w http.ResponseWriter, r *http.Request) {
+	res, err := h.svc.GetStudent(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toStudentResponse(res))
 }
 
 // --- enrollments ----------------------------------------------------------
