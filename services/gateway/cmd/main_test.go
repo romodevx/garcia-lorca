@@ -48,6 +48,10 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"student-reader":   {"students:read"},
 		"grades-writer":    {"grades:write", "grades:read"},
 		"grades-reader":    {"grades:read"},
+		"users-writer":     {"users:write", "users:read"},
+		"users-reader":     {"users:read"},
+		"roles-writer":     {"roles:write", "roles:read"},
+		"roles-reader":     {"roles:read"},
 	}
 	granted, ok := perms[req.Msg.GetAccessToken()]
 	if !ok {
@@ -55,6 +59,43 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 	}
 	return connect.NewResponse(&iamv1.ValidateTokenResponse{Claims: &iamv1.Claims{
 		Subject: "u1", TenantId: "t1", Email: "ana@garcialorca.mx", Permissions: granted,
+	}}), nil
+}
+
+// iam admin RPCs on the stub: enough canned behavior to drive the route-security
+// chain for the user/role admin surface and the teacher-link user validation.
+
+func (stubIAM) CreateUser(_ context.Context, req *connect.Request[iamv1.CreateUserRequest]) (*connect.Response[iamv1.CreateUserResponse], error) {
+	return connect.NewResponse(&iamv1.CreateUserResponse{User: &iamv1.User{
+		Id: "usr-1", Email: req.Msg.GetEmail(), DisplayName: req.Msg.GetDisplayName(),
+		Status: iamv1.UserStatus_USER_STATUS_ACTIVE, MustChangePassword: true, RoleIds: req.Msg.GetRoleIds(),
+	}}), nil
+}
+
+func (stubIAM) GetUser(_ context.Context, req *connect.Request[iamv1.GetUserRequest]) (*connect.Response[iamv1.GetUserResponse], error) {
+	if req.Msg.GetId() == "ghost" {
+		return nil, connect.NewError(connect.CodeNotFound, errStr("no user"))
+	}
+	return connect.NewResponse(&iamv1.GetUserResponse{User: &iamv1.User{
+		Id: req.Msg.GetId(), Email: "prof@example.com", Status: iamv1.UserStatus_USER_STATUS_ACTIVE,
+	}}), nil
+}
+
+func (stubIAM) ListUsers(_ context.Context, _ *connect.Request[iamv1.ListUsersRequest]) (*connect.Response[iamv1.ListUsersResponse], error) {
+	return connect.NewResponse(&iamv1.ListUsersResponse{Users: []*iamv1.User{
+		{Id: "usr-1", Email: "prof@example.com", Status: iamv1.UserStatus_USER_STATUS_ACTIVE},
+	}}), nil
+}
+
+func (stubIAM) CreateRole(_ context.Context, req *connect.Request[iamv1.CreateRoleRequest]) (*connect.Response[iamv1.CreateRoleResponse], error) {
+	return connect.NewResponse(&iamv1.CreateRoleResponse{Role: &iamv1.Role{
+		Id: "rol-1", Name: req.Msg.GetName(), Permissions: req.Msg.GetPermissions(),
+	}}), nil
+}
+
+func (stubIAM) ListRoles(_ context.Context, _ *connect.Request[iamv1.ListRolesRequest]) (*connect.Response[iamv1.ListRolesResponse], error) {
+	return connect.NewResponse(&iamv1.ListRolesResponse{Roles: []*iamv1.Role{
+		{Id: "rol-1", Name: "docente", Permissions: []string{"grades:read"}},
 	}}), nil
 }
 
@@ -133,6 +174,12 @@ func (stubConfig) CreateTeacher(_ context.Context, req *connect.Request[configv1
 		LastName:  req.Msg.GetLastName(),
 		Email:     req.Msg.GetEmail(),
 		UserId:    req.Msg.GetUserId(),
+	}}), nil
+}
+
+func (stubConfig) SetTeacherUser(_ context.Context, req *connect.Request[configv1.SetTeacherUserRequest]) (*connect.Response[configv1.SetTeacherUserResponse], error) {
+	return connect.NewResponse(&configv1.SetTeacherUserResponse{Teacher: &configv1.Teacher{
+		Id: req.Msg.GetTeacherId(), UserId: req.Msg.GetUserId(),
 	}}), nil
 }
 
@@ -627,6 +674,152 @@ func TestGradesListReadOnlyPermissionLists200(t *testing.T) {
 func TestGradesListDisabledModuleIs404(t *testing.T) {
 	gw := newTestGateway(t, map[string]bool{}) // module_grades OFF
 	res := doGateway(t, gw, http.MethodGet, "/api/v1/grades?enrollmentId=enr-1", "grades-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+// --- iam admin routes (users/roles): ModuleGuard(iam) → RequireAuth →
+// RequirePermission. User routes gate on users:* , role routes on roles:* .
+// Every route sits behind guard.Protect("iam", …) so module_iam OFF ⇒ 404.
+
+const validCreateUserBody = `{"email":"prof@example.com","displayName":"Prof","tempPassword":"init-pw-123","roleIds":["rol-1"]}`
+const validCreateRoleBody = `{"name":"docente","permissions":["students:read","grades:read","grades:write"]}`
+
+func TestUsersRouteDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_iam OFF
+	// Even a caller with users:write must not learn the admin surface exists.
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/users", "users-writer", validCreateUserBody)
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestUsersRouteNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_iam": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/users", "", validCreateUserBody)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+func TestUsersWriteReadOnlyPermissionIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_iam": true})
+	// users:read is insufficient to create a user.
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/users", "users-reader", validCreateUserBody)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+func TestUsersWriteWithPermissionCreates201(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_iam": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/users", "users-writer", validCreateUserBody)
+	if res.StatusCode != http.StatusCreated {
+		t.Errorf("status = %d, want 201", res.StatusCode)
+	}
+}
+
+func TestUsersListWithReadPermission200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_iam": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/users", "users-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", res.StatusCode)
+	}
+}
+
+func TestUsersListDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_iam OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/users", "users-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestRolesRouteDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_iam OFF
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/roles", "roles-writer", validCreateRoleBody)
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestRolesWriteReadOnlyPermissionIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_iam": true})
+	// roles:read is insufficient to create a role.
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/roles", "roles-reader", validCreateRoleBody)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+func TestRolesWriteWithPermissionCreates201(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_iam": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/roles", "roles-writer", validCreateRoleBody)
+	if res.StatusCode != http.StatusCreated {
+		t.Errorf("status = %d, want 201", res.StatusCode)
+	}
+}
+
+func TestRolesListWithReadPermission200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_iam": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/roles", "roles-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", res.StatusCode)
+	}
+}
+
+// Users routes must NOT be reachable with roles:* (and vice versa): the
+// permission is resource-scoped, so a roles-only principal is forbidden on users.
+func TestUsersWriteWithRolesPermissionIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_iam": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/users", "roles-writer", validCreateUserBody)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+// --- teacher↔user link: ModuleGuard(config) → RequireAuth → config:write. The
+// handler validates the iam user (GetUser) before the config write, so a bogus
+// user id maps to 404 and no link is stored.
+
+func TestTeacherLinkDisabledConfigModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_iam": true}) // module_config OFF
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teachers/tch-1/user", "config-writer", `{"userId":"usr-1"}`)
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestTeacherLinkNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_config": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teachers/tch-1/user", "", `{"userId":"usr-1"}`)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+func TestTeacherLinkReadOnlyPermissionIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_config": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teachers/tch-1/user", "config-reader", `{"userId":"usr-1"}`)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+func TestTeacherLinkWithPermission200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_config": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teachers/tch-1/user", "config-writer", `{"userId":"usr-1"}`)
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", res.StatusCode)
+	}
+}
+
+// A bogus user id fails the gateway-orchestrated iam validation before any
+// config write: iam GetUser NotFound ⇒ 404.
+func TestTeacherLinkBogusUserIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_config": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teachers/tch-1/user", "config-writer", `{"userId":"ghost"}`)
 	if res.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", res.StatusCode)
 	}
