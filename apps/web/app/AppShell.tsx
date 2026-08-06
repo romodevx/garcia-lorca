@@ -8,6 +8,7 @@ import { MODULES, USERS, type ModuleDef, type Role } from "./_design/data";
 import { Dashboard } from "./_screens/Dashboard";
 import { Finances } from "./_screens/Finances";
 import { Catalog } from "./_screens/config/Catalog";
+import { Admin } from "./_screens/admin/Admin";
 import { Enrollment } from "./_screens/students/Enrollment";
 import { GradeCapture } from "./_screens/grades/GradeCapture";
 import { Login } from "./_screens/Login";
@@ -24,6 +25,7 @@ type View =
   | { screen: "config" }
   | { screen: "students" }
   | { screen: "grades" }
+  | { screen: "admin" }
   | { screen: "module"; moduleId: string };
 
 // Gateway base URL for the browser (public env; matches compose NEXT_PUBLIC_API_URL).
@@ -59,6 +61,9 @@ export function AppShell(): ReactElement {
   // The grade-capture surface is gated by module_grades (UX-only; the gateway is
   // the boundary). The "grades" module (Calificaciones) opens this surface.
   const gradesEnabled = useFlag("module_grades");
+  // The admin surface (users/roles/teacher-link) is gated by module_iam (UX-only;
+  // the gateway is the boundary). The "admin" module (Administración) opens it.
+  const adminEnabled = useFlag("module_iam");
 
   const handleLogin = async (email: string, password: string): Promise<void> => {
     setPending(true);
@@ -109,6 +114,10 @@ export function AppShell(): ReactElement {
     }
     if (id === "grades") {
       setView({ screen: "grades" });
+      return;
+    }
+    if (id === "admin") {
+      setView({ screen: "admin" });
       return;
     }
     setView({ screen: "module", moduleId: id });
@@ -173,6 +182,14 @@ export function AppShell(): ReactElement {
           // Flag OFF: never render the grade-capture surface; show the friendly stub
           // so navigation never dead-ends. (Backend 404 is authoritative.)
           <ModulePlaceholder m={MODULES.find((m) => m.id === "grades") as ModuleDef} onBack={home} />
+        ))}
+      {view.screen === "admin" &&
+        (adminEnabled ? (
+          <Admin onBack={home} />
+        ) : (
+          // Flag OFF: never render the admin surface; show the friendly stub so
+          // navigation never dead-ends. (Backend 404 is authoritative.)
+          <ModulePlaceholder m={MODULES.find((m) => m.id === "admin") as ModuleDef} onBack={home} />
         ))}
       {view.screen === "module" && activeModule && <ModulePlaceholder m={activeModule} onBack={home} />}
     </div>

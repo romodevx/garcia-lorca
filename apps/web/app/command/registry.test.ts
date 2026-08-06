@@ -115,6 +115,26 @@ describe("buildCommandRegistry", () => {
     expect(got.some((id) => id.startsWith("grades."))).toBe(false);
   });
 
+  it("registers the admin (iam) surface commands under module_iam", () => {
+    const got = ids({ module_iam: true });
+    // Nav to the admin surface plus the fewest-clicks create shortcuts.
+    expect(got).toContain("admin.nav");
+    expect(got).toContain("admin.create.user");
+    expect(got).toContain("admin.create.role");
+    const cmds = buildCommandRegistry({ module_iam: true }, t);
+    // All route back to the admin surface.
+    expect(cmds.find((c) => c.id === "admin.create.user")?.route).toBe("module:admin");
+    expect(cmds.find((c) => c.id === "admin.create.role")?.route).toBe("module:admin");
+    // Localized + alias-split from i18n.
+    const createUser = cmds.find((c) => c.id === "admin.create.user");
+    expect(createUser?.title).toBe("Crear usuario");
+    expect(createUser?.aliases).toContain("nuevo usuario");
+  });
+
+  it("emits zero admin commands when module_iam is OFF", () => {
+    expect(ids({ module_students: true }).some((id) => id.startsWith("admin."))).toBe(false);
+  });
+
   it("keys each command's route to its module for navigation", () => {
     const [nav] = buildCommandRegistry({ module_students: true }, t);
     expect(nav?.route).toBe("module:students");
