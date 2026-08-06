@@ -249,6 +249,14 @@ func (h *ConfigHandler) ListTeachers(ctx context.Context, _ *connect.Request[con
 	return connect.NewResponse(&configv1.ListTeachersResponse{Teachers: out}), nil
 }
 
+func (h *ConfigHandler) SetTeacherUser(ctx context.Context, req *connect.Request[configv1.SetTeacherUserRequest]) (*connect.Response[configv1.SetTeacherUserResponse], error) {
+	te, err := h.catalog.SetTeacherUser(ctx, req.Msg.GetTeacherId(), req.Msg.GetUserId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.SetTeacherUserResponse{Teacher: toProtoTeacher(te)}), nil
+}
+
 // --- teaching assignments (the knot) ---------------------------------------
 
 func (h *ConfigHandler) CreateTeachingAssignment(ctx context.Context, req *connect.Request[configv1.CreateTeachingAssignmentRequest]) (*connect.Response[configv1.CreateTeachingAssignmentResponse], error) {

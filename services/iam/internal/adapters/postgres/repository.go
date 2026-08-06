@@ -4,12 +4,22 @@ import (
 	"context"
 	"errors"
 
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/lib/pq"
 	"gorm.io/gorm"
 
 	"github.com/garcia-lorca/pkg/authctx"
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/iam/internal/domain"
 	"github.com/garcia-lorca/services/iam/internal/ports"
+)
+
+// SQLSTATE codes the adapter maps to domain error Kinds (mirrors the config
+// adapter): a unique violation is a Conflict; a foreign-key violation means a
+// referenced row (e.g. a role id) is missing → Invalid.
+const (
+	uniqueViolation     = "23505"
+	foreignKeyViolation = "23503"
 )
 
 // Compile-time proof the adapters satisfy their ports. UserRepository and
@@ -158,6 +168,90 @@ func (r *UserRepo) RemoveRole(ctx context.Context, userID, roleID string) error 
 	})
 }
 
+// CreateUser inserts a new principal together with its credential hash. A
+// duplicate email (UNIQUE(tenant_id, email)) is KindConflict.
+func (r *UserRepo) CreateUser(ctx context.Context, user domain.User, passwordHash string) error {
+	model, err := fromDomainUser(user, passwordHash)
+	if err != nil {
+		return err
+	}
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		return translateCreateErr(tx.Create(&model).Error, "creating user", "a user with this email already exists")
+	})
+}
+
+// ListUsers returns every principal in the tenant with roles resolved. It costs
+// exactly two queries regardless of user count — one for the users, one join for
+// all of their roles — then stitches roles onto users in memory (no N+1).
+func (r *UserRepo) ListUsers(ctx context.Context) ([]domain.User, error) {
+	var out []domain.User
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var ums []userModel
+		if err := tx.Order("email").Find(&ums).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing users", err)
+		}
+		ids := make([]string, 0, len(ums))
+		for _, um := range ums {
+			ids = append(ids, um.ID)
+		}
+		rolesByUser, err := loadRolesForUsers(tx, ids)
+		if err != nil {
+			return err
+		}
+		out = make([]domain.User, 0, len(ums))
+		for _, um := range ums {
+			user, _, derr := toDomainUser(um, rolesByUser[um.ID])
+			if derr != nil {
+				return derr
+			}
+			out = append(out, user)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SetStatus updates a user's lifecycle status. An id that matches no row is
+// KindNotFound.
+func (r *UserRepo) SetStatus(ctx context.Context, userID string, status domain.Status) error {
+	text, err := statusColumn(status)
+	if err != nil {
+		return err
+	}
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Model(&userModel{}).Where("id = ?", userID).Update("status", text)
+		if res.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "updating user status", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return glerrors.ErrNotFound
+		}
+		return nil
+	})
+}
+
+// SetUserRoles replaces the user's entire role set with roleIDs. The delete and
+// the inserts run in ONE tenant-bound transaction so the swap is atomic (a
+// failure rolls both back). A role id that violates the FK is KindInvalid.
+func (r *UserRepo) SetUserRoles(ctx context.Context, userID string, roleIDs []string) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := tx.Where("user_id = ?", userID).Delete(&userRoleModel{}).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "clearing user roles", err)
+		}
+		if len(roleIDs) == 0 {
+			return nil
+		}
+		rows := make([]userRoleModel, 0, len(roleIDs))
+		for _, roleID := range roleIDs {
+			rows = append(rows, userRoleModel{UserID: userID, RoleID: roleID, TenantID: r.tenantID})
+		}
+		return translateCreateErr(tx.Create(&rows).Error, "assigning user roles", "role already assigned")
+	})
+}
+
 // --- roles ----------------------------------------------------------------
 
 // RoleRepo is the GORM-backed ports.RoleRepository.
@@ -186,7 +280,92 @@ func (r *RoleRepo) FindByID(ctx context.Context, roleID string) (domain.Role, er
 	return role, nil
 }
 
+// CreateRole inserts a new role. A duplicate name (UNIQUE(tenant_id, name)) is
+// KindConflict.
+func (r *RoleRepo) CreateRole(ctx context.Context, role domain.Role) error {
+	model := fromDomainRole(role, r.tenantID)
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		return translateCreateErr(tx.Create(&model).Error, "creating role", "a role with this name already exists")
+	})
+}
+
+// ListRoles returns every role in the tenant, ordered by name.
+func (r *RoleRepo) ListRoles(ctx context.Context) ([]domain.Role, error) {
+	var out []domain.Role
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var rows []roleModel
+		if err := tx.Order("name").Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing roles", err)
+		}
+		out = make([]domain.Role, 0, len(rows))
+		for _, rm := range rows {
+			role, derr := toDomainRole(rm)
+			if derr != nil {
+				return derr
+			}
+			out = append(out, role)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SetPermissions replaces a role's permission set. An id that matches no row is
+// KindNotFound.
+func (r *RoleRepo) SetPermissions(ctx context.Context, roleID string, permissions []string) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Model(&roleModel{}).
+			Where("id = ?", roleID).
+			Update("permissions", pq.StringArray(permissions))
+		if res.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "updating role permissions", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return glerrors.ErrNotFound
+		}
+		return nil
+	})
+}
+
 // --- shared helpers -------------------------------------------------------
+
+// loadRolesForUsers resolves the roles of many users in a single join query,
+// grouping them by user id in memory. Called once per ListUsers so the whole
+// listing costs two queries, never one-per-user (no N+1).
+func loadRolesForUsers(tx *gorm.DB, userIDs []string) (map[string][]roleModel, error) {
+	if len(userIDs) == 0 {
+		return map[string][]roleModel{}, nil
+	}
+	type joinRow struct {
+		UserID      string         `gorm:"column:user_id"`
+		ID          string         `gorm:"column:id"`
+		TenantID    string         `gorm:"column:tenant_id"`
+		Name        string         `gorm:"column:name"`
+		Permissions pq.StringArray `gorm:"column:permissions;type:text[]"`
+	}
+	var rows []joinRow
+	err := tx.Table("roles").
+		Select("ur.user_id AS user_id, roles.id AS id, roles.tenant_id AS tenant_id, roles.name AS name, roles.permissions AS permissions").
+		Joins("JOIN user_roles ur ON ur.role_id = roles.id").
+		Where("ur.user_id IN ?", userIDs).
+		Find(&rows).Error
+	if err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "loading roles", err)
+	}
+	out := make(map[string][]roleModel, len(userIDs))
+	for _, row := range rows {
+		out[row.UserID] = append(out[row.UserID], roleModel{
+			ID:          row.ID,
+			TenantID:    row.TenantID,
+			Name:        row.Name,
+			Permissions: row.Permissions,
+		})
+	}
+	return out, nil
+}
 
 // loadRoles resolves a user's roles via the join table (explicit; no N+1).
 func loadRoles(tx *gorm.DB, userID string) ([]roleModel, error) {
@@ -206,4 +385,31 @@ func translateFindErr(err error) error {
 		return glerrors.ErrNotFound
 	}
 	return glerrors.Wrap(glerrors.KindInternal, "query failed", err)
+}
+
+// translateCreateErr maps a GORM insert error to the port's error contract: a
+// unique violation is KindConflict (conflictMsg), a foreign-key violation is
+// KindInvalid (a referenced row — e.g. a role id — is missing), anything else is
+// KindInternal.
+func translateCreateErr(err error, internalMsg, conflictMsg string) error {
+	if err == nil {
+		return nil
+	}
+	switch pgCode(err) {
+	case uniqueViolation:
+		return glerrors.Wrap(glerrors.KindConflict, conflictMsg, err)
+	case foreignKeyViolation:
+		return glerrors.Wrap(glerrors.KindInvalid, "referenced row does not exist", err)
+	default:
+		return glerrors.Wrap(glerrors.KindInternal, internalMsg, err)
+	}
+}
+
+// pgCode extracts the SQLSTATE code from a driver error, or "" if it is not one.
+func pgCode(err error) string {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code
+	}
+	return ""
 }

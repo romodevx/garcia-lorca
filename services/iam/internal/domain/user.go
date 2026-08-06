@@ -98,6 +98,17 @@ func (u User) EffectivePermissions() []Permission {
 	return out
 }
 
+// RoleIDs returns the ids of the user's assigned roles, in assignment order.
+// The admin surface projects this onto the wire (User.role_ids) so callers can
+// see and edit a user's role set.
+func (u User) RoleIDs() []string {
+	out := make([]string, 0, len(u.roles))
+	for _, role := range u.roles {
+		out = append(out, role.ID())
+	}
+	return out
+}
+
 // HasPermission reports whether the user's effective permissions include want.
 func (u User) HasPermission(want Permission) bool {
 	for _, role := range u.roles {

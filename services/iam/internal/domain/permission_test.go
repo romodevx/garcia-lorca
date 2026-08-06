@@ -42,6 +42,27 @@ func TestNewPermissionRejectsMalformed(t *testing.T) {
 	}
 }
 
+func TestIsValidPermission(t *testing.T) {
+	valid := []string{
+		"users:read", "users:write", "roles:read", "roles:write",
+		"students:create", "config:read", "must_change:foo_bar",
+	}
+	for _, s := range valid {
+		if !domain.IsValidPermission(s) {
+			t.Errorf("IsValidPermission(%q) = false, want true", s)
+		}
+	}
+	invalid := []string{
+		"", "foo", "Students:Create", "students:", ":read", "a:b:c",
+		"students:re ad", "finance.payment:create", "students:read2", " users:read ",
+	}
+	for _, s := range invalid {
+		if domain.IsValidPermission(s) {
+			t.Errorf("IsValidPermission(%q) = true, want false", s)
+		}
+	}
+}
+
 func TestRoleHasPermission(t *testing.T) {
 	role, err := domain.NewRole("role-1", "Docente", []string{"students:read", "grades:create"})
 	if err != nil {

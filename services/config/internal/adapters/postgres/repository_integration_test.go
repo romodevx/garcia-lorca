@@ -436,6 +436,53 @@ func TestTeacherRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSetTeacherUserIDLinkAndUnlink links a teacher to an IAM user then unlinks
+// it (SQL NULL), round-tripping both directions as the non-owner app role under
+// RLS. An unknown teacher id is KindNotFound.
+func TestSetTeacherUserIDLinkAndUnlink(t *testing.T) {
+	ctx := context.Background()
+	repo := pgadapter.NewRepository(appDB(t), tenantA)
+
+	tid := "eeee0001-0000-0000-0000-000000000001"
+	te, err := domain.NewTeacher(tid, tenantA, "Grace", "Hopper", "grace.link@example.com", "")
+	if err != nil {
+		t.Fatalf("NewTeacher: %v", err)
+	}
+	if err := repo.CreateTeacher(ctx, te); err != nil {
+		t.Fatalf("CreateTeacher: %v", err)
+	}
+
+	// Link.
+	link := "99990002-0000-0000-0000-000000000001"
+	if err := repo.SetTeacherUserID(ctx, tid, &link); err != nil {
+		t.Fatalf("SetTeacherUserID (link): %v", err)
+	}
+	got, err := repo.GetTeacher(ctx, tid)
+	if err != nil {
+		t.Fatalf("GetTeacher (linked): %v", err)
+	}
+	if !got.HasUser() || got.UserID() != link {
+		t.Errorf("link round-trip: HasUser=%v UserID=%q, want %q", got.HasUser(), got.UserID(), link)
+	}
+
+	// Unlink (NULL).
+	if err := repo.SetTeacherUserID(ctx, tid, nil); err != nil {
+		t.Fatalf("SetTeacherUserID (unlink): %v", err)
+	}
+	got, err = repo.GetTeacher(ctx, tid)
+	if err != nil {
+		t.Fatalf("GetTeacher (unlinked): %v", err)
+	}
+	if got.HasUser() || got.UserID() != "" {
+		t.Errorf("unlink round-trip: HasUser=%v UserID=%q, want \"\"", got.HasUser(), got.UserID())
+	}
+
+	// Unknown teacher id → KindNotFound.
+	if err := repo.SetTeacherUserID(ctx, "eeee0001-0000-0000-0000-0000000000ff", &link); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("unknown teacher should be KindNotFound, got %v", glerrors.KindOf(err))
+	}
+}
+
 // teachingAssignmentFixture builds a valid, mutually-consistent parent chain for
 // a teaching assignment (a group and a subject under the SAME grade level, plus a
 // teacher) under tenantID via the app role, returning the group/subject/teacher
