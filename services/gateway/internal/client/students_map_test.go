@@ -35,6 +35,25 @@ func TestUnknownLevelNameIsUnspecified(t *testing.T) {
 	}
 }
 
+func TestEnrollmentStatusNames(t *testing.T) {
+	cases := []struct {
+		wire studentsv1.EnrollmentStatus
+		name string
+	}{
+		{studentsv1.EnrollmentStatus_ENROLLMENT_STATUS_ACTIVE, "active"},
+		{studentsv1.EnrollmentStatus_ENROLLMENT_STATUS_TRANSFERRED, "transferred"},
+		{studentsv1.EnrollmentStatus_ENROLLMENT_STATUS_WITHDRAWN, "withdrawn"},
+	}
+	for _, c := range cases {
+		if got := enrollmentStatusName(c.wire); got != c.name {
+			t.Errorf("enrollmentStatusName(%v) = %q, want %q", c.wire, got, c.name)
+		}
+	}
+	if got := enrollmentStatusName(studentsv1.EnrollmentStatus_ENROLLMENT_STATUS_UNSPECIFIED); got != "" {
+		t.Errorf("enrollmentStatusName(UNSPECIFIED) = %q, want empty", got)
+	}
+}
+
 func TestAdmissionNames(t *testing.T) {
 	cases := []struct {
 		wire studentsv1.AdmissionStatus
