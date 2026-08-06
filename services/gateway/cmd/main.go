@@ -157,5 +157,9 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/config/terms", configRead(configH.ListTerms))
 	mux.Handle("POST /api/v1/config/groups", configWrite(configH.CreateGroup))
 	mux.Handle("GET /api/v1/config/groups", configRead(configH.ListGroups))
+	mux.Handle("POST /api/v1/config/teachers", configWrite(configH.CreateTeacher))
+	mux.Handle("GET /api/v1/config/teachers", configRead(configH.ListTeachers))
+	mux.Handle("POST /api/v1/config/teaching-assignments", configWrite(configH.CreateTeachingAssignment))
+	mux.Handle("GET /api/v1/config/teaching-assignments", configRead(configH.ListTeachingAssignments))
 	return mux
 }

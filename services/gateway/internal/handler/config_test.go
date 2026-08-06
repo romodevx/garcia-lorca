@@ -42,6 +42,20 @@ type fakeConfig struct {
 	groupsCycle string
 	groupsGrade string
 
+	teacherFirst string
+	teacherLast  string
+	teacherEmail string
+	teacherUser  string
+	teachers     []client.Teacher
+
+	assignGroup   string
+	assignSubject string
+	assignTeacher string
+	assignments   []client.TeachingAssignment
+	asgCycle      string
+	asgGroup      string
+	asgTeacher    string
+
 	err error
 }
 
@@ -119,6 +133,33 @@ func (f *fakeConfig) CreateGroup(_ context.Context, in client.CreateGroupInput) 
 func (f *fakeConfig) ListGroups(_ context.Context, cycleID, gradeLevelID string) ([]client.GroupResult, error) {
 	f.groupsCycle, f.groupsGrade = cycleID, gradeLevelID
 	return f.groups, f.err
+}
+
+func (f *fakeConfig) CreateTeacher(_ context.Context, firstName, lastName, email, userID string) (client.Teacher, error) {
+	f.teacherFirst, f.teacherLast, f.teacherEmail, f.teacherUser = firstName, lastName, email, userID
+	if f.err != nil {
+		return client.Teacher{}, f.err
+	}
+	return client.Teacher{ID: "tch-1", FirstName: firstName, LastName: lastName, Email: email, UserID: userID}, nil
+}
+
+func (f *fakeConfig) ListTeachers(_ context.Context) ([]client.Teacher, error) {
+	return f.teachers, f.err
+}
+
+func (f *fakeConfig) CreateTeachingAssignment(_ context.Context, groupID, subjectID, teacherID string) (client.TeachingAssignment, error) {
+	f.assignGroup, f.assignSubject, f.assignTeacher = groupID, subjectID, teacherID
+	if f.err != nil {
+		return client.TeachingAssignment{}, f.err
+	}
+	// cycleId is DERIVED server-side; the fake echoes a canned value to prove the
+	// edge surfaces it without ever accepting it from the client.
+	return client.TeachingAssignment{ID: "asg-1", CycleID: "cyc-1", GroupID: groupID, SubjectID: subjectID, TeacherID: teacherID}, nil
+}
+
+func (f *fakeConfig) ListTeachingAssignments(_ context.Context, cycleID, groupID, teacherID string) ([]client.TeachingAssignment, error) {
+	f.asgCycle, f.asgGroup, f.asgTeacher = cycleID, groupID, teacherID
+	return f.assignments, f.err
 }
 
 func doReq(t *testing.T, hf http.HandlerFunc, method, target, body string) *httptest.ResponseRecorder {
@@ -290,5 +331,142 @@ func TestListGroupsReadsCycleAndGradeQuery(t *testing.T) {
 	}
 	if svc.groupsCycle != "cyc-1" || svc.groupsGrade != "grd-1" {
 		t.Errorf("filters = %q/%q", svc.groupsCycle, svc.groupsGrade)
+	}
+}
+
+// --- teachers -------------------------------------------------------------
+
+func TestCreateTeacherReturns201AndBody(t *testing.T) {
+	svc := &fakeConfig{}
+	h := handler.NewConfigHandler(svc)
+	rec := doReq(t, h.CreateTeacher, http.MethodPost, "/api/v1/config/teachers",
+		`{"firstName":"Ada","lastName":"Lovelace","email":"ada@example.com","userId":"usr-1"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+	if svc.teacherFirst != "Ada" || svc.teacherLast != "Lovelace" || svc.teacherEmail != "ada@example.com" || svc.teacherUser != "usr-1" {
+		t.Errorf("forwarded = %q/%q/%q/%q", svc.teacherFirst, svc.teacherLast, svc.teacherEmail, svc.teacherUser)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if out["id"] != "tch-1" || out["firstName"] != "Ada" || out["email"] != "ada@example.com" || out["userId"] != "usr-1" {
+		t.Errorf("body = %v", out)
+	}
+}
+
+func TestCreateTeacherInvalidBodyIs400(t *testing.T) {
+	h := handler.NewConfigHandler(&fakeConfig{})
+	rec := doReq(t, h.CreateTeacher, http.MethodPost, "/api/v1/config/teachers", `not json`)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestCreateTeacherDuplicateIs409(t *testing.T) {
+	svc := &fakeConfig{err: connect.NewError(connect.CodeAlreadyExists, nil)}
+	h := handler.NewConfigHandler(svc)
+	rec := doReq(t, h.CreateTeacher, http.MethodPost, "/api/v1/config/teachers",
+		`{"firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`)
+	if rec.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409", rec.Code)
+	}
+}
+
+func TestListTeachersReturnsItems(t *testing.T) {
+	svc := &fakeConfig{teachers: []client.Teacher{
+		{ID: "tch-1", FirstName: "Ada", LastName: "Lovelace", Email: "ada@example.com"},
+	}}
+	h := handler.NewConfigHandler(svc)
+	rec := doReq(t, h.ListTeachers, http.MethodGet, "/api/v1/config/teachers", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var out struct {
+		Teachers []map[string]any `json:"teachers"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Teachers) != 1 || out.Teachers[0]["id"] != "tch-1" || out.Teachers[0]["firstName"] != "Ada" {
+		t.Errorf("body = %v", out)
+	}
+}
+
+// --- teaching_assignments -------------------------------------------------
+
+func TestCreateTeachingAssignmentReturns201AndDerivedCycle(t *testing.T) {
+	svc := &fakeConfig{}
+	h := handler.NewConfigHandler(svc)
+	rec := doReq(t, h.CreateTeachingAssignment, http.MethodPost, "/api/v1/config/teaching-assignments",
+		`{"groupId":"grp-1","subjectId":"sub-1","teacherId":"tch-1"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+	if svc.assignGroup != "grp-1" || svc.assignSubject != "sub-1" || svc.assignTeacher != "tch-1" {
+		t.Errorf("forwarded = %q/%q/%q", svc.assignGroup, svc.assignSubject, svc.assignTeacher)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	// cycleId must be present in the response (derived server-side), not the request.
+	if out["id"] != "asg-1" || out["cycleId"] != "cyc-1" || out["groupId"] != "grp-1" || out["subjectId"] != "sub-1" || out["teacherId"] != "tch-1" {
+		t.Errorf("body = %v", out)
+	}
+}
+
+func TestCreateTeachingAssignmentInvalidBodyIs400(t *testing.T) {
+	h := handler.NewConfigHandler(&fakeConfig{})
+	rec := doReq(t, h.CreateTeachingAssignment, http.MethodPost, "/api/v1/config/teaching-assignments", `not json`)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+// A grade-level mismatch (or a missing parent) surfaces from the config service
+// as InvalidArgument, which the edge maps to 400.
+func TestCreateTeachingAssignmentMismatchIs400(t *testing.T) {
+	svc := &fakeConfig{err: connect.NewError(connect.CodeInvalidArgument, nil)}
+	h := handler.NewConfigHandler(svc)
+	rec := doReq(t, h.CreateTeachingAssignment, http.MethodPost, "/api/v1/config/teaching-assignments",
+		`{"groupId":"grp-1","subjectId":"sub-x","teacherId":"tch-1"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestCreateTeachingAssignmentDuplicateIs409(t *testing.T) {
+	svc := &fakeConfig{err: connect.NewError(connect.CodeAlreadyExists, nil)}
+	h := handler.NewConfigHandler(svc)
+	rec := doReq(t, h.CreateTeachingAssignment, http.MethodPost, "/api/v1/config/teaching-assignments",
+		`{"groupId":"grp-1","subjectId":"sub-1","teacherId":"tch-1"}`)
+	if rec.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409", rec.Code)
+	}
+}
+
+func TestListTeachingAssignmentsReadsQueryFilters(t *testing.T) {
+	svc := &fakeConfig{assignments: []client.TeachingAssignment{
+		{ID: "asg-1", CycleID: "cyc-1", GroupID: "grp-1", SubjectID: "sub-1", TeacherID: "tch-1"},
+	}}
+	h := handler.NewConfigHandler(svc)
+	rec := doReq(t, h.ListTeachingAssignments, http.MethodGet,
+		"/api/v1/config/teaching-assignments?cycleId=cyc-1&groupId=grp-1&teacherId=tch-1", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if svc.asgCycle != "cyc-1" || svc.asgGroup != "grp-1" || svc.asgTeacher != "tch-1" {
+		t.Errorf("filters = %q/%q/%q", svc.asgCycle, svc.asgGroup, svc.asgTeacher)
+	}
+	var out struct {
+		TeachingAssignments []map[string]any `json:"teachingAssignments"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.TeachingAssignments) != 1 || out.TeachingAssignments[0]["cycleId"] != "cyc-1" {
+		t.Errorf("body = %v", out)
 	}
 }
