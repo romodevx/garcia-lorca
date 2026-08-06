@@ -71,9 +71,13 @@ type GradeEntryRepository interface {
 	// existing row on the (tenant, enrollment, subject, term) key — one grade per
 	// student·subject·term ("capturar/editar"). Returns the stored entry.
 	UpsertGradeEntry(ctx context.Context, e domain.GradeEntry) (domain.GradeEntry, error)
-	// GetForKey returns the grade entry for a (enrollment, subject, term) key, or
-	// glerrors.ErrNotFound when absent.
-	GetForKey(ctx context.Context, enrollmentID, subjectID, termID string) (domain.GradeEntry, error)
+	// GetForKeys batch-loads the grade entries for many enrollments under the
+	// same (subject, term), in ONE tenant-bound query, so building a roster never
+	// fans out into a grade lookup per student (N+1). The result is keyed by
+	// enrollment_id and holds an entry ONLY for enrollments that have a grade;
+	// absent enrollments are simply missing from the map. An empty enrollmentIDs
+	// slice yields an empty map without touching the database.
+	GetForKeys(ctx context.Context, enrollmentIDs []string, subjectID, termID string) (map[string]domain.GradeEntry, error)
 	// ListGradeEntries returns entries for an enrollment in a term; an empty
 	// string skips that filter.
 	ListGradeEntries(ctx context.Context, enrollmentID, termID string) ([]domain.GradeEntry, error)

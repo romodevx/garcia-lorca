@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"math"
 	"strings"
 	"time"
 
@@ -13,6 +14,30 @@ const (
 	minGradeValue = 0.0
 	maxGradeValue = 10.0
 )
+
+// The persisted column is numeric(4,2): a grade carries at most 2 decimal
+// places. gradeValueScale is that 2-decimal scale and gradeValueEpsilon absorbs
+// float64 representation noise when checking a value already lands on it, so a
+// legitimate 8.55 is accepted while an 8.555 (which the DB would silently round)
+// is rejected.
+const (
+	gradeValueScale   = 100.0
+	gradeValueEpsilon = 1e-9
+)
+
+// validateGradeValue enforces the grade contract: within the inclusive [0, 10]
+// range and expressible in at most 2 decimal places. Both failures are
+// KindInvalid.
+func validateGradeValue(value float64) error {
+	if value < minGradeValue || value > maxGradeValue {
+		return glerrors.New(glerrors.KindInvalid, "grade value must be between 0 and 10")
+	}
+	rounded := math.Round(value*gradeValueScale) / gradeValueScale
+	if math.Abs(rounded-value) > gradeValueEpsilon {
+		return glerrors.New(glerrors.KindInvalid, "grade must have at most 2 decimals")
+	}
+	return nil
+}
 
 // GradeEntry is one student's numeric grade for a subject in a term. All
 // identity references (enrollment, subject, term, teacher) are cross-service
@@ -58,8 +83,8 @@ func NewGradeEntry(id, tenantID, enrollmentID, subjectID, termID, teacherID stri
 	if strings.TrimSpace(teacherID) == "" {
 		return GradeEntry{}, glerrors.New(glerrors.KindInvalid, "teacher id is required")
 	}
-	if value < minGradeValue || value > maxGradeValue {
-		return GradeEntry{}, glerrors.New(glerrors.KindInvalid, "grade value must be between 0 and 10")
+	if err := validateGradeValue(value); err != nil {
+		return GradeEntry{}, err
 	}
 	return GradeEntry{
 		id:           id,
@@ -77,8 +102,8 @@ func NewGradeEntry(id, tenantID, enrollmentID, subjectID, termID, teacherID stri
 // leaving the receiver unchanged. Used by the capture use case on the
 // upsert-update path (re-capturing an existing student·subject·term key).
 func (e GradeEntry) WithValue(v float64) (GradeEntry, error) {
-	if v < minGradeValue || v > maxGradeValue {
-		return GradeEntry{}, glerrors.New(glerrors.KindInvalid, "grade value must be between 0 and 10")
+	if err := validateGradeValue(v); err != nil {
+		return GradeEntry{}, err
 	}
 	e.value = v
 	return e, nil

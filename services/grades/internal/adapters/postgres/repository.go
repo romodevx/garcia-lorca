@@ -83,27 +83,37 @@ func (r *Repository) UpsertGradeEntry(ctx context.Context, e domain.GradeEntry) 
 	return out, nil
 }
 
-// GetForKey returns the grade entry for a (enrollment, subject, term) key, or
-// glerrors.ErrNotFound when absent (also when RLS hides it).
-func (r *Repository) GetForKey(ctx context.Context, enrollmentID, subjectID, termID string) (domain.GradeEntry, error) {
-	var out domain.GradeEntry
+// GetForKeys batch-loads the grade entries for many enrollments sharing the
+// same (subject, term) in ONE tenant-bound transaction (a single SELECT with an
+// IN filter), collapsing what would otherwise be one query per roster student
+// (N+1). The returned map is keyed by enrollment_id and contains an entry only
+// for enrollments that actually have a grade; enrollments with no grade — and
+// any hidden by RLS — are simply absent (no rows is not an error). An empty
+// enrollmentIDs slice returns an empty map without querying.
+func (r *Repository) GetForKeys(ctx context.Context, enrollmentIDs []string, subjectID, termID string) (map[string]domain.GradeEntry, error) {
+	out := make(map[string]domain.GradeEntry, len(enrollmentIDs))
+	if len(enrollmentIDs) == 0 {
+		return out, nil
+	}
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		var m gradeEntryModel
+		var rows []gradeEntryModel
 		if err := tx.Where(
-			"enrollment_id = ? AND subject_id = ? AND term_id = ?",
-			enrollmentID, subjectID, termID,
-		).First(&m).Error; err != nil {
-			return translateFindErr(err)
+			"subject_id = ? AND term_id = ? AND enrollment_id IN ?",
+			subjectID, termID, enrollmentIDs,
+		).Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "batch loading grade entries", err)
 		}
-		d, err := toDomain(m)
-		if err != nil {
-			return err
+		for _, m := range rows {
+			d, err := toDomain(m)
+			if err != nil {
+				return err
+			}
+			out[m.EnrollmentID] = d
 		}
-		out = d
 		return nil
 	})
 	if err != nil {
-		return domain.GradeEntry{}, err
+		return nil, err
 	}
 	return out, nil
 }

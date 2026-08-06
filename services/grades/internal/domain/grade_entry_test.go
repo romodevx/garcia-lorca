@@ -51,6 +51,35 @@ func TestNewGradeEntryValueOutOfRange(t *testing.T) {
 	}
 }
 
+func TestNewGradeEntryDecimalPrecision(t *testing.T) {
+	at := time.Now()
+	// The stored column is numeric(4,2): at most 2 decimals (integers and
+	// single-decimal values included) must be accepted.
+	for _, value := range []float64{0, 10, 8.5, 8.55, 9.25} {
+		if _, err := domain.NewGradeEntry("ge-1", "t1", "enr-1", "subj-1", "term-1", "teacher-1", value, at); err != nil {
+			t.Errorf("value %v: want accepted (<=2 decimals), got %v", value, err)
+		}
+	}
+	// More than 2 decimals would silently round at the DB, so the domain rejects
+	// it as KindInvalid.
+	for _, value := range []float64{8.555, 7.001, 0.125} {
+		_, err := domain.NewGradeEntry("ge-1", "t1", "enr-1", "subj-1", "term-1", "teacher-1", value, at)
+		if glerrors.KindOf(err) != glerrors.KindInvalid {
+			t.Errorf("value %v: want KindInvalid (>2 decimals), got %v", value, err)
+		}
+	}
+}
+
+func TestWithValueDecimalPrecision(t *testing.T) {
+	e := validGradeEntry(t, 5)
+	if _, err := e.WithValue(8.55); err != nil {
+		t.Errorf("WithValue 8.55: want accepted, got %v", err)
+	}
+	if _, err := e.WithValue(8.555); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("WithValue 8.555: want KindInvalid (>2 decimals), got %v", err)
+	}
+}
+
 func TestNewGradeEntryValidation(t *testing.T) {
 	at := time.Now()
 	cases := []struct {

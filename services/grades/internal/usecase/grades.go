@@ -124,21 +124,29 @@ func (s *GradesService) Roster(ctx context.Context, assignmentID, termID string)
 		return nil, err
 	}
 
-	rows := make([]RosterRow, 0, len(enrollments))
+	// Collect the active enrollments, then resolve every grade in ONE batched,
+	// tenant-bound read (no per-student query — the roster is O(1) round-trips).
+	activeIDs := make([]string, 0, len(enrollments))
+	studentByEnrollment := make(map[string]string, len(enrollments))
 	for _, enr := range enrollments {
 		if enr.Status != enrollmentStatusActive {
 			continue
 		}
-		row := RosterRow{EnrollmentID: enr.ID, StudentID: enr.StudentID}
-		entry, err := s.entries.GetForKey(ctx, enr.ID, asg.SubjectID, termID)
-		switch {
-		case err == nil:
+		activeIDs = append(activeIDs, enr.ID)
+		studentByEnrollment[enr.ID] = enr.StudentID
+	}
+
+	grades, err := s.entries.GetForKeys(ctx, activeIDs, asg.SubjectID, termID)
+	if err != nil {
+		return nil, err
+	}
+
+	rows := make([]RosterRow, 0, len(activeIDs))
+	for _, enrollmentID := range activeIDs {
+		row := RosterRow{EnrollmentID: enrollmentID, StudentID: studentByEnrollment[enrollmentID]}
+		if entry, ok := grades[enrollmentID]; ok {
 			row.Value = entry.Value()
 			row.HasValue = true
-		case glerrors.KindOf(err) == glerrors.KindNotFound:
-			// leave HasValue false — no grade captured yet
-		default:
-			return nil, err
 		}
 		rows = append(rows, row)
 	}

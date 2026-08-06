@@ -27,7 +27,6 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	glerrors "github.com/garcia-lorca/pkg/errors"
 	pgadapter "github.com/garcia-lorca/services/grades/internal/adapters/postgres"
 	"github.com/garcia-lorca/services/grades/internal/domain"
 )
@@ -60,9 +59,13 @@ const (
 	// pre-populates a tenant-A row for its key (the container is shared and not
 	// reset between tests).
 	enrollmentRLS = "e0000000-0000-0000-0000-000000000003"
-	subjectOne    = "50000000-0000-0000-0000-000000000001"
-	termOne       = "70000000-0000-0000-0000-000000000001"
-	teacherOne    = "60000000-0000-0000-0000-000000000001"
+	// enrollmentSubset* are used only by the batched GetForKeys subset test, so no
+	// other test pre-populates rows for their keys (the container is shared).
+	enrollmentSubsetGraded   = "e0000000-0000-0000-0000-000000000004"
+	enrollmentSubsetUngraded = "e0000000-0000-0000-0000-000000000005"
+	subjectOne               = "50000000-0000-0000-0000-000000000001"
+	termOne                  = "70000000-0000-0000-0000-000000000001"
+	teacherOne               = "60000000-0000-0000-0000-000000000001"
 )
 
 var captureClock = time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
@@ -232,12 +235,13 @@ func TestUpsertRoundTripEditsInPlace(t *testing.T) {
 		t.Errorf("grade rows = %d, want 1 (upsert edited in place)", n)
 	}
 	// A read via the port reflects the edited value.
-	got, err := repo.GetForKey(ctx, enrollmentOne, subjectOne, termOne)
+	got, err := repo.GetForKeys(ctx, []string{enrollmentOne}, subjectOne, termOne)
 	if err != nil {
-		t.Fatalf("GetForKey: %v", err)
+		t.Fatalf("GetForKeys: %v", err)
 	}
-	if got.Value() != 9 {
-		t.Errorf("GetForKey value = %v, want 9", got.Value())
+	entry, ok := got[enrollmentOne]
+	if !ok || entry.Value() != 9 {
+		t.Errorf("GetForKeys value = %v (ok=%v), want 9", entry.Value(), ok)
 	}
 	// The reserved boleta column is never written on capture.
 	if !publishedAtIsNull(t, tenantA, enrollmentOne) {
@@ -245,12 +249,57 @@ func TestUpsertRoundTripEditsInPlace(t *testing.T) {
 	}
 }
 
-// TestGetForKeyMissingIsNotFound proves an absent key surfaces as KindNotFound.
-func TestGetForKeyMissingIsNotFound(t *testing.T) {
+// TestGetForKeysMissingReturnsEmpty proves an absent key is simply missing from
+// the map (no rows is not an error), not a surfaced NotFound.
+func TestGetForKeysMissingReturnsEmpty(t *testing.T) {
 	repo := appRepo(t, tenantA)
-	_, err := repo.GetForKey(context.Background(), "e0000000-0000-0000-0000-0000000000ff", subjectOne, termOne)
-	if glerrors.KindOf(err) != glerrors.KindNotFound {
-		t.Errorf("missing key: want KindNotFound, got %v", err)
+	got, err := repo.GetForKeys(context.Background(), []string{"e0000000-0000-0000-0000-0000000000ff"}, subjectOne, termOne)
+	if err != nil {
+		t.Fatalf("GetForKeys: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("missing key: want empty map, got %v", got)
+	}
+}
+
+// TestGetForKeysEmptyIDsSkipsQuery proves an empty enrollment slice returns an
+// empty map without hitting the database.
+func TestGetForKeysEmptyIDsSkipsQuery(t *testing.T) {
+	repo := appRepo(t, tenantA)
+	got, err := repo.GetForKeys(context.Background(), nil, subjectOne, termOne)
+	if err != nil {
+		t.Fatalf("GetForKeys(nil): %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("empty ids: want empty map, got %v", got)
+	}
+}
+
+// TestGetForKeysReturnsSubset proves a batched read over several enrollments
+// returns entries ONLY for those that have a grade, keyed by enrollment_id,
+// inside a single tenant-bound transaction.
+func TestGetForKeysReturnsSubset(t *testing.T) {
+	repo := appRepo(t, tenantA)
+	ctx := context.Background()
+
+	// Grade only one of the two enrollments in this (subject, term).
+	if _, err := repo.UpsertGradeEntry(ctx, gradeEntry(t, "aaaaaaaa-0000-0000-0000-000000000010", tenantA, enrollmentSubsetGraded, 8)); err != nil {
+		t.Fatalf("seed graded: %v", err)
+	}
+
+	got, err := repo.GetForKeys(ctx, []string{enrollmentSubsetGraded, enrollmentSubsetUngraded}, subjectOne, termOne)
+	if err != nil {
+		t.Fatalf("GetForKeys: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want exactly 1 graded entry in the map, got %d: %v", len(got), got)
+	}
+	entry, ok := got[enrollmentSubsetGraded]
+	if !ok || entry.Value() != 8 {
+		t.Errorf("graded entry wrong: %+v (ok=%v)", entry, ok)
+	}
+	if _, ok := got[enrollmentSubsetUngraded]; ok {
+		t.Error("ungraded enrollment must be absent from the map")
 	}
 }
 
@@ -286,11 +335,15 @@ func TestRLSIsolatesGradeEntries(t *testing.T) {
 	}
 
 	// Read isolation: tenant A cannot see tenant B's grade; tenant B can.
-	if _, err := appRepo(t, tenantA).GetForKey(ctx, enrollmentRLS, subjectOne, termOne); glerrors.KindOf(err) != glerrors.KindNotFound {
-		t.Errorf("tenant A saw tenant B's grade (RLS read breach): %v", err)
+	if gotA, err := appRepo(t, tenantA).GetForKeys(ctx, []string{enrollmentRLS}, subjectOne, termOne); err != nil {
+		t.Errorf("tenant A GetForKeys: %v", err)
+	} else if _, ok := gotA[enrollmentRLS]; ok {
+		t.Error("tenant A saw tenant B's grade (RLS read breach)")
 	}
-	if _, err := appRepo(t, tenantB).GetForKey(ctx, enrollmentRLS, subjectOne, termOne); err != nil {
-		t.Errorf("tenant B should see its own grade: %v", err)
+	if gotB, err := appRepo(t, tenantB).GetForKeys(ctx, []string{enrollmentRLS}, subjectOne, termOne); err != nil {
+		t.Errorf("tenant B GetForKeys: %v", err)
+	} else if _, ok := gotB[enrollmentRLS]; !ok {
+		t.Error("tenant B should see its own grade")
 	}
 
 	// Write isolation: tenant A "upserting" the same (enrollment, subject, term)
@@ -300,12 +353,13 @@ func TestRLSIsolatesGradeEntries(t *testing.T) {
 	if _, err := appRepo(t, tenantA).UpsertGradeEntry(ctx, gradeEntry(t, "aaaaaaaa-0000-0000-0000-0000000000a1", tenantA, enrollmentRLS, 3)); err != nil {
 		t.Fatalf("tenant A upsert: %v", err)
 	}
-	afterB, err := appRepo(t, tenantB).GetForKey(ctx, enrollmentRLS, subjectOne, termOne)
+	afterMap, err := appRepo(t, tenantB).GetForKeys(ctx, []string{enrollmentRLS}, subjectOne, termOne)
 	if err != nil {
 		t.Fatalf("re-read grade B: %v", err)
 	}
-	if afterB.Value() != 7 {
-		t.Errorf("tenant A's write leaked into tenant B: value = %v, want 7", afterB.Value())
+	afterB, ok := afterMap[enrollmentRLS]
+	if !ok || afterB.Value() != 7 {
+		t.Errorf("tenant A's write leaked into tenant B: value = %v (ok=%v), want 7", afterB.Value(), ok)
 	}
 	// Each tenant sees exactly its own single row for this enrollment.
 	if n := countEntries(t, tenantA, enrollmentRLS); n != 1 {

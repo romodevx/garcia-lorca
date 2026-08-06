@@ -57,8 +57,15 @@ func (f *fakeEnrollments) ByGroup(_ context.Context, groupID string) ([]ports.En
 }
 
 // fakeEntries is an in-memory upsert store keyed by (enrollment, subject, term).
+// It records how GetForKeys is called so the roster test can prove the lookup is
+// batched into exactly ONE query (no N+1).
 type fakeEntries struct {
 	rows map[string]domain.GradeEntry
+
+	getForKeysCalls int
+	lastKeyIDs      []string
+	lastSubjectID   string
+	lastTermID      string
 }
 
 func newFakeEntries() *fakeEntries { return &fakeEntries{rows: map[string]domain.GradeEntry{}} }
@@ -72,12 +79,26 @@ func (f *fakeEntries) UpsertGradeEntry(_ context.Context, e domain.GradeEntry) (
 	return e, nil
 }
 
-func (f *fakeEntries) GetForKey(_ context.Context, enrollmentID, subjectID, termID string) (domain.GradeEntry, error) {
-	e, ok := f.rows[entryKey(enrollmentID, subjectID, termID)]
-	if !ok {
-		return domain.GradeEntry{}, glerrors.ErrNotFound
+func (f *fakeEntries) GetForKeys(_ context.Context, enrollmentIDs []string, subjectID, termID string) (map[string]domain.GradeEntry, error) {
+	f.getForKeysCalls++
+	f.lastKeyIDs = append([]string(nil), enrollmentIDs...)
+	f.lastSubjectID = subjectID
+	f.lastTermID = termID
+
+	out := make(map[string]domain.GradeEntry, len(enrollmentIDs))
+	for _, id := range enrollmentIDs {
+		if e, ok := f.rows[entryKey(id, subjectID, termID)]; ok {
+			out[id] = e
+		}
 	}
-	return e, nil
+	return out, nil
+}
+
+// getForKey is a test-only convenience read (not part of the repository port,
+// which now batches via GetForKeys) used to assert what CaptureGrade persisted.
+func (f *fakeEntries) getForKey(enrollmentID, subjectID, termID string) (domain.GradeEntry, bool) {
+	e, ok := f.rows[entryKey(enrollmentID, subjectID, termID)]
+	return e, ok
 }
 
 func (f *fakeEntries) ListGradeEntries(_ context.Context, enrollmentID, termID string) ([]domain.GradeEntry, error) {
@@ -119,6 +140,14 @@ func activeEnrollment(id, studentID string) ports.EnrollmentRef {
 	return ports.EnrollmentRef{ID: id, StudentID: studentID, GroupID: groupID, CycleID: cycleID, Status: "active"}
 }
 
+func idSet(ids []string) map[string]bool {
+	set := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		set[id] = true
+	}
+	return set
+}
+
 func newService(a ports.AssignmentReader, e ports.EnrollmentReader, r ports.GradeEntryRepository) *usecase.GradesService {
 	fixedNow := func() time.Time { return time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC) }
 	seq := 0
@@ -144,9 +173,9 @@ func TestCaptureGradeHappyDerivesSubjectAndTeacher(t *testing.T) {
 	if got.EnrollmentID() != enrollmentID || got.TermID() != termID || got.Value() != 8.5 || got.TenantID() != testTenant {
 		t.Errorf("stored entry mismatch: %+v", got)
 	}
-	stored, err := repo.GetForKey(context.Background(), enrollmentID, subjectID, termID)
-	if err != nil || stored.Value() != 8.5 {
-		t.Errorf("value not persisted: %+v, %v", stored, err)
+	stored, ok := repo.getForKey(enrollmentID, subjectID, termID)
+	if !ok || stored.Value() != 8.5 {
+		t.Errorf("value not persisted: %+v, ok=%v", stored, ok)
 	}
 }
 
@@ -252,7 +281,7 @@ func TestCaptureGradeReCaptureUpdatesValue(t *testing.T) {
 	if len(repo.rows) != 1 {
 		t.Errorf("re-capture must upsert one row, got %d", len(repo.rows))
 	}
-	stored, _ := repo.GetForKey(context.Background(), enrollmentID, subjectID, termID)
+	stored, _ := repo.getForKey(enrollmentID, subjectID, termID)
 	if stored.Value() != 9 {
 		t.Errorf("re-capture did not update value: %v", stored.Value())
 	}
@@ -279,6 +308,19 @@ func TestRosterActiveEnrollmentsWithAndWithoutValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Roster: %v", err)
 	}
+
+	// The roster must batch grade lookups into exactly ONE call regardless of the
+	// number of active enrollments (no N+1).
+	if repo.getForKeysCalls != 1 {
+		t.Fatalf("Roster must batch grade lookups into ONE GetForKeys call, got %d", repo.getForKeysCalls)
+	}
+	if repo.lastSubjectID != subjectID || repo.lastTermID != termID {
+		t.Errorf("GetForKeys called with wrong subject/term: subj=%q term=%q", repo.lastSubjectID, repo.lastTermID)
+	}
+	if got := idSet(repo.lastKeyIDs); !got["enr-graded"] || !got["enr-ungraded"] || len(got) != 2 {
+		t.Errorf("GetForKeys called with wrong enrollment ids (want only active enr-graded, enr-ungraded): %v", repo.lastKeyIDs)
+	}
+
 	if len(rows) != 2 {
 		t.Fatalf("want 2 active rows (inactive excluded), got %d: %+v", len(rows), rows)
 	}

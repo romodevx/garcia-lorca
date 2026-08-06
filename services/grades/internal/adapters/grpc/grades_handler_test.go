@@ -75,12 +75,14 @@ func (f *fakeEntries) UpsertGradeEntry(_ context.Context, e domain.GradeEntry) (
 	return e, nil
 }
 
-func (f *fakeEntries) GetForKey(_ context.Context, enrollmentID, subjectID, termID string) (domain.GradeEntry, error) {
-	e, ok := f.rows[key(enrollmentID, subjectID, termID)]
-	if !ok {
-		return domain.GradeEntry{}, glerrors.ErrNotFound
+func (f *fakeEntries) GetForKeys(_ context.Context, enrollmentIDs []string, subjectID, termID string) (map[string]domain.GradeEntry, error) {
+	out := make(map[string]domain.GradeEntry, len(enrollmentIDs))
+	for _, id := range enrollmentIDs {
+		if e, ok := f.rows[key(id, subjectID, termID)]; ok {
+			out[id] = e
+		}
 	}
-	return e, nil
+	return out, nil
 }
 
 func (f *fakeEntries) ListGradeEntries(_ context.Context, enrollmentID, termID string) ([]domain.GradeEntry, error) {
