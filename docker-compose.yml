@@ -144,8 +144,23 @@ services:
 
   grades:
     <<: *go-service
-    environment: { <<: *go-env, SERVICE: grades }
+    environment:
+      <<: *go-env
+      SERVICE: grades
+      # The capture knot + roster read config (teaching assignment + term) and
+      # students (enrollments) by RPC — server-to-server, network-private.
+      CONFIG_BASE_URL: "http://config:8080"
+      STUDENTS_BASE_URL: "http://students:8080"
     ports: ["8094:8080"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      config:
+        condition: service_started
+      students:
+        condition: service_started
 
   attendance:
     <<: *go-service
