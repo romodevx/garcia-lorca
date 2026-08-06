@@ -91,3 +91,35 @@ type groupModel struct {
 }
 
 func (groupModel) TableName() string { return "groups" }
+
+// teacherModel is the GORM row for `teachers` (a catalog person record, NOT a
+// login account). user_id is a nullable reserved slot for a future IAM link; it
+// is carried as *string so DB NULL ↔ domain "" (see mapper.go).
+type teacherModel struct {
+	ID        string    `gorm:"column:id;primaryKey"`
+	TenantID  string    `gorm:"column:tenant_id"`
+	FirstName string    `gorm:"column:first_name"`
+	LastName  string    `gorm:"column:last_name"`
+	Email     string    `gorm:"column:email"`
+	UserID    *string   `gorm:"column:user_id"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+	UpdatedAt time.Time `gorm:"column:updated_at"`
+}
+
+func (teacherModel) TableName() string { return "teachers" }
+
+// teachingAssignmentModel is the GORM row for `teaching_assignments` (the knot:
+// teacher ↔ group ↔ subject ↔ cycle). cycle_id is derived from the group by the
+// use case, so every reference here is a real FK to a sibling config table.
+type teachingAssignmentModel struct {
+	ID        string    `gorm:"column:id;primaryKey"`
+	TenantID  string    `gorm:"column:tenant_id"`
+	CycleID   string    `gorm:"column:cycle_id"`
+	GroupID   string    `gorm:"column:group_id"`
+	SubjectID string    `gorm:"column:subject_id"`
+	TeacherID string    `gorm:"column:teacher_id"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+	UpdatedAt time.Time `gorm:"column:updated_at"`
+}
+
+func (teachingAssignmentModel) TableName() string { return "teaching_assignments" }
