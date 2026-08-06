@@ -48,6 +48,39 @@ service IamService {
 
   // RevokeRole removes a role from a user (admin operation, permission-gated).
   rpc RevokeRole(RevokeRoleRequest) returns (RevokeRoleResponse);
+
+  // --- User admin (admin operations, permission-gated) ---
+
+  // CreateUser provisions a new principal with a temporary password. The account
+  // is created with must_change_password=true, so the first allowed action is the
+  // forced ChangePassword rotation. Optionally assigns roles at creation.
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+
+  // GetUser fetches a user by id, including its assigned role ids.
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+
+  // ListUsers lists every user in the tenant, each with its assigned role ids.
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+
+  // SetUserStatus suspends or reactivates an account. A SUSPENDED user cannot log
+  // in; reactivating restores ACTIVE.
+  rpc SetUserStatus(SetUserStatusRequest) returns (SetUserStatusResponse);
+
+  // --- Role admin (admin operations, permission-gated) ---
+
+  // CreateRole defines a named bundle of permissions. The name is unique per
+  // tenant.
+  rpc CreateRole(CreateRoleRequest) returns (CreateRoleResponse);
+
+  // GetRole fetches a role by id, including its permissions.
+  rpc GetRole(GetRoleRequest) returns (GetRoleResponse);
+
+  // ListRoles lists every role in the tenant, each with its permissions.
+  rpc ListRoles(ListRolesRequest) returns (ListRolesResponse);
+
+  // SetRolePermissions replaces a role's full permission set (not an additive
+  // merge). Callers send the desired final list.
+  rpc SetRolePermissions(SetRolePermissionsRequest) returns (SetRolePermissionsResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -82,6 +115,10 @@ message User {
   // must_change_password is true while the account still holds a temporary
   // password; the only allowed action until it clears is ChangePassword.
   bool must_change_password = 8;
+  // role_ids are the ids of the roles assigned to the user. Populated by the
+  // admin read RPCs (GetUser/ListUsers); the effective permission set is the
+  // union of these roles' permissions.
+  repeated string role_ids = 9;
 }
 
 // Role is a named bundle of permissions. `permissions` are "resource:action"
@@ -174,6 +211,96 @@ message RevokeRoleRequest {
 }
 
 message RevokeRoleResponse {}
+
+// --- User admin -----------------------------------------------------------
+
+// CreateUserRequest provisions a new principal. temp_password is the initial
+// temporary password (stored as must_change_password=true). role_ids optionally
+// assigns roles at creation.
+message CreateUserRequest {
+  string email = 1;
+  string display_name = 2;
+  string temp_password = 3;
+  repeated string role_ids = 4;
+}
+
+// CreateUserResponse returns the created user.
+message CreateUserResponse {
+  User user = 1;
+}
+
+// GetUserRequest fetches a user by id.
+message GetUserRequest {
+  string id = 1;
+}
+
+// GetUserResponse returns the requested user (with role ids).
+message GetUserResponse {
+  User user = 1;
+}
+
+// ListUsersRequest lists all users in the tenant.
+message ListUsersRequest {}
+
+// ListUsersResponse returns the tenant users (each with role ids).
+message ListUsersResponse {
+  repeated User users = 1;
+}
+
+// SetUserStatusRequest suspends or reactivates a user account.
+message SetUserStatusRequest {
+  string user_id = 1;
+  UserStatus status = 2;
+}
+
+// SetUserStatusResponse returns the updated user.
+message SetUserStatusResponse {
+  User user = 1;
+}
+
+// --- Role admin -----------------------------------------------------------
+
+// CreateRoleRequest defines a role with an initial permission set. name is
+// unique per tenant.
+message CreateRoleRequest {
+  string name = 1;
+  repeated string permissions = 2;
+}
+
+// CreateRoleResponse returns the created role.
+message CreateRoleResponse {
+  Role role = 1;
+}
+
+// GetRoleRequest fetches a role by id.
+message GetRoleRequest {
+  string id = 1;
+}
+
+// GetRoleResponse returns the requested role.
+message GetRoleResponse {
+  Role role = 1;
+}
+
+// ListRolesRequest lists all roles in the tenant.
+message ListRolesRequest {}
+
+// ListRolesResponse returns the tenant roles.
+message ListRolesResponse {
+  repeated Role roles = 1;
+}
+
+// SetRolePermissionsRequest replaces a role's full permission set. The list is
+// the desired final state, not an additive delta.
+message SetRolePermissionsRequest {
+  string role_id = 1;
+  repeated string permissions = 2;
+}
+
+// SetRolePermissionsResponse returns the updated role.
+message SetRolePermissionsResponse {
+  Role role = 1;
+}
 
 // --- Domain events (published; see MODULES.md M04) ------------------------
 
