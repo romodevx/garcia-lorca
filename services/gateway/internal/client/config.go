@@ -134,6 +134,27 @@ type GroupResult struct {
 	Capacity     int
 }
 
+// Teacher is the edge's view of a catalog teacher (a person record, not a login
+// account). UserID is reserved for a future IAM link and may be empty.
+type Teacher struct {
+	ID        string
+	FirstName string
+	LastName  string
+	Email     string
+	UserID    string
+}
+
+// TeachingAssignment is the edge's view of the knot binding a teacher to a
+// (group, subject) within a cycle. CycleID is DERIVED server-side from the
+// group at create time — it is never sent by the client.
+type TeachingAssignment struct {
+	ID        string
+	CycleID   string
+	GroupID   string
+	SubjectID string
+	TeacherID string
+}
+
 // --- cycles ---------------------------------------------------------------
 
 // CreateCycle adds a school-year cycle via the config service.
@@ -306,6 +327,70 @@ func (c *ConfigClient) ListGroups(ctx context.Context, cycleID, gradeLevelID str
 	return out, nil
 }
 
+// --- teachers -------------------------------------------------------------
+
+// CreateTeacher adds a teacher catalog record. userID may be empty (reserved
+// for a future IAM link).
+func (c *ConfigClient) CreateTeacher(ctx context.Context, first, last, email, userID string) (Teacher, error) {
+	res, err := c.rpc.CreateTeacher(ctx, connect.NewRequest(&configv1.CreateTeacherRequest{
+		FirstName: first,
+		LastName:  last,
+		Email:     email,
+		UserId:    userID,
+	}))
+	if err != nil {
+		return Teacher{}, err
+	}
+	return toTeacher(res.Msg.GetTeacher()), nil
+}
+
+// ListTeachers lists every teacher in the tenant catalog.
+func (c *ConfigClient) ListTeachers(ctx context.Context) ([]Teacher, error) {
+	res, err := c.rpc.ListTeachers(ctx, connect.NewRequest(&configv1.ListTeachersRequest{}))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Teacher, 0, len(res.Msg.GetTeachers()))
+	for _, t := range res.Msg.GetTeachers() {
+		out = append(out, toTeacher(t))
+	}
+	return out, nil
+}
+
+// --- teaching_assignments -------------------------------------------------
+
+// CreateTeachingAssignment binds a teacher to a (group, subject). The config
+// service derives the cycle from the group; the returned assignment carries it.
+func (c *ConfigClient) CreateTeachingAssignment(ctx context.Context, groupID, subjectID, teacherID string) (TeachingAssignment, error) {
+	res, err := c.rpc.CreateTeachingAssignment(ctx, connect.NewRequest(&configv1.CreateTeachingAssignmentRequest{
+		GroupId:   groupID,
+		SubjectId: subjectID,
+		TeacherId: teacherID,
+	}))
+	if err != nil {
+		return TeachingAssignment{}, err
+	}
+	return toTeachingAssignment(res.Msg.GetTeachingAssignment()), nil
+}
+
+// ListTeachingAssignments lists assignments, filtered by any of cycleID,
+// groupID, teacherID ("" = no filter on that dimension).
+func (c *ConfigClient) ListTeachingAssignments(ctx context.Context, cycleID, groupID, teacherID string) ([]TeachingAssignment, error) {
+	res, err := c.rpc.ListTeachingAssignments(ctx, connect.NewRequest(&configv1.ListTeachingAssignmentsRequest{
+		CycleId:   cycleID,
+		GroupId:   groupID,
+		TeacherId: teacherID,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TeachingAssignment, 0, len(res.Msg.GetTeachingAssignments()))
+	for _, a := range res.Msg.GetTeachingAssignments() {
+		out = append(out, toTeachingAssignment(a))
+	}
+	return out, nil
+}
+
 // --- proto ↔ edge mappers -------------------------------------------------
 
 func toCycleResult(c *configv1.Cycle) CycleResult {
@@ -363,6 +448,26 @@ func toGroupResult(g *configv1.Group) GroupResult {
 		GradeLevelID: g.GetGradeLevelId(),
 		Name:         g.GetName(),
 		Capacity:     int(g.GetCapacity()),
+	}
+}
+
+func toTeacher(t *configv1.Teacher) Teacher {
+	return Teacher{
+		ID:        t.GetId(),
+		FirstName: t.GetFirstName(),
+		LastName:  t.GetLastName(),
+		Email:     t.GetEmail(),
+		UserID:    t.GetUserId(),
+	}
+}
+
+func toTeachingAssignment(a *configv1.TeachingAssignment) TeachingAssignment {
+	return TeachingAssignment{
+		ID:        a.GetId(),
+		CycleID:   a.GetCycleId(),
+		GroupID:   a.GetGroupId(),
+		SubjectID: a.GetSubjectId(),
+		TeacherID: a.GetTeacherId(),
 	}
 }
 

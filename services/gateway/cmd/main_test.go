@@ -86,6 +86,28 @@ func (stubConfig) ListCycles(_ context.Context, _ *connect.Request[configv1.List
 	}}), nil
 }
 
+func (stubConfig) CreateTeacher(_ context.Context, req *connect.Request[configv1.CreateTeacherRequest]) (*connect.Response[configv1.CreateTeacherResponse], error) {
+	return connect.NewResponse(&configv1.CreateTeacherResponse{Teacher: &configv1.Teacher{
+		Id:        "tch-1",
+		FirstName: req.Msg.GetFirstName(),
+		LastName:  req.Msg.GetLastName(),
+		Email:     req.Msg.GetEmail(),
+		UserId:    req.Msg.GetUserId(),
+	}}), nil
+}
+
+// CreateTeachingAssignment echoes a derived cycle to prove the edge surfaces the
+// server-derived cycleId without ever accepting one from the client.
+func (stubConfig) CreateTeachingAssignment(_ context.Context, req *connect.Request[configv1.CreateTeachingAssignmentRequest]) (*connect.Response[configv1.CreateTeachingAssignmentResponse], error) {
+	return connect.NewResponse(&configv1.CreateTeachingAssignmentResponse{TeachingAssignment: &configv1.TeachingAssignment{
+		Id:        "asg-1",
+		CycleId:   "cyc-1",
+		GroupId:   req.Msg.GetGroupId(),
+		SubjectId: req.Msg.GetSubjectId(),
+		TeacherId: req.Msg.GetTeacherId(),
+	}}), nil
+}
+
 func connectServer(t *testing.T, path string, handler http.Handler) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -248,5 +270,52 @@ func TestConfigReadDisabledModuleIs404(t *testing.T) {
 	res := doGateway(t, gw, http.MethodGet, "/api/v1/config/cycles", "config-reader", "")
 	if res.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+// The teachers + teaching-assignments routes reuse the exact configWrite/
+// configRead helpers, so the whole guard chain (flag → auth → permission) must
+// apply to them identically. These assert that boundary on the new routes.
+
+const validAssignmentBody = `{"groupId":"grp-1","subjectId":"sub-1","teacherId":"tch-1"}`
+
+func TestTeachingAssignmentDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_config OFF
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teaching-assignments", "config-writer", validAssignmentBody)
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestTeachingAssignmentWriteNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_config": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teaching-assignments", "", validAssignmentBody)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+func TestTeachingAssignmentWriteReadOnlyPermissionIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_config": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teaching-assignments", "config-reader", validAssignmentBody)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+func TestTeachingAssignmentWriteWithPermissionCreates201(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_config": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teaching-assignments", "config-writer", validAssignmentBody)
+	if res.StatusCode != http.StatusCreated {
+		t.Errorf("status = %d, want 201", res.StatusCode)
+	}
+}
+
+func TestTeacherWriteWithPermissionCreates201(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_config": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teachers", "config-writer",
+		`{"firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`)
+	if res.StatusCode != http.StatusCreated {
+		t.Errorf("status = %d, want 201", res.StatusCode)
 	}
 }

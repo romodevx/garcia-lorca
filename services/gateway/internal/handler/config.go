@@ -23,6 +23,10 @@ type ConfigService interface {
 	ListTerms(ctx context.Context, cycleID, levelID string) ([]client.TermResult, error)
 	CreateGroup(ctx context.Context, in client.CreateGroupInput) (client.GroupResult, error)
 	ListGroups(ctx context.Context, cycleID, gradeLevelID string) ([]client.GroupResult, error)
+	CreateTeacher(ctx context.Context, firstName, lastName, email, userID string) (client.Teacher, error)
+	ListTeachers(ctx context.Context) ([]client.Teacher, error)
+	CreateTeachingAssignment(ctx context.Context, groupID, subjectID, teacherID string) (client.TeachingAssignment, error)
+	ListTeachingAssignments(ctx context.Context, cycleID, groupID, teacherID string) ([]client.TeachingAssignment, error)
 }
 
 // ConfigHandler exposes the front-facing (HTTP/JSON) academic-catalog endpoints,
@@ -430,6 +434,122 @@ func (h *ConfigHandler) ListGroups(w http.ResponseWriter, r *http.Request) {
 		out = append(out, toGroupResponse(g))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"groups": out})
+}
+
+// --- teachers -------------------------------------------------------------
+
+type createTeacherRequest struct {
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"`
+	Email     string `json:"email"`
+	UserID    string `json:"userId"`
+}
+
+type teacherResponse struct {
+	ID        string `json:"id"`
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"`
+	Email     string `json:"email"`
+	UserID    string `json:"userId"`
+}
+
+func toTeacherResponse(t client.Teacher) teacherResponse {
+	return teacherResponse{
+		ID:        t.ID,
+		FirstName: t.FirstName,
+		LastName:  t.LastName,
+		Email:     t.Email,
+		UserID:    t.UserID,
+	}
+}
+
+// CreateTeacher handles POST /api/v1/config/teachers.
+func (h *ConfigHandler) CreateTeacher(w http.ResponseWriter, r *http.Request) {
+	var req createTeacherRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	res, err := h.svc.CreateTeacher(r.Context(), req.FirstName, req.LastName, req.Email, req.UserID)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, toTeacherResponse(res))
+}
+
+// ListTeachers handles GET /api/v1/config/teachers.
+func (h *ConfigHandler) ListTeachers(w http.ResponseWriter, r *http.Request) {
+	res, err := h.svc.ListTeachers(r.Context())
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	out := make([]teacherResponse, 0, len(res))
+	for _, t := range res {
+		out = append(out, toTeacherResponse(t))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"teachers": out})
+}
+
+// --- teaching_assignments -------------------------------------------------
+
+// createTeachingAssignmentRequest carries only the client-supplied edges of the
+// knot. cycleId is intentionally absent: the config service derives it from the
+// group so it can never drift from the group's cycle.
+type createTeachingAssignmentRequest struct {
+	GroupID   string `json:"groupId"`
+	SubjectID string `json:"subjectId"`
+	TeacherID string `json:"teacherId"`
+}
+
+type teachingAssignmentResponse struct {
+	ID        string `json:"id"`
+	CycleID   string `json:"cycleId"`
+	GroupID   string `json:"groupId"`
+	SubjectID string `json:"subjectId"`
+	TeacherID string `json:"teacherId"`
+}
+
+func toTeachingAssignmentResponse(a client.TeachingAssignment) teachingAssignmentResponse {
+	return teachingAssignmentResponse{
+		ID:        a.ID,
+		CycleID:   a.CycleID,
+		GroupID:   a.GroupID,
+		SubjectID: a.SubjectID,
+		TeacherID: a.TeacherID,
+	}
+}
+
+// CreateTeachingAssignment handles POST /api/v1/config/teaching-assignments.
+func (h *ConfigHandler) CreateTeachingAssignment(w http.ResponseWriter, r *http.Request) {
+	var req createTeachingAssignmentRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	res, err := h.svc.CreateTeachingAssignment(r.Context(), req.GroupID, req.SubjectID, req.TeacherID)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, toTeachingAssignmentResponse(res))
+}
+
+// ListTeachingAssignments handles
+// GET /api/v1/config/teaching-assignments?cycleId=...&groupId=...&teacherId=...
+func (h *ConfigHandler) ListTeachingAssignments(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	res, err := h.svc.ListTeachingAssignments(r.Context(), q.Get("cycleId"), q.Get("groupId"), q.Get("teacherId"))
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	out := make([]teachingAssignmentResponse, 0, len(res))
+	for _, a := range res {
+		out = append(out, toTeachingAssignmentResponse(a))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"teachingAssignments": out})
 }
 
 // writeConnectError maps a Connect error code from the config service to an HTTP
