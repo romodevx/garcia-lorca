@@ -48,9 +48,16 @@ func NewAdminService(
 // CreateUser provisions a new principal from an admin-supplied temporary
 // password and assigns the given roles. The temp password is hashed (never
 // stored in plaintext) and the account is flagged must_change_password. Every
-// requested role is validated to exist BEFORE the user is persisted, so a bad
-// role id fails atomically with KindInvalid and never leaves a role-less user. A
-// blank temp password is KindInvalid; a duplicate email is KindConflict.
+// requested role is validated to exist BEFORE any write, so a bad role id is
+// rejected (KindInvalid) without persisting anything. A blank temp password is
+// KindInvalid; a duplicate email is KindConflict.
+//
+// NOTE: the user insert and the role assignment are two separate transactions
+// (not one atomic write). This fails SAFE — a transient failure of the role
+// assignment after the user is created leaves a role-less user (zero
+// permissions, never an escalation), which an admin can fix by re-running
+// SetUserRoles. Promote to a single-tx CreateUserWithRoles if provisioning must
+// be all-or-nothing.
 func (s *AdminService) CreateUser(ctx context.Context, rawEmail, displayName, tempPassword string, roleIDs []string) (domain.User, error) {
 	if strings.TrimSpace(tempPassword) == "" {
 		return domain.User{}, glerrors.New(glerrors.KindInvalid, "temporary password is required")
