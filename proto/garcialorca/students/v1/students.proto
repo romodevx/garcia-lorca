@@ -28,6 +28,27 @@ service StudentsService {
   // ChangeAdmissionStatus advances the admission state machine (accept, reject,
   // enroll, withdraw). An invalid transition is a FailedPrecondition error.
   rpc ChangeAdmissionStatus(ChangeAdmissionStatusRequest) returns (ChangeAdmissionStatusResponse);
+
+  // Enroll places a student into a group of a cycle. The cycle is DERIVED
+  // server-side from the group (never a client arg); the group and optional term
+  // are validated by RPC against the config service. A duplicate enrollment for
+  // the same (student, cycle) is an AlreadyExists error.
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+
+  // GetEnrollment fetches a single enrollment by id.
+  rpc GetEnrollment(GetEnrollmentRequest) returns (GetEnrollmentResponse);
+
+  // ListEnrollments lists enrollments, optionally filtered by student, cycle, or
+  // group (each filter is independent; empty = any).
+  rpc ListEnrollments(ListEnrollmentsRequest) returns (ListEnrollmentsResponse);
+
+  // TransferStudent moves an active enrollment to another group in the SAME
+  // cycle, recording a dated, reasoned transfer. Returns the updated enrollment.
+  rpc TransferStudent(TransferStudentRequest) returns (TransferStudentResponse);
+
+  // WithdrawEnrollment marks an enrollment as withdrawn. Returns the updated
+  // enrollment.
+  rpc WithdrawEnrollment(WithdrawEnrollmentRequest) returns (WithdrawEnrollmentResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -141,4 +162,86 @@ message AdmissionStatusChanged {
   AdmissionStatus new_status = 4;
   string reason = 5;
   google.protobuf.Timestamp changed_at = 6;
+}
+
+// --- Enrollment (Phase 4) -------------------------------------------------
+
+// EnrollmentStatus is the lifecycle of a student's placement in a cycle.
+enum EnrollmentStatus {
+  ENROLLMENT_STATUS_UNSPECIFIED = 0;
+  ENROLLMENT_STATUS_ACTIVE = 1;       // currently enrolled
+  ENROLLMENT_STATUS_TRANSFERRED = 2;  // superseded by a move to another group
+  ENROLLMENT_STATUS_WITHDRAWN = 3;    // terminal, withdrawn from the cycle
+}
+
+// Enrollment places a student into a group of a cycle. cycle_id / group_id /
+// term_id reference the config service (validated by RPC, not FKs). tenant_id
+// scopes RLS. term_id is optional (empty when the cycle is not term-scoped).
+message Enrollment {
+  string id = 1;
+  string tenant_id = 2;
+  string student_id = 3;
+  string cycle_id = 4;
+  string group_id = 5;
+  string term_id = 6;   // optional
+  EnrollmentStatus status = 7;
+  google.protobuf.Timestamp enrolled_at = 8;
+}
+
+// EnrollmentTransfer is a dated, reasoned record of a move between groups.
+message EnrollmentTransfer {
+  string id = 1;
+  string enrollment_id = 2;
+  string from_group_id = 3;
+  string to_group_id = 4;
+  string reason = 5;
+  google.protobuf.Timestamp moved_at = 6;
+}
+
+// EnrollRequest enrolls a student into a group. The cycle is DERIVED from the
+// group server-side, so it is deliberately NOT a field here.
+message EnrollRequest {
+  string student_id = 1;
+  string group_id = 2;
+  string term_id = 3;   // optional
+}
+
+message EnrollResponse {
+  Enrollment enrollment = 1;
+}
+
+message GetEnrollmentRequest {
+  string id = 1;
+}
+
+message GetEnrollmentResponse {
+  Enrollment enrollment = 1;
+}
+
+message ListEnrollmentsRequest {
+  string student_id = 1;  // optional filter (empty = any)
+  string cycle_id = 2;    // optional filter (empty = any)
+  string group_id = 3;    // optional filter (empty = any)
+}
+
+message ListEnrollmentsResponse {
+  repeated Enrollment enrollments = 1;
+}
+
+message TransferStudentRequest {
+  string enrollment_id = 1;
+  string to_group_id = 2;
+  string reason = 3;
+}
+
+message TransferStudentResponse {
+  Enrollment enrollment = 1;  // the updated enrollment
+}
+
+message WithdrawEnrollmentRequest {
+  string id = 1;
+}
+
+message WithdrawEnrollmentResponse {
+  Enrollment enrollment = 1;  // the updated enrollment
 }
