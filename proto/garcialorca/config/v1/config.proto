@@ -1,0 +1,376 @@
+// Config / Academic Catalog (M04) — the academic structure the whole spine hangs
+// off: cycles → levels → grade_levels → groups → subjects → terms, with the
+// hybrid cycle model (per-level enrollment_granularity).
+//
+// FROZEN CONTRACT once merged (M04). All six entities live in ONE service/DB, so
+// intra-catalog references are real FKs (no cross-service RPC within config).
+// Every entity is tenant-scoped (RLS on app.current_tenant).
+syntax = "proto3";
+
+package garcialorca.config.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// ConfigService is the academic-catalog API surface: catalog entities
+// (levels, grade_levels, subjects) plus per-cycle entities (cycles, terms,
+// groups). Per entity: Create / Get / List (lists are parent-scoped where
+// natural).
+service ConfigService {
+  // Health is the liveness/ping probe present on every service.
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // --- levels (catalog) ---
+  // CreateLevel adds a SEP education level with its enrollment granularity.
+  rpc CreateLevel(CreateLevelRequest) returns (CreateLevelResponse);
+  // GetLevel fetches a level by id.
+  rpc GetLevel(GetLevelRequest) returns (GetLevelResponse);
+  // ListLevels lists every level in the tenant catalog.
+  rpc ListLevels(ListLevelsRequest) returns (ListLevelsResponse);
+
+  // --- cycles (per-cycle umbrella) ---
+  // CreateCycle adds a school-year umbrella (status defaults to draft).
+  rpc CreateCycle(CreateCycleRequest) returns (CreateCycleResponse);
+  // GetCycle fetches a cycle by id.
+  rpc GetCycle(GetCycleRequest) returns (GetCycleResponse);
+  // ListCycles lists every cycle in the tenant.
+  rpc ListCycles(ListCyclesRequest) returns (ListCyclesResponse);
+
+  // --- grade_levels (catalog) ---
+  // CreateGradeLevel adds a grade within a level.
+  rpc CreateGradeLevel(CreateGradeLevelRequest) returns (CreateGradeLevelResponse);
+  // GetGradeLevel fetches a grade_level by id.
+  rpc GetGradeLevel(GetGradeLevelRequest) returns (GetGradeLevelResponse);
+  // ListGradeLevels lists the grades of a level (scoped by level_id).
+  rpc ListGradeLevels(ListGradeLevelsRequest) returns (ListGradeLevelsResponse);
+
+  // --- subjects (catalog) ---
+  // CreateSubject adds a subject taught at a grade.
+  rpc CreateSubject(CreateSubjectRequest) returns (CreateSubjectResponse);
+  // GetSubject fetches a subject by id.
+  rpc GetSubject(GetSubjectRequest) returns (GetSubjectResponse);
+  // ListSubjects lists the subjects of a grade (scoped by grade_level_id).
+  rpc ListSubjects(ListSubjectsRequest) returns (ListSubjectsResponse);
+
+  // --- terms (per cycle, level) ---
+  // CreateTerm adds a period within a cycle for a level.
+  rpc CreateTerm(CreateTermRequest) returns (CreateTermResponse);
+  // GetTerm fetches a term by id.
+  rpc GetTerm(GetTermRequest) returns (GetTermResponse);
+  // ListTerms lists the terms of a cycle (scoped by cycle_id, optional level_id).
+  rpc ListTerms(ListTermsRequest) returns (ListTermsResponse);
+
+  // --- groups (per cycle, grade_level) ---
+  // CreateGroup adds a class group within a cycle for a grade.
+  rpc CreateGroup(CreateGroupRequest) returns (CreateGroupResponse);
+  // GetGroup fetches a group by id.
+  rpc GetGroup(GetGroupRequest) returns (GetGroupResponse);
+  // ListGroups lists the groups of a cycle (scoped by cycle_id, optional grade_level_id).
+  rpc ListGroups(ListGroupsRequest) returns (ListGroupsResponse);
+}
+
+// --- Health ---------------------------------------------------------------
+
+// HealthRequest is the empty liveness probe request.
+message HealthRequest {}
+
+// HealthResponse reports service liveness.
+message HealthResponse {
+  string status = 1;
+}
+
+// --- Enums ----------------------------------------------------------------
+
+// EnrollmentGranularity drives the hybrid cycle model: a level enrolls per
+// whole CYCLE or per TERM.
+enum EnrollmentGranularity {
+  ENROLLMENT_GRANULARITY_UNSPECIFIED = 0;
+  ENROLLMENT_GRANULARITY_CYCLE = 1;
+  ENROLLMENT_GRANULARITY_TERM = 2;
+}
+
+// CycleStatus is a cycle's lifecycle state.
+enum CycleStatus {
+  CYCLE_STATUS_UNSPECIFIED = 0;
+  CYCLE_STATUS_DRAFT = 1;
+  CYCLE_STATUS_ACTIVE = 2;
+  CYCLE_STATUS_CLOSED = 3;
+}
+
+// --- Entities -------------------------------------------------------------
+
+// Level is a SEP education level (catalog). enrollment_granularity is the
+// hybrid-model driver. tenant_id scopes RLS.
+message Level {
+  string id = 1;
+  string tenant_id = 2;
+  string name = 3;
+  string sep_code = 4;
+  EnrollmentGranularity enrollment_granularity = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+// Cycle is a school-year umbrella (e.g. "2026-2027").
+message Cycle {
+  string id = 1;
+  string tenant_id = 2;
+  string name = 3;
+  CycleStatus status = 4;
+  google.protobuf.Timestamp starts_on = 5;
+  google.protobuf.Timestamp ends_on = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+// GradeLevel is a grade within a level (catalog). ordinal orders grades.
+message GradeLevel {
+  string id = 1;
+  string tenant_id = 2;
+  string level_id = 3;
+  string name = 4;
+  int32 ordinal = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+// Subject is a subject taught at a grade (catalog).
+message Subject {
+  string id = 1;
+  string tenant_id = 2;
+  string grade_level_id = 3;
+  string name = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+// Term is a period within a cycle for a level (per cycle).
+message Term {
+  string id = 1;
+  string tenant_id = 2;
+  string cycle_id = 3;
+  string level_id = 4;
+  string name = 5;
+  int32 ordinal = 6;
+  google.protobuf.Timestamp starts_on = 7;
+  google.protobuf.Timestamp ends_on = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+}
+
+// Group is a class group within a cycle for a grade (per cycle).
+message Group {
+  string id = 1;
+  string tenant_id = 2;
+  string cycle_id = 3;
+  string grade_level_id = 4;
+  string name = 5;
+  int32 capacity = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+// --- Level RPC messages ---------------------------------------------------
+
+// CreateLevelRequest creates a catalog level.
+message CreateLevelRequest {
+  string name = 1;
+  string sep_code = 2;
+  EnrollmentGranularity enrollment_granularity = 3;
+}
+
+// CreateLevelResponse returns the created level.
+message CreateLevelResponse {
+  Level level = 1;
+}
+
+// GetLevelRequest fetches a level by id.
+message GetLevelRequest {
+  string id = 1;
+}
+
+// GetLevelResponse returns the requested level.
+message GetLevelResponse {
+  Level level = 1;
+}
+
+// ListLevelsRequest lists all levels in the tenant.
+message ListLevelsRequest {}
+
+// ListLevelsResponse returns the tenant levels.
+message ListLevelsResponse {
+  repeated Level levels = 1;
+}
+
+// --- Cycle RPC messages ---------------------------------------------------
+
+// CreateCycleRequest creates a school-year cycle.
+message CreateCycleRequest {
+  string name = 1;
+  CycleStatus status = 2;
+  google.protobuf.Timestamp starts_on = 3;
+  google.protobuf.Timestamp ends_on = 4;
+}
+
+// CreateCycleResponse returns the created cycle.
+message CreateCycleResponse {
+  Cycle cycle = 1;
+}
+
+// GetCycleRequest fetches a cycle by id.
+message GetCycleRequest {
+  string id = 1;
+}
+
+// GetCycleResponse returns the requested cycle.
+message GetCycleResponse {
+  Cycle cycle = 1;
+}
+
+// ListCyclesRequest lists all cycles in the tenant.
+message ListCyclesRequest {}
+
+// ListCyclesResponse returns the tenant cycles.
+message ListCyclesResponse {
+  repeated Cycle cycles = 1;
+}
+
+// --- GradeLevel RPC messages ----------------------------------------------
+
+// CreateGradeLevelRequest creates a grade within a level.
+message CreateGradeLevelRequest {
+  string level_id = 1;
+  string name = 2;
+  int32 ordinal = 3;
+}
+
+// CreateGradeLevelResponse returns the created grade_level.
+message CreateGradeLevelResponse {
+  GradeLevel grade_level = 1;
+}
+
+// GetGradeLevelRequest fetches a grade_level by id.
+message GetGradeLevelRequest {
+  string id = 1;
+}
+
+// GetGradeLevelResponse returns the requested grade_level.
+message GetGradeLevelResponse {
+  GradeLevel grade_level = 1;
+}
+
+// ListGradeLevelsRequest lists the grades of a level.
+message ListGradeLevelsRequest {
+  string level_id = 1;
+}
+
+// ListGradeLevelsResponse returns the grades of the level.
+message ListGradeLevelsResponse {
+  repeated GradeLevel grade_levels = 1;
+}
+
+// --- Subject RPC messages -------------------------------------------------
+
+// CreateSubjectRequest creates a subject at a grade.
+message CreateSubjectRequest {
+  string grade_level_id = 1;
+  string name = 2;
+}
+
+// CreateSubjectResponse returns the created subject.
+message CreateSubjectResponse {
+  Subject subject = 1;
+}
+
+// GetSubjectRequest fetches a subject by id.
+message GetSubjectRequest {
+  string id = 1;
+}
+
+// GetSubjectResponse returns the requested subject.
+message GetSubjectResponse {
+  Subject subject = 1;
+}
+
+// ListSubjectsRequest lists the subjects of a grade.
+message ListSubjectsRequest {
+  string grade_level_id = 1;
+}
+
+// ListSubjectsResponse returns the subjects of the grade.
+message ListSubjectsResponse {
+  repeated Subject subjects = 1;
+}
+
+// --- Term RPC messages ----------------------------------------------------
+
+// CreateTermRequest creates a period within a cycle for a level.
+message CreateTermRequest {
+  string cycle_id = 1;
+  string level_id = 2;
+  string name = 3;
+  int32 ordinal = 4;
+  google.protobuf.Timestamp starts_on = 5;
+  google.protobuf.Timestamp ends_on = 6;
+}
+
+// CreateTermResponse returns the created term.
+message CreateTermResponse {
+  Term term = 1;
+}
+
+// GetTermRequest fetches a term by id.
+message GetTermRequest {
+  string id = 1;
+}
+
+// GetTermResponse returns the requested term.
+message GetTermResponse {
+  Term term = 1;
+}
+
+// ListTermsRequest lists the terms of a cycle, optionally filtered by level.
+message ListTermsRequest {
+  string cycle_id = 1;
+  string level_id = 2;  // optional filter (empty = any level)
+}
+
+// ListTermsResponse returns the terms of the cycle.
+message ListTermsResponse {
+  repeated Term terms = 1;
+}
+
+// --- Group RPC messages ---------------------------------------------------
+
+// CreateGroupRequest creates a class group within a cycle for a grade.
+message CreateGroupRequest {
+  string cycle_id = 1;
+  string grade_level_id = 2;
+  string name = 3;
+  int32 capacity = 4;
+}
+
+// CreateGroupResponse returns the created group.
+message CreateGroupResponse {
+  Group group = 1;
+}
+
+// GetGroupRequest fetches a group by id.
+message GetGroupRequest {
+  string id = 1;
+}
+
+// GetGroupResponse returns the requested group.
+message GetGroupResponse {
+  Group group = 1;
+}
+
+// ListGroupsRequest lists the groups of a cycle, optionally filtered by grade.
+message ListGroupsRequest {
+  string cycle_id = 1;
+  string grade_level_id = 2;  // optional filter (empty = any grade)
+}
+
+// ListGroupsResponse returns the groups of the cycle.
+message ListGroupsResponse {
+  repeated Group groups = 1;
+}

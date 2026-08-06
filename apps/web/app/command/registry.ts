@@ -29,6 +29,8 @@ interface ActionSpec {
   readonly kind: Extract<CommandKind, "create" | "quick">;
   readonly titleKey: string;
   readonly aliasKey?: string;
+  /** Disambiguator when a module registers several actions of the same kind. */
+  readonly key?: string;
 }
 
 /** Curated create/quick actions (seed; each module extends this as it's built). */
@@ -41,7 +43,10 @@ const ACTIONS: readonly ActionSpec[] = [
   { moduleId: "documents", kind: "create", titleKey: "create.document", aliasKey: "alias.document" },
   { moduleId: "uniforms", kind: "create", titleKey: "create.uniform", aliasKey: "alias.uniform" },
   { moduleId: "billing", kind: "create", titleKey: "create.invoice", aliasKey: "alias.invoice" },
-  { moduleId: "settings", kind: "create", titleKey: "create.user", aliasKey: "alias.user" },
+  // Academic-catalog (module_config) surfaced under the "settings" module.
+  { moduleId: "settings", kind: "create", key: "cycle", titleKey: "create.cycle", aliasKey: "alias.cycle" },
+  { moduleId: "settings", kind: "create", key: "level", titleKey: "create.level", aliasKey: "alias.level" },
+  { moduleId: "settings", kind: "create", key: "group", titleKey: "create.group", aliasKey: "alias.group" },
   { moduleId: "attendance", kind: "quick", titleKey: "quick.attendance", aliasKey: "alias.attendance" },
   { moduleId: "reports", kind: "quick", titleKey: "quick.reports", aliasKey: "alias.reports" },
 ];
@@ -78,7 +83,7 @@ export function buildCommandRegistry(flags: FlagSet, t: Translate): Command[] {
     const module = moduleById.get(action.moduleId);
     if (module === undefined || module.hidden || flags[module.flag] !== true) continue;
     commands.push({
-      id: `${module.id}.${action.kind}`,
+      id: action.key !== undefined ? `${module.id}.${action.kind}.${action.key}` : `${module.id}.${action.kind}`,
       kind: action.kind,
       title: t(action.titleKey),
       aliases: action.aliasKey !== undefined ? parseAliases(t(action.aliasKey)) : undefined,

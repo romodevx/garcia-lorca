@@ -97,6 +97,9 @@ services:
       <<: *go-env
       SERVICE: gateway
       IAM_BASE_URL: "http://iam:8080"
+      STUDENTS_BASE_URL: "http://students:8080"
+      CONFIG_BASE_URL: "http://config:8080"
+      ENABLED_MODULES: "iam,gateway,students,config"
     ports: ["8080:8080"]
     depends_on:
       postgres:
@@ -104,6 +107,8 @@ services:
       migrate:
         condition: service_completed_successfully
       iam:
+        condition: service_started
+      config:
         condition: service_started
 
   iam:
@@ -115,6 +120,11 @@ services:
     <<: *go-service
     environment: { <<: *go-env, SERVICE: students }
     ports: ["8092:8080"]
+
+  config:
+    <<: *go-service
+    environment: { <<: *go-env, SERVICE: config }
+    ports: ["8101:8080"]
 
   finance:
     <<: *go-service

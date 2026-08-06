@@ -20,7 +20,7 @@ are UX-only via a single `useFlag` hook / `FlagsProvider`).
 | `module_iam` | M01 IAM | iam | **OFF** | Auth, JWT, roles & permissions. Spine — gate carefully; everything depends on it. |
 | `module_gateway` | M02 Gateway/BFF | gateway | **OFF** | Connect edge + the flag-enforcement middleware itself + dashboard read-model plumbing. |
 | `module_students` | M03 Students/Admisión | students | **OFF** | Student control & admission. First vertical slice. |
-| `module_config` | M04 Cycles/Config | config | **OFF** | School-cycle lifecycle, roles & per-cycle configuration. |
+| `module_config` | M04 Cycles/Config | config | **OFF** | School-cycle lifecycle & per-cycle configuration. **Backed by a real `config` service since Phase 2 (academic catalog: cycles/levels/grade_levels/subjects/terms/groups).** Gateway routes require `config:read`/`config:write`. |
 | `module_finance` | M05 Finance/Adeudos | finance | **OFF** | Debts & payment ledger; overdue detection. |
 | `module_attendance` | M06 Attendance | attendance | **OFF** | QR-based attendance marking & absence recording. |
 | `module_grades` | M07 Grades/Boletas | grades | **OFF** | Grade capture & boletas (Strategy per SEP level). |

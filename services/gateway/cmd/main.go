@@ -46,6 +46,10 @@ func main() {
 	if studentsBaseURL == "" {
 		studentsBaseURL = "http://localhost:8083"
 	}
+	configBaseURL := os.Getenv("CONFIG_BASE_URL")
+	if configBaseURL == "" {
+		configBaseURL = "http://localhost:8085"
+	}
 
 	// flags is the authoritative source of module visibility (default-deny),
 	// loaded from ENABLED_MODULES (comma-separated module names). The gateway
@@ -56,6 +60,7 @@ func main() {
 	iamHealth := client.NewIAMClient(iamBaseURL, http.DefaultClient)
 	authClient := client.NewAuthClient(iamBaseURL, http.DefaultClient)
 	studentsClient := client.NewStudentsClient(studentsBaseURL, http.DefaultClient)
+	configClient := client.NewConfigClient(configBaseURL, http.DefaultClient)
 
 	// loginLimiter fronts POST /auth/login with a per-IP token bucket so an
 	// attacker cannot brute-force credentials from a single source. It is
@@ -63,12 +68,13 @@ func main() {
 	loginRL := config.ParseLoginRateLimit(os.Getenv)
 	loginLimiter := middleware.NewRateLimiter(loginRL.Burst, loginRL.RefillPerSec(), time.Now)
 
-	mux := newMux(iamHealth, authClient, studentsClient, flags, loginLimiter)
+	mux := newMux(iamHealth, authClient, studentsClient, configClient, flags, loginLimiter)
 
 	log.Info("gateway starting",
 		slog.String("addr", addr),
 		slog.String("iam", iamBaseURL),
-		slog.String("students", studentsBaseURL))
+		slog.String("students", studentsBaseURL),
+		slog.String("config", configBaseURL))
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           mux,
@@ -93,11 +99,14 @@ func main() {
 //	GET  /api/v1/features      → resolved module-flag map (frontend gating)
 //	POST /api/v1/students      → ModuleGuard(students) → RequireAuth →
 //	                             RequirePermission(students:create) → students service
+//	/api/v1/config/...         → ModuleGuard(config) → RequireAuth → rotation →
+//	                             RequirePermission(config:write on POST, config:read
+//	                             on GET) → config (academic catalog) service
 //	/healthz, /readyz          → liveness + iam reachability
 //
 // `flags` (via middleware.NewModuleGuard) is the module-visibility boundary:
 // disabled module ⇒ 404, evaluated before auth so a hidden module is invisible.
-func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, flags featureflag.Checker, loginLimiter *middleware.RateLimiter) *http.ServeMux {
+func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, configClient *client.ConfigClient, flags featureflag.Checker, loginLimiter *middleware.RateLimiter) *http.ServeMux {
 	mux := http.NewServeMux()
 	handler.NewHealthHandler(iamHealth).Register(mux)
 
@@ -124,5 +133,29 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	studentsCreate := requireAuthChanged(middleware.RequirePermission("students:create")(
 		http.HandlerFunc(handler.NewStudentsHandler(studentsClient).Create)))
 	mux.Handle("POST /api/v1/students", guard.Protect("students", studentsCreate))
+
+	// M04 config (academic catalog): flag-guarded, authenticated + rotation-
+	// enforced, permission-gated. Writes need config:write, reads config:read;
+	// every route sits behind guard.Protect("config", …) so module_config OFF ⇒
+	// 404 (the module is invisible before auth even runs).
+	configH := handler.NewConfigHandler(configClient)
+	configWrite := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("config", requireAuthChanged(middleware.RequirePermission("config:write")(http.HandlerFunc(h))))
+	}
+	configRead := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("config", requireAuthChanged(middleware.RequirePermission("config:read")(http.HandlerFunc(h))))
+	}
+	mux.Handle("POST /api/v1/config/cycles", configWrite(configH.CreateCycle))
+	mux.Handle("GET /api/v1/config/cycles", configRead(configH.ListCycles))
+	mux.Handle("POST /api/v1/config/levels", configWrite(configH.CreateLevel))
+	mux.Handle("GET /api/v1/config/levels", configRead(configH.ListLevels))
+	mux.Handle("POST /api/v1/config/grade-levels", configWrite(configH.CreateGradeLevel))
+	mux.Handle("GET /api/v1/config/grade-levels", configRead(configH.ListGradeLevels))
+	mux.Handle("POST /api/v1/config/subjects", configWrite(configH.CreateSubject))
+	mux.Handle("GET /api/v1/config/subjects", configRead(configH.ListSubjects))
+	mux.Handle("POST /api/v1/config/terms", configWrite(configH.CreateTerm))
+	mux.Handle("GET /api/v1/config/terms", configRead(configH.ListTerms))
+	mux.Handle("POST /api/v1/config/groups", configWrite(configH.CreateGroup))
+	mux.Handle("GET /api/v1/config/groups", configRead(configH.ListGroups))
 	return mux
 }

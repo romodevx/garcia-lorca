@@ -154,6 +154,16 @@ must be resolved before turning a flag ON in a shared environment.
    calls `/auth/refresh` immediately after `change-password` so the cookie picks up
    `must_change_password=false`).
 
+### Added by Phase 2 (`config` service) — before enabling `module_config` in a shared env
+6. **Internal services must be network-private.** `config` (like `iam`/`students`)
+   has no independent authn — the gateway is the sole auth boundary. The host-published
+   port (`8101` in docker-compose) is LOCAL ONLY; in Cloud Run set `ingress=internal`
+   so only the gateway can reach it.
+7. **Multi-tenant forwarding.** `config` is single-tenant by construction
+   (`CONFIG_TENANT_ID` is a process-wide constant; the client cannot set `tenant_id`).
+   Before any multi-tenant shared use, the gateway must forward the principal's
+   `TenantID` to `config` and the constant must be removed.
+
 ## Common commands
 
 ```bash
