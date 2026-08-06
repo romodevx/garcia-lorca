@@ -47,6 +47,8 @@ const ACTIONS: readonly ActionSpec[] = [
   { moduleId: "settings", kind: "create", key: "cycle", titleKey: "create.cycle", aliasKey: "alias.cycle" },
   { moduleId: "settings", kind: "create", key: "level", titleKey: "create.level", aliasKey: "alias.level" },
   { moduleId: "settings", kind: "create", key: "group", titleKey: "create.group", aliasKey: "alias.group" },
+  { moduleId: "settings", kind: "create", key: "teacher", titleKey: "create.teacher", aliasKey: "alias.teacher" },
+  { moduleId: "settings", kind: "create", key: "assignment", titleKey: "create.assignment", aliasKey: "alias.assignment" },
   { moduleId: "attendance", kind: "quick", titleKey: "quick.attendance", aliasKey: "alias.attendance" },
   { moduleId: "reports", kind: "quick", titleKey: "quick.reports", aliasKey: "alias.reports" },
 ];
