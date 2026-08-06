@@ -50,6 +50,10 @@ func main() {
 	if configBaseURL == "" {
 		configBaseURL = "http://localhost:8085"
 	}
+	gradesBaseURL := os.Getenv("GRADES_BASE_URL")
+	if gradesBaseURL == "" {
+		gradesBaseURL = "http://localhost:8094"
+	}
 
 	// flags is the authoritative source of module visibility (default-deny),
 	// loaded from ENABLED_MODULES (comma-separated module names). The gateway
@@ -61,6 +65,7 @@ func main() {
 	authClient := client.NewAuthClient(iamBaseURL, http.DefaultClient)
 	studentsClient := client.NewStudentsClient(studentsBaseURL, http.DefaultClient)
 	configClient := client.NewConfigClient(configBaseURL, http.DefaultClient)
+	gradesClient := client.NewGradesClient(gradesBaseURL, http.DefaultClient)
 
 	// loginLimiter fronts POST /auth/login with a per-IP token bucket so an
 	// attacker cannot brute-force credentials from a single source. It is
@@ -68,13 +73,14 @@ func main() {
 	loginRL := config.ParseLoginRateLimit(os.Getenv)
 	loginLimiter := middleware.NewRateLimiter(loginRL.Burst, loginRL.RefillPerSec(), time.Now)
 
-	mux := newMux(iamHealth, authClient, studentsClient, configClient, flags, loginLimiter)
+	mux := newMux(iamHealth, authClient, studentsClient, configClient, gradesClient, flags, loginLimiter)
 
 	log.Info("gateway starting",
 		slog.String("addr", addr),
 		slog.String("iam", iamBaseURL),
 		slog.String("students", studentsBaseURL),
-		slog.String("config", configBaseURL))
+		slog.String("config", configBaseURL),
+		slog.String("grades", gradesBaseURL))
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           mux,
@@ -105,11 +111,14 @@ func main() {
 //	/api/v1/config/...         → ModuleGuard(config) → RequireAuth → rotation →
 //	                             RequirePermission(config:write on POST, config:read
 //	                             on GET) → config (academic catalog) service
+//	/api/v1/grades/...         → ModuleGuard(grades) → RequireAuth → rotation →
+//	                             RequirePermission(grades:write on capture,
+//	                             grades:read on roster/list) → grades service
 //	/healthz, /readyz          → liveness + iam reachability
 //
 // `flags` (via middleware.NewModuleGuard) is the module-visibility boundary:
 // disabled module ⇒ 404, evaluated before auth so a hidden module is invisible.
-func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, configClient *client.ConfigClient, flags featureflag.Checker, loginLimiter *middleware.RateLimiter) *http.ServeMux {
+func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, configClient *client.ConfigClient, gradesClient *client.GradesClient, flags featureflag.Checker, loginLimiter *middleware.RateLimiter) *http.ServeMux {
 	mux := http.NewServeMux()
 	handler.NewHealthHandler(iamHealth).Register(mux)
 
@@ -188,5 +197,20 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/config/teachers", configRead(configH.ListTeachers))
 	mux.Handle("POST /api/v1/config/teaching-assignments", configWrite(configH.CreateTeachingAssignment))
 	mux.Handle("GET /api/v1/config/teaching-assignments", configRead(configH.ListTeachingAssignments))
+
+	// M07 grades (grade capture): flag-guarded, authenticated + rotation-enforced,
+	// permission-gated. Capture is a write (grades:write); roster + list are reads
+	// (grades:read). Every route sits behind guard.Protect("grades", …) so
+	// module_grades OFF ⇒ 404 (the module is invisible before auth even runs).
+	gradesH := handler.NewGradesHandler(gradesClient)
+	gradesWrite := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("grades", requireAuthChanged(middleware.RequirePermission("grades:write")(http.HandlerFunc(h))))
+	}
+	gradesRead := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("grades", requireAuthChanged(middleware.RequirePermission("grades:read")(http.HandlerFunc(h))))
+	}
+	mux.Handle("POST /api/v1/grades", gradesWrite(gradesH.CaptureGrade))
+	mux.Handle("GET /api/v1/grades/roster", gradesRead(gradesH.GetRoster))
+	mux.Handle("GET /api/v1/grades", gradesRead(gradesH.ListGradeEntries))
 	return mux
 }

@@ -13,6 +13,8 @@ import (
 
 	configv1 "github.com/garcia-lorca/gen/go/garcialorca/config/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/config/v1/configv1connect"
+	gradesv1 "github.com/garcia-lorca/gen/go/garcialorca/grades/v1"
+	"github.com/garcia-lorca/gen/go/garcialorca/grades/v1/gradesv1connect"
 	iamv1 "github.com/garcia-lorca/gen/go/garcialorca/iam/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/iam/v1/iamv1connect"
 	studentsv1 "github.com/garcia-lorca/gen/go/garcialorca/students/v1"
@@ -44,6 +46,8 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"config-reader":    {"config:read"},
 		"student-enroller": {"students:enroll"},
 		"student-reader":   {"students:read"},
+		"grades-writer":    {"grades:write", "grades:read"},
+		"grades-reader":    {"grades:read"},
 	}
 	granted, ok := perms[req.Msg.GetAccessToken()]
 	if !ok {
@@ -144,6 +148,36 @@ func (stubConfig) CreateTeachingAssignment(_ context.Context, req *connect.Reque
 	}}), nil
 }
 
+// stubGrades echoes a canned grade entry / roster / list, enough to exercise the
+// grades route security chain end to end. CaptureGrade echoes the derived
+// subject/teacher to prove the edge surfaces them without accepting them.
+type stubGrades struct {
+	gradesv1connect.UnimplementedGradesServiceHandler
+}
+
+func (stubGrades) CaptureGrade(_ context.Context, req *connect.Request[gradesv1.CaptureGradeRequest]) (*connect.Response[gradesv1.CaptureGradeResponse], error) {
+	return connect.NewResponse(&gradesv1.CaptureGradeResponse{Entry: &gradesv1.GradeEntry{
+		Id:           "grd-1",
+		EnrollmentId: req.Msg.GetEnrollmentId(),
+		SubjectId:    "sub-1",
+		TermId:       req.Msg.GetTermId(),
+		TeacherId:    "tch-1",
+		Value:        req.Msg.GetValue(),
+	}}), nil
+}
+
+func (stubGrades) GetRoster(_ context.Context, req *connect.Request[gradesv1.GetRosterRequest]) (*connect.Response[gradesv1.GetRosterResponse], error) {
+	return connect.NewResponse(&gradesv1.GetRosterResponse{Rows: []*gradesv1.RosterRow{
+		{EnrollmentId: "enr-1", StudentId: "stu-1", Value: 8.5, HasValue: true},
+	}}), nil
+}
+
+func (stubGrades) ListGradeEntries(_ context.Context, req *connect.Request[gradesv1.ListGradeEntriesRequest]) (*connect.Response[gradesv1.ListGradeEntriesResponse], error) {
+	return connect.NewResponse(&gradesv1.ListGradeEntriesResponse{Entries: []*gradesv1.GradeEntry{
+		{Id: "grd-1", EnrollmentId: req.Msg.GetEnrollmentId(), SubjectId: "sub-1", TermId: req.Msg.GetTermId(), TeacherId: "tch-1", Value: 8.5},
+	}}), nil
+}
+
 func connectServer(t *testing.T, path string, handler http.Handler) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -163,6 +197,8 @@ func newTestGateway(t *testing.T, flags map[string]bool) *httptest.Server {
 	stuSrv := connectServer(t, stuPath, stuHandler)
 	cfgPath, cfgHandler := configv1connect.NewConfigServiceHandler(stubConfig{})
 	cfgSrv := connectServer(t, cfgPath, cfgHandler)
+	grdPath, grdHandler := gradesv1connect.NewGradesServiceHandler(stubGrades{})
+	grdSrv := connectServer(t, grdPath, grdHandler)
 
 	// A generous burst keeps the limiter out of the way of these route tests;
 	// rate-limit behavior is covered directly in the middleware package.
@@ -172,6 +208,7 @@ func newTestGateway(t *testing.T, flags map[string]bool) *httptest.Server {
 		client.NewAuthClient(iamSrv.URL, iamSrv.Client()),
 		client.NewStudentsClient(stuSrv.URL, stuSrv.Client()),
 		client.NewConfigClient(cfgSrv.URL, cfgSrv.Client()),
+		client.NewGradesClient(grdSrv.URL, grdSrv.Client()),
 		featureflag.NewInMemory(flags),
 		loginLimiter,
 	)
@@ -495,5 +532,102 @@ func TestTransferRouteReadOnlyPermissionIs403(t *testing.T) {
 		`{"enrollmentId":"enr-1","toGroupId":"grp-2","reason":"reassigned"}`)
 	if res.StatusCode != http.StatusForbidden {
 		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+// --- grades routes: ModuleGuard(grades) → RequireAuth → RequirePermission.
+// Capture is a write (grades:write); roster + list are reads (grades:read).
+// Every route sits behind guard.Protect("grades", …) so module_grades OFF ⇒ 404.
+
+const validCaptureBody = `{"assignmentId":"asg-1","enrollmentId":"enr-1","termId":"trm-1","value":8.5}`
+
+func TestGradesCaptureDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_grades OFF
+	// Even a caller with grades:write must not learn the module exists.
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/grades", "grades-writer", validCaptureBody)
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestGradesCaptureNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_grades": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/grades", "", validCaptureBody)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+func TestGradesCaptureReadOnlyPermissionIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_grades": true})
+	// capture is a write: grades:read is insufficient.
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/grades", "grades-reader", validCaptureBody)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+func TestGradesCaptureWithWritePermission200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_grades": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/grades", "grades-writer", validCaptureBody)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// subject/teacher are derived server-side; the client never sends them.
+	if out["id"] != "grd-1" || out["value"] != 8.5 || out["subjectId"] != "sub-1" || out["teacherId"] != "tch-1" {
+		t.Errorf("body = %v", out)
+	}
+}
+
+func TestGradesRosterDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_grades OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/grades/roster?assignmentId=asg-1&termId=trm-1", "grades-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestGradesRosterNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_grades": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/grades/roster?assignmentId=asg-1&termId=trm-1", "", "")
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+func TestGradesRosterWithReadPermissionLists200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_grades": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/grades/roster?assignmentId=asg-1&termId=trm-1", "grades-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out struct {
+		Roster []map[string]any `json:"roster"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Roster) != 1 || out.Roster[0]["enrollmentId"] != "enr-1" || out.Roster[0]["value"] != 8.5 {
+		t.Errorf("body = %v", out)
+	}
+}
+
+func TestGradesListReadOnlyPermissionLists200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_grades": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/grades?enrollmentId=enr-1&termId=trm-1", "grades-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", res.StatusCode)
+	}
+}
+
+func TestGradesListDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_grades OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/grades?enrollmentId=enr-1", "grades-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
 	}
 }
