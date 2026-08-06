@@ -99,6 +99,9 @@ func main() {
 //	GET  /api/v1/features      → resolved module-flag map (frontend gating)
 //	POST /api/v1/students      → ModuleGuard(students) → RequireAuth →
 //	                             RequirePermission(students:create) → students service
+//	/api/v1/enrollments/...    → ModuleGuard(students) → RequireAuth → rotation →
+//	                             RequirePermission(students:enroll on write,
+//	                             students:read on list/get) → students service
 //	/api/v1/config/...         → ModuleGuard(config) → RequireAuth → rotation →
 //	                             RequirePermission(config:write on POST, config:read
 //	                             on GET) → config (academic catalog) service
@@ -133,6 +136,24 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	studentsCreate := requireAuthChanged(middleware.RequirePermission("students:create")(
 		http.HandlerFunc(handler.NewStudentsHandler(studentsClient).Create)))
 	mux.Handle("POST /api/v1/students", guard.Protect("students", studentsCreate))
+
+	// M03 enrollments (Phase 4): place a student into a group of a cycle and
+	// transfer/withdraw them. Flag-guarded (module_students), authenticated +
+	// rotation-enforced, permission-gated: writes (enroll/transfer/withdraw) need
+	// students:enroll, reads (list/get) need students:read. Every route sits
+	// behind guard.Protect("students", …) so module_students OFF ⇒ 404.
+	enrollH := handler.NewEnrollmentsHandler(studentsClient)
+	studentsWrite := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("students", requireAuthChanged(middleware.RequirePermission("students:enroll")(http.HandlerFunc(h))))
+	}
+	studentsRead := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("students", requireAuthChanged(middleware.RequirePermission("students:read")(http.HandlerFunc(h))))
+	}
+	mux.Handle("POST /api/v1/enrollments", studentsWrite(enrollH.Enroll))
+	mux.Handle("GET /api/v1/enrollments", studentsRead(enrollH.ListEnrollments))
+	mux.Handle("GET /api/v1/enrollments/{id}", studentsRead(enrollH.GetEnrollment))
+	mux.Handle("POST /api/v1/enrollments/transfer", studentsWrite(enrollH.Transfer))
+	mux.Handle("POST /api/v1/enrollments/withdraw", studentsWrite(enrollH.Withdraw))
 
 	// M04 config (academic catalog): flag-guarded, authenticated + rotation-
 	// enforced, permission-gated. Writes need config:write, reads config:read;

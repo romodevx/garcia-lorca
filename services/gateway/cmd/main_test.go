@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -37,10 +38,12 @@ type stubIAM struct {
 
 func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.ValidateTokenRequest]) (*connect.Response[iamv1.ValidateTokenResponse], error) {
 	perms := map[string][]string{
-		"with-perm":     {"students:create"},
-		"no-perm":       {"students:read"},
-		"config-writer": {"config:write", "config:read"},
-		"config-reader": {"config:read"},
+		"with-perm":        {"students:create"},
+		"no-perm":          {"students:read"},
+		"config-writer":    {"config:write", "config:read"},
+		"config-reader":    {"config:read"},
+		"student-enroller": {"students:enroll"},
+		"student-reader":   {"students:read"},
 	}
 	granted, ok := perms[req.Msg.GetAccessToken()]
 	if !ok {
@@ -63,6 +66,25 @@ func (stubStudents) CreateApplicant(_ context.Context, req *connect.Request[stud
 		FirstName:       req.Msg.GetFirstName(),
 		Level:           req.Msg.GetLevel(),
 		AdmissionStatus: studentsv1.AdmissionStatus_ADMISSION_STATUS_PENDING,
+	}}), nil
+}
+
+func (stubStudents) Enroll(_ context.Context, req *connect.Request[studentsv1.EnrollRequest]) (*connect.Response[studentsv1.EnrollResponse], error) {
+	// Echo a canned enrollment with a server-derived cycleId, proving the edge
+	// surfaces the derived cycle without ever accepting one from the client.
+	return connect.NewResponse(&studentsv1.EnrollResponse{Enrollment: &studentsv1.Enrollment{
+		Id:        "enr-1",
+		StudentId: req.Msg.GetStudentId(),
+		CycleId:   "cyc-1",
+		GroupId:   req.Msg.GetGroupId(),
+		TermId:    req.Msg.GetTermId(),
+		Status:    studentsv1.EnrollmentStatus_ENROLLMENT_STATUS_ACTIVE,
+	}}), nil
+}
+
+func (stubStudents) ListEnrollments(_ context.Context, req *connect.Request[studentsv1.ListEnrollmentsRequest]) (*connect.Response[studentsv1.ListEnrollmentsResponse], error) {
+	return connect.NewResponse(&studentsv1.ListEnrollmentsResponse{Enrollments: []*studentsv1.Enrollment{
+		{Id: "enr-1", StudentId: req.Msg.GetStudentId(), CycleId: "cyc-1", GroupId: "grp-1", Status: studentsv1.EnrollmentStatus_ENROLLMENT_STATUS_ACTIVE},
 	}}), nil
 }
 
@@ -317,5 +339,78 @@ func TestTeacherWriteWithPermissionCreates201(t *testing.T) {
 		`{"firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`)
 	if res.StatusCode != http.StatusCreated {
 		t.Errorf("status = %d, want 201", res.StatusCode)
+	}
+}
+
+// --- enrollment routes: ModuleGuard(students) → RequireAuth → RequirePermission
+// Writes (enroll/transfer/withdraw) need students:enroll; reads need students:read.
+
+const validEnrollBody = `{"studentId":"stu-1","groupId":"grp-1"}`
+
+func TestEnrollRouteDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_students OFF
+	// Even a caller with students:enroll must not learn the module exists.
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/enrollments", "student-enroller", validEnrollBody)
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestEnrollRouteNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/enrollments", "", validEnrollBody)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+func TestEnrollRouteReadOnlyPermissionIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	// A read-only principal (students:read) may not enroll.
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/enrollments", "student-reader", validEnrollBody)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+func TestEnrollRouteWithEnrollPermissionCreates201(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/enrollments", "student-enroller", validEnrollBody)
+	if res.StatusCode != http.StatusCreated {
+		t.Errorf("status = %d, want 201", res.StatusCode)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// cycleId is derived server-side; the client never sends it.
+	if out["cycleId"] != "cyc-1" || out["status"] != "active" {
+		t.Errorf("body = %v", out)
+	}
+}
+
+func TestListEnrollmentsDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_students OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/enrollments?studentId=stu-1", "student-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestListEnrollmentsWithReadPermissionLists200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/enrollments?studentId=stu-1", "student-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", res.StatusCode)
+	}
+}
+
+func TestTransferRouteReadOnlyPermissionIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	// transfer is a write: students:read is insufficient.
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/enrollments/transfer", "student-reader",
+		`{"enrollmentId":"enr-1","toGroupId":"grp-2","reason":"reassigned"}`)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
 	}
 }
