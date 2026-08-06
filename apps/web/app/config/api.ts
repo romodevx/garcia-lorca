@@ -103,6 +103,46 @@ export interface CreateGroupInput {
   capacity: number;
 }
 
+export interface Teacher {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  /** Reserved for a future IAM link; empty until a teacher is linked to a login. */
+  userId: string;
+}
+
+export interface CreateTeacherInput {
+  firstName: string;
+  lastName: string;
+  email: string;
+  /** Reserved for a future IAM link; omitted by the UI today. */
+  userId?: string;
+}
+
+export interface TeachingAssignment {
+  id: string;
+  /** Server-derived from the group's cycle — never sent by the client. */
+  cycleId: string;
+  groupId: string;
+  subjectId: string;
+  teacherId: string;
+}
+
+/** The client-supplied edges of the knot. cycleId is derived server-side. */
+export interface CreateTeachingAssignmentInput {
+  groupId: string;
+  subjectId: string;
+  teacherId: string;
+}
+
+/** Optional list filters; empty values are dropped from the query string. */
+export interface TeachingAssignmentFilters {
+  cycleId?: string;
+  groupId?: string;
+  teacherId?: string;
+}
+
 // --- transport helpers ----------------------------------------------------
 
 const BASE_PATH = "/api/v1/config";
@@ -205,4 +245,31 @@ export function createGroup(baseURL: string, input: CreateGroupInput): Promise<G
 
 export function listGroups(baseURL: string, cycleId: string, gradeLevelId?: string): Promise<Group[]> {
   return getList<Group>(baseURL, `/groups${query({ cycleId, gradeLevelId })}`, "groups");
+}
+
+// --- teachers -------------------------------------------------------------
+
+export function createTeacher(baseURL: string, input: CreateTeacherInput): Promise<Teacher> {
+  return postJSON<Teacher>(baseURL, "/teachers", input);
+}
+
+export function listTeachers(baseURL: string): Promise<Teacher[]> {
+  return getList<Teacher>(baseURL, "/teachers", "teachers");
+}
+
+// --- teaching assignments (the knot) --------------------------------------
+
+export function createTeachingAssignment(
+  baseURL: string,
+  input: CreateTeachingAssignmentInput,
+): Promise<TeachingAssignment> {
+  return postJSON<TeachingAssignment>(baseURL, "/teaching-assignments", input);
+}
+
+export function listTeachingAssignments(
+  baseURL: string,
+  filters: TeachingAssignmentFilters = {},
+): Promise<TeachingAssignment[]> {
+  const qs = query({ cycleId: filters.cycleId, groupId: filters.groupId, teacherId: filters.teacherId });
+  return getList<TeachingAssignment>(baseURL, `/teaching-assignments${qs}`, "teachingAssignments");
 }

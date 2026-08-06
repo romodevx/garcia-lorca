@@ -8,31 +8,41 @@ import {
   createGroup,
   createLevel,
   createSubject,
+  createTeacher,
+  createTeachingAssignment,
   createTerm,
   listCycles,
   listGradeLevels,
   listGroups,
   listLevels,
   listSubjects,
+  listTeachers,
+  listTeachingAssignments,
   listTerms,
   type CreateCycleInput,
   type CreateGradeLevelInput,
   type CreateGroupInput,
   type CreateLevelInput,
   type CreateSubjectInput,
+  type CreateTeacherInput,
+  type CreateTeachingAssignmentInput,
   type CreateTermInput,
   type Cycle,
   type GradeLevel,
   type Group,
   type Level,
   type Subject,
+  type Teacher,
+  type TeachingAssignment,
   type Term,
 } from "../../config/api";
+import { AssignmentsPanel } from "./AssignmentsPanel";
 import { CycleBar } from "./CycleBar";
 import { GradeLevelsPanel } from "./GradeLevelsPanel";
 import { GroupsPanel } from "./GroupsPanel";
 import { LevelsPanel } from "./LevelsPanel";
 import { SubjectsPanel } from "./SubjectsPanel";
+import { TeachersPanel } from "./TeachersPanel";
 import { TermsPanel } from "./TermsPanel";
 
 // Gateway base URL for the browser (public env; matches AppShell/compose).
@@ -57,6 +67,7 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [terms, setTerms] = useState<Term[]>([]);
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
 
   const [selectedCycleId, setSelectedCycleId] = useState<string | undefined>(undefined);
   const [selectedLevelId, setSelectedLevelId] = useState<string | undefined>(undefined);
@@ -69,11 +80,12 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
   useEffect(() => {
     let active = true;
     setLoading(true);
-    Promise.all([listCycles(API_URL), listLevels(API_URL)])
-      .then(([cs, ls]) => {
+    Promise.all([listCycles(API_URL), listLevels(API_URL), listTeachers(API_URL)])
+      .then(([cs, ls, ts]) => {
         if (!active) return;
         setCycles(cs);
         setLevels(ls);
+        setTeachers(ts);
         const preferred = cs.find((c) => c.status === "active") ?? cs[0];
         if (preferred !== undefined) setSelectedCycleId((prev) => prev ?? preferred.id);
       })
@@ -165,6 +177,27 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
     setTerms((prev) => [...prev, created]);
   }, []);
 
+  const handleCreateTeacher = useCallback(async (input: CreateTeacherInput): Promise<void> => {
+    const created = await createTeacher(API_URL, input);
+    setTeachers((prev) => [...prev, created]);
+  }, []);
+
+  const handleCreateAssignment = useCallback(async (input: CreateTeachingAssignmentInput): Promise<void> => {
+    await createTeachingAssignment(API_URL, input);
+  }, []);
+
+  // Loaders for the assignments panel — kept here so Catalog stays the single
+  // fetch owner; memoized so the panel's cascade effects don't re-fire.
+  const loadGroupsForAssign = useCallback((cycleId: string): Promise<Group[]> => listGroups(API_URL, cycleId), []);
+  const loadSubjectsForAssign = useCallback(
+    (gradeLevelId: string): Promise<Subject[]> => listSubjects(API_URL, gradeLevelId),
+    [],
+  );
+  const loadAssignmentsForGroup = useCallback(
+    (groupId: string): Promise<TeachingAssignment[]> => listTeachingAssignments(API_URL, { groupId }),
+    [],
+  );
+
   const selectedCycle = cycles.find((c) => c.id === selectedCycleId);
   const selectedLevel = levels.find((l) => l.id === selectedLevelId);
   const selectedGradeLevel = gradeLevels.find((g) => g.id === selectedGradeLevelId);
@@ -229,6 +262,18 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
                 onCreate={handleCreateGroup}
               />
             )}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 18 }}>
+            <TeachersPanel teachers={teachers} onCreate={handleCreateTeacher} />
+            <AssignmentsPanel
+              cycles={cycles}
+              teachers={teachers}
+              loadGroups={loadGroupsForAssign}
+              loadSubjects={loadSubjectsForAssign}
+              loadAssignments={loadAssignmentsForGroup}
+              onCreate={handleCreateAssignment}
+            />
           </div>
         </div>
       )}

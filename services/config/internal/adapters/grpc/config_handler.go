@@ -219,6 +219,67 @@ func (h *ConfigHandler) ListGroups(ctx context.Context, req *connect.Request[con
 	return connect.NewResponse(&configv1.ListGroupsResponse{Groups: out}), nil
 }
 
+// --- teachers --------------------------------------------------------------
+
+func (h *ConfigHandler) CreateTeacher(ctx context.Context, req *connect.Request[configv1.CreateTeacherRequest]) (*connect.Response[configv1.CreateTeacherResponse], error) {
+	te, err := h.catalog.CreateTeacher(ctx, req.Msg.GetFirstName(), req.Msg.GetLastName(), req.Msg.GetEmail(), req.Msg.GetUserId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.CreateTeacherResponse{Teacher: toProtoTeacher(te)}), nil
+}
+
+func (h *ConfigHandler) GetTeacher(ctx context.Context, req *connect.Request[configv1.GetTeacherRequest]) (*connect.Response[configv1.GetTeacherResponse], error) {
+	te, err := h.catalog.GetTeacher(ctx, req.Msg.GetId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.GetTeacherResponse{Teacher: toProtoTeacher(te)}), nil
+}
+
+func (h *ConfigHandler) ListTeachers(ctx context.Context, _ *connect.Request[configv1.ListTeachersRequest]) (*connect.Response[configv1.ListTeachersResponse], error) {
+	teachers, err := h.catalog.ListTeachers(ctx)
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	out := make([]*configv1.Teacher, 0, len(teachers))
+	for _, te := range teachers {
+		out = append(out, toProtoTeacher(te))
+	}
+	return connect.NewResponse(&configv1.ListTeachersResponse{Teachers: out}), nil
+}
+
+// --- teaching assignments (the knot) ---------------------------------------
+
+func (h *ConfigHandler) CreateTeachingAssignment(ctx context.Context, req *connect.Request[configv1.CreateTeachingAssignmentRequest]) (*connect.Response[configv1.CreateTeachingAssignmentResponse], error) {
+	// The request carries NO cycle_id: the use case derives it from the group.
+	a, err := h.catalog.CreateTeachingAssignment(ctx, req.Msg.GetGroupId(), req.Msg.GetSubjectId(), req.Msg.GetTeacherId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.CreateTeachingAssignmentResponse{TeachingAssignment: toProtoTeachingAssignment(a)}), nil
+}
+
+func (h *ConfigHandler) GetTeachingAssignment(ctx context.Context, req *connect.Request[configv1.GetTeachingAssignmentRequest]) (*connect.Response[configv1.GetTeachingAssignmentResponse], error) {
+	a, err := h.catalog.GetTeachingAssignment(ctx, req.Msg.GetId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.GetTeachingAssignmentResponse{TeachingAssignment: toProtoTeachingAssignment(a)}), nil
+}
+
+func (h *ConfigHandler) ListTeachingAssignments(ctx context.Context, req *connect.Request[configv1.ListTeachingAssignmentsRequest]) (*connect.Response[configv1.ListTeachingAssignmentsResponse], error) {
+	assignments, err := h.catalog.ListTeachingAssignments(ctx, req.Msg.GetCycleId(), req.Msg.GetGroupId(), req.Msg.GetTeacherId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	out := make([]*configv1.TeachingAssignment, 0, len(assignments))
+	for _, a := range assignments {
+		out = append(out, toProtoTeachingAssignment(a))
+	}
+	return connect.NewResponse(&configv1.ListTeachingAssignmentsResponse{TeachingAssignments: out}), nil
+}
+
 // --- entity mapping (domain → proto) ---------------------------------------
 
 func toProtoLevel(l domain.Level) *configv1.Level {
@@ -282,6 +343,28 @@ func toProtoGroup(g domain.Group) *configv1.Group {
 		GradeLevelId: g.GradeLevelID(),
 		Name:         g.Name(),
 		Capacity:     int32(g.Capacity()),
+	}
+}
+
+func toProtoTeacher(t domain.Teacher) *configv1.Teacher {
+	return &configv1.Teacher{
+		Id:        t.ID(),
+		TenantId:  t.TenantID(),
+		FirstName: t.FirstName(),
+		LastName:  t.LastName(),
+		Email:     t.Email(),
+		UserId:    t.UserID(), // "" when the teacher has no IAM link yet.
+	}
+}
+
+func toProtoTeachingAssignment(a domain.TeachingAssignment) *configv1.TeachingAssignment {
+	return &configv1.TeachingAssignment{
+		Id:        a.ID(),
+		TenantId:  a.TenantID(),
+		CycleId:   a.CycleID(), // server-derived from the group.
+		GroupId:   a.GroupID(),
+		SubjectId: a.SubjectID(),
+		TeacherId: a.TeacherID(),
 	}
 }
 

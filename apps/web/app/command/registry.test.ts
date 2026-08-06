@@ -62,9 +62,17 @@ describe("buildCommandRegistry", () => {
     expect(got).toContain("settings.create.cycle");
     expect(got).toContain("settings.create.level");
     expect(got).toContain("settings.create.group");
+    expect(got).toContain("settings.create.teacher");
+    expect(got).toContain("settings.create.assignment");
     // All route back to the config surface.
     const cmds = buildCommandRegistry({ module_config: true }, t);
     expect(cmds.find((c) => c.id === "settings.create.cycle")?.route).toBe("module:settings");
+    expect(cmds.find((c) => c.id === "settings.create.teacher")?.route).toBe("module:settings");
+    expect(cmds.find((c) => c.id === "settings.create.assignment")?.route).toBe("module:settings");
+    // Teacher command is localized + alias-split from i18n.
+    const teacher = cmds.find((c) => c.id === "settings.create.teacher");
+    expect(teacher?.title).toBe("Crear profesor");
+    expect(teacher?.aliases).toContain("nuevo profesor");
   });
 
   it("emits zero config commands when module_config is OFF", () => {

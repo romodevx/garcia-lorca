@@ -370,6 +370,126 @@ func (r *Repository) ListGroups(ctx context.Context, cycleID string, gradeLevelI
 	return out, nil
 }
 
+// --- teachers -------------------------------------------------------------
+
+// CreateTeacher persists a new teacher. A duplicate email (per tenant) is
+// KindConflict.
+func (r *Repository) CreateTeacher(ctx context.Context, t domain.Teacher) error {
+	model := fromDomainTeacher(t)
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		return translateCreateErr(tx.Create(&model).Error, "creating teacher", "a teacher with this email already exists")
+	})
+}
+
+// GetTeacher returns a teacher by id, or KindNotFound.
+func (r *Repository) GetTeacher(ctx context.Context, id string) (domain.Teacher, error) {
+	var out domain.Teacher
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var m teacherModel
+		if err := tx.Where("id = ?", id).First(&m).Error; err != nil {
+			return translateFindErr(err)
+		}
+		var derr error
+		out, derr = toDomainTeacher(m)
+		return derr
+	})
+	if err != nil {
+		return domain.Teacher{}, err
+	}
+	return out, nil
+}
+
+// ListTeachers returns every teacher in the tenant, ordered by (last, first) name.
+func (r *Repository) ListTeachers(ctx context.Context) ([]domain.Teacher, error) {
+	var out []domain.Teacher
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var rows []teacherModel
+		if err := tx.Order("last_name, first_name, id").Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing teachers", err)
+		}
+		out = make([]domain.Teacher, 0, len(rows))
+		for _, m := range rows {
+			te, derr := toDomainTeacher(m)
+			if derr != nil {
+				return derr
+			}
+			out = append(out, te)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// --- teaching assignments (the knot) --------------------------------------
+
+// CreateTeachingAssignment persists a new assignment. A duplicate
+// (cycle_id, group_id, subject_id) is KindConflict; a missing referenced row
+// surfaces as an FK violation mapped to KindInvalid (the use case forestalls
+// this by checking the group, subject, and teacher up front).
+func (r *Repository) CreateTeachingAssignment(ctx context.Context, a domain.TeachingAssignment) error {
+	model := fromDomainTeachingAssignment(a)
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		return translateCreateErr(tx.Create(&model).Error, "creating teaching assignment", "a teacher is already assigned to this group and subject in the cycle")
+	})
+}
+
+// GetTeachingAssignment returns an assignment by id, or KindNotFound.
+func (r *Repository) GetTeachingAssignment(ctx context.Context, id string) (domain.TeachingAssignment, error) {
+	var out domain.TeachingAssignment
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var m teachingAssignmentModel
+		if err := tx.Where("id = ?", id).First(&m).Error; err != nil {
+			return translateFindErr(err)
+		}
+		var derr error
+		out, derr = toDomainTeachingAssignment(m)
+		return derr
+	})
+	if err != nil {
+		return domain.TeachingAssignment{}, err
+	}
+	return out, nil
+}
+
+// ListTeachingAssignments returns assignments filtered by any of cycleID,
+// groupID, and teacherID ("" = do not filter on that field), ordered
+// deterministically by (cycle, group, subject).
+func (r *Repository) ListTeachingAssignments(ctx context.Context, cycleID string, groupID string, teacherID string) ([]domain.TeachingAssignment, error) {
+	var out []domain.TeachingAssignment
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		q := tx.Model(&teachingAssignmentModel{})
+		if cycleID != "" {
+			q = q.Where("cycle_id = ?", cycleID)
+		}
+		if groupID != "" {
+			q = q.Where("group_id = ?", groupID)
+		}
+		if teacherID != "" {
+			q = q.Where("teacher_id = ?", teacherID)
+		}
+		var rows []teachingAssignmentModel
+		if err := q.Order("cycle_id, group_id, subject_id").Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing teaching assignments", err)
+		}
+		out = make([]domain.TeachingAssignment, 0, len(rows))
+		for _, m := range rows {
+			a, derr := toDomainTeachingAssignment(m)
+			if derr != nil {
+				return derr
+			}
+			out = append(out, a)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // --- shared helpers -------------------------------------------------------
 
 // translateCreateErr maps a GORM insert error to the port's error contract: a

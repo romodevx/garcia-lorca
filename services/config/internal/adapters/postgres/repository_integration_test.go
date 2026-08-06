@@ -370,6 +370,278 @@ func TestEnrollmentGranularityRoundTrip(t *testing.T) {
 	}
 }
 
+// TestTeacherRoundTrip persists a teacher WITHOUT an IAM link (user_id NULL) and
+// one WITH a user_id set, then reads both back, asserting the "" ↔ NULL bridge
+// maps in both directions.
+func TestTeacherRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	repo := pgadapter.NewRepository(appDB(t), tenantA)
+
+	const (
+		noUserID  = "ffff0001-0000-0000-0000-000000000001"
+		hasUserID = "ffff0002-0000-0000-0000-000000000001"
+		linkedUID = "99990001-0000-0000-0000-000000000001"
+	)
+
+	// user_id "" must persist as SQL NULL and read back as "".
+	unlinked, err := domain.NewTeacher(noUserID, tenantA, "Ada", "Lovelace", "ada@example.com", "")
+	if err != nil {
+		t.Fatalf("NewTeacher (unlinked): %v", err)
+	}
+	if err := repo.CreateTeacher(ctx, unlinked); err != nil {
+		t.Fatalf("CreateTeacher (unlinked, NULL user_id): %v", err)
+	}
+	gotUnlinked, err := repo.GetTeacher(ctx, noUserID)
+	if err != nil {
+		t.Fatalf("GetTeacher (unlinked): %v", err)
+	}
+	if gotUnlinked.HasUser() || gotUnlinked.UserID() != "" {
+		t.Errorf("NULL user_id should map to \"\": HasUser=%v UserID=%q", gotUnlinked.HasUser(), gotUnlinked.UserID())
+	}
+	if gotUnlinked.Email() != "ada@example.com" || gotUnlinked.FirstName() != "Ada" || gotUnlinked.LastName() != "Lovelace" {
+		t.Errorf("teacher round-trip mismatch: %+v", gotUnlinked)
+	}
+
+	// A set user_id must persist and read back verbatim.
+	linked, err := domain.NewTeacher(hasUserID, tenantA, "Alan", "Turing", "alan@example.com", linkedUID)
+	if err != nil {
+		t.Fatalf("NewTeacher (linked): %v", err)
+	}
+	if err := repo.CreateTeacher(ctx, linked); err != nil {
+		t.Fatalf("CreateTeacher (linked): %v", err)
+	}
+	gotLinked, err := repo.GetTeacher(ctx, hasUserID)
+	if err != nil {
+		t.Fatalf("GetTeacher (linked): %v", err)
+	}
+	if !gotLinked.HasUser() || gotLinked.UserID() != linkedUID {
+		t.Errorf("set user_id round-trip: HasUser=%v UserID=%q, want %q", gotLinked.HasUser(), gotLinked.UserID(), linkedUID)
+	}
+
+	// A duplicate email (per tenant) is KindConflict (UNIQUE(tenant_id, email)).
+	dup, err := domain.NewTeacher("ffff0003-0000-0000-0000-000000000001", tenantA, "Ada", "Byron", "ada@example.com", "")
+	if err != nil {
+		t.Fatalf("NewTeacher (dup): %v", err)
+	}
+	if err := repo.CreateTeacher(ctx, dup); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Errorf("duplicate teacher email should be KindConflict, got %v", glerrors.KindOf(err))
+	}
+
+	teachers, err := repo.ListTeachers(ctx)
+	if err != nil {
+		t.Fatalf("ListTeachers: %v", err)
+	}
+	if len(teachers) != 2 {
+		t.Errorf("ListTeachers: got %d, want 2", len(teachers))
+	}
+}
+
+// teachingAssignmentFixture builds a valid, mutually-consistent parent chain for
+// a teaching assignment (a group and a subject under the SAME grade level, plus a
+// teacher) under tenantID via the app role, returning the group/subject/teacher
+// ids the knot needs. The prefix keeps ids unique across tests sharing the DB.
+func teachingAssignmentFixture(t *testing.T, tenantID, prefix string) (cycleID, groupID, subjectID, teacherID string) {
+	t.Helper()
+	ctx := context.Background()
+	repo := pgadapter.NewRepository(appDB(t), tenantID)
+
+	cycleID = prefix + "0000-0000-0000-0000-000000000001"
+	levelID := prefix + "0000-0000-0000-0000-000000000002"
+	gradeID := prefix + "0000-0000-0000-0000-000000000003"
+	subjectID = prefix + "0000-0000-0000-0000-000000000004"
+	groupID = prefix + "0000-0000-0000-0000-000000000005"
+	teacherID = prefix + "0000-0000-0000-0000-000000000006"
+
+	cycle, err := domain.NewCycle(cycleID, tenantID, "Knot-Cycle-"+prefix, domain.CycleStatusActive, startsOn, endsOn)
+	if err != nil {
+		t.Fatalf("fixture NewCycle: %v", err)
+	}
+	if err := repo.CreateCycle(ctx, cycle); err != nil {
+		t.Fatalf("fixture CreateCycle: %v", err)
+	}
+	level, err := domain.NewLevel(levelID, tenantID, "Level-"+prefix, "", domain.GranularityTerm)
+	if err != nil {
+		t.Fatalf("fixture NewLevel: %v", err)
+	}
+	if err := repo.CreateLevel(ctx, level); err != nil {
+		t.Fatalf("fixture CreateLevel: %v", err)
+	}
+	grade, err := domain.NewGradeLevel(gradeID, tenantID, levelID, "Grade-"+prefix, 1)
+	if err != nil {
+		t.Fatalf("fixture NewGradeLevel: %v", err)
+	}
+	if err := repo.CreateGradeLevel(ctx, grade); err != nil {
+		t.Fatalf("fixture CreateGradeLevel: %v", err)
+	}
+	// Subject and group share this grade level (the knot's teachability invariant).
+	subject, err := domain.NewSubject(subjectID, tenantID, gradeID, "Subject-"+prefix)
+	if err != nil {
+		t.Fatalf("fixture NewSubject: %v", err)
+	}
+	if err := repo.CreateSubject(ctx, subject); err != nil {
+		t.Fatalf("fixture CreateSubject: %v", err)
+	}
+	group, err := domain.NewGroup(groupID, tenantID, cycleID, gradeID, "A", 30)
+	if err != nil {
+		t.Fatalf("fixture NewGroup: %v", err)
+	}
+	if err := repo.CreateGroup(ctx, group); err != nil {
+		t.Fatalf("fixture CreateGroup: %v", err)
+	}
+	teacher, err := domain.NewTeacher(teacherID, tenantID, "Grace", "Hopper", "grace-"+prefix+"@example.com", "")
+	if err != nil {
+		t.Fatalf("fixture NewTeacher: %v", err)
+	}
+	if err := repo.CreateTeacher(ctx, teacher); err != nil {
+		t.Fatalf("fixture CreateTeacher: %v", err)
+	}
+	return cycleID, groupID, subjectID, teacherID
+}
+
+// TestTeachingAssignmentRoundTrip persists a teaching assignment against a valid
+// (group, subject same grade level, teacher) chain, reads it back, and asserts
+// the cycle_id matches the group's cycle. A duplicate (cycle, group, subject) is
+// KindConflict (the UNIQUE backstop).
+func TestTeachingAssignmentRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	repo := pgadapter.NewRepository(appDB(t), tenantA)
+
+	cycleID, groupID, subjectID, teacherID := teachingAssignmentFixture(t, tenantA, "a0a0")
+	const assignID = "a0a07000-0000-0000-0000-000000000001"
+
+	assign, err := domain.NewTeachingAssignment(assignID, tenantA, cycleID, groupID, subjectID, teacherID)
+	if err != nil {
+		t.Fatalf("NewTeachingAssignment: %v", err)
+	}
+	if err := repo.CreateTeachingAssignment(ctx, assign); err != nil {
+		t.Fatalf("CreateTeachingAssignment (valid knot insert): %v", err)
+	}
+
+	got, err := repo.GetTeachingAssignment(ctx, assignID)
+	if err != nil {
+		t.Fatalf("GetTeachingAssignment: %v", err)
+	}
+	if got.GroupID() != groupID || got.SubjectID() != subjectID || got.TeacherID() != teacherID {
+		t.Errorf("assignment round-trip mismatch: %+v", got)
+	}
+	if got.CycleID() != cycleID {
+		t.Errorf("assignment cycle_id = %q, want the group's cycle %q", got.CycleID(), cycleID)
+	}
+
+	// List filters: by teacher, by group, by cycle all find the one assignment.
+	if rows, err := repo.ListTeachingAssignments(ctx, "", "", teacherID); err != nil || len(rows) != 1 {
+		t.Fatalf("ListTeachingAssignments(teacher): len=%d err=%v", len(rows), err)
+	}
+	if rows, err := repo.ListTeachingAssignments(ctx, cycleID, groupID, ""); err != nil || len(rows) != 1 {
+		t.Fatalf("ListTeachingAssignments(cycle, group): len=%d err=%v", len(rows), err)
+	}
+
+	// A duplicate (cycle, group, subject) is rejected by the UNIQUE constraint.
+	dup, err := domain.NewTeachingAssignment("a0a07000-0000-0000-0000-000000000002", tenantA, cycleID, groupID, subjectID, teacherID)
+	if err != nil {
+		t.Fatalf("NewTeachingAssignment (dup): %v", err)
+	}
+	if err := repo.CreateTeachingAssignment(ctx, dup); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Errorf("duplicate (cycle, group, subject) should be KindConflict, got %v", glerrors.KindOf(err))
+	}
+}
+
+// TestRLSIsolatesTeachers proves app.current_tenant isolates the teachers table:
+// a teacher created by tenant A is invisible AND unwritable to a tenant-B
+// connection (read + write isolation, as the non-owner app role).
+func TestRLSIsolatesTeachers(t *testing.T) {
+	ctx := context.Background()
+	const teacherID = "b0b00001-0000-0000-0000-000000000001"
+
+	repoA := pgadapter.NewRepository(appDB(t), tenantA)
+	teacher, err := domain.NewTeacher(teacherID, tenantA, "Isolation", "Teacher-A", "iso-teacher-a@example.com", "")
+	if err != nil {
+		t.Fatalf("NewTeacher: %v", err)
+	}
+	if err := repoA.CreateTeacher(ctx, teacher); err != nil {
+		t.Fatalf("tenant A CreateTeacher: %v", err)
+	}
+
+	// Read isolation: tenant B sees it via neither Get nor List.
+	repoB := pgadapter.NewRepository(appDB(t), tenantB)
+	if _, err := repoB.GetTeacher(ctx, teacherID); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("tenant B saw tenant A's teacher via Get (RLS breach): err=%v", err)
+	}
+	teachersB, err := repoB.ListTeachers(ctx)
+	if err != nil {
+		t.Fatalf("tenant B ListTeachers: %v", err)
+	}
+	for _, te := range teachersB {
+		if te.ID() == teacherID {
+			t.Errorf("tenant B listed tenant A's teacher (RLS breach)")
+		}
+	}
+
+	// Write isolation: tenant B's UPDATE/DELETE affect zero rows.
+	if n := writeAsTenant(t, tenantB, "UPDATE teachers SET last_name = 'hijacked' WHERE id = ?", teacherID); n != 0 {
+		t.Errorf("tenant B UPDATE teachers affected %d rows (RLS breach)", n)
+	}
+	if n := writeAsTenant(t, tenantB, "DELETE FROM teachers WHERE id = ?", teacherID); n != 0 {
+		t.Errorf("tenant B DELETE teachers affected %d rows (RLS breach)", n)
+	}
+
+	// Tenant A's row is untouched.
+	gotA, err := repoA.GetTeacher(ctx, teacherID)
+	if err != nil {
+		t.Fatalf("tenant A GetTeacher after B's writes: %v", err)
+	}
+	if gotA.LastName() != "Teacher-A" {
+		t.Errorf("tenant A's teacher was mutated across the tenant boundary: %q", gotA.LastName())
+	}
+}
+
+// TestRLSIsolatesTeachingAssignments proves app.current_tenant isolates the
+// teaching_assignments table: an assignment created by tenant A is invisible AND
+// unwritable to a tenant-B connection (read + write isolation, app role).
+func TestRLSIsolatesTeachingAssignments(t *testing.T) {
+	ctx := context.Background()
+
+	cycleID, groupID, subjectID, teacherID := teachingAssignmentFixture(t, tenantA, "b1b1")
+	const assignID = "b1b17000-0000-0000-0000-000000000001"
+
+	repoA := pgadapter.NewRepository(appDB(t), tenantA)
+	assign, err := domain.NewTeachingAssignment(assignID, tenantA, cycleID, groupID, subjectID, teacherID)
+	if err != nil {
+		t.Fatalf("NewTeachingAssignment: %v", err)
+	}
+	if err := repoA.CreateTeachingAssignment(ctx, assign); err != nil {
+		t.Fatalf("tenant A CreateTeachingAssignment: %v", err)
+	}
+
+	// Read isolation.
+	repoB := pgadapter.NewRepository(appDB(t), tenantB)
+	if _, err := repoB.GetTeachingAssignment(ctx, assignID); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("tenant B saw tenant A's assignment via Get (RLS breach): err=%v", err)
+	}
+	rowsB, err := repoB.ListTeachingAssignments(ctx, "", "", "")
+	if err != nil {
+		t.Fatalf("tenant B ListTeachingAssignments: %v", err)
+	}
+	for _, a := range rowsB {
+		if a.ID() == assignID {
+			t.Errorf("tenant B listed tenant A's assignment (RLS breach)")
+		}
+	}
+
+	// Write isolation.
+	if n := writeAsTenant(t, tenantB, "UPDATE teaching_assignments SET subject_id = subject_id WHERE id = ?", assignID); n != 0 {
+		t.Errorf("tenant B UPDATE teaching_assignments affected %d rows (RLS breach)", n)
+	}
+	if n := writeAsTenant(t, tenantB, "DELETE FROM teaching_assignments WHERE id = ?", assignID); n != 0 {
+		t.Errorf("tenant B DELETE teaching_assignments affected %d rows (RLS breach)", n)
+	}
+
+	// Tenant A's row survives.
+	if _, err := repoA.GetTeachingAssignment(ctx, assignID); err != nil {
+		t.Fatalf("tenant A GetTeachingAssignment after B's writes: %v", err)
+	}
+}
+
 // writeAsTenant runs a single write on the app connection inside a transaction
 // bound to tenantID (same set_config primitive as pkg/authctx) and returns the
 // affected row count. It lets the RLS test observe UPDATE/DELETE visibility

@@ -36,6 +36,8 @@ type fakeCatalog struct {
 	subjects    map[string]domain.Subject
 	terms       map[string]domain.Term
 	groups      map[string]domain.Group
+	teachers    map[string]domain.Teacher
+	assignments map[string]domain.TeachingAssignment
 	unique      map[string]bool
 }
 
@@ -47,6 +49,8 @@ func newFake() *fakeCatalog {
 		subjects:    map[string]domain.Subject{},
 		terms:       map[string]domain.Term{},
 		groups:      map[string]domain.Group{},
+		teachers:    map[string]domain.Teacher{},
+		assignments: map[string]domain.TeachingAssignment{},
 		unique:      map[string]bool{},
 	}
 }
@@ -209,6 +213,61 @@ func (f *fakeCatalog) ListGroups(_ context.Context, cycleID, gradeLevelID string
 			continue
 		}
 		out = append(out, g)
+	}
+	return out, nil
+}
+
+func (f *fakeCatalog) CreateTeacher(_ context.Context, t domain.Teacher) error {
+	if err := f.claim("teacher|" + t.Email()); err != nil {
+		return err
+	}
+	f.teachers[t.ID()] = t
+	return nil
+}
+
+func (f *fakeCatalog) GetTeacher(_ context.Context, id string) (domain.Teacher, error) {
+	if t, ok := f.teachers[id]; ok {
+		return t, nil
+	}
+	return domain.Teacher{}, glerrors.ErrNotFound
+}
+
+func (f *fakeCatalog) ListTeachers(_ context.Context) ([]domain.Teacher, error) {
+	out := make([]domain.Teacher, 0, len(f.teachers))
+	for _, t := range f.teachers {
+		out = append(out, t)
+	}
+	return out, nil
+}
+
+func (f *fakeCatalog) CreateTeachingAssignment(_ context.Context, a domain.TeachingAssignment) error {
+	if err := f.claim("assign|" + a.CycleID() + "|" + a.GroupID() + "|" + a.SubjectID()); err != nil {
+		return err
+	}
+	f.assignments[a.ID()] = a
+	return nil
+}
+
+func (f *fakeCatalog) GetTeachingAssignment(_ context.Context, id string) (domain.TeachingAssignment, error) {
+	if a, ok := f.assignments[id]; ok {
+		return a, nil
+	}
+	return domain.TeachingAssignment{}, glerrors.ErrNotFound
+}
+
+func (f *fakeCatalog) ListTeachingAssignments(_ context.Context, cycleID, groupID, teacherID string) ([]domain.TeachingAssignment, error) {
+	out := make([]domain.TeachingAssignment, 0)
+	for _, a := range f.assignments {
+		if cycleID != "" && a.CycleID() != cycleID {
+			continue
+		}
+		if groupID != "" && a.GroupID() != groupID {
+			continue
+		}
+		if teacherID != "" && a.TeacherID() != teacherID {
+			continue
+		}
+		out = append(out, a)
 	}
 	return out, nil
 }
@@ -677,5 +736,256 @@ func TestGetGroupAndList(t *testing.T) {
 	list, err := h.ListGroups(ctx(), connect.NewRequest(&configv1.ListGroupsRequest{CycleId: cycleID}))
 	if err != nil || len(list.Msg.GetGroups()) != 1 {
 		t.Errorf("ListGroups: %d %v", len(list.Msg.GetGroups()), err)
+	}
+}
+
+// seedSubject / seedGroup / seedTeacher build the valid knot parents via the
+// handler; seedKnot returns a mutually-consistent (group, subject same grade
+// level, teacher) chain the assignment tests reuse.
+
+func seedSubject(t *testing.T, h *grpcadapter.ConfigHandler, gradeID string) string {
+	t.Helper()
+	res, err := h.CreateSubject(ctx(), connect.NewRequest(&configv1.CreateSubjectRequest{
+		GradeLevelId: gradeID,
+		Name:         "Matematicas",
+	}))
+	if err != nil {
+		t.Fatalf("seed subject: %v", err)
+	}
+	return res.Msg.GetSubject().GetId()
+}
+
+func seedGroup(t *testing.T, h *grpcadapter.ConfigHandler, cycleID, gradeID string) string {
+	t.Helper()
+	res, err := h.CreateGroup(ctx(), connect.NewRequest(&configv1.CreateGroupRequest{
+		CycleId:      cycleID,
+		GradeLevelId: gradeID,
+		Name:         "A",
+		Capacity:     30,
+	}))
+	if err != nil {
+		t.Fatalf("seed group: %v", err)
+	}
+	return res.Msg.GetGroup().GetId()
+}
+
+func seedTeacher(t *testing.T, h *grpcadapter.ConfigHandler, email string) string {
+	t.Helper()
+	res, err := h.CreateTeacher(ctx(), connect.NewRequest(&configv1.CreateTeacherRequest{
+		FirstName: "Grace",
+		LastName:  "Hopper",
+		Email:     email,
+	}))
+	if err != nil {
+		t.Fatalf("seed teacher: %v", err)
+	}
+	return res.Msg.GetTeacher().GetId()
+}
+
+// seedKnot returns (cycleID, groupID, subjectID, teacherID) where the group and
+// subject share one grade level — a valid assignment target.
+func seedKnot(t *testing.T, h *grpcadapter.ConfigHandler) (string, string, string, string) {
+	t.Helper()
+	cycleID := seedCycle(t, h)
+	levelID := seedLevel(t, h)
+	gradeID := seedGradeLevel(t, h, levelID)
+	subjectID := seedSubject(t, h, gradeID)
+	groupID := seedGroup(t, h, cycleID, gradeID)
+	teacherID := seedTeacher(t, h, "grace@example.com")
+	return cycleID, groupID, subjectID, teacherID
+}
+
+// --- Teacher ---------------------------------------------------------------
+
+func TestCreateTeacher(t *testing.T) {
+	h, _ := newHandler(t)
+	res, err := h.CreateTeacher(ctx(), connect.NewRequest(&configv1.CreateTeacherRequest{
+		FirstName: "Ada",
+		LastName:  "Lovelace",
+		Email:     "ada@example.com",
+		UserId:    "",
+	}))
+	if err != nil {
+		t.Fatalf("CreateTeacher: %v", err)
+	}
+	te := res.Msg.GetTeacher()
+	if te.GetId() == "" || te.GetTenantId() != tenant || te.GetEmail() != "ada@example.com" {
+		t.Errorf("teacher wrong: %+v", te)
+	}
+	if te.GetFirstName() != "Ada" || te.GetLastName() != "Lovelace" {
+		t.Errorf("teacher name wrong: %+v", te)
+	}
+	if te.GetUserId() != "" {
+		t.Errorf("user_id = %q, want empty", te.GetUserId())
+	}
+}
+
+func TestCreateTeacherInvalidEmailIsInvalid(t *testing.T) {
+	h, _ := newHandler(t)
+	_, err := h.CreateTeacher(ctx(), connect.NewRequest(&configv1.CreateTeacherRequest{
+		FirstName: "Ada",
+		LastName:  "Lovelace",
+		Email:     "not-an-email",
+	}))
+	if got := codeOf(err); got != connect.CodeInvalidArgument {
+		t.Errorf("invalid email: code = %v, want InvalidArgument", got)
+	}
+}
+
+func TestCreateTeacherDuplicateEmailIsAlreadyExists(t *testing.T) {
+	h, _ := newHandler(t)
+	seedTeacher(t, h, "dup@example.com")
+	_, err := h.CreateTeacher(ctx(), connect.NewRequest(&configv1.CreateTeacherRequest{
+		FirstName: "Other",
+		LastName:  "Person",
+		Email:     "dup@example.com",
+	}))
+	if got := codeOf(err); got != connect.CodeAlreadyExists {
+		t.Errorf("duplicate teacher email: code = %v, want AlreadyExists", got)
+	}
+}
+
+func TestGetTeacherAndList(t *testing.T) {
+	h, _ := newHandler(t)
+	id := seedTeacher(t, h, "grace@example.com")
+	got, err := h.GetTeacher(ctx(), connect.NewRequest(&configv1.GetTeacherRequest{Id: id}))
+	if err != nil || got.Msg.GetTeacher().GetId() != id {
+		t.Fatalf("GetTeacher: %+v %v", got, err)
+	}
+	_, err = h.GetTeacher(ctx(), connect.NewRequest(&configv1.GetTeacherRequest{Id: "nope"}))
+	if code := codeOf(err); code != connect.CodeNotFound {
+		t.Errorf("unknown teacher: code = %v, want NotFound", code)
+	}
+	list, err := h.ListTeachers(ctx(), connect.NewRequest(&configv1.ListTeachersRequest{}))
+	if err != nil || len(list.Msg.GetTeachers()) != 1 {
+		t.Errorf("ListTeachers: %d %v", len(list.Msg.GetTeachers()), err)
+	}
+}
+
+// --- TeachingAssignment (the knot) -----------------------------------------
+
+func TestCreateTeachingAssignment(t *testing.T) {
+	h, _ := newHandler(t)
+	cycleID, groupID, subjectID, teacherID := seedKnot(t, h)
+	res, err := h.CreateTeachingAssignment(ctx(), connect.NewRequest(&configv1.CreateTeachingAssignmentRequest{
+		GroupId:   groupID,
+		SubjectId: subjectID,
+		TeacherId: teacherID,
+	}))
+	if err != nil {
+		t.Fatalf("CreateTeachingAssignment: %v", err)
+	}
+	a := res.Msg.GetTeachingAssignment()
+	if a.GetGroupId() != groupID || a.GetSubjectId() != subjectID || a.GetTeacherId() != teacherID {
+		t.Errorf("assignment wrong: %+v", a)
+	}
+	// The server derives cycle_id from the group; the client never sends it.
+	if a.GetCycleId() != cycleID {
+		t.Errorf("cycle_id = %q, want the group's derived cycle %q", a.GetCycleId(), cycleID)
+	}
+}
+
+func TestCreateTeachingAssignmentGradeLevelMismatchIsInvalid(t *testing.T) {
+	h, _ := newHandler(t)
+	cycleID := seedCycle(t, h)
+	levelID := seedLevel(t, h)
+	gradeA := seedGradeLevel(t, h, levelID)
+	// A second grade level under the same level; its subject is NOT teachable
+	// for a group in gradeA.
+	gradeBRes, err := h.CreateGradeLevel(ctx(), connect.NewRequest(&configv1.CreateGradeLevelRequest{
+		LevelId: levelID,
+		Name:    "2° Primaria",
+		Ordinal: 2,
+	}))
+	if err != nil {
+		t.Fatalf("seed grade B: %v", err)
+	}
+	gradeB := gradeBRes.Msg.GetGradeLevel().GetId()
+
+	groupID := seedGroup(t, h, cycleID, gradeA) // group in grade A
+	subjectID := seedSubject(t, h, gradeB)      // subject in grade B
+	teacherID := seedTeacher(t, h, "mix@example.com")
+
+	_, err = h.CreateTeachingAssignment(ctx(), connect.NewRequest(&configv1.CreateTeachingAssignmentRequest{
+		GroupId:   groupID,
+		SubjectId: subjectID,
+		TeacherId: teacherID,
+	}))
+	if got := codeOf(err); got != connect.CodeInvalidArgument {
+		t.Errorf("grade-level mismatch: code = %v, want InvalidArgument", got)
+	}
+}
+
+func TestCreateTeachingAssignmentMissingGroupIsInvalid(t *testing.T) {
+	h, _ := newHandler(t)
+	_, _, subjectID, teacherID := seedKnot(t, h)
+	_, err := h.CreateTeachingAssignment(ctx(), connect.NewRequest(&configv1.CreateTeachingAssignmentRequest{
+		GroupId:   "no-such-group",
+		SubjectId: subjectID,
+		TeacherId: teacherID,
+	}))
+	if got := codeOf(err); got != connect.CodeInvalidArgument {
+		t.Errorf("missing group: code = %v, want InvalidArgument", got)
+	}
+}
+
+func TestCreateTeachingAssignmentMissingTeacherIsInvalid(t *testing.T) {
+	h, _ := newHandler(t)
+	_, groupID, subjectID, _ := seedKnot(t, h)
+	_, err := h.CreateTeachingAssignment(ctx(), connect.NewRequest(&configv1.CreateTeachingAssignmentRequest{
+		GroupId:   groupID,
+		SubjectId: subjectID,
+		TeacherId: "no-such-teacher",
+	}))
+	if got := codeOf(err); got != connect.CodeInvalidArgument {
+		t.Errorf("missing teacher: code = %v, want InvalidArgument", got)
+	}
+}
+
+func TestCreateTeachingAssignmentDuplicateIsAlreadyExists(t *testing.T) {
+	h, _ := newHandler(t)
+	_, groupID, subjectID, teacherID := seedKnot(t, h)
+	req := connect.NewRequest(&configv1.CreateTeachingAssignmentRequest{
+		GroupId:   groupID,
+		SubjectId: subjectID,
+		TeacherId: teacherID,
+	})
+	if _, err := h.CreateTeachingAssignment(ctx(), req); err != nil {
+		t.Fatalf("first CreateTeachingAssignment: %v", err)
+	}
+	_, err := h.CreateTeachingAssignment(ctx(), connect.NewRequest(&configv1.CreateTeachingAssignmentRequest{
+		GroupId:   groupID,
+		SubjectId: subjectID,
+		TeacherId: teacherID,
+	}))
+	if got := codeOf(err); got != connect.CodeAlreadyExists {
+		t.Errorf("duplicate assignment: code = %v, want AlreadyExists", got)
+	}
+}
+
+func TestGetTeachingAssignmentAndList(t *testing.T) {
+	h, _ := newHandler(t)
+	cycleID, groupID, subjectID, teacherID := seedKnot(t, h)
+	created, err := h.CreateTeachingAssignment(ctx(), connect.NewRequest(&configv1.CreateTeachingAssignmentRequest{
+		GroupId:   groupID,
+		SubjectId: subjectID,
+		TeacherId: teacherID,
+	}))
+	if err != nil {
+		t.Fatalf("CreateTeachingAssignment: %v", err)
+	}
+	id := created.Msg.GetTeachingAssignment().GetId()
+	got, err := h.GetTeachingAssignment(ctx(), connect.NewRequest(&configv1.GetTeachingAssignmentRequest{Id: id}))
+	if err != nil || got.Msg.GetTeachingAssignment().GetId() != id {
+		t.Fatalf("GetTeachingAssignment: %+v %v", got, err)
+	}
+	// Each optional filter finds the one assignment.
+	byTeacher, err := h.ListTeachingAssignments(ctx(), connect.NewRequest(&configv1.ListTeachingAssignmentsRequest{TeacherId: teacherID}))
+	if err != nil || len(byTeacher.Msg.GetTeachingAssignments()) != 1 {
+		t.Errorf("ListTeachingAssignments(teacher): %d %v", len(byTeacher.Msg.GetTeachingAssignments()), err)
+	}
+	byCycleGroup, err := h.ListTeachingAssignments(ctx(), connect.NewRequest(&configv1.ListTeachingAssignmentsRequest{CycleId: cycleID, GroupId: groupID}))
+	if err != nil || len(byCycleGroup.Msg.GetTeachingAssignments()) != 1 {
+		t.Errorf("ListTeachingAssignments(cycle, group): %d %v", len(byCycleGroup.Msg.GetTeachingAssignments()), err)
 	}
 }

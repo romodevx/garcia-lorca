@@ -66,6 +66,24 @@ service ConfigService {
   rpc GetGroup(GetGroupRequest) returns (GetGroupResponse);
   // ListGroups lists the groups of a cycle (scoped by cycle_id, optional grade_level_id).
   rpc ListGroups(ListGroupsRequest) returns (ListGroupsResponse);
+
+  // --- teachers (catalog person records; NOT login accounts) ---
+  // CreateTeacher adds a teacher catalog record (user_id reserved, may be empty).
+  rpc CreateTeacher(CreateTeacherRequest) returns (CreateTeacherResponse);
+  // GetTeacher fetches a teacher by id.
+  rpc GetTeacher(GetTeacherRequest) returns (GetTeacherResponse);
+  // ListTeachers lists every teacher in the tenant catalog.
+  rpc ListTeachers(ListTeachersRequest) returns (ListTeachersResponse);
+
+  // --- teaching_assignments (the knot: teacher ↔ group ↔ subject ↔ cycle) ---
+  // CreateTeachingAssignment binds a teacher to a (group, subject); the server
+  // derives cycle_id from the group and enforces the relational invariants.
+  rpc CreateTeachingAssignment(CreateTeachingAssignmentRequest) returns (CreateTeachingAssignmentResponse);
+  // GetTeachingAssignment fetches a teaching assignment by id.
+  rpc GetTeachingAssignment(GetTeachingAssignmentRequest) returns (GetTeachingAssignmentResponse);
+  // ListTeachingAssignments lists assignments, optionally filtered by
+  // cycle_id / group_id / teacher_id (empty = any).
+  rpc ListTeachingAssignments(ListTeachingAssignmentsRequest) returns (ListTeachingAssignmentsResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -373,4 +391,104 @@ message ListGroupsRequest {
 // ListGroupsResponse returns the groups of the cycle.
 message ListGroupsResponse {
   repeated Group groups = 1;
+}
+
+// --- teachers / teaching_assignments (Phase 3) entities -------------------
+
+// Teacher is a catalog person record, NOT a login account. user_id is a
+// reserved link to a future IAM user and may be empty.
+message Teacher {
+  string id = 1;
+  string tenant_id = 2;
+  string first_name = 3;
+  string last_name = 4;
+  string email = 5;
+  string user_id = 6;  // reserved IAM link; may be empty
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+// TeachingAssignment is the knot binding a teacher to a (group, subject)
+// within a cycle. cycle_id is derived server-side from the group.
+message TeachingAssignment {
+  string id = 1;
+  string tenant_id = 2;
+  string cycle_id = 3;
+  string group_id = 4;
+  string subject_id = 5;
+  string teacher_id = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+// --- Teacher RPC messages -------------------------------------------------
+
+// CreateTeacherRequest creates a teacher catalog record.
+message CreateTeacherRequest {
+  string first_name = 1;
+  string last_name = 2;
+  string email = 3;
+  string user_id = 4;  // reserved IAM link; may be empty
+}
+
+// CreateTeacherResponse returns the created teacher.
+message CreateTeacherResponse {
+  Teacher teacher = 1;
+}
+
+// GetTeacherRequest fetches a teacher by id.
+message GetTeacherRequest {
+  string id = 1;
+}
+
+// GetTeacherResponse returns the requested teacher.
+message GetTeacherResponse {
+  Teacher teacher = 1;
+}
+
+// ListTeachersRequest lists all teachers in the tenant.
+message ListTeachersRequest {}
+
+// ListTeachersResponse returns the tenant teachers.
+message ListTeachersResponse {
+  repeated Teacher teachers = 1;
+}
+
+// --- TeachingAssignment RPC messages --------------------------------------
+
+// CreateTeachingAssignmentRequest binds a teacher to a (group, subject). The
+// server derives cycle_id from the group (never supplied by the client).
+message CreateTeachingAssignmentRequest {
+  string group_id = 1;
+  string subject_id = 2;
+  string teacher_id = 3;
+}
+
+// CreateTeachingAssignmentResponse returns the created assignment, including
+// the server-derived cycle_id.
+message CreateTeachingAssignmentResponse {
+  TeachingAssignment teaching_assignment = 1;
+}
+
+// GetTeachingAssignmentRequest fetches a teaching assignment by id.
+message GetTeachingAssignmentRequest {
+  string id = 1;
+}
+
+// GetTeachingAssignmentResponse returns the requested assignment.
+message GetTeachingAssignmentResponse {
+  TeachingAssignment teaching_assignment = 1;
+}
+
+// ListTeachingAssignmentsRequest lists assignments filtered by any of
+// cycle_id / group_id / teacher_id (empty = any).
+message ListTeachingAssignmentsRequest {
+  string cycle_id = 1;    // optional filter (empty = any cycle)
+  string group_id = 2;    // optional filter (empty = any group)
+  string teacher_id = 3;  // optional filter (empty = any teacher)
+}
+
+// ListTeachingAssignmentsResponse returns the matching assignments.
+message ListTeachingAssignmentsResponse {
+  repeated TeachingAssignment teaching_assignments = 1;
 }
