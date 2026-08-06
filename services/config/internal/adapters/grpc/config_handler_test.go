@@ -240,6 +240,19 @@ func (f *fakeCatalog) ListTeachers(_ context.Context) ([]domain.Teacher, error) 
 	return out, nil
 }
 
+func (f *fakeCatalog) SetTeacherUserID(_ context.Context, teacherID string, userID *string) error {
+	t, ok := f.teachers[teacherID]
+	if !ok {
+		return glerrors.ErrNotFound
+	}
+	link := ""
+	if userID != nil {
+		link = *userID
+	}
+	f.teachers[teacherID] = t.WithUserID(link)
+	return nil
+}
+
 func (f *fakeCatalog) CreateTeachingAssignment(_ context.Context, a domain.TeachingAssignment) error {
 	if err := f.claim("assign|" + a.CycleID() + "|" + a.GroupID() + "|" + a.SubjectID()); err != nil {
 		return err
@@ -859,6 +872,41 @@ func TestGetTeacherAndList(t *testing.T) {
 	list, err := h.ListTeachers(ctx(), connect.NewRequest(&configv1.ListTeachersRequest{}))
 	if err != nil || len(list.Msg.GetTeachers()) != 1 {
 		t.Errorf("ListTeachers: %d %v", len(list.Msg.GetTeachers()), err)
+	}
+}
+
+func TestSetTeacherUserLinksAndUnlinks(t *testing.T) {
+	h, _ := newHandler(t)
+	id := seedTeacher(t, h, "linkme@example.com")
+
+	linked, err := h.SetTeacherUser(ctx(), connect.NewRequest(&configv1.SetTeacherUserRequest{
+		TeacherId: id, UserId: "user-7",
+	}))
+	if err != nil {
+		t.Fatalf("SetTeacherUser (link): %v", err)
+	}
+	if got := linked.Msg.GetTeacher().GetUserId(); got != "user-7" {
+		t.Errorf("linked user_id = %q, want user-7", got)
+	}
+
+	unlinked, err := h.SetTeacherUser(ctx(), connect.NewRequest(&configv1.SetTeacherUserRequest{
+		TeacherId: id, UserId: "",
+	}))
+	if err != nil {
+		t.Fatalf("SetTeacherUser (unlink): %v", err)
+	}
+	if got := unlinked.Msg.GetTeacher().GetUserId(); got != "" {
+		t.Errorf("unlinked user_id = %q, want empty", got)
+	}
+}
+
+func TestSetTeacherUserUnknownTeacherIsNotFound(t *testing.T) {
+	h, _ := newHandler(t)
+	_, err := h.SetTeacherUser(ctx(), connect.NewRequest(&configv1.SetTeacherUserRequest{
+		TeacherId: "no-such-teacher", UserId: "user-1",
+	}))
+	if code := codeOf(err); code != connect.CodeNotFound {
+		t.Errorf("unknown teacher: code = %v, want NotFound", code)
 	}
 }
 

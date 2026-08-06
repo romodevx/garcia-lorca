@@ -65,6 +65,14 @@ func validateTeacherEmail(email string) error {
 	return nil
 }
 
+// WithUserID returns a copy of the teacher linked to userID, or unlinked when
+// userID is "". The teacher's other invariants are already satisfied, so this
+// re-link cannot fail — it never reaches a constructor.
+func (t Teacher) WithUserID(userID string) Teacher {
+	t.userID = userID
+	return t
+}
+
 // ID returns the stable teacher identifier.
 func (t Teacher) ID() string { return t.id }
 

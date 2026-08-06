@@ -323,6 +323,215 @@ func TestOwnerUserAuthAndPasswordUpdate(t *testing.T) {
 	}
 }
 
+// TestCreateUserRoundTripWithRoles provisions a user AS THE NON-OWNER app role
+// (through RLS), assigns two roles, then reads the principal back with its roles
+// resolved — proving CreateUser + SetUserRoles + the role-resolving read all
+// round-trip under RLS. A duplicate email is KindConflict.
+func TestCreateUserRoundTripWithRoles(t *testing.T) {
+	ctx := context.Background()
+	r1 := "abababab-0000-0000-0000-0000000000a1"
+	r2 := "abababab-0000-0000-0000-0000000000a2"
+	seedRole(t, r1, tenantA, "Coordinador", []string{"users:read", "roles:read"})
+	seedRole(t, r2, tenantA, "DocenteA", []string{"students:read"})
+
+	repo := pgadapter.NewUserRepo(appDB(t), tenantA)
+	uid := "abababab-0000-0000-0000-000000000001"
+	email, _ := domain.NewEmail("nueva@garcialorca.mx")
+	user, err := domain.NewUser(uid, tenantA, email, "Nueva", domain.StatusActive, true, nil)
+	if err != nil {
+		t.Fatalf("NewUser: %v", err)
+	}
+	hash, _ := bcrypt.NewHasher(4).Hash("test-temp-pw")
+	if err := repo.CreateUser(ctx, user, hash); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if err := repo.SetUserRoles(ctx, uid, []string{r1, r2}); err != nil {
+		t.Fatalf("SetUserRoles: %v", err)
+	}
+
+	got, gotHash, err := repo.FindAuthByEmail(ctx, tenantA, email)
+	if err != nil {
+		t.Fatalf("FindAuthByEmail: %v", err)
+	}
+	if !got.MustChangePassword() {
+		t.Error("created user must_change_password = false, want true (temp password)")
+	}
+	if err := bcrypt.NewHasher(4).Verify(gotHash, "test-temp-pw"); err != nil {
+		t.Errorf("stored hash should verify against the temp password: %v", err)
+	}
+	usersRead, _ := domain.NewPermission("users:read")
+	studentsRead, _ := domain.NewPermission("students:read")
+	if !got.HasPermission(usersRead) || !got.HasPermission(studentsRead) {
+		t.Errorf("assigned roles not resolved on read: %+v", got.RoleIDs())
+	}
+
+	// A duplicate email (UNIQUE(tenant_id, email)) is KindConflict.
+	dup, _ := domain.NewUser("abababab-0000-0000-0000-000000000002", tenantA, email, "Dup", domain.StatusActive, true, nil)
+	if err := repo.CreateUser(ctx, dup, hash); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Errorf("duplicate email should be KindConflict, got %v", glerrors.KindOf(err))
+	}
+}
+
+// TestListUsersResolvesRolesNoNPlusOne lists users with their roles resolved. The
+// implementation loads roles for the whole page in ONE join query (loadRolesForUsers),
+// so the listing costs two queries regardless of user count — no N+1 by construction.
+func TestListUsersResolvesRoles(t *testing.T) {
+	ctx := context.Background()
+	uid := "acacacac-0000-0000-0000-000000000001"
+	rid := "acacacac-0000-0000-0000-0000000000c1"
+	seedUser(t, uid, tenantA, "listme@garcialorca.mx", "x", "active")
+	seedRole(t, rid, tenantA, "ListRole", []string{"grades:read"})
+	assign(t, uid, rid, tenantA)
+
+	repo := pgadapter.NewUserRepo(appDB(t), tenantA)
+	users, err := repo.ListUsers(ctx)
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+
+	var found domain.User
+	for _, u := range users {
+		if u.ID() == uid {
+			found = u
+		}
+	}
+	if found.ID() != uid {
+		t.Fatalf("ListUsers did not return the seeded user %q", uid)
+	}
+	gradesRead, _ := domain.NewPermission("grades:read")
+	if !found.HasPermission(gradesRead) || len(found.RoleIDs()) != 1 {
+		t.Errorf("ListUsers did not resolve the user's roles: RoleIDs=%v", found.RoleIDs())
+	}
+}
+
+// TestSetStatusSuspend flips a user to suspended (so it can no longer
+// authenticate) and reports KindNotFound for an unknown id.
+func TestSetStatusSuspend(t *testing.T) {
+	ctx := context.Background()
+	uid := "adadadad-0000-0000-0000-000000000001"
+	seedUser(t, uid, tenantA, "suspendme@garcialorca.mx", "x", "active")
+
+	repo := pgadapter.NewUserRepo(appDB(t), tenantA)
+	if err := repo.SetStatus(ctx, uid, domain.StatusSuspended); err != nil {
+		t.Fatalf("SetStatus: %v", err)
+	}
+	got, err := repo.FindByID(ctx, uid)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if got.CanAuthenticate() {
+		t.Error("suspended user should not be able to authenticate")
+	}
+
+	if err := repo.SetStatus(ctx, "adadadad-0000-0000-0000-0000000000ff", domain.StatusSuspended); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("SetStatus on an unknown id should be KindNotFound, got %v", glerrors.KindOf(err))
+	}
+}
+
+// TestSetUserRolesReplaceIsAtomic proves SetUserRoles replaces the whole set and
+// that a bad role id (FK violation) is KindInvalid AND rolls the swap back — the
+// delete + inserts share one tenant-bound transaction.
+func TestSetUserRolesReplaceIsAtomic(t *testing.T) {
+	ctx := context.Background()
+	uid := "aeaeaeae-0000-0000-0000-000000000001"
+	r1 := "aeaeaeae-0000-0000-0000-0000000000e1"
+	r2 := "aeaeaeae-0000-0000-0000-0000000000e2"
+	seedUser(t, uid, tenantA, "swap@garcialorca.mx", "x", "active")
+	seedRole(t, r1, tenantA, "SwapOne", []string{"students:read"})
+	seedRole(t, r2, tenantA, "SwapTwo", []string{"grades:read"})
+
+	repo := pgadapter.NewUserRepo(appDB(t), tenantA)
+	if err := repo.SetUserRoles(ctx, uid, []string{r1}); err != nil {
+		t.Fatalf("SetUserRoles(r1): %v", err)
+	}
+	if err := repo.SetUserRoles(ctx, uid, []string{r2}); err != nil {
+		t.Fatalf("SetUserRoles(r2): %v", err)
+	}
+	got, _ := repo.FindByID(ctx, uid)
+	studentsRead, _ := domain.NewPermission("students:read")
+	gradesRead, _ := domain.NewPermission("grades:read")
+	if got.HasPermission(studentsRead) || !got.HasPermission(gradesRead) {
+		t.Errorf("replace did not swap roles: RoleIDs=%v", got.RoleIDs())
+	}
+
+	// A non-existent role id violates the FK → KindInvalid, and the prior set
+	// (r2) survives because the failed swap rolls back.
+	ghost := "aeaeaeae-0000-0000-0000-0000000000ff"
+	if err := repo.SetUserRoles(ctx, uid, []string{ghost}); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("bad role id should be KindInvalid, got %v", glerrors.KindOf(err))
+	}
+	after, _ := repo.FindByID(ctx, uid)
+	if !after.HasPermission(gradesRead) || len(after.RoleIDs()) != 1 {
+		t.Errorf("failed SetUserRoles must roll back, leaving r2 intact: RoleIDs=%v", after.RoleIDs())
+	}
+}
+
+// TestRoleRepoCRUD exercises CreateRole (+ duplicate-name conflict), ListRoles,
+// SetPermissions, and NotFound on an unknown id — all as the app role under RLS.
+func TestRoleRepoCRUD(t *testing.T) {
+	ctx := context.Background()
+	repo := pgadapter.NewRoleRepo(appDB(t), tenantA)
+
+	rid := "afafafaf-0000-0000-0000-0000000000f1"
+	role, _ := domain.NewRole(rid, "Auditoria", []string{"users:read", "roles:read"})
+	if err := repo.CreateRole(ctx, role); err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+
+	// Duplicate name (UNIQUE(tenant_id, name)) → KindConflict.
+	dup, _ := domain.NewRole("afafafaf-0000-0000-0000-0000000000f2", "Auditoria", []string{"users:read"})
+	if err := repo.CreateRole(ctx, dup); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Errorf("duplicate role name should be KindConflict, got %v", glerrors.KindOf(err))
+	}
+
+	roles, err := repo.ListRoles(ctx)
+	if err != nil {
+		t.Fatalf("ListRoles: %v", err)
+	}
+	var listed domain.Role
+	for _, r := range roles {
+		if r.ID() == rid {
+			listed = r
+		}
+	}
+	if listed.ID() != rid || len(listed.Permissions()) != 2 {
+		t.Errorf("ListRoles did not return the created role with 2 permissions: %+v", listed)
+	}
+
+	if err := repo.SetPermissions(ctx, rid, []string{"users:write"}); err != nil {
+		t.Fatalf("SetPermissions: %v", err)
+	}
+	updated, _ := repo.FindByID(ctx, rid)
+	usersWrite, _ := domain.NewPermission("users:write")
+	if len(updated.Permissions()) != 1 || !updated.HasPermission(usersWrite) {
+		t.Errorf("SetPermissions did not replace the set: %+v", updated.Permissions())
+	}
+
+	if err := repo.SetPermissions(ctx, "afafafaf-0000-0000-0000-0000000000ff", []string{"users:read"}); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("SetPermissions on an unknown id should be KindNotFound, got %v", glerrors.KindOf(err))
+	}
+}
+
+// TestRLSIsolatesAdminWrites confirms the admin writes stay tenant-isolated: a
+// role created in tenant A is invisible to a tenant-B repo, and tenant B cannot
+// suspend tenant A's user (RLS hides the row → NotFound).
+func TestRLSIsolatesAdminWrites(t *testing.T) {
+	ctx := context.Background()
+	rid := "ba5eba11-0000-0000-0000-0000000000a1"
+	uid := "ba5eba11-0000-0000-0000-000000000001"
+	seedRole(t, rid, tenantA, "TenantAOnly", []string{"users:read"})
+	seedUser(t, uid, tenantA, "onlya@garcialorca.mx", "x", "active")
+
+	roleRepoB := pgadapter.NewRoleRepo(appDB(t), tenantB)
+	if _, err := roleRepoB.FindByID(ctx, rid); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("tenant B saw tenant A's role (RLS breach): err=%v", err)
+	}
+	userRepoB := pgadapter.NewUserRepo(appDB(t), tenantB)
+	if err := userRepoB.SetStatus(ctx, uid, domain.StatusSuspended); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("tenant B suspended tenant A's user (RLS breach): err=%v", glerrors.KindOf(err))
+	}
+}
+
 func TestRoleRepoFindByID(t *testing.T) {
 	rid := "dddddddd-0000-0000-0000-0000000000d1"
 	seedRole(t, rid, tenantA, "Direccion", []string{"students:read", "finance:read"})

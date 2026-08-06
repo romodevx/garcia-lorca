@@ -162,7 +162,22 @@ must be resolved before turning a flag ON in a shared environment.
 7. **Multi-tenant forwarding.** `config` is single-tenant by construction
    (`CONFIG_TENANT_ID` is a process-wide constant; the client cannot set `tenant_id`).
    Before any multi-tenant shared use, the gateway must forward the principal's
-   `TenantID` to `config` and the constant must be removed.
+   `TenantID` to `config` and the constant must be removed. (Same for `students`,
+   `grades` — all carry a `*_TENANT_ID` constant.)
+
+### Added by Phase 6 (roles & users) — before a shared, multi-admin environment
+8. **"Grant only what you hold."** A `roles:write` admin can currently mint/assign a
+   role with ANY catalog permission (e.g. grant `grades:write`). Fine for the single
+   owner; before non-owner admins exist, restrict the assignable permission set to a
+   subset of the caller's own effective permissions (enforce in the iam admin usecase).
+9. **Token revocation on suspend.** `SetUserStatus(SUSPENDED)` blocks new logins and
+   refresh, but an already-issued access token stays valid until it expires (15-min
+   TTL). For immediate revocation, add a token denylist (or shorten the access TTL) —
+   the 15-min window is acceptable for MVP only.
+10. **Grade capture is not teacher-scoped yet.** Any `grades:write` holder can capture
+    for any assignment (teacher derived from the assignment, not the caller). Once
+    teacher login exists (link `teachers.user_id` → require the caller own the
+    assignment), enforce it before grades is more than a presentation surface.
 
 ## Common commands
 

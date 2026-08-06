@@ -65,6 +65,42 @@ func TestListTeachers(t *testing.T) {
 	}
 }
 
+func TestSetTeacherUserLinksAndUnlinks(t *testing.T) {
+	svc, repo := newService(t)
+	te := seedTeacher(t, svc)
+
+	// Link: the returned + persisted teacher carries the user id.
+	linked, err := svc.SetTeacherUser(ctx(), te.ID(), "user-42")
+	if err != nil {
+		t.Fatalf("SetTeacherUser (link): %v", err)
+	}
+	if !linked.HasUser() || linked.UserID() != "user-42" {
+		t.Errorf("link: UserID=%q HasUser=%v, want user-42/true", linked.UserID(), linked.HasUser())
+	}
+	if got := repo.teachers[te.ID()]; got.UserID() != "user-42" {
+		t.Errorf("persisted link = %q, want user-42", got.UserID())
+	}
+
+	// Unlink: an empty user id clears the link.
+	unlinked, err := svc.SetTeacherUser(ctx(), te.ID(), "")
+	if err != nil {
+		t.Fatalf("SetTeacherUser (unlink): %v", err)
+	}
+	if unlinked.HasUser() || unlinked.UserID() != "" {
+		t.Errorf("unlink: UserID=%q HasUser=%v, want \"\"/false", unlinked.UserID(), unlinked.HasUser())
+	}
+	if got := repo.teachers[te.ID()]; got.HasUser() {
+		t.Errorf("persisted unlink still linked: UserID=%q", got.UserID())
+	}
+}
+
+func TestSetTeacherUserUnknownTeacherIsNotFound(t *testing.T) {
+	svc, _ := newService(t)
+	if _, err := svc.SetTeacherUser(ctx(), "no-such-teacher", "user-1"); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("unknown teacher: want KindNotFound, got %v", err)
+	}
+}
+
 // --- TeachingAssignment (the knot) -----------------------------------------
 
 // seedKnotParents builds a full, self-consistent parent chain: a cycle, a level,

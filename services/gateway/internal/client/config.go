@@ -344,6 +344,20 @@ func (c *ConfigClient) CreateTeacher(ctx context.Context, first, last, email, us
 	return toTeacher(res.Msg.GetTeacher()), nil
 }
 
+// SetTeacherUser links a teacher catalog record to an iam user, or unlinks it
+// when userID is empty. The config service just stores the id; the gateway is
+// responsible for having validated the user exists (via iam GetUser) first.
+func (c *ConfigClient) SetTeacherUser(ctx context.Context, teacherID, userID string) (Teacher, error) {
+	res, err := c.rpc.SetTeacherUser(ctx, connect.NewRequest(&configv1.SetTeacherUserRequest{
+		TeacherId: teacherID,
+		UserId:    userID,
+	}))
+	if err != nil {
+		return Teacher{}, err
+	}
+	return toTeacher(res.Msg.GetTeacher()), nil
+}
+
 // ListTeachers lists every teacher in the tenant catalog.
 func (c *ConfigClient) ListTeachers(ctx context.Context) ([]Teacher, error) {
 	res, err := c.rpc.ListTeachers(ctx, connect.NewRequest(&configv1.ListTeachersRequest{}))

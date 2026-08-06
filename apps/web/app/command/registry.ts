@@ -54,6 +54,9 @@ const ACTIONS: readonly ActionSpec[] = [
   { moduleId: "settings", kind: "create", key: "group", titleKey: "create.group", aliasKey: "alias.group" },
   { moduleId: "settings", kind: "create", key: "teacher", titleKey: "create.teacher", aliasKey: "alias.teacher" },
   { moduleId: "settings", kind: "create", key: "assignment", titleKey: "create.assignment", aliasKey: "alias.assignment" },
+  // Admin surface (module_iam) — fewest-clicks shortcuts into the admin surface.
+  { moduleId: "admin", kind: "create", key: "user", titleKey: "create.user", aliasKey: "alias.user" },
+  { moduleId: "admin", kind: "create", key: "role", titleKey: "create.role", aliasKey: "alias.role" },
   { moduleId: "attendance", kind: "quick", titleKey: "quick.attendance", aliasKey: "alias.attendance" },
   { moduleId: "reports", kind: "quick", titleKey: "quick.reports", aliasKey: "alias.reports" },
 ];

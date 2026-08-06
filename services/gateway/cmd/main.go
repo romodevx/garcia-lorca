@@ -114,6 +114,12 @@ func main() {
 //	/api/v1/grades/...         → ModuleGuard(grades) → RequireAuth → rotation →
 //	                             RequirePermission(grades:write on capture,
 //	                             grades:read on roster/list) → grades service
+//	/api/v1/users/..., /roles/... → ModuleGuard(iam) → RequireAuth → rotation →
+//	                             RequirePermission(users:*/roles:* by verb) → iam
+//	                             admin (user/role CRUD)
+//	POST /api/v1/config/teachers/{id}/user → ModuleGuard(config) → RequireAuth →
+//	                             rotation → RequirePermission(config:write) →
+//	                             validate iam user (GetUser) then config SetTeacherUser
 //	/healthz, /readyz          → liveness + iam reachability
 //
 // `flags` (via middleware.NewModuleGuard) is the module-visibility boundary:
@@ -212,5 +218,30 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/grades", gradesWrite(gradesH.CaptureGrade))
 	mux.Handle("GET /api/v1/grades/roster", gradesRead(gradesH.GetRoster))
 	mux.Handle("GET /api/v1/grades", gradesRead(gradesH.ListGradeEntries))
+
+	// Phase 6 iam admin (user/role CRUD): flag-guarded (module_iam), authenticated
+	// + rotation-enforced, permission-gated. User routes need users:read (GET) /
+	// users:write (POST); role routes need roles:read / roles:write. Every route
+	// sits behind guard.Protect("iam", …) so module_iam OFF ⇒ 404 (the admin
+	// surface is invisible before auth even runs). The AuthClient carries both the
+	// auth and the admin surface; the ConfigClient is the teacher linker.
+	adminH := handler.NewAdminHandler(authClient, configClient)
+	iamAdmin := func(perm string, h http.HandlerFunc) http.Handler {
+		return guard.Protect("iam", requireAuthChanged(middleware.RequirePermission(perm)(http.HandlerFunc(h))))
+	}
+	mux.Handle("POST /api/v1/users", iamAdmin("users:write", adminH.CreateUser))
+	mux.Handle("GET /api/v1/users", iamAdmin("users:read", adminH.ListUsers))
+	mux.Handle("GET /api/v1/users/{id}", iamAdmin("users:read", adminH.GetUser))
+	mux.Handle("POST /api/v1/users/{id}/status", iamAdmin("users:write", adminH.SetUserStatus))
+	mux.Handle("POST /api/v1/users/{id}/roles", iamAdmin("users:write", adminH.SetUserRoles))
+	mux.Handle("POST /api/v1/roles", iamAdmin("roles:write", adminH.CreateRole))
+	mux.Handle("GET /api/v1/roles", iamAdmin("roles:read", adminH.ListRoles))
+	mux.Handle("POST /api/v1/roles/{id}/permissions", iamAdmin("roles:write", adminH.SetRolePermissions))
+
+	// The teacher↔user link mutates a CONFIG teacher, so it sits under
+	// module_config + config:write (reusing configWrite), not module_iam. The
+	// handler itself performs the gateway-orchestrated cross-service validation
+	// (iam GetUser) before the config write.
+	mux.Handle("POST /api/v1/config/teachers/{id}/user", configWrite(adminH.LinkTeacherUser))
 	return mux
 }

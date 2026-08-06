@@ -98,6 +98,9 @@ type CatalogRepository interface {
 	GetTeacher(ctx context.Context, id string) (domain.Teacher, error)
 	// ListTeachers returns every teacher in the tenant.
 	ListTeachers(ctx context.Context) ([]domain.Teacher, error)
+	// SetTeacherUserID links a teacher to an IAM user (or unlinks it when userID
+	// is nil, storing SQL NULL). An id that matches no row is KindNotFound.
+	SetTeacherUserID(ctx context.Context, teacherID string, userID *string) error
 
 	// --- teaching assignments (the knot: teacher ↔ group ↔ subject ↔ cycle) ---
 

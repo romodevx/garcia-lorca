@@ -1,10 +1,23 @@
 package domain
 
 import (
+	"regexp"
 	"strings"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 )
+
+// permissionFormat is the strict admin-surface grammar for a permission string:
+// lowercase ASCII letters/underscores on each side of a single ':'.
+var permissionFormat = regexp.MustCompile(`^[a-z_]+:[a-z_]+$`)
+
+// IsValidPermission reports whether s is already a well-formed "resource:action"
+// permission in the strict catalog grammar (no normalization). It is stricter
+// than NewPermission — which trims and lowercases and tolerates dotted resources
+// — because the admin role editor accepts only canonical catalog entries.
+func IsValidPermission(s string) bool {
+	return permissionFormat.MatchString(s)
+}
 
 // Permission is a "resource:action" capability, e.g. "students:read" or
 // "finance.payment:create". Authorization is permission-based: a principal's

@@ -74,6 +74,10 @@ service ConfigService {
   rpc GetTeacher(GetTeacherRequest) returns (GetTeacherResponse);
   // ListTeachers lists every teacher in the tenant catalog.
   rpc ListTeachers(ListTeachersRequest) returns (ListTeachersResponse);
+  // SetTeacherUser links a teacher catalog record to an IAM user (or unlinks it
+  // when user_id is empty). config only stores the link; the caller (gateway)
+  // is responsible for validating that the user exists.
+  rpc SetTeacherUser(SetTeacherUserRequest) returns (SetTeacherUserResponse);
 
   // --- teaching_assignments (the knot: teacher ↔ group ↔ subject ↔ cycle) ---
   // CreateTeachingAssignment binds a teacher to a (group, subject); the server
@@ -452,6 +456,18 @@ message ListTeachersRequest {}
 // ListTeachersResponse returns the tenant teachers.
 message ListTeachersResponse {
   repeated Teacher teachers = 1;
+}
+
+// SetTeacherUserRequest links a teacher to an IAM user. An empty user_id
+// unlinks (stored as NULL).
+message SetTeacherUserRequest {
+  string teacher_id = 1;
+  string user_id = 2;  // empty unlinks
+}
+
+// SetTeacherUserResponse returns the updated teacher.
+message SetTeacherUserResponse {
+  Teacher teacher = 1;
 }
 
 // --- TeachingAssignment RPC messages --------------------------------------

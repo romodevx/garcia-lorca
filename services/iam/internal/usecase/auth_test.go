@@ -14,6 +14,11 @@ import (
 
 const testTenant = "t1"
 
+type createdUser struct {
+	user domain.User
+	hash string
+}
+
 type fakeUsers struct {
 	byEmail map[domain.Email]struct {
 		user domain.User
@@ -22,6 +27,12 @@ type fakeUsers struct {
 	byID    map[string]domain.User
 	added   [][2]string // (userID, roleID)
 	removed [][2]string
+
+	// admin-surface recording
+	created   []createdUser            // CreateUser calls
+	listOut   []domain.User            // ListUsers return
+	statusSet map[string]domain.Status // SetStatus calls
+	rolesSet  map[string][]string      // SetUserRoles calls
 }
 
 func (f *fakeUsers) FindAuthByEmail(_ context.Context, _ string, email domain.Email) (domain.User, string, error) {
@@ -60,7 +71,41 @@ func (f *fakeUsers) RemoveRole(_ context.Context, userID, roleID string) error {
 	return nil
 }
 
-type fakeRoles struct{ byID map[string]domain.Role }
+func (f *fakeUsers) CreateUser(_ context.Context, user domain.User, passwordHash string) error {
+	if _, dup := f.byEmail[user.Email()]; dup {
+		return glerrors.New(glerrors.KindConflict, "email already exists")
+	}
+	f.created = append(f.created, createdUser{user: user, hash: passwordHash})
+	return nil
+}
+
+func (f *fakeUsers) ListUsers(_ context.Context) ([]domain.User, error) {
+	return f.listOut, nil
+}
+
+func (f *fakeUsers) SetStatus(_ context.Context, userID string, status domain.Status) error {
+	if f.statusSet == nil {
+		f.statusSet = map[string]domain.Status{}
+	}
+	f.statusSet[userID] = status
+	return nil
+}
+
+func (f *fakeUsers) SetUserRoles(_ context.Context, userID string, roleIDs []string) error {
+	if f.rolesSet == nil {
+		f.rolesSet = map[string][]string{}
+	}
+	f.rolesSet[userID] = roleIDs
+	return nil
+}
+
+type fakeRoles struct {
+	byID map[string]domain.Role
+
+	created  []domain.Role       // CreateRole calls
+	listOut  []domain.Role       // ListRoles return
+	permsSet map[string][]string // SetPermissions calls
+}
 
 func (f *fakeRoles) FindByID(_ context.Context, roleID string) (domain.Role, error) {
 	r, ok := f.byID[roleID]
@@ -68,6 +113,33 @@ func (f *fakeRoles) FindByID(_ context.Context, roleID string) (domain.Role, err
 		return domain.Role{}, glerrors.ErrNotFound
 	}
 	return r, nil
+}
+
+func (f *fakeRoles) CreateRole(_ context.Context, role domain.Role) error {
+	for _, existing := range f.byID {
+		if existing.Name() == role.Name() {
+			return glerrors.New(glerrors.KindConflict, "role name already exists")
+		}
+	}
+	for _, existing := range f.created {
+		if existing.Name() == role.Name() {
+			return glerrors.New(glerrors.KindConflict, "role name already exists")
+		}
+	}
+	f.created = append(f.created, role)
+	return nil
+}
+
+func (f *fakeRoles) ListRoles(_ context.Context) ([]domain.Role, error) {
+	return f.listOut, nil
+}
+
+func (f *fakeRoles) SetPermissions(_ context.Context, roleID string, permissions []string) error {
+	if f.permsSet == nil {
+		f.permsSet = map[string][]string{}
+	}
+	f.permsSet[roleID] = permissions
+	return nil
 }
 
 // fakeHasher treats the stored "hash" as the plaintext prefixed with "h:".
