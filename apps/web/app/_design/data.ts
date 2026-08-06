@@ -42,7 +42,9 @@ export const MODULES: readonly ModuleDef[] = [
   { id: "uniforms", label: "Uniformes", icon: "uniforms", color: "purple", desc: "Pedidos y tallas", badge: null, flag: "module_uniforms" },
   { id: "billing", label: "Facturación", icon: "billing", color: "lime", desc: "CFDI 4.0", badge: null, flag: "module_billing" },
   { id: "reports", label: "Reportes", icon: "reports", color: "yellow", desc: "Indicadores", badge: null, flag: "module_reports" },
-  { id: "settings", label: "Configuración", icon: "settings", color: "neutral", desc: "Centro y permisos", badge: null, flag: "module_config" }
+  { id: "settings", label: "Configuración", icon: "settings", color: "neutral", desc: "Centro y permisos", badge: null, flag: "module_config" },
+  // Admin surface (module_iam): users, roles, and the teacher↔user link.
+  { id: "admin", label: "Administración", icon: "shield", color: "forest", desc: "Usuarios y roles", badge: null, flag: "module_iam" }
 ];
 
 export const LEVELS = ["Kínder", "Primaria", "Secundaria", "Preparatoria"] as const;
