@@ -8,6 +8,7 @@ import { MODULES, USERS, type ModuleDef, type Role } from "./_design/data";
 import { Dashboard } from "./_screens/Dashboard";
 import { Finances } from "./_screens/Finances";
 import { Catalog } from "./_screens/config/Catalog";
+import { Enrollment } from "./_screens/students/Enrollment";
 import { Login } from "./_screens/Login";
 import { ChangePassword } from "./_screens/ChangePassword";
 import { ModulePlaceholder } from "./_screens/ModulePlaceholder";
@@ -20,6 +21,7 @@ type View =
   | { screen: "dashboard" }
   | { screen: "finance" }
   | { screen: "config" }
+  | { screen: "students" }
   | { screen: "module"; moduleId: string };
 
 // Gateway base URL for the browser (public env; matches compose NEXT_PUBLIC_API_URL).
@@ -49,6 +51,9 @@ export function AppShell(): ReactElement {
   // The academic-catalog surface is gated by module_config (UX-only; the gateway
   // is the boundary). The "settings" module (Configuración) opens this catalog.
   const configEnabled = useFlag("module_config");
+  // The enrollment surface is gated by module_students (UX-only; the gateway is
+  // the boundary). The "students" module (Estudiantes) opens this surface.
+  const studentsEnabled = useFlag("module_students");
 
   const handleLogin = async (email: string, password: string): Promise<void> => {
     setPending(true);
@@ -91,6 +96,10 @@ export function AppShell(): ReactElement {
     }
     if (id === "settings") {
       setView({ screen: "config" });
+      return;
+    }
+    if (id === "students") {
+      setView({ screen: "students" });
       return;
     }
     setView({ screen: "module", moduleId: id });
@@ -139,6 +148,14 @@ export function AppShell(): ReactElement {
           // Flag OFF: never render the catalog; show the friendly stub so
           // navigation never dead-ends. (Backend 404 is authoritative.)
           <ModulePlaceholder m={MODULES.find((m) => m.id === "settings") as ModuleDef} onBack={home} />
+        ))}
+      {view.screen === "students" &&
+        (studentsEnabled ? (
+          <Enrollment onBack={home} />
+        ) : (
+          // Flag OFF: never render the enrollment surface; show the friendly stub
+          // so navigation never dead-ends. (Backend 404 is authoritative.)
+          <ModulePlaceholder m={MODULES.find((m) => m.id === "students") as ModuleDef} onBack={home} />
         ))}
       {view.screen === "module" && activeModule && <ModulePlaceholder m={activeModule} onBack={home} />}
     </div>

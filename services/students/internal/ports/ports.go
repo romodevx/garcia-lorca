@@ -39,3 +39,46 @@ type EventPublisher interface {
 	PublishStudentEnrolled(ctx context.Context, ev domain.StudentEnrolledEvent) error
 	PublishAdmissionChanged(ctx context.Context, ev domain.AdmissionChangedEvent) error
 }
+
+// GroupRef is the students-owned view of a config group. It is the minimum the
+// enroll knot needs: the group's identity and the cycle it derives from.
+type GroupRef struct {
+	ID           string
+	CycleID      string
+	GradeLevelID string
+}
+
+// TermRef is the students-owned view of a config term (its identity and cycle).
+type TermRef struct {
+	ID      string
+	CycleID string
+}
+
+// CatalogValidator validates cross-service references against the config bounded
+// context (by RPC). It is a consumer-defined seam: the use case depends on this
+// interface and stays testable with a fake, while the real adapter is a Connect
+// client to config. A missing group/term is reported as glerrors.ErrNotFound
+// (KindNotFound); any other error propagates unchanged.
+type CatalogValidator interface {
+	GroupByID(ctx context.Context, id string) (GroupRef, error)
+	TermByID(ctx context.Context, id string) (TermRef, error)
+}
+
+// EnrollmentRepository loads and persists enrollments and their transfer history.
+// All access is tenant-scoped for RLS (the adapter binds app.current_tenant per
+// transaction, as in students/iam).
+type EnrollmentRepository interface {
+	// CreateEnrollment inserts a new enrollment. A duplicate (student, cycle) per
+	// tenant is KindConflict.
+	CreateEnrollment(ctx context.Context, e domain.Enrollment) error
+	// GetEnrollment returns an enrollment or KindNotFound.
+	GetEnrollment(ctx context.Context, id string) (domain.Enrollment, error)
+	// ListEnrollments returns enrollments matching the given filters; an empty
+	// string skips that filter.
+	ListEnrollments(ctx context.Context, studentID, cycleID, groupID string) ([]domain.Enrollment, error)
+	// TransferEnrollment writes the transfer history row and updates the
+	// enrollment's group in ONE transaction.
+	TransferEnrollment(ctx context.Context, enrollmentID, toGroupID string, transfer domain.EnrollmentTransfer) error
+	// SetEnrollmentStatus updates an enrollment's status (e.g. to withdrawn).
+	SetEnrollmentStatus(ctx context.Context, id string, status domain.EnrollmentStatus) error
+}

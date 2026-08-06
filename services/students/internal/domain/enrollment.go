@@ -1,0 +1,114 @@
+package domain
+
+import (
+	"strings"
+	"time"
+
+	glerrors "github.com/garcia-lorca/pkg/errors"
+)
+
+// EnrollmentStatus is the lifecycle state of an enrollment (a student's place in
+// a group of a cycle). It is a domain type (no proto import); the adapter maps it
+// to/from the wire enum.
+type EnrollmentStatus uint8
+
+const (
+	// EnrollmentStatusUnspecified is the zero value; not a valid status.
+	EnrollmentStatusUnspecified EnrollmentStatus = iota
+	// EnrollmentStatusActive is the live enrollment (can transfer or withdraw).
+	EnrollmentStatusActive
+	// EnrollmentStatusTransferred marks an enrollment superseded by a move.
+	EnrollmentStatusTransferred
+	// EnrollmentStatusWithdrawn marks a terminated enrollment.
+	EnrollmentStatusWithdrawn
+)
+
+var enrollmentStatusNames = map[EnrollmentStatus]string{
+	EnrollmentStatusActive:      "active",
+	EnrollmentStatusTransferred: "transferred",
+	EnrollmentStatusWithdrawn:   "withdrawn",
+}
+
+// Valid reports whether the status is a real enrollment status (not unspecified).
+func (s EnrollmentStatus) Valid() bool {
+	return s >= EnrollmentStatusActive && s <= EnrollmentStatusWithdrawn
+}
+
+// String returns the canonical status name ("" for unspecified).
+func (s EnrollmentStatus) String() string { return enrollmentStatusNames[s] }
+
+// ParseEnrollmentStatus resolves a status name to an EnrollmentStatus.
+func ParseEnrollmentStatus(raw string) (EnrollmentStatus, error) {
+	key := strings.ToLower(strings.TrimSpace(raw))
+	for status, name := range enrollmentStatusNames {
+		if name == key {
+			return status, nil
+		}
+	}
+	return EnrollmentStatusUnspecified, glerrors.New(glerrors.KindInvalid, "unknown enrollment status: "+raw)
+}
+
+// Enrollment is the join placing a student into a group of a cycle. cycle_id,
+// group_id and term_id are cross-service references to the config bounded context
+// (plain UUIDs, RPC-validated by the use case — never cross-service FKs). term_id
+// is optional. The cycle is derived from the group at enroll time, so an
+// Enrollment always carries a group and its cycle together.
+type Enrollment struct {
+	id         string
+	tenantID   string
+	studentID  string
+	cycleID    string
+	groupID    string
+	termID     string
+	status     EnrollmentStatus
+	enrolledAt time.Time
+}
+
+// NewEnrollment builds a validated Enrollment. All identity references except
+// termID are required, and the status must be a real enrollment status.
+func NewEnrollment(id, tenantID, studentID, cycleID, groupID, termID string, status EnrollmentStatus, enrolledAt time.Time) (Enrollment, error) {
+	if strings.TrimSpace(id) == "" {
+		return Enrollment{}, glerrors.New(glerrors.KindInvalid, "enrollment id is required")
+	}
+	if strings.TrimSpace(tenantID) == "" {
+		return Enrollment{}, glerrors.New(glerrors.KindInvalid, "tenant id is required")
+	}
+	if strings.TrimSpace(studentID) == "" {
+		return Enrollment{}, glerrors.New(glerrors.KindInvalid, "student id is required")
+	}
+	if strings.TrimSpace(cycleID) == "" {
+		return Enrollment{}, glerrors.New(glerrors.KindInvalid, "cycle id is required")
+	}
+	if strings.TrimSpace(groupID) == "" {
+		return Enrollment{}, glerrors.New(glerrors.KindInvalid, "group id is required")
+	}
+	if !status.Valid() {
+		return Enrollment{}, glerrors.New(glerrors.KindInvalid, "a valid enrollment status is required")
+	}
+	return Enrollment{
+		id:         id,
+		tenantID:   tenantID,
+		studentID:  studentID,
+		cycleID:    cycleID,
+		groupID:    groupID,
+		termID:     termID,
+		status:     status,
+		enrolledAt: enrolledAt,
+	}, nil
+}
+
+// CanTransfer reports whether the enrollment may be transferred to another group.
+func (e Enrollment) CanTransfer() bool { return e.status == EnrollmentStatusActive }
+
+// CanWithdraw reports whether the enrollment may be withdrawn.
+func (e Enrollment) CanWithdraw() bool { return e.status == EnrollmentStatusActive }
+
+// Accessors.
+func (e Enrollment) ID() string               { return e.id }
+func (e Enrollment) TenantID() string         { return e.tenantID }
+func (e Enrollment) StudentID() string        { return e.studentID }
+func (e Enrollment) CycleID() string          { return e.cycleID }
+func (e Enrollment) GroupID() string          { return e.groupID }
+func (e Enrollment) TermID() string           { return e.termID }
+func (e Enrollment) Status() EnrollmentStatus { return e.status }
+func (e Enrollment) EnrolledAt() time.Time    { return e.enrolledAt }

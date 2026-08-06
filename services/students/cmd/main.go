@@ -30,6 +30,7 @@ import (
 	"github.com/garcia-lorca/gen/go/garcialorca/students/v1/studentsv1connect"
 	"github.com/garcia-lorca/pkg/logger"
 	"github.com/garcia-lorca/pkg/pubsub"
+	"github.com/garcia-lorca/services/students/internal/adapters/configclient"
 	grpcadapter "github.com/garcia-lorca/services/students/internal/adapters/grpc"
 	pgadapter "github.com/garcia-lorca/services/students/internal/adapters/postgres"
 	pubsubadapter "github.com/garcia-lorca/services/students/internal/adapters/pubsub"
@@ -40,6 +41,9 @@ const (
 	serviceName   = "students"
 	defaultAddr   = ":8080"
 	defaultTenant = "00000000-0000-0000-0000-000000000001"
+	// defaultConfigBaseURL targets the config service on its local dev port
+	// (compose overrides it to the in-network address http://config:8080).
+	defaultConfigBaseURL = "http://localhost:8101"
 
 	readHeaderTimeout = 10 * time.Second
 	readTimeout       = 30 * time.Second
@@ -91,9 +95,20 @@ func buildMux(log *slog.Logger) (*http.ServeMux, error) {
 
 	repo := pgadapter.NewRepository(db, tenantID)
 	events := pubsubadapter.NewEventPublisher(newDevBus(log))
-	svc := usecase.NewStudentService(repo, events, tenantID, func() string { return uuid.NewString() })
+	newID := func() string { return uuid.NewString() }
+	svc := usecase.NewStudentService(repo, events, tenantID, newID)
+
+	// The enroll knot validates group/term references against the config bounded
+	// context by RPC (the app's first service-to-service call). The catalog
+	// validator is a Connect client to config; the use case stays testable behind
+	// the CatalogValidator port. http.DefaultClient speaks Connect over HTTP/1.1,
+	// which is sufficient for these unary calls.
+	configBaseURL := envOr("CONFIG_BASE_URL", defaultConfigBaseURL)
+	catalog := configclient.New(configBaseURL, http.DefaultClient)
+	enroll := usecase.NewEnrollmentService(repo, repo, catalog, events, tenantID, newID, time.Now)
+
 	health := usecase.NewHealthService(serviceName)
-	handler := grpcadapter.NewStudentsHandler(svc, health)
+	handler := grpcadapter.NewStudentsHandler(svc, enroll, health)
 
 	mux := http.NewServeMux()
 	path, h := studentsv1connect.NewStudentsServiceHandler(handler, connect.WithRecover(recoverFn))

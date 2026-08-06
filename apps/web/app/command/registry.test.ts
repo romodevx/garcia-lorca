@@ -79,6 +79,25 @@ describe("buildCommandRegistry", () => {
     expect(ids({ module_students: true }).some((id) => id.startsWith("settings."))).toBe(false);
   });
 
+  it("registers the enroll + transfer commands under module_students", () => {
+    const got = ids({ module_students: true });
+    expect(got).toContain("students.create.enroll");
+    expect(got).toContain("students.create.transfer");
+    const cmds = buildCommandRegistry({ module_students: true }, t);
+    // Both route to the students surface (the enrollment screen).
+    expect(cmds.find((c) => c.id === "students.create.enroll")?.route).toBe("module:students");
+    expect(cmds.find((c) => c.id === "students.create.transfer")?.route).toBe("module:students");
+    // Localized + alias-split from i18n.
+    const enroll = cmds.find((c) => c.id === "students.create.enroll");
+    expect(enroll?.title).toBe("Inscribir alumno");
+    expect(enroll?.aliases).toContain("matricular");
+  });
+
+  it("emits zero enroll/transfer commands when module_students is OFF", () => {
+    const got = ids({ module_finance: true });
+    expect(got.some((id) => id.startsWith("students."))).toBe(false);
+  });
+
   it("keys each command's route to its module for navigation", () => {
     const [nav] = buildCommandRegistry({ module_students: true }, t);
     expect(nav?.route).toBe("module:students");
