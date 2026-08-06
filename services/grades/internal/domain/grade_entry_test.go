@@ -26,7 +26,7 @@ func TestNewGradeEntryAccessors(t *testing.T) {
 	}
 	if e.ID() != "ge-1" || e.TenantID() != "t1" || e.EnrollmentID() != "enr-1" ||
 		e.SubjectID() != "subj-1" || e.TermID() != "term-1" || e.TeacherID() != "teacher-1" ||
-		e.Value() != 8.5 || !e.PublishedAt().Equal(at) {
+		e.Value() != 8.5 || !e.CapturedAt().Equal(at) {
 		t.Errorf("accessors mismatch: %+v", e)
 	}
 }

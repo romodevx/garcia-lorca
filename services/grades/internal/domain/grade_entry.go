@@ -20,6 +20,11 @@ const (
 // cross-service FKs. subjectID and teacherID are DERIVED from the teaching
 // assignment by the use case; they are never client-supplied. The entry is
 // immutable; WithValue returns a re-validated copy for the upsert-update path.
+//
+// capturedAt is the instant the grade was captured/edited. It is NOT the future
+// boleta "published_at": publication is a later phase, so this timestamp is not
+// persisted to the reserved published_at column — the adapter leaves that NULL
+// and lets the DB manage created_at/updated_at.
 type GradeEntry struct {
 	id           string
 	tenantID     string
@@ -28,7 +33,7 @@ type GradeEntry struct {
 	termID       string
 	teacherID    string
 	value        float64
-	publishedAt  time.Time
+	capturedAt   time.Time
 }
 
 // NewGradeEntry builds a validated GradeEntry. Every identity reference and the
@@ -64,7 +69,7 @@ func NewGradeEntry(id, tenantID, enrollmentID, subjectID, termID, teacherID stri
 		termID:       termID,
 		teacherID:    teacherID,
 		value:        value,
-		publishedAt:  capturedAt,
+		capturedAt:   capturedAt,
 	}, nil
 }
 
@@ -80,11 +85,11 @@ func (e GradeEntry) WithValue(v float64) (GradeEntry, error) {
 }
 
 // Accessors.
-func (e GradeEntry) ID() string             { return e.id }
-func (e GradeEntry) TenantID() string       { return e.tenantID }
-func (e GradeEntry) EnrollmentID() string   { return e.enrollmentID }
-func (e GradeEntry) SubjectID() string      { return e.subjectID }
-func (e GradeEntry) TermID() string         { return e.termID }
-func (e GradeEntry) TeacherID() string      { return e.teacherID }
-func (e GradeEntry) Value() float64         { return e.value }
-func (e GradeEntry) PublishedAt() time.Time { return e.publishedAt }
+func (e GradeEntry) ID() string            { return e.id }
+func (e GradeEntry) TenantID() string      { return e.tenantID }
+func (e GradeEntry) EnrollmentID() string  { return e.enrollmentID }
+func (e GradeEntry) SubjectID() string     { return e.subjectID }
+func (e GradeEntry) TermID() string        { return e.termID }
+func (e GradeEntry) TeacherID() string     { return e.teacherID }
+func (e GradeEntry) Value() float64        { return e.value }
+func (e GradeEntry) CapturedAt() time.Time { return e.capturedAt }
