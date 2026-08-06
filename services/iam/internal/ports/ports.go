@@ -36,12 +36,35 @@ type UserRepository interface {
 	// AddRole / RemoveRole change a user's role assignments.
 	AddRole(ctx context.Context, userID, roleID string) error
 	RemoveRole(ctx context.Context, userID, roleID string) error
+
+	// CreateUser persists a new principal together with its initial password
+	// hash. A duplicate email (unique per tenant) is a KindConflict error.
+	CreateUser(ctx context.Context, user domain.User, passwordHash string) error
+
+	// ListUsers returns every principal in the tenant with its roles resolved.
+	ListUsers(ctx context.Context) ([]domain.User, error)
+
+	// SetStatus changes a user's lifecycle status (activate/suspend).
+	SetStatus(ctx context.Context, userID string, status domain.Status) error
+
+	// SetUserRoles replaces the user's entire role set with roleIDs.
+	SetUserRoles(ctx context.Context, userID string, roleIDs []string) error
 }
 
-// RoleRepository loads roles (used to validate AssignRole targets and to resolve
-// permissions when composing a user).
+// RoleRepository loads and persists roles (used to validate AssignRole targets,
+// to resolve permissions when composing a user, and by the admin surface).
 type RoleRepository interface {
 	FindByID(ctx context.Context, roleID string) (domain.Role, error)
+
+	// CreateRole persists a new role. A duplicate name (unique per tenant) is a
+	// KindConflict error.
+	CreateRole(ctx context.Context, role domain.Role) error
+
+	// ListRoles returns every role in the tenant.
+	ListRoles(ctx context.Context) ([]domain.Role, error)
+
+	// SetPermissions replaces the role's permission set with permissions.
+	SetPermissions(ctx context.Context, roleID string, permissions []string) error
 }
 
 // PasswordHasher hashes and verifies credentials. The implementation is a slow

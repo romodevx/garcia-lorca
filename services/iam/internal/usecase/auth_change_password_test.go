@@ -40,6 +40,13 @@ func (f *cpUsers) UpdatePassword(_ context.Context, _, newHash string) error {
 func (f *cpUsers) AddRole(context.Context, string, string) error    { return nil }
 func (f *cpUsers) RemoveRole(context.Context, string, string) error { return nil }
 
+// Admin-surface methods are unused by the change-password flow; present only so
+// cpUsers keeps satisfying the extended ports.UserRepository.
+func (f *cpUsers) CreateUser(context.Context, domain.User, string) error  { return nil }
+func (f *cpUsers) ListUsers(context.Context) ([]domain.User, error)       { return nil, nil }
+func (f *cpUsers) SetStatus(context.Context, string, domain.Status) error { return nil }
+func (f *cpUsers) SetUserRoles(context.Context, string, []string) error   { return nil }
+
 // hasher fake: "H:"+plain is the "hash"; Verify matches that shape.
 type cpHasher struct{}
 
