@@ -124,6 +124,12 @@ levels                                      cycles
 teaching_assignments [cycle]  (teacher ↔ group ↔ subject ↔ cycle)  ← central knot
   id, tenant_id, cycle_id, group_id──▶groups, subject_id──▶subjects, teacher_id──▶teachers
   UNIQUE(tenant_id, cycle_id, group_id, subject_id)
+  # Implemented in Phase 3. Two invariants are APPLICATION-enforced (not DB constraints),
+  # safe because grade_level_id on groups/subjects is immutable (no update RPC):
+  #   (a) cycle_id is DERIVED from group.cycle_id at create time (never client-supplied);
+  #   (b) subject.grade_level_id must equal group.grade_level_id (teachability check).
+  # DB backstops: FK RESTRICT/CASCADE + UNIQUE(cycle,group,subject). If groups/subjects
+  # ever become mutable, promote (a)/(b) to composite-FK / trigger enforcement.
 
 teachers (maestros)
   id, tenant_id, first_name, last_name, email, user_id (NULL, reserved for IAM link)
