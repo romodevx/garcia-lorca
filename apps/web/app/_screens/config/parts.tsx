@@ -130,6 +130,47 @@ export function DateField({
   );
 }
 
+export interface SelectOption {
+  value: string;
+  label: string;
+}
+
+export function SelectField({
+  label,
+  value,
+  options,
+  onChange,
+  placeholder,
+  disabled = false,
+}: {
+  label: string;
+  value: string;
+  options: readonly SelectOption[];
+  onChange: (value: string) => void;
+  placeholder?: string;
+  disabled?: boolean;
+}): ReactElement {
+  return (
+    <label style={{ display: "block" }}>
+      <span style={labelStyle}>{label}</span>
+      <select
+        aria-label={label}
+        value={value}
+        disabled={disabled}
+        onChange={(e: ChangeEvent<HTMLSelectElement>) => onChange(e.target.value)}
+        style={{ ...inputStyle, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.6 : 1 }}
+      >
+        <option value="">{placeholder ?? "Selecciona…"}</option>
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export interface RadioOption {
   value: string;
   label: string;
