@@ -3,10 +3,12 @@
 import { useEffect, useState, type ReactElement } from "react";
 import { useTranslations } from "next-intl";
 import { Btn } from "../../_design/Controls";
-import type { Charge, RegisterPaymentInput } from "../../finance/api";
-import { centsToPesosInput, ErrorAlert, formatCents, pesosToCents, RadioGroup, Section, SelectField, TextField } from "./parts";
+import type { Charge, PaymentMethod, RegisterPaymentInput } from "../../finance/api";
+import { centsToPesosInput, formatCents, pesosToCents } from "./money";
+import { ErrorAlert, RadioGroup, Section, SelectField, TextField } from "./parts";
 
-const DEFAULT_METHOD = "cash";
+const DEFAULT_METHOD: PaymentMethod = "cash";
+const METHODS: readonly PaymentMethod[] = ["cash", "card", "transfer"];
 
 export interface PaymentPanelProps {
   /** Collectable charges (a remaining balance, not cancelled). */
@@ -29,7 +31,7 @@ export interface PaymentPanelProps {
 export function PaymentPanel({ charges, selectedChargeId, onSelectCharge, studentName, onSubmit }: PaymentPanelProps): ReactElement {
   const t = useTranslations("finance");
   const [amount, setAmount] = useState("");
-  const [method, setMethod] = useState(DEFAULT_METHOD);
+  const [method, setMethod] = useState<PaymentMethod>(DEFAULT_METHOD);
   const [reference, setReference] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -75,6 +77,7 @@ export function PaymentPanel({ charges, selectedChargeId, onSelectCharge, studen
             label: `${studentName(charge.studentId)} · ${charge.description} · ${formatCents(charge.remainingCents)}`,
           }))}
           onChange={onSelectCharge}
+          placeholder={t("option.choose")}
         />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
           <TextField label={t("field.amount")} value={amount} onChange={setAmount} placeholder="0.00" />
@@ -84,11 +87,7 @@ export function PaymentPanel({ charges, selectedChargeId, onSelectCharge, studen
           legend={t("field.method")}
           value={method}
           onChange={setMethod}
-          options={[
-            { value: "cash", label: t("method.cash") },
-            { value: "card", label: t("method.card") },
-            { value: "transfer", label: t("method.transfer") },
-          ]}
+          options={METHODS.map((option) => ({ value: option, label: t(`method.${option}`) }))}
         />
         <p style={{ fontSize: 12.5, color: "var(--text-faint)", margin: 0 }}>{t("hint.amountPesos")}</p>
         <div>

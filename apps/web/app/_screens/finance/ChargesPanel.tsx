@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import type { Cycle } from "../../config/api";
 import type { Charge } from "../../finance/api";
 import type { Student } from "../../students/api";
-import { CHARGE_GRID, ChargeRow } from "./ChargeRow";
+import { ACTION_COL_WIDTH, CHARGE_GRID, ChargeRow } from "./ChargeRow";
 import { AllClear, ErrorAlert, SelectField, TabBar } from "./parts";
 
 /** Which charges the table shows: the collection queue, or everything filtered. */
@@ -25,6 +25,8 @@ export interface ChargesPanelProps {
   onCycleChange: (cycleId: string) => void;
   studentName: (studentId: string) => string;
   onPay: (charge: Charge) => void;
+  onDiscount: (chargeId: string, discountCents: number, reason: string) => Promise<void>;
+  onCancel: (chargeId: string) => Promise<void>;
 }
 
 /**
@@ -46,6 +48,8 @@ export function ChargesPanel({
   onCycleChange,
   studentName,
   onPay,
+  onDiscount,
+  onCancel,
 }: ChargesPanelProps): ReactElement {
   const t = useTranslations("finance");
 
@@ -69,6 +73,7 @@ export function ChargesPanel({
             value={cycleId}
             options={cycles.map((c) => ({ value: c.id, label: c.name }))}
             onChange={onCycleChange}
+            placeholder={t("option.choose")}
           />
         </div>
         <div style={{ minWidth: 240 }}>
@@ -77,6 +82,7 @@ export function ChargesPanel({
             value={studentId}
             options={students.map((s) => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
             onChange={onStudentChange}
+            placeholder={t("option.choose")}
             disabled={filter === "overdue"}
           />
         </div>
@@ -110,7 +116,7 @@ export function ChargesPanel({
           {columns.map((column) => (
             <div key={column}>{column}</div>
           ))}
-          <div style={{ width: 168 }} />
+          <div style={{ width: ACTION_COL_WIDTH }} />
         </div>
         <div style={{ padding: 8 }}>
           {loading ? (
@@ -119,7 +125,14 @@ export function ChargesPanel({
             <AllClear title={t("state.allClear")} hint={t("state.empty.charges")} />
           ) : (
             charges.map((charge) => (
-              <ChargeRow key={charge.id} charge={charge} studentName={studentName(charge.studentId)} onPay={onPay} />
+              <ChargeRow
+                key={charge.id}
+                charge={charge}
+                studentName={studentName(charge.studentId)}
+                onPay={onPay}
+                onDiscount={onDiscount}
+                onCancel={onCancel}
+              />
             ))
           )}
         </div>

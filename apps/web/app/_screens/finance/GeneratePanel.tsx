@@ -5,7 +5,8 @@ import { useTranslations } from "next-intl";
 import { Btn } from "../../_design/Controls";
 import type { Cycle, Group } from "../../config/api";
 import type { ChargeConcept, GenerateChargesInput } from "../../finance/api";
-import { DateField, ErrorAlert, pesosToCents, Section, SelectField, TextField } from "./parts";
+import { pesosToCents } from "./money";
+import { DateField, ErrorAlert, Section, SelectField, TextField } from "./parts";
 
 export interface GeneratePanelProps {
   concepts: readonly ChargeConcept[];
@@ -61,18 +62,21 @@ export function GeneratePanel({ concepts, cycles, cycleId, onCycleChange, groups
             value={conceptId}
             options={concepts.map((concept) => ({ value: concept.id, label: concept.name }))}
             onChange={setConceptId}
+            placeholder={t("option.choose")}
           />
           <SelectField
             label={t("field.cycle")}
             value={cycleId}
             options={cycles.map((cycle) => ({ value: cycle.id, label: cycle.name }))}
             onChange={onCycleChange}
+            placeholder={t("option.choose")}
           />
           <SelectField
             label={t("field.group")}
             value={groupId}
             options={groups.map((group) => ({ value: group.id, label: group.name }))}
             onChange={setGroupId}
+            placeholder={t("option.choose")}
             disabled={cycleId === ""}
           />
           <DateField label={t("field.dueDate")} value={dueDate} onChange={setDueDate} />

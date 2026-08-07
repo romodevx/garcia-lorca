@@ -3,32 +3,27 @@
 import { useState, type ReactElement } from "react";
 import { useTranslations } from "next-intl";
 import { Btn } from "../../_design/Controls";
-import type { ChargeConcept, CreateConceptInput, UpdateConceptInput } from "../../finance/api";
-import {
-  CheckBoxField,
-  EmptyHint,
-  ErrorAlert,
-  formatCents,
-  pesosToCents,
-  RadioGroup,
-  Section,
-  TextField,
-  centsToPesosInput,
-} from "./parts";
+import type { ChargeConcept, CreateConceptInput, Recurrence, UpdateConceptInput } from "../../finance/api";
+import { centsToPesosInput, formatCents, pesosToCents } from "./money";
+import { CheckBoxField, EmptyHint, ErrorAlert, RadioGroup, Section, TextField } from "./parts";
 
 /** Blank draft = create mode; a draft with an id = editing that concept. */
 interface Draft {
   id?: string;
   name: string;
   amount: string;
-  recurrence: string;
+  recurrence: Recurrence;
   active: boolean;
 }
 
 const EMPTY_DRAFT: Draft = { name: "", amount: "", recurrence: "monthly", active: true };
 
+const RECURRENCES: readonly Recurrence[] = ["once", "monthly"];
+
 export interface ConceptsPanelProps {
   concepts: readonly ChargeConcept[];
+  /** The concept READ failed — shown here, so the rest of the surface stays usable. */
+  loadError?: string;
   includeInactive: boolean;
   onIncludeInactiveChange: (include: boolean) => void;
   onCreate: (input: CreateConceptInput) => Promise<void>;
@@ -42,6 +37,7 @@ export interface ConceptsPanelProps {
  */
 export function ConceptsPanel({
   concepts,
+  loadError,
   includeInactive,
   onIncludeInactiveChange,
   onCreate,
@@ -89,10 +85,7 @@ export function ConceptsPanel({
             legend={t("field.recurrence")}
             value={draft.recurrence}
             onChange={(recurrence) => patch({ recurrence })}
-            options={[
-              { value: "once", label: t("recurrence.once") },
-              { value: "monthly", label: t("recurrence.monthly") },
-            ]}
+            options={RECURRENCES.map((recurrence) => ({ value: recurrence, label: t(`recurrence.${recurrence}`) }))}
           />
           {editing && <CheckBoxField label={t("field.active")} checked={draft.active} onChange={(active) => patch({ active })} />}
         </div>
@@ -106,6 +99,8 @@ export function ConceptsPanel({
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
           <CheckBoxField label={t("option.includeInactive")} checked={includeInactive} onChange={onIncludeInactiveChange} />
         </div>
+
+        {loadError !== undefined && <ErrorAlert message={loadError} />}
 
         {concepts.length === 0 ? (
           <EmptyHint>{t("state.empty.concepts")}</EmptyHint>

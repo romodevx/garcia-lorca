@@ -15,7 +15,12 @@ import {
 
 const BASE = "http://gw";
 
-afterEach(() => vi.restoreAllMocks());
+// `restoreAllMocks` does NOT undo `stubGlobal` — only `unstubAllGlobals` puts the
+// real `fetch` back, so a stub cannot leak into the next test file.
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -307,6 +312,20 @@ describe("charges write path", () => {
     const body = JSON.parse(init.body as string);
     expect(body).toEqual({ discountCents: 5000, reason: "beca parcial" });
     expect(typeof body.discountCents).toBe("number");
+  });
+
+  it("narrows an unrecognized wire enum instead of widening it into the union", async () => {
+    // A gateway newer than this build: the value must not reach the UI as-is,
+    // because every renderer treats `status`/`method` as an exhaustive union.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ charges: [{ ...charge, status: "refunded" }] })));
+    await expect(listCharges(BASE)).resolves.toMatchObject([{ id: "ch1", status: "pending" }]);
+
+    vi.unstubAllGlobals();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ payments: [{ ...payment, method: "crypto" }], totalBalanceCents: 0 })),
+    );
+    await expect(getAccount(BASE, "st1")).resolves.toMatchObject({ payments: [{ id: "p1", method: "cash" }] });
   });
 
   it("cancelCharge POSTs the cancel route with no body", async () => {

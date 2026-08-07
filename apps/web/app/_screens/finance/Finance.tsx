@@ -8,7 +8,8 @@ import { ConceptsPanel } from "./ConceptsPanel";
 import { FinanceHeader } from "./FinanceHeader";
 import { GeneratePanel } from "./GeneratePanel";
 import { PaymentPanel } from "./PaymentPanel";
-import { formatCents, SummaryCards, TabBar, Toast, type SummaryCard } from "./parts";
+import { formatCents } from "./money";
+import { SummaryCards, TabBar, Toast, type SummaryCard } from "./parts";
 import { collectable, totalsOf } from "./totals";
 import { useFinance, type FinanceSection } from "./useFinance";
 
@@ -82,6 +83,8 @@ export function Finance({ onBack, intent }: FinanceProps): ReactElement {
               onCycleChange={fin.setCycleId}
               studentName={fin.studentName}
               onPay={fin.openPayment}
+              onDiscount={fin.handleDiscount}
+              onCancel={fin.handleCancelCharge}
             />
           )}
           {fin.section === "payment" && (
@@ -96,6 +99,7 @@ export function Finance({ onBack, intent }: FinanceProps): ReactElement {
           {fin.section === "concepts" && (
             <ConceptsPanel
               concepts={fin.concepts}
+              loadError={fin.conceptsError}
               includeInactive={fin.includeInactive}
               onIncludeInactiveChange={fin.setIncludeInactive}
               onCreate={fin.handleCreateConcept}

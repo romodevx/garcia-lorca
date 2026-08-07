@@ -28,7 +28,7 @@ export interface ChargeConcept {
   id: string;
   name: string;
   defaultAmountCents: number;
-  recurrence: string;
+  recurrence: Recurrence;
   active: boolean;
 }
 
@@ -44,7 +44,7 @@ export interface Charge {
   amountCents: number;
   discountCents: number;
   dueDate: string;
-  status: string;
+  status: ChargeStatus;
   /** Server-derived from the charge's payments — never sent by the client. */
   paidCents: number;
   /** Server-derived (amount − discount − paid) — never sent by the client. */
@@ -58,7 +58,7 @@ export interface Payment {
   id: string;
   chargeId: string;
   amountCents: number;
-  method: string;
+  method: PaymentMethod;
   reference: string;
   paidAt: string;
 }
@@ -87,7 +87,7 @@ export interface GenerateResult {
 export interface CreateConceptInput {
   name: string;
   defaultAmountCents: number;
-  recurrence: string;
+  recurrence: Recurrence;
 }
 
 export interface UpdateConceptInput extends CreateConceptInput {
@@ -118,7 +118,7 @@ export interface GenerateChargesInput {
 export interface RegisterPaymentInput {
   chargeId: string;
   amountCents: number;
-  method: string;
+  method: PaymentMethod;
   reference: string;
 }
 
@@ -127,6 +127,46 @@ export interface ChargeFilters {
   studentId?: string;
   cycleId?: string;
 }
+
+// --- the parse boundary ---------------------------------------------------
+
+/**
+ * On the wire an enum is just a string, so the union types above are a CLAIM
+ * about the response, not a fact. `oneOf` is the single place that claim is
+ * checked: every entity crossing into the app passes through one of the `to…`
+ * mappers below, so no unchecked string is ever widened into a union by a cast.
+ */
+type Wire<T, K extends keyof T> = Omit<T, K> & { [P in K]: string };
+
+const RECURRENCES: readonly Recurrence[] = ["once", "monthly"];
+const CHARGE_STATUSES: readonly ChargeStatus[] = ["pending", "partial", "paid", "cancelled"];
+const PAYMENT_METHODS: readonly PaymentMethod[] = ["cash", "card", "transfer"];
+
+/** Narrow a wire string to its union; an unrecognized value degrades to `fallback`. */
+function oneOf<T extends string>(allowed: readonly T[], value: string, fallback: T): T {
+  return (allowed as readonly string[]).includes(value) ? (value as T) : fallback;
+}
+
+const toConcept = (raw: Wire<ChargeConcept, "recurrence">): ChargeConcept => ({
+  ...raw,
+  recurrence: oneOf(RECURRENCES, raw.recurrence, "monthly"),
+});
+
+/**
+ * A status this build does not know means a gateway newer than the client. It
+ * degrades to `pending`, the neutral lifecycle state: the row stays readable and
+ * never claims the charge was voided, while the collect action remains gated on
+ * `remainingCents` — so an unknown status can neither hide nor invent a debt.
+ */
+const toCharge = (raw: Wire<Charge, "status">): Charge => ({
+  ...raw,
+  status: oneOf(CHARGE_STATUSES, raw.status, "pending"),
+});
+
+const toPayment = (raw: Wire<Payment, "method">): Payment => ({
+  ...raw,
+  method: oneOf(PAYMENT_METHODS, raw.method, "cash"),
+});
 
 // --- transport helpers ----------------------------------------------------
 
@@ -199,35 +239,36 @@ function query(params: Record<string, string | undefined>): string {
 
 // --- concepts -------------------------------------------------------------
 
-export function createConcept(baseURL: string, input: CreateConceptInput): Promise<ChargeConcept> {
+export async function createConcept(baseURL: string, input: CreateConceptInput): Promise<ChargeConcept> {
   const body = {
     name: input.name,
     defaultAmountCents: input.defaultAmountCents,
     recurrence: input.recurrence,
   };
-  return sendJSON<ChargeConcept>(baseURL, "/concepts", "POST", body);
+  return toConcept(await sendJSON<Wire<ChargeConcept, "recurrence">>(baseURL, "/concepts", "POST", body));
 }
 
 /** Full replace of a concept's mutable fields, `active` included. */
-export function updateConcept(baseURL: string, id: string, input: UpdateConceptInput): Promise<ChargeConcept> {
+export async function updateConcept(baseURL: string, id: string, input: UpdateConceptInput): Promise<ChargeConcept> {
   const body = {
     name: input.name,
     defaultAmountCents: input.defaultAmountCents,
     recurrence: input.recurrence,
     active: input.active,
   };
-  return sendJSON<ChargeConcept>(baseURL, `/concepts/${id}`, "PUT", body);
+  return toConcept(await sendJSON<Wire<ChargeConcept, "recurrence">>(baseURL, `/concepts/${id}`, "PUT", body));
 }
 
 /** Active concepts by default; `includeInactive` adds the archived ones. */
-export function listConcepts(baseURL: string, includeInactive = false): Promise<ChargeConcept[]> {
+export async function listConcepts(baseURL: string, includeInactive = false): Promise<ChargeConcept[]> {
   const qs = query({ includeInactive: includeInactive ? "true" : undefined });
-  return getList<ChargeConcept>(baseURL, `/concepts${qs}`, "concepts");
+  const rows = await getList<Wire<ChargeConcept, "recurrence">>(baseURL, `/concepts${qs}`, "concepts");
+  return rows.map(toConcept);
 }
 
 // --- charges --------------------------------------------------------------
 
-export function createCharge(baseURL: string, input: CreateChargeInput): Promise<Charge> {
+export async function createCharge(baseURL: string, input: CreateChargeInput): Promise<Charge> {
   const body = {
     studentId: input.studentId,
     cycleId: input.cycleId,
@@ -236,7 +277,7 @@ export function createCharge(baseURL: string, input: CreateChargeInput): Promise
     descriptionOverride: input.descriptionOverride,
     dueDate: input.dueDate,
   };
-  return sendJSON<Charge>(baseURL, "/charges", "POST", body);
+  return toCharge(await sendJSON<Wire<Charge, "status">>(baseURL, "/charges", "POST", body));
 }
 
 /**
@@ -256,22 +297,31 @@ export async function generateCharges(baseURL: string, input: GenerateChargesInp
   return { created: res.created ?? 0, skipped: res.skipped ?? 0 };
 }
 
-export function listCharges(baseURL: string, filters: ChargeFilters = {}): Promise<Charge[]> {
+export async function listCharges(baseURL: string, filters: ChargeFilters = {}): Promise<Charge[]> {
   const qs = query({ studentId: filters.studentId, cycleId: filters.cycleId });
-  return getList<Charge>(baseURL, `/charges${qs}`, "charges");
+  const rows = await getList<Wire<Charge, "status">>(baseURL, `/charges${qs}`, "charges");
+  return rows.map(toCharge);
 }
 
-export function applyDiscount(baseURL: string, chargeId: string, discountCents: number, reason: string): Promise<Charge> {
-  return sendJSON<Charge>(baseURL, `/charges/${chargeId}/discount`, "POST", { discountCents, reason });
+/**
+ * Forgive part of a charge (a beca or an adjustment). `discountCents` is integer
+ * cents and `reason` is the audit trail the gateway records; the response is the
+ * charge with its recomputed remaining balance and status.
+ */
+export async function applyDiscount(baseURL: string, chargeId: string, discountCents: number, reason: string): Promise<Charge> {
+  const body = { discountCents, reason };
+  return toCharge(await sendJSON<Wire<Charge, "status">>(baseURL, `/charges/${chargeId}/discount`, "POST", body));
 }
 
-export function cancelCharge(baseURL: string, chargeId: string): Promise<Charge> {
-  return postAction<Charge>(baseURL, `/charges/${chargeId}/cancel`);
+/** Void a charge. Returns it with `status: "cancelled"` — no longer collectable. */
+export async function cancelCharge(baseURL: string, chargeId: string): Promise<Charge> {
+  return toCharge(await postAction<Wire<Charge, "status">>(baseURL, `/charges/${chargeId}/cancel`));
 }
 
 /** Charges past their due date with a remaining balance. */
-export function getOverdue(baseURL: string, cycleId?: string): Promise<Charge[]> {
-  return getList<Charge>(baseURL, `/overdue${query({ cycleId })}`, "overdue");
+export async function getOverdue(baseURL: string, cycleId?: string): Promise<Charge[]> {
+  const rows = await getList<Wire<Charge, "status">>(baseURL, `/overdue${query({ cycleId })}`, "overdue");
+  return rows.map(toCharge);
 }
 
 // --- payments + account ---------------------------------------------------
@@ -280,22 +330,32 @@ export function getOverdue(baseURL: string, cycleId?: string): Promise<Charge[]>
  * Register a window payment. The response carries the recomputed charge too, so
  * the caller needs no follow-up read.
  */
-export function registerPayment(baseURL: string, input: RegisterPaymentInput): Promise<PaymentResult> {
+export async function registerPayment(baseURL: string, input: RegisterPaymentInput): Promise<PaymentResult> {
   const body = {
     chargeId: input.chargeId,
     amountCents: input.amountCents,
     method: input.method,
     reference: input.reference,
   };
-  return sendJSON<PaymentResult>(baseURL, "/payments", "POST", body);
+  const res = await sendJSON<{ payment: Wire<Payment, "method">; charge: Wire<Charge, "status"> }>(
+    baseURL,
+    "/payments",
+    "POST",
+    body,
+  );
+  return { payment: toPayment(res.payment), charge: toCharge(res.charge) };
 }
 
 /** A student's statement: charges, payments and the outstanding balance. */
 export async function getAccount(baseURL: string, studentId: string): Promise<AccountStatement> {
-  const res = await getJSON<Partial<AccountStatement>>(baseURL, `/accounts/${studentId}`);
+  const res = await getJSON<{
+    charges?: Wire<Charge, "status">[];
+    payments?: Wire<Payment, "method">[];
+    totalBalanceCents?: number;
+  }>(baseURL, `/accounts/${studentId}`);
   return {
-    charges: res.charges ?? [],
-    payments: res.payments ?? [],
+    charges: (res.charges ?? []).map(toCharge),
+    payments: (res.payments ?? []).map(toPayment),
     totalBalanceCents: res.totalBalanceCents ?? 0,
   };
 }

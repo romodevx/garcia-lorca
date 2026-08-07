@@ -5,14 +5,12 @@ import { Icon, type IconName } from "../../_design/Icon";
 import { COLOR, type ColorKey } from "../../_design/colors";
 
 /**
- * Presentational primitives + money conversion for the finance surface. The
- * catalog primitives (Section/TextField/SelectField/DateField/RadioGroup/…) are
- * re-exported so a panel imports everything from one place.
+ * Presentational primitives for the finance surface. The catalog primitives
+ * (Section/TextField/SelectField/DateField/RadioGroup/…) are re-exported so a
+ * panel imports everything visual from one place.
  *
- * MONEY: the API layer speaks integer CENTS end to end. Pesos exist ONLY here,
- * at the formatting boundary — `formatCents` for display and `pesosToCents` for
- * the one place a human types an amount. No float ever crosses back into the
- * client/API layer.
+ * MONEY conversion deliberately does NOT live here: it is pure logic with its
+ * own unit tests, in `./money`.
  */
 
 export {
@@ -25,28 +23,6 @@ export {
   TextField,
   type SelectOption,
 } from "../config/parts";
-
-/**
- * Currency display is pinned to es-MX/MXN regardless of the UI locale: the
- * amount IS Mexican pesos, so an English UI must not re-render it as USD.
- */
-export function formatCents(cents: number): string {
-  return (cents / 100).toLocaleString("es-MX", { style: "currency", currency: "MXN" });
-}
-
-/** The peso value a human sees in an amount input, e.g. 185000 → "1850.00". */
-export function centsToPesosInput(cents: number): string {
-  return (cents / 100).toFixed(2);
-}
-
-/**
- * Parse a typed peso amount into integer cents. `NaN` for anything unparseable,
- * so the caller validates before sending. Rounding happens once, here.
- */
-export function pesosToCents(pesos: string): number {
-  const value = Number(pesos.replace(/[\s,]/g, ""));
-  return Number.isFinite(value) ? Math.round(value * 100) : Number.NaN;
-}
 
 /** A single labelled checkbox (`aria-label` = the visible label, for a11y + tests). */
 export function CheckBoxField({

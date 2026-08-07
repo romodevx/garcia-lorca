@@ -20,6 +20,8 @@ vi.mock("../../finance/api", () => ({
   getOverdue: vi.fn(),
   registerPayment: vi.fn(),
   getAccount: vi.fn(),
+  applyDiscount: vi.fn(),
+  cancelCharge: vi.fn(),
 }));
 
 vi.mock("../../config/api", () => ({
@@ -49,7 +51,7 @@ const student = {
   admissionStatus: "enrolled" as const,
 };
 
-const concept = { id: "c1", name: "Colegiatura", defaultAmountCents: 185000, recurrence: "monthly", active: true };
+const concept = { id: "c1", name: "Colegiatura", defaultAmountCents: 185000, recurrence: "monthly" as const, active: true };
 
 const overdueCharge = {
   id: "ch1",
@@ -60,7 +62,7 @@ const overdueCharge = {
   amountCents: 185000,
   discountCents: 0,
   dueDate: "2026-09-05",
-  status: "pending",
+  status: "pending" as const,
   paidCents: 0,
   remainingCents: 185000,
 };
@@ -113,12 +115,120 @@ describe("Finance — adeudos", () => {
   });
 });
 
+describe("Finance — a cancelled charge", () => {
+  const cancelledCharge = { ...overdueCharge, id: "ch9", description: "Cargo anulado", status: "cancelled" as const, remainingCents: 0 };
+
+  it("labels it from its own status — never 'Pagado', which it was not", async () => {
+    finance.getOverdue.mockResolvedValue([cancelledCharge]);
+    renderFinance();
+
+    expect(await screen.findByText("Cargo anulado")).toBeInTheDocument();
+    // "Cancelado" is the pill AND the row label; "Pagado" must appear nowhere in
+    // the row (the column HEADER "Pagado" is the only legitimate occurrence).
+    const labels = screen.getAllByText("Pagado").filter((element) => element.tagName !== "OPTION");
+    expect(labels).toHaveLength(1);
+    expect(labels[0]).toHaveTextContent("Pagado");
+    expect(screen.getAllByText("Cancelado").length).toBe(2);
+  });
+
+  it("offers no money actions on it (nothing left to collect, discount or void)", async () => {
+    finance.getOverdue.mockResolvedValue([cancelledCharge]);
+    renderFinance();
+
+    await screen.findByText("Cargo anulado");
+    expect(screen.queryByRole("button", { name: /Registrar pago de/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Más acciones de/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("Finance — descuento y cancelación", () => {
+  /** Opens the secondary-actions disclosure of the single overdue row. */
+  async function openActions(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+    renderFinance();
+    await user.click(await screen.findByRole("button", { name: "Más acciones de Colegiatura septiembre" }));
+  }
+
+  it("applies a discount as INTEGER cents with its reason, and updates the row", async () => {
+    const user = userEvent.setup();
+    finance.applyDiscount.mockResolvedValue({ ...overdueCharge, discountCents: 25050, remainingCents: 159950 });
+
+    await openActions(user);
+    await user.type(screen.getByLabelText("Descuento (pesos)"), "250.50");
+    await user.type(screen.getByLabelText("Motivo del descuento"), "beca parcial");
+    await user.click(screen.getByRole("button", { name: "Aplicar descuento" }));
+
+    await waitFor(() => expect(finance.applyDiscount).toHaveBeenCalledWith(expect.any(String), "ch1", 25050, "beca parcial"));
+    const [, , discountCents] = finance.applyDiscount.mock.calls[0]!;
+    expect(Number.isInteger(discountCents)).toBe(true);
+    // The gateway's recomputed charge replaces the row, and the toast confirms.
+    expect(await screen.findByRole("status")).toHaveTextContent("Descuento aplicado · $250.50");
+    // The new balance shows in the row AND in the recomputed KPI card.
+    expect(screen.getAllByText("$1,599.50")).toHaveLength(2);
+  });
+
+  it("refuses a discount whose amount is not unambiguously pesos (no NaN reaches the gateway)", async () => {
+    const user = userEvent.setup();
+
+    await openActions(user);
+    // A decimal COMMA: silently coerced this would forgive 100x the intended amount.
+    await user.type(screen.getByLabelText("Descuento (pesos)"), "250,50");
+    await user.type(screen.getByLabelText("Motivo del descuento"), "beca parcial");
+    await user.click(screen.getByRole("button", { name: "Aplicar descuento" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Captura un monto mayor a cero.");
+    expect(finance.applyDiscount).not.toHaveBeenCalled();
+  });
+
+  it("requires a reason for the discount (it is the gateway's audit trail)", async () => {
+    const user = userEvent.setup();
+
+    await openActions(user);
+    await user.type(screen.getByLabelText("Descuento (pesos)"), "250.50");
+    await user.click(screen.getByRole("button", { name: "Aplicar descuento" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Captura el motivo del descuento.");
+    expect(finance.applyDiscount).not.toHaveBeenCalled();
+  });
+
+  it("cancels a charge only after an explicit confirmation, then shows it cancelled", async () => {
+    const user = userEvent.setup();
+    finance.cancelCharge.mockResolvedValue({ ...overdueCharge, status: "cancelled" as const, remainingCents: 0 });
+
+    await openActions(user);
+
+    // First click arms the action; nothing is sent yet.
+    await user.click(screen.getByRole("button", { name: "Cancelar cargo" }));
+    expect(finance.cancelCharge).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Confirmar cancelación" }));
+
+    await waitFor(() => expect(finance.cancelCharge).toHaveBeenCalledWith(expect.any(String), "ch1"));
+    expect(await screen.findByRole("status")).toHaveTextContent("Cargo cancelado");
+    // The row is now cancelled (pill + label) and offers no money actions.
+    await waitFor(() => expect(screen.getAllByText("Cancelado")).toHaveLength(2));
+    expect(screen.queryByRole("button", { name: /Registrar pago de/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Más acciones de/ })).not.toBeInTheDocument();
+  });
+
+  it("surfaces the gateway's refusal next to the form instead of failing silently", async () => {
+    const user = userEvent.setup();
+    finance.applyDiscount.mockRejectedValue(new Error("discount exceeds charge amount"));
+
+    await openActions(user);
+    await user.type(screen.getByLabelText("Descuento (pesos)"), "999999");
+    await user.type(screen.getByLabelText("Motivo del descuento"), "error de captura");
+    await user.click(screen.getByRole("button", { name: "Aplicar descuento" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("discount exceeds charge amount");
+  });
+});
+
 describe("Finance — ventanilla", () => {
   it("prefills the remaining balance, posts integer cents and confirms with a toast", async () => {
     const user = userEvent.setup();
     finance.registerPayment.mockResolvedValue({
       payment: { id: "p1", chargeId: "ch1", amountCents: 185000, method: "cash", reference: "", paidAt: "2026-09-01T10:00:00Z" },
-      charge: { ...overdueCharge, paidCents: 185000, remainingCents: 0, status: "paid" },
+      charge: { ...overdueCharge, paidCents: 185000, remainingCents: 0, status: "paid" as const },
     });
 
     renderFinance();
@@ -145,8 +255,8 @@ describe("Finance — ventanilla", () => {
   it("sends the chosen method and reference, converting pesos to cents", async () => {
     const user = userEvent.setup();
     finance.registerPayment.mockResolvedValue({
-      payment: { id: "p1", chargeId: "ch1", amountCents: 50025, method: "transfer", reference: "SPEI-77", paidAt: "2026-09-01T10:00:00Z" },
-      charge: { ...overdueCharge, paidCents: 50025, remainingCents: 134975, status: "partial" },
+      payment: { id: "p1", chargeId: "ch1", amountCents: 50025, method: "transfer" as const, reference: "SPEI-77", paidAt: "2026-09-01T10:00:00Z" },
+      charge: { ...overdueCharge, paidCents: 50025, remainingCents: 134975, status: "partial" as const },
     });
 
     renderFinance();
@@ -287,7 +397,7 @@ describe("Finance — estado de cuenta", () => {
     const user = userEvent.setup();
     finance.getAccount.mockResolvedValue({
       charges: [overdueCharge],
-      payments: [{ id: "p1", chargeId: "ch1", amountCents: 50000, method: "cash", reference: "", paidAt: "2026-09-01T10:00:00Z" }],
+      payments: [{ id: "p1", chargeId: "ch1", amountCents: 50000, method: "cash" as const, reference: "", paidAt: "2026-09-01T10:00:00Z" }],
       totalBalanceCents: 135000,
     });
 
@@ -317,5 +427,26 @@ describe("Finance — load failures", () => {
     renderFinance();
     expect(await screen.findByRole("alert")).toHaveTextContent("No se pudieron cargar los cargos: HTTP 503");
     expect(screen.getByRole("tablist", { name: "Secciones de finanzas" })).toBeInTheDocument();
+  });
+
+  it("keeps the debts table intact when only the concept read fails", async () => {
+    // Regression: a transient concepts read used to set the SHARED load error,
+    // which replaced the whole surface — wiping a debts table that was fine.
+    finance.listConcepts.mockRejectedValue(new Error("HTTP 503"));
+    renderFinance();
+
+    expect(await screen.findByText("Colegiatura septiembre")).toBeInTheDocument();
+    expect(screen.queryByText("No se pudieron cargar las finanzas.")).not.toBeInTheDocument();
+  });
+
+  it("reports a failed concept read inside the concepts panel", async () => {
+    const user = userEvent.setup();
+    finance.listConcepts.mockRejectedValue(new Error("HTTP 503"));
+    renderFinance();
+
+    const tabs = await screen.findByRole("tablist", { name: "Secciones de finanzas" });
+    await user.click(within(tabs).getByRole("tab", { name: "Conceptos" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("No se pudieron cargar los conceptos: HTTP 503");
   });
 });

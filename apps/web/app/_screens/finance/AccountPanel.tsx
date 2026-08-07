@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, type ReactElement } from "react";
+import { useRef, useState, type ReactElement } from "react";
 import { useTranslations } from "next-intl";
 import { Btn } from "../../_design/Controls";
 import type { AccountStatement } from "../../finance/api";
 import type { Student } from "../../students/api";
-import { EmptyHint, ErrorAlert, formatCents, Section, SelectField } from "./parts";
+import { formatCents } from "./money";
+import { EmptyHint, ErrorAlert, Section, SelectField } from "./parts";
 
 export interface AccountPanelProps {
   students: readonly Student[];
@@ -24,18 +25,26 @@ export function AccountPanel({ students, onLoad }: AccountPanelProps): ReactElem
   const [statement, setStatement] = useState<AccountStatement | undefined>(undefined);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  // Monotonic id of the newest read: a slow response for a previously chosen
+  // student must never be rendered as THIS student's statement.
+  const request = useRef(0);
 
   const load = async (): Promise<void> => {
     setError(undefined);
     if (studentId === "") return;
+    const id = (request.current += 1);
+    const isCurrent = (): boolean => id === request.current;
     setPending(true);
     try {
-      setStatement(await onLoad(studentId));
+      const loaded = await onLoad(studentId);
+      if (isCurrent()) setStatement(loaded);
     } catch (cause) {
-      setStatement(undefined);
-      setError(t("error.account", { detail: cause instanceof Error ? cause.message : String(cause) }));
+      if (isCurrent()) {
+        setStatement(undefined);
+        setError(t("error.account", { detail: cause instanceof Error ? cause.message : String(cause) }));
+      }
     } finally {
-      setPending(false);
+      if (isCurrent()) setPending(false);
     }
   };
 
@@ -49,6 +58,7 @@ export function AccountPanel({ students, onLoad }: AccountPanelProps): ReactElem
               value={studentId}
               options={students.map((student) => ({ value: student.id, label: `${student.firstName} ${student.lastName}` }))}
               onChange={setStudentId}
+              placeholder={t("option.choose")}
             />
           </div>
           <Btn kind="forest" icon="reports" onClick={() => void load()} disabled={pending || studentId === ""}>
