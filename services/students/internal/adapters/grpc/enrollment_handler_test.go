@@ -138,7 +138,7 @@ func enrollmentHandler(t *testing.T) (*grpcadapter.StudentsHandler, string) {
 	now := func() time.Time { return time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC) }
 	enroll := usecase.NewEnrollmentService(studentRepo, newFakeEnrollmentRepo(), catalog, nil, testTenant, newID, now)
 	stu := usecase.NewStudentService(studentRepo, &fakePublisher{}, testTenant, func() string { return "stu-x" })
-	return grpcadapter.NewStudentsHandler(stu, enroll, usecase.NewHealthService("students")), student.ID()
+	return grpcadapter.NewStudentsHandler(stu, enroll, nil, usecase.NewHealthService("students")), student.ID()
 }
 
 // seedApplicant inserts an applicant directly through the student repo and

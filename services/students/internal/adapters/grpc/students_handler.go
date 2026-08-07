@@ -23,15 +23,21 @@ var _ studentsv1connect.StudentsServiceHandler = (*StudentsHandler)(nil)
 // use-case calls, and domain error Kinds ↔ Connect codes. All logic lives in
 // usecase/domain.
 type StudentsHandler struct {
-	svc    *usecase.StudentService
-	enroll *usecase.EnrollmentService
-	health *usecase.HealthService
+	svc      *usecase.StudentService
+	enroll   *usecase.EnrollmentService
+	guardian *usecase.GuardianService
+	health   *usecase.HealthService
 }
 
-// NewStudentsHandler wires the handler to the student, enrollment, and health use
-// cases.
-func NewStudentsHandler(svc *usecase.StudentService, enroll *usecase.EnrollmentService, health *usecase.HealthService) *StudentsHandler {
-	return &StudentsHandler{svc: svc, enroll: enroll, health: health}
+// NewStudentsHandler wires the handler to the student, enrollment, guardian, and
+// health use cases.
+func NewStudentsHandler(
+	svc *usecase.StudentService,
+	enroll *usecase.EnrollmentService,
+	guardian *usecase.GuardianService,
+	health *usecase.HealthService,
+) *StudentsHandler {
+	return &StudentsHandler{svc: svc, enroll: enroll, guardian: guardian, health: health}
 }
 
 func (h *StudentsHandler) Health(ctx context.Context, _ *connect.Request[studentsv1.HealthRequest]) (*connect.Response[studentsv1.HealthResponse], error) {
@@ -159,6 +165,47 @@ func (h *StudentsHandler) WithdrawEnrollment(ctx context.Context, req *connect.R
 	return connect.NewResponse(&studentsv1.WithdrawEnrollmentResponse{Enrollment: toProtoEnrollment(enrollment)}), nil
 }
 
+// --- guardian links --------------------------------------------------------
+
+// LinkGuardian links an iam user (validated by RPC at the use-case layer) to a
+// student. A guardian_user_id that is unknown to iam, or that does not hold the
+// guardian role, is an InvalidArgument — not a NotFound: the resource addressed by
+// the call is the student, and the user id is an argument. A duplicate link
+// surfaces as AlreadyExists via the shared error mapper.
+func (h *StudentsHandler) LinkGuardian(ctx context.Context, req *connect.Request[studentsv1.LinkGuardianRequest]) (*connect.Response[studentsv1.LinkGuardianResponse], error) {
+	m := req.Msg
+	link, err := h.guardian.LinkGuardian(ctx, m.GetGuardianUserId(), m.GetStudentId(), m.GetRelationship())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.LinkGuardianResponse{Link: toProtoGuardianLink(link)}), nil
+}
+
+// UnlinkGuardian removes a guardian ↔ student link. An unknown link is NotFound.
+func (h *StudentsHandler) UnlinkGuardian(ctx context.Context, req *connect.Request[studentsv1.UnlinkGuardianRequest]) (*connect.Response[studentsv1.UnlinkGuardianResponse], error) {
+	m := req.Msg
+	if err := h.guardian.UnlinkGuardian(ctx, m.GetGuardianUserId(), m.GetStudentId()); err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.UnlinkGuardianResponse{}), nil
+}
+
+func (h *StudentsHandler) ListGuardiansForStudent(ctx context.Context, req *connect.Request[studentsv1.ListGuardiansForStudentRequest]) (*connect.Response[studentsv1.ListGuardiansForStudentResponse], error) {
+	links, err := h.guardian.ListGuardiansForStudent(ctx, req.Msg.GetStudentId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.ListGuardiansForStudentResponse{Links: toProtoGuardianLinks(links)}), nil
+}
+
+func (h *StudentsHandler) ListStudentsForGuardian(ctx context.Context, req *connect.Request[studentsv1.ListStudentsForGuardianRequest]) (*connect.Response[studentsv1.ListStudentsForGuardianResponse], error) {
+	links, err := h.guardian.ListStudentsForGuardian(ctx, req.Msg.GetGuardianUserId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.ListStudentsForGuardianResponse{Links: toProtoGuardianLinks(links)}), nil
+}
+
 // --- mapping ---------------------------------------------------------------
 
 func toProtoStudent(s *domain.Student) *studentsv1.Student {
@@ -186,6 +233,26 @@ func toProtoEnrollment(e domain.Enrollment) *studentsv1.Enrollment {
 		Status:     protoconv.ToProtoEnrollmentStatus(e.Status()),
 		EnrolledAt: timestamppb.New(e.EnrolledAt()),
 	}
+}
+
+// toProtoGuardianLink projects a domain GuardianLink onto the wire. The
+// relationship travels as its canonical name (the DB CHECK vocabulary).
+func toProtoGuardianLink(l domain.GuardianLink) *studentsv1.GuardianLink {
+	return &studentsv1.GuardianLink{
+		Id:             l.ID(),
+		TenantId:       l.TenantID(),
+		GuardianUserId: l.GuardianUserID(),
+		StudentId:      l.StudentID(),
+		Relationship:   l.Relationship().String(),
+	}
+}
+
+func toProtoGuardianLinks(links []domain.GuardianLink) []*studentsv1.GuardianLink {
+	out := make([]*studentsv1.GuardianLink, 0, len(links))
+	for _, l := range links {
+		out = append(out, toProtoGuardianLink(l))
+	}
+	return out
 }
 
 // connectErr maps a domain error Kind to the Connect status code. Internal
