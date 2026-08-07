@@ -3,9 +3,9 @@
  * handoff (project/data.jsx), scoped to the web system (administración +
  * maestros). Parent-app fixtures from the prototype are intentionally omitted.
  *
- * NOTE: this is mock data for the presentation surface. When `module_finance`
- * et al. land their real backends, these screens read from
- * `@garcia-lorca/api-client` instead — the gateway is the security boundary.
+ * NOTE: what remains is CHROME data (the module panel + the demo identity in the
+ * top bar). Domain fixtures are gone: every built module reads its own data from
+ * the gateway — the security boundary — through `app/<module>/api.ts`.
  */
 import type { ColorKey } from "./colors";
 import type { IconName } from "./Icon";
@@ -46,52 +46,6 @@ export const MODULES: readonly ModuleDef[] = [
   // Admin surface (module_iam): users, roles, and the teacher↔user link.
   { id: "admin", label: "Administración", icon: "shield", color: "forest", desc: "Usuarios y roles", badge: null, flag: "module_iam" }
 ];
-
-export const LEVELS = ["Kínder", "Primaria", "Secundaria", "Preparatoria"] as const;
-export type Level = (typeof LEVELS)[number];
-
-export type StudentStatus = "paid" | "due" | "overdue";
-
-export interface StudentRow {
-  id: string;
-  name: string;
-  level: Level;
-  grade: string;
-  guardian: string;
-  amount: number;
-  status: StudentStatus;
-  due: string;
-  concept: string;
-}
-
-export const STUDENTS: readonly StudentRow[] = [
-  { id: "GL-2041", name: "Sofía Hernández Ríos", level: "Primaria", grade: "4° A", guardian: "Marisol Ríos", amount: 0, status: "paid", due: "—", concept: "Colegiatura junio" },
-  { id: "GL-1187", name: "Mateo Domínguez Lara", level: "Secundaria", grade: "2° B", guardian: "Jorge Domínguez", amount: 3200, status: "overdue", due: "5 jun", concept: "Colegiatura mayo" },
-  { id: "GL-3320", name: "Valentina Cruz Mendoza", level: "Preparatoria", grade: "1° C", guardian: "Ana Mendoza", amount: 1850, status: "due", due: "15 jun", concept: "Colegiatura junio" },
-  { id: "GL-2298", name: "Diego Navarro Estrada", level: "Primaria", grade: "6° A", guardian: "Luis Navarro", amount: 0, status: "paid", due: "—", concept: "Colegiatura junio" },
-  { id: "GL-0455", name: "Renata Flores Aguilar", level: "Kínder", grade: "K3", guardian: "Paola Aguilar", amount: 5400, status: "overdue", due: "28 may", concept: "Colegiatura + inscripción" },
-  { id: "GL-2710", name: "Emiliano Reyes Castro", level: "Secundaria", grade: "1° A", guardian: "Sandra Castro", amount: 0, status: "paid", due: "—", concept: "Colegiatura junio" },
-  { id: "GL-1903", name: "Camila Ortega Salinas", level: "Preparatoria", grade: "2° A", guardian: "Hugo Ortega", amount: 1850, status: "due", due: "15 jun", concept: "Colegiatura junio" },
-  { id: "GL-3088", name: "Santiago Vega Morales", level: "Primaria", grade: "3° B", guardian: "Karla Morales", amount: 0, status: "paid", due: "—", concept: "Colegiatura junio" },
-  { id: "GL-2566", name: "Isabella Ramírez Peña", level: "Kínder", grade: "K2", guardian: "Diana Peña", amount: 2700, status: "overdue", due: "1 jun", concept: "Colegiatura mayo" },
-  { id: "GL-1422", name: "Sebastián Luna Carrillo", level: "Secundaria", grade: "3° C", guardian: "Raúl Luna", amount: 0, status: "paid", due: "—", concept: "Colegiatura junio" },
-  { id: "GL-2845", name: "Regina Campos Téllez", level: "Primaria", grade: "5° A", guardian: "Mónica Téllez", amount: 1600, status: "due", due: "18 jun", concept: "Material y laboratorio" },
-  { id: "GL-3501", name: "Leonardo Fuentes Bravo", level: "Preparatoria", grade: "3° B", guardian: "Pedro Fuentes", amount: 0, status: "paid", due: "—", concept: "Colegiatura junio" }
-];
-
-export interface FinanceSummary {
-  collected: number;
-  pending: number;
-  overdueCount: number;
-  paidPct: number;
-}
-
-export const FIN_SUMMARY: FinanceSummary = {
-  collected: 842500,
-  pending: 128300,
-  overdueCount: 37,
-  paidPct: 87
-};
 
 export type Role = "admin" | "teacher";
 
