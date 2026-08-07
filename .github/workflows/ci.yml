@@ -1,0 +1,261 @@
+# García Lorca — CI (GitHub Actions).
+#
+# Mirrors the gates of deploy/cloudbuild/cloudbuild.yaml (the Cloud Build
+# pipeline) for pull requests and branch pushes. Cloud Build stays the
+# build-and-deploy path (images, Artifact Registry, Cloud Run); this workflow is
+# the pre-merge quality gate only — it never builds or pushes images.
+#
+# Gate order (cheap first, same as cloudbuild):
+#   proto  : buf lint -> buf breaking (vs. PR base) -> buf generate
+#   go     : per workspace module — vet -> test -race -> integration -> govulncheck -> mod verify
+#   web    : pnpm install -> turbo test/lint/build -> source-map hardening gate
+#
+# `gen/` is 100% generated and gitignored (except gen/go/go.mod + go.sum, which
+# are hand-maintained). The proto job generates it once and hands it to the go
+# and web jobs as an artifact instead of re-running buf in every job.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [dev, master]
+  push:
+    branches: [dev, master]
+
+permissions:
+  contents: read
+
+# One run per ref; a new push cancels the superseded run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned toolchains. buf matches cloudbuild's bufbuild/buf:1.50.0 image and
+  # deploy/README.md's ">= 1.50" prerequisite; Go 1.25.x is required by the
+  # pre-shared-env checklist (item 1) for a clean govulncheck.
+  BUF_VERSION: "1.50.0"
+  GO_VERSION: "1.25.x"
+  NODE_VERSION: "22"
+  GOVULNCHECK_VERSION: "v1.1.4"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Proto: lint, breaking-change detection, and codegen for downstream jobs.
+  # ---------------------------------------------------------------------------
+  proto:
+    name: proto (lint / breaking / generate)
+    runs-on: ubuntu-latest
+    outputs:
+      # JSON array of go.work `use` entries, consumed as the `go` job matrix.
+      go-modules: ${{ steps.modules.outputs.list }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so `buf breaking --against` can resolve the base branch.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: "**/go.sum"
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          version: ${{ env.BUF_VERSION }}
+          github_token: ${{ github.token }}
+
+      - name: buf lint
+        run: buf lint
+
+      # Breaking-change detection only makes sense against a base revision, so
+      # it is scoped to pull requests. A breaking contract change requires a
+      # version bump + ADR (api-standards canon) — CI refuses it silently.
+      - name: buf breaking (vs. ${{ github.base_ref }})
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          buf breaking --against ".git#ref=origin/${BASE_REF}"
+
+      - name: buf generate
+        run: buf generate
+
+      - name: Assert codegen produced Go and TS output
+        run: |
+          set -euo pipefail
+          for d in gen/go/garcialorca gen/ts; do
+            if [ ! -d "$d" ]; then
+              echo "ERROR: buf generate did not produce $d"
+              exit 1
+            fi
+          done
+          echo "OK: gen/go and gen/ts present."
+
+      # The single source of truth for "which Go modules exist" is go.work.
+      # Parsing it here keeps the matrix from drifting when a service is added.
+      - name: Derive Go module matrix from go.work
+        id: modules
+        run: |
+          set -euo pipefail
+          list="$(go work edit -json | jq -c '[.Use[].DiskPath]')"
+          echo "go.work modules: ${list}"
+          echo "list=${list}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gen
+          path: gen
+          retention-days: 1
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # 2. Go: one leg per go.work module. fail-fast is off so a single bad module
+  #    does not hide the state of the other twelve; any red leg still fails CI.
+  # ---------------------------------------------------------------------------
+  go:
+    name: go (${{ matrix.module }})
+    needs: proto
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJSON(needs.proto.outputs.go-modules) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: "**/go.sum"
+
+      # gen/ is gitignored; restore the codegen the proto job produced.
+      - uses: actions/download-artifact@v4
+        with:
+          name: gen
+          path: gen
+
+      - name: go vet
+        working-directory: ${{ matrix.module }}
+        run: go vet ./...
+
+      - name: go test -race
+        working-directory: ${{ matrix.module }}
+        run: go test ./... -race -count=1
+
+      # Integration tests are behind `//go:build integration` and need a real
+      # Postgres via testcontainers-go. GitHub's ubuntu runners ship a working
+      # Docker daemon, so they run here rather than being skipped.
+      - name: go test -tags=integration
+        working-directory: ${{ matrix.module }}
+        run: |
+          set -euo pipefail
+          if grep -rlq --include='*.go' '//go:build integration' .; then
+            echo "Integration-tagged files found; running with -tags=integration."
+            go test ./... -tags=integration -count=1
+          else
+            echo "No integration-tagged files in ${{ matrix.module }}; skipping."
+          fi
+
+      # Security gate (cloudbuild step 3): reachable-vulnerability scan plus a
+      # dependency audit (checksums match go.sum).
+      - name: govulncheck
+        run: |
+          set -euo pipefail
+          go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
+          "$(go env GOPATH)/bin/govulncheck" ./...
+        working-directory: ${{ matrix.module }}
+
+      - name: go mod verify
+        working-directory: ${{ matrix.module }}
+        run: go mod verify
+
+  # ---------------------------------------------------------------------------
+  # 3. Web: pnpm is the ONLY package manager (repo CLAUDE.md §7). The job ends
+  #    on the build-hardening gate — source maps must never ship.
+  # ---------------------------------------------------------------------------
+  web:
+    name: web (test / lint / build / source-map gate)
+    needs: proto
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # corepack pins pnpm to package.json#packageManager. `npm`/`yarn` are
+      # forbidden here and the root `preinstall` guard (only-allow pnpm) enforces it.
+      - name: Enable pnpm via corepack
+        run: |
+          set -euo pipefail
+          corepack enable pnpm
+          pnpm --version
+
+      # packages/api-client consumes gen/ts, so the web build needs the codegen.
+      - uses: actions/download-artifact@v4
+        with:
+          name: gen
+          path: gen
+
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
+      - uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: turbo-${{ runner.os }}-
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: turbo test / lint / build
+        run: pnpm turbo run test lint build
+
+      # Build-hardening gate (cloudbuild step 5). Prefers the frontend-owned
+      # check; falls back to the pipeline-owned grep gate. Either FAILS CI if a
+      # *.map file or a sourceMappingURL comment reaches a client artifact.
+      - name: Source-map gate (no source maps in production artifacts)
+        run: |
+          set -euo pipefail
+          if [ -f apps/web/scripts/check-no-sourcemaps.mjs ] || [ -f apps/web/scripts/check-no-sourcemaps.sh ]; then
+            echo "Using frontend-owned source-map check (pnpm --filter @garcia-lorca/web check:no-sourcemaps)."
+            pnpm --filter @garcia-lorca/web run check:no-sourcemaps
+          else
+            echo "Frontend check script absent; using pipeline fallback gate."
+            bash deploy/cloudbuild/check-no-sourcemaps.sh
+          fi
+
+  # ---------------------------------------------------------------------------
+  # 4. Single required status check. Branch protection points at this job so the
+  #    matrix legs do not each need to be registered.
+  # ---------------------------------------------------------------------------
+  ci:
+    name: ci
+    if: always()
+    needs: [proto, go, web]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert all gates passed
+        run: |
+          set -euo pipefail
+          results="${{ needs.proto.result }} ${{ needs.go.result }} ${{ needs.web.result }}"
+          echo "gate results: ${results}"
+          for r in $results; do
+            if [ "$r" != "success" ]; then
+              echo "FAILED: at least one CI gate did not pass."
+              exit 1
+            fi
+          done
+          echo "OK: proto, go, and web gates passed."
