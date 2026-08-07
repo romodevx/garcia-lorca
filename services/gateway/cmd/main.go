@@ -54,6 +54,10 @@ func main() {
 	if gradesBaseURL == "" {
 		gradesBaseURL = "http://localhost:8094"
 	}
+	financeBaseURL := os.Getenv("FINANCE_BASE_URL")
+	if financeBaseURL == "" {
+		financeBaseURL = "http://localhost:8093"
+	}
 
 	// flags is the authoritative source of module visibility (default-deny),
 	// loaded from ENABLED_MODULES (comma-separated module names). The gateway
@@ -66,6 +70,7 @@ func main() {
 	studentsClient := client.NewStudentsClient(studentsBaseURL, http.DefaultClient)
 	configClient := client.NewConfigClient(configBaseURL, http.DefaultClient)
 	gradesClient := client.NewGradesClient(gradesBaseURL, http.DefaultClient)
+	financeClient := client.NewFinanceClient(financeBaseURL, http.DefaultClient)
 
 	// loginLimiter fronts POST /auth/login with a per-IP token bucket so an
 	// attacker cannot brute-force credentials from a single source. It is
@@ -73,14 +78,15 @@ func main() {
 	loginRL := config.ParseLoginRateLimit(os.Getenv)
 	loginLimiter := middleware.NewRateLimiter(loginRL.Burst, loginRL.RefillPerSec(), time.Now)
 
-	mux := newMux(iamHealth, authClient, studentsClient, configClient, gradesClient, flags, loginLimiter)
+	mux := newMux(iamHealth, authClient, studentsClient, configClient, gradesClient, financeClient, flags, loginLimiter)
 
 	log.Info("gateway starting",
 		slog.String("addr", addr),
 		slog.String("iam", iamBaseURL),
 		slog.String("students", studentsBaseURL),
 		slog.String("config", configBaseURL),
-		slog.String("grades", gradesBaseURL))
+		slog.String("grades", gradesBaseURL),
+		slog.String("finance", financeBaseURL))
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           mux,
@@ -114,6 +120,11 @@ func main() {
 //	/api/v1/grades/...         → ModuleGuard(grades) → RequireAuth → rotation →
 //	                             RequirePermission(grades:write on capture,
 //	                             grades:read on roster/list) → grades service
+//	/api/v1/finance/...        → ModuleGuard(finance) → RequireAuth → rotation →
+//	                             RequirePermission(finance:write on concept/charge/
+//	                             discount/cancel/payment, finance:read on the
+//	                             catalog, charge list, account and overdue reads)
+//	                             → finance service
 //	/api/v1/users/..., /roles/... → ModuleGuard(iam) → RequireAuth → rotation →
 //	                             RequirePermission(users:*/roles:* by verb) → iam
 //	                             admin (user/role CRUD)
@@ -124,7 +135,7 @@ func main() {
 //
 // `flags` (via middleware.NewModuleGuard) is the module-visibility boundary:
 // disabled module ⇒ 404, evaluated before auth so a hidden module is invisible.
-func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, configClient *client.ConfigClient, gradesClient *client.GradesClient, flags featureflag.Checker, loginLimiter *middleware.RateLimiter) *http.ServeMux {
+func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, configClient *client.ConfigClient, gradesClient *client.GradesClient, financeClient *client.FinanceClient, flags featureflag.Checker, loginLimiter *middleware.RateLimiter) *http.ServeMux {
 	mux := http.NewServeMux()
 	handler.NewHealthHandler(iamHealth).Register(mux)
 
@@ -218,6 +229,34 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/grades", gradesWrite(gradesH.CaptureGrade))
 	mux.Handle("GET /api/v1/grades/roster", gradesRead(gradesH.GetRoster))
 	mux.Handle("GET /api/v1/grades", gradesRead(gradesH.ListGradeEntries))
+
+	// M05 finance (adeudos): flag-guarded, authenticated + rotation-enforced,
+	// permission-gated. Everything that moves money or the catalog is a write
+	// (finance:write): concept create/update, charge create/generate, discount,
+	// cancel, payment. The catalog, charge list, account statement and overdue
+	// report are reads (finance:read). Every route sits behind
+	// guard.Protect("finance", …) so module_finance OFF ⇒ 404 (the module is
+	// invisible before auth even runs). The more specific patterns
+	// (/charges/generate, /charges/{id}/discount, /charges/{id}/cancel) win over
+	// /charges under ServeMux's specificity rule.
+	financeH := handler.NewFinanceHandler(financeClient)
+	financeWrite := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("finance", requireAuthChanged(middleware.RequirePermission("finance:write")(http.HandlerFunc(h))))
+	}
+	financeRead := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("finance", requireAuthChanged(middleware.RequirePermission("finance:read")(http.HandlerFunc(h))))
+	}
+	mux.Handle("POST /api/v1/finance/concepts", financeWrite(financeH.CreateConcept))
+	mux.Handle("PUT /api/v1/finance/concepts/{id}", financeWrite(financeH.UpdateConcept))
+	mux.Handle("GET /api/v1/finance/concepts", financeRead(financeH.ListConcepts))
+	mux.Handle("POST /api/v1/finance/charges", financeWrite(financeH.CreateCharge))
+	mux.Handle("POST /api/v1/finance/charges/generate", financeWrite(financeH.GenerateCharges))
+	mux.Handle("POST /api/v1/finance/charges/{id}/discount", financeWrite(financeH.ApplyDiscount))
+	mux.Handle("POST /api/v1/finance/charges/{id}/cancel", financeWrite(financeH.CancelCharge))
+	mux.Handle("GET /api/v1/finance/charges", financeRead(financeH.ListCharges))
+	mux.Handle("POST /api/v1/finance/payments", financeWrite(financeH.RegisterPayment))
+	mux.Handle("GET /api/v1/finance/accounts/{studentId}", financeRead(financeH.GetAccount))
+	mux.Handle("GET /api/v1/finance/overdue", financeRead(financeH.ListOverdue))
 
 	// Phase 6 iam admin (user/role CRUD): flag-guarded (module_iam), authenticated
 	// + rotation-enforced, permission-gated. User routes need users:read (GET) /

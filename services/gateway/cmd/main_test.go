@@ -10,9 +10,12 @@ import (
 	"time"
 
 	connect "connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	configv1 "github.com/garcia-lorca/gen/go/garcialorca/config/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/config/v1/configv1connect"
+	financev1 "github.com/garcia-lorca/gen/go/garcialorca/finance/v1"
+	"github.com/garcia-lorca/gen/go/garcialorca/finance/v1/financev1connect"
 	gradesv1 "github.com/garcia-lorca/gen/go/garcialorca/grades/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/grades/v1/gradesv1connect"
 	iamv1 "github.com/garcia-lorca/gen/go/garcialorca/iam/v1"
@@ -48,6 +51,8 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"student-reader":   {"students:read"},
 		"grades-writer":    {"grades:write", "grades:read"},
 		"grades-reader":    {"grades:read"},
+		"finance-writer":   {"finance:write", "finance:read"},
+		"finance-reader":   {"finance:read"},
 		"users-writer":     {"users:write", "users:read"},
 		"users-reader":     {"users:read"},
 		"roles-writer":     {"roles:write", "roles:read"},
@@ -225,6 +230,70 @@ func (stubGrades) ListGradeEntries(_ context.Context, req *connect.Request[grade
 	}}), nil
 }
 
+// stubFinance echoes canned concepts, charges and payments, enough to exercise
+// the finance route security chain end to end. Money stays integer cents.
+type stubFinance struct {
+	financev1connect.UnimplementedFinanceServiceHandler
+}
+
+func (stubFinance) CreateConcept(_ context.Context, req *connect.Request[financev1.CreateConceptRequest]) (*connect.Response[financev1.CreateConceptResponse], error) {
+	return connect.NewResponse(&financev1.CreateConceptResponse{Concept: &financev1.ChargeConcept{
+		Id: "cpt-1", Name: req.Msg.GetName(), DefaultAmountCents: req.Msg.GetDefaultAmountCents(),
+		Recurrence: req.Msg.GetRecurrence(), Active: true,
+	}}), nil
+}
+
+func (stubFinance) ListConcepts(_ context.Context, _ *connect.Request[financev1.ListConceptsRequest]) (*connect.Response[financev1.ListConceptsResponse], error) {
+	return connect.NewResponse(&financev1.ListConceptsResponse{Concepts: []*financev1.ChargeConcept{
+		{Id: "cpt-1", Name: "Colegiatura", DefaultAmountCents: 150000, Recurrence: "monthly", Active: true},
+	}}), nil
+}
+
+func (stubFinance) CreateCharge(_ context.Context, req *connect.Request[financev1.CreateChargeRequest]) (*connect.Response[financev1.CreateChargeResponse], error) {
+	return connect.NewResponse(&financev1.CreateChargeResponse{Charge: &financev1.Charge{
+		Id: "chg-1", StudentId: req.Msg.GetStudentId(), CycleId: req.Msg.GetCycleId(), ConceptId: req.Msg.GetConceptId(),
+		Description: "Colegiatura", AmountCents: 150000, DueDate: req.Msg.GetDueDate(),
+		Status: "pending", RemainingCents: 150000,
+	}}), nil
+}
+
+func (stubFinance) GenerateCharges(_ context.Context, _ *connect.Request[financev1.GenerateChargesRequest]) (*connect.Response[financev1.GenerateChargesResponse], error) {
+	return connect.NewResponse(&financev1.GenerateChargesResponse{CreatedCount: 2, SkippedCount: 1}), nil
+}
+
+func (stubFinance) ListCharges(_ context.Context, req *connect.Request[financev1.ListChargesRequest]) (*connect.Response[financev1.ListChargesResponse], error) {
+	return connect.NewResponse(&financev1.ListChargesResponse{Charges: []*financev1.Charge{
+		{Id: "chg-1", StudentId: req.Msg.GetStudentId(), AmountCents: 150000, Status: "pending", RemainingCents: 150000},
+	}}), nil
+}
+
+func (stubFinance) RegisterPayment(_ context.Context, req *connect.Request[financev1.RegisterPaymentRequest]) (*connect.Response[financev1.RegisterPaymentResponse], error) {
+	return connect.NewResponse(&financev1.RegisterPaymentResponse{
+		Payment: &financev1.Payment{
+			Id: "pay-1", ChargeId: req.Msg.GetChargeId(), AmountCents: req.Msg.GetAmountCents(),
+			Method: req.Msg.GetMethod(), Reference: req.Msg.GetReference(),
+			PaidAt: timestamppb.New(time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)),
+		},
+		Charge: &financev1.Charge{
+			Id: req.Msg.GetChargeId(), AmountCents: 150000, PaidCents: req.Msg.GetAmountCents(),
+			RemainingCents: 150000 - req.Msg.GetAmountCents(), Status: "partially_paid",
+		},
+	}), nil
+}
+
+func (stubFinance) GetAccount(_ context.Context, req *connect.Request[financev1.GetAccountRequest]) (*connect.Response[financev1.GetAccountResponse], error) {
+	return connect.NewResponse(&financev1.GetAccountResponse{
+		Charges:           []*financev1.Charge{{Id: "chg-1", StudentId: req.Msg.GetStudentId(), AmountCents: 150000, RemainingCents: 150000}},
+		TotalBalanceCents: 150000,
+	}), nil
+}
+
+func (stubFinance) ListOverdue(_ context.Context, _ *connect.Request[financev1.ListOverdueRequest]) (*connect.Response[financev1.ListOverdueResponse], error) {
+	return connect.NewResponse(&financev1.ListOverdueResponse{Charges: []*financev1.Charge{
+		{Id: "chg-1", DueDate: "2026-08-05", AmountCents: 150000, RemainingCents: 150000, Status: "pending"},
+	}}), nil
+}
+
 func connectServer(t *testing.T, path string, handler http.Handler) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -246,6 +315,8 @@ func newTestGateway(t *testing.T, flags map[string]bool) *httptest.Server {
 	cfgSrv := connectServer(t, cfgPath, cfgHandler)
 	grdPath, grdHandler := gradesv1connect.NewGradesServiceHandler(stubGrades{})
 	grdSrv := connectServer(t, grdPath, grdHandler)
+	finPath, finHandler := financev1connect.NewFinanceServiceHandler(stubFinance{})
+	finSrv := connectServer(t, finPath, finHandler)
 
 	// A generous burst keeps the limiter out of the way of these route tests;
 	// rate-limit behavior is covered directly in the middleware package.
@@ -256,6 +327,7 @@ func newTestGateway(t *testing.T, flags map[string]bool) *httptest.Server {
 		client.NewStudentsClient(stuSrv.URL, stuSrv.Client()),
 		client.NewConfigClient(cfgSrv.URL, cfgSrv.Client()),
 		client.NewGradesClient(grdSrv.URL, grdSrv.Client()),
+		client.NewFinanceClient(finSrv.URL, finSrv.Client()),
 		featureflag.NewInMemory(flags),
 		loginLimiter,
 	)
@@ -822,5 +894,216 @@ func TestTeacherLinkBogusUserIs404(t *testing.T) {
 	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teachers/tch-1/user", "config-writer", `{"userId":"ghost"}`)
 	if res.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+// --- finance routes (Phase 7): ModuleGuard(finance) → RequireAuth →
+// RequirePermission. Concepts/charges/discount/cancel/payments are writes
+// (finance:write); concept list, charge list, account and overdue are reads
+// (finance:read). Every route sits behind guard.Protect("finance", …) so
+// module_finance OFF ⇒ 404, before auth runs.
+
+const validConceptBody = `{"name":"Colegiatura","defaultAmountCents":150000,"recurrence":"monthly"}`
+const validChargeBody = `{"studentId":"stu-1","cycleId":"cyc-1","conceptId":"cpt-1","dueDate":"2026-09-05"}`
+const validPaymentBody = `{"chargeId":"chg-1","amountCents":50000,"method":"transfer","reference":"SPEI-993"}`
+
+func TestFinanceConceptCreateDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_finance OFF
+	// Even a caller with finance:write must not learn the module exists.
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/finance/concepts", "finance-writer", validConceptBody)
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestFinanceConceptCreateNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_finance": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/finance/concepts", "", validConceptBody)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+func TestFinanceConceptCreateReadOnlyPermissionIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_finance": true})
+	// finance:read is insufficient to define a charge concept.
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/finance/concepts", "finance-reader", validConceptBody)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+func TestFinanceConceptCreateWithWritePermission201(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_finance": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/finance/concepts", "finance-writer", validConceptBody)
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", res.StatusCode)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// Money crosses the whole edge as integer cents.
+	if out["id"] != "cpt-1" || out["defaultAmountCents"] != float64(150000) {
+		t.Errorf("body = %v", out)
+	}
+}
+
+func TestFinanceConceptListWithReadPermission200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_finance": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/finance/concepts", "finance-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", res.StatusCode)
+	}
+}
+
+func TestFinanceConceptListDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_finance OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/finance/concepts", "finance-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestFinanceChargeCreateWithWritePermission201(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_finance": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/finance/charges", "finance-writer", validChargeBody)
+	if res.StatusCode != http.StatusCreated {
+		t.Errorf("status = %d, want 201", res.StatusCode)
+	}
+}
+
+// /charges/generate is a more specific pattern than /charges: ServeMux must
+// route it to the bulk handler, and it must carry the same write guard.
+func TestFinanceGenerateRouteWithWritePermission200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_finance": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/finance/charges/generate", "finance-writer",
+		`{"conceptId":"cpt-1","cycleId":"cyc-1","dueDate":"2026-09-05"}`)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out["created"] != float64(2) || out["skipped"] != float64(1) {
+		t.Errorf("body = %v", out)
+	}
+}
+
+func TestFinanceGenerateRouteReadOnlyPermissionIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_finance": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/finance/charges/generate", "finance-reader",
+		`{"conceptId":"cpt-1","cycleId":"cyc-1","dueDate":"2026-09-05"}`)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+func TestFinanceDiscountRouteReadOnlyPermissionIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_finance": true})
+	// applying a discount is a write: finance:read is insufficient.
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/finance/charges/chg-1/discount", "finance-reader",
+		`{"discountCents":50000,"reason":"beca"}`)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+func TestFinanceCancelRouteDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_finance OFF
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/finance/charges/chg-1/cancel", "finance-writer", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestFinancePaymentWithWritePermission201(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_finance": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/finance/payments", "finance-writer", validPaymentBody)
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", res.StatusCode)
+	}
+	var out struct {
+		Payment map[string]any `json:"payment"`
+		Charge  map[string]any `json:"charge"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The amount survives the whole chain as int64 cents, and the charge comes
+	// back with its server-recomputed remaining balance.
+	if out.Payment["amountCents"] != float64(50000) || out.Payment["paidAt"] != "2026-09-01T10:00:00Z" {
+		t.Errorf("payment = %v", out.Payment)
+	}
+	if out.Charge["remainingCents"] != float64(100000) {
+		t.Errorf("charge = %v", out.Charge)
+	}
+}
+
+func TestFinancePaymentReadOnlyPermissionIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_finance": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/finance/payments", "finance-reader", validPaymentBody)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+func TestFinanceAccountDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_finance OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/finance/accounts/stu-1", "finance-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestFinanceAccountNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_finance": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/finance/accounts/stu-1", "", "")
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+func TestFinanceAccountWithReadPermission200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_finance": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/finance/accounts/stu-1", "finance-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out struct {
+		Charges           []map[string]any `json:"charges"`
+		TotalBalanceCents int64            `json:"totalBalanceCents"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The studentId comes from the path param, so the stub echoes it back.
+	if len(out.Charges) != 1 || out.Charges[0]["studentId"] != "stu-1" || out.TotalBalanceCents != 150000 {
+		t.Errorf("body = %+v", out)
+	}
+}
+
+func TestFinanceOverdueWithReadPermission200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_finance": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/finance/overdue?cycleId=cyc-1", "finance-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", res.StatusCode)
+	}
+}
+
+func TestFinanceOverdueDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_finance OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/finance/overdue", "finance-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestFinanceChargeListWithReadPermission200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_finance": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/finance/charges?studentId=stu-1", "finance-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", res.StatusCode)
 	}
 }
