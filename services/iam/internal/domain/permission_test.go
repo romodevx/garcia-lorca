@@ -97,3 +97,40 @@ func TestNewRoleRequiresName(t *testing.T) {
 		t.Errorf("NewRole with blank name: want KindInvalid, got %v", err)
 	}
 }
+
+func TestIsOwnerOnly(t *testing.T) {
+	tests := []struct {
+		perm string
+		want bool
+	}{
+		{"finance:read", true},
+		{"attendance:read", true},
+		{" Finance:Read ", true}, // normalized like NewPermission
+		{"finance:write", false},
+		{"attendance:write", false},
+		{"students:read", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := domain.IsOwnerOnly(tt.perm); got != tt.want {
+			t.Errorf("IsOwnerOnly(%q) = %v, want %v", tt.perm, got, tt.want)
+		}
+	}
+}
+
+func TestIsOwnerRoleName(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"owner", true},
+		{" Owner ", true},
+		{"Docente", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := domain.IsOwnerRoleName(tt.name); got != tt.want {
+			t.Errorf("IsOwnerRoleName(%q) = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}

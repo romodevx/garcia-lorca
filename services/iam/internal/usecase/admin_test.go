@@ -254,3 +254,94 @@ func TestAdminSetRolePermissions(t *testing.T) {
 		t.Fatalf("bad permission: want KindInvalid, got %v", err)
 	}
 }
+
+// The tenant-wide sensitive reads (finance:read, attendance:read) return ANY
+// student's data — there is no per-object scoping yet, so only the single owner
+// role may hold them. The admin API must refuse to build the vulnerable config.
+
+func TestAdminSetRolePermissionsRejectsOwnerOnlyPermissionOnNonOwnerRole(t *testing.T) {
+	for _, restricted := range []string{"finance:read", "attendance:read"} {
+		roles := &fakeRoles{byID: map[string]domain.Role{
+			"r1": mustRole(t, "r1", "Docente", []string{"students:read"}),
+		}}
+		svc := newAdmin(&fakeUsers{}, roles, func() string { return "x" })
+
+		err := svc.SetRolePermissions(context.Background(), "r1", []string{"students:read", restricted})
+		if err == nil || glerrors.KindOf(err) != glerrors.KindForbidden {
+			t.Errorf("SetRolePermissions(Docente, %q): want KindForbidden, got %v", restricted, err)
+		}
+		if _, persisted := roles.permsSet["r1"]; persisted {
+			t.Errorf("SetRolePermissions(Docente, %q): must not persist the rejected set", restricted)
+		}
+	}
+}
+
+func TestAdminSetRolePermissionsAllowsUnrestrictedOnNonOwnerRole(t *testing.T) {
+	roles := &fakeRoles{byID: map[string]domain.Role{
+		"r1": mustRole(t, "r1", "Docente", nil),
+	}}
+	svc := newAdmin(&fakeUsers{}, roles, func() string { return "x" })
+
+	if err := svc.SetRolePermissions(context.Background(), "r1", []string{"students:read", "finance:write"}); err != nil {
+		t.Fatalf("SetRolePermissions with unrestricted permissions: %v", err)
+	}
+	if got := roles.permsSet["r1"]; len(got) != 2 {
+		t.Errorf("permissions for r1 = %v, want 2 entries", got)
+	}
+}
+
+func TestAdminSetRolePermissionsAllowsOwnerOnlyPermissionOnOwnerRole(t *testing.T) {
+	roles := &fakeRoles{byID: map[string]domain.Role{
+		"owner-role": mustRole(t, "owner-role", "owner", nil),
+	}}
+	svc := newAdmin(&fakeUsers{}, roles, func() string { return "x" })
+
+	perms := []string{"finance:read", "attendance:read", "students:read"}
+	if err := svc.SetRolePermissions(context.Background(), "owner-role", perms); err != nil {
+		t.Fatalf("SetRolePermissions on the owner role: %v", err)
+	}
+	if got := roles.permsSet["owner-role"]; len(got) != 3 {
+		t.Errorf("permissions for owner-role = %v, want 3 entries", got)
+	}
+}
+
+func TestAdminSetRolePermissionsUnknownRoleWithOwnerOnlyPermissionFailsClosed(t *testing.T) {
+	roles := &fakeRoles{byID: map[string]domain.Role{}}
+	svc := newAdmin(&fakeUsers{}, roles, func() string { return "x" })
+
+	err := svc.SetRolePermissions(context.Background(), "ghost", []string{"finance:read"})
+	if err == nil {
+		t.Fatal("SetRolePermissions on an unresolvable role with a restricted permission must fail")
+	}
+	if _, persisted := roles.permsSet["ghost"]; persisted {
+		t.Error("must not persist when the target role cannot be confirmed to be the owner")
+	}
+}
+
+func TestAdminCreateRoleRejectsOwnerOnlyPermissionOnNonOwnerRole(t *testing.T) {
+	for _, restricted := range []string{"finance:read", "attendance:read"} {
+		roles := &fakeRoles{}
+		svc := newAdmin(&fakeUsers{}, roles, func() string { return "role-new" })
+
+		_, err := svc.CreateRole(context.Background(), "Coordinador", []string{"users:read", restricted})
+		if err == nil || glerrors.KindOf(err) != glerrors.KindForbidden {
+			t.Errorf("CreateRole(Coordinador, %q): want KindForbidden, got %v", restricted, err)
+		}
+		if len(roles.created) != 0 {
+			t.Errorf("CreateRole(Coordinador, %q): must not persist the rejected role", restricted)
+		}
+	}
+}
+
+func TestAdminCreateRoleAllowsOwnerOnlyPermissionOnOwnerRole(t *testing.T) {
+	roles := &fakeRoles{}
+	svc := newAdmin(&fakeUsers{}, roles, func() string { return "role-new" })
+
+	role, err := svc.CreateRole(context.Background(), "owner", []string{"finance:read", "attendance:read"})
+	if err != nil {
+		t.Fatalf("CreateRole on the owner role: %v", err)
+	}
+	if len(role.Permissions()) != 2 || len(roles.created) != 1 {
+		t.Errorf("owner role = %d perms / %d persisted, want 2 / 1", len(role.Permissions()), len(roles.created))
+	}
+}

@@ -6,6 +6,17 @@ import (
 	glerrors "github.com/garcia-lorca/pkg/errors"
 )
 
+// OwnerRoleName is the name of the seeded super-role (migrations/iam). It is the
+// one role allowed to hold the tenant-wide sensitive reads (see IsOwnerOnly);
+// authorization itself never compares role names — this is a grant-time guard.
+const OwnerRoleName = "owner"
+
+// IsOwnerRoleName reports whether name refers to the seeded owner role, ignoring
+// surrounding space and case (role names are stored as typed by the admin).
+func IsOwnerRoleName(name string) bool {
+	return strings.EqualFold(strings.TrimSpace(name), OwnerRoleName)
+}
+
 // Role is a named bundle of permissions. Roles exist only to group permissions;
 // authorization always resolves to permissions, so callers never compare role
 // names. Permissions are stored deduplicated and validated.
