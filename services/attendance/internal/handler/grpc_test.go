@@ -2,6 +2,7 @@ package handler_test
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -75,6 +76,10 @@ const (
 	testTenant = "tenant-1"
 	groupID    = "grp-1"
 	testDate   = "2026-09-15"
+
+	// ListAttendance validates its enrollment id as a UUID at the boundary, so
+	// its tests carry a real one (the readable ids above never reach it).
+	enrollmentUUID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
 )
 
 func activeEnrollment(id, studentID string) service.EnrollmentRef {
@@ -86,7 +91,7 @@ func newHandler(repo *fakeRepo, enrollments []service.EnrollmentRef) *handler.At
 	groups := &fakeGroups{existing: map[string]bool{groupID: true}}
 	seq := 0
 	newID := func() string { seq++; return "rec-" + string(rune('0'+seq)) }
-	svc := service.NewAttendanceService(repo, enr, groups, nil, testTenant, newID)
+	svc := service.NewAttendanceService(repo, enr, groups, nil, testTenant, newID, slog.New(slog.DiscardHandler))
 	return handler.NewAttendanceHandler(svc)
 }
 
@@ -200,7 +205,7 @@ func TestListAttendanceFormatsDatesAsISO(t *testing.T) {
 	repo := newFakeRepo()
 	repo.list = []service.AttendanceRecord{{
 		ID:           "rec-1",
-		EnrollmentID: "enr-1",
+		EnrollmentID: enrollmentUUID,
 		Date:         time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC),
 		Status:       "absent",
 		Note:         "sin aviso",
@@ -208,7 +213,7 @@ func TestListAttendanceFormatsDatesAsISO(t *testing.T) {
 	h := newHandler(repo, nil)
 
 	res, err := h.ListAttendance(context.Background(), connect.NewRequest(&attendancev1.ListAttendanceRequest{
-		EnrollmentId: "enr-1", FromDate: "2026-09-01", ToDate: "2026-09-30",
+		EnrollmentId: enrollmentUUID, FromDate: "2026-09-01", ToDate: "2026-09-30",
 	}))
 	if err != nil {
 		t.Fatalf("ListAttendance: %v", err)
@@ -222,7 +227,7 @@ func TestListAttendanceFormatsDatesAsISO(t *testing.T) {
 	if rec.GetDate() != "2026-09-15" {
 		t.Errorf("date = %q, want 2026-09-15", rec.GetDate())
 	}
-	if rec.GetId() != "rec-1" || rec.GetEnrollmentId() != "enr-1" || rec.GetStatus() != "absent" || rec.GetNote() != "sin aviso" {
+	if rec.GetId() != "rec-1" || rec.GetEnrollmentId() != enrollmentUUID || rec.GetStatus() != "absent" || rec.GetNote() != "sin aviso" {
 		t.Errorf("record = %+v", rec)
 	}
 }
@@ -230,7 +235,21 @@ func TestListAttendanceFormatsDatesAsISO(t *testing.T) {
 func TestListAttendanceBadBoundIsInvalidArgument(t *testing.T) {
 	h := newHandler(newFakeRepo(), nil)
 	_, err := h.ListAttendance(context.Background(), connect.NewRequest(&attendancev1.ListAttendanceRequest{
-		EnrollmentId: "enr-1", FromDate: "septiembre",
+		EnrollmentId: enrollmentUUID, FromDate: "septiembre",
+	}))
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("want InvalidArgument, got %v", connect.CodeOf(err))
+	}
+}
+
+// A malformed enrollment id is a client error at the edge too: it must map to
+// InvalidArgument, never to the Internal a broken uuid literal would raise in
+// Postgres.
+func TestListAttendanceMalformedEnrollmentIDIsInvalidArgument(t *testing.T) {
+	repo := newFakeRepo()
+	h := newHandler(repo, nil)
+	_, err := h.ListAttendance(context.Background(), connect.NewRequest(&attendancev1.ListAttendanceRequest{
+		EnrollmentId: "abc",
 	}))
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Errorf("want InvalidArgument, got %v", connect.CodeOf(err))

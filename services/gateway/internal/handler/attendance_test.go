@@ -160,12 +160,15 @@ func TestAttendanceSaveDailyInvalidBodyIs400(t *testing.T) {
 	}
 }
 
-// Marking a student "present" is rejected by the domain (omit them instead) ⇒ 400.
-func TestAttendanceSaveDailyPresentMarkIs400(t *testing.T) {
+// A client error raised upstream (an unknown status, an enrollment outside the
+// group, an over-long note) arrives as Connect InvalidArgument and must surface
+// at the edge as 400, not 500. This covers the mapping only — what the attendance
+// service itself rejects is pinned by its own service tests.
+func TestAttendanceSaveDailyUpstreamInvalidArgumentIs400(t *testing.T) {
 	svc := &fakeAttendance{err: connect.NewError(connect.CodeInvalidArgument, nil)}
 	h := handler.NewAttendanceHandler(svc)
 	rec := doReq(t, h.SaveDaily, http.MethodPost, "/api/v1/attendance",
-		`{"groupId":"grp-1","date":"2026-09-01","marks":[{"enrollmentId":"enr-1","status":"present"}]}`)
+		`{"groupId":"grp-1","date":"2026-09-01","marks":[{"enrollmentId":"enr-1","status":"tarde"}]}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)
 	}

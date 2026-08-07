@@ -1,4 +1,4 @@
--- attendance (M08) initial schema — daily attendance marks.
+-- attendance (M06) initial schema — daily attendance marks.
 --
 -- RLS is tenant-scoped (same posture as iam/students/grades, ADR 0001): policy
 -- filters on app.current_tenant, ENABLE + FORCE so it applies even to the table
@@ -21,8 +21,12 @@ CREATE TABLE attendance (
     tenant_id     uuid NOT NULL,
     enrollment_id uuid NOT NULL,   -- students.enrollments (RPC-validated, NOT a FK)
     date          date NOT NULL,
+    -- 'present' is deliberately allowed although the default-present model above
+    -- never stores it: it is reserved for the Phase 8b QR check-in, which records
+    -- an explicit present. Until then the service drops present marks.
     status        text NOT NULL CHECK (status IN ('present', 'absent', 'late', 'excused')),
-    note          text NOT NULL DEFAULT '',   -- optional reason for late/excused
+    -- Free text from a teacher's browser: bounded here as well as in the service.
+    note          text NOT NULL DEFAULT '' CHECK (length(note) <= 500),   -- optional reason for late/excused
     created_at    timestamptz NOT NULL DEFAULT now(),
     updated_at    timestamptz NOT NULL DEFAULT now(),
     -- One mark per student per day (the reconcile/upsert key).

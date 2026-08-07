@@ -17,6 +17,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,6 +63,8 @@ const (
 	enrollmentBatchClean   = "e0000000-0000-0000-0000-000000000005"
 	enrollmentRLS          = "e0000000-0000-0000-0000-000000000006"
 	enrollmentRange        = "e0000000-0000-0000-0000-000000000007"
+	enrollmentUpsert       = "e0000000-0000-0000-0000-000000000008"
+	enrollmentRace         = "e0000000-0000-0000-0000-000000000009"
 )
 
 func randToken() string {
@@ -292,6 +295,111 @@ func TestReconcileDayLeavesOtherDaysAlone(t *testing.T) {
 	}
 }
 
+// TestReconcileDayUpsertsOverAPreExistingRow drives the insert straight onto an
+// existing (tenant, enrollment, date) row — the state a concurrent save leaves
+// behind, reproduced deterministically by reconciling with no delete scope. The
+// UNIQUE key must be absorbed as an update (last write wins on status/note, and
+// updated_at is bumped), never surface as a constraint violation: that error is
+// the 500 two teachers saving the same group·day used to get.
+func TestReconcileDayUpsertsOverAPreExistingRow(t *testing.T) {
+	r := appRepo(t, tenantA)
+	ctx := context.Background()
+	date := day(t, "2026-08-10")
+
+	if err := r.ReconcileDay(ctx, []string{enrollmentUpsert}, date, []service.AttendanceRecord{
+		mark("aaaaaaaa-0000-0000-0000-000000000030", enrollmentUpsert, date, "absent", "first"),
+	}); err != nil {
+		t.Fatalf("seed reconcile: %v", err)
+	}
+	before := updatedAt(t, tenantA, enrollmentUpsert, date)
+
+	// An empty scope skips the DELETE, so the insert collides head-on with the row
+	// already stored for that enrollment·day.
+	if err := r.ReconcileDay(ctx, nil, date, []service.AttendanceRecord{
+		mark("aaaaaaaa-0000-0000-0000-000000000031", enrollmentUpsert, date, "late", "second"),
+	}); err != nil {
+		t.Fatalf("a colliding reconcile must upsert, not fail: %v", err)
+	}
+
+	marks, err := r.MarksForDate(ctx, []string{enrollmentUpsert}, date)
+	if err != nil {
+		t.Fatalf("MarksForDate: %v", err)
+	}
+	got, ok := marks[enrollmentUpsert]
+	if !ok {
+		t.Fatal("the upserted mark is gone")
+	}
+	if got.Status != "late" || got.Note != "second" {
+		t.Errorf("mark = %+v, want the second write (late/\"second\")", got)
+	}
+	if n := countMarks(t, tenantA, enrollmentUpsert); n != 1 {
+		t.Errorf("rows for the enrollment·day = %d, want exactly 1 (the UNIQUE key holds)", n)
+	}
+	if after := updatedAt(t, tenantA, enrollmentUpsert, date); !after.After(before) {
+		t.Errorf("updated_at = %v, want it bumped past %v on the update path", after, before)
+	}
+}
+
+// TestReconcileDayConcurrentSaveLastWriteWins is the race that motivated the
+// upsert: two teachers saving the SAME group·day at the same time. Neither save
+// may fail on the UNIQUE key, and the day must end with exactly one mark holding
+// one of the two writers' statuses.
+func TestReconcileDayConcurrentSaveLastWriteWins(t *testing.T) {
+	ctx := context.Background()
+	date := day(t, "2026-08-11")
+	scope := []string{enrollmentRace}
+
+	errs := make(chan error, 2)
+	statuses := []string{"absent", "late"}
+	for i, status := range statuses {
+		go func(i int, status string) {
+			errs <- appRepo(t, tenantA).ReconcileDay(ctx, scope, date, []service.AttendanceRecord{
+				mark(fmt.Sprintf("aaaaaaaa-0000-0000-0000-00000000004%d", i), enrollmentRace, date, status, status),
+			})
+		}(i, status)
+	}
+	for range statuses {
+		if err := <-errs; err != nil {
+			t.Fatalf("a concurrent save must not fail on the UNIQUE key: %v", err)
+		}
+	}
+
+	if n := countMarks(t, tenantA, enrollmentRace); n != 1 {
+		t.Fatalf("rows after two concurrent saves = %d, want exactly 1", n)
+	}
+	marks, err := appRepo(t, tenantA).MarksForDate(ctx, scope, date)
+	if err != nil {
+		t.Fatalf("MarksForDate: %v", err)
+	}
+	got := marks[enrollmentRace]
+	if got.Status != "absent" && got.Status != "late" {
+		t.Errorf("surviving mark = %+v, want one of the two concurrent writes", got)
+	}
+}
+
+// updatedAt reads a stored mark's audit timestamp as the tenant-bound app role.
+func updatedAt(t *testing.T, tenant, enrollment string, date time.Time) time.Time {
+	t.Helper()
+	db, err := open(appDSN)
+	if err != nil {
+		t.Fatalf("open app db: %v", err)
+	}
+	var out time.Time
+	err = db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT set_config('app.current_tenant', ?, true)", tenant).Error; err != nil {
+			return err
+		}
+		return tx.Raw(
+			"SELECT updated_at FROM attendance WHERE enrollment_id = ? AND date = ?::date",
+			enrollment, date.Format(dateLayout),
+		).Scan(&out).Error
+	})
+	if err != nil {
+		t.Fatalf("read updated_at: %v", err)
+	}
+	return out
+}
+
 // TestMarksForDateBatched proves several enrollments are resolved in ONE call,
 // keyed by enrollment_id, returning rows only for those that have an exception —
 // and that an empty id slice short-circuits without a query.
@@ -435,5 +543,32 @@ func TestStatusCheckRejectsUnknownStatus(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("DB accepted an unknown status; the CHECK must reject it")
+	}
+}
+
+// TestNoteLengthCheckRejectsOversizedNote proves the free-text cap is enforced by
+// the database too, so an unbounded note cannot reach the column through a writer
+// that skipped the service's validation.
+func TestNoteLengthCheckRejectsOversizedNote(t *testing.T) {
+	db, err := open(appDSN)
+	if err != nil {
+		t.Fatalf("open app db: %v", err)
+	}
+	insertNote := func(note string) error {
+		return db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec("SELECT set_config('app.current_tenant', ?, true)", tenantA).Error; err != nil {
+				return err
+			}
+			return tx.Exec(
+				"INSERT INTO attendance (tenant_id, enrollment_id, date, status, note) VALUES (?, ?, ?::date, ?, ?)",
+				tenantA, enrollmentBatchClean, "2026-08-12", "excused", note,
+			).Error
+		})
+	}
+	if err := insertNote(strings.Repeat("x", 501)); err == nil {
+		t.Fatal("DB accepted a 501-char note; the CHECK must reject it")
+	}
+	if err := insertNote(strings.Repeat("x", 500)); err != nil {
+		t.Fatalf("a note of exactly 500 chars must be accepted: %v", err)
 	}
 }

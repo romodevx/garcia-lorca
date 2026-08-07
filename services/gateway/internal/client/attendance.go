@@ -31,9 +31,10 @@ type AttendanceRosterRow struct {
 	Status       string
 }
 
-// Mark is one non-present exception submitted for a group·day. Status is
-// absent|late|excused ("present" is rejected — omit the enrollment instead);
-// Note is an optional free-text justification.
+// Mark is one exception submitted for a group·day. Status is normally
+// absent|late|excused; "present" is accepted too and CLEARS the row stored for
+// that enrollment (an explicit revert to default-present, equivalent to omitting
+// it). Note is an optional free-text justification, capped at 500 characters.
 type Mark struct {
 	EnrollmentID string
 	Status       string

@@ -1,8 +1,11 @@
 package service_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -156,10 +159,19 @@ const (
 	enrollmentGone  = "enr-d" // withdrawn: never on the roster
 	enrollmentAlien = "enr-x" // enrolled in another group
 
+	// ListAttendance validates its enrollment id as a UUID at the boundary (the
+	// column is a uuid), so its tests use a real one rather than the readable
+	// roster fixtures above.
+	enrollmentUUID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+
 	studentAna  = "stu-a"
 	studentBeto = "stu-b"
 	studentCruz = "stu-c"
 )
+
+// maxNote is the longest note the service accepts; one more character is a
+// client error (the column carries the same CHECK).
+const maxNote = 500
 
 // mintedIDs is the deterministic id sequence the service draws from, so tests
 // can assert exactly which record got which id.
@@ -184,9 +196,17 @@ func day(t *testing.T, s string) time.Time {
 }
 
 // newService wires the service over the given seams with a deterministic id
-// source. The roster group holds three active enrollments plus one withdrawn,
-// and a second group holds an unrelated enrollment.
+// source and a silent logger (see newLoggingService when the log itself is
+// under test).
 func newService(t *testing.T, repo *fakeRepo, pub service.Publisher, ids ...string) *service.AttendanceService {
+	t.Helper()
+	return newLoggingService(t, repo, pub, slog.New(slog.DiscardHandler), ids...)
+}
+
+// newLoggingService wires the service over the given seams with a deterministic
+// id source. The roster group holds three active enrollments plus one
+// withdrawn, and a second group holds an unrelated enrollment.
+func newLoggingService(t *testing.T, repo *fakeRepo, pub service.Publisher, log *slog.Logger, ids ...string) *service.AttendanceService {
 	t.Helper()
 	enrollments := &fakeEnrollments{byGroup: map[string][]service.EnrollmentRef{
 		groupID: {
@@ -203,7 +223,14 @@ func newService(t *testing.T, repo *fakeRepo, pub service.Publisher, ids ...stri
 	if len(ids) == 0 {
 		ids = []string{"rec-1", "rec-2", "rec-3"}
 	}
-	return service.NewAttendanceService(repo, enrollments, groups, pub, testTenant, fixedIDs(ids...))
+	return service.NewAttendanceService(repo, enrollments, groups, pub, testTenant, fixedIDs(ids...), log)
+}
+
+// captureLogs returns a logger writing into the buffer it also returns, so a
+// test can assert on what was actually logged.
+func captureLogs() (*slog.Logger, *bytes.Buffer) {
+	var buf bytes.Buffer
+	return slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})), &buf
 }
 
 func wantInvalid(t *testing.T, err error) {
@@ -288,6 +315,51 @@ func TestGetDailyRosterRejectsBadInput(t *testing.T) {
 				t.Errorf("repo was queried despite invalid input (%d calls)", repo.marksForDateCalls)
 			}
 		})
+	}
+}
+
+// TestMalformedDateIsCheckedBeforeTheGroupRPC proves the cheap pure check runs
+// first: a request that is wrong in BOTH the date and the group reports the date
+// (and never pays for the config round trip).
+func TestMalformedDateIsCheckedBeforeTheGroupRPC(t *testing.T) {
+	const badDate = "05/08/2026"
+	calls := &countingGroups{}
+
+	t.Run("GetDailyRoster", func(t *testing.T) {
+		svc := newRosterService(t, newFakeRepo(), calls)
+		_, err := svc.GetDailyRoster(context.Background(), "grp-nope", badDate)
+		wantDateError(t, err, calls)
+	})
+	t.Run("SaveDailyAttendance", func(t *testing.T) {
+		calls.calls = 0
+		svc := newRosterService(t, newFakeRepo(), calls)
+		_, _, err := svc.SaveDailyAttendance(context.Background(), "grp-nope", badDate, nil)
+		wantDateError(t, err, calls)
+	})
+}
+
+// countingGroups is a GroupReader that records whether it was consulted at all.
+type countingGroups struct{ calls int }
+
+func (c *countingGroups) ByID(context.Context, string) error {
+	c.calls++
+	return glerrors.ErrNotFound
+}
+
+func newRosterService(t *testing.T, repo *fakeRepo, groups service.GroupReader) *service.AttendanceService {
+	t.Helper()
+	return service.NewAttendanceService(
+		repo, &fakeEnrollments{}, groups, nil, testTenant, fixedIDs(), slog.New(slog.DiscardHandler))
+}
+
+func wantDateError(t *testing.T, err error, groups *countingGroups) {
+	t.Helper()
+	wantInvalid(t, err)
+	if !strings.Contains(err.Error(), "ISO date") {
+		t.Errorf("error = %q, want the date error (the pure check runs before the RPC)", err)
+	}
+	if groups.calls != 0 {
+		t.Errorf("the group RPC was called %d times despite a malformed date", groups.calls)
 	}
 }
 
@@ -477,6 +549,14 @@ func TestSaveDailyAttendanceRejectsBadInput(t *testing.T) {
 				{EnrollmentID: enrollmentAna, Status: "late"},
 			},
 		},
+		{
+			name:    "note longer than the cap",
+			groupID: groupID,
+			date:    schoolDay,
+			marks: []service.Mark{
+				{EnrollmentID: enrollmentAna, Status: "excused", Note: strings.Repeat("x", maxNote+1)},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -533,19 +613,23 @@ func TestSaveDailyAttendancePublishesEvents(t *testing.T) {
 
 // TestSaveDailyAttendancePublishingIsBestEffort proves the save succeeds with no
 // publisher wired at all AND when the bus is broken: attendance is already
-// durable, and losing a notification must never fail the teacher's save.
+// durable, and losing a notification must never fail the teacher's save. A
+// broken bus is best-effort, not silent: it must leave a warning behind, so a
+// dropped notification is diagnosable instead of invisible.
 func TestSaveDailyAttendancePublishingIsBestEffort(t *testing.T) {
 	tests := []struct {
-		name string
-		pub  service.Publisher
+		name    string
+		pub     service.Publisher
+		wantLog bool
 	}{
 		{name: "no publisher wired", pub: nil},
-		{name: "broken bus", pub: &spyPublisher{err: errors.New("pubsub unavailable")}},
+		{name: "broken bus", pub: &spyPublisher{err: errors.New("pubsub unavailable")}, wantLog: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newFakeRepo()
-			svc := newService(t, repo, tt.pub)
+			log, logs := captureLogs()
+			svc := newLoggingService(t, repo, tt.pub, log, "rec-1")
 
 			absent, marked, err := svc.SaveDailyAttendance(context.Background(), groupID, schoolDay, []service.Mark{
 				{EnrollmentID: enrollmentAna, Status: "absent"},
@@ -555,6 +639,23 @@ func TestSaveDailyAttendancePublishingIsBestEffort(t *testing.T) {
 			}
 			if absent != 1 || marked != 1 {
 				t.Errorf("counts = (%d, %d), want (1, 1)", absent, marked)
+			}
+
+			logged := logs.String()
+			if !tt.wantLog {
+				if logged != "" {
+					t.Errorf("a healthy publish must log nothing, got %q", logged)
+				}
+				return
+			}
+			if !strings.Contains(logged, "attendance event not published") {
+				t.Errorf("a dropped event must be logged, got %q", logged)
+			}
+			if !strings.Contains(logged, "pubsub unavailable") {
+				t.Errorf("the log must carry the publisher error, got %q", logged)
+			}
+			if !strings.Contains(logged, "rec-1") {
+				t.Errorf("the log must identify the record, got %q", logged)
 			}
 		})
 	}
@@ -614,6 +715,44 @@ func TestSaveDailyAttendanceAcceptsEveryStoredStatus(t *testing.T) {
 	}
 }
 
+// TestSaveDailyAttendanceCapsNoteLength pins the free-text boundary: a note of
+// exactly the cap is stored, one character more is rejected before anything is
+// written. Without it an unbounded note reaches a text column straight from a
+// teacher's browser.
+func TestSaveDailyAttendanceCapsNoteLength(t *testing.T) {
+	tests := []struct {
+		name       string
+		length     int
+		wantStored bool
+	}{
+		{name: "at the cap", length: maxNote, wantStored: true},
+		{name: "one over the cap", length: maxNote + 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newFakeRepo()
+			svc := newService(t, repo, nil)
+
+			_, marked, err := svc.SaveDailyAttendance(context.Background(), groupID, schoolDay, []service.Mark{
+				{EnrollmentID: enrollmentAna, Status: "excused", Note: strings.Repeat("x", tt.length)},
+			})
+			if !tt.wantStored {
+				wantInvalid(t, err)
+				if repo.reconcileCalls != 0 {
+					t.Errorf("an oversized note still reached the repo (%d calls)", repo.reconcileCalls)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("a note of exactly %d chars must be accepted: %v", maxNote, err)
+			}
+			if marked != 1 {
+				t.Errorf("marked = %d, want 1", marked)
+			}
+		})
+	}
+}
+
 // TestSaveDailyAttendanceEmptyMarksClearsTheDay proves an empty exception set is
 // a legitimate "everybody present" save: it still reconciles the roster (wiping
 // any previous marks) and reports zero counts.
@@ -660,18 +799,18 @@ func TestListAttendanceParsesOptionalBounds(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newFakeRepo()
-			repo.listResult = []service.AttendanceRecord{{ID: "rec-1", EnrollmentID: enrollmentAna, Status: "absent"}}
+			repo.listResult = []service.AttendanceRecord{{ID: "rec-1", EnrollmentID: enrollmentUUID, Status: "absent"}}
 			svc := newService(t, repo, nil)
 
-			got, err := svc.ListAttendance(context.Background(), enrollmentAna, tt.from, tt.to)
+			got, err := svc.ListAttendance(context.Background(), enrollmentUUID, tt.from, tt.to)
 			if err != nil {
 				t.Fatalf("ListAttendance: %v", err)
 			}
 			if len(got) != 1 || got[0].ID != "rec-1" {
 				t.Errorf("records = %+v, want the repo's rows verbatim", got)
 			}
-			if repo.lastListEnrollment != enrollmentAna {
-				t.Errorf("enrollment = %q, want %q", repo.lastListEnrollment, enrollmentAna)
+			if repo.lastListEnrollment != enrollmentUUID {
+				t.Errorf("enrollment = %q, want %q", repo.lastListEnrollment, enrollmentUUID)
 			}
 			assertBound(t, "from", repo.lastListFrom, tt.wantFrom)
 			assertBound(t, "to", repo.lastListTo, tt.wantTo)
@@ -695,10 +834,38 @@ func TestListAttendanceRejectsMalformedBounds(t *testing.T) {
 			repo := newFakeRepo()
 			svc := newService(t, repo, nil)
 
-			_, err := svc.ListAttendance(context.Background(), enrollmentAna, tt.from, tt.to)
+			_, err := svc.ListAttendance(context.Background(), enrollmentUUID, tt.from, tt.to)
 			wantInvalid(t, err)
 			if repo.listCalls != 0 {
 				t.Errorf("repo queried despite a malformed bound (%d calls)", repo.listCalls)
+			}
+		})
+	}
+}
+
+// TestListAttendanceRejectsMalformedEnrollmentID proves the id is validated at
+// the boundary instead of reaching Postgres as a broken uuid literal: without
+// this, `?enrollmentId=abc` is a 500 (an infrastructure error for what is plainly
+// a client mistake).
+func TestListAttendanceRejectsMalformedEnrollmentID(t *testing.T) {
+	tests := []struct {
+		name         string
+		enrollmentID string
+	}{
+		{name: "not a uuid", enrollmentID: "abc"},
+		{name: "empty", enrollmentID: ""},
+		{name: "sql-ish", enrollmentID: "' OR 1=1 --"},
+		{name: "truncated uuid", enrollmentID: "3f2504e0-4f89-41d3-9a0c"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newFakeRepo()
+			svc := newService(t, repo, nil)
+
+			_, err := svc.ListAttendance(context.Background(), tt.enrollmentID, "", "")
+			wantInvalid(t, err)
+			if repo.listCalls != 0 {
+				t.Errorf("repo queried with a malformed enrollment id (%d calls)", repo.listCalls)
 			}
 		})
 	}

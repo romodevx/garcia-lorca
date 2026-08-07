@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/garcia-lorca/pkg/authctx"
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -74,11 +75,18 @@ func (r *Repo) MarksForDate(ctx context.Context, enrollmentIDs []string, date ti
 
 // ReconcileDay makes the stored state of one group·day match records inside ONE
 // tenant-bound transaction: the day's marks for every enrollment in scope are
-// deleted and records inserted in their place. The delete is what turns a dropped
+// deleted and records written in their place. The delete is what turns a dropped
 // exception back into "present", and doing both in one transaction is what keeps
 // a concurrent roster read from ever seeing a half-saved day. Both statements are
 // bounded by RLS, so another tenant's marks for the same enrollment·day are
 // untouched.
+//
+// The write is an UPSERT on the (tenant, enrollment, date) key, not a plain
+// insert: two teachers saving the same group·day concurrently each delete rows
+// the other has not committed yet, so a plain insert would lose the race to the
+// UNIQUE constraint and fail the save. On conflict the row's status, note and
+// updated_at are overwritten — last write wins — while the pre-existing row keeps
+// its id (the day still holds exactly one mark per enrollment either way).
 func (r *Repo) ReconcileDay(ctx context.Context, enrollmentIDs []string, date time.Time, records []service.AttendanceRecord) error {
 	if len(enrollmentIDs) == 0 && len(records) == 0 {
 		return nil
@@ -100,7 +108,16 @@ func (r *Repo) ReconcileDay(ctx context.Context, enrollmentIDs []string, date ti
 		for _, rec := range records {
 			models = append(models, fromRecord(rec, r.tenantID))
 		}
-		if err := tx.Create(&models).Error; err != nil {
+		if err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "tenant_id"}, {Name: "enrollment_id"}, {Name: "date"},
+			},
+			DoUpdates: clause.Assignments(map[string]any{
+				"status":     gorm.Expr("excluded.status"),
+				"note":       gorm.Expr("excluded.note"),
+				"updated_at": gorm.Expr("now()"),
+			}),
+		}).Create(&models).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "storing attendance marks", err)
 		}
 		return nil

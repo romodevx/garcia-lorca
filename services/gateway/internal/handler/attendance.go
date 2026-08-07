@@ -36,8 +36,9 @@ func NewAttendanceHandler(svc AttendanceService) *AttendanceHandler {
 
 // --- request bodies --------------------------------------------------------
 
-// markRequest is one non-present exception. Status is absent|late|excused;
-// "present" is rejected server-side — omit the enrollment instead.
+// markRequest is one exception. Status is normally absent|late|excused;
+// "present" CLEARS the row stored for that enrollment (an explicit revert to
+// default-present, equivalent to omitting it).
 type markRequest struct {
 	EnrollmentID string `json:"enrollmentId"`
 	Status       string `json:"status"`

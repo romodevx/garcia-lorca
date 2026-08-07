@@ -107,7 +107,7 @@ func buildMux(log *slog.Logger) (*http.ServeMux, error) {
 	publisher := pubsubadapter.NewEventPublisher(newDevBus(log))
 
 	newID := func() string { return uuid.NewString() }
-	svc := service.NewAttendanceService(repo, enrollments, groups, publisher, tenantID, newID)
+	svc := service.NewAttendanceService(repo, enrollments, groups, publisher, tenantID, newID, log)
 	h := handler.NewAttendanceHandler(svc)
 
 	mux := http.NewServeMux()

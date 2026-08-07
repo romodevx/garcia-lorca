@@ -2,8 +2,11 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"sort"
 	"time"
+
+	"github.com/google/uuid"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 )
@@ -23,6 +26,11 @@ const (
 
 // enrollmentStatusActive is the only enrollment status that appears on a roster.
 const enrollmentStatusActive = "active"
+
+// maxNoteLength bounds the free-text justification a client may attach to a
+// mark. The column carries the same CHECK, so the cap holds even for a writer
+// that bypasses this layer.
+const maxNoteLength = 500
 
 // --- seams -------------------------------------------------------------------
 //
@@ -154,11 +162,14 @@ type AttendanceService struct {
 	publisher   Publisher
 	tenantID    string
 	newID       func() string
+	log         *slog.Logger
 }
 
 // NewAttendanceService wires the service. tenantID is the single-tenant scope for
 // this phase and is stamped on every published event; publisher may be nil, which
-// disables event publishing.
+// disables event publishing. log receives the best-effort publishing failures
+// (the only thing this layer logs); a nil log falls back to slog.Default so a
+// dropped event is never silent.
 func NewAttendanceService(
 	repo Repo,
 	enrollments EnrollmentReader,
@@ -166,7 +177,11 @@ func NewAttendanceService(
 	publisher Publisher,
 	tenantID string,
 	newID func() string,
+	log *slog.Logger,
 ) *AttendanceService {
+	if log == nil {
+		log = slog.Default()
+	}
 	return &AttendanceService{
 		repo:        repo,
 		enrollments: enrollments,
@@ -174,6 +189,7 @@ func NewAttendanceService(
 		publisher:   publisher,
 		tenantID:    tenantID,
 		newID:       newID,
+		log:         log,
 	}
 }
 
@@ -182,11 +198,13 @@ func NewAttendanceService(
 // when nothing is stored (default-present). Every mark is resolved in ONE batched
 // read. Rows are ordered by enrollment id, deterministically.
 func (s *AttendanceService) GetDailyRoster(ctx context.Context, groupID, dateStr string) ([]RosterRow, error) {
-	if err := s.requireGroup(ctx, groupID); err != nil {
-		return nil, err
-	}
+	// The pure check first: a malformed date costs nothing to reject and must not
+	// be reported as "group not found" when the request is wrong in both.
 	date, err := parseDate(dateStr)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.requireGroup(ctx, groupID); err != nil {
 		return nil, err
 	}
 	enrollmentIDs, studentByEnrollment, err := s.activeRoster(ctx, groupID)
@@ -221,11 +239,12 @@ func (s *AttendanceService) GetDailyRoster(ctx context.Context, groupID, dateStr
 // total. The batch is validated before anything is written, so a rejected save
 // leaves the day untouched.
 func (s *AttendanceService) SaveDailyAttendance(ctx context.Context, groupID, dateStr string, marks []Mark) (absentCount, markedCount int, err error) {
-	if err := s.requireGroup(ctx, groupID); err != nil {
-		return 0, 0, err
-	}
+	// Cheap pure check before the network round trip (see GetDailyRoster).
 	date, err := parseDate(dateStr)
 	if err != nil {
+		return 0, 0, err
+	}
+	if err := s.requireGroup(ctx, groupID); err != nil {
 		return 0, 0, err
 	}
 	enrollmentIDs, studentByEnrollment, err := s.activeRoster(ctx, groupID)
@@ -255,8 +274,13 @@ func (s *AttendanceService) SaveDailyAttendance(ctx context.Context, groupID, da
 
 // ListAttendance returns one enrollment's stored marks between two optional ISO
 // bounds (an empty bound is unbounded). Only exceptions are stored, so present
-// days are absent from the result by construction.
+// days are absent from the result by construction. The enrollment id is checked
+// here rather than left to Postgres: the column is a uuid, so a malformed id
+// would otherwise surface as an infrastructure error for a plain client mistake.
 func (s *AttendanceService) ListAttendance(ctx context.Context, enrollmentID, fromStr, toStr string) ([]AttendanceRecord, error) {
+	if err := uuid.Validate(enrollmentID); err != nil {
+		return nil, glerrors.New(glerrors.KindInvalid, "invalid enrollment id")
+	}
 	from, err := parseOptionalDate(fromStr)
 	if err != nil {
 		return nil, err
@@ -270,9 +294,10 @@ func (s *AttendanceService) ListAttendance(ctx context.Context, enrollmentID, fr
 
 // recordsFor validates the submitted marks against the day's active roster and
 // projects the exceptions into storable records. A mark for an enrollment that is
-// not on the roster, an unknown status or a second mark for the same enrollment
-// (the stored key is one mark per enrollment·day) is a client error; a
-// statusPresent mark is dropped, since being present is the absence of a record.
+// not on the roster, an unknown status, an over-long note or a second mark for
+// the same enrollment (the stored key is one mark per enrollment·day) is a client
+// error; a statusPresent mark is dropped, since being present is the absence of a
+// record.
 func (s *AttendanceService) recordsFor(marks []Mark, studentByEnrollment map[string]string, date time.Time) ([]AttendanceRecord, error) {
 	records := make([]AttendanceRecord, 0, len(marks))
 	seen := make(map[string]bool, len(marks))
@@ -282,6 +307,9 @@ func (s *AttendanceService) recordsFor(marks []Mark, studentByEnrollment map[str
 		}
 		if !isStorableStatus(mark.Status) && mark.Status != statusPresent {
 			return nil, glerrors.New(glerrors.KindInvalid, "invalid attendance status")
+		}
+		if len(mark.Note) > maxNoteLength {
+			return nil, glerrors.New(glerrors.KindInvalid, "note is too long")
 		}
 		if seen[mark.EnrollmentID] {
 			return nil, glerrors.New(glerrors.KindInvalid, "duplicate mark for enrollment")
@@ -304,9 +332,10 @@ func (s *AttendanceService) recordsFor(marks []Mark, studentByEnrollment map[str
 
 // publishDay announces the marks that were just stored: one AttendanceMarked per
 // exception and, for the absences, one AbsenceRecorded (what comms M10 listens
-// for). Failures are deliberately ignored and a nil publisher is a no-op: the
-// day is already durable, and losing a notification is strictly better than
-// failing a teacher's save.
+// for). A nil publisher is a no-op and a failure never fails the call — the day
+// is already durable, and losing a notification is strictly better than failing a
+// teacher's save — but every dropped event is logged, so best-effort stays
+// diagnosable instead of silent.
 func (s *AttendanceService) publishDay(ctx context.Context, records []AttendanceRecord, studentByEnrollment map[string]string, date time.Time) {
 	if s.publisher == nil {
 		return
@@ -314,7 +343,7 @@ func (s *AttendanceService) publishDay(ctx context.Context, records []Attendance
 	day := date.Format(dateLayout)
 	for _, rec := range records {
 		studentID := studentByEnrollment[rec.EnrollmentID]
-		_ = s.publisher.PublishAttendanceMarked(ctx, MarkedEvent{
+		err := s.publisher.PublishAttendanceMarked(ctx, MarkedEvent{
 			RecordID:     rec.ID,
 			EnrollmentID: rec.EnrollmentID,
 			StudentID:    studentID,
@@ -322,17 +351,30 @@ func (s *AttendanceService) publishDay(ctx context.Context, records []Attendance
 			Date:         day,
 			Status:       rec.Status,
 		})
+		s.logDroppedEvent(err, rec.ID)
 		if rec.Status != statusAbsent {
 			continue
 		}
-		_ = s.publisher.PublishAbsenceRecorded(ctx, AbsenceEvent{
+		err = s.publisher.PublishAbsenceRecorded(ctx, AbsenceEvent{
 			RecordID:     rec.ID,
 			EnrollmentID: rec.EnrollmentID,
 			StudentID:    studentID,
 			TenantID:     s.tenantID,
 			Date:         day,
 		})
+		s.logDroppedEvent(err, rec.ID)
 	}
+}
+
+// logDroppedEvent records a best-effort publish that did not make it to the bus.
+// The record id is the handle an operator replays from; no PII is logged.
+func (s *AttendanceService) logDroppedEvent(err error, recordID string) {
+	if err == nil {
+		return
+	}
+	s.log.Warn("attendance event not published",
+		slog.Any("error", err),
+		slog.String("record_id", recordID))
 }
 
 // activeRoster resolves a group's ACTIVE enrollments once: the sorted enrollment
