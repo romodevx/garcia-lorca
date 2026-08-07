@@ -69,7 +69,11 @@ const (
 	userUpsert      = "b0000000-0000-0000-0000-000000000001"
 	userUpsertOther = "b0000000-0000-0000-0000-000000000002"
 	userRLS         = "b0000000-0000-0000-0000-000000000003"
-	userTargets     = "b0000000-0000-0000-0000-000000000004"
+	// The push-targeting trio: two users a lookup names (a student's guardians)
+	// and one it does not.
+	userTargets      = "b0000000-0000-0000-0000-000000000004"
+	userTargetsOther = "b0000000-0000-0000-0000-000000000005"
+	userUntargeted   = "b0000000-0000-0000-0000-000000000006"
 )
 
 var seedNow = time.Date(2026, 8, 7, 9, 30, 0, 0, time.UTC)
@@ -460,34 +464,58 @@ func TestUpsertDeviceIsKeyedOnTheToken(t *testing.T) {
 	}
 }
 
-// TestDevicesForTenantReturnsTheTenantsTargets covers the (deliberately coarse)
-// push fanout of this phase: every token in the tenant, and nobody else's.
-func TestDevicesForTenantReturnsTheTenantsTargets(t *testing.T) {
+// TestDevicesForUsersTargetsOnlyThoseUsers covers the push fanout: the devices of
+// the named users (a notification's guardians), of nobody else, and never across
+// tenants — the same user id registered in tenant B is a different device that
+// RLS must keep out of tenant A's targets.
+func TestDevicesForUsersTargetsOnlyThoseUsers(t *testing.T) {
 	ctx := context.Background()
-	if _, err := appRepo(t, tenantA).UpsertDevice(ctx, service.Device{
-		ID: "d0000000-0000-0000-0000-000000000010", UserID: userTargets, FCMToken: "token-a-targets", Platform: "ios",
-	}); err != nil {
-		t.Fatalf("seed A: %v", err)
+	seed := []struct {
+		id     string
+		tenant string
+		user   string
+		token  string
+	}{
+		{"d0000000-0000-0000-0000-000000000010", tenantA, userTargets, "token-a-targets"},
+		{"d0000000-0000-0000-0000-000000000012", tenantA, userTargetsOther, "token-a-targets-two"},
+		{"d0000000-0000-0000-0000-000000000013", tenantA, userUntargeted, "token-a-untargeted"},
+		{"d0000000-0000-0000-0000-000000000011", tenantB, userTargets, "token-b-targets"},
 	}
-	if _, err := appRepo(t, tenantB).UpsertDevice(ctx, service.Device{
-		ID: "d0000000-0000-0000-0000-000000000011", UserID: userTargets, FCMToken: "token-b-targets", Platform: "ios",
-	}); err != nil {
-		t.Fatalf("seed B: %v", err)
+	for _, s := range seed {
+		if _, err := appRepo(t, s.tenant).UpsertDevice(ctx, service.Device{
+			ID: s.id, UserID: s.user, FCMToken: s.token, Platform: "ios",
+		}); err != nil {
+			t.Fatalf("seed %s: %v", s.token, err)
+		}
 	}
 
-	devices, err := appRepo(t, tenantA).DevicesForTenant(ctx)
+	devices, err := appRepo(t, tenantA).DevicesForUsers(ctx, []string{userTargets, userTargetsOther})
 	if err != nil {
-		t.Fatalf("DevicesForTenant: %v", err)
+		t.Fatalf("DevicesForUsers: %v", err)
 	}
 	tokens := map[string]bool{}
 	for _, d := range devices {
 		tokens[d.FCMToken] = true
 	}
-	if !tokens["token-a-targets"] {
-		t.Error("the tenant's own device is missing from the push targets")
+	if !tokens["token-a-targets"] || !tokens["token-a-targets-two"] {
+		t.Errorf("targets = %v, want both named users' devices", tokens)
+	}
+	if tokens["token-a-untargeted"] {
+		t.Error("a device outside the requested users is a push target; the IN filter is not applied")
 	}
 	if tokens["token-b-targets"] {
 		t.Error("another tenant's device is a push target (RLS read breach)")
+	}
+
+	// No users, no targets — and no query: a lookup scoped to nobody has no
+	// possible result, and an empty IN () would be a syntax error rather than an
+	// empty set.
+	none, err := appRepo(t, tenantA).DevicesForUsers(ctx, nil)
+	if err != nil {
+		t.Fatalf("DevicesForUsers(nil): %v", err)
+	}
+	if len(none) != 0 {
+		t.Errorf("DevicesForUsers(nil) = %+v, want no targets", none)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -75,11 +76,17 @@ func (f *fakeRepo) UpsertDevice(_ context.Context, d service.Device) (service.De
 	return d, nil
 }
 
-func (f *fakeRepo) DevicesForTenant(_ context.Context) ([]service.Device, error) {
+func (f *fakeRepo) DevicesForUsers(_ context.Context, userIDs []string) ([]service.Device, error) {
 	if f.failWith != nil {
 		return nil, f.failWith
 	}
-	return f.devices, nil
+	out := make([]service.Device, 0, len(userIDs))
+	for _, d := range f.devices {
+		if slices.Contains(userIDs, d.UserID) {
+			out = append(out, d)
+		}
+	}
+	return out, nil
 }
 
 // --- fixtures -----------------------------------------------------------------
@@ -100,7 +107,9 @@ var (
 
 func newHandler(repo *fakeRepo) *handler.CommsHandler {
 	svc := service.NewCommsService(
-		repo, nil, testTenant,
+		// No guardian reader and no sender: these tests exercise the read/write
+		// RPCs, and push is a side effect of CONSUMING an event, never of a call.
+		repo, nil, nil, testTenant,
 		func() string { return deviceID },
 		func() time.Time { return createdInstant },
 		slog.New(slog.DiscardHandler),

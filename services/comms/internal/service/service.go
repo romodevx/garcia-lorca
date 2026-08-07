@@ -132,14 +132,21 @@ type Repo interface {
 	// UpsertDevice registers d, refreshing the existing row when its token is
 	// already known rather than fanning the same device out twice.
 	UpsertDevice(ctx context.Context, d Device) (Device, error)
-	// DevicesForTenant returns every push target in the tenant.
-	//
-	// Targeting is deliberately coarse in this phase: comms cannot yet resolve
-	// WHICH users are a given student's guardians (the guardian↔student link
-	// lands with the family module), so the push fans out tenant-wide while the
-	// per-student feed — the durable part — is already exact. Narrowing this to a
-	// student's guardians is the carry-forward.
-	DevicesForTenant(ctx context.Context) ([]Device, error)
+	// DevicesForUsers returns the push targets OWNED by any of userIDs — for a
+	// notification, its student's guardians. It is one batched read, never one
+	// per user, and no userIDs means no targets (and no query).
+	DevicesForUsers(ctx context.Context, userIDs []string) ([]Device, error)
+}
+
+// GuardianReader resolves which users are a student's guardians — the audience a
+// notification about that student is pushed to. Comms owns no guardian link: the
+// students bounded context does, and the adapter reads it by RPC.
+//
+// A student with no guardians linked yet is an EMPTY list, not an error: that is
+// the ordinary state of a school still onboarding its families, and the durable
+// feed is exact regardless of who can be reached.
+type GuardianReader interface {
+	GuardiansForStudent(ctx context.Context, studentID string) ([]string, error)
 }
 
 // Sender delivers a rendered notification to push targets. Delivery is
@@ -164,21 +171,24 @@ type Sender interface {
 // Ids come from an injected newID and the timestamps from an injected now, so
 // the consumer is deterministic under test.
 type CommsService struct {
-	repo     Repo
-	sender   Sender
-	tenantID string
-	newID    func() string
-	now      func() time.Time
-	log      *slog.Logger
+	repo      Repo
+	guardians GuardianReader
+	sender    Sender
+	tenantID  string
+	newID     func() string
+	now       func() time.Time
+	log       *slog.Logger
 }
 
 // NewCommsService wires the service. tenantID is the single-tenant scope for this
 // phase and the tenant every consumed event must belong to; sender may be nil,
-// which disables push and leaves only the durable feed. log receives the dropped
-// messages and the best-effort push failures; a nil log falls back to
+// which disables push and leaves only the durable feed, and so may guardians,
+// which leaves the push untargetable and therefore not attempted. log receives
+// the dropped messages and the best-effort push failures; a nil log falls back to
 // slog.Default so nothing is ever silently discarded.
 func NewCommsService(
 	repo Repo,
+	guardians GuardianReader,
 	sender Sender,
 	tenantID string,
 	newID func() string,
@@ -189,12 +199,13 @@ func NewCommsService(
 		log = slog.Default()
 	}
 	return &CommsService{
-		repo:     repo,
-		sender:   sender,
-		tenantID: tenantID,
-		newID:    newID,
-		now:      now,
-		log:      log,
+		repo:      repo,
+		guardians: guardians,
+		sender:    sender,
+		tenantID:  tenantID,
+		newID:     newID,
+		now:       now,
+		log:       log,
 	}
 }
 
@@ -287,15 +298,43 @@ func (s *CommsService) MarkNotificationRead(ctx context.Context, id string) (Not
 	return s.repo.MarkRead(ctx, id)
 }
 
-// push delivers a stored notification to the tenant's devices. Every failure is
-// logged and swallowed: the feed entry is already durable, and the family seeing
-// it late is strictly better than failing the handler — which, with the event
-// already claimed, would lose the notification rather than retry it.
+// push delivers a stored notification to the devices of ITS STUDENT'S GUARDIANS,
+// resolved in two steps: which users are the student's guardians (students owns
+// that link), then which devices those users registered here.
+//
+// Every failure is logged and swallowed: the feed entry is already durable, and
+// the family seeing it late is strictly better than failing the handler — which,
+// with the event already claimed, would lose the notification rather than retry
+// it. A failure never widens the audience either: when the guardians cannot be
+// resolved, nothing is pushed, because pushing one family's absence to a guessed
+// audience is worse than pushing late.
 func (s *CommsService) push(ctx context.Context, n Notification) {
 	if s.sender == nil {
 		return
 	}
-	devices, err := s.repo.DevicesForTenant(ctx)
+	if s.guardians == nil {
+		s.log.Warn("comms cannot target a push without a guardian reader",
+			slog.String("notification_id", n.ID))
+		return
+	}
+	guardianIDs, err := s.guardians.GuardiansForStudent(ctx, n.StudentID)
+	if err != nil {
+		s.log.Warn("comms could not resolve the student's guardians",
+			slog.String("notification_id", n.ID),
+			slog.String("student_id", n.StudentID),
+			slog.Any("error", err))
+		return
+	}
+	if len(guardianIDs) == 0 {
+		// The ordinary state of a student whose family is not linked yet: the feed
+		// entry stands, there is simply nobody to reach.
+		s.log.Debug("comms notified a student with no guardians to push to",
+			slog.String("notification_id", n.ID),
+			slog.String("student_id", n.StudentID))
+		return
+	}
+
+	devices, err := s.repo.DevicesForUsers(ctx, guardianIDs)
 	if err != nil {
 		s.log.Warn("comms could not resolve push targets",
 			slog.String("notification_id", n.ID),
