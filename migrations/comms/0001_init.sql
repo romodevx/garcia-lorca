@@ -21,7 +21,7 @@ CREATE TABLE notifications (
     id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id     uuid NOT NULL,
     student_id    uuid NOT NULL,   -- students.students (RPC-validated, NOT a FK)
-    type          text NOT NULL,   -- source event, e.g. 'AbsenceRecorded', 'PaymentRegistered'
+    type          text NOT NULL,   -- stable client vocabulary: 'absence'|'attendance'|'payment' (NOT the producing event name, which tracks the upstream contract)
     title         text NOT NULL,
     body          text NOT NULL,
     created_at    timestamptz NOT NULL DEFAULT now(),

@@ -28,11 +28,15 @@ service still runs standalone. The `EventPublisher` adapters are unchanged; they
 depend only on `pubsub.Publisher`.
 
 **Consumers are idempotent because delivery is at-least-once.** Pub/Sub redelivers.
-The comms consumer gates every message through a `processed_events` ledger:
-`event_key = <event type>:<event id>`, `INSERT … ON CONFLICT DO NOTHING`; if the
-row already existed the handler returns nil (ack, no-op). Only a genuinely new
-event proceeds to create the Notification. Handlers MUST be idempotent — this is
-the contract for all future consumers.
+The comms consumer claims each message through a `processed_events` ledger AND
+writes its Notification **in one transaction** (`repo.RecordEvent`): it inserts
+`(tenant_id, event_key)` — `event_key = <event type>:<event id>` — with
+`ON CONFLICT DO NOTHING`; if `RowsAffected == 0` the event was already handled, so
+the handler returns nil (ack, no-op); otherwise it creates the Notification in the
+same tx and commits. Because claim + create commit atomically, a crash before
+commit rolls the claim back and redelivery re-runs cleanly — there is **no
+mark-then-create loss window**. Handlers MUST be idempotent — this is the contract
+for all future consumers.
 
 **Side effects are best-effort and ordered after durability.** The FCM push
 happens *after* the notification is persisted and the event is marked processed,
@@ -47,11 +51,17 @@ shuts down gracefully. "No broker configured" degrades to API-only, not a crash.
 
 ## Consequences / limits
 
-- **Crash window:** `MarkProcessed` commits before `CreateNotification`. A crash
-  between them drops that one notification (it will be marked processed, so
-  redelivery won't retry). Accepted for MVP (notifications are advisory, not
-  ledger money); the stronger fix is a single transaction spanning mark+create,
-  or an outbox — revisit if a notification-loss SLO demands it.
+- **No consume-side loss window:** claim + Notification commit atomically in
+  `RecordEvent` (see above), so there is no mark-then-create gap. The remaining
+  open problem is **cross-service** side effects (the FCM push happens after the
+  commit and is best-effort — see below); a transactional outbox would be the
+  stronger pattern if push delivery ever needs an at-least-once guarantee.
+- **Pub/Sub client version:** the gcp adapter uses `cloud.google.com/go/pubsub`
+  v1 (the v2 module is present transitively). Future consumers inherit v1; a
+  v1→v2 migration is a tracked backlog item, not a per-consumer choice.
+- **Event attributes are for routing only.** Producers stamp `type` + `tenant_id`
+  message attributes; the consumer trusts the tenant inside the **payload**, not
+  the attribute (payload-as-truth). Do not "fix" a consumer to trust the attribute.
 - **Guardian targeting is deferred (9b).** In 9a a Notification is student-scoped
   and the push fans out to tenant devices (no guardian↔student link yet). The
   render/target step refines when the guardian model + family auth land.
