@@ -99,11 +99,27 @@ export function usePassList(initialDate?: string): PassListState {
   // Monotonic id of the newest roster read; an older response is dropped so a
   // slow request can never repaint another group's or day's list.
   const rosterRequest = useRef(0);
+  // Handle of the pending toast-dismiss timer, so a rapid second toast clears
+  // the first's timer instead of dismissing early, and unmount cancels it.
+  const toastTimer = useRef<number | undefined>(undefined);
 
   const announce = useCallback((message: string): void => {
+    if (toastTimer.current !== undefined) {
+      window.clearTimeout(toastTimer.current);
+    }
     setToast(message);
-    window.setTimeout(() => setToast(undefined), TOAST_MS);
+    toastTimer.current = window.setTimeout(() => setToast(undefined), TOAST_MS);
   }, []);
+
+  // Cancel a pending toast timer on unmount (no state update after teardown).
+  useEffect(
+    () => () => {
+      if (toastTimer.current !== undefined) {
+        window.clearTimeout(toastTimer.current);
+      }
+    },
+    []
+  );
 
   // Boot: the cycle picker + the students that resolve the row names. Attendance
   // itself carries NO student PII — the roster is ids only.
