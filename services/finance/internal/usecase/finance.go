@@ -192,6 +192,14 @@ func (s *FinanceService) GenerateCharges(ctx context.Context, conceptID, cycleID
 	return created, len(charges) - created, nil
 }
 
+// ListCharges returns charges with what has been collected against each,
+// optionally narrowed by student and/or cycle (an empty filter means "any").
+// The collected total is resolved by the repository in one query, so listing a
+// cycle never degenerates into a payment lookup per charge.
+func (s *FinanceService) ListCharges(ctx context.Context, studentID, cycleID string) ([]ports.ChargeWithPaid, error) {
+	return s.repo.ListCharges(ctx, studentID, cycleID)
+}
+
 // ApplyDiscount grants a scholarship or courtesy on an issued charge. The
 // discount replaces any previous one and may not exceed the gross amount; the
 // status is re-derived from what has already been collected, so a discount that

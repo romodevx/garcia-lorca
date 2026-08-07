@@ -142,8 +142,23 @@ services:
 
   finance:
     <<: *go-service
-    environment: { <<: *go-env, SERVICE: finance }
+    environment:
+      <<: *go-env
+      SERVICE: finance
+      # The ledger validates its references by RPC: config (school cycle) and
+      # students (the debtor + the enrollments a bulk generation expands over).
+      CONFIG_BASE_URL: "http://config:8080"
+      STUDENTS_BASE_URL: "http://students:8080"
     ports: ["8093:8080"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      config:
+        condition: service_started
+      students:
+        condition: service_started
 
   grades:
     <<: *go-service

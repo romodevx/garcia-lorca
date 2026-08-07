@@ -674,6 +674,36 @@ func TestListOverduePassesTheInjectedClock(t *testing.T) {
 	}
 }
 
+// TestListChargesFiltersAndCarriesTheCollectedTotal proves the read reaches the
+// ledger with both filters applied and returns each charge paired with what has
+// already been collected against it — the pair the wire's derived paid/remaining
+// fields are built from.
+func TestListChargesFiltersAndCarriesTheCollectedTotal(t *testing.T) {
+	const otherStudent = "stu-2"
+	f := newFixture(t)
+	f.students.byID[otherStudent] = ports.StudentRef{ID: otherStudent, Status: "active"}
+	concept := f.seedConcept(t, "Colegiatura", 250000)
+	ctx := context.Background()
+
+	mine := f.seedCharge(t, concept.ID(), 100000)
+	if _, err := f.svc.CreateCharge(ctx, otherStudent, testCycle, concept.ID(), 100000, "", testDueDate); err != nil {
+		t.Fatalf("seed another student's charge: %v", err)
+	}
+	if _, _, err := f.svc.RegisterPayment(ctx, mine.ID(), 40000, domain.MethodCash, ""); err != nil {
+		t.Fatalf("seed payment: %v", err)
+	}
+
+	got, err := f.svc.ListCharges(ctx, testStudent, testCycle)
+
+	requireNoError(t, err)
+	if len(got) != 1 || got[0].Charge.ID() != mine.ID() {
+		t.Fatalf("charges = %v, want just %q — the student filter must reach the ledger", got, mine.ID())
+	}
+	if got[0].PaidCents != 40000 {
+		t.Fatalf("paid = %d, want 40000", got[0].PaidCents)
+	}
+}
+
 // ids extracts concept ids for readable failure messages.
 func ids(cs []domain.ChargeConcept) []string {
 	out := make([]string, 0, len(cs))
