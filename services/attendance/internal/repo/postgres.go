@@ -8,6 +8,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/garcia-lorca/pkg/authctx"
+	"github.com/garcia-lorca/pkg/authctx/gormtx"
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/attendance/internal/service"
 )
@@ -38,8 +39,8 @@ func New(db *gorm.DB, tenantID string) *Repo {
 // delegating to the shared pkg/authctx RLS primitive so tenant binding lives in
 // exactly one place across every service.
 func (r *Repo) withTenant(ctx context.Context, fn func(tx *gorm.DB) error) error {
-	return authctx.WithTenantContext(ctx, gormTxRunner{r.db}, r.tenantID, func(tx authctx.Tx) error {
-		return fn(txGorm(tx))
+	return authctx.WithTenantContext(ctx, gormtx.NewRunner(r.db), r.tenantID, func(tx authctx.Tx) error {
+		return fn(gormtx.Gorm(tx))
 	})
 }
 
