@@ -69,19 +69,20 @@ func fromDomainCharge(c domain.Charge) chargeModel {
 // toDomainPayment rebuilds a domain Payment from its row. ReceivedBy is not part
 // of the domain yet (reserved for cashier attribution).
 func toDomainPayment(m paymentModel) (domain.Payment, error) {
-	return domain.NewPayment(m.ID, m.TenantID, m.ChargeID, m.AmountCents, m.Method, m.Reference, m.PaidAt)
+	return domain.NewPayment(m.ID, m.TenantID, m.ChargeID, m.AmountCents, m.Method, m.Reference, m.PaidAt, m.IdempotencyKey)
 }
 
 // fromDomainPayment projects a domain Payment into its GORM row for insert.
 // ReceivedBy is deliberately left nil and CreatedAt zero (DEFAULT now()).
 func fromDomainPayment(p domain.Payment) paymentModel {
 	return paymentModel{
-		ID:          p.ID(),
-		TenantID:    p.TenantID(),
-		ChargeID:    p.ChargeID(),
-		AmountCents: p.Amount().Int64(),
-		Method:      p.Method(),
-		Reference:   p.Reference(),
-		PaidAt:      p.PaidAt(),
+		ID:             p.ID(),
+		TenantID:       p.TenantID(),
+		ChargeID:       p.ChargeID(),
+		AmountCents:    p.Amount().Int64(),
+		Method:         p.Method(),
+		Reference:      p.Reference(),
+		IdempotencyKey: p.IdempotencyKey(),
+		PaidAt:         p.PaidAt(),
 	}
 }

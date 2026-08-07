@@ -41,6 +41,14 @@ ledger operations run in a single transaction (Unit of Work).
   `time.Now()` inside the domain).
 - Bulk `GenerateCharges` is idempotent via `UNIQUE(tenant, student, cycle,
   concept)` + ON CONFLICT DO NOTHING (re-run reports created vs skipped).
+- `RegisterPayment` is idempotent when the caller sends an `idempotency_key`:
+  a repeat under the same key returns the ORIGINAL payment and writes nothing —
+  no second row, no status change, and NO second `PaymentRegistered` event. The
+  lookup runs inside the payment transaction, under the charge's `FOR UPDATE`
+  lock; the partial `UNIQUE (tenant_id, idempotency_key) WHERE idempotency_key
+  <> ''` (migration 0002) is the backstop for retries that share no lock. An
+  empty key opts out (every call posts a payment). The web ventanilla mints one
+  key per payment ATTEMPT and reuses it across retries of that submit.
 
 ## Events
 - Published: `PaymentRegistered` (via `adapters/pubsub`, `pkg/pubsub`; a dev

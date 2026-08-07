@@ -50,17 +50,20 @@ func (chargeModel) TableName() string { return "charges" }
 // paymentModel is the GORM row for `payments`: money received against a charge.
 // Append-only — there is no update path. ReceivedBy is a nullable column
 // RESERVED for cashier attribution and is never written yet, so it maps to
-// *string and stays NULL.
+// *string and stays NULL. IdempotencyKey is the caller's handle on the payment
+// ATTEMPT; the empty string means "not deduplicated" and is excluded from the
+// partial unique index (migration 0002).
 type paymentModel struct {
-	ID          string    `gorm:"column:id;primaryKey"`
-	TenantID    string    `gorm:"column:tenant_id"`
-	ChargeID    string    `gorm:"column:charge_id"`
-	AmountCents int64     `gorm:"column:amount_cents"`
-	Method      string    `gorm:"column:method"`
-	Reference   string    `gorm:"column:reference"`
-	ReceivedBy  *string   `gorm:"column:received_by"`
-	PaidAt      time.Time `gorm:"column:paid_at"`
-	CreatedAt   time.Time `gorm:"column:created_at"`
+	ID             string    `gorm:"column:id;primaryKey"`
+	TenantID       string    `gorm:"column:tenant_id"`
+	ChargeID       string    `gorm:"column:charge_id"`
+	AmountCents    int64     `gorm:"column:amount_cents"`
+	Method         string    `gorm:"column:method"`
+	Reference      string    `gorm:"column:reference"`
+	ReceivedBy     *string   `gorm:"column:received_by"`
+	IdempotencyKey string    `gorm:"column:idempotency_key"`
+	PaidAt         time.Time `gorm:"column:paid_at"`
+	CreatedAt      time.Time `gorm:"column:created_at"`
 }
 
 func (paymentModel) TableName() string { return "payments" }

@@ -35,22 +35,30 @@ func validateMethod(method string) error {
 //
 // paidAt is when the money was received, supplied by the caller — the domain
 // never reads a clock, so every derivation stays deterministic.
+//
+// idempotencyKey is the caller's optional handle on the payment ATTEMPT (as
+// opposed to reference, which identifies the money): two requests carrying the
+// same key are the same attempt retried, and only one of them may become a
+// payment. It is opaque to the domain — enforcing the dedup needs the whole
+// ledger, so it belongs to the repository's payment transaction.
 type Payment struct {
-	id        string
-	tenantID  string
-	chargeID  string
-	amount    Cents
-	method    string
-	reference string
-	paidAt    time.Time
+	id             string
+	tenantID       string
+	chargeID       string
+	amount         Cents
+	method         string
+	reference      string
+	paidAt         time.Time
+	idempotencyKey string
 }
 
 // NewPayment builds a validated Payment. Identity, tenant and charge are
 // required, the amount must be strictly positive (a zero-money movement is not
 // a payment), and the method must belong to the closed vocabulary above.
-// reference is optional: cash at the desk carries none. Every failure is
-// KindInvalid.
-func NewPayment(id, tenantID, chargeID string, amountCents int64, method, reference string, paidAt time.Time) (Payment, error) {
+// reference is optional: cash at the desk carries none, and so is
+// idempotencyKey — an empty key simply means the caller is not deduplicating
+// retries. Every failure is KindInvalid.
+func NewPayment(id, tenantID, chargeID string, amountCents int64, method, reference string, paidAt time.Time, idempotencyKey string) (Payment, error) {
 	if strings.TrimSpace(id) == "" {
 		return Payment{}, glerrors.New(glerrors.KindInvalid, "payment id is required")
 	}
@@ -78,21 +86,23 @@ func NewPayment(id, tenantID, chargeID string, amountCents int64, method, refere
 		return Payment{}, glerrors.New(glerrors.KindInvalid, "payment date is required")
 	}
 	return Payment{
-		id:        id,
-		tenantID:  tenantID,
-		chargeID:  chargeID,
-		amount:    amount,
-		method:    method,
-		reference: reference,
-		paidAt:    paidAt,
+		id:             id,
+		tenantID:       tenantID,
+		chargeID:       chargeID,
+		amount:         amount,
+		method:         method,
+		reference:      reference,
+		paidAt:         paidAt,
+		idempotencyKey: idempotencyKey,
 	}, nil
 }
 
 // Accessors.
-func (p Payment) ID() string        { return p.id }
-func (p Payment) TenantID() string  { return p.tenantID }
-func (p Payment) ChargeID() string  { return p.chargeID }
-func (p Payment) Amount() Cents     { return p.amount }
-func (p Payment) Method() string    { return p.method }
-func (p Payment) Reference() string { return p.reference }
-func (p Payment) PaidAt() time.Time { return p.paidAt }
+func (p Payment) ID() string             { return p.id }
+func (p Payment) TenantID() string       { return p.tenantID }
+func (p Payment) ChargeID() string       { return p.chargeID }
+func (p Payment) Amount() Cents          { return p.amount }
+func (p Payment) Method() string         { return p.method }
+func (p Payment) Reference() string      { return p.reference }
+func (p Payment) PaidAt() time.Time      { return p.paidAt }
+func (p Payment) IdempotencyKey() string { return p.idempotencyKey }

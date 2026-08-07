@@ -120,9 +120,20 @@ export interface RegisterPaymentInput {
   amountCents: number;
   method: PaymentMethod;
   reference: string;
+  /**
+   * Optional handle on the payment ATTEMPT: the gateway returns the original
+   * payment for a repeat under the same key instead of collecting again, so a
+   * double-click or a retried request cannot charge the family twice. Omitted ⇒
+   * every call posts a new payment.
+   */
+  idempotencyKey?: string;
 }
 
-/** Optional list filters; empty values are dropped from the query string. */
+/**
+ * Charge list filters; empty values are dropped from the query string. Each is
+ * independent, but the gateway REQUIRES at least one — an unscoped read would be
+ * the school's whole ledger — and answers 400 when both are missing.
+ */
 export interface ChargeFilters {
   studentId?: string;
   cycleId?: string;
@@ -297,6 +308,7 @@ export async function generateCharges(baseURL: string, input: GenerateChargesInp
   return { created: res.created ?? 0, skipped: res.skipped ?? 0 };
 }
 
+/** Pass a student and/or a cycle: the gateway rejects an unscoped read with 400. */
 export async function listCharges(baseURL: string, filters: ChargeFilters = {}): Promise<Charge[]> {
   const qs = query({ studentId: filters.studentId, cycleId: filters.cycleId });
   const rows = await getList<Wire<Charge, "status">>(baseURL, `/charges${qs}`, "charges");
@@ -329,6 +341,11 @@ export async function getOverdue(baseURL: string, cycleId?: string): Promise<Cha
 /**
  * Register a window payment. The response carries the recomputed charge too, so
  * the caller needs no follow-up read.
+ *
+ * An `idempotencyKey` makes the POST safe to retry: the gateway replies with the
+ * payment already stored rather than collecting a second time. The field is
+ * dropped when absent, so a caller that does not deduplicate sends exactly the
+ * body it always did.
  */
 export async function registerPayment(baseURL: string, input: RegisterPaymentInput): Promise<PaymentResult> {
   const body = {
@@ -336,6 +353,9 @@ export async function registerPayment(baseURL: string, input: RegisterPaymentInp
     amountCents: input.amountCents,
     method: input.method,
     reference: input.reference,
+    ...(input.idempotencyKey !== undefined && input.idempotencyKey !== ""
+      ? { idempotencyKey: input.idempotencyKey }
+      : {}),
   };
   const res = await sendJSON<{ payment: Wire<Payment, "method">; charge: Wire<Charge, "status"> }>(
     baseURL,

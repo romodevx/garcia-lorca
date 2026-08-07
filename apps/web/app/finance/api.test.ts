@@ -91,6 +91,28 @@ describe("registerPayment", () => {
     expect(Number.isInteger(body.amountCents)).toBe(true);
   });
 
+  it("sends the idempotency key so a retried submit cannot charge twice", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ payment, charge }, 201));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await registerPayment(BASE, {
+      chargeId: "ch1",
+      amountCents: 185000,
+      method: "cash",
+      reference: "REC-001",
+      idempotencyKey: "attempt-1",
+    });
+
+    const [, init] = lastCall(fetchMock);
+    expect(JSON.parse(init.body as string)).toEqual({
+      chargeId: "ch1",
+      amountCents: 185000,
+      method: "cash",
+      reference: "REC-001",
+      idempotencyKey: "attempt-1",
+    });
+  });
+
   it("throws with the gateway's error text so the ventanilla can surface it", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("payment exceeds remaining balance", { status: 400 })));
     await expect(

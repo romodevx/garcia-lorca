@@ -230,23 +230,30 @@ func (f *fakeRepo) SaveCharge(_ context.Context, c domain.Charge) (domain.Charge
 	return c, nil
 }
 
-// RegisterPayment reproduces the atomic knot: sum the stored payments, let the
-// caller's derive callback decide (and veto), then store the payment and the
-// charge's new status together.
+// RegisterPayment reproduces the atomic knot: dedupe the attempt by its
+// idempotency key, then sum the stored payments, let the caller's derive
+// callback decide (and veto), and store the payment and the charge's new status
+// together. A key already on the ledger replays the original payment and writes
+// nothing, exactly like the real transaction.
 func (f *fakeRepo) RegisterPayment(
 	_ context.Context,
 	p domain.Payment,
 	derive func(charge domain.Charge, newPaidCents int64) (string, error),
-) (domain.Payment, ports.ChargeWithPaid, error) {
+) (domain.Payment, ports.ChargeWithPaid, bool, error) {
 	c, ok := f.charges[p.ChargeID()]
 	if !ok {
-		return domain.Payment{}, ports.ChargeWithPaid{}, glerrors.ErrNotFound
+		return domain.Payment{}, ports.ChargeWithPaid{}, false, glerrors.ErrNotFound
+	}
+	if existing, found := f.byIdempotencyKey(p.IdempotencyKey()); found {
+		replayedCharge := f.charges[existing.ChargeID()]
+		paid := f.paidFor(existing.ChargeID())
+		return existing, ports.ChargeWithPaid{Charge: replayedCharge, PaidCents: paid}, true, nil
 	}
 	newPaid := f.paidFor(p.ChargeID()) + p.Amount().Int64()
 	status, err := derive(c, newPaid)
 	if err != nil {
 		// The transaction aborts: neither the payment nor the status is stored.
-		return domain.Payment{}, ports.ChargeWithPaid{}, err
+		return domain.Payment{}, ports.ChargeWithPaid{}, false, err
 	}
 	f.lastDerivedStatus = status
 	f.payments[p.ChargeID()] = append(f.payments[p.ChargeID()], p)
@@ -254,7 +261,23 @@ func (f *fakeRepo) RegisterPayment(
 	// the callback returned — recorded above for the tests to assert on.
 	updated := c.WithStatus(newPaid)
 	f.charges[c.ID()] = updated
-	return p, ports.ChargeWithPaid{Charge: updated, PaidCents: newPaid}, nil
+	return p, ports.ChargeWithPaid{Charge: updated, PaidCents: newPaid}, false, nil
+}
+
+// byIdempotencyKey finds a payment already posted under key. An empty key never
+// matches: it means the caller opted out of deduplication.
+func (f *fakeRepo) byIdempotencyKey(key string) (domain.Payment, bool) {
+	if key == "" {
+		return domain.Payment{}, false
+	}
+	for _, ps := range f.payments {
+		for _, p := range ps {
+			if p.IdempotencyKey() == key {
+				return p, true
+			}
+		}
+	}
+	return domain.Payment{}, false
 }
 
 func (f *fakeRepo) ListPayments(_ context.Context, studentID string) ([]domain.Payment, error) {

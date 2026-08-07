@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/garcia-lorca/pkg/authctx"
+	"github.com/garcia-lorca/pkg/authctx/gormtx"
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/iam/internal/domain"
 	"github.com/garcia-lorca/services/iam/internal/ports"
@@ -43,8 +44,8 @@ type base struct {
 // delegating to the shared pkg/authctx RLS primitive so tenant binding lives in
 // exactly one place across every service.
 func (b base) withTenant(ctx context.Context, fn func(tx *gorm.DB) error) error {
-	return authctx.WithTenantContext(ctx, gormTxRunner{b.db}, b.tenantID, func(tx authctx.Tx) error {
-		return fn(txGorm(tx))
+	return authctx.WithTenantContext(ctx, gormtx.NewRunner(b.db), b.tenantID, func(tx authctx.Tx) error {
+		return fn(gormtx.Gorm(tx))
 	})
 }
 

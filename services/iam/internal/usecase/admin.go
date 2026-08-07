@@ -123,9 +123,13 @@ func (s *AdminService) SetUserStatus(ctx context.Context, userID string, status 
 
 // CreateRole creates a role from a name and a set of "resource:action"
 // permission strings. Every permission must match the strict catalog grammar
-// (KindInvalid otherwise); a duplicate name is KindConflict.
+// (KindInvalid otherwise); a duplicate name is KindConflict; a tenant-wide
+// sensitive read on a non-owner role is KindForbidden.
 func (s *AdminService) CreateRole(ctx context.Context, name string, permissions []string) (domain.Role, error) {
 	if err := validatePermissions(permissions); err != nil {
+		return domain.Role{}, err
+	}
+	if err := guardOwnerOnly(name, permissions); err != nil {
 		return domain.Role{}, err
 	}
 	role, err := domain.NewRole(s.newID(), name, permissions)
@@ -149,10 +153,25 @@ func (s *AdminService) ListRoles(ctx context.Context) ([]domain.Role, error) {
 }
 
 // SetRolePermissions replaces a role's permission set. Every permission must
-// match the strict catalog grammar (KindInvalid otherwise).
+// match the strict catalog grammar (KindInvalid otherwise); granting a
+// tenant-wide sensitive read to a role other than owner is KindForbidden.
+//
+// The target role is resolved only when the requested set actually contains a
+// restricted permission — the common path keeps its single write, and when the
+// role cannot be resolved the grant fails closed (KindNotFound) rather than
+// being applied to an unverified name.
 func (s *AdminService) SetRolePermissions(ctx context.Context, roleID string, permissions []string) error {
 	if err := validatePermissions(permissions); err != nil {
 		return err
+	}
+	if containsOwnerOnly(permissions) {
+		role, err := s.roles.FindByID(ctx, roleID)
+		if err != nil {
+			return err // KindNotFound: cannot confirm the target is the owner role.
+		}
+		if err := guardOwnerOnly(role.Name(), permissions); err != nil {
+			return err
+		}
 	}
 	return s.roles.SetPermissions(ctx, roleID, permissions)
 }
@@ -163,6 +182,34 @@ func validatePermissions(permissions []string) error {
 	for _, p := range permissions {
 		if !domain.IsValidPermission(p) {
 			return glerrors.New(glerrors.KindInvalid, "invalid permission: "+p)
+		}
+	}
+	return nil
+}
+
+// containsOwnerOnly reports whether the set requests any owner-only permission.
+func containsOwnerOnly(permissions []string) bool {
+	for _, p := range permissions {
+		if domain.IsOwnerOnly(p) {
+			return true
+		}
+	}
+	return false
+}
+
+// guardOwnerOnly refuses to put a tenant-wide sensitive read on any role other
+// than owner. Those reads are not scoped per object yet, so a non-owner holder
+// would see every family's ledger / every group's attendance; the guard keeps
+// the vulnerable configuration from being created through the admin API. The
+// owner role — seeded and granted these by migration — is unaffected.
+func guardOwnerOnly(roleName string, permissions []string) error {
+	if domain.IsOwnerRoleName(roleName) {
+		return nil
+	}
+	for _, p := range permissions {
+		if domain.IsOwnerOnly(p) {
+			return glerrors.New(glerrors.KindForbidden,
+				p+" cannot be granted to a non-owner role yet (no per-object scoping)")
 		}
 	}
 	return nil

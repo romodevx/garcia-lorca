@@ -137,10 +137,12 @@ func (h *FinanceHandler) CancelCharge(ctx context.Context, req *connect.Request[
 }
 
 // RegisterPayment applies a payment to a charge and returns the payment plus
-// the charge with its recomputed paid/remaining/status.
+// the charge with its recomputed paid/remaining/status. An idempotency key on
+// the request makes a retry return the original payment instead of collecting
+// again; an empty one keeps the historical behaviour.
 func (h *FinanceHandler) RegisterPayment(ctx context.Context, req *connect.Request[financev1.RegisterPaymentRequest]) (*connect.Response[financev1.RegisterPaymentResponse], error) {
 	m := req.Msg
-	payment, charge, err := h.finance.RegisterPayment(ctx, m.GetChargeId(), m.GetAmountCents(), m.GetMethod(), m.GetReference())
+	payment, charge, err := h.finance.RegisterPayment(ctx, m.GetChargeId(), m.GetAmountCents(), m.GetMethod(), m.GetReference(), m.GetIdempotencyKey())
 	if err != nil {
 		return nil, connectErr(err)
 	}

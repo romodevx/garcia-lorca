@@ -49,6 +49,7 @@ type fakeFinance struct {
 	payAmount   int64
 	payMethod   string
 	payRef      string
+	payKey      string
 	payment     client.Payment
 
 	accountStudent string
@@ -121,8 +122,9 @@ func (f *fakeFinance) CancelCharge(_ context.Context, chargeID string) (client.C
 	return f.charge, nil
 }
 
-func (f *fakeFinance) RegisterPayment(_ context.Context, chargeID string, amountCents int64, method, reference string) (client.Payment, client.Charge, error) {
+func (f *fakeFinance) RegisterPayment(_ context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string) (client.Payment, client.Charge, error) {
 	f.payChargeID, f.payAmount, f.payMethod, f.payRef = chargeID, amountCents, method, reference
+	f.payKey = idempotencyKey
 	if f.err != nil {
 		return client.Payment{}, client.Charge{}, f.err
 	}
@@ -354,6 +356,24 @@ func TestFinanceListChargesForwardsFilters(t *testing.T) {
 	}
 }
 
+// TestFinanceListChargesUnfilteredIs400 pins the edge's half of the unscoped-read
+// blindaje: the handler forwards the two empty filters verbatim — it does not
+// invent a scope — and the finance service's rejection of the whole-ledger read
+// reaches the caller as 400, not as an empty 200 that looks like "no debts".
+func TestFinanceListChargesUnfilteredIs400(t *testing.T) {
+	svc := &fakeFinance{err: connect.NewError(connect.CodeInvalidArgument, nil)}
+	h := handler.NewFinanceHandler(svc)
+
+	rec := doReq(t, h.ListCharges, http.MethodGet, "/api/v1/finance/charges", "")
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if svc.listStudent != "" || svc.listCycle != "" {
+		t.Errorf("forwarded filters = %q %q, want both empty", svc.listStudent, svc.listCycle)
+	}
+}
+
 func TestFinanceApplyDiscountUsesPathID(t *testing.T) {
 	discounted := sampleCharge
 	discounted.DiscountCents = 50000
@@ -462,6 +482,24 @@ func TestFinanceRegisterPaymentReturnsPaymentAndCharge(t *testing.T) {
 	if out.Charge["paidCents"] != float64(50000) || out.Charge["remainingCents"] != float64(100000) ||
 		out.Charge["status"] != "partially_paid" {
 		t.Errorf("charge = %v", out.Charge)
+	}
+}
+
+// The edge is where the browser's retry key enters the system; if the handler
+// drops it, every layer below is deduplicating on an empty string and the whole
+// feature is inert.
+func TestFinanceRegisterPaymentForwardsTheIdempotencyKey(t *testing.T) {
+	svc := &fakeFinance{payment: client.Payment{ID: "pay-1"}, charge: sampleCharge}
+	h := handler.NewFinanceHandler(svc)
+
+	rec := doReq(t, h.RegisterPayment, http.MethodPost, "/api/v1/finance/payments",
+		`{"chargeId":"chg-1","amountCents":50000,"method":"cash","reference":"","idempotencyKey":"attempt-1"}`)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+	if svc.payKey != "attempt-1" {
+		t.Errorf("forwarded idempotency key = %q, want %q", svc.payKey, "attempt-1")
 	}
 }
 

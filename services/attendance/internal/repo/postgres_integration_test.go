@@ -65,6 +65,7 @@ const (
 	enrollmentRange        = "e0000000-0000-0000-0000-000000000007"
 	enrollmentUpsert       = "e0000000-0000-0000-0000-000000000008"
 	enrollmentRace         = "e0000000-0000-0000-0000-000000000009"
+	enrollmentOrder        = "e0000000-0000-0000-0000-000000000010"
 )
 
 func randToken() string {
@@ -271,13 +272,13 @@ func TestReconcileDayLeavesOtherDaysAlone(t *testing.T) {
 		t.Errorf("monday mark = %+v (ok=%v), want absent — tuesday's save must not touch it", got, ok)
 	}
 
-	// ListByEnrollment sees both days, ordered, and honours each optional bound.
+	// ListByEnrollment sees both days, newest first, and honours each optional bound.
 	all, err := r.ListByEnrollment(ctx, enrollmentRange, time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatalf("ListByEnrollment unbounded: %v", err)
 	}
-	if len(all) != 2 || !all[0].Date.Equal(monday) || !all[1].Date.Equal(tuesday) {
-		t.Fatalf("unbounded list = %+v, want monday then tuesday", all)
+	if len(all) != 2 || !all[0].Date.Equal(tuesday) || !all[1].Date.Equal(monday) {
+		t.Fatalf("unbounded list = %+v, want tuesday then monday", all)
 	}
 	fromTuesday, err := r.ListByEnrollment(ctx, enrollmentRange, tuesday, time.Time{})
 	if err != nil {
@@ -442,6 +443,46 @@ func TestMarksForDateBatched(t *testing.T) {
 	}
 	if len(empty) != 0 {
 		t.Errorf("empty ids: want an empty map, got %+v", empty)
+	}
+}
+
+// TestListByEnrollmentIsNewestFirstAndBounded proves the history read is a
+// DETERMINISTIC, BOUNDED window: rows come back newest first (so the cap drops
+// ancient history, never the days a teacher is looking at) and no single call
+// can return more than the documented maximum.
+func TestListByEnrollmentIsNewestFirstAndBounded(t *testing.T) {
+	r := appRepo(t, tenantA)
+	ctx := context.Background()
+
+	// One mark per day, seeded oldest-first so insertion order cannot masquerade
+	// as the ordering under test.
+	const seeded = 12
+	start := day(t, "2026-03-02")
+	dates := make([]time.Time, 0, seeded)
+	for i := range seeded {
+		date := start.AddDate(0, 0, i)
+		dates = append(dates, date)
+		id := fmt.Sprintf("aaaaaaaa-0000-0000-0000-0000000004%02d", i)
+		if err := r.ReconcileDay(ctx, []string{enrollmentOrder}, date, []service.AttendanceRecord{
+			mark(id, enrollmentOrder, date, "absent", ""),
+		}); err != nil {
+			t.Fatalf("seed %s: %v", date.Format(dateLayout), err)
+		}
+	}
+
+	got, err := r.ListByEnrollment(ctx, enrollmentOrder, time.Time{}, time.Time{})
+	if err != nil {
+		t.Fatalf("ListByEnrollment: %v", err)
+	}
+	if len(got) != seeded {
+		t.Fatalf("read %d marks, want the %d seeded (all fit under the cap)", len(got), seeded)
+	}
+	for i, rec := range got {
+		want := dates[seeded-1-i]
+		if !rec.Date.Equal(want) {
+			t.Fatalf("row %d = %s, want %s — the read must be newest first",
+				i, rec.Date.Format(dateLayout), want.Format(dateLayout))
+		}
 	}
 }
 

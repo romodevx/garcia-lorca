@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/garcia-lorca/pkg/authctx"
+	"github.com/garcia-lorca/pkg/authctx/gormtx"
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/finance/internal/domain"
 	"github.com/garcia-lorca/services/finance/internal/ports"
@@ -23,6 +24,12 @@ const (
 	// dateLayout renders a Go time as the DATE literal the `due_date` column is
 	// compared against, so only the date part of the caller's clock matters.
 	dateLayout = "2006-01-02"
+	// maxListLimit caps every unpaginated ledger read, so no single request can
+	// pull an unbounded number of rows into memory (defense in depth behind the
+	// use case's scoping filters). It is a DOCUMENTED bound, not a hidden one:
+	// each capped method says so, as does the proto contract. Explicit pagination
+	// is the follow-up that removes the need for it.
+	maxListLimit = 500
 )
 
 // Repository is the GORM-backed finance ledger repository. Every operation runs
@@ -43,8 +50,8 @@ func NewRepository(db *gorm.DB, tenantID string) *Repository {
 // delegating to the shared pkg/authctx RLS primitive so tenant binding lives in
 // exactly one place across every service.
 func (r *Repository) withTenant(ctx context.Context, fn func(tx *gorm.DB) error) error {
-	return authctx.WithTenantContext(ctx, gormTxRunner{r.db}, r.tenantID, func(tx authctx.Tx) error {
-		return fn(txGorm(tx))
+	return authctx.WithTenantContext(ctx, gormtx.NewRunner(r.db), r.tenantID, func(tx authctx.Tx) error {
+		return fn(gormtx.Gorm(tx))
 	})
 }
 
@@ -249,10 +256,14 @@ func (r *Repository) GetCharge(ctx context.Context, id string) (ports.ChargeWith
 // ListCharges returns charges with their collected totals. An empty studentID or
 // cycleID skips that filter. The payment totals for the whole page are resolved
 // in ONE grouped query rather than a lookup per charge (no N+1).
+//
+// The read returns AT MOST maxListLimit rows, the earliest due first, ordered by
+// (due_date, id) so the cut is deterministic rather than whatever the planner
+// happened to emit. Explicit pagination is a follow-up.
 func (r *Repository) ListCharges(ctx context.Context, studentID, cycleID string) ([]ports.ChargeWithPaid, error) {
 	var out []ports.ChargeWithPaid
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		q := tx.Model(&chargeModel{}).Order("due_date ASC, id ASC")
+		q := tx.Model(&chargeModel{}).Order("due_date ASC, id ASC").Limit(maxListLimit)
 		if studentID != "" {
 			q = q.Where("student_id = ?", studentID)
 		}
@@ -324,14 +335,24 @@ func (r *Repository) SaveCharge(ctx context.Context, c domain.Charge) (domain.Ch
 // race-free — two concurrent payments serialize on it instead of both reading a
 // stale total. On success the payment row and the charge's new status are
 // written in the same transaction. A missing charge yields glerrors.ErrNotFound.
+//
+// Deduplication happens under that same lock: a payment carrying an idempotency
+// key the tenant has already used returns the ORIGINAL payment with
+// replayed=true and writes nothing, so a retried request cannot collect twice.
+// Looking it up after acquiring the lock is what makes the check race-free for
+// the common case — a concurrent retry of the same charge waits, then sees the
+// committed row. Two retries against DIFFERENT charges share no lock, and there
+// the partial unique index (migration 0002) is the backstop: the loser's insert
+// fails rather than double-charging.
 func (r *Repository) RegisterPayment(
 	ctx context.Context,
 	p domain.Payment,
 	derive func(charge domain.Charge, newPaidCents int64) (string, error),
-) (domain.Payment, ports.ChargeWithPaid, error) {
+) (domain.Payment, ports.ChargeWithPaid, bool, error) {
 	var (
 		storedPayment domain.Payment
 		result        ports.ChargeWithPaid
+		replayed      bool
 	)
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var row chargeModel
@@ -349,6 +370,17 @@ func (r *Repository) RegisterPayment(
 			return err
 		}
 
+		original, found, err := paymentByIdempotencyKey(tx, p.IdempotencyKey())
+		if err != nil {
+			return err
+		}
+		if found {
+			storedPayment = original
+			result = ports.ChargeWithPaid{Charge: charge, PaidCents: currentPaid}
+			replayed = true
+			return nil
+		}
+
 		newPaid := currentPaid + p.Amount().Int64()
 		status, err := derive(charge, newPaid)
 		if err != nil {
@@ -357,6 +389,12 @@ func (r *Repository) RegisterPayment(
 
 		payment := fromDomainPayment(p)
 		if err := tx.Create(&payment).Error; err != nil {
+			// The partial unique index caught a same-key attempt that did not
+			// serialize on this charge's lock. It is a retry, not a new payment,
+			// so the caller sees a conflict rather than a duplicated collection.
+			if isUniqueViolation(err) {
+				return glerrors.Wrap(glerrors.KindConflict, "payment already registered under this idempotency key", err)
+			}
 			return glerrors.Wrap(glerrors.KindInternal, "storing payment", err)
 		}
 		if err := tx.Model(&chargeModel{}).Where("id = ?", p.ChargeID()).Updates(map[string]any{
@@ -377,9 +415,32 @@ func (r *Repository) RegisterPayment(
 		return nil
 	})
 	if err != nil {
-		return domain.Payment{}, ports.ChargeWithPaid{}, err
+		return domain.Payment{}, ports.ChargeWithPaid{}, false, err
 	}
-	return storedPayment, result, nil
+	return storedPayment, result, replayed, nil
+}
+
+// paymentByIdempotencyKey looks up the payment already posted under key, if any.
+// An empty key never matches — it means the caller opted out of deduplication,
+// and the partial unique index excludes blank keys for the same reason. The
+// query is tenant-bound by RLS, so a key is only ever a duplicate within its own
+// school.
+func paymentByIdempotencyKey(tx *gorm.DB, key string) (domain.Payment, bool, error) {
+	if key == "" {
+		return domain.Payment{}, false, nil
+	}
+	var m paymentModel
+	if err := tx.Where("idempotency_key = ?", key).First(&m).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return domain.Payment{}, false, nil
+		}
+		return domain.Payment{}, false, glerrors.Wrap(glerrors.KindInternal, "looking up payment by idempotency key", err)
+	}
+	stored, err := toDomainPayment(m)
+	if err != nil {
+		return domain.Payment{}, false, err
+	}
+	return stored, true, nil
 }
 
 // ListPayments returns every payment posted against the student's charges, for
@@ -417,12 +478,19 @@ func (r *Repository) ListPayments(ctx context.Context, studentID string) ([]doma
 // spans every cycle. today is supplied by the caller — never read from a clock
 // here — so the query stays deterministic. The remaining balance is computed
 // from the same single grouped payment query the list reads (no N+1).
+//
+// The read examines AT MOST maxListLimit candidates, the earliest due first,
+// ordered by (due_date, id) — so the collection queue is bounded and its cut is
+// deterministic. Since the still-owing filter is applied afterwards, the result
+// holds no more than that many rows and never fewer of the oldest debts.
+// Explicit pagination is a follow-up.
 func (r *Repository) ListOverdue(ctx context.Context, cycleID string, today time.Time) ([]ports.ChargeWithPaid, error) {
 	var out []ports.ChargeWithPaid
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		q := tx.Model(&chargeModel{}).
 			Where("due_date < ?::date AND status <> ?", today.Format(dateLayout), domain.StatusCancelled).
-			Order("due_date ASC, id ASC")
+			Order("due_date ASC, id ASC").
+			Limit(maxListLimit)
 		if cycleID != "" {
 			q = q.Where("cycle_id = ?", cycleID)
 		}

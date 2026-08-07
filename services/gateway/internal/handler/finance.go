@@ -19,7 +19,7 @@ type FinanceService interface {
 	ListCharges(ctx context.Context, studentID, cycleID string) ([]client.Charge, error)
 	ApplyDiscount(ctx context.Context, chargeID string, discountCents int64, reason string) (client.Charge, error)
 	CancelCharge(ctx context.Context, chargeID string) (client.Charge, error)
-	RegisterPayment(ctx context.Context, chargeID string, amountCents int64, method, reference string) (client.Payment, client.Charge, error)
+	RegisterPayment(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string) (client.Payment, client.Charge, error)
 	GetAccount(ctx context.Context, studentID string) (client.AccountStatement, error)
 	ListOverdue(ctx context.Context, cycleID string) ([]client.Charge, error)
 }
@@ -81,6 +81,9 @@ type registerPaymentRequest struct {
 	AmountCents int64  `json:"amountCents"`
 	Method      string `json:"method"`
 	Reference   string `json:"reference"`
+	// IdempotencyKey "" ⇒ no deduplication; a repeat under the same key returns
+	// the original payment rather than collecting twice.
+	IdempotencyKey string `json:"idempotencyKey"`
 }
 
 // --- response bodies -------------------------------------------------------
@@ -290,14 +293,15 @@ func (h *FinanceHandler) CancelCharge(w http.ResponseWriter, r *http.Request) {
 
 // RegisterPayment handles POST /api/v1/finance/payments. The response carries
 // both the payment and the charge with its recomputed paid/remaining/status, so
-// the caller needs no follow-up read.
+// the caller needs no follow-up read. An idempotencyKey in the body makes the
+// endpoint safe to retry: the repeat returns the original payment.
 func (h *FinanceHandler) RegisterPayment(w http.ResponseWriter, r *http.Request) {
 	var req registerPaymentRequest
 	if err := decodeJSONBody(w, r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	payment, charge, err := h.svc.RegisterPayment(r.Context(), req.ChargeID, req.AmountCents, req.Method, req.Reference)
+	payment, charge, err := h.svc.RegisterPayment(r.Context(), req.ChargeID, req.AmountCents, req.Method, req.Reference, req.IdempotencyKey)
 	if err != nil {
 		writeConnectError(w, err)
 		return

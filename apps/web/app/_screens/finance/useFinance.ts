@@ -164,9 +164,19 @@ export function useFinance(initialSection: FinanceSection): FinanceState {
 
   // The debts table: the overdue queue, or a student's/cycle's charges. Reads can
   // overlap (every filter change starts one), so only the newest may write state.
+  //
+  // The "all" read needs a scope: the gateway refuses an unfiltered charge list
+  // (it would be the tenant's whole ledger), so with neither filter set the
+  // surface asks for one instead of firing a request it knows will bounce.
   const reloadCharges = useCallback(async (): Promise<void> => {
     const request = (chargesRequest.current += 1);
     const isCurrent = (): boolean => request === chargesRequest.current;
+    if (filter === "all" && studentId === "" && cycleId === "") {
+      setCharges([]);
+      setChargesError(t("error.scopeRequired"));
+      setLoadingCharges(false);
+      return;
+    }
     setLoadingCharges(true);
     setChargesError(undefined);
     try {

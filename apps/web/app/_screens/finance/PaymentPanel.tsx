@@ -10,6 +10,16 @@ import { ErrorAlert, RadioGroup, Section, SelectField, TextField } from "./parts
 const DEFAULT_METHOD: PaymentMethod = "cash";
 const METHODS: readonly PaymentMethod[] = ["cash", "card", "transfer"];
 
+/**
+ * Mint a handle on ONE payment attempt. The key only has to be unique, never
+ * unguessable, so the fallback is fine where `crypto.randomUUID` is missing —
+ * it is exposed to secure contexts only, and the ventanilla may well be opened
+ * over plain http on the school's LAN.
+ */
+function newAttemptKey(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 export interface PaymentPanelProps {
   /** Collectable charges (a remaining balance, not cancelled). */
   charges: readonly Charge[];
@@ -27,6 +37,13 @@ export interface PaymentPanelProps {
  *
  * The human types PESOS; `pesosToCents` converts once, here, and only integer
  * cents ever reach the api client.
+ *
+ * Every submit carries an idempotency key identifying the ATTEMPT, not the
+ * click: a submit that fails or hangs is retried under the same key, so a
+ * double-click — or a response lost after the server already banked the money —
+ * cannot charge the family twice. The key is renewed once a collection lands,
+ * and whenever the cashier moves to another charge, because those are genuinely
+ * new attempts.
  */
 export function PaymentPanel({ charges, selectedChargeId, onSelectCharge, studentName, onSubmit }: PaymentPanelProps): ReactElement {
   const t = useTranslations("finance");
@@ -35,6 +52,7 @@ export function PaymentPanel({ charges, selectedChargeId, onSelectCharge, studen
   const [reference, setReference] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [attemptKey, setAttemptKey] = useState(newAttemptKey);
 
   const selected = charges.find((charge) => charge.id === selectedChargeId);
   const remainingCents = selected?.remainingCents;
@@ -43,6 +61,12 @@ export function PaymentPanel({ charges, selectedChargeId, onSelectCharge, studen
   useEffect(() => {
     setAmount(remainingCents !== undefined ? centsToPesosInput(remainingCents) : "");
   }, [selectedChargeId, remainingCents]);
+
+  // Another charge is another attempt — never dedupe one student's payment
+  // against another's.
+  useEffect(() => {
+    setAttemptKey(newAttemptKey());
+  }, [selectedChargeId]);
 
   const submit = async (): Promise<void> => {
     setError(undefined);
@@ -57,8 +81,10 @@ export function PaymentPanel({ charges, selectedChargeId, onSelectCharge, studen
     }
     setPending(true);
     try {
-      await onSubmit({ chargeId: selected.id, amountCents, method, reference });
+      await onSubmit({ chargeId: selected.id, amountCents, method, reference, idempotencyKey: attemptKey });
       setReference("");
+      // The money is in: anything the cashier collects next is a new attempt.
+      setAttemptKey(newAttemptKey());
     } catch (cause) {
       setError(t("error.payment", { detail: cause instanceof Error ? cause.message : String(cause) }));
     } finally {
