@@ -1,21 +1,86 @@
-// Finance / Adeudos (M05) — debt + payment ledger per student.
-// Includes CONTPAQi XML export stub (spike S02, in-MVP scope).
-// FASE 0 contract-first stub.
+// Finance / Adeudos (M05) — charge concepts, charges, and the payment ledger.
+//
+// Phase 7 (finance core): the school defines its own charge concepts
+// (colegiatura, inscripción, uniformes, …), charges are issued against a
+// student's enrollment in a cycle — one at a time or generated in bulk for a
+// whole cycle/group — and payments are applied against those charges.
+// Cross-service references (student_id, cycle_id, group_id) are plain UUIDs
+// validated by RPC, NOT foreign keys.
+//
+// MONEY IS ALWAYS INTEGER CENTS (int64). Never a float/double.
+//
+// CONTPAQi XML export (spike S02) remains a stub — Phase 7b.
 syntax = "proto3";
 
 package garcialorca.finance.v1;
+
+import "google/protobuf/timestamp.proto";
 
 // FinanceService is the finance/debt API surface.
 service FinanceService {
   // Health is the liveness/ping probe present on every service.
   rpc Health(HealthRequest) returns (HealthResponse);
 
+  // --- Concepts ---
+
+  // CreateConcept registers a charge concept in the tenant's catalog.
+  rpc CreateConcept(CreateConceptRequest) returns (CreateConceptResponse);
+
+  // ListConcepts lists the tenant's charge concepts. Only active concepts are
+  // returned unless include_inactive is set.
+  rpc ListConcepts(ListConceptsRequest) returns (ListConceptsResponse);
+
+  // UpdateConcept edits a charge concept (full replace of the mutable fields,
+  // including active — deactivating hides it from new charges). Charges already
+  // issued from the concept are untouched.
+  rpc UpdateConcept(UpdateConceptRequest) returns (UpdateConceptResponse);
+
+  // --- Charges ---
+
+  // CreateCharge issues a single charge against a student's enrollment in a
+  // cycle. Amount and description default to the concept's when not overridden.
+  rpc CreateCharge(CreateChargeRequest) returns (CreateChargeResponse);
+
+  // GenerateCharges issues one charge per ACTIVE enrollment in the cycle,
+  // optionally narrowed to a single group. Idempotent: enrollments that already
+  // have a charge for the same (concept, cycle, due_date) are skipped, so the
+  // call can be safely retried.
+  rpc GenerateCharges(GenerateChargesRequest) returns (GenerateChargesResponse);
+
+  // ListCharges lists charges, optionally filtered by student and/or cycle
+  // (each filter is independent; empty = any).
+  rpc ListCharges(ListChargesRequest) returns (ListChargesResponse);
+
+  // ApplyDiscount sets the discount on a charge (beca, convenio, ajuste). The
+  // discount cannot exceed the charge amount; the remaining balance and status
+  // are recomputed server-side.
+  rpc ApplyDiscount(ApplyDiscountRequest) returns (ApplyDiscountResponse);
+
+  // CancelCharge voids a charge. A cancelled charge stops counting toward the
+  // account balance and can no longer receive payments.
+  rpc CancelCharge(CancelChargeRequest) returns (CancelChargeResponse);
+
+  // --- Payments + account ---
+
+  // RegisterPayment applies a payment to a charge and returns the payment plus
+  // the charge with its recomputed paid/remaining/status. Overpaying a charge
+  // or paying a cancelled charge is InvalidArgument.
+  rpc RegisterPayment(RegisterPaymentRequest) returns (RegisterPaymentResponse);
+
+  // GetAccount returns a student's account statement: every charge, every
+  // payment, and the total outstanding balance.
+  rpc GetAccount(GetAccountRequest) returns (GetAccountResponse);
+
+  // ListOverdue lists charges past their due date with a remaining balance,
+  // optionally filtered by cycle. Cancelled and fully paid charges are excluded.
+  rpc ListOverdue(ListOverdueRequest) returns (ListOverdueResponse);
+
   // ExportContpaqi produces a CONTPAQi-format XML export (spike S02).
   // TODO(M05/S02): real field mapping + period/account filters.
   rpc ExportContpaqi(ExportContpaqiRequest) returns (ExportContpaqiResponse);
-
-  // TODO(M05): RegisterPayment, GetAccount, ListOverdue.
 }
+
+// --- Health ---------------------------------------------------------------
 
 message HealthRequest {}
 
@@ -23,13 +88,193 @@ message HealthResponse {
   string status = 1;
 }
 
-// FinanceAccount is a per-student ledger. TODO(M05): balance, currency, tenant_id.
-message FinanceAccount {
+// --- Core types -----------------------------------------------------------
+
+// ChargeConcept is a school-defined billable concept (colegiatura, inscripción,
+// uniformes, …). `default_amount_cents` is the amount used when a charge does
+// not override it. `recurrence` is "once" or "monthly" — it documents the
+// concept's intent; issuing the charges is always an explicit call.
+message ChargeConcept {
   string id = 1;
-  string student_id = 2;
+  string tenant_id = 2;
+  string name = 3;
+  int64 default_amount_cents = 4;
+  string recurrence = 5;
+  bool active = 6;
 }
 
-// --- CONTPAQi export (S02) ---
+// Charge is one debt owed by a student for a concept in a cycle.
+// `paid_cents` and `remaining_cents` are DERIVED server-side and never
+// client-supplied: paid = sum of the charge's payments,
+// remaining = amount_cents - discount_cents - paid_cents.
+// `status` is one of: pending | partially_paid | paid | cancelled.
+// `due_date` is an ISO date, "YYYY-MM-DD".
+message Charge {
+  string id = 1;
+  string tenant_id = 2;
+  string student_id = 3;
+  string cycle_id = 4;
+  string concept_id = 5;
+  string description = 6;
+  int64 amount_cents = 7;
+  int64 discount_cents = 8;
+  string due_date = 9;
+  string status = 10;
+  int64 paid_cents = 11;
+  int64 remaining_cents = 12;
+}
+
+// Payment is one amount applied to a charge. `method` is one of:
+// cash | card | transfer. `reference` is the folio / "con qué se pagó"
+// (transfer id, card voucher, receipt number) — free text.
+message Payment {
+  string id = 1;
+  string tenant_id = 2;
+  string charge_id = 3;
+  int64 amount_cents = 4;
+  string method = 5;
+  string reference = 6;
+  google.protobuf.Timestamp paid_at = 7;
+}
+
+// --- Concept RPC messages -------------------------------------------------
+
+message CreateConceptRequest {
+  string name = 1;
+  int64 default_amount_cents = 2;
+  // recurrence is "once" or "monthly".
+  string recurrence = 3;
+}
+
+message CreateConceptResponse {
+  ChargeConcept concept = 1;
+}
+
+message ListConceptsRequest {
+  // include_inactive false (default) returns only active concepts.
+  bool include_inactive = 1;
+}
+
+message ListConceptsResponse {
+  repeated ChargeConcept concepts = 1;
+}
+
+message UpdateConceptRequest {
+  string id = 1;
+  string name = 2;
+  int64 default_amount_cents = 3;
+  string recurrence = 4;
+  bool active = 5;
+}
+
+message UpdateConceptResponse {
+  ChargeConcept concept = 1;
+}
+
+// --- Charge RPC messages --------------------------------------------------
+
+// CreateChargeRequest issues one charge. The overrides let the school deviate
+// from the concept's defaults for a single student without editing the concept.
+message CreateChargeRequest {
+  string student_id = 1;
+  string cycle_id = 2;
+  string concept_id = 3;
+  // amount_cents_override 0 ⇒ use the concept's default_amount_cents.
+  int64 amount_cents_override = 4;
+  // description_override empty ⇒ use the concept's name.
+  string description_override = 5;
+  // due_date is an ISO date, "YYYY-MM-DD".
+  string due_date = 6;
+}
+
+message CreateChargeResponse {
+  Charge charge = 1;
+}
+
+// GenerateChargesRequest issues the concept's charge to every active enrollment
+// in the cycle, optionally narrowed to one group.
+message GenerateChargesRequest {
+  string concept_id = 1;
+  string cycle_id = 2;
+  // group_id empty ⇒ the whole cycle.
+  string group_id = 3;
+  // amount_cents_override 0 ⇒ use the concept's default_amount_cents.
+  int64 amount_cents_override = 4;
+  // due_date is an ISO date, "YYYY-MM-DD".
+  string due_date = 5;
+}
+
+message GenerateChargesResponse {
+  int32 created_count = 1;
+  // skipped_count counts enrollments that already had the charge (idempotency).
+  int32 skipped_count = 2;
+}
+
+message ListChargesRequest {
+  string student_id = 1;  // optional filter (empty = any)
+  string cycle_id = 2;    // optional filter (empty = any)
+}
+
+message ListChargesResponse {
+  repeated Charge charges = 1;
+}
+
+message ApplyDiscountRequest {
+  string charge_id = 1;
+  int64 discount_cents = 2;
+  string reason = 3;
+}
+
+message ApplyDiscountResponse {
+  Charge charge = 1;
+}
+
+message CancelChargeRequest {
+  string charge_id = 1;
+}
+
+message CancelChargeResponse {
+  Charge charge = 1;
+}
+
+// --- Payment + account RPC messages ---------------------------------------
+
+message RegisterPaymentRequest {
+  string charge_id = 1;
+  int64 amount_cents = 2;
+  // method is one of: cash | card | transfer.
+  string method = 3;
+  // reference is the folio / voucher / transfer id.
+  string reference = 4;
+}
+
+message RegisterPaymentResponse {
+  Payment payment = 1;
+  // charge carries the recomputed paid/remaining/status after the payment.
+  Charge charge = 2;
+}
+
+message GetAccountRequest {
+  string student_id = 1;
+}
+
+// GetAccountResponse is the student's account statement.
+// total_balance_cents is the sum of remaining_cents across non-cancelled charges.
+message GetAccountResponse {
+  repeated Charge charges = 1;
+  repeated Payment payments = 2;
+  int64 total_balance_cents = 3;
+}
+
+message ListOverdueRequest {
+  string cycle_id = 1;  // optional filter (empty = any)
+}
+
+message ListOverdueResponse {
+  repeated Charge charges = 1;
+}
+
+// --- CONTPAQi export (S02) ------------------------------------------------
 
 message ExportContpaqiRequest {
   string tenant_id = 1;
@@ -41,20 +286,25 @@ message ExportContpaqiResponse {
   bytes xml = 1;
 }
 
-// --- Domain events (published) ---
+// --- Domain events (published) --------------------------------------------
 
-// PaymentRegistered fires when a payment is applied to an account.
-// TODO(M05): amount, method, registered_at.
+// PaymentRegistered fires when a payment is applied to a charge.
 message PaymentRegistered {
   string payment_id = 1;
   string student_id = 2;
-  string tenant_id = 3;
+  string charge_id = 3;
+  string tenant_id = 4;
+  int64 amount_cents = 5;
+  string method = 6;
+  google.protobuf.Timestamp paid_at = 7;
 }
 
-// DebtOverdue fires when an account crosses its due date unpaid.
-// TODO(M05): amount_due, due_date, days_overdue.
+// DebtOverdue fires when a charge crosses its due date with a remaining balance.
+// due_date is an ISO date, "YYYY-MM-DD".
 message DebtOverdue {
-  string account_id = 1;
+  string charge_id = 1;
   string student_id = 2;
   string tenant_id = 3;
+  int64 amount_due_cents = 4;
+  string due_date = 5;
 }
