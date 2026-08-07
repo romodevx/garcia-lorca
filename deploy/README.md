@@ -249,6 +249,22 @@ in a shared, multi-role, or family-facing environment.
     reconciles a group's whole day. Authenticated + reconcile-scoped so low risk, but add a
     limiter before a shared, multi-writer environment.
 
+### Added by Phase 9a (`comms` event backbone) — before enabling `module_comms` / real events in a shared env
+23. **Real FCM via Secret Manager.** Push uses a `LogSender` stub; the real Firebase Cloud
+    Messaging sender (service-account credentials) is injected by env/Secret Manager behind an
+    `FCM_ENABLED` flag. No Firebase credential is committed. (See ADR 0003.)
+24. **Cloud Pub/Sub subscription hygiene.** Delivery is at-least-once; the comms consumer is
+    idempotent (`processed_events`), but the Cloud Pub/Sub subscriptions still need a
+    **dead-letter topic + retry/backoff policy** (not needed on the local emulator) so a
+    poison message can't loop forever. Provision in Terraform with the topics.
+25. **Internal service + single-tenant.** `comms` (like the others) has no own authn → gateway is
+    the boundary → `ingress=internal`, don't publish its host port. `COMMS_TENANT_ID` is a
+    process-wide constant → gateway must forward the principal's tenant before multi-tenant use.
+26. **`comms:read` is tenant-wide** — `ListNotifications(studentId)` returns any student's
+    notifications. Owner-only today (0009). Add `comms:read` to the iam `IsOwnerOnly` guard set
+    (with `finance:read`/`attendance:read`) and scope reads to the caller's own students before
+    granting it to a guardian/family or teacher role (Phase 9b).
+
 ## Common commands
 
 ```bash
