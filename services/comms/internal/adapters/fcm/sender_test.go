@@ -25,17 +25,17 @@ func newSender(t *testing.T) (*fcm.LogSender, *bytes.Buffer) {
 // a credential for pushing to that device, so a log line carrying one is a leak
 // that survives in log storage.
 func TestLogSenderReportsTheDeliveryWithoutLeakingTokens(t *testing.T) {
-	const secret = "cXVpZXJvLXVuLXRva2VuLXNlY3JldG8tbGFyZ28"
+	const fakeToken = "device-token-fixture-not-a-real-credential"
 	sender, logs := newSender(t)
 
 	if err := sender.Push(context.Background(),
-		[]string{secret, "otro-token-largo-de-dispositivo"},
+		[]string{fakeToken, "otro-token-largo-de-dispositivo"},
 		"Ausencia registrada", "Se registró una ausencia el 2026-08-06."); err != nil {
 		t.Fatalf("Push: %v", err)
 	}
 
 	out := logs.String()
-	if strings.Contains(out, secret) {
+	if strings.Contains(out, fakeToken) {
 		t.Errorf("the log leaked a full FCM token:\n%s", out)
 	}
 	if !strings.Contains(out, "target_count=2") {
