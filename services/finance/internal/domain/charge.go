@@ -1,0 +1,182 @@
+package domain
+
+import (
+	"strings"
+	"time"
+
+	glerrors "github.com/garcia-lorca/pkg/errors"
+)
+
+// Lifecycle of a charge. Every status except cancelled is DERIVED from the
+// payments posted against the charge (see DeriveStatus); it is a cached
+// projection of the ledger, never an independently mutable field.
+const (
+	// StatusPending: nothing has been paid yet.
+	StatusPending = "pending"
+	// StatusPartiallyPaid: paid, but less than the effective amount.
+	StatusPartiallyPaid = "partially_paid"
+	// StatusPaid: the effective amount is fully covered.
+	StatusPaid = "paid"
+	// StatusCancelled: withdrawn by the school; terminal and never derived.
+	StatusCancelled = "cancelled"
+)
+
+// Charge is one debt a student owes for a cycle, created from a ChargeConcept.
+// studentID, cycleID and conceptID are cross-service UUIDs — plain columns
+// validated by RPC at the use-case boundary, never cross-service FKs.
+//
+// amount is the gross charge and discount the scholarship or courtesy applied
+// to it; what the student actually owes is Effective() = amount - discount.
+// Both are snapshots taken at creation time, so later edits to the catalog or
+// the scholarship never rewrite an issued charge.
+//
+// The entity is immutable: WithDiscount, Cancel and WithStatus each return a
+// copy. Paid amounts are deliberately NOT a field — the ledger owns them, and
+// the use case passes the summed total in whenever the status must be
+// re-derived.
+type Charge struct {
+	id          string
+	tenantID    string
+	studentID   string
+	cycleID     string
+	conceptID   string
+	description string
+	amount      Cents
+	discount    Cents
+	dueDate     time.Time
+	status      string
+}
+
+// NewCharge builds a validated Charge in the pending status. Every identity
+// reference and the description are required, amount and discount must be
+// non-negative, and the discount may not exceed the amount. Every failure is
+// KindInvalid.
+func NewCharge(id, tenantID, studentID, cycleID, conceptID, description string, amountCents, discountCents int64, dueDate time.Time) (Charge, error) {
+	if strings.TrimSpace(id) == "" {
+		return Charge{}, glerrors.New(glerrors.KindInvalid, "charge id is required")
+	}
+	if strings.TrimSpace(tenantID) == "" {
+		return Charge{}, glerrors.New(glerrors.KindInvalid, "tenant id is required")
+	}
+	if strings.TrimSpace(studentID) == "" {
+		return Charge{}, glerrors.New(glerrors.KindInvalid, "student id is required")
+	}
+	if strings.TrimSpace(cycleID) == "" {
+		return Charge{}, glerrors.New(glerrors.KindInvalid, "cycle id is required")
+	}
+	if strings.TrimSpace(conceptID) == "" {
+		return Charge{}, glerrors.New(glerrors.KindInvalid, "charge concept id is required")
+	}
+	if strings.TrimSpace(description) == "" {
+		return Charge{}, glerrors.New(glerrors.KindInvalid, "charge description is required")
+	}
+	amount, err := NewCents(amountCents)
+	if err != nil {
+		return Charge{}, err
+	}
+	discount, err := validateDiscount(amount, discountCents)
+	if err != nil {
+		return Charge{}, err
+	}
+	if dueDate.IsZero() {
+		return Charge{}, glerrors.New(glerrors.KindInvalid, "charge due date is required")
+	}
+	return Charge{
+		id:          id,
+		tenantID:    tenantID,
+		studentID:   studentID,
+		cycleID:     cycleID,
+		conceptID:   conceptID,
+		description: description,
+		amount:      amount,
+		discount:    discount,
+		dueDate:     dueDate,
+		status:      StatusPending,
+	}, nil
+}
+
+// validateDiscount checks a discount against the gross amount it applies to. A
+// discount larger than the amount would make the charge owe negative money, so
+// it is rejected; equal is legal and means a full scholarship.
+func validateDiscount(amount Cents, discountCents int64) (Cents, error) {
+	discount, err := NewCents(discountCents)
+	if err != nil {
+		return 0, err
+	}
+	if discount > amount {
+		return 0, glerrors.New(glerrors.KindInvalid, "discount cannot exceed amount")
+	}
+	return discount, nil
+}
+
+// Effective is what the student actually owes: the gross amount less the
+// discount. Non-negative by construction, since the discount is capped at the
+// amount.
+func (c Charge) Effective() Cents { return c.amount - c.discount }
+
+// DeriveStatus computes the status this charge would have given the total paid
+// against it. Pure: it neither mutates the receiver nor reads a clock.
+//
+// Cancelled is terminal and wins over any payment. Otherwise nothing paid means
+// pending — including the fully-discounted case, which stays pending until a
+// payment actually lands rather than reporting itself as collected.
+func (c Charge) DeriveStatus(paidCents int64) string {
+	if c.status == StatusCancelled {
+		return StatusCancelled
+	}
+	if paidCents <= 0 {
+		return StatusPending
+	}
+	if paidCents >= c.Effective().Int64() {
+		return StatusPaid
+	}
+	return StatusPartiallyPaid
+}
+
+// WithDiscount returns a copy carrying a new discount, with the status
+// re-derived from paidCents because changing the discount changes what is owed
+// (granting a scholarship can settle a charge outright). The new discount is
+// re-validated against the amount; over-amount is KindInvalid.
+func (c Charge) WithDiscount(discountCents int64, paidCents int64) (Charge, error) {
+	discount, err := validateDiscount(c.amount, discountCents)
+	if err != nil {
+		return Charge{}, err
+	}
+	c.discount = discount
+	c.status = c.DeriveStatus(paidCents)
+	return c, nil
+}
+
+// Cancel returns a cancelled copy of the charge. Cancelling twice is a
+// KindConflict.
+//
+// For the MVP a charge may be cancelled regardless of the payments posted
+// against it: the school sometimes voids a charge it has already partially
+// collected, and reconciling that money (refund vs. credit toward another
+// charge) is a later phase, handled by the ledger rather than by blocking here.
+func (c Charge) Cancel() (Charge, error) {
+	if c.status == StatusCancelled {
+		return Charge{}, glerrors.New(glerrors.KindConflict, "charge already cancelled")
+	}
+	c.status = StatusCancelled
+	return c, nil
+}
+
+// WithStatus returns a copy whose status is re-derived from the total paid.
+// Used after a payment is posted. A cancelled charge stays cancelled.
+func (c Charge) WithStatus(paidCents int64) Charge {
+	c.status = c.DeriveStatus(paidCents)
+	return c
+}
+
+// Accessors.
+func (c Charge) ID() string          { return c.id }
+func (c Charge) TenantID() string    { return c.tenantID }
+func (c Charge) StudentID() string   { return c.studentID }
+func (c Charge) CycleID() string     { return c.cycleID }
+func (c Charge) ConceptID() string   { return c.conceptID }
+func (c Charge) Description() string { return c.description }
+func (c Charge) Amount() Cents       { return c.amount }
+func (c Charge) Discount() Cents     { return c.discount }
+func (c Charge) DueDate() time.Time  { return c.dueDate }
+func (c Charge) Status() string      { return c.status }
