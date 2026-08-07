@@ -14,6 +14,8 @@ import (
 
 	attendancev1 "github.com/garcia-lorca/gen/go/garcialorca/attendance/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/attendance/v1/attendancev1connect"
+	commsv1 "github.com/garcia-lorca/gen/go/garcialorca/comms/v1"
+	"github.com/garcia-lorca/gen/go/garcialorca/comms/v1/commsv1connect"
 	configv1 "github.com/garcia-lorca/gen/go/garcialorca/config/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/config/v1/configv1connect"
 	financev1 "github.com/garcia-lorca/gen/go/garcialorca/finance/v1"
@@ -57,6 +59,8 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"finance-reader":   {"finance:read"},
 		"att-writer":       {"attendance:write", "attendance:read"},
 		"att-reader":       {"attendance:read"},
+		"comms-writer":     {"comms:write", "comms:read"},
+		"comms-reader":     {"comms:read"},
 		"users-writer":     {"users:write", "users:read"},
 		"users-reader":     {"users:read"},
 		"roles-writer":     {"roles:write", "roles:read"},
@@ -330,6 +334,37 @@ func (stubAttendance) ListAttendance(_ context.Context, req *connect.Request[att
 	}}), nil
 }
 
+// stubComms echoes a canned device / notification list / marked notification,
+// enough to exercise the comms route security chain end to end. The unread state
+// shows up as an unset read_at, which the edge must render as an empty string.
+type stubComms struct {
+	commsv1connect.UnimplementedCommsServiceHandler
+}
+
+func (stubComms) RegisterDevice(_ context.Context, req *connect.Request[commsv1.RegisterDeviceRequest]) (*connect.Response[commsv1.RegisterDeviceResponse], error) {
+	return connect.NewResponse(&commsv1.RegisterDeviceResponse{Device: &commsv1.Device{
+		Id: "dev-1", UserId: req.Msg.GetUserId(), FcmToken: req.Msg.GetFcmToken(), Platform: req.Msg.GetPlatform(),
+	}}), nil
+}
+
+func (stubComms) ListNotifications(_ context.Context, req *connect.Request[commsv1.ListNotificationsRequest]) (*connect.Response[commsv1.ListNotificationsResponse], error) {
+	return connect.NewResponse(&commsv1.ListNotificationsResponse{Notifications: []*commsv1.Notification{
+		{
+			Id: "ntf-1", StudentId: req.Msg.GetStudentId(), Type: "absence",
+			Title: "Ausencia", Body: "Ana faltó hoy",
+			CreatedAt: timestamppb.New(time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)),
+		},
+	}}), nil
+}
+
+func (stubComms) MarkNotificationRead(_ context.Context, req *connect.Request[commsv1.MarkNotificationReadRequest]) (*connect.Response[commsv1.MarkNotificationReadResponse], error) {
+	return connect.NewResponse(&commsv1.MarkNotificationReadResponse{Notification: &commsv1.Notification{
+		Id: req.Msg.GetId(), StudentId: "stu-1", Type: "absence", Title: "Ausencia",
+		CreatedAt: timestamppb.New(time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)),
+		ReadAt:    timestamppb.New(time.Date(2026, 9, 1, 18, 0, 0, 0, time.UTC)),
+	}}), nil
+}
+
 func connectServer(t *testing.T, path string, handler http.Handler) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -355,6 +390,8 @@ func newTestGateway(t *testing.T, flags map[string]bool) *httptest.Server {
 	finSrv := connectServer(t, finPath, finHandler)
 	attPath, attHandler := attendancev1connect.NewAttendanceServiceHandler(stubAttendance{})
 	attSrv := connectServer(t, attPath, attHandler)
+	comPath, comHandler := commsv1connect.NewCommsServiceHandler(stubComms{})
+	comSrv := connectServer(t, comPath, comHandler)
 
 	// A generous burst keeps the limiter out of the way of these route tests;
 	// rate-limit behavior is covered directly in the middleware package.
@@ -367,6 +404,7 @@ func newTestGateway(t *testing.T, flags map[string]bool) *httptest.Server {
 		client.NewGradesClient(grdSrv.URL, grdSrv.Client()),
 		client.NewFinanceClient(finSrv.URL, finSrv.Client()),
 		client.NewAttendanceClient(attSrv.URL, attSrv.Client()),
+		client.NewCommsClient(comSrv.URL, comSrv.Client()),
 		featureflag.NewInMemory(flags),
 		loginLimiter,
 	)
@@ -1269,6 +1307,137 @@ func TestAttendanceListDisabledModuleIs404(t *testing.T) {
 func TestAttendanceListWithWritePermission200(t *testing.T) {
 	gw := newTestGateway(t, map[string]bool{"module_attendance": true})
 	res := doGateway(t, gw, http.MethodGet, "/api/v1/attendance?enrollmentId=enr-1", "att-writer", "")
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", res.StatusCode)
+	}
+}
+
+// --- comms routes (Phase 9a): ModuleGuard(comms) → RequireAuth →
+// RequirePermission. Registering a device and marking a notification read are
+// writes (comms:write); the notification list is a read (comms:read). Every
+// route sits behind guard.Protect("comms", …) so module_comms OFF ⇒ 404, before
+// auth runs.
+
+const validDeviceBody = `{"userId":"usr-1","fcmToken":"tok-abc","platform":"android"}`
+
+func TestCommsRegisterDeviceDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_comms OFF
+	// Even a caller with comms:write must not learn the module exists.
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/comms/devices", "comms-writer", validDeviceBody)
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestCommsRegisterDeviceNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_comms": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/comms/devices", "", validDeviceBody)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+// Registering a device changes who gets pushed to, so comms:read is deliberately
+// insufficient.
+func TestCommsRegisterDeviceReadOnlyPermissionIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_comms": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/comms/devices", "comms-reader", validDeviceBody)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+func TestCommsRegisterDeviceWithWritePermission200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_comms": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/comms/devices", "comms-writer", validDeviceBody)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out["id"] != "dev-1" || out["fcmToken"] != "tok-abc" || out["platform"] != "android" {
+		t.Errorf("body = %v", out)
+	}
+}
+
+func TestCommsListNotificationsWithReadPermission200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_comms": true})
+	res := doGateway(t, gw, http.MethodGet,
+		"/api/v1/comms/notifications?studentId=stu-1&unreadOnly=true", "comms-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out struct {
+		Notifications []map[string]any `json:"notifications"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The studentId comes from the query, so the stub echoes it back. An unset
+	// read_at survives the whole edge as an empty string, never a zero instant.
+	if len(out.Notifications) != 1 || out.Notifications[0]["studentId"] != "stu-1" ||
+		out.Notifications[0]["createdAt"] != "2026-09-01T10:00:00Z" || out.Notifications[0]["readAt"] != "" {
+		t.Errorf("body = %v", out.Notifications)
+	}
+}
+
+func TestCommsListNotificationsDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_comms OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/comms/notifications?studentId=stu-1", "comms-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestCommsListNotificationsNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_comms": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/comms/notifications?studentId=stu-1", "", "")
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+// The mark-read route carries the id in the path: ServeMux must bind it and the
+// handler must forward it, which the stub proves by echoing it back.
+func TestCommsMarkReadWithWritePermission200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_comms": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/comms/notifications/ntf-7/read", "comms-writer", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out["id"] != "ntf-7" || out["readAt"] != "2026-09-01T18:00:00Z" {
+		t.Errorf("body = %v", out)
+	}
+}
+
+// Acknowledging a notification mutates it, so a read-only caller is refused.
+func TestCommsMarkReadReadOnlyPermissionIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_comms": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/comms/notifications/ntf-7/read", "comms-reader", "")
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+func TestCommsMarkReadDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_comms OFF
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/comms/notifications/ntf-7/read", "comms-writer", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+// A write token also carries comms:read, so the inbox stays reachable for the
+// client that just registered its device.
+func TestCommsListNotificationsWithWritePermission200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_comms": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/comms/notifications?studentId=stu-1", "comms-writer", "")
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200", res.StatusCode)
 	}

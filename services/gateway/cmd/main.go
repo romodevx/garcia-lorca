@@ -62,6 +62,10 @@ func main() {
 	if attendanceBaseURL == "" {
 		attendanceBaseURL = "http://localhost:8095"
 	}
+	commsBaseURL := os.Getenv("COMMS_BASE_URL")
+	if commsBaseURL == "" {
+		commsBaseURL = "http://localhost:8096"
+	}
 
 	// flags is the authoritative source of module visibility (default-deny),
 	// loaded from ENABLED_MODULES (comma-separated module names). The gateway
@@ -76,6 +80,7 @@ func main() {
 	gradesClient := client.NewGradesClient(gradesBaseURL, http.DefaultClient)
 	financeClient := client.NewFinanceClient(financeBaseURL, http.DefaultClient)
 	attendanceClient := client.NewAttendanceClient(attendanceBaseURL, http.DefaultClient)
+	commsClient := client.NewCommsClient(commsBaseURL, http.DefaultClient)
 
 	// loginLimiter fronts POST /auth/login with a per-IP token bucket so an
 	// attacker cannot brute-force credentials from a single source. It is
@@ -83,7 +88,7 @@ func main() {
 	loginRL := config.ParseLoginRateLimit(os.Getenv)
 	loginLimiter := middleware.NewRateLimiter(loginRL.Burst, loginRL.RefillPerSec(), time.Now)
 
-	mux := newMux(iamHealth, authClient, studentsClient, configClient, gradesClient, financeClient, attendanceClient, flags, loginLimiter)
+	mux := newMux(iamHealth, authClient, studentsClient, configClient, gradesClient, financeClient, attendanceClient, commsClient, flags, loginLimiter)
 
 	log.Info("gateway starting",
 		slog.String("addr", addr),
@@ -92,7 +97,8 @@ func main() {
 		slog.String("config", configBaseURL),
 		slog.String("grades", gradesBaseURL),
 		slog.String("finance", financeBaseURL),
-		slog.String("attendance", attendanceBaseURL))
+		slog.String("attendance", attendanceBaseURL),
+		slog.String("comms", commsBaseURL))
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           mux,
@@ -135,6 +141,11 @@ func main() {
 //	                             RequirePermission(attendance:write on saving a
 //	                             day, attendance:read on roster/list) →
 //	                             attendance service
+//	/api/v1/comms/...          → ModuleGuard(comms) → RequireAuth → rotation →
+//	                             RequirePermission(comms:write on device
+//	                             registration and marking a notification read,
+//	                             comms:read on the notification list) → comms
+//	                             service
 //	/api/v1/users/..., /roles/... → ModuleGuard(iam) → RequireAuth → rotation →
 //	                             RequirePermission(users:*/roles:* by verb) → iam
 //	                             admin (user/role CRUD)
@@ -145,7 +156,7 @@ func main() {
 //
 // `flags` (via middleware.NewModuleGuard) is the module-visibility boundary:
 // disabled module ⇒ 404, evaluated before auth so a hidden module is invisible.
-func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, configClient *client.ConfigClient, gradesClient *client.GradesClient, financeClient *client.FinanceClient, attendanceClient *client.AttendanceClient, flags featureflag.Checker, loginLimiter *middleware.RateLimiter) *http.ServeMux {
+func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, configClient *client.ConfigClient, gradesClient *client.GradesClient, financeClient *client.FinanceClient, attendanceClient *client.AttendanceClient, commsClient *client.CommsClient, flags featureflag.Checker, loginLimiter *middleware.RateLimiter) *http.ServeMux {
 	mux := http.NewServeMux()
 	handler.NewHealthHandler(iamHealth).Register(mux)
 
@@ -286,6 +297,29 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/attendance/roster", attendanceRead(attendanceH.GetRoster))
 	mux.Handle("POST /api/v1/attendance", attendanceWrite(attendanceH.SaveDaily))
 	mux.Handle("GET /api/v1/attendance", attendanceRead(attendanceH.ListAttendance))
+
+	// M10 comms (push + notification inbox): flag-guarded, authenticated +
+	// rotation-enforced, permission-gated. Registering a device and marking a
+	// notification read both mutate state (comms:write); listing a student's
+	// notifications is a read (comms:read). Every route sits behind
+	// guard.Protect("comms", …) so module_comms OFF ⇒ 404 (the module is
+	// invisible before auth even runs).
+	//
+	// SCOPING CAVEAT: comms:read takes a studentId from the query, so it can
+	// expose ANY student's notifications to any holder of the permission — it is
+	// owner-only for now and is a candidate for the iam IsOwnerOnly guard once
+	// guardian scoping lands (Phase 9b), which is where the caller↔student
+	// relationship gets modelled.
+	commsH := handler.NewCommsHandler(commsClient)
+	commsWrite := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("comms", requireAuthChanged(middleware.RequirePermission("comms:write")(http.HandlerFunc(h))))
+	}
+	commsRead := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("comms", requireAuthChanged(middleware.RequirePermission("comms:read")(http.HandlerFunc(h))))
+	}
+	mux.Handle("POST /api/v1/comms/devices", commsWrite(commsH.RegisterDevice))
+	mux.Handle("GET /api/v1/comms/notifications", commsRead(commsH.ListNotifications))
+	mux.Handle("POST /api/v1/comms/notifications/{id}/read", commsWrite(commsH.MarkRead))
 
 	// Phase 6 iam admin (user/role CRUD): flag-guarded (module_iam), authenticated
 	// + rotation-enforced, permission-gated. User routes need users:read (GET) /
