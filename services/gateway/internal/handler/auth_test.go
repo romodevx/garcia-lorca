@@ -21,13 +21,19 @@ type fakeLogin struct {
 	cpErr       error
 	cpGotToken  string
 	cpGotCalled bool
+
+	gotEmail        string
+	gotPassword     string
+	gotRefreshToken string
 }
 
-func (f fakeLogin) Login(context.Context, string, string) (client.LoginResult, error) {
+func (f *fakeLogin) Login(_ context.Context, email, password string) (client.LoginResult, error) {
+	f.gotEmail, f.gotPassword = email, password
 	return f.res, f.err
 }
 
-func (f fakeLogin) Refresh(context.Context, string) (client.LoginResult, error) {
+func (f *fakeLogin) Refresh(_ context.Context, refreshToken string) (client.LoginResult, error) {
+	f.gotRefreshToken = refreshToken
 	return f.res, f.err
 }
 
@@ -302,6 +308,124 @@ func TestLogoutClearsCookie(t *testing.T) {
 	ref := cookieByName(cs, "gl_refresh")
 	if ref == nil || ref.MaxAge >= 0 || !ref.HttpOnly || ref.Path != "/api/v1/auth" {
 		t.Errorf("expected HttpOnly gl_refresh deletion cookie (Path /api/v1/auth), got %v", ref)
+	}
+}
+
+// --- mobile credential posture ---------------------------------------------
+//
+// The mobile endpoints are the mirror image of the web ones: tokens travel in
+// the JSON body (a React Native client has no cookie jar) and NO Set-Cookie is
+// emitted. These tests pin both halves of that contract, since accidentally
+// leaking a token into the web body — or a cookie into the mobile response —
+// would silently break the posture the web flow depends on.
+
+func TestMobileLoginReturnsTokensInBodyAndSetsNoCookies(t *testing.T) {
+	fake := &fakeLogin{res: client.LoginResult{
+		AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 900, MustChangePassword: true,
+	}}
+	h := handler.NewAuthHandler(fake)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/mobile/login",
+		strings.NewReader(`{"email":"ana@garcialorca.mx","password":"secret"}`))
+	h.MobileLogin(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200", rec.Code)
+	}
+	var body struct {
+		AccessToken        string `json:"accessToken"`
+		RefreshToken       string `json:"refreshToken"`
+		ExpiresIn          int64  `json:"expiresIn"`
+		MustChangePassword bool   `json:"mustChangePassword"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.AccessToken != "acc" || body.RefreshToken != "ref" {
+		t.Errorf("body tokens = %+v, want acc/ref", body)
+	}
+	if body.ExpiresIn != 900 || !body.MustChangePassword {
+		t.Errorf("body = %+v, want expiresIn 900 and mustChangePassword true", body)
+	}
+	if cs := rec.Result().Cookies(); len(cs) != 0 {
+		t.Errorf("mobile login must set no cookies, got %v", cs)
+	}
+	if fake.gotEmail != "ana@garcialorca.mx" || fake.gotPassword != "secret" {
+		t.Errorf("credentials forwarded = %q/%q", fake.gotEmail, fake.gotPassword)
+	}
+}
+
+func TestMobileLoginBadCredentialsIs401(t *testing.T) {
+	h := handler.NewAuthHandler(&fakeLogin{err: connect.NewError(connect.CodeUnauthenticated, errString("bad"))})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/mobile/login",
+		strings.NewReader(`{"email":"a@b.mx","password":"x"}`))
+	h.MobileLogin(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("code = %d, want 401", rec.Code)
+	}
+}
+
+func TestMobileLoginMalformedBodyIs400(t *testing.T) {
+	h := handler.NewAuthHandler(&fakeLogin{})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/mobile/login", strings.NewReader(`not json`))
+	h.MobileLogin(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("code = %d, want 400", rec.Code)
+	}
+}
+
+func TestMobileRefreshTakesTokenFromBodyAndSetsNoCookies(t *testing.T) {
+	fake := &fakeLogin{res: client.LoginResult{AccessToken: "new-acc", RefreshToken: "new-ref", ExpiresIn: 900}}
+	h := handler.NewAuthHandler(fake)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/mobile/refresh",
+		strings.NewReader(`{"refreshToken":"old-ref"}`))
+	// A cookie must NOT be what authorizes a mobile refresh: the body wins.
+	req.AddCookie(&http.Cookie{Name: "gl_refresh", Value: "cookie-ref"})
+	h.MobileRefresh(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200", rec.Code)
+	}
+	if fake.gotRefreshToken != "old-ref" {
+		t.Errorf("refresh token forwarded = %q, want the body token old-ref", fake.gotRefreshToken)
+	}
+	var body struct {
+		AccessToken  string `json:"accessToken"`
+		RefreshToken string `json:"refreshToken"`
+		ExpiresIn    int64  `json:"expiresIn"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.AccessToken != "new-acc" || body.RefreshToken != "new-ref" || body.ExpiresIn != 900 {
+		t.Errorf("rotated body = %+v, want new-acc/new-ref/900", body)
+	}
+	if cs := rec.Result().Cookies(); len(cs) != 0 {
+		t.Errorf("mobile refresh must set no cookies, got %v", cs)
+	}
+}
+
+func TestMobileRefreshMissingTokenIs401(t *testing.T) {
+	h := handler.NewAuthHandler(&fakeLogin{res: client.LoginResult{AccessToken: "a", RefreshToken: "r"}})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/mobile/refresh", strings.NewReader(`{}`))
+	h.MobileRefresh(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("code = %d, want 401", rec.Code)
+	}
+}
+
+func TestMobileRefreshRejectedTokenIs401(t *testing.T) {
+	h := handler.NewAuthHandler(&fakeLogin{err: connect.NewError(connect.CodeUnauthenticated, errString("bad"))})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/mobile/refresh",
+		strings.NewReader(`{"refreshToken":"stale"}`))
+	h.MobileRefresh(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("code = %d, want 401", rec.Code)
 	}
 }
 

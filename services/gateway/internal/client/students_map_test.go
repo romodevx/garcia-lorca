@@ -99,3 +99,26 @@ func TestAdmissionFromName(t *testing.T) {
 		t.Errorf("admissionFromName(unknown) = %v, want UNSPECIFIED", got)
 	}
 }
+
+func TestToGuardianLinkCopiesEveryField(t *testing.T) {
+	got := toGuardianLink(&studentsv1.GuardianLink{
+		Id:             "gl-1",
+		TenantId:       "t1",
+		GuardianUserId: "usr-9",
+		StudentId:      "stu-1",
+		Relationship:   "mother",
+	})
+	want := GuardianLink{
+		ID: "gl-1", TenantID: "t1", GuardianUserID: "usr-9", StudentID: "stu-1", Relationship: "mother",
+	}
+	if got != want {
+		t.Errorf("toGuardianLink() = %+v, want %+v", got, want)
+	}
+}
+
+// A nil link (an empty response field) must map to the zero value, not panic.
+func TestToGuardianLinkNilIsZero(t *testing.T) {
+	if got := toGuardianLink(nil); got != (GuardianLink{}) {
+		t.Errorf("toGuardianLink(nil) = %+v, want zero", got)
+	}
+}
