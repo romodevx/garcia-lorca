@@ -1,0 +1,403 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"google.golang.org/protobuf/proto"
+
+	attendancev1 "github.com/garcia-lorca/gen/go/garcialorca/attendance/v1"
+	financev1 "github.com/garcia-lorca/gen/go/garcialorca/finance/v1"
+	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/pubsub"
+)
+
+// The event types this consumer dispatches on, as the publishing services stamp
+// them in the message's "type" attribute (see each service's adapters/pubsub).
+const (
+	eventAbsenceRecorded   = "AbsenceRecorded"
+	eventAttendanceMarked  = "AttendanceMarked"
+	eventPaymentRegistered = "PaymentRegistered"
+)
+
+// attrType is the routing attribute carrying the event type name.
+const attrType = "type"
+
+// The notification vocabulary stored in `type`, as declared by the proto
+// contract (garcialorca.comms.v1.Notification): a short, stable kind the client
+// switches on for its icon — NOT the producing event's name, which changes with
+// the upstream contract.
+const (
+	typeAbsence    = "absence"
+	typeAttendance = "attendance"
+	typePayment    = "payment"
+)
+
+// The attendance statuses that reach this consumer. statusAbsent is deliberately
+// NOT notified from AttendanceMarked: attendance publishes both events for an
+// absence, and rendering each would notify the family twice for one absence.
+const (
+	statusAbsent  = "absent"
+	statusLate    = "late"
+	statusExcused = "excused"
+)
+
+// The push platforms a device may report. platformUnknown, the empty string, is
+// accepted on purpose — a client that does not report its platform must still be
+// registrable, and the column defaults to it.
+const (
+	platformUnknown = ""
+	platformIOS     = "ios"
+	platformAndroid = "android"
+	platformWeb     = "web"
+)
+
+// errNotNotifiable marks a message this consumer will never turn into a
+// notification: an unknown event type, a payload it cannot read, or an event
+// that is deliberately not notified. It is handled by ACKING the message —
+// redelivering it could not change the outcome, so failing would loop forever.
+var errNotNotifiable = errors.New("event is not notifiable")
+
+// --- seams -------------------------------------------------------------------
+//
+// The interfaces below are consumer-defined: comms declares the narrow view it
+// needs and the adapters (the GORM repository, the FCM sender) satisfy them from
+// the outside. Comms owns no students and no users — both are cross-service
+// UUIDs it only carries.
+
+// Notification is one message materialised for a student out of a consumed
+// domain event. Type is the stable client-facing kind (absence|attendance|
+// payment); Title and Body are the rendered Spanish copy. A zero ReadAt means
+// the notification is still unread, which is what the badge counts.
+type Notification struct {
+	ID        string
+	StudentID string
+	Type      string
+	Title     string
+	Body      string
+	CreatedAt time.Time
+	ReadAt    time.Time
+}
+
+// Device is one push target: the FCM token a user's client is reachable at, plus
+// the platform it came from.
+type Device struct {
+	ID       string
+	UserID   string
+	FCMToken string
+	Platform string
+}
+
+// Repo stores the notification feed, the push devices and the consumed-event
+// ledger. All access is tenant-scoped for RLS (the adapter binds
+// app.current_tenant per transaction, as in students/grades/attendance).
+type Repo interface {
+	// RecordEvent claims eventKey in the consumed-event ledger and materialises n
+	// in the SAME transaction, returning the stored notification. isNew is false
+	// when the key was already claimed — a redelivery — and NOTHING is written.
+	//
+	// Claiming and storing are one unit on purpose: split across two
+	// transactions, a failure between them would leave the event marked handled
+	// with no notification to show for it, and the redelivery would be skipped.
+	RecordEvent(ctx context.Context, eventKey string, n Notification) (created Notification, isNew bool, err error)
+	// ListNotifications returns one student's notifications, newest first. With
+	// unreadOnly, only those whose read_at is unset.
+	ListNotifications(ctx context.Context, studentID string, unreadOnly bool) ([]Notification, error)
+	// MarkRead stamps a notification as read and returns it. Marking an
+	// already-read notification keeps the original instant (idempotent). An
+	// unknown id is glerrors.ErrNotFound.
+	MarkRead(ctx context.Context, id string) (Notification, error)
+	// UpsertDevice registers d, refreshing the existing row when its token is
+	// already known rather than fanning the same device out twice.
+	UpsertDevice(ctx context.Context, d Device) (Device, error)
+	// DevicesForTenant returns every push target in the tenant.
+	//
+	// Targeting is deliberately coarse in this phase: comms cannot yet resolve
+	// WHICH users are a given student's guardians (the guardian↔student link
+	// lands with the family module), so the push fans out tenant-wide while the
+	// per-student feed — the durable part — is already exact. Narrowing this to a
+	// student's guardians is the carry-forward.
+	DevicesForTenant(ctx context.Context) ([]Device, error)
+}
+
+// Sender delivers a rendered notification to push targets. Delivery is
+// best-effort (see push): a nil Sender disables it entirely.
+type Sender interface {
+	Push(ctx context.Context, tokens []string, title, body string) error
+}
+
+// --- service -----------------------------------------------------------------
+
+// CommsService materialises domain events from other services into a per-student
+// notification feed, and serves that feed plus device registration.
+//
+// It PUBLISHES NOTHING: sending is a side effect of consuming an event, never an
+// RPC. Its one hard requirement is idempotency — Pub/Sub is at-least-once, so
+// every delivery goes through the consumed-event ledger before anything is
+// written:
+//
+//	HandleEvent: render (pure) ─> claim the event + store the feed entry
+//	             (one tx) ─> push (best-effort, never fails the handler)
+//
+// Ids come from an injected newID and the timestamps from an injected now, so
+// the consumer is deterministic under test.
+type CommsService struct {
+	repo     Repo
+	sender   Sender
+	tenantID string
+	newID    func() string
+	now      func() time.Time
+	log      *slog.Logger
+}
+
+// NewCommsService wires the service. tenantID is the single-tenant scope for this
+// phase and the tenant every consumed event must belong to; sender may be nil,
+// which disables push and leaves only the durable feed. log receives the dropped
+// messages and the best-effort push failures; a nil log falls back to
+// slog.Default so nothing is ever silently discarded.
+func NewCommsService(
+	repo Repo,
+	sender Sender,
+	tenantID string,
+	newID func() string,
+	now func() time.Time,
+	log *slog.Logger,
+) *CommsService {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &CommsService{
+		repo:     repo,
+		sender:   sender,
+		tenantID: tenantID,
+		newID:    newID,
+		now:      now,
+		log:      log,
+	}
+}
+
+// HandleEvent is the idempotent consumer, usable directly as a pubsub.Handler.
+//
+// Returning an error asks the transport to redeliver, so the two failure modes
+// are told apart deliberately:
+//
+//   - Nothing was stored and a retry could succeed (the ledger is unreachable)
+//     ⇒ return the error and let the event come back.
+//   - The message can never be handled (unknown type, unreadable payload, an
+//     event this consumer does not notify, another tenant's event) ⇒ log it and
+//     ACK, because redelivering it would loop forever.
+//
+// Once the feed entry is stored the event is DONE: the push that follows is
+// best-effort and its failure is never returned, since a redelivery would be
+// skipped by the ledger and the notification lost for nothing.
+func (s *CommsService) HandleEvent(ctx context.Context, msg pubsub.Message) error {
+	eventType := msg.Attributes[attrType]
+
+	eventKey, n, err := s.render(eventType, msg.Data)
+	if err != nil {
+		s.log.Warn("comms dropped an event it cannot notify on",
+			slog.String("event_type", eventType),
+			slog.Any("error", err))
+		return nil
+	}
+
+	n.ID = s.newID()
+	n.CreatedAt = s.now()
+	created, isNew, err := s.repo.RecordEvent(ctx, eventKey, n)
+	if err != nil {
+		return fmt.Errorf("recording event %s: %w", eventKey, err)
+	}
+	if !isNew {
+		// A redelivery of an event already handled: acking is the whole point of
+		// the ledger.
+		s.log.Debug("comms skipped an already-handled event", slog.String("event_key", eventKey))
+		return nil
+	}
+
+	s.push(ctx, created)
+	return nil
+}
+
+// RegisterDevice registers (or refreshes) the FCM token a user's device is
+// reachable at. Re-registering a known token updates it rather than duplicating
+// it, so a client may call this on every launch.
+func (s *CommsService) RegisterDevice(ctx context.Context, userID, fcmToken, platform string) (Device, error) {
+	if err := uuid.Validate(userID); err != nil {
+		return Device{}, glerrors.New(glerrors.KindInvalid, "invalid user id")
+	}
+	if strings.TrimSpace(fcmToken) == "" {
+		return Device{}, glerrors.New(glerrors.KindInvalid, "fcm token is required")
+	}
+	if !isKnownPlatform(platform) {
+		return Device{}, glerrors.New(glerrors.KindInvalid, "platform must be one of ios, android, web")
+	}
+	return s.repo.UpsertDevice(ctx, Device{
+		ID:       s.newID(),
+		UserID:   userID,
+		FCMToken: fcmToken,
+		Platform: platform,
+	})
+}
+
+// ListNotifications returns one student's notifications, newest first; with
+// unreadOnly, only the unread ones. The student id is checked here rather than
+// left to Postgres: the column is a uuid, so a malformed id would otherwise
+// surface as an infrastructure error for a plain client mistake.
+func (s *CommsService) ListNotifications(ctx context.Context, studentID string, unreadOnly bool) ([]Notification, error) {
+	if err := uuid.Validate(studentID); err != nil {
+		return nil, glerrors.New(glerrors.KindInvalid, "invalid student id")
+	}
+	return s.repo.ListNotifications(ctx, studentID, unreadOnly)
+}
+
+// MarkNotificationRead stamps a notification as read and returns it. Marking an
+// already-read notification is idempotent: read_at keeps its original value.
+func (s *CommsService) MarkNotificationRead(ctx context.Context, id string) (Notification, error) {
+	if err := uuid.Validate(id); err != nil {
+		return Notification{}, glerrors.New(glerrors.KindInvalid, "invalid notification id")
+	}
+	return s.repo.MarkRead(ctx, id)
+}
+
+// push delivers a stored notification to the tenant's devices. Every failure is
+// logged and swallowed: the feed entry is already durable, and the family seeing
+// it late is strictly better than failing the handler — which, with the event
+// already claimed, would lose the notification rather than retry it.
+func (s *CommsService) push(ctx context.Context, n Notification) {
+	if s.sender == nil {
+		return
+	}
+	devices, err := s.repo.DevicesForTenant(ctx)
+	if err != nil {
+		s.log.Warn("comms could not resolve push targets",
+			slog.String("notification_id", n.ID),
+			slog.Any("error", err))
+		return
+	}
+	if len(devices) == 0 {
+		return
+	}
+	tokens := make([]string, 0, len(devices))
+	for _, d := range devices {
+		tokens = append(tokens, d.FCMToken)
+	}
+	if err := s.sender.Push(ctx, tokens, n.Title, n.Body); err != nil {
+		s.log.Warn("comms push not delivered",
+			slog.String("notification_id", n.ID),
+			slog.Int("target_count", len(tokens)),
+			slog.Any("error", err))
+	}
+}
+
+// render turns a raw event into its ledger key and the notification to store. It
+// is PURE — no clock, no ids, no I/O — so the whole rendering contract is
+// table-testable, and it is the single place that knows the upstream protos.
+//
+// Every message it cannot notify on is errNotNotifiable, which HandleEvent acks.
+// That covers an unknown type, an unreadable payload, an event with no id to key
+// the ledger on or no student to notify, and — the tenant guard — an event
+// belonging to someone else: this service is bound to one tenant, and its
+// repository would otherwise store another tenant's data under ours.
+func (s *CommsService) render(eventType string, data []byte) (eventKey string, n Notification, err error) {
+	switch eventType {
+	case eventAbsenceRecorded:
+		var e attendancev1.AbsenceRecorded
+		if err := proto.Unmarshal(data, &e); err != nil {
+			return "", Notification{}, fmt.Errorf("%w: unreadable %s payload: %v", errNotNotifiable, eventType, err)
+		}
+		return s.notification(eventType, e.GetRecordId(), e.GetStudentId(), e.GetTenantId(), Notification{
+			Type:  typeAbsence,
+			Title: "Ausencia registrada",
+			Body:  fmt.Sprintf("Se registró una ausencia el %s.", e.GetDate()),
+		})
+
+	case eventAttendanceMarked:
+		var e attendancev1.AttendanceMarked
+		if err := proto.Unmarshal(data, &e); err != nil {
+			return "", Notification{}, fmt.Errorf("%w: unreadable %s payload: %v", errNotNotifiable, eventType, err)
+		}
+		title, body, ok := attendanceCopy(e.GetStatus(), e.GetDate())
+		if !ok {
+			return "", Notification{}, fmt.Errorf("%w: attendance status %q", errNotNotifiable, e.GetStatus())
+		}
+		return s.notification(eventType, e.GetRecordId(), e.GetStudentId(), e.GetTenantId(), Notification{
+			Type:  typeAttendance,
+			Title: title,
+			Body:  body,
+		})
+
+	case eventPaymentRegistered:
+		var e financev1.PaymentRegistered
+		if err := proto.Unmarshal(data, &e); err != nil {
+			return "", Notification{}, fmt.Errorf("%w: unreadable %s payload: %v", errNotNotifiable, eventType, err)
+		}
+		return s.notification(eventType, e.GetPaymentId(), e.GetStudentId(), e.GetTenantId(), Notification{
+			Type:  typePayment,
+			Title: "Pago recibido",
+			Body:  fmt.Sprintf("Recibimos tu pago de %s MXN.", pesos(e.GetAmountCents())),
+		})
+
+	default:
+		return "", Notification{}, fmt.Errorf("%w: unknown event type %q", errNotNotifiable, eventType)
+	}
+}
+
+// notification completes a rendered notification with the parts every event
+// shares — its ledger key and its student — after the checks that make it
+// storable at all. The key is "<event type>:<event id>", the form the
+// processed_events column documents.
+func (s *CommsService) notification(eventType, eventID, studentID, tenantID string, n Notification) (string, Notification, error) {
+	if eventID == "" {
+		return "", Notification{}, fmt.Errorf("%w: %s carries no event id", errNotNotifiable, eventType)
+	}
+	if studentID == "" {
+		return "", Notification{}, fmt.Errorf("%w: %s carries no student id", errNotNotifiable, eventType)
+	}
+	if tenantID != s.tenantID {
+		return "", Notification{}, fmt.Errorf("%w: %s belongs to another tenant", errNotNotifiable, eventType)
+	}
+	n.StudentID = studentID
+	return eventType + ":" + eventID, n, nil
+}
+
+// attendanceCopy renders the copy for a general attendance exception, reporting
+// whether the status is notified at all. An absence is NOT: attendance publishes
+// AbsenceRecorded for it too, and notifying on both would tell the family twice.
+func attendanceCopy(status, date string) (title, body string, ok bool) {
+	switch status {
+	case statusLate:
+		return "Llegada tarde", fmt.Sprintf("Se registró una llegada tarde el %s.", date), true
+	case statusExcused:
+		return "Ausencia justificada", fmt.Sprintf("Se registró una ausencia justificada el %s.", date), true
+	case statusAbsent:
+		return "", "", false // AbsenceRecorded is the event that notifies this
+	default:
+		return "", "", false
+	}
+}
+
+// pesos renders minor units as the amount a family reads. Money crosses every
+// boundary in this system as int64 cents, never a float, so the decimal point is
+// placed by integer arithmetic here.
+func pesos(cents int64) string {
+	if cents < 0 {
+		return fmt.Sprintf("-$%d.%02d", -cents/100, -cents%100)
+	}
+	return fmt.Sprintf("$%d.%02d", cents/100, cents%100)
+}
+
+// isKnownPlatform reports whether platform is one the contract accepts. The empty
+// string is valid: it is the unreported platform.
+func isKnownPlatform(platform string) bool {
+	switch platform {
+	case platformUnknown, platformIOS, platformAndroid, platformWeb:
+		return true
+	default:
+		return false
+	}
+}
