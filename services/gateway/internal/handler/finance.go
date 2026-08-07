@@ -87,7 +87,6 @@ type registerPaymentRequest struct {
 
 type conceptResponse struct {
 	ID                 string `json:"id"`
-	TenantID           string `json:"tenantId"`
 	Name               string `json:"name"`
 	DefaultAmountCents int64  `json:"defaultAmountCents"`
 	Recurrence         string `json:"recurrence"`
@@ -97,7 +96,6 @@ type conceptResponse struct {
 func toConceptResponse(c client.ChargeConcept) conceptResponse {
 	return conceptResponse{
 		ID:                 c.ID,
-		TenantID:           c.TenantID,
 		Name:               c.Name,
 		DefaultAmountCents: c.DefaultAmountCents,
 		Recurrence:         c.Recurrence,
@@ -107,7 +105,6 @@ func toConceptResponse(c client.ChargeConcept) conceptResponse {
 
 type chargeResponse struct {
 	ID            string `json:"id"`
-	TenantID      string `json:"tenantId"`
 	StudentID     string `json:"studentId"`
 	CycleID       string `json:"cycleId"`
 	ConceptID     string `json:"conceptId"`
@@ -124,7 +121,6 @@ type chargeResponse struct {
 func toChargeResponse(c client.Charge) chargeResponse {
 	return chargeResponse{
 		ID:             c.ID,
-		TenantID:       c.TenantID,
 		StudentID:      c.StudentID,
 		CycleID:        c.CycleID,
 		ConceptID:      c.ConceptID,
@@ -148,7 +144,6 @@ func toChargeResponses(in []client.Charge) []chargeResponse {
 
 type paymentResponse struct {
 	ID          string `json:"id"`
-	TenantID    string `json:"tenantId"`
 	ChargeID    string `json:"chargeId"`
 	AmountCents int64  `json:"amountCents"`
 	Method      string `json:"method"`
@@ -159,7 +154,6 @@ type paymentResponse struct {
 func toPaymentResponse(p client.Payment) paymentResponse {
 	return paymentResponse{
 		ID:          p.ID,
-		TenantID:    p.TenantID,
 		ChargeID:    p.ChargeID,
 		AmountCents: p.AmountCents,
 		Method:      p.Method,

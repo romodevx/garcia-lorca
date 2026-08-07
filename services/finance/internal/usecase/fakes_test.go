@@ -338,6 +338,18 @@ func (f *fixture) seedConcept(t *testing.T, name string, amount int64) domain.Ch
 	return c
 }
 
+// seedRetiredConcept creates a concept and deactivates it — the catalog state a
+// charge may no longer be issued from.
+func (f *fixture) seedRetiredConcept(t *testing.T, name string, amount int64) domain.ChargeConcept {
+	t.Helper()
+	c := f.seedConcept(t, name, amount)
+	retired, err := f.svc.UpdateConcept(context.Background(), c.ID(), name, amount, domain.RecurrenceMonthly, false)
+	if err != nil {
+		t.Fatalf("retire concept %q: %v", name, err)
+	}
+	return retired
+}
+
 // seedCharge creates a charge for the default student through the service.
 func (f *fixture) seedCharge(t *testing.T, conceptID string, amount int64) domain.Charge {
 	t.Helper()

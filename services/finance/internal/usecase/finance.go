@@ -115,7 +115,8 @@ func (s *FinanceService) UpdateConcept(ctx context.Context, id, name string, def
 
 // CreateCharge issues one charge to one student. In order: the student must
 // exist (students RPC), the cycle must exist (config RPC), and the concept must
-// exist in the catalog. The amount and description default to the concept's,
+// exist in the catalog AND still be active — a retired concept is out of
+// billing, not merely hidden. The amount and description default to the concept's,
 // which lets the caller override either without touching the catalog; both are
 // snapshotted onto the charge, so editing the catalog later never rewrites an
 // issued charge. A student may owe a given concept once per cycle — a repeat is
@@ -127,7 +128,7 @@ func (s *FinanceService) CreateCharge(ctx context.Context, studentID, cycleID, c
 	if err := s.requireCycle(ctx, cycleID); err != nil {
 		return ports.ChargeWithPaid{}, err
 	}
-	concept, err := s.requireConcept(ctx, conceptID)
+	concept, err := s.requireActiveConcept(ctx, conceptID)
 	if err != nil {
 		return ports.ChargeWithPaid{}, err
 	}
@@ -150,14 +151,14 @@ func (s *FinanceService) CreateCharge(ctx context.Context, studentID, cycleID, c
 
 // GenerateCharges issues the same concept to every ACTIVE enrollment of a cycle
 // (or of one group within it) — how a school bills a month of tuition in one
-// action. The write is a single bulk insert that skips students who already owe
+// action. The concept itself must still be active. The write is a single bulk insert that skips students who already owe
 // this concept for the cycle, so re-running a generation is idempotent: created
 // counts the rows written and skipped the ones already there.
 func (s *FinanceService) GenerateCharges(ctx context.Context, conceptID, cycleID, groupID string, amountCentsOverride int64, dueDate string) (created, skipped int, err error) {
 	if err := s.requireCycle(ctx, cycleID); err != nil {
 		return 0, 0, err
 	}
-	concept, err := s.requireConcept(ctx, conceptID)
+	concept, err := s.requireActiveConcept(ctx, conceptID)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -366,6 +367,20 @@ func (s *FinanceService) requireConcept(ctx context.Context, conceptID string) (
 			return domain.ChargeConcept{}, glerrors.New(glerrors.KindInvalid, "concept not found")
 		}
 		return domain.ChargeConcept{}, err
+	}
+	return concept, nil
+}
+
+// requireActiveConcept loads a catalog entry that may still issue charges. The
+// active check lives here rather than in requireConcept because retirement must
+// stay reversible: UpdateConcept has to load an inactive concept to revive it.
+func (s *FinanceService) requireActiveConcept(ctx context.Context, conceptID string) (domain.ChargeConcept, error) {
+	concept, err := s.requireConcept(ctx, conceptID)
+	if err != nil {
+		return domain.ChargeConcept{}, err
+	}
+	if !concept.Active() {
+		return domain.ChargeConcept{}, glerrors.New(glerrors.KindInvalid, "concept is inactive")
 	}
 	return concept, nil
 }

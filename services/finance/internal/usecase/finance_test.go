@@ -100,6 +100,21 @@ func TestUpdateConcept(t *testing.T) {
 	}
 }
 
+// TestUpdateConceptReactivatesARetiredConcept is the counterpart of the
+// inactive-concept veto on charges: retirement must stay reversible, so loading
+// a concept for an update is never subject to the active check.
+func TestUpdateConceptReactivatesARetiredConcept(t *testing.T) {
+	f := newFixture(t)
+	retired := f.seedRetiredConcept(t, "Excursión 2024", 50000)
+
+	revived, err := f.svc.UpdateConcept(context.Background(), retired.ID(), retired.Name(), 50000, domain.RecurrenceOnce, true)
+
+	requireNoError(t, err)
+	if !revived.Active() {
+		t.Fatal("a retired concept must be re-activatable through UpdateConcept")
+	}
+}
+
 func TestUpdateConceptMissingIsInvalid(t *testing.T) {
 	f := newFixture(t)
 
@@ -209,6 +224,21 @@ func TestCreateChargeDuplicateConflicts(t *testing.T) {
 	requireKind(t, err, glerrors.KindConflict)
 }
 
+// TestCreateChargeRejectsARetiredConcept holds the catalog's promise: a
+// deactivated concept is retired from new billing, not merely hidden from the
+// list. Issuing from it is bad input, and nothing is written.
+func TestCreateChargeRejectsARetiredConcept(t *testing.T) {
+	f := newFixture(t)
+	retired := f.seedRetiredConcept(t, "Excursión 2024", 50000)
+
+	_, err := f.svc.CreateCharge(context.Background(), testStudent, testCycle, retired.ID(), 0, "", testDueDate)
+
+	requireKind(t, err, glerrors.KindInvalid)
+	if len(f.repo.charges) != 0 {
+		t.Fatal("a retired concept must issue no charge")
+	}
+}
+
 // --- bulk generation ---------------------------------------------------------
 
 // seedEnrollments loads the students-service double with one cycle's roster.
@@ -308,6 +338,24 @@ func TestGenerateChargesRejectsBadInput(t *testing.T) {
 				t.Fatal("no charge may be written when validation fails")
 			}
 		})
+	}
+}
+
+// TestGenerateChargesRejectsARetiredConcept is the bulk counterpart: a retired
+// concept must not bill a whole cycle, and the veto lands before the insert.
+func TestGenerateChargesRejectsARetiredConcept(t *testing.T) {
+	f := newFixture(t)
+	retired := f.seedRetiredConcept(t, "Excursión 2024", 50000)
+	seedEnrollments(f)
+
+	created, skipped, err := f.svc.GenerateCharges(context.Background(), retired.ID(), testCycle, "", 0, testDueDate)
+
+	requireKind(t, err, glerrors.KindInvalid)
+	if created != 0 || skipped != 0 {
+		t.Fatalf("created/skipped = %d/%d, want 0/0", created, skipped)
+	}
+	if len(f.repo.charges) != 0 {
+		t.Fatal("no charge may be written for a retired concept")
 	}
 }
 
