@@ -208,6 +208,21 @@ in a shared, multi-role, or family-facing environment.
     Pub/Sub adapter before shared use. `DebtOverdue` is a READ only (no event emitter yet);
     `ExportContpaqi` returns `Unimplemented` and is intentionally unrouted (S02 / Phase 7b).
 
+### Added by Phase 8 (`attendance` service) — before enabling `module_attendance` in a shared env
+17. **Internal service network-private.** `attendance` has no authn of its own — the gateway
+    is the sole boundary. Cloud Run `ingress=internal`; do NOT publish `8095`. It calls
+    `students`/`config` server-to-server with a plain client (no credentials) — same private
+    network requirement.
+18. **Multi-tenant forwarding.** `ATTENDANCE_TENANT_ID` is a process-wide constant fixed at
+    composition; before multi-tenant use the gateway must forward the principal's `TenantID`
+    and the constant must be removed (same as iam/config/students/grades/finance).
+19. **Real Pub/Sub before Comms (Phase 9) depends on it.** `attendance` emits
+    `AttendanceMarked`/`AbsenceRecorded` onto the dev logging bus and swallows publish
+    failures by design. Comms (Phase 9) consumes `AbsenceRecorded` to notify guardians —
+    swap in the Cloud Pub/Sub adapter (with delivery guarantees) before that dependency is
+    live. The event payloads carry ids only (no student PII), which is correct for a
+    guardian-facing notification pipeline — keep it that way.
+
 ## Common commands
 
 ```bash
