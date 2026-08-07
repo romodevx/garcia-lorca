@@ -1,8 +1,10 @@
 import { type Locale } from "../locales";
+import enAttendance from "./en/attendance.json";
 import enAuth from "./en/auth.json";
 import enCommon from "./en/common.json";
 import enFinance from "./en/finance.json";
 import enPalette from "./en/palette.json";
+import esAttendance from "./es/attendance.json";
 import esAuth from "./es/auth.json";
 import esCommon from "./es/common.json";
 import esFinance from "./es/finance.json";
@@ -22,13 +24,13 @@ import esPalette from "./es/palette.json";
  *   MessageKey = `common.${CommonKey}` | `auth.${AuthKey}`   (fully-qualified)
  */
 
-export const NAMESPACES = ["common", "auth", "palette", "finance"] as const;
+export const NAMESPACES = ["common", "auth", "palette", "finance", "attendance"] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 
 /** All raw ICU catalogs, keyed by locale then namespace. `es` is the reference. */
 export const messages = {
-  es: { common: esCommon, auth: esAuth, palette: esPalette, finance: esFinance },
-  en: { common: enCommon, auth: enAuth, palette: enPalette, finance: enFinance },
+  es: { common: esCommon, auth: esAuth, palette: esPalette, finance: esFinance, attendance: esAttendance },
+  en: { common: enCommon, auth: enAuth, palette: enPalette, finance: enFinance, attendance: enAttendance },
 } as const satisfies Record<Locale, Record<Namespace, Record<string, string>>>;
 
 /** Literal key unions derived from the reference (`es`) catalogs. */
@@ -36,24 +38,17 @@ export type CommonKey = keyof typeof esCommon;
 export type AuthKey = keyof typeof esAuth;
 export type PaletteKey = keyof typeof esPalette;
 export type FinanceKey = keyof typeof esFinance;
+export type AttendanceKey = keyof typeof esAttendance;
 
-/** Per-namespace key lookup: `NamespaceKey<"auth">` = the auth catalog's keys. */
-export type NamespaceKey<N extends Namespace> = N extends "common"
-  ? CommonKey
-  : N extends "auth"
-    ? AuthKey
-    : N extends "palette"
-      ? PaletteKey
-      : N extends "finance"
-        ? FinanceKey
-        : never;
+/**
+ * Per-namespace key lookup: `NamespaceKey<"auth">` = the auth catalog's keys.
+ * Derived by indexing the reference locale, so a new namespace only has to be
+ * added to `messages` — no per-namespace branch to keep in sync.
+ */
+export type NamespaceKey<N extends Namespace> = keyof (typeof messages)["es"][N] & string;
 
 /** Fully-qualified message key, e.g. `"common.action.save"` | `"palette.nav.students"`. */
-export type MessageKey =
-  | `common.${CommonKey}`
-  | `auth.${AuthKey}`
-  | `palette.${PaletteKey}`
-  | `finance.${FinanceKey}`;
+export type MessageKey = { [N in Namespace]: `${N}.${NamespaceKey<N>}` }[Namespace];
 
 /** The raw ICU catalog for one locale + namespace. */
 export function catalog<N extends Namespace>(locale: Locale, namespace: N): Record<NamespaceKey<N>, string> {
