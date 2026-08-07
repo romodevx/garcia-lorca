@@ -49,6 +49,23 @@ service StudentsService {
   // WithdrawEnrollment marks an enrollment as withdrawn. Returns the updated
   // enrollment.
   rpc WithdrawEnrollment(WithdrawEnrollmentRequest) returns (WithdrawEnrollmentResponse);
+
+  // LinkGuardian links a guardian to a student. guardian_user_id references an
+  // iam user (validated by RPC at the use-case layer, not by an FK). A duplicate
+  // link for the same (guardian, student) is an AlreadyExists error.
+  rpc LinkGuardian(LinkGuardianRequest) returns (LinkGuardianResponse);
+
+  // UnlinkGuardian removes a guardian↔student link. An unknown link is a
+  // NotFound error.
+  rpc UnlinkGuardian(UnlinkGuardianRequest) returns (UnlinkGuardianResponse);
+
+  // ListGuardiansForStudent lists the guardians linked to one student.
+  rpc ListGuardiansForStudent(ListGuardiansForStudentRequest) returns (ListGuardiansForStudentResponse);
+
+  // ListStudentsForGuardian lists the students linked to one guardian. This is
+  // the seam that powers the self-scoped family read path: the gateway resolves
+  // the caller's children through it before serving any family endpoint.
+  rpc ListStudentsForGuardian(ListStudentsForGuardianRequest) returns (ListStudentsForGuardianResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -244,4 +261,50 @@ message WithdrawEnrollmentRequest {
 
 message WithdrawEnrollmentResponse {
   Enrollment enrollment = 1;  // the updated enrollment
+}
+
+// --- Guardian links (Phase 9b) --------------------------------------------
+
+// GuardianLink ties a guardian to a student. guardian_user_id references an iam
+// user (validated by RPC, not an FK — services own their own tables).
+// tenant_id scopes RLS. relationship is one of mother|father|guardian|other.
+message GuardianLink {
+  string id = 1;
+  string tenant_id = 2;
+  string guardian_user_id = 3;
+  string student_id = 4;
+  string relationship = 5;
+}
+
+message LinkGuardianRequest {
+  string guardian_user_id = 1;
+  string student_id = 2;
+  string relationship = 3;  // mother | father | guardian | other
+}
+
+message LinkGuardianResponse {
+  GuardianLink link = 1;
+}
+
+message UnlinkGuardianRequest {
+  string guardian_user_id = 1;
+  string student_id = 2;
+}
+
+message UnlinkGuardianResponse {}
+
+message ListGuardiansForStudentRequest {
+  string student_id = 1;
+}
+
+message ListGuardiansForStudentResponse {
+  repeated GuardianLink links = 1;
+}
+
+message ListStudentsForGuardianRequest {
+  string guardian_user_id = 1;
+}
+
+message ListStudentsForGuardianResponse {
+  repeated GuardianLink links = 1;
 }
