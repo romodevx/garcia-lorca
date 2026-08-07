@@ -53,12 +53,12 @@ message HealthResponse {
 // --- Core types -----------------------------------------------------------
 
 // Notification is one message materialised for a student from a consumed
-// domain event. `type` names the event that produced it (e.g. "absence",
-// "payment", "debt_overdue"); `title` / `body` are the rendered push payload.
-// `read_at` unset means the notification is still unread.
+// domain event. `type` is the stable client-facing KIND — one of
+// "absence"|"attendance"|"payment" — which a client switches on for its icon;
+// it is deliberately NOT the producing event's name, so an upstream contract
+// change never reaches the client. `title` / `body` are the rendered push
+// payload. `read_at` unset means the notification is still unread.
 message Notification {
-  reserved "recipient_id";  // FASE 0 stub; superseded by student_id
-
   string id = 1;
   string tenant_id = 2;
   string student_id = 3;

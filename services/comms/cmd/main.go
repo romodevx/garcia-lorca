@@ -6,9 +6,9 @@
 //   - the generated garcialorca.comms.v1 Connect service — device registration
 //     plus reading the notification feed materialised for a student;
 //   - a Pub/Sub subscriber loop over the domain events other services own
-//     (payment-events, attendance-events, student-events), which is what fills
-//     that feed. Comms PUBLISHES NOTHING: sending is a side effect of consuming
-//     an event, never an RPC.
+//     (payment-events, attendance-events — see consumedTopics), which is what
+//     fills that feed. Comms PUBLISHES NOTHING: sending is a side effect of
+//     consuming an event, never an RPC.
 //
 // Both share one cancellable context, so a SIGINT/SIGTERM stops consuming and
 // drains the server together (see run).
@@ -68,10 +68,17 @@ var errMissingDatabaseURL = errors.New("DATABASE_URL is required")
 // owns on that topic. One subscription PER TOPIC, named after this service, so a
 // second consumer of the same events never competes with comms for them — and so
 // a restart resumes where it left off instead of replaying from nothing.
+//
+// It lists ONLY topics the service renders (see internal/service.render). This
+// phase notifies on absence, attendance and payment events; student-events
+// (StudentEnrolled, AdmissionStatusChanged) is deliberately absent, because
+// subscribing to events nothing renders is worse than not subscribing at all — it
+// creates a durable subscription whose backlog only grows while every delivery is
+// logged as undeliverable. It returns together with the copy for enrollment
+// events.
 var consumedTopics = map[string]string{
 	"payment-events":    "comms-payment-events",
 	"attendance-events": "comms-attendance-events",
-	"student-events":    "comms-student-events",
 }
 
 func main() {
@@ -135,7 +142,13 @@ func run(ctx context.Context, log *slog.Logger) error {
 	// that dies for good takes the server down with it and the platform restarts
 	// the process, rather than leaving a service that answers reads while
 	// silently consuming nothing.
-	group, groupCtx := errgroup.WithContext(ctx)
+	//
+	// The cancel handle is ours because errgroup's own context is cancelled only
+	// when one of ITS goroutines fails: an error on run's path (the subscriber
+	// setup below) has to be able to stop the goroutines the group already owns.
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	group, groupCtx := errgroup.WithContext(runCtx)
 
 	group.Go(func() error {
 		log.Info("comms serving", slog.String("addr", addr))
@@ -156,6 +169,10 @@ func run(ctx context.Context, log *slog.Logger) error {
 
 	closeSubscribers, err := startSubscribers(groupCtx, group, svc, log)
 	if err != nil {
+		// The group already owns the server and its shutdown watcher. Returning
+		// straight away would leave both running behind a run() that has reported
+		// the process dead, so they are stopped and joined first.
+		stopGroup(cancel, group, log)
 		return err
 	}
 	// Deferred, so the broker client is released only once Wait has seen every
@@ -164,6 +181,17 @@ func run(ctx context.Context, log *slog.Logger) error {
 	defer closeSubscribers()
 
 	return group.Wait()
+}
+
+// stopGroup cancels the supervised context and joins every goroutine the group
+// owns, so no exit path leaves one behind. Its error is only logged: it is the
+// consequence of a failure the caller is already returning, and reporting it
+// instead would hide the cause.
+func stopGroup(cancel context.CancelFunc, group *errgroup.Group, log *slog.Logger) {
+	cancel()
+	if err := group.Wait(); err != nil {
+		log.Warn("comms stopped its running goroutines after a startup failure", slog.Any("error", err))
+	}
 }
 
 // startSubscribers adds one supervised consumer per topic to group and returns the

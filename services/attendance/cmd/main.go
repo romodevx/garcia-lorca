@@ -9,8 +9,9 @@
 //
 // TRANSPORT NOTE: events go to Cloud Pub/Sub (attendance-events topic) whenever a
 // broker is configured — the compose emulator locally, the real service in shared
-// environments. Without one the service falls back to a logging dev bus so it
-// runs standalone. The service.Publisher seam is the same either way.
+// environments. With NO broker configured the service runs standalone on the dev
+// log bus; a configured broker that cannot be reached fails startup instead (see
+// gcp.PublisherFromEnv). The service.Publisher seam is the same either way.
 package main
 
 import (
@@ -49,8 +50,6 @@ const (
 	// http://config:8080 / http://students:8080.
 	defaultConfigBaseURL   = "http://localhost:8101"
 	defaultStudentsBaseURL = "http://localhost:8092"
-	// defaultPubSubProject matches the project the compose emulator starts with.
-	defaultPubSubProject = "garcia-lorca-local"
 
 	readHeaderTimeout = 10 * time.Second
 	readTimeout       = 30 * time.Second
@@ -63,11 +62,26 @@ var errMissingDatabaseURL = errors.New("DATABASE_URL is required")
 func main() {
 	log := logger.Default()
 
-	mux, err := buildMux(context.Background(), log)
-	if err != nil {
-		log.Error("attendance failed to start", slog.Any("error", err))
+	if err := run(context.Background(), log); err != nil {
+		log.Error("attendance stopped", slog.Any("error", err))
 		os.Exit(1)
 	}
+}
+
+// run is the process lifecycle: build the composition root, serve until the
+// listener stops, and release the event transport on the way out.
+func run(ctx context.Context, log *slog.Logger) error {
+	mux, events, err := buildMux(ctx, log)
+	if err != nil {
+		return err
+	}
+	// The publisher owns the broker client's per-topic batching goroutines, so
+	// releasing it belongs next to the code that built it.
+	defer func() {
+		if err := events.Close(); err != nil {
+			log.Warn("attendance could not close the event publisher", slog.Any("error", err))
+		}
+	}()
 
 	addr := envOr("ADDR", defaultAddr)
 	log.Info("attendance starting", slog.String("addr", addr))
@@ -81,21 +95,22 @@ func main() {
 		IdleTimeout:       idleTimeout,
 	}
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Error("attendance server stopped", slog.Any("error", err))
-		os.Exit(1)
+		return err
 	}
+	return nil
 }
 
 // buildMux is the composition root: config → adapters (both reader clients, repo
-// and publisher) → service → Connect handler, returning the mounted routes.
-func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, error) {
+// and publisher) → service → Connect handler, returning the mounted routes plus
+// the event publisher the caller must close on shutdown.
+func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.PublisherCloser, error) {
 	// Single-tenant for this phase: the tenant is fixed here (not derived from
 	// the caller), so RLS binds this one tenant for every request. See ADR 0001.
 	tenantID := envOr("ATTENDANCE_TENANT_ID", defaultTenant)
 
 	db, err := openDB()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	repo := repoadapter.New(db, tenantID)
@@ -108,7 +123,11 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, error) {
 	enrollments := studentsclient.New(envOr("STUDENTS_BASE_URL", defaultStudentsBaseURL), http.DefaultClient)
 	groups := configclient.New(envOr("CONFIG_BASE_URL", defaultConfigBaseURL), http.DefaultClient)
 
-	publisher := pubsubadapter.NewEventPublisher(selectPublisher(ctx, log))
+	events, err := gcp.PublisherFromEnv(ctx, log)
+	if err != nil {
+		return nil, nil, err
+	}
+	publisher := pubsubadapter.NewEventPublisher(events)
 
 	newID := func() string { return uuid.NewString() }
 	svc := service.NewAttendanceService(repo, enrollments, groups, publisher, tenantID, newID, log)
@@ -121,7 +140,7 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, error) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	return mux, nil
+	return mux, events, nil
 }
 
 // openDB opens the GORM Postgres pool from DATABASE_URL.
@@ -131,40 +150,6 @@ func openDB() (*gorm.DB, error) {
 		return nil, errMissingDatabaseURL
 	}
 	return gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Warn)})
-}
-
-// selectPublisher returns the Cloud Pub/Sub client when a broker is configured
-// (PUBSUB_EMULATOR_HOST locally, PUBSUB_PROJECT_ID in a real environment), else
-// the dev log bus so the service still runs standalone. A client that fails to
-// initialise degrades to the dev bus rather than blocking startup: publishing is
-// not on the read path.
-func selectPublisher(ctx context.Context, log *slog.Logger) pubsub.Publisher {
-	if os.Getenv("PUBSUB_EMULATOR_HOST") == "" && os.Getenv("PUBSUB_PROJECT_ID") == "" {
-		return newDevBus(log)
-	}
-
-	projectID := envOr("PUBSUB_PROJECT_ID", defaultPubSubProject)
-	client, err := gcp.New(ctx, projectID)
-	if err != nil {
-		log.Error("pubsub client init failed; falling back to dev bus", slog.Any("error", err))
-		return newDevBus(log)
-	}
-	log.Info("publishing events to Cloud Pub/Sub", slog.String("project", projectID))
-	return client
-}
-
-// devBus is a dev-only pubsub.Publisher that logs events instead of transporting
-// them. It is the fallback when no broker is configured.
-type devBus struct{ log *slog.Logger }
-
-func newDevBus(log *slog.Logger) *devBus { return &devBus{log: log} }
-
-func (b *devBus) Publish(_ context.Context, msg pubsub.Message) error {
-	b.log.Info("event published (dev bus)",
-		slog.String("topic", msg.Topic),
-		slog.String("type", msg.Attributes["type"]),
-		slog.Int("bytes", len(msg.Data)))
-	return nil
 }
 
 func recoverFn(_ context.Context, _ connect.Spec, _ http.Header, _ any) error {

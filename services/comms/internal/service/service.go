@@ -25,8 +25,9 @@ const (
 	eventPaymentRegistered = "PaymentRegistered"
 )
 
-// attrType is the routing attribute carrying the event type name.
-const attrType = "type"
+// attrType is the routing attribute carrying the event type name. It comes from
+// the messaging boundary, not from here: producers stamp the same constant.
+const attrType = pubsub.AttrType
 
 // The notification vocabulary stored in `type`, as declared by the proto
 // contract (garcialorca.comms.v1.Notification): a short, stable kind the client
@@ -41,8 +42,11 @@ const (
 // The attendance statuses that reach this consumer. statusAbsent is deliberately
 // NOT notified from AttendanceMarked: attendance publishes both events for an
 // absence, and rendering each would notify the family twice for one absence.
+// statusPresent is not notified either — attendance stores only exceptions, so it
+// should never arrive, but a presence is a non-event rather than a fault.
 const (
 	statusAbsent  = "absent"
+	statusPresent = "present"
 	statusLate    = "late"
 	statusExcused = "excused"
 )
@@ -57,11 +61,24 @@ const (
 	platformWeb     = "web"
 )
 
-// errNotNotifiable marks a message this consumer will never turn into a
-// notification: an unknown event type, a payload it cannot read, or an event
-// that is deliberately not notified. It is handled by ACKING the message —
-// redelivering it could not change the outcome, so failing would loop forever.
-var errNotNotifiable = errors.New("event is not notifiable")
+// Both sentinels below mean "this message produces no notification, ACK it":
+// redelivering could not change the outcome, so failing would loop forever. They
+// are told apart only to be REPORTED apart — one is the normal path, the other is
+// something an operator should look at.
+var (
+	// errNotNotifiable marks an event this consumer deliberately does not notify
+	// on: an absence arriving as AttendanceMarked (AbsenceRecorded already
+	// notified it), a presence. This happens on every school day, so it is logged
+	// at Debug — warning on it would bury the real problems in noise.
+	errNotNotifiable = errors.New("event is deliberately not notified")
+
+	// errUndeliverable marks a message that is WRONG: an unknown event type, a
+	// payload that will not unmarshal, an event with no id or no student, a status
+	// outside the contract, another tenant's event. Each means comms and a
+	// producer disagree — or someone is publishing where they should not — so it
+	// is logged at Warn.
+	errUndeliverable = errors.New("event cannot be turned into a notification")
+)
 
 // --- seams -------------------------------------------------------------------
 //
@@ -188,9 +205,9 @@ func NewCommsService(
 //
 //   - Nothing was stored and a retry could succeed (the ledger is unreachable)
 //     ⇒ return the error and let the event come back.
-//   - The message can never be handled (unknown type, unreadable payload, an
-//     event this consumer does not notify, another tenant's event) ⇒ log it and
-//     ACK, because redelivering it would loop forever.
+//   - The message can never be handled (errUndeliverable) or is one this consumer
+//     does not notify on by design (errNotNotifiable) ⇒ log it — at Warn and at
+//     Debug respectively — and ACK, because redelivering it would loop forever.
 //
 // Once the feed entry is stored the event is DONE: the push that follows is
 // best-effort and its failure is never returned, since a redelivery would be
@@ -199,7 +216,13 @@ func (s *CommsService) HandleEvent(ctx context.Context, msg pubsub.Message) erro
 	eventType := msg.Attributes[attrType]
 
 	eventKey, n, err := s.render(eventType, msg.Data)
-	if err != nil {
+	switch {
+	case errors.Is(err, errNotNotifiable):
+		s.log.Debug("comms skipped an event it does not notify on",
+			slog.String("event_type", eventType),
+			slog.Any("reason", err))
+		return nil
+	case err != nil:
 		s.log.Warn("comms dropped an event it cannot notify on",
 			slog.String("event_type", eventType),
 			slog.Any("error", err))
@@ -298,17 +321,18 @@ func (s *CommsService) push(ctx context.Context, n Notification) {
 // is PURE — no clock, no ids, no I/O — so the whole rendering contract is
 // table-testable, and it is the single place that knows the upstream protos.
 //
-// Every message it cannot notify on is errNotNotifiable, which HandleEvent acks.
-// That covers an unknown type, an unreadable payload, an event with no id to key
-// the ledger on or no student to notify, and — the tenant guard — an event
-// belonging to someone else: this service is bound to one tenant, and its
-// repository would otherwise store another tenant's data under ours.
+// Every message it produces no notification for comes back as errUndeliverable
+// (the message is wrong: an unknown type, an unreadable payload, an event with no
+// id to key the ledger on or no student to notify, and — the tenant guard — an
+// event belonging to someone else, which the repository would otherwise store
+// under ours) or errNotNotifiable (a well-formed event this consumer skips by
+// design). HandleEvent acks both and logs them at different levels.
 func (s *CommsService) render(eventType string, data []byte) (eventKey string, n Notification, err error) {
 	switch eventType {
 	case eventAbsenceRecorded:
 		var e attendancev1.AbsenceRecorded
 		if err := proto.Unmarshal(data, &e); err != nil {
-			return "", Notification{}, fmt.Errorf("%w: unreadable %s payload: %v", errNotNotifiable, eventType, err)
+			return "", Notification{}, fmt.Errorf("%w: unreadable %s payload: %w", errUndeliverable, eventType, err)
 		}
 		return s.notification(eventType, e.GetRecordId(), e.GetStudentId(), e.GetTenantId(), Notification{
 			Type:  typeAbsence,
@@ -319,11 +343,11 @@ func (s *CommsService) render(eventType string, data []byte) (eventKey string, n
 	case eventAttendanceMarked:
 		var e attendancev1.AttendanceMarked
 		if err := proto.Unmarshal(data, &e); err != nil {
-			return "", Notification{}, fmt.Errorf("%w: unreadable %s payload: %v", errNotNotifiable, eventType, err)
+			return "", Notification{}, fmt.Errorf("%w: unreadable %s payload: %w", errUndeliverable, eventType, err)
 		}
-		title, body, ok := attendanceCopy(e.GetStatus(), e.GetDate())
-		if !ok {
-			return "", Notification{}, fmt.Errorf("%w: attendance status %q", errNotNotifiable, e.GetStatus())
+		title, body, err := attendanceCopy(e.GetStatus(), e.GetDate())
+		if err != nil {
+			return "", Notification{}, err
 		}
 		return s.notification(eventType, e.GetRecordId(), e.GetStudentId(), e.GetTenantId(), Notification{
 			Type:  typeAttendance,
@@ -334,7 +358,7 @@ func (s *CommsService) render(eventType string, data []byte) (eventKey string, n
 	case eventPaymentRegistered:
 		var e financev1.PaymentRegistered
 		if err := proto.Unmarshal(data, &e); err != nil {
-			return "", Notification{}, fmt.Errorf("%w: unreadable %s payload: %v", errNotNotifiable, eventType, err)
+			return "", Notification{}, fmt.Errorf("%w: unreadable %s payload: %w", errUndeliverable, eventType, err)
 		}
 		return s.notification(eventType, e.GetPaymentId(), e.GetStudentId(), e.GetTenantId(), Notification{
 			Type:  typePayment,
@@ -343,7 +367,7 @@ func (s *CommsService) render(eventType string, data []byte) (eventKey string, n
 		})
 
 	default:
-		return "", Notification{}, fmt.Errorf("%w: unknown event type %q", errNotNotifiable, eventType)
+		return "", Notification{}, fmt.Errorf("%w: unknown event type %q", errUndeliverable, eventType)
 	}
 }
 
@@ -353,31 +377,33 @@ func (s *CommsService) render(eventType string, data []byte) (eventKey string, n
 // processed_events column documents.
 func (s *CommsService) notification(eventType, eventID, studentID, tenantID string, n Notification) (string, Notification, error) {
 	if eventID == "" {
-		return "", Notification{}, fmt.Errorf("%w: %s carries no event id", errNotNotifiable, eventType)
+		return "", Notification{}, fmt.Errorf("%w: %s carries no event id", errUndeliverable, eventType)
 	}
 	if studentID == "" {
-		return "", Notification{}, fmt.Errorf("%w: %s carries no student id", errNotNotifiable, eventType)
+		return "", Notification{}, fmt.Errorf("%w: %s carries no student id", errUndeliverable, eventType)
 	}
 	if tenantID != s.tenantID {
-		return "", Notification{}, fmt.Errorf("%w: %s belongs to another tenant", errNotNotifiable, eventType)
+		return "", Notification{}, fmt.Errorf("%w: %s belongs to another tenant", errUndeliverable, eventType)
 	}
 	n.StudentID = studentID
 	return eventType + ":" + eventID, n, nil
 }
 
-// attendanceCopy renders the copy for a general attendance exception, reporting
-// whether the status is notified at all. An absence is NOT: attendance publishes
-// AbsenceRecorded for it too, and notifying on both would tell the family twice.
-func attendanceCopy(status, date string) (title, body string, ok bool) {
+// attendanceCopy renders the copy for a general attendance exception. A status
+// that produces no notification is reported as the sentinel that says WHY: an
+// absence or a presence is skipped by design (an absence is already notified by
+// AbsenceRecorded, and notifying on both would tell the family twice), while
+// anything else means attendance's vocabulary and this consumer's have drifted.
+func attendanceCopy(status, date string) (title, body string, err error) {
 	switch status {
 	case statusLate:
-		return "Llegada tarde", fmt.Sprintf("Se registró una llegada tarde el %s.", date), true
+		return "Llegada tarde", fmt.Sprintf("Se registró una llegada tarde el %s.", date), nil
 	case statusExcused:
-		return "Ausencia justificada", fmt.Sprintf("Se registró una ausencia justificada el %s.", date), true
-	case statusAbsent:
-		return "", "", false // AbsenceRecorded is the event that notifies this
+		return "Ausencia justificada", fmt.Sprintf("Se registró una ausencia justificada el %s.", date), nil
+	case statusAbsent, statusPresent:
+		return "", "", fmt.Errorf("%w: attendance status %q", errNotNotifiable, status)
 	default:
-		return "", "", false
+		return "", "", fmt.Errorf("%w: attendance status %q is outside the contract", errUndeliverable, status)
 	}
 }
 

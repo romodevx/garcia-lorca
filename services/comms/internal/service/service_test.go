@@ -407,10 +407,13 @@ func TestHandleEventLedgerFailureRedelivers(t *testing.T) {
 	}
 }
 
-// TestHandleEventUnhandledMessagesAreAcked covers everything this consumer
-// cannot turn into a notification. None of it may error: an unknown type or a
+// TestHandleEventUnhandledMessagesAreAcked covers everything this consumer does
+// not turn into a notification. None of it may error: an unknown type or a
 // corrupt payload will never become handleable, so failing would redeliver it
-// forever. Nothing is stored and every case leaves a log trace.
+// forever. Nothing is stored, and the LOG LEVEL tells the two kinds apart —
+// which is the point of the split: an operator scanning warnings must find only
+// events that are actually wrong, never the ones this consumer skips by design
+// (an absence arriving twice, once per event, happens on every school day).
 func TestHandleEventUnhandledMessagesAreAcked(t *testing.T) {
 	absentMarked := markedMessage(t, "eeeeeeee-0000-0000-0000-000000000008", studentID, tenantID, "2026-08-06", "absent")
 	corrupt := absenceMessage(t, "eeeeeeee-0000-0000-0000-000000000009", studentID, tenantID, "2026-08-06")
@@ -422,21 +425,34 @@ func TestHandleEventUnhandledMessagesAreAcked(t *testing.T) {
 		RecordId: "eeeeeeee-0000-0000-0000-000000000010", TenantId: tenantID, Date: "2026-08-06",
 	}, tenantID)
 
+	const (
+		levelSkipped = "level=DEBUG" // deliberately not notified: the normal path
+		levelWrong   = "level=WARN"  // something an operator should look at
+	)
+
 	tests := []struct {
-		name string
-		msg  pubsub.Message
+		name      string
+		msg       pubsub.Message
+		wantLevel string
 	}{
 		{"an unknown event type", pubsub.Message{
 			Topic: "test-events", Data: []byte("{}"),
 			Attributes: map[string]string{"type": "SomethingElse"},
-		}},
-		{"a message with no type attribute", pubsub.Message{Topic: "test-events", Data: []byte("{}")}},
-		{"a corrupt payload", corrupt},
-		{"an event with no id to key the ledger on", noID},
-		{"an event with no student to notify", noStudent},
-		{"an absence arriving as AttendanceMarked (AbsenceRecorded already covers it)", absentMarked},
+		}, levelWrong},
+		{"a message with no type attribute", pubsub.Message{
+			Topic: "test-events", Data: []byte("{}"),
+		}, levelWrong},
+		{"a corrupt payload", corrupt, levelWrong},
+		{"an event with no id to key the ledger on", noID, levelWrong},
+		{"an event with no student to notify", noStudent, levelWrong},
 		{"an event for another tenant", absenceMessage(t,
-			"eeeeeeee-0000-0000-0000-000000000011", studentID, otherTenantID, "2026-08-06")},
+			"eeeeeeee-0000-0000-0000-000000000011", studentID, otherTenantID, "2026-08-06"), levelWrong},
+		{"an attendance status outside the contract", markedMessage(t,
+			"eeeeeeee-0000-0000-0000-000000000012", studentID, tenantID, "2026-08-06", "sick"), levelWrong},
+		{"an absence arriving as AttendanceMarked (AbsenceRecorded already covers it)",
+			absentMarked, levelSkipped},
+		{"a presence, which no family is notified about", markedMessage(t,
+			"eeeeeeee-0000-0000-0000-000000000013", studentID, tenantID, "2026-08-06", "present"), levelSkipped},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -457,7 +473,10 @@ func TestHandleEventUnhandledMessagesAreAcked(t *testing.T) {
 				t.Errorf("sender called %d times, want 0", sender.calls)
 			}
 			if logs.Len() == 0 {
-				t.Error("a dropped message must leave a log trace, not vanish")
+				t.Fatal("a dropped message must leave a log trace, not vanish")
+			}
+			if got := logs.String(); !strings.Contains(got, tt.wantLevel) {
+				t.Errorf("logged %q, want it at %s", got, tt.wantLevel)
 			}
 		})
 	}
