@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"math"
 	"testing"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -17,6 +18,12 @@ func TestNewCents(t *testing.T) {
 		{"positive", 12550, false},
 		{"negative is rejected", -1, true},
 		{"large negative is rejected", -12550, true},
+		{"at the maximum is valid", domain.MaxCents, false},
+		// A bound is what keeps currentPaid + amount from overflowing int64 in
+		// the payment knot (which would flip negative and bypass the overpay
+		// veto), so anything past MaxCents — up to MaxInt64 — must be rejected.
+		{"just above the maximum is rejected", domain.MaxCents + 1, true},
+		{"MaxInt64 is rejected", math.MaxInt64, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

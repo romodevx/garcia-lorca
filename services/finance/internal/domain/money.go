@@ -15,11 +15,23 @@ import (
 // constructor.
 type Cents int64
 
+// MaxCents is the inclusive upper bound of a single money amount: 10^15 centavos
+// (ten trillion pesos), far beyond any real charge or payment yet small enough
+// that summing a realistic number of them stays well inside int64. The bound is
+// what makes the payment knot safe: without it a near-MaxInt64 payment would
+// overflow `currentPaid + amount` into a negative, slipping past the
+// "payment exceeds the remaining balance" veto and both corrupting the ledger
+// and poisoning every later SUM(amount_cents) with a bigint-out-of-range error.
+const MaxCents int64 = 1_000_000_000_000_000
+
 // NewCents builds a validated Cents from a raw minor-unit value, rejecting
-// negatives as KindInvalid.
+// negatives and amounts above MaxCents as KindInvalid.
 func NewCents(v int64) (Cents, error) {
 	if v < 0 {
 		return 0, glerrors.New(glerrors.KindInvalid, "amount cannot be negative")
+	}
+	if v > MaxCents {
+		return 0, glerrors.New(glerrors.KindInvalid, "amount exceeds the maximum allowed")
 	}
 	return Cents(v), nil
 }

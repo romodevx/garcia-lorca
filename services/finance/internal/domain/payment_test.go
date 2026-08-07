@@ -55,6 +55,9 @@ func TestNewPaymentValidation(t *testing.T) {
 		{"empty charge", "pay-1", "t1", "", 100, domain.MethodCash, paidAt},
 		{"zero amount", "pay-1", "t1", "ch-1", 0, domain.MethodCash, paidAt},
 		{"negative amount", "pay-1", "t1", "ch-1", -100, domain.MethodCash, paidAt},
+		// The upper bound closes the payment-knot overflow (B0): a near-MaxInt64
+		// amount must be rejected here, before it can flip currentPaid + amount.
+		{"amount above the maximum", "pay-1", "t1", "ch-1", domain.MaxCents + 1, domain.MethodCash, paidAt},
 		{"unknown method", "pay-1", "t1", "ch-1", 100, "crypto", paidAt},
 		{"empty method", "pay-1", "t1", "ch-1", 100, "", paidAt},
 		{"zero paid at", "pay-1", "t1", "ch-1", 100, domain.MethodCash, time.Time{}},

@@ -60,13 +60,17 @@ func NewPayment(id, tenantID, chargeID string, amountCents int64, method, refere
 	if strings.TrimSpace(chargeID) == "" {
 		return Payment{}, glerrors.New(glerrors.KindInvalid, "charge id is required")
 	}
-	// Stricter than Cents, which allows zero: a movement of no money is not a
-	// payment. Passing this check also satisfies the Cents non-negative
-	// invariant, so the value is converted directly.
+	// Stricter than Cents on the low end — a movement of no money is not a
+	// payment — but it still goes through NewCents for the MaxCents upper bound,
+	// which is what stops a near-MaxInt64 amount from overflowing the
+	// currentPaid + amount sum in the payment knot and bypassing the overpay veto.
 	if amountCents <= 0 {
 		return Payment{}, glerrors.New(glerrors.KindInvalid, "payment amount must be positive")
 	}
-	amount := Cents(amountCents)
+	amount, err := NewCents(amountCents)
+	if err != nil {
+		return Payment{}, err
+	}
 	if err := validateMethod(method); err != nil {
 		return Payment{}, err
 	}
