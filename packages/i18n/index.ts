@@ -26,6 +26,7 @@ export {
   NAMESPACES,
   type AuthKey,
   type CommonKey,
+  type FinanceKey,
   type MessageKey,
   type Namespace,
   type NamespaceKey,

@@ -6,7 +6,7 @@ import { CommandPaletteHost } from "./command/CommandPaletteHost";
 import { TopBar } from "./_design/TopBar";
 import { MODULES, USERS, type ModuleDef, type Role } from "./_design/data";
 import { Dashboard } from "./_screens/Dashboard";
-import { Finances } from "./_screens/Finances";
+import { Finance, type FinanceIntent } from "./_screens/finance/Finance";
 import { Catalog } from "./_screens/config/Catalog";
 import { Admin } from "./_screens/admin/Admin";
 import { Enrollment } from "./_screens/students/Enrollment";
@@ -21,7 +21,7 @@ type View =
   | { screen: "login" }
   | { screen: "changePassword" }
   | { screen: "dashboard" }
-  | { screen: "finance" }
+  | { screen: "finance"; intent?: FinanceIntent }
   | { screen: "config" }
   | { screen: "students" }
   | { screen: "grades" }
@@ -99,9 +99,9 @@ export function AppShell(): ReactElement {
     setView({ screen: "login" });
   };
   const home = (): void => setView({ screen: "dashboard" });
-  const open = useCallback((id: string): void => {
+  const open = useCallback((id: string, intent?: string): void => {
     if (id === "finance") {
-      setView({ screen: "finance" });
+      setView({ screen: "finance", intent: intent === "payment" ? "payment" : undefined });
       return;
     }
     if (id === "settings") {
@@ -123,12 +123,13 @@ export function AppShell(): ReactElement {
     setView({ screen: "module", moduleId: id });
   }, []);
 
-  // Command Palette navigation: a command route is `module:<id>`. Navigating IS
+  // Command Palette navigation: a command route is `module:<id>` plus an optional
+  // intent (`module:finance:payment` lands on the ventanilla form). Navigating IS
   // executing (the palette never mutates), so we just open the target surface.
   const navigate = useCallback(
     (route: string): void => {
-      const [kind, id] = route.split(":");
-      if (kind === "module" && id !== undefined && id !== "") open(id);
+      const [kind, id, intent] = route.split(":");
+      if (kind === "module" && id !== undefined && id !== "") open(id, intent);
     },
     [open],
   );
@@ -153,7 +154,7 @@ export function AppShell(): ReactElement {
       {view.screen === "dashboard" && <Dashboard user={user} onOpen={open} />}
       {view.screen === "finance" &&
         (financeEnabled ? (
-          <Finances onBack={home} />
+          <Finance onBack={home} intent={view.intent} />
         ) : (
           // Flag OFF: do not render the finance surface; show the friendly stub
           // instead so navigation never dead-ends. (Backend 404 is authoritative.)
