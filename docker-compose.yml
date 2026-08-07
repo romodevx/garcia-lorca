@@ -138,6 +138,9 @@ services:
       SERVICE: students
       # The enroll knot validates group/term references against config by RPC.
       CONFIG_BASE_URL: "http://config:8080"
+      # Guardian links validate the guardian user (existence + role) against iam
+      # by RPC — server-to-server, network-private.
+      IAM_BASE_URL: "http://iam:8080"
     ports: ["8092:8080"]
     depends_on:
       postgres:
@@ -145,6 +148,8 @@ services:
       migrate:
         condition: service_completed_successfully
       config:
+        condition: service_started
+      iam:
         condition: service_started
       # student-events publishing needs the emulator reachable.
       pubsub:

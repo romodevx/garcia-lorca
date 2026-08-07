@@ -38,10 +38,12 @@ const (
 )
 
 // migrationFiles are applied in order before the app role is granted, so the
-// non-owner role gets privileges on every table (students + enrollments).
+// non-owner role gets privileges on every table (students + enrollments +
+// guardian links).
 var migrationFiles = []string{
 	"../../../../../migrations/students/0001_init.sql",
 	"../../../../../migrations/students/0002_enrollments.sql",
+	"../../../../../migrations/students/0003_guardians.sql",
 }
 
 var (

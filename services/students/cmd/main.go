@@ -34,6 +34,7 @@ import (
 	"github.com/garcia-lorca/pkg/pubsub/gcp"
 	"github.com/garcia-lorca/services/students/internal/adapters/configclient"
 	grpcadapter "github.com/garcia-lorca/services/students/internal/adapters/grpc"
+	"github.com/garcia-lorca/services/students/internal/adapters/iamclient"
 	pgadapter "github.com/garcia-lorca/services/students/internal/adapters/postgres"
 	pubsubadapter "github.com/garcia-lorca/services/students/internal/adapters/pubsub"
 	"github.com/garcia-lorca/services/students/internal/usecase"
@@ -46,6 +47,9 @@ const (
 	// defaultConfigBaseURL targets the config service on its local dev port
 	// (compose overrides it to the in-network address http://config:8080).
 	defaultConfigBaseURL = "http://localhost:8101"
+	// defaultIAMBaseURL targets the iam service on its local dev port (compose
+	// overrides it to the in-network address http://iam:8080).
+	defaultIAMBaseURL = "http://localhost:8091"
 
 	readHeaderTimeout = 10 * time.Second
 	readTimeout       = 30 * time.Second
@@ -129,8 +133,15 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	catalog := configclient.New(configBaseURL, http.DefaultClient)
 	enroll := usecase.NewEnrollmentService(repo, repo, catalog, events, tenantID, newID, time.Now)
 
+	// Guardian links reference iam users, so the use case validates them against
+	// the iam bounded context by RPC (the user must exist AND hold the guardian
+	// role). Server-to-server and network-private, like the config client.
+	iamBaseURL := envOr("IAM_BASE_URL", defaultIAMBaseURL)
+	users := iamclient.New(iamBaseURL, http.DefaultClient)
+	guardians := usecase.NewGuardianService(repo, repo, users, tenantID, newID)
+
 	health := usecase.NewHealthService(serviceName)
-	handler := grpcadapter.NewStudentsHandler(svc, enroll, health)
+	handler := grpcadapter.NewStudentsHandler(svc, enroll, guardians, health)
 
 	mux := http.NewServeMux()
 	path, h := studentsv1connect.NewStudentsServiceHandler(handler, connect.WithRecover(recoverFn))
