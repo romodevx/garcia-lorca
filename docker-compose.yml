@@ -100,7 +100,8 @@ services:
       STUDENTS_BASE_URL: "http://students:8080"
       CONFIG_BASE_URL: "http://config:8080"
       GRADES_BASE_URL: "http://grades:8080"
-      ENABLED_MODULES: "iam,gateway,students,config,grades"
+      FINANCE_BASE_URL: "http://finance:8080"
+      ENABLED_MODULES: "iam,gateway,students,config,grades,finance"
     ports: ["8080:8080"]
     depends_on:
       postgres:
@@ -112,6 +113,8 @@ services:
       config:
         condition: service_started
       grades:
+        condition: service_started
+      finance:
         condition: service_started
 
   iam:
