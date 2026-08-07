@@ -195,29 +195,49 @@ func (f *fakeRepo) SaveCharge(_ context.Context, c domain.Charge) (domain.Charge
 	return c, nil
 }
 
-// RegisterPayment mirrors the adapter's transaction: it runs derive over the
-// total the new payment would bring the charge to, and aborts on its error.
+// RegisterPayment mirrors the adapter's transaction: it replays a payment
+// already posted under the request's idempotency key, otherwise runs derive over
+// the total the new payment would bring the charge to, and aborts on its error.
 func (f *fakeRepo) RegisterPayment(
 	_ context.Context,
 	p domain.Payment,
 	derive func(charge domain.Charge, newPaidCents int64) (string, error),
-) (domain.Payment, ports.ChargeWithPaid, error) {
+) (domain.Payment, ports.ChargeWithPaid, bool, error) {
 	charge, ok := f.charges[p.ChargeID()]
 	if !ok {
-		return domain.Payment{}, ports.ChargeWithPaid{}, glerrors.ErrNotFound
+		return domain.Payment{}, ports.ChargeWithPaid{}, false, glerrors.ErrNotFound
+	}
+	if original, found := f.byIdempotencyKey(p.IdempotencyKey()); found {
+		return original, ports.ChargeWithPaid{Charge: charge, PaidCents: f.paidFor(p.ChargeID())}, true, nil
 	}
 	newPaid := f.paidFor(p.ChargeID()) + p.Amount().Int64()
 	status, err := derive(charge, newPaid)
 	if err != nil {
-		return domain.Payment{}, ports.ChargeWithPaid{}, err
+		return domain.Payment{}, ports.ChargeWithPaid{}, false, err
 	}
 	f.payments[p.ChargeID()] = append(f.payments[p.ChargeID()], p)
 	updated := charge.WithStatus(newPaid)
 	if updated.Status() != status {
-		return domain.Payment{}, ports.ChargeWithPaid{}, fmt.Errorf("derive said %q but the charge derived %q", status, updated.Status())
+		return domain.Payment{}, ports.ChargeWithPaid{}, false, fmt.Errorf("derive said %q but the charge derived %q", status, updated.Status())
 	}
 	f.charges[updated.ID()] = updated
-	return p, ports.ChargeWithPaid{Charge: updated, PaidCents: newPaid}, nil
+	return p, ports.ChargeWithPaid{Charge: updated, PaidCents: newPaid}, false, nil
+}
+
+// byIdempotencyKey finds a payment already posted under key; an empty key never
+// matches, because it means the caller opted out of deduplication.
+func (f *fakeRepo) byIdempotencyKey(key string) (domain.Payment, bool) {
+	if key == "" {
+		return domain.Payment{}, false
+	}
+	for _, ps := range f.payments {
+		for _, p := range ps {
+			if p.IdempotencyKey() == key {
+				return p, true
+			}
+		}
+	}
+	return domain.Payment{}, false
 }
 
 func (f *fakeRepo) ListPayments(_ context.Context, studentID string) ([]domain.Payment, error) {
@@ -488,6 +508,39 @@ func TestRegisterPaymentReturnsPaymentAndRecomputedCharge(t *testing.T) {
 	}
 	if got.GetStatus() != domain.StatusPartiallyPaid {
 		t.Errorf("status = %q, want partially_paid", got.GetStatus())
+	}
+}
+
+// The idempotency key has to survive the whole wire path: the proto field is
+// only useful if the handler threads it into the use case. Sending the same
+// request twice must yield the same payment and leave the charge where it was.
+func TestRegisterPaymentIdempotencyKeyDedupesTheRetry(t *testing.T) {
+	f := newFixture(t)
+	concept := f.seedConcept(t, "Colegiatura", 250000)
+	charge := f.seedCharge(t, concept.GetId(), 100000)
+	attempt := func() *connect.Request[financev1.RegisterPaymentRequest] {
+		return connect.NewRequest(&financev1.RegisterPaymentRequest{
+			ChargeId: charge.GetId(), AmountCents: 40000, Method: domain.MethodCash, IdempotencyKey: "attempt-1",
+		})
+	}
+
+	first, err := f.h.RegisterPayment(context.Background(), attempt())
+	if err != nil {
+		t.Fatalf("RegisterPayment: %v", err)
+	}
+	second, err := f.h.RegisterPayment(context.Background(), attempt())
+	if err != nil {
+		t.Fatalf("RegisterPayment (retry): %v", err)
+	}
+
+	if second.Msg.GetPayment().GetId() != first.Msg.GetPayment().GetId() {
+		t.Errorf("retry minted payment %q, want the original %q",
+			second.Msg.GetPayment().GetId(), first.Msg.GetPayment().GetId())
+	}
+	got := second.Msg.GetCharge()
+	if got.GetPaidCents() != 40000 || got.GetRemainingCents() != 60000 {
+		t.Errorf("paid/remaining = %d/%d, want 40000/60000 — the retry must not collect again",
+			got.GetPaidCents(), got.GetRemainingCents())
 	}
 }
 

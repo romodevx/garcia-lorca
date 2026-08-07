@@ -144,11 +144,18 @@ type FinanceRepository interface {
 	// payment is inserted and the charge's status and updated_at are written in
 	// the same transaction. Returns the stored payment and the charge with its
 	// new collected total. A missing charge yields glerrors.ErrNotFound.
+	//
+	// A payment carrying a non-empty IdempotencyKey is deduplicated inside that
+	// same transaction: if the tenant already has a payment under the key, the
+	// stored one is returned with replayed=true and NOTHING is written — no
+	// second insert, no derive, no status change. An empty key opts out (every
+	// call posts a payment) and always reports replayed=false. The caller uses
+	// the flag to suppress the side effects of a retry, notably the event.
 	RegisterPayment(
 		ctx context.Context,
 		p domain.Payment,
 		derive func(charge domain.Charge, newPaidCents int64) (status string, err error),
-	) (domain.Payment, ChargeWithPaid, error)
+	) (stored domain.Payment, charge ChargeWithPaid, replayed bool, err error)
 	// ListPayments returns every payment posted against the student's charges,
 	// for the account statement.
 	ListPayments(ctx context.Context, studentID string) ([]domain.Payment, error)

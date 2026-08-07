@@ -247,6 +247,10 @@ message RegisterPaymentRequest {
   string method = 3;
   // reference is the folio / voucher / transfer id.
   string reference = 4;
+  // idempotency_key is optional; a repeat with the same key returns the original
+  // payment instead of charging again. Empty ⇒ no deduplication (every call
+  // posts a new payment).
+  string idempotency_key = 5;
 }
 
 message RegisterPaymentResponse {

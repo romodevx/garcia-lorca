@@ -256,13 +256,20 @@ func (s *FinanceService) CancelCharge(ctx context.Context, chargeID string) (por
 // both succeed. The PaymentRegistered event is published afterwards and
 // best-effort: the money is already banked, so a broker outage must not fail
 // the call.
-func (s *FinanceService) RegisterPayment(ctx context.Context, chargeID string, amountCents int64, method, reference string) (domain.Payment, ports.ChargeWithPaid, error) {
-	payment, err := domain.NewPayment(s.newID(), s.tenantID, chargeID, amountCents, method, reference, s.now())
+//
+// idempotencyKey is the caller's optional handle on the attempt: a repeat under
+// the same key returns the payment already stored (same response, no second
+// charge) instead of collecting again — the retry a lost response provokes must
+// not cost the family twice. Because such a replay collected nothing, it
+// publishes nothing either: the event fired the first time round, and a second
+// one would bill a second receipt for one payment. An empty key opts out.
+func (s *FinanceService) RegisterPayment(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string) (domain.Payment, ports.ChargeWithPaid, error) {
+	payment, err := domain.NewPayment(s.newID(), s.tenantID, chargeID, amountCents, method, reference, s.now(), idempotencyKey)
 	if err != nil {
 		return domain.Payment{}, ports.ChargeWithPaid{}, err
 	}
 
-	stored, charge, err := s.repo.RegisterPayment(ctx, payment, derivePaidStatus)
+	stored, charge, replayed, err := s.repo.RegisterPayment(ctx, payment, derivePaidStatus)
 	if err != nil {
 		if glerrors.KindOf(err) == glerrors.KindNotFound {
 			return domain.Payment{}, ports.ChargeWithPaid{}, glerrors.New(glerrors.KindInvalid, "charge not found")
@@ -270,7 +277,9 @@ func (s *FinanceService) RegisterPayment(ctx context.Context, chargeID string, a
 		return domain.Payment{}, ports.ChargeWithPaid{}, err
 	}
 
-	s.publishPaymentRegistered(ctx, stored, charge)
+	if !replayed {
+		s.publishPaymentRegistered(ctx, stored, charge)
+	}
 	return stored, charge, nil
 }
 

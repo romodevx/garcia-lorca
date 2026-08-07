@@ -247,6 +247,7 @@ describe("Finance — ventanilla", () => {
         amountCents: 185000,
         method: "cash",
         reference: "",
+        idempotencyKey: expect.any(String),
       }),
     );
     expect(await screen.findByRole("status")).toHaveTextContent("Pago registrado");
@@ -276,6 +277,7 @@ describe("Finance — ventanilla", () => {
         amountCents: 50025,
         method: "transfer",
         reference: "SPEI-77",
+        idempotencyKey: expect.any(String),
       }),
     );
   });
@@ -290,6 +292,36 @@ describe("Finance — ventanilla", () => {
     await user.click(screen.getByRole("button", { name: "Registrar pago" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("payment exceeds remaining balance");
+  });
+
+  it("retries a failed submit under the SAME idempotency key, and mints a fresh one after a success", async () => {
+    const user = userEvent.setup();
+    const keyOf = (nth: number): string | undefined => finance.registerPayment.mock.calls[nth]?.[1].idempotencyKey;
+    // A PARTIAL collection, so the charge stays on the window form and a third
+    // submit is possible.
+    finance.registerPayment.mockRejectedValueOnce(new Error("gateway unreachable")).mockResolvedValue({
+      payment: { id: "p1", chargeId: "ch1", amountCents: 50000, method: "cash", reference: "", paidAt: "2026-09-01T10:00:00Z" },
+      charge: { ...overdueCharge, paidCents: 50000, remainingCents: 135000, status: "partial" as const },
+    });
+
+    renderFinance();
+
+    await user.click(await screen.findByRole("button", { name: "Registrar pago de Colegiatura septiembre" }));
+    await user.click(screen.getByRole("button", { name: "Registrar pago" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+
+    // The retry is the SAME attempt: reusing the key is what lets the server
+    // recognise it and refuse to collect twice.
+    await user.click(screen.getByRole("button", { name: "Registrar pago" }));
+    await waitFor(() => expect(finance.registerPayment).toHaveBeenCalledTimes(2));
+    expect(keyOf(1)).toBe(keyOf(0));
+    expect(keyOf(1)).toEqual(expect.any(String));
+
+    // That payment is banked, so the next collection is a NEW attempt and must
+    // not be deduplicated against it.
+    await user.click(screen.getByRole("button", { name: "Registrar pago" }));
+    await waitFor(() => expect(finance.registerPayment).toHaveBeenCalledTimes(3));
+    expect(keyOf(2)).not.toBe(keyOf(1));
   });
 
   it("opens directly on the window form when the palette asks for the payment intent", async () => {

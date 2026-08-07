@@ -387,7 +387,7 @@ func TestApplyDiscountSettlesAPartiallyPaidCharge(t *testing.T) {
 	f := newFixture(t)
 	concept := f.seedConcept(t, "Colegiatura", 250000)
 	charge := f.seedCharge(t, concept.ID(), 100000)
-	if _, _, err := f.svc.RegisterPayment(context.Background(), charge.ID(), 40000, domain.MethodCash, ""); err != nil {
+	if _, _, err := f.svc.RegisterPayment(context.Background(), charge.ID(), 40000, domain.MethodCash, "", ""); err != nil {
 		t.Fatalf("seed payment: %v", err)
 	}
 
@@ -474,7 +474,7 @@ func TestRegisterPayment(t *testing.T) {
 	concept := f.seedConcept(t, "Colegiatura", 250000)
 	charge := f.seedCharge(t, concept.ID(), 100000)
 
-	stored, cwp, err := f.svc.RegisterPayment(context.Background(), charge.ID(), 40000, domain.MethodTransfer, "SPEI-778")
+	stored, cwp, err := f.svc.RegisterPayment(context.Background(), charge.ID(), 40000, domain.MethodTransfer, "SPEI-778", "")
 
 	requireNoError(t, err)
 	if stored.ID() == "" || stored.ChargeID() != charge.ID() || stored.Amount().Int64() != 40000 {
@@ -490,7 +490,7 @@ func TestRegisterPayment(t *testing.T) {
 	}
 
 	// The second payment closes the balance.
-	_, cwp, err = f.svc.RegisterPayment(context.Background(), charge.ID(), 60000, domain.MethodCash, "")
+	_, cwp, err = f.svc.RegisterPayment(context.Background(), charge.ID(), 60000, domain.MethodCash, "", "")
 
 	requireNoError(t, err)
 	if cwp.PaidCents != 100000 || cwp.Charge.Status() != domain.StatusPaid {
@@ -504,7 +504,7 @@ func TestRegisterPaymentPublishesTheEvent(t *testing.T) {
 	concept := f.seedConcept(t, "Colegiatura", 250000)
 	charge := f.seedCharge(t, concept.ID(), 100000)
 
-	stored, _, err := f.svc.RegisterPayment(context.Background(), charge.ID(), 40000, domain.MethodCard, "auth-9")
+	stored, _, err := f.svc.RegisterPayment(context.Background(), charge.ID(), 40000, domain.MethodCard, "auth-9", "")
 
 	requireNoError(t, err)
 	if len(f.publisher.events) != 1 {
@@ -524,6 +524,56 @@ func TestRegisterPaymentPublishesTheEvent(t *testing.T) {
 	}
 }
 
+// A retry is the same attempt reaching the service twice — typically because
+// the response to a committed payment was lost. It must collect nothing more,
+// and it must not re-announce money that was already announced: a second
+// PaymentRegistered would send the family a second receipt for one payment.
+func TestRegisterPaymentReplayIsSilent(t *testing.T) {
+	f := newFixture(t)
+	concept := f.seedConcept(t, "Colegiatura", 250000)
+	charge := f.seedCharge(t, concept.ID(), 100000)
+	ctx := context.Background()
+
+	first, _, err := f.svc.RegisterPayment(ctx, charge.ID(), 40000, domain.MethodCash, "", "attempt-1")
+	requireNoError(t, err)
+
+	replay, cwp, err := f.svc.RegisterPayment(ctx, charge.ID(), 40000, domain.MethodCash, "", "attempt-1")
+
+	requireNoError(t, err)
+	if replay.ID() != first.ID() {
+		t.Fatalf("replayed payment id = %q, want the original %q", replay.ID(), first.ID())
+	}
+	if cwp.PaidCents != 40000 {
+		t.Fatalf("paid = %d, want 40000 — the retry must not collect twice", cwp.PaidCents)
+	}
+	if len(f.publisher.events) != 1 {
+		t.Fatalf("published %d events, want exactly 1 (the replay must stay silent)", len(f.publisher.events))
+	}
+}
+
+// A different key (or none at all) is a different attempt: two genuine
+// installments on the same charge both land and both announce themselves.
+func TestRegisterPaymentDistinctKeysBothCollect(t *testing.T) {
+	f := newFixture(t)
+	concept := f.seedConcept(t, "Colegiatura", 250000)
+	charge := f.seedCharge(t, concept.ID(), 100000)
+	ctx := context.Background()
+
+	if _, _, err := f.svc.RegisterPayment(ctx, charge.ID(), 40000, domain.MethodCash, "", "attempt-1"); err != nil {
+		t.Fatalf("first payment: %v", err)
+	}
+	_, cwp, err := f.svc.RegisterPayment(ctx, charge.ID(), 60000, domain.MethodCash, "", "attempt-2")
+
+	requireNoError(t, err)
+	if cwp.PaidCents != 100000 || cwp.Charge.Status() != domain.StatusPaid {
+		t.Fatalf("charge = (%d paid, %q), want (100000, %q)",
+			cwp.PaidCents, cwp.Charge.Status(), domain.StatusPaid)
+	}
+	if len(f.publisher.events) != 2 {
+		t.Fatalf("published %d events, want 2", len(f.publisher.events))
+	}
+}
+
 func TestRegisterPaymentSurvivesPublisherFailures(t *testing.T) {
 	t.Run("publish error does not fail the payment", func(t *testing.T) {
 		f := newFixture(t)
@@ -531,7 +581,7 @@ func TestRegisterPaymentSurvivesPublisherFailures(t *testing.T) {
 		concept := f.seedConcept(t, "Colegiatura", 250000)
 		charge := f.seedCharge(t, concept.ID(), 100000)
 
-		_, cwp, err := f.svc.RegisterPayment(context.Background(), charge.ID(), 40000, domain.MethodCash, "")
+		_, cwp, err := f.svc.RegisterPayment(context.Background(), charge.ID(), 40000, domain.MethodCash, "", "")
 
 		requireNoError(t, err)
 		if cwp.PaidCents != 40000 {
@@ -546,7 +596,7 @@ func TestRegisterPaymentSurvivesPublisherFailures(t *testing.T) {
 		svc := usecase.NewFinanceService(f.repo, f.students, f.cycles, f.enrollments, nil,
 			testTenant, seqID("np"), func() time.Time { return fixedNow })
 
-		_, cwp, err := svc.RegisterPayment(context.Background(), charge.ID(), 40000, domain.MethodCash, "")
+		_, cwp, err := svc.RegisterPayment(context.Background(), charge.ID(), 40000, domain.MethodCash, "", "")
 
 		requireNoError(t, err)
 		if cwp.PaidCents != 40000 {
@@ -561,7 +611,7 @@ func TestRegisterPaymentRejected(t *testing.T) {
 		concept := f.seedConcept(t, "Colegiatura", 250000)
 		charge := f.seedCharge(t, concept.ID(), 100000)
 
-		_, _, err := f.svc.RegisterPayment(context.Background(), charge.ID(), 100001, domain.MethodCash, "")
+		_, _, err := f.svc.RegisterPayment(context.Background(), charge.ID(), 100001, domain.MethodCash, "", "")
 
 		requireKind(t, err, glerrors.KindInvalid)
 		if paid := f.repo.paidFor(charge.ID()); paid != 0 {
@@ -579,11 +629,11 @@ func TestRegisterPaymentRejected(t *testing.T) {
 		f := newFixture(t)
 		concept := f.seedConcept(t, "Colegiatura", 250000)
 		charge := f.seedCharge(t, concept.ID(), 100000)
-		if _, _, err := f.svc.RegisterPayment(context.Background(), charge.ID(), 40000, domain.MethodCash, ""); err != nil {
+		if _, _, err := f.svc.RegisterPayment(context.Background(), charge.ID(), 40000, domain.MethodCash, "", ""); err != nil {
 			t.Fatalf("seed payment: %v", err)
 		}
 
-		_, _, err := f.svc.RegisterPayment(context.Background(), charge.ID(), 60001, domain.MethodCash, "")
+		_, _, err := f.svc.RegisterPayment(context.Background(), charge.ID(), 60001, domain.MethodCash, "", "")
 
 		requireKind(t, err, glerrors.KindInvalid)
 		if paid := f.repo.paidFor(charge.ID()); paid != 40000 {
@@ -599,7 +649,7 @@ func TestRegisterPaymentRejected(t *testing.T) {
 			t.Fatalf("seed cancel: %v", err)
 		}
 
-		_, _, err := f.svc.RegisterPayment(context.Background(), charge.ID(), 10000, domain.MethodCash, "")
+		_, _, err := f.svc.RegisterPayment(context.Background(), charge.ID(), 10000, domain.MethodCash, "", "")
 
 		requireKind(t, err, glerrors.KindInvalid)
 		if paid := f.repo.paidFor(charge.ID()); paid != 0 {
@@ -610,7 +660,7 @@ func TestRegisterPaymentRejected(t *testing.T) {
 	t.Run("unknown charge", func(t *testing.T) {
 		f := newFixture(t)
 
-		_, _, err := f.svc.RegisterPayment(context.Background(), "ghost", 10000, domain.MethodCash, "")
+		_, _, err := f.svc.RegisterPayment(context.Background(), "ghost", 10000, domain.MethodCash, "", "")
 
 		requireKind(t, err, glerrors.KindInvalid)
 		if errors.Is(err, glerrors.ErrNotFound) {
@@ -623,7 +673,7 @@ func TestRegisterPaymentRejected(t *testing.T) {
 		concept := f.seedConcept(t, "Colegiatura", 250000)
 		charge := f.seedCharge(t, concept.ID(), 100000)
 
-		_, _, err := f.svc.RegisterPayment(context.Background(), charge.ID(), 0, domain.MethodCash, "")
+		_, _, err := f.svc.RegisterPayment(context.Background(), charge.ID(), 0, domain.MethodCash, "", "")
 
 		requireKind(t, err, glerrors.KindInvalid)
 	})
@@ -633,7 +683,7 @@ func TestRegisterPaymentRejected(t *testing.T) {
 		concept := f.seedConcept(t, "Colegiatura", 250000)
 		charge := f.seedCharge(t, concept.ID(), 100000)
 
-		_, _, err := f.svc.RegisterPayment(context.Background(), charge.ID(), 10000, "crypto", "")
+		_, _, err := f.svc.RegisterPayment(context.Background(), charge.ID(), 10000, "crypto", "", "")
 
 		requireKind(t, err, glerrors.KindInvalid)
 	})
@@ -650,11 +700,11 @@ func TestGetAccount(t *testing.T) {
 	ctx := context.Background()
 
 	partly := f.seedCharge(t, tuition.ID(), 100000)
-	if _, _, err := f.svc.RegisterPayment(ctx, partly.ID(), 40000, domain.MethodCash, ""); err != nil {
+	if _, _, err := f.svc.RegisterPayment(ctx, partly.ID(), 40000, domain.MethodCash, "", ""); err != nil {
 		t.Fatalf("seed payment: %v", err)
 	}
 	settled := f.seedCharge(t, inscription.ID(), 50000)
-	if _, _, err := f.svc.RegisterPayment(ctx, settled.ID(), 50000, domain.MethodCash, ""); err != nil {
+	if _, _, err := f.svc.RegisterPayment(ctx, settled.ID(), 50000, domain.MethodCash, "", ""); err != nil {
 		t.Fatalf("seed payment: %v", err)
 	}
 	voided := f.seedCharge(t, trip.ID(), 30000)
@@ -687,7 +737,7 @@ func TestGetAccountOverpaidChargeNeverGoesNegative(t *testing.T) {
 	concept := f.seedConcept(t, "Colegiatura", 250000)
 	charge := f.seedCharge(t, concept.ID(), 100000)
 	ctx := context.Background()
-	if _, _, err := f.svc.RegisterPayment(ctx, charge.ID(), 100000, domain.MethodCash, ""); err != nil {
+	if _, _, err := f.svc.RegisterPayment(ctx, charge.ID(), 100000, domain.MethodCash, "", ""); err != nil {
 		t.Fatalf("seed payment: %v", err)
 	}
 	// A later discount leaves the charge collecting more than it now owes.
@@ -737,7 +787,7 @@ func TestListChargesFiltersAndCarriesTheCollectedTotal(t *testing.T) {
 	if _, err := f.svc.CreateCharge(ctx, otherStudent, testCycle, concept.ID(), 100000, "", testDueDate); err != nil {
 		t.Fatalf("seed another student's charge: %v", err)
 	}
-	if _, _, err := f.svc.RegisterPayment(ctx, mine.ID(), 40000, domain.MethodCash, ""); err != nil {
+	if _, _, err := f.svc.RegisterPayment(ctx, mine.ID(), 40000, domain.MethodCash, "", ""); err != nil {
 		t.Fatalf("seed payment: %v", err)
 	}
 

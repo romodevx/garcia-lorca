@@ -325,14 +325,24 @@ func (r *Repository) SaveCharge(ctx context.Context, c domain.Charge) (domain.Ch
 // race-free — two concurrent payments serialize on it instead of both reading a
 // stale total. On success the payment row and the charge's new status are
 // written in the same transaction. A missing charge yields glerrors.ErrNotFound.
+//
+// Deduplication happens under that same lock: a payment carrying an idempotency
+// key the tenant has already used returns the ORIGINAL payment with
+// replayed=true and writes nothing, so a retried request cannot collect twice.
+// Looking it up after acquiring the lock is what makes the check race-free for
+// the common case — a concurrent retry of the same charge waits, then sees the
+// committed row. Two retries against DIFFERENT charges share no lock, and there
+// the partial unique index (migration 0002) is the backstop: the loser's insert
+// fails rather than double-charging.
 func (r *Repository) RegisterPayment(
 	ctx context.Context,
 	p domain.Payment,
 	derive func(charge domain.Charge, newPaidCents int64) (string, error),
-) (domain.Payment, ports.ChargeWithPaid, error) {
+) (domain.Payment, ports.ChargeWithPaid, bool, error) {
 	var (
 		storedPayment domain.Payment
 		result        ports.ChargeWithPaid
+		replayed      bool
 	)
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var row chargeModel
@@ -350,6 +360,17 @@ func (r *Repository) RegisterPayment(
 			return err
 		}
 
+		original, found, err := paymentByIdempotencyKey(tx, p.IdempotencyKey())
+		if err != nil {
+			return err
+		}
+		if found {
+			storedPayment = original
+			result = ports.ChargeWithPaid{Charge: charge, PaidCents: currentPaid}
+			replayed = true
+			return nil
+		}
+
 		newPaid := currentPaid + p.Amount().Int64()
 		status, err := derive(charge, newPaid)
 		if err != nil {
@@ -358,6 +379,12 @@ func (r *Repository) RegisterPayment(
 
 		payment := fromDomainPayment(p)
 		if err := tx.Create(&payment).Error; err != nil {
+			// The partial unique index caught a same-key attempt that did not
+			// serialize on this charge's lock. It is a retry, not a new payment,
+			// so the caller sees a conflict rather than a duplicated collection.
+			if isUniqueViolation(err) {
+				return glerrors.Wrap(glerrors.KindConflict, "payment already registered under this idempotency key", err)
+			}
 			return glerrors.Wrap(glerrors.KindInternal, "storing payment", err)
 		}
 		if err := tx.Model(&chargeModel{}).Where("id = ?", p.ChargeID()).Updates(map[string]any{
@@ -378,9 +405,32 @@ func (r *Repository) RegisterPayment(
 		return nil
 	})
 	if err != nil {
-		return domain.Payment{}, ports.ChargeWithPaid{}, err
+		return domain.Payment{}, ports.ChargeWithPaid{}, false, err
 	}
-	return storedPayment, result, nil
+	return storedPayment, result, replayed, nil
+}
+
+// paymentByIdempotencyKey looks up the payment already posted under key, if any.
+// An empty key never matches — it means the caller opted out of deduplication,
+// and the partial unique index excludes blank keys for the same reason. The
+// query is tenant-bound by RLS, so a key is only ever a duplicate within its own
+// school.
+func paymentByIdempotencyKey(tx *gorm.DB, key string) (domain.Payment, bool, error) {
+	if key == "" {
+		return domain.Payment{}, false, nil
+	}
+	var m paymentModel
+	if err := tx.Where("idempotency_key = ?", key).First(&m).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return domain.Payment{}, false, nil
+		}
+		return domain.Payment{}, false, glerrors.Wrap(glerrors.KindInternal, "looking up payment by idempotency key", err)
+	}
+	stored, err := toDomainPayment(m)
+	if err != nil {
+		return domain.Payment{}, false, err
+	}
+	return stored, true, nil
 }
 
 // ListPayments returns every payment posted against the student's charges, for

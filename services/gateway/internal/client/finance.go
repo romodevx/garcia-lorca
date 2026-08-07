@@ -201,13 +201,16 @@ func (c *FinanceClient) CancelCharge(ctx context.Context, chargeID string) (Char
 }
 
 // RegisterPayment applies a payment to a charge and returns the payment plus
-// the charge with its recomputed paid/remaining/status.
-func (c *FinanceClient) RegisterPayment(ctx context.Context, chargeID string, amountCents int64, method, reference string) (Payment, Charge, error) {
+// the charge with its recomputed paid/remaining/status. idempotencyKey is
+// optional: a repeat under the same key returns the original payment instead of
+// collecting again, which is what makes a retried request safe.
+func (c *FinanceClient) RegisterPayment(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string) (Payment, Charge, error) {
 	res, err := c.rpc.RegisterPayment(ctx, connect.NewRequest(&financev1.RegisterPaymentRequest{
-		ChargeId:    chargeID,
-		AmountCents: amountCents,
-		Method:      method,
-		Reference:   reference,
+		ChargeId:       chargeID,
+		AmountCents:    amountCents,
+		Method:         method,
+		Reference:      reference,
+		IdempotencyKey: idempotencyKey,
 	}))
 	if err != nil {
 		return Payment{}, Charge{}, err
