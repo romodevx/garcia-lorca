@@ -12,6 +12,8 @@ import (
 	connect "connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	attendancev1 "github.com/garcia-lorca/gen/go/garcialorca/attendance/v1"
+	"github.com/garcia-lorca/gen/go/garcialorca/attendance/v1/attendancev1connect"
 	configv1 "github.com/garcia-lorca/gen/go/garcialorca/config/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/config/v1/configv1connect"
 	financev1 "github.com/garcia-lorca/gen/go/garcialorca/finance/v1"
@@ -53,6 +55,8 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"grades-reader":    {"grades:read"},
 		"finance-writer":   {"finance:write", "finance:read"},
 		"finance-reader":   {"finance:read"},
+		"att-writer":       {"attendance:write", "attendance:read"},
+		"att-reader":       {"attendance:read"},
 		"users-writer":     {"users:write", "users:read"},
 		"users-reader":     {"users:read"},
 		"roles-writer":     {"roles:write", "roles:read"},
@@ -294,6 +298,38 @@ func (stubFinance) ListOverdue(_ context.Context, _ *connect.Request[financev1.L
 	}}), nil
 }
 
+// stubAttendance echoes a canned roster / save summary / record list, enough to
+// exercise the attendance route security chain end to end. The default-present
+// model shows up in the roster: a row with no stored mark reads "present".
+type stubAttendance struct {
+	attendancev1connect.UnimplementedAttendanceServiceHandler
+}
+
+func (stubAttendance) GetDailyRoster(_ context.Context, _ *connect.Request[attendancev1.GetDailyRosterRequest]) (*connect.Response[attendancev1.GetDailyRosterResponse], error) {
+	return connect.NewResponse(&attendancev1.GetDailyRosterResponse{Rows: []*attendancev1.RosterRow{
+		{EnrollmentId: "enr-1", StudentId: "stu-1", Status: "present"},
+		{EnrollmentId: "enr-2", StudentId: "stu-2", Status: "absent"},
+	}}), nil
+}
+
+func (stubAttendance) SaveDailyAttendance(_ context.Context, req *connect.Request[attendancev1.SaveDailyAttendanceRequest]) (*connect.Response[attendancev1.SaveDailyAttendanceResponse], error) {
+	var absent int32
+	for _, m := range req.Msg.GetMarks() {
+		if m.GetStatus() == "absent" {
+			absent++
+		}
+	}
+	return connect.NewResponse(&attendancev1.SaveDailyAttendanceResponse{
+		AbsentCount: absent, MarkedCount: int32(len(req.Msg.GetMarks())),
+	}), nil
+}
+
+func (stubAttendance) ListAttendance(_ context.Context, req *connect.Request[attendancev1.ListAttendanceRequest]) (*connect.Response[attendancev1.ListAttendanceResponse], error) {
+	return connect.NewResponse(&attendancev1.ListAttendanceResponse{Records: []*attendancev1.AttendanceRecord{
+		{Id: "att-1", EnrollmentId: req.Msg.GetEnrollmentId(), Date: "2026-09-01", Status: "absent", Note: "cita médica"},
+	}}), nil
+}
+
 func connectServer(t *testing.T, path string, handler http.Handler) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -317,6 +353,8 @@ func newTestGateway(t *testing.T, flags map[string]bool) *httptest.Server {
 	grdSrv := connectServer(t, grdPath, grdHandler)
 	finPath, finHandler := financev1connect.NewFinanceServiceHandler(stubFinance{})
 	finSrv := connectServer(t, finPath, finHandler)
+	attPath, attHandler := attendancev1connect.NewAttendanceServiceHandler(stubAttendance{})
+	attSrv := connectServer(t, attPath, attHandler)
 
 	// A generous burst keeps the limiter out of the way of these route tests;
 	// rate-limit behavior is covered directly in the middleware package.
@@ -328,6 +366,7 @@ func newTestGateway(t *testing.T, flags map[string]bool) *httptest.Server {
 		client.NewConfigClient(cfgSrv.URL, cfgSrv.Client()),
 		client.NewGradesClient(grdSrv.URL, grdSrv.Client()),
 		client.NewFinanceClient(finSrv.URL, finSrv.Client()),
+		client.NewAttendanceClient(attSrv.URL, attSrv.Client()),
 		featureflag.NewInMemory(flags),
 		loginLimiter,
 	)
@@ -1103,6 +1142,133 @@ func TestFinanceOverdueDisabledModuleIs404(t *testing.T) {
 func TestFinanceChargeListWithReadPermission200(t *testing.T) {
 	gw := newTestGateway(t, map[string]bool{"module_finance": true})
 	res := doGateway(t, gw, http.MethodGet, "/api/v1/finance/charges?studentId=stu-1", "finance-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", res.StatusCode)
+	}
+}
+
+// --- attendance routes (Phase 8): ModuleGuard(attendance) → RequireAuth →
+// RequirePermission. Saving a group·day is the write (attendance:write); the
+// roster and the per-enrollment history are reads (attendance:read). Every
+// route sits behind guard.Protect("attendance", …) so module_attendance OFF ⇒
+// 404, before auth runs.
+
+const validSaveDayBody = `{"groupId":"grp-1","date":"2026-09-01","marks":[` +
+	`{"enrollmentId":"enr-1","status":"absent","note":"cita médica"},` +
+	`{"enrollmentId":"enr-2","status":"late","note":""}]}`
+
+func TestAttendanceSaveDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_attendance OFF
+	// Even a caller with attendance:write must not learn the module exists.
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/attendance", "att-writer", validSaveDayBody)
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestAttendanceSaveNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_attendance": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/attendance", "", validSaveDayBody)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+// Saving a day reconciles it — it can erase marks — so attendance:read is
+// deliberately insufficient.
+func TestAttendanceSaveReadOnlyPermissionIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_attendance": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/attendance", "att-reader", validSaveDayBody)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+func TestAttendanceSaveWithWritePermission200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_attendance": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/attendance", "att-writer", validSaveDayBody)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// Two exceptions crossed the whole edge; only one of them is an absence.
+	if out["absentCount"] != float64(1) || out["markedCount"] != float64(2) {
+		t.Errorf("body = %v", out)
+	}
+}
+
+// /attendance/roster is a more specific pattern than /attendance: ServeMux must
+// route it to the roster handler, under the read guard.
+func TestAttendanceRosterWithReadPermission200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_attendance": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/attendance/roster?groupId=grp-1&date=2026-09-01", "att-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out struct {
+		Roster []map[string]any `json:"roster"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// Default-present survives the whole chain: an unmarked row reads "present".
+	if len(out.Roster) != 2 || out.Roster[0]["status"] != "present" || out.Roster[1]["status"] != "absent" {
+		t.Errorf("body = %v", out.Roster)
+	}
+}
+
+func TestAttendanceRosterDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_attendance OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/attendance/roster?groupId=grp-1&date=2026-09-01", "att-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestAttendanceRosterNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_attendance": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/attendance/roster?groupId=grp-1&date=2026-09-01", "", "")
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+func TestAttendanceListWithReadPermission200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_attendance": true})
+	res := doGateway(t, gw, http.MethodGet,
+		"/api/v1/attendance?enrollmentId=enr-1&from=2026-09-01&to=2026-09-30", "att-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out struct {
+		Records []map[string]any `json:"records"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The enrollmentId comes from the query, so the stub echoes it back.
+	if len(out.Records) != 1 || out.Records[0]["enrollmentId"] != "enr-1" ||
+		out.Records[0]["status"] != "absent" {
+		t.Errorf("body = %v", out.Records)
+	}
+}
+
+func TestAttendanceListDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_attendance OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/attendance?enrollmentId=enr-1", "att-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+// A write token also carries attendance:read, so the read routes stay reachable
+// for the teacher who is capturing the day.
+func TestAttendanceListWithWritePermission200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_attendance": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/attendance?enrollmentId=enr-1", "att-writer", "")
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200", res.StatusCode)
 	}
