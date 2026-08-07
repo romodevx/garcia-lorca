@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactElement, ReactNode } from "react";
+import type { ReactElement } from "react";
 import { Icon, type IconName } from "../../_design/Icon";
 import { COLOR, type ColorKey } from "../../_design/colors";
 
@@ -262,32 +262,5 @@ export function AllClear({ title, hint }: { title: string; hint: string }): Reac
   );
 }
 
-/** A bottom-centred confirmation toast (`role="status"`). */
-export function Toast({ children }: { children: ReactNode }): ReactElement {
-  return (
-    <div
-      role="status"
-      style={{
-        position: "fixed",
-        bottom: 28,
-        left: "50%",
-        transform: "translateX(-50%)",
-        zIndex: 60,
-        display: "flex",
-        alignItems: "center",
-        gap: 11,
-        padding: "14px 22px",
-        borderRadius: "var(--r-pill)",
-        background: "var(--forest)",
-        color: "#fff",
-        fontWeight: 600,
-        fontSize: 15,
-        boxShadow: "var(--shadow-pop)",
-        animation: "pop .25s var(--ease) both",
-      }}
-    >
-      <Icon name="check" size={20} stroke={2.6} />
-      {children}
-    </div>
-  );
-}
+/** The confirmation toast now lives in the design system (every surface uses it). */
+export { Toast } from "../../_design/Toast";

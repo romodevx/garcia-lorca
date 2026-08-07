@@ -6,6 +6,7 @@ import { CommandPaletteHost } from "./command/CommandPaletteHost";
 import { TopBar } from "./_design/TopBar";
 import { MODULES, USERS, type ModuleDef, type Role } from "./_design/data";
 import { Dashboard } from "./_screens/Dashboard";
+import { Attendance } from "./_screens/attendance/Attendance";
 import { Finance, type FinanceIntent } from "./_screens/finance/Finance";
 import { Catalog } from "./_screens/config/Catalog";
 import { Admin } from "./_screens/admin/Admin";
@@ -25,6 +26,7 @@ type View =
   | { screen: "config" }
   | { screen: "students" }
   | { screen: "grades" }
+  | { screen: "attendance" }
   | { screen: "admin" }
   | { screen: "module"; moduleId: string };
 
@@ -61,6 +63,9 @@ export function AppShell(): ReactElement {
   // The grade-capture surface is gated by module_grades (UX-only; the gateway is
   // the boundary). The "grades" module (Calificaciones) opens this surface.
   const gradesEnabled = useFlag("module_grades");
+  // The daily pass-list surface is gated by module_attendance (UX-only; the
+  // gateway is the boundary). The "attendance" module (Asistencia) opens it.
+  const attendanceEnabled = useFlag("module_attendance");
   // The admin surface (users/roles/teacher-link) is gated by module_iam (UX-only;
   // the gateway is the boundary). The "admin" module (Administración) opens it.
   const adminEnabled = useFlag("module_iam");
@@ -114,6 +119,10 @@ export function AppShell(): ReactElement {
     }
     if (id === "grades") {
       setView({ screen: "grades" });
+      return;
+    }
+    if (id === "attendance") {
+      setView({ screen: "attendance" });
       return;
     }
     if (id === "admin") {
@@ -183,6 +192,14 @@ export function AppShell(): ReactElement {
           // Flag OFF: never render the grade-capture surface; show the friendly stub
           // so navigation never dead-ends. (Backend 404 is authoritative.)
           <ModulePlaceholder m={MODULES.find((m) => m.id === "grades") as ModuleDef} onBack={home} />
+        ))}
+      {view.screen === "attendance" &&
+        (attendanceEnabled ? (
+          <Attendance onBack={home} />
+        ) : (
+          // Flag OFF: never render the pass list; show the friendly stub so
+          // navigation never dead-ends. (Backend 404 is authoritative.)
+          <ModulePlaceholder m={MODULES.find((m) => m.id === "attendance") as ModuleDef} onBack={home} />
         ))}
       {view.screen === "admin" &&
         (adminEnabled ? (

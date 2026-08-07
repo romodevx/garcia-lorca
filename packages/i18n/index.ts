@@ -24,6 +24,7 @@ export {
   catalog,
   messages,
   NAMESPACES,
+  type AttendanceKey,
   type AuthKey,
   type CommonKey,
   type FinanceKey,

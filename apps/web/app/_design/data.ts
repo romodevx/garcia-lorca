@@ -33,7 +33,8 @@ export interface ModuleDef {
 export const MODULES: readonly ModuleDef[] = [
   { id: "students", label: "Estudiantes", icon: "students", color: "forest", desc: "1,248 alumnos", badge: null, flag: "module_students" },
   { id: "finance", label: "Finanzas y Adeudos", icon: "finance", color: "orange", desc: "37 con adeudo", badge: 37, flag: "module_finance" },
-  { id: "attendance", label: "Asistencia QR", icon: "qr", color: "lime", desc: "92% hoy", badge: null, flag: "module_attendance" },
+  // QR capture is deferred; the module ships as the daily pass list.
+  { id: "attendance", label: "Asistencia", icon: "qr", color: "lime", desc: "Pase de lista diario", badge: null, flag: "module_attendance" },
   { id: "grades", label: "Calificaciones", icon: "grades", color: "yellow", desc: "Bloque 3 abierto", badge: null, flag: "module_grades" },
   { id: "announcements", label: "Avisos", icon: "announcements", color: "orange", desc: "2 nuevos", badge: 2, flag: "module_comms" },
   { id: "scholarships", label: "Becas", icon: "scholarship", color: "purple", desc: "84 activas", badge: null, flag: "module_scholarships" },
