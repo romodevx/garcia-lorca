@@ -17,6 +17,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -60,6 +61,7 @@ const (
 	cycleOne     = "70000000-0000-0000-0000-000000000001"
 	cycleBulk    = "70000000-0000-0000-0000-000000000002"
 	cycleOverdue = "70000000-0000-0000-0000-000000000003"
+	cycleOrder   = "70000000-0000-0000-0000-000000000004"
 )
 
 // today is the fixed clock the overdue query is evaluated against; the domain
@@ -657,5 +659,53 @@ func TestListOverdueSelectsPastDueWithBalance(t *testing.T) {
 	}
 	if overdue[0].PaidCents != 0 {
 		t.Errorf("overdue paid = %d, want 0", overdue[0].PaidCents)
+	}
+}
+
+// TestListChargesIsEarliestDueFirst proves the ledger read has a DETERMINISTIC
+// order — earliest due date first — rather than whatever the planner emits. That
+// order is what makes the read's documented cap safe to apply: the rows a capped
+// read drops are always the ones furthest from being collectable.
+func TestListChargesIsEarliestDueFirst(t *testing.T) {
+	ctx := context.Background()
+	const (
+		conceptID = "c0000000-0000-0000-0000-0000000000f1"
+		lastID    = "d0000000-0000-0000-0000-0000000000f1"
+		firstID   = "d0000000-0000-0000-0000-0000000000f2"
+		middleID  = "d0000000-0000-0000-0000-0000000000f3"
+	)
+	repo := appRepo(t, tenantA)
+	if _, err := repo.CreateConcept(ctx, newConcept(t, conceptID, tenantA, "ordered-concept", 1000)); err != nil {
+		t.Fatalf("seed concept: %v", err)
+	}
+
+	// Seeded out of due-date order, one student each (a student owes a concept
+	// once per cycle), so insertion order cannot masquerade as the ordering.
+	seeds := []struct {
+		id, student string
+		due         time.Time
+	}{
+		{lastID, "50000000-0000-0000-0000-0000000000f1", today.AddDate(0, 0, 30)},
+		{firstID, "50000000-0000-0000-0000-0000000000f2", today.AddDate(0, 0, -30)},
+		{middleID, "50000000-0000-0000-0000-0000000000f3", today},
+	}
+	for _, s := range seeds {
+		if _, err := repo.CreateCharge(ctx, newCharge(t, s.id, tenantA, s.student, cycleOrder, conceptID, 1000, 0, s.due)); err != nil {
+			t.Fatalf("seed charge %s: %v", s.id, err)
+		}
+	}
+
+	list, err := repo.ListCharges(ctx, "", cycleOrder)
+	if err != nil {
+		t.Fatalf("ListCharges: %v", err)
+	}
+
+	want := []string{firstID, middleID, lastID}
+	got := make([]string, 0, len(list))
+	for _, c := range list {
+		got = append(got, c.Charge.ID())
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("ListCharges order = %v, want %v (earliest due first)", got, want)
 	}
 }

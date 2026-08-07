@@ -48,8 +48,11 @@ service FinanceService {
   // phase — see the monthly-recurrence follow-up.)
   rpc GenerateCharges(GenerateChargesRequest) returns (GenerateChargesResponse);
 
-  // ListCharges lists charges, optionally filtered by student and/or cycle
-  // (each filter is independent; empty = any).
+  // ListCharges lists charges filtered by student and/or cycle (each filter is
+  // independent; empty = any). AT LEAST ONE is required: an unscoped read would
+  // return the tenant's whole ledger, so it is rejected as INVALID_ARGUMENT.
+  // Returns at most 500 rows (earliest due first); explicit pagination is a
+  // follow-up.
   rpc ListCharges(ListChargesRequest) returns (ListChargesResponse);
 
   // ApplyDiscount sets the discount on a charge (beca, convenio, ajuste). The
@@ -74,6 +77,8 @@ service FinanceService {
 
   // ListOverdue lists charges past their due date with a remaining balance,
   // optionally filtered by cycle. Cancelled and fully paid charges are excluded.
+  // Returns at most 500 rows (earliest due first); explicit pagination is a
+  // follow-up.
   rpc ListOverdue(ListOverdueRequest) returns (ListOverdueResponse);
 
   // ExportContpaqi produces a CONTPAQi-format XML export (spike S02).
@@ -212,8 +217,8 @@ message GenerateChargesResponse {
 }
 
 message ListChargesRequest {
-  string student_id = 1;  // optional filter (empty = any)
-  string cycle_id = 2;    // optional filter (empty = any)
+  string student_id = 1;  // filter (empty = any); at least one of the two required
+  string cycle_id = 2;    // filter (empty = any); at least one of the two required
 }
 
 message ListChargesResponse {

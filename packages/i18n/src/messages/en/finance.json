@@ -82,6 +82,7 @@
   "error.concept": "The concept could not be saved: {detail}",
   "error.generate": "The charges could not be generated: {detail}",
   "error.charges": "The charges could not be loaded: {detail}",
+  "error.scopeRequired": "Pick a student or a cycle to see the charges.",
   "error.concepts": "The charge concepts could not be loaded: {detail}",
   "error.account": "The account statement could not be loaded: {detail}",
   "error.discount": "The discount could not be applied: {detail}",

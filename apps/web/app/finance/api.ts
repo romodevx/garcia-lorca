@@ -129,7 +129,11 @@ export interface RegisterPaymentInput {
   idempotencyKey?: string;
 }
 
-/** Optional list filters; empty values are dropped from the query string. */
+/**
+ * Charge list filters; empty values are dropped from the query string. Each is
+ * independent, but the gateway REQUIRES at least one — an unscoped read would be
+ * the school's whole ledger — and answers 400 when both are missing.
+ */
 export interface ChargeFilters {
   studentId?: string;
   cycleId?: string;
@@ -304,6 +308,7 @@ export async function generateCharges(baseURL: string, input: GenerateChargesInp
   return { created: res.created ?? 0, skipped: res.skipped ?? 0 };
 }
 
+/** Pass a student and/or a cycle: the gateway rejects an unscoped read with 400. */
 export async function listCharges(baseURL: string, filters: ChargeFilters = {}): Promise<Charge[]> {
   const qs = query({ studentId: filters.studentId, cycleId: filters.cycleId });
   const rows = await getList<Wire<Charge, "status">>(baseURL, `/charges${qs}`, "charges");

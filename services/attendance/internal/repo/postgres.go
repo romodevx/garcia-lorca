@@ -16,10 +16,17 @@ import (
 // Compile-time proof the adapter satisfies the seam the service declares.
 var _ service.Repo = (*Repo)(nil)
 
-// dateLayout renders a Go time as the DATE literal the `date` column is compared
-// against, so only the date part of a caller's time matters and no time zone can
-// shift a school day.
-const dateLayout = "2006-01-02"
+const (
+	// dateLayout renders a Go time as the DATE literal the `date` column is
+	// compared against, so only the date part of a caller's time matters and no
+	// time zone can shift a school day.
+	dateLayout = "2006-01-02"
+	// maxListLimit caps the unpaginated history read, so an open-ended date range
+	// cannot pull an unbounded number of rows into memory. It is a DOCUMENTED
+	// bound, not a hidden one: the capped method says so, as does the proto
+	// contract. Explicit pagination is the follow-up that removes the need for it.
+	maxListLimit = 500
+)
 
 // Repo is the GORM-backed attendance repository. Every operation runs in a
 // transaction bound to a tenant so Row Level Security applies (mirrors
@@ -126,14 +133,21 @@ func (r *Repo) ReconcileDay(ctx context.Context, enrollmentIDs []string, date ti
 }
 
 // ListByEnrollment returns one enrollment's stored marks within an inclusive date
-// range; a zero from or to skips that bound. Results are ordered by date (then id
-// for a stable read). Only exceptions are stored, so present days never appear.
+// range; a zero from or to skips that bound. Only exceptions are stored, so
+// present days never appear.
+//
+// The read returns AT MOST maxListLimit rows, the MOST RECENT first, ordered by
+// (date, id) so the cut is deterministic rather than whatever the planner
+// happened to emit. Newest-first is what makes the cap safe: an open-ended range
+// over years of history drops the oldest days, never the ones being looked at.
+// Explicit pagination is a follow-up.
 func (r *Repo) ListByEnrollment(ctx context.Context, enrollmentID string, from, to time.Time) ([]service.AttendanceRecord, error) {
 	var out []service.AttendanceRecord
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		q := tx.Model(&attendanceModel{}).
 			Where("enrollment_id = ?", enrollmentID).
-			Order("date ASC, id ASC")
+			Order("date DESC, id ASC").
+			Limit(maxListLimit)
 		if !from.IsZero() {
 			q = q.Where("date >= ?::date", from.Format(dateLayout))
 		}

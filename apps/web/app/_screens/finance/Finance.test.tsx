@@ -113,6 +113,21 @@ describe("Finance — adeudos", () => {
       expect(finance.listCharges).toHaveBeenCalledWith(expect.any(String), { studentId: "st1", cycleId: "cy1" }),
     );
   });
+
+  // The gateway refuses an unscoped charge read (it would be the whole tenant
+  // ledger), so the surface must ask for a scope instead of firing a request it
+  // knows will bounce — and never render the bounce as "no debts".
+  it("asks for a student or cycle instead of reading the whole ledger unscoped", async () => {
+    const user = userEvent.setup();
+    config.listCycles.mockResolvedValue([]);
+    renderFinance();
+
+    const filters = await screen.findByRole("tablist", { name: "Filtrar por estado" });
+    await user.click(within(filters).getByRole("tab", { name: "Todos" }));
+
+    expect(await screen.findByText("Elige un alumno o un ciclo para ver los cargos.")).toBeInTheDocument();
+    expect(finance.listCharges).not.toHaveBeenCalled();
+  });
 });
 
 describe("Finance — a cancelled charge", () => {

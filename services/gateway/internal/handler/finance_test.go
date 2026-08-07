@@ -356,6 +356,24 @@ func TestFinanceListChargesForwardsFilters(t *testing.T) {
 	}
 }
 
+// TestFinanceListChargesUnfilteredIs400 pins the edge's half of the unscoped-read
+// blindaje: the handler forwards the two empty filters verbatim — it does not
+// invent a scope — and the finance service's rejection of the whole-ledger read
+// reaches the caller as 400, not as an empty 200 that looks like "no debts".
+func TestFinanceListChargesUnfilteredIs400(t *testing.T) {
+	svc := &fakeFinance{err: connect.NewError(connect.CodeInvalidArgument, nil)}
+	h := handler.NewFinanceHandler(svc)
+
+	rec := doReq(t, h.ListCharges, http.MethodGet, "/api/v1/finance/charges", "")
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if svc.listStudent != "" || svc.listCycle != "" {
+		t.Errorf("forwarded filters = %q %q, want both empty", svc.listStudent, svc.listCycle)
+	}
+}
+
 func TestFinanceApplyDiscountUsesPathID(t *testing.T) {
 	discounted := sampleCharge
 	discounted.DiscountCents = 50000

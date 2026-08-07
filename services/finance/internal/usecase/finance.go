@@ -194,10 +194,16 @@ func (s *FinanceService) GenerateCharges(ctx context.Context, conceptID, cycleID
 }
 
 // ListCharges returns charges with what has been collected against each,
-// optionally narrowed by student and/or cycle (an empty filter means "any").
+// narrowed by student and/or cycle (either filter alone is enough; an empty one
+// means "any"). At least one is REQUIRED: an unscoped read would hand the caller
+// the tenant's whole ledger, so it is refused as bad input rather than served.
 // The collected total is resolved by the repository in one query, so listing a
-// cycle never degenerates into a payment lookup per charge.
+// cycle never degenerates into a payment lookup per charge. The repository caps
+// the result — see its documented bound.
 func (s *FinanceService) ListCharges(ctx context.Context, studentID, cycleID string) ([]ports.ChargeWithPaid, error) {
+	if studentID == "" && cycleID == "" {
+		return nil, glerrors.New(glerrors.KindInvalid, "specify a student or a cycle")
+	}
 	return s.repo.ListCharges(ctx, studentID, cycleID)
 }
 

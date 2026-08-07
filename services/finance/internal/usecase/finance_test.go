@@ -802,6 +802,52 @@ func TestListChargesFiltersAndCarriesTheCollectedTotal(t *testing.T) {
 	}
 }
 
+// TestListChargesRequiresAScopingFilter is the blindaje: an unfiltered read
+// would hand the caller the tenant's WHOLE ledger, so the use case refuses it.
+// Either filter on its own is enough to scope the read.
+func TestListChargesRequiresAScopingFilter(t *testing.T) {
+	f := newFixture(t)
+	concept := f.seedConcept(t, "Colegiatura", 250000)
+	f.seedCharge(t, concept.ID(), 100000)
+	ctx := context.Background()
+
+	_, err := f.svc.ListCharges(ctx, "", "")
+	requireKind(t, err, glerrors.KindInvalid)
+
+	tests := []struct {
+		name      string
+		studentID string
+		cycleID   string
+	}{
+		{"student only", testStudent, ""},
+		{"cycle only", "", testCycle},
+		{"both", testStudent, testCycle},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := f.svc.ListCharges(ctx, tt.studentID, tt.cycleID); err != nil {
+				t.Fatalf("ListCharges(%q, %q) = %v, want the scoped read to pass through", tt.studentID, tt.cycleID, err)
+			}
+		})
+	}
+}
+
+// TestGetAccountReadsTheStudentLedgerDespiteTheFilterGuard proves the statement
+// keeps working: it is already scoped by student, so the unfiltered-read guard
+// on ListCharges must not reach it.
+func TestGetAccountReadsTheStudentLedgerDespiteTheFilterGuard(t *testing.T) {
+	f := newFixture(t)
+	concept := f.seedConcept(t, "Colegiatura", 250000)
+	charge := f.seedCharge(t, concept.ID(), 100000)
+
+	got, err := f.svc.GetAccount(context.Background(), testStudent)
+
+	requireNoError(t, err)
+	if len(got.Charges) != 1 || got.Charges[0].Charge.ID() != charge.ID() {
+		t.Fatalf("statement charges = %v, want just %q", got.Charges, charge.ID())
+	}
+}
+
 // ids extracts concept ids for readable failure messages.
 func ids(cs []domain.ChargeConcept) []string {
 	out := make([]string, 0, len(cs))

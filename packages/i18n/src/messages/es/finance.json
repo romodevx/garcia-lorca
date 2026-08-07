@@ -82,6 +82,7 @@
   "error.concept": "No se pudo guardar el concepto: {detail}",
   "error.generate": "No se pudieron generar los cargos: {detail}",
   "error.charges": "No se pudieron cargar los cargos: {detail}",
+  "error.scopeRequired": "Elige un alumno o un ciclo para ver los cargos.",
   "error.concepts": "No se pudieron cargar los conceptos: {detail}",
   "error.account": "No se pudo cargar el estado de cuenta: {detail}",
   "error.discount": "No se pudo aplicar el descuento: {detail}",

@@ -24,6 +24,12 @@ const (
 	// dateLayout renders a Go time as the DATE literal the `due_date` column is
 	// compared against, so only the date part of the caller's clock matters.
 	dateLayout = "2006-01-02"
+	// maxListLimit caps every unpaginated ledger read, so no single request can
+	// pull an unbounded number of rows into memory (defense in depth behind the
+	// use case's scoping filters). It is a DOCUMENTED bound, not a hidden one:
+	// each capped method says so, as does the proto contract. Explicit pagination
+	// is the follow-up that removes the need for it.
+	maxListLimit = 500
 )
 
 // Repository is the GORM-backed finance ledger repository. Every operation runs
@@ -250,10 +256,14 @@ func (r *Repository) GetCharge(ctx context.Context, id string) (ports.ChargeWith
 // ListCharges returns charges with their collected totals. An empty studentID or
 // cycleID skips that filter. The payment totals for the whole page are resolved
 // in ONE grouped query rather than a lookup per charge (no N+1).
+//
+// The read returns AT MOST maxListLimit rows, the earliest due first, ordered by
+// (due_date, id) so the cut is deterministic rather than whatever the planner
+// happened to emit. Explicit pagination is a follow-up.
 func (r *Repository) ListCharges(ctx context.Context, studentID, cycleID string) ([]ports.ChargeWithPaid, error) {
 	var out []ports.ChargeWithPaid
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		q := tx.Model(&chargeModel{}).Order("due_date ASC, id ASC")
+		q := tx.Model(&chargeModel{}).Order("due_date ASC, id ASC").Limit(maxListLimit)
 		if studentID != "" {
 			q = q.Where("student_id = ?", studentID)
 		}
@@ -468,12 +478,19 @@ func (r *Repository) ListPayments(ctx context.Context, studentID string) ([]doma
 // spans every cycle. today is supplied by the caller — never read from a clock
 // here — so the query stays deterministic. The remaining balance is computed
 // from the same single grouped payment query the list reads (no N+1).
+//
+// The read examines AT MOST maxListLimit candidates, the earliest due first,
+// ordered by (due_date, id) — so the collection queue is bounded and its cut is
+// deterministic. Since the still-owing filter is applied afterwards, the result
+// holds no more than that many rows and never fewer of the oldest debts.
+// Explicit pagination is a follow-up.
 func (r *Repository) ListOverdue(ctx context.Context, cycleID string, today time.Time) ([]ports.ChargeWithPaid, error) {
 	var out []ports.ChargeWithPaid
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		q := tx.Model(&chargeModel{}).
 			Where("due_date < ?::date AND status <> ?", today.Format(dateLayout), domain.StatusCancelled).
-			Order("due_date ASC, id ASC")
+			Order("due_date ASC, id ASC").
+			Limit(maxListLimit)
 		if cycleID != "" {
 			q = q.Where("cycle_id = ?", cycleID)
 		}

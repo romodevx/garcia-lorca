@@ -46,7 +46,8 @@ service AttendanceService {
 
   // ListAttendance lists a single enrollment's stored attendance records within
   // an inclusive date range. Only exceptions are stored, so present days are
-  // absent from the result by construction.
+  // absent from the result by construction. Returns at most 500 rows (most
+  // recent first); explicit pagination is a follow-up.
   rpc ListAttendance(ListAttendanceRequest) returns (ListAttendanceResponse);
 }
 
