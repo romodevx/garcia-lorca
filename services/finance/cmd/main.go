@@ -9,9 +9,10 @@
 // the enrollments a bulk generation expands over) and config (the school
 // cycle).
 //
-// TRANSPORT NOTE: the Pub/Sub transport is a dev-only logging publisher for now;
-// the Cloud Pub/Sub adapter (payment-events topic) is the remaining infra
-// follow-up. The ports.PaymentPublisher port stays unchanged when it lands.
+// TRANSPORT NOTE: events go to Cloud Pub/Sub (payment-events topic) whenever a
+// broker is configured — the compose emulator locally, the real service in shared
+// environments. Without one the service falls back to a logging dev bus so it
+// runs standalone. The ports.PaymentPublisher port is the same either way.
 package main
 
 import (
@@ -33,6 +34,7 @@ import (
 	"github.com/garcia-lorca/gen/go/garcialorca/finance/v1/financev1connect"
 	"github.com/garcia-lorca/pkg/logger"
 	"github.com/garcia-lorca/pkg/pubsub"
+	"github.com/garcia-lorca/pkg/pubsub/gcp"
 	"github.com/garcia-lorca/services/finance/internal/adapters/configclient"
 	grpcadapter "github.com/garcia-lorca/services/finance/internal/adapters/grpc"
 	pgadapter "github.com/garcia-lorca/services/finance/internal/adapters/postgres"
@@ -50,6 +52,8 @@ const (
 	// http://config:8080 / http://students:8080.
 	defaultConfigBaseURL   = "http://localhost:8101"
 	defaultStudentsBaseURL = "http://localhost:8092"
+	// defaultPubSubProject matches the project the compose emulator starts with.
+	defaultPubSubProject = "garcia-lorca-local"
 
 	readHeaderTimeout = 10 * time.Second
 	readTimeout       = 30 * time.Second
@@ -62,7 +66,7 @@ var errMissingDatabaseURL = errors.New("DATABASE_URL is required")
 func main() {
 	log := logger.Default()
 
-	mux, err := buildMux(log)
+	mux, err := buildMux(context.Background(), log)
 	if err != nil {
 		log.Error("finance failed to start", slog.Any("error", err))
 		os.Exit(1)
@@ -88,7 +92,7 @@ func main() {
 // buildMux is the composition root: config → adapters (both reader clients,
 // repo and publisher) → use case → Connect handler, returning the mounted
 // routes.
-func buildMux(log *slog.Logger) (*http.ServeMux, error) {
+func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, error) {
 	// Single-tenant for this phase: the tenant is fixed here (not derived from
 	// the caller), so RLS binds this one tenant for every request. See ADR 0001.
 	tenantID := envOr("FINANCE_TENANT_ID", defaultTenant)
@@ -109,7 +113,7 @@ func buildMux(log *slog.Logger) (*http.ServeMux, error) {
 	studentsClient := studentsclient.New(envOr("STUDENTS_BASE_URL", defaultStudentsBaseURL), http.DefaultClient)
 	cyclesClient := configclient.New(envOr("CONFIG_BASE_URL", defaultConfigBaseURL), http.DefaultClient)
 
-	publisher := pubsubadapter.NewEventPublisher(newDevBus(log))
+	publisher := pubsubadapter.NewEventPublisher(selectPublisher(ctx, log))
 
 	newID := func() string { return uuid.NewString() }
 	svc := usecase.NewFinanceService(repo, studentsClient, cyclesClient, studentsClient, publisher, tenantID, newID, time.Now)
@@ -135,8 +139,28 @@ func openDB() (*gorm.DB, error) {
 	return gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Warn)})
 }
 
+// selectPublisher returns the Cloud Pub/Sub client when a broker is configured
+// (PUBSUB_EMULATOR_HOST locally, PUBSUB_PROJECT_ID in a real environment), else
+// the dev log bus so the service still runs standalone. A client that fails to
+// initialise degrades to the dev bus rather than blocking startup: publishing is
+// not on the read path.
+func selectPublisher(ctx context.Context, log *slog.Logger) pubsub.Publisher {
+	if os.Getenv("PUBSUB_EMULATOR_HOST") == "" && os.Getenv("PUBSUB_PROJECT_ID") == "" {
+		return newDevBus(log)
+	}
+
+	projectID := envOr("PUBSUB_PROJECT_ID", defaultPubSubProject)
+	client, err := gcp.New(ctx, projectID)
+	if err != nil {
+		log.Error("pubsub client init failed; falling back to dev bus", slog.Any("error", err))
+		return newDevBus(log)
+	}
+	log.Info("publishing events to Cloud Pub/Sub", slog.String("project", projectID))
+	return client
+}
+
 // devBus is a dev-only pubsub.Publisher that logs events instead of transporting
-// them. It is replaced by the Cloud Pub/Sub adapter in shared environments.
+// them. It is the fallback when no broker is configured.
 type devBus struct{ log *slog.Logger }
 
 func newDevBus(log *slog.Logger) *devBus { return &devBus{log: log} }

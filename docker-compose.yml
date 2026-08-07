@@ -19,6 +19,9 @@ x-go-env: &go-env
   ADDR: ":8080"
   DATABASE_URL: "postgres://app:${APP_DB_PASSWORD}@postgres:5432/garcia_lorca?sslmode=disable"
   PUBSUB_EMULATOR_HOST: "pubsub:8085"
+  # Must match the project the emulator starts with, or publishes land in a
+  # different (invisible) project.
+  PUBSUB_PROJECT_ID: "garcia-lorca-local"
   GOFLAGS: "-buildvcs=false"
 
 x-go-service: &go-service
@@ -140,6 +143,9 @@ services:
         condition: service_completed_successfully
       config:
         condition: service_started
+      # student-events publishing needs the emulator reachable.
+      pubsub:
+        condition: service_started
 
   config:
     <<: *go-service
@@ -164,6 +170,9 @@ services:
       config:
         condition: service_started
       students:
+        condition: service_started
+      # payment-events publishing needs the emulator reachable.
+      pubsub:
         condition: service_started
 
   grades:
@@ -205,6 +214,9 @@ services:
       config:
         condition: service_started
       students:
+        condition: service_started
+      # attendance-events publishing needs the emulator reachable.
+      pubsub:
         condition: service_started
 
   comms:
