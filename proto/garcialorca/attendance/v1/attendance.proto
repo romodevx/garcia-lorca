@@ -1,5 +1,18 @@
-// Attendance (M06) — QR check-in; absence events feed comms.
-// FASE 0 contract-first stub.
+// Attendance (M06) — daily pass list; absence events feed comms.
+//
+// Phase 8 (daily pass list): attendance is per (enrollment, date). The model is
+// DEFAULT-PRESENT: the server stores only the exceptions (absent/late/excused),
+// so a roster row with no stored mark reads back as "present". Saving a day is a
+// reconcile — the client sends the full set of exceptions for the group·day and
+// the server makes the stored state match it (marks removed from the set become
+// present again).
+//
+// Dates are ISO "YYYY-MM-DD" strings (no time-of-day: attendance is per school
+// day). Cross-service references (group_id, enrollment_id, student_id) are plain
+// UUIDs validated by RPC, NOT foreign keys.
+//
+// QR check-in is DEFERRED to a later phase: this contract has no marked_by /
+// method field, and every mark is a manual teacher/staff action.
 syntax = "proto3";
 
 package garcialorca.attendance.v1;
@@ -9,8 +22,26 @@ service AttendanceService {
   // Health is the liveness/ping probe present on every service.
   rpc Health(HealthRequest) returns (HealthResponse);
 
-  // TODO(M06): MarkAttendance (QR), GetAttendance, ListByStudent.
+  // GetDailyRoster returns one row per active enrollment in the group for the
+  // given date, each carrying the effective status for that day. Rows with no
+  // stored mark come back as "present" (default-present model). Student names
+  // are NOT returned — attendance stays free of student PII; the web resolves
+  // names from the students list.
+  rpc GetDailyRoster(GetDailyRosterRequest) returns (GetDailyRosterResponse);
+
+  // SaveDailyAttendance reconciles a whole group·day in one call. `marks` carry
+  // ONLY the non-present exceptions; every enrollment in the group that is
+  // absent from `marks` is reset to present (its stored mark, if any, is
+  // dropped). Saving the same day again is idempotent.
+  rpc SaveDailyAttendance(SaveDailyAttendanceRequest) returns (SaveDailyAttendanceResponse);
+
+  // ListAttendance lists a single enrollment's stored attendance records within
+  // an inclusive date range. Only exceptions are stored, so present days are
+  // absent from the result by construction.
+  rpc ListAttendance(ListAttendanceRequest) returns (ListAttendanceResponse);
 }
+
+// --- Health ---------------------------------------------------------------
 
 message HealthRequest {}
 
@@ -18,26 +49,98 @@ message HealthResponse {
   string status = 1;
 }
 
-// AttendanceRecord references a student. TODO(M06): date, status, marked_by.
+// --- Core types -----------------------------------------------------------
+
+// AttendanceRecord is one stored attendance exception for an enrollment on a
+// date. `date` is ISO "YYYY-MM-DD"; `status` is one of absent|late|excused
+// (present is never stored — see the default-present model). `note` is an
+// optional free-text justification and may be empty.
 message AttendanceRecord {
   string id = 1;
-  string student_id = 2;
+  string enrollment_id = 2;
+  string date = 3;
+  string status = 4;
+  string note = 5;
 }
 
-// --- Domain events (published) ---
+// RosterRow is one student's slot in a day's pass list: the enrollment, the
+// student it belongs to, and the effective status for that day. `status` is one
+// of present|absent|late|excused and defaults to "present" when no mark exists.
+message RosterRow {
+  string enrollment_id = 1;
+  string student_id = 2;
+  string status = 3;
+}
 
-// AttendanceMarked fires when a student is checked in.
-// TODO(M06): marked_at, method (qr/manual).
+// Mark is one non-present exception submitted for a group·day. `status` is one
+// of absent|late|excused ("present" is rejected — omit the enrollment instead).
+// `note` is an optional free-text justification.
+message Mark {
+  string enrollment_id = 1;
+  string status = 2;
+  string note = 3;
+}
+
+// --- RPC messages ---------------------------------------------------------
+
+// GetDailyRosterRequest asks for a group's pass list on one date
+// (ISO "YYYY-MM-DD").
+message GetDailyRosterRequest {
+  string group_id = 1;
+  string date = 2;
+}
+
+message GetDailyRosterResponse {
+  repeated RosterRow rows = 1;
+}
+
+// SaveDailyAttendanceRequest reconciles one group·day. `marks` is the COMPLETE
+// set of exceptions for that day; anything not listed is present.
+message SaveDailyAttendanceRequest {
+  string group_id = 1;
+  string date = 2;
+  repeated Mark marks = 3;
+}
+
+// SaveDailyAttendanceResponse reports the state after reconciling:
+// `absent_count` is how many of the stored marks are status "absent";
+// `marked_count` is how many exceptions are stored for the day in total.
+message SaveDailyAttendanceResponse {
+  int32 absent_count = 1;
+  int32 marked_count = 2;
+}
+
+// ListAttendanceRequest bounds the query by enrollment and an inclusive date
+// range (both ISO "YYYY-MM-DD").
+message ListAttendanceRequest {
+  string enrollment_id = 1;
+  string from_date = 2;
+  string to_date = 3;
+}
+
+message ListAttendanceResponse {
+  repeated AttendanceRecord records = 1;
+}
+
+// --- Domain events (published) --------------------------------------------
+
+// AttendanceMarked fires when an attendance exception is stored for a student
+// on a date. `status` is one of absent|late|excused.
 message AttendanceMarked {
   string record_id = 1;
-  string student_id = 2;
-  string tenant_id = 3;
+  string enrollment_id = 2;
+  string student_id = 3;
+  string tenant_id = 4;
+  string date = 5;
+  string status = 6;
 }
 
-// AbsenceRecorded fires when a student is recorded absent (feeds comms M10).
-// TODO(M06): date, reason.
+// AbsenceRecorded fires when a student is recorded absent on a date (feeds
+// comms M10). It is the absent-only companion of AttendanceMarked.
 message AbsenceRecorded {
   string record_id = 1;
-  string student_id = 2;
-  string tenant_id = 3;
+  string enrollment_id = 2;
+  string student_id = 3;
+  string tenant_id = 4;
+  string date = 5;
 }
