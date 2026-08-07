@@ -255,12 +255,13 @@ func TestAdminSetRolePermissions(t *testing.T) {
 	}
 }
 
-// The tenant-wide sensitive reads (finance:read, attendance:read) return ANY
-// student's data — there is no per-object scoping yet, so only the single owner
-// role may hold them. The admin API must refuse to build the vulnerable config.
+// The tenant-wide sensitive reads (finance:read, attendance:read, comms:read)
+// return ANY student's data — there is no per-object scoping yet, so only the
+// single owner role may hold them. The admin API must refuse to build the
+// vulnerable config.
 
 func TestAdminSetRolePermissionsRejectsOwnerOnlyPermissionOnNonOwnerRole(t *testing.T) {
-	for _, restricted := range []string{"finance:read", "attendance:read"} {
+	for _, restricted := range []string{"finance:read", "attendance:read", "comms:read"} {
 		roles := &fakeRoles{byID: map[string]domain.Role{
 			"r1": mustRole(t, "r1", "Docente", []string{"students:read"}),
 		}}
@@ -296,12 +297,12 @@ func TestAdminSetRolePermissionsAllowsOwnerOnlyPermissionOnOwnerRole(t *testing.
 	}}
 	svc := newAdmin(&fakeUsers{}, roles, func() string { return "x" })
 
-	perms := []string{"finance:read", "attendance:read", "students:read"}
+	perms := []string{"finance:read", "attendance:read", "comms:read", "students:read"}
 	if err := svc.SetRolePermissions(context.Background(), "owner-role", perms); err != nil {
 		t.Fatalf("SetRolePermissions on the owner role: %v", err)
 	}
-	if got := roles.permsSet["owner-role"]; len(got) != 3 {
-		t.Errorf("permissions for owner-role = %v, want 3 entries", got)
+	if got := roles.permsSet["owner-role"]; len(got) != 4 {
+		t.Errorf("permissions for owner-role = %v, want 4 entries", got)
 	}
 }
 
@@ -319,7 +320,7 @@ func TestAdminSetRolePermissionsUnknownRoleWithOwnerOnlyPermissionFailsClosed(t 
 }
 
 func TestAdminCreateRoleRejectsOwnerOnlyPermissionOnNonOwnerRole(t *testing.T) {
-	for _, restricted := range []string{"finance:read", "attendance:read"} {
+	for _, restricted := range []string{"finance:read", "attendance:read", "comms:read"} {
 		roles := &fakeRoles{}
 		svc := newAdmin(&fakeUsers{}, roles, func() string { return "role-new" })
 
@@ -337,11 +338,11 @@ func TestAdminCreateRoleAllowsOwnerOnlyPermissionOnOwnerRole(t *testing.T) {
 	roles := &fakeRoles{}
 	svc := newAdmin(&fakeUsers{}, roles, func() string { return "role-new" })
 
-	role, err := svc.CreateRole(context.Background(), "owner", []string{"finance:read", "attendance:read"})
+	role, err := svc.CreateRole(context.Background(), "owner", []string{"finance:read", "attendance:read", "comms:read"})
 	if err != nil {
 		t.Fatalf("CreateRole on the owner role: %v", err)
 	}
-	if len(role.Permissions()) != 2 || len(roles.created) != 1 {
-		t.Errorf("owner role = %d perms / %d persisted, want 2 / 1", len(role.Permissions()), len(roles.created))
+	if len(role.Permissions()) != 3 || len(roles.created) != 1 {
+		t.Errorf("owner role = %d perms / %d persisted, want 3 / 1", len(role.Permissions()), len(roles.created))
 	}
 }

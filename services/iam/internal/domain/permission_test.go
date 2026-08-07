@@ -105,9 +105,11 @@ func TestIsOwnerOnly(t *testing.T) {
 	}{
 		{"finance:read", true},
 		{"attendance:read", true},
+		{"comms:read", true},
 		{" Finance:Read ", true}, // normalized like NewPermission
 		{"finance:write", false},
 		{"attendance:write", false},
+		{"comms:write", false},
 		{"students:read", false},
 		{"", false},
 	}

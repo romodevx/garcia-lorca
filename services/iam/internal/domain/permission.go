@@ -22,16 +22,18 @@ func IsValidPermission(s string) bool {
 // ownerOnlyPermissions are the tenant-wide sensitive reads: they resolve data
 // for ANY student in the tenant, with no per-object scoping (a teacher holding
 // attendance:read reads every group; a holder of finance:read reads every
-// family's ledger). They are safe only on the single owner role, so the admin
-// surface refuses to grant them to any other role — see the security
+// family's ledger; a holder of comms:read reads every student's notifications,
+// payment amounts included). They are safe only on the single owner role, so the
+// admin surface refuses to grant them to any other role — see the security
 // carry-forward in deploy/README.
 //
 // TEMPORARY: lift this once per-object scoping (guardian sees only their child,
-// teacher only their assigned groups — Phase 9) lands and the reads are filtered
+// teacher only their assigned groups — Phase 9b) lands and the reads are filtered
 // by the caller's scope rather than by the tenant alone.
 var ownerOnlyPermissions = map[string]struct{}{
 	"finance:read":    {},
 	"attendance:read": {},
+	"comms:read":      {},
 }
 
 // IsOwnerOnly reports whether raw is a tenant-wide sensitive read that only the
