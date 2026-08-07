@@ -185,8 +185,24 @@ services:
 
   attendance:
     <<: *go-service
-    environment: { <<: *go-env, SERVICE: attendance }
+    environment:
+      <<: *go-env
+      SERVICE: attendance
+      # The roster comes from students (a group's enrollments) and the group
+      # reference is validated against config — both by RPC, server-to-server
+      # and network-private.
+      CONFIG_BASE_URL: "http://config:8080"
+      STUDENTS_BASE_URL: "http://students:8080"
     ports: ["8095:8080"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      config:
+        condition: service_started
+      students:
+        condition: service_started
 
   comms:
     <<: *go-service
