@@ -222,6 +222,20 @@ in a shared, multi-role, or family-facing environment.
     swap in the Cloud Pub/Sub adapter (with delivery guarantees) before that dependency is
     live. The event payloads carry ids only (no student PII), which is correct for a
     guardian-facing notification pipeline — keep it that way.
+20. **`ListAttendance` has no per-object authz.** `GET /api/v1/attendance?enrollmentId=…` goes
+    straight to the repo with only tenant RLS ("same tenant", not "yours"). Fine for the single
+    owner (0008 grants `attendance:read` to owner alone); the instant a teacher role or the
+    Phase 9 family portal gets `attendance:read` it's a horizontal-authz hole — any holder reads
+    any enrollment's absence history. Scope the read to the caller's own students/groups before
+    granting `attendance:read` to a non-owner role (same shape as finance item 14).
+21. **`note` is unbounded free text and likely sensitive PII.** The teacher's justification
+    field (`attendance.note`) is plain `text` (only the 1 MiB body cap bounds it) and is returned
+    in full by `ListAttendance` — so it inherits item 20. It routinely holds health data
+    ("cita médica"). Cap its length (service + DB CHECK) and treat it as sensitive when roles
+    expand.
+22. **Attendance writes are not rate-limited** (only `/auth/login` is). One `POST /api/v1/attendance`
+    reconciles a group's whole day. Authenticated + reconcile-scoped so low risk, but add a
+    limiter before a shared, multi-writer environment.
 
 ## Common commands
 
