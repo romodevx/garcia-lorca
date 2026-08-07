@@ -42,9 +42,10 @@ service FinanceService {
   rpc CreateCharge(CreateChargeRequest) returns (CreateChargeResponse);
 
   // GenerateCharges issues one charge per ACTIVE enrollment in the cycle,
-  // optionally narrowed to a single group. Idempotent: enrollments that already
-  // have a charge for the same (concept, cycle, due_date) are skipped, so the
-  // call can be safely retried.
+  // optionally narrowed to a single group. Idempotent: a student who already
+  // has a charge for the same (concept, cycle) is skipped, so the call can be
+  // safely retried. (Re-issuing a recurring concept within a cycle is a later
+  // phase — see the monthly-recurrence follow-up.)
   rpc GenerateCharges(GenerateChargesRequest) returns (GenerateChargesResponse);
 
   // ListCharges lists charges, optionally filtered by student and/or cycle
