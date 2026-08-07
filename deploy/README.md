@@ -139,6 +139,18 @@ with `HttpOnly; Secure; SameSite=Strict` (Phase B). This constrains deployment:
 From the Phase-1 hardening security gate (2026-08-03). None block local/MVP use; all
 must be resolved before turning a flag ON in a shared environment.
 
+> **Update 2026-08-07 (hardening batch).** Several items are now closed or mitigated:
+> **CI is live** (`.github/workflows/ci.yml`) — it runs `buf lint`/`buf breaking`, per-module
+> `go vet` + `go test -race` + integration + **`govulncheck`** + `go mod verify`, and the web
+> `test`/`lint`/`build` + **source-map gate** on every PR, so items 1 and the build-hardening
+> gate are now enforced by pipeline (still confirm the toolchain/`x/text` bumps land green).
+> **Payment idempotency** (finance I1) is DONE (`idempotency_key` + partial-unique + replay).
+> **Items 14 & 20 (per-object authz on finance/attendance reads)** are now *mitigated, not yet
+> fully closed*: a new iam **grant-guard** blocks assigning `finance:read`/`attendance:read` to
+> any non-owner role, and the list reads are **bounded** (`ListCharges` requires a student/cycle
+> filter; all list reads cap at 500 rows, ordered). True per-student scoping still lands with the
+> Phase 9 guardian/teacher identity model before these reads go to a non-owner/family role.
+
 1. **`govulncheck` clean in CI.** As of the gate, code-reachable vulns come from the
    Go toolchain and one dependency (pre-existing, not first-party): bump the toolchain
    to **Go 1.25.12** and **`golang.org/x/text` → v0.39.0** (fixes GO-2026-5970 and the
