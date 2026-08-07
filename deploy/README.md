@@ -249,6 +249,36 @@ in a shared, multi-role, or family-facing environment.
     reconciles a group's whole day. Authenticated + reconcile-scoped so low risk, but add a
     limiter before a shared, multi-writer environment.
 
+### Added by Phase 9a (`comms` event backbone) — before enabling `module_comms` / real events in a shared env
+23. **Real FCM via Secret Manager.** Push uses a `LogSender` stub; the real Firebase Cloud
+    Messaging sender (service-account credentials) is injected by env/Secret Manager behind an
+    `FCM_ENABLED` flag. No Firebase credential is committed. (See ADR 0003.)
+24. **Cloud Pub/Sub subscription hygiene.** Delivery is at-least-once; the comms consumer is
+    idempotent (`processed_events`), but the Cloud Pub/Sub subscriptions still need a
+    **dead-letter topic + retry/backoff policy** (not needed on the local emulator) so a
+    poison message can't loop forever. Provision in Terraform with the topics.
+25. **Internal service + single-tenant.** `comms` (like the others) has no own authn → gateway is
+    the boundary → `ingress=internal`, don't publish its host port. `COMMS_TENANT_ID` is a
+    process-wide constant → gateway must forward the principal's tenant before multi-tenant use.
+26. **`comms:read` is tenant-wide** — `ListNotifications(studentId)` returns any student's
+    notifications. Owner-only today (0009); **added to the iam `IsOwnerOnly` guard in 9a** so it
+    can't be granted to a non-owner role yet. Still scope reads to the caller's own students
+    before granting it to a guardian/family or teacher role (Phase 9b).
+27. **Device owner must come from the authenticated principal (B2/B3).** `RegisterDevice` takes a
+    client-supplied `userId` and the upsert reassigns `user_id` on an `(tenant,fcm_token)` conflict.
+    Harmless with tenant-wide fanout, but once targeting is per-guardian this lets anyone with a
+    token redirect a device to another user (cross-family push). Derive `userId` from the principal
+    and require the conflicting row's owner to match, before per-guardian targeting.
+28. **Real FCM requires per-student targeting first (B4).** `DevicesForTenant` fans every
+    notification to every device in the tenant. Inert with the `LogSender`; enabling the real FCM
+    sender (`FCM_ENABLED`) MUST be gated on per-student/guardian targeting existing, not merely
+    sequenced after it — else every family gets every family's notices.
+29. **No silent dev-bus fallback in shared envs (B5/I3).** `selectPublisher` falls back to the log
+    bus if the broker fails to init; with a broker CONFIGURED (`PUBSUB_PROJECT_ID` set) a failure
+    must fail startup (let Cloud Run restart), not boot healthy and silently drop every event.
+30. **Rate-limit comms writes (B6).** `RegisterDevice` is an authenticated write called on every
+    app launch; add a limiter before a shared, multi-client environment (group with item 22).
+
 ## Common commands
 
 ```bash

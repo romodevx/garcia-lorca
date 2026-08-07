@@ -1,17 +1,48 @@
-// Comms / Agenda / Push (M10) — consumes events, pushes FCM + agenda.
-// Primarily an event consumer; minimal published surface.
-// FASE 0 contract-first stub.
+// Comms / Push (M10) — event consumer that fans domain events out to families.
+//
+// Comms PUBLISHES NOTHING. It subscribes over Pub/Sub to the domain events
+// owned by other services — finance (PaymentRegistered, DebtOverdue),
+// attendance (AbsenceRecorded, AttendanceMarked) and students
+// (StudentEnrolled, AdmissionStatusChanged) — and those services' proto
+// messages ARE the wire contract; comms never redefines them here.
+//
+// Its own API surface is therefore deliberately small: device registration
+// (an FCM token per user) plus reading the notifications it has already
+// materialised for a student. Sending is a side effect of consuming an event,
+// never an RPC.
+//
+// Phase 9a scope: RegisterDevice + ListNotifications + MarkNotificationRead.
+// The family agenda (AgendaEntry, ListAgenda) lands in a later phase — the
+// FASE 0 `AgendaEntry` stub is dropped here rather than half-modelled.
 syntax = "proto3";
 
 package garcialorca.comms.v1;
+
+import "google/protobuf/timestamp.proto";
 
 // CommsService is the communications API surface.
 service CommsService {
   // Health is the liveness/ping probe present on every service.
   rpc Health(HealthRequest) returns (HealthResponse);
 
-  // TODO(M10): SendNotification, ListAgenda, RegisterDevice (FCM token).
+  // RegisterDevice registers (or refreshes) the FCM token a user's device is
+  // reachable at. Re-registering the same token updates the existing device
+  // rather than duplicating it (upsert), so a client may call this on every
+  // launch. An unknown platform is InvalidArgument.
+  rpc RegisterDevice(RegisterDeviceRequest) returns (RegisterDeviceResponse);
+
+  // ListNotifications returns the notifications materialised for one student,
+  // newest first. With unread_only=true only notifications whose read_at is
+  // unset are returned.
+  rpc ListNotifications(ListNotificationsRequest) returns (ListNotificationsResponse);
+
+  // MarkNotificationRead stamps a notification's read_at and returns the
+  // updated notification. Marking an already-read notification is idempotent
+  // (read_at keeps its original value).
+  rpc MarkNotificationRead(MarkNotificationReadRequest) returns (MarkNotificationReadResponse);
 }
+
+// --- Health ---------------------------------------------------------------
 
 message HealthRequest {}
 
@@ -19,15 +50,62 @@ message HealthResponse {
   string status = 1;
 }
 
-// Notification is an outbound push/agenda item. TODO(M10): channel, payload, sent_at.
+// --- Core types -----------------------------------------------------------
+
+// Notification is one message materialised for a student from a consumed
+// domain event. `type` is the stable client-facing KIND — one of
+// "absence"|"attendance"|"payment" — which a client switches on for its icon;
+// it is deliberately NOT the producing event's name, so an upstream contract
+// change never reaches the client. `title` / `body` are the rendered push
+// payload. `read_at` unset means the notification is still unread.
 message Notification {
   string id = 1;
-  string recipient_id = 2;
+  string tenant_id = 2;
+  string student_id = 3;
+  string type = 4;
+  string title = 5;
+  string body = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp read_at = 8;
 }
 
-// AgendaEntry is a calendar/agenda item surfaced to families.
-// TODO(M10): title, date, audience.
-message AgendaEntry {
+// Device is one push target for a user: the FCM token plus the platform it
+// came from. `platform` is one of ""|ios|android|web (empty = unknown client).
+message Device {
   string id = 1;
   string tenant_id = 2;
+  string user_id = 3;
+  string fcm_token = 4;
+  string platform = 5;
+}
+
+// --- RPC messages ---------------------------------------------------------
+
+// RegisterDeviceRequest carries the token to register. `platform` is one of
+// ""|ios|android|web; anything else is InvalidArgument.
+message RegisterDeviceRequest {
+  string user_id = 1;
+  string fcm_token = 2;
+  string platform = 3;
+}
+
+message RegisterDeviceResponse {
+  Device device = 1;
+}
+
+message ListNotificationsRequest {
+  string student_id = 1;
+  bool unread_only = 2;  // true = only notifications with read_at unset
+}
+
+message ListNotificationsResponse {
+  repeated Notification notifications = 1;
+}
+
+message MarkNotificationReadRequest {
+  string id = 1;
+}
+
+message MarkNotificationReadResponse {
+  Notification notification = 1;
 }

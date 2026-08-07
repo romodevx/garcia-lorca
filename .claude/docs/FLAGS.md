@@ -26,7 +26,7 @@ are UX-only via a single `useFlag` hook / `FlagsProvider`).
 | `module_grades` | M07 Grades/Boletas | grades | **OFF** | Grade capture & boletas (Strategy per SEP level). |
 | `module_scholarships` | M08 Scholarships | scholarships | **OFF** | Scholarship application/cancellation. |
 | `module_docs` | M09 Docs/Trámites | docs | **OFF** | Document & procedure requests. |
-| `module_comms` | M10 Comms/Agenda/Push | comms | **OFF** | Communications, agenda & FCM push (event consumer). |
+| `module_comms` | M10 Comms/Agenda/Push | comms | **OFF** | Communications & push. **Backed by a real thin `comms` service since Phase 9a (event backbone): the first Pub/Sub CONSUMER — subscribes to `AbsenceRecorded`/`PaymentRegistered`/student events, persists a Notification idempotently (`processed_events` ledger), registers FCM device tokens, pushes via a log stub (real FCM behind env). Producers now publish for real (emulator locally).** Gateway requires `comms:read`/`comms:write`. Agenda + personalized messages = Phase 9d; guardian targeting + mobile = 9b/9c. |
 | `module_billing` | M11 Billing CFDI 4.0 + IEDU | billing | **OFF** | **Out of MVP (post-MVP, future-ready).** Flag stays **registered, default OFF** as a reserved boundary; **no implementation, no PAC integration this cycle.** Proto contract kept as a frozen stub. |
 | `module_uniforms` | M12 Uniforms store | uniforms | **OFF** | Uniform reservation store (State pattern). |
 | `module_reports` | M13 Reports/Dashboard | gateway + read models | **OFF** | Advanced cross-module dashboard read-models. |
