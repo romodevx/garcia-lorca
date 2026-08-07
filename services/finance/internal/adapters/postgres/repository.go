@@ -1,0 +1,520 @@
+package postgres
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+
+	"github.com/garcia-lorca/pkg/authctx"
+	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/services/finance/internal/domain"
+	"github.com/garcia-lorca/services/finance/internal/ports"
+)
+
+// Compile-time proof the adapter satisfies the port.
+var _ ports.FinanceRepository = (*Repository)(nil)
+
+const (
+	uniqueViolation = "23505"
+	// dateLayout renders a Go time as the DATE literal the `due_date` column is
+	// compared against, so only the date part of the caller's clock matters.
+	dateLayout = "2006-01-02"
+)
+
+// Repository is the GORM-backed finance ledger repository. Every operation runs
+// in a transaction bound to a tenant so Row Level Security applies (mirrors
+// iam/students/grades, ADR 0001). In this phase the tenant is fixed at
+// construction (single-tenant).
+type Repository struct {
+	db       *gorm.DB
+	tenantID string
+}
+
+// NewRepository builds the repository scoped to tenantID.
+func NewRepository(db *gorm.DB, tenantID string) *Repository {
+	return &Repository{db: db, tenantID: tenantID}
+}
+
+// withTenant runs fn inside a transaction that has bound app.current_tenant,
+// delegating to the shared pkg/authctx RLS primitive so tenant binding lives in
+// exactly one place across every service.
+func (r *Repository) withTenant(ctx context.Context, fn func(tx *gorm.DB) error) error {
+	return authctx.WithTenantContext(ctx, gormTxRunner{r.db}, r.tenantID, func(tx authctx.Tx) error {
+		return fn(txGorm(tx))
+	})
+}
+
+// --- catalog ----------------------------------------------------------------
+
+// CreateConcept stores a new catalog entry. A duplicate (tenant, name) is
+// KindConflict.
+func (r *Repository) CreateConcept(ctx context.Context, c domain.ChargeConcept) (domain.ChargeConcept, error) {
+	model := fromDomainConcept(c)
+	var out domain.ChargeConcept
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := tx.Create(&model).Error; err != nil {
+			if isUniqueViolation(err) {
+				return glerrors.Wrap(glerrors.KindConflict, "charge concept already exists", err)
+			}
+			return glerrors.Wrap(glerrors.KindInternal, "creating charge concept", err)
+		}
+		stored, err := toDomainConcept(model)
+		if err != nil {
+			return err
+		}
+		out = stored
+		return nil
+	})
+	if err != nil {
+		return domain.ChargeConcept{}, err
+	}
+	return out, nil
+}
+
+// GetConcept loads one catalog entry; a missing id yields glerrors.ErrNotFound.
+func (r *Repository) GetConcept(ctx context.Context, id string) (domain.ChargeConcept, error) {
+	var out domain.ChargeConcept
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var m chargeConceptModel
+		if err := tx.Where("id = ?", id).First(&m).Error; err != nil {
+			return translateFindErr(err)
+		}
+		stored, err := toDomainConcept(m)
+		if err != nil {
+			return err
+		}
+		out = stored
+		return nil
+	})
+	if err != nil {
+		return domain.ChargeConcept{}, err
+	}
+	return out, nil
+}
+
+// ListConcepts returns the catalog ordered by name. Deactivated entries are
+// hidden unless includeInactive is set — they are never deleted, because issued
+// charges keep pointing at them.
+func (r *Repository) ListConcepts(ctx context.Context, includeInactive bool) ([]domain.ChargeConcept, error) {
+	var out []domain.ChargeConcept
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		q := tx.Model(&chargeConceptModel{}).Order("name ASC")
+		if !includeInactive {
+			q = q.Where("active = ?", true)
+		}
+		var rows []chargeConceptModel
+		if err := q.Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing charge concepts", err)
+		}
+		for _, m := range rows {
+			d, err := toDomainConcept(m)
+			if err != nil {
+				return err
+			}
+			out = append(out, d)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// UpdateConcept persists a re-validated copy of an existing entry and returns
+// the stored row. Renaming onto another concept's name is KindConflict; an
+// unknown id is glerrors.ErrNotFound.
+func (r *Repository) UpdateConcept(ctx context.Context, c domain.ChargeConcept) (domain.ChargeConcept, error) {
+	var out domain.ChargeConcept
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Model(&chargeConceptModel{}).Where("id = ?", c.ID()).Updates(map[string]any{
+			"name":                 c.Name(),
+			"default_amount_cents": c.DefaultAmount().Int64(),
+			"recurrence":           c.Recurrence(),
+			"active":               c.Active(),
+			"updated_at":           gorm.Expr("now()"),
+		})
+		if res.Error != nil {
+			if isUniqueViolation(res.Error) {
+				return glerrors.Wrap(glerrors.KindConflict, "charge concept already exists", res.Error)
+			}
+			return glerrors.Wrap(glerrors.KindInternal, "updating charge concept", res.Error)
+		}
+
+		var stored chargeConceptModel
+		if err := tx.Where("id = ?", c.ID()).First(&stored).Error; err != nil {
+			return translateFindErr(err)
+		}
+		d, err := toDomainConcept(stored)
+		if err != nil {
+			return err
+		}
+		out = d
+		return nil
+	})
+	if err != nil {
+		return domain.ChargeConcept{}, err
+	}
+	return out, nil
+}
+
+// --- charges ----------------------------------------------------------------
+
+// CreateCharge issues one charge. A second charge for the same
+// (student, cycle, concept) is KindConflict — a student owes a given concept
+// once per cycle.
+func (r *Repository) CreateCharge(ctx context.Context, c domain.Charge) (domain.Charge, error) {
+	model := fromDomainCharge(c)
+	var out domain.Charge
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := tx.Create(&model).Error; err != nil {
+			if isUniqueViolation(err) {
+				return glerrors.Wrap(glerrors.KindConflict, "student already has this charge", err)
+			}
+			return glerrors.Wrap(glerrors.KindInternal, "creating charge", err)
+		}
+		// A freshly issued charge has collected nothing yet.
+		stored, err := toDomainCharge(model, 0)
+		if err != nil {
+			return err
+		}
+		out = stored
+		return nil
+	})
+	if err != nil {
+		return domain.Charge{}, err
+	}
+	return out, nil
+}
+
+// CreateChargesBulk issues many charges in ONE statement, skipping the rows
+// whose (student, cycle, concept) key already exists instead of failing the
+// batch. Postgres reports only the rows actually inserted, so re-running a
+// generation is idempotent and the caller can infer the skipped count from
+// len(cs) - created.
+func (r *Repository) CreateChargesBulk(ctx context.Context, cs []domain.Charge) (int, error) {
+	if len(cs) == 0 {
+		return 0, nil
+	}
+	models := make([]chargeModel, 0, len(cs))
+	for _, c := range cs {
+		models = append(models, fromDomainCharge(c))
+	}
+
+	var created int
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&models)
+		if res.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "bulk creating charges", res.Error)
+		}
+		created = int(res.RowsAffected)
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return created, nil
+}
+
+// GetCharge loads one charge together with its collected total; a missing id
+// yields glerrors.ErrNotFound.
+func (r *Repository) GetCharge(ctx context.Context, id string) (ports.ChargeWithPaid, error) {
+	var out ports.ChargeWithPaid
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var m chargeModel
+		if err := tx.Where("id = ?", id).First(&m).Error; err != nil {
+			return translateFindErr(err)
+		}
+		paid, err := paidFor(tx, id)
+		if err != nil {
+			return err
+		}
+		charge, err := toDomainCharge(m, paid)
+		if err != nil {
+			return err
+		}
+		out = ports.ChargeWithPaid{Charge: charge, PaidCents: paid}
+		return nil
+	})
+	if err != nil {
+		return ports.ChargeWithPaid{}, err
+	}
+	return out, nil
+}
+
+// ListCharges returns charges with their collected totals. An empty studentID or
+// cycleID skips that filter. The payment totals for the whole page are resolved
+// in ONE grouped query rather than a lookup per charge (no N+1).
+func (r *Repository) ListCharges(ctx context.Context, studentID, cycleID string) ([]ports.ChargeWithPaid, error) {
+	var out []ports.ChargeWithPaid
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		q := tx.Model(&chargeModel{}).Order("due_date ASC, id ASC")
+		if studentID != "" {
+			q = q.Where("student_id = ?", studentID)
+		}
+		if cycleID != "" {
+			q = q.Where("cycle_id = ?", cycleID)
+		}
+		var rows []chargeModel
+		if err := q.Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing charges", err)
+		}
+		assembled, err := withPaidTotals(tx, rows)
+		if err != nil {
+			return err
+		}
+		out = assembled
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SaveCharge persists the mutable part of an existing charge (its discount and
+// derived status), as left by ApplyDiscount or CancelCharge, and returns the
+// stored row. An unknown id is glerrors.ErrNotFound.
+func (r *Repository) SaveCharge(ctx context.Context, c domain.Charge) (domain.Charge, error) {
+	var out domain.Charge
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Model(&chargeModel{}).Where("id = ?", c.ID()).Updates(map[string]any{
+			"discount_cents": c.Discount().Int64(),
+			"status":         c.Status(),
+			"updated_at":     gorm.Expr("now()"),
+		})
+		if res.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "saving charge", res.Error)
+		}
+
+		var stored chargeModel
+		if err := tx.Where("id = ?", c.ID()).First(&stored).Error; err != nil {
+			return translateFindErr(err)
+		}
+		// Re-derive from the row's own collected total so the returned entity is
+		// the canonical stored state, not the caller's copy.
+		paid, err := paidFor(tx, c.ID())
+		if err != nil {
+			return err
+		}
+		charge, err := toDomainCharge(stored, paid)
+		if err != nil {
+			return err
+		}
+		out = charge
+		return nil
+	})
+	if err != nil {
+		return domain.Charge{}, err
+	}
+	return out, nil
+}
+
+// --- payments ---------------------------------------------------------------
+
+// RegisterPayment posts a payment against a charge atomically. It locks the
+// charge row FOR UPDATE, sums what has already been collected, and hands the
+// charge plus the prospective new total to derive, which owns the decision: an
+// error from derive aborts the transaction, so a rejected payment (cancelled
+// charge, overpay) writes NOTHING. The row lock is what makes those rules
+// race-free — two concurrent payments serialize on it instead of both reading a
+// stale total. On success the payment row and the charge's new status are
+// written in the same transaction. A missing charge yields glerrors.ErrNotFound.
+func (r *Repository) RegisterPayment(
+	ctx context.Context,
+	p domain.Payment,
+	derive func(charge domain.Charge, newPaidCents int64) (string, error),
+) (domain.Payment, ports.ChargeWithPaid, error) {
+	var (
+		storedPayment domain.Payment
+		result        ports.ChargeWithPaid
+	)
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var row chargeModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", p.ChargeID()).First(&row).Error; err != nil {
+			return translateFindErr(err)
+		}
+
+		currentPaid, err := paidFor(tx, p.ChargeID())
+		if err != nil {
+			return err
+		}
+		charge, err := toDomainCharge(row, currentPaid)
+		if err != nil {
+			return err
+		}
+
+		newPaid := currentPaid + p.Amount().Int64()
+		status, err := derive(charge, newPaid)
+		if err != nil {
+			return err
+		}
+
+		payment := fromDomainPayment(p)
+		if err := tx.Create(&payment).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "storing payment", err)
+		}
+		if err := tx.Model(&chargeModel{}).Where("id = ?", p.ChargeID()).Updates(map[string]any{
+			"status":     status,
+			"updated_at": gorm.Expr("now()"),
+		}).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "updating charge status", err)
+		}
+
+		d, err := toDomainPayment(payment)
+		if err != nil {
+			return err
+		}
+		storedPayment = d
+		// derive has already vetoed cancelled and overpaying charges, so
+		// re-deriving from the new total reproduces exactly the status written.
+		result = ports.ChargeWithPaid{Charge: charge.WithStatus(newPaid), PaidCents: newPaid}
+		return nil
+	})
+	if err != nil {
+		return domain.Payment{}, ports.ChargeWithPaid{}, err
+	}
+	return storedPayment, result, nil
+}
+
+// ListPayments returns every payment posted against the student's charges, for
+// the account statement. The join is tenant-bound on both sides (RLS applies to
+// charges and payments alike).
+func (r *Repository) ListPayments(ctx context.Context, studentID string) ([]domain.Payment, error) {
+	var out []domain.Payment
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var rows []paymentModel
+		if err := tx.Model(&paymentModel{}).
+			Select("payments.*").
+			Joins("JOIN charges ON charges.id = payments.charge_id").
+			Where("charges.student_id = ?", studentID).
+			Order("payments.paid_at ASC").
+			Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing payments", err)
+		}
+		for _, m := range rows {
+			d, err := toDomainPayment(m)
+			if err != nil {
+				return err
+			}
+			out = append(out, d)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ListOverdue returns the charges past their due date that still owe money
+// (due_date < today, effective - paid > 0, not cancelled). An empty cycleID
+// spans every cycle. today is supplied by the caller — never read from a clock
+// here — so the query stays deterministic. The remaining balance is computed
+// from the same single grouped payment query the list reads (no N+1).
+func (r *Repository) ListOverdue(ctx context.Context, cycleID string, today time.Time) ([]ports.ChargeWithPaid, error) {
+	var out []ports.ChargeWithPaid
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		q := tx.Model(&chargeModel{}).
+			Where("due_date < ?::date AND status <> ?", today.Format(dateLayout), domain.StatusCancelled).
+			Order("due_date ASC, id ASC")
+		if cycleID != "" {
+			q = q.Where("cycle_id = ?", cycleID)
+		}
+		var rows []chargeModel
+		if err := q.Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing overdue charges", err)
+		}
+		candidates, err := withPaidTotals(tx, rows)
+		if err != nil {
+			return err
+		}
+		for _, c := range candidates {
+			if c.Charge.Effective().Int64()-c.PaidCents > 0 {
+				out = append(out, c)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// --- helpers ----------------------------------------------------------------
+
+// paidFor sums the payments collected against one charge. COALESCE keeps "no
+// payments yet" a zero rather than a NULL.
+func paidFor(tx *gorm.DB, chargeID string) (int64, error) {
+	var paid int64
+	if err := tx.Model(&paymentModel{}).
+		Where("charge_id = ?", chargeID).
+		Select("COALESCE(SUM(amount_cents), 0)").
+		Scan(&paid).Error; err != nil {
+		return 0, glerrors.Wrap(glerrors.KindInternal, "summing payments", err)
+	}
+	return paid, nil
+}
+
+// withPaidTotals pairs each charge row with its collected total, resolving every
+// total in ONE grouped query instead of a lookup per charge. Charges with no
+// payments are simply absent from the sum result and default to zero.
+func withPaidTotals(tx *gorm.DB, rows []chargeModel) ([]ports.ChargeWithPaid, error) {
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	ids := make([]string, 0, len(rows))
+	for _, m := range rows {
+		ids = append(ids, m.ID)
+	}
+
+	type chargePaid struct {
+		ChargeID string `gorm:"column:charge_id"`
+		Paid     int64  `gorm:"column:paid"`
+	}
+	var sums []chargePaid
+	if err := tx.Model(&paymentModel{}).
+		Select("charge_id, COALESCE(SUM(amount_cents), 0) AS paid").
+		Where("charge_id IN ?", ids).
+		Group("charge_id").
+		Scan(&sums).Error; err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "summing payments", err)
+	}
+	paidByCharge := make(map[string]int64, len(sums))
+	for _, s := range sums {
+		paidByCharge[s.ChargeID] = s.Paid
+	}
+
+	out := make([]ports.ChargeWithPaid, 0, len(rows))
+	for _, m := range rows {
+		paid := paidByCharge[m.ID]
+		charge, err := toDomainCharge(m, paid)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ports.ChargeWithPaid{Charge: charge, PaidCents: paid})
+	}
+	return out, nil
+}
+
+// isUniqueViolation reports whether err is a Postgres unique-constraint
+// violation, which the ledger surfaces as KindConflict.
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation
+}
+
+// translateFindErr maps a GORM not-found to the shared sentinel; anything else
+// is an internal error.
+func translateFindErr(err error) error {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return glerrors.ErrNotFound
+	}
+	return glerrors.Wrap(glerrors.KindInternal, "query failed", err)
+}

@@ -21,7 +21,7 @@ are UX-only via a single `useFlag` hook / `FlagsProvider`).
 | `module_gateway` | M02 Gateway/BFF | gateway | **OFF** | Connect edge + the flag-enforcement middleware itself + dashboard read-model plumbing. |
 | `module_students` | M03 Students/Admisión | students | **OFF** | Student control & admission. First vertical slice. |
 | `module_config` | M04 Cycles/Config | config | **OFF** | School-cycle lifecycle & per-cycle configuration. **Backed by a real `config` service since Phase 2 (academic catalog: cycles/levels/grade_levels/subjects/terms/groups).** Gateway routes require `config:read`/`config:write`. |
-| `module_finance` | M05 Finance/Adeudos | finance | **OFF** | Debts & payment ledger; overdue detection. |
+| `module_finance` | M05 Finance/Adeudos | finance | **OFF** | Debts & payment ledger. **Backed by a real `finance` service since Phase 7 (finance core: dynamic charge concepts, charges single + bulk-per-cycle/group, window payments cash/card/transfer + reference, discounts, account statement, overdue). Money is integer cents; RLS on concepts/charges/payments; atomic payment knot. Emits `PaymentRegistered`.** Gateway routes require `finance:read`/`finance:write`. Scholarships (M08) + CONTPAQi export (S02) are Phase 7b (the `ExportContpaqi` RPC is a stub). |
 | `module_attendance` | M06 Attendance | attendance | **OFF** | QR-based attendance marking & absence recording. |
 | `module_grades` | M07 Grades/Boletas | grades | **OFF** | Grade capture & boletas (Strategy per SEP level). |
 | `module_scholarships` | M08 Scholarships | scholarships | **OFF** | Scholarship application/cancellation. |

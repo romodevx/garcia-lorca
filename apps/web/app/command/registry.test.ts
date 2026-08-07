@@ -135,6 +135,13 @@ describe("buildCommandRegistry", () => {
     expect(ids({ module_students: true }).some((id) => id.startsWith("admin."))).toBe(false);
   });
 
+  it("routes the ventanilla shortcut straight to the payment flow", () => {
+    const cmds = buildCommandRegistry({ module_finance: true }, t);
+    // Nav opens the surface; the create shortcut opens it ON the payment form.
+    expect(cmds.find((c) => c.id === "finance.nav")?.route).toBe("module:finance");
+    expect(cmds.find((c) => c.id === "finance.create")?.route).toBe("module:finance:payment");
+  });
+
   it("keys each command's route to its module for navigation", () => {
     const [nav] = buildCommandRegistry({ module_students: true }, t);
     expect(nav?.route).toBe("module:students");

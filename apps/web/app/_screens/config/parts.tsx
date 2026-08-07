@@ -171,21 +171,26 @@ export function SelectField({
   );
 }
 
-export interface RadioOption {
-  value: string;
+export interface RadioOption<Value extends string = string> {
+  value: Value;
   label: string;
 }
 
-export function RadioGroup({
+/**
+ * Generic over the option value so a caller whose choices are a union (a
+ * recurrence, a payment method) keeps that type end to end instead of widening
+ * to `string` and casting it back.
+ */
+export function RadioGroup<Value extends string>({
   legend,
   options,
   value,
   onChange,
 }: {
   legend: string;
-  options: readonly RadioOption[];
-  value: string;
-  onChange: (value: string) => void;
+  options: readonly RadioOption<Value>[];
+  value: Value;
+  onChange: (value: Value) => void;
 }): ReactElement {
   return (
     <fieldset style={{ border: "none", padding: 0, margin: 0 }}>

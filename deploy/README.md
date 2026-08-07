@@ -179,6 +179,35 @@ must be resolved before turning a flag ON in a shared environment.
     teacher login exists (link `teachers.user_id` → require the caller own the
     assignment), enforce it before grades is more than a presentation surface.
 
+### Added by Phase 7 (`finance` service) — before enabling `module_finance` in a shared env
+Finance is a money ledger; the security gate (2026-08-06) returned CONDITIONAL PASS.
+None block local/demo (owner-only); all must be resolved before `module_finance` is ON
+in a shared, multi-role, or family-facing environment.
+11. **Internal service must be network-private.** `finance` has no authn of its own — the
+    gateway is the sole boundary, and it trusts any caller reaching its Connect port. In
+    Cloud Run set `ingress=internal`; do NOT publish `8093`. It also calls `students`/`config`
+    server-to-server with a plain client (no credentials) — same private-network requirement.
+12. **Multi-tenant forwarding.** `FINANCE_TENANT_ID` is a process-wide constant fixed at
+    composition (not derived from the caller). Before multi-tenant use, the gateway must
+    forward the principal's `TenantID` and the constant must be removed (same as iam/config/
+    students/grades).
+13. **Audit trail on money operations (B1).** `payments.received_by` is always NULL, the
+    discount `reason` is accepted then discarded, and the gateway forwards no caller identity.
+    Who took the cash / forgave the debt / voided the charge is unrecoverable. Forward the
+    authenticated subject and persist it on payment, discount, and cancel before shared use.
+14. **Per-object authz on finance reads (B2).** `finance:read` is tenant-wide: `GET
+    /finance/accounts/{studentId}` returns any student's statement and `GET /finance/charges`
+    (no filter) returns the whole tenant ledger. Fine for the single owner; **do NOT grant
+    `finance:read` to any non-owner role** (parent/family portal in Phase 9, teacher roles)
+    until account/charge reads are scoped to the caller's own students.
+15. **Money-op permission split + hardening (recommended).** Split `finance:discount`/
+    `finance:cancel` out of `finance:write` (a cashier should bank cash, not erase debt);
+    paginate the unbounded ledger reads; rate-limit `POST /finance/charges/generate`.
+16. **Real Pub/Sub + event emission.** Finance publishes `PaymentRegistered` onto a dev
+    logging bus (`newDevBus`) and swallows publish failures by design; swap in the Cloud
+    Pub/Sub adapter before shared use. `DebtOverdue` is a READ only (no event emitter yet);
+    `ExportContpaqi` returns `Unimplemented` and is intentionally unrouted (S02 / Phase 7b).
+
 ## Common commands
 
 ```bash

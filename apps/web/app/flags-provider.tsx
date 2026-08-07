@@ -13,25 +13,31 @@ import { fetchFeatures } from "./features";
  * frontend renders.
  *
  * When NEXT_PUBLIC_API_URL is set, the resolved flag map is fetched once on boot
- * from the gateway's authoritative `GET /api/v1/features`. Until it resolves (or
- * when no gateway is configured — e.g. the standalone design demo — or the fetch
- * fails), we fall back to DEMO_FLAGS so the app is always usable.
+ * from the gateway's authoritative `GET /api/v1/features`. Until it resolves — or
+ * if the gateway is unreachable — we fall back to DEMO_FLAGS so the app still
+ * renders instead of erroring.
  *
- * DEMO_FLAGS turns ON only the surfaces implemented in this web build; everything
- * else stays OFF and falls through to the friendly ModulePlaceholder.
+ * FLAGS DEFAULT OFF: with a gateway configured, that fallback must NOT switch a
+ * module on, because the surfaces now talk to real endpoints — a flag the gateway
+ * never granted would render a screen whose every read 404s. So DEMO_FLAGS only
+ * lights modules up in the standalone design demo (no gateway at all); against a
+ * real gateway every module stays OFF until `/features` says otherwise, and an
+ * OFF module falls through to the friendly ModulePlaceholder.
  */
-const DEMO_FLAGS: FlagSet = {
-  module_finance: true
-};
-
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
+
+const IS_DESIGN_DEMO = API_URL === "";
+
+const DEMO_FLAGS: FlagSet = {
+  module_finance: IS_DESIGN_DEMO
+};
 
 export function AppFlagsProvider({ children }: { children: ReactNode }): ReactNode {
   const [flags, setFlags] = useState<FlagSet>(DEMO_FLAGS);
 
   useEffect(() => {
-    if (API_URL === "") {
-      return; // No gateway configured (design demo) — keep DEMO_FLAGS.
+    if (IS_DESIGN_DEMO) {
+      return; // No gateway to ask — keep DEMO_FLAGS.
     }
     const controller = new AbortController();
     fetchFeatures(API_URL, controller.signal)

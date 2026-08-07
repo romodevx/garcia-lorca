@@ -31,6 +31,11 @@ interface ActionSpec {
   readonly aliasKey?: string;
   /** Disambiguator when a module registers several actions of the same kind. */
   readonly key?: string;
+  /**
+   * Sub-intent appended to the module route (`module:finance:payment`) so the
+   * surface opens directly on that flow. Omitted ⇒ the module's default view.
+   */
+  readonly intent?: string;
 }
 
 /** Curated create/quick actions (seed; each module extends this as it's built). */
@@ -39,7 +44,8 @@ const ACTIONS: readonly ActionSpec[] = [
   // Enrollment surface (Phase 4) — fewest-clicks shortcuts into the students surface.
   { moduleId: "students", kind: "create", key: "enroll", titleKey: "create.enroll", aliasKey: "alias.enroll" },
   { moduleId: "students", kind: "create", key: "transfer", titleKey: "create.transfer", aliasKey: "alias.transfer" },
-  { moduleId: "finance", kind: "create", titleKey: "create.payment", aliasKey: "alias.payment" },
+  // Ventanilla shortcut (Phase 7) — lands on the payment form, not just the surface.
+  { moduleId: "finance", kind: "create", titleKey: "create.payment", aliasKey: "alias.payment", intent: "payment" },
   { moduleId: "grades", kind: "create", titleKey: "create.evaluation", aliasKey: "alias.evaluation" },
   // Grade-capture surface (Phase 5) — fewest-clicks shortcut into the roster grid.
   { moduleId: "grades", kind: "create", key: "capture", titleKey: "create.captureGrades", aliasKey: "alias.captureGrades" },
@@ -99,7 +105,7 @@ export function buildCommandRegistry(flags: FlagSet, t: Translate): Command[] {
       aliases: action.aliasKey !== undefined ? parseAliases(t(action.aliasKey)) : undefined,
       icon: module.icon,
       color: module.color,
-      route: `module:${module.id}`,
+      route: action.intent !== undefined ? `module:${module.id}:${action.intent}` : `module:${module.id}`,
       moduleId: module.id,
     });
   }
