@@ -58,6 +58,10 @@ func main() {
 	if financeBaseURL == "" {
 		financeBaseURL = "http://localhost:8093"
 	}
+	attendanceBaseURL := os.Getenv("ATTENDANCE_BASE_URL")
+	if attendanceBaseURL == "" {
+		attendanceBaseURL = "http://localhost:8095"
+	}
 
 	// flags is the authoritative source of module visibility (default-deny),
 	// loaded from ENABLED_MODULES (comma-separated module names). The gateway
@@ -71,6 +75,7 @@ func main() {
 	configClient := client.NewConfigClient(configBaseURL, http.DefaultClient)
 	gradesClient := client.NewGradesClient(gradesBaseURL, http.DefaultClient)
 	financeClient := client.NewFinanceClient(financeBaseURL, http.DefaultClient)
+	attendanceClient := client.NewAttendanceClient(attendanceBaseURL, http.DefaultClient)
 
 	// loginLimiter fronts POST /auth/login with a per-IP token bucket so an
 	// attacker cannot brute-force credentials from a single source. It is
@@ -78,7 +83,7 @@ func main() {
 	loginRL := config.ParseLoginRateLimit(os.Getenv)
 	loginLimiter := middleware.NewRateLimiter(loginRL.Burst, loginRL.RefillPerSec(), time.Now)
 
-	mux := newMux(iamHealth, authClient, studentsClient, configClient, gradesClient, financeClient, flags, loginLimiter)
+	mux := newMux(iamHealth, authClient, studentsClient, configClient, gradesClient, financeClient, attendanceClient, flags, loginLimiter)
 
 	log.Info("gateway starting",
 		slog.String("addr", addr),
@@ -86,7 +91,8 @@ func main() {
 		slog.String("students", studentsBaseURL),
 		slog.String("config", configBaseURL),
 		slog.String("grades", gradesBaseURL),
-		slog.String("finance", financeBaseURL))
+		slog.String("finance", financeBaseURL),
+		slog.String("attendance", attendanceBaseURL))
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           mux,
@@ -125,6 +131,10 @@ func main() {
 //	                             discount/cancel/payment, finance:read on the
 //	                             catalog, charge list, account and overdue reads)
 //	                             → finance service
+//	/api/v1/attendance/...     → ModuleGuard(attendance) → RequireAuth → rotation →
+//	                             RequirePermission(attendance:write on saving a
+//	                             day, attendance:read on roster/list) →
+//	                             attendance service
 //	/api/v1/users/..., /roles/... → ModuleGuard(iam) → RequireAuth → rotation →
 //	                             RequirePermission(users:*/roles:* by verb) → iam
 //	                             admin (user/role CRUD)
@@ -135,7 +145,7 @@ func main() {
 //
 // `flags` (via middleware.NewModuleGuard) is the module-visibility boundary:
 // disabled module ⇒ 404, evaluated before auth so a hidden module is invisible.
-func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, configClient *client.ConfigClient, gradesClient *client.GradesClient, financeClient *client.FinanceClient, flags featureflag.Checker, loginLimiter *middleware.RateLimiter) *http.ServeMux {
+func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, configClient *client.ConfigClient, gradesClient *client.GradesClient, financeClient *client.FinanceClient, attendanceClient *client.AttendanceClient, flags featureflag.Checker, loginLimiter *middleware.RateLimiter) *http.ServeMux {
 	mux := http.NewServeMux()
 	handler.NewHealthHandler(iamHealth).Register(mux)
 
@@ -257,6 +267,25 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/finance/payments", financeWrite(financeH.RegisterPayment))
 	mux.Handle("GET /api/v1/finance/accounts/{studentId}", financeRead(financeH.GetAccount))
 	mux.Handle("GET /api/v1/finance/overdue", financeRead(financeH.ListOverdue))
+
+	// M06 attendance (daily pass list): flag-guarded, authenticated + rotation-
+	// enforced, permission-gated. Saving a group·day is the only write
+	// (attendance:write) — it reconciles the whole day, so it also erases marks;
+	// the roster and the per-enrollment history are reads (attendance:read).
+	// Every route sits behind guard.Protect("attendance", …) so
+	// module_attendance OFF ⇒ 404 (the module is invisible before auth even
+	// runs). The more specific /attendance/roster wins over /attendance under
+	// ServeMux's specificity rule.
+	attendanceH := handler.NewAttendanceHandler(attendanceClient)
+	attendanceWrite := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("attendance", requireAuthChanged(middleware.RequirePermission("attendance:write")(http.HandlerFunc(h))))
+	}
+	attendanceRead := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("attendance", requireAuthChanged(middleware.RequirePermission("attendance:read")(http.HandlerFunc(h))))
+	}
+	mux.Handle("GET /api/v1/attendance/roster", attendanceRead(attendanceH.GetRoster))
+	mux.Handle("POST /api/v1/attendance", attendanceWrite(attendanceH.SaveDaily))
+	mux.Handle("GET /api/v1/attendance", attendanceRead(attendanceH.ListAttendance))
 
 	// Phase 6 iam admin (user/role CRUD): flag-guarded (module_iam), authenticated
 	// + rotation-enforced, permission-gated. User routes need users:read (GET) /

@@ -208,6 +208,35 @@ in a shared, multi-role, or family-facing environment.
     Pub/Sub adapter before shared use. `DebtOverdue` is a READ only (no event emitter yet);
     `ExportContpaqi` returns `Unimplemented` and is intentionally unrouted (S02 / Phase 7b).
 
+### Added by Phase 8 (`attendance` service) — before enabling `module_attendance` in a shared env
+17. **Internal service network-private.** `attendance` has no authn of its own — the gateway
+    is the sole boundary. Cloud Run `ingress=internal`; do NOT publish `8095`. It calls
+    `students`/`config` server-to-server with a plain client (no credentials) — same private
+    network requirement.
+18. **Multi-tenant forwarding.** `ATTENDANCE_TENANT_ID` is a process-wide constant fixed at
+    composition; before multi-tenant use the gateway must forward the principal's `TenantID`
+    and the constant must be removed (same as iam/config/students/grades/finance).
+19. **Real Pub/Sub before Comms (Phase 9) depends on it.** `attendance` emits
+    `AttendanceMarked`/`AbsenceRecorded` onto the dev logging bus and swallows publish
+    failures by design. Comms (Phase 9) consumes `AbsenceRecorded` to notify guardians —
+    swap in the Cloud Pub/Sub adapter (with delivery guarantees) before that dependency is
+    live. The event payloads carry ids only (no student PII), which is correct for a
+    guardian-facing notification pipeline — keep it that way.
+20. **`ListAttendance` has no per-object authz.** `GET /api/v1/attendance?enrollmentId=…` goes
+    straight to the repo with only tenant RLS ("same tenant", not "yours"). Fine for the single
+    owner (0008 grants `attendance:read` to owner alone); the instant a teacher role or the
+    Phase 9 family portal gets `attendance:read` it's a horizontal-authz hole — any holder reads
+    any enrollment's absence history. Scope the read to the caller's own students/groups before
+    granting `attendance:read` to a non-owner role (same shape as finance item 14).
+21. **`note` is unbounded free text and likely sensitive PII.** The teacher's justification
+    field (`attendance.note`) is plain `text` (only the 1 MiB body cap bounds it) and is returned
+    in full by `ListAttendance` — so it inherits item 20. It routinely holds health data
+    ("cita médica"). Cap its length (service + DB CHECK) and treat it as sensitive when roles
+    expand.
+22. **Attendance writes are not rate-limited** (only `/auth/login` is). One `POST /api/v1/attendance`
+    reconciles a group's whole day. Authenticated + reconcile-scoped so low risk, but add a
+    limiter before a shared, multi-writer environment.
+
 ## Common commands
 
 ```bash
