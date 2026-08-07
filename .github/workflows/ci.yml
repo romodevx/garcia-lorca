@@ -220,8 +220,14 @@ jobs:
       - name: pnpm install
         run: pnpm install --frozen-lockfile
 
-      - name: turbo test / lint / build
-        run: pnpm turbo run test lint build
+      # test + lint run across the whole workspace (web, mobile, shared packages).
+      # build is scoped to the web app + its workspace deps: the only production
+      # artifact CI ships/gates here. apps/mobile's build (`expo export`) needs
+      # native/EAS tooling and joins CI in Phase 9 when the family app is real.
+      - name: turbo test / lint (all) + build (web + deps)
+        run: |
+          pnpm turbo run test lint
+          pnpm turbo run build --filter=@garcia-lorca/web...
 
       # Build-hardening gate (cloudbuild step 5). Prefers the frontend-owned
       # check; falls back to the pipeline-owned grep gate. Either FAILS CI if a
