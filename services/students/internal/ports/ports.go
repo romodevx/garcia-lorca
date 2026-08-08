@@ -100,7 +100,10 @@ type GuardianRepository interface {
 
 // UserRef is the students-owned view of an iam user: the minimum the guardian
 // link needs to decide whether the referenced principal may be a guardian — its
-// identity, account status, and the names of the roles it holds.
+// identity, account status, and the names of the roles it holds. Both are
+// decision inputs and both are enforced: only an ACTIVE user holding the guardian
+// role may be linked. Status carries iam's UserStatus enum in its string form
+// (e.g. "USER_STATUS_ACTIVE"), which is what the iamclient adapter projects.
 type UserRef struct {
 	ID     string
 	Status string

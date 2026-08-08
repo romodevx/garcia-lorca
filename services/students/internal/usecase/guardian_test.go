@@ -100,9 +100,19 @@ func newGuardianService(t *testing.T) (*usecase.GuardianService, *fakeRepo, *fak
 	return svc, students, guardians, users
 }
 
-// seedGuardianUser registers an iam user holding the roles given.
+// activeUserStatus is the projected iam status of a usable account: the string
+// form of iamv1.UserStatus_USER_STATUS_ACTIVE, which is what the iamclient
+// adapter puts in UserRef.Status.
+const activeUserStatus = "USER_STATUS_ACTIVE"
+
+// seedGuardianUser registers an active iam user holding the roles given.
 func seedGuardianUser(u *fakeUsers, id string, roles ...string) {
-	u.byID[id] = ports.UserRef{ID: id, Status: "USER_STATUS_ACTIVE", Roles: roles}
+	seedUserWithStatus(u, id, activeUserStatus, roles...)
+}
+
+// seedUserWithStatus registers an iam user with an explicit account status.
+func seedUserWithStatus(u *fakeUsers, id, status string, roles ...string) {
+	u.byID[id] = ports.UserRef{ID: id, Status: status, Roles: roles}
 }
 
 // --- LinkGuardian ----------------------------------------------------------
@@ -166,6 +176,27 @@ func TestLinkGuardianRequiresGuardianRole(t *testing.T) {
 	}
 	if len(guardians.links) != 0 {
 		t.Errorf("nothing may be persisted for a non-guardian user: %+v", guardians.links)
+	}
+}
+
+// A suspended (or otherwise non-active) iam account must not acquire a guardian
+// link: the link is what the family read path authorizes on, so a disabled
+// account would keep reading its children's records through it.
+func TestLinkGuardianRequiresActiveAccount(t *testing.T) {
+	for _, status := range []string{"USER_STATUS_SUSPENDED", "USER_STATUS_UNSPECIFIED", ""} {
+		t.Run(status, func(t *testing.T) {
+			svc, students, guardians, users := newGuardianService(t)
+			seedStudent(t, students, "stu-1")
+			seedUserWithStatus(users, "usr-1", status, "guardian")
+
+			_, err := svc.LinkGuardian(context.Background(), "usr-1", "stu-1", "mother")
+			if glerrors.KindOf(err) != glerrors.KindInvalid {
+				t.Fatalf("want KindInvalid, got %v (kind %v)", err, glerrors.KindOf(err))
+			}
+			if len(guardians.links) != 0 {
+				t.Errorf("nothing may be persisted for a non-active user: %+v", guardians.links)
+			}
+		})
 	}
 }
 

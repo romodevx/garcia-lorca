@@ -14,13 +14,21 @@ import (
 // links, so a user without the role must never acquire one.
 const guardianRoleName = "guardian"
 
+// activeUserStatus is the only iam account status a guardian may be linked from.
+// It is the value the iamclient adapter projects into ports.UserRef.Status — the
+// string form of iam's USER_STATUS_ACTIVE enum. A suspended account must not gain
+// a link, for the same reason a role-less user must not: the link IS the family
+// read path's authorization.
+const activeUserStatus = "USER_STATUS_ACTIVE"
+
 // GuardianService links guardians to students. It orchestrates three seams: the
 // local StudentRepository (the student must exist in THIS context), the
 // GuardianRepository, and the cross-service UserReader (iam, by RPC — faked in
 // tests). It depends only on ports + domain.
 //
-//	Link: student exists (local) ─> guardian user exists + holds the
-//	      guardian role (RPC) ─> persist the link (unique per pair)
+//	Link: student exists (local) ─> guardian user exists, holds the guardian
+//	      role, and its account is active (RPC) ─> persist the link
+//	      (unique per pair)
 type GuardianService struct {
 	students  ports.StudentRepository
 	guardians ports.GuardianRepository
@@ -49,9 +57,10 @@ func NewGuardianService(
 
 // LinkGuardian links an iam user to a student. Both references are validated
 // before anything is written: a missing student, a missing user, an unknown
-// relationship, or a user that does not hold the guardian role are all KindInvalid
-// (bad arguments, not missing resources); a duplicate link is KindConflict. A
-// transport failure from iam propagates unchanged.
+// relationship, a user that does not hold the guardian role, or a user whose iam
+// account is not active are all KindInvalid (bad arguments, not missing
+// resources); a duplicate link is KindConflict. A transport failure from iam
+// propagates unchanged.
 func (s *GuardianService) LinkGuardian(ctx context.Context, guardianUserID, studentID, relationship string) (domain.GuardianLink, error) {
 	// Parsed first: a malformed relationship is decidable without any I/O.
 	rel, err := domain.ParseRelationship(relationship)
@@ -82,9 +91,9 @@ func (s *GuardianService) LinkGuardian(ctx context.Context, guardianUserID, stud
 }
 
 // requireGuardianUser resolves the user against iam and asserts it may act as a
-// guardian. Only iam's "does not exist" answer becomes a bad argument; any other
-// failure (transport, iam internal) propagates so the edge does not blame the
-// caller for an outage.
+// guardian: it holds the guardian role AND its account is active. Only iam's
+// "does not exist" answer becomes a bad argument; any other failure (transport,
+// iam internal) propagates so the edge does not blame the caller for an outage.
 func (s *GuardianService) requireGuardianUser(ctx context.Context, guardianUserID string) error {
 	user, err := s.users.ByID(ctx, guardianUserID)
 	if err != nil {
@@ -95,6 +104,9 @@ func (s *GuardianService) requireGuardianUser(ctx context.Context, guardianUserI
 	}
 	if !slices.Contains(user.Roles, guardianRoleName) {
 		return glerrors.New(glerrors.KindInvalid, "user is not a guardian")
+	}
+	if user.Status != activeUserStatus {
+		return glerrors.New(glerrors.KindInvalid, "guardian account is not active")
 	}
 	return nil
 }
