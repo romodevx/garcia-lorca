@@ -292,6 +292,19 @@ the principal — a guardian can never name another family's student). The admin
 32. **Guardian linking is admin-only** (`guardians:write`, owner). A guardian self-service invite/claim
     flow (a parent registering + proving their child) is deferred — until then, linking is a
     back-office action, so vet who holds `guardians:write`.
+33. **BLOCKING — device-owner spoofing is armed (was item 27, latent; 9b fired its trigger).**
+    Per-guardian push targeting shipped, so the deferred device-owner hole is now live. Gateway
+    `RegisterDevice` now derives the owner from the authenticated principal (closed at the edge in 9b),
+    but the comms repo upsert still reassigns `user_id` on an `(tenant,fcm_token)` conflict
+    (defense-in-depth, open). Do NOT enable the real FCM sender, and do NOT grant the `guardian` role
+    `comms:write`, until the repo upsert also refuses to reassign a token to a different owner.
+34. **The `guardian` role holds only `family:read`** — so a guardian can't yet register a device or mark
+    a notification read (both need `comms:write`). Fail-closed and correct for 9b; 9c must decide the
+    guardian's `comms:write` grant, and that decision must land AFTER item 33's repo fix.
+35. **`guardians:read/write` are now `IsOwnerOnly`-guarded** (they compose into a tenant-wide family
+    read via self-linking + `/family/*`). This makes the grant-subset gap ("grant only permissions you
+    hold") load-bearing, not cosmetic: a non-owner `roles:write` holder could still route around it —
+    close the grant-subset gap before non-owner admins exist.
 
 ## Common commands
 
