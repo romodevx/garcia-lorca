@@ -197,9 +197,11 @@ type GuardianLink struct {
 }
 
 // LinkGuardian links a guardian (an iam user) to a student. Connect error codes
-// propagate (NotFound for an unknown user/student, AlreadyExists for a duplicate
-// link, InvalidArgument for a bad relationship) so the handler maps them to HTTP
-// status.
+// propagate so the handler maps them to HTTP status: AlreadyExists for a
+// duplicate link, and InvalidArgument for an unknown user, an unknown student, a
+// user without the guardian role, or a bad relationship — the students service
+// validates every reference in the request as an argument, so none of them is a
+// NotFound.
 func (c *StudentsClient) LinkGuardian(ctx context.Context, guardianUserID, studentID, relationship string) (GuardianLink, error) {
 	res, err := c.rpc.LinkGuardian(ctx, connect.NewRequest(&studentsv1.LinkGuardianRequest{
 		GuardianUserId: guardianUserID,
@@ -212,8 +214,9 @@ func (c *StudentsClient) LinkGuardian(ctx context.Context, guardianUserID, stude
 	return toGuardianLink(res.Msg.GetLink()), nil
 }
 
-// UnlinkGuardian removes a guardian↔student link. Unlinking a link that is not
-// there is a no-op at the students service, so this is idempotent.
+// UnlinkGuardian removes a guardian↔student link. It is NOT idempotent: the
+// students service answers NotFound when the pair is not linked, which the edge
+// surfaces as 404 so an admin revoking access learns there was nothing to revoke.
 func (c *StudentsClient) UnlinkGuardian(ctx context.Context, guardianUserID, studentID string) error {
 	_, err := c.rpc.UnlinkGuardian(ctx, connect.NewRequest(&studentsv1.UnlinkGuardianRequest{
 		GuardianUserId: guardianUserID,

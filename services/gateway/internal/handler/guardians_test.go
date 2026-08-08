@@ -94,14 +94,18 @@ func TestLinkGuardianDuplicateIs409(t *testing.T) {
 	}
 }
 
-func TestLinkGuardianUnknownUserIs404(t *testing.T) {
+// On LinkGuardian the students service treats BOTH references as arguments — an
+// unknown user, an unknown student and a bad relationship are all
+// InvalidArgument, never NotFound — so the edge answers 400. There is no
+// addressed resource in the URL that could be missing.
+func TestLinkGuardianUnknownUserIsBadRequest(t *testing.T) {
 	h := handler.NewGuardiansHandler(&fakeGuardians{
-		err: connect.NewError(connect.CodeNotFound, errString("no such user")),
+		err: connect.NewError(connect.CodeInvalidArgument, errString("guardian user not found")),
 	})
 	rec := doReq(t, h.LinkGuardian, http.MethodPost, "/api/v1/guardians",
 		`{"guardianUserId":"ghost","studentId":"stu-1","relationship":"mother"}`)
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
 	}
 }
 
@@ -119,6 +123,20 @@ func TestUnlinkGuardianIs204(t *testing.T) {
 	}
 	if svc.unlinkGuardianID != "usr-9" || svc.unlinkStudentID != "stu-1" {
 		t.Errorf("forwarded = %q/%q", svc.unlinkGuardianID, svc.unlinkStudentID)
+	}
+}
+
+// Unlinking is NOT idempotent: the students contract answers NotFound when the
+// pair is not linked, which the edge surfaces as 404 — the admin UI's "there was
+// nothing to revoke" signal.
+func TestUnlinkGuardianUnknownLinkIs404(t *testing.T) {
+	h := handler.NewGuardiansHandler(&fakeGuardians{
+		err: connect.NewError(connect.CodeNotFound, errString("guardian link not found")),
+	})
+	rec := doReq(t, h.UnlinkGuardian, http.MethodPost, "/api/v1/guardians/unlink",
+		`{"guardianUserId":"usr-9","studentId":"stu-1"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
 	}
 }
 

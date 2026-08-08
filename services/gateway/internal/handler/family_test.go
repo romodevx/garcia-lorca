@@ -99,6 +99,81 @@ func TestFamilyNotificationsAggregatesEveryChild(t *testing.T) {
 	}
 }
 
+// The family inbox is ONE chronological stream, newest first — the same order
+// /comms/notifications documents. The fan-out is child-major, so the aggregate
+// must be re-sorted at the edge or the second child's news would all trail the
+// first child's, however recent it is.
+func TestFamilyNotificationsIsNewestFirstAcrossChildren(t *testing.T) {
+	students := &fakeFamilyStudents{links: []client.GuardianLink{
+		{StudentID: "stu-1"}, {StudentID: "stu-2"},
+	}}
+	comms := &fakeFamilyComms{byStudent: map[string][]client.Notification{
+		"stu-1": {
+			{ID: "old-1", StudentID: "stu-1", CreatedAt: "2026-08-01T10:00:00Z"},
+			{ID: "old-2", StudentID: "stu-1", CreatedAt: "2026-07-01T10:00:00Z"},
+		},
+		"stu-2": {
+			{ID: "newest", StudentID: "stu-2", CreatedAt: "2026-09-01T10:00:00Z"},
+			{ID: "middle", StudentID: "stu-2", CreatedAt: "2026-08-15T10:00:00Z"},
+		},
+	}}
+	h := handler.NewFamilyHandler(students, comms)
+
+	rec := httptest.NewRecorder()
+	h.Notifications(rec, guardianRequest("/api/v1/family/notifications", "usr-9"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var out struct {
+		Notifications []map[string]any `json:"notifications"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	got := make([]string, 0, len(out.Notifications))
+	for _, n := range out.Notifications {
+		got = append(got, n["id"].(string))
+	}
+	want := []string{"newest", "middle", "old-1", "old-2"}
+	if len(got) != len(want) {
+		t.Fatalf("ids = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("ids = %v, want %v (newest first across both children)", got, want)
+		}
+	}
+}
+
+// Equal instants keep the child order of the fan-out, so the response is
+// reproducible rather than dependent on sort internals.
+func TestFamilyNotificationsEqualInstantsKeepChildOrder(t *testing.T) {
+	students := &fakeFamilyStudents{links: []client.GuardianLink{
+		{StudentID: "stu-1"}, {StudentID: "stu-2"},
+	}}
+	sameInstant := "2026-09-01T10:00:00Z"
+	comms := &fakeFamilyComms{byStudent: map[string][]client.Notification{
+		"stu-1": {{ID: "ntf-a", StudentID: "stu-1", CreatedAt: sameInstant}},
+		"stu-2": {{ID: "ntf-b", StudentID: "stu-2", CreatedAt: sameInstant}},
+	}}
+	h := handler.NewFamilyHandler(students, comms)
+
+	rec := httptest.NewRecorder()
+	h.Notifications(rec, guardianRequest("/api/v1/family/notifications", "usr-9"))
+
+	var out struct {
+		Notifications []map[string]any `json:"notifications"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Notifications) != 2 ||
+		out.Notifications[0]["id"] != "ntf-a" || out.Notifications[1]["id"] != "ntf-b" {
+		t.Errorf("notifications = %v, want ntf-a then ntf-b", out.Notifications)
+	}
+}
+
 func TestFamilyNotificationsWithoutChildrenIsEmptyArray(t *testing.T) {
 	students := &fakeFamilyStudents{}
 	comms := &fakeFamilyComms{}

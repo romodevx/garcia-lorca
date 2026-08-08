@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
+	"github.com/garcia-lorca/services/gateway/internal/middleware"
 )
 
 // CommsService is the communications surface the edge needs (consumer-defined,
@@ -24,6 +25,10 @@ type CommsService interface {
 // Comms sends nothing on request: notifications are materialised by consuming
 // other services' domain events, so this surface only registers a push token and
 // reads/acknowledges what is already stored.
+//
+// Device registration is self-scoped by construction — the owner is read from the
+// principal RequireAuth injected — so comms:write grants "register MY device",
+// not "register anyone's device".
 type CommsHandler struct {
 	svc CommsService
 }
@@ -39,10 +44,12 @@ const unreadOnlyTrue = "true"
 
 // --- request bodies --------------------------------------------------------
 
-// registerDeviceRequest carries the FCM token a user's device is reachable at.
-// Platform is one of ""|ios|android|web; comms rejects anything else.
+// registerDeviceRequest carries the FCM token the caller's device is reachable
+// at. Platform is one of ""|ios|android|web; comms rejects anything else.
+//
+// There is deliberately NO userId field: the owner comes from the authenticated
+// principal, so the body cannot name someone else's device.
 type registerDeviceRequest struct {
-	UserID   string `json:"userId"`
 	FcmToken string `json:"fcmToken"`
 	Platform string `json:"platform"`
 }
@@ -99,13 +106,22 @@ func toNotificationResponse(n client.Notification) notificationResponse {
 // RegisterDevice handles POST /api/v1/comms/devices — register (or refresh) the
 // FCM token of the caller's device. Re-sending the same token upserts it, so the
 // client may call this on every launch.
+//
+// The owner is ALWAYS the authenticated principal, never a request field: push
+// notifications are per-guardian, so a body-supplied owner would let any
+// comms:write holder redirect another family's notifications to their own phone.
 func (h *CommsHandler) RegisterDevice(w http.ResponseWriter, r *http.Request) {
+	p, ok := middleware.PrincipalFrom(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	var req registerDeviceRequest
 	if err := decodeJSONBody(w, r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	device, err := h.svc.RegisterDevice(r.Context(), req.UserID, req.FcmToken, req.Platform)
+	device, err := h.svc.RegisterDevice(r.Context(), p.UserID, req.FcmToken, req.Platform)
 	if err != nil {
 		writeConnectError(w, err)
 		return

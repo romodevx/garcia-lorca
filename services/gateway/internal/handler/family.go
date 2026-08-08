@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"net/http"
+	"sort"
+	"time"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
@@ -44,15 +46,18 @@ func NewFamilyHandler(links GuardianLinkReader, inbox NotificationReader) *Famil
 
 // Notifications handles GET /api/v1/family/notifications?unreadOnly=true — every
 // notification of every child the CALLER is linked to, tagged with the child it
-// belongs to. A guardian with no linked children gets an empty list.
+// belongs to, newest first. A guardian with no linked children gets an empty list.
 //
-// It must run behind RequireAuth (which injects the principal) plus the comms
-// module guard and RequirePermission("family:read"). One child's inbox failing
-// fails the whole read: a partial list would read as "your child has no news",
-// which is worse than an error.
+// It must run behind RequireAuth (which injects the principal) plus the module
+// guards of BOTH modules it composes (comms and students) and
+// RequirePermission("family:read"). One child's inbox failing fails the whole
+// read: a partial list would read as "your child has no news", which is worse
+// than an error.
 //
 // The fan-out is sequential on purpose — a guardian has a handful of children, so
-// the round-trips are few and the child order stays stable and reproducible.
+// the round-trips are few and the child order stays stable and reproducible. That
+// fan-out is child-major, so the aggregate is re-sorted before it is written: the
+// family app shows one chronological stream, not one block per child.
 func (h *FamilyHandler) Notifications(w http.ResponseWriter, r *http.Request) {
 	p, ok := middleware.PrincipalFrom(r.Context())
 	if !ok {
@@ -65,7 +70,7 @@ func (h *FamilyHandler) Notifications(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	unreadOnly := r.URL.Query().Get("unreadOnly") == unreadOnlyTrue
-	out := make([]notificationResponse, 0, len(links))
+	dated := make([]datedNotification, 0, len(links))
 	seen := make(map[string]bool, len(links))
 	for _, link := range links {
 		if seen[link.StudentID] {
@@ -82,8 +87,41 @@ func (h *FamilyHandler) Notifications(w http.ResponseWriter, r *http.Request) {
 			if res.StudentID == "" {
 				res.StudentID = link.StudentID // always tagged, even if comms omits it
 			}
-			out = append(out, res)
+			dated = append(dated, newDatedNotification(res))
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"notifications": out})
+	writeJSON(w, http.StatusOK, map[string]any{"notifications": newestFirst(dated)})
+}
+
+// datedNotification pairs one rendered notification with its parsed creation
+// instant, so the aggregate is sorted without re-parsing RFC3339 per comparison.
+type datedNotification struct {
+	res     notificationResponse
+	created time.Time
+}
+
+// newDatedNotification parses CreatedAt once. An absent or unparseable instant
+// yields the zero time, which sorts last — a notification with no usable date
+// belongs at the bottom of the stream, not the top.
+func newDatedNotification(res notificationResponse) datedNotification {
+	created, err := time.Parse(time.RFC3339, res.CreatedAt)
+	if err != nil {
+		return datedNotification{res: res}
+	}
+	return datedNotification{res: res, created: created}
+}
+
+// newestFirst orders the aggregated inbox by creation instant, descending, and
+// projects it back to the response shape. The sort is stable so notifications
+// created at the same instant keep the fan-out's child order, making the response
+// reproducible. The result is never nil, so the JSON carries [] rather than null.
+func newestFirst(dated []datedNotification) []notificationResponse {
+	sort.SliceStable(dated, func(i, j int) bool {
+		return dated[i].created.After(dated[j].created)
+	})
+	out := make([]notificationResponse, 0, len(dated))
+	for _, d := range dated {
+		out = append(out, d.res)
+	}
+	return out
 }

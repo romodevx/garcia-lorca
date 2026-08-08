@@ -137,12 +137,14 @@ func main() {
 //	                             RequirePermission(guardians:write on link/unlink,
 //	                             guardians:read on the list) → students service.
 //	                             Admin surface: it decides who may see a child.
-//	GET  /api/v1/family/notifications → ModuleGuard(comms) → RequireAuth →
-//	                             rotation → RequirePermission(family:read) →
-//	                             students ListStudentsForGuardian(PRINCIPAL) then
-//	                             comms ListNotifications per child. Scoped by
-//	                             construction: the caller reads only their own
-//	                             children, no request field can widen it.
+//	GET  /api/v1/family/notifications → ModuleGuard(comms) → ModuleGuard(students)
+//	                             → RequireAuth → rotation →
+//	                             RequirePermission(family:read) → students
+//	                             ListStudentsForGuardian(PRINCIPAL) then comms
+//	                             ListNotifications per child, newest first. It
+//	                             composes two modules, so EITHER flag OFF ⇒ 404.
+//	                             Scoped by construction: the caller reads only their
+//	                             own children, no request field can widen it.
 //	/api/v1/config/...         → ModuleGuard(config) → RequireAuth → rotation →
 //	                             RequirePermission(config:write on POST, config:read
 //	                             on GET) → config (academic catalog) service
@@ -361,15 +363,21 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/comms/notifications/{id}/read", commsWrite(commsH.MarkRead))
 
 	// Phase 9b family surface: the guardian's own children's news, composed at the
-	// edge from the students guardian links + the comms inbox. It lives under
-	// module_comms (it is a notification read) and needs family:read.
+	// edge from the students guardian links + the comms inbox. It needs family:read.
+	//
+	// The route READS FROM TWO MODULES, so it is guarded on both (the guards nest):
+	// module_comms OFF or module_students OFF ⇒ 404. Guarding only comms would leave
+	// a route that still calls students ListStudentsForGuardian, so disabling
+	// students would break it instead of hiding it — a disabled module must be
+	// invisible and removable without taking others down with it.
 	//
 	// The child set is derived from the PRINCIPAL, so the caller can only ever read
 	// their own children — no request field can widen the scope. That is why this
 	// route, unlike /comms/notifications, is safe to grant to a parent.
 	familyH := handler.NewFamilyHandler(studentsClient, commsClient)
 	familyRead := func(h http.HandlerFunc) http.Handler {
-		return guard.Protect("comms", requireAuthChanged(middleware.RequirePermission("family:read")(http.HandlerFunc(h))))
+		return guard.Protect("comms", guard.Protect("students",
+			requireAuthChanged(middleware.RequirePermission("family:read")(http.HandlerFunc(h)))))
 	}
 	mux.Handle("GET /api/v1/family/notifications", familyRead(familyH.Notifications))
 

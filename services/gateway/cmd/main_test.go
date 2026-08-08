@@ -1371,6 +1371,8 @@ func TestAttendanceListWithWritePermission200(t *testing.T) {
 // route sits behind guard.Protect("comms", …) so module_comms OFF ⇒ 404, before
 // auth runs.
 
+// validDeviceBody deliberately carries a userId: the edge must IGNORE it and
+// register the device for the authenticated caller (the stub's subject "u1").
 const validDeviceBody = `{"userId":"usr-1","fcmToken":"tok-abc","platform":"android"}`
 
 func TestCommsRegisterDeviceDisabledModuleIs404(t *testing.T) {
@@ -1412,6 +1414,11 @@ func TestCommsRegisterDeviceWithWritePermission200(t *testing.T) {
 	}
 	if out["id"] != "dev-1" || out["fcmToken"] != "tok-abc" || out["platform"] != "android" {
 		t.Errorf("body = %v", out)
+	}
+	// The stub comms echoes the user_id it received, so this pins the owner to the
+	// token's subject rather than the "usr-1" the body asked for.
+	if out["userId"] != "u1" {
+		t.Errorf("device owner = %v, want the caller's u1 (the body must not decide it)", out["userId"])
 	}
 }
 
@@ -1598,9 +1605,19 @@ func TestListGuardiansForStudentWithReadPermission200(t *testing.T) {
 	}
 }
 
-// --- Phase 9b family surface: ModuleGuard(comms) → RequireAuth → rotation →
-// RequirePermission(family:read). The child set comes from the principal, so a
-// guardian can only ever read their own children's notifications.
+// --- Phase 9b family surface: ModuleGuard(comms) → ModuleGuard(students) →
+// RequireAuth → rotation → RequirePermission(family:read). The child set comes
+// from the principal, so a guardian can only ever read their own children's
+// notifications.
+//
+// The route reads from BOTH modules — students for the guardian links, comms for
+// the inbox — so it is guarded on both: either one disabled ⇒ 404. A disabled
+// module must be invisible and removable without breaking others, and a
+// half-guarded composite route would answer 500 (or leak the links) instead.
+
+// familyModulesOn is the flag set the family route needs: both of the modules it
+// composes.
+var familyModulesOn = map[string]bool{"module_comms": true, "module_students": true}
 
 func TestFamilyNotificationsDisabledCommsModuleIs404(t *testing.T) {
 	gw := newTestGateway(t, map[string]bool{"module_students": true}) // module_comms OFF
@@ -1610,8 +1627,16 @@ func TestFamilyNotificationsDisabledCommsModuleIs404(t *testing.T) {
 	}
 }
 
+func TestFamilyNotificationsDisabledStudentsModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_comms": true}) // module_students OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/notifications", "family-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
 func TestFamilyNotificationsNoTokenIs401(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_comms": true})
+	gw := newTestGateway(t, familyModulesOn)
 	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/notifications", "", "")
 	if res.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", res.StatusCode)
@@ -1621,7 +1646,7 @@ func TestFamilyNotificationsNoTokenIs401(t *testing.T) {
 // comms:read reads ONE student by id; family:read is the guardian-scoped
 // permission, so a comms reader is refused here.
 func TestFamilyNotificationsWithoutFamilyReadIs403(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_comms": true})
+	gw := newTestGateway(t, familyModulesOn)
 	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/notifications", "comms-reader", "")
 	if res.StatusCode != http.StatusForbidden {
 		t.Errorf("status = %d, want 403", res.StatusCode)
@@ -1629,7 +1654,7 @@ func TestFamilyNotificationsWithoutFamilyReadIs403(t *testing.T) {
 }
 
 func TestFamilyNotificationsWithFamilyReadAggregatesChildren200(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_comms": true})
+	gw := newTestGateway(t, familyModulesOn)
 	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/notifications", "family-reader", "")
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", res.StatusCode)

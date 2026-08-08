@@ -74,7 +74,10 @@ func toGuardianLinkResponse(l client.GuardianLink) guardianLinkResponse {
 // --- endpoints -------------------------------------------------------------
 
 // LinkGuardian handles POST /api/v1/guardians — link a guardian (an iam user) to
-// a student. A duplicate link is 409, an unknown user or student 404.
+// a student. A duplicate link is 409. An unknown user, an unknown student and a
+// bad relationship are all 400: the students service treats every reference in
+// the body as an ARGUMENT, and nothing in the URL addresses a resource that could
+// be missing.
 func (h *GuardiansHandler) LinkGuardian(w http.ResponseWriter, r *http.Request) {
 	var req linkGuardianRequest
 	if err := decodeJSONBody(w, r, &req); err != nil {
@@ -90,8 +93,10 @@ func (h *GuardiansHandler) LinkGuardian(w http.ResponseWriter, r *http.Request) 
 }
 
 // UnlinkGuardian handles POST /api/v1/guardians/unlink — revoke a guardian's
-// access to a student. It is idempotent: unlinking what is not linked still
-// yields 204, so a retry is safe.
+// access to a student. Revoking a link that is there yields 204; unlinking an
+// unknown link returns 404, because the students contract answers NotFound. That
+// is the admin UI's "there was nothing to revoke" signal, so a retry is NOT a
+// silent success.
 func (h *GuardiansHandler) UnlinkGuardian(w http.ResponseWriter, r *http.Request) {
 	var req unlinkGuardianRequest
 	if err := decodeJSONBody(w, r, &req); err != nil {
@@ -106,14 +111,10 @@ func (h *GuardiansHandler) UnlinkGuardian(w http.ResponseWriter, r *http.Request
 }
 
 // ListGuardiansForStudent handles GET /api/v1/students/{studentId}/guardians —
-// who may see this child. The id comes from the path pattern; a query parameter
-// is accepted as a fallback so the handler is usable from a flat route too.
+// who may see this child. The id comes from the path pattern, which is the only
+// route registered for it.
 func (h *GuardiansHandler) ListGuardiansForStudent(w http.ResponseWriter, r *http.Request) {
-	studentID := r.PathValue("studentId")
-	if studentID == "" {
-		studentID = r.URL.Query().Get("studentId")
-	}
-	links, err := h.svc.ListGuardiansForStudent(r.Context(), studentID)
+	links, err := h.svc.ListGuardiansForStudent(r.Context(), r.PathValue("studentId"))
 	if err != nil {
 		writeConnectError(w, err)
 		return
