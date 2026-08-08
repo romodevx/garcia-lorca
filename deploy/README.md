@@ -279,6 +279,20 @@ in a shared, multi-role, or family-facing environment.
 30. **Rate-limit comms writes (B6).** `RegisterDevice` is an authenticated write called on every
     app launch; add a limiter before a shared, multi-client environment (group with item 22).
 
+### Added by Phase 9b (guardians + family auth)
+Phase 9b introduces family identity + a **self-scoped** read path, closing the per-object-authz
+spirit of items 14/20/26 FOR THE FAMILY PATH (`/api/v1/family/*` derives the caller's children from
+the principal — a guardian can never name another family's student). The admin-side `finance:read`/
+`attendance:read`/`comms:read` stay owner-only + `IsOwnerOnly`-guarded; the `guardian` role holds only
+`family:read`. Still open before a shared family-facing env:
+31. **Mobile token lifecycle.** Bearer tokens are returned in the body for the mobile path (secure
+    storage is the 9c app's job). Consider a shorter access TTL for mobile and confirm MobileRefresh
+    has the same rotation/revocation posture as the web refresh (ties to checklist item 9, token
+    revocation on suspend). Real FCM (item 23) still required before push is meaningful.
+32. **Guardian linking is admin-only** (`guardians:write`, owner). A guardian self-service invite/claim
+    flow (a parent registering + proving their child) is deferred — until then, linking is a
+    back-office action, so vet who holds `guardians:write`.
+
 ## Common commands
 
 ```bash
