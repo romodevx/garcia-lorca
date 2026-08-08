@@ -84,6 +84,28 @@ func enrollmentFromDomain(e domain.Enrollment) enrollmentModel {
 	}
 }
 
+// guardianLinkToDomain rebuilds a domain GuardianLink from its row. An
+// unrecognized relationship is an internal error (the DB CHECK should make this
+// impossible).
+func guardianLinkToDomain(m guardianStudentModel) (domain.GuardianLink, error) {
+	rel, err := domain.ParseRelationship(m.Relationship)
+	if err != nil {
+		return domain.GuardianLink{}, glerrors.Wrap(glerrors.KindInternal, "unknown relationship in db", err)
+	}
+	return domain.NewGuardianLink(m.ID, m.TenantID, m.GuardianUserID, m.StudentID, rel)
+}
+
+// guardianLinkFromDomain projects a domain GuardianLink into its GORM row.
+func guardianLinkFromDomain(l domain.GuardianLink) guardianStudentModel {
+	return guardianStudentModel{
+		ID:             l.ID(),
+		TenantID:       l.TenantID(),
+		GuardianUserID: l.GuardianUserID(),
+		StudentID:      l.StudentID(),
+		Relationship:   l.Relationship().String(),
+	}
+}
+
 // transferFromDomain projects a domain EnrollmentTransfer into its GORM row.
 func transferFromDomain(t domain.EnrollmentTransfer) enrollmentTransferModel {
 	return enrollmentTransferModel{

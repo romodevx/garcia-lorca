@@ -57,3 +57,17 @@ type enrollmentTransferModel struct {
 }
 
 func (enrollmentTransferModel) TableName() string { return "enrollment_transfers" }
+
+// guardianStudentModel is the GORM row for `guardian_students`, the many-to-many
+// link between a guardian (an iam user — a plain UUID, RPC-validated, never an FK)
+// and a student of this context.
+type guardianStudentModel struct {
+	ID             string `gorm:"column:id;primaryKey"`
+	TenantID       string `gorm:"column:tenant_id"`
+	GuardianUserID string `gorm:"column:guardian_user_id"`
+	StudentID      string `gorm:"column:student_id"`
+	Relationship   string `gorm:"column:relationship"`
+	CreatedAt      time.Time
+}
+
+func (guardianStudentModel) TableName() string { return "guardian_students" }

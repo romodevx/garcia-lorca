@@ -41,6 +41,7 @@ import (
 	"github.com/garcia-lorca/pkg/logger"
 	"github.com/garcia-lorca/pkg/pubsub/gcp"
 	"github.com/garcia-lorca/services/comms/internal/adapters/fcm"
+	"github.com/garcia-lorca/services/comms/internal/adapters/studentsclient"
 	"github.com/garcia-lorca/services/comms/internal/handler"
 	repoadapter "github.com/garcia-lorca/services/comms/internal/repo"
 	"github.com/garcia-lorca/services/comms/internal/service"
@@ -51,6 +52,9 @@ const (
 	defaultTenant = "00000000-0000-0000-0000-000000000001"
 	// defaultPubSubProject matches the project the compose emulator starts with.
 	defaultPubSubProject = "garcia-lorca-local"
+	// defaultStudentsBaseURL is the students service on its local port; compose
+	// overrides it with the in-network http://students:8080.
+	defaultStudentsBaseURL = "http://localhost:8092"
 
 	readHeaderTimeout = 10 * time.Second
 	readTimeout       = 30 * time.Second
@@ -112,11 +116,16 @@ func run(ctx context.Context, log *slog.Logger) error {
 	}
 
 	repo := repoadapter.New(db, tenantID)
+	// WHO a notification reaches is students' knowledge, read by RPC on every
+	// push: the student's guardians, then the devices those users registered here.
+	// http.DefaultClient speaks Connect over HTTP/1.1, sufficient for this unary
+	// call (mirrors attendance and grades).
+	guardians := studentsclient.New(envOr("STUDENTS_BASE_URL", defaultStudentsBaseURL), http.DefaultClient)
 	// Push is the courtesy on top of the durable feed, and only the logging sender
 	// ships in this phase (see adapters/fcm): the real Firebase client needs a
-	// credential and the guardian↔student link that says WHICH devices to reach.
+	// service-account credential in the secret manager.
 	sender := fcm.NewLogSender(log)
-	svc := service.NewCommsService(repo, sender, tenantID, uuid.NewString, time.Now, log)
+	svc := service.NewCommsService(repo, guardians, sender, tenantID, uuid.NewString, time.Now, log)
 
 	mux := http.NewServeMux()
 	path, connectHandler := commsv1connect.NewCommsServiceHandler(handler.NewCommsHandler(svc, tenantID), connect.WithRecover(recoverFn))

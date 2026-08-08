@@ -82,3 +82,39 @@ type EnrollmentRepository interface {
 	// SetEnrollmentStatus updates an enrollment's status (e.g. to withdrawn).
 	SetEnrollmentStatus(ctx context.Context, id string, status domain.EnrollmentStatus) error
 }
+
+// GuardianRepository loads and persists guardian ↔ student links. All access is
+// tenant-scoped for RLS (the adapter binds app.current_tenant per transaction, as
+// in students/enrollments).
+type GuardianRepository interface {
+	// Link inserts a guardian ↔ student link. A duplicate
+	// (guardian, student) per tenant is KindConflict.
+	Link(ctx context.Context, l domain.GuardianLink) error
+	// Unlink removes a link. An unknown (or invisible) link is KindNotFound.
+	Unlink(ctx context.Context, guardianUserID, studentID string) error
+	// ListByStudent returns the links of one student (its guardians).
+	ListByStudent(ctx context.Context, studentID string) ([]domain.GuardianLink, error)
+	// ListByGuardian returns the links of one guardian (their students).
+	ListByGuardian(ctx context.Context, guardianUserID string) ([]domain.GuardianLink, error)
+}
+
+// UserRef is the students-owned view of an iam user: the minimum the guardian
+// link needs to decide whether the referenced principal may be a guardian — its
+// identity, account status, and the names of the roles it holds. Both are
+// decision inputs and both are enforced: only an ACTIVE user holding the guardian
+// role may be linked. Status carries iam's UserStatus enum in its string form
+// (e.g. "USER_STATUS_ACTIVE"), which is what the iamclient adapter projects.
+type UserRef struct {
+	ID     string
+	Status string
+	Roles  []string
+}
+
+// UserReader resolves a user against the iam bounded context (by RPC). Like
+// CatalogValidator it is a consumer-defined seam: the use case depends on this
+// interface and stays testable with a fake, while the real adapter is a Connect
+// client to iam. A missing user is reported as glerrors.ErrNotFound
+// (KindNotFound); any other error propagates unchanged.
+type UserReader interface {
+	ByID(ctx context.Context, userID string) (UserRef, error)
+}

@@ -27,13 +27,22 @@ func IsValidPermission(s string) bool {
 // admin surface refuses to grant them to any other role — see the security
 // carry-forward in deploy/README.
 //
-// TEMPORARY: lift this once per-object scoping (guardian sees only their child,
-// teacher only their assigned groups — Phase 9b) lands and the reads are filtered
-// by the caller's scope rather than by the tenant alone.
+// guardians:read/write are here for a different reason: they don't read student
+// data directly, but they COMPOSE into it — a holder can link itself to every
+// student and then read every family's notifications through /api/v1/family/*.
+// Keeping the guard closed under composition (not just over a hand-picked list of
+// direct reads) means guardian management stays owner-only until the grant-subset
+// gap ("grant only permissions you hold") is closed.
+//
+// TEMPORARY: lift the direct reads once per-object scoping (guardian sees only
+// their child, teacher only their assigned groups) is enforced on those admin
+// endpoints; the family path is already self-scoped (gateway /api/v1/family/*).
 var ownerOnlyPermissions = map[string]struct{}{
 	"finance:read":    {},
 	"attendance:read": {},
 	"comms:read":      {},
+	"guardians:read":  {},
+	"guardians:write": {},
 }
 
 // IsOwnerOnly reports whether raw is a tenant-wide sensitive read that only the

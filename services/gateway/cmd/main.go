@@ -119,6 +119,12 @@ func main() {
 //	POST /api/v1/auth/login    → per-IP rate limit → proxy to iam Login (unauthenticated)
 //	POST /api/v1/auth/refresh  → rotate both auth cookies via iam RefreshToken
 //	POST /api/v1/auth/logout   → expire both auth cookies (unauthenticated)
+//	POST /api/v1/auth/mobile/login   → per-IP rate limit (SAME limiter as web
+//	                             login) → iam Login → tokens in the BODY, no
+//	                             cookies (unauthenticated)
+//	POST /api/v1/auth/mobile/refresh → iam RefreshToken with the refresh token read
+//	                             from the BODY → rotated pair in the body, no
+//	                             cookies (the refresh token itself authorizes it)
 //	GET  /api/v1/me            → RequireAuth → the caller's principal
 //	GET  /api/v1/features      → resolved module-flag map (frontend gating)
 //	POST /api/v1/students      → ModuleGuard(students) → RequireAuth →
@@ -126,6 +132,19 @@ func main() {
 //	/api/v1/enrollments/...    → ModuleGuard(students) → RequireAuth → rotation →
 //	                             RequirePermission(students:enroll on write,
 //	                             students:read on list/get) → students service
+//	/api/v1/guardians, /guardians/unlink, /students/{studentId}/guardians
+//	                           → ModuleGuard(students) → RequireAuth → rotation →
+//	                             RequirePermission(guardians:write on link/unlink,
+//	                             guardians:read on the list) → students service.
+//	                             Admin surface: it decides who may see a child.
+//	GET  /api/v1/family/notifications → ModuleGuard(comms) → ModuleGuard(students)
+//	                             → RequireAuth → rotation →
+//	                             RequirePermission(family:read) → students
+//	                             ListStudentsForGuardian(PRINCIPAL) then comms
+//	                             ListNotifications per child, newest first. It
+//	                             composes two modules, so EITHER flag OFF ⇒ 404.
+//	                             Scoped by construction: the caller reads only their
+//	                             own children, no request field can widen it.
 //	/api/v1/config/...         → ModuleGuard(config) → RequireAuth → rotation →
 //	                             RequirePermission(config:write on POST, config:read
 //	                             on GET) → config (academic catalog) service
@@ -172,6 +191,13 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 
 	mux.Handle("POST /api/v1/auth/login", loginLimiter.Middleware(http.HandlerFunc(authH.Login)))
 	mux.HandleFunc("POST /api/v1/auth/refresh", authH.Refresh)
+	// Phase 9b mobile auth: the same iam Login/RefreshToken, different credential
+	// posture (tokens in the body, no cookies — see handler/auth.go). Both are
+	// unauthenticated like their web siblings, and MobileLogin shares the SAME
+	// per-IP loginLimiter instance, so a brute-force attempt cannot dodge the
+	// budget by switching to the mobile door.
+	mux.Handle("POST /api/v1/auth/mobile/login", loginLimiter.Middleware(http.HandlerFunc(authH.MobileLogin)))
+	mux.HandleFunc("POST /api/v1/auth/mobile/refresh", authH.MobileRefresh)
 	mux.Handle("GET /api/v1/me", requireAuthChanged(http.HandlerFunc(authH.Me)))
 	// change-password is the one deliberate exception: it stays reachable while
 	// the must-change flag is set, so it authenticates but does NOT enforce.
@@ -207,6 +233,22 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/enrollments/{id}", studentsRead(enrollH.GetEnrollment))
 	mux.Handle("POST /api/v1/enrollments/transfer", studentsWrite(enrollH.Transfer))
 	mux.Handle("POST /api/v1/enrollments/withdraw", studentsWrite(enrollH.Withdraw))
+
+	// Phase 9b guardian links: WHO MAY SEE A CHILD, so it is an admin action with
+	// its own permission pair (guardians:write / guardians:read) — students:* is
+	// deliberately insufficient. Flag-guarded under module_students (the links live
+	// in the students service), authenticated + rotation-enforced. The guardian's
+	// own self-scoped view is /api/v1/family/* below, not these routes.
+	guardiansH := handler.NewGuardiansHandler(studentsClient)
+	guardiansWrite := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("students", requireAuthChanged(middleware.RequirePermission("guardians:write")(http.HandlerFunc(h))))
+	}
+	guardiansRead := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("students", requireAuthChanged(middleware.RequirePermission("guardians:read")(http.HandlerFunc(h))))
+	}
+	mux.Handle("POST /api/v1/guardians", guardiansWrite(guardiansH.LinkGuardian))
+	mux.Handle("POST /api/v1/guardians/unlink", guardiansWrite(guardiansH.UnlinkGuardian))
+	mux.Handle("GET /api/v1/students/{studentId}/guardians", guardiansRead(guardiansH.ListGuardiansForStudent))
 
 	// M04 config (academic catalog): flag-guarded, authenticated + rotation-
 	// enforced, permission-gated. Writes need config:write, reads config:read;
@@ -306,10 +348,9 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// invisible before auth even runs).
 	//
 	// SCOPING CAVEAT: comms:read takes a studentId from the query, so it can
-	// expose ANY student's notifications to any holder of the permission — it is
-	// owner-only for now and is a candidate for the iam IsOwnerOnly guard once
-	// guardian scoping lands (Phase 9b), which is where the caller↔student
-	// relationship gets modelled.
+	// expose ANY student's notifications to any holder of the permission — it stays
+	// owner-only. The guardian-facing read is /api/v1/family/notifications below,
+	// which is scoped by construction and needs no such caveat.
 	commsH := handler.NewCommsHandler(commsClient)
 	commsWrite := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("comms", requireAuthChanged(middleware.RequirePermission("comms:write")(http.HandlerFunc(h))))
@@ -320,6 +361,25 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/comms/devices", commsWrite(commsH.RegisterDevice))
 	mux.Handle("GET /api/v1/comms/notifications", commsRead(commsH.ListNotifications))
 	mux.Handle("POST /api/v1/comms/notifications/{id}/read", commsWrite(commsH.MarkRead))
+
+	// Phase 9b family surface: the guardian's own children's news, composed at the
+	// edge from the students guardian links + the comms inbox. It needs family:read.
+	//
+	// The route READS FROM TWO MODULES, so it is guarded on both (the guards nest):
+	// module_comms OFF or module_students OFF ⇒ 404. Guarding only comms would leave
+	// a route that still calls students ListStudentsForGuardian, so disabling
+	// students would break it instead of hiding it — a disabled module must be
+	// invisible and removable without taking others down with it.
+	//
+	// The child set is derived from the PRINCIPAL, so the caller can only ever read
+	// their own children — no request field can widen the scope. That is why this
+	// route, unlike /comms/notifications, is safe to grant to a parent.
+	familyH := handler.NewFamilyHandler(studentsClient, commsClient)
+	familyRead := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("comms", guard.Protect("students",
+			requireAuthChanged(middleware.RequirePermission("family:read")(http.HandlerFunc(h)))))
+	}
+	mux.Handle("GET /api/v1/family/notifications", familyRead(familyH.Notifications))
 
 	// Phase 6 iam admin (user/role CRUD): flag-guarded (module_iam), authenticated
 	// + rotation-enforced, permission-gated. User routes need users:read (GET) /

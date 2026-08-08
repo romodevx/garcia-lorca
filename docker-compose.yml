@@ -138,6 +138,9 @@ services:
       SERVICE: students
       # The enroll knot validates group/term references against config by RPC.
       CONFIG_BASE_URL: "http://config:8080"
+      # Guardian links validate the guardian user (existence + role) against iam
+      # by RPC — server-to-server, network-private.
+      IAM_BASE_URL: "http://iam:8080"
     ports: ["8092:8080"]
     depends_on:
       postgres:
@@ -145,6 +148,8 @@ services:
       migrate:
         condition: service_completed_successfully
       config:
+        condition: service_started
+      iam:
         condition: service_started
       # student-events publishing needs the emulator reachable.
       pubsub:
@@ -232,12 +237,18 @@ services:
       # an event belonging to another tenant is dropped — a mismatch with the
       # publishers would look like a silent stack rather than a misconfiguration.
       COMMS_TENANT_ID: "00000000-0000-0000-0000-000000000001"
+      # A notification is pushed to the student's GUARDIANS' devices, and who
+      # those guardians are is read from students by RPC — server-to-server,
+      # network-private.
+      STUDENTS_BASE_URL: "http://students:8080"
     ports: ["8096:8080"]
     depends_on:
       postgres:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      students:
+        condition: service_started
       # The subscriber loop needs the emulator reachable at startup: it
       # get-or-creates its own subscription per topic.
       pubsub:

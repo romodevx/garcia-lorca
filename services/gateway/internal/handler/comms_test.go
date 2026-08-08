@@ -12,6 +12,7 @@ import (
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/handler"
+	"github.com/garcia-lorca/services/gateway/internal/middleware"
 )
 
 // fakeComms is a hand-written double for the comms surface the handler needs. It
@@ -56,14 +57,36 @@ func (f *fakeComms) MarkNotificationRead(_ context.Context, id string) (client.N
 
 // --- register a device -----------------------------------------------------
 
+// callerRequest builds a request carrying the principal RequireAuth injects in
+// production, so handlers that derive identity from the caller (never from the
+// body) are exercised the way they actually run.
+func callerRequest(method, target, body, userID string) *http.Request {
+	var r *http.Request
+	if body == "" {
+		r = httptest.NewRequest(method, target, nil)
+	} else {
+		r = httptest.NewRequest(method, target, strings.NewReader(body))
+	}
+	return r.WithContext(middleware.WithPrincipal(r.Context(), middleware.Principal{
+		UserID: userID, TenantID: "t1", Email: "mama@example.com", Permissions: []string{"comms:write"},
+	}))
+}
+
+func doCallerReq(t *testing.T, hf http.HandlerFunc, method, target, body, userID string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	hf(rec, callerRequest(method, target, body, userID))
+	return rec
+}
+
 func TestCommsRegisterDeviceReturnsDevice(t *testing.T) {
 	svc := &fakeComms{device: client.Device{
 		ID: "dev-1", TenantID: "t1", UserID: "usr-1", FcmToken: "tok-abc", Platform: "android",
 	}}
 	h := handler.NewCommsHandler(svc)
 
-	rec := doReq(t, h.RegisterDevice, http.MethodPost, "/api/v1/comms/devices",
-		`{"userId":"usr-1","fcmToken":"tok-abc","platform":"android"}`)
+	rec := doCallerReq(t, h.RegisterDevice, http.MethodPost, "/api/v1/comms/devices",
+		`{"fcmToken":"tok-abc","platform":"android"}`, "usr-1")
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -81,9 +104,40 @@ func TestCommsRegisterDeviceReturnsDevice(t *testing.T) {
 	}
 }
 
+// A device is ALWAYS registered for the authenticated caller. A userId in the
+// body is ignored, otherwise any comms:write holder could point another
+// family's push notifications at their own phone.
+func TestCommsRegisterDeviceIgnoresBodySuppliedUserID(t *testing.T) {
+	svc := &fakeComms{device: client.Device{ID: "dev-1", UserID: "usr-1", FcmToken: "tok-abc"}}
+	h := handler.NewCommsHandler(svc)
+
+	rec := doCallerReq(t, h.RegisterDevice, http.MethodPost, "/api/v1/comms/devices",
+		`{"userId":"victim-usr","fcmToken":"tok-abc","platform":"android"}`, "usr-1")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if svc.deviceUserID != "usr-1" {
+		t.Errorf("device owner = %q, want the principal's usr-1 (the body must not decide it)", svc.deviceUserID)
+	}
+}
+
+func TestCommsRegisterDeviceWithoutPrincipalIs401(t *testing.T) {
+	svc := &fakeComms{}
+	h := handler.NewCommsHandler(svc)
+	rec := doReq(t, h.RegisterDevice, http.MethodPost, "/api/v1/comms/devices",
+		`{"fcmToken":"tok-abc","platform":"android"}`)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+	if svc.deviceUserID != "" {
+		t.Errorf("comms was called with owner %q; an unauthenticated request must register nothing", svc.deviceUserID)
+	}
+}
+
 func TestCommsRegisterDeviceInvalidBodyIs400(t *testing.T) {
 	h := handler.NewCommsHandler(&fakeComms{})
-	rec := doReq(t, h.RegisterDevice, http.MethodPost, "/api/v1/comms/devices", `{`)
+	rec := doCallerReq(t, h.RegisterDevice, http.MethodPost, "/api/v1/comms/devices", `{`, "usr-1")
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)
 	}
@@ -95,8 +149,8 @@ func TestCommsRegisterDeviceInvalidBodyIs400(t *testing.T) {
 func TestCommsRegisterDeviceUnknownPlatformIs400(t *testing.T) {
 	svc := &fakeComms{err: connect.NewError(connect.CodeInvalidArgument, nil)}
 	h := handler.NewCommsHandler(svc)
-	rec := doReq(t, h.RegisterDevice, http.MethodPost, "/api/v1/comms/devices",
-		`{"userId":"usr-1","fcmToken":"tok-abc","platform":"blackberry"}`)
+	rec := doCallerReq(t, h.RegisterDevice, http.MethodPost, "/api/v1/comms/devices",
+		`{"fcmToken":"tok-abc","platform":"blackberry"}`, "usr-1")
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)
 	}

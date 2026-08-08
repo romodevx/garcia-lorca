@@ -182,6 +182,92 @@ func (c *StudentsClient) WithdrawEnrollment(ctx context.Context, id string) (Enr
 	return toEnrollment(res.Msg.GetEnrollment()), nil
 }
 
+// --- guardian links -------------------------------------------------------
+
+// GuardianLink is the edge's view of a guardian↔student link. GuardianUserID
+// references an iam user, which the students service validates by RPC (services
+// own their own tables, so it is not an FK). Relationship is one of
+// mother|father|guardian|other.
+type GuardianLink struct {
+	ID             string
+	TenantID       string
+	GuardianUserID string
+	StudentID      string
+	Relationship   string
+}
+
+// LinkGuardian links a guardian (an iam user) to a student. Connect error codes
+// propagate so the handler maps them to HTTP status: AlreadyExists for a
+// duplicate link, and InvalidArgument for an unknown user, an unknown student, a
+// user without the guardian role, or a bad relationship — the students service
+// validates every reference in the request as an argument, so none of them is a
+// NotFound.
+func (c *StudentsClient) LinkGuardian(ctx context.Context, guardianUserID, studentID, relationship string) (GuardianLink, error) {
+	res, err := c.rpc.LinkGuardian(ctx, connect.NewRequest(&studentsv1.LinkGuardianRequest{
+		GuardianUserId: guardianUserID,
+		StudentId:      studentID,
+		Relationship:   relationship,
+	}))
+	if err != nil {
+		return GuardianLink{}, err
+	}
+	return toGuardianLink(res.Msg.GetLink()), nil
+}
+
+// UnlinkGuardian removes a guardian↔student link. It is NOT idempotent: the
+// students service answers NotFound when the pair is not linked, which the edge
+// surfaces as 404 so an admin revoking access learns there was nothing to revoke.
+func (c *StudentsClient) UnlinkGuardian(ctx context.Context, guardianUserID, studentID string) error {
+	_, err := c.rpc.UnlinkGuardian(ctx, connect.NewRequest(&studentsv1.UnlinkGuardianRequest{
+		GuardianUserId: guardianUserID,
+		StudentId:      studentID,
+	}))
+	return err
+}
+
+// ListGuardiansForStudent lists the guardians linked to one student — the admin
+// view of "who may see this child".
+func (c *StudentsClient) ListGuardiansForStudent(ctx context.Context, studentID string) ([]GuardianLink, error) {
+	res, err := c.rpc.ListGuardiansForStudent(ctx, connect.NewRequest(&studentsv1.ListGuardiansForStudentRequest{
+		StudentId: studentID,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	return toGuardianLinks(res.Msg.GetLinks()), nil
+}
+
+// ListStudentsForGuardian lists the students linked to one guardian. This is the
+// scoping primitive of the family surface: the caller's own children, derived
+// from the authenticated principal, never from the request.
+func (c *StudentsClient) ListStudentsForGuardian(ctx context.Context, guardianUserID string) ([]GuardianLink, error) {
+	res, err := c.rpc.ListStudentsForGuardian(ctx, connect.NewRequest(&studentsv1.ListStudentsForGuardianRequest{
+		GuardianUserId: guardianUserID,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	return toGuardianLinks(res.Msg.GetLinks()), nil
+}
+
+func toGuardianLinks(links []*studentsv1.GuardianLink) []GuardianLink {
+	out := make([]GuardianLink, 0, len(links))
+	for _, l := range links {
+		out = append(out, toGuardianLink(l))
+	}
+	return out
+}
+
+func toGuardianLink(l *studentsv1.GuardianLink) GuardianLink {
+	return GuardianLink{
+		ID:             l.GetId(),
+		TenantID:       l.GetTenantId(),
+		GuardianUserID: l.GetGuardianUserId(),
+		StudentID:      l.GetStudentId(),
+		Relationship:   l.GetRelationship(),
+	}
+}
+
 func toEnrollment(e *studentsv1.Enrollment) Enrollment {
 	return Enrollment{
 		ID:         e.GetId(),

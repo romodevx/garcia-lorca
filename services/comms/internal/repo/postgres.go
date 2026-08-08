@@ -17,8 +17,7 @@ import (
 var _ service.Repo = (*Repo)(nil)
 
 // maxListLimit caps the unpaginated reads, so neither a long-lived notification
-// feed nor a tenant-wide push fanout can pull an unbounded number of rows into
-// memory. It is a DOCUMENTED bound, not a hidden one: the capped methods say so,
+// feed nor a push fanout can pull an unbounded number of rows into memory. It is a DOCUMENTED bound, not a hidden one: the capped methods say so,
 // as does the proto contract. Explicit pagination is the follow-up that removes
 // the need for it.
 const maxListLimit = 500
@@ -185,21 +184,26 @@ func (r *Repo) UpsertDevice(ctx context.Context, d service.Device) (service.Devi
 	return out, nil
 }
 
-// DevicesForTenant returns the tenant's push targets, AT MOST maxListLimit of
-// them, ordered by (created_at, id) so the set a push fans out to is
-// deterministic.
+// DevicesForUsers returns the push targets owned by any of userIDs — for a
+// notification, its student's guardians — AT MOST maxListLimit of them, ordered by
+// (created_at, id) so the set a push fans out to is deterministic.
 //
-// Targeting is deliberately coarse in this phase: the guardian↔student link that
-// would say WHICH devices belong to a notification's student does not exist yet,
-// so the push goes tenant-wide while the per-student feed — the durable part of
-// the product — is already exact. Narrowing this to a student's guardians is the
-// carry-forward, and it is why the push is a courtesy rather than the delivery
-// guarantee.
-func (r *Repo) DevicesForTenant(ctx context.Context) ([]service.Device, error) {
+// It is ONE query with an IN filter, never one per user: a family of four
+// guardians must cost the consumer a single round trip, and the same shape holds
+// as guardian lists grow. No userIDs returns no targets WITHOUT querying: an
+// audience of nobody has no possible result, and `IN ()` is not valid SQL.
+//
+// The read is tenant-bound like every other, so a user id that also exists in
+// another tenant contributes only the devices registered in ours.
+func (r *Repo) DevicesForUsers(ctx context.Context, userIDs []string) ([]service.Device, error) {
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
 	var out []service.Device
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var rows []deviceModel
 		if err := tx.Model(&deviceModel{}).
+			Where("user_id IN ?", userIDs).
 			Order("created_at ASC, id ASC").
 			Limit(maxListLimit).
 			Find(&rows).Error; err != nil {

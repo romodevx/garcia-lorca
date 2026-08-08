@@ -6,9 +6,9 @@
 // of calling Firebase, which is enough to develop and demo the whole consumer
 // path (the durable feed is the product; push is the courtesy on top). Wiring the
 // real Firebase Cloud Messaging client is a deliberate carry-forward — it needs a
-// service-account credential in the secret manager and, more importantly, the
-// guardian↔student link that tells us WHICH devices a notification belongs to
-// (see service.Repo.DevicesForTenant).
+// service-account credential in the secret manager. WHICH devices a notification
+// belongs to is already exact: the service targets the student's guardians (see
+// service.GuardianReader and service.Repo.DevicesForUsers).
 package fcm
 
 import (
@@ -46,9 +46,9 @@ func NewLogSender(log *slog.Logger) *LogSender {
 // The notification body is family-facing content and stays out of the log too;
 // the title is enough to tell deliveries apart.
 //
-// Pushing to nobody is a no-op, not a log line: with targeting still tenant-wide
-// (see service.Repo.DevicesForTenant), an empty device list is the ordinary state
-// of a tenant that has registered none.
+// Pushing to nobody is a no-op, not a log line: a student whose guardians have
+// registered no device is the ordinary state of a school still onboarding its
+// families, and the service already reports the cases worth looking at.
 func (s *LogSender) Push(_ context.Context, tokens []string, title, _ string) error {
 	if len(tokens) == 0 {
 		return nil

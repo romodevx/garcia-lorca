@@ -142,6 +142,95 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, refreshResponse{ExpiresIn: res.ExpiresIn})
 }
 
+// --- mobile credential posture ---------------------------------------------
+//
+// The gateway serves TWO credential postures from the same iam auth surface:
+//
+//   - WEB (Login/Refresh above): both tokens live ONLY in HttpOnly, Secure,
+//     SameSite=Strict cookies and never appear in a response body, so browser JS
+//     cannot read them (XSS-resistant). The browser replays them automatically.
+//   - MOBILE (MobileLogin/MobileRefresh below): both tokens are returned in the
+//     JSON body and NO cookie is set. A React Native client has no cookie jar; it
+//     stores the pair in the OS keychain (expo-secure-store) and sends the access
+//     token as "Authorization: Bearer …" — which middleware.TokenFrom already
+//     accepts, so the authenticated routes need no change.
+//
+// The postures must not bleed into each other: a token in the web body would
+// defeat HttpOnly, and a cookie on the mobile response would be dead weight the
+// client cannot manage. Each is pinned by a test.
+
+// mobileLoginResponse carries the token pair IN THE BODY — the mobile posture.
+type mobileLoginResponse struct {
+	AccessToken        string `json:"accessToken"`
+	RefreshToken       string `json:"refreshToken"`
+	ExpiresIn          int64  `json:"expiresIn"`
+	MustChangePassword bool   `json:"mustChangePassword"`
+}
+
+// mobileRefreshResponse carries the rotated pair. It omits mustChangePassword:
+// iam's RefreshToken does not report it, and an always-false field would lie.
+type mobileRefreshResponse struct {
+	AccessToken  string `json:"accessToken"`
+	RefreshToken string `json:"refreshToken"`
+	ExpiresIn    int64  `json:"expiresIn"`
+}
+
+// mobileRefreshRequest carries the refresh token in the BODY: a mobile client has
+// no cookie jar, so the body is the only credential source. The token itself is
+// what authorizes the call, which is why the route needs no access token.
+type mobileRefreshRequest struct {
+	RefreshToken string `json:"refreshToken"`
+}
+
+// MobileLogin handles POST /api/v1/auth/mobile/login. It calls the same iam Login
+// as the web handler but returns both tokens in the body and sets NO cookies (see
+// the posture note above). It is unauthenticated, so it MUST stay behind the same
+// per-IP login rate limiter as the web login.
+func (h *AuthHandler) MobileLogin(w http.ResponseWriter, r *http.Request) {
+	var req loginRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	res, err := h.auth.Login(r.Context(), req.Email, req.Password)
+	if err != nil {
+		http.Error(w, http.StatusText(httpStatusFor(err)), httpStatusFor(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, mobileLoginResponse{
+		AccessToken:        res.AccessToken,
+		RefreshToken:       res.RefreshToken,
+		ExpiresIn:          res.ExpiresIn,
+		MustChangePassword: res.MustChangePassword,
+	})
+}
+
+// MobileRefresh handles POST /api/v1/auth/mobile/refresh. Unlike the web Refresh
+// it reads the refresh token from the BODY (never a cookie) and returns the
+// rotated pair in the body, setting no cookies. A missing token is 401, exactly
+// like a missing refresh cookie on the web route.
+func (h *AuthHandler) MobileRefresh(w http.ResponseWriter, r *http.Request) {
+	var req mobileRefreshRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.RefreshToken == "" {
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+	}
+	res, err := h.auth.Refresh(r.Context(), req.RefreshToken)
+	if err != nil {
+		http.Error(w, http.StatusText(httpStatusFor(err)), httpStatusFor(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, mobileRefreshResponse{
+		AccessToken:  res.AccessToken,
+		RefreshToken: res.RefreshToken,
+		ExpiresIn:    res.ExpiresIn,
+	})
+}
+
 type meResponse struct {
 	UserID      string   `json:"userId"`
 	TenantID    string   `json:"tenantId"`

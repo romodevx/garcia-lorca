@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -23,7 +24,13 @@ const (
 	tenantID      = "11111111-1111-1111-1111-111111111111"
 	otherTenantID = "22222222-2222-2222-2222-222222222222"
 	studentID     = "aaaaaaaa-0000-0000-0000-000000000001"
+
+	// userID is studentID's guardian in the default fixture, so the push tests
+	// below reach the device it owns. The other two are a second guardian and a
+	// user linked to NO student — the one nobody may ever be pushed to.
 	userID        = "bbbbbbbb-0000-0000-0000-000000000001"
+	guardianTwoID = "bbbbbbbb-0000-0000-0000-000000000002"
+	strangerID    = "bbbbbbbb-0000-0000-0000-0000000000ff"
 
 	// Ids of already-materialised notifications, in the uuid form the column
 	// holds: the service validates the shape before the id reaches Postgres.
@@ -45,9 +52,10 @@ type fakeRepo struct {
 	notifications []service.Notification
 	devices       []service.Device
 
-	recordCalls  int
-	deviceCalls  int
-	lastListArgs [2]string // studentID, "unread"|"all"
+	recordCalls   int
+	deviceCalls   int
+	lastListArgs  [2]string // studentID, "unread"|"all"
+	lastDeviceIDs []string  // the user ids the last device lookup was scoped to
 
 	recordErr  error
 	devicesErr error
@@ -113,12 +121,49 @@ func (f *fakeRepo) UpsertDevice(_ context.Context, d service.Device) (service.De
 	return d, nil
 }
 
-func (f *fakeRepo) DevicesForTenant(_ context.Context) ([]service.Device, error) {
+// DevicesForUsers keeps the real adapter's semantics: only the devices OWNED by
+// one of userIDs come back, so a test that pushes to the wrong people fails here
+// rather than in production.
+func (f *fakeRepo) DevicesForUsers(_ context.Context, userIDs []string) ([]service.Device, error) {
 	f.deviceCalls++
+	f.lastDeviceIDs = append([]string(nil), userIDs...)
 	if f.devicesErr != nil {
 		return nil, f.devicesErr
 	}
-	return f.devices, nil
+	wanted := make(map[string]bool, len(userIDs))
+	for _, id := range userIDs {
+		wanted[id] = true
+	}
+	out := make([]service.Device, 0, len(userIDs))
+	for _, d := range f.devices {
+		if wanted[d.UserID] {
+			out = append(out, d)
+		}
+	}
+	return out, nil
+}
+
+// fakeGuardians is the students bounded context as comms sees it: which users are
+// a given student's guardians. It records how often it was asked and can be made
+// to fail, which is how the best-effort contract of the push path is proven.
+type fakeGuardians struct {
+	links map[string][]string
+	calls int
+	err   error
+}
+
+// newFakeGuardians is the default fixture: studentID's only guardian is userID,
+// the owner of the device the push tests seed.
+func newFakeGuardians() *fakeGuardians {
+	return &fakeGuardians{links: map[string][]string{studentID: {userID}}}
+}
+
+func (f *fakeGuardians) GuardiansForStudent(_ context.Context, studentID string) ([]string, error) {
+	f.calls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.links[studentID], nil
 }
 
 // spySender records what it was asked to push and can be made to fail, which is
@@ -142,7 +187,7 @@ func (s *spySender) Push(_ context.Context, tokens []string, title, body string)
 
 // newService wires a deterministic service: ids come from a counter and the
 // clock is fixed, so every assertion below is on an exact value.
-func newService(t *testing.T, repo service.Repo, sender service.Sender) (*service.CommsService, *bytes.Buffer) {
+func newService(t *testing.T, repo service.Repo, guardians service.GuardianReader, sender service.Sender) (*service.CommsService, *bytes.Buffer) {
 	t.Helper()
 	var logs bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
@@ -152,7 +197,7 @@ func newService(t *testing.T, repo service.Repo, sender service.Sender) (*servic
 		ids++
 		return "id-" + string(rune('0'+ids))
 	}
-	return service.NewCommsService(repo, sender, tenantID, newID, func() time.Time { return fixedNow }, log), &logs
+	return service.NewCommsService(repo, guardians, sender, tenantID, newID, func() time.Time { return fixedNow }, log), &logs
 }
 
 // absenceMessage builds the transport message attendance publishes for an
@@ -219,7 +264,7 @@ func TestHandleEventMaterialisesAnAbsence(t *testing.T) {
 		t.Fatalf("seed device: %v", err)
 	}
 	sender := &spySender{}
-	svc, _ := newService(t, repo, sender)
+	svc, _ := newService(t, repo, newFakeGuardians(), sender)
 
 	msg := absenceMessage(t, "eeeeeeee-0000-0000-0000-000000000001", studentID, tenantID, "2026-08-06")
 	if err := svc.HandleEvent(context.Background(), msg); err != nil {
@@ -270,7 +315,7 @@ func TestHandleEventMaterialisesAnAbsence(t *testing.T) {
 func TestHandleEventIsIdempotent(t *testing.T) {
 	repo := newFakeRepo()
 	sender := &spySender{}
-	svc, _ := newService(t, repo, sender)
+	svc, _ := newService(t, repo, newFakeGuardians(), sender)
 	ctx := context.Background()
 	// A registered device, so "the push happened exactly once" is an assertion
 	// about the redelivery rather than about there being nobody to notify.
@@ -299,7 +344,7 @@ func TestHandleEventIsIdempotent(t *testing.T) {
 // two different events must not collide just because they share a student.
 func TestHandleEventDistinctEventsBothLand(t *testing.T) {
 	repo := newFakeRepo()
-	svc, _ := newService(t, repo, &spySender{})
+	svc, _ := newService(t, repo, newFakeGuardians(), &spySender{})
 	ctx := context.Background()
 
 	first := absenceMessage(t, "eeeeeeee-0000-0000-0000-000000000003", studentID, tenantID, "2026-08-06")
@@ -321,6 +366,129 @@ func TestHandleEventDistinctEventsBothLand(t *testing.T) {
 	}
 }
 
+// TestHandleEventPushesOnlyToTheStudentsGuardians is the targeting contract of
+// this phase, and the reason the guardian reader exists: a notification reaches
+// the devices of the student's OWN guardians and nobody else's. The stranger's
+// device is the assertion that matters — a family being pushed another family's
+// absence is a privacy incident, not a cosmetic bug.
+func TestHandleEventPushesOnlyToTheStudentsGuardians(t *testing.T) {
+	repo := newFakeRepo()
+	repo.devices = []service.Device{
+		{ID: "device-1", UserID: userID, FCMToken: "token-guardian-one", Platform: "ios"},
+		{ID: "device-2", UserID: guardianTwoID, FCMToken: "token-guardian-two", Platform: "android"},
+		{ID: "device-3", UserID: strangerID, FCMToken: "token-stranger", Platform: "web"},
+	}
+	guardians := &fakeGuardians{links: map[string][]string{studentID: {userID, guardianTwoID}}}
+	sender := &spySender{}
+	svc, _ := newService(t, repo, guardians, sender)
+
+	msg := absenceMessage(t, "eeeeeeee-0000-0000-0000-000000000020", studentID, tenantID, "2026-08-06")
+	if err := svc.HandleEvent(context.Background(), msg); err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+
+	if guardians.calls != 1 {
+		t.Errorf("the guardian reader was asked %d times, want 1 (once per notification)", guardians.calls)
+	}
+	if want := []string{userID, guardianTwoID}; !slices.Equal(repo.lastDeviceIDs, want) {
+		t.Errorf("devices were looked up for %v, want exactly the student's guardians %v", repo.lastDeviceIDs, want)
+	}
+	if sender.calls != 1 {
+		t.Fatalf("sender called %d times, want 1", sender.calls)
+	}
+	want := []string{"token-guardian-one", "token-guardian-two"}
+	if !slices.Equal(sender.tokens, want) {
+		t.Errorf("pushed tokens = %v, want %v — no device outside the student's family", sender.tokens, want)
+	}
+}
+
+// TestHandleEventWithNoGuardiansPushesNothing covers the ordinary state of a
+// student whose family has not been linked yet: the feed entry is still stored
+// (it is the durable product), there is simply nobody to push to. It is not an
+// error, and the devices are not even read — a lookup scoped to nobody would be
+// a query with no possible result.
+func TestHandleEventWithNoGuardiansPushesNothing(t *testing.T) {
+	repo := newFakeRepo()
+	repo.devices = []service.Device{
+		{ID: "device-3", UserID: strangerID, FCMToken: "token-stranger", Platform: "web"},
+	}
+	guardians := &fakeGuardians{links: map[string][]string{}}
+	sender := &spySender{}
+	svc, _ := newService(t, repo, guardians, sender)
+
+	msg := absenceMessage(t, "eeeeeeee-0000-0000-0000-000000000021", studentID, tenantID, "2026-08-06")
+	if err := svc.HandleEvent(context.Background(), msg); err != nil {
+		t.Fatalf("a student with no guardians must not fail HandleEvent: %v", err)
+	}
+	if len(repo.notifications) != 1 {
+		t.Errorf("stored %d notifications, want 1 — the feed is exact regardless of push", len(repo.notifications))
+	}
+	if repo.deviceCalls != 0 {
+		t.Errorf("devices were read %d times, want 0 when the student has no guardians", repo.deviceCalls)
+	}
+	if sender.calls != 0 {
+		t.Errorf("sender called %d times, want 0 — there is nobody to notify", sender.calls)
+	}
+}
+
+// TestHandleEventGuardianLookupFailureIsBestEffort covers the new failure mode
+// the cross-service call introduces: students being unreachable must cost us the
+// push, never the stored notification — the event is already claimed, so failing
+// the handler would drop it instead of retrying it.
+func TestHandleEventGuardianLookupFailureIsBestEffort(t *testing.T) {
+	repo := newFakeRepo()
+	repo.devices = []service.Device{{ID: "device-1", UserID: userID, FCMToken: "token-abc"}}
+	guardians := newFakeGuardians()
+	guardians.err = errors.New("students unavailable")
+	sender := &spySender{}
+	svc, logs := newService(t, repo, guardians, sender)
+
+	msg := absenceMessage(t, "eeeeeeee-0000-0000-0000-000000000022", studentID, tenantID, "2026-08-06")
+	if err := svc.HandleEvent(context.Background(), msg); err != nil {
+		t.Fatalf("a guardian-lookup failure must not fail HandleEvent: %v", err)
+	}
+	if len(repo.notifications) != 1 {
+		t.Errorf("stored %d notifications, want 1", len(repo.notifications))
+	}
+	if repo.deviceCalls != 0 {
+		t.Errorf("devices were read %d times, want 0 when the targets are unknown", repo.deviceCalls)
+	}
+	if sender.calls != 0 {
+		t.Errorf("sender called %d times, want 0 — pushing to a guessed audience is worse than not pushing", sender.calls)
+	}
+	if !strings.Contains(logs.String(), "students unavailable") {
+		t.Errorf("the failed guardian lookup was not logged; logs = %q", logs.String())
+	}
+}
+
+// TestHandleEventNilGuardianReaderIsSupported proves a half-wired composition
+// root degrades rather than panicking: without a way to resolve WHO to notify,
+// the feed is still materialised, nothing is pushed, and the misconfiguration is
+// reported instead of looking like a quiet stack.
+func TestHandleEventNilGuardianReaderIsSupported(t *testing.T) {
+	repo := newFakeRepo()
+	repo.devices = []service.Device{{ID: "device-1", UserID: userID, FCMToken: "token-abc"}}
+	sender := &spySender{}
+	svc, logs := newService(t, repo, nil, sender)
+
+	msg := absenceMessage(t, "eeeeeeee-0000-0000-0000-000000000023", studentID, tenantID, "2026-08-06")
+	if err := svc.HandleEvent(context.Background(), msg); err != nil {
+		t.Fatalf("HandleEvent with no guardian reader: %v", err)
+	}
+	if len(repo.notifications) != 1 {
+		t.Errorf("stored %d notifications, want 1", len(repo.notifications))
+	}
+	if repo.deviceCalls != 0 {
+		t.Errorf("devices were read %d times, want 0 without a guardian reader", repo.deviceCalls)
+	}
+	if sender.calls != 0 {
+		t.Errorf("sender called %d times, want 0 — an untargetable push must not fan out", sender.calls)
+	}
+	if logs.Len() == 0 {
+		t.Error("a service that cannot target its pushes must say so, not go quiet")
+	}
+}
+
 // TestHandleEventPushFailureIsBestEffort pins the durability rule: the
 // notification is already stored, so a dead push must not fail the handler —
 // returning an error would redeliver the event and (once the ledger has claimed
@@ -334,7 +502,7 @@ func TestHandleEventPushFailureIsBestEffort(t *testing.T) {
 		t.Fatalf("seed device: %v", err)
 	}
 	sender := &spySender{err: errors.New("fcm unreachable")}
-	svc, logs := newService(t, repo, sender)
+	svc, logs := newService(t, repo, newFakeGuardians(), sender)
 
 	msg := absenceMessage(t, "eeeeeeee-0000-0000-0000-000000000004", studentID, tenantID, "2026-08-06")
 	if err := svc.HandleEvent(context.Background(), msg); err != nil {
@@ -354,7 +522,7 @@ func TestHandleEventDeviceLookupFailureIsBestEffort(t *testing.T) {
 	repo := newFakeRepo()
 	repo.devicesErr = errors.New("devices unavailable")
 	sender := &spySender{}
-	svc, logs := newService(t, repo, sender)
+	svc, logs := newService(t, repo, newFakeGuardians(), sender)
 
 	msg := absenceMessage(t, "eeeeeeee-0000-0000-0000-000000000005", studentID, tenantID, "2026-08-06")
 	if err := svc.HandleEvent(context.Background(), msg); err != nil {
@@ -375,7 +543,7 @@ func TestHandleEventDeviceLookupFailureIsBestEffort(t *testing.T) {
 // without a sender still materialises the feed and never touches the devices.
 func TestHandleEventNilSenderIsSupported(t *testing.T) {
 	repo := newFakeRepo()
-	svc, _ := newService(t, repo, nil)
+	svc, _ := newService(t, repo, newFakeGuardians(), nil)
 
 	msg := absenceMessage(t, "eeeeeeee-0000-0000-0000-000000000006", studentID, tenantID, "2026-08-06")
 	if err := svc.HandleEvent(context.Background(), msg); err != nil {
@@ -395,7 +563,7 @@ func TestHandleEventNilSenderIsSupported(t *testing.T) {
 func TestHandleEventLedgerFailureRedelivers(t *testing.T) {
 	repo := newFakeRepo()
 	repo.recordErr = errors.New("database down")
-	svc, _ := newService(t, repo, &spySender{})
+	svc, _ := newService(t, repo, newFakeGuardians(), &spySender{})
 
 	msg := absenceMessage(t, "eeeeeeee-0000-0000-0000-000000000007", studentID, tenantID, "2026-08-06")
 	err := svc.HandleEvent(context.Background(), msg)
@@ -458,7 +626,7 @@ func TestHandleEventUnhandledMessagesAreAcked(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newFakeRepo()
 			sender := &spySender{}
-			svc, logs := newService(t, repo, sender)
+			svc, logs := newService(t, repo, newFakeGuardians(), sender)
 
 			if err := svc.HandleEvent(context.Background(), tt.msg); err != nil {
 				t.Fatalf("an unhandleable message must be acked, not failed: %v", err)
@@ -532,7 +700,7 @@ func TestHandleEventRendersEveryNotifiableEvent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newFakeRepo()
-			svc, _ := newService(t, repo, nil)
+			svc, _ := newService(t, repo, newFakeGuardians(), nil)
 
 			if err := svc.HandleEvent(context.Background(), tt.msg); err != nil {
 				t.Fatalf("HandleEvent: %v", err)
@@ -559,7 +727,7 @@ func TestHandleEventRendersEveryNotifiableEvent(t *testing.T) {
 // subscription hands messages to) and not merely a method that looks like one.
 func TestHandleEventOverTheBus(t *testing.T) {
 	repo := newFakeRepo()
-	svc, _ := newService(t, repo, &spySender{})
+	svc, _ := newService(t, repo, newFakeGuardians(), &spySender{})
 
 	bus := pubsub.NewMemoryBus()
 	bus.CreateSubscription("attendance-events", "comms-attendance")
@@ -621,7 +789,7 @@ func TestRegisterDeviceValidatesInput(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newFakeRepo()
-			svc, _ := newService(t, repo, nil)
+			svc, _ := newService(t, repo, newFakeGuardians(), nil)
 
 			_, err := svc.RegisterDevice(context.Background(), tt.userID, tt.token, tt.platform)
 			if err == nil {
@@ -644,7 +812,7 @@ func TestRegisterDeviceAcceptsEveryKnownPlatform(t *testing.T) {
 	for _, platform := range []string{"", "ios", "android", "web"} {
 		t.Run("platform "+platform, func(t *testing.T) {
 			repo := newFakeRepo()
-			svc, _ := newService(t, repo, nil)
+			svc, _ := newService(t, repo, newFakeGuardians(), nil)
 
 			got, err := svc.RegisterDevice(context.Background(), userID, "token-"+platform, platform)
 			if err != nil {
@@ -668,7 +836,7 @@ func TestRegisterDeviceAcceptsEveryKnownPlatform(t *testing.T) {
 // client may call this on every launch.
 func TestRegisterDeviceIsAnUpsert(t *testing.T) {
 	repo := newFakeRepo()
-	svc, _ := newService(t, repo, nil)
+	svc, _ := newService(t, repo, newFakeGuardians(), nil)
 	ctx := context.Background()
 
 	if _, err := svc.RegisterDevice(ctx, userID, "token-shared", "ios"); err != nil {
@@ -692,7 +860,7 @@ func TestRegisterDeviceIsAnUpsert(t *testing.T) {
 // (the badge count depends on it) and that the student id is validated first.
 func TestListNotificationsFiltersUnread(t *testing.T) {
 	repo := newFakeRepo()
-	svc, _ := newService(t, repo, nil)
+	svc, _ := newService(t, repo, newFakeGuardians(), nil)
 	ctx := context.Background()
 
 	repo.notifications = []service.Notification{
@@ -732,7 +900,7 @@ func TestListNotificationsFiltersUnread(t *testing.T) {
 // rather than a silent success.
 func TestMarkNotificationReadIsIdempotent(t *testing.T) {
 	repo := newFakeRepo()
-	svc, _ := newService(t, repo, nil)
+	svc, _ := newService(t, repo, newFakeGuardians(), nil)
 	ctx := context.Background()
 	repo.notifications = []service.Notification{
 		{ID: notifOneID, StudentID: studentID, Type: "absence", Title: "a", Body: "b", CreatedAt: fixedNow},

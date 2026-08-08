@@ -65,6 +65,9 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"users-reader":     {"users:read"},
 		"roles-writer":     {"roles:write", "roles:read"},
 		"roles-reader":     {"roles:read"},
+		"guardian-writer":  {"guardians:write", "guardians:read"},
+		"guardian-reader":  {"guardians:read"},
+		"family-reader":    {"family:read"},
 	}
 	granted, ok := perms[req.Msg.GetAccessToken()]
 	if !ok {
@@ -73,6 +76,28 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 	return connect.NewResponse(&iamv1.ValidateTokenResponse{Claims: &iamv1.Claims{
 		Subject: "u1", TenantId: "t1", Email: "ana@garcialorca.mx", Permissions: granted,
 	}}), nil
+}
+
+// Login on the stub accepts one credential pair, so the mobile-login route can
+// be exercised end to end (tokens must come back in the BODY).
+func (stubIAM) Login(_ context.Context, req *connect.Request[iamv1.LoginRequest]) (*connect.Response[iamv1.LoginResponse], error) {
+	if req.Msg.GetEmail() != "mama@example.com" || req.Msg.GetPassword() != "secret" {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errStr("bad credentials"))
+	}
+	return connect.NewResponse(&iamv1.LoginResponse{
+		AccessToken: "acc-tok", RefreshToken: "ref-tok", ExpiresIn: 900,
+	}), nil
+}
+
+// RefreshToken rotates the canned pair for the one known refresh token, so the
+// mobile refresh route can be exercised end to end.
+func (stubIAM) RefreshToken(_ context.Context, req *connect.Request[iamv1.RefreshTokenRequest]) (*connect.Response[iamv1.RefreshTokenResponse], error) {
+	if req.Msg.GetRefreshToken() != "ref-tok" {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errStr("stale refresh token"))
+	}
+	return connect.NewResponse(&iamv1.RefreshTokenResponse{
+		AccessToken: "acc-tok-2", RefreshToken: "ref-tok-2", ExpiresIn: 900,
+	}), nil
 }
 
 // iam admin RPCs on the stub: enough canned behavior to drive the route-security
@@ -157,6 +182,34 @@ func (stubStudents) Enroll(_ context.Context, req *connect.Request[studentsv1.En
 func (stubStudents) ListEnrollments(_ context.Context, req *connect.Request[studentsv1.ListEnrollmentsRequest]) (*connect.Response[studentsv1.ListEnrollmentsResponse], error) {
 	return connect.NewResponse(&studentsv1.ListEnrollmentsResponse{Enrollments: []*studentsv1.Enrollment{
 		{Id: "enr-1", StudentId: req.Msg.GetStudentId(), CycleId: "cyc-1", GroupId: "grp-1", Status: studentsv1.EnrollmentStatus_ENROLLMENT_STATUS_ACTIVE},
+	}}), nil
+}
+
+// Guardian-link RPCs on the stub. ListStudentsForGuardian answers with TWO
+// children so the family aggregation is observable end to end; the guardian id
+// is echoed back, proving the gateway sent the principal's own id.
+func (stubStudents) LinkGuardian(_ context.Context, req *connect.Request[studentsv1.LinkGuardianRequest]) (*connect.Response[studentsv1.LinkGuardianResponse], error) {
+	return connect.NewResponse(&studentsv1.LinkGuardianResponse{Link: &studentsv1.GuardianLink{
+		Id: "gl-1", TenantId: "t1", GuardianUserId: req.Msg.GetGuardianUserId(),
+		StudentId: req.Msg.GetStudentId(), Relationship: req.Msg.GetRelationship(),
+	}}), nil
+}
+
+func (stubStudents) UnlinkGuardian(_ context.Context, _ *connect.Request[studentsv1.UnlinkGuardianRequest]) (*connect.Response[studentsv1.UnlinkGuardianResponse], error) {
+	return connect.NewResponse(&studentsv1.UnlinkGuardianResponse{}), nil
+}
+
+func (stubStudents) ListGuardiansForStudent(_ context.Context, req *connect.Request[studentsv1.ListGuardiansForStudentRequest]) (*connect.Response[studentsv1.ListGuardiansForStudentResponse], error) {
+	return connect.NewResponse(&studentsv1.ListGuardiansForStudentResponse{Links: []*studentsv1.GuardianLink{
+		{Id: "gl-1", TenantId: "t1", GuardianUserId: "usr-9", StudentId: req.Msg.GetStudentId(), Relationship: "mother"},
+	}}), nil
+}
+
+func (stubStudents) ListStudentsForGuardian(_ context.Context, req *connect.Request[studentsv1.ListStudentsForGuardianRequest]) (*connect.Response[studentsv1.ListStudentsForGuardianResponse], error) {
+	guardian := req.Msg.GetGuardianUserId()
+	return connect.NewResponse(&studentsv1.ListStudentsForGuardianResponse{Links: []*studentsv1.GuardianLink{
+		{Id: "gl-1", TenantId: "t1", GuardianUserId: guardian, StudentId: "stu-1", Relationship: "mother"},
+		{Id: "gl-2", TenantId: "t1", GuardianUserId: guardian, StudentId: "stu-2", Relationship: "mother"},
 	}}), nil
 }
 
@@ -1318,6 +1371,8 @@ func TestAttendanceListWithWritePermission200(t *testing.T) {
 // route sits behind guard.Protect("comms", …) so module_comms OFF ⇒ 404, before
 // auth runs.
 
+// validDeviceBody deliberately carries a userId: the edge must IGNORE it and
+// register the device for the authenticated caller (the stub's subject "u1").
 const validDeviceBody = `{"userId":"usr-1","fcmToken":"tok-abc","platform":"android"}`
 
 func TestCommsRegisterDeviceDisabledModuleIs404(t *testing.T) {
@@ -1359,6 +1414,11 @@ func TestCommsRegisterDeviceWithWritePermission200(t *testing.T) {
 	}
 	if out["id"] != "dev-1" || out["fcmToken"] != "tok-abc" || out["platform"] != "android" {
 		t.Errorf("body = %v", out)
+	}
+	// The stub comms echoes the user_id it received, so this pins the owner to the
+	// token's subject rather than the "usr-1" the body asked for.
+	if out["userId"] != "u1" {
+		t.Errorf("device owner = %v, want the caller's u1 (the body must not decide it)", out["userId"])
 	}
 }
 
@@ -1440,5 +1500,272 @@ func TestCommsListNotificationsWithWritePermission200(t *testing.T) {
 	res := doGateway(t, gw, http.MethodGet, "/api/v1/comms/notifications?studentId=stu-1", "comms-writer", "")
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200", res.StatusCode)
+	}
+}
+
+// --- Phase 9b guardian links: ModuleGuard(students) → RequireAuth → rotation →
+// RequirePermission(guardians:write on link/unlink, guardians:read on the list).
+// Managing who may see a child is an admin action, hence its own permission pair
+// rather than students:*.
+
+const validGuardianBody = `{"guardianUserId":"usr-9","studentId":"stu-1","relationship":"mother"}`
+
+func TestGuardianLinkDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_students OFF
+	// Even a caller with guardians:write must not learn the module exists.
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/guardians", "guardian-writer", validGuardianBody)
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestGuardianLinkNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/guardians", "", validGuardianBody)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+func TestGuardianLinkReadOnlyPermissionIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/guardians", "guardian-reader", validGuardianBody)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+// students:* is deliberately insufficient: a student clerk must not be able to
+// grant somebody visibility of a child.
+func TestGuardianLinkStudentsPermissionIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/guardians", "student-enroller", validGuardianBody)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+func TestGuardianLinkWithWritePermissionCreates201(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/guardians", "guardian-writer", validGuardianBody)
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", res.StatusCode)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out["id"] != "gl-1" || out["guardianUserId"] != "usr-9" || out["studentId"] != "stu-1" || out["relationship"] != "mother" {
+		t.Errorf("body = %v", out)
+	}
+}
+
+func TestGuardianUnlinkReadOnlyPermissionIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/guardians/unlink", "guardian-reader",
+		`{"guardianUserId":"usr-9","studentId":"stu-1"}`)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+func TestGuardianUnlinkWithWritePermissionIs204(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/guardians/unlink", "guardian-writer",
+		`{"guardianUserId":"usr-9","studentId":"stu-1"}`)
+	if res.StatusCode != http.StatusNoContent {
+		t.Errorf("status = %d, want 204", res.StatusCode)
+	}
+}
+
+func TestListGuardiansForStudentDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_students OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/students/stu-1/guardians", "guardian-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestListGuardiansForStudentWithReadPermission200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/students/stu-1/guardians", "guardian-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out struct {
+		Guardians []map[string]any `json:"guardians"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The path value must reach the students service — a dropped {studentId}
+	// would silently list the wrong child's guardians.
+	if len(out.Guardians) != 1 || out.Guardians[0]["studentId"] != "stu-1" {
+		t.Errorf("guardians = %v", out.Guardians)
+	}
+}
+
+// --- Phase 9b family surface: ModuleGuard(comms) → ModuleGuard(students) →
+// RequireAuth → rotation → RequirePermission(family:read). The child set comes
+// from the principal, so a guardian can only ever read their own children's
+// notifications.
+//
+// The route reads from BOTH modules — students for the guardian links, comms for
+// the inbox — so it is guarded on both: either one disabled ⇒ 404. A disabled
+// module must be invisible and removable without breaking others, and a
+// half-guarded composite route would answer 500 (or leak the links) instead.
+
+// familyModulesOn is the flag set the family route needs: both of the modules it
+// composes.
+var familyModulesOn = map[string]bool{"module_comms": true, "module_students": true}
+
+func TestFamilyNotificationsDisabledCommsModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true}) // module_comms OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/notifications", "family-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestFamilyNotificationsDisabledStudentsModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_comms": true}) // module_students OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/notifications", "family-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestFamilyNotificationsNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, familyModulesOn)
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/notifications", "", "")
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+// comms:read reads ONE student by id; family:read is the guardian-scoped
+// permission, so a comms reader is refused here.
+func TestFamilyNotificationsWithoutFamilyReadIs403(t *testing.T) {
+	gw := newTestGateway(t, familyModulesOn)
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/notifications", "comms-reader", "")
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+func TestFamilyNotificationsWithFamilyReadAggregatesChildren200(t *testing.T) {
+	gw := newTestGateway(t, familyModulesOn)
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/notifications", "family-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out struct {
+		Notifications []map[string]any `json:"notifications"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The stub guardian has two children and the stub inbox yields one
+	// notification each, tagged with the child it belongs to.
+	if len(out.Notifications) != 2 {
+		t.Fatalf("notifications = %d, want 2 (one per linked child)", len(out.Notifications))
+	}
+	seen := map[string]bool{}
+	for _, n := range out.Notifications {
+		seen[n["studentId"].(string)] = true
+	}
+	if !seen["stu-1"] || !seen["stu-2"] {
+		t.Errorf("notifications tagged %v, want both stu-1 and stu-2", seen)
+	}
+}
+
+// --- Phase 9b mobile auth: unauthenticated like the web login, tokens in the
+// BODY (no cookie jar in React Native), and MobileLogin behind the SAME per-IP
+// login limiter as the web login.
+
+func TestMobileLoginRouteReturnsBodyTokensWithoutCookies(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/auth/mobile/login", "",
+		`{"email":"mama@example.com","password":"secret"}`)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	if cs := res.Cookies(); len(cs) != 0 {
+		t.Errorf("mobile login set cookies %v, want none", cs)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out["accessToken"] != "acc-tok" || out["refreshToken"] != "ref-tok" {
+		t.Errorf("body = %v, want the token pair", out)
+	}
+}
+
+func TestMobileLoginRouteBadCredentialsIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/auth/mobile/login", "",
+		`{"email":"mama@example.com","password":"wrong"}`)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+// The web login keeps its cookie-only posture: tokens must never appear in its
+// body, even though the mobile sibling now returns them.
+func TestWebLoginRouteKeepsCookieOnlyPosture(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/auth/login", "",
+		`{"email":"mama@example.com","password":"secret"}`)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if _, ok := out["accessToken"]; ok {
+		t.Errorf("web login body leaked accessToken: %v", out)
+	}
+	if _, ok := out["refreshToken"]; ok {
+		t.Errorf("web login body leaked refreshToken: %v", out)
+	}
+	names := map[string]bool{}
+	for _, c := range res.Cookies() {
+		names[c.Name] = true
+	}
+	if !names["gl_access"] || !names["gl_refresh"] {
+		t.Errorf("web login cookies = %v, want gl_access + gl_refresh", names)
+	}
+}
+
+// The mobile refresh is authorized by the refresh token in the BODY, never by a
+// cookie, and rotates without emitting Set-Cookie.
+func TestMobileRefreshRouteRotatesFromBody(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/auth/mobile/refresh", "",
+		`{"refreshToken":"ref-tok"}`)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	if cs := res.Cookies(); len(cs) != 0 {
+		t.Errorf("mobile refresh set cookies %v, want none", cs)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out["accessToken"] != "acc-tok-2" || out["refreshToken"] != "ref-tok-2" {
+		t.Errorf("body = %v, want the rotated pair", out)
+	}
+}
+
+// A cookie must not be able to authorize a mobile refresh: the body is the only
+// credential source, so an empty body is 401 even with a valid cookie present.
+func TestMobileRefreshRouteEmptyBodyIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/auth/mobile/refresh", "", `{}`)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
 	}
 }
