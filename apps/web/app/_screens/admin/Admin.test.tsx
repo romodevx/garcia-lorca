@@ -58,6 +58,20 @@ describe("Admin — roles", () => {
       }),
     );
   });
+
+  it("renders a role whose permissions come back null without crashing the panel", async () => {
+    // Regression: a role created with no permissions used to serialize as null;
+    // the panel did role.permissions.length and took the whole Admin surface
+    // down ("This page couldn't load"). It must degrade to 0 instead.
+    admin.listRoles.mockResolvedValue([{ id: "r9", name: "Coordinador", permissions: null as unknown as string[] }]);
+
+    render(<Admin onBack={() => {}} />);
+
+    // The panel renders (before the fix it threw on role.permissions.length and
+    // the whole surface went to "This page couldn't load"). The count degrades to 0.
+    expect(await screen.findByText(/0 permiso\(s\)/)).toBeInTheDocument();
+    expect(screen.getAllByText("Coordinador").length).toBeGreaterThan(0);
+  });
 });
 
 describe("Admin — users", () => {

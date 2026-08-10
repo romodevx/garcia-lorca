@@ -263,6 +263,24 @@ func TestAdminCreateRole(t *testing.T) {
 	}
 }
 
+func TestAdminCreateRoleNilPermissionsSerializesAsEmptyArray(t *testing.T) {
+	f := &fakeAdmin{}
+	h := http.HandlerFunc(newAdminHandler(f, &fakeLinker{}).CreateRole)
+	// A role with no permissions: the service returns a nil slice, which MUST
+	// serialize as [] (not null) — a null crashed the web roles panel, which
+	// reads role.permissions.length.
+	w := doAdminReq(t, h, http.MethodPost, "/api/v1/roles", `{"name":"empty"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", w.Code)
+	}
+	if strings.Contains(w.Body.String(), `"permissions":null`) {
+		t.Errorf("permissions serialized as null: %s", w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"permissions":[]`) {
+		t.Errorf("body = %s, want permissions:[]", w.Body.String())
+	}
+}
+
 func TestAdminCreateRoleBadPermissionIs400(t *testing.T) {
 	f := &fakeAdmin{err: connect.NewError(connect.CodeInvalidArgument, errString("bad perm"))}
 	h := http.HandlerFunc(newAdminHandler(f, &fakeLinker{}).CreateRole)

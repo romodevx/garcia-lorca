@@ -77,7 +77,14 @@ type roleResponse struct {
 }
 
 func toRoleResponse(r client.Role) roleResponse {
-	return roleResponse{ID: r.ID, Name: r.Name, Permissions: r.Permissions}
+	// Never emit a null permissions array: a role with no permissions must
+	// serialize to [] so JSON clients can always iterate it (a null crashed the
+	// web roles panel, which does role.permissions.length).
+	perms := r.Permissions
+	if perms == nil {
+		perms = []string{}
+	}
+	return roleResponse{ID: r.ID, Name: r.Name, Permissions: perms}
 }
 
 // --- users ----------------------------------------------------------------

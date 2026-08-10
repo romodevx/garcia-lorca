@@ -62,7 +62,7 @@ export function RolesPanel({ roles, onCreate, onSetPermissions }: RolesPanelProp
 
   const startEdit = (role: Role): void => {
     setEditingId(role.id);
-    setEditPerms(new Set(role.permissions));
+    setEditPerms(new Set(role.permissions ?? []));
     setEditError(undefined);
   };
 
@@ -88,7 +88,7 @@ export function RolesPanel({ roles, onCreate, onSetPermissions }: RolesPanelProp
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                 <span style={{ fontSize: 14 }}>
                   <span style={{ fontWeight: 600 }}>{r.name}</span>{" "}
-                  <span style={{ color: "var(--text-muted)" }}>· {r.permissions.length} permiso(s)</span>
+                  <span style={{ color: "var(--text-muted)" }}>· {(r.permissions ?? []).length} permiso(s)</span>
                 </span>
                 <button
                   onClick={() => (editingId === r.id ? setEditingId(undefined) : startEdit(r))}
