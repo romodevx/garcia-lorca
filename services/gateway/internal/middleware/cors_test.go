@@ -1,0 +1,101 @@
+package middleware_test
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/garcia-lorca/services/gateway/internal/middleware"
+)
+
+// okHandler is the downstream the CORS middleware wraps; it records whether it ran.
+func okHandler(ran *bool) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		*ran = true
+		w.WriteHeader(http.StatusOK)
+	})
+}
+
+func TestCORSReflectsAllowedOriginWithCredentials(t *testing.T) {
+	var ran bool
+	h := middleware.CORS([]string{"http://localhost:3002"})(okHandler(&ran))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
+	req.Header.Set("Origin", "http://localhost:3002")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:3002" {
+		t.Errorf("Allow-Origin = %q, want the exact request origin", got)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Credentials"); got != "true" {
+		t.Errorf("Allow-Credentials = %q, want \"true\"", got)
+	}
+	if got := rec.Header().Get("Vary"); got != "Origin" {
+		t.Errorf("Vary = %q, want \"Origin\" (cache correctness for per-origin reflection)", got)
+	}
+	if !ran {
+		t.Error("downstream handler should run for a non-preflight request")
+	}
+}
+
+func TestCORSPreflightShortCircuitsWith204(t *testing.T) {
+	var ran bool
+	h := middleware.CORS([]string{"http://localhost:3002"})(okHandler(&ran))
+
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/auth/login", nil)
+	req.Header.Set("Origin", "http://localhost:3002")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	req.Header.Set("Access-Control-Request-Headers", "content-type")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("preflight status = %d, want 204", rec.Code)
+	}
+	if ran {
+		t.Error("preflight must NOT reach the downstream handler")
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:3002" {
+		t.Errorf("preflight Allow-Origin = %q, want the request origin", got)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Methods"); got == "" {
+		t.Error("preflight must advertise Allow-Methods")
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Headers"); got != "content-type" {
+		t.Errorf("preflight Allow-Headers = %q, want the requested headers echoed", got)
+	}
+}
+
+func TestCORSDisallowedOriginGetsNoHeaders(t *testing.T) {
+	var ran bool
+	h := middleware.CORS([]string{"http://localhost:3002"})(okHandler(&ran))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
+	req.Header.Set("Origin", "http://evil.example.com")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Errorf("Allow-Origin = %q, want empty for a disallowed origin", got)
+	}
+	if !ran {
+		t.Error("a non-preflight request still reaches downstream; the browser, not the gateway, enforces the block")
+	}
+}
+
+func TestCORSNoOriginPassesThrough(t *testing.T) {
+	var ran bool
+	h := middleware.CORS([]string{"http://localhost:3002"})(okHandler(&ran))
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Errorf("Allow-Origin = %q, want empty when no Origin header is present", got)
+	}
+	if !ran {
+		t.Error("same-origin/no-Origin requests must pass through untouched")
+	}
+}

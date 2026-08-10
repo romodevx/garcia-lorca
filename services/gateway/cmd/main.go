@@ -99,9 +99,14 @@ func main() {
 		slog.String("finance", financeBaseURL),
 		slog.String("attendance", attendanceBaseURL),
 		slog.String("comms", commsBaseURL))
+	// CORS wraps the whole mux: the browser web client calls the gateway
+	// cross-origin with credentials (auth cookies), which requires reflected
+	// Allow-Origin + Allow-Credentials. WEB_ORIGIN lists the allowed origins;
+	// shared envs set it explicitly (see config.ParseAllowedOrigins).
+	webOrigins := config.ParseAllowedOrigins(os.Getenv("WEB_ORIGIN"))
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           middleware.CORS(webOrigins)(mux),
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,
