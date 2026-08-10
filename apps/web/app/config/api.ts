@@ -12,6 +12,8 @@
 
 // --- entity types (match the gateway JSON contract) -----------------------
 
+import { authFetch } from "../auth/authFetch";
+
 export type CycleStatus = "draft" | "active" | "closed";
 
 export interface Cycle {
@@ -153,7 +155,7 @@ function url(baseURL: string, path: string): string {
 
 /** POST a JSON body and return the created entity. Throws on any non-2xx. */
 async function postJSON<T>(baseURL: string, path: string, body: unknown): Promise<T> {
-  const res = await fetch(url(baseURL, `${BASE_PATH}${path}`), {
+  const res = await authFetch(url(baseURL, `${BASE_PATH}${path}`), {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -167,7 +169,7 @@ async function postJSON<T>(baseURL: string, path: string, body: unknown): Promis
 
 /** GET a list endpoint and unwrap the single-key envelope (`{ <key>: [...] }`). */
 async function getList<T>(baseURL: string, path: string, key: string): Promise<T[]> {
-  const res = await fetch(url(baseURL, `${BASE_PATH}${path}`), { credentials: "include" });
+  const res = await authFetch(url(baseURL, `${BASE_PATH}${path}`), { credentials: "include" });
   if (!res.ok) {
     throw new Error(`config ${path}: HTTP ${res.status}`);
   }

@@ -22,6 +22,8 @@
 // --- entity types (match the gateway JSON contract) -----------------------
 
 /** How often a concept is charged. */
+import { authFetch } from "../auth/authFetch";
+
 export type Recurrence = "once" | "monthly";
 
 export interface ChargeConcept {
@@ -200,7 +202,7 @@ async function failure(res: Response): Promise<Error> {
 
 /** Send a JSON body (POST/PUT) and return the parsed entity. Throws on non-2xx. */
 async function sendJSON<T>(baseURL: string, path: string, method: "POST" | "PUT", body: unknown): Promise<T> {
-  const res = await fetch(url(baseURL, `${BASE_PATH}${path}`), {
+  const res = await authFetch(url(baseURL, `${BASE_PATH}${path}`), {
     method,
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -214,7 +216,7 @@ async function sendJSON<T>(baseURL: string, path: string, method: "POST" | "PUT"
 
 /** POST a bodyless action (the id in the path is the whole request). */
 async function postAction<T>(baseURL: string, path: string): Promise<T> {
-  const res = await fetch(url(baseURL, `${BASE_PATH}${path}`), { method: "POST", credentials: "include" });
+  const res = await authFetch(url(baseURL, `${BASE_PATH}${path}`), { method: "POST", credentials: "include" });
   if (!res.ok) {
     throw await failure(res);
   }
@@ -223,7 +225,7 @@ async function postAction<T>(baseURL: string, path: string): Promise<T> {
 
 /** GET and return the parsed payload. Throws on any non-2xx. */
 async function getJSON<T>(baseURL: string, path: string): Promise<T> {
-  const res = await fetch(url(baseURL, `${BASE_PATH}${path}`), { credentials: "include" });
+  const res = await authFetch(url(baseURL, `${BASE_PATH}${path}`), { credentials: "include" });
   if (!res.ok) {
     throw await failure(res);
   }
