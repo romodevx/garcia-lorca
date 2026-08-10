@@ -62,7 +62,7 @@ gen/go/go.mod:
 .PHONY: run
 run: .env gen/go/go.mod ## Levanta TODO el stack (build + up en segundo plano)
 	$(COMPOSE) up -d --build
-	@echo "→ web http://localhost:3000 · gateway http://localhost:8080 · postgres :5432"
+	@set -a; . ./.env 2>/dev/null; set +a; echo "→ web http://localhost:$${WEB_HOST_PORT:-3000} · gateway http://localhost:8080 · postgres :$${POSTGRES_HOST_PORT:-5432}"
 
 .PHONY: run-fg
 run-fg: .env gen/go/go.mod ## Igual que run pero en primer plano (logs en vivo)

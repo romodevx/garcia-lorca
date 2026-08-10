@@ -50,7 +50,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: garcia_lorca
       APP_DB_PASSWORD: ${APP_DB_PASSWORD}
-    ports: ["5432:5432"]
+    # Host port is configurable to avoid clashing with another local Postgres
+    # (another project's stack, a native install). Internal traffic always uses
+    # the service name `postgres:5432`, so this only affects host-side tools.
+    ports: ["${POSTGRES_HOST_PORT:-5432}:5432"]
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./docker/postgres-init.sh:/docker-entrypoint-initdb.d/10-init.sh:ro
@@ -107,6 +110,9 @@ services:
       ATTENDANCE_BASE_URL: "http://attendance:8080"
       COMMS_BASE_URL: "http://comms:8080"
       ENABLED_MODULES: "iam,gateway,students,config,grades,finance,attendance,comms"
+      # Browser origin(s) allowed to call the gateway cross-origin with cookies.
+      # Tracks WEB_HOST_PORT so a remapped web port stays permitted.
+      WEB_ORIGIN: "http://localhost:${WEB_HOST_PORT:-3000}"
     ports: ["8080:8080"]
     depends_on:
       postgres:
@@ -287,7 +293,8 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: "http://localhost:8080"
       WATCHPACK_POLLING: "true"
-    ports: ["3000:3000"]
+    # Host port configurable to dodge another local dev server on 3000.
+    ports: ["${WEB_HOST_PORT:-3000}:3000"]
     volumes:
       - .:/workspace
       - web-nm-root:/workspace/node_modules
