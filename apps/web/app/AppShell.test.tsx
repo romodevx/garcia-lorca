@@ -3,13 +3,15 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
 import { Providers } from "./test-utils";
-import { changePassword as apiChangePassword, login as apiLogin, logout as apiLogout, refresh as apiRefresh } from "./auth/api";
+import { changePassword as apiChangePassword, login as apiLogin, logout as apiLogout, me as apiMe, refresh as apiRefresh } from "./auth/api";
 
 vi.mock("./auth/api", () => ({
   login: vi.fn(),
   changePassword: vi.fn(),
   logout: vi.fn(),
   refresh: vi.fn(),
+  // Default: no live session on boot, so every existing flow starts at login.
+  me: vi.fn(() => Promise.reject(new Error("no session"))),
 }));
 
 // The finance surface is the only screen these flows mount that fetches on boot;
@@ -39,6 +41,7 @@ const mockLogin = vi.mocked(apiLogin);
 const mockChangePassword = vi.mocked(apiChangePassword);
 const mockLogout = vi.mocked(apiLogout);
 const mockRefresh = vi.mocked(apiRefresh);
+const mockMe = vi.mocked(apiMe);
 
 afterEach(() => vi.clearAllMocks());
 
@@ -101,6 +104,21 @@ describe("AppShell navigation flow", () => {
     // The cookie must be rotated after the change so it carries mcp=false.
     expect(mockRefresh).toHaveBeenCalledWith(expect.any(String));
     expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
+  });
+
+  it("restores the session on reload when the cookie is still live (me → dashboard, no re-login)", async () => {
+    // A valid HttpOnly cookie survives a page reload; boot must rehydrate the
+    // session instead of dropping the user back to the login screen.
+    mockMe.mockResolvedValueOnce({ userId: "u1", email: "owner@example.com", permissions: [] });
+    render(
+      <Providers flags={{}}>
+        <AppShell />
+      </Providers>
+    );
+
+    // No login submit — the boot restore lands straight on the dashboard.
+    expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Entrar al sistema" })).not.toBeInTheDocument();
   });
 
   it("shows an inline error when login fails", async () => {

@@ -13,6 +13,12 @@ export interface RefreshResult {
   expiresIn: number;
 }
 
+export interface MeResult {
+  userId: string;
+  email: string;
+  permissions: string[];
+}
+
 function url(baseURL: string, path: string): string {
   return `${baseURL.replace(/\/+$/, "")}${path}`;
 }
@@ -28,6 +34,22 @@ export async function login(baseURL: string, email: string, password: string): P
     throw new Error(`login: HTTP ${res.status}`);
   }
   return (await res.json()) as LoginResult;
+}
+
+// me restores the session on boot: it reads the authenticated principal using
+// the HttpOnly cookie the browser still holds. A 200 means a live session whose
+// forced password change (if any) is already cleared, so the caller can go
+// straight to the dashboard; any non-200 (401 no session, 403 change pending)
+// throws so the caller shows the login screen.
+export async function me(baseURL: string): Promise<MeResult> {
+  const res = await fetch(url(baseURL, "/api/v1/me"), {
+    method: "GET",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw new Error(`me: HTTP ${res.status}`);
+  }
+  return (await res.json()) as MeResult;
 }
 
 // refresh rotates both auth cookies. It sends no body — the gateway reads the

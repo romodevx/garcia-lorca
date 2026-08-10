@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { useFlag } from "@garcia-lorca/ui/flags";
 import { CommandPaletteHost } from "./command/CommandPaletteHost";
 import { TopBar } from "./_design/TopBar";
@@ -16,7 +16,7 @@ import { Login } from "./_screens/Login";
 import { ChangePassword } from "./_screens/ChangePassword";
 import { ModulePlaceholder } from "./_screens/ModulePlaceholder";
 import { useTheme } from "./theme/ThemeProvider";
-import { login as apiLogin, changePassword as apiChangePassword, logout as apiLogout, refresh as apiRefresh } from "./auth/api";
+import { login as apiLogin, changePassword as apiChangePassword, logout as apiLogout, me as apiMe, refresh as apiRefresh } from "./auth/api";
 
 type View =
   | { screen: "login" }
@@ -69,6 +69,25 @@ export function AppShell(): ReactElement {
   // The admin surface (users/roles/teacher-link) is gated by module_iam (UX-only;
   // the gateway is the boundary). The "admin" module (Administración) opens it.
   const adminEnabled = useFlag("module_iam");
+
+  // Restore the session on boot: the auth cookies are HttpOnly (unreadable by
+  // JS), so we ask the gateway who we are. A live session lands straight on the
+  // dashboard — without this, every reload / deep-link / bookmark drops the user
+  // back to login even though the cookie is still valid. A rejection (no session,
+  // or a pending forced change) simply leaves the initial login screen in place.
+  useEffect(() => {
+    let active = true;
+    apiMe(API_URL)
+      .then(() => {
+        if (active) setView({ screen: "dashboard" });
+      })
+      .catch(() => {
+        // No restorable session — stay on login.
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleLogin = async (email: string, password: string): Promise<void> => {
     setPending(true);
