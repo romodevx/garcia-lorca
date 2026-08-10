@@ -9,8 +9,8 @@ vi.mock("./auth/api", () => ({
   login: vi.fn(),
   changePassword: vi.fn(),
   logout: vi.fn(),
-  refresh: vi.fn(),
   // Default: no live session on boot, so every existing flow starts at login.
+  refresh: vi.fn(() => Promise.reject(new Error("no session"))),
   me: vi.fn(() => Promise.reject(new Error("no session"))),
 }));
 
@@ -117,6 +117,23 @@ describe("AppShell navigation flow", () => {
     );
 
     // No login submit — the boot restore lands straight on the dashboard.
+    expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Entrar al sistema" })).not.toBeInTheDocument();
+  });
+
+  it("restores via the refresh cookie when the access cookie has expired (me → refresh → me → dashboard)", async () => {
+    // /me fails (access cookie expired) but the 24h refresh cookie mints a fresh
+    // one; boot must recover instead of dropping to login.
+    mockMe
+      .mockRejectedValueOnce(new Error("HTTP 401"))
+      .mockResolvedValueOnce({ userId: "u1", email: "owner@example.com", permissions: [] });
+    mockRefresh.mockResolvedValueOnce({ expiresIn: 900 });
+    render(
+      <Providers flags={{}}>
+        <AppShell />
+      </Providers>
+    );
+
     expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Entrar al sistema" })).not.toBeInTheDocument();
   });

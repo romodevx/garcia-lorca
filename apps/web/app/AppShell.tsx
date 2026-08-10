@@ -77,13 +77,24 @@ export function AppShell(): ReactElement {
   // or a pending forced change) simply leaves the initial login screen in place.
   useEffect(() => {
     let active = true;
-    apiMe(API_URL)
-      .then(() => {
+    const restore = async (): Promise<void> => {
+      try {
+        await apiMe(API_URL);
         if (active) setView({ screen: "dashboard" });
-      })
-      .catch(() => {
+        return;
+      } catch {
+        // The short-lived access cookie may have expired; fall through to the
+        // longer-lived refresh cookie, which can mint a fresh access token.
+      }
+      try {
+        await apiRefresh(API_URL);
+        await apiMe(API_URL);
+        if (active) setView({ screen: "dashboard" });
+      } catch {
         // No restorable session — stay on login.
-      });
+      }
+    };
+    void restore();
     return () => {
       active = false;
     };
