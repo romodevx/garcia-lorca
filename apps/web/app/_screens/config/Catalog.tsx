@@ -73,6 +73,11 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
   const [selectedLevelId, setSelectedLevelId] = useState<string | undefined>(undefined);
   const [selectedGradeLevelId, setSelectedGradeLevelId] = useState<string | undefined>(undefined);
 
+  // Bumped whenever a group/subject is created so the AssignmentsPanel — which
+  // fetches its own cycle-wide group list independently of the per-grade panels
+  // above — re-fetches and shows the new entry without a full page reload.
+  const [catalogVersion, setCatalogVersion] = useState(0);
+
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
 
@@ -165,11 +170,13 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
   const handleCreateSubject = useCallback(async (input: CreateSubjectInput): Promise<void> => {
     const created = await createSubject(API_URL, input);
     setSubjects((prev) => [...prev, created]);
+    setCatalogVersion((v) => v + 1);
   }, []);
 
   const handleCreateGroup = useCallback(async (input: CreateGroupInput): Promise<void> => {
     const created = await createGroup(API_URL, input);
     setGroups((prev) => [...prev, created]);
+    setCatalogVersion((v) => v + 1);
   }, []);
 
   const handleCreateTerm = useCallback(async (input: CreateTermInput): Promise<void> => {
@@ -273,6 +280,7 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
               loadSubjects={loadSubjectsForAssign}
               loadAssignments={loadAssignmentsForGroup}
               onCreate={handleCreateAssignment}
+              refreshKey={catalogVersion}
             />
           </div>
         </div>
