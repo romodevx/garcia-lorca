@@ -11,6 +11,7 @@ import { Enrollment } from "./Enrollment";
 // covered by app/students/api.test.ts). Neutral literals only.
 vi.mock("../../students/api", () => ({
   listStudents: vi.fn(),
+  createStudent: vi.fn(),
   enroll: vi.fn(),
   listEnrollments: vi.fn(),
   transfer: vi.fn(),
@@ -88,6 +89,50 @@ describe("Enrollment — enroll", () => {
     );
     const payload = students.enroll.mock.calls[0]?.[1];
     expect(payload).not.toHaveProperty("cycleId");
+  });
+});
+
+describe("Enrollment — register applicant", () => {
+  it("registers a new applicant and makes it immediately enrollable (no reload)", async () => {
+    const user = userEvent.setup();
+    const katherine = {
+      id: "st9",
+      curp: "CCCC000000CCCCCC03",
+      firstName: "Katherine",
+      lastName: "Johnson",
+      level: "Primaria",
+      gradeGroup: "1° A",
+      guardianName: "Joylette Coleman",
+      admissionStatus: "pending" as const,
+    };
+    students.createStudent.mockResolvedValue(katherine);
+
+    render(<Enrollment onBack={() => {}} />);
+
+    const form = await screen.findByRole("form", { name: "Registrar alumno" });
+    await user.type(within(form).getByLabelText("CURP"), "CCCC000000CCCCCC03");
+    await user.type(within(form).getByLabelText("Nombre"), "Katherine");
+    await user.type(within(form).getByLabelText("Apellidos"), "Johnson");
+    await user.selectOptions(within(form).getByLabelText("Nivel"), "primaria");
+    await user.type(within(form).getByLabelText("Grado y grupo"), "1° A");
+    await user.type(within(form).getByLabelText("Tutor"), "Joylette Coleman");
+    await user.click(within(form).getByRole("button", { name: "Registrar alumno" }));
+
+    await waitFor(() =>
+      expect(students.createStudent).toHaveBeenCalledWith(expect.any(String), {
+        curp: "CCCC000000CCCCCC03",
+        firstName: "Katherine",
+        lastName: "Johnson",
+        level: "primaria",
+        gradeGroup: "1° A",
+        guardianName: "Joylette Coleman",
+      }),
+    );
+
+    // The applicant is prepended to the enrollable list, so it appears in the
+    // enroll panel's student picker without a page reload.
+    const enrollForm = screen.getByRole("form", { name: "Inscribir alumno" });
+    expect(await within(enrollForm).findByRole("option", { name: "Katherine Johnson" })).toBeInTheDocument();
   });
 });
 

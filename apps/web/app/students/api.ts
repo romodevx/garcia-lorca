@@ -129,6 +129,25 @@ export function getStudent(baseURL: string, id: string): Promise<Student> {
   return getJSON<Student>(baseURL, `/students/${id}`);
 }
 
+/** The applicant's identity + intended placement, as the gateway create contract expects. */
+export interface CreateStudentInput {
+  curp: string;
+  firstName: string;
+  lastName: string;
+  level: string;
+  gradeGroup: string;
+  guardianName: string;
+}
+
+/**
+ * Registers a new applicant. Admission starts at "pending" (the server owns the
+ * state machine); the returned Student then becomes enrollable. Needs
+ * students:create — the gateway is the security boundary, this is UX only.
+ */
+export function createStudent(baseURL: string, input: CreateStudentInput): Promise<Student> {
+  return postJSON<Student>(baseURL, "/students", input);
+}
+
 // --- enrollments ----------------------------------------------------------
 
 /**
