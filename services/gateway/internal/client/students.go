@@ -89,16 +89,35 @@ func (c *StudentsClient) CreateApplicant(ctx context.Context, in CreateApplicant
 // = all). Pagination and the level/grade filters are not exposed at the edge
 // yet; the students service returns its default page. Connect error codes
 // propagate so the handler maps them to HTTP status.
+// listStudentsPageSize is the per-page size the gateway requests (the students
+// service caps at 200). The web resolves student names from the full roster, so
+// ListStudents follows the page token to return every student, not just page 1 —
+// otherwise a school with more than one page shows raw ids where names belong.
+const listStudentsPageSize = 200
+
+// listStudentsMaxPages bounds the pagination loop so a misbehaving page token can
+// never spin forever (200 × 100 = 20k students, far beyond any single school).
+const listStudentsMaxPages = 100
+
 func (c *StudentsClient) ListStudents(ctx context.Context, status string) ([]StudentResult, error) {
-	res, err := c.rpc.ListStudents(ctx, connect.NewRequest(&studentsv1.ListStudentsRequest{
-		Status: admissionFromName(status),
-	}))
-	if err != nil {
-		return nil, err
-	}
-	out := make([]StudentResult, 0, len(res.Msg.GetStudents()))
-	for _, s := range res.Msg.GetStudents() {
-		out = append(out, toStudentResult(s))
+	var out []StudentResult
+	pageToken := ""
+	for page := 0; page < listStudentsMaxPages; page++ {
+		res, err := c.rpc.ListStudents(ctx, connect.NewRequest(&studentsv1.ListStudentsRequest{
+			Status:    admissionFromName(status),
+			PageSize:  listStudentsPageSize,
+			PageToken: pageToken,
+		}))
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range res.Msg.GetStudents() {
+			out = append(out, toStudentResult(s))
+		}
+		pageToken = res.Msg.GetNextPageToken()
+		if pageToken == "" {
+			break
+		}
 	}
 	return out, nil
 }
