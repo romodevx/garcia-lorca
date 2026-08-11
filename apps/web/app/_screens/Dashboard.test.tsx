@@ -4,6 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 import { MODULES, USERS } from "../_design/data";
 import { Dashboard } from "./Dashboard";
 
+// The dashboard now reads real KPIs from the gateway — mock the clients so the
+// component renders without hitting the network.
+vi.mock("../students/api", () => ({ listStudents: vi.fn().mockResolvedValue([]) }));
+vi.mock("../config/api", () => ({ listCycles: vi.fn().mockResolvedValue([]) }));
+vi.mock("../finance/api", () => ({ listCharges: vi.fn().mockResolvedValue([]) }));
+
 const VISIBLE_MODULES = MODULES.filter((m) => !m.hidden);
 const HIDDEN_MODULES = MODULES.filter((m) => m.hidden);
 
@@ -11,7 +17,6 @@ describe("Dashboard", () => {
   it("renders a launcher card for every visible module", () => {
     render(<Dashboard user={USERS.admin} onOpen={() => {}} now={new Date("2026-06-12T09:00:00")} />);
 
-    // Each visible module card surfaces its unique description text — assert one per module.
     for (const m of VISIBLE_MODULES) {
       expect(screen.getByText(m.desc)).toBeInTheDocument();
     }
@@ -22,7 +27,6 @@ describe("Dashboard", () => {
   it("does not render modules deactivated from the panel (e.g. Documentos)", () => {
     render(<Dashboard user={USERS.admin} onOpen={() => {}} now={new Date("2026-06-12T09:00:00")} />);
 
-    // "Documentos" is deactivated (hidden) — kept future-ready, but never shown in the panel.
     expect(HIDDEN_MODULES.some((m) => m.id === "documents")).toBe(true);
     for (const m of HIDDEN_MODULES) {
       expect(screen.queryByText(m.label)).not.toBeInTheDocument();
@@ -30,9 +34,9 @@ describe("Dashboard", () => {
     }
   });
 
-  it("greets by time of day", () => {
+  it("greets by time of day with the real user", () => {
     render(<Dashboard user={USERS.admin} onOpen={() => {}} now={new Date("2026-06-12T09:00:00")} />);
-    expect(screen.getByRole("heading", { name: /Buenos días, Laura/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Buenos días, Director/ })).toBeInTheDocument();
   });
 
   it("navigates from a KPI card", async () => {
@@ -40,7 +44,7 @@ describe("Dashboard", () => {
     const onOpen = vi.fn();
     render(<Dashboard user={USERS.admin} onOpen={onOpen} now={new Date("2026-06-12T09:00:00")} />);
 
-    await user.click(screen.getByRole("button", { name: /Adeudos del mes/ }));
+    await user.click(screen.getByRole("button", { name: /Por cobrar/ }));
     expect(onOpen).toHaveBeenCalledWith("finance");
   });
 });

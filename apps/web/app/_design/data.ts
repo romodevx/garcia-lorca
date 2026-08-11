@@ -31,13 +31,13 @@ export interface ModuleDef {
 }
 
 export const MODULES: readonly ModuleDef[] = [
-  { id: "students", label: "Estudiantes", icon: "students", color: "forest", desc: "1,248 alumnos", badge: null, flag: "module_students" },
-  { id: "finance", label: "Finanzas y Adeudos", icon: "finance", color: "orange", desc: "37 con adeudo", badge: 37, flag: "module_finance" },
+  { id: "students", label: "Estudiantes", icon: "students", color: "forest", desc: "Alumnos y admisión", badge: null, flag: "module_students" },
+  { id: "finance", label: "Finanzas y Adeudos", icon: "finance", color: "orange", desc: "Colegiaturas y adeudos", badge: null, flag: "module_finance" },
   // QR capture is deferred; the module ships as the daily pass list.
   { id: "attendance", label: "Asistencia", icon: "qr", color: "lime", desc: "Pase de lista diario", badge: null, flag: "module_attendance" },
-  { id: "grades", label: "Calificaciones", icon: "grades", color: "yellow", desc: "Bloque 3 abierto", badge: null, flag: "module_grades" },
-  { id: "announcements", label: "Avisos", icon: "announcements", color: "orange", desc: "2 nuevos", badge: 2, flag: "module_comms" },
-  { id: "scholarships", label: "Becas", icon: "scholarship", color: "purple", desc: "84 activas", badge: null, flag: "module_scholarships" },
+  { id: "grades", label: "Calificaciones", icon: "grades", color: "yellow", desc: "Boletas y captura", badge: null, flag: "module_grades" },
+  { id: "announcements", label: "Avisos", icon: "announcements", color: "orange", desc: "Comunicados y agenda", badge: null, flag: "module_comms" },
+  { id: "scholarships", label: "Becas", icon: "scholarship", color: "purple", desc: "Becas y descuentos", badge: null, flag: "module_scholarships" },
   // Deactivated from the panel per the school (kept future-ready; nothing deleted). See [[module-docs-deactivated]].
   { id: "documents", label: "Documentos", icon: "documents", color: "forest", desc: "Constancias, kardex", badge: null, flag: "module_docs", hidden: true },
   { id: "uniforms", label: "Uniformes", icon: "uniforms", color: "purple", desc: "Pedidos y tallas", badge: null, flag: "module_uniforms" },
@@ -58,6 +58,6 @@ export interface UserProfile {
 }
 
 export const USERS: Record<Role, UserProfile> = {
-  admin: { name: "Laura Mendizábal", first: "Laura", role: "Dirección", color: "forest" },
-  teacher: { name: "Miguel Vázquez", first: "Miguel", role: "Docente · 4° A", color: "purple" }
+  admin: { name: "Dirección", first: "Director", role: "Centro Educativo García Lorca", color: "forest" },
+  teacher: { name: "Docente", first: "Profesor", role: "Personal académico", color: "purple" }
 };

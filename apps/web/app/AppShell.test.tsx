@@ -66,7 +66,7 @@ describe("AppShell navigation flow", () => {
     expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
 
     // Open Finanzas (KPI shortcut) — finance flag is ON, so the real surface shows.
-    await user.click(screen.getByRole("button", { name: /Adeudos del mes/ }));
+    await user.click(screen.getByRole("button", { name: /Por cobrar/ }));
     expect(await screen.findByRole("heading", { name: "Finanzas y Adeudos" })).toBeInTheDocument();
 
     // Back home.
@@ -183,7 +183,7 @@ describe("AppShell navigation flow", () => {
     );
 
     await submitLogin(user);
-    await user.click(screen.getByRole("button", { name: /Adeudos del mes/ }));
+    await user.click(screen.getByRole("button", { name: /Por cobrar/ }));
 
     // Flag OFF → friendly stub, not the real finance table. The placeholder
     // shows the "Módulo «...»" heading; the real surface shows the status tablist.

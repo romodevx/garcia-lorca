@@ -1,10 +1,16 @@
 "use client";
 
-import { useState, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import { Btn } from "../_design/Controls";
 import { Icon, type IconName } from "../_design/Icon";
 import { COLOR, type ColorKey } from "../_design/colors";
 import { MODULES, type ModuleDef, type UserProfile } from "../_design/data";
+import { listCycles } from "../config/api";
+import { listCharges } from "../finance/api";
+import { listStudents } from "../students/api";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+const money = (cents: number): string => "$" + Math.round(cents / 100).toLocaleString("es-MX");
 
 function ModuleCard({ m, i, onOpen }: { m: ModuleDef; i: number; onOpen: (id: string) => void }): ReactElement {
   const [hov, setHov] = useState(false);
@@ -167,6 +173,30 @@ export function Dashboard({ user, onOpen, now = new Date() }: DashboardProps): R
   const hour = now.getHours();
   const greet = hour < 12 ? "Buenos días" : hour < 19 ? "Buenas tardes" : "Buenas noches";
   const today = now.toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" });
+
+  // Real KPIs — no mock numbers: students from the roster, money from the ledger.
+  const [kpi, setKpi] = useState({ students: 0, pending: 0, collected: 0, withBalance: 0 });
+  const [cycleName, setCycleName] = useState("—");
+  useEffect(() => {
+    let active = true;
+    listStudents(API_URL).then((ss) => active && setKpi((k) => ({ ...k, students: ss.length }))).catch(() => {});
+    listCycles(API_URL).then((cs) => {
+      const cyc = cs.find((c) => c.status === "active") ?? cs[0];
+      if (cyc === undefined) return;
+      if (active) setCycleName(cyc.name);
+      listCharges(API_URL, { cycleId: cyc.id }).then((chs) => {
+        if (!active) return;
+        setKpi((k) => ({
+          ...k,
+          collected: chs.reduce((a, c) => a + c.paidCents, 0),
+          pending: chs.reduce((a, c) => a + Math.max(0, c.remainingCents), 0),
+          withBalance: chs.filter((c) => c.remainingCents > 0).length,
+        }));
+      }).catch(() => {});
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
+
   return (
     <div style={{ maxWidth: 1320, margin: "0 auto", padding: "34px 28px 64px" }}>
       {/* welcome */}
@@ -179,7 +209,7 @@ export function Dashboard({ user, onOpen, now = new Date() }: DashboardProps): R
             {greet}, {user.first} 🌱
           </h1>
           <p style={{ color: "var(--text-muted)", fontSize: 16, marginTop: 6, textTransform: "capitalize" }}>
-            {today} · Ciclo 2025–2026
+            {today} · Ciclo {cycleName}
           </p>
         </div>
         <Btn icon="plus" kind="forest" onClick={() => onOpen("announcements")}>
@@ -189,9 +219,9 @@ export function Dashboard({ user, onOpen, now = new Date() }: DashboardProps): R
 
       {/* KPIs */}
       <div className="fade-up" style={{ display: "flex", gap: 18, flexWrap: "wrap", marginBottom: 34 }}>
-        <KpiCard icon="qr" color="lime" label="Asistencia de hoy" value="92%" sub="1,148 de 1,248 presentes" onClick={() => onOpen("attendance")} />
-        <KpiCard icon="finance" color="orange" label="Adeudos del mes" value="$128,300" sub="37 alumnos pendientes" onClick={() => onOpen("finance")} />
-        <KpiCard icon="announcements" color="purple" label="Avisos nuevos" value="2" sub="Festival de primavera" onClick={() => onOpen("announcements")} />
+        <KpiCard icon="students" color="forest" label="Alumnos" value={String(kpi.students)} sub="Registrados este ciclo" onClick={() => onOpen("students")} />
+        <KpiCard icon="finance" color="orange" label="Por cobrar" value={money(kpi.pending)} sub={`${kpi.withBalance} cargos con saldo`} onClick={() => onOpen("finance")} />
+        <KpiCard icon="trend" color="lime" label="Cobrado" value={money(kpi.collected)} sub={`Ciclo ${cycleName}`} onClick={() => onOpen("finance")} />
       </div>
 
       {/* modules */}
