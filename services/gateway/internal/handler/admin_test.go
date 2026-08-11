@@ -158,6 +158,25 @@ func TestAdminCreateUser(t *testing.T) {
 	}
 }
 
+func TestAdminCreateUserNilRoleIDsSerializesAsEmptyArray(t *testing.T) {
+	f := &fakeAdmin{}
+	h := http.HandlerFunc(newAdminHandler(f, &fakeLinker{}).CreateUser)
+	// A user created with no roles: the service returns nil roleIDs, which MUST
+	// serialize as [] (not null) — a null crashed the web users panel, which
+	// does user.roleIds.length / new Set(user.roleIds).
+	w := doAdminReq(t, h, http.MethodPost, "/api/v1/users",
+		`{"email":"noroles@example.com","displayName":"No Roles","tempPassword":"init-pw-123"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", w.Code)
+	}
+	if strings.Contains(w.Body.String(), `"roleIds":null`) {
+		t.Errorf("roleIds serialized as null: %s", w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"roleIds":[]`) {
+		t.Errorf("body = %s, want roleIds:[]", w.Body.String())
+	}
+}
+
 func TestAdminCreateUserDuplicateEmailIs409(t *testing.T) {
 	f := &fakeAdmin{err: connect.NewError(connect.CodeAlreadyExists, errString("dup"))}
 	h := http.HandlerFunc(newAdminHandler(f, &fakeLinker{}).CreateUser)

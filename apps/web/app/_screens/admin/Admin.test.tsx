@@ -107,6 +107,20 @@ describe("Admin — users", () => {
     );
   });
 
+  it("renders a user whose roleIds come back null without crashing the panel", async () => {
+    // Regression: a user created with no roles used to serialize roleIds as null;
+    // the panel did user.roleIds.length / new Set(user.roleIds) and took the whole
+    // Admin surface down ("This page couldn't load"). It must show "Sin roles".
+    admin.listUsers.mockResolvedValue([
+      { id: "u9", email: "noroles@example.com", displayName: "Sin Roles", status: "active", mustChangePassword: true, roleIds: null as unknown as string[] },
+    ]);
+
+    render(<Admin onBack={() => {}} />);
+
+    expect(await screen.findByText("Sin Roles")).toBeInTheDocument();
+    expect(screen.getByText("Sin roles")).toBeInTheDocument();
+  });
+
   it("suspends an active user", async () => {
     const user = userEvent.setup();
     admin.listUsers.mockResolvedValue([

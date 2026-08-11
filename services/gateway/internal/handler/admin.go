@@ -60,13 +60,20 @@ type userResponse struct {
 }
 
 func toUserResponse(u client.User) userResponse {
+	// Never emit a null roleIds array: a user with no roles must serialize as []
+	// so JSON clients can iterate it (a null crashed the web users panel, which
+	// does user.roleIds.length / new Set(user.roleIds)).
+	roleIDs := u.RoleIDs
+	if roleIDs == nil {
+		roleIDs = []string{}
+	}
 	return userResponse{
 		ID:                 u.ID,
 		Email:              u.Email,
 		DisplayName:        u.DisplayName,
 		Status:             u.Status,
 		MustChangePassword: u.MustChangePassword,
-		RoleIDs:            u.RoleIDs,
+		RoleIDs:            roleIDs,
 	}
 }
 

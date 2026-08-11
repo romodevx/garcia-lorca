@@ -80,7 +80,7 @@ export function UsersPanel({ users, roles, onCreate, onSetStatus, onSetRoles }: 
 
   const startEditRoles = (u: AdminUser): void => {
     setEditingId(u.id);
-    setEditRoles(new Set(u.roleIds));
+    setEditRoles(new Set(u.roleIds ?? []));
   };
 
   const saveRoles = async (userId: string): Promise<void> => {
@@ -106,7 +106,7 @@ export function UsersPanel({ users, roles, onCreate, onSetStatus, onSetRoles }: 
                   <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <StatusPill status={u.status} />
                     <span style={{ fontSize: 12.5, color: "var(--text-muted)" }}>
-                      {u.roleIds.length > 0 ? u.roleIds.map(roleName).join(", ") : "Sin roles"}
+                      {(u.roleIds ?? []).length > 0 ? (u.roleIds ?? []).map(roleName).join(", ") : "Sin roles"}
                     </span>
                   </div>
                 </div>
