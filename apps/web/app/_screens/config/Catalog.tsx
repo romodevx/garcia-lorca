@@ -221,7 +221,7 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
       </button>
 
       <div className="fade-up" style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24 }}>
-        <div style={{ width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--surface-3)", color: "var(--text-muted)" }}>
+        <div style={{ width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--forest)", color: "#fff", boxShadow: "0 6px 16px color-mix(in oklab, var(--forest) 38%, transparent)" }}>
           <Icon name="settings" size={30} />
         </div>
         <div>
@@ -229,6 +229,17 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
           <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Ciclos, niveles, grados, materias, grupos y periodos</p>
         </div>
       </div>
+
+      {!loading && loadError === undefined && (
+        <div className="fade-up" style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 24 }}>
+          {([["calendar", "lime", "Ciclos", cycles.length], ["graduation", "forest", "Niveles", levels.length], ["students", "purple", "Grados", gradeLevels.length], ["user", "orange", "Profesores", teachers.length]] as const).map(([icon, c, label, val], i) => (
+            <div key={i} style={{ flex: "1 1 180px", minWidth: 0, display: "flex", alignItems: "center", gap: 14, padding: "16px 20px", borderRadius: "var(--r-lg)", background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "var(--shadow-card)" }}>
+              <div style={{ width: 44, height: 44, borderRadius: 13, flexShrink: 0, display: "grid", placeItems: "center", background: `color-mix(in oklab, var(--${c}) 16%, var(--surface))`, color: `var(--${c})` }}><Icon name={icon} size={22} /></div>
+              <div><div style={{ fontSize: 13, color: "var(--text-muted)", fontWeight: 600 }}>{label}</div><div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 22, color: "var(--text)", lineHeight: 1.1 }}>{val}</div></div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {loading ? (
         <p className="fade-up" style={{ color: "var(--text-muted)", fontSize: 15 }}>Cargando catálogo…</p>

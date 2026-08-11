@@ -2,7 +2,6 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as configApi from "../../config/api";
-import * as gradesApi from "../../grades/api";
 import * as studentsApi from "../../students/api";
 import { GradesScreen } from "./GradesScreen";
 
