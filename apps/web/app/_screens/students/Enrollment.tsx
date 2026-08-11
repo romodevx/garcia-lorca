@@ -19,6 +19,7 @@ import {
 import { EnrollPanel } from "./EnrollPanel";
 import { RosterPanel } from "./RosterPanel";
 import { StudentCreatePanel } from "./StudentCreatePanel";
+import { StudentDirectoryPanel } from "./StudentDirectoryPanel";
 
 // Gateway base URL for the browser (public env; matches AppShell/compose).
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -109,9 +110,11 @@ export function Enrollment({ onBack }: EnrollmentProps): ReactElement {
       ) : loadError !== undefined ? (
         <p role="alert" className="fade-up" style={{ color: "var(--bad-fg)", fontSize: 15 }}>{loadError}</p>
       ) : (
-        <div className="fade-up" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 18 }}>
-          <StudentCreatePanel onCreate={handleCreateStudent} />
-          <EnrollPanel students={students} cycles={cycles} loadGroups={loadGroups} onEnroll={handleEnroll} />
+        <div className="fade-up" style={{ display: "grid", gap: 18 }}>
+          <StudentDirectoryPanel students={students} />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 18 }}>
+            <StudentCreatePanel onCreate={handleCreateStudent} />
+            <EnrollPanel students={students} cycles={cycles} loadGroups={loadGroups} onEnroll={handleEnroll} />
           <RosterPanel
             students={students}
             cycles={cycles}
@@ -120,6 +123,7 @@ export function Enrollment({ onBack }: EnrollmentProps): ReactElement {
             onTransfer={handleTransfer}
             onWithdraw={handleWithdraw}
           />
+          </div>
         </div>
       )}
     </div>
