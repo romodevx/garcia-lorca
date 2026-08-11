@@ -6,7 +6,7 @@ import { CommandPaletteHost } from "./command/CommandPaletteHost";
 import { TopBar } from "./_design/TopBar";
 import { MODULES, USERS, type ModuleDef, type Role } from "./_design/data";
 import { Dashboard } from "./_screens/Dashboard";
-import { Attendance } from "./_screens/attendance/Attendance";
+import { AttendanceScreen } from "./_screens/attendance/AttendanceScreen";
 import { FinanceScreen } from "./_screens/finance/FinanceScreen";
 import { Catalog } from "./_screens/config/Catalog";
 import { AdminScreen } from "./_screens/admin/AdminScreen";
@@ -225,7 +225,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "attendance" &&
         (attendanceEnabled ? (
-          <Attendance onBack={home} />
+          <AttendanceScreen onBack={home} />
         ) : (
           // Flag OFF: never render the pass list; show the friendly stub so
           // navigation never dead-ends. (Backend 404 is authoritative.)
