@@ -10,7 +10,7 @@ import { Attendance } from "./_screens/attendance/Attendance";
 import { Finance, type FinanceIntent } from "./_screens/finance/Finance";
 import { Catalog } from "./_screens/config/Catalog";
 import { Admin } from "./_screens/admin/Admin";
-import { Enrollment } from "./_screens/students/Enrollment";
+import { StudentsScreen } from "./_screens/students/StudentsScreen";
 import { GradeCapture } from "./_screens/grades/GradeCapture";
 import { Login } from "./_screens/Login";
 import { ChangePassword } from "./_screens/ChangePassword";
@@ -209,7 +209,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "students" &&
         (studentsEnabled ? (
-          <Enrollment onBack={home} />
+          <StudentsScreen onBack={home} />
         ) : (
           // Flag OFF: never render the enrollment surface; show the friendly stub
           // so navigation never dead-ends. (Backend 404 is authoritative.)
