@@ -7,7 +7,7 @@ import { TopBar } from "./_design/TopBar";
 import { MODULES, USERS, type ModuleDef, type Role } from "./_design/data";
 import { Dashboard } from "./_screens/Dashboard";
 import { Attendance } from "./_screens/attendance/Attendance";
-import { Finance, type FinanceIntent } from "./_screens/finance/Finance";
+import { FinanceScreen } from "./_screens/finance/FinanceScreen";
 import { Catalog } from "./_screens/config/Catalog";
 import { Admin } from "./_screens/admin/Admin";
 import { StudentsScreen } from "./_screens/students/StudentsScreen";
@@ -22,7 +22,7 @@ type View =
   | { screen: "login" }
   | { screen: "changePassword" }
   | { screen: "dashboard" }
-  | { screen: "finance"; intent?: FinanceIntent }
+  | { screen: "finance" }
   | { screen: "config" }
   | { screen: "students" }
   | { screen: "grades" }
@@ -134,9 +134,9 @@ export function AppShell(): ReactElement {
     setView({ screen: "login" });
   };
   const home = (): void => setView({ screen: "dashboard" });
-  const open = useCallback((id: string, intent?: string): void => {
+  const open = useCallback((id: string, _intent?: string): void => {
     if (id === "finance") {
-      setView({ screen: "finance", intent: intent === "payment" ? "payment" : undefined });
+      setView({ screen: "finance" });
       return;
     }
     if (id === "settings") {
@@ -193,7 +193,7 @@ export function AppShell(): ReactElement {
       {view.screen === "dashboard" && <Dashboard user={user} onOpen={open} />}
       {view.screen === "finance" &&
         (financeEnabled ? (
-          <Finance onBack={home} intent={view.intent} />
+          <FinanceScreen onBack={home} />
         ) : (
           // Flag OFF: do not render the finance surface; show the friendly stub
           // instead so navigation never dead-ends. (Backend 404 is authoritative.)

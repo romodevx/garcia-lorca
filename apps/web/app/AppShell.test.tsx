@@ -153,7 +153,7 @@ describe("AppShell navigation flow", () => {
     expect(screen.getByRole("button", { name: "Entrar al sistema" })).toBeInTheDocument();
   });
 
-  it("lands on the ventanilla when the palette's 'Registrar pago' command is picked", async () => {
+  it("opens the finance surface when the palette's 'Registrar pago' command is picked", async () => {
     mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: false });
     const user = userEvent.setup();
     render(
@@ -165,12 +165,12 @@ describe("AppShell navigation flow", () => {
     await submitLogin(user);
     expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
 
-    // Cmd+K → the create shortcut routes to module:finance:payment, so the
-    // surface opens ON the payment form instead of the debts table.
+    // Cmd+K → the "Registrar pago" shortcut routes to module:finance and opens
+    // the Finanzas surface (payments are now registered per charge from its table).
     fireEvent.keyDown(window, { key: "k", metaKey: true });
     await user.click(await screen.findByText("Registrar pago"));
 
-    expect(await screen.findByLabelText("Cargo")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Finanzas y Adeudos" })).toBeInTheDocument();
   });
 
   it("falls back to the placeholder when module_finance is OFF (UX gating)", async () => {
