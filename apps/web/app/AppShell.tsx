@@ -11,7 +11,7 @@ import { FinanceScreen } from "./_screens/finance/FinanceScreen";
 import { Catalog } from "./_screens/config/Catalog";
 import { AdminScreen } from "./_screens/admin/AdminScreen";
 import { StudentsScreen } from "./_screens/students/StudentsScreen";
-import { GradeCapture } from "./_screens/grades/GradeCapture";
+import { GradesScreen } from "./_screens/grades/GradesScreen";
 import { Login } from "./_screens/Login";
 import { ChangePassword } from "./_screens/ChangePassword";
 import { ModulePlaceholder } from "./_screens/ModulePlaceholder";
@@ -217,7 +217,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "grades" &&
         (gradesEnabled ? (
-          <GradeCapture onBack={home} />
+          <GradesScreen onBack={home} />
         ) : (
           // Flag OFF: never render the grade-capture surface; show the friendly stub
           // so navigation never dead-ends. (Backend 404 is authoritative.)
