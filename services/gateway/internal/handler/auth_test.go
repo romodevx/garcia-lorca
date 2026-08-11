@@ -166,6 +166,29 @@ func TestMeReturnsPrincipal(t *testing.T) {
 	}
 }
 
+func TestMeNilPermissionsSerializesAsEmptyArray(t *testing.T) {
+	h := handler.NewAuthHandler(&fakeLogin{})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	// A principal with no permissions: the body must carry [] not null, so JSON
+	// clients can always iterate it (same contract as roles/users responses).
+	ctx := middleware.WithPrincipal(req.Context(), middleware.Principal{UserID: "u1", Permissions: nil})
+	h.Me(rec, req.WithContext(ctx))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200", rec.Code)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	perms, present := body["permissions"]
+	if !present || perms == nil {
+		t.Fatalf("permissions missing or null: %s", rec.Body.String())
+	}
+	if _, isArray := perms.([]any); !isArray {
+		t.Errorf("permissions is not an array: %v", perms)
+	}
+}
+
 func TestMeWithoutPrincipalIs401(t *testing.T) {
 	h := handler.NewAuthHandler(&fakeLogin{})
 	rec := httptest.NewRecorder()

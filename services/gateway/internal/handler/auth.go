@@ -246,11 +246,18 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	// Never emit a null permissions array: a principal with no permissions must
+	// serialize as [] so JSON clients can always iterate it (same contract as the
+	// roles/users responses).
+	perms := p.Permissions
+	if perms == nil {
+		perms = []string{}
+	}
 	writeJSON(w, http.StatusOK, meResponse{
 		UserID:      p.UserID,
 		TenantID:    p.TenantID,
 		Email:       p.Email,
-		Permissions: p.Permissions,
+		Permissions: perms,
 	})
 }
 
