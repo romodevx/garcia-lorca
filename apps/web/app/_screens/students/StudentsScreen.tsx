@@ -52,6 +52,12 @@ function StatusPill({ status }: { status: AdmissionStatus }): ReactElement {
 
 const qb: CSSProperties = { width: 36, height: 36, borderRadius: "50%", display: "grid", placeItems: "center", background: "var(--surface-3)", border: "1px solid var(--border)", color: "var(--text-muted)", cursor: "pointer" };
 
+const pager = (disabled: boolean): CSSProperties => ({
+  display: "inline-flex", alignItems: "center", gap: 6, height: 40, padding: "0 16px", borderRadius: 99,
+  fontSize: 14, fontWeight: 600, fontFamily: "var(--font-display)", border: "1px solid var(--border)",
+  background: "var(--surface)", color: "var(--text)", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.45 : 1,
+});
+
 // ── quick-add slide-over: create a student in one panel, minimal fields ──
 function QuickAdd({ onClose, onSave }: { onClose: () => void; onSave: (input: CreateStudentInput) => Promise<void> }): ReactElement {
   const [curp, setCurp] = useState("");
@@ -200,6 +206,8 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
   const [add, setAdd] = useState(false);
   const [sheet, setSheet] = useState<Student | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [pageSize, setPageSize] = useState(20);
+  const [page, setPage] = useState(0);
 
   const say = (m: string): void => { setToast(m); setTimeout(() => setToast(null), 2600); };
 
@@ -230,6 +238,16 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
         (needle === "" || `${s.firstName} ${s.lastName}`.toLowerCase().includes(needle) || s.curp.toLowerCase().includes(needle) || s.guardianName.toLowerCase().includes(needle)))
       .sort((a, b) => `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`, "es"));
   }, [students, tab, level, q]);
+
+  // Any filter change (or a new page size) sends the view back to the first page.
+  useEffect(() => { setPage(0); }, [tab, level, q, pageSize]);
+
+  const total = filtered.length;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const cur = Math.min(page, pageCount - 1);
+  const paged = filtered.slice(cur * pageSize, cur * pageSize + pageSize);
+  const from = total === 0 ? 0 : cur * pageSize + 1;
+  const to = Math.min(total, (cur + 1) * pageSize);
 
   const cycleName = cycles.find((c) => c.status === "active")?.name ?? cycles[0]?.name ?? "—";
   const anyFilter = tab !== "all" || level !== "Todos" || q !== "";
@@ -337,9 +355,29 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
               </div>
             </div>
           ) : (
-            filtered.map((st, i) => <StuRow key={st.id} st={st} i={i} onOpen={() => setSheet(st)} />)
+            paged.map((st, i) => <StuRow key={st.id} st={st} i={i} onOpen={() => setSheet(st)} />)
           )}
         </div>
+        {!loading && total > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", padding: "14px 24px", borderTop: "1px solid var(--border)" }}>
+            <span style={{ fontSize: 13.5, color: "var(--text-muted)" }}>Mostrando <b style={{ color: "var(--text)" }}>{from}–{to}</b> de {total}</span>
+            <div style={{ flex: 1 }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 13, color: "var(--text-faint)" }}>Mostrar</span>
+              <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--surface-3)", borderRadius: 99, border: "1px solid var(--border)" }}>
+                {[20, 50, 100].map((n) => {
+                  const on = pageSize === n;
+                  return <button key={n} onClick={() => setPageSize(n)} style={{ height: 32, minWidth: 42, padding: "0 12px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", background: on ? "var(--surface)" : "transparent", color: on ? "var(--text)" : "var(--text-muted)", boxShadow: on ? "var(--shadow-card)" : "none" }}>{n}</button>;
+                })}
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={cur === 0} aria-label="Anterior" style={pager(cur === 0)}><Icon name="back" size={16} stroke={2.4} />Anterior</button>
+              <span style={{ fontSize: 13.5, color: "var(--text-muted)", fontFamily: "var(--font-display)", fontWeight: 600, minWidth: 52, textAlign: "center" }}>{cur + 1} / {pageCount}</span>
+              <button onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))} disabled={cur >= pageCount - 1} aria-label="Siguiente" style={pager(cur >= pageCount - 1)}>Siguiente<Icon name="chevron" size={16} stroke={2.4} /></button>
+            </div>
+          </div>
+        )}
       </div>
 
       <button onClick={() => setAdd(true)} title="Nuevo alumno" style={{ position: "fixed", right: 32, bottom: 32, zIndex: 50, height: 60, padding: "0 26px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 10, background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16.5, cursor: "pointer", boxShadow: "0 10px 30px color-mix(in oklab, var(--lime) 45%, transparent)" }}><Icon name="plus" size={22} stroke={2.6} />Nuevo alumno</button>

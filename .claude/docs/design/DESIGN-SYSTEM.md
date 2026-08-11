@@ -29,6 +29,9 @@ Referencia canónica: `screen_students.jsx` del proyecto de diseño (Estudiantes
 5. **Chips de filtro** (nivel/grupo): píldoras con borde; activo = borde de color +
    `color-mix(... 12%, --surface)`. Botón "Limpiar" cuando hay filtro activo.
 6. **Barra de selección** (cuando hay filas marcadas): banda lima con acciones masivas.
+7b. **Paginación** (footer de la tabla, `borderTop`): "Mostrando X–Y de N" +
+   selector "Mostrar 20/50/100" (píldoras) + botones Anterior/Siguiente + "pág / total".
+   Reset a la página 1 al cambiar filtros o tamaño de página. Toda tabla larga la lleva.
 7. **Tabla de datos** (`--r-xl`, `--shadow-card`): header en mayúsculas `text-faint`;
    filas con barra de acento a la izquierda (color por estado), checkbox, `Avatar`
    (inicial en círculo de color), nombre + id `text-faint`, columnas, **píldora de

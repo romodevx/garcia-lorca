@@ -61,6 +61,23 @@ describe("StudentsScreen", () => {
     expect(screen.queryByText("Valentina Cruz")).not.toBeInTheDocument();
   });
 
+  it("paginates the table: 20 per page, Siguiente reveals the rest, page size changes it", async () => {
+    const user = userEvent.setup();
+    const many = Array.from({ length: 25 }, (_, i) => mk(String(i + 10), `Nom${i}`, `Ape${String(i).padStart(2, "0")}`, "enrolled"));
+    students.listStudents.mockResolvedValue(many);
+    render(<StudentsScreen onBack={() => {}} />);
+    await screen.findByText("Nom0 Ape00");
+
+    // Sorted by surname Ape00..Ape24 → the last one is on page 2, hidden at first.
+    expect(screen.queryByText("Nom24 Ape24")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Siguiente" }));
+    expect(await screen.findByText("Nom24 Ape24")).toBeInTheDocument();
+
+    // Page size 50 → all 25 on one page.
+    await user.click(screen.getByRole("button", { name: "50" }));
+    expect(screen.getByText("Nom24 Ape24")).toBeInTheDocument();
+  });
+
   it("opens the quick-add drawer and creates a student in one panel", async () => {
     const user = userEvent.setup();
     students.createStudent.mockResolvedValue(mk("9", "Nuevo", "Alumno", "pending"));
