@@ -9,7 +9,7 @@ import { Dashboard } from "./_screens/Dashboard";
 import { Attendance } from "./_screens/attendance/Attendance";
 import { FinanceScreen } from "./_screens/finance/FinanceScreen";
 import { Catalog } from "./_screens/config/Catalog";
-import { Admin } from "./_screens/admin/Admin";
+import { AdminScreen } from "./_screens/admin/AdminScreen";
 import { StudentsScreen } from "./_screens/students/StudentsScreen";
 import { GradeCapture } from "./_screens/grades/GradeCapture";
 import { Login } from "./_screens/Login";
@@ -233,7 +233,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "admin" &&
         (adminEnabled ? (
-          <Admin onBack={home} />
+          <AdminScreen onBack={home} />
         ) : (
           // Flag OFF: never render the admin surface; show the friendly stub so
           // navigation never dead-ends. (Backend 404 is authoritative.)
