@@ -261,6 +261,45 @@ func TestAuthenticateUnknownEmailIsGenericUnauthorized(t *testing.T) {
 	}
 }
 
+// countingHasher records how many times Verify runs, so the timing-equalization
+// behavior is testable deterministically (no wall-clock measurement).
+type countingHasher struct{ verifyCalls int }
+
+func (c *countingHasher) Hash(plain string) (string, error) { return "h:" + plain, nil }
+func (c *countingHasher) Verify(hash, plain string) error {
+	c.verifyCalls++
+	if hash == "h:"+plain {
+		return nil
+	}
+	return glerrors.ErrUnauthorized
+}
+
+// SECURITY: the unknown-email path must perform the SAME password-verification
+// work as the known-email path, or the response-time delta (bcrypt runs only
+// when the email exists) leaks which emails are registered — defeating the
+// generic-error enumeration defense. Deterministic proxy for the timing check:
+// Verify must be invoked exactly once even when the email does not exist.
+func TestAuthenticateUnknownEmailStillPerformsHashVerification(t *testing.T) {
+	users := &fakeUsers{
+		byEmail: map[domain.Email]struct {
+			user domain.User
+			hash string
+		}{}, // empty → every email is unknown
+		byID: map[string]domain.User{},
+	}
+	hasher := &countingHasher{}
+	now := func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) }
+	svc := usecase.NewAuthService(users, &fakeRoles{}, hasher, &fakeTokens{}, &fakeTokens{}, testTenant, 15*time.Minute, now)
+
+	_, err := svc.Authenticate(context.Background(), "nobody@garcialorca.mx", "secret")
+	if glerrors.KindOf(err) != glerrors.KindUnauthorized {
+		t.Fatalf("want KindUnauthorized, got %v", err)
+	}
+	if hasher.verifyCalls != 1 {
+		t.Errorf("unknown-email path performed %d password verifications, want 1 (to equalize timing)", hasher.verifyCalls)
+	}
+}
+
 func TestAuthenticateSuspendedIsForbidden(t *testing.T) {
 	svc, _ := fixtureService(t, domain.StatusSuspended)
 	_, err := svc.Authenticate(context.Background(), "ana@garcialorca.mx", "secret")

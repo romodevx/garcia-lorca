@@ -31,8 +31,8 @@ function Brandmark({ height = 64 }: { height?: number }): ReactElement {
 /** Login screen — consistent with the web portal (logo, lime primary, fields). */
 export function LoginScreen({ onLogin }: LoginScreenProps): ReactElement {
   const theme = useTheme();
-  const [email, setEmail] = useState("laura.diaz@gmail.com");
-  const [password, setPassword] = useState("123456");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
 
   const fieldStyle = [styles.field, { backgroundColor: theme.colors.surface2 }];

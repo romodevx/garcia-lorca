@@ -13,6 +13,14 @@ import (
 // gateway/UI also validate).
 const minPasswordLen = 8
 
+// timingEqualizerHash is a fixed, valid bcrypt hash (cost 10) used ONLY to make
+// the unknown-email login path do the same ~constant password-verification work
+// as the known-email path. Without it, bcrypt runs only when the email exists,
+// and the response-time delta leaks which emails are registered even though both
+// paths return the identical generic error. It is not a credential — it matches
+// no real password.
+const timingEqualizerHash = "$2a$10$y5uQah8/CrIHsNKRCJzWJOHR/4SQOcCzbJGiBfN6wACA0k3FS9I0i"
+
 // AuthService orchestrates authentication and authorization. It depends only on
 // the ports (repositories, hasher, token issuer/validator) and the domain — the
 // composition root injects concrete adapters (postgres, bcrypt, jwt).
@@ -79,7 +87,11 @@ func (s *AuthService) Authenticate(ctx context.Context, rawEmail, password strin
 
 	user, hash, err := s.users.FindAuthByEmail(ctx, s.tenantID, email)
 	if err != nil {
-		// Unknown email → generic auth failure (do not leak existence).
+		// Unknown email → generic auth failure (do not leak existence). Run a
+		// throwaway verification against a fixed hash first so this path costs the
+		// same as a real bcrypt compare — otherwise the timing delta reveals which
+		// emails exist. The result is intentionally discarded.
+		_ = s.hasher.Verify(timingEqualizerHash, password)
 		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid credentials")
 	}
 	if err := s.hasher.Verify(hash, password); err != nil {
