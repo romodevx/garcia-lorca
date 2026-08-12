@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
+	"github.com/garcia-lorca/services/gateway/internal/middleware"
 )
 
 // AdminService is the iam admin surface the edge needs (consumer-defined, so the
@@ -46,6 +47,73 @@ type AdminHandler struct {
 // teacher linker.
 func NewAdminHandler(svc AdminService, linker TeacherLinker) *AdminHandler {
 	return &AdminHandler{svc: svc, linker: linker}
+}
+
+// --- caller-subset authorization guard ------------------------------------
+//
+// Delegation rule: an admin may only grant, or assign via a role, permissions it
+// already holds itself. holding roles:write/users:write lets you administer the
+// permission model, NOT hand yourself powers your own account was never given.
+// Without this, such an admin could mint or assign a role carrying finance:read
+// (or any owner-only read) and escalate — the very outcome iam's owner guard is
+// the last-resort backstop for. The caller's effective permission set only
+// exists here at the edge (from the verified token's principal), so the check
+// lives at the edge; iam remains the defense-in-depth backstop.
+
+// callerHeld is the authenticated caller's effective permission set. These routes
+// always run behind RequireAuth, so the principal is present; a missing principal
+// yields the empty set, which fails every subset check closed.
+func callerHeld(ctx context.Context) map[string]struct{} {
+	p, _ := middleware.PrincipalFrom(ctx)
+	held := make(map[string]struct{}, len(p.Permissions))
+	for _, perm := range p.Permissions {
+		held[perm] = struct{}{}
+	}
+	return held
+}
+
+// firstUnheld returns the first permission in want that held does not contain
+// (and true), or "" and false when held is a superset of want.
+func firstUnheld(held map[string]struct{}, want []string) (string, bool) {
+	for _, perm := range want {
+		if _, ok := held[perm]; !ok {
+			return perm, true
+		}
+	}
+	return "", false
+}
+
+// callerCanAssign reports whether the caller may assign every role in ids —
+// i.e. holds every permission those roles carry. Role permissions come from a
+// single ListRoles; an unknown id contributes nothing (iam validates existence).
+// Returns the offending permission when the caller falls short.
+func (h *AdminHandler) callerCanAssign(ctx context.Context, ids []string) (offending string, ok bool, err error) {
+	if len(ids) == 0 {
+		return "", true, nil
+	}
+	roles, err := h.svc.ListRoles(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	permsByRole := make(map[string][]string, len(roles))
+	for _, role := range roles {
+		permsByRole[role.ID] = role.Permissions
+	}
+	held := callerHeld(ctx)
+	for _, id := range ids {
+		if perm, missing := firstUnheld(held, permsByRole[id]); missing {
+			return perm, false, nil
+		}
+	}
+	return "", true, nil
+}
+
+func forbidGrant(w http.ResponseWriter, perm string) {
+	http.Error(w, "forbidden: cannot grant a permission you do not hold: "+perm, http.StatusForbidden)
+}
+
+func forbidAssign(w http.ResponseWriter, perm string) {
+	http.Error(w, "forbidden: cannot assign a role granting a permission you do not hold: "+perm, http.StatusForbidden)
 }
 
 // --- wire shapes ----------------------------------------------------------
@@ -109,6 +177,16 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	var req createUserRequest
 	if err := decodeJSONBody(w, r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	// Subset guard: the caller may only seed the new user with roles whose
+	// permissions it holds — else it could create an owner-powered account (with
+	// a temp password it chose) and log in as it.
+	if perm, ok, err := h.callerCanAssign(r.Context(), req.RoleIDs); err != nil {
+		writeConnectError(w, err)
+		return
+	} else if !ok {
+		forbidAssign(w, perm)
 		return
 	}
 	res, err := h.svc.CreateUser(r.Context(), req.Email, req.DisplayName, req.TempPassword, req.RoleIDs)
@@ -184,6 +262,16 @@ func (h *AdminHandler) SetUserRoles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	toAdd, toRemove := diffRoleSets(current.RoleIDs, req.RoleIDs)
+	// Subset guard: only the newly ADDED roles need checking (revoking a role you
+	// couldn't grant is de-escalation, always allowed). Checked before any
+	// mutation so a rejected escalation leaves the user's roles untouched.
+	if perm, ok, err := h.callerCanAssign(r.Context(), toAdd); err != nil {
+		writeConnectError(w, err)
+		return
+	} else if !ok {
+		forbidAssign(w, perm)
+		return
+	}
 	for _, roleID := range toAdd {
 		if err := h.svc.AssignRole(r.Context(), userID, roleID); err != nil {
 			writeConnectError(w, err)
@@ -241,6 +329,11 @@ func (h *AdminHandler) CreateRole(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
+	// Subset guard: a role may only be built from permissions the caller holds.
+	if perm, unheld := firstUnheld(callerHeld(r.Context()), req.Permissions); unheld {
+		forbidGrant(w, perm)
+		return
+	}
 	res, err := h.svc.CreateRole(r.Context(), req.Name, req.Permissions)
 	if err != nil {
 		writeConnectError(w, err)
@@ -272,6 +365,12 @@ func (h *AdminHandler) SetRolePermissions(w http.ResponseWriter, r *http.Request
 	var req setRolePermissionsRequest
 	if err := decodeJSONBody(w, r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	// Subset guard: a role's new permission set may only contain permissions the
+	// caller holds.
+	if perm, unheld := firstUnheld(callerHeld(r.Context()), req.Permissions); unheld {
+		forbidGrant(w, perm)
 		return
 	}
 	res, err := h.svc.SetRolePermissions(r.Context(), r.PathValue("id"), req.Permissions)

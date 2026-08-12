@@ -12,7 +12,24 @@ import (
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/handler"
+	"github.com/garcia-lorca/services/gateway/internal/middleware"
 )
+
+// ownerCallerPerms is a broad, valid permission set — the seeded owner holds the
+// whole catalog, so a caller carrying these passes the "grant/assign only what
+// you hold" subset guard. Tests that exercise the guard's DENY path inject a
+// deliberately narrower principal instead.
+var ownerCallerPerms = []string{
+	"students:read", "students:create", "students:list", "students:update",
+	"grades:read", "grades:write", "users:read", "users:write",
+	"roles:read", "roles:write", "finance:read", "finance:write",
+	"attendance:read", "attendance:write", "comms:read", "comms:write",
+	"config:read", "config:write", "guardians:read", "guardians:write",
+}
+
+func principalHolding(perms ...string) middleware.Principal {
+	return middleware.Principal{UserID: "caller-1", TenantID: "tenant-1", Email: "caller@example.com", Permissions: perms}
+}
 
 // fakeAdmin is a hand-written double for the iam admin surface the handler
 // needs. It records inputs and returns canned results/errors so each handler is
@@ -29,6 +46,7 @@ type fakeAdmin struct {
 	rolePerms                 []string
 	setPermsRole              string
 	setPerms                  []string
+	rolesList                 []client.Role // when set, ListRoles returns this
 
 	err        error
 	getUserErr error
@@ -88,6 +106,9 @@ func (f *fakeAdmin) ListRoles(_ context.Context) ([]client.Role, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
+	if f.rolesList != nil {
+		return f.rolesList, nil
+	}
 	return []client.Role{{ID: "rol-1", Name: "docente", Permissions: []string{"grades:read"}}}, nil
 }
 
@@ -122,12 +143,23 @@ func newAdminHandler(svc handler.AdminService, linker handler.TeacherLinker) *ha
 // receives no mux-populated PathValue otherwise.
 func doAdminReq(t *testing.T, h http.Handler, method, target, body string, pathValues ...string) *httptest.ResponseRecorder {
 	t.Helper()
+	// Default caller is an owner-equivalent principal (holds the whole catalog),
+	// so the subset guard is transparent to every test that is not exercising it.
+	return adminReqAs(t, h, principalHolding(ownerCallerPerms...), method, target, body, pathValues...)
+}
+
+// adminReqAs drives a handler with a specific caller principal in context, as
+// RequireAuth would inject in production — needed to exercise the caller-subset
+// authorization guard.
+func adminReqAs(t *testing.T, h http.Handler, p middleware.Principal, method, target, body string, pathValues ...string) *httptest.ResponseRecorder {
+	t.Helper()
 	var r *http.Request
 	if body == "" {
 		r = httptest.NewRequest(method, target, nil)
 	} else {
 		r = httptest.NewRequest(method, target, strings.NewReader(body))
 	}
+	r = r.WithContext(middleware.WithPrincipal(r.Context(), p))
 	for i := 0; i+1 < len(pathValues); i += 2 {
 		r.SetPathValue(pathValues[i], pathValues[i+1])
 	}
@@ -303,9 +335,106 @@ func TestAdminCreateRoleNilPermissionsSerializesAsEmptyArray(t *testing.T) {
 func TestAdminCreateRoleBadPermissionIs400(t *testing.T) {
 	f := &fakeAdmin{err: connect.NewError(connect.CodeInvalidArgument, errString("bad perm"))}
 	h := http.HandlerFunc(newAdminHandler(f, &fakeLinker{}).CreateRole)
-	w := doAdminReq(t, h, http.MethodPost, "/api/v1/roles", `{"name":"x","permissions":["bad"]}`)
+	// Caller nominally "holds" the string so the subset guard passes and the
+	// request reaches iam, which rejects it as a non-catalog permission (400).
+	w := adminReqAs(t, h, principalHolding("bad"), http.MethodPost, "/api/v1/roles", `{"name":"x","permissions":["bad"]}`)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+// --- caller-subset authorization guard ------------------------------------
+// A delegated admin may only grant/assign permissions it already holds itself.
+// Without this, a roles:write / users:write holder could mint or assign a role
+// carrying finance:read etc. and escalate to permissions its own account lacks.
+
+func TestAdminCreateRoleRejectsPermissionCallerLacks(t *testing.T) {
+	f := &fakeAdmin{}
+	h := http.HandlerFunc(newAdminHandler(f, &fakeLinker{}).CreateRole)
+	// Caller holds roles:write + students:read but NOT finance:read.
+	w := adminReqAs(t, h, principalHolding("roles:write", "students:read"),
+		http.MethodPost, "/api/v1/roles", `{"name":"escalado","permissions":["students:read","finance:read"]}`)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+	if f.roleName != "" || f.rolePerms != nil {
+		t.Errorf("CreateRole must not be called on a rejected grant, captured %q/%v", f.roleName, f.rolePerms)
+	}
+}
+
+func TestAdminSetRolePermissionsRejectsPermissionCallerLacks(t *testing.T) {
+	f := &fakeAdmin{}
+	h := http.HandlerFunc(newAdminHandler(f, &fakeLinker{}).SetRolePermissions)
+	w := adminReqAs(t, h, principalHolding("roles:write", "grades:read"),
+		http.MethodPost, "/api/v1/roles/rol-1/permissions", `{"permissions":["finance:read"]}`, "id", "rol-1")
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+	if f.setPermsRole != "" || f.setPerms != nil {
+		t.Errorf("SetRolePermissions must not be called on a rejected grant, captured %q/%v", f.setPermsRole, f.setPerms)
+	}
+}
+
+func TestAdminCreateRoleAllowsPermissionsWithinCallerSet(t *testing.T) {
+	f := &fakeAdmin{}
+	h := http.HandlerFunc(newAdminHandler(f, &fakeLinker{}).CreateRole)
+	w := adminReqAs(t, h, principalHolding("roles:write", "students:read", "grades:read"),
+		http.MethodPost, "/api/v1/roles", `{"name":"docente","permissions":["students:read","grades:read"]}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", w.Code)
+	}
+	if len(f.rolePerms) != 2 {
+		t.Errorf("CreateRole should have been called with 2 perms, got %v", f.rolePerms)
+	}
+}
+
+func TestAdminSetUserRolesRejectsAssigningRoleWithUnheldPermission(t *testing.T) {
+	f := &fakeAdmin{
+		getUser:   client.User{RoleIDs: []string{}},
+		rolesList: []client.Role{{ID: "rol-priv", Name: "coordinador", Permissions: []string{"finance:read"}}},
+	}
+	h := http.HandlerFunc(newAdminHandler(f, &fakeLinker{}).SetUserRoles)
+	// Caller holds users:write but NOT finance:read → cannot assign rol-priv.
+	w := adminReqAs(t, h, principalHolding("users:write"),
+		http.MethodPost, "/api/v1/users/usr-1/roles", `{"roleIds":["rol-priv"]}`, "id", "usr-1")
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+	if len(f.assigned) != 0 {
+		t.Errorf("no role must be assigned on a rejected escalation, got %v", f.assigned)
+	}
+}
+
+func TestAdminSetUserRolesAllowsAssigningRoleWithinCallerSet(t *testing.T) {
+	f := &fakeAdmin{
+		getUser:   client.User{RoleIDs: []string{}},
+		rolesList: []client.Role{{ID: "rol-priv", Name: "coordinador", Permissions: []string{"finance:read"}}},
+	}
+	h := http.HandlerFunc(newAdminHandler(f, &fakeLinker{}).SetUserRoles)
+	// Caller DOES hold finance:read → may delegate it via rol-priv.
+	w := adminReqAs(t, h, principalHolding("users:write", "finance:read"),
+		http.MethodPost, "/api/v1/users/usr-1/roles", `{"roleIds":["rol-priv"]}`, "id", "usr-1")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if len(f.assigned) != 1 || f.assigned[0] != "usr-1:rol-priv" {
+		t.Errorf("assigned = %v, want [usr-1:rol-priv]", f.assigned)
+	}
+}
+
+func TestAdminCreateUserRejectsAssigningRoleWithUnheldPermission(t *testing.T) {
+	f := &fakeAdmin{
+		rolesList: []client.Role{{ID: "rol-priv", Name: "coordinador", Permissions: []string{"finance:read"}}},
+	}
+	h := http.HandlerFunc(newAdminHandler(f, &fakeLinker{}).CreateUser)
+	w := adminReqAs(t, h, principalHolding("users:write"),
+		http.MethodPost, "/api/v1/users",
+		`{"email":"x@example.com","displayName":"X","tempPassword":"init-pw-123","roleIds":["rol-priv"]}`)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+	if f.createIn.email != "" {
+		t.Errorf("CreateUser must not be called on a rejected escalation, captured %+v", f.createIn)
 	}
 }
 

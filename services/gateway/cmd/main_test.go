@@ -61,13 +61,17 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"att-reader":       {"attendance:read"},
 		"comms-writer":     {"comms:write", "comms:read"},
 		"comms-reader":     {"comms:read"},
-		"users-writer":     {"users:write", "users:read"},
-		"users-reader":     {"users:read"},
-		"roles-writer":     {"roles:write", "roles:read"},
-		"roles-reader":     {"roles:read"},
-		"guardian-writer":  {"guardians:write", "guardians:read"},
-		"guardian-reader":  {"guardians:read"},
-		"family-reader":    {"family:read"},
+		// users-writer / roles-writer also hold the permissions they hand out in
+		// the happy-path bodies below: the caller-subset guard only lets an admin
+		// grant or assign permissions it holds itself. A real school admin (the
+		// owner) holds the whole catalog; these fixtures mirror the subset needed.
+		"users-writer":    {"users:write", "users:read", "grades:read"},
+		"users-reader":    {"users:read"},
+		"roles-writer":    {"roles:write", "roles:read", "students:read", "grades:read", "grades:write"},
+		"roles-reader":    {"roles:read"},
+		"guardian-writer": {"guardians:write", "guardians:read"},
+		"guardian-reader": {"guardians:read"},
+		"family-reader":   {"family:read"},
 	}
 	granted, ok := perms[req.Msg.GetAccessToken()]
 	if !ok {
@@ -960,6 +964,18 @@ func TestRolesWriteWithPermissionCreates201(t *testing.T) {
 	res := doGateway(t, gw, http.MethodPost, "/api/v1/roles", "roles-writer", validCreateRoleBody)
 	if res.StatusCode != http.StatusCreated {
 		t.Errorf("status = %d, want 201", res.StatusCode)
+	}
+}
+
+// End-to-end caller-subset guard: a roles:write holder cannot grant a permission
+// it does not itself hold (here finance:read), even though it may create roles.
+// This is the escalation the guard closes — verified through the full stack.
+func TestRolesWriteCannotGrantPermissionCallerLacks(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_iam": true})
+	body := `{"name":"escalado","permissions":["students:read","finance:read"]}`
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/roles", "roles-writer", body)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (cannot grant finance:read it does not hold)", res.StatusCode)
 	}
 }
 
