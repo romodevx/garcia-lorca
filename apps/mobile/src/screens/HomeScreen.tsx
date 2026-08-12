@@ -14,7 +14,10 @@ import { Card, Chip, ListRow, SectionLabel, TintIcon } from "../ui";
  */
 export function HomeScreen(): ReactElement {
   const theme = useTheme();
-  const { child, paid } = useAppState();
+  const { child, paid, unreadCount } = useAppState();
+  // today.attendance / today.balance / today.nextEvent are still static mock:
+  // TODO(pendiente-backend: GET /api/v1/family/students/{id}/attendance | .../account | agenda)
+  // — dato estático provisional. No borrar. Ver .claude/docs/PLAN-mock-data-audit.md #B3/#B4/#B6.
   const att = today.attendance;
   const bal = today.balance;
 
@@ -78,7 +81,7 @@ export function HomeScreen(): ReactElement {
         <Card onPress={() => router.push("/(tabs)/avisos")} accessibilityLabel="Avisos" padded style={styles.tile}>
           <View style={styles.tileTop}>
             <TintIcon name="megaphone" tint="purple" />
-            <Chip kind="bad">{`${today.unread} nuevos`}</Chip>
+            <Chip kind="bad">{`${unreadCount} nuevos`}</Chip>
           </View>
           <Text style={[styles.tileTitle, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>Avisos</Text>
           <Text style={[styles.heroSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>Sin leer</Text>

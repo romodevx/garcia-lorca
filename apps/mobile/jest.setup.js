@@ -1,5 +1,15 @@
 /* Test environment shims. */
 
+// Default network stub: the AppState provider fetches family notifications on
+// mount, so every screen rendered through the provider stack issues a request.
+// Return an empty, well-formed envelope by default; individual tests override
+// `global.fetch` with jest.fn() when they need specific responses.
+global.fetch = jest.fn(async () => ({
+  ok: true,
+  status: 200,
+  json: async () => ({ notifications: [] }),
+}));
+
 // expo-router: stub the imperative router + hooks used by screens.
 jest.mock("expo-router", () => ({
   router: { push: jest.fn(), replace: jest.fn(), back: jest.fn(), navigate: jest.fn() },

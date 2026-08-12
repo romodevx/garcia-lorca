@@ -1,0 +1,88 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { login, refresh } from "./auth";
+import { clearTokens, getAccessToken, getRefreshToken, saveTokens } from "./tokenStore";
+
+/** Minimal Response stand-in for the mocked global fetch. */
+function response(status: number, body: unknown): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+  } as unknown as Response;
+}
+
+describe("auth.login", () => {
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+    await clearTokens();
+  });
+
+  it("posts the credentials to the mobile login route and stores the returned pair", async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue(
+        response(200, { accessToken: "a1", refreshToken: "r1", expiresIn: 900, mustChangePassword: false }),
+      );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const result = await login("director@garcialorca.edu.mx", "Admin123.");
+
+    expect(result.mustChangePassword).toBe(false);
+    expect(getAccessToken()).toBe("a1");
+    expect(getRefreshToken()).toBe("r1");
+    const [urlArg, init] = fetchMock.mock.calls[0];
+    expect(String(urlArg)).toContain("/api/v1/auth/mobile/login");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ email: "director@garcialorca.edu.mx", password: "Admin123." });
+  });
+
+  it("surfaces the mustChangePassword flag from the body", async () => {
+    globalThis.fetch = jest
+      .fn()
+      .mockResolvedValue(response(200, { accessToken: "a1", refreshToken: "r1", expiresIn: 900, mustChangePassword: true })) as unknown as typeof fetch;
+    const result = await login("u", "p");
+    expect(result.mustChangePassword).toBe(true);
+  });
+
+  it("throws and stores nothing when the credentials are rejected", async () => {
+    globalThis.fetch = jest.fn().mockResolvedValue(response(401, {})) as unknown as typeof fetch;
+    await expect(login("u", "bad")).rejects.toMatchObject({ status: 401 });
+    expect(getAccessToken()).toBeNull();
+  });
+});
+
+describe("auth.refresh", () => {
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+    await clearTokens();
+  });
+
+  it("returns false without calling the network when there is no refresh token", async () => {
+    const fetchMock = jest.fn();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    expect(await refresh()).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rotates the pair using the stored refresh token", async () => {
+    await saveTokens({ accessToken: "stale", refreshToken: "r1" });
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue(response(200, { accessToken: "a2", refreshToken: "r2", expiresIn: 900 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    expect(await refresh()).toBe(true);
+    expect(getAccessToken()).toBe("a2");
+    expect(getRefreshToken()).toBe("r2");
+    const [urlArg, init] = fetchMock.mock.calls[0];
+    expect(String(urlArg)).toContain("/api/v1/auth/mobile/refresh");
+    expect(JSON.parse(init.body)).toEqual({ refreshToken: "r1" });
+  });
+
+  it("clears the tokens and returns false when the refresh token is rejected", async () => {
+    await saveTokens({ accessToken: "stale", refreshToken: "r1" });
+    globalThis.fetch = jest.fn().mockResolvedValue(response(401, {})) as unknown as typeof fetch;
+    expect(await refresh()).toBe(false);
+    expect(getRefreshToken()).toBeNull();
+  });
+});

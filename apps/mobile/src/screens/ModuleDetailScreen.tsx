@@ -9,12 +9,16 @@ export interface ModuleDetailScreenProps {
   id: ModuleTile["id"] | string;
 }
 
+// TODO(pendiente-backend: docs — servicio docs es shell, sin RPCs)
+// — dato estático provisional. No borrar. Ver .claude/docs/PLAN-mock-data-audit.md #B8.
 const DOCS: ReadonlyArray<[string, string]> = [
   ["Boleta 2.º periodo", "PDF · 240 KB"],
   ["Constancia de estudios", "PDF · 180 KB"],
   ["Reglamento escolar", "PDF · 1.2 MB"],
 ];
 
+// TODO(pendiente-backend: facturas CFDI — billing fuera de MVP)
+// — dato estático provisional. No borrar. Ver .claude/docs/PLAN-mock-data-audit.md #B9.
 const INVOICES: ReadonlyArray<[string, string]> = [
   ["Colegiatura mayo", "CFDI · 02 jun"],
   ["Colegiatura abril", "CFDI · 02 may"],
@@ -45,6 +49,8 @@ export function ModuleDetailScreen({ id }: ModuleDetailScreenProps): ReactElemen
   if (id === "uniformes") {
     return (
       <>
+        {/* TODO(pendiente-backend: uniformes tallas — servicio uniforms es shell)
+            — dato estático provisional. No borrar. Ver .claude/docs/PLAN-mock-data-audit.md #B10. */}
         <Card padded style={styles.tile}>
           <TintIcon name="shirt" tint="lime" size={48} icon={26} />
           <View>
@@ -79,6 +85,8 @@ export function ModuleDetailScreen({ id }: ModuleDetailScreenProps): ReactElemen
   if (id === "becas") {
     return (
       <>
+        {/* TODO(pendiente-backend: becas — servicio scholarships es shell, sin RPCs)
+            — dato estático provisional. No borrar. Ver .claude/docs/PLAN-mock-data-audit.md #B11. */}
         <Card style={styles.balanceHero}>
           <Text style={[styles.cap, { color: theme.colors.text2, fontFamily: theme.fonts.uiExtra }]}>Beca aplicada</Text>
           <Text style={[styles.amount, { color: theme.colors.tintPurpleInk, fontFamily: theme.fonts.display }]}>23%</Text>

@@ -2,12 +2,13 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from "react";
+import { listFamilyNotifications, type FamilyNotification } from "../api";
 import {
-  announcements as ANNOUNCEMENTS,
   attendance as ATTENDANCE,
   child as CHILD,
   levels as LEVELS,
@@ -16,15 +17,16 @@ import {
   type Level,
   type LevelId,
 } from "../data/mock";
+import { isUnread } from "../screens/notificationView";
 
 /**
- * App-wide interactive state for the parent app: the persistent child context,
- * the selected level (drives grade rendering), and the mutable session state
- * that screens update live — paid status, attendance excuse overrides, and the
- * set of read announcements. Mirrors the prototype's top-level shell state.
+ * App-wide interactive state for the parent app.
  *
- * This is in-memory mock state; the real implementation will hydrate it from
- * the gateway and persist mutations through the API client.
+ * The notifications slice is REAL: it hydrates from the gateway's self-scoped
+ * family surface (`GET /api/v1/family/notifications`) on mount. Everything else
+ * (child context, level, paid status, attendance overrides) is still in-memory
+ * mock state pending its own family-scoped endpoints — see
+ * .claude/docs/PLAN-mock-data-audit.md (B2–B6).
  */
 interface AppStateValue {
   child: Child;
@@ -43,11 +45,20 @@ interface AppStateValue {
   /** Marks a day as excused (one-tap "Justificar"). */
   excuseDay: (day: number) => void;
 
-  /** Set of announcement ids the user has read. */
-  readIds: ReadonlySet<number>;
-  /** Count of still-unread announcements. */
+  /** Family notifications loaded from the gateway (newest first). */
+  notifications: FamilyNotification[];
+  /** True while the first (or a manual) notification load is in flight. */
+  notificationsLoading: boolean;
+  /** True when the last notification load failed. */
+  notificationsError: boolean;
+  /** Re-fetches the notification inbox (pull-to-refresh / retry). */
+  refreshNotifications: () => Promise<void>;
+
+  /** Ids of notifications marked read locally this session. */
+  readIds: ReadonlySet<string>;
+  /** Count of still-unread notifications. */
   unreadCount: number;
-  markRead: (id: number) => void;
+  markRead: (id: string) => void;
   markAllRead: () => void;
 }
 
@@ -66,7 +77,13 @@ export function AppStateProvider({
   const [levelId, setLevelId] = useState<LevelId>(initialLevelId);
   const [paid, setPaid] = useState(false);
   const [overrides, setOverrides] = useState<Record<number, AttendanceStatus>>({});
-  const [readIds, setReadIds] = useState<ReadonlySet<number>>(() => new Set());
+
+  const [notifications, setNotifications] = useState<FamilyNotification[]>([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(true);
+  const [notificationsError, setNotificationsError] = useState(false);
+  // Read state is session-local: the guardian role cannot reach the comms
+  // mark-read endpoint (see notificationView isUnread). Ids are notification ids.
+  const [readIds, setReadIds] = useState<ReadonlySet<string>>(() => new Set());
 
   const pay = useCallback(() => setPaid(true), []);
 
@@ -79,7 +96,23 @@ export function AppStateProvider({
     setOverrides((prev) => ({ ...prev, [day]: "excused" }));
   }, []);
 
-  const markRead = useCallback((id: number) => {
+  const refreshNotifications = useCallback(async () => {
+    setNotificationsLoading(true);
+    setNotificationsError(false);
+    try {
+      setNotifications(await listFamilyNotifications());
+    } catch {
+      setNotificationsError(true);
+    } finally {
+      setNotificationsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshNotifications();
+  }, [refreshNotifications]);
+
+  const markRead = useCallback((id: string) => {
     setReadIds((prev) => {
       const next = new Set(prev);
       next.add(id);
@@ -88,12 +121,18 @@ export function AppStateProvider({
   }, []);
 
   const markAllRead = useCallback(() => {
-    setReadIds(new Set(ANNOUNCEMENTS.map((a) => a.id)));
-  }, []);
+    setReadIds((prev) => {
+      const next = new Set(prev);
+      for (const n of notifications) {
+        next.add(n.id);
+      }
+      return next;
+    });
+  }, [notifications]);
 
   const unreadCount = useMemo(
-    () => ANNOUNCEMENTS.filter((a) => a.unread && !readIds.has(a.id)).length,
-    [readIds],
+    () => notifications.filter((n) => isUnread(n, readIds)).length,
+    [notifications, readIds],
   );
 
   const value = useMemo<AppStateValue>(
@@ -107,6 +146,10 @@ export function AppStateProvider({
       overrides,
       attendanceStatus,
       excuseDay,
+      notifications,
+      notificationsLoading,
+      notificationsError,
+      refreshNotifications,
       readIds,
       unreadCount,
       markRead,
@@ -119,6 +162,10 @@ export function AppStateProvider({
       overrides,
       attendanceStatus,
       excuseDay,
+      notifications,
+      notificationsLoading,
+      notificationsError,
+      refreshNotifications,
       readIds,
       unreadCount,
       markRead,

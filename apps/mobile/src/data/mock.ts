@@ -59,17 +59,6 @@ export interface Movement {
   paid?: boolean;
 }
 
-export interface Announcement {
-  id: number;
-  unread: boolean;
-  cat: "evento" | "academico" | "administrativo";
-  from: string;
-  time: string;
-  title: string;
-  excerpt: string;
-  body: string;
-}
-
 export interface SchoolEvent {
   day: string;
   mon: string;
@@ -98,6 +87,8 @@ export interface ExcuseReason {
   label: string;
 }
 
+// TODO(pendiente-backend: perfil del hijo family — students+config exist, falta ruta family)
+// — dato estático provisional. No borrar. Ver .claude/docs/PLAN-mock-data-audit.md #B5.
 export const child: Child = {
   name: "Mateo Herrera Díaz",
   short: "Mateo",
@@ -113,14 +104,20 @@ export const levels: Record<LevelId, Level> = {
   secundaria: { id: "secundaria", name: "Secundaria", group: "2° B", grading: "num" },
 };
 
+// The home "Hoy" summary. `unread` was removed: the avisos counter is now derived
+// from real /family/notifications data (AppState.unreadCount). The remaining
+// fields are still static.
+// TODO(pendiente-backend: GET /api/v1/family/students/{id}/attendance | .../account | agenda)
+// — dato estático provisional. No borrar. Ver .claude/docs/PLAN-mock-data-audit.md #B3/#B4/#B6.
 export const today = {
   dateLabel: "vie 12 jun",
   attendance: { status: "present" as AttendanceStatus, label: "Presente", detail: "Entrada 7:52 a.m." },
-  unread: 2,
   balance: { amount: 1850, status: "warn", label: "Pendiente", due: "Vence 15 jun" },
   nextEvent: { title: "Festival de Primavera", when: "vie 20 jun · 9:00 a.m.", cat: "evento" },
 };
 
+// TODO(pendiente-backend: GET /api/v1/family/students/{id}/attendance)
+// — dato estático provisional. No borrar. Ver .claude/docs/PLAN-mock-data-audit.md #B3.
 export const attendance = {
   monthLabel: "Junio 2026",
   todayDate: 12,
@@ -140,6 +137,8 @@ export const attendance = {
   ],
 };
 
+// TODO(pendiente-backend: GET /api/v1/family/students/{id}/grades — reusa grades service)
+// — dato estático provisional. No borrar. Ver .claude/docs/PLAN-mock-data-audit.md #B2.
 export const gradesNum = {
   average: 9.3,
   period: "2.º periodo",
@@ -174,6 +173,8 @@ export const qualMeta: Record<QualLevel, { label: string; chip: ChipKind; pct: n
   apoyo: { label: "Requiere apoyo", chip: "bad", pct: 30 },
 };
 
+// TODO(pendiente-backend: GET /api/v1/family/students/{id}/account — reusa finance.GetAccount)
+// — dato estático provisional. No borrar. Ver .claude/docs/PLAN-mock-data-audit.md #B4.
 export const balance = {
   amount: 1850,
   status: "warn",
@@ -188,45 +189,13 @@ export const balance = {
   ] satisfies Movement[],
 };
 
-export const announcements: Announcement[] = [
-  {
-    id: 1, unread: true, cat: "evento", from: "Dirección", time: "Hace 2 h",
-    title: "Festival de Primavera: confirma tu asistencia",
-    excerpt: "Los esperamos el viernes 20 de junio a las 9:00 a.m. en el patio central…",
-    body: "Estimadas familias:\n\nCon gran alegría los invitamos al Festival de Primavera, donde nuestros alumnos presentarán bailes, música y los proyectos del ciclo escolar.\n\nFecha: viernes 20 de junio\nHora: 9:00 a.m.\nLugar: patio central\n\nPor motivos de aforo, les pedimos confirmar su asistencia antes del 17 de junio.",
-  },
-  {
-    id: 2, unread: true, cat: "academico", from: "Mtra. Patricia Lugo", time: "Hace 5 h",
-    title: "Reunión de padres del grupo",
-    excerpt: "Revisaremos avances del 2.º periodo y la organización del cierre de ciclo.",
-    body: "Buenas tardes:\n\nLos convoco a la reunión informativa del grupo el próximo miércoles 18 de junio a las 5:00 p.m. en el salón.\n\nTrataremos los avances del 2.º periodo y la logística del cierre de ciclo escolar. Su presencia es muy importante.",
-  },
-  {
-    id: 3, unread: false, cat: "administrativo", from: "Administración", time: "Ayer",
-    title: "Recordatorio de pago de colegiatura",
-    excerpt: "La colegiatura de junio vence el día 15. Evita recargos pagando a tiempo.",
-    body: "Le recordamos que la colegiatura del mes de junio vence el 15 de junio. Puede realizar su pago desde la sección Cuenta de la app o en caja. Gracias.",
-  },
-  {
-    id: 4, unread: false, cat: "administrativo", from: "Dirección", time: "Hace 2 días",
-    title: "Suspensión de clases — 16 de junio",
-    excerpt: "No habrá clases el lunes 16 por junta de Consejo Técnico Escolar.",
-    body: "Informamos que el lunes 16 de junio se suspenden las clases por sesión de Consejo Técnico Escolar. Las actividades se reanudan el martes 17 con normalidad.",
-  },
-  {
-    id: 5, unread: false, cat: "evento", from: "Comité ambiental", time: "Hace 4 días",
-    title: "Campaña de reciclaje de tapitas",
-    excerpt: "Trae tus tapitas de plástico y apoya la causa. Contenedor en la entrada.",
-    body: "Iniciamos la campaña de acopio de tapitas de plástico a beneficio de la fundación. Pueden depositarlas en el contenedor verde ubicado en la entrada principal. ¡Gracias por participar!",
-  },
-];
+// NOTE: the former `announcements` / `catMeta` mock was removed — avisos now load
+// from the real gateway family surface (GET /api/v1/family/notifications) via the
+// API client (src/api/notifications.ts) and are rendered through
+// src/screens/notificationView.ts. See .claude/docs/PLAN-mock-data-audit.md #A4/#A5.
 
-export const catMeta: Record<Announcement["cat"], { label: string; icon: IconName; tint: TintName }> = {
-  evento: { label: "Evento", icon: "pin", tint: "purple" },
-  academico: { label: "Académico", icon: "book", tint: "forest" },
-  administrativo: { label: "Administrativo", icon: "document", tint: "orange" },
-};
-
+// TODO(pendiente-backend: agenda/eventos — no endpoint; comms agenda diferida Phase 9d)
+// — dato estático provisional. No borrar. Ver .claude/docs/PLAN-mock-data-audit.md #B6.
 export const events: SchoolEvent[] = [
   { day: "16", mon: "JUN", title: "Suspensión de clases", sub: "Consejo Técnico Escolar", tint: "orange" },
   { day: "18", mon: "JUN", title: "Reunión de padres", sub: "5:00 p.m. · Salón 3°A", tint: "forest" },

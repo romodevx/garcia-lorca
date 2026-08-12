@@ -1,24 +1,67 @@
-import { fireEvent, screen } from "@testing-library/react-native";
+import { act, fireEvent, screen } from "@testing-library/react-native";
 import { LoginScreen } from "./LoginScreen";
 import { renderWithProviders } from "../test/renderWithProviders";
 
+// The LoginScreen renders inside the full provider stack, whose AppState fetches
+// family notifications on mount. Draining that promise chain (a macrotask flush)
+// before interacting settles the background fetch so it neither overlaps the
+// interaction's act() nor leaks a late update into the next test.
+async function drainMount(): Promise<void> {
+  await act(async () => {
+    await new Promise<void>((resolve) => {
+      setTimeout(() => resolve(), 0);
+    });
+  });
+}
+
 describe("LoginScreen", () => {
   it("renders the portal branding", async () => {
-    await renderWithProviders(<LoginScreen onLogin={() => undefined} />);
+    await renderWithProviders(<LoginScreen onSubmit={async () => undefined} />);
+    await drainMount();
     expect(screen.getByText(/Portal para padres y tutores/)).toBeTruthy();
   });
 
-  it("submits via the Ingresar button", async () => {
-    const onLogin = jest.fn();
-    await renderWithProviders(<LoginScreen onLogin={onLogin} />);
-    fireEvent.press(screen.getByRole("button", { name: "Ingresar" }));
-    expect(onLogin).toHaveBeenCalledTimes(1);
+  it("submits the typed credentials via the Ingresar button", async () => {
+    const onSubmit = jest.fn().mockResolvedValue(undefined);
+    await renderWithProviders(<LoginScreen onSubmit={onSubmit} />);
+    await drainMount();
+
+    // React 19 + RNTL v14 flush controlled-input and async-handler updates
+    // asynchronously. Every interaction runs inside act() so the typed state is
+    // committed before the submit reads it and the async submit — including its
+    // trailing `finally` (setSubmitting false) — settles fully and cannot leak
+    // into the next test. (A bare fireEvent + waitFor between the two steps leaves
+    // a pending update that corrupts the following render under this stack.)
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText("tu@correo.com"), "laura@correo.com");
+      fireEvent.changeText(screen.getByPlaceholderText("••••••••"), "secret123");
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByRole("button", { name: "Ingresar" }));
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith("laura@correo.com", "secret123");
   });
 
-  it("also submits via Face ID", async () => {
-    const onLogin = jest.fn();
-    await renderWithProviders(<LoginScreen onLogin={onLogin} />);
+  it("shows an error message when the submit is rejected", async () => {
+    const onSubmit = jest.fn().mockRejectedValue(new Error("bad creds"));
+    await renderWithProviders(<LoginScreen onSubmit={onSubmit} />);
+    await drainMount();
+
+    await act(async () => {
+      fireEvent.press(screen.getByRole("button", { name: "Ingresar" }));
+    });
+
+    expect(screen.getByText(/No pudimos iniciar sesión/)).toBeTruthy();
+  });
+
+  it("does not submit credentials via Face ID (out of scope, not a silent login)", async () => {
+    const onSubmit = jest.fn().mockResolvedValue(undefined);
+    await renderWithProviders(<LoginScreen onSubmit={onSubmit} />);
+    await drainMount();
+
     fireEvent.press(screen.getByRole("button", { name: "Entrar con Face ID" }));
-    expect(onLogin).toHaveBeenCalledTimes(1);
+
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });

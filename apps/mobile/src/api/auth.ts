@@ -1,0 +1,79 @@
+import { apiUrl } from "./config";
+import { ApiError } from "./errors";
+import { clearTokens, getRefreshToken, saveTokens } from "./tokenStore";
+
+/**
+ * Mobile auth against the gateway's Bearer posture (`/api/v1/auth/mobile/*`). Both
+ * tokens are returned in the JSON body — never a cookie — and stored via
+ * `tokenStore`. The access token is then sent as `Authorization: Bearer …` by
+ * `apiFetch`.
+ */
+
+// Gateway response shapes (mobile posture). See services/gateway auth.go:
+//   mobileLoginResponse / mobileRefreshResponse.
+interface MobileLoginResponse {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+  mustChangePassword: boolean;
+}
+
+interface MobileRefreshResponse {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+}
+
+export interface LoginResult {
+  /** The gateway asks the user to rotate a temporary password before continuing. */
+  mustChangePassword: boolean;
+}
+
+const JSON_HEADERS = { "Content-Type": "application/json" } as const;
+
+/**
+ * Exchanges credentials for a token pair and stores it. Throws an ApiError on any
+ * non-2xx (e.g. 401 for bad credentials) without touching the stored tokens.
+ */
+export async function login(email: string, password: string): Promise<LoginResult> {
+  const res = await fetch(apiUrl("/api/v1/auth/mobile/login"), {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, "login failed");
+  }
+  const data = (await res.json()) as MobileLoginResponse;
+  await saveTokens({ accessToken: data.accessToken, refreshToken: data.refreshToken });
+  return { mustChangePassword: Boolean(data.mustChangePassword) };
+}
+
+/**
+ * Rotates the token pair using the stored refresh token. Returns false (without a
+ * network call) when there is no refresh token, and clears the stored pair when
+ * the gateway rejects it — a rejected refresh means the session is dead.
+ */
+export async function refresh(): Promise<boolean> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) {
+    return false;
+  }
+  const res = await fetch(apiUrl("/api/v1/auth/mobile/refresh"), {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ refreshToken }),
+  });
+  if (!res.ok) {
+    await clearTokens();
+    return false;
+  }
+  const data = (await res.json()) as MobileRefreshResponse;
+  await saveTokens({ accessToken: data.accessToken, refreshToken: data.refreshToken });
+  return true;
+}
+
+/** Signs out by clearing the stored token pair. */
+export async function logout(): Promise<void> {
+  await clearTokens();
+}
