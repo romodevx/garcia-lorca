@@ -125,6 +125,31 @@ describe("AppShell navigation flow", () => {
     expect(screen.queryByRole("button", { name: "Entrar al sistema" })).not.toBeInTheDocument();
   });
 
+  it("shows the real authenticated identity (email + derived name), not the static owner chrome", async () => {
+    // The boot restore hits /me and lands on the dashboard. The top bar must
+    // reflect the REAL principal returned by the gateway — showing the actual
+    // email and a name derived from it — instead of the hardcoded "Dirección"
+    // owner identity that every user used to see regardless of who logged in.
+    mockMe.mockResolvedValueOnce({
+      userId: "u9",
+      email: "patricia.lugo@garcialorca.edu.mx",
+      permissions: ["grades:read"],
+    });
+    render(
+      <Providers flags={{}}>
+        <AppShell />
+      </Providers>
+    );
+
+    expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
+    // Real email is visible in the chrome (identity subtitle).
+    expect(screen.getByText("patricia.lugo@garcialorca.edu.mx")).toBeInTheDocument();
+    // Name derived from the email local-part (dots → spaces, title-cased).
+    expect(screen.getByText("Patricia Lugo")).toBeInTheDocument();
+    // The old static owner identity must be gone.
+    expect(screen.queryByText("Dirección")).not.toBeInTheDocument();
+  });
+
   it("restores via the refresh cookie when the access cookie has expired (me → refresh → me → dashboard)", async () => {
     // /me fails (access cookie expired) but the 24h refresh cookie mints a fresh
     // one; boot must recover instead of dropping to login.
