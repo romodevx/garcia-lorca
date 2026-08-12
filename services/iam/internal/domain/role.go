@@ -6,15 +6,24 @@ import (
 	glerrors "github.com/garcia-lorca/pkg/errors"
 )
 
-// OwnerRoleName is the name of the seeded super-role (migrations/iam). It is the
-// one role allowed to hold the tenant-wide sensitive reads (see IsOwnerOnly);
-// authorization itself never compares role names — this is a grant-time guard.
+// OwnerRoleName is the name of the seeded super-role (migrations/iam). Kept for
+// documentation of the seed; it is NOT used for any authorization decision —
+// role names are admin-typed and case-collidable, so they must never gate a
+// grant (see IsOwnerRoleID).
 const OwnerRoleName = "owner"
 
-// IsOwnerRoleName reports whether name refers to the seeded owner role, ignoring
-// surrounding space and case (role names are stored as typed by the admin).
-func IsOwnerRoleName(name string) bool {
-	return strings.EqualFold(strings.TrimSpace(name), OwnerRoleName)
+// OwnerRoleID is the fixed UUID of the seeded owner role
+// (migrations/iam/0002_owner_and_password_policy.sql). It is the single stable,
+// unforgeable identity of the tenant super-role: the owner-only grant guard keys
+// off THIS, never the mutable role name. Role-name uniqueness in Postgres is
+// case-sensitive, so a name like "Owner" is a distinct, insertable role that
+// must not inherit the owner exemption.
+const OwnerRoleID = "00000000-0000-0000-0000-0000000000a1"
+
+// IsOwnerRoleID reports whether id is the seeded owner role. Grant-time guards
+// use this — an id cannot be spoofed by choosing a colliding role name.
+func IsOwnerRoleID(id string) bool {
+	return strings.TrimSpace(id) == OwnerRoleID
 }
 
 // Role is a named bundle of permissions. Roles exist only to group permissions;

@@ -122,19 +122,20 @@ func TestIsOwnerOnly(t *testing.T) {
 	}
 }
 
-func TestIsOwnerRoleName(t *testing.T) {
+func TestIsOwnerRoleID(t *testing.T) {
 	tests := []struct {
-		name string
+		id   string
 		want bool
 	}{
-		{"owner", true},
-		{" Owner ", true},
-		{"Docente", false},
+		{domain.OwnerRoleID, true},
+		{"00000000-0000-0000-0000-0000000000a1", true},
+		{"00000000-0000-0000-0000-0000000000a2", false},
+		{"owner", false}, // a name is never the id — this is the whole point.
 		{"", false},
 	}
 	for _, tt := range tests {
-		if got := domain.IsOwnerRoleName(tt.name); got != tt.want {
-			t.Errorf("IsOwnerRoleName(%q) = %v, want %v", tt.name, got, tt.want)
+		if got := domain.IsOwnerRoleID(tt.id); got != tt.want {
+			t.Errorf("IsOwnerRoleID(%q) = %v, want %v", tt.id, got, tt.want)
 		}
 	}
 }

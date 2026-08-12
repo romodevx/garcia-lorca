@@ -129,12 +129,15 @@ func (s *AdminService) CreateRole(ctx context.Context, name string, permissions 
 	if err := validatePermissions(permissions); err != nil {
 		return domain.Role{}, err
 	}
-	if err := guardOwnerOnly(name, permissions); err != nil {
-		return domain.Role{}, err
-	}
 	role, err := domain.NewRole(s.newID(), name, permissions)
 	if err != nil {
 		return domain.Role{}, err // KindInvalid: blank name / malformed permission
+	}
+	// A freshly generated id is never the seeded owner id, so an owner-only
+	// permission on a newly created role is always refused — the API cannot mint
+	// a second super-role by choosing a name that collides with "owner".
+	if err := guardOwnerOnly(role.ID(), permissions); err != nil {
+		return domain.Role{}, err
 	}
 	if err := s.roles.CreateRole(ctx, role); err != nil {
 		return domain.Role{}, err // KindConflict on duplicate name
@@ -169,7 +172,7 @@ func (s *AdminService) SetRolePermissions(ctx context.Context, roleID string, pe
 		if err != nil {
 			return err // KindNotFound: cannot confirm the target is the owner role.
 		}
-		if err := guardOwnerOnly(role.Name(), permissions); err != nil {
+		if err := guardOwnerOnly(role.ID(), permissions); err != nil {
 			return err
 		}
 	}
@@ -198,12 +201,15 @@ func containsOwnerOnly(permissions []string) bool {
 }
 
 // guardOwnerOnly refuses to put a tenant-wide sensitive read on any role other
-// than owner. Those reads are not scoped per object yet, so a non-owner holder
-// would see every family's ledger / every group's attendance; the guard keeps
-// the vulnerable configuration from being created through the admin API. The
-// owner role — seeded and granted these by migration — is unaffected.
-func guardOwnerOnly(roleName string, permissions []string) error {
-	if domain.IsOwnerRoleName(roleName) {
+// than the seeded owner. Those reads are not scoped per object yet, so a
+// non-owner holder would see every family's ledger / every group's attendance;
+// the guard keeps the vulnerable configuration from being created through the
+// admin API. The exemption is keyed on the owner role's fixed id, never its name
+// — a name is admin-typed and case-collidable, so gating on it let a delegated
+// admin mint an escalated "Owner" role. The seeded owner role (granted these by
+// migration) is unaffected.
+func guardOwnerOnly(roleID string, permissions []string) error {
+	if domain.IsOwnerRoleID(roleID) {
 		return nil
 	}
 	for _, p := range permissions {

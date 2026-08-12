@@ -292,17 +292,40 @@ func TestAdminSetRolePermissionsAllowsUnrestrictedOnNonOwnerRole(t *testing.T) {
 }
 
 func TestAdminSetRolePermissionsAllowsOwnerOnlyPermissionOnOwnerRole(t *testing.T) {
+	// The exemption is keyed on the seeded owner role's fixed id, never its name.
 	roles := &fakeRoles{byID: map[string]domain.Role{
-		"owner-role": mustRole(t, "owner-role", "owner", nil),
+		domain.OwnerRoleID: mustRole(t, domain.OwnerRoleID, "owner", nil),
 	}}
 	svc := newAdmin(&fakeUsers{}, roles, func() string { return "x" })
 
 	perms := []string{"finance:read", "attendance:read", "comms:read", "students:read"}
-	if err := svc.SetRolePermissions(context.Background(), "owner-role", perms); err != nil {
+	if err := svc.SetRolePermissions(context.Background(), domain.OwnerRoleID, perms); err != nil {
 		t.Fatalf("SetRolePermissions on the owner role: %v", err)
 	}
-	if got := roles.permsSet["owner-role"]; len(got) != 4 {
-		t.Errorf("permissions for owner-role = %v, want 4 entries", got)
+	if got := roles.permsSet[domain.OwnerRoleID]; len(got) != 4 {
+		t.Errorf("permissions for owner role = %v, want 4 entries", got)
+	}
+}
+
+// SECURITY regression: the owner-only guard must key off the seeded owner role's
+// fixed id, NOT its name. Role-name uniqueness in Postgres is case-sensitive, so
+// a case-variant like "Owner" is a distinct, insertable role; if it inherited
+// the owner exemption a delegated non-owner admin (roles:write + users:write)
+// could mint itself a tenant-wide sensitive read and see every family's ledger.
+func TestAdminSetRolePermissionsCaseVariantOwnerNameCannotHoldOwnerOnly(t *testing.T) {
+	for _, name := range []string{"Owner", "OWNER", "owner "} {
+		roles := &fakeRoles{byID: map[string]domain.Role{
+			"r1": mustRole(t, "r1", name, []string{"students:read"}),
+		}}
+		svc := newAdmin(&fakeUsers{}, roles, func() string { return "x" })
+
+		err := svc.SetRolePermissions(context.Background(), "r1", []string{"finance:read"})
+		if err == nil || glerrors.KindOf(err) != glerrors.KindForbidden {
+			t.Errorf("SetRolePermissions(name=%q, finance:read): want KindForbidden, got %v", name, err)
+		}
+		if _, persisted := roles.permsSet["r1"]; persisted {
+			t.Errorf("SetRolePermissions(name=%q): must not persist an escalated set on a non-owner id", name)
+		}
 	}
 }
 
@@ -334,15 +357,22 @@ func TestAdminCreateRoleRejectsOwnerOnlyPermissionOnNonOwnerRole(t *testing.T) {
 	}
 }
 
-func TestAdminCreateRoleAllowsOwnerOnlyPermissionOnOwnerRole(t *testing.T) {
-	roles := &fakeRoles{}
-	svc := newAdmin(&fakeUsers{}, roles, func() string { return "role-new" })
+// CreateRole can never mint the seeded owner role — that role is created by
+// migration with a fixed id (ON CONFLICT DO NOTHING). A freshly generated role
+// id is never the owner id, so an owner-only permission on CreateRole is
+// forbidden regardless of the requested name (even "owner"): the API cannot
+// bootstrap a second, name-colliding super-role.
+func TestAdminCreateRoleRejectsOwnerOnlyEvenWhenNamedOwner(t *testing.T) {
+	for _, name := range []string{"owner", "Owner", "OWNER"} {
+		roles := &fakeRoles{}
+		svc := newAdmin(&fakeUsers{}, roles, func() string { return "role-new" })
 
-	role, err := svc.CreateRole(context.Background(), "owner", []string{"finance:read", "attendance:read", "comms:read"})
-	if err != nil {
-		t.Fatalf("CreateRole on the owner role: %v", err)
-	}
-	if len(role.Permissions()) != 3 || len(roles.created) != 1 {
-		t.Errorf("owner role = %d perms / %d persisted, want 3 / 1", len(role.Permissions()), len(roles.created))
+		_, err := svc.CreateRole(context.Background(), name, []string{"finance:read"})
+		if err == nil || glerrors.KindOf(err) != glerrors.KindForbidden {
+			t.Errorf("CreateRole(%q, finance:read): want KindForbidden, got %v", name, err)
+		}
+		if len(roles.created) != 0 {
+			t.Errorf("CreateRole(%q): must not persist an escalated role", name)
+		}
 	}
 }
