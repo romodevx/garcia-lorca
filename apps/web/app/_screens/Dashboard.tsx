@@ -179,7 +179,9 @@ export function Dashboard({ user, onOpen, now = new Date() }: DashboardProps): R
   const [cycleName, setCycleName] = useState("—");
   useEffect(() => {
     let active = true;
-    listStudents(API_URL).then((ss) => active && setKpi((k) => ({ ...k, students: ss.length }))).catch(() => {});
+    // "Registrados": the active admission pipeline — exclude rejected/withdrawn,
+    // which are not current students, so the count never over-reports.
+    listStudents(API_URL).then((ss) => active && setKpi((k) => ({ ...k, students: ss.filter((s) => s.admissionStatus !== "rejected" && s.admissionStatus !== "withdrawn").length }))).catch(() => {});
     listCycles(API_URL).then((cs) => {
       const cyc = cs.find((c) => c.status === "active") ?? cs[0];
       if (cyc === undefined) return;

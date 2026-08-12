@@ -7,17 +7,21 @@ import { Icon, type IconName } from "../../_design/Icon";
 import type { ColorKey } from "../../_design/colors";
 import { listCycles, type Cycle } from "../../config/api";
 import { getOverdue, listCharges, registerPayment, type Charge, type PaymentMethod } from "../../finance/api";
+import { centsToPesosInput, formatCents, pesosToCents } from "./money";
 import { listStudents, type Student } from "../../students/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
-const money = (cents: number): string => "$" + Math.round(cents / 100).toLocaleString("es-MX");
+// Money crosses the boundary as integer cents; formatting/parsing goes through
+// the tested money helpers (locale-aware, cents-exact) — never a naive parseFloat.
+const money = (cents: number): string => formatCents(cents);
 const AV: ColorKey[] = ["lime", "forest", "orange", "purple", "yellow"];
-type VisualStatus = "paid" | "due" | "overdue";
+type VisualStatus = "paid" | "due" | "overdue" | "cancelled";
 const STATUS: Record<VisualStatus, { label: string; dot: string; bg: string; fg: string }> = {
   paid: { label: "Pagado", dot: "var(--forest)", bg: "var(--ok-bg)", fg: "var(--ok-fg)" },
   due: { label: "Por vencer", dot: "var(--yellow)", bg: "var(--warn-bg)", fg: "var(--warn-fg)" },
   overdue: { label: "Vencido", dot: "var(--red)", bg: "var(--bad-bg)", fg: "var(--bad-fg)" },
+  cancelled: { label: "Cancelado", dot: "var(--text-faint)", bg: "var(--surface-3)", fg: "var(--text-muted)" },
 };
 const METHODS: { value: PaymentMethod; label: string }[] = [
   { value: "cash", label: "Efectivo" },
@@ -48,13 +52,15 @@ function StatusPill({ status }: { status: VisualStatus }): ReactElement {
 
 // ── payment slide-over: pay a charge in one panel ──
 function PayDrawer({ charge, name, onClose, onPaid }: { charge: Charge; name: string; onClose: () => void; onPaid: () => void }): ReactElement {
-  const [amount, setAmount] = useState(String(Math.round(charge.remainingCents / 100)));
+  const [amount, setAmount] = useState(centsToPesosInput(charge.remainingCents));
   const [method, setMethod] = useState<PaymentMethod>("cash");
   const [reference, setReference] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
-  const cents = Math.round(parseFloat(amount || "0") * 100);
+  // pesosToCents is locale-aware (handles thousands commas) and returns NaN for
+  // anything ambiguous — never a truncated parseFloat.
+  const cents = pesosToCents(amount);
   const ready = Number.isFinite(cents) && cents > 0 && !saving;
 
   const submit = async (): Promise<void> => {
@@ -151,7 +157,7 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
     }).catch(() => setLoading(false));
   }, [load]);
 
-  const visual = useCallback((c: Charge): VisualStatus => (c.remainingCents <= 0 ? "paid" : overdueIds.has(c.id) ? "overdue" : "due"), [overdueIds]);
+  const visual = useCallback((c: Charge): VisualStatus => (c.status === "cancelled" ? "cancelled" : c.remainingCents <= 0 ? "paid" : overdueIds.has(c.id) ? "overdue" : "due"), [overdueIds]);
 
   const rows: Row[] = useMemo(() => charges.map((c) => {
     const s = studentMap.get(c.studentId);
@@ -166,7 +172,8 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
   }), [rows]);
   const totals = useMemo(() => ({
     collected: charges.reduce((a, c) => a + c.paidCents, 0),
-    pending: charges.reduce((a, c) => a + Math.max(0, c.remainingCents), 0),
+    // A cancelled (voided) charge is never owed, so it must not count as pending debt.
+    pending: charges.filter((c) => c.status !== "cancelled").reduce((a, c) => a + Math.max(0, c.remainingCents), 0),
   }), [charges]);
 
   const filtered = useMemo(() => {
@@ -314,6 +321,8 @@ function FinRow({ r, i, onPay }: { r: Row; i: number; onPay: () => void }): Reac
       <div style={{ display: "flex", justifyContent: "flex-end", width: 148 }}>
         {r.visual === "paid" ? (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--forest)", fontSize: 13.5, fontWeight: 600 }}><Icon name="check" size={18} stroke={2.5} />Al corriente</span>
+        ) : r.visual === "cancelled" ? (
+          <span style={{ color: "var(--text-faint)", fontSize: 13.5 }}>Cancelado</span>
         ) : (
           <button onClick={onPay} style={{ display: "inline-flex", alignItems: "center", gap: 7, height: 40, padding: "0 16px", borderRadius: 99, cursor: "pointer", background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 14, boxShadow: "0 3px 10px color-mix(in oklab, var(--lime) 36%, transparent)" }}><Icon name="card" size={17} />Registrar pago</button>
         )}

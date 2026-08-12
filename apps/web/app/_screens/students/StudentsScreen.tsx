@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement } from "react";
 import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
 import { Icon, type IconName } from "../../_design/Icon";
@@ -32,6 +32,9 @@ const STATUS: Record<AdmissionStatus, StatusMeta> = {
   rejected: { label: "Rechazado", dot: "var(--red)", bg: "var(--bad-bg)", fg: "var(--bad-fg)", tab: "inactive" },
   withdrawn: { label: "Baja", dot: "var(--red)", bg: "var(--bad-bg)", fg: "var(--bad-fg)", tab: "inactive" },
 };
+const FALLBACK_STATUS: StatusMeta = { label: "—", dot: "var(--text-faint)", bg: "var(--surface-3)", fg: "var(--text-muted)", tab: "pending" };
+const statusOf = (s: AdmissionStatus): StatusMeta => STATUS[s] ?? FALLBACK_STATUS;
+
 const AV: ColorKey[] = ["lime", "forest", "orange", "purple", "yellow"];
 const LEVELS: { value: string; label: string }[] = [
   { value: "kinder", label: "Kínder" },
@@ -41,7 +44,7 @@ const LEVELS: { value: string; label: string }[] = [
 ];
 
 function StatusPill({ status }: { status: AdmissionStatus }): ReactElement {
-  const s = STATUS[status];
+  const s = statusOf(status);
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "5px 12px 5px 10px", borderRadius: 99, background: s.bg, color: s.fg, fontWeight: 700, fontSize: 13, fontFamily: "var(--font-display)", whiteSpace: "nowrap" }}>
       <span style={{ width: 9, height: 9, borderRadius: 99, background: s.dot, boxShadow: `0 0 0 3px color-mix(in oklab, ${s.dot} 22%, transparent)` }} />
@@ -149,7 +152,7 @@ function StudentSheet({ st, groups, onClose, onEnroll }: { st: Student; groups: 
     ["CURP", st.curp],
     ["Nivel", `${st.level} · ${st.gradeGroup}`],
     ["Tutor", st.guardianName],
-    ["Admisión", STATUS[st.admissionStatus].label],
+    ["Admisión", statusOf(st.admissionStatus).label],
   ];
   const [gid, setGid] = useState("");
   return (
@@ -209,7 +212,15 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(0);
 
-  const say = (m: string): void => { setToast(m); setTimeout(() => setToast(null), 2600); };
+  // A single tracked timer: replacing a toast clears the prior countdown so a
+  // fast second toast never gets dismissed early by the first one's timeout.
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const say = useCallback((m: string): void => {
+    setToast(m);
+    if (toastTimer.current !== null) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2600);
+  }, []);
+  useEffect(() => () => { if (toastTimer.current !== null) clearTimeout(toastTimer.current); }, []);
 
   const reload = useCallback((): void => {
     listStudents(API_URL).then(setStudents).catch(() => {}).finally(() => setLoading(false));
@@ -225,16 +236,16 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
 
   const counts = useMemo(() => ({
     all: students.length,
-    active: students.filter((s) => STATUS[s.admissionStatus].tab === "active").length,
-    pending: students.filter((s) => STATUS[s.admissionStatus].tab === "pending").length,
-    inactive: students.filter((s) => STATUS[s.admissionStatus].tab === "inactive").length,
+    active: students.filter((s) => statusOf(s.admissionStatus).tab === "active").length,
+    pending: students.filter((s) => statusOf(s.admissionStatus).tab === "pending").length,
+    inactive: students.filter((s) => statusOf(s.admissionStatus).tab === "inactive").length,
   }), [students]);
   const levelsPresent = useMemo(() => Array.from(new Set(students.map((s) => s.level))), [students]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return students
-      .filter((s) => (tab === "all" || STATUS[s.admissionStatus].tab === tab) && (level === "Todos" || s.level === level) &&
+      .filter((s) => (tab === "all" || statusOf(s.admissionStatus).tab === tab) && (level === "Todos" || s.level === level) &&
         (needle === "" || `${s.firstName} ${s.lastName}`.toLowerCase().includes(needle) || s.curp.toLowerCase().includes(needle) || s.guardianName.toLowerCase().includes(needle)))
       .sort((a, b) => `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`, "es"));
   }, [students, tab, level, q]);
@@ -372,9 +383,9 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={cur === 0} aria-label="Anterior" style={pager(cur === 0)}><Icon name="back" size={16} stroke={2.4} />Anterior</button>
+              <button onClick={() => setPage(Math.max(0, cur - 1))} disabled={cur === 0} aria-label="Anterior" style={pager(cur === 0)}><Icon name="back" size={16} stroke={2.4} />Anterior</button>
               <span style={{ fontSize: 13.5, color: "var(--text-muted)", fontFamily: "var(--font-display)", fontWeight: 600, minWidth: 52, textAlign: "center" }}>{cur + 1} / {pageCount}</span>
-              <button onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))} disabled={cur >= pageCount - 1} aria-label="Siguiente" style={pager(cur >= pageCount - 1)}>Siguiente<Icon name="chevron" size={16} stroke={2.4} /></button>
+              <button onClick={() => setPage(Math.min(pageCount - 1, cur + 1))} disabled={cur >= pageCount - 1} aria-label="Siguiente" style={pager(cur >= pageCount - 1)}>Siguiente<Icon name="chevron" size={16} stroke={2.4} /></button>
             </div>
           </div>
         )}
@@ -395,7 +406,7 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
 
 function StuRow({ st, i, onOpen }: { st: Student; i: number; onOpen: () => void }): ReactElement {
   const [hov, setHov] = useState(false);
-  const s = STATUS[st.admissionStatus];
+  const s = statusOf(st.admissionStatus);
   return (
     <div onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)} onClick={onOpen} style={{ display: "grid", gridTemplateColumns: "2.4fr 1.1fr 1.6fr 1fr auto", alignItems: "center", gap: 16, padding: "13px 24px", borderRadius: "var(--r-md)", position: "relative", cursor: "pointer", background: hov ? "var(--surface-2)" : "transparent", transition: "background .15s var(--ease)" }}>
       <span style={{ position: "absolute", left: 4, top: 10, bottom: 10, width: 4, borderRadius: 99, background: s.dot }} />

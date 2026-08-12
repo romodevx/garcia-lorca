@@ -24,7 +24,7 @@ export interface AttendanceScreenProps {
 
 export function AttendanceScreen({ onBack, today }: AttendanceScreenProps): ReactElement {
   const list = usePassList(today);
-  const { cycles, groups, cycleId, setCycleId, groupId, setGroupId, date, setDate, rows, counts, loadingRoster, saving } = list;
+  const { cycles, groups, cycleId, setCycleId, groupId, setGroupId, date, setDate, rows, counts, loadingRoster, saving, rosterError, saveError } = list;
   const ready = groupId !== "" && rows.length > 0;
 
   const stats: { icon: IconName; c: string; label: string; val: string }[] = [
@@ -67,6 +67,8 @@ export function AttendanceScreen({ onBack, today }: AttendanceScreenProps): Reac
             <div style={{ padding: "56px 20px", textAlign: "center", color: "var(--text-muted)", fontSize: 15 }}>Selecciona un grupo para pasar lista.</div>
           ) : loadingRoster ? (
             <div style={{ padding: 56, textAlign: "center", color: "var(--text-muted)" }}>Cargando…</div>
+          ) : rosterError !== undefined ? (
+            <div role="alert" style={{ padding: "56px 20px", textAlign: "center", color: "var(--bad-fg)", fontSize: 15, fontWeight: 600 }}>No se pudo cargar el pase de lista. Reintenta.</div>
           ) : rows.length === 0 ? (
             <div style={{ padding: "56px 20px", textAlign: "center", color: "var(--text-muted)", fontSize: 15 }}>Este grupo no tiene alumnos inscritos.</div>
           ) : (
@@ -91,7 +93,11 @@ export function AttendanceScreen({ onBack, today }: AttendanceScreenProps): Reac
         </div>
       </div>
 
-      {list.toast !== undefined && <div style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}><Icon name="check" size={20} stroke={2.6} />{list.toast}</div>}
+      {saveError !== undefined ? (
+        <div role="alert" style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--red)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}><Icon name="warning" size={20} stroke={2.4} />No se pudo guardar la lista. Reintenta.</div>
+      ) : list.toast !== undefined ? (
+        <div style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}><Icon name="check" size={20} stroke={2.6} />{list.toast}</div>
+      ) : null}
     </div>
   );
 }

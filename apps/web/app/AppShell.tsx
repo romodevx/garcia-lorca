@@ -118,15 +118,19 @@ export function AppShell(): ReactElement {
     setAuthError(undefined);
     try {
       await apiChangePassword(API_URL, current, next);
-      // Rotate the session cookie so it carries the cleared must_change_password
-      // flag (mcp=false); otherwise the stale token keeps protected routes at 403.
-      await apiRefresh(API_URL);
-      setView({ screen: "dashboard" });
     } catch {
+      // Only the change itself can be blamed on the current password.
       setAuthError("No se pudo cambiar la contraseña. Verifica la actual.");
-    } finally {
       setPending(false);
+      return;
     }
+    // The password IS changed. Rotate the cookie so it carries the cleared
+    // must_change flag (mcp=false); if that transient call fails, still proceed —
+    // the boot restore / next action refreshes it — never trap the user on the
+    // change screen re-typing a password that no longer exists.
+    await apiRefresh(API_URL).catch(() => {});
+    setView({ screen: "dashboard" });
+    setPending(false);
   };
 
   const logout = (): void => {

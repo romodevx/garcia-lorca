@@ -79,10 +79,12 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
   const [editRoles, setEditRoles] = useState<AdminUser | null>(null);
   const [editPerms, setEditPerms] = useState<Role | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | undefined>(undefined);
   const say = (m: string): void => { setToast(m); setTimeout(() => setToast(null), 2600); };
 
   const reload = useCallback((): void => {
-    Promise.all([listUsers(API_URL), listRoles(API_URL)]).then(([us, rs]) => { setUsers(us); setRoles(rs); }).catch(() => {}).finally(() => setLoading(false));
+    setLoadError(undefined);
+    Promise.all([listUsers(API_URL), listRoles(API_URL)]).then(([us, rs]) => { setUsers(us); setRoles(rs); }).catch(() => setLoadError("No se pudo cargar usuarios y roles. Reintenta.")).finally(() => setLoading(false));
   }, []);
   useEffect(() => reload(), [reload]);
 
@@ -96,8 +98,8 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
   const onCreateUser = async (input: CreateUserInput): Promise<void> => { await createUser(API_URL, input); setAddUser(false); reload(); say(`Usuario creado · ${input.displayName}`); };
   const onCreateRole = async (input: CreateRoleInput): Promise<void> => { await createRole(API_URL, input); setAddRole(false); reload(); say(`Rol creado · ${input.name}`); };
   const onSuspend = async (u: AdminUser): Promise<void> => { await setUserStatus(API_URL, u.id, u.status === "active" ? "suspended" : "active"); reload(); say(u.status === "active" ? "Usuario suspendido" : "Usuario reactivado"); };
-  const onSaveUserRoles = async (u: AdminUser, roleIds: string[]): Promise<void> => { await setUserRoles(API_URL, u.id, roleIds); setEditRoles(null); reload(); say("Roles actualizados"); };
-  const onSavePerms = async (r: Role, permissions: string[]): Promise<void> => { await setRolePermissions(API_URL, r.id, permissions); setEditPerms(null); reload(); say("Permisos actualizados"); };
+  const onSaveUserRoles = async (u: AdminUser, roleIds: string[]): Promise<void> => { try { await setUserRoles(API_URL, u.id, roleIds); setEditRoles(null); reload(); say("Roles actualizados"); } catch { say("No se pudieron guardar los roles"); } };
+  const onSavePerms = async (r: Role, permissions: string[]): Promise<void> => { try { await setRolePermissions(API_URL, r.id, permissions); setEditPerms(null); reload(); say("Permisos actualizados"); } catch { say("No se pudieron guardar los permisos"); } };
 
   const statCards: { icon: IconName; c: string; label: string; val: string; sub: string }[] = [
     { icon: "user", c: "forest", label: "Usuarios", val: String(stats.users), sub: "Cuentas del sistema" },
@@ -143,7 +145,9 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
       </div>
 
       <div className="fade-up" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-xl)", boxShadow: "var(--shadow-card)", overflow: "hidden" }}>
-        {loading ? <div style={{ padding: 56, textAlign: "center", color: "var(--text-muted)" }}>Cargando…</div> : tab === "users" ? (
+        {loading ? <div style={{ padding: 56, textAlign: "center", color: "var(--text-muted)" }}>Cargando…</div> : loadError !== undefined ? (
+          <div role="alert" style={{ padding: 56, textAlign: "center" }}><div style={{ color: "var(--bad-fg)", fontSize: 15, fontWeight: 600 }}>{loadError}</div><div style={{ marginTop: 16 }}><Btn kind="ghost" icon="check" onClick={reload}>Reintentar</Btn></div></div>
+        ) : tab === "users" ? (
           <div style={{ padding: 8 }}>
             {usersF.map((u, i) => (
               <div key={u.id} style={{ display: "grid", gridTemplateColumns: "2.4fr 1.6fr 1fr auto", alignItems: "center", gap: 16, padding: "13px 24px", borderRadius: "var(--r-md)" }}>

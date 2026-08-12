@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -116,10 +117,13 @@ func (c *StudentsClient) ListStudents(ctx context.Context, status string) ([]Stu
 		}
 		pageToken = res.Msg.GetNextPageToken()
 		if pageToken == "" {
-			break
+			return out, nil
 		}
 	}
-	return out, nil
+	// The token is still non-empty after the page cap: the roster is larger than
+	// this loop can safely drain. Fail loudly instead of silently truncating —
+	// a partial list that looks complete is worse than a clear error.
+	return nil, fmt.Errorf("listing students: exceeded %d pages (%d per page) with more results pending", listStudentsMaxPages, listStudentsPageSize)
 }
 
 // GetStudent fetches a single student by id. Connect error codes propagate

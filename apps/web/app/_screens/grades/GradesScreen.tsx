@@ -63,14 +63,19 @@ export function GradesScreen({ onBack }: GradesScreenProps): ReactElement {
     setRoster([]);
   }, [assignmentId, assignments]);
 
-  // Assignment + term → roster.
+  // Assignment + term → roster. The `active` guard drops a stale response so a
+  // slow roster for a previous assignment/term can never overwrite the current
+  // one (a term switch mid-flight would otherwise paint the wrong grades).
   useEffect(() => {
     if (assignmentId === "" || termId === "") { setRoster([]); return; }
+    let active = true;
     setLoadingRoster(true);
     getRoster(API_URL, { assignmentId, termId }).then((r) => {
+      if (!active) return;
       setRoster(r);
       setDraft(Object.fromEntries(r.map((x) => [x.enrollmentId, x.hasValue ? String(x.value) : ""])));
-    }).catch(() => {}).finally(() => setLoadingRoster(false));
+    }).catch(() => {}).finally(() => { if (active) setLoadingRoster(false); });
+    return () => { active = false; };
   }, [assignmentId, termId]);
 
   const save = async (enrollmentId: string): Promise<void> => {
