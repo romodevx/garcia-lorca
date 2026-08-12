@@ -435,6 +435,27 @@ func TestRefreshTokenAfterPasswordChangeStillValid(t *testing.T) {
 	}
 }
 
+// REGRESSION (runtime-found): a JWT's iat is floored to whole seconds, but
+// password_changed_at carries sub-second precision. The re-issued session token
+// (minted the same second as the change) has iat = floor(second), which is
+// strictly before a sub-second password_changed_at — it must NOT be revoked, or
+// changing a password immediately logs the user out. The cutoff compares at
+// second granularity to keep the same-second re-issue alive.
+func TestRefreshTokenSameSecondAsPasswordChangeSurvives(t *testing.T) {
+	// Password changed at 12:00:00.862; the fresh token's iat floors to 12:00:00.
+	changedAt := time.Date(2026, 7, 1, 12, 0, 0, 862_000_000, time.UTC)
+	issuedAt := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) // floored iat, same second
+	svc := refreshFixture(t, changedAt, issuedAt)
+
+	res, err := svc.RefreshToken(context.Background(), "refresh:u1")
+	if err != nil {
+		t.Fatalf("a token issued in the same second as the change must survive (no logout): %v", err)
+	}
+	if res.AccessToken != "access:u1" {
+		t.Errorf("rotated access token = %q, want access:u1", res.AccessToken)
+	}
+}
+
 // --- AssignRole ------------------------------------------------------------
 
 func TestAssignRole(t *testing.T) {

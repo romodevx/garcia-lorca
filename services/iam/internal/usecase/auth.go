@@ -122,7 +122,13 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (Au
 	if err != nil {
 		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid refresh token")
 	}
-	if issuedAt.Before(user.PasswordChangedAt()) {
+	// Compare at whole-second granularity: a JWT's `iat` is Unix seconds (floored),
+	// while password_changed_at carries sub-second precision. Truncating the floor
+	// to the second means a token issued in the SAME second as the change is NOT
+	// revoked — critical, because the re-issued session (login right after the
+	// change) always lands in that second and must survive. Tokens from any earlier
+	// second are still revoked. The at-most-1s window is a negligible trade.
+	if issuedAt.Before(user.PasswordChangedAt().Truncate(time.Second)) {
 		// Revoked by a later password change — same generic error as any other
 		// invalid refresh token (do not reveal why).
 		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid refresh token")
