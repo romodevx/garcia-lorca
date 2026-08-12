@@ -113,12 +113,15 @@ func TestRefreshTokenRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("IssueRefreshToken: %v", err)
 	}
-	uid, err := a.ParseRefreshToken(ctx, rt)
+	uid, issuedAt, err := a.ParseRefreshToken(ctx, rt)
 	if err != nil {
 		t.Fatalf("ParseRefreshToken: %v", err)
 	}
 	if uid != "u1" {
 		t.Errorf("uid = %q, want u1", uid)
+	}
+	if !issuedAt.Equal(t0) {
+		t.Errorf("issuedAt = %v, want %v", issuedAt, t0)
 	}
 }
 
@@ -134,7 +137,7 @@ func TestTokenTypesAreNotInterchangeable(t *testing.T) {
 		t.Errorf("refresh accepted as access: %v", err)
 	}
 	// ...and an access token must not parse as a refresh token.
-	if _, err := a.ParseRefreshToken(ctx, access); glerrors.KindOf(err) != glerrors.KindUnauthorized {
+	if _, _, err := a.ParseRefreshToken(ctx, access); glerrors.KindOf(err) != glerrors.KindUnauthorized {
 		t.Errorf("access accepted as refresh: %v", err)
 	}
 }
@@ -144,7 +147,7 @@ func TestExpiredRefreshTokenIsUnauthorized(t *testing.T) {
 	rt, _ := issuer.IssueRefreshToken(context.Background(), "u1")
 
 	validator := adapterAt(t0.Add(25 * time.Hour))
-	if _, err := validator.ParseRefreshToken(context.Background(), rt); glerrors.KindOf(err) != glerrors.KindUnauthorized {
+	if _, _, err := validator.ParseRefreshToken(context.Background(), rt); glerrors.KindOf(err) != glerrors.KindUnauthorized {
 		t.Errorf("want KindUnauthorized for expired refresh, got %v", err)
 	}
 }

@@ -109,14 +109,22 @@ func (s *AuthService) Authenticate(ctx context.Context, rawEmail, password strin
 	return res, nil
 }
 
-// RefreshToken exchanges a valid refresh token for a fresh, rotated pair.
+// RefreshToken exchanges a valid refresh token for a fresh, rotated pair. A
+// token minted before the user's last password change is rejected, so rotating
+// the password revokes every refresh token issued before it (a stolen token
+// stops working the moment the password is changed).
 func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (AuthResult, error) {
-	userID, err := s.validator.ParseRefreshToken(ctx, refreshToken)
+	userID, issuedAt, err := s.validator.ParseRefreshToken(ctx, refreshToken)
 	if err != nil {
 		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid refresh token")
 	}
 	user, err := s.users.FindByID(ctx, userID)
 	if err != nil {
+		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid refresh token")
+	}
+	if issuedAt.Before(user.PasswordChangedAt()) {
+		// Revoked by a later password change — same generic error as any other
+		// invalid refresh token (do not reveal why).
 		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid refresh token")
 	}
 	if !user.CanAuthenticate() {

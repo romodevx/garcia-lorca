@@ -130,12 +130,15 @@ func (r *UserRepo) FindAuthByID(ctx context.Context, userID string) (domain.User
 	return user, hash, nil
 }
 
-// UpdatePassword sets a new hash and clears must_change_password in one write.
+// UpdatePassword sets a new hash, clears must_change_password, and stamps
+// password_changed_at = now() in one write. The stamp is what revokes every
+// refresh token issued before this rotation (RefreshToken rejects an earlier
+// issued-at), so a stolen refresh token dies the moment the password changes.
 func (r *UserRepo) UpdatePassword(ctx context.Context, userID, newHash string) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
 		res := tx.Model(&userModel{}).
 			Where("id = ?", userID).
-			Updates(map[string]any{"password_hash": newHash, "must_change_password": false})
+			Updates(map[string]any{"password_hash": newHash, "must_change_password": false, "password_changed_at": gorm.Expr("now()")})
 		if res.Error != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "updating password", res.Error)
 		}
@@ -177,7 +180,9 @@ func (r *UserRepo) CreateUser(ctx context.Context, user domain.User, passwordHas
 		return err
 	}
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		return translateCreateErr(tx.Create(&model).Error, "creating user", "a user with this email already exists")
+		// Omit password_changed_at so the column's DB default (now()) fills it —
+		// a freshly created domain user carries the zero instant.
+		return translateCreateErr(tx.Omit("password_changed_at").Create(&model).Error, "creating user", "a user with this email already exists")
 	})
 }
 

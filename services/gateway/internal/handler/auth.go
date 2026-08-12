@@ -277,7 +277,8 @@ const minNewPasswordLen = 8
 // forwarded access token, so the gateway forwards the caller's token — never a
 // user id from the request body or principal.
 func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
-	if _, ok := middleware.PrincipalFrom(r.Context()); !ok {
+	p, ok := middleware.PrincipalFrom(r.Context())
+	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -294,7 +295,19 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(httpStatusFor(err)), httpStatusFor(err))
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	// The change revoked every refresh token issued before it — including the
+	// caller's current one. Re-issue a fresh session immediately (login with the
+	// new password) so the user is not bounced to the login screen right after
+	// changing their password. The principal's email is the verified subject, not
+	// a request-supplied value. A rare re-login failure leaves the password
+	// changed but no fresh cookies (204); the client falls back to login.
+	res, err := h.auth.Login(r.Context(), p.Email, req.NewPassword)
+	if err != nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	setAuthCookies(w, res)
+	writeJSON(w, http.StatusOK, loginResponse{ExpiresIn: res.ExpiresIn, MustChangePassword: res.MustChangePassword})
 }
 
 // httpStatusFor maps a Connect error code (from iam) to an HTTP status.

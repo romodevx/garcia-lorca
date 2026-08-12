@@ -98,12 +98,16 @@ describe("AppShell navigation flow", () => {
     await user.type(screen.getByLabelText("Contraseña actual"), "test-owner-pw");
     await user.type(screen.getByLabelText("Nueva contraseña"), "test-new-pw-123");
     await user.type(screen.getByLabelText("Confirmar contraseña"), "test-new-pw-123");
+    // The gateway re-issues fresh cookies IN the change-password response, so the
+    // client must NOT fire an extra refresh round-trip after the change. Capture
+    // the count now (boot restore may have called refresh once) and assert the
+    // change itself adds none.
+    const refreshCallsBeforeChange = mockRefresh.mock.calls.length;
     await user.click(screen.getByRole("button", { name: "Guardar y entrar" }));
 
     expect(mockChangePassword).toHaveBeenCalledWith(expect.any(String), "test-owner-pw", "test-new-pw-123");
-    // The cookie must be rotated after the change so it carries mcp=false.
-    expect(mockRefresh).toHaveBeenCalledWith(expect.any(String));
     expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
+    expect(mockRefresh.mock.calls.length).toBe(refreshCallsBeforeChange);
   });
 
   it("restores the session on reload when the cookie is still live (me → dashboard, no re-login)", async () => {

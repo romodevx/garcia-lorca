@@ -124,11 +124,11 @@ export function AppShell(): ReactElement {
       setPending(false);
       return;
     }
-    // The password IS changed. Rotate the cookie so it carries the cleared
-    // must_change flag (mcp=false); if that transient call fails, still proceed —
-    // the boot restore / next action refreshes it — never trap the user on the
-    // change screen re-typing a password that no longer exists.
-    await apiRefresh(API_URL).catch(() => {});
+    // The password IS changed. The gateway revoked the old refresh token and
+    // re-issued a fresh session in the SAME change-password response (new
+    // gl_access / gl_refresh cookies, must_change cleared), so we just land on
+    // the dashboard — no extra refresh round-trip, and the user is never trapped
+    // re-typing a password that no longer exists.
     setView({ screen: "dashboard" });
     setPending(false);
   };

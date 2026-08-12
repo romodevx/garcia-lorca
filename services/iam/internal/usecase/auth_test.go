@@ -155,8 +155,9 @@ func (fakeHasher) Verify(hash, plain string) error {
 
 // fakeTokens is both issuer and validator; tokens are inspectable strings.
 type fakeTokens struct {
-	lastClaims domain.Claims
-	refreshFor string
+	lastClaims      domain.Claims
+	refreshFor      string
+	refreshIssuedAt time.Time // issued-at reported by ParseRefreshToken (zero ⇒ no floor)
 }
 
 func (t *fakeTokens) IssueAccessToken(_ context.Context, claims domain.Claims) (string, error) {
@@ -172,11 +173,11 @@ func (t *fakeTokens) ValidateAccessToken(_ context.Context, token string) (domai
 	}
 	return domain.Claims{}, glerrors.ErrUnauthorized
 }
-func (t *fakeTokens) ParseRefreshToken(_ context.Context, token string) (string, error) {
+func (t *fakeTokens) ParseRefreshToken(_ context.Context, token string) (string, time.Time, error) {
 	if token == "refresh:u1" {
-		return "u1", nil
+		return "u1", t.refreshIssuedAt, nil
 	}
-	return "", glerrors.ErrUnauthorized
+	return "", time.Time{}, glerrors.ErrUnauthorized
 }
 
 // --- fixtures --------------------------------------------------------------
@@ -382,6 +383,55 @@ func TestRefreshTokenSuspendedIsForbidden(t *testing.T) {
 	_, err := svc.RefreshToken(context.Background(), "refresh:u1")
 	if glerrors.KindOf(err) != glerrors.KindForbidden {
 		t.Errorf("want KindForbidden, got %v", err)
+	}
+}
+
+// refreshFixture builds a service whose one user rotated their password at
+// changedAt, and whose refresh token reports refreshIssuedAt. Used to pin the
+// revocation-on-password-change cutoff.
+func refreshFixture(t *testing.T, changedAt, refreshIssuedAt time.Time) *usecase.AuthService {
+	t.Helper()
+	email, _ := domain.NewEmail("ana@garcialorca.mx")
+	role, _ := domain.NewRole("r1", "Docente", []string{"students:read"})
+	user, _ := domain.NewUser("u1", testTenant, email, "Ana", domain.StatusActive, false, []domain.Role{role})
+	user = user.WithPasswordChangedAt(changedAt)
+	users := &fakeUsers{
+		byEmail: map[domain.Email]struct {
+			user domain.User
+			hash string
+		}{email: {user: user, hash: "h:secret"}},
+		byID: map[string]domain.User{"u1": user},
+	}
+	roles := &fakeRoles{byID: map[string]domain.Role{"r1": role}}
+	now := func() time.Time { return changedAt.Add(time.Hour) }
+	validator := &fakeTokens{refreshIssuedAt: refreshIssuedAt}
+	return usecase.NewAuthService(users, roles, fakeHasher{}, &fakeTokens{}, validator, testTenant, 15*time.Minute, now)
+}
+
+// SECURITY: a refresh token minted BEFORE the last password change is revoked —
+// a stolen token stops working the instant the user rotates their password.
+func TestRefreshTokenRevokedByLaterPasswordChange(t *testing.T) {
+	changedAt := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	svc := refreshFixture(t, changedAt, changedAt.Add(-time.Minute)) // issued before the change
+
+	_, err := svc.RefreshToken(context.Background(), "refresh:u1")
+	if glerrors.KindOf(err) != glerrors.KindUnauthorized {
+		t.Fatalf("a refresh token issued before the password change must be Unauthorized, got %v", err)
+	}
+}
+
+// A refresh token minted AFTER the change is still honored (only pre-change
+// tokens are revoked, so the legitimate current session keeps working).
+func TestRefreshTokenAfterPasswordChangeStillValid(t *testing.T) {
+	changedAt := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	svc := refreshFixture(t, changedAt, changedAt.Add(time.Minute)) // issued after the change
+
+	res, err := svc.RefreshToken(context.Background(), "refresh:u1")
+	if err != nil {
+		t.Fatalf("a refresh token issued after the password change must still rotate: %v", err)
+	}
+	if res.AccessToken != "access:u1" {
+		t.Errorf("rotated access token = %q, want access:u1", res.AccessToken)
 	}
 }
 

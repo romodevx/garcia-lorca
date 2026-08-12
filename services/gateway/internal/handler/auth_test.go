@@ -231,28 +231,62 @@ func TestLoginResponseIncludesMustChange(t *testing.T) {
 	}
 }
 
-func TestChangePasswordSuccessIs204(t *testing.T) {
-	h := handler.NewAuthHandler(&fakeLogin{})
+// Changing the password revokes the caller's current refresh token, so the
+// handler re-issues a fresh session (login with the new password) and sets both
+// cookies — the user stays logged in instead of being bounced to login.
+func TestChangePasswordReissuesSessionCookies(t *testing.T) {
+	fake := &fakeLogin{res: client.LoginResult{AccessToken: "fresh-acc", RefreshToken: "fresh-ref", ExpiresIn: 900}}
+	h := handler.NewAuthHandler(fake)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password", strings.NewReader(`{"currentPassword":"old","newPassword":"newlongpass"}`))
-	ctx := middleware.WithPrincipal(req.Context(), middleware.Principal{UserID: "u1"})
+	ctx := middleware.WithPrincipal(req.Context(), middleware.Principal{UserID: "u1", Email: "ana@garcialorca.mx"})
 	h.ChangePassword(rec, req.WithContext(ctx))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code=%d, want 200", rec.Code)
+	}
+	// Re-login must use the VERIFIED principal email + the new password (never a
+	// request-supplied identity).
+	if fake.gotEmail != "ana@garcialorca.mx" || fake.gotPassword != "newlongpass" {
+		t.Errorf("re-login used %q/%q, want the principal email + new password", fake.gotEmail, fake.gotPassword)
+	}
+	if c := cookieByName(rec.Result().Cookies(), "gl_access"); c == nil || c.Value != "fresh-acc" {
+		t.Errorf("gl_access cookie = %v, want fresh-acc", c)
+	}
+	if c := cookieByName(rec.Result().Cookies(), "gl_refresh"); c == nil || c.Value != "fresh-ref" {
+		t.Errorf("gl_refresh cookie = %v, want fresh-ref", c)
+	}
+}
+
+// If the re-login fails (rare — the password was just set), the change still
+// succeeded: respond 204 with no fresh cookies and let the client re-login.
+func TestChangePasswordReloginFailureFallsBackTo204(t *testing.T) {
+	fake := &fakeLogin{err: connect.NewError(connect.CodeUnauthenticated, errString("transient"))}
+	h := handler.NewAuthHandler(fake)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password", strings.NewReader(`{"currentPassword":"old","newPassword":"newlongpass"}`))
+	ctx := middleware.WithPrincipal(req.Context(), middleware.Principal{UserID: "u1", Email: "ana@garcialorca.mx"})
+	h.ChangePassword(rec, req.WithContext(ctx))
+
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("code=%d, want 204", rec.Code)
+	}
+	if cookieByName(rec.Result().Cookies(), "gl_access") != nil {
+		t.Error("no fresh cookies must be set when re-login fails")
 	}
 }
 
 func TestChangePasswordForwardsAccessTokenNotUserID(t *testing.T) {
-	fake := &fakeLogin{}
+	fake := &fakeLogin{res: client.LoginResult{AccessToken: "a", RefreshToken: "r", ExpiresIn: 900}}
 	h := handler.NewAuthHandler(fake)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password", strings.NewReader(`{"currentPassword":"old","newPassword":"newlongpass"}`))
 	req.Header.Set("Authorization", "Bearer caller-access-token")
-	ctx := middleware.WithPrincipal(req.Context(), middleware.Principal{UserID: "u1"})
+	ctx := middleware.WithPrincipal(req.Context(), middleware.Principal{UserID: "u1", Email: "ana@garcialorca.mx"})
 	h.ChangePassword(rec, req.WithContext(ctx))
 
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("code=%d, want 204", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code=%d, want 200", rec.Code)
 	}
 	if !fake.cpGotCalled {
 		t.Fatal("ChangePassword was not called")

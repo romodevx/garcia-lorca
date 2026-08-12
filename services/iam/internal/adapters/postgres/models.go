@@ -21,8 +21,11 @@ type userModel struct {
 	Status       string `gorm:"column:status"`
 	// MustChangePassword forces a rotation at first login (temporary password).
 	MustChangePassword bool `gorm:"column:must_change_password"`
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	// PasswordChangedAt is the instant the credential was last rotated; refresh
+	// tokens issued before it are revoked. Filled by the DB default on insert.
+	PasswordChangedAt time.Time `gorm:"column:password_changed_at"`
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 func (userModel) TableName() string { return "users" }

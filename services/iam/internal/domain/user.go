@@ -2,6 +2,7 @@ package domain
 
 import (
 	"strings"
+	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 )
@@ -34,6 +35,12 @@ type User struct {
 	status             Status
 	mustChangePassword bool
 	roles              []Role
+	// passwordChangedAt is the instant the credential was last rotated. Refresh
+	// tokens minted before it are no longer valid, so a password change revokes
+	// every previously issued refresh token. The zero value means "no floor"
+	// (a user built in memory imposes no revocation cutoff); the DB is the source
+	// of truth, mapped in on load.
+	passwordChangedAt time.Time
 }
 
 // NewUser constructs a principal. `id` and `tenantID` are required; the email is
@@ -79,6 +86,18 @@ func (u User) CanAuthenticate() bool { return u.status == StatusActive }
 // MustChangePassword reports whether the account still holds a temporary
 // password and must rotate it before doing anything else.
 func (u User) MustChangePassword() bool { return u.mustChangePassword }
+
+// PasswordChangedAt returns the instant the credential was last rotated (zero if
+// unknown — imposes no refresh-token revocation floor).
+func (u User) PasswordChangedAt() time.Time { return u.passwordChangedAt }
+
+// WithPasswordChangedAt returns a copy of the user carrying the given rotation
+// instant. The persistence layer uses it to hydrate the stored value on load,
+// keeping NewUser's creation signature unchanged.
+func (u User) WithPasswordChangedAt(t time.Time) User {
+	u.passwordChangedAt = t
+	return u
+}
 
 // EffectivePermissions returns the deduplicated union of permissions across all
 // of the user's roles — the authoritative set every authorization check uses.

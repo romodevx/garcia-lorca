@@ -2,6 +2,7 @@ package ports
 
 import (
 	"context"
+	"time"
 
 	"github.com/garcia-lorca/services/iam/internal/domain"
 )
@@ -86,6 +87,8 @@ type TokenIssuer interface {
 // token is a KindUnauthorized error.
 type TokenValidator interface {
 	ValidateAccessToken(ctx context.Context, token string) (domain.Claims, error)
-	// ParseRefreshToken returns the subject (user id) of a valid refresh token.
-	ParseRefreshToken(ctx context.Context, token string) (userID string, err error)
+	// ParseRefreshToken returns the subject (user id) and issued-at instant of a
+	// valid refresh token. The issued-at supports revoking tokens minted before
+	// the user's last password change.
+	ParseRefreshToken(ctx context.Context, token string) (userID string, issuedAt time.Time, err error)
 }

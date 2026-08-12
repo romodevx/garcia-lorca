@@ -118,16 +118,22 @@ func (h *HMAC) ValidateAccessToken(_ context.Context, token string) (domain.Clai
 	}, nil
 }
 
-// ParseRefreshToken verifies a refresh token and returns its subject (user id).
-func (h *HMAC) ParseRefreshToken(_ context.Context, token string) (string, error) {
+// ParseRefreshToken verifies a refresh token and returns its subject (user id)
+// and issued-at instant. The issued-at lets the use case revoke tokens minted
+// before the user's last password change.
+func (h *HMAC) ParseRefreshToken(_ context.Context, token string) (string, time.Time, error) {
 	var body refreshClaims
 	if err := h.parse(token, &body); err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
 	if body.TokenType != typeRefresh {
-		return "", glerrors.New(glerrors.KindUnauthorized, "not a refresh token")
+		return "", time.Time{}, glerrors.New(glerrors.KindUnauthorized, "not a refresh token")
 	}
-	return body.Subject, nil
+	issuedAt := time.Time{}
+	if body.IssuedAt != nil {
+		issuedAt = body.IssuedAt.Time
+	}
+	return body.Subject, issuedAt, nil
 }
 
 func (h *HMAC) sign(claims gojwt.Claims) (string, error) {
