@@ -16,7 +16,7 @@ import { useTheme } from "@/src/theme";
 export default function IndexRoute(): ReactNode {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { refreshNotifications } = useAppState();
+  const { refreshNotifications, refreshChildren } = useAppState();
 
   const onSubmit = async (email: string, password: string): Promise<void> => {
     const { mustChangePassword } = await login(email, password);
@@ -26,8 +26,10 @@ export default function IndexRoute(): ReactNode {
     // /auth/change-password screen (mirrors apps/web) before enabling temp
     // passwords for guardians.
     void mustChangePassword;
-    // The inbox was skipped on boot (no token then); now that login stored one,
-    // load it so the guardian lands on real notifications, not a stuck error.
+    // The child list + inbox were skipped on boot (no token then); now that login
+    // stored one, load them so the guardian lands on their real child and
+    // notifications, not a stuck empty/error state.
+    void refreshChildren();
     void refreshNotifications();
     router.replace("/(tabs)");
   };

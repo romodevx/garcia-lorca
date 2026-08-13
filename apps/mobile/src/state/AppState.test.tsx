@@ -17,7 +17,30 @@ function NotificationsProbe(): ReactElement {
   );
 }
 
+/** Surfaces the child slice as plain text for assertions. */
+function ChildProbe(): ReactElement {
+  const { children, child, childLoading, childError } = useAppState();
+  return (
+    <>
+      <Text testID="childCount">{String(children.length)}</Text>
+      <Text testID="selected">{child?.id ?? "none"}</Text>
+      <Text testID="childLoading">{String(childLoading)}</Text>
+      <Text testID="childError">{String(childError)}</Text>
+    </>
+  );
+}
+
 const text = (id: string): unknown => screen.getByTestId(id).props.children;
+
+/** Routes the family fetch by path so both slices get well-formed envelopes. */
+function mockFamilyFetch(students: unknown[]): jest.Mock {
+  const fetchMock = jest.fn(async (url: string) => {
+    const body = String(url).includes("/family/students") ? { students } : { notifications: [] };
+    return { ok: true, status: 200, json: async () => body };
+  });
+  globalThis.fetch = fetchMock as unknown as typeof fetch;
+  return fetchMock;
+}
 
 describe("AppState notifications slice", () => {
   afterEach(async () => {
@@ -64,5 +87,51 @@ describe("AppState notifications slice", () => {
     await waitFor(() => expect(text("count")).toBe("1"));
     expect(fetchMock).toHaveBeenCalled();
     expect(text("error")).toBe("false");
+  });
+});
+
+describe("AppState child slice", () => {
+  afterEach(async () => {
+    await clearTokens();
+  });
+
+  it("no-ops to an empty, non-loading, non-error slice when signed out (no token)", async () => {
+    await clearTokens();
+    const fetchMock = jest.fn();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await renderWithProviders(<ChildProbe />);
+
+    await waitFor(() => expect(text("childLoading")).toBe("false"));
+    expect(text("childCount")).toBe("0");
+    expect(text("selected")).toBe("none");
+    expect(text("childError")).toBe("false");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("bootstraps the linked children and selects the first when signed in", async () => {
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+    mockFamilyFetch([
+      { id: "s1", firstName: "Mateo", lastName: "Herrera", level: "primaria", gradeGroup: "3° A" },
+      { id: "s2", firstName: "Sofía", lastName: "Herrera", level: "kinder", gradeGroup: "K3" },
+    ]);
+
+    await renderWithProviders(<ChildProbe />);
+
+    await waitFor(() => expect(text("childCount")).toBe("2"));
+    expect(text("selected")).toBe("s1");
+    expect(text("childError")).toBe("false");
+  });
+
+  it("flags an error when the child load fails", async () => {
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+    globalThis.fetch = jest
+      .fn()
+      .mockResolvedValue({ ok: false, status: 500, json: async () => ({}) }) as unknown as typeof fetch;
+
+    await renderWithProviders(<ChildProbe />);
+
+    await waitFor(() => expect(text("childError")).toBe("true"));
+    expect(text("selected")).toBe("none");
   });
 });

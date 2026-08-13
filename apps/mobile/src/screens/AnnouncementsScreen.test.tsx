@@ -65,6 +65,26 @@ describe("AnnouncementsScreen", () => {
     });
   });
 
+  it("persists a read acknowledgement via the family API (not a session-only hack)", async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue({ ok: true, status: 200, json: async () => ({ notifications: [unread] }) });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await renderWithProviders(<AnnouncementsScreen />);
+    fireEvent.press(await screen.findByRole("button", { name: "Marcar leídos" }));
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url).includes("/family/notifications/n1/read") &&
+            (init as RequestInit | undefined)?.method === "POST",
+        ),
+      ).toBe(true),
+    );
+  });
+
   it("renders a friendly empty state when there are no notifications", async () => {
     mockFetchNotifications([]);
     await renderWithProviders(<AnnouncementsScreen />);

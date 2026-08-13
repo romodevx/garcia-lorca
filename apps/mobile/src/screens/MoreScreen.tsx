@@ -5,6 +5,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { modules, type ModuleTile } from "../data/mock";
 import { Icon } from "../icons";
 import { useAppState } from "../state/AppState";
+import { toChildView } from "../state/childView";
 import { useTheme } from "../theme";
 import { Avatar, Card, Chip, ListRow, SectionLabel, TintIcon } from "../ui";
 
@@ -26,18 +27,21 @@ const MODULE_FLAGS: Record<ModuleTile["id"], FlagKey> = {
 export function MoreScreen({ onLogout }: { onLogout: () => void }): ReactElement {
   const theme = useTheme();
   const { child } = useAppState();
+  const view = toChildView(child);
 
   return (
     <>
       <Card padded style={[styles.profile, { marginTop: 8 }]}>
-        <Avatar child={child} size={52} />
+        <Avatar initials={view.initials} size={52} />
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={[styles.name, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]} numberOfLines={1}>
-            {child.name}
+            {view.present ? view.fullName : "Portal de familias"}
           </Text>
-          <Text style={[styles.teacher, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{child.teacher}</Text>
+          <Text style={[styles.teacher, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>
+            {view.present ? [view.levelLabel, view.group].filter(Boolean).join(" · ") : "—"}
+          </Text>
         </View>
-        <Chip kind="lime">{child.short}</Chip>
+        {view.present ? <Chip kind="lime">{view.short}</Chip> : null}
       </Card>
 
       <SectionLabel>Módulos</SectionLabel>

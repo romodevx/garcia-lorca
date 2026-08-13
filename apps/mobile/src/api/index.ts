@@ -9,3 +9,20 @@ export { apiFetch } from "./client";
 export { onSessionLost, emitSessionLost } from "./session";
 export { getAccessToken, getRefreshToken, loadTokens, clearTokens, saveTokens, type TokenPair } from "./tokenStore";
 export { listFamilyNotifications, type FamilyNotification } from "./notifications";
+export {
+  listChildren,
+  getProfile,
+  getAccount,
+  getGrades,
+  getAttendance,
+  markNotificationRead,
+  type FamilyStudent,
+  type FamilyEnrollment,
+  type FamilyProfile,
+  type FamilyCharge,
+  type FamilyPayment,
+  type FamilyAccount,
+  type FamilyGradeEntry,
+  type FamilyAttendanceRecord,
+  type FamilyAttendanceStatus,
+} from "./family";

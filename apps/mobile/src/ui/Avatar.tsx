@@ -1,21 +1,35 @@
 import { type ReactElement } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import type { Child } from "../data/mock";
 import { useTheme } from "../theme";
 
+/** Default brand gradient stops (lime → forest) when a child carries no photo. */
+const BRAND_FROM = "#7AC400";
+const BRAND_TO = "#0A7A2F";
+
 export interface AvatarProps {
-  child: Child;
+  /** Two-letter monogram (empty renders a blank brand circle). */
+  initials: string;
   size?: number;
   /** Moderno skin uses a circular story-ring avatar. */
   ring?: boolean;
+  /** Gradient start stop. */
+  from?: string;
+  /** Gradient end stop. */
+  to?: string;
 }
 
 /**
- * Initials avatar with the child's brand gradient. In the Moderno skin it is a
- * circle wrapped in a lime "story ring" (a ring separated from the photo by a
+ * Initials avatar with a brand gradient. In the Moderno skin it is a circle
+ * wrapped in a lime "story ring" (a ring separated from the photo by a
  * background-colored gap), matching the design handoff.
  */
-export function Avatar({ child, size = 44, ring = true }: AvatarProps): ReactElement {
+export function Avatar({
+  initials,
+  size = 44,
+  ring = true,
+  from = BRAND_FROM,
+  to = BRAND_TO,
+}: AvatarProps): ReactElement {
   const theme = useTheme();
   const inner = (
     <View
@@ -25,7 +39,7 @@ export function Avatar({ child, size = 44, ring = true }: AvatarProps): ReactEle
           width: size,
           height: size,
           borderRadius: size / 2,
-          backgroundColor: child.avatar.from,
+          backgroundColor: from,
         },
       ]}
     >
@@ -33,11 +47,11 @@ export function Avatar({ child, size = 44, ring = true }: AvatarProps): ReactEle
       <View
         style={[
           StyleSheet.absoluteFill,
-          { borderRadius: size / 2, backgroundColor: child.avatar.to, opacity: 0.55 },
+          { borderRadius: size / 2, backgroundColor: to, opacity: 0.55 },
         ]}
       />
       <Text style={[styles.initials, { fontSize: size * 0.38, fontFamily: theme.fonts.display }]}>
-        {child.initials}
+        {initials}
       </Text>
     </View>
   );

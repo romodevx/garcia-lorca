@@ -1,36 +1,102 @@
-import { useState, type ReactElement } from "react";
+import { type ReactElement } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { balance, money, type Movement } from "../data/mock";
+import type { FamilyAccount, FamilyCharge, FamilyPayment } from "../api";
 import type { IconName } from "../icons";
-import { PaySheet } from "../sheets/PaySheet";
 import { useAppState } from "../state/AppState";
-import { useToast } from "../state/Toast";
+import { useChildAccount } from "../state/familyData";
 import { useTheme, type TintName } from "../theme";
-import { Button, Card, Chip, ListRow, ScreenTitle, SectionLabel, StatusDot, TintIcon } from "../ui";
+import { Card, Chip, EmptyState, ListRow, ScreenTitle, SectionLabel, TintIcon } from "../ui";
+import { AsyncErrorState, AsyncLoading } from "./AsyncStates";
+import { formatDate, pesos } from "./format";
 
-const KIND: Record<Movement["kind"], { icon: IconName; tint: TintName }> = {
-  pago: { icon: "check-circle", tint: "forest" },
-  cargo: { icon: "receipt", tint: "orange" },
-  descuento: { icon: "sparkles", tint: "purple" },
+const CHARGE_STATUS_LABEL: Record<string, string> = {
+  pending: "Pendiente",
+  partial: "Abono parcial",
+  paid: "Pagado",
+  overdue: "Vencido",
 };
 
+/** One row in the movements ledger, derived from a charge or a payment. */
+interface Movement {
+  key: string;
+  icon: IconName;
+  tint: TintName;
+  title: string;
+  sub: string;
+  amountCents: number;
+  /** A credit (payment) renders in green with a minus sign. */
+  credit: boolean;
+  chip?: string;
+  /** Epoch ms used to sort the ledger newest-first. */
+  sortAt: number;
+}
+
+function epoch(iso: string): number {
+  const t = new Date(iso).getTime();
+  return Number.isNaN(t) ? 0 : t;
+}
+
+/** Builds the newest-first ledger from the statement's charges and payments. */
+function toLedger(account: FamilyAccount): Movement[] {
+  const charges: Movement[] = account.charges.map((c: FamilyCharge) => ({
+    key: `charge-${c.id}`,
+    icon: "receipt",
+    tint: "orange",
+    title: c.description,
+    sub: `${CHARGE_STATUS_LABEL[c.status] ?? c.status} · Vence ${formatDate(c.dueDate)}`,
+    amountCents: c.amountCents - c.discountCents,
+    credit: false,
+    chip: c.remainingCents <= 0 ? "Pagado" : undefined,
+    sortAt: epoch(c.dueDate),
+  }));
+  const payments: Movement[] = account.payments.map((p: FamilyPayment) => ({
+    key: `payment-${p.id}`,
+    icon: "check-circle",
+    tint: "forest",
+    title: "Pago recibido",
+    sub: `Pago · ${formatDate(p.paidAt)}`,
+    amountCents: p.amountCents,
+    credit: true,
+    sortAt: epoch(p.paidAt),
+  }));
+  return [...charges, ...payments].sort((a, b) => b.sortAt - a.sortAt);
+}
+
 /**
- * Cuenta/Saldo: a large balance with a traffic-light state, a legend, and the
- * recent movements ledger. "Pagar ahora" opens the pay sheet; confirming flips
- * the balance to settled (live, via app state) and toasts. The whole screen
- * re-renders into its paid state.
+ * Cuenta/Saldo: the child's real finance statement from
+ * `GET /api/v1/family/students/{id}/account` — the outstanding balance and the
+ * charges/payments ledger. Read-only: there is no guardian payment endpoint yet,
+ * so the screen never fabricates a settled state. Handles loading/error/empty.
  */
 export function AccountScreen(): ReactElement {
+  const { selectedChildId, childLoading } = useAppState();
+  const { data, loading, error, reload } = useChildAccount(selectedChildId);
   const theme = useTheme();
-  const { paid, pay } = useAppState();
-  const { fireToast } = useToast();
-  const [sheetOpen, setSheetOpen] = useState(false);
 
-  const confirmPay = (): void => {
-    pay();
-    setSheetOpen(false);
-    fireToast("¡Pago realizado con éxito!");
-  };
+  if (error) {
+    return (
+      <>
+        <ScreenTitle>Cuenta</ScreenTitle>
+        <AsyncErrorState
+          title="No pudimos cargar tu cuenta"
+          subtitle="Revisa tu conexión e inténtalo de nuevo."
+          onRetry={reload}
+        />
+      </>
+    );
+  }
+
+  if ((childLoading || loading) && data === null) {
+    return (
+      <>
+        <ScreenTitle>Cuenta</ScreenTitle>
+        <AsyncLoading />
+      </>
+    );
+  }
+
+  const settled = (data?.totalBalanceCents ?? 0) <= 0;
+  const movements = data ? toLedger(data) : [];
 
   return (
     <>
@@ -38,98 +104,52 @@ export function AccountScreen(): ReactElement {
 
       <Card style={[styles.balanceHero, { marginTop: 12 }]}>
         <Text style={[styles.cap, { color: theme.colors.text2, fontFamily: theme.fonts.uiExtra }]}>
-          {paid ? "Saldo actual" : "Saldo por pagar"}
+          {settled ? "Saldo actual" : "Saldo por pagar"}
         </Text>
         <Text
           accessibilityLabel="Saldo"
-          style={[styles.amount, { color: paid ? theme.colors.ok : theme.colors.text, fontFamily: theme.fonts.display }]}
+          style={[styles.amount, { color: settled ? theme.colors.ok : theme.colors.text, fontFamily: theme.fonts.display }]}
         >
-          {paid ? money(0) : money(balance.amount)}
+          {pesos(Math.max(data?.totalBalanceCents ?? 0, 0))}
         </Text>
         <View style={styles.center}>
-          {paid ? (
-            <Chip kind="ok" icon="check">Al corriente · ¡Gracias!</Chip>
+          {settled ? (
+            <Chip kind="ok" icon="check">Al corriente</Chip>
           ) : (
-            <Chip kind="warn" icon="clock">{`${balance.label} · ${balance.due}`}</Chip>
+            <Chip kind="warn" icon="clock">Pendiente</Chip>
           )}
         </View>
-        {paid ? (
-          <Button label="Solicitar factura (CFDI)" variant="ghost" small icon="document" style={{ marginTop: 18 }} />
-        ) : (
-          <>
-            <Button
-              label={`Pagar ${money(balance.amount)}`}
-              icon="credit-card"
-              onPress={() => setSheetOpen(true)}
-              style={{ marginTop: 18 }}
-            />
-            <Button label="Solicitar factura (CFDI)" variant="ghost" small icon="document" style={{ marginTop: 10 }} />
-          </>
-        )}
       </Card>
-
-      {!paid ? (
-        <Card padded style={[styles.legendCard, { marginTop: 12 }]}>
-          {(
-            [
-              [theme.colors.ok, "Al corriente"],
-              [theme.palette.orange, "Por vencer"],
-              [theme.colors.bad, "Vencido"],
-            ] as const
-          ).map(([c, l]) => (
-            <View key={l} style={styles.legendItem}>
-              <StatusDot color={c} size={11} />
-              <Text style={[styles.legendText, { color: theme.colors.text2, fontFamily: theme.fonts.uiExtra }]}>{l}</Text>
-            </View>
-          ))}
-        </Card>
-      ) : null}
 
       <SectionLabel>Movimientos recientes</SectionLabel>
-      <Card>
-        {paid ? (
-          <ListRow>
-            <TintIcon name="check-circle" tint="forest" />
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.rowTitle, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>Pago recibido</Text>
-              <Text style={[styles.rowSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>Colegiatura junio · hoy</Text>
-            </View>
-            <View style={styles.trail}>
-              <Text style={[styles.amountPos, { color: theme.colors.ok, fontFamily: theme.fonts.display }]}>
-                {money(-balance.amount)}
-              </Text>
-              <Chip kind="ok">Pagado</Chip>
-            </View>
-          </ListRow>
-        ) : null}
-        {balance.movements.map((m, i) => (
-          <MovementRow key={`${m.date}-${m.title}`} movement={m} divider={paid || i > 0} />
-        ))}
-      </Card>
-
-      <PaySheet visible={sheetOpen} onClose={() => setSheetOpen(false)} onConfirm={confirmPay} />
+      {movements.length === 0 ? (
+        <EmptyState icon="receipt" title="Sin movimientos" subtitle="Aquí verás los cargos y pagos de tu cuenta." />
+      ) : (
+        <Card>
+          {movements.map((m, i) => (
+            <MovementRow key={m.key} movement={m} divider={i > 0} />
+          ))}
+        </Card>
+      )}
     </>
   );
 }
 
 function MovementRow({ movement, divider }: { movement: Movement; divider: boolean }): ReactElement {
   const theme = useTheme();
-  const k = KIND[movement.kind];
-  const negative = movement.amount < 0;
+  const amount = movement.credit ? -movement.amountCents : movement.amountCents;
   return (
     <ListRow divider={divider}>
-      <TintIcon name={k.icon} tint={k.tint} />
+      <TintIcon name={movement.icon} tint={movement.tint} />
       <View style={{ flex: 1 }}>
         <Text style={[styles.rowTitle, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{movement.title}</Text>
-        <Text style={[styles.rowSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>
-          {movement.sub} · {movement.date}
-        </Text>
+        <Text style={[styles.rowSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{movement.sub}</Text>
       </View>
       <View style={styles.trail}>
-        <Text style={[styles.amountVal, { color: negative ? theme.colors.ok : theme.colors.text, fontFamily: theme.fonts.display }]}>
-          {money(movement.amount)}
+        <Text style={[styles.amountVal, { color: movement.credit ? theme.colors.ok : theme.colors.text, fontFamily: theme.fonts.display }]}>
+          {pesos(amount)}
         </Text>
-        {movement.paid ? <Chip kind="ok">Pagado</Chip> : null}
+        {movement.chip ? <Chip kind="ok">{movement.chip}</Chip> : null}
       </View>
     </ListRow>
   );
@@ -140,12 +160,8 @@ const styles = StyleSheet.create({
   cap: { fontSize: 13, fontWeight: "700", marginBottom: 4 },
   amount: { fontSize: 44, fontWeight: "800", letterSpacing: -1.5 },
   center: { alignItems: "center", marginTop: 12 },
-  legendCard: { flexDirection: "row", justifyContent: "space-around" },
-  legendItem: { flexDirection: "row", alignItems: "center", gap: 7 },
-  legendText: { fontSize: 12.5, fontWeight: "700" },
   rowTitle: { fontSize: 15, fontWeight: "800" },
   rowSub: { fontSize: 12.5, fontWeight: "600", marginTop: 3 },
   trail: { alignItems: "flex-end", gap: 4 },
   amountVal: { fontSize: 16, fontWeight: "700", letterSpacing: -0.2 },
-  amountPos: { fontSize: 16, fontWeight: "700", letterSpacing: -0.2 },
 });

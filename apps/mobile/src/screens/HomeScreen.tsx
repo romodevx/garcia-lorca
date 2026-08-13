@@ -1,37 +1,59 @@
 import { router } from "expo-router";
 import { type ReactElement } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { money, today } from "../data/mock";
+import type { FamilyAttendanceStatus } from "../api";
 import { Icon } from "../icons";
 import { useAppState } from "../state/AppState";
+import { toChildView } from "../state/childView";
+import { useChildAccount, useChildAttendance } from "../state/familyData";
 import { useTheme } from "../theme";
 import { Card, Chip, SectionLabel, TintIcon } from "../ui";
+import { pesos } from "./format";
+
+const STATUS_LABEL: Record<FamilyAttendanceStatus, string> = {
+  present: "Asistió",
+  absent: "Falta",
+  late: "Retardo",
+  excused: "Justificada",
+};
+
+/** Today's ISO calendar day (local), used to find today's attendance record. */
+function todayIso(): string {
+  const now = new Date();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${m}-${d}`;
+}
 
 /**
- * Inicio: greeting + actionable summary cards. Each card routes straight to its
- * detail (asistencia, cuenta, avisos, eventos). The balance card flips to a
- * "settled" state and hides "Pagar ahora" once the payment has been made.
+ * Inicio: greeting + actionable summary cards, each routing to its detail. The
+ * attendance and balance summaries are derived from the SAME real family reads
+ * the detail screens use ( `/family/.../attendance` and `/.../account` ); when
+ * there is no data yet the cards show a neutral state rather than a fabricated one.
+ * The agenda/next-event tile is intentionally absent — it has no backend.
  */
 export function HomeScreen(): ReactElement {
   const theme = useTheme();
-  const { child, paid, unreadCount } = useAppState();
-  // today.attendance / today.balance / today.nextEvent are still static mock:
-  // TODO(pendiente-backend: GET /api/v1/family/students/{id}/attendance | .../account | agenda)
-  // — static placeholder data. Do not delete. See .claude/docs/PLAN-mock-data-audit.md #B3/#B4/#B6.
-  const att = today.attendance;
-  const bal = today.balance;
+  const { child, selectedChildId, unreadCount } = useAppState();
+  const view = toChildView(child);
+  const account = useChildAccount(selectedChildId);
+  const attendance = useChildAttendance(selectedChildId);
+
+  const todayRecord = (attendance.data ?? []).find((r) => r.date === todayIso());
+  const balanceCents = account.data?.totalBalanceCents ?? null;
+  const settled = balanceCents !== null && balanceCents <= 0;
+
+  const dateLabel = new Date().toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" });
 
   return (
     <>
       <View style={styles.greetRow}>
-        <View>
-          <Text style={[styles.hello, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>
-            Hola, {child.parent}
-          </Text>
-          <Text style={[styles.date, { color: theme.colors.text3, fontFamily: theme.fonts.uiExtra }]}>
-            {today.dateLabel} · Ciclo 2025–2026
-          </Text>
-        </View>
+        <Text style={[styles.hello, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>
+          {view.present ? `Hola, familia ${view.short}` : "Hola"}
+        </Text>
+        <Text style={[styles.date, { color: theme.colors.text3, fontFamily: theme.fonts.uiExtra }]}>
+          {dateLabel}
+        </Text>
       </View>
 
       <SectionLabel>Hoy</SectionLabel>
@@ -44,31 +66,35 @@ export function HomeScreen(): ReactElement {
           </View>
           <View style={styles.heroMain}>
             <Text style={[styles.heroLabel, { color: theme.colors.text2, fontFamily: theme.fonts.ui }]}>Asistencia de hoy</Text>
-            <Text style={[styles.heroValue, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{att.label}</Text>
-            <Text style={[styles.heroSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{att.detail}</Text>
+            <Text style={[styles.heroValue, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>
+              {todayRecord ? STATUS_LABEL[todayRecord.status] : "Sin novedades"}
+            </Text>
+            {todayRecord?.note ? (
+              <Text style={[styles.heroSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{todayRecord.note}</Text>
+            ) : null}
           </View>
           <Icon name="chevron-right" size={20} stroke={2.4} color={theme.colors.text3} />
         </View>
       </Card>
 
-      {/* Balance → Cuenta (with Pagar ahora) */}
+      {/* Balance → Cuenta */}
       <Card onPress={() => router.push("/(tabs)/cuenta")} accessibilityLabel="Saldo" style={[styles.hero, { marginTop: 12 }]}>
         <View style={styles.heroTop}>
-          <View style={[styles.statusCircle, { backgroundColor: paid ? theme.colors.primarySoft : theme.colors.orangeSoft }]}>
-            <Icon name="wallet" size={26} color={paid ? theme.colors.tintLimeInk : theme.colors.tintOrangeInk} />
+          <View style={[styles.statusCircle, { backgroundColor: settled ? theme.colors.primarySoft : theme.colors.orangeSoft }]}>
+            <Icon name="wallet" size={26} color={settled ? theme.colors.tintLimeInk : theme.colors.tintOrangeInk} />
           </View>
           <View style={styles.heroMain}>
             <Text style={[styles.heroLabel, { color: theme.colors.text2, fontFamily: theme.fonts.ui }]}>
-              {paid ? "Estado de cuenta" : "Saldo por pagar"}
+              {settled ? "Estado de cuenta" : "Saldo por pagar"}
             </Text>
             <Text style={[styles.heroValue, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>
-              {paid ? money(0) : money(bal.amount)}
+              {balanceCents === null ? "—" : pesos(Math.max(balanceCents, 0))}
             </Text>
             <View style={{ marginTop: 7 }}>
-              {paid ? (
+              {balanceCents === null ? null : settled ? (
                 <Chip kind="ok" icon="check">Al corriente</Chip>
               ) : (
-                <Chip kind="warn" icon="clock">{`${bal.label} · ${bal.due}`}</Chip>
+                <Chip kind="warn" icon="clock">Pendiente</Chip>
               )}
             </View>
           </View>
@@ -76,16 +102,8 @@ export function HomeScreen(): ReactElement {
         </View>
       </Card>
 
-      {/* Avisos (real notifications). The former "próximo evento" tile + the
-          "Próximos eventos" list are hidden: the comms agenda has no backend yet
-          (Phase 9d), so `today.nextEvent` / `events` are static mock and showing
-          them would fake data. They stay in mock.ts, just not rendered. */}
-      <Card
-        onPress={() => router.push("/(tabs)/avisos")}
-        accessibilityLabel="Avisos"
-        padded
-        style={{ marginTop: 12 }}
-      >
+      {/* Avisos (real notifications) */}
+      <Card onPress={() => router.push("/(tabs)/avisos")} accessibilityLabel="Avisos" padded style={{ marginTop: 12 }}>
         <View style={styles.tileTop}>
           <TintIcon name="megaphone" tint="purple" />
           <Chip kind="bad">{`${unreadCount} nuevos`}</Chip>
@@ -100,7 +118,7 @@ export function HomeScreen(): ReactElement {
 const styles = StyleSheet.create({
   greetRow: { paddingHorizontal: 4, paddingTop: 8, paddingBottom: 2 },
   hello: { fontSize: 22, fontWeight: "800", letterSpacing: -0.3 },
-  date: { fontSize: 13, fontWeight: "700", marginTop: 1 },
+  date: { fontSize: 13, fontWeight: "700", marginTop: 1, textTransform: "capitalize" },
   hero: { padding: 18 },
   heroTop: { flexDirection: "row", alignItems: "center", gap: 12 },
   statusCircle: { width: 52, height: 52, borderRadius: 18, alignItems: "center", justifyContent: "center" },

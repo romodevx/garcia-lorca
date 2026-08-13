@@ -11,13 +11,14 @@ import { useTheme } from "@/src/theme";
 /** "Más" module grid — pushed from the bottom bar's last entry. */
 export default function MasRoute(): ReactNode {
   const theme = useTheme();
-  const { refreshNotifications } = useAppState();
+  const { refreshNotifications, refreshChildren } = useAppState();
 
-  // Clear the token pair (privacy on a shared family device), reset the inbox so
-  // the next guardian never sees the previous one (refreshNotifications empties
-  // it once the token is gone), then return to the login screen.
+  // Clear the token pair (privacy on a shared family device), then reset the child
+  // list and inbox so the next guardian never sees the previous one (both empty
+  // once the token is gone), then return to the login screen.
   const onLogout = async (): Promise<void> => {
     await logout();
+    await refreshChildren();
     await refreshNotifications();
     router.replace("/");
   };

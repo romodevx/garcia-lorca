@@ -51,12 +51,12 @@ export function formatNotificationDate(iso: string, style: "short" | "long"): st
 
 /**
  * A notification is unread when the server has not stamped a read instant AND the
- * user has not marked it read locally in this session.
+ * user has not acknowledged it optimistically this session.
  *
- * NOTE(pendiente-backend: POST /comms/notifications/{id}/read): the guardian role
- * holds only `family:read`, not `comms:write`, so the mark-read endpoint is not
- * reachable from the family app. Read state is therefore session-local until a
- * guardian-reachable acknowledge route exists. See .claude/docs/PLAN-mock-data-audit.md.
+ * Acknowledgement PERSISTS: AppState.markRead calls the guardian-reachable
+ * `POST /api/v1/family/notifications/{id}/read` route (the gateway marks it on the
+ * guardian's behalf after an ownership check), so `readAt` is stamped server-side
+ * and survives a relaunch. `readIds` only bridges the gap until the next refetch.
  */
 export function isUnread(n: FamilyNotification, readIds: ReadonlySet<string>): boolean {
   return n.readAt === "" && !readIds.has(n.id);

@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Icon } from "../icons";
 import { LanguageToggle } from "../i18n/LanguageToggle";
 import { useAppState } from "../state/AppState";
+import { toChildView } from "../state/childView";
 import { useTheme, useThemeControls } from "../theme";
 import { Avatar } from "../ui";
 
@@ -16,7 +17,8 @@ import { Avatar } from "../ui";
 export function AppHeader(): ReactElement {
   const theme = useTheme();
   const { toggleTheme } = useThemeControls();
-  const { child, level, unreadCount } = useAppState();
+  const { child, unreadCount } = useAppState();
+  const view = toChildView(child);
   const insets = useSafeAreaInsets();
 
   return (
@@ -27,16 +29,16 @@ export function AppHeader(): ReactElement {
       ]}
     >
       <View style={styles.id}>
-        <Avatar child={child} size={40} />
+        <Avatar initials={view.initials} size={40} />
         <View style={styles.idText}>
           <Text style={[styles.greet, { color: theme.colors.text3, fontFamily: theme.fonts.uiExtra }]}>
-            {child.short} · {level.group}
+            {view.present ? `${view.short} · ${view.group}` : "García Lorca"}
           </Text>
           <Text
             style={[styles.name, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}
             numberOfLines={1}
           >
-            {child.name.split(" ").slice(0, 2).join(" ")}
+            {view.present ? view.fullName.split(" ").slice(0, 2).join(" ") : "Portal de familias"}
           </Text>
         </View>
       </View>
