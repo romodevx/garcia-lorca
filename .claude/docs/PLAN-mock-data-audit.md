@@ -141,6 +141,31 @@ saber qué va ahí después.*
 
 ---
 
+## 8. Cierre de ejecución (branch `feature/wire-frontend-real-data`, 10 commits)
+
+Todo el plan quedó ejecutado en una sola branch, TDD estricto, verificado en runtime.
+
+**Reemplazos hechos + verificados:**
+- **A1** identidad web real (`me()`) — commit `ee36b31f`; **drive runtime**: TopBar muestra "Director" + email real, no el estático.
+- **B1** `/me` enriquece `displayName`+`role` (iam GetUser+ListRoles, degrada limpio) — `e13175ad`; runtime: `displayName:"Director", role:"owner"`.
+- **Fase 0 + login + notificaciones mobile** — `7c45ad6c`; contrato `/auth/mobile/login` verificado.
+- **Fixes ultrareview** (ciclo de sesión: hidratación de token en boot, fetch gated por auth, logout real, detalle de aviso, DRY, comentarios en inglés) — `5048f23f`.
+- **bug_007** redirect a login en sesión muerta + **ocultar B6/B8–B12 tras flag** — `2787c872`.
+- **B2–B5 + B6.5 + `/family/students`** superficie family self-scoped — `41674846`; **verificado runtime con guardián real**: children/profile/account/attendance/grades OK, mark-read persiste (`readAt`), **IDOR→404** en todas. Revisión de seguridad: limpia (sin IDOR/leak).
+- **Enriquecer grades** subject/term names — `a79d433c`; runtime: `'Matemáticas'/'Bloque 1'=9.5`.
+- **Fix config** `ListSubjects/ListTerms` empty→all (bug 22P02, encontrado en verificación runtime) — `d94fda67`.
+- **Cablear mobile a `/family/*`** (account/attendance/grades/home/child + mark-read) — `4051005f`; 104 tests mobile green.
+
+**Decisión de producto aplicada:** módulos sin backend (agenda B6, docs/becas/uniformes/facturas B8–B12) → **ocultos tras flag OFF / estado "Próximamente"**, no fabricados, mock conservado.
+
+**Follow-ups documentados (no bloquean):**
+- Grades cualitativas (kínder): backend solo tiene `value` numérico → pantalla muestra "Próximamente". Falta modelar cualitativo (logrado/proceso).
+- Perfil: `currentEnrollment` trae ids de grupo/maestro, no nombres → muestra grupo, no maestro. Falta enriquecer nombres vía config.
+- `config.ListGradeLevels(levelID)` tiene el mismo bug latente 22P02 con filtro vacío (sin caller vacío hoy; documentado).
+- Seguridad INFO (preexistentes): multi-tenant readiness (gateway no propaga tenant por request; hoy tenant fijo) y grant-subset gap ([[vuln_authz_grant_subset]]) — ninguno introducido por este trabajo.
+- Verificación: la **GUI del mobile no se ejecutó** (no hay simulador/Expo web en el entorno); se verificaron sus contratos de gateway en vivo + 104 tests unitarios.
+- Seed de prueba en la DB de dev: usuario guardián `guardian.test@garcialorca.edu.mx` (rol guardian, hija María Reyes) para verificación runtime.
+
 ## 7. Inventario completo de hallazgos (trazabilidad)
 
 - **Web:** 5 reales (A1, A2, B7, B13, B14) + 6 enum-lists verificadas legítimas + 1 dev-only (`DEMO_FLAGS`, correcto).
