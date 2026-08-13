@@ -64,7 +64,10 @@ function chromeUser(principal: MeResult | undefined): UserProfile {
   const name = principal.displayName && principal.displayName.length > 0
     ? principal.displayName
     : displayName(principal.email);
-  return { name, first: name, role: principal.email, color: base.color };
+  // `name` is the full identity (bold line + avatar); `first` is only the greeting
+  // token, so take the leading word — "Patricia Lugo Reyes" greets as "Patricia".
+  const first = name.split(/\s+/)[0] || name;
+  return { name, first, role: principal.email, color: base.color };
 }
 
 /**

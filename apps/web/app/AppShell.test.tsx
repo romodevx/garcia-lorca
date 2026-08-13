@@ -151,6 +151,10 @@ describe("AppShell navigation flow", () => {
     // NOT the email-derived name ("Director"), and NOT the old static owner row.
     expect(screen.queryByText("Director")).not.toBeInTheDocument();
     expect(screen.queryByText("Dirección")).not.toBeInTheDocument();
+    // The dashboard greeting uses only the FIRST name token, not the full display
+    // name — "Patricia Lugo" greets as "Patricia", never "Patricia Lugo 🌱".
+    expect(screen.getByRole("heading", { name: /,\s*Patricia\s*🌱/ })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Patricia Lugo\s*🌱/ })).not.toBeInTheDocument();
   });
 
   it("falls back to the email-derived name when the gateway returns no display name", async () => {
