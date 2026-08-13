@@ -1,11 +1,11 @@
 import { router } from "expo-router";
 import { type ReactElement } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { events, money, today } from "../data/mock";
+import { money, today } from "../data/mock";
 import { Icon } from "../icons";
 import { useAppState } from "../state/AppState";
-import { tintColors, useTheme, type TintName } from "../theme";
-import { Card, Chip, ListRow, SectionLabel, TintIcon } from "../ui";
+import { useTheme } from "../theme";
+import { Card, Chip, SectionLabel, TintIcon } from "../ui";
 
 /**
  * Inicio: greeting + actionable summary cards. Each card routes straight to its
@@ -76,52 +76,24 @@ export function HomeScreen(): ReactElement {
         </View>
       </Card>
 
-      {/* Two-up: avisos + next event */}
-      <View style={styles.row2}>
-        <Card onPress={() => router.push("/(tabs)/avisos")} accessibilityLabel="Avisos" padded style={styles.tile}>
-          <View style={styles.tileTop}>
-            <TintIcon name="megaphone" tint="purple" />
-            <Chip kind="bad">{`${unreadCount} nuevos`}</Chip>
-          </View>
-          <Text style={[styles.tileTitle, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>Avisos</Text>
-          <Text style={[styles.heroSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>Sin leer</Text>
-        </Card>
-
-        <Card onPress={() => router.push("/eventos")} accessibilityLabel="Próximo evento" padded style={styles.tile}>
-          <TintIcon name="calendar" tint="forest" />
-          <Text style={[styles.tileTitleSm, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>
-            {today.nextEvent.title}
-          </Text>
-          <Text style={[styles.heroSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>
-            {today.nextEvent.when}
-          </Text>
-        </Card>
-      </View>
-
-      <SectionLabel>Próximos eventos</SectionLabel>
-      <Card>
-        {events.map((ev, i) => (
-          <ListRow key={ev.title} divider={i > 0}>
-            <EventBadge day={ev.day} mon={ev.mon} tint={ev.tint} />
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.rowTitle, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{ev.title}</Text>
-              <Text style={[styles.rowSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{ev.sub}</Text>
-            </View>
-          </ListRow>
-        ))}
+      {/* Avisos (real notifications). The former "próximo evento" tile + the
+          "Próximos eventos" list are hidden: the comms agenda has no backend yet
+          (Phase 9d), so `today.nextEvent` / `events` are static mock and showing
+          them would fake data. They stay in mock.ts, just not rendered. */}
+      <Card
+        onPress={() => router.push("/(tabs)/avisos")}
+        accessibilityLabel="Avisos"
+        padded
+        style={{ marginTop: 12 }}
+      >
+        <View style={styles.tileTop}>
+          <TintIcon name="megaphone" tint="purple" />
+          <Chip kind="bad">{`${unreadCount} nuevos`}</Chip>
+        </View>
+        <Text style={[styles.tileTitle, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>Avisos</Text>
+        <Text style={[styles.heroSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>Sin leer</Text>
       </Card>
     </>
-  );
-}
-
-function EventBadge({ day, mon, tint }: { day: string; mon: string; tint: TintName }): ReactElement {
-  const theme = useTheme();
-  const { bg, fg } = tintColors(theme.colors, tint);
-  return (
-    <View style={[styles.eventBadge, { backgroundColor: bg }]}>
-      <Text style={[styles.eventDay, { color: fg, fontFamily: theme.fonts.display }]}>{day}</Text>
-      <Text style={[styles.eventMon, { color: fg }]}>{mon}</Text>
-    </View>
   );
 }
 
@@ -136,14 +108,6 @@ const styles = StyleSheet.create({
   heroLabel: { fontSize: 13, fontWeight: "700" },
   heroValue: { fontSize: 25, fontWeight: "800", letterSpacing: -0.5, marginTop: 1 },
   heroSub: { fontSize: 13, fontWeight: "600", marginTop: 2 },
-  row2: { flexDirection: "row", gap: 12, marginTop: 12 },
-  tile: { flex: 1, gap: 0 },
   tileTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
   tileTitle: { fontSize: 17, fontWeight: "800", marginTop: 12 },
-  tileTitleSm: { fontSize: 15, fontWeight: "800", marginTop: 12, lineHeight: 18 },
-  rowTitle: { fontSize: 15, fontWeight: "800" },
-  rowSub: { fontSize: 12.5, fontWeight: "600", marginTop: 3 },
-  eventBadge: { width: 46, height: 46, borderRadius: 14, alignItems: "center", justifyContent: "center" },
-  eventDay: { fontSize: 18, fontWeight: "700", lineHeight: 20 },
-  eventMon: { fontSize: 9, fontWeight: "800", opacity: 0.8, marginTop: 1 },
 });

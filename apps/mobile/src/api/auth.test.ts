@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { login, refresh } from "./auth";
+import { onSessionLost } from "./session";
 import { clearTokens, getAccessToken, getRefreshToken, saveTokens } from "./tokenStore";
 
 /** Minimal Response stand-in for the mocked global fetch. */
@@ -84,5 +85,31 @@ describe("auth.refresh", () => {
     globalThis.fetch = jest.fn().mockResolvedValue(response(401, {})) as unknown as typeof fetch;
     expect(await refresh()).toBe(false);
     expect(getRefreshToken()).toBeNull();
+  });
+
+  it("emits the session-lost signal when the gateway rejects the refresh token", async () => {
+    await saveTokens({ accessToken: "stale", refreshToken: "r1" });
+    globalThis.fetch = jest.fn().mockResolvedValue(response(401, {})) as unknown as typeof fetch;
+    const onLost = jest.fn();
+    const unsubscribe = onSessionLost(onLost);
+
+    expect(await refresh()).toBe(false);
+
+    // A rejected refresh token is a genuine dead session — the one true moment
+    // that must force navigation back to Login.
+    expect(onLost).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+
+  it("does NOT emit session-lost when there is no refresh token (pre-login)", async () => {
+    globalThis.fetch = jest.fn() as unknown as typeof fetch;
+    const onLost = jest.fn();
+    const unsubscribe = onSessionLost(onLost);
+
+    expect(await refresh()).toBe(false);
+
+    // No token yet means no network call and no dead session — must stay silent.
+    expect(onLost).not.toHaveBeenCalled();
+    unsubscribe();
   });
 });

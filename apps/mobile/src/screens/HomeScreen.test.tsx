@@ -24,9 +24,13 @@ describe("HomeScreen summary cards", () => {
     expect(router.push).toHaveBeenCalledWith("/(tabs)/avisos");
   });
 
-  it("routes the next-event tile to Eventos", async () => {
+  it("does not render fake agenda events (next-event tile + list hidden)", async () => {
+    // Agenda has no backend yet (Phase 9d): the mock `events` and the static
+    // `today.nextEvent` must not be shown — a fake event would mislead the parent.
     await renderWithProviders(<HomeScreen />);
-    fireEvent.press(screen.getByLabelText("Próximo evento"));
-    expect(router.push).toHaveBeenCalledWith("/eventos");
+
+    expect(screen.queryByLabelText("Próximo evento")).toBeNull();
+    expect(screen.queryByText("Suspensión de clases")).toBeNull();
+    expect(screen.queryByText("Festival de Primavera")).toBeNull();
   });
 });

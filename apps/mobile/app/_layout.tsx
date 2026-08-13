@@ -2,6 +2,7 @@ import { Stack } from "expo-router";
 import { type ReactNode } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { Providers } from "@/src/Providers";
+import { useSessionLostRedirect } from "@/src/boot/useSessionLostRedirect";
 import { useTokenBootstrap } from "@/src/boot/useTokenBootstrap";
 import { useAppFonts } from "@/src/theme/useAppFonts";
 
@@ -25,6 +26,9 @@ function BootSplash(): ReactNode {
  */
 function RootNavigator(): ReactNode {
   const fontsReady = useAppFonts();
+  // Runs inside the provider + router context: on a dead session it forces the
+  // user back to Login instead of leaving a zombie signed-in state (bug_007).
+  useSessionLostRedirect();
   if (!fontsReady) {
     return <BootSplash />;
   }

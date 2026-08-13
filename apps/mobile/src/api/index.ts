@@ -6,5 +6,6 @@ export { API_BASE_URL, apiUrl } from "./config";
 export { ApiError } from "./errors";
 export { login, logout, refresh, type LoginResult } from "./auth";
 export { apiFetch } from "./client";
+export { onSessionLost, emitSessionLost } from "./session";
 export { getAccessToken, getRefreshToken, loadTokens, clearTokens, saveTokens, type TokenPair } from "./tokenStore";
 export { listFamilyNotifications, type FamilyNotification } from "./notifications";

@@ -1,5 +1,6 @@
 import { apiUrl } from "./config";
 import { ApiError } from "./errors";
+import { emitSessionLost } from "./session";
 import { clearTokens, getRefreshToken, saveTokens } from "./tokenStore";
 
 /**
@@ -66,6 +67,11 @@ export async function refresh(): Promise<boolean> {
   });
   if (!res.ok) {
     await clearTokens();
+    // A rejected refresh token is the one true dead-session moment: signal it so
+    // the app root forces navigation back to Login (bug_007). This never fires
+    // for the pre-login "no token" case — that path returned false above without
+    // reaching the network.
+    emitSessionLost();
     return false;
   }
   const data = (await res.json()) as MobileRefreshResponse;
