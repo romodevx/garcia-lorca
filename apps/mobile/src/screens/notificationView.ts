@@ -38,6 +38,18 @@ export function notificationKind(type: string): NotificationKindMeta {
 }
 
 /**
+ * es-MX day+month label from an RFC3339 instant; empty on an unparseable date.
+ * The list uses the `short` month, the detail the `long` one.
+ */
+export function formatNotificationDate(iso: string, style: "short" | "long"): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return date.toLocaleDateString("es-MX", { day: "numeric", month: style });
+}
+
+/**
  * A notification is unread when the server has not stamped a read instant AND the
  * user has not marked it read locally in this session.
  *

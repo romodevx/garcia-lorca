@@ -1,5 +1,5 @@
 import type { FamilyNotification } from "../api";
-import { isUnread, notificationKind } from "./notificationView";
+import { formatNotificationDate, isUnread, notificationKind } from "./notificationView";
 
 function make(overrides: Partial<FamilyNotification>): FamilyNotification {
   return {
@@ -26,6 +26,25 @@ describe("notificationKind", () => {
     expect(meta.label).toBe("Escuela");
     expect(meta.icon).toBeTruthy();
     expect(meta.tint).toBeTruthy();
+  });
+});
+
+describe("formatNotificationDate", () => {
+  const iso = "2026-08-12T10:00:00Z";
+
+  it("formats a long es-MX day+month label", () => {
+    expect(formatNotificationDate(iso, "long")).toContain("agosto");
+    expect(formatNotificationDate(iso, "long")).toContain("12");
+  });
+
+  it("formats a short es-MX day+month label distinct from the long one", () => {
+    const short = formatNotificationDate(iso, "short");
+    expect(short).toContain("12");
+    expect(short).not.toContain("agosto");
+  });
+
+  it("returns an empty string for an unparseable date", () => {
+    expect(formatNotificationDate("not-a-date", "short")).toBe("");
   });
 });
 

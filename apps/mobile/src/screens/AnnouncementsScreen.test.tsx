@@ -1,4 +1,5 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { clearTokens, saveTokens } from "../api";
 import { AnnouncementsScreen } from "./AnnouncementsScreen";
 import { renderWithProviders } from "../test/renderWithProviders";
 
@@ -35,6 +36,17 @@ const unread: Notif = {
 };
 
 describe("AnnouncementsScreen", () => {
+  // The inbox only loads for a signed-in guardian: AppState skips the fetch when
+  // there is no access token (see AppState refreshNotifications). Seed a token so
+  // these render the network-backed path.
+  beforeEach(async () => {
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+  });
+
+  afterEach(async () => {
+    await clearTokens();
+  });
+
   it("renders notifications loaded from the family API", async () => {
     mockFetchNotifications([unread]);
     await renderWithProviders(<AnnouncementsScreen />);

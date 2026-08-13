@@ -87,8 +87,8 @@ export interface ExcuseReason {
   label: string;
 }
 
-// TODO(pendiente-backend: perfil del hijo family — students+config exist, falta ruta family)
-// — dato estático provisional. No borrar. Ver .claude/docs/PLAN-mock-data-audit.md #B5.
+// TODO(pendiente-backend: family child profile — students+config exist, missing family route)
+// — static placeholder data. Do not delete. See .claude/docs/PLAN-mock-data-audit.md #B5.
 export const child: Child = {
   name: "Mateo Herrera Díaz",
   short: "Mateo",
@@ -108,7 +108,7 @@ export const levels: Record<LevelId, Level> = {
 // from real /family/notifications data (AppState.unreadCount). The remaining
 // fields are still static.
 // TODO(pendiente-backend: GET /api/v1/family/students/{id}/attendance | .../account | agenda)
-// — dato estático provisional. No borrar. Ver .claude/docs/PLAN-mock-data-audit.md #B3/#B4/#B6.
+// — static placeholder data. Do not delete. See .claude/docs/PLAN-mock-data-audit.md #B3/#B4/#B6.
 export const today = {
   dateLabel: "vie 12 jun",
   attendance: { status: "present" as AttendanceStatus, label: "Presente", detail: "Entrada 7:52 a.m." },
@@ -117,7 +117,7 @@ export const today = {
 };
 
 // TODO(pendiente-backend: GET /api/v1/family/students/{id}/attendance)
-// — dato estático provisional. No borrar. Ver .claude/docs/PLAN-mock-data-audit.md #B3.
+// — static placeholder data. Do not delete. See .claude/docs/PLAN-mock-data-audit.md #B3.
 export const attendance = {
   monthLabel: "Junio 2026",
   todayDate: 12,
@@ -137,8 +137,8 @@ export const attendance = {
   ],
 };
 
-// TODO(pendiente-backend: GET /api/v1/family/students/{id}/grades — reusa grades service)
-// — dato estático provisional. No borrar. Ver .claude/docs/PLAN-mock-data-audit.md #B2.
+// TODO(pendiente-backend: GET /api/v1/family/students/{id}/grades — reuses grades service)
+// — static placeholder data. Do not delete. See .claude/docs/PLAN-mock-data-audit.md #B2.
 export const gradesNum = {
   average: 9.3,
   period: "2.º periodo",
@@ -173,8 +173,8 @@ export const qualMeta: Record<QualLevel, { label: string; chip: ChipKind; pct: n
   apoyo: { label: "Requiere apoyo", chip: "bad", pct: 30 },
 };
 
-// TODO(pendiente-backend: GET /api/v1/family/students/{id}/account — reusa finance.GetAccount)
-// — dato estático provisional. No borrar. Ver .claude/docs/PLAN-mock-data-audit.md #B4.
+// TODO(pendiente-backend: GET /api/v1/family/students/{id}/account — reuses finance.GetAccount)
+// — static placeholder data. Do not delete. See .claude/docs/PLAN-mock-data-audit.md #B4.
 export const balance = {
   amount: 1850,
   status: "warn",
@@ -194,8 +194,8 @@ export const balance = {
 // API client (src/api/notifications.ts) and are rendered through
 // src/screens/notificationView.ts. See .claude/docs/PLAN-mock-data-audit.md #A4/#A5.
 
-// TODO(pendiente-backend: agenda/eventos — no endpoint; comms agenda diferida Phase 9d)
-// — dato estático provisional. No borrar. Ver .claude/docs/PLAN-mock-data-audit.md #B6.
+// TODO(pendiente-backend: agenda/events — no endpoint; comms agenda deferred to Phase 9d)
+// — static placeholder data. Do not delete. See .claude/docs/PLAN-mock-data-audit.md #B6.
 export const events: SchoolEvent[] = [
   { day: "16", mon: "JUN", title: "Suspensión de clases", sub: "Consejo Técnico Escolar", tint: "orange" },
   { day: "18", mon: "JUN", title: "Reunión de padres", sub: "5:00 p.m. · Salón 3°A", tint: "forest" },

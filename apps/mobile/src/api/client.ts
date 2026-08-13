@@ -43,6 +43,10 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   }
   const refreshed = await refreshOnce();
   if (!refreshed) {
+    // FOLLOW-UP(bug_007): a dead session surfaces only as a returned 401 here;
+    // there is no global "session lost" signal to force navigation back to Login,
+    // so callers can be left in a zombie authenticated-looking state. Tracked
+    // separately — needs a session-lost event + router redirect (architectural).
     return res;
   }
   return fetch(apiUrl(path), withBearer(init));

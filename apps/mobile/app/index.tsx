@@ -4,6 +4,7 @@ import { ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { login } from "@/src/api";
 import { LoginScreen } from "@/src/screens/LoginScreen";
+import { useAppState } from "@/src/state/AppState";
 import { useTheme } from "@/src/theme";
 
 /**
@@ -15,6 +16,7 @@ import { useTheme } from "@/src/theme";
 export default function IndexRoute(): ReactNode {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const { refreshNotifications } = useAppState();
 
   const onSubmit = async (email: string, password: string): Promise<void> => {
     const { mustChangePassword } = await login(email, password);
@@ -24,6 +26,9 @@ export default function IndexRoute(): ReactNode {
     // /auth/change-password screen (mirrors apps/web) before enabling temp
     // passwords for guardians.
     void mustChangePassword;
+    // The inbox was skipped on boot (no token then); now that login stored one,
+    // load it so the guardian lands on real notifications, not a stuck error.
+    void refreshNotifications();
     router.replace("/(tabs)");
   };
 

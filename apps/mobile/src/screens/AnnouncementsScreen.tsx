@@ -1,11 +1,13 @@
 import { router } from "expo-router";
 import { type ReactElement } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { FamilyNotification } from "../api";
 import { useAppState } from "../state/AppState";
 import { useTheme } from "../theme";
-import { Button, Card, EmptyState, ScreenTitle, TintIcon } from "../ui";
-import { isUnread, notificationKind } from "./notificationView";
+import { Card, EmptyState, ScreenTitle, TintIcon } from "../ui";
+import { NotificationsErrorState } from "./NotificationsErrorState";
+import { NotificationsLoading } from "./NotificationsLoading";
+import { formatNotificationDate, isUnread, notificationKind } from "./notificationView";
 
 /**
  * Avisos: the guardian's real notification inbox, loaded from
@@ -75,31 +77,16 @@ interface BodyProps {
 
 /** Renders exactly one of: loading, error+retry, empty, or the notification list. */
 function AnnouncementsBody({ notifications, loading, error, readIds, onRetry, onOpen }: BodyProps): ReactElement {
-  const theme = useTheme();
-
   // Error takes precedence over a stale/empty list so a failed refresh is never
   // mistaken for "no news".
   if (error) {
-    return (
-      <View style={styles.centered}>
-        <EmptyState
-          icon="inbox"
-          title="No pudimos cargar los avisos"
-          subtitle="Revisa tu conexión e inténtalo de nuevo."
-        />
-        <Button label="Reintentar" icon="refresh" variant="outline" small onPress={onRetry} style={styles.retry} />
-      </View>
-    );
+    return <NotificationsErrorState onRetry={onRetry} />;
   }
 
   // Only show the spinner on the FIRST load (nothing to show yet); a refresh over
   // existing content keeps the list visible.
   if (loading && notifications.length === 0) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator color={theme.colors.primary} />
-      </View>
-    );
+    return <NotificationsLoading />;
   }
 
   if (notifications.length === 0) {
@@ -166,7 +153,7 @@ function NotificationRow({ notification, unread, divider, onPress }: RowProps): 
           <Text style={[styles.from, { color: theme.colors.text2, fontFamily: theme.fonts.ui }]}>{kind.label}</Text>
           <Text style={[styles.metaSep, { color: theme.colors.text3 }]}>·</Text>
           <Text style={[styles.time, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>
-            {formatWhen(notification.createdAt)}
+            {formatNotificationDate(notification.createdAt, "short")}
           </Text>
         </View>
         <Text numberOfLines={2} style={[styles.excerpt, { color: theme.colors.text2, fontFamily: theme.fonts.uiRegular }]}>
@@ -177,20 +164,9 @@ function NotificationRow({ notification, unread, divider, onPress }: RowProps): 
   );
 }
 
-/** Short es-MX day+month label from an RFC3339 instant; empty on an unparseable date. */
-function formatWhen(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-  return date.toLocaleDateString("es-MX", { day: "numeric", month: "short" });
-}
-
 const styles = StyleSheet.create({
   titleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingTop: 8, paddingBottom: 12 },
   action: { fontSize: 13.5, fontWeight: "800" },
-  centered: { alignItems: "center" },
-  retry: { width: "auto", paddingHorizontal: 22, marginTop: -8 },
   row: { flexDirection: "row", alignItems: "flex-start", gap: 13, paddingVertical: 15, paddingHorizontal: 16 },
   unreadDot: { width: 9, height: 9, borderRadius: 4.5, marginTop: 7 },
   title: { fontSize: 15, lineHeight: 19 },

@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { listFamilyNotifications, type FamilyNotification } from "../api";
+import { getAccessToken, listFamilyNotifications, type FamilyNotification } from "../api";
 import {
   attendance as ATTENDANCE,
   child as CHILD,
@@ -97,6 +97,15 @@ export function AppStateProvider({
   }, []);
 
   const refreshNotifications = useCallback(async () => {
+    // Signed out: there is no token to authenticate the family request, so treat
+    // the inbox as cleanly empty rather than firing an unauthenticated call that
+    // 401s and sticks an error. This also empties the slice after logout.
+    if (getAccessToken() === null) {
+      setNotifications([]);
+      setNotificationsLoading(false);
+      setNotificationsError(false);
+      return;
+    }
     setNotificationsLoading(true);
     setNotificationsError(false);
     try {

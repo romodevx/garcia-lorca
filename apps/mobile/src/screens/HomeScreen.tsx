@@ -17,7 +17,7 @@ export function HomeScreen(): ReactElement {
   const { child, paid, unreadCount } = useAppState();
   // today.attendance / today.balance / today.nextEvent are still static mock:
   // TODO(pendiente-backend: GET /api/v1/family/students/{id}/attendance | .../account | agenda)
-  // — dato estático provisional. No borrar. Ver .claude/docs/PLAN-mock-data-audit.md #B3/#B4/#B6.
+  // — static placeholder data. Do not delete. See .claude/docs/PLAN-mock-data-audit.md #B3/#B4/#B6.
   const att = today.attendance;
   const bal = today.balance;
 

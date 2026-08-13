@@ -2,7 +2,17 @@ import { Stack } from "expo-router";
 import { type ReactNode } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { Providers } from "@/src/Providers";
+import { useTokenBootstrap } from "@/src/boot/useTokenBootstrap";
 import { useAppFonts } from "@/src/theme/useAppFonts";
+
+/** Full-screen splash shown while a boot dependency (fonts, tokens) settles. */
+function BootSplash(): ReactNode {
+  return (
+    <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+      <ActivityIndicator />
+    </View>
+  );
+}
 
 /**
  * Root layout. Composes the app-wide providers (theme, flags, app state, toast,
@@ -16,11 +26,7 @@ import { useAppFonts } from "@/src/theme/useAppFonts";
 function RootNavigator(): ReactNode {
   const fontsReady = useAppFonts();
   if (!fontsReady) {
-    return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-        <ActivityIndicator />
-      </View>
-    );
+    return <BootSplash />;
   }
   return (
     <Stack screenOptions={{ headerShown: false, animation: "fade" }}>
@@ -30,7 +36,19 @@ function RootNavigator(): ReactNode {
   );
 }
 
+/**
+ * Gates the whole app on the token cache being hydrated from durable storage
+ * BEFORE the providers mount. AppState's mount effect fetches the family inbox
+ * with a Bearer header, so the stored access token must already be in memory —
+ * otherwise a cold start would fire that first request unauthenticated (401).
+ * This runs OUTSIDE <Providers> on purpose, so hydration finishes before
+ * AppStateProvider's mount effect can read the token.
+ */
 export default function RootLayout(): ReactNode {
+  const tokensReady = useTokenBootstrap();
+  if (!tokensReady) {
+    return <BootSplash />;
+  }
   return (
     <Providers>
       <RootNavigator />

@@ -20,8 +20,8 @@ interface PayMethod {
   sub: string;
 }
 
-// TODO(pendiente-backend: tokenización de tarjeta no construida; pago real usa finance)
-// — dato estático provisional. No borrar. Ver .claude/docs/PLAN-mock-data-audit.md #B12.
+// TODO(pendiente-backend: card tokenization not built; real payment uses finance)
+// — static placeholder data. Do not delete. See .claude/docs/PLAN-mock-data-audit.md #B12.
 const METHODS: PayMethod[] = [
   { id: "card", icon: "credit-card", title: "Tarjeta", sub: "•••• 4242" },
   { id: "spei", icon: "arrow-up-right", title: "Transferencia SPEI", sub: "CLABE de la escuela" },

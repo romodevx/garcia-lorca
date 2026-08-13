@@ -4,7 +4,9 @@ import { Icon } from "../icons";
 import { useAppState } from "../state/AppState";
 import { useTheme } from "../theme";
 import { Card, Chip, EmptyState, TintIcon } from "../ui";
-import { notificationKind } from "./notificationView";
+import { NotificationsErrorState } from "./NotificationsErrorState";
+import { NotificationsLoading } from "./NotificationsLoading";
+import { formatNotificationDate, notificationKind } from "./notificationView";
 
 export interface AnnouncementDetailScreenProps {
   /** The notification id (string) from the family inbox. */
@@ -19,9 +21,17 @@ export interface AnnouncementDetailScreenProps {
  */
 export function AnnouncementDetailScreen({ id }: AnnouncementDetailScreenProps): ReactElement {
   const theme = useTheme();
-  const { notifications } = useAppState();
+  const { notifications, notificationsLoading, notificationsError, refreshNotifications } = useAppState();
   const notification = notifications.find((n) => n.id === id);
 
+  // Order matters: a failed or in-flight load must never read as a retracted
+  // notice. Branch on the inbox's load state before the "not found" empty state.
+  if (notificationsError) {
+    return <NotificationsErrorState onRetry={refreshNotifications} />;
+  }
+  if (notificationsLoading && !notification) {
+    return <NotificationsLoading />;
+  }
   if (!notification) {
     return <EmptyState icon="inbox" title="Aviso no disponible" subtitle="Es posible que se haya retirado." />;
   }
@@ -44,7 +54,7 @@ export function AnnouncementDetailScreen({ id }: AnnouncementDetailScreenProps):
         <Text style={[styles.from, { color: theme.colors.text2, fontFamily: theme.fonts.ui }]}>{kind.label}</Text>
         <Text style={[styles.sep, { color: theme.colors.text3 }]}>·</Text>
         <Text style={[styles.time, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>
-          {formatWhen(notification.createdAt)}
+          {formatNotificationDate(notification.createdAt, "long")}
         </Text>
       </View>
 
@@ -55,15 +65,6 @@ export function AnnouncementDetailScreen({ id }: AnnouncementDetailScreenProps):
       </Card>
     </>
   );
-}
-
-/** Long es-MX date label from an RFC3339 instant; empty on an unparseable date. */
-function formatWhen(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-  return date.toLocaleDateString("es-MX", { day: "numeric", month: "long" });
 }
 
 const styles = StyleSheet.create({
