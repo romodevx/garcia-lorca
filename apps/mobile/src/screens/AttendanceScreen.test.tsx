@@ -76,4 +76,19 @@ describe("AttendanceScreen (real family attendance)", () => {
     await waitFor(() => expect(screen.getByText("No pudimos cargar la asistencia")).toBeTruthy());
     expect(screen.getByRole("button", { name: "Reintentar" })).toBeTruthy();
   });
+
+  it("shows the error state (not a fabricated empty state) when the child bootstrap fails (bug_005)", async () => {
+    const fetchMock = jest.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/family/students")) return { ok: false, status: 500, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => ({ notifications: [] }) };
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await renderWithProviders(<AttendanceScreen />);
+
+    await waitFor(() => expect(screen.getByText("No pudimos cargar la asistencia")).toBeTruthy());
+    expect(screen.getByRole("button", { name: "Reintentar" })).toBeTruthy();
+    expect(screen.queryByText("Sin registros de asistencia")).toBeNull();
+  });
 });

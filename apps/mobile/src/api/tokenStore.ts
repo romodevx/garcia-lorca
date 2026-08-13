@@ -25,6 +25,23 @@ const REFRESH_KEY = "gl.auth.refreshToken";
 
 let cache: TokenPair | null = null;
 
+// Monotonic session-generation counter. Every sign-out (clearTokens) advances it,
+// giving in-flight work a way to detect that the session it began under has since
+// been cleared. This is the guard that stops a refresh() resolving AFTER a logout
+// from resurrecting the just-cleared session (bug_009). Saving tokens does NOT
+// advance it: a fresh login inherits the post-logout generation, so a stale
+// in-flight refresh still sees a changed generation and drops its result.
+let sessionGeneration = 0;
+
+/**
+ * The current session generation. Callers sample it before starting async work
+ * and re-read it after, dropping the result if it advanced (a sign-out happened
+ * in between).
+ */
+export function currentSessionGeneration(): number {
+  return sessionGeneration;
+}
+
 /** The current access token, or null when signed out. Synchronous by design. */
 export function getAccessToken(): string | null {
   return cache?.accessToken ?? null;
@@ -65,5 +82,9 @@ export async function loadTokens(): Promise<TokenPair | null> {
 /** Clears the token pair from memory and durable storage (sign out). */
 export async function clearTokens(): Promise<void> {
   cache = null;
+  // Advance the generation FIRST so any concurrent in-flight refresh that resolves
+  // after this point observes the change synchronously, even before the durable
+  // multiRemove settles (the multiSet/multiRemove race in bug_009).
+  sessionGeneration += 1;
   await AsyncStorage.multiRemove([ACCESS_KEY, REFRESH_KEY]);
 }

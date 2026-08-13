@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { login, refresh } from "./auth";
+import { login, logout, refresh } from "./auth";
 import { onSessionLost } from "./session";
 import { clearTokens, getAccessToken, getRefreshToken, saveTokens } from "./tokenStore";
 
@@ -99,6 +99,27 @@ describe("auth.refresh", () => {
     // that must force navigation back to Login.
     expect(onLost).toHaveBeenCalledTimes(1);
     unsubscribe();
+  });
+
+  it("drops the refreshed pair when a logout happens mid-refresh (no resurrection)", async () => {
+    await saveTokens({ accessToken: "stale", refreshToken: "r1" });
+    // Hold the network response open so we can log out while the POST is in flight.
+    let resolveFetch: (r: Response) => void = () => undefined;
+    const fetchPromise = new Promise<Response>((resolve) => {
+      resolveFetch = resolve;
+    });
+    globalThis.fetch = jest.fn().mockReturnValue(fetchPromise) as unknown as typeof fetch;
+
+    const refreshPromise = refresh();
+    // The guardian signs out before the refresh resolves.
+    await logout();
+    // Only now does the gateway answer 200 with a fresh pair.
+    resolveFetch(response(200, { accessToken: "a2", refreshToken: "r2", expiresIn: 900 }));
+
+    // The in-flight refresh must NOT resurrect the just-cleared session.
+    expect(await refreshPromise).toBe(false);
+    expect(getAccessToken()).toBeNull();
+    expect(getRefreshToken()).toBeNull();
   });
 
   it("does NOT emit session-lost when there is no refresh token (pre-login)", async () => {

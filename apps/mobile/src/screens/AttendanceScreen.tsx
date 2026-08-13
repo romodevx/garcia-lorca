@@ -50,12 +50,27 @@ function tally(records: FamilyAttendanceRecord[]): { faltas: number; retardos: n
  * a fabricated figure would mislead. Handles loading/error/empty.
  */
 export function AttendanceScreen(): ReactElement {
-  const { selectedChildId, childLoading } = useAppState();
+  const { selectedChildId, childLoading, childError, refreshChildren } = useAppState();
   const { data, loading, error, reload } = useChildAttendance(selectedChildId);
   const theme = useTheme();
 
   const records = data ?? [];
   const stats = useMemo(() => tally(records), [records]);
+
+  // No child to read against (child bootstrap failed): show the error, never the
+  // fabricated "Sin registros" empty state (bug_005).
+  if (childError) {
+    return (
+      <>
+        <ScreenTitle>Asistencia</ScreenTitle>
+        <AsyncErrorState
+          title="No pudimos cargar la asistencia"
+          subtitle="Revisa tu conexión e inténtalo de nuevo."
+          onRetry={refreshChildren}
+        />
+      </>
+    );
+  }
 
   if (error) {
     return (

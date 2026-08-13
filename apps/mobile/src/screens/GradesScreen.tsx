@@ -10,10 +10,13 @@ import { AsyncErrorState, AsyncLoading } from "./AsyncStates";
 
 /** One subject's entries collapsed into a display row. */
 interface SubjectGroup {
+  subjectId: string;
   subjectName: string;
   average: number;
   termCount: number;
 }
+
+const MISSING_SUBJECT_NAME = "Materia sin nombre";
 
 function numericBadge(colors: ThemeColors, g: number): { bg: string; fg: string } {
   if (g >= 9) return { bg: colors.okBg, fg: colors.ok };
@@ -30,21 +33,44 @@ function mean(values: number[]): number {
   return values.length === 0 ? 0 : values.reduce((a, b) => a + b, 0) / values.length;
 }
 
-/** Collapses the flat entries into one row per subject, preserving first-seen order. */
+/** Accumulator for one subject while grouping (values + best-known display name). */
+interface SubjectAccumulator {
+  values: number[];
+  name: string;
+}
+
+/**
+ * Collapses the flat entries into one row per subject, preserving first-seen order.
+ * Grouping keys on the STABLE `subjectId`, never the display name: the gateway
+ * degrades `subjectName` to "" on a config outage (a tested contract), so keying
+ * on the name would merge every subject into one bogus row (bug_004). The display
+ * name is derived separately and upgraded from a later entry for the same subject
+ * that carries a non-empty name.
+ */
 function groupBySubject(entries: FamilyGradeEntry[]): SubjectGroup[] {
   const order: string[] = [];
-  const byName = new Map<string, number[]>();
+  const bySubject = new Map<string, SubjectAccumulator>();
   for (const e of entries) {
-    const name = e.subjectName || "Materia";
-    if (!byName.has(name)) {
-      byName.set(name, []);
-      order.push(name);
+    let acc = bySubject.get(e.subjectId);
+    if (!acc) {
+      acc = { values: [], name: "" };
+      bySubject.set(e.subjectId, acc);
+      order.push(e.subjectId);
     }
-    byName.get(name)?.push(e.value);
+    acc.values.push(e.value);
+    // Keep the first non-empty name we see for this subject (upgrade the label).
+    if (!acc.name && e.subjectName) {
+      acc.name = e.subjectName;
+    }
   }
-  return order.map((name) => {
-    const values = byName.get(name) ?? [];
-    return { subjectName: name, average: mean(values), termCount: values.length };
+  return order.map((subjectId) => {
+    const acc = bySubject.get(subjectId) ?? { values: [], name: "" };
+    return {
+      subjectId,
+      subjectName: acc.name || MISSING_SUBJECT_NAME,
+      average: mean(acc.values),
+      termCount: acc.values.length,
+    };
   });
 }
 
@@ -61,7 +87,7 @@ function groupBySubject(entries: FamilyGradeEntry[]): SubjectGroup[] {
  * boleta once the grades service exposes it.
  */
 export function GradesScreen(): ReactElement {
-  const { child, selectedChildId, childLoading } = useAppState();
+  const { child, selectedChildId, childLoading, childError, refreshChildren } = useAppState();
   const view = toChildView(child);
   const { data, loading, error, reload } = useChildGrades(selectedChildId);
   const theme = useTheme();
@@ -69,6 +95,21 @@ export function GradesScreen(): ReactElement {
   const entries = data ?? [];
   const subjects = useMemo(() => groupBySubject(entries), [entries]);
   const average = useMemo(() => mean(entries.map((e) => e.value)), [entries]);
+
+  // No child to read against (child bootstrap failed): show the error, never the
+  // fabricated "Aún no hay calificaciones" empty state (bug_005).
+  if (childError) {
+    return (
+      <>
+        <ScreenTitle>Calificaciones</ScreenTitle>
+        <AsyncErrorState
+          title="No pudimos cargar las calificaciones"
+          subtitle="Revisa tu conexión e inténtalo de nuevo."
+          onRetry={refreshChildren}
+        />
+      </>
+    );
+  }
 
   // Qualitative levels (kínder) have no backend representation — never fabricate.
   if (view.qualitative) {
@@ -147,7 +188,7 @@ export function GradesScreen(): ReactElement {
         {subjects.map((s, i) => {
           const badge = numericBadge(theme.colors, s.average);
           return (
-            <ListRow key={s.subjectName} divider={i > 0} accessibilityLabel={s.subjectName}>
+            <ListRow key={s.subjectId} divider={i > 0} accessibilityLabel={s.subjectName}>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.subjTitle, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{s.subjectName}</Text>
                 <Text style={[styles.subjSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>

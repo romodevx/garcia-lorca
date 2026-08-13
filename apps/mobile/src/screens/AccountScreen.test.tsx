@@ -81,4 +81,22 @@ describe("AccountScreen (real family account)", () => {
     await waitFor(() => expect(screen.getByText("No pudimos cargar tu cuenta")).toBeTruthy());
     expect(screen.getByRole("button", { name: "Reintentar" })).toBeTruthy();
   });
+
+  it("shows the error state (not a fabricated settled balance) when the child bootstrap fails (bug_005)", async () => {
+    // The child list load fails, so childError is true and selectedChildId is null.
+    // The screen must surface the error, never the fabricated "Al corriente / $0.00".
+    const fetchMock = jest.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/family/students")) return { ok: false, status: 500, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => ({ notifications: [] }) };
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await renderWithProviders(<AccountScreen />);
+
+    await waitFor(() => expect(screen.getByText("No pudimos cargar tu cuenta")).toBeTruthy());
+    expect(screen.getByRole("button", { name: "Reintentar" })).toBeTruthy();
+    expect(screen.queryByText("Al corriente")).toBeNull();
+    expect(screen.queryByText("$0.00")).toBeNull();
+  });
 });

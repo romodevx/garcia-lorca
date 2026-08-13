@@ -1,7 +1,12 @@
 import { apiUrl } from "./config";
 import { ApiError } from "./errors";
 import { emitSessionLost } from "./session";
-import { clearTokens, getRefreshToken, saveTokens } from "./tokenStore";
+import {
+  clearTokens,
+  currentSessionGeneration,
+  getRefreshToken,
+  saveTokens,
+} from "./tokenStore";
 
 /**
  * Mobile auth against the gateway's Bearer posture (`/api/v1/auth/mobile/*`). Both
@@ -60,6 +65,9 @@ export async function refresh(): Promise<boolean> {
   if (!refreshToken) {
     return false;
   }
+  // Sample the session generation BEFORE the network round-trip so we can detect a
+  // logout that lands while the POST is in flight (bug_009).
+  const startGeneration = currentSessionGeneration();
   const res = await fetch(apiUrl("/api/v1/auth/mobile/refresh"), {
     method: "POST",
     headers: JSON_HEADERS,
@@ -75,6 +83,12 @@ export async function refresh(): Promise<boolean> {
     return false;
   }
   const data = (await res.json()) as MobileRefreshResponse;
+  // A cleared session must never be resurrected by an in-flight refresh: if a
+  // logout advanced the generation while we were awaiting the network, drop the
+  // freshly-minted pair instead of persisting it over the cleared session.
+  if (currentSessionGeneration() !== startGeneration) {
+    return false;
+  }
   await saveTokens({ accessToken: data.accessToken, refreshToken: data.refreshToken });
   return true;
 }

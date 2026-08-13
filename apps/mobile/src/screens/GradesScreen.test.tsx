@@ -51,6 +51,37 @@ describe("GradesScreen (real family grades)", () => {
     expect(screen.getByLabelText("Promedio").props.children).toBe("8.7");
   });
 
+  it("keeps subjects distinct by id when the catalog degrades names to empty (bug_004)", async () => {
+    // A config outage makes the gateway return subjectName === "" for every entry
+    // (a tested contract). Grouping by name would collapse them all into one bogus
+    // "Materia" row; grouping by the stable subjectId must keep them distinct.
+    mockFetch(primaria, [
+      { id: "g1", subjectId: "sub-a", termId: "t1", teacherId: "te1", value: 10, subjectName: "", termName: "1er periodo" },
+      { id: "g2", subjectId: "sub-b", termId: "t1", teacherId: "te1", value: 6, subjectName: "", termName: "1er periodo" },
+      { id: "g3", subjectId: "sub-c", termId: "t1", teacherId: "te1", value: 8, subjectName: "", termName: "1er periodo" },
+    ]);
+
+    await renderWithProviders(<GradesScreen />);
+
+    // Three distinct subjects → three rows, each its own average, NOT one merged row.
+    await waitFor(() => expect(screen.getByText("3 materias")).toBeTruthy());
+    const nameless = screen.getAllByText("Materia sin nombre");
+    expect(nameless).toHaveLength(3);
+  });
+
+  it("upgrades the fallback label when a later entry for the same subject carries a name", async () => {
+    mockFetch(primaria, [
+      { id: "g1", subjectId: "sub-a", termId: "t1", teacherId: "te1", value: 9, subjectName: "", termName: "1er periodo" },
+      { id: "g2", subjectId: "sub-a", termId: "t2", teacherId: "te1", value: 9, subjectName: "Español", termName: "2do periodo" },
+    ]);
+
+    await renderWithProviders(<GradesScreen />);
+
+    await waitFor(() => expect(screen.getByText("1 materias")).toBeTruthy());
+    expect(screen.getByText("Español")).toBeTruthy();
+    expect(screen.queryByText("Materia sin nombre")).toBeNull();
+  });
+
   it("shows the qualitative-pending state for a kínder child (no numeric grades fabricated)", async () => {
     mockFetch(kinder, [entry("Pensamiento", "1er periodo", 10, "g1")]);
 
@@ -76,5 +107,20 @@ describe("GradesScreen (real family grades)", () => {
 
     await waitFor(() => expect(screen.getByText("No pudimos cargar las calificaciones")).toBeTruthy());
     expect(screen.getByRole("button", { name: "Reintentar" })).toBeTruthy();
+  });
+
+  it("shows the error state (not a fabricated empty state) when the child bootstrap fails (bug_005)", async () => {
+    const fetchMock = jest.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/family/students")) return { ok: false, status: 500, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => ({ notifications: [] }) };
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await renderWithProviders(<GradesScreen />);
+
+    await waitFor(() => expect(screen.getByText("No pudimos cargar las calificaciones")).toBeTruthy());
+    expect(screen.getByRole("button", { name: "Reintentar" })).toBeTruthy();
+    expect(screen.queryByText("Aún no hay calificaciones")).toBeNull();
   });
 });

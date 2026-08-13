@@ -8,6 +8,7 @@ import { toChildView } from "../state/childView";
 import { useChildAccount, useChildAttendance } from "../state/familyData";
 import { useTheme } from "../theme";
 import { Card, Chip, SectionLabel, TintIcon } from "../ui";
+import { AsyncErrorState } from "./AsyncStates";
 import { pesos } from "./format";
 
 const STATUS_LABEL: Record<FamilyAttendanceStatus, string> = {
@@ -34,10 +35,23 @@ function todayIso(): string {
  */
 export function HomeScreen(): ReactElement {
   const theme = useTheme();
-  const { child, selectedChildId, unreadCount } = useAppState();
+  const { child, selectedChildId, unreadCount, childError, refreshChildren } = useAppState();
   const view = toChildView(child);
   const account = useChildAccount(selectedChildId);
   const attendance = useChildAttendance(selectedChildId);
+
+  // The child bootstrap failed: there is no child to summarize. Surface the error
+  // (retrying the child load) instead of the neutral "Sin novedades / —" cards,
+  // which would read as a fabricated healthy state (bug_005).
+  if (childError) {
+    return (
+      <AsyncErrorState
+        title="No pudimos cargar la información"
+        subtitle="Revisa tu conexión e inténtalo de nuevo."
+        onRetry={refreshChildren}
+      />
+    );
+  }
 
   const todayRecord = (attendance.data ?? []).find((r) => r.date === todayIso());
   const balanceCents = account.data?.totalBalanceCents ?? null;

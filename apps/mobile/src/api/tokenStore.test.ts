@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   clearTokens,
+  currentSessionGeneration,
   getAccessToken,
   getRefreshToken,
   loadTokens,
@@ -31,5 +32,18 @@ describe("tokenStore", () => {
     await clearTokens();
     expect(getAccessToken()).toBeNull();
     expect(await loadTokens()).toBeNull();
+  });
+
+  it("advances the session generation on every clear (but not on save)", async () => {
+    const before = currentSessionGeneration();
+    // Saving a pair must NOT advance the generation — only a sign-out does.
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+    expect(currentSessionGeneration()).toBe(before);
+
+    await clearTokens();
+    expect(currentSessionGeneration()).toBe(before + 1);
+
+    await clearTokens();
+    expect(currentSessionGeneration()).toBe(before + 2);
   });
 });

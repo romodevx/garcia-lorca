@@ -14,10 +14,11 @@ import { formatNotificationDate, isUnread, notificationKind } from "./notificati
  * `GET /api/v1/family/notifications` via AppState. It handles the four states a
  * network-backed list must: loading, error (with retry), empty, and populated.
  *
- * "Marcar leídos" and tapping a row update SESSION-LOCAL read state only — the
- * guardian role cannot reach the comms mark-read endpoint (see
- * notificationView.isUnread). Read state resets on relaunch until a
- * guardian-reachable acknowledge route exists.
+ * "Marcar leídos" and tapping a row PERSIST the acknowledgement: markRead calls the
+ * guardian-reachable `POST /api/v1/family/notifications/{id}/read` route, so the
+ * server stamps `readAt` and the read state survives a relaunch (see
+ * notificationView.isUnread). `readIds` is only an optimistic bridge that reflects
+ * the acknowledgement immediately until the next refetch returns the stamped list.
  */
 export function AnnouncementsScreen(): ReactElement {
   const {

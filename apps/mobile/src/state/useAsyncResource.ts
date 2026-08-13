@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
  * The state of one asynchronously-loaded resource: its data (null until loaded),
@@ -27,7 +27,16 @@ export function useAsyncResource<T>(load: (() => Promise<T>) | null): AsyncResou
   const [loading, setLoading] = useState<boolean>(load !== null);
   const [error, setError] = useState(false);
 
+  // Monotonic generation shared by the effect and the manual reload. Every new
+  // load (a childId switch, a logout, a retry) and every effect cleanup advances
+  // it, so a superseded in-flight call — captured against an older generation —
+  // can detect it is stale and skip its state writes. Without this a slow prior
+  // response could overwrite fresher data (bug_001).
+  const generationRef = useRef(0);
+
   const reload = useCallback(async () => {
+    const generation = (generationRef.current += 1);
+    const isCurrent = (): boolean => generation === generationRef.current;
     if (load === null) {
       setData(null);
       setLoading(false);
@@ -37,16 +46,28 @@ export function useAsyncResource<T>(load: (() => Promise<T>) | null): AsyncResou
     setLoading(true);
     setError(false);
     try {
-      setData(await load());
+      const result = await load();
+      if (isCurrent()) {
+        setData(result);
+      }
     } catch {
-      setError(true);
+      if (isCurrent()) {
+        setError(true);
+      }
     } finally {
-      setLoading(false);
+      if (isCurrent()) {
+        setLoading(false);
+      }
     }
   }, [load]);
 
   useEffect(() => {
     void reload();
+    // Cancel the in-flight load on cleanup (load changed / unmount) so its late
+    // response is discarded rather than applied over the next load's state.
+    return () => {
+      generationRef.current += 1;
+    };
   }, [reload]);
 
   return { data, loading, error, reload };

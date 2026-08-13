@@ -69,9 +69,25 @@ function toLedger(account: FamilyAccount): Movement[] {
  * so the screen never fabricates a settled state. Handles loading/error/empty.
  */
 export function AccountScreen(): ReactElement {
-  const { selectedChildId, childLoading } = useAppState();
+  const { selectedChildId, childLoading, childError, refreshChildren } = useAppState();
   const { data, loading, error, reload } = useChildAccount(selectedChildId);
   const theme = useTheme();
+
+  // The child bootstrap failed, so there is no child to read against. Surface that
+  // error (retrying the child load) instead of falling through to a fabricated
+  // settled "$0.00 / Al corriente" state (bug_005).
+  if (childError) {
+    return (
+      <>
+        <ScreenTitle>Cuenta</ScreenTitle>
+        <AsyncErrorState
+          title="No pudimos cargar tu cuenta"
+          subtitle="Revisa tu conexión e inténtalo de nuevo."
+          onRetry={refreshChildren}
+        />
+      </>
+    );
+  }
 
   if (error) {
     return (
