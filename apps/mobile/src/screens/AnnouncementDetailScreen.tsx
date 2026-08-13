@@ -1,49 +1,68 @@
 import { type ReactElement } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { announcements, catMeta, type ChipKind } from "../data/mock";
 import { Icon } from "../icons";
+import { useAppState } from "../state/AppState";
 import { useTheme } from "../theme";
-import { Button, Card, Chip, EmptyState, TintIcon } from "../ui";
+import { Card, Chip, EmptyState, TintIcon } from "../ui";
+import { NotificationsErrorState } from "./NotificationsErrorState";
+import { NotificationsLoading } from "./NotificationsLoading";
+import { formatNotificationDate, notificationKind } from "./notificationView";
 
 export interface AnnouncementDetailScreenProps {
-  id: number;
+  /** The notification id (string) from the family inbox. */
+  id: string;
 }
 
-/** Full announcement view: category chip, title, author/time, body, CTA. */
+/**
+ * Full notification view: kind chip, title, sender/date, body. It reads the
+ * notification from the already-loaded family inbox in AppState (there is no
+ * single-notification family endpoint), so a deep link that outlives the loaded
+ * list falls back to a friendly empty state.
+ */
 export function AnnouncementDetailScreen({ id }: AnnouncementDetailScreenProps): ReactElement {
   const theme = useTheme();
-  const ann = announcements.find((a) => a.id === id);
+  const { notifications, notificationsLoading, notificationsError, refreshNotifications } = useAppState();
+  const notification = notifications.find((n) => n.id === id);
 
-  if (!ann) {
+  // Order matters: a failed or in-flight load must never read as a retracted
+  // notice. Branch on the inbox's load state before the "not found" empty state.
+  if (notificationsError) {
+    return <NotificationsErrorState onRetry={refreshNotifications} />;
+  }
+  if (notificationsLoading && !notification) {
+    return <NotificationsLoading />;
+  }
+  if (!notification) {
     return <EmptyState icon="inbox" title="Aviso no disponible" subtitle="Es posible que se haya retirado." />;
   }
 
-  const cat = catMeta[ann.cat];
-  const chipKind: ChipKind = cat.tint === "purple" ? "purple" : cat.tint === "forest" ? "ok" : "warn";
+  const kind = notificationKind(notification.type);
 
   return (
     <>
       <View style={styles.head}>
-        <TintIcon name={cat.icon} tint={cat.tint} size={46} icon={24} />
-        <Chip kind={chipKind}>{cat.label}</Chip>
+        <TintIcon name={kind.icon} tint={kind.tint} size={46} icon={24} />
+        <Chip kind={kind.chip}>{kind.label}</Chip>
       </View>
 
-      <Text style={[styles.title, { color: theme.colors.text, fontFamily: theme.fonts.display }]}>{ann.title}</Text>
+      <Text style={[styles.title, { color: theme.colors.text, fontFamily: theme.fonts.display }]}>
+        {notification.title}
+      </Text>
 
       <View style={styles.meta}>
         <Icon name="user" size={15} color={theme.colors.text2} />
-        <Text style={[styles.from, { color: theme.colors.text2, fontFamily: theme.fonts.ui }]}>{ann.from}</Text>
+        <Text style={[styles.from, { color: theme.colors.text2, fontFamily: theme.fonts.ui }]}>{kind.label}</Text>
         <Text style={[styles.sep, { color: theme.colors.text3 }]}>·</Text>
-        <Text style={[styles.time, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{ann.time}</Text>
+        <Text style={[styles.time, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>
+          {formatNotificationDate(notification.createdAt, "long")}
+        </Text>
       </View>
 
       <Card padded style={{ marginTop: 16 }}>
-        <Text style={[styles.body, { color: theme.colors.text2, fontFamily: theme.fonts.uiRegular }]}>{ann.body}</Text>
+        <Text style={[styles.body, { color: theme.colors.text2, fontFamily: theme.fonts.uiRegular }]}>
+          {notification.body}
+        </Text>
       </Card>
-
-      {ann.cat === "evento" ? (
-        <Button label="Confirmar asistencia" icon="check" style={{ marginTop: 16 }} />
-      ) : null}
     </>
   );
 }

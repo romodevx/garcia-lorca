@@ -17,6 +17,12 @@ export interface MeResult {
   userId: string;
   email: string;
   permissions: string[];
+  // The gateway enriches /me from iam when available: the real display name and
+  // the caller's primary role name. Both are optional — a directory outage
+  // degrades /me to the token principal, so the chrome must tolerate their
+  // absence (it falls back to a name derived from the email).
+  displayName?: string;
+  role?: string;
 }
 
 function url(baseURL: string, path: string): string {

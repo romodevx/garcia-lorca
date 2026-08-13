@@ -198,6 +198,86 @@ func TestMeWithoutPrincipalIs401(t *testing.T) {
 	}
 }
 
+// fakeDirectory is the iam directory surface Me uses to enrich the response with
+// the caller's real display name + role name. GetUser and ListRoles are each
+// independently stubbable so a test can force either to fail and assert /me
+// degrades gracefully instead of erroring.
+type fakeDirectory struct {
+	user     client.User
+	userErr  error
+	roles    []client.Role
+	rolesErr error
+	gotID    string
+}
+
+func (f *fakeDirectory) GetUser(_ context.Context, id string) (client.User, error) {
+	f.gotID = id
+	return f.user, f.userErr
+}
+
+func (f *fakeDirectory) ListRoles(_ context.Context) ([]client.Role, error) {
+	return f.roles, f.rolesErr
+}
+
+// With a directory wired, /me carries the caller's real display name and the name
+// of their first role (resolved id → name) alongside the token principal.
+func TestMeEnrichesDisplayNameAndRole(t *testing.T) {
+	dir := &fakeDirectory{
+		user:  client.User{ID: "u1", DisplayName: "Director", RoleIDs: []string{"r-owner"}},
+		roles: []client.Role{{ID: "r-owner", Name: "owner"}, {ID: "r-teacher", Name: "teacher"}},
+	}
+	h := handler.NewAuthHandler(&fakeLogin{}, handler.WithDirectory(dir))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	ctx := middleware.WithPrincipal(req.Context(), middleware.Principal{UserID: "u1", Email: "director@garcialorca.edu.mx", Permissions: []string{"students:read"}})
+	h.Me(rec, req.WithContext(ctx))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200", rec.Code)
+	}
+	if dir.gotID != "u1" {
+		t.Errorf("GetUser id = %q, want the principal's user id u1", dir.gotID)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body["displayName"] != "Director" {
+		t.Errorf("displayName = %v, want Director", body["displayName"])
+	}
+	if body["role"] != "owner" {
+		t.Errorf("role = %v, want owner", body["role"])
+	}
+	// The base principal fields survive the enrichment.
+	if body["userId"] != "u1" || body["email"] != "director@garcialorca.edu.mx" {
+		t.Errorf("base principal fields lost: %v", body)
+	}
+}
+
+// The directory lookup failing must NOT fail /me — it drives session restore, so
+// it degrades to the base token principal with an empty displayName/role.
+func TestMeEnrichmentFailureStillReturns200(t *testing.T) {
+	dir := &fakeDirectory{userErr: connect.NewError(connect.CodeUnavailable, errString("iam down"))}
+	h := handler.NewAuthHandler(&fakeLogin{}, handler.WithDirectory(dir))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	ctx := middleware.WithPrincipal(req.Context(), middleware.Principal{UserID: "u1", Email: "ana@garcialorca.mx", Permissions: []string{"students:read"}})
+	h.Me(rec, req.WithContext(ctx))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200 despite enrichment failure", rec.Code)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body["email"] != "ana@garcialorca.mx" {
+		t.Errorf("email = %v, want ana@garcialorca.mx", body["email"])
+	}
+	if _, ok := body["permissions"]; !ok {
+		t.Errorf("permissions missing on degraded response: %v", body)
+	}
+	if dn, present := body["displayName"]; present && dn != "" {
+		t.Errorf("displayName = %v, want empty/absent on enrichment failure", dn)
+	}
+}
+
 func TestLoginResponseIncludesMustChange(t *testing.T) {
 	h := handler.NewAuthHandler(&fakeLogin{res: client.LoginResult{AccessToken: "a", RefreshToken: "r", ExpiresIn: 900, MustChangePassword: true}})
 	rec := httptest.NewRecorder()

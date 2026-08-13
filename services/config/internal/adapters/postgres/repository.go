@@ -178,12 +178,19 @@ func (r *Repository) GetGradeLevel(ctx context.Context, id string) (domain.Grade
 	return out, nil
 }
 
-// ListGradeLevels returns the grade levels of levelID, ordered by ordinal.
+// ListGradeLevels returns the grade levels of levelID, ordered by ordinal. An
+// empty levelID means "no filter": every grade level in the tenant (still
+// RLS-scoped by withTenant). Guarding the predicate is required because level_id
+// is a uuid column and binding "" to it is a 22P02 error, not an empty result.
 func (r *Repository) ListGradeLevels(ctx context.Context, levelID string) ([]domain.GradeLevel, error) {
 	var out []domain.GradeLevel
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		q := tx
+		if levelID != "" {
+			q = q.Where("level_id = ?", levelID)
+		}
 		var rows []gradeLevelModel
-		if err := tx.Where("level_id = ?", levelID).Order("ordinal").Find(&rows).Error; err != nil {
+		if err := q.Order("ordinal").Find(&rows).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "listing grade levels", err)
 		}
 		out = make([]domain.GradeLevel, 0, len(rows))
@@ -231,12 +238,19 @@ func (r *Repository) GetSubject(ctx context.Context, id string) (domain.Subject,
 	return out, nil
 }
 
-// ListSubjects returns the subjects of gradeLevelID, ordered by name.
+// ListSubjects returns the subjects of gradeLevelID, ordered by name. An empty
+// gradeLevelID means "no filter": every subject in the tenant (still RLS-scoped
+// by withTenant). Guarding the predicate is required because grade_level_id is a
+// uuid column and binding "" to it is a 22P02 error, not an empty result.
 func (r *Repository) ListSubjects(ctx context.Context, gradeLevelID string) ([]domain.Subject, error) {
 	var out []domain.Subject
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		q := tx
+		if gradeLevelID != "" {
+			q = q.Where("grade_level_id = ?", gradeLevelID)
+		}
 		var rows []subjectModel
-		if err := tx.Where("grade_level_id = ?", gradeLevelID).Order("name").Find(&rows).Error; err != nil {
+		if err := q.Order("name").Find(&rows).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "listing subjects", err)
 		}
 		out = make([]domain.Subject, 0, len(rows))
@@ -284,12 +298,17 @@ func (r *Repository) GetTerm(ctx context.Context, id string) (domain.Term, error
 	return out, nil
 }
 
-// ListTerms returns the terms of cycleID, optionally narrowed to levelID
-// ("" = all levels of the cycle), ordered by ordinal.
+// ListTerms returns terms filtered by any of cycleID and levelID
+// ("" = do not filter on that field), ordered by ordinal. Both are uuid
+// columns, so each predicate must be guarded: binding "" would be a 22P02
+// error rather than a no-op. Results stay RLS-scoped by withTenant.
 func (r *Repository) ListTerms(ctx context.Context, cycleID string, levelID string) ([]domain.Term, error) {
 	var out []domain.Term
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		q := tx.Where("cycle_id = ?", cycleID)
+		q := tx.Model(&termModel{})
+		if cycleID != "" {
+			q = q.Where("cycle_id = ?", cycleID)
+		}
 		if levelID != "" {
 			q = q.Where("level_id = ?", levelID)
 		}

@@ -125,6 +125,60 @@ describe("AppShell navigation flow", () => {
     expect(screen.queryByRole("button", { name: "Entrar al sistema" })).not.toBeInTheDocument();
   });
 
+  it("shows the gateway's real display name (not the email-derived one), with the email as the subtitle", async () => {
+    // The boot restore hits /me and lands on the dashboard. When the gateway
+    // returns a real displayName, the top bar must show THAT as the bold name —
+    // not a name derived from the email local-part — and never the old static
+    // "Dirección" owner identity. The email stays the identity subtitle.
+    mockMe.mockResolvedValueOnce({
+      userId: "u9",
+      email: "director@garcialorca.edu.mx",
+      permissions: ["grades:read"],
+      displayName: "Patricia Lugo",
+      role: "owner",
+    });
+    render(
+      <Providers flags={{}}>
+        <AppShell />
+      </Providers>
+    );
+
+    expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
+    // The real email is the identity subtitle.
+    expect(screen.getByText("director@garcialorca.edu.mx")).toBeInTheDocument();
+    // The gateway's real display name wins the bold name line.
+    expect(screen.getByText("Patricia Lugo")).toBeInTheDocument();
+    // NOT the email-derived name ("Director"), and NOT the old static owner row.
+    expect(screen.queryByText("Director")).not.toBeInTheDocument();
+    expect(screen.queryByText("Dirección")).not.toBeInTheDocument();
+    // The dashboard greeting uses only the FIRST name token, not the full display
+    // name — "Patricia Lugo" greets as "Patricia", never "Patricia Lugo 🌱".
+    expect(screen.getByRole("heading", { name: /,\s*Patricia\s*🌱/ })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Patricia Lugo\s*🌱/ })).not.toBeInTheDocument();
+  });
+
+  it("falls back to the email-derived name when the gateway returns no display name", async () => {
+    // A directory outage degrades /me to the token principal (no displayName), so
+    // the chrome falls back to a name derived from the email local-part.
+    mockMe.mockResolvedValueOnce({
+      userId: "u9",
+      email: "patricia.lugo@garcialorca.edu.mx",
+      permissions: ["grades:read"],
+    });
+    render(
+      <Providers flags={{}}>
+        <AppShell />
+      </Providers>
+    );
+
+    expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
+    // Real email is the subtitle.
+    expect(screen.getByText("patricia.lugo@garcialorca.edu.mx")).toBeInTheDocument();
+    // Name derived from the email local-part (dots → spaces, title-cased).
+    expect(screen.getByText("Patricia Lugo")).toBeInTheDocument();
+    expect(screen.queryByText("Dirección")).not.toBeInTheDocument();
+  });
+
   it("restores via the refresh cookie when the access cookie has expired (me → refresh → me → dashboard)", async () => {
     // /me fails (access cookie expired) but the 24h refresh cookie mints a fresh
     // one; boot must recover instead of dropping to login.

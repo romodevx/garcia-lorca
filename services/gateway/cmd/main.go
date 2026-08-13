@@ -184,7 +184,9 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux := http.NewServeMux()
 	handler.NewHealthHandler(iamHealth).Register(mux)
 
-	authH := handler.NewAuthHandler(authClient)
+	// Reuse the same iam client that backs the admin /users and /roles routes to
+	// enrich /me with the caller's real display name + role name.
+	authH := handler.NewAuthHandler(authClient, handler.WithDirectory(authClient))
 	requireAuth := middleware.RequireAuth(authClient)
 	// requireAuthChanged is the DEFAULT building block for authenticated routes:
 	// it authenticates AND enforces the forced password rotation, so a new route
@@ -367,24 +369,58 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/comms/notifications", commsRead(commsH.ListNotifications))
 	mux.Handle("POST /api/v1/comms/notifications/{id}/read", commsWrite(commsH.MarkRead))
 
-	// Phase 9b family surface: the guardian's own children's news, composed at the
-	// edge from the students guardian links + the comms inbox. It needs family:read.
+	// Phase 9b family surface: the guardian's own children's news, account,
+	// profile, grades and attendance, composed at the edge from the students
+	// guardian links + each owning module. Every route needs family:read.
 	//
-	// The route READS FROM TWO MODULES, so it is guarded on both (the guards nest):
-	// module_comms OFF or module_students OFF ⇒ 404. Guarding only comms would leave
-	// a route that still calls students ListStudentsForGuardian, so disabling
-	// students would break it instead of hiding it — a disabled module must be
-	// invisible and removable without taking others down with it.
+	// A composite route READS FROM SEVERAL MODULES, so it is guarded on each one it
+	// touches (the guards nest): any one disabled ⇒ 404. Guarding only some would
+	// leave a route that still calls a disabled module's service, so disabling that
+	// module would break the route instead of hiding it — a disabled module must be
+	// invisible and removable without taking others down with it. Every by-child
+	// route also composes module_students, because the ownership check itself reads
+	// the guardian links from the students service.
 	//
-	// The child set is derived from the PRINCIPAL, so the caller can only ever read
-	// their own children — no request field can widen the scope. That is why this
-	// route, unlike /comms/notifications, is safe to grant to a parent.
-	familyH := handler.NewFamilyHandler(studentsClient, commsClient)
-	familyRead := func(h http.HandlerFunc) http.Handler {
-		return guard.Protect("comms", guard.Protect("students",
-			requireAuthChanged(middleware.RequirePermission("family:read")(http.HandlerFunc(h)))))
+	// The child set is derived from the PRINCIPAL, and every {studentId} in a path
+	// is checked against it (assertLinkedChild → 404 for a non-linked id), so the
+	// caller can only ever read their own children — no request field can widen the
+	// scope. That is why these routes, unlike the admin /comms and /finance ones,
+	// are safe to grant to a parent.
+	// configClient (the same one backing the /config/* routes) is reused here only
+	// to resolve grade subject/term ids to names for the family grades screen.
+	familyH := handler.NewFamilyHandler(studentsClient, commsClient, financeClient, gradesClient, attendanceClient, configClient)
+	// familyReadModules composes family:read behind the given module guards, in
+	// addition to module_students which every family route needs for the ownership
+	// check. The guards nest right-to-left, so the outermost listed module is
+	// evaluated first; order does not affect the result (all must be ON).
+	familyReadModules := func(modules []string, h http.HandlerFunc) http.Handler {
+		wrapped := requireAuthChanged(middleware.RequirePermission("family:read")(http.HandlerFunc(h)))
+		for _, module := range modules {
+			wrapped = guard.Protect(module, wrapped)
+		}
+		return wrapped
 	}
-	mux.Handle("GET /api/v1/family/notifications", familyRead(familyH.Notifications))
+	// /family/notifications and the guardian mark-read compose comms (the inbox and
+	// the acknowledgement) with students (the guardian links).
+	familyComms := func(h http.HandlerFunc) http.Handler {
+		return familyReadModules([]string{"comms", "students"}, h)
+	}
+	mux.Handle("GET /api/v1/family/notifications", familyComms(familyH.Notifications))
+	mux.Handle("POST /api/v1/family/notifications/{notificationId}/read", familyComms(familyH.MarkNotificationRead))
+	// The students list is scoped by the principal alone (no {studentId}), so it
+	// needs only module_students — the app calls it first to discover its children.
+	mux.Handle("GET /api/v1/family/students",
+		familyReadModules([]string{"students"}, familyH.ListStudents))
+	// The by-child reads each compose module_students (ownership) with the module
+	// that owns the data.
+	mux.Handle("GET /api/v1/family/students/{studentId}/account",
+		familyReadModules([]string{"finance", "students"}, familyH.Account))
+	mux.Handle("GET /api/v1/family/students/{studentId}/profile",
+		familyReadModules([]string{"students"}, familyH.Profile))
+	mux.Handle("GET /api/v1/family/students/{studentId}/grades",
+		familyReadModules([]string{"grades", "students"}, familyH.Grades))
+	mux.Handle("GET /api/v1/family/students/{studentId}/attendance",
+		familyReadModules([]string{"attendance", "students"}, familyH.Attendance))
 
 	// Phase 6 iam admin (user/role CRUD): flag-guarded (module_iam), authenticated
 	// + rotation-enforced, permission-gated. User routes need users:read (GET) /

@@ -1,37 +1,22 @@
 import { type ReactElement } from "react";
-import { StyleSheet, Text, View } from "react-native";
-import { events } from "../data/mock";
-import { tintColors, useTheme } from "../theme";
-import { Card, ListRow } from "../ui";
+import { Card, EmptyState } from "../ui";
 
-/** Eventos: the full agenda list (reached from the Inicio "próximo evento" tile). */
+/**
+ * Eventos: the agenda list (reached from the Inicio "próximo evento" tile).
+ *
+ * The comms agenda has no backend yet (deferred to Phase 9d). The mock `events`
+ * in `mock.ts` are intentionally NOT rendered — showing fake agenda items would
+ * mislead the parent. A neutral "Próximamente" state stands in until the real
+ * endpoint lands.
+ */
 export function EventsScreen(): ReactElement {
-  const theme = useTheme();
   return (
     <Card>
-      {events.map((ev, i) => {
-        const { bg, fg } = tintColors(theme.colors, ev.tint);
-        return (
-          <ListRow key={ev.title} divider={i > 0}>
-            <View style={[styles.badge, { backgroundColor: bg }]}>
-              <Text style={[styles.day, { color: fg, fontFamily: theme.fonts.display }]}>{ev.day}</Text>
-              <Text style={[styles.mon, { color: fg }]}>{ev.mon}</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.title, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{ev.title}</Text>
-              <Text style={[styles.sub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{ev.sub}</Text>
-            </View>
-          </ListRow>
-        );
-      })}
+      <EmptyState
+        icon="calendar"
+        title="Próximamente"
+        subtitle="La agenda de eventos estará disponible pronto."
+      />
     </Card>
   );
 }
-
-const styles = StyleSheet.create({
-  badge: { width: 50, height: 50, borderRadius: 15, alignItems: "center", justifyContent: "center" },
-  day: { fontSize: 19, fontWeight: "700", lineHeight: 21 },
-  mon: { fontSize: 9, fontWeight: "800", opacity: 0.8, marginTop: 1 },
-  title: { fontSize: 16, fontWeight: "800" },
-  sub: { fontSize: 12.5, fontWeight: "600", marginTop: 3 },
-});

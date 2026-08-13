@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactElement } from "re
 import { useFlag } from "@garcia-lorca/ui/flags";
 import { CommandPaletteHost } from "./command/CommandPaletteHost";
 import { TopBar } from "./_design/TopBar";
-import { MODULES, USERS, type ModuleDef, type Role } from "./_design/data";
+import { MODULES, USERS, type ModuleDef, type Role, type UserProfile } from "./_design/data";
 import { Dashboard } from "./_screens/Dashboard";
 import { AttendanceScreen } from "./_screens/attendance/AttendanceScreen";
 import { FinanceScreen } from "./_screens/finance/FinanceScreen";
@@ -16,7 +16,7 @@ import { Login } from "./_screens/Login";
 import { ChangePassword } from "./_screens/ChangePassword";
 import { ModulePlaceholder } from "./_screens/ModulePlaceholder";
 import { useTheme } from "./theme/ThemeProvider";
-import { login as apiLogin, changePassword as apiChangePassword, logout as apiLogout, me as apiMe, refresh as apiRefresh } from "./auth/api";
+import { login as apiLogin, changePassword as apiChangePassword, logout as apiLogout, me as apiMe, refresh as apiRefresh, type MeResult } from "./auth/api";
 
 type View =
   | { screen: "login" }
@@ -33,9 +33,42 @@ type View =
 // Gateway base URL for the browser (public env; matches compose NEXT_PUBLIC_API_URL).
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
-// Single-user demo chrome: the dashboard/top-bar identity is fixed to the owner
-// until per-user profiles land. Login is now credential-driven (no role picker).
+// Chrome fallback: color + the institution subtitle used until a real per-user
+// profile lands. The identity itself now comes from the authenticated principal
+// (`me()`), not this static row.
 const CHROME_ROLE: Role = "admin";
+
+// Derive a display name from the email local-part (dots/underscores/hyphens →
+// spaces, title-cased): "patricia.lugo@…" → "Patricia Lugo". Used as the fallback
+// when the gateway has no real display name to return (directory outage or an
+// identity with none set).
+function displayName(email: string): string {
+  const local = email.split("@")[0] ?? email;
+  return local
+    .split(/[._-]+/)
+    .filter((part) => part.length > 0)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+// Build the top-bar identity from the real principal, falling back to the static
+// chrome row only before `me()` resolves (or if it fails). The bold name line
+// prefers the gateway's real display name; when absent it falls back to a name
+// derived from the email local-part. The real email stays the identity subtitle,
+// and the name drives the greeting + avatar initials.
+function chromeUser(principal: MeResult | undefined): UserProfile {
+  const base = USERS[CHROME_ROLE];
+  if (principal === undefined) {
+    return base;
+  }
+  const name = principal.displayName && principal.displayName.length > 0
+    ? principal.displayName
+    : displayName(principal.email);
+  // `name` is the full identity (bold line + avatar); `first` is only the greeting
+  // token, so take the leading word — "Patricia Lugo Reyes" greets as "Patricia".
+  const first = name.split(/\s+/)[0] || name;
+  return { name, first, role: principal.email, color: base.color };
+}
 
 /**
  * Navigation shell — real auth flow: login → (forced change-password, if the
@@ -47,6 +80,7 @@ const CHROME_ROLE: Role = "admin";
 export function AppShell(): ReactElement {
   const { theme, toggle } = useTheme();
   const [view, setView] = useState<View>({ screen: "login" });
+  const [principal, setPrincipal] = useState<MeResult | undefined>(undefined);
   const [authError, setAuthError] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -79,8 +113,11 @@ export function AppShell(): ReactElement {
     let active = true;
     const restore = async (): Promise<void> => {
       try {
-        await apiMe(API_URL);
-        if (active) setView({ screen: "dashboard" });
+        const m = await apiMe(API_URL);
+        if (active) {
+          setPrincipal(m);
+          setView({ screen: "dashboard" });
+        }
         return;
       } catch {
         // The short-lived access cookie may have expired; fall through to the
@@ -88,8 +125,11 @@ export function AppShell(): ReactElement {
       }
       try {
         await apiRefresh(API_URL);
-        await apiMe(API_URL);
-        if (active) setView({ screen: "dashboard" });
+        const m = await apiMe(API_URL);
+        if (active) {
+          setPrincipal(m);
+          setView({ screen: "dashboard" });
+        }
       } catch {
         // No restorable session — stay on login.
       }
@@ -105,7 +145,19 @@ export function AppShell(): ReactElement {
     setAuthError(undefined);
     try {
       const res = await apiLogin(API_URL, email, password);
-      setView(res.mustChangePassword ? { screen: "changePassword" } : { screen: "dashboard" });
+      if (res.mustChangePassword) {
+        setView({ screen: "changePassword" });
+        return;
+      }
+      // Login only returns session metadata; fetch the principal so the chrome
+      // shows the real identity. A failure here is non-fatal — the static
+      // fallback chrome renders and the dashboard still opens.
+      try {
+        setPrincipal(await apiMe(API_URL));
+      } catch {
+        // Keep the fallback chrome; the session is still valid.
+      }
+      setView({ screen: "dashboard" });
     } catch {
       setAuthError("Correo o contraseña incorrectos.");
     } finally {
@@ -129,12 +181,18 @@ export function AppShell(): ReactElement {
     // gl_access / gl_refresh cookies, must_change cleared), so we just land on
     // the dashboard — no extra refresh round-trip, and the user is never trapped
     // re-typing a password that no longer exists.
+    try {
+      setPrincipal(await apiMe(API_URL));
+    } catch {
+      // Keep the fallback chrome; the fresh session is still valid.
+    }
     setView({ screen: "dashboard" });
     setPending(false);
   };
 
   const logout = (): void => {
     void apiLogout(API_URL).catch(() => {});
+    setPrincipal(undefined);
     setView({ screen: "login" });
   };
   const home = (): void => setView({ screen: "dashboard" });
@@ -177,7 +235,7 @@ export function AppShell(): ReactElement {
     [open],
   );
 
-  const user = USERS[CHROME_ROLE];
+  const user = chromeUser(principal);
   const activeModule: ModuleDef | undefined = useMemo(
     () => (view.screen === "module" ? MODULES.find((m) => m.id === view.moduleId) : undefined),
     [view]

@@ -1695,6 +1695,254 @@ func TestFamilyNotificationsWithFamilyReadAggregatesChildren200(t *testing.T) {
 	}
 }
 
+// --- Phase 9b B6.x self-scoped by-child family reads. Each composite route is
+// guarded on module_students (the ownership check reads the guardian links) plus
+// the module that owns the data, needs family:read, and answers 404 for a
+// {studentId} outside the caller's own children. The stub guardian is linked to
+// stu-1 and stu-2, so stu-1 is owned and stu-999 is not.
+
+// The students list is scoped by the principal alone and needs only
+// module_students; the stub guardian is linked to stu-1 and stu-2.
+func TestFamilyListStudentsOwnedReturnsChildren200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/students", "family-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out struct {
+		Students []map[string]any `json:"students"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Students) != 2 {
+		t.Fatalf("students = %d, want 2 (the guardian's linked children)", len(out.Students))
+	}
+	seen := map[string]bool{}
+	for _, s := range out.Students {
+		seen[s["id"].(string)] = true
+	}
+	if !seen["stu-1"] || !seen["stu-2"] {
+		t.Errorf("students = %v, want both stu-1 and stu-2", out.Students)
+	}
+}
+
+func TestFamilyListStudentsDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_students OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/students", "family-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestFamilyListStudentsNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/students", "", "")
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+// students:read is not family:read: an admin student reader is refused the
+// guardian-scoped list.
+func TestFamilyListStudentsWithoutFamilyReadIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/students", "student-reader", "")
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+// familyAccountModulesOn is the flag set the account route needs.
+var familyAccountModulesOn = map[string]bool{"module_finance": true, "module_students": true}
+
+func TestFamilyAccountDisabledFinanceModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true}) // module_finance OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/students/stu-1/account", "family-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestFamilyAccountDisabledStudentsModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_finance": true}) // module_students OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/students/stu-1/account", "family-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestFamilyAccountNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, familyAccountModulesOn)
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/students/stu-1/account", "", "")
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+func TestFamilyAccountWithoutFamilyReadIs403(t *testing.T) {
+	gw := newTestGateway(t, familyAccountModulesOn)
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/students/stu-1/account", "finance-reader", "")
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+func TestFamilyAccountOwnedChildReturnsStatement200(t *testing.T) {
+	gw := newTestGateway(t, familyAccountModulesOn)
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/students/stu-1/account", "family-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out struct {
+		Charges           []map[string]any `json:"charges"`
+		TotalBalanceCents int64            `json:"totalBalanceCents"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Charges) != 1 || out.Charges[0]["studentId"] != "stu-1" {
+		t.Errorf("charges = %v, want the owned child's statement", out.Charges)
+	}
+}
+
+// The core security property: a guardian guessing another family's child id gets
+// 404, not the statement — and not 403, which would confirm the id exists.
+func TestFamilyAccountUnlinkedChildIs404(t *testing.T) {
+	gw := newTestGateway(t, familyAccountModulesOn)
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/students/stu-999/account", "family-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (no cross-family read, no existence leak)", res.StatusCode)
+	}
+}
+
+func TestFamilyProfileOwnedChildReturns200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/students/stu-1/profile", "family-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.ID != "stu-1" {
+		t.Errorf("profile id = %q, want stu-1", out.ID)
+	}
+}
+
+func TestFamilyProfileUnlinkedChildIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/students/stu-999/profile", "family-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+var familyGradesModulesOn = map[string]bool{"module_grades": true, "module_students": true}
+
+func TestFamilyGradesOwnedChildReturns200(t *testing.T) {
+	gw := newTestGateway(t, familyGradesModulesOn)
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/students/stu-1/grades?termId=trm-1", "family-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out struct {
+		GradeEntries []map[string]any `json:"gradeEntries"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The stub resolves stu-1 to enr-1 and returns one entry for it, proving the
+	// student id was translated to the enrollment id the grades service keys on.
+	if len(out.GradeEntries) != 1 || out.GradeEntries[0]["enrollmentId"] != "enr-1" {
+		t.Errorf("gradeEntries = %v, want one keyed on enr-1", out.GradeEntries)
+	}
+}
+
+func TestFamilyGradesDisabledGradesModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true}) // module_grades OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/students/stu-1/grades", "family-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestFamilyGradesUnlinkedChildIs404(t *testing.T) {
+	gw := newTestGateway(t, familyGradesModulesOn)
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/students/stu-999/grades", "family-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+var familyAttendanceModulesOn = map[string]bool{"module_attendance": true, "module_students": true}
+
+func TestFamilyAttendanceOwnedChildReturns200(t *testing.T) {
+	gw := newTestGateway(t, familyAttendanceModulesOn)
+	res := doGateway(t, gw, http.MethodGet,
+		"/api/v1/family/students/stu-1/attendance?from=2026-09-01&to=2026-09-30", "family-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out struct {
+		Records []map[string]any `json:"records"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Records) != 1 || out.Records[0]["enrollmentId"] != "enr-1" {
+		t.Errorf("records = %v, want one keyed on enr-1", out.Records)
+	}
+}
+
+func TestFamilyAttendanceUnlinkedChildIs404(t *testing.T) {
+	gw := newTestGateway(t, familyAttendanceModulesOn)
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/students/stu-999/attendance", "family-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+// B6.5 guardian mark-read: family:read (NOT comms:write) marks one of the
+// caller's OWN children's notifications. The stub inbox yields ntf-1 for each
+// linked child, so ntf-1 is owned and a guessed id is not.
+func TestFamilyMarkReadOwnedNotification200(t *testing.T) {
+	gw := newTestGateway(t, familyModulesOn)
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/family/notifications/ntf-1/read", "family-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out struct {
+		ID     string `json:"id"`
+		ReadAt string `json:"readAt"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.ID != "ntf-1" || out.ReadAt == "" {
+		t.Errorf("marked = %+v, want ntf-1 with a readAt stamp", out)
+	}
+}
+
+func TestFamilyMarkReadOtherFamilysNotificationIs404(t *testing.T) {
+	gw := newTestGateway(t, familyModulesOn)
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/family/notifications/ntf-x/read", "family-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (a guardian cannot mark another family's notification)", res.StatusCode)
+	}
+}
+
+func TestFamilyMarkReadWithoutFamilyReadIs403(t *testing.T) {
+	gw := newTestGateway(t, familyModulesOn)
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/family/notifications/ntf-1/read", "comms-reader", "")
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (comms:read is not family:read)", res.StatusCode)
+	}
+}
+
 // --- Phase 9b mobile auth: unauthenticated like the web login, tokens in the
 // BODY (no cookie jar in React Native), and MobileLogin behind the SAME per-IP
 // login limiter as the web login.

@@ -38,6 +38,8 @@ const (
 	dbName        = "garcia_lorca"
 	tenantA       = "11111111-1111-1111-1111-111111111111"
 	tenantB       = "22222222-2222-2222-2222-222222222222"
+	tenantC       = "33333333-3333-3333-3333-333333333333"
+	tenantD       = "44444444-4444-4444-4444-444444444444"
 	migrationsDir = "../../../../../migrations/config"
 )
 
@@ -257,6 +259,211 @@ func TestCatalogRoundTrip(t *testing.T) {
 	}
 	if groups, err := repo.ListGroups(ctx, cycleID, gradeID); err != nil || len(groups) != 1 {
 		t.Fatalf("ListGroups(cycle, grade): len=%d err=%v", len(groups), err)
+	}
+}
+
+// TestListGradeLevelsEmptyFilterReturnsAll proves the empty-filter contract on
+// ListGradeLevels (empty levelID = no filter). Before the fix,
+// ListGradeLevels(ctx, "") ran `level_id = ”` against a uuid column and
+// Postgres rejected it (22P02) — reachable from the gateway grade-levels
+// handler, which forwards a missing levelId param verbatim. A dedicated tenant
+// keeps the counts deterministic.
+func TestListGradeLevelsEmptyFilterReturnsAll(t *testing.T) {
+	ctx := context.Background()
+	repo := pgadapter.NewRepository(appDB(t), tenantD)
+
+	const (
+		levelID1 = "d0d00001-0000-0000-0000-000000000001"
+		levelID2 = "d0d00001-0000-0000-0000-000000000002"
+		gradeA   = "d0d00002-0000-0000-0000-000000000001"
+		gradeB   = "d0d00002-0000-0000-0000-000000000002"
+		gradeC   = "d0d00002-0000-0000-0000-000000000003"
+	)
+
+	levels := []struct{ id, name string }{
+		{levelID1, "Primaria-D"},
+		{levelID2, "Secundaria-D"},
+	}
+	for _, l := range levels {
+		level, err := domain.NewLevel(l.id, tenantD, l.name, "", domain.GranularityTerm)
+		if err != nil {
+			t.Fatalf("NewLevel(%s): %v", l.name, err)
+		}
+		if err := repo.CreateLevel(ctx, level); err != nil {
+			t.Fatalf("CreateLevel(%s): %v", l.name, err)
+		}
+	}
+	// Two grade levels under level 1, one under level 2 → three across the tenant.
+	seed := []struct {
+		id, levelID, name string
+		ordinal           int
+	}{
+		{gradeA, levelID1, "Grade-A", 1},
+		{gradeB, levelID1, "Grade-B", 2},
+		{gradeC, levelID2, "Grade-C", 1},
+	}
+	for _, g := range seed {
+		grade, err := domain.NewGradeLevel(g.id, tenantD, g.levelID, g.name, g.ordinal)
+		if err != nil {
+			t.Fatalf("NewGradeLevel(%s): %v", g.id, err)
+		}
+		if err := repo.CreateGradeLevel(ctx, grade); err != nil {
+			t.Fatalf("CreateGradeLevel(%s): %v", g.id, err)
+		}
+	}
+
+	// Empty filter returns ALL grade levels across levels (the red case).
+	all, err := repo.ListGradeLevels(ctx, "")
+	if err != nil {
+		t.Fatalf("ListGradeLevels(ctx, \"\") must not error (22P02 regression): %v", err)
+	}
+	if len(all) != 3 {
+		t.Errorf("ListGradeLevels(ctx, \"\"): got %d, want 3", len(all))
+	}
+
+	// A concrete level still narrows to that level only.
+	one, err := repo.ListGradeLevels(ctx, levelID1)
+	if err != nil {
+		t.Fatalf("ListGradeLevels(ctx, levelID1): %v", err)
+	}
+	if len(one) != 2 {
+		t.Errorf("ListGradeLevels(ctx, levelID1): got %d, want 2", len(one))
+	}
+}
+
+// TestListSubjectsEmptyFilterReturnsAll proves the empty-filter contract on
+// ListSubjects (empty gradeLevelID = no filter). Before the fix,
+// ListSubjects(ctx, "") ran `grade_level_id = ”` against a uuid column and
+// Postgres rejected it (22P02). A dedicated tenant keeps the counts
+// deterministic regardless of what other tests seed.
+func TestListSubjectsEmptyFilterReturnsAll(t *testing.T) {
+	ctx := context.Background()
+	repo := pgadapter.NewRepository(appDB(t), tenantC)
+
+	const (
+		levelID  = "c0c00001-0000-0000-0000-000000000001"
+		gradeID1 = "c0c00002-0000-0000-0000-000000000001"
+		gradeID2 = "c0c00002-0000-0000-0000-000000000002"
+		subjA    = "c0c00003-0000-0000-0000-000000000001"
+		subjB    = "c0c00003-0000-0000-0000-000000000002"
+		subjC    = "c0c00003-0000-0000-0000-000000000003"
+	)
+
+	level, err := domain.NewLevel(levelID, tenantC, "Primaria-C", "", domain.GranularityTerm)
+	if err != nil {
+		t.Fatalf("NewLevel: %v", err)
+	}
+	if err := repo.CreateLevel(ctx, level); err != nil {
+		t.Fatalf("CreateLevel: %v", err)
+	}
+	for id, ord := range map[string]int{gradeID1: 1, gradeID2: 2} {
+		grade, err := domain.NewGradeLevel(id, tenantC, levelID, fmt.Sprintf("Grade-%d", ord), ord)
+		if err != nil {
+			t.Fatalf("NewGradeLevel: %v", err)
+		}
+		if err := repo.CreateGradeLevel(ctx, grade); err != nil {
+			t.Fatalf("CreateGradeLevel: %v", err)
+		}
+	}
+	// Two subjects under grade 1, one under grade 2 → three across the tenant.
+	seed := []struct{ id, gradeID, name string }{
+		{subjA, gradeID1, "Matematicas"},
+		{subjB, gradeID1, "Espanol"},
+		{subjC, gradeID2, "Ciencias"},
+	}
+	for _, s := range seed {
+		subject, err := domain.NewSubject(s.id, tenantC, s.gradeID, s.name)
+		if err != nil {
+			t.Fatalf("NewSubject(%s): %v", s.name, err)
+		}
+		if err := repo.CreateSubject(ctx, subject); err != nil {
+			t.Fatalf("CreateSubject(%s): %v", s.name, err)
+		}
+	}
+
+	// Empty filter returns ALL subjects across grade levels (the red case).
+	all, err := repo.ListSubjects(ctx, "")
+	if err != nil {
+		t.Fatalf("ListSubjects(ctx, \"\") must not error (22P02 regression): %v", err)
+	}
+	if len(all) != 3 {
+		t.Errorf("ListSubjects(ctx, \"\"): got %d, want 3", len(all))
+	}
+
+	// A concrete grade level still narrows to that level only.
+	one, err := repo.ListSubjects(ctx, gradeID1)
+	if err != nil {
+		t.Fatalf("ListSubjects(ctx, gradeID1): %v", err)
+	}
+	if len(one) != 2 {
+		t.Errorf("ListSubjects(ctx, gradeID1): got %d, want 2", len(one))
+	}
+}
+
+// TestListTermsEmptyFiltersReturnAll proves the empty-filter contract on
+// ListTerms (empty cycleID / levelID = no filter). Before the fix,
+// ListTerms(ctx, "", "") ran `cycle_id = ”` against a uuid column (22P02).
+func TestListTermsEmptyFiltersReturnAll(t *testing.T) {
+	ctx := context.Background()
+	repo := pgadapter.NewRepository(appDB(t), tenantC)
+
+	const (
+		cycleID = "c1c10001-0000-0000-0000-000000000001"
+		levelID = "c1c10002-0000-0000-0000-000000000001"
+		termT1  = "c1c10003-0000-0000-0000-000000000001"
+		termT2  = "c1c10003-0000-0000-0000-000000000002"
+	)
+
+	cycle, err := domain.NewCycle(cycleID, tenantC, "Cycle-Terms-C", domain.CycleStatusActive, startsOn, endsOn)
+	if err != nil {
+		t.Fatalf("NewCycle: %v", err)
+	}
+	if err := repo.CreateCycle(ctx, cycle); err != nil {
+		t.Fatalf("CreateCycle: %v", err)
+	}
+	level, err := domain.NewLevel(levelID, tenantC, "Level-Terms-C", "", domain.GranularityTerm)
+	if err != nil {
+		t.Fatalf("NewLevel: %v", err)
+	}
+	if err := repo.CreateLevel(ctx, level); err != nil {
+		t.Fatalf("CreateLevel: %v", err)
+	}
+	for id, ord := range map[string]int{termT1: 1, termT2: 2} {
+		term, err := domain.NewTerm(id, tenantC, cycleID, levelID, fmt.Sprintf("T%d", ord), ord, startsOn, endsOn)
+		if err != nil {
+			t.Fatalf("NewTerm: %v", err)
+		}
+		if err := repo.CreateTerm(ctx, term); err != nil {
+			t.Fatalf("CreateTerm: %v", err)
+		}
+	}
+
+	// Fully-open filter returns all terms of the tenant (the red case: empty
+	// cycle_id against a uuid column).
+	all, err := repo.ListTerms(ctx, "", "")
+	if err != nil {
+		t.Fatalf("ListTerms(ctx, \"\", \"\") must not error (22P02 regression): %v", err)
+	}
+	if len(all) != 2 {
+		t.Errorf("ListTerms(ctx, \"\", \"\"): got %d, want 2", len(all))
+	}
+
+	// Partial filter: cycle only (level open) still works and finds both.
+	byCycle, err := repo.ListTerms(ctx, cycleID, "")
+	if err != nil || len(byCycle) != 2 {
+		t.Fatalf("ListTerms(ctx, cycleID, \"\"): len=%d err=%v", len(byCycle), err)
+	}
+
+	// Partial filter: level only (cycle open) also works and finds both.
+	byLevel, err := repo.ListTerms(ctx, "", levelID)
+	if err != nil || len(byLevel) != 2 {
+		t.Fatalf("ListTerms(ctx, \"\", levelID): len=%d err=%v", len(byLevel), err)
+	}
+
+	// Both filters set narrows to the cycle+level intersection.
+	both, err := repo.ListTerms(ctx, cycleID, levelID)
+	if err != nil || len(both) != 2 {
+		t.Fatalf("ListTerms(ctx, cycleID, levelID): len=%d err=%v", len(both), err)
 	}
 }
 
