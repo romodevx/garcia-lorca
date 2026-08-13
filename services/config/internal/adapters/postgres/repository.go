@@ -178,12 +178,19 @@ func (r *Repository) GetGradeLevel(ctx context.Context, id string) (domain.Grade
 	return out, nil
 }
 
-// ListGradeLevels returns the grade levels of levelID, ordered by ordinal.
+// ListGradeLevels returns the grade levels of levelID, ordered by ordinal. An
+// empty levelID means "no filter": every grade level in the tenant (still
+// RLS-scoped by withTenant). Guarding the predicate is required because level_id
+// is a uuid column and binding "" to it is a 22P02 error, not an empty result.
 func (r *Repository) ListGradeLevels(ctx context.Context, levelID string) ([]domain.GradeLevel, error) {
 	var out []domain.GradeLevel
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		q := tx
+		if levelID != "" {
+			q = q.Where("level_id = ?", levelID)
+		}
 		var rows []gradeLevelModel
-		if err := tx.Where("level_id = ?", levelID).Order("ordinal").Find(&rows).Error; err != nil {
+		if err := q.Order("ordinal").Find(&rows).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "listing grade levels", err)
 		}
 		out = make([]domain.GradeLevel, 0, len(rows))

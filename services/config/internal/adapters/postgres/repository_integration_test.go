@@ -39,6 +39,7 @@ const (
 	tenantA       = "11111111-1111-1111-1111-111111111111"
 	tenantB       = "22222222-2222-2222-2222-222222222222"
 	tenantC       = "33333333-3333-3333-3333-333333333333"
+	tenantD       = "44444444-4444-4444-4444-444444444444"
 	migrationsDir = "../../../../../migrations/config"
 )
 
@@ -258,6 +259,75 @@ func TestCatalogRoundTrip(t *testing.T) {
 	}
 	if groups, err := repo.ListGroups(ctx, cycleID, gradeID); err != nil || len(groups) != 1 {
 		t.Fatalf("ListGroups(cycle, grade): len=%d err=%v", len(groups), err)
+	}
+}
+
+// TestListGradeLevelsEmptyFilterReturnsAll proves the empty-filter contract on
+// ListGradeLevels (empty levelID = no filter). Before the fix,
+// ListGradeLevels(ctx, "") ran `level_id = ”` against a uuid column and
+// Postgres rejected it (22P02) — reachable from the gateway grade-levels
+// handler, which forwards a missing levelId param verbatim. A dedicated tenant
+// keeps the counts deterministic.
+func TestListGradeLevelsEmptyFilterReturnsAll(t *testing.T) {
+	ctx := context.Background()
+	repo := pgadapter.NewRepository(appDB(t), tenantD)
+
+	const (
+		levelID1 = "d0d00001-0000-0000-0000-000000000001"
+		levelID2 = "d0d00001-0000-0000-0000-000000000002"
+		gradeA   = "d0d00002-0000-0000-0000-000000000001"
+		gradeB   = "d0d00002-0000-0000-0000-000000000002"
+		gradeC   = "d0d00002-0000-0000-0000-000000000003"
+	)
+
+	levels := []struct{ id, name string }{
+		{levelID1, "Primaria-D"},
+		{levelID2, "Secundaria-D"},
+	}
+	for _, l := range levels {
+		level, err := domain.NewLevel(l.id, tenantD, l.name, "", domain.GranularityTerm)
+		if err != nil {
+			t.Fatalf("NewLevel(%s): %v", l.name, err)
+		}
+		if err := repo.CreateLevel(ctx, level); err != nil {
+			t.Fatalf("CreateLevel(%s): %v", l.name, err)
+		}
+	}
+	// Two grade levels under level 1, one under level 2 → three across the tenant.
+	seed := []struct {
+		id, levelID, name string
+		ordinal           int
+	}{
+		{gradeA, levelID1, "Grade-A", 1},
+		{gradeB, levelID1, "Grade-B", 2},
+		{gradeC, levelID2, "Grade-C", 1},
+	}
+	for _, g := range seed {
+		grade, err := domain.NewGradeLevel(g.id, tenantD, g.levelID, g.name, g.ordinal)
+		if err != nil {
+			t.Fatalf("NewGradeLevel(%s): %v", g.id, err)
+		}
+		if err := repo.CreateGradeLevel(ctx, grade); err != nil {
+			t.Fatalf("CreateGradeLevel(%s): %v", g.id, err)
+		}
+	}
+
+	// Empty filter returns ALL grade levels across levels (the red case).
+	all, err := repo.ListGradeLevels(ctx, "")
+	if err != nil {
+		t.Fatalf("ListGradeLevels(ctx, \"\") must not error (22P02 regression): %v", err)
+	}
+	if len(all) != 3 {
+		t.Errorf("ListGradeLevels(ctx, \"\"): got %d, want 3", len(all))
+	}
+
+	// A concrete level still narrows to that level only.
+	one, err := repo.ListGradeLevels(ctx, levelID1)
+	if err != nil {
+		t.Fatalf("ListGradeLevels(ctx, levelID1): %v", err)
+	}
+	if len(one) != 2 {
+		t.Errorf("ListGradeLevels(ctx, levelID1): got %d, want 2", len(one))
 	}
 }
 
