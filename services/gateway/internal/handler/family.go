@@ -77,6 +77,16 @@ type AttendanceRangeReader interface {
 	ListAttendance(ctx context.Context, enrollmentID, from, to string) ([]client.AttendanceRecord, error)
 }
 
+// FamilyCatalogReader reads the academic catalog the family grades screen needs
+// to render: it turns the bare subject/term UUIDs on a grade entry into the
+// human-readable names a parent can read. The Connect ConfigClient (the same one
+// backing the /config/* routes) satisfies it. Passing "" lists the whole
+// tenant-scoped catalog, which is what the id→name maps are built from.
+type FamilyCatalogReader interface {
+	ListSubjects(ctx context.Context, gradeLevelID string) ([]client.SubjectResult, error)
+	ListTerms(ctx context.Context, cycleID, levelID string) ([]client.TermResult, error)
+}
+
 // FamilyStudentsReader is the students surface the family handler consumes: the
 // guardian-link scoping primitive plus the per-child profile/enrollment reads.
 // The Connect StudentsClient satisfies it.
@@ -99,14 +109,16 @@ type FamilyHandler struct {
 	finance    AccountReader
 	grades     GradeEntriesReader
 	attendance AttendanceRangeReader
+	catalog    FamilyCatalogReader
 }
 
 // NewFamilyHandler wires the handler to the students (guardian links + profile),
-// comms (inbox + acknowledgement), finance (account), grades and attendance
-// readers. finance/grades/attendance may be nil for a handler that only serves
-// the notification routes.
-func NewFamilyHandler(students FamilyStudentsReader, comms FamilyCommsReader, finance AccountReader, grades GradeEntriesReader, attendance AttendanceRangeReader) *FamilyHandler {
-	return &FamilyHandler{students: students, comms: comms, finance: finance, grades: grades, attendance: attendance}
+// comms (inbox + acknowledgement), finance (account), grades, attendance and
+// catalog (config, for grade subject/term names) readers. Any of
+// finance/grades/attendance/catalog may be nil for a handler that only serves
+// the routes that do not use them.
+func NewFamilyHandler(students FamilyStudentsReader, comms FamilyCommsReader, finance AccountReader, grades GradeEntriesReader, attendance AttendanceRangeReader, catalog FamilyCatalogReader) *FamilyHandler {
+	return &FamilyHandler{students: students, comms: comms, finance: finance, grades: grades, attendance: attendance, catalog: catalog}
 }
 
 // --- ownership gate --------------------------------------------------------
@@ -403,10 +415,22 @@ func currentEnrollment(enrollments []client.Enrollment) (client.Enrollment, bool
 
 // --- grades ----------------------------------------------------------------
 
+// familyGradeEntryResponse is the family-route-local grade projection: the same
+// entry the admin route returns (bare subject/term ids kept) PLUS the
+// human-readable subject and term names the parent-facing screen needs to
+// render. The admin grades handler is untouched; only this surface enriches.
+// A name that cannot be resolved degrades to "" — never an error.
+type familyGradeEntryResponse struct {
+	gradeEntryResponse
+	SubjectName string `json:"subjectName"`
+	TermName    string `json:"termName"`
+}
+
 // Grades handles GET /api/v1/family/students/{studentId}/grades?termId=… — the
 // child's grade entries, optionally narrowed to one term. Grades are keyed by
 // enrollment, so the child id is resolved to its enrollment(s) first and the
-// entries are aggregated across them.
+// entries are aggregated across them. Each entry is enriched with its subject
+// and term display names, resolved once per request from the config catalog.
 func (h *FamilyHandler) Grades(w http.ResponseWriter, r *http.Request) {
 	p, ok := middleware.PrincipalFrom(r.Context())
 	if !ok {
@@ -423,18 +447,51 @@ func (h *FamilyHandler) Grades(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	termID := r.URL.Query().Get("termId")
-	out := make([]gradeEntryResponse, 0, len(enrollments))
+	var entries []client.GradeEntry
 	for _, e := range enrollments {
-		entries, err := h.grades.ListGradeEntries(r.Context(), e.ID, termID)
+		found, err := h.grades.ListGradeEntries(r.Context(), e.ID, termID)
 		if err != nil {
 			writeConnectError(w, err)
 			return
 		}
-		for _, entry := range entries {
-			out = append(out, toGradeEntryResponse(entry))
-		}
+		entries = append(entries, found...)
+	}
+	// Resolve the id→name maps ONCE, and only when there is something to enrich.
+	// A catalog lookup miss leaves the maps empty, so the names degrade to "" and
+	// the read still succeeds — the same graceful degradation /me applies.
+	subjectNames, termNames := h.catalogNames(r.Context(), len(entries) > 0)
+	out := make([]familyGradeEntryResponse, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, familyGradeEntryResponse{
+			gradeEntryResponse: toGradeEntryResponse(entry),
+			SubjectName:        subjectNames[entry.SubjectID],
+			TermName:           termNames[entry.TermID],
+		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"gradeEntries": out})
+}
+
+// catalogNames builds the subject and term id→name maps used to enrich a grades
+// read. It is best-effort by design: a nil catalog, no entries to enrich, or a
+// failed lookup each yields an empty map, and the caller reads a missing id as
+// "" — a display gap, never a failed read. Both non-nil maps are always
+// returned, so lookups never panic.
+func (h *FamilyHandler) catalogNames(ctx context.Context, enrich bool) (subjects, terms map[string]string) {
+	subjects, terms = map[string]string{}, map[string]string{}
+	if !enrich || h.catalog == nil {
+		return subjects, terms
+	}
+	if subs, err := h.catalog.ListSubjects(ctx, ""); err == nil {
+		for _, s := range subs {
+			subjects[s.ID] = s.Name
+		}
+	}
+	if tms, err := h.catalog.ListTerms(ctx, "", ""); err == nil {
+		for _, t := range tms {
+			terms[t.ID] = t.Name
+		}
+	}
+	return subjects, terms
 }
 
 // --- attendance ------------------------------------------------------------

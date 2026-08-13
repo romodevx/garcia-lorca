@@ -139,10 +139,33 @@ func (f *fakeFamilyAttendance) ListAttendance(_ context.Context, enrollmentID, f
 	return f.byEnrollment[enrollmentID], nil
 }
 
+// fakeFamilyConfig doubles the academic catalog the grades enrichment reads,
+// counting the calls so the "maps built once per request" contract is
+// observable, and able to fail either lookup to prove the read degrades rather
+// than erroring.
+type fakeFamilyConfig struct {
+	subjects        []client.SubjectResult
+	terms           []client.TermResult
+	subjectsErr     error
+	termsErr        error
+	gotListSubjects int
+	gotListTerms    int
+}
+
+func (f *fakeFamilyConfig) ListSubjects(_ context.Context, _ string) ([]client.SubjectResult, error) {
+	f.gotListSubjects++
+	return f.subjects, f.subjectsErr
+}
+
+func (f *fakeFamilyConfig) ListTerms(_ context.Context, _, _ string) ([]client.TermResult, error) {
+	f.gotListTerms++
+	return f.terms, f.termsErr
+}
+
 // newNotifHandler builds a FamilyHandler for the notification-only tests, where
 // the finance/grades/attendance readers are never touched.
 func newNotifHandler(students *fakeFamilyStudents, comms *fakeFamilyComms) *handler.FamilyHandler {
-	return handler.NewFamilyHandler(students, comms, nil, nil, nil)
+	return handler.NewFamilyHandler(students, comms, nil, nil, nil, nil)
 }
 
 // guardianRequest builds an authenticated request against the family surface,
@@ -411,7 +434,7 @@ func TestFamilyListStudentsReturnsLinkedChildrenDeduped(t *testing.T) {
 			"stu-2": {ID: "stu-2", FirstName: "Luis", LastName: "García", Level: "kinder", GradeGroup: "K2"},
 		},
 	}
-	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, nil, nil)
+	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, nil, nil, nil)
 
 	rec := httptest.NewRecorder()
 	h.ListStudents(rec, guardianGET("/api/v1/family/students", "usr-9"))
@@ -449,7 +472,7 @@ func TestFamilyListStudentsReturnsLinkedChildrenDeduped(t *testing.T) {
 
 func TestFamilyListStudentsWithoutChildrenIsEmptyArray(t *testing.T) {
 	students := &fakeFamilyStudents{}
-	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, nil, nil)
+	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, nil, nil, nil)
 
 	rec := httptest.NewRecorder()
 	h.ListStudents(rec, guardianGET("/api/v1/family/students", "usr-lonely"))
@@ -472,7 +495,7 @@ func TestFamilyListStudentsWithoutChildrenIsEmptyArray(t *testing.T) {
 }
 
 func TestFamilyListStudentsWithoutPrincipalIs401(t *testing.T) {
-	h := handler.NewFamilyHandler(&fakeFamilyStudents{}, &fakeFamilyComms{}, nil, nil, nil)
+	h := handler.NewFamilyHandler(&fakeFamilyStudents{}, &fakeFamilyComms{}, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/family/students", nil)
 	h.ListStudents(rec, req)
@@ -502,7 +525,7 @@ func TestFamilyAccountOwnedChildReturnsStatement(t *testing.T) {
 		Payments:          []client.Payment{{ID: "pay-1", ChargeID: "chg-1", AmountCents: 50000, Method: "cash"}},
 		TotalBalanceCents: 100000,
 	}}
-	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, finance, nil, nil)
+	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, finance, nil, nil, nil)
 
 	rec := httptest.NewRecorder()
 	h.Account(rec, guardianRequest(http.MethodGet, "/api/v1/family/students/stu-1/account", "usr-9", "studentId", "stu-1"))
@@ -532,7 +555,7 @@ func TestFamilyAccountOwnedChildReturnsStatement(t *testing.T) {
 func TestFamilyAccountUnlinkedChildIs404AndDoesNotRead(t *testing.T) {
 	students := oneChild() // linked only to stu-1
 	finance := &fakeFamilyFinance{}
-	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, finance, nil, nil)
+	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, finance, nil, nil, nil)
 
 	rec := httptest.NewRecorder()
 	// The guardian guesses another family's child id in the path.
@@ -554,7 +577,7 @@ func TestFamilyProfileOwnedChildReturnsCoreFields(t *testing.T) {
 	students.enrollments = []client.Enrollment{
 		{ID: "enr-1", StudentID: "stu-1", CycleID: "cyc-1", GroupID: "grp-1", TermID: "trm-1", Status: "active"},
 	}
-	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, nil, nil)
+	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, nil, nil, nil)
 
 	rec := httptest.NewRecorder()
 	h.Profile(rec, guardianRequest(http.MethodGet, "/api/v1/family/students/stu-1/profile", "usr-9", "studentId", "stu-1"))
@@ -587,7 +610,7 @@ func TestFamilyProfileOwnedChildReturnsCoreFields(t *testing.T) {
 
 func TestFamilyProfileUnlinkedChildIs404AndDoesNotRead(t *testing.T) {
 	students := oneChild()
-	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, nil, nil)
+	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, nil, nil, nil)
 
 	rec := httptest.NewRecorder()
 	h.Profile(rec, guardianRequest(http.MethodGet, "/api/v1/family/students/stu-999/profile", "usr-9", "studentId", "stu-999"))
@@ -608,7 +631,7 @@ func TestFamilyGradesOwnedChildResolvesEnrollmentThenReads(t *testing.T) {
 	grades := &fakeFamilyGrades{byEnrollment: map[string][]client.GradeEntry{
 		"enr-1": {{ID: "grd-1", EnrollmentID: "enr-1", SubjectID: "sub-1", TermID: "trm-1", Value: 8.5}},
 	}}
-	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, grades, nil)
+	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, grades, nil, nil)
 
 	rec := httptest.NewRecorder()
 	h.Grades(rec, guardianRequest(http.MethodGet, "/api/v1/family/students/stu-1/grades?termId=trm-1", "usr-9", "studentId", "stu-1"))
@@ -648,7 +671,7 @@ func TestFamilyGradesAggregatesAcrossEnrollments(t *testing.T) {
 		"enr-1": {{ID: "grd-1", EnrollmentID: "enr-1"}},
 		"enr-2": {{ID: "grd-2", EnrollmentID: "enr-2"}},
 	}}
-	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, grades, nil)
+	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, grades, nil, nil)
 
 	rec := httptest.NewRecorder()
 	h.Grades(rec, guardianRequest(http.MethodGet, "/api/v1/family/students/stu-1/grades", "usr-9", "studentId", "stu-1"))
@@ -667,10 +690,101 @@ func TestFamilyGradesAggregatesAcrossEnrollments(t *testing.T) {
 	}
 }
 
+// The family grades screen is unrenderable with bare UUIDs, so the family route
+// (only) enriches each entry with the subject and term display names, resolved
+// once per request from the config catalog.
+func TestFamilyGradesEnrichesSubjectAndTermNames(t *testing.T) {
+	students := oneChild()
+	students.enrollments = []client.Enrollment{
+		{ID: "enr-1", StudentID: "stu-1", Status: "active"},
+	}
+	grades := &fakeFamilyGrades{byEnrollment: map[string][]client.GradeEntry{
+		"enr-1": {
+			{ID: "grd-1", EnrollmentID: "enr-1", SubjectID: "sub-1", TermID: "trm-1", Value: 8.5},
+			{ID: "grd-2", EnrollmentID: "enr-1", SubjectID: "sub-2", TermID: "trm-1", Value: 9.0},
+		},
+	}}
+	config := &fakeFamilyConfig{
+		subjects: []client.SubjectResult{
+			{ID: "sub-1", Name: "Matemáticas"},
+			{ID: "sub-2", Name: "Español"},
+		},
+		terms: []client.TermResult{{ID: "trm-1", Name: "Bloque 1"}},
+	}
+	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, grades, nil, config)
+
+	rec := httptest.NewRecorder()
+	h.Grades(rec, guardianRequest(http.MethodGet, "/api/v1/family/students/stu-1/grades", "usr-9", "studentId", "stu-1"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	// The id→name maps are built once, not per entry: two entries, one catalog read.
+	if config.gotListSubjects != 1 || config.gotListTerms != 1 {
+		t.Errorf("catalog reads = subjects %d / terms %d, want exactly 1 each per request", config.gotListSubjects, config.gotListTerms)
+	}
+	var out struct {
+		GradeEntries []map[string]any `json:"gradeEntries"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.GradeEntries) != 2 {
+		t.Fatalf("gradeEntries = %d, want 2", len(out.GradeEntries))
+	}
+	byID := map[string]map[string]any{}
+	for _, e := range out.GradeEntries {
+		byID[e["id"].(string)] = e
+	}
+	// The existing bare-id fields are kept AND the readable names are added.
+	if byID["grd-1"]["subjectId"] != "sub-1" || byID["grd-1"]["subjectName"] != "Matemáticas" ||
+		byID["grd-1"]["termId"] != "trm-1" || byID["grd-1"]["termName"] != "Bloque 1" {
+		t.Errorf("grd-1 = %v, want ids kept and names enriched", byID["grd-1"])
+	}
+	if byID["grd-2"]["subjectName"] != "Español" || byID["grd-2"]["termName"] != "Bloque 1" {
+		t.Errorf("grd-2 = %v, want Español / Bloque 1", byID["grd-2"])
+	}
+}
+
+// A catalog lookup miss must never fail the grades read: the names degrade to
+// empty strings (like the /me enrichment) while the entries still come back 200.
+func TestFamilyGradesConfigErrorDegradesToEmptyNames(t *testing.T) {
+	students := oneChild()
+	students.enrollments = []client.Enrollment{{ID: "enr-1", StudentID: "stu-1", Status: "active"}}
+	grades := &fakeFamilyGrades{byEnrollment: map[string][]client.GradeEntry{
+		"enr-1": {{ID: "grd-1", EnrollmentID: "enr-1", SubjectID: "sub-1", TermID: "trm-1", Value: 8.5}},
+	}}
+	config := &fakeFamilyConfig{
+		subjectsErr: connect.NewError(connect.CodeUnavailable, errString("config down")),
+		termsErr:    connect.NewError(connect.CodeUnavailable, errString("config down")),
+	}
+	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, grades, nil, config)
+
+	rec := httptest.NewRecorder()
+	h.Grades(rec, guardianRequest(http.MethodGet, "/api/v1/family/students/stu-1/grades", "usr-9", "studentId", "stu-1"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 despite the catalog error", rec.Code)
+	}
+	var out struct {
+		GradeEntries []map[string]any `json:"gradeEntries"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.GradeEntries) != 1 {
+		t.Fatalf("gradeEntries = %d, want 1 (the entry still comes back)", len(out.GradeEntries))
+	}
+	e := out.GradeEntries[0]
+	if e["subjectId"] != "sub-1" || e["subjectName"] != "" || e["termName"] != "" {
+		t.Errorf("entry = %v, want ids kept and names degraded to empty strings", e)
+	}
+}
+
 func TestFamilyGradesUnlinkedChildIs404AndDoesNotRead(t *testing.T) {
 	students := oneChild()
 	grades := &fakeFamilyGrades{}
-	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, grades, nil)
+	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, grades, nil, nil)
 
 	rec := httptest.NewRecorder()
 	h.Grades(rec, guardianRequest(http.MethodGet, "/api/v1/family/students/stu-999/grades", "usr-9", "studentId", "stu-999"))
@@ -689,7 +803,7 @@ func TestFamilyAttendanceOwnedChildResolvesEnrollmentThenReads(t *testing.T) {
 	attendance := &fakeFamilyAttendance{byEnrollment: map[string][]client.AttendanceRecord{
 		"enr-1": {{ID: "att-1", EnrollmentID: "enr-1", Date: "2026-09-01", Status: "absent"}},
 	}}
-	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, nil, attendance)
+	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, nil, attendance, nil)
 
 	rec := httptest.NewRecorder()
 	h.Attendance(rec, guardianRequest(http.MethodGet,
@@ -718,7 +832,7 @@ func TestFamilyAttendanceOwnedChildResolvesEnrollmentThenReads(t *testing.T) {
 func TestFamilyAttendanceUnlinkedChildIs404AndDoesNotRead(t *testing.T) {
 	students := oneChild()
 	attendance := &fakeFamilyAttendance{}
-	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, nil, attendance)
+	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, nil, attendance, nil)
 
 	rec := httptest.NewRecorder()
 	h.Attendance(rec, guardianRequest(http.MethodGet, "/api/v1/family/students/stu-999/attendance", "usr-9", "studentId", "stu-999"))
@@ -741,7 +855,7 @@ func TestFamilyMarkReadOwnedNotificationMarks(t *testing.T) {
 		"stu-1": {{ID: "ntf-1", StudentID: "stu-1"}},
 		"stu-2": {{ID: "ntf-2", StudentID: "stu-2"}},
 	}}
-	h := handler.NewFamilyHandler(students, comms, nil, nil, nil)
+	h := handler.NewFamilyHandler(students, comms, nil, nil, nil, nil)
 
 	rec := httptest.NewRecorder()
 	h.MarkNotificationRead(rec, guardianRequest(http.MethodPost,
@@ -767,7 +881,7 @@ func TestFamilyMarkReadOtherFamilysNotificationIs404AndDoesNotMark(t *testing.T)
 	comms := &fakeFamilyComms{byStudent: map[string][]client.Notification{
 		"stu-1": {{ID: "ntf-1", StudentID: "stu-1"}},
 	}}
-	h := handler.NewFamilyHandler(students, comms, nil, nil, nil)
+	h := handler.NewFamilyHandler(students, comms, nil, nil, nil, nil)
 
 	rec := httptest.NewRecorder()
 	// ntf-x belongs to a child this guardian is not linked to.
@@ -783,7 +897,7 @@ func TestFamilyMarkReadOtherFamilysNotificationIs404AndDoesNotMark(t *testing.T)
 }
 
 func TestFamilyByChildRoutesWithoutPrincipalAre401(t *testing.T) {
-	h := handler.NewFamilyHandler(oneChild(), &fakeFamilyComms{}, &fakeFamilyFinance{}, &fakeFamilyGrades{}, &fakeFamilyAttendance{})
+	h := handler.NewFamilyHandler(oneChild(), &fakeFamilyComms{}, &fakeFamilyFinance{}, &fakeFamilyGrades{}, &fakeFamilyAttendance{}, nil)
 	routes := map[string]http.HandlerFunc{
 		"account":    h.Account,
 		"profile":    h.Profile,

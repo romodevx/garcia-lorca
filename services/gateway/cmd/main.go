@@ -386,7 +386,9 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// caller can only ever read their own children — no request field can widen the
 	// scope. That is why these routes, unlike the admin /comms and /finance ones,
 	// are safe to grant to a parent.
-	familyH := handler.NewFamilyHandler(studentsClient, commsClient, financeClient, gradesClient, attendanceClient)
+	// configClient (the same one backing the /config/* routes) is reused here only
+	// to resolve grade subject/term ids to names for the family grades screen.
+	familyH := handler.NewFamilyHandler(studentsClient, commsClient, financeClient, gradesClient, attendanceClient, configClient)
 	// familyReadModules composes family:read behind the given module guards, in
 	// addition to module_students which every family route needs for the ownership
 	// check. The guards nest right-to-left, so the outermost listed module is
