@@ -184,7 +184,9 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux := http.NewServeMux()
 	handler.NewHealthHandler(iamHealth).Register(mux)
 
-	authH := handler.NewAuthHandler(authClient)
+	// Reuse the same iam client that backs the admin /users and /roles routes to
+	// enrich /me with the caller's real display name + role name.
+	authH := handler.NewAuthHandler(authClient, handler.WithDirectory(authClient))
 	requireAuth := middleware.RequireAuth(authClient)
 	// requireAuthChanged is the DEFAULT building block for authenticated routes:
 	// it authenticates AND enforces the forced password rotation, so a new route

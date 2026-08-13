@@ -39,9 +39,9 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 const CHROME_ROLE: Role = "admin";
 
 // Derive a display name from the email local-part (dots/underscores/hyphens →
-// spaces, title-cased): "patricia.lugo@…" → "Patricia Lugo".
-// TODO(pendiente-backend: perfil/display-name — PLAN-mock-data-audit.md #B1):
-// interim until the gateway returns a real display name + role label.
+// spaces, title-cased): "patricia.lugo@…" → "Patricia Lugo". Used as the fallback
+// when the gateway has no real display name to return (directory outage or an
+// identity with none set).
 function displayName(email: string): string {
   const local = email.split("@")[0] ?? email;
   return local
@@ -52,14 +52,18 @@ function displayName(email: string): string {
 }
 
 // Build the top-bar identity from the real principal, falling back to the static
-// chrome row only before `me()` resolves (or if it fails). The real email is the
-// identity subtitle; the derived name drives the greeting + avatar initials.
+// chrome row only before `me()` resolves (or if it fails). The bold name line
+// prefers the gateway's real display name; when absent it falls back to a name
+// derived from the email local-part. The real email stays the identity subtitle,
+// and the name drives the greeting + avatar initials.
 function chromeUser(principal: MeResult | undefined): UserProfile {
   const base = USERS[CHROME_ROLE];
   if (principal === undefined) {
     return base;
   }
-  const name = displayName(principal.email);
+  const name = principal.displayName && principal.displayName.length > 0
+    ? principal.displayName
+    : displayName(principal.email);
   return { name, first: name, role: principal.email, color: base.color };
 }
 
