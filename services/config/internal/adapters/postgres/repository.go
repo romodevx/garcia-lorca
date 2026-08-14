@@ -361,12 +361,17 @@ func (r *Repository) GetGroup(ctx context.Context, id string) (domain.Group, err
 	return out, nil
 }
 
-// ListGroups returns the groups of cycleID, optionally narrowed to gradeLevelID
-// ("" = all grade levels of the cycle), ordered by name.
+// ListGroups returns groups filtered by any of cycleID and gradeLevelID
+// ("" = do not filter on that field), ordered by name. Both are uuid columns,
+// so each predicate must be guarded: binding "" would be a 22P02 error rather
+// than a no-op. Results stay RLS-scoped by withTenant.
 func (r *Repository) ListGroups(ctx context.Context, cycleID string, gradeLevelID string) ([]domain.Group, error) {
 	var out []domain.Group
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		q := tx.Where("cycle_id = ?", cycleID)
+		q := tx.Model(&groupModel{})
+		if cycleID != "" {
+			q = q.Where("cycle_id = ?", cycleID)
+		}
 		if gradeLevelID != "" {
 			q = q.Where("grade_level_id = ?", gradeLevelID)
 		}

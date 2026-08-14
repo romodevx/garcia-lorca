@@ -7,9 +7,17 @@ import { Providers } from "../test-utils";
 import { CommandPaletteHost } from "./CommandPaletteHost";
 import { RECENTS_KEY } from "./recents";
 
-function Harness({ onNavigate, startOpen = true }: { onNavigate: (r: string) => void; startOpen?: boolean }): React.ReactNode {
+function Harness({
+  onNavigate,
+  startOpen = true,
+  permissions,
+}: {
+  onNavigate: (r: string) => void;
+  startOpen?: boolean;
+  permissions?: readonly string[];
+}): React.ReactNode {
   const [open, setOpen] = useState(startOpen);
-  return <CommandPaletteHost open={open} onOpenChange={setOpen} onNavigate={onNavigate} />;
+  return <CommandPaletteHost open={open} onOpenChange={setOpen} onNavigate={onNavigate} permissions={permissions} />;
 }
 
 const withFlags = (node: React.ReactNode, flags: FlagSet = { module_students: true, module_finance: true }) =>
@@ -47,6 +55,18 @@ describe("CommandPaletteHost", () => {
     withFlags(<Harness onNavigate={() => {}} />, { module_students: true });
     fireEvent.click(screen.getByText("Estudiantes"));
     expect(JSON.parse(window.localStorage.getItem(RECENTS_KEY) ?? "[]")).toEqual(["students.nav"]);
+  });
+
+  it("hides commands for modules the caller cannot READ (role-aware)", () => {
+    // Both flags ON, but the caller only holds grades:read — finance commands
+    // must not surface even though module_finance is enabled.
+    withFlags(<Harness onNavigate={() => {}} permissions={["grades:read"]} />, {
+      module_finance: true,
+      module_grades: true,
+    });
+    expect(screen.getByText("Calificaciones")).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText(/Buscar/), { target: { value: "finanzas" } });
+    expect(screen.queryByText("Finanzas y adeudos")).toBeNull();
   });
 
   it("opens on Cmd+K", () => {

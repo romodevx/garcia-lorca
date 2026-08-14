@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactElement } from "react";
 import { Btn } from "../_design/Controls";
 import { Icon, type IconName } from "../_design/Icon";
 import { COLOR, type ColorKey } from "../_design/colors";
-import { MODULES, type ModuleDef, type UserProfile } from "../_design/data";
+import { MODULES, isModuleVisible, type ModuleDef, type UserProfile } from "../_design/data";
 import { listCycles } from "../config/api";
 import { listCharges } from "../finance/api";
 import { listStudents } from "../students/api";
@@ -162,17 +162,82 @@ function KpiCard({
   );
 }
 
+// Grid shape shared by the real cards, the skeleton, and the empty state so the
+// modules section never reflows between loading and loaded.
+const GRID_STYLE = { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(236px, 1fr))", gap: 18 } as const;
+
+// Loading placeholder shown while `me()` is still resolving — avoids flashing
+// every module and then hiding the ones the caller cannot read.
+function ModulesSkeleton(): ReactElement {
+  return (
+    <div role="status" aria-label="Cargando módulos" style={GRID_STYLE}>
+      {Array.from({ length: 6 }, (_, i) => (
+        <div
+          key={i}
+          aria-hidden
+          style={{
+            minHeight: 172,
+            borderRadius: "var(--r-lg)",
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            opacity: 0.55
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// Shown to a signed-in user whose permissions match no module at all.
+function NoModules(): ReactElement {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 10,
+        padding: "48px 24px",
+        borderRadius: "var(--r-lg)",
+        background: "var(--surface)",
+        border: "1px dashed var(--border)",
+        color: "var(--text-muted)",
+        textAlign: "center"
+      }}
+    >
+      <Icon name="shield" size={30} stroke={2} />
+      <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, color: "var(--text)" }}>
+        No tienes módulos asignados
+      </div>
+      <div style={{ fontSize: 13.5 }}>Solicita acceso a tu administrador para ver tus módulos aquí.</div>
+    </div>
+  );
+}
+
 export interface DashboardProps {
   user: UserProfile;
   onOpen: (id: string) => void;
+  /**
+   * The authenticated principal's READ permissions. Drives which module tiles
+   * and KPI shortcuts are visible. `undefined` until `me()` resolves — the grid
+   * shows a skeleton rather than flashing every module. UX-only; the gateway is
+   * the security boundary.
+   */
+  permissions?: readonly string[];
   /** Injectable clock so the greeting/date are deterministic under test. */
   now?: Date;
 }
 
-export function Dashboard({ user, onOpen, now = new Date() }: DashboardProps): ReactElement {
+export function Dashboard({ user, onOpen, permissions, now = new Date() }: DashboardProps): ReactElement {
   const hour = now.getHours();
   const greet = hour < 12 ? "Buenos días" : hour < 19 ? "Buenas tardes" : "Buenas noches";
   const today = now.toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" });
+
+  // Role-aware visibility: a tile/shortcut is shown IFF the principal holds the
+  // module's READ permission. `undefined` means `me()` has not resolved yet.
+  const resolved = permissions !== undefined;
+  const visibleModules = resolved ? MODULES.filter((m) => isModuleVisible(m, permissions)) : [];
+  const canSee = (perm: string): boolean => resolved && permissions.includes(perm);
 
   // Real KPIs — no mock numbers: students from the roster, money from the ledger.
   const [kpi, setKpi] = useState({ students: 0, pending: 0, collected: 0, withBalance: 0 });
@@ -214,28 +279,44 @@ export function Dashboard({ user, onOpen, now = new Date() }: DashboardProps): R
             {today} · Ciclo {cycleName}
           </p>
         </div>
-        <Btn icon="plus" kind="forest" onClick={() => onOpen("announcements")}>
-          Nuevo aviso
-        </Btn>
+        {canSee("comms:read") && (
+          <Btn icon="plus" kind="forest" onClick={() => onOpen("announcements")}>
+            Nuevo aviso
+          </Btn>
+        )}
       </div>
 
-      {/* KPIs */}
-      <div className="fade-up" style={{ display: "flex", gap: 18, flexWrap: "wrap", marginBottom: 34 }}>
-        <KpiCard icon="students" color="forest" label="Alumnos" value={String(kpi.students)} sub="Registrados este ciclo" onClick={() => onOpen("students")} />
-        <KpiCard icon="finance" color="orange" label="Por cobrar" value={money(kpi.pending)} sub={`${kpi.withBalance} cargos con saldo`} onClick={() => onOpen("finance")} />
-        <KpiCard icon="trend" color="lime" label="Cobrado" value={money(kpi.collected)} sub={`Ciclo ${cycleName}`} onClick={() => onOpen("finance")} />
-      </div>
+      {/* KPIs — each shortcut is shown only to callers who can read its module. */}
+      {(canSee("students:read") || canSee("finance:read")) && (
+        <div className="fade-up" style={{ display: "flex", gap: 18, flexWrap: "wrap", marginBottom: 34 }}>
+          {canSee("students:read") && (
+            <KpiCard icon="students" color="forest" label="Alumnos" value={String(kpi.students)} sub="Registrados este ciclo" onClick={() => onOpen("students")} />
+          )}
+          {canSee("finance:read") && (
+            <>
+              <KpiCard icon="finance" color="orange" label="Por cobrar" value={money(kpi.pending)} sub={`${kpi.withBalance} cargos con saldo`} onClick={() => onOpen("finance")} />
+              <KpiCard icon="trend" color="lime" label="Cobrado" value={money(kpi.collected)} sub={`Ciclo ${cycleName}`} onClick={() => onOpen("finance")} />
+            </>
+          )}
+        </div>
+      )}
 
       {/* modules */}
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 16 }}>
         <h2 style={{ fontSize: 21, fontWeight: 700, color: "var(--text)" }}>Módulos</h2>
         <span style={{ fontSize: 14, color: "var(--text-faint)" }}>Todo el sistema, a la vista</span>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(236px, 1fr))", gap: 18 }}>
-        {MODULES.filter((m) => !m.hidden).map((m, i) => (
-          <ModuleCard key={m.id} m={m} i={i} onOpen={onOpen} />
-        ))}
-      </div>
+      {!resolved ? (
+        <ModulesSkeleton />
+      ) : visibleModules.length === 0 ? (
+        <NoModules />
+      ) : (
+        <div style={GRID_STYLE}>
+          {visibleModules.map((m, i) => (
+            <ModuleCard key={m.id} m={m} i={i} onOpen={onOpen} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -251,8 +251,8 @@ export function AppShell(): ReactElement {
   return (
     <div className="app-root" style={{ minHeight: "100vh" }}>
       <TopBar user={user} theme={theme} onToggle={toggle} onHome={home} onLogout={logout} onOpenPalette={() => setPaletteOpen(true)} />
-      <CommandPaletteHost open={paletteOpen} onOpenChange={setPaletteOpen} onNavigate={navigate} />
-      {view.screen === "dashboard" && <Dashboard user={user} onOpen={open} />}
+      <CommandPaletteHost open={paletteOpen} onOpenChange={setPaletteOpen} onNavigate={navigate} permissions={principal?.permissions} />
+      {view.screen === "dashboard" && <Dashboard user={user} onOpen={open} permissions={principal?.permissions} />}
       {view.screen === "finance" &&
         (financeEnabled ? (
           <FinanceScreen onBack={home} />
@@ -279,7 +279,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "grades" &&
         (gradesEnabled ? (
-          <GradesScreen onBack={home} />
+          <GradesScreen onBack={home} permissions={principal?.permissions} />
         ) : (
           // Flag OFF: never render the grade-capture surface; show the friendly stub
           // so navigation never dead-ends. (Backend 404 is authoritative.)
@@ -287,7 +287,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "attendance" &&
         (attendanceEnabled ? (
-          <AttendanceScreen onBack={home} />
+          <AttendanceScreen onBack={home} permissions={principal?.permissions} />
         ) : (
           // Flag OFF: never render the pass list; show the friendly stub so
           // navigation never dead-ends. (Backend 404 is authoritative.)
