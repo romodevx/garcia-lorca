@@ -40,6 +40,7 @@ const (
 	tenantB       = "22222222-2222-2222-2222-222222222222"
 	tenantC       = "33333333-3333-3333-3333-333333333333"
 	tenantD       = "44444444-4444-4444-4444-444444444444"
+	tenantE       = "55555555-5555-5555-5555-555555555555"
 	migrationsDir = "../../../../../migrations/config"
 )
 
@@ -259,6 +260,95 @@ func TestCatalogRoundTrip(t *testing.T) {
 	}
 	if groups, err := repo.ListGroups(ctx, cycleID, gradeID); err != nil || len(groups) != 1 {
 		t.Fatalf("ListGroups(cycle, grade): len=%d err=%v", len(groups), err)
+	}
+}
+
+// TestListGroupsEmptyFiltersReturnAll proves the empty-filter contract on
+// ListGroups (empty cycleID / gradeLevelID = no filter). Before the fix,
+// ListGroups(ctx, "", "") ran `cycle_id = ”` against a uuid column (22P02) —
+// reachable from the teacher roster's group-name enrichment, which calls
+// ListGroups with an empty cycleId to build a groupId→name map.
+func TestListGroupsEmptyFiltersReturnAll(t *testing.T) {
+	ctx := context.Background()
+	repo := pgadapter.NewRepository(appDB(t), tenantE)
+
+	const (
+		cycleID  = "e0e00001-0000-0000-0000-000000000001"
+		levelID  = "e0e00002-0000-0000-0000-000000000001"
+		gradeID1 = "e0e00003-0000-0000-0000-000000000001"
+		gradeID2 = "e0e00003-0000-0000-0000-000000000002"
+		groupA   = "e0e00004-0000-0000-0000-000000000001"
+		groupB   = "e0e00004-0000-0000-0000-000000000002"
+		groupC   = "e0e00004-0000-0000-0000-000000000003"
+	)
+
+	cycle, err := domain.NewCycle(cycleID, tenantE, "Cycle-Groups-E", domain.CycleStatusActive, startsOn, endsOn)
+	if err != nil {
+		t.Fatalf("NewCycle: %v", err)
+	}
+	if err := repo.CreateCycle(ctx, cycle); err != nil {
+		t.Fatalf("CreateCycle: %v", err)
+	}
+	level, err := domain.NewLevel(levelID, tenantE, "Level-Groups-E", "", domain.GranularityTerm)
+	if err != nil {
+		t.Fatalf("NewLevel: %v", err)
+	}
+	if err := repo.CreateLevel(ctx, level); err != nil {
+		t.Fatalf("CreateLevel: %v", err)
+	}
+	for id, ord := range map[string]int{gradeID1: 1, gradeID2: 2} {
+		grade, err := domain.NewGradeLevel(id, tenantE, levelID, fmt.Sprintf("Grade-%d", ord), ord)
+		if err != nil {
+			t.Fatalf("NewGradeLevel: %v", err)
+		}
+		if err := repo.CreateGradeLevel(ctx, grade); err != nil {
+			t.Fatalf("CreateGradeLevel: %v", err)
+		}
+	}
+	// Two groups under grade 1, one under grade 2 → three across the tenant/cycle.
+	seed := []struct {
+		id, gradeID, name string
+	}{
+		{groupA, gradeID1, "A"},
+		{groupB, gradeID1, "B"},
+		{groupC, gradeID2, "A"},
+	}
+	for _, g := range seed {
+		group, err := domain.NewGroup(g.id, tenantE, cycleID, g.gradeID, g.name, 30)
+		if err != nil {
+			t.Fatalf("NewGroup(%s): %v", g.id, err)
+		}
+		if err := repo.CreateGroup(ctx, group); err != nil {
+			t.Fatalf("CreateGroup(%s): %v", g.id, err)
+		}
+	}
+
+	// Fully-open filter returns all groups of the tenant (the red case: empty
+	// cycle_id against a uuid column).
+	all, err := repo.ListGroups(ctx, "", "")
+	if err != nil {
+		t.Fatalf("ListGroups(ctx, \"\", \"\") must not error (22P02 regression): %v", err)
+	}
+	if len(all) != 3 {
+		t.Errorf("ListGroups(ctx, \"\", \"\"): got %d, want 3", len(all))
+	}
+
+	// Cycle only (grade level open) still works and finds all three.
+	byCycle, err := repo.ListGroups(ctx, cycleID, "")
+	if err != nil || len(byCycle) != 3 {
+		t.Fatalf("ListGroups(ctx, cycleID, \"\"): len=%d err=%v", len(byCycle), err)
+	}
+
+	// Grade level only (cycle open) narrows to that grade level.
+	byGrade, err := repo.ListGroups(ctx, "", gradeID1)
+	if err != nil || len(byGrade) != 2 {
+		t.Fatalf("ListGroups(ctx, \"\", gradeID1): len=%d err=%v", len(byGrade), err)
+	}
+
+	// Both filters set narrows to the cycle+grade intersection.
+	both, err := repo.ListGroups(ctx, cycleID, gradeID1)
+	if err != nil || len(both) != 2 {
+		t.Fatalf("ListGroups(ctx, cycleID, gradeID1): len=%d err=%v", len(both), err)
 	}
 }
 
