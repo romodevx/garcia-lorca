@@ -335,6 +335,31 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/teaching/grades",
 		teachingModules("teaching:write", []string{"grades"}, teachingH.CaptureGrade))
 
+	// M07 teaching-attendance (teacher self-scoped daily pass list): the maestro
+	// takes attendance ONLY for the groups they teach. Attendance is per GROUP, so
+	// the scope is the DISTINCT group_ids across the caller's assignments — derived
+	// by construction from the principal (via the same config-backed teaching scope
+	// handler), so no request field can widen it. attendance_own:read /
+	// attendance_own:write are self-scoped, so — unlike attendance:read /
+	// attendance:write, which touch ANY group — they are safe to grant to a
+	// non-owner Maestro role. The attendance client (roster + save, the same one
+	// backing /attendance/*) and the students client (roster student-name
+	// enrichment — a Maestro holds no students:read) are reused via the scope
+	// handler.
+	//
+	// Groups composes module_attendance + module_config (it enriches group names);
+	// roster and save touch only the attendance service, so they need only
+	// module_attendance. A supplied groupId is verified against the caller's OWN set
+	// before any roster/save call — a group outside it answers 404, never 403,
+	// leaking nothing about whether another group exists.
+	teachingAttH := handler.NewTeachingAttendanceHandler(teachingH, attendanceClient)
+	mux.Handle("GET /api/v1/teaching/groups",
+		teachingModules("attendance_own:read", []string{"attendance", "config"}, teachingAttH.Groups))
+	mux.Handle("GET /api/v1/teaching/attendance/roster",
+		teachingModules("attendance_own:read", []string{"attendance"}, teachingAttH.Roster))
+	mux.Handle("POST /api/v1/teaching/attendance",
+		teachingModules("attendance_own:write", []string{"attendance"}, teachingAttH.SaveAttendance))
+
 	// M05 finance (adeudos): flag-guarded, authenticated + rotation-enforced,
 	// permission-gated. Everything that moves money or the catalog is a write
 	// (finance:write): concept create/update, charge create/generate, discount,

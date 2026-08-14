@@ -61,6 +61,8 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"finance-reader":   {"finance:read"},
 		"att-writer":       {"attendance:write", "attendance:read"},
 		"att-reader":       {"attendance:read"},
+		"att-own-writer":   {"attendance_own:write", "attendance_own:read"},
+		"att-own-reader":   {"attendance_own:read"},
 		"comms-writer":     {"comms:write", "comms:read"},
 		"comms-reader":     {"comms:read"},
 		// users-writer / roles-writer also hold the permissions they hand out in
@@ -2215,6 +2217,175 @@ func TestTeachingCaptureUnownedAssignmentIs404(t *testing.T) {
 		`{"assignmentId":"asg-999","enrollmentId":"enr-1","termId":"trm-1","value":9}`)
 	if res.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404 (not the caller's assignment)", res.StatusCode)
+	}
+}
+
+// --- M07 teaching-attendance (teacher self-scoped daily pass list): every route
+// behind RequireAuth + rotation + module guards + attendance_own permission +
+// group-ownership scoping. attendance_own:* is NOT attendance:* — a broad
+// attendance-staff token must be forbidden here, and a foreign group answers 404.
+
+// Groups composes module_attendance + module_config: either OFF ⇒ 404.
+func TestTeachingGroupsDisabledAttendanceModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_config": true}) // module_attendance OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/groups", "att-own-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestTeachingGroupsDisabledConfigModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_attendance": true}) // module_config OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/groups", "att-own-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestTeachingGroupsNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_attendance": true, "module_config": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/groups", "", "")
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+// attendance:read is NOT attendance_own:read: a broad attendance-staff token
+// cannot reach the teacher self-scoped surface.
+func TestTeachingGroupsWithoutAttendanceOwnReadIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_attendance": true, "module_config": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/groups", "att-reader", "")
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (attendance:read is not attendance_own:read)", res.StatusCode)
+	}
+}
+
+func TestTeachingGroupsWithAttendanceOwnReadReturns200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_attendance": true, "module_config": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/groups", "att-own-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out struct {
+		Groups []map[string]any `json:"groups"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The stub teacher tch-1 teaches grp-1, enriched to "3° A" from the config
+	// catalog. No other group is the caller's.
+	if len(out.Groups) != 1 || out.Groups[0]["id"] != "grp-1" || out.Groups[0]["name"] != "3° A" {
+		t.Errorf("groups = %v, want one group grp-1 named 3° A", out.Groups)
+	}
+}
+
+func TestTeachingAttendanceRosterDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_config": true}) // module_attendance OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/attendance/roster?groupId=grp-1&date=2026-09-01", "att-own-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestTeachingAttendanceRosterNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_attendance": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/attendance/roster?groupId=grp-1&date=2026-09-01", "", "")
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+func TestTeachingAttendanceRosterWithoutAttendanceOwnReadIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_attendance": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/attendance/roster?groupId=grp-1&date=2026-09-01", "att-reader", "")
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (attendance:read is not attendance_own:read)", res.StatusCode)
+	}
+}
+
+func TestTeachingAttendanceRosterOwnedGroupReturns200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_attendance": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/attendance/roster?groupId=grp-1&date=2026-09-01", "att-own-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out struct {
+		Roster []map[string]any `json:"roster"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The gateway resolves the student name for the Maestro (who holds no
+	// students:read): the stub roster's stu-1 comes back named "Ana".
+	if len(out.Roster) != 2 || out.Roster[0]["enrollmentId"] != "enr-1" ||
+		out.Roster[0]["studentId"] != "stu-1" || out.Roster[0]["studentName"] != "Ana" ||
+		out.Roster[0]["status"] != "present" {
+		t.Errorf("roster = %v, want enr-1/stu-1/Ana/present enriched", out.Roster)
+	}
+}
+
+// A group the caller does not teach answers 404 — the ownership guard runs before
+// the attendance service is ever consulted.
+func TestTeachingAttendanceRosterForeignGroupIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_attendance": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/attendance/roster?groupId=grp-999&date=2026-09-01", "att-own-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (not the caller's group)", res.StatusCode)
+	}
+}
+
+func TestTeachingAttendanceSaveDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_config": true}) // module_attendance OFF
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teaching/attendance", "att-own-writer",
+		`{"groupId":"grp-1","date":"2026-09-01","marks":[]}`)
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestTeachingAttendanceSaveNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_attendance": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teaching/attendance", "",
+		`{"groupId":"grp-1","date":"2026-09-01","marks":[]}`)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+// attendance_own:read is not attendance_own:write: a reader cannot save a day.
+func TestTeachingAttendanceSaveWithoutAttendanceOwnWriteIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_attendance": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teaching/attendance", "att-own-reader",
+		`{"groupId":"grp-1","date":"2026-09-01","marks":[]}`)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (attendance_own:read is not attendance_own:write)", res.StatusCode)
+	}
+}
+
+func TestTeachingAttendanceSaveOwnedGroupReturns200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_attendance": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teaching/attendance", "att-own-writer",
+		`{"groupId":"grp-1","date":"2026-09-01","marks":[{"enrollmentId":"enr-1","status":"absent"}]}`)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out["absentCount"] != float64(1) || out["markedCount"] != float64(1) {
+		t.Errorf("summary = %v, want absentCount 1 / markedCount 1", out)
+	}
+}
+
+// Saving against a group the caller does not teach answers 404 — the ownership
+// guard runs before the attendance service is ever consulted.
+func TestTeachingAttendanceSaveForeignGroupIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_attendance": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teaching/attendance", "att-own-writer",
+		`{"groupId":"grp-999","date":"2026-09-01","marks":[]}`)
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (not the caller's group)", res.StatusCode)
 	}
 }
 
