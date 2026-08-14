@@ -7,14 +7,12 @@ import i18n from "./i18n/i18n";
 import { AppStateProvider } from "./state/AppState";
 import { ToastProvider } from "./state/Toast";
 import { ThemeProvider, type ThemeName } from "./theme";
-import type { LevelId } from "./data/mock";
 
 export interface ProvidersProps {
   children: ReactNode;
   /** Flag map (defaults to the demo seed; tests can inject their own). */
   flags?: FlagSet;
   initialTheme?: ThemeName;
-  initialLevelId?: LevelId;
 }
 
 /**
@@ -28,7 +26,6 @@ export function Providers({
   children,
   flags = demoFlags,
   initialTheme = "light",
-  initialLevelId = "primaria",
 }: ProvidersProps): ReactNode {
   return (
     <SafeAreaProvider
@@ -40,7 +37,7 @@ export function Providers({
       <I18nextProvider i18n={i18n}>
         <ThemeProvider initial={initialTheme}>
           <FlagsProvider flags={flags}>
-            <AppStateProvider initialLevelId={initialLevelId}>
+            <AppStateProvider>
               <ToastProvider>{children}</ToastProvider>
             </AppStateProvider>
           </FlagsProvider>

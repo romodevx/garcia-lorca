@@ -1,101 +1,167 @@
 import { router } from "expo-router";
 import { type ReactElement } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { announcements, catMeta } from "../data/mock";
+import type { FamilyNotification } from "../api";
 import { useAppState } from "../state/AppState";
 import { useTheme } from "../theme";
 import { Card, EmptyState, ScreenTitle, TintIcon } from "../ui";
+import { NotificationsErrorState } from "./NotificationsErrorState";
+import { NotificationsLoading } from "./NotificationsLoading";
+import { formatNotificationDate, isUnread, notificationKind } from "./notificationView";
 
 /**
- * Avisos: read/unread list with an unread dot, a "Marcar leídos" action that
- * clears every badge, and a friendly empty state when nothing is left. Tapping
- * a row marks it read and opens the detail.
+ * Avisos: the guardian's real notification inbox, loaded from
+ * `GET /api/v1/family/notifications` via AppState. It handles the four states a
+ * network-backed list must: loading, error (with retry), empty, and populated.
  *
- * The list is non-empty by design (mock data), so the empty state is reached by
- * filtering; an `emptyOverride` prop lets tests assert the empty branch.
+ * "Marcar leídos" and tapping a row PERSIST the acknowledgement: markRead calls the
+ * guardian-reachable `POST /api/v1/family/notifications/{id}/read` route, so the
+ * server stamps `readAt` and the read state survives a relaunch (see
+ * notificationView.isUnread). `readIds` is only an optimistic bridge that reflects
+ * the acknowledgement immediately until the next refetch returns the stamped list.
  */
-export interface AnnouncementsScreenProps {
-  /** Forces the empty state (used to verify the empty-state UI). */
-  emptyOverride?: boolean;
-}
+export function AnnouncementsScreen(): ReactElement {
+  const {
+    notifications,
+    notificationsLoading,
+    notificationsError,
+    refreshNotifications,
+    readIds,
+    unreadCount,
+    markRead,
+    markAllRead,
+  } = useAppState();
 
-export function AnnouncementsScreen({ emptyOverride = false }: AnnouncementsScreenProps): ReactElement {
-  const theme = useTheme();
-  const { readIds, unreadCount, markRead, markAllRead } = useAppState();
-  const list = emptyOverride ? [] : announcements;
-
-  const open = (id: number): void => {
+  const open = (id: string): void => {
     markRead(id);
-    router.push({ pathname: "/aviso/[id]", params: { id: String(id) } });
+    router.push({ pathname: "/aviso/[id]", params: { id } });
   };
 
   return (
     <>
       <View style={styles.titleRow}>
         <ScreenTitle>Avisos</ScreenTitle>
-        {unreadCount > 0 ? (
-          <Pressable accessibilityRole="button" accessibilityLabel="Marcar leídos" onPress={markAllRead}>
-            <Text style={[styles.action, { color: theme.colors.primaryInk, fontFamily: theme.fonts.uiExtra }]}>
-              Marcar leídos
-            </Text>
-          </Pressable>
-        ) : null}
+        {unreadCount > 0 ? <MarkAllAction onPress={markAllRead} /> : null}
       </View>
 
-      {list.length === 0 ? (
-        <EmptyState
-          icon="inbox"
-          title="No hay avisos nuevos"
-          subtitle="Te avisaremos cuando la escuela publique algo."
-        />
-      ) : (
-        <Card>
-          {list.map((a, i) => {
-            const isUnread = a.unread && !readIds.has(a.id);
-            const cat = catMeta[a.cat];
-            return (
-              <Pressable
-                key={a.id}
-                accessibilityRole="button"
-                accessibilityLabel={a.title}
-                onPress={() => open(a.id)}
-                style={[styles.row, i > 0 ? { borderTopColor: theme.colors.line, borderTopWidth: StyleSheet.hairlineWidth } : null]}
-                android_ripple={{ color: theme.colors.surface2 }}
-              >
-                <View
-                  style={[
-                    styles.unreadDot,
-                    { backgroundColor: isUnread ? theme.colors.primary : "transparent" },
-                  ]}
-                />
-                <TintIcon name={cat.icon} tint={cat.tint} size={42} />
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text
-                    style={[
-                      styles.title,
-                      {
-                        color: isUnread ? theme.colors.text : theme.colors.text2,
-                        fontFamily: isUnread ? theme.fonts.uiExtra : theme.fonts.uiSemi,
-                      },
-                    ]}
-                  >
-                    {a.title}
-                  </Text>
-                  <View style={styles.meta}>
-                    <Text style={[styles.from, { color: theme.colors.text2, fontFamily: theme.fonts.ui }]}>{a.from}</Text>
-                    <Text style={[styles.metaSep, { color: theme.colors.text3 }]}>·</Text>
-                    <Text style={[styles.time, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{a.time}</Text>
-                  </View>
-                  <Text style={[styles.excerpt, { color: theme.colors.text2, fontFamily: theme.fonts.uiRegular }]}>
-                    {a.excerpt}
-                  </Text>
-                </View>
-              </Pressable>
-            );
-          })}
-        </Card>
-      )}
+      <AnnouncementsBody
+        notifications={notifications}
+        loading={notificationsLoading}
+        error={notificationsError}
+        readIds={readIds}
+        onRetry={refreshNotifications}
+        onOpen={open}
+      />
     </>
+  );
+}
+
+function MarkAllAction({ onPress }: { onPress: () => void }): ReactElement {
+  const theme = useTheme();
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel="Marcar leídos" onPress={onPress}>
+      <Text style={[styles.action, { color: theme.colors.primaryInk, fontFamily: theme.fonts.uiExtra }]}>
+        Marcar leídos
+      </Text>
+    </Pressable>
+  );
+}
+
+interface BodyProps {
+  notifications: FamilyNotification[];
+  loading: boolean;
+  error: boolean;
+  readIds: ReadonlySet<string>;
+  onRetry: () => void;
+  onOpen: (id: string) => void;
+}
+
+/** Renders exactly one of: loading, error+retry, empty, or the notification list. */
+function AnnouncementsBody({ notifications, loading, error, readIds, onRetry, onOpen }: BodyProps): ReactElement {
+  // Error takes precedence over a stale/empty list so a failed refresh is never
+  // mistaken for "no news".
+  if (error) {
+    return <NotificationsErrorState onRetry={onRetry} />;
+  }
+
+  // Only show the spinner on the FIRST load (nothing to show yet); a refresh over
+  // existing content keeps the list visible.
+  if (loading && notifications.length === 0) {
+    return <NotificationsLoading />;
+  }
+
+  if (notifications.length === 0) {
+    return (
+      <EmptyState
+        icon="inbox"
+        title="No hay avisos nuevos"
+        subtitle="Te avisaremos cuando la escuela publique algo."
+      />
+    );
+  }
+
+  return (
+    <Card>
+      {notifications.map((n, i) => (
+        <NotificationRow
+          key={n.id}
+          notification={n}
+          unread={isUnread(n, readIds)}
+          divider={i > 0}
+          onPress={() => onOpen(n.id)}
+        />
+      ))}
+    </Card>
+  );
+}
+
+interface RowProps {
+  notification: FamilyNotification;
+  unread: boolean;
+  divider: boolean;
+  onPress: () => void;
+}
+
+function NotificationRow({ notification, unread, divider, onPress }: RowProps): ReactElement {
+  const theme = useTheme();
+  const kind = notificationKind(notification.type);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={notification.title}
+      onPress={onPress}
+      style={[
+        styles.row,
+        divider ? { borderTopColor: theme.colors.line, borderTopWidth: StyleSheet.hairlineWidth } : null,
+      ]}
+      android_ripple={{ color: theme.colors.surface2 }}
+    >
+      <View style={[styles.unreadDot, { backgroundColor: unread ? theme.colors.primary : "transparent" }]} />
+      <TintIcon name={kind.icon} tint={kind.tint} size={42} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text
+          style={[
+            styles.title,
+            {
+              color: unread ? theme.colors.text : theme.colors.text2,
+              fontFamily: unread ? theme.fonts.uiExtra : theme.fonts.uiSemi,
+            },
+          ]}
+        >
+          {notification.title}
+        </Text>
+        <View style={styles.meta}>
+          <Text style={[styles.from, { color: theme.colors.text2, fontFamily: theme.fonts.ui }]}>{kind.label}</Text>
+          <Text style={[styles.metaSep, { color: theme.colors.text3 }]}>·</Text>
+          <Text style={[styles.time, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>
+            {formatNotificationDate(notification.createdAt, "short")}
+          </Text>
+        </View>
+        <Text numberOfLines={2} style={[styles.excerpt, { color: theme.colors.text2, fontFamily: theme.fonts.uiRegular }]}>
+          {notification.body}
+        </Text>
+      </View>
+    </Pressable>
   );
 }
 

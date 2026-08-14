@@ -24,11 +24,18 @@ export interface CommandPaletteHostProps {
   readonly onOpenChange: (open: boolean) => void;
   /** Navigate to a command's route (e.g. "module:students"). Never mutates. */
   readonly onNavigate: (route: string) => void;
+  /**
+   * The authenticated principal's READ permissions. Commands for modules the
+   * caller cannot read are never surfaced. `undefined` before `me()` resolves —
+   * the registry then falls back to flag-only filtering. UX-only; the gateway is
+   * the security boundary.
+   */
+  readonly permissions?: readonly string[];
 }
 
 const RECENT_PREFIX = "recent:";
 
-export function CommandPaletteHost({ open, onOpenChange, onNavigate }: CommandPaletteHostProps): ReactNode {
+export function CommandPaletteHost({ open, onOpenChange, onNavigate, permissions }: CommandPaletteHostProps): ReactNode {
   const flags = useFlags();
   const t = useTranslations("palette");
   const [recents, setRecents] = useState<string[]>([]);
@@ -56,7 +63,7 @@ export function CommandPaletteHost({ open, onOpenChange, onNavigate }: CommandPa
     }
   }, [open]);
 
-  const base = useMemo(() => buildCommandRegistry(flags, (key) => t(key)), [flags, t]);
+  const base = useMemo(() => buildCommandRegistry(flags, (key) => t(key), permissions), [flags, t, permissions]);
 
   // Recent commands: resolve stored ids against the flag-filtered registry, so a
   // command whose module is now disabled simply drops (no leak). Prefixed id

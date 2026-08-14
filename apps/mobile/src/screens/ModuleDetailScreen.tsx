@@ -9,12 +9,16 @@ export interface ModuleDetailScreenProps {
   id: ModuleTile["id"] | string;
 }
 
+// TODO(pendiente-backend: docs — docs service is a shell, no RPCs)
+// — static placeholder data. Do not delete. See .claude/docs/PLAN-mock-data-audit.md #B8.
 const DOCS: ReadonlyArray<[string, string]> = [
   ["Boleta 2.º periodo", "PDF · 240 KB"],
   ["Constancia de estudios", "PDF · 180 KB"],
   ["Reglamento escolar", "PDF · 1.2 MB"],
 ];
 
+// TODO(pendiente-backend: CFDI invoices — billing is out of MVP)
+// — static placeholder data. Do not delete. See .claude/docs/PLAN-mock-data-audit.md #B9.
 const INVOICES: ReadonlyArray<[string, string]> = [
   ["Colegiatura mayo", "CFDI · 02 jun"],
   ["Colegiatura abril", "CFDI · 02 may"],
@@ -45,6 +49,8 @@ export function ModuleDetailScreen({ id }: ModuleDetailScreenProps): ReactElemen
   if (id === "uniformes") {
     return (
       <>
+        {/* TODO(pendiente-backend: uniform sizes — uniforms service is a shell)
+            — static placeholder data. Do not delete. See .claude/docs/PLAN-mock-data-audit.md #B10. */}
         <Card padded style={styles.tile}>
           <TintIcon name="shirt" tint="lime" size={48} icon={26} />
           <View>
@@ -79,6 +85,8 @@ export function ModuleDetailScreen({ id }: ModuleDetailScreenProps): ReactElemen
   if (id === "becas") {
     return (
       <>
+        {/* TODO(pendiente-backend: scholarships — scholarships service is a shell, no RPCs)
+            — static placeholder data. Do not delete. See .claude/docs/PLAN-mock-data-audit.md #B11. */}
         <Card style={styles.balanceHero}>
           <Text style={[styles.cap, { color: theme.colors.text2, fontFamily: theme.fonts.uiExtra }]}>Beca aplicada</Text>
           <Text style={[styles.amount, { color: theme.colors.tintPurpleInk, fontFamily: theme.fonts.display }]}>23%</Text>

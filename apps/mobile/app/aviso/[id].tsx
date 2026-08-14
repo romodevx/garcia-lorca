@@ -10,12 +10,11 @@ import { useTheme } from "@/src/theme";
 export default function AvisoRoute(): ReactNode {
   const theme = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const numericId = Number(id);
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <DetailHeader title="Aviso" />
       <ScreenScroll refreshable={false}>
-        <AnnouncementDetailScreen id={numericId} />
+        <AnnouncementDetailScreen id={id} />
       </ScreenScroll>
     </View>
   );

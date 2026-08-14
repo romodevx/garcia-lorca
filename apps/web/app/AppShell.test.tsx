@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
 import { Providers } from "./test-utils";
 import { changePassword as apiChangePassword, login as apiLogin, logout as apiLogout, me as apiMe, refresh as apiRefresh } from "./auth/api";
@@ -37,11 +37,33 @@ vi.mock("./students/api", () => ({
   listStudents: vi.fn().mockResolvedValue([]),
 }));
 
+// The signed-in principal for the navigation flows: READ on the modules these
+// tests reach (finance + students, for the dashboard KPI shortcuts). Module
+// tiles/KPIs are now permission-gated, so a flow that clicks one must resolve
+// `me()` with that permission.
+const OWNER_ME = {
+  userId: "u1",
+  email: "owner@example.com",
+  permissions: ["students:read", "finance:read", "grades:read", "comms:read", "config:read", "users:read", "attendance:read"],
+};
+
 const mockLogin = vi.mocked(apiLogin);
 const mockChangePassword = vi.mocked(apiChangePassword);
 const mockLogout = vi.mocked(apiLogout);
 const mockRefresh = vi.mocked(apiRefresh);
 const mockMe = vi.mocked(apiMe);
+
+// A persistent `mockResolvedValue` (used by the nav flows below) survives
+// clearAllMocks, so reset the session probes to their default "no session"
+// baseline before every test — each flow then opts into a live session
+// explicitly. Without this, a resolved `me()` would leak into the login-first
+// and boot-restore tests.
+beforeEach(() => {
+  mockMe.mockReset();
+  mockRefresh.mockReset();
+  mockMe.mockRejectedValue(new Error("no session"));
+  mockRefresh.mockRejectedValue(new Error("no session"));
+});
 
 afterEach(() => vi.clearAllMocks());
 
@@ -54,6 +76,8 @@ async function submitLogin(user: ReturnType<typeof userEvent.setup>): Promise<vo
 describe("AppShell navigation flow", () => {
   it("goes login → dashboard → finance → back, then logs out", async () => {
     mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: false });
+    // Boot restore fails (stay at login); the post-login /me returns the principal.
+    mockMe.mockRejectedValueOnce(new Error("no session")).mockResolvedValue(OWNER_ME);
     mockLogout.mockResolvedValue(undefined);
     const user = userEvent.setup();
     render(
@@ -125,6 +149,60 @@ describe("AppShell navigation flow", () => {
     expect(screen.queryByRole("button", { name: "Entrar al sistema" })).not.toBeInTheDocument();
   });
 
+  it("shows the gateway's real display name (not the email-derived one), with the email as the subtitle", async () => {
+    // The boot restore hits /me and lands on the dashboard. When the gateway
+    // returns a real displayName, the top bar must show THAT as the bold name —
+    // not a name derived from the email local-part — and never the old static
+    // "Dirección" owner identity. The email stays the identity subtitle.
+    mockMe.mockResolvedValueOnce({
+      userId: "u9",
+      email: "director@garcialorca.edu.mx",
+      permissions: ["grades:read"],
+      displayName: "Patricia Lugo",
+      role: "owner",
+    });
+    render(
+      <Providers flags={{}}>
+        <AppShell />
+      </Providers>
+    );
+
+    expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
+    // The real email is the identity subtitle.
+    expect(screen.getByText("director@garcialorca.edu.mx")).toBeInTheDocument();
+    // The gateway's real display name wins the bold name line.
+    expect(screen.getByText("Patricia Lugo")).toBeInTheDocument();
+    // NOT the email-derived name ("Director"), and NOT the old static owner row.
+    expect(screen.queryByText("Director")).not.toBeInTheDocument();
+    expect(screen.queryByText("Dirección")).not.toBeInTheDocument();
+    // The dashboard greeting uses only the FIRST name token, not the full display
+    // name — "Patricia Lugo" greets as "Patricia", never "Patricia Lugo 🌱".
+    expect(screen.getByRole("heading", { name: /,\s*Patricia\s*🌱/ })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Patricia Lugo\s*🌱/ })).not.toBeInTheDocument();
+  });
+
+  it("falls back to the email-derived name when the gateway returns no display name", async () => {
+    // A directory outage degrades /me to the token principal (no displayName), so
+    // the chrome falls back to a name derived from the email local-part.
+    mockMe.mockResolvedValueOnce({
+      userId: "u9",
+      email: "patricia.lugo@garcialorca.edu.mx",
+      permissions: ["grades:read"],
+    });
+    render(
+      <Providers flags={{}}>
+        <AppShell />
+      </Providers>
+    );
+
+    expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
+    // Real email is the subtitle.
+    expect(screen.getByText("patricia.lugo@garcialorca.edu.mx")).toBeInTheDocument();
+    // Name derived from the email local-part (dots → spaces, title-cased).
+    expect(screen.getByText("Patricia Lugo")).toBeInTheDocument();
+    expect(screen.queryByText("Dirección")).not.toBeInTheDocument();
+  });
+
   it("restores via the refresh cookie when the access cookie has expired (me → refresh → me → dashboard)", async () => {
     // /me fails (access cookie expired) but the 24h refresh cookie mints a fresh
     // one; boot must recover instead of dropping to login.
@@ -179,6 +257,10 @@ describe("AppShell navigation flow", () => {
 
   it("falls back to the placeholder when module_finance is OFF (UX gating)", async () => {
     mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: false });
+    // The caller CAN read finance (KPI shortcut visible); the module flag being
+    // OFF is what routes to the placeholder — permission governs visibility,
+    // flag governs real-surface-vs-stub. Boot restore fails, post-login /me resolves.
+    mockMe.mockRejectedValueOnce(new Error("no session")).mockResolvedValue(OWNER_ME);
     const user = userEvent.setup();
     render(
       <Providers flags={{}}>

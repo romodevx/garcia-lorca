@@ -5,14 +5,16 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { modules, type ModuleTile } from "../data/mock";
 import { Icon } from "../icons";
 import { useAppState } from "../state/AppState";
+import { toChildView } from "../state/childView";
 import { useTheme } from "../theme";
 import { Avatar, Card, Chip, ListRow, SectionLabel, TintIcon } from "../ui";
 
 /**
- * Maps each "Más" module tile to its feature flag. The grid renders every tile
- * but a tile whose flag is OFF is shown disabled (UX-only) — the backend
- * gateway is the security boundary regardless. "Facturas" (billing) is out of
- * MVP, so its flag stays OFF and the tile reads as "Próximamente".
+ * Maps each "Más" module tile to its feature flag. A tile whose flag is OFF is
+ * NOT rendered at all — modules with no backend stay hidden until they land, so
+ * the parent never sees mock data (the backend gateway is the security boundary
+ * regardless). The mock content in `mock.ts` is kept future-ready, just
+ * unreachable.
  */
 const MODULE_FLAGS: Record<ModuleTile["id"], FlagKey> = {
   documentos: "module_docs",
@@ -25,18 +27,21 @@ const MODULE_FLAGS: Record<ModuleTile["id"], FlagKey> = {
 export function MoreScreen({ onLogout }: { onLogout: () => void }): ReactElement {
   const theme = useTheme();
   const { child } = useAppState();
+  const view = toChildView(child);
 
   return (
     <>
       <Card padded style={[styles.profile, { marginTop: 8 }]}>
-        <Avatar child={child} size={52} />
+        <Avatar initials={view.initials} size={52} />
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={[styles.name, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]} numberOfLines={1}>
-            {child.name}
+            {view.present ? view.fullName : "Portal de familias"}
           </Text>
-          <Text style={[styles.teacher, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{child.teacher}</Text>
+          <Text style={[styles.teacher, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>
+            {view.present ? [view.levelLabel, view.group].filter(Boolean).join(" · ") : "—"}
+          </Text>
         </View>
-        <Chip kind="lime">{child.short}</Chip>
+        {view.present ? <Chip kind="lime">{view.short}</Chip> : null}
       </Card>
 
       <SectionLabel>Módulos</SectionLabel>
@@ -84,22 +89,23 @@ export function MoreScreen({ onLogout }: { onLogout: () => void }): ReactElement
   );
 }
 
-function ModuleCard({ module }: { module: ModuleTile }): ReactElement {
+function ModuleCard({ module }: { module: ModuleTile }): ReactElement | null {
   const theme = useTheme();
   const enabled = useFlag(MODULE_FLAGS[module.id]);
+  // Flag OFF (no backend yet) → don't render the tile at all.
+  if (!enabled) {
+    return null;
+  }
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={module.title}
-      accessibilityState={{ disabled: !enabled }}
-      disabled={!enabled}
       onPress={() => router.push({ pathname: "/modulo/[id]", params: { id: module.id } })}
       style={({ pressed }) => [
         styles.modCard,
         {
           backgroundColor: theme.colors.surface,
           borderColor: theme.colors.line,
-          opacity: enabled ? 1 : 0.55,
           transform: [{ scale: pressed ? 0.97 : 1 }],
         },
       ]}
@@ -107,9 +113,7 @@ function ModuleCard({ module }: { module: ModuleTile }): ReactElement {
       <TintIcon name={module.icon} tint={module.tint} size={48} icon={26} />
       <View>
         <Text style={[styles.modTitle, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{module.title}</Text>
-        <Text style={[styles.modSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>
-          {enabled ? module.sub : "Próximamente"}
-        </Text>
+        <Text style={[styles.modSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{module.sub}</Text>
       </View>
     </Pressable>
   );

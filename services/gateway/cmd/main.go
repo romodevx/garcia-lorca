@@ -184,7 +184,9 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux := http.NewServeMux()
 	handler.NewHealthHandler(iamHealth).Register(mux)
 
-	authH := handler.NewAuthHandler(authClient)
+	// Reuse the same iam client that backs the admin /users and /roles routes to
+	// enrich /me with the caller's real display name + role name.
+	authH := handler.NewAuthHandler(authClient, handler.WithDirectory(authClient))
 	requireAuth := middleware.RequireAuth(authClient)
 	// requireAuthChanged is the DEFAULT building block for authenticated routes:
 	// it authenticates AND enforces the forced password rotation, so a new route
@@ -298,6 +300,66 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/grades/roster", gradesRead(gradesH.GetRoster))
 	mux.Handle("GET /api/v1/grades", gradesRead(gradesH.ListGradeEntries))
 
+	// M07 teaching (teacher self-scoped grades): the maestro-facing surface that
+	// exposes ONLY the caller's own groups+subjects, scoped by construction from
+	// the principal (the Teacher whose user_id == principal.UserID → that teacher's
+	// assignments). teaching:read/teaching:write are self-scoped, so — unlike
+	// grades:read/grades:write, which read and write ANY group — they are safe to
+	// grant to a non-owner Maestro role. The config client (teacher directory +
+	// assignments + group/subject catalog for name enrichment) is reused here, the
+	// same one backing /config/*, alongside the grades client (roster + capture)
+	// and the students client (roster student-name enrichment — a Maestro holds no
+	// students:read, so the trusted gateway resolves the names on its behalf).
+	//
+	// Assignments composes module_grades + module_config (it reads the config
+	// catalog); roster and capture touch only the grades service, so they need only
+	// module_grades. A supplied assignmentId is verified against the caller's OWN
+	// set before any roster/capture call — an id outside it answers 404, never 403,
+	// leaking nothing about whether another teacher's assignment exists.
+	teachingH := handler.NewTeachingHandler(configClient, gradesClient, studentsClient)
+	teachingModules := func(perm string, modules []string, h http.HandlerFunc) http.Handler {
+		wrapped := requireAuthChanged(middleware.RequirePermission(perm)(http.HandlerFunc(h)))
+		for _, module := range modules {
+			wrapped = guard.Protect(module, wrapped)
+		}
+		return wrapped
+	}
+	mux.Handle("GET /api/v1/teaching/assignments",
+		teachingModules("teaching:read", []string{"grades", "config"}, teachingH.Assignments))
+	// Terms reads the config catalog (terms of the caller's taught cycles), so like
+	// assignments it composes module_grades + module_config.
+	mux.Handle("GET /api/v1/teaching/terms",
+		teachingModules("teaching:read", []string{"grades", "config"}, teachingH.Terms))
+	mux.Handle("GET /api/v1/teaching/roster",
+		teachingModules("teaching:read", []string{"grades"}, teachingH.Roster))
+	mux.Handle("POST /api/v1/teaching/grades",
+		teachingModules("teaching:write", []string{"grades"}, teachingH.CaptureGrade))
+
+	// M07 teaching-attendance (teacher self-scoped daily pass list): the maestro
+	// takes attendance ONLY for the groups they teach. Attendance is per GROUP, so
+	// the scope is the DISTINCT group_ids across the caller's assignments — derived
+	// by construction from the principal (via the same config-backed teaching scope
+	// handler), so no request field can widen it. attendance_own:read /
+	// attendance_own:write are self-scoped, so — unlike attendance:read /
+	// attendance:write, which touch ANY group — they are safe to grant to a
+	// non-owner Maestro role. The attendance client (roster + save, the same one
+	// backing /attendance/*) and the students client (roster student-name
+	// enrichment — a Maestro holds no students:read) are reused via the scope
+	// handler.
+	//
+	// Groups composes module_attendance + module_config (it enriches group names);
+	// roster and save touch only the attendance service, so they need only
+	// module_attendance. A supplied groupId is verified against the caller's OWN set
+	// before any roster/save call — a group outside it answers 404, never 403,
+	// leaking nothing about whether another group exists.
+	teachingAttH := handler.NewTeachingAttendanceHandler(teachingH, attendanceClient)
+	mux.Handle("GET /api/v1/teaching/groups",
+		teachingModules("attendance_own:read", []string{"attendance", "config"}, teachingAttH.Groups))
+	mux.Handle("GET /api/v1/teaching/attendance/roster",
+		teachingModules("attendance_own:read", []string{"attendance"}, teachingAttH.Roster))
+	mux.Handle("POST /api/v1/teaching/attendance",
+		teachingModules("attendance_own:write", []string{"attendance"}, teachingAttH.SaveAttendance))
+
 	// M05 finance (adeudos): flag-guarded, authenticated + rotation-enforced,
 	// permission-gated. Everything that moves money or the catalog is a write
 	// (finance:write): concept create/update, charge create/generate, discount,
@@ -367,24 +429,58 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/comms/notifications", commsRead(commsH.ListNotifications))
 	mux.Handle("POST /api/v1/comms/notifications/{id}/read", commsWrite(commsH.MarkRead))
 
-	// Phase 9b family surface: the guardian's own children's news, composed at the
-	// edge from the students guardian links + the comms inbox. It needs family:read.
+	// Phase 9b family surface: the guardian's own children's news, account,
+	// profile, grades and attendance, composed at the edge from the students
+	// guardian links + each owning module. Every route needs family:read.
 	//
-	// The route READS FROM TWO MODULES, so it is guarded on both (the guards nest):
-	// module_comms OFF or module_students OFF ⇒ 404. Guarding only comms would leave
-	// a route that still calls students ListStudentsForGuardian, so disabling
-	// students would break it instead of hiding it — a disabled module must be
-	// invisible and removable without taking others down with it.
+	// A composite route READS FROM SEVERAL MODULES, so it is guarded on each one it
+	// touches (the guards nest): any one disabled ⇒ 404. Guarding only some would
+	// leave a route that still calls a disabled module's service, so disabling that
+	// module would break the route instead of hiding it — a disabled module must be
+	// invisible and removable without taking others down with it. Every by-child
+	// route also composes module_students, because the ownership check itself reads
+	// the guardian links from the students service.
 	//
-	// The child set is derived from the PRINCIPAL, so the caller can only ever read
-	// their own children — no request field can widen the scope. That is why this
-	// route, unlike /comms/notifications, is safe to grant to a parent.
-	familyH := handler.NewFamilyHandler(studentsClient, commsClient)
-	familyRead := func(h http.HandlerFunc) http.Handler {
-		return guard.Protect("comms", guard.Protect("students",
-			requireAuthChanged(middleware.RequirePermission("family:read")(http.HandlerFunc(h)))))
+	// The child set is derived from the PRINCIPAL, and every {studentId} in a path
+	// is checked against it (assertLinkedChild → 404 for a non-linked id), so the
+	// caller can only ever read their own children — no request field can widen the
+	// scope. That is why these routes, unlike the admin /comms and /finance ones,
+	// are safe to grant to a parent.
+	// configClient (the same one backing the /config/* routes) is reused here only
+	// to resolve grade subject/term ids to names for the family grades screen.
+	familyH := handler.NewFamilyHandler(studentsClient, commsClient, financeClient, gradesClient, attendanceClient, configClient)
+	// familyReadModules composes family:read behind the given module guards, in
+	// addition to module_students which every family route needs for the ownership
+	// check. The guards nest right-to-left, so the outermost listed module is
+	// evaluated first; order does not affect the result (all must be ON).
+	familyReadModules := func(modules []string, h http.HandlerFunc) http.Handler {
+		wrapped := requireAuthChanged(middleware.RequirePermission("family:read")(http.HandlerFunc(h)))
+		for _, module := range modules {
+			wrapped = guard.Protect(module, wrapped)
+		}
+		return wrapped
 	}
-	mux.Handle("GET /api/v1/family/notifications", familyRead(familyH.Notifications))
+	// /family/notifications and the guardian mark-read compose comms (the inbox and
+	// the acknowledgement) with students (the guardian links).
+	familyComms := func(h http.HandlerFunc) http.Handler {
+		return familyReadModules([]string{"comms", "students"}, h)
+	}
+	mux.Handle("GET /api/v1/family/notifications", familyComms(familyH.Notifications))
+	mux.Handle("POST /api/v1/family/notifications/{notificationId}/read", familyComms(familyH.MarkNotificationRead))
+	// The students list is scoped by the principal alone (no {studentId}), so it
+	// needs only module_students — the app calls it first to discover its children.
+	mux.Handle("GET /api/v1/family/students",
+		familyReadModules([]string{"students"}, familyH.ListStudents))
+	// The by-child reads each compose module_students (ownership) with the module
+	// that owns the data.
+	mux.Handle("GET /api/v1/family/students/{studentId}/account",
+		familyReadModules([]string{"finance", "students"}, familyH.Account))
+	mux.Handle("GET /api/v1/family/students/{studentId}/profile",
+		familyReadModules([]string{"students"}, familyH.Profile))
+	mux.Handle("GET /api/v1/family/students/{studentId}/grades",
+		familyReadModules([]string{"grades", "students"}, familyH.Grades))
+	mux.Handle("GET /api/v1/family/students/{studentId}/attendance",
+		familyReadModules([]string{"attendance", "students"}, familyH.Attendance))
 
 	// Phase 6 iam admin (user/role CRUD): flag-guarded (module_iam), authenticated
 	// + rotation-enforced, permission-gated. User routes need users:read (GET) /

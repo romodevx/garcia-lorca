@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { MODULES, USERS } from "../_design/data";
+import { MODULES, USERS, isModuleVisible } from "../_design/data";
 import { Dashboard } from "./Dashboard";
 
 // The dashboard now reads real KPIs from the gateway — mock the clients so the
@@ -10,39 +10,101 @@ vi.mock("../students/api", () => ({ listStudents: vi.fn().mockResolvedValue([]) 
 vi.mock("../config/api", () => ({ listCycles: vi.fn().mockResolvedValue([]) }));
 vi.mock("../finance/api", () => ({ listCharges: vi.fn().mockResolvedValue([]) }));
 
-const VISIBLE_MODULES = MODULES.filter((m) => !m.hidden);
-const HIDDEN_MODULES = MODULES.filter((m) => m.hidden);
+// The full owner permission set: READ on every backend-backed module. The
+// no-backend modules (scholarships/uniforms/billing/reports) carry a permission
+// nobody is granted, so they never appear even for the owner.
+const OWNER_PERMS = [
+  "students:read",
+  "finance:read",
+  "attendance:read",
+  "grades:read",
+  "comms:read",
+  "config:read",
+  "users:read",
+] as const;
+
+const NOW = new Date("2026-06-12T09:00:00");
+const visibleFor = (perms: readonly string[]) => MODULES.filter((m) => isModuleVisible(m, perms));
 
 describe("Dashboard", () => {
-  it("renders a launcher card for every visible module", () => {
-    render(<Dashboard user={USERS.admin} onOpen={() => {}} now={new Date("2026-06-12T09:00:00")} />);
+  it("renders a launcher card for every module the owner can read", () => {
+    render(<Dashboard user={USERS.admin} onOpen={() => {}} permissions={OWNER_PERMS} now={NOW} />);
 
-    for (const m of VISIBLE_MODULES) {
-      expect(screen.getByText(m.desc)).toBeInTheDocument();
+    const expected = visibleFor(OWNER_PERMS);
+    for (const m of expected) {
+      expect(screen.getByText(m.label)).toBeInTheDocument();
     }
-    const launcherCards = VISIBLE_MODULES.map((m) => screen.getByText(m.label));
-    expect(launcherCards).toHaveLength(VISIBLE_MODULES.length);
+    expect(expected.map((m) => screen.getByText(m.label))).toHaveLength(expected.length);
+  });
+
+  it("hides modules the owner has no backend permission for (Becas/Uniformes/Facturación/Reportes)", () => {
+    render(<Dashboard user={USERS.admin} onOpen={() => {}} permissions={OWNER_PERMS} now={NOW} />);
+
+    for (const label of ["Becas", "Uniformes", "Facturación", "Reportes"]) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+    }
+  });
+
+  it("scopes the grid to the caller's permissions (grades+attendance only)", () => {
+    render(
+      <Dashboard user={USERS.teacher} onOpen={() => {}} permissions={["grades:read", "attendance:read"]} now={NOW} />
+    );
+
+    expect(screen.getByText("Calificaciones")).toBeInTheDocument();
+    expect(screen.getByText("Asistencia")).toBeInTheDocument();
+    // Modules the teacher cannot read must NOT appear.
+    expect(screen.queryByText("Finanzas y Adeudos")).not.toBeInTheDocument();
+    expect(screen.queryByText("Administración")).not.toBeInTheDocument();
+    expect(screen.queryByText("Estudiantes")).not.toBeInTheDocument();
+  });
+
+  it("gates the KPI shortcuts by permission (grades-only user sees no finance/students KPIs)", () => {
+    render(<Dashboard user={USERS.teacher} onOpen={() => {}} permissions={["grades:read"]} now={NOW} />);
+
+    expect(screen.queryByRole("button", { name: /Por cobrar/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Cobrado/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Alumnos/ })).not.toBeInTheDocument();
+  });
+
+  it("shows a friendly empty state when the caller has zero matching modules", () => {
+    render(<Dashboard user={USERS.teacher} onOpen={() => {}} permissions={[]} now={NOW} />);
+
+    expect(screen.getByText(/No tienes módulos asignados/)).toBeInTheDocument();
+    // No module tiles at all.
+    expect(screen.queryByText("Calificaciones")).not.toBeInTheDocument();
+  });
+
+  it("shows a loading skeleton (not all modules) before permissions resolve", () => {
+    // permissions === undefined ⇒ me() has not resolved yet. The grid must not
+    // flash every module and then hide them; it shows a skeleton instead.
+    render(<Dashboard user={USERS.admin} onOpen={() => {}} now={NOW} />);
+
+    expect(screen.getByRole("status", { name: /Cargando módulos/ })).toBeInTheDocument();
+    // Neither real tiles nor the empty state while loading.
+    expect(screen.queryByText("Calificaciones")).not.toBeInTheDocument();
+    expect(screen.queryByText(/No tienes módulos asignados/)).not.toBeInTheDocument();
   });
 
   it("does not render modules deactivated from the panel (e.g. Documentos)", () => {
-    render(<Dashboard user={USERS.admin} onOpen={() => {}} now={new Date("2026-06-12T09:00:00")} />);
+    render(<Dashboard user={USERS.admin} onOpen={() => {}} permissions={OWNER_PERMS} now={NOW} />);
 
-    expect(HIDDEN_MODULES.some((m) => m.id === "documents")).toBe(true);
-    for (const m of HIDDEN_MODULES) {
+    const hidden = MODULES.filter((m) => m.hidden);
+    expect(hidden.some((m) => m.id === "documents")).toBe(true);
+    for (const m of hidden) {
       expect(screen.queryByText(m.label)).not.toBeInTheDocument();
       expect(screen.queryByText(m.desc)).not.toBeInTheDocument();
     }
   });
 
   it("greets by time of day with the real user", () => {
-    render(<Dashboard user={USERS.admin} onOpen={() => {}} now={new Date("2026-06-12T09:00:00")} />);
+    render(<Dashboard user={USERS.admin} onOpen={() => {}} permissions={OWNER_PERMS} now={NOW} />);
     expect(screen.getByRole("heading", { name: /Buenos días, Director/ })).toBeInTheDocument();
   });
 
   it("navigates from a KPI card", async () => {
     const user = userEvent.setup();
     const onOpen = vi.fn();
-    render(<Dashboard user={USERS.admin} onOpen={onOpen} now={new Date("2026-06-12T09:00:00")} />);
+    render(<Dashboard user={USERS.admin} onOpen={onOpen} permissions={OWNER_PERMS} now={NOW} />);
 
     await user.click(screen.getByRole("button", { name: /Por cobrar/ }));
     expect(onOpen).toHaveBeenCalledWith("finance");

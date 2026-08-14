@@ -5,8 +5,12 @@ import { useTheme } from "../theme";
 import { Button } from "../ui";
 
 export interface LoginScreenProps {
-  /** Invoked on a successful sign-in (real auth lands with the IAM module). */
-  onLogin: () => void;
+  /**
+   * Submits the entered credentials. Resolves on success (the caller navigates);
+   * rejects on failure, which this screen surfaces as an inline error. The screen
+   * owns the loading + error UI so the caller only wires the network call.
+   */
+  onSubmit: (email: string, password: string) => Promise<void>;
 }
 
 // The official school logo (299×168 lockup). Shown on a white rounded backing so
@@ -28,12 +32,42 @@ function Brandmark({ height = 64 }: { height?: number }): ReactElement {
   );
 }
 
+// Message shown when a sign-in attempt is rejected. Deliberately generic (never
+// "wrong password" vs "no such user") so the screen does not leak which half of
+// the credential was wrong — the gateway equalizes login timing for the same
+// reason.
+const SIGN_IN_ERROR = "No pudimos iniciar sesión. Verifica tu correo y contraseña.";
+
+// Face ID / biometric unlock is out of scope for this pass. The button stays for
+// design fidelity but MUST NOT fake a login: it explains it is not yet available
+// instead of silently authenticating.
+// TODO(pendiente-mobile: biometric-unlock) — gate biometric sign-in on
+// expo-local-authentication + a stored refresh token.
+const FACE_ID_PENDING = "El acceso con Face ID estará disponible pronto.";
+
 /** Login screen — consistent with the web portal (logo, lime primary, fields). */
-export function LoginScreen({ onLogin }: LoginScreenProps): ReactElement {
+export function LoginScreen({ onSubmit }: LoginScreenProps): ReactElement {
   const theme = useTheme();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async (): Promise<void> => {
+    if (submitting) {
+      return;
+    }
+    setError(null);
+    setSubmitting(true);
+    try {
+      await onSubmit(email.trim(), password);
+    } catch {
+      setError(SIGN_IN_ERROR);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const fieldStyle = [styles.field, { backgroundColor: theme.colors.surface2 }];
 
@@ -88,7 +122,16 @@ export function LoginScreen({ onLogin }: LoginScreenProps): ReactElement {
         </Text>
       </Pressable>
 
-      <Button label="Ingresar" icon="arrow-right" onPress={onLogin} />
+      {error ? (
+        <Text
+          accessibilityRole="alert"
+          style={[styles.error, { color: theme.colors.bad, fontFamily: theme.fonts.uiSemi }]}
+        >
+          {error}
+        </Text>
+      ) : null}
+
+      <Button label="Ingresar" icon="arrow-right" onPress={submit} loading={submitting} />
 
       <View style={styles.divider}>
         <View style={[styles.line, { backgroundColor: theme.colors.line }]} />
@@ -96,7 +139,12 @@ export function LoginScreen({ onLogin }: LoginScreenProps): ReactElement {
         <View style={[styles.line, { backgroundColor: theme.colors.line }]} />
       </View>
 
-      <Button label="Entrar con Face ID" variant="outline" icon="lock" onPress={onLogin} />
+      <Button
+        label="Entrar con Face ID"
+        variant="outline"
+        icon="lock"
+        onPress={() => setError(FACE_ID_PENDING)}
+      />
 
       <Text style={[styles.help, { color: theme.colors.text3, fontFamily: theme.fonts.uiExtra }]}>
         ¿Problemas para entrar? Contacta a la escuela
@@ -128,6 +176,7 @@ const styles = StyleSheet.create({
   },
   input: { flex: 1, fontSize: 16, fontWeight: "600", padding: 0 },
   forgot: { alignSelf: "flex-end", marginVertical: 12, marginRight: 4 },
+  error: { textAlign: "center", fontSize: 13, fontWeight: "700", marginBottom: 12, marginHorizontal: 4 },
   divider: { flexDirection: "row", alignItems: "center", gap: 12, marginVertical: 18 },
   line: { flex: 1, height: 1 },
   help: { textAlign: "center", fontSize: 12.5, fontWeight: "700", marginTop: 22 },

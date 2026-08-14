@@ -19,15 +19,41 @@ type LoginService interface {
 	ChangePassword(ctx context.Context, accessToken, currentPassword, newPassword string) error
 }
 
+// MeEnricher is the iam directory surface the Me handler uses to decorate the
+// response with the caller's real display name + role name. The Connect
+// AuthClient implements it (it already backs the admin /users and /roles routes),
+// so the same client is reused; it is consumer-defined here so the handler stays
+// testable with a fake.
+type MeEnricher interface {
+	GetUser(ctx context.Context, id string) (client.User, error)
+	ListRoles(ctx context.Context) ([]client.Role, error)
+}
+
 // AuthHandler exposes the front-facing (HTTP/JSON) auth endpoints, proxying to
 // iam. It translates JSON ↔ the AuthClient and Connect error codes ↔ HTTP status.
 type AuthHandler struct {
 	auth LoginService
+	dir  MeEnricher // optional; enriches GET /me. Nil ⇒ /me returns only the principal.
 }
 
-// NewAuthHandler wires the handler to a login service.
-func NewAuthHandler(auth LoginService) *AuthHandler {
-	return &AuthHandler{auth: auth}
+// AuthOption configures an AuthHandler at construction (functional options).
+type AuthOption func(*AuthHandler)
+
+// WithDirectory wires the iam directory surface used to enrich GET /me with the
+// caller's real display name + role name. When unset, /me returns only the token
+// principal (userId/email/permissions).
+func WithDirectory(dir MeEnricher) AuthOption {
+	return func(h *AuthHandler) { h.dir = dir }
+}
+
+// NewAuthHandler wires the handler to a login service, plus any options (e.g.
+// WithDirectory to enable /me enrichment).
+func NewAuthHandler(auth LoginService, opts ...AuthOption) *AuthHandler {
+	h := &AuthHandler{auth: auth}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // Auth cookie conventions. Both tokens live ONLY in HttpOnly cookies — they are
@@ -236,10 +262,13 @@ type meResponse struct {
 	TenantID    string   `json:"tenantId"`
 	Email       string   `json:"email"`
 	Permissions []string `json:"permissions"`
+	DisplayName string   `json:"displayName,omitempty"`
+	Role        string   `json:"role,omitempty"`
 }
 
-// Me handles GET /api/v1/me: returns the authenticated principal. It must run
-// behind middleware.RequireAuth, which injects the principal.
+// Me handles GET /api/v1/me: returns the authenticated principal, enriched (when
+// a directory is wired) with the caller's real display name + role name. It must
+// run behind middleware.RequireAuth, which injects the principal.
 func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	p, ok := middleware.PrincipalFrom(r.Context())
 	if !ok {
@@ -253,12 +282,43 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	if perms == nil {
 		perms = []string{}
 	}
-	writeJSON(w, http.StatusOK, meResponse{
+	resp := meResponse{
 		UserID:      p.UserID,
 		TenantID:    p.TenantID,
 		Email:       p.Email,
 		Permissions: perms,
-	})
+	}
+	// Best-effort enrichment: /me drives session restore, so a directory outage
+	// must never fail it — the response degrades to the token principal.
+	h.enrichMe(r.Context(), p.UserID, &resp)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// enrichMe fills resp.DisplayName and resp.Role from the iam directory. Every
+// failure path — no directory wired, GetUser error, ListRoles error, no roles —
+// leaves the base response untouched, so enrichment can never break /me.
+func (h *AuthHandler) enrichMe(ctx context.Context, userID string, resp *meResponse) {
+	if h.dir == nil {
+		return
+	}
+	u, err := h.dir.GetUser(ctx, userID)
+	if err != nil {
+		return
+	}
+	resp.DisplayName = u.DisplayName
+	if len(u.RoleIDs) == 0 {
+		return
+	}
+	roles, err := h.dir.ListRoles(ctx)
+	if err != nil {
+		return
+	}
+	nameByID := make(map[string]string, len(roles))
+	for _, role := range roles {
+		nameByID[role.ID] = role.Name
+	}
+	// The user's primary/first role names the caller in the chrome.
+	resp.Role = nameByID[u.RoleIDs[0]]
 }
 
 type changePasswordRequest struct {
