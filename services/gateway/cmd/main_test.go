@@ -55,6 +55,8 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"student-reader":   {"students:read"},
 		"grades-writer":    {"grades:write", "grades:read"},
 		"grades-reader":    {"grades:read"},
+		"teaching-writer":  {"teaching:write", "teaching:read"},
+		"teaching-reader":  {"teaching:read"},
 		"finance-writer":   {"finance:write", "finance:read"},
 		"finance-reader":   {"finance:read"},
 		"att-writer":       {"attendance:write", "attendance:read"},
@@ -262,6 +264,40 @@ func (stubConfig) CreateTeachingAssignment(_ context.Context, req *connect.Reque
 		GroupId:   req.Msg.GetGroupId(),
 		SubjectId: req.Msg.GetSubjectId(),
 		TeacherId: req.Msg.GetTeacherId(),
+	}}), nil
+}
+
+// ListTeachers backs the teaching surface's caller→teacher resolution: it returns
+// one teacher whose user_id is "u1", the Subject the stub iam mints for every
+// token, so the authenticated principal resolves to teacher tch-1.
+func (stubConfig) ListTeachers(_ context.Context, _ *connect.Request[configv1.ListTeachersRequest]) (*connect.Response[configv1.ListTeachersResponse], error) {
+	return connect.NewResponse(&configv1.ListTeachersResponse{Teachers: []*configv1.Teacher{
+		{Id: "tch-1", FirstName: "Juan", LastName: "Pérez", Email: "juan@garcialorca.mx", UserId: "u1"},
+		{Id: "tch-2", FirstName: "Otra", LastName: "Maestra", Email: "otra@garcialorca.mx", UserId: "u2"},
+	}}), nil
+}
+
+// ListTeachingAssignments echoes one assignment (asg-1) for teacher tch-1, so the
+// teacher self-scoped surface has exactly one owned assignment; any other id is
+// unowned and must answer 404.
+func (stubConfig) ListTeachingAssignments(_ context.Context, req *connect.Request[configv1.ListTeachingAssignmentsRequest]) (*connect.Response[configv1.ListTeachingAssignmentsResponse], error) {
+	if req.Msg.GetTeacherId() != "tch-1" {
+		return connect.NewResponse(&configv1.ListTeachingAssignmentsResponse{}), nil
+	}
+	return connect.NewResponse(&configv1.ListTeachingAssignmentsResponse{TeachingAssignments: []*configv1.TeachingAssignment{
+		{Id: "asg-1", CycleId: "cyc-1", GroupId: "grp-1", SubjectId: "sub-1", TeacherId: "tch-1"},
+	}}), nil
+}
+
+func (stubConfig) ListGroups(_ context.Context, _ *connect.Request[configv1.ListGroupsRequest]) (*connect.Response[configv1.ListGroupsResponse], error) {
+	return connect.NewResponse(&configv1.ListGroupsResponse{Groups: []*configv1.Group{
+		{Id: "grp-1", CycleId: "cyc-1", Name: "3° A"},
+	}}), nil
+}
+
+func (stubConfig) ListSubjects(_ context.Context, _ *connect.Request[configv1.ListSubjectsRequest]) (*connect.Response[configv1.ListSubjectsResponse], error) {
+	return connect.NewResponse(&configv1.ListSubjectsResponse{Subjects: []*configv1.Subject{
+		{Id: "sub-1", Name: "Matemáticas"},
 	}}), nil
 }
 
@@ -1940,6 +1976,174 @@ func TestFamilyMarkReadWithoutFamilyReadIs403(t *testing.T) {
 	res := doGateway(t, gw, http.MethodPost, "/api/v1/family/notifications/ntf-1/read", "comms-reader", "")
 	if res.StatusCode != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 (comms:read is not family:read)", res.StatusCode)
+	}
+}
+
+// --- M07 teaching: the teacher self-scoped grade surface. Assignments composes
+// module_grades + module_config; roster and capture need only module_grades. The
+// stub iam mints Subject "u1" for every token, and stubConfig links user "u1" to
+// teacher tch-1, who teaches exactly asg-1 — so asg-1 is owned and any other id
+// is not.
+
+var teachingAssignmentsModulesOn = map[string]bool{"module_grades": true, "module_config": true}
+
+func TestTeachingAssignmentsDisabledGradesModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_config": true}) // module_grades OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/assignments", "teaching-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestTeachingAssignmentsDisabledConfigModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_grades": true}) // module_config OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/assignments", "teaching-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestTeachingAssignmentsNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, teachingAssignmentsModulesOn)
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/assignments", "", "")
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+// grades:read is NOT teaching:read: the broad staff permission cannot reach the
+// teacher self-scoped surface.
+func TestTeachingAssignmentsWithoutTeachingReadIs403(t *testing.T) {
+	gw := newTestGateway(t, teachingAssignmentsModulesOn)
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/assignments", "grades-reader", "")
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (grades:read is not teaching:read)", res.StatusCode)
+	}
+}
+
+func TestTeachingAssignmentsWithTeachingReadReturns200(t *testing.T) {
+	gw := newTestGateway(t, teachingAssignmentsModulesOn)
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/assignments", "teaching-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out struct {
+		Assignments []map[string]any `json:"assignments"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The stub resolves the principal (Subject "u1") to teacher tch-1, whose one
+	// assignment asg-1 comes back enriched with its group and subject names.
+	if len(out.Assignments) != 1 || out.Assignments[0]["id"] != "asg-1" ||
+		out.Assignments[0]["groupName"] != "3° A" || out.Assignments[0]["subjectName"] != "Matemáticas" {
+		t.Errorf("assignments = %v, want the caller's own asg-1 enriched", out.Assignments)
+	}
+}
+
+func TestTeachingRosterDisabledGradesModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_config": true}) // module_grades OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/roster?assignmentId=asg-1&termId=trm-1", "teaching-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestTeachingRosterNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_grades": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/roster?assignmentId=asg-1", "", "")
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+func TestTeachingRosterWithoutTeachingReadIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_grades": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/roster?assignmentId=asg-1", "grades-reader", "")
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+func TestTeachingRosterOwnedAssignmentReturns200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_grades": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/roster?assignmentId=asg-1&termId=trm-1", "teaching-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out struct {
+		Roster []map[string]any `json:"roster"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Roster) != 1 || out.Roster[0]["enrollmentId"] != "enr-1" {
+		t.Errorf("roster = %v, want one row keyed on enr-1", out.Roster)
+	}
+}
+
+// An assignment the caller does not teach answers 404 — the ownership guard runs
+// before the grades service is ever consulted.
+func TestTeachingRosterUnownedAssignmentIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_grades": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/roster?assignmentId=asg-999&termId=trm-1", "teaching-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (not the caller's assignment)", res.StatusCode)
+	}
+}
+
+func TestTeachingCaptureDisabledGradesModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_config": true}) // module_grades OFF
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teaching/grades", "teaching-writer",
+		`{"assignmentId":"asg-1","enrollmentId":"enr-1","termId":"trm-1","value":9}`)
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestTeachingCaptureNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_grades": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teaching/grades", "",
+		`{"assignmentId":"asg-1","enrollmentId":"enr-1","termId":"trm-1","value":9}`)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+// teaching:read is not teaching:write: a reader cannot capture.
+func TestTeachingCaptureWithoutTeachingWriteIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_grades": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teaching/grades", "teaching-reader",
+		`{"assignmentId":"asg-1","enrollmentId":"enr-1","termId":"trm-1","value":9}`)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (teaching:read is not teaching:write)", res.StatusCode)
+	}
+}
+
+func TestTeachingCaptureOwnedAssignmentReturns200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_grades": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teaching/grades", "teaching-writer",
+		`{"assignmentId":"asg-1","enrollmentId":"enr-1","termId":"trm-1","value":9}`)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out["id"] != "grd-1" || out["enrollmentId"] != "enr-1" {
+		t.Errorf("captured = %v, want grd-1 keyed on enr-1", out)
+	}
+}
+
+// Capturing against an assignment the caller does not teach answers 404 — the
+// ownership guard runs before the grades service is ever consulted.
+func TestTeachingCaptureUnownedAssignmentIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_grades": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teaching/grades", "teaching-writer",
+		`{"assignmentId":"asg-999","enrollmentId":"enr-1","termId":"trm-1","value":9}`)
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (not the caller's assignment)", res.StatusCode)
 	}
 }
 

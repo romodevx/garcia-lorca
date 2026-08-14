@@ -300,6 +300,35 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/grades/roster", gradesRead(gradesH.GetRoster))
 	mux.Handle("GET /api/v1/grades", gradesRead(gradesH.ListGradeEntries))
 
+	// M07 teaching (teacher self-scoped grades): the maestro-facing surface that
+	// exposes ONLY the caller's own groups+subjects, scoped by construction from
+	// the principal (the Teacher whose user_id == principal.UserID → that teacher's
+	// assignments). teaching:read/teaching:write are self-scoped, so — unlike
+	// grades:read/grades:write, which read and write ANY group — they are safe to
+	// grant to a non-owner Maestro role. The config client (teacher directory +
+	// assignments + group/subject catalog for name enrichment) is reused here, the
+	// same one backing /config/*, alongside the grades client (roster + capture).
+	//
+	// Assignments composes module_grades + module_config (it reads the config
+	// catalog); roster and capture touch only the grades service, so they need only
+	// module_grades. A supplied assignmentId is verified against the caller's OWN
+	// set before any roster/capture call — an id outside it answers 404, never 403,
+	// leaking nothing about whether another teacher's assignment exists.
+	teachingH := handler.NewTeachingHandler(configClient, gradesClient)
+	teachingModules := func(perm string, modules []string, h http.HandlerFunc) http.Handler {
+		wrapped := requireAuthChanged(middleware.RequirePermission(perm)(http.HandlerFunc(h)))
+		for _, module := range modules {
+			wrapped = guard.Protect(module, wrapped)
+		}
+		return wrapped
+	}
+	mux.Handle("GET /api/v1/teaching/assignments",
+		teachingModules("teaching:read", []string{"grades", "config"}, teachingH.Assignments))
+	mux.Handle("GET /api/v1/teaching/roster",
+		teachingModules("teaching:read", []string{"grades"}, teachingH.Roster))
+	mux.Handle("POST /api/v1/teaching/grades",
+		teachingModules("teaching:write", []string{"grades"}, teachingH.CaptureGrade))
+
 	// M05 finance (adeudos): flag-guarded, authenticated + rotation-enforced,
 	// permission-gated. Everything that moves money or the catalog is a write
 	// (finance:write): concept create/update, charge create/generate, discount,
