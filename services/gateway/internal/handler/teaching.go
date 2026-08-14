@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
@@ -70,16 +71,29 @@ type TeachingGradesService interface {
 	CaptureGrade(ctx context.Context, assignmentID, enrollmentID, termID string, value float64) (client.GradeEntry, error)
 }
 
+// TeachingStudentReader turns a roster's bare student UUIDs into the readable
+// names the teacher's capture screen needs. A Maestro role holds no
+// students:read, so the gateway — trusted, and running regardless of the caller's
+// permissions — resolves the names on the teacher's behalf. The Connect
+// StudentsClient (the same one backing /students and /family/*) satisfies it. One
+// list read (status "" — the whole tenant roster, honoring the client's page cap)
+// builds the id→name map, never one GetStudent per row.
+type TeachingStudentReader interface {
+	ListStudents(ctx context.Context, status string) ([]client.StudentResult, error)
+}
+
 // TeachingHandler is the teacher-facing, self-scoped grade surface.
 type TeachingHandler struct {
-	config TeachingConfigReader
-	grades TeachingGradesService
+	config   TeachingConfigReader
+	grades   TeachingGradesService
+	students TeachingStudentReader
 }
 
 // NewTeachingHandler wires the handler to the config (teacher directory +
-// assignments + catalog) and grades (roster + capture) surfaces.
-func NewTeachingHandler(config TeachingConfigReader, grades TeachingGradesService) *TeachingHandler {
-	return &TeachingHandler{config: config, grades: grades}
+// assignments + catalog), grades (roster + capture) and students (roster name
+// enrichment) surfaces.
+func NewTeachingHandler(config TeachingConfigReader, grades TeachingGradesService, students TeachingStudentReader) *TeachingHandler {
+	return &TeachingHandler{config: config, grades: grades, students: students}
 }
 
 // --- scoping core ----------------------------------------------------------
@@ -219,10 +233,25 @@ func (h *TeachingHandler) catalogNames(ctx context.Context, enrich bool) (groups
 
 // --- roster ----------------------------------------------------------------
 
+// teachingRosterRowResponse is the teaching-route-local roster projection: the
+// same fields the admin roster returns (enrollment, student, value, hasValue)
+// PLUS the student's readable name the teacher's capture screen needs — the join
+// a Maestro cannot do client-side without students:read. The admin grades roster
+// (rosterRowResponse in grades.go) is untouched; only this surface enriches. A
+// name that cannot be resolved degrades to "" — never an error.
+type teachingRosterRowResponse struct {
+	EnrollmentID string  `json:"enrollmentId"`
+	StudentID    string  `json:"studentId"`
+	StudentName  string  `json:"studentName"`
+	Value        float64 `json:"value"`
+	HasValue     bool    `json:"hasValue"`
+}
+
 // Roster handles GET /api/v1/teaching/roster?assignmentId=&termId= — the roster
-// of one of the caller's OWN assignments. The assignmentId is caller-supplied, so
-// it is verified against the caller's own set first (404 for any other id), and
-// only then is the grades service asked for the roster.
+// of one of the caller's OWN assignments, each row enriched with the student's
+// readable name. The assignmentId is caller-supplied, so it is verified against
+// the caller's own set first (404 for any other id), and only then is the grades
+// service asked for the roster.
 //
 // It runs behind RequireAuth + rotation, the module_grades guard and
 // RequirePermission("teaching:read").
@@ -242,11 +271,39 @@ func (h *TeachingHandler) Roster(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, err)
 		return
 	}
-	out := make([]rosterRowResponse, 0, len(rows))
+	// Resolve the studentId→name map ONCE, and only when there is a row to enrich.
+	studentNames := h.studentNames(r.Context(), len(rows) > 0)
+	out := make([]teachingRosterRowResponse, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, toRosterRowResponse(row))
+		out = append(out, teachingRosterRowResponse{
+			EnrollmentID: row.EnrollmentID,
+			StudentID:    row.StudentID,
+			StudentName:  studentNames[row.StudentID],
+			Value:        row.Value,
+			HasValue:     row.HasValue,
+		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"roster": out})
+}
+
+// studentNames builds the studentId→"First Last" map used to enrich a roster. It
+// is best-effort by design: no rows to enrich or a failed list read each yields
+// an empty map, and the caller reads a missing id as "" — a display gap, never a
+// failed read. A non-nil map is always returned, so lookups never panic. The map
+// is built from ONE list read, not one GetStudent per row.
+func (h *TeachingHandler) studentNames(ctx context.Context, enrich bool) map[string]string {
+	names := map[string]string{}
+	if !enrich {
+		return names
+	}
+	students, err := h.students.ListStudents(ctx, "")
+	if err != nil {
+		return names
+	}
+	for _, s := range students {
+		names[s.ID] = strings.TrimSpace(s.FirstName + " " + s.LastName)
+	}
+	return names
 }
 
 // --- capture ---------------------------------------------------------------

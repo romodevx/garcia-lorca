@@ -2077,8 +2077,11 @@ func TestTeachingRosterOwnedAssignmentReturns200(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(out.Roster) != 1 || out.Roster[0]["enrollmentId"] != "enr-1" {
-		t.Errorf("roster = %v, want one row keyed on enr-1", out.Roster)
+	// The gateway resolves the student name for the Maestro (who holds no
+	// students:read): the stub roster's stu-1 comes back named "Ana".
+	if len(out.Roster) != 1 || out.Roster[0]["enrollmentId"] != "enr-1" ||
+		out.Roster[0]["studentId"] != "stu-1" || out.Roster[0]["studentName"] != "Ana" {
+		t.Errorf("roster = %v, want one row keyed on enr-1 with studentName Ana", out.Roster)
 	}
 }
 

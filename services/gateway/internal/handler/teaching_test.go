@@ -103,6 +103,26 @@ func (f *fakeTeachingGrades) CaptureGrade(_ context.Context, assignmentID, enrol
 	return f.captured, nil
 }
 
+// fakeTeachingStudents doubles the students directory the roster enrichment
+// reads. It counts the calls so the "resolve the roster's names in a SINGLE list
+// read" contract is observable, and can fail to prove the read degrades rather
+// than erroring.
+type fakeTeachingStudents struct {
+	students     []client.StudentResult
+	err          error
+	gotListCalls int
+	gotStatus    string
+}
+
+func (f *fakeTeachingStudents) ListStudents(_ context.Context, status string) ([]client.StudentResult, error) {
+	f.gotListCalls++
+	f.gotStatus = status
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.students, nil
+}
+
 // teacherGET builds an authenticated GET against the teaching surface, with
 // userID as the principal the middleware would have injected.
 func teacherGET(target, userID string) *http.Request {
@@ -153,7 +173,7 @@ func TestTeachingAssignmentsReturnsCallerOwnAssignmentsEnriched(t *testing.T) {
 		groups:   []client.GroupResult{{ID: "grp-1", Name: "3° A"}, {ID: "grp-2", Name: "4° B"}},
 		subjects: []client.SubjectResult{{ID: "sub-1", Name: "Matemáticas"}, {ID: "sub-2", Name: "Español"}},
 	}
-	h := handler.NewTeachingHandler(config, &fakeTeachingGrades{})
+	h := handler.NewTeachingHandler(config, &fakeTeachingGrades{}, &fakeTeachingStudents{})
 
 	rec := httptest.NewRecorder()
 	h.Assignments(rec, teacherGET("/api/v1/teaching/assignments", "usr-t"))
@@ -195,7 +215,7 @@ func TestTeachingAssignmentsNoLinkedTeacherIsEmptyArray(t *testing.T) {
 	config := &fakeTeachingConfig{
 		teachers: []client.Teacher{{ID: "tch-1", UserID: "usr-someone-else"}},
 	}
-	h := handler.NewTeachingHandler(config, &fakeTeachingGrades{})
+	h := handler.NewTeachingHandler(config, &fakeTeachingGrades{}, &fakeTeachingStudents{})
 
 	rec := httptest.NewRecorder()
 	h.Assignments(rec, teacherGET("/api/v1/teaching/assignments", "usr-nobody"))
@@ -223,7 +243,7 @@ func TestTeachingAssignmentsEnrichmentDegradesToEmptyNames(t *testing.T) {
 	config := oneTeacher()
 	config.groupsErr = connect.NewError(connect.CodeUnavailable, errString("config down"))
 	config.subjectsErr = connect.NewError(connect.CodeUnavailable, errString("config down"))
-	h := handler.NewTeachingHandler(config, &fakeTeachingGrades{})
+	h := handler.NewTeachingHandler(config, &fakeTeachingGrades{}, &fakeTeachingStudents{})
 
 	rec := httptest.NewRecorder()
 	h.Assignments(rec, teacherGET("/api/v1/teaching/assignments", "usr-t"))
@@ -248,7 +268,7 @@ func TestTeachingAssignmentsEnrichmentDegradesToEmptyNames(t *testing.T) {
 
 func TestTeachingAssignmentsPropagatesDirectoryError(t *testing.T) {
 	config := &fakeTeachingConfig{teachersErr: connect.NewError(connect.CodeUnavailable, errString("config down"))}
-	h := handler.NewTeachingHandler(config, &fakeTeachingGrades{})
+	h := handler.NewTeachingHandler(config, &fakeTeachingGrades{}, &fakeTeachingStudents{})
 
 	rec := httptest.NewRecorder()
 	h.Assignments(rec, teacherGET("/api/v1/teaching/assignments", "usr-t"))
@@ -259,7 +279,7 @@ func TestTeachingAssignmentsPropagatesDirectoryError(t *testing.T) {
 }
 
 func TestTeachingAssignmentsWithoutPrincipalIs401(t *testing.T) {
-	h := handler.NewTeachingHandler(oneTeacher(), &fakeTeachingGrades{})
+	h := handler.NewTeachingHandler(oneTeacher(), &fakeTeachingGrades{}, &fakeTeachingStudents{})
 	rec := httptest.NewRecorder()
 	h.Assignments(rec, httptest.NewRequest(http.MethodGet, "/api/v1/teaching/assignments", nil))
 	if rec.Code != http.StatusUnauthorized {
@@ -283,7 +303,7 @@ func TestTeachingAssignmentsEmptyPrincipalNeverMatchesUnlinkedTeacher(t *testing
 			"tch-1":        {{ID: "asg-1", TeacherID: "tch-1"}},
 		},
 	}
-	h := handler.NewTeachingHandler(config, &fakeTeachingGrades{})
+	h := handler.NewTeachingHandler(config, &fakeTeachingGrades{}, &fakeTeachingStudents{})
 
 	// A principal with an empty UserID must resolve to zero assignments and never
 	// scan for a teacher.
@@ -330,8 +350,16 @@ func TestTeachingRosterOwnedAssignmentReads(t *testing.T) {
 	config := oneTeacher()
 	grades := &fakeTeachingGrades{roster: []client.RosterRow{
 		{EnrollmentID: "enr-1", StudentID: "stu-1", Value: 8.5, HasValue: true},
+		{EnrollmentID: "enr-2", StudentID: "stu-2", Value: 0, HasValue: false},
 	}}
-	h := handler.NewTeachingHandler(config, grades)
+	// The Maestro role holds no students:read, so the gateway resolves the names
+	// on its behalf: ONE list read builds the studentId→name map.
+	students := &fakeTeachingStudents{students: []client.StudentResult{
+		{ID: "stu-1", FirstName: "Ana", LastName: "García"},
+		{ID: "stu-2", FirstName: "Luis", LastName: "Pérez"},
+		{ID: "stu-9", FirstName: "Otra", LastName: "Persona"},
+	}}
+	h := handler.NewTeachingHandler(config, grades, students)
 
 	rec := httptest.NewRecorder()
 	h.Roster(rec, teacherGET("/api/v1/teaching/roster?assignmentId=asg-1&termId=trm-1", "usr-t"))
@@ -343,14 +371,62 @@ func TestTeachingRosterOwnedAssignmentReads(t *testing.T) {
 		t.Errorf("roster read = %d call(s) for %q/%q, want 1 for asg-1/trm-1",
 			grades.rosterCalls, grades.gotRosterAssignmentID, grades.gotRosterTermID)
 	}
+	// The names come from a SINGLE list read, not one GetStudent per row.
+	if students.gotListCalls != 1 {
+		t.Errorf("students listed %d time(s), want exactly 1 for the whole roster", students.gotListCalls)
+	}
 	var out struct {
 		Roster []map[string]any `json:"roster"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(out.Roster) != 1 || out.Roster[0]["enrollmentId"] != "enr-1" {
-		t.Errorf("roster = %v, want one row keyed on enr-1", out.Roster)
+	if len(out.Roster) != 2 {
+		t.Fatalf("roster = %v, want two rows", out.Roster)
+	}
+	byEnr := map[string]map[string]any{}
+	for _, row := range out.Roster {
+		byEnr[row["enrollmentId"].(string)] = row
+	}
+	// Existing fields kept AND the readable name added.
+	if byEnr["enr-1"]["studentId"] != "stu-1" || byEnr["enr-1"]["studentName"] != "Ana García" ||
+		byEnr["enr-1"]["hasValue"] != true {
+		t.Errorf("enr-1 = %v, want fields kept and studentName enriched", byEnr["enr-1"])
+	}
+	if byEnr["enr-2"]["studentName"] != "Luis Pérez" || byEnr["enr-2"]["hasValue"] != false {
+		t.Errorf("enr-2 = %v, want Luis Pérez / hasValue false", byEnr["enr-2"])
+	}
+}
+
+// A students-lookup miss must never fail the roster read: the names degrade to
+// empty strings while the rows still come back 200 (same graceful pattern as the
+// grades subject/term enrichment).
+func TestTeachingRosterStudentLookupErrorDegradesToEmptyName(t *testing.T) {
+	config := oneTeacher()
+	grades := &fakeTeachingGrades{roster: []client.RosterRow{
+		{EnrollmentID: "enr-1", StudentID: "stu-1", Value: 8.5, HasValue: true},
+	}}
+	students := &fakeTeachingStudents{err: connect.NewError(connect.CodeUnavailable, errString("students down"))}
+	h := handler.NewTeachingHandler(config, grades, students)
+
+	rec := httptest.NewRecorder()
+	h.Roster(rec, teacherGET("/api/v1/teaching/roster?assignmentId=asg-1&termId=trm-1", "usr-t"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 despite the students error", rec.Code)
+	}
+	var out struct {
+		Roster []map[string]any `json:"roster"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Roster) != 1 {
+		t.Fatalf("roster = %d, want 1 (the row still comes back)", len(out.Roster))
+	}
+	row := out.Roster[0]
+	if row["studentId"] != "stu-1" || row["studentName"] != "" {
+		t.Errorf("row = %v, want ids kept and studentName degraded to empty string", row)
 	}
 }
 
@@ -359,7 +435,7 @@ func TestTeachingRosterOwnedAssignmentReads(t *testing.T) {
 func TestTeachingRosterUnownedAssignmentIs404AndDoesNotRead(t *testing.T) {
 	config := oneTeacher() // teaches only asg-1
 	grades := &fakeTeachingGrades{}
-	h := handler.NewTeachingHandler(config, grades)
+	h := handler.NewTeachingHandler(config, grades, &fakeTeachingStudents{})
 
 	rec := httptest.NewRecorder()
 	h.Roster(rec, teacherGET("/api/v1/teaching/roster?assignmentId=asg-999&termId=trm-1", "usr-t"))
@@ -373,7 +449,7 @@ func TestTeachingRosterUnownedAssignmentIs404AndDoesNotRead(t *testing.T) {
 }
 
 func TestTeachingRosterWithoutPrincipalIs401(t *testing.T) {
-	h := handler.NewTeachingHandler(oneTeacher(), &fakeTeachingGrades{})
+	h := handler.NewTeachingHandler(oneTeacher(), &fakeTeachingGrades{}, &fakeTeachingStudents{})
 	rec := httptest.NewRecorder()
 	h.Roster(rec, httptest.NewRequest(http.MethodGet, "/api/v1/teaching/roster?assignmentId=asg-1", nil))
 	if rec.Code != http.StatusUnauthorized {
@@ -388,7 +464,7 @@ func TestTeachingCaptureOwnedAssignmentCaptures(t *testing.T) {
 	grades := &fakeTeachingGrades{captured: client.GradeEntry{
 		ID: "grd-1", EnrollmentID: "enr-1", SubjectID: "sub-1", TermID: "trm-1", TeacherID: "tch-1", Value: 9,
 	}}
-	h := handler.NewTeachingHandler(config, grades)
+	h := handler.NewTeachingHandler(config, grades, &fakeTeachingStudents{})
 
 	rec := httptest.NewRecorder()
 	h.CaptureGrade(rec, teacherPOST("/api/v1/teaching/grades", "usr-t",
@@ -416,7 +492,7 @@ func TestTeachingCaptureOwnedAssignmentCaptures(t *testing.T) {
 func TestTeachingCaptureUnownedAssignmentIs404AndDoesNotCapture(t *testing.T) {
 	config := oneTeacher() // teaches only asg-1
 	grades := &fakeTeachingGrades{}
-	h := handler.NewTeachingHandler(config, grades)
+	h := handler.NewTeachingHandler(config, grades, &fakeTeachingStudents{})
 
 	rec := httptest.NewRecorder()
 	h.CaptureGrade(rec, teacherPOST("/api/v1/teaching/grades", "usr-t",
@@ -444,7 +520,7 @@ func TestTeachingCaptureAnotherTeachersAssignmentIs404(t *testing.T) {
 		},
 	}
 	grades := &fakeTeachingGrades{}
-	h := handler.NewTeachingHandler(config, grades)
+	h := handler.NewTeachingHandler(config, grades, &fakeTeachingStudents{})
 
 	rec := httptest.NewRecorder()
 	// asg-2 belongs to tch-2, not to the caller's tch-1.
@@ -460,7 +536,7 @@ func TestTeachingCaptureAnotherTeachersAssignmentIs404(t *testing.T) {
 }
 
 func TestTeachingCaptureWithoutPrincipalIs401(t *testing.T) {
-	h := handler.NewTeachingHandler(oneTeacher(), &fakeTeachingGrades{})
+	h := handler.NewTeachingHandler(oneTeacher(), &fakeTeachingGrades{}, &fakeTeachingStudents{})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/teaching/grades",
 		strings.NewReader(`{"assignmentId":"asg-1","enrollmentId":"enr-1","termId":"trm-1","value":9}`))
@@ -471,7 +547,7 @@ func TestTeachingCaptureWithoutPrincipalIs401(t *testing.T) {
 }
 
 func TestTeachingCaptureInvalidBodyIs400(t *testing.T) {
-	h := handler.NewTeachingHandler(oneTeacher(), &fakeTeachingGrades{})
+	h := handler.NewTeachingHandler(oneTeacher(), &fakeTeachingGrades{}, &fakeTeachingStudents{})
 	rec := httptest.NewRecorder()
 	h.CaptureGrade(rec, teacherPOST("/api/v1/teaching/grades", "usr-t", `{not json`))
 	if rec.Code != http.StatusBadRequest {

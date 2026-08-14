@@ -307,14 +307,16 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// grades:read/grades:write, which read and write ANY group — they are safe to
 	// grant to a non-owner Maestro role. The config client (teacher directory +
 	// assignments + group/subject catalog for name enrichment) is reused here, the
-	// same one backing /config/*, alongside the grades client (roster + capture).
+	// same one backing /config/*, alongside the grades client (roster + capture)
+	// and the students client (roster student-name enrichment — a Maestro holds no
+	// students:read, so the trusted gateway resolves the names on its behalf).
 	//
 	// Assignments composes module_grades + module_config (it reads the config
 	// catalog); roster and capture touch only the grades service, so they need only
 	// module_grades. A supplied assignmentId is verified against the caller's OWN
 	// set before any roster/capture call — an id outside it answers 404, never 403,
 	// leaking nothing about whether another teacher's assignment exists.
-	teachingH := handler.NewTeachingHandler(configClient, gradesClient)
+	teachingH := handler.NewTeachingHandler(configClient, gradesClient, studentsClient)
 	teachingModules := func(perm string, modules []string, h http.HandlerFunc) http.Handler {
 		wrapped := requireAuthChanged(middleware.RequirePermission(perm)(http.HandlerFunc(h)))
 		for _, module := range modules {
