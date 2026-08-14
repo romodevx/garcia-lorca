@@ -46,11 +46,14 @@ type TeachingAssignmentReader interface {
 }
 
 // TeachingCatalogReader turns the bare group/subject UUIDs on an assignment into
-// the human-readable names the teacher's screen needs to render. Passing "" lists
-// the whole tenant-scoped catalog, which is what the id→name maps are built from.
+// the human-readable names the teacher's screen needs to render, and lists the
+// terms of a cycle for the term picker. Passing "" for the group/subject filters
+// lists the whole tenant-scoped catalog, which is what the id→name maps are built
+// from; ListTerms is scoped to one cycle the caller teaches in.
 type TeachingCatalogReader interface {
 	ListGroups(ctx context.Context, cycleID, gradeLevelID string) ([]client.GroupResult, error)
 	ListSubjects(ctx context.Context, gradeLevelID string) ([]client.SubjectResult, error)
+	ListTerms(ctx context.Context, cycleID, levelID string) ([]client.TermResult, error)
 }
 
 // TeachingConfigReader is the config surface the teaching handler consumes: the
@@ -229,6 +232,63 @@ func (h *TeachingHandler) catalogNames(ctx context.Context, enrich bool) (groups
 		}
 	}
 	return groups, subjects
+}
+
+// --- terms -----------------------------------------------------------------
+
+// teachingTermResponse is the term-picker projection the teacher's roster screen
+// needs: a term's id, readable name and the cycle it belongs to. A Maestro holds
+// no config:read, so the /config/terms route is unreachable to it — this surface
+// serves only the terms of cycles the caller actually teaches in.
+type teachingTermResponse struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	CycleID string `json:"cycleId"`
+}
+
+// Terms handles GET /api/v1/teaching/terms — the terms of every cycle the CALLER
+// teaches in, deduped by term id. The cycle set is derived from the principal's
+// own assignments (via callerAssignments), so no request field can widen it — a
+// teacher never sees the terms of a cycle they do not teach. A principal with no
+// linked teacher record (or no assignments) gets an empty list.
+//
+// It runs behind RequireAuth + rotation, the module_grades + module_config guards
+// and RequirePermission("teaching:read") — the same wrapper as
+// /teaching/assignments. Resolving the caller's assignments is a hard dependency
+// (a failure there is a real 500), but each per-cycle terms lookup is best-effort:
+// a failed cycle is skipped, never a 500, mirroring the name enrichment.
+func (h *TeachingHandler) Terms(w http.ResponseWriter, r *http.Request) {
+	p, ok := middleware.PrincipalFrom(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	_, assignments, err := h.callerAssignments(r.Context(), p)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	out := make([]teachingTermResponse, 0, len(assignments))
+	seenCycle := make(map[string]bool, len(assignments))
+	seenTerm := make(map[string]bool, len(assignments))
+	for _, a := range assignments {
+		if a.CycleID == "" || seenCycle[a.CycleID] {
+			continue // each DISTINCT taught cycle is resolved exactly once
+		}
+		seenCycle[a.CycleID] = true
+		terms, err := h.config.ListTerms(r.Context(), a.CycleID, "")
+		if err != nil {
+			continue // best-effort: skip a cycle whose terms cannot be read
+		}
+		for _, t := range terms {
+			if seenTerm[t.ID] {
+				continue // a term shared across cycles is returned once
+			}
+			seenTerm[t.ID] = true
+			out = append(out, teachingTermResponse{ID: t.ID, Name: t.Name, CycleID: t.CycleID})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"terms": out})
 }
 
 // --- roster ----------------------------------------------------------------

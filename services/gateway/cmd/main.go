@@ -326,6 +326,10 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	}
 	mux.Handle("GET /api/v1/teaching/assignments",
 		teachingModules("teaching:read", []string{"grades", "config"}, teachingH.Assignments))
+	// Terms reads the config catalog (terms of the caller's taught cycles), so like
+	// assignments it composes module_grades + module_config.
+	mux.Handle("GET /api/v1/teaching/terms",
+		teachingModules("teaching:read", []string{"grades", "config"}, teachingH.Terms))
 	mux.Handle("GET /api/v1/teaching/roster",
 		teachingModules("teaching:read", []string{"grades"}, teachingH.Roster))
 	mux.Handle("POST /api/v1/teaching/grades",

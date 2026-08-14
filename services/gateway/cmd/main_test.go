@@ -301,6 +301,18 @@ func (stubConfig) ListSubjects(_ context.Context, _ *connect.Request[configv1.Li
 	}}), nil
 }
 
+// ListTerms echoes one term for cyc-1, the cycle stubConfig's one teaching
+// assignment lives in, so the teacher self-scoped terms surface has exactly one
+// term to return.
+func (stubConfig) ListTerms(_ context.Context, req *connect.Request[configv1.ListTermsRequest]) (*connect.Response[configv1.ListTermsResponse], error) {
+	if req.Msg.GetCycleId() != "cyc-1" {
+		return connect.NewResponse(&configv1.ListTermsResponse{}), nil
+	}
+	return connect.NewResponse(&configv1.ListTermsResponse{Terms: []*configv1.Term{
+		{Id: "trm-1", CycleId: "cyc-1", Name: "Bloque 1"},
+	}}), nil
+}
+
 // stubGrades echoes a canned grade entry / roster / list, enough to exercise the
 // grades route security chain end to end. CaptureGrade echoes the derived
 // subject/teacher to prove the edge surfaces them without accepting them.
@@ -2038,6 +2050,62 @@ func TestTeachingAssignmentsWithTeachingReadReturns200(t *testing.T) {
 	if len(out.Assignments) != 1 || out.Assignments[0]["id"] != "asg-1" ||
 		out.Assignments[0]["groupName"] != "3° A" || out.Assignments[0]["subjectName"] != "Matemáticas" {
 		t.Errorf("assignments = %v, want the caller's own asg-1 enriched", out.Assignments)
+	}
+}
+
+// /teaching/terms composes module_grades + module_config (it reads the config
+// term catalog), teaching:read, and serves only the terms of cycles the caller
+// teaches in.
+
+func TestTeachingTermsDisabledGradesModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_config": true}) // module_grades OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/terms", "teaching-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestTeachingTermsDisabledConfigModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_grades": true}) // module_config OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/terms", "teaching-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestTeachingTermsNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, teachingAssignmentsModulesOn)
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/terms", "", "")
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+func TestTeachingTermsWithoutTeachingReadIs403(t *testing.T) {
+	gw := newTestGateway(t, teachingAssignmentsModulesOn)
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/terms", "grades-reader", "")
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (grades:read is not teaching:read)", res.StatusCode)
+	}
+}
+
+func TestTeachingTermsWithTeachingReadReturns200(t *testing.T) {
+	gw := newTestGateway(t, teachingAssignmentsModulesOn)
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/terms", "teaching-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var out struct {
+		Terms []map[string]any `json:"terms"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The stub resolves the principal to teacher tch-1, whose one assignment lives
+	// in cyc-1, whose one term trm-1 comes back.
+	if len(out.Terms) != 1 || out.Terms[0]["id"] != "trm-1" ||
+		out.Terms[0]["name"] != "Bloque 1" || out.Terms[0]["cycleId"] != "cyc-1" {
+		t.Errorf("terms = %v, want the caller's own cycle's trm-1", out.Terms)
 	}
 }
 

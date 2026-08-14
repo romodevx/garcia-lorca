@@ -36,6 +36,11 @@ type fakeTeachingConfig struct {
 	subjectsErr     error
 	gotListGroups   int
 	gotListSubjects int
+
+	termsByCycle   map[string][]client.TermResult
+	termsErr       error
+	gotListTerms   int
+	gotTermsCycles []string
 }
 
 func (f *fakeTeachingConfig) ListTeachers(_ context.Context) ([]client.Teacher, error) {
@@ -60,6 +65,15 @@ func (f *fakeTeachingConfig) ListGroups(_ context.Context, _, _ string) ([]clien
 func (f *fakeTeachingConfig) ListSubjects(_ context.Context, _ string) ([]client.SubjectResult, error) {
 	f.gotListSubjects++
 	return f.subjects, f.subjectsErr
+}
+
+func (f *fakeTeachingConfig) ListTerms(_ context.Context, cycleID, _ string) ([]client.TermResult, error) {
+	f.gotListTerms++
+	f.gotTermsCycles = append(f.gotTermsCycles, cycleID)
+	if f.termsErr != nil {
+		return nil, f.termsErr
+	}
+	return f.termsByCycle[cycleID], nil
 }
 
 // fakeTeachingGrades doubles the grades surface, counting its calls so the
@@ -341,6 +355,183 @@ func TestTeachingAssignmentsEmptyPrincipalNeverMatchesUnlinkedTeacher(t *testing
 	}
 	if len(out.Assignments) != 1 || out.Assignments[0]["id"] != "asg-1" {
 		t.Errorf("assignments = %v, want the linked teacher's own asg-1", out.Assignments)
+	}
+}
+
+// --- terms -----------------------------------------------------------------
+
+// The teacher picks a term for the roster, but a Maestro holds no config:read, so
+// the gateway serves ONLY the terms of the cycles the caller actually teaches in
+// — the union across the caller's assignments' cycles, deduped by term id.
+func TestTeachingTermsReturnsUnionAcrossTaughtCycles(t *testing.T) {
+	config := &fakeTeachingConfig{
+		teachers: []client.Teacher{{ID: "tch-1", UserID: "usr-t"}},
+		assignmentsByTeacher: map[string][]client.TeachingAssignment{
+			"tch-1": {
+				{ID: "asg-1", CycleID: "cyc-1", TeacherID: "tch-1"},
+				{ID: "asg-2", CycleID: "cyc-2", TeacherID: "tch-1"},
+				{ID: "asg-3", CycleID: "cyc-1", TeacherID: "tch-1"}, // same cycle as asg-1
+			},
+		},
+		termsByCycle: map[string][]client.TermResult{
+			"cyc-1": {
+				{ID: "trm-1", CycleID: "cyc-1", Name: "Bloque 1"},
+				{ID: "trm-2", CycleID: "cyc-1", Name: "Bloque 2"},
+			},
+			"cyc-2": {
+				{ID: "trm-3", CycleID: "cyc-2", Name: "Trimestre 1"},
+			},
+		},
+	}
+	h := handler.NewTeachingHandler(config, &fakeTeachingGrades{}, &fakeTeachingStudents{})
+
+	rec := httptest.NewRecorder()
+	h.Terms(rec, teacherGET("/api/v1/teaching/terms", "usr-t"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	// Only the DISTINCT cycles the caller teaches are queried — cyc-1 once, not
+	// twice, despite two assignments in it.
+	if config.gotListTerms != 2 {
+		t.Errorf("ListTerms called %d time(s), want 2 (one per distinct taught cycle)", config.gotListTerms)
+	}
+	var out struct {
+		Terms []map[string]any `json:"terms"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Terms) != 3 {
+		t.Fatalf("terms = %d, want 3 (union of both cycles, deduped)", len(out.Terms))
+	}
+	byID := map[string]map[string]any{}
+	for _, term := range out.Terms {
+		byID[term["id"].(string)] = term
+	}
+	if byID["trm-1"]["name"] != "Bloque 1" || byID["trm-1"]["cycleId"] != "cyc-1" {
+		t.Errorf("trm-1 = %v, want Bloque 1 / cyc-1", byID["trm-1"])
+	}
+	if byID["trm-3"]["name"] != "Trimestre 1" || byID["trm-3"]["cycleId"] != "cyc-2" {
+		t.Errorf("trm-3 = %v, want Trimestre 1 / cyc-2", byID["trm-3"])
+	}
+}
+
+// A term that appears in more than one taught cycle's list is returned once.
+func TestTeachingTermsDedupsByTermID(t *testing.T) {
+	config := &fakeTeachingConfig{
+		teachers: []client.Teacher{{ID: "tch-1", UserID: "usr-t"}},
+		assignmentsByTeacher: map[string][]client.TeachingAssignment{
+			"tch-1": {
+				{ID: "asg-1", CycleID: "cyc-1", TeacherID: "tch-1"},
+				{ID: "asg-2", CycleID: "cyc-2", TeacherID: "tch-1"},
+			},
+		},
+		termsByCycle: map[string][]client.TermResult{
+			"cyc-1": {{ID: "trm-shared", CycleID: "cyc-1", Name: "Bloque 1"}},
+			"cyc-2": {{ID: "trm-shared", CycleID: "cyc-2", Name: "Bloque 1"}},
+		},
+	}
+	h := handler.NewTeachingHandler(config, &fakeTeachingGrades{}, &fakeTeachingStudents{})
+
+	rec := httptest.NewRecorder()
+	h.Terms(rec, teacherGET("/api/v1/teaching/terms", "usr-t"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var out struct {
+		Terms []map[string]any `json:"terms"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Terms) != 1 || out.Terms[0]["id"] != "trm-shared" {
+		t.Errorf("terms = %v, want a single deduped trm-shared", out.Terms)
+	}
+}
+
+// A principal with no linked teacher record teaches nothing, so there are no
+// cycles to resolve terms for: an empty array, never a 500, and no terms lookup.
+func TestTeachingTermsNoLinkedTeacherIsEmptyArray(t *testing.T) {
+	config := &fakeTeachingConfig{
+		teachers: []client.Teacher{{ID: "tch-1", UserID: "usr-someone-else"}},
+	}
+	h := handler.NewTeachingHandler(config, &fakeTeachingGrades{}, &fakeTeachingStudents{})
+
+	rec := httptest.NewRecorder()
+	h.Terms(rec, teacherGET("/api/v1/teaching/terms", "usr-nobody"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if config.gotListTerms != 0 {
+		t.Errorf("terms were read %d time(s); a principal with no teacher record needs no lookup", config.gotListTerms)
+	}
+	var out struct {
+		Terms []map[string]any `json:"terms"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Terms == nil || len(out.Terms) != 0 {
+		t.Errorf("terms = %v, want an empty array (never null)", out.Terms)
+	}
+}
+
+// A ListTerms error for one cycle degrades to skipping that cycle's terms and
+// still returns 200 — the same graceful pattern the name enrichment uses.
+func TestTeachingTermsListTermsErrorDegrades(t *testing.T) {
+	config := &fakeTeachingConfig{
+		teachers: []client.Teacher{{ID: "tch-1", UserID: "usr-t"}},
+		assignmentsByTeacher: map[string][]client.TeachingAssignment{
+			"tch-1": {{ID: "asg-1", CycleID: "cyc-1", TeacherID: "tch-1"}},
+		},
+		termsErr: connect.NewError(connect.CodeUnavailable, errString("config down")),
+	}
+	h := handler.NewTeachingHandler(config, &fakeTeachingGrades{}, &fakeTeachingStudents{})
+
+	rec := httptest.NewRecorder()
+	h.Terms(rec, teacherGET("/api/v1/teaching/terms", "usr-t"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 despite the terms error", rec.Code)
+	}
+	var out struct {
+		Terms []map[string]any `json:"terms"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Terms == nil || len(out.Terms) != 0 {
+		t.Errorf("terms = %v, want an empty array (the failed cycle is skipped)", out.Terms)
+	}
+}
+
+// A failure resolving the caller's assignments (not the per-cycle terms) is a
+// real error, not a degrade: the whole read fails rather than silently returning
+// no terms.
+func TestTeachingTermsPropagatesAssignmentError(t *testing.T) {
+	config := &fakeTeachingConfig{
+		teachers:       []client.Teacher{{ID: "tch-1", UserID: "usr-t"}},
+		assignmentsErr: connect.NewError(connect.CodeUnavailable, errString("config down")),
+	}
+	h := handler.NewTeachingHandler(config, &fakeTeachingGrades{}, &fakeTeachingStudents{})
+
+	rec := httptest.NewRecorder()
+	h.Terms(rec, teacherGET("/api/v1/teaching/terms", "usr-t"))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", rec.Code)
+	}
+}
+
+func TestTeachingTermsWithoutPrincipalIs401(t *testing.T) {
+	h := handler.NewTeachingHandler(oneTeacher(), &fakeTeachingGrades{}, &fakeTeachingStudents{})
+	rec := httptest.NewRecorder()
+	h.Terms(rec, httptest.NewRequest(http.MethodGet, "/api/v1/teaching/terms", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
 	}
 }
 
