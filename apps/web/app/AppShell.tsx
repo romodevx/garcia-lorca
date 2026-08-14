@@ -279,7 +279,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "grades" &&
         (gradesEnabled ? (
-          <GradesScreen onBack={home} />
+          <GradesScreen onBack={home} permissions={principal?.permissions} />
         ) : (
           // Flag OFF: never render the grade-capture surface; show the friendly stub
           // so navigation never dead-ends. (Backend 404 is authoritative.)

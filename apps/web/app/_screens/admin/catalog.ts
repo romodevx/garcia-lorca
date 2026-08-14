@@ -60,6 +60,15 @@ export const PERMISSION_CATALOG: readonly PermissionGroup[] = [
       { value: "grades:write", label: "Capturar calificaciones" },
     ],
   },
+  {
+    // The Maestro (teacher) role: self-scoped capture over ONLY the teacher's own
+    // assigned groups, distinct from the school-wide grades:* above.
+    resource: "Docencia",
+    permissions: [
+      { value: "teaching:read", label: "Calificaciones (mis grupos) — ver" },
+      { value: "teaching:write", label: "Calificaciones (mis grupos) — capturar" },
+    ],
+  },
 ];
 
 /** Flat list of every permission string in the catalog (stable order). */

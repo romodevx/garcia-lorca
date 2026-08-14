@@ -1,7 +1,7 @@
 import type { Command, CommandKind } from "@garcia-lorca/ui/command-core";
 import type { FlagSet } from "@garcia-lorca/ui/flags";
 
-import { MODULES, type ModuleDef } from "../_design/data";
+import { MODULES, moduleHasPerm, type ModuleDef } from "../_design/data";
 
 /**
  * Layer A command registry — the static half of the palette (nav + create +
@@ -91,7 +91,7 @@ export function buildCommandRegistry(flags: FlagSet, t: Translate, permissions?:
   const allowed = (module: ModuleDef): boolean =>
     module.hidden !== true &&
     flags[module.flag] === true &&
-    (permissions === undefined || permissions.includes(module.perm));
+    (permissions === undefined || moduleHasPerm(module, permissions));
 
   for (const module of MODULES) {
     if (!allowed(module)) continue;

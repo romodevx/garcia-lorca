@@ -21,12 +21,16 @@ export interface ModuleDef {
   /** Flag that gates this module's surface (UX-only; backend is authoritative). */
   flag: FlagKey;
   /**
-   * READ permission the authenticated principal must hold to SEE this module in
-   * the panel/palette. UX-only: the gateway (403/404) is the real security
-   * boundary. Modules with no backend (e.g. scholarships) carry a permission
-   * nobody is ever granted, so they naturally disappear — no special-casing.
+   * READ permission(s) the authenticated principal must hold to SEE this module
+   * in the panel/palette. A single string requires exactly that permission; an
+   * array is ANY-OF — holding any one of the listed perms reveals the module (so
+   * a surface with role-adaptive sub-views, like Calificaciones for directors OR
+   * teachers, stays visible to either audience). UX-only: the gateway (403/404)
+   * is the real security boundary. Modules with no backend (e.g. scholarships)
+   * carry a permission nobody is ever granted, so they naturally disappear — no
+   * special-casing.
    */
-  perm: string;
+  perm: string | readonly string[];
   /**
    * Deactivated from the product (the school doesn't offer this module). Hidden
    * from the panel entirely — this is distinct from a flag being OFF, which
@@ -42,7 +46,9 @@ export const MODULES: readonly ModuleDef[] = [
   { id: "finance", label: "Finanzas y Adeudos", icon: "finance", color: "orange", desc: "Colegiaturas y adeudos", badge: null, flag: "module_finance", perm: "finance:read" },
   // QR capture is deferred; the module ships as the daily pass list.
   { id: "attendance", label: "Asistencia", icon: "qr", color: "lime", desc: "Pase de lista diario", badge: null, flag: "module_attendance", perm: "attendance:read" },
-  { id: "grades", label: "Calificaciones", icon: "grades", color: "yellow", desc: "Boletas y captura", badge: null, flag: "module_grades", perm: "grades:read" },
+  // Any-of: directors capture via grades:read; teachers use their self-scoped
+  // teaching:read surface. Either permission reveals the tile.
+  { id: "grades", label: "Calificaciones", icon: "grades", color: "yellow", desc: "Boletas y captura", badge: null, flag: "module_grades", perm: ["grades:read", "teaching:read"] },
   { id: "announcements", label: "Avisos", icon: "announcements", color: "orange", desc: "Comunicados y agenda", badge: null, flag: "module_comms", perm: "comms:read" },
   { id: "scholarships", label: "Becas", icon: "scholarship", color: "purple", desc: "Becas y descuentos", badge: null, flag: "module_scholarships", perm: "scholarships:read" },
   // Deactivated from the panel per the school (kept future-ready; nothing deleted). See [[module-docs-deactivated]].
@@ -56,14 +62,26 @@ export const MODULES: readonly ModuleDef[] = [
 ];
 
 /**
+ * Whether the principal holds a module's READ permission under the any-of rule:
+ * a single-string `perm` must be present; an array `perm` matches if the
+ * principal holds ANY one of its entries. Shared by the dashboard grid and the
+ * command palette so their visibility can never drift.
+ */
+export function moduleHasPerm(m: ModuleDef, permissions: readonly string[]): boolean {
+  const required = typeof m.perm === "string" ? [m.perm] : m.perm;
+  return required.some((p) => permissions.includes(p));
+}
+
+/**
  * The module visibility rule, in ONE place so the dashboard grid and the command
  * palette can never drift. A module is shown IFF it is not deactivated AND the
- * principal holds its READ permission. UX-only — the gateway remains the security
- * boundary (its 403/404 is authoritative). No-backend modules carry a permission
- * nobody is granted, so they disappear naturally with no special-casing.
+ * principal holds (any of) its READ permission(s). UX-only — the gateway remains
+ * the security boundary (its 403/404 is authoritative). No-backend modules carry
+ * a permission nobody is granted, so they disappear naturally with no
+ * special-casing.
  */
 export function isModuleVisible(m: ModuleDef, permissions: readonly string[]): boolean {
-  return m.hidden !== true && permissions.includes(m.perm);
+  return m.hidden !== true && moduleHasPerm(m, permissions);
 }
 
 export type Role = "admin" | "teacher";
