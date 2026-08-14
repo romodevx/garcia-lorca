@@ -147,4 +147,52 @@ describe("buildCommandRegistry", () => {
     expect(nav?.route).toBe("module:students");
     expect(nav?.moduleId).toBe("students");
   });
+
+  // Permission filtering (role-aware visibility): when a permission set is
+  // supplied, a module contributes commands only if the caller holds its READ
+  // permission — layered ON TOP of the flag gate. Omitting the set (undefined)
+  // preserves the flag-only behavior the demo/unit tests above rely on.
+  describe("permission filtering", () => {
+    const idsP = (flags: FlagSet, perms: readonly string[]): string[] =>
+      buildCommandRegistry(flags, t, perms).map((c) => c.id);
+
+    it("surfaces only modules the caller holds READ on, even when the flag is ON", () => {
+      // grades + finance flags ON, but the caller only has grades:read.
+      const got = idsP({ module_grades: true, module_finance: true }, ["grades:read"]);
+      expect(got).toContain("grades.nav");
+      expect(got).toContain("grades.create.capture");
+      expect(got.some((id) => id.startsWith("finance."))).toBe(false);
+    });
+
+    it("drops a module whose flag is ON but whose READ permission is missing", () => {
+      const got = idsP({ module_finance: true }, ["grades:read"]);
+      expect(got.some((id) => id.startsWith("finance."))).toBe(false);
+    });
+
+    it("still requires the flag: a permitted module with its flag OFF stays absent", () => {
+      // Caller CAN read finance, but the module flag is OFF → no commands.
+      const got = idsP({ module_grades: true }, ["grades:read", "finance:read"]);
+      expect(got).toContain("grades.nav");
+      expect(got.some((id) => id.startsWith("finance."))).toBe(false);
+    });
+
+    it("returns nothing when the caller holds no matching permissions", () => {
+      expect(buildCommandRegistry({ module_finance: true, module_grades: true }, t, [])).toEqual([]);
+    });
+
+    it("maps admin visibility to users:read and settings to config:read", () => {
+      const admin = idsP({ module_iam: true, module_config: true }, ["users:read"]);
+      expect(admin).toContain("admin.nav");
+      expect(admin.some((id) => id.startsWith("settings."))).toBe(false);
+
+      const config = idsP({ module_iam: true, module_config: true }, ["config:read"]);
+      expect(config).toContain("settings.nav");
+      expect(config.some((id) => id.startsWith("admin."))).toBe(false);
+    });
+
+    it("omitting the permission set keeps flag-only behavior (backward compatible)", () => {
+      const got = buildCommandRegistry({ module_finance: true }, t).map((c) => c.id);
+      expect(got).toContain("finance.nav");
+    });
+  });
 });

@@ -251,8 +251,8 @@ export function AppShell(): ReactElement {
   return (
     <div className="app-root" style={{ minHeight: "100vh" }}>
       <TopBar user={user} theme={theme} onToggle={toggle} onHome={home} onLogout={logout} onOpenPalette={() => setPaletteOpen(true)} />
-      <CommandPaletteHost open={paletteOpen} onOpenChange={setPaletteOpen} onNavigate={navigate} />
-      {view.screen === "dashboard" && <Dashboard user={user} onOpen={open} />}
+      <CommandPaletteHost open={paletteOpen} onOpenChange={setPaletteOpen} onNavigate={navigate} permissions={principal?.permissions} />
+      {view.screen === "dashboard" && <Dashboard user={user} onOpen={open} permissions={principal?.permissions} />}
       {view.screen === "finance" &&
         (financeEnabled ? (
           <FinanceScreen onBack={home} />

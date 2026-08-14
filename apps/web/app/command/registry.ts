@@ -77,12 +77,24 @@ function parseAliases(value: string): string[] {
     .filter((term) => term.length > 0);
 }
 
-export function buildCommandRegistry(flags: FlagSet, t: Translate): Command[] {
+/**
+ * @param permissions the caller's READ permissions. When supplied, a module also
+ *   needs its `perm` present here to contribute commands (role-aware visibility,
+ *   layered on top of the flag gate). Omit it (undefined) for the flag-only
+ *   behavior used by the design demo and flag-isolation unit tests. UX-only —
+ *   the gateway 403/404 remains the security boundary.
+ */
+export function buildCommandRegistry(flags: FlagSet, t: Translate, permissions?: readonly string[]): Command[] {
   const commands: Command[] = [];
+  // A module is allowed when its flag is ON and — if a permission set was given —
+  // the caller holds its READ permission. Deactivated (hidden) modules never pass.
+  const allowed = (module: ModuleDef): boolean =>
+    module.hidden !== true &&
+    flags[module.flag] === true &&
+    (permissions === undefined || permissions.includes(module.perm));
 
   for (const module of MODULES) {
-    if (module.hidden) continue; // deactivated from the product → never surfaced.
-    if (flags[module.flag] !== true) continue; // flag OFF → module contributes nothing.
+    if (!allowed(module)) continue;
     commands.push({
       id: `${module.id}.nav`,
       kind: "module",
@@ -97,7 +109,7 @@ export function buildCommandRegistry(flags: FlagSet, t: Translate): Command[] {
 
   for (const action of ACTIONS) {
     const module = moduleById.get(action.moduleId);
-    if (module === undefined || module.hidden || flags[module.flag] !== true) continue;
+    if (module === undefined || !allowed(module)) continue;
     commands.push({
       id: action.key !== undefined ? `${module.id}.${action.kind}.${action.key}` : `${module.id}.${action.kind}`,
       kind: action.kind,

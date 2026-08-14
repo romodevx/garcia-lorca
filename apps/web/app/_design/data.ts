@@ -21,6 +21,13 @@ export interface ModuleDef {
   /** Flag that gates this module's surface (UX-only; backend is authoritative). */
   flag: FlagKey;
   /**
+   * READ permission the authenticated principal must hold to SEE this module in
+   * the panel/palette. UX-only: the gateway (403/404) is the real security
+   * boundary. Modules with no backend (e.g. scholarships) carry a permission
+   * nobody is ever granted, so they naturally disappear — no special-casing.
+   */
+  perm: string;
+  /**
    * Deactivated from the product (the school doesn't offer this module). Hidden
    * from the panel entirely — this is distinct from a flag being OFF, which
    * shows the module as available-but-disabled ("Próximamente"). Nothing is
@@ -31,22 +38,33 @@ export interface ModuleDef {
 }
 
 export const MODULES: readonly ModuleDef[] = [
-  { id: "students", label: "Estudiantes", icon: "students", color: "forest", desc: "Alumnos y admisión", badge: null, flag: "module_students" },
-  { id: "finance", label: "Finanzas y Adeudos", icon: "finance", color: "orange", desc: "Colegiaturas y adeudos", badge: null, flag: "module_finance" },
+  { id: "students", label: "Estudiantes", icon: "students", color: "forest", desc: "Alumnos y admisión", badge: null, flag: "module_students", perm: "students:read" },
+  { id: "finance", label: "Finanzas y Adeudos", icon: "finance", color: "orange", desc: "Colegiaturas y adeudos", badge: null, flag: "module_finance", perm: "finance:read" },
   // QR capture is deferred; the module ships as the daily pass list.
-  { id: "attendance", label: "Asistencia", icon: "qr", color: "lime", desc: "Pase de lista diario", badge: null, flag: "module_attendance" },
-  { id: "grades", label: "Calificaciones", icon: "grades", color: "yellow", desc: "Boletas y captura", badge: null, flag: "module_grades" },
-  { id: "announcements", label: "Avisos", icon: "announcements", color: "orange", desc: "Comunicados y agenda", badge: null, flag: "module_comms" },
-  { id: "scholarships", label: "Becas", icon: "scholarship", color: "purple", desc: "Becas y descuentos", badge: null, flag: "module_scholarships" },
+  { id: "attendance", label: "Asistencia", icon: "qr", color: "lime", desc: "Pase de lista diario", badge: null, flag: "module_attendance", perm: "attendance:read" },
+  { id: "grades", label: "Calificaciones", icon: "grades", color: "yellow", desc: "Boletas y captura", badge: null, flag: "module_grades", perm: "grades:read" },
+  { id: "announcements", label: "Avisos", icon: "announcements", color: "orange", desc: "Comunicados y agenda", badge: null, flag: "module_comms", perm: "comms:read" },
+  { id: "scholarships", label: "Becas", icon: "scholarship", color: "purple", desc: "Becas y descuentos", badge: null, flag: "module_scholarships", perm: "scholarships:read" },
   // Deactivated from the panel per the school (kept future-ready; nothing deleted). See [[module-docs-deactivated]].
-  { id: "documents", label: "Documentos", icon: "documents", color: "forest", desc: "Constancias, kardex", badge: null, flag: "module_docs", hidden: true },
-  { id: "uniforms", label: "Uniformes", icon: "uniforms", color: "purple", desc: "Pedidos y tallas", badge: null, flag: "module_uniforms" },
-  { id: "billing", label: "Facturación", icon: "billing", color: "lime", desc: "CFDI 4.0", badge: null, flag: "module_billing" },
-  { id: "reports", label: "Reportes", icon: "reports", color: "yellow", desc: "Indicadores", badge: null, flag: "module_reports" },
-  { id: "settings", label: "Configuración", icon: "settings", color: "neutral", desc: "Centro y permisos", badge: null, flag: "module_config" },
+  { id: "documents", label: "Documentos", icon: "documents", color: "forest", desc: "Constancias, kardex", badge: null, flag: "module_docs", perm: "documents:read", hidden: true },
+  { id: "uniforms", label: "Uniformes", icon: "uniforms", color: "purple", desc: "Pedidos y tallas", badge: null, flag: "module_uniforms", perm: "uniforms:read" },
+  { id: "billing", label: "Facturación", icon: "billing", color: "lime", desc: "CFDI 4.0", badge: null, flag: "module_billing", perm: "billing:read" },
+  { id: "reports", label: "Reportes", icon: "reports", color: "yellow", desc: "Indicadores", badge: null, flag: "module_reports", perm: "reports:read" },
+  { id: "settings", label: "Configuración", icon: "settings", color: "neutral", desc: "Centro y permisos", badge: null, flag: "module_config", perm: "config:read" },
   // Admin surface (module_iam): users, roles, and the teacher↔user link.
-  { id: "admin", label: "Administración", icon: "shield", color: "forest", desc: "Usuarios y roles", badge: null, flag: "module_iam" }
+  { id: "admin", label: "Administración", icon: "shield", color: "forest", desc: "Usuarios y roles", badge: null, flag: "module_iam", perm: "users:read" }
 ];
+
+/**
+ * The module visibility rule, in ONE place so the dashboard grid and the command
+ * palette can never drift. A module is shown IFF it is not deactivated AND the
+ * principal holds its READ permission. UX-only — the gateway remains the security
+ * boundary (its 403/404 is authoritative). No-backend modules carry a permission
+ * nobody is granted, so they disappear naturally with no special-casing.
+ */
+export function isModuleVisible(m: ModuleDef, permissions: readonly string[]): boolean {
+  return m.hidden !== true && permissions.includes(m.perm);
+}
 
 export type Role = "admin" | "teacher";
 
