@@ -67,6 +67,8 @@ export const PERMISSION_CATALOG: readonly PermissionGroup[] = [
     permissions: [
       { value: "teaching:read", label: "Calificaciones (mis grupos) — ver" },
       { value: "teaching:write", label: "Calificaciones (mis grupos) — capturar" },
+      { value: "attendance_own:read", label: "Asistencia (mis grupos) — ver" },
+      { value: "attendance_own:write", label: "Asistencia (mis grupos) — pasar lista" },
     ],
   },
 ];

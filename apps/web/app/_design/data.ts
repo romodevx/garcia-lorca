@@ -45,7 +45,9 @@ export const MODULES: readonly ModuleDef[] = [
   { id: "students", label: "Estudiantes", icon: "students", color: "forest", desc: "Alumnos y admisión", badge: null, flag: "module_students", perm: "students:read" },
   { id: "finance", label: "Finanzas y Adeudos", icon: "finance", color: "orange", desc: "Colegiaturas y adeudos", badge: null, flag: "module_finance", perm: "finance:read" },
   // QR capture is deferred; the module ships as the daily pass list.
-  { id: "attendance", label: "Asistencia", icon: "qr", color: "lime", desc: "Pase de lista diario", badge: null, flag: "module_attendance", perm: "attendance:read" },
+  // Any-of: directors/admins pass lists via attendance:read; teachers use their
+  // self-scoped attendance_own:read surface. Either permission reveals the tile.
+  { id: "attendance", label: "Asistencia", icon: "qr", color: "lime", desc: "Pase de lista diario", badge: null, flag: "module_attendance", perm: ["attendance:read", "attendance_own:read"] },
   // Any-of: directors capture via grades:read; teachers use their self-scoped
   // teaching:read surface. Either permission reveals the tile.
   { id: "grades", label: "Calificaciones", icon: "grades", color: "yellow", desc: "Boletas y captura", badge: null, flag: "module_grades", perm: ["grades:read", "teaching:read"] },

@@ -15,6 +15,12 @@
  */
 
 import { authFetch } from "../auth/authFetch";
+// The self-scoped attendance surface shares the daily pass-list vocabulary with
+// the admin client — a status union, the exception-only Mark, and the reconcile
+// result. These are TYPES ONLY (`import type` is erased at build), so reusing
+// them keeps the model in one place without creating any runtime dependency on
+// the admin `/attendance/*` client a teacher may not call.
+import type { AttendanceStatus, Mark, SaveDailyResult } from "../attendance/api";
 
 // --- entity types (match the gateway JSON contract) -----------------------
 
@@ -144,5 +150,70 @@ export function captureGrade(input: CaptureGradeInput): Promise<TeachingGradeEnt
     enrollmentId: input.enrollmentId,
     termId: input.termId,
     value: input.value,
+  });
+}
+
+// --- teaching attendance (self-scoped) ------------------------------------
+
+/** One of the caller-teacher's OWN groups, with its readable display name. */
+export interface TeacherGroup {
+  id: string;
+  name: string;
+}
+
+/**
+ * One row of a group·day pass list — the student's readable name is included so
+ * the teacher (who cannot list students) never resolves it separately. `status`
+ * reads back as "present" when the day has no stored mark for the row.
+ */
+export interface TeachingAttendanceRosterRow {
+  enrollmentId: string;
+  studentId: string;
+  studentName: string;
+  status: AttendanceStatus;
+}
+
+/**
+ * The COMPLETE exception set of one of the caller's group·days: every enrolled
+ * student omitted from `marks` is reconciled to present, so `marks: []`
+ * legitimately means "everybody present".
+ */
+export interface SaveAttendanceInput {
+  groupId: string;
+  date: string;
+  marks: readonly Mark[];
+}
+
+/** Drops an empty note so the body carries only what the teacher actually typed. */
+function toMarkBody(mark: Mark): Record<string, string> {
+  const body: Record<string, string> = { enrollmentId: mark.enrollmentId, status: mark.status };
+  if (mark.note !== undefined && mark.note !== "") {
+    body.note = mark.note;
+  }
+  return body;
+}
+
+/** The DISTINCT groups the caller teaches (attendance is taken per group). */
+export function listGroups(): Promise<TeacherGroup[]> {
+  return getList<TeacherGroup>("/teaching/groups", "groups");
+}
+
+/** The day's pass list for one of the caller's OWN groups — one row per enrolled
+ *  student, name included; every row opens PRESENT unless the day was already taken. */
+export function getAttendanceRoster(groupId: string, date: string): Promise<TeachingAttendanceRosterRow[]> {
+  const qs = query({ groupId, date });
+  return getList<TeachingAttendanceRosterRow>(`/teaching/attendance/roster${qs}`, "roster");
+}
+
+/**
+ * Reconcile one of the caller's group·days. `marks` carries ONLY the non-present
+ * exceptions — every enrollment left out is stored as present — so the payload
+ * stays as small as the teacher's corrections and an empty array is valid.
+ */
+export function saveAttendance(input: SaveAttendanceInput): Promise<SaveDailyResult> {
+  return postJSON<SaveDailyResult>("/teaching/attendance", {
+    groupId: input.groupId,
+    date: input.date,
+    marks: input.marks.map(toMarkBody),
   });
 }

@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { captureGrade, getRoster, listAssignments, listTerms } from "./api";
+import {
+  captureGrade,
+  getAttendanceRoster,
+  getRoster,
+  listAssignments,
+  listGroups,
+  listTerms,
+  saveAttendance,
+} from "./api";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -142,5 +150,123 @@ describe("captureGrade", () => {
     await expect(
       captureGrade({ assignmentId: "a1", enrollmentId: "en1", termId: "term1", value: 11 }),
     ).rejects.toThrow();
+  });
+});
+
+// --- attendance (self-scoped) ---------------------------------------------
+
+const teacherGroup = { id: "g1", name: "1° A" };
+
+const attendanceRosterRow = {
+  enrollmentId: "en1",
+  studentId: "st1",
+  studentName: "Ada Lovelace",
+  status: "present",
+};
+
+describe("listGroups", () => {
+  it("GETs /teaching/groups with credentials and unwraps {groups}", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ groups: [teacherGroup] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await listGroups();
+
+    expect(res).toEqual([teacherGroup]);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/teaching/groups");
+    expect(init.credentials).toBe("include");
+    expect(init.method ?? "GET").toBe("GET");
+  });
+
+  it("returns [] when the envelope key is absent", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({})));
+    await expect(listGroups()).resolves.toEqual([]);
+  });
+
+  it("throws on a non-ok response (e.g. teacher lacks the flag → 404)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 404 })));
+    await expect(listGroups()).rejects.toThrow();
+  });
+});
+
+describe("getAttendanceRoster", () => {
+  it("GETs /teaching/attendance/roster with credentials, the query params, and unwraps {roster}", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ roster: [attendanceRosterRow] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await getAttendanceRoster("g1", "2026-09-01");
+
+    expect(res).toEqual([attendanceRosterRow]);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/teaching/attendance/roster?groupId=g1&date=2026-09-01");
+    expect(init.credentials).toBe("include");
+    expect(init.method ?? "GET").toBe("GET");
+  });
+
+  it("throws on a non-ok response (e.g. a group the caller does not teach → 404)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 404 })));
+    await expect(getAttendanceRoster("gX", "2026-09-01")).rejects.toThrow();
+  });
+});
+
+describe("saveAttendance", () => {
+  it("POSTs {groupId, date, marks} (only the exceptions) and unwraps the counts", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ absentCount: 1, markedCount: 2 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await saveAttendance({
+      groupId: "g1",
+      date: "2026-09-01",
+      marks: [
+        { enrollmentId: "en1", status: "absent" },
+        { enrollmentId: "en2", status: "late" },
+      ],
+    });
+
+    expect(res).toEqual({ absentCount: 1, markedCount: 2 });
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/teaching/attendance");
+    expect(init.method).toBe("POST");
+    expect(init.credentials).toBe("include");
+    const body = JSON.parse(init.body as string);
+    expect(body).toEqual({
+      groupId: "g1",
+      date: "2026-09-01",
+      marks: [
+        { enrollmentId: "en1", status: "absent" },
+        { enrollmentId: "en2", status: "late" },
+      ],
+    });
+  });
+
+  it("carries an empty marks array verbatim (default-present: everybody present)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ absentCount: 0, markedCount: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await saveAttendance({ groupId: "g1", date: "2026-09-01", marks: [] });
+
+    const [, init] = lastCall(fetchMock);
+    const body = JSON.parse(init.body as string);
+    expect(body.marks).toEqual([]);
+  });
+
+  it("includes a note only when it is non-empty", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ absentCount: 1, markedCount: 1 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await saveAttendance({
+      groupId: "g1",
+      date: "2026-09-01",
+      marks: [{ enrollmentId: "en1", status: "excused", note: "Cita médica" }],
+    });
+
+    const [, init] = lastCall(fetchMock);
+    const body = JSON.parse(init.body as string);
+    expect(body.marks[0]).toEqual({ enrollmentId: "en1", status: "excused", note: "Cita médica" });
+  });
+
+  it("throws on a non-ok response (e.g. a group the caller does not teach → 404)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 404 })));
+    await expect(saveAttendance({ groupId: "gX", date: "2026-09-01", marks: [] })).rejects.toThrow();
   });
 });

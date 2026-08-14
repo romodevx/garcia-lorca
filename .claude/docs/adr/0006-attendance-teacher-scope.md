@@ -51,8 +51,11 @@ self-scoped grantable pair (`attendance_own:*`), exactly as grades already do.
 
 ## Consequences
 
-- **+1 iam migration:** the owner role gains `attendance_own:read/write` so it can
-  delegate them; the admin permission catalog gains the two entries.
+- **+1 iam migration:** the owner role gains `attendance_own:read/write` (via
+  migration `0013`) so it can delegate them. iam itself has no enumerated
+  permission catalog (validity is grammar-regex based); the web role-editor
+  catalog (`apps/web/app/_screens/admin/catalog.ts`) gains the two entries in the
+  frontend slice so an admin can tick them when building a Maestro role.
 - **The attendance service is unchanged** — it is already group-keyed; the new
   surface is entirely at the gateway (ownership resolution + studentsClient
   enrichment), calling attendance server-to-server with the resolved group.

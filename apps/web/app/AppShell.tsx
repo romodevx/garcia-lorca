@@ -287,7 +287,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "attendance" &&
         (attendanceEnabled ? (
-          <AttendanceScreen onBack={home} />
+          <AttendanceScreen onBack={home} permissions={principal?.permissions} />
         ) : (
           // Flag OFF: never render the pass list; show the friendly stub so
           // navigation never dead-ends. (Backend 404 is authoritative.)

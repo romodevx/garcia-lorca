@@ -42,3 +42,23 @@ describe("Calificaciones module", () => {
     expect(isModuleVisible(gradesModule(), ["grades:read"])).toBe(true);
   });
 });
+
+const attendanceModule = (): ModuleDef => {
+  const m = MODULES.find((x) => x.id === "attendance");
+  if (m === undefined) throw new Error("attendance module missing");
+  return m;
+};
+
+describe("Asistencia module", () => {
+  it("is visible to an attendance_own:read-only principal (a teacher, no attendance:read)", () => {
+    expect(isModuleVisible(attendanceModule(), ["attendance_own:read"])).toBe(true);
+  });
+
+  it("is still visible to an attendance:read principal (a director)", () => {
+    expect(isModuleVisible(attendanceModule(), ["attendance:read"])).toBe(true);
+  });
+
+  it("is hidden from a principal holding neither attendance perm", () => {
+    expect(isModuleVisible(attendanceModule(), ["students:read"])).toBe(false);
+  });
+});
