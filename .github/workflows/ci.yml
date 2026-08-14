@@ -16,11 +16,26 @@
 
 name: CI
 
+# Cost controls (private repo, billed Actions minutes):
+#  - push runs only on `dev` (master gets the same tree via the dev->master merge;
+#    re-testing it is redundant). PRs to dev OR master still run.
+#  - docs/markdown/.claude-only changes skip CI entirely (no code impact).
+#  - the heavy legs (-race, integration/testcontainers, govulncheck) run on PRs
+#    only; pushes get a fast unit gate (vet + unit tests + mod verify). Open a PR
+#    (e.g. dev -> master) to trigger the full gate before a release.
 on:
   pull_request:
     branches: [dev, master]
+    paths-ignore:
+      - '**/*.md'
+      - '.claude/**'
+      - 'docs/**'
   push:
-    branches: [dev, master]
+    branches: [dev]
+    paths-ignore:
+      - '**/*.md'
+      - '.claude/**'
+      - 'docs/**'
 
 permissions:
   contents: read
@@ -149,14 +164,23 @@ jobs:
         working-directory: ${{ matrix.module }}
         run: go vet ./...
 
+      # Push: fast unit tests only (no -race). PRs get the full -race pass below.
+      - name: go test (unit)
+        if: github.event_name != 'pull_request'
+        working-directory: ${{ matrix.module }}
+        run: go test ./... -count=1
+
       - name: go test -race
+        if: github.event_name == 'pull_request'
         working-directory: ${{ matrix.module }}
         run: go test ./... -race -count=1
 
       # Integration tests are behind `//go:build integration` and need a real
       # Postgres via testcontainers-go. GitHub's ubuntu runners ship a working
-      # Docker daemon, so they run here rather than being skipped.
+      # Docker daemon, so they run here rather than being skipped. PR-only: they
+      # are the slowest leg and would dominate every push otherwise.
       - name: go test -tags=integration
+        if: github.event_name == 'pull_request'
         working-directory: ${{ matrix.module }}
         run: |
           set -euo pipefail
@@ -168,8 +192,10 @@ jobs:
           fi
 
       # Security gate (cloudbuild step 3): reachable-vulnerability scan plus a
-      # dependency audit (checksums match go.sum).
+      # dependency audit (checksums match go.sum). PR-only: installs + scans per
+      # module are expensive; a push doesn't need the full vuln sweep every time.
       - name: govulncheck
+        if: github.event_name == 'pull_request'
         run: |
           set -euo pipefail
           go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
