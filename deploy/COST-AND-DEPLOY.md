@@ -105,10 +105,14 @@ The Terraform is multi-env-ready: per-env `project_id`, `billing_account_id`, SA
 
 ## E. "Start now" plan (get DEV live cheaply)
 
-### Blockers to close first (these prevent a working deploy today)
-1. **Only 3 of 8 real services are in IaC/CI.** Add `services.tf` module blocks + Dockerfiles (from `deploy/Dockerfile.service.template`) + CI build/deploy steps for **config, finance, grades, attendance, comms**. Skip the 4 stubs.
-2. **Gateway→internal wiring missing.** Inject each internal service's `*.run.app` URL as `*_BASE_URL` + `ENABLED_MODULES` into the gateway; grant the runtime SA `roles/run.invoker` on each internal (internal-ingress) service, OR add a Serverless VPC connector (module supports it, currently null).
-3. **Owner seed:** set `seed_owner_secret=true` + inject `TF_VAR_owner_temp_password` at apply; owner rotates at first login.
+### Deploy blockers — CLOSED (were caught by review before apply; fixed + verified)
+1. ✅ **All 8 real services in IaC + CI + Dockerfiles** (config/finance/grades/attendance/comms added; 4 stubs skipped).
+2. ✅ **Gateway + internal wiring** — gateway gets `ENABLED_MODULES` + every `*_BASE_URL`; the 5 internal services get their own sibling `*_BASE_URL` (they call each other too); runtime SA holds `run.invoker` on each internal service (no VPC connector).
+3. ✅ **Services boot** — `DATABASE_URL` was never set; `pkg/dbdsn` now assembles the Cloud SQL socket DSN from the split env when `DATABASE_URL` is absent.
+4. ✅ **Service-to-service auth** — internal ingress + invoker requires an OIDC ID token; `pkg/gcpauth` attaches one (audience = target URL) for https targets, `http.DefaultClient` locally.
+5. ✅ **comms works scale-to-zero** — converted to authenticated Pub/Sub **push** (`POST /pubsub`); handler pins the caller to the push SA. No always-on cost.
+
+**Still your action at apply time:** set `seed_owner_secret=true` + inject `TF_VAR_owner_temp_password` (owner rotates at first login); the custom domain (below); and `billing_account_id`.
 
 ### Apply order (once blockers closed)
 1. Create `garcia-lorca-dev` project on owner's billing; create GCS state bucket; enable billing.
