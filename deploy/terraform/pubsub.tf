@@ -32,6 +32,19 @@ resource "google_pubsub_subscription" "payment_events_comms" {
 
   ack_deadline_seconds = 30
 
+  # Authenticated PUSH: Pub/Sub POSTs each message to comms /pubsub and wakes it
+  # from scale-to-zero, so comms no longer runs a pull loop. The oidc_token lets
+  # comms verify the caller is Pub/Sub (audience = the service URI; the push SA
+  # carries run.invoker on comms — see main.tf). Presence of push_config makes
+  # this a push subscription; the pull semantics are dropped by that alone.
+  push_config {
+    push_endpoint = "${module.comms.uri}/pubsub"
+    oidc_token {
+      service_account_email = google_service_account.pubsub_push.email
+      audience              = module.comms.uri
+    }
+  }
+
   # Redeliver with backoff; after max_delivery_attempts, route to the DLQ.
   retry_policy {
     minimum_backoff = "10s"
@@ -112,6 +125,16 @@ resource "google_pubsub_subscription" "attendance_events_comms" {
   topic   = google_pubsub_topic.attendance_events.id
 
   ack_deadline_seconds = 30
+
+  # Authenticated PUSH (same shape as comms-payment-events above): Pub/Sub POSTs
+  # to comms /pubsub with an OIDC token, waking it from scale-to-zero.
+  push_config {
+    push_endpoint = "${module.comms.uri}/pubsub"
+    oidc_token {
+      service_account_email = google_service_account.pubsub_push.email
+      audience              = module.comms.uri
+    }
+  }
 
   retry_policy {
     minimum_backoff = "10s"

@@ -84,6 +84,16 @@ locals {
   comms_env = merge(local.common_env, {
     STUDENTS_BASE_URL = module.students.uri
     COMMS_TENANT_ID   = "00000000-0000-0000-0000-000000000001"
+    # Authenticated PUSH mode: comms skips the Pub/Sub pull loop and serves the
+    # POST /pubsub receiver instead. SAFE with min=0/cpu_idle=true because
+    # Pub/Sub wakes comms on each delivery (see pubsub.tf push_config). Without
+    # this flag comms would pull, which a scaled-to-zero instance cannot do.
+    PUBSUB_PUSH_MODE = "true"
+    # Defense-in-depth over run.invoker: the /pubsub handler enforces that the
+    # caller's OIDC token email equals this push SA (main.tf), so no other
+    # run.invoker holder can forge events. Enforced only when non-empty;
+    # local docker-compose leaves it unset (check skipped).
+    PUBSUB_PUSH_SA_EMAIL = google_service_account.pubsub_push.email
   })
 
   # Internal-ingress services the gateway (and other services) call as the
@@ -285,11 +295,11 @@ module "attendance" {
 }
 
 # ---- comms: notifications + Pub/Sub consumer (M08), SCALE-TO-ZERO ---------
-# comms is BOTH a Connect server and a Pub/Sub subscriber (see
-# services/comms/cmd/main.go). The subscriber starts because common_env sets
-# PUBSUB_PROJECT_ID; it consumes the comms-* subscriptions pre-created in
-# pubsub.tf. min=0 is fine — push is a courtesy on top of a durable feed, and a
-# cold start on the first event only defers delivery, it does not drop it.
+# comms is BOTH a Connect server and a Pub/Sub PUSH receiver (see
+# services/comms/cmd/main.go). Pub/Sub POSTs each event to /pubsub, waking comms
+# from scale-to-zero, so min=0/cpu_idle=true stays SAFE (no pull loop to keep
+# alive — see comms_env PUBSUB_PUSH_MODE and the push_config subscriptions in
+# pubsub.tf).
 module "comms" {
   source = "./modules/cloud_run"
 
@@ -305,7 +315,12 @@ module "comms" {
   concurrency       = 80
   max_instances     = 3
 
-  ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  # ALL (not INTERNAL_ONLY) because Pub/Sub push originates from Google's public
+  # range, not the VPC. This is NOT public exposure: allow_unauthenticated stays
+  # false, so every caller must present a valid OIDC token carrying run.invoker —
+  # the push SA for /pubsub (main.tf) and the runtime SA for gateway→comms RPCs
+  # (internal_invoker below). Unauthenticated public traffic is still rejected.
+  ingress = "INGRESS_TRAFFIC_ALL"
 
   cloudsql_instances = [local.db_connection_name]
   env                = local.comms_env
