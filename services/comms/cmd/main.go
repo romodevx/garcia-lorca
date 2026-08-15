@@ -38,6 +38,8 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/garcia-lorca/gen/go/garcialorca/comms/v1/commsv1connect"
+	"github.com/garcia-lorca/pkg/dbdsn"
+	"github.com/garcia-lorca/pkg/gcpauth"
 	"github.com/garcia-lorca/pkg/logger"
 	"github.com/garcia-lorca/pkg/pubsub/gcp"
 	"github.com/garcia-lorca/services/comms/internal/adapters/fcm"
@@ -65,8 +67,6 @@ const (
 	// makes Receive stop after the handlers it has already started.
 	shutdownTimeout = 15 * time.Second
 )
-
-var errMissingDatabaseURL = errors.New("DATABASE_URL is required")
 
 // consumedTopics maps every topic comms consumes to the durable subscription it
 // owns on that topic. One subscription PER TOPIC, named after this service, so a
@@ -120,7 +120,8 @@ func run(ctx context.Context, log *slog.Logger) error {
 	// push: the student's guardians, then the devices those users registered here.
 	// http.DefaultClient speaks Connect over HTTP/1.1, sufficient for this unary
 	// call (mirrors attendance and grades).
-	guardians := studentsclient.New(envOr("STUDENTS_BASE_URL", defaultStudentsBaseURL), http.DefaultClient)
+	studentsBaseURL := envOr("STUDENTS_BASE_URL", defaultStudentsBaseURL)
+	guardians := studentsclient.New(studentsBaseURL, gcpauth.HTTPClient(ctx, studentsBaseURL))
 	// Push is the courtesy on top of the durable feed, and only the logging sender
 	// ships in this phase (see adapters/fcm): the real Firebase client needs a
 	// service-account credential in the secret manager.
@@ -243,11 +244,13 @@ func startSubscribers(ctx context.Context, group *errgroup.Group, svc *service.C
 	}, nil
 }
 
-// openDB opens the GORM Postgres pool from DATABASE_URL.
+// openDB opens the GORM Postgres pool, resolving its DSN via pkg/dbdsn:
+// DATABASE_URL verbatim when set (docker-compose), otherwise assembled
+// from the Cloud SQL split env (DB_SOCKET_DIR/DB_USER/DB_PASSWORD/DB_NAME).
 func openDB() (*gorm.DB, error) {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		return nil, errMissingDatabaseURL
+	dsn, err := dbdsn.Resolve()
+	if err != nil {
+		return nil, err
 	}
 	return gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Warn)})
 }

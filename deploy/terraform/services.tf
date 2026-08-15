@@ -52,6 +52,40 @@ locals {
     COMMS_BASE_URL      = module.comms.uri
   })
 
+  # Spoke-to-spoke wiring. Non-gateway services also dial their siblings as the
+  # runtime SA; without an injected *_BASE_URL each falls back to
+  # envOr("X_BASE_URL", "http://localhost:PORT") and self-dials localhost on
+  # Cloud Run, so every cross-service RPC fails. Each local mirrors gateway_env:
+  # common_env + only the sibling URL(s) that service's cmd/main.go reads. config
+  # and iam are leaves (no sibling deps) and keep common_env directly.
+  students_env = merge(local.common_env, {
+    CONFIG_BASE_URL = module.config.uri
+    IAM_BASE_URL    = module.iam.uri
+  })
+
+  finance_env = merge(local.common_env, {
+    STUDENTS_BASE_URL = module.students.uri
+    CONFIG_BASE_URL   = module.config.uri
+  })
+
+  grades_env = merge(local.common_env, {
+    CONFIG_BASE_URL   = module.config.uri
+    STUDENTS_BASE_URL = module.students.uri
+  })
+
+  attendance_env = merge(local.common_env, {
+    STUDENTS_BASE_URL = module.students.uri
+    CONFIG_BASE_URL   = module.config.uri
+  })
+
+  # comms reads STUDENTS_BASE_URL (guardian lookup) and pins COMMS_TENANT_ID to
+  # the same default tenant UUID every service falls back to (services/*/cmd/main.go
+  # defaultTenant), so the consumed-event tenant can never silently diverge.
+  comms_env = merge(local.common_env, {
+    STUDENTS_BASE_URL = module.students.uri
+    COMMS_TENANT_ID   = "00000000-0000-0000-0000-000000000001"
+  })
+
   # Internal-ingress services the gateway (and other services) call as the
   # runtime SA. Each needs roles/run.invoker granted to that SA — cheaper and
   # simpler than a Serverless VPC connector. See internal_invoker below.
@@ -144,7 +178,7 @@ module "students" {
   ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"
 
   cloudsql_instances = [local.db_connection_name]
-  env                = local.common_env
+  env                = local.students_env
   secret_env         = local.common_secret_env
 
   depends_on = [google_project_service.apis]
@@ -194,7 +228,7 @@ module "finance" {
   ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"
 
   cloudsql_instances = [local.db_connection_name]
-  env                = local.common_env
+  env                = local.finance_env
   secret_env         = local.common_secret_env
 
   depends_on = [google_project_service.apis]
@@ -219,7 +253,7 @@ module "grades" {
   ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"
 
   cloudsql_instances = [local.db_connection_name]
-  env                = local.common_env
+  env                = local.grades_env
   secret_env         = local.common_secret_env
 
   depends_on = [google_project_service.apis]
@@ -244,7 +278,7 @@ module "attendance" {
   ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"
 
   cloudsql_instances = [local.db_connection_name]
-  env                = local.common_env
+  env                = local.attendance_env
   secret_env         = local.common_secret_env
 
   depends_on = [google_project_service.apis]
@@ -274,7 +308,7 @@ module "comms" {
   ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"
 
   cloudsql_instances = [local.db_connection_name]
-  env                = local.common_env
+  env                = local.comms_env
   secret_env         = local.common_secret_env
 
   depends_on = [google_project_service.apis]

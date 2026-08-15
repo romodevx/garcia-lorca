@@ -9,6 +9,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/garcia-lorca/pkg/dbdsn"
 	"github.com/garcia-lorca/pkg/logger"
 )
 
@@ -122,7 +123,13 @@ func TestStopGroupJoinsEveryGoroutine(t *testing.T) {
 // It is also the guard on run's early-return path: the feed is durable storage, so
 // booting without it would serve empty reads and drop every consumed event.
 func TestRunRequiresADatabase(t *testing.T) {
+	// Neither DATABASE_URL nor the Cloud SQL split vars are set, so dbdsn.Resolve
+	// cannot assemble a DSN and run must fail fast rather than boot databaseless.
 	t.Setenv("DATABASE_URL", "")
+	t.Setenv("DB_SOCKET_DIR", "")
+	t.Setenv("DB_USER", "")
+	t.Setenv("DB_PASSWORD", "")
+	t.Setenv("DB_NAME", "")
 	t.Setenv("PUBSUB_EMULATOR_HOST", "")
 	t.Setenv("PUBSUB_PROJECT_ID", "")
 
@@ -131,8 +138,8 @@ func TestRunRequiresADatabase(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if !errors.Is(err, errMissingDatabaseURL) {
-			t.Fatalf("run() = %v, want errMissingDatabaseURL", err)
+		if !errors.Is(err, dbdsn.ErrMissingConfig) {
+			t.Fatalf("run() = %v, want dbdsn.ErrMissingConfig", err)
 		}
 	case <-time.After(waitTimeout):
 		t.Fatal("run() did not return without DATABASE_URL")

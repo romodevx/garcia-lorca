@@ -29,6 +29,8 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/garcia-lorca/gen/go/garcialorca/students/v1/studentsv1connect"
+	"github.com/garcia-lorca/pkg/dbdsn"
+	"github.com/garcia-lorca/pkg/gcpauth"
 	"github.com/garcia-lorca/pkg/logger"
 	"github.com/garcia-lorca/pkg/pubsub"
 	"github.com/garcia-lorca/pkg/pubsub/gcp"
@@ -56,8 +58,6 @@ const (
 	writeTimeout      = 30 * time.Second
 	idleTimeout       = 120 * time.Second
 )
-
-var errMissingDatabaseURL = errors.New("DATABASE_URL is required")
 
 func main() {
 	log := logger.Default()
@@ -130,14 +130,14 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	// the CatalogValidator port. http.DefaultClient speaks Connect over HTTP/1.1,
 	// which is sufficient for these unary calls.
 	configBaseURL := envOr("CONFIG_BASE_URL", defaultConfigBaseURL)
-	catalog := configclient.New(configBaseURL, http.DefaultClient)
+	catalog := configclient.New(configBaseURL, gcpauth.HTTPClient(ctx, configBaseURL))
 	enroll := usecase.NewEnrollmentService(repo, repo, catalog, events, tenantID, newID, time.Now)
 
 	// Guardian links reference iam users, so the use case validates them against
 	// the iam bounded context by RPC (the user must exist AND hold the guardian
 	// role). Server-to-server and network-private, like the config client.
 	iamBaseURL := envOr("IAM_BASE_URL", defaultIAMBaseURL)
-	users := iamclient.New(iamBaseURL, http.DefaultClient)
+	users := iamclient.New(iamBaseURL, gcpauth.HTTPClient(ctx, iamBaseURL))
 	guardians := usecase.NewGuardianService(repo, repo, users, tenantID, newID)
 
 	health := usecase.NewHealthService(serviceName)
@@ -153,11 +153,13 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	return mux, publisher, nil
 }
 
-// openDB opens the GORM Postgres pool from DATABASE_URL.
+// openDB opens the GORM Postgres pool, resolving its DSN via pkg/dbdsn:
+// DATABASE_URL verbatim when set (docker-compose), otherwise assembled
+// from the Cloud SQL split env (DB_SOCKET_DIR/DB_USER/DB_PASSWORD/DB_NAME).
 func openDB() (*gorm.DB, error) {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		return nil, errMissingDatabaseURL
+	dsn, err := dbdsn.Resolve()
+	if err != nil {
+		return nil, err
 	}
 	return gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Warn)})
 }

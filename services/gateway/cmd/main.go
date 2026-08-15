@@ -8,6 +8,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
 
 	"github.com/garcia-lorca/pkg/featureflag"
+	"github.com/garcia-lorca/pkg/gcpauth"
 	"github.com/garcia-lorca/pkg/logger"
 )
 
@@ -73,14 +75,19 @@ func main() {
 	// /features). Each module wires its routes behind the guard as it lands.
 	flags := featureflag.NewInMemory(config.ParseEnabledModules(os.Getenv("ENABLED_MODULES")))
 
-	iamHealth := client.NewIAMClient(iamBaseURL, http.DefaultClient)
-	authClient := client.NewAuthClient(iamBaseURL, http.DefaultClient)
-	studentsClient := client.NewStudentsClient(studentsBaseURL, http.DefaultClient)
-	configClient := client.NewConfigClient(configBaseURL, http.DefaultClient)
-	gradesClient := client.NewGradesClient(gradesBaseURL, http.DefaultClient)
-	financeClient := client.NewFinanceClient(financeBaseURL, http.DefaultClient)
-	attendanceClient := client.NewAttendanceClient(attendanceBaseURL, http.DefaultClient)
-	commsClient := client.NewCommsClient(commsBaseURL, http.DefaultClient)
+	// Each downstream client gets an ID-token-authenticated HTTP client whose
+	// OIDC audience is that service's own base URL, so the invoker-guarded
+	// (INTERNAL_ONLY) Cloud Run services accept the call. Local http:// targets
+	// fall back to http.DefaultClient (see pkg/gcpauth).
+	ctx := context.Background()
+	iamHealth := client.NewIAMClient(iamBaseURL, gcpauth.HTTPClient(ctx, iamBaseURL))
+	authClient := client.NewAuthClient(iamBaseURL, gcpauth.HTTPClient(ctx, iamBaseURL))
+	studentsClient := client.NewStudentsClient(studentsBaseURL, gcpauth.HTTPClient(ctx, studentsBaseURL))
+	configClient := client.NewConfigClient(configBaseURL, gcpauth.HTTPClient(ctx, configBaseURL))
+	gradesClient := client.NewGradesClient(gradesBaseURL, gcpauth.HTTPClient(ctx, gradesBaseURL))
+	financeClient := client.NewFinanceClient(financeBaseURL, gcpauth.HTTPClient(ctx, financeBaseURL))
+	attendanceClient := client.NewAttendanceClient(attendanceBaseURL, gcpauth.HTTPClient(ctx, attendanceBaseURL))
+	commsClient := client.NewCommsClient(commsBaseURL, gcpauth.HTTPClient(ctx, commsBaseURL))
 
 	// loginLimiter fronts POST /auth/login with a per-IP token bucket so an
 	// attacker cannot brute-force credentials from a single source. It is
