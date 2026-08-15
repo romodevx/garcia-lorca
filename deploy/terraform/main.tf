@@ -44,6 +44,26 @@ resource "google_artifact_registry_repository" "images" {
   format        = "DOCKER"
   labels        = local.labels
 
+  # Cost/hygiene: keep the 5 most-recent versions per package (rollback targets)
+  # and delete untagged images older than 30 days (churn from every CI build).
+  # See deploy/COST-AND-DEPLOY.md §C5.
+  cleanup_policies {
+    id     = "keep-recent-versions"
+    action = "KEEP"
+    most_recent_versions {
+      keep_count = 5
+    }
+  }
+
+  cleanup_policies {
+    id     = "delete-old-untagged"
+    action = "DELETE"
+    condition {
+      tag_state  = "UNTAGGED"
+      older_than = "2592000s" # 30 days
+    }
+  }
+
   depends_on = [google_project_service.apis]
 }
 

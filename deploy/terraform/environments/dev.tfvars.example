@@ -1,13 +1,39 @@
 # Per-environment overrides for dev. Copy to dev.tfvars (gitignored) and apply:
 #   terraform apply -var-file=environments/dev.tfvars
-project_id            = "garcia-lorca-dev"
-region                = "us-central1"
-env                   = "dev"
-image_tag             = "latest"
-db_tier               = "db-g1-small"
-db_availability_type  = "ZONAL"
-billing_account_id    = "000000-000000-000000"
-monthly_budget_amount = 100
+#
+# This is the COST-OPTIMIZED dev preset. Every override below maps to a lever in
+# deploy/COST-AND-DEPLOY.md §E ("Top 5 cost levers"). Tuned dev floor ~$12-20/mo
+# (Cloud SQL-dominated); the always-warm gateway+iam are the ~$95-100/mo lever.
+project_id           = "garcia-lorca-dev"
+region               = "us-central1"
+env                  = "dev"
+image_tag            = "latest"
+billing_account_id   = "000000-000000-000000"
+
+# ---- Cloud SQL: cheapest viable dev DB (COST-AND-DEPLOY.md §C1) ------------
+# Keep Cloud SQL (GCP-native, dev/prod parity). db-f1-micro shared-core needs
+# Enterprise edition + ZONAL (both are the module defaults). PITR off — daily
+# backups suffice for dev; retain only a few.
+db_tier                           = "db-f1-micro"
+db_availability_type              = "ZONAL"
+db_point_in_time_recovery_enabled = false
+db_backup_retained_count          = 3
+
+# ---- Cloud Run: scale-to-zero everywhere (COST-AND-DEPLOY.md §C2) ----------
+# THE big lever: let the two always-warm services scale to zero in dev. Cold
+# start (~1-3s) on the first morning request is acceptable here. gateway caps at
+# max=1 because its login rate limiter is in-process/per-instance — min=0/max=1
+# keeps rate limiting correct AND the cost at zero.
+gateway_min_instances     = 0
+gateway_max_instances     = 1
+gateway_cpu_idle          = true
+gateway_startup_cpu_boost = false
+iam_min_instances         = 0
+iam_cpu_idle              = true
+iam_startup_cpu_boost     = false
+
+# ---- Budget: alert-only, tightened for dev (COST-AND-DEPLOY.md §C5) --------
+monthly_budget_amount = 30
 budget_alert_emails   = ["andres.roqa93@gmail.com"]
 
 # ---- Owner temp password (shared envs only) -------------------------------
