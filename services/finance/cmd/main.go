@@ -33,6 +33,8 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/garcia-lorca/gen/go/garcialorca/finance/v1/financev1connect"
+	"github.com/garcia-lorca/pkg/dbdsn"
+	"github.com/garcia-lorca/pkg/gcpauth"
 	"github.com/garcia-lorca/pkg/logger"
 	"github.com/garcia-lorca/pkg/pubsub"
 	"github.com/garcia-lorca/pkg/pubsub/gcp"
@@ -59,8 +61,6 @@ const (
 	writeTimeout      = 30 * time.Second
 	idleTimeout       = 120 * time.Second
 )
-
-var errMissingDatabaseURL = errors.New("DATABASE_URL is required")
 
 func main() {
 	log := logger.Default()
@@ -124,8 +124,10 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	// answers for the cycle. The use case stays testable behind the ports.
 	// http.DefaultClient speaks Connect over HTTP/1.1, sufficient for these
 	// unary calls.
-	studentsClient := studentsclient.New(envOr("STUDENTS_BASE_URL", defaultStudentsBaseURL), http.DefaultClient)
-	cyclesClient := configclient.New(envOr("CONFIG_BASE_URL", defaultConfigBaseURL), http.DefaultClient)
+	studentsBaseURL := envOr("STUDENTS_BASE_URL", defaultStudentsBaseURL)
+	configBaseURL := envOr("CONFIG_BASE_URL", defaultConfigBaseURL)
+	studentsClient := studentsclient.New(studentsBaseURL, gcpauth.HTTPClient(ctx, studentsBaseURL))
+	cyclesClient := configclient.New(configBaseURL, gcpauth.HTTPClient(ctx, configBaseURL))
 
 	events, err := gcp.PublisherFromEnv(ctx, log)
 	if err != nil {
@@ -148,11 +150,13 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	return mux, events, nil
 }
 
-// openDB opens the GORM Postgres pool from DATABASE_URL.
+// openDB opens the GORM Postgres pool, resolving its DSN via pkg/dbdsn:
+// DATABASE_URL verbatim when set (docker-compose), otherwise assembled
+// from the Cloud SQL split env (DB_SOCKET_DIR/DB_USER/DB_PASSWORD/DB_NAME).
 func openDB() (*gorm.DB, error) {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		return nil, errMissingDatabaseURL
+	dsn, err := dbdsn.Resolve()
+	if err != nil {
+		return nil, err
 	}
 	return gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Warn)})
 }

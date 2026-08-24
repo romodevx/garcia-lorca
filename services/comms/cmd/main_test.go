@@ -9,6 +9,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/garcia-lorca/pkg/dbdsn"
 	"github.com/garcia-lorca/pkg/logger"
 )
 
@@ -47,6 +48,41 @@ func TestStartSubscribersAPIOnly(t *testing.T) {
 		}
 	case <-time.After(waitTimeout):
 		t.Fatal("Wait() blocked with no broker configured: a subscriber goroutine was started anyway")
+	}
+}
+
+// TestStartSubscribersPushModeSkipsPullLoop is the scale-to-zero guard: on Cloud
+// Run events arrive by POST /pubsub, so the streaming-pull loop must NOT start
+// even though a broker is configured (PUBSUB_PROJECT_ID is set). Nothing was
+// added to the group — a Wait that returns while the context is still live proves
+// no subscriber goroutine was started — and the release is the usual no-op.
+func TestStartSubscribersPushModeSkipsPullLoop(t *testing.T) {
+	t.Setenv("PUBSUB_PUSH_MODE", "true")
+	t.Setenv("PUBSUB_PROJECT_ID", "garcia-lorca-local") // a broker IS configured
+	t.Setenv("PUBSUB_EMULATOR_HOST", "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	group, groupCtx := errgroup.WithContext(ctx)
+
+	release, err := startSubscribers(groupCtx, group, nil, logger.Default())
+	if err != nil {
+		t.Fatalf("startSubscribers() error = %v, want nil (push mode must not fail startup)", err)
+	}
+	if release == nil {
+		t.Fatal("startSubscribers() returned a nil release; the caller always runs it")
+	}
+	release()
+
+	waited := make(chan error, 1)
+	go func() { waited <- group.Wait() }()
+	select {
+	case err := <-waited:
+		if err != nil {
+			t.Fatalf("Wait() = %v, want nil", err)
+		}
+	case <-time.After(waitTimeout):
+		t.Fatal("Wait() blocked in push mode: the pull subscriber loop was started anyway")
 	}
 }
 
@@ -122,7 +158,13 @@ func TestStopGroupJoinsEveryGoroutine(t *testing.T) {
 // It is also the guard on run's early-return path: the feed is durable storage, so
 // booting without it would serve empty reads and drop every consumed event.
 func TestRunRequiresADatabase(t *testing.T) {
+	// Neither DATABASE_URL nor the Cloud SQL split vars are set, so dbdsn.Resolve
+	// cannot assemble a DSN and run must fail fast rather than boot databaseless.
 	t.Setenv("DATABASE_URL", "")
+	t.Setenv("DB_SOCKET_DIR", "")
+	t.Setenv("DB_USER", "")
+	t.Setenv("DB_PASSWORD", "")
+	t.Setenv("DB_NAME", "")
 	t.Setenv("PUBSUB_EMULATOR_HOST", "")
 	t.Setenv("PUBSUB_PROJECT_ID", "")
 
@@ -131,8 +173,8 @@ func TestRunRequiresADatabase(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if !errors.Is(err, errMissingDatabaseURL) {
-			t.Fatalf("run() = %v, want errMissingDatabaseURL", err)
+		if !errors.Is(err, dbdsn.ErrMissingConfig) {
+			t.Fatalf("run() = %v, want dbdsn.ErrMissingConfig", err)
 		}
 	case <-time.After(waitTimeout):
 		t.Fatal("run() did not return without DATABASE_URL")

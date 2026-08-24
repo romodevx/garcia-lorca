@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -38,6 +39,8 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/garcia-lorca/gen/go/garcialorca/comms/v1/commsv1connect"
+	"github.com/garcia-lorca/pkg/dbdsn"
+	"github.com/garcia-lorca/pkg/gcpauth"
 	"github.com/garcia-lorca/pkg/logger"
 	"github.com/garcia-lorca/pkg/pubsub/gcp"
 	"github.com/garcia-lorca/services/comms/internal/adapters/fcm"
@@ -65,8 +68,6 @@ const (
 	// makes Receive stop after the handlers it has already started.
 	shutdownTimeout = 15 * time.Second
 )
-
-var errMissingDatabaseURL = errors.New("DATABASE_URL is required")
 
 // consumedTopics maps every topic comms consumes to the durable subscription it
 // owns on that topic. One subscription PER TOPIC, named after this service, so a
@@ -120,7 +121,8 @@ func run(ctx context.Context, log *slog.Logger) error {
 	// push: the student's guardians, then the devices those users registered here.
 	// http.DefaultClient speaks Connect over HTTP/1.1, sufficient for this unary
 	// call (mirrors attendance and grades).
-	guardians := studentsclient.New(envOr("STUDENTS_BASE_URL", defaultStudentsBaseURL), http.DefaultClient)
+	studentsBaseURL := envOr("STUDENTS_BASE_URL", defaultStudentsBaseURL)
+	guardians := studentsclient.New(studentsBaseURL, gcpauth.HTTPClient(ctx, studentsBaseURL))
 	// Push is the courtesy on top of the durable feed, and only the logging sender
 	// ships in this phase (see adapters/fcm): the real Firebase client needs a
 	// service-account credential in the secret manager.
@@ -134,6 +136,17 @@ func run(ctx context.Context, log *slog.Logger) error {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	// The Pub/Sub PUSH receiver: Cloud Run delivers events here when the process
+	// is scaled to zero (see startSubscribers). It dispatches to the SAME
+	// idempotent consumer as the pull loop, so it is always mounted — harmless in
+	// pull mode, where no push delivery ever arrives. The route is method-aware,
+	// so anything but POST gets a 405.
+	//
+	// PUBSUB_PUSH_SA_EMAIL, when set by Terraform, pins the caller to the push
+	// subscription's service account (defense-in-depth over the coarse run.invoker
+	// gate); unset locally, the receiver skips that check.
+	pushSA := os.Getenv("PUBSUB_PUSH_SA_EMAIL")
+	mux.Handle("POST /pubsub", gcp.NewPushHandler(svc.HandleEvent, pushSA, log))
 
 	addr := envOr("ADDR", defaultAddr)
 	// h2c: serve HTTP/2 cleartext so both gRPC and Connect clients work.
@@ -213,6 +226,16 @@ func stopGroup(cancel context.CancelFunc, group *errgroup.Group, log *slog.Logge
 // a no-op: consuming is how the feed is filled, but refusing to boot without a
 // broker would make the read side of the module undevelopable on its own.
 func startSubscribers(ctx context.Context, group *errgroup.Group, svc *service.CommsService, log *slog.Logger) (release func(), err error) {
+	// Under Cloud Run scale-to-zero nothing runs to call Receive, so events are
+	// delivered by POST /pubsub instead (see run's route) and the streaming-pull
+	// loop must stay off — starting it would create durable subscriptions no
+	// running process drains. Terraform sets PUBSUB_PUSH_MODE on Cloud Run; local
+	// docker-compose leaves it unset and keeps the pull loop below.
+	if pushMode() {
+		log.Info("comms in pubsub push mode; pull subscriber loop disabled (events arrive via POST /pubsub)")
+		return func() {}, nil
+	}
+
 	if os.Getenv("PUBSUB_EMULATOR_HOST") == "" && os.Getenv("PUBSUB_PROJECT_ID") == "" {
 		log.Warn("pubsub not configured; comms runs API-only")
 		return func() {}, nil
@@ -243,17 +266,28 @@ func startSubscribers(ctx context.Context, group *errgroup.Group, svc *service.C
 	}, nil
 }
 
-// openDB opens the GORM Postgres pool from DATABASE_URL.
+// openDB opens the GORM Postgres pool, resolving its DSN via pkg/dbdsn:
+// DATABASE_URL verbatim when set (docker-compose), otherwise assembled
+// from the Cloud SQL split env (DB_SOCKET_DIR/DB_USER/DB_PASSWORD/DB_NAME).
 func openDB() (*gorm.DB, error) {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		return nil, errMissingDatabaseURL
+	dsn, err := dbdsn.Resolve()
+	if err != nil {
+		return nil, err
 	}
 	return gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Warn)})
 }
 
 func recoverFn(_ context.Context, _ connect.Spec, _ http.Header, _ any) error {
 	return connect.NewError(connect.CodeInternal, errors.New("internal error"))
+}
+
+// pushMode reports whether comms consumes via Pub/Sub push (Cloud Run) rather
+// than the streaming-pull loop (local docker-compose). Terraform sets
+// PUBSUB_PUSH_MODE on Cloud Run; an unset or unparseable value is false, so the
+// safe default is the pull loop the emulator relies on.
+func pushMode() bool {
+	enabled, err := strconv.ParseBool(os.Getenv("PUBSUB_PUSH_MODE"))
+	return err == nil && enabled
 }
 
 func envOr(key, fallback string) string {

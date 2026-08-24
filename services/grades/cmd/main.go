@@ -25,6 +25,8 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/garcia-lorca/gen/go/garcialorca/grades/v1/gradesv1connect"
+	"github.com/garcia-lorca/pkg/dbdsn"
+	"github.com/garcia-lorca/pkg/gcpauth"
 	"github.com/garcia-lorca/pkg/logger"
 	"github.com/garcia-lorca/services/grades/internal/adapters/configclient"
 	grpcadapter "github.com/garcia-lorca/services/grades/internal/adapters/grpc"
@@ -48,8 +50,6 @@ const (
 	writeTimeout      = 30 * time.Second
 	idleTimeout       = 120 * time.Second
 )
-
-var errMissingDatabaseURL = errors.New("DATABASE_URL is required")
 
 func main() {
 	log := logger.Default()
@@ -96,8 +96,10 @@ func buildMux() (*http.ServeMux, error) {
 	// envs); the use case stays testable behind the AssignmentReader /
 	// EnrollmentReader ports. http.DefaultClient speaks Connect over HTTP/1.1,
 	// sufficient for these unary calls.
-	assignments := configclient.New(envOr("CONFIG_BASE_URL", defaultConfigBaseURL), http.DefaultClient)
-	enrollments := studentsclient.New(envOr("STUDENTS_BASE_URL", defaultStudentsBaseURL), http.DefaultClient)
+	configBaseURL := envOr("CONFIG_BASE_URL", defaultConfigBaseURL)
+	studentsBaseURL := envOr("STUDENTS_BASE_URL", defaultStudentsBaseURL)
+	assignments := configclient.New(configBaseURL, gcpauth.HTTPClient(context.Background(), configBaseURL))
+	enrollments := studentsclient.New(studentsBaseURL, gcpauth.HTTPClient(context.Background(), studentsBaseURL))
 
 	newID := func() string { return uuid.NewString() }
 	svc := usecase.NewGradesService(repo, assignments, enrollments, tenantID, newID, time.Now)
@@ -114,11 +116,13 @@ func buildMux() (*http.ServeMux, error) {
 	return mux, nil
 }
 
-// openDB opens the GORM Postgres pool from DATABASE_URL.
+// openDB opens the GORM Postgres pool, resolving its DSN via pkg/dbdsn:
+// DATABASE_URL verbatim when set (docker-compose), otherwise assembled
+// from the Cloud SQL split env (DB_SOCKET_DIR/DB_USER/DB_PASSWORD/DB_NAME).
 func openDB() (*gorm.DB, error) {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		return nil, errMissingDatabaseURL
+	dsn, err := dbdsn.Resolve()
+	if err != nil {
+		return nil, err
 	}
 	return gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Warn)})
 }

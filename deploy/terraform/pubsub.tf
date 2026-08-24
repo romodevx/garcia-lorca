@@ -20,12 +20,30 @@ resource "google_pubsub_topic" "payment_events_dlq" {
   depends_on = [google_project_service.apis]
 }
 
+# NOTE: the subscription NAME must match what the comms consumer subscribes to
+# (services/comms/cmd/main.go consumedTopics: "payment-events" ->
+# "comms-payment-events"). Pre-creating it here means the runtime finds it
+# existing instead of auto-creating it, so the runtime SA needs only
+# publisher/subscriber — never pubsub.subscriptions.create.
 resource "google_pubsub_subscription" "payment_events_comms" {
   project = var.project_id
-  name    = "payment-events-comms"
+  name    = "comms-payment-events"
   topic   = google_pubsub_topic.payment_events.id
 
   ack_deadline_seconds = 30
+
+  # Authenticated PUSH: Pub/Sub POSTs each message to comms /pubsub and wakes it
+  # from scale-to-zero, so comms no longer runs a pull loop. The oidc_token lets
+  # comms verify the caller is Pub/Sub (audience = the service URI; the push SA
+  # carries run.invoker on comms — see main.tf). Presence of push_config makes
+  # this a push subscription; the pull semantics are dropped by that alone.
+  push_config {
+    push_endpoint = "${module.comms.uri}/pubsub"
+    oidc_token {
+      service_account_email = google_service_account.pubsub_push.email
+      audience              = module.comms.uri
+    }
+  }
 
   # Redeliver with backoff; after max_delivery_attempts, route to the DLQ.
   retry_policy {
@@ -77,4 +95,95 @@ resource "google_pubsub_subscription_iam_member" "dlq_subscriber" {
   subscription = google_pubsub_subscription.payment_events_comms.id
   role         = "roles/pubsub.subscriber"
   member       = local.pubsub_sa
+}
+
+# ---- attendance-events (attendance publishes; comms consumes) --------------
+# Pre-declared so the attendance publisher and comms consumer never rely on
+# runtime auto-creation (keeps the runtime SA at publisher/subscriber only).
+# Mirrors the payment-events topic + DLQ + comms-subscription shape above.
+resource "google_pubsub_topic" "attendance_events" {
+  project = var.project_id
+  name    = "attendance-events"
+  labels  = local.labels
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_pubsub_topic" "attendance_events_dlq" {
+  project = var.project_id
+  name    = "attendance-events-dlq"
+  labels  = local.labels
+
+  depends_on = [google_project_service.apis]
+}
+
+# Subscription NAME matches the comms consumer (consumedTopics:
+# "attendance-events" -> "comms-attendance-events").
+resource "google_pubsub_subscription" "attendance_events_comms" {
+  project = var.project_id
+  name    = "comms-attendance-events"
+  topic   = google_pubsub_topic.attendance_events.id
+
+  ack_deadline_seconds = 30
+
+  # Authenticated PUSH (same shape as comms-payment-events above): Pub/Sub POSTs
+  # to comms /pubsub with an OIDC token, waking it from scale-to-zero.
+  push_config {
+    push_endpoint = "${module.comms.uri}/pubsub"
+    oidc_token {
+      service_account_email = google_service_account.pubsub_push.email
+      audience              = module.comms.uri
+    }
+  }
+
+  retry_policy {
+    minimum_backoff = "10s"
+    maximum_backoff = "600s"
+  }
+
+  dead_letter_policy {
+    dead_letter_topic     = google_pubsub_topic.attendance_events_dlq.id
+    max_delivery_attempts = 5
+  }
+
+  message_retention_duration = "604800s" # 7 days
+  expiration_policy {
+    ttl = "" # never expire the subscription
+  }
+}
+
+resource "google_pubsub_subscription" "attendance_events_dlq_drain" {
+  project = var.project_id
+  name    = "attendance-events-dlq-drain"
+  topic   = google_pubsub_topic.attendance_events_dlq.id
+
+  ack_deadline_seconds       = 60
+  message_retention_duration = "604800s" # 7 days
+}
+
+resource "google_pubsub_topic_iam_member" "attendance_dlq_publisher" {
+  project = var.project_id
+  topic   = google_pubsub_topic.attendance_events_dlq.id
+  role    = "roles/pubsub.publisher"
+  member  = local.pubsub_sa
+}
+
+resource "google_pubsub_subscription_iam_member" "attendance_dlq_subscriber" {
+  project      = var.project_id
+  subscription = google_pubsub_subscription.attendance_events_comms.id
+  role         = "roles/pubsub.subscriber"
+  member       = local.pubsub_sa
+}
+
+# ---- student-events (students publishes; no consumer yet) ------------------
+# Declared so the students publisher finds the topic pre-created instead of
+# auto-creating it. comms deliberately does NOT subscribe (it renders nothing
+# from student-events — see services/comms/cmd/main.go), so there is no
+# subscription and thus no DLQ. Add both when a consumer lands.
+resource "google_pubsub_topic" "student_events" {
+  project = var.project_id
+  name    = "student-events"
+  labels  = local.labels
+
+  depends_on = [google_project_service.apis]
 }

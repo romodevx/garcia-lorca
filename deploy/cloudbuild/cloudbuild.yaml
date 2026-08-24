@@ -19,7 +19,11 @@ substitutions:
 
 options:
   logging: CLOUD_LOGGING_ONLY
-  machineType: E2_HIGHCPU_8
+  # COST: no machineType set, so builds run on the DEFAULT machine (e2-medium),
+  # which is the only pool eligible for the 120 free build-minutes/day. This
+  # trades some wall-clock time on the parallel image builds for ~$0 dev builds
+  # (see deploy/COST-AND-DEPLOY.md §C5). For faster prod builds, re-add a bigger
+  # machineType (e.g. E2_HIGHCPU_8) on the prod trigger — it forfeits free minutes.
 
 steps:
   # ---- 1. Proto: lint + generate (gen/ is regenerated, never committed) ----
@@ -142,6 +146,66 @@ steps:
         docker push "$IMG"
     waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
 
+  - id: image-config
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/config:$SHORT_SHA"
+        docker build -f services/config/Dockerfile -t "$IMG" .
+        docker push "$IMG"
+    waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
+
+  - id: image-finance
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/finance:$SHORT_SHA"
+        docker build -f services/finance/Dockerfile -t "$IMG" .
+        docker push "$IMG"
+    waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
+
+  - id: image-grades
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/grades:$SHORT_SHA"
+        docker build -f services/grades/Dockerfile -t "$IMG" .
+        docker push "$IMG"
+    waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
+
+  - id: image-attendance
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/attendance:$SHORT_SHA"
+        docker build -f services/attendance/Dockerfile -t "$IMG" .
+        docker push "$IMG"
+    waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
+
+  - id: image-comms
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/comms:$SHORT_SHA"
+        docker build -f services/comms/Dockerfile -t "$IMG" .
+        docker push "$IMG"
+    waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
+
   # ---- 7. Deploy (only when _DEPLOY=true; main/release triggers) ----------
   # Cloud Run deploy preserves each service's scaling profile set by Terraform.
   # Terraform owns the desired-state config; this updates the running image to
@@ -158,18 +222,31 @@ steps:
           echo "Skipping deploy (_DEPLOY != true)."
           exit 0
         fi
-        for svc in gateway iam students; do
+        for svc in gateway iam students config finance grades attendance comms; do
           gcloud run deploy "$svc" \
             --project="$PROJECT_ID" \
             --region="${_REGION}" \
             --image="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/$svc:$SHORT_SHA"
         done
-    waitFor: ["image-gateway", "image-iam", "image-students"]
+    waitFor:
+      - image-gateway
+      - image-iam
+      - image-students
+      - image-config
+      - image-finance
+      - image-grades
+      - image-attendance
+      - image-comms
 
 # Record built images in the build metadata.
 images:
   - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/gateway:$SHORT_SHA"
   - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/iam:$SHORT_SHA"
   - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/students:$SHORT_SHA"
+  - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/config:$SHORT_SHA"
+  - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/finance:$SHORT_SHA"
+  - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/grades:$SHORT_SHA"
+  - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/attendance:$SHORT_SHA"
+  - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/comms:$SHORT_SHA"
 
 timeout: 1800s
