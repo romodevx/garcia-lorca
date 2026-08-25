@@ -50,11 +50,15 @@ GCP Cloud Run + Cloud SQL (Postgres) + Pub/Sub · contratos en `proto/` vía buf
 ## Arquitectura por servicio
 
 - **Clean Architecture completa** (dominio rico): `finance`, `billing`, `grades`,
-  `scholarships`, `students`, `iam`.
+  `scholarships`, `students`, `iam`, **`uniforms`**.
   `cmd/main.go` + `internal/{domain,usecase,ports,adapters/{postgres,grpc,pubsub}}`.
   Dependencias: `adapters → usecase → domain`.
-- **Layout thin** (CRUD + I/O): `attendance`, `docs`, `comms`, `uniforms`.
+- **Layout thin** (CRUD + I/O): `attendance`, `docs`, `comms`.
   `handler gRPC → service → repo`. La arquitectura se gana, no se impone.
+- `uniforms` nació clasificado como thin en FASE 0 y **se movió** al construirse:
+  máquina de estados de 7 estados, invariantes de inventario que cruzan tablas,
+  aritmética de días hábiles y asignación FIFO no son CRUD (**ADR 0007**). La
+  clasificación de FASE 0 es una hipótesis, no un contrato.
 - **gateway/BFF:** edge Connect (HTTP/JSON) hacia front; gRPC interno hacia servicios;
   middleware de feature flags; read models para dashboard.
 
