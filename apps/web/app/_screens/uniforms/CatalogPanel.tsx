@@ -1,0 +1,385 @@
+"use client";
+
+import { useCallback, useState, type ReactElement } from "react";
+import { Btn } from "../../_design/Controls";
+import { createItem, updateItem, UniformsError, upsertSizes, type Level, type SizeSpec, type UniformItem } from "../../uniforms/api";
+import { Drawer } from "./InventoryPanel";
+import { EmptyState, ErrorNote, field, label, money } from "./parts";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+
+const LEVELS: { id: Level; label: string }[] = [
+  { id: "", label: "Todos los niveles" },
+  { id: "kinder", label: "Kínder" },
+  { id: "primaria", label: "Primaria" },
+  { id: "secundaria", label: "Secundaria" },
+  { id: "preparatoria", label: "Prepa" },
+];
+
+/**
+ * The catalogue.
+ *
+ * Used once at the start of a cycle and then almost never, which is exactly why
+ * it is its own tab rather than a drawer inside the storeroom: creating a garment
+ * and counting stock have different rhythms and should not compete for the same
+ * screen.
+ *
+ * "Todos los niveles" is the default because most garments are the same from
+ * kinder to prepa. The requirement is that a school MAY dress levels differently,
+ * not that it must, and making somebody say "all four" four times is busywork.
+ */
+export function CatalogPanel({
+  items,
+  onChanged,
+}: {
+  items: UniformItem[];
+  onChanged: () => void;
+}): ReactElement {
+  const [creating, setCreating] = useState(false);
+  const [sizing, setSizing] = useState<UniformItem | null>(null);
+  const [failure, setFailure] = useState<UniformsError | null>(null);
+  const [note, setNote] = useState("");
+
+  const retire = useCallback(
+    async (item: UniformItem): Promise<void> => {
+      try {
+        await updateItem(API_URL, item.id, {
+          name: item.name,
+          description: item.description,
+          level: item.level,
+          priceCents: item.priceCents,
+          active: !item.active,
+        });
+        onChanged();
+      } catch (err) {
+        setFailure(err instanceof UniformsError ? err : new UniformsError("internal", "Algo salió mal"));
+      }
+    },
+    [onChanged],
+  );
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      {failure !== null && <ErrorNote message={failure.message} detail={failure.detail} />}
+      {note !== "" && (
+        <div style={{ padding: "12px 16px", borderRadius: "var(--r-lg)", background: "var(--ok-bg)", color: "var(--ok-fg)", fontWeight: 600, fontSize: 14 }}>
+          {note}
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <Btn icon="plus" onClick={() => setCreating(true)}>
+          Nueva prenda
+        </Btn>
+      </div>
+
+      {items.length === 0 ? (
+        <EmptyState
+          icon="uniforms"
+          title="Crea tu primera prenda"
+          hint="Una prenda es un artículo del uniforme: playera, pantalón, suéter. Después le generas todas sus tallas de un golpe."
+          action={
+            <Btn icon="plus" onClick={() => setCreating(true)}>
+              Nueva prenda
+            </Btn>
+          }
+        />
+      ) : (
+        <div style={{ display: "grid", gap: 10 }}>
+          {items.map((item) => (
+            <div
+              key={item.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+                flexWrap: "wrap",
+                padding: 16,
+                borderRadius: "var(--r-lg)",
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                opacity: item.active ? 1 : 0.6,
+              }}
+            >
+              <div style={{ flex: "1 1 200px", minWidth: 0 }}>
+                <p style={{ fontWeight: 700, fontSize: 15.5 }}>
+                  {item.name}
+                  {!item.active && <span style={{ fontSize: 12.5, color: "var(--text-faint)" }}> · retirada</span>}
+                </p>
+                <p style={{ fontSize: 13.5, color: "var(--text-muted)" }}>
+                  {item.code} · {money(item.priceCents)} ·{" "}
+                  {item.level === "" ? "todos los niveles" : LEVELS.find((l) => l.id === item.level)?.label}
+                </p>
+              </div>
+              <span style={{ fontSize: 13.5, color: item.sizes.length === 0 ? "var(--warn-fg)" : "var(--text-muted)" }}>
+                {item.sizes.length === 0 ? "sin tallas" : `${item.sizes.length} tallas`}
+              </span>
+              <Btn kind="ghost" icon="plus" onClick={() => setSizing(item)}>
+                Tallas
+              </Btn>
+              <Btn kind="ghost" onClick={() => void retire(item)}>
+                {item.active ? "Retirar" : "Reactivar"}
+              </Btn>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {creating && (
+        <CreateDrawer
+          onClose={() => setCreating(false)}
+          onDone={(created) => {
+            setCreating(false);
+            onChanged();
+            // Straight into sizes: a garment with no sizes cannot be sold, so
+            // stopping here would leave the job half done and looking finished.
+            setSizing(created);
+          }}
+          onError={setFailure}
+        />
+      )}
+
+      {sizing !== null && (
+        <SizesDrawer
+          item={sizing}
+          onClose={() => setSizing(null)}
+          onDone={(message) => {
+            setSizing(null);
+            setNote(message);
+            onChanged();
+          }}
+          onError={setFailure}
+        />
+      )}
+    </div>
+  );
+}
+
+function CreateDrawer({
+  onClose,
+  onDone,
+  onError,
+}: {
+  onClose: () => void;
+  onDone: (created: UniformItem) => void;
+  onError: (err: UniformsError) => void;
+}): ReactElement {
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
+  const [level, setLevel] = useState<Level>("");
+  const [pesos, setPesos] = useState("");
+  const [pending, setPending] = useState(false);
+
+  const priceCents = Math.round(Number(pesos.replace(/[^0-9.]/g, "")) * 100);
+  const valid = code.trim() !== "" && name.trim() !== "" && Number.isFinite(priceCents) && priceCents >= 0;
+
+  const save = useCallback(async (): Promise<void> => {
+    setPending(true);
+    try {
+      const created = await createItem(API_URL, { code: code.trim(), name: name.trim(), level, priceCents });
+      onDone(created);
+    } catch (err) {
+      onError(err instanceof UniformsError ? err : new UniformsError("internal", "Algo salió mal"));
+      onClose();
+    } finally {
+      setPending(false);
+    }
+  }, [code, level, name, onClose, onDone, onError, priceCents]);
+
+  return (
+    <Drawer title="Nueva prenda" icon="plus" onClose={onClose}>
+      <label style={label} htmlFor="item-name">
+        Nombre
+      </label>
+      <input id="item-name" style={field} placeholder="Suéter verde" value={name} onChange={(e) => setName(e.target.value)} />
+
+      <label style={{ ...label, marginTop: 16 }} htmlFor="item-code">
+        Clave
+      </label>
+      <input id="item-code" style={field} placeholder="SUE-VER" value={code} onChange={(e) => setCode(e.target.value)} />
+      <p style={{ fontSize: 12.5, color: "var(--text-faint)", marginTop: 6 }}>
+        La clave no se puede cambiar después: es como se refieren a la prenda los pedidos ya hechos.
+      </p>
+
+      <p style={{ ...label, marginTop: 16 }}>Nivel</p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {LEVELS.map((option) => (
+          <button
+            key={option.id}
+            aria-pressed={level === option.id}
+            onClick={() => setLevel(option.id)}
+            style={{
+              height: 38,
+              padding: "0 14px",
+              borderRadius: 99,
+              fontSize: 13.5,
+              fontWeight: 600,
+              border: level === option.id ? "1.5px solid var(--forest)" : "1px solid var(--border)",
+              background: level === option.id ? "color-mix(in oklab, var(--forest) 12%, var(--surface))" : "var(--surface)",
+              color: level === option.id ? "var(--forest)" : "var(--text-muted)",
+            }}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+
+      <label style={{ ...label, marginTop: 16 }} htmlFor="item-price">
+        Precio
+      </label>
+      <input id="item-price" style={field} inputMode="decimal" placeholder="650.00" value={pesos} onChange={(e) => setPesos(e.target.value)} />
+
+      <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+        <Btn kind="ghost" onClick={onClose}>
+          Cancelar
+        </Btn>
+        <Btn icon="check" onClick={() => void save()} disabled={!valid || pending}>
+          {pending ? "Guardando…" : "Crear y poner tallas"}
+        </Btn>
+      </div>
+    </Drawer>
+  );
+}
+
+/**
+ * The whole size run in one go.
+ *
+ * A school opening the module has six garments and eight sizes each. Asking for
+ * forty-eight separate forms is how a module gets abandoned on its first
+ * afternoon, so this takes a range or a list and reports created and updated
+ * separately — "8 tallas creadas, 2 ya existían" beats saving in silence.
+ */
+function SizesDrawer({
+  item,
+  onClose,
+  onDone,
+  onError,
+}: {
+  item: UniformItem;
+  onClose: () => void;
+  onDone: (message: string) => void;
+  onError: (err: UniformsError) => void;
+}): ReactElement {
+  const [raw, setRaw] = useState(item.sizes.map((s) => s.sizeLabel).join(", "));
+  const [minStock, setMinStock] = useState("");
+  const [pending, setPending] = useState(false);
+
+  const labels = parseSizes(raw);
+  const min = Number(minStock);
+
+  const save = useCallback(async (): Promise<void> => {
+    setPending(true);
+    try {
+      const specs: SizeSpec[] = labels.map((sizeLabel, index) => ({
+        sizeLabel,
+        sizeOrder: index + 1,
+        minStock: Number.isFinite(min) && min > 0 ? min : 0,
+      }));
+      const res = await upsertSizes(API_URL, item.id, specs);
+      onDone(sizesMessage(res.createdCount, res.updatedCount));
+    } catch (err) {
+      onError(err instanceof UniformsError ? err : new UniformsError("internal", "Algo salió mal"));
+      onClose();
+    } finally {
+      setPending(false);
+    }
+  }, [item.id, labels, min, onClose, onDone, onError]);
+
+  return (
+    <Drawer title={`Tallas de ${item.name}`} icon="plus" onClose={onClose}>
+      <label style={label} htmlFor="sizes-raw">
+        Tallas
+      </label>
+      <input
+        id="sizes-raw"
+        style={field}
+        placeholder="4-16  ·  CH, M, G  ·  4, 6, 8"
+        value={raw}
+        onChange={(e) => setRaw(e.target.value)}
+      />
+      <p style={{ fontSize: 12.5, color: "var(--text-faint)", marginTop: 6 }}>
+        Escribe un rango como 4-16 o una lista separada por comas. El orden es el que escribas.
+      </p>
+
+      {labels.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
+          {labels.map((size) => (
+            <span
+              key={size}
+              style={{
+                padding: "5px 12px",
+                borderRadius: 99,
+                background: "var(--surface-3)",
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
+              {size}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <label style={{ ...label, marginTop: 16 }} htmlFor="sizes-min">
+        Mínimo por talla
+      </label>
+      <input
+        id="sizes-min"
+        style={field}
+        inputMode="numeric"
+        placeholder="0"
+        value={minStock}
+        onChange={(e) => setMinStock(e.target.value)}
+      />
+      <p style={{ fontSize: 12.5, color: "var(--text-faint)", marginTop: 6 }}>
+        Cuando queden menos piezas libres que este número, la talla aparece en Bajo mínimo.
+      </p>
+
+      <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+        <Btn kind="ghost" onClick={onClose}>
+          Cancelar
+        </Btn>
+        <Btn icon="check" onClick={() => void save()} disabled={labels.length === 0 || pending}>
+          {pending ? "Guardando…" : `Guardar ${labels.length} tallas`}
+        </Btn>
+      </div>
+    </Drawer>
+  );
+}
+
+/**
+ * Turns what somebody typed into a size run.
+ *
+ * "4-16" means the even sizes a school actually stocks, not every integer:
+ * nobody sells a size 5 jumper. A list is taken verbatim, because letter runs
+ * have no arithmetic.
+ */
+export function parseSizes(raw: string): string[] {
+  const text = raw.trim();
+  if (text === "") return [];
+
+  const range = /^(\d{1,2})\s*-\s*(\d{1,2})$/.exec(text);
+  if (range !== null) {
+    const from = Number(range[1]);
+    const to = Number(range[2]);
+    if (from >= to) return [String(from)];
+    const step = from % 2 === 0 ? 2 : 1;
+    const out: string[] = [];
+    for (let n = from; n <= to; n += step) out.push(String(n));
+    return out;
+  }
+
+  const seen = new Set<string>();
+  return text
+    .split(/[,\s]+/)
+    .map((part) => part.trim())
+    .filter((part) => part !== "" && !seen.has(part) && seen.add(part) !== undefined);
+}
+
+/** "8 tallas creadas, 2 ya existían" beats saving in silence. */
+export function sizesMessage(created: number, updated: number): string {
+  const parts: string[] = [];
+  if (created > 0) parts.push(`${created} ${created === 1 ? "talla creada" : "tallas creadas"}`);
+  if (updated > 0) parts.push(`${updated} ${updated === 1 ? "ya existía" : "ya existían"}`);
+  return parts.length === 0 ? "Sin cambios" : parts.join(", ");
+}
