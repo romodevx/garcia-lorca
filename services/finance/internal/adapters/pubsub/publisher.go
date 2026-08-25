@@ -25,6 +25,7 @@ const (
 	topicPaymentEvents = "payment-events"
 
 	typePaymentRegistered = "PaymentRegistered"
+	typeChargeSettled     = "ChargeSettled"
 
 	attrType     = "type"
 	attrTenantID = "tenant_id"
@@ -55,6 +56,21 @@ func (p *EventPublisher) PublishPaymentRegistered(ctx context.Context, e ports.P
 		AmountCents: e.AmountCents,
 		Method:      e.Method,
 		PaidAt:      timestamppb.New(e.PaidAt),
+	})
+}
+
+// PublishChargeSettled announces that a charge is now fully covered. It rides
+// the same per-domain topic as PaymentRegistered and is told apart by the "type"
+// attribute, so a consumer that only wants settlements filters on it instead of
+// summing payments.
+func (p *EventPublisher) PublishChargeSettled(ctx context.Context, e ports.ChargeSettledEvent) error {
+	return p.publish(ctx, e.TenantID, typeChargeSettled, &financev1.ChargeSettled{
+		ChargeId:    e.ChargeID,
+		StudentId:   e.StudentID,
+		TenantId:    e.TenantID,
+		ExternalRef: e.ExternalRef,
+		AmountCents: e.AmountCents,
+		SettledAt:   timestamppb.New(e.SettledAt),
 	})
 }
 

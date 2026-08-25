@@ -353,6 +353,26 @@ func (s *FinanceService) publishPaymentRegistered(ctx context.Context, p domain.
 		AmountCents: p.Amount().Int64(),
 		PaidAt:      p.PaidAt(),
 	})
+	s.publishChargeSettledIfClosed(ctx, p, charge)
+}
+
+// publishChargeSettledIfClosed fires ChargeSettled on the collection that closes
+// the charge, and on no other. A consumer that releases goods against the event
+// must never act on a partial payment, so the test is the charge's own derived
+// status after this payment — not the amount collected, which says nothing about
+// what was owed. Best-effort for the same reason as above: the money is banked.
+func (s *FinanceService) publishChargeSettledIfClosed(ctx context.Context, p domain.Payment, charge ports.ChargeWithPaid) {
+	if charge.Charge.Status() != domain.StatusPaid {
+		return
+	}
+	_ = s.publisher.PublishChargeSettled(ctx, ports.ChargeSettledEvent{
+		ChargeID:    p.ChargeID(),
+		StudentID:   charge.Charge.StudentID(),
+		TenantID:    s.tenantID,
+		ExternalRef: charge.Charge.ExternalRef(),
+		AmountCents: charge.Charge.Effective().Int64(),
+		SettledAt:   p.PaidAt(),
+	})
 }
 
 // GetAccount builds a student's account statement: every charge across every

@@ -88,8 +88,14 @@ func (f *fakeEnrollments) ListByCycle(_ context.Context, cycleID, groupID string
 // --- publisher ---------------------------------------------------------------
 
 type spyPublisher struct {
-	events []ports.PaymentRegisteredEvent
-	err    error
+	events  []ports.PaymentRegisteredEvent
+	settled []ports.ChargeSettledEvent
+	err     error
+}
+
+func (s *spyPublisher) PublishChargeSettled(_ context.Context, e ports.ChargeSettledEvent) error {
+	s.settled = append(s.settled, e)
+	return s.err
 }
 
 func (s *spyPublisher) PublishPaymentRegistered(_ context.Context, e ports.PaymentRegisteredEvent) error {

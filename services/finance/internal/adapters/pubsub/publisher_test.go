@@ -69,3 +69,42 @@ func TestPublishPaymentRegisteredMarshalsProtoToPaymentEventsTopic(t *testing.T)
 		t.Errorf("paid_at = %v, want %v", got.GetPaidAt().AsTime(), paidAt)
 	}
 }
+
+// TestPublishChargeSettled proves the settled event carries what a consumer
+// needs to close its own row without calling back into finance: the external
+// reference it created the charge with, and nothing it would have to derive.
+func TestPublishChargeSettled(t *testing.T) {
+	bus := &fakeBus{}
+	p := pubsubadapter.NewEventPublisher(bus)
+
+	settledAt := time.Date(2026, 9, 12, 10, 30, 0, 0, time.UTC)
+	err := p.PublishChargeSettled(context.Background(), ports.ChargeSettledEvent{
+		ChargeID:    "ch-1",
+		StudentID:   "stu-1",
+		TenantID:    "t-1",
+		ExternalRef: "uniforms:ful-42",
+		AmountCents: 89000,
+		SettledAt:   settledAt,
+	})
+	if err != nil {
+		t.Fatalf("PublishChargeSettled: %v", err)
+	}
+	if len(bus.msgs) != 1 {
+		t.Fatalf("published %d messages, want 1", len(bus.msgs))
+	}
+	msg := bus.msgs[0]
+	if msg.Attributes["type"] != "ChargeSettled" {
+		t.Errorf("type attribute = %q, want ChargeSettled", msg.Attributes["type"])
+	}
+	if msg.Attributes["tenant_id"] != "t-1" {
+		t.Errorf("tenant_id attribute = %q, want t-1", msg.Attributes["tenant_id"])
+	}
+	var got financev1.ChargeSettled
+	if err := proto.Unmarshal(msg.Data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.GetChargeId() != "ch-1" || got.GetExternalRef() != "uniforms:ful-42" ||
+		got.GetAmountCents() != 89000 || !got.GetSettledAt().AsTime().Equal(settledAt) {
+		t.Errorf("event mismatch: %+v", &got)
+	}
+}

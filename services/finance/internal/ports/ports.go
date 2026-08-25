@@ -89,12 +89,32 @@ type PaymentRegisteredEvent struct {
 	PaidAt      time.Time
 }
 
-// PaymentPublisher emits the PaymentRegistered domain event. Publishing is
-// best-effort and happens after the payment is durably stored: a broker outage
-// must never lose money that was already collected, so the use case ignores the
-// returned error (and tolerates a nil publisher).
+// ChargeSettledEvent announces that a charge became FULLY covered — the
+// crossing into paid, not every collection along the way. It exists for the
+// consumer that only cares whether the money is in (uniforms, before it releases
+// goods): summing PaymentRegistered would make that consumer redo the ledger's
+// arithmetic, depend on delivery order, and subscribe to every payment the
+// school takes to discard most of them.
+//
+// ExternalRef echoes the charge's reference, so the consumer resolves its own
+// row without calling back into finance.
+type ChargeSettledEvent struct {
+	ChargeID    string
+	StudentID   string
+	TenantID    string
+	ExternalRef string
+	AmountCents int64
+	SettledAt   time.Time
+}
+
+// PaymentPublisher emits the finance domain events. Publishing is best-effort
+// and happens after the payment is durably stored: a broker outage must never
+// lose money that was already collected, so the use case ignores the returned
+// error (and tolerates a nil publisher).
 type PaymentPublisher interface {
 	PublishPaymentRegistered(ctx context.Context, e PaymentRegisteredEvent) error
+	// PublishChargeSettled fires only on the payment that closes the charge.
+	PublishChargeSettled(ctx context.Context, e ChargeSettledEvent) error
 }
 
 // FinanceRepository loads and persists the ledger: the charge catalog, the

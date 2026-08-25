@@ -938,3 +938,40 @@ func TestCancelChargeIfUnpaidDelegatesToRepo(t *testing.T) {
 		t.Errorf("repo.CancelChargeIfUnpaid called %d times, want 1", f.repo.cancelIfUnpaidCalls)
 	}
 }
+
+// TestRegisterPaymentPublishesChargeSettledOnlyWhenClosed proves the settled
+// event fires on the collection that closes the charge and on no other. A
+// consumer releasing goods against it must never act on a partial payment.
+func TestRegisterPaymentPublishesChargeSettledOnlyWhenClosed(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	concept := f.seedConcept(t, "Uniformes", 145000)
+	charge, err := f.svc.CreateCharge(ctx, usecase.CreateChargeInput{
+		StudentID: testStudent, CycleID: testCycle, ConceptID: concept.ID(),
+		DueDate: testDueDate, AmountCentsOverride: 89000, ExternalRef: "uniforms:ful-42",
+	})
+	if err != nil {
+		t.Fatalf("seed charge: %v", err)
+	}
+
+	// Half the money: the family still owes, so nothing is settled.
+	if _, _, err := f.svc.RegisterPayment(ctx, charge.Charge.ID(), 40000, "cash", "", ""); err != nil {
+		t.Fatalf("partial payment: %v", err)
+	}
+	if n := len(f.publisher.settled); n != 0 {
+		t.Fatalf("a partial payment published %d ChargeSettled events, want 0", n)
+	}
+
+	// The rest closes it.
+	if _, _, err := f.svc.RegisterPayment(ctx, charge.Charge.ID(), 49000, "cash", "", ""); err != nil {
+		t.Fatalf("closing payment: %v", err)
+	}
+	if n := len(f.publisher.settled); n != 1 {
+		t.Fatalf("published %d ChargeSettled events, want 1", n)
+	}
+	got := f.publisher.settled[0]
+	if got.ChargeID != charge.Charge.ID() || got.ExternalRef != "uniforms:ful-42" ||
+		got.AmountCents != 89000 || got.StudentID != testStudent {
+		t.Errorf("settled event mismatch: %+v", got)
+	}
+}
