@@ -150,6 +150,66 @@ func newFulfillment(id, tenantID, orderID string, seq int, amountCents int64) (F
 	return Fulfillment{id: id, tenantID: tenantID, orderID: orderID, seq: seq, amountCents: amountCents}, nil
 }
 
+// FulfillmentSnapshot is a stored delivery, as the persistence layer holds it.
+// It exists so rehydration has ONE shape to fill rather than a constructor with
+// sixteen positional arguments, half of them zero most of the time.
+type FulfillmentSnapshot struct {
+	ID                string
+	TenantID          string
+	OrderID           string
+	Seq               int
+	Status            FulfillmentStatus
+	AmountCents       int64
+	FinanceChargeID   string
+	ReadyAt           time.Time
+	PickupDeadline    time.Time
+	DeadlineEstimated bool
+	ExtensionSeq      int
+	RequiresAttention bool
+	AttentionReason   string
+	PaidAt            time.Time
+	DispatchedAt      time.Time
+	CancelledAt       time.Time
+	CancelReason      string
+}
+
+// RestoreFulfillment rebuilds a stored delivery.
+//
+// It deliberately does NOT replay the state machine to arrive at the stored
+// status. A row that says "dispatched" is a fact about the past; asking the
+// transition table to re-approve it would make LOADING that row fail for
+// something that already happened, and no amount of validation at read time can
+// un-hand-over a garment. The table governs what happens NEXT — the only place
+// it can prevent anything — so the past is accepted as it stands and the guards
+// apply from here on, exactly as strictly.
+//
+// The one thing it does refuse is a status this code does not know: that is data
+// corruption or a half-finished migration, and loading it would hand the machine
+// a state with no transitions and no meaning.
+func RestoreFulfillment(s FulfillmentSnapshot) (Fulfillment, error) {
+	f, err := newFulfillment(s.ID, s.TenantID, s.OrderID, s.Seq, s.AmountCents)
+	if err != nil {
+		return Fulfillment{}, err
+	}
+	if _, known := allowedTransitions[s.Status]; !known {
+		return Fulfillment{}, glerrors.New(glerrors.KindInvalid,
+			"unknown delivery status: "+string(s.Status))
+	}
+	f.status = s.Status
+	f.financeChargeID = s.FinanceChargeID
+	f.readyAt = s.ReadyAt
+	f.pickupDeadline = s.PickupDeadline
+	f.deadlineEstimated = s.DeadlineEstimated
+	f.extensionSeq = s.ExtensionSeq
+	f.requiresAttention = s.RequiresAttention
+	f.attentionReason = s.AttentionReason
+	f.paidAt = s.PaidAt
+	f.dispatchedAt = s.DispatchedAt
+	f.cancelledAt = s.CancelledAt
+	f.cancelReason = s.CancelReason
+	return f, nil
+}
+
 // Folio renders the delivery's own folio: the order's, plus a suffix. The suffix
 // is derived from a NUMBER, so the twenty-seventh delivery is "-AA" rather than
 // impossible.

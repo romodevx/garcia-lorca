@@ -37,12 +37,18 @@ const (
 	dbName  = "garcia_lorca"
 	tenantA = "11111111-1111-1111-1111-111111111111"
 	tenantB = "22222222-2222-2222-2222-222222222222"
+	// A tenant no other test in this package ever writes to. The isolation
+	// assertions say "sees ZERO rows", which is only a statement about RLS if
+	// the observer genuinely owns nothing — otherwise a sibling test seeding its
+	// own legitimate row reads as a leak.
+	tenantOutsider = "33333333-3333-3333-3333-333333333333"
 )
 
 var migrationFiles = []string{
 	"../../../../../migrations/uniforms/0001_init.sql",
 	"../../../../../migrations/uniforms/0002_orders.sql",
 	"../../../../../migrations/uniforms/0003_settings.sql",
+	"../../../../../migrations/uniforms/0004_sale_keys.sql",
 }
 
 var (
@@ -162,7 +168,7 @@ func TestRLSIsolatesEveryTable(t *testing.T) {
 	tables := []string{
 		"uniform_items", "uniform_stock", "uniform_stock_moves",
 		"uniform_folio_counters", "uniform_orders", "uniform_fulfillments",
-		"uniform_order_lines", "uniform_settings",
+		"uniform_order_lines", "uniform_settings", "uniform_sale_keys",
 	}
 
 	// Seed one row per table as tenant A, using the owner connection so the seed
@@ -171,35 +177,35 @@ func TestRLSIsolatesEveryTable(t *testing.T) {
 
 	for _, table := range tables {
 		t.Run(table+" read", func(t *testing.T) {
-			tx := asApp(t, tenantB)
+			tx := asApp(t, tenantOutsider)
 			var n int64
 			if err := tx.Raw("SELECT count(*) FROM " + table).Scan(&n).Error; err != nil {
 				t.Fatalf("count: %v", err)
 			}
 			if n != 0 {
-				t.Errorf("tenant B sees %d rows of tenant A in %s", n, table)
+				t.Errorf("an outsider sees %d rows of tenant A in %s", n, table)
 			}
 		})
 	}
 
 	t.Run("write across tenants is refused", func(t *testing.T) {
-		tx := asApp(t, tenantB)
-		// Tenant B, bound to its own tenant, tries to plant a row labelled A.
+		tx := asApp(t, tenantOutsider)
+		// The outsider, bound to its own tenant, tries to plant a row labelled A.
 		err := tx.Exec(`INSERT INTO uniform_items (tenant_id, code, name, price_cents)
 		                VALUES (?, 'SMUGGLED', 'x', 1)`, tenantA).Error
 		if err == nil {
-			t.Error("tenant B inserted a row belonging to tenant A")
+			t.Error("an outsider inserted a row belonging to tenant A")
 		}
 	})
 
 	t.Run("update across tenants touches nothing", func(t *testing.T) {
-		tx := asApp(t, tenantB)
+		tx := asApp(t, tenantOutsider)
 		res := tx.Exec("UPDATE uniform_items SET name = 'hijacked' WHERE id = ?", itemID)
 		if res.Error != nil {
 			t.Fatalf("update: %v", res.Error)
 		}
 		if res.RowsAffected != 0 {
-			t.Errorf("tenant B updated %d of tenant A's rows", res.RowsAffected)
+			t.Errorf("an outsider updated %d of tenant A's rows", res.RowsAffected)
 		}
 	})
 }
@@ -227,14 +233,22 @@ func ownerSeed(t *testing.T) string {
 	                VALUES (?, ?, '8', 5) RETURNING id`, tenantA, itemID)
 	exec(`INSERT INTO uniform_stock_moves (tenant_id, stock_id, kind, qty)
 	      VALUES (?, ?, 'receive', 5)`, tenantA, stockID)
-	exec(`INSERT INTO uniform_folio_counters (tenant_id, year, next_seq) VALUES (?, 2026, 1)`, tenantA)
+	// ON CONFLICT because the repository tests share this container and may have
+	// already opened this year's run of folios. The seed is scaffolding, not the
+	// thing under test.
+	// Its own year, so it can never collide with the repository tests that share
+	// this container and allocate real folios.
+	exec(`INSERT INTO uniform_folio_counters (tenant_id, year, next_seq) VALUES (?, 2099, 1)
+	      ON CONFLICT (tenant_id, year) DO NOTHING`, tenantA)
 	scan(&orderID, `INSERT INTO uniform_orders (tenant_id, folio, source)
-	                VALUES (?, 'U-2026-000001', 'counter') RETURNING id`, tenantA)
+	                VALUES (?, 'U-2099-000001', 'counter') RETURNING id`, tenantA)
 	scan(&fulfillmentID, `INSERT INTO uniform_fulfillments (tenant_id, order_id, seq, status)
 	                      VALUES (?, ?, 1, 'picking') RETURNING id`, tenantA, orderID)
 	exec(`INSERT INTO uniform_order_lines (tenant_id, order_id, item_id, item_name, size_label, qty, unit_price_cents, status, fulfillment_id)
 	      VALUES (?, ?, ?, 'Playera', '8', 1, 32000, 'reserved', ?)`, tenantA, orderID, itemID, fulfillmentID)
 	exec(`INSERT INTO uniform_settings (tenant_id) VALUES (?)`, tenantA)
+	exec(`INSERT INTO uniform_sale_keys (tenant_id, idempotency_key, order_id)
+	      VALUES (?, 'seed-key', ?)`, tenantA, orderID)
 	return itemID
 }
 
@@ -397,7 +411,7 @@ func TestFolioCountersArePerTenant(t *testing.T) {
 func TestOrderRequiresCycleWhenItHasAStudent(t *testing.T) {
 	tx := asApp(t, tenantA)
 	err := tx.Exec(`INSERT INTO uniform_orders (tenant_id, folio, student_id, source)
-	                VALUES (?, 'U-2026-000900', gen_random_uuid(), 'family')`, tenantA).Error
+	                VALUES (?, 'U-2099-000900', gen_random_uuid(), 'family')`, tenantA).Error
 	if err == nil {
 		t.Error("an order naming a student was accepted with no cycle")
 	}

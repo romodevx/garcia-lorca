@@ -410,3 +410,80 @@ func TestTransitionsRequireTheirTimestamps(t *testing.T) {
 		t.Errorf("counter sale with no time: want KindInvalid, got %v", err)
 	}
 }
+
+// TestRestoreDoesNotReplayTheStateMachine is the rule rehydration lives by. A
+// stored delivery is a fact about the past: asking the transition table to
+// re-approve it would make LOADING a dispatched row fail for something that
+// already happened. The table governs what happens NEXT — the only place it can
+// prevent anything — so a restored delivery is accepted as it stands and then
+// obeys the same guards from there on.
+func TestRestoreDoesNotReplayTheStateMachine(t *testing.T) {
+	for _, status := range []domain.FulfillmentStatus{
+		domain.StatusPicking, domain.StatusReadyForPickup, domain.StatusPaid,
+		domain.StatusDispatched, domain.StatusExpired, domain.StatusCancelled,
+		domain.StatusSoldAtCounter,
+	} {
+		t.Run(string(status), func(t *testing.T) {
+			got, err := domain.RestoreFulfillment(domain.FulfillmentSnapshot{
+				ID: "ful-1", TenantID: "t-1", OrderID: "ord-1", Seq: 1,
+				Status: status, AmountCents: 89000,
+			})
+			if err != nil {
+				t.Fatalf("restoring a %s delivery failed: %v", status, err)
+			}
+			if got.Status() != status {
+				t.Errorf("status = %q, want %q", got.Status(), status)
+			}
+		})
+	}
+}
+
+// TestRestoredDeliveryStillObeysTheGuards: rehydration is permissive about the
+// past and exactly as strict about the future.
+func TestRestoredDeliveryStillObeysTheGuards(t *testing.T) {
+	dispatched, err := domain.RestoreFulfillment(domain.FulfillmentSnapshot{
+		ID: "ful-1", TenantID: "t-1", OrderID: "ord-1", Seq: 1,
+		Status: domain.StatusDispatched, AmountCents: 89000,
+	})
+	if err != nil {
+		t.Fatalf("RestoreFulfillment: %v", err)
+	}
+	if _, err := dispatched.Cancel("motivo", settledAt); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Errorf("a restored dispatched delivery must still be terminal, got %v", err)
+	}
+}
+
+// TestRestoreRefusesAnUnknownStatus: a status the code does not know is data
+// corruption or a half-finished migration. Loading it as if it were fine would
+// hand the state machine a state with no transitions and no meaning.
+func TestRestoreRefusesAnUnknownStatus(t *testing.T) {
+	_, err := domain.RestoreFulfillment(domain.FulfillmentSnapshot{
+		ID: "ful-1", TenantID: "t-1", OrderID: "ord-1", Seq: 1,
+		Status: domain.FulfillmentStatus("teletransportado"), AmountCents: 1,
+	})
+	if glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("want KindInvalid for an unknown status, got %v", err)
+	}
+}
+
+// TestRestoreCarriesEverythingBack guards against a field being silently dropped
+// in rehydration — the kind of bug that shows up as a deadline that reads as
+// "never" three weeks later.
+func TestRestoreCarriesEverythingBack(t *testing.T) {
+	got, err := domain.RestoreFulfillment(domain.FulfillmentSnapshot{
+		ID: "ful-1", TenantID: "t-1", OrderID: "ord-1", Seq: 3,
+		Status: domain.StatusReadyForPickup, AmountCents: 89000,
+		FinanceChargeID: "chg-1", ReadyAt: readyAt, PickupDeadline: deadline,
+		DeadlineEstimated: true, ExtensionSeq: 2,
+		RequiresAttention: true, AttentionReason: "pago tardío",
+	})
+	if err != nil {
+		t.Fatalf("RestoreFulfillment: %v", err)
+	}
+	if got.Seq() != 3 || got.AmountCents() != 89000 || got.FinanceChargeID() != "chg-1" ||
+		!got.ReadyAt().Equal(readyAt) || !got.PickupDeadline().Equal(deadline) ||
+		!got.DeadlineEstimated() || got.ExtensionSeq() != 2 ||
+		!got.RequiresAttention() || got.AttentionReason() != "pago tardío" {
+		t.Errorf("a field was lost in rehydration: %+v", got)
+	}
+}
