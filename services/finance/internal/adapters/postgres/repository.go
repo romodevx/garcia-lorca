@@ -180,7 +180,11 @@ func (r *Repository) CreateCharge(ctx context.Context, c domain.Charge) (domain.
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		if err := tx.Create(&model).Error; err != nil {
 			if isUniqueViolation(err) {
-				return glerrors.Wrap(glerrors.KindConflict, "student already has this charge", err)
+				// Two partial indexes can raise this (migration 0003): the
+				// keyless "one concept per cycle" rule, or a repeated external
+				// ref — a retried creation for the same origin row. Both mean
+				// the same thing to the caller: this charge already exists.
+				return glerrors.Wrap(glerrors.KindConflict, "charge already exists", err)
 			}
 			return glerrors.Wrap(glerrors.KindInternal, "creating charge", err)
 		}
@@ -214,7 +218,17 @@ func (r *Repository) CreateChargesBulk(ctx context.Context, cs []domain.Charge) 
 
 	var created int
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&models)
+		// The target is spelled out on purpose. A bare OnConflict{DoNothing}
+		// infers its arbiter from whatever unique index happens to match, so a
+		// change to the table's keys could stop this deduplicating with no
+		// error and re-bill the whole school on the next generation run.
+		res := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "tenant_id"}, {Name: "student_id"}, {Name: "cycle_id"}, {Name: "concept_id"}},
+			// TargetWhere, not Where: this is the predicate of the PARTIAL index
+			// being used as the arbiter, not a condition on a DO UPDATE.
+			TargetWhere: clause.Where{Exprs: []clause.Expression{clause.Eq{Column: clause.Column{Name: "external_ref"}, Value: ""}}},
+			DoNothing:   true,
+		}).Create(&models)
 		if res.Error != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "bulk creating charges", res.Error)
 		}
@@ -225,6 +239,53 @@ func (r *Repository) CreateChargesBulk(ctx context.Context, cs []domain.Charge) 
 		return 0, err
 	}
 	return created, nil
+}
+
+// CancelChargeIfUnpaid voids a charge only when nothing has been collected
+// against it, deciding under the charge's row lock so the answer cannot go stale
+// between the read and the write.
+//
+// It exists for automated callers, and the uniforms expiry sweep is the first:
+// it voids the charge behind a hold nobody came to pay for, and it runs while a
+// cashier may be collecting that exact payment. CancelCharge would void the
+// charge anyway (the school does that deliberately — see domain.Charge.Cancel),
+// which here would mean money collected against a cancelled charge and released
+// goods. Taking the same FOR UPDATE lock RegisterPayment takes makes the two
+// serialize: whichever runs second sees the other's work and the loser gets a
+// conflict instead of a silent inconsistency.
+func (r *Repository) CancelChargeIfUnpaid(ctx context.Context, id string) (ports.ChargeWithPaid, error) {
+	var out ports.ChargeWithPaid
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var row chargeModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", id).First(&row).Error; err != nil {
+			return translateFindErr(err)
+		}
+		paid, err := paidFor(tx, id)
+		if err != nil {
+			return err
+		}
+		charge, err := toDomainCharge(row, paid)
+		if err != nil {
+			return err
+		}
+		cancelled, err := charge.CancelIfUnpaid(paid)
+		if err != nil {
+			return err
+		}
+		if err := tx.Model(&chargeModel{}).Where("id = ?", id).Updates(map[string]any{
+			"status":     cancelled.Status(),
+			"updated_at": gorm.Expr("now()"),
+		}).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "cancelling charge", err)
+		}
+		out = ports.ChargeWithPaid{Charge: cancelled, PaidCents: paid}
+		return nil
+	})
+	if err != nil {
+		return ports.ChargeWithPaid{}, err
+	}
+	return out, nil
 }
 
 // GetCharge loads one charge together with its collected total; a missing id

@@ -43,6 +43,12 @@ func toDomainCharge(m chargeModel, paidCents int64) (domain.Charge, error) {
 	if err != nil {
 		return domain.Charge{}, err
 	}
+	if m.ExternalRef != "" {
+		c, err = c.WithExternalRef(m.ExternalRef)
+		if err != nil {
+			return domain.Charge{}, err
+		}
+	}
 	if m.Status == domain.StatusCancelled {
 		return c.Cancel()
 	}
@@ -63,6 +69,7 @@ func fromDomainCharge(c domain.Charge) chargeModel {
 		DiscountCents: c.Discount().Int64(),
 		DueDate:       c.DueDate(),
 		Status:        c.Status(),
+		ExternalRef:   c.ExternalRef(),
 	}
 }
 
