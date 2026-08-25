@@ -43,6 +43,12 @@ var ownerOnlyPermissions = map[string]struct{}{
 	"comms:read":      {},
 	"guardians:read":  {},
 	"guardians:write": {},
+	// uniforms:orders lists every order in the school, and each row carries the
+	// student's name, level and what the family bought — a tenant-wide read of
+	// student data with no per-object scoping, which is exactly what this map
+	// is for. Its sibling uniforms:stock is deliberately absent and grantable:
+	// the storeroom works in garments, sizes and counts, and never needs a name.
+	"uniforms:orders": {},
 }
 
 // IsOwnerOnly reports whether raw is a tenant-wide sensitive read that only the
