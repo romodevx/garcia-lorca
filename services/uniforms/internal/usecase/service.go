@@ -282,8 +282,9 @@ func (s *Service) priceLines(ctx context.Context, orderID string, inputs []SaleL
 			return nil, 0, err
 		}
 		if want.Qty > stock.Available() {
-			return nil, 0, glerrors.New(glerrors.KindConflict,
-				"there are not enough of "+item.Name()+" in size "+want.SizeLabel)
+			return nil, 0, glerrors.Wrap(glerrors.KindConflict,
+				"there are not enough of "+item.Name()+" in size "+want.SizeLabel,
+				domain.ErrInsufficientStock)
 		}
 		// Sold, not reserved: at the counter the garment leaves as it is sold.
 		line, err := item.LineFor(s.newID(), orderID, want.SizeLabel, want.Qty, domain.LineSold)

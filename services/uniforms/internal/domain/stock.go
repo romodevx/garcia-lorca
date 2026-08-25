@@ -1,10 +1,28 @@
 package domain
 
 import (
+	"errors"
 	"strings"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 )
+
+// ErrInsufficientStock marks the one conflict a PARENT causes by being unlucky
+// rather than wrong: the size ran out.
+//
+// It is a sentinel rather than a message because the edge has to tell it apart
+// from every other conflict — a duplicate garment code is also a conflict, and
+// showing a cashier the same sentence for both blames them for an empty shelf.
+// Matching on the text would work until somebody reworded it.
+//
+// Errors that carry it are still KindConflict, so callers that only branch on
+// the kind keep working unchanged.
+var ErrInsufficientStock = errors.New("not enough stock available")
+
+// outOfStock builds a conflict that is identifiable as an empty shelf.
+func outOfStock() error {
+	return glerrors.Wrap(glerrors.KindConflict, "not enough stock available", ErrInsufficientStock)
+}
 
 // StockLevel is one garment in one size, and the position of the whole module
 // rests on its two counters.
@@ -77,7 +95,7 @@ func (s StockLevel) Reserve(qty int) (StockLevel, error) {
 		return StockLevel{}, err
 	}
 	if qty > s.Available() {
-		return StockLevel{}, glerrors.New(glerrors.KindConflict, "not enough stock available")
+		return StockLevel{}, outOfStock()
 	}
 	s.reserved += qty
 	return s, nil
@@ -124,7 +142,7 @@ func (s StockLevel) SellFromShelf(qty int) (StockLevel, error) {
 		return StockLevel{}, err
 	}
 	if qty > s.Available() {
-		return StockLevel{}, glerrors.New(glerrors.KindConflict, "not enough stock available")
+		return StockLevel{}, outOfStock()
 	}
 	s.onHand -= qty
 	return s, nil

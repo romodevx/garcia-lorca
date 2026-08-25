@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"errors"
 	"testing"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -211,5 +212,39 @@ func TestNewStockLevelRefusesABrokenPosition(t *testing.T) {
 	}
 	if _, err := domain.NewStockLevel("st-1", "t-1", "it-1", "", 1, 2, 0, 0); glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("want KindInvalid for a blank size, got %v", err)
+	}
+}
+
+// TestInsufficientStockIsIdentifiable is what lets the edge tell a cashier
+// "esa talla ya no está disponible" instead of a generic conflict.
+//
+// Running out of stock and a duplicate garment code are both conflicts, and
+// without a way to tell them apart the panel has to show the same sentence for
+// both — one of which is the cashier's fault and one of which is not. Matching on
+// the message text would work until somebody rewords it.
+func TestInsufficientStockIsIdentifiable(t *testing.T) {
+	s := stock(t, 5, 4)
+
+	_, err := s.Reserve(2)
+	if !errors.Is(err, domain.ErrInsufficientStock) {
+		t.Errorf("a refused reservation is not identifiable as an out-of-stock: %v", err)
+	}
+	_, err = s.SellFromShelf(2)
+	if !errors.Is(err, domain.ErrInsufficientStock) {
+		t.Errorf("a refused counter sale is not identifiable as an out-of-stock: %v", err)
+	}
+	// It is still a conflict, so every caller that only branches on the kind
+	// keeps working.
+	if glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Errorf("kind = %v, want KindConflict", glerrors.KindOf(err))
+	}
+}
+
+// TestOtherConflictsAreNotOutOfStock: releasing more than is held is a caller
+// bug, not an empty shelf, and must not be reported to a parent as one.
+func TestOtherConflictsAreNotOutOfStock(t *testing.T) {
+	s := stock(t, 5, 1)
+	if _, err := s.Release(3); errors.Is(err, domain.ErrInsufficientStock) {
+		t.Error("releasing too much was reported as an out-of-stock")
 	}
 }

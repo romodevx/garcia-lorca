@@ -555,8 +555,11 @@ func (r *Repository) sellFromShelf(tx *gorm.DB, line domain.OrderLine, note, act
 		return glerrors.Wrap(glerrors.KindInternal, "deducting stock", res.Error)
 	}
 	if res.RowsAffected == 0 {
-		return glerrors.New(glerrors.KindConflict,
-			"there are not enough of "+line.ItemName()+" in size "+line.SizeLabel())
+		// Carries the sentinel so the edge can say "that size just ran out"
+		// rather than the sentence it shows for a duplicate garment code.
+		return glerrors.Wrap(glerrors.KindConflict,
+			"there are not enough of "+line.ItemName()+" in size "+line.SizeLabel(),
+			domain.ErrInsufficientStock)
 	}
 	return r.appendMove(tx, stock.ID, line.ID(), "sell", -line.Qty(), note, actorUserID)
 }

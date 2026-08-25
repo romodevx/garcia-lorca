@@ -263,18 +263,25 @@ func toProtoPayment(p domain.Payment) *financev1.Payment {
 // connectErr maps a domain error Kind to the Connect status code. Internal
 // failures return a generic message (no internal detail leaks to the client);
 // the other Kinds carry already-generic domain messages.
+// Every code goes through glerrors.SafeMessage, not just the internal one. The
+// kind decides the STATUS; it does not decide whether the wrapped cause is the
+// caller's business, and it never is. Error() concatenates the cause, so handing
+// the error straight to connect.NewError shipped Postgres constraint names and
+// SQLSTATEs — and on some constraints the conflicting value — to whoever called.
 func connectErr(err error) *connect.Error {
+	safe := errors.New(glerrors.SafeMessage(err))
+
 	switch glerrors.KindOf(err) {
 	case glerrors.KindInvalid:
-		return connect.NewError(connect.CodeInvalidArgument, err)
+		return connect.NewError(connect.CodeInvalidArgument, safe)
 	case glerrors.KindUnauthorized:
-		return connect.NewError(connect.CodeUnauthenticated, err)
+		return connect.NewError(connect.CodeUnauthenticated, safe)
 	case glerrors.KindForbidden:
-		return connect.NewError(connect.CodePermissionDenied, err)
+		return connect.NewError(connect.CodePermissionDenied, safe)
 	case glerrors.KindNotFound:
-		return connect.NewError(connect.CodeNotFound, err)
+		return connect.NewError(connect.CodeNotFound, safe)
 	case glerrors.KindConflict:
-		return connect.NewError(connect.CodeAlreadyExists, err)
+		return connect.NewError(connect.CodeAlreadyExists, safe)
 	default:
 		return connect.NewError(connect.CodeInternal, glerrors.New(glerrors.KindInternal, "internal error"))
 	}

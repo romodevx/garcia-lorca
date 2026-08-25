@@ -2,6 +2,7 @@ package grpcadapter
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	connect "connectrpc.com/connect"
@@ -472,22 +473,38 @@ func toProtoSettings(s domain.Settings) *uniformsv1.Settings {
 	}
 }
 
-// connectErr maps a domain error kind to the Connect code that means the same
-// thing. An unrecognised kind becomes a bare Internal: whatever it was carrying
-// is not the caller's business.
+// connectErr maps a domain error onto the Connect code that means the same thing
+// and a message that is safe to send.
+//
+// Every code goes through glerrors.SafeMessage, not just the internal one. The
+// kind decides the STATUS; it does not decide whether the wrapped cause is the
+// caller's business, and it never is. A conflict wrapped around a Postgres
+// unique violation carries the constraint name and the SQLSTATE, and Error()
+// concatenates the lot — so passing the error straight through ships all of it to
+// whoever called. The sentence we wrote survives; everything under it does not.
 func connectErr(err error) *connect.Error {
+	safe := errors.New(glerrors.SafeMessage(err))
+
+	// Running out of stock is a conflict, but not the same conflict as a
+	// duplicate code, and the edge has to show a different sentence for each.
+	// FailedPrecondition says "the world is not in the state this needs", which
+	// is exactly right and stays a distinct code all the way to the panel.
+	if errors.Is(err, domain.ErrInsufficientStock) {
+		return connect.NewError(connect.CodeFailedPrecondition, safe)
+	}
 	switch glerrors.KindOf(err) {
 	case glerrors.KindInvalid:
-		return connect.NewError(connect.CodeInvalidArgument, err)
+		return connect.NewError(connect.CodeInvalidArgument, safe)
 	case glerrors.KindUnauthorized:
-		return connect.NewError(connect.CodeUnauthenticated, err)
+		return connect.NewError(connect.CodeUnauthenticated, safe)
 	case glerrors.KindForbidden:
-		return connect.NewError(connect.CodePermissionDenied, err)
+		return connect.NewError(connect.CodePermissionDenied, safe)
 	case glerrors.KindNotFound:
-		return connect.NewError(connect.CodeNotFound, err)
+		return connect.NewError(connect.CodeNotFound, safe)
 	case glerrors.KindConflict:
-		return connect.NewError(connect.CodeAlreadyExists, err)
+		return connect.NewError(connect.CodeAlreadyExists, safe)
 	default:
-		return connect.NewError(connect.CodeInternal, glerrors.New(glerrors.KindInternal, "internal error"))
+		// An unrecognised kind is not ours, so it says nothing at all.
+		return connect.NewError(connect.CodeInternal, errors.New("internal error"))
 	}
 }

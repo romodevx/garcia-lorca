@@ -2,6 +2,7 @@ package grpcadapter_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -295,4 +296,70 @@ func mustLine(t *testing.T, id string, status domain.LineStatus) domain.OrderLin
 		t.Fatalf("NewOrderLine: %v", err)
 	}
 	return line
+}
+
+// TestOutOfStockIsItsOwnCode is the distinction the panel's copy depends on.
+// Both are conflicts; only one is the cashier's fault. Answering the same code
+// for a duplicate garment code and an empty shelf forces the UI to show one
+// sentence for both, and it would be the wrong sentence half the time.
+func TestOutOfStockIsItsOwnCode(t *testing.T) {
+	outOfStock := glerrors.Wrap(glerrors.KindConflict,
+		"there are not enough of Suéter verde in size M", domain.ErrInsufficientStock)
+	duplicate := glerrors.New(glerrors.KindConflict, "a garment with that code already exists")
+
+	h := handlerWith(&stubRepo{err: outOfStock})
+	_, err := h.ListItems(context.Background(), connect.NewRequest(&uniformsv1.ListItemsRequest{}))
+	if got := connect.CodeOf(err); got != connect.CodeFailedPrecondition {
+		t.Errorf("out of stock answered %v, want FailedPrecondition", got)
+	}
+
+	h = handlerWith(&stubRepo{err: duplicate})
+	_, err = h.ListItems(context.Background(), connect.NewRequest(&uniformsv1.ListItemsRequest{}))
+	if got := connect.CodeOf(err); got != connect.CodeAlreadyExists {
+		t.Errorf("a duplicate answered %v, want AlreadyExists", got)
+	}
+}
+
+// TestNoErrorLeaksTheDriversWords is the wider version of the internal-error
+// test, and it was written after finding the leak: a CONFLICT was shipping the
+// Postgres constraint name and SQLSTATE to whoever called. The kind decides the
+// status; it does not decide whether the cause is the caller's business, and it
+// never is.
+func TestNoErrorLeaksTheDriversWords(t *testing.T) {
+	driver := `ERROR: duplicate key value violates unique constraint "uniform_items_tenant_id_code_key" (SQLSTATE 23505)`
+	cases := map[string]error{
+		"conflict": glerrors.Wrap(glerrors.KindConflict, "a garment with that code already exists", errors.New(driver)),
+		"invalid":  glerrors.Wrap(glerrors.KindInvalid, "that size is not on this garment", errors.New(driver)),
+		"notFound": glerrors.Wrap(glerrors.KindNotFound, "no such garment", errors.New(driver)),
+		"internal": glerrors.Wrap(glerrors.KindInternal, "reading the catalogue", errors.New(driver)),
+	}
+	for name, injected := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := handlerWith(&stubRepo{err: injected})
+			_, err := h.ListItems(context.Background(), connect.NewRequest(&uniformsv1.ListItemsRequest{}))
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			for _, secret := range []string{"SQLSTATE", "uniform_items_tenant_id_code_key", "duplicate key"} {
+				if contains(err.Error(), secret) {
+					t.Errorf("%q reached the caller: %s", secret, err.Error())
+				}
+			}
+		})
+	}
+}
+
+// TestUsefulMessagesStillReachTheCaller: sanitising must not turn every refusal
+// into "internal error". The sentence we wrote is the one a cashier reads.
+func TestUsefulMessagesStillReachTheCaller(t *testing.T) {
+	h := handlerWith(&stubRepo{err: glerrors.Wrap(glerrors.KindConflict,
+		"there are not enough of Suéter verde in size M",
+		errors.New("ERROR: something internal (SQLSTATE 23514)"))})
+	_, err := h.ListItems(context.Background(), connect.NewRequest(&uniformsv1.ListItemsRequest{}))
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !contains(err.Error(), "not enough of Suéter verde in size M") {
+		t.Errorf("the useful part was thrown away too: %s", err.Error())
+	}
 }
