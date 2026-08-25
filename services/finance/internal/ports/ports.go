@@ -114,9 +114,11 @@ type FinanceRepository interface {
 	// UpdateConcept persists a re-validated copy of an existing entry.
 	UpdateConcept(ctx context.Context, c domain.ChargeConcept) (domain.ChargeConcept, error)
 
-	// CreateCharge issues one charge. A second charge for the same
-	// (student, cycle, concept) is reported as KindConflict — a student owes a
-	// given concept once per cycle.
+	// CreateCharge issues one charge. A KEYLESS charge (no external ref) may
+	// exist once per (student, cycle, concept) — a student owes tuition once a
+	// cycle — and a second one is KindConflict. A charge carrying an external
+	// ref is identified by that ref instead, so it may repeat the concept
+	// freely while a retried creation still conflicts (migration 0003).
 	CreateCharge(ctx context.Context, c domain.Charge) (domain.Charge, error)
 	// CreateChargesBulk issues many charges in ONE statement, skipping the rows
 	// whose (student, cycle, concept) key already exists (ON CONFLICT DO
@@ -130,6 +132,11 @@ type FinanceRepository interface {
 	// tenant-bound query rather than a payment lookup per charge (no N+1). An
 	// empty studentID or cycleID skips that filter.
 	ListCharges(ctx context.Context, studentID, cycleID string) ([]ChargeWithPaid, error)
+	// CancelChargeIfUnpaid voids a charge only if nothing was collected against
+	// it, deciding under the charge's row lock so the read cannot go stale
+	// before the write. A charge with payments is KindConflict. Automated
+	// callers use this; CancelCharge stays the school's unguarded override.
+	CancelChargeIfUnpaid(ctx context.Context, id string) (ChargeWithPaid, error)
 	// SaveCharge persists the mutable part of an existing charge (its discount
 	// and derived status), as left by ApplyDiscount or CancelCharge.
 	SaveCharge(ctx context.Context, c domain.Charge) (domain.Charge, error)

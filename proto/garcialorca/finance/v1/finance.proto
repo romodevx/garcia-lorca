@@ -64,6 +64,13 @@ service FinanceService {
   // account balance and can no longer receive payments.
   rpc CancelCharge(CancelChargeRequest) returns (CancelChargeResponse);
 
+  // CancelChargeIfUnpaid voids a charge ONLY if nothing was collected against
+  // it, decided under the charge's row lock. It is the variant an automated
+  // caller needs: the uniforms expiry sweep voids the charge behind a lapsed
+  // hold while a cashier may be collecting that exact payment, and it must lose
+  // that race loudly (FailedPrecondition) rather than void collected money.
+  rpc CancelChargeIfUnpaid(CancelChargeIfUnpaidRequest) returns (CancelChargeIfUnpaidResponse);
+
   // --- Payments + account ---
 
   // RegisterPayment applies a payment to a charge and returns the payment plus
@@ -128,6 +135,10 @@ message Charge {
   string status = 10;
   int64 paid_cents = 11;
   int64 remaining_cents = 12;
+  // external_ref ties this charge to the row that caused it in another module
+  // (e.g. a uniforms fulfillment). Empty for the school's own charges, which is
+  // what keeps the "one concept per cycle" rule applying to them alone.
+  string external_ref = 13;
 }
 
 // Payment is one amount applied to a charge. `method` is one of:
@@ -191,6 +202,12 @@ message CreateChargeRequest {
   string description_override = 5;
   // due_date is an ISO date, "YYYY-MM-DD".
   string due_date = 6;
+  // external_ref identifies the row in the calling module that this charge
+  // stands for. Setting it does two things: it exempts the charge from the
+  // "a student owes a concept once per cycle" rule, so a module that bills the
+  // same concept repeatedly (uniforms) can; and it deduplicates a retried
+  // creation, since the same ref may exist only once per tenant.
+  string external_ref = 7;
 }
 
 message CreateChargeResponse {
@@ -237,6 +254,14 @@ message ApplyDiscountResponse {
 
 message CancelChargeRequest {
   string charge_id = 1;
+}
+
+message CancelChargeIfUnpaidRequest {
+  string charge_id = 1;
+}
+
+message CancelChargeIfUnpaidResponse {
+  Charge charge = 1;
 }
 
 message CancelChargeResponse {
@@ -307,6 +332,23 @@ message PaymentRegistered {
   int64 amount_cents = 5;
   string method = 6;
   google.protobuf.Timestamp paid_at = 7;
+}
+
+// ChargeSettled fires the moment a charge becomes fully covered — the crossing
+// into "paid", not every collection along the way. It exists because a consumer
+// that only cares whether the money is IN (uniforms, before it releases goods)
+// should not have to sum payments off PaymentRegistered, tolerate out-of-order
+// delivery, or subscribe to every payment the school takes to discard most of
+// them. A partial payment simply does not emit it.
+message ChargeSettled {
+  string charge_id = 1;
+  string student_id = 2;
+  string tenant_id = 3;
+  // external_ref echoes the charge's reference, so a consumer can resolve its
+  // own row without a lookup back into finance.
+  string external_ref = 4;
+  int64 amount_cents = 5;
+  google.protobuf.Timestamp settled_at = 6;
 }
 
 // DebtOverdue fires when a charge crosses its due date with a remaining balance.

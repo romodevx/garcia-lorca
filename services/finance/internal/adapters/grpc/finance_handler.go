@@ -84,8 +84,15 @@ func (h *FinanceHandler) UpdateConcept(ctx context.Context, req *connect.Request
 // CreateCharge issues one charge against a student's cycle.
 func (h *FinanceHandler) CreateCharge(ctx context.Context, req *connect.Request[financev1.CreateChargeRequest]) (*connect.Response[financev1.CreateChargeResponse], error) {
 	m := req.Msg
-	charge, err := h.finance.CreateCharge(ctx, m.GetStudentId(), m.GetCycleId(), m.GetConceptId(),
-		m.GetAmountCentsOverride(), m.GetDescriptionOverride(), m.GetDueDate())
+	charge, err := h.finance.CreateCharge(ctx, usecase.CreateChargeInput{
+		StudentID:           m.GetStudentId(),
+		CycleID:             m.GetCycleId(),
+		ConceptID:           m.GetConceptId(),
+		DueDate:             m.GetDueDate(),
+		AmountCentsOverride: m.GetAmountCentsOverride(),
+		DescriptionOverride: m.GetDescriptionOverride(),
+		ExternalRef:         m.GetExternalRef(),
+	})
 	if err != nil {
 		return nil, connectErr(err)
 	}
@@ -134,6 +141,16 @@ func (h *FinanceHandler) CancelCharge(ctx context.Context, req *connect.Request[
 		return nil, connectErr(err)
 	}
 	return connect.NewResponse(&financev1.CancelChargeResponse{Charge: toProtoCharge(charge)}), nil
+}
+
+// CancelChargeIfUnpaid voids a charge only if nothing was collected against it.
+// The guarded variant automated callers use; see the RPC comment in the proto.
+func (h *FinanceHandler) CancelChargeIfUnpaid(ctx context.Context, req *connect.Request[financev1.CancelChargeIfUnpaidRequest]) (*connect.Response[financev1.CancelChargeIfUnpaidResponse], error) {
+	charge, err := h.finance.CancelChargeIfUnpaid(ctx, req.Msg.GetChargeId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&financev1.CancelChargeIfUnpaidResponse{Charge: toProtoCharge(charge)}), nil
 }
 
 // RegisterPayment applies a payment to a charge and returns the payment plus
@@ -223,6 +240,7 @@ func toProtoCharge(cwp ports.ChargeWithPaid) *financev1.Charge {
 		AmountCents:    c.Amount().Int64(),
 		DiscountCents:  c.Discount().Int64(),
 		DueDate:        c.DueDate().Format(dueDateLayout),
+		ExternalRef:    c.ExternalRef(),
 		Status:         c.Status(),
 		PaidCents:      cwp.PaidCents,
 		RemainingCents: max(0, c.Effective().Int64()-cwp.PaidCents),

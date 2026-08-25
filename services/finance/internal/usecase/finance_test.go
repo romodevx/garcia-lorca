@@ -186,8 +186,14 @@ func TestCreateCharge(t *testing.T) {
 				conceptID = concept.ID()
 			}
 
-			got, err := f.svc.CreateCharge(context.Background(), tt.studentID, tt.cycleID, conceptID,
-				tt.amount, tt.description, tt.dueDate)
+			got, err := f.svc.CreateCharge(context.Background(), usecase.CreateChargeInput{
+				StudentID:           tt.studentID,
+				CycleID:             tt.cycleID,
+				ConceptID:           conceptID,
+				DueDate:             tt.dueDate,
+				AmountCentsOverride: tt.amount,
+				DescriptionOverride: tt.description,
+			})
 
 			if tt.wantKind != glerrors.KindUnknown {
 				requireKind(t, err, tt.wantKind)
@@ -219,7 +225,9 @@ func TestCreateChargeDuplicateConflicts(t *testing.T) {
 	concept := f.seedConcept(t, "Inscripción", 500000)
 	f.seedCharge(t, concept.ID(), 0)
 
-	_, err := f.svc.CreateCharge(context.Background(), testStudent, testCycle, concept.ID(), 0, "", testDueDate)
+	_, err := f.svc.CreateCharge(context.Background(), usecase.CreateChargeInput{
+		StudentID: testStudent, CycleID: testCycle, ConceptID: concept.ID(), DueDate: testDueDate,
+	})
 
 	requireKind(t, err, glerrors.KindConflict)
 }
@@ -231,7 +239,9 @@ func TestCreateChargeRejectsARetiredConcept(t *testing.T) {
 	f := newFixture(t)
 	retired := f.seedRetiredConcept(t, "Excursión 2024", 50000)
 
-	_, err := f.svc.CreateCharge(context.Background(), testStudent, testCycle, retired.ID(), 0, "", testDueDate)
+	_, err := f.svc.CreateCharge(context.Background(), usecase.CreateChargeInput{
+		StudentID: testStudent, CycleID: testCycle, ConceptID: retired.ID(), DueDate: testDueDate,
+	})
 
 	requireKind(t, err, glerrors.KindInvalid)
 	if len(f.repo.charges) != 0 {
@@ -712,7 +722,10 @@ func TestGetAccount(t *testing.T) {
 		t.Fatalf("seed cancel: %v", err)
 	}
 	// Another student's debt must never reach this statement.
-	if _, err := f.svc.CreateCharge(ctx, "stu-2", testCycle, tuition.ID(), 777000, "", testDueDate); err != nil {
+	if _, err := f.svc.CreateCharge(ctx, usecase.CreateChargeInput{
+		StudentID: "stu-2", CycleID: testCycle, ConceptID: tuition.ID(), DueDate: testDueDate,
+		AmountCentsOverride: 777000,
+	}); err != nil {
 		t.Fatalf("seed other student: %v", err)
 	}
 
@@ -784,7 +797,10 @@ func TestListChargesFiltersAndCarriesTheCollectedTotal(t *testing.T) {
 	ctx := context.Background()
 
 	mine := f.seedCharge(t, concept.ID(), 100000)
-	if _, err := f.svc.CreateCharge(ctx, otherStudent, testCycle, concept.ID(), 100000, "", testDueDate); err != nil {
+	if _, err := f.svc.CreateCharge(ctx, usecase.CreateChargeInput{
+		StudentID: otherStudent, CycleID: testCycle, ConceptID: concept.ID(), DueDate: testDueDate,
+		AmountCentsOverride: 100000,
+	}); err != nil {
 		t.Fatalf("seed another student's charge: %v", err)
 	}
 	if _, _, err := f.svc.RegisterPayment(ctx, mine.ID(), 40000, domain.MethodCash, "", ""); err != nil {
@@ -855,4 +871,70 @@ func ids(cs []domain.ChargeConcept) []string {
 		out = append(out, c.ID())
 	}
 	return out
+}
+
+// --- external references (M12 uniforms) --------------------------------------
+
+// TestCreateChargeCarriesExternalRef proves the reference survives the use case
+// and reaches the stored charge. It is what lets another module (uniforms)
+// charge the same concept more than once in a cycle, and what deduplicates a
+// retried creation.
+func TestCreateChargeCarriesExternalRef(t *testing.T) {
+	f := newFixture(t)
+	concept := f.seedConcept(t, "Uniformes", 145000)
+
+	got, err := f.svc.CreateCharge(context.Background(), usecase.CreateChargeInput{
+		StudentID:   testStudent,
+		CycleID:     testCycle,
+		ConceptID:   concept.ID(),
+		DueDate:     testDueDate,
+		ExternalRef: "uniforms:ful-42",
+	})
+	if err != nil {
+		t.Fatalf("CreateCharge: %v", err)
+	}
+	if got.Charge.ExternalRef() != "uniforms:ful-42" {
+		t.Errorf("external ref = %q, want uniforms:ful-42", got.Charge.ExternalRef())
+	}
+}
+
+// TestCreateChargeWithoutExternalRefStaysKeyless guards the other half: the
+// school's own charges must keep landing on the "one concept per cycle" side of
+// the partial index, or bulk tuition generation stops being idempotent.
+func TestCreateChargeWithoutExternalRefStaysKeyless(t *testing.T) {
+	f := newFixture(t)
+	concept := f.seedConcept(t, "Colegiatura", 800000)
+
+	got, err := f.svc.CreateCharge(context.Background(), usecase.CreateChargeInput{
+		StudentID: testStudent,
+		CycleID:   testCycle,
+		ConceptID: concept.ID(),
+		DueDate:   testDueDate,
+	})
+	if err != nil {
+		t.Fatalf("CreateCharge: %v", err)
+	}
+	if got.Charge.ExternalRef() != "" {
+		t.Errorf("external ref = %q, want empty", got.Charge.ExternalRef())
+	}
+}
+
+// TestCancelChargeIfUnpaidDelegatesToRepo proves the use case hands the decision
+// to the repository, where it can be made under the charge's row lock. Deciding
+// it here — read, then write — would reopen the very race it exists to close.
+func TestCancelChargeIfUnpaidDelegatesToRepo(t *testing.T) {
+	f := newFixture(t)
+	concept := f.seedConcept(t, "Uniformes", 145000)
+	charge := f.seedCharge(t, concept.ID(), 145000)
+
+	got, err := f.svc.CancelChargeIfUnpaid(context.Background(), charge.ID())
+	if err != nil {
+		t.Fatalf("CancelChargeIfUnpaid: %v", err)
+	}
+	if got.Charge.Status() != domain.StatusCancelled {
+		t.Errorf("status = %q, want cancelled", got.Charge.Status())
+	}
+	if f.repo.cancelIfUnpaidCalls != 1 {
+		t.Errorf("repo.CancelChargeIfUnpaid called %d times, want 1", f.repo.cancelIfUnpaidCalls)
+	}
 }

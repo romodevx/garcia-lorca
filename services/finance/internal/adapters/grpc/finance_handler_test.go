@@ -152,6 +152,23 @@ func (f *fakeRepo) CreateCharge(_ context.Context, c domain.Charge) (domain.Char
 	return c, nil
 }
 
+func (f *fakeRepo) CancelChargeIfUnpaid(_ context.Context, id string) (ports.ChargeWithPaid, error) {
+	c, ok := f.charges[id]
+	if !ok {
+		return ports.ChargeWithPaid{}, glerrors.ErrNotFound
+	}
+	var paid int64
+	for _, p := range f.payments[id] {
+		paid += p.Amount().Int64()
+	}
+	cancelled, err := c.CancelIfUnpaid(paid)
+	if err != nil {
+		return ports.ChargeWithPaid{}, err
+	}
+	f.charges[id] = cancelled
+	return ports.ChargeWithPaid{Charge: cancelled, PaidCents: paid}, nil
+}
+
 func (f *fakeRepo) CreateChargesBulk(_ context.Context, cs []domain.Charge) (int, error) {
 	created := 0
 	for _, c := range cs {
