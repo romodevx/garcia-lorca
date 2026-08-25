@@ -379,11 +379,25 @@ func (s *Service) GetSettings(ctx context.Context) (domain.Settings, error) {
 	return s.repo.GetSettings(ctx)
 }
 
-// UpdateSettings replaces them, re-validated.
-func (s *Service) UpdateSettings(ctx context.Context, in domain.Settings) (domain.Settings, error) {
+// UpdateSettingsInput is the school's limits as they arrive from the edge: a bag
+// of numbers that has not been validated yet, and that carries no tenant. The
+// tenant is the service's, never the caller's — accepting one from the wire is
+// how a request talks its way into another school's settings.
+type UpdateSettingsInput struct {
+	PickupWindowBusinessDays int
+	AutoCancelEnabled        bool
+	MaxExtensions            int
+	MaxOpenOrdersPerStudent  int
+	MaxLinesPerOrder         int
+	MaxUnitsPerLine          int
+	MaxLineExpiries          int
+}
+
+// UpdateSettings replaces the school's limits, validated on the way in.
+func (s *Service) UpdateSettings(ctx context.Context, in UpdateSettingsInput) (domain.Settings, error) {
 	next, err := domain.NewSettings(s.tenantID,
-		in.PickupWindowBusinessDays(), in.AutoCancelEnabled(), in.MaxExtensions(),
-		in.MaxOpenOrdersPerStudent(), in.MaxLinesPerOrder(), in.MaxUnitsPerLine(), in.MaxLineExpiries())
+		in.PickupWindowBusinessDays, in.AutoCancelEnabled, in.MaxExtensions,
+		in.MaxOpenOrdersPerStudent, in.MaxLinesPerOrder, in.MaxUnitsPerLine, in.MaxLineExpiries)
 	if err != nil {
 		return domain.Settings{}, err
 	}

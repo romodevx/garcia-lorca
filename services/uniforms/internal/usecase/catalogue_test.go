@@ -306,11 +306,10 @@ func TestSettingsRoundTrip(t *testing.T) {
 		t.Errorf("default window = %d, want 10", def.PickupWindowBusinessDays())
 	}
 
-	next, err := domain.NewSettings(testTenant, 15, false, 1, 3, 10, 3, 1)
-	if err != nil {
-		t.Fatalf("NewSettings: %v", err)
-	}
-	saved, err := f.svc.UpdateSettings(ctx, next)
+	saved, err := f.svc.UpdateSettings(ctx, usecase.UpdateSettingsInput{
+		PickupWindowBusinessDays: 15, AutoCancelEnabled: false, MaxExtensions: 1,
+		MaxOpenOrdersPerStudent: 3, MaxLinesPerOrder: 10, MaxUnitsPerLine: 3, MaxLineExpiries: 1,
+	})
 	if err != nil {
 		t.Fatalf("UpdateSettings: %v", err)
 	}
@@ -326,14 +325,14 @@ func TestUpdatedCeilingsBindTheNextSale(t *testing.T) {
 	f := newFixture(t)
 	item := f.seedItem(t, "PLA", "8", 32000, 50)
 
-	tighter, err := domain.NewSettings(testTenant, 10, true, 2, 5, 20, 2, 2)
-	if err != nil {
-		t.Fatalf("NewSettings: %v", err)
+	tighter := usecase.UpdateSettingsInput{
+		PickupWindowBusinessDays: 10, AutoCancelEnabled: true, MaxExtensions: 2,
+		MaxOpenOrdersPerStudent: 5, MaxLinesPerOrder: 20, MaxUnitsPerLine: 2, MaxLineExpiries: 2,
 	}
 	if _, err := f.svc.UpdateSettings(ctx, tighter); err != nil {
 		t.Fatalf("UpdateSettings: %v", err)
 	}
 
-	_, err = f.svc.CounterSale(ctx, saleFor(item, "8", 3))
+	_, err := f.svc.CounterSale(ctx, saleFor(item, "8", 3))
 	requireKind(t, err, glerrors.KindInvalid)
 }
