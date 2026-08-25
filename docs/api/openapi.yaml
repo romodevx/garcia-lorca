@@ -1,0 +1,853 @@
+openapi: 3.1.0
+
+# García Lorca — REST contract served by the gateway/BFF.
+#
+# SCOPE. This file starts with the uniform shop (M12) because that is the first
+# module written contract-first, as the canon requires. The modules that shipped
+# before it are NOT described here yet; adding them is tracked as tech debt, and
+# the intent is that every path the gateway serves ends up in this file.
+#
+# ERRORS. Every operation here answers failures with the SAME envelope
+# (#/components/schemas/Error). The gateway's older handlers still answer with
+# text/plain, which is why the shared web client reads JSON first and falls back
+# to text: one module moving to the envelope must not fork error handling. The
+# rest migrating is the tech-debt item above.
+#
+# AUTH. The routes here are the staff panel's, authenticated with a session
+# cookie (Secure, HttpOnly, SameSite=Strict), which is why every state-changing
+# call also carries a CSRF header. The family routes authenticate with a bearer
+# token instead and have no cookie to forge; their scheme is declared when those
+# routes land, because an unused security scheme is dead contract.
+#
+# MODULE FLAG. Every path below sits behind `module_uniforms`. With the flag off
+# the routes answer 404 — not 403 — because a disabled module must be invisible,
+# not merely refused.
+
+info:
+  title: García Lorca API
+  version: 0.12.0
+  license:
+    name: Proprietary
+    url: https://garcialorca.edu.mx/legal
+  description: |
+    School management API. Currently describes the uniform shop (M12);
+    other modules are added as they are brought under contract-first.
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+  - url: https://api.garcialorca.edu.mx
+    description: Production
+
+tags:
+  - name: uniforms-catalogue
+    description: Garments and their sizes. Requires `uniforms:stock`.
+  - name: uniforms-inventory
+    description: Stock levels, goods receipts and adjustments. Requires `uniforms:stock`.
+  - name: uniforms-sales
+    description: The counter sale. Requires `uniforms:write` AND `finance:write`.
+  - name: uniforms-orders
+    description: The order list. Requires `uniforms:orders`, which is owner-only.
+  - name: uniforms-settings
+    description: Per-school limits and windows.
+
+paths:
+  /api/v1/uniforms/items:
+    get:
+      tags: [uniforms-catalogue]
+      summary: List garments
+      operationId: listUniformItems
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: includeInactive
+          in: query
+          schema: { type: boolean, default: false }
+          description: Retired garments are hidden by default; issued orders still point at them.
+        - name: level
+          in: query
+          schema: { $ref: '#/components/schemas/Level' }
+          description: |
+            Narrows to what a student of that level may buy: garments scoped to
+            it PLUS garments scoped to no level at all. Omitted returns everything.
+      responses:
+        '200':
+          description: The catalogue.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Item' }
+              examples:
+                mixed:
+                  summary: One garment for every level, one only for kinder
+                  value:
+                    items:
+                      - id: 6f1c9a2e-1111-4e2b-9a11-000000000001
+                        code: PLA-BLA
+                        name: Playera blanca
+                        level: null
+                        priceCents: 32000
+                        active: true
+                        sizes:
+                          - id: 8a2b1c3d-0000-4000-8000-000000000006
+                            itemId: 6f1c9a2e-1111-4e2b-9a11-000000000001
+                            sizeLabel: "6"
+                            sizeOrder: 1
+                            onHand: 12
+                            reserved: 2
+                            available: 10
+                            minStock: 5
+                            belowMinimum: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+    post:
+      tags: [uniforms-catalogue]
+      summary: Create a garment
+      operationId: createUniformItem
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateItemRequest' }
+            examples:
+              everyLevel:
+                summary: A garment the whole school wears
+                value: { code: SUE-VER, name: Suéter verde, priceCents: 65000 }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Item' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+        '409':
+          description: A garment with that code already exists.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/uniforms/items/{id}/sizes:
+    post:
+      tags: [uniforms-catalogue]
+      summary: Add or update a garment's sizes in one call
+      description: |
+        A school opening the module has six garments and eight sizes each. Asking
+        for forty-eight separate calls is how a module gets abandoned on its first
+        afternoon, so this takes the whole size run at once and reports created
+        and updated separately — the panel can then say "8 sizes created, 2 already
+        existed" instead of upserting in silence.
+      operationId: upsertUniformSizes
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ItemId' }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sizes]
+              properties:
+                sizes:
+                  type: array
+                  minItems: 1
+                  maxItems: 40
+                  items:
+                    type: object
+                    required: [sizeLabel]
+                    properties:
+                      sizeLabel: { type: string, minLength: 1, maxLength: 12 }
+                      sizeOrder: { type: integer, default: 0 }
+                      minStock: { type: integer, minimum: 0, default: 0 }
+            examples:
+              numericRun:
+                summary: Trousers, sizes 4 to 12
+                value:
+                  sizes:
+                    - { sizeLabel: "4", sizeOrder: 1, minStock: 3 }
+                    - { sizeLabel: "6", sizeOrder: 2, minStock: 3 }
+                    - { sizeLabel: "8", sizeOrder: 3, minStock: 5 }
+                    - { sizeLabel: "10", sizeOrder: 4, minStock: 5 }
+                    - { sizeLabel: "12", sizeOrder: 5, minStock: 3 }
+              letterRun:
+                summary: A jumper, CH to G
+                value:
+                  sizes:
+                    - { sizeLabel: CH, sizeOrder: 1 }
+                    - { sizeLabel: M, sizeOrder: 2 }
+                    - { sizeLabel: G, sizeOrder: 3 }
+      responses:
+        '200':
+          description: The garment's sizes after the call.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [createdCount, updatedCount, sizes]
+                properties:
+                  createdCount: { type: integer }
+                  updatedCount: { type: integer }
+                  sizes:
+                    type: array
+                    items: { $ref: '#/components/schemas/StockLevel' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/uniforms/stock:
+    get:
+      tags: [uniforms-inventory]
+      summary: List stock levels
+      operationId: listUniformStock
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: itemId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: onlyBelowMinimum
+          in: query
+          schema: { type: boolean, default: false }
+          description: Powers the "below minimum" tab, which is how the storeroom decides what to reorder.
+      responses:
+        '200':
+          description: Stock by garment and size.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [stock]
+                properties:
+                  stock:
+                    type: array
+                    items: { $ref: '#/components/schemas/StockLevel' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
+  /api/v1/uniforms/stock/receive:
+    post:
+      tags: [uniforms-inventory]
+      summary: Book a delivery from the supplier
+      description: |
+        Books the units in, and in the same transaction allocates them to the
+        lines that have been waiting for those sizes, oldest first. The guardians
+        of the allocated lines are notified: "the size you asked for is here".
+      operationId: receiveUniformStock
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lines]
+              properties:
+                lines:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [stockId, qty]
+                    properties:
+                      stockId: { type: string, format: uuid }
+                      qty: { type: integer, minimum: 1 }
+                note: { type: string, maxLength: 500 }
+            examples:
+              oneBox:
+                summary: A box of forty pieces across six sizes
+                value:
+                  note: Factura 8871, proveedor Uniformes del Bajío
+                  lines:
+                    - { stockId: 8a2b1c3d-0000-4000-8000-000000000006, qty: 6 }
+                    - { stockId: 8a2b1c3d-0000-4000-8000-000000000008, qty: 12 }
+      responses:
+        '200':
+          description: Stock after the receipt, plus any waiting lines it satisfied.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [stock, allocatedLineIds]
+                properties:
+                  stock:
+                    type: array
+                    items: { $ref: '#/components/schemas/StockLevel' }
+                  allocatedLineIds:
+                    type: array
+                    items: { type: string, format: uuid }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/uniforms/stock/adjust:
+    post:
+      tags: [uniforms-inventory]
+      summary: Correct a stock count
+      description: |
+        Breakage, loss, a miscount. The note is REQUIRED because this is the one
+        write that can conceal a shortfall; it is recorded in the append-only
+        ledger with the actor, and a negative adjustment raises an alert.
+      operationId: adjustUniformStock
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [stockId, qtyDelta, note]
+              properties:
+                stockId: { type: string, format: uuid }
+                qtyDelta:
+                  type: integer
+                  description: Signed. Negative is the shortfall case.
+                note: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200':
+          description: The corrected stock level.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockLevel' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The correction would push the count below what is already held.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/uniforms/counter-sale:
+    post:
+      tags: [uniforms-sales]
+      summary: Sell and hand over in one act
+      description: |
+        The parent who walks in without an order. The goods are sold, handed over
+        and charged in one call, and the resulting delivery is born terminal so no
+        expiry sweep can ever "return" stock that has physically left.
+
+        `Idempotency-Key` is REQUIRED and must be minted when the till drawer
+        opens, not when the button is pressed. This is the only call that moves
+        physical goods and money together; a double click or a retried timeout
+        without it is a second sale of goods that left once.
+
+        `studentId` may be omitted for a sale to someone who is not a student.
+        The money is still recorded — against the school's counter account — so
+        the till reconciles; the note must then say who bought it.
+
+        Requires `uniforms:write` AND `finance:write`. A caller holding only the
+        first gets 403 with a message naming the missing one, so the panel can
+        disable the entry point and say why rather than failing after six lines
+        have been keyed in.
+      operationId: uniformCounterSale
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/CsrfToken' }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lines, method]
+              properties:
+                studentId: { type: [string, 'null'], format: uuid }
+                cycleId:
+                  type: [string, 'null']
+                  format: uuid
+                  description: Required when studentId is present, forbidden when it is not.
+                lines:
+                  type: array
+                  minItems: 1
+                  items: { $ref: '#/components/schemas/SaleLine' }
+                method: { type: string, enum: [cash, card, transfer] }
+                reference:
+                  type: string
+                  maxLength: 120
+                  description: Voucher or transfer id. Only meaningful when method is not cash.
+                note: { type: string, maxLength: 500 }
+            examples:
+              toAStudent:
+                summary: Two garments to an enrolled student, cash
+                value:
+                  studentId: 3d5f8a10-0000-4000-8000-000000000042
+                  cycleId: 70000000-0000-0000-0000-000000000001
+                  method: cash
+                  lines:
+                    - { itemId: 6f1c9a2e-1111-4e2b-9a11-000000000001, sizeLabel: "8", qty: 1 }
+                    - { itemId: 6f1c9a2e-1111-4e2b-9a11-000000000002, sizeLabel: "8", qty: 1 }
+              toSomeoneElse:
+                summary: A sale to an uncle
+                value:
+                  method: cash
+                  note: Tío de Zoe Villalobos, 3B
+                  lines:
+                    - { itemId: 6f1c9a2e-1111-4e2b-9a11-000000000001, sizeLabel: M, qty: 1 }
+      responses:
+        '201':
+          description: Sold and handed over.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [order, replayed]
+                properties:
+                  order: { $ref: '#/components/schemas/Order' }
+                  replayed:
+                    type: boolean
+                    description: true when the key matched an earlier sale and nothing was collected again.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: |
+            Missing `uniforms:write` or `finance:write`. The message names which.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                missingFinance:
+                  value:
+                    error:
+                      code: forbidden
+                      message: Necesitas permiso de cobros para vender en mostrador
+                      details: { missingPermission: finance:write }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+        '409':
+          description: Not enough stock for one of the lines.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/uniforms/orders:
+    get:
+      tags: [uniforms-orders]
+      summary: List orders
+      description: |
+        Requires `uniforms:orders`, which is OWNER-ONLY: each row carries a
+        student's name and what the family bought, for the whole school, with no
+        per-object scoping.
+
+        Defaults to LIVE deliveries only. Reading the full history requires an
+        explicit date range — a cheap limit on how much of the school's purchase
+        record one screen hands over at once.
+      operationId: listUniformOrders
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: level
+          in: query
+          schema: { $ref: '#/components/schemas/Level' }
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 100 }
+          description: |
+            A folio if it matches `U-YYYY-NNNNNN`, otherwise a student name.
+            Wildcards in the input are escaped, not interpreted.
+        - name: status
+          in: query
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/FulfillmentStatus' }
+          style: form
+          explode: true
+        - name: requiresAttention
+          in: query
+          schema: { type: boolean }
+          description: The deliveries no rule could settle on its own.
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [createdAt, deadline, status], default: createdAt }
+        - name: desc
+          in: query
+          schema: { type: boolean, default: true }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: pageToken
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: |
+            Orders with their lines and deliveries. Ties break on id, so paging
+            stays stable while the expiry sweep mutates rows underneath.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [orders, totalCount]
+                properties:
+                  orders:
+                    type: array
+                    items: { $ref: '#/components/schemas/Order' }
+                  nextPageToken: { type: [string, 'null'] }
+                  totalCount: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
+  /api/v1/uniforms/orders/{id}:
+    get:
+      tags: [uniforms-orders]
+      summary: Read one order
+      operationId: getUniformOrder
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/OrderId' }]
+      responses:
+        '200':
+          description: The order with its lines and deliveries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/uniforms/settings:
+    get:
+      tags: [uniforms-settings]
+      summary: Read the shop's limits
+      operationId: getUniformSettings
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Current settings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Settings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+    put:
+      tags: [uniforms-settings]
+      summary: Update the shop's limits
+      operationId: updateUniformSettings
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Settings' }
+      responses:
+        '200':
+          description: Settings after the update.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Settings' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: gl_session
+      description: |
+        The web panel's session. Secure, HttpOnly, SameSite=Strict. Because it is
+        a cookie, every state-changing call also requires the CSRF header.
+  parameters:
+    CsrfToken:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      schema: { type: string }
+      description: |
+        Required on every state-changing call made with the session cookie. The
+        family app's bearer-authenticated calls do not need it.
+    ItemId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    OrderId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    BadRequest:
+      description: The request did not satisfy the contract.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: No session, or it expired.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Authenticated, but lacking the permission this route needs.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: |
+        No such row — OR the caller may not see it. The two are deliberately
+        indistinguishable: a 403 on someone else's id confirms that it exists.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ModuleDisabled:
+      description: |
+        `module_uniforms` is off. A disabled module answers 404 because it must be
+        invisible, not merely refused — the flag is a security boundary enforced
+        by the gateway, not a hint to the UI.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Stable, machine-readable. The UI branches on this, never on the message.
+              enum:
+                [invalid, unauthorized, forbidden, not_found, conflict,
+                 insufficient_stock, module_disabled, upstream_unavailable, internal]
+            message:
+              type: string
+              description: |
+                Human-readable, in Spanish, and safe to show. It says what happened
+                and what to do — never a stack trace, never an internal id.
+            details:
+              type: object
+              additionalProperties: true
+              description: Structured context the UI can use, e.g. which permission is missing.
+      examples:
+        - error:
+            code: insufficient_stock
+            message: Esa talla ya no está disponible, actualizamos la lista
+            details: { itemId: 6f1c9a2e-1111-4e2b-9a11-000000000001, sizeLabel: "8", available: 0 }
+
+    Level:
+      type: [string, 'null']
+      enum: [kinder, primaria, secundaria, preparatoria, null]
+      description: null on a garment means it applies to EVERY level.
+
+    Item:
+      type: object
+      required: [id, code, name, priceCents, active, sizes]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, maxLength: 40 }
+        name: { type: string, maxLength: 120 }
+        description: { type: string, maxLength: 500 }
+        level: { $ref: '#/components/schemas/Level' }
+        priceCents:
+          type: integer
+          minimum: 0
+          description: Integer cents, as everywhere money appears.
+        active: { type: boolean }
+        sizes:
+          type: array
+          items: { $ref: '#/components/schemas/StockLevel' }
+
+    CreateItemRequest:
+      type: object
+      required: [code, name, priceCents]
+      properties:
+        code: { type: string, minLength: 1, maxLength: 40 }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: string, maxLength: 500 }
+        level: { $ref: '#/components/schemas/Level' }
+        priceCents: { type: integer, minimum: 0 }
+
+    StockLevel:
+      type: object
+      required: [id, itemId, sizeLabel, onHand, reserved, available, minStock, belowMinimum]
+      properties:
+        id: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        sizeLabel: { type: string, maxLength: 12 }
+        sizeOrder: { type: integer }
+        onHand: { type: integer, description: Physically in the storeroom. }
+        reserved: { type: integer, description: Committed to a live order line. }
+        available:
+          type: integer
+          description: |
+            onHand minus reserved. DERIVED, never stored, and the only number a
+            parent should ever be shown: it is what can actually be taken.
+        minStock: { type: integer }
+        belowMinimum: { type: boolean }
+
+    SaleLine:
+      type: object
+      required: [itemId, sizeLabel, qty]
+      properties:
+        itemId: { type: string, format: uuid }
+        sizeLabel: { type: string, maxLength: 12 }
+        qty: { type: integer, minimum: 1 }
+      description: |
+        Note what is NOT here: a price. The amount always comes from the server's
+        catalogue, so a crafted request cannot buy a jumper for one peso.
+
+    LineStatus:
+      type: string
+      enum: [awaiting_stock, reserved, sold, released, cancelled]
+      description: |
+        `reserved` is the only status that holds stock. `released` and `cancelled`
+        are terminal: a line let go is not re-picked, because the school has
+        reclaimed the goods and may already have sold them to someone else. The
+        family orders again.
+
+    FulfillmentStatus:
+      type: string
+      enum: [picking, ready_for_pickup, paid, dispatched, expired, cancelled, sold_at_counter]
+      description: |
+        `sold_at_counter` is terminal from birth: the goods were handed over as
+        they were sold, so no sweep may ever return them to stock.
+
+    OrderLabel:
+      type: string
+      enum: [awaiting_stock, partial, in_progress, closed, closed_partial]
+      description: |
+        The order's DERIVED state, for display only, recomputed on every read so
+        it cannot drift. `closed_partial` is the honest ending for an order that
+        finished having delivered only some of what was asked for.
+
+    OrderLine:
+      type: object
+      required: [id, itemId, itemName, sizeLabel, qty, unitPriceCents, status]
+      properties:
+        id: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        itemName:
+          type: string
+          description: Snapshot; renaming the catalogue must not rewrite an issued order.
+        sizeLabel: { type: string }
+        qty: { type: integer }
+        unitPriceCents:
+          type: integer
+          description: Snapshot, for the same reason.
+        status: { $ref: '#/components/schemas/LineStatus' }
+        fulfillmentId: { type: [string, 'null'], format: uuid }
+
+    Fulfillment:
+      type: object
+      required: [id, orderId, seq, folio, status, amountCents]
+      properties:
+        id: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        seq:
+          type: integer
+          description: Renders as the -A, -B suffix. A number, so an order is not capped at 26 deliveries.
+        folio: { type: string, example: U-2026-000123-A }
+        status: { $ref: '#/components/schemas/FulfillmentStatus' }
+        amountCents: { type: integer }
+        financeChargeId: { type: [string, 'null'], format: uuid }
+        readyAt: { type: [string, 'null'], format: date-time }
+        pickupDeadline: { type: [string, 'null'], format: date }
+        remainingBusinessDays:
+          type: [integer, 'null']
+          description: |
+            Computed by the SERVER against the school calendar, in the school's
+            timezone. A client deriving it from the date would count Saturdays,
+            and two clients in different timezones would disagree with the panel.
+        deadlineLabel:
+          type: [string, 'null']
+          description: |
+            The sentence to show, already written. Escalates with urgency and never
+            says "0 days" or "1 days".
+          examples:
+            - Pasa a caja antes del viernes 12 de septiembre · te quedan 3 días hábiles
+            - 'Último día: mañana, viernes 12 de septiembre'
+            - Hoy es el último día para recoger tu pedido
+        deadlineEstimated:
+          type: boolean
+          description: |
+            The calendar was unreachable and the deadline was computed without it.
+            Such deadlines may later be EXTENDED, never shortened.
+        extendedDays: { type: integer }
+        requiresAttention:
+          type: boolean
+          description: |
+            No rule could settle this one — a payment that arrived after expiry,
+            say. It surfaces in its own filter; silence is not an option.
+        attentionReason: { type: string }
+
+    Order:
+      type: object
+      required: [id, folio, source, label, totalCents, lines, fulfillments, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        folio: { type: string, example: U-2026-000123 }
+        studentId: { type: [string, 'null'], format: uuid }
+        studentName:
+          type: string
+          description: Snapshot, so the panel filters and searches without calling the students service per row.
+        studentLevel: { $ref: '#/components/schemas/Level' }
+        studentGradeGroup: { type: string, example: 3° B }
+        cycleId: { type: [string, 'null'], format: uuid }
+        source: { type: string, enum: [family, counter, staff] }
+        label: { $ref: '#/components/schemas/OrderLabel' }
+        totalCents: { type: integer }
+        lines:
+          type: array
+          items: { $ref: '#/components/schemas/OrderLine' }
+        fulfillments:
+          type: array
+          items: { $ref: '#/components/schemas/Fulfillment' }
+        createdAt: { type: string, format: date-time }
+        closedAt: { type: [string, 'null'], format: date-time }
+
+    Settings:
+      type: object
+      required: [pickupWindowBusinessDays, autoCancelEnabled]
+      properties:
+        pickupWindowBusinessDays: { type: integer, minimum: 1, maximum: 90, default: 10 }
+        autoCancelEnabled:
+          type: boolean
+          default: true
+          description: |
+            Lets a school stop automatic release entirely — during the
+            back-to-school weeks, when nobody wants holds evaporating.
+        maxExtensions: { type: integer, minimum: 0, maximum: 5, default: 2 }
+        maxOpenOrdersPerStudent: { type: integer, minimum: 1, maximum: 50, default: 5 }
+        maxLinesPerOrder: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        maxUnitsPerLine: { type: integer, minimum: 1, maximum: 20, default: 5 }
+        maxLineExpiries:
+          type: integer
+          minimum: 0
+          maximum: 10
+          default: 2
+          description: |
+            How many times one line may be reserved and let lapse before it stops
+            being reservable. Without a ceiling, a family can hold the last unit
+            of a size indefinitely, for free, by never coming to pay.
