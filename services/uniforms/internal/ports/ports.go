@@ -94,6 +94,14 @@ type Repository interface {
 	// charge and payment in finance follow it and are eventually consistent over
 	// it, because the goods have already left the storeroom.
 	CounterSale(ctx context.Context, cmd CounterSaleCommand) (OrderAggregate, bool, error)
+	// RecordCounterSaleCharge attaches the finance charge to a sale already
+	// written. It is a second step because the goods left the storeroom in the
+	// first one: the sale is the fact, and the ledger entry catches up to it.
+	RecordCounterSaleCharge(ctx context.Context, fulfillmentID, chargeID string) error
+	// FlagFulfillment hands a delivery to a person. Used when the money side of
+	// a completed sale could not be recorded: the goods are gone, so the answer
+	// is never to pretend, and never to unwind.
+	FlagFulfillment(ctx context.Context, fulfillmentID, reason string) error
 	ListOrders(ctx context.Context, f ListOrdersFilter) ([]OrderAggregate, string, int, error)
 	GetOrder(ctx context.Context, id string, studentIDs []string) (OrderAggregate, error)
 
