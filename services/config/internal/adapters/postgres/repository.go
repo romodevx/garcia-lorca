@@ -55,6 +55,37 @@ func (r *Repository) CreateCycle(ctx context.Context, c domain.Cycle) error {
 	})
 }
 
+// ActivateCycle promotes one cycle and demotes whichever other was live, in one
+// transaction.
+//
+// Both writes together, because "at most one active cycle" is an invariant
+// ACROSS rows: two callers activating two different years would each read one
+// active cycle, each demote it and each promote their own, leaving a school with
+// two live years and every downstream question ("which cycle is active?")
+// answering whichever row came back first.
+//
+// The demotion is scoped to rows that are actually active and are not this one,
+// so re-activating the live year writes nothing anybody has to reason about.
+func (r *Repository) ActivateCycle(ctx context.Context, c domain.Cycle) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := tx.Model(&cycleModel{}).
+			Where("status = ? AND id <> ?", domain.CycleStatusActive.String(), c.ID()).
+			Update("status", domain.CycleStatusDraft.String()).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "standing down the previous school year", err)
+		}
+		res := tx.Model(&cycleModel{}).
+			Where("id = ?", c.ID()).
+			Updates(map[string]any{"status": c.Status().String(), "updated_at": gorm.Expr("now()")})
+		if res.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "activating the school year", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return glerrors.ErrNotFound
+		}
+		return nil
+	})
+}
+
 // GetCycle returns a cycle by id, or KindNotFound.
 func (r *Repository) GetCycle(ctx context.Context, id string) (domain.Cycle, error) {
 	var out domain.Cycle

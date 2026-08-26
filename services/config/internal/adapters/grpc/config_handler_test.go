@@ -1037,3 +1037,14 @@ func TestGetTeachingAssignmentAndList(t *testing.T) {
 		t.Errorf("ListTeachingAssignments(cycle, group): %d %v", len(byCycleGroup.Msg.GetTeachingAssignments()), err)
 	}
 }
+
+// The handler's own tests do not exercise the lifecycle — that lives in the use
+// case, against a double that models the single-live-year invariant. This exists
+// so the handler compiles against the port.
+func (f *fakeCatalog) ActivateCycle(_ context.Context, c domain.Cycle) error {
+	if _, ok := f.cycles[c.ID()]; !ok {
+		return glerrors.ErrNotFound
+	}
+	f.cycles[c.ID()] = c
+	return nil
+}

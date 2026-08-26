@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
 import { ConfigError } from "../../config/api";
-import { cycleFailureMessage } from "./CycleBar";
+import { CycleBar, cycleFailureMessage } from "./CycleBar";
 
 // Deliberately its own file: Catalog.test.tsx mocks the whole config/api module,
 // and these need the REAL ConfigError.
@@ -31,5 +33,49 @@ describe("cycleFailureMessage", () => {
 
   it("falls back to something honest for anything else", () => {
     expect(cycleFailureMessage(new Error("network down"))).toContain("conexión");
+  });
+});
+
+describe("putting a school year into service", () => {
+  const cycles = [
+    { id: "c1", name: "2025-2026", status: "active" as const, startsOn: "2025-08-01", endsOn: "2026-07-01" },
+    { id: "c2", name: "2026-2027", status: "draft" as const, startsOn: "2026-08-31", endsOn: "2027-07-09" },
+  ];
+
+  // The complaint that started this: every year read "Borrador" and nothing on
+  // the screen could change it, because nothing in the system could.
+  it("offers to activate the selected draft year", async () => {
+    const user = userEvent.setup();
+    const onActivate = vi.fn().mockResolvedValue(undefined);
+    render(
+      <CycleBar cycles={cycles} selectedCycleId="c2" onSelect={() => {}} onCreate={vi.fn()} onActivate={onActivate} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Activar ciclo/ }));
+
+    expect(onActivate).toHaveBeenCalledWith("c2");
+  });
+
+  // Activating the year that is already live is the click of somebody who is not
+  // sure. Offering it would invite a no-op; hiding it answers the question.
+  it("does not offer it for the year already in service", () => {
+    render(
+      <CycleBar cycles={cycles} selectedCycleId="c1" onSelect={() => {}} onCreate={vi.fn()} onActivate={vi.fn()} />,
+    );
+
+    expect(screen.queryByRole("button", { name: /Activar ciclo/ })).toBeNull();
+    expect(screen.getByText(/es el ciclo en curso/i)).toBeInTheDocument();
+  });
+
+  it("says so when the school is not allowed to change the live year", async () => {
+    const user = userEvent.setup();
+    const onActivate = vi.fn().mockRejectedValue(new ConfigError(403, "forbidden"));
+    render(
+      <CycleBar cycles={cycles} selectedCycleId="c2" onSelect={() => {}} onCreate={vi.fn()} onActivate={onActivate} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Activar ciclo/ }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/permiso/i);
   });
 });

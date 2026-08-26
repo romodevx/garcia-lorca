@@ -23,7 +23,7 @@ const EXPECTED_TEACHERS = 20;
 const LEVELS = ["Kínder", "Primaria", "Secundaria", "Preparatoria"];
 
 test.describe("the demo's data is really there", () => {
-  test("the roster carries the whole school", async ({ page }) => {
+  test("the roster carries the whole school, and they read as enrolled", async ({ page }) => {
     await signIn(page);
     await openModule(page, "Estudiantes");
 
@@ -34,6 +34,24 @@ test.describe("the demo's data is really there", () => {
     // And the page renders rows rather than an empty state, which is the failure
     // an empty database would produce.
     await expect(page.getByRole("button", { name: /Ver ficha de/ }).first()).toBeVisible();
+
+    // Placing a pupil in a group used to leave their FILE untouched, so a school
+    // could have four hundred pupils actively enrolled whose records all read
+    // "Trámite" — and the roster's own tabs meant nothing.
+    // The stat card, not the filter tab: both say "Inscritos", and only the card
+    // carries the count.
+    await expect(page.getByText(`Inscritos${EXPECTED_STUDENTS}`, { exact: false }).first()).toBeVisible();
+  });
+
+  // A cycle is born a draft and used to have no way out, so every school year
+  // read "Borrador" while the panel silently resolved "the active cycle" to
+  // whichever came first.
+  test("the school year is in service, not a draft", async ({ page }) => {
+    await signIn(page);
+    await openModule(page, "Configuración");
+
+    await expect(page.getByText(/es el ciclo en curso/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: /Activar ciclo/ })).toHaveCount(0);
   });
 
   test("every level is priced, and the tuition table shows it", async ({ page }) => {

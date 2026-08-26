@@ -64,6 +64,28 @@ func (s *CatalogService) CreateCycle(ctx context.Context, name string, status do
 	return c, nil
 }
 
+// ActivateCycle makes a cycle the school's live year.
+//
+// Everything downstream asks "which cycle is active" — the roster's header, the
+// group dropdowns, the tuition table, the billing run — and until now nothing
+// could answer, because cycles were created in draft and had no way out. The
+// panel papered over it by falling back to the first cycle it found, which is
+// right exactly while a school has one year and wrong from the second onwards.
+func (s *CatalogService) ActivateCycle(ctx context.Context, id string) (domain.Cycle, error) {
+	current, err := s.repo.GetCycle(ctx, id)
+	if err != nil {
+		return domain.Cycle{}, err
+	}
+	activated, err := current.Activate()
+	if err != nil {
+		return domain.Cycle{}, err
+	}
+	if err := s.repo.ActivateCycle(ctx, activated); err != nil {
+		return domain.Cycle{}, err
+	}
+	return activated, nil
+}
+
 // GetCycle returns a cycle by id (KindNotFound if absent).
 func (s *CatalogService) GetCycle(ctx context.Context, id string) (domain.Cycle, error) {
 	return s.repo.GetCycle(ctx, id)

@@ -77,6 +77,43 @@ function url(baseURL: string, path: string): string {
 }
 
 /** POST a JSON body and return the parsed entity. Throws on any non-2xx. */
+/**
+ * A students failure the UI can act on.
+ *
+ * The status is the point. Creating a pupil fails in exactly two ways a person
+ * causes — a CURP the school already has, and one that is not a CURP — and they
+ * need different advice. Throwing a bare Error left the drawer with one sentence
+ * for both ("verifica el CURP"), which it also showed when the server fell over,
+ * so a person could re-type a perfectly good CURP forever.
+ */
+export class StudentsError extends Error {
+  readonly status: number;
+  /** The server's own words, when it sent any. */
+  readonly detail: string;
+
+  constructor(status: number, detail: string) {
+    super(detail !== "" ? detail : `HTTP ${status}`);
+    this.name = "StudentsError";
+    this.status = status;
+    this.detail = detail;
+  }
+
+  /** The school already has this pupil. Re-typing the same CURP never helps. */
+  get isConflict(): boolean {
+    return this.status === 409;
+  }
+
+  /** The input itself is wrong; changing it will help. */
+  get isInvalid(): boolean {
+    return this.status === 400;
+  }
+}
+
+async function studentsFailure(res: Response): Promise<StudentsError> {
+  const body = await res.text().catch(() => "");
+  return new StudentsError(res.status, body.trim());
+}
+
 async function postJSON<T>(baseURL: string, path: string, body: unknown): Promise<T> {
   const res = await authFetch(url(baseURL, `${BASE_PATH}${path}`), {
     method: "POST",
@@ -85,7 +122,7 @@ async function postJSON<T>(baseURL: string, path: string, body: unknown): Promis
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    throw new Error(`students ${path}: HTTP ${res.status}`);
+    throw await studentsFailure(res);
   }
   return (await res.json()) as T;
 }

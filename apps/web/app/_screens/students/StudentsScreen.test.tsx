@@ -106,7 +106,7 @@ describe("StudentsScreen", () => {
     await user.type(within(dialog).getByPlaceholderText("Ana Sofía"), "Nuevo");
     await user.type(within(dialog).getByPlaceholderText("Ruiz Márquez"), "Alumno");
     await user.type(within(dialog).getByPlaceholderText("Nombre del tutor"), "Tutor Nuevo");
-    await user.click(within(dialog).getByRole("button", { name: "Guardar alumno" }));
+    await user.click(within(dialog).getByRole("button", { name: "Crear alumno" }));
 
     await waitFor(() =>
       expect(students.createStudent).toHaveBeenCalledWith(expect.any(String), {

@@ -796,3 +796,88 @@ func TestGetDelegatesNotFound(t *testing.T) {
 		t.Errorf("GetGroup unknown: want KindNotFound, got %v", err)
 	}
 }
+
+// ActivateCycle in the double demotes the others exactly as the transaction does,
+// so a test that expects one live year fails here rather than only against
+// Postgres.
+func (f *fakeCatalog) ActivateCycle(_ context.Context, c domain.Cycle) error {
+	if _, ok := f.cycles[c.ID()]; !ok {
+		return glerrors.ErrNotFound
+	}
+	for id, other := range f.cycles {
+		if id == c.ID() || other.Status() != domain.CycleStatusActive {
+			continue
+		}
+		stood, err := domain.NewCycle(other.ID(), other.TenantID(), other.Name(),
+			domain.CycleStatusDraft, other.StartsOn(), other.EndsOn())
+		if err != nil {
+			return err
+		}
+		f.cycles[id] = stood
+	}
+	f.cycles[c.ID()] = c
+	return nil
+}
+
+// --- activating a school year -----------------------------------------------
+
+func seedNamedCycle(t *testing.T, svc *usecase.CatalogService, name string) domain.Cycle {
+	t.Helper()
+	c, err := svc.CreateCycle(ctx(), name, domain.CycleStatusUnspecified, someDate, laterDate)
+	if err != nil {
+		t.Fatalf("seed cycle %q: %v", name, err)
+	}
+	if c.Status() != domain.CycleStatusDraft {
+		t.Fatalf("a new cycle must start as a draft, got %v", c.Status())
+	}
+	return c
+}
+
+func TestActivateCyclePutsTheYearIntoService(t *testing.T) {
+	svc, repo := newService(t)
+	cycle := seedNamedCycle(t, svc, "2026-2027")
+
+	activated, err := svc.ActivateCycle(ctx(), cycle.ID())
+	if err != nil {
+		t.Fatalf("ActivateCycle: %v", err)
+	}
+	if activated.Status() != domain.CycleStatusActive {
+		t.Errorf("status = %v, want active", activated.Status())
+	}
+	if stored := repo.cycles[cycle.ID()]; stored.Status() != domain.CycleStatusActive {
+		t.Errorf("stored status = %v, want active — the panel reads the stored one", stored.Status())
+	}
+}
+
+// The invariant the whole product leans on: everything downstream asks "which
+// cycle is active", and that question must have exactly one answer.
+func TestActivatingAYearStandsDownThePrevious(t *testing.T) {
+	svc, repo := newService(t)
+	first := seedNamedCycle(t, svc, "2025-2026")
+	second := seedNamedCycle(t, svc, "2026-2027")
+	if _, err := svc.ActivateCycle(ctx(), first.ID()); err != nil {
+		t.Fatalf("activate the first: %v", err)
+	}
+
+	if _, err := svc.ActivateCycle(ctx(), second.ID()); err != nil {
+		t.Fatalf("activate the second: %v", err)
+	}
+
+	var active []string
+	for _, c := range repo.cycles {
+		if c.Status() == domain.CycleStatusActive {
+			active = append(active, c.Name())
+		}
+	}
+	if len(active) != 1 || active[0] != "2026-2027" {
+		t.Errorf("active cycles = %v; a school has exactly one live year", active)
+	}
+}
+
+func TestActivateCycleRejectsAYearThatDoesNotExist(t *testing.T) {
+	svc, _ := newService(t)
+
+	if _, err := svc.ActivateCycle(ctx(), "nope"); err == nil {
+		t.Error("activating a cycle that does not exist must fail")
+	}
+}

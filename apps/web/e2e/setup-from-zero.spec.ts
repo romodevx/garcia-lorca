@@ -157,7 +157,7 @@ test.describe.serial("setting up a school from zero", () => {
     await drawer.getByRole("button", { name: "Primaria", exact: true }).click();
     await drawer.getByRole("textbox", { name: "Grado y grupo" }).fill("1° A");
     await drawer.getByRole("textbox", { name: "Tutor *" }).fill("Marisol Villalobos");
-    await drawer.getByRole("button", { name: /Registrar|Guardar/ }).click();
+    await drawer.getByRole("button", { name: "Crear alumno" }).click();
 
     await expect(page.getByText(`Villalobos ${tag}`, { exact: false }).first()).toBeVisible();
   });

@@ -184,6 +184,16 @@ func (c *ConfigClient) ListCycles(ctx context.Context) ([]CycleResult, error) {
 	return out, nil
 }
 
+// ActivateCycle makes a cycle the school's live year, standing down whichever
+// other was active.
+func (c *ConfigClient) ActivateCycle(ctx context.Context, id string) (CycleResult, error) {
+	res, err := c.rpc.ActivateCycle(ctx, connect.NewRequest(&configv1.ActivateCycleRequest{Id: id}))
+	if err != nil {
+		return CycleResult{}, err
+	}
+	return toCycleResult(res.Msg.GetCycle()), nil
+}
+
 // --- levels ---------------------------------------------------------------
 
 // CreateLevel adds a catalog level via the config service.

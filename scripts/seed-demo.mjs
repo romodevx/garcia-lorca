@@ -239,8 +239,12 @@ async function assertEmpty() {
 }
 
 async function seedCatalogue() {
-  const cycle = await post("/api/v1/config/cycles", CYCLE);
-  log("ciclo", `${cycle.name} (${CYCLE.startsOn} → ${CYCLE.endsOn})`);
+  const created = await post("/api/v1/config/cycles", CYCLE);
+  // Cycles are born as drafts. A demo school is a school in session, and every
+  // screen that asks "which cycle is active" — the roster header, the group
+  // dropdowns, the tuition table, the billing run — needs an answer.
+  const cycle = await post(`/api/v1/config/cycles/${created.id}/activate`, {});
+  log("ciclo", `${cycle.name} (${CYCLE.startsOn} → ${CYCLE.endsOn}) · ${cycle.status}`);
 
   const levels = [];
   for (const spec of LEVELS) {

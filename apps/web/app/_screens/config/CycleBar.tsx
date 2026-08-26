@@ -10,6 +10,8 @@ export interface CycleBarProps {
   selectedCycleId: string | undefined;
   onSelect: (id: string) => void;
   onCreate: (input: CreateCycleInput) => Promise<void>;
+  /** Puts the selected draft year into service, standing down the previous one. */
+  onActivate: (id: string) => Promise<void>;
 }
 
 /**
@@ -37,12 +39,28 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 /** Pick an existing cycle or create one (status omitted → server defaults draft). */
-export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate }: CycleBarProps): ReactElement {
+export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActivate }: CycleBarProps): ReactElement {
   const [name, setName] = useState("");
   const [startsOn, setStartsOn] = useState("");
   const [endsOn, setEndsOn] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [activating, setActivating] = useState(false);
+
+  const selected = cycles.find((c) => c.id === selectedCycleId);
+
+  const activate = async (): Promise<void> => {
+    if (selected === undefined) return;
+    setActivating(true);
+    setError(undefined);
+    try {
+      await onActivate(selected.id);
+    } catch (err) {
+      setError(cycleFailureMessage(err));
+    } finally {
+      setActivating(false);
+    }
+  };
 
   const canSubmit = name.trim() !== "" && startsOn !== "" && endsOn !== "" && !pending;
 
@@ -74,6 +92,31 @@ export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate }: CycleB
         </div>
       ) : (
         <EmptyHint>Aún no hay ciclos. Crea el primero para empezar.</EmptyHint>
+      )}
+
+      {/*
+        A cycle is created as a draft, and until this button existed nothing could
+        move it — so every school year read "Borrador" while the panel quietly
+        resolved "the active cycle" to whichever came first. That fallback is
+        right exactly while a school has one year and wrong from the second on.
+      */}
+      {selected !== undefined && (
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18, flexWrap: "wrap" }}>
+          {selected.status === "active" ? (
+            <p style={{ fontSize: 14, color: "var(--text-muted)", margin: 0 }}>
+              <strong>{selected.name}</strong> es el ciclo en curso.
+            </p>
+          ) : (
+            <>
+              <Btn icon="check" onClick={() => void activate()} disabled={activating}>
+                {activating ? "Activando…" : "Activar ciclo"}
+              </Btn>
+              <p style={{ fontSize: 13.5, color: "var(--text-muted)", margin: 0 }}>
+                El colegio trabaja sobre el ciclo activo: inscripciones, grupos y colegiaturas.
+              </p>
+            </>
+          )}
+        </div>
       )}
 
       <form aria-label="Agregar ciclo" onSubmit={submit}>

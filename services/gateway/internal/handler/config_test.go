@@ -19,8 +19,9 @@ import (
 // It records the last input per entity and returns canned results/errors so each
 // handler is exercised in isolation (no Connect round-trip).
 type fakeConfig struct {
-	cycleIn client.CreateCycleInput
-	cycles  []client.CycleResult
+	activatedCycle string
+	cycleIn        client.CreateCycleInput
+	cycles         []client.CycleResult
 
 	levelIn client.CreateLevelInput
 	levels  []client.LevelResult
@@ -469,4 +470,12 @@ func TestListTeachingAssignmentsReadsQueryFilters(t *testing.T) {
 	if len(out.TeachingAssignments) != 1 || out.TeachingAssignments[0]["cycleId"] != "cyc-1" {
 		t.Errorf("body = %v", out)
 	}
+}
+
+func (f *fakeConfig) ActivateCycle(_ context.Context, id string) (client.CycleResult, error) {
+	f.activatedCycle = id
+	if f.err != nil {
+		return client.CycleResult{}, f.err
+	}
+	return client.CycleResult{ID: id, Name: "2026-2027", Status: "active"}, nil
 }

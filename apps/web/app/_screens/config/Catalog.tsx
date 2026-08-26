@@ -9,6 +9,7 @@ import {
   createLevel,
   createSubject,
   createTerm,
+  activateCycle,
   listCycles,
   listGradeLevels,
   listGroups,
@@ -134,6 +135,13 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
     };
   }, [selectedCycleId, selectedLevelId]);
 
+  const handleActivateCycle = useCallback(async (id: string): Promise<void> => {
+    const activated = await activateCycle(API_URL, id);
+    // Every other cycle is stood down server-side, so the local list mirrors that
+    // rather than showing two live years until the next reload.
+    setCycles((prev) => prev.map((c) => (c.id === activated.id ? activated : c.status === "active" ? { ...c, status: "draft" } : c)));
+  }, []);
+
   const handleCreateCycle = useCallback(async (input: CreateCycleInput): Promise<void> => {
     const created = await createCycle(API_URL, input);
     setCycles((prev) => [...prev, created]);
@@ -209,7 +217,7 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
         <p role="alert" className="fade-up" style={{ color: "var(--bad-fg)", fontSize: 15 }}>{loadError}</p>
       ) : (
         <div className="fade-up" style={{ display: "grid", gap: 18 }}>
-          <CycleBar cycles={cycles} selectedCycleId={selectedCycleId} onSelect={setSelectedCycleId} onCreate={handleCreateCycle} />
+          <CycleBar cycles={cycles} selectedCycleId={selectedCycleId} onSelect={setSelectedCycleId} onCreate={handleCreateCycle} onActivate={handleActivateCycle} />
 
           {/*
             The money screen for the academic catalogue. It reads and writes
