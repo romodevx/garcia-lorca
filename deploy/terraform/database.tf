@@ -19,8 +19,11 @@ resource "google_sql_database_instance" "main" {
 
     backup_configuration {
       enabled                        = true
-      point_in_time_recovery_enabled = true
+      point_in_time_recovery_enabled = var.db_point_in_time_recovery_enabled
       start_time                     = "07:00"
+      backup_retention_settings {
+        retained_backups = var.db_backup_retained_count
+      }
     }
 
     ip_configuration {

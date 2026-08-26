@@ -75,6 +75,64 @@ variable "db_availability_type" {
   default     = "ZONAL"
 }
 
+variable "db_point_in_time_recovery_enabled" {
+  description = "Cloud SQL point-in-time recovery (WAL archiving). Default ON (prod-safe); set false for dev — daily backups suffice and PITR adds storage cost. See deploy/COST-AND-DEPLOY.md §C1."
+  type        = bool
+  default     = true
+}
+
+variable "db_backup_retained_count" {
+  description = "Number of automated daily backups Cloud SQL retains. Prod default 7; dev uses 2-3 to trim storage."
+  type        = number
+  default     = 7
+}
+
+# ---- Cloud Run cost profile (warm vs scale-to-zero) -----------------------
+# gateway + iam default to WARM (min=1, CPU always allocated, boost on) so prod
+# has no cold starts. dev overrides these to scale-to-zero in its tfvars — the
+# single biggest cost lever (~$95-100/mo). See deploy/COST-AND-DEPLOY.md §C2.
+variable "gateway_min_instances" {
+  description = "gateway minimum instances. 1 = always warm (prod); 0 = scale-to-zero (dev)."
+  type        = number
+  default     = 1
+}
+
+variable "gateway_max_instances" {
+  description = "gateway maximum instances (cost ceiling). Dev caps at 1 because the login rate limiter is in-process/per-instance."
+  type        = number
+  default     = 20
+}
+
+variable "gateway_cpu_idle" {
+  description = "gateway CPU allocation. false = CPU always allocated (warm, prod); true = CPU billed only per request (scale-to-zero, dev)."
+  type        = bool
+  default     = false
+}
+
+variable "gateway_startup_cpu_boost" {
+  description = "gateway startup CPU boost. On for warm/prod to cut tail latency; off for dev."
+  type        = bool
+  default     = true
+}
+
+variable "iam_min_instances" {
+  description = "iam minimum instances. 1 = always warm (prod); 0 = scale-to-zero (dev)."
+  type        = number
+  default     = 1
+}
+
+variable "iam_cpu_idle" {
+  description = "iam CPU allocation. false = CPU always allocated (warm, prod); true = CPU billed only per request (scale-to-zero, dev)."
+  type        = bool
+  default     = false
+}
+
+variable "iam_startup_cpu_boost" {
+  description = "iam startup CPU boost. On for warm/prod; off for dev."
+  type        = bool
+  default     = true
+}
+
 # ---- Budget ---------------------------------------------------------------
 variable "billing_account_id" {
   description = "Billing account id the budget is attached to (format XXXXXX-XXXXXX-XXXXXX)."
@@ -97,4 +155,30 @@ variable "budget_alert_emails" {
   description = "Emails notified when budget thresholds are crossed."
   type        = list(string)
   default     = []
+}
+
+# ---- M15 billing schedule ---------------------------------------------------
+
+variable "billing_schedule_enabled" {
+  description = "Create the Cloud Scheduler job that runs the monthly billing. Turning module_tuition off does NOT stop this — the scheduler calls finance directly, so stopping it is an apply."
+  type        = bool
+  default     = false
+}
+
+variable "billing_cycle_id" {
+  description = "The school cycle the scheduled run bills. Deliberately explicit: a job that guessed the cycle would silently bill the wrong school year the day one rolls over. Empty disables the job."
+  type        = string
+  default     = ""
+}
+
+variable "billing_schedule_cron" {
+  description = "When the billing run fires. Default: 06:00 on the 1st of each month."
+  type        = string
+  default     = "0 6 1 * *"
+}
+
+variable "billing_schedule_timezone" {
+  description = "IANA timezone the cron is read in. A school's due dates are local dates."
+  type        = string
+  default     = "America/Mexico_City"
 }

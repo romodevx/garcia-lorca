@@ -88,8 +88,14 @@ func (f *fakeEnrollments) ListByCycle(_ context.Context, cycleID, groupID string
 // --- publisher ---------------------------------------------------------------
 
 type spyPublisher struct {
-	events []ports.PaymentRegisteredEvent
-	err    error
+	events  []ports.PaymentRegisteredEvent
+	settled []ports.ChargeSettledEvent
+	err     error
+}
+
+func (s *spyPublisher) PublishChargeSettled(_ context.Context, e ports.ChargeSettledEvent) error {
+	s.settled = append(s.settled, e)
+	return s.err
 }
 
 func (s *spyPublisher) PublishPaymentRegistered(_ context.Context, e ports.PaymentRegisteredEvent) error {
@@ -103,11 +109,13 @@ type fakeRepo struct {
 	concepts map[string]domain.ChargeConcept
 	charges  map[string]domain.Charge
 	payments map[string][]domain.Payment // keyed by charge id
+	plans    map[string]domain.TuitionPlan
 
 	// Recorded call arguments, for the tests that assert on the call itself.
-	overdueCycleID    string
-	overdueToday      time.Time
-	lastDerivedStatus string
+	overdueCycleID      string
+	overdueToday        time.Time
+	lastDerivedStatus   string
+	cancelIfUnpaidCalls int
 }
 
 func newFakeRepo() *fakeRepo {
@@ -115,12 +123,21 @@ func newFakeRepo() *fakeRepo {
 		concepts: map[string]domain.ChargeConcept{},
 		charges:  map[string]domain.Charge{},
 		payments: map[string][]domain.Payment{},
+		plans:    map[string]domain.TuitionPlan{},
 	}
 }
 
 // chargeKey is the uniqueness key the ledger enforces: one charge per student,
 // cycle and concept.
+// chargeKey mirrors what the ledger actually enforces, which since migration
+// 0003 is TWO partial unique indexes rather than one total key: a charge with no
+// external ref is one per (student, cycle, concept), and a charge carrying one
+// is identified by the ref alone. A fake that kept the old single key would let
+// tests pass against a rule the database no longer has.
 func chargeKey(c domain.Charge) string {
+	if ref := c.ExternalRef(); ref != "" {
+		return "ref|" + ref
+	}
 	return c.StudentID() + "|" + c.CycleID() + "|" + c.ConceptID()
 }
 
@@ -183,6 +200,24 @@ func (f *fakeRepo) CreateCharge(_ context.Context, c domain.Charge) (domain.Char
 	}
 	f.charges[c.ID()] = c
 	return c, nil
+}
+
+// CancelChargeIfUnpaid is the fake of the guarded cancel. The real one decides
+// under the charge's row lock; here it is enough to apply the same domain rule
+// against the payments recorded for the charge.
+func (f *fakeRepo) CancelChargeIfUnpaid(_ context.Context, id string) (ports.ChargeWithPaid, error) {
+	f.cancelIfUnpaidCalls++
+	c, ok := f.charges[id]
+	if !ok {
+		return ports.ChargeWithPaid{}, glerrors.ErrNotFound
+	}
+	paid := f.paidFor(id)
+	cancelled, err := c.CancelIfUnpaid(paid)
+	if err != nil {
+		return ports.ChargeWithPaid{}, err
+	}
+	f.charges[id] = cancelled
+	return ports.ChargeWithPaid{Charge: cancelled, PaidCents: paid}, nil
 }
 
 // CreateChargesBulk mirrors the adapter's ON CONFLICT DO NOTHING: rows whose
@@ -323,6 +358,7 @@ type fixture struct {
 	students    *fakeStudents
 	cycles      *fakeCycles
 	enrollments *fakeEnrollments
+	catalog     *fakeCatalog
 	publisher   *spyPublisher
 }
 
@@ -335,9 +371,10 @@ func newFixture(t *testing.T) *fixture {
 		students:    &fakeStudents{byID: map[string]ports.StudentRef{testStudent: {ID: testStudent, Status: "active"}}},
 		cycles:      &fakeCycles{byID: map[string]ports.CycleRef{testCycle: {ID: testCycle}}},
 		enrollments: &fakeEnrollments{byCycle: map[string][]ports.EnrollmentRef{}},
+		catalog:     &fakeCatalog{},
 		publisher:   &spyPublisher{},
 	}
-	f.svc = usecase.NewFinanceService(f.repo, f.students, f.cycles, f.enrollments, f.publisher,
+	f.svc = usecase.NewFinanceService(f.repo, f.students, f.cycles, f.enrollments, f.catalog, f.publisher,
 		testTenant, seqID("id"), func() time.Time { return fixedNow })
 	return f
 }
@@ -376,7 +413,13 @@ func (f *fixture) seedRetiredConcept(t *testing.T, name string, amount int64) do
 // seedCharge creates a charge for the default student through the service.
 func (f *fixture) seedCharge(t *testing.T, conceptID string, amount int64) domain.Charge {
 	t.Helper()
-	cwp, err := f.svc.CreateCharge(context.Background(), testStudent, testCycle, conceptID, amount, "", testDueDate)
+	cwp, err := f.svc.CreateCharge(context.Background(), usecase.CreateChargeInput{
+		StudentID:           testStudent,
+		CycleID:             testCycle,
+		ConceptID:           conceptID,
+		DueDate:             testDueDate,
+		AmountCentsOverride: amount,
+	})
 	if err != nil {
 		t.Fatalf("seed charge: %v", err)
 	}
@@ -401,3 +444,73 @@ func requireNoError(t *testing.T, err error) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+// --- tuition doubles (M15) ---------------------------------------------------
+
+func (f *fakeRepo) EnsureConceptOfKind(_ context.Context, id, kind, name string) (domain.ChargeConcept, error) {
+	for _, c := range f.concepts {
+		if c.Kind() == kind {
+			return c, nil
+		}
+	}
+	recurrence := domain.RecurrenceOnce
+	if kind == domain.KindTuition {
+		recurrence = domain.RecurrenceMonthly
+	}
+	c, err := domain.NewChargeConcept(id, testTenant, name, 0, recurrence, true)
+	if err != nil {
+		return domain.ChargeConcept{}, err
+	}
+	c, err = c.WithKind(kind)
+	if err != nil {
+		return domain.ChargeConcept{}, err
+	}
+	f.concepts[c.ID()] = c
+	return c, nil
+}
+
+// conceptIDOfKind is a test convenience: which concept ended up being the school's
+// tuition, inscription or surcharge.
+func (f *fakeRepo) conceptIDOfKind(kind string) string {
+	for _, c := range f.concepts {
+		if c.Kind() == kind {
+			return c.ID()
+		}
+	}
+	return ""
+}
+
+func (f *fakeRepo) planKey(cycleID, levelID string) string { return cycleID + "|" + levelID }
+
+func (f *fakeRepo) UpsertTuitionPlan(_ context.Context, p domain.TuitionPlan) (domain.TuitionPlan, error) {
+	f.plans[f.planKey(p.CycleID(), p.LevelID())] = p
+	return p, nil
+}
+
+func (f *fakeRepo) ListTuitionPlans(_ context.Context, cycleID string) ([]domain.TuitionPlan, error) {
+	out := make([]domain.TuitionPlan, 0, len(f.plans))
+	for _, p := range f.plans {
+		if p.CycleID() == cycleID {
+			out = append(out, p)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].LevelID() < out[j].LevelID() })
+	return out, nil
+}
+
+// fakeCatalog stands in for the config service: the levels a school has, and
+// which level each group of a cycle belongs to.
+type fakeCatalog struct {
+	levels      []ports.LevelRef
+	groupLevels []ports.GroupLevel
+}
+
+func (f *fakeCatalog) ListLevels(_ context.Context) ([]ports.LevelRef, error) { return f.levels, nil }
+
+func (f *fakeCatalog) GroupLevels(_ context.Context, _ string) ([]ports.GroupLevel, error) {
+	return f.groupLevels, nil
+}
+
+// clearPlans hands back an empty tuition table, for the tests about a school that
+// has not priced a level.
+func clearPlans() map[string]domain.TuitionPlan { return map[string]domain.TuitionPlan{} }

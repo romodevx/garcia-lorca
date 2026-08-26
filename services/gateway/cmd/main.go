@@ -8,6 +8,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
 
 	"github.com/garcia-lorca/pkg/featureflag"
+	"github.com/garcia-lorca/pkg/gcpauth"
 	"github.com/garcia-lorca/pkg/logger"
 )
 
@@ -66,6 +68,10 @@ func main() {
 	if commsBaseURL == "" {
 		commsBaseURL = "http://localhost:8096"
 	}
+	uniformsBaseURL := os.Getenv("UNIFORMS_BASE_URL")
+	if uniformsBaseURL == "" {
+		uniformsBaseURL = "http://localhost:8099"
+	}
 
 	// flags is the authoritative source of module visibility (default-deny),
 	// loaded from ENABLED_MODULES (comma-separated module names). The gateway
@@ -73,14 +79,20 @@ func main() {
 	// /features). Each module wires its routes behind the guard as it lands.
 	flags := featureflag.NewInMemory(config.ParseEnabledModules(os.Getenv("ENABLED_MODULES")))
 
-	iamHealth := client.NewIAMClient(iamBaseURL, http.DefaultClient)
-	authClient := client.NewAuthClient(iamBaseURL, http.DefaultClient)
-	studentsClient := client.NewStudentsClient(studentsBaseURL, http.DefaultClient)
-	configClient := client.NewConfigClient(configBaseURL, http.DefaultClient)
-	gradesClient := client.NewGradesClient(gradesBaseURL, http.DefaultClient)
-	financeClient := client.NewFinanceClient(financeBaseURL, http.DefaultClient)
-	attendanceClient := client.NewAttendanceClient(attendanceBaseURL, http.DefaultClient)
-	commsClient := client.NewCommsClient(commsBaseURL, http.DefaultClient)
+	// Each downstream client gets an ID-token-authenticated HTTP client whose
+	// OIDC audience is that service's own base URL, so the invoker-guarded
+	// (INTERNAL_ONLY) Cloud Run services accept the call. Local http:// targets
+	// fall back to http.DefaultClient (see pkg/gcpauth).
+	ctx := context.Background()
+	iamHealth := client.NewIAMClient(iamBaseURL, gcpauth.HTTPClient(ctx, iamBaseURL))
+	authClient := client.NewAuthClient(iamBaseURL, gcpauth.HTTPClient(ctx, iamBaseURL))
+	studentsClient := client.NewStudentsClient(studentsBaseURL, gcpauth.HTTPClient(ctx, studentsBaseURL))
+	configClient := client.NewConfigClient(configBaseURL, gcpauth.HTTPClient(ctx, configBaseURL))
+	gradesClient := client.NewGradesClient(gradesBaseURL, gcpauth.HTTPClient(ctx, gradesBaseURL))
+	financeClient := client.NewFinanceClient(financeBaseURL, gcpauth.HTTPClient(ctx, financeBaseURL))
+	attendanceClient := client.NewAttendanceClient(attendanceBaseURL, gcpauth.HTTPClient(ctx, attendanceBaseURL))
+	commsClient := client.NewCommsClient(commsBaseURL, gcpauth.HTTPClient(ctx, commsBaseURL))
+	uniformsClient := client.NewUniformsClient(uniformsBaseURL, gcpauth.HTTPClient(ctx, uniformsBaseURL))
 
 	// loginLimiter fronts POST /auth/login with a per-IP token bucket so an
 	// attacker cannot brute-force credentials from a single source. It is
@@ -88,7 +100,7 @@ func main() {
 	loginRL := config.ParseLoginRateLimit(os.Getenv)
 	loginLimiter := middleware.NewRateLimiter(loginRL.Burst, loginRL.RefillPerSec(), time.Now)
 
-	mux := newMux(iamHealth, authClient, studentsClient, configClient, gradesClient, financeClient, attendanceClient, commsClient, flags, loginLimiter)
+	mux := newMux(iamHealth, authClient, studentsClient, configClient, gradesClient, financeClient, attendanceClient, commsClient, uniformsClient, flags, loginLimiter)
 
 	log.Info("gateway starting",
 		slog.String("addr", addr),
@@ -173,14 +185,18 @@ func main() {
 //	/api/v1/users/..., /roles/... → ModuleGuard(iam) → RequireAuth → rotation →
 //	                             RequirePermission(users:*/roles:* by verb) → iam
 //	                             admin (user/role CRUD)
-//	POST /api/v1/config/teachers/{id}/user → ModuleGuard(config) → RequireAuth →
-//	                             rotation → RequirePermission(config:write) →
+//	/api/v1/teachers/..., /teaching-assignments/... → ModuleGuard(teachers) →
+//	                             RequireAuth → rotation →
+//	                             RequirePermission(teachers:read|write) → config
+//	                             (staff roster + assignments)
+//	POST /api/v1/teachers/{id}/user → ModuleGuard(teachers) → RequireAuth →
+//	                             rotation → RequirePermission(teachers:write) →
 //	                             validate iam user (GetUser) then config SetTeacherUser
 //	/healthz, /readyz          → liveness + iam reachability
 //
 // `flags` (via middleware.NewModuleGuard) is the module-visibility boundary:
 // disabled module ⇒ 404, evaluated before auth so a hidden module is invisible.
-func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, configClient *client.ConfigClient, gradesClient *client.GradesClient, financeClient *client.FinanceClient, attendanceClient *client.AttendanceClient, commsClient *client.CommsClient, flags featureflag.Checker, loginLimiter *middleware.RateLimiter) *http.ServeMux {
+func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, configClient *client.ConfigClient, gradesClient *client.GradesClient, financeClient *client.FinanceClient, attendanceClient *client.AttendanceClient, commsClient *client.CommsClient, uniformsClient *client.UniformsClient, flags featureflag.Checker, loginLimiter *middleware.RateLimiter) *http.ServeMux {
 	mux := http.NewServeMux()
 	handler.NewHealthHandler(iamHealth).Register(mux)
 
@@ -280,10 +296,22 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/config/terms", configRead(configH.ListTerms))
 	mux.Handle("POST /api/v1/config/groups", configWrite(configH.CreateGroup))
 	mux.Handle("GET /api/v1/config/groups", configRead(configH.ListGroups))
-	mux.Handle("POST /api/v1/config/teachers", configWrite(configH.CreateTeacher))
-	mux.Handle("GET /api/v1/config/teachers", configRead(configH.ListTeachers))
-	mux.Handle("POST /api/v1/config/teaching-assignments", configWrite(configH.CreateTeachingAssignment))
-	mux.Handle("GET /api/v1/config/teaching-assignments", configRead(configH.ListTeachingAssignments))
+
+	// M14 teachers (staff roster + who teaches what): the same config service
+	// answers these, but they are a MODULE of their own now, so they carry their
+	// own flag and their own permission. A school can hand somebody the staff
+	// roster without handing them the cycles, levels, grades and groups too —
+	// which is exactly what config:read used to force.
+	teachersWrite := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("teachers", requireAuthChanged(middleware.RequirePermission("teachers:write")(http.HandlerFunc(h))))
+	}
+	teachersRead := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("teachers", requireAuthChanged(middleware.RequirePermission("teachers:read")(http.HandlerFunc(h))))
+	}
+	mux.Handle("POST /api/v1/teachers", teachersWrite(configH.CreateTeacher))
+	mux.Handle("GET /api/v1/teachers", teachersRead(configH.ListTeachers))
+	mux.Handle("POST /api/v1/teaching-assignments", teachersWrite(configH.CreateTeachingAssignment))
+	mux.Handle("GET /api/v1/teaching-assignments", teachersRead(configH.ListTeachingAssignments))
 
 	// M07 grades (grade capture): flag-guarded, authenticated + rotation-enforced,
 	// permission-gated. Capture is a write (grades:write); roster + list are reads
@@ -376,6 +404,13 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	financeRead := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("finance", requireAuthChanged(middleware.RequirePermission("finance:read")(http.HandlerFunc(h))))
 	}
+	// M15 tuition: pricing a level and running the month are WRITES on the
+	// ledger, so they answer to finance:write; reading the table is finance:read.
+	// The screen lives in Configuración because that is where a director looks
+	// for it, but the money stays in the finance module and behind its flag.
+	mux.Handle("PUT /api/v1/finance/tuition-plans", financeWrite(financeH.UpsertTuitionPlan))
+	mux.Handle("GET /api/v1/finance/tuition-plans", financeRead(financeH.ListTuitionPlans))
+	mux.Handle("POST /api/v1/finance/billing-runs", financeWrite(financeH.RunBilling))
 	mux.Handle("POST /api/v1/finance/concepts", financeWrite(financeH.CreateConcept))
 	mux.Handle("PUT /api/v1/finance/concepts/{id}", financeWrite(financeH.UpdateConcept))
 	mux.Handle("GET /api/v1/finance/concepts", financeRead(financeH.ListConcepts))
@@ -428,6 +463,58 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/comms/devices", commsWrite(commsH.RegisterDevice))
 	mux.Handle("GET /api/v1/comms/notifications", commsRead(commsH.ListNotifications))
 	mux.Handle("POST /api/v1/comms/notifications/{id}/read", commsWrite(commsH.MarkRead))
+
+	// M12 uniforms (the school's uniform shop). Stage one: the catalogue, the
+	// storeroom and the counter sale. Every route sits behind
+	// guard.Protect("uniforms", ...) so module_uniforms OFF => 404 -- the module
+	// is invisible before auth even runs, not merely refused.
+	//
+	// THE READ PERMISSION IS SPLIT, and that split is the point:
+	//
+	//   uniforms:stock   the catalogue, stock counts, receipts, adjustments.
+	//                    Resolves NO student data at all -- garments, sizes and
+	//                    numbers. Grantable without reservation, which is what
+	//                    makes a "Caja/Almacen" role possible.
+	//   uniforms:orders  the order list, which carries every pupil's name and
+	//                    purchase history for the whole school with no
+	//                    per-object scoping. That is the literal criterion in
+	//                    iam's ownerOnlyPermissions, so it is OWNER-ONLY until
+	//                    per-object scoping exists for it.
+	//
+	// A single uniforms:read would have forced a choice between a storeroom role
+	// that cannot work and handing the school roll to whoever holds it. The
+	// storeroom does not need names.
+	//
+	// The counter sale needs uniforms:write AND finance:write, because it moves
+	// goods and takes money in one act. RequireAllPermissions names the missing
+	// one so the panel can disable the entry point and SAY WHY -- otherwise a
+	// cashier keys in six lines with a parent waiting and eats a bare 403.
+	uniformsH := handler.NewUniformsHandler(uniformsClient)
+	uniformsStock := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("uniforms", requireAuthChanged(middleware.RequirePermission("uniforms:stock")(http.HandlerFunc(h))))
+	}
+	uniformsWrite := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("uniforms", requireAuthChanged(middleware.RequirePermission("uniforms:write")(http.HandlerFunc(h))))
+	}
+	uniformsOrders := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("uniforms", requireAuthChanged(middleware.RequirePermission("uniforms:orders")(http.HandlerFunc(h))))
+	}
+	uniformsSell := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("uniforms", requireAuthChanged(
+			middleware.RequireAllPermissions("uniforms:write", "finance:write")(http.HandlerFunc(h))))
+	}
+	mux.Handle("GET /api/v1/uniforms/items", uniformsStock(uniformsH.ListItems))
+	mux.Handle("POST /api/v1/uniforms/items", uniformsWrite(uniformsH.CreateItem))
+	mux.Handle("PUT /api/v1/uniforms/items/{id}", uniformsWrite(uniformsH.UpdateItem))
+	mux.Handle("POST /api/v1/uniforms/items/{id}/sizes", uniformsWrite(uniformsH.UpsertSizes))
+	mux.Handle("GET /api/v1/uniforms/stock", uniformsStock(uniformsH.ListStock))
+	mux.Handle("POST /api/v1/uniforms/stock/receive", uniformsWrite(uniformsH.ReceiveStock))
+	mux.Handle("POST /api/v1/uniforms/stock/adjust", uniformsWrite(uniformsH.AdjustStock))
+	mux.Handle("POST /api/v1/uniforms/counter-sale", uniformsSell(uniformsH.CounterSale))
+	mux.Handle("GET /api/v1/uniforms/orders", uniformsOrders(uniformsH.ListOrders))
+	mux.Handle("GET /api/v1/uniforms/orders/{id}", uniformsOrders(uniformsH.GetOrder))
+	mux.Handle("GET /api/v1/uniforms/settings", uniformsStock(uniformsH.GetSettings))
+	mux.Handle("PUT /api/v1/uniforms/settings", uniformsWrite(uniformsH.UpdateSettings))
 
 	// Phase 9b family surface: the guardian's own children's news, account,
 	// profile, grades and attendance, composed at the edge from the students
@@ -505,6 +592,6 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// module_config + config:write (reusing configWrite), not module_iam. The
 	// handler itself performs the gateway-orchestrated cross-service validation
 	// (iam GetUser) before the config write.
-	mux.Handle("POST /api/v1/config/teachers/{id}/user", configWrite(adminH.LinkTeacherUser))
+	mux.Handle("POST /api/v1/teachers/{id}/user", teachersWrite(adminH.LinkTeacherUser))
 	return mux
 }

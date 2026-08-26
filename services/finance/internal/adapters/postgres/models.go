@@ -19,11 +19,33 @@ type chargeConceptModel struct {
 	DefaultAmountCents int64     `gorm:"column:default_amount_cents"`
 	Recurrence         string    `gorm:"column:recurrence"`
 	Active             bool      `gorm:"column:active"`
+	Kind               string    `gorm:"column:kind"`
 	CreatedAt          time.Time `gorm:"column:created_at"`
 	UpdatedAt          time.Time `gorm:"column:updated_at"`
 }
 
 func (chargeConceptModel) TableName() string { return "charge_concepts" }
+
+// tuitionPlanModel is the GORM row for `tuition_plans`: what one level costs in
+// one cycle. CycleID and LevelID are cross-service UUIDs validated by RPC, so
+// they carry no FK here.
+type tuitionPlanModel struct {
+	ID               string    `gorm:"column:id;primaryKey"`
+	TenantID         string    `gorm:"column:tenant_id"`
+	CycleID          string    `gorm:"column:cycle_id"`
+	LevelID          string    `gorm:"column:level_id"`
+	EnrollmentCents  int64     `gorm:"column:enrollment_cents"`
+	MonthlyCents     int64     `gorm:"column:monthly_cents"`
+	Months           int       `gorm:"column:months"`
+	FirstBilledMonth int       `gorm:"column:first_billed_month"`
+	DueDay           int       `gorm:"column:due_day"`
+	LateFeeCents     int64     `gorm:"column:late_fee_cents"`
+	Active           bool      `gorm:"column:active"`
+	CreatedAt        time.Time `gorm:"column:created_at"`
+	UpdatedAt        time.Time `gorm:"column:updated_at"`
+}
+
+func (tuitionPlanModel) TableName() string { return "tuition_plans" }
 
 // chargeModel is the GORM row for `charges`: one debt a student owes for one
 // concept in one cycle. StudentID and CycleID are cross-service UUIDs validated
@@ -41,8 +63,14 @@ type chargeModel struct {
 	DiscountCents int64     `gorm:"column:discount_cents"`
 	DueDate       time.Time `gorm:"column:due_date"`
 	Status        string    `gorm:"column:status"`
-	CreatedAt     time.Time `gorm:"column:created_at"`
-	UpdatedAt     time.Time `gorm:"column:updated_at"`
+	// ExternalRef ties the charge to the row that caused it in another module
+	// (a uniforms fulfillment, say). Empty means the school's own charge; the
+	// empty string is what the "one concept per cycle" partial index covers, so
+	// tuition keeps its idempotency while referenced charges may repeat
+	// (migration 0003).
+	ExternalRef string    `gorm:"column:external_ref"`
+	CreatedAt   time.Time `gorm:"column:created_at"`
+	UpdatedAt   time.Time `gorm:"column:updated_at"`
 }
 
 func (chargeModel) TableName() string { return "charges" }

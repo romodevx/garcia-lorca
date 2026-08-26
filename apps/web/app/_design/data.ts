@@ -43,6 +43,7 @@ export interface ModuleDef {
 
 export const MODULES: readonly ModuleDef[] = [
   { id: "students", label: "Estudiantes", icon: "students", color: "forest", desc: "Alumnos y admisión", badge: null, flag: "module_students", perm: "students:read" },
+  { id: "teachers", label: "Docentes", icon: "user", color: "purple", desc: "Plantilla y asignaturas", badge: null, flag: "module_teachers", perm: ["teachers:read", "teachers:write"] },
   { id: "finance", label: "Finanzas y Adeudos", icon: "finance", color: "orange", desc: "Colegiaturas y adeudos", badge: null, flag: "module_finance", perm: "finance:read" },
   // QR capture is deferred; the module ships as the daily pass list.
   // Any-of: directors/admins pass lists via attendance:read; teachers use their
@@ -55,7 +56,12 @@ export const MODULES: readonly ModuleDef[] = [
   { id: "scholarships", label: "Becas", icon: "scholarship", color: "purple", desc: "Becas y descuentos", badge: null, flag: "module_scholarships", perm: "scholarships:read" },
   // Deactivated from the panel per the school (kept future-ready; nothing deleted). See [[module-docs-deactivated]].
   { id: "documents", label: "Documentos", icon: "documents", color: "forest", desc: "Constancias, kardex", badge: null, flag: "module_docs", perm: "documents:read", hidden: true },
-  { id: "uniforms", label: "Uniformes", icon: "uniforms", color: "purple", desc: "Pedidos y tallas", badge: null, flag: "module_uniforms", perm: "uniforms:read" },
+  // Two doors, because the read permission is split: the storeroom
+  // (uniforms:stock) resolves no student data and is grantable, while the order
+  // list (uniforms:orders) carries every pupil's name and is owner-only. Either
+  // one is a reason to show the tile — a Caja/Almacén role that cannot see the
+  // module cannot do its job.
+  { id: "uniforms", label: "Uniformes", icon: "uniforms", color: "purple", desc: "Inventario y mostrador", badge: null, flag: "module_uniforms", perm: ["uniforms:stock", "uniforms:orders"] },
   { id: "billing", label: "Facturación", icon: "billing", color: "lime", desc: "CFDI 4.0", badge: null, flag: "module_billing", perm: "billing:read" },
   { id: "reports", label: "Reportes", icon: "reports", color: "yellow", desc: "Indicadores", badge: null, flag: "module_reports", perm: "reports:read" },
   { id: "settings", label: "Configuración", icon: "settings", color: "neutral", desc: "Centro y permisos", badge: null, flag: "module_config", perm: "config:read" },

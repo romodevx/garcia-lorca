@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as adminApi from "../../admin/api";
-import * as configApi from "../../config/api";
+import * as teachersApi from "../../teachers/api";
 import { Admin } from "./Admin";
 
 // The screen talks to the gateway only through the admin + config api clients,
@@ -20,17 +20,17 @@ vi.mock("../../admin/api", () => ({
   linkTeacherUser: vi.fn(),
 }));
 
-vi.mock("../../config/api", () => ({
+vi.mock("../../teachers/api", () => ({
   listTeachers: vi.fn(),
 }));
 
 const admin = vi.mocked(adminApi);
-const config = vi.mocked(configApi);
+const teachers = vi.mocked(teachersApi);
 
 beforeEach(() => {
   admin.listUsers.mockResolvedValue([]);
   admin.listRoles.mockResolvedValue([]);
-  config.listTeachers.mockResolvedValue([]);
+  teachers.listTeachers.mockResolvedValue([]);
 });
 
 afterEach(() => vi.clearAllMocks());
@@ -146,7 +146,7 @@ describe("Admin — users", () => {
 describe("Admin — teacher link", () => {
   it("links a teacher to a user", async () => {
     const user = userEvent.setup();
-    config.listTeachers.mockResolvedValue([
+    teachers.listTeachers.mockResolvedValue([
       { id: "t1", firstName: "Ada", lastName: "Lovelace", email: "ada@example.com", userId: "" },
     ]);
     admin.listUsers.mockResolvedValue([

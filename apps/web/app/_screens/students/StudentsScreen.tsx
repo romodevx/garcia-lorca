@@ -421,7 +421,7 @@ function StuRow({ st, i, onOpen }: { st: Student; i: number; onOpen: () => void 
       <div style={{ minWidth: 0, fontSize: 14, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{st.guardianName}</div>
       <div><StatusPill status={st.admissionStatus} /></div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, width: 84 }}>
-        <button onClick={(ev) => { ev.stopPropagation(); onOpen(); }} title="Ver ficha" style={qb}><Icon name="chevron" size={18} /></button>
+        <button onClick={(ev) => { ev.stopPropagation(); onOpen(); }} title="Ver ficha" aria-label={`Ver ficha de ${st.firstName} ${st.lastName}`} style={qb}><Icon name="chevron" size={18} /></button>
       </div>
     </div>
   );

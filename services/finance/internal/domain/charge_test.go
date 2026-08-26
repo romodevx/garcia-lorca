@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -206,5 +207,85 @@ func TestChargeWithStatusKeepsCancelled(t *testing.T) {
 	}
 	if got := cancelled.WithStatus(250000); got.Status() != domain.StatusCancelled {
 		t.Errorf("WithStatus on a cancelled charge = %q, want %q", got.Status(), domain.StatusCancelled)
+	}
+}
+
+// --- external reference (M12 uniforms) --------------------------------------
+
+func TestChargeWithExternalRef(t *testing.T) {
+	c := validCharge(t, 145000, 0)
+	if c.ExternalRef() != "" {
+		t.Fatalf("a charge is born without an external ref, got %q", c.ExternalRef())
+	}
+
+	tagged, err := c.WithExternalRef("  uniforms:ful-42  ")
+	if err != nil {
+		t.Fatalf("WithExternalRef: %v", err)
+	}
+	if tagged.ExternalRef() != "uniforms:ful-42" {
+		t.Errorf("external ref should be trimmed, got %q", tagged.ExternalRef())
+	}
+	if c.ExternalRef() != "" {
+		t.Errorf("WithExternalRef must not mutate the receiver, got %q", c.ExternalRef())
+	}
+	// Everything else is carried over untouched.
+	if tagged.ID() != c.ID() || tagged.Amount() != c.Amount() || tagged.Status() != c.Status() {
+		t.Errorf("WithExternalRef changed more than the reference: %+v", tagged)
+	}
+}
+
+func TestChargeWithExternalRefValidation(t *testing.T) {
+	c := validCharge(t, 145000, 0)
+	cases := []struct {
+		name string
+		ref  string
+	}{
+		{"blank", "   "},
+		{"too long", strings.Repeat("x", 129)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := c.WithExternalRef(tc.ref); glerrors.KindOf(err) != glerrors.KindInvalid {
+				t.Errorf("want KindInvalid, got %v", err)
+			}
+		})
+	}
+}
+
+// --- CancelIfUnpaid (M12: the expiry sweep must never void collected money) ---
+
+func TestChargeCancelIfUnpaid(t *testing.T) {
+	c := validCharge(t, 145000, 0)
+
+	cancelled, err := c.CancelIfUnpaid(0)
+	if err != nil {
+		t.Fatalf("CancelIfUnpaid(0): %v", err)
+	}
+	if cancelled.Status() != domain.StatusCancelled {
+		t.Errorf("want cancelled, got %q", cancelled.Status())
+	}
+	if c.Status() != domain.StatusPending {
+		t.Errorf("CancelIfUnpaid must not mutate the receiver, got %q", c.Status())
+	}
+}
+
+func TestChargeCancelIfUnpaidRefusesCollectedMoney(t *testing.T) {
+	c := validCharge(t, 145000, 0)
+
+	// One peso collected is enough: the uniforms expiry sweep must back off and
+	// leave the goods reserved rather than void a charge the cashier just took.
+	if _, err := c.CancelIfUnpaid(100); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Errorf("want KindConflict for a charge with payments, got %v", err)
+	}
+}
+
+func TestChargeCancelIfUnpaidTwice(t *testing.T) {
+	c := validCharge(t, 145000, 0)
+	cancelled, err := c.CancelIfUnpaid(0)
+	if err != nil {
+		t.Fatalf("CancelIfUnpaid: %v", err)
+	}
+	if _, err := cancelled.CancelIfUnpaid(0); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Errorf("want KindConflict cancelling twice, got %v", err)
 	}
 }

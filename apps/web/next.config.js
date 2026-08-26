@@ -24,6 +24,11 @@ const withNextIntl = createNextIntlPlugin("./app/i18n/request.ts");
 const nextConfig = {
   reactStrictMode: true,
 
+  // Lean, self-contained server output: Next traces only the files the server
+  // actually needs into .next/standalone, for a small container image and a
+  // faster Cloud Run cold start. See deploy/COST-AND-DEPLOY.md §C4.
+  output: "standalone",
+
   // HARDENING: never emit browser source maps in production builds.
   productionBrowserSourceMaps: false,
 

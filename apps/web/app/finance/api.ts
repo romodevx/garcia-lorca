@@ -381,3 +381,55 @@ export async function getAccount(baseURL: string, studentId: string): Promise<Ac
     totalBalanceCents: res.totalBalanceCents ?? 0,
   };
 }
+
+// --- tuition (M15) ----------------------------------------------------------
+
+/** What one level costs in one cycle. Every amount is integer cents. */
+export interface TuitionPlan {
+  id: string;
+  cycleId: string;
+  levelId: string;
+  enrollmentCents: number;
+  monthlyCents: number;
+  /** How many monthly payments the year has, and which month the first falls in. */
+  months: number;
+  firstBilledMonth: number;
+  /** Day of the month a payment falls due. 1-28, so it exists in February too. */
+  dueDay: number;
+  /** Fixed surcharge added once per completed overdue month. Zero disables it. */
+  lateFeeCents: number;
+  active: boolean;
+}
+
+export type TuitionPlanInput = Omit<TuitionPlan, "id">;
+
+/** What a billing run did, as the person who pressed the button reads it. */
+export interface BillingRun {
+  tuitionCreated: number;
+  enrollmentCreated: number;
+  lateFeesCreated: number;
+  /** Already existed. On a second press this is everything — that IS the proof. */
+  skipped: number;
+  /** Levels nobody has priced. Reported, never billed at zero. */
+  levelsWithoutPlan: string[];
+}
+
+/** Sets what one level of one cycle costs, replacing whatever was there. */
+export async function upsertTuitionPlan(baseURL: string, input: TuitionPlanInput): Promise<TuitionPlan> {
+  return sendJSON<TuitionPlan>(baseURL, "/tuition-plans", "PUT", input);
+}
+
+/** The whole tuition table of a cycle. */
+export async function listTuitionPlans(baseURL: string, cycleId: string): Promise<TuitionPlan[]> {
+  return getList<TuitionPlan>(baseURL, `/tuition-plans?cycleId=${encodeURIComponent(cycleId)}`, "plans");
+}
+
+/**
+ * Generates what the school is owed as of a date.
+ *
+ * Safe to press twice: the run is idempotent downstream, so a second press
+ * reports everything as skipped rather than charging anybody again.
+ */
+export async function runBilling(baseURL: string, cycleId: string, asOfDate = ""): Promise<BillingRun> {
+  return sendJSON<BillingRun>(baseURL, "/billing-runs", "POST", { cycleId, asOfDate });
+}

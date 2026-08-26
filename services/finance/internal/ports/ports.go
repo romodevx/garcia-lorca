@@ -38,6 +38,10 @@ type StudentRef struct {
 // all the ledger needs to stamp a charge.
 type CycleRef struct {
 	ID string
+	// StartsOn anchors the billing calendar. "Ten payments from September" is
+	// meaningless without knowing which September, and a cycle that opens in
+	// August 2026 reaches June of 2027 — the year is derived, never stated twice.
+	StartsOn time.Time
 }
 
 // EnrollmentRef is the finance-owned view of a students enrollment: enough to
@@ -89,12 +93,57 @@ type PaymentRegisteredEvent struct {
 	PaidAt      time.Time
 }
 
-// PaymentPublisher emits the PaymentRegistered domain event. Publishing is
-// best-effort and happens after the payment is durably stored: a broker outage
-// must never lose money that was already collected, so the use case ignores the
-// returned error (and tolerates a nil publisher).
+// ChargeSettledEvent announces that a charge became FULLY covered — the
+// crossing into paid, not every collection along the way. It exists for the
+// consumer that only cares whether the money is in (uniforms, before it releases
+// goods): summing PaymentRegistered would make that consumer redo the ledger's
+// arithmetic, depend on delivery order, and subscribe to every payment the
+// school takes to discard most of them.
+//
+// ExternalRef echoes the charge's reference, so the consumer resolves its own
+// row without calling back into finance.
+type ChargeSettledEvent struct {
+	ChargeID    string
+	StudentID   string
+	TenantID    string
+	ExternalRef string
+	AmountCents int64
+	SettledAt   time.Time
+}
+
+// LevelRef is the finance-owned view of a config level: its identity, and the
+// name the panel shows when reporting a level that has no tuition table yet.
+type LevelRef struct {
+	ID   string
+	Name string
+}
+
+// GroupLevel maps a group of a cycle to the level it belongs to. It is the join
+// finance cannot make on its own: an enrolment names a GROUP, a price is set per
+// LEVEL, and the path between them (group → grade → level) lives in config.
+type GroupLevel struct {
+	GroupID string
+	LevelID string
+}
+
+// CatalogReader reads the academic catalogue finance needs to price a cycle.
+// Read-only and by RPC: config owns this data and finance never writes it.
+type CatalogReader interface {
+	// ListLevels returns the school's levels.
+	ListLevels(ctx context.Context) ([]LevelRef, error)
+	// GroupLevels resolves every group of a cycle to its level, in one call, so
+	// the billing run does not make a round trip per enrolment.
+	GroupLevels(ctx context.Context, cycleID string) ([]GroupLevel, error)
+}
+
+// PaymentPublisher emits the finance domain events. Publishing is best-effort
+// and happens after the payment is durably stored: a broker outage must never
+// lose money that was already collected, so the use case ignores the returned
+// error (and tolerates a nil publisher).
 type PaymentPublisher interface {
 	PublishPaymentRegistered(ctx context.Context, e PaymentRegisteredEvent) error
+	// PublishChargeSettled fires only on the payment that closes the charge.
+	PublishChargeSettled(ctx context.Context, e ChargeSettledEvent) error
 }
 
 // FinanceRepository loads and persists the ledger: the charge catalog, the
@@ -114,9 +163,11 @@ type FinanceRepository interface {
 	// UpdateConcept persists a re-validated copy of an existing entry.
 	UpdateConcept(ctx context.Context, c domain.ChargeConcept) (domain.ChargeConcept, error)
 
-	// CreateCharge issues one charge. A second charge for the same
-	// (student, cycle, concept) is reported as KindConflict — a student owes a
-	// given concept once per cycle.
+	// CreateCharge issues one charge. A KEYLESS charge (no external ref) may
+	// exist once per (student, cycle, concept) — a student owes tuition once a
+	// cycle — and a second one is KindConflict. A charge carrying an external
+	// ref is identified by that ref instead, so it may repeat the concept
+	// freely while a retried creation still conflicts (migration 0003).
 	CreateCharge(ctx context.Context, c domain.Charge) (domain.Charge, error)
 	// CreateChargesBulk issues many charges in ONE statement, skipping the rows
 	// whose (student, cycle, concept) key already exists (ON CONFLICT DO
@@ -130,6 +181,11 @@ type FinanceRepository interface {
 	// tenant-bound query rather than a payment lookup per charge (no N+1). An
 	// empty studentID or cycleID skips that filter.
 	ListCharges(ctx context.Context, studentID, cycleID string) ([]ChargeWithPaid, error)
+	// CancelChargeIfUnpaid voids a charge only if nothing was collected against
+	// it, deciding under the charge's row lock so the read cannot go stale
+	// before the write. A charge with payments is KindConflict. Automated
+	// callers use this; CancelCharge stays the school's unguarded override.
+	CancelChargeIfUnpaid(ctx context.Context, id string) (ChargeWithPaid, error)
 	// SaveCharge persists the mutable part of an existing charge (its discount
 	// and derived status), as left by ApplyDiscount or CancelCharge.
 	SaveCharge(ctx context.Context, c domain.Charge) (domain.Charge, error)
@@ -164,4 +220,22 @@ type FinanceRepository interface {
 	// spans every cycle. today is passed in, never read from a clock here, so
 	// the query stays deterministic and testable.
 	ListOverdue(ctx context.Context, cycleID string, today time.Time) ([]ChargeWithPaid, error)
+
+	// EnsureConceptOfKind returns the tenant's concept for a system kind. The id
+	// is supplied by the caller (ids are minted in the use case, not here) and is
+	// used only when the concept has to be created.
+	// (tuition, enrollment, late_fee), creating it with the given name if the
+	// school has none yet. Looking a concept up by KIND rather than by name is
+	// what lets a school rename "Colegiatura" without the monthly run losing
+	// track of what it bills. At most one concept per kind exists — the partial
+	// unique index in migration 0004 is the backstop.
+	EnsureConceptOfKind(ctx context.Context, id, kind, name string) (domain.ChargeConcept, error)
+
+	// UpsertTuitionPlan stores the tuition table for one (cycle, level),
+	// replacing whatever was there. Replacing and not versioning: the table is a
+	// statement of current price, and the charges already issued carry their own
+	// amount, so correcting a typo must not require a new cycle.
+	UpsertTuitionPlan(ctx context.Context, p domain.TuitionPlan) (domain.TuitionPlan, error)
+	// ListTuitionPlans returns the whole tuition table of a cycle.
+	ListTuitionPlans(ctx context.Context, cycleID string) ([]domain.TuitionPlan, error)
 }

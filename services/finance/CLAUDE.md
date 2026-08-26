@@ -50,14 +50,43 @@ ledger operations run in a single transaction (Unit of Work).
   empty key opts out (every call posts a payment). The web ventanilla mints one
   key per payment ATTEMPT and reuses it across retries of that submit.
 
+## M15 — colegiaturas, inscripción y adeudo mensual
+- `TuitionPlan` — what one level costs in one cycle: inscription, monthly fee,
+  how many months and from which, the due day, and the fixed late fee. Keyed by
+  **(cycle, level)**, because a school raises tuition every year and the old year
+  must keep reconciling against its own table.
+- `due_day` is capped at **28**: a limit on the 31st does not exist in February
+  and would be moved by the calendar. Refused at the boundary, never adjusted.
+- `charge_concepts.kind` (`custom|tuition|enrollment|late_fee`, at most one of
+  each system kind per school) is how the run finds its concepts. By KIND and not
+  by name, so renaming "Colegiatura" cannot stop a school being billed.
+- `RunBilling(cycle, asOf)` issues the tuition whose due date has arrived, the
+  inscription of anybody enrolled without one, and **one fixed surcharge per
+  COMPLETED overdue month**. Idempotent through `external_ref`
+  (`tuition:<cycle>:<student>:<YYYY-MM>`, `enrollment:<cycle>:<student>`,
+  `latefee:<charge>:<YYYY-MM>`), so a button and a scheduler may both call it.
+- Surcharges are separate charges and are **excluded from their own input**: a
+  fee that earned fees would turn a fixed monthly charge into compound interest.
+- A level with no table is **reported by name**, never billed at zero.
+- `CreateChargesBulk` splits its batch by whether the charge carries a ref: the
+  two kinds are deduplicated by DIFFERENT partial indexes, and ON CONFLICT takes
+  one arbiter. Naming only the keyless one made the second run of every month
+  fail outright.
+
 ## Events
+- **Consumed: `StudentEnrolled`** (student-events → `finance-student-events`).
+  It charges the pupil's inscription the moment they take a place in a group,
+  which is the school's rule. **No idempotency ledger** — unlike comms on the
+  same topic — because the charge's own `external_ref` makes a redelivery insert
+  nothing. Pull loop locally; authenticated `POST /pubsub` under Cloud Run
+  scale-to-zero.
 - Published: `PaymentRegistered` (via `adapters/pubsub`, `pkg/pubsub`; a dev
   logging bus locally — swap the Cloud Pub/Sub adapter before shared use).
   `DebtOverdue` is a READ (`ListOverdue`) for now; the event emitter is a later
   phase. Consumers will include comms (notifications) and scholarships.
 
 ## RLS-sensitive tables
-`charge_concepts`, `charges`, `payments` — each `ENABLE + FORCE ROW LEVEL
+`charge_concepts`, `charges`, `payments`, `tuition_plans` — each `ENABLE + FORCE ROW LEVEL
 SECURITY` from the first migration with a `tenant_isolation` policy. All access
 goes through `pkg/authctx.WithTenantContext`, which binds `app.current_tenant`
 via `set_config(..., true)` (SET LOCAL semantics) inside the transaction.

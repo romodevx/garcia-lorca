@@ -49,6 +49,7 @@ type FinanceService struct {
 	students    ports.StudentReader
 	cycles      ports.CycleReader
 	enrollments ports.EnrollmentReader
+	catalog     ports.CatalogReader
 	publisher   ports.PaymentPublisher
 	tenantID    string
 	newID       func() string
@@ -64,6 +65,7 @@ func NewFinanceService(
 	students ports.StudentReader,
 	cycles ports.CycleReader,
 	enrollments ports.EnrollmentReader,
+	catalog ports.CatalogReader,
 	publisher ports.PaymentPublisher,
 	tenantID string,
 	newID func() string,
@@ -74,6 +76,7 @@ func NewFinanceService(
 		students:    students,
 		cycles:      cycles,
 		enrollments: enrollments,
+		catalog:     catalog,
 		publisher:   publisher,
 		tenantID:    tenantID,
 		newID:       newID,
@@ -121,26 +124,52 @@ func (s *FinanceService) UpdateConcept(ctx context.Context, id, name string, def
 // snapshotted onto the charge, so editing the catalog later never rewrites an
 // issued charge. A student may owe a given concept once per cycle — a repeat is
 // KindConflict.
-func (s *FinanceService) CreateCharge(ctx context.Context, studentID, cycleID, conceptID string, amountCentsOverride int64, descriptionOverride, dueDate string) (ports.ChargeWithPaid, error) {
-	if err := s.requireStudent(ctx, studentID); err != nil {
+// CreateChargeInput is what it takes to issue one charge. It is a struct rather
+// than a parameter list because the optional half — an amount that overrides the
+// concept's, a description that overrides its name, a reference to the row in
+// another module that caused the charge — is easy to mis-order positionally and
+// each field is worth naming at the call site.
+type CreateChargeInput struct {
+	StudentID string
+	CycleID   string
+	ConceptID string
+	DueDate   string
+	// AmountCentsOverride replaces the concept's default amount; zero keeps it.
+	AmountCentsOverride int64
+	// DescriptionOverride replaces the concept's name; empty keeps it.
+	DescriptionOverride string
+	// ExternalRef ties the charge to the row that caused it in another module.
+	// Empty means this is the school's own charge and the "one concept per
+	// cycle" rule applies to it.
+	ExternalRef string
+}
+
+func (s *FinanceService) CreateCharge(ctx context.Context, in CreateChargeInput) (ports.ChargeWithPaid, error) {
+	if err := s.requireStudent(ctx, in.StudentID); err != nil {
 		return ports.ChargeWithPaid{}, err
 	}
-	if err := s.requireCycle(ctx, cycleID); err != nil {
+	if err := s.requireCycle(ctx, in.CycleID); err != nil {
 		return ports.ChargeWithPaid{}, err
 	}
-	concept, err := s.requireActiveConcept(ctx, conceptID)
+	concept, err := s.requireActiveConcept(ctx, in.ConceptID)
 	if err != nil {
 		return ports.ChargeWithPaid{}, err
 	}
-	due, err := parseDueDate(dueDate)
+	due, err := parseDueDate(in.DueDate)
 	if err != nil {
 		return ports.ChargeWithPaid{}, err
 	}
 
-	charge, err := domain.NewCharge(s.newID(), s.tenantID, studentID, cycleID, conceptID,
-		resolveDescription(concept, descriptionOverride), resolveAmount(concept, amountCentsOverride), 0, due)
+	charge, err := domain.NewCharge(s.newID(), s.tenantID, in.StudentID, in.CycleID, in.ConceptID,
+		resolveDescription(concept, in.DescriptionOverride), resolveAmount(concept, in.AmountCentsOverride), 0, due)
 	if err != nil {
 		return ports.ChargeWithPaid{}, err
+	}
+	if in.ExternalRef != "" {
+		charge, err = charge.WithExternalRef(in.ExternalRef)
+		if err != nil {
+			return ports.ChargeWithPaid{}, err
+		}
 	}
 	created, err := s.repo.CreateCharge(ctx, charge)
 	if err != nil {
@@ -255,6 +284,15 @@ func (s *FinanceService) CancelCharge(ctx context.Context, chargeID string) (por
 	return ports.ChargeWithPaid{Charge: saved, PaidCents: current.PaidCents}, nil
 }
 
+// CancelChargeIfUnpaid voids a charge only when nothing has been collected
+// against it. The decision belongs to the repository, not here: it has to be
+// made under the charge's row lock, and reading the paid total in the use case
+// and writing afterwards would reopen the race it exists to close — the expiry
+// sweep of another module voiding the charge a cashier is collecting right now.
+func (s *FinanceService) CancelChargeIfUnpaid(ctx context.Context, chargeID string) (ports.ChargeWithPaid, error) {
+	return s.repo.CancelChargeIfUnpaid(ctx, chargeID)
+}
+
 // RegisterPayment posts money against a charge. The rules that depend on what
 // has already been collected — no overpayment, no paying a cancelled charge —
 // are handed to the repository as a callback so they run inside the transaction
@@ -317,6 +355,26 @@ func (s *FinanceService) publishPaymentRegistered(ctx context.Context, p domain.
 		Method:      p.Method(),
 		AmountCents: p.Amount().Int64(),
 		PaidAt:      p.PaidAt(),
+	})
+	s.publishChargeSettledIfClosed(ctx, p, charge)
+}
+
+// publishChargeSettledIfClosed fires ChargeSettled on the collection that closes
+// the charge, and on no other. A consumer that releases goods against the event
+// must never act on a partial payment, so the test is the charge's own derived
+// status after this payment — not the amount collected, which says nothing about
+// what was owed. Best-effort for the same reason as above: the money is banked.
+func (s *FinanceService) publishChargeSettledIfClosed(ctx context.Context, p domain.Payment, charge ports.ChargeWithPaid) {
+	if charge.Charge.Status() != domain.StatusPaid {
+		return
+	}
+	_ = s.publisher.PublishChargeSettled(ctx, ports.ChargeSettledEvent{
+		ChargeID:    p.ChargeID(),
+		StudentID:   charge.Charge.StudentID(),
+		TenantID:    s.tenantID,
+		ExternalRef: charge.Charge.ExternalRef(),
+		AmountCents: charge.Charge.Effective().Int64(),
+		SettledAt:   p.PaidAt(),
 	})
 }
 

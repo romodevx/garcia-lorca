@@ -549,3 +549,90 @@ func TestRoleRepoFindByID(t *testing.T) {
 		t.Errorf("unknown role should be NotFound, got %v", err)
 	}
 }
+
+// --- seeded role permissions -------------------------------------------------
+
+// TestSeededRolesHoldTheirPermissions closes a gap the permission migrations had
+// left open since the first of them: every one is an UPDATE guarded by a NOT
+// (permissions @> …) clause, so a migration that matched ZERO rows — a renamed
+// role, a changed tenant literal, a typo in the WHERE — would apply cleanly and
+// grant nothing. The next thing to notice would be a director who cannot open a
+// module, in production.
+//
+// It asserts what the migrations are supposed to have produced, not how they did
+// it, so it guards the ones already merged as well as the ones still to come.
+func TestSeededRolesHoldTheirPermissions(t *testing.T) {
+	const seedTenant = "00000000-0000-0000-0000-000000000001"
+
+	cases := []struct {
+		role string
+		want []string
+	}{
+		{"owner", []string{
+			// One per permission migration, in the order they landed.
+			"config:read", "config:write",
+			// students uses granular verbs, not a blanket :write.
+			"students:read", "students:list", "students:create",
+			"students:update", "students:enroll",
+			"grades:read", "grades:write",
+			"users:read", "users:write", "roles:read", "roles:write",
+			"finance:read", "finance:write",
+			"attendance:read", "attendance:write",
+			"comms:read", "comms:write",
+			"guardians:read", "guardians:write",
+			"teaching:read", "teaching:write",
+			"attendance_own:read", "attendance_own:write",
+			// M12: the owner holds all four so it can delegate them.
+			"uniforms:stock", "uniforms:orders", "uniforms:write",
+			"uniforms_own:read", "uniforms_own:write",
+			// M14: teachers left Configuración and became a module of its own,
+			// so it gates on its own permission — the point being that a school
+			// can hand somebody the staff roster without handing them the whole
+			// academic catalogue.
+			"teachers:read", "teachers:write",
+		}},
+		{"guardian", []string{
+			"family:read",
+			"uniforms_own:read", "uniforms_own:write",
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.role, func(t *testing.T) {
+			var got []string
+			err := superDB.Raw(
+				`SELECT unnest(permissions) FROM roles WHERE tenant_id = ? AND name = ?`,
+				seedTenant, tc.role).Scan(&got).Error
+			if err != nil {
+				t.Fatalf("read %s permissions: %v", tc.role, err)
+			}
+			if len(got) == 0 {
+				t.Fatalf("role %q has no permissions at all — did a migration match zero rows?", tc.role)
+			}
+			held := make(map[string]bool, len(got))
+			for _, p := range got {
+				held[p] = true
+			}
+			for _, want := range tc.want {
+				if !held[want] {
+					t.Errorf("role %q is missing %q", tc.role, want)
+				}
+			}
+		})
+	}
+
+	// The guardian must NOT have picked up anything tenant-wide along the way.
+	t.Run("guardian holds nothing owner-only", func(t *testing.T) {
+		var got []string
+		if err := superDB.Raw(
+			`SELECT unnest(permissions) FROM roles WHERE tenant_id = ? AND name = 'guardian'`,
+			seedTenant).Scan(&got).Error; err != nil {
+			t.Fatalf("read guardian permissions: %v", err)
+		}
+		for _, p := range got {
+			if domain.IsOwnerOnly(p) {
+				t.Errorf("the guardian role holds the owner-only permission %q", p)
+			}
+		}
+	})
+}

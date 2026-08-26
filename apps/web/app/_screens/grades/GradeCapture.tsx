@@ -2,18 +2,13 @@
 
 import { useCallback, useEffect, useState, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
+import { listGroups, listSubjects, listTerms, type Group, type Subject, type Term } from "../../config/api";
 import {
-  listGroups,
-  listSubjects,
   listTeachers,
   listTeachingAssignments,
-  listTerms,
-  type Group,
-  type Subject,
   type Teacher,
   type TeachingAssignment,
-  type Term,
-} from "../../config/api";
+} from "../../teachers/api";
 import { listStudents, type Student } from "../../students/api";
 import { captureGrade, getRoster, type RosterRow } from "../../grades/api";
 import { CapturePanel } from "./CapturePanel";

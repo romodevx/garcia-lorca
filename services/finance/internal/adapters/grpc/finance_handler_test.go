@@ -152,6 +152,23 @@ func (f *fakeRepo) CreateCharge(_ context.Context, c domain.Charge) (domain.Char
 	return c, nil
 }
 
+func (f *fakeRepo) CancelChargeIfUnpaid(_ context.Context, id string) (ports.ChargeWithPaid, error) {
+	c, ok := f.charges[id]
+	if !ok {
+		return ports.ChargeWithPaid{}, glerrors.ErrNotFound
+	}
+	var paid int64
+	for _, p := range f.payments[id] {
+		paid += p.Amount().Int64()
+	}
+	cancelled, err := c.CancelIfUnpaid(paid)
+	if err != nil {
+		return ports.ChargeWithPaid{}, err
+	}
+	f.charges[id] = cancelled
+	return ports.ChargeWithPaid{Charge: cancelled, PaidCents: paid}, nil
+}
+
 func (f *fakeRepo) CreateChargesBulk(_ context.Context, cs []domain.Charge) (int, error) {
 	created := 0
 	for _, c := range cs {
@@ -285,7 +302,7 @@ func newFixture(t *testing.T) *fixture {
 
 	seq := 0
 	newID := func() string { seq++; return fmt.Sprintf("id-%d", seq) }
-	svc := usecase.NewFinanceService(repo, students, cycles, enrollments, nil,
+	svc := usecase.NewFinanceService(repo, students, cycles, enrollments, &fakeCatalog{}, nil,
 		testTenant, newID, func() time.Time { return fixedNow })
 	return &fixture{
 		h:           grpcadapter.NewFinanceHandler(svc, usecase.NewHealthService("finance")),
@@ -686,4 +703,34 @@ func TestExportContpaqiIsUnimplemented(t *testing.T) {
 	if connect.CodeOf(err) != connect.CodeUnimplemented {
 		t.Errorf("want Unimplemented, got %v", connect.CodeOf(err))
 	}
+}
+
+// --- tuition doubles (M15) ---------------------------------------------------
+//
+// The handler's own tests do not exercise billing — that lives in the use case,
+// against a fixture that models a school. These exist so the handler compiles
+// against the port, and answer with the least a caller could believe.
+
+func (f *fakeRepo) EnsureConceptOfKind(_ context.Context, id, kind, name string) (domain.ChargeConcept, error) {
+	c, err := domain.NewChargeConcept(id, testTenant, name, 0, domain.RecurrenceOnce, true)
+	if err != nil {
+		return domain.ChargeConcept{}, err
+	}
+	return c.WithKind(kind)
+}
+
+func (f *fakeRepo) UpsertTuitionPlan(_ context.Context, p domain.TuitionPlan) (domain.TuitionPlan, error) {
+	return p, nil
+}
+
+func (f *fakeRepo) ListTuitionPlans(_ context.Context, _ string) ([]domain.TuitionPlan, error) {
+	return nil, nil
+}
+
+type fakeCatalog struct{}
+
+func (fakeCatalog) ListLevels(_ context.Context) ([]ports.LevelRef, error) { return nil, nil }
+
+func (fakeCatalog) GroupLevels(_ context.Context, _ string) ([]ports.GroupLevel, error) {
+	return nil, nil
 }

@@ -281,16 +281,32 @@ jobs:
   # 4. Single required status check. Branch protection points at this job so the
   #    matrix legs do not each need to be registered.
   # ---------------------------------------------------------------------------
+  contract:
+    name: openapi (lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # The canon is spec-first: the REST contract is written and linted BEFORE
+      # the handlers exist. A contract nobody validates drifts from the code
+      # within a sprint, at which point the generated clients start lying.
+      - name: Lint the REST contract
+        run: npx --yes @redocly/cli@latest lint docs/api/openapi.yaml
+
   ci:
     name: ci
     if: always()
-    needs: [proto, go, web]
+    needs: [proto, go, web, contract]
     runs-on: ubuntu-latest
     steps:
       - name: Assert all gates passed
         run: |
           set -euo pipefail
-          results="${{ needs.proto.result }} ${{ needs.go.result }} ${{ needs.web.result }}"
+          results="${{ needs.proto.result }} ${{ needs.go.result }} ${{ needs.web.result }} ${{ needs.contract.result }}"
           echo "gate results: ${results}"
           for r in $results; do
             if [ "$r" != "success" ]; then
@@ -298,4 +314,4 @@ jobs:
               exit 1
             fi
           done
-          echo "OK: proto, go, and web gates passed."
+          echo "OK: proto, go, web and contract gates passed."

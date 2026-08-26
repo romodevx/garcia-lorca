@@ -64,6 +64,8 @@ end-to-end slice (`iam` → `students`) deployed and integration-tested before w
 | ID | Module | Microservice | Area | Clean Arch | MoSCoW | Depends on | Events published | RLS-sensitive tables | Flag key | DoD reminder |
 |----|--------|--------------|------|-----------|--------|-----------|------------------|---------------------|----------|--------------|
 | M12 | **Uniforms store** | uniforms | 7 | thin (State) | **Could** | M01, M03, M05 | `UniformReserved`, `ReservationExpired` | _(reservations reference students; tenant-scoped)_ | `module_uniforms` | Reservation lifecycle via **State pattern**; expiry emits event. |
+| M14 | **Docentes (staff roster + assignments)** | config (same service) | 2 | thin | **Must** | M04 | — | _(staff data; tenant-scoped)_ | `module_teachers` | Out of Configuración into its own module. Own permissions (`teachers:*`) so the roster can be delegated without the catalogue. |
+| M15 | **Colegiaturas / adeudo mensual** | finance | 5 | rich | **Must** | M03, M04, M05 | `ChargeSettled` | _(tuition plans; tenant-scoped, RLS)_ | `module_finance` | Tabulador por (ciclo, nivel) + corrida mensual idempotente + recargo fijo por mes vencido. Plan: `.claude/docs/PLAN-m15-colegiaturas.md`. |
 | M13 | **Reports / Dashboard (advanced read-models)** | gateway + read models | 10 | — | **Could** | M02 + all event producers | _(consumer of all events)_ | — | `module_reports` | Cross-module read-models / dashboard. Basic gateway read-model plumbing is in M02 (Must); the rich dashboard is here (Could). |
 
 ### Won't (for MVP) — post-MVP, future-ready (reserved, not built this cycle)

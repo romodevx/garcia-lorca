@@ -16,6 +16,13 @@ import (
 // needs. It records the last input and returns canned results/errors so each
 // handler is exercised in isolation (no Connect round-trip).
 type fakeFinance struct {
+	planIn     client.TuitionPlanInput
+	plans      []client.TuitionPlan
+	plansCycle string
+	run        client.BillingRun
+	runCycle   string
+	runAsOf    string
+
 	conceptName       string
 	conceptAmount     int64
 	conceptRecurrence string
@@ -596,5 +603,88 @@ func TestFinanceListOverdueUpstreamFailureIs500(t *testing.T) {
 	rec := doReq(t, h.ListOverdue, http.MethodGet, "/api/v1/finance/overdue", "")
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", rec.Code)
+	}
+}
+
+// --- tuition (M15) ----------------------------------------------------------
+
+func (f *fakeFinance) UpsertTuitionPlan(_ context.Context, in client.TuitionPlanInput) (client.TuitionPlan, error) {
+	f.planIn = in
+	if f.err != nil {
+		return client.TuitionPlan{}, f.err
+	}
+	return client.TuitionPlan{
+		ID: "tp-1", CycleID: in.CycleID, LevelID: in.LevelID,
+		EnrollmentCents: in.EnrollmentCents, MonthlyCents: in.MonthlyCents,
+		Months: in.Months, FirstBilledMonth: in.FirstBilledMonth,
+		DueDay: in.DueDay, LateFeeCents: in.LateFeeCents, Active: in.Active,
+	}, nil
+}
+
+func (f *fakeFinance) ListTuitionPlans(_ context.Context, cycleID string) ([]client.TuitionPlan, error) {
+	f.plansCycle = cycleID
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.plans, nil
+}
+
+func (f *fakeFinance) RunBilling(_ context.Context, cycleID, asOfDate string) (client.BillingRun, error) {
+	f.runCycle, f.runAsOf = cycleID, asOfDate
+	if f.err != nil {
+		return client.BillingRun{}, f.err
+	}
+	return f.run, nil
+}
+
+func TestFinanceUpsertTuitionPlanForwardsTheWholeTable(t *testing.T) {
+	svc := &fakeFinance{}
+	h := handler.NewFinanceHandler(svc)
+
+	rec := doReq(t, h.UpsertTuitionPlan, http.MethodPut, "/api/v1/finance/tuition-plans",
+		`{"cycleId":"cyc-1","levelId":"lv-1","enrollmentCents":50000,"monthlyCents":320000,
+		  "months":10,"firstBilledMonth":9,"dueDay":10,"lateFeeCents":15000,"active":true}`)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	// Every field, because a table that arrives with a field dropped silently
+	// prices a level wrong for a year.
+	got := svc.planIn
+	if got.CycleID != "cyc-1" || got.LevelID != "lv-1" || got.EnrollmentCents != 50000 ||
+		got.MonthlyCents != 320000 || got.Months != 10 || got.FirstBilledMonth != 9 ||
+		got.DueDay != 10 || got.LateFeeCents != 15000 || !got.Active {
+		t.Errorf("forwarded input = %+v", got)
+	}
+}
+
+func TestFinanceRunBillingReportsWhatItDid(t *testing.T) {
+	svc := &fakeFinance{run: client.BillingRun{
+		TuitionCreated: 30, EnrollmentCreated: 10, LateFeesCreated: 4, Skipped: 6,
+		LevelsWithoutPlan: []string{"Kínder"},
+	}}
+	h := handler.NewFinanceHandler(svc)
+
+	rec := doReq(t, h.RunBilling, http.MethodPost, "/api/v1/finance/billing-runs",
+		`{"cycleId":"cyc-1","asOfDate":"2026-11-15"}`)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if svc.runCycle != "cyc-1" || svc.runAsOf != "2026-11-15" {
+		t.Errorf("forwarded %q %q", svc.runCycle, svc.runAsOf)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	// skipped is the one a person reads twice: on a second press it is the whole
+	// total, and that is the proof nobody was charged again.
+	if out["tuitionCreated"] != float64(30) || out["skipped"] != float64(6) {
+		t.Errorf("body = %v", out)
+	}
+	levels, ok := out["levelsWithoutPlan"].([]any)
+	if !ok || len(levels) != 1 || levels[0] != "Kínder" {
+		t.Errorf("levels without a plan = %v; a level nobody priced must reach the screen", out["levelsWithoutPlan"])
 	}
 }

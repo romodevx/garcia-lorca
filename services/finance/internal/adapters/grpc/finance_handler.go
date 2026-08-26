@@ -84,8 +84,15 @@ func (h *FinanceHandler) UpdateConcept(ctx context.Context, req *connect.Request
 // CreateCharge issues one charge against a student's cycle.
 func (h *FinanceHandler) CreateCharge(ctx context.Context, req *connect.Request[financev1.CreateChargeRequest]) (*connect.Response[financev1.CreateChargeResponse], error) {
 	m := req.Msg
-	charge, err := h.finance.CreateCharge(ctx, m.GetStudentId(), m.GetCycleId(), m.GetConceptId(),
-		m.GetAmountCentsOverride(), m.GetDescriptionOverride(), m.GetDueDate())
+	charge, err := h.finance.CreateCharge(ctx, usecase.CreateChargeInput{
+		StudentID:           m.GetStudentId(),
+		CycleID:             m.GetCycleId(),
+		ConceptID:           m.GetConceptId(),
+		DueDate:             m.GetDueDate(),
+		AmountCentsOverride: m.GetAmountCentsOverride(),
+		DescriptionOverride: m.GetDescriptionOverride(),
+		ExternalRef:         m.GetExternalRef(),
+	})
 	if err != nil {
 		return nil, connectErr(err)
 	}
@@ -134,6 +141,16 @@ func (h *FinanceHandler) CancelCharge(ctx context.Context, req *connect.Request[
 		return nil, connectErr(err)
 	}
 	return connect.NewResponse(&financev1.CancelChargeResponse{Charge: toProtoCharge(charge)}), nil
+}
+
+// CancelChargeIfUnpaid voids a charge only if nothing was collected against it.
+// The guarded variant automated callers use; see the RPC comment in the proto.
+func (h *FinanceHandler) CancelChargeIfUnpaid(ctx context.Context, req *connect.Request[financev1.CancelChargeIfUnpaidRequest]) (*connect.Response[financev1.CancelChargeIfUnpaidResponse], error) {
+	charge, err := h.finance.CancelChargeIfUnpaid(ctx, req.Msg.GetChargeId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&financev1.CancelChargeIfUnpaidResponse{Charge: toProtoCharge(charge)}), nil
 }
 
 // RegisterPayment applies a payment to a charge and returns the payment plus
@@ -193,6 +210,7 @@ func toProtoConcept(c domain.ChargeConcept) *financev1.ChargeConcept {
 		Name:               c.Name(),
 		DefaultAmountCents: c.DefaultAmount().Int64(),
 		Recurrence:         c.Recurrence(),
+		Kind:               c.Kind(),
 		Active:             c.Active(),
 	}
 }
@@ -223,6 +241,7 @@ func toProtoCharge(cwp ports.ChargeWithPaid) *financev1.Charge {
 		AmountCents:    c.Amount().Int64(),
 		DiscountCents:  c.Discount().Int64(),
 		DueDate:        c.DueDate().Format(dueDateLayout),
+		ExternalRef:    c.ExternalRef(),
 		Status:         c.Status(),
 		PaidCents:      cwp.PaidCents,
 		RemainingCents: max(0, c.Effective().Int64()-cwp.PaidCents),
@@ -245,19 +264,94 @@ func toProtoPayment(p domain.Payment) *financev1.Payment {
 // connectErr maps a domain error Kind to the Connect status code. Internal
 // failures return a generic message (no internal detail leaks to the client);
 // the other Kinds carry already-generic domain messages.
+// Every code goes through glerrors.SafeMessage, not just the internal one. The
+// kind decides the STATUS; it does not decide whether the wrapped cause is the
+// caller's business, and it never is. Error() concatenates the cause, so handing
+// the error straight to connect.NewError shipped Postgres constraint names and
+// SQLSTATEs — and on some constraints the conflicting value — to whoever called.
 func connectErr(err error) *connect.Error {
+	safe := errors.New(glerrors.SafeMessage(err))
+
 	switch glerrors.KindOf(err) {
 	case glerrors.KindInvalid:
-		return connect.NewError(connect.CodeInvalidArgument, err)
+		return connect.NewError(connect.CodeInvalidArgument, safe)
 	case glerrors.KindUnauthorized:
-		return connect.NewError(connect.CodeUnauthenticated, err)
+		return connect.NewError(connect.CodeUnauthenticated, safe)
 	case glerrors.KindForbidden:
-		return connect.NewError(connect.CodePermissionDenied, err)
+		return connect.NewError(connect.CodePermissionDenied, safe)
 	case glerrors.KindNotFound:
-		return connect.NewError(connect.CodeNotFound, err)
+		return connect.NewError(connect.CodeNotFound, safe)
 	case glerrors.KindConflict:
-		return connect.NewError(connect.CodeAlreadyExists, err)
+		return connect.NewError(connect.CodeAlreadyExists, safe)
 	default:
 		return connect.NewError(connect.CodeInternal, glerrors.New(glerrors.KindInternal, "internal error"))
+	}
+}
+
+// --- tuition (M15) ----------------------------------------------------------
+
+// UpsertTuitionPlan sets what one level of one cycle costs.
+func (h *FinanceHandler) UpsertTuitionPlan(ctx context.Context, req *connect.Request[financev1.UpsertTuitionPlanRequest]) (*connect.Response[financev1.UpsertTuitionPlanResponse], error) {
+	m := req.Msg
+	plan, err := h.finance.UpsertTuitionPlan(ctx, usecase.TuitionPlanInput{
+		CycleID:          m.GetCycleId(),
+		LevelID:          m.GetLevelId(),
+		EnrollmentCents:  m.GetEnrollmentCents(),
+		MonthlyCents:     m.GetMonthlyCents(),
+		Months:           int(m.GetMonths()),
+		FirstBilledMonth: int(m.GetFirstBilledMonth()),
+		DueDay:           int(m.GetDueDay()),
+		LateFeeCents:     m.GetLateFeeCents(),
+		Active:           m.GetActive(),
+	})
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&financev1.UpsertTuitionPlanResponse{Plan: toProtoPlan(plan)}), nil
+}
+
+// ListTuitionPlans returns the whole tuition table of a cycle.
+func (h *FinanceHandler) ListTuitionPlans(ctx context.Context, req *connect.Request[financev1.ListTuitionPlansRequest]) (*connect.Response[financev1.ListTuitionPlansResponse], error) {
+	plans, err := h.finance.ListTuitionPlans(ctx, req.Msg.GetCycleId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	out := make([]*financev1.TuitionPlan, 0, len(plans))
+	for _, p := range plans {
+		out = append(out, toProtoPlan(p))
+	}
+	return connect.NewResponse(&financev1.ListTuitionPlansResponse{Plans: out}), nil
+}
+
+// RunBilling generates what the school is owed as of a date. Idempotent, so the
+// same call from a button and from a scheduler is safe.
+func (h *FinanceHandler) RunBilling(ctx context.Context, req *connect.Request[financev1.RunBillingRequest]) (*connect.Response[financev1.RunBillingResponse], error) {
+	got, err := h.finance.RunBilling(ctx, req.Msg.GetCycleId(), req.Msg.GetAsOfDate())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&financev1.RunBillingResponse{
+		TuitionCreated:    int32(got.TuitionCreated),
+		EnrollmentCreated: int32(got.EnrollmentCreated),
+		LateFeesCreated:   int32(got.LateFeesCreated),
+		Skipped:           int32(got.Skipped),
+		LevelsWithoutPlan: got.LevelsWithoutPlan,
+	}), nil
+}
+
+// toProtoPlan maps a domain TuitionPlan to its proto message.
+func toProtoPlan(p domain.TuitionPlan) *financev1.TuitionPlan {
+	return &financev1.TuitionPlan{
+		Id:               p.ID(),
+		TenantId:         p.TenantID(),
+		CycleId:          p.CycleID(),
+		LevelId:          p.LevelID(),
+		EnrollmentCents:  p.EnrollmentCents(),
+		MonthlyCents:     p.MonthlyCents(),
+		Months:           int32(p.Months()),
+		FirstBilledMonth: int32(p.FirstBilledMonth()),
+		DueDay:           int32(p.DueDay()),
+		LateFeeCents:     p.LateFeeCents(),
+		Active:           p.Active(),
 	}
 }

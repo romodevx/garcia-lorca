@@ -64,6 +64,13 @@ service FinanceService {
   // account balance and can no longer receive payments.
   rpc CancelCharge(CancelChargeRequest) returns (CancelChargeResponse);
 
+  // CancelChargeIfUnpaid voids a charge ONLY if nothing was collected against
+  // it, decided under the charge's row lock. It is the variant an automated
+  // caller needs: the uniforms expiry sweep voids the charge behind a lapsed
+  // hold while a cashier may be collecting that exact payment, and it must lose
+  // that race loudly (FailedPrecondition) rather than void collected money.
+  rpc CancelChargeIfUnpaid(CancelChargeIfUnpaidRequest) returns (CancelChargeIfUnpaidResponse);
+
   // --- Payments + account ---
 
   // RegisterPayment applies a payment to a charge and returns the payment plus
@@ -80,6 +87,24 @@ service FinanceService {
   // Returns at most 500 rows (earliest due first); explicit pagination is a
   // follow-up.
   rpc ListOverdue(ListOverdueRequest) returns (ListOverdueResponse);
+
+  // --- tuition (M15: what each level costs, and the monthly run) ---
+  // UpsertTuitionPlan sets (or replaces) the tuition table for one level of one
+  // cycle. Keyed by (cycle, level): a school raises tuition each year, and the
+  // old year must keep reconciling against its own table.
+  rpc UpsertTuitionPlan(UpsertTuitionPlanRequest) returns (UpsertTuitionPlanResponse);
+
+  // ListTuitionPlans returns the whole tuition table of a cycle.
+  rpc ListTuitionPlans(ListTuitionPlansRequest) returns (ListTuitionPlansResponse);
+
+  // RunBilling generates everything the school is owed as of a date: the monthly
+  // tuition whose due date has arrived, the inscription of anybody enrolled
+  // without one, and one fixed surcharge per completed overdue month.
+  //
+  // It is IDEMPOTENT — every charge it writes carries an external_ref that is
+  // unique per tenant — so a button and a scheduler may both call it, and calling
+  // it twice on the same day charges nobody twice.
+  rpc RunBilling(RunBillingRequest) returns (RunBillingResponse);
 
   // ExportContpaqi produces a CONTPAQi-format XML export (spike S02).
   // TODO(M05/S02): real field mapping + period/account filters.
@@ -107,6 +132,11 @@ message ChargeConcept {
   int64 default_amount_cents = 4;
   string recurrence = 5;
   bool active = 6;
+  // What the concept IS, independent of what the school called it:
+  // "custom" | "tuition" | "enrollment" | "late_fee". At most one of each
+  // system kind per school; the billing run finds its concepts by this, so
+  // renaming "Colegiatura" cannot stop a school being billed.
+  string kind = 7;
 }
 
 // Charge is one debt owed by a student for a concept in a cycle.
@@ -128,6 +158,10 @@ message Charge {
   string status = 10;
   int64 paid_cents = 11;
   int64 remaining_cents = 12;
+  // external_ref ties this charge to the row that caused it in another module
+  // (e.g. a uniforms fulfillment). Empty for the school's own charges, which is
+  // what keeps the "one concept per cycle" rule applying to them alone.
+  string external_ref = 13;
 }
 
 // Payment is one amount applied to a charge. `method` is one of:
@@ -191,6 +225,12 @@ message CreateChargeRequest {
   string description_override = 5;
   // due_date is an ISO date, "YYYY-MM-DD".
   string due_date = 6;
+  // external_ref identifies the row in the calling module that this charge
+  // stands for. Setting it does two things: it exempts the charge from the
+  // "a student owes a concept once per cycle" rule, so a module that bills the
+  // same concept repeatedly (uniforms) can; and it deduplicates a retried
+  // creation, since the same ref may exist only once per tenant.
+  string external_ref = 7;
 }
 
 message CreateChargeResponse {
@@ -237,6 +277,14 @@ message ApplyDiscountResponse {
 
 message CancelChargeRequest {
   string charge_id = 1;
+}
+
+message CancelChargeIfUnpaidRequest {
+  string charge_id = 1;
+}
+
+message CancelChargeIfUnpaidResponse {
+  Charge charge = 1;
 }
 
 message CancelChargeResponse {
@@ -309,6 +357,23 @@ message PaymentRegistered {
   google.protobuf.Timestamp paid_at = 7;
 }
 
+// ChargeSettled fires the moment a charge becomes fully covered — the crossing
+// into "paid", not every collection along the way. It exists because a consumer
+// that only cares whether the money is IN (uniforms, before it releases goods)
+// should not have to sum payments off PaymentRegistered, tolerate out-of-order
+// delivery, or subscribe to every payment the school takes to discard most of
+// them. A partial payment simply does not emit it.
+message ChargeSettled {
+  string charge_id = 1;
+  string student_id = 2;
+  string tenant_id = 3;
+  // external_ref echoes the charge's reference, so a consumer can resolve its
+  // own row without a lookup back into finance.
+  string external_ref = 4;
+  int64 amount_cents = 5;
+  google.protobuf.Timestamp settled_at = 6;
+}
+
 // DebtOverdue fires when a charge crosses its due date with a remaining balance.
 // due_date is an ISO date, "YYYY-MM-DD".
 message DebtOverdue {
@@ -317,4 +382,72 @@ message DebtOverdue {
   string tenant_id = 3;
   int64 amount_due_cents = 4;
   string due_date = 5;
+}
+
+// --- tuition (M15) ----------------------------------------------------------
+
+// TuitionPlan is what one level costs in one cycle.
+message TuitionPlan {
+  string id = 1;
+  string tenant_id = 2;
+  string cycle_id = 3;
+  string level_id = 4;
+  int64 enrollment_cents = 5;
+  int64 monthly_cents = 6;
+  // How many monthly payments the year has (1-12) and the calendar month the
+  // first one falls in (1-12). Ten from September is the common shape.
+  int32 months = 7;
+  int32 first_billed_month = 8;
+  // Day of the month a payment is due. 1-28: a limit on the 31st does not exist
+  // in February and would silently move, so it is refused rather than adjusted.
+  int32 due_day = 9;
+  // Fixed surcharge added once per completed overdue month. Zero disables it.
+  int64 late_fee_cents = 10;
+  bool active = 11;
+}
+
+message UpsertTuitionPlanRequest {
+  string cycle_id = 1;
+  string level_id = 2;
+  int64 enrollment_cents = 3;
+  int64 monthly_cents = 4;
+  int32 months = 5;
+  int32 first_billed_month = 6;
+  int32 due_day = 7;
+  int64 late_fee_cents = 8;
+  bool active = 9;
+}
+
+message UpsertTuitionPlanResponse {
+  TuitionPlan plan = 1;
+}
+
+message ListTuitionPlansRequest {
+  string cycle_id = 1;
+}
+
+message ListTuitionPlansResponse {
+  repeated TuitionPlan plans = 1;
+}
+
+message RunBillingRequest {
+  string cycle_id = 1;
+  // The date the run pretends it is, as YYYY-MM-DD. Empty means today. It exists
+  // so a school can catch up a cycle it configured late, and so the behaviour is
+  // testable without waiting for a calendar.
+  string as_of_date = 2;
+}
+
+// RunBillingResponse reports what the run did. `skipped` counts the charges that
+// already existed — on a second run in the same day that is everything, which is
+// what idempotent looks like from the outside.
+message RunBillingResponse {
+  int32 tuition_created = 1;
+  int32 enrollment_created = 2;
+  int32 late_fees_created = 3;
+  int32 skipped = 4;
+  // Levels of the cycle with no tuition table. They are NOT billed at zero —
+  // they are reported, so a school notices it forgot one instead of discovering
+  // it in June.
+  repeated string levels_without_plan = 5;
 }

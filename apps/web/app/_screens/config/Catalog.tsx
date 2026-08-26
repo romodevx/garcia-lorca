@@ -8,41 +8,32 @@ import {
   createGroup,
   createLevel,
   createSubject,
-  createTeacher,
-  createTeachingAssignment,
   createTerm,
   listCycles,
   listGradeLevels,
   listGroups,
   listLevels,
   listSubjects,
-  listTeachers,
-  listTeachingAssignments,
   listTerms,
   type CreateCycleInput,
   type CreateGradeLevelInput,
   type CreateGroupInput,
   type CreateLevelInput,
   type CreateSubjectInput,
-  type CreateTeacherInput,
-  type CreateTeachingAssignmentInput,
   type CreateTermInput,
   type Cycle,
   type GradeLevel,
   type Group,
   type Level,
   type Subject,
-  type Teacher,
-  type TeachingAssignment,
   type Term,
 } from "../../config/api";
-import { AssignmentsPanel } from "./AssignmentsPanel";
 import { CycleBar } from "./CycleBar";
 import { GradeLevelsPanel } from "./GradeLevelsPanel";
 import { GroupsPanel } from "./GroupsPanel";
 import { LevelsPanel } from "./LevelsPanel";
+import { TuitionPanel } from "./TuitionPanel";
 import { SubjectsPanel } from "./SubjectsPanel";
-import { TeachersPanel } from "./TeachersPanel";
 import { TermsPanel } from "./TermsPanel";
 
 // Gateway base URL for the browser (public env; matches AppShell/compose).
@@ -67,16 +58,10 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [terms, setTerms] = useState<Term[]>([]);
-  const [teachers, setTeachers] = useState<Teacher[]>([]);
 
   const [selectedCycleId, setSelectedCycleId] = useState<string | undefined>(undefined);
   const [selectedLevelId, setSelectedLevelId] = useState<string | undefined>(undefined);
   const [selectedGradeLevelId, setSelectedGradeLevelId] = useState<string | undefined>(undefined);
-
-  // Bumped whenever a group/subject is created so the AssignmentsPanel — which
-  // fetches its own cycle-wide group list independently of the per-grade panels
-  // above — re-fetches and shows the new entry without a full page reload.
-  const [catalogVersion, setCatalogVersion] = useState(0);
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
@@ -85,12 +70,11 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
   useEffect(() => {
     let active = true;
     setLoading(true);
-    Promise.all([listCycles(API_URL), listLevels(API_URL), listTeachers(API_URL)])
-      .then(([cs, ls, ts]) => {
+    Promise.all([listCycles(API_URL), listLevels(API_URL)])
+      .then(([cs, ls]) => {
         if (!active) return;
         setCycles(cs);
         setLevels(ls);
-        setTeachers(ts);
         const preferred = cs.find((c) => c.status === "active") ?? cs[0];
         if (preferred !== undefined) setSelectedCycleId((prev) => prev ?? preferred.id);
       })
@@ -170,13 +154,11 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
   const handleCreateSubject = useCallback(async (input: CreateSubjectInput): Promise<void> => {
     const created = await createSubject(API_URL, input);
     setSubjects((prev) => [...prev, created]);
-    setCatalogVersion((v) => v + 1);
   }, []);
 
   const handleCreateGroup = useCallback(async (input: CreateGroupInput): Promise<void> => {
     const created = await createGroup(API_URL, input);
     setGroups((prev) => [...prev, created]);
-    setCatalogVersion((v) => v + 1);
   }, []);
 
   const handleCreateTerm = useCallback(async (input: CreateTermInput): Promise<void> => {
@@ -184,26 +166,6 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
     setTerms((prev) => [...prev, created]);
   }, []);
 
-  const handleCreateTeacher = useCallback(async (input: CreateTeacherInput): Promise<void> => {
-    const created = await createTeacher(API_URL, input);
-    setTeachers((prev) => [...prev, created]);
-  }, []);
-
-  const handleCreateAssignment = useCallback(async (input: CreateTeachingAssignmentInput): Promise<void> => {
-    await createTeachingAssignment(API_URL, input);
-  }, []);
-
-  // Loaders for the assignments panel — kept here so Catalog stays the single
-  // fetch owner; memoized so the panel's cascade effects don't re-fire.
-  const loadGroupsForAssign = useCallback((cycleId: string): Promise<Group[]> => listGroups(API_URL, cycleId), []);
-  const loadSubjectsForAssign = useCallback(
-    (gradeLevelId: string): Promise<Subject[]> => listSubjects(API_URL, gradeLevelId),
-    [],
-  );
-  const loadAssignmentsForGroup = useCallback(
-    (groupId: string): Promise<TeachingAssignment[]> => listTeachingAssignments(API_URL, { groupId }),
-    [],
-  );
 
   const selectedCycle = cycles.find((c) => c.id === selectedCycleId);
   const selectedLevel = levels.find((l) => l.id === selectedLevelId);
@@ -232,7 +194,7 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
 
       {!loading && loadError === undefined && (
         <div className="fade-up" style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 24 }}>
-          {([["calendar", "lime", "Ciclos", cycles.length], ["graduation", "forest", "Niveles", levels.length], ["students", "purple", "Grados", gradeLevels.length], ["user", "orange", "Profesores", teachers.length]] as const).map(([icon, c, label, val], i) => (
+          {([["calendar", "lime", "Ciclos", cycles.length], ["graduation", "forest", "Niveles", levels.length], ["students", "purple", "Grados", gradeLevels.length]] as const).map(([icon, c, label, val], i) => (
             <div key={i} style={{ flex: "1 1 180px", minWidth: 0, display: "flex", alignItems: "center", gap: 14, padding: "16px 20px", borderRadius: "var(--r-lg)", background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "var(--shadow-card)" }}>
               <div style={{ width: 44, height: 44, borderRadius: 13, flexShrink: 0, display: "grid", placeItems: "center", background: `color-mix(in oklab, var(--${c}) 16%, var(--surface))`, color: `var(--${c})` }}><Icon name={icon} size={22} /></div>
               <div><div style={{ fontSize: 13, color: "var(--text-muted)", fontWeight: 600 }}>{label}</div><div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 22, color: "var(--text)", lineHeight: 1.1 }}>{val}</div></div>
@@ -248,6 +210,13 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
       ) : (
         <div className="fade-up" style={{ display: "grid", gap: 18 }}>
           <CycleBar cycles={cycles} selectedCycleId={selectedCycleId} onSelect={setSelectedCycleId} onCreate={handleCreateCycle} />
+
+          {/*
+            The money screen for the academic catalogue. It reads and writes
+            through finance — the ledger owns prices — but it belongs in front of
+            a director's eyes here, next to the levels it prices.
+          */}
+          {selectedCycle !== undefined && <TuitionPanel cycle={selectedCycle} levels={levels} />}
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 18 }}>
             <LevelsPanel levels={levels} selectedLevelId={selectedLevelId} onSelect={setSelectedLevelId} onCreate={handleCreateLevel} />
@@ -280,19 +249,6 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
                 onCreate={handleCreateGroup}
               />
             )}
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 18 }}>
-            <TeachersPanel teachers={teachers} onCreate={handleCreateTeacher} />
-            <AssignmentsPanel
-              cycles={cycles}
-              teachers={teachers}
-              loadGroups={loadGroupsForAssign}
-              loadSubjects={loadSubjectsForAssign}
-              loadAssignments={loadAssignmentsForGroup}
-              onCreate={handleCreateAssignment}
-              refreshKey={catalogVersion}
-            />
           </div>
         </div>
       )}

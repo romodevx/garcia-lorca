@@ -1,20 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  ConfigError,
   createCycle,
   createGradeLevel,
   createGroup,
   createLevel,
   createSubject,
-  createTeacher,
-  createTeachingAssignment,
   createTerm,
   listCycles,
   listGradeLevels,
   listGroups,
   listLevels,
   listSubjects,
-  listTeachers,
-  listTeachingAssignments,
   listTerms,
 } from "./api";
 
@@ -209,89 +206,59 @@ describe("groups", () => {
   });
 });
 
-describe("teachers", () => {
-  it("createTeacher POSTs firstName/lastName/email with credentials", async () => {
-    const created = { id: "tch1", firstName: "Ada", lastName: "Lovelace", email: "ada@example.com", userId: "" };
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(created, 201));
-    vi.stubGlobal("fetch", fetchMock);
 
-    const res = await createTeacher(BASE, { firstName: "Ada", lastName: "Lovelace", email: "ada@example.com" });
-
-    expect(res).toEqual(created);
-    const [url, init] = lastCall(fetchMock);
-    expect(url).toBe("http://gw/api/v1/config/teachers");
-    expect(init.method).toBe("POST");
-    expect(init.credentials).toBe("include");
-    expect(JSON.parse(init.body as string)).toEqual({ firstName: "Ada", lastName: "Lovelace", email: "ada@example.com" });
+describe("what a failure tells the user", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
-  it("listTeachers GETs with credentials and unwraps the {teachers} envelope", async () => {
-    const teachers = [{ id: "tch1", firstName: "Ada", lastName: "Lovelace", email: "ada@example.com", userId: "" }];
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ teachers }));
-    vi.stubGlobal("fetch", fetchMock);
+  /**
+   * These exist because "No se pudo crear el ciclo. Intenta de nuevo." was the
+   * ONLY thing the catalog said, whatever went wrong.
+   *
+   * The two ways creating a cycle actually fails are a name that already exists
+   * and an end date before the start — and for the first one, "intenta de nuevo"
+   * is advice that will never work. The status is the only signal the client
+   * gets, so it has to survive the throw.
+   */
+  it("carries the status so a duplicate can be told from bad dates", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("Conflict", { status: 409 })));
 
-    const res = await listTeachers(BASE);
+    const err = (await createCycle("http://gw", {
+      name: "Ciclo 2026-2027",
+      startsOn: "2026-08-31",
+      endsOn: "2027-07-09",
+    }).catch((e: unknown) => e)) as ConfigError;
 
-    expect(res).toEqual(teachers);
-    const [url, init] = lastCall(fetchMock);
-    expect(url).toBe("http://gw/api/v1/config/teachers");
-    expect(init.credentials).toBe("include");
-    expect(init.method ?? "GET").toBe("GET");
+    expect(err).toBeInstanceOf(ConfigError);
+    expect(err.status).toBe(409);
+    expect(err.isConflict).toBe(true);
   });
 
-  it("listTeachers returns [] when the envelope key is absent", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({})));
-    await expect(listTeachers(BASE)).resolves.toEqual([]);
-  });
-});
+  it("tells a bad request apart from a conflict", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("Bad Request", { status: 400 })));
 
-describe("teaching assignments", () => {
-  it("createTeachingAssignment POSTs groupId/subjectId/teacherId and NEVER sends cycleId", async () => {
-    const created = { id: "ta1", cycleId: "c1", groupId: "grp1", subjectId: "s1", teacherId: "tch1" };
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(created, 201));
-    vi.stubGlobal("fetch", fetchMock);
+    const err = (await createCycle("http://gw", {
+      name: "Raro",
+      startsOn: "2028-07-10",
+      endsOn: "2027-08-30",
+    }).catch((e: unknown) => e)) as ConfigError;
 
-    const res = await createTeachingAssignment(BASE, { groupId: "grp1", subjectId: "s1", teacherId: "tch1" });
-
-    expect(res).toEqual(created);
-    const [url, init] = lastCall(fetchMock);
-    expect(url).toBe("http://gw/api/v1/config/teaching-assignments");
-    expect(init.method).toBe("POST");
-    expect(init.credentials).toBe("include");
-    const body = JSON.parse(init.body as string);
-    expect(body).toEqual({ groupId: "grp1", subjectId: "s1", teacherId: "tch1" });
-    expect(body).not.toHaveProperty("cycleId");
+    expect(err.status).toBe(400);
+    expect(err.isConflict).toBe(false);
+    expect(err.isInvalid).toBe(true);
   });
 
-  it("listTeachingAssignments unwraps the {teachingAssignments} envelope", async () => {
-    const teachingAssignments = [{ id: "ta1", cycleId: "c1", groupId: "grp1", subjectId: "s1", teacherId: "tch1" }];
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ teachingAssignments }));
-    vi.stubGlobal("fetch", fetchMock);
+  it("keeps the server's words when it sends any", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("cycle name already used", { status: 409 })));
 
-    await expect(listTeachingAssignments(BASE)).resolves.toEqual(teachingAssignments);
-  });
+    const err = (await createCycle("http://gw", {
+      name: "x",
+      startsOn: "2026-01-01",
+      endsOn: "2026-12-31",
+    }).catch((e: unknown) => e)) as ConfigError;
 
-  it("listTeachingAssignments applies the given filters as query params", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ teachingAssignments: [] }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await listTeachingAssignments(BASE, { cycleId: "c1", groupId: "grp1", teacherId: "tch1" });
-    expect(lastCall(fetchMock)[0]).toBe("http://gw/api/v1/config/teaching-assignments?cycleId=c1&groupId=grp1&teacherId=tch1");
-  });
-
-  it("listTeachingAssignments drops empty filters (only groupId given)", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ teachingAssignments: [] }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await listTeachingAssignments(BASE, { groupId: "grp1" });
-    expect(lastCall(fetchMock)[0]).toBe("http://gw/api/v1/config/teaching-assignments?groupId=grp1");
-  });
-
-  it("listTeachingAssignments sends no query string when no filters are given", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ teachingAssignments: [] }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await listTeachingAssignments(BASE);
-    expect(lastCall(fetchMock)[0]).toBe("http://gw/api/v1/config/teaching-assignments");
+    expect(err.detail).toBe("cycle name already used");
   });
 });

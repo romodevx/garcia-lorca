@@ -26,6 +26,8 @@ import (
 	"github.com/garcia-lorca/gen/go/garcialorca/iam/v1/iamv1connect"
 	studentsv1 "github.com/garcia-lorca/gen/go/garcialorca/students/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/students/v1/studentsv1connect"
+	uniformsv1 "github.com/garcia-lorca/gen/go/garcialorca/uniforms/v1"
+	"github.com/garcia-lorca/gen/go/garcialorca/uniforms/v1/uniformsv1connect"
 	"github.com/garcia-lorca/pkg/featureflag"
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
@@ -47,10 +49,15 @@ type stubIAM struct {
 
 func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.ValidateTokenRequest]) (*connect.Response[iamv1.ValidateTokenResponse], error) {
 	perms := map[string][]string{
-		"with-perm":        {"students:create"},
-		"no-perm":          {"students:read"},
-		"config-writer":    {"config:write", "config:read"},
-		"config-reader":    {"config:read"},
+		"with-perm":     {"students:create"},
+		"no-perm":       {"students:read"},
+		"config-writer": {"config:write", "config:read"},
+		"config-reader": {"config:read"},
+		// M13: the staff roster left Configuración, so it answers to its own
+		// permission. A config holder must NOT reach it any more — that split is
+		// the whole point of the move.
+		"teachers-writer":  {"teachers:write", "teachers:read"},
+		"teachers-reader":  {"teachers:read"},
 		"student-enroller": {"students:enroll"},
 		"student-reader":   {"students:read"},
 		"grades-writer":    {"grades:write", "grades:read"},
@@ -65,6 +72,13 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"att-own-reader":   {"attendance_own:read"},
 		"comms-writer":     {"comms:write", "comms:read"},
 		"comms-reader":     {"comms:read"},
+		// The uniform shop's split. The storeroom role holds stock + write and
+		// deliberately NOT uniforms:orders, which carries every pupil's name.
+		"uni-storeroom": {"uniforms:stock", "uniforms:write"},
+		// The same role once the school also lets it take money.
+		"uni-cashier": {"uniforms:stock", "uniforms:write", "finance:write"},
+		// The director, who may read the order list.
+		"uni-director": {"uniforms:stock", "uniforms:write", "uniforms:orders", "finance:write"},
 		// users-writer / roles-writer also hold the permissions they hand out in
 		// the happy-path bodies below: the caller-subset guard only lets an admin
 		// grant or assign permissions it holds itself. A real school admin (the
@@ -444,6 +458,32 @@ func (stubAttendance) ListAttendance(_ context.Context, req *connect.Request[att
 // stubComms echoes a canned device / notification list / marked notification,
 // enough to exercise the comms route security chain end to end. The unread state
 // shows up as an unset read_at, which the edge must render as an empty string.
+// stubUniforms answers enough for the ROUTE tests: what is under test here is
+// the flag guard and the permission split, not the shop's behaviour.
+type stubUniforms struct {
+	uniformsv1connect.UnimplementedUniformsServiceHandler
+}
+
+func (stubUniforms) ListItems(context.Context, *connect.Request[uniformsv1.ListItemsRequest]) (*connect.Response[uniformsv1.ListItemsResponse], error) {
+	return connect.NewResponse(&uniformsv1.ListItemsResponse{}), nil
+}
+
+func (stubUniforms) ListStock(context.Context, *connect.Request[uniformsv1.ListStockRequest]) (*connect.Response[uniformsv1.ListStockResponse], error) {
+	return connect.NewResponse(&uniformsv1.ListStockResponse{}), nil
+}
+
+func (stubUniforms) GetSettings(context.Context, *connect.Request[uniformsv1.GetSettingsRequest]) (*connect.Response[uniformsv1.GetSettingsResponse], error) {
+	return connect.NewResponse(&uniformsv1.GetSettingsResponse{Settings: &uniformsv1.Settings{PickupWindowBusinessDays: 10}}), nil
+}
+
+func (stubUniforms) ListOrders(context.Context, *connect.Request[uniformsv1.ListOrdersRequest]) (*connect.Response[uniformsv1.ListOrdersResponse], error) {
+	return connect.NewResponse(&uniformsv1.ListOrdersResponse{}), nil
+}
+
+func (stubUniforms) CounterSale(context.Context, *connect.Request[uniformsv1.CounterSaleRequest]) (*connect.Response[uniformsv1.CounterSaleResponse], error) {
+	return connect.NewResponse(&uniformsv1.CounterSaleResponse{Order: &uniformsv1.Order{Id: "ord-1", Folio: "U-2026-000001"}}), nil
+}
+
 type stubComms struct {
 	commsv1connect.UnimplementedCommsServiceHandler
 }
@@ -499,6 +539,8 @@ func newTestGateway(t *testing.T, flags map[string]bool) *httptest.Server {
 	attSrv := connectServer(t, attPath, attHandler)
 	comPath, comHandler := commsv1connect.NewCommsServiceHandler(stubComms{})
 	comSrv := connectServer(t, comPath, comHandler)
+	uniPath, uniHandler := uniformsv1connect.NewUniformsServiceHandler(stubUniforms{})
+	uniSrv := connectServer(t, uniPath, uniHandler)
 
 	// A generous burst keeps the limiter out of the way of these route tests;
 	// rate-limit behavior is covered directly in the middleware package.
@@ -512,6 +554,7 @@ func newTestGateway(t *testing.T, flags map[string]bool) *httptest.Server {
 		client.NewFinanceClient(finSrv.URL, finSrv.Client()),
 		client.NewAttendanceClient(attSrv.URL, attSrv.Client()),
 		client.NewCommsClient(comSrv.URL, comSrv.Client()),
+		client.NewUniformsClient(uniSrv.URL, uniSrv.Client()),
 		featureflag.NewInMemory(flags),
 		loginLimiter,
 	)
@@ -645,6 +688,34 @@ func TestGetStudentRouteWithReadPermission200(t *testing.T) {
 
 const validCycleBody = `{"name":"2026-2027","status":"draft","startsOn":"2026-08-01","endsOn":"2027-07-15"}`
 
+// doGatewayWithHeaders is doGateway plus extra headers, for the routes that
+// require one (the counter sale's Idempotency-Key).
+func doGatewayWithHeaders(t *testing.T, gw *httptest.Server, method, path, token, body string, headers map[string]string) *http.Response {
+	t.Helper()
+	var r *http.Request
+	var err error
+	if body == "" {
+		r, err = http.NewRequest(method, gw.URL+path, nil)
+	} else {
+		r, err = http.NewRequest(method, gw.URL+path, strings.NewReader(body))
+	}
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	if token != "" {
+		r.Header.Set("Authorization", "Bearer "+token)
+	}
+	for k, v := range headers {
+		r.Header.Set(k, v)
+	}
+	res, err := gw.Client().Do(r)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+	t.Cleanup(func() { _ = res.Body.Close() })
+	return res
+}
+
 func doGateway(t *testing.T, gw *httptest.Server, method, path, token, body string) *http.Response {
 	t.Helper()
 	var r *http.Request
@@ -718,50 +789,87 @@ func TestConfigReadDisabledModuleIs404(t *testing.T) {
 	}
 }
 
-// The teachers + teaching-assignments routes reuse the exact configWrite/
-// configRead helpers, so the whole guard chain (flag → auth → permission) must
-// apply to them identically. These assert that boundary on the new routes.
+// --- teachers routes: ModuleGuard(teachers) → RequireAuth → RequirePermission
+//
+// M13 moved the staff roster out of Configuración into a module of its own, so
+// the whole guard chain moved with it: the flag is module_teachers and the
+// permission is teachers:read/teachers:write. The last test here is the one that
+// gives the move its meaning — a config holder no longer reaches the roster.
 
 const validAssignmentBody = `{"groupId":"grp-1","subjectId":"sub-1","teacherId":"tch-1"}`
+const validTeacherBody = `{"firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`
 
-func TestTeachingAssignmentDisabledModuleIs404(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{}) // module_config OFF
-	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teaching-assignments", "config-writer", validAssignmentBody)
+func TestTeachersRouteDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_teachers OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teachers", "teachers-reader", "")
 	if res.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", res.StatusCode)
 	}
 }
 
-func TestTeachingAssignmentWriteNoTokenIs401(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_config": true})
-	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teaching-assignments", "", validAssignmentBody)
+func TestTeachersWriteNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_teachers": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teachers", "", validTeacherBody)
 	if res.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", res.StatusCode)
 	}
 }
 
+func TestTeachersWriteReadOnlyPermissionIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_teachers": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teachers", "teachers-reader", validTeacherBody)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+func TestTeachersWriteWithPermissionCreates201(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_teachers": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teachers", "teachers-writer", validTeacherBody)
+	if res.StatusCode != http.StatusCreated {
+		t.Errorf("status = %d, want 201", res.StatusCode)
+	}
+}
+
+func TestTeachersReadWithPermissionLists200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_teachers": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teachers", "teachers-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", res.StatusCode)
+	}
+}
+
+func TestTeachingAssignmentDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_teachers OFF
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teaching-assignments", "teachers-writer", validAssignmentBody)
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
 func TestTeachingAssignmentWriteReadOnlyPermissionIs403(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_config": true})
-	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teaching-assignments", "config-reader", validAssignmentBody)
+	gw := newTestGateway(t, map[string]bool{"module_teachers": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teaching-assignments", "teachers-reader", validAssignmentBody)
 	if res.StatusCode != http.StatusForbidden {
 		t.Errorf("status = %d, want 403", res.StatusCode)
 	}
 }
 
 func TestTeachingAssignmentWriteWithPermissionCreates201(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_config": true})
-	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teaching-assignments", "config-writer", validAssignmentBody)
+	gw := newTestGateway(t, map[string]bool{"module_teachers": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teaching-assignments", "teachers-writer", validAssignmentBody)
 	if res.StatusCode != http.StatusCreated {
 		t.Errorf("status = %d, want 201", res.StatusCode)
 	}
 }
 
-func TestTeacherWriteWithPermissionCreates201(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_config": true})
-	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teachers", "config-writer",
-		`{"firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`)
-	if res.StatusCode != http.StatusCreated {
-		t.Errorf("status = %d, want 201", res.StatusCode)
+// The move only means something if the old key stops working. A holder of
+// config:write ran the staff roster yesterday; today it must not.
+func TestConfigPermissionNoLongerReachesTheStaffRoster(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_teachers": true, "module_config": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teachers", "config-writer", validTeacherBody)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 — config:write must not open the roster", res.StatusCode)
 	}
 }
 
@@ -1051,33 +1159,33 @@ func TestUsersWriteWithRolesPermissionIs403(t *testing.T) {
 // handler validates the iam user (GetUser) before the config write, so a bogus
 // user id maps to 404 and no link is stored.
 
-func TestTeacherLinkDisabledConfigModuleIs404(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_iam": true}) // module_config OFF
-	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teachers/tch-1/user", "config-writer", `{"userId":"usr-1"}`)
+func TestTeacherLinkDisabledTeachersModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_iam": true}) // module_teachers OFF
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teachers/tch-1/user", "teachers-writer", `{"userId":"usr-1"}`)
 	if res.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", res.StatusCode)
 	}
 }
 
 func TestTeacherLinkNoTokenIs401(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_config": true})
-	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teachers/tch-1/user", "", `{"userId":"usr-1"}`)
+	gw := newTestGateway(t, map[string]bool{"module_teachers": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teachers/tch-1/user", "", `{"userId":"usr-1"}`)
 	if res.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", res.StatusCode)
 	}
 }
 
 func TestTeacherLinkReadOnlyPermissionIs403(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_config": true})
-	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teachers/tch-1/user", "config-reader", `{"userId":"usr-1"}`)
+	gw := newTestGateway(t, map[string]bool{"module_teachers": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teachers/tch-1/user", "teachers-reader", `{"userId":"usr-1"}`)
 	if res.StatusCode != http.StatusForbidden {
 		t.Errorf("status = %d, want 403", res.StatusCode)
 	}
 }
 
 func TestTeacherLinkWithPermission200(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_config": true})
-	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teachers/tch-1/user", "config-writer", `{"userId":"usr-1"}`)
+	gw := newTestGateway(t, map[string]bool{"module_teachers": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teachers/tch-1/user", "teachers-writer", `{"userId":"usr-1"}`)
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200", res.StatusCode)
 	}
@@ -1087,7 +1195,7 @@ func TestTeacherLinkWithPermission200(t *testing.T) {
 // config write: iam GetUser NotFound ⇒ 404.
 func TestTeacherLinkBogusUserIs404(t *testing.T) {
 	gw := newTestGateway(t, map[string]bool{"module_config": true})
-	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teachers/tch-1/user", "config-writer", `{"userId":"ghost"}`)
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teachers/tch-1/user", "teachers-writer", `{"userId":"ghost"}`)
 	if res.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", res.StatusCode)
 	}
@@ -2477,5 +2585,118 @@ func TestMobileRefreshRouteEmptyBodyIs401(t *testing.T) {
 	res := doGateway(t, gw, http.MethodPost, "/api/v1/auth/mobile/refresh", "", `{}`)
 	if res.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+// --- M12 uniforms routes -----------------------------------------------------
+
+func TestUniformsDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_uniforms OFF
+	// Even the director must not learn the module exists: a disabled module is
+	// invisible, not merely refused.
+	for _, path := range []string{
+		"/api/v1/uniforms/items",
+		"/api/v1/uniforms/stock",
+		"/api/v1/uniforms/orders",
+		"/api/v1/uniforms/settings",
+	} {
+		res := doGateway(t, gw, http.MethodGet, path, "uni-director", "")
+		if res.StatusCode != http.StatusNotFound {
+			t.Errorf("%s: status = %d, want 404", path, res.StatusCode)
+		}
+	}
+}
+
+func TestUniformsNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_uniforms": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/uniforms/items", "", "")
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
+	}
+}
+
+// TestUniformsStoreroomCanRunTheStoreroom is the point of splitting the read: a
+// Caja/Almacen role that holds no student data must still be able to do the whole
+// of its job.
+func TestUniformsStoreroomCanRunTheStoreroom(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_uniforms": true})
+	for _, path := range []string{"/api/v1/uniforms/items", "/api/v1/uniforms/stock", "/api/v1/uniforms/settings"} {
+		res := doGateway(t, gw, http.MethodGet, path, "uni-storeroom", "")
+		if res.StatusCode != http.StatusOK {
+			t.Errorf("%s: status = %d, want 200", path, res.StatusCode)
+		}
+	}
+}
+
+// TestUniformsOrderListIsOwnerOnly is the other half. The order list carries
+// every pupil's name and purchase history for the whole school, so holding
+// uniforms:stock is deliberately not enough to see it.
+func TestUniformsOrderListIsOwnerOnly(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_uniforms": true})
+
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/uniforms/orders", "uni-storeroom", "")
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("the storeroom read the school roll: status = %d, want 403", res.StatusCode)
+	}
+	res = doGateway(t, gw, http.MethodGet, "/api/v1/uniforms/orders", "uni-director", "")
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("the director cannot read the order list: status = %d, want 200", res.StatusCode)
+	}
+}
+
+// TestUniformsCounterSaleNeedsBothPermissions is the composition: the sale moves
+// goods AND takes money, so holding one right is not enough.
+func TestUniformsCounterSaleNeedsBothPermissions(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_uniforms": true})
+	body := `{"lines":[{"itemId":"it-1","sizeLabel":"8","qty":1}],"method":"cash","note":"x"}`
+
+	res := doGatewayWithHeaders(t, gw, http.MethodPost, "/api/v1/uniforms/counter-sale",
+		"uni-storeroom", body, map[string]string{"Idempotency-Key": "till-1"})
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("without finance:write: status = %d, want 403", res.StatusCode)
+	}
+
+	// And the refusal NAMES what is missing, so the panel can disable the entry
+	// point and say why rather than letting a cashier key in six lines first.
+	var refusal struct {
+		Error struct {
+			Details map[string]string `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&refusal); err != nil {
+		t.Fatalf("the refusal is not the shared envelope: %v", err)
+	}
+	if refusal.Error.Details["missingPermission"] != "finance:write" {
+		t.Errorf("the refusal does not name the missing permission: %v", refusal.Error.Details)
+	}
+
+	res = doGatewayWithHeaders(t, gw, http.MethodPost, "/api/v1/uniforms/counter-sale",
+		"uni-cashier", body, map[string]string{"Idempotency-Key": "till-2"})
+	if res.StatusCode != http.StatusCreated {
+		t.Errorf("with both permissions: status = %d, want 201", res.StatusCode)
+	}
+}
+
+// TestUniformsCounterSaleWithoutTheIdempotencyHeaderIs400: the header is rejected
+// at the edge so the message names it, rather than surfacing as a generic
+// invalid-argument from two services away.
+func TestUniformsCounterSaleWithoutTheIdempotencyHeaderIs400(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_uniforms": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/uniforms/counter-sale", "uni-cashier",
+		`{"lines":[],"method":"cash"}`)
+	if res.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", res.StatusCode)
+	}
+}
+
+// TestUniformsWritesRefuseAReadOnlyCaller: creating a garment or moving stock is
+// not something uniforms:stock alone may do.
+func TestUniformsWritesRefuseAReadOnlyCaller(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_uniforms": true})
+	// A caller with only the read half of the storeroom permission.
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/uniforms/items", "comms-reader",
+		`{"code":"PLA","name":"Playera","priceCents":32000}`)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
 	}
 }

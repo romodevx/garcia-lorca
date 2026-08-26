@@ -3,7 +3,7 @@
 import { useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import type { AdminUser } from "../../admin/api";
-import type { Teacher } from "../../config/api";
+import type { Teacher } from "../../teachers/api";
 import { EmptyHint, ErrorAlert, Section, SelectField } from "./parts";
 
 export interface TeacherLinkPanelProps {

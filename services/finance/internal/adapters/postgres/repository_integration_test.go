@@ -44,6 +44,9 @@ const (
 var migrationFiles = []string{
 	"../../../../../migrations/finance/0001_init.sql",
 	"../../../../../migrations/finance/0002_payment_idempotency.sql",
+	"../../../../../migrations/finance/0003_charge_external_ref.sql",
+	"../../../../../migrations/finance/0004_concept_kind.sql",
+	"../../../../../migrations/finance/0005_tuition_plans.sql",
 }
 
 var (
@@ -62,6 +65,7 @@ const (
 	cycleBulk    = "70000000-0000-0000-0000-000000000002"
 	cycleOverdue = "70000000-0000-0000-0000-000000000003"
 	cycleOrder   = "70000000-0000-0000-0000-000000000004"
+	cycleExtRef  = "70000000-0000-0000-0000-000000000005"
 )
 
 // today is the fixed clock the overdue query is evaluated against; the domain
@@ -553,6 +557,66 @@ func TestCreateChargesBulkIdempotent(t *testing.T) {
 	}
 }
 
+// TestCreateChargesBulkIsIdempotentForREFERENCEDCharges is the case the older
+// test above does not reach, and the one the monthly billing run depends on
+// entirely.
+//
+// A charge with no external ref is deduplicated by (student, cycle, concept). A
+// charge WITH one is deduplicated by the ref instead — that is the whole point
+// of migration 0003, because a school year has ten tuition charges for the same
+// concept and the keyless index forbids the second.
+//
+// The bulk insert names its arbiter explicitly, so it named ONE of the two
+// partial indexes. Referenced charges therefore collided against the index that
+// was not the arbiter, and Postgres raised a duplicate-key error instead of
+// skipping: the second billing run of any month returned a 500 and generated
+// nothing. Found by running the thing twice against a real database.
+func TestCreateChargesBulkIsIdempotentForReferencedCharges(t *testing.T) {
+	ctx := context.Background()
+	const conceptID = "c0000000-0000-0000-0000-0000000000f7"
+	repo := appRepo(t, tenantA)
+	if _, err := repo.CreateConcept(ctx, newConcept(t, conceptID, tenantA, "bulk-referenced", 8000)); err != nil {
+		t.Fatalf("seed concept: %v", err)
+	}
+
+	// Two charges for the SAME student, cycle and concept — September's tuition
+	// and October's. Only the ref tells them apart, which is exactly the shape
+	// the billing run produces.
+	student := "50000000-0000-0000-0000-0000000000f7"
+	// The ids differ between attempts, exactly as they do in life: the billing
+	// run mints a fresh uuid every time it builds a charge, so the ONLY thing
+	// telling a re-run from a first run is the external ref.
+	build := func(idSuffix string) []domain.Charge {
+		var out []domain.Charge
+		for i, month := range []string{"2026-09", "2026-10"} {
+			c := newCharge(t, fmt.Sprintf("d0000000-0000-0000-0000-00000000%s%d", idSuffix, i+1),
+				tenantA, student, cycleBulk, conceptID, 8000, 0, today)
+			withRef, err := c.WithExternalRef("tuition:" + cycleBulk + ":" + student + ":" + month)
+			if err != nil {
+				t.Fatalf("external ref: %v", err)
+			}
+			out = append(out, withRef)
+		}
+		return out
+	}
+
+	created, err := repo.CreateChargesBulk(ctx, build("f7a"))
+	if err != nil {
+		t.Fatalf("first bulk: %v", err)
+	}
+	if created != 2 {
+		t.Fatalf("first bulk created = %d, want 2 — two months of the same concept", created)
+	}
+
+	again, err := repo.CreateChargesBulk(ctx, build("f7b"))
+	if err != nil {
+		t.Fatalf("second bulk must skip, not fail: %v", err)
+	}
+	if again != 0 {
+		t.Errorf("second bulk created = %d, want 0", again)
+	}
+}
+
 // TestGetAccountBalanceMath proves the statement's arithmetic: each charge comes
 // back with its own collected total (resolved in one grouped query), and what is
 // still owed is Effective() - PaidCents.
@@ -708,4 +772,188 @@ func TestListChargesIsEarliestDueFirst(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("ListCharges order = %v, want %v (earliest due first)", got, want)
 	}
+}
+
+// --- external references (M12 uniforms) --------------------------------------
+
+// TestChargeExternalRefAllowsRepeatConcept is the test that would have caught the
+// blocker: `charges` carries UNIQUE (tenant, student, cycle, concept) so a
+// student could only ever be charged a concept ONCE per cycle. A uniforms order
+// needs several — one per delivery, and one per purchase across the school year.
+// Migration 0003 makes that key PARTIAL (charges with no external ref only), so
+// referenced charges are free to repeat while tuition keeps its old rule.
+func TestChargeExternalRefAllowsRepeatConcept(t *testing.T) {
+	ctx := context.Background()
+	const (
+		conceptID = "c0000000-0000-0000-0000-00000000ab01"
+		studentID = "50000000-0000-0000-0000-00000000ab01"
+	)
+	repo := appRepo(t, tenantA)
+	if _, err := repo.CreateConcept(ctx, newConcept(t, conceptID, tenantA, "uniformes", 145000)); err != nil {
+		t.Fatalf("seed concept: %v", err)
+	}
+
+	first := withExternalRef(t,
+		newCharge(t, "d0000000-0000-0000-0000-00000000ab01", tenantA, studentID, cycleExtRef, conceptID, 89000, 0, today),
+		"uniforms:ful-a")
+	if _, err := repo.CreateCharge(ctx, first); err != nil {
+		t.Fatalf("first referenced charge: %v", err)
+	}
+
+	// Same student, same cycle, same concept — and it must go through, because
+	// this is delivery -B of the same order.
+	second := withExternalRef(t,
+		newCharge(t, "d0000000-0000-0000-0000-00000000ab02", tenantA, studentID, cycleExtRef, conceptID, 65000, 0, today),
+		"uniforms:ful-b")
+	saved, err := repo.CreateCharge(ctx, second)
+	if err != nil {
+		t.Fatalf("second referenced charge must be allowed: %v", err)
+	}
+	if saved.ExternalRef() != "uniforms:ful-b" {
+		t.Errorf("external ref not persisted, got %q", saved.ExternalRef())
+	}
+}
+
+// TestChargeExternalRefIsUnique proves the reference itself is deduplicated: a
+// retried "create the charge for this fulfillment" must not bill the family
+// twice. Same guarantee RegisterPayment's idempotency key gives, same partial
+// index shape (migration 0002).
+func TestChargeExternalRefIsUnique(t *testing.T) {
+	ctx := context.Background()
+	const (
+		conceptID = "c0000000-0000-0000-0000-00000000ab02"
+		studentID = "50000000-0000-0000-0000-00000000ab02"
+	)
+	repo := appRepo(t, tenantA)
+	if _, err := repo.CreateConcept(ctx, newConcept(t, conceptID, tenantA, "uniformes-dup", 145000)); err != nil {
+		t.Fatalf("seed concept: %v", err)
+	}
+
+	one := withExternalRef(t,
+		newCharge(t, "d0000000-0000-0000-0000-00000000ab03", tenantA, studentID, cycleExtRef, conceptID, 89000, 0, today),
+		"uniforms:ful-dup")
+	if _, err := repo.CreateCharge(ctx, one); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+
+	// A different charge id, but the same origin row: the retry of a call whose
+	// response was lost.
+	retry := withExternalRef(t,
+		newCharge(t, "d0000000-0000-0000-0000-00000000ab04", tenantA, "50000000-0000-0000-0000-00000000ab09", cycleExtRef, conceptID, 89000, 0, today),
+		"uniforms:ful-dup")
+	if _, err := repo.CreateCharge(ctx, retry); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Errorf("a repeated external ref must conflict, got %v", err)
+	}
+}
+
+// TestChargeKeylessStillOnePerCycle is the regression guard for the dangerous
+// half of migration 0003. CreateChargesBulk relies on ON CONFLICT DO NOTHING to
+// make re-running a generation a no-op; if the unique key stopped covering
+// keyless charges, GenerateCharges would silently re-bill the whole school.
+func TestChargeKeylessStillOnePerCycle(t *testing.T) {
+	ctx := context.Background()
+	const (
+		conceptID = "c0000000-0000-0000-0000-00000000ab03"
+		studentID = "50000000-0000-0000-0000-00000000ab03"
+	)
+	repo := appRepo(t, tenantA)
+	if _, err := repo.CreateConcept(ctx, newConcept(t, conceptID, tenantA, "colegiatura-guard", 8000)); err != nil {
+		t.Fatalf("seed concept: %v", err)
+	}
+
+	tuition := newCharge(t, "d0000000-0000-0000-0000-00000000ab05", tenantA, studentID, cycleExtRef, conceptID, 8000, 0, today)
+	if _, err := repo.CreateCharge(ctx, tuition); err != nil {
+		t.Fatalf("first tuition charge: %v", err)
+	}
+
+	dup := newCharge(t, "d0000000-0000-0000-0000-00000000ab06", tenantA, studentID, cycleExtRef, conceptID, 8000, 0, today)
+	if _, err := repo.CreateCharge(ctx, dup); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Errorf("a keyless charge must still be one per concept per cycle, got %v", err)
+	}
+
+	// And the bulk path — the one that bills the whole school — stays a no-op.
+	again, err := repo.CreateChargesBulk(ctx, []domain.Charge{tuition, dup})
+	if err != nil {
+		t.Fatalf("bulk re-run: %v", err)
+	}
+	if again != 0 {
+		t.Fatalf("re-running a generation created %d rows; it must create 0", again)
+	}
+}
+
+// TestCancelChargeIfUnpaidRefusesCollectedMoney proves the guard the uniforms
+// expiry sweep stands on, end to end: with money posted, the cancel is refused
+// and the stored charge is left untouched.
+func TestCancelChargeIfUnpaidRefusesCollectedMoney(t *testing.T) {
+	ctx := context.Background()
+	const (
+		conceptID = "c0000000-0000-0000-0000-00000000ab04"
+		studentID = "50000000-0000-0000-0000-00000000ab04"
+		chargeID  = "d0000000-0000-0000-0000-00000000ab07"
+	)
+	repo := appRepo(t, tenantA)
+	if _, err := repo.CreateConcept(ctx, newConcept(t, conceptID, tenantA, "uniformes-race", 145000)); err != nil {
+		t.Fatalf("seed concept: %v", err)
+	}
+	c := withExternalRef(t,
+		newCharge(t, chargeID, tenantA, studentID, cycleExtRef, conceptID, 89000, 0, today),
+		"uniforms:ful-race")
+	if _, err := repo.CreateCharge(ctx, c); err != nil {
+		t.Fatalf("seed charge: %v", err)
+	}
+	if _, _, _, err := repo.RegisterPayment(ctx,
+		newPayment(t, "e0000000-0000-0000-0000-00000000ab07", tenantA, chargeID, 89000, paidAt), derive); err != nil {
+		t.Fatalf("cashier collects: %v", err)
+	}
+
+	// The sweep fires a moment later. It must back off.
+	if _, err := repo.CancelChargeIfUnpaid(ctx, chargeID); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Fatalf("want KindConflict cancelling a paid charge, got %v", err)
+	}
+	after, err := repo.GetCharge(ctx, chargeID)
+	if err != nil {
+		t.Fatalf("re-read: %v", err)
+	}
+	if after.Charge.Status() == domain.StatusCancelled {
+		t.Error("the charge was cancelled despite carrying a payment")
+	}
+}
+
+// TestCancelChargeIfUnpaidCancelsCleanCharge is the other half: nothing
+// collected, so the hold really did lapse and the charge is voided.
+func TestCancelChargeIfUnpaidCancelsCleanCharge(t *testing.T) {
+	ctx := context.Background()
+	const (
+		conceptID = "c0000000-0000-0000-0000-00000000ab05"
+		studentID = "50000000-0000-0000-0000-00000000ab05"
+		chargeID  = "d0000000-0000-0000-0000-00000000ab08"
+	)
+	repo := appRepo(t, tenantA)
+	if _, err := repo.CreateConcept(ctx, newConcept(t, conceptID, tenantA, "uniformes-lapse", 145000)); err != nil {
+		t.Fatalf("seed concept: %v", err)
+	}
+	c := withExternalRef(t,
+		newCharge(t, chargeID, tenantA, studentID, cycleExtRef, conceptID, 89000, 0, today),
+		"uniforms:ful-lapse")
+	if _, err := repo.CreateCharge(ctx, c); err != nil {
+		t.Fatalf("seed charge: %v", err)
+	}
+
+	cancelled, err := repo.CancelChargeIfUnpaid(ctx, chargeID)
+	if err != nil {
+		t.Fatalf("CancelChargeIfUnpaid: %v", err)
+	}
+	if cancelled.Charge.Status() != domain.StatusCancelled {
+		t.Errorf("want cancelled, got %q", cancelled.Charge.Status())
+	}
+}
+
+// withExternalRef tags a charge for the tests that need one.
+func withExternalRef(t *testing.T, c domain.Charge, ref string) domain.Charge {
+	t.Helper()
+	tagged, err := c.WithExternalRef(ref)
+	if err != nil {
+		t.Fatalf("WithExternalRef(%q): %v", ref, err)
+	}
+	return tagged
 }

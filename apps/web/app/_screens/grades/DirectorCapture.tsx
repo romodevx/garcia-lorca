@@ -5,7 +5,8 @@ import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
 import { Icon, type IconName } from "../../_design/Icon";
 import type { ColorKey } from "../../_design/colors";
-import { listGroups, listSubjects, listTeachers, listTeachingAssignments, listTerms, type Group, type Subject, type Teacher, type TeachingAssignment, type Term } from "../../config/api";
+import { listGroups, listSubjects, listTerms, type Group, type Subject, type Term } from "../../config/api";
+import { listTeachers, listTeachingAssignments, type Teacher, type TeachingAssignment } from "../../teachers/api";
 import { captureGrade, getRoster, type RosterRow } from "../../grades/api";
 import { listStudents, type Student } from "../../students/api";
 

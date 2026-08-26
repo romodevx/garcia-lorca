@@ -50,7 +50,67 @@ func (c *Client) ByID(ctx context.Context, id string) (ports.CycleRef, error) {
 	if err != nil {
 		return ports.CycleRef{}, mapConfigErr(err, "cycle")
 	}
-	return ports.CycleRef{ID: res.Msg.GetCycle().GetId()}, nil
+	cycle := res.Msg.GetCycle()
+	return ports.CycleRef{
+		ID:       cycle.GetId(),
+		StartsOn: cycle.GetStartsOn().AsTime(),
+	}, nil
+}
+
+// ListLevels returns the school's levels. Finance reads them only to report the
+// ones nobody has priced yet — by name, because the reader is a person.
+func (c *Client) ListLevels(ctx context.Context) ([]ports.LevelRef, error) {
+	res, err := c.rpc.ListLevels(ctx, connect.NewRequest(&configv1.ListLevelsRequest{}))
+	if err != nil {
+		return nil, mapConfigErr(err, "levels")
+	}
+	out := make([]ports.LevelRef, 0, len(res.Msg.GetLevels()))
+	for _, l := range res.Msg.GetLevels() {
+		out = append(out, ports.LevelRef{ID: l.GetId(), Name: l.GetName()})
+	}
+	return out, nil
+}
+
+// GroupLevels resolves every group of a cycle to the level it belongs to.
+//
+// It is three reads and not one, because config exposes the path in pieces:
+// groups name a GRADE, grades name a LEVEL, and grades are listed per level. The
+// alternative — a round trip per enrolment during the billing run — would turn a
+// school of six hundred into six hundred RPCs.
+func (c *Client) GroupLevels(ctx context.Context, cycleID string) ([]ports.GroupLevel, error) {
+	levels, err := c.ListLevels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	levelOfGrade := map[string]string{}
+	for _, level := range levels {
+		res, err := c.rpc.ListGradeLevels(ctx, connect.NewRequest(&configv1.ListGradeLevelsRequest{
+			LevelId: level.ID,
+		}))
+		if err != nil {
+			return nil, mapConfigErr(err, "grade levels")
+		}
+		for _, g := range res.Msg.GetGradeLevels() {
+			levelOfGrade[g.GetId()] = level.ID
+		}
+	}
+
+	res, err := c.rpc.ListGroups(ctx, connect.NewRequest(&configv1.ListGroupsRequest{CycleId: cycleID}))
+	if err != nil {
+		return nil, mapConfigErr(err, "groups")
+	}
+	out := make([]ports.GroupLevel, 0, len(res.Msg.GetGroups()))
+	for _, g := range res.Msg.GetGroups() {
+		levelID, ok := levelOfGrade[g.GetGradeLevelId()]
+		if !ok {
+			// A group whose grade config no longer lists. Skipping it means its
+			// pupils go unbilled and get reported as a level without a plan,
+			// which is louder than a silent zero-peso charge.
+			continue
+		}
+		out = append(out, ports.GroupLevel{GroupID: g.GetId(), LevelID: levelID})
+	}
+	return out, nil
 }
 
 // mapConfigErr translates a Connect transport error to the port's error

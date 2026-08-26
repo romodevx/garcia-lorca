@@ -45,6 +45,11 @@ type Charge struct {
 	discount    Cents
 	dueDate     time.Time
 	status      string
+	// externalRef ties this charge to the row that caused it in another module
+	// (e.g. a uniforms fulfillment). Empty for the school's own charges —
+	// tuition and the like — which is what keeps the "one concept per cycle"
+	// rule applying to them and only to them. See migrations/finance/0003.
+	externalRef string
 }
 
 // NewCharge builds a validated Charge in the pending status. Every identity
@@ -169,6 +174,47 @@ func (c Charge) WithStatus(paidCents int64) Charge {
 	return c
 }
 
+// maxExternalRefLen bounds the reference so a caller cannot push an unbounded
+// string into the ledger's unique index.
+const maxExternalRefLen = 128
+
+// WithExternalRef returns a copy tagged with the reference of the row that
+// caused this charge in another module. It is what lets a student be charged
+// the same concept more than once in a cycle: the "one per cycle" unique index
+// is partial and only covers charges with no reference, so tuition keeps its
+// idempotency while a uniforms fulfillment gets its own identity.
+//
+// The reference is trimmed; blank or over-long is KindInvalid.
+func (c Charge) WithExternalRef(ref string) (Charge, error) {
+	trimmed := strings.TrimSpace(ref)
+	if trimmed == "" {
+		return Charge{}, glerrors.New(glerrors.KindInvalid, "external ref is required")
+	}
+	if len(trimmed) > maxExternalRefLen {
+		return Charge{}, glerrors.New(glerrors.KindInvalid, "external ref is too long")
+	}
+	c.externalRef = trimmed
+	return c, nil
+}
+
+// CancelIfUnpaid returns a cancelled copy ONLY if nothing has been collected
+// against the charge. Cancel deliberately voids a charge regardless of its
+// payments (the school does that on purpose, see above); this is the guarded
+// variant an automated caller needs.
+//
+// The uniforms expiry sweep is the reason it exists: it voids the charge for a
+// hold nobody came to pay for, and it runs while the cashier may be taking that
+// exact payment. Refusing to cancel a charge with money on it turns that race
+// into an observable outcome — the sweep backs off and leaves the goods
+// reserved — instead of a silently voided charge with collected money behind it.
+// paidCents is read by the caller under the charge's row lock.
+func (c Charge) CancelIfUnpaid(paidCents int64) (Charge, error) {
+	if paidCents > 0 {
+		return Charge{}, glerrors.New(glerrors.KindConflict, "charge has payments and cannot be cancelled")
+	}
+	return c.Cancel()
+}
+
 // Accessors.
 func (c Charge) ID() string          { return c.id }
 func (c Charge) TenantID() string    { return c.tenantID }
@@ -180,3 +226,4 @@ func (c Charge) Amount() Cents       { return c.amount }
 func (c Charge) Discount() Cents     { return c.discount }
 func (c Charge) DueDate() time.Time  { return c.dueDate }
 func (c Charge) Status() string      { return c.status }
+func (c Charge) ExternalRef() string { return c.externalRef }

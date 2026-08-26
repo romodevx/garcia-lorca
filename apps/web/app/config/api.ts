@@ -105,46 +105,6 @@ export interface CreateGroupInput {
   capacity: number;
 }
 
-export interface Teacher {
-  id: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  /** Reserved for a future IAM link; empty until a teacher is linked to a login. */
-  userId: string;
-}
-
-export interface CreateTeacherInput {
-  firstName: string;
-  lastName: string;
-  email: string;
-  /** Reserved for a future IAM link; omitted by the UI today. */
-  userId?: string;
-}
-
-export interface TeachingAssignment {
-  id: string;
-  /** Server-derived from the group's cycle — never sent by the client. */
-  cycleId: string;
-  groupId: string;
-  subjectId: string;
-  teacherId: string;
-}
-
-/** The client-supplied edges of the knot. cycleId is derived server-side. */
-export interface CreateTeachingAssignmentInput {
-  groupId: string;
-  subjectId: string;
-  teacherId: string;
-}
-
-/** Optional list filters; empty values are dropped from the query string. */
-export interface TeachingAssignmentFilters {
-  cycleId?: string;
-  groupId?: string;
-  teacherId?: string;
-}
-
 // --- transport helpers ----------------------------------------------------
 
 const BASE_PATH = "/api/v1/config";
@@ -154,6 +114,43 @@ function url(baseURL: string, path: string): string {
 }
 
 /** POST a JSON body and return the created entity. Throws on any non-2xx. */
+/**
+ * A config failure the UI can act on.
+ *
+ * The status is the point. Creating a cycle fails in exactly two ways a person
+ * causes — a name that already exists, and an end date before the start — and
+ * they need different advice. Throwing a bare Error left the catalog with one
+ * sentence for both, and for the duplicate that sentence was "intenta de nuevo",
+ * which is advice that can never work.
+ */
+export class ConfigError extends Error {
+  readonly status: number;
+  /** The server's own words, when it sent any. */
+  readonly detail: string;
+
+  constructor(status: number, detail: string) {
+    super(detail !== "" ? detail : `HTTP ${status}`);
+    this.name = "ConfigError";
+    this.status = status;
+    this.detail = detail;
+  }
+
+  /** The thing already exists. Retrying the same input never helps. */
+  get isConflict(): boolean {
+    return this.status === 409;
+  }
+
+  /** The input itself is wrong; changing it will help. */
+  get isInvalid(): boolean {
+    return this.status === 400;
+  }
+}
+
+async function configFailure(res: Response): Promise<ConfigError> {
+  const body = await res.text().catch(() => "");
+  return new ConfigError(res.status, body.trim());
+}
+
 async function postJSON<T>(baseURL: string, path: string, body: unknown): Promise<T> {
   const res = await authFetch(url(baseURL, `${BASE_PATH}${path}`), {
     method: "POST",
@@ -162,7 +159,7 @@ async function postJSON<T>(baseURL: string, path: string, body: unknown): Promis
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    throw new Error(`config ${path}: HTTP ${res.status}`);
+    throw await configFailure(res);
   }
   return (await res.json()) as T;
 }
@@ -171,7 +168,7 @@ async function postJSON<T>(baseURL: string, path: string, body: unknown): Promis
 async function getList<T>(baseURL: string, path: string, key: string): Promise<T[]> {
   const res = await authFetch(url(baseURL, `${BASE_PATH}${path}`), { credentials: "include" });
   if (!res.ok) {
-    throw new Error(`config ${path}: HTTP ${res.status}`);
+    throw await configFailure(res);
   }
   const data = (await res.json()) as Record<string, T[] | undefined>;
   return data[key] ?? [];
@@ -249,29 +246,3 @@ export function listGroups(baseURL: string, cycleId: string, gradeLevelId?: stri
   return getList<Group>(baseURL, `/groups${query({ cycleId, gradeLevelId })}`, "groups");
 }
 
-// --- teachers -------------------------------------------------------------
-
-export function createTeacher(baseURL: string, input: CreateTeacherInput): Promise<Teacher> {
-  return postJSON<Teacher>(baseURL, "/teachers", input);
-}
-
-export function listTeachers(baseURL: string): Promise<Teacher[]> {
-  return getList<Teacher>(baseURL, "/teachers", "teachers");
-}
-
-// --- teaching assignments (the knot) --------------------------------------
-
-export function createTeachingAssignment(
-  baseURL: string,
-  input: CreateTeachingAssignmentInput,
-): Promise<TeachingAssignment> {
-  return postJSON<TeachingAssignment>(baseURL, "/teaching-assignments", input);
-}
-
-export function listTeachingAssignments(
-  baseURL: string,
-  filters: TeachingAssignmentFilters = {},
-): Promise<TeachingAssignment[]> {
-  const qs = query({ cycleId: filters.cycleId, groupId: filters.groupId, teacherId: filters.teacherId });
-  return getList<TeachingAssignment>(baseURL, `/teaching-assignments${qs}`, "teachingAssignments");
-}

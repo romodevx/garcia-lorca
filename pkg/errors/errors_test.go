@@ -1,7 +1,9 @@
 package errors_test
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -56,5 +58,50 @@ func errorsIs(err, target error) bool {
 		if err == nil {
 			return false
 		}
+	}
+}
+
+// TestSafeMessageStopsAtTheTypedMessage exists because Error() deliberately
+// includes the wrapped cause — which is right for a log line and wrong for a
+// response.
+//
+// The leak is easy to miss: a handler that maps a Kind to a status and then
+// hands the error straight to the client ships whatever the driver said with it.
+// A unique-violation message carries the constraint name and the SQLSTATE, and
+// on some constraints it carries the conflicting VALUE too.
+func TestSafeMessageStopsAtTheTypedMessage(t *testing.T) {
+	driver := errors.New(`ERROR: duplicate key value violates unique constraint "uniform_items_tenant_id_code_key" (SQLSTATE 23505)`)
+	wrapped := glerrors.Wrap(glerrors.KindConflict, "a garment with that code already exists", driver)
+
+	if got := glerrors.SafeMessage(wrapped); got != "a garment with that code already exists" {
+		t.Errorf("SafeMessage = %q; it must stop at the message we wrote", got)
+	}
+	// Error() still carries everything, because that is what a log wants.
+	if !strings.Contains(wrapped.Error(), "SQLSTATE") {
+		t.Error("Error() should still carry the cause for logs")
+	}
+}
+
+func TestSafeMessageOnAPlainError(t *testing.T) {
+	// Something that is not one of ours could be carrying anything, so it gets
+	// nothing: a caller learning that a host is unreachable learns the host.
+	if got := glerrors.SafeMessage(errors.New("dial tcp 10.0.0.7:5432: connect: refused")); got != "internal error" {
+		t.Errorf("SafeMessage = %q, want a bare internal error", got)
+	}
+}
+
+func TestSafeMessageOnNil(t *testing.T) {
+	if got := glerrors.SafeMessage(nil); got != "" {
+		t.Errorf("SafeMessage(nil) = %q, want empty", got)
+	}
+}
+
+// TestSafeMessageUnwrapsToTheOutermostTyped: when our own errors nest, the
+// outermost one is the one written for this caller.
+func TestSafeMessageNested(t *testing.T) {
+	inner := glerrors.Wrap(glerrors.KindConflict, "row lock lost", errors.New("pq: deadlock detected"))
+	outer := glerrors.Wrap(glerrors.KindConflict, "esa talla ya no está disponible", inner)
+	if got := glerrors.SafeMessage(outer); got != "esa talla ya no está disponible" {
+		t.Errorf("SafeMessage = %q", got)
 	}
 }

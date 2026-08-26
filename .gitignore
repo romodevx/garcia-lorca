@@ -58,3 +58,7 @@ crash.log
 # pnpm store written by the dockerized web container (bind mount)
 .pnpm-store/
 .gstack/
+
+# Playwright run output: traces, videos and screenshots of the last run.
+apps/web/test-results/
+apps/web/playwright-report/
