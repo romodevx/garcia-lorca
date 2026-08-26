@@ -110,7 +110,7 @@ services:
       ATTENDANCE_BASE_URL: "http://attendance:8080"
       COMMS_BASE_URL: "http://comms:8080"
       UNIFORMS_BASE_URL: "http://uniforms:8080"
-      ENABLED_MODULES: "iam,gateway,students,config,grades,finance,attendance,comms,uniforms"
+      ENABLED_MODULES: "iam,gateway,students,config,teachers,grades,finance,attendance,comms,uniforms"
       # Browser origin(s) allowed to call the gateway cross-origin with cookies.
       # Tracks WEB_HOST_PORT so a remapped web port stays permitted.
       WEB_ORIGIN: "http://localhost:${WEB_HOST_PORT:-3000}"

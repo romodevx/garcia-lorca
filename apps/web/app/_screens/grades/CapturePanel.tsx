@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, type ReactElement } from "react";
-import type { TeachingAssignment, Term } from "../../config/api";
+import type { Term } from "../../config/api";
+import type { TeachingAssignment } from "../../teachers/api";
 import type { RosterRow } from "../../grades/api";
 import { EmptyHint, ErrorAlert, Section, SelectField, type SelectOption } from "../config/parts";
 import { GradeRow } from "./GradeRow";

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as gradesApi from "../../grades/api";
 import * as configApi from "../../config/api";
+import * as teachersApi from "../../teachers/api";
 import * as studentsApi from "../../students/api";
 import { GradeCapture } from "./GradeCapture";
 
@@ -16,11 +17,13 @@ vi.mock("../../grades/api", () => ({
   listGradeEntries: vi.fn(),
 }));
 vi.mock("../../config/api", () => ({
-  listTeachingAssignments: vi.fn(),
   listTerms: vi.fn(),
   listGroups: vi.fn(),
   listSubjects: vi.fn(),
+}));
+vi.mock("../../teachers/api", () => ({
   listTeachers: vi.fn(),
+  listTeachingAssignments: vi.fn(),
 }));
 vi.mock("../../students/api", () => ({
   listStudents: vi.fn(),
@@ -28,6 +31,7 @@ vi.mock("../../students/api", () => ({
 
 const grades = vi.mocked(gradesApi);
 const config = vi.mocked(configApi);
+const teachers = vi.mocked(teachersApi);
 const students = vi.mocked(studentsApi);
 
 const assignment = { id: "asg1", cycleId: "c1", groupId: "grp1", subjectId: "sub1", teacherId: "tch1" };
@@ -50,10 +54,10 @@ const ada = {
 const rosterRow = { enrollmentId: "en1", studentId: "st1", value: 8, hasValue: true };
 
 beforeEach(() => {
-  config.listTeachingAssignments.mockResolvedValue([assignment]);
+  teachers.listTeachingAssignments.mockResolvedValue([assignment]);
   config.listGroups.mockResolvedValue([group]);
   config.listSubjects.mockResolvedValue([subject]);
-  config.listTeachers.mockResolvedValue([teacher]);
+  teachers.listTeachers.mockResolvedValue([teacher]);
   config.listTerms.mockResolvedValue([term]);
   students.listStudents.mockResolvedValue([ada]);
   grades.getRoster.mockResolvedValue([rosterRow]);

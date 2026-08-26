@@ -2,15 +2,13 @@
 
 import { useEffect, useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
+import type { Cycle, Group, Subject } from "../../config/api";
 import type {
   CreateTeachingAssignmentInput,
-  Cycle,
-  Group,
-  Subject,
   Teacher,
   TeachingAssignment,
-} from "../../config/api";
-import { EmptyHint, ErrorAlert, Section, SelectField, type SelectOption } from "./parts";
+} from "../../teachers/api";
+import { EmptyHint, ErrorAlert, Section, SelectField, type SelectOption } from "../config/parts";
 
 export interface AssignmentsPanelProps {
   cycles: readonly Cycle[];

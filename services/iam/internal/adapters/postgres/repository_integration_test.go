@@ -585,6 +585,11 @@ func TestSeededRolesHoldTheirPermissions(t *testing.T) {
 			// M12: the owner holds all four so it can delegate them.
 			"uniforms:stock", "uniforms:orders", "uniforms:write",
 			"uniforms_own:read", "uniforms_own:write",
+			// M14: teachers left Configuración and became a module of its own,
+			// so it gates on its own permission — the point being that a school
+			// can hand somebody the staff roster without handing them the whole
+			// academic catalogue.
+			"teachers:read", "teachers:write",
 		}},
 		{"guardian", []string{
 			"family:read",

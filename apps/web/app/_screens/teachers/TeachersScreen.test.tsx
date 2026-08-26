@@ -1,0 +1,79 @@
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import * as configApi from "../../config/api";
+import * as teachersApi from "../../teachers/api";
+import { TeachersScreen } from "./TeachersScreen";
+
+vi.mock("../../teachers/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof teachersApi>()),
+  listTeachers: vi.fn(),
+  createTeacher: vi.fn(),
+  listTeachingAssignments: vi.fn(),
+  createTeachingAssignment: vi.fn(),
+}));
+vi.mock("../../config/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof configApi>()),
+  listCycles: vi.fn(),
+  listGroups: vi.fn(),
+  listSubjects: vi.fn(),
+}));
+
+const teachers = vi.mocked(teachersApi);
+const config = vi.mocked(configApi);
+
+const ada = { id: "t1", firstName: "Ada", lastName: "Lovelace", email: "ada@escuela.mx", userId: "" };
+
+beforeEach(() => {
+  teachers.listTeachers.mockResolvedValue([ada]);
+  teachers.listTeachingAssignments.mockResolvedValue([]);
+  config.listCycles.mockResolvedValue([
+    { id: "c1", name: "2026-2027", status: "active", startsOn: "2026-08-01", endsOn: "2027-06-30" },
+  ]);
+  config.listGroups.mockResolvedValue([]);
+  config.listSubjects.mockResolvedValue([]);
+});
+afterEach(() => vi.clearAllMocks());
+
+describe("the Docentes module", () => {
+  it("opens on the staff roster", async () => {
+    render(<TeachersScreen onBack={() => {}} />);
+
+    expect(await screen.findByRole("heading", { name: "Docentes", level: 1 })).toBeInTheDocument();
+    // Scoped to the roster list: the assignment panel offers every teacher as a
+    // dropdown option too, so the name appears twice on a working screen.
+    const roster = await screen.findByRole("list");
+    expect(within(roster).getByText(/Ada Lovelace/)).toBeInTheDocument();
+  });
+
+  it("adds a teacher to the roster", async () => {
+    const user = userEvent.setup();
+    teachers.createTeacher.mockResolvedValue({
+      id: "t2", firstName: "Grace", lastName: "Hopper", email: "grace@escuela.mx", userId: "",
+    });
+    render(<TeachersScreen onBack={() => {}} />);
+    const form = await screen.findByRole("form", { name: "Agregar profesor" });
+
+    await user.type(within(form).getByLabelText(/Nombre/), "Grace");
+    await user.type(within(form).getByLabelText(/Apellidos/), "Hopper");
+    await user.type(within(form).getByLabelText(/Correo/), "grace@escuela.mx");
+    await user.click(within(form).getByRole("button", { name: "Crear profesor" }));
+
+    await waitFor(() => expect(teachers.createTeacher).toHaveBeenCalled());
+    const roster = await screen.findByRole("list");
+    await waitFor(() => expect(within(roster).getByText(/Grace Hopper/)).toBeInTheDocument());
+  });
+
+  it("says so, instead of showing empty dropdowns, when the catalogue is closed to this account", async () => {
+    // Assigning a teacher needs groups and subjects, which belong to
+    // Configuración. A teachers:read holder without config:read gets a 403 there
+    // — and an empty dropdown would read as "the school has no groups".
+    config.listCycles.mockRejectedValue(new configApi.ConfigError(403, "forbidden"));
+    render(<TeachersScreen onBack={() => {}} />);
+
+    expect(await screen.findByText(/no tienes acceso al catálogo/i)).toBeInTheDocument();
+    // The roster itself still works: it does not depend on the catalogue.
+    expect(await screen.findByText(/Ada Lovelace/)).toBeInTheDocument();
+  });
+});

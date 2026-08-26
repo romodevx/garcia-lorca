@@ -185,8 +185,12 @@ func main() {
 //	/api/v1/users/..., /roles/... → ModuleGuard(iam) → RequireAuth → rotation →
 //	                             RequirePermission(users:*/roles:* by verb) → iam
 //	                             admin (user/role CRUD)
-//	POST /api/v1/config/teachers/{id}/user → ModuleGuard(config) → RequireAuth →
-//	                             rotation → RequirePermission(config:write) →
+//	/api/v1/teachers/..., /teaching-assignments/... → ModuleGuard(teachers) →
+//	                             RequireAuth → rotation →
+//	                             RequirePermission(teachers:read|write) → config
+//	                             (staff roster + assignments)
+//	POST /api/v1/teachers/{id}/user → ModuleGuard(teachers) → RequireAuth →
+//	                             rotation → RequirePermission(teachers:write) →
 //	                             validate iam user (GetUser) then config SetTeacherUser
 //	/healthz, /readyz          → liveness + iam reachability
 //
@@ -292,10 +296,22 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/config/terms", configRead(configH.ListTerms))
 	mux.Handle("POST /api/v1/config/groups", configWrite(configH.CreateGroup))
 	mux.Handle("GET /api/v1/config/groups", configRead(configH.ListGroups))
-	mux.Handle("POST /api/v1/config/teachers", configWrite(configH.CreateTeacher))
-	mux.Handle("GET /api/v1/config/teachers", configRead(configH.ListTeachers))
-	mux.Handle("POST /api/v1/config/teaching-assignments", configWrite(configH.CreateTeachingAssignment))
-	mux.Handle("GET /api/v1/config/teaching-assignments", configRead(configH.ListTeachingAssignments))
+
+	// M14 teachers (staff roster + who teaches what): the same config service
+	// answers these, but they are a MODULE of their own now, so they carry their
+	// own flag and their own permission. A school can hand somebody the staff
+	// roster without handing them the cycles, levels, grades and groups too —
+	// which is exactly what config:read used to force.
+	teachersWrite := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("teachers", requireAuthChanged(middleware.RequirePermission("teachers:write")(http.HandlerFunc(h))))
+	}
+	teachersRead := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("teachers", requireAuthChanged(middleware.RequirePermission("teachers:read")(http.HandlerFunc(h))))
+	}
+	mux.Handle("POST /api/v1/teachers", teachersWrite(configH.CreateTeacher))
+	mux.Handle("GET /api/v1/teachers", teachersRead(configH.ListTeachers))
+	mux.Handle("POST /api/v1/teaching-assignments", teachersWrite(configH.CreateTeachingAssignment))
+	mux.Handle("GET /api/v1/teaching-assignments", teachersRead(configH.ListTeachingAssignments))
 
 	// M07 grades (grade capture): flag-guarded, authenticated + rotation-enforced,
 	// permission-gated. Capture is a write (grades:write); roster + list are reads
@@ -569,6 +585,6 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// module_config + config:write (reusing configWrite), not module_iam. The
 	// handler itself performs the gateway-orchestrated cross-service validation
 	// (iam GetUser) before the config write.
-	mux.Handle("POST /api/v1/config/teachers/{id}/user", configWrite(adminH.LinkTeacherUser))
+	mux.Handle("POST /api/v1/teachers/{id}/user", teachersWrite(adminH.LinkTeacherUser))
 	return mux
 }
