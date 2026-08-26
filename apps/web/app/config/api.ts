@@ -192,6 +192,15 @@ export function createCycle(baseURL: string, input: CreateCycleInput): Promise<C
   return postJSON<Cycle>(baseURL, "/cycles", input);
 }
 
+/**
+ * Makes a cycle the school's live year, standing down whichever other was
+ * active. Everything downstream asks "which cycle is active" — the roster
+ * header, the group dropdowns, the tuition table, the billing run.
+ */
+export function activateCycle(baseURL: string, id: string): Promise<Cycle> {
+  return postJSON<Cycle>(baseURL, `/cycles/${encodeURIComponent(id)}/activate`, {});
+}
+
 export function listCycles(baseURL: string): Promise<Cycle[]> {
   return getList<Cycle>(baseURL, "/cycles", "cycles");
 }

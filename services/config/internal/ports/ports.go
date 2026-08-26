@@ -37,6 +37,15 @@ type CatalogRepository interface {
 	GetCycle(ctx context.Context, id string) (domain.Cycle, error)
 	// ListCycles returns every cycle in the tenant.
 	ListCycles(ctx context.Context) ([]domain.Cycle, error)
+	// ActivateCycle makes one cycle the live year and demotes any other that was
+	// active, in ONE transaction.
+	//
+	// The demotion belongs here rather than in the use case because "at most one
+	// active cycle" is an invariant across ROWS: two callers activating two
+	// different years would each read one active cycle, each demote it, and each
+	// promote their own — leaving two. Doing both writes under one transaction is
+	// what makes the second caller wait rather than race.
+	ActivateCycle(ctx context.Context, c domain.Cycle) error
 
 	// --- levels (cross-cycle catalog) ---
 

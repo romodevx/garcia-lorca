@@ -104,3 +104,45 @@ func (c Cycle) StartsOn() time.Time { return c.startsOn }
 
 // EndsOn returns the last day of the cycle.
 func (c Cycle) EndsOn() time.Time { return c.endsOn }
+
+// Activate makes the cycle the school's live year.
+//
+// A cycle was born in draft and nothing could move it, so every school year read
+// "Borrador" forever — and the panel, which resolves "the active cycle" to decide
+// which groups and prices to show, silently fell back to whichever cycle came
+// first. That fallback is invisible and wrong the moment a school has two.
+//
+// Re-activating the live year is a no-op rather than an error: it is what a
+// person does when they are not sure, and refusing would teach them nothing.
+// A closed year cannot be re-opened — it is history a school has already
+// reported on, and issuing charges or grades against it is not a thing to make
+// easy.
+func (c Cycle) Activate() (Cycle, error) {
+	switch c.status {
+	case CycleStatusActive:
+		return c, nil
+	case CycleStatusDraft:
+		c.status = CycleStatusActive
+		return c, nil
+	default:
+		return Cycle{}, glerrors.New(glerrors.KindConflict,
+			"a closed school year cannot be reopened")
+	}
+}
+
+// Close ends a live cycle, making it read-only.
+//
+// Only a live year can be closed: a draft has nothing to close, and saying so is
+// better than accepting a click that means nothing.
+func (c Cycle) Close() (Cycle, error) {
+	switch c.status {
+	case CycleStatusClosed:
+		return c, nil
+	case CycleStatusActive:
+		c.status = CycleStatusClosed
+		return c, nil
+	default:
+		return Cycle{}, glerrors.New(glerrors.KindConflict,
+			"a school year that never opened cannot be closed")
+	}
+}

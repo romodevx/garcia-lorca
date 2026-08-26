@@ -474,3 +474,12 @@ func connectErr(err error) *connect.Error {
 		return connect.NewError(connect.CodeInternal, glerrors.New(glerrors.KindInternal, "internal error"))
 	}
 }
+
+// ActivateCycle makes a cycle the school's live year.
+func (h *ConfigHandler) ActivateCycle(ctx context.Context, req *connect.Request[configv1.ActivateCycleRequest]) (*connect.Response[configv1.ActivateCycleResponse], error) {
+	cycle, err := h.catalog.ActivateCycle(ctx, req.Msg.GetId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.ActivateCycleResponse{Cycle: toProtoCycle(cycle)}), nil
+}

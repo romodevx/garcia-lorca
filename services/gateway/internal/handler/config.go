@@ -13,6 +13,7 @@ import (
 type ConfigService interface {
 	CreateCycle(ctx context.Context, in client.CreateCycleInput) (client.CycleResult, error)
 	ListCycles(ctx context.Context) ([]client.CycleResult, error)
+	ActivateCycle(ctx context.Context, id string) (client.CycleResult, error)
 	CreateLevel(ctx context.Context, in client.CreateLevelInput) (client.LevelResult, error)
 	ListLevels(ctx context.Context) ([]client.LevelResult, error)
 	CreateGradeLevel(ctx context.Context, in client.CreateGradeLevelInput) (client.GradeLevelResult, error)
@@ -557,4 +558,18 @@ func (h *ConfigHandler) ListTeachingAssignments(w http.ResponseWriter, r *http.R
 func writeConnectError(w http.ResponseWriter, err error) {
 	status := httpStatusFor(err)
 	http.Error(w, http.StatusText(status), status)
+}
+
+// ActivateCycle: POST /api/v1/config/cycles/{id}/activate
+//
+// A cycle is created as a draft and used to have no way out, so every school year
+// read "Borrador" forever while the panel quietly resolved "the active cycle" to
+// whichever came first. This is the way out.
+func (h *ConfigHandler) ActivateCycle(w http.ResponseWriter, r *http.Request) {
+	cycle, err := h.svc.ActivateCycle(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toCycleResponse(cycle))
 }

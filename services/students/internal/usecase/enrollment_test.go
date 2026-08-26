@@ -360,3 +360,83 @@ func TestEnrollmentGetAndList(t *testing.T) {
 		t.Errorf("ListEnrollments: %d %v", len(list), err)
 	}
 }
+
+// --- the file and the placement must agree ---------------------------------
+//
+// Two paths could move a pupil: ChangeAdmissionStatus (the file) and Enroll
+// (the placement in a group). Enroll persisted the placement and published the
+// event but never touched the file, so a school could — and in the demo data
+// did — end up with four hundred pupils actively enrolled in groups whose
+// records all still read "Trámite". The roster's own tabs mean nothing when that
+// happens, and neither does any report built on admission status.
+
+func seedPendingApplicant(t *testing.T, repo *fakeRepo, id string) {
+	t.Helper()
+	s := domain.Rehydrate(domain.NewApplicantParams{
+		ID: id, TenantID: tenant, FirstName: "Ana", LastName: "Hernández",
+		Level: domain.LevelPrimaria,
+	}, domain.AdmissionPending)
+	repo.byID[id] = s
+}
+
+func TestEnrollMovesTheStudentsFileToEnrolled(t *testing.T) {
+	svc, students, _, catalog, _ := newEnrollService(t)
+	seedStudent(t, students, "stu-1") // already accepted
+	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", GradeLevelID: "gl-1"}
+
+	if _, err := svc.Enroll(context.Background(), "stu-1", "grp-1", ""); err != nil {
+		t.Fatalf("Enroll: %v", err)
+	}
+
+	if len(students.updated) == 0 {
+		t.Fatal("the file was never persisted — the roster would still say Trámite")
+	}
+	if got := students.updated[len(students.updated)-1].Status(); got != domain.AdmissionEnrolled {
+		t.Errorf("persisted admission status = %v, want enrolled", got)
+	}
+}
+
+// Placing a child in 3°A IS the school accepting them; there is no separate
+// "accept" anywhere in the product. So the enrolment walks pending → accepted →
+// enrolled rather than jumping the state machine, and both steps are recorded.
+func TestEnrollAcceptsAPendingApplicantOnTheWay(t *testing.T) {
+	svc, students, _, catalog, pub := newEnrollService(t)
+	seedPendingApplicant(t, students, "stu-2")
+	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", GradeLevelID: "gl-1"}
+
+	if _, err := svc.Enroll(context.Background(), "stu-2", "grp-1", ""); err != nil {
+		t.Fatalf("Enroll: %v", err)
+	}
+
+	if len(students.updated) == 0 {
+		t.Fatal("the file was never persisted")
+	}
+	if got := students.updated[len(students.updated)-1].Status(); got != domain.AdmissionEnrolled {
+		t.Fatalf("persisted admission status = %v, want enrolled", got)
+	}
+	// The acceptance is not swallowed: an audit that only saw pending → enrolled
+	// could not tell a legal path from a bypassed state machine.
+	if len(pub.changed) != 2 {
+		t.Errorf("published %d admission changes, want 2 (accepted, then enrolled)", len(pub.changed))
+	}
+}
+
+// A withdrawn pupil cannot be quietly re-enrolled by dropping them in a group:
+// withdrawal is terminal, and the refusal has to come from the state machine
+// rather than from nobody noticing.
+func TestEnrollRefusesAStudentWhoseFileIsTerminal(t *testing.T) {
+	svc, students, enrolls, catalog, _ := newEnrollService(t)
+	s := domain.Rehydrate(domain.NewApplicantParams{
+		ID: "stu-3", TenantID: tenant, FirstName: "Ana", LastName: "Hernández",
+		Level: domain.LevelPrimaria,
+	}, domain.AdmissionWithdrawn)
+	students.byID["stu-3"] = s
+	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", GradeLevelID: "gl-1"}
+
+	if _, err := svc.Enroll(context.Background(), "stu-3", "grp-1", ""); err == nil {
+		t.Fatal("a withdrawn pupil must not be re-enrolled by placing them in a group")
+	}
+	if len(enrolls.createSeen) != 0 {
+		t.Error("the placement was persisted even though the file refused it")
+	}
+}

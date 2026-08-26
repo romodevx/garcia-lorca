@@ -34,6 +34,11 @@ service ConfigService {
   rpc GetCycle(GetCycleRequest) returns (GetCycleResponse);
   // ListCycles lists every cycle in the tenant.
   rpc ListCycles(ListCyclesRequest) returns (ListCyclesResponse);
+  // ActivateCycle makes a cycle the school's live year, standing down whichever
+  // other was active. Everything downstream asks "which cycle is active" — the
+  // roster header, the group dropdowns, the tuition table, the billing run — so
+  // that question must have exactly one answer.
+  rpc ActivateCycle(ActivateCycleRequest) returns (ActivateCycleResponse);
 
   // --- grade_levels (catalog) ---
   // CreateGradeLevel adds a grade within a level.
@@ -254,6 +259,14 @@ message ListCyclesRequest {}
 // ListCyclesResponse returns the tenant cycles.
 message ListCyclesResponse {
   repeated Cycle cycles = 1;
+}
+
+message ActivateCycleRequest {
+  string id = 1;
+}
+
+message ActivateCycleResponse {
+  Cycle cycle = 1;
 }
 
 // --- GradeLevel RPC messages ----------------------------------------------

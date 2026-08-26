@@ -14,6 +14,7 @@ import {
   type Student,
 } from "../../students/api";
 import { listCycles, listGroups, type Cycle, type Group } from "../../config/api";
+import { StudentsError } from "../../students/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
@@ -61,6 +62,55 @@ const pager = (disabled: boolean): CSSProperties => ({
   background: "var(--surface)", color: "var(--text)", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.45 : 1,
 });
 
+/** The shape the quick-add drawer validates before it asks the server. */
+export interface QuickAddDraft {
+  curp: string;
+  firstName: string;
+  lastName: string;
+  guardianName: string;
+}
+
+/** A CURP is exactly eighteen characters. The server checks its shape too. */
+const CURP_LENGTH = 18;
+
+/**
+ * What the form is still waiting for, or undefined when it is ready.
+ *
+ * This exists because the button used to be greyed out and silent: four separate
+ * requirements, any one of which could be unmet, and no way to find out which.
+ * The one nobody guesses is the tutor — a two-letter name failed the check with
+ * no sign at all.
+ *
+ * One field at a time, in reading order, so the answer matches where the eye
+ * already is.
+ */
+export function missingFieldMessage(draft: QuickAddDraft): string | undefined {
+  const curp = draft.curp.trim();
+  if (curp === "") return "Escribe el CURP del alumno.";
+  if (curp.length !== CURP_LENGTH) {
+    return `El CURP debe tener ${CURP_LENGTH} caracteres; llevas ${curp.length}.`;
+  }
+  if (draft.firstName.trim().length < 2) return "Escribe el nombre del alumno.";
+  if (draft.lastName.trim().length < 2) return "Escribe los apellidos del alumno.";
+  if (draft.guardianName.trim().length < 3) return "Escribe el nombre del tutor.";
+  return undefined;
+}
+
+/**
+ * What the server said, in words a person can act on.
+ *
+ * A duplicate and a malformed CURP need different advice, and a server that fell
+ * over needs advice about neither — blaming the CURP for it, which is what this
+ * used to do, sends somebody re-typing a perfectly good one.
+ */
+export function createFailureMessage(err: unknown): string {
+  if (err instanceof StudentsError) {
+    if (err.isConflict) return "Ya existe un alumno con ese CURP.";
+    if (err.isInvalid) return "Revisa el CURP: son 18 caracteres con el formato oficial.";
+  }
+  return "No se pudo crear el alumno. Intenta de nuevo en un momento.";
+}
+
 // ── quick-add slide-over: create a student in one panel, minimal fields ──
 function QuickAdd({ onClose, onSave }: { onClose: () => void; onSave: (input: CreateStudentInput) => Promise<void> }): ReactElement {
   const [curp, setCurp] = useState("");
@@ -72,15 +122,20 @@ function QuickAdd({ onClose, onSave }: { onClose: () => void; onSave: (input: Cr
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
-  const ready = curp.trim().length >= 18 && firstName.trim().length > 1 && lastName.trim().length > 1 && guardianName.trim().length > 2;
-
   const submit = async (): Promise<void> => {
+    // Validated on PRESS, not by greying the button out. A control that refuses
+    // and will not say why is the thing this replaced.
+    const missing = missingFieldMessage({ curp, firstName, lastName, guardianName });
+    if (missing !== undefined) {
+      setError(missing);
+      return;
+    }
     setSaving(true);
     setError(undefined);
     try {
       await onSave({ curp: curp.trim().toUpperCase(), firstName: firstName.trim(), lastName: lastName.trim(), level, gradeGroup: gradeGroup.trim(), guardianName: guardianName.trim() });
-    } catch {
-      setError("No se pudo crear el alumno. Verifica el CURP (único, 18 caracteres).");
+    } catch (err) {
+      setError(createFailureMessage(err));
       setSaving(false);
     }
   };
@@ -129,7 +184,12 @@ function QuickAdd({ onClose, onSave }: { onClose: () => void; onSave: (input: Cr
         <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "18px 26px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>
           <Btn kind="ghost" onClick={onClose}>Cancelar</Btn>
           <div style={{ flex: 1 }} />
-          <Btn icon="check" onClick={() => void submit()} style={{ opacity: ready && !saving ? 1 : 0.45, pointerEvents: ready && !saving ? "auto" : "none", height: 52, fontSize: 16 }}>Guardar alumno</Btn>
+          {/* "Crear", not "Guardar": this makes a pupil that did not exist. And
+              disabled ONLY while the request is in flight — an incomplete form
+              gets a sentence, not a dead control. */}
+          <Btn icon="check" onClick={() => void submit()} disabled={saving} style={{ opacity: saving ? 0.45 : 1, height: 52, fontSize: 16 }}>
+            {saving ? "Creando…" : "Crear alumno"}
+          </Btn>
         </div>
       </div>
     </div>

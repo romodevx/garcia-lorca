@@ -255,6 +255,12 @@ func (stubConfig) ListCycles(_ context.Context, _ *connect.Request[configv1.List
 	}}), nil
 }
 
+func (stubConfig) ActivateCycle(_ context.Context, req *connect.Request[configv1.ActivateCycleRequest]) (*connect.Response[configv1.ActivateCycleResponse], error) {
+	return connect.NewResponse(&configv1.ActivateCycleResponse{
+		Cycle: &configv1.Cycle{Id: req.Msg.GetId(), Name: "2026-2027", Status: configv1.CycleStatus_CYCLE_STATUS_ACTIVE},
+	}), nil
+}
+
 func (stubConfig) CreateTeacher(_ context.Context, req *connect.Request[configv1.CreateTeacherRequest]) (*connect.Response[configv1.CreateTeacherResponse], error) {
 	return connect.NewResponse(&configv1.CreateTeacherResponse{Teacher: &configv1.Teacher{
 		Id:        "tch-1",
@@ -2698,5 +2704,35 @@ func TestUniformsWritesRefuseAReadOnlyCaller(t *testing.T) {
 		`{"code":"PLA","name":"Playera","priceCents":32000}`)
 	if res.StatusCode != http.StatusForbidden {
 		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+// --- activating a school year (M04 lifecycle, closed in the demo prep) -------
+//
+// A cycle was created as a draft and had no way out, so every school year read
+// "Borrador" and the panel resolved "the active cycle" to whichever came first.
+// The route is a config WRITE: it changes which year the whole product is about.
+
+func TestActivateCycleDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_config OFF
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/cycles/cyc-1/activate", "config-writer", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestActivateCycleReadOnlyPermissionIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_config": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/cycles/cyc-1/activate", "config-reader", "")
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 — choosing the live year is a write", res.StatusCode)
+	}
+}
+
+func TestActivateCycleWithPermission200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_config": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/cycles/cyc-1/activate", "config-writer", "")
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", res.StatusCode)
 	}
 }

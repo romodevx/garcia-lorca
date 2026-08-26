@@ -84,6 +84,21 @@ func (s *EnrollmentService) Enroll(ctx context.Context, studentID, groupID, term
 		}
 	}
 
+	// The FILE moves first, and it moves before anything is persisted.
+	//
+	// Two paths could change a pupil's standing — this one and
+	// ChangeAdmissionStatus — and this one used to move only the placement,
+	// leaving the record behind. A school then had pupils actively enrolled in
+	// groups whose files all still read "Trámite": the roster's own tabs meant
+	// nothing, and so did every report built on admission status.
+	//
+	// Doing it first is what makes a terminal file (a withdrawn pupil) refuse the
+	// placement instead of quietly acquiring one.
+	changes, err := admitAndEnroll(student, cycleID)
+	if err != nil {
+		return domain.Enrollment{}, err
+	}
+
 	enrollment, err := domain.NewEnrollment(s.newID(), s.tenant, student.ID(), cycleID, groupID, termID,
 		domain.EnrollmentStatusActive, s.now())
 	if err != nil {
@@ -92,9 +107,49 @@ func (s *EnrollmentService) Enroll(ctx context.Context, studentID, groupID, term
 	if err := s.enrollments.CreateEnrollment(ctx, enrollment); err != nil {
 		return domain.Enrollment{}, err // KindConflict on duplicate propagates
 	}
+	if err := s.students.Update(ctx, student); err != nil {
+		return domain.Enrollment{}, err
+	}
 
+	s.publishAdmissionChanges(ctx, changes)
 	s.publishEnrolled(ctx, student, cycleID)
 	return enrollment, nil
+}
+
+// admitAndEnroll walks the pupil's file to enrolled, accepting them on the way if
+// they were still an applicant.
+//
+// Placing a child in 3°A IS the school accepting them — there is no separate
+// "accept" action anywhere in the product — but the acceptance is walked through
+// the state machine rather than jumped, and returned so it can be published.
+// An audit that only ever saw pending → enrolled could not tell a legal path from
+// a bypassed machine.
+func admitAndEnroll(student *domain.Student, cycleID string) ([]domain.AdmissionChangedEvent, error) {
+	var changes []domain.AdmissionChangedEvent
+	if student.Status() == domain.AdmissionPending {
+		accepted, err := student.Accept()
+		if err != nil {
+			return nil, err
+		}
+		changes = append(changes, accepted)
+	}
+	_, enrolled, err := student.Enroll(cycleID)
+	if err != nil {
+		return nil, err
+	}
+	return append(changes, enrolled), nil
+}
+
+// publishAdmissionChanges emits the file's movements best-effort, for the same
+// reason the enrolment event is best-effort: the placement is already durable,
+// and a broker that is down must not undo a child's enrolment.
+func (s *EnrollmentService) publishAdmissionChanges(ctx context.Context, changes []domain.AdmissionChangedEvent) {
+	if s.events == nil {
+		return
+	}
+	for _, change := range changes {
+		_ = s.events.PublishAdmissionChanged(ctx, change)
+	}
 }
 
 // publishEnrolled emits StudentEnrolled best-effort: it is skipped when no
