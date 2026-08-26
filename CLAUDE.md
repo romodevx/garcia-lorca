@@ -84,3 +84,6 @@ GCP Cloud Run + Cloud SQL (Postgres) + Pub/Sub · contratos en `proto/` vía buf
 - `buf lint` / `buf breaking` — valida contratos
 - `go work sync` · `go test ./...`
 - `pnpm install` (NUNCA `npm install`) · `pnpm run build` / `pnpm turbo run build|test|lint`
+- `pnpm demo:ready` — deja el sistema listo para demo: verifica desde cero, siembra
+  el ciclo completo (400 alumnos, 20 docentes, 4 niveles) y confirma que se ve.
+  Ver `.claude/docs/DEMO.md` — **el orden importa**, `demo:verify` vacía la base.
