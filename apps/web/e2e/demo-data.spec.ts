@@ -19,6 +19,13 @@ import { API_URL, apiAsOwner, openModule, signIn } from "./helpers";
  */
 
 const EXPECTED_STUDENTS = 400;
+/**
+ * The seed pays roughly two inscriptions in three, and a pupil is "inscrito" only
+ * once theirs is paid — so the roster is deliberately a MIX. A school where every
+ * pupil reads enrolled is a school that has collected from nobody and does not
+ * know it.
+ */
+const MIN_ENROLLED = 200;
 const EXPECTED_TEACHERS = 20;
 const LEVELS = ["Kínder", "Primaria", "Secundaria", "Preparatoria"];
 
@@ -35,12 +42,14 @@ test.describe("the demo's data is really there", () => {
     // an empty database would produce.
     await expect(page.getByRole("button", { name: /Ver ficha de/ }).first()).toBeVisible();
 
-    // Placing a pupil in a group used to leave their FILE untouched, so a school
-    // could have four hundred pupils actively enrolled whose records all read
-    // "Trámite" — and the roster's own tabs meant nothing.
-    // The stat card, not the filter tab: both say "Inscritos", and only the card
-    // carries the count.
-    await expect(page.getByText(`Inscritos${EXPECTED_STUDENTS}`, { exact: false }).first()).toBeVisible();
+    // A pupil is "inscrito" when their inscription is PAID, so the roster is a
+    // mix: those who paid, and those still en trámite. Both tabs must have
+    // somebody in them, or the distinction the school cares about is invisible.
+    const enrolled = Number((await page.getByRole("button", { name: /^Inscritos/ }).innerText()).replace(/\D/g, ""));
+    const pending = Number((await page.getByRole("button", { name: /^Trámite/ }).innerText()).replace(/\D/g, ""));
+    expect(enrolled, "nobody is enrolled — the school has collected from no one").toBeGreaterThan(MIN_ENROLLED);
+    expect(pending, "nobody is en trámite — the demo cannot show an adeudo").toBeGreaterThan(0);
+    expect(enrolled + pending).toBe(EXPECTED_STUDENTS);
   });
 
   // A cycle is born a draft and used to have no way out, so every school year

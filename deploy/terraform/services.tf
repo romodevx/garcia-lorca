@@ -58,9 +58,13 @@ locals {
   # Cloud Run, so every cross-service RPC fails. Each local mirrors gateway_env:
   # common_env + only the sibling URL(s) that service's cmd/main.go reads. config
   # and iam are leaves (no sibling deps) and keep common_env directly.
+  # students consumes payment-events (a paid inscription is what makes a pupil
+  # "inscrito"), so it needs the same push wiring comms and finance have.
   students_env = merge(local.common_env, {
-    CONFIG_BASE_URL = module.config.uri
-    IAM_BASE_URL    = module.iam.uri
+    PUBSUB_PUSH_MODE     = "true"
+    PUBSUB_PUSH_SA_EMAIL = google_service_account.pubsub_push.email
+    CONFIG_BASE_URL      = module.config.uri
+    IAM_BASE_URL         = module.iam.uri
   })
 
   # finance became a CONSUMER as well as a publisher in M15: StudentEnrolled is

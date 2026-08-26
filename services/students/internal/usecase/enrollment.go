@@ -84,18 +84,9 @@ func (s *EnrollmentService) Enroll(ctx context.Context, studentID, groupID, term
 		}
 	}
 
-	// The FILE moves first, and it moves before anything is persisted.
-	//
-	// Two paths could change a pupil's standing — this one and
-	// ChangeAdmissionStatus — and this one used to move only the placement,
-	// leaving the record behind. A school then had pupils actively enrolled in
-	// groups whose files all still read "Trámite": the roster's own tabs meant
-	// nothing, and so did every report built on admission status.
-	//
-	// Doing it first is what makes a terminal file (a withdrawn pupil) refuse the
-	// placement instead of quietly acquiring one.
-	changes, err := admitAndEnroll(student, cycleID)
-	if err != nil {
+	// A terminal file refuses the placement rather than quietly acquiring one:
+	// a withdrawn pupil is not re-enrolled by being dropped into a group.
+	if err := refusePlacementIfTerminal(student); err != nil {
 		return domain.Enrollment{}, err
 	}
 
@@ -107,26 +98,65 @@ func (s *EnrollmentService) Enroll(ctx context.Context, studentID, groupID, term
 	if err := s.enrollments.CreateEnrollment(ctx, enrollment); err != nil {
 		return domain.Enrollment{}, err // KindConflict on duplicate propagates
 	}
-	// The record follows the placement here too. Both enrolment paths write it,
-	// so a pupil's file can never name a group they are not in.
+	// The record follows the placement. Both enrolment paths write it, so a
+	// pupil's file can never name a group they are not in. The ADMISSION status
+	// is deliberately untouched: a pupil is "inscrito" when the inscription is
+	// paid, and finance is what knows that.
 	student.PlaceIn(grp.Name)
 	if err := s.students.Update(ctx, student); err != nil {
 		return domain.Enrollment{}, err
 	}
 
-	s.publishAdmissionChanges(ctx, changes)
 	s.publishEnrolled(ctx, student, cycleID)
 	return enrollment, nil
 }
 
-// admitAndEnroll walks the pupil's file to enrolled, accepting them on the way if
-// they were still an applicant.
+// refusePlacementIfTerminal stops a rejected or withdrawn pupil being re-enrolled
+// by dropping them into a group. Placement leaves the admission file alone
+// otherwise — a pupil becomes "inscrito" when the inscription is PAID — but a
+// terminal file is a decision the school already made, and a group is not a way
+// around it.
+func refusePlacementIfTerminal(student *domain.Student) error {
+	if student.Status().IsTerminal() {
+		return glerrors.New(glerrors.KindConflict,
+			"ese alumno está dado de baja: no se le puede colocar en un grupo")
+	}
+	return nil
+}
+
+// MarkInscriptionPaid is what actually makes a pupil "inscrito".
 //
-// Placing a child in 3°A IS the school accepting them — there is no separate
-// "accept" action anywhere in the product — but the acceptance is walked through
-// the state machine rather than jumped, and returned so it can be published.
-// An audit that only ever saw pending → enrolled could not tell a legal path from
-// a bypassed machine.
+// The school's rule, in its own words: a new pupil is en trámite, and inscrito
+// only once the inscription is paid. Finance is what knows that a payment closed
+// the inscription charge, so this runs off its ChargeSettled event.
+//
+// The walk is pending → accepted → enrolled rather than a jump, so an audit can
+// tell a legal path from a bypassed state machine, and both steps are published.
+// A pupil already enrolled is a NO-OP and not an error: payments arrive at least
+// once, and a consumer that failed on a redelivery would be redelivered forever.
+func (s *EnrollmentService) MarkInscriptionPaid(ctx context.Context, studentID string) error {
+	student, err := s.students.FindByID(ctx, studentID)
+	if err != nil {
+		return err
+	}
+	if student.Status() == domain.AdmissionEnrolled {
+		return nil
+	}
+	changes, err := admitAndEnroll(student, "")
+	if err != nil {
+		return err
+	}
+	if err := s.students.Update(ctx, student); err != nil {
+		return err
+	}
+	s.publishAdmissionChanges(ctx, changes)
+	return nil
+}
+
+// admitAndEnroll walks the pupil's file to enrolled, accepting them on the way if
+// they were still an applicant. Walked rather than jumped so the acceptance is
+// recorded: an audit that only ever saw pending → enrolled could not tell a legal
+// path from a bypassed machine.
 func admitAndEnroll(student *domain.Student, cycleID string) ([]domain.AdmissionChangedEvent, error) {
 	var changes []domain.AdmissionChangedEvent
 	if student.Status() == domain.AdmissionPending {
@@ -271,10 +301,7 @@ func (s *EnrollmentService) EnrollIntoGrade(ctx context.Context, studentID, grad
 			"ese grado no tiene ningún grupo: créalo en Configuración antes de inscribir")
 	}
 
-	// The file moves first, for the same reason as in Enroll: a terminal file
-	// must refuse the placement rather than quietly acquire one.
-	changes, err := admitAndEnroll(student, groups[0].CycleID)
-	if err != nil {
+	if err := refusePlacementIfTerminal(student); err != nil {
 		return Placement{}, err
 	}
 
@@ -287,14 +314,11 @@ func (s *EnrollmentService) EnrollIntoGrade(ctx context.Context, studentID, grad
 	if err != nil {
 		return Placement{}, err
 	}
-	// The record follows the placement. Saved in the SAME Update as the admission
-	// change, so a pupil can never be enrolled with a stale group on their file.
 	student.PlaceIn(chosen.Name)
 	if err := s.students.Update(ctx, student); err != nil {
 		return Placement{}, err
 	}
 
-	s.publishAdmissionChanges(ctx, changes)
 	s.publishEnrolled(ctx, student, chosen.CycleID)
 	return Placement{Enrollment: draft, GroupID: chosen.ID, GroupName: chosen.Name}, nil
 }
