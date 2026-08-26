@@ -252,6 +252,8 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 		return guard.Protect("students", requireAuthChanged(middleware.RequirePermission("students:enroll")(http.HandlerFunc(h))))
 	}
 	mux.Handle("POST /api/v1/enrollments", studentsWrite(enrollH.Enroll))
+	// The panel's path: a level and a grade, with the group chosen by capacity.
+	mux.Handle("POST /api/v1/enrollments/by-grade", studentsWrite(enrollH.EnrollIntoGrade))
 	mux.Handle("GET /api/v1/enrollments", studentsRead(enrollH.ListEnrollments))
 	mux.Handle("GET /api/v1/enrollments/{id}", studentsRead(enrollH.GetEnrollment))
 	mux.Handle("POST /api/v1/enrollments/transfer", studentsWrite(enrollH.Transfer))

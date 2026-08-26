@@ -13,8 +13,8 @@ import {
   type CreateStudentInput,
   type Student,
 } from "../../students/api";
-import { listCycles, listGroups, type Cycle, type Group } from "../../config/api";
-import { StudentsError } from "../../students/api";
+import { listCycles, listGradeLevels, listGroups, listLevels, type Cycle, type GradeLevel, type Group, type Level } from "../../config/api";
+import { enrollIntoGrade, StudentsError, type Placement } from "../../students/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
@@ -37,12 +37,6 @@ const FALLBACK_STATUS: StatusMeta = { label: "—", dot: "var(--text-faint)", bg
 const statusOf = (s: AdmissionStatus): StatusMeta => STATUS[s] ?? FALLBACK_STATUS;
 
 const AV: ColorKey[] = ["lime", "forest", "orange", "purple", "yellow"];
-const LEVELS: { value: string; label: string }[] = [
-  { value: "kinder", label: "Kínder" },
-  { value: "primaria", label: "Primaria" },
-  { value: "secundaria", label: "Secundaria" },
-  { value: "preparatoria", label: "Preparatoria" },
-];
 
 function StatusPill({ status }: { status: AdmissionStatus }): ReactElement {
   const s = statusOf(status);
@@ -62,16 +56,54 @@ const pager = (disabled: boolean): CSSProperties => ({
   background: "var(--surface)", color: "var(--text)", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.45 : 1,
 });
 
+/**
+ * Marks a failure that happened AFTER the pupil was created, while placing them.
+ *
+ * The distinction is the whole reason it exists: the drawer has to tell somebody
+ * that their pupil is safe and only the placement failed, or they re-type the
+ * form and meet "ya existe ese CURP".
+ */
+export class PlacementFailed extends Error {
+  override readonly cause: unknown;
+
+  constructor(cause: unknown) {
+    super("placement failed");
+    this.name = "PlacementFailed";
+    this.cause = cause;
+  }
+}
+
 /** The shape the quick-add drawer validates before it asks the server. */
 export interface QuickAddDraft {
   curp: string;
   firstName: string;
   lastName: string;
   guardianName: string;
+  /** The config grade the pupil joins. The GROUP is chosen by capacity, not here. */
+  gradeLevelId?: string;
 }
 
 /** A CURP is exactly eighteen characters. The server checks its shape too. */
 const CURP_LENGTH = 18;
+
+/**
+ * The four levels the SEP recognises, folded the way the services fold them.
+ *
+ * A school may name its levels anything — the catalogue is theirs — but a pupil's
+ * record carries a SEP level, so a level called "Maternal" has nowhere to put
+ * one. Checking here means the person is told which levels work instead of
+ * meeting a 400 that blames their CURP.
+ */
+const SEP_LEVELS = ["kinder", "primaria", "secundaria", "preparatoria"];
+
+function foldLevel(name: string): string {
+  return name.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+/** Whether a school's level name corresponds to a SEP level. */
+export function isSepLevel(name: string): boolean {
+  return SEP_LEVELS.includes(foldLevel(name));
+}
 
 /**
  * What the form is still waiting for, or undefined when it is ready.
@@ -93,6 +125,9 @@ export function missingFieldMessage(draft: QuickAddDraft): string | undefined {
   if (draft.firstName.trim().length < 2) return "Escribe el nombre del alumno.";
   if (draft.lastName.trim().length < 2) return "Escribe los apellidos del alumno.";
   if (draft.guardianName.trim().length < 3) return "Escribe el nombre del tutor.";
+  if (draft.gradeLevelId !== undefined && draft.gradeLevelId === "") {
+    return "Elige el nivel y el grado al que entra.";
+  }
   return undefined;
 }
 
@@ -111,31 +146,101 @@ export function createFailureMessage(err: unknown): string {
   return "No se pudo crear el alumno. Intenta de nuevo en un momento.";
 }
 
+/**
+ * What went wrong PLACING a pupil who, by then, already exists.
+ *
+ * Saying so is the whole point of a separate message: without it somebody reads
+ * "no quedan lugares", re-types the whole form and gets "ya existe ese CURP",
+ * which is true and useless.
+ */
+export function placementFailureMessage(err: unknown): string {
+  const tail = " El alumno sí se creó: inscríbelo desde su ficha cuando haya lugar.";
+  if (err instanceof StudentsError) {
+    if (err.isConflict) return "Ese grado ya no tiene lugares. Abre otro grupo en Configuración." + tail;
+    if (err.isInvalid) return (err.detail !== "" ? err.detail : "No se pudo inscribir en ese grado.") + tail;
+  }
+  return "No se pudo inscribir al alumno en ese grado." + tail;
+}
+
 // ── quick-add slide-over: create a student in one panel, minimal fields ──
-function QuickAdd({ onClose, onSave }: { onClose: () => void; onSave: (input: CreateStudentInput) => Promise<void> }): ReactElement {
+function QuickAdd({
+  onClose,
+  onSave,
+  levels,
+}: {
+  onClose: () => void;
+  onSave: (input: CreateStudentInput, gradeLevelId: string) => Promise<void>;
+  levels: readonly Level[];
+}): ReactElement {
   const [curp, setCurp] = useState("");
   const [firstName, setFirst] = useState("");
   const [lastName, setLast] = useState("");
-  const [level, setLevel] = useState("primaria");
-  const [gradeGroup, setGroup] = useState("1° A");
+  const [levelId, setLevelId] = useState("");
+  const [gradeLevelId, setGradeLevelId] = useState("");
+  const [grades, setGrades] = useState<GradeLevel[]>([]);
   const [guardianName, setGuardian] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
+  // Choosing a level loads its grades. They are whatever the school configured —
+  // kínder has three, primaria six — so a school that adds one sees it here
+  // without anybody editing this screen.
+  useEffect(() => {
+    if (levelId === "") {
+      setGrades([]);
+      return;
+    }
+    let alive = true;
+    setGradeLevelId("");
+    listGradeLevels(API_URL, levelId)
+      .then((gs) => alive && setGrades(gs))
+      .catch(() => alive && setGrades([]));
+    return () => {
+      alive = false;
+    };
+  }, [levelId]);
+
   const submit = async (): Promise<void> => {
     // Validated on PRESS, not by greying the button out. A control that refuses
     // and will not say why is the thing this replaced.
-    const missing = missingFieldMessage({ curp, firstName, lastName, guardianName });
+    const missing = missingFieldMessage({ curp, firstName, lastName, guardianName, gradeLevelId });
     if (missing !== undefined) {
       setError(missing);
+      return;
+    }
+    const chosenLevel = levels.find((l) => l.id === levelId);
+    if (chosenLevel === undefined) {
+      setError("Elige el nivel y el grado al que entra.");
+      return;
+    }
+    if (!isSepLevel(chosenLevel.name)) {
+      setError(
+        `«${chosenLevel.name}» no es un nivel de la SEP, así que no puede recibir alumnos. ` +
+          "Renómbralo en Configuración a Kínder, Primaria, Secundaria o Preparatoria.",
+      );
       return;
     }
     setSaving(true);
     setError(undefined);
     try {
-      await onSave({ curp: curp.trim().toUpperCase(), firstName: firstName.trim(), lastName: lastName.trim(), level, gradeGroup: gradeGroup.trim(), guardianName: guardianName.trim() });
+      // The level travels as the config level's NAME. The students service folds
+      // accents ("Kínder" → kinder), so there is no mapping table on this side to
+      // drift out of step with the one that decides.
+      await onSave(
+        {
+          curp: curp.trim().toUpperCase(),
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          level: chosenLevel.name,
+          // Left empty on purpose: the server writes it when capacity picks the
+          // group, so the record cannot claim a group the pupil is not in.
+          gradeGroup: "",
+          guardianName: guardianName.trim(),
+        },
+        gradeLevelId,
+      );
     } catch (err) {
-      setError(createFailureMessage(err));
+      setError(err instanceof PlacementFailed ? placementFailureMessage(err.cause) : createFailureMessage(err));
       setSaving(false);
     }
   };
@@ -160,23 +265,28 @@ function QuickAdd({ onClose, onSave }: { onClose: () => void; onSave: (input: Cr
             <Field label="Nombre" req><input value={firstName} onChange={(e) => setFirst(e.target.value)} placeholder="Ana Sofía" style={fi} /></Field>
             <Field label="Apellidos" req><input value={lastName} onChange={(e) => setLast(e.target.value)} placeholder="Ruiz Márquez" style={fi} /></Field>
           </div>
-          <Field label="Nivel">
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              {LEVELS.map((l) => {
-                const on = level === l.value;
-                return (
-                  <button key={l.value} onClick={() => setLevel(l.value)} style={{ height: 46, borderRadius: "var(--r-md)", fontSize: 14.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>{l.label}</button>
-                );
-              })}
-            </div>
-          </Field>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <Field label="Grado y grupo"><input value={gradeGroup} onChange={(e) => setGroup(e.target.value)} placeholder="1° A" style={fi} /></Field>
-            <Field label="Tutor" req><input value={guardianName} onChange={(e) => setGuardian(e.target.value)} placeholder="Nombre del tutor" style={fi} /></Field>
+            <Field label="Nivel" req>
+              <select aria-label="Nivel" value={levelId} onChange={(e) => setLevelId(e.target.value)} style={fi}>
+                <option value="">Selecciona…</option>
+                {levels.map((l) => (
+                  <option key={l.id} value={l.id}>{l.name}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Grado" req>
+              <select aria-label="Grado" value={gradeLevelId} onChange={(e) => setGradeLevelId(e.target.value)} disabled={grades.length === 0} style={fi}>
+                <option value="">{levelId === "" ? "Elige un nivel primero" : "Selecciona…"}</option>
+                {grades.map((g) => (
+                  <option key={g.id} value={g.id}>{g.name}</option>
+                ))}
+              </select>
+            </Field>
           </div>
+          <Field label="Tutor" req><input value={guardianName} onChange={(e) => setGuardian(e.target.value)} placeholder="Nombre del tutor" style={fi} /></Field>
           <div style={{ display: "flex", gap: 11, padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
             <span style={{ color: "var(--forest)", flexShrink: 0, marginTop: 1 }}><Icon name="check" size={19} stroke={2.6} /></span>
-            <p style={{ fontSize: 13.5, color: "var(--text-muted)", lineHeight: 1.5, margin: 0 }}>Al guardar se crea la matrícula y el expediente. La inscripción a un grupo y los documentos se hacen después.</p>
+            <p style={{ fontSize: 13.5, color: "var(--text-muted)", lineHeight: 1.5, margin: 0 }}>El grupo <strong>se asigna solo</strong>, según el cupo de cada salón: se llena A y el siguiente alumno pasa a B. Los documentos se cargan después.</p>
           </div>
           {error !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{error}</p>}
         </div>
@@ -261,6 +371,7 @@ export interface StudentsScreenProps {
 export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
   const [students, setStudents] = useState<Student[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
+  const [levels, setLevels] = useState<Level[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"all" | "active" | "pending" | "inactive">("all");
@@ -287,6 +398,7 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
   }, []);
   useEffect(() => {
     reload();
+    listLevels(API_URL).then(setLevels).catch(() => setLevels([]));
     listCycles(API_URL).then((cs) => {
       setCycles(cs);
       const active = cs.find((c) => c.status === "active") ?? cs[0];
@@ -324,11 +436,21 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
   const anyFilter = tab !== "all" || level !== "Todos" || q !== "";
   const clear = (): void => { setTab("all"); setLevel("Todos"); setQ(""); };
 
-  const onSave = async (input: CreateStudentInput): Promise<void> => {
-    await createStudent(API_URL, input);
+  const onSave = async (input: CreateStudentInput, gradeLevelId: string): Promise<void> => {
+    const created = await createStudent(API_URL, input);
+    // Two calls, and the SECOND one is the one that can fail on a full grade —
+    // by then the pupil exists. PlacementFailed carries that distinction to the
+    // drawer, so the message can say "el alumno sí se creó" instead of sending
+    // somebody back to re-type a CURP that is now taken.
+    let placement: Placement;
+    try {
+      placement = await enrollIntoGrade(API_URL, created.id, gradeLevelId);
+    } catch (err) {
+      throw new PlacementFailed(err);
+    }
     setAdd(false);
     reload();
-    say(`Alumno creado · ${input.firstName}`);
+    say(`Alumno creado · ${input.firstName} quedó en ${placement.groupName}`);
   };
   const onEnroll = async (groupId: string): Promise<void> => {
     if (sheet === null) return;
@@ -453,7 +575,7 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
 
       <button onClick={() => setAdd(true)} title="Nuevo alumno" style={{ position: "fixed", right: 32, bottom: 32, zIndex: 50, height: 60, padding: "0 26px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 10, background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16.5, cursor: "pointer", boxShadow: "0 10px 30px color-mix(in oklab, var(--lime) 45%, transparent)" }}><Icon name="plus" size={22} stroke={2.6} />Nuevo alumno</button>
 
-      {add && <QuickAdd onClose={() => setAdd(false)} onSave={onSave} />}
+      {add && <QuickAdd onClose={() => setAdd(false)} onSave={onSave} levels={levels} />}
       {sheet !== null && <StudentSheet st={sheet} groups={groups} onClose={() => setSheet(null)} onEnroll={onEnroll} />}
       {toast !== null && (
         <div style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>

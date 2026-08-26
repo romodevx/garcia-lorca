@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +29,38 @@ type fakeEnrollRepo struct {
 	transfers  []domain.EnrollmentTransfer
 	createErr  error
 	createSeen []domain.Enrollment
+}
+
+// CreateEnrollmentInFirstFreeGroup models what the transaction does: it counts
+// what is already in each group and takes the first with room. Modelling the
+// capacity here rather than answering "yes" to everything is what lets the
+// overflow tests fail in a unit test instead of only against Postgres.
+func (r *fakeEnrollRepo) CreateEnrollmentInFirstFreeGroup(
+	ctx context.Context,
+	e domain.Enrollment,
+	groups []ports.GroupSeats,
+) (ports.GroupSeats, error) {
+	for _, g := range groups {
+		taken := 0
+		for _, existing := range r.byID {
+			if existing.GroupID() == g.ID && existing.Status() == domain.EnrollmentStatusActive {
+				taken++
+			}
+		}
+		if taken >= g.Capacity {
+			continue
+		}
+		placed, err := domain.NewEnrollment(e.ID(), e.TenantID(), e.StudentID(), g.CycleID, g.ID,
+			e.TermID(), domain.EnrollmentStatusActive, e.EnrolledAt())
+		if err != nil {
+			return ports.GroupSeats{}, err
+		}
+		if err := r.CreateEnrollment(ctx, placed); err != nil {
+			return ports.GroupSeats{}, err
+		}
+		return g, nil
+	}
+	return ports.GroupSeats{}, glerrors.New(glerrors.KindConflict, "no quedan lugares")
 }
 
 func newEnrollRepo() *fakeEnrollRepo {
@@ -105,12 +138,17 @@ func (r *fakeEnrollRepo) SetEnrollmentStatus(_ context.Context, id string, statu
 // fakeCatalog is an in-memory CatalogValidator. A missing group/term returns
 // glerrors.ErrNotFound, matching the real Connect client's NotFound mapping.
 type fakeCatalog struct {
-	groups map[string]groupRef
-	terms  map[string]termRef
+	groups      map[string]groupRef
+	terms       map[string]termRef
+	gradeGroups map[string][]ports.GroupSeats
 }
 
 func newCatalog() *fakeCatalog {
-	return &fakeCatalog{groups: map[string]groupRef{}, terms: map[string]termRef{}}
+	return &fakeCatalog{
+		groups:      map[string]groupRef{},
+		terms:       map[string]termRef{},
+		gradeGroups: map[string][]ports.GroupSeats{},
+	}
 }
 
 func (c *fakeCatalog) GroupByID(_ context.Context, id string) (groupRef, error) {
@@ -118,6 +156,11 @@ func (c *fakeCatalog) GroupByID(_ context.Context, id string) (groupRef, error) 
 		return g, nil
 	}
 	return groupRef{}, glerrors.ErrNotFound
+}
+
+// GroupsOfGrade answers with the school's groups for a grade, in fill order.
+func (c *fakeCatalog) GroupsOfGrade(_ context.Context, gradeLevelID string) ([]ports.GroupSeats, error) {
+	return c.gradeGroups[gradeLevelID], nil
 }
 
 func (c *fakeCatalog) TermByID(_ context.Context, id string) (termRef, error) {
@@ -382,7 +425,7 @@ func seedPendingApplicant(t *testing.T, repo *fakeRepo, id string) {
 func TestEnrollMovesTheStudentsFileToEnrolled(t *testing.T) {
 	svc, students, _, catalog, _ := newEnrollService(t)
 	seedStudent(t, students, "stu-1") // already accepted
-	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", GradeLevelID: "gl-1"}
+	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", Name: "3° B", GradeLevelID: "gl-1"}
 
 	if _, err := svc.Enroll(context.Background(), "stu-1", "grp-1", ""); err != nil {
 		t.Fatalf("Enroll: %v", err)
@@ -391,8 +434,13 @@ func TestEnrollMovesTheStudentsFileToEnrolled(t *testing.T) {
 	if len(students.updated) == 0 {
 		t.Fatal("the file was never persisted — the roster would still say Trámite")
 	}
-	if got := students.updated[len(students.updated)-1].Status(); got != domain.AdmissionEnrolled {
-		t.Errorf("persisted admission status = %v, want enrolled", got)
+	saved := students.updated[len(students.updated)-1]
+	if saved.Status() != domain.AdmissionEnrolled {
+		t.Errorf("persisted admission status = %v, want enrolled", saved.Status())
+	}
+	// Both enrolment paths write the group onto the record. Only one used to.
+	if saved.GradeGroup() != "3° B" {
+		t.Errorf("persisted grade group = %q, want 3° B", saved.GradeGroup())
 	}
 }
 
@@ -438,5 +486,127 @@ func TestEnrollRefusesAStudentWhoseFileIsTerminal(t *testing.T) {
 	}
 	if len(enrolls.createSeen) != 0 {
 		t.Error("the placement was persisted even though the file refused it")
+	}
+}
+
+// --- placing a pupil by GRADE, letting the school's capacity choose the group --
+//
+// The panel used to ask for "grado y grupo" as free text, so a secretary typed
+// "1° A" and nothing checked whether 1°A had a seat left. What a school actually
+// knows is the level and the grade; which group the child lands in is a
+// consequence of how full each one is, and that is arithmetic the system should
+// be doing.
+
+func TestEnrollIntoGradeTakesTheFirstGroupWithRoom(t *testing.T) {
+	svc, students, enrolls, catalog, _ := newEnrollService(t)
+	seedStudent(t, students, "stu-1")
+	catalog.gradeGroups["gl-1"] = []ports.GroupSeats{
+		{ID: "grp-a", Name: "1° A", CycleID: "cyc-1", Capacity: 2},
+		{ID: "grp-b", Name: "1° B", CycleID: "cyc-1", Capacity: 2},
+	}
+
+	placed, err := svc.EnrollIntoGrade(context.Background(), "stu-1", "gl-1")
+	if err != nil {
+		t.Fatalf("EnrollIntoGrade: %v", err)
+	}
+
+	if placed.GroupName != "1° A" {
+		t.Errorf("placed in %q, want 1° A — a school fills A before B", placed.GroupName)
+	}
+	if len(enrolls.createSeen) != 1 || enrolls.createSeen[0].GroupID() != "grp-a" {
+		t.Errorf("persisted enrollment group = %+v", enrolls.createSeen)
+	}
+}
+
+// The rule the owner asked for in as many words: when A fills up, the next child
+// goes to B.
+func TestAFullGroupOverflowsIntoTheNext(t *testing.T) {
+	svc, students, enrolls, catalog, _ := newEnrollService(t)
+	catalog.gradeGroups["gl-1"] = []ports.GroupSeats{
+		{ID: "grp-a", Name: "1° A", CycleID: "cyc-1", Capacity: 2},
+		{ID: "grp-b", Name: "1° B", CycleID: "cyc-1", Capacity: 2},
+	}
+
+	var landed []string
+	for i, id := range []string{"s1", "s2", "s3"} {
+		seedStudent(t, students, id)
+		placed, err := svc.EnrollIntoGrade(context.Background(), id, "gl-1")
+		if err != nil {
+			t.Fatalf("pupil %d: %v", i+1, err)
+		}
+		landed = append(landed, placed.GroupName)
+	}
+
+	want := []string{"1° A", "1° A", "1° B"}
+	for i := range want {
+		if landed[i] != want[i] {
+			t.Fatalf("pupils landed in %v, want %v", landed, want)
+		}
+	}
+	_ = enrolls
+}
+
+// A grade with every seat taken is the school's decision to make, not ours. It
+// refuses and says how full it is, rather than opening a group on its own or
+// quietly overfilling one.
+func TestAGradeWithNoSeatsLeftIsRefused(t *testing.T) {
+	svc, students, _, catalog, _ := newEnrollService(t)
+	catalog.gradeGroups["gl-1"] = []ports.GroupSeats{{ID: "grp-a", Name: "1° A", CycleID: "cyc-1", Capacity: 1}}
+	seedStudent(t, students, "s1")
+	if _, err := svc.EnrollIntoGrade(context.Background(), "s1", "gl-1"); err != nil {
+		t.Fatalf("first pupil: %v", err)
+	}
+
+	seedStudent(t, students, "s2")
+	_, err := svc.EnrollIntoGrade(context.Background(), "s2", "gl-1")
+
+	if err == nil || glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Fatalf("want KindConflict, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "lugar") {
+		t.Errorf("message = %q; it must tell the school its grade is full", err.Error())
+	}
+}
+
+// A grade nobody has given groups to is a configuration gap, and saying so beats
+// "no hay lugares" — the school has to go and create a group, not free a seat.
+func TestAGradeWithNoGroupsSaysSo(t *testing.T) {
+	svc, students, _, catalog, _ := newEnrollService(t)
+	seedStudent(t, students, "s1")
+	catalog.gradeGroups["gl-1"] = nil
+
+	_, err := svc.EnrollIntoGrade(context.Background(), "s1", "gl-1")
+
+	if err == nil {
+		t.Fatal("a grade with no groups cannot take a pupil")
+	}
+	if !strings.Contains(err.Error(), "grupo") {
+		t.Errorf("message = %q; it must point at the missing group", err.Error())
+	}
+}
+
+// Placing by grade must move the pupil's file exactly as placing by group does —
+// the two paths cannot disagree about what enrolment means.
+func TestEnrollIntoGradeMovesTheStudentsFile(t *testing.T) {
+	svc, students, _, catalog, _ := newEnrollService(t)
+	seedPendingApplicant(t, students, "stu-9")
+	catalog.gradeGroups["gl-1"] = []ports.GroupSeats{{ID: "grp-b", Name: "1° B", CycleID: "cyc-1", Capacity: 5}}
+
+	if _, err := svc.EnrollIntoGrade(context.Background(), "stu-9", "gl-1"); err != nil {
+		t.Fatalf("EnrollIntoGrade: %v", err)
+	}
+
+	if len(students.updated) == 0 {
+		t.Fatal("the file was never persisted")
+	}
+	saved := students.updated[len(students.updated)-1]
+	if saved.Status() != domain.AdmissionEnrolled {
+		t.Errorf("persisted admission status = %v, want enrolled", saved.Status())
+	}
+	// The record follows the placement: "grado y grupo" used to be free text a
+	// secretary typed, and it drifted the moment they guessed a group that was
+	// full or one that had never been created.
+	if saved.GradeGroup() != "1° B" {
+		t.Errorf("persisted grade group = %q, want 1° B — the record must say where they landed", saved.GradeGroup())
 	}
 }

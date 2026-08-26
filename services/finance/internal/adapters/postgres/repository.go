@@ -235,6 +235,13 @@ func (r *Repository) CreateChargesBulk(ctx context.Context, cs []domain.Charge) 
 		referenced = append(referenced, model)
 	}
 
+	// NOTE, for whoever changes the two TargetWhere clauses below: the
+	// testcontainers harness does NOT reproduce the failure they guard against.
+	// The integration tests here pass with a parameterised predicate and fail only
+	// against the compose database, on the same Postgres 16 and the same GORM
+	// config — the difference was never found. So the literals are load-bearing
+	// and untested: verify a change to them against a running stack, not just
+	// against `go test -tags=integration`.
 	var created int
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		// The target is spelled out on purpose in both cases. A bare
@@ -246,8 +253,15 @@ func (r *Repository) CreateChargesBulk(ctx context.Context, cs []domain.Charge) 
 				Columns: []clause.Column{{Name: "tenant_id"}, {Name: "student_id"}, {Name: "cycle_id"}, {Name: "concept_id"}},
 				// TargetWhere, not Where: this is the predicate of the PARTIAL
 				// index being used as the arbiter, not a condition on DO UPDATE.
+				//
+				// A raw expression, not clause.Eq, and that is not a style choice:
+				// clause.Eq binds the '' as a PARAMETER, and Postgres cannot prove
+				// a parameterised predicate implies a partial index's, so it
+				// answers "there is no unique or exclusion constraint matching the
+				// ON CONFLICT specification". The literal is what makes the
+				// arbiter resolvable.
 				TargetWhere: clause.Where{Exprs: []clause.Expression{
-					clause.Eq{Column: clause.Column{Name: "external_ref"}, Value: ""},
+					clause.Expr{SQL: "external_ref = ''"},
 				}},
 				DoNothing: true,
 			}).Create(&keyless)
@@ -259,8 +273,10 @@ func (r *Repository) CreateChargesBulk(ctx context.Context, cs []domain.Charge) 
 		if len(referenced) > 0 {
 			res := tx.Clauses(clause.OnConflict{
 				Columns: []clause.Column{{Name: "tenant_id"}, {Name: "external_ref"}},
+				// Literal, for the same reason as above: a bound parameter makes
+				// the partial index unresolvable as an arbiter.
 				TargetWhere: clause.Where{Exprs: []clause.Expression{
-					clause.Neq{Column: clause.Column{Name: "external_ref"}, Value: ""},
+					clause.Expr{SQL: "external_ref <> ''"},
 				}},
 				DoNothing: true,
 			}).Create(&referenced)

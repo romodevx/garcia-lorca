@@ -556,8 +556,28 @@ func (h *ConfigHandler) ListTeachingAssignments(w http.ResponseWriter, r *http.R
 // writeConnectError maps a Connect error code from the config service to an HTTP
 // status and writes the standard status text.
 func writeConnectError(w http.ResponseWriter, err error) {
+	WriteConnectError(w, err)
+}
+
+// WriteConnectError answers a downstream Connect failure, forwarding the
+// SERVICE'S OWN sentence when it has one.
+//
+// It used to answer the bare status text and nothing else, so every refusal from
+// every service read "Bad Request" — including the carefully worded ones. A
+// director creating a pupil before activating the school year was told "Bad
+// Request" rather than "no hay un ciclo escolar activo", and had no way to guess.
+//
+// Forwarding is safe by construction, not by hope: every service sanitises its
+// errors at its own boundary (pkg/errors.SafeMessage), so nothing from a driver
+// or a query reaches this point. Exported so the behaviour can be tested for what
+// it is — the one thing standing between a written message and a person.
+func WriteConnectError(w http.ResponseWriter, err error) {
 	status := httpStatusFor(err)
-	http.Error(w, http.StatusText(status), status)
+	message := connectMessage(err)
+	if message == "" {
+		message = http.StatusText(status)
+	}
+	http.Error(w, message, status)
 }
 
 // ActivateCycle: POST /api/v1/config/cycles/{id}/activate

@@ -22,7 +22,7 @@ test.describe.serial("setting up a school from zero", () => {
   // re-run never collides with the last one.
   const tag = uniqueSuffix();
   const cycle = `Ciclo ${tag}`;
-  const level = `Primaria ${tag}`;
+  const level = "Primaria";
   const grade = `1° ${tag}`;
   const group = `A ${tag}`;
   const subject = `Matemáticas ${tag}`;
@@ -54,6 +54,13 @@ test.describe.serial("setting up a school from zero", () => {
     await page.getByRole("button", { name: "Crear ciclo" }).click();
 
     await expect(page.getByRole("button", { name: new RegExp(cycle) })).toBeVisible();
+
+    // A cycle is born a draft. Everything downstream asks "which year is active"
+    // — groups, tuition, enrolment — so putting it into service is part of
+    // opening a school, not an afterthought.
+    await page.getByRole("button", { name: new RegExp(cycle) }).click();
+    await page.getByRole("button", { name: "Activar ciclo" }).click();
+    await expect(page.getByText(/es el ciclo en curso/i)).toBeVisible();
   });
 
   /**
@@ -153,38 +160,14 @@ test.describe.serial("setting up a school from zero", () => {
     await drawer.getByRole("textbox", { name: "CURP *" }).fill(curpFor(tag));
     await drawer.getByRole("textbox", { name: "Nombre *" }).fill("Zoe");
     await drawer.getByRole("textbox", { name: "Apellidos *" }).fill(`Villalobos ${tag}`);
-    // Level is chips, not a dropdown — fewest clicks, per the design system.
-    await drawer.getByRole("button", { name: "Primaria", exact: true }).click();
-    await drawer.getByRole("textbox", { name: "Grado y grupo" }).fill("1° A");
+    // Level and grade are cascading selects, and the GROUP is never asked for:
+    // it is chosen by whichever one still has a seat.
+    await drawer.getByRole("combobox", { name: "Nivel" }).selectOption({ label: level });
+    await drawer.getByRole("combobox", { name: "Grado" }).selectOption({ label: grade });
     await drawer.getByRole("textbox", { name: "Tutor *" }).fill("Marisol Villalobos");
     await drawer.getByRole("button", { name: "Crear alumno" }).click();
 
     await expect(page.getByText(`Villalobos ${tag}`, { exact: false }).first()).toBeVisible();
-  });
-
-  /**
-   * Registering a pupil and enrolling one are two different acts, and the shop
-   * cares about the second: a charge names a school year, the year comes from the
-   * enrolment, so an admitted-but-unplaced pupil cannot be billed for a uniform.
-   * The demo does this in the pupil's own card, which is also where the school
-   * will do it in real life.
-   */
-  test("3b · the pupil takes a place in the group", async ({ page }) => {
-    await signIn(page);
-    await openModule(page, "Estudiantes");
-
-    // Search first, then open. The roster pages at 20, so on a school that has
-    // been running a while the pupil just registered is not necessarily on the
-    // page in front of you — which is also why the search box is there.
-    await page.getByRole("textbox", { name: "Buscar" }).fill(`Villalobos ${tag}`);
-    await page.getByRole("button", { name: `Ver ficha de Zoe Villalobos ${tag}` }).click();
-    const card = page.getByRole("dialog", { name: "Ficha del alumno" });
-    await card.getByRole("button", { name: group, exact: true }).click();
-    await card.getByRole("button", { name: "Inscribir", exact: true }).click();
-
-    await expect(card).toBeHidden();
-    // The roster is the proof: the pupil moved out of "Trámite".
-    await expect(page.getByText("Inscrito").first()).toBeVisible();
   });
 
   /**

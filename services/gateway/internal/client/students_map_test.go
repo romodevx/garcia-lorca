@@ -20,15 +20,15 @@ func TestLevelNameRoundTrip(t *testing.T) {
 		if got := levelName(c.wire); got != c.name {
 			t.Errorf("levelName(%v) = %q, want %q", c.wire, got, c.name)
 		}
-		if got := levelFromName(c.name); got != c.wire {
-			t.Errorf("levelFromName(%q) = %v, want %v", c.name, got, c.wire)
+		if got := LevelFromName(c.name); got != c.wire {
+			t.Errorf("LevelFromName(%q) = %v, want %v", c.name, got, c.wire)
 		}
 	}
 }
 
 func TestUnknownLevelNameIsUnspecified(t *testing.T) {
-	if got := levelFromName("licenciatura"); got != studentsv1.Level_LEVEL_UNSPECIFIED {
-		t.Errorf("levelFromName(unknown) = %v, want UNSPECIFIED", got)
+	if got := LevelFromName("licenciatura"); got != studentsv1.Level_LEVEL_UNSPECIFIED {
+		t.Errorf("LevelFromName(unknown) = %v, want UNSPECIFIED", got)
 	}
 	if got := levelName(studentsv1.Level_LEVEL_UNSPECIFIED); got != "" {
 		t.Errorf("levelName(UNSPECIFIED) = %q, want empty", got)

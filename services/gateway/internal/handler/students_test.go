@@ -199,6 +199,8 @@ func TestGetStudentNotFoundIs404(t *testing.T) {
 // --- enrollments ----------------------------------------------------------
 
 type fakeEnrollmentSvc struct {
+	gradeStudent                                  string
+	gradeLevel                                    string
 	gotStudentID, gotGroupID, gotTermID           string
 	gotListStudentID, gotListCycleID, gotListGrp  string
 	gotGetID                                      string
@@ -397,5 +399,60 @@ func TestWithdrawForwardsAndReturns200(t *testing.T) {
 	}
 	if out["status"] != "withdrawn" {
 		t.Errorf("body = %v", out)
+	}
+}
+
+func (f *fakeEnrollmentSvc) EnrollIntoGrade(_ context.Context, studentID, gradeLevelID string) (client.Placement, error) {
+	f.gradeStudent, f.gradeLevel = studentID, gradeLevelID
+	if f.err != nil {
+		return client.Placement{}, f.err
+	}
+	return client.Placement{
+		Enrollment: client.Enrollment{ID: "enr-1", StudentID: studentID, GroupID: "grp-b"},
+		GroupName:  "1° B",
+	}, nil
+}
+
+// The panel asks for a grade and is told which group the pupil landed in, by
+// name — "quedó en 1° B" is the whole answer a person needs.
+func TestEnrollIntoGradeReportsTheGroupCapacityChose(t *testing.T) {
+	svc := &fakeEnrollmentSvc{}
+	h := handler.NewEnrollmentsHandler(svc)
+
+	rec := doReq(t, h.EnrollIntoGrade, http.MethodPost, "/api/v1/enrollments/by-grade",
+		`{"studentId":"stu-1","gradeLevelId":"gl-1"}`)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+	if svc.gradeStudent != "stu-1" || svc.gradeLevel != "gl-1" {
+		t.Errorf("forwarded %q %q", svc.gradeStudent, svc.gradeLevel)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if out["groupName"] != "1° B" {
+		t.Errorf("body = %v; the panel has to be able to say where the pupil landed", out)
+	}
+}
+
+// The whole API answers in camelCase. Returning the client struct directly would
+// serialise Go field names, and a panel reading `enrollment.id` would find
+// nothing while `enrollment.ID` quietly worked.
+func TestPlacementAnswersInTheSameShapeAsEveryOtherEndpoint(t *testing.T) {
+	h := handler.NewEnrollmentsHandler(&fakeEnrollmentSvc{})
+
+	rec := doReq(t, h.EnrollIntoGrade, http.MethodPost, "/api/v1/enrollments/by-grade",
+		`{"studentId":"stu-1","gradeLevelId":"gl-1"}`)
+
+	var out struct {
+		Enrollment map[string]any `json:"enrollment"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if _, ok := out.Enrollment["id"]; !ok {
+		t.Errorf("enrollment keys = %v; want camelCase like the rest of the API", out.Enrollment)
 	}
 }

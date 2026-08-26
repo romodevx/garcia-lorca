@@ -102,8 +102,9 @@ func (r *fakeEnrollmentRepo) SetEnrollmentStatus(_ context.Context, id string, s
 // fakeCatalogValidator is an in-memory CatalogValidator: a missing group/term is
 // glerrors.ErrNotFound (matching the real Connect client's NotFound mapping).
 type fakeCatalogValidator struct {
-	groups map[string]ports.GroupRef
-	terms  map[string]ports.TermRef
+	gradeGroups []ports.GroupSeats
+	groups      map[string]ports.GroupRef
+	terms       map[string]ports.TermRef
 }
 
 func (c *fakeCatalogValidator) GroupByID(_ context.Context, id string) (ports.GroupRef, error) {
@@ -301,4 +302,28 @@ func TestListEnrollmentsFiltersByStudent(t *testing.T) {
 	if len(res.Msg.GetEnrollments()) != 1 {
 		t.Errorf("got %d enrollments, want 1", len(res.Msg.GetEnrollments()))
 	}
+}
+
+// --- doubles for the capacity-aware placement -------------------------------
+//
+// The handler's own tests do not exercise the fill order — that lives in the use
+// case, against a double that models capacity. These exist so the handler
+// compiles against the ports.
+
+func (f *fakeEnrollmentRepo) CreateEnrollmentInFirstFreeGroup(
+	ctx context.Context,
+	e domain.Enrollment,
+	groups []ports.GroupSeats,
+) (ports.GroupSeats, error) {
+	if len(groups) == 0 {
+		return ports.GroupSeats{}, glerrors.New(glerrors.KindConflict, "no quedan lugares")
+	}
+	if err := f.CreateEnrollment(ctx, e); err != nil {
+		return ports.GroupSeats{}, err
+	}
+	return groups[0], nil
+}
+
+func (f *fakeCatalogValidator) GroupsOfGrade(_ context.Context, _ string) ([]ports.GroupSeats, error) {
+	return f.gradeGroups, nil
 }

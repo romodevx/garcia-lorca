@@ -149,3 +149,14 @@ func (s *Student) Level() Level            { return s.level }
 func (s *Student) GradeGroup() string      { return s.gradeGroup }
 func (s *Student) GuardianName() string    { return s.guardianName }
 func (s *Student) Status() AdmissionStatus { return s.status }
+
+// PlaceIn records the group the pupil ended up in.
+//
+// The field used to be free text a secretary typed ("1° A") with nothing
+// checking it against the groups that exist. It is now written by the system
+// when capacity chooses a group, so the record and the placement cannot drift
+// apart — which they did the moment somebody typed a group that was full, or one
+// that had never been created.
+func (s *Student) PlaceIn(groupName string) {
+	s.gradeGroup = strings.TrimSpace(groupName)
+}

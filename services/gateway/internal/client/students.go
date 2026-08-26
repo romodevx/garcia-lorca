@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	connect "connectrpc.com/connect"
@@ -76,7 +77,7 @@ func (c *StudentsClient) CreateApplicant(ctx context.Context, in CreateApplicant
 		Curp:         in.CURP,
 		FirstName:    in.FirstName,
 		LastName:     in.LastName,
-		Level:        levelFromName(in.Level),
+		Level:        LevelFromName(in.Level),
 		GradeGroup:   in.GradeGroup,
 		GuardianName: in.GuardianName,
 	}))
@@ -152,6 +153,27 @@ func (c *StudentsClient) Enroll(ctx context.Context, studentID, groupID, termID 
 		return Enrollment{}, err
 	}
 	return toEnrollment(res.Msg.GetEnrollment()), nil
+}
+
+// Placement is where a pupil landed: the enrolment plus the group the school's
+// own capacity chose, by name.
+type Placement struct {
+	Enrollment Enrollment `json:"enrollment"`
+	GroupName  string     `json:"groupName"`
+}
+
+// EnrollIntoGrade places a pupil in a grade and lets capacity pick the group.
+func (c *StudentsClient) EnrollIntoGrade(ctx context.Context, studentID, gradeLevelID string) (Placement, error) {
+	res, err := c.rpc.EnrollIntoGrade(ctx, connect.NewRequest(&studentsv1.EnrollIntoGradeRequest{
+		StudentId: studentID, GradeLevelId: gradeLevelID,
+	}))
+	if err != nil {
+		return Placement{}, err
+	}
+	return Placement{
+		Enrollment: toEnrollment(res.Msg.GetEnrollment()),
+		GroupName:  res.Msg.GetGroupName(),
+	}, nil
 }
 
 // ListEnrollments lists enrollments filtered by any of studentID, cycleID,
@@ -325,9 +347,20 @@ var levelNames = map[studentsv1.Level]string{
 
 func levelName(l studentsv1.Level) string { return levelNames[l] }
 
-func levelFromName(name string) studentsv1.Level {
+// LevelFromName resolves a level name to the SEP enum, as tolerantly as the
+// students domain does.
+//
+// Exported and tested because it is the second place in the system that parses
+// this, and the two used to disagree: the domain folds case and accents so
+// "Kínder" resolves, while the edge matched exact lowercase and turned the
+// school's own level name into UNSPECIFIED — a 400 for a value the service two
+// hops away would have accepted, with nothing in between to say why.
+func LevelFromName(name string) studentsv1.Level {
+	key := strings.ToLower(strings.TrimSpace(name))
+	// The same fold the domain applies (services/students/internal/domain/level.go).
+	key = strings.ReplaceAll(key, "í", "i")
 	for level, n := range levelNames {
-		if n == name {
+		if n == key {
 			return level
 		}
 	}

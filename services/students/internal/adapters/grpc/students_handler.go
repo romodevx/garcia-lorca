@@ -125,6 +125,19 @@ func (h *StudentsHandler) Enroll(ctx context.Context, req *connect.Request[stude
 	return connect.NewResponse(&studentsv1.EnrollResponse{Enrollment: toProtoEnrollment(enrollment)}), nil
 }
 
+// EnrollIntoGrade places a pupil in a grade and lets capacity choose the group.
+func (h *StudentsHandler) EnrollIntoGrade(ctx context.Context, req *connect.Request[studentsv1.EnrollIntoGradeRequest]) (*connect.Response[studentsv1.EnrollIntoGradeResponse], error) {
+	m := req.Msg
+	placed, err := h.enroll.EnrollIntoGrade(ctx, m.GetStudentId(), m.GetGradeLevelId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.EnrollIntoGradeResponse{
+		Enrollment: toProtoEnrollment(placed.Enrollment),
+		GroupName:  placed.GroupName,
+	}), nil
+}
+
 func (h *StudentsHandler) GetEnrollment(ctx context.Context, req *connect.Request[studentsv1.GetEnrollmentRequest]) (*connect.Response[studentsv1.GetEnrollmentResponse], error) {
 	enrollment, err := h.enroll.GetEnrollment(ctx, req.Msg.GetId())
 	if err != nil {
