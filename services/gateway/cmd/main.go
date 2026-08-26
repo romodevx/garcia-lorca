@@ -404,6 +404,13 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	financeRead := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("finance", requireAuthChanged(middleware.RequirePermission("finance:read")(http.HandlerFunc(h))))
 	}
+	// M15 tuition: pricing a level and running the month are WRITES on the
+	// ledger, so they answer to finance:write; reading the table is finance:read.
+	// The screen lives in Configuración because that is where a director looks
+	// for it, but the money stays in the finance module and behind its flag.
+	mux.Handle("PUT /api/v1/finance/tuition-plans", financeWrite(financeH.UpsertTuitionPlan))
+	mux.Handle("GET /api/v1/finance/tuition-plans", financeRead(financeH.ListTuitionPlans))
+	mux.Handle("POST /api/v1/finance/billing-runs", financeWrite(financeH.RunBilling))
 	mux.Handle("POST /api/v1/finance/concepts", financeWrite(financeH.CreateConcept))
 	mux.Handle("PUT /api/v1/finance/concepts/{id}", financeWrite(financeH.UpdateConcept))
 	mux.Handle("GET /api/v1/finance/concepts", financeRead(financeH.ListConcepts))

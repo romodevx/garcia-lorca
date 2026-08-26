@@ -41,6 +41,7 @@ type ChargeConcept struct {
 	defaultAmount Cents
 	recurrence    string
 	active        bool
+	kind          string
 }
 
 // NewChargeConcept builds a validated ChargeConcept. Identity, tenant and name
@@ -70,7 +71,35 @@ func NewChargeConcept(id, tenantID, name string, defaultAmountCents int64, recur
 		defaultAmount: amount,
 		recurrence:    recurrence,
 		active:        active,
+		kind:          KindCustom,
 	}, nil
+}
+
+// Concept kinds. A school may invent any number of custom concepts and has AT
+// MOST ONE of each system kind; the billing run finds its concepts by kind, so
+// renaming one cannot stop a school being billed.
+const (
+	KindCustom     = "custom"
+	KindTuition    = "tuition"
+	KindEnrollment = "enrollment"
+	KindLateFee    = "late_fee"
+)
+
+// Kind reports what the concept IS, independent of what it was named.
+func (c ChargeConcept) Kind() string { return c.kind }
+
+// WithKind returns a copy marked as a system concept. It is a separate step
+// rather than a constructor parameter because every existing caller creates a
+// custom concept, and a school creating one through the UI must not be able to
+// claim a system kind.
+func (c ChargeConcept) WithKind(kind string) (ChargeConcept, error) {
+	switch kind {
+	case KindCustom, KindTuition, KindEnrollment, KindLateFee:
+		c.kind = kind
+		return c, nil
+	default:
+		return ChargeConcept{}, glerrors.New(glerrors.KindInvalid, "unknown charge concept kind")
+	}
 }
 
 // WithUpdate returns a re-validated copy carrying the new mutable attributes,

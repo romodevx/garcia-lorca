@@ -211,28 +211,64 @@ func (r *Repository) CreateChargesBulk(ctx context.Context, cs []domain.Charge) 
 	if len(cs) == 0 {
 		return 0, nil
 	}
-	models := make([]chargeModel, 0, len(cs))
+
+	// The batch is split by whether the charge carries an external ref, because
+	// the two kinds are deduplicated by DIFFERENT partial indexes (migration
+	// 0003) and ON CONFLICT takes exactly one arbiter.
+	//
+	// A keyless charge is one per (student, cycle, concept): a student owes a
+	// given concept once a cycle. A referenced charge is one per ref, which is
+	// what lets a school year hold ten tuition charges for the same concept.
+	//
+	// Naming only the keyless arbiter — which this did until M15 — meant a
+	// referenced charge collided against the index that was NOT the arbiter, so
+	// Postgres raised a duplicate-key error instead of skipping. Nothing was
+	// wrong until the billing run started using refs, and then the second run of
+	// every month failed outright.
+	var keyless, referenced []chargeModel
 	for _, c := range cs {
-		models = append(models, fromDomainCharge(c))
+		model := fromDomainCharge(c)
+		if c.ExternalRef() == "" {
+			keyless = append(keyless, model)
+			continue
+		}
+		referenced = append(referenced, model)
 	}
 
 	var created int
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		// The target is spelled out on purpose. A bare OnConflict{DoNothing}
-		// infers its arbiter from whatever unique index happens to match, so a
-		// change to the table's keys could stop this deduplicating with no
-		// error and re-bill the whole school on the next generation run.
-		res := tx.Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "tenant_id"}, {Name: "student_id"}, {Name: "cycle_id"}, {Name: "concept_id"}},
-			// TargetWhere, not Where: this is the predicate of the PARTIAL index
-			// being used as the arbiter, not a condition on a DO UPDATE.
-			TargetWhere: clause.Where{Exprs: []clause.Expression{clause.Eq{Column: clause.Column{Name: "external_ref"}, Value: ""}}},
-			DoNothing:   true,
-		}).Create(&models)
-		if res.Error != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "bulk creating charges", res.Error)
+		// The target is spelled out on purpose in both cases. A bare
+		// OnConflict{DoNothing} infers its arbiter from whatever unique index
+		// happens to match, so a change to the table's keys could stop this
+		// deduplicating with no error and re-bill the whole school.
+		if len(keyless) > 0 {
+			res := tx.Clauses(clause.OnConflict{
+				Columns: []clause.Column{{Name: "tenant_id"}, {Name: "student_id"}, {Name: "cycle_id"}, {Name: "concept_id"}},
+				// TargetWhere, not Where: this is the predicate of the PARTIAL
+				// index being used as the arbiter, not a condition on DO UPDATE.
+				TargetWhere: clause.Where{Exprs: []clause.Expression{
+					clause.Eq{Column: clause.Column{Name: "external_ref"}, Value: ""},
+				}},
+				DoNothing: true,
+			}).Create(&keyless)
+			if res.Error != nil {
+				return glerrors.Wrap(glerrors.KindInternal, "bulk creating charges", res.Error)
+			}
+			created += int(res.RowsAffected)
 		}
-		created = int(res.RowsAffected)
+		if len(referenced) > 0 {
+			res := tx.Clauses(clause.OnConflict{
+				Columns: []clause.Column{{Name: "tenant_id"}, {Name: "external_ref"}},
+				TargetWhere: clause.Where{Exprs: []clause.Expression{
+					clause.Neq{Column: clause.Column{Name: "external_ref"}, Value: ""},
+				}},
+				DoNothing: true,
+			}).Create(&referenced)
+			if res.Error != nil {
+				return glerrors.Wrap(glerrors.KindInternal, "bulk creating charges", res.Error)
+			}
+			created += int(res.RowsAffected)
+		}
 		return nil
 	})
 	if err != nil {
@@ -646,4 +682,124 @@ func translateFindErr(err error) error {
 		return glerrors.ErrNotFound
 	}
 	return glerrors.Wrap(glerrors.KindInternal, "query failed", err)
+}
+
+// --- tuition (M15) ----------------------------------------------------------
+
+// EnsureConceptOfKind returns the tenant's concept for a system kind, creating it
+// with the given name if the school has none.
+//
+// The lookup is by KIND, never by name. Names are the school's to change, and a
+// monthly billing run that found its concept by name would stop finding it the
+// day somebody renamed "Colegiatura" to "Mensualidad" — silently, and only
+// noticeably a month later.
+func (r *Repository) EnsureConceptOfKind(ctx context.Context, id, kind, name string) (domain.ChargeConcept, error) {
+	var out domain.ChargeConcept
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var existing chargeConceptModel
+		err := tx.Where("kind = ?", kind).Take(&existing).Error
+		if err == nil {
+			stored, convErr := toDomainConcept(existing)
+			if convErr != nil {
+				return convErr
+			}
+			out = stored
+			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return glerrors.Wrap(glerrors.KindInternal, "reading the charge concept", err)
+		}
+
+		concept, err := domain.NewChargeConcept(id, r.tenantID, name, 0, recurrenceFor(kind), true)
+		if err != nil {
+			return err
+		}
+		concept, err = concept.WithKind(kind)
+		if err != nil {
+			return err
+		}
+		model := fromDomainConcept(concept)
+		if err := tx.Create(&model).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "creating the charge concept", err)
+		}
+		out = concept
+		return nil
+	})
+	if err != nil {
+		return domain.ChargeConcept{}, err
+	}
+	return out, nil
+}
+
+// recurrenceFor is the recurrence a system concept is born with. Only tuition
+// repeats; an inscription happens once a year and a surcharge is a one-off event
+// that merely happens to be able to recur.
+func recurrenceFor(kind string) string {
+	if kind == domain.KindTuition {
+		return "monthly"
+	}
+	return "once"
+}
+
+// UpsertTuitionPlan stores the tuition table for one (cycle, level), replacing
+// whatever was there.
+//
+// Replacing rather than versioning: the table states the CURRENT price, and every
+// charge already issued carries its own amount, so correcting a typo cannot
+// disturb what a family already owes.
+func (r *Repository) UpsertTuitionPlan(ctx context.Context, p domain.TuitionPlan) (domain.TuitionPlan, error) {
+	model := fromDomainPlan(p)
+	var out domain.TuitionPlan
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "tenant_id"}, {Name: "cycle_id"}, {Name: "level_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"enrollment_cents", "monthly_cents", "months",
+				"first_billed_month", "due_day", "late_fee_cents", "active", "updated_at",
+			}),
+		}).Create(&model).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "storing the tuition table", err)
+		}
+		// Read back: on a conflict the stored id is the ORIGINAL row's, not the
+		// one just minted, and returning the minted id would hand the caller an
+		// identifier that matches nothing.
+		var stored tuitionPlanModel
+		if err := tx.Where("cycle_id = ? AND level_id = ?", p.CycleID(), p.LevelID()).
+			Take(&stored).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "reading back the tuition table", err)
+		}
+		plan, err := toDomainPlan(stored)
+		if err != nil {
+			return err
+		}
+		out = plan
+		return nil
+	})
+	if err != nil {
+		return domain.TuitionPlan{}, err
+	}
+	return out, nil
+}
+
+// ListTuitionPlans returns the whole tuition table of a cycle.
+func (r *Repository) ListTuitionPlans(ctx context.Context, cycleID string) ([]domain.TuitionPlan, error) {
+	var rows []tuitionPlanModel
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := tx.Where("cycle_id = ?", cycleID).Order("created_at").Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing the tuition tables", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.TuitionPlan, 0, len(rows))
+	for _, row := range rows {
+		plan, err := toDomainPlan(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, plan)
+	}
+	return out, nil
 }

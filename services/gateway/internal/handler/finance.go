@@ -16,6 +16,9 @@ type FinanceService interface {
 	UpdateConcept(ctx context.Context, id, name string, defaultAmountCents int64, recurrence string, active bool) (client.ChargeConcept, error)
 	CreateCharge(ctx context.Context, studentID, cycleID, conceptID string, amountCentsOverride int64, descriptionOverride, dueDate string) (client.Charge, error)
 	GenerateCharges(ctx context.Context, conceptID, cycleID, groupID string, amountCentsOverride int64, dueDate string) (int32, int32, error)
+	UpsertTuitionPlan(ctx context.Context, in client.TuitionPlanInput) (client.TuitionPlan, error)
+	ListTuitionPlans(ctx context.Context, cycleID string) ([]client.TuitionPlan, error)
+	RunBilling(ctx context.Context, cycleID, asOfDate string) (client.BillingRun, error)
 	ListCharges(ctx context.Context, studentID, cycleID string) ([]client.Charge, error)
 	ApplyDiscount(ctx context.Context, chargeID string, discountCents int64, reason string) (client.Charge, error)
 	CancelCharge(ctx context.Context, chargeID string) (client.Charge, error)
@@ -340,4 +343,55 @@ func (h *FinanceHandler) ListOverdue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"overdue": toChargeResponses(res)})
+}
+
+// --- tuition (M15) ----------------------------------------------------------
+
+// UpsertTuitionPlan: PUT /api/v1/finance/tuition-plans
+//
+// A PUT and not a POST: the school states what a level costs, and stating it
+// twice must mean the same thing as stating it once. There is exactly one table
+// per (cycle, level), so there is nothing to create a second of.
+func (h *FinanceHandler) UpsertTuitionPlan(w http.ResponseWriter, r *http.Request) {
+	var body client.TuitionPlanInput
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	plan, err := h.svc.UpsertTuitionPlan(r.Context(), body)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, plan)
+}
+
+// ListTuitionPlans: GET /api/v1/finance/tuition-plans?cycleId=…
+func (h *FinanceHandler) ListTuitionPlans(w http.ResponseWriter, r *http.Request) {
+	plans, err := h.svc.ListTuitionPlans(r.Context(), r.URL.Query().Get("cycleId"))
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"plans": plans})
+}
+
+// RunBilling: POST /api/v1/finance/billing-runs
+//
+// Idempotent downstream, which is what makes it safe to expose as a button the
+// school can press twice: the second press reports everything as skipped rather
+// than charging anybody again.
+func (h *FinanceHandler) RunBilling(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		CycleID  string `json:"cycleId"`
+		AsOfDate string `json:"asOfDate"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	run, err := h.svc.RunBilling(r.Context(), body.CycleID, body.AsOfDate)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, run)
 }

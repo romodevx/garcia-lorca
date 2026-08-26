@@ -603,7 +603,7 @@ func TestRegisterPaymentSurvivesPublisherFailures(t *testing.T) {
 		f := newFixture(t)
 		concept := f.seedConcept(t, "Colegiatura", 250000)
 		charge := f.seedCharge(t, concept.ID(), 100000)
-		svc := usecase.NewFinanceService(f.repo, f.students, f.cycles, f.enrollments, nil,
+		svc := usecase.NewFinanceService(f.repo, f.students, f.cycles, f.enrollments, f.catalog, nil,
 			testTenant, seqID("np"), func() time.Time { return fixedNow })
 
 		_, cwp, err := svc.RegisterPayment(context.Background(), charge.ID(), 40000, domain.MethodCash, "", "")

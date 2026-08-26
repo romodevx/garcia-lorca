@@ -156,3 +156,29 @@ variable "budget_alert_emails" {
   type        = list(string)
   default     = []
 }
+
+# ---- M15 billing schedule ---------------------------------------------------
+
+variable "billing_schedule_enabled" {
+  description = "Create the Cloud Scheduler job that runs the monthly billing. Turning module_tuition off does NOT stop this — the scheduler calls finance directly, so stopping it is an apply."
+  type        = bool
+  default     = false
+}
+
+variable "billing_cycle_id" {
+  description = "The school cycle the scheduled run bills. Deliberately explicit: a job that guessed the cycle would silently bill the wrong school year the day one rolls over. Empty disables the job."
+  type        = string
+  default     = ""
+}
+
+variable "billing_schedule_cron" {
+  description = "When the billing run fires. Default: 06:00 on the 1st of each month."
+  type        = string
+  default     = "0 6 1 * *"
+}
+
+variable "billing_schedule_timezone" {
+  description = "IANA timezone the cron is read in. A school's due dates are local dates."
+  type        = string
+  default     = "America/Mexico_City"
+}

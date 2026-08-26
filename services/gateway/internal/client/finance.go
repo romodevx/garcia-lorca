@@ -303,3 +303,115 @@ func toPayment(p *financev1.Payment) Payment {
 		PaidAt:      paidAt,
 	}
 }
+
+// --- tuition (M15) ----------------------------------------------------------
+
+// TuitionPlan is the edge's view of what one level costs in one cycle.
+type TuitionPlan struct {
+	ID               string `json:"id"`
+	CycleID          string `json:"cycleId"`
+	LevelID          string `json:"levelId"`
+	EnrollmentCents  int64  `json:"enrollmentCents"`
+	MonthlyCents     int64  `json:"monthlyCents"`
+	Months           int    `json:"months"`
+	FirstBilledMonth int    `json:"firstBilledMonth"`
+	DueDay           int    `json:"dueDay"`
+	LateFeeCents     int64  `json:"lateFeeCents"`
+	Active           bool   `json:"active"`
+}
+
+// TuitionPlanInput is what the panel sends to price a level.
+type TuitionPlanInput struct {
+	CycleID          string `json:"cycleId"`
+	LevelID          string `json:"levelId"`
+	EnrollmentCents  int64  `json:"enrollmentCents"`
+	MonthlyCents     int64  `json:"monthlyCents"`
+	Months           int    `json:"months"`
+	FirstBilledMonth int    `json:"firstBilledMonth"`
+	DueDay           int    `json:"dueDay"`
+	LateFeeCents     int64  `json:"lateFeeCents"`
+	Active           bool   `json:"active"`
+}
+
+// BillingRun is what a run did, as the panel reports it back to the person who
+// pressed the button.
+type BillingRun struct {
+	TuitionCreated    int      `json:"tuitionCreated"`
+	EnrollmentCreated int      `json:"enrollmentCreated"`
+	LateFeesCreated   int      `json:"lateFeesCreated"`
+	Skipped           int      `json:"skipped"`
+	LevelsWithoutPlan []string `json:"levelsWithoutPlan"`
+}
+
+// UpsertTuitionPlan sets what one level of one cycle costs.
+func (c *FinanceClient) UpsertTuitionPlan(ctx context.Context, in TuitionPlanInput) (TuitionPlan, error) {
+	res, err := c.rpc.UpsertTuitionPlan(ctx, connect.NewRequest(&financev1.UpsertTuitionPlanRequest{
+		CycleId:          in.CycleID,
+		LevelId:          in.LevelID,
+		EnrollmentCents:  in.EnrollmentCents,
+		MonthlyCents:     in.MonthlyCents,
+		Months:           int32(in.Months),
+		FirstBilledMonth: int32(in.FirstBilledMonth),
+		DueDay:           int32(in.DueDay),
+		LateFeeCents:     in.LateFeeCents,
+		Active:           in.Active,
+	}))
+	if err != nil {
+		return TuitionPlan{}, err
+	}
+	return toTuitionPlan(res.Msg.GetPlan()), nil
+}
+
+// ListTuitionPlans returns the whole tuition table of a cycle.
+func (c *FinanceClient) ListTuitionPlans(ctx context.Context, cycleID string) ([]TuitionPlan, error) {
+	res, err := c.rpc.ListTuitionPlans(ctx, connect.NewRequest(&financev1.ListTuitionPlansRequest{
+		CycleId: cycleID,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TuitionPlan, 0, len(res.Msg.GetPlans()))
+	for _, p := range res.Msg.GetPlans() {
+		out = append(out, toTuitionPlan(p))
+	}
+	return out, nil
+}
+
+// RunBilling generates what the school is owed as of a date.
+func (c *FinanceClient) RunBilling(ctx context.Context, cycleID, asOfDate string) (BillingRun, error) {
+	res, err := c.rpc.RunBilling(ctx, connect.NewRequest(&financev1.RunBillingRequest{
+		CycleId: cycleID, AsOfDate: asOfDate,
+	}))
+	if err != nil {
+		return BillingRun{}, err
+	}
+	m := res.Msg
+	levels := m.GetLevelsWithoutPlan()
+	if levels == nil {
+		// A JSON null would make the panel test for it; an empty list reads the
+		// same to a person and to a `for`.
+		levels = []string{}
+	}
+	return BillingRun{
+		TuitionCreated:    int(m.GetTuitionCreated()),
+		EnrollmentCreated: int(m.GetEnrollmentCreated()),
+		LateFeesCreated:   int(m.GetLateFeesCreated()),
+		Skipped:           int(m.GetSkipped()),
+		LevelsWithoutPlan: levels,
+	}, nil
+}
+
+func toTuitionPlan(p *financev1.TuitionPlan) TuitionPlan {
+	return TuitionPlan{
+		ID:               p.GetId(),
+		CycleID:          p.GetCycleId(),
+		LevelID:          p.GetLevelId(),
+		EnrollmentCents:  p.GetEnrollmentCents(),
+		MonthlyCents:     p.GetMonthlyCents(),
+		Months:           int(p.GetMonths()),
+		FirstBilledMonth: int(p.GetFirstBilledMonth()),
+		DueDay:           int(p.GetDueDay()),
+		LateFeeCents:     p.GetLateFeeCents(),
+		Active:           p.GetActive(),
+	}
+}

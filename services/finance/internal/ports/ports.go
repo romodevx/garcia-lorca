@@ -38,6 +38,10 @@ type StudentRef struct {
 // all the ledger needs to stamp a charge.
 type CycleRef struct {
 	ID string
+	// StartsOn anchors the billing calendar. "Ten payments from September" is
+	// meaningless without knowing which September, and a cycle that opens in
+	// August 2026 reaches June of 2027 — the year is derived, never stated twice.
+	StartsOn time.Time
 }
 
 // EnrollmentRef is the finance-owned view of a students enrollment: enough to
@@ -105,6 +109,31 @@ type ChargeSettledEvent struct {
 	ExternalRef string
 	AmountCents int64
 	SettledAt   time.Time
+}
+
+// LevelRef is the finance-owned view of a config level: its identity, and the
+// name the panel shows when reporting a level that has no tuition table yet.
+type LevelRef struct {
+	ID   string
+	Name string
+}
+
+// GroupLevel maps a group of a cycle to the level it belongs to. It is the join
+// finance cannot make on its own: an enrolment names a GROUP, a price is set per
+// LEVEL, and the path between them (group → grade → level) lives in config.
+type GroupLevel struct {
+	GroupID string
+	LevelID string
+}
+
+// CatalogReader reads the academic catalogue finance needs to price a cycle.
+// Read-only and by RPC: config owns this data and finance never writes it.
+type CatalogReader interface {
+	// ListLevels returns the school's levels.
+	ListLevels(ctx context.Context) ([]LevelRef, error)
+	// GroupLevels resolves every group of a cycle to its level, in one call, so
+	// the billing run does not make a round trip per enrolment.
+	GroupLevels(ctx context.Context, cycleID string) ([]GroupLevel, error)
 }
 
 // PaymentPublisher emits the finance domain events. Publishing is best-effort
@@ -191,4 +220,22 @@ type FinanceRepository interface {
 	// spans every cycle. today is passed in, never read from a clock here, so
 	// the query stays deterministic and testable.
 	ListOverdue(ctx context.Context, cycleID string, today time.Time) ([]ChargeWithPaid, error)
+
+	// EnsureConceptOfKind returns the tenant's concept for a system kind. The id
+	// is supplied by the caller (ids are minted in the use case, not here) and is
+	// used only when the concept has to be created.
+	// (tuition, enrollment, late_fee), creating it with the given name if the
+	// school has none yet. Looking a concept up by KIND rather than by name is
+	// what lets a school rename "Colegiatura" without the monthly run losing
+	// track of what it bills. At most one concept per kind exists — the partial
+	// unique index in migration 0004 is the backstop.
+	EnsureConceptOfKind(ctx context.Context, id, kind, name string) (domain.ChargeConcept, error)
+
+	// UpsertTuitionPlan stores the tuition table for one (cycle, level),
+	// replacing whatever was there. Replacing and not versioning: the table is a
+	// statement of current price, and the charges already issued carry their own
+	// amount, so correcting a typo must not require a new cycle.
+	UpsertTuitionPlan(ctx context.Context, p domain.TuitionPlan) (domain.TuitionPlan, error)
+	// ListTuitionPlans returns the whole tuition table of a cycle.
+	ListTuitionPlans(ctx context.Context, cycleID string) ([]domain.TuitionPlan, error)
 }

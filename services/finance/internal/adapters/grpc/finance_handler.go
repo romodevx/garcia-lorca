@@ -210,6 +210,7 @@ func toProtoConcept(c domain.ChargeConcept) *financev1.ChargeConcept {
 		Name:               c.Name(),
 		DefaultAmountCents: c.DefaultAmount().Int64(),
 		Recurrence:         c.Recurrence(),
+		Kind:               c.Kind(),
 		Active:             c.Active(),
 	}
 }
@@ -284,5 +285,73 @@ func connectErr(err error) *connect.Error {
 		return connect.NewError(connect.CodeAlreadyExists, safe)
 	default:
 		return connect.NewError(connect.CodeInternal, glerrors.New(glerrors.KindInternal, "internal error"))
+	}
+}
+
+// --- tuition (M15) ----------------------------------------------------------
+
+// UpsertTuitionPlan sets what one level of one cycle costs.
+func (h *FinanceHandler) UpsertTuitionPlan(ctx context.Context, req *connect.Request[financev1.UpsertTuitionPlanRequest]) (*connect.Response[financev1.UpsertTuitionPlanResponse], error) {
+	m := req.Msg
+	plan, err := h.finance.UpsertTuitionPlan(ctx, usecase.TuitionPlanInput{
+		CycleID:          m.GetCycleId(),
+		LevelID:          m.GetLevelId(),
+		EnrollmentCents:  m.GetEnrollmentCents(),
+		MonthlyCents:     m.GetMonthlyCents(),
+		Months:           int(m.GetMonths()),
+		FirstBilledMonth: int(m.GetFirstBilledMonth()),
+		DueDay:           int(m.GetDueDay()),
+		LateFeeCents:     m.GetLateFeeCents(),
+		Active:           m.GetActive(),
+	})
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&financev1.UpsertTuitionPlanResponse{Plan: toProtoPlan(plan)}), nil
+}
+
+// ListTuitionPlans returns the whole tuition table of a cycle.
+func (h *FinanceHandler) ListTuitionPlans(ctx context.Context, req *connect.Request[financev1.ListTuitionPlansRequest]) (*connect.Response[financev1.ListTuitionPlansResponse], error) {
+	plans, err := h.finance.ListTuitionPlans(ctx, req.Msg.GetCycleId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	out := make([]*financev1.TuitionPlan, 0, len(plans))
+	for _, p := range plans {
+		out = append(out, toProtoPlan(p))
+	}
+	return connect.NewResponse(&financev1.ListTuitionPlansResponse{Plans: out}), nil
+}
+
+// RunBilling generates what the school is owed as of a date. Idempotent, so the
+// same call from a button and from a scheduler is safe.
+func (h *FinanceHandler) RunBilling(ctx context.Context, req *connect.Request[financev1.RunBillingRequest]) (*connect.Response[financev1.RunBillingResponse], error) {
+	got, err := h.finance.RunBilling(ctx, req.Msg.GetCycleId(), req.Msg.GetAsOfDate())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&financev1.RunBillingResponse{
+		TuitionCreated:    int32(got.TuitionCreated),
+		EnrollmentCreated: int32(got.EnrollmentCreated),
+		LateFeesCreated:   int32(got.LateFeesCreated),
+		Skipped:           int32(got.Skipped),
+		LevelsWithoutPlan: got.LevelsWithoutPlan,
+	}), nil
+}
+
+// toProtoPlan maps a domain TuitionPlan to its proto message.
+func toProtoPlan(p domain.TuitionPlan) *financev1.TuitionPlan {
+	return &financev1.TuitionPlan{
+		Id:               p.ID(),
+		TenantId:         p.TenantID(),
+		CycleId:          p.CycleID(),
+		LevelId:          p.LevelID(),
+		EnrollmentCents:  p.EnrollmentCents(),
+		MonthlyCents:     p.MonthlyCents(),
+		Months:           int32(p.Months()),
+		FirstBilledMonth: int32(p.FirstBilledMonth()),
+		DueDay:           int32(p.DueDay()),
+		LateFeeCents:     p.LateFeeCents(),
+		Active:           p.Active(),
 	}
 }

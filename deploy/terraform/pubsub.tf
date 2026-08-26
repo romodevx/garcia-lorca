@@ -175,15 +175,88 @@ resource "google_pubsub_subscription_iam_member" "attendance_dlq_subscriber" {
   member       = local.pubsub_sa
 }
 
-# ---- student-events (students publishes; no consumer yet) ------------------
-# Declared so the students publisher finds the topic pre-created instead of
-# auto-creating it. comms deliberately does NOT subscribe (it renders nothing
-# from student-events — see services/comms/cmd/main.go), so there is no
-# subscription and thus no DLQ. Add both when a consumer lands.
+# ---- student-events (students publishes; finance consumes) -----------------
+# comms deliberately does NOT subscribe here (it renders nothing from
+# student-events). finance does, since M15: StudentEnrolled is what charges a
+# pupil's inscription the moment they take a place in a group.
 resource "google_pubsub_topic" "student_events" {
   project = var.project_id
   name    = "student-events"
   labels  = local.labels
 
   depends_on = [google_project_service.apis]
+}
+
+resource "google_pubsub_topic" "student_events_dlq" {
+  project = var.project_id
+  name    = "student-events-dlq"
+  labels  = local.labels
+
+  depends_on = [google_project_service.apis]
+}
+
+# NOTE: the name must match what finance subscribes to
+# (services/finance/cmd/main.go studentEventsSubscription). Pre-creating it here
+# means the runtime finds it existing, so the runtime SA needs only
+# publisher/subscriber — never pubsub.subscriptions.create.
+#
+# finance keeps NO idempotency ledger for this, unlike comms: the inscription
+# charge is keyed by its external_ref, so a redelivery inserts nothing. That is
+# also why redelivery here is cheap rather than dangerous.
+resource "google_pubsub_subscription" "student_events_finance" {
+  project = var.project_id
+  name    = "finance-student-events"
+  topic   = google_pubsub_topic.student_events.id
+
+  ack_deadline_seconds = 30
+
+  push_config {
+    push_endpoint = "${module.finance.uri}/pubsub"
+    oidc_token {
+      service_account_email = google_service_account.pubsub_push.email
+      audience              = module.finance.uri
+    }
+  }
+
+  retry_policy {
+    minimum_backoff = "10s"
+    maximum_backoff = "600s"
+  }
+
+  dead_letter_policy {
+    dead_letter_topic     = google_pubsub_topic.student_events_dlq.id
+    max_delivery_attempts = 5
+  }
+
+  message_retention_duration = "604800s" # 7 days
+  expiration_policy {
+    ttl = "" # never expire the subscription
+  }
+}
+
+resource "google_pubsub_subscription" "student_events_dlq_drain" {
+  project = var.project_id
+  name    = "student-events-dlq-drain"
+  topic   = google_pubsub_topic.student_events_dlq.id
+
+  message_retention_duration = "604800s"
+  expiration_policy {
+    ttl = ""
+  }
+}
+
+# The DLQ machinery needs Pub/Sub's own service agent to be able to publish into
+# the dead-letter topic and to ack on the source subscription.
+resource "google_pubsub_topic_iam_member" "student_events_dlq_publisher" {
+  project = var.project_id
+  topic   = google_pubsub_topic.student_events_dlq.id
+  role    = "roles/pubsub.publisher"
+  member  = local.pubsub_sa
+}
+
+resource "google_pubsub_subscription_iam_member" "student_events_dlq_subscriber" {
+  project      = var.project_id
+  subscription = google_pubsub_subscription.student_events_finance.id
+  role         = "roles/pubsub.subscriber"
+  member       = local.pubsub_sa
 }

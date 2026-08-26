@@ -32,6 +32,7 @@ import { CycleBar } from "./CycleBar";
 import { GradeLevelsPanel } from "./GradeLevelsPanel";
 import { GroupsPanel } from "./GroupsPanel";
 import { LevelsPanel } from "./LevelsPanel";
+import { TuitionPanel } from "./TuitionPanel";
 import { SubjectsPanel } from "./SubjectsPanel";
 import { TermsPanel } from "./TermsPanel";
 
@@ -209,6 +210,13 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
       ) : (
         <div className="fade-up" style={{ display: "grid", gap: 18 }}>
           <CycleBar cycles={cycles} selectedCycleId={selectedCycleId} onSelect={setSelectedCycleId} onCreate={handleCreateCycle} />
+
+          {/*
+            The money screen for the academic catalogue. It reads and writes
+            through finance — the ledger owns prices — but it belongs in front of
+            a director's eyes here, next to the levels it prices.
+          */}
+          {selectedCycle !== undefined && <TuitionPanel cycle={selectedCycle} levels={levels} />}
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 18 }}>
             <LevelsPanel levels={levels} selectedLevelId={selectedLevelId} onSelect={setSelectedLevelId} onCreate={handleCreateLevel} />

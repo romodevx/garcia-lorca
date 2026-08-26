@@ -9,7 +9,36 @@ import (
 
 // toDomainConcept rebuilds a domain ChargeConcept from its row.
 func toDomainConcept(m chargeConceptModel) (domain.ChargeConcept, error) {
-	return domain.NewChargeConcept(m.ID, m.TenantID, m.Name, m.DefaultAmountCents, m.Recurrence, m.Active)
+	c, err := domain.NewChargeConcept(m.ID, m.TenantID, m.Name, m.DefaultAmountCents, m.Recurrence, m.Active)
+	if err != nil {
+		return domain.ChargeConcept{}, err
+	}
+	// Rows written before migration 0004 carry the column default, so an empty
+	// kind reads as custom rather than as a validation failure.
+	if m.Kind == "" {
+		return c, nil
+	}
+	return c.WithKind(m.Kind)
+}
+
+// toDomainPlan rebuilds a tuition table from its row.
+func toDomainPlan(m tuitionPlanModel) (domain.TuitionPlan, error) {
+	return domain.NewTuitionPlan(domain.TuitionPlanSpec{
+		ID: m.ID, TenantID: m.TenantID, CycleID: m.CycleID, LevelID: m.LevelID,
+		EnrollmentCents: m.EnrollmentCents, MonthlyCents: m.MonthlyCents,
+		Months: m.Months, FirstBilledMonth: m.FirstBilledMonth,
+		DueDay: m.DueDay, LateFeeCents: m.LateFeeCents, Active: m.Active,
+	})
+}
+
+// fromDomainPlan projects a tuition table into its GORM row.
+func fromDomainPlan(p domain.TuitionPlan) tuitionPlanModel {
+	return tuitionPlanModel{
+		ID: p.ID(), TenantID: p.TenantID(), CycleID: p.CycleID(), LevelID: p.LevelID(),
+		EnrollmentCents: p.EnrollmentCents(), MonthlyCents: p.MonthlyCents(),
+		Months: p.Months(), FirstBilledMonth: p.FirstBilledMonth(),
+		DueDay: p.DueDay(), LateFeeCents: p.LateFeeCents(), Active: p.Active(),
+	}
 }
 
 // fromDomainConcept projects a domain ChargeConcept into its GORM row.
@@ -22,6 +51,7 @@ func fromDomainConcept(c domain.ChargeConcept) chargeConceptModel {
 		DefaultAmountCents: c.DefaultAmount().Int64(),
 		Recurrence:         c.Recurrence(),
 		Active:             c.Active(),
+		Kind:               c.Kind(),
 	}
 }
 
