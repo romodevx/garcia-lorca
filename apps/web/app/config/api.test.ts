@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  ConfigError,
   createCycle,
   createGradeLevel,
   createGroup,
@@ -293,5 +294,61 @@ describe("teaching assignments", () => {
 
     await listTeachingAssignments(BASE);
     expect(lastCall(fetchMock)[0]).toBe("http://gw/api/v1/config/teaching-assignments");
+  });
+});
+
+describe("what a failure tells the user", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * These exist because "No se pudo crear el ciclo. Intenta de nuevo." was the
+   * ONLY thing the catalog said, whatever went wrong.
+   *
+   * The two ways creating a cycle actually fails are a name that already exists
+   * and an end date before the start — and for the first one, "intenta de nuevo"
+   * is advice that will never work. The status is the only signal the client
+   * gets, so it has to survive the throw.
+   */
+  it("carries the status so a duplicate can be told from bad dates", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("Conflict", { status: 409 })));
+
+    const err = (await createCycle("http://gw", {
+      name: "Ciclo 2026-2027",
+      startsOn: "2026-08-31",
+      endsOn: "2027-07-09",
+    }).catch((e: unknown) => e)) as ConfigError;
+
+    expect(err).toBeInstanceOf(ConfigError);
+    expect(err.status).toBe(409);
+    expect(err.isConflict).toBe(true);
+  });
+
+  it("tells a bad request apart from a conflict", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("Bad Request", { status: 400 })));
+
+    const err = (await createCycle("http://gw", {
+      name: "Raro",
+      startsOn: "2028-07-10",
+      endsOn: "2027-08-30",
+    }).catch((e: unknown) => e)) as ConfigError;
+
+    expect(err.status).toBe(400);
+    expect(err.isConflict).toBe(false);
+    expect(err.isInvalid).toBe(true);
+  });
+
+  it("keeps the server's words when it sends any", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("cycle name already used", { status: 409 })));
+
+    const err = (await createCycle("http://gw", {
+      name: "x",
+      startsOn: "2026-01-01",
+      endsOn: "2026-12-31",
+    }).catch((e: unknown) => e)) as ConfigError;
+
+    expect(err.detail).toBe("cycle name already used");
   });
 });

@@ -31,6 +31,7 @@ export function TopBar({
   const tp = useTranslations("palette");
   return (
     <header
+      className="topbar"
       style={{
         position: "sticky",
         top: 0,
@@ -46,14 +47,14 @@ export function TopBar({
         borderBottom: "1px solid var(--border)"
       }}
     >
-      <button onClick={onHome} style={{ display: "flex", alignItems: "center" }} aria-label={t("nav.dashboard")}>
+      <button onClick={onHome} className="topbar-logo" style={{ display: "flex", alignItems: "center" }} aria-label={t("nav.dashboard")}>
         <Logo height={40} />
       </button>
       {/*
         The search box is a TRIGGER for the Command Palette (Cmd+K), not an
         input: click or ⌘K opens the omnidirectional navigate+execute palette.
       */}
-      <div style={{ flex: 1, maxWidth: 520, marginLeft: 8 }}>
+      <div className="topbar-search" style={{ flex: 1, maxWidth: 520, marginLeft: 8 }}>
         <button
           type="button"
           onClick={onOpenPalette}
@@ -75,8 +76,9 @@ export function TopBar({
           }}
         >
           <Icon name="search" size={20} />
-          <span style={{ flex: 1 }}>{tp("ui.placeholder")}</span>
+          <span className="topbar-search-text" style={{ flex: 1 }}>{tp("ui.placeholder")}</span>
           <kbd
+            className="topbar-search-kbd"
             style={{
               fontFamily: "var(--font-ui)",
               fontSize: 12,
@@ -92,15 +94,20 @@ export function TopBar({
           </kbd>
         </button>
       </div>
-      <div style={{ flex: 1 }} />
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <div className="topbar-spacer" style={{ flex: 1 }} />
+      <div className="topbar-actions" style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <IconBtn name="bell" badge={3} label={t("action.notifications")} />
-        <LanguageToggle />
+        {/* Wrapped so the stylesheet can drop it on a phone: it is the one
+            control here that a person changes once and then never again. */}
+        <span className="topbar-lang">
+          <LanguageToggle />
+        </span>
         <ThemeToggle theme={theme} onToggle={onToggle} />
         <button
           onClick={onLogout}
           aria-label="Cerrar sesión"
           title="Cerrar sesión"
+          className="topbar-user"
           style={{
             display: "flex",
             alignItems: "center",
@@ -111,7 +118,7 @@ export function TopBar({
             border: "1px solid var(--border)"
           }}
         >
-          <div style={{ textAlign: "right", lineHeight: 1.15 }}>
+          <div className="topbar-user-text" style={{ textAlign: "right", lineHeight: 1.15 }}>
             <div
               style={{
                 fontWeight: 700,

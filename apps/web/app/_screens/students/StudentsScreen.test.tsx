@@ -51,6 +51,20 @@ describe("StudentsScreen", () => {
     expect(screen.getAllByText("Trámite").length).toBeGreaterThan(0);
   });
 
+  it("names each row's open button after the pupil it opens", async () => {
+    const user = userEvent.setup();
+    render(<StudentsScreen onBack={() => {}} />);
+    await screen.findByText("Valentina Cruz");
+
+    // Every row used to offer an identically-named "Ver ficha": a screen reader
+    // announced the same thing five times over, and nothing could address one
+    // row in particular. The pupil's name is what tells them apart.
+    await user.click(screen.getByRole("button", { name: "Ver ficha de Mateo Sánchez" }));
+
+    const card = await screen.findByRole("dialog", { name: "Ficha del alumno" });
+    expect(within(card).getByText("Mateo Sánchez")).toBeInTheDocument();
+  });
+
   it("filters by the search box", async () => {
     const user = userEvent.setup();
     render(<StudentsScreen onBack={() => {}} />);

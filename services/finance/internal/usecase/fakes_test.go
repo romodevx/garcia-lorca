@@ -88,8 +88,14 @@ func (f *fakeEnrollments) ListByCycle(_ context.Context, cycleID, groupID string
 // --- publisher ---------------------------------------------------------------
 
 type spyPublisher struct {
-	events []ports.PaymentRegisteredEvent
-	err    error
+	events  []ports.PaymentRegisteredEvent
+	settled []ports.ChargeSettledEvent
+	err     error
+}
+
+func (s *spyPublisher) PublishChargeSettled(_ context.Context, e ports.ChargeSettledEvent) error {
+	s.settled = append(s.settled, e)
+	return s.err
 }
 
 func (s *spyPublisher) PublishPaymentRegistered(_ context.Context, e ports.PaymentRegisteredEvent) error {
@@ -105,9 +111,10 @@ type fakeRepo struct {
 	payments map[string][]domain.Payment // keyed by charge id
 
 	// Recorded call arguments, for the tests that assert on the call itself.
-	overdueCycleID    string
-	overdueToday      time.Time
-	lastDerivedStatus string
+	overdueCycleID      string
+	overdueToday        time.Time
+	lastDerivedStatus   string
+	cancelIfUnpaidCalls int
 }
 
 func newFakeRepo() *fakeRepo {
@@ -120,7 +127,15 @@ func newFakeRepo() *fakeRepo {
 
 // chargeKey is the uniqueness key the ledger enforces: one charge per student,
 // cycle and concept.
+// chargeKey mirrors what the ledger actually enforces, which since migration
+// 0003 is TWO partial unique indexes rather than one total key: a charge with no
+// external ref is one per (student, cycle, concept), and a charge carrying one
+// is identified by the ref alone. A fake that kept the old single key would let
+// tests pass against a rule the database no longer has.
 func chargeKey(c domain.Charge) string {
+	if ref := c.ExternalRef(); ref != "" {
+		return "ref|" + ref
+	}
 	return c.StudentID() + "|" + c.CycleID() + "|" + c.ConceptID()
 }
 
@@ -183,6 +198,24 @@ func (f *fakeRepo) CreateCharge(_ context.Context, c domain.Charge) (domain.Char
 	}
 	f.charges[c.ID()] = c
 	return c, nil
+}
+
+// CancelChargeIfUnpaid is the fake of the guarded cancel. The real one decides
+// under the charge's row lock; here it is enough to apply the same domain rule
+// against the payments recorded for the charge.
+func (f *fakeRepo) CancelChargeIfUnpaid(_ context.Context, id string) (ports.ChargeWithPaid, error) {
+	f.cancelIfUnpaidCalls++
+	c, ok := f.charges[id]
+	if !ok {
+		return ports.ChargeWithPaid{}, glerrors.ErrNotFound
+	}
+	paid := f.paidFor(id)
+	cancelled, err := c.CancelIfUnpaid(paid)
+	if err != nil {
+		return ports.ChargeWithPaid{}, err
+	}
+	f.charges[id] = cancelled
+	return ports.ChargeWithPaid{Charge: cancelled, PaidCents: paid}, nil
 }
 
 // CreateChargesBulk mirrors the adapter's ON CONFLICT DO NOTHING: rows whose
@@ -376,7 +409,13 @@ func (f *fixture) seedRetiredConcept(t *testing.T, name string, amount int64) do
 // seedCharge creates a charge for the default student through the service.
 func (f *fixture) seedCharge(t *testing.T, conceptID string, amount int64) domain.Charge {
 	t.Helper()
-	cwp, err := f.svc.CreateCharge(context.Background(), testStudent, testCycle, conceptID, amount, "", testDueDate)
+	cwp, err := f.svc.CreateCharge(context.Background(), usecase.CreateChargeInput{
+		StudentID:           testStudent,
+		CycleID:             testCycle,
+		ConceptID:           conceptID,
+		DueDate:             testDueDate,
+		AmountCentsOverride: amount,
+	})
 	if err != nil {
 		t.Fatalf("seed charge: %v", err)
 	}

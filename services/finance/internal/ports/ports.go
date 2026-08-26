@@ -89,12 +89,32 @@ type PaymentRegisteredEvent struct {
 	PaidAt      time.Time
 }
 
-// PaymentPublisher emits the PaymentRegistered domain event. Publishing is
-// best-effort and happens after the payment is durably stored: a broker outage
-// must never lose money that was already collected, so the use case ignores the
-// returned error (and tolerates a nil publisher).
+// ChargeSettledEvent announces that a charge became FULLY covered — the
+// crossing into paid, not every collection along the way. It exists for the
+// consumer that only cares whether the money is in (uniforms, before it releases
+// goods): summing PaymentRegistered would make that consumer redo the ledger's
+// arithmetic, depend on delivery order, and subscribe to every payment the
+// school takes to discard most of them.
+//
+// ExternalRef echoes the charge's reference, so the consumer resolves its own
+// row without calling back into finance.
+type ChargeSettledEvent struct {
+	ChargeID    string
+	StudentID   string
+	TenantID    string
+	ExternalRef string
+	AmountCents int64
+	SettledAt   time.Time
+}
+
+// PaymentPublisher emits the finance domain events. Publishing is best-effort
+// and happens after the payment is durably stored: a broker outage must never
+// lose money that was already collected, so the use case ignores the returned
+// error (and tolerates a nil publisher).
 type PaymentPublisher interface {
 	PublishPaymentRegistered(ctx context.Context, e PaymentRegisteredEvent) error
+	// PublishChargeSettled fires only on the payment that closes the charge.
+	PublishChargeSettled(ctx context.Context, e ChargeSettledEvent) error
 }
 
 // FinanceRepository loads and persists the ledger: the charge catalog, the
@@ -114,9 +134,11 @@ type FinanceRepository interface {
 	// UpdateConcept persists a re-validated copy of an existing entry.
 	UpdateConcept(ctx context.Context, c domain.ChargeConcept) (domain.ChargeConcept, error)
 
-	// CreateCharge issues one charge. A second charge for the same
-	// (student, cycle, concept) is reported as KindConflict — a student owes a
-	// given concept once per cycle.
+	// CreateCharge issues one charge. A KEYLESS charge (no external ref) may
+	// exist once per (student, cycle, concept) — a student owes tuition once a
+	// cycle — and a second one is KindConflict. A charge carrying an external
+	// ref is identified by that ref instead, so it may repeat the concept
+	// freely while a retried creation still conflicts (migration 0003).
 	CreateCharge(ctx context.Context, c domain.Charge) (domain.Charge, error)
 	// CreateChargesBulk issues many charges in ONE statement, skipping the rows
 	// whose (student, cycle, concept) key already exists (ON CONFLICT DO
@@ -130,6 +152,11 @@ type FinanceRepository interface {
 	// tenant-bound query rather than a payment lookup per charge (no N+1). An
 	// empty studentID or cycleID skips that filter.
 	ListCharges(ctx context.Context, studentID, cycleID string) ([]ChargeWithPaid, error)
+	// CancelChargeIfUnpaid voids a charge only if nothing was collected against
+	// it, deciding under the charge's row lock so the read cannot go stale
+	// before the write. A charge with payments is KindConflict. Automated
+	// callers use this; CancelCharge stays the school's unguarded override.
+	CancelChargeIfUnpaid(ctx context.Context, id string) (ChargeWithPaid, error)
 	// SaveCharge persists the mutable part of an existing charge (its discount
 	// and derived status), as left by ApplyDiscount or CancelCharge.
 	SaveCharge(ctx context.Context, c domain.Charge) (domain.Charge, error)

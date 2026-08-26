@@ -9,7 +9,9 @@
     "test": "turbo run test",
     "lint": "turbo run lint",
     "dev": "turbo run dev",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "demo:reset": "sh scripts/reset-demo-db.sh",
+    "demo:verify": "pnpm --filter @garcia-lorca/web e2e"
   },
   "devDependencies": {
     "turbo": "2.9.18",

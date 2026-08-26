@@ -1,15 +1,104 @@
-// Uniforms store (M12) — reservation lifecycle via State pattern.
-// FASE 0 contract-first stub.
+// Uniform shop (M12).
+//
+// The shop keeps stock by garment and size, sells it over the counter, and — from
+// stage two — lets a family order from the app and collect later.
+//
+// Two shapes carry the whole design and are worth reading before the RPCs.
+//
+// An ORDER is a container: what the family asked for. It has no status of its
+// own; its label is derived from its lines and deliveries.
+//
+// A FULFILLMENT is a delivery, and it is where the state machine lives, because
+// a delivery is what gets picked, charged, expires and is handed over. An order
+// of three garments with only two in stock becomes one delivery now and another
+// when the third arrives, each with its own charge and its own deadline.
+//
+//   picking ──► ready_for_pickup ──► paid ──► dispatched
+//                      │
+//                      └──► expired            (nobody came; stock released)
+//
+//   sold_at_counter is terminal from birth: the goods were handed over as they
+//   were sold, so no sweep may ever "return" them to stock.
+//
+// Money is integer cents, as in finance. Stock is never deducted on a promise:
+// on_hand falls only when the charge is settled.
 syntax = "proto3";
 
 package garcialorca.uniforms.v1;
 
-// UniformsService is the uniforms store API surface.
+import "google/protobuf/timestamp.proto";
+
 service UniformsService {
   // Health is the liveness/ping probe present on every service.
   rpc Health(HealthRequest) returns (HealthResponse);
 
-  // TODO(M12): ReserveUniform, CancelReservation, GetReservation.
+  // --- Catalogue -----------------------------------------------------------
+
+  rpc CreateItem(CreateItemRequest) returns (CreateItemResponse);
+  rpc UpdateItem(UpdateItemRequest) returns (UpdateItemResponse);
+  rpc ListItems(ListItemsRequest) returns (ListItemsResponse);
+  // UpsertSizes adds or updates a garment's sizes in one call. A school opening
+  // the module has six garments and eight sizes each; asking for forty-eight
+  // separate calls is how a module gets abandoned on its first afternoon.
+  rpc UpsertSizes(UpsertSizesRequest) returns (UpsertSizesResponse);
+
+  // --- Inventory -----------------------------------------------------------
+
+  rpc ListStock(ListStockRequest) returns (ListStockResponse);
+  // ReceiveStock books a delivery from the supplier into the storeroom and, in
+  // the same transaction, allocates it to the lines that have been waiting for
+  // that size, oldest first.
+  rpc ReceiveStock(ReceiveStockRequest) returns (ReceiveStockResponse);
+  // AdjustStock corrects the count: breakage, loss, a miscount. It demands a
+  // note because it is the one write that can hide a shortfall, and it is
+  // recorded in the append-only ledger like everything else.
+  rpc AdjustStock(AdjustStockRequest) returns (AdjustStockResponse);
+
+  // --- Selling and ordering ------------------------------------------------
+
+  // CounterSale is the parent who walks in without an order. One act: the goods
+  // are sold, handed over, and charged, and the delivery is born terminal so no
+  // sweep can ever release stock that has physically left.
+  rpc CounterSale(CounterSaleRequest) returns (CounterSaleResponse);
+  // CreateOrder places an order that will be collected later. Lines whose size
+  // is in stock are reserved; the rest wait for the school to restock.
+  rpc CreateOrder(CreateOrderRequest) returns (CreateOrderResponse);
+  rpc ListOrders(ListOrdersRequest) returns (ListOrdersResponse);
+  rpc GetOrder(GetOrderRequest) returns (GetOrderResponse);
+
+  // --- Deliveries ----------------------------------------------------------
+
+  // PickLines turns reserved lines into a delivery: staff pulled them from the
+  // storeroom, so the charge is raised and the collection clock starts.
+  rpc PickLines(PickLinesRequest) returns (PickLinesResponse);
+  // DispatchFulfillment hands a paid delivery over. Terminal.
+  rpc DispatchFulfillment(DispatchFulfillmentRequest) returns (DispatchFulfillmentResponse);
+  // CancelFulfillment calls off a delivery, releasing its hold and voiding its
+  // charge. It refuses if the charge has payments — that case needs a human,
+  // not a rule.
+  rpc CancelFulfillment(CancelFulfillmentRequest) returns (CancelFulfillmentResponse);
+  // CancelOrderLines calls off lines that are still waiting for stock. It is the
+  // only cancellation a guardian may perform, because nothing is held yet.
+  rpc CancelOrderLines(CancelOrderLinesRequest) returns (CancelOrderLinesResponse);
+  // ExtendDeadline gives a family more time. Without it, staff would cancel and
+  // re-create orders to buy a few days, and the stock ledger would stop adding up.
+  rpc ExtendDeadline(ExtendDeadlineRequest) returns (ExtendDeadlineResponse);
+
+  // --- Maintenance (invoked by the scheduler, never by a person) -----------
+
+  // ExpireDueFulfillments releases the holds whose deadline has passed, and
+  // reconciles the ones whose charge was settled while an event went missing.
+  rpc ExpireDueFulfillments(ExpireDueFulfillmentsRequest) returns (ExpireDueFulfillmentsResponse);
+  // ResumeStuckPicking finishes deliveries left mid-transition by a crash
+  // between raising the charge and recording it.
+  rpc ResumeStuckPicking(ResumeStuckPickingRequest) returns (ResumeStuckPickingResponse);
+  // DrainOutbox publishes the events whose in-process delivery did not land.
+  rpc DrainOutbox(DrainOutboxRequest) returns (DrainOutboxResponse);
+
+  // --- Settings ------------------------------------------------------------
+
+  rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
+  rpc UpdateSettings(UpdateSettingsRequest) returns (UpdateSettingsResponse);
 }
 
 message HealthRequest {}
@@ -18,26 +107,517 @@ message HealthResponse {
   string status = 1;
 }
 
-// Reservation references a student. TODO(M12): item_sku, size, state, expires_at.
-message Reservation {
+// --- Core types --------------------------------------------------------------
+
+// Level mirrors the students service's levels. LEVEL_UNSPECIFIED on an item
+// means the garment applies to EVERY level — the common case for a school whose
+// jumper does not change from kinder to prepa.
+enum Level {
+  LEVEL_UNSPECIFIED = 0;
+  LEVEL_KINDER = 1;
+  LEVEL_PRIMARIA = 2;
+  LEVEL_SECUNDARIA = 3;
+  LEVEL_PREPARATORIA = 4;
+}
+
+// Item is one garment in the catalogue.
+message Item {
   string id = 1;
-  string student_id = 2;
+  string tenant_id = 2;
+  string code = 3;
+  string name = 4;
+  string description = 5;
+  Level level = 6;
+  int64 price_cents = 7;
+  bool active = 8;
+  repeated StockLevel sizes = 9;
 }
 
-// --- Domain events (published) ---
-
-// UniformReserved fires when a uniform item is reserved.
-// TODO(M12): item_sku, size, expires_at.
-message UniformReserved {
-  string reservation_id = 1;
-  string student_id = 2;
-  string tenant_id = 3;
+// StockLevel is one garment in one size. available is DERIVED (on_hand minus
+// reserved) and is the only number a parent should ever be shown: it is what
+// can actually be taken.
+message StockLevel {
+  string id = 1;
+  string item_id = 2;
+  string size_label = 3;
+  int32 size_order = 4;
+  int32 on_hand = 5;
+  int32 reserved = 6;
+  int32 available = 7;
+  int32 min_stock = 8;
+  bool below_minimum = 9;
 }
 
-// ReservationExpired fires when a reservation lapses without pickup/payment.
-// TODO(M12): expired_at.
-message ReservationExpired {
-  string reservation_id = 1;
+// FulfillmentStatus is the delivery's state. See the file header for the
+// transitions and why sold_at_counter is terminal from birth.
+enum FulfillmentStatus {
+  FULFILLMENT_STATUS_UNSPECIFIED = 0;
+  FULFILLMENT_STATUS_PICKING = 1;
+  FULFILLMENT_STATUS_READY_FOR_PICKUP = 2;
+  FULFILLMENT_STATUS_PAID = 3;
+  FULFILLMENT_STATUS_DISPATCHED = 4;
+  FULFILLMENT_STATUS_EXPIRED = 5;
+  FULFILLMENT_STATUS_CANCELLED = 6;
+  FULFILLMENT_STATUS_SOLD_AT_COUNTER = 7;
+}
+
+// LineStatus is what one garment in one size is doing. reserved is the only
+// status that holds stock. released and cancelled are terminal: a line let go is
+// not re-picked, because the school has reclaimed the goods and may already have
+// sold them to somebody else. The family orders again.
+enum LineStatus {
+  LINE_STATUS_UNSPECIFIED = 0;
+  LINE_STATUS_AWAITING_STOCK = 1;
+  LINE_STATUS_RESERVED = 2;
+  LINE_STATUS_SOLD = 3;
+  LINE_STATUS_RELEASED = 4;
+  LINE_STATUS_CANCELLED = 5;
+}
+
+// OrderLabel is the order's DERIVED state, for display only. It is computed from
+// the lines and deliveries on every read rather than stored, so it cannot drift.
+// CLOSED_PARTIAL is the honest ending for an order that finished having delivered
+// only some of what was asked for.
+enum OrderLabel {
+  ORDER_LABEL_UNSPECIFIED = 0;
+  ORDER_LABEL_AWAITING_STOCK = 1;
+  ORDER_LABEL_PARTIAL = 2;
+  ORDER_LABEL_IN_PROGRESS = 3;
+  ORDER_LABEL_CLOSED = 4;
+  ORDER_LABEL_CLOSED_PARTIAL = 5;
+}
+
+message OrderLine {
+  string id = 1;
+  string item_id = 2;
+  string item_name = 3;
+  string size_label = 4;
+  int32 qty = 5;
+  int64 unit_price_cents = 6;
+  LineStatus status = 7;
+  string fulfillment_id = 8;
+}
+
+message Fulfillment {
+  string id = 1;
+  string order_id = 2;
+  // seq renders as the -A, -B suffix of the order's folio. A number, so an order
+  // is not capped at 26 deliveries.
+  int32 seq = 3;
+  string folio = 4;
+  FulfillmentStatus status = 5;
+  int64 amount_cents = 6;
+  string finance_charge_id = 7;
+  google.protobuf.Timestamp ready_at = 8;
+  // pickup_deadline is an ISO date, "YYYY-MM-DD".
+  string pickup_deadline = 9;
+  // remaining_business_days and deadline_label are computed by the SERVER, in
+  // the school's timezone, against the school calendar. A client deriving them
+  // from the date would count Saturdays, and two clients in different timezones
+  // would disagree with the panel.
+  int32 remaining_business_days = 10;
+  string deadline_label = 11;
+  // deadline_estimated is true when the calendar was unreachable and the
+  // deadline was computed without it. Such deadlines may later be EXTENDED but
+  // never shortened.
+  bool deadline_estimated = 12;
+  int32 extended_days = 13;
+  // requires_attention marks a delivery no rule can settle on its own — a
+  // payment that arrived after expiry, say. Silence is not an option.
+  bool requires_attention = 14;
+  string attention_reason = 15;
+  google.protobuf.Timestamp paid_at = 16;
+  google.protobuf.Timestamp dispatched_at = 17;
+  string cancel_reason = 18;
+}
+
+message Order {
+  string id = 1;
+  string tenant_id = 2;
+  string folio = 3;
+  string student_id = 4;
+  // Snapshots taken when the order was placed, so the panel can filter and
+  // search without calling the students service for every row.
+  string student_name = 5;
+  Level student_level = 6;
+  string student_grade_group = 7;
+  string cycle_id = 8;
+  // source is family | counter | staff.
+  string source = 9;
+  OrderLabel label = 10;
+  int64 total_cents = 11;
+  repeated OrderLine lines = 12;
+  repeated Fulfillment fulfillments = 13;
+  google.protobuf.Timestamp created_at = 14;
+  google.protobuf.Timestamp closed_at = 15;
+}
+
+// --- Catalogue ---------------------------------------------------------------
+
+message CreateItemRequest {
+  string code = 1;
+  string name = 2;
+  string description = 3;
+  // LEVEL_UNSPECIFIED means every level.
+  Level level = 4;
+  int64 price_cents = 5;
+}
+
+message CreateItemResponse {
+  Item item = 1;
+}
+
+message UpdateItemRequest {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  Level level = 4;
+  int64 price_cents = 5;
+  bool active = 6;
+}
+
+message UpdateItemResponse {
+  Item item = 1;
+}
+
+message ListItemsRequest {
+  bool include_inactive = 1;
+  // level narrows to the garments a student of that level may buy: the ones
+  // scoped to it, plus the ones scoped to none. LEVEL_UNSPECIFIED returns all.
+  Level level = 2;
+}
+
+message ListItemsResponse {
+  repeated Item items = 1;
+}
+
+message SizeSpec {
+  string size_label = 1;
+  int32 size_order = 2;
+  int32 min_stock = 3;
+}
+
+message UpsertSizesRequest {
+  string item_id = 1;
+  repeated SizeSpec sizes = 2;
+}
+
+message UpsertSizesResponse {
+  // Split so the panel can say "8 sizes created, 2 already existed" instead of
+  // upserting in silence and leaving the user guessing.
+  int32 created_count = 1;
+  int32 updated_count = 2;
+  repeated StockLevel sizes = 3;
+}
+
+// --- Inventory ---------------------------------------------------------------
+
+message ListStockRequest {
+  string item_id = 1;
+  bool only_below_minimum = 2;
+}
+
+message ListStockResponse {
+  repeated StockLevel stock = 1;
+}
+
+message ReceiveStockLine {
+  string stock_id = 1;
+  int32 qty = 2;
+}
+
+message ReceiveStockRequest {
+  repeated ReceiveStockLine lines = 1;
+  string note = 2;
+  string actor_user_id = 3;
+}
+
+message ReceiveStockResponse {
+  repeated StockLevel stock = 1;
+  // Lines that had been waiting for these sizes and were allocated on arrival,
+  // oldest first. Their guardians are notified.
+  repeated string allocated_line_ids = 2;
+}
+
+message AdjustStockRequest {
+  string stock_id = 1;
+  // Signed. Negative is the shortfall case, which is why the note is required.
+  int32 qty_delta = 2;
+  string note = 3;
+  string actor_user_id = 4;
+}
+
+message AdjustStockResponse {
+  StockLevel stock = 1;
+}
+
+// --- Selling and ordering ----------------------------------------------------
+
+message SaleLine {
+  string item_id = 1;
+  string size_label = 2;
+  int32 qty = 3;
+}
+
+message CounterSaleRequest {
+  // student_id empty is a sale to someone who is not a student. It still moves
+  // stock and still takes money; it just cannot land on anybody's account
+  // statement, so it is charged to the school's counter account and demands a
+  // note saying who bought it.
+  string student_id = 1;
+  string cycle_id = 2;
+  repeated SaleLine lines = 3;
+  // cash | card | transfer.
+  string method = 4;
+  string reference = 5;
+  string note = 6;
+  string actor_user_id = 7;
+  // idempotency_key is REQUIRED and minted when the till drawer opens, not when
+  // the button is pressed. This is the only call that moves physical goods and
+  // money in one act; a double click or a retried timeout without it is a second
+  // sale of goods that left once.
+  string idempotency_key = 8;
+}
+
+message CounterSaleResponse {
+  Order order = 1;
+  bool replayed = 2;
+}
+
+message OrderLineRequest {
+  string item_id = 1;
+  string size_label = 2;
+  int32 qty = 3;
+}
+
+message CreateOrderRequest {
+  string student_id = 1;
+  string cycle_id = 2;
+  repeated OrderLineRequest lines = 3;
+  string created_by_user_id = 4;
+  // source is family | staff.
+  string source = 5;
+  // idempotency_key comes from the client, so a double tap or a flaky network
+  // does not place the order twice.
+  string idempotency_key = 6;
+}
+
+message CreateOrderResponse {
+  Order order = 1;
+  bool replayed = 2;
+}
+
+message ListOrdersRequest {
+  // student_ids scopes the read. The family surface ALWAYS sets it, and the
+  // service enforces it rather than trusting the caller to have filtered.
+  repeated string student_ids = 1;
+  Level level = 2;
+  // query matches a folio by shape, otherwise a student name.
+  string query = 3;
+  repeated FulfillmentStatus statuses = 4;
+  bool only_requires_attention = 5;
+  // from/to are ISO dates over the order's creation date.
+  string from = 6;
+  string to = 7;
+  // sort is created_at | deadline | status. Ties break on id so paging is stable.
+  string sort = 8;
+  bool descending = 9;
+  int32 page_size = 10;
+  string page_token = 11;
+}
+
+message ListOrdersResponse {
+  repeated Order orders = 1;
+  string next_page_token = 2;
+  int32 total_count = 3;
+}
+
+message GetOrderRequest {
+  string id = 1;
+  // student_ids, when set, restricts which orders this caller may see AT THE
+  // SERVICE, not merely at the edge. The family surface passes the guardian's
+  // children; a mismatch is NotFound, never PermissionDenied, so an id cannot be
+  // probed for existence.
+  repeated string student_ids = 2;
+}
+
+message GetOrderResponse {
+  Order order = 1;
+}
+
+// --- Deliveries --------------------------------------------------------------
+
+message PickLinesRequest {
+  string order_id = 1;
+  // line_ids empty means every reserved line of the order.
+  repeated string line_ids = 2;
+  string actor_user_id = 3;
+}
+
+message PickLinesResponse {
+  Fulfillment fulfillment = 1;
+}
+
+message DispatchFulfillmentRequest {
+  string id = 1;
+  string actor_user_id = 2;
+}
+
+message DispatchFulfillmentResponse {
+  Fulfillment fulfillment = 1;
+}
+
+message CancelFulfillmentRequest {
+  string id = 1;
+  string reason = 2;
+  string actor_user_id = 3;
+}
+
+message CancelFulfillmentResponse {
+  Fulfillment fulfillment = 1;
+}
+
+message CancelOrderLinesRequest {
+  string order_id = 1;
+  repeated string line_ids = 2;
+  string reason = 3;
+  // student_ids restricts the caller to its own children, as in GetOrder.
+  repeated string student_ids = 4;
+}
+
+message CancelOrderLinesResponse {
+  Order order = 1;
+}
+
+message ExtendDeadlineRequest {
+  string fulfillment_id = 1;
+  int32 extra_business_days = 2;
+  string reason = 3;
+  string actor_user_id = 4;
+}
+
+message ExtendDeadlineResponse {
+  Fulfillment fulfillment = 1;
+}
+
+// --- Maintenance -------------------------------------------------------------
+
+message ExpireDueFulfillmentsRequest {
+  // batch_size bounds one run; the scheduler calls again until nothing is left.
+  int32 batch_size = 1;
+}
+
+message ExpireDueFulfillmentsResponse {
+  int32 expired_count = 1;
+  // Deliveries whose charge turned out to be settled: the payment event never
+  // arrived, and this is the backstop that stops paid goods being held forever.
+  int32 reconciled_count = 2;
+  // Deliveries left for a human because the charge carries payments but is not
+  // settled.
+  int32 flagged_count = 3;
+}
+
+message ResumeStuckPickingRequest {
+  int32 batch_size = 1;
+}
+
+message ResumeStuckPickingResponse {
+  int32 resumed_count = 1;
+  int32 cancelled_count = 2;
+}
+
+message DrainOutboxRequest {
+  int32 batch_size = 1;
+}
+
+message DrainOutboxResponse {
+  int32 published_count = 1;
+}
+
+// --- Settings ----------------------------------------------------------------
+
+message Settings {
+  int32 pickup_window_business_days = 1;
+  bool auto_cancel_enabled = 2;
+  int32 max_extensions = 3;
+  int32 max_open_orders_per_student = 4;
+  int32 max_lines_per_order = 5;
+  int32 max_units_per_line = 6;
+  int32 max_line_expiries = 7;
+}
+
+message GetSettingsRequest {}
+
+message GetSettingsResponse {
+  Settings settings = 1;
+}
+
+message UpdateSettingsRequest {
+  Settings settings = 1;
+}
+
+message UpdateSettingsResponse {
+  Settings settings = 1;
+}
+
+// --- Domain events (published on the `uniform-events` topic) -----------------
+
+// UniformOrderPlaced fires when a family places an order.
+message UniformOrderPlaced {
+  string order_id = 1;
   string student_id = 2;
   string tenant_id = 3;
+  string folio = 4;
+  int64 total_cents = 5;
+  google.protobuf.Timestamp placed_at = 6;
+}
+
+// UniformBackorderFulfilled fires when stock arrives for a line a family has
+// been waiting on: "the size you asked for is here".
+message UniformBackorderFulfilled {
+  string order_id = 1;
+  string order_line_id = 2;
+  string student_id = 3;
+  string tenant_id = 4;
+  string item_name = 5;
+  string size_label = 6;
+}
+
+// UniformFulfillmentReady fires when a delivery is ready and the clock starts:
+// "come and pay before <date>".
+//
+// extension_seq is part of the consumer's idempotency key. Without it, extending
+// a deadline would re-emit an event the consumer's ledger has already seen, and
+// the family would never be told the new date.
+message UniformFulfillmentReady {
+  string fulfillment_id = 1;
+  string order_id = 2;
+  string student_id = 3;
+  string tenant_id = 4;
+  string folio = 5;
+  string pickup_deadline = 6;
+  int64 amount_cents = 7;
+  int32 extension_seq = 8;
+}
+
+// UniformFulfillmentPaid fires when a delivery is settled and the goods are
+// waiting to be handed over.
+message UniformFulfillmentPaid {
+  string fulfillment_id = 1;
+  string order_id = 2;
+  string student_id = 3;
+  string tenant_id = 4;
+  string folio = 5;
+  google.protobuf.Timestamp paid_at = 6;
+}
+
+// UniformFulfillmentExpired fires when a hold lapses and the goods go back on
+// the shelf.
+message UniformFulfillmentExpired {
+  string fulfillment_id = 1;
+  string order_id = 2;
+  string student_id = 3;
+  string tenant_id = 4;
+  string folio = 5;
+  google.protobuf.Timestamp expired_at = 6;
 }

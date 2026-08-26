@@ -108,6 +108,15 @@ func TestIsOwnerOnly(t *testing.T) {
 		{"comms:read", true},
 		{"guardians:read", true},
 		{"guardians:write", true},
+		// The uniform shop's order list carries every student's name and
+		// purchase history with no per-object scoping, which is the literal
+		// criterion. Its sibling deliberately is NOT owner-only: the storeroom
+		// needs garments and counts, never names.
+		{"uniforms:orders", true},
+		{"uniforms:stock", false},
+		{"uniforms:write", false},
+		{"uniforms_own:read", false},
+		{"uniforms_own:write", false},
 		{" Finance:Read ", true}, // normalized like NewPermission
 		{"finance:write", false},
 		{"attendance:write", false},

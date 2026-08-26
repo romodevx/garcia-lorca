@@ -80,6 +80,29 @@ func Wrap(kind Kind, msg string, cause error) *Error {
 	return &Error{Kind: kind, Msg: msg, Err: cause}
 }
 
+// SafeMessage is the part of err that may be shown to a caller.
+//
+// Error() deliberately includes the wrapped cause, which is right for a log line
+// and wrong for a response. A handler that maps a Kind to a status and then hands
+// the error straight to the client ships whatever the driver said along with it:
+// a unique-violation carries the constraint name and the SQLSTATE, and on some
+// constraints the conflicting VALUE as well.
+//
+// So this returns the message OUR code wrote — the outermost typed one, which is
+// the one written for this caller — and nothing beneath it. An error that is not
+// one of ours could be carrying anything, so it gets a bare "internal error":
+// telling a caller that a host is unreachable tells them the host.
+func SafeMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	var e *Error
+	if errors.As(err, &e) && e.Msg != "" {
+		return e.Msg
+	}
+	return "internal error"
+}
+
 // KindOf reports the Kind of err by walking the chain. Errors that are not a
 // *Error (or do not wrap one) are classified as KindInternal.
 func KindOf(err error) Kind {

@@ -68,6 +68,10 @@ func main() {
 	if commsBaseURL == "" {
 		commsBaseURL = "http://localhost:8096"
 	}
+	uniformsBaseURL := os.Getenv("UNIFORMS_BASE_URL")
+	if uniformsBaseURL == "" {
+		uniformsBaseURL = "http://localhost:8099"
+	}
 
 	// flags is the authoritative source of module visibility (default-deny),
 	// loaded from ENABLED_MODULES (comma-separated module names). The gateway
@@ -88,6 +92,7 @@ func main() {
 	financeClient := client.NewFinanceClient(financeBaseURL, gcpauth.HTTPClient(ctx, financeBaseURL))
 	attendanceClient := client.NewAttendanceClient(attendanceBaseURL, gcpauth.HTTPClient(ctx, attendanceBaseURL))
 	commsClient := client.NewCommsClient(commsBaseURL, gcpauth.HTTPClient(ctx, commsBaseURL))
+	uniformsClient := client.NewUniformsClient(uniformsBaseURL, gcpauth.HTTPClient(ctx, uniformsBaseURL))
 
 	// loginLimiter fronts POST /auth/login with a per-IP token bucket so an
 	// attacker cannot brute-force credentials from a single source. It is
@@ -95,7 +100,7 @@ func main() {
 	loginRL := config.ParseLoginRateLimit(os.Getenv)
 	loginLimiter := middleware.NewRateLimiter(loginRL.Burst, loginRL.RefillPerSec(), time.Now)
 
-	mux := newMux(iamHealth, authClient, studentsClient, configClient, gradesClient, financeClient, attendanceClient, commsClient, flags, loginLimiter)
+	mux := newMux(iamHealth, authClient, studentsClient, configClient, gradesClient, financeClient, attendanceClient, commsClient, uniformsClient, flags, loginLimiter)
 
 	log.Info("gateway starting",
 		slog.String("addr", addr),
@@ -187,7 +192,7 @@ func main() {
 //
 // `flags` (via middleware.NewModuleGuard) is the module-visibility boundary:
 // disabled module ⇒ 404, evaluated before auth so a hidden module is invisible.
-func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, configClient *client.ConfigClient, gradesClient *client.GradesClient, financeClient *client.FinanceClient, attendanceClient *client.AttendanceClient, commsClient *client.CommsClient, flags featureflag.Checker, loginLimiter *middleware.RateLimiter) *http.ServeMux {
+func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, configClient *client.ConfigClient, gradesClient *client.GradesClient, financeClient *client.FinanceClient, attendanceClient *client.AttendanceClient, commsClient *client.CommsClient, uniformsClient *client.UniformsClient, flags featureflag.Checker, loginLimiter *middleware.RateLimiter) *http.ServeMux {
 	mux := http.NewServeMux()
 	handler.NewHealthHandler(iamHealth).Register(mux)
 
@@ -435,6 +440,58 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/comms/devices", commsWrite(commsH.RegisterDevice))
 	mux.Handle("GET /api/v1/comms/notifications", commsRead(commsH.ListNotifications))
 	mux.Handle("POST /api/v1/comms/notifications/{id}/read", commsWrite(commsH.MarkRead))
+
+	// M12 uniforms (the school's uniform shop). Stage one: the catalogue, the
+	// storeroom and the counter sale. Every route sits behind
+	// guard.Protect("uniforms", ...) so module_uniforms OFF => 404 -- the module
+	// is invisible before auth even runs, not merely refused.
+	//
+	// THE READ PERMISSION IS SPLIT, and that split is the point:
+	//
+	//   uniforms:stock   the catalogue, stock counts, receipts, adjustments.
+	//                    Resolves NO student data at all -- garments, sizes and
+	//                    numbers. Grantable without reservation, which is what
+	//                    makes a "Caja/Almacen" role possible.
+	//   uniforms:orders  the order list, which carries every pupil's name and
+	//                    purchase history for the whole school with no
+	//                    per-object scoping. That is the literal criterion in
+	//                    iam's ownerOnlyPermissions, so it is OWNER-ONLY until
+	//                    per-object scoping exists for it.
+	//
+	// A single uniforms:read would have forced a choice between a storeroom role
+	// that cannot work and handing the school roll to whoever holds it. The
+	// storeroom does not need names.
+	//
+	// The counter sale needs uniforms:write AND finance:write, because it moves
+	// goods and takes money in one act. RequireAllPermissions names the missing
+	// one so the panel can disable the entry point and SAY WHY -- otherwise a
+	// cashier keys in six lines with a parent waiting and eats a bare 403.
+	uniformsH := handler.NewUniformsHandler(uniformsClient)
+	uniformsStock := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("uniforms", requireAuthChanged(middleware.RequirePermission("uniforms:stock")(http.HandlerFunc(h))))
+	}
+	uniformsWrite := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("uniforms", requireAuthChanged(middleware.RequirePermission("uniforms:write")(http.HandlerFunc(h))))
+	}
+	uniformsOrders := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("uniforms", requireAuthChanged(middleware.RequirePermission("uniforms:orders")(http.HandlerFunc(h))))
+	}
+	uniformsSell := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("uniforms", requireAuthChanged(
+			middleware.RequireAllPermissions("uniforms:write", "finance:write")(http.HandlerFunc(h))))
+	}
+	mux.Handle("GET /api/v1/uniforms/items", uniformsStock(uniformsH.ListItems))
+	mux.Handle("POST /api/v1/uniforms/items", uniformsWrite(uniformsH.CreateItem))
+	mux.Handle("PUT /api/v1/uniforms/items/{id}", uniformsWrite(uniformsH.UpdateItem))
+	mux.Handle("POST /api/v1/uniforms/items/{id}/sizes", uniformsWrite(uniformsH.UpsertSizes))
+	mux.Handle("GET /api/v1/uniforms/stock", uniformsStock(uniformsH.ListStock))
+	mux.Handle("POST /api/v1/uniforms/stock/receive", uniformsWrite(uniformsH.ReceiveStock))
+	mux.Handle("POST /api/v1/uniforms/stock/adjust", uniformsWrite(uniformsH.AdjustStock))
+	mux.Handle("POST /api/v1/uniforms/counter-sale", uniformsSell(uniformsH.CounterSale))
+	mux.Handle("GET /api/v1/uniforms/orders", uniformsOrders(uniformsH.ListOrders))
+	mux.Handle("GET /api/v1/uniforms/orders/{id}", uniformsOrders(uniformsH.GetOrder))
+	mux.Handle("GET /api/v1/uniforms/settings", uniformsStock(uniformsH.GetSettings))
+	mux.Handle("PUT /api/v1/uniforms/settings", uniformsWrite(uniformsH.UpdateSettings))
 
 	// Phase 9b family surface: the guardian's own children's news, account,
 	// profile, grades and attendance, composed at the edge from the students

@@ -41,8 +41,14 @@ type chargeModel struct {
 	DiscountCents int64     `gorm:"column:discount_cents"`
 	DueDate       time.Time `gorm:"column:due_date"`
 	Status        string    `gorm:"column:status"`
-	CreatedAt     time.Time `gorm:"column:created_at"`
-	UpdatedAt     time.Time `gorm:"column:updated_at"`
+	// ExternalRef ties the charge to the row that caused it in another module
+	// (a uniforms fulfillment, say). Empty means the school's own charge; the
+	// empty string is what the "one concept per cycle" partial index covers, so
+	// tuition keeps its idempotency while referenced charges may repeat
+	// (migration 0003).
+	ExternalRef string    `gorm:"column:external_ref"`
+	CreatedAt   time.Time `gorm:"column:created_at"`
+	UpdatedAt   time.Time `gorm:"column:updated_at"`
 }
 
 func (chargeModel) TableName() string { return "charges" }
