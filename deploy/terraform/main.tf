@@ -124,6 +124,14 @@ resource "google_cloud_run_v2_service_iam_member" "pubsub_push_comms_invoker" {
 # wakes on StudentEnrolled to charge a pupil's inscription (M15). Two bindings
 # rather than one project-wide grant, so this identity can reach exactly the two
 # services that receive pushes and nothing else.
+resource "google_cloud_run_v2_service_iam_member" "pubsub_push_students_invoker" {
+  project  = var.project_id
+  location = var.region
+  name     = module.students.service_name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.pubsub_push.email}"
+}
+
 resource "google_cloud_run_v2_service_iam_member" "pubsub_push_finance_invoker" {
   project  = var.project_id
   location = var.region

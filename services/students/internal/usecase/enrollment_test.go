@@ -422,9 +422,9 @@ func seedPendingApplicant(t *testing.T, repo *fakeRepo, id string) {
 	repo.byID[id] = s
 }
 
-func TestEnrollMovesTheStudentsFileToEnrolled(t *testing.T) {
+func TestEnrollRecordsThePlacementWithoutCallingThemEnrolled(t *testing.T) {
 	svc, students, _, catalog, _ := newEnrollService(t)
-	seedStudent(t, students, "stu-1") // already accepted
+	seedPendingApplicant(t, students, "stu-1")
 	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", Name: "3° B", GradeLevelID: "gl-1"}
 
 	if _, err := svc.Enroll(context.Background(), "stu-1", "grp-1", ""); err != nil {
@@ -435,25 +435,28 @@ func TestEnrollMovesTheStudentsFileToEnrolled(t *testing.T) {
 		t.Fatal("the file was never persisted — the roster would still say Trámite")
 	}
 	saved := students.updated[len(students.updated)-1]
-	if saved.Status() != domain.AdmissionEnrolled {
-		t.Errorf("persisted admission status = %v, want enrolled", saved.Status())
+	// A pupil placed in a group is NOT yet "inscrito": the school counts them
+	// enrolled when the inscription is PAID, and the ledger is what says so.
+	// Flipping the file here would have the panel showing 400 enrolled pupils in
+	// a school that had collected from 260 of them.
+	if saved.Status() != domain.AdmissionPending {
+		t.Errorf("persisted admission status = %v, want pending — enrolled comes with payment", saved.Status())
 	}
-	// Both enrolment paths write the group onto the record. Only one used to.
+	// The record still says where they sit. Both enrolment paths write it.
 	if saved.GradeGroup() != "3° B" {
 		t.Errorf("persisted grade group = %q, want 3° B", saved.GradeGroup())
 	}
 }
 
-// Placing a child in 3°A IS the school accepting them; there is no separate
-// "accept" anywhere in the product. So the enrolment walks pending → accepted →
-// enrolled rather than jumping the state machine, and both steps are recorded.
-func TestEnrollAcceptsAPendingApplicantOnTheWay(t *testing.T) {
-	svc, students, _, catalog, pub := newEnrollService(t)
+// Paying the inscription is what makes a pupil "inscrito" — the school's rule in
+// its own words. The walk is pending → accepted → enrolled rather than a jump,
+// so an audit can tell a legal path from a bypassed state machine.
+func TestPayingTheInscriptionIsWhatEnrolsThem(t *testing.T) {
+	svc, students, _, _, pub := newEnrollService(t)
 	seedPendingApplicant(t, students, "stu-2")
-	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", GradeLevelID: "gl-1"}
 
-	if _, err := svc.Enroll(context.Background(), "stu-2", "grp-1", ""); err != nil {
-		t.Fatalf("Enroll: %v", err)
+	if err := svc.MarkInscriptionPaid(context.Background(), "stu-2"); err != nil {
+		t.Fatalf("MarkInscriptionPaid: %v", err)
 	}
 
 	if len(students.updated) == 0 {
@@ -462,10 +465,22 @@ func TestEnrollAcceptsAPendingApplicantOnTheWay(t *testing.T) {
 	if got := students.updated[len(students.updated)-1].Status(); got != domain.AdmissionEnrolled {
 		t.Fatalf("persisted admission status = %v, want enrolled", got)
 	}
-	// The acceptance is not swallowed: an audit that only saw pending → enrolled
-	// could not tell a legal path from a bypassed state machine.
 	if len(pub.changed) != 2 {
 		t.Errorf("published %d admission changes, want 2 (accepted, then enrolled)", len(pub.changed))
+	}
+}
+
+// Payments arrive at least once. A redelivery must be a no-op, or Pub/Sub keeps
+// redelivering it forever.
+func TestMarkingAnAlreadyEnrolledPupilIsHarmless(t *testing.T) {
+	svc, students, _, _, _ := newEnrollService(t)
+	seedPendingApplicant(t, students, "stu-3")
+	if err := svc.MarkInscriptionPaid(context.Background(), "stu-3"); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+
+	if err := svc.MarkInscriptionPaid(context.Background(), "stu-3"); err != nil {
+		t.Errorf("a redelivered payment must be a no-op, not a failure: %v", err)
 	}
 }
 
@@ -587,7 +602,7 @@ func TestAGradeWithNoGroupsSaysSo(t *testing.T) {
 
 // Placing by grade must move the pupil's file exactly as placing by group does —
 // the two paths cannot disagree about what enrolment means.
-func TestEnrollIntoGradeMovesTheStudentsFile(t *testing.T) {
+func TestEnrollIntoGradeRecordsTheGroupWithoutEnrolling(t *testing.T) {
 	svc, students, _, catalog, _ := newEnrollService(t)
 	seedPendingApplicant(t, students, "stu-9")
 	catalog.gradeGroups["gl-1"] = []ports.GroupSeats{{ID: "grp-b", Name: "1° B", CycleID: "cyc-1", Capacity: 5}}
@@ -600,8 +615,9 @@ func TestEnrollIntoGradeMovesTheStudentsFile(t *testing.T) {
 		t.Fatal("the file was never persisted")
 	}
 	saved := students.updated[len(students.updated)-1]
-	if saved.Status() != domain.AdmissionEnrolled {
-		t.Errorf("persisted admission status = %v, want enrolled", saved.Status())
+	// Placed, but still en trámite: inscrito comes with the payment.
+	if saved.Status() != domain.AdmissionPending {
+		t.Errorf("persisted admission status = %v, want pending", saved.Status())
 	}
 	// The record follows the placement: "grado y grupo" used to be free text a
 	// secretary typed, and it drifted the moment they guessed a group that was

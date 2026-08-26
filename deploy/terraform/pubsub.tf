@@ -97,6 +97,47 @@ resource "google_pubsub_subscription_iam_member" "dlq_subscriber" {
   member       = local.pubsub_sa
 }
 
+# students also consumes payment-events: a pupil is en trámite until their
+# inscription is PAID, and finance is what knows that. Its OWN subscription —
+# sharing comms' would give each of them half the events.
+resource "google_pubsub_subscription" "payment_events_students" {
+  project = var.project_id
+  name    = "students-payment-events"
+  topic   = google_pubsub_topic.payment_events.id
+
+  ack_deadline_seconds = 30
+
+  push_config {
+    push_endpoint = "${module.students.uri}/pubsub"
+    oidc_token {
+      service_account_email = google_service_account.pubsub_push.email
+      audience              = module.students.uri
+    }
+  }
+
+  retry_policy {
+    minimum_backoff = "10s"
+    maximum_backoff = "600s"
+  }
+
+  dead_letter_policy {
+    dead_letter_topic     = google_pubsub_topic.payment_events_dlq.id
+    max_delivery_attempts = 5
+  }
+
+  message_retention_duration = "604800s"
+  expiration_policy {
+    ttl = ""
+  }
+}
+
+resource "google_pubsub_subscription_iam_member" "payment_events_students_dlq_subscriber" {
+  project      = var.project_id
+  subscription = google_pubsub_subscription.payment_events_students.id
+  role         = "roles/pubsub.subscriber"
+  member       = local.pubsub_sa
+}
+
 # ---- attendance-events (attendance publishes; comms consumes) --------------
 # Pre-declared so the attendance publisher and comms consumer never rely on
 # runtime auto-creation (keeps the runtime SA at publisher/subscriber only).

@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	connect "connectrpc.com/connect"
@@ -32,6 +33,8 @@ import (
 	"github.com/garcia-lorca/pkg/dbdsn"
 	"github.com/garcia-lorca/pkg/gcpauth"
 	"github.com/garcia-lorca/pkg/logger"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/garcia-lorca/pkg/pubsub"
 	"github.com/garcia-lorca/pkg/pubsub/gcp"
 	"github.com/garcia-lorca/services/students/internal/adapters/configclient"
@@ -57,6 +60,17 @@ const (
 	readTimeout       = 30 * time.Second
 	writeTimeout      = 30 * time.Second
 	idleTimeout       = 120 * time.Second
+	// shutdownTimeout bounds the drain: past it, Shutdown stops waiting for
+	// in-flight requests rather than holding the process open indefinitely.
+	shutdownTimeout = 15 * time.Second
+
+	// defaultPubSubProject matches the project the compose emulator starts with.
+	defaultPubSubProject = "garcia-lorca-local"
+	// The topic finance owns, and students' OWN subscription on it. A separate
+	// subscription per consumer is the point: comms reads this topic too, and two
+	// consumers sharing one subscription would each see half the events.
+	paymentEventsTopic        = "payment-events"
+	paymentEventsSubscription = "students-payment-events"
 )
 
 func main() {
@@ -71,7 +85,7 @@ func main() {
 // run is the process lifecycle: build the composition root, serve until the
 // listener stops, and release the event transport on the way out.
 func run(ctx context.Context, log *slog.Logger) error {
-	mux, events, err := buildMux(ctx, log)
+	mux, events, consumer, err := buildMux(ctx, log)
 	if err != nil {
 		return err
 	}
@@ -84,7 +98,6 @@ func run(ctx context.Context, log *slog.Logger) error {
 	}()
 
 	addr := envOr("ADDR", defaultAddr)
-	log.Info("students starting", slog.String("addr", addr))
 	// h2c: serve HTTP/2 cleartext so both gRPC and Connect clients work.
 	srv := &http.Server{
 		Addr:              addr,
@@ -94,16 +107,98 @@ func run(ctx context.Context, log *slog.Logger) error {
 		WriteTimeout:      writeTimeout,
 		IdleTimeout:       idleTimeout,
 	}
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+
+	// Students publishes AND consumes: a pupil is en trámite until their
+	// inscription is paid, and finance is what knows that. The group's context is
+	// cancelled by the signal or by the first goroutine that fails, so a
+	// subscriber that dies for good takes the server down and the platform
+	// restarts it, rather than leaving a service that answers reads while
+	// silently consuming nothing.
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	group, groupCtx := errgroup.WithContext(runCtx)
+
+	group.Go(func() error {
+		log.Info("students starting", slog.String("addr", addr))
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	})
+
+	group.Go(func() error {
+		<-groupCtx.Done()
+		// Detached from groupCtx on purpose: it is already cancelled here, so
+		// draining needs a deadline of its own.
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
+		defer shutdownCancel()
+		return srv.Shutdown(shutdownCtx)
+	})
+
+	closeSubscriber, err := startSubscriber(groupCtx, group, consumer, log)
+	if err != nil {
+		cancel()
+		if waitErr := group.Wait(); waitErr != nil {
+			log.Warn("students stopped after a subscriber failure", slog.Any("error", waitErr))
+		}
 		return err
 	}
-	return nil
+	defer closeSubscriber()
+
+	return group.Wait()
+}
+
+// startSubscriber runs the streaming-pull loop that feeds the payment consumer,
+// or nothing at all when there is no broker to pull from.
+//
+// Under Cloud Run scale-to-zero nothing is running to call Receive, so events
+// arrive by POST /pubsub instead and this loop must stay off: starting it would
+// create durable subscriptions no process drains, and pupils would stay en
+// trámite after paying. Terraform sets PUBSUB_PUSH_MODE there.
+//
+// With no broker at all the service runs API-only. Refusing to boot would make
+// students undevelopable on its own; the cost is that admission does not follow
+// payment until a broker exists, which is a local-development trade, not a
+// production one.
+func startSubscriber(ctx context.Context, group *errgroup.Group, consumer *pubsubadapter.Consumer, log *slog.Logger) (release func(), err error) {
+	if pushMode() {
+		log.Info("students in pubsub push mode; pull loop disabled (events arrive via POST /pubsub)")
+		return func() {}, nil
+	}
+	if os.Getenv("PUBSUB_EMULATOR_HOST") == "" && os.Getenv("PUBSUB_PROJECT_ID") == "" {
+		log.Warn("pubsub not configured; a paid inscription will not move a pupil out of trámite")
+		return func() {}, nil
+	}
+
+	projectID := envOr("PUBSUB_PROJECT_ID", defaultPubSubProject)
+	client, err := gcp.New(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	group.Go(func() error {
+		log.Info("students consuming",
+			slog.String("topic", paymentEventsTopic),
+			slog.String("subscription", paymentEventsSubscription))
+		return client.SubscribeTopic(ctx, paymentEventsTopic, paymentEventsSubscription, consumer.Handle)
+	})
+	return func() {
+		if err := client.Close(); err != nil {
+			log.Warn("students could not close the broker client", slog.Any("error", err))
+		}
+	}, nil
+}
+
+// pushMode reports whether students consumes via Pub/Sub push (Cloud Run) rather
+// than the streaming-pull loop (local). An unset or unparseable value is false.
+func pushMode() bool {
+	enabled, err := strconv.ParseBool(os.Getenv("PUBSUB_PUSH_MODE"))
+	return err == nil && enabled
 }
 
 // buildMux is the composition root: config → adapters → use case → Connect
 // handler, returning the mounted routes plus the event publisher the caller must
 // close on shutdown.
-func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.PublisherCloser, error) {
+func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.PublisherCloser, *pubsubadapter.Consumer, error) {
 	// M03 is single-tenant: the tenant is fixed here (not derived from the
 	// caller), so RLS binds this one tenant for every request. When multi-tenant
 	// lands, the gateway must forward the authenticated principal's TenantID and
@@ -112,13 +207,13 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 
 	db, err := openDB()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	repo := pgadapter.NewRepository(db, tenantID)
 	publisher, err := gcp.PublisherFromEnv(ctx, log)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	events := pubsubadapter.NewEventPublisher(publisher)
 	newID := func() string { return uuid.NewString() }
@@ -140,6 +235,10 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	users := iamclient.New(iamBaseURL, gcpauth.HTTPClient(ctx, iamBaseURL))
 	guardians := usecase.NewGuardianService(repo, repo, users, tenantID, newID)
 
+	// A pupil is en trámite until their inscription is PAID, and finance is what
+	// knows that. The consumer is how the two facts meet.
+	consumer := pubsubadapter.NewConsumer(enroll, log)
+
 	health := usecase.NewHealthService(serviceName)
 	handler := grpcadapter.NewStudentsHandler(svc, enroll, guardians, health)
 
@@ -150,7 +249,11 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	return mux, publisher, nil
+	// The push endpoint Cloud Run needs: under scale-to-zero nothing is running
+	// to pull, so events arrive as authenticated POSTs instead. Mounted always —
+	// harmless locally, where the pull loop does the work.
+	mux.Handle("POST /pubsub", gcp.NewPushHandler(consumer.Handle, os.Getenv("PUBSUB_PUSH_SA_EMAIL"), log))
+	return mux, publisher, consumer, nil
 }
 
 // openDB opens the GORM Postgres pool, resolving its DSN via pkg/dbdsn:
