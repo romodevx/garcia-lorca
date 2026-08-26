@@ -151,7 +151,7 @@ func TestCounterSaleCannotSpendAHold(t *testing.T) {
 	// single line, fatal for a multi-line sale where later lines still have work
 	// to do. Asserting the message pins the refusal to the predicate and stops a
 	// weakened WHERE clause from hiding behind the constraint.
-	if !strings.Contains(err.Error(), "there are not enough of") {
+	if !strings.Contains(err.Error(), "no quedan suficientes") {
 		t.Errorf("refused by the constraint rather than the predicate: %v", err)
 	}
 

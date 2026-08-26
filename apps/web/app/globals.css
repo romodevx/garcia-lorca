@@ -133,3 +133,51 @@ input { font-family: var(--font-ui); }
 @keyframes pop { from { transform: scale(.95); } to { transform: none; } }
 .fade-up { animation: fadeUp .5s var(--ease) both; }
 @media (prefers-reduced-motion: reduce) { .fade-up { animation: none; } }
+
+/*
+ * The top bar is laid out for a desk. On a phone it does not fit — it used to
+ * push the whole page 346px wide, which put the module tiles half off-screen and
+ * made a tap land on the tile next door.
+ *
+ * Below the same 768px breakpoint the modules use, it gives up what it can
+ * afford to: the search collapses to its icon (⌘K is not a phone gesture
+ * anyway) and the account chip to its avatar. Nothing is removed, only the
+ * labels of things that still have an icon and an accessible name.
+ */
+@media (max-width: 768px) {
+  .topbar {
+    height: 64px;
+    gap: 10px;
+    padding: 0 14px;
+  }
+  .topbar-search {
+    flex: 0 0 auto;
+    max-width: none;
+    margin-left: 0;
+  }
+  .topbar-search-text,
+  .topbar-search-kbd,
+  .topbar-user-text {
+    display: none;
+  }
+  .topbar-search button {
+    width: 48px;
+    padding: 0;
+    justify-content: center;
+  }
+  .topbar-actions {
+    gap: 6px;
+  }
+  .topbar-user {
+    padding: 4px;
+  }
+  .topbar-lang {
+    display: none;
+  }
+  /* !important because Logo sets its height inline, from a prop: the size is a
+     component decision everywhere except here, where the viewport decides. */
+  .topbar-logo img {
+    height: 30px !important;
+    width: auto;
+  }
+}

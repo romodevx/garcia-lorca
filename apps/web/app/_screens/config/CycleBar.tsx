@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
-import type { Cycle, CreateCycleInput } from "../../config/api";
+import { ConfigError, type Cycle, type CreateCycleInput } from "../../config/api";
 import { DateField, EmptyHint, ErrorAlert, Section, SelectChip, TextField } from "./parts";
 
 export interface CycleBarProps {
@@ -10,6 +10,24 @@ export interface CycleBarProps {
   selectedCycleId: string | undefined;
   onSelect: (id: string) => void;
   onCreate: (input: CreateCycleInput) => Promise<void>;
+}
+
+/**
+ * What went wrong, in words that point at a fix.
+ *
+ * The whole message used to be "Intenta de nuevo", which for the commonest
+ * failure — a cycle name the school already used — is advice that can never
+ * work. A person following it clicks the same button forever.
+ */
+export function cycleFailureMessage(err: unknown): string {
+  if (err instanceof ConfigError) {
+    if (err.isConflict) return "Ya existe un ciclo con ese nombre. Usa otro.";
+    if (err.isInvalid) return "Revisa las fechas: el fin del ciclo debe ser posterior al inicio.";
+    if (err.status === 401) return "Tu sesión expiró. Vuelve a entrar.";
+    if (err.status === 403) return "Tu cuenta no tiene permiso para crear ciclos.";
+    if (err.status === 404) return "El módulo de configuración está apagado.";
+  }
+  return "No pudimos crear el ciclo. Revisa tu conexión e intenta de nuevo.";
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -37,8 +55,8 @@ export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate }: CycleB
       setName("");
       setStartsOn("");
       setEndsOn("");
-    } catch {
-      setError("No se pudo crear el ciclo. Intenta de nuevo.");
+    } catch (err) {
+      setError(cycleFailureMessage(err));
     } finally {
       setPending(false);
     }

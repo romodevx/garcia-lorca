@@ -192,6 +192,22 @@ func (r *fakeRepo) CounterSale(_ context.Context, cmd ports.CounterSaleCommand) 
 	if prior, ok := r.byKey[cmd.IdempotencyKey]; ok && cmd.IdempotencyKey != "" {
 		return prior, true, nil
 	}
+	// The order is built BEFORE anything moves, in the same order as the real
+	// transaction. It matters: Postgres rolls the whole thing back when the order
+	// is refused, and a fake that had already emptied the shelf by then would let
+	// a refused sale look like it moved goods.
+	order, err := domain.NewOrder(cmd.OrderID, cmd.TenantID, domain.FormatFolio(2026, len(r.sales)+1),
+		domain.OrderStudent{
+			ID: cmd.StudentID, FullName: cmd.StudentName, Level: cmd.StudentLevel,
+			GradeGroup: cmd.StudentGradeGroup, CycleID: cmd.CycleID,
+		}, domain.SourceCounter, cmd.ActorUserID, cmd.SoldAt)
+	if err != nil {
+		return ports.OrderAggregate{}, false, err
+	}
+	ful, err := domain.NewCounterSaleFulfillment(cmd.FulfillmentID, cmd.TenantID, cmd.OrderID, 1, cmd.TotalCents, cmd.SoldAt)
+	if err != nil {
+		return ports.OrderAggregate{}, false, err
+	}
 	// Deduct exactly as the real transaction does, so a test that oversells the
 	// shelf fails here rather than only against Postgres.
 	for _, line := range cmd.Lines {
@@ -204,18 +220,6 @@ func (r *fakeRepo) CounterSale(_ context.Context, cmd ports.CounterSaleCommand) 
 			return ports.OrderAggregate{}, false, err
 		}
 		r.stock[s.ID()] = next
-	}
-	order, err := domain.NewOrder(cmd.OrderID, cmd.TenantID, domain.FormatFolio(2026, len(r.sales)+1),
-		domain.OrderStudent{
-			ID: cmd.StudentID, FullName: cmd.StudentName, Level: cmd.StudentLevel,
-			GradeGroup: cmd.StudentGradeGroup, CycleID: cmd.CycleID,
-		}, domain.SourceCounter, cmd.ActorUserID, cmd.SoldAt)
-	if err != nil {
-		return ports.OrderAggregate{}, false, err
-	}
-	ful, err := domain.NewCounterSaleFulfillment(cmd.FulfillmentID, cmd.TenantID, cmd.OrderID, 1, cmd.TotalCents, cmd.SoldAt)
-	if err != nil {
-		return ports.OrderAggregate{}, false, err
 	}
 	agg := ports.OrderAggregate{Order: order, Lines: cmd.Lines, Fulfillments: []domain.Fulfillment{ful}}
 	r.sales = append(r.sales, cmd)

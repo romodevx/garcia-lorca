@@ -29,9 +29,61 @@ const jumper: UniformItem = {
   ],
 };
 
-/** Answers the catalogue read the screen makes on mount. */
+/** The pupil the till sells to. The picker resolves a name to THIS id. */
+const zoe = {
+  id: "stu-1",
+  curp: "ZAVX150312MDFRNN01",
+  firstName: "Zoe",
+  lastName: "Villalobos",
+  level: "primaria",
+  gradeGroup: "1° A",
+  guardianName: "Marisol Villalobos",
+  admissionStatus: "enrolled",
+};
+
+/**
+ * Answers the reads the screen makes on mount.
+ *
+ * It routes by path because the till makes two: the catalogue, and the roster
+ * the pupil picker searches. Answering both with the same body is how the picker
+ * silently found nobody.
+ */
 function stubCatalogue(items: UniformItem[]): ReturnType<typeof vi.fn> {
-  const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ items }));
+  const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (url.includes("/students")) return Promise.resolve(jsonResponse({ students: [zoe] }));
+    return Promise.resolve(jsonResponse({ items }));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+/**
+ * Names a pupil at the till the way a cashier does: type, then choose.
+ *
+ * Typing alone used to be enough, and that was the bug — the typed text went out
+ * as the student id and came back a 500. The choice is what resolves a name to
+ * an id, so the tests have to make it.
+ */
+async function chooseZoe(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.type(screen.getByLabelText("Alumno"), "Zoe");
+  await user.click(await screen.findByRole("button", { name: /Zoe Villalobos/ }));
+}
+
+/**
+ * Answers the till's reads AND the one write it makes.
+ *
+ * Routed by path rather than by call order: the pupil picker adds a roster read
+ * whose position depends on when the cashier types, and a queue of
+ * mockResolvedValueOnce cannot express that.
+ */
+function stubTill(items: UniformItem[], sale: Response): ReturnType<typeof vi.fn> {
+  const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (url.includes("/counter-sale")) return Promise.resolve(sale);
+    if (url.includes("/students")) return Promise.resolve(jsonResponse({ students: [zoe] }));
+    return Promise.resolve(jsonResponse({ items }));
+  });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
@@ -127,7 +179,7 @@ describe("the till", () => {
     // needs the pupil.
     expect(confirm()).toBeDisabled();
 
-    await user.type(screen.getByLabelText("Alumno"), "Zoe");
+    await chooseZoe(user);
     expect(confirm()).toBeEnabled();
   });
 
@@ -156,21 +208,15 @@ describe("the till", () => {
   });
 
   it("shows the folio big after a sale, because it is the only handle on it", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse({ items: [jumper] }))
-      .mockResolvedValueOnce(
-        jsonResponse({ id: "ord-1", folio: "U-2026-000007", totalCents: 65000, lines: [], fulfillments: [] }, 201),
-      )
-      .mockResolvedValue(jsonResponse({ items: [jumper] }));
-    vi.stubGlobal("fetch", fetchMock);
+    stubTill([jumper],
+      jsonResponse({ id: "ord-1", folio: "U-2026-000007", totalCents: 65000, lines: [], fulfillments: [] }, 201));
     const user = userEvent.setup();
     render(<UniformsScreen onBack={() => {}} permissions={ALL} />);
 
     await waitFor(() => expect(screen.getByText("Suéter verde")).toBeInTheDocument());
     await user.click(screen.getByText("Suéter verde"));
     await user.click(screen.getByRole("button", { name: /M\s*6 libres/ }));
-    await user.type(screen.getByLabelText("Alumno"), "Zoe");
+    await chooseZoe(user);
     await user.click(screen.getByRole("button", { name: /Cobrar y entregar/ }));
 
     await waitFor(() => expect(screen.getByText("U-2026-000007")).toBeInTheDocument());
@@ -179,21 +225,15 @@ describe("the till", () => {
   it("sends an idempotency key, and a NEW one for the next sale", async () => {
     // A retry of this sale carries the same key; the next parent in the queue
     // carries a different one. Reusing it would make the second sale a no-op.
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse({ items: [jumper] }))
-      .mockResolvedValueOnce(
-        jsonResponse({ id: "ord-1", folio: "U-2026-000007", totalCents: 65000, lines: [], fulfillments: [] }, 201),
-      )
-      .mockResolvedValue(jsonResponse({ items: [jumper] }));
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = stubTill([jumper],
+      jsonResponse({ id: "ord-1", folio: "U-2026-000007", totalCents: 65000, lines: [], fulfillments: [] }, 201));
     const user = userEvent.setup();
     render(<UniformsScreen onBack={() => {}} permissions={ALL} />);
 
     await waitFor(() => expect(screen.getByText("Suéter verde")).toBeInTheDocument());
     await user.click(screen.getByText("Suéter verde"));
     await user.click(screen.getByRole("button", { name: /M\s*6 libres/ }));
-    await user.type(screen.getByLabelText("Alumno"), "Zoe");
+    await chooseZoe(user);
     await user.click(screen.getByRole("button", { name: /Cobrar y entregar/ }));
 
     await waitFor(() => expect(screen.getByText("U-2026-000007")).toBeInTheDocument());
@@ -210,30 +250,23 @@ describe("the till", () => {
   });
 
   it("shows the shop's own words when a size ran out mid-sale", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse({ items: [jumper] }))
-      .mockResolvedValueOnce(
-        jsonResponse(
-          {
-            error: {
-              code: "insufficient_stock",
-              message: "Esa talla ya no está disponible, actualizamos la lista",
-              details: { reason: "there are not enough of Suéter verde in size M" },
-            },
-          },
-          409,
-        ),
-      )
-      .mockResolvedValue(jsonResponse({ items: [jumper] }));
-    vi.stubGlobal("fetch", fetchMock);
+    stubTill([jumper], jsonResponse(
+      {
+        error: {
+          code: "insufficient_stock",
+          message: "Esa talla ya no está disponible, actualizamos la lista",
+          details: { reason: "no quedan suficientes Suéter verde en talla M" },
+        },
+      },
+      409,
+    ));
     const user = userEvent.setup();
     render(<UniformsScreen onBack={() => {}} permissions={ALL} />);
 
     await waitFor(() => expect(screen.getByText("Suéter verde")).toBeInTheDocument());
     await user.click(screen.getByText("Suéter verde"));
     await user.click(screen.getByRole("button", { name: /M\s*6 libres/ }));
-    await user.type(screen.getByLabelText("Alumno"), "Zoe");
+    await chooseZoe(user);
     await user.click(screen.getByRole("button", { name: /Cobrar y entregar/ }));
 
     await waitFor(() => {

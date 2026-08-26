@@ -4,6 +4,8 @@ import { useCallback, useMemo, useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { Icon } from "../../_design/Icon";
 import { counterSale, UniformsError, type SaleLine, type UniformItem, type UniformOrder } from "../../uniforms/api";
+import type { Student } from "../../students/api";
+import { StudentPicker } from "./StudentPicker";
 import { EmptyState, ErrorNote, field, label, money } from "./parts";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -36,7 +38,7 @@ export function CounterSalePanel({
   const [selectedItem, setSelectedItem] = useState<UniformItem | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [anonymous, setAnonymous] = useState(false);
-  const [studentId, setStudentId] = useState("");
+  const [student, setStudent] = useState<Student | null>(null);
   const [note, setNote] = useState("");
   const [method, setMethod] = useState<"cash" | "card" | "transfer">("cash");
   const [reference, setReference] = useState("");
@@ -60,7 +62,7 @@ export function CounterSalePanel({
   const reset = useCallback((): void => {
     setCart([]);
     setSelectedItem(null);
-    setStudentId("");
+    setStudent(null);
     setNote("");
     setReference("");
     setReceived("");
@@ -98,7 +100,10 @@ export function CounterSalePanel({
       const order = await counterSale(
         API_URL,
         {
-          studentId: anonymous ? undefined : studentId,
+          // The pupil's ID, never what somebody typed: the first version of this
+          // field sent the typed name where an id belongs, and the service —
+          // correctly — had no idea what to do with it.
+          studentId: anonymous ? undefined : (student?.id ?? ""),
           lines,
           method,
           reference: method === "cash" ? undefined : reference,
@@ -113,7 +118,7 @@ export function CounterSalePanel({
     } finally {
       setPending(false);
     }
-  }, [anonymous, cart, method, note, onSold, reference, saleKey, studentId]);
+  }, [anonymous, cart, method, note, onSold, reference, saleKey, student]);
 
   // The account may run the storeroom without being allowed to take money. Say
   // so at the door, with the reason — not after six lines have been keyed in.
@@ -155,7 +160,7 @@ export function CounterSalePanel({
   const canConfirm =
     cart.length > 0 &&
     !pending &&
-    (anonymous ? note.trim() !== "" : studentId.trim() !== "");
+    (anonymous ? note.trim() !== "" : student !== null);
 
   return (
     <div style={{ display: "grid", gap: 18 }}>
@@ -272,13 +277,7 @@ export function CounterSalePanel({
       <section style={{ display: "grid", gap: 12 }}>
         <p style={label}>3. Para quién</p>
         {!anonymous ? (
-          <input
-            style={field}
-            placeholder="Número o nombre del alumno"
-            value={studentId}
-            onChange={(e) => setStudentId(e.target.value)}
-            aria-label="Alumno"
-          />
+          <StudentPicker value={student} onChange={setStudent} />
         ) : (
           <div
             style={{

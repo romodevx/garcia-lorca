@@ -304,7 +304,7 @@ func mustLine(t *testing.T, id string, status domain.LineStatus) domain.OrderLin
 // sentence for both, and it would be the wrong sentence half the time.
 func TestOutOfStockIsItsOwnCode(t *testing.T) {
 	outOfStock := glerrors.Wrap(glerrors.KindConflict,
-		"there are not enough of Suéter verde in size M", domain.ErrInsufficientStock)
+		"no quedan suficientes Suéter verde en talla M", domain.ErrInsufficientStock)
 	duplicate := glerrors.New(glerrors.KindConflict, "a garment with that code already exists")
 
 	h := handlerWith(&stubRepo{err: outOfStock})
@@ -353,13 +353,13 @@ func TestNoErrorLeaksTheDriversWords(t *testing.T) {
 // into "internal error". The sentence we wrote is the one a cashier reads.
 func TestUsefulMessagesStillReachTheCaller(t *testing.T) {
 	h := handlerWith(&stubRepo{err: glerrors.Wrap(glerrors.KindConflict,
-		"there are not enough of Suéter verde in size M",
+		"no quedan suficientes Suéter verde en talla M",
 		errors.New("ERROR: something internal (SQLSTATE 23514)"))})
 	_, err := h.ListItems(context.Background(), connect.NewRequest(&uniformsv1.ListItemsRequest{}))
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	if !contains(err.Error(), "not enough of Suéter verde in size M") {
+	if !contains(err.Error(), "no quedan suficientes Suéter verde en talla M") {
 		t.Errorf("the useful part was thrown away too: %s", err.Error())
 	}
 }

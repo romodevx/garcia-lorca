@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"time"
 
@@ -259,12 +260,36 @@ func (s *Service) resolveBuyer(ctx context.Context, in CounterSaleInput) (ports.
 		}
 		return ports.StudentRef{}, nil
 	}
+	// The shape is checked HERE, before the id leaves this service. A caller is
+	// not a UI: sending a typed name where an id belongs used to travel all the
+	// way to students and come back as a 500 — an answer that blames the server
+	// for the caller's input and pages somebody at night for a typo.
+	if !looksLikeUUID(in.StudentID) {
+		return ports.StudentRef{}, glerrors.New(glerrors.KindInvalid,
+			"student id must be an identifier, not a name")
+	}
 	student, err := s.students.ByID(ctx, in.StudentID)
 	if err != nil {
 		return ports.StudentRef{}, err
 	}
+	// A pupil who has been registered but not yet placed in a group has no cycle,
+	// and a charge must name one — the sale genuinely cannot go through. The
+	// refusal is worded HERE, in the language of the till, because the domain's
+	// own sentence names a concept ("the cycle it belongs to") that the person at
+	// the counter cannot act on, and it rides to the panel in details.reason.
+	if strings.TrimSpace(student.CycleID) == "" {
+		return ports.StudentRef{}, glerrors.New(glerrors.KindInvalid,
+			"ese alumno aún no está inscrito en un ciclo: inscríbelo en un grupo y vuelve a cobrar")
+	}
 	return student, nil
 }
+
+// uuidPattern is the canonical 8-4-4-4-12 form. It is deliberately a shape check
+// and not a parse: this service does not care which UUID version it is, only
+// that the value is an identifier at all.
+var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+func looksLikeUUID(s string) bool { return uuidPattern.MatchString(strings.TrimSpace(s)) }
 
 // priceLines turns what the caller asked for into priced lines, reading every
 // amount from the catalogue. A garment off sale cannot start a new line, and a
@@ -283,7 +308,7 @@ func (s *Service) priceLines(ctx context.Context, orderID string, inputs []SaleL
 		}
 		if want.Qty > stock.Available() {
 			return nil, 0, glerrors.Wrap(glerrors.KindConflict,
-				"there are not enough of "+item.Name()+" in size "+want.SizeLabel,
+				"no quedan suficientes "+item.Name()+" en talla "+want.SizeLabel,
 				domain.ErrInsufficientStock)
 		}
 		// Sold, not reserved: at the counter the garment leaves as it is sold.

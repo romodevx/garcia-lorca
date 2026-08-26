@@ -3,10 +3,12 @@ package usecase_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/uniforms/internal/domain"
+	"github.com/garcia-lorca/services/uniforms/internal/ports"
 	"github.com/garcia-lorca/services/uniforms/internal/usecase"
 )
 
@@ -307,5 +309,72 @@ func TestCounterSaleUsesTheDeliveryAsTheChargesExternalRef(t *testing.T) {
 	want := "uniforms:" + got.Fulfillments[0].ID()
 	if f.finance.charges[0].ExternalRef != want {
 		t.Errorf("external ref = %q, want %q", f.finance.charges[0].ExternalRef, want)
+	}
+}
+
+// TestCounterSaleRejectsAMalformedStudentId is the second half of a bug the
+// end-to-end suite found.
+//
+// The panel used to send whatever a cashier typed where a student id belongs, so
+// "Zoe Villalobos" reached the students service and came back as a 500 — an
+// answer that blames the server for the caller's input, tells the cashier
+// nothing, and pages somebody at night for a typo. The panel now picks a real
+// pupil, and this makes sure the service refuses the bad shape ITSELF: a caller
+// is not a UI, and the next one may not be as polite.
+func TestCounterSaleRejectsAMalformedStudentId(t *testing.T) {
+	f := newFixture(t)
+	item := f.seedItem(t, "PLA", "8", 32000, 5)
+	in := saleFor(item, "8", 1)
+	in.StudentID = "Zoe Villalobos"
+
+	_, err := f.svc.CounterSale(context.Background(), in)
+	requireKind(t, err, glerrors.KindInvalid)
+}
+
+func TestCounterSaleAcceptsAWellFormedId(t *testing.T) {
+	f := newFixture(t)
+	item := f.seedItem(t, "PLA", "8", 32000, 5)
+	if _, err := f.svc.CounterSale(context.Background(), saleFor(item, "8", 1)); err != nil {
+		t.Fatalf("a real id must still work: %v", err)
+	}
+}
+
+// TestCounterSaleToAnUnenrolledPupilIsRefusedInPlainSpanish pins the message a
+// cashier reads. A pupil who has been registered but not yet placed in a group
+// has no cycle, and a charge must name one — the sale genuinely cannot go
+// through. What must not happen is what used to: the domain's internal English
+// sentence ("an order for a student needs the cycle it belongs to") reaching a
+// Spanish till, where it names a concept the person at the counter cannot act on.
+func TestCounterSaleToAnUnenrolledPupilIsRefusedInPlainSpanish(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	item := f.seedItem(t, "UNE", "8", 32000, 5)
+
+	const newcomer = "9f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
+	f.students.byID[newcomer] = ports.StudentRef{
+		ID: newcomer, FullName: "Zoe Villalobos", Level: domain.LevelPrimaria,
+		GradeGroup: "1 A", CycleID: "", Status: "in_process",
+	}
+
+	in := saleFor(item, "8", 1)
+	in.StudentID = newcomer
+	_, err := f.svc.CounterSale(ctx, in)
+
+	if err == nil {
+		t.Fatal("a pupil with no live enrolment has no cycle to bill; the sale must be refused")
+	}
+	if got := glerrors.KindOf(err); got != glerrors.KindInvalid {
+		t.Errorf("kind = %v; want Invalid", got)
+	}
+	if !strings.Contains(err.Error(), "inscrito") {
+		t.Errorf("message = %q; it must tell the cashier the pupil is not enrolled yet", err.Error())
+	}
+	// The shelf must be untouched: nothing was handed over.
+	stock, err := f.repo.GetStockBySize(ctx, item.ID(), "8")
+	if err != nil {
+		t.Fatalf("read stock: %v", err)
+	}
+	if stock.OnHand() != 5 {
+		t.Errorf("on hand = %d; want 5 — a refused sale moves no goods", stock.OnHand())
 	}
 }

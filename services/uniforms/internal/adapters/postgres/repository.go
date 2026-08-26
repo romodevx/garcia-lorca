@@ -550,7 +550,7 @@ func (r *Repository) sellFromShelf(tx *gorm.DB, line domain.OrderLine, note, act
 		})
 	if res.Error != nil {
 		if isViolation(res.Error, checkViolation) {
-			return glerrors.Wrap(glerrors.KindConflict, "not enough stock available", res.Error)
+			return glerrors.Wrap(glerrors.KindConflict, "no quedan suficientes piezas de esa talla", res.Error)
 		}
 		return glerrors.Wrap(glerrors.KindInternal, "deducting stock", res.Error)
 	}
@@ -558,7 +558,7 @@ func (r *Repository) sellFromShelf(tx *gorm.DB, line domain.OrderLine, note, act
 		// Carries the sentinel so the edge can say "that size just ran out"
 		// rather than the sentence it shows for a duplicate garment code.
 		return glerrors.Wrap(glerrors.KindConflict,
-			"there are not enough of "+line.ItemName()+" in size "+line.SizeLabel(),
+			"no quedan suficientes "+line.ItemName()+" en talla "+line.SizeLabel(),
 			domain.ErrInsufficientStock)
 	}
 	return r.appendMove(tx, stock.ID, line.ID(), "sell", -line.Qty(), note, actorUserID)
