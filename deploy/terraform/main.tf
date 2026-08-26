@@ -120,6 +120,18 @@ resource "google_cloud_run_v2_service_iam_member" "pubsub_push_comms_invoker" {
   member   = "serviceAccount:${google_service_account.pubsub_push.email}"
 }
 
+# The same identity, scoped separately, for the second push consumer: finance
+# wakes on StudentEnrolled to charge a pupil's inscription (M15). Two bindings
+# rather than one project-wide grant, so this identity can reach exactly the two
+# services that receive pushes and nothing else.
+resource "google_cloud_run_v2_service_iam_member" "pubsub_push_finance_invoker" {
+  project  = var.project_id
+  location = var.region
+  name     = module.finance.service_name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.pubsub_push.email}"
+}
+
 # REQUIRED for OIDC push: the Pub/Sub service agent (local.pubsub_sa, defined in
 # pubsub.tf) must be able to create tokens as the push SA. Without this binding
 # Pub/Sub cannot mint the OIDC token and every push delivery fails with a

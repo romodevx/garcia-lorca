@@ -565,6 +565,101 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
 
+  /api/v1/finance/tuition-plans:
+    get:
+      tags: [finance-tuition]
+      summary: The tuition table of a school year
+      description: >
+        What each level costs in the given cycle. A level with no row is not free —
+        it is unpriced, and the billing run reports it rather than charging zero.
+      operationId: listTuitionPlans
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: cycleId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The cycle's tuition table.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [plans]
+                properties:
+                  plans:
+                    type: array
+                    items: { $ref: '#/components/schemas/TuitionPlan' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+    put:
+      tags: [finance-tuition]
+      summary: Price one level of one school year
+      description: >
+        Replaces the table for a (cycle, level). A PUT because stating the price
+        twice must mean the same as stating it once: there is exactly one table
+        per level per cycle.
+      operationId: upsertTuitionPlan
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TuitionPlanInput' }
+      responses:
+        '200':
+          description: The stored table.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TuitionPlan' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
+  /api/v1/finance/billing-runs:
+    post:
+      tags: [finance-tuition]
+      summary: Generate the month's charges
+      description: >
+        Issues the tuition whose due date has arrived, the inscription of anybody
+        enrolled without one, and one fixed surcharge per completed overdue month.
+        IDEMPOTENT — every charge carries a reference unique per school — so this
+        may be called by a button and by a scheduler, and calling it twice in a
+        day charges nobody twice.
+      operationId: runBilling
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cycleId]
+              properties:
+                cycleId: { type: string, format: uuid }
+                asOfDate:
+                  type: string
+                  format: date
+                  description: >
+                    The date the run pretends it is, so a school can catch up a
+                    cycle it configured late. Empty means today.
+      responses:
+        '200':
+          description: What the run did.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingRun' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
 components:
   securitySchemes:
     sessionCookie:
@@ -627,6 +722,80 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    TuitionPlan:
+      type: object
+      description: What one level costs in one school year. Every amount is integer cents.
+      required: [id, cycleId, levelId, enrollmentCents, monthlyCents, months, firstBilledMonth, dueDay, lateFeeCents, active]
+      properties:
+        id: { type: string, format: uuid }
+        cycleId: { type: string, format: uuid }
+        levelId: { type: string, format: uuid }
+        enrollmentCents: { type: integer, format: int64, minimum: 0, example: 500000 }
+        monthlyCents: { type: integer, format: int64, minimum: 0, example: 320000 }
+        months:
+          type: integer
+          minimum: 1
+          maximum: 12
+          example: 10
+          description: How many monthly payments the year has.
+        firstBilledMonth:
+          type: integer
+          minimum: 1
+          maximum: 12
+          example: 9
+          description: Calendar month of the first payment. Ten from September is the common shape.
+        dueDay:
+          type: integer
+          minimum: 1
+          maximum: 28
+          example: 10
+          description: >
+            Day of the month a payment falls due. Capped at 28 so it exists in
+            February too — a limit on the 31st would be moved by the calendar,
+            silently, one month a year.
+        lateFeeCents:
+          type: integer
+          format: int64
+          minimum: 0
+          example: 15000
+          description: Fixed surcharge added once per completed overdue month. Zero disables it.
+        active: { type: boolean }
+
+    TuitionPlanInput:
+      type: object
+      required: [cycleId, levelId, monthlyCents, months, firstBilledMonth, dueDay]
+      properties:
+        cycleId: { type: string, format: uuid }
+        levelId: { type: string, format: uuid }
+        enrollmentCents: { type: integer, format: int64, minimum: 0 }
+        monthlyCents: { type: integer, format: int64, minimum: 0 }
+        months: { type: integer, minimum: 1, maximum: 12 }
+        firstBilledMonth: { type: integer, minimum: 1, maximum: 12 }
+        dueDay: { type: integer, minimum: 1, maximum: 28 }
+        lateFeeCents: { type: integer, format: int64, minimum: 0 }
+        active: { type: boolean }
+
+    BillingRun:
+      type: object
+      description: What a billing run did.
+      required: [tuitionCreated, enrollmentCreated, lateFeesCreated, skipped, levelsWithoutPlan]
+      properties:
+        tuitionCreated: { type: integer, example: 30 }
+        enrollmentCreated: { type: integer, example: 10 }
+        lateFeesCreated: { type: integer, example: 4 }
+        skipped:
+          type: integer
+          example: 6
+          description: >
+            Already existed. On a second run in the same day this is everything,
+            which is what idempotent looks like from the outside.
+        levelsWithoutPlan:
+          type: array
+          items: { type: string }
+          example: ["Kínder"]
+          description: >
+            Levels nobody has priced, by NAME. Reported rather than billed at
+            zero: a family charged nothing is a problem a school finds in June.
     Error:
       type: object
       required: [error]

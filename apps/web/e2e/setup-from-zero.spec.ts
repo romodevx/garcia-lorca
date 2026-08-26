@@ -187,6 +187,37 @@ test.describe.serial("setting up a school from zero", () => {
     await expect(page.getByText("Inscrito").first()).toBeVisible();
   });
 
+  /**
+   * The money the school actually lives on. Two things happen here that are worth
+   * watching on stage: a level with no table says so instead of showing zeros,
+   * and the run can be pressed twice without charging anybody twice.
+   */
+  test("3c · what the level costs, and the month's charges", async ({ page }) => {
+    await signIn(page);
+    await openModule(page, "Configuración");
+    await page.getByRole("button", { name: new RegExp(cycle) }).click();
+
+    // Price the level the pupil is enrolled in.
+    const row = page.getByRole("row").filter({ hasText: level });
+    await row.getByRole("button", { name: /Definir|Editar/ }).click();
+    const form = page.getByRole("form", { name: "Tabulador del nivel" });
+    await form.getByLabel("Inscripción").fill("5000");
+    await form.getByLabel("Colegiatura mensual").fill("3200");
+    await form.getByLabel("Recargo por mes vencido").fill("150");
+    await form.getByRole("button", { name: "Guardar tabulador" }).click();
+
+    await expect(page.getByRole("row").filter({ hasText: level })).toContainText("$3200.00");
+
+    // Run the month, then run it again. The second press is the demonstration:
+    // everything comes back as already existing.
+    await page.getByRole("button", { name: /Generar cargos del mes/ }).click();
+    const summary = page.getByRole("status");
+    await expect(summary).toBeVisible();
+
+    await page.getByRole("button", { name: /Generar cargos del mes/ }).click();
+    await expect(summary).toContainText(/Se generaron 0 colegiaturas/);
+  });
+
   test("4 · the uniform shop's catalogue", async ({ page }) => {
     await signIn(page);
     await openModule(page, "Uniformes");

@@ -49,6 +49,7 @@ type FinanceService struct {
 	students    ports.StudentReader
 	cycles      ports.CycleReader
 	enrollments ports.EnrollmentReader
+	catalog     ports.CatalogReader
 	publisher   ports.PaymentPublisher
 	tenantID    string
 	newID       func() string
@@ -64,6 +65,7 @@ func NewFinanceService(
 	students ports.StudentReader,
 	cycles ports.CycleReader,
 	enrollments ports.EnrollmentReader,
+	catalog ports.CatalogReader,
 	publisher ports.PaymentPublisher,
 	tenantID string,
 	newID func() string,
@@ -74,6 +76,7 @@ func NewFinanceService(
 		students:    students,
 		cycles:      cycles,
 		enrollments: enrollments,
+		catalog:     catalog,
 		publisher:   publisher,
 		tenantID:    tenantID,
 		newID:       newID,

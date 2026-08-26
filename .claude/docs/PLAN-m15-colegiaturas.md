@@ -148,7 +148,7 @@ cual están. Se quitan de `Catalog.tsx`. Sin cambio de backend.
 
 | Flag | Default | Qué apaga |
 |---|---|---|
-| `module_tuition` | OFF | El tabulador y la corrida. Con el flag apagado las rutas responden 404 en el gateway. |
+| ~~`module_tuition`~~ → **`module_finance`** | OFF | **Desviación del plan, decidida al construir.** El flag propio no tenía lector: para un colegio el tabulador, la corrida y el estado de cuenta son una sola cosa, y un módulo de finanzas con colegiaturas apagadas responde sobre cargos que nadie puede explicar. Las rutas viven en `/api/v1/finance/...` detrás de `module_finance` + `finance:read`/`finance:write`. |
 | `module_teachers` | OFF | El módulo Docentes. Configuración deja de mostrarlos igual. |
 
 Recordatorio ya aprendido: los flags viven en `ENABLED_MODULES` (env), no en la

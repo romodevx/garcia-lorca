@@ -45,6 +45,8 @@ var migrationFiles = []string{
 	"../../../../../migrations/finance/0001_init.sql",
 	"../../../../../migrations/finance/0002_payment_idempotency.sql",
 	"../../../../../migrations/finance/0003_charge_external_ref.sql",
+	"../../../../../migrations/finance/0004_concept_kind.sql",
+	"../../../../../migrations/finance/0005_tuition_plans.sql",
 }
 
 var (
@@ -552,6 +554,66 @@ func TestCreateChargesBulkIdempotent(t *testing.T) {
 	}
 	if again != 0 {
 		t.Errorf("second bulk created = %d, want 0 (re-running must be idempotent)", again)
+	}
+}
+
+// TestCreateChargesBulkIsIdempotentForREFERENCEDCharges is the case the older
+// test above does not reach, and the one the monthly billing run depends on
+// entirely.
+//
+// A charge with no external ref is deduplicated by (student, cycle, concept). A
+// charge WITH one is deduplicated by the ref instead — that is the whole point
+// of migration 0003, because a school year has ten tuition charges for the same
+// concept and the keyless index forbids the second.
+//
+// The bulk insert names its arbiter explicitly, so it named ONE of the two
+// partial indexes. Referenced charges therefore collided against the index that
+// was not the arbiter, and Postgres raised a duplicate-key error instead of
+// skipping: the second billing run of any month returned a 500 and generated
+// nothing. Found by running the thing twice against a real database.
+func TestCreateChargesBulkIsIdempotentForReferencedCharges(t *testing.T) {
+	ctx := context.Background()
+	const conceptID = "c0000000-0000-0000-0000-0000000000f7"
+	repo := appRepo(t, tenantA)
+	if _, err := repo.CreateConcept(ctx, newConcept(t, conceptID, tenantA, "bulk-referenced", 8000)); err != nil {
+		t.Fatalf("seed concept: %v", err)
+	}
+
+	// Two charges for the SAME student, cycle and concept — September's tuition
+	// and October's. Only the ref tells them apart, which is exactly the shape
+	// the billing run produces.
+	student := "50000000-0000-0000-0000-0000000000f7"
+	// The ids differ between attempts, exactly as they do in life: the billing
+	// run mints a fresh uuid every time it builds a charge, so the ONLY thing
+	// telling a re-run from a first run is the external ref.
+	build := func(idSuffix string) []domain.Charge {
+		var out []domain.Charge
+		for i, month := range []string{"2026-09", "2026-10"} {
+			c := newCharge(t, fmt.Sprintf("d0000000-0000-0000-0000-00000000%s%d", idSuffix, i+1),
+				tenantA, student, cycleBulk, conceptID, 8000, 0, today)
+			withRef, err := c.WithExternalRef("tuition:" + cycleBulk + ":" + student + ":" + month)
+			if err != nil {
+				t.Fatalf("external ref: %v", err)
+			}
+			out = append(out, withRef)
+		}
+		return out
+	}
+
+	created, err := repo.CreateChargesBulk(ctx, build("f7a"))
+	if err != nil {
+		t.Fatalf("first bulk: %v", err)
+	}
+	if created != 2 {
+		t.Fatalf("first bulk created = %d, want 2 — two months of the same concept", created)
+	}
+
+	again, err := repo.CreateChargesBulk(ctx, build("f7b"))
+	if err != nil {
+		t.Fatalf("second bulk must skip, not fail: %v", err)
+	}
+	if again != 0 {
+		t.Errorf("second bulk created = %d, want 0", again)
 	}
 }
 

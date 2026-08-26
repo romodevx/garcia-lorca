@@ -23,7 +23,7 @@ BEGIN;
 TRUNCATE
   uniform_sale_keys, uniform_stock_moves, uniform_order_lines, uniform_fulfillments,
   uniform_orders, uniform_stock, uniform_items, uniform_folio_counters, uniform_settings,
-  payments, charges, charge_concepts,
+  payments, charges, charge_concepts, tuition_plans,
   attendance,
   grade_entries,
   guardian_students, enrollments, students,

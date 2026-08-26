@@ -63,9 +63,15 @@ locals {
     IAM_BASE_URL    = module.iam.uri
   })
 
+  # finance became a CONSUMER as well as a publisher in M15: StudentEnrolled is
+  # what charges a pupil's inscription the moment they take a place in a group.
+  # Same push reasoning as comms — a scaled-to-zero instance cannot pull, so
+  # Pub/Sub POSTs instead and wakes it (see pubsub.tf student_events_finance).
   finance_env = merge(local.common_env, {
-    STUDENTS_BASE_URL = module.students.uri
-    CONFIG_BASE_URL   = module.config.uri
+    STUDENTS_BASE_URL    = module.students.uri
+    CONFIG_BASE_URL      = module.config.uri
+    PUBSUB_PUSH_MODE     = "true"
+    PUBSUB_PUSH_SA_EMAIL = google_service_account.pubsub_push.email
   })
 
   grades_env = merge(local.common_env, {

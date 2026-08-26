@@ -109,6 +109,7 @@ type fakeRepo struct {
 	concepts map[string]domain.ChargeConcept
 	charges  map[string]domain.Charge
 	payments map[string][]domain.Payment // keyed by charge id
+	plans    map[string]domain.TuitionPlan
 
 	// Recorded call arguments, for the tests that assert on the call itself.
 	overdueCycleID      string
@@ -122,6 +123,7 @@ func newFakeRepo() *fakeRepo {
 		concepts: map[string]domain.ChargeConcept{},
 		charges:  map[string]domain.Charge{},
 		payments: map[string][]domain.Payment{},
+		plans:    map[string]domain.TuitionPlan{},
 	}
 }
 
@@ -356,6 +358,7 @@ type fixture struct {
 	students    *fakeStudents
 	cycles      *fakeCycles
 	enrollments *fakeEnrollments
+	catalog     *fakeCatalog
 	publisher   *spyPublisher
 }
 
@@ -368,9 +371,10 @@ func newFixture(t *testing.T) *fixture {
 		students:    &fakeStudents{byID: map[string]ports.StudentRef{testStudent: {ID: testStudent, Status: "active"}}},
 		cycles:      &fakeCycles{byID: map[string]ports.CycleRef{testCycle: {ID: testCycle}}},
 		enrollments: &fakeEnrollments{byCycle: map[string][]ports.EnrollmentRef{}},
+		catalog:     &fakeCatalog{},
 		publisher:   &spyPublisher{},
 	}
-	f.svc = usecase.NewFinanceService(f.repo, f.students, f.cycles, f.enrollments, f.publisher,
+	f.svc = usecase.NewFinanceService(f.repo, f.students, f.cycles, f.enrollments, f.catalog, f.publisher,
 		testTenant, seqID("id"), func() time.Time { return fixedNow })
 	return f
 }
@@ -440,3 +444,73 @@ func requireNoError(t *testing.T, err error) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+// --- tuition doubles (M15) ---------------------------------------------------
+
+func (f *fakeRepo) EnsureConceptOfKind(_ context.Context, id, kind, name string) (domain.ChargeConcept, error) {
+	for _, c := range f.concepts {
+		if c.Kind() == kind {
+			return c, nil
+		}
+	}
+	recurrence := domain.RecurrenceOnce
+	if kind == domain.KindTuition {
+		recurrence = domain.RecurrenceMonthly
+	}
+	c, err := domain.NewChargeConcept(id, testTenant, name, 0, recurrence, true)
+	if err != nil {
+		return domain.ChargeConcept{}, err
+	}
+	c, err = c.WithKind(kind)
+	if err != nil {
+		return domain.ChargeConcept{}, err
+	}
+	f.concepts[c.ID()] = c
+	return c, nil
+}
+
+// conceptIDOfKind is a test convenience: which concept ended up being the school's
+// tuition, inscription or surcharge.
+func (f *fakeRepo) conceptIDOfKind(kind string) string {
+	for _, c := range f.concepts {
+		if c.Kind() == kind {
+			return c.ID()
+		}
+	}
+	return ""
+}
+
+func (f *fakeRepo) planKey(cycleID, levelID string) string { return cycleID + "|" + levelID }
+
+func (f *fakeRepo) UpsertTuitionPlan(_ context.Context, p domain.TuitionPlan) (domain.TuitionPlan, error) {
+	f.plans[f.planKey(p.CycleID(), p.LevelID())] = p
+	return p, nil
+}
+
+func (f *fakeRepo) ListTuitionPlans(_ context.Context, cycleID string) ([]domain.TuitionPlan, error) {
+	out := make([]domain.TuitionPlan, 0, len(f.plans))
+	for _, p := range f.plans {
+		if p.CycleID() == cycleID {
+			out = append(out, p)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].LevelID() < out[j].LevelID() })
+	return out, nil
+}
+
+// fakeCatalog stands in for the config service: the levels a school has, and
+// which level each group of a cycle belongs to.
+type fakeCatalog struct {
+	levels      []ports.LevelRef
+	groupLevels []ports.GroupLevel
+}
+
+func (f *fakeCatalog) ListLevels(_ context.Context) ([]ports.LevelRef, error) { return f.levels, nil }
+
+func (f *fakeCatalog) GroupLevels(_ context.Context, _ string) ([]ports.GroupLevel, error) {
+	return f.groupLevels, nil
+}
+
+// clearPlans hands back an empty tuition table, for the tests about a school that
+// has not priced a level.
+func clearPlans() map[string]domain.TuitionPlan { return map[string]domain.TuitionPlan{} }
