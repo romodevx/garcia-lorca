@@ -189,6 +189,24 @@ export function createStudent(baseURL: string, input: CreateStudentInput): Promi
 
 // --- enrollments ----------------------------------------------------------
 
+/** Where a pupil landed: the enrolment, plus the group capacity chose, by name. */
+export interface Placement {
+  enrollment: Enrollment;
+  groupName: string;
+}
+
+/**
+ * Places a pupil in a GRADE and lets the school's capacity choose the group.
+ *
+ * What a school knows when a child arrives is the level and the grade; which
+ * group they land in is a consequence of how full each one is. The form used to
+ * ask for "grado y grupo" as free text, so somebody typed "1° A" and nothing
+ * checked whether 1°A had a seat left.
+ */
+export function enrollIntoGrade(baseURL: string, studentId: string, gradeLevelId: string): Promise<Placement> {
+  return postJSON<Placement>(baseURL, "/enrollments/by-grade", { studentId, gradeLevelId });
+}
+
 /**
  * Places a student into a group. The body carries only the client-supplied edges
  * ({studentId, groupId}, plus termId when given) — cycleId is intentionally

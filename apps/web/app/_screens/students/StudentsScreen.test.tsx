@@ -6,14 +6,18 @@ import * as studentsApi from "../../students/api";
 import * as configApi from "../../config/api";
 import { StudentsScreen } from "./StudentsScreen";
 
-vi.mock("../../students/api", () => ({
+vi.mock("../../students/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof studentsApi>()),
   listStudents: vi.fn(),
   createStudent: vi.fn(),
   enroll: vi.fn(),
+  enrollIntoGrade: vi.fn(),
 }));
 vi.mock("../../config/api", () => ({
   listCycles: vi.fn(),
   listGroups: vi.fn(),
+  listLevels: vi.fn(),
+  listGradeLevels: vi.fn(),
 }));
 
 const students = vi.mocked(studentsApi);
@@ -34,6 +38,14 @@ beforeEach(() => {
   students.listStudents.mockResolvedValue([mk("1", "Valentina", "Cruz", "enrolled"), mk("2", "Mateo", "Sánchez", "pending")]);
   config.listCycles.mockResolvedValue([{ id: "c1", name: "2026-2027", status: "active", startsOn: "2026-08-01", endsOn: "2027-06-30" }]);
   config.listGroups.mockResolvedValue([]);
+  config.listLevels.mockResolvedValue([
+    { id: "lv-p", name: "Primaria", sepCode: "PRI", enrollmentGranularity: "cycle" },
+  ]);
+  config.listGradeLevels.mockResolvedValue([{ id: "gl-1", levelId: "lv-p", name: "1° Primaria", ordinal: 1 }]);
+  students.enrollIntoGrade.mockResolvedValue({
+    enrollment: { id: "e1", studentId: "9", cycleId: "c1", groupId: "grp-a", termId: "", status: "active", enrolledAt: "2026-08-31" },
+    groupName: "1° A",
+  });
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -106,15 +118,20 @@ describe("StudentsScreen", () => {
     await user.type(within(dialog).getByPlaceholderText("Ana Sofía"), "Nuevo");
     await user.type(within(dialog).getByPlaceholderText("Ruiz Márquez"), "Alumno");
     await user.type(within(dialog).getByPlaceholderText("Nombre del tutor"), "Tutor Nuevo");
+    await user.selectOptions(within(dialog).getByLabelText("Nivel"), "lv-p");
+    await user.selectOptions(await within(dialog).findByLabelText("Grado"), "gl-1");
     await user.click(within(dialog).getByRole("button", { name: "Crear alumno" }));
 
     await waitFor(() =>
+      // The level travels as the config level's NAME, and gradeGroup is empty:
+      // the server writes it when capacity chooses the group, so the record can
+      // never claim a group the pupil is not in.
       expect(students.createStudent).toHaveBeenCalledWith(expect.any(String), {
         curp: "HEGA050312MDFRNN08",
         firstName: "Nuevo",
         lastName: "Alumno",
-        level: "primaria",
-        gradeGroup: "1° A",
+        level: "Primaria",
+        gradeGroup: "",
         guardianName: "Tutor Nuevo",
       }),
     );

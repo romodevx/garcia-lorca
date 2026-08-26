@@ -118,6 +118,7 @@ func (h *StudentsHandler) Get(w http.ResponseWriter, r *http.Request) {
 // group so it can never drift.
 type EnrollmentService interface {
 	Enroll(ctx context.Context, studentID, groupID, termID string) (client.Enrollment, error)
+	EnrollIntoGrade(ctx context.Context, studentID, gradeLevelID string) (client.Placement, error)
 	ListEnrollments(ctx context.Context, studentID, cycleID, groupID string) ([]client.Enrollment, error)
 	GetEnrollment(ctx context.Context, id string) (client.Enrollment, error)
 	TransferStudent(ctx context.Context, enrollmentID, toGroupID, reason string) (client.Enrollment, error)
@@ -140,6 +141,11 @@ func NewEnrollmentsHandler(svc EnrollmentService) *EnrollmentsHandler {
 
 // enrollRequest carries the client-supplied edges. cycleId is intentionally
 // absent: the students service derives it from the group so it can never drift.
+type enrollIntoGradeRequest struct {
+	StudentID    string `json:"studentId"`
+	GradeLevelID string `json:"gradeLevelId"`
+}
+
 type enrollRequest struct {
 	StudentID string `json:"studentId"`
 	GroupID   string `json:"groupId"`
@@ -254,4 +260,36 @@ func (h *EnrollmentsHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, toEnrollmentResponse(res))
+}
+
+// EnrollIntoGrade: POST /api/v1/enrollments/by-grade
+//
+// The panel asks for a level and a grade — what a school actually knows when a
+// child arrives — and the group is chosen by whoever still has a seat. It used
+// to ask for "grado y grupo" as free text, so a secretary typed "1° A" and
+// nothing checked whether 1°A had room.
+func (h *EnrollmentsHandler) EnrollIntoGrade(w http.ResponseWriter, r *http.Request) {
+	var body enrollIntoGradeRequest
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	placed, err := h.svc.EnrollIntoGrade(r.Context(), body.StudentID, body.GradeLevelID)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	// Through the response type, not the client struct: the client's Enrollment
+	// carries no JSON tags, so returning it directly serialises Go field names
+	// (ID, StudentID) into an API that is camelCase everywhere else.
+	writeJSON(w, http.StatusCreated, placementResponse{
+		Enrollment: toEnrollmentResponse(placed.Enrollment),
+		GroupName:  placed.GroupName,
+	})
+}
+
+// placementResponse is where a pupil landed. GroupName is the field a person
+// reads — "quedó en 1° B" — and the reason the response is not just an enrolment.
+type placementResponse struct {
+	Enrollment enrollmentResponse `json:"enrollment"`
+	GroupName  string             `json:"groupName"`
 }

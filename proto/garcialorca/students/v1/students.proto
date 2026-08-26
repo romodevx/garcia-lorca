@@ -34,6 +34,12 @@ service StudentsService {
   // are validated by RPC against the config service. A duplicate enrollment for
   // the same (student, cycle) is an AlreadyExists error.
   rpc Enroll(EnrollRequest) returns (EnrollResponse);
+  // EnrollIntoGrade places a pupil in a GRADE and lets the school's own capacity
+  // choose the group: A until it is full, then B. What a school knows when a
+  // child arrives is the level and the grade; which group they land in is a
+  // consequence of how full each one is. Refuses when the grade has no groups,
+  // and when every seat is taken — opening another group is a decision.
+  rpc EnrollIntoGrade(EnrollIntoGradeRequest) returns (EnrollIntoGradeResponse);
 
   // GetEnrollment fetches a single enrollment by id.
   rpc GetEnrollment(GetEnrollmentRequest) returns (GetEnrollmentResponse);
@@ -161,6 +167,18 @@ message ChangeAdmissionStatusResponse {
 }
 
 // --- Domain events (published) --------------------------------------------
+
+message EnrollIntoGradeRequest {
+  string student_id = 1;
+  string grade_level_id = 2;
+}
+
+// EnrollIntoGradeResponse carries the enrolment plus the group capacity chose,
+// by NAME: the only reader is a person being told "quedó en 1° B".
+message EnrollIntoGradeResponse {
+  Enrollment enrollment = 1;
+  string group_name = 2;
+}
 
 // StudentEnrolled fires when a student is enrolled into a cycle.
 message StudentEnrolled {

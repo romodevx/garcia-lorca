@@ -155,3 +155,63 @@ func translateTransferWriteErr(err error) error {
 	}
 	return glerrors.Wrap(glerrors.KindInternal, "recording transfer", err)
 }
+
+// CreateEnrollmentInFirstFreeGroup places a pupil in the first group with a seat
+// left, deciding and writing inside ONE transaction.
+//
+// The lock is the point. Counting the occupancy and then inserting would be a
+// textbook race with a real cost: two secretaries enrolling at the same moment
+// would each read 24 of 25 seats taken in 1°A and each take the last one, and the
+// school would find out in September when twenty-six children turned up.
+//
+// It is a transaction-scoped ADVISORY lock keyed on the group, not a row lock,
+// because the row that would be locked lives in the config service's `groups`
+// table and this transaction cannot reach across a bounded context to take it.
+// Advisory locks need no row to exist and are released with the transaction, so
+// a caller that dies mid-placement releases it rather than wedging a group
+// forever. Two callers aiming at the same group serialise; the second sees the
+// first's pupil and moves on to 1°B.
+func (r *Repository) CreateEnrollmentInFirstFreeGroup(
+	ctx context.Context,
+	e domain.Enrollment,
+	groups []ports.GroupSeats,
+) (ports.GroupSeats, error) {
+	var chosen ports.GroupSeats
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		for _, group := range groups {
+			if group.Capacity <= 0 {
+				// A group with no seats declared is not "infinitely large"; it is
+				// a group nobody has sized yet, and guessing would be worse.
+				continue
+			}
+			if err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext(?))`, group.ID).Error; err != nil {
+				return glerrors.Wrap(glerrors.KindInternal, "reserving the group", err)
+			}
+
+			var taken int64
+			if err := tx.Model(&enrollmentModel{}).
+				Where("group_id = ? AND status = ?", group.ID, domain.EnrollmentStatusActive.String()).
+				Count(&taken).Error; err != nil {
+				return glerrors.Wrap(glerrors.KindInternal, "counting the group", err)
+			}
+			if taken >= int64(group.Capacity) {
+				continue
+			}
+
+			model := enrollmentFromDomain(e)
+			model.GroupID = group.ID
+			model.CycleID = group.CycleID
+			if err := tx.Create(&model).Error; err != nil {
+				return translateEnrollmentWriteErr(err)
+			}
+			chosen = group
+			return nil
+		}
+		return glerrors.New(glerrors.KindConflict,
+			"no quedan lugares en ese grado: abre otro grupo en Configuración")
+	})
+	if err != nil {
+		return ports.GroupSeats{}, err
+	}
+	return chosen, nil
+}

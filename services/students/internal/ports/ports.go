@@ -43,8 +43,14 @@ type EventPublisher interface {
 // GroupRef is the students-owned view of a config group. It is the minimum the
 // enroll knot needs: the group's identity and the cycle it derives from.
 type GroupRef struct {
-	ID           string
-	CycleID      string
+	ID      string
+	CycleID string
+	// Name is what the pupil's record says they are in ("1° A"). It travels with
+	// the reference so BOTH enrolment paths can write it: the one that takes a
+	// group and the one that takes a grade. Only one of them used to, which meant
+	// a record could keep whatever text somebody typed while the placement said
+	// something else.
+	Name         string
 	GradeLevelID string
 }
 
@@ -62,6 +68,22 @@ type TermRef struct {
 type CatalogValidator interface {
 	GroupByID(ctx context.Context, id string) (GroupRef, error)
 	TermByID(ctx context.Context, id string) (TermRef, error)
+	// GroupsOfGrade returns the ACTIVE cycle's groups for a grade, in the order a
+	// school fills them (A, then B, then C), each with the seats it holds.
+	//
+	// The cycle is resolved by config, not passed in: a caller choosing the year
+	// a child joins is a caller who can put them in the wrong one.
+	GroupsOfGrade(ctx context.Context, gradeLevelID string) ([]GroupSeats, error)
+}
+
+// GroupSeats is a group and how many pupils it may hold. Occupancy is NOT here:
+// who is enrolled is students' own data, and asking config for it would make two
+// services disagree about the same count.
+type GroupSeats struct {
+	ID       string
+	Name     string
+	CycleID  string
+	Capacity int
 }
 
 // EnrollmentRepository loads and persists enrollments and their transfer history.
@@ -71,6 +93,21 @@ type EnrollmentRepository interface {
 	// CreateEnrollment inserts a new enrollment. A duplicate (student, cycle) per
 	// tenant is KindConflict.
 	CreateEnrollment(ctx context.Context, e domain.Enrollment) error
+	// CreateEnrollmentInFirstFreeGroup places a pupil in the first of `groups`
+	// that still has room, and returns which one, ALL INSIDE ONE TRANSACTION.
+	//
+	// Choosing outside the transaction would be a race with a real cost: two
+	// secretaries enrolling at the same moment would each read 24 of 25 seats
+	// taken in 1°A and each take the last one. The adapter serialises per group
+	// so the second caller sees the first's pupil and moves on to 1°B.
+	//
+	// Every group full is glerrors.KindConflict — the school has to open another
+	// group, which is a decision, not something to do on its behalf.
+	CreateEnrollmentInFirstFreeGroup(
+		ctx context.Context,
+		e domain.Enrollment,
+		groups []GroupSeats,
+	) (chosen GroupSeats, err error)
 	// GetEnrollment returns an enrollment or KindNotFound.
 	GetEnrollment(ctx context.Context, id string) (domain.Enrollment, error)
 	// ListEnrollments returns enrollments matching the given filters; an empty

@@ -107,6 +107,9 @@ func (s *EnrollmentService) Enroll(ctx context.Context, studentID, groupID, term
 	if err := s.enrollments.CreateEnrollment(ctx, enrollment); err != nil {
 		return domain.Enrollment{}, err // KindConflict on duplicate propagates
 	}
+	// The record follows the placement here too. Both enrolment paths write it,
+	// so a pupil's file can never name a group they are not in.
+	student.PlaceIn(grp.Name)
 	if err := s.students.Update(ctx, student); err != nil {
 		return domain.Enrollment{}, err
 	}
@@ -227,4 +230,71 @@ func (s *EnrollmentService) GetEnrollment(ctx context.Context, id string) (domai
 // ListEnrollments returns enrollments matching the given filters ("" skips a filter).
 func (s *EnrollmentService) ListEnrollments(ctx context.Context, studentID, cycleID, groupID string) ([]domain.Enrollment, error) {
 	return s.enrollments.ListEnrollments(ctx, studentID, cycleID, groupID)
+}
+
+// Placement is where a pupil landed: the enrolment, and the group the school's
+// own capacity chose for them. The group's NAME travels with it because the only
+// reader is a person being told "quedó en 1° B".
+type Placement struct {
+	Enrollment domain.Enrollment
+	GroupID    string
+	GroupName  string
+}
+
+// EnrollIntoGrade places a pupil in a GRADE and lets capacity choose the group.
+//
+// What a school knows when a child arrives is the level and the grade. Which
+// group they land in is a consequence of how full each one is — the panel used
+// to ask for "grado y grupo" as free text, so a secretary typed "1° A" and
+// nothing checked whether 1°A had a seat left.
+//
+// The choosing happens inside the repository's transaction, not here. Reading the
+// occupancy and then writing would be a race with a real cost: two secretaries
+// enrolling at the same moment would each see 24 of 25 seats taken and each take
+// the last one.
+//
+// A grade with no groups and a grade with no seats are different problems and get
+// different sentences: one needs a group created, the other needs a decision
+// about opening one.
+func (s *EnrollmentService) EnrollIntoGrade(ctx context.Context, studentID, gradeLevelID string) (Placement, error) {
+	student, err := s.students.FindByID(ctx, studentID)
+	if err != nil {
+		return Placement{}, err
+	}
+
+	groups, err := s.catalog.GroupsOfGrade(ctx, gradeLevelID)
+	if err != nil {
+		return Placement{}, err
+	}
+	if len(groups) == 0 {
+		return Placement{}, glerrors.New(glerrors.KindInvalid,
+			"ese grado no tiene ningún grupo: créalo en Configuración antes de inscribir")
+	}
+
+	// The file moves first, for the same reason as in Enroll: a terminal file
+	// must refuse the placement rather than quietly acquire one.
+	changes, err := admitAndEnroll(student, groups[0].CycleID)
+	if err != nil {
+		return Placement{}, err
+	}
+
+	draft, err := domain.NewEnrollment(s.newID(), s.tenant, student.ID(), groups[0].CycleID,
+		groups[0].ID, "", domain.EnrollmentStatusActive, s.now())
+	if err != nil {
+		return Placement{}, err
+	}
+	chosen, err := s.enrollments.CreateEnrollmentInFirstFreeGroup(ctx, draft, groups)
+	if err != nil {
+		return Placement{}, err
+	}
+	// The record follows the placement. Saved in the SAME Update as the admission
+	// change, so a pupil can never be enrolled with a stale group on their file.
+	student.PlaceIn(chosen.Name)
+	if err := s.students.Update(ctx, student); err != nil {
+		return Placement{}, err
+	}
+
+	s.publishAdmissionChanges(ctx, changes)
+	s.publishEnrolled(ctx, student, chosen.CycleID)
+	return Placement{Enrollment: draft, GroupID: chosen.ID, GroupName: chosen.Name}, nil
 }

@@ -13,6 +13,7 @@ package configclient
 import (
 	"context"
 	"net/http"
+	"sort"
 
 	connect "connectrpc.com/connect"
 
@@ -54,6 +55,7 @@ func (c *Client) GroupByID(ctx context.Context, id string) (ports.GroupRef, erro
 	return ports.GroupRef{
 		ID:           g.GetId(),
 		CycleID:      g.GetCycleId(),
+		Name:         g.GetName(),
 		GradeLevelID: g.GetGradeLevelId(),
 	}, nil
 }
@@ -81,4 +83,46 @@ func mapCatalogErr(err error, what string) error {
 		return glerrors.ErrNotFound
 	}
 	return glerrors.Wrap(glerrors.KindInternal, "config "+what+" lookup failed", err)
+}
+
+// GroupsOfGrade returns the ACTIVE cycle's groups for a grade, in the order a
+// school fills them, each with the seats it holds.
+//
+// The cycle is resolved HERE rather than taken from the caller: a caller that
+// chose the school year a child joins is a caller that can put them in the wrong
+// one, and the answer is never in doubt — a school has exactly one live year.
+func (c *Client) GroupsOfGrade(ctx context.Context, gradeLevelID string) ([]ports.GroupSeats, error) {
+	cycles, err := c.rpc.ListCycles(ctx, connect.NewRequest(&configv1.ListCyclesRequest{}))
+	if err != nil {
+		return nil, mapCatalogErr(err, "cycles")
+	}
+	var activeID string
+	for _, cyc := range cycles.Msg.GetCycles() {
+		if cyc.GetStatus() == configv1.CycleStatus_CYCLE_STATUS_ACTIVE {
+			activeID = cyc.GetId()
+			break
+		}
+	}
+	if activeID == "" {
+		return nil, glerrors.New(glerrors.KindInvalid,
+			"no hay un ciclo escolar activo: actívalo en Configuración antes de inscribir")
+	}
+
+	res, err := c.rpc.ListGroups(ctx, connect.NewRequest(&configv1.ListGroupsRequest{
+		CycleId:      activeID,
+		GradeLevelId: gradeLevelID,
+	}))
+	if err != nil {
+		return nil, mapCatalogErr(err, "groups")
+	}
+	out := make([]ports.GroupSeats, 0, len(res.Msg.GetGroups()))
+	for _, g := range res.Msg.GetGroups() {
+		out = append(out, ports.GroupSeats{
+			ID: g.GetId(), Name: g.GetName(), CycleID: g.GetCycleId(), Capacity: int(g.GetCapacity()),
+		})
+	}
+	// A school fills A, then B, then C. Config returns whatever order the query
+	// gave, so the fill order is stated here rather than assumed.
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
 }

@@ -617,6 +617,49 @@ func TestCreateChargesBulkIsIdempotentForReferencedCharges(t *testing.T) {
 	}
 }
 
+// TestCreateChargesBulkWithASingleReferencedCharge is the case the two-row test
+// above does not reach, and the one the panel actually hits.
+//
+// GORM renders a one-row insert differently from a batch, and the ON CONFLICT
+// predicate came out as a bind parameter rather than a literal. Postgres cannot
+// prove a parameterised predicate implies a partial index's, so it answered
+// "there is no unique or exclusion constraint matching the ON CONFLICT
+// specification" — and every billing run of a school with ONE pupil failed,
+// which is exactly the shape of a demo.
+func TestCreateChargesBulkWithASingleReferencedCharge(t *testing.T) {
+	ctx := context.Background()
+	const conceptID = "c0000000-0000-0000-0000-0000000000f8"
+	repo := appRepo(t, tenantA)
+	if _, err := repo.CreateConcept(ctx, newConcept(t, conceptID, tenantA, "single-referenced", 8000)); err != nil {
+		t.Fatalf("seed concept: %v", err)
+	}
+	student := "50000000-0000-0000-0000-0000000000f8"
+	one := func(id string) []domain.Charge {
+		c := newCharge(t, id, tenantA, student, cycleBulk, conceptID, 8000, 0, today)
+		withRef, err := c.WithExternalRef("enrollment:" + cycleBulk + ":" + student)
+		if err != nil {
+			t.Fatalf("external ref: %v", err)
+		}
+		return []domain.Charge{withRef}
+	}
+
+	created, err := repo.CreateChargesBulk(ctx, one("d0000000-0000-0000-0000-0000000000f8"))
+	if err != nil {
+		t.Fatalf("single referenced charge: %v", err)
+	}
+	if created != 1 {
+		t.Fatalf("created = %d, want 1", created)
+	}
+
+	again, err := repo.CreateChargesBulk(ctx, one("d0000000-0000-0000-0000-0000000000f9"))
+	if err != nil {
+		t.Fatalf("re-running must skip, not fail: %v", err)
+	}
+	if again != 0 {
+		t.Errorf("created = %d, want 0", again)
+	}
+}
+
 // TestGetAccountBalanceMath proves the statement's arithmetic: each charge comes
 // back with its own collected total (resolved in one grouped query), and what is
 // still owed is Effective() - PaidCents.
