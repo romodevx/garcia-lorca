@@ -43,9 +43,25 @@ export default defineConfig({
     actionTimeout: 10_000,
   },
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    // The from-zero suite and the guardrails. They own the database: global setup
+    // empties it, so they never see the demo's data and the demo never sees
+    // theirs.
+    {
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"] },
+      testIgnore: [/.*\.mobile\.spec\.ts/, /demo-data\.spec\.ts/],
+    },
     // The storeroom is worked from a phone, standing between the shelves, so the
     // narrow layout is a real surface and gets a real run.
     { name: "mobile", use: { ...devices["Pixel 7"] }, testMatch: /.*\.mobile\.spec\.ts/ },
+    // READ-ONLY, and run against a SEEDED database rather than an empty one. It
+    // is the check you want an hour before a demo: not "can the system be built
+    // from nothing" but "does the school we are about to show actually render".
+    // It creates nothing, so it can run immediately before walking on stage.
+    {
+      name: "demo",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: /demo-data\.spec\.ts/,
+    },
   ],
 });

@@ -18,6 +18,8 @@ export default function globalSetup(): void {
   if (!/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(api)) {
     throw new Error(`refusing to reset a non-local database: API_URL=${api}`);
   }
+  // The demo project reads a SEEDED database and must never wipe it. Anything
+  // that sets this is saying "the data in there is the point".
   if (process.env.E2E_SKIP_RESET === "1") return;
 
   const repoRoot = path.resolve(__dirname, "../../..");
