@@ -2,8 +2,8 @@
 
 import { useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
-import type { CreateTeacherInput, Teacher } from "../../config/api";
-import { EmptyHint, ErrorAlert, Section, TextField } from "./parts";
+import type { CreateTeacherInput, Teacher } from "../../teachers/api";
+import { EmptyHint, ErrorAlert, Section, TextField } from "../config/parts";
 
 export interface TeachersPanelProps {
   teachers: readonly Teacher[];

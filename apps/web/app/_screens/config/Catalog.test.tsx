@@ -21,10 +21,6 @@ vi.mock("../../config/api", () => ({
   createGroup: vi.fn(),
   listTerms: vi.fn(),
   createTerm: vi.fn(),
-  listTeachers: vi.fn(),
-  createTeacher: vi.fn(),
-  listTeachingAssignments: vi.fn(),
-  createTeachingAssignment: vi.fn(),
 }));
 
 const mocked = vi.mocked(api);
@@ -36,8 +32,6 @@ beforeEach(() => {
   mocked.listSubjects.mockResolvedValue([]);
   mocked.listGroups.mockResolvedValue([]);
   mocked.listTerms.mockResolvedValue([]);
-  mocked.listTeachers.mockResolvedValue([]);
-  mocked.listTeachingAssignments.mockResolvedValue([]);
 });
 
 afterEach(() => vi.clearAllMocks());
@@ -122,87 +116,5 @@ describe("Catalog — nested level → grade level", () => {
         ordinal: 1,
       }),
     );
-  });
-});
-
-describe("Catalog — teachers", () => {
-  it("creates a teacher with first/last name + email (userId is never sent)", async () => {
-    const user = userEvent.setup();
-    mocked.createTeacher.mockResolvedValue({
-      id: "tch1",
-      firstName: "Ada",
-      lastName: "Lovelace",
-      email: "ada@example.com",
-      userId: "",
-    });
-
-    render(<Catalog onBack={() => {}} />);
-
-    const form = await screen.findByRole("form", { name: "Agregar profesor" });
-    await user.type(within(form).getByLabelText("Nombre"), "Ada");
-    await user.type(within(form).getByLabelText("Apellidos"), "Lovelace");
-    await user.type(within(form).getByLabelText("Correo"), "ada@example.com");
-    await user.click(within(form).getByRole("button", { name: "Crear profesor" }));
-
-    await waitFor(() =>
-      expect(mocked.createTeacher).toHaveBeenCalledWith(expect.any(String), {
-        firstName: "Ada",
-        lastName: "Lovelace",
-        email: "ada@example.com",
-      }),
-    );
-    // The new teacher appears in the roster.
-    expect(await screen.findByText(/Ada Lovelace/)).toBeInTheDocument();
-  });
-});
-
-describe("Catalog — teaching assignments (the knot)", () => {
-  it("scopes the subject dropdown to the selected group's grade level and assigns without cycleId", async () => {
-    const user = userEvent.setup();
-    mocked.listCycles.mockResolvedValue([
-      { id: "c1", name: "2026-2027", status: "active", startsOn: "2026-08-01", endsOn: "2027-06-30" },
-    ]);
-    mocked.listTeachers.mockResolvedValue([
-      { id: "tch1", firstName: "Ada", lastName: "Lovelace", email: "ada@example.com", userId: "" },
-    ]);
-    // The active cycle auto-loads its groups; the group carries gradeLevelId "g1".
-    mocked.listGroups.mockResolvedValue([{ id: "grp1", cycleId: "c1", gradeLevelId: "g1", name: "A", capacity: 30 }]);
-    // Subjects are fetched for the GROUP's grade level, not a navigation choice.
-    mocked.listSubjects.mockResolvedValue([{ id: "s1", gradeLevelId: "g1", name: "Matemáticas" }]);
-    mocked.createTeachingAssignment.mockResolvedValue({
-      id: "ta1",
-      cycleId: "c1",
-      groupId: "grp1",
-      subjectId: "s1",
-      teacherId: "tch1",
-    });
-
-    render(<Catalog onBack={() => {}} />);
-
-    const form = await screen.findByRole("form", { name: "Asignar profesor" });
-    // Cycle auto-selected → groups loaded for that cycle.
-    await waitFor(() => expect(mocked.listGroups).toHaveBeenCalledWith(expect.any(String), "c1"));
-
-    await user.selectOptions(within(form).getByLabelText("Grupo"), "grp1");
-
-    // The subject list is scoped to the GROUP's grade level (g1), never a global list.
-    await waitFor(() => expect(mocked.listSubjects).toHaveBeenCalledWith(expect.any(String), "g1"));
-    const subjectSelect = within(form).getByLabelText("Materia");
-    expect(await within(subjectSelect).findByRole("option", { name: "Matemáticas" })).toBeInTheDocument();
-
-    await user.selectOptions(subjectSelect, "s1");
-    await user.selectOptions(within(form).getByLabelText("Profesor"), "tch1");
-    await user.click(within(form).getByRole("button", { name: "Asignar profesor" }));
-
-    await waitFor(() =>
-      expect(mocked.createTeachingAssignment).toHaveBeenCalledWith(expect.any(String), {
-        groupId: "grp1",
-        subjectId: "s1",
-        teacherId: "tch1",
-      }),
-    );
-    // cycleId must never be part of the create payload — the server derives it.
-    const payload = mocked.createTeachingAssignment.mock.calls[0]?.[1];
-    expect(payload).not.toHaveProperty("cycleId");
   });
 });

@@ -18,7 +18,7 @@
  * creation and never returned or logged.
  */
 
-import type { Teacher } from "../config/api";
+import type { Teacher } from "../teachers/api";
 
 // --- entity types (match the gateway JSON contract) -----------------------
 

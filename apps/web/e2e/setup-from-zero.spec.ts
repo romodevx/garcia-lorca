@@ -30,7 +30,7 @@ test.describe.serial("setting up a school from zero", () => {
   const garmentCode = `SUE-${tag.toUpperCase()}`;
 
   test("the director signs in", async ({ page }) => {
-    await signIn(page);
+    await signIn(page, true);
     await expect(page.getByRole("heading", { level: 1, name: /🌱/ })).toBeVisible();
   });
 
@@ -104,6 +104,39 @@ test.describe.serial("setting up a school from zero", () => {
     await page.getByLabel("Nombre de la materia").fill(subject);
     await page.getByRole("button", { name: "Crear materia" }).click();
     await expect(page.getByText(subject, { exact: false }).first()).toBeVisible();
+  });
+
+  /**
+   * Docentes is its own module now, not the bottom half of Configuración. The
+   * demo walks it as a separate stop for that reason — and because a school
+   * hires its staff before it enrols anybody.
+   */
+  test("2b · the first teacher, and what they teach", async ({ page }) => {
+    await signIn(page);
+    await openModule(page, "Docentes");
+
+    const roster = page.getByRole("form", { name: "Agregar profesor" });
+    await roster.getByLabel("Nombre").fill("Gabriela");
+    await roster.getByLabel("Apellidos").fill(`Rojas ${tag}`);
+    await roster.getByLabel("Correo").fill(`gabriela.${tag}@garcialorca.edu.mx`);
+    await roster.getByRole("button", { name: "Crear profesor" }).click();
+
+    await expect(page.getByRole("list").getByText(`Rojas ${tag}`)).toBeVisible();
+
+    // The assignment is the knot: (grupo, materia, profesor). The cycle is
+    // derived server-side from the group, which is why it is never sent.
+    const assign = page.getByRole("form", { name: "Asignar profesor" });
+    await assign.getByRole("combobox", { name: "Ciclo" }).selectOption({ label: cycle });
+    await assign.getByRole("combobox", { name: "Grupo" }).selectOption({ label: group });
+    await assign.getByRole("combobox", { name: "Materia" }).selectOption({ label: subject });
+    await assign.getByRole("combobox", { name: "Profesor" }).selectOption({ label: `Gabriela Rojas ${tag}` });
+    await assign.getByRole("button", { name: "Asignar profesor" }).click();
+
+    // The assignment list, not the dropdown that also carries the subject name:
+    // what is being asserted is that the knot was tied, not that an option exists.
+    await expect(
+      page.getByRole("listitem").filter({ hasText: subject }).filter({ hasText: `Rojas ${tag}` }),
+    ).toBeVisible();
   });
 
   test("3 · the first pupil", async ({ page }) => {

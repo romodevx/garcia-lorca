@@ -15,6 +15,7 @@ export type FlagKey =
   | "module_docs"
   | "module_comms"
   | "module_billing"
+  | "module_teachers"
   | "module_uniforms"
   | "module_reports";
 

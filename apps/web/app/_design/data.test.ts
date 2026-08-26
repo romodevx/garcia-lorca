@@ -102,6 +102,32 @@ describe("Uniformes module", () => {
   });
 });
 
+describe("Docentes is a module, not a panel inside Configuración", () => {
+  const teachers = (): ModuleDef => {
+    const m = MODULES.find((x) => x.id === "teachers");
+    if (m === undefined) throw new Error("the teachers module is missing from MODULES");
+    return m;
+  };
+
+  it("gates on its own flag and its own permission", () => {
+    // Not module_config and not config:read: the whole point of the move is that
+    // a school can hand somebody the staff roster without handing them the
+    // cycles, levels, grades and groups as well.
+    expect(teachers().flag).toBe("module_teachers");
+    const names = typeof teachers().perm === "string" ? [teachers().perm] : teachers().perm;
+    expect(names).toContain("teachers:read");
+    expect(names).not.toContain("config:read");
+  });
+
+  it("is visible to a teachers:read holder who cannot read the catalogue", () => {
+    expect(isModuleVisible(teachers(), ["teachers:read"])).toBe(true);
+  });
+
+  it("stays hidden from a config-only holder", () => {
+    expect(isModuleVisible(teachers(), ["config:read", "config:write"])).toBe(false);
+  });
+});
+
 /**
  * The wider version of the same bug: any tile gated on a permission the system
  * never grants is a module nobody can reach. The deactivated ones are excluded
@@ -122,6 +148,7 @@ describe("every live module's permission is one somebody can hold", () => {
     "family:read",
     "uniforms:stock", "uniforms:orders", "uniforms:write",
     "uniforms_own:read", "uniforms_own:write",
+    "teachers:read", "teachers:write",
   ]);
   // These carry a permission nobody is granted ON PURPOSE, so the tile hides
   // itself until the module exists.

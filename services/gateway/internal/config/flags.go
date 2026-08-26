@@ -17,6 +17,7 @@ var AllModuleFlags = []string{
 	featureflag.Key("gateway"),
 	featureflag.Key("students"),
 	featureflag.Key("config"),
+	featureflag.Key("teachers"),
 	featureflag.Key("finance"),
 	featureflag.Key("attendance"),
 	featureflag.Key("grades"),

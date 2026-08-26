@@ -1,4 +1,4 @@
-import { expect, type Page, type APIRequestContext } from "@playwright/test";
+import { expect, type APIRequestContext, type BrowserContext, type Page } from "@playwright/test";
 
 /**
  * Shared moves for the end-to-end suite.
@@ -37,7 +37,28 @@ export function uniqueSuffix(): string {
  * It uses the UI rather than seeding a cookie because logging in is itself part
  * of the demo, and a suite that skips it would not notice the day it breaks.
  */
-export async function signIn(page: Page): Promise<void> {
+/**
+ * Puts the director in front of the dashboard.
+ *
+ * The session is minted ONCE and replayed as cookies for every test after that.
+ * Signing in per test is what a suite naturally does and what this one used to
+ * do — and at 23 tests it drained the login throttle (burst 10, refilling one
+ * every two seconds) and failed a late test for a reason that had nothing to do
+ * with what that test was checking. Replaying is also closer to the truth: a
+ * director signs in in the morning, not before every click.
+ *
+ * `forceLogin` skips the cache for the one test whose subject IS the login form.
+ */
+let cachedCookies: Awaited<ReturnType<BrowserContext["cookies"]>> | null = null;
+
+export async function signIn(page: Page, forceLogin = false): Promise<void> {
+  if (!forceLogin && cachedCookies !== null) {
+    await page.context().addCookies(cachedCookies);
+    await page.goto("/");
+    await expect(page.getByRole("heading", { level: 1, name: /🌱/ })).toBeVisible({ timeout: 20_000 });
+    return;
+  }
+
   await page.goto("/");
   // By ROLE, not by label: "Contraseña" also matches the show-password button,
   // and a selector that resolves to two elements fails on the strictness rather
@@ -49,6 +70,8 @@ export async function signIn(page: Page): Promise<void> {
   // The greeting is the proof. Waiting for "an h1" would have passed on the
   // LOGIN page, which has one of its own — a green test that never signed in.
   await expect(page.getByRole("heading", { level: 1, name: /🌱/ })).toBeVisible({ timeout: 20_000 });
+
+  cachedCookies = await page.context().cookies();
 }
 
 /** Opens a module from the dashboard, by the name a person reads. */

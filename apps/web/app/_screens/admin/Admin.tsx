@@ -16,7 +16,7 @@ import {
   type CreateUserInput,
   type Role,
 } from "../../admin/api";
-import { listTeachers, type Teacher } from "../../config/api";
+import { listTeachers, type Teacher } from "../../teachers/api";
 import { RolesPanel } from "./RolesPanel";
 import { TeacherLinkPanel } from "./TeacherLinkPanel";
 import { UsersPanel } from "./UsersPanel";

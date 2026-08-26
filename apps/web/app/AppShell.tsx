@@ -7,6 +7,7 @@ import { TopBar } from "./_design/TopBar";
 import { MODULES, USERS, type ModuleDef, type Role, type UserProfile } from "./_design/data";
 import { Dashboard } from "./_screens/Dashboard";
 import { AttendanceScreen } from "./_screens/attendance/AttendanceScreen";
+import { TeachersScreen } from "./_screens/teachers/TeachersScreen";
 import { UniformsScreen } from "./_screens/uniforms/UniformsScreen";
 import { FinanceScreen } from "./_screens/finance/FinanceScreen";
 import { Catalog } from "./_screens/config/Catalog";
@@ -28,6 +29,7 @@ type View =
   | { screen: "students" }
   | { screen: "grades" }
   | { screen: "attendance" }
+  | { screen: "teachers" }
   | { screen: "uniforms" }
   | { screen: "admin" }
   | { screen: "module"; moduleId: string };
@@ -105,6 +107,7 @@ export function AppShell(): ReactElement {
   // The admin surface (users/roles/teacher-link) is gated by module_iam (UX-only;
   // the gateway is the boundary). The "admin" module (Administración) opens it.
   const adminEnabled = useFlag("module_iam");
+  const teachersEnabled = useFlag("module_teachers");
   const uniformsEnabled = useFlag("module_uniforms");
 
   // Restore the session on boot: the auth cookies are HttpOnly (unreadable by
@@ -220,6 +223,10 @@ export function AppShell(): ReactElement {
       setView({ screen: "attendance" });
       return;
     }
+    if (id === "teachers") {
+      setView({ screen: "teachers" });
+      return;
+    }
     if (id === "uniforms") {
       setView({ screen: "uniforms" });
       return;
@@ -299,6 +306,14 @@ export function AppShell(): ReactElement {
           // Flag OFF: never render the pass list; show the friendly stub so
           // navigation never dead-ends. (Backend 404 is authoritative.)
           <ModulePlaceholder m={MODULES.find((m) => m.id === "attendance") as ModuleDef} onBack={home} />
+        ))}
+      {view.screen === "teachers" &&
+        (teachersEnabled ? (
+          <TeachersScreen onBack={home} />
+        ) : (
+          // Flag OFF: never render the roster; show the friendly stub so
+          // navigation never dead-ends. (Backend 404 is authoritative.)
+          <ModulePlaceholder m={MODULES.find((m) => m.id === "teachers") as ModuleDef} onBack={home} />
         ))}
       {view.screen === "uniforms" &&
         (uniformsEnabled ? (

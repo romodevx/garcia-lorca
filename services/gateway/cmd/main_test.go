@@ -49,10 +49,15 @@ type stubIAM struct {
 
 func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.ValidateTokenRequest]) (*connect.Response[iamv1.ValidateTokenResponse], error) {
 	perms := map[string][]string{
-		"with-perm":        {"students:create"},
-		"no-perm":          {"students:read"},
-		"config-writer":    {"config:write", "config:read"},
-		"config-reader":    {"config:read"},
+		"with-perm":     {"students:create"},
+		"no-perm":       {"students:read"},
+		"config-writer": {"config:write", "config:read"},
+		"config-reader": {"config:read"},
+		// M13: the staff roster left Configuración, so it answers to its own
+		// permission. A config holder must NOT reach it any more — that split is
+		// the whole point of the move.
+		"teachers-writer":  {"teachers:write", "teachers:read"},
+		"teachers-reader":  {"teachers:read"},
 		"student-enroller": {"students:enroll"},
 		"student-reader":   {"students:read"},
 		"grades-writer":    {"grades:write", "grades:read"},
@@ -784,50 +789,87 @@ func TestConfigReadDisabledModuleIs404(t *testing.T) {
 	}
 }
 
-// The teachers + teaching-assignments routes reuse the exact configWrite/
-// configRead helpers, so the whole guard chain (flag → auth → permission) must
-// apply to them identically. These assert that boundary on the new routes.
+// --- teachers routes: ModuleGuard(teachers) → RequireAuth → RequirePermission
+//
+// M13 moved the staff roster out of Configuración into a module of its own, so
+// the whole guard chain moved with it: the flag is module_teachers and the
+// permission is teachers:read/teachers:write. The last test here is the one that
+// gives the move its meaning — a config holder no longer reaches the roster.
 
 const validAssignmentBody = `{"groupId":"grp-1","subjectId":"sub-1","teacherId":"tch-1"}`
+const validTeacherBody = `{"firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`
 
-func TestTeachingAssignmentDisabledModuleIs404(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{}) // module_config OFF
-	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teaching-assignments", "config-writer", validAssignmentBody)
+func TestTeachersRouteDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_teachers OFF
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teachers", "teachers-reader", "")
 	if res.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", res.StatusCode)
 	}
 }
 
-func TestTeachingAssignmentWriteNoTokenIs401(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_config": true})
-	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teaching-assignments", "", validAssignmentBody)
+func TestTeachersWriteNoTokenIs401(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_teachers": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teachers", "", validTeacherBody)
 	if res.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", res.StatusCode)
 	}
 }
 
+func TestTeachersWriteReadOnlyPermissionIs403(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_teachers": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teachers", "teachers-reader", validTeacherBody)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", res.StatusCode)
+	}
+}
+
+func TestTeachersWriteWithPermissionCreates201(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_teachers": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teachers", "teachers-writer", validTeacherBody)
+	if res.StatusCode != http.StatusCreated {
+		t.Errorf("status = %d, want 201", res.StatusCode)
+	}
+}
+
+func TestTeachersReadWithPermissionLists200(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_teachers": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/teachers", "teachers-reader", "")
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", res.StatusCode)
+	}
+}
+
+func TestTeachingAssignmentDisabledModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{}) // module_teachers OFF
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teaching-assignments", "teachers-writer", validAssignmentBody)
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
 func TestTeachingAssignmentWriteReadOnlyPermissionIs403(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_config": true})
-	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teaching-assignments", "config-reader", validAssignmentBody)
+	gw := newTestGateway(t, map[string]bool{"module_teachers": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teaching-assignments", "teachers-reader", validAssignmentBody)
 	if res.StatusCode != http.StatusForbidden {
 		t.Errorf("status = %d, want 403", res.StatusCode)
 	}
 }
 
 func TestTeachingAssignmentWriteWithPermissionCreates201(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_config": true})
-	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teaching-assignments", "config-writer", validAssignmentBody)
+	gw := newTestGateway(t, map[string]bool{"module_teachers": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teaching-assignments", "teachers-writer", validAssignmentBody)
 	if res.StatusCode != http.StatusCreated {
 		t.Errorf("status = %d, want 201", res.StatusCode)
 	}
 }
 
-func TestTeacherWriteWithPermissionCreates201(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_config": true})
-	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teachers", "config-writer",
-		`{"firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`)
-	if res.StatusCode != http.StatusCreated {
-		t.Errorf("status = %d, want 201", res.StatusCode)
+// The move only means something if the old key stops working. A holder of
+// config:write ran the staff roster yesterday; today it must not.
+func TestConfigPermissionNoLongerReachesTheStaffRoster(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_teachers": true, "module_config": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teachers", "config-writer", validTeacherBody)
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 — config:write must not open the roster", res.StatusCode)
 	}
 }
 
@@ -1117,33 +1159,33 @@ func TestUsersWriteWithRolesPermissionIs403(t *testing.T) {
 // handler validates the iam user (GetUser) before the config write, so a bogus
 // user id maps to 404 and no link is stored.
 
-func TestTeacherLinkDisabledConfigModuleIs404(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_iam": true}) // module_config OFF
-	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teachers/tch-1/user", "config-writer", `{"userId":"usr-1"}`)
+func TestTeacherLinkDisabledTeachersModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_iam": true}) // module_teachers OFF
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teachers/tch-1/user", "teachers-writer", `{"userId":"usr-1"}`)
 	if res.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", res.StatusCode)
 	}
 }
 
 func TestTeacherLinkNoTokenIs401(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_config": true})
-	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teachers/tch-1/user", "", `{"userId":"usr-1"}`)
+	gw := newTestGateway(t, map[string]bool{"module_teachers": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teachers/tch-1/user", "", `{"userId":"usr-1"}`)
 	if res.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", res.StatusCode)
 	}
 }
 
 func TestTeacherLinkReadOnlyPermissionIs403(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_config": true})
-	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teachers/tch-1/user", "config-reader", `{"userId":"usr-1"}`)
+	gw := newTestGateway(t, map[string]bool{"module_teachers": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teachers/tch-1/user", "teachers-reader", `{"userId":"usr-1"}`)
 	if res.StatusCode != http.StatusForbidden {
 		t.Errorf("status = %d, want 403", res.StatusCode)
 	}
 }
 
 func TestTeacherLinkWithPermission200(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_config": true})
-	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teachers/tch-1/user", "config-writer", `{"userId":"usr-1"}`)
+	gw := newTestGateway(t, map[string]bool{"module_teachers": true})
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teachers/tch-1/user", "teachers-writer", `{"userId":"usr-1"}`)
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200", res.StatusCode)
 	}
@@ -1153,7 +1195,7 @@ func TestTeacherLinkWithPermission200(t *testing.T) {
 // config write: iam GetUser NotFound ⇒ 404.
 func TestTeacherLinkBogusUserIs404(t *testing.T) {
 	gw := newTestGateway(t, map[string]bool{"module_config": true})
-	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/teachers/tch-1/user", "config-writer", `{"userId":"ghost"}`)
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/teachers/tch-1/user", "teachers-writer", `{"userId":"ghost"}`)
 	if res.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", res.StatusCode)
 	}
