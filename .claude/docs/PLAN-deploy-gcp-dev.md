@@ -217,86 +217,92 @@ conectar por TLS público.
 
 ---
 
-## 4. Runbook de ejecución
+## 4. Runbook de ejecución  *(CORREGIDO por las Fases 1 y 3 — esta es la versión autoritativa)*
 
-### Fase A — Cerrar bloqueadores en el repo (todo en `dev`, TDD donde aplique)
+> Cambios respecto al primer borrador, todos por hallazgos verificados: el orden de las fases
+> B y D estaba **invertido** (F9.1), `pnpm demo:ready` **no puede** apuntar a Cloud SQL (F4),
+> `uniforms` **no es un stub** y se despliega (F5), `module_tuition` **no existe** (F6), y se
+> agregaron 6 tareas que bloquean el arranque (F3, F9, F10, F14, E1, E2, E3).
 
-| # | Tarea | Archivos |
-|---|---|---|
-| A1 | Arreglar `ip_configuration`: `ipv4_enabled = true`, `authorized_networks` vacío, `ssl_mode = "ENCRYPTED_ONLY"` | `deploy/terraform/database.tf` |
-| A2 | `Dockerfile` para `apps/web` (multi-stage pnpm → `.next/standalone`, non-root, `PORT` de Cloud Run) | `apps/web/Dockerfile` |
-| A3 | Módulo TF `web`: `min=0`, `max=2`, `cpu_idle=true`, `ingress=ALL`, `allow_unauthenticated=true`, sin Cloud SQL, sin secretos | `deploy/terraform/services.tf` |
-| A4 | `rewrites()` `/api/:path*` → `GATEWAY_URL`, y `NEXT_PUBLIC_API_URL` relativo. **Test que falle primero** cubriendo el bug de `IS_DESIGN_DEMO` | `apps/web/next.config.js`, `apps/web/app/flags-provider.tsx` |
-| A5 | Paso `image-web` + deploy de `web` en Cloud Build | `deploy/cloudbuild/cloudbuild.yaml` |
-| A6 | Agregar `cloudresourcemanager` y `monitoring` al `for_each` de APIs | `deploy/terraform/main.tf` |
-| A7 | Añadir `teachers,tuition` a `ENABLED_MODULES` (verificar antes cómo los nombra el gateway) | `deploy/terraform/services.tf` |
-| A8 | `scripts/migrate-cloudsql.sh`: levanta Cloud SQL Auth Proxy, corre `setup_app_role.sql` + `migrations/**` + seed del dueño | `scripts/` |
-| A9 | `dev.tfvars` real (gitignored) con `project_id = "garcia-lorca"` y el preset barato | `deploy/terraform/environments/` |
+### Fase 0 — Bloqueante, 5 minutos, gratis
 
-### Fase B — Aplicar la infraestructura
+0. **Consola de GCP → Facturación → Reportes → agrupar por SKU y por proyecto**, mes en curso,
+   proyecto `heraldo-489500`. **Anotar qué SKU produce los 700 MXN.** Es el único supuesto que
+   queda abierto en todo el plan (F2). No se empieza la Fase A hasta tener ese dato.
+
+### Fase A — Cerrar bloqueadores en el repo (rama `dev`, TDD donde hay código)
+
+| # | Tarea | Archivos | Hallazgo |
+|---|---|---|---|
+| A1 | `ipv4_enabled = true`, `authorized_networks` vacío, TLS obligatorio | `database.tf` | B1 |
+| A2 | **Secreto `IAM_JWT_SECRET`** + fallo duro al arrancar fuera de local | `secrets.tf`, `services.tf`, `iam/cmd/main.go` | **F3** |
+| A3 | `Dockerfile` del web (monorepo pnpm → standalone, no-root, `PORT`) | `apps/web/Dockerfile` | B2 |
+| A4 | **`outputFileTracingRoot`** apuntando a la raíz del monorepo | `apps/web/next.config.js` | **E2** |
+| A5 | **`app/healthz/route.ts`** que devuelva 200 | `apps/web/app/healthz/` | **E1** |
+| A6 | Route Handler proxy `/api/[...path]` con `getSetCookie()`, allowlist, timeout, `force-dynamic` | `apps/web/app/api/[...path]/route.ts` | B3, F7, 1.2 |
+| A7 | Desacoplar `IS_DESIGN_DEMO`; un solo `api-url.ts` | `flags-provider.tsx`, `api-url.ts` | 1.3, F7 |
+| A8 | Módulo TF `web`: `min=0`, `max=2`, `cpu_idle=true`, público, sin Cloud SQL | `services.tf` | B2 |
+| A9 | **Desplegar `uniforms`** como 9º servicio + `UNIFORMS_BASE_URL` | `services.tf`, `cloudbuild.yaml` | **F5, F8** |
+| A10 | `WEB_ORIGIN` desde **`var.web_origin`**, NUNCA desde `module.web.uri` | `services.tf`, `variables.tf` | **E3 (ciclo)** |
+| A11 | `ENABLED_MODULES = "iam,gateway,students,config,grades,finance,attendance,comms,teachers,uniforms"` | `services.tf` | B6, F6 |
+| A12 | **Precondición** que falle el apply si `min_instances>0` y `env!=prod` | `modules/cloud_run`, CI | **F10** |
+| A13 | Acotar el pool: `SetMaxOpenConns(3)`, `SetMaxIdleConns(1)` | `pkg/dbdsn` | **F9** |
+| A14 | Cloud Build: `roles/run.admin` + `roles/iam.serviceAccountUser`, `timeout: 3600s` | `main.tf`, `cloudbuild.yaml` | **F14** |
+| A15 | APIs faltantes: `cloudresourcemanager`, `monitoring` | `main.tf` | B5 |
+| A16 | `scripts/migrate-cloudsql.sh` (Auth Proxy) | `scripts/` | B4 |
+| A17 | `scripts/seed-cloud.mjs` **solo siembra**; borrar el comentario falso de `reset-demo-db.sh` | `scripts/` | **F4** |
+| A18 | `scripts/demo-warm.sh` + `demo-cold.sh` + targets del `Makefile` | `scripts/`, `Makefile` | **F15**, E2 |
+| A19 | Ocultar mosaicos muertos (Becas, Facturación, Reportes) | `_design/data.ts` | F16 |
+| A20 | Barandilla anti-borrado en `demo:verify` contra host no local | `scripts/`, `package.json` | 4.1 |
+| A21 | `dev.tfvars` real (gitignored) con `project_id = "garcia-lorca"` | `environments/` | — |
+| A22 | Corregir `COST-AND-DEPLOY.md` (inventario + los dos modelos de costo) | `deploy/` | E6 |
+
+### Fase B — Arrancar la infraestructura  *(el orden importa: el registro está vacío)*
 
 1. `gcloud config set project garcia-lorca`
-2. Crear bucket de estado: `gs://garcia-lorca-tfstate` (misma región, versioning ON, uniform access)
+2. Crear `gs://garcia-lorca-tfstate` — misma región, **versioning ON, acceso uniforme, sin
+   acceso público** (S4).
 3. `terraform init -backend-config=bucket=garcia-lorca-tfstate -backend-config=prefix=cloud-run/dev`
-4. `terraform plan -var-file=environments/dev.tfvars` → **revisar a mano que ningún `min_instances` sea > 0**
-5. `TF_VAR_owner_temp_password=… terraform apply -var-file=environments/dev.tfvars`
-
-`dev.tfvars` (los valores que importan):
-
-```hcl
-project_id = "garcia-lorca"          # el proyecto YA EXISTE — no crear uno nuevo
-env        = "dev"
-region     = "us-central1"
-billing_account_id = "018CA3-FF15AB-FAA61D"
-
-db_tier                           = "db-f1-micro"
-db_availability_type              = "ZONAL"
-db_point_in_time_recovery_enabled = false
-db_backup_retained_count          = 3
-
-gateway_min_instances = 0    # ← el error de Heraldo, explícitamente evitado
-gateway_max_instances = 1
-gateway_cpu_idle      = true
-gateway_startup_cpu_boost = false
-iam_min_instances     = 0    # ← idem
-iam_cpu_idle          = true
-iam_startup_cpu_boost = false
-
-monthly_budget_amount = 20
-budget_alert_emails   = ["andres.roqa93@gmail.com"]
-seed_owner_secret     = true
-billing_schedule_enabled = false     # el job mensual queda APAGADO en demo
-```
+4. **Arranque parcial** — el registro de imágenes tiene que existir antes que los servicios:
+   `terraform apply -target=google_project_service.apis -target=google_artifact_registry_repository.images`
+5. **Construir y subir las 10 imágenes** (9 servicios + web) a mano la primera vez:
+   `gcloud builds submit --config=deploy/cloudbuild/cloudbuild.yaml --substitutions=_DEPLOY=false`
+   (a mano es el camino **por defecto** en la primera corrida, no el plan B — F14)
+6. `terraform plan -var-file=environments/dev.tfvars` → **leer el plan**; la precondición de
+   A12 ya impide que se cuele un `min_instances>0`, así que esto es lectura, no vigilancia.
+7. `TF_VAR_owner_temp_password=… terraform apply -var-file=environments/dev.tfvars`
 
 ### Fase C — Datos
 
-6. Escribir el password de la app en Secret Manager (lo crea Terraform, hay que darle valor)
-7. `scripts/migrate-cloudsql.sh` → `setup_app_role.sql` + `migrations/**` + semilla del dueño
-8. Sembrar datos de demo (`pnpm demo:ready` apuntado a Cloud SQL vía proxy)
+8. Escribir el valor del password de la app en Secret Manager (Terraform crea el contenedor).
+9. `scripts/migrate-cloudsql.sh` → `setup_app_role.sql` (como superusuario, NOBYPASSRLS)
+   + `migrations/**` (11 dominios) + semilla del dueño.
+10. `node scripts/seed-cloud.mjs` — **solo siembra.** Nunca `pnpm demo:ready`: encadena
+    `demo:verify`, que **vacía la base** (F4).
 
-### Fase D — Imágenes y verificación
+### Fase D — Verificar
 
-9. Cloud Build con `_DEPLOY=true` (9 imágenes) — o `gcloud builds submit` a mano la primera vez
-10. Verificación end-to-end en la URL del web: login del dueño → cambio de contraseña →
-    ciclo/catálogo → alumnos → calificaciones → asistencia → adeudos → notificación
-11. Confirmar en Cloud Run que **las 9 revisiones muestran `minScale` vacío o 0**
-12. Cerrar el turno: `gcloud run services list` a las 24 h y confirmar `$0` de CPU idle
+11. `terraform apply` de nuevo con los tags de imagen reales (o `_DEPLOY=true` en Cloud Build).
+12. Recorrido end-to-end en la URL del web: login del dueño → cambio de contraseña → ciclo →
+    catálogo → alumnos → docentes → calificaciones → asistencia → adeudos → **uniformes** →
+    avisos.
+13. `gcloud run services list` → confirmar `minScale` vacío o 0 en **las 10** revisiones.
+14. **Correr la lista de ensayo pre-demo** (artefacto aparte, 8 puntos), sobre todo **R5**:
+    entrar, esperar 20+ minutos, recargar, y seguir autenticado. Es la prueba de F3.
+15. A las 24 h: confirmar en Facturación que Cloud Run cobró **$0** de CPU.
 
-### Fase E — Interruptor de emergencia
+### Fase E — Interruptor de emergencia  *(como comandos, no como bloque en un `.md` — E2)*
 
-Si algo se dispara, el corte total es un comando (la base sobrevive):
-
-```bash
-for s in web gateway iam students config finance grades attendance comms; do
-  gcloud run services update $s --region=us-central1 --min-instances=0 --max-instances=0
-done
-gcloud sql instances patch garcia-lorca-dev --activation-policy=NEVER   # apaga la DB
+```
+make demo-down     # min-instances=0 y max-instances=0 en los 10 servicios
+                   # + gcloud sql instances patch --activation-policy=NEVER
+make demo-up       # revierte lo anterior
+make demo-warm     # calienta web+gateway+iam 15 min antes de la junta (~$0.06)
+make demo-cold     # los devuelve a cero al terminar
 ```
 
-`--activation-policy=NEVER` detiene la instancia: se sigue pagando el disco (~$1.70/mes) pero
-no el cómputo. Volver: `--activation-policy=ALWAYS`.
-
----
+`--activation-policy=NEVER` detiene la base: se sigue pagando el disco (~$1.70/mes) pero no el
+cómputo. La base **sobrevive**; nada se borra.
 
 ## 5. Decisiones abiertas para el dueño
 
