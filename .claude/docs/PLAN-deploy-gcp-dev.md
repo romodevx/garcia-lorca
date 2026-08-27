@@ -2152,3 +2152,248 @@ Esfuerzo: **humano ~3 días · con CC ~3-4 h.**
 > **Nota sobre el agregador:** `gstack` agrega tareas de una ventana de los últimos 5 commits.
 > Las 19 tareas de la Fase 1 quedaron fuera de esa ventana durante esta corrida (se escribieron
 > 6 commits atrás), así que el agregador reporta 12. **La lista autoritativa es esta: A0-A31.**
+
+---
+
+## Paso 0.5 — Voces duales (Ingeniería)
+
+**CODEX SAYS (eng):** `[codex-unavailable: binary not found]`.
+
+### CLAUDE SUBAGENT (eng — revisión independiente)
+
+**24 hallazgos.** Verifiqué los cinco de mayor consecuencia contra el árbol; **los cinco
+resultaron ciertos.** Dos de ellos hacen que el plan, tal como estaba, **no pueda producir ni
+una sola imagen ni una sola tabla.**
+
+### 🔴🔴 V-1 — EL HALLAZGO MÁS GRAVE DE TODA LA REVISIÓN: el pipeline de Cloud Build no puede correr
+
+`cloudbuild.yaml` corre `go vet ./...`, `go test ./... -race` y `govulncheck ./...` **desde la
+raíz del repo**, bajo `set -euo pipefail`. Ejecutado ahora mismo en este repositorio:
+
+```
+$ ls go.mod
+NO ROOT go.mod
+
+$ go list ./...
+pattern ./...: directory prefix . does not contain modules listed in go.work
+  or their selected dependencies
+```
+
+**No hay `go.mod` en la raíz — solo `go.work`.** El pipeline **muere en el paso 2 de 7** y
+**nunca construye una sola imagen.**
+
+`.github/workflows/ci.yml` está en verde **únicamente** porque usa una matriz por módulo con
+`working-directory`. Nadie lo notó porque el pipeline de Cloud Build **jamás se ha ejecutado**.
+
+Y esto colapsa toda la cadena: la Fase B paso 5 construye las imágenes, el paso 7 las
+despliega, y el arranque parcial del Hallazgo 9.1 depende de que exista la imagen #0.
+**Sin este arreglo no hay despliegue de ninguna clase.** → **A32**
+
+### 🔴🔴 W-1 — El `.dockerignore` de la raíz borra el código del web del contexto de build
+
+Verificado, textual, en `/.dockerignore`:
+
+```
+.next
+out
+dist
+.turbo
+.expo
+web-build
+apps          ← ✗
+packages      ← ✗
+```
+
+Los 9 servicios Go construyen desde la raíz, así que excluir `apps` y `packages` es
+**deliberado y correcto para ellos**. Pero un `docker build -f apps/web/Dockerfile .`
+recibe **cero archivos del web**: `COPY apps/web ./apps/web` falla con *file not found*.
+Mi tarea A3 listaba `.dockerignore` como archivo a crear, sin ver que **el existente es
+activamente hostil**.
+
+**Decisión:** `apps/web/Dockerfile.dockerignore` (BuildKit prefiere
+`<dockerfile>.dockerignore` sobre el de la raíz). **No** desexcluir `apps`/`packages` en el
+de la raíz — inflaría los 9 contextos Go. → **A33**
+
+### 🔴 M-1 — El paso 5 del runbook (`setup_app_role.sql`) es una parada garantizada
+
+`deploy/terraform/db/setup_app_role.sql:18-19`, verificado:
+
+```sql
+ALTER ROLE app NOBYPASSRLS;
+ALTER ROLE app NOSUPERUSER;
+```
+
+Postgres exige un **superusuario real** para tocar los atributos `bypassrls` y `superuser`.
+El rol `postgres` de Cloud SQL es `cloudsqlsuperuser`, con **`rolsuper = false`**. Ambas
+sentencias fallan, y con `ON_ERROR_STOP=1` el script **aborta en la línea 18** — antes de los
+`GRANT` de la línea 25 y antes del `ALTER DEFAULT PRIVILEGES` de la 34.
+
+**Resultado: el rol `app` queda sin un solo privilegio** y cada consulta responde
+`permission denied for table`. **Decisión:** borrar ambas líneas (Cloud SQL nunca le concede
+esos atributos a un usuario creado por API, así que la intención ya se cumple sola) o
+envolverlas en un `DO $$ … IF current_setting('is_superuser') = 'on' … $$`. → **A34**
+
+**M-4 asociado:** `ALTER DEFAULT PRIVILEGES` es **por otorgante**. Si el paso 5 corre como
+`postgres` y el paso 6 (migraciones) corre como otro rol, `app` no hereda nada. Los dos pasos
+deben fijarse al **mismo rol** dentro de `migrate-cloudsql.sh`.
+
+**M-2 asociado:** el usuario `postgres` de una instancia nueva de Cloud SQL **no tiene
+contraseña**. Nada en el plan corre `gcloud sql users set-password postgres`.
+**No hay credencial con la que ejecutar el paso 5.** → entra en A34.
+
+### 🔴 T-1 — `INGRESS_TRAFFIC_INTERNAL_ONLY` probablemente bloquea TODAS las llamadas entre servicios
+
+`services.tf` pone ingress interno en iam/students/config/finance/grades/attendance,
+**sin conector VPC y sin Direct VPC egress** (`vpc_connector` default `null`). Una llamada de
+Cloud Run a Cloud Run por la URL `*.run.app` **sale a internet**; Google no puede atribuirla a
+una VPC, así que el ingress interno la rechaza — en el *frontend* de Cloud Run, antes de llegar
+a tu código y antes de evaluar el token OIDC. **El `apply` tiene éxito y después cada login
+devuelve 404/403 sin un solo log de aplicación.**
+
+**El propio repo trae la evidencia de que esto ya mordió una vez:** `comms` está en
+`INGRESS_TRAFFIC_ALL` con un comentario que dice que es *"porque el push de Pub/Sub viene del
+rango público de Google"*. Esa justificación **está al revés** — Pub/Sub sí está en la lista de
+orígenes permitidos por el ingress interno (`students` y `finance` reciben push **siendo
+internos**, y esa mitad funciona). Lo que en realidad no pasa el ingress interno es
+**Cloud Run llamando a Cloud Run**, que es justo lo que hace el gateway.
+
+**Confianza: alta, pero no verificada en vivo** (verificarlo cuesta un despliegue). La buena
+noticia: **el arreglo es seguro pase lo que pase.** `ingress = "INGRESS_TRAFFIC_ALL"` con
+`allow_unauthenticated = false` **no debilita nada**: la frontera real es `run.invoker` + OIDC
+con audiencia, que es exactamente la configuración con la que `comms` ya vive. Es gratis, no
+necesita conector VPC, y si T-1 resultara falso, no se pierde nada. → **A35**
+
+### 🔴 T-4 — El `plan` muere antes de poder habilitar nada, y mi B5 no lo arregla
+
+`pubsub.tf:78` declara `data "google_project" "current"`. Los data sources con configuración
+completamente conocida se leen **en tiempo de plan/refresh**, *antes* de que
+`google_project_service.apis` cree nada. Y ya está verificado en la §0: **`cloudresourcemanager`
+no está habilitada** en `garcia-lorca`.
+
+Mi B5 decía "agregarlas al `for_each`". **No sirve**: el data source falla igual en el primer
+`plan`, y también en el arranque parcial con `-target`.
+**Decisión:** `gcloud services enable cloudresourcemanager.googleapis.com` como **paso
+explícito de la Fase B, antes del paso 3**. Se deja además en el `for_each` por idempotencia.
+→ corrige A15.
+
+### 🔴 T-5 — Cloud Build no tiene cuenta de servicio en este proyecto
+
+Desde el cambio de default de mediados de 2024, un proyecto que corre su primer build usa la
+**cuenta por defecto de Compute Engine**, no la `@cloudbuild.gserviceaccount.com` heredada
+(que ya no se crea). Y `compute.googleapis.com` **no está habilitada** en `garcia-lorca`, así
+que `PROJECT_NUMBER-compute@developer…` **tampoco existe**. `gcloud builds submit` falla antes
+de correr un solo paso. Mi A14 solo cubría `run.admin`/`serviceAccountUser` sobre una cuenta
+que no existe. **Decisión:** crear una SA de build dedicada con `artifactregistry.writer` +
+`logging.logWriter` + `run.admin` + `iam.serviceAccountUser` y pasar `--service-account`
+(viable porque `options.logging: CLOUD_LOGGING_ONLY` ya está puesto, que es el prerrequisito).
+→ amplía A14.
+
+### 🔴 P-1..P-5 — Cinco formas de romper el proxy que no había considerado
+
+| # | Rompe | Detalle |
+|---|---|---|
+| **P-1** | **Las pantallas de dinero** | Los Route Handlers despachan por verbo exportado. El gateway tiene rutas **`PUT`** (`tuition-plans`, `concepts/{id}`, `uniforms/items/{id}`, `uniforms/settings`). Exportar solo GET/POST devuelve **405** en todas. Hay que exportar `GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS`. |
+| **P-2** | **Todo** | Cloud Run enruta por cabecera `Host`. Reenviar `request.headers` tal cual manda `host: web-….run.app` al gateway y **Cloud Run responde 404 sin log en ningún lado.** Allowlist explícita de cabeceras (`cookie`, `content-type`, `accept`, `authorization`, `x-request-id`), no denylist. |
+| **P-3** | **Las listas largas** | undici descomprime la respuesta de forma transparente. Reemitir `content-encoding: gzip` da **`ERR_CONTENT_DECODING_FAILED`** en toda respuesta bastante grande como para comprimirse — o sea **la lista de alumnos y la de adeudos, no el login.** Hay que quitar `content-encoding`, `content-length`, `transfer-encoding`, `connection`, `keep-alive`. |
+| **P-4** | **Todo POST** | Pasar `request.body` (un `ReadableStream`) a `fetch` **sin `duplex: "half"`** lanza `TypeError` en cada POST. Y nunca adjuntar cuerpo a GET/HEAD. |
+| **P-5** | **La primera pantalla tras el login** | Reconstruir el destino solo desde `params.path` **descarta el query string**. Y `GET /api/v1/finance/charges` **exige un filtro** (guardia de lecturas acotadas del lote de hardening) → **400**. Hay que usar `request.nextUrl.search`. |
+| P-6 | Runtime | En Next 16 `params` es una **Promise**: `const { path } = await params`. |
+
+→ todos entran en **A6**, con test primero. **P-3 es especialmente cruel: el login funciona y
+la demo se rompe justo cuando enseñas el padrón.**
+
+### 🔴 W-5 — Mi tarea A7 arregla 2 archivos de 24. Verificado.
+
+```
+NEXT_PUBLIC_API_URL leído en:                    24 sitios
+… con  ?? "http://localhost:8080"                21 sitios
+```
+
+A7 tocaba `flags-provider.tsx` y un `api-url.ts` nuevo. **La "ruta NULA" que yo mismo
+diagnostiqué —el navegador del director marcando a su propio localhost, app muerta, cero logs—
+sobrevive intacta en 21 archivos.** Adoptar el helper en los 24 sitios es parte de A7, no un
+detalle.
+
+**Y el valor correcto es `"/"`, no `""`:** ambos `features.ts:14` y `auth/api.ts:28` hacen
+`baseURL.replace(/\/+$/, "")`, así que `"/"` colapsa a `""` — se obtiene la URL relativa **y**
+un valor no vacío que sobrevive al plumbing de Docker/Turbo. Además `turbo.json` **no lista
+`NEXT_PUBLIC_API_URL` en `globalEnv`**, así que un `build` cacheado **no se reejecuta** cuando
+cambia. → **A36**
+
+### 🟡 W-3 — El layout de `standalone` está anidado
+
+Confirmado contra el build local: el servidor queda en `.next/standalone/**apps/web**/server.js`
+y hace `process.chdir(__dirname)`. Entonces `CMD ["node", "apps/web/server.js"]`, y los
+estáticos van a `/app/apps/web/.next/static` y `/app/apps/web/public`. Equivocarse en
+cualquiera de los tres **renderiza la página sin CSS ni JS y sin un solo error en los logs.**
+Más `ENV HOSTNAME=0.0.0.0`. → entra en A3.
+
+### 🟡 T-11 — Mi guardia A12 no se puede escribir como la especifiqué
+
+Dentro de `modules/cloud_run`, **`var.env` ya está tomado**: es el **mapa de variables de
+entorno**. Mi precondición compararía un mapa contra `"dev"`. Hay que pasar una variable
+`environment` nueva por las 10 llamadas al módulo. → corrige A12.
+
+### 🟡 T-8 — `latest` nunca redespliega, y el paso de deploy pelea con Terraform
+
+Cloud Run fija la etiqueta a un **digest** al crear la revisión. Re-subir `:latest` y volver a
+aplicar **no produce diff ni revisión nueva** — un no-op silencioso que el runbook leería como
+"desplegado". Y al revés: el paso `deploy` de Cloud Build pone una imagen por SHA sobre un
+recurso gestionado por Terraform, así que el siguiente `apply` **la revierte a `:latest`**.
+**Decisión:** el SHA es la fuente de verdad (`image_tags` escrito por CI) y se elimina el paso
+`gcloud run deploy`. → amplía A25.
+
+### 🟡 V-2 / V-5 / V-6 — Lo que mi plan decía verificar y no verifica
+
+- **V-2:** mi matriz son 5 unitarias de web + 2 E2E, y yo mismo escribí "0 de integración —
+  correcta". **Falso.** *Todos* los fallos que introduce este plan son de integración: ingress
+  interno, audiencia OIDC, DSN por socket, contraseña de Secret Manager, startup probe, push a
+  servicios internos. **Ninguna prueba de la capa web puede verlos.** El mínimo honesto es un
+  smoke post-apply: `curl` al `/healthz` y `/readyz` del gateway (que además sondea la
+  alcanzabilidad de iam) y **un login**, antes de tocar la UI. → **A37**
+- **V-5:** "confirmar `$0` de CPU a las 24 h" — `services list` **no reporta costo**, los datos
+  de facturación tardan 24-48 h, y la §0 ya dice que **no hay export a BigQuery**. La señal
+  verificable es la métrica `run.googleapis.com/container/instance_count` filtrada por
+  `state=idle` (debe ser plana en cero). **Y habilitar el export de facturación a BigQuery el
+  día 0 — es gratis y de paso cierra el diagnóstico abierto de Heraldo.** → **A38**
+- **V-6:** el botón de pánico pone `--max-instances=0` y la lista de verificación **solo mira
+  `minScale`** — una demo dejada en posición de apagado **luce correcta ante todos los chequeos
+  del runbook.** (Se resuelve solo al arreglar DX5.)
+- **V-3:** mi test de traversal `/api/v1/../../x` **no puede dispararse**: la URL se normaliza
+  antes del ruteo. Solo significa algo con segmentos percent-encoded (`%2e%2e%2f`), y la
+  aserción debe ser sobre **lo que el handler manda upstream**, no sobre lo que recibe.
+- **V-4:** el E2E de 20 minutos ejercita la **ruta de refresh** (`authFetch.ts` ya renueva ante
+  un 401, TTL de 15 min), pero **no puede verificar la mitad "en frío"**: no hay API para
+  desalojar una instancia de Cloud Run. Yo dije que "cubre los tres riesgos en un solo test";
+  **lo sobrevendí por uno.**
+
+## TABLA DE CONSENSO — VOCES DUALES (Ingeniería)
+
+```
+═══════════════════════════════════════════════════════════════
+  Dimensión                            Claude  Codex  Consenso
+  ───────────────────────────────────  ──────  ─────  ─────────
+  1. ¿Arquitectura sólida?             NO      N/A    ⚠️ ingress interno rompe todo (T-1)
+  2. ¿Cobertura de pruebas suficiente? NO      N/A    ⚠️ 0 tests ven los fallos reales (V-2)
+  3. ¿Riesgos de rendimiento cubiertos?PARCIAL N/A    ⚠️ pool sí; content-encoding no (P-3)
+  4. ¿Amenazas de seguridad cubiertas? PARCIAL N/A    ⚠️ host header, verbos, force-dynamic
+  5. ¿Rutas de error manejadas?        NO      N/A    ⚠️ 5 formas nuevas de romper el proxy
+  6. ¿Riesgo de despliegue manejable?  NO      N/A    ⚠️ el pipeline NO CORRE (V-1)
+═══════════════════════════════════════════════════════════════
+Modo: [subagent-only]. 6/6 dimensiones con hallazgo real.
+```
+
+## Tareas nuevas de la Fase 3
+
+- [ ] **A32 (P1)** — `cloudbuild.yaml`: iterar los módulos de `go.work` en vez de `./...` — **V-1**
+- [ ] **A33 (P1)** — `apps/web/Dockerfile.dockerignore` (el de la raíz excluye `apps`/`packages`) — **W-1**
+- [ ] **A34 (P1)** — Quitar `ALTER ROLE … NOBYPASSRLS/NOSUPERUSER`; fijar un solo rol otorgante; poner contraseña a `postgres` — **M-1/M-2/M-4**
+- [ ] **A35 (P1)** — `ingress = ALL` + `allow_unauthenticated = false` en los 6 internos — **T-1**
+- [ ] **A36 (P1)** — Adoptar `api-url.ts` en los **24** sitios; usar `"/"`; agregar a `turbo.json globalEnv` — **W-5**
+- [ ] **A37 (P1)** — Smoke post-apply: `curl /healthz` + `/readyz` + un login, antes de la UI — **V-2**
+- [ ] **A38 (P2)** — Habilitar export de facturación a BigQuery el día 0; verificar por `instance_count{state=idle}` — **V-5**
+
+> **Fase 3 completa.** Codex: no disponible. Claude subagent: **24 hallazgos, 8 críticos**,
+> los 5 de mayor consecuencia **verificados ciertos contra el árbol**. Dos de ellos (**V-1**,
+> **W-1**) significaban que el plan **no podía producir ni una imagen**.
+> Consenso: 0/6 (una sola voz). Pasando a la Fase 3.5 → Fase 4.
