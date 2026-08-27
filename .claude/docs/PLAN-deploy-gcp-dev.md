@@ -1353,3 +1353,212 @@ Modo: [subagent-only] — cobertura cross-model NO obtenida en esta corrida.
 el valor del ejercicio se sostiene en que **verifiqué cada hallazgo contra el código** en vez
 de creerle. Los seis renglones en ⚠️ significan que la voz externa encontró algo real en las
 seis dimensiones — no que haya acuerdo entre modelos.
+
+---
+
+## SALIDAS OBLIGATORIAS — FASE 1
+
+### Registro de modos de falla
+
+```
+ RUTA                        | MODO DE FALLA               |RESCAT|TEST| QUÉ VE EL USUARIO      |LOG
+ ----------------------------|-----------------------------|------|----|------------------------|-----
+ iam jwtSecret()             | llave efímera tras dormirse  | N 🔴 | N  | Lo saca al login       | N 🔴
+ route.ts set-cookie         | 2 cookies unidas en 1        | N 🔴 | N  | Sesión muere a 15 min  | N 🔴
+ NEXT_PUBLIC_API_URL nula    | apunta a localhost:8080      | N 🔴 | N  | App muerta             | N 🔴
+ NEXT_PUBLIC_API_URL vacía   | IS_DESIGN_DEMO = true        | N 🔴 | N  | DATOS FALSOS           | N 🔴
+ pool de conexiones          | too many connections         | N 🔴 | N  | 500 intermitente       | Y
+ route.ts GATEWAY_URL vacía  | Invalid URL                  | N 🟡 | N  | 500 en blanco          | N
+ route.ts gateway frío       | timeout                      | N 🟡 | N  | Pantalla en blanco 5 s | N
+ route.ts sin allowlist      | proxy abierto                | N 🟡 | N  | (nada — es la amenaza) | N
+ demo:verify vs Cloud SQL    | vacía la base                | N 🔴 | N  | Escuela desaparecida   | N 🔴
+ seed llama a uniforms 404   | semilla revienta a la mitad  | N 🔴 | N  | Escuela a medias       | Y
+ Cloud Build deploy sin IAM  | permission denied            | Y    | N  | Falla el build         | Y
+ apply con registry vacío    | imagen inexistente           | Y    | N  | Falla el apply         | Y
+ min_instances > 0 se cuela  | cobra en reposo              | N 🔴 | N  | (nada — llega la cuenta)| N 🔴
+ Cloud SQL sin IP            | apply rechazado por la API   | Y    | N  | Falla el apply         | Y
+ arranque en frío encadenado | 5-15 s el primer login       | N 🟡 | N  | "No está terminado"    | N
+```
+
+**14 modos de falla. 8 GAPS CRÍTICOS** (`RESCATADO=N` + `TEST=N` + el usuario ve algo malo o
+nada). Los ocho tienen decisión y tarea asignada. **Ninguno de los ocho es visible en
+`docker-compose`** — todos nacen de correr en la nube, con scale-to-zero, tras un proxy.
+Ese es el resultado más importante de esta revisión.
+
+### "NO está en alcance" (diferido, con razón)
+
+| Ítem | Por qué se difiere |
+|---|---|
+| Desplegar `master` a la cuenta de la escuela | Otro proyecto, otra cuenta, cuando firmen (D4) |
+| Los 3 stubs reales (`billing`, `scholarships`, `docs`) | Sin implementación; flags OFF; nada que enseñar |
+| App móvil Expo | No consume infra de GCP; apunta al mismo gateway |
+| Load Balancer / CDN / Cloud Armor | ~$18/mes de LB rompe el objetivo de costo |
+| HA, réplicas de lectura, PITR | Cosas de producción |
+| `billing_schedule` mensual de M15 | Un job que factura el ciclo equivocado es peor que no tener job |
+| **E1 — apagado nocturno de Cloud SQL** | Ahorra ~$5/mes y arriesga una demo muerta a deshora. Reconsiderar si la demo vive meses |
+| Migraciones `down` | En dev el rollback es recrear + sembrar (~15 min) |
+| Mover el rate limiter a un store compartido | **Bloquea producción** (F13), no la demo. Va a TODOS |
+| Ruta de migración de datos demo → prod | Solo importa si la demo acumula datos reales — y la política dice que no (F12) |
+| Staging | Dev *es* el staging para una demo |
+
+### Delta contra el estado soñado
+
+El plan **acerca** al ideal a 12 meses y **no crea nada que haya que deshacer**, con dos
+excepciones nombradas: (1) el Route Handler se retira el día que haya dominio propio — por eso
+tiene que llevar escrito **por qué existe**; (2) si D1 elige Neon, dev y prod usan bases
+distintas para siempre. Todo lo demás (Terraform multi-entorno, precondición de
+`min_instances`, caps de pool, secreto de JWT, uniforms desplegado) es **igual de necesario en
+producción**. Ocho de las quince tareas son trabajo de producción hecho por adelantado.
+
+### Diagramas producidos
+
+1. ✅ Arquitectura del sistema (antes/después) — Sección 1
+2. ✅ Flujo de datos con las 4 rutas sombra — Sección 1
+3. ✅ Máquina de estados del ciclo de vida Cloud Run — Sección 1
+4. ✅ Flujo de errores (entrada→validación→reenvío→respuesta→cookies) — Sección 4
+5. ✅ Secuencia de despliegue (12 pasos) — Sección 9
+6. ✅ Ruta lenta del arranque en frío, con tiempos — Sección 7
+
+### Auditoría de diagramas obsoletos
+
+| Diagrama | Estado |
+|---|---|
+| `deploy/COST-AND-DEPLOY.md` §A tabla de inventario | 🔴 **OBSOLETO** — dice que faltan 5 servicios y que solo gateway/iam tienen Dockerfile. Los 8 están. Y clasifica `uniforms` como stub. → **E6 lo corrige** |
+| `deploy/COST-AND-DEPLOY.md` §B tabla de costos | 🔴 **OBSOLETO** — sin reconciliar con el escenario `cpu_idle` (F2). → E6 |
+| `services.tf:8-14` comentario de cabecera | 🟡 Dice *"solo gateway + iam + students instanciados como ejemplo"*. Falso: están los 8. → corregir al tocar el archivo |
+| `scripts/reset-demo-db.sh` cabecera | 🔴 **MIENTE** — dice que `PGHOST=…` funciona "anywhere else"; el código es `docker exec` fijo. → F4 |
+| Diagramas de `CLAUDE.md` | ✅ Vigentes |
+
+---
+
+## Tareas de implementación (Fase 1 — CEO)
+
+- [ ] **T1 (P1, humano ~1h / CC ~10min)** — iam+terraform — **Secreto de firma JWT persistente**
+  - Surgió de: F3 — `iam/cmd/main.go:109-116` genera llave efímera; ausente de `deploy/`
+  - Archivos: `deploy/terraform/secrets.tf`, `services.tf`, `services/iam/cmd/main.go`
+  - Verificar: test que `jwtSecret()` haga panic cuando `APP_ENV=dev` y falte la variable
+- [ ] **T2 (P1, humano ~30min / CC ~5min)** — terraform — **Cloud SQL con IP y sin redes autorizadas**
+  - Surgió de: B1 — *"Cloud SQL instances require at least a public IPv4 address or a configured private network"* (docs del provider)
+  - Archivos: `deploy/terraform/database.tf`
+  - Verificar: `terraform plan` sin error en `google_sql_database_instance`
+- [ ] **T3 (P1, humano ~4h / CC ~30min)** — web — **Dockerfile del web (monorepo pnpm → standalone)**
+  - Surgió de: B2 — `apps/web` no tiene Dockerfile ni existe en TF/CI
+  - Archivos: `apps/web/Dockerfile`, `.dockerignore`
+  - Verificar: `docker build` y `curl localhost:3000` responde
+- [ ] **T4 (P1, humano ~2h / CC ~20min)** — web — **Route Handler proxy de mismo origen**
+  - Surgió de: B3 + F7 — `rewrites()` se congela en build; la URL del gateway no existe aún
+  - Archivos: `apps/web/app/api/[...path]/route.ts` (+ test)
+  - Verificar: **test primero** — upstream con 2 `Set-Cookie` sale con 2 (`getSetCookie()`)
+- [ ] **T5 (P1, humano ~30min / CC ~5min)** — web — **Desacoplar `IS_DESIGN_DEMO` del string vacío**
+  - Surgió de: 1.3 — `flags-provider.tsx:29` `API_URL === ""` colisiona con el mismo origen
+  - Archivos: `apps/web/app/flags-provider.tsx`, `apps/web/app/api-url.ts` (nuevo)
+  - Verificar: test — con `API_URL=""` y sin flag de demo, DEBE llamar a `/features`
+- [ ] **T6 (P1, humano ~2h / CC ~15min)** — terraform+ci — **Desplegar `uniforms` como 9º servicio**
+  - Surgió de: F5 — 35 archivos Go, Dockerfile, 4 migraciones, ADR 0007. **No es un stub**
+  - Archivos: `services.tf`, `cloudbuild.yaml`
+  - Verificar: el mosaico Uniformes abre inventario real, no `ModulePlaceholder`
+- [ ] **T7 (P1, humano ~15min / CC ~2min)** — terraform — **`ENABLED_MODULES` completo**
+  - Surgió de: B6 + F6 — falta `teachers`; `tuition` **no existe** (`FLAGS.md:24`)
+  - Archivos: `deploy/terraform/services.tf`
+  - Verificar: `/api/v1/features` lista `module_teachers` y `module_uniforms`
+- [ ] **T8 (P1, humano ~1h / CC ~10min)** — terraform — **Precondición que impide `min_instances>0` fuera de prod**
+  - Surgió de: F10 — el control que falló en Heraldo era un ojo humano
+  - Archivos: `modules/cloud_run/main.tf`, workflow de CI
+  - Verificar: un apply con `gateway_min_instances=1` y `env=dev` **falla**
+- [ ] **T9 (P1, humano ~1h / CC ~10min)** — pkg — **Acotar el pool de conexiones**
+  - Surgió de: F9 — `grep SetMaxOpenConns` → cero; `db-f1-micro` da ~25 conexiones
+  - Archivos: `pkg/dbdsn` (o cada `openDB()`)
+  - Verificar: la semilla de 8 en paralelo corre sin `remaining connection slots`
+- [ ] **T10 (P1, humano ~2h / CC ~20min)** — scripts — **`seed-cloud.mjs`, solo siembra**
+  - Surgió de: F4 — `demo:ready` corre `demo:verify`, que **vacía la base**; `reset-demo-db.sh` es `docker exec` fijo
+  - Archivos: `scripts/seed-cloud.mjs`, `scripts/reset-demo-db.sh` (borrar el comentario falso)
+  - Verificar: ensayo contra Cloud SQL real **48 h antes de la junta**
+- [ ] **T11 (P1, humano ~1h / CC ~10min)** — scripts — **`migrate-cloudsql.sh` por Auth Proxy**
+  - Surgió de: B4 — no hay camino de migración en GCP
+  - Archivos: `scripts/migrate-cloudsql.sh`
+  - Verificar: `schema_migrations` con las 11 carpetas aplicadas
+- [ ] **T12 (P1, humano ~30min / CC ~5min)** — terraform — **Permisos de Cloud Build + timeout**
+  - Surgió de: F14 — sin `run.admin` ni `serviceAccountUser`; `timeout: 1800s` corto para 9 imágenes
+  - Archivos: `main.tf`, `cloudbuild.yaml`
+  - Verificar: un build con `_DEPLOY=true` termina sin permiso denegado
+- [ ] **T13 (P1, humano ~1h / CC ~10min)** — scripts — **`demo-warm.sh` / `demo-cold.sh`**
+  - Surgió de: F15 — 5-15 s el primer login; 3 servicios calientes 3 h ≈ **$0.06**
+  - Archivos: `scripts/demo-warm.sh`, `scripts/demo-cold.sh`, `Makefile` (E2)
+  - Verificar: tras `demo-warm.sh`, el login responde <1 s; tras `demo-cold.sh`, `minScale` vacío
+- [ ] **T14 (P2, humano ~30min / CC ~5min)** — web — **Ocultar mosaicos muertos**
+  - Surgió de: F16 — Becas/Facturación/Reportes caen en `ModulePlaceholder`
+  - Archivos: `apps/web/app/_design/data.ts`
+  - Verificar: el menú de la demo no tiene ningún mosaico que no abra nada
+- [ ] **T15 (P2, humano ~30min / CC ~5min)** — terraform — **`UNIFORMS_BASE_URL` + `WEB_ORIGIN`**
+  - Surgió de: F8 — `gateway/cmd/main.go:71` y `:118` las leen; TF no las da
+  - Archivos: `deploy/terraform/services.tf`
+  - Verificar: el login de la app móvil contra el gateway trae cabecera CORS
+- [ ] **T16 (P2, humano ~1h / CC ~10min)** — web — **Estado "despertando…" (E4)**
+  - Surgió de: 7.x + F15 — arranque en frío sin retroalimentación se lee como roto
+  - Archivos: `apps/web/app/AppShell.tsx`
+  - Verificar: con el gateway frío, aparece el indicador a los 800 ms
+- [ ] **T17 (P2, humano ~30min / CC ~5min)** — scripts — **Barandilla anti-borrado en `demo:verify`**
+  - Surgió de: 4.1 — vacía la base; hoy solo lo advierte un `.md`
+  - Archivos: `scripts/`, `package.json`
+  - Verificar: contra un host no local, se niega sin `--i-know-this-wipes-prod`
+- [ ] **T18 (P2, humano ~30min / CC ~5min)** — docs — **Corregir `COST-AND-DEPLOY.md` (E6)**
+  - Surgió de: auditoría de diagramas obsoletos — inventario falso + costos sin reconciliar
+  - Archivos: `deploy/COST-AND-DEPLOY.md`, `services.tf:8-14`
+  - Verificar: el inventario coincide con `services.tf`; uniforms sale de la lista de stubs
+- [ ] **T19 (P2, humano ~1h / CC ~10min)** — observabilidad — **Log del proxy + `X-Request-Id` + alerta de DLQ**
+  - Surgió de: Sección 8 — el proxy es el único componente sin dueño en los logs
+  - Archivos: `apps/web/app/api/[...path]/route.ts`, `deploy/terraform/`
+  - Verificar: un request aparece correlacionado en los logs de web y de gateway
+
+### Resumen de cierre — FASE 1 (CEO)
+
+```
++====================================================================+
+|            MEGA PLAN REVIEW — COMPLETION SUMMARY                   |
++====================================================================+
+| Modo seleccionado    | SELECTIVE EXPANSION                          |
+| Auditoría de sistema | dev==master+1; sin TODOS.md; COST doc obsoleto|
+| Paso 0               | Enfoque B; 3 premisas mías REFUTADAS          |
+| Sección 1  (Arq)     | 3 hallazgos (2 críticos: proxy, cookies)      |
+| Sección 2  (Errores) | 13 rutas mapeadas, 5 GAPS, todos cerrados     |
+| Sección 3  (Segurid.)| 10 amenazas, 3 altas (proxy abierto, PII, IP) |
+| Sección 4  (Datos/UX)| 13 casos borde, 5 sin cubrir                  |
+| Sección 5  (Calidad) | 2 hallazgos (4 copias de API_URL, naming)     |
+| Sección 6  (Tests)   | Diagrama hecho, 7 pruebas faltantes           |
+| Sección 7  (Perf)    | 3 hallazgos (pool, caché del proxy, p99 7 s)  |
+| Sección 8  (Observ.) | 6 gaps; conflicto real observabilidad/costo   |
+| Sección 9  (Deploy)  | 2 riesgos (registry vacío, sin rollback de DB)|
+| Sección 10 (Futuro)  | Reversibilidad: 5/5; 4 ítems de deuda        |
+| Sección 11 (Diseño)  | OMITIDA — sin alcance de UI                   |
++--------------------------------------------------------------------+
+| "NO en alcance"      | escrito (11 ítems)                           |
+| Qué ya existe        | escrito (14 sub-problemas mapeados)          |
+| Delta al estado ideal| escrito                                      |
+| Registro err/rescate | 13 rutas, 5 GAPS CRÍTICOS                    |
+| Modos de falla       | 14 totales, 8 GAPS CRÍTICOS                  |
+| Propuestas de alcance| 12 propuestas, 9 aceptadas, 3 a la puerta    |
+| Plan CEO             | escrito (~/.gstack/…/ceo-plans/)             |
+| Voz externa          | corrió (claude subagent) — 17 hallazgos      |
+| Lake Score           | 9/9 recomendaciones eligieron la opción completa |
+| Diagramas producidos | 6 (arq, flujo, estados, error, deploy, latencia) |
+| Diagramas obsoletos  | 4 encontrados (2 en COST-AND-DEPLOY.md)      |
+| Decisiones abiertas  | 3 (van a la puerta final)                    |
++====================================================================+
+```
+
+**Decisiones sin resolver (van a la puerta final, no se deciden solas):**
+1. **D1** — Cloud SQL (~$9.70/mes) vs Neon free ($0). El único costo en reposo.
+2. **F11** — Corte duro de facturación vs solo alertas.
+3. **F1** — ¿GCP es el vehículo correcto para la demo? (desafío de la voz externa)
+
+> **Fase 1 completa.** Codex: no disponible. Claude subagent: 17 hallazgos, **todos los
+> verificados resultaron ciertos**, incluidos 3 que refutan afirmaciones mías.
+> Consenso: 0/6 confirmados (una sola voz — no hay cobertura cross-model).
+> 19 tareas de implementación, 13 de ellas P1. Pasando a la Fase 2.
+
+> **Fase 2 (Diseño) OMITIDA** — sin alcance de UI detectado en la Fase 0
+> (0 coincidencias de términos de interfaz). El plan es de infraestructura.
+
+---
+
+# FASE 3 — Revisión de ingeniería
