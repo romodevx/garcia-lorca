@@ -1771,3 +1771,54 @@ diseño** — por eso salen de CI y no se les pone umbral estricto.
   Sin eso, Next puede cachear una respuesta de `/api/v1/me` y **servírsela a otro visitante**.
   Ya está en las decisiones de la Sección 7 de la Fase 1; se eleva a **P1 de seguridad**,
   no de rendimiento: es una fuga de sesión entre usuarios, no una optimización.
+
+---
+
+## Análisis de D1 — el costo del cambio a Neon es **cero líneas de código**
+
+Hallazgo verificado en `pkg/dbdsn/dbdsn.go:25-27`:
+
+```go
+func resolve(getenv func(string) string) (string, error) {
+	if url := getenv(envDatabaseURL); url != "" {
+		return url, nil          // ← DATABASE_URL gana SIEMPRE
+	}
+	// … solo si falta, arma el DSN de socket de Cloud SQL
+```
+
+`DATABASE_URL` tiene **precedencia** sobre la ruta de socket de Cloud SQL. Eso significa que
+mover la demo a Neon es puramente configuración:
+
+1. Un secreto `DATABASE_URL = postgres://…@….neon.tech/garcia_lorca?sslmode=require`
+2. Quitar `cloudsql_instances` de los módulos (deja de montar el volumen)
+3. No aplicar `database.tf` en dev (se queda para prod)
+
+**Cero cambios en Go. Cero cambios en las migraciones. Cero cambios en RLS** — Neon es
+Postgres de verdad, así que `ENABLE ROW LEVEL SECURITY`, las policies y
+`set_config('app.current_tenant', …, true)` funcionan idénticos.
+
+Esto **cambia el peso de la decisión**. Yo la había planteado como "paridad contra costo", y
+la memoria del proyecto traía una decisión previa de *quedarse con Cloud SQL por paridad*.
+Pero si el cambio son tres líneas de configuración y es reversible en minutos, el argumento
+de paridad pierde casi todo su peso.
+
+| | Cloud SQL `db-f1-micro` | Neon free tier |
+|---|---|---|
+| Costo en reposo | **~$9.70/mes (~185 MXN)** | **$0** |
+| Se apaga sola | ❌ nunca | ✅ auto-suspende a los 5 min |
+| Cambios de código | 0 | **0** |
+| RLS + `SET LOCAL` | ✅ | ✅ (Postgres real) |
+| Almacenamiento | 10 GB | 0.5 GB (400 alumnos usan una fracción) |
+| Latencia extra al despertar | — | ~0.5-1 s, **encadenada al arranque en frío** |
+| Dónde viven los datos | Proyecto del dueño en GCP | Tercero, fuera de GCP |
+| Ruta de socket Cloud SQL probada | ✅ en dev | ❌ **solo se estrena en producción** |
+
+**El costo honesto de Neon** no es técnico, son dos cosas: (1) suma ~1 s al primer clic, que
+ya es el punto débil de la demo (F15 lo mitiga); (2) la ruta de socket de Cloud SQL y el
+montaje del volumen **no se ejercitan nunca** hasta el día que se despliega para la escuela.
+Es deuda diferida real, aunque pequeña.
+
+**Y una restricción que decide sola:** la política de la Sección 3 (Hallazgo 3.1) dice que la
+demo lleva **datos sintéticos únicamente**. Con esa política, "los datos viven en un tercero"
+deja de ser una objeción de privacidad. Sin esa política, Neon sería inaceptable — y Cloud SQL
+en la cuenta personal del dueño, también.
