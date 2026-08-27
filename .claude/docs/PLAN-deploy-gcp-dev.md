@@ -2082,3 +2082,73 @@ Modo: [subagent-only]. 6/6 dimensiones con hallazgo real.
 > Codex: no disponible. Claude subagent: 20 hallazgos, **4 críticos que impiden completar
 > el runbook**, todos los verificados resultaron ciertos.
 > Consenso: 0/6 (una sola voz). Pasando a la Fase 4.
+
+---
+
+# LISTA ÚNICA DE TAREAS — A1..A31
+
+Colapsada a un solo espacio de nombres (DX14). Los identificadores `T*`, `F*`, `E*`, `DX*` de
+las fases anteriores quedan **solo como columna de procedencia**, no como listas paralelas.
+
+## Bloque 0 — Bloqueante, antes de tocar código (5 min)
+
+| # | Tarea | Procedencia |
+|---|---|---|
+| **A0** | Consola → Facturación → Reportes → por SKU y proyecto: **nombrar el SKU de los 700 MXN** | F2 |
+
+## Bloque 1 — Impiden que arranque (sin esto no hay despliegue)
+
+| # | Tarea | Archivos | Proc. |
+|---|---|---|---|
+| A1 | Cloud SQL: `ipv4_enabled = true`, sin redes autorizadas, TLS obligatorio | `database.tf` | B1 |
+| A2 | **`IAM_JWT_SECRET`** como secreto + fallo duro al arrancar fuera de local | `secrets.tf`, `services.tf`, `iam/cmd/main.go` | **F3** |
+| A3 | `Dockerfile` del web (monorepo pnpm → standalone, no-root, `PORT`) | `apps/web/Dockerfile` | B2 |
+| A4 | **`outputFileTracingRoot`** a la raíz del monorepo | `next.config.js` | **E2** |
+| A5 | **`/healthz`** en el web (el probe del módulo lo exige) | `apps/web/app/healthz/` | **E1** |
+| A10 | `WEB_ORIGIN` desde `var.web_origin`, **nunca** desde `module.web.uri` | `services.tf`, `variables.tf` | **E3** |
+| A14 | Cloud Build: `run.admin` + `iam.serviceAccountUser`, `timeout: 3600s` | `main.tf`, `cloudbuild.yaml` | **F14** |
+| A15 | APIs faltantes: `cloudresourcemanager`, `monitoring` | `main.tf` | B5 |
+| A25 | **Etiquetas alineadas**: `SHORT_SHA=bootstrap` + `-var image_tag=bootstrap` | `cloudbuild.yaml`, runbook | **DX1/DX2** |
+| A26 | **Contraseña de BD generada en el primer apply**; borrar el paso 8 | `secrets.tf`, runbook | **DX3** |
+
+## Bloque 2 — La demo funciona pero se rompe en manos del cliente
+
+| # | Tarea | Archivos | Proc. |
+|---|---|---|---|
+| A6 | Route Handler proxy: `getSetCookie()`, allowlist `/api/v1/`, timeout, sin `host` | `app/api/[...path]/route.ts` | B3, 1.2 |
+| A7 | Desacoplar `IS_DESIGN_DEMO`; un solo `api-url.ts` | `flags-provider.tsx`, `api-url.ts` | 1.3 |
+| A9 | **Desplegar `uniforms`** (9º servicio) + `UNIFORMS_BASE_URL` | `services.tf`, `cloudbuild.yaml` | **F5/F8** |
+| A11 | `ENABLED_MODULES` con `teachers` y `uniforms` (**no** `tuition`) | `services.tf` | B6/F6 |
+| A13 | Acotar el pool: `SetMaxOpenConns(3)`, `SetMaxIdleConns(1)` | `pkg/dbdsn` | **F9** |
+| A17 | `seed-cloud.mjs` **solo siembra**; borrar el comentario falso | `scripts/` | **F4** |
+| A19 | Ocultar mosaicos muertos (Becas, Facturación, Reportes) | `_design/data.ts` | F16 |
+| A31 | `force-dynamic` en el proxy (**fuga de sesión**, no rendimiento) | `route.ts` | Sec. 4 eng |
+
+## Bloque 3 — Que no cueste dinero y no se pueda repetir el error
+
+| # | Tarea | Archivos | Proc. |
+|---|---|---|---|
+| A12 | **Precondición** que falla el apply con `min_instances>0` fuera de prod | `modules/cloud_run`, CI | **F10** |
+| A18 | `demo-warm` / `demo-cold` (~$0.08 por junta) | `scripts/`, `Makefile` | **F15** |
+| A21 | `dev.tfvars` real, **completo y copiable**, alineado con el `.example` | `environments/` | DX9 |
+| A28 | `cloud-stop/start/warm/cool` con `--project`/`--region`; `PROJECT_ID ?=`; `tf-init` | `Makefile` | **DX5/15/16** |
+
+## Bloque 4 — Que el dueño pueda ejecutarlo (y repetirlo para la escuela)
+
+| # | Tarea | Archivos | Proc. |
+|---|---|---|---|
+| A16 | `migrate-cloudsql.sh` por Auth Proxy | `scripts/` | B4 |
+| A20 | Barandilla anti-borrado en `demo:verify` contra host no local | `scripts/`, `package.json` | 4.1 |
+| A22 | Corregir `COST-AND-DEPLOY.md` (inventario + los dos modelos de costo) | `deploy/` | E6 |
+| A23 | **Alinear `deploy/README.md`** (npm→pnpm, min=1→0, IP, dominio) | `deploy/README.md` | **DX18** |
+| A24 | **Extraer `deploy/RUNBOOK-dev.md`** autocontenido | `deploy/` | DX estructural |
+| A27 | `make deploy-preflight` (binarios + roles, incl. `billing.costsManager`) | `Makefile`, `scripts/` | **DX7/DX8** |
+| A29 | Columna **"Si falla"** en los 15 pasos numerados | `RUNBOOK-dev.md` | DX11 |
+| A30 | Versionar `deploy/PRE-DEMO-CHECKLIST.md` | `deploy/` | DX20 |
+
+**Total: 31 tareas** — 22 P1 (bloques 0-3 + los P1 del 4), 9 P2.
+Esfuerzo: **humano ~3 días · con CC ~3-4 h.**
+
+> **Nota sobre el agregador:** `gstack` agrega tareas de una ventana de los últimos 5 commits.
+> Las 19 tareas de la Fase 1 quedaron fuera de esa ventana durante esta corrida (se escribieron
+> 6 commits atrás), así que el agregador reporta 12. **La lista autoritativa es esta: A0-A31.**
