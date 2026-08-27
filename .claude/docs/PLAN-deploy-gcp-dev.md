@@ -1104,3 +1104,252 @@ justamente por lo que la demo no debe tener datos que importen.**
 plan). El plan es de infraestructura. La única superficie visible que toca es la pantalla de
 "despertando" (E4), y su diseño se resuelve con el sistema de diseño existente
 (`.claude/docs/design/DESIGN-SYSTEM.md`), no requiere revisión de diseño propia.
+
+---
+
+## Paso 0.5 — Voces duales (CEO)
+
+**CODEX SAYS (CEO — strategy challenge):** `[codex-unavailable: binary not found]`.
+Instalar con `npm install -g @openai/codex` para cobertura cross-model.
+
+### CLAUDE SUBAGENT (CEO — independencia estratégica)
+
+Contexto fresco, sin ver esta revisión. **17 hallazgos.** Verifiqué uno por uno los de mayor
+riesgo antes de absorberlos; **todos los que verifiqué resultaron ciertos**, incluidos tres
+que refutan cosas que yo escribí.
+
+#### 🔴 F3 — CRÍTICO, y es el peor hallazgo de toda la revisión: `IAM_JWT_SECRET`
+
+`services/iam/cmd/main.go:106-116`:
+
+```go
+func jwtSecret(log *slog.Logger) []byte {
+	if s := os.Getenv("IAM_JWT_SECRET"); s != "" { return []byte(s) }
+	b := make([]byte, 32); _, _ = rand.Read(b)
+	log.Warn("IAM_JWT_SECRET not set; generated an ephemeral signing key (dev only)")
+	return []byte(hex.EncodeToString(b))
+}
+```
+
+**Verificado:** `grep -rn "IAM_JWT_SECRET" deploy/` → **cero resultados.** No está en
+`common_env`, ni en `common_secret_env`, ni en `secrets.tf`.
+
+Con `iam_min_instances = 0`, `iam` se duerme a los ~15 minutos. El siguiente request la
+despierta **con una llave de firma nueva**, y todos los tokens emitidos antes dejan de
+validar. Traducido a la junta: *el director entra, navega, se queda leyendo una pantalla
+cinco minutos, hace clic — y lo saca al login.* Sin error entendible. Y si `max_instances`
+levanta dos instancias a la vez, cada una firma con una llave distinta: 401 intermitentes,
+imposibles de reproducir.
+
+**Es invisible en local**, porque en `docker-compose` `iam` nunca se reinicia. Por eso nadie
+lo vio. Es exactamente la clase de falla que este plan existe para atrapar: **silenciosa,
+diferida, y solo aparece bajo scale-to-zero — o sea, solo aparece por culpa de la decisión de
+costo.**
+
+**Decisión (P1 completitud, no negociable):** secreto `garcia-lorca-iam-jwt-secret-${env}` en
+`secrets.tf`, inyectado por `common_secret_env`, **más** un fallo duro al arrancar en
+`jwtSecret()` cuando `APP_ENV != "local"`. El fallback aleatorio nunca debe poder correr en
+la nube. **Bloquea el deploy.**
+
+#### 🔴 F5 — CRÍTICO: `uniforms` NO es un stub. Me equivoqué.
+
+Escribí (siguiendo a `COST-AND-DEPLOY.md:52`) que los stubs son
+`billing, scholarships, docs, uniforms`. **Falso, y verificable en tres lugares:**
+
+- `services/uniforms/`: **35 archivos Go**, `go.mod` propio, `Dockerfile`, `cmd/`, `internal/`
+- `migrations/uniforms/`: **4 migraciones**
+- `FLAGS.md:31`: *"Backed by a real Clean-Architecture service since M12 (ADR 0007)"* —
+  con ADRs 0007/0008/0009/0010
+- El `CLAUDE.md` de este repo **lo dice explícitamente**: uniforms nació clasificado como thin
+  y **se movió** a Clean Architecture completa
+- `apps/web/app/_design/data.ts:64`: el mosaico **"Uniformes — Inventario y mostrador"** ya
+  está en el menú
+
+Caí en el antipatrón que yo mismo señalé en el chequeo retrospectivo: **creerle a un documento
+de costos desactualizado en vez de mirar el árbol.** Es una lección, no solo un bug.
+
+Costo de negocio: inventario y venta en mostrador es de lo **más tangible** que se le puede
+enseñar a una administradora escolar — se ve, se toca, se entiende sin explicación. Y de
+pilón, su ausencia **tumba la semilla** (F4) y deja un mosaico muerto en el menú (F16).
+
+**Decisión (P1 + P2):** desplegar `uniforms` como **noveno servicio backend**. Ya tiene
+Dockerfile. Faltan ~30 líneas: bloque `module "uniforms"`, paso de imagen en `cloudbuild.yaml`,
+`UNIFORMS_BASE_URL` en `gateway_env`, y `uniforms` en `ENABLED_MODULES`.
+**Los stubs reales son tres: `billing`, `scholarships`, `docs`.**
+
+#### 🔴 F4 — CRÍTICO: la Fase C paso 8 es imposible tal como la escribí
+
+Escribí *"sembrar con `pnpm demo:ready` apuntado a Cloud SQL"*. **Se rompe por tres lados
+independientes**, los tres verificados:
+
+1. `package.json:17` — `demo:ready` = `demo:verify && demo:seed && demo:smoke`, y
+   `demo:verify` corre la suite Playwright desde cero, que **vacía la base**. Mi propio
+   `CLAUDE.md` advierte esto y aun así lo escribí mal. (Confirma el Hallazgo 4.1 desde otro
+   ángulo, y lo empeora: no es un riesgo futuro, **está en el runbook.**)
+2. `scripts/reset-demo-db.sh:41` — llama `docker exec -i "$CONTAINER" psql`
+   incondicionalmente. **No puede apuntar a Cloud SQL de ninguna manera.** El comentario de
+   cabecera que dice que funciona "anywhere else" es mentira; hay que borrarlo.
+3. `scripts/seed-demo.mjs:434-469` — la semilla llama `/api/v1/uniforms/…`. Sin uniforms
+   desplegado, 404 → la semilla revienta → **escuela a medio sembrar.**
+
+**Decisión (P1):** `scripts/seed-cloud.mjs`, **solo siembra**, contra el proxy de Cloud SQL, y
+se **ensaya contra la base real 48 h antes de la junta**. Corregir el comentario falso.
+
+#### 🟡 F6 — `module_tuition` no existe. Me equivoqué otra vez.
+
+Mi B6 decía agregar `teachers,tuition`. **`FLAGS.md:24` dice lo contrario, con todas sus
+letras:** *"M15 (colegiaturas) rides on THIS flag, not one of its own — the plan reserved
+`module_tuition`, and building it showed the split had no reader."* Y `grep 'Protect("'` en el
+gateway confirma que no hay guard de `tuition`. Colegiaturas ya funciona bajo `module_finance`.
+
+**Correcto:** `ENABLED_MODULES = "iam,gateway,students,config,grades,finance,attendance,comms,teachers,uniforms"`
+
+#### 🟡 F8 — Dos variables que el gateway lee y Terraform no le da
+
+Verificado: `services/gateway/cmd/main.go:71` lee `UNIFORMS_BASE_URL`; `:118` lee `WEB_ORIGIN`
+(la allowlist de CORS). Ninguna está en `local.gateway_env`. Con el proxy de mismo origen CORS
+es irrelevante — pero **la app móvil sí pega directo al gateway**, y sin `WEB_ORIGIN` su
+login falla con un síntoma idéntico a B3. **Decisión:** agregar ambas.
+
+#### 🔴 F9 — Nada acota el pool de conexiones. Confirma y agrava el Hallazgo 7.1.
+
+`grep -rn "SetMaxOpenConns\|SetMaxIdleConns" services pkg` → **cero resultados.**
+`database/sql` de Go abre conexiones **sin límite** por defecto. 9 servicios × hasta 3
+instancias × pool ilimitado, contra las ~25 conexiones de `db-f1-micro`.
+`FATAL: remaining connection slots are reserved`, intermitente, primero bajo la semilla
+(que corre con 8 en paralelo) y después con el director haciendo clic.
+**Decisión (P2, un solo cambio en `pkg/dbdsn`):** `SetMaxOpenConns(3)`, `SetMaxIdleConns(1)`,
+`SetConnMaxIdleTime(1m)`.
+
+#### 🔴 F10 — El guardia contra `min_instances` es un ojo humano
+
+Mi Fase B paso 4 decía *"revisar a mano que ningún `min_instances` sea > 0"*.
+**Ese es exactamente el control que falló en Heraldo.** Una revisión manual no es un control;
+es una intención.
+
+**Decisión (P1 — es la pieza que hace que "esto no puede repetirse" sea verdad y no un deseo):**
+un `lifecycle.precondition` en el módulo `cloud_run` que **falle el apply** si
+`var.env != "prod"` y `min_instances > 0`, más un gate de `grep` en CI. Gratis, permanente.
+
+#### 🟡 F11 — El presupuesto solo avisa, y avisar ya falló una vez
+
+`budget.tf` no tiene `pubsub_topic`. Un correo a las 3 a.m. no detiene una tormenta de
+reintentos de Pub/Sub ni un Cloud Build desbocado. **Al dueño lo quemó una cuenta silenciosa;
+las alertas son precisamente el control que no lo salvó.** → decisión de gusto, va a la puerta.
+
+#### 🔴 F14 — El paso de deploy de Cloud Build no tiene permisos
+
+Verificado: en `deploy/terraform/*.tf` solo aparece `cloudbuild.googleapis.com` como API.
+**No hay ni un `roles/run.admin` ni un `roles/iam.serviceAccountUser`** para la cuenta de
+servicio de Cloud Build. El paso `_DEPLOY=true` (`cloudbuild.yaml`, step `deploy`) va a fallar
+con permiso denegado en la primera corrida. Además `timeout: 1800s` para lint + `go test -race`
+de todo el workspace + `govulncheck` + `pnpm turbo build` + **9** builds de Docker en una
+e2-medium es optimista. **Decisión:** otorgar ambos roles, subir el timeout a `3600s`, y hacer
+de `gcloud builds submit` a mano el camino **por defecto** en la primera corrida.
+
+#### 🔴 F15 — El arranque en frío es el riesgo real de la junta, y es barato de matar
+
+Con `min=0`, `cpu_idle=true` y **`startup_cpu_boost = false`**, el primer clic encadena:
+web frío → gateway frío → iam frío → primera conexión a Cloud SQL. Y **cada** primer toque de
+cada módulo es otro arranque en frío independiente. Realista: 5-15 s el login, 3-8 s por
+módulo nuevo. Una directora de colegio privado lee eso como *"no está terminado"*.
+
+**El arreglo cuesta unos seis centavos de dólar:**
+
+```
+scripts/demo-warm.sh   # min-instances=1 en web,gateway,iam + un curl a cada módulo
+scripts/demo-cold.sh   # min-instances=0 en todo   (correr al terminar la junta)
+```
+
+Tres servicios calientes durante una ventana de 3 horas ≈ **$0.06**. Se corre `demo-warm.sh`
+15 minutos antes, se pasea por cada módulo una vez, y `demo-cold.sh` al terminar.
+**Elimina el riesgo entero sin tocar el costo en reposo.** Y `startup_cpu_boost = true` en
+web/gateway/iam: con `min=0` **solo se cobra durante el arranque**, así que en reposo no cuesta
+nada y acorta justo el camino que el director sí experimenta.
+
+Esto **supera a mi E4**: E4 tapaba la espera con una pantalla; F15 **la elimina**. Se aceptan
+las dos — E4 para el visitante casual que abra la liga un martes cualquiera, F15 para la junta.
+
+#### 🟡 F16 — Mosaicos muertos en el menú
+
+`apps/web/app/_design/data.ts` renderiza **Becas** (56), **Facturación/CFDI** (65) y
+**Reportes** (66) con sus flags apagadas → los tres caen en `ModulePlaceholder`. Solo
+`documents` está marcado `hidden: true` (58). El director va a hacer clic en al menos uno.
+**Decisión (P1, es la cara del producto):** desplegar uniforms (F5) y marcar
+`hidden: true` en becas/facturación/reportes para el build de demo.
+
+#### ✅ F17 — El idioma no es riesgo (verificado limpio)
+
+`packages/i18n/src/locales.ts:21`: `DEFAULT_LOCALE = "es"`, mapeado a `es-MX`. Un navegador
+nuevo en la escuela abre en español. Sin acción.
+
+#### F2 — La aritmética de Heraldo: el subagente ve una contradicción; en realidad son dos configuraciones distintas
+
+Señala que mis **$6.80/servicio** y los **$95-100** de `COST-AND-DEPLOY.md:20-21` difieren 7x
+sin reconciliar. Tiene razón en que **no estaba reconciliado**. Pero no es un error de
+aritmética — **son escenarios distintos, y reconciliarlos mejora el argumento**:
+
+| Escenario | `cpu_idle` | Tarifa de CPU | Costo/servicio/mes |
+|---|---|---|---|
+| **Heraldo hoy** (medido: sin anotación `cpu-throttling` ⇒ throttling ON) | `true` | tarifa *idle* | **~$6.80** |
+| **García Lorca con el TF tal como está** (`services.tf:47-54`, `cpu_idle = false`) | `false` | tarifa **activa 24/7** | **~$62** |
+
+**La conclusión que se desprende es más fuerte que la que yo escribí:** si se aplicara el
+Terraform **tal como está hoy**, García Lorca costaría **~$124/mes en gateway+iam solos —
+más del doble que Heraldo.** El `dev.tfvars` no es una optimización opcional; es lo único que
+separa este proyecto de un problema **peor** que el que se quiere evitar.
+
+**Decisión (P1, acepta el fondo del hallazgo):** el reporte de facturación de Heraldo por SKU
+**sube a Fase 0 y es bloqueante** — 5 minutos, gratis, y cierra el único supuesto que sigue
+abierto. Y `COST-AND-DEPLOY.md` se corrige para que las dos cifras convivan explicadas (E6).
+
+#### F1 — Desafío al vehículo: ¿GCP es siquiera el medio correcto para una demo?
+
+Propone dos caminos nunca analizados: (a) la demo de `docker compose` en la laptop, que **ya
+existe y está verificada con Playwright**; (b) una VM `e2-micro` de la capa siempre-gratis
+corriendo el mismo `docker-compose.yml`, con URL pública a **$0/mes** — por debajo del piso de
+$10 de este plan.
+
+**Es la objeción más fuerte de la revisión y merece ir a la puerta final.** Mi lectura honesta,
+para que decidas con los dos lados:
+
+- **La `e2-micro` es más frágil de lo que suena.** Tiene **1 GB de RAM**. Nueve servicios Go
+  (~400 MB) + Postgres (~200 MB) + Next.js (~150 MB) ≈ 750 MB antes de atender un solo
+  request. Va a estar al borde del OOM. Y desde 2024 GCP **cobra la IP externa IPv4** (~$3.60/mes),
+  así que el "$0" tampoco es exacto.
+- **Tira el camino a producción.** La escuela (D4) va a querer una nube de verdad. Ese trabajo
+  se haría dos veces.
+- **Pero la demo en laptop sí es una jugada legítima — como red, no como reemplazo.** Para la
+  junta en sí, tiene cero modos de falla. Nada impide tenerla lista *y* desplegar en GCP.
+
+---
+
+## TABLA DE CONSENSO — VOCES DUALES (CEO)
+
+```
+═══════════════════════════════════════════════════════════════════════
+  Dimensión                              Claude   Codex   Consenso
+  ─────────────────────────────────────  ───────  ──────  ────────────
+  1. ¿Premisas válidas?                  NO       N/A     ⚠️ 1 voz: 3 premisas
+                                                           mías refutadas (F4/F5/F6)
+  2. ¿Es el problema correcto?           PARCIAL  N/A     ⚠️ 1 voz: vehículo
+                                                           cuestionado (F1) → puerta
+  3. ¿Alcance bien calibrado?            NO       N/A     ⚠️ 1 voz: faltan 6 tareas
+                                                           (F3/F5/F9/F10/F14/F15)
+  4. ¿Alternativas exploradas?           NO       N/A     ⚠️ 1 voz: e2-micro y
+                                                           laptop no analizadas
+  5. ¿Riesgos de negocio cubiertos?      NO       N/A     ⚠️ 1 voz: arranque en frío
+                                                           y mosaicos muertos (F15/F16)
+  6. ¿Trayectoria a 6 meses sana?        PARCIAL  N/A     ⚠️ 1 voz: sin ruta de datos
+                                                           demo→prod (F12)
+═══════════════════════════════════════════════════════════════════════
+CONFIRMADO = ambas coinciden. Codex ausente ⇒ N/A, nunca CONFIRMADO.
+Hallazgo crítico de una sola voz = se marca igual. **F3 y F5 son de ese tipo,
+y los dos resultaron ciertos al verificarlos contra el árbol.**
+Modo: [subagent-only] — cobertura cross-model NO obtenida en esta corrida.
+```
+
+**Lectura honesta de esta tabla:** con una sola voz externa no hay consenso que reportar, y
+el valor del ejercicio se sostiene en que **verifiqué cada hallazgo contra el código** en vez
+de creerle. Los seis renglones en ⚠️ significan que la voz externa encontró algo real en las
+seis dimensiones — no que haya acuerdo entre modelos.
