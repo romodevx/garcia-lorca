@@ -568,3 +568,539 @@ aceptar 2-5 s en blanco. Gente sensata discreparía sobre si vale el trabajo.
 ## 0F. Confirmación de modo
 
 **SELECTIVE EXPANSION** con **ENFOQUE B**, más E2/E3/E4/E5/E6 aceptadas y E1 diferida.
+
+---
+
+## Sección 1 — Arquitectura
+
+### Grafo de dependencias, antes y después
+
+```
+ANTES (solo local)                        DESPUÉS (GCP dev)
+──────────────────                        ─────────────────
+navegador                                 navegador
+   │ localhost:3002                          │ https://web-….run.app
+   ▼                                         ▼
+ web (pnpm dev)                          ┌────────────────┐
+   │ localhost:8080  (mismo sitio        │ web (Cloud Run)│ ← COMPONENTE NUEVO
+   ▼                  por ser localhost) │  Route Handler │
+ gateway                                 │  /api/[...] ───┼──┐
+   │                                     └────────────────┘  │ HTTPS, público
+   ▼                                                          ▼
+ 7 servicios ── postgres (compose)        ┌──────────────────────┐
+                                          │ gateway (Cloud Run)  │
+                                          └──────────┬───────────┘
+                                                     │ OIDC (runtime SA)
+                          ┌──────────┬───────┬───────┼────────┬──────────┬────────┐
+                          ▼          ▼       ▼       ▼        ▼          ▼        ▼
+                        iam      students  config  grades  finance  attendance  comms
+                          └──────────┴───────┴───────┴────────┴──────────┴────────┘
+                                              │ socket /cloudsql
+                                              ▼
+                                       Cloud SQL (garcia-lorca-dev)
+                                              ▲
+                                     Pub/Sub push (OIDC) ──┘
+                                     payment · student · attendance events
+```
+
+**Acoplamiento nuevo:** exactamente uno, `web → gateway`. Justificado: es la única forma de
+que las cookies `SameSite=Strict` vivan en un solo origen sin comprar un dominio ni un
+balanceador. No introduce ciclos: el grafo de Terraform sigue siendo un DAG
+(`config` y `iam` son hojas; `web` es la nueva raíz).
+
+### Hallazgo 1.1 — 🔴 CRÍTICO: el proxy no puede ser un `rewrite`
+
+Un `rewrites()` de Next.js se resuelve en **build** y se congela en `routes-manifest.json`.
+La URL del gateway solo existe **después** del `terraform apply`. Eso crea un huevo-y-gallina:
+no se puede construir la imagen del web hasta que exista el gateway, pero Terraform quiere
+la imagen para crear el servicio.
+
+**Decisión (P5 explícito sobre listo):** un **Route Handler catch-all**
+`apps/web/app/api/[...path]/route.ts` que lee `process.env.GATEWAY_URL` **en cada request**.
+Elimina el orden de despliegue por completo: cambiar el gateway es
+`gcloud run services update web --set-env-vars GATEWAY_URL=…`, no reconstruir la imagen.
+~40 líneas. Rechazadas: el apply en dos fases (frágil, `-target` es una trampa) y confiar en
+que Cloud Run dé una URL predecible (**Heraldo demuestra que no**:
+`heraldo-api-ugvhpcz6ja-uc.a.run.app` trae hash aleatorio).
+
+### Hallazgo 1.2 — 🔴 CRÍTICO: el proxy pierde una de las dos cookies
+
+El gateway manda **dos** cabeceras `Set-Cookie` (`auth.go:88-105`): `gl_access` en `Path=/`
+y `gl_refresh` en `Path=/api/v1/auth`. Un proxy escrito de la manera obvia
+(`res.headers.get("set-cookie")`) **une las dos en un solo string** y el navegador guarda una
+sola cookie malformada. Resultado: el login parece funcionar y la sesión **muere a los ~15
+minutos** sin poder renovarse. Falla silenciosa, tardía, y clavada justo a la mitad de una
+demostración.
+
+**Decisión (P1 completitud):** el handler usa `res.headers.getSetCookie()` (array) y reemite
+cada cookie por separado. **Test obligatorio primero**: una respuesta upstream con dos
+`Set-Cookie` debe salir con dos.
+
+### Las cuatro rutas del flujo de datos nuevo (navegador → web → gateway)
+
+```
+  FELIZ:   browser → /api/v1/auth/login → Route Handler → gateway → iam
+           ← 200 + 2 Set-Cookie ← reemitidas por separado ← cookies en el origen del web ✅
+
+  NULA:    NEXT_PUBLIC_API_URL sin definir en el build
+           → AppShell.tsx:38 `?? "http://localhost:8080"`
+           → el navegador del director marca a SU propio localhost → connection refused
+           → 🔴 APP MUERTA, sin un solo log del lado servidor
+
+  VACÍA:   NEXT_PUBLIC_API_URL = "" (que es lo que QUEREMOS para el mismo origen)
+           → flags-provider.tsx:29 `IS_DESIGN_DEMO = true`
+           → nunca llama a /features, usa DEMO_FLAGS
+           → 🔴 LA ESCUELA VE DATOS FALSOS creyendo que son suyos
+
+  ERROR:   GATEWAY_URL apunta a un gateway frío o caído
+           → fetch del Route Handler falla
+           → hoy: 500 sin cuerpo. La UI muestra pantalla en blanco.
+           → 🟡 GAP: debe devolver 502 con JSON y que la UI lo distinga de "no autenticado"
+```
+
+**Las rutas NULA y VACÍA son las dos peores del plan porque ninguna hace ruido.** Violan la
+Directiva 1 (cero fallas silenciosas). Ambas se arreglan con el mismo cambio: dejar de
+usar el string vacío como interruptor de modo.
+
+### Hallazgo 1.3 — 🔴 CRÍTICO: `IS_DESIGN_DEMO` sobrecarga el string vacío
+
+`flags-provider.tsx:27-29` decide "¿hay gateway?" preguntando `API_URL === ""`. Pero `""` es
+exactamente el valor que necesitamos para hacer llamadas relativas al mismo origen
+(`auth/api.ts:28` hace `baseURL.replace(/\/+$/,"") + path`, así que `"" + "/api/v1/me"` da
+justo la URL relativa correcta). Un mismo valor significa dos cosas opuestas.
+
+**Decisión (P5 explícito):** un flag propio, `NEXT_PUBLIC_DESIGN_DEMO === "true"`.
+`NEXT_PUBLIC_API_URL=""` pasa a significar solo "mismo origen". Cambio de 2 líneas.
+**Test primero:** con `API_URL=""` y sin el flag de demo, el provider DEBE llamar a
+`/features`.
+
+### Máquina de estados: ciclo de vida de una instancia Cloud Run (min=0)
+
+```
+        ┌──────────────────────────────────────────────────┐
+        │                                                  │
+        ▼                                                  │
+   ┌─────────┐  request  ┌──────────┐  listo  ┌─────────┐  │ ~15 min
+   │  CERO   │ ────────▶ │ ARRANQUE │ ──────▶ │ SIRVE   │  │ sin tráfico
+   │ ($0.00) │           │ 2-5 s    │         │         │ ─┘
+   └─────────┘           └──────────┘         └─────────┘
+        ▲                      │                    │
+        │                      │ la imagen          │ 5xx
+        │                      │ no arranca         ▼
+        │                      ▼               ┌─────────┐
+        └───────────────  ┌──────────┐         │ Cloud   │
+                          │  FALLA   │         │ Run     │
+                          │ 503 al   │         │ reinicia│
+                          │ usuario  │         └─────────┘
+                          └──────────┘
+
+  Transición imposible: CERO ──▶ SIRVE directo. Cloud Run ENCOLA el request
+  durante ARRANQUE (no lo pierde). Por eso Pub/Sub push funciona con min=0:
+  el POST despierta el servicio y el ack_deadline de 30 s cubre los 2-5 s de arranque.
+```
+
+### Escalado, puntos únicos de falla, seguridad
+
+- **Qué truena primero a 10x:** nada de cómputo. `gateway_max_instances = 1` en dev es un
+  techo duro: al pasar de ~200 requests concurrentes (`concurrency = 200`) los siguientes se
+  encolan. Para una demo de una escuela es holgadísimo. A 100x, el techo es
+  `db-f1-micro` (~25 conexiones), no Cloud Run.
+- **SPOF:** Cloud SQL (una zona). Aceptado para dev; prod usa REGIONAL. Segundo SPOF nuevo:
+  **el servicio `web`** — si no arranca, no hay demo aunque los 8 backends estén sanos.
+- **Superficie de ataque nueva:** exactamente un endpoint público nuevo, el catch-all
+  `/api/[...path]` del web. **Es un proxy: hay que acotarlo a la lista de rutas del gateway,
+  no reenviar cualquier cosa.** Ver Sección 3.
+
+### Postura de rollback
+
+| Qué falló | Cómo se revierte | Cuánto tarda |
+|---|---|---|
+| Una imagen mala | `gcloud run services update-traffic <svc> --to-revisions=<previa>=100` | ~30 s |
+| Terraform mal aplicado | `terraform apply` con el tfvars anterior | ~5 min |
+| Migración mala | ❌ **No hay rollback.** Ver Hallazgo 9.1 | — |
+| El gasto se dispara | `make demo-down` (E2) | ~1 min |
+
+**Belleza / potencial de plataforma:** el Route Handler proxy no es solo un parche de cookies
+— es **la frontera de origen único** de la aplicación. Cuando llegue el dominio propio de la
+escuela, o un segundo cliente web, la frontera ya existe y solo cambia `GATEWAY_URL`.
+
+---
+
+## Sección 2 — Mapa de errores y rescates
+
+### Registro de errores y rescates
+
+| Ruta de código | Qué puede salir mal | Clase de error |
+|---|---|---|
+| `app/api/[...path]/route.ts` (nuevo) | `GATEWAY_URL` sin definir | `TypeError: Invalid URL` |
+| | gateway frío, tarda >10 s | `fetch` timeout / `AbortError` |
+| | gateway devuelve 5xx | (no lanza; `res.ok === false`) |
+| | ruta fuera de la lista permitida | — (debe rechazarse) |
+| | dos `Set-Cookie` unidas | (silencioso, ver 1.2) |
+| `fetchFeatures` (`features.ts:14`) | gateway inalcanzable | `TypeError: Failed to fetch` |
+| | HTTP no-2xx | `Error("features: HTTP nnn")` |
+| `login` (`auth/api.ts:32`) | HTTP no-2xx | `Error("login: HTTP nnn")` |
+| `me` (`auth/api.ts:51`) | 401 sin sesión | `Error("me: HTTP 401")` |
+| `scripts/migrate-cloudsql.sh` (nuevo) | proxy de Cloud SQL no levanta | exit ≠ 0 |
+| | un `.sql` falla a mitad | `psql` `ON_ERROR_STOP=1` |
+| Arranque de cualquier servicio Go | `DB_PASSWORD` no está en Secret Manager | pánico al boot |
+| Push de Pub/Sub | el consumidor no arranca | reintento → DLQ tras 5 |
+
+| Clase de error | ¿Rescatado? | Acción de rescate | Qué ve el usuario |
+|---|---|---|---|
+| `Invalid URL` (GATEWAY_URL vacío) | **N ← GAP** | — | 500 en blanco |
+| `AbortError` (gateway frío) | **N ← GAP** | — | Pantalla en blanco durante 2-5 s |
+| gateway 5xx | **N ← GAP** | — | Se propaga el body crudo |
+| ruta no permitida | **N ← GAP** | — | Se reenvía al gateway |
+| `Set-Cookie` unidas | **N ← GAP CRÍTICO** | — | **Nada. La sesión muere a los 15 min.** |
+| `features: HTTP nnn` | **Y** | `.catch(() => {})`, conserva DEMO_FLAGS | Módulos apagados (default-deny) |
+| `login: HTTP nnn` | **Y** | `AppShell.tsx` muestra el error | Mensaje de error en el login |
+| `me: HTTP 401` | **Y** | intenta `refresh`, luego pantalla de login | Pantalla de login |
+| migración fallida | **Y** (`ON_ERROR_STOP=1`) | corta al primer error | Salida en la terminal |
+| `DB_PASSWORD` ausente | **Y** (falla al arrancar) | Cloud Run no promueve la revisión | 503 |
+| consumidor caído | **Y** | backoff → DLQ tras 5 intentos | La notificación no llega |
+
+**5 GAPs, todos en el Route Handler nuevo — el único código nuevo del plan.** Es coherente:
+lo ya construido tiene su manejo de errores; lo que falta es lo que aún no se escribe.
+
+### Decisiones automáticas (P1 completitud — se cierran los 5 GAPs)
+
+| Gap | Rescate decidido | Qué verá el usuario |
+|---|---|---|
+| `GATEWAY_URL` vacío | Validar al arrancar el módulo y **fallar el boot** con mensaje claro | La revisión nunca se promueve (mejor que una demo rota) |
+| gateway frío | `AbortSignal.timeout(30_000)` + reintento 1 vez | La pantalla de "despertando" de E4 |
+| gateway 5xx | Reenviar el status, envolver en `{"error":"gateway_unavailable"}` | Mensaje distinguible de "no autenticado" |
+| ruta no permitida | Prefijo permitido `/api/v1/` únicamente; el resto → 404 | 404 |
+| `Set-Cookie` unidas | `getSetCookie()` + reemitir una por una, **con test primero** | Sesión que sí dura |
+
+Nada de `catch` genérico. Cada error tiene nombre, rescate y consecuencia visible.
+
+---
+
+## Sección 3 — Seguridad y modelo de amenazas
+
+| # | Amenaza | Probab. | Impacto | ¿El plan la mitiga? |
+|---|---|---|---|---|
+| S1 | **El Route Handler es un proxy abierto**: sin restricción reenvía cualquier ruta al gateway, y la petición sale **desde dentro de la red de Cloud Run** | Media | **Alta** | ❌ → mitigado por decisión: solo prefijo `/api/v1/`, y `GATEWAY_URL` fijo por env (nunca tomado del request) |
+| S2 | Cloud SQL con IP pública (fix de B1) expuesta a internet | Baja | Alta | ✅ `authorized_networks` vacío + `ssl_mode` obligatorio; solo entra IAM vía proxy |
+| S3 | `OWNER_TEMP_PASSWORD` filtrado en el historial de shell o en tfvars | Media | **Alta** | ✅ `TF_VAR_owner_temp_password` en la invocación, `seed_owner_secret`; rotación forzada al primer login (`mustChangePassword`) |
+| S4 | Bucket de estado de Terraform con secretos legible | Baja | Alta | ⚠️ **GAP**: el plan no exige acceso uniforme + versioning + sin acceso público. Añadir al runbook. |
+| S5 | El proxy reenvía la cabecera `Host` del cliente y el gateway confía en ella | Baja | Media | ⚠️ **GAP**: no reenviar `host`; dejar que `fetch` ponga el del destino |
+| S6 | Falsificación de push de Pub/Sub | Baja | Alta | ✅ Ya cerrado: OIDC + el handler exige `email == PUBSUB_PUSH_SA_EMAIL` |
+| S7 | Escalada de privilegios entre servicios | Baja | Alta | ✅ `run.invoker` por servicio, no a nivel proyecto; SA de push separada del SA de runtime |
+| S8 | Datos reales de menores en una demo pública | **Media** | **Alta** | ❌ **GAP NO CUBIERTO** — ver abajo |
+| S9 | La URL de la demo se indexa en buscadores | Media | Media | ❌ **GAP**: sin `robots.txt` / `X-Robots-Tag` |
+| S10 | Fuerza bruta al login desde internet | Media | Media | ⚠️ Hay rate limiting **in-process**; con `max_instances=1` es correcto, pero el proxy hace que **todo el tráfico llegue con la IP del servicio web**, no la del cliente → el limitador pierde su discriminante |
+
+### Hallazgo 3.1 — 🔴 S8: la demo va a tener nombres de niños reales
+
+`pnpm demo:ready` siembra 400 alumnos y 20 docentes. Si esos nombres son reales, quedan en
+una base en la nube, en una URL pública, en la cuenta personal del dueño, sin contrato de
+tratamiento de datos con la escuela. Eso es un problema legal antes que técnico.
+
+**Decisión (P1 + seguridad no es opcional):** la semilla de demo usa **nombres sintéticos
+verosímiles**, nunca el padrón real. Verificar qué genera hoy `scripts/` de demo. Si genera
+nombres reales, es bloqueante. Se documenta explícitamente en el runbook.
+
+### Hallazgo 3.2 — 🟡 S10: el proxy ciega al limitador de intentos de login
+
+Con el Route Handler en medio, el gateway ve todos los logins llegando del mismo origen. Si
+el limitador discrimina por IP, deja de servir; si discrimina por email, sigue bien.
+**Decisión (P3 pragmático):** verificar cuál usa `services/gateway` durante la
+implementación. Si es por IP, reenviar `X-Forwarded-For` desde el Route Handler. Una línea.
+
+**Validación de entradas:** el plan no agrega ningún campo de usuario nuevo. El único input
+nuevo es el **path** del proxy, y se acota por allowlist de prefijo (S1). Sin inyección SQL
+nueva (no hay consultas nuevas). Sin dependencias npm/Go nuevas: el Route Handler usa `fetch`
+nativo. **Riesgo de dependencias: cero.**
+
+**Bitácora de auditoría:** el proxy debe registrar método, path, status y duración por
+request — hoy no existe nada. Ver Sección 8.
+
+---
+
+## Sección 4 — Flujo de datos y casos borde de interacción
+
+```
+  ENTRADA ────▶ VALIDACIÓN ────▶ REENVÍO ────▶ RESPUESTA ────▶ COOKIES
+     │              │                │              │              │
+     ▼              ▼                ▼              ▼              ▼
+  [¿path?]     [¿prefijo         [¿GATEWAY_URL   [¿5xx?]      [¿2 Set-Cookie?]
+  [¿body?]      /api/v1/?]        vacío?]        [¿body       [¿Path correcto?]
+  [¿método?]   [¿método            [¿timeout?]    vacío?]      [¿Secure?]
+                permitido?]        [¿DNS?]       [¿stream?]
+```
+
+| Interacción | Caso borde | ¿Cubierto? | Cómo |
+|---|---|---|---|
+| Primer login del día | Web y gateway **ambos fríos**: 2 arranques encadenados, 4-8 s | ❌ → **E4** | Estado "despertando…" tras 800 ms |
+| Login | Doble clic en Entrar | ⚠️ | Deshabilitar el botón mientras la petición vuela (verificar `AppShell.tsx`) |
+| Login | Correcto pero la sesión muere a los 15 min | ❌ → **1.2** | `getSetCookie()` |
+| Restaurar sesión al abrir | `me()` 401 → `refresh()` → `me()` | ✅ | `AppShell.tsx:122-134` |
+| Navegar a un módulo | El módulo está OFF en `ENABLED_MODULES` | ✅ | `ModulePlaceholder` amable |
+| Ir a **Docentes** | `teachers` **no está** en `ENABLED_MODULES` | ❌ → **B6** | Módulo ausente del menú |
+| Listado de alumnos | 400 resultados | ✅ | Lectura acotada (tope 500) |
+| Listado de alumnos | Cero resultados (base sin sembrar) | ❌ → **E3** | Sembrar siempre al desplegar |
+| Cualquier pantalla | El gateway se durmió mientras el director leía | ❌ → **E4** | Reintento + aviso |
+| Corrida de facturación | Se dispara dos veces | ✅ | Idempotente por `external_ref` |
+| Push de Pub/Sub | Llega mientras `comms` arranca | ✅ | Encolado + ack 30 s |
+| Migraciones | Se corren dos veces | ✅ | Ledger `schema_migrations` |
+| Migraciones | `demo:verify` **después** de sembrar | ❌ → **GAP** | **Vacía la base.** El script debe negarse a correr contra Cloud SQL |
+
+### Hallazgo 4.1 — 🔴 `demo:verify` puede vaciar la base de la demo
+
+`.claude/docs/DEMO.md` advierte que **`demo:verify` vacía la base**. Ese comando hoy solo
+conoce el Postgres local. Cuando exista una demo en la nube, un `pnpm demo:verify` distraído
+con el env apuntando a Cloud SQL **borra la escuela** — probablemente la noche anterior a la
+junta. Que la advertencia viva en un `.md` no es una salvaguarda.
+
+**Decisión (P1 completitud):** el script se niega a correr si el host de la base no es
+local, salvo que se pase `--i-know-this-wipes-prod`. Es la barandilla más barata del plan.
+
+---
+
+## Sección 5 — Calidad de código
+
+- **DRY:** `const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080"` está
+  repetido **al menos 3 veces** (`AppShell.tsx:38`, `_screens/Dashboard.tsx:12`,
+  `_screens/attendance/usePassList.ts:17`) y una cuarta con default distinto
+  (`flags-provider.tsx:27` usa `?? ""`). **Cuatro copias, dos defaults distintos.** Justo el
+  tipo de duplicación que produce el bug 1.3.
+  **Decisión (P4 DRY):** un solo `apps/web/app/api-url.ts` que exporte el valor resuelto, y
+  los cuatro sitios lo importan. Cambio mecánico, hace imposible que los defaults diverjan.
+- **Nombres:** `IS_DESIGN_DEMO` nombra el *qué* pero se deriva del *cómo* (string vacío).
+  Renombrar la fuente, no la constante (ver 1.3).
+- **Sobre-ingeniería:** ninguna. El Route Handler es la pieza mínima; la alternativa
+  (balanceador + dominio) es más infraestructura por el mismo resultado.
+- **Sub-ingeniería:** el Route Handler tal como se describiría "obvio" es frágil en cookies,
+  timeouts y allowlist. Los tres se cierran arriba.
+- **Complejidad ciclomática:** el handler ramifica ~4 veces (método, allowlist, timeout,
+  set-cookie). Bajo el umbral de 5. Sin refactor.
+- **Ajuste al patrón existente:** el módulo `web` en Terraform copia el bloque `students`
+  cambiando el nombre y quitando Cloud SQL. Exactamente lo que el comentario de
+  `services.tf:12-14` dice que hay que hacer.
+
+---
+
+## Sección 6 — Pruebas
+
+```
+  FLUJOS DE UX NUEVOS
+    - Primera visita del día con web y gateway fríos (E4)
+    - Login a través del proxy de mismo origen
+
+  FLUJOS DE DATOS NUEVOS
+    - navegador → Route Handler → gateway → servicio (ida)
+    - gateway → Route Handler → navegador, con DOS Set-Cookie (vuelta)
+
+  RUTAS DE CÓDIGO NUEVAS
+    - route.ts: allowlist de prefijo / método / timeout / reemisión de cookies
+    - api-url.ts: resolución única de la URL base
+    - flags-provider: IS_DESIGN_DEMO desde flag propio, no desde string vacío
+
+  TRABAJO ASÍNCRONO NUEVO
+    - ninguno (Pub/Sub ya existía y ya está probado)
+
+  INTEGRACIONES NUEVAS
+    - web → gateway por HTTPS
+    - laptop → Cloud SQL por Auth Proxy (migraciones)
+
+  RUTAS DE ERROR NUEVAS
+    - los 5 GAPs de la Sección 2
+```
+
+| Qué | Tipo | ¿Existe? | Feliz | Falla | Borde |
+|---|---|---|---|---|---|
+| `route.ts` reemite 2 cookies | Unit (Vitest) | ❌ **escribir primero** | upstream 2 `Set-Cookie` → salida 2 | upstream 0 cookies → salida 0 | cookie con `;` y `=` en el valor |
+| `route.ts` allowlist | Unit | ❌ escribir primero | `/api/v1/me` → 200 | `/admin` → 404 | `/api/v1/../../x` (traversal) |
+| `route.ts` timeout | Unit | ❌ escribir primero | responde <30 s | upstream cuelga → 504 | reintento exactamente 1 vez |
+| `api-url.ts` | Unit | ❌ escribir primero | `""` → relativo | sin definir → **falla ruidosa**, no localhost | `"https://x/"` → sin barra doble |
+| `flags-provider` con `API_URL=""` | Unit | ⚠️ existe, **hay que invertirlo** | llama a `/features` | gateway caído → default-deny | flag de demo puesto → no llama |
+| Login E2E contra la demo | E2E (Playwright) | ❌ escribir | login → dashboard | credencial mala → error | recarga tras 20 min → sigue con sesión |
+| Docentes visible | E2E | ❌ escribir | menú muestra Docentes | — | — |
+
+**La prueba que da confianza para desplegar un viernes a las 2 am:** un E2E que abre la
+demo **fría** (sin tráfico previo), hace login, espera 20 minutos, recarga, y sigue
+autenticado. Cubre a la vez el arranque en frío, el proxy, y el bug de las dos cookies —
+los tres riesgos nuevos del plan, en un solo test.
+
+**Lo que escribiría un QA hostil:** mandar `POST /api/v1/../../../secret` por el proxy y ver
+si sale de la allowlist.
+
+**Prueba de caos:** matar el gateway a media sesión y confirmar que la UI dice "servicio no
+disponible" y no una pantalla en blanco.
+
+**Pirámide:** 4-5 unitarias, 0 de integración nuevas, 2 E2E. Correcta (base ancha).
+**Riesgo de flakiness:** el E2E de arranque en frío **depende del tiempo por diseño**. Se
+acota con un timeout generoso y se marca como no-paralelizable; no se le pone un umbral de
+latencia estricto que lo vuelva intermitente.
+
+---
+
+## Sección 7 — Rendimiento
+
+- **N+1 / índices:** el plan **no agrega ni una consulta**. No aplica. Sin cambios de esquema.
+- **La ruta lenta nueva, y es la que ve el cliente:**
+
+```
+  Primera visita del día (todo en cero):
+    DNS + TLS                     ~200 ms
+    arranque del web (standalone) ~1.5-2.5 s
+    arranque del gateway          ~1-2 s      ← encadenado, no en paralelo
+    arranque de iam (login)       ~1-2 s      ← encadenado
+    consulta a Cloud SQL          ~50 ms
+                                  ─────────────
+    p99 del primer login          ~4-7 s
+    Visitas siguientes (calientes) ~150-300 ms
+```
+
+  **Este es el precio exacto de los $0 en reposo, y es un precio de venta, no técnico.**
+- **Presión sobre el pool de conexiones:** 7 servicios × su pool contra `db-f1-micro`
+  (~25 conexiones). Con `max_instances=3` por servicio el techo teórico supera el límite.
+  🟡 **GAP:** hay que fijar un pool chico y explícito por servicio (p. ej. `MaxOpenConns=2`).
+  Con min=0 casi nunca hay 7 servicios despiertos a la vez, pero "casi nunca" no es una
+  garantía y el modo de falla (`too many connections`) es feo y aleatorio.
+- **Caché:** el Route Handler **no debe cachear nada** — es tráfico autenticado.
+  Poner `export const dynamic = "force-dynamic"` explícito. Que Next cachee una respuesta
+  de `/api/v1/me` y se la sirva a otro visitante sería una fuga de sesión.
+- **Memoria:** el proxy debe hacer *stream* del cuerpo, no bufferearlo. Las respuestas son
+  JSON chico, pero bufferear es un hábito que se paga cuando aparezcan PDFs de boletas.
+
+### Hallazgo 7.1 — 🟡 Fijar el pool de conexiones antes de aplicar
+
+**Decisión (P2, dentro del radio de impacto):** `MaxOpenConns` explícito y bajo en los 7
+servicios. Barato ahora, doloroso de diagnosticar después.
+
+---
+
+## Sección 8 — Observabilidad
+
+| Necesidad | ¿Existe? | Decisión |
+|---|---|---|
+| Log estructurado del proxy (método, path, status, ms) | ❌ | **Agregar.** Es el único componente sin dueño en los logs |
+| Correlación web ↔ gateway | ❌ | Propagar `X-Request-Id` desde el Route Handler |
+| Métrica "¿está viva la demo?" | ❌ | Cloud Monitoring uptime check contra `/` del web |
+| Métrica "¿me está costando?" | ⚠️ parcial | El budget avisa a $7.50/$12/$15 (E5). **Es la métrica que le importa al dueño.** |
+| Alerta de arranques fallidos | ❌ | Alerta por log: revisión que no promueve |
+| Alerta de la DLQ | ❌ | 🟡 **GAP**: existe la DLQ pero nada avisa si le cae algo |
+| Tablero día 1 | ❌ | 4 paneles: requests, latencia p95, errores 5xx, **gasto del mes** |
+| Runbook | ⚠️ | §E es el interruptor; falta "la demo no responde: qué mirar y en qué orden" |
+
+**Decisión (P1, y es barato):** log estructurado en el proxy + uptime check + alerta de DLQ.
+Los tres son configuración, no código.
+
+**Depurabilidad a 3 semanas:** hoy, con un solo log de Cloud Run por servicio y sin id de
+correlación, reconstruir "qué pasó el martes a las 10" significa leer 9 flujos a mano. El
+`X-Request-Id` propagado es lo que convierte eso en una consulta.
+
+**Uptime check — ojo:** un chequeo cada minuto **despierta el servicio 1440 veces al día** y
+mata el scale-to-zero. Configurarlo a **15 minutos**, o mejor, dejarlo apagado en la demo y
+depender del budget. 🟡 **Contradicción real entre observabilidad y costo, y el costo gana
+aquí.** → uptime check **cada 15 min**, no cada minuto.
+
+---
+
+## Sección 9 — Despliegue y salida a producción
+
+### Secuencia
+
+```
+  1. Habilitar APIs ────▶ 2. Bucket de estado ────▶ 3. terraform apply
+                                                          │
+        ┌─────────────────────────────────────────────────┘
+        ▼
+  4. Secret: password de la app
+        │
+        ▼
+  5. setup_app_role.sql (como superusuario)  ← NOBYPASSRLS
+        │
+        ▼
+  6. migrations/**  (11 dominios, orden lexicográfico)
+        │
+        ▼
+  7. Semilla del dueño ────▶ 8. Semilla de demo (400 alumnos)
+        │
+        ▼
+  9. Cloud Build ×9 imágenes ────▶ 10. gcloud run deploy
+        │
+        ▼
+ 11. Verificación E2E ────▶ 12. Confirmar min=0 en las 9 revisiones
+```
+
+**Orden crítico:** las migraciones van **antes** del primer despliegue con tráfico. Pero
+Terraform crea los servicios en el paso 3, apuntando a una imagen que quizá no existe todavía.
+
+### Hallazgo 9.1 — 🔴 El primer apply falla porque las imágenes no existen
+
+`image_tag = "latest"` y el Artifact Registry está **vacío** en un proyecto nuevo. Cloud Run
+no puede crear una revisión de una imagen inexistente: `terraform apply` falla en los 9
+servicios. El runbook actual (§4 Fase B antes de Fase D) tiene el orden invertido.
+
+**Decisión (P1 completitud):** orden correcto para un proyecto virgen:
+1. `terraform apply -target=google_artifact_registry_repository.images -target=google_project_service.apis`
+2. Cloud Build construye y sube las 9 imágenes con tag `latest`
+3. `terraform apply` completo
+
+Es el único uso de `-target` justificado: arrancar el huevo antes que la gallina, una sola vez.
+
+### Hallazgo 9.2 — 🟡 Las migraciones no tienen vuelta atrás
+
+`migrations/**` solo tiene `.sql` de ida; `schema_migrations` registra qué se aplicó pero no
+sabe deshacerlo. En una demo el rollback real es **recrear la base y volver a sembrar**, lo
+cual es aceptable *si está escrito*. **Decisión (P3 pragmático):** no se construyen
+migraciones `down`. Se documenta que el rollback de datos en dev es
+`terraform destroy` de la instancia + apply + migrar + sembrar (~15 min), y **eso es
+justamente por lo que la demo no debe tener datos que importen.**
+
+### Otros
+
+- **Feature flags:** ya existen y son env. `ENABLED_MODULES` decide qué ve la escuela. **Es
+  la palanca de "modo presentación" y hay que usarla a conciencia** — incluyendo `teachers`.
+- **Ventana de riesgo (código viejo + nuevo a la vez):** Cloud Run desplaza el tráfico al
+  100% a la revisión nueva. Con una sola instancia, la ventana es de segundos. Sin bases de
+  datos compartidas entre versiones incompatibles porque no hay migraciones nuevas.
+- **Paridad de entornos:** ❌ **no hay staging.** Dev *es* el staging. Aceptado para una demo.
+- **Verificación post-deploy (primeros 5 min):** los 12 pasos de arriba, más:
+  `gcloud run services list --format="value(name,spec.template.metadata.annotations)"` y
+  confirmar `minScale` vacío en las 9.
+- **Primera hora:** abrir la demo, hacer login, tocar cada módulo, cerrar. Volver a las 2 h
+  y confirmar que todo volvió a cero (`gcloud run revisions list` sin instancias activas).
+
+---
+
+## Sección 10 — Trayectoria a largo plazo
+
+- **Deuda técnica introducida:**
+  - *Código:* el Route Handler es un proxy propio. Deuda pequeña y contenida, pero real: si
+    mañana hay dominio propio, el proxy sobra y hay que acordarse de quitarlo.
+  - *Operativa:* migraciones aplicadas **a mano desde la laptop**. Funciona para dos veces al
+    año; no escala a la escuela. Deuda consciente.
+  - *Pruebas:* sin staging, la primera vez que este camino se ejerce es contra la demo real.
+  - *Documentación:* `COST-AND-DEPLOY.md` ya está desfasado. Se corrige (E6).
+- **Dependencia de camino:** baja. Todo lo que se agrega es aditivo. El único punto que
+  condiciona el futuro es **D1**: si dev usa Neon y prod usa Cloud SQL, se mantienen dos
+  rutas de conexión para siempre.
+- **Reversibilidad: 5/5.** `terraform destroy` borra el entorno completo. La única puerta de
+  un solo sentido sería sembrar datos reales de alumnos (Hallazgo 3.1) — un dato personal
+  publicado no se despublica. **Por eso 3.1 es bloqueante y no una recomendación.**
+- **Concentración de conocimiento:** el runbook queda en el repo, no en la cabeza del dueño.
+  Un ingeniero nuevo en 12 meses lee `PLAN-deploy-gcp-dev.md` + `COST-AND-DEPLOY.md`
+  corregido y puede repetirlo.
+- **La pregunta del año:** ¿por qué hay un Route Handler que proxea a un servicio hermano?
+  **Hay que escribir el porqué en el archivo**, no en este plan: "las cookies son
+  `SameSite=Strict` y `run.app` está en la Public Suffix List". Sin ese comentario, en 12
+  meses alguien lo borra por redundante y rompe el login.
+- **Qué viene después:** promoción a la escuela (mismo TF + `prod.tfvars`), gateway+iam
+  calientes, DB REGIONAL, dominio propio (el proxy se retira), y CI que aplique por rama.
+  **La arquitectura soporta esa trayectoria sin reescrituras.**
+- **Retrospectiva de los cherry-picks:** E4 (estado de "despertando") resultó **cargante de
+  peso**, no cosmético: es la mitigación de la ruta lenta de la Sección 7, que a su vez es
+  consecuencia directa de la decisión de costo. Aceptarlo fue correcto. E1 (apagar la DB de
+  noche) quedó bien diferido: habría empeorado la misma latencia que E4 intenta tapar.
+
+## Sección 11 — Diseño y UX
+
+**OMITIDA — sin alcance de UI detectado** (0 coincidencias de términos de interfaz en el
+plan). El plan es de infraestructura. La única superficie visible que toca es la pantalla de
+"despertando" (E4), y su diseño se resuelve con el sistema de diseño existente
+(`.claude/docs/design/DESIGN-SYSTEM.md`), no requiere revisión de diseño propia.
