@@ -1562,3 +1562,206 @@ producción**. Ocho de las quince tareas son trabajo de producción hecho por ad
 ---
 
 # FASE 3 — Revisión de ingeniería
+
+Modo: FULL REVIEW (el alcance no se reduce, P2). Voces duales: Claude subagente + Codex.
+
+## Paso 0 — Desafío de alcance (leyendo el código, no el plan)
+
+El plan agrega **un** componente (`web`), **un** archivo de código nuevo (el Route Handler),
+**tres** scripts y **~15** líneas de HCL por servicio. Bajo cualquier umbral de complejidad.
+Pero al leer el módulo compartido de Cloud Run aparecen **tres bloqueadores de despliegue que
+ninguna fase anterior vio**, y los tres golpean exactamente al componente nuevo.
+
+### 🔴 E1 — CRÍTICO: el servicio `web` nunca va a pasar el startup probe
+
+`deploy/terraform/modules/cloud_run/main.tf:80-88` — el módulo **compartido** codifica:
+
+```hcl
+startup_probe {
+  http_get { path = "/healthz" }
+  initial_delay_seconds = 2
+  period_seconds        = 5
+  failure_threshold     = 5
+}
+```
+
+Conteo verificado de `/healthz` por servicio:
+
+```
+gateway: 3   iam: 4   students: 1   config: 2   finance: 1
+grades: 1    attendance: 1   comms: 1   uniforms: 1
+apps/web: 0   ← ✗
+```
+
+Los nueve servicios Go lo exponen. **La app Next.js no.** Cloud Run pedirá `/healthz`,
+recibirá **404** (que el probe cuenta como fallo), reintentará 5 veces y **matará el
+contenedor**. La revisión nunca se promueve y `terraform apply` falla en el servicio `web`.
+
+Y es la falla más confusa posible de diagnosticar: la imagen está bien, el `docker run` local
+funciona, los logs de la app no muestran ni un error — solo Cloud Run diciendo que el
+contenedor no arrancó.
+
+**Decisión (P1 completitud):** `apps/web/app/healthz/route.ts` devolviendo 200.
+Cuatro líneas, y de paso es el endpoint que necesita el uptime check de la Sección 8.
+Rechazado parametrizar `probe_path` en el módulo: agregar una variable para evitar escribir
+cuatro líneas es la clase de flexibilidad que después nadie entiende (P5).
+
+### 🔴 E2 — CRÍTICO: `output: "standalone"` sin `outputFileTracingRoot` en un monorepo pnpm
+
+Verificado: `grep outputFileTracing apps/web/next.config.js` → **NOT SET**.
+
+`apps/web` depende de **cuatro paquetes del workspace**: `@garcia-lorca/ui`, `domain`,
+`i18n`, `api-client`. Con pnpm esos paquetes son **symlinks** hacia `node_modules/.pnpm`,
+fuera de `apps/web/`. El rastreo de archivos de Next parte del directorio de la app; sin
+declarar la raíz del monorepo, **no copia esos paquetes** al bundle standalone.
+
+`next build` pasa (`transpilePackages` resuelve la compilación), la imagen se construye, y el
+servidor **muere al arrancar** con `Cannot find module '@garcia-lorca/ui'`.
+`transpilePackages` cubre el build; **no** cubre el rastreo en runtime. Son dos cosas
+distintas y solo una está configurada.
+
+**Decisión (P1):** `outputFileTracingRoot: path.join(__dirname, "../../")` en
+`next.config.js`, y el Dockerfile copia desde la raíz del monorepo, no desde `apps/web`.
+**Verificación obligatoria:** `docker run` de la imagen **antes** de tocar Terraform. Este bug
+solo se manifiesta en la imagen, jamás en `pnpm dev`.
+
+### 🔴 E3 — CRÍTICO: T15 introduce un ciclo en el grafo de Terraform
+
+Dos tareas ya aprobadas se contradicen:
+
+- **T3/A3**: el módulo `web` recibe `GATEWAY_URL = module.gateway.uri`
+- **T15** (de F8): `gateway_env` recibe `WEB_ORIGIN = module.web.uri`
+
+Referencia mutua entre módulos ⇒ `Error: Cycle: module.gateway → module.web → module.gateway`.
+**Terraform ni siquiera genera un plan.** Es un fallo de `plan`, no de `apply`: no rompe nada
+desplegado, pero deja el trabajo trabado hasta entenderlo.
+
+**Decisión (P5 explícito sobre listo):** `WEB_ORIGIN` sale de una **variable de tfvars**
+(`var.web_origin`, default `""`), no de `module.web.uri`. Se llena después del primer apply.
+Es honesto: **con el proxy de mismo origen, el navegador nunca hace una petición cross-origin
+al gateway**, así que `WEB_ORIGIN` solo existe para la app móvil. Atarlo al ciclo de vida del
+servicio web era acoplar dos cosas que no tienen relación.
+
+### Mapa de sub-problemas a código existente
+
+| Sub-problema | Código que ya lo resuelve | ¿Se reusa? |
+|---|---|---|
+| Definir un servicio Cloud Run | `modules/cloud_run` | ✅ el bloque `web` lo copia |
+| Perfil de costo por entorno | `variables.tf:88-133` + `dev.tfvars.example` | ✅ sin cambios |
+| Construir y subir imágenes | `cloudbuild.yaml` (8 pasos idénticos) | ✅ se copian 2 más (web, uniforms) |
+| Aplicar migraciones | `docker/apply-migrations.sh` | ⚠️ la lógica sirve; el transporte (`docker exec`) no |
+| Sembrar una escuela | `scripts/seed-demo.mjs` | ⚠️ sirve; el envoltorio `demo:ready` no (F4) |
+| Llamadas HTTP autenticadas | `packages/api-client` + cookies | ✅ sin cambios, gracias al mismo origen |
+| Health checks | `/healthz` en los 9 servicios Go | ❌ falta en web (E1) |
+
+**Nada se reconstruye.** El plan es aditivo en todos los frentes. Confirmado leyendo el código.
+
+## Sección 1 — Arquitectura (eng)
+
+El diagrama de la Sección 1 de la Fase 1 sigue siendo correcto. Añadidos de esta fase:
+
+```
+  GRAFO DE TERRAFORM (debe ser un DAG)
+
+  apis ──▶ artifact_registry ──▶ [imágenes construidas fuera de TF]
+    │
+    ├──▶ sql_instance ──▶ sql_database ──▶ sql_user ◀── secret(db_password)
+    │
+    ├──▶ sa_runtime ─────┬──▶ config ─┐
+    │                    ├──▶ iam ────┤   (hojas: sin dependencias hermanas)
+    │                    │            ▼
+    │                    ├──▶ students ──▶ finance ──▶ ...
+    │                    ├──▶ grades ──▶ attendance ──▶ comms ──▶ uniforms
+    │                    │                                  │
+    │                    └──▶ gateway ◀───────────────────┘  (lee todas las *_BASE_URL)
+    │                            ▲
+    │                            │ GATEWAY_URL
+    │                          web
+    │                            ✗ WEB_ORIGIN de vuelta al gateway = CICLO (E3)
+    │                            ✓ WEB_ORIGIN desde var.web_origin  = DAG
+    │
+    └──▶ sa_pubsub_push ──▶ topics + subs (push a comms/students/finance)
+```
+
+**Escalado:** sin cambios respecto a la Fase 1. El techo real es `db-f1-micro` (~25
+conexiones), y T9 lo acota. **Nuevo SPOF confirmado:** el servicio `web` — es el único
+camino del navegador, y con el proxy también es el único camino a la API.
+
+## Sección 2 — Calidad de código (eng)
+
+- **DRY:** los 9 (pronto 10) bloques `module "x"` en `services.tf` son ~18 líneas idénticas
+  salvo nombre y env. Un `for_each` sobre un mapa los reduciría a uno. **Decisión: NO
+  refactorizar** (P5 + P3): los bloques explícitos se leen de un vistazo, difieren en
+  ingress/concurrency/cloudsql, y un `for_each` con esas excepciones sería peor de leer.
+  La duplicación es intencional y está comentada. Se deja.
+- **La duplicación que sí importa** es la de `API_URL` en el front (4 copias, 2 defaults) —
+  ya cubierta por T5.
+- **Nombres:** `local.internal_services` va a incluir `uniforms` pero no `web` (web es
+  público). Correcto y hay que dejarlo escrito para que nadie lo "arregle".
+- **Sobre-ingeniería:** ninguna nueva.
+- **Sub-ingeniería:** el Dockerfile del web es donde se concentra el riesgo (E2). Multi-stage
+  con `pnpm fetch --frozen-lockfile` en su propia capa; usuario no-root; `PORT` de Cloud Run.
+
+## Sección 3 — Revisión de pruebas (eng) — NO SE OMITE
+
+### Diagrama de pruebas
+
+```
+  RUTAS DE CÓDIGO NUEVAS                          TIPO      ¿EXISTE?  GAP
+  ──────────────────────────────────────────────  ────────  ────────  ────
+  route.ts · reemisión de 2 Set-Cookie            Unit      NO        🔴 P1
+  route.ts · allowlist de prefijo /api/v1/        Unit      NO        🔴 P1
+  route.ts · path traversal (/api/v1/../../x)     Unit      NO        🔴 P1
+  route.ts · timeout + 1 reintento                Unit      NO        🟡 P2
+  route.ts · pasa el cuerpo en POST sin mutarlo   Unit      NO        🔴 P1
+  route.ts · NO reenvía la cabecera host          Unit      NO        🟡 P2
+  api-url.ts · "" es mismo origen, no localhost   Unit      NO        🔴 P1
+  flags-provider · "" NO significa design-demo    Unit      INVERTIR  🔴 P1
+  healthz · devuelve 200                          Unit      NO        🔴 P1
+  jwtSecret() · panic si falta fuera de local     Unit      NO        🔴 P1
+  pool · SetMaxOpenConns aplicado                 Unit      NO        🟡 P2
+
+  FLUJOS NUEVOS QUE NINGÚN TEST AUTOMÁTICO PUEDE CUBRIR
+  ──────────────────────────────────────────────────────────────────────
+  imagen del web arranca con los 4 paquetes       docker run  NO      🔴 P1
+  apply de Terraform sin ciclos                   tf plan     NO      🔴 P1
+  probe /healthz pasa en Cloud Run real           deploy      NO      🔴 P1
+  sesión sobrevive a que iam se duerma            ensayo      NO      🔴 P1
+  arranque en frío encadenado                     ensayo      NO      🟡 P2
+```
+
+### 🔴 Hallazgo 3.1 — El plan afirma verificar cosas que no puede verificar
+
+La "prueba de las 2 am" que propuse en la Fase 1 (*abrir en frío, entrar, esperar 20 minutos,
+recargar, seguir autenticado*) **no es un test automatizable**: necesita nube real, 20 minutos
+de reloj, y un servicio que de verdad se duerma. En CI sería lentísima e intermitente.
+
+Llamarla "test" es engañarse. **Es un ensayo manual**, y hay que tratarla como tal: un paso
+con nombre en el runbook, con casilla, **48 h antes de la junta** — no un archivo en `tests/`
+que nadie corre. Cinco de las líneas de arriba son de esta clase.
+
+**Decisión (P1 honestidad + completitud):** dos artefactos separados —
+(1) las 11 pruebas unitarias, que sí van en CI; (2) una **lista de ensayo pre-demo** de 5
+puntos, versionada, que se ejecuta a mano. Confundirlas es cómo se llega a la junta creyendo
+que algo está probado.
+
+### Pirámide y flakiness
+
+11 unitarias / 0 de integración nuevas / 2 E2E. Base ancha, correcta.
+El único riesgo de intermitencia son los ensayos manuales, y **dependen del tiempo por
+diseño** — por eso salen de CI y no se les pone umbral estricto.
+
+## Sección 4 — Rendimiento (eng)
+
+- **N+1 / índices:** cero consultas nuevas. No aplica.
+- **Memoria del `web`:** `memory` default `512Mi`. Un Next.js standalone arranca en ~80-150 MB
+  y con este tamaño de app se sostiene. **Suficiente, pero es el servicio con menos holgura
+  del conjunto.** Si el arranque muere con OOM, subir a `1Gi` es una línea — y con `min=0` se
+  paga solo mientras sirve, así que **el costo en reposo no cambia**. Anotado en el runbook
+  como primer ajuste si el arranque falla.
+- **`concurrency` del web:** el bloque copia `students` (80). Para un proxy que solo reenvía
+  I/O, 80 es conservador y está bien; deja el techo en `max_instances=2`.
+- **Caché de Next:** el Route Handler necesita `export const dynamic = "force-dynamic"`.
+  Sin eso, Next puede cachear una respuesta de `/api/v1/me` y **servírsela a otro visitante**.
+  Ya está en las decisiones de la Sección 7 de la Fase 1; se eleva a **P1 de seguridad**,
+  no de rendimiento: es una fuga de sesión entre usuarios, no una optimización.
