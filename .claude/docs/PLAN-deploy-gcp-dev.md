@@ -2397,3 +2397,30 @@ Modo: [subagent-only]. 6/6 dimensiones con hallazgo real.
 > los 5 de mayor consecuencia **verificados ciertos contra el árbol**. Dos de ellos (**V-1**,
 > **W-1**) significaban que el plan **no podía producir ni una imagen**.
 > Consenso: 0/6 (una sola voz). Pasando a la Fase 3.5 → Fase 4.
+
+---
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 1 | issues_open | 12 proposals, 9 accepted, 3 deferred; 8 critical gaps |
+| Codex Review | `/codex review` | Independent 2nd opinion | 0 | unavailable | codex CLI not installed |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | issues_open | 24 issues, 8 critical gaps |
+| Design Review | `/plan-design-review` | UI/UX gaps | 0 | skipped | no UI scope detected |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 1 | issues_open | score 4/10 → 8.5/10, TTHW 6-9h → 3-4h |
+
+**CROSS-MODEL:** not obtained. Codex CLI absent in all three phases, so every outside voice ran
+as `[subagent-only]`. No cross-model consensus exists in this run — the confidence here rests on
+having **verified each finding against the tree** rather than on two models agreeing. Installing
+codex (`npm install -g @openai/codex`) would add genuine cross-model coverage next run.
+
+**VERDICT:** CEO + ENG + DX reviewed — **NOT cleared to apply.** 61 findings, **12 verified
+deploy blockers**, of which two (`V-1` Cloud Build cannot run, `W-1` the web has no build
+context) meant the plan as written could not produce a single image. 31 tasks (A0-A38), 22 P1.
+Implement Bloque 0-1 before any `terraform apply`.
+
+**UNRESOLVED DECISIONS:**
+- **D1** — Cloud SQL `db-f1-micro` (~$9.70/mo, the only non-zero idle cost) vs Neon free tier ($0). Switching costs zero code: `pkg/dbdsn` reads `DATABASE_URL` first.
+- **F11** — Hard billing cap (Pub/Sub + Cloud Function disabling billing) vs alert-only. Alert-only is what already failed on Heraldo.
+- **F1** — Is a 10-service Cloud Run deploy the right vehicle for a one-school sales demo, versus the laptop compose demo that already exists and is Playwright-verified?
