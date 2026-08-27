@@ -58,8 +58,8 @@ verificado (`terraform validate` OK, mergeado a `dev` el 2026-08-24):
 
 - Módulo `cloud_run` reutilizable con perfil de costo por variable.
 - Los **8 servicios reales** instanciados: `gateway`, `iam`, `students`, `config`, `finance`,
-  `grades`, `attendance`, `comms`. Los 4 stubs (`billing`, `scholarships`, `docs`, `uniforms`)
-  deliberadamente **fuera**.
+  `grades`, `attendance`, `comms`. **Corregido por F5: `uniforms` es el 9º servicio real y SÍ
+  se despliega.** Los stubs reales son tres: `billing`, `scholarships`, `docs`.
 - Wiring completo gateway→internos **y** interno→interno (`*_BASE_URL` por servicio),
   con `roles/run.invoker` al runtime SA (sin conector VPC — más barato).
 - Auth servicio-a-servicio por OIDC (`pkg/gcpauth`), DSN de Cloud SQL armado desde env
@@ -194,7 +194,7 @@ módulos más nuevos y más vendibles.
 
 | Recurso | Config | Reposo | Notas |
 |---|---|---|---|
-| 9 servicios Cloud Run | `min=0`, `cpu_idle=true` | **$0.00** | No hay instancia viva. Cero. |
+| **10** servicios Cloud Run (9 backend + web) | `min=0`, `cpu_idle=true` | **$0.00** | No hay instancia viva. Cero. |
 | Cloud SQL `db-f1-micro` | ZONAL, 10 GB SSD, PITR off, 3 backups | **~$9.70** | vCPU/RAM ~$7.67 + disco ~$1.70 + backups ~$0.30 |
 | Artifact Registry | política: 5 versiones, borra untagged >30d | ~$0.20 | acotado por la política |
 | Pub/Sub | 3 topics + DLQ, sin tráfico | $0.00 | 10 GiB/mes gratis |
@@ -329,7 +329,8 @@ la escuela contrate.
 ## 6. Fuera de alcance (explícito)
 
 - Deploy de `master` a la cuenta de la escuela (D4).
-- Los 4 servicios stub (`billing`, `scholarships`, `docs`, `uniforms`) — flags OFF, sin imagen.
+- Los **3** servicios stub reales (`billing`, `scholarships`, `docs`) — flags OFF, sin imagen.
+  (`uniforms` **sí** se despliega — ver F5.)
 - App móvil Expo (no consume infra de GCP; solo apunta al gateway).
 - Load Balancer / CDN / Cloud Armor (~$18/mes de LB — no se justifica en demo).
 - HA, réplicas de lectura, PITR (prod).
@@ -1822,3 +1823,262 @@ Es deuda diferida real, aunque pequeña.
 demo lleva **datos sintéticos únicamente**. Con esa política, "los datos viven en un tercero"
 deja de ser una objeción de privacidad. Sin esa política, Neon sería inaceptable — y Cloud SQL
 en la cuenta personal del dueño, también.
+
+---
+
+# FASE 3.5 — Revisión de experiencia de desarrollo (DX)
+
+Modo: DX POLISH. Persona: **el dueño, solo, ejecutando este runbook él mismo, quizá dentro de
+meses, quizá a las 11 de la noche antes de una junta de ventas — y otra vez después contra la
+cuenta de la escuela.** El "producto" bajo revisión **no es la app escolar: es el runbook.**
+
+**CODEX SAYS (DX):** `[codex-unavailable: binary not found]`.
+
+## CLAUDE SUBAGENT (DX — revisión independiente)
+
+**Calificación: 4/10.** Veredicto, y es justo: *"un artefacto de revisión disfrazado de
+runbook — las respuestas existen, pero están a 800-1400 líneas del paso que las necesita, y
+los dos comandos más importantes están mal."*
+
+### 🔴 DX1+DX2 — CRÍTICO: la Fase B **no puede completarse**. Verificado.
+
+Dos bugs que se combinan y que introduje yo al "arreglar" el orden:
+
+1. `cloudbuild.yaml:120` etiqueta las imágenes como **`$SHORT_SHA`**.
+   `variables.tf:30-34` y `dev.tfvars.example` usan `image_tag = "latest"`.
+   **Nadie sube jamás un `:latest`.** Los 10 servicios fallan con *image not found* —
+   exactamente el fallo que el Hallazgo 9.1 decía arreglar. Reordené las fases y **no vi el
+   desajuste de etiquetas.**
+2. `gcloud builds submit` (mi paso 5, "el camino por defecto") **no puebla `$SHORT_SHA`** —
+   esa sustitución solo la rellenan los triggers con contexto de repo. Las referencias quedan
+   `…/gateway:` y el build **muere en el primer `docker push`, ~20 minutos adentro**, después
+   de haber quemado `go test -race` y el build del front.
+
+**Decisión (P1):** el paso 5 pasa `--substitutions=SHORT_SHA=bootstrap,_DEPLOY=false` y el
+paso 7 aplica con `-var="image_tag=bootstrap"`. Sin esto el runbook simplemente no termina.
+
+### 🔴 DX3 — CRÍTICO: el paso 8 rompe un despliegue que funcionaba. Verificado en `secrets.tf`.
+
+`secrets.tf:35-43` crea la **versión** del secreto **incondicionalmente** desde
+`var.db_app_password`, que **por defecto es `""`**. Y `database.tf:66-72` le pone al usuario de
+Cloud SQL la contraseña **leyendo esa versión**. Entonces:
+
+- el primer apply falla (Secret Manager rechaza un payload vacío) o crea una contraseña vacía;
+- cuando el operador después hace `gcloud secrets versions add` (mi paso 8), Cloud Run lee
+  `latest` (la nueva) mientras Postgres sigue con la vieja → **todos los servicios fallan con
+  `password authentication failed`**;
+- y `ignore_changes = [secret_data]` **garantiza que un re-apply nunca lo reconcilie.**
+
+Lo revelador: el bloque de `owner_temp_password`, **40 líneas más abajo en el mismo archivo**,
+sí tiene un `precondition` que impide el valor vacío. El patrón correcto ya está escrito; al
+bloque de la contraseña de base de datos le falta.
+
+**Decisión (P1):** **borrar el paso 8.** La contraseña se genera en el primer apply:
+`TF_VAR_db_app_password="$(openssl rand -base64 32)" terraform apply …`, y se documenta que
+rotarla después es `terraform apply -replace=google_sql_user.app`.
+
+### 🔴 DX4 — La semilla corre antes de que existan servicios que respondan
+
+`seed-demo.mjs` siembra **a través del API real** (no metiendo filas). Mi paso 10 está **antes**
+del paso 11, que es el apply que finalmente pone imágenes reales en los servicios.
+**Decisión:** la semilla se mueve a la Fase D, después del paso 11 y después de un login de humo.
+
+### 🔴 DX5 — El botón de pánico probablemente descapa el escalado
+
+Especifiqué `make demo-down` como *"`min-instances=0` y `max-instances=0`"*. En Cloud Run
+**`maxScale = 0` significa "sin límite", no "apagado"**. El botón de pánico podría dejar el
+escalado **sin techo**. Peor: el bucle **no lleva `--project`**, y el dueño maneja tres cuentas
+(Heraldo, García Lorca, y luego la de la escuela). Un comando de emergencia que hereda el
+proyecto del ambiente es exactamente la forma equivocada.
+
+**Decisión (P1):** las palancas reales son `gcloud sql instances patch --activation-policy=NEVER`
+(el único costo real) y bajar `min-instances` a 0. Cada comando lleva
+`--project=$(PROJECT_ID) --region=$(REGION)` **explícitos**, y el target imprime qué va a hacer
+antes de hacerlo.
+
+### 🔴 DX6 — Son tres secretos y el runbook nombra uno
+
+`IAM_JWT_SECRET` (A2), la contraseña de base de datos, y `owner_temp_password` — que además
+requiere `seed_owner_secret = true`, y `dev.tfvars.example` lo trae en **`false`** y ningún paso
+lo cambia. **Si se queda en false, el paso 9 no tiene de dónde sacar la contraseña del dueño y
+no puede entrar.** Decisión: una sub-fase "Secretos" con los tres valores y sus comandos exactos.
+
+### 🔴 DX7+DX8 — Prerrequisitos y permisos nunca declarados, y el fallo llega al final
+
+Asume sin decirlo: `terraform>=1.7`, `gcloud` + `gcloud beta`, `docker`, **`cloud-sql-proxy`**
+(que A16 necesita y no se menciona en ningún lado), `psql`, `openssl`, node 22, pnpm.
+Y `deploy/README.md:36` manda `npm ci` — **prohibido por la regla 7 del `CLAUDE.md` del repo.**
+
+Peor, DX8: el budget necesita **`roles/billing.costsManager` sobre la cuenta de facturación**,
+que **no es un permiso de proyecto**. Si falta, el apply crea ~40 recursos **y luego falla en
+el budget** — justo la barandilla por la que existe todo este plan. Para la segunda cuenta
+(la escuela) esto es casi seguro que muerde.
+
+**Decisión (P1):** bloque de prerrequisitos + roles al inicio del §4, y un
+`make deploy-preflight` que verifique cada binario y cada permiso y nombre el que falta.
+**Esto es lo que hace barata la segunda corrida.**
+
+### 🟡 DX9 — Los valores que tiene que buscar están en 3 documentos con 3 respuestas distintas
+
+Al reescribir el §4 **borré el bloque `dev.tfvars` completo**. Ahora:
+
+| Valor | Respuestas en conflicto |
+|---|---|
+| `project_id` | `garcia-lorca` (plan) vs `garcia-lorca-dev` (dev.tfvars.example, terraform.tfvars.example, COST §D) |
+| `monthly_budget_amount` | `30` (example) vs `20` (bloque borrado) vs `15` (E5 aceptada) |
+| `billing_account_id` | solo en la tabla de evidencia del §0 |
+| bucket de estado | `garcia-lorca-tfstate` (plan) vs `…-tfstate-dev` (comentario de `versions.tf`) |
+
+**Decisión (P1):** restaurar un `dev.tfvars` **completo y copiable** en el runbook y alinear
+`dev.tfvars.example`. Una sola fuente de verdad.
+
+### 🟡 DX11 — Ningún paso dice cómo se ve el fallo ni cómo retomar
+
+Los fallos que **este mismo plan predice** (registro vacío, ciclo de TF, `/healthz` 404,
+`Cannot find module '@garcia-lorca/ui'`, `too many connections`) están diagnosticados en las
+Fases 1 y 3 pero **nunca conectados al paso que los produce**. A las 11 de la noche el dueño
+ve *"Cloud Run container failed to start"* y tiene que buscar en 1773 líneas.
+
+**Decisión (P1):** una columna **"Si falla"** en cada paso numerado: síntoma → causa probable →
+el comando que lo confirma. Seis renglones cubren todo el conjunto conocido. Es la diferencia
+entre una primera corrida de 4 h y una de 9 h.
+
+### 🟡 DX12+DX13 — Idempotencia sin declarar y estado parcial sin salida
+
+Re-ejecutables: `terraform apply`, `migrate-cloudsql.sh` (ledger), `gcloud builds submit`.
+**No** re-ejecutables: el paso 2 (crear bucket falla la segunda vez), el paso 8 (**re-correrlo
+rompe un deploy sano**), la semilla. Y el paso 4 usa `-target`, dejando el estado
+deliberadamente parcial — sin ninguna guía de qué hacer si el paso 5 falla (que DX2 garantiza).
+**Decisión:** marcar cada paso ♻️ / ⚠️, y agregar un `make tf-destroy` con la ruta de
+"empezar limpio".
+
+### 🟡 DX14+DX15 — Cuatro sistemas de numeración y una colisión peligrosa de nombres
+
+`A1-A22`, `T1-T19`, `F1-F16`, `E1-E6` — y **`E1` significa tres cosas distintas** en el mismo
+documento (expansión E1, Fase E, hallazgo de ingeniería E1). Culpable.
+
+Y la colisión que de verdad importa: el `Makefile` **ya tiene `up`/`down`** para el stack local
+de docker-compose. `make down` para tu laptop; `make demo-down` apagaría infraestructura en la
+nube **incluida la base de datos**. A las 11 de la noche ese no es el momento de aprender la
+diferencia. Y `demo:*` en `package.json` es un **tercer** espacio de nombres que significa
+"datos de demo locales".
+
+**Decisión (P5 explícito, consistencia sobre ingenio):** los targets de nube se llaman
+`cloud-stop` / `cloud-start` / `cloud-warm` / `cloud-cool`. **Nunca reusar `up`/`down`.**
+Y una sola lista de tareas, `A1-A22`, con los hallazgos como columna de procedencia.
+
+### 🟡 DX16 — Los targets del Makefile en los que me apoyé están rotos. Verificado.
+
+`REGION ?=`, `AR_REPO ?=`, `ENV ?=` tienen default. **`PROJECT_ID` no.**
+`image-%` y `deploy-%` lo interpolan igual → `us-central1-docker.pkg.dev//garcia-lorca/gateway:local`
+(**doble slash**), en silencio. Y **no existe `tf-init`**, así que el runbook no puede usar el
+Makefile para las Fases B-D aunque el Makefile es justo donde el plan quiere el botón de pánico.
+**Decisión:** `PROJECT_ID ?= garcia-lorca` con guardia `$(if …,,$(error …))`, y agregar `tf-init`.
+
+### 🔴 DX18 — `deploy/README.md` está obsoleto y A22 no lo tocaba. Verificado.
+
+Es **el archivo que cualquiera abre primero**, y hoy dice:
+`:36` `npm ci` · `:59-60` gateway e iam **min=1 warm** (¡el error exacto de Heraldo!) ·
+`:80` *"Cloud SQL has no public IP"* (contradice A1) · y que un dominio propio es **obligatorio**
+(contradice la decisión del proxy). **Dos documentos en la misma carpeta se contradicen sobre
+los hechos centrales del despliegue.** → **A23**.
+
+### 🟡 DX19 — El plan se contradecía a sí mismo. **Ya corregido.**
+
+Señaló que el §6 seguía listando `uniforms` como stub mientras A9 lo despliega, y que la tabla
+de costos decía "9 servicios" mientras la Fase D dice "las 10 revisiones".
+**Corregido en esta pasada:** líneas 61, 332 y la tabla de costos ahora dicen **10 servicios
+(9 backend + web)** y **3 stubs reales**.
+
+### 🟡 DX20 — La lista de ensayo pre-demo estaba referenciada pero fuera del repo
+
+Existe (`~/.gstack/projects/romodevx-garcia-lorca/andresromo-dev-test-plan-*.md`) pero **vive
+fuera del repo**, y el paso 14 manda ejecutar un documento que el dueño no encuentra.
+**Decisión:** se versiona como `deploy/PRE-DEMO-CHECKLIST.md`.
+
+### La recomendación estructural, y tiene razón
+
+> *"Extraer el runbook. El §4 debería ser su propio archivo (`deploy/RUNBOOK-dev.md`, ~120
+> líneas, autocontenido, copiable). Las 1500 líneas de revisión se quedan en el plan como
+> procedencia. Hoy el contenido ejecutable es el 5% del documento, y el otro 95% lo contradice
+> en cuatro lugares."*
+
+**Aceptado (P5 + P4).** Un plan de revisión y un runbook operativo son dos productos distintos
+para dos momentos distintos. → **A24**.
+
+## Mapa del recorrido del desarrollador
+
+| Etapa | Hoy | Fricción | Después de los arreglos |
+|---|---|---|---|
+| 1. Encontrar por dónde empezar | 3 documentos que se contradicen | 🔴 | Un `deploy/RUNBOOK-dev.md` |
+| 2. Instalar herramientas | No declarado | 🔴 | `make deploy-preflight` |
+| 3. Conseguir permisos | No declarado; falla al final | 🔴 | Preflight nombra el rol faltante |
+| 4. Llenar `dev.tfvars` | 4 valores, 3 fuentes en conflicto | 🔴 | Bloque copiable |
+| 5. Arrancar infraestructura | **Falla** (DX1/DX2) | 🔴 | Etiquetas alineadas |
+| 6. Cargar secretos | 1 de 3 documentados; el paso 8 rompe | 🔴 | Sub-fase "Secretos" |
+| 7. Migrar + sembrar | Orden invertido | 🟡 | Semilla en la Fase D |
+| 8. Verificar | Sin comandos | 🟡 | Comandos + lista de ensayo |
+| 9. Apagar / retomar | Botón de pánico dudoso | 🔴 | `make cloud-stop` con `--project` |
+
+## Narrativa de empatía (primera persona)
+
+> *Son las 11 de la noche. La junta es a las 9. Abro `deploy/README.md` porque es el que se
+> llama README, y me dice que corra `npm ci` — que en este repo está prohibido — y que gateway
+> va con min=1, que es justo lo que me costó 700 pesos. Encuentro el plan; tiene 1773 líneas.
+> Llego al §4. Copio el `terraform apply`... y no sé de dónde sacar `billing_account_id`.
+> Lo busco: está en una tabla de evidencia, 200 líneas arriba. Sigo. El build corre 20 minutos
+> y muere empujando `gateway:` con la etiqueta vacía. No sé si re-correr el paso 4. Son las
+> 11:40 y todavía no hay una sola URL.*
+
+**Ese recorrido es el producto que esta fase está calificando, y hoy saca 4/10.**
+
+## Tarjeta de puntuación DX
+
+| # | Dimensión | Antes | Después de A23-A28 |
+|---|---|---|---|
+| 1 | Tiempo al primer "hola mundo" | 2/10 (no completa) | 8/10 |
+| 2 | Prerrequisitos declarados | 1/10 | 9/10 |
+| 3 | Comandos copiables | 3/10 | 9/10 |
+| 4 | Mensajes y recuperación de errores | 2/10 | 8/10 |
+| 5 | Nombres y consistencia | 3/10 (colisión `down`) | 8/10 |
+| 6 | Idempotencia declarada | 2/10 | 8/10 |
+| 7 | Salidas de emergencia | 4/10 | 9/10 |
+| 8 | Documentación encontrable | 2/10 (3 docs en conflicto) | 9/10 |
+| | **Global** | **4/10** | **8.5/10** |
+
+**TTHW (tiempo hasta la primera demo funcionando):**
+hoy **6-9 h y no completa en el primer intento**; después de los arreglos, **3-4 h**;
+segunda cuenta (la escuela) **2-3 h**.
+
+## TABLA DE CONSENSO — VOCES DUALES (DX)
+
+```
+═══════════════════════════════════════════════════════════════
+  Dimensión                            Claude  Codex  Consenso
+  ───────────────────────────────────  ──────  ─────  ─────────
+  1. ¿Arranque en < 5 min?             NO      N/A    ⚠️ 1 voz: 6-9 h y no completa
+  2. ¿Nombres adivinables?             NO      N/A    ⚠️ 1 voz: colisión make down
+  3. ¿Errores accionables?             NO      N/A    ⚠️ 1 voz: sin columna "si falla"
+  4. ¿Docs encontrables/completas?     NO      N/A    ⚠️ 1 voz: 3 docs en conflicto
+  5. ¿Ruta de actualización segura?    PARCIAL N/A    ⚠️ 1 voz: sin resume ni destroy
+  6. ¿Entorno sin fricción?            NO      N/A    ⚠️ 1 voz: prerrequisitos ocultos
+═══════════════════════════════════════════════════════════════
+Modo: [subagent-only]. 6/6 dimensiones con hallazgo real.
+```
+
+## Tareas nuevas de la Fase 3.5
+
+- [ ] **A23 (P1)** — Alinear `deploy/README.md` (npm→pnpm, min=1→min=0, IP, dominio) — DX18
+- [ ] **A24 (P1)** — Extraer `deploy/RUNBOOK-dev.md` autocontenido y copiable — recomendación estructural
+- [ ] **A25 (P1)** — Arreglar el flujo de etiquetas: `SHORT_SHA=bootstrap` + `-var image_tag=bootstrap` — DX1/DX2
+- [ ] **A26 (P1)** — Borrar el paso 8; generar la contraseña en el primer apply; documentar `-replace` — DX3
+- [ ] **A27 (P1)** — `make deploy-preflight` (binarios + roles, incluido `billing.costsManager`) — DX7/DX8
+- [ ] **A28 (P1)** — Targets `cloud-stop/start/warm/cool` con `--project`/`--region` explícitos; `PROJECT_ID ?=`; `tf-init` — DX5/DX15/DX16
+- [ ] **A29 (P2)** — Columna "Si falla" en los 15 pasos numerados — DX11
+- [ ] **A30 (P2)** — Versionar `deploy/PRE-DEMO-CHECKLIST.md` — DX20
+
+> **Fase 3.5 completa.** DX global: **4/10 → 8.5/10** proyectado.
+> TTHW: **6-9 h (no completa) → 3-4 h**; segunda cuenta 2-3 h.
+> Codex: no disponible. Claude subagent: 20 hallazgos, **4 críticos que impiden completar
+> el runbook**, todos los verificados resultaron ciertos.
+> Consenso: 0/6 (una sola voz). Pasando a la Fase 4.
