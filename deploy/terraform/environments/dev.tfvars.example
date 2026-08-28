@@ -38,7 +38,7 @@ db_backup_retained_count          = 3
 # ---- Cloud Run: scale-to-zero everywhere ----------------------------------
 # These are now enforced, not merely intended: modules/cloud_run has a
 # precondition that FAILS THE APPLY if any service asks for min_instances > 0
-# outside prod. To warm the demo before a meeting use scripts/demo-warm.sh —
+# outside prod. To warm the demo before a meeting use scripts/cloud-warm.sh —
 # a temporary, reversible gcloud update, not a persisted setting.
 gateway_min_instances     = 0
 gateway_max_instances     = 1 # the login rate limiter is in-process/per-instance

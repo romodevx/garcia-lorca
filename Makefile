@@ -6,6 +6,10 @@
 REGION  ?= us-central1
 AR_REPO ?= garcia-lorca
 ENV     ?= dev
+# Had NO default while REGION/AR_REPO/ENV did, so image-% and deploy-% silently
+# built refs like us-central1-docker.pkg.dev//garcia-lorca/gateway:local — a
+# double slash and no error.
+PROJECT_ID ?= garcia-lorca
 TF_DIR  := deploy/terraform
 TF_VARS := $(TF_DIR)/environments/$(ENV).tfvars
 
@@ -150,6 +154,13 @@ deploy-%: ## Deploy a service to Cloud Run, e.g. make deploy-gateway
 		--image=$(REGION)-docker.pkg.dev/$(PROJECT_ID)/$(AR_REPO)/$*:$(or $(TAG),local)
 
 # ---- Terraform ------------------------------------------------------------
+.PHONY: tf-init
+tf-init: ## terraform init for ENV (default dev) — pass BUCKET=gs-bucket-name
+	@test -n "$(BUCKET)" || { echo "BUCKET is required, e.g. make tf-init BUCKET=garcia-lorca-tfstate"; exit 1; }
+	terraform -chdir=$(TF_DIR) init \
+		-backend-config=bucket=$(BUCKET) \
+		-backend-config=prefix=cloud-run/$(ENV)
+
 .PHONY: tf-plan
 tf-plan: ## terraform plan for ENV (default dev)
 	terraform -chdir=$(TF_DIR) plan -var-file=environments/$(ENV).tfvars
@@ -157,3 +168,30 @@ tf-plan: ## terraform plan for ENV (default dev)
 .PHONY: tf-apply
 tf-apply: ## terraform apply for ENV (default dev)
 	terraform -chdir=$(TF_DIR) apply -var-file=environments/$(ENV).tfvars
+
+# ---- Deployed environment -------------------------------------------------
+# Deliberately prefixed `cloud-` and NOT `up`/`down`: those already mean the
+# LOCAL docker-compose stack in this file, and confusing `make down` (stops your
+# laptop) with a command that takes the customer-facing demo offline is not a
+# mistake worth leaving available at 11pm. Every underlying script passes
+# --project and --region explicitly rather than inheriting gcloud config.
+.PHONY: cloud-warm
+cloud-warm: ## Warm web+gateway+iam before a demo (~$0.10 for a 3h window)
+	PROJECT_ID=$(PROJECT_ID) REGION=$(REGION) sh scripts/cloud-warm.sh
+
+.PHONY: cloud-cool
+cloud-cool: ## Return every service to scale-to-zero after a demo
+	PROJECT_ID=$(PROJECT_ID) REGION=$(REGION) sh scripts/cloud-cool.sh
+
+.PHONY: cloud-stop
+cloud-stop: ## PANIC: take the demo offline and cap instances (deletes nothing)
+	PROJECT_ID=$(PROJECT_ID) REGION=$(REGION) sh scripts/cloud-stop.sh
+
+.PHONY: cloud-start
+cloud-start: ## Undo cloud-stop: put the demo back online
+	PROJECT_ID=$(PROJECT_ID) REGION=$(REGION) sh scripts/cloud-start.sh
+
+.PHONY: cloud-status
+cloud-status: ## Show every service's min/max instances — is anything warm?
+	@gcloud run services list --project=$(PROJECT_ID) --region=$(REGION) \
+		--format='table(metadata.name,status.url,spec.template.metadata.annotations["autoscaling.knative.dev/minScale"]:label=MIN,spec.template.metadata.annotations["autoscaling.knative.dev/maxScale"]:label=MAX)'

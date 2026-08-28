@@ -13,13 +13,13 @@ resource "google_cloud_run_v2_service" "this" {
   #
   # The control that failed there was a human remembering to check. This one
   # fails the apply instead: outside prod, no service may hold an instance warm.
-  # If a demo ever genuinely needs warmth, that is what scripts/demo-warm.sh is
+  # If a demo ever genuinely needs warmth, that is what scripts/cloud-warm.sh is
   # for — a temporary, deliberate, reversible `gcloud run services update`, not a
   # setting that quietly persists in the infrastructure.
   lifecycle {
     precondition {
       condition     = var.environment == "prod" || var.min_instances == 0
-      error_message = "min_instances must be 0 outside prod (service '${var.name}' in '${var.environment}' asked for ${var.min_instances}). An always-warm instance bills 24/7 even with zero traffic. For a temporary warm-up before a demo use scripts/demo-warm.sh instead."
+      error_message = "min_instances must be 0 outside prod (service '${var.name}' in '${var.environment}' asked for ${var.min_instances}). An always-warm instance bills 24/7 even with zero traffic. For a temporary warm-up before a demo use scripts/cloud-warm.sh instead."
     }
   }
 
