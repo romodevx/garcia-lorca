@@ -2471,7 +2471,8 @@ deploy blockers**, of which two (`V-1` Cloud Build cannot run, `W-1` the web has
 context) meant the plan as written could not produce a single image. 31 tasks (A0-A38), 22 P1.
 Implement Bloque 0-1 before any `terraform apply`.
 
-**UNRESOLVED DECISIONS:**
-- **D1** — Cloud SQL `db-f1-micro` (~$9.70/mo, the only non-zero idle cost) vs Neon free tier ($0). Switching costs zero code: `pkg/dbdsn` reads `DATABASE_URL` first.
-- **F11** — Hard billing cap (Pub/Sub + Cloud Function disabling billing) vs alert-only. Alert-only is what already failed on Heraldo.
-- **F1** — Is a 10-service Cloud Run deploy the right vehicle for a one-school sales demo, versus the laptop compose demo that already exists and is Playwright-verified?
+**RESOLVED AT THE GATE (2026-08-27):** D2 → Neon free tier · D3 → hard billing cutoff at 100% ·
+D4 → GCP as planned, with the docker-compose demo kept as a rehearsed fallback. Resting cost
+falls to ~$0.38/mo (~7 MXN). See "DECISIONES DEL DUEÑO" above.
+
+NO UNRESOLVED DECISIONS
