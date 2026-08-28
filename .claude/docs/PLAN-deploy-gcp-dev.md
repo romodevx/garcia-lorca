@@ -2545,11 +2545,26 @@ Rama `feature/deploy-gcp-dev-blockers`. **Bloque 1 (bloqueadores de arranque) co
 **Regresión: cero.** 521 tests del front y `vet`+`test` de los 14 módulos Go, todo verde, sin
 deriva en `go.mod` (se revirtió el bump 1.24→1.25 que `go work sync` provocó).
 
+### Bloque 2 y 3 — completos (2026-08-27)
+
+| # | Tarea | Verificación |
+|---|---|---|
+| A6/A31 | Proxy de mismo origen | 10 tests primero: 2 cookies separadas, query string, sin `Host`, `content-encoding` fuera, PUT/PATCH/DELETE, allowlist, traversal, 502, `force-dynamic` |
+| A36/A7 | `api-url.ts` en los 24 sitios | 6 tests; nunca cae a localhost en bundle de producción; `turbo.json globalEnv` |
+| A13 | Pool acotado (`pkg/dbpool`) | Tests incl. el caso `0` (que `database/sql` lee como *ilimitado*); cableado en los 8 servicios |
+| A17/A20 | `reset-demo-db.sh`: dos transportes + barandilla | Host remoto sin `--i-know-this-wipes-remote` → **exit 1**, no toca nada |
+| ~~A19~~ | ~~Ocultar mosaicos muertos~~ | **CANCELADA** — ya se ocultan solos (0 migraciones otorgan esos permisos) |
+| A18/A28 | `cloud-warm/cool/stop/start/status` + `tf-init` + `PROJECT_ID` | `make help`; sintaxis de los 4 scripts; `--project`/`--region` explícitos |
+| A40 | Corte duro de facturación | `validate` OK; grafo construye con el flag en `false` **y** en `true` |
+
+**Estado global:** 537 tests del front · 14 módulos Go verdes · lint + typecheck limpios ·
+`terraform validate` Success · sin deriva en `go.mod` · árbol limpio.
+
 ### Pendiente
 
-- **Bloque 2** (proxy A6/A31/A36, `api-url` en 24 sitios, pool A13, semilla A17, mosaicos A19)
-- **Bloque 3** (A40 corte duro de facturación, A18 warm/cold, A28 targets `cloud-*`)
-- **Bloque 4** (A16 migraciones, A20 barandilla, A22/A23 docs, A24 runbook, A27 preflight, A29/A30)
+- **Bloque 4** — A16 (migraciones por psql), **A34** (`setup_app_role.sql` aborta en la línea
+  18 contra Postgres gestionado), A22/A23 (docs desfasados), A24 (extraer el runbook),
+  A27 (`make deploy-preflight`), A29 (columna "Si falla"), A30 (checklist versionado)
 - **`docker build` del web sin verificar** — el daemon de Docker no estaba corriendo. Es la
   única afirmación de este lote que no pude probar de punta a punta.
 - **A0** (reporte de SKU de Heraldo) y la cuenta de Neon: los dos son del dueño.
