@@ -2453,6 +2453,40 @@ facturación (A40) y el par `cloud-stop`/`cloud-warm` (A28/A18).
 
 ## CORRECCIÓN AL REGISTRO — un hallazgo refutado durante la implementación (2026-08-27)
 
+### F16 (mosaicos muertos en el menú) es **falsa alarma**. A19 se cancela.
+
+Las voces CEO y DX señalaron que Becas, Facturación y Reportes renderizarían
+`ModulePlaceholder` y que *"el director va a hacer clic en al menos uno"*. Verifiqué antes de
+tocar nada, y el mecanismo ya existe:
+
+`apps/web/app/_design/data.ts:91` filtra por **permiso**, no solo por flag:
+
+```ts
+export function isModuleVisible(m, permissions) {
+  return m.hidden !== true && moduleHasPerm(m, permissions);
+}
+```
+
+con el comentario, ya escrito: *"No-backend modules carry a permission nobody is granted, so
+they disappear naturally with no special-casing."*
+
+Y contra las migraciones reales, no contra el comentario:
+
+```
+scholarships:read -> otorgado en 0 migraciones
+billing:read      -> otorgado en 0 migraciones
+reports:read      -> otorgado en 0 migraciones
+documents:read    -> otorgado en 0 migraciones
+```
+
+Ninguno de los 33 permisos que las migraciones conceden incluye esos cuatro. **Los mosaicos ya
+se ocultan solos**, y `apps/web/app/_design/data.test.ts:155` documenta el diseño con un
+conjunto `NOT_BUILT_YET` explícito.
+
+Agregar `hidden: true` habría duplicado una intención que ya está expresada y probada en otro
+lado — justo la violación de DRY que el canon prohíbe. **A19 se cancela**; el total de tareas
+baja de 34 a 33.
+
 ### E2 / W-2 (`outputFileTracingRoot`) estaba **sobrecalificado como CRÍTICO**
 
 La voz de ingeniería afirmó que sin `outputFileTracingRoot` el bundle standalone omite los
