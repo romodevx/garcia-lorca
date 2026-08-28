@@ -10,7 +10,8 @@ import { listTeachers, listTeachingAssignments, type Teacher, type TeachingAssig
 import { captureGrade, getRoster, type RosterRow } from "../../grades/api";
 import { listStudents, type Student } from "../../students/api";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+import { API_URL } from "../../api-url";
+
 const AV: ColorKey[] = ["lime", "forest", "orange", "purple", "yellow"];
 const distinct = (xs: string[]): string[] => Array.from(new Set(xs));
 const sel: CSSProperties = { height: 48, padding: "0 16px", borderRadius: "var(--r-pill)", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 15, fontFamily: "var(--font-ui)", outline: "none", cursor: "pointer", minWidth: 240 };

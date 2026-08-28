@@ -21,8 +21,9 @@ import { RosterPanel } from "./RosterPanel";
 import { StudentCreatePanel } from "./StudentCreatePanel";
 import { StudentDirectoryPanel } from "./StudentDirectoryPanel";
 
+import { API_URL } from "../../api-url";
+
 // Gateway base URL for the browser (public env; matches AppShell/compose).
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
 export interface EnrollmentProps {
   onBack: () => void;

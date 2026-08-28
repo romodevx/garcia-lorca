@@ -20,7 +20,8 @@ import {
 } from "../../admin/api";
 import { PERMISSION_CATALOG } from "./catalog";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+import { API_URL } from "../../api-url";
+
 const AV: ColorKey[] = ["lime", "forest", "orange", "purple", "yellow"];
 
 const qb: CSSProperties = { width: 36, height: 36, borderRadius: "50%", display: "grid", placeItems: "center", background: "var(--surface-3)", border: "1px solid var(--border)", color: "var(--text-muted)", cursor: "pointer" };

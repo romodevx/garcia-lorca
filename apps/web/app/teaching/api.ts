@@ -22,6 +22,8 @@ import { authFetch } from "../auth/authFetch";
 // the admin `/attendance/*` client a teacher may not call.
 import type { AttendanceStatus, Mark, SaveDailyResult } from "../attendance/api";
 
+import { API_URL } from "../api-url";
+
 // --- entity types (match the gateway JSON contract) -----------------------
 
 /** One of the caller-teacher's own assignments, WITH readable group/subject names. */
@@ -76,13 +78,9 @@ export interface TeachingGradeEntry {
 
 const BASE_PATH = "/api/v1";
 
-/** The gateway origin for the browser (public env; matches AppShell/compose). */
-function baseURL(): string {
-  return process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
-}
-
 function url(path: string): string {
-  return `${baseURL().replace(/\/+$/, "")}${BASE_PATH}${path}`;
+  // API_URL is already normalised (no trailing slash) by app/api-url.ts.
+  return `${API_URL}${BASE_PATH}${path}`;
 }
 
 /** GET a list endpoint and unwrap the single-key envelope (`{ <key>: [...] }`). */

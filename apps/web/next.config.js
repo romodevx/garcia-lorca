@@ -16,6 +16,8 @@
  */
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- CommonJS Next config
+const path = require("node:path");
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- CommonJS Next config
 const createNextIntlPlugin = require("next-intl/plugin");
 // next-intl request config: resolves locale (cookie) + messages for SSR.
 const withNextIntl = createNextIntlPlugin("./app/i18n/request.ts");
@@ -37,7 +39,7 @@ const nextConfig = {
   // "Cannot find module '@garcia-lorca/ui'". `transpilePackages` below covers the
   // BUILD; this covers RUNTIME tracing — they are different things and only one
   // of them used to be set. See .claude/docs/PLAN-deploy-gcp-dev.md (E2/W-2).
-  outputFileTracingRoot: require("path").join(__dirname, "../../"),
+  outputFileTracingRoot: path.join(__dirname, "../../"),
 
   // HARDENING: never emit browser source maps in production builds.
   productionBrowserSourceMaps: false,

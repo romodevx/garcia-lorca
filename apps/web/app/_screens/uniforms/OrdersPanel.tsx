@@ -5,7 +5,8 @@ import { Btn } from "../../_design/Controls";
 import { listOrders, UniformsError, type Level, type UniformFulfillment, type UniformOrder } from "../../uniforms/api";
 import { EmptyState, ErrorNote, LevelChips, money, SkeletonRows } from "./parts";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+import { API_URL } from "../../api-url";
+
 const PAGE_SIZE = 20;
 
 /**

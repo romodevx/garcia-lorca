@@ -26,8 +26,9 @@ import { listStudents, type Student } from "../../students/api";
 import type { ChargeFilter } from "./ChargesPanel";
 import { formatCents } from "./money";
 
+import { API_URL } from "../../api-url";
+
 // Gateway base URL for the browser (public env; matches AppShell/compose).
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 const TOAST_MS = 2600;
 
 /** The finance surface's sections; also the palette's deep-link targets. */

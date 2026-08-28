@@ -13,8 +13,9 @@ import {
 import { listCycles, listGroups, type Cycle, type Group } from "../../config/api";
 import { listStudents, type Student } from "../../students/api";
 
+import { API_URL } from "../../api-url";
+
 // Gateway base URL for the browser (public env; matches AppShell/compose).
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 const TOAST_MS = 2600;
 
 const detailOf = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));

@@ -13,8 +13,9 @@ import { listStudents, type Student } from "../../students/api";
 import { captureGrade, getRoster, type RosterRow } from "../../grades/api";
 import { CapturePanel } from "./CapturePanel";
 
+import { API_URL } from "../../api-url";
+
 // Gateway base URL for the browser (public env; matches AppShell/compose).
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
 export interface GradeCaptureProps {
   onBack: () => void;
