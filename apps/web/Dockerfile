@@ -38,8 +38,16 @@ WORKDIR /app
 
 RUN corepack enable pnpm
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
+# Copy the WHOLE installed tree, not just the root and apps/web.
+#
+# pnpm gives every workspace package its own node_modules of symlinks into
+# node_modules/.pnpm. Copying only the root and apps/web left packages/ui and
+# packages/i18n without theirs, so `next build` failed on THEIR dependencies —
+# cmdk, intl-messageformat, @formatjs/icu-messageformat-parser — even though the
+# install had fetched them. The symlinks stay valid because the layout under
+# /app is preserved verbatim.
+COPY --from=deps /app ./
+# Sources last, so a code change does not invalidate the install layer.
 COPY . .
 
 # Same-origin API base. "/" (not "") on purpose:
