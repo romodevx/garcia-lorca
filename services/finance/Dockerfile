@@ -9,11 +9,18 @@ ENV CGO_ENABLED=0 GOOS=linux
 
 WORKDIR /src
 
-COPY go.work go.work.sum* ./
 COPY pkg/go.mod pkg/go.sum* ./pkg/
 COPY gen/go/go.mod gen/go/go.sum* ./gen/go/
 COPY services/finance/go.mod services/finance/go.sum* ./services/finance/
-RUN go work sync || true
+
+# Build a workspace containing ONLY what this image needs, instead of copying
+# the repo go.work. That file lists all fourteen modules while this build
+# context has three, so every go command failed with "cannot load module
+# services/x listed in go.work file". The old `go work sync || true` swallowed
+# that error and the build died one step later at `go build`, with a less
+# obvious message.
+RUN go work init ./gen/go ./pkg ./services/finance \
+    && (cd services/finance && go mod download)
 
 COPY pkg ./pkg
 COPY gen ./gen
