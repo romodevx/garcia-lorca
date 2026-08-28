@@ -1,44 +1,72 @@
 # Per-environment overrides for dev. Copy to dev.tfvars (gitignored) and apply:
 #   terraform apply -var-file=environments/dev.tfvars
 #
-# This is the COST-OPTIMIZED dev preset. Every override below maps to a lever in
-# deploy/COST-AND-DEPLOY.md §E ("Top 5 cost levers"). Tuned dev floor ~$12-20/mo
-# (Cloud SQL-dominated); the always-warm gateway+iam are the ~$95-100/mo lever.
-project_id           = "garcia-lorca-dev"
-region               = "us-central1"
-env                  = "dev"
-image_tag            = "latest"
-billing_account_id   = "000000-000000-000000"
+# COST-OPTIMIZED DEMO PRESET. Resting cost with these values is ~$0.38/month:
+# Artifact Registry + Secret Manager and nothing else. Every Cloud Run service
+# scales to zero, and the database is external and auto-suspends.
+#
+# The project ALREADY EXISTS — this deploys into it, it does not create it.
+project_id = "garcia-lorca"
+region     = "us-central1"
+env        = "dev"
 
-# ---- Cloud SQL: cheapest viable dev DB (COST-AND-DEPLOY.md §C1) ------------
-# Keep Cloud SQL (GCP-native, dev/prod parity). db-f1-micro shared-core needs
-# Enterprise edition + ZONAL (both are the module defaults). PITR off — daily
-# backups suffice for dev; retain only a few.
+# Both billing accounts belong to the owner; the second one is closed, so dev
+# bills to the same account as the sibling project. budget.tf filters by project,
+# so the alert below is not polluted by the other project's spend.
+billing_account_id = "018CA3-FF15AB-FAA61D"
+
+# Image tag. Keep "latest" for a manual bootstrap build; CI overrides it with the
+# commit SHA (cloudbuild.yaml substitution _TAG) so infra and revision agree.
+image_tag = "latest"
+
+# ---- Database: external Postgres, NOT Cloud SQL ---------------------------
+# Cloud SQL cannot scale to zero and was the entire resting cost of this
+# environment (~$9.70/mo). pkg/dbdsn.Resolve() reads DATABASE_URL before it
+# assembles the Cloud SQL socket DSN, so this switch costs zero service code.
+# The DSN itself is injected at apply time and NEVER committed:
+#   TF_VAR_database_url='postgresql://USER:PASS@HOST.neon.tech/garcia_lorca?sslmode=require' \
+#     terraform apply -var-file=environments/dev.tfvars
+use_cloud_sql = false
+
+# The Cloud SQL block below is inert while use_cloud_sql = false. It is kept so
+# the school's prod.tfvars can flip one flag and get a real managed instance.
 db_tier                           = "db-f1-micro"
 db_availability_type              = "ZONAL"
 db_point_in_time_recovery_enabled = false
 db_backup_retained_count          = 3
 
-# ---- Cloud Run: scale-to-zero everywhere (COST-AND-DEPLOY.md §C2) ----------
-# THE big lever: let the two always-warm services scale to zero in dev. Cold
-# start (~1-3s) on the first morning request is acceptable here. gateway caps at
-# max=1 because its login rate limiter is in-process/per-instance — min=0/max=1
-# keeps rate limiting correct AND the cost at zero.
+# ---- Cloud Run: scale-to-zero everywhere ----------------------------------
+# These are now enforced, not merely intended: modules/cloud_run has a
+# precondition that FAILS THE APPLY if any service asks for min_instances > 0
+# outside prod. To warm the demo before a meeting use scripts/demo-warm.sh —
+# a temporary, reversible gcloud update, not a persisted setting.
 gateway_min_instances     = 0
-gateway_max_instances     = 1
+gateway_max_instances     = 1 # the login rate limiter is in-process/per-instance
 gateway_cpu_idle          = true
 gateway_startup_cpu_boost = false
 iam_min_instances         = 0
 iam_cpu_idle              = true
 iam_startup_cpu_boost     = false
 
-# ---- Budget: alert-only, tightened for dev (COST-AND-DEPLOY.md §C5) --------
-monthly_budget_amount = 30
+# ---- CORS -----------------------------------------------------------------
+# The web app proxies same-origin, so the browser never calls the gateway
+# cross-origin and this can stay empty. Fill it in only for native mobile
+# clients, AFTER the first apply (deliberately not module.web.uri: that would
+# make gateway and web depend on each other and Terraform refuses the cycle).
+web_origin = ""
+
+# ---- Budget ---------------------------------------------------------------
+# Alerts at 50/80/100% => first email at $7.50, which is already ~20x the
+# expected resting cost.
+monthly_budget_amount = 15
 budget_alert_emails   = ["andres.roqa93@gmail.com"]
 
-# ---- Owner temp password (shared envs only) -------------------------------
-# Leave false for local-parity / throwaway dev. Set true ONLY in a real shared
-# env, and inject owner_temp_password out of band at apply time (never here):
-#   seed_owner_secret  = true
-#   TF_VAR_owner_temp_password=... terraform apply -var-file=environments/dev.tfvars
-seed_owner_secret = false
+# ---- Owner temp password --------------------------------------------------
+# Required for a real shared env, or the owner has no way to log in. Inject the
+# value out of band at apply time, never here:
+#   TF_VAR_owner_temp_password=... terraform apply ...
+seed_owner_secret = true
+
+# ---- Scheduled billing run ------------------------------------------------
+# OFF for a demo: a job that bills the wrong school cycle is worse than no job.
+billing_schedule_enabled = false

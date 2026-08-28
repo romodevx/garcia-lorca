@@ -29,6 +29,19 @@ resource "google_project_service" "apis" {
     "cloudbuild.googleapis.com",
     "billingbudgets.googleapis.com",
     "iam.googleapis.com",
+    # Read by data.google_project (pubsub.tf). NOTE: enabling it HERE is not
+    # enough — a data source with fully-known config is read during plan/refresh,
+    # before this resource can create anything, so a virgin project fails the
+    # very first `terraform plan`. It must also be enabled out of band once:
+    #   gcloud services enable cloudresourcemanager.googleapis.com --project=...
+    # Kept in this list so the state stays declarative and re-applies are inert.
+    "cloudresourcemanager.googleapis.com",
+    # Budget alert notification channels.
+    "monitoring.googleapis.com",
+    # Reading the billing account the budget attaches to.
+    "cloudbilling.googleapis.com",
+    # Minting OIDC tokens for service-to-service calls (pkg/gcpauth).
+    "iamcredentials.googleapis.com",
   ])
   project            = var.project_id
   service            = each.value
@@ -148,4 +161,41 @@ resource "google_service_account_iam_member" "pubsub_agent_token_creator" {
   service_account_id = google_service_account.pubsub_push.name
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = local.pubsub_sa
+}
+
+# ---- Cloud Build identity --------------------------------------------------
+# Since the mid-2024 default change, a project running its first build uses the
+# COMPUTE ENGINE default service account — not the legacy
+# @cloudbuild.gserviceaccount.com, which is no longer created. compute.googleapis.com
+# is not enabled here (deliberately: no VMs), so that account does not exist
+# either, and `gcloud builds submit` would fail before running a single step.
+#
+# So: a dedicated build identity, passed explicitly with --service-account. That
+# requires the build to use CLOUD_LOGGING_ONLY, which cloudbuild.yaml already sets.
+resource "google_service_account" "build" {
+  project      = var.project_id
+  account_id   = "garcia-lorca-build-${var.env}"
+  display_name = "García Lorca Cloud Build (${var.env})"
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_project_iam_member" "build_roles" {
+  for_each = toset([
+    "roles/artifactregistry.writer", # push the service images
+    "roles/logging.logWriter",       # required when a build names its own SA
+    "roles/run.admin",               # the _DEPLOY=true step updates services
+    "roles/iam.serviceAccountUser",  # deploy a revision that RUNS AS the runtime SA
+  ])
+  project = var.project_id
+  role    = each.value
+  member  = "serviceAccount:${google_service_account.build.email}"
+}
+
+# run.admin lets the build update a service; actually setting that service's
+# identity to the runtime SA additionally needs actAs on THAT account.
+resource "google_service_account_iam_member" "build_acts_as_runtime" {
+  service_account_id = google_service_account.runtime.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.build.email}"
 }

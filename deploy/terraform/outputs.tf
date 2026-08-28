@@ -82,3 +82,8 @@ output "student_events_topic" {
   description = "Pub/Sub topic id for student events."
   value       = google_pubsub_topic.student_events.id
 }
+
+output "build_service_account" {
+  description = "Pass this to Cloud Build: gcloud builds submit --service-account=projects/PROJECT/serviceAccounts/THIS"
+  value       = google_service_account.build.email
+}
