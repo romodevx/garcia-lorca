@@ -168,6 +168,7 @@ module "gateway" {
 
   name                  = "gateway"
   project_id            = var.project_id
+  environment           = var.env
   region                = var.region
   image                 = lookup(local.image, "gateway", "${local.registry_path}/gateway:${var.image_tag}")
   service_account_email = google_service_account.runtime.email
@@ -196,6 +197,7 @@ module "iam" {
 
   name                  = "iam"
   project_id            = var.project_id
+  environment           = var.env
   region                = var.region
   image                 = lookup(local.image, "iam", "${local.registry_path}/iam:${var.image_tag}")
   service_account_email = google_service_account.runtime.email
@@ -234,6 +236,7 @@ module "students" {
 
   name                  = "students"
   project_id            = var.project_id
+  environment           = var.env
   region                = var.region
   image                 = lookup(local.image, "students", "${local.registry_path}/students:${var.image_tag}")
   service_account_email = google_service_account.runtime.email
@@ -259,6 +262,7 @@ module "config" {
 
   name                  = "config"
   project_id            = var.project_id
+  environment           = var.env
   region                = var.region
   image                 = lookup(local.image, "config", "${local.registry_path}/config:${var.image_tag}")
   service_account_email = google_service_account.runtime.email
@@ -284,6 +288,7 @@ module "finance" {
 
   name                  = "finance"
   project_id            = var.project_id
+  environment           = var.env
   region                = var.region
   image                 = lookup(local.image, "finance", "${local.registry_path}/finance:${var.image_tag}")
   service_account_email = google_service_account.runtime.email
@@ -309,6 +314,7 @@ module "grades" {
 
   name                  = "grades"
   project_id            = var.project_id
+  environment           = var.env
   region                = var.region
   image                 = lookup(local.image, "grades", "${local.registry_path}/grades:${var.image_tag}")
   service_account_email = google_service_account.runtime.email
@@ -334,6 +340,7 @@ module "attendance" {
 
   name                  = "attendance"
   project_id            = var.project_id
+  environment           = var.env
   region                = var.region
   image                 = lookup(local.image, "attendance", "${local.registry_path}/attendance:${var.image_tag}")
   service_account_email = google_service_account.runtime.email
@@ -364,6 +371,7 @@ module "comms" {
 
   name                  = "comms"
   project_id            = var.project_id
+  environment           = var.env
   region                = var.region
   image                 = lookup(local.image, "comms", "${local.registry_path}/comms:${var.image_tag}")
   service_account_email = google_service_account.runtime.email
@@ -403,6 +411,7 @@ module "uniforms" {
 
   name                  = "uniforms"
   project_id            = var.project_id
+  environment           = var.env
   region                = var.region
   image                 = lookup(local.image, "uniforms", "${local.registry_path}/uniforms:${var.image_tag}")
   service_account_email = google_service_account.runtime.email
@@ -435,6 +444,7 @@ module "web" {
 
   name                  = "web"
   project_id            = var.project_id
+  environment           = var.env
   region                = var.region
   image                 = lookup(local.image, "web", "${local.registry_path}/web:${var.image_tag}")
   service_account_email = google_service_account.runtime.email

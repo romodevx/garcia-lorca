@@ -4,6 +4,15 @@
 # min_instances=1 + cpu_idle=false + startup_cpu_boost=true. Scale-to-zero
 # services pass min_instances=0 + cpu_idle=true (CPU billed only per request).
 
+# NOTE: deliberately NOT called "env" — that name is already taken by the map of
+# container environment variables below. A precondition comparing a map to "dev"
+# would silently never fire, which for a cost guardrail is worse than not having
+# one at all.
+variable "environment" {
+  description = "Deployment environment (dev/staging/prod). Drives the always-on cost guardrail below."
+  type        = string
+}
+
 variable "name" {
   description = "Service name (also the Cloud Run service id), e.g. \"gateway\"."
   type        = string
