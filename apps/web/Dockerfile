@@ -69,8 +69,12 @@ RUN pnpm --filter @garcia-lorca/web run build
 # Fail the BUILD, not the container, if the standalone server or the workspace
 # packages did not make it into the traced output. Cheap insurance against the
 # failure mode where the image builds green and dies on boot.
-RUN test -f .next/standalone/apps/web/server.js \
-      || (echo "standalone server.js missing — check outputFileTracingRoot" && exit 1)
+# NOTE the path. `pnpm --filter` runs the build with apps/web as its working
+# directory, so the output lands under /app/apps/web/.next — not /app/.next. And
+# because outputFileTracingRoot is the monorepo root, Next nests the server one
+# more level down, at .next/standalone/apps/web/server.js.
+RUN test -f apps/web/.next/standalone/apps/web/server.js \
+      || (echo "standalone server.js not found. Either the tracing root moved or this path is stale; run: find apps/web/.next/standalone -name server.js" && exit 1)
 
 # ---- runtime --------------------------------------------------------------
 FROM node:22-bookworm-slim AS runner
@@ -87,7 +91,7 @@ ENV HOSTNAME=0.0.0.0
 # static assets and public files must sit next to it under apps/web — not at the
 # image root. Getting this wrong renders the page with no CSS or JS and logs
 # nothing at all.
-COPY --from=builder --chown=node:node /app/.next/standalone ./
+COPY --from=builder --chown=node:node /app/apps/web/.next/standalone ./
 COPY --from=builder --chown=node:node /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder --chown=node:node /app/apps/web/public ./apps/web/public
 
