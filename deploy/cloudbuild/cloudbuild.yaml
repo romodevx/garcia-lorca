@@ -47,7 +47,15 @@ steps:
       - |
         set -euo pipefail
         go work sync
-        go vet ./...
+        # There is NO root go.mod — only go.work — so `go vet ./...` from the
+        # repo root fails with "directory prefix . does not contain modules
+        # listed in go.work" and, under `set -e`, kills this step before a
+        # single image is built. Iterate the workspace members instead, the
+        # same way .github/workflows/ci.yml does with its per-module matrix.
+        for dir in $(go list -m -f '{{.Dir}}'); do
+          echo "--- go vet: $dir"
+          (cd "$dir" && go vet ./...)
+        done
     waitFor: ["buf-generate"]
 
   - id: go-test
@@ -57,7 +65,12 @@ steps:
       - -c
       - |
         set -euo pipefail
-        go test ./... -race -count=1
+        # Per workspace module — see the go-vet step for why `./...` cannot be
+        # used from the repo root.
+        for dir in $(go list -m -f '{{.Dir}}'); do
+          echo "--- go test: $dir"
+          (cd "$dir" && go test ./... -race -count=1)
+        done
     waitFor: ["go-vet"]
 
   # ---- 3. Security gate: govulncheck + module audit -----------------------
@@ -69,9 +82,12 @@ steps:
       - |
         set -euo pipefail
         go install golang.org/x/vuln/cmd/govulncheck@latest
-        $(go env GOPATH)/bin/govulncheck ./...
-        # Dependency audit: verify checksums and that go.mod is tidy/pinned.
-        go mod verify
+        # Per workspace module — see the go-vet step. `go mod verify` also needs
+        # a module directory; there is no root go.mod to verify.
+        for dir in $(go list -m -f '{{.Dir}}'); do
+          echo "--- govulncheck: $dir"
+          (cd "$dir" && "$(go env GOPATH)/bin/govulncheck" ./... && go mod verify)
+        done
     waitFor: ["buf-generate"]
 
   # ---- 4. Frontend: install + turbo test/lint/build -----------------------

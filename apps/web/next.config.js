@@ -29,6 +29,16 @@ const nextConfig = {
   // faster Cloud Run cold start. See deploy/COST-AND-DEPLOY.md §C4.
   output: "standalone",
 
+  // REQUIRED for standalone inside this pnpm workspace. apps/web depends on four
+  // `workspace:*` packages (@garcia-lorca/ui|domain|i18n|api-client) that pnpm
+  // symlinks from node_modules/.pnpm, OUTSIDE apps/web. Without an explicit root,
+  // Next infers the tracing root from the app directory and silently omits them:
+  // `next build` passes, the image builds, and the server dies at boot with
+  // "Cannot find module '@garcia-lorca/ui'". `transpilePackages` below covers the
+  // BUILD; this covers RUNTIME tracing — they are different things and only one
+  // of them used to be set. See .claude/docs/PLAN-deploy-gcp-dev.md (E2/W-2).
+  outputFileTracingRoot: require("path").join(__dirname, "../../"),
+
   // HARDENING: never emit browser source maps in production builds.
   productionBrowserSourceMaps: false,
 

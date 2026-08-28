@@ -1,0 +1,57 @@
+# BuildKit prefers <dockerfile>.dockerignore over the repo-root .dockerignore.
+#
+# WHY THIS FILE EXISTS: the root .dockerignore excludes `apps` and `packages`
+# outright, deliberately, so the nine Go service build contexts stay small. That
+# makes the root file actively hostile to a frontend image — a web Dockerfile
+# built from the repo root with the root ignore file receives ZERO web source and
+# fails on the first COPY. See .claude/docs/PLAN-deploy-gcp-dev.md (W-1).
+#
+# So: keep apps/ and packages/, drop everything a Next build never needs.
+
+.git
+.github
+deploy
+docker
+migrations
+proto
+services
+gen
+docs
+
+# The Expo app is a workspace member (its package.json is needed for the pnpm
+# lockfile to resolve) but its sources are not part of the web image.
+apps/mobile/app
+apps/mobile/assets
+apps/mobile/src
+
+# Installed and built inside the image, never copied in.
+node_modules
+**/node_modules
+.next
+**/.next
+.turbo
+**/.turbo
+out
+dist
+web-build
+.expo
+
+# Secrets / env — must never enter an image.
+.env
+.env.*
+!.env.example
+*-key.json
+*.pem
+service-account*.json
+*.tfvars
+*.tfstate
+*.tfstate.*
+
+# Source maps must never ship.
+*.map
+
+# Local noise
+*.log
+.DS_Store
+.idea
+.vscode
