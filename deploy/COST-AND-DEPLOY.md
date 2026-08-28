@@ -1,5 +1,46 @@
 # García Lorca — GCP Deployment & Cost-Minimization
 
+> **STATUS — corrected 2026-08-27.** The inventory and cost tables below were
+> written before the IaC was finished and drifted badly: they claimed only
+> gateway/iam were wired, that five services were "NOT written", and that
+> `uniforms` was a stub. All three were false, and trusting this file over
+> `services.tf` caused a real planning error. The two cost figures in it also
+> looked contradictory and were not: they describe DIFFERENT configurations —
+> see "Reconciling the two cost models" immediately below.
+>
+> For what is actually deployed, read `deploy/terraform/services.tf`.
+> For how to deploy it, read `deploy/RUNBOOK-dev.md`.
+
+## Reconciling the two cost models
+
+Both numbers in this document are right; they are not about the same thing.
+
+| Scenario | `cpu_idle` | CPU billed at | Per service / month |
+|---|---|---|---|
+| A service left at `min=1` with CPU throttled (the sibling project's actual setup) | `true` | idle rate | **~$6.80** |
+| A service left at `min=1` with CPU always allocated (what `services.tf` used to declare for gateway+iam) | `false` | active rate, 24/7 | **~$62** |
+
+The conclusion that matters: applying the Terraform **as it was originally
+written** would have cost more than the project this exercise was trying not to
+repeat. The dev preset is not an optimisation, it is the whole defence — and it is
+now enforced by a precondition in `modules/cloud_run`, not by remembering.
+
+## What is actually deployed (2026-08-27)
+
+**Ten Cloud Run services, all scale-to-zero:** `web`, `gateway`, `iam`,
+`students`, `config`, `finance`, `grades`, `attendance`, `comms`, `uniforms`.
+
+**Three stubs, NOT deployed:** `billing`, `scholarships`, `docs`.
+
+`uniforms` is emphatically not a stub — 35 Go files, its own migrations and
+ADRs 0007-0010.
+
+**The database is NOT Cloud SQL in dev.** It runs on an external Postgres that
+auto-suspends, because Cloud SQL cannot scale to zero and was the entire resting
+cost. Resting cost is now **~$0.38/month**: Artifact Registry and Secret Manager,
+nothing else.
+
+
 Grounded in `deploy/terraform/**`, `deploy/cloudbuild/cloudbuild.yaml`, `docker-compose.yml`, `go.work`.
 Prices are **estimates (us-central1) — verify against current GCP pricing before committing.**
 
