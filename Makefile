@@ -154,6 +154,14 @@ deploy-%: ## Deploy a service to Cloud Run, e.g. make deploy-gateway
 		--image=$(REGION)-docker.pkg.dev/$(PROJECT_ID)/$(AR_REPO)/$*:$(or $(TAG),local)
 
 # ---- Terraform ------------------------------------------------------------
+.PHONY: deploy-preflight
+deploy-preflight: ## Check every prerequisite the deploy assumes (read-only)
+	PROJECT_ID=$(PROJECT_ID) REGION=$(REGION) sh scripts/deploy-preflight.sh
+
+.PHONY: migrate-cloud
+migrate-cloud: ## Apply migrations to a deployed env (needs DATABASE_URL)
+	sh scripts/migrate-cloud.sh
+
 .PHONY: tf-init
 tf-init: ## terraform init for ENV (default dev) — pass BUCKET=gs-bucket-name
 	@test -n "$(BUCKET)" || { echo "BUCKET is required, e.g. make tf-init BUCKET=garcia-lorca-tfstate"; exit 1; }
