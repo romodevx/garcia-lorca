@@ -61,6 +61,19 @@ web_origin = ""
 monthly_budget_amount = 15
 budget_alert_emails   = ["andres.roqa93@gmail.com"]
 
+# HARD CUTOFF, not just an alert. At 100% of the budget a Cloud Function
+# disconnects this project's billing account: every service stops, NOTHING is
+# deleted, and re-attaching the account in the console restores it.
+#
+# Leave this false until you have granted the role it needs, which lives on the
+# BILLING ACCOUNT and cannot be granted from Terraform:
+#   terraform apply ...                     # creates the SA with the flag false
+#   gcloud billing accounts add-iam-policy-binding 018CA3-FF15AB-FAA61D \
+#     --member="serviceAccount:$(terraform output -raw billing_killswitch_sa)" \
+#     --role="roles/billing.projectManager"
+# then flip it to true and apply again.
+enable_billing_killswitch = false
+
 # ---- Owner temp password --------------------------------------------------
 # Required for a real shared env, or the owner has no way to log in. Inject the
 # value out of band at apply time, never here:

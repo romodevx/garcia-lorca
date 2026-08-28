@@ -87,3 +87,8 @@ output "build_service_account" {
   description = "Pass this to Cloud Build: gcloud builds submit --service-account=projects/PROJECT/serviceAccounts/THIS"
   value       = google_service_account.build.email
 }
+
+output "billing_killswitch_sa" {
+  description = "Service account that must hold roles/billing.projectManager ON THE BILLING ACCOUNT for the kill switch to work. Empty when the kill switch is disabled."
+  value       = var.enable_billing_killswitch ? google_service_account.billing_killswitch[0].email : ""
+}

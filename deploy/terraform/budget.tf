@@ -36,12 +36,15 @@ resource "google_billing_budget" "monthly" {
     spend_basis       = "FORECASTED_SPEND"
   }
 
+  # Emails notify; the Pub/Sub topic is what lets something ACT. An email at 3am
+  # does not stop a retry storm — see billing_killswitch.tf.
   dynamic "all_updates_rule" {
-    for_each = length(var.budget_alert_emails) > 0 ? [1] : []
+    for_each = (length(var.budget_alert_emails) > 0 || var.enable_billing_killswitch) ? [1] : []
     content {
       monitoring_notification_channels = [
         for c in google_monitoring_notification_channel.budget : c.id
       ]
+      pubsub_topic                   = var.enable_billing_killswitch ? google_pubsub_topic.budget_alerts[0].id : null
       disable_default_iam_recipients = false
     }
   }
