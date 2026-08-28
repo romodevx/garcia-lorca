@@ -2400,6 +2400,57 @@ Modo: [subagent-only]. 6/6 dimensiones con hallazgo real.
 
 ---
 
+## DECISIONES DEL DUEÑO — resueltas en la puerta final (2026-08-27)
+
+| # | Decisión | Elegida | Consecuencia |
+|---|---|---|---|
+| **D2** | Base de datos | **Neon free tier** | El piso de costo pasa de ~$9.70/mes a **~$0.30/mes** |
+| **D3** | Control de gasto | **Corte duro al 100%** | El tope deja de ser una esperanza y pasa a ser una garantía |
+| **D4** | Vehículo | **GCP + demo local como red** | Se despliega, y la demo de compose queda lista para la junta |
+
+### Lo que cambia en las tareas
+
+**Por D2 (Neon):**
+- **A1 sale del alcance de dev.** No se aplica `database.tf` en dev; el bloqueador B1 (Cloud SQL
+  sin IP) **deja de existir para esta demo** y queda pendiente solo para el deploy de la escuela.
+- **A16 se simplifica mucho:** sin Cloud SQL no hay Auth Proxy, no hace falta `cloudsql.client`
+  en la laptop, ni el puerto 3307 (que M-3 señalaba como bloqueado en muchas redes). Las
+  migraciones corren por TLS público directo. **Desaparecen M-2 y M-3 completos.**
+- **A34 sigue siendo necesario:** el rol por defecto de Neon tampoco es superusuario, así que
+  `ALTER ROLE app NOBYPASSRLS` falla igual. El arreglo es el mismo.
+- **Nueva A39:** secreto `DATABASE_URL` en Secret Manager, inyectado por `common_secret_env`;
+  quitar `cloudsql_instances` de los 10 módulos.
+- Se conserva `database.tf` **intacto** para `prod.tfvars` de la escuela.
+
+**Por D3 (corte duro):**
+- **Nueva A40:** `budget.tf` gana `pubsub_topic`; Cloud Function (~20 líneas) que llama
+  `projects.updateBillingInfo` con cuenta vacía al 100%. Presupuesto en **$15**.
+  Se documenta cómo **reconectar** la facturación, porque un corte a media junta sin saber
+  revertirlo es peor que el problema.
+
+**Por D4 (red de seguridad):**
+- **Nueva A41:** ensayar `pnpm demo:ready` **en la laptop** y dejarlo verde antes de la junta.
+  Es el plan B, y tiene que estar probado para contar como plan B.
+
+### Costo final, con las decisiones tomadas
+
+| Recurso | En reposo |
+|---|---|
+| 10 servicios Cloud Run a `min=0` | **$0.00** |
+| Neon free tier | **$0.00** |
+| Artifact Registry (con política de limpieza) | ~$0.20 |
+| Secret Manager (3 secretos) | ~$0.18 |
+| Pub/Sub · Cloud Build · Logging | $0.00 (capas gratuitas) |
+| **Total en reposo** | **≈ $0.38 USD ≈ 7 MXN/mes** |
+
+Contra los ~700 MXN de Heraldo: **el gasto en reposo baja ~99%**, y ahora hay tres controles
+que impiden que vuelva a subir — la precondición de `min_instances` (A12), el corte duro de
+facturación (A40) y el par `cloud-stop`/`cloud-warm` (A28/A18).
+
+**Total de tareas: 34 (A0-A41).** Bloque 0-1 antes de cualquier `terraform apply`.
+
+---
+
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |
