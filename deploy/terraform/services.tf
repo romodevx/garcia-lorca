@@ -13,36 +13,69 @@
 # call with the scale-to-zero profile (copy the "students" block, change name).
 
 locals {
-  db_connection_name = google_sql_database_instance.main.connection_name
+  # Empty when running against an external Postgres (use_cloud_sql = false).
+  db_connection_name = var.use_cloud_sql ? google_sql_database_instance.main[0].connection_name : ""
+  cloudsql_instances = var.use_cloud_sql ? [local.db_connection_name] : []
 
-  # Shared runtime env every service receives.
-  common_env = {
-    APP_ENV          = var.env
-    OTEL_SERVICE_ENV = var.env
-    DB_NAME          = var.db_name
-    DB_USER          = var.db_app_user
-    # Unix-socket path used with the Cloud SQL proxy volume mount.
-    DB_SOCKET_DIR = "/cloudsql/${local.db_connection_name}"
-    # Selects the real Cloud Pub/Sub transport (vs the dev log bus) for every
-    # service that publishes or consumes events. Harmless for services that use
-    # neither — the var is only read by pkg/pubsub/gcp.*FromEnv. See pubsub.tf.
-    PUBSUB_PROJECT_ID = var.project_id
-  }
+  # Shared runtime env every service receives. The DB_* half only applies to the
+  # Cloud SQL socket path; with an external Postgres the whole DSN arrives as the
+  # DATABASE_URL secret, which pkg/dbdsn.Resolve() reads first.
+  common_env = merge(
+    {
+      APP_ENV          = var.env
+      OTEL_SERVICE_ENV = var.env
+      # Selects the real Cloud Pub/Sub transport (vs the dev log bus) for every
+      # service that publishes or consumes events. Harmless for services that use
+      # neither — the var is only read by pkg/pubsub/gcp.*FromEnv. See pubsub.tf.
+      PUBSUB_PROJECT_ID = var.project_id
+    },
+    var.use_cloud_sql ? {
+      DB_NAME = var.db_name
+      DB_USER = var.db_app_user
+      # Unix-socket path used with the Cloud SQL proxy volume mount.
+      DB_SOCKET_DIR = "/cloudsql/${local.db_connection_name}"
+    } : {}
+  )
 
-  # The app DB password is read from Secret Manager at runtime, never inlined.
-  common_secret_env = {
+  # Database credentials are read from Secret Manager at runtime, never inlined.
+  common_secret_env = var.use_cloud_sql ? {
     DB_PASSWORD = {
-      secret_id = google_secret_manager_secret.db_app_password.secret_id
+      secret_id = google_secret_manager_secret.db_app_password[0].secret_id
+      version   = "latest"
+    }
+    } : {
+    DATABASE_URL = {
+      secret_id = google_secret_manager_secret.database_url[0].secret_id
       version   = "latest"
     }
   }
+
+  # iam additionally needs its token signing key. Without it iam refuses to boot
+  # outside a local environment — deliberately, because the previous random
+  # fallback silently invalidated every session on each scale-to-zero restart.
+  iam_secret_env = merge(local.common_secret_env, {
+    IAM_JWT_SECRET = {
+      secret_id = google_secret_manager_secret.iam_jwt_secret.secret_id
+      version   = "latest"
+    }
+  })
 
   # Gateway → internal service wiring. ENABLED_MODULES is the authoritative
   # module-visibility list the gateway enforces (default-deny); each *_BASE_URL
   # points at the internal service's Cloud Run URL. Mirrors docker-compose.yml
   # and the env the gateway reads (services/gateway/cmd/main.go).
   gateway_env = merge(local.common_env, {
-    ENABLED_MODULES     = "iam,gateway,students,config,grades,finance,attendance,comms"
+    # The authoritative module-visibility list (default-deny). `teachers` and
+    # `uniforms` were missing: teachers guards /api/v1/teachers +teaching
+    # assignments (M14), and uniforms is a real Clean-Architecture service with
+    # its own migrations since M12 — not a stub. There is deliberately NO
+    # `tuition` entry: M15 rides on module_finance (FLAGS.md).
+    ENABLED_MODULES = "iam,gateway,students,config,grades,finance,attendance,comms,teachers,uniforms"
+    # CORS allow-list for clients that call the gateway cross-origin. The web app
+    # does not: it proxies same-origin. This is a plain variable rather than
+    # module.web.uri on purpose — see var.web_origin for the dependency cycle.
+    WEB_ORIGIN          = var.web_origin
+    UNIFORMS_BASE_URL   = module.uniforms.uri
     IAM_BASE_URL        = module.iam.uri
     STUDENTS_BASE_URL   = module.students.uri
     CONFIG_BASE_URL     = module.config.uri
@@ -106,6 +139,14 @@ locals {
     PUBSUB_PUSH_SA_EMAIL = google_service_account.pubsub_push.email
   })
 
+  # uniforms sells at the counter, which creates a charge in finance by
+  # external_ref (ADR 0008), and resolves pupils for the order list.
+  uniforms_env = merge(local.common_env, {
+    FINANCE_BASE_URL  = module.finance.uri
+    STUDENTS_BASE_URL = module.students.uri
+    CONFIG_BASE_URL   = module.config.uri
+  })
+
   # Internal-ingress services the gateway (and other services) call as the
   # runtime SA. Each needs roles/run.invoker granted to that SA — cheaper and
   # simpler than a Serverless VPC connector. See internal_invoker below.
@@ -117,6 +158,7 @@ locals {
     grades     = module.grades.service_name
     attendance = module.attendance.service_name
     comms      = module.comms.service_name
+    uniforms   = module.uniforms.service_name
   }
 }
 
@@ -140,7 +182,7 @@ module "gateway" {
   ingress               = "INGRESS_TRAFFIC_ALL"
   allow_unauthenticated = true # the only public entry point
 
-  cloudsql_instances = [local.db_connection_name]
+  cloudsql_instances = local.cloudsql_instances
   # gateway_env adds ENABLED_MODULES + one *_BASE_URL per internal service.
   env        = local.gateway_env
   secret_env = local.common_secret_env
@@ -165,11 +207,18 @@ module "iam" {
   concurrency       = 120
   max_instances     = 10
 
-  ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY" # reached only via the gateway
+  # NOT internal-only. Cloud Run -> Cloud Run over the *.run.app URL egresses to
+  # the public internet unless a VPC connector or Direct VPC egress is
+  # configured, and neither is (that is the cost decision). Internal ingress is a
+  # NETWORK filter evaluated before authentication, so it would reject every
+  # gateway call with a 404 from Cloud Run's frontend, before reaching any code.
+  # The real boundary is allow_unauthenticated=false + roles/run.invoker +
+  # audience-scoped OIDC (pkg/gcpauth) — exactly what comms already relies on.
+  ingress = "INGRESS_TRAFFIC_ALL"
 
-  cloudsql_instances = [local.db_connection_name]
+  cloudsql_instances = local.cloudsql_instances
   env                = local.common_env
-  secret_env         = local.common_secret_env
+  secret_env         = local.iam_secret_env
 
   depends_on = [google_project_service.apis]
 }
@@ -195,9 +244,9 @@ module "students" {
   concurrency       = 80
   max_instances     = 3
 
-  ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  ingress = "INGRESS_TRAFFIC_ALL" # see the iam block: authenticated, not public
 
-  cloudsql_instances = [local.db_connection_name]
+  cloudsql_instances = local.cloudsql_instances
   env                = local.students_env
   secret_env         = local.common_secret_env
 
@@ -220,9 +269,9 @@ module "config" {
   concurrency       = 80
   max_instances     = 3
 
-  ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  ingress = "INGRESS_TRAFFIC_ALL" # see the iam block: authenticated, not public
 
-  cloudsql_instances = [local.db_connection_name]
+  cloudsql_instances = local.cloudsql_instances
   env                = local.common_env
   secret_env         = local.common_secret_env
 
@@ -245,9 +294,9 @@ module "finance" {
   concurrency       = 80
   max_instances     = 3
 
-  ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  ingress = "INGRESS_TRAFFIC_ALL" # see the iam block: authenticated, not public
 
-  cloudsql_instances = [local.db_connection_name]
+  cloudsql_instances = local.cloudsql_instances
   env                = local.finance_env
   secret_env         = local.common_secret_env
 
@@ -270,9 +319,9 @@ module "grades" {
   concurrency       = 80
   max_instances     = 3
 
-  ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  ingress = "INGRESS_TRAFFIC_ALL" # see the iam block: authenticated, not public
 
-  cloudsql_instances = [local.db_connection_name]
+  cloudsql_instances = local.cloudsql_instances
   env                = local.grades_env
   secret_env         = local.common_secret_env
 
@@ -295,9 +344,9 @@ module "attendance" {
   concurrency       = 80
   max_instances     = 3
 
-  ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  ingress = "INGRESS_TRAFFIC_ALL" # see the iam block: authenticated, not public
 
-  cloudsql_instances = [local.db_connection_name]
+  cloudsql_instances = local.cloudsql_instances
   env                = local.attendance_env
   secret_env         = local.common_secret_env
 
@@ -325,16 +374,90 @@ module "comms" {
   concurrency       = 80
   max_instances     = 3
 
-  # ALL (not INTERNAL_ONLY) because Pub/Sub push originates from Google's public
-  # range, not the VPC. This is NOT public exposure: allow_unauthenticated stays
-  # false, so every caller must present a valid OIDC token carrying run.invoker —
-  # the push SA for /pubsub (main.tf) and the runtime SA for gateway→comms RPCs
-  # (internal_invoker below). Unauthenticated public traffic is still rejected.
+  # ALL, for the same reason as every other service here (see the iam block):
+  # Cloud Run -> Cloud Run does not qualify as internal traffic without VPC
+  # egress. NOTE: the original comment here blamed Pub/Sub push and was wrong —
+  # Pub/Sub IS an allowed internal-ingress source, which is why students and
+  # finance receive pushes fine. Either way this is NOT public exposure:
+  # allow_unauthenticated stays false, so every caller must present a valid OIDC
+  # token carrying run.invoker — the push SA for /pubsub (main.tf) and the
+  # runtime SA for gateway->comms RPCs (internal_invoker below).
   ingress = "INGRESS_TRAFFIC_ALL"
 
-  cloudsql_instances = [local.db_connection_name]
+  cloudsql_instances = local.cloudsql_instances
   env                = local.comms_env
   secret_env         = local.common_secret_env
+
+  depends_on = [google_project_service.apis]
+}
+
+# ---- uniforms: store + inventory (M12), SCALE-TO-ZERO ---------------------
+# NOT a stub. 35 Go files, its own go.mod and migrations, ADRs 0007-0010: a full
+# Clean-Architecture service with a 7-state delivery machine and FIFO stock
+# allocation. deploy/COST-AND-DEPLOY.md listed it among the stubs long after that
+# stopped being true, and the web already renders its "Uniformes" tile — so
+# leaving it undeployed both dropped a module a school administrator can actually
+# touch AND broke the demo seed, which calls /api/v1/uniforms/*.
+module "uniforms" {
+  source = "./modules/cloud_run"
+
+  name                  = "uniforms"
+  project_id            = var.project_id
+  region                = var.region
+  image                 = lookup(local.image, "uniforms", "${local.registry_path}/uniforms:${var.image_tag}")
+  service_account_email = google_service_account.runtime.email
+
+  min_instances     = 0
+  cpu_idle          = true
+  startup_cpu_boost = false
+  concurrency       = 80
+  max_instances     = 3
+
+  ingress = "INGRESS_TRAFFIC_ALL" # see the iam block: authenticated, not public
+
+  cloudsql_instances = local.cloudsql_instances
+  env                = local.uniforms_env
+  secret_env         = local.common_secret_env
+
+  depends_on = [google_project_service.apis]
+}
+
+# ---- web: the Next.js front end, PUBLIC, SCALE-TO-ZERO --------------------
+# The only thing the browser talks to. It proxies /api/* to the gateway from its
+# own origin (apps/web/app/api/[...path]/route.ts) because the auth cookies are
+# SameSite=Strict and run.app is on the Public Suffix List, so a browser would
+# never send them across two different *.run.app hosts.
+#
+# No Cloud SQL and no secrets: it holds no credentials and reaches nothing but
+# the gateway.
+module "web" {
+  source = "./modules/cloud_run"
+
+  name                  = "web"
+  project_id            = var.project_id
+  region                = var.region
+  image                 = lookup(local.image, "web", "${local.registry_path}/web:${var.image_tag}")
+  service_account_email = google_service_account.runtime.email
+
+  min_instances = 0
+  cpu_idle      = true
+  # On for the one path a visitor actually experiences. With min_instances=0 the
+  # boost is billed only while starting, so it costs ~nothing at rest.
+  startup_cpu_boost = true
+  concurrency       = 80
+  max_instances     = 2
+
+  ingress               = "INGRESS_TRAFFIC_ALL"
+  allow_unauthenticated = true # the public entry point for humans
+
+  cloudsql_instances = []
+  env = {
+    APP_ENV = var.env
+    # Read per request by the proxy route handler, so pointing the web at a
+    # different gateway is an env update, not an image rebuild.
+    GATEWAY_URL = module.gateway.uri
+  }
+  secret_env = {}
 
   depends_on = [google_project_service.apis]
 }

@@ -2,6 +2,8 @@
 # Scale by raising db_tier and switching availability_type to REGIONAL for prod.
 
 resource "google_sql_database_instance" "main" {
+  count = var.use_cloud_sql ? 1 : 0
+
   project          = var.project_id
   name             = "garcia-lorca-${var.env}"
   region           = var.region
@@ -43,8 +45,10 @@ resource "google_sql_database_instance" "main" {
 }
 
 resource "google_sql_database" "app" {
+  count = var.use_cloud_sql ? 1 : 0
+
   project  = var.project_id
-  instance = google_sql_database_instance.main.name
+  instance = google_sql_database_instance.main[0].name
   name     = var.db_name
 }
 
@@ -63,10 +67,19 @@ resource "google_sql_database" "app" {
 # snippet in db/setup_app_role.sql (run once by an admin/owner connection),
 # because Terraform's google_sql_user does not manage GRANT/role attributes.
 resource "google_sql_user" "app" {
+  count = var.use_cloud_sql ? 1 : 0
+
   project  = var.project_id
-  instance = google_sql_database_instance.main.name
+  instance = google_sql_database_instance.main[0].name
   name     = var.db_app_user
 
-  # Password comes from Secret Manager, not from tfvars or code.
-  password = google_secret_manager_secret_version.db_app_password.secret_data
+  # The password is GENERATED AT APPLY TIME and flows one way: random_password ->
+  # Secret Manager version -> this user. It used to read the secret version whose
+  # data came from var.db_app_password (default ""), which meant either an empty
+  # password or, worse, an operator writing a value out of band afterwards: Cloud
+  # Run then mounted "latest" (the new password) while Postgres kept the old one,
+  # every service died on "password authentication failed", and ignore_changes
+  # guaranteed no later apply would ever reconcile them.
+  # Rotating later is: terraform apply -replace=random_password.db_app
+  password = google_secret_manager_secret_version.db_app_password[0].secret_data
 }

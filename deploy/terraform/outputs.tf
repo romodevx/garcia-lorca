@@ -44,13 +44,28 @@ output "artifact_registry_path" {
 }
 
 output "db_connection_name" {
-  description = "Cloud SQL connection name (project:region:instance) for the proxy."
-  value       = google_sql_database_instance.main.connection_name
+  description = "Cloud SQL connection name (project:region:instance) for the proxy. Empty when use_cloud_sql = false."
+  value       = var.use_cloud_sql ? google_sql_database_instance.main[0].connection_name : ""
 }
 
 output "db_app_password_secret" {
-  description = "Secret Manager secret id holding the app DB password."
-  value       = google_secret_manager_secret.db_app_password.secret_id
+  description = "Secret Manager secret id holding the app DB password. Empty when use_cloud_sql = false — the whole DSN lives in the database-url secret instead."
+  value       = var.use_cloud_sql ? google_secret_manager_secret.db_app_password[0].secret_id : ""
+}
+
+output "database_url_secret" {
+  description = "Secret Manager secret id holding the external Postgres DSN. Empty when use_cloud_sql = true."
+  value       = var.use_cloud_sql ? "" : google_secret_manager_secret.database_url[0].secret_id
+}
+
+output "iam_jwt_secret_name" {
+  description = "Secret Manager secret id holding the iam token signing key. iam refuses to boot without it outside a local environment."
+  value       = google_secret_manager_secret.iam_jwt_secret.secret_id
+}
+
+output "web_url" {
+  description = "Public URL of the web front end — the one link to hand to the school."
+  value       = module.web.uri
 }
 
 output "payment_events_topic" {
