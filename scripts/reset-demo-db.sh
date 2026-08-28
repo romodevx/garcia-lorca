@@ -10,13 +10,54 @@
 # counters and sequences start over — a demo that opens on "U-2026-000042" has
 # some explaining to do.
 #
-# Usage:  sh scripts/reset-demo-db.sh            (compose)
-#         PGHOST=… PGUSER=… sh scripts/…         (anywhere else)
+# TWO TRANSPORTS. Default is `docker exec` against the compose container. Set
+# PGHOST to talk to a real host with a local psql instead — the header used to
+# claim that worked while the code called docker exec unconditionally, so it
+# never did.
+#
+# THIS SCRIPT DESTROYS DATA. Against anything that is not localhost it refuses
+# unless you pass --i-know-this-wipes-remote. That guard exists because the one
+# realistic way to lose a demo is to run a wipe against the cloud the night
+# before showing it, and until now the only thing standing in the way was a
+# sentence in a markdown file.
+#
+# Usage:  sh scripts/reset-demo-db.sh                         (compose)
+#         PGHOST=127.0.0.1 PGPASSWORD=… sh scripts/reset-demo-db.sh
+#         PGHOST=db.example PGPASSWORD=… sh scripts/reset-demo-db.sh --i-know-this-wipes-remote
 set -e
 
 : "${CONTAINER:=garcia-lorca-postgres-1}"
 : "${PGUSER:=postgres}"
 : "${PGDATABASE:=garcia_lorca}"
+
+CONFIRMED=""
+for arg in "$@"; do
+  [ "$arg" = "--i-know-this-wipes-remote" ] && CONFIRMED="yes"
+done
+
+if [ -n "${PGHOST:-}" ]; then
+  case "$PGHOST" in
+    localhost|127.0.0.1|::1|"") ;;
+    *)
+      if [ -z "$CONFIRMED" ]; then
+        echo "[reset] REFUSING: PGHOST=$PGHOST is not local." >&2
+        echo "[reset] This TRUNCATEs every operational table. If you really mean it," >&2
+        echo "[reset] re-run with --i-know-this-wipes-remote." >&2
+        exit 1
+      fi
+      echo "[reset] WARNING: wiping REMOTE host $PGHOST (confirmed on the command line)"
+      ;;
+  esac
+fi
+
+# psql_do runs one psql invocation against whichever transport applies.
+psql_do() {
+  if [ -n "${PGHOST:-}" ]; then
+    psql -h "$PGHOST" -p "${PGPORT:-5432}" -U "$PGUSER" -d "$PGDATABASE" "$@"
+  else
+    docker exec -i "$CONTAINER" psql -U "$PGUSER" -d "$PGDATABASE" "$@"
+  fi
+}
 
 SQL="
 BEGIN;
@@ -33,11 +74,11 @@ RESTART IDENTITY CASCADE;
 COMMIT;
 "
 
-echo "[reset] emptying operational data in ${PGDATABASE} (users and roles are kept)"
-docker exec -i "$CONTAINER" psql -v ON_ERROR_STOP=1 -U "$PGUSER" -d "$PGDATABASE" -c "$SQL"
+echo "[reset] emptying operational data in ${PGDATABASE}@${PGHOST:-$CONTAINER} (users and roles are kept)"
+psql_do -v ON_ERROR_STOP=1 -c "$SQL"
 
 echo "[reset] what is left:"
-docker exec -i "$CONTAINER" psql -U "$PGUSER" -d "$PGDATABASE" -tAc "
+psql_do -tAc "
 SELECT 'users: '||count(*) FROM users
 UNION ALL SELECT 'roles: '||count(*) FROM roles
 UNION ALL SELECT 'students: '||count(*) FROM students
