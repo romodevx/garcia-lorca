@@ -28,6 +28,13 @@ locals {
       # service that publishes or consumes events. Harmless for services that use
       # neither — the var is only read by pkg/pubsub/gcp.*FromEnv. See pubsub.tf.
       PUBSUB_PROJECT_ID = var.project_id
+      # db-f1-micro allows ~25 connections total. Ten services that could each
+      # run several instances would exhaust that, and the failure is an
+      # intermittent "remaining connection slots are reserved" rather than
+      # anything obvious. pkg/dbpool defaults to 3; trim it here for the small
+      # tier. Raise it in an environment that has the headroom.
+      DB_MAX_OPEN_CONNS = "2"
+      DB_MAX_IDLE_CONNS = "1"
     },
     var.use_cloud_sql ? {
       DB_NAME = var.db_name

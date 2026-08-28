@@ -19,17 +19,22 @@ billing_account_id = "018CA3-FF15AB-FAA61D"
 # commit SHA (cloudbuild.yaml substitution _TAG) so infra and revision agree.
 image_tag = "latest"
 
-# ---- Database: external Postgres, NOT Cloud SQL ---------------------------
-# Cloud SQL cannot scale to zero and was the entire resting cost of this
-# environment (~$9.70/mo). pkg/dbdsn.Resolve() reads DATABASE_URL before it
-# assembles the Cloud SQL socket DSN, so this switch costs zero service code.
-# The DSN itself is injected at apply time and NEVER committed:
-#   TF_VAR_database_url='postgresql://USER:PASS@HOST.neon.tech/garcia_lorca?sslmode=require' \
-#     terraform apply -var-file=environments/dev.tfvars
-use_cloud_sql = false
+# ---- Database: Cloud SQL, inside this GCP project --------------------------
+# Everything stays in GCP. An external Postgres would cost ~$0 instead of
+# ~$9.70/mo, but the school's production environment will be 100% GCP, and the
+# owner would rather exercise the real connection path (socket, volume mount,
+# IAM) here than discover it works on handover day. The demo runs until November
+# 2026 and is then torn down and handed to the director's own account, so the
+# total exposure is about three months.
+#
+# Cloud SQL CANNOT scale to zero: this is the one resting cost in the whole
+# environment, and it is the entire ~185 MXN/month.
+use_cloud_sql = true
 
-# The Cloud SQL block below is inert while use_cloud_sql = false. It is kept so
-# the school's prod.tfvars can flip one flag and get a real managed instance.
+# Shared-core tier. db-f1-micro allows roughly 25 connections, which is why
+# pkg/dbpool caps each service at 3 open (DB_MAX_OPEN_CONNS below trims it
+# further for this tier). If you ever see "remaining connection slots are
+# reserved", the fix is one line: db_tier = "db-g1-small" (~$25/mo).
 db_tier                           = "db-f1-micro"
 db_availability_type              = "ZONAL"
 db_point_in_time_recovery_enabled = false

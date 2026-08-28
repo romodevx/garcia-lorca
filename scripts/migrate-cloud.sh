@@ -28,20 +28,85 @@ MIGRATIONS_DIR="$REPO_ROOT/migrations"
 ROLE_SQL="$REPO_ROOT/deploy/terraform/db/setup_app_role.sql"
 OWNER_SQL="$REPO_ROOT/docker/seed-owner.sql"
 
-if [ -z "${DATABASE_URL:-}" ]; then
-  echo "[migrate] DATABASE_URL is required." >&2
-  echo "[migrate]   DATABASE_URL='postgresql://user:pass@host/garcia_lorca?sslmode=require' sh $0" >&2
-  exit 1
-fi
+# ---------------------------------------------------------------------------
+# Connection. Two shapes, and the script works out which one applies.
+#
+#   1. DATABASE_URL set  -> use it verbatim (external Postgres, or a proxy you
+#      started yourself).
+#   2. Otherwise         -> Cloud SQL. Read the instance and the migration
+#      credentials from Terraform + Secret Manager, start the Cloud SQL Auth
+#      Proxy on a local port, and tear it down on exit.
+#
+# The Cloud SQL instance has a public IP with NO authorized networks, so a direct
+# psql from this machine cannot connect and is not supposed to. The proxy
+# authenticates through the Admin API as roles/cloudsql.client instead.
+# ---------------------------------------------------------------------------
+PROXY_PID=""
+cleanup() { [ -n "$PROXY_PID" ] && kill "$PROXY_PID" 2>/dev/null || true; }
+trap cleanup EXIT INT TERM
 
 if ! command -v psql >/dev/null 2>&1; then
   echo "[migrate] psql not found. Install it:  brew install libpq && brew link --force libpq" >&2
   exit 1
 fi
 
-# Everything goes through this one connection string, so every statement runs as
-# the same role — which is what makes ALTER DEFAULT PRIVILEGES mean anything.
-psql_do() { psql "$DATABASE_URL" -v ON_ERROR_STOP=1 "$@"; }
+if [ -z "${DATABASE_URL:-}" ]; then
+  : "${PROJECT_ID:=garcia-lorca}"
+  : "${ENV_NAME:=dev}"
+  : "${DB_NAME:=garcia_lorca}"
+  : "${PROXY_PORT:=5433}"
+
+  if ! command -v cloud-sql-proxy >/dev/null 2>&1; then
+    echo "[migrate] cloud-sql-proxy not found. Install it:" >&2
+    echo "[migrate]   brew install cloud-sql-proxy" >&2
+    echo "[migrate] (or set DATABASE_URL yourself and skip the proxy)" >&2
+    exit 1
+  fi
+
+  CONNECTION_NAME="${INSTANCE_CONNECTION_NAME:-$(terraform -chdir="$REPO_ROOT/deploy/terraform" output -raw db_connection_name 2>/dev/null || true)}"
+  if [ -z "$CONNECTION_NAME" ]; then
+    echo "[migrate] cannot resolve the Cloud SQL instance." >&2
+    echo "[migrate] Run terraform apply first, or set INSTANCE_CONNECTION_NAME=project:region:instance" >&2
+    exit 1
+  fi
+
+  echo "[migrate] reading the migration credentials from Secret Manager"
+  MIGRATOR_PASSWORD=$(gcloud secrets versions access latest \
+    --secret="garcia-lorca-db-migrator-password-${ENV_NAME}" \
+    --project="$PROJECT_ID" 2>/dev/null || true)
+  if [ -z "$MIGRATOR_PASSWORD" ]; then
+    echo "[migrate] could not read garcia-lorca-db-migrator-password-${ENV_NAME}." >&2
+    echo "[migrate] Terraform creates it; run the apply first." >&2
+    exit 1
+  fi
+
+  echo "[migrate] starting the Cloud SQL Auth Proxy on 127.0.0.1:${PROXY_PORT}"
+  cloud-sql-proxy --port "$PROXY_PORT" "$CONNECTION_NAME" >/tmp/cloud-sql-proxy.log 2>&1 &
+  PROXY_PID=$!
+
+  # The proxy needs a moment; poll rather than sleep a fixed amount.
+  READY=""
+  i=0
+  while [ "$i" -lt 30 ]; do
+    if psql "postgresql://migrator:${MIGRATOR_PASSWORD}@127.0.0.1:${PROXY_PORT}/${DB_NAME}?sslmode=disable" \
+         -tAc 'SELECT 1' >/dev/null 2>&1; then
+      READY=yes
+      break
+    fi
+    i=$((i + 1))
+    sleep 1
+  done
+  if [ -z "$READY" ]; then
+    echo "[migrate] the proxy never became usable. Its log:" >&2
+    tail -20 /tmp/cloud-sql-proxy.log >&2
+    echo "[migrate] Common cause: your account lacks roles/cloudsql.client on $PROJECT_ID." >&2
+    exit 1
+  fi
+
+  # sslmode=disable is correct HERE and only here: the hop is to a local proxy
+  # process, and the proxy itself holds the encrypted connection to the instance.
+  DATABASE_URL="postgresql://migrator:${MIGRATOR_PASSWORD}@127.0.0.1:${PROXY_PORT}/${DB_NAME}?sslmode=disable"
+fi
 
 # Redact credentials before echoing anything.
 SAFE_TARGET=$(printf '%s' "$DATABASE_URL" | sed -E 's|://[^@]*@|://***@|')

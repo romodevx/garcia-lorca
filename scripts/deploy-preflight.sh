@@ -46,6 +46,7 @@ fi
 check_bin node      "brew install node"
 check_bin pnpm      "corepack enable pnpm"
 check_bin psql      "brew install libpq && brew link --force libpq  (migrations need it)"
+check_bin cloud-sql-proxy "brew install cloud-sql-proxy  (the Cloud SQL instance has no authorized networks, so migrations go through the proxy)"
 check_bin openssl   "ships with macOS; needed to generate secrets"
 
 echo

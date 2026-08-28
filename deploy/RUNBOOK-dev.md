@@ -4,8 +4,11 @@ Self-contained and copy-paste complete. The reasoning behind every step lives in
 `.claude/docs/PLAN-deploy-gcp-dev.md`; you do not need it to execute this.
 
 **Target:** project `garcia-lorca` (number `230382563795`), region `us-central1`.
-**Resting cost when nobody is using it:** ~$0.38/month. Every Cloud Run service
-scales to zero and the database auto-suspends.
+**Resting cost when nobody is using it:** ~$9.70/month (~185 MXN), and all of it
+is Cloud SQL. The ten Cloud Run services genuinely cost $0 at rest; Cloud SQL is a
+server and cannot scale to zero. That is the deliberate price of keeping the
+database inside GCP so the school's production environment inherits a path that
+has actually been exercised.
 
 ---
 
@@ -19,13 +22,11 @@ Checks tools, gcloud auth, the project, billing, APIs, **billing-account roles**
 and the state bucket. Fix every `✗` before continuing — each one is a failure
 that would otherwise surface deep into an apply or a build.
 
-You also need two things this repo cannot create for you:
+You also need **the Heraldo billing report** (5 minutes, free): console → Billing
+→ Reports, grouped by SKU and project. It is the last open assumption about where
+the sibling project's ~700 MXN/month actually went.
 
-1. **A Neon project.** Create one at neon.tech, database `garcia_lorca`, and copy
-   its connection string. This is the `DATABASE_URL` below.
-2. **The Heraldo billing report** (5 minutes, free): console → Billing → Reports,
-   group by SKU and project. It is the last open assumption about where the
-   sibling project's ~700 MXN/month went.
+Everything else, including the database, is created by this runbook.
 
 ---
 
@@ -77,7 +78,7 @@ Three secrets. Terraform generates two; you supply the third.
 
 | # | Step | | If it fails |
 |---|------|---|---|
-| 3.1 | `export TF_VAR_database_url='postgresql://…@….neon.tech/garcia_lorca?sslmode=require'` | ⚠️ | Missing → apply stops with a precondition naming this variable. |
+| 3.1 | Nothing to export for the database — Terraform provisions Cloud SQL and generates both DB passwords | — | If `apply` fails on `ip_configuration`, an instance needs a public IP or a private network; this repo uses public IP with **no** authorized networks. |
 | 3.2 | `export TF_VAR_owner_temp_password="$(openssl rand -base64 18)"` — **write it down** | ⚠️ | Without it nobody can log in. Recover later with `gcloud secrets versions access latest --secret=owner-temp-password-dev --project=garcia-lorca`. |
 | 3.3 | `make tf-plan` | ♻️ | `Cycle:` → something references `module.web` from the gateway; `WEB_ORIGIN` must stay a variable. `min_instances must be 0` → the cost guardrail fired; that is correct, set it to 0. |
 | 3.4 | `make tf-apply` — **build the image tag in** (below) | ♻️ | Budget fails last → you lack `roles/billing.costsManager` on the billing account. Everything else is already created; grant it and re-apply. |
@@ -97,7 +98,7 @@ kept the old one, and no later apply would reconcile them.
 
 | # | Step | | If it fails |
 |---|------|---|---|
-| 4.1 | `DATABASE_URL="$TF_VAR_database_url" OWNER_TEMP_PASSWORD="$TF_VAR_owner_temp_password" make migrate-cloud` | ♻️ | `psql not found` → `brew install libpq && brew link --force libpq`. `role "app" holds privileges…` → the role posture is wrong; the message says what. |
+| 4.1 | `OWNER_TEMP_PASSWORD="$TF_VAR_owner_temp_password" make migrate-cloud` | ♻️ | Starts the Cloud SQL Auth Proxy itself and connects as the `migrator` role. `cloud-sql-proxy not found` → `brew install cloud-sql-proxy`. "proxy never became usable" → your account lacks `roles/cloudsql.client`. `role "app" holds privileges…` → the message says exactly what is wrong. |
 | 4.2 | `API_URL=$(terraform -chdir=deploy/terraform output -raw web_url) node scripts/seed-demo.mjs` | ⚠️ | Expects an EMPTY school and says so. Re-seeding needs a reset first. |
 
 **Never `pnpm demo:ready` against the cloud.** It chains `demo:verify`, which
@@ -141,6 +142,9 @@ then repeat from §2. `deletion_protection` is off outside prod, so this works.
 * Deploy `master` to the school's account — same Terraform plus a `prod.tfvars`,
   when they sign.
 * Deploy `billing`, `scholarships` or `docs` — no implementation, flags off.
+* Survive past November 2026. This environment is temporary: it is torn down and
+  `dev` is handed to the director's own GCP account. There is deliberately no
+  demo→prod data migration path, because the demo holds synthetic data only.
 * Enable the hard billing cutoff — see `deploy/terraform/billing_killswitch.tf`;
   it needs a billing-account role granted out of band first.
 * Put real pupil data anywhere. **The demo is synthetic-data-only.**

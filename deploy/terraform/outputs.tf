@@ -92,3 +92,8 @@ output "billing_killswitch_sa" {
   description = "Service account that must hold roles/billing.projectManager ON THE BILLING ACCOUNT for the kill switch to work. Empty when the kill switch is disabled."
   value       = var.enable_billing_killswitch ? google_service_account.billing_killswitch[0].email : ""
 }
+
+output "db_migrator_password_secret" {
+  description = "Secret Manager secret id holding the migration role's password. Empty when use_cloud_sql = false."
+  value       = var.use_cloud_sql ? google_secret_manager_secret.db_migrator_password[0].secret_id : ""
+}
