@@ -2451,6 +2451,77 @@ facturación (A40) y el par `cloud-stop`/`cloud-warm` (A28/A18).
 
 ---
 
+## CORRECCIÓN AL REGISTRO — un hallazgo refutado durante la implementación (2026-08-27)
+
+### E2 / W-2 (`outputFileTracingRoot`) estaba **sobrecalificado como CRÍTICO**
+
+La voz de ingeniería afirmó que sin `outputFileTracingRoot` el bundle standalone omite los
+cuatro paquetes del workspace y **el servidor muere al arrancar** con
+`Cannot find module '@garcia-lorca/ui'`. Lo probé antes de creerlo, contra el build
+**anterior** al arreglo:
+
+```
+$ ls .next/standalone/node_modules/@garcia-lorca/   → no existe
+$ node apps/web/server.js  →  ✓ Ready
+$ curl /                   →  HTTP 200
+```
+
+**El servidor arranca y sirve.** La razón: `transpilePackages` **empaqueta** esos paquetes
+dentro de los chunks compilados; no se requieren desde `node_modules` en runtime, así que no
+pueden producir `MODULE_NOT_FOUND`. El síntoma descrito no existe en este repo.
+
+**Qué sí es cierto:** el rastreo de Next infiere la raíz del workspace buscando marcadores
+(`pnpm-workspace.yaml`, lockfile). En el host los encuentra; **dentro de un contenedor depende
+de qué contenga el contexto de build.** Fijar `outputFileTracingRoot` elimina esa inferencia y
+hace el build determinista.
+
+**Veredicto: A4 se conserva** — es correcto, barato y hace el build reproducible — pero baja
+de 🔴 CRÍTICO a 🟡 endurecimiento. No era un bloqueador de despliegue.
+
+Lo dejo escrito porque el valor de esta revisión estuvo en verificar cada hallazgo contra el
+árbol, y eso **tiene que incluir los que no sobreviven la verificación.**
+
+---
+
+## ESTADO DE IMPLEMENTACIÓN — 2026-08-27
+
+Rama `feature/deploy-gcp-dev-blockers`. **Bloque 1 (bloqueadores de arranque) completo.**
+
+| # | Tarea | Estado | Cómo se verificó |
+|---|---|---|---|
+| A32 | Pipeline itera los módulos de `go.work` | ✅ | Script extraído del YAML y ejecutado: `exit 0` en los 14 módulos (antes `exit 1`) |
+| A33 | `apps/web/Dockerfile.dockerignore` | ✅ | — (se prueba con el `docker build`) |
+| A3 | Dockerfile del web | ✅ escrito | Build + standalone corrido: `/healthz` 200, `/` 200, `/login` 200, **CSS 200** |
+| A4 | `outputFileTracingRoot` | ✅ | Build limpio; ver la corrección arriba |
+| A5 | `/healthz` en el web | ✅ TDD | Test primero (RED→GREEN); 200 `ok` en el artefacto real |
+| A2 | `IAM_JWT_SECRET` + fallo al arrancar | ✅ TDD | Test de tabla, 6 casos + prueba de que dos llaves efímeras difieren |
+| A26 | Contraseña de BD generada en el apply | ✅ | `terraform validate` |
+| A39 | `DATABASE_URL` (Neon) + `use_cloud_sql` | ✅ | `terraform validate` |
+| A35 | `ingress = ALL` con auth obligatoria | ✅ | `terraform validate` |
+| A9 | `uniforms` desplegado (9º servicio) | ✅ | `terraform validate` + paso de imagen |
+| A8 | Servicio `web` en Terraform | ✅ | `terraform validate` |
+| A10 | `WEB_ORIGIN` sin ciclo | ✅ | **`terraform graph` construye** (un ciclo lo abortaría) |
+| A11 | `ENABLED_MODULES` con teachers+uniforms | ✅ | `terraform validate` |
+| A12 | **Precondición de `min_instances`** | ✅ **probada** | Harness aislado: dev+1 **bloquea**, dev+0 pasa, prod+1 pasa |
+| A14 | SA de Cloud Build + roles | ✅ | `terraform validate` |
+| A15 | APIs faltantes | ✅ | `terraform validate` |
+| A25 | Etiquetas de imagen (`_TAG`) | ✅ | YAML parseado: 18 pasos, 10 imágenes, sin `SHORT_SHA` |
+| A21 | `dev.tfvars.example` como fuente única | ✅ | — |
+
+**Regresión: cero.** 521 tests del front y `vet`+`test` de los 14 módulos Go, todo verde, sin
+deriva en `go.mod` (se revirtió el bump 1.24→1.25 que `go work sync` provocó).
+
+### Pendiente
+
+- **Bloque 2** (proxy A6/A31/A36, `api-url` en 24 sitios, pool A13, semilla A17, mosaicos A19)
+- **Bloque 3** (A40 corte duro de facturación, A18 warm/cold, A28 targets `cloud-*`)
+- **Bloque 4** (A16 migraciones, A20 barandilla, A22/A23 docs, A24 runbook, A27 preflight, A29/A30)
+- **`docker build` del web sin verificar** — el daemon de Docker no estaba corriendo. Es la
+  única afirmación de este lote que no pude probar de punta a punta.
+- **A0** (reporte de SKU de Heraldo) y la cuenta de Neon: los dos son del dueño.
+
+---
+
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |
