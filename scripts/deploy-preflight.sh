@@ -31,7 +31,18 @@ check_bin() {
 }
 check_bin terraform "https://developer.hashicorp.com/terraform/install"
 check_bin gcloud    "https://cloud.google.com/sdk/docs/install"
-check_bin docker    "needed to build images locally; Cloud Build can do it instead"
+# Binary presence is not the useful question for docker: the daemon is what
+# actually builds. `command -v docker` says yes on a machine where Docker Desktop
+# is closed, which is a preflight that passes and a build that does not.
+if command -v docker >/dev/null 2>&1; then
+  if docker info >/dev/null 2>&1; then
+    ok "docker (daemon running)"
+  else
+    warn "docker installed but the daemon is not running" "open -a Docker — only needed to build images locally; Cloud Build can do it instead"
+  fi
+else
+  warn "docker missing" "only needed to build images locally; Cloud Build can do it instead"
+fi
 check_bin node      "brew install node"
 check_bin pnpm      "corepack enable pnpm"
 check_bin psql      "brew install libpq && brew link --force libpq  (migrations need it)"
