@@ -2560,14 +2560,40 @@ deriva en `go.mod` (se revirtió el bump 1.24→1.25 que `go work sync` provocó
 **Estado global:** 537 tests del front · 14 módulos Go verdes · lint + typecheck limpios ·
 `terraform validate` Success · sin deriva en `go.mod` · árbol limpio.
 
-### Pendiente
+### Bloque 4 — completo (2026-08-27)
 
-- **Bloque 4** — A16 (migraciones por psql), **A34** (`setup_app_role.sql` aborta en la línea
-  18 contra Postgres gestionado), A22/A23 (docs desfasados), A24 (extraer el runbook),
-  A27 (`make deploy-preflight`), A29 (columna "Si falla"), A30 (checklist versionado)
-- **`docker build` del web sin verificar** — el daemon de Docker no estaba corriendo. Es la
-  única afirmación de este lote que no pude probar de punta a punta.
-- **A0** (reporte de SKU de Heraldo) y la cuenta de Neon: los dos son del dueño.
+| # | Tarea | Verificación |
+|---|---|---|
+| A34 | `setup_app_role.sql` afirma en vez de forzar | Estructura revisada · **no ejecutado contra un Postgres vivo** (sin psql ni docker aquí) |
+| A16 | `scripts/migrate-cloud.sh` | Sintaxis OK; ambas guardas tempranas dan mensajes accionables |
+| A27 | `make deploy-preflight` | **Corrido contra la cuenta real**: detectó `psql` faltante y `cloudresourcemanager` deshabilitada |
+| A24/A29 | `deploy/RUNBOOK-dev.md` con columna "Si falla" | 146 líneas, autocontenido |
+| A30 | `deploy/PRE-DEMO-CHECKLIST.md` versionado | 92 líneas; R5 marcado como el que importa |
+| A23 | `deploy/README.md` | 5 afirmaciones falsas corregidas |
+| A22 | `COST-AND-DEPLOY.md` | Inventario corregido + los dos modelos de costo reconciliados |
+
+**Los cuatro bloques están cerrados.** 537 tests del front · 14 módulos Go ·
+lint · typecheck · `terraform validate` Success · 8 scripts · 10 targets de deploy ·
+sin deriva en `go.mod` · árbol limpio.
+
+### Lo que sigue sin verificarse (honesto)
+
+1. **`docker build` del web** — el daemon nunca estuvo encendido en esta sesión.
+   Verifiqué el build de Next y el artefacto standalone que la imagen ejecuta
+   (`/healthz` 200, `/` 200, CSS 200), pero no la imagen.
+2. **`setup_app_role.sql` contra un Postgres real** — no hay `psql` ni docker aquí.
+3. **Todo lo que solo se puede probar desplegando**: ingress, OIDC entre servicios,
+   el probe de arranque, el push de Pub/Sub. Eso es exactamente para lo que existe
+   `deploy/PRE-DEMO-CHECKLIST.md`.
+
+### Bloqueado en ti
+
+| # | Qué | Por qué solo tú |
+|---|---|---|
+| A0 | Reporte de SKU de Heraldo | Consola de facturación, 5 min. Último supuesto abierto |
+| — | Proyecto en Neon + `DATABASE_URL` | Cuenta tuya |
+| — | `brew install libpq && brew link --force libpq` | Las migraciones lo necesitan |
+| — | `gcloud services enable cloudresourcemanager.googleapis.com --project=garcia-lorca` | Sin esto el primer `plan` truena |
 
 ---
 
