@@ -59,8 +59,8 @@ steps:
         # single image is built. Iterate the workspace members instead, the
         # same way .github/workflows/ci.yml does with its per-module matrix.
         for dir in $(go list -m -f '{{.Dir}}'); do
-          echo "--- go vet: $dir"
-          (cd "$dir" && go vet ./...)
+          echo "--- go vet: $$dir"
+          (cd "$$dir" && go vet ./...)
         done
     waitFor: ["buf-generate"]
 
@@ -74,8 +74,8 @@ steps:
         # Per workspace module — see the go-vet step for why `./...` cannot be
         # used from the repo root.
         for dir in $(go list -m -f '{{.Dir}}'); do
-          echo "--- go test: $dir"
-          (cd "$dir" && go test ./... -race -count=1)
+          echo "--- go test: $$dir"
+          (cd "$$dir" && go test ./... -race -count=1)
         done
     waitFor: ["go-vet"]
 
@@ -91,8 +91,8 @@ steps:
         # Per workspace module — see the go-vet step. `go mod verify` also needs
         # a module directory; there is no root go.mod to verify.
         for dir in $(go list -m -f '{{.Dir}}'); do
-          echo "--- govulncheck: $dir"
-          (cd "$dir" && "$(go env GOPATH)/bin/govulncheck" ./... && go mod verify)
+          echo "--- govulncheck: $$dir"
+          (cd "$$dir" && "$$(go env GOPATH)/bin/govulncheck" ./... && go mod verify)
         done
     waitFor: ["buf-generate"]
 
@@ -143,8 +143,8 @@ steps:
       - |
         set -euo pipefail
         IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/gateway:${_TAG}"
-        docker build -f services/gateway/Dockerfile -t "$IMG" .
-        docker push "$IMG"
+        docker build -f services/gateway/Dockerfile -t "$$IMG" .
+        docker push "$$IMG"
     waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
 
   - id: image-iam
@@ -155,8 +155,8 @@ steps:
       - |
         set -euo pipefail
         IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/iam:${_TAG}"
-        docker build -f services/iam/Dockerfile -t "$IMG" .
-        docker push "$IMG"
+        docker build -f services/iam/Dockerfile -t "$$IMG" .
+        docker push "$$IMG"
     waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
 
   - id: image-students
@@ -167,8 +167,8 @@ steps:
       - |
         set -euo pipefail
         IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/students:${_TAG}"
-        docker build -f services/students/Dockerfile -t "$IMG" .
-        docker push "$IMG"
+        docker build -f services/students/Dockerfile -t "$$IMG" .
+        docker push "$$IMG"
     waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
 
   - id: image-config
@@ -179,8 +179,8 @@ steps:
       - |
         set -euo pipefail
         IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/config:${_TAG}"
-        docker build -f services/config/Dockerfile -t "$IMG" .
-        docker push "$IMG"
+        docker build -f services/config/Dockerfile -t "$$IMG" .
+        docker push "$$IMG"
     waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
 
   - id: image-finance
@@ -191,8 +191,8 @@ steps:
       - |
         set -euo pipefail
         IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/finance:${_TAG}"
-        docker build -f services/finance/Dockerfile -t "$IMG" .
-        docker push "$IMG"
+        docker build -f services/finance/Dockerfile -t "$$IMG" .
+        docker push "$$IMG"
     waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
 
   - id: image-grades
@@ -203,8 +203,8 @@ steps:
       - |
         set -euo pipefail
         IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/grades:${_TAG}"
-        docker build -f services/grades/Dockerfile -t "$IMG" .
-        docker push "$IMG"
+        docker build -f services/grades/Dockerfile -t "$$IMG" .
+        docker push "$$IMG"
     waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
 
   - id: image-attendance
@@ -215,8 +215,8 @@ steps:
       - |
         set -euo pipefail
         IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/attendance:${_TAG}"
-        docker build -f services/attendance/Dockerfile -t "$IMG" .
-        docker push "$IMG"
+        docker build -f services/attendance/Dockerfile -t "$$IMG" .
+        docker push "$$IMG"
     waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
 
   - id: image-comms
@@ -227,8 +227,8 @@ steps:
       - |
         set -euo pipefail
         IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/comms:${_TAG}"
-        docker build -f services/comms/Dockerfile -t "$IMG" .
-        docker push "$IMG"
+        docker build -f services/comms/Dockerfile -t "$$IMG" .
+        docker push "$$IMG"
     waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
 
   - id: image-uniforms
@@ -239,8 +239,8 @@ steps:
       - |
         set -euo pipefail
         IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/uniforms:${_TAG}"
-        docker build -f services/uniforms/Dockerfile -t "$IMG" .
-        docker push "$IMG"
+        docker build -f services/uniforms/Dockerfile -t "$$IMG" .
+        docker push "$$IMG"
     waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
 
   # The web image builds from the repo root like the Go services, but the root
@@ -256,8 +256,8 @@ steps:
         set -euo pipefail
         export DOCKER_BUILDKIT=1
         IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/web:${_TAG}"
-        docker build -f apps/web/Dockerfile -t "$IMG" .
-        docker push "$IMG"
+        docker build -f apps/web/Dockerfile -t "$$IMG" .
+        docker push "$$IMG"
     waitFor: ["web-build", "sourcemap-gate"]
 
   # ---- 7. Deploy (only when _DEPLOY=true; main/release triggers) ----------
@@ -277,10 +277,10 @@ steps:
           exit 0
         fi
         for svc in gateway iam students config finance grades attendance comms uniforms web; do
-          gcloud run deploy "$svc" \
+          gcloud run deploy "$$svc" \
             --project="$PROJECT_ID" \
             --region="${_REGION}" \
-            --image="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/$svc:${_TAG}"
+            --image="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/$$svc:${_TAG}"
         done
     waitFor:
       - image-gateway

@@ -184,6 +184,11 @@ resource "google_project_iam_member" "build_roles" {
   for_each = toset([
     "roles/artifactregistry.writer", # push the service images
     "roles/logging.logWriter",       # required when a build names its own SA
+    # `gcloud builds submit` uploads the source tarball to gs://PROJECT_cloudbuild
+    # and the build then READS it back. A user-specified SA does not inherit the
+    # legacy Cloud Build agent's access to that bucket, so without this every
+    # submit dies with "does not have storage.objects.get access" before step 1.
+    "roles/storage.objectViewer",
     "roles/run.admin",               # the _DEPLOY=true step updates services
     "roles/iam.serviceAccountUser",  # deploy a revision that RUNS AS the runtime SA
   ])
