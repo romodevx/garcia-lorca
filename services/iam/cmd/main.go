@@ -27,6 +27,7 @@ import (
 
 	"github.com/garcia-lorca/gen/go/garcialorca/iam/v1/iamv1connect"
 	"github.com/garcia-lorca/pkg/dbdsn"
+	"github.com/garcia-lorca/pkg/dbpool"
 	"github.com/garcia-lorca/pkg/logger"
 	"github.com/garcia-lorca/services/iam/internal/adapters/bcrypt"
 	grpcadapter "github.com/garcia-lorca/services/iam/internal/adapters/grpc"
@@ -104,7 +105,18 @@ func openDB() (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Warn)})
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Warn)})
+	if err != nil {
+		return nil, err
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+	// database/sql opens UNLIMITED connections by default. Nine services on Cloud
+	// Run, each allowed several instances, would exhaust a small managed Postgres.
+	dbpool.Tune(sqlDB)
+	return db, nil
 }
 
 // errMissingJWTSecret stops the boot when a shared environment has no signing

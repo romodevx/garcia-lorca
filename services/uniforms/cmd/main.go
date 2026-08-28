@@ -30,6 +30,7 @@ import (
 
 	"github.com/garcia-lorca/gen/go/garcialorca/uniforms/v1/uniformsv1connect"
 	"github.com/garcia-lorca/pkg/dbdsn"
+	"github.com/garcia-lorca/pkg/dbpool"
 	"github.com/garcia-lorca/pkg/gcpauth"
 	"github.com/garcia-lorca/pkg/logger"
 	"github.com/garcia-lorca/services/uniforms/internal/adapters/financeclient"
@@ -135,7 +136,18 @@ func openDB() (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Warn)})
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Warn)})
+	if err != nil {
+		return nil, err
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+	// database/sql opens UNLIMITED connections by default. Nine services on Cloud
+	// Run, each allowed several instances, would exhaust a small managed Postgres.
+	dbpool.Tune(sqlDB)
+	return db, nil
 }
 
 // recoverFn turns a panic into a bare internal error. Whatever the panic was
