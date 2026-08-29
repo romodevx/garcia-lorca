@@ -35,19 +35,30 @@ for arg in "$@"; do
   [ "$arg" = "--i-know-this-wipes-remote" ] && CONFIRMED="yes"
 done
 
-if [ -n "${PGHOST:-}" ]; then
-  case "$PGHOST" in
-    localhost|127.0.0.1|::1|"") ;;
+# Ask POSTGRES where it lives, rather than trusting the address we dialled.
+#
+# Checking PGHOST alone is not enough and the gap is not theoretical: the Cloud
+# SQL Auth Proxy listens on 127.0.0.1, so a connection to a production instance
+# looks perfectly local from here. inet_server_addr() returns the address of the
+# SERVER, which for a proxied connection is the instance itself and for a real
+# local Postgres is loopback or NULL over a unix socket.
+if [ -n "${PGHOST:-}" ] && [ -z "$CONFIRMED" ]; then
+  SERVER_ADDR=$(psql -h "$PGHOST" -p "${PGPORT:-5432}" -U "$PGUSER" -d "$PGDATABASE" \
+    -tAc "SELECT coalesce(host(inet_server_addr()), 'local')" 2>/dev/null || echo "unknown")
+  case "$SERVER_ADDR" in
+    local|127.0.0.1|::1) ;;
     *)
-      if [ -z "$CONFIRMED" ]; then
-        echo "[reset] REFUSING: PGHOST=$PGHOST is not local." >&2
-        echo "[reset] This TRUNCATEs every operational table. If you really mean it," >&2
-        echo "[reset] re-run with --i-know-this-wipes-remote." >&2
-        exit 1
-      fi
-      echo "[reset] WARNING: wiping REMOTE host $PGHOST (confirmed on the command line)"
+      echo "[reset] REFUSING: the server is at $SERVER_ADDR, which is not local." >&2
+      echo "[reset] You dialled $PGHOST, but that only tells you where the SOCKET is —" >&2
+      echo "[reset] the Cloud SQL Auth Proxy makes a remote instance look like localhost." >&2
+      echo "[reset] This TRUNCATEs every operational table. If you really mean it," >&2
+      echo "[reset] re-run with --i-know-this-wipes-remote." >&2
+      exit 1
       ;;
   esac
+fi
+if [ -n "$CONFIRMED" ]; then
+  echo "[reset] WARNING: wipe confirmed on the command line; not checking where the server is"
 fi
 
 # psql_do runs one psql invocation against whichever transport applies.
