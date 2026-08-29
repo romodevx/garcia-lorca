@@ -51,13 +51,32 @@ BEGIN
     RAISE EXCEPTION 'role "app" does not exist. Create it (Terraform google_sql_user.app, or your provider console) before running this script.';
   END IF;
 
-  IF NOT (r.rolbypassrls OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole) THEN
-    RAISE NOTICE 'role "app" posture is correct (no BYPASSRLS, no SUPERUSER, no CREATEDB, no CREATEROLE)';
-  ELSIF am_super THEN
-    EXECUTE 'ALTER ROLE app NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE';
-    RAISE NOTICE 'role "app" held privileges it must not have; tightened them';
+  -- TWO CLASSES OF ATTRIBUTE, and conflating them was a mistake worth writing down.
+  --
+  -- BYPASSRLS and SUPERUSER are the RLS posture. If either is set, Row Level
+  -- Security simply does not apply to this role and every tenant boundary in the
+  -- system is decorative. Neither can be cleared without a real superuser, which
+  -- managed Postgres never gives you — so this is a hard stop.
+  --
+  -- CREATEDB and CREATEROLE are untidy but harmless to RLS, and Cloud SQL grants
+  -- them to EVERY user it creates through its API (they come with
+  -- cloudsqlsuperuser). Failing on them means failing on every fresh Cloud SQL
+  -- instance for a reason that does not affect tenant isolation. They can be
+  -- revoked by any role holding CREATEROLE, which the migrator does, so tighten
+  -- them and carry on.
+  IF r.rolbypassrls OR r.rolsuper THEN
+    RAISE EXCEPTION 'role "app" can bypass Row Level Security (bypassrls=%, superuser=%). Every tenant boundary in this database is unenforceable against it. Clearing these needs a real superuser connection.', r.rolbypassrls, r.rolsuper;
+  END IF;
+
+  IF r.rolcreatedb OR r.rolcreaterole THEN
+    BEGIN
+      EXECUTE 'ALTER ROLE app NOCREATEDB NOCREATEROLE';
+      RAISE NOTICE 'role "app" had CREATEDB/CREATEROLE (Cloud SQL grants these by default); revoked';
+    EXCEPTION WHEN insufficient_privilege THEN
+      RAISE WARNING 'role "app" holds CREATEDB/CREATEROLE and this connection cannot revoke them. RLS is still enforced (bypassrls=f, superuser=f), so this is untidy rather than dangerous.';
+    END;
   ELSE
-    RAISE EXCEPTION 'role "app" holds privileges it must not have (bypassrls=%, superuser=%, createdb=%, createrole=%). RLS is not enforceable against it; repairing this needs a real superuser connection.', r.rolbypassrls, r.rolsuper, r.rolcreatedb, r.rolcreaterole;
+    RAISE NOTICE 'role "app" posture is correct';
   END IF;
 END
 $$;

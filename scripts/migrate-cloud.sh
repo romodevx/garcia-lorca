@@ -108,6 +108,11 @@ if [ -z "${DATABASE_URL:-}" ]; then
   DATABASE_URL="postgresql://migrator:${MIGRATOR_PASSWORD}@127.0.0.1:${PROXY_PORT}/${DB_NAME}?sslmode=disable"
 fi
 
+# Every statement goes through this one connection string, so they all run as the
+# SAME role — which is what makes ALTER DEFAULT PRIVILEGES in setup_app_role.sql
+# mean anything. Defined here, before its first use.
+psql_do() { psql "$DATABASE_URL" -v ON_ERROR_STOP=1 "$@"; }
+
 # Redact credentials before echoing anything.
 SAFE_TARGET=$(printf '%s' "$DATABASE_URL" | sed -E 's|://[^@]*@|://***@|')
 echo "[migrate] target: $SAFE_TARGET"
