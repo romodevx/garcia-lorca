@@ -63,7 +63,12 @@ web_origin = ""
 # ---- Budget ---------------------------------------------------------------
 # Alerts at 50/80/100% => first email at $7.50, which is already ~20x the
 # expected resting cost.
-monthly_budget_amount = 15
+# The currency MUST match the billing account's. This one bills in MXN; asking
+# for USD makes the API return a bare "Request contains an invalid argument" that
+# never mentions currency. ~280 MXN is about 15 USD, i.e. ~1.5x the expected
+# resting cost of ~185 MXN, so the 50% alert lands at ~140 MXN.
+monthly_budget_amount = 280
+budget_currency       = "MXN"
 budget_alert_emails   = ["andres.roqa93@gmail.com"]
 
 # HARD CUTOFF, not just an alert. At 100% of the budget a Cloud Function

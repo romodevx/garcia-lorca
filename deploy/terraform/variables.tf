@@ -178,9 +178,9 @@ variable "monthly_budget_amount" {
 }
 
 variable "budget_currency" {
-  description = "Currency code for the budget amount."
+  description = "Currency code for the budget amount. MUST match the billing account's own currency — the Budget API rejects a mismatch with a bare \"Request contains an invalid argument\" that never mentions currency, which is a genuinely awful hour to spend. Check yours in the console under Billing."
   type        = string
-  default     = "USD"
+  default     = "MXN"
 }
 
 variable "budget_alert_emails" {
