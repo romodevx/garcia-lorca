@@ -30,18 +30,30 @@ export const runtime = "nodejs";
 const ALLOWED_PREFIX = "/api/v1/";
 
 /**
- * Request headers forwarded upstream. An ALLOWLIST, not a denylist: forwarding
- * the client's `Host` makes Cloud Run route by it and answer 404 from its
- * frontend, with no application log on either side to explain it.
+ * Request headers that must NOT be forwarded upstream.
+ *
+ * This started as an allowlist, which looked safer and quietly broke the app: the
+ * gateway requires `Idempotency-Key` on a uniforms counter sale, the allowlist had
+ * never heard of it, and the sale came back as a 400 blaming the caller. Any
+ * allowlist here is a promise to predict every header the API will ever use, and
+ * that promise cannot be kept.
+ *
+ * A denylist is the standard reverse-proxy contract and keeps the one that
+ * actually matters out: `Host`. Cloud Run routes by it, so forwarding the
+ * client's makes Cloud Run's frontend answer 404 with no application log on
+ * either side. The rest are hop-by-hop headers that describe THIS connection and
+ * are meaningless on the next one.
  */
-const FORWARDED_REQUEST_HEADERS = [
-  "cookie",
-  "content-type",
-  "accept",
-  "accept-language",
-  "authorization",
-  "x-request-id",
-];
+const BLOCKED_REQUEST_HEADERS = new Set([
+  "host",
+  "connection",
+  "keep-alive",
+  "transfer-encoding",
+  "upgrade",
+  "proxy-authorization",
+  "proxy-connection",
+  "content-length", // fetch recomputes it for the body it actually sends
+]);
 
 /**
  * Response headers that must NOT be copied through.
@@ -99,10 +111,9 @@ async function proxy(request: NextRequest, context: RouteContext): Promise<Respo
   }
 
   const headers = new Headers();
-  for (const name of FORWARDED_REQUEST_HEADERS) {
-    const value = request.headers.get(name);
-    if (value !== null) headers.set(name, value);
-  }
+  request.headers.forEach((value, name) => {
+    if (!BLOCKED_REQUEST_HEADERS.has(name.toLowerCase())) headers.set(name, value);
+  });
 
   const init: RequestInit & { duplex?: "half" } = {
     method: request.method,

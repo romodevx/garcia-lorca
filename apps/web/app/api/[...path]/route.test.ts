@@ -83,6 +83,25 @@ describe("same-origin gateway proxy", () => {
     expect(sent.get("cookie")).toBe("gl_access=x");
   });
 
+  it("forwards application headers it has never heard of", async () => {
+    // A narrow allowlist looked safe and silently broke the money path: the
+    // gateway REQUIRES Idempotency-Key on a uniforms counter sale and rejects the
+    // request without it, so the proxy dropping the header turned a working sale
+    // into a 400 that pointed at the caller rather than at the proxy.
+    await POST(
+      new NextRequest(`https://web.example/api/v1/uniforms/counter-sale`, {
+        method: "POST",
+        body: "{}",
+        headers: { "idempotency-key": "sale-42", "x-custom-thing": "keep-me" },
+      }),
+      ctx(["v1", "uniforms", "counter-sale"]),
+    );
+
+    const sent = new Headers(fetchMock.mock.calls[0]?.[1]?.headers as HeadersInit);
+    expect(sent.get("idempotency-key")).toBe("sale-42");
+    expect(sent.get("x-custom-thing")).toBe("keep-me");
+  });
+
   it("strips hop-by-hop and encoding headers from the response", async () => {
     // undici transparently gunzips upstream. Re-emitting content-encoding gives
     // the browser ERR_CONTENT_DECODING_FAILED on anything big enough to be
