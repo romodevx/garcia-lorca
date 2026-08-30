@@ -1,0 +1,110 @@
+# Auto-deploy to the dev demo environment on every push to `dev`.
+#
+# Keyless: no service-account JSON lives in this repository. GitHub mints a
+# short-lived OIDC token, Google exchanges it for a scoped access token, and the
+# exchange is bound to THIS repository by an attribute condition on the Workload
+# Identity provider (deploy/terraform/cicd.tf).
+#
+# This deploys IMAGES ONLY. Terraform owns the infrastructure and is applied
+# deliberately by a human, because an apply can destroy a database and a push
+# should never be able to. `gcloud run deploy` swaps the container on an existing
+# service, which is reversible in one command.
+name: Deploy dev
+
+on:
+  push:
+    branches: [dev]
+    # Documentation and plan changes cannot alter a running service.
+    paths-ignore:
+      - "**/*.md"
+      - ".claude/**"
+      - "docs/**"
+  workflow_dispatch:
+
+# Never let two deploys race onto the same services. A newer push supersedes an
+# in-flight one rather than interleaving with it.
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write # required to mint the OIDC token
+
+env:
+  PROJECT_ID: garcia-lorca
+  REGION: us-central1
+  AR_REPO: garcia-lorca
+
+jobs:
+  deploy:
+    name: build images and roll out
+    runs-on: ubuntu-latest
+    # Do not deploy a commit whose tests did not pass. CI runs on the same push;
+    # this waits for it rather than duplicating it.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wait for CI to pass on this commit
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.sha }}
+          check-name: "ci"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 20
+          allowed-conclusions: success
+
+      - id: auth
+        name: Authenticate to Google Cloud (keyless)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build and push the ten images
+        run: |
+          set -euo pipefail
+          gcloud builds submit \
+            --project="$PROJECT_ID" \
+            --config=deploy/cloudbuild/cloudbuild.yaml \
+            --substitutions=_TAG="$GITHUB_SHA",_DEPLOY=false \
+            --service-account="projects/$PROJECT_ID/serviceAccounts/${{ vars.GCP_DEPLOY_SA }}"
+
+      - name: Roll out the new revisions
+        run: |
+          set -euo pipefail
+          for svc in gateway iam students config finance grades attendance comms uniforms web; do
+            echo "--- $svc"
+            gcloud run services update "$svc" \
+              --project="$PROJECT_ID" --region="$REGION" --quiet \
+              --image="$REGION-docker.pkg.dev/$PROJECT_ID/$AR_REPO/$svc:$GITHUB_SHA"
+          done
+
+      - name: Smoke test — the demo must actually answer
+        run: |
+          set -euo pipefail
+          WEB=$(gcloud run services describe web --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')
+          echo "web: $WEB"
+          # /healthz proves the container serves; /login proves Next rendered.
+          for path in /healthz /login; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 "$WEB$path")
+            echo "  $path -> $code"
+            [ "$code" = "200" ] || { echo "::error::$path returned $code"; exit 1; }
+          done
+
+      - name: Confirm nothing was left warm
+        run: |
+          # A deploy must never quietly raise min-instances. This is the cost
+          # guardrail the whole environment exists to have, checked after every
+          # rollout rather than trusted.
+          set -euo pipefail
+          warm=$(gcloud run services list --project="$PROJECT_ID" --region="$REGION" \
+            --format='value(spec.template.metadata.annotations["autoscaling.knative.dev/minScale"])' \
+            | grep -vE '^(0)?$' || true)
+          if [ -n "$warm" ]; then
+            echo "::error::a service is running with min-instances > 0 — that bills 24/7"
+            exit 1
+          fi
+          echo "all services at zero"
