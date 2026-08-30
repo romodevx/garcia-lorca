@@ -9,6 +9,8 @@ import { ThemeProvider } from "./theme/ThemeProvider";
 import { themeBootstrapScript } from "./theme/theme-script";
 import "./globals.css";
 
+import { DemoBanner } from "./_design/DemoBanner";
+
 /**
  * Self-hosted fonts via next/font (no render-blocking @import, no external
  * request). Each exposes a CSS variable consumed by the design tokens in
@@ -66,7 +68,10 @@ export default async function RootLayout({
       <body>
         <NextIntlClientProvider locale={locale} messages={messages}>
           <ThemeProvider>
-            <AppFlagsProvider>{children}</AppFlagsProvider>
+            <AppFlagsProvider>
+              <DemoBanner />
+              {children}
+            </AppFlagsProvider>
           </ThemeProvider>
         </NextIntlClientProvider>
       </body>
