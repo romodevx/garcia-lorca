@@ -53,6 +53,31 @@ that ends a demo mid-sentence, in front of the customer, with nothing on screen
 explaining it. Everything else on this list is recoverable in the moment; this one
 is not.
 
+### If you test this with curl instead of a browser, read this first
+
+A raw `GET /api/v1/me` after 20 minutes returns **401, and that is correct** —
+`accessTokenTTL` is 15 minutes (`services/iam/cmd/main.go:44`), so the access
+token has legitimately expired. It proves nothing either way, and it looks
+exactly like the bug.
+
+The browser never shows you that 401: `AppShell.tsx:133` catches it and calls
+refresh. So the thing to test is the refresh, which is the only call that proves
+the signing key survived the restart:
+
+```sh
+WEB=$(terraform -chdir=deploy/terraform output -raw web_url)
+# log in, keeping cookies
+curl -s -c /tmp/c.txt -X POST "$WEB/api/v1/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"director@garcialorca.edu.mx","password":"..."}'
+# ... wait 20+ minutes ...
+curl -s -b /tmp/c.txt -c /tmp/c.txt -o /dev/null -w '%{http_code}\n' \
+  -X POST "$WEB/api/v1/auth/refresh"     # 200 = the key survived. 401 = the bug is back.
+```
+
+Verified this way on 2026-08-30: refresh after 22 minutes returned 200, and `/me`
+with the renewed cookie returned the owner. R5 passes.
+
 ## R6 — Know your cold-start number
 ```sh
 make cloud-cool
