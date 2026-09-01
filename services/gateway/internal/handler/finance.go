@@ -168,6 +168,16 @@ type paymentResponse struct {
 	PaidAt      string `json:"paidAt"`
 }
 
+// toPaymentResponses maps a list of payments to the camelCase shape the front
+// reads.
+func toPaymentResponses(in []client.Payment) []paymentResponse {
+	out := make([]paymentResponse, 0, len(in))
+	for _, p := range in {
+		out = append(out, toPaymentResponse(p))
+	}
+	return out
+}
+
 func toPaymentResponse(p client.Payment) paymentResponse {
 	return paymentResponse{
 		ID:          p.ID,
@@ -372,7 +382,17 @@ func (h *FinanceHandler) RegisterDeposit(w http.ResponseWriter, r *http.Request)
 		writeConnectError(w, derr)
 		return
 	}
-	writeJSON(w, http.StatusCreated, got)
+	// Mapped, not written straight through: client.Payment and client.Charge
+	// carry no JSON tags, so serialising them directly puts Go field names
+	// ("AmountCents") on the wire where every other finance endpoint puts
+	// "amountCents". The front would read every allocation as blank.
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"deposit":          got.Deposit,
+		"allocations":      toPaymentResponses(got.Allocations),
+		"surcharges":       toChargeResponses(got.Surcharges),
+		"unallocatedCents": got.UnallocatedCents,
+		"replayed":         got.Replayed,
+	})
 }
 
 // PreviewDeposit handles POST /api/v1/finance/deposits/preview: what an amount
@@ -398,8 +418,8 @@ func (h *FinanceHandler) PreviewDeposit(w http.ResponseWriter, r *http.Request) 
 	// an empty deposit on the wire, and an empty deposit is a thing that reads
 	// like a real one.
 	writeJSON(w, http.StatusOK, map[string]any{
-		"allocations":      got.Allocations,
-		"surcharges":       got.Surcharges,
+		"allocations":      toPaymentResponses(got.Allocations),
+		"surcharges":       toChargeResponses(got.Surcharges),
 		"unallocatedCents": got.UnallocatedCents,
 	})
 }

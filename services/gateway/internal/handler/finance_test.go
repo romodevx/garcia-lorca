@@ -810,3 +810,60 @@ func TestFinanceIncomeNeedsBothDates(t *testing.T) {
 		t.Error("the service was asked for an unbounded period")
 	}
 }
+
+// The bug this pins: client.Payment and client.Charge carry no JSON tags, so
+// writing them straight through put "AmountCents" on the wire where the rest of
+// finance puts "amountCents". Everything compiled, every unit test passed, and
+// the counter showed blank amounts. Only running it found it.
+func TestFinanceDepositAllocationsUseTheSameKeysAsEveryOtherEndpoint(t *testing.T) {
+	svc := &fakeFinance{depositResult: client.DepositResult{
+		Deposit:     client.Deposit{ID: "dep-1", AmountCents: 670000},
+		Allocations: []client.Payment{{ID: "p1", ChargeID: "ch1", AmountCents: 320000, Method: "cash"}},
+		Surcharges:  []client.Charge{{ID: "ch2", Description: "Recargo", AmountCents: 30000}},
+	}}
+	h := handler.NewFinanceHandler(svc)
+
+	rec := doReq(t, h.RegisterDeposit, http.MethodPost, "/api/v1/finance/deposits",
+		`{"studentId":"stu-1","amountCents":670000,"method":"cash"}`)
+
+	var body struct {
+		Allocations []map[string]any `json:"allocations"`
+		Surcharges  []map[string]any `json:"surcharges"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Allocations) != 1 {
+		t.Fatalf("allocations = %d, want 1", len(body.Allocations))
+	}
+	if body.Allocations[0]["amountCents"] != float64(320000) {
+		t.Errorf("allocation keys are wrong: %v", body.Allocations[0])
+	}
+	if body.Allocations[0]["chargeId"] != "ch1" {
+		t.Errorf("chargeId missing from the allocation: %v", body.Allocations[0])
+	}
+	if len(body.Surcharges) != 1 || body.Surcharges[0]["amountCents"] != float64(30000) {
+		t.Errorf("surcharge keys are wrong: %v", body.Surcharges)
+	}
+}
+
+// Same for the preview, which the counter calls on every keystroke.
+func TestFinancePreviewUsesTheSameKeys(t *testing.T) {
+	svc := &fakeFinance{depositResult: client.DepositResult{
+		Allocations: []client.Payment{{ID: "p1", ChargeID: "ch1", AmountCents: 320000, Method: "cash"}},
+	}}
+	h := handler.NewFinanceHandler(svc)
+
+	rec := doReq(t, h.PreviewDeposit, http.MethodPost, "/api/v1/finance/deposits/preview",
+		`{"studentId":"stu-1","amountCents":670000}`)
+
+	var body struct {
+		Allocations []map[string]any `json:"allocations"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Allocations) != 1 || body.Allocations[0]["chargeId"] != "ch1" {
+		t.Errorf("preview allocation keys are wrong: %v", body.Allocations)
+	}
+}
