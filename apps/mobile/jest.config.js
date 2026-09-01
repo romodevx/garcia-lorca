@@ -23,6 +23,17 @@ module.exports = {
     "node_modules/(?!(?:.pnpm/[^/]+/node_modules/)?((jest-)?react-native|@react-native(-community)?|@react-native-async-storage/.*|expo|expo-.*|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|react-native-safe-area-context|react-native-svg|react-native-worklets|@unimodules/.*|unimodules|sentry-expo|native-base|@garcia-lorca/.*|@formatjs/.*|intl-messageformat(-parser)?|i18next|react-i18next|i18next-icu))"
   ],
   testMatch: ["**/*.test.{ts,tsx}"],
+  // Jest defaults to 5s per test. That is fine here (the suite runs in ~6s) and
+  // too tight on a CI runner, where GradesScreen.test.tsx alone took 20s and
+  // failed the build. Nothing is wrong with the test: React Native Testing
+  // Library renders a full screen through a real React tree, and that is simply
+  // slower on a shared 2-vCPU worker.
+  //
+  // This is the third place the same class of default has bitten this repo — see
+  // apps/web/vitest.config.ts (testTimeout) and apps/web/vitest.setup.ts
+  // (asyncUtilTimeout). A build that goes red for the machine's speed rather
+  // than the code teaches people to ignore red builds.
+  testTimeout: 30_000,
   // pnpm's symlinked store can surface two physical React module instances to
   // Jest's resolver (the app's `node_modules/react` symlink vs the .pnpm
   // target), which breaks hooks with "Cannot read properties of null". Pin a
