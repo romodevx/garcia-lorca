@@ -196,3 +196,35 @@ describe("FinanceScreen — corte de caja", () => {
     expect(await screen.findByTestId("cash-up-total")).toHaveTextContent("4,700");
   });
 });
+
+describe("FinanceScreen — exportar", () => {
+  // "Exportar esta vista" has to mean the view: the tab picked and the search
+  // typed. A file that quietly holds everything is worse than no file, because
+  // it looks right.
+  it("exports the rows on screen, not the whole ledger", async () => {
+    const user = userEvent.setup();
+    render(<FinanceScreen onBack={() => {}} />);
+    await screen.findByText("Valentina Cruz");
+    await user.type(screen.getByLabelText("Buscar"), "Valentina");
+
+    // The spy goes on AFTER the render: React creates elements too, and a
+    // blanket stub on createElement takes the whole tree down with it.
+    const click = vi.fn();
+    const anchor = { click, href: "", download: "", style: {} } as unknown as HTMLAnchorElement;
+    const realCreate = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tag: string) =>
+      (tag === "a" ? anchor : realCreate(tag)) as HTMLElement);
+    vi.spyOn(document.body, "appendChild").mockImplementation((n) => n);
+    vi.spyOn(document.body, "removeChild").mockImplementation((n) => n);
+    vi.stubGlobal("URL", { createObjectURL: vi.fn().mockReturnValue("blob:x"), revokeObjectURL: vi.fn() });
+
+    await user.click(screen.getByRole("button", { name: /Exportar/ }));
+
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(anchor.download).toMatch(/^adeudos-\d{4}-\d{2}-\d{2}\.csv$/);
+    expect(await screen.findByRole("status")).toHaveTextContent("1 renglones exportados");
+
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+});

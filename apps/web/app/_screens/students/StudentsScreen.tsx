@@ -17,6 +17,7 @@ import { listCycles, listGradeLevels, listGroups, listLevels, type Cycle, type G
 import { enrollIntoGrade, StudentsError, type Placement } from "../../students/api";
 
 import { API_URL } from "../../api-url";
+import { csvName, downloadCsv, toCsv, type CsvColumn } from "../../_lib/csv";
 
 
 // ── admission status → pill (design language) ──
@@ -373,6 +374,17 @@ export interface StudentsScreenProps {
   onBack: () => void;
 }
 
+/** What the school reads in Excel, in the order the table shows it. */
+const EXPORT_COLUMNS: readonly CsvColumn<Student>[] = [
+  { label: "Apellidos", value: (s) => s.lastName },
+  { label: "Nombre", value: (s) => s.firstName },
+  { label: "CURP", value: (s) => s.curp },
+  { label: "Nivel", value: (s) => s.level },
+  { label: "Grado y grupo", value: (s) => s.gradeGroup },
+  { label: "Tutor", value: (s) => s.guardianName },
+  { label: "Estado", value: (s) => statusOf(s.admissionStatus).label },
+];
+
 export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
   const [students, setStudents] = useState<Student[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
@@ -418,6 +430,13 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
     inactive: students.filter((s) => statusOf(s.admissionStatus).tab === "inactive").length,
   }), [students]);
   const levelsPresent = useMemo(() => Array.from(new Set(students.map((s) => s.level))), [students]);
+
+  // The padrón as it is on screen: the tab, the level and the search. A file
+  // that quietly held every pupil would look right and be wrong.
+  const exportView = (): void => {
+    downloadCsv(csvName("alumnos", new Date()), toCsv(EXPORT_COLUMNS, filtered));
+    say(`${filtered.length} alumnos exportados`);
+  };
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -492,7 +511,7 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
           </div>
         </div>
         <div style={{ display: "flex", gap: 12 }}>
-          <Btn kind="ghost" icon="download" onClick={() => say("Exportación generada")}>Exportar</Btn>
+          <Btn kind="ghost" icon="download" onClick={() => exportView()}>Exportar</Btn>
           <Btn icon="plus" onClick={() => setAdd(true)} style={{ height: 52, fontSize: 16.5 }}>Nuevo alumno</Btn>
         </div>
       </div>

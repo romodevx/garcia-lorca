@@ -15,6 +15,7 @@ import { CollectDrawer, type CollectStudent } from "./CollectDrawer";
 import { StudentPicker } from "./StudentPicker";
 import { CashUpPanel } from "./CashUpPanel";
 import { IncomePanel } from "./IncomePanel";
+import { csvName, downloadCsv, toCsv, type CsvColumn } from "../../_lib/csv";
 
 /** One key per payment attempt. Mirrors PaymentPanel, which had it right. */
 function newAttemptKey(): string {
@@ -154,6 +155,22 @@ function monthStart(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
+/** The columns the school reads in Excel, in the order the table shows them. */
+const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
+  { label: "Alumno", value: (r) => r.name },
+  { label: "Nivel", value: (r) => r.level },
+  { label: "Grupo", value: (r) => r.grade },
+  { label: "Concepto", value: (r) => r.charge.description },
+  { label: "Vence", value: (r) => r.charge.dueDate },
+  // Pesos with two decimals, not cents: the file is read by a person, and the
+  // column is summed in Excel.
+  { label: "Importe", value: (r) => (r.charge.amountCents / 100).toFixed(2) },
+  { label: "Descuento", value: (r) => (r.charge.discountCents / 100).toFixed(2) },
+  { label: "Pagado", value: (r) => (r.charge.paidCents / 100).toFixed(2) },
+  { label: "Saldo", value: (r) => (r.charge.remainingCents / 100).toFixed(2) },
+  { label: "Estado", value: (r) => STATUS[r.visual].label },
+];
+
 export interface FinanceScreenProps {
   onBack: () => void;
 }
@@ -232,6 +249,14 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
 
   const cycleName = cycles.find((c) => c.status === "active")?.name ?? cycles[0]?.name ?? "—";
   const activeCycleId = cycles.find((c) => c.status === "active")?.id ?? cycles[0]?.id;
+  // "Exportar esta vista" means the list on screen: the tab picked and the
+  // search typed, not everything the school has ever charged. Building it from
+  // `filtered` is what makes the file match what the person is looking at.
+  const exportView = (): void => {
+    downloadCsv(csvName("adeudos", new Date()), toCsv(EXPORT_COLUMNS, filtered));
+    say(`${filtered.length} renglones exportados`);
+  };
+
   const onPaid = (): void => { setPay(null); if (activeCycleId !== undefined) load(activeCycleId); say("Pago registrado"); };
 
   const tabs: [typeof tab, string][] = [["all", "Todos"], ["overdue", "Vencidos"], ["due", "Por vencer"], ["paid", "Pagados"]];
@@ -257,7 +282,7 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
           </div>
         </div>
         <div style={{ display: "flex", gap: 12 }}>
-          <Btn kind="ghost" icon="download" onClick={() => say("Exportación generada")}>Exportar</Btn>
+          <Btn kind="ghost" icon="download" onClick={() => exportView()}>Exportar</Btn>
           <Btn kind="ghost" icon="finance" onClick={() => setCashUp(true)}>Corte de caja</Btn>
           <Btn icon="card" onClick={() => setPicking(true)}>Cobrar</Btn>
         </div>
@@ -371,7 +396,7 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
         />
       )}
       {toast !== null && (
-        <div style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>
+        <div role="status" style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>
           <Icon name="check" size={20} stroke={2.6} />{toast}
         </div>
       )}
