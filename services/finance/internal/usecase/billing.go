@@ -161,12 +161,16 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 		}
 		wantedEnrollment = append(wantedEnrollment, enrolCharge)
 
+		// The WHOLE year, not just the months that have arrived. The school asked
+		// for "el monto total que debe pagar el año", and it is what makes a
+		// deposit work: a family that hands over $6,000 in September has six
+		// months marked paid, which cannot happen if those months are not
+		// charges yet. Billing on arrival left the other five sitting as an
+		// unexplained credit.
+		//
+		// A future month owes nothing extra: it is not overdue, so it accrues no
+		// surcharge until its own due date passes.
 		for _, due := range plan.BilledMonths(cycle.StartsOn) {
-			if due.After(asOf) {
-				// Not due yet. A school that opens in September must not hand a
-				// family ten months of debt on day one.
-				continue
-			}
 			monthly, err := s.buildCharge(chargeSpec{
 				studentID:   enr.StudentID,
 				cycleID:     cycleID,

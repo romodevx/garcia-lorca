@@ -109,10 +109,14 @@ func TestNoMoneyMeansNoSurchargeRow(t *testing.T) {
 
 // Money beyond the debt is the family's credit, not an error. Refusing it sends
 // a parent away from the counter with cash in hand.
+//
+// "Beyond the debt" now means beyond the WHOLE YEAR: ten months at $3,200 plus
+// the surcharge September earned. A parent who settles the year and hands over
+// a little extra keeps it.
 func TestMoneyBeyondTheDebtBecomesCredit(t *testing.T) {
 	f := depositFixture(t)
 
-	got := deposit(t, f, 1000000, "2026-10-10")
+	got := deposit(t, f, 3300000, "2026-10-10")
 
 	if got.UnallocatedCents <= 0 {
 		t.Errorf("unallocated = %d, want the leftover recorded as credit", got.UnallocatedCents)
@@ -173,14 +177,20 @@ func TestVoidingADepositReleasesWhatItSettled(t *testing.T) {
 // parent's credit is invisible to everyone but them.
 func TestTheStatementShowsTheFamilysCredit(t *testing.T) {
 	f := depositFixture(t)
-	deposit(t, f, 1000000, "2026-10-10")
+	// The year is $32,000 of tuition plus $300 of surcharge; anything past that
+	// is credit.
+	const overpaid = 3300000
+	deposit(t, f, overpaid, "2026-10-10")
 
 	account, err := f.svc.GetAccount(context.Background(), testStudent)
 	if err != nil {
 		t.Fatalf("GetAccount: %v", err)
 	}
-	if account.UnallocatedCents != 1000000-670000 {
-		t.Errorf("credit = %d, want %d", account.UnallocatedCents, 1000000-670000)
+	if account.TotalBalanceCents != 0 {
+		t.Fatalf("balance = %d, want the year settled", account.TotalBalanceCents)
+	}
+	if account.UnallocatedCents != overpaid-3230000 {
+		t.Errorf("credit = %d, want %d", account.UnallocatedCents, overpaid-3230000)
 	}
 }
 
@@ -222,8 +232,16 @@ func TestPayingEarlyTakesTheDiscount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetAccount: %v", err)
 	}
-	if account.TotalBalanceCents != 0 {
-		t.Errorf("balance = %d, want 0 — September is settled", account.TotalBalanceCents)
+	// The whole year is billed, so the balance is not zero — September is. The
+	// month the money landed on is what this test is about.
+	var settled int
+	for _, c := range account.Charges {
+		if c.Charge.Discount().Int64() > 0 && c.Charge.Status() == domain.StatusPaid {
+			settled++
+		}
+	}
+	if settled != 1 {
+		t.Errorf("%d discounted months came out settled, want 1", settled)
 	}
 	var discounted int
 	for _, c := range account.Charges {
@@ -261,13 +279,18 @@ func TestPayingLateTakesNoDiscount(t *testing.T) {
 // nothing.
 func TestPreviewShowsTheSplitWithoutTakingTheMoney(t *testing.T) {
 	f := depositFixture(t)
+	opening, err := f.svc.GetAccount(context.Background(), testStudent)
+	if err != nil {
+		t.Fatalf("GetAccount: %v", err)
+	}
+	before := opening.TotalBalanceCents
 
-	preview, err := f.svc.PreviewDeposit(context.Background(), usecase.DepositInput{
+	preview, perr := f.svc.PreviewDeposit(context.Background(), usecase.DepositInput{
 		StudentID: testStudent, AmountCents: 670000, Method: domain.MethodCash,
 		PaidAt: time.Date(2026, time.October, 10, 0, 0, 0, 0, time.UTC),
 	})
-	if err != nil {
-		t.Fatalf("PreviewDeposit: %v", err)
+	if perr != nil {
+		t.Fatalf("PreviewDeposit: %v", perr)
 	}
 	if len(preview.Allocations) != 3 {
 		t.Errorf("preview split into %d, want 3 (September, its surcharge, October)", len(preview.Allocations))
@@ -285,8 +308,9 @@ func TestPreviewShowsTheSplitWithoutTakingTheMoney(t *testing.T) {
 		// money would show up here.
 		t.Errorf("the preview moved money: %d payments on the account", len(account.Payments))
 	}
-	if account.TotalBalanceCents != 640000 {
-		t.Errorf("balance = %d after a preview, want the untouched 640000", account.TotalBalanceCents)
+	if account.TotalBalanceCents != before {
+		t.Errorf("balance moved from %d to %d — the preview collected something",
+			before, account.TotalBalanceCents)
 	}
 }
 
@@ -327,5 +351,92 @@ func TestDailyCashUpExcludesWhatWasCancelled(t *testing.T) {
 	}
 	if cut.TotalCents != 0 {
 		t.Errorf("total = %d after the only deposit was cancelled, want 0", cut.TotalCents)
+	}
+}
+
+// The owner's example, end to end: eleven months and an inscription exist from
+// the start, the family hands over $6,000 in September, and six months come out
+// marked paid — not five months and an unexplained credit.
+func TestSixThousandPaysSixMonths(t *testing.T) {
+	f := billingFixture(t)
+	// A cleaner year for the arithmetic: $1,000 a month, no surcharge yet.
+	if _, err := f.svc.UpsertTuitionPlan(context.Background(), usecase.TuitionPlanInput{
+		CycleID: testCycle, LevelID: testLevel,
+		EnrollmentCents: 200000, MonthlyCents: 100000,
+		Months: 11, FirstBilledMonth: 9, DueDay: 10, Active: true,
+	}); err != nil {
+		t.Fatalf("seed plan: %v", err)
+	}
+	runOn(t, f, "2026-09-01")
+	f.clock = time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC)
+
+	opening, err := f.svc.GetAccount(context.Background(), testStudent)
+	if err != nil {
+		t.Fatalf("GetAccount: %v", err)
+	}
+	// $1,000 × 11 + $2,000 = $13,000 owed for the year, visible on day one.
+	if opening.TotalBalanceCents != 1300000 {
+		t.Errorf("annual debt = %d, want 1300000", opening.TotalBalanceCents)
+	}
+
+	got := deposit(t, f, 600000, "2026-09-01")
+
+	// The inscription is the oldest debt, so it takes $2,000; the remaining
+	// $4,000 settles four months. Six charges closed in total.
+	settled := 0
+	for _, a := range got.Allocations {
+		_ = a
+		settled++
+	}
+	if settled != 5 {
+		t.Errorf("the deposit landed on %d charges, want 5 (inscription + four months)", settled)
+	}
+	if got.UnallocatedCents != 0 {
+		t.Errorf("unallocated = %d, want 0 — every peso found a month", got.UnallocatedCents)
+	}
+
+	after, err := f.svc.GetAccount(context.Background(), testStudent)
+	if err != nil {
+		t.Fatalf("GetAccount: %v", err)
+	}
+	if after.TotalBalanceCents != 1300000-600000 {
+		t.Errorf("balance = %d, want the annual debt less what was paid", after.TotalBalanceCents)
+	}
+	var paid int
+	for _, c := range after.Charges {
+		if c.Charge.Status() == domain.StatusPaid {
+			paid++
+		}
+	}
+	if paid != 5 {
+		t.Errorf("%d charges are marked paid, want 5", paid)
+	}
+}
+
+// And the partial: $1,500 pays one month and leaves $500 ON the next, not
+// floating as credit. The owner said it in those words.
+func TestFifteenHundredPaysOneMonthAndPartOfTheNext(t *testing.T) {
+	f := billingFixture(t)
+	if _, err := f.svc.UpsertTuitionPlan(context.Background(), usecase.TuitionPlanInput{
+		CycleID: testCycle, LevelID: testLevel,
+		EnrollmentCents: 0, MonthlyCents: 100000,
+		Months: 11, FirstBilledMonth: 9, DueDay: 10, Active: true,
+	}); err != nil {
+		t.Fatalf("seed plan: %v", err)
+	}
+	runOn(t, f, "2026-09-01")
+	f.clock = time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC)
+
+	got := deposit(t, f, 150000, "2026-09-01")
+
+	if len(got.Allocations) != 2 {
+		t.Fatalf("landed on %d charges, want 2", len(got.Allocations))
+	}
+	if got.Allocations[0].Amount().Int64() != 100000 || got.Allocations[1].Amount().Int64() != 50000 {
+		t.Errorf("split = %d and %d, want 100000 and 50000",
+			got.Allocations[0].Amount().Int64(), got.Allocations[1].Amount().Int64())
+	}
+	if got.UnallocatedCents != 0 {
+		t.Errorf("unallocated = %d, want 0 — the $500 sits on October", got.UnallocatedCents)
 	}
 }

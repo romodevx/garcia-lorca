@@ -51,19 +51,39 @@ func runOn(t *testing.T, f *fixture, day string) usecase.BillingResult {
 	return got
 }
 
-// The run bills only the months whose due date has ARRIVED. A school that opens
-// in September must not hand a family ten months of debt on day one.
-func TestRunBillingChargesOnlyTheMonthsThatHaveComeDue(t *testing.T) {
+// The run issues the WHOLE year at once: the eleven months and the inscription,
+// due dates and all.
+//
+// The school asked for this in as many words — "el monto total que debe pagar el
+// año" — and it is what makes the rest work. A family that hands over $6,000 in
+// September has six months marked paid, which cannot happen if those months are
+// not charges yet. The earlier rule (bill a month when it falls due) left the
+// other five as an unexplained credit.
+func TestRunBillingIssuesTheWholeYearUpFront(t *testing.T) {
 	f := billingFixture(t)
 
-	// 15 November: September, October and November are due. December is not.
+	// 15 November, but the year is billed in full: the plan has ten months.
 	got := runOn(t, f, "2026-11-15")
 
-	if got.TuitionCreated != 3 {
-		t.Errorf("tuition created = %d, want 3 (Sep, Oct, Nov)", got.TuitionCreated)
+	if got.TuitionCreated != 10 {
+		t.Errorf("tuition created = %d, want 10 — the whole year", got.TuitionCreated)
 	}
 	if got.EnrollmentCreated != 1 {
 		t.Errorf("enrollment created = %d, want 1", got.EnrollmentCreated)
+	}
+}
+
+// Billing the year up front must not bill the FUTURE as overdue. A month that
+// has not arrived owes nothing extra, and a family opening the app in September
+// must not find surcharges on June.
+func TestTheFutureMonthsCarryNoSurcharge(t *testing.T) {
+	f := billingFixture(t)
+
+	got := runOn(t, f, "2026-11-12")
+
+	// Only September (2 months late), October (1) and the inscription (3).
+	if got.LateFeesCreated != 6 {
+		t.Errorf("late fees = %d, want 6 — nothing accrues on a month that has not come due", got.LateFeesCreated)
 	}
 }
 
@@ -247,9 +267,9 @@ func TestDailyModeIssuesNoSurchargeCharges(t *testing.T) {
 	if got.LateFeesCreated != 0 {
 		t.Errorf("late fees created = %d, want 0 — the daily rule is derived, not charged", got.LateFeesCreated)
 	}
-	// The tuition itself is still billed. Turning the surcharge rule off must not
-	// turn the school's income off with it.
-	if got.TuitionCreated != 3 {
-		t.Errorf("tuition created = %d, want 3", got.TuitionCreated)
+	// The tuition itself is still billed — the whole year of it. Turning the
+	// surcharge rule off must not turn the school's income off with it.
+	if got.TuitionCreated != 10 {
+		t.Errorf("tuition created = %d, want 10", got.TuitionCreated)
 	}
 }
