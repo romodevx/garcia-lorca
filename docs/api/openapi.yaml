@@ -1545,9 +1545,20 @@ components:
           minimum: 0
           description: Integer cents, as everywhere money appears.
         active: { type: boolean }
+        category: { $ref: '#/components/schemas/ItemCategory' }
         sizes:
           type: array
           items: { $ref: '#/components/schemas/StockLevel' }
+
+    ItemCategory:
+      type: string
+      enum: [uniform, book, supply, other]
+      default: uniform
+      description: >
+        What kind of thing this is. The module sells whatever the school sells —
+        the stock rules, the append-only ledger and the counter sale were never
+        about clothing, only the vocabulary was. Everything stored before
+        categories existed is a uniform, which is the truth about it.
 
     CreateItemRequest:
       type: object
@@ -1556,6 +1567,7 @@ components:
         code: { type: string, minLength: 1, maxLength: 40 }
         name: { type: string, minLength: 1, maxLength: 120 }
         description: { type: string, maxLength: 500 }
+        category: { $ref: '#/components/schemas/ItemCategory' }
         level: { $ref: '#/components/schemas/Level' }
         priceCents: { type: integer, minimum: 0 }
 

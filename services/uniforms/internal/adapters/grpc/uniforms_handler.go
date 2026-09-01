@@ -53,6 +53,7 @@ func (h *UniformsHandler) CreateItem(ctx context.Context, req *connect.Request[u
 	item, err := h.shop.CreateItem(ctx, usecase.CreateItemInput{
 		Code: m.GetCode(), Name: m.GetName(), Description: m.GetDescription(),
 		Level: fromProtoLevel(m.GetLevel()), PriceCents: m.GetPriceCents(),
+		Category: m.GetCategory(),
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -66,6 +67,7 @@ func (h *UniformsHandler) UpdateItem(ctx context.Context, req *connect.Request[u
 	item, err := h.shop.UpdateItem(ctx, usecase.UpdateItemInput{
 		ID: m.GetId(), Name: m.GetName(), Description: m.GetDescription(),
 		Level: fromProtoLevel(m.GetLevel()), PriceCents: m.GetPriceCents(), Active: m.GetActive(),
+		Category: m.GetCategory(),
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -385,6 +387,7 @@ func toProtoItem(i domain.Item, sizes []domain.StockLevel) *uniformsv1.Item {
 		Id: i.ID(), TenantId: i.TenantID(), Code: i.Code(), Name: i.Name(),
 		Description: i.Description(), Level: toProtoLevel(i.Level()),
 		PriceCents: i.PriceCents(), Active: i.Active(), Sizes: toProtoStockAll(sizes),
+		Category: i.Category(),
 	}
 }
 

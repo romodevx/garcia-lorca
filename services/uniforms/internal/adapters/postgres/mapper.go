@@ -49,6 +49,12 @@ func toDomainItem(m itemModel) (domain.Item, error) {
 	if err != nil {
 		return domain.Item{}, err
 	}
+	if m.Category != "" {
+		item, err = item.WithCategory(m.Category)
+		if err != nil {
+			return domain.Item{}, err
+		}
+	}
 	if !m.Active {
 		item = item.Retire()
 	}
@@ -59,7 +65,7 @@ func fromDomainItem(i domain.Item) itemModel {
 	return itemModel{
 		ID: i.ID(), TenantID: i.TenantID(), Code: i.Code(), Name: i.Name(),
 		Description: i.Description(), Level: nullable(string(i.Level())),
-		PriceCents: i.PriceCents(), Active: i.Active(),
+		PriceCents: i.PriceCents(), Active: i.Active(), Category: i.Category(),
 	}
 }
 

@@ -64,7 +64,7 @@ export const MODULES: readonly ModuleDef[] = [
   // list (uniforms:orders) carries every pupil's name and is owner-only. Either
   // one is a reason to show the tile — a Caja/Almacén role that cannot see the
   // module cannot do its job.
-  { id: "uniforms", label: "Uniformes", icon: "uniforms", color: "purple", desc: "Inventario y mostrador", badge: null, flag: "module_uniforms", perm: ["uniforms:stock", "uniforms:orders"] },
+  { id: "uniforms", label: "Inventario", icon: "uniforms", color: "purple", desc: "Uniformes, libros y artículos", badge: null, flag: "module_uniforms", perm: ["uniforms:stock", "uniforms:orders"] },
   { id: "billing", label: "Facturación", icon: "billing", color: "lime", desc: "CFDI 4.0", badge: null, flag: "module_billing", perm: "billing:read" },
   { id: "reports", label: "Reportes", icon: "reports", color: "yellow", desc: "Indicadores", badge: null, flag: "module_reports", perm: "reports:read" },
   { id: "settings", label: "Configuración", icon: "settings", color: "neutral", desc: "Centro y permisos", badge: null, flag: "module_config", perm: "config:read" },

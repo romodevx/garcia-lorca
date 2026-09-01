@@ -55,6 +55,9 @@ type UniformItem struct {
 	PriceCents  int64         `json:"priceCents"`
 	Active      bool          `json:"active"`
 	Sizes       []UniformSize `json:"sizes"`
+	// Category is uniform, book, supply or other. The module sells whatever the
+	// school sells; only the vocabulary was ever about clothing.
+	Category string `json:"category"`
 }
 
 // UniformOrderLine is one garment in one order.
@@ -170,13 +173,15 @@ type CreateItemInput struct {
 	Description string
 	Level       string
 	PriceCents  int64
+	// Category is uniform, book, supply or other. Empty means uniform.
+	Category string
 }
 
 // CreateItem puts a garment on sale.
 func (c *UniformsClient) CreateItem(ctx context.Context, in CreateItemInput) (UniformItem, error) {
 	res, err := c.rpc.CreateItem(ctx, connect.NewRequest(&uniformsv1.CreateItemRequest{
 		Code: in.Code, Name: in.Name, Description: in.Description,
-		Level: uniformLevel(in.Level), PriceCents: in.PriceCents,
+		Level: uniformLevel(in.Level), PriceCents: in.PriceCents, Category: in.Category,
 	}))
 	if err != nil {
 		return UniformItem{}, err
@@ -193,6 +198,7 @@ type UpdateItemInput struct {
 	Level       string
 	PriceCents  int64
 	Active      bool
+	Category    string
 }
 
 // UpdateItem edits a garment.
@@ -200,6 +206,7 @@ func (c *UniformsClient) UpdateItem(ctx context.Context, in UpdateItemInput) (Un
 	res, err := c.rpc.UpdateItem(ctx, connect.NewRequest(&uniformsv1.UpdateItemRequest{
 		Id: in.ID, Name: in.Name, Description: in.Description,
 		Level: uniformLevel(in.Level), PriceCents: in.PriceCents, Active: in.Active,
+		Category: in.Category,
 	}))
 	if err != nil {
 		return UniformItem{}, err
@@ -475,6 +482,7 @@ func toUniformItem(i *uniformsv1.Item) UniformItem {
 		ID: i.GetId(), Code: i.GetCode(), Name: i.GetName(), Description: i.GetDescription(),
 		Level: uniformLevelNames[i.GetLevel()], PriceCents: i.GetPriceCents(),
 		Active: i.GetActive(), Sizes: toUniformSizes(i.GetSizes()),
+		Category: i.GetCategory(),
 	}
 }
 

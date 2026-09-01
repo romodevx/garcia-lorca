@@ -55,7 +55,16 @@ export interface UniformItem {
   priceCents: number;
   active: boolean;
   sizes: UniformSize[];
+  /**
+   * What kind of thing this is. The module sells whatever the school sells —
+   * the stock rules, the ledger and the counter sale were never about clothing,
+   * only the vocabulary was.
+   */
+  category: ItemCategory;
 }
+
+/** uniform | book | supply | other. Everything stored first was a uniform. */
+export type ItemCategory = "uniform" | "book" | "supply" | "other";
 
 /**
  * What one garment in one size is doing. `reserved` is the only status holding
@@ -311,10 +320,22 @@ export interface NewItem {
   description?: string;
   level?: Level;
   priceCents: number;
+  /** Omitted means uniform. */
+  category?: ItemCategory;
 }
 
 export async function createItem(baseURL: string, item: NewItem): Promise<UniformItem> {
-  return send<UniformItem>(baseURL, "/items", "POST", item);
+  return withSizes(await send<UniformItem>(baseURL, "/items", "POST", item));
+}
+
+/**
+ * A freshly created item has no size run yet. The gateway sends an empty list,
+ * but the screen that opens straight afterwards does `item.sizes.map(...)` and
+ * a missing field crashes it outright rather than showing nothing — so the one
+ * place that can be sure fills it in.
+ */
+function withSizes(item: UniformItem): UniformItem {
+  return { ...item, sizes: item.sizes ?? [] };
 }
 
 export interface ItemEdit {
@@ -323,10 +344,11 @@ export interface ItemEdit {
   level?: Level;
   priceCents: number;
   active: boolean;
+  category?: ItemCategory;
 }
 
 export async function updateItem(baseURL: string, id: string, edit: ItemEdit): Promise<UniformItem> {
-  return send<UniformItem>(baseURL, `/items/${encodeURIComponent(id)}`, "PUT", edit);
+  return withSizes(await send<UniformItem>(baseURL, `/items/${encodeURIComponent(id)}`, "PUT", edit));
 }
 
 /** Writes a garment's whole size run in one call. */

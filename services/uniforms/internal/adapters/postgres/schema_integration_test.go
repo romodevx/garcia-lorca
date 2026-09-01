@@ -49,6 +49,8 @@ var migrationFiles = []string{
 	"../../../../../migrations/uniforms/0002_orders.sql",
 	"../../../../../migrations/uniforms/0003_settings.sql",
 	"../../../../../migrations/uniforms/0004_sale_keys.sql",
+	"../../../../../migrations/uniforms/0005_maternal_level.sql",
+	"../../../../../migrations/uniforms/0006_item_category.sql",
 }
 
 var (

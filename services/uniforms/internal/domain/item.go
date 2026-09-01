@@ -45,6 +45,7 @@ type Item struct {
 	level       Level
 	priceCents  int64
 	active      bool
+	category    string
 }
 
 const (
@@ -53,6 +54,42 @@ const (
 )
 
 // NewItem builds a validated garment, on sale.
+// What kind of thing this is. The module sells whatever the school sells: the
+// stock rules, the ledger and the counter sale were never about clothing, only
+// the vocabulary was.
+const (
+	// CategoryUniform is a garment. Everything stored before categories existed
+	// is one, which is the truth about it.
+	CategoryUniform = "uniform"
+	// CategoryBook is a textbook or workbook.
+	CategoryBook = "book"
+	// CategorySupply is stationery and other school supplies.
+	CategorySupply = "supply"
+	// CategoryOther is anything else the school decides to sell.
+	CategoryOther = "other"
+)
+
+func validCategory(category string) bool {
+	switch category {
+	case CategoryUniform, CategoryBook, CategorySupply, CategoryOther:
+		return true
+	default:
+		return false
+	}
+}
+
+// WithCategory returns a copy filed under another category.
+func (i Item) WithCategory(category string) (Item, error) {
+	if !validCategory(category) {
+		return Item{}, glerrors.New(glerrors.KindInvalid, "unknown item category")
+	}
+	i.category = category
+	return i, nil
+}
+
+// Category is what kind of thing this is: uniform, book, supply or other.
+func (i Item) Category() string { return i.category }
+
 func NewItem(id, tenantID, code, name, description string, level Level, priceCents int64) (Item, error) {
 	if strings.TrimSpace(id) == "" {
 		return Item{}, glerrors.New(glerrors.KindInvalid, "item id is required")
@@ -81,6 +118,7 @@ func NewItem(id, tenantID, code, name, description string, level Level, priceCen
 	return Item{
 		id: id, tenantID: tenantID, code: trimmedCode, name: trimmedName,
 		description: trimmedDesc, level: level, priceCents: priceCents, active: true,
+		category: CategoryUniform,
 	}, nil
 }
 
