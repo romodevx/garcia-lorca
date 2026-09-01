@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
@@ -280,5 +280,33 @@ describe("AppShell navigation flow", () => {
     // shows the "Módulo «...»" heading; the real surface shows the status tablist.
     expect(await screen.findByRole("heading", { name: /Módulo «Finanzas»/ })).toBeInTheDocument();
     expect(screen.queryByRole("tablist", { name: "Filtrar por estado" })).not.toBeInTheDocument();
+  });
+});
+
+describe("AppShell — sesión por inactividad", () => {
+  // The school's rule, end to end: the panel closes itself and says why. On a
+  // shared office computer, walking away has to end the session.
+  it("closes the session after fifteen idle minutes and explains it", async () => {
+    // Fake timers BEFORE the render: the watchdog's interval is created on
+    // mount, and one created under real timers would never see the clock move.
+    // shouldAdvanceTime keeps the session probe's promises resolving.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockMe.mockResolvedValueOnce({ userId: "u1", email: "owner@example.com", permissions: [] });
+      render(
+        <Providers flags={{}}>
+          <AppShell />
+        </Providers>,
+      );
+      // Wait for the live session to land, or the hook has nothing to close.
+      await screen.findByRole("button", { name: /Salir|Cerrar sesión/i });
+
+      await act(async () => { vi.advanceTimersByTime(16 * 60 * 1000); });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(mockLogout).toHaveBeenCalled();
+    expect(await screen.findByText(/inactividad/i)).toBeInTheDocument();
   });
 });

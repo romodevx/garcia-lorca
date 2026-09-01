@@ -23,6 +23,7 @@ import { useTheme } from "./theme/ThemeProvider";
 import { login as apiLogin, changePassword as apiChangePassword, logout as apiLogout, me as apiMe, refresh as apiRefresh, type MeResult } from "./auth/api";
 
 import { API_URL } from "./api-url";
+import { useSessionTimeout } from "./auth/useSessionTimeout";
 
 type View =
   | { screen: "login" }
@@ -208,6 +209,27 @@ export function AppShell(): ReactElement {
     setPrincipal(undefined);
     setView({ screen: "login" });
   };
+
+  // The school's session rule. The panel runs on a computer at the front desk:
+  // somebody walks away to attend a parent, and the next person who sits down
+  // must not find an open session holding the school's money.
+  //
+  // The server enforces it too — a staff session that has sat unused for fifteen
+  // minutes is refused, and the cookie expires with it. This is what makes it
+  // immediate and explained, rather than a surprise on the next click.
+  useSessionTimeout({
+    onExpire: () => {
+      if (principal === undefined) {
+        // Nobody is signed in; there is nothing to close.
+        return;
+      }
+      logout();
+      setAuthError("Cerramos la sesión por inactividad. Vuelve a entrar.");
+    },
+    // Renews while somebody is working, so a cashier entering payments for an
+    // hour never meets a login screen mid-entry.
+    onKeepAlive: () => { void apiRefresh(API_URL).catch(() => {}); },
+  });
   const home = (): void => setView({ screen: "dashboard" });
   const open = useCallback((id: string, _intent?: string): void => {
     if (id === "finance") {

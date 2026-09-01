@@ -38,8 +38,30 @@ func NewAuthClient(baseURL string, httpClient connect.HTTPClient) *AuthClient {
 
 // Login exchanges credentials for tokens via iam. Connect error codes propagate
 // (e.g. Unauthenticated for bad credentials) so the handler can map them.
+// SessionKind is which surface is logging in. It decides how long the session
+// may sit unused: the school's panel closes after fifteen idle minutes, a
+// parent's phone lasts a day.
+type SessionKind string
+
+const (
+	// SessionStaff is the school's panel.
+	SessionStaff SessionKind = "staff"
+	// SessionFamily is a parent's phone.
+	SessionFamily SessionKind = "family"
+)
+
+// Login authenticates for the school's panel. It is the safe default: a caller
+// that does not say which surface it is gets the shorter session.
 func (c *AuthClient) Login(ctx context.Context, email, password string) (LoginResult, error) {
-	res, err := c.rpc.Login(ctx, connect.NewRequest(&iamv1.LoginRequest{Email: email, Password: password}))
+	return c.LoginAs(ctx, email, password, SessionStaff)
+}
+
+// LoginAs authenticates for a named surface. The kind comes from the ROUTE the
+// request arrived on — never from anything a user can type.
+func (c *AuthClient) LoginAs(ctx context.Context, email, password string, kind SessionKind) (LoginResult, error) {
+	res, err := c.rpc.Login(ctx, connect.NewRequest(&iamv1.LoginRequest{
+		Email: email, Password: password, SessionKind: protoSessionKind(kind),
+	}))
 	if err != nil {
 		return LoginResult{}, err
 	}
@@ -95,3 +117,11 @@ func (c *AuthClient) ValidateToken(ctx context.Context, accessToken string) (mid
 
 // compile-time proof AuthClient satisfies the middleware's Authenticator.
 var _ middleware.Authenticator = (*AuthClient)(nil)
+
+// protoSessionKind maps the edge's name for a surface to the wire enum.
+func protoSessionKind(kind SessionKind) iamv1.SessionKind {
+	if kind == SessionFamily {
+		return iamv1.SessionKind_SESSION_KIND_FAMILY
+	}
+	return iamv1.SessionKind_SESSION_KIND_STAFF
+}
