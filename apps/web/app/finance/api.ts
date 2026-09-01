@@ -70,6 +70,64 @@ export interface AccountStatement {
   charges: Charge[];
   payments: Payment[];
   totalBalanceCents: number;
+  /** Money the family has handed over that no charge has claimed. */
+  unallocatedCents: number;
+}
+
+/**
+ * Money as it arrived, before it was decided what it pays. The counter records
+ * ONE amount; which months it covers is worked out server-side, oldest first.
+ */
+export interface Deposit {
+  id: string;
+  studentId: string;
+  amountCents: number;
+  method: PaymentMethod;
+  reference: string;
+  paidAt: string;
+  /**
+   * The school calendar the split was worked out against. "unavailable" means
+   * the calendar could not be read and the deadline was computed without the
+   * school's holidays — worth showing on a receipt somebody may dispute.
+   */
+  calendarVersion: string;
+  voidedAt?: string;
+  voidReason?: string;
+}
+
+/** What a deposit did: where the money landed and what is left over. */
+export interface DepositResult {
+  deposit: Deposit;
+  allocations: Payment[];
+  surcharges: Charge[];
+  /** Money no charge claimed — the family's credit with the school. */
+  unallocatedCents: number;
+  /** The deposit already existed under this key; nothing was collected again. */
+  replayed: boolean;
+}
+
+/** What an amount WOULD cover. No deposit, because nothing was taken. */
+export interface DepositPreview {
+  allocations: Payment[];
+  surcharges: Charge[];
+  unallocatedCents: number;
+}
+
+export interface RegisterDepositInput {
+  studentId: string;
+  amountCents: number;
+  method: PaymentMethod;
+  reference: string;
+  /** The DAY the money changed hands, "2026-10-10". Omitted ⇒ the server stamps today. */
+  paidAt?: string;
+  /** One key per ATTEMPT: a retry returns the deposit already stored. */
+  idempotencyKey?: string;
+}
+
+export interface PreviewDepositInput {
+  studentId: string;
+  amountCents: number;
+  paidAt?: string;
 }
 
 /** The payment plus the charge with its recomputed paid/remaining/status. */
@@ -385,11 +443,112 @@ export async function getAccount(baseURL: string, studentId: string): Promise<Ac
     charges?: Wire<Charge, "status">[];
     payments?: Wire<Payment, "method">[];
     totalBalanceCents?: number;
+    unallocatedCents?: number;
   }>(baseURL, `/accounts/${studentId}`);
   return {
     charges: (res.charges ?? []).map(toCharge),
     payments: (res.payments ?? []).map(toPayment),
     totalBalanceCents: res.totalBalanceCents ?? 0,
+    unallocatedCents: res.unallocatedCents ?? 0,
+  };
+}
+
+// --- deposits (M16) ---------------------------------------------------------
+
+/**
+ * Take money without being told what it pays for. The response carries the
+ * whole split, so a receipt can be printed without a second call while the
+ * parent is still at the counter.
+ *
+ * Send an `idempotencyKey`: a double click or a retried request must not cost
+ * the family twice.
+ */
+export async function registerDeposit(baseURL: string, input: RegisterDepositInput): Promise<DepositResult> {
+  const res = await sendJSON<{
+    deposit: Wire<Deposit, "method">;
+    allocations?: Wire<Payment, "method">[];
+    surcharges?: Wire<Charge, "status">[];
+    unallocatedCents?: number;
+    replayed?: boolean;
+  }>(baseURL, "/deposits", "POST", depositBody(input));
+  return {
+    deposit: toDeposit(res.deposit),
+    allocations: (res.allocations ?? []).map(toPayment),
+    surcharges: (res.surcharges ?? []).map(toCharge),
+    unallocatedCents: res.unallocatedCents ?? 0,
+    replayed: res.replayed ?? false,
+  };
+}
+
+/**
+ * What an amount WOULD cover. Same rule as taking it, and it writes nothing, so
+ * the cashier can say it out loud before the money changes hands.
+ */
+export async function previewDeposit(baseURL: string, input: PreviewDepositInput): Promise<DepositPreview> {
+  const res = await sendJSON<{
+    allocations?: Wire<Payment, "method">[];
+    surcharges?: Wire<Charge, "status">[];
+    unallocatedCents?: number;
+  }>(baseURL, "/deposits/preview", "POST", {
+    studentId: input.studentId,
+    amountCents: input.amountCents,
+    ...(input.paidAt !== undefined && input.paidAt !== "" ? { paidAt: input.paidAt } : {}),
+  });
+  return {
+    allocations: (res.allocations ?? []).map(toPayment),
+    surcharges: (res.surcharges ?? []).map(toCharge),
+    unallocatedCents: res.unallocatedCents ?? 0,
+  };
+}
+
+/** A family's deposits, newest first. */
+export async function listDeposits(baseURL: string, studentId: string): Promise<Deposit[]> {
+  const rows = await getList<Wire<Deposit, "method">>(baseURL, `/deposits?studentId=${encodeURIComponent(studentId)}`, "deposits");
+  return rows.map(toDeposit);
+}
+
+/**
+ * Cancel a deposit and release what it settled. The reason is required — a
+ * cancelled deposit without one is an unexplained hole in the day's takings.
+ */
+export async function voidDeposit(baseURL: string, id: string, reason: string): Promise<void> {
+  const res = await authFetch(url(baseURL, `${BASE_PATH}/deposits/${id}/void`), {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason }),
+  });
+  if (!res.ok) {
+    throw await failure(res);
+  }
+}
+
+function depositBody(input: RegisterDepositInput): Record<string, unknown> {
+  return {
+    studentId: input.studentId,
+    amountCents: input.amountCents,
+    method: input.method,
+    reference: input.reference,
+    // Omitted when the money is captured the day it arrived: the gateway reads
+    // an absent paidAt as "today".
+    ...(input.paidAt !== undefined && input.paidAt !== "" ? { paidAt: input.paidAt } : {}),
+    ...(input.idempotencyKey !== undefined && input.idempotencyKey !== ""
+      ? { idempotencyKey: input.idempotencyKey }
+      : {}),
+  };
+}
+
+function toDeposit(d: Wire<Deposit, "method">): Deposit {
+  return {
+    id: d.id,
+    studentId: d.studentId,
+    amountCents: d.amountCents,
+    method: d.method as PaymentMethod,
+    reference: d.reference ?? "",
+    paidAt: d.paidAt,
+    calendarVersion: d.calendarVersion ?? "",
+    ...(d.voidedAt !== undefined ? { voidedAt: d.voidedAt } : {}),
+    ...(d.voidReason !== undefined ? { voidReason: d.voidReason } : {}),
   };
 }
 
