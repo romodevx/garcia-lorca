@@ -308,7 +308,31 @@ func (s *FinanceService) CancelChargeIfUnpaid(ctx context.Context, chargeID stri
 // publishes nothing either: the event fired the first time round, and a second
 // one would bill a second receipt for one payment. An empty key opts out.
 func (s *FinanceService) RegisterPayment(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string) (domain.Payment, ports.ChargeWithPaid, error) {
-	payment, err := domain.NewPayment(s.newID(), s.tenantID, chargeID, amountCents, method, reference, s.now(), idempotencyKey)
+	return s.RegisterPaymentAt(ctx, chargeID, amountCents, method, reference, idempotencyKey, time.Time{})
+}
+
+// RegisterPaymentAt is RegisterPayment with the date the money actually changed
+// hands. A zero paidAt means "now", which is what every existing caller gets.
+//
+// The date matters more than it looks. Every rule the school asked for — the
+// early-payment discount, the daily surcharge, which months a deposit covers —
+// is a function of WHEN the family paid, and until now there was no way to say:
+// the service stamped its own clock, so a cashier catching up on Monday stamped
+// Monday on Friday's cash and every rule downstream used the wrong day.
+//
+// A future date is refused. It is the classic counter typo (2027 for 2026) and
+// it silently lifts a payment out of every overdue calculation, which is a
+// mistake nobody notices until a parent is wrongly told they are current.
+func (s *FinanceService) RegisterPaymentAt(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time) (domain.Payment, ports.ChargeWithPaid, error) {
+	when := paidAt
+	if when.IsZero() {
+		when = s.now()
+	} else if when.After(s.now()) {
+		return domain.Payment{}, ports.ChargeWithPaid{}, glerrors.New(glerrors.KindInvalid,
+			"la fecha del pago no puede estar en el futuro")
+	}
+
+	payment, err := domain.NewPayment(s.newID(), s.tenantID, chargeID, amountCents, method, reference, when, idempotencyKey)
 	if err != nil {
 		return domain.Payment{}, ports.ChargeWithPaid{}, err
 	}

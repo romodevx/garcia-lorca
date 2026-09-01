@@ -975,3 +975,55 @@ func TestRegisterPaymentPublishesChargeSettledOnlyWhenClosed(t *testing.T) {
 		t.Errorf("settled event mismatch: %+v", got)
 	}
 }
+
+// TestRegisterPaymentHonoursTheCapturedDate pins the date a payment carries.
+//
+// Every rule the school asked for — the early-payment discount, the daily
+// surcharge, which months a deposit covers — is a function of WHEN the family
+// paid. RegisterPayment stamped s.now() and the request had no date field at
+// all, so a cashier catching up on Monday stamped Monday on Friday's cash and
+// every downstream rule quietly used the wrong day.
+func TestRegisterPaymentHonoursTheCapturedDate(t *testing.T) {
+	f := newFixture(t)
+	charge := f.seedCharge(t, f.seedConcept(t, "Colegiatura", 100000).ID(), 100000)
+	friday := time.Date(2026, 9, 4, 0, 0, 0, 0, time.UTC)
+
+	got, _, err := f.svc.RegisterPaymentAt(context.Background(), charge.ID(), 100000, "cash", "", "k1", friday)
+	if err != nil {
+		t.Fatalf("RegisterPaymentAt: %v", err)
+	}
+	if !got.PaidAt().Equal(friday) {
+		t.Errorf("paidAt = %s, want %s — the captured date must survive to the ledger", got.PaidAt(), friday)
+	}
+}
+
+// A future date is the classic counter typo (2027 for 2026) and it silently
+// moves a payment out of every overdue calculation.
+func TestRegisterPaymentRejectsAFutureDate(t *testing.T) {
+	f := newFixture(t)
+	charge := f.seedCharge(t, f.seedConcept(t, "Colegiatura", 100000).ID(), 100000)
+	tomorrow := fixedNow.Add(48 * time.Hour)
+
+	_, _, err := f.svc.RegisterPaymentAt(context.Background(), charge.ID(), 100000, "cash", "", "k1", tomorrow)
+	if err == nil {
+		t.Fatal("a payment dated in the future was accepted")
+	}
+	if glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("kind = %v, want Invalid", glerrors.KindOf(err))
+	}
+}
+
+// Omitting the date keeps today's behaviour, so every existing caller is
+// unaffected until it chooses to send one.
+func TestRegisterPaymentWithoutADateStampsNow(t *testing.T) {
+	f := newFixture(t)
+	charge := f.seedCharge(t, f.seedConcept(t, "Colegiatura", 100000).ID(), 100000)
+
+	got, _, err := f.svc.RegisterPayment(context.Background(), charge.ID(), 100000, "cash", "", "k1")
+	if err != nil {
+		t.Fatalf("RegisterPayment: %v", err)
+	}
+	if !got.PaidAt().Equal(fixedNow) {
+		t.Errorf("paidAt = %s, want the injected clock %s", got.PaidAt(), fixedNow)
+	}
+}

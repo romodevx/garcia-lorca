@@ -129,6 +129,13 @@ export interface RegisterPaymentInput {
    * every call posts a new payment.
    */
   idempotencyKey?: string;
+  /**
+   * The DAY the money changed hands, "2026-09-04". Omitted ⇒ the server stamps
+   * now, which is right when the payment is captured as it is received and
+   * wrong when a cashier is catching up on Friday's cash. Every collection rule
+   * reads this date.
+   */
+  paidAt?: string;
 }
 
 /**
@@ -358,6 +365,10 @@ export async function registerPayment(baseURL: string, input: RegisterPaymentInp
     ...(input.idempotencyKey !== undefined && input.idempotencyKey !== ""
       ? { idempotencyKey: input.idempotencyKey }
       : {}),
+    // A date like "2026-09-04", omitted when the payment is being captured the
+    // same day it was received. The gateway reads an absent paidAt as "now", so
+    // leaving it out keeps the old behaviour exactly.
+    ...(input.paidAt !== undefined && input.paidAt !== "" ? { paidAt: input.paidAt } : {}),
   };
   const res = await sendJSON<{ payment: Wire<Payment, "method">; charge: Wire<Charge, "status"> }>(
     baseURL,

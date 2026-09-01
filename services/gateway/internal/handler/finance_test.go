@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	connect "connectrpc.com/connect"
 
@@ -57,6 +58,7 @@ type fakeFinance struct {
 	payMethod   string
 	payRef      string
 	payKey      string
+	payPaidAt   time.Time
 	payment     client.Payment
 
 	accountStudent string
@@ -129,9 +131,9 @@ func (f *fakeFinance) CancelCharge(_ context.Context, chargeID string) (client.C
 	return f.charge, nil
 }
 
-func (f *fakeFinance) RegisterPayment(_ context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string) (client.Payment, client.Charge, error) {
+func (f *fakeFinance) RegisterPaymentAt(_ context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time) (client.Payment, client.Charge, error) {
 	f.payChargeID, f.payAmount, f.payMethod, f.payRef = chargeID, amountCents, method, reference
-	f.payKey = idempotencyKey
+	f.payKey, f.payPaidAt = idempotencyKey, paidAt
 	if f.err != nil {
 		return client.Payment{}, client.Charge{}, f.err
 	}

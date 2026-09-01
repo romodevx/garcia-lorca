@@ -6,6 +6,7 @@ import (
 	"time"
 
 	connect "connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	financev1 "github.com/garcia-lorca/gen/go/garcialorca/finance/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/finance/v1/financev1connect"
@@ -205,13 +206,24 @@ func (c *FinanceClient) CancelCharge(ctx context.Context, chargeID string) (Char
 // optional: a repeat under the same key returns the original payment instead of
 // collecting again, which is what makes a retried request safe.
 func (c *FinanceClient) RegisterPayment(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string) (Payment, Charge, error) {
-	res, err := c.rpc.RegisterPayment(ctx, connect.NewRequest(&financev1.RegisterPaymentRequest{
+	return c.RegisterPaymentAt(ctx, chargeID, amountCents, method, reference, idempotencyKey, time.Time{})
+}
+
+// RegisterPaymentAt carries the date the money changed hands. A zero paidAt is
+// omitted from the request, so the service stamps its own clock exactly as
+// before.
+func (c *FinanceClient) RegisterPaymentAt(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time) (Payment, Charge, error) {
+	req := &financev1.RegisterPaymentRequest{
 		ChargeId:       chargeID,
 		AmountCents:    amountCents,
 		Method:         method,
 		Reference:      reference,
 		IdempotencyKey: idempotencyKey,
-	}))
+	}
+	if !paidAt.IsZero() {
+		req.PaidAt = timestamppb.New(paidAt)
+	}
+	res, err := c.rpc.RegisterPayment(ctx, connect.NewRequest(req))
 	if err != nil {
 		return Payment{}, Charge{}, err
 	}

@@ -8,6 +8,7 @@ package grpcadapter
 import (
 	"context"
 	"errors"
+	"time"
 
 	connect "connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -159,7 +160,13 @@ func (h *FinanceHandler) CancelChargeIfUnpaid(ctx context.Context, req *connect.
 // again; an empty one keeps the historical behaviour.
 func (h *FinanceHandler) RegisterPayment(ctx context.Context, req *connect.Request[financev1.RegisterPaymentRequest]) (*connect.Response[financev1.RegisterPaymentResponse], error) {
 	m := req.Msg
-	payment, charge, err := h.finance.RegisterPayment(ctx, m.GetChargeId(), m.GetAmountCents(), m.GetMethod(), m.GetReference(), m.GetIdempotencyKey())
+	// An unset paid_at arrives as a nil timestamp and becomes the zero time, which
+	// the use case reads as "now" — so an older client keeps its behaviour exactly.
+	var paidAt time.Time
+	if ts := m.GetPaidAt(); ts != nil {
+		paidAt = ts.AsTime()
+	}
+	payment, charge, err := h.finance.RegisterPaymentAt(ctx, m.GetChargeId(), m.GetAmountCents(), m.GetMethod(), m.GetReference(), m.GetIdempotencyKey(), paidAt)
 	if err != nil {
 		return nil, connectErr(err)
 	}

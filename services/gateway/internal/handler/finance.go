@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 )
@@ -22,7 +24,7 @@ type FinanceService interface {
 	ListCharges(ctx context.Context, studentID, cycleID string) ([]client.Charge, error)
 	ApplyDiscount(ctx context.Context, chargeID string, discountCents int64, reason string) (client.Charge, error)
 	CancelCharge(ctx context.Context, chargeID string) (client.Charge, error)
-	RegisterPayment(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string) (client.Payment, client.Charge, error)
+	RegisterPaymentAt(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time) (client.Payment, client.Charge, error)
 	GetAccount(ctx context.Context, studentID string) (client.AccountStatement, error)
 	ListOverdue(ctx context.Context, cycleID string) ([]client.Charge, error)
 }
@@ -87,6 +89,9 @@ type registerPaymentRequest struct {
 	// IdempotencyKey "" ⇒ no deduplication; a repeat under the same key returns
 	// the original payment rather than collecting twice.
 	IdempotencyKey string `json:"idempotencyKey"`
+	// PaidAt "" ⇒ now. A date like "2026-09-04": the counter records the DAY the
+	// money changed hands, which is not always the day it was captured.
+	PaidAt string `json:"paidAt"`
 }
 
 // --- response bodies -------------------------------------------------------
@@ -304,7 +309,19 @@ func (h *FinanceHandler) RegisterPayment(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	payment, charge, err := h.svc.RegisterPayment(r.Context(), req.ChargeID, req.AmountCents, req.Method, req.Reference, req.IdempotencyKey)
+	// paidAt is optional and dated-only ("2026-09-04"): the counter records a
+	// day, not an instant, and a time zone on a cashier's clock is a bug waiting
+	// to move a payment across a due date.
+	var paidAt time.Time
+	if raw := strings.TrimSpace(req.PaidAt); raw != "" {
+		parsed, perr := time.Parse("2006-01-02", raw)
+		if perr != nil {
+			http.Error(w, "paidAt must be a date like 2026-09-04", http.StatusBadRequest)
+			return
+		}
+		paidAt = parsed
+	}
+	payment, charge, err := h.svc.RegisterPaymentAt(r.Context(), req.ChargeID, req.AmountCents, req.Method, req.Reference, req.IdempotencyKey, paidAt)
 	if err != nil {
 		writeConnectError(w, err)
 		return

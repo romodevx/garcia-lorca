@@ -304,6 +304,13 @@ message RegisterPaymentRequest {
   // payment instead of charging again. Empty ⇒ no deduplication (every call
   // posts a new payment).
   string idempotency_key = 5;
+  // paid_at is the date the money actually changed hands, which is not always
+  // the date it was captured: a cashier catching up on Monday is recording
+  // Friday's cash. Every collection rule — early-payment discount, daily
+  // surcharge, which months a deposit covers — reads this, so stamping the
+  // server clock instead quietly applied the wrong day's rules.
+  // Optional: unset ⇒ now. A future date is refused.
+  google.protobuf.Timestamp paid_at = 6;
 }
 
 message RegisterPaymentResponse {
