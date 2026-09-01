@@ -7,6 +7,7 @@ import (
 	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/schoolcal"
 	"github.com/garcia-lorca/services/finance/internal/domain"
 	"github.com/garcia-lorca/services/finance/internal/ports"
 )
@@ -131,6 +132,17 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 		return BillingResult{}, err
 	}
 
+	// The school's closed days, so no charge falls due on one. A due date on a
+	// day the office was shut is a date nobody could have paid on, and with the
+	// surcharge counting every day it would charge a family for the school's own
+	// holiday.
+	calendar := schoolcal.New(nil)
+	if s.calendar != nil {
+		if snap, cerr := s.calendar.NonWorkingDays(ctx, cycleID); cerr == nil {
+			calendar = schoolcal.New(snap.Days)
+		}
+	}
+
 	// Kept apart so the counts reported back are exact. A single bulk insert
 	// returns one number, and splitting it afterwards would be arithmetic
 	// pretending to be knowledge.
@@ -153,7 +165,7 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 			conceptID:   concepts[domain.KindEnrollment].ID(),
 			description: enrollmentConceptName,
 			amount:      plan.EnrollmentCents(),
-			due:         enrollmentDueDate(cycle.StartsOn, plan),
+			due:         calendar.NextWorkingDay(enrollmentDueDate(cycle.StartsOn, plan)),
 			ref:         fmt.Sprintf("enrollment:%s:%s", cycleID, enr.StudentID),
 		})
 		if err != nil {
@@ -177,8 +189,11 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 				conceptID:   concepts[domain.KindTuition].ID(),
 				description: fmt.Sprintf("%s %s", tuitionConceptName, due.Format("2006-01")),
 				amount:      plan.MonthlyCents(),
-				due:         due,
-				ref:         fmt.Sprintf("tuition:%s:%s:%s", cycleID, enr.StudentID, due.Format("2006-01")),
+				// Moved off a closed day, but the ref below still names the
+				// ORIGINAL month: the charge must stay the same charge even if
+				// the calendar is edited afterwards.
+				due: calendar.NextWorkingDay(due),
+				ref: fmt.Sprintf("tuition:%s:%s:%s", cycleID, enr.StudentID, due.Format("2006-01")),
 			})
 			if err != nil {
 				return BillingResult{}, err

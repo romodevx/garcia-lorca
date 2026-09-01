@@ -209,3 +209,22 @@ describe("FinanceScreen — exportar", () => {
     vi.restoreAllMocks();
   });
 });
+
+describe("FinanceScreen — filtro por mes", () => {
+  // "¿Quién debe septiembre?" is how a school reads its debt. A year of rows on
+  // one screen is not an answer to that question.
+  it("narrows the debt to one month", async () => {
+    const user = userEvent.setup();
+    finance.listCharges.mockResolvedValue([
+      { ...charge("ch1", "s1", 100000), dueDate: "2026-09-10", description: "Colegiatura 2026-09" },
+      { ...charge("ch2", "s2", 100000), dueDate: "2026-10-10", description: "Colegiatura 2026-10" },
+    ]);
+    render(<FinanceScreen onBack={() => {}} />);
+    await screen.findByText("Valentina Cruz");
+
+    await user.selectOptions(screen.getByLabelText("Mes"), "2026-10");
+
+    expect(await screen.findByText("Mateo Sánchez")).toBeInTheDocument();
+    expect(screen.queryByText("Valentina Cruz")).not.toBeInTheDocument();
+  });
+});

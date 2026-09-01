@@ -97,6 +97,15 @@ func (f *fakeEnrollments) ListByStudent(_ context.Context, studentID string) ([]
 	return out, nil
 }
 
+// fakeCalendar answers with whatever days the test says the school is shut.
+type fakeCalendar struct {
+	days []time.Time
+}
+
+func (f *fakeCalendar) NonWorkingDays(_ context.Context, _ string) (ports.CalendarSnapshot, error) {
+	return ports.CalendarSnapshot{Days: f.days, Version: "test"}, nil
+}
+
 // --- publisher ---------------------------------------------------------------
 
 type spyPublisher struct {
@@ -630,6 +639,7 @@ type fixture struct {
 	cycles      *fakeCycles
 	enrollments *fakeEnrollments
 	catalog     *fakeCatalog
+	calendar    *fakeCalendar
 	publisher   *spyPublisher
 	// clock is what the service reads for "now". It starts at fixedNow and a
 	// test may move it forward — the collection rules are all functions of a
@@ -647,10 +657,11 @@ func newFixture(t *testing.T) *fixture {
 		cycles:      &fakeCycles{byID: map[string]ports.CycleRef{testCycle: {ID: testCycle}}},
 		enrollments: &fakeEnrollments{byCycle: map[string][]ports.EnrollmentRef{}},
 		catalog:     &fakeCatalog{},
+		calendar:    &fakeCalendar{},
 		publisher:   &spyPublisher{},
 	}
 	f.clock = fixedNow
-	f.svc = usecase.NewFinanceService(f.repo, f.students, f.cycles, f.enrollments, f.catalog, nil, f.publisher,
+	f.svc = usecase.NewFinanceService(f.repo, f.students, f.cycles, f.enrollments, f.catalog, f.calendar, f.publisher,
 		testTenant, seqID("id"), func() time.Time { return f.clock })
 	return f
 }

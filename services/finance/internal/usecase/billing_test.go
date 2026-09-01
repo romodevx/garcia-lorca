@@ -273,3 +273,34 @@ func TestDailyModeIssuesNoSurchargeCharges(t *testing.T) {
 		t.Errorf("tuition created = %d, want 10", got.TuitionCreated)
 	}
 }
+
+// A due date on a day the school is shut is a date nobody could have paid on.
+// It moves to the next working day, and only then does being late start
+// costing: the review asks for exactly this, and the surcharge rule counting
+// every day makes it matter — an unmoved holiday would charge a family for the
+// day the office was closed.
+func TestADueDateOnAClosedDayMovesToTheNextWorkingDay(t *testing.T) {
+	f := billingFixture(t)
+	// 10 October 2026 is a Saturday, and the school also closes the Monday.
+	f.calendar.days = []time.Time{time.Date(2026, time.October, 12, 0, 0, 0, 0, time.UTC)}
+
+	runOn(t, f, "2026-11-15")
+
+	charges, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	if err != nil {
+		t.Fatalf("ListCharges: %v", err)
+	}
+	var october time.Time
+	for _, c := range charges {
+		if strings.Contains(c.Charge.Description(), "2026-10") {
+			october = c.Charge.DueDate()
+		}
+	}
+	if october.IsZero() {
+		t.Fatal("October was not billed")
+	}
+	// Saturday 10 → Sunday 11 → Monday 12 is closed → Tuesday 13.
+	if october.Day() != 13 {
+		t.Errorf("October fell due on the %d, want the 13th — the first day the school was open", october.Day())
+	}
+}

@@ -144,6 +144,15 @@ function PayDrawer({ charge, name, onClose, onPaid }: { charge: Charge; name: st
   );
 }
 
+/** "2026-09" as a person reads it. */
+function monthName(iso: string): string {
+  const [year, month] = iso.split("-");
+  const names = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+  const name = names[Number(month) - 1];
+  return name === undefined ? iso : `${name} ${year}`;
+}
+
 /** Today, as the wire wants it. */
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -183,6 +192,10 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"all" | "overdue" | "due" | "paid">("all");
   const [q, setQ] = useState("");
+  // Which month's charges to look at. The school reads its debt a month at a
+  // time — "¿quién debe septiembre?" — and a year of rows on one screen is not
+  // an answer to that.
+  const [month, setMonth] = useState("todos");
   const [pay, setPay] = useState<Row | null>(null);
   // The counter: pick a pupil, then take whatever the parent hands over. Kept
   // separate from `pay`, which is the older per-charge path.
@@ -232,14 +245,22 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
     pending: charges.filter((c) => c.status !== "cancelled").reduce((a, c) => a + Math.max(0, c.remainingCents), 0),
   }), [charges]);
 
+  // The months the cycle actually has charges in, newest last, as YYYY-MM.
+  const months = useMemo(
+    () => [...new Set(charges.map((c) => c.dueDate.slice(0, 7)))].sort(),
+    [charges],
+  );
+
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return rows
-      .filter((r) => (tab === "all" || r.visual === tab) && (needle === "" || r.name.toLowerCase().includes(needle) || r.charge.description.toLowerCase().includes(needle)))
+      .filter((r) => (tab === "all" || r.visual === tab)
+        && (month === "todos" || r.charge.dueDate.startsWith(month))
+        && (needle === "" || r.name.toLowerCase().includes(needle) || r.charge.description.toLowerCase().includes(needle)))
       .sort((a, b) => a.name.localeCompare(b.name, "es"));
-  }, [rows, tab, q]);
+  }, [rows, tab, month, q]);
 
-  useEffect(() => { setPage(0); }, [tab, q, pageSize]);
+  useEffect(() => { setPage(0); }, [tab, month, q, pageSize]);
   const total = filtered.length;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const cur = Math.min(page, pageCount - 1);
@@ -319,6 +340,16 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
             );
           })}
         </div>
+        {months.length > 1 && (
+          <select
+            aria-label="Mes"
+            value={month}
+            onChange={(e) => setMonth(e.target.value)}
+            style={{ height: 48, padding: "0 14px", borderRadius: "var(--r-pill)", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 14.5, cursor: "pointer" }}>
+            <option value="todos">Todos los meses</option>
+            {months.map((m) => <option key={m} value={m}>{monthName(m)}</option>)}
+          </select>
+        )}
         <div style={{ position: "relative", flex: 1, minWidth: 230, maxWidth: 360 }}>
           <span style={{ position: "absolute", left: 16, top: "50%", transform: "translateY(-50%)", color: "var(--text-faint)" }}><Icon name="search" size={19} /></span>
           <input value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar" placeholder="Buscar alumno o concepto…" style={{ width: "100%", height: 48, paddingLeft: 46, paddingRight: 16, borderRadius: "var(--r-pill)", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 15, outline: "none" }} />
