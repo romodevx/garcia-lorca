@@ -47,6 +47,9 @@ var migrationFiles = []string{
 	"../../../../../migrations/finance/0003_charge_external_ref.sql",
 	"../../../../../migrations/finance/0004_concept_kind.sql",
 	"../../../../../migrations/finance/0005_tuition_plans.sql",
+	"../../../../../migrations/finance/0006_collection_policy.sql",
+	"../../../../../migrations/finance/0007_deposits.sql",
+	"../../../../../migrations/finance/0008_discount_reason.sql",
 }
 
 var (
