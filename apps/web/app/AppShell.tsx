@@ -17,6 +17,7 @@ import { GradesScreen } from "./_screens/grades/GradesScreen";
 import { Login } from "./_screens/Login";
 import { ChangePassword } from "./_screens/ChangePassword";
 import { ModulePlaceholder } from "./_screens/ModulePlaceholder";
+import { AnnouncementsScreen } from "./_screens/announcements/AnnouncementsScreen";
 import { useTheme } from "./theme/ThemeProvider";
 import { login as apiLogin, changePassword as apiChangePassword, logout as apiLogout, me as apiMe, refresh as apiRefresh, type MeResult } from "./auth/api";
 
@@ -27,6 +28,7 @@ type View =
   | { screen: "changePassword" }
   | { screen: "dashboard" }
   | { screen: "finance" }
+  | { screen: "announcements" }
   | { screen: "config" }
   | { screen: "students" }
   | { screen: "grades" }
@@ -92,6 +94,9 @@ export function AppShell(): ReactElement {
   // The single flag read for the finance surface (UX-only; the gateway is the
   // security boundary). Hooks must run unconditionally, so we read it here.
   const financeEnabled = useFlag("module_finance");
+  // UX only, like every other flag read here: the gateway's 404 is what actually
+  // keeps a disabled module unreachable.
+  const commsEnabled = useFlag("module_comms");
   // The academic-catalog surface is gated by module_config (UX-only; the gateway
   // is the boundary). The "settings" module (Configuración) opens this catalog.
   const configEnabled = useFlag("module_config");
@@ -231,6 +236,10 @@ export function AppShell(): ReactElement {
       setView({ screen: "uniforms" });
       return;
     }
+    if (id === "announcements") {
+      setView({ screen: "announcements" });
+      return;
+    }
     if (id === "admin") {
       setView({ screen: "admin" });
       return;
@@ -274,6 +283,14 @@ export function AppShell(): ReactElement {
           // Flag OFF: do not render the finance surface; show the friendly stub
           // instead so navigation never dead-ends. (Backend 404 is authoritative.)
           <ModulePlaceholder m={MODULES.find((m) => m.id === "finance") as ModuleDef} onBack={home} />
+        ))}
+      {view.screen === "announcements" &&
+        (commsEnabled ? (
+          <AnnouncementsScreen onBack={home} />
+        ) : (
+          // Flag OFF: never render the send surface; the friendly stub keeps
+          // navigation from dead-ending. (Backend 404 is authoritative.)
+          <ModulePlaceholder m={MODULES.find((m) => m.id === "announcements") as ModuleDef} onBack={home} />
         ))}
       {view.screen === "config" &&
         (configEnabled ? (

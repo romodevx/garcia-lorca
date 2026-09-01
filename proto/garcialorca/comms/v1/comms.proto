@@ -40,6 +40,14 @@ service CommsService {
   // updated notification. Marking an already-read notification is idempotent
   // (read_at keeps its original value).
   rpc MarkNotificationRead(MarkNotificationReadRequest) returns (MarkNotificationReadResponse);
+
+  // Announce sends one message to many families at once: a notification per
+  // pupil, plus a push to the families that can be reached.
+  //
+  // The audience arrives as a list of pupils, already resolved. Comms does not
+  // know what a group or a level is — the gateway owns that question, because it
+  // already speaks to config and students.
+  rpc Announce(AnnounceRequest) returns (AnnounceResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -108,4 +116,21 @@ message MarkNotificationReadRequest {
 
 message MarkNotificationReadResponse {
   Notification notification = 1;
+}
+
+// AnnounceRequest is one message for many families.
+message AnnounceRequest {
+  repeated string student_ids = 1;
+  string title = 2;
+  string body = 3;
+  // idempotency_key makes the send safe to retry. One announcement can reach
+  // four hundred families; a phone buzzing twice for the same junta is what
+  // makes a school turn notifications off for good.
+  string idempotency_key = 4;
+}
+
+// AnnounceResponse reports how many families it actually reached — a retry
+// reports zero, because it delivered nothing new.
+message AnnounceResponse {
+  int32 created = 1;
 }

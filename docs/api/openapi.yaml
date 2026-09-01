@@ -565,6 +565,71 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
 
+  /api/v1/comms/announcements:
+    post:
+      tags: [comms]
+      summary: Tell a group, a level, or the whole school
+      description: >
+        One message, one audience: every ACTIVE pupil of a group, of every group
+        under a level, or of the cycle. A pupil who left mid-year is not in the
+        group any more — sending them the junta is how a school looks like it
+        does not know who its pupils are.
+
+
+        The audience is resolved here at the edge, because config and students
+        already answer "who is in 1° A". Comms receives a list of pupils and does
+        not know what a group is.
+
+
+        Send an idempotencyKey. One announcement can reach four hundred families,
+        and a phone buzzing twice for the same junta is what makes a school turn
+        notifications off for good.
+      operationId: announce
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scope, cycleId, title, body, idempotencyKey]
+              properties:
+                scope: { type: string, enum: [group, level, cycle] }
+                targetId:
+                  type: string
+                  format: uuid
+                  description: The group or level. Unused when the scope is the whole cycle.
+                cycleId: { type: string, format: uuid }
+                title: { type: string, minLength: 1 }
+                body: { type: string, minLength: 1 }
+                idempotencyKey: { type: string, minLength: 1 }
+      responses:
+        '201':
+          description: Sent.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [created, audience]
+                properties:
+                  created:
+                    type: integer
+                    description: >
+                      How many families it actually reached. A retry reports
+                      zero: it delivered nothing new.
+                  audience:
+                    type: integer
+                    description: How many pupils the scope named.
+        '400':
+          description: >
+            A malformed body, an unknown scope, or an audience of nobody. An
+            empty audience is refused rather than reported as sent — otherwise
+            the office believes a message went out that never did.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
   /api/v1/config/calendar:
     get:
       tags: [config]

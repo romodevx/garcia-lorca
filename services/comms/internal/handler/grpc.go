@@ -85,6 +85,21 @@ func (h *CommsHandler) MarkNotificationRead(ctx context.Context, req *connect.Re
 }
 
 // notification maps a stored notification onto the wire.
+// Announce sends one message to many families at once.
+func (h *CommsHandler) Announce(ctx context.Context, req *connect.Request[commsv1.AnnounceRequest]) (*connect.Response[commsv1.AnnounceResponse], error) {
+	m := req.Msg
+	created, err := h.svc.Announce(ctx, service.Announcement{
+		StudentIDs: m.GetStudentIds(),
+		Title:      m.GetTitle(),
+		Body:       m.GetBody(),
+		Key:        m.GetIdempotencyKey(),
+	})
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&commsv1.AnnounceResponse{Created: int32(created)}), nil
+}
+
 func (h *CommsHandler) notification(n service.Notification) *commsv1.Notification {
 	return &commsv1.Notification{
 		Id:        n.ID,

@@ -475,6 +475,11 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/comms/devices", commsWrite(commsH.RegisterDevice))
 	mux.Handle("GET /api/v1/comms/notifications", commsRead(commsH.ListNotifications))
 	mux.Handle("POST /api/v1/comms/notifications/{id}/read", commsWrite(commsH.MarkRead))
+	// An announcement is a comms write, but the audience is resolved here at the
+	// edge: config and students already answer "who is in 1° A", and comms
+	// deliberately does not know what a group is.
+	announcementsH := handler.NewAnnouncementHandler(commsClient, studentsClient, configClient)
+	mux.Handle("POST /api/v1/comms/announcements", commsWrite(announcementsH.Announce))
 
 	// M12 uniforms (the school's uniform shop). Stage one: the catalogue, the
 	// storeroom and the counter sale. Every route sits behind
