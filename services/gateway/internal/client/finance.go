@@ -600,17 +600,30 @@ type BillingRun struct {
 
 // UpsertTuitionPlan sets what one level of one cycle costs.
 func (c *FinanceClient) UpsertTuitionPlan(ctx context.Context, in TuitionPlanInput) (TuitionPlan, error) {
-	res, err := c.rpc.UpsertTuitionPlan(ctx, connect.NewRequest(&financev1.UpsertTuitionPlanRequest{
-		CycleId:          in.CycleID,
-		LevelId:          in.LevelID,
-		EnrollmentCents:  in.EnrollmentCents,
-		MonthlyCents:     in.MonthlyCents,
-		Months:           int32(in.Months),
-		FirstBilledMonth: int32(in.FirstBilledMonth),
-		DueDay:           int32(in.DueDay),
-		LateFeeCents:     in.LateFeeCents,
-		Active:           in.Active,
-		Schedule:         scheduleToProto(in.Schedule),
+	res, err := c.rpc.UpsertTuitionPlan(ctx, connect.NewRequest(tuitionPlanRequest(in)))
+	if err != nil {
+		return TuitionPlan{}, err
+	}
+	return toTuitionPlan(res.Msg.GetPlan()), nil
+}
+
+// tuitionPlanRequest builds the wire message. Pulled out of the call so the
+// mapping is testable on its own: it was silently missing two fields — they
+// existed on the struct, carried JSON tags, and were never copied — and the
+// screen saved a plan the API answered as zeros while everything compiled.
+func tuitionPlanRequest(in TuitionPlanInput) *financev1.UpsertTuitionPlanRequest {
+	return &financev1.UpsertTuitionPlanRequest{
+		CycleId:              in.CycleID,
+		LevelId:              in.LevelID,
+		EnrollmentCents:      in.EnrollmentCents,
+		MonthlyCents:         in.MonthlyCents,
+		Months:               int32(in.Months),
+		FirstBilledMonth:     int32(in.FirstBilledMonth),
+		DueDay:               int32(in.DueDay),
+		LateFeeCents:         in.LateFeeCents,
+		Active:               in.Active,
+		Schedule:             scheduleToProto(in.Schedule),
+		MonthlyDiscountCents: in.MonthlyDiscountCents,
 		Policy: &financev1.CollectionPolicy{
 			DailyMode:              in.Policy.DailyMode,
 			LateFeeDailyCents:      in.Policy.LateFeeDailyCents,
@@ -618,11 +631,7 @@ func (c *FinanceClient) UpsertTuitionPlan(ctx context.Context, in TuitionPlanInp
 			EarlyPaymentCents:      in.Policy.EarlyPaymentCents,
 			EarlyPaymentDays:       int32(in.Policy.EarlyPaymentDays),
 		},
-	}))
-	if err != nil {
-		return TuitionPlan{}, err
 	}
-	return toTuitionPlan(res.Msg.GetPlan()), nil
 }
 
 // ListTuitionPlans returns the whole tuition table of a cycle.
@@ -682,17 +691,18 @@ func scheduleFromProto(in []*financev1.Installment) []Installment {
 
 func toTuitionPlan(p *financev1.TuitionPlan) TuitionPlan {
 	return TuitionPlan{
-		ID:               p.GetId(),
-		CycleID:          p.GetCycleId(),
-		LevelID:          p.GetLevelId(),
-		EnrollmentCents:  p.GetEnrollmentCents(),
-		MonthlyCents:     p.GetMonthlyCents(),
-		Months:           int(p.GetMonths()),
-		FirstBilledMonth: int(p.GetFirstBilledMonth()),
-		DueDay:           int(p.GetDueDay()),
-		LateFeeCents:     p.GetLateFeeCents(),
-		Active:           p.GetActive(),
-		Schedule:         scheduleFromProto(p.GetSchedule()),
+		ID:                   p.GetId(),
+		CycleID:              p.GetCycleId(),
+		LevelID:              p.GetLevelId(),
+		EnrollmentCents:      p.GetEnrollmentCents(),
+		MonthlyCents:         p.GetMonthlyCents(),
+		Months:               int(p.GetMonths()),
+		FirstBilledMonth:     int(p.GetFirstBilledMonth()),
+		DueDay:               int(p.GetDueDay()),
+		LateFeeCents:         p.GetLateFeeCents(),
+		Active:               p.GetActive(),
+		Schedule:             scheduleFromProto(p.GetSchedule()),
+		MonthlyDiscountCents: p.GetMonthlyDiscountCents(),
 		Policy: CollectionPolicy{
 			DailyMode:              p.GetPolicy().GetDailyMode(),
 			LateFeeDailyCents:      p.GetPolicy().GetLateFeeDailyCents(),
