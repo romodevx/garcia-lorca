@@ -304,3 +304,61 @@ func TestIncomeLinesGroupsCollectedMoneyByConcept(t *testing.T) {
 		}
 	}
 }
+
+// Re-pricing a level must change everything the request said, not the columns
+// somebody remembered to list. The upsert used to update seven of thirteen: an
+// insert stored the daily surcharge and the split schedule, an update dropped
+// them on the floor, and the same request did two different things depending on
+// whether that level had been priced before.
+func TestRepricingALevelUpdatesEveryColumn(t *testing.T) {
+	tenant := tenantA
+	repo := appRepo(t, tenant)
+	ctx := context.Background()
+	const cycleID = "70000000-0000-0000-0000-000000000099"
+	const levelID = "71000000-0000-0000-0000-000000000099"
+
+	plain, err := domain.NewTuitionPlan(domain.TuitionPlanSpec{
+		ID: "72000000-0000-0000-0000-000000000001", TenantID: tenant, CycleID: cycleID, LevelID: levelID,
+		EnrollmentCents: 500000, MonthlyCents: 320000, Months: 10,
+		FirstBilledMonth: 9, DueDay: 10, Active: true,
+	})
+	if err != nil {
+		t.Fatalf("NewTuitionPlan: %v", err)
+	}
+	if _, err := repo.UpsertTuitionPlan(ctx, plain); err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+
+	// Same level, now on the daily rule with a split year.
+	changed, err := domain.NewTuitionPlan(domain.TuitionPlanSpec{
+		ID: "72000000-0000-0000-0000-000000000002", TenantID: tenant, CycleID: cycleID, LevelID: levelID,
+		EnrollmentCents: 500000, MonthlyCents: 320000, Months: 10,
+		FirstBilledMonth: 9, DueDay: 10, Active: true,
+		Policy: domain.CollectionPolicy{
+			DailyMode: true, LateFeeDailyCents: 1000,
+			SurchargeCountsAllDays: true, EarlyPaymentCents: 10000, EarlyPaymentDays: 5,
+		},
+		Schedule: []domain.Installment{
+			{Month: 9, AmountCents: 320000},
+			{Month: 12, AmountCents: 160000},
+			{Month: 3, AmountCents: 480000},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewTuitionPlan: %v", err)
+	}
+	stored, err := repo.UpsertTuitionPlan(ctx, changed)
+	if err != nil {
+		t.Fatalf("second upsert: %v", err)
+	}
+
+	if !stored.Policy().DailyMode || stored.Policy().LateFeeDailyCents != 1000 {
+		t.Errorf("the collection rule did not survive the update: %+v", stored.Policy())
+	}
+	if stored.Policy().EarlyPaymentCents != 10000 || stored.Policy().EarlyPaymentDays != 5 {
+		t.Errorf("the early-payment reward did not survive: %+v", stored.Policy())
+	}
+	if len(stored.Schedule()) != 3 || stored.Schedule()[1].AmountCents != 160000 {
+		t.Errorf("the split schedule did not survive: %+v", stored.Schedule())
+	}
+}

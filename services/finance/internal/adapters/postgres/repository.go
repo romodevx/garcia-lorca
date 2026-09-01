@@ -824,9 +824,16 @@ func (r *Repository) UpsertTuitionPlan(ctx context.Context, p domain.TuitionPlan
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "tenant_id"}, {Name: "cycle_id"}, {Name: "level_id"}},
+			// EVERY mutable column. A list that misses one silently keeps the
+			// old value on an update while an insert stores the new one, so the
+			// same request does two different things depending on whether the
+			// level had been priced before — which is exactly how the daily
+			// surcharge and the split schedule looked saved and were not.
 			DoUpdates: clause.AssignmentColumns([]string{
 				"enrollment_cents", "monthly_cents", "months",
 				"first_billed_month", "due_day", "late_fee_cents", "active", "updated_at",
+				"late_fee_daily_cents", "late_fee_mode", "surcharge_counts_all_days",
+				"early_payment_cents", "early_payment_days", "schedule",
 			}),
 		}).Create(&model).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "storing the tuition table", err)
