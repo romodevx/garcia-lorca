@@ -64,4 +64,57 @@ describe("PaymentsScreen", () => {
 
     expect(await screen.findByRole("dialog", { name: "Cobrar" })).toBeInTheDocument();
   });
+
+  // THE BUG THIS EXISTS TO CLOSE.
+  //
+  // The pupil list was loaded with .catch(() => {}) and the screen then said
+  // "Ningún alumno con ese nombre" for every search. When the students service
+  // was down, the counter told the office that a pupil who exists does not —
+  // which is the worst answer available: it is confident and wrong, and sends
+  // somebody looking for a registration problem that is not there.
+  it("says the list could not be loaded, instead of claiming the pupil does not exist", async () => {
+    const user = userEvent.setup();
+    students.listStudents.mockRejectedValue(new Error("students is down"));
+    render(<PaymentsScreen onBack={() => {}} />);
+
+    await user.type(await screen.findByLabelText("Buscar alumno"), "Valen");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/no pudimos cargar/i);
+    expect(screen.queryByText(/Ningún alumno con ese nombre/)).not.toBeInTheDocument();
+  });
+
+  // And it can be tried again without reloading the page: the service being
+  // back is the common case, and a dead end at the counter is not acceptable.
+  it("can retry the list", async () => {
+    const user = userEvent.setup();
+    students.listStudents.mockRejectedValueOnce(new Error("students is down"));
+    render(<PaymentsScreen onBack={() => {}} />);
+    await screen.findByRole("alert");
+
+    students.listStudents.mockResolvedValue([student("s1", "Valentina", "Cruz")]);
+    await user.click(screen.getByRole("button", { name: /Reintentar/ }));
+
+    await user.type(screen.getByLabelText("Buscar alumno"), "Valen");
+    expect(await screen.findByText("Valentina Cruz")).toBeInTheDocument();
+  });
+
+  // What each pupil owes is asked ONCE. The first version listed `owed` among
+  // its own effect dependencies and then wrote to it, so every answer threw the
+  // other requests away and started them again — a dozen names became dozens of
+  // round trips.
+  it("asks what each pupil owes once", async () => {
+    const user = userEvent.setup();
+    students.listStudents.mockResolvedValue([
+      student("s1", "Valentina", "Cruz"),
+      student("s2", "Valeria", "Cruz"),
+      student("s3", "Valentín", "Cruz"),
+    ]);
+    render(<PaymentsScreen onBack={() => {}} />);
+    await screen.findByLabelText("Buscar alumno");
+
+    await user.type(screen.getByLabelText("Buscar alumno"), "Cruz");
+    await waitFor(() => expect(finance.getExpected).toHaveBeenCalledTimes(3));
+
+    expect(finance.getExpected).toHaveBeenCalledTimes(3);
+  });
 });

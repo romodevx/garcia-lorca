@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement } from "react";
 import { Avatar } from "../../_design/Brand";
+import { Btn } from "../../_design/Controls";
 import { Icon } from "../../_design/Icon";
 import { listStudents, type Student } from "../../students/api";
 import { getExpected } from "../../finance/api";
@@ -35,14 +36,25 @@ export interface PaymentsScreenProps {
  */
 export function PaymentsScreen({ onBack }: PaymentsScreenProps): ReactElement {
   const [students, setStudents] = useState<Student[]>([]);
+  // Three states, not two. "Empty" and "we could not ask" look the same on
+  // screen and mean opposite things: one says the pupil is not registered, the
+  // other says we do not know. Telling the office the first when the truth is
+  // the second sends somebody looking for a registration problem that is not
+  // there — which is exactly what happened when the students service was down.
+  const [roll, setRoll] = useState<"loading" | "ready" | "failed">("loading");
   const [q, setQ] = useState("");
   const [collecting, setCollecting] = useState<CollectStudent | null>(null);
   const [owed, setOwed] = useState<Map<string, number>>(new Map());
   const [toast, setToast] = useState<string | null>(null);
 
-  useEffect(() => {
-    listStudents(API_URL).then(setStudents).catch(() => {});
+  const loadRoll = useCallback(() => {
+    setRoll("loading");
+    listStudents(API_URL)
+      .then((rows) => { setStudents(rows); setRoll("ready"); })
+      .catch(() => setRoll("failed"));
   }, []);
+
+  useEffect(loadRoll, [loadRoll]);
 
   const matches = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -57,18 +69,29 @@ export function PaymentsScreen({ onBack }: PaymentsScreenProps): ReactElement {
   // What each visible pupil owes today, so the cashier sees it before opening
   // anything. Only for the handful on screen: asking for four hundred would
   // make typing a name slow.
+  //
+  // The "already asked" set is a ref, not state, and deliberately: the first
+  // version listed `owed` among this effect's dependencies and then wrote to it,
+  // so every answer re-ran the effect, threw the other requests away and started
+  // them again. A dozen names became dozens of round trips.
+  const asked = useRef<Set<string>>(new Set());
   useEffect(() => {
     let live = true;
     for (const s of matches) {
-      if (owed.has(s.id)) {
+      if (asked.current.has(s.id)) {
         continue;
       }
+      asked.current.add(s.id);
       getExpected(API_URL, s.id)
         .then((e) => { if (live) { setOwed((prev) => new Map(prev).set(s.id, e.amountCents)); } })
-        .catch(() => {});
+        .catch(() => {
+          // Unknown, not zero. Asked again next time the name comes up rather
+          // than showing a balance we never got.
+          asked.current.delete(s.id);
+        });
     }
     return () => { live = false; };
-  }, [matches, owed]);
+  }, [matches]);
 
   const say = (m: string): void => { setToast(m); setTimeout(() => setToast(null), 2600); };
 
@@ -95,12 +118,25 @@ export function PaymentsScreen({ onBack }: PaymentsScreenProps): ReactElement {
         <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar alumno" placeholder="Nombre o CURP del alumno…" style={search} />
       </div>
 
-      {q.trim() === "" && (
+      {roll === "failed" && (
+        <div role="alert" style={{ padding: "22px 24px", borderRadius: "var(--r-lg)", background: "var(--bad-bg)", border: "1px solid var(--border)", textAlign: "center" }}>
+          <p style={{ color: "var(--bad-fg)", fontSize: 15, marginBottom: 12 }}>
+            No pudimos cargar la lista de alumnos. No es que no existan — no la pudimos leer.
+          </p>
+          <Btn kind="ghost" onClick={loadRoll}>Reintentar</Btn>
+        </div>
+      )}
+      {roll === "loading" && (
+        <p style={{ color: "var(--text-faint)", fontSize: 15, textAlign: "center", padding: "40px 0" }}>
+          Cargando alumnos…
+        </p>
+      )}
+      {roll === "ready" && q.trim() === "" && (
         <p style={{ color: "var(--text-faint)", fontSize: 15, textAlign: "center", padding: "40px 0" }}>
           Escribe el nombre del alumno para empezar.
         </p>
       )}
-      {q.trim() !== "" && matches.length === 0 && (
+      {roll === "ready" && q.trim() !== "" && matches.length === 0 && (
         <p style={{ color: "var(--text-muted)", fontSize: 15, textAlign: "center", padding: "40px 0" }}>
           Ningún alumno con ese nombre.
         </p>

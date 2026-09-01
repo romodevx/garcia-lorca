@@ -393,6 +393,7 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
   const [levels, setLevels] = useState<Level[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [tab, setTab] = useState<"all" | "active" | "pending" | "inactive">("all");
   const [level, setLevel] = useState("Todos");
   const [q, setQ] = useState("");
@@ -413,7 +414,14 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
   useEffect(() => () => { if (toastTimer.current !== null) clearTimeout(toastTimer.current); }, []);
 
   const reload = useCallback((): void => {
-    listStudents(API_URL).then(setStudents).catch(() => {}).finally(() => setLoading(false));
+    // Three states, not two. An empty roll and a roll we could not read look
+    // identical on screen and mean opposite things — "no pupils match" versus
+    // "we do not know" — and the office reading the first when the truth is the
+    // second goes looking for a problem that is not there.
+    listStudents(API_URL)
+      .then((rows) => { setStudents(rows); setLoadFailed(false); })
+      .catch(() => setLoadFailed(true))
+      .finally(() => setLoading(false));
   }, []);
   useEffect(() => {
     reload();
@@ -590,6 +598,16 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
         <div style={{ padding: 8 }}>
           {loading ? (
             <div style={{ padding: "56px", textAlign: "center", color: "var(--text-muted)" }}>Cargando…</div>
+          ) : loadFailed ? (
+            <div role="alert" style={{ padding: "56px 20px", textAlign: "center" }}>
+              <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 19, color: "var(--bad-fg)" }}>No pudimos cargar los alumnos</div>
+              <div style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 6 }}>
+                No es que no haya — no los pudimos leer. Vuelve a intentar en un momento.
+              </div>
+              <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 22 }}>
+                <Btn kind="ghost" onClick={() => { setLoading(true); reload(); }}>Reintentar</Btn>
+              </div>
+            </div>
           ) : filtered.length === 0 ? (
             <div style={{ padding: "56px 20px", textAlign: "center" }}>
               <div style={{ width: 70, height: 70, borderRadius: 20, margin: "0 auto 16px", display: "grid", placeItems: "center", background: "color-mix(in oklab, var(--forest) 12%, var(--surface))", color: "var(--forest)" }}><Icon name="students" size={36} stroke={1.9} /></div>
