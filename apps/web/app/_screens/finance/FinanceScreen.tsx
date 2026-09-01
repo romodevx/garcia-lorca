@@ -12,6 +12,11 @@ import { listStudents, type Student } from "../../students/api";
 
 import { API_URL } from "../../api-url";
 
+/** One key per payment attempt. Mirrors PaymentPanel, which had it right. */
+function newAttemptKey(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 
 // Money crosses the boundary as integer cents; formatting/parsing goes through
 // the tested money helpers (locale-aware, cents-exact) — never a naive parseFloat.
@@ -58,6 +63,16 @@ function PayDrawer({ charge, name, onClose, onPaid }: { charge: Charge; name: st
   const [reference, setReference] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  // One key per ATTEMPT, minted when the drawer opens and kept across retries.
+  // The gateway dedupes on it, so a retry after a network error returns the
+  // original payment instead of charging the family twice. This shipped as ""
+  // — which the proto documents as "no deduplication (every call posts a new
+  // payment)" — so a double click double-charged.
+  const [attemptKey] = useState(newAttemptKey);
+  // Anything typed makes the drawer dirty: a stray click on the backdrop then
+  // stops closing it. Losing a captured amount at counter speed, with a parent
+  // waiting, is worse than an extra click on the X.
+  const dirty = amount.trim() !== "" || reference.trim() !== "";
 
   // pesosToCents is locale-aware (handles thousands commas) and returns NaN for
   // anything ambiguous — never a truncated parseFloat.
@@ -68,7 +83,7 @@ function PayDrawer({ charge, name, onClose, onPaid }: { charge: Charge; name: st
     setSaving(true);
     setError(undefined);
     try {
-      await registerPayment(API_URL, { chargeId: charge.id, amountCents: cents, method, reference: reference.trim(), idempotencyKey: "" });
+      await registerPayment(API_URL, { chargeId: charge.id, amountCents: cents, method, reference: reference.trim(), idempotencyKey: attemptKey });
       onPaid();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo registrar el pago.");
@@ -77,7 +92,10 @@ function PayDrawer({ charge, name, onClose, onPaid }: { charge: Charge; name: st
   };
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(6,20,12,.5)", backdropFilter: "blur(4px)", display: "flex", justifyContent: "flex-end" }}>
+    <div
+      data-testid="pay-drawer-backdrop"
+      onClick={dirty ? undefined : onClose}
+      style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(6,20,12,.5)", backdropFilter: "blur(4px)", display: "flex", justifyContent: "flex-end" }}>
       <div onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Registrar pago" style={{ width: "min(480px, 100%)", height: "100%", background: "var(--surface)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow-pop)", display: "flex", flexDirection: "column", animation: "slideIn .28s var(--ease) both" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "22px 26px", borderBottom: "1px solid var(--border)" }}>
           <div style={{ width: 48, height: 48, borderRadius: 14, display: "grid", placeItems: "center", background: "var(--forest)", color: "#fff" }}><Icon name="card" size={26} /></div>
