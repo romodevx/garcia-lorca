@@ -621,6 +621,122 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
 
+  /api/v1/finance/deposits:
+    post:
+      tags: [finance-payments]
+      summary: Take money without being told what it pays for
+      description: >
+        A parent hands over an amount and says nothing else. The split lands on
+        the oldest debt first, then the surcharge that debt earned, then the next
+        month, and whatever is left over stays as the family's credit. The
+        response carries the whole split so a receipt can be printed without a
+        second call while the parent waits.
+
+
+        Send an idempotencyKey: the retry a lost response provokes must not cost
+        the family twice.
+      operationId: registerDeposit
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [studentId, amountCents, method]
+              properties:
+                studentId: { type: string, format: uuid }
+                amountCents: { type: integer, format: int64, minimum: 1 }
+                method: { type: string, enum: [cash, card, transfer] }
+                reference: { type: string }
+                paidAt:
+                  type: string
+                  format: date
+                  description: >
+                    The day the money changed hands, which is not always the day
+                    it was keyed — every collection rule is a function of it. A
+                    date, not an instant: a time zone on a cashier's clock is a
+                    bug waiting to move a payment across a due date. Empty means
+                    today; a future date is refused.
+                idempotencyKey: { type: string }
+      responses:
+        '201':
+          description: The deposit and what it covered.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DepositResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+    get:
+      tags: [finance-payments]
+      summary: A family's deposits, newest first
+      operationId: listDeposits
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: studentId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The deposits.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deposits]
+                properties:
+                  deposits:
+                    type: array
+                    items: { $ref: '#/components/schemas/Deposit' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
+  /api/v1/finance/deposits/{id}/void:
+    post:
+      tags: [finance-payments]
+      summary: Cancel a deposit and release what it settled
+      description: >
+        A cashier who keys $67,000 instead of $6,700 has to be able to undo it.
+        The row survives with its reason — a school that deletes money rows
+        cannot explain its own ledger — and the debts it paid go back to being
+        owed.
+      operationId: voidDeposit
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  description: >
+                    Required. Without one, a cancelled deposit is an unexplained
+                    hole in the day's takings.
+      responses:
+        '204': { description: Cancelled. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+        '409':
+          description: The deposit was already cancelled.
+
   /api/v1/finance/billing-runs:
     post:
       tags: [finance-tuition]
@@ -760,6 +876,46 @@ components:
           example: 15000
           description: Fixed surcharge added once per completed overdue month. Zero disables it.
         active: { type: boolean }
+        policy: { $ref: '#/components/schemas/CollectionPolicy' }
+
+    CollectionPolicy:
+      type: object
+      description: >
+        What a late payment costs and what an early one saves. It rides with the
+        tuition table because that is where a price lives.
+      properties:
+        dailyMode:
+          type: boolean
+          description: >
+            Picks the rule. false keeps the fixed monthly surcharge above. true
+            charges lateFeeDailyCents for every day the money is late, and the
+            monthly run stops issuing surcharge charges — the amount changes
+            every night, so it is worked out at the moment of payment instead.
+        lateFeeDailyCents:
+          type: integer
+          format: int64
+          minimum: 0
+          example: 1000
+          description: The daily surcharge. Required when dailyMode is true.
+        surchargeCountsAllDays:
+          type: boolean
+          description: >
+            Counts Saturdays, Sundays and holidays. The school said yes — the
+            money is late on a Sunday too.
+        earlyPaymentCents:
+          type: integer
+          format: int64
+          minimum: 0
+          example: 10000
+          description: >
+            A fixed amount off, per month settled, when the family pays inside
+            the early window. Zero disables it.
+        earlyPaymentDays:
+          type: integer
+          minimum: 0
+          maximum: 28
+          example: 10
+          description: How many WORKING days the early window lasts, from the first of the month.
 
     TuitionPlanInput:
       type: object
@@ -774,6 +930,56 @@ components:
         dueDay: { type: integer, minimum: 1, maximum: 28 }
         lateFeeCents: { type: integer, format: int64, minimum: 0 }
         active: { type: boolean }
+        policy: { $ref: '#/components/schemas/CollectionPolicy' }
+
+    Deposit:
+      type: object
+      description: Money as it arrived, before it was decided what it pays.
+      required: [id, studentId, amountCents, method, paidAt]
+      properties:
+        id: { type: string, format: uuid }
+        studentId: { type: string, format: uuid }
+        amountCents: { type: integer, format: int64, minimum: 1, example: 670000 }
+        method: { type: string, enum: [cash, card, transfer] }
+        reference:
+          type: string
+          description: What identifies the money itself — a folio, a transfer id, a card slip.
+        paidAt: { type: string, format: date-time }
+        calendarVersion:
+          type: string
+          description: >
+            The school calendar the split was worked out against. "unavailable"
+            means the calendar could not be read and the deadline was computed
+            without the school's holidays.
+        voidedAt: { type: [string, 'null'], format: date-time }
+        voidReason: { type: string }
+
+    DepositResult:
+      type: object
+      description: What a deposit did, in the shape a receipt needs.
+      required: [deposit, allocations, surcharges, unallocatedCents, replayed]
+      properties:
+        deposit: { $ref: '#/components/schemas/Deposit' }
+        allocations:
+          type: array
+          description: The payments the deposit split into, oldest debt first.
+          items: { type: object }
+        surcharges:
+          type: array
+          description: >
+            The surcharge charges this deposit made real. Under the daily rule a
+            row exists only where money landed on it.
+          items: { type: object }
+        unallocatedCents:
+          type: integer
+          format: int64
+          minimum: 0
+          description: What no charge claimed — the family's credit with the school.
+        replayed:
+          type: boolean
+          description: >
+            The deposit already existed under this idempotency key and nothing
+            was collected a second time.
 
     BillingRun:
       type: object

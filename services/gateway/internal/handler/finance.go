@@ -26,6 +26,9 @@ type FinanceService interface {
 	CancelCharge(ctx context.Context, chargeID string) (client.Charge, error)
 	RegisterPaymentAt(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time) (client.Payment, client.Charge, error)
 	GetAccount(ctx context.Context, studentID string) (client.AccountStatement, error)
+	RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time) (client.DepositResult, error)
+	ListDeposits(ctx context.Context, studentID string) ([]client.Deposit, error)
+	VoidDeposit(ctx context.Context, id, reason string) error
 	ListOverdue(ctx context.Context, cycleID string) ([]client.Charge, error)
 }
 
@@ -312,14 +315,10 @@ func (h *FinanceHandler) RegisterPayment(w http.ResponseWriter, r *http.Request)
 	// paidAt is optional and dated-only ("2026-09-04"): the counter records a
 	// day, not an instant, and a time zone on a cashier's clock is a bug waiting
 	// to move a payment across a due date.
-	var paidAt time.Time
-	if raw := strings.TrimSpace(req.PaidAt); raw != "" {
-		parsed, perr := time.Parse("2006-01-02", raw)
-		if perr != nil {
-			http.Error(w, "paidAt must be a date like 2026-09-04", http.StatusBadRequest)
-			return
-		}
-		paidAt = parsed
+	paidAt, perr := parseCounterDate(req.PaidAt)
+	if perr != nil {
+		http.Error(w, "paidAt must be a date like 2026-09-04", http.StatusBadRequest)
+		return
 	}
 	payment, charge, err := h.svc.RegisterPaymentAt(r.Context(), req.ChargeID, req.AmountCents, req.Method, req.Reference, req.IdempotencyKey, paidAt)
 	if err != nil {
@@ -330,6 +329,88 @@ func (h *FinanceHandler) RegisterPayment(w http.ResponseWriter, r *http.Request)
 		"payment": toPaymentResponse(payment),
 		"charge":  toChargeResponse(charge),
 	})
+}
+
+// --- deposits (M16) --------------------------------------------------------
+
+// registerDepositRequest is a deposit as the counter reports it: how much, how,
+// and when. What it covers is deliberately not asked for.
+type registerDepositRequest struct {
+	StudentID      string `json:"studentId"`
+	AmountCents    int64  `json:"amountCents"`
+	Method         string `json:"method"`
+	Reference      string `json:"reference"`
+	PaidAt         string `json:"paidAt"`
+	IdempotencyKey string `json:"idempotencyKey"`
+}
+
+type voidDepositRequest struct {
+	Reason string `json:"reason"`
+}
+
+// RegisterDeposit handles POST /api/v1/finance/deposits. The response carries
+// the split, so the cashier can print a receipt without a follow-up read: which
+// months the money landed on, which surcharges it made real, and what is left
+// over as the family's credit.
+func (h *FinanceHandler) RegisterDeposit(w http.ResponseWriter, r *http.Request) {
+	var req registerDepositRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	paidAt, err := parseCounterDate(req.PaidAt)
+	if err != nil {
+		http.Error(w, "paidAt must be a date like 2026-09-04", http.StatusBadRequest)
+		return
+	}
+	got, derr := h.svc.RegisterDeposit(r.Context(), req.StudentID, req.AmountCents,
+		req.Method, req.Reference, req.IdempotencyKey, paidAt)
+	if derr != nil {
+		writeConnectError(w, derr)
+		return
+	}
+	writeJSON(w, http.StatusCreated, got)
+}
+
+// ListDeposits handles GET /api/v1/finance/deposits?studentId=…
+func (h *FinanceHandler) ListDeposits(w http.ResponseWriter, r *http.Request) {
+	deposits, err := h.svc.ListDeposits(r.Context(), r.URL.Query().Get("studentId"))
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deposits": deposits})
+}
+
+// VoidDeposit handles POST /api/v1/finance/deposits/{id}/void. The reason is
+// required: a cancelled deposit without one is an unexplained hole in the day's
+// takings.
+func (h *FinanceHandler) VoidDeposit(w http.ResponseWriter, r *http.Request) {
+	var req voidDepositRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.Reason) == "" {
+		http.Error(w, "reason is required to cancel a deposit", http.StatusBadRequest)
+		return
+	}
+	if err := h.svc.VoidDeposit(r.Context(), r.PathValue("id"), req.Reason); err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// parseCounterDate reads an optional dated-only value ("2026-09-04"). The
+// counter records a DAY, not an instant: a time zone on a cashier's clock is a
+// bug waiting to move a payment across a due date. Empty means "now".
+func parseCounterDate(raw string) (time.Time, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return time.Time{}, nil
+	}
+	return time.Parse("2006-01-02", trimmed)
 }
 
 // GetAccount handles GET /api/v1/finance/accounts/{studentId}: the student's
@@ -348,6 +429,7 @@ func (h *FinanceHandler) GetAccount(w http.ResponseWriter, r *http.Request) {
 		"charges":           toChargeResponses(res.Charges),
 		"payments":          payments,
 		"totalBalanceCents": res.TotalBalanceCents,
+		"unallocatedCents":  res.UnallocatedCents,
 	})
 }
 

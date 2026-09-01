@@ -71,6 +71,9 @@ type AccountStatement struct {
 	Charges           []Charge
 	Payments          []Payment
 	TotalBalanceCents int64
+	// UnallocatedCents is money the family has handed over that no charge has
+	// claimed — their credit with the school.
+	UnallocatedCents int64
 }
 
 // NewFinanceClient builds a FinanceClient targeting the finance base URL over
@@ -247,6 +250,7 @@ func (c *FinanceClient) GetAccount(ctx context.Context, studentID string) (Accou
 		Charges:           toCharges(res.Msg.GetCharges()),
 		Payments:          payments,
 		TotalBalanceCents: res.Msg.GetTotalBalanceCents(),
+		UnallocatedCents:  res.Msg.GetUnallocatedCents(),
 	}, nil
 }
 
@@ -260,6 +264,102 @@ func (c *FinanceClient) ListOverdue(ctx context.Context, cycleID string) ([]Char
 		return nil, err
 	}
 	return toCharges(res.Msg.GetCharges()), nil
+}
+
+// --- deposits (M16) --------------------------------------------------------
+
+// Deposit is money as it arrived, before it was decided what it pays.
+type Deposit struct {
+	ID              string `json:"id"`
+	StudentID       string `json:"studentId"`
+	AmountCents     int64  `json:"amountCents"`
+	Method          string `json:"method"`
+	Reference       string `json:"reference"`
+	PaidAt          string `json:"paidAt"`
+	CalendarVersion string `json:"calendarVersion"`
+	VoidedAt        string `json:"voidedAt,omitempty"`
+	VoidReason      string `json:"voidReason,omitempty"`
+}
+
+// DepositResult is what the money did, in the shape a receipt needs.
+type DepositResult struct {
+	Deposit          Deposit   `json:"deposit"`
+	Allocations      []Payment `json:"allocations"`
+	Surcharges       []Charge  `json:"surcharges"`
+	UnallocatedCents int64     `json:"unallocatedCents"`
+	Replayed         bool      `json:"replayed"`
+}
+
+// RegisterDeposit takes money without being told what it pays for and splits it
+// across what the family owes, oldest first.
+func (c *FinanceClient) RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time) (DepositResult, error) {
+	req := &financev1.RegisterDepositRequest{
+		StudentId:      studentID,
+		AmountCents:    amountCents,
+		Method:         method,
+		Reference:      reference,
+		IdempotencyKey: idempotencyKey,
+	}
+	if !paidAt.IsZero() {
+		req.PaidAt = timestamppb.New(paidAt)
+	}
+	res, err := c.rpc.RegisterDeposit(ctx, connect.NewRequest(req))
+	if err != nil {
+		return DepositResult{}, err
+	}
+	allocations := make([]Payment, 0, len(res.Msg.GetAllocations()))
+	for _, p := range res.Msg.GetAllocations() {
+		allocations = append(allocations, toPayment(p))
+	}
+	return DepositResult{
+		Deposit:          toDeposit(res.Msg.GetDeposit()),
+		Allocations:      allocations,
+		Surcharges:       toCharges(res.Msg.GetSurcharges()),
+		UnallocatedCents: res.Msg.GetUnallocatedCents(),
+		Replayed:         res.Msg.GetReplayed(),
+	}, nil
+}
+
+// ListDeposits returns a student's deposits, newest first.
+func (c *FinanceClient) ListDeposits(ctx context.Context, studentID string) ([]Deposit, error) {
+	res, err := c.rpc.ListDeposits(ctx, connect.NewRequest(&financev1.ListDepositsRequest{
+		StudentId: studentID,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Deposit, 0, len(res.Msg.GetDeposits()))
+	for _, d := range res.Msg.GetDeposits() {
+		out = append(out, toDeposit(d))
+	}
+	return out, nil
+}
+
+// VoidDeposit cancels a deposit and releases what it settled.
+func (c *FinanceClient) VoidDeposit(ctx context.Context, id, reason string) error {
+	_, err := c.rpc.VoidDeposit(ctx, connect.NewRequest(&financev1.VoidDepositRequest{
+		Id: id, Reason: reason,
+	}))
+	return err
+}
+
+func toDeposit(d *financev1.Deposit) Deposit {
+	out := Deposit{
+		ID:              d.GetId(),
+		StudentID:       d.GetStudentId(),
+		AmountCents:     d.GetAmountCents(),
+		Method:          d.GetMethod(),
+		Reference:       d.GetReference(),
+		CalendarVersion: d.GetCalendarVersion(),
+		VoidReason:      d.GetVoidReason(),
+	}
+	if ts := d.GetPaidAt(); ts != nil {
+		out.PaidAt = ts.AsTime().Format(time.RFC3339)
+	}
+	if ts := d.GetVoidedAt(); ts != nil {
+		out.VoidedAt = ts.AsTime().Format(time.RFC3339)
+	}
+	return out
 }
 
 func toChargeConcept(c *financev1.ChargeConcept) ChargeConcept {
@@ -320,29 +420,43 @@ func toPayment(p *financev1.Payment) Payment {
 
 // TuitionPlan is the edge's view of what one level costs in one cycle.
 type TuitionPlan struct {
-	ID               string `json:"id"`
-	CycleID          string `json:"cycleId"`
-	LevelID          string `json:"levelId"`
-	EnrollmentCents  int64  `json:"enrollmentCents"`
-	MonthlyCents     int64  `json:"monthlyCents"`
-	Months           int    `json:"months"`
-	FirstBilledMonth int    `json:"firstBilledMonth"`
-	DueDay           int    `json:"dueDay"`
-	LateFeeCents     int64  `json:"lateFeeCents"`
-	Active           bool   `json:"active"`
+	ID               string           `json:"id"`
+	CycleID          string           `json:"cycleId"`
+	LevelID          string           `json:"levelId"`
+	EnrollmentCents  int64            `json:"enrollmentCents"`
+	MonthlyCents     int64            `json:"monthlyCents"`
+	Months           int              `json:"months"`
+	FirstBilledMonth int              `json:"firstBilledMonth"`
+	DueDay           int              `json:"dueDay"`
+	LateFeeCents     int64            `json:"lateFeeCents"`
+	Active           bool             `json:"active"`
+	Policy           CollectionPolicy `json:"policy"`
+}
+
+// CollectionPolicy is what a late payment costs and what an early one saves.
+// It rides with the tuition plan because that is where a price lives.
+type CollectionPolicy struct {
+	// DailyMode picks the rule: false keeps the fixed monthly surcharge, true
+	// charges LateFeeDailyCents for every day the money is late.
+	DailyMode              bool  `json:"dailyMode"`
+	LateFeeDailyCents      int64 `json:"lateFeeDailyCents"`
+	SurchargeCountsAllDays bool  `json:"surchargeCountsAllDays"`
+	EarlyPaymentCents      int64 `json:"earlyPaymentCents"`
+	EarlyPaymentDays       int   `json:"earlyPaymentDays"`
 }
 
 // TuitionPlanInput is what the panel sends to price a level.
 type TuitionPlanInput struct {
-	CycleID          string `json:"cycleId"`
-	LevelID          string `json:"levelId"`
-	EnrollmentCents  int64  `json:"enrollmentCents"`
-	MonthlyCents     int64  `json:"monthlyCents"`
-	Months           int    `json:"months"`
-	FirstBilledMonth int    `json:"firstBilledMonth"`
-	DueDay           int    `json:"dueDay"`
-	LateFeeCents     int64  `json:"lateFeeCents"`
-	Active           bool   `json:"active"`
+	CycleID          string           `json:"cycleId"`
+	LevelID          string           `json:"levelId"`
+	EnrollmentCents  int64            `json:"enrollmentCents"`
+	MonthlyCents     int64            `json:"monthlyCents"`
+	Months           int              `json:"months"`
+	FirstBilledMonth int              `json:"firstBilledMonth"`
+	DueDay           int              `json:"dueDay"`
+	LateFeeCents     int64            `json:"lateFeeCents"`
+	Active           bool             `json:"active"`
+	Policy           CollectionPolicy `json:"policy"`
 }
 
 // BillingRun is what a run did, as the panel reports it back to the person who
@@ -367,6 +481,13 @@ func (c *FinanceClient) UpsertTuitionPlan(ctx context.Context, in TuitionPlanInp
 		DueDay:           int32(in.DueDay),
 		LateFeeCents:     in.LateFeeCents,
 		Active:           in.Active,
+		Policy: &financev1.CollectionPolicy{
+			DailyMode:              in.Policy.DailyMode,
+			LateFeeDailyCents:      in.Policy.LateFeeDailyCents,
+			SurchargeCountsAllDays: in.Policy.SurchargeCountsAllDays,
+			EarlyPaymentCents:      in.Policy.EarlyPaymentCents,
+			EarlyPaymentDays:       int32(in.Policy.EarlyPaymentDays),
+		},
 	}))
 	if err != nil {
 		return TuitionPlan{}, err
@@ -425,5 +546,12 @@ func toTuitionPlan(p *financev1.TuitionPlan) TuitionPlan {
 		DueDay:           int(p.GetDueDay()),
 		LateFeeCents:     p.GetLateFeeCents(),
 		Active:           p.GetActive(),
+		Policy: CollectionPolicy{
+			DailyMode:              p.GetPolicy().GetDailyMode(),
+			LateFeeDailyCents:      p.GetPolicy().GetLateFeeDailyCents(),
+			SurchargeCountsAllDays: p.GetPolicy().GetSurchargeCountsAllDays(),
+			EarlyPaymentCents:      p.GetPolicy().GetEarlyPaymentCents(),
+			EarlyPaymentDays:       int(p.GetPolicy().GetEarlyPaymentDays()),
+		},
 	}
 }
