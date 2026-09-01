@@ -27,9 +27,14 @@ concurrency:
   group: deploy-dev
   cancel-in-progress: true
 
+# Declaring a permissions block opts OUT of the defaults, so every scope the job
+# needs has to be listed. Omitting `checks: read` is what made the first real run
+# die in 25s: the wait-on-check step cannot query check runs without it, and the
+# failure surfaces as a Ruby stack trace from octokit rather than "403".
 permissions:
   contents: read
-  id-token: write # required to mint the OIDC token
+  checks: read # read the CI check runs on this commit
+  id-token: write # mint the OIDC token for keyless auth to Google
 
 env:
   PROJECT_ID: garcia-lorca
