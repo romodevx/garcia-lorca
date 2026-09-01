@@ -655,3 +655,233 @@ error caro en un clic de corrección.
 
 **Recomendación:** correr `/plan-design-review` sobre esta pantalla antes de construirla.
 Es la que el director va a usar cincuenta veces al día.
+
+---
+
+## Paso 0.5 — Voces duales
+
+**CODEX:** `[codex-unavailable: binary not found]` en ambas fases → **[subagent-only]**.
+
+Las dos voces (CEO y diseño) encontraron cosas que yo no vi, incluidas **cuatro
+correcciones a este mismo plan** y **dos bugs vivos en producción**. Verifiqué cada
+afirmación de peso contra el árbol antes de aceptarla.
+
+### 🔴🔴 C1 — Me equivoqué: la aritmética de días hábiles NO existe
+
+Escribí que existía en `uniforms` (`PickupWindowBusinessDays`). Verificado:
+
+```
+$ grep -rniE "business.?day|día hábil|holiday|weekend" services/ pkg/ --include="*.go"
+  (sin resultados fuera del propio nombre de la variable)
+
+$ grep -n "PickupWindowBusinessDays" services/uniforms/internal/domain/settings.go
+99: func (s Settings) PickupWindowBusinessDays() int { return s.pickupWindowBusinessDays }
+```
+
+**Es un getter de un entero de configuración. No calcula nada.** No hay una sola función
+en el repo que sepa qué es un día hábil.
+
+Ese error importa más que ninguno: **acredité como hecho el primitivo del que dependen
+los bloques 1, 2, 6 y 7 de la petición.** El calendario no es "una pieza más" — es la
+única pieza, y parte de cero.
+
+Y hay una señal que lo confirma: `uniforms` documenta el hueco en
+`migrations/uniforms/0003_settings.sql:7-10` — *"the school calendar is deliberately NOT
+here… it lives in the config service"* — y `config` tampoco lo tiene. La costura se
+diseñó y nunca se llenó.
+
+### 🔴🔴 C2 — "Descuentos maternales" no es un descuento: es un NIVEL que el sistema rechaza
+
+El mejor hallazgo de toda la revisión, y yo lo leí como "beca" (P7 de mis premisas).
+En México **maternal es el nivel anterior a kínder**. Y el sistema lo prohíbe:
+
+```sql
+-- migrations/students/0001_init.sql:17
+level text NOT NULL CHECK (level IN ('kinder','primaria','secundaria','preparatoria'))
+```
+
+```
+-- apps/web/app/_screens/students/StudentsScreen.tsx:94
+"un nivel llamado 'Maternal' no tiene dónde poner uno"
+```
+
+**Ese comentario lo escribió alguien que ya sabía que la escuela tiene Maternal.**
+O sea: **la escuela no puede dar de alta a sus alumnos de maternal en el sistema.**
+
+Eso es más grave que las 20 peticiones juntas, y venía disfrazado de "descuento".
+Si es el nivel, entonces el "descuento maternal" es **cero código**: un renglón de
+`tuition_plans` para ese nivel, que ya funciona.
+
+### 🔴 C3 — La fecha de pago no existe en el contrato
+
+`RegisterPaymentRequest` (`finance.proto:296-307`) tiene `charge_id`, `amount_cents`,
+`method`, `reference`, `idempotency_key`. **No tiene fecha.** Y
+`usecase/finance.go:311` estampa `s.now()`.
+
+Yo puse *"Registro de pago idempotente ✅ existe"* y con eso escondí que **la fecha
+exacta —el dato del que dependen TODAS las reglas de cobro que pide el director— no se
+puede enviar hoy.** La cajera que se pone al corriente el lunes estampa lunes.
+
+La columna existe en la base (`0001_init.sql:93`) y es inalcanzable.
+
+### 🔴🔴 C4 — DOS BUGS VIVOS en la pantalla de cobro, hoy, en producción
+
+**`apps/web/app/_screens/finance/FinanceScreen.tsx:76`:**
+```ts
+registerPayment(API_URL, { …, idempotencyKey: "" })
+```
+Y el propio proto documenta qué significa: *"Empty ⇒ no deduplication (every call posts
+a new payment)"*. **Doble clic = doble cobro.** Alcanzable hoy.
+
+Lo peor: `PaymentPanel.tsx` **sí** genera la clave correctamente (`newAttemptKey`). O sea
+la protección existe y la pantalla que se usa no la usa.
+
+**`FinanceScreen.tsx:87`:** `onClick={onClose}` en el fondo del modal, sin guardia de
+cambios. Un clic fuera **borra un pago a medio capturar**.
+
+Mi Sección 4 decía *"doble clic en Guardar ✅ la idempotencia ya existe"*. Existe en el
+backend y en un panel que nadie usa. **Falso donde importa.**
+
+### 🔴 C5 — El tope de 500 filas rompe la facturación con el padrón real
+
+`repository.go:32` — `maxListLimit = 500`, aplicado a `ListOverdue` (`:606`), que
+`accrueLateFees` consume (`billing.go:280`).
+
+**400 alumnos × 11 colegiaturas ≈ 4,400 cargos.** Pasando 500 vencidos, la corrida
+mensual **deja de acumular recargos en las deudas más nuevas, en silencio**. La escuela
+sub-factura y nadie se entera. El mismo tope está en `ListCharges`, así que la "deuda
+total" que el director pidió **no va a cuadrar** y lo va a descubrir la primera semana.
+
+**Es un bug de dinero, vivo, y el recargo diario lo empeora.**
+
+### 🔴 C6 — El reparto no cabe en el modelo de pagos actual
+
+`payments.charge_id` es `NOT NULL` con FK (`0001_init.sql:88`), y
+`uq_payments_idempotency` es `UNIQUE (tenant_id, idempotency_key)`. **No se pueden
+escribir seis renglones de pago para un depósito con una sola clave.**
+
+Además `derivePaidStatus` **veta el sobrepago** (`finance.go:337-339`) y `GetAccount`
+pisa los saldos en cero (`:401`). O sea: el pago de $6,000 del ejemplo del director
+**hoy ni siquiera se puede guardar**, mucho menos repartir.
+
+Yo lo llamé "reabrir una pieza". Es **un agregado nuevo**: `deposits` +
+`payment_allocations`.
+
+Y un acoplamiento que no vi: `students` marca al alumno como inscrito escuchando
+`ChargeSettled` filtrado por el prefijo `"enrollment:"`
+(`students/internal/adapters/pubsub/consumer.go:63`). **Un repartidor que liquide la
+inscripción sin emitir ese evento rompe el estado de admisión en silencio.**
+
+### 🔴 C7 — Los avisos no existen ni siquiera para un alumno
+
+Dije *"comms notifica por alumno; falta grupo y nivel"*. Verificado: `CommsService` tiene
+`Health`, `RegisterDevice`, `ListNotifications`, `MarkNotificationRead`. **No hay RPC de
+envío.** El contrato lo dice: *"Sending is a side effect of consuming an event, never an
+RPC."*
+
+No es un filtro que falta: es una ruta de escritura nueva completa. **Se dimensiona como
+módulo, no como campo.**
+
+### 🟡 C8 — Multicontacto: ya hay DOS modelos, no cero
+
+Dije que faltaba porque `students.guardian_name` es un texto. Pero
+`migrations/students/0003_guardians.sql` ya tiene **`guardian_students`**: muchos a
+muchos, con RLS y `relationship IN ('mother','father','guardian','other')`.
+
+Hay un nombre de tutor en texto libre **y** un grafo de tutores real. El director quiere
+una tercera cosa (teléfonos y correos), que ninguno guarda.
+**Decisión:** columnas de contacto en `guardian_students`, y retirar `guardian_name`.
+**No** crear `student_contacts` — sería el tercer modelo.
+
+### 🟡 C9 — Cité texto que no está en mi propia transcripción
+
+Mi premisa P3 dice que la petición contiene *"cantidad fija configurable"*. Mi §0, que
+prometí transcribir sin reinterpretar, dice solo *"ej. 5%"*. **Razoné sobre texto que no
+registré.** La contradicción que denuncié puede ser mía.
+
+### 🟡 C10 — El recargo diario NO es un campo barato
+
+Lo clasifiqué entre los "campos nuevos (baratos)". `accrueLateFees` emite **un cargo por
+mes vencido**. Diario emitiría ~30 renglones por mes por alumno → 400 × 30 = **12,000
+cargos mensuales**, contra un tope de lectura de 500.
+
+**Un recargo diario tiene que ser un monto DERIVADO** sobre el cargo padre, calculado de
+`(vencimiento, hoy, calendario, política)`. Eso cambia qué *es* un recargo. Es el segundo
+ítem más caro de la lista, no un campo.
+
+### 🔴 D1 — La pantalla no está diseñada para quien la usa 50 veces al día
+
+La voz de diseño la calificó y el promedio es duro:
+
+| Dimensión | Puntaje |
+|---|---|
+| Jerarquía de información | 5/10 |
+| Estados de error | 3/10 |
+| Confianza y auditoría | 4/10 |
+| Velocidad de uso repetido | **3/10** |
+| Intención móvil | **2/10** |
+
+Lo esencial: **"Esperado / Capturado / Diferencia" es un triple de contador, no de
+cajera.** Ella no compara números: recibe efectivo y necesita saber *cuánto debe esta
+familia hoy*. Y con el reparto, el ejemplo del propio director ($6,000) hace que
+"Diferencia" muestre **−$5,000**, que parece un error, no un adelanto.
+
+**Los dos campos no pueden coexistir con el reparto.** Es una contradicción del diseño,
+no un detalle.
+
+Además: `PayDrawer` **no es un formulario** (es un árbol de `div`s) — sin Enter para
+guardar, sin Escape, sin trampa de foco. Cincuenta veces al día con un padre esperando,
+el ratón es el cuello de botella.
+
+### 🔴 D2 — Falta el corte de caja, y es lo que de verdad da confianza
+
+No aparece en la petición ni en mi revisión. Es **el único artefacto** que le permite a
+la cajera demostrar que no se quedó con una diferencia, y al director cuadrar contra el
+banco. Sin él, el director sigue con su libreta.
+
+Tampoco hay **folio** (cero resultados en el repo para recibo/folio/imprimir), así que
+una cajera y un padre no pueden referirse a la misma transacción por teléfono.
+
+### ⚠️ D3 — La voz de diseño DISCREPA de mi Hallazgo 2.3, y tiene razón
+
+Yo decidí: si el calendario no responde, **bloquear la captura**.
+
+Ella responde: *"hay un padre parado con efectivo. Negarse a registrar dinero que ya
+entró al cajón es peor que una asignación aproximada — garantiza que la cajera lo anote
+en papel, que es justo el fallo que el proyecto existe para eliminar."*
+
+**Acepto la corrección.** Se registra siempre el pago; se difiere solo la **asignación**.
+Queda como `pendiente de aplicación`, con folio y recibo, y aparece en una cola que el
+director resuelve. **El dinero nunca se bloquea; solo espera la aritmética.**
+
+---
+
+## TABLA DE CONSENSO — VOCES DUALES
+
+```
+═══════════════════════════════════════════════════════════════════════
+  Dimensión                          CEO      Diseño   Codex  Consenso
+  ─────────────────────────────────  ───────  ───────  ─────  ─────────
+  1. ¿Premisas válidas?              NO       —        N/A    ⚠️ 4 correcciones al plan
+  2. ¿Es el problema correcto?       PARCIAL  NO       N/A    ⚠️ AMBAS: la venta, no la lista
+  3. ¿Alcance bien calibrado?        NO       NO       N/A    ⚠️ AMBAS: cortar más
+  4. ¿Estimación realista?           NO       —        N/A    ⚠️ 45% de la lista, 15% del esfuerzo
+  5. ¿Riesgos cubiertos?             NO       NO       N/A    ⚠️ AMBAS: 2 bugs vivos de dinero
+  6. ¿Trayectoria sana?              NO       —        N/A    ⚠️ tenant fijo al arranque
+═══════════════════════════════════════════════════════════════════════
+Modo: [subagent-only] — sin cobertura cross-model.
+```
+
+### Temas que aparecieron en AMBAS voces de forma independiente
+
+**Señal de alta confianza — dos revisores que no se leyeron llegaron a lo mismo:**
+
+1. **El tope de 500 filas es un bug de dinero, vivo.** (CEO §4.1 · diseño lo implica en
+   "no va a cuadrar")
+2. **La auditoría del descuento manual no es opcional.** El CEO encontró el
+   `TODO(finance): persist discount reason/audit`; diseño exige que se **muestre** en
+   pantalla o la propiedad es invisible.
+3. **La lista no es el problema; la firma sí.** El CEO: *"ocho semanas construyendo contra
+   la política de una escuela, entregado a un cliente sin contrato, produce una
+   consultoría, no un producto"*. Diseño: *"el Excel es un síntoma, no un requisito"*.
+4. **Hay que preguntarle tres cosas al director antes de escribir código.**
