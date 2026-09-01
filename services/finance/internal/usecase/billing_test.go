@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -171,5 +172,47 @@ func TestUpsertTuitionPlanRejectsAnUnknownCycle(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("a tuition table for a cycle that does not exist must be refused")
+	}
+}
+
+// TestRunBillingAccruesBeyondTheListCap is the regression for a live money bug.
+//
+// ListOverdue caps at 500 rows. A school with 400 pupils and eleven monthly
+// charges holds ~4,400 charges per cycle, so once more than 500 were overdue the
+// run stopped accruing surcharges on the newest debt — silently. The school
+// under-billed and nobody was told.
+//
+// The unit tests could not see it because the fake repository returned
+// everything: the double was MORE capable than production. It now models the cap
+// on ListOverdue and offers the paged read the run actually uses.
+func TestRunBillingAccruesBeyondTheListCap(t *testing.T) {
+	f := billingFixture(t)
+	const pupils = 700 // deliberately more than the 500-row cap
+
+	rows := make([]ports.EnrollmentRef, 0, pupils)
+	for i := 0; i < pupils; i++ {
+		rows = append(rows, ports.EnrollmentRef{
+			ID:        fmt.Sprintf("enr-%04d", i),
+			StudentID: fmt.Sprintf("st-%04d", i),
+			GroupID:   testGroup,
+			CycleID:   testCycle,
+			Status:    "active",
+		})
+	}
+	f.enrollments.byCycle[testCycle] = rows
+
+	// ONE run, one assertion. The enrolment charge falls due when the cycle
+	// opens (2026-08-10), so by 15 September every one of the 700 pupils is
+	// overdue on it and must earn exactly one surcharge.
+	//
+	// Asserting across two runs would be worse than useless: the totals
+	// accumulate and cross 700 by accident even while each individual run is
+	// capped at 500. This test was written that way first and passed against the
+	// bug it exists to catch.
+	got := runOn(t, f, "2026-09-15")
+
+	if got.LateFeesCreated != pupils {
+		t.Fatalf("late fees = %d, want exactly %d — the run stopped at the read cap and silently under-billed the newest debt",
+			got.LateFeesCreated, pupils)
 	}
 }

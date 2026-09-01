@@ -285,6 +285,23 @@ func (f *fakeRepo) ListOverdue(_ context.Context, cycleID string, today time.Tim
 	return out, nil
 }
 
+// ListOverduePage is the uncapped keyset walk the billing run uses. This fake
+// holds a handful of charges, so one page always covers them; the walk semantics
+// are exercised properly in the use-case tests.
+func (f *fakeRepo) ListOverduePage(ctx context.Context, cycleID string, today time.Time, after ports.OverdueCursor, limit int) ([]ports.ChargeWithPaid, error) {
+	if !after.IsZero() {
+		return nil, nil // one page is enough here; a second walk is always empty
+	}
+	all, err := f.ListOverdue(ctx, cycleID, today)
+	if err != nil {
+		return nil, err
+	}
+	if limit > 0 && len(all) > limit {
+		return all[:limit], nil
+	}
+	return all, nil
+}
+
 // --- fixture -------------------------------------------------------------------
 
 type fixture struct {

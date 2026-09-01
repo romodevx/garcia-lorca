@@ -628,6 +628,61 @@ func (r *Repository) ListOverdue(ctx context.Context, cycleID string, today time
 	return out, nil
 }
 
+// ListOverduePage is the uncapped, keyset-paged walk of the same set.
+//
+// ListOverdue above stops at maxListLimit, which is right for a screen and wrong
+// for the billing run: a school with 400 pupils and eleven monthly charges holds
+// ~4,400 charges in a cycle, so once more than maxListLimit are overdue the run
+// stopped accruing surcharges on the NEWEST debt and said nothing. The school
+// under-billed and nobody was told.
+//
+// Keyset (due_date, id) rather than OFFSET on purpose: accrueLateFees WRITES
+// surcharge rows while it reads this set, and an OFFSET walk would skip or
+// repeat rows as the result shifts underneath it. A keyset cursor is stable
+// against inserts.
+//
+// The still-owing filter runs after the page is fetched, so a page can come back
+// shorter than `limit` while more pages remain. Callers must therefore stop on
+// an EMPTY page, never on a short one.
+func (r *Repository) ListOverduePage(ctx context.Context, cycleID string, today time.Time, after ports.OverdueCursor, limit int) ([]ports.ChargeWithPaid, error) {
+	if limit <= 0 || limit > maxListLimit {
+		limit = maxListLimit
+	}
+	var out []ports.ChargeWithPaid
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		q := tx.Model(&chargeModel{}).
+			Where("due_date < ?::date AND status <> ?", today.Format(dateLayout), domain.StatusCancelled).
+			Order("due_date ASC, id ASC").
+			Limit(limit)
+		if cycleID != "" {
+			q = q.Where("cycle_id = ?", cycleID)
+		}
+		if !after.IsZero() {
+			// Row-wise comparison: strictly after (due_date, id) in the same
+			// total order the ORDER BY imposes.
+			q = q.Where("(due_date, id) > (?::date, ?)", after.DueDate.Format(dateLayout), after.ID)
+		}
+		var rows []chargeModel
+		if err := q.Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing overdue charges page", err)
+		}
+		candidates, err := withPaidTotals(tx, rows)
+		if err != nil {
+			return err
+		}
+		for _, c := range candidates {
+			if c.Charge.Effective().Int64()-c.PaidCents > 0 {
+				out = append(out, c)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // --- helpers ----------------------------------------------------------------
 
 // paidFor sums the payments collected against one charge. COALESCE keeps "no

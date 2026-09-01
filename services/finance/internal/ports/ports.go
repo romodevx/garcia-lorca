@@ -221,6 +221,17 @@ type FinanceRepository interface {
 	// the query stays deterministic and testable.
 	ListOverdue(ctx context.Context, cycleID string, today time.Time) ([]ChargeWithPaid, error)
 
+	// ListOverduePage walks the overdue set in (due_date, id) order without a
+	// cap, one page at a time, starting strictly after `after`.
+	//
+	// ListOverdue above is capped for the UI, which is correct there: nobody
+	// reads five thousand rows on a screen. The BILLING RUN is different — it
+	// must see every overdue charge or it silently under-bills the newest debt,
+	// and a school with 400 pupils crosses that cap in its first cycle. Two
+	// readers with genuinely different needs, so two methods rather than one
+	// that is wrong for somebody.
+	ListOverduePage(ctx context.Context, cycleID string, today time.Time, after OverdueCursor, limit int) ([]ChargeWithPaid, error)
+
 	// EnsureConceptOfKind returns the tenant's concept for a system kind. The id
 	// is supplied by the caller (ids are minted in the use case, not here) and is
 	// used only when the concept has to be created.
@@ -239,3 +250,15 @@ type FinanceRepository interface {
 	// ListTuitionPlans returns the whole tuition table of a cycle.
 	ListTuitionPlans(ctx context.Context, cycleID string) ([]domain.TuitionPlan, error)
 }
+
+// OverdueCursor is the keyset position of a page walk: the last (due_date, id)
+// already consumed. Zero means "from the beginning". Keyset and not OFFSET
+// because the billing run writes surcharges WHILE it reads, and OFFSET would
+// skip or repeat rows as the result set shifts underneath it.
+type OverdueCursor struct {
+	DueDate time.Time
+	ID      string
+}
+
+// IsZero reports the start-from-the-beginning position.
+func (c OverdueCursor) IsZero() bool { return c.ID == "" && c.DueDate.IsZero() }

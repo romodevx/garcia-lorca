@@ -328,7 +328,51 @@ func (f *fakeRepo) ListPayments(_ context.Context, studentID string) ([]domain.P
 	return out, nil
 }
 
+// overdueCap mirrors the real repository's maxListLimit. The fake used to return
+// everything, which made it MORE capable than production and hid a money bug:
+// past this many overdue charges the billing run silently stopped accruing
+// surcharges. A fake that cannot express the production bound cannot catch it.
+const overdueCap = 500
+
 func (f *fakeRepo) ListOverdue(_ context.Context, cycleID string, today time.Time) ([]ports.ChargeWithPaid, error) {
+	all, err := f.listOverdueFrom(cycleID, today)
+	if err != nil {
+		return nil, err
+	}
+	if len(all) > overdueCap {
+		return all[:overdueCap], nil
+	}
+	return all, nil
+}
+
+// ListOverduePage is the paged read the billing run uses: it walks the whole set
+// in (due_date, id) order instead of stopping at a cap.
+func (f *fakeRepo) ListOverduePage(_ context.Context, cycleID string, today time.Time, after ports.OverdueCursor, limit int) ([]ports.ChargeWithPaid, error) {
+	all, err := f.listOverdueFrom(cycleID, today)
+	if err != nil {
+		return nil, err
+	}
+	var out []ports.ChargeWithPaid
+	for _, c := range all {
+		if !after.IsZero() && !afterCursor(c, after) {
+			continue
+		}
+		out = append(out, c)
+		if len(out) == limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func afterCursor(c ports.ChargeWithPaid, after ports.OverdueCursor) bool {
+	if c.Charge.DueDate().After(after.DueDate) {
+		return true
+	}
+	return c.Charge.DueDate().Equal(after.DueDate) && c.Charge.ID() > after.ID
+}
+
+func (f *fakeRepo) listOverdueFrom(cycleID string, today time.Time) ([]ports.ChargeWithPaid, error) {
 	f.overdueCycleID, f.overdueToday = cycleID, today
 	var out []ports.ChargeWithPaid
 	for _, c := range f.charges {
@@ -344,7 +388,14 @@ func (f *fakeRepo) ListOverdue(_ context.Context, cycleID string, today time.Tim
 		}
 		out = append(out, ports.ChargeWithPaid{Charge: c, PaidCents: paid})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Charge.ID() < out[j].Charge.ID() })
+	// (due_date, id) — the same total order the real query uses, so a cursor
+	// walk over this fake means what it means in production.
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].Charge.DueDate().Equal(out[j].Charge.DueDate()) {
+			return out[i].Charge.DueDate().Before(out[j].Charge.DueDate())
+		}
+		return out[i].Charge.ID() < out[j].Charge.ID()
+	})
 	return out, nil
 }
 

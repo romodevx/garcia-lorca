@@ -262,6 +262,41 @@ func (s *FinanceService) levelsWithoutPlan(ctx context.Context, planByLevel map[
 	return out
 }
 
+// overduePageSize is how many overdue charges one page of the walk fetches. It
+// exists so the run holds a bounded slice in memory per round trip, NOT to bound
+// the total: allOverdue keeps going until the pages run out.
+const overduePageSize = 500
+
+// allOverdue walks every overdue charge of the cycle, not the first page of them.
+//
+// This used to call ListOverdue, which caps at 500 rows — right for a screen,
+// wrong here. A school with 400 pupils and eleven monthly charges crosses that
+// cap inside its first cycle, and past it the run stopped accruing surcharges on
+// the newest debt without a word. The school under-billed and found out from a
+// parent, if at all.
+//
+// Stops on an EMPTY page, never on a short one: the repository applies the
+// still-owing filter after fetching a page, so a page can come back with fewer
+// rows than requested while later pages still hold debt.
+func (s *FinanceService) allOverdue(ctx context.Context, cycleID string, asOf time.Time) ([]ports.ChargeWithPaid, error) {
+	var (
+		out    []ports.ChargeWithPaid
+		cursor ports.OverdueCursor
+	)
+	for {
+		page, err := s.repo.ListOverduePage(ctx, cycleID, asOf, cursor, overduePageSize)
+		if err != nil {
+			return nil, err
+		}
+		if len(page) == 0 {
+			return out, nil
+		}
+		out = append(out, page...)
+		last := page[len(page)-1].Charge
+		cursor = ports.OverdueCursor{DueDate: last.DueDate(), ID: last.ID()}
+	}
+}
+
 // accrueLateFees issues one fixed surcharge per completed overdue month, per
 // unpaid charge.
 //
@@ -277,7 +312,7 @@ func (s *FinanceService) accrueLateFees(
 	enrollments []ports.EnrollmentRef,
 	lateFeeConceptID string,
 ) ([]domain.Charge, error) {
-	overdue, err := s.repo.ListOverdue(ctx, cycleID, asOf)
+	overdue, err := s.allOverdue(ctx, cycleID, asOf)
 	if err != nil {
 		return nil, err
 	}
