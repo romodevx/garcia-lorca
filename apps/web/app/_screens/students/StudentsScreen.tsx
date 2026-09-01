@@ -18,6 +18,7 @@ import { enrollIntoGrade, StudentsError, type Placement } from "../../students/a
 
 import { API_URL } from "../../api-url";
 import { csvName, downloadCsv, toCsv, type CsvColumn } from "../../_lib/csv";
+import { ContactsPanel } from "./ContactsPanel";
 
 
 // ── admission status → pill (design language) ──
@@ -349,6 +350,7 @@ function StudentSheet({ st, groups, onClose, onEnroll }: { st: Student; groups: 
               <span style={{ fontSize: 14.5, fontWeight: 600, color: "var(--text)", textAlign: "right" }}>{v}</span>
             </div>
           ))}
+          <ContactsPanel studentId={st.id} />
           {groups.length > 0 && (
             <div style={{ padding: "18px 0" }}>
               <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Inscribir en grupo</span>
