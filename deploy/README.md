@@ -1,5 +1,10 @@
 # Deploy — García Lorca Infrastructure & CI/CD
 
+> **To actually deploy, follow `deploy/RUNBOOK-dev.md`.** That file is the
+> executable procedure and the authority on values and ordering; this one
+> explains the shape of the environment.
+
+
 Infrastructure-as-Code (Terraform), the Cloud Build CI/CD pipeline, and the
 container build setup for the García Lorca monorepo.
 
@@ -33,7 +38,9 @@ a billing account, and a GCS bucket for Terraform remote state.
 
 1. **Contracts**: `buf lint` + `buf generate` (CI regenerates `gen/`; never committed).
 2. **Quality gates** (fail-fast): `go vet` → `go test -race` → `govulncheck` + `go mod verify`.
-3. **Frontend**: `npm ci` → `turbo run test lint build`.
+3. **Frontend**: `pnpm install --frozen-lockfile` → `turbo run test lint build --filter=@garcia-lorca/web...`
+   (pnpm is the only permitted package manager here — see the repo CLAUDE.md;
+   the filter skips the Expo app, whose build needs native tooling).
 4. **Build-hardening gate**: fail if any `*.map` or `sourceMappingURL` exists in
    web artifacts. Uses `apps/web/scripts/check-no-sourcemaps.sh` when present,
    otherwise `deploy/cloudbuild/check-no-sourcemaps.sh`.
@@ -56,16 +63,26 @@ except the two hot-path services.
 
 | Service                                                              | min-instances | CPU allocation       | Why                              |
 | -------------------------------------------------------------------- | ------------- | -------------------- | -------------------------------- |
-| `gateway`                                                            | **1 (warm)**  | always + boost       | public edge; no cold start       |
-| `iam`                                                                | **1 (warm)**  | always + boost       | every request authenticates      |
-| `students`, `finance`, `grades`, `scholarships`, `attendance`, `docs`, `comms`, `uniforms`, `billing` | **0 (scale-to-zero)** | per-request | pay only while serving           |
+| `web`, `gateway`, `iam`, `students`, `config`, `finance`, `grades`, `attendance`, `comms`, `uniforms` | **0 (scale-to-zero)** | per-request | pay only while serving |
+| `billing`, `scholarships`, `docs` | not deployed | — | stubs: no implementation, flags off |
+
+**dev runs everything at zero, and that is enforced, not intended.**
+`modules/cloud_run` has a precondition that FAILS the apply if any service asks
+for `min_instances > 0` outside prod. Two always-warm services are what produced a
+sibling project's ~700 MXN/month bill; the control that failed there was a human
+remembering to check. To warm the demo before a meeting use `make cloud-warm`,
+which sets it with `gcloud` — so the next apply undoes it and warmth can never
+quietly persist. prod flips `gateway` and `iam` to warm through its own tfvars.
 
 High per-instance concurrency packs requests onto fewer instances. All services
 share one reusable `cloud_run` module — the cost profile is just the variables
 passed in (`min_instances`, `cpu_idle`, `startup_cpu_boost`, `concurrency`).
 
-**Cloud SQL** starts at `db-g1-small` with auto storage increase; bump `db_tier`
-and set `db_availability_type = "REGIONAL"` for prod HA.
+**Database.** dev runs on an EXTERNAL Postgres (`use_cloud_sql = false`), because
+Cloud SQL cannot scale to zero and was the entire resting cost of the environment.
+The DSN arrives as the `DATABASE_URL` secret; `pkg/dbdsn.Resolve()` reads it before
+it assembles a Cloud SQL socket DSN, so the switch costs no service code. prod sets
+`use_cloud_sql = true` and gets `db_tier` / `db_availability_type = "REGIONAL"`.
 
 **Budget alerts** are provisioned from day one (`budget.tf`): email at 50/80/100%
 of actual spend and 100% of forecast. Alerts warn — they do not cap spend.
@@ -75,11 +92,19 @@ of actual spend and 100% of forecast. Alerts warn — they do not cap spend.
 - **No secrets in code or tfvars.** Secret Manager holds values; Cloud Run injects
   them at runtime; `*.tfvars` is gitignored.
 - **App DB role** (`app`) is **not the instance owner** and **NOBYPASSRLS** — RLS
-  policies always apply. Run `terraform/db/setup_app_role.sql` once per env as an
-  owner connection to fix role attributes and baseline grants.
-- **Cloud SQL** has no public IP; reached via the Cloud SQL proxy volume.
-- Only `gateway` is public (`allow_unauthenticated`); all other services are
-  `INGRESS_TRAFFIC_INTERNAL_ONLY`.
+  policies always apply. `scripts/migrate-cloud.sh` runs
+  `terraform/db/setup_app_role.sql` and the migrations on ONE connection, as one
+  role — `ALTER DEFAULT PRIVILEGES` is per-grantor, so splitting them leaves the
+  `app` role with no rights on any new table.
+- **Only `web` is public** (`allow_unauthenticated`). Every other service has
+  `allow_unauthenticated = false`, so the boundary is `roles/run.invoker` plus
+  audience-scoped OIDC (`pkg/gcpauth`).
+- Ingress is `ALL`, NOT `INTERNAL_ONLY`. Internal ingress is a network filter
+  evaluated BEFORE authentication, and Cloud Run → Cloud Run over `*.run.app`
+  egresses to the public internet unless a VPC connector or Direct VPC egress is
+  configured — neither is, deliberately, because both cost money. Internal-only
+  would therefore reject every gateway call with a 404 from Cloud Run's frontend,
+  before reaching any code.
 - `govulncheck` + `go mod verify` gate every build.
 
 ## Owner temporary password
@@ -115,11 +140,19 @@ the owner is required to rotate at first login (enforced server-side by the
 The gateway issues auth tokens **only** as cookies `gl_access` / `gl_refresh`
 with `HttpOnly; Secure; SameSite=Strict` (Phase B). This constrains deployment:
 
-- **Same-site topology (required).** The web app and the gateway MUST be
-  same-site — a shared registrable domain via reverse-proxy / path routing
-  (e.g. `app.example.com` + `app.example.com/api`, or an edge that fronts both).
-  With `SameSite=Strict`, cross-site cookies are NOT sent on the SPA's `fetch`
-  calls, so a split-domain deployment breaks the auth flow.
+- **Same-site topology (required) — and it does NOT require buying a domain.**
+  With `SameSite=Strict` the browser never sends the cookies cross-site, and
+  `run.app` is on the Public Suffix List, so `web-x.run.app` and
+  `gateway-y.run.app` are DIFFERENT sites: login would appear to succeed and every
+  subsequent `/me` would return 401.
+  This is solved in the app, not in DNS: `apps/web/app/api/[...path]/route.ts`
+  proxies `/api/v1/*` to the gateway from the web app's own origin, so the cookies
+  are first-party. It reads `GATEWAY_URL` per request, which also removes the
+  ordering problem that a build-time `rewrites()` destination would create — the
+  gateway's URL only exists after `terraform apply`.
+  A shared registrable domain (`app.example.mx` + `api.example.mx`) is the nicer
+  answer when one exists, and the proxy can be dropped then. It is not a
+  prerequisite for deploying.
 - **TLS everywhere (required).** `Secure` cookies are only sent over HTTPS.
   Shared envs are HTTPS on Cloud Run; **local dev must run behind TLS** (or a
   TLS-terminating proxy) for the cookie flow to work end to end.

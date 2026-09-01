@@ -1,0 +1,9 @@
+{
+  "name": "billing-killswitch",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "dependencies": {
+    "@google-cloud/billing": "^4.4.0"
+  }
+}

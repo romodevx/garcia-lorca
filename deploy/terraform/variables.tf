@@ -50,6 +50,38 @@ variable "seed_owner_secret" {
   default     = false
 }
 
+# ---- Database backend -----------------------------------------------------
+# The demo environment runs on an external Postgres (Neon free tier) because
+# Cloud SQL cannot scale to zero and was the ENTIRE resting cost of this
+# environment (~$9.70/mo). Switching costs nothing in code: pkg/dbdsn.Resolve()
+# reads DATABASE_URL first and only assembles the Cloud SQL socket DSN when it is
+# absent. Prod keeps Cloud SQL for parity and operational control.
+variable "use_cloud_sql" {
+  description = "Provision Cloud SQL and wire services to it via the /cloudsql socket. false = supply DATABASE_URL from Secret Manager instead (external Postgres, e.g. Neon)."
+  type        = bool
+  default     = true
+}
+
+variable "database_url" {
+  description = "Full Postgres connection URL, used only when use_cloud_sql=false. Injected at apply time from a secure source; NEVER committed."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "iam_jwt_secret" {
+  description = "HMAC signing key for iam access/refresh tokens. Injected at apply time; NEVER committed. Required in every shared env — iam refuses to boot without it (see services/iam/cmd/main.go)."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "web_origin" {
+  description = "Browser origin(s) the gateway allows for CORS, comma-separated. Deliberately a plain string and NOT module.web.uri: referencing the web service here while web reads the gateway URI would make module.gateway and module.web depend on each other, and Terraform refuses the cycle. With the same-origin proxy the browser never makes a cross-origin call, so this exists for native mobile clients. Fill in after the first apply."
+  type        = string
+  default     = ""
+}
+
 # ---- Cloud SQL ------------------------------------------------------------
 variable "db_tier" {
   description = "Cloud SQL machine tier. Start small (db-g1-small) and scale up later."
@@ -146,9 +178,9 @@ variable "monthly_budget_amount" {
 }
 
 variable "budget_currency" {
-  description = "Currency code for the budget amount."
+  description = "Currency code for the budget amount. MUST match the billing account's own currency — the Budget API rejects a mismatch with a bare \"Request contains an invalid argument\" that never mentions currency, which is a genuinely awful hour to spend. Check yours in the console under Billing."
   type        = string
-  default     = "USD"
+  default     = "MXN"
 }
 
 variable "budget_alert_emails" {

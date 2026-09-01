@@ -2,6 +2,8 @@
 # Scale by raising db_tier and switching availability_type to REGIONAL for prod.
 
 resource "google_sql_database_instance" "main" {
+  count = var.use_cloud_sql ? 1 : 0
+
   project          = var.project_id
   name             = "garcia-lorca-${var.env}"
   region           = var.region
@@ -27,9 +29,31 @@ resource "google_sql_database_instance" "main" {
     }
 
     ip_configuration {
-      # No public IP. Access is via the Cloud SQL proxy / private path only.
-      ipv4_enabled = false
-      # private_network = "projects/<project>/global/networks/<vpc>"  # set when VPC exists
+      # A public IP with NO authorized networks.
+      #
+      # This used to be ipv4_enabled = false with private_network commented out,
+      # which the Cloud SQL API rejects outright: an instance requires at least a
+      # public IPv4 address or a configured private network. The apply failed
+      # here, before creating anything.
+      #
+      # "Public IP" is a misleading name for this posture. authorized_networks is
+      # EMPTY, so no address on the internet may open a connection. Reachability
+      # comes from IAM instead: Cloud Run's built-in connector and the Cloud SQL
+      # Auth Proxy both authenticate through the Admin API as
+      # roles/cloudsql.client. There is no password-on-the-open-internet path.
+      #
+      # The private-IP alternative needs a VPC plus Direct VPC egress or a
+      # Serverless VPC connector — real money and real moving parts for an
+      # environment whose entire point is costing almost nothing. Prod can revisit
+      # it; this is the documented trade, not an oversight.
+      ipv4_enabled = true
+
+      # Belt and braces: reject any connection that is not TLS.
+      ssl_mode = "ENCRYPTED_ONLY"
+
+      # Deliberately empty. Adding an entry here is what would actually expose the
+      # instance to the internet.
+      # authorized_networks = []
     }
 
     insights_config {
@@ -43,8 +67,10 @@ resource "google_sql_database_instance" "main" {
 }
 
 resource "google_sql_database" "app" {
+  count = var.use_cloud_sql ? 1 : 0
+
   project  = var.project_id
-  instance = google_sql_database_instance.main.name
+  instance = google_sql_database_instance.main[0].name
   name     = var.db_name
 }
 
@@ -63,10 +89,65 @@ resource "google_sql_database" "app" {
 # snippet in db/setup_app_role.sql (run once by an admin/owner connection),
 # because Terraform's google_sql_user does not manage GRANT/role attributes.
 resource "google_sql_user" "app" {
+  count = var.use_cloud_sql ? 1 : 0
+
   project  = var.project_id
-  instance = google_sql_database_instance.main.name
+  instance = google_sql_database_instance.main[0].name
   name     = var.db_app_user
 
-  # Password comes from Secret Manager, not from tfvars or code.
-  password = google_secret_manager_secret_version.db_app_password.secret_data
+  # The password is GENERATED AT APPLY TIME and flows one way: random_password ->
+  # Secret Manager version -> this user. It used to read the secret version whose
+  # data came from var.db_app_password (default ""), which meant either an empty
+  # password or, worse, an operator writing a value out of band afterwards: Cloud
+  # Run then mounted "latest" (the new password) while Postgres kept the old one,
+  # every service died on "password authentication failed", and ignore_changes
+  # guaranteed no later apply would ever reconcile them.
+  # Rotating later is: terraform apply -replace=random_password.db_app
+  password = google_secret_manager_secret_version.db_app_password[0].secret_data
+}
+
+# ---- Migration role -------------------------------------------------------
+# Migrations need DDL, which the `app` role deliberately does not have. Cloud
+# SQL's built-in `postgres` user is NOT usable for this: a new instance ships it
+# with NO password set, so there is simply no credential to connect with — the
+# runbook used to say "run this as the superuser" without ever creating one.
+#
+# A user created through the Cloud SQL API gets cloudsqlsuperuser, which is
+# enough to create tables and grant on them. Its password is generated here and
+# stored in Secret Manager, the same one-way flow as the app password.
+#
+# scripts/migrate-cloud.sh connects AS THIS ROLE for both setup_app_role.sql and
+# the migrations, because ALTER DEFAULT PRIVILEGES is per-grantor: split them
+# across two roles and `app` inherits nothing on any new table.
+resource "random_password" "db_migrator" {
+  count   = var.use_cloud_sql ? 1 : 0
+  length  = 32
+  special = false
+}
+
+resource "google_secret_manager_secret" "db_migrator_password" {
+  count     = var.use_cloud_sql ? 1 : 0
+  project   = var.project_id
+  secret_id = "garcia-lorca-db-migrator-password-${var.env}"
+  labels    = local.labels
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_secret_manager_secret_version" "db_migrator_password" {
+  count       = var.use_cloud_sql ? 1 : 0
+  secret      = google_secret_manager_secret.db_migrator_password[0].id
+  secret_data = random_password.db_migrator[0].result
+}
+
+resource "google_sql_user" "migrator" {
+  count    = var.use_cloud_sql ? 1 : 0
+  project  = var.project_id
+  instance = google_sql_database_instance.main[0].name
+  name     = "migrator"
+  password = google_secret_manager_secret_version.db_migrator_password[0].secret_data
 }

@@ -27,6 +27,7 @@ import (
 
 	"github.com/garcia-lorca/gen/go/garcialorca/iam/v1/iamv1connect"
 	"github.com/garcia-lorca/pkg/dbdsn"
+	"github.com/garcia-lorca/pkg/dbpool"
 	"github.com/garcia-lorca/pkg/logger"
 	"github.com/garcia-lorca/services/iam/internal/adapters/bcrypt"
 	grpcadapter "github.com/garcia-lorca/services/iam/internal/adapters/grpc"
@@ -76,7 +77,11 @@ func buildMux(log *slog.Logger) (*http.ServeMux, error) {
 	userRepo := pgadapter.NewUserRepo(db, tenantID)
 	roleRepo := pgadapter.NewRoleRepo(db, tenantID)
 	hasher := bcrypt.NewHasher(0)
-	tokens := jwt.NewHMAC(jwtSecret(log), tokenIssuer, refreshTTL, time.Now)
+	secret, err := jwtSecret(log)
+	if err != nil {
+		return nil, err
+	}
+	tokens := jwt.NewHMAC(secret, tokenIssuer, refreshTTL, time.Now)
 
 	auth := usecase.NewAuthService(userRepo, roleRepo, hasher, tokens, tokens, tenantID, accessTokenTTL, time.Now)
 	admin := usecase.NewAdminService(userRepo, roleRepo, hasher, tenantID, func() string { return uuid.NewString() })
@@ -100,19 +105,53 @@ func openDB() (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Warn)})
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Warn)})
+	if err != nil {
+		return nil, err
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+	// database/sql opens UNLIMITED connections by default. Nine services on Cloud
+	// Run, each allowed several instances, would exhaust a small managed Postgres.
+	dbpool.Tune(sqlDB)
+	return db, nil
 }
 
-// jwtSecret reads IAM_JWT_SECRET, or generates an ephemeral one (dev only —
-// tokens do not survive a restart; production supplies the secret).
-func jwtSecret(log *slog.Logger) []byte {
+// errMissingJWTSecret stops the boot when a shared environment has no signing
+// key configured. Deliberately fatal rather than degraded: see jwtSecret.
+var errMissingJWTSecret = errors.New("IAM_JWT_SECRET must be set outside a local environment")
+
+// jwtSecret reads IAM_JWT_SECRET. When it is absent, the behaviour depends on
+// where we are running:
+//
+//   - LOCAL (APP_ENV empty or "local"): generate an ephemeral key and warn.
+//     docker-compose never restarts iam, so a per-process key is invisible and
+//     saves developers from managing a secret.
+//   - ANY SHARED ENVIRONMENT (dev/staging/prod): refuse to boot.
+//
+// The second case is not caution, it is a scar. Under Cloud Run with
+// min_instances=0 this service sleeps after ~15 minutes of idle; the next
+// request wakes a NEW process which, with an ephemeral key, cannot validate a
+// single token it issued before sleeping. The user is silently thrown back to
+// the login screen mid-session, and two concurrent instances sign with two
+// different keys. A revision that refuses to start is a loud failure someone
+// fixes in a minute; a service that quietly forgets sessions is a demo that
+// falls apart in front of a customer.
+func jwtSecret(log *slog.Logger) ([]byte, error) {
 	if s := os.Getenv("IAM_JWT_SECRET"); s != "" {
-		return []byte(s)
+		return []byte(s), nil
+	}
+	if appEnv := os.Getenv("APP_ENV"); appEnv != "" && appEnv != "local" {
+		return nil, fmt.Errorf("%w (APP_ENV=%s)", errMissingJWTSecret, appEnv)
 	}
 	b := make([]byte, 32)
-	_, _ = rand.Read(b)
-	log.Warn("IAM_JWT_SECRET not set; generated an ephemeral signing key (dev only)")
-	return []byte(hex.EncodeToString(b))
+	if _, err := rand.Read(b); err != nil {
+		return nil, fmt.Errorf("generate ephemeral signing key: %w", err)
+	}
+	log.Warn("IAM_JWT_SECRET not set; generated an ephemeral signing key (local only — tokens do not survive a restart)")
+	return []byte(hex.EncodeToString(b)), nil
 }
 
 func recoverFn(_ context.Context, _ connect.Spec, _ http.Header, p any) error {

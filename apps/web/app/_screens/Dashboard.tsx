@@ -9,7 +9,8 @@ import { listCycles } from "../config/api";
 import { listCharges } from "../finance/api";
 import { listStudents } from "../students/api";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+import { API_URL } from "../api-url";
+
 const money = (cents: number): string => "$" + Math.round(cents / 100).toLocaleString("es-MX");
 
 function ModuleCard({ m, i, onOpen }: { m: ModuleDef; i: number; onOpen: (id: string) => void }): ReactElement {

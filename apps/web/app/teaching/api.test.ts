@@ -1,22 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  captureGrade,
-  getAttendanceRoster,
-  getRoster,
-  listAssignments,
-  listGroups,
-  listTerms,
-  saveAttendance,
-} from "./api";
+
+// NEXT_PUBLIC_* is inlined at BUILD time, so app/api-url.ts resolves the base URL
+// once when the module is first imported — not on every call. The env therefore
+// has to be stubbed BEFORE importing, which is also what production actually
+// does. Stubbing afterwards used to appear to work only because the old helper
+// re-read process.env on every request.
+let captureGrade: typeof import("./api").captureGrade;
+let getAttendanceRoster: typeof import("./api").getAttendanceRoster;
+let getRoster: typeof import("./api").getRoster;
+let listAssignments: typeof import("./api").listAssignments;
+let listGroups: typeof import("./api").listGroups;
+let listTerms: typeof import("./api").listTerms;
+let saveAttendance: typeof import("./api").saveAttendance;
 
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
 });
 
-beforeEach(() => {
-  // The client reads its base URL from the public env at call time.
+beforeEach(async () => {
   vi.stubEnv("NEXT_PUBLIC_API_URL", "http://gw");
+  vi.resetModules();
+  ({ captureGrade, getAttendanceRoster, getRoster, listAssignments, listGroups, listTerms, saveAttendance } =
+    await import("./api"));
 });
 
 function jsonResponse(body: unknown, status = 200): Response {

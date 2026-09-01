@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { listStudents, type Student } from "../../students/api";
 import { field } from "./parts";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+import { API_URL } from "../../api-url";
+
 
 /**
  * Picks the pupil a counter sale belongs to.

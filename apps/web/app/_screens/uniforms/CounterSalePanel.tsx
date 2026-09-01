@@ -8,7 +8,8 @@ import type { Student } from "../../students/api";
 import { StudentPicker } from "./StudentPicker";
 import { EmptyState, ErrorNote, field, label, money } from "./parts";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+import { API_URL } from "../../api-url";
+
 
 /**
  * The till.

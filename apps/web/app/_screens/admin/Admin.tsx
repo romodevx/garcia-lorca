@@ -21,8 +21,9 @@ import { RolesPanel } from "./RolesPanel";
 import { TeacherLinkPanel } from "./TeacherLinkPanel";
 import { UsersPanel } from "./UsersPanel";
 
+import { API_URL } from "../../api-url";
+
 // Gateway base URL for the browser (public env; matches AppShell/compose).
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
 export interface AdminProps {
   onBack: () => void;

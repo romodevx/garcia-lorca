@@ -13,6 +13,7 @@
 # (never committed). If left empty, manage versions entirely out of band.
 
 resource "google_secret_manager_secret" "db_app_password" {
+  count     = var.use_cloud_sql ? 1 : 0
   project   = var.project_id
   secret_id = "garcia-lorca-db-app-password-${var.env}"
   labels    = local.labels
@@ -24,21 +25,84 @@ resource "google_secret_manager_secret" "db_app_password" {
   depends_on = [google_project_service.apis]
 }
 
-# Bootstrap variable — injected by CI from a secure source, defaults empty.
-variable "db_app_password" {
-  description = "App DB password. Injected by CI from a secure source; NEVER committed. Leave empty to manage versions out of band."
-  type        = string
-  default     = ""
-  sensitive   = true
+# GENERATED, not supplied. An operator-supplied password that defaulted to ""
+# produced either an empty credential or a permanent split-brain: the value
+# written out of band afterwards became Cloud Run's "latest" while Postgres kept
+# the one Terraform had set, and ignore_changes meant no apply ever reconciled
+# them. Generating it here keeps exactly one source of truth.
+# Rotate with: terraform apply -replace=random_password.db_app
+resource "random_password" "db_app" {
+  count   = var.use_cloud_sql ? 1 : 0
+  length  = 32
+  special = false # avoids quoting hazards in DSNs and shell one-liners
 }
 
 resource "google_secret_manager_secret_version" "db_app_password" {
-  secret      = google_secret_manager_secret.db_app_password.id
-  secret_data = var.db_app_password
+  count       = var.use_cloud_sql ? 1 : 0
+  secret      = google_secret_manager_secret.db_app_password[0].id
+  secret_data = random_password.db_app[0].result
+}
+
+# ---- DATABASE_URL (external Postgres, when use_cloud_sql = false) ----------
+# pkg/dbdsn.Resolve() reads DATABASE_URL before assembling the Cloud SQL socket
+# DSN, so this is the whole switch: no service code changes.
+resource "google_secret_manager_secret" "database_url" {
+  count     = var.use_cloud_sql ? 0 : 1
+  project   = var.project_id
+  secret_id = "garcia-lorca-database-url-${var.env}"
+  labels    = local.labels
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_secret_manager_secret_version" "database_url" {
+  count       = var.use_cloud_sql ? 0 : 1
+  secret      = google_secret_manager_secret.database_url[0].id
+  secret_data = var.database_url
 
   lifecycle {
-    # Once the secret has a real value (managed out of band), ignore drift so a
-    # bootstrap apply never clobbers the live password.
+    precondition {
+      condition     = var.database_url != ""
+      error_message = "database_url must be provided when use_cloud_sql = false; inject it at apply time (TF_VAR_database_url=...) and never commit it."
+    }
+    ignore_changes = [secret_data]
+  }
+}
+
+# ---- iam token signing key ------------------------------------------------
+# iam REFUSES TO BOOT without this outside a local environment. It used to fall
+# back to a random per-process key, which under scale-to-zero silently
+# invalidated every session each time the instance slept. See
+# services/iam/cmd/main.go jwtSecret().
+resource "google_secret_manager_secret" "iam_jwt_secret" {
+  project   = var.project_id
+  secret_id = "garcia-lorca-iam-jwt-secret-${var.env}"
+  labels    = local.labels
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "random_password" "iam_jwt" {
+  count   = var.iam_jwt_secret == "" ? 1 : 0
+  length  = 64
+  special = false
+}
+
+resource "google_secret_manager_secret_version" "iam_jwt_secret" {
+  secret      = google_secret_manager_secret.iam_jwt_secret.id
+  secret_data = var.iam_jwt_secret != "" ? var.iam_jwt_secret : random_password.iam_jwt[0].result
+
+  lifecycle {
+    # Rotating this logs every user out, so never let a re-apply do it by
+    # accident. Deliberate rotation: terraform apply -replace=random_password.iam_jwt
     ignore_changes = [secret_data]
   }
 }

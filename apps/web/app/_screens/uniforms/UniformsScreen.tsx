@@ -9,7 +9,8 @@ import { InventoryPanel } from "./InventoryPanel";
 import { OrdersPanel } from "./OrdersPanel";
 import { ErrorNote, money, NARROW, SkeletonRows, StatCards } from "./parts";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+import { API_URL } from "../../api-url";
+
 
 type TabId = "counter" | "orders" | "inventory" | "catalog";
 

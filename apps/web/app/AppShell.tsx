@@ -20,6 +20,8 @@ import { ModulePlaceholder } from "./_screens/ModulePlaceholder";
 import { useTheme } from "./theme/ThemeProvider";
 import { login as apiLogin, changePassword as apiChangePassword, logout as apiLogout, me as apiMe, refresh as apiRefresh, type MeResult } from "./auth/api";
 
+import { API_URL } from "./api-url";
+
 type View =
   | { screen: "login" }
   | { screen: "changePassword" }
@@ -34,8 +36,6 @@ type View =
   | { screen: "admin" }
   | { screen: "module"; moduleId: string };
 
-// Gateway base URL for the browser (public env; matches compose NEXT_PUBLIC_API_URL).
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
 // Chrome fallback: color + the institution subtitle used until a real per-user
 // profile lands. The identity itself now comes from the authenticated principal

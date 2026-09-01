@@ -10,7 +10,8 @@ import { getOverdue, listCharges, registerPayment, type Charge, type PaymentMeth
 import { centsToPesosInput, formatCents, pesosToCents } from "./money";
 import { listStudents, type Student } from "../../students/api";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+import { API_URL } from "../../api-url";
+
 
 // Money crosses the boundary as integer cents; formatting/parsing goes through
 // the tested money helpers (locale-aware, cents-exact) — never a naive parseFloat.

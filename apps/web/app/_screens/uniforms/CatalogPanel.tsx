@@ -6,7 +6,8 @@ import { createItem, updateItem, UniformsError, upsertSizes, type Level, type Si
 import { Drawer } from "./InventoryPanel";
 import { EmptyState, ErrorNote, field, label, money } from "./parts";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+import { API_URL } from "../../api-url";
+
 
 const LEVELS: { id: Level; label: string }[] = [
   { id: "", label: "Todos los niveles" },

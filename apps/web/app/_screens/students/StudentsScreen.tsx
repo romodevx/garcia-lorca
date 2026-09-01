@@ -16,7 +16,8 @@ import {
 import { listCycles, listGradeLevels, listGroups, listLevels, type Cycle, type GradeLevel, type Group, type Level } from "../../config/api";
 import { enrollIntoGrade, StudentsError, type Placement } from "../../students/api";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+import { API_URL } from "../../api-url";
+
 
 // ── admission status → pill (design language) ──
 interface StatusMeta {

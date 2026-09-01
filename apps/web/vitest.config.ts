@@ -18,6 +18,18 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
-    include: ["**/*.test.{ts,tsx}"]
+    include: ["**/*.test.{ts,tsx}"],
+    // Vitest defaults to 5s. That is comfortable here (the whole suite runs in
+    // ~5s on a dev machine) and far too tight on Cloud Build's default e2-medium
+    // worker, where the same suite takes ~300s and the heaviest test — a full
+    // login → dashboard → finance → logout flow driven by userEvent — blew past
+    // 5s and failed the deploy.
+    //
+    // This is a machine-speed accommodation, not a flaky test being papered
+    // over: the flow passes deterministically, it is simply bounded by how fast
+    // jsdom and userEvent can run. Kept generous so a slower CI worker never
+    // fails a build for a reason that has nothing to do with the code.
+    testTimeout: 30_000,
+    hookTimeout: 30_000
   }
 });

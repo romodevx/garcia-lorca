@@ -13,7 +13,8 @@ import {
 } from "../../finance/api";
 import { EmptyHint, ErrorAlert, Section, TextField } from "./parts";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+import { API_URL } from "../../api-url";
+
 
 /** The calendar's limit, not ours: February has no 29th three years in four. */
 const MAX_DUE_DAY = 28;

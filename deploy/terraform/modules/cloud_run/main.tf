@@ -7,6 +7,22 @@ resource "google_cloud_run_v2_service" "this" {
   location = var.region
   ingress  = var.ingress
 
+  # THE COST GUARDRAIL. A single always-warm service costs ~$7/month idle, and
+  # with cpu_idle=false it is ~$62. Two of them are what turned a sibling project
+  # into a ~700 MXN/month bill that nobody noticed for weeks.
+  #
+  # The control that failed there was a human remembering to check. This one
+  # fails the apply instead: outside prod, no service may hold an instance warm.
+  # If a demo ever genuinely needs warmth, that is what scripts/cloud-warm.sh is
+  # for — a temporary, deliberate, reversible `gcloud run services update`, not a
+  # setting that quietly persists in the infrastructure.
+  lifecycle {
+    precondition {
+      condition     = var.environment == "prod" || var.min_instances == 0
+      error_message = "min_instances must be 0 outside prod (service '${var.name}' in '${var.environment}' asked for ${var.min_instances}). An always-warm instance bills 24/7 even with zero traffic. For a temporary warm-up before a demo use scripts/cloud-warm.sh instead."
+    }
+  }
+
   template {
     service_account                  = var.service_account_email
     max_instance_request_concurrency = var.concurrency
