@@ -13,6 +13,7 @@ package gcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -29,6 +30,17 @@ import (
 // library's 10s default is tight; Receive keeps extending it while the handler
 // runs, up to ReceiveSettings.MaxExtension.
 const ackDeadline = 30 * time.Second
+
+const (
+	// maxResubscribes bounds the recovery from a vanished subscription. Enough
+	// that an emulator restart or a deleted subscription is absorbed; small
+	// enough that a genuinely broken configuration still stops and says so
+	// rather than spinning forever.
+	maxResubscribes = 10
+	// resubscribeDelay gives the broker a moment to come back before trying
+	// again. Seconds, because the thing on the other side is usually restarting.
+	resubscribeDelay = 2 * time.Second
+)
 
 // Client publishes to and consumes from Cloud Pub/Sub. It is safe for
 // concurrent use, and callers must Close it to release the publisher goroutines
@@ -92,7 +104,81 @@ func (c *Client) Subscribe(ctx context.Context, subscription string, h pubsub.Ha
 	if cfg.Topic != nil {
 		topic = cfg.Topic.ID()
 	}
-	return c.receive(ctx, sub, topic, h)
+	return c.consume(ctx, topic, subscription, h)
+}
+
+// DeleteSubscription removes a subscription. It exists for tests that need to
+// simulate one disappearing under a running consumer, which is what an emulator
+// restart does.
+func (c *Client) DeleteSubscription(ctx context.Context, subscription string) error {
+	if err := c.client.Subscription(subscription).Delete(ctx); err != nil {
+		return fmt.Errorf("pubsub/gcp: delete subscription %q: %w", subscription, err)
+	}
+	return nil
+}
+
+// consume receives until the caller's context ends, recreating the subscription
+// if it disappears underneath.
+//
+// A subscription CAN vanish: restarting the emulator wipes every one of them,
+// and a person or a script can delete one in a real project. When that happened,
+// Receive returned NotFound, the service treated it as fatal and exited — and
+// because the dev container keeps running with a dead process inside, the school
+// saw a module that answered nothing until somebody restarted it by hand. dev
+// runs demos every day; a broker blip has to cost a reconnection, not an outage.
+//
+// Only NotFound is retried, and only so many times. Anything else — a permission
+// error, a broken config — is still fatal, because a service that quietly
+// consumes nothing forever is worse than one that stops and says why.
+func (c *Client) consume(ctx context.Context, topic, subscription string, h pubsub.Handler) error {
+	for attempt := 0; ; attempt++ {
+		sub, err := c.ensureSubscription(ctx, topic, subscription)
+		if err != nil {
+			return err
+		}
+		err = c.receive(ctx, sub, topic, h)
+		if err == nil || ctx.Err() != nil {
+			// A clean stop, or the caller asked us to.
+			return err
+		}
+		if status.Code(errors.Unwrap(err)) != codes.NotFound || attempt >= maxResubscribes {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(resubscribeDelay):
+		}
+	}
+}
+
+// ensureSubscription returns the subscription, creating it when it is missing.
+func (c *Client) ensureSubscription(ctx context.Context, topic, subscription string) (*gcppubsub.Subscription, error) {
+	gcpTopic, err := c.topic(ctx, topic)
+	if err != nil {
+		return nil, err
+	}
+	sub := c.client.Subscription(subscription)
+	exists, err := sub.Exists(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("pubsub/gcp: check subscription %q: %w", subscription, err)
+	}
+	if exists {
+		return sub, nil
+	}
+	created, err := c.client.CreateSubscription(ctx, subscription, gcppubsub.SubscriptionConfig{
+		Topic:       gcpTopic,
+		AckDeadline: ackDeadline,
+	})
+	if err != nil {
+		// A concurrent replica may have won the race; fall back to the existing
+		// subscription rather than failing startup.
+		if !isAlreadyExists(err) {
+			return nil, fmt.Errorf("pubsub/gcp: create subscription %q on %q: %w", subscription, topic, err)
+		}
+		return c.client.Subscription(subscription), nil
+	}
+	return created, nil
 }
 
 // SubscribeTopic creates the topic and the subscription bound to it when they
@@ -100,31 +186,7 @@ func (c *Client) Subscribe(ctx context.Context, subscription string, h pubsub.Ha
 // for a service that owns its subscription (its main wires it at startup) and
 // must run against a blank emulator.
 func (c *Client) SubscribeTopic(ctx context.Context, topic, subscription string, h pubsub.Handler) error {
-	gcpTopic, err := c.topic(ctx, topic)
-	if err != nil {
-		return err
-	}
-
-	sub := c.client.Subscription(subscription)
-	exists, err := sub.Exists(ctx)
-	if err != nil {
-		return fmt.Errorf("pubsub/gcp: check subscription %q: %w", subscription, err)
-	}
-	if !exists {
-		sub, err = c.client.CreateSubscription(ctx, subscription, gcppubsub.SubscriptionConfig{
-			Topic:       gcpTopic,
-			AckDeadline: ackDeadline,
-		})
-		if err != nil {
-			// A concurrent replica may have won the race; fall back to the
-			// existing subscription rather than failing startup.
-			if !isAlreadyExists(err) {
-				return fmt.Errorf("pubsub/gcp: create subscription %q on %q: %w", subscription, topic, err)
-			}
-			sub = c.client.Subscription(subscription)
-		}
-	}
-	return c.receive(ctx, sub, topic, h)
+	return c.consume(ctx, topic, subscription, h)
 }
 
 // Close stops the batching publisher of every topic used so far and closes the
