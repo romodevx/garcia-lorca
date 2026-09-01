@@ -186,6 +186,13 @@ type DepositWrite struct {
 	UnallocatedCents int64
 }
 
+// IncomeLine is what one concept earned in a period.
+type IncomeLine struct {
+	ConceptID   string
+	Concept     string
+	AmountCents int64
+}
+
 // DepositRecord is a stored deposit with what it did.
 type DepositRecord struct {
 	Deposit          domain.Deposit
@@ -258,6 +265,11 @@ type FinanceRepository interface {
 	// claimed: the sum of their live deposits, less what those deposits paid.
 	// Cancelled deposits do not count — that money went back.
 	UnallocatedCents(ctx context.Context, studentID string) (int64, error)
+
+	// IncomeLines sums what was collected between two dates, grouped by the
+	// concept the money was charged for. Cancelled charges are excluded: money
+	// against a voided charge is a correction to make, not income to report.
+	IncomeLines(ctx context.Context, from, to time.Time) ([]IncomeLine, error)
 
 	// GetDeposit returns one deposit by id, or KindNotFound.
 	GetDeposit(ctx context.Context, id string) (domain.Deposit, error)

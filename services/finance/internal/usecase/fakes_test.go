@@ -433,6 +433,32 @@ func (f *fakeRepo) UnallocatedCents(_ context.Context, studentID string) (int64,
 	return deposited - allocated, nil
 }
 
+func (f *fakeRepo) IncomeLines(_ context.Context, from, to time.Time) ([]ports.IncomeLine, error) {
+	end := to.AddDate(0, 0, 1)
+	byConcept := map[string]int64{}
+	for chargeID, ps := range f.payments {
+		charge, ok := f.charges[chargeID]
+		if !ok || charge.Status() == domain.StatusCancelled {
+			continue
+		}
+		for _, p := range ps {
+			if p.PaidAt().Before(from) || !p.PaidAt().Before(end) {
+				continue
+			}
+			byConcept[charge.ConceptID()] += p.Amount().Int64()
+		}
+	}
+	out := make([]ports.IncomeLine, 0, len(byConcept))
+	for conceptID, cents := range byConcept {
+		out = append(out, ports.IncomeLine{
+			ConceptID:   conceptID,
+			Concept:     f.concepts[conceptID].Name(),
+			AmountCents: cents,
+		})
+	}
+	return out, nil
+}
+
 func (f *fakeRepo) GetDeposit(_ context.Context, id string) (domain.Deposit, error) {
 	for _, d := range f.deposits {
 		if d.ID() == id {

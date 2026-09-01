@@ -321,6 +321,45 @@ func toProtoDeposits(ds []domain.Deposit) []*financev1.Deposit {
 	return out
 }
 
+// IncomeByConcept is what the school earned in a period.
+func (h *FinanceHandler) IncomeByConcept(ctx context.Context, req *connect.Request[financev1.IncomeByConceptRequest]) (*connect.Response[financev1.IncomeByConceptResponse], error) {
+	from, err := parseIncomeDate(req.Msg.GetFrom())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	to, err := parseIncomeDate(req.Msg.GetTo())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	income, err := h.finance.IncomeByConcept(ctx, from, to)
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	lines := make([]*financev1.IncomeLine, 0, len(income.Lines))
+	for _, l := range income.Lines {
+		lines = append(lines, &financev1.IncomeLine{
+			ConceptId: l.ConceptID, Concept: l.Concept, AmountCents: l.AmountCents,
+		})
+	}
+	return connect.NewResponse(&financev1.IncomeByConceptResponse{
+		Lines: lines, TotalCents: income.TotalCents,
+	}), nil
+}
+
+// parseIncomeDate reads a period bound. Empty is refused rather than defaulted:
+// a report over "everything since the beginning" is almost never what was meant,
+// and it is the kind of mistake read as a real number.
+func parseIncomeDate(raw string) (time.Time, error) {
+	if raw == "" {
+		return time.Time{}, glerrors.New(glerrors.KindInvalid, "the period needs both dates")
+	}
+	d, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return time.Time{}, glerrors.New(glerrors.KindInvalid, "dates must be YYYY-MM-DD")
+	}
+	return d, nil
+}
+
 // VoidDeposit cancels a deposit and releases what it settled.
 func (h *FinanceHandler) VoidDeposit(ctx context.Context, req *connect.Request[financev1.VoidDepositRequest]) (*connect.Response[financev1.VoidDepositResponse], error) {
 	if err := h.finance.VoidDeposit(ctx, req.Msg.GetId(), req.Msg.GetReason()); err != nil {

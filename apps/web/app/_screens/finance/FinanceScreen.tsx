@@ -14,6 +14,7 @@ import { API_URL } from "../../api-url";
 import { CollectDrawer, type CollectStudent } from "./CollectDrawer";
 import { StudentPicker } from "./StudentPicker";
 import { CashUpPanel } from "./CashUpPanel";
+import { IncomePanel } from "./IncomePanel";
 
 /** One key per payment attempt. Mirrors PaymentPanel, which had it right. */
 function newAttemptKey(): string {
@@ -140,6 +141,17 @@ function PayDrawer({ charge, name, onClose, onPaid }: { charge: Charge; name: st
       </div>
     </div>
   );
+}
+
+/** Today, as the wire wants it. */
+function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/** The first of the current month. */
+function monthStart(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
 export interface FinanceScreenProps {
@@ -342,8 +354,11 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
               </div>
               <button onClick={() => setCashUp(false)} aria-label="Cerrar" style={{ ...qb, width: 40, height: 40 }}><Icon name="close" size={19} /></button>
             </div>
-            <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px" }}>
+            <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px", display: "flex", flexDirection: "column", gap: 24 }}>
               <CashUpPanel day="" />
+              {/* The month so far, under the day: closing the till and knowing
+                  how the month is going are the same sitting. */}
+              <IncomePanel from={monthStart()} to={today()} />
             </div>
           </div>
         </div>

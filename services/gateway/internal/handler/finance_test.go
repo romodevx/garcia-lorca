@@ -74,6 +74,9 @@ type fakeFinance struct {
 	depositPaidAt  time.Time
 	depositResult  client.DepositResult
 	deposits       []client.Deposit
+	incomeFrom     string
+	incomeTo       string
+	income         client.Income
 	cashUpDay      string
 	cashUp         client.CashUp
 	voidedDeposit  string
@@ -105,6 +108,11 @@ func (f *fakeFinance) ListDeposits(_ context.Context, studentID string) ([]clien
 func (f *fakeFinance) DailyCashUp(_ context.Context, day string) (client.CashUp, error) {
 	f.cashUpDay = day
 	return f.cashUp, f.err
+}
+
+func (f *fakeFinance) IncomeByConcept(_ context.Context, from, to string) (client.Income, error) {
+	f.incomeFrom, f.incomeTo = from, to
+	return f.income, f.err
 }
 
 func (f *fakeFinance) VoidDeposit(_ context.Context, id, reason string) error {
@@ -784,5 +792,21 @@ func TestFinanceVoidDepositNeedsAReason(t *testing.T) {
 	}
 	if svc.voidedDeposit != "" {
 		t.Errorf("the service was asked to cancel %q despite the missing reason", svc.voidedDeposit)
+	}
+}
+
+// A period with a missing or malformed bound is refused at the edge. A report
+// over "everything" reads like a real number and is nobody's question.
+func TestFinanceIncomeNeedsBothDates(t *testing.T) {
+	svc := &fakeFinance{}
+	h := handler.NewFinanceHandler(svc)
+
+	rec := doReq(t, h.IncomeByConcept, http.MethodGet, "/api/v1/finance/income?from=2026-10-01", "")
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+	if svc.incomeFrom != "" {
+		t.Error("the service was asked for an unbounded period")
 	}
 }

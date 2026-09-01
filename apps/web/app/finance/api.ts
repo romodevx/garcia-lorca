@@ -557,6 +557,34 @@ export async function getCashUp(baseURL: string, day: string): Promise<CashUp> {
   };
 }
 
+/** What one concept earned in a period. */
+export interface IncomeLine {
+  conceptId: string;
+  concept: string;
+  amountCents: number;
+}
+
+/** A period's income, biggest line first. */
+export interface Income {
+  lines: IncomeLine[];
+  totalCents: number;
+}
+
+/**
+ * What the school earned between two days, by what it charged for.
+ *
+ * Counted on the day the money changed hands, not the day the charge was
+ * issued: for anyone paying late the two are months apart, and reporting on the
+ * charge date credits October with September's arrears.
+ */
+export async function getIncome(baseURL: string, from: string, to: string): Promise<Income> {
+  const res = await getJSON<{ lines?: IncomeLine[]; totalCents?: number }>(
+    baseURL,
+    `/income?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+  );
+  return { lines: res.lines ?? [], totalCents: res.totalCents ?? 0 };
+}
+
 function depositBody(input: RegisterDepositInput): Record<string, unknown> {
   return {
     studentId: input.studentId,

@@ -257,3 +257,50 @@ func TestRLSIsolatesDeposits(t *testing.T) {
 		t.Errorf("tenant B saw a credit of %d (err %v)", credit, cerr)
 	}
 }
+
+// The income query is a grouped join over three tables. It is the kind of thing
+// that works against a fake and is wrong against SQL, so it is proven here.
+func TestIncomeLinesGroupsCollectedMoneyByConcept(t *testing.T) {
+	tenant, student := tenantA, "80000000-0000-0000-0000-000000000006"
+	charge := seedConceptAndCharge(t, tenant, "60000000-0000-0000-0000-000000000061", "colegiatura income",
+		"61000000-0000-0000-0000-000000000061", student, cycleCredit, 320000, 0,
+		time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC))
+
+	repo := appRepo(t, tenant)
+	paidOn := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	if _, _, _, err := repo.RegisterPayment(context.Background(),
+		newPayment(t, "91000000-0000-0000-0000-000000000061", tenant, charge.ID(), 200000, paidOn), derive); err != nil {
+		t.Fatalf("RegisterPayment: %v", err)
+	}
+
+	lines, err := repo.IncomeLines(context.Background(),
+		time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("IncomeLines: %v", err)
+	}
+	var got int64
+	for _, l := range lines {
+		if l.ConceptID == charge.ConceptID() {
+			got = l.AmountCents
+			if l.Concept != "colegiatura income" {
+				t.Errorf("concept name = %q, want the catalog name", l.Concept)
+			}
+		}
+	}
+	if got != 200000 {
+		t.Errorf("income for the concept = %d, want 200000", got)
+	}
+
+	// September is another month's income. Counting it twice is how a school
+	// convinces itself it had a good October.
+	before, err := repo.IncomeLines(context.Background(),
+		time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("IncomeLines(September): %v", err)
+	}
+	for _, l := range before {
+		if l.ConceptID == charge.ConceptID() {
+			t.Errorf("September counted %d of October's money", l.AmountCents)
+		}
+	}
+}

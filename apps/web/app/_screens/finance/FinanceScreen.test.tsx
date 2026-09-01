@@ -15,6 +15,7 @@ vi.mock("../../finance/api", () => ({
   previewDeposit: vi.fn(),
   registerDeposit: vi.fn(),
   getCashUp: vi.fn(),
+  getIncome: vi.fn(),
 }));
 vi.mock("../../config/api", () => ({ listCycles: vi.fn() }));
 vi.mock("../../students/api", () => ({ listStudents: vi.fn() }));
@@ -48,6 +49,7 @@ beforeEach(() => {
   finance.getAccount.mockResolvedValue({ charges: [], payments: [], totalBalanceCents: 0, unallocatedCents: 0 });
   finance.previewDeposit.mockResolvedValue({ allocations: [], surcharges: [], unallocatedCents: 0 });
   finance.getCashUp.mockResolvedValue({ deposits: [], cancelled: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0 });
+  finance.getIncome.mockResolvedValue({ lines: [], totalCents: 0 });
 });
 afterEach(() => vi.clearAllMocks());
 

@@ -1147,6 +1147,35 @@ func (r *Repository) UnallocatedCents(ctx context.Context, studentID string) (in
 	return credit, nil
 }
 
+// IncomeLines sums collected money per concept over a window, in ONE grouped
+// query rather than a read per concept.
+//
+// The window is on payments.paid_at — the day the money changed hands. Grouping
+// on the charge's due date instead would credit October with September's
+// arrears, which is precisely the month a school most wants to read honestly.
+//
+// Payments against a cancelled charge are excluded. That money is a correction
+// to make, not income to report.
+func (r *Repository) IncomeLines(ctx context.Context, from, to time.Time) ([]ports.IncomeLine, error) {
+	start := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, from.Location())
+	end := time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, to.Location()).AddDate(0, 0, 1)
+
+	var rows []ports.IncomeLine
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		return tx.Table("payments p").
+			Select("c.concept_id AS concept_id, k.name AS concept, COALESCE(SUM(p.amount_cents), 0) AS amount_cents").
+			Joins("JOIN charges c ON c.id = p.charge_id").
+			Joins("JOIN charge_concepts k ON k.id = c.concept_id").
+			Where("p.paid_at >= ? AND p.paid_at < ? AND c.status <> ?", start, end, domain.StatusCancelled).
+			Group("c.concept_id, k.name").
+			Scan(&rows).Error
+	})
+	if err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "summing income by concept", err)
+	}
+	return rows, nil
+}
+
 // GetDeposit returns one deposit by id (KindNotFound if absent or hidden by RLS).
 func (r *Repository) GetDeposit(ctx context.Context, id string) (domain.Deposit, error) {
 	var out domain.Deposit

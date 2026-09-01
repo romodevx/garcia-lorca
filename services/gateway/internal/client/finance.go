@@ -391,6 +391,36 @@ func toDeposits(ds []*financev1.Deposit) []Deposit {
 	return out
 }
 
+// IncomeLine is what one concept earned in a period.
+type IncomeLine struct {
+	ConceptID   string `json:"conceptId"`
+	Concept     string `json:"concept"`
+	AmountCents int64  `json:"amountCents"`
+}
+
+// Income is a period's takings, by what the school charged for.
+type Income struct {
+	Lines      []IncomeLine `json:"lines"`
+	TotalCents int64        `json:"totalCents"`
+}
+
+// IncomeByConcept returns what came in between two days, biggest line first.
+func (c *FinanceClient) IncomeByConcept(ctx context.Context, from, to string) (Income, error) {
+	res, err := c.rpc.IncomeByConcept(ctx, connect.NewRequest(&financev1.IncomeByConceptRequest{
+		From: from, To: to,
+	}))
+	if err != nil {
+		return Income{}, err
+	}
+	lines := make([]IncomeLine, 0, len(res.Msg.GetLines()))
+	for _, l := range res.Msg.GetLines() {
+		lines = append(lines, IncomeLine{
+			ConceptID: l.GetConceptId(), Concept: l.GetConcept(), AmountCents: l.GetAmountCents(),
+		})
+	}
+	return Income{Lines: lines, TotalCents: res.Msg.GetTotalCents()}, nil
+}
+
 // VoidDeposit cancels a deposit and releases what it settled.
 func (c *FinanceClient) VoidDeposit(ctx context.Context, id, reason string) error {
 	_, err := c.rpc.VoidDeposit(ctx, connect.NewRequest(&financev1.VoidDepositRequest{

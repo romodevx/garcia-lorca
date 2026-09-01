@@ -119,6 +119,10 @@ func (f *fakeRepo) RegisterDeposit(_ context.Context, d domain.Deposit,
 
 func (f *fakeRepo) UnallocatedCents(_ context.Context, _ string) (int64, error) { return 0, nil }
 
+func (f *fakeRepo) IncomeLines(_ context.Context, _, _ time.Time) ([]ports.IncomeLine, error) {
+	return nil, nil
+}
+
 func (f *fakeRepo) GetDeposit(_ context.Context, _ string) (domain.Deposit, error) {
 	return domain.Deposit{}, glerrors.ErrNotFound
 }

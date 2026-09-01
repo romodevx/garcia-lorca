@@ -30,6 +30,7 @@ type FinanceService interface {
 	PreviewDeposit(ctx context.Context, studentID string, amountCents int64, paidAt time.Time) (client.DepositResult, error)
 	ListDeposits(ctx context.Context, studentID string) ([]client.Deposit, error)
 	DailyCashUp(ctx context.Context, day string) (client.CashUp, error)
+	IncomeByConcept(ctx context.Context, from, to string) (client.Income, error)
 	VoidDeposit(ctx context.Context, id, reason string) error
 	ListOverdue(ctx context.Context, cycleID string) ([]client.Charge, error)
 }
@@ -429,6 +430,27 @@ func (h *FinanceHandler) DailyCashUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, cut)
+}
+
+// IncomeByConcept handles GET /api/v1/finance/income?from=…&to=… — what the
+// school earned in a period, by what it charged for. Both dates are required:
+// a report over "everything since the beginning" is almost never what was
+// meant, and it is the kind of mistake that gets read as a real number.
+func (h *FinanceHandler) IncomeByConcept(w http.ResponseWriter, r *http.Request) {
+	from := strings.TrimSpace(r.URL.Query().Get("from"))
+	to := strings.TrimSpace(r.URL.Query().Get("to"))
+	for _, raw := range []string{from, to} {
+		if _, err := time.Parse("2006-01-02", raw); err != nil {
+			http.Error(w, "from and to must be dates like 2026-10-01", http.StatusBadRequest)
+			return
+		}
+	}
+	income, err := h.svc.IncomeByConcept(r.Context(), from, to)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, income)
 }
 
 // VoidDeposit handles POST /api/v1/finance/deposits/{id}/void. The reason is

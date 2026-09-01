@@ -172,6 +172,35 @@ func (s *FinanceService) VoidDeposit(ctx context.Context, depositID, reason stri
 	return s.repo.VoidDeposit(ctx, voided)
 }
 
+// Income is what the school earned in a period, by what it charged for.
+type Income struct {
+	From, To   time.Time
+	Lines      []ports.IncomeLine
+	TotalCents int64
+}
+
+// IncomeByConcept answers the question a director actually asks: how much came
+// in for colegiaturas this month, and how much for everything else.
+//
+// It counts payments by the day the money changed hands, not the day the charge
+// was issued — the two are months apart for anyone paying late, and reporting
+// on the charge date would credit October with September's arrears.
+//
+// The lines come back biggest first. A report read on a phone is read from the
+// top, and alphabetical order buries the number that matters.
+func (s *FinanceService) IncomeByConcept(ctx context.Context, from, to time.Time) (Income, error) {
+	lines, err := s.repo.IncomeLines(ctx, from, to)
+	if err != nil {
+		return Income{}, err
+	}
+	sort.Slice(lines, func(i, j int) bool { return lines[i].AmountCents > lines[j].AmountCents })
+	income := Income{From: from, To: to, Lines: lines}
+	for _, l := range lines {
+		income.TotalCents += l.AmountCents
+	}
+	return income, nil
+}
+
 // CashUp is the day's takings: one number per method, the total, and the list
 // behind them.
 type CashUp struct {

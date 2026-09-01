@@ -105,6 +105,10 @@ service FinanceService {
   // list behind them. The artefact that replaces the notebook — at close of day
   // the office can say what came in without adding anything up by hand.
   rpc DailyCashUp(DailyCashUpRequest) returns (DailyCashUpResponse);
+  // IncomeByConcept is what the school earned in a period, by what it charged
+  // for. Counted on the day the money changed hands, not the day the charge was
+  // issued: the two are months apart for anyone paying late.
+  rpc IncomeByConcept(IncomeByConceptRequest) returns (IncomeByConceptResponse);
   // VoidDeposit cancels a deposit and releases what it settled. The row stays,
   // with its reason: a school that deletes money rows cannot explain its ledger.
   rpc VoidDeposit(VoidDepositRequest) returns (VoidDepositResponse);
@@ -600,4 +604,23 @@ message DailyCashUpResponse {
   int64 card_cents = 4;
   int64 transfer_cents = 5;
   int64 total_cents = 6;
+}
+
+// IncomeByConceptRequest asks what came in between two days, both inclusive.
+message IncomeByConceptRequest {
+  string from = 1;  // YYYY-MM-DD
+  string to = 2;    // YYYY-MM-DD, inclusive
+}
+
+// IncomeLine is what one concept earned in the period.
+message IncomeLine {
+  string concept_id = 1;
+  string concept = 2;
+  int64 amount_cents = 3;
+}
+
+// IncomeByConceptResponse is the period's income, biggest line first.
+message IncomeByConceptResponse {
+  repeated IncomeLine lines = 1;
+  int64 total_cents = 2;
 }
