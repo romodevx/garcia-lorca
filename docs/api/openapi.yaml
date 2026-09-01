@@ -1252,6 +1252,13 @@ components:
           description: Fixed surcharge added once per completed overdue month. Zero disables it.
         active: { type: boolean }
         policy: { $ref: '#/components/schemas/CollectionPolicy' }
+        schedule:
+          type: array
+          description: >
+            An explicit payment plan, replacing the uniform monthly amount.
+            Empty means the year is divided into equal parts, which is what most
+            schools do.
+          items: { $ref: '#/components/schemas/Installment' }
 
     Contact:
       type: object
@@ -1288,6 +1295,18 @@ components:
         kind: { type: string, enum: [holiday, vacation] }
         startsOn: { type: string, format: date }
         endsOn: { type: string, format: date }
+
+    Installment:
+      type: object
+      description: >
+        One payment of the year. A school does not always divide the year into
+        equal parts — "once meses, pero diciembre a la mitad y la otra mitad en
+        marzo" is a real arrangement, and N-equal-payments cannot express it.
+        The year comes from the cycle, so a schedule may run past December.
+      required: [month, amountCents]
+      properties:
+        month: { type: integer, minimum: 1, maximum: 12 }
+        amountCents: { type: integer, format: int64, minimum: 1 }
 
     CollectionPolicy:
       type: object
