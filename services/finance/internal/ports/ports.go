@@ -136,6 +136,29 @@ type CatalogReader interface {
 	GroupLevels(ctx context.Context, cycleID string) ([]GroupLevel, error)
 }
 
+// CalendarSnapshot is the school calendar as finance saw it at one moment: the
+// days the school is shut, plus a version to stamp on whatever was computed
+// from it.
+//
+// Version exists so a recomputation months later can tell whether it is looking
+// at the same calendar the cashier saw. Stale says the snapshot did not come
+// fresh from config — either it was served from cache after a failed read, or
+// config was unreachable and this is the weekends-only fallback. A number
+// derived from a stale calendar is still a number a person has to defend, so it
+// is recorded as such rather than passed off as current.
+type CalendarSnapshot struct {
+	Days    []time.Time
+	Version string
+	Stale   bool
+}
+
+// CalendarReader tells finance which days the school does not operate. config
+// owns the calendar; finance only reads it, and only to work out deadlines
+// counted in working days.
+type CalendarReader interface {
+	NonWorkingDays(ctx context.Context, cycleID string) (CalendarSnapshot, error)
+}
+
 // PaymentPublisher emits the finance domain events. Publishing is best-effort
 // and happens after the payment is durably stored: a broker outage must never
 // lose money that was already collected, so the use case ignores the returned

@@ -13,6 +13,7 @@ package configclient
 import (
 	"context"
 	"net/http"
+	"time"
 
 	connect "connectrpc.com/connect"
 
@@ -24,6 +25,9 @@ import (
 
 // Compile-time proof the adapter satisfies the consumer-defined port.
 var _ ports.CycleReader = (*Client)(nil)
+
+// And of the calendar port: config owns the school calendar, finance reads it.
+var _ ports.CalendarReader = (*Client)(nil)
 
 // Client reads school cycles from config by RPC. It depends only on the
 // generated Connect client and translates to the small, finance-owned CycleRef
@@ -123,3 +127,39 @@ func mapConfigErr(err error, what string) error {
 	}
 	return glerrors.Wrap(glerrors.KindInternal, "config "+what+" lookup failed", err)
 }
+
+// NonWorkingDays reads the cycle's closed periods from config and expands them
+// into individual days, which is the shape the working-day arithmetic wants.
+// config stores ranges because that is how a person enters "vacaciones de
+// invierno"; nobody downstream of here cares that it was one decision.
+//
+// A failure comes back as an error rather than an empty calendar: an empty
+// calendar is a claim that the school never closes, and CachedCalendar is the
+// one place allowed to decide what to do when the read fails.
+func (c *Client) NonWorkingDays(ctx context.Context, cycleID string) (ports.CalendarSnapshot, error) {
+	res, err := c.rpc.ListNonWorkingPeriods(ctx, connect.NewRequest(&configv1.ListNonWorkingPeriodsRequest{
+		CycleId: cycleID,
+	}))
+	if err != nil {
+		return ports.CalendarSnapshot{}, mapConfigErr(err, "school calendar")
+	}
+	var days []time.Time
+	for _, p := range res.Msg.GetPeriods() {
+		from, ferr := time.Parse(calendarDateLayout, p.GetStartsOn())
+		to, terr := time.Parse(calendarDateLayout, p.GetEndsOn())
+		if ferr != nil || terr != nil {
+			// config is the only writer and validates on the way in, so this is
+			// a contract break rather than bad user input. Skipping the period
+			// would silently shorten the calendar; say so instead.
+			return ports.CalendarSnapshot{}, glerrors.New(glerrors.KindInternal,
+				"config returned a non-working period with an unreadable date")
+		}
+		for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
+			days = append(days, d)
+		}
+	}
+	return ports.CalendarSnapshot{Days: days}, nil
+}
+
+// calendarDateLayout matches how config puts a calendar day on the wire.
+const calendarDateLayout = "2006-01-02"
