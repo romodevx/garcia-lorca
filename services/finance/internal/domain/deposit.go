@@ -1,0 +1,149 @@
+package domain
+
+import (
+	"strings"
+	"time"
+
+	glerrors "github.com/garcia-lorca/pkg/errors"
+)
+
+// Deposit is money as it arrived: one amount, one date, one method, one receipt.
+//
+// It exists because the school does not collect the way the old screen assumed.
+// A parent hands over an amount and says nothing else; what it covers is worked
+// out afterwards, oldest debt first. Recording the deposit and recording the
+// allocation as separate facts is what lets the office correct a split without
+// touching the money, and lets a receipt say "recibimos $6,700" even while the
+// months it covers are still being decided.
+//
+// The allocations themselves are Payments carrying this deposit's id. There is
+// one place that answers "what has been collected against this charge", and it
+// is still the payments table.
+//
+// A Deposit is a value. Void returns a new one rather than mutating, so a caller
+// holding the pre-void deposit keeps holding exactly what was true when it read
+// it.
+type Deposit struct {
+	id              string
+	tenantID        string
+	studentID       string
+	amount          Cents
+	method          string
+	reference       string
+	paidAt          time.Time
+	idempotencyKey  string
+	calendarVersion string
+	voidedAt        time.Time
+	voidReason      string
+}
+
+// NewDeposit builds a validated deposit.
+//
+// calendarVersion is the school calendar the allocation was worked out against.
+// A surcharge or an early-payment discount is a number someone has to defend
+// months later, and without this a recomputation cannot tell whether it is
+// looking at the same calendar the cashier saw. It is opaque to the domain.
+func NewDeposit(id, tenantID, studentID string, amountCents int64, method, reference string, paidAt time.Time, idempotencyKey, calendarVersion string) (Deposit, error) {
+	if strings.TrimSpace(id) == "" {
+		return Deposit{}, glerrors.New(glerrors.KindInvalid, "deposit id is required")
+	}
+	if strings.TrimSpace(tenantID) == "" {
+		return Deposit{}, glerrors.New(glerrors.KindInvalid, "tenant id is required")
+	}
+	if strings.TrimSpace(studentID) == "" {
+		return Deposit{}, glerrors.New(glerrors.KindInvalid, "student id is required")
+	}
+	// Same reasoning as Payment: a movement of no money is not a deposit, and
+	// NewCents still enforces the upper bound that keeps sums from overflowing.
+	if amountCents <= 0 {
+		return Deposit{}, glerrors.New(glerrors.KindInvalid, "deposit amount must be positive")
+	}
+	amount, err := NewCents(amountCents)
+	if err != nil {
+		return Deposit{}, err
+	}
+	if err := validateMethod(method); err != nil {
+		return Deposit{}, err
+	}
+	if paidAt.IsZero() {
+		return Deposit{}, glerrors.New(glerrors.KindInvalid, "deposit date is required")
+	}
+	return Deposit{
+		id: id, tenantID: tenantID, studentID: studentID,
+		amount: amount, method: method, reference: strings.TrimSpace(reference),
+		paidAt: paidAt, idempotencyKey: idempotencyKey,
+		calendarVersion: calendarVersion,
+	}, nil
+}
+
+// Void cancels a deposit, keeping the row and recording why.
+//
+// A cashier who keys $67,000 instead of $6,700 has to be able to undo it, and a
+// school that deletes money rows cannot explain its own ledger. The reason is
+// required: without one, a cancelled deposit is an unexplained hole in the day's
+// takings that someone will have to account for at the end of the month.
+//
+// Voiding an already-void deposit is a second cashier acting on a stale screen.
+// The first void stands and the second is refused, rather than quietly
+// overwriting who cancelled what, and when.
+func (d Deposit) Void(reason string, at time.Time) (Deposit, error) {
+	if d.Voided() {
+		return Deposit{}, glerrors.New(glerrors.KindConflict, "this deposit is already cancelled")
+	}
+	if strings.TrimSpace(reason) == "" {
+		return Deposit{}, glerrors.New(glerrors.KindInvalid, "cancelling a deposit needs a reason")
+	}
+	if at.IsZero() {
+		return Deposit{}, glerrors.New(glerrors.KindInvalid, "cancellation date is required")
+	}
+	out := d
+	out.voidedAt = at
+	out.voidReason = strings.TrimSpace(reason)
+	return out, nil
+}
+
+// Rehydrate rebuilds a stored deposit, void state included. Only the persistence
+// mapper calls it: NewDeposit is the constructor for new money, and it
+// deliberately cannot produce a voided deposit.
+func (d Deposit) Rehydrate(voidedAt time.Time, voidReason string) Deposit {
+	out := d
+	out.voidedAt = voidedAt
+	out.voidReason = strings.TrimSpace(voidReason)
+	return out
+}
+
+// ID returns the deposit's identifier.
+func (d Deposit) ID() string { return d.id }
+
+// TenantID returns the owning tenant.
+func (d Deposit) TenantID() string { return d.tenantID }
+
+// StudentID is the pupil whose family handed over the money.
+func (d Deposit) StudentID() string { return d.studentID }
+
+// Amount is the money as it arrived, in cents.
+func (d Deposit) Amount() Cents { return d.amount }
+
+// Method is how the money reached the school.
+func (d Deposit) Method() string { return d.method }
+
+// Reference identifies the money itself: a folio, a transfer id, a card slip.
+func (d Deposit) Reference() string { return d.reference }
+
+// PaidAt is when the money changed hands, which is not always when it was keyed.
+func (d Deposit) PaidAt() time.Time { return d.paidAt }
+
+// IdempotencyKey is the caller's handle on the attempt.
+func (d Deposit) IdempotencyKey() string { return d.idempotencyKey }
+
+// CalendarVersion is the school calendar the allocation was worked out against.
+func (d Deposit) CalendarVersion() string { return d.calendarVersion }
+
+// Voided reports whether the deposit has been cancelled.
+func (d Deposit) Voided() bool { return !d.voidedAt.IsZero() }
+
+// VoidedAt is when it was cancelled (zero if it was not).
+func (d Deposit) VoidedAt() time.Time { return d.voidedAt }
+
+// VoidReason is why it was cancelled.
+func (d Deposit) VoidReason() string { return d.voidReason }
