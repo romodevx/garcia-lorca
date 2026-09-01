@@ -61,16 +61,19 @@ func (tuitionPlanModel) TableName() string { return "tuition_plans" }
 // date part is meaningful. Status is a cached projection of the payments posted
 // against the charge (plus the terminal cancelled state).
 type chargeModel struct {
-	ID            string    `gorm:"column:id;primaryKey"`
-	TenantID      string    `gorm:"column:tenant_id"`
-	StudentID     string    `gorm:"column:student_id"`
-	CycleID       string    `gorm:"column:cycle_id"`
-	ConceptID     string    `gorm:"column:concept_id"`
-	Description   string    `gorm:"column:description"`
-	AmountCents   int64     `gorm:"column:amount_cents"`
-	DiscountCents int64     `gorm:"column:discount_cents"`
-	DueDate       time.Time `gorm:"column:due_date"`
-	Status        string    `gorm:"column:status"`
+	ID            string `gorm:"column:id;primaryKey"`
+	TenantID      string `gorm:"column:tenant_id"`
+	StudentID     string `gorm:"column:student_id"`
+	CycleID       string `gorm:"column:cycle_id"`
+	ConceptID     string `gorm:"column:concept_id"`
+	Description   string `gorm:"column:description"`
+	AmountCents   int64  `gorm:"column:amount_cents"`
+	DiscountCents int64  `gorm:"column:discount_cents"`
+	// Why the discount exists. Empty on the ones given before there was
+	// anywhere to record it, which is the truth about them.
+	DiscountReason string    `gorm:"column:discount_reason"`
+	DueDate        time.Time `gorm:"column:due_date"`
+	Status         string    `gorm:"column:status"`
 	// ExternalRef ties the charge to the row that caused it in another module
 	// (a uniforms fulfillment, say). Empty means the school's own charge; the
 	// empty string is what the "one concept per cycle" partial index covers, so

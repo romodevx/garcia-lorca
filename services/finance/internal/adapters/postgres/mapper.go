@@ -96,6 +96,12 @@ func toDomainCharge(m chargeModel, paidCents int64) (domain.Charge, error) {
 	if err != nil {
 		return domain.Charge{}, err
 	}
+	if m.DiscountCents > 0 {
+		c, err = c.WithDiscount(m.DiscountCents, paidCents, m.DiscountReason)
+		if err != nil {
+			return domain.Charge{}, err
+		}
+	}
 	if m.ExternalRef != "" {
 		c, err = c.WithExternalRef(m.ExternalRef)
 		if err != nil {
@@ -112,17 +118,18 @@ func toDomainCharge(m chargeModel, paidCents int64) (domain.Charge, error) {
 // CreatedAt/UpdatedAt are left zero so the DB assigns them via DEFAULT now().
 func fromDomainCharge(c domain.Charge) chargeModel {
 	return chargeModel{
-		ID:            c.ID(),
-		TenantID:      c.TenantID(),
-		StudentID:     c.StudentID(),
-		CycleID:       c.CycleID(),
-		ConceptID:     c.ConceptID(),
-		Description:   c.Description(),
-		AmountCents:   c.Amount().Int64(),
-		DiscountCents: c.Discount().Int64(),
-		DueDate:       c.DueDate(),
-		Status:        c.Status(),
-		ExternalRef:   c.ExternalRef(),
+		ID:             c.ID(),
+		TenantID:       c.TenantID(),
+		StudentID:      c.StudentID(),
+		CycleID:        c.CycleID(),
+		ConceptID:      c.ConceptID(),
+		Description:    c.Description(),
+		AmountCents:    c.Amount().Int64(),
+		DiscountCents:  c.Discount().Int64(),
+		DiscountReason: c.DiscountReason(),
+		DueDate:        c.DueDate(),
+		Status:         c.Status(),
+		ExternalRef:    c.ExternalRef(),
 	}
 }
 

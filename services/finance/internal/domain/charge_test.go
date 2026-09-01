@@ -128,7 +128,7 @@ func TestChargeDeriveStatusZeroEffective(t *testing.T) {
 
 func TestChargeWithDiscount(t *testing.T) {
 	c := validCharge(t, 250000, 0)
-	updated, err := c.WithDiscount(50000, 200000)
+	updated, err := c.WithDiscount(50000, 200000, "beca")
 	if err != nil {
 		t.Fatalf("WithDiscount: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestChargeWithDiscount(t *testing.T) {
 func TestChargeWithDiscountValidation(t *testing.T) {
 	c := validCharge(t, 250000, 0)
 	for _, discount := range []int64{-1, 250001} {
-		if _, err := c.WithDiscount(discount, 0); glerrors.KindOf(err) != glerrors.KindInvalid {
+		if _, err := c.WithDiscount(discount, 0, "beca"); glerrors.KindOf(err) != glerrors.KindInvalid {
 			t.Errorf("WithDiscount(%d): want KindInvalid, got %v", discount, err)
 		}
 	}
@@ -287,5 +287,38 @@ func TestChargeCancelIfUnpaidTwice(t *testing.T) {
 	}
 	if _, err := cancelled.CancelIfUnpaid(0); glerrors.KindOf(err) != glerrors.KindConflict {
 		t.Errorf("want KindConflict cancelling twice, got %v", err)
+	}
+}
+
+// A discount the system gives by itself has to say why. A parent asking why
+// September is $3,100 and not $3,200 deserves an answer that does not depend on
+// somebody remembering.
+func TestADiscountCarriesItsReason(t *testing.T) {
+	charge := validCharge(t, 250000, 0)
+
+	discounted, err := charge.WithDiscount(10000, 0, domain.ReasonEarlyPayment)
+	if err != nil {
+		t.Fatalf("WithDiscount: %v", err)
+	}
+	if discounted.DiscountReason() != domain.ReasonEarlyPayment {
+		t.Errorf("reason = %q, want %q", discounted.DiscountReason(), domain.ReasonEarlyPayment)
+	}
+}
+
+// Removing a discount clears the reason with it. A zero discount that still
+// claimed to be an early payment would be a row that contradicts itself.
+func TestRemovingADiscountClearsItsReason(t *testing.T) {
+	charge := validCharge(t, 250000, 0)
+	discounted, err := charge.WithDiscount(10000, 0, domain.ReasonEarlyPayment)
+	if err != nil {
+		t.Fatalf("WithDiscount: %v", err)
+	}
+
+	cleared, err := discounted.WithDiscount(0, 0, "")
+	if err != nil {
+		t.Fatalf("WithDiscount(0): %v", err)
+	}
+	if cleared.DiscountReason() != "" {
+		t.Errorf("reason = %q after removing the discount, want empty", cleared.DiscountReason())
 	}
 }

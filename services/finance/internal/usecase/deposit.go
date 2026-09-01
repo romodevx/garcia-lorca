@@ -78,6 +78,10 @@ func (s *FinanceService) RegisterDeposit(ctx context.Context, in DepositInput) (
 	if err != nil {
 		return DepositResult{}, err
 	}
+	tuition, err := s.repo.EnsureConceptOfKind(ctx, s.newID(), domain.KindTuition, tuitionConceptName)
+	if err != nil {
+		return DepositResult{}, err
+	}
 
 	deposit, err := domain.NewDeposit(s.newID(), s.tenantID, in.StudentID, in.AmountCents,
 		in.Method, in.Reference, when, in.IdempotencyKey, calendarVersion)
@@ -91,6 +95,7 @@ func (s *FinanceService) RegisterDeposit(ctx context.Context, in DepositInput) (
 		policy:      policy,
 		calendar:    calendar,
 		lateFeeID:   lateFee.ID(),
+		tuitionID:   tuition.ID(),
 		paidOn:      when,
 		description: lateFeeConceptName,
 	}
@@ -141,6 +146,7 @@ type depositPlanner struct {
 	policy      domain.CollectionPolicy
 	calendar    *schoolcal.Calendar
 	lateFeeID   string
+	tuitionID   string
 	paidOn      time.Time
 	description string
 }
@@ -158,16 +164,31 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 	})
 
 	var (
-		items   []domain.Payable
-		newFees = map[string]domain.Charge{}
-		fresh   []domain.Charge
+		items      []domain.Payable
+		newFees    = map[string]domain.Charge{}
+		fresh      []domain.Charge
+		discounted []domain.Charge
 	)
+	// budget walks alongside the items so the early-payment reward is only given
+	// where the money in hand actually settles that month. Granting it on a part
+	// payment would leave the month open at a price the school never set.
+	budget := p.deposit.Amount().Int64()
 	for _, c := range base {
+		charge, due := c.Charge, owed(c)
+		reduced, discountable, err := p.earlyPayment(c, budget)
+		if err != nil {
+			return ports.DepositWrite{}, err
+		}
+		if discountable {
+			discounted = append(discounted, reduced)
+			charge, due = reduced, reduced.Effective().Int64()-c.PaidCents
+		}
 		items = append(items, domain.Payable{
-			ChargeID:  c.Charge.ID(),
-			DueOn:     c.Charge.DueDate(),
-			OwedCents: owed(c),
+			ChargeID:  charge.ID(),
+			DueOn:     charge.DueDate(),
+			OwedCents: due,
 		})
+		budget -= min(budget, max(0, due))
 		// Whatever surcharge this charge has already been given, in the order it
 		// was given, comes before any new one: the older debt is the older debt.
 		for _, fee := range feesByCharge[c.Charge.ID()] {
@@ -177,10 +198,11 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 				OwedCents: owed(fee),
 				Surcharge: true,
 			})
+			budget -= min(budget, max(0, owed(fee)))
 		}
-		fee, ok, err := p.deriveSurcharge(c, feesByCharge[c.Charge.ID()])
-		if err != nil {
-			return ports.DepositWrite{}, err
+		fee, ok, ferr := p.deriveSurcharge(c, feesByCharge[c.Charge.ID()])
+		if ferr != nil {
+			return ports.DepositWrite{}, ferr
 		}
 		if ok {
 			newFees[fee.ID()] = fee
@@ -190,6 +212,7 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 				OwedCents: fee.Effective().Int64(),
 				Surcharge: true,
 			})
+			budget -= min(budget, fee.Effective().Int64())
 		}
 	}
 
@@ -212,6 +235,7 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 	}
 	return ports.DepositWrite{
 		Surcharges:       fresh,
+		Discounted:       discounted,
 		Allocations:      payments,
 		UnallocatedCents: unallocated,
 	}, nil
@@ -274,6 +298,36 @@ func (p *depositPlanner) deriveSurcharge(c ports.ChargeWithPaid, existing []port
 		return domain.Charge{}, false, err
 	}
 	return fee, true, nil
+}
+
+// earlyPayment grants the pronto pago on a monthly tuition charge, but only
+// when the money in hand settles that month outright.
+//
+// The condition is the whole point. The reward is for paying a month early, so
+// granting it on a part payment would leave the month open at a price the school
+// never set — and the office would have to explain a balance that does not match
+// any figure on the price list.
+//
+// It is given once: a charge that already carries a discount is left alone, so
+// a second deposit in the same window cannot reprice a month twice.
+func (p *depositPlanner) earlyPayment(c ports.ChargeWithPaid, budget int64) (domain.Charge, bool, error) {
+	if p.policy.EarlyPaymentCents <= 0 || c.Charge.ConceptID() != p.tuitionID {
+		return domain.Charge{}, false, nil
+	}
+	if c.Charge.Discount().Int64() > 0 || owed(c) <= 0 {
+		return domain.Charge{}, false, nil
+	}
+	due := c.Charge.DueDate()
+	monthStart := time.Date(due.Year(), due.Month(), 1, 0, 0, 0, 0, due.Location())
+	discount := domain.EarlyPaymentDiscount(p.policy, p.calendar, monthStart, p.paidOn)
+	if discount <= 0 || budget < owed(c)-discount {
+		return domain.Charge{}, false, nil
+	}
+	reduced, err := c.Charge.WithDiscount(discount, c.PaidCents, domain.ReasonEarlyPayment)
+	if err != nil {
+		return domain.Charge{}, false, err
+	}
+	return reduced, true, nil
 }
 
 // surchargeRefPrefix is how a materialised daily surcharge names the charge it

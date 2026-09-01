@@ -176,6 +176,10 @@ type DepositWrite struct {
 	// on them. The daily rule is derived, not billed, so a surcharge row exists
 	// only where there was movement.
 	Surcharges []domain.Charge
+	// Discounted are charges whose discount this deposit changed — the
+	// early-payment reward, granted only where the money actually settles the
+	// month. They are written before the allocations that assume the new amount.
+	Discounted []domain.Charge
 	// Allocations are the payments, each naming the charge it lands on.
 	Allocations []domain.Payment
 	// UnallocatedCents is the family's credit: money beyond what they owed.

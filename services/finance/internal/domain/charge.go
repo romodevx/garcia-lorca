@@ -43,8 +43,12 @@ type Charge struct {
 	description string
 	amount      Cents
 	discount    Cents
-	dueDate     time.Time
-	status      string
+	// discountReason is why the discount exists. It matters most for the ones
+	// the system gives by itself: a family asking why a month is cheaper than
+	// the price list deserves an answer that outlives whoever applied it.
+	discountReason string
+	dueDate        time.Time
+	status         string
 	// externalRef ties this charge to the row that caused it in another module
 	// (e.g. a uniforms fulfillment). Empty for the school's own charges —
 	// tuition and the like — which is what keeps the "one concept per cycle"
@@ -142,15 +146,35 @@ func (c Charge) DeriveStatus(paidCents int64) string {
 // re-derived from paidCents because changing the discount changes what is owed
 // (granting a scholarship can settle a charge outright). The new discount is
 // re-validated against the amount; over-amount is KindInvalid.
-func (c Charge) WithDiscount(discountCents int64, paidCents int64) (Charge, error) {
+func (c Charge) WithDiscount(discountCents int64, paidCents int64, reason string) (Charge, error) {
 	discount, err := validateDiscount(c.amount, discountCents)
 	if err != nil {
 		return Charge{}, err
 	}
 	c.discount = discount
+	c.discountReason = strings.TrimSpace(reason)
+	if discount == 0 {
+		// A zero discount that still claimed to be an early payment would be a
+		// row that contradicts itself.
+		c.discountReason = ""
+	}
 	c.status = c.DeriveStatus(paidCents)
 	return c, nil
 }
+
+// Reasons a discount exists. Open-ended — the school types its own for a
+// negotiated arrangement — but the ones the system gives by itself are named
+// here, so a report can find them without matching on free text.
+const (
+	// ReasonEarlyPayment is the pronto pago: a fixed amount off a month settled
+	// inside the early window.
+	ReasonEarlyPayment = "pronto_pago"
+)
+
+// DiscountReason is why the charge carries the discount it does. Empty on the
+// discounts given before there was anywhere to record it, which is the truth
+// about them.
+func (c Charge) DiscountReason() string { return c.discountReason }
 
 // Cancel returns a cancelled copy of the charge. Cancelling twice is a
 // KindConflict.

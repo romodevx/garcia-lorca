@@ -183,3 +183,75 @@ func TestTheStatementShowsTheFamilysCredit(t *testing.T) {
 		t.Errorf("credit = %d, want %d", account.UnallocatedCents, 1000000-670000)
 	}
 }
+
+// prontoPagoFixture is the school on the early-payment rule: $100 off any month
+// settled inside the first ten working days.
+func prontoPagoFixture(t *testing.T) *fixture {
+	t.Helper()
+	f := billingFixture(t)
+	if _, err := f.svc.UpsertTuitionPlan(context.Background(), usecase.TuitionPlanInput{
+		CycleID: testCycle, LevelID: testLevel,
+		EnrollmentCents: 50000, MonthlyCents: 320000,
+		Months: 10, FirstBilledMonth: 9, DueDay: 10, Active: true,
+		Policy: domain.CollectionPolicy{
+			DailyMode: true, LateFeeDailyCents: 1000, SurchargeCountsAllDays: true,
+			EarlyPaymentCents: 10000, EarlyPaymentDays: 10,
+		},
+	}); err != nil {
+		t.Fatalf("seed pronto-pago plan: %v", err)
+	}
+	runOn(t, f, "2026-09-10")
+	settleInscription(t, f)
+	f.clock = time.Date(2026, time.September, 3, 12, 0, 0, 0, time.UTC)
+	return f
+}
+
+// A family that pays early pays less, and the system does it rather than waiting
+// for someone at the counter to remember.
+func TestPayingEarlyTakesTheDiscount(t *testing.T) {
+	f := prontoPagoFixture(t)
+
+	// 3 September is the third working day of the month. September's tuition is
+	// $3,200, so $3,100 settles it.
+	got := deposit(t, f, 310000, "2026-09-03")
+
+	if got.UnallocatedCents != 0 {
+		t.Errorf("unallocated = %d, want 0 — $3,100 settles a discounted month", got.UnallocatedCents)
+	}
+	account, err := f.svc.GetAccount(context.Background(), testStudent)
+	if err != nil {
+		t.Fatalf("GetAccount: %v", err)
+	}
+	if account.TotalBalanceCents != 0 {
+		t.Errorf("balance = %d, want 0 — September is settled", account.TotalBalanceCents)
+	}
+	var discounted int
+	for _, c := range account.Charges {
+		if c.Charge.Discount().Int64() == 10000 && c.Charge.DiscountReason() == domain.ReasonEarlyPayment {
+			discounted++
+		}
+	}
+	if discounted != 1 {
+		t.Errorf("%d charges carry a recorded early-payment discount, want 1", discounted)
+	}
+}
+
+// Past the window the discount is gone. It is a reward for paying early, not a
+// price cut, and a system that gave it late would be quietly repricing the year.
+func TestPayingLateTakesNoDiscount(t *testing.T) {
+	f := prontoPagoFixture(t)
+	f.clock = time.Date(2026, time.September, 20, 12, 0, 0, 0, time.UTC)
+
+	got := deposit(t, f, 310000, "2026-09-20")
+
+	account, err := f.svc.GetAccount(context.Background(), testStudent)
+	if err != nil {
+		t.Fatalf("GetAccount: %v", err)
+	}
+	if account.TotalBalanceCents == 0 {
+		t.Errorf("balance = 0 — a late payment got the early discount")
+	}
+	if got.UnallocatedCents != 0 {
+		t.Errorf("unallocated = %d, want 0", got.UnallocatedCents)
+	}
+}

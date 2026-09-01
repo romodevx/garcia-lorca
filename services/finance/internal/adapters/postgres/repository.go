@@ -934,6 +934,19 @@ func (r *Repository) RegisterDeposit(
 			return glerrors.Wrap(glerrors.KindInternal, "storing deposit", err)
 		}
 
+		// The discounts come first: the allocations that follow assume the new,
+		// lower amount, and a charge saved after them would be a row whose
+		// payments were computed against a price it no longer has.
+		for _, c := range write.Discounted {
+			if err := tx.Model(&chargeModel{}).Where("id = ?", c.ID()).Updates(map[string]any{
+				"discount_cents":  c.Discount().Int64(),
+				"discount_reason": c.DiscountReason(),
+				"updated_at":      gorm.Expr("now()"),
+			}).Error; err != nil {
+				return glerrors.Wrap(glerrors.KindInternal, "applying discount", err)
+			}
+		}
+
 		for _, fee := range write.Surcharges {
 			model := fromDomainCharge(fee)
 			if err := tx.Create(&model).Error; err != nil {
@@ -941,7 +954,7 @@ func (r *Repository) RegisterDeposit(
 			}
 		}
 
-		settled, err := applyAllocations(tx, d, write.Allocations, open, write.Surcharges)
+		settled, err := applyAllocations(tx, d, write.Allocations, replaceCharges(open, write.Discounted), write.Surcharges)
 		if err != nil {
 			return err
 		}
@@ -1020,6 +1033,27 @@ func applyAllocations(
 		}
 	}
 	return settled, nil
+}
+
+// replaceCharges swaps in the discounted versions, so the allocation veto
+// measures each payment against the amount the family was actually charged
+// rather than the one read a moment before the discount was granted.
+func replaceCharges(open []ports.ChargeWithPaid, discounted []domain.Charge) []ports.ChargeWithPaid {
+	if len(discounted) == 0 {
+		return open
+	}
+	byID := make(map[string]domain.Charge, len(discounted))
+	for _, c := range discounted {
+		byID[c.ID()] = c
+	}
+	out := make([]ports.ChargeWithPaid, 0, len(open))
+	for _, c := range open {
+		if replacement, ok := byID[c.Charge.ID()]; ok {
+			c.Charge = replacement
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 // lockedChargesOf takes every live charge of a student FOR UPDATE and pairs each

@@ -253,10 +253,6 @@ func (s *FinanceService) ListCharges(ctx context.Context, studentID, cycleID str
 // covers the remaining balance settles the charge outright. A cancelled charge
 // owes nothing and cannot be discounted.
 func (s *FinanceService) ApplyDiscount(ctx context.Context, chargeID string, discountCents int64, reason string) (ports.ChargeWithPaid, error) {
-	// TODO(finance): persist discount reason/audit — the reason is captured at
-	// the boundary but has no column yet; it lands with the audit trail phase.
-	_ = reason
-
 	current, err := s.requireCharge(ctx, chargeID)
 	if err != nil {
 		return ports.ChargeWithPaid{}, err
@@ -265,7 +261,7 @@ func (s *FinanceService) ApplyDiscount(ctx context.Context, chargeID string, dis
 		return ports.ChargeWithPaid{}, glerrors.New(glerrors.KindInvalid, "cannot discount a cancelled charge")
 	}
 
-	discounted, err := current.Charge.WithDiscount(discountCents, current.PaidCents)
+	discounted, err := current.Charge.WithDiscount(discountCents, current.PaidCents, reason)
 	if err != nil {
 		return ports.ChargeWithPaid{}, err
 	}

@@ -365,6 +365,9 @@ func (f *fakeRepo) RegisterDeposit(
 	}
 
 	f.deposits = append(f.deposits, d)
+	for _, c := range write.Discounted {
+		f.charges[c.ID()] = c
+	}
 	for _, fee := range write.Surcharges {
 		f.charges[fee.ID()] = fee
 	}
