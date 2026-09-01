@@ -13,7 +13,11 @@ env        = "dev"
 # Both billing accounts belong to the owner; the second one is closed, so dev
 # bills to the same account as the sibling project. budget.tf filters by project,
 # so the alert below is not polluted by the other project's spend.
-billing_account_id = "018CA3-FF15AB-FAA61D"
+# Your billing account, from: gcloud beta billing accounts list
+# Deliberately a placeholder: an account identifier does not belong in a tracked
+# file, and this repo is handed to the school later. The real value goes in
+# dev.tfvars, which is gitignored.
+billing_account_id = "000000-000000-000000"
 
 # Image tag. Keep "latest" for a manual bootstrap build; CI overrides it with the
 # commit SHA (cloudbuild.yaml substitution _TAG) so infra and revision agree.
@@ -78,7 +82,7 @@ budget_alert_emails   = ["andres.roqa93@gmail.com"]
 # Leave this false until you have granted the role it needs, which lives on the
 # BILLING ACCOUNT and cannot be granted from Terraform:
 #   terraform apply ...                     # creates the SA with the flag false
-#   gcloud billing accounts add-iam-policy-binding 018CA3-FF15AB-FAA61D \
+#   gcloud billing accounts add-iam-policy-binding YOUR-BILLING-ACCOUNT-ID \
 #     --member="serviceAccount:$(terraform output -raw billing_killswitch_sa)" \
 #     --role="roles/billing.projectManager"
 # then flip it to true and apply again.

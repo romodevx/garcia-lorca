@@ -15,7 +15,7 @@ Sondas ejecutadas con `gcloud` el 2026-08-27:
 | Hecho | Evidencia |
 |---|---|
 | El proyecto `garcia-lorca` **ya existe** y está ACTIVE | `gcloud projects describe garcia-lorca` → `garcia-lorca 230382563795 ACTIVE` |
-| Tiene billing habilitado, en la cuenta **Heraldo** `018CA3-FF15AB-FAA61D` | `gcloud beta billing projects describe garcia-lorca` → `billingEnabled: True` |
+| Tiene billing habilitado, en la cuenta **Heraldo** `018CA3-…-FAA61D (redactado)` | `gcloud beta billing projects describe garcia-lorca` → `billingEnabled: True` |
 | La otra cuenta de facturación (`01483F-…`) está **CERRADA** (`OPEN=False`) | `gcloud beta billing accounts list` |
 | El proyecto está **limpio**: sin Cloud Run, sin Cloud SQL, sin Artifact Registry | `gcloud services list --enabled` → solo BigQuery/Firebase/logging por defecto |
 | **Heraldo tiene `minScale: 1` en sus DOS servicios** (`heraldo-api`, `heraldo-web`), cpu=1, 512Mi | `gcloud run services describe` (anotación `autoscaling.knative.dev/minScale: '1'`) |

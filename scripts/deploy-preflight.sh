@@ -15,7 +15,9 @@ set -u
 
 : "${PROJECT_ID:=garcia-lorca}"
 : "${REGION:=us-central1}"
-: "${BILLING_ACCOUNT_ID:=018CA3-FF15AB-FAA61D}"
+# No default on purpose: an account identifier does not belong in a tracked file.
+# Read it from the env tfvars when present, else ask for it.
+BILLING_ACCOUNT_ID="${BILLING_ACCOUNT_ID:-$(sed -n 's/^billing_account_id *= *"\(.*\)"/\1/p' deploy/terraform/environments/dev.tfvars 2>/dev/null | head -1)}"
 
 FAIL=0
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
@@ -93,7 +95,9 @@ done
 
 echo
 echo "BILLING-ACCOUNT ROLES (not project roles — this is the one that bites late)"
-if gcloud beta billing accounts describe "$BILLING_ACCOUNT_ID" >/dev/null 2>&1; then
+if [ -z "${BILLING_ACCOUNT_ID:-}" ] || [ "$BILLING_ACCOUNT_ID" = "000000-000000-000000" ]; then
+  warn "billing account not configured" "set billing_account_id in deploy/terraform/environments/dev.tfvars (gcloud beta billing accounts list)"
+elif gcloud beta billing accounts describe "$BILLING_ACCOUNT_ID" >/dev/null 2>&1; then
   ok "can read billing account $BILLING_ACCOUNT_ID"
 else
   bad "cannot read billing account $BILLING_ACCOUNT_ID" \
