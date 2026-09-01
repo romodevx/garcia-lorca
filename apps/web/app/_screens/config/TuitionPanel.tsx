@@ -135,7 +135,9 @@ export function TuitionPanel({ cycle, levels }: TuitionPanelProps): ReactElement
                       </td>
                       <td style={cell}>día {plan.dueDay}</td>
                       <td style={cell}>
-                        {plan.lateFeeCents === 0 ? "—" : `$${centsToPesos(plan.lateFeeCents)}`}
+                        {plan.policy.dailyMode
+                          ? `$${centsToPesos(plan.policy.lateFeeDailyCents)} / día`
+                          : plan.lateFeeCents === 0 ? "—" : `$${centsToPesos(plan.lateFeeCents)}`}
                       </td>
                     </>
                   )}
@@ -227,6 +229,15 @@ function PlanForm({
   const [firstMonth, setFirstMonth] = useState(String(plan?.firstBilledMonth ?? 9));
   const [dueDay, setDueDay] = useState(String(plan?.dueDay ?? 10));
   const [lateFee, setLateFee] = useState(plan === undefined ? "" : centsToPesos(plan.lateFeeCents));
+  // The M16 collection rule. Daily mode replaces the fixed monthly surcharge
+  // with an amount charged for every day the money is late.
+  const [dailyMode, setDailyMode] = useState(plan?.policy.dailyMode ?? false);
+  const [dailyFee, setDailyFee] = useState(
+    plan === undefined || plan.policy.lateFeeDailyCents === 0 ? "" : centsToPesos(plan.policy.lateFeeDailyCents));
+  const [allDays, setAllDays] = useState(plan?.policy.surchargeCountsAllDays ?? true);
+  const [earlyAmount, setEarlyAmount] = useState(
+    plan === undefined || plan.policy.earlyPaymentCents === 0 ? "" : centsToPesos(plan.policy.earlyPaymentCents));
+  const [earlyDays, setEarlyDays] = useState(String(plan?.policy.earlyPaymentDays ?? 0));
   const [error, setError] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState(false);
 
@@ -255,6 +266,19 @@ function PlanForm({
       return;
     }
 
+    const dailyCents = pesosToCents(dailyFee) ?? 0;
+    if (dailyMode && dailyCents <= 0) {
+      // The same rule the database enforces. Said here so the person reads what
+      // is missing instead of a constraint violation.
+      setError("El recargo diario necesita un monto, o no cobraría nada.");
+      return;
+    }
+    const window = wholeInRange(earlyDays, 0, MAX_DUE_DAY);
+    if (window === null) {
+      setError(`Los días de pronto pago van de 0 a ${MAX_DUE_DAY}.`);
+      return;
+    }
+
     setPending(true);
     setError(undefined);
     try {
@@ -270,6 +294,13 @@ function PlanForm({
         dueDay: day,
         lateFeeCents: pesosToCents(lateFee) ?? 0,
         active: true,
+        policy: {
+          dailyMode,
+          lateFeeDailyCents: dailyCents,
+          surchargeCountsAllDays: allDays,
+          earlyPaymentCents: pesosToCents(earlyAmount) ?? 0,
+          earlyPaymentDays: window,
+        },
       });
       onSaved();
     } catch {
@@ -293,6 +324,41 @@ function PlanForm({
         <TextField label="Mes de inicio" value={firstMonth} onChange={setFirstMonth} placeholder="9" />
         <TextField label="Día límite" value={dueDay} onChange={setDueDay} placeholder="10" />
         <TextField label="Recargo por mes vencido" value={lateFee} onChange={setLateFee} placeholder="150" />
+      </div>
+
+      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14, marginBottom: 12 }}>
+        <p style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text-muted)", marginBottom: 10 }}>
+          Cobranza
+        </p>
+        <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={dailyMode}
+            onChange={(e) => setDailyMode(e.target.checked)}
+            aria-label="Cobrar recargo por día"
+            style={{ width: 18, height: 18 }}
+          />
+          <span style={{ fontSize: 14, color: "var(--text)" }}>
+            Cobrar recargo por día en vez del monto fijo mensual
+          </span>
+        </label>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
+          <TextField label="Recargo por día" value={dailyFee} onChange={setDailyFee} placeholder="10" />
+          <TextField label="Pronto pago (monto)" value={earlyAmount} onChange={setEarlyAmount} placeholder="100" />
+          <TextField label="Pronto pago (días hábiles)" value={earlyDays} onChange={setEarlyDays} placeholder="5" />
+        </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={allDays}
+            onChange={(e) => setAllDays(e.target.checked)}
+            aria-label="Contar sábados, domingos y feriados"
+            style={{ width: 18, height: 18 }}
+          />
+          <span style={{ fontSize: 14, color: "var(--text)" }}>
+            Contar sábados, domingos y feriados en el recargo
+          </span>
+        </label>
       </div>
       <div style={{ display: "flex", gap: 10 }}>
         <Btn type="submit" icon="check" disabled={pending}>

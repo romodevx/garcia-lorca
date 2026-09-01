@@ -664,6 +664,29 @@ export interface TuitionPlan {
   /** Fixed surcharge added once per completed overdue month. Zero disables it. */
   lateFeeCents: number;
   active: boolean;
+  policy: CollectionPolicy;
+}
+
+/**
+ * What a late payment costs and what an early one saves. It rides with the
+ * tuition table because that is where a price lives, and it is per level: a
+ * school may treat maternal differently from preparatoria.
+ */
+export interface CollectionPolicy {
+  /**
+   * Picks the rule. false keeps the fixed monthly surcharge above; true charges
+   * `lateFeeDailyCents` for every day the money is late, and the monthly run
+   * stops issuing surcharge charges — the amount changes every night, so it is
+   * worked out at the moment of payment instead.
+   */
+  dailyMode: boolean;
+  lateFeeDailyCents: number;
+  /** Counts Saturdays, Sundays and holidays: the money is late on a Sunday too. */
+  surchargeCountsAllDays: boolean;
+  /** A fixed amount off, per month settled, inside the early window. */
+  earlyPaymentCents: number;
+  /** How many WORKING days that window lasts, from the first of the month. */
+  earlyPaymentDays: number;
 }
 
 export type TuitionPlanInput = Omit<TuitionPlan, "id">;
@@ -684,9 +707,27 @@ export async function upsertTuitionPlan(baseURL: string, input: TuitionPlanInput
   return sendJSON<TuitionPlan>(baseURL, "/tuition-plans", "PUT", input);
 }
 
-/** The whole tuition table of a cycle. */
+/**
+ * The whole tuition table of a cycle.
+ *
+ * A plan stored before M16 comes back without a policy, so it is filled in with
+ * the zero rule — the fixed monthly surcharge it already had. A missing field
+ * must not read as "daily surcharge of nothing".
+ */
 export async function listTuitionPlans(baseURL: string, cycleId: string): Promise<TuitionPlan[]> {
-  return getList<TuitionPlan>(baseURL, `/tuition-plans?cycleId=${encodeURIComponent(cycleId)}`, "plans");
+  const plans = await getList<Partial<TuitionPlan> & Omit<TuitionPlan, "policy">>(
+    baseURL, `/tuition-plans?cycleId=${encodeURIComponent(cycleId)}`, "plans");
+  return plans.map((p) => ({ ...p, policy: p.policy ?? emptyPolicy() }));
+}
+
+function emptyPolicy(): CollectionPolicy {
+  return {
+    dailyMode: false,
+    lateFeeDailyCents: 0,
+    surchargeCountsAllDays: true,
+    earlyPaymentCents: 0,
+    earlyPaymentDays: 0,
+  };
 }
 
 /**

@@ -23,7 +23,8 @@ const levels: Level[] = [
 beforeEach(() => {
   finance.listTuitionPlans.mockResolvedValue([
     { id: "tp1", cycleId: "c1", levelId: "lv2", enrollmentCents: 500000, monthlyCents: 320000,
-      months: 10, firstBilledMonth: 9, dueDay: 10, lateFeeCents: 15000, active: true },
+      months: 10, firstBilledMonth: 9, dueDay: 10, lateFeeCents: 15000, active: true,
+      policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 } },
   ]);
 });
 afterEach(() => vi.clearAllMocks());
@@ -63,6 +64,7 @@ describe("the tuition table", () => {
     finance.upsertTuitionPlan.mockResolvedValue({
       id: "tp2", cycleId: "c1", levelId: "lv1", enrollmentCents: 400000, monthlyCents: 250000,
       months: 11, firstBilledMonth: 8, dueDay: 5, lateFeeCents: 10000, active: true,
+      policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 },
     });
     render(<TuitionPanel cycle={cycle} levels={levels} />);
     await screen.findByText("Primaria");
@@ -134,5 +136,47 @@ describe("running the month", () => {
     await user.click(screen.getByRole("button", { name: /Generar cargos/ }));
 
     expect(await screen.findByText(/Kínder, Preparatoria/)).toBeInTheDocument();
+  });
+});
+
+describe("TuitionPanel — cobranza", () => {
+  // The $10 a day was configurable in the database and in the API and nowhere a
+  // person could reach. This is that field.
+  it("saves the daily surcharge and the early-payment reward", async () => {
+    const user = userEvent.setup();
+    render(<TuitionPanel cycle={cycle} levels={levels} />);
+
+    await screen.findByRole("row", { name: /Kínder/ });
+    await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
+    await user.type(screen.getByLabelText("Colegiatura mensual"), "3200");
+    await user.click(screen.getByLabelText("Cobrar recargo por día"));
+    await user.type(screen.getByLabelText("Recargo por día"), "10");
+    await user.type(screen.getByLabelText("Pronto pago (monto)"), "100");
+    await user.clear(screen.getByLabelText("Pronto pago (días hábiles)"));
+    await user.type(screen.getByLabelText("Pronto pago (días hábiles)"), "5");
+    await user.click(screen.getByRole("button", { name: /Guardar tabulador/ }));
+
+    await waitFor(() => expect(finance.upsertTuitionPlan).toHaveBeenCalled());
+    const sent = finance.upsertTuitionPlan.mock.calls[0]?.[1];
+    expect(sent?.policy.dailyMode).toBe(true);
+    expect(sent?.policy.lateFeeDailyCents).toBe(1000);
+    expect(sent?.policy.earlyPaymentCents).toBe(10000);
+    expect(sent?.policy.earlyPaymentDays).toBe(5);
+  });
+
+  // A daily rule with no amount charges nothing. The database refuses it; the
+  // form says so before the round trip.
+  it("refuses a daily rule with no amount", async () => {
+    const user = userEvent.setup();
+    render(<TuitionPanel cycle={cycle} levels={levels} />);
+
+    await screen.findByRole("row", { name: /Kínder/ });
+    await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
+    await user.type(screen.getByLabelText("Colegiatura mensual"), "3200");
+    await user.click(screen.getByLabelText("Cobrar recargo por día"));
+    await user.click(screen.getByRole("button", { name: /Guardar tabulador/ }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/recargo diario necesita un monto/);
+    expect(finance.upsertTuitionPlan).not.toHaveBeenCalled();
   });
 });
