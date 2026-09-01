@@ -30,19 +30,27 @@ func (chargeConceptModel) TableName() string { return "charge_concepts" }
 // one cycle. CycleID and LevelID are cross-service UUIDs validated by RPC, so
 // they carry no FK here.
 type tuitionPlanModel struct {
-	ID               string    `gorm:"column:id;primaryKey"`
-	TenantID         string    `gorm:"column:tenant_id"`
-	CycleID          string    `gorm:"column:cycle_id"`
-	LevelID          string    `gorm:"column:level_id"`
-	EnrollmentCents  int64     `gorm:"column:enrollment_cents"`
-	MonthlyCents     int64     `gorm:"column:monthly_cents"`
-	Months           int       `gorm:"column:months"`
-	FirstBilledMonth int       `gorm:"column:first_billed_month"`
-	DueDay           int       `gorm:"column:due_day"`
-	LateFeeCents     int64     `gorm:"column:late_fee_cents"`
-	Active           bool      `gorm:"column:active"`
-	CreatedAt        time.Time `gorm:"column:created_at"`
-	UpdatedAt        time.Time `gorm:"column:updated_at"`
+	ID               string `gorm:"column:id;primaryKey"`
+	TenantID         string `gorm:"column:tenant_id"`
+	CycleID          string `gorm:"column:cycle_id"`
+	LevelID          string `gorm:"column:level_id"`
+	EnrollmentCents  int64  `gorm:"column:enrollment_cents"`
+	MonthlyCents     int64  `gorm:"column:monthly_cents"`
+	Months           int    `gorm:"column:months"`
+	FirstBilledMonth int    `gorm:"column:first_billed_month"`
+	DueDay           int    `gorm:"column:due_day"`
+	LateFeeCents     int64  `gorm:"column:late_fee_cents"`
+	// M16 collection policy. late_fee_mode decides which of the two surcharge
+	// rules applies; existing rows default to 'monthly' so nothing already billed
+	// changes meaning.
+	LateFeeDailyCents      int64     `gorm:"column:late_fee_daily_cents"`
+	LateFeeMode            string    `gorm:"column:late_fee_mode"`
+	SurchargeCountsAllDays bool      `gorm:"column:surcharge_counts_all_days"`
+	EarlyPaymentCents      int64     `gorm:"column:early_payment_cents"`
+	EarlyPaymentDays       int       `gorm:"column:early_payment_days"`
+	Active                 bool      `gorm:"column:active"`
+	CreatedAt              time.Time `gorm:"column:created_at"`
+	UpdatedAt              time.Time `gorm:"column:updated_at"`
 }
 
 func (tuitionPlanModel) TableName() string { return "tuition_plans" }

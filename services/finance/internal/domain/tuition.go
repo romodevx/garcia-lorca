@@ -39,6 +39,12 @@ type TuitionPlanSpec struct {
 	DueDay       int
 	LateFeeCents int64
 	Active       bool
+
+	// Policy is what this level costs for paying late and saves for paying early.
+	// It travels with the plan because a school raises tuition and changes its
+	// late-fee rule in the same breath, and last year's charges must still
+	// reconcile against last year's rules.
+	Policy CollectionPolicy
 }
 
 // TuitionPlan is what one level costs in one cycle: the inscription, the monthly
@@ -62,6 +68,7 @@ type TuitionPlan struct {
 
 	dueDay       int
 	lateFeeCents int64
+	policy       CollectionPolicy
 	active       bool
 }
 
@@ -86,11 +93,23 @@ func NewTuitionPlan(spec TuitionPlanSpec) (TuitionPlan, error) {
 		return TuitionPlan{}, glerrors.New(glerrors.KindInvalid,
 			"the due day must be between 1 and 28, so it exists in February too")
 	}
+	if spec.Policy.DailyMode && spec.Policy.LateFeeDailyCents <= 0 {
+		// The same rule the database enforces (tuition_plans_daily_rate_ck).
+		// Caught here too so a half-configured plan is refused where the message
+		// can say what is missing, not as a constraint violation.
+		return TuitionPlan{}, glerrors.New(glerrors.KindInvalid,
+			"a daily late-fee rule needs a daily rate, or it charges nothing")
+	}
+	if spec.Policy.LateFeeDailyCents < 0 || spec.Policy.EarlyPaymentCents < 0 || spec.Policy.EarlyPaymentDays < 0 {
+		return TuitionPlan{}, glerrors.New(glerrors.KindInvalid, "an amount cannot be negative")
+	}
+
 	return TuitionPlan{
 		id: spec.ID, tenantID: spec.TenantID, cycleID: spec.CycleID, levelID: spec.LevelID,
 		enrollmentCents: spec.EnrollmentCents, monthlyCents: spec.MonthlyCents,
 		months: spec.Months, firstBilledMonth: spec.FirstBilledMonth,
 		dueDay: spec.DueDay, lateFeeCents: spec.LateFeeCents, active: spec.Active,
+		policy: spec.Policy,
 	}, nil
 }
 
@@ -120,6 +139,10 @@ func (p TuitionPlan) FirstBilledMonth() int { return p.firstBilledMonth }
 
 // DueDay is the day of the month a payment falls due.
 func (p TuitionPlan) DueDay() int { return p.dueDay }
+
+// Policy is the collection rule that applies to this plan's charges: what a late
+// payment costs per day and what an early one saves.
+func (p TuitionPlan) Policy() CollectionPolicy { return p.policy }
 
 // LateFeeCents is the fixed surcharge added once per completed overdue month.
 func (p TuitionPlan) LateFeeCents() int64 { return p.lateFeeCents }

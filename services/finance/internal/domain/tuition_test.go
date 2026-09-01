@@ -125,3 +125,49 @@ func TestOverdueMonthsCountsCompletedMonthsNotDays(t *testing.T) {
 		})
 	}
 }
+
+// The collection policy travels with the plan it belongs to. A school raises
+// tuition and changes its late-fee rule in the same breath, and both have to be
+// answerable per cycle: last year's charges must still reconcile against last
+// year's rules.
+func TestTuitionPlanCarriesItsCollectionPolicy(t *testing.T) {
+	spec := domain.TuitionPlanSpec{
+		ID: "tp-1", TenantID: "t-1", CycleID: "c-1", LevelID: "lv-1",
+		EnrollmentCents: 500000, MonthlyCents: 320000,
+		Months: 10, FirstBilledMonth: 9, DueDay: 10,
+	}
+	spec.Policy = domain.CollectionPolicy{
+		LateFeeDailyCents:      1000,
+		SurchargeCountsAllDays: true,
+		EarlyPaymentCents:      15000,
+		EarlyPaymentDays:       5,
+	}
+
+	plan, err := domain.NewTuitionPlan(spec)
+	if err != nil {
+		t.Fatalf("NewTuitionPlan: %v", err)
+	}
+	got := plan.Policy()
+	if got.LateFeeDailyCents != 1000 || got.EarlyPaymentCents != 15000 || got.EarlyPaymentDays != 5 {
+		t.Errorf("policy = %+v, want the one supplied", got)
+	}
+	if !got.SurchargeCountsAllDays {
+		t.Error("surchargeCountsAllDays was dropped in construction")
+	}
+}
+
+// A daily rule with no rate charges nothing, which is a half-finished setup
+// rather than a school offering free credit. Refused at construction so it
+// cannot reach the database, where the same rule is a CHECK.
+func TestDailyModeRequiresARate(t *testing.T) {
+	spec := domain.TuitionPlanSpec{
+		ID: "tp-1", TenantID: "t-1", CycleID: "c-1", LevelID: "lv-1",
+		EnrollmentCents: 500000, MonthlyCents: 320000,
+		Months: 10, FirstBilledMonth: 9, DueDay: 10,
+	}
+	spec.Policy = domain.CollectionPolicy{LateFeeDailyCents: 0, DailyMode: true}
+
+	if _, err := domain.NewTuitionPlan(spec); err == nil {
+		t.Fatal("a daily plan with no rate was accepted")
+	}
+}

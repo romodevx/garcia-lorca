@@ -13,6 +13,16 @@ import (
 // with the plan it belongs to. Keeping it separate from TuitionPlan is what lets
 // the rules change for a new cycle without rewriting what the old one charged.
 type CollectionPolicy struct {
+	// DailyMode selects which surcharge rule applies. false keeps the original
+	// rule (TuitionPlan.LateFeeCents, once per completed overdue month), which is
+	// what every plan written before M16 means. true is per-day at
+	// LateFeeDailyCents.
+	//
+	// An explicit mode rather than "daily if a daily rate is set": a school that
+	// half-configured the new rule would otherwise silently switch, and the
+	// difference between $150 a month and $10 a day is money on every statement.
+	DailyMode bool
+
 	// LateFeeDailyCents is charged for each day past the due date. Zero disables
 	// the surcharge entirely — a school that has not set a rate charges nothing,
 	// rather than charging zero and looking like the feature worked.

@@ -33,6 +33,9 @@ type TuitionPlanInput struct {
 	DueDay           int
 	LateFeeCents     int64
 	Active           bool
+	// Policy is the M16 collection rule. Zero value keeps the original monthly
+	// surcharge, so a caller written before M16 goes on meaning what it meant.
+	Policy domain.CollectionPolicy
 }
 
 // BillingResult is what a run did. Skipped counts the charges that already
@@ -62,6 +65,7 @@ func (s *FinanceService) UpsertTuitionPlan(ctx context.Context, in TuitionPlanIn
 		EnrollmentCents: in.EnrollmentCents, MonthlyCents: in.MonthlyCents,
 		Months: in.Months, FirstBilledMonth: in.FirstBilledMonth,
 		DueDay: in.DueDay, LateFeeCents: in.LateFeeCents, Active: in.Active,
+		Policy: in.Policy,
 	})
 	if err != nil {
 		return domain.TuitionPlan{}, err
@@ -330,6 +334,13 @@ func (s *FinanceService) accrueLateFees(
 		}
 		plan, ok := planOfStudent[c.Charge.StudentID()]
 		if !ok || plan.LateFeeCents() == 0 {
+			continue
+		}
+		if plan.Policy().DailyMode {
+			// The daily rule is derived at the moment of payment, never written
+			// down. What a family owes in surcharge changes every night: a charge
+			// issued today would be a wrong number sitting in their balance
+			// tomorrow, and the run would have to chase and correct it forever.
 			continue
 		}
 		months := domain.OverdueMonths(c.Charge.DueDate(), asOf)

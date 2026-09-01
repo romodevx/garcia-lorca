@@ -28,6 +28,15 @@ func toDomainPlan(m tuitionPlanModel) (domain.TuitionPlan, error) {
 		EnrollmentCents: m.EnrollmentCents, MonthlyCents: m.MonthlyCents,
 		Months: m.Months, FirstBilledMonth: m.FirstBilledMonth,
 		DueDay: m.DueDay, LateFeeCents: m.LateFeeCents, Active: m.Active,
+		Policy: domain.CollectionPolicy{
+			// A row written before M16 has mode 'monthly' by default, so it keeps
+			// meaning exactly what it meant when it was billed.
+			DailyMode:              m.LateFeeMode == "daily",
+			LateFeeDailyCents:      m.LateFeeDailyCents,
+			SurchargeCountsAllDays: m.SurchargeCountsAllDays,
+			EarlyPaymentCents:      m.EarlyPaymentCents,
+			EarlyPaymentDays:       m.EarlyPaymentDays,
+		},
 	})
 }
 
@@ -38,7 +47,21 @@ func fromDomainPlan(p domain.TuitionPlan) tuitionPlanModel {
 		EnrollmentCents: p.EnrollmentCents(), MonthlyCents: p.MonthlyCents(),
 		Months: p.Months(), FirstBilledMonth: p.FirstBilledMonth(),
 		DueDay: p.DueDay(), LateFeeCents: p.LateFeeCents(), Active: p.Active(),
+		LateFeeDailyCents:      p.Policy().LateFeeDailyCents,
+		LateFeeMode:            lateFeeMode(p.Policy().DailyMode),
+		SurchargeCountsAllDays: p.Policy().SurchargeCountsAllDays,
+		EarlyPaymentCents:      p.Policy().EarlyPaymentCents,
+		EarlyPaymentDays:       p.Policy().EarlyPaymentDays,
 	}
+}
+
+// lateFeeMode is the column's vocabulary. Spelled out rather than stored as a
+// boolean so a person reading the table sees which rule a plan is on.
+func lateFeeMode(daily bool) string {
+	if daily {
+		return "daily"
+	}
+	return "monthly"
 }
 
 // fromDomainConcept projects a domain ChargeConcept into its GORM row.

@@ -17,9 +17,9 @@ func on(y int, m time.Month, d int) time.Time {
 // within the first 5 working days.
 func policy() domain.CollectionPolicy {
 	return domain.CollectionPolicy{
-		LateFeeDailyCents:    1000,
-		EarlyPaymentCents:    15000,
-		EarlyPaymentDays:     5,
+		LateFeeDailyCents:      1000,
+		EarlyPaymentCents:      15000,
+		EarlyPaymentDays:       5,
 		SurchargeCountsAllDays: true,
 	}
 }

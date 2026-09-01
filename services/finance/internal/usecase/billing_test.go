@@ -216,3 +216,40 @@ func TestRunBillingAccruesBeyondTheListCap(t *testing.T) {
 			got.LateFeesCreated, pupils)
 	}
 }
+
+// dailyFixture is the same school on the owner's new rule: $10 a day from the
+// day after the due date, every day of the week, and no fixed monthly fee.
+func dailyFixture(t *testing.T) *fixture {
+	t.Helper()
+	f := billingFixture(t)
+	if _, err := f.svc.UpsertTuitionPlan(context.Background(), usecase.TuitionPlanInput{
+		CycleID: testCycle, LevelID: testLevel,
+		EnrollmentCents: 50000, MonthlyCents: 320000,
+		Months: 10, FirstBilledMonth: 9, DueDay: 10, Active: true,
+		Policy: domain.CollectionPolicy{
+			DailyMode: true, LateFeeDailyCents: 1000, SurchargeCountsAllDays: true,
+		},
+	}); err != nil {
+		t.Fatalf("seed daily plan: %v", err)
+	}
+	return f
+}
+
+// Under the daily rule the monthly run must NOT issue surcharge charges. What is
+// owed in surcharge changes every night; a charge written today would be wrong
+// tomorrow and would still be sitting in the family's balance. The amount is
+// derived at the moment of payment instead.
+func TestDailyModeIssuesNoSurchargeCharges(t *testing.T) {
+	f := dailyFixture(t)
+
+	got := runOn(t, f, "2026-11-12")
+
+	if got.LateFeesCreated != 0 {
+		t.Errorf("late fees created = %d, want 0 — the daily rule is derived, not charged", got.LateFeesCreated)
+	}
+	// The tuition itself is still billed. Turning the surcharge rule off must not
+	// turn the school's income off with it.
+	if got.TuitionCreated != 3 {
+		t.Errorf("tuition created = %d, want 3", got.TuitionCreated)
+	}
+}
