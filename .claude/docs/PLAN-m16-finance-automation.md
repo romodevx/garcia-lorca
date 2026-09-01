@@ -1041,3 +1041,26 @@ origen nuevo, (5) `reserved 8` en el proto — nunca borrar un número de campo,
 ═══════════════════════════════════════════════════════════════════
 Modo: [subagent-only] en las tres fases. Sin cobertura cross-model.
 ```
+
+---
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 1 | issues_open | 14 proposals, 10 accepted, 4 deferred; 6 critical gaps |
+| Design Review | `/plan-design-review` | UI/UX gaps | 1 | issues_open | 3/10 speed, 2/10 mobile; 2 live bugs found |
+| Eng Review | `/plan-eng-review` | Architecture & tests | 1 | issues_open | 20 issues, 6 critical gaps |
+| Codex Review | `/codex review` | Cross-model | 0 | unavailable | binary not installed |
+
+**CROSS-MODEL:** not obtained — Codex absent in all three phases. Confidence rests on
+verifying each finding against the tree, not on two models agreeing.
+
+**VERDICT:** NOT ready to build. Three live bugs must land first (empty idempotency key,
+500-row cap, backdrop discard). One disguised blocker outranks the whole list: the school
+likely cannot enroll its Maternal pupils. Three questions go to the director before any code.
+
+**UNRESOLVED DECISIONS:**
+- **D1** — Does the school have a Maternal level, and are those pupils in the system today?
+- **D2** — Pronto pago: percentage of what, or a fixed amount?
+- **D3** — A parent pays $6,000 at the window: what should "Diferencia" show?
