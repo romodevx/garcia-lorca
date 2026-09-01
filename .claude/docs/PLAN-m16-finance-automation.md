@@ -307,3 +307,351 @@ simplemente no van en la primera entrega.
 ## 0F. Confirmación de modo
 
 **SELECTIVE EXPANSION**, **ENFOQUE B**, 10 peticiones aceptadas y 4 diferidas.
+
+---
+
+## Sección 1 — Arquitectura
+
+### Grafo, antes y después
+
+```
+HOY                                    CON M16
+───────────────────────                ─────────────────────────────────
+config  (ciclos, niveles,              config  ── + CALENDARIO ESCOLAR ◄── pieza nueva
+         grupos, materias)                        (feriados, vacaciones,
+   │                                               días hábiles)
+   ▼                                        │
+finance ── TuitionPlan                      ▼
+        ── RunBilling ──► charges     finance ── TuitionPlan (+ regla de recargo)
+        ── RegisterPayment(chargeID)          ── RunBilling  ──► charges
+   │                                          ── BillingCalendar ◄── consulta config
+   ▼                                          ── RegisterPayment(studentID) ── NUEVO
+PaymentRegistered ──► comms, students         └──► reparto ──► N charges
+                                          │
+                                          ▼
+                                    PaymentRegistered (sin cambio de contrato)
+```
+
+**Acoplamiento nuevo:** `finance → config` para leer el calendario. Ya existe esa
+dirección (`CONFIG_BASE_URL` en `finance_env`), así que no se agrega un borde nuevo al
+grafo — se usa uno que ya está.
+
+**Dónde vive el calendario:** en `config`, no en `finance`. El director pidió el mismo
+calendario para **actividades escolares**, y actividades no es finanzas. Ponerlo en
+finanzas obligaría a comms y a config a pedirle fechas al módulo de dinero.
+
+### Hallazgo 1.1 — 🔴 El reparto choca con `uq_charges_concept_per_cycle`
+
+`migrations/finance/0001_init.sql:67` tenía `UNIQUE (tenant_id, student_id, cycle_id,
+concept_id)` — un alumno solo puede deber un concepto **una vez por ciclo**.
+`0003_charge_external_ref.sql` la reemplazó por dos índices: uno que conserva esa regla
+para los cargos propios (`external_ref = ''`) y otro sobre `(tenant_id, external_ref)`
+para los que vienen con referencia.
+
+**Consecuencia para esta petición:** las 11 colegiaturas solo pueden coexistir porque
+cada una lleva su `external_ref` (mes). Entonces **el reparto de un pago debe ordenar por
+esa referencia**, no por fecha de creación ni por id. Y la "colegiatura partida"
+(mitad diciembre, mitad marzo) es un `external_ref` más, no un modelo nuevo — lo cual la
+abarata mucho y justifica haberla diferido sin drama.
+
+### Hallazgo 1.2 — 🔴 El reparto necesita ser una transacción, no un bucle
+
+Repartir $6,000 entre seis meses son **seis escrituras de cargo + un pago**. Si el
+proceso muere a la mitad, el alumno queda con tres meses pagados y $3,000 sin registrar
+en ningún lado. La idempotencia actual protege **un** pago contra **un** cargo
+(`0002_payment_idempotency`); no protege un reparto parcial.
+
+**Decisión (P1):** el reparto es una sola transacción con la misma clave de idempotencia
+que hoy. Reintentar con la misma clave devuelve el mismo resultado, no un segundo reparto.
+
+### Las cuatro rutas del flujo nuevo
+
+```
+  FELIZ:  captura $6,000 el 3 de septiembre
+          → calendario dice: día hábil, dentro de los 5 primeros → pronto pago
+          → esperado = 6 × colegiatura − descuento
+          → reparte sep..feb, marca pagados
+          → PaymentRegistered  ✅
+
+  NULA:   el alumno no tiene cargos emitidos todavía (la corrida no ha pasado)
+          → hoy: el reparto no tiene a qué aplicar
+          → 🔴 GAP: ¿se rechaza, o se crea un saldo a favor?
+
+  VACÍA:  captura $0  → 🟡 debe rechazarse en el borde, no crear un pago de cero
+
+  ERROR:  el calendario no responde (config dormido en scale-to-zero)
+          → 🔴 GAP: ¿se bloquea la captura, o se registra sin descuento?
+          → Un pago que se registra con el monto esperado EQUIVOCADO es peor que
+            uno que no se registra
+```
+
+### Escalado y puntos de falla
+
+- **Qué truena primero:** el reparto sobre un alumno con muchos cargos abiertos es
+  O(n) escrituras. Con 11 meses + inscripción + uniformes, n≈15. Irrelevante.
+- **SPOF nuevo:** `config` pasa a estar en el camino de **registrar un pago**. Hoy no lo
+  está. Si config no responde, la caja de la escuela se detiene. Ver ruta ERROR.
+
+### Rollback
+
+| Qué | Cómo se revierte |
+|---|---|
+| Regla de recargo mal configurada | Es configuración: se corrige y se vuelve a correr |
+| Un reparto equivocado | ⚠️ **No hay reverso de pago hoy.** Ver Hallazgo 2.1 |
+| Calendario con un feriado de más | Se edita el día; los cálculos futuros lo toman |
+
+---
+
+## Sección 2 — Mapa de errores y rescates
+
+| Ruta | Qué puede salir mal | Clase |
+|---|---|---|
+| `RegisterStudentPayment` (nuevo) | el alumno no tiene cargos abiertos | `KindInvalid` |
+| | el monto excede la deuda total | (sobrepago — ver 2.2) |
+| | `config` no responde al pedir el calendario | timeout |
+| | el reparto falla a mitad | (transacción) |
+| `BillingCalendar.ExpectedAmount` | fecha de pago futura | `KindInvalid` |
+| | no hay plan de colegiatura para ese nivel | `KindNotFound` |
+| Alta de feriado | día duplicado | `KindConflict` |
+| | rango invertido (fin antes que inicio) | `KindInvalid` |
+
+| Clase | ¿Rescatado? | Acción | Qué ve el usuario |
+|---|---|---|---|
+| alumno sin cargos | **N ← GAP** | — | debe decir "corre la facturación del ciclo primero" |
+| sobrepago | **N ← GAP CRÍTICO** | — | ver 2.2 |
+| calendario caído | **N ← GAP CRÍTICO** | — | ver 2.3 |
+| reparto parcial | **N ← GAP** | — | se cierra con la transacción de 1.2 |
+| día duplicado | Y (constraint) | rechaza | mensaje en el formulario |
+
+### Hallazgo 2.1 — 🔴 No existe reverso de pago, y el reparto lo vuelve urgente
+
+Hoy un pago mal capturado se corrige... no se corrige. No hay `VoidPayment`. Con el modelo
+actual el daño es un cargo mal saldado; **con reparto automático, un pago equivocado
+mueve seis meses a la vez.** La cajera se va a equivocar — eso no es hipótesis, es
+operación de mostrador.
+
+**Decisión (P1 completitud):** `VoidPayment` entra en el alcance. Reversa por asiento
+(un pago negativo que deshace el reparto), nunca un `DELETE`, para que el estado de cuenta
+siga explicando de dónde salió cada peso.
+
+### Hallazgo 2.2 — 🔴 ¿Qué pasa si pagan de más?
+
+La petición dice *"si hay excedente, aplicar al siguiente mes"* — pero no dice qué pasa
+cuando ya no hay siguiente mes. Un padre que liquida el año entero y da $500 de más.
+
+**Decisión (P1):** el excedente se queda como **saldo a favor** del alumno, visible en el
+estado de cuenta, y se consume solo en la siguiente corrida. Rechazar el pago sería peor:
+el dinero ya entró a la caja.
+
+### Hallazgo 2.3 — 🔴 Si el calendario no responde, la captura se bloquea
+
+El caso realista: `config` lleva 15 minutos sin tráfico, está dormido, y la cajera captura
+un pago. El arranque en frío tarda segundos; un timeout, más.
+
+**Decisión (P1 + seguridad del dato):** si el calendario no responde, **la captura se
+bloquea con un mensaje claro**, no se registra con el esperado sin descuento. Un pago con
+el monto esperado equivocado contamina el estado de cuenta y nadie lo detecta hasta que
+un padre reclama.
+
+---
+
+## Sección 3 — Seguridad
+
+| # | Amenaza | Prob. | Impacto | ¿Mitigada? |
+|---|---|---|---|---|
+| S1 | La cajera aplica "Pronto Pago" a discreción y perdona dinero | **Alta** | Media | ❌ **GAP** — el botón manual que pidió el director es una puerta de descuento sin control |
+| S2 | Reparto sobre un alumno de otro tenant | Baja | Alta | ✅ RLS ya cubre `charges` y `payments` |
+| S3 | Export a Excel del padrón completo | Media | **Alta** | ⚠️ 400 nombres de menores en un archivo que sale del sistema. Diferido, pero cuando entre necesita permiso propio y bitácora |
+| S4 | Aviso masivo a un nivel entero por error | Media | Media | ❌ **GAP** — mandar a "Secundaria" son ~100 familias; no hay confirmación |
+| S5 | Multicontacto usado para exfiltrar datos de familias | Baja | Alta | ✅ mismo modelo de permisos que `students` |
+
+### Hallazgo 3.1 — 🟡 El botón "Aplicar Pronto Pago" necesita dueño
+
+El director lo pidió con buena razón (*"si el padre siempre paga puntual pero falla un
+día"*). Pero un botón que perdona dinero, disponible para quien cobra, sin registro de
+quién lo apretó, es un agujero de caja.
+
+**Decisión (P1, y es barato):** el botón se queda —el caso de uso es real— pero (a) exige
+`finance:write`, (b) queda asentado **quién** lo aplicó y **cuándo** en el estado de
+cuenta. No es desconfianza: es que la persona que cobra pueda demostrar que no se quedó
+con la diferencia.
+
+### Hallazgo 3.2 — 🟡 Un aviso a un nivel no se puede deshacer
+
+**Decisión (P3 pragmático):** confirmación explícita con el conteo de destinatarios
+("Vas a enviar a 103 familias de Secundaria"). No es un permiso nuevo, es una pantalla.
+
+---
+
+## Sección 4 — Casos borde
+
+| Interacción | Caso borde | ¿Cubierto? |
+|---|---|---|
+| Capturar pago | fecha del pago **anterior** al inicio del ciclo | ❌ debe rechazarse |
+| Capturar pago | fecha **futura** (dedazo: 2027 en vez de 2026) | ❌ **muy probable**, debe rechazarse |
+| Capturar pago | el alumno ya liquidó el año | ❌ → saldo a favor (2.2) |
+| Capturar pago | doble clic en Guardar | ✅ la idempotencia ya existe |
+| Pronto pago | el día 5 cae en sábado | ✅ es exactamente para lo que sirve el calendario |
+| Pronto pago | el día 5 es feriado **y** sábado | ❌ recorrer una vez o dos, hay que definirlo |
+| Recargo diario | el mes tiene 3 feriados seguidos | ❌ ¿se cobran o no esos días? **La petición no lo dice y cambia el número** |
+| Reparto | hay un recargo emitido en un mes que se liquida tarde | ❌ **GAP** — pregunta abierta #3 del plan |
+| Calendario | se carga un feriado **retroactivo** | ❌ ¿recalcula recargos ya emitidos? |
+| Avisos | grupo sin alumnos | 🟡 debe decirlo, no fallar |
+
+### Hallazgo 4.1 — 🔴 "Recargo diario" no está definido para días no hábiles
+
+Si el recargo son 10 pesos diarios y hay un puente de 3 días, ¿son 30 pesos o 0?
+El director dijo que el calendario debe respetarse "manteniendo el beneficio/costo",
+lo cual sugiere que **sí se cobran**, pero es ambiguo y cambia lo que el padre paga.
+
+**Es la pregunta con más impacto en pesos de toda la petición y no puedo decidirla yo.**
+→ va al gate final.
+
+---
+
+## Sección 5 — Calidad
+
+- **DRY:** la aritmética de días hábiles **ya existe** en `uniforms`
+  (`PickupWindowBusinessDays`). Duplicarla en finanzas sería el clásico error de dos
+  implementaciones que se desincronizan. **Decisión (P4):** se extrae a `pkg/` y ambos
+  la usan. Es el único refactor que este plan justifica.
+- **Nombres:** "descuento maternal" no significa nada en el dominio. Sea lo que sea, se
+  nombra por lo que hace (`beca_hermanos`, `beca_madre_trabajadora`).
+- **Sobre-ingeniería:** el riesgo está en el calendario. Un calendario de cobro completo
+  (reglas por nivel, por período, por concepto) es un motor de reglas. **Se acota a lo
+  que la escuela pidió**, no a lo que se podría configurar.
+- **Sub-ingeniería:** el reparto escrito "obvio" (un bucle que resta) pierde la
+  transacción y la idempotencia. Ver 1.2.
+
+---
+
+## Sección 6 — Pruebas
+
+```
+  RUTAS NUEVAS                                   TIPO         ¿EXISTE?
+  ───────────────────────────────────────────    ──────────   ────────
+  BillingCalendar: día hábil siguiente           Unit tabla   NO 🔴
+  BillingCalendar: feriado + fin de semana       Unit tabla   NO 🔴
+  BillingCalendar: monto esperado con pronto pago Unit tabla  NO 🔴
+  BillingCalendar: recargo diario N días         Unit tabla   NO 🔴
+  Reparto: exacto (6 meses justos)               Unit         NO 🔴
+  Reparto: parcial ($1,500 → sep + medio oct)    Unit         NO 🔴
+  Reparto: excedente sin meses → saldo a favor   Unit         NO 🔴
+  Reparto: idempotente (misma clave, un reparto) Integration  NO 🔴
+  Reparto: transacción (falla a la mitad)        Integration  NO 🔴
+  VoidPayment deshace el reparto                 Integration  NO 🔴
+  Avisos: destinatarios por grupo y por nivel    Unit         NO 🔴
+  Multicontacto: RLS por tenant                  Integration  NO 🔴
+```
+
+**La prueba que da confianza:** una tabla que toma (fecha de pago, calendario, plan) y
+compara el monto esperado contra números calculados a mano por el director. Si esa tabla
+pasa, el sistema cobra lo que la escuela cobra. Todo lo demás es plomería.
+
+**Riesgo de intermitencia:** cualquier prueba de calendario que use `time.Now()` es una
+bomba de tiempo — literalmente falla en enero. El reloj se inyecta, como ya hace
+`TuitionPlan` (`time.Now` es un parámetro, no una llamada).
+
+---
+
+## Sección 7 — Rendimiento
+
+- **Reparto:** O(cargos abiertos del alumno) ≈ 15. Irrelevante.
+- **Vista de ingresos:** agregación sobre `payments` de todo el ciclo. Con 400 alumnos ×
+  13 conceptos ≈ 5,200 filas. Irrelevante hoy; **necesita índice** por (tenant, ciclo,
+  concepto) para no degradar cuando sean 5 años de historia.
+- **Conteo por filtro en vivo:** si dispara una consulta por cada tecla, son cientos de
+  llamadas. **Decisión (P3):** debounce en el front, y el conteo viaja en la misma
+  respuesta que la lista, no en una consulta aparte.
+- **Calendario en el camino del pago:** es la ruta que más importa. Se cachea en memoria
+  del servicio de finanzas por ciclo — un calendario escolar cambia dos veces al año.
+
+---
+
+## Sección 8 — Observabilidad
+
+| Necesidad | Decisión |
+|---|---|
+| Bitácora de quién aplicó un pronto pago manual | **P1** — es dinero perdonado (3.1) |
+| Bitácora de repartos | **P1** — para explicarle a un padre por qué su pago fue a marzo |
+| Métrica: pagos capturados por día | Útil; sale de datos que ya existen |
+| Alerta: reparto fallido | **P1** — un reparto que falla deja dinero sin aplicar |
+| Estado de cuenta que explique cada peso | **P1** — es lo que hace que el director confíe |
+
+---
+
+## Sección 9 — Despliegue
+
+- **Migraciones:** calendario (tabla nueva), multicontacto (tabla nueva), regla de recargo
+  (columnas en `tuition_plans`), saldo a favor. Todas **aditivas** — compatibles hacia
+  atrás.
+- **La migración que sí tiene riesgo:** cambiar el recargo de mensual a diario con cargos
+  **ya emitidos** bajo la regla vieja. **Decisión (P1):** los cargos existentes conservan
+  su regla; la nueva aplica desde el ciclo siguiente. Recalcular el pasado le cambiaría
+  el saldo a familias que ya pagaron.
+- **Flag:** todo detrás de `module_finance`, que ya existe. El calendario, ¿bajo
+  `module_config`? Sí — vive ahí.
+- **Orden:** calendario → recargo/pronto pago → reparto → pantallas. Cada paso es
+  desplegable solo.
+
+---
+
+## Sección 10 — Trayectoria
+
+- **Deuda que introduce:** las reglas de cobro de ESTA escuela quedan en el modelo. Si
+  llega una segunda con reglas distintas (recargo porcentual, no fijo), hay que
+  generalizar. **Aceptable**: no hay segunda escuela todavía, y adivinar sus reglas es
+  peor que adaptarse cuando exista.
+- **Reversibilidad: 4/5.** Todo aditivo salvo el cambio de regla de recargo, que se acota
+  por ciclo.
+- **La pregunta del año:** ¿por qué el calendario vive en `config` y no en `finance`?
+  Porque el director lo pidió también para actividades escolares. **Eso hay que escribirlo
+  en el código**, o alguien lo "arregla" moviéndolo a finanzas.
+- **Qué habilita:** el estado de cuenta que el padre ve solo (app familiar, 9c/9d), y el
+  CFDI de M11 — que necesita exactamente esto: qué se cobró, cuándo se pagó, con qué
+  descuento.
+
+---
+
+## Sección 11 — Diseño y UX
+
+Alcance UI detectado. La pantalla central es el **modal de registro de pago**, y su
+diseño decide si el director deja su método actual.
+
+```
+  ┌─ Registrar pago ──────────────────────────────┐
+  │  Alumno   [buscar…            ]                │
+  │  Fecha    [03/09/2026]  ← manda el cálculo     │
+  │  Método   ( )efectivo (•)tarjeta               │
+  │           └─ ( )débito (•)crédito              │
+  │                                                │
+  │  Esperado     $ 5,700   ← pronto pago aplicado │
+  │  Capturado    [$ 5,700]                        │
+  │  Diferencia   $     0   ← verde en 0           │
+  │                                                │
+  │  [Aplicar pronto pago]      [Guardar]          │
+  │                                                │
+  │  Se aplicará a:  sep ✓  oct ✓ … ← ANTES de     │
+  │                                    guardar     │
+  └────────────────────────────────────────────────┘
+```
+
+### Hallazgo 11.1 — 🔴 El reparto debe verse ANTES de guardar
+
+La petición describe el reparto como consecuencia. Pero si la cajera no ve a qué meses va
+el dinero **antes** de confirmar, el primer error se descubre cuando el padre reclama —
+y ya hay seis meses movidos.
+
+**Decisión (P1):** el modal muestra el reparto propuesto antes del guardado. Convierte un
+error caro en un clic de corrección.
+
+| Estado | Cubierto |
+|---|---|
+| Cargando (calendario) | ❌ debe bloquear Guardar, no dejar capturar a ciegas |
+| Vacío (alumno sin cargos) | ❌ mensaje que diga qué hacer |
+| Error (config caído) | ❌ ver 2.3 |
+| Éxito | ✅ |
+| Parcial (excedente) | ❌ debe decir "quedan $500 a favor" |
+
+**Recomendación:** correr `/plan-design-review` sobre esta pantalla antes de construirla.
+Es la que el director va a usar cincuenta veces al día.
