@@ -172,3 +172,21 @@ func fromDomainTeachingAssignment(a domain.TeachingAssignment) teachingAssignmen
 func toDomainTeachingAssignment(m teachingAssignmentModel) (domain.TeachingAssignment, error) {
 	return domain.NewTeachingAssignment(m.ID, m.TenantID, m.CycleID, m.GroupID, m.SubjectID, m.TeacherID)
 }
+
+// --- non-working periods (M16 school calendar) -----------------------------
+
+func fromDomainNonWorkingPeriod(p domain.NonWorkingPeriod) nonWorkingPeriodModel {
+	return nonWorkingPeriodModel{
+		ID:       p.ID(),
+		TenantID: p.TenantID(),
+		CycleID:  p.CycleID(),
+		Label:    p.Label(),
+		Kind:     p.Kind(),
+		StartsOn: p.From(),
+		EndsOn:   p.To(),
+	}
+}
+
+func toDomainNonWorkingPeriod(m nonWorkingPeriodModel) (domain.NonWorkingPeriod, error) {
+	return domain.NewNonWorkingPeriod(m.ID, m.TenantID, m.CycleID, m.Label, m.Kind, m.StartsOn, m.EndsOn)
+}

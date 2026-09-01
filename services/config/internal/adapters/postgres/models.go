@@ -123,3 +123,19 @@ type teachingAssignmentModel struct {
 }
 
 func (teachingAssignmentModel) TableName() string { return "teaching_assignments" }
+
+// nonWorkingPeriodModel is the GORM row for `non_working_periods` (M16): the
+// days the school is shut. Stored as a RANGE with both ends inclusive; the
+// domain expands it into days for the working-day arithmetic.
+type nonWorkingPeriodModel struct {
+	ID        string    `gorm:"column:id;primaryKey"`
+	TenantID  string    `gorm:"column:tenant_id"`
+	CycleID   string    `gorm:"column:cycle_id"`
+	Label     string    `gorm:"column:label"`
+	Kind      string    `gorm:"column:kind"`
+	StartsOn  time.Time `gorm:"column:starts_on"`
+	EndsOn    time.Time `gorm:"column:ends_on"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+}
+
+func (nonWorkingPeriodModel) TableName() string { return "non_working_periods" }

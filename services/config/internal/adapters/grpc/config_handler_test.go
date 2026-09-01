@@ -38,6 +38,7 @@ type fakeCatalog struct {
 	groups      map[string]domain.Group
 	teachers    map[string]domain.Teacher
 	assignments map[string]domain.TeachingAssignment
+	periods     []domain.NonWorkingPeriod
 	unique      map[string]bool
 }
 
@@ -61,6 +62,31 @@ func (f *fakeCatalog) claim(key string) error {
 	}
 	f.unique[key] = true
 	return nil
+}
+
+func (f *fakeCatalog) CreateNonWorkingPeriod(_ context.Context, p domain.NonWorkingPeriod) error {
+	f.periods = append(f.periods, p)
+	return nil
+}
+
+func (f *fakeCatalog) ListNonWorkingPeriods(_ context.Context, cycleID string) ([]domain.NonWorkingPeriod, error) {
+	out := make([]domain.NonWorkingPeriod, 0, len(f.periods))
+	for _, p := range f.periods {
+		if p.CycleID() == cycleID {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeCatalog) DeleteNonWorkingPeriod(_ context.Context, id string) error {
+	for i, p := range f.periods {
+		if p.ID() == id {
+			f.periods = append(f.periods[:i], f.periods[i+1:]...)
+			return nil
+		}
+	}
+	return glerrors.ErrNotFound
 }
 
 func (f *fakeCatalog) CreateCycle(_ context.Context, c domain.Cycle) error {
@@ -304,6 +330,12 @@ func itoa(n int) string {
 	}
 	return string(b)
 }
+
+// handlerUnderTest is the slice of the handler the calendar tests drive.
+type handlerUnderTest = *grpcadapter.ConfigHandler
+
+// tsOf is timestamppb.New, named so the calendar test reads as dates.
+func tsOf(t time.Time) *timestamppb.Timestamp { return timestamppb.New(t) }
 
 // --- harness ---------------------------------------------------------------
 

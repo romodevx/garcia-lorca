@@ -100,6 +100,18 @@ type CatalogRepository interface {
 
 	// --- teachers (catalog person records; NOT login accounts) ---
 
+	// --- school calendar (M16; per cycle, tenant-scoped) ---
+
+	// CreateNonWorkingPeriod persists a closed period. A duplicate label within
+	// the same cycle is KindConflict: the same closure entered twice is a
+	// mistake, not two closures.
+	CreateNonWorkingPeriod(ctx context.Context, p domain.NonWorkingPeriod) error
+	// ListNonWorkingPeriods returns every closed period of a cycle, ordered by
+	// start date. This is the read the collection rules make.
+	ListNonWorkingPeriods(ctx context.Context, cycleID string) ([]domain.NonWorkingPeriod, error)
+	// DeleteNonWorkingPeriod removes one period, or KindNotFound.
+	DeleteNonWorkingPeriod(ctx context.Context, id string) error
+
 	// CreateTeacher persists a new teacher. A duplicate email (per tenant) is
 	// KindConflict.
 	CreateTeacher(ctx context.Context, t domain.Teacher) error

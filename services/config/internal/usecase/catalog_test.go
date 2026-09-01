@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"sort"
 	"testing"
 	"time"
 
@@ -32,6 +33,7 @@ type fakeCatalog struct {
 	groups      map[string]domain.Group
 	teachers    map[string]domain.Teacher
 	assignments map[string]domain.TeachingAssignment
+	periods     map[string]domain.NonWorkingPeriod
 	unique      map[string]bool // scope-qualified unique keys across all entities
 }
 
@@ -45,6 +47,7 @@ func newFake() *fakeCatalog {
 		groups:      map[string]domain.Group{},
 		teachers:    map[string]domain.Teacher{},
 		assignments: map[string]domain.TeachingAssignment{},
+		periods:     map[string]domain.NonWorkingPeriod{},
 		unique:      map[string]bool{},
 	}
 }
@@ -55,6 +58,33 @@ func (f *fakeCatalog) claim(key string) error {
 		return glerrors.ErrConflict
 	}
 	f.unique[key] = true
+	return nil
+}
+
+func (f *fakeCatalog) CreateNonWorkingPeriod(_ context.Context, p domain.NonWorkingPeriod) error {
+	if err := f.claim("period|" + p.CycleID() + "|" + p.Label()); err != nil {
+		return err
+	}
+	f.periods[p.ID()] = p
+	return nil
+}
+
+func (f *fakeCatalog) ListNonWorkingPeriods(_ context.Context, cycleID string) ([]domain.NonWorkingPeriod, error) {
+	out := make([]domain.NonWorkingPeriod, 0, len(f.periods))
+	for _, p := range f.periods {
+		if p.CycleID() == cycleID {
+			out = append(out, p)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].From().Before(out[j].From()) })
+	return out, nil
+}
+
+func (f *fakeCatalog) DeleteNonWorkingPeriod(_ context.Context, id string) error {
+	if _, ok := f.periods[id]; !ok {
+		return glerrors.ErrNotFound
+	}
+	delete(f.periods, id)
 	return nil
 }
 

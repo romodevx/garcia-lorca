@@ -250,6 +250,39 @@ func (s *CatalogService) ListGroups(ctx context.Context, cycleID, gradeLevelID s
 // CreateTeacher validates and persists a new teacher (a catalog person record,
 // not a login account). `userID` is optional ("" = no IAM link yet). A duplicate
 // email (per tenant) surfaces as KindConflict from the repo.
+// --- school calendar (M16) -------------------------------------------------
+
+// CreateNonWorkingPeriod records a day, or a run of days, on which the school
+// does not operate.
+//
+// The cycle is checked first. A calendar hanging from a school year that does
+// not exist is a typo, and the cost of finding out later is a due date that
+// moves in March for a reason nobody can explain.
+func (s *CatalogService) CreateNonWorkingPeriod(ctx context.Context, cycleID, label, kind string, from, to time.Time) (domain.NonWorkingPeriod, error) {
+	if _, err := s.repo.GetCycle(ctx, cycleID); err != nil {
+		return domain.NonWorkingPeriod{}, glerrors.New(glerrors.KindInvalid, "cycle does not exist")
+	}
+	p, err := domain.NewNonWorkingPeriod(s.newID(), s.tenant, cycleID, label, kind, from, to)
+	if err != nil {
+		return domain.NonWorkingPeriod{}, err
+	}
+	if err := s.repo.CreateNonWorkingPeriod(ctx, p); err != nil {
+		return domain.NonWorkingPeriod{}, err
+	}
+	return p, nil
+}
+
+// ListNonWorkingPeriods returns the closed periods of a cycle, ordered by start
+// date.
+func (s *CatalogService) ListNonWorkingPeriods(ctx context.Context, cycleID string) ([]domain.NonWorkingPeriod, error) {
+	return s.repo.ListNonWorkingPeriods(ctx, cycleID)
+}
+
+// DeleteNonWorkingPeriod removes one period (KindNotFound if absent).
+func (s *CatalogService) DeleteNonWorkingPeriod(ctx context.Context, id string) error {
+	return s.repo.DeleteNonWorkingPeriod(ctx, id)
+}
+
 func (s *CatalogService) CreateTeacher(ctx context.Context, firstName, lastName, email, userID string) (domain.Teacher, error) {
 	te, err := domain.NewTeacher(s.newID(), s.tenant, firstName, lastName, email, userID)
 	if err != nil {

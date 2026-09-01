@@ -483,3 +483,67 @@ func (h *ConfigHandler) ActivateCycle(ctx context.Context, req *connect.Request[
 	}
 	return connect.NewResponse(&configv1.ActivateCycleResponse{Cycle: toProtoCycle(cycle)}), nil
 }
+
+// --- school calendar (M16) -------------------------------------------------
+
+// dateLayout is how a calendar day travels on the wire. A plain YYYY-MM-DD, not
+// a timestamp: a holiday is a calendar day everywhere in Mexico, and a timestamp
+// would invite a timezone to move it a day either way.
+const dateLayout = "2006-01-02"
+
+func (h *ConfigHandler) CreateNonWorkingPeriod(ctx context.Context, req *connect.Request[configv1.CreateNonWorkingPeriodRequest]) (*connect.Response[configv1.CreateNonWorkingPeriodResponse], error) {
+	from, err := parseDate(req.Msg.GetStartsOn())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	to, err := parseDate(req.Msg.GetEndsOn())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	p, err := h.catalog.CreateNonWorkingPeriod(ctx, req.Msg.GetCycleId(), req.Msg.GetLabel(), req.Msg.GetKind(), from, to)
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.CreateNonWorkingPeriodResponse{Period: toProtoNonWorkingPeriod(p)}), nil
+}
+
+func (h *ConfigHandler) ListNonWorkingPeriods(ctx context.Context, req *connect.Request[configv1.ListNonWorkingPeriodsRequest]) (*connect.Response[configv1.ListNonWorkingPeriodsResponse], error) {
+	periods, err := h.catalog.ListNonWorkingPeriods(ctx, req.Msg.GetCycleId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	out := make([]*configv1.NonWorkingPeriod, 0, len(periods))
+	for _, p := range periods {
+		out = append(out, toProtoNonWorkingPeriod(p))
+	}
+	return connect.NewResponse(&configv1.ListNonWorkingPeriodsResponse{Periods: out}), nil
+}
+
+func (h *ConfigHandler) DeleteNonWorkingPeriod(ctx context.Context, req *connect.Request[configv1.DeleteNonWorkingPeriodRequest]) (*connect.Response[configv1.DeleteNonWorkingPeriodResponse], error) {
+	if err := h.catalog.DeleteNonWorkingPeriod(ctx, req.Msg.GetId()); err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.DeleteNonWorkingPeriodResponse{}), nil
+}
+
+// parseDate reads a wire date. A malformed one is the caller's mistake, so it
+// comes back KindInvalid rather than as a zero date that would silently mean
+// year one.
+func parseDate(s string) (time.Time, error) {
+	d, err := time.Parse(dateLayout, s)
+	if err != nil {
+		return time.Time{}, glerrors.New(glerrors.KindInvalid, "date must be YYYY-MM-DD")
+	}
+	return d, nil
+}
+
+func toProtoNonWorkingPeriod(p domain.NonWorkingPeriod) *configv1.NonWorkingPeriod {
+	return &configv1.NonWorkingPeriod{
+		Id:       p.ID(),
+		CycleId:  p.CycleID(),
+		Label:    p.Label(),
+		Kind:     p.Kind(),
+		StartsOn: p.From().Format(dateLayout),
+		EndsOn:   p.To().Format(dateLayout),
+	}
+}
