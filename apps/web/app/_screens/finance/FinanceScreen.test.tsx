@@ -14,6 +14,7 @@ vi.mock("../../finance/api", () => ({
   getAccount: vi.fn(),
   previewDeposit: vi.fn(),
   registerDeposit: vi.fn(),
+  getCashUp: vi.fn(),
 }));
 vi.mock("../../config/api", () => ({ listCycles: vi.fn() }));
 vi.mock("../../students/api", () => ({ listStudents: vi.fn() }));
@@ -46,6 +47,7 @@ beforeEach(() => {
   finance.getOverdue.mockResolvedValue([]);
   finance.getAccount.mockResolvedValue({ charges: [], payments: [], totalBalanceCents: 0, unallocatedCents: 0 });
   finance.previewDeposit.mockResolvedValue({ allocations: [], surcharges: [], unallocatedCents: 0 });
+  finance.getCashUp.mockResolvedValue({ deposits: [], cancelled: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0 });
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -174,5 +176,21 @@ describe("FinanceScreen — cobrar", () => {
 
     expect(await screen.findByRole("dialog", { name: "Cobrar" })).toBeInTheDocument();
     expect(await screen.findByTestId("amount-owed")).toHaveTextContent("6,400");
+  });
+});
+
+describe("FinanceScreen — corte de caja", () => {
+  // The number the office closes the day with, one click from the counter.
+  it("opens the day's takings", async () => {
+    const user = userEvent.setup();
+    finance.getCashUp.mockResolvedValue({
+      deposits: [], cancelled: [], cashCents: 320000, cardCents: 0, transferCents: 150000, totalCents: 470000,
+    });
+    render(<FinanceScreen onBack={() => {}} />);
+    await screen.findByText("Valentina Cruz");
+
+    await user.click(screen.getByRole("button", { name: /Corte de caja/ }));
+
+    expect(await screen.findByTestId("cash-up-total")).toHaveTextContent("4,700");
   });
 });

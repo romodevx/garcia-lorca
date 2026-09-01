@@ -127,6 +127,10 @@ func (f *fakeRepo) ListDeposits(_ context.Context, _ string) ([]domain.Deposit, 
 	return nil, nil
 }
 
+func (f *fakeRepo) ListDepositsOn(_ context.Context, _ time.Time) ([]domain.Deposit, error) {
+	return nil, nil
+}
+
 func (f *fakeRepo) VoidDeposit(_ context.Context, _ domain.Deposit) error { return nil }
 
 func (f *fakeRepo) paidFor(chargeID string) int64 {

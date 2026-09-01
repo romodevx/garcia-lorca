@@ -774,6 +774,38 @@ paths:
         '409':
           description: The deposit was already cancelled.
 
+  /api/v1/finance/cash-up:
+    get:
+      tags: [finance-payments]
+      summary: The day's takings
+      description: >
+        What came in on one day and in what form — cash, card, transfer — with
+        the list behind each number. This is what a school closes the day with,
+        instead of adding up a notebook.
+
+
+        Cancelled deposits count for nothing and are listed anyway: a cash-up
+        that hid them could not explain why the drawer holds less than the
+        receipts say.
+      operationId: dailyCashUp
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: day
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: The day the money changed hands. Empty means today.
+      responses:
+        '200':
+          description: The day's takings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CashUp' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
   /api/v1/finance/billing-runs:
     post:
       tags: [finance-tuition]
@@ -1038,6 +1070,23 @@ components:
           format: int64
           minimum: 0
           description: What would be left over as the family's credit.
+
+    CashUp:
+      type: object
+      description: One day's takings, split by how the money arrived.
+      required: [deposits, cancelled, cashCents, cardCents, transferCents, totalCents]
+      properties:
+        deposits:
+          type: array
+          items: { $ref: '#/components/schemas/Deposit' }
+        cancelled:
+          type: array
+          description: Voided that day. They count for nothing and are shown anyway.
+          items: { $ref: '#/components/schemas/Deposit' }
+        cashCents: { type: integer, format: int64, minimum: 0 }
+        cardCents: { type: integer, format: int64, minimum: 0 }
+        transferCents: { type: integer, format: int64, minimum: 0 }
+        totalCents: { type: integer, format: int64, minimum: 0 }
 
     BillingRun:
       type: object

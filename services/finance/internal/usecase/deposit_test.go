@@ -289,3 +289,43 @@ func TestPreviewShowsTheSplitWithoutTakingTheMoney(t *testing.T) {
 		t.Errorf("balance = %d after a preview, want the untouched 640000", account.TotalBalanceCents)
 	}
 }
+
+// The day's takings, in one number per method plus the list behind it. This is
+// the artefact that replaces the notebook: at close of day the office can say
+// what came in, and in what form, without adding anything up by hand.
+func TestDailyCashUpTotalsWhatCameIn(t *testing.T) {
+	f := depositFixture(t)
+	deposit(t, f, 320000, "2026-10-10")
+
+	cut, err := f.svc.DailyCashUp(context.Background(), time.Date(2026, time.October, 10, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("DailyCashUp: %v", err)
+	}
+	if cut.TotalCents != 320000 {
+		t.Errorf("total = %d, want 320000", cut.TotalCents)
+	}
+	if cut.ByMethod[domain.MethodCash] != 320000 {
+		t.Errorf("cash = %d, want 320000", cut.ByMethod[domain.MethodCash])
+	}
+	if len(cut.Deposits) != 1 {
+		t.Errorf("listed %d deposits, want 1", len(cut.Deposits))
+	}
+}
+
+// A cancelled deposit is not takings. Counting it would send someone to the safe
+// looking for money that was handed back.
+func TestDailyCashUpExcludesWhatWasCancelled(t *testing.T) {
+	f := depositFixture(t)
+	got := deposit(t, f, 320000, "2026-10-10")
+	if err := f.svc.VoidDeposit(context.Background(), got.Deposit.ID(), "error de captura"); err != nil {
+		t.Fatalf("VoidDeposit: %v", err)
+	}
+
+	cut, err := f.svc.DailyCashUp(context.Background(), time.Date(2026, time.October, 10, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("DailyCashUp: %v", err)
+	}
+	if cut.TotalCents != 0 {
+		t.Errorf("total = %d after the only deposit was cancelled, want 0", cut.TotalCents)
+	}
+}

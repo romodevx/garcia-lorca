@@ -453,6 +453,16 @@ func (f *fakeRepo) ListDeposits(_ context.Context, studentID string) ([]domain.D
 	return out, nil
 }
 
+func (f *fakeRepo) ListDepositsOn(_ context.Context, day time.Time) ([]domain.Deposit, error) {
+	var out []domain.Deposit
+	for _, d := range f.deposits {
+		if d.PaidAt().Year() == day.Year() && d.PaidAt().YearDay() == day.YearDay() {
+			out = append(out, d)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeRepo) VoidDeposit(_ context.Context, d domain.Deposit) error {
 	for i, stored := range f.deposits {
 		if stored.ID() != d.ID() {

@@ -289,6 +289,38 @@ func (h *FinanceHandler) ListDeposits(ctx context.Context, req *connect.Request[
 	return connect.NewResponse(&financev1.ListDepositsResponse{Deposits: out}), nil
 }
 
+// DailyCashUp is the day's takings, split by how the money arrived.
+func (h *FinanceHandler) DailyCashUp(ctx context.Context, req *connect.Request[financev1.DailyCashUpRequest]) (*connect.Response[financev1.DailyCashUpResponse], error) {
+	day := time.Now()
+	if raw := req.Msg.GetDay(); raw != "" {
+		parsed, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			return nil, connectErr(glerrors.New(glerrors.KindInvalid, "day must be YYYY-MM-DD"))
+		}
+		day = parsed
+	}
+	cut, err := h.finance.DailyCashUp(ctx, day)
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&financev1.DailyCashUpResponse{
+		Deposits:      toProtoDeposits(cut.Deposits),
+		Cancelled:     toProtoDeposits(cut.Cancelled),
+		CashCents:     cut.ByMethod[domain.MethodCash],
+		CardCents:     cut.ByMethod[domain.MethodCard],
+		TransferCents: cut.ByMethod[domain.MethodTransfer],
+		TotalCents:    cut.TotalCents,
+	}), nil
+}
+
+func toProtoDeposits(ds []domain.Deposit) []*financev1.Deposit {
+	out := make([]*financev1.Deposit, 0, len(ds))
+	for _, d := range ds {
+		out = append(out, toProtoDeposit(d))
+	}
+	return out
+}
+
 // VoidDeposit cancels a deposit and releases what it settled.
 func (h *FinanceHandler) VoidDeposit(ctx context.Context, req *connect.Request[financev1.VoidDepositRequest]) (*connect.Response[financev1.VoidDepositResponse], error) {
 	if err := h.finance.VoidDeposit(ctx, req.Msg.GetId(), req.Msg.GetReason()); err != nil {

@@ -74,6 +74,8 @@ type fakeFinance struct {
 	depositPaidAt  time.Time
 	depositResult  client.DepositResult
 	deposits       []client.Deposit
+	cashUpDay      string
+	cashUp         client.CashUp
 	voidedDeposit  string
 	voidReason     string
 
@@ -98,6 +100,11 @@ func (f *fakeFinance) PreviewDeposit(_ context.Context, studentID string, amount
 func (f *fakeFinance) ListDeposits(_ context.Context, studentID string) ([]client.Deposit, error) {
 	f.depositStudent = studentID
 	return f.deposits, f.err
+}
+
+func (f *fakeFinance) DailyCashUp(_ context.Context, day string) (client.CashUp, error) {
+	f.cashUpDay = day
+	return f.cashUp, f.err
 }
 
 func (f *fakeFinance) VoidDeposit(_ context.Context, id, reason string) error {

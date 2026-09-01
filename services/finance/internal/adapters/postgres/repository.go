@@ -1194,6 +1194,35 @@ func (r *Repository) ListDeposits(ctx context.Context, studentID string) ([]doma
 	return out, nil
 }
 
+// ListDepositsOn returns every deposit taken on one calendar day, cancelled
+// ones included. The window is [day, day+1) on paid_at — the day the money
+// changed hands, not the day it was keyed, which is the whole point of storing
+// them apart.
+func (r *Repository) ListDepositsOn(ctx context.Context, day time.Time) ([]domain.Deposit, error) {
+	from := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, day.Location())
+	var out []domain.Deposit
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var rows []depositModel
+		if err := tx.Where("paid_at >= ? AND paid_at < ?", from, from.AddDate(0, 0, 1)).
+			Order("paid_at ASC, id ASC").Limit(maxListLimit).Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing the day's deposits", err)
+		}
+		out = make([]domain.Deposit, 0, len(rows))
+		for _, m := range rows {
+			d, derr := toDomainDeposit(m)
+			if derr != nil {
+				return derr
+			}
+			out = append(out, d)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // VoidDeposit cancels a deposit and releases what it settled, in one
 // transaction: the allocations are removed and every charge they touched goes
 // back to the status its remaining payments imply.

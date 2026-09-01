@@ -29,6 +29,7 @@ type FinanceService interface {
 	RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time) (client.DepositResult, error)
 	PreviewDeposit(ctx context.Context, studentID string, amountCents int64, paidAt time.Time) (client.DepositResult, error)
 	ListDeposits(ctx context.Context, studentID string) ([]client.Deposit, error)
+	DailyCashUp(ctx context.Context, day string) (client.CashUp, error)
 	VoidDeposit(ctx context.Context, id, reason string) error
 	ListOverdue(ctx context.Context, cycleID string) ([]client.Charge, error)
 }
@@ -410,6 +411,24 @@ func (h *FinanceHandler) ListDeposits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deposits": deposits})
+}
+
+// DailyCashUp handles GET /api/v1/finance/cash-up?day=2026-10-10 — what came in
+// that day, split by how it arrived. Empty day means today.
+func (h *FinanceHandler) DailyCashUp(w http.ResponseWriter, r *http.Request) {
+	day := strings.TrimSpace(r.URL.Query().Get("day"))
+	if day != "" {
+		if _, err := time.Parse("2006-01-02", day); err != nil {
+			http.Error(w, "day must be a date like 2026-10-10", http.StatusBadRequest)
+			return
+		}
+	}
+	cut, err := h.svc.DailyCashUp(r.Context(), day)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, cut)
 }
 
 // VoidDeposit handles POST /api/v1/finance/deposits/{id}/void. The reason is

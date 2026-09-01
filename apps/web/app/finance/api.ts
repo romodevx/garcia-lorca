@@ -523,6 +523,40 @@ export async function voidDeposit(baseURL: string, id: string, reason: string): 
   }
 }
 
+/** One day's takings, split by how the money arrived. */
+export interface CashUp {
+  deposits: Deposit[];
+  /** Voided that day. They count for nothing and are shown anyway. */
+  cancelled: Deposit[];
+  cashCents: number;
+  cardCents: number;
+  transferCents: number;
+  totalCents: number;
+}
+
+/**
+ * What came in on one day. This is what a school closes the day with, instead
+ * of adding up a notebook. An empty `day` means today.
+ */
+export async function getCashUp(baseURL: string, day: string): Promise<CashUp> {
+  const res = await getJSON<{
+    deposits?: Wire<Deposit, "method">[];
+    cancelled?: Wire<Deposit, "method">[];
+    cashCents?: number;
+    cardCents?: number;
+    transferCents?: number;
+    totalCents?: number;
+  }>(baseURL, day === "" ? "/cash-up" : `/cash-up?day=${encodeURIComponent(day)}`);
+  return {
+    deposits: (res.deposits ?? []).map(toDeposit),
+    cancelled: (res.cancelled ?? []).map(toDeposit),
+    cashCents: res.cashCents ?? 0,
+    cardCents: res.cardCents ?? 0,
+    transferCents: res.transferCents ?? 0,
+    totalCents: res.totalCents ?? 0,
+  };
+}
+
 function depositBody(input: RegisterDepositInput): Record<string, unknown> {
   return {
     studentId: input.studentId,

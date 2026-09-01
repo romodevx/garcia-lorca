@@ -101,6 +101,10 @@ service FinanceService {
   rpc PreviewDeposit(PreviewDepositRequest) returns (PreviewDepositResponse);
   // ListDeposits returns a student's deposits, newest first.
   rpc ListDeposits(ListDepositsRequest) returns (ListDepositsResponse);
+  // DailyCashUp is the day's takings: one number per method, the total, and the
+  // list behind them. The artefact that replaces the notebook — at close of day
+  // the office can say what came in without adding anything up by hand.
+  rpc DailyCashUp(DailyCashUpRequest) returns (DailyCashUpResponse);
   // VoidDeposit cancels a deposit and releases what it settled. The row stays,
   // with its reason: a school that deletes money rows cannot explain its ledger.
   rpc VoidDeposit(VoidDepositRequest) returns (VoidDepositResponse);
@@ -578,4 +582,22 @@ message PreviewDepositResponse {
   repeated Payment allocations = 1;
   repeated Charge surcharges = 2;
   int64 unallocated_cents = 3;
+}
+
+// DailyCashUpRequest asks for one day's takings.
+message DailyCashUpRequest {
+  // The day the money changed hands, as YYYY-MM-DD. Empty means today.
+  string day = 1;
+}
+
+// DailyCashUpResponse is what came in, and in what form.
+message DailyCashUpResponse {
+  repeated Deposit deposits = 1;
+  // Cancelled deposits count for nothing and are listed anyway: a cash-up that
+  // hid them could not explain why the drawer holds less than the receipts say.
+  repeated Deposit cancelled = 2;
+  int64 cash_cents = 3;
+  int64 card_cents = 4;
+  int64 transfer_cents = 5;
+  int64 total_cents = 6;
 }

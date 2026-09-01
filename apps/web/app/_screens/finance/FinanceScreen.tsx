@@ -13,6 +13,7 @@ import { listStudents, type Student } from "../../students/api";
 import { API_URL } from "../../api-url";
 import { CollectDrawer, type CollectStudent } from "./CollectDrawer";
 import { StudentPicker } from "./StudentPicker";
+import { CashUpPanel } from "./CashUpPanel";
 
 /** One key per payment attempt. Mirrors PaymentPanel, which had it right. */
 function newAttemptKey(): string {
@@ -158,6 +159,7 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
   // separate from `pay`, which is the older per-charge path.
   const [picking, setPicking] = useState(false);
   const [collecting, setCollecting] = useState<CollectStudent | null>(null);
+  const [cashUp, setCashUp] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(0);
@@ -244,6 +246,7 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
         </div>
         <div style={{ display: "flex", gap: 12 }}>
           <Btn kind="ghost" icon="download" onClick={() => say("Exportación generada")}>Exportar</Btn>
+          <Btn kind="ghost" icon="finance" onClick={() => setCashUp(true)}>Corte de caja</Btn>
           <Btn icon="card" onClick={() => setPicking(true)}>Cobrar</Btn>
         </div>
       </div>
@@ -321,6 +324,29 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
           onPick={(s) => { setPicking(false); setCollecting(s); }}
           onClose={() => setPicking(false)}
         />
+      )}
+      {cashUp && (
+        <div
+          data-testid="cash-up-backdrop"
+          onClick={() => setCashUp(false)}
+          style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(6,20,12,.5)", backdropFilter: "blur(4px)", display: "flex", justifyContent: "flex-end" }}>
+          <div
+            role="dialog"
+            aria-label="Corte de caja"
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: "min(520px, 100%)", height: "100%", background: "var(--surface-2)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow-pop)", display: "flex", flexDirection: "column", animation: "slideIn .28s var(--ease) both" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "22px 26px", borderBottom: "1px solid var(--border)", background: "var(--surface)" }}>
+              <div style={{ flex: 1 }}>
+                <h2 style={{ fontSize: 21, fontWeight: 700, color: "var(--text)" }}>Corte de caja</h2>
+                <p style={{ fontSize: 13.5, color: "var(--text-muted)", marginTop: 2 }}>Lo recibido hoy, por forma de pago</p>
+              </div>
+              <button onClick={() => setCashUp(false)} aria-label="Cerrar" style={{ ...qb, width: 40, height: 40 }}><Icon name="close" size={19} /></button>
+            </div>
+            <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px" }}>
+              <CashUpPanel day="" />
+            </div>
+          </div>
+        </div>
       )}
       {collecting !== null && (
         <CollectDrawer

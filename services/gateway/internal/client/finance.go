@@ -356,6 +356,41 @@ func (c *FinanceClient) ListDeposits(ctx context.Context, studentID string) ([]D
 	return out, nil
 }
 
+// CashUp is a day's takings: one number per method, the total, and the list
+// behind them.
+type CashUp struct {
+	Deposits      []Deposit `json:"deposits"`
+	Cancelled     []Deposit `json:"cancelled"`
+	CashCents     int64     `json:"cashCents"`
+	CardCents     int64     `json:"cardCents"`
+	TransferCents int64     `json:"transferCents"`
+	TotalCents    int64     `json:"totalCents"`
+}
+
+// DailyCashUp returns what came in on one day, and in what form.
+func (c *FinanceClient) DailyCashUp(ctx context.Context, day string) (CashUp, error) {
+	res, err := c.rpc.DailyCashUp(ctx, connect.NewRequest(&financev1.DailyCashUpRequest{Day: day}))
+	if err != nil {
+		return CashUp{}, err
+	}
+	return CashUp{
+		Deposits:      toDeposits(res.Msg.GetDeposits()),
+		Cancelled:     toDeposits(res.Msg.GetCancelled()),
+		CashCents:     res.Msg.GetCashCents(),
+		CardCents:     res.Msg.GetCardCents(),
+		TransferCents: res.Msg.GetTransferCents(),
+		TotalCents:    res.Msg.GetTotalCents(),
+	}, nil
+}
+
+func toDeposits(ds []*financev1.Deposit) []Deposit {
+	out := make([]Deposit, 0, len(ds))
+	for _, d := range ds {
+		out = append(out, toDeposit(d))
+	}
+	return out
+}
+
 // VoidDeposit cancels a deposit and releases what it settled.
 func (c *FinanceClient) VoidDeposit(ctx context.Context, id, reason string) error {
 	_, err := c.rpc.VoidDeposit(ctx, connect.NewRequest(&financev1.VoidDepositRequest{

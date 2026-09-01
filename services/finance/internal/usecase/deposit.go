@@ -172,6 +172,46 @@ func (s *FinanceService) VoidDeposit(ctx context.Context, depositID, reason stri
 	return s.repo.VoidDeposit(ctx, voided)
 }
 
+// CashUp is the day's takings: one number per method, the total, and the list
+// behind them.
+type CashUp struct {
+	Day        time.Time
+	Deposits   []domain.Deposit
+	ByMethod   map[string]int64
+	TotalCents int64
+	// Cancelled are the day's voided deposits. They count for nothing and are
+	// listed anyway: a cash-up that hid them could not explain why the drawer
+	// holds less than the receipts say.
+	Cancelled []domain.Deposit
+}
+
+// DailyCashUp adds up what came in on one day, and in what form.
+//
+// This is the artefact that replaces the notebook. At close of day the office
+// can say what was collected, split by cash, card and transfer, without adding
+// anything up by hand — and the list behind each number is right there when a
+// figure is disputed.
+//
+// A cancelled deposit counts for nothing but is still shown. Hiding it would
+// leave a gap between the receipts and the total that nobody could account for.
+func (s *FinanceService) DailyCashUp(ctx context.Context, day time.Time) (CashUp, error) {
+	deposits, err := s.repo.ListDepositsOn(ctx, day)
+	if err != nil {
+		return CashUp{}, err
+	}
+	cut := CashUp{Day: day, ByMethod: map[string]int64{}}
+	for _, d := range deposits {
+		if d.Voided() {
+			cut.Cancelled = append(cut.Cancelled, d)
+			continue
+		}
+		cut.Deposits = append(cut.Deposits, d)
+		cut.ByMethod[d.Method()] += d.Amount().Int64()
+		cut.TotalCents += d.Amount().Int64()
+	}
+	return cut, nil
+}
+
 // ListDeposits returns a student's deposits, newest first.
 func (s *FinanceService) ListDeposits(ctx context.Context, studentID string) ([]domain.Deposit, error) {
 	return s.repo.ListDeposits(ctx, studentID)

@@ -426,6 +426,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/finance/deposits", financeWrite(financeH.RegisterDeposit))
 	mux.Handle("POST /api/v1/finance/deposits/preview", financeRead(financeH.PreviewDeposit))
 	mux.Handle("GET /api/v1/finance/deposits", financeRead(financeH.ListDeposits))
+	mux.Handle("GET /api/v1/finance/cash-up", financeRead(financeH.DailyCashUp))
 	mux.Handle("POST /api/v1/finance/deposits/{id}/void", financeWrite(financeH.VoidDeposit))
 	mux.Handle("GET /api/v1/finance/accounts/{studentId}", financeRead(financeH.GetAccount))
 	mux.Handle("GET /api/v1/finance/overdue", financeRead(financeH.ListOverdue))

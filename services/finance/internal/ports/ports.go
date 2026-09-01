@@ -265,6 +265,11 @@ type FinanceRepository interface {
 	// ListDeposits returns a student's deposits, newest first.
 	ListDeposits(ctx context.Context, studentID string) ([]domain.Deposit, error)
 
+	// ListDepositsOn returns every deposit taken on one day, cancelled ones
+	// included — the day's cash-up decides what to do with those, and a reader
+	// that never saw them could not explain a gap.
+	ListDepositsOn(ctx context.Context, day time.Time) ([]domain.Deposit, error)
+
 	// VoidDeposit cancels a deposit and releases its allocations, in one
 	// transaction. The deposit row survives with its reason; the payments it
 	// created do not, so the charges they settled go back to being owed.
