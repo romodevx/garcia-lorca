@@ -1,0 +1,87 @@
+package domain
+
+import (
+	"time"
+
+	"github.com/garcia-lorca/pkg/schoolcal"
+)
+
+// CollectionPolicy is what a school charges for paying late and forgives for
+// paying early. One policy per (cycle, level), alongside the tuition table.
+//
+// It is a value, not an entity: it has no identity of its own and is always read
+// with the plan it belongs to. Keeping it separate from TuitionPlan is what lets
+// the rules change for a new cycle without rewriting what the old one charged.
+type CollectionPolicy struct {
+	// LateFeeDailyCents is charged for each day past the due date. Zero disables
+	// the surcharge entirely — a school that has not set a rate charges nothing,
+	// rather than charging zero and looking like the feature worked.
+	LateFeeDailyCents int64
+
+	// SurchargeCountsAllDays decides whether weekends and holidays are billable.
+	//
+	// This school said yes: "el recargo sí sábados domingos y feriados". Another
+	// may not, and the difference is real money, so it is configuration rather
+	// than an assumption compiled into the arithmetic.
+	SurchargeCountsAllDays bool
+
+	// EarlyPaymentCents is forgiven per month settled inside the window. A FIXED
+	// amount, not a percentage: "el pronto pago es una cantidad fija".
+	EarlyPaymentCents int64
+
+	// EarlyPaymentDays is the width of that window in WORKING days, counted from
+	// the start of the month being paid. Working days and not calendar days so a
+	// window ending on a Sunday does not quietly cost a family the discount.
+	EarlyPaymentDays int
+}
+
+// Surcharge is what a charge has accrued for being late, as of paidOn.
+//
+// The rule the school gave, in their own example: tuition falls due on the 10th
+// of September and the family pays on the 10th of October, so they owe thirty
+// days of surcharge on top of the month. It keeps accruing until THAT month is
+// settled — paying something else does not stop it.
+//
+// Derived, never stored. A daily surcharge written as charge rows would be ~30
+// rows per pupil per month — 12,000 a month for this school — and would still be
+// wrong the moment the rate changed. The ledger materialises it as one real
+// charge at the moment money is applied to it, so rows exist where money moved.
+func Surcharge(p CollectionPolicy, cal *schoolcal.Calendar, dueOn, paidOn time.Time) int64 {
+	if p.LateFeeDailyCents <= 0 {
+		return 0
+	}
+	var days int
+	if p.SurchargeCountsAllDays {
+		days = cal.CalendarDaysBetween(dueOn, paidOn)
+	} else {
+		days = cal.WorkingDaysBetween(dueOn, paidOn)
+	}
+	if days <= 0 {
+		return 0
+	}
+	return int64(days) * p.LateFeeDailyCents
+}
+
+// EarlyPaymentDiscount is what a family is forgiven for settling a month inside
+// its early window, counted from monthStart.
+//
+// Applied PER MONTH SETTLED, not per payment: "si paga 6 meses se le aplica
+// durante los 6 meses la cuota de pronto pago". A family clearing six months on
+// time earns it six times, so the caller asks once per month it settles.
+//
+// The window is working days, which is the one place the school calendar still
+// matters now that the surcharge runs every day. A holiday inside the window
+// pushes the deadline out and the family keeps the benefit — the rule the
+// director gave for deadlines landing on closed days.
+func EarlyPaymentDiscount(p CollectionPolicy, cal *schoolcal.Calendar, monthStart, paidOn time.Time) int64 {
+	if p.EarlyPaymentCents <= 0 || p.EarlyPaymentDays <= 0 {
+		return 0
+	}
+	// AddWorkingDays(start, n-1): the first working day is day one of the window,
+	// so five days from a Tuesday ends on the fifth working day, not the sixth.
+	deadline := cal.AddWorkingDays(monthStart, p.EarlyPaymentDays-1)
+	if paidOn.After(deadline) {
+		return 0
+	}
+	return p.EarlyPaymentCents
+}
