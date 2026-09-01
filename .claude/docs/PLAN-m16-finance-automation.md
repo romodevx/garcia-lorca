@@ -1292,9 +1292,15 @@ commit… hasta terminar empujamos para no estar consumiendo minutos de actions"
   decidido **dentro** de la transacción, con los cargos bloqueados · **T16** un
   `PaymentRegistered` por depósito, no seis · **T18** `UnallocatedCents` (el saldo a favor)
   en el estado de cuenta · **T19** `VoidDeposit` por asiento, con motivo obligatorio.
-- **T17** el outbox transaccional para `ChargeSettled` **no** se hizo: la publicación sigue
-  siendo best-effort después de la transacción, igual que antes. Es la única tarea del
-  bloque que queda abierta.
+- **T17 HECHO** (2026-09-01, después de que el dueño aclarara que `dev` es la demo diaria
+  hasta la entrega del 30 de noviembre): outbox transaccional en `finance_outbox`. El
+  evento se escribe en la MISMA transacción que el dinero; el pago drena al confirmar y
+  un barrido cada 30 s recoge lo que quedó. `FOR UPDATE SKIP LOCKED`, así que dos
+  instancias no publican dos veces. Probado apagando el emulador: el cobro contestó 201
+  en 1.07 s y los eventos salieron solos al volver el broker.
+- **Bug propio en el camino:** la primera versión drenaba sin límite de tiempo y con el
+  broker caído **la ventanilla se colgaba** — convertí "se pierde un evento" en "la caja
+  se traba", que es peor. Ahora el drenado del camino de pago tiene tope de 1 segundo.
 
 ### Bloque 5 · Pantalla
 - **T20/T21/T22** ventanilla nueva: buscar alumno → **un número** (lo que debe) y **un
@@ -1322,7 +1328,6 @@ commit… hasta terminar empujamos para no estar consumiendo minutos de actions"
 - `docs/api/openapi.yaml` documenta cada endpoint nuevo y pasa el lint de Redocly.
 
 ### Lo que queda
-- **T17** outbox transaccional para `ChargeSettled`.
 - Diferidas desde el inicio: inventario genérico, calendario de actividades, PDF del estado
   de cuenta, colegiatura partida por período.
 - Nada de esto se ha desplegado: el branch no se ha empujado.
