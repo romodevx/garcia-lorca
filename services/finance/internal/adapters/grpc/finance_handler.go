@@ -412,6 +412,16 @@ func toProtoDeposit(d domain.Deposit) *financev1.Deposit {
 	return out
 }
 
+// DrainOutbox publishes the events still waiting.
+func (h *FinanceHandler) DrainOutbox(ctx context.Context, req *connect.Request[financev1.DrainOutboxRequest]) (*connect.Response[financev1.DrainOutboxResponse], error) {
+	limit := int(req.Msg.GetLimit())
+	published, err := h.finance.DrainOutbox(ctx, limit)
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&financev1.DrainOutboxResponse{Published: int32(published)}), nil
+}
+
 // ExportContpaqi is the CONTPAQi XML export (spike S02). The contract reserves
 // the RPC; the field mapping is a later phase, so the boundary answers
 // Unimplemented rather than an empty document that could be mistaken for one.

@@ -107,8 +107,13 @@ func chargeKey(c domain.Charge) string {
 // The deposit path is exercised at the use-case layer; this handler fake only
 // has to satisfy the port so the wiring compiles.
 
+func (f *fakeRepo) DrainOutbox(_ context.Context, _ int, _ func(ports.OutboxEvent) error) (int, error) {
+	return 0, nil
+}
+
 func (f *fakeRepo) RegisterDeposit(_ context.Context, d domain.Deposit,
 	plan func(open []ports.ChargeWithPaid) (ports.DepositWrite, error),
+	_ func(record ports.DepositRecord) []ports.OutboxEvent,
 ) (ports.DepositRecord, bool, error) {
 	write, err := plan(nil)
 	if err != nil {
@@ -264,6 +269,7 @@ func (f *fakeRepo) RegisterPayment(
 	_ context.Context,
 	p domain.Payment,
 	derive func(charge domain.Charge, newPaidCents int64) (string, error),
+	_ func(charge ports.ChargeWithPaid) []ports.OutboxEvent,
 ) (domain.Payment, ports.ChargeWithPaid, bool, error) {
 	charge, ok := f.charges[p.ChargeID()]
 	if !ok {

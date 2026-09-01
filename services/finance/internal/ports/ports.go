@@ -205,6 +205,28 @@ type DepositRecord struct {
 	Settled []ChargeWithPaid
 }
 
+// The event types the outbox carries. They are the names the messaging boundary
+// stamps, so a row read with psql says what it is without a lookup.
+const (
+	OutboxChargeSettled     = "ChargeSettled"
+	OutboxPaymentRegistered = "PaymentRegistered"
+)
+
+// OutboxEvent is a domain event queued inside the transaction that produced it.
+//
+// It exists because publishing after a commit has no second chance: a broker
+// that is down, or a container that dies in between, loses the event and nothing
+// notices. Written here, either the payment and its event both land or neither
+// does, and a publication that fails is simply tried again.
+//
+// Payload is JSON of the domain event, not proto bytes. What goes on the wire is
+// the adapter's business; what belongs in a durable queue is the fact, in a form
+// a person debugging a stuck row can read.
+type OutboxEvent struct {
+	Type    string
+	Payload []byte
+}
+
 // PaymentPublisher emits the finance domain events. Publishing is best-effort
 // and happens after the payment is durably stored: a broker outage must never
 // lose money that was already collected, so the use case ignores the returned
@@ -258,8 +280,12 @@ type FinanceRepository interface {
 	// A repeat under the same idempotency key returns what was stored the first
 	// time (replayed = true) and collects nothing: the retry a lost response
 	// provokes must not cost a family twice.
+	//
+	// outbox runs inside the same transaction, after the allocations are
+	// applied, and returns the events the deposit produced.
 	RegisterDeposit(ctx context.Context, d domain.Deposit,
-		plan func(open []ChargeWithPaid) (DepositWrite, error)) (DepositRecord, bool, error)
+		plan func(open []ChargeWithPaid) (DepositWrite, error),
+		outbox func(record DepositRecord) []OutboxEvent) (DepositRecord, bool, error)
 
 	// UnallocatedCents is money a family has handed over that no charge has
 	// claimed: the sum of their live deposits, less what those deposits paid.
@@ -270,6 +296,15 @@ type FinanceRepository interface {
 	// concept the money was charged for. Cancelled charges are excluded: money
 	// against a voided charge is a correction to make, not income to report.
 	IncomeLines(ctx context.Context, from, to time.Time) ([]IncomeLine, error)
+
+	// DrainOutbox publishes the events waiting in the outbox, oldest first, and
+	// marks the ones that went out.
+	//
+	// publish is called per event; an event it refuses stays unpublished, its
+	// attempt count climbs, and the next drain tries it again. Rows are taken
+	// under SKIP LOCKED so two instances draining at once never publish the same
+	// event twice.
+	DrainOutbox(ctx context.Context, limit int, publish func(OutboxEvent) error) (int, error)
 
 	// GetDeposit returns one deposit by id, or KindNotFound.
 	GetDeposit(ctx context.Context, id string) (domain.Deposit, error)
@@ -313,10 +348,16 @@ type FinanceRepository interface {
 	// second insert, no derive, no status change. An empty key opts out (every
 	// call posts a payment) and always reports replayed=false. The caller uses
 	// the flag to suppress the side effects of a retry, notably the event.
+	//
+	// outbox runs inside the SAME transaction, after the status is derived, and
+	// returns the events this payment produced. Queuing them here rather than
+	// publishing after the commit is what stops an event being lost when the
+	// broker is down or the container dies in between.
 	RegisterPayment(
 		ctx context.Context,
 		p domain.Payment,
 		derive func(charge domain.Charge, newPaidCents int64) (status string, err error),
+		outbox func(charge ChargeWithPaid) []OutboxEvent,
 	) (stored domain.Payment, charge ChargeWithPaid, replayed bool, err error)
 	// ListPayments returns every payment posted against the student's charges,
 	// for the account statement.

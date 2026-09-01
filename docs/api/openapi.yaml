@@ -1198,6 +1198,51 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
 
+  /api/v1/finance/outbox/drain:
+    post:
+      tags: [finance-payments]
+      summary: Publish the events still waiting
+      description: >
+        A payment queues its events in the same transaction as the money and
+        drains them the moment it commits, so the ordinary case needs nobody and
+        an empty queue is the normal answer.
+
+
+        This exists for what that cannot cover: the broker was down, or the
+        process died between the commit and the send. Without it, a family could
+        pay and the pupil stay "en trámite" forever — the event that marks them
+        inscribed would simply be gone, with nothing able to notice.
+
+
+        Safe to call repeatedly. The service also sweeps on its own timer.
+      operationId: drainFinanceOutbox
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                limit:
+                  type: integer
+                  minimum: 0
+                  description: How many to publish in this pass. Zero uses the service's batch size.
+      responses:
+        '200':
+          description: How many events actually went out. Zero is the ordinary answer.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [published]
+                properties:
+                  published: { type: integer, minimum: 0 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
   /api/v1/finance/billing-runs:
     post:
       tags: [finance-tuition]

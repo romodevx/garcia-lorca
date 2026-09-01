@@ -461,6 +461,7 @@ func (r *Repository) RegisterPayment(
 	ctx context.Context,
 	p domain.Payment,
 	derive func(charge domain.Charge, newPaidCents int64) (string, error),
+	outbox func(charge ports.ChargeWithPaid) []ports.OutboxEvent,
 ) (domain.Payment, ports.ChargeWithPaid, bool, error) {
 	var (
 		storedPayment domain.Payment
@@ -525,6 +526,13 @@ func (r *Repository) RegisterPayment(
 		// derive has already vetoed cancelled and overpaying charges, so
 		// re-deriving from the new total reproduces exactly the status written.
 		result = ports.ChargeWithPaid{Charge: charge.WithStatus(newPaid), PaidCents: newPaid}
+		if outbox != nil {
+			// In the SAME transaction as the money: either both land or neither
+			// does, which is the whole point.
+			if err := writeOutbox(tx, r.tenantID, outbox(result)); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -902,6 +910,7 @@ func (r *Repository) RegisterDeposit(
 	ctx context.Context,
 	d domain.Deposit,
 	plan func(open []ports.ChargeWithPaid) (ports.DepositWrite, error),
+	outbox func(record ports.DepositRecord) []ports.OutboxEvent,
 ) (ports.DepositRecord, bool, error) {
 	var (
 		record   ports.DepositRecord
@@ -973,6 +982,11 @@ func (r *Repository) RegisterDeposit(
 			Allocations:      write.Allocations,
 			UnallocatedCents: write.UnallocatedCents,
 			Settled:          settled,
+		}
+		if outbox != nil {
+			if err := writeOutbox(tx, r.tenantID, outbox(record)); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -1320,4 +1334,78 @@ func (r *Repository) VoidDeposit(ctx context.Context, d domain.Deposit) error {
 		}
 		return nil
 	})
+}
+
+// --- outbox (M16) ----------------------------------------------------------
+
+// writeOutbox queues events inside the caller's transaction. It is unexported
+// and takes a tx on purpose: an outbox row written in its own transaction would
+// be exactly the thing this exists to prevent.
+func writeOutbox(tx *gorm.DB, tenantID string, events []ports.OutboxEvent) error {
+	for _, e := range events {
+		row := outboxModel{TenantID: tenantID, EventType: e.Type, Payload: e.Payload}
+		if err := tx.Create(&row).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "queueing event", err)
+		}
+	}
+	return nil
+}
+
+// DrainOutbox publishes what is waiting, oldest first.
+//
+// Each event is taken under SKIP LOCKED, so two instances draining at the same
+// moment never publish the same event twice — and neither waits on the other.
+// An event the publisher refuses is left unpublished with its attempt count
+// raised: the next drain tries it again, and a count that keeps climbing is the
+// signal that the broker is wrong, not the payment.
+//
+// Publishing happens INSIDE the row's transaction. That is deliberate: it means
+// a crash after the send but before the mark redelivers the event rather than
+// losing it, and every consumer here is idempotent — comms dedupes on its event
+// ledger, students' "mark inscribed" is a no-op when already inscribed. At least
+// once is the contract; at most once would be the wrong trade for money.
+func (r *Repository) DrainOutbox(ctx context.Context, limit int, publish func(ports.OutboxEvent) error) (int, error) {
+	published := 0
+	for taken := 0; taken < limit; taken++ {
+		var done bool
+		err := r.withTenant(ctx, func(tx *gorm.DB) error {
+			// Find and not Take: an empty queue is the ORDINARY answer here —
+			// the sweep runs every thirty seconds and the payment path drains
+			// its own events — and Take reports "record not found" as an error
+			// GORM logs at warn level. A line every half minute saying nothing
+			// happened is a log nobody reads, which buries the ones that matter.
+			var rows []outboxModel
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+				Where("published_at IS NULL").
+				Order("created_at, id").
+				Limit(1).
+				Find(&rows).Error; err != nil {
+				return glerrors.Wrap(glerrors.KindInternal, "reading the outbox", err)
+			}
+			if len(rows) == 0 {
+				done = true
+				return nil
+			}
+			row := rows[0]
+
+			if perr := publish(ports.OutboxEvent{Type: row.EventType, Payload: row.Payload}); perr != nil {
+				// Left unpublished on purpose. Counting the attempt is the only
+				// write, so the event survives to be tried again.
+				return tx.Model(&outboxModel{}).Where("id = ?", row.ID).
+					Update("attempts", row.Attempts+1).Error
+			}
+			published++
+			return tx.Model(&outboxModel{}).Where("id = ?", row.ID).Updates(map[string]any{
+				"published_at": gorm.Expr("now()"),
+				"attempts":     row.Attempts + 1,
+			}).Error
+		})
+		if err != nil {
+			return published, err
+		}
+		if done {
+			break
+		}
+	}
+	return published, nil
 }

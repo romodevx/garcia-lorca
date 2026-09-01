@@ -4,6 +4,7 @@ package postgres_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -84,7 +85,7 @@ func TestRegisterDepositSplitsAcrossChargesInOneTransaction(t *testing.T) {
 	paidOn := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
 	record, replayed, err := repo.RegisterDeposit(context.Background(),
 		newDeposit(t, "62000000-0000-0000-0000-000000000011", tenant, student, 500000, paidOn, "dep-key-1"),
-		splitOldestFirst(t, tenant, &ids, 500000, paidOn))
+		splitOldestFirst(t, tenant, &ids, 500000, paidOn), nil)
 	if err != nil {
 		t.Fatalf("RegisterDeposit: %v", err)
 	}
@@ -128,13 +129,13 @@ func TestRegisterDepositIsIdempotent(t *testing.T) {
 	paidOn := time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)
 	deposit := newDeposit(t, "62000000-0000-0000-0000-000000000021", tenant, student, 320000, paidOn, "dep-key-2")
 	if _, _, err := repo.RegisterDeposit(context.Background(), deposit,
-		splitOldestFirst(t, tenant, &ids, 320000, paidOn)); err != nil {
+		splitOldestFirst(t, tenant, &ids, 320000, paidOn), nil); err != nil {
 		t.Fatalf("first RegisterDeposit: %v", err)
 	}
 
 	second := newDeposit(t, "62000000-0000-0000-0000-000000000022", tenant, student, 320000, paidOn, "dep-key-2")
 	record, replayed, err := repo.RegisterDeposit(context.Background(), second,
-		splitOldestFirst(t, tenant, &ids, 320000, paidOn))
+		splitOldestFirst(t, tenant, &ids, 320000, paidOn), nil)
 	if err != nil {
 		t.Fatalf("second RegisterDeposit: %v", err)
 	}
@@ -160,7 +161,7 @@ func TestVoidDepositReleasesTheDebtAndKeepsTheRow(t *testing.T) {
 	paidOn := time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)
 	deposit := newDeposit(t, "62000000-0000-0000-0000-000000000031", tenant, student, 320000, paidOn, "dep-key-3")
 	if _, _, err := repo.RegisterDeposit(context.Background(), deposit,
-		splitOldestFirst(t, tenant, &ids, 320000, paidOn)); err != nil {
+		splitOldestFirst(t, tenant, &ids, 320000, paidOn), nil); err != nil {
 		t.Fatalf("RegisterDeposit: %v", err)
 	}
 
@@ -206,7 +207,7 @@ func TestUnallocatedCentsIsTheFamilysCredit(t *testing.T) {
 	paidOn := time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)
 	if _, _, err := repo.RegisterDeposit(context.Background(),
 		newDeposit(t, "62000000-0000-0000-0000-000000000041", tenant, student, 500000, paidOn, "dep-key-4"),
-		splitOldestFirst(t, tenant, &ids, 500000, paidOn)); err != nil {
+		splitOldestFirst(t, tenant, &ids, 500000, paidOn), nil); err != nil {
 		t.Fatalf("RegisterDeposit: %v", err)
 	}
 
@@ -231,7 +232,7 @@ func TestRLSIsolatesDeposits(t *testing.T) {
 	paidOn := time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)
 	deposit := newDeposit(t, "62000000-0000-0000-0000-000000000051", tenantA, student, 320000, paidOn, "dep-key-5")
 	if _, _, err := appRepo(t, tenantA).RegisterDeposit(context.Background(), deposit,
-		splitOldestFirst(t, tenantA, &ids, 320000, paidOn)); err != nil {
+		splitOldestFirst(t, tenantA, &ids, 320000, paidOn), nil); err != nil {
 		t.Fatalf("RegisterDeposit: %v", err)
 	}
 
@@ -269,7 +270,7 @@ func TestIncomeLinesGroupsCollectedMoneyByConcept(t *testing.T) {
 	repo := appRepo(t, tenant)
 	paidOn := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
 	if _, _, _, err := repo.RegisterPayment(context.Background(),
-		newPayment(t, "91000000-0000-0000-0000-000000000061", tenant, charge.ID(), 200000, paidOn), derive); err != nil {
+		newPayment(t, "91000000-0000-0000-0000-000000000061", tenant, charge.ID(), 200000, paidOn), derive, nil); err != nil {
 		t.Fatalf("RegisterPayment: %v", err)
 	}
 
@@ -360,5 +361,111 @@ func TestRepricingALevelUpdatesEveryColumn(t *testing.T) {
 	}
 	if len(stored.Schedule()) != 3 || stored.Schedule()[1].AmountCents != 160000 {
 		t.Errorf("the split schedule did not survive: %+v", stored.Schedule())
+	}
+}
+
+// The whole point of the outbox, against real SQL: the event is written in the
+// SAME transaction as the money, so a broker that is down costs a delay and not
+// a fact.
+//
+// Before this, a payment committed and then published best-effort. Lose that
+// send — broker down, container dies in between — and students never hears
+// ChargeSettled, so a family that paid keeps a pupil "en trámite" forever with
+// nothing able to notice.
+func TestTheOutboxSurvivesABrokenBroker(t *testing.T) {
+	tenant, student := tenantA, "80000000-0000-0000-0000-000000000010"
+	charge := seedConceptAndCharge(t, tenant, "60000000-0000-0000-0000-000000000071", "inscripción outbox",
+		"61000000-0000-0000-0000-000000000071", student, cycleDeposit, 320000, 0,
+		time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC))
+
+	repo := appRepo(t, tenant)
+	ids := 500
+	paidOn := time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)
+	_, _, err := repo.RegisterDeposit(context.Background(),
+		newDeposit(t, "62000000-0000-0000-0000-000000000071", tenant, student, 320000, paidOn, "dep-key-outbox"),
+		splitOldestFirst(t, tenant, &ids, 320000, paidOn),
+		func(record ports.DepositRecord) []ports.OutboxEvent {
+			events := []ports.OutboxEvent{{Type: ports.OutboxPaymentRegistered, Payload: []byte(`{"paymentId":"dep"}`)}}
+			for range record.Settled {
+				events = append(events, ports.OutboxEvent{
+					Type: ports.OutboxChargeSettled, Payload: []byte(`{"chargeId":"` + charge.ID() + `"}`),
+				})
+			}
+			return events
+		})
+	if err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+
+	// The broker is down: every publication is refused.
+	broken := func(ports.OutboxEvent) error { return errors.New("pub/sub is down") }
+	published, err := repo.DrainOutbox(context.Background(), 50, broken)
+	if err != nil {
+		t.Fatalf("DrainOutbox with a broken broker: %v", err)
+	}
+	if published != 0 {
+		t.Errorf("published %d events through a broken broker", published)
+	}
+
+	// And the events are still there, which is the whole claim.
+	var seen []ports.OutboxEvent
+	published, err = repo.DrainOutbox(context.Background(), 50, func(e ports.OutboxEvent) error {
+		seen = append(seen, e)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("DrainOutbox: %v", err)
+	}
+	if published != 2 || len(seen) != 2 {
+		t.Fatalf("published %d events after the broker came back, want 2", published)
+	}
+	var settled int
+	for _, e := range seen {
+		if e.Type == ports.OutboxChargeSettled {
+			settled++
+		}
+	}
+	if settled != 1 {
+		t.Errorf("%d ChargeSettled events survived, want 1", settled)
+	}
+
+	// A second drain has nothing left: published rows are not sent twice.
+	published, err = repo.DrainOutbox(context.Background(), 50, func(ports.OutboxEvent) error { return nil })
+	if err != nil {
+		t.Fatalf("second DrainOutbox: %v", err)
+	}
+	if published != 0 {
+		t.Errorf("re-published %d events that had already gone out", published)
+	}
+}
+
+// A payment that fails leaves no event behind. A consumer acting on a payment
+// that never happened is worse than a lost notification.
+func TestAnAbortedPaymentQueuesNoEvent(t *testing.T) {
+	tenant, student := tenantA, "80000000-0000-0000-0000-000000000011"
+	seedConceptAndCharge(t, tenant, "60000000-0000-0000-0000-000000000081", "inscripción abort",
+		"61000000-0000-0000-0000-000000000081", student, cycleDeposit, 320000, 0,
+		time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC))
+
+	repo := appRepo(t, tenant)
+	paidOn := time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)
+	_, _, err := repo.RegisterDeposit(context.Background(),
+		newDeposit(t, "62000000-0000-0000-0000-000000000081", tenant, student, 320000, paidOn, "dep-key-abort"),
+		func([]ports.ChargeWithPaid) (ports.DepositWrite, error) {
+			return ports.DepositWrite{}, errors.New("the split could not be worked out")
+		},
+		func(ports.DepositRecord) []ports.OutboxEvent {
+			return []ports.OutboxEvent{{Type: ports.OutboxChargeSettled, Payload: []byte(`{}`)}}
+		})
+	if err == nil {
+		t.Fatal("the deposit was accepted")
+	}
+
+	published, derr := repo.DrainOutbox(context.Background(), 50, func(ports.OutboxEvent) error { return nil })
+	if derr != nil {
+		t.Fatalf("DrainOutbox: %v", derr)
+	}
+	if published != 0 {
+		t.Errorf("%d events queued for a payment that never happened", published)
 	}
 }

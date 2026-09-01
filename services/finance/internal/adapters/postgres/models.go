@@ -138,3 +138,20 @@ type depositModel struct {
 }
 
 func (depositModel) TableName() string { return "deposits" }
+
+// outboxModel is the GORM row for `finance_outbox`: a domain event queued in
+// the same transaction that produced it, waiting to be published.
+type outboxModel struct {
+	// The database mints the id. An outbox row has no domain identity — it is a
+	// queue entry — so nothing upstream has a name for it, and the `default` tag
+	// is what stops GORM sending an empty string for a uuid column.
+	ID          string     `gorm:"column:id;primaryKey;default:gen_random_uuid()"`
+	TenantID    string     `gorm:"column:tenant_id"`
+	EventType   string     `gorm:"column:event_type"`
+	Payload     []byte     `gorm:"column:payload;type:jsonb"`
+	CreatedAt   time.Time  `gorm:"column:created_at"`
+	PublishedAt *time.Time `gorm:"column:published_at"`
+	Attempts    int        `gorm:"column:attempts"`
+}
+
+func (outboxModel) TableName() string { return "finance_outbox" }

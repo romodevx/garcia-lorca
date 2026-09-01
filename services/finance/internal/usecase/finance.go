@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -344,7 +345,10 @@ func (s *FinanceService) RegisterPaymentAt(ctx context.Context, chargeID string,
 		return domain.Payment{}, ports.ChargeWithPaid{}, err
 	}
 
-	stored, charge, replayed, err := s.repo.RegisterPayment(ctx, payment, derivePaidStatus)
+	stored, charge, replayed, err := s.repo.RegisterPayment(ctx, payment, derivePaidStatus,
+		func(charge ports.ChargeWithPaid) []ports.OutboxEvent {
+			return s.paymentEvents(payment, charge)
+		})
 	if err != nil {
 		if glerrors.KindOf(err) == glerrors.KindNotFound {
 			return domain.Payment{}, ports.ChargeWithPaid{}, glerrors.New(glerrors.KindInvalid, "charge not found")
@@ -353,7 +357,10 @@ func (s *FinanceService) RegisterPaymentAt(ctx context.Context, chargeID string,
 	}
 
 	if !replayed {
-		s.publishPaymentRegistered(ctx, stored, charge)
+		// The events are already durable; this only gets them out now instead of
+		// on the next drain. It cannot fail the payment — that is the difference
+		// between a queue and a best-effort send.
+		s.drainQuietly(ctx)
 	}
 	return stored, charge, nil
 }
@@ -371,43 +378,119 @@ func derivePaidStatus(charge domain.Charge, newPaidCents int64) (string, error) 
 	return charge.DeriveStatus(newPaidCents), nil
 }
 
-// publishPaymentRegistered announces a collected payment. Failures are
-// deliberately ignored: the payment is already durable, and losing a
-// notification is strictly better than rejecting money that was received.
-func (s *FinanceService) publishPaymentRegistered(ctx context.Context, p domain.Payment, charge ports.ChargeWithPaid) {
+// paymentEvents is what a collected payment announces, queued INSIDE the
+// payment transaction so it cannot be lost between the commit and the send.
+//
+// ChargeSettled fires on the collection that CLOSES the charge and on no other:
+// a consumer acting on a partial payment would enrol a pupil whose inscription
+// is half paid. The test is the charge's derived status, not the amount
+// collected, which says nothing about what was owed.
+func (s *FinanceService) paymentEvents(p domain.Payment, charge ports.ChargeWithPaid) []ports.OutboxEvent {
+	events := []ports.OutboxEvent{
+		outboxEvent(ports.OutboxPaymentRegistered, ports.PaymentRegisteredEvent{
+			PaymentID:   p.ID(),
+			StudentID:   charge.Charge.StudentID(),
+			ChargeID:    p.ChargeID(),
+			TenantID:    s.tenantID,
+			Method:      p.Method(),
+			AmountCents: p.Amount().Int64(),
+			PaidAt:      p.PaidAt(),
+		}),
+	}
+	if charge.Charge.Status() == domain.StatusPaid {
+		events = append(events, outboxEvent(ports.OutboxChargeSettled, ports.ChargeSettledEvent{
+			ChargeID:    p.ChargeID(),
+			StudentID:   charge.Charge.StudentID(),
+			TenantID:    s.tenantID,
+			ExternalRef: charge.Charge.ExternalRef(),
+			AmountCents: charge.Charge.Effective().Int64(),
+			SettledAt:   p.PaidAt(),
+		}))
+	}
+	return events
+}
+
+// outboxEvent serialises a domain event for the queue. A payload that cannot be
+// marshalled would be a silently dropped event, so it becomes an empty one the
+// drain refuses loudly rather than a row nobody notices.
+func outboxEvent(eventType string, payload any) ports.OutboxEvent {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return ports.OutboxEvent{Type: eventType}
+	}
+	return ports.OutboxEvent{Type: eventType, Payload: raw}
+}
+
+// DrainOutbox publishes what is waiting. It is called right after every payment
+// so the ordinary case is instant, and by a scheduler so nothing stays stuck
+// when the broker was down or the process died.
+func (s *FinanceService) DrainOutbox(ctx context.Context, limit int) (int, error) {
+	if s.publisher == nil {
+		return 0, nil
+	}
+	if limit <= 0 {
+		limit = drainBatch
+	}
+	return s.repo.DrainOutbox(ctx, limit, func(e ports.OutboxEvent) error {
+		return s.publishWithin(ctx, e)
+	})
+}
+
+// publishWithin turns one queued row back into a typed publication.
+//
+// An unknown type is refused rather than dropped: the row stays, and an attempt
+// count that climbs is how somebody finds out this service was deployed emitting
+// something nothing consumes.
+func (s *FinanceService) publishWithin(ctx context.Context, e ports.OutboxEvent) error {
+	switch e.Type {
+	case ports.OutboxPaymentRegistered:
+		var ev ports.PaymentRegisteredEvent
+		if err := json.Unmarshal(e.Payload, &ev); err != nil {
+			return err
+		}
+		return s.publisher.PublishPaymentRegistered(ctx, ev)
+	case ports.OutboxChargeSettled:
+		var ev ports.ChargeSettledEvent
+		if err := json.Unmarshal(e.Payload, &ev); err != nil {
+			return err
+		}
+		return s.publisher.PublishChargeSettled(ctx, ev)
+	default:
+		return glerrors.New(glerrors.KindInternal, "unknown outbox event: "+e.Type)
+	}
+}
+
+// drainQuietly gets the just-queued events out now, under a hard deadline.
+//
+// The deadline is the whole point. A broker that is down must never turn into a
+// payment that was refused — and it must not turn into a payment that HANGS
+// either, which is what happened the first time this was written without one:
+// the Pub/Sub client retried a dead emulator and the counter froze with a parent
+// standing there. A second is plenty for a healthy publish and invisible when it
+// fails; whatever misses the deadline is still queued, and the sweep gets it.
+//
+// Detached from the caller's context so a client that hangs up does not cancel
+// a publication already in flight.
+func (s *FinanceService) drainQuietly(ctx context.Context) {
 	if s.publisher == nil {
 		return
 	}
-	_ = s.publisher.PublishPaymentRegistered(ctx, ports.PaymentRegisteredEvent{
-		PaymentID:   p.ID(),
-		StudentID:   charge.Charge.StudentID(),
-		ChargeID:    p.ChargeID(),
-		TenantID:    s.tenantID,
-		Method:      p.Method(),
-		AmountCents: p.Amount().Int64(),
-		PaidAt:      p.PaidAt(),
+	drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), drainDeadline)
+	defer cancel()
+	_, _ = s.repo.DrainOutbox(drainCtx, drainBatch, func(e ports.OutboxEvent) error {
+		return s.publishWithin(drainCtx, e)
 	})
-	s.publishChargeSettledIfClosed(ctx, p, charge)
 }
 
-// publishChargeSettledIfClosed fires ChargeSettled on the collection that closes
-// the charge, and on no other. A consumer that releases goods against the event
-// must never act on a partial payment, so the test is the charge's own derived
-// status after this payment — not the amount collected, which says nothing about
-// what was owed. Best-effort for the same reason as above: the money is banked.
-func (s *FinanceService) publishChargeSettledIfClosed(ctx context.Context, p domain.Payment, charge ports.ChargeWithPaid) {
-	if charge.Charge.Status() != domain.StatusPaid {
-		return
-	}
-	_ = s.publisher.PublishChargeSettled(ctx, ports.ChargeSettledEvent{
-		ChargeID:    p.ChargeID(),
-		StudentID:   charge.Charge.StudentID(),
-		TenantID:    s.tenantID,
-		ExternalRef: charge.Charge.ExternalRef(),
-		AmountCents: charge.Charge.Effective().Int64(),
-		SettledAt:   p.PaidAt(),
-	})
-}
+// drainDeadline bounds the drain that runs on the payment path. See above: a
+// healthy publish takes milliseconds, and a dead broker must cost the cashier a
+// blink rather than a wait.
+const drainDeadline = time.Second
+
+// drainBatch is how many events one drain publishes. Small enough that a
+// counter-side drain never becomes a wait, large enough that a backlog clears in
+// a few passes.
+const drainBatch = 50
 
 // GetAccount builds a student's account statement: every charge across every
 // cycle with what has been collected against it, every payment received, and

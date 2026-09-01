@@ -136,6 +136,15 @@ service FinanceService {
   // it twice on the same day charges nobody twice.
   rpc RunBilling(RunBillingRequest) returns (RunBillingResponse);
 
+  // DrainOutbox publishes the events waiting in the outbox and reports how many
+  // went out.
+  //
+  // A payment drains straight after committing, so the ordinary case needs
+  // nobody. This exists for the case that ordinary path cannot cover: the broker
+  // was down, or the container died between the commit and the send. A scheduler
+  // calls it on a timer, and an empty queue is the normal answer.
+  rpc DrainOutbox(DrainOutboxRequest) returns (DrainOutboxResponse);
+
   // ExportContpaqi produces a CONTPAQi-format XML export (spike S02).
   // TODO(M05/S02): real field mapping + period/account filters.
   rpc ExportContpaqi(ExportContpaqiRequest) returns (ExportContpaqiResponse);
@@ -679,4 +688,16 @@ message ExpectedTodayResponse {
   // The whole year still owed, shown beside it so nobody confuses "what is due
   // today" with "what is left".
   int64 annual_balance_cents = 4;
+}
+
+// DrainOutboxRequest asks for the waiting events to be published.
+message DrainOutboxRequest {
+  // How many to publish in this pass. Zero means the service's own batch size.
+  int32 limit = 1;
+}
+
+// DrainOutboxResponse reports how many actually went out. Zero is the ordinary
+// answer: the payment path drains its own events.
+message DrainOutboxResponse {
+  int32 published = 1;
 }

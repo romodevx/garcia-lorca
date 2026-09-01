@@ -112,9 +112,17 @@ type spyPublisher struct {
 	events  []ports.PaymentRegisteredEvent
 	settled []ports.ChargeSettledEvent
 	err     error
+	// settledErr fails ONLY the settled publication, which is how a broker
+	// outage is simulated without also breaking the receipt notification.
+	settledErr   error
+	settledCalls int
 }
 
 func (s *spyPublisher) PublishChargeSettled(_ context.Context, e ports.ChargeSettledEvent) error {
+	s.settledCalls++
+	if s.settledErr != nil {
+		return s.settledErr
+	}
 	s.settled = append(s.settled, e)
 	return s.err
 }
@@ -135,6 +143,10 @@ type fakeRepo struct {
 	// depositOfPayment stands in for payments.deposit_id: which deposit an
 	// allocation came from, so voiding can find and release exactly those.
 	depositOfPayment map[string]string
+	// outbox mirrors the real table: an event queued in the same "transaction"
+	// as the money, still there when publishing fails. A fake that dropped it
+	// would prove the opposite of what these tests claim.
+	outbox []ports.OutboxEvent
 
 	// Recorded call arguments, for the tests that assert on the call itself.
 	overdueCycleID      string
@@ -301,6 +313,7 @@ func (f *fakeRepo) RegisterPayment(
 	_ context.Context,
 	p domain.Payment,
 	derive func(charge domain.Charge, newPaidCents int64) (string, error),
+	outbox func(charge ports.ChargeWithPaid) []ports.OutboxEvent,
 ) (domain.Payment, ports.ChargeWithPaid, bool, error) {
 	c, ok := f.charges[p.ChargeID()]
 	if !ok {
@@ -323,7 +336,11 @@ func (f *fakeRepo) RegisterPayment(
 	// the callback returned — recorded above for the tests to assert on.
 	updated := c.WithStatus(newPaid)
 	f.charges[c.ID()] = updated
-	return p, ports.ChargeWithPaid{Charge: updated, PaidCents: newPaid}, false, nil
+	result := ports.ChargeWithPaid{Charge: updated, PaidCents: newPaid}
+	if outbox != nil {
+		f.outbox = append(f.outbox, outbox(result)...)
+	}
+	return p, result, false, nil
 }
 
 // RegisterDeposit mirrors the real repository closely enough to be worth
@@ -334,6 +351,7 @@ func (f *fakeRepo) RegisterDeposit(
 	_ context.Context,
 	d domain.Deposit,
 	plan func(open []ports.ChargeWithPaid) (ports.DepositWrite, error),
+	outbox func(record ports.DepositRecord) []ports.OutboxEvent,
 ) (ports.DepositRecord, bool, error) {
 	if original, found := f.depositByKey(d.IdempotencyKey()); found {
 		var allocations []domain.Payment
@@ -400,14 +418,42 @@ func (f *fakeRepo) RegisterDeposit(
 			settled = append(settled, ports.ChargeWithPaid{Charge: updated, PaidCents: newPaid})
 		}
 	}
-	return ports.DepositRecord{
+	record := ports.DepositRecord{
 		Deposit:          d,
 		Surcharges:       write.Surcharges,
 		Allocations:      write.Allocations,
 		UnallocatedCents: write.UnallocatedCents,
 		Settled:          settled,
-	}, false, nil
+	}
+	if outbox != nil {
+		f.outbox = append(f.outbox, outbox(record)...)
+	}
+	return record, false, nil
 }
+
+// DrainOutbox mirrors the real one: an event the publisher refuses STAYS. A
+// fake that removed it regardless would make the retry test pass against a
+// service that loses events.
+func (f *fakeRepo) DrainOutbox(_ context.Context, limit int, publish func(ports.OutboxEvent) error) (int, error) {
+	published := 0
+	var kept []ports.OutboxEvent
+	for i, e := range f.outbox {
+		if i >= limit {
+			kept = append(kept, f.outbox[i:]...)
+			break
+		}
+		if err := publish(e); err != nil {
+			kept = append(kept, e)
+			continue
+		}
+		published++
+	}
+	f.outbox = kept
+	return published, nil
+}
+
+// pendingOutbox is how many events are still waiting to go out.
+func (f *fakeRepo) pendingOutbox() int { return len(f.outbox) }
 
 func (f *fakeRepo) depositByKey(key string) (domain.Deposit, bool) {
 	if key == "" {

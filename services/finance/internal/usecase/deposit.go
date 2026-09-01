@@ -70,12 +70,14 @@ func (s *FinanceService) RegisterDeposit(ctx context.Context, in DepositInput) (
 		return DepositResult{}, err
 	}
 
-	record, replayed, err := s.repo.RegisterDeposit(ctx, deposit, planner.plan)
+	record, replayed, err := s.repo.RegisterDeposit(ctx, deposit, planner.plan, s.depositEvents)
 	if err != nil {
 		return DepositResult{}, err
 	}
 	if !replayed {
-		s.announceDeposit(ctx, record)
+		// The events are already durable; this only gets them out now rather
+		// than on the next drain, and cannot fail the deposit.
+		s.drainQuietly(ctx)
 	}
 	return DepositResult{
 		Deposit:          record.Deposit,
@@ -664,30 +666,37 @@ func (s *FinanceService) activeCycleOf(ctx context.Context, studentID string) (s
 	return e.CycleID, nil
 }
 
-// announceDeposit publishes one PaymentRegistered for the deposit — not one per
-// allocation. A family that pays six months at once gets one receipt and one
-// notification; six would read as six payments and the phone would buzz six
-// times for one act.
-func (s *FinanceService) announceDeposit(ctx context.Context, record ports.DepositRecord) {
-	if s.publisher == nil {
-		return
+// depositEvents is what a deposit announces, queued INSIDE its transaction.
+//
+// ONE PaymentRegistered for the deposit, not one per month settled: a family
+// that pays six months at once performed one act, and six notifications would
+// read as six payments and buzz the phone six times.
+//
+// One ChargeSettled per charge the money CLOSED, and none for the ones it merely
+// touched. That is what students listens to in order to turn a pupil from "en
+// trámite" into "inscrito", and it is exactly the event that used to be lost
+// when the broker was down — leaving a family paid and a pupil unenrolled with
+// nothing in the system able to notice.
+func (s *FinanceService) depositEvents(record ports.DepositRecord) []ports.OutboxEvent {
+	events := []ports.OutboxEvent{
+		outboxEvent(ports.OutboxPaymentRegistered, ports.PaymentRegisteredEvent{
+			PaymentID:   record.Deposit.ID(),
+			StudentID:   record.Deposit.StudentID(),
+			TenantID:    s.tenantID,
+			Method:      record.Deposit.Method(),
+			AmountCents: record.Deposit.Amount().Int64(),
+			PaidAt:      record.Deposit.PaidAt(),
+		}),
 	}
-	_ = s.publisher.PublishPaymentRegistered(ctx, ports.PaymentRegisteredEvent{
-		PaymentID:   record.Deposit.ID(),
-		StudentID:   record.Deposit.StudentID(),
-		TenantID:    s.tenantID,
-		Method:      record.Deposit.Method(),
-		AmountCents: record.Deposit.Amount().Int64(),
-		PaidAt:      record.Deposit.PaidAt(),
-	})
 	for _, settled := range record.Settled {
-		_ = s.publisher.PublishChargeSettled(ctx, ports.ChargeSettledEvent{
+		events = append(events, outboxEvent(ports.OutboxChargeSettled, ports.ChargeSettledEvent{
 			ChargeID:    settled.Charge.ID(),
 			StudentID:   settled.Charge.StudentID(),
 			TenantID:    s.tenantID,
 			ExternalRef: settled.Charge.ExternalRef(),
 			AmountCents: settled.Charge.Effective().Int64(),
 			SettledAt:   record.Deposit.PaidAt(),
-		})
+		}))
 	}
+	return events
 }
