@@ -1193,3 +1193,61 @@ amount · D3 → no Diferencia field; the payment is a credit against the annual
 removes the design contradiction outright.
 
 NO UNRESOLVED DECISIONS
+
+---
+
+## LAS REGLAS DE COBRO, EN PALABRAS DEL DUEÑO (2026-09-01)
+
+### R1 · El recargo corre TODOS los días
+
+> *"si el recargo sí sábados domingos y feriados"*
+
+Recargo = tarifa diaria × **días naturales** desde el vencimiento. `CalendarDaysBetween`,
+no `WorkingDaysBetween`.
+
+**Consecuencia que conviene tener presente:** el calendario escolar **no interviene en el
+recargo**. Sirve solo para la ventana de pronto pago ("los primeros N días hábiles"), que
+sí se cuenta en días hábiles. Fue buena decisión que `pkg/schoolcal` respondiera las dos
+preguntas: la respuesta del dueño usa una y la otra sigue haciendo falta.
+
+### R2 · El pronto pago se aplica por cada mes que se paga
+
+> *"si paga 6 meses se le aplica durante los 6 meses la cuota de pronto pago"*
+
+Es un monto fijo **por mes liquidado**, no por transacción. Pagar 6 meses puntual
+= 6 × descuento. Encaja sin fricción con el `discount` que ya existe en `charge.go`:
+cada cargo mensual lleva el suyo.
+
+### R3 · El recargo se conserva y sigue creciendo hasta que se pague
+
+> *"se conserva. Si el padre después del día 10 paga cada mes se le genera diario el
+> recargo hasta que pague. Si paga el siguiente día 10 debe pagar el mes anterior más los
+> 10 pesos diarios que se generaron más el mes actual. Si no, le sigue generando recargos"*
+
+La regla completa, con el ejemplo del dueño:
+
+```
+día 10 sep    vence la colegiatura de septiembre
+día 11 sep    empieza a correr el recargo: $10 por día natural
+...
+día 10 oct    el padre paga. Debe:
+                colegiatura septiembre     $3,200
+                recargo 30 días × $10      $  300
+                colegiatura octubre        $3,200   (vence hoy, sin recargo)
+                ─────────────────────────────────
+                                           $6,700
+
+              si NO paga, el recargo de septiembre sigue corriendo
+              y el de octubre empieza el día 11
+```
+
+**Lo que esto fija en el diseño:**
+- El recargo se acumula **por cargo mensual**, no por alumno. Cada mes tiene el suyo.
+- Deja de correr cuando **ese** mes queda liquidado, no cuando el alumno paga algo.
+- Nunca se perdona por sí solo: perdonarlo es un acto explícito, que es justo lo que hace
+  el botón de "aplicar pronto pago" y por eso necesita quedar asentado.
+
+**Esto confirma el diseño al que llegó la revisión de ingeniería:** derivar el recargo para
+mostrarlo (crece todos los días, sin escribir 30 renglones al mes) y **materializarlo como
+cargo real en el momento en que se le aplica dinero**. Los renglones existen solo donde
+hubo movimiento.
