@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, type FormEvent, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
+import { SlideOver } from "../../_design/SlideOver";
 import type { CreateGroupInput, Cycle, GradeLevel, Group } from "../../config/api";
-import { EmptyHint, ErrorAlert, NumberField, Section, TextField } from "./parts";
+import { EmptyHint, NumberField, Section, TextField } from "./parts";
 
 export interface GroupsPanelProps {
   cycle: Cycle;
@@ -19,31 +20,43 @@ function nextLetter(groups: readonly Group[]): string {
   return String.fromCharCode("A".charCodeAt(0) + Math.min(groups.length, 25));
 }
 
-/** Groups for a (cycle, grade level), with an A/B/C… name suggestion. */
+/**
+ * The classrooms of a grade in one cycle: A, B, C…
+ *
+ * The next letter and the usual capacity come filled in, because opening a
+ * second group is one of those things a school does twenty times in an
+ * afternoon and then not again until next August.
+ */
 export function GroupsPanel({ cycle, gradeLevel, groups, onCreate }: GroupsPanelProps): ReactElement {
+  const [creating, setCreating] = useState(false);
   const [name, setName] = useState(nextLetter(groups));
   const [capacity, setCapacity] = useState(DEFAULT_CAPACITY);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
-  const canSubmit = name.trim() !== "" && capacity >= 0 && !pending;
+  // The suggested letter follows the list, so it is never stale after a save or
+  // after switching grade.
+  useEffect(() => { setName(nextLetter(groups)); }, [groups]);
 
-  const submit = async (e: FormEvent): Promise<void> => {
-    e.preventDefault();
+  const submit = async (): Promise<void> => {
+    if (name.trim() === "") {
+      setError("Escribe el nombre del grupo.");
+      return;
+    }
     setPending(true);
     setError(undefined);
     try {
       await onCreate({ cycleId: cycle.id, gradeLevelId: gradeLevel.id, name: name.trim(), capacity });
-      setName(nextLetter([...groups, { id: "", cycleId: cycle.id, gradeLevelId: gradeLevel.id, name, capacity }]));
+      setCreating(false);
     } catch {
-      setError("No se pudo crear el grupo. Intenta de nuevo.");
+      setError("No se pudo crear el grupo. Revisa que no exista ya con ese nombre.");
     } finally {
       setPending(false);
     }
   };
 
   return (
-    <Section title="Grupos" subtitle={`Grupos de ${gradeLevel.name} en ${cycle.name}.`}>
+    <Section title="Grupos" subtitle={`De ${gradeLevel.name} en ${cycle.name}.`}>
       {groups.length > 0 ? (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
           {groups.map((g) => (
@@ -59,16 +72,31 @@ export function GroupsPanel({ cycle, gradeLevel, groups, onCreate }: GroupsPanel
         <EmptyHint>Aún no hay grupos para este grado en el ciclo.</EmptyHint>
       )}
 
-      <form aria-label="Agregar grupo" onSubmit={submit}>
-        <div style={{ display: "grid", gridTemplateColumns: ".8fr .8fr auto", gap: 12, alignItems: "end" }}>
-          <TextField label="Nombre del grupo" value={name} onChange={setName} placeholder="A" />
-          <NumberField label="Cupo" value={capacity} onChange={setCapacity} min={0} />
-          <Btn type="submit" icon="plus" disabled={!canSubmit}>
-            Crear grupo
-          </Btn>
-        </div>
-      </form>
-      {error !== undefined && <ErrorAlert message={error} />}
+      <Btn icon="plus" onClick={() => { setError(undefined); setCreating(true); }}>Nuevo grupo</Btn>
+
+      {creating && (
+        <SlideOver
+          title={`Nuevo grupo de ${gradeLevel.name}`}
+          subtitle={`Ciclo ${cycle.name}`}
+          icon="students"
+          submitLabel="Crear grupo"
+          pending={pending}
+          error={error}
+          onClose={() => { setCreating(false); setError(undefined); }}
+          onSubmit={() => void submit()}
+        >
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <TextField label="Nombre del grupo" value={name} onChange={setName} placeholder="A" />
+            <NumberField label="Cupo" value={capacity} onChange={setCapacity} min={0} />
+          </div>
+          <div style={{ display: "flex", gap: 11, padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
+            <p style={{ fontSize: 13.5, color: "var(--text-muted)", lineHeight: 1.5, margin: 0 }}>
+              El <strong>cupo</strong> es lo que decide a qué grupo entra un alumno nuevo: se llena
+              A y el siguiente pasa a B, sin que nadie lo asigne a mano.
+            </p>
+          </div>
+        </SlideOver>
+      )}
     </Section>
   );
 }

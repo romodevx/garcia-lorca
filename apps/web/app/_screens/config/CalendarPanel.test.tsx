@@ -43,6 +43,7 @@ describe("CalendarPanel", () => {
     render(<CalendarPanel cycle={cycle} />);
     await screen.findByText("Independencia");
 
+    await user.click(screen.getByRole("button", { name: "Nuevo día cerrado" }));
     await user.type(screen.getByLabelText("Nombre"), "Revolución");
     await user.type(screen.getByLabelText("Del día"), "2026-11-20");
     await user.click(screen.getByRole("button", { name: /Agregar día cerrado/ }));
@@ -59,6 +60,7 @@ describe("CalendarPanel", () => {
     render(<CalendarPanel cycle={cycle} />);
     await screen.findByText("Independencia");
 
+    await user.click(screen.getByRole("button", { name: "Nuevo día cerrado" }));
     await user.type(screen.getByLabelText("Del día"), "2026-11-20");
     await user.click(screen.getByRole("button", { name: /Agregar día cerrado/ }));
 
@@ -87,6 +89,7 @@ describe("CalendarPanel", () => {
     render(<CalendarPanel cycle={cycle} />);
     await screen.findByText("Independencia");
 
+    await user.click(screen.getByRole("button", { name: "Nueva actividad" }));
     await user.type(screen.getByLabelText("Actividad"), "Festival de primavera");
     await user.type(screen.getByLabelText("Fecha"), "2026-09-20");
     await user.click(screen.getByRole("button", { name: /Agregar actividad/ }));

@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent, type ReactElement } from "react";
+import { useCallback, useEffect, useState, type ReactElement } from "react";
 
 import { Btn } from "../../_design/Controls";
+import { SlideOver } from "../../_design/SlideOver";
 import type { Cycle, Level } from "../../config/api";
 import {
   listTuitionPlans,
@@ -282,8 +283,7 @@ function PlanForm({
   const [error, setError] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState(false);
 
-  const submit = async (e: FormEvent): Promise<void> => {
-    e.preventDefault();
+  const submit = async (): Promise<void> => {
     const monthlyCents = pesosToCents(monthly);
     if (monthlyCents === null) {
       setError("Escribe la colegiatura mensual, en pesos.");
@@ -366,12 +366,16 @@ function PlanForm({
   };
 
   return (
-    <form
-      aria-label="Tabulador del nivel"
-      onSubmit={(e) => void submit(e)}
-      style={{ padding: 16, borderRadius: "var(--r-md)", background: "var(--surface-2)", marginBottom: 16 }}
+    <SlideOver
+      title={`Precios de ${level.name}`}
+      subtitle="Inscripción, colegiatura, cobranza y cuotas"
+      icon="finance"
+      submitLabel="Guardar tabulador"
+      pending={pending}
+      error={error}
+      onClose={onClose}
+      onSubmit={() => void submit()}
     >
-      <p style={{ fontWeight: 700, marginBottom: 12 }}>{level.name}</p>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginBottom: 12 }}>
         <TextField label="Inscripción" value={enrollment} onChange={setEnrollment} placeholder="5000" />
         <TextField label="Colegiatura mensual" value={monthly} onChange={setMonthly} placeholder="3200" />
@@ -428,16 +432,7 @@ function PlanForm({
         <TextField label="Cuotas" value={schedule} onChange={setSchedule} placeholder="9:3200, 10:3200, 12:1600, 3:4800" />
       </div>
 
-      <div style={{ display: "flex", gap: 10 }}>
-        <Btn type="submit" icon="check" disabled={pending}>
-          Guardar tabulador
-        </Btn>
-        <Btn kind="ghost" onClick={onClose}>
-          Cancelar
-        </Btn>
-      </div>
-      {error !== undefined && <ErrorAlert message={error} />}
-    </form>
+    </SlideOver>
   );
 }
 

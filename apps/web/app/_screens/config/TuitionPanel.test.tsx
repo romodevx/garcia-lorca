@@ -70,7 +70,7 @@ describe("the tuition table", () => {
     await screen.findByText("Primaria");
 
     await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
-    const form = await screen.findByRole("form", { name: "Tabulador del nivel" });
+    const form = await screen.findByRole("dialog", { name: /^Precios de / });
     await user.type(within(form).getByLabelText("Inscripción"), "4000");
     await user.type(within(form).getByLabelText("Colegiatura mensual"), "2500");
     await user.clear(within(form).getByLabelText("Mensualidades"));
@@ -95,7 +95,7 @@ describe("the tuition table", () => {
     await screen.findByText("Primaria");
 
     await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
-    const form = await screen.findByRole("form", { name: "Tabulador del nivel" });
+    const form = await screen.findByRole("dialog", { name: /^Precios de / });
     await user.type(within(form).getByLabelText("Colegiatura mensual"), "2500");
     await user.clear(within(form).getByLabelText("Día límite"));
     await user.type(within(form).getByLabelText("Día límite"), "31");

@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, type FormEvent, type ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
+import { SlideOver } from "../../_design/SlideOver";
 import type { CreateSubjectInput, GradeLevel, Subject } from "../../config/api";
-import { EmptyHint, ErrorAlert, Section, TextField } from "./parts";
+import { EmptyHint, Section, TextField } from "./parts";
 
 export interface SubjectsPanelProps {
   gradeLevel: GradeLevel;
@@ -12,29 +13,33 @@ export interface SubjectsPanelProps {
 }
 
 /** Subjects of the selected grade level. */
+/** The subjects taught in a grade. List here, create in the drawer. */
 export function SubjectsPanel({ gradeLevel, subjects, onCreate }: SubjectsPanelProps): ReactElement {
+  const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
-  const canSubmit = name.trim() !== "" && !pending;
-
-  const submit = async (e: FormEvent): Promise<void> => {
-    e.preventDefault();
+  const submit = async (): Promise<void> => {
+    if (name.trim() === "") {
+      setError("Escribe el nombre de la materia.");
+      return;
+    }
     setPending(true);
     setError(undefined);
     try {
       await onCreate({ gradeLevelId: gradeLevel.id, name: name.trim() });
       setName("");
+      setCreating(false);
     } catch {
-      setError("No se pudo crear la materia. Intenta de nuevo.");
+      setError("No se pudo crear la materia. Revisa que no exista ya en este grado.");
     } finally {
       setPending(false);
     }
   };
 
   return (
-    <Section title="Materias" subtitle={`Materias de ${gradeLevel.name}.`}>
+    <Section title="Materias" subtitle={`De ${gradeLevel.name}.`}>
       {subjects.length > 0 ? (
         <ul style={{ listStyle: "none", padding: 0, margin: "0 0 16px", display: "grid", gap: 6 }}>
           {subjects.map((s) => (
@@ -47,15 +52,21 @@ export function SubjectsPanel({ gradeLevel, subjects, onCreate }: SubjectsPanelP
         <EmptyHint>Aún no hay materias en este grado.</EmptyHint>
       )}
 
-      <form aria-label="Agregar materia" onSubmit={submit}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12, alignItems: "end" }}>
+      <Btn icon="plus" onClick={() => { setError(undefined); setCreating(true); }}>Nueva materia</Btn>
+
+      {creating && (
+        <SlideOver
+          title={`Nueva materia en ${gradeLevel.name}`}
+          icon="grades"
+          submitLabel="Crear materia"
+          pending={pending}
+          error={error}
+          onClose={() => { setCreating(false); setError(undefined); }}
+          onSubmit={() => void submit()}
+        >
           <TextField label="Nombre de la materia" value={name} onChange={setName} placeholder="Matemáticas" />
-          <Btn type="submit" icon="plus" disabled={!canSubmit}>
-            Crear materia
-          </Btn>
-        </div>
-      </form>
-      {error !== undefined && <ErrorAlert message={error} />}
+        </SlideOver>
+      )}
     </Section>
   );
 }

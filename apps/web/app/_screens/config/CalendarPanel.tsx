@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent, type ReactElement } from "react";
+import { useCallback, useEffect, useState, type ReactElement } from "react";
 
 import { Btn } from "../../_design/Controls";
+import { SlideOver } from "../../_design/SlideOver";
 import {
   createNonWorkingPeriod,
   createSchoolEvent,
@@ -51,6 +52,9 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
   const [kind, setKind] = useState<NonWorkingKind>("holiday");
   const [error, setError] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
+  // Nothing is created from the page itself: a closure and an activity each open
+  // the same drawer the rest of the system uses.
+  const [open, setOpen] = useState<"none" | "day" | "event">("none");
 
   const reload = useCallback(() => {
     listNonWorkingPeriods(API_URL, cycle.id)
@@ -63,8 +67,7 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
 
   useEffect(reload, [reload]);
 
-  const add = async (e: FormEvent): Promise<void> => {
-    e.preventDefault();
+  const add = async (): Promise<void> => {
     if (label.trim() === "" || from.trim() === "") {
       setError("Un día cerrado necesita nombre y fecha.");
       return;
@@ -83,6 +86,7 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
       setLabel("");
       setFrom("");
       setTo("");
+      setOpen("none");
       reload();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo agregar.");
@@ -91,8 +95,7 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
     }
   };
 
-  const addEvent = async (e: FormEvent): Promise<void> => {
-    e.preventDefault();
+  const addEvent = async (): Promise<void> => {
     if (eventTitle.trim() === "" || eventFrom.trim() === "") {
       setError("Una actividad necesita nombre y fecha.");
       return;
@@ -109,6 +112,7 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
       setEventTitle("");
       setEventFrom("");
       setEventTo("");
+      setOpen("none");
       reload();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo agregar la actividad.");
@@ -159,26 +163,7 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
         </div>
       )}
 
-      <form onSubmit={(e) => void add(e)} style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
-        <div style={{ flex: "2 1 200px" }}><TextField label="Nombre" value={label} onChange={setLabel} placeholder="Independencia" /></div>
-        <div style={{ flex: "1 1 150px" }}><TextField label="Del día" value={from} onChange={setFrom} placeholder="2026-09-16" /></div>
-        <div style={{ flex: "1 1 150px" }}><TextField label="Al día (opcional)" value={to} onChange={setTo} placeholder="2026-09-16" /></div>
-        <div style={{ display: "flex", gap: 8 }}>
-          {KINDS.map((k) => {
-            const on = kind === k.value;
-            return (
-              <button
-                key={k.value}
-                type="button"
-                onClick={() => setKind(k.value)}
-                style={{ height: 44, padding: "0 14px", borderRadius: 99, fontSize: 14, fontWeight: 600, cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>
-                {k.label}
-              </button>
-            );
-          })}
-        </div>
-        <Btn type="submit" icon="plus" style={{ opacity: saving ? 0.5 : 1 }}>Agregar día cerrado</Btn>
-      </form>
+      <Btn icon="plus" onClick={() => { setError(undefined); setOpen("day"); }}>Nuevo día cerrado</Btn>
       <div style={{ borderTop: "1px solid var(--border)", marginTop: 22, paddingTop: 18 }}>
         <p style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>Actividades</p>
         <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 2, marginBottom: 12 }}>
@@ -207,15 +192,59 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
           </div>
         )}
 
-        <form onSubmit={(e) => void addEvent(e)} style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <div style={{ flex: "2 1 200px" }}><TextField label="Actividad" value={eventTitle} onChange={setEventTitle} placeholder="Festival de primavera" /></div>
-          <div style={{ flex: "1 1 150px" }}><TextField label="Fecha" value={eventFrom} onChange={setEventFrom} placeholder="2026-09-20" /></div>
-          <div style={{ flex: "1 1 150px" }}><TextField label="Hasta (opcional)" value={eventTo} onChange={setEventTo} placeholder="2026-09-22" /></div>
-          <Btn type="submit" icon="plus" style={{ opacity: saving ? 0.5 : 1 }}>Agregar actividad</Btn>
-        </form>
+        <Btn icon="plus" onClick={() => { setError(undefined); setOpen("event"); }}>Nueva actividad</Btn>
       </div>
 
-      {error !== undefined && <ErrorAlert message={error} />}
+      {open === "none" && error !== undefined && <ErrorAlert message={error} />}
+
+      {open === "day" && (
+        <SlideOver
+          title="Nuevo día cerrado"
+          subtitle="Un feriado o un periodo de vacaciones. Mueve las fechas de pago."
+          icon="calendar"
+          submitLabel="Agregar día cerrado"
+          pending={saving}
+          error={error}
+          onClose={() => setOpen("none")}
+          onSubmit={() => void add()}>
+          <TextField label="Nombre" value={label} onChange={setLabel} placeholder="Independencia" />
+          <TextField label="Del día" value={from} onChange={setFrom} placeholder="2026-09-16" />
+          <TextField label="Al día (opcional)" value={to} onChange={setTo} placeholder="2026-09-16" />
+          <div>
+            <p style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", marginBottom: 8 }}>Tipo</p>
+            <div style={{ display: "flex", gap: 8 }}>
+              {KINDS.map((k) => {
+                const on = kind === k.value;
+                return (
+                  <button
+                    key={k.value}
+                    type="button"
+                    onClick={() => setKind(k.value)}
+                    style={{ height: 44, padding: "0 16px", borderRadius: 99, fontSize: 14, fontWeight: 600, cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>
+                    {k.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </SlideOver>
+      )}
+
+      {open === "event" && (
+        <SlideOver
+          title="Nueva actividad"
+          subtitle="Juntas, festivales, exámenes. No mueve fechas de pago."
+          icon="calendar"
+          submitLabel="Agregar actividad"
+          pending={saving}
+          error={error}
+          onClose={() => setOpen("none")}
+          onSubmit={() => void addEvent()}>
+          <TextField label="Actividad" value={eventTitle} onChange={setEventTitle} placeholder="Festival de primavera" />
+          <TextField label="Fecha" value={eventFrom} onChange={setEventFrom} placeholder="2026-09-20" />
+          <TextField label="Hasta (opcional)" value={eventTo} onChange={setEventTo} placeholder="2026-09-22" />
+        </SlideOver>
+      )}
     </Section>
   );
 }
