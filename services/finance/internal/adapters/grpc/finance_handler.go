@@ -190,6 +190,7 @@ func (h *FinanceHandler) GetAccount(ctx context.Context, req *connect.Request[fi
 		Charges:           toProtoCharges(statement.Charges),
 		Payments:          payments,
 		TotalBalanceCents: statement.TotalBalanceCents,
+		UnallocatedCents:  statement.UnallocatedCents,
 	}), nil
 }
 
@@ -200,6 +201,84 @@ func (h *FinanceHandler) ListOverdue(ctx context.Context, req *connect.Request[f
 		return nil, connectErr(err)
 	}
 	return connect.NewResponse(&financev1.ListOverdueResponse{Charges: toProtoCharges(charges)}), nil
+}
+
+// --- deposits (M16) --------------------------------------------------------
+
+// RegisterDeposit takes money without being told what it pays for.
+func (h *FinanceHandler) RegisterDeposit(ctx context.Context, req *connect.Request[financev1.RegisterDepositRequest]) (*connect.Response[financev1.RegisterDepositResponse], error) {
+	m := req.Msg
+	// An unset paid_at becomes the zero time, which the use case reads as "now".
+	var paidAt time.Time
+	if ts := m.GetPaidAt(); ts != nil {
+		paidAt = ts.AsTime()
+	}
+	got, err := h.finance.RegisterDeposit(ctx, usecase.DepositInput{
+		StudentID:      m.GetStudentId(),
+		AmountCents:    m.GetAmountCents(),
+		Method:         m.GetMethod(),
+		Reference:      m.GetReference(),
+		PaidAt:         paidAt,
+		IdempotencyKey: m.GetIdempotencyKey(),
+	})
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	allocations := make([]*financev1.Payment, 0, len(got.Allocations))
+	for _, p := range got.Allocations {
+		allocations = append(allocations, toProtoPayment(p))
+	}
+	surcharges := make([]*financev1.Charge, 0, len(got.Surcharges))
+	for _, c := range got.Surcharges {
+		// A freshly materialised surcharge has collected nothing yet by
+		// definition: it did not exist a moment ago.
+		surcharges = append(surcharges, toProtoCharge(ports.ChargeWithPaid{Charge: c}))
+	}
+	return connect.NewResponse(&financev1.RegisterDepositResponse{
+		Deposit:          toProtoDeposit(got.Deposit),
+		Allocations:      allocations,
+		Surcharges:       surcharges,
+		UnallocatedCents: got.UnallocatedCents,
+		Replayed:         got.Replayed,
+	}), nil
+}
+
+// ListDeposits returns a student's deposits, newest first.
+func (h *FinanceHandler) ListDeposits(ctx context.Context, req *connect.Request[financev1.ListDepositsRequest]) (*connect.Response[financev1.ListDepositsResponse], error) {
+	deposits, err := h.finance.ListDeposits(ctx, req.Msg.GetStudentId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	out := make([]*financev1.Deposit, 0, len(deposits))
+	for _, d := range deposits {
+		out = append(out, toProtoDeposit(d))
+	}
+	return connect.NewResponse(&financev1.ListDepositsResponse{Deposits: out}), nil
+}
+
+// VoidDeposit cancels a deposit and releases what it settled.
+func (h *FinanceHandler) VoidDeposit(ctx context.Context, req *connect.Request[financev1.VoidDepositRequest]) (*connect.Response[financev1.VoidDepositResponse], error) {
+	if err := h.finance.VoidDeposit(ctx, req.Msg.GetId(), req.Msg.GetReason()); err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&financev1.VoidDepositResponse{}), nil
+}
+
+func toProtoDeposit(d domain.Deposit) *financev1.Deposit {
+	out := &financev1.Deposit{
+		Id:              d.ID(),
+		StudentId:       d.StudentID(),
+		AmountCents:     d.Amount().Int64(),
+		Method:          d.Method(),
+		Reference:       d.Reference(),
+		PaidAt:          timestamppb.New(d.PaidAt()),
+		CalendarVersion: d.CalendarVersion(),
+		VoidReason:      d.VoidReason(),
+	}
+	if d.Voided() {
+		out.VoidedAt = timestamppb.New(d.VoidedAt())
+	}
+	return out
 }
 
 // ExportContpaqi is the CONTPAQi XML export (spike S02). The contract reserves
@@ -310,6 +389,7 @@ func (h *FinanceHandler) UpsertTuitionPlan(ctx context.Context, req *connect.Req
 		DueDay:           int(m.GetDueDay()),
 		LateFeeCents:     m.GetLateFeeCents(),
 		Active:           m.GetActive(),
+		Policy:           toDomainPolicy(m.GetPolicy()),
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -360,5 +440,32 @@ func toProtoPlan(p domain.TuitionPlan) *financev1.TuitionPlan {
 		DueDay:           int32(p.DueDay()),
 		LateFeeCents:     p.LateFeeCents(),
 		Active:           p.Active(),
+		Policy:           toProtoPolicy(p.Policy()),
+	}
+}
+
+// toDomainPolicy reads the collection rule off the wire. A nil message is the
+// zero policy, which is the original monthly rule — an older client that does
+// not know about M16 keeps meaning exactly what it meant.
+func toDomainPolicy(p *financev1.CollectionPolicy) domain.CollectionPolicy {
+	if p == nil {
+		return domain.CollectionPolicy{}
+	}
+	return domain.CollectionPolicy{
+		DailyMode:              p.GetDailyMode(),
+		LateFeeDailyCents:      p.GetLateFeeDailyCents(),
+		SurchargeCountsAllDays: p.GetSurchargeCountsAllDays(),
+		EarlyPaymentCents:      p.GetEarlyPaymentCents(),
+		EarlyPaymentDays:       int(p.GetEarlyPaymentDays()),
+	}
+}
+
+func toProtoPolicy(p domain.CollectionPolicy) *financev1.CollectionPolicy {
+	return &financev1.CollectionPolicy{
+		DailyMode:              p.DailyMode,
+		LateFeeDailyCents:      p.LateFeeDailyCents,
+		SurchargeCountsAllDays: p.SurchargeCountsAllDays,
+		EarlyPaymentCents:      p.EarlyPaymentCents,
+		EarlyPaymentDays:       int32(p.EarlyPaymentDays),
 	}
 }

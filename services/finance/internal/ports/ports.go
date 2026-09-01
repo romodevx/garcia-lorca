@@ -250,6 +250,11 @@ type FinanceRepository interface {
 	RegisterDeposit(ctx context.Context, d domain.Deposit,
 		plan func(open []ChargeWithPaid) (DepositWrite, error)) (DepositRecord, bool, error)
 
+	// UnallocatedCents is money a family has handed over that no charge has
+	// claimed: the sum of their live deposits, less what those deposits paid.
+	// Cancelled deposits do not count — that money went back.
+	UnallocatedCents(ctx context.Context, studentID string) (int64, error)
+
 	// GetDeposit returns one deposit by id, or KindNotFound.
 	GetDeposit(ctx context.Context, id string) (domain.Deposit, error)
 

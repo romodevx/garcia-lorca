@@ -409,6 +409,27 @@ func (f *fakeRepo) depositByKey(key string) (domain.Deposit, bool) {
 	return domain.Deposit{}, false
 }
 
+func (f *fakeRepo) UnallocatedCents(_ context.Context, studentID string) (int64, error) {
+	var deposited int64
+	live := map[string]bool{}
+	for _, d := range f.deposits {
+		if d.StudentID() != studentID || d.Voided() {
+			continue
+		}
+		deposited += d.Amount().Int64()
+		live[d.ID()] = true
+	}
+	var allocated int64
+	for _, ps := range f.payments {
+		for _, p := range ps {
+			if live[f.depositOfPayment[p.ID()]] {
+				allocated += p.Amount().Int64()
+			}
+		}
+	}
+	return deposited - allocated, nil
+}
+
 func (f *fakeRepo) GetDeposit(_ context.Context, id string) (domain.Deposit, error) {
 	for _, d := range f.deposits {
 		if d.ID() == id {

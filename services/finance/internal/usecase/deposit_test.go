@@ -167,3 +167,19 @@ func TestVoidingADepositReleasesWhatItSettled(t *testing.T) {
 		t.Errorf("balance = %d after voiding the only deposit — the debt did not come back", account.TotalBalanceCents)
 	}
 }
+
+// A family that overpays has money sitting with the school. If the statement
+// does not say so, the office cannot tell an overpayment from a mistake and the
+// parent's credit is invisible to everyone but them.
+func TestTheStatementShowsTheFamilysCredit(t *testing.T) {
+	f := depositFixture(t)
+	deposit(t, f, 1000000, "2026-10-10")
+
+	account, err := f.svc.GetAccount(context.Background(), testStudent)
+	if err != nil {
+		t.Fatalf("GetAccount: %v", err)
+	}
+	if account.UnallocatedCents != 1000000-670000 {
+		t.Errorf("credit = %d, want %d", account.UnallocatedCents, 1000000-670000)
+	}
+}

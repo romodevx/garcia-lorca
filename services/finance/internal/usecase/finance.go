@@ -28,6 +28,11 @@ type AccountStatement struct {
 	Charges           []ports.ChargeWithPaid
 	Payments          []domain.Payment
 	TotalBalanceCents int64
+	// UnallocatedCents is money the family has handed over that no charge has
+	// claimed: an overpayment, or a deposit made before the month was billed.
+	// Without it on the statement the office cannot tell a credit from a
+	// keying mistake, and the parent is the only one who knows it exists.
+	UnallocatedCents int64
 }
 
 // FinanceService runs the debt-and-payment ledger: the charge catalog, the
@@ -421,6 +426,11 @@ func (s *FinanceService) GetAccount(ctx context.Context, studentID string) (Acco
 		return AccountStatement{}, err
 	}
 
+	credit, err := s.repo.UnallocatedCents(ctx, studentID)
+	if err != nil {
+		return AccountStatement{}, err
+	}
+
 	var balance int64
 	for _, c := range charges {
 		if c.Charge.Status() == domain.StatusCancelled {
@@ -430,7 +440,12 @@ func (s *FinanceService) GetAccount(ctx context.Context, studentID string) (Acco
 		// not a discount on the student's other debts.
 		balance += max(0, c.Charge.Effective().Int64()-c.PaidCents)
 	}
-	return AccountStatement{Charges: charges, Payments: payments, TotalBalanceCents: balance}, nil
+	return AccountStatement{
+		Charges:           charges,
+		Payments:          payments,
+		TotalBalanceCents: balance,
+		UnallocatedCents:  credit,
+	}, nil
 }
 
 // ListOverdue returns the charges past due that still owe money, as of the

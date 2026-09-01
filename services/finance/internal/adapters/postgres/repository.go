@@ -1082,6 +1082,37 @@ func rebuildDepositRecord(tx *gorm.DB, d domain.Deposit) (ports.DepositRecord, e
 	}, nil
 }
 
+// UnallocatedCents is what a family has paid that no charge has claimed.
+//
+// Two sums rather than a join per deposit: the deposits they still have
+// standing, and what those deposits actually landed on. The difference is the
+// credit. A cancelled deposit is excluded from both sides — voiding already
+// deleted its allocations, so counting its amount would invent money.
+func (r *Repository) UnallocatedCents(ctx context.Context, studentID string) (int64, error) {
+	var credit int64
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var deposited int64
+		if err := tx.Model(&depositModel{}).
+			Where("student_id = ? AND voided_at IS NULL", studentID).
+			Select("COALESCE(SUM(amount_cents), 0)").Scan(&deposited).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "summing deposits", err)
+		}
+		var allocated int64
+		if err := tx.Model(&paymentModel{}).
+			Where("deposit_id IN (?)", tx.Model(&depositModel{}).
+				Select("id").Where("student_id = ? AND voided_at IS NULL", studentID)).
+			Select("COALESCE(SUM(amount_cents), 0)").Scan(&allocated).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "summing allocations", err)
+		}
+		credit = deposited - allocated
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return credit, nil
+}
+
 // GetDeposit returns one deposit by id (KindNotFound if absent or hidden by RLS).
 func (r *Repository) GetDeposit(ctx context.Context, id string) (domain.Deposit, error) {
 	var out domain.Deposit

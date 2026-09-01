@@ -88,6 +88,17 @@ service FinanceService {
   // follow-up.
   rpc ListOverdue(ListOverdueRequest) returns (ListOverdueResponse);
 
+  // --- deposits (M16: money that arrives before it is decided what it pays) ---
+  // RegisterDeposit takes an amount without being told what it covers, and
+  // splits it across what the family owes: oldest first, surcharges included,
+  // and whatever is left stays as their credit.
+  rpc RegisterDeposit(RegisterDepositRequest) returns (RegisterDepositResponse);
+  // ListDeposits returns a student's deposits, newest first.
+  rpc ListDeposits(ListDepositsRequest) returns (ListDepositsResponse);
+  // VoidDeposit cancels a deposit and releases what it settled. The row stays,
+  // with its reason: a school that deletes money rows cannot explain its ledger.
+  rpc VoidDeposit(VoidDepositRequest) returns (VoidDepositResponse);
+
   // --- tuition (M15: what each level costs, and the monthly run) ---
   // UpsertTuitionPlan sets (or replaces) the tuition table for one level of one
   // cycle. Keyed by (cycle, level): a school raises tuition each year, and the
@@ -329,6 +340,9 @@ message GetAccountResponse {
   repeated Charge charges = 1;
   repeated Payment payments = 2;
   int64 total_balance_cents = 3;
+  // Money the family has handed over that no charge has claimed: an
+  // overpayment, or a deposit made before the month was billed.
+  int64 unallocated_cents = 4;
 }
 
 message ListOverdueRequest {
@@ -411,7 +425,28 @@ message TuitionPlan {
   // Fixed surcharge added once per completed overdue month. Zero disables it.
   int64 late_fee_cents = 10;
   bool active = 11;
+  CollectionPolicy policy = 12;
 }
+
+// CollectionPolicy is what a late payment costs and what an early one saves,
+// for one tuition table. It rides with the plan because that is where a price
+// lives.
+message CollectionPolicy {
+  // daily_mode picks which surcharge rule applies. false keeps the original one
+  // (late_fee_cents, once per completed overdue month); true charges
+  // late_fee_daily_cents for every day the money is late, and the monthly run
+  // stops issuing surcharge charges because the amount changes every night.
+  bool daily_mode = 1;
+  int64 late_fee_daily_cents = 2;
+  // surcharge_counts_all_days counts Saturdays, Sundays and holidays. The school
+  // said yes: the money is late on a Sunday too.
+  bool surcharge_counts_all_days = 3;
+  // A fixed amount off, per month settled, when the family pays within the first
+  // early_payment_days working days of the month. Zero disables it.
+  int64 early_payment_cents = 4;
+  int32 early_payment_days = 5;
+}
+
 
 message UpsertTuitionPlanRequest {
   string cycle_id = 1;
@@ -423,6 +458,7 @@ message UpsertTuitionPlanRequest {
   int32 due_day = 7;
   int64 late_fee_cents = 8;
   bool active = 9;
+  CollectionPolicy policy = 10;
 }
 
 message UpsertTuitionPlanResponse {
@@ -458,3 +494,67 @@ message RunBillingResponse {
   // it in June.
   repeated string levels_without_plan = 5;
 }
+
+// --- Deposits (M16) --------------------------------------------------------
+
+// Deposit is money as it arrived: one amount, one date, one receipt.
+message Deposit {
+  string id = 1;
+  string student_id = 2;
+  int64 amount_cents = 3;
+  // method is one of: cash | card | transfer.
+  string method = 4;
+  string reference = 5;
+  google.protobuf.Timestamp paid_at = 6;
+  // The school calendar the split was worked out against. 'unavailable' means
+  // the calendar could not be read and the deadline was computed without the
+  // school's holidays.
+  string calendar_version = 7;
+  google.protobuf.Timestamp voided_at = 8;
+  string void_reason = 9;
+}
+
+message RegisterDepositRequest {
+  string student_id = 1;
+  int64 amount_cents = 2;
+  // method is one of: cash | card | transfer.
+  string method = 3;
+  string reference = 4;
+  // paid_at is when the money changed hands, which is not always when it was
+  // keyed. Every collection rule is a function of it. Empty means now; a future
+  // date is refused.
+  google.protobuf.Timestamp paid_at = 5;
+  // idempotency_key is optional; a repeat under the same key returns what was
+  // stored the first time and collects nothing.
+  string idempotency_key = 6;
+}
+
+message RegisterDepositResponse {
+  Deposit deposit = 1;
+  // The payments the deposit split into, oldest debt first.
+  repeated Payment allocations = 2;
+  // The surcharge charges this deposit made real. A row exists only where money
+  // landed on it.
+  repeated Charge surcharges = 3;
+  // What no charge claimed: the family's credit.
+  int64 unallocated_cents = 4;
+  // replayed says the deposit already existed under this idempotency key.
+  bool replayed = 5;
+}
+
+message ListDepositsRequest {
+  string student_id = 1;
+}
+
+message ListDepositsResponse {
+  repeated Deposit deposits = 1;
+}
+
+message VoidDepositRequest {
+  string id = 1;
+  // reason is required: a cancelled deposit without one is an unexplained hole
+  // in the day's takings.
+  string reason = 2;
+}
+
+message VoidDepositResponse {}
