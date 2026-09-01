@@ -65,7 +65,7 @@ describe("what the form is still waiting for", () => {
 });
 
 // A school names its own levels; a pupil's record carries a SEP level. A level
-// called "Maternal" has nowhere to put one, and being told that beats a 400 that
+// outside the supported set has nowhere to put one, and being told that beats a 400 that
 // blames the CURP — which is what the panel used to show for it.
 describe("which levels can actually hold a pupil", () => {
   it("folds case and accents the way the services do", () => {
@@ -73,7 +73,12 @@ describe("which levels can actually hold a pupil", () => {
     expect(isSepLevel("KINDER")).toBe(true);
     expect(isSepLevel("  primaria ")).toBe(true);
     expect(isSepLevel("Preparatoria")).toBe(true);
-    expect(isSepLevel("Maternal")).toBe(false);
+    // Maternal became a real level in M16 — the school teaches it and could not
+    // enrol those pupils while this returned false.
+    expect(isSepLevel("Maternal")).toBe(true);
+    expect(isSepLevel("maternal")).toBe(true);
+    // A level the system genuinely cannot hold still has to be caught here.
+    expect(isSepLevel("Universidad")).toBe(false);
     expect(isSepLevel("Primaria B")).toBe(false);
   });
 });
@@ -245,10 +250,12 @@ describe("choosing where the pupil goes", () => {
 describe("a level that cannot hold a pupil", () => {
   it("says so before sending, and names the levels that can", async () => {
     const user = userEvent.setup();
+    // Deliberately a level the system does not carry. Maternal used to stand in
+    // for this and no longer can: it is a supported level as of M16.
     config.listLevels.mockResolvedValue([
-      { id: "lv-m", name: "Maternal", sepCode: "MAT", enrollmentGranularity: "cycle" as const },
+      { id: "lv-m", name: "Universidad", sepCode: "UNI", enrollmentGranularity: "cycle" as const },
     ]);
-    config.listGradeLevels.mockResolvedValue([{ id: "gl-m1", levelId: "lv-m", name: "Lactantes", ordinal: 1 }]);
+    config.listGradeLevels.mockResolvedValue([{ id: "gl-m1", levelId: "lv-m", name: "Primer semestre", ordinal: 1 }]);
     render(<StudentsScreen onBack={() => {}} />);
     await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
 
@@ -263,8 +270,8 @@ describe("a level that cannot hold a pupil", () => {
     await user.click(within(drawer).getByRole("button", { name: "Crear alumno" }));
 
     const alert = await within(drawer).findByRole("alert");
+    expect(alert).toHaveTextContent(/Universidad/);
     expect(alert).toHaveTextContent(/Maternal/);
-    expect(alert).toHaveTextContent(/Kínder, Primaria, Secundaria o Preparatoria/);
     expect(students.createStudent).not.toHaveBeenCalled();
   });
 });

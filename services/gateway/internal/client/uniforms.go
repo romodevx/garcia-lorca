@@ -406,6 +406,7 @@ var uniformLevelNames = map[uniformsv1.Level]string{
 	uniformsv1.Level_LEVEL_PRIMARIA:     "primaria",
 	uniformsv1.Level_LEVEL_SECUNDARIA:   "secundaria",
 	uniformsv1.Level_LEVEL_PREPARATORIA: "preparatoria",
+	uniformsv1.Level_LEVEL_MATERNAL:     "maternal",
 }
 
 // uniformLevel maps the edge's lowercase name onto the enum. An unknown name

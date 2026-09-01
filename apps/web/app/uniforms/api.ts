@@ -25,7 +25,7 @@ const BASE_PATH = "/api/v1/uniforms";
 // --- entity types (match the gateway JSON contract) ------------------------
 
 /** A school level. Empty on a GARMENT means it applies to every level. */
-export type Level = "" | "kinder" | "primaria" | "secundaria" | "preparatoria";
+export type Level = "" | "maternal" | "kinder" | "primaria" | "secundaria" | "preparatoria";
 
 /** One garment in one size. */
 export interface UniformSize {

@@ -91,6 +91,11 @@ enum Level {
   LEVEL_PRIMARIA = 2;
   LEVEL_SECUNDARIA = 3;
   LEVEL_PREPARATORIA = 4;
+  // Maternal (nursery) is the level below kinder. Appended as 5 rather than
+  // inserted at 1 where it belongs pedagogically: enum numbers are the wire
+  // format and renumbering them silently reinterprets every stored value.
+  // Display order is a presentation concern and lives in the UI.
+  LEVEL_MATERNAL = 5;
 }
 
 // AdmissionStatus is the applicant/student lifecycle state.

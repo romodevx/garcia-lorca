@@ -10,6 +10,7 @@ import { ErrorAlert, Section, SelectField, TextField, type SelectOption } from "
 // would be rejected. Keep the values in lockstep with levelNames in
 // services/gateway/internal/client/students.go.
 const LEVEL_OPTIONS: readonly SelectOption[] = [
+  { value: "maternal", label: "Maternal" },
   { value: "kinder", label: "Kínder" },
   { value: "primaria", label: "Primaria" },
   { value: "secundaria", label: "Secundaria" },

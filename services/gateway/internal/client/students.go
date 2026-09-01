@@ -343,6 +343,7 @@ var levelNames = map[studentsv1.Level]string{
 	studentsv1.Level_LEVEL_PRIMARIA:     "primaria",
 	studentsv1.Level_LEVEL_SECUNDARIA:   "secundaria",
 	studentsv1.Level_LEVEL_PREPARATORIA: "preparatoria",
+	studentsv1.Level_LEVEL_MATERNAL:     "maternal",
 }
 
 func levelName(l studentsv1.Level) string { return levelNames[l] }

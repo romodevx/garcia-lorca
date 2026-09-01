@@ -269,6 +269,7 @@ export function LevelChips({
 }): ReactElement {
   const levels = [
     { id: "", label: "Todos" },
+    { id: "maternal", label: "Maternal" },
     { id: "kinder", label: "Kínder" },
     { id: "primaria", label: "Primaria" },
     { id: "secundaria", label: "Secundaria" },

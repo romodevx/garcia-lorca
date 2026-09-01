@@ -11,6 +11,7 @@ import { API_URL } from "../../api-url";
 
 const LEVELS: { id: Level; label: string }[] = [
   { id: "", label: "Todos los niveles" },
+  { id: "maternal", label: "Maternal" },
   { id: "kinder", label: "Kínder" },
   { id: "primaria", label: "Primaria" },
   { id: "secundaria", label: "Secundaria" },

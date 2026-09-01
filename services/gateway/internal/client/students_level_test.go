@@ -26,9 +26,11 @@ func TestLevelNamesAreReadAsTolerantlyAsTheServiceReadsThem(t *testing.T) {
 		"  Primaria ":  studentsv1.Level_LEVEL_PRIMARIA,
 		"secundaria":   studentsv1.Level_LEVEL_SECUNDARIA,
 		"Preparatoria": studentsv1.Level_LEVEL_PREPARATORIA,
-		// A level a school invented is still not a SEP level, and saying so at the
-		// edge beats sending it on to be refused.
-		"Maternal": studentsv1.Level_LEVEL_UNSPECIFIED,
+		// Maternal is a real level this school teaches. It used to map to
+		// UNSPECIFIED with a comment calling it "a level a school invented",
+		// which meant the school could not enrol its youngest pupils at all.
+		"Maternal": studentsv1.Level_LEVEL_MATERNAL,
+		"maternal": studentsv1.Level_LEVEL_MATERNAL,
 		"":         studentsv1.Level_LEVEL_UNSPECIFIED,
 	}
 	for name, want := range cases {

@@ -91,11 +91,15 @@ const CURP_LENGTH = 18;
  * The four levels the SEP recognises, folded the way the services fold them.
  *
  * A school may name its levels anything — the catalogue is theirs — but a pupil's
- * record carries a SEP level, so a level called "Maternal" has nowhere to put
- * one. Checking here means the person is told which levels work instead of
- * meeting a 400 that blames their CURP.
+ * record carries a level the whole system understands, so a name outside this
+ * list has nowhere to go. Checking here means the person is told which levels
+ * work instead of meeting a 400 that blames their CURP.
+ *
+ * "maternal" was missing until M16, which meant this school could not enrol its
+ * youngest pupils at all — the guard below was reporting a real gap as if it
+ * were the user's mistake.
  */
-const SEP_LEVELS = ["kinder", "primaria", "secundaria", "preparatoria"];
+const SEP_LEVELS = ["maternal", "kinder", "primaria", "secundaria", "preparatoria"];
 
 function foldLevel(name: string): string {
   return name.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -217,7 +221,7 @@ function QuickAdd({
     if (!isSepLevel(chosenLevel.name)) {
       setError(
         `«${chosenLevel.name}» no es un nivel de la SEP, así que no puede recibir alumnos. ` +
-          "Renómbralo en Configuración a Kínder, Primaria, Secundaria o Preparatoria.",
+          "Renómbralo en Configuración a Maternal, Kínder, Primaria, Secundaria o Preparatoria.",
       );
       return;
     }

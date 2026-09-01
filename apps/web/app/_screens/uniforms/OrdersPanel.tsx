@@ -232,6 +232,7 @@ export interface Row {
 
 const LEVEL_LABELS: Record<string, string> = {
   "": "—",
+  maternal: "Maternal",
   kinder: "Kínder",
   primaria: "Primaria",
   secundaria: "Secundaria",

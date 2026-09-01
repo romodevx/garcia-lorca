@@ -17,6 +17,10 @@ const (
 	LevelPrimaria
 	LevelSecundaria
 	LevelPreparatoria
+	// LevelMaternal is nursery, the level below kinder. Appended rather than
+	// placed first because the wire enum's numbers are its format; pedagogical
+	// order is a display concern.
+	LevelMaternal
 )
 
 var levelNames = map[Level]string{
@@ -24,6 +28,7 @@ var levelNames = map[Level]string{
 	LevelPrimaria:     "primaria",
 	LevelSecundaria:   "secundaria",
 	LevelPreparatoria: "preparatoria",
+	LevelMaternal:     "maternal",
 }
 
 // parseAliases maps normalized (folded) input to a Level, tolerating accents.
@@ -32,6 +37,7 @@ var parseAliases = map[string]Level{
 	"primaria":     LevelPrimaria,
 	"secundaria":   LevelSecundaria,
 	"preparatoria": LevelPreparatoria,
+	"maternal":     LevelMaternal,
 }
 
 // ParseLevel resolves a level name (case/accent-insensitive) to a Level.
