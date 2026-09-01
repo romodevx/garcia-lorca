@@ -37,8 +37,12 @@ func TestJWTSecret(t *testing.T) {
 		{
 			name:      "explicit secret is used verbatim in any environment",
 			appEnv:    "prod",
-			secret:    "s3cr3t-signing-key",
-			wantValue: "s3cr3t-signing-key",
+			// Deliberately unmistakable as a fixture. A leetspeak value here read
+			// as a "Generic High Entropy Secret" to the repository secret scanner
+			// and failed the PR — a false positive, but one that trains people to
+			// wave the scanner through, which is how a real leak gets merged.
+			secret:    "fixture-not-a-real-key",
+			wantValue: "fixture-not-a-real-key",
 		},
 		{
 			name:   "unset APP_ENV is local: ephemeral key allowed",
