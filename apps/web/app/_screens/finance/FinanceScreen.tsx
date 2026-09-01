@@ -11,6 +11,8 @@ import { centsToPesosInput, formatCents, pesosToCents } from "./money";
 import { listStudents, type Student } from "../../students/api";
 
 import { API_URL } from "../../api-url";
+import { CollectDrawer, type CollectStudent } from "./CollectDrawer";
+import { StudentPicker } from "./StudentPicker";
 
 /** One key per payment attempt. Mirrors PaymentPanel, which had it right. */
 function newAttemptKey(): string {
@@ -152,6 +154,10 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
   const [tab, setTab] = useState<"all" | "overdue" | "due" | "paid">("all");
   const [q, setQ] = useState("");
   const [pay, setPay] = useState<Row | null>(null);
+  // The counter: pick a pupil, then take whatever the parent hands over. Kept
+  // separate from `pay`, which is the older per-charge path.
+  const [picking, setPicking] = useState(false);
+  const [collecting, setCollecting] = useState<CollectStudent | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(0);
@@ -238,6 +244,7 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
         </div>
         <div style={{ display: "flex", gap: 12 }}>
           <Btn kind="ghost" icon="download" onClick={() => say("Exportación generada")}>Exportar</Btn>
+          <Btn icon="card" onClick={() => setPicking(true)}>Cobrar</Btn>
         </div>
       </div>
 
@@ -308,6 +315,20 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
       </div>
 
       {pay !== null && <PayDrawer charge={pay.charge} name={pay.name} onClose={() => setPay(null)} onPaid={onPaid} />}
+      {picking && (
+        <StudentPicker
+          students={[...studentMap.values()].map((s) => ({ id: s.id, firstName: s.firstName, lastName: s.lastName, gradeGroup: s.gradeGroup }))}
+          onPick={(s) => { setPicking(false); setCollecting(s); }}
+          onClose={() => setPicking(false)}
+        />
+      )}
+      {collecting !== null && (
+        <CollectDrawer
+          student={collecting}
+          onClose={() => setCollecting(null)}
+          onCollected={() => { if (activeCycleId !== undefined) { load(activeCycleId); } say("Cobro registrado"); }}
+        />
+      )}
       {toast !== null && (
         <div style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>
           <Icon name="check" size={20} stroke={2.6} />{toast}
