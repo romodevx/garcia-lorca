@@ -642,11 +642,21 @@ paths:
               type: object
               required: [scope, cycleId, title, body, idempotencyKey]
               properties:
-                scope: { type: string, enum: [group, level, cycle] }
+                scope: { type: string, enum: [student, group, level, cycle] }
                 targetId:
                   type: string
                   format: uuid
-                  description: The group or level. Unused when the scope is the whole cycle.
+                  description: >
+                    The pupil, group or level. Unused for a whole-cycle
+                    announcement, and ignored when targetIds carries a list.
+                targetIds:
+                  type: array
+                  items: { type: string, format: uuid }
+                  description: >
+                    Several groups (or levels) at once — "1° A y 1° B" is one
+                    message the school writes once, not two it writes twice and
+                    sends at different times. A pupil in two of them hears it
+                    once.
                 cycleId: { type: string, format: uuid }
                 title: { type: string, minLength: 1 }
                 body: { type: string, minLength: 1 }
@@ -854,6 +864,10 @@ paths:
                 studentId: { type: string, format: uuid }
                 amountCents: { type: integer, format: int64, minimum: 1 }
                 method: { type: string, enum: [cash, card, transfer] }
+                cardType:
+                  type: string
+                  enum: [debit, credit]
+                  description: Only on a card. A card type on cash is refused.
                 reference: { type: string }
                 paidAt:
                   type: string
@@ -1338,6 +1352,13 @@ components:
         studentId: { type: string, format: uuid }
         amountCents: { type: integer, format: int64, minimum: 1, example: 670000 }
         method: { type: string, enum: [cash, card, transfer] }
+        cardType:
+          type: string
+          enum: ['', debit, credit]
+          description: >
+            Which kind of card. Not a payment method — the money still arrives
+            by card — but the terminal the office reconciles against at month
+            end knows the difference. Empty for cash and transfers.
         reference:
           type: string
           description: What identifies the money itself — a folio, a transfer id, a card slip.

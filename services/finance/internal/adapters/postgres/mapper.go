@@ -167,6 +167,7 @@ func fromDomainDeposit(d domain.Deposit) depositModel {
 		PaidAt:          d.PaidAt(),
 		IdempotencyKey:  d.IdempotencyKey(),
 		CalendarVersion: d.CalendarVersion(),
+		CardType:        d.CardType(),
 		VoidReason:      d.VoidReason(),
 	}
 	if d.Voided() {
@@ -181,6 +182,12 @@ func toDomainDeposit(m depositModel) (domain.Deposit, error) {
 		m.Method, m.Reference, m.PaidAt, m.IdempotencyKey, m.CalendarVersion)
 	if err != nil {
 		return domain.Deposit{}, err
+	}
+	if m.CardType != "" {
+		d, err = d.WithCardType(m.CardType)
+		if err != nil {
+			return domain.Deposit{}, err
+		}
 	}
 	if m.VoidedAt == nil {
 		return d, nil

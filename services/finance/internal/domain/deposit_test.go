@@ -94,3 +94,44 @@ func TestADepositCannotBeVoidedTwice(t *testing.T) {
 		t.Errorf("second void: want KindConflict, got %v", err)
 	}
 }
+
+// The office reconciles against the terminal at the end of the month, and the
+// terminal knows debit from credit. The ledger has to as well.
+func TestADepositRecordsWhichKindOfCard(t *testing.T) {
+	d, err := domain.NewDeposit("dep-1", "t1", "st-1", 320000, domain.MethodCard, "",
+		day(2026, time.October, 10), "", "")
+	if err != nil {
+		t.Fatalf("NewDeposit: %v", err)
+	}
+	withCard, err := d.WithCardType(domain.CardDebit)
+	if err != nil {
+		t.Fatalf("WithCardType: %v", err)
+	}
+	if withCard.CardType() != domain.CardDebit {
+		t.Errorf("card type = %q, want debit", withCard.CardType())
+	}
+}
+
+// A card type on cash is a contradiction. Somebody would have to explain it to
+// an auditor, and nobody could.
+func TestCashHasNoCardType(t *testing.T) {
+	d, err := domain.NewDeposit("dep-1", "t1", "st-1", 320000, domain.MethodCash, "",
+		day(2026, time.October, 10), "", "")
+	if err != nil {
+		t.Fatalf("NewDeposit: %v", err)
+	}
+	if _, err := d.WithCardType(domain.CardCredit); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("card type on cash: want KindInvalid, got %v", err)
+	}
+}
+
+func TestAnUnknownCardTypeIsRefused(t *testing.T) {
+	d, err := domain.NewDeposit("dep-1", "t1", "st-1", 320000, domain.MethodCard, "",
+		day(2026, time.October, 10), "", "")
+	if err != nil {
+		t.Fatalf("NewDeposit: %v", err)
+	}
+	if _, err := d.WithCardType("vale de despensa"); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("unknown card type: want KindInvalid, got %v", err)
+	}
+}

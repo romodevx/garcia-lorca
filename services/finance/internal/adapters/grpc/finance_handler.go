@@ -223,6 +223,7 @@ func (h *FinanceHandler) RegisterDeposit(ctx context.Context, req *connect.Reque
 		// The school honouring the reward late is a decision it makes at the
 		// counter; the use case records it as one.
 		GrantEarlyPayment: m.GetGrantEarlyPayment(),
+		CardType:          m.GetCardType(),
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -402,6 +403,7 @@ func toProtoDeposit(d domain.Deposit) *financev1.Deposit {
 		Reference:       d.Reference(),
 		PaidAt:          timestamppb.New(d.PaidAt()),
 		CalendarVersion: d.CalendarVersion(),
+		CardType:        d.CardType(),
 		VoidReason:      d.VoidReason(),
 	}
 	if d.Voided() {

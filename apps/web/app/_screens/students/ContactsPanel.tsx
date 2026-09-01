@@ -39,6 +39,7 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [relationship, setRelationship] = useState<Relationship>("other");
   const [error, setError] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
@@ -65,9 +66,11 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
         relationship,
         fullName: name.trim(),
         ...(phone.trim() !== "" ? { phone: phone.trim() } : {}),
+        ...(email.trim() !== "" ? { email: email.trim() } : {}),
       });
       setName("");
       setPhone("");
+      setEmail("");
       reload();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo agregar el contacto.");
@@ -94,6 +97,7 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
             <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
               {RELATIONSHIP_LABEL[c.relationship] ?? c.relationship}
               {c.phone !== "" && ` · ${c.phone}`}
+              {c.email !== "" && ` · ${c.email}`}
             </div>
           </div>
           {c.hasAccount && (
@@ -109,6 +113,7 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
       <form onSubmit={(e) => void add(e)} style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
         <input aria-label="Nombre del contacto" value={name} onChange={(e) => setName(e.target.value)} placeholder="Nombre" style={{ ...input, flex: "2 1 150px" }} />
         <input aria-label="Teléfono del contacto" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Teléfono" style={{ ...input, flex: "1 1 120px" }} />
+        <input aria-label="Correo del contacto" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Correo" style={{ ...input, flex: "1 1 150px" }} />
         <select aria-label="Parentesco" value={relationship} onChange={(e) => setRelationship(e.target.value as Relationship)} style={{ ...input, flex: "1 1 110px" }}>
           {RELATIONSHIPS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
         </select>

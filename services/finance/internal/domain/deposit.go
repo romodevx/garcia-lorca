@@ -35,7 +35,43 @@ type Deposit struct {
 	calendarVersion string
 	voidedAt        time.Time
 	voidReason      string
+	cardType        string
 }
+
+// Which kind of card the money came in on. Not a payment method — the money
+// still arrives by card and the ledger treats it as one — but the terminal the
+// office reconciles against at month end knows the difference, so the ledger
+// has to as well.
+const (
+	// CardDebit is a debit card.
+	CardDebit = "debit"
+	// CardCredit is a credit card.
+	CardCredit = "credit"
+)
+
+// WithCardType records debit or credit on a card payment.
+//
+// Only on a card payment: a card type on cash is a contradiction somebody would
+// eventually have to explain to an auditor, and nobody could. An empty type
+// clears it, which is the ordinary state of cash, a transfer, and every card
+// payment taken before the school asked for this.
+func (d Deposit) WithCardType(cardType string) (Deposit, error) {
+	if cardType == "" {
+		d.cardType = ""
+		return d, nil
+	}
+	if cardType != CardDebit && cardType != CardCredit {
+		return Deposit{}, glerrors.New(glerrors.KindInvalid, "card type must be debit or credit")
+	}
+	if d.method != MethodCard {
+		return Deposit{}, glerrors.New(glerrors.KindInvalid, "only a card payment has a card type")
+	}
+	d.cardType = cardType
+	return d, nil
+}
+
+// CardType is debit or credit on a card payment, and empty otherwise.
+func (d Deposit) CardType() string { return d.cardType }
 
 // NewDeposit builds a validated deposit.
 //

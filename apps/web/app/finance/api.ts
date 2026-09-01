@@ -56,6 +56,13 @@ export interface Charge {
 /** How the money came in at the window. */
 export type PaymentMethod = "cash" | "card" | "transfer";
 
+/**
+ * Which kind of card. Not a payment method — the money still arrives by card —
+ * but the terminal the office reconciles against at month end knows the
+ * difference, so the ledger records it.
+ */
+export type CardType = "debit" | "credit";
+
 export interface Payment {
   id: string;
   chargeId: string;
@@ -91,6 +98,8 @@ export interface Deposit {
    * school's holidays — worth showing on a receipt somebody may dispute.
    */
   calendarVersion: string;
+  /** debit or credit on a card payment; absent otherwise. */
+  cardType?: CardType;
   voidedAt?: string;
   voidReason?: string;
 }
@@ -129,6 +138,8 @@ export interface RegisterDepositInput {
    * decision from the rule firing.
    */
   grantEarlyPayment?: boolean;
+  /** debit or credit. Only meaningful when the method is card. */
+  cardType?: CardType;
 }
 
 /** What a family must hand over today to be current. */
@@ -630,6 +641,8 @@ function depositBody(input: RegisterDepositInput): Record<string, unknown> {
       ? { idempotencyKey: input.idempotencyKey }
       : {}),
     ...(input.grantEarlyPayment === true ? { grantEarlyPayment: true } : {}),
+    // Sent only on a card: the server refuses a card type on cash, and rightly.
+    ...(input.method === "card" && input.cardType !== undefined ? { cardType: input.cardType } : {}),
   };
 }
 
@@ -642,6 +655,8 @@ function toDeposit(d: Wire<Deposit, "method">): Deposit {
     reference: d.reference ?? "",
     paidAt: d.paidAt,
     calendarVersion: d.calendarVersion ?? "",
+    // The wire sends "" for cash and transfers; the type says "absent".
+    ...(d.cardType !== undefined && String(d.cardType) !== "" ? { cardType: d.cardType } : {}),
     ...(d.voidedAt !== undefined ? { voidedAt: d.voidedAt } : {}),
     ...(d.voidReason !== undefined ? { voidReason: d.voidReason } : {}),
   };

@@ -11,6 +11,7 @@ import {
   type Charge,
   type DepositResult,
   type Expected,
+  type CardType,
   type Payment,
   type PaymentMethod,
 } from "../../finance/api";
@@ -84,6 +85,9 @@ export function CollectDrawer({ student, onClose, onCollected }: CollectDrawerPr
   // decision somebody makes, which is why it is a switch and not a default.
   const [grantEarly, setGrantEarly] = useState(false);
   const [method, setMethod] = useState<PaymentMethod>("cash");
+  // Debit or credit, asked for only once the money is on a card. The office
+  // reconciles against the terminal at month end.
+  const [cardType, setCardType] = useState<CardType>("debit");
   const [reference, setReference] = useState("");
   const [preview, setPreview] = useState<{ allocations: Payment[]; surcharges: Charge[]; unallocatedCents: number } | null>(null);
   const [receipt, setReceipt] = useState<DepositResult | null>(null);
@@ -166,6 +170,7 @@ export function CollectDrawer({ student, onClose, onCollected }: CollectDrawerPr
         reference: reference.trim(),
         idempotencyKey: attemptKey,
         ...(grantEarly ? { grantEarlyPayment: true } : {}),
+        ...(method === "card" ? { cardType } : {}),
       });
       setReceipt(result);
       onCollected();
@@ -174,7 +179,7 @@ export function CollectDrawer({ student, onClose, onCollected }: CollectDrawerPr
     } finally {
       setSaving(false);
     }
-  }, [ready, student.id, cents, method, reference, attemptKey, grantEarly, onCollected]);
+  }, [ready, student.id, cents, method, cardType, reference, attemptKey, grantEarly, onCollected]);
 
   return (
     <div
@@ -290,6 +295,27 @@ export function CollectDrawer({ student, onClose, onCollected }: CollectDrawerPr
                     })}
                   </div>
                 </div>
+
+                {method === "card" && (
+                  <div>
+                    <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Tipo de tarjeta</span>
+                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                      {([["debit", "Débito"], ["credit", "Crédito"]] as [CardType, string][]).map(([value, label]) => {
+                        const on = cardType === value;
+                        return (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() => setCardType(value)}
+                            aria-label={label}
+                            style={{ height: 44, padding: "0 18px", borderRadius: 99, fontSize: 14.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 <label style={{ display: "block" }}>
                   <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Referencia (opcional)</span>

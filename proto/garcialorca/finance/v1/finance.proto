@@ -531,6 +531,10 @@ message Deposit {
   string calendar_version = 7;
   google.protobuf.Timestamp voided_at = 8;
   string void_reason = 9;
+  // debit | credit on a card payment, empty otherwise. Not a payment method —
+  // the money still arrives by card — but the terminal the office reconciles
+  // against at month end knows the difference.
+  string card_type = 10;
 }
 
 message RegisterDepositRequest {
@@ -551,6 +555,8 @@ message RegisterDepositRequest {
   // slipped once. A decision, never a default: it is recorded under its own
   // discount reason so a report can tell it from the rule firing.
   bool grant_early_payment = 7;
+  // debit | credit, only when method is card.
+  string card_type = 8;
 }
 
 message RegisterDepositResponse {

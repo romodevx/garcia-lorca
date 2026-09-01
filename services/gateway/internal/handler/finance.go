@@ -26,7 +26,7 @@ type FinanceService interface {
 	CancelCharge(ctx context.Context, chargeID string) (client.Charge, error)
 	RegisterPaymentAt(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time) (client.Payment, client.Charge, error)
 	GetAccount(ctx context.Context, studentID string) (client.AccountStatement, error)
-	RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool) (client.DepositResult, error)
+	RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string) (client.DepositResult, error)
 	ExpectedToday(ctx context.Context, studentID, on string) (client.Expected, error)
 	PreviewDeposit(ctx context.Context, studentID string, amountCents int64, paidAt time.Time) (client.DepositResult, error)
 	ListDeposits(ctx context.Context, studentID string) ([]client.Deposit, error)
@@ -359,6 +359,8 @@ type registerDepositRequest struct {
 	// GrantEarlyPayment honours the reward after the window closed, because the
 	// school decided to. Recorded as a decision, not as the rule firing.
 	GrantEarlyPayment bool `json:"grantEarlyPayment"`
+	// CardType is debit or credit, only meaningful when method is card.
+	CardType string `json:"cardType"`
 }
 
 type voidDepositRequest struct {
@@ -381,7 +383,7 @@ func (h *FinanceHandler) RegisterDeposit(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	got, derr := h.svc.RegisterDeposit(r.Context(), req.StudentID, req.AmountCents,
-		req.Method, req.Reference, req.IdempotencyKey, paidAt, req.GrantEarlyPayment)
+		req.Method, req.Reference, req.IdempotencyKey, paidAt, req.GrantEarlyPayment, req.CardType)
 	if derr != nil {
 		writeConnectError(w, derr)
 		return

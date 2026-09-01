@@ -78,6 +78,7 @@ type fakeFinance struct {
 	expectedOn      string
 	expected        client.Expected
 	depositGranted  bool
+	depositCardType string
 	incomeFrom      string
 	incomeTo        string
 	income          client.Income
@@ -95,7 +96,8 @@ func (f *fakeFinance) ExpectedToday(_ context.Context, studentID, on string) (cl
 	return f.expected, f.err
 }
 
-func (f *fakeFinance) RegisterDeposit(_ context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool) (client.DepositResult, error) {
+func (f *fakeFinance) RegisterDeposit(_ context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string) (client.DepositResult, error) {
+	f.depositCardType = cardType
 	f.depositStudent, f.depositAmount, f.depositMethod = studentID, amountCents, method
 	f.depositKey, f.depositPaidAt = idempotencyKey, paidAt
 	f.depositGranted = grantEarlyPayment

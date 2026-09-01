@@ -433,6 +433,7 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
   }), [students]);
   const levelsPresent = useMemo(() => Array.from(new Set(students.map((s) => s.level))), [students]);
 
+
   // The padrón as it is on screen: the tab, the level and the search. A file
   // that quietly held every pupil would look right and be wrong.
   const exportView = (): void => {
@@ -447,6 +448,17 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
         (needle === "" || `${s.firstName} ${s.lastName}`.toLowerCase().includes(needle) || s.curp.toLowerCase().includes(needle) || s.guardianName.toLowerCase().includes(needle)))
       .sort((a, b) => `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`, "es"));
   }, [students, tab, level, q]);
+
+  // How many pupils sit in each classroom, over whatever filter is on. The
+  // school asked for it and it is the number a director counts by hand before
+  // deciding whether to open another group.
+  const perGroup = useMemo(() => {
+    const counted = new Map<string, number>();
+    for (const s of filtered) {
+      counted.set(s.gradeGroup, (counted.get(s.gradeGroup) ?? 0) + 1);
+    }
+    return [...counted.entries()].sort((a, b) => a[0].localeCompare(b[0], "es"));
+  }, [filtered]);
 
   // Any filter change (or a new page size) sends the view back to the first page.
   useEffect(() => { setPage(0); }, [tab, level, q, pageSize]);
@@ -556,6 +568,20 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
         })}
         {anyFilter && <button onClick={clear} style={{ height: 38, padding: "0 14px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, color: "var(--text-muted)", background: "var(--surface-3)", border: "1px solid var(--border)", cursor: "pointer" }}><Icon name="close" size={15} />Limpiar</button>}
       </div>
+
+      {/* How many sit in each classroom, under whatever filter is on. It is the
+          number a director counts by hand before deciding to open a group. */}
+      {perGroup.length > 0 && (
+        <div data-testid="per-group" className="fade-up" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: ".04em" }}>Por salón</span>
+          {perGroup.map(([group, n]) => (
+            <span key={group} style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, padding: "0 12px", borderRadius: 99, background: "var(--surface-3)", border: "1px solid var(--border)", fontSize: 13, color: "var(--text-muted)" }}>
+              {group}
+              <b style={{ color: "var(--text)", fontFamily: "var(--font-display)" }}>{n}</b>
+            </span>
+          ))}
+        </div>
+      )}
 
       <div className="fade-up" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-xl)", boxShadow: "var(--shadow-card)", overflow: "hidden" }}>
         <div style={{ display: "grid", gridTemplateColumns: "2.4fr 1.1fr 1.6fr 1fr auto", gap: 16, padding: "14px 24px 12px", borderBottom: "1px solid var(--border)", fontSize: 12.5, fontWeight: 700, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: ".04em" }}>

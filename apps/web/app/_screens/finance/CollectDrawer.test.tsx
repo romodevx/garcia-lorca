@@ -199,4 +199,29 @@ describe("CollectDrawer", () => {
 
     expect(finance.registerDeposit).not.toHaveBeenCalled();
   });
+
+  // The card type is asked for only when the money is on a card, and it reaches
+  // the ledger: the office reconciles debit against credit at month end.
+  it("asks which kind of card, only when the money came in on one", async () => {
+    const user = userEvent.setup();
+    finance.registerDeposit.mockResolvedValue({
+      deposit: {
+        id: "dep-1", studentId: "s1", amountCents: 670000, method: "card", reference: "",
+        paidAt: "2026-10-10T00:00:00Z", calendarVersion: "abc", cardType: "credit",
+      },
+      allocations: [], surcharges: [], unallocatedCents: 0, replayed: false,
+    });
+    render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} />);
+    await screen.findByTestId("amount-expected");
+
+    // Cash: nothing to ask.
+    expect(screen.queryByLabelText("Débito")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Tarjeta" }));
+    await user.click(screen.getByLabelText("Crédito"));
+    await user.click(screen.getByRole("button", { name: /Cobrar/ }));
+
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
+    expect(finance.registerDeposit.mock.calls[0]?.[1]?.cardType).toBe("credit");
+  });
 });

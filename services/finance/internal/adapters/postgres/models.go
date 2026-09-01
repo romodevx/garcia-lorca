@@ -124,6 +124,7 @@ type depositModel struct {
 	PaidAt          time.Time  `gorm:"column:paid_at"`
 	IdempotencyKey  string     `gorm:"column:idempotency_key"`
 	CalendarVersion string     `gorm:"column:calendar_version"`
+	CardType        string     `gorm:"column:card_type"`
 	VoidedAt        *time.Time `gorm:"column:voided_at"`
 	VoidReason      string     `gorm:"column:void_reason"`
 	CreatedAt       time.Time  `gorm:"column:created_at"`

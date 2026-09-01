@@ -5,6 +5,7 @@ import { Btn } from "../../_design/Controls";
 import { Icon } from "../../_design/Icon";
 import { announce, type AnnouncementScope } from "../../comms/api";
 import { listCycles, listGroups, listLevels, type Cycle, type Group, type Level } from "../../config/api";
+import { listStudents, type Student } from "../../students/api";
 import { API_URL } from "../../api-url";
 
 /** One key per attempt: a retry must not buzz four hundred phones twice. */
@@ -13,8 +14,9 @@ function newAttemptKey(): string {
 }
 
 const SCOPES: { value: AnnouncementScope; label: string }[] = [
-  { value: "group", label: "Un grupo" },
-  { value: "level", label: "Un nivel" },
+  { value: "student", label: "Un alumno" },
+  { value: "group", label: "Grupos" },
+  { value: "level", label: "Niveles" },
   { value: "cycle", label: "Toda la escuela" },
 ];
 
@@ -40,7 +42,11 @@ export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): React
   const [levels, setLevels] = useState<Level[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [scope, setScope] = useState<AnnouncementScope>("group");
-  const [targetId, setTargetId] = useState("");
+  // A list, always: one pupil is a list of one, and "1° A y 1° B" is a list of
+  // two. Keeping two shapes for the same question is how the send ends up
+  // addressing the wrong people.
+  const [picked, setPicked] = useState<string[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
@@ -53,6 +59,7 @@ export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): React
   useEffect(() => {
     listCycles(API_URL).then(setCycles).catch(() => setError("No pudimos leer los ciclos."));
     listLevels(API_URL).then(setLevels).catch(() => {});
+    listStudents(API_URL).then(setStudents).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -72,7 +79,7 @@ export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): React
       setError("Un aviso necesita título y mensaje.");
       return;
     }
-    if (scope !== "cycle" && targetId === "") {
+    if (scope !== "cycle" && picked.length === 0) {
       setError("Elige a quién va dirigido.");
       return;
     }
@@ -81,7 +88,7 @@ export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): React
     try {
       const result = await announce(API_URL, {
         scope,
-        ...(scope === "cycle" ? {} : { targetId }),
+        ...(scope === "cycle" ? {} : { targetIds: picked }),
         cycleId: cycle.id,
         title: title.trim(),
         body: body.trim(),
@@ -90,6 +97,7 @@ export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): React
       setSent(result);
       setTitle("");
       setBody("");
+      setPicked([]);
       // A fresh key for the next message: the old one now means THIS junta, and
       // reusing it would silently deliver nothing.
       setAttemptKey(newAttemptKey());
@@ -102,7 +110,20 @@ export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): React
 
   const targets = scope === "level"
     ? levels.map((l) => ({ id: l.id, name: l.name }))
-    : groups.map((g) => ({ id: g.id, name: g.name }));
+    : scope === "student"
+      ? students.map((s) => ({ id: s.id, name: `${s.firstName} ${s.lastName}` }))
+      : groups.map((g) => ({ id: g.id, name: g.name }));
+
+  const toggle = (id: string): void => {
+    setPicked((prev) => {
+      if (prev.includes(id)) {
+        return prev.filter((p) => p !== id);
+      }
+      // One pupil at a time: a note to a family is not a circular, and picking
+      // several would be a group announcement wearing the wrong label.
+      return scope === "student" ? [id] : [...prev, id];
+    });
+  };
 
   return (
     <div style={{ maxWidth: 820, margin: "0 auto", padding: "24px 28px 96px" }}>
@@ -132,7 +153,7 @@ export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): React
                 <button
                   key={s.value}
                   type="button"
-                  onClick={() => { setScope(s.value); setTargetId(""); }}
+                  onClick={() => { setScope(s.value); setPicked([]); }}
                   style={{ height: 44, padding: "0 18px", borderRadius: 99, fontSize: 14.5, fontWeight: 600, cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>
                   {s.label}
                 </button>
@@ -142,17 +163,28 @@ export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): React
         </div>
 
         {scope !== "cycle" && (
-          <label style={{ display: "block" }}>
-            <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>{scope === "level" ? "Nivel" : "Grupo"}</span>
-            <select
-              aria-label={scope === "level" ? "Nivel" : "Grupo"}
-              value={targetId}
-              onChange={(e) => setTargetId(e.target.value)}
-              style={{ ...field, marginTop: 8 }}>
-              <option value="">Elige…</option>
-              {targets.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          </label>
+          <div>
+            <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>
+              {scope === "level" ? "Niveles" : scope === "student" ? "Alumno" : "Grupos"}
+              {picked.length > 1 && ` · ${picked.length} seleccionados`}
+            </span>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, maxHeight: 200, overflowY: "auto" }}>
+              {targets.map((t) => {
+                const on = picked.includes(t.id);
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => toggle(t.id)}
+                    aria-label={t.name}
+                    aria-pressed={on}
+                    style={{ height: 40, padding: "0 15px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, cursor: "pointer", border: `1.5px solid ${on ? "var(--forest)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--forest) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>
+                    {t.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         )}
 
         <label style={{ display: "block" }}>

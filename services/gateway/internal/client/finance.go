@@ -277,8 +277,10 @@ type Deposit struct {
 	Reference       string `json:"reference"`
 	PaidAt          string `json:"paidAt"`
 	CalendarVersion string `json:"calendarVersion"`
-	VoidedAt        string `json:"voidedAt,omitempty"`
-	VoidReason      string `json:"voidReason,omitempty"`
+	// CardType is debit or credit on a card payment, empty otherwise.
+	CardType   string `json:"cardType,omitempty"`
+	VoidedAt   string `json:"voidedAt,omitempty"`
+	VoidReason string `json:"voidReason,omitempty"`
 }
 
 // DepositResult is what the money did, in the shape a receipt needs.
@@ -292,7 +294,7 @@ type DepositResult struct {
 
 // RegisterDeposit takes money without being told what it pays for and splits it
 // across what the family owes, oldest first.
-func (c *FinanceClient) RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool) (DepositResult, error) {
+func (c *FinanceClient) RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string) (DepositResult, error) {
 	req := &financev1.RegisterDepositRequest{
 		StudentId:         studentID,
 		AmountCents:       amountCents,
@@ -300,6 +302,7 @@ func (c *FinanceClient) RegisterDeposit(ctx context.Context, studentID string, a
 		Reference:         reference,
 		IdempotencyKey:    idempotencyKey,
 		GrantEarlyPayment: grantEarlyPayment,
+		CardType:          cardType,
 	}
 	if !paidAt.IsZero() {
 		req.PaidAt = timestamppb.New(paidAt)
@@ -462,6 +465,7 @@ func toDeposit(d *financev1.Deposit) Deposit {
 		Method:          d.GetMethod(),
 		Reference:       d.GetReference(),
 		CalendarVersion: d.GetCalendarVersion(),
+		CardType:        d.GetCardType(),
 		VoidReason:      d.GetVoidReason(),
 	}
 	if ts := d.GetPaidAt(); ts != nil {

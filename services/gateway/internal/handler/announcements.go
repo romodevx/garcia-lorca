@@ -14,6 +14,9 @@ const (
 	scopeGroup = "group"
 	scopeLevel = "level"
 	scopeCycle = "cycle"
+	// scopeStudent is one pupil: the note that goes to one family and nobody
+	// else. A school sends more of these than it sends circulars.
+	scopeStudent = "student"
 )
 
 // Announcer sends one message to many families. The audience is a list of
@@ -55,12 +58,17 @@ func NewAnnouncementHandler(comms Announcer, enrollments EnrollmentReader, group
 type announceRequest struct {
 	// Scope is group | level | cycle.
 	Scope string `json:"scope"`
-	// TargetID is the group or level. Unused for a whole-cycle announcement.
-	TargetID       string `json:"targetId"`
-	CycleID        string `json:"cycleId"`
-	Title          string `json:"title"`
-	Body           string `json:"body"`
-	IdempotencyKey string `json:"idempotencyKey"`
+	// TargetID is the group, level or pupil. Unused for a whole-cycle
+	// announcement, and ignored when TargetIDs carries a list.
+	TargetID string `json:"targetId"`
+	// TargetIDs addresses SEVERAL groups at once — "1° A y 1° B" is one message
+	// the school writes once, not two it writes twice and sends at different
+	// times.
+	TargetIDs      []string `json:"targetIds"`
+	CycleID        string   `json:"cycleId"`
+	Title          string   `json:"title"`
+	Body           string   `json:"body"`
+	IdempotencyKey string   `json:"idempotencyKey"`
 }
 
 // Announce handles POST /api/v1/comms/announcements.
@@ -105,19 +113,40 @@ func (h *AnnouncementHandler) Announce(w http.ResponseWriter, r *http.Request) {
 // audienceOf turns a scope into the pupils it names.
 func (h *AnnouncementHandler) audienceOf(ctx context.Context, req announceRequest) ([]string, error) {
 	switch req.Scope {
+	case scopeStudent:
+		// No lookup: the caller named the pupil. Sending to one family is the
+		// most common announcement there is.
+		return targets(req), nil
 	case scopeGroup:
-		return h.studentsOfGroups(ctx, req.CycleID, []string{req.TargetID})
+		return h.studentsOfGroups(ctx, req.CycleID, targets(req))
 	case scopeCycle:
 		return h.studentsOfGroups(ctx, req.CycleID, nil)
 	case scopeLevel:
-		groupIDs, err := h.groupsOfLevel(ctx, req.CycleID, req.TargetID)
-		if err != nil {
-			return nil, err
+		var groupIDs []string
+		for _, levelID := range targets(req) {
+			ids, err := h.groupsOfLevel(ctx, req.CycleID, levelID)
+			if err != nil {
+				return nil, err
+			}
+			groupIDs = append(groupIDs, ids...)
 		}
 		return h.studentsOfGroups(ctx, req.CycleID, groupIDs)
 	default:
 		return nil, errUnknownScope
 	}
+}
+
+// targets is what the request addressed, as a list. One id and a list of ids
+// are the same question asked two ways, and the rest of this file should not
+// have to care which was used.
+func targets(req announceRequest) []string {
+	if len(req.TargetIDs) > 0 {
+		return req.TargetIDs
+	}
+	if strings.TrimSpace(req.TargetID) == "" {
+		return nil
+	}
+	return []string{req.TargetID}
 }
 
 // groupsOfLevel walks level → grades → groups. A level is not enrolled in

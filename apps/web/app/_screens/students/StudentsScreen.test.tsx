@@ -137,3 +137,20 @@ describe("StudentsScreen", () => {
     );
   });
 });
+
+describe("StudentsScreen — por salón", () => {
+  // The director counts heads per classroom before deciding to open another
+  // group. It follows the filters, because that is the count they mean.
+  it("counts pupils per classroom, and follows the filter", async () => {
+    const user = userEvent.setup();
+    render(<StudentsScreen onBack={() => {}} />);
+    await screen.findByText("Valentina Cruz");
+
+    const perGroup = await screen.findByTestId("per-group");
+    expect(perGroup).toHaveTextContent("1° A");
+
+    await user.type(screen.getByLabelText("Buscar"), "Valentina");
+
+    expect(await screen.findByTestId("per-group")).toHaveTextContent("1");
+  });
+});

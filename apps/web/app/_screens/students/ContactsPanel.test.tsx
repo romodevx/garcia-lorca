@@ -63,4 +63,23 @@ describe("ContactsPanel", () => {
     expect(students.addContact).not.toHaveBeenCalled();
     expect(await screen.findByRole("alert")).toBeInTheDocument();
   });
+
+  // The review asked for numbers AND emails. The column existed from the start
+  // and the form never asked for one.
+  it("records a correo too", async () => {
+    const user = userEvent.setup();
+    students.addContact.mockResolvedValue({
+      id: "gl-3", studentId: "st-1", guardianUserId: "", relationship: "other",
+      fullName: "Luis Cruz", phone: "", email: "luis@example.com", hasAccount: false,
+    });
+    render(<ContactsPanel studentId="st-1" />);
+    await screen.findByText("Ana Cruz");
+
+    await user.type(screen.getByLabelText("Nombre del contacto"), "Luis Cruz");
+    await user.type(screen.getByLabelText("Correo del contacto"), "luis@example.com");
+    await user.click(screen.getByRole("button", { name: /Agregar/ }));
+
+    await waitFor(() => expect(students.addContact).toHaveBeenCalled());
+    expect(students.addContact.mock.calls[0]?.[1]?.email).toBe("luis@example.com");
+  });
 });

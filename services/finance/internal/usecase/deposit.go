@@ -22,6 +22,10 @@ type DepositInput struct {
 	Reference      string
 	PaidAt         time.Time
 	IdempotencyKey string
+	// CardType is debit or credit when the money came in on a card. The office
+	// reconciles against the terminal at month end, and the terminal knows the
+	// difference.
+	CardType string
 	// GrantEarlyPayment honours the early-payment reward even though the money
 	// arrived after the window closed. It is the school saying yes to a parent
 	// who is always punctual and slipped once — a decision, never a default,
@@ -146,6 +150,10 @@ func (s *FinanceService) prepareDeposit(ctx context.Context, in DepositInput) (d
 
 	deposit, err := domain.NewDeposit(s.newID(), s.tenantID, in.StudentID, in.AmountCents,
 		in.Method, in.Reference, when, in.IdempotencyKey, calendarVersion)
+	if err != nil {
+		return domain.Deposit{}, nil, err
+	}
+	deposit, err = deposit.WithCardType(in.CardType)
 	if err != nil {
 		return domain.Deposit{}, nil, err
 	}

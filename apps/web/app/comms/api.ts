@@ -12,12 +12,14 @@ import { authFetch } from "../auth/authFetch";
 const BASE_PATH = "/api/v1/comms";
 
 /** Who an announcement is for. */
-export type AnnouncementScope = "group" | "level" | "cycle";
+export type AnnouncementScope = "student" | "group" | "level" | "cycle";
 
 export interface AnnounceInput {
   scope: AnnouncementScope;
-  /** The group or level. Unused when the scope is the whole cycle. */
+  /** The pupil, group or level. Unused when the scope is the whole cycle. */
   targetId?: string;
+  /** Several groups (or levels) at once: one message, written once. */
+  targetIds?: string[];
   cycleId: string;
   title: string;
   body: string;
@@ -44,7 +46,11 @@ export async function announce(baseURL: string, input: AnnounceInput): Promise<A
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       scope: input.scope,
-      ...(input.targetId !== undefined && input.targetId !== "" ? { targetId: input.targetId } : {}),
+      ...(input.targetIds !== undefined && input.targetIds.length > 0
+        ? { targetIds: input.targetIds }
+        : input.targetId !== undefined && input.targetId !== ""
+          ? { targetId: input.targetId }
+          : {}),
       cycleId: input.cycleId,
       title: input.title,
       body: input.body,

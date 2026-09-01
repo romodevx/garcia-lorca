@@ -149,3 +149,57 @@ func TestAnnounceNeedsAKnownScope(t *testing.T) {
 		t.Errorf("status = %d, want 400", rec.Code)
 	}
 }
+
+// The note that goes to one family and nobody else. A school sends more of
+// these than it sends circulars.
+func TestAnnounceToOneStudent(t *testing.T) {
+	h, comms, _ := newAnnouncementHandler(1)
+
+	rec := doReq(t, h.Announce, http.MethodPost, "/api/v1/comms/announcements",
+		`{"scope":"student","targetId":"s1","cycleId":"c1","title":"Recordatorio","body":"Traer uniforme","idempotencyKey":"k6"}`)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+	if len(comms.studentIDs) != 1 || comms.studentIDs[0] != "s1" {
+		t.Errorf("audience = %v, want the one pupil named", comms.studentIDs)
+	}
+}
+
+// "1° A y 1° B" is one message the school writes once — not two it writes twice
+// and sends at different times.
+func TestAnnounceToSeveralGroupsAtOnce(t *testing.T) {
+	h, comms, _ := newAnnouncementHandler(2)
+
+	rec := doReq(t, h.Announce, http.MethodPost, "/api/v1/comms/announcements",
+		`{"scope":"group","targetIds":["g1","g2"],"cycleId":"c1","title":"Junta","body":"Jueves","idempotencyKey":"k7"}`)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+	if len(comms.studentIDs) != 2 {
+		t.Errorf("audience = %v, want the active pupils of both groups", comms.studentIDs)
+	}
+}
+
+// A pupil in two of the chosen groups hears it once. Two notifications for one
+// announcement is how a school teaches parents to ignore them.
+func TestAPupilInTwoChosenGroupsHearsItOnce(t *testing.T) {
+	h, comms, audience := newAnnouncementHandler(1)
+	audience.enrollments = append(audience.enrollments,
+		client.Enrollment{StudentID: "s1", GroupID: "g2", CycleID: "c1", Status: "active"})
+
+	rec := doReq(t, h.Announce, http.MethodPost, "/api/v1/comms/announcements",
+		`{"scope":"group","targetIds":["g1","g2"],"cycleId":"c1","title":"Junta","body":"Jueves","idempotencyKey":"k8"}`)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+	seen := map[string]int{}
+	for _, id := range comms.studentIDs {
+		seen[id]++
+	}
+	if seen["s1"] != 1 {
+		t.Errorf("s1 appears %d times in the audience, want 1", seen["s1"])
+	}
+}
