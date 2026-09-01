@@ -885,3 +885,159 @@ Modo: [subagent-only] — sin cobertura cross-model.
    la política de una escuela, entregado a un cliente sin contrato, produce una
    consultoría, no un producto"*. Diseño: *"el Excel es un síntoma, no un requisito"*.
 4. **Hay que preguntarle tres cosas al director antes de escribir código.**
+
+---
+
+# FASE 3 — Ingeniería
+
+Voz independiente sobre el plan **ya corregido**. 20 hallazgos; verifiqué los tres que
+cambian decisiones. Los tres resultaron ciertos, y **uno mata un diseño que yo propuse**.
+
+### 🔴🔴 E1 — El recargo DERIVADO no se puede cobrar. Mi decisión C10 estaba mal.
+
+`usecase/finance.go:333-341`:
+```go
+if newPaidCents > charge.Effective().Int64() {
+    return "", glerrors.New(glerrors.KindInvalid, "payment exceeds the remaining balance")
+}
+```
+
+Propuse que el recargo diario fuera un **monto derivado** sobre el cargo padre, para no
+emitir 12,000 renglones al mes. Pero `Effective() = amount − discount` **no incluye un
+derivado**, así que una familia que paga colegiatura **más** recargo es rechazada como
+sobrepago. **El recargo derivado no tiene dónde recibir el dinero.**
+
+Y se lleva cuatro cosas más por delante: el cargo se marca `paid` con el recargo sin
+pagar → dispara `ChargeSettled` → **`students` inscribe a un alumno que no terminó de
+pagar**; `GetAccount` excluye todos los recargos de la "deuda total"; `ListOverdue` saca
+de la cola de cobranza a quien solo debe recargo; y el cajón de pago pre-llena un monto
+corto.
+
+**Corrección (acepto la de la voz):** derivar **solo para mostrar**, y **materializar en
+el momento en que el dinero se aplica**. El recargo se calcula para la pantalla; cuando
+la cajera cobra, se inserta un cargo real de `late_fee` por el monto acumulado, con
+`external_ref = latefee:<chargeID>:<fecha>`, justo antes de aplicarle el pago.
+
+Así los cuatro sitios de arriba siguen funcionando sin tocarse, el libro mayor sigue
+explicable, y **solo existen renglones donde hubo dinero** — que era el problema que yo
+quería evitar. Es mejor que las dos propuestas anteriores.
+
+### 🔴🔴 E2 — Un depósito genera SEIS notificaciones al padre
+
+`comms/service.go:397-405` indexa su ledger por `PaymentRegistered:<payment_id>` y
+manda *"Recibimos tu pago de $X"*. Seis asignaciones = seis ids distintos = **seis push,
+cada uno por una fracción de lo que el padre entregó**. El ledger no puede deduplicarlos
+porque son eventos genuinamente distintos.
+
+**Decisión:** `PaymentRegistered` se re-ancla al **depósito** (un evento, monto total,
+sin `charge_id`), y `ChargeSettled` lleva el reparto por cargo. Es un cambio de proto, y
+**hoy es barato**: `charge_id` solo lo consume comms, que lo ignora. Después de M11/CFDI
+sería caro.
+
+### 🔴🔴 E3 — Reusar `late_fee_cents` multiplica el recargo por 30
+
+La columna está documentada como *"the fixed surcharge added once per completed overdue
+month"*, y la demo siembra `lateFeeCents: 15000` ($150/mes). Reinterpretarla como tarifa
+diaria convierte $150/mes en **$150/día ≈ $4,500/mes**, sobre 400 alumnos.
+
+**Decisión:** nunca reinterpretar. Columnas nuevas `late_fee_daily_cents` +
+`late_fee_mode CHECK (mode IN ('monthly','daily')) DEFAULT 'monthly'`. Los renglones
+existentes conservan `monthly`. Así mi "los cargos existentes conservan su regla" pasa de
+ser una convención en prosa a **una restricción en los datos**.
+
+### 🔴 E4 — `guardian_students` no puede recibir los contactos: está vacía y no puede llenarse
+
+Verificado: `guardian_user_id uuid NOT NULL` — exige un **usuario de iam con rol
+guardian**. La demo siembra **cero** vínculos (solo `guardianName` como texto).
+
+Mi decisión C8 —"columnas de contacto en `guardian_students`"— era correcta en evitar un
+tercer modelo y **equivocada en cuál sobrevive**: no hay nada sobre lo que hacer backfill,
+y fabricar un usuario de iam por tutor crea una credencial de acceso que la escuela nunca
+pidió.
+
+**Corrección:** `guardian_user_id` pasa a **nullable** (un contacto que todavía no es un
+login), se agregan `phone`/`email`, y se hace backfill de un renglón por alumno desde
+`students.guardian_name`. Así la ruta de auth familiar (`guardian_user_id IS NOT NULL`) y
+la lista de contactos **son la misma tabla**, que es lo que yo quería y no logré.
+
+### 🔴 E5 — `ChargeSettled` es un disparador de máquina de estados, no un aviso
+
+`students/consumer.go:54-77` lo consume para mover al alumno pending→accepted→enrolled.
+Hoy lo emite `publishChargeSettledIfClosed` desde **un** cargo. Con un depósito que cierra
+seis, si el emisor se queda donde está, dispara una vez o ninguna. Y si sale de la
+transacción, una caída entre commit y publish deja **un alumno pagado y en trámite para
+siempre** — no hay reconciliador.
+
+**Decisión:** un `ChargeSettled` por cargo que cruce a `paid`, y los eventos salen por una
+**tabla de outbox transaccional** en la misma transacción. Publicar en modo "mejor
+esfuerzo" era defendible para un cargo; no lo es para seis.
+
+### 🔴 E6 — Sin timeout, la decisión D3 es indeployable
+
+`pkg/gcpauth/gcpauth.go:30-41` devuelve un cliente **sin `Timeout`**. El único límite es
+el `writeTimeout = 30s` del servidor. Con `config` en `min_instances = 0`, el Guardar de
+la cajera **gira hasta 30 segundos** y devuelve un 500 sin mensaje útil.
+
+O sea: la corrección que acepté de la voz de diseño (registrar el dinero y diferir la
+aritmética) **no se puede implementar**, porque el código no puede ni distinguir que fue
+un timeout. **Decisión:** `context.WithTimeout` de 2-3s específico para la lectura del
+calendario, con error distinguible.
+
+### 🟡 E7 — El caché por ciclo no es seguro, y yo mismo nombré al invalidador
+
+Escribí en la Sección 7 "se cachea por ciclo, un calendario cambia dos veces al año", y en
+la Sección 4 dejé abierto el caso de **cargar un feriado retroactivo**. Se contradicen.
+
+Con `min_instances=0` y N instancias, no hay señal de invalidación: la escuela agrega un
+feriado y finanzas sigue cotizando el monto viejo hasta que la instancia muera. Dos
+instancias pueden discrepar a la vez.
+
+**Decisión:** TTL en minutos, no en ciclos, y **estampar la versión del calendario en el
+depósito** — así el estado de cuenta puede explicar con qué reglas se calculó un número.
+Eso es lo que hace verdadera la promesa de "explicar cada peso", y es casi gratis.
+
+### 🟡 E8 — Dos depósitos simultáneos del mismo alumno se van a bloquear entre sí
+
+Dos cajeras, mismo alumno. Hoy solo hay **un** `FOR UPDATE`, así que el orden nunca
+importó. **Decisión:** bloquear los cargos abiertos del alumno en una sola sentencia
+ordenada por `due_date, id`.
+
+Y de paso corrige mi Hallazgo 1.1: propuse ordenar el reparto **por `external_ref`**.
+Ordenar por texto pone `latefee:` **antes** que `tuition:` — el depósito se consumiría al
+revés. `due_date, id` da el orden correcto gratis.
+
+### 🟡 E9 — El saldo a favor es invisible en la pantalla que debe explicarlo
+
+`GetAccount` pisa cada cargo en cero y `ListPayments` hace `JOIN charges ON
+payments.charge_id`. Un depósito sin asignar **no aparece en ninguna de las dos**: el
+dinero está en la caja y ausente de la pantalla. Justo el saldo a favor de mi Hallazgo 2.2
+y el "pendiente de aplicación" de D3.
+
+**Decisión:** `AccountStatement` gana `UnallocatedCents`, y la lista de pagos sale de
+`deposits`, no del join con cargos.
+
+### 🟡 E10 — Retirar `guardian_name` son SEIS despliegues, no uno
+
+Es campo de proto (`students.proto:116,130`), está en el dominio, **es obligatorio en el
+formulario web** y lo leen tres pantallas. El orden correcto: (1) columnas aditivas,
+(2) backfill idempotente, (3) RPC nuevos con doble escritura, (4) el front lee del
+origen nuevo, (5) `reserved 8` en el proto — nunca borrar un número de campo,
+(6) drop de la columna, en su propia migración.
+
+**Los pasos 2 y 6 en el mismo release es como se pierden 400 nombres de tutor.**
+
+## TABLA DE CONSENSO — INGENIERÍA
+
+```
+═══════════════════════════════════════════════════════════════════
+  Dimensión                        Claude   Codex   Consenso
+  ───────────────────────────────  ───────  ──────  ──────────────
+  1. ¿Arquitectura sólida?         NO       N/A     ⚠️ el recargo derivado no cobra
+  2. ¿Cobertura de pruebas?        NO       N/A     ⚠️ 6 rutas no son unit-testeables
+  3. ¿Riesgos de datos cubiertos?  NO       N/A     ⚠️ reinterpretar columna = ×30
+  4. ¿Contratos de evento sanos?   NO       N/A     ⚠️ 6 push por un depósito
+  5. ¿Rutas de error manejadas?    NO       N/A     ⚠️ sin timeout, D3 no se puede hacer
+  6. ¿Migración segura?            NO       N/A     ⚠️ guardian_students está vacía
+═══════════════════════════════════════════════════════════════════
+Modo: [subagent-only] en las tres fases. Sin cobertura cross-model.
+```
