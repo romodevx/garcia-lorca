@@ -69,6 +69,18 @@ func (f *fakeEnrollments) ListByCycle(_ context.Context, cycleID, groupID string
 	return out, nil
 }
 
+func (f *fakeEnrollments) ListByStudent(_ context.Context, studentID string) ([]ports.EnrollmentRef, error) {
+	var out []ports.EnrollmentRef
+	for _, rows := range f.byCycle {
+		for _, e := range rows {
+			if e.StudentID == studentID {
+				out = append(out, e)
+			}
+		}
+	}
+	return out, nil
+}
+
 // --- repository ---------------------------------------------------------------
 
 // fakeRepo is behavioural, not a stub: it reproduces the duplicate keys that
@@ -91,6 +103,29 @@ func newFakeRepo() *fakeRepo {
 func chargeKey(c domain.Charge) string {
 	return c.StudentID() + "|" + c.CycleID() + "|" + c.ConceptID()
 }
+
+// The deposit path is exercised at the use-case layer; this handler fake only
+// has to satisfy the port so the wiring compiles.
+
+func (f *fakeRepo) RegisterDeposit(_ context.Context, d domain.Deposit,
+	plan func(open []ports.ChargeWithPaid) (ports.DepositWrite, error),
+) (ports.DepositRecord, bool, error) {
+	write, err := plan(nil)
+	if err != nil {
+		return ports.DepositRecord{}, false, err
+	}
+	return ports.DepositRecord{Deposit: d, UnallocatedCents: write.UnallocatedCents}, false, nil
+}
+
+func (f *fakeRepo) GetDeposit(_ context.Context, _ string) (domain.Deposit, error) {
+	return domain.Deposit{}, glerrors.ErrNotFound
+}
+
+func (f *fakeRepo) ListDeposits(_ context.Context, _ string) ([]domain.Deposit, error) {
+	return nil, nil
+}
+
+func (f *fakeRepo) VoidDeposit(_ context.Context, _ domain.Deposit) error { return nil }
 
 func (f *fakeRepo) paidFor(chargeID string) int64 {
 	var total int64
@@ -319,7 +354,7 @@ func newFixture(t *testing.T) *fixture {
 
 	seq := 0
 	newID := func() string { seq++; return fmt.Sprintf("id-%d", seq) }
-	svc := usecase.NewFinanceService(repo, students, cycles, enrollments, &fakeCatalog{}, nil,
+	svc := usecase.NewFinanceService(repo, students, cycles, enrollments, &fakeCatalog{}, nil, nil,
 		testTenant, newID, func() time.Time { return fixedNow })
 	return &fixture{
 		h:           grpcadapter.NewFinanceHandler(svc, usecase.NewHealthService("finance")),

@@ -100,6 +100,30 @@ type paymentModel struct {
 	IdempotencyKey string    `gorm:"column:idempotency_key"`
 	PaidAt         time.Time `gorm:"column:paid_at"`
 	CreatedAt      time.Time `gorm:"column:created_at"`
+	// DepositID is set when this payment is one slice of a deposit. NULL means a
+	// payment made the old way, against one named charge.
+	DepositID *string `gorm:"column:deposit_id"`
 }
 
 func (paymentModel) TableName() string { return "payments" }
+
+// depositModel is the GORM row for `deposits` (M16): money as it arrived,
+// before it was decided what it pays. Its allocations are payments carrying
+// deposit_id, so there is still exactly one place that answers "what has been
+// collected against this charge".
+type depositModel struct {
+	ID              string     `gorm:"column:id;primaryKey"`
+	TenantID        string     `gorm:"column:tenant_id"`
+	StudentID       string     `gorm:"column:student_id"`
+	AmountCents     int64      `gorm:"column:amount_cents"`
+	Method          string     `gorm:"column:method"`
+	Reference       string     `gorm:"column:reference"`
+	PaidAt          time.Time  `gorm:"column:paid_at"`
+	IdempotencyKey  string     `gorm:"column:idempotency_key"`
+	CalendarVersion string     `gorm:"column:calendar_version"`
+	VoidedAt        *time.Time `gorm:"column:voided_at"`
+	VoidReason      string     `gorm:"column:void_reason"`
+	CreatedAt       time.Time  `gorm:"column:created_at"`
+}
+
+func (depositModel) TableName() string { return "deposits" }

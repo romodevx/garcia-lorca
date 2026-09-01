@@ -188,6 +188,15 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	studentsBaseURL := envOr("STUDENTS_BASE_URL", defaultStudentsBaseURL)
 	configBaseURL := envOr("CONFIG_BASE_URL", defaultConfigBaseURL)
 	studentsClient := studentsclient.New(studentsBaseURL, gcpauth.HTTPClient(ctx, studentsBaseURL))
+	// How long the school calendar is held, and how long a read of it may take.
+	// Minutes, not per cycle: a holiday entered this morning has to be visible
+	// this morning. Seconds, not indefinitely: a cashier is standing in front of
+	// a parent, and a slow config service must not become a slow counter.
+	const (
+		calendarTTL     = 5 * time.Minute
+		calendarTimeout = 3 * time.Second
+	)
+
 	cyclesClient := configclient.New(configBaseURL, gcpauth.HTTPClient(ctx, configBaseURL))
 
 	events, err := gcp.PublisherFromEnv(ctx, log)
@@ -199,7 +208,8 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	newID := func() string { return uuid.NewString() }
 	// cyclesClient is the config client twice over: it answers both "is this a
 	// real school year" and "which level does this group belong to".
-	svc := usecase.NewFinanceService(repo, studentsClient, cyclesClient, studentsClient, cyclesClient, publisher, tenantID, newID, time.Now)
+	svc := usecase.NewFinanceService(repo, studentsClient, cyclesClient, studentsClient, cyclesClient,
+		configclient.NewCachedCalendar(cyclesClient, calendarTTL, calendarTimeout), publisher, tenantID, newID, time.Now)
 	health := usecase.NewHealthService(serviceName)
 	handler := grpcadapter.NewFinanceHandler(svc, health)
 	consumer := pubsubadapter.NewConsumer(svc, log)

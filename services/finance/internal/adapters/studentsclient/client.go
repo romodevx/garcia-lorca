@@ -83,6 +83,24 @@ func (c *Client) ListByCycle(ctx context.Context, cycleID, groupID string) ([]po
 	return out, nil
 }
 
+// ListByStudent returns one pupil's enrolments across every cycle. A deposit
+// needs it to find where the pupil sits: the group leads to the level, and the
+// level's tuition table carries the collection rule that decides what a late
+// payment costs.
+func (c *Client) ListByStudent(ctx context.Context, studentID string) ([]ports.EnrollmentRef, error) {
+	req := &studentsv1.ListEnrollmentsRequest{StudentId: studentID}
+	res, err := c.rpc.ListEnrollments(ctx, connect.NewRequest(req))
+	if err != nil {
+		return nil, mapStudentsErr(err, "enrollments")
+	}
+	src := res.Msg.GetEnrollments()
+	out := make([]ports.EnrollmentRef, 0, len(src))
+	for _, e := range src {
+		out = append(out, toRef(e))
+	}
+	return out, nil
+}
+
 // toRef projects a proto Enrollment to the finance-owned view, mapping the
 // status enum to the lowercase string the use case compares against ("active",
 // …).

@@ -50,10 +50,14 @@ type FinanceService struct {
 	cycles      ports.CycleReader
 	enrollments ports.EnrollmentReader
 	catalog     ports.CatalogReader
-	publisher   ports.PaymentPublisher
-	tenantID    string
-	newID       func() string
-	now         func() time.Time
+	// calendar tells the collection rules which days the school is shut. It may
+	// be nil: a service wired without one counts weekends as non-working and
+	// nothing else, which is what every caller got before M16.
+	calendar  ports.CalendarReader
+	publisher ports.PaymentPublisher
+	tenantID  string
+	newID     func() string
+	now       func() time.Time
 }
 
 // NewFinanceService wires the use case. tenantID is the single-tenant scope for
@@ -66,6 +70,7 @@ func NewFinanceService(
 	cycles ports.CycleReader,
 	enrollments ports.EnrollmentReader,
 	catalog ports.CatalogReader,
+	calendar ports.CalendarReader,
 	publisher ports.PaymentPublisher,
 	tenantID string,
 	newID func() string,
@@ -77,6 +82,7 @@ func NewFinanceService(
 		cycles:      cycles,
 		enrollments: enrollments,
 		catalog:     catalog,
+		calendar:    calendar,
 		publisher:   publisher,
 		tenantID:    tenantID,
 		newID:       newID,

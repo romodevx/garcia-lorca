@@ -85,6 +85,18 @@ func (f *fakeEnrollments) ListByCycle(_ context.Context, cycleID, groupID string
 	return out, nil
 }
 
+func (f *fakeEnrollments) ListByStudent(_ context.Context, studentID string) ([]ports.EnrollmentRef, error) {
+	var out []ports.EnrollmentRef
+	for _, rows := range f.byCycle {
+		for _, e := range rows {
+			if e.StudentID == studentID {
+				out = append(out, e)
+			}
+		}
+	}
+	return out, nil
+}
+
 // --- publisher ---------------------------------------------------------------
 
 type spyPublisher struct {
@@ -110,6 +122,10 @@ type fakeRepo struct {
 	charges  map[string]domain.Charge
 	payments map[string][]domain.Payment // keyed by charge id
 	plans    map[string]domain.TuitionPlan
+	deposits []domain.Deposit
+	// depositOfPayment stands in for payments.deposit_id: which deposit an
+	// allocation came from, so voiding can find and release exactly those.
+	depositOfPayment map[string]string
 
 	// Recorded call arguments, for the tests that assert on the call itself.
 	overdueCycleID      string
@@ -124,6 +140,8 @@ func newFakeRepo() *fakeRepo {
 		charges:  map[string]domain.Charge{},
 		payments: map[string][]domain.Payment{},
 		plans:    map[string]domain.TuitionPlan{},
+
+		depositOfPayment: map[string]string{},
 	}
 }
 
@@ -299,6 +317,148 @@ func (f *fakeRepo) RegisterPayment(
 	return p, ports.ChargeWithPaid{Charge: updated, PaidCents: newPaid}, false, nil
 }
 
+// RegisterDeposit mirrors the real repository closely enough to be worth
+// trusting: it dedupes on the key, hands the planner the student's live charges
+// with their collected totals, and refuses an allocation that would overpay —
+// which is the veto the transaction exists to run.
+func (f *fakeRepo) RegisterDeposit(
+	_ context.Context,
+	d domain.Deposit,
+	plan func(open []ports.ChargeWithPaid) (ports.DepositWrite, error),
+) (ports.DepositRecord, bool, error) {
+	if original, found := f.depositByKey(d.IdempotencyKey()); found {
+		var allocations []domain.Payment
+		var allocated int64
+		for _, ps := range f.payments {
+			for _, p := range ps {
+				if f.depositOfPayment[p.ID()] == original.ID() {
+					allocations = append(allocations, p)
+					allocated += p.Amount().Int64()
+				}
+			}
+		}
+		sort.Slice(allocations, func(i, j int) bool { return allocations[i].ID() < allocations[j].ID() })
+		return ports.DepositRecord{
+			Deposit:          original,
+			Allocations:      allocations,
+			UnallocatedCents: original.Amount().Int64() - allocated,
+		}, true, nil
+	}
+
+	var open []ports.ChargeWithPaid
+	for _, c := range f.charges {
+		if c.StudentID() != d.StudentID() || c.Status() == domain.StatusCancelled {
+			continue
+		}
+		open = append(open, ports.ChargeWithPaid{Charge: c, PaidCents: f.paidFor(c.ID())})
+	}
+	sort.Slice(open, func(i, j int) bool {
+		if !open[i].Charge.DueDate().Equal(open[j].Charge.DueDate()) {
+			return open[i].Charge.DueDate().Before(open[j].Charge.DueDate())
+		}
+		return open[i].Charge.ID() < open[j].Charge.ID()
+	})
+
+	write, err := plan(open)
+	if err != nil {
+		return ports.DepositRecord{}, false, err
+	}
+
+	f.deposits = append(f.deposits, d)
+	for _, fee := range write.Surcharges {
+		f.charges[fee.ID()] = fee
+	}
+	var settled []ports.ChargeWithPaid
+	for _, p := range write.Allocations {
+		c, ok := f.charges[p.ChargeID()]
+		if !ok {
+			return ports.DepositRecord{}, false, glerrors.New(glerrors.KindInternal,
+				"deposit allocated to a charge that is not in the transaction")
+		}
+		newPaid := f.paidFor(p.ChargeID()) + p.Amount().Int64()
+		if newPaid > c.Effective().Int64() {
+			return ports.DepositRecord{}, false, glerrors.New(glerrors.KindInternal,
+				"deposit allocated more than a charge owed")
+		}
+		f.payments[p.ChargeID()] = append(f.payments[p.ChargeID()], p)
+		f.depositOfPayment[p.ID()] = d.ID()
+		updated := c.WithStatus(newPaid)
+		f.charges[c.ID()] = updated
+		if updated.Status() == domain.StatusPaid {
+			settled = append(settled, ports.ChargeWithPaid{Charge: updated, PaidCents: newPaid})
+		}
+	}
+	return ports.DepositRecord{
+		Deposit:          d,
+		Surcharges:       write.Surcharges,
+		Allocations:      write.Allocations,
+		UnallocatedCents: write.UnallocatedCents,
+		Settled:          settled,
+	}, false, nil
+}
+
+func (f *fakeRepo) depositByKey(key string) (domain.Deposit, bool) {
+	if key == "" {
+		return domain.Deposit{}, false
+	}
+	for _, d := range f.deposits {
+		if d.IdempotencyKey() == key && !d.Voided() {
+			return d, true
+		}
+	}
+	return domain.Deposit{}, false
+}
+
+func (f *fakeRepo) GetDeposit(_ context.Context, id string) (domain.Deposit, error) {
+	for _, d := range f.deposits {
+		if d.ID() == id {
+			return d, nil
+		}
+	}
+	return domain.Deposit{}, glerrors.ErrNotFound
+}
+
+func (f *fakeRepo) ListDeposits(_ context.Context, studentID string) ([]domain.Deposit, error) {
+	out := make([]domain.Deposit, 0, len(f.deposits))
+	for _, d := range f.deposits {
+		if studentID != "" && d.StudentID() != studentID {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out, nil
+}
+
+func (f *fakeRepo) VoidDeposit(_ context.Context, d domain.Deposit) error {
+	for i, stored := range f.deposits {
+		if stored.ID() != d.ID() {
+			continue
+		}
+		if stored.Voided() {
+			return glerrors.New(glerrors.KindConflict, "this deposit is already cancelled")
+		}
+		f.deposits[i] = d
+		touched := map[string]bool{}
+		for chargeID, ps := range f.payments {
+			var kept []domain.Payment
+			for _, p := range ps {
+				if f.depositOfPayment[p.ID()] == d.ID() {
+					touched[chargeID] = true
+					continue
+				}
+				kept = append(kept, p)
+			}
+			f.payments[chargeID] = kept
+		}
+		for chargeID := range touched {
+			c := f.charges[chargeID]
+			f.charges[chargeID] = c.WithStatus(f.paidFor(chargeID))
+		}
+		return nil
+	}
+	return glerrors.ErrNotFound
+}
+
 // byIdempotencyKey finds a payment already posted under key. An empty key never
 // matches: it means the caller opted out of deduplication.
 func (f *fakeRepo) byIdempotencyKey(key string) (domain.Payment, bool) {
@@ -411,6 +571,10 @@ type fixture struct {
 	enrollments *fakeEnrollments
 	catalog     *fakeCatalog
 	publisher   *spyPublisher
+	// clock is what the service reads for "now". It starts at fixedNow and a
+	// test may move it forward — the collection rules are all functions of a
+	// date, so a test that cannot say what day it is cannot exercise them.
+	clock time.Time
 }
 
 // newFixture wires a service over fresh doubles: one active student, one cycle,
@@ -425,8 +589,9 @@ func newFixture(t *testing.T) *fixture {
 		catalog:     &fakeCatalog{},
 		publisher:   &spyPublisher{},
 	}
-	f.svc = usecase.NewFinanceService(f.repo, f.students, f.cycles, f.enrollments, f.catalog, f.publisher,
-		testTenant, seqID("id"), func() time.Time { return fixedNow })
+	f.clock = fixedNow
+	f.svc = usecase.NewFinanceService(f.repo, f.students, f.cycles, f.enrollments, f.catalog, nil, f.publisher,
+		testTenant, seqID("id"), func() time.Time { return f.clock })
 	return f
 }
 

@@ -78,6 +78,10 @@ type CycleReader interface {
 // use case's job, so the caller sees exactly what students reported.
 type EnrollmentReader interface {
 	ListByCycle(ctx context.Context, cycleID, groupID string) ([]EnrollmentRef, error)
+	// ListByStudent returns one student's enrolments across every cycle. A
+	// deposit needs it to find where the pupil sits: the group leads to the
+	// level, and the level's tuition table carries the collection rule.
+	ListByStudent(ctx context.Context, studentID string) ([]EnrollmentRef, error)
 }
 
 // PaymentRegisteredEvent announces that money was collected. Consumers (comms
@@ -159,6 +163,37 @@ type CalendarReader interface {
 	NonWorkingDays(ctx context.Context, cycleID string) (CalendarSnapshot, error)
 }
 
+// DepositWrite is everything one deposit turns into: the surcharge charges it
+// makes real, the payments that split it across debts, and what is left over.
+//
+// It is produced by a callback the repository runs INSIDE the transaction, with
+// the student's open charges already locked. Planning outside and writing inside
+// would reopen the race the lock exists to close: two cashiers taking money from
+// the same family at once would each plan against the same balance and both
+// allocate it.
+type DepositWrite struct {
+	// Surcharges are late-fee charges materialised because this money is landing
+	// on them. The daily rule is derived, not billed, so a surcharge row exists
+	// only where there was movement.
+	Surcharges []domain.Charge
+	// Allocations are the payments, each naming the charge it lands on.
+	Allocations []domain.Payment
+	// UnallocatedCents is the family's credit: money beyond what they owed.
+	UnallocatedCents int64
+}
+
+// DepositRecord is a stored deposit with what it did.
+type DepositRecord struct {
+	Deposit          domain.Deposit
+	Surcharges       []domain.Charge
+	Allocations      []domain.Payment
+	UnallocatedCents int64
+	// Settled names the charges this deposit closed. The caller announces them,
+	// and only them: a consumer that releases goods on ChargeSettled must never
+	// act on a partial payment.
+	Settled []ChargeWithPaid
+}
+
 // PaymentPublisher emits the finance domain events. Publishing is best-effort
 // and happens after the payment is durably stored: a broker outage must never
 // lose money that was already collected, so the use case ignores the returned
@@ -204,6 +239,28 @@ type FinanceRepository interface {
 	// tenant-bound query rather than a payment lookup per charge (no N+1). An
 	// empty studentID or cycleID skips that filter.
 	ListCharges(ctx context.Context, studentID, cycleID string) ([]ChargeWithPaid, error)
+	// RegisterDeposit stores money as it arrived and the payments it splits
+	// into, in ONE transaction. plan is run inside that transaction with the
+	// student's open charges locked and their collected totals already summed,
+	// so the split is decided against a balance that cannot move under it.
+	//
+	// A repeat under the same idempotency key returns what was stored the first
+	// time (replayed = true) and collects nothing: the retry a lost response
+	// provokes must not cost a family twice.
+	RegisterDeposit(ctx context.Context, d domain.Deposit,
+		plan func(open []ChargeWithPaid) (DepositWrite, error)) (DepositRecord, bool, error)
+
+	// GetDeposit returns one deposit by id, or KindNotFound.
+	GetDeposit(ctx context.Context, id string) (domain.Deposit, error)
+
+	// ListDeposits returns a student's deposits, newest first.
+	ListDeposits(ctx context.Context, studentID string) ([]domain.Deposit, error)
+
+	// VoidDeposit cancels a deposit and releases its allocations, in one
+	// transaction. The deposit row survives with its reason; the payments it
+	// created do not, so the charges they settled go back to being owed.
+	VoidDeposit(ctx context.Context, d domain.Deposit) error
+
 	// CancelChargeIfUnpaid voids a charge only if nothing was collected against
 	// it, deciding under the charge's row lock so the read cannot go stale
 	// before the write. A charge with payments is KindConflict. Automated

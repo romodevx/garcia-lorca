@@ -146,3 +146,40 @@ func fromDomainPayment(p domain.Payment) paymentModel {
 		PaidAt:         p.PaidAt(),
 	}
 }
+
+// --- deposits (M16) --------------------------------------------------------
+
+func fromDomainDeposit(d domain.Deposit) depositModel {
+	m := depositModel{
+		ID:              d.ID(),
+		TenantID:        d.TenantID(),
+		StudentID:       d.StudentID(),
+		AmountCents:     d.Amount().Int64(),
+		Method:          d.Method(),
+		Reference:       d.Reference(),
+		PaidAt:          d.PaidAt(),
+		IdempotencyKey:  d.IdempotencyKey(),
+		CalendarVersion: d.CalendarVersion(),
+		VoidReason:      d.VoidReason(),
+	}
+	if d.Voided() {
+		at := d.VoidedAt()
+		m.VoidedAt = &at
+	}
+	return m
+}
+
+func toDomainDeposit(m depositModel) (domain.Deposit, error) {
+	d, err := domain.NewDeposit(m.ID, m.TenantID, m.StudentID, m.AmountCents,
+		m.Method, m.Reference, m.PaidAt, m.IdempotencyKey, m.CalendarVersion)
+	if err != nil {
+		return domain.Deposit{}, err
+	}
+	if m.VoidedAt == nil {
+		return d, nil
+	}
+	// Rehydrate rather than Void: the constructor is for new money and
+	// deliberately cannot produce a cancelled deposit, but a stored one has to
+	// come back exactly as it was written, reason included.
+	return d.Rehydrate(*m.VoidedAt, m.VoidReason), nil
+}
