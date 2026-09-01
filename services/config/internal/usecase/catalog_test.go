@@ -34,6 +34,7 @@ type fakeCatalog struct {
 	teachers    map[string]domain.Teacher
 	assignments map[string]domain.TeachingAssignment
 	periods     map[string]domain.NonWorkingPeriod
+	events      map[string]domain.SchoolEvent
 	unique      map[string]bool // scope-qualified unique keys across all entities
 }
 
@@ -48,6 +49,7 @@ func newFake() *fakeCatalog {
 		teachers:    map[string]domain.Teacher{},
 		assignments: map[string]domain.TeachingAssignment{},
 		periods:     map[string]domain.NonWorkingPeriod{},
+		events:      map[string]domain.SchoolEvent{},
 		unique:      map[string]bool{},
 	}
 }
@@ -58,6 +60,30 @@ func (f *fakeCatalog) claim(key string) error {
 		return glerrors.ErrConflict
 	}
 	f.unique[key] = true
+	return nil
+}
+
+func (f *fakeCatalog) CreateSchoolEvent(_ context.Context, e domain.SchoolEvent) error {
+	f.events[e.ID()] = e
+	return nil
+}
+
+func (f *fakeCatalog) ListSchoolEvents(_ context.Context, cycleID string) ([]domain.SchoolEvent, error) {
+	out := make([]domain.SchoolEvent, 0, len(f.events))
+	for _, e := range f.events {
+		if e.CycleID() == cycleID {
+			out = append(out, e)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].From().Before(out[j].From()) })
+	return out, nil
+}
+
+func (f *fakeCatalog) DeleteSchoolEvent(_ context.Context, id string) error {
+	if _, ok := f.events[id]; !ok {
+		return glerrors.ErrNotFound
+	}
+	delete(f.events, id)
 	return nil
 }
 

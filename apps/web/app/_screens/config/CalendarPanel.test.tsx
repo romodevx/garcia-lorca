@@ -9,12 +9,16 @@ vi.mock("../../config/api", () => ({
   listNonWorkingPeriods: vi.fn(),
   createNonWorkingPeriod: vi.fn(),
   deleteNonWorkingPeriod: vi.fn(),
+  listSchoolEvents: vi.fn(),
+  createSchoolEvent: vi.fn(),
+  deleteSchoolEvent: vi.fn(),
 }));
 const config = vi.mocked(configApi);
 
 const cycle = { id: "c1", name: "2026-2027", status: "active" as const, startsOn: "2026-08-01", endsOn: "2027-06-30" };
 
 beforeEach(() => {
+  config.listSchoolEvents.mockResolvedValue([]);
   config.listNonWorkingPeriods.mockResolvedValue([
     { id: "per-1", cycleId: "c1", label: "Independencia", kind: "holiday", startsOn: "2026-09-16", endsOn: "2026-09-16" },
   ]);
@@ -41,7 +45,7 @@ describe("CalendarPanel", () => {
 
     await user.type(screen.getByLabelText("Nombre"), "Revolución");
     await user.type(screen.getByLabelText("Del día"), "2026-11-20");
-    await user.click(screen.getByRole("button", { name: /Agregar/ }));
+    await user.click(screen.getByRole("button", { name: /Agregar día cerrado/ }));
 
     await waitFor(() => expect(config.createNonWorkingPeriod).toHaveBeenCalled());
     const sent = config.createNonWorkingPeriod.mock.calls[0]?.[1];
@@ -56,7 +60,7 @@ describe("CalendarPanel", () => {
     await screen.findByText("Independencia");
 
     await user.type(screen.getByLabelText("Del día"), "2026-11-20");
-    await user.click(screen.getByRole("button", { name: /Agregar/ }));
+    await user.click(screen.getByRole("button", { name: /Agregar día cerrado/ }));
 
     expect(config.createNonWorkingPeriod).not.toHaveBeenCalled();
   });
@@ -70,5 +74,35 @@ describe("CalendarPanel", () => {
     await user.click(screen.getByRole("button", { name: /Quitar Independencia/ }));
 
     await waitFor(() => expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-1"));
+  });
+
+  // The agenda lives on the same screen and means something different: a
+  // festival on the 10th does not mean nobody could pay on the 10th.
+  it("adds an activity without closing the school", async () => {
+    const user = userEvent.setup();
+    config.createSchoolEvent.mockResolvedValue({
+      id: "ev-1", cycleId: "c1", title: "Festival de primavera",
+      description: "", startsOn: "2026-09-20", endsOn: "2026-09-20",
+    });
+    render(<CalendarPanel cycle={cycle} />);
+    await screen.findByText("Independencia");
+
+    await user.type(screen.getByLabelText("Actividad"), "Festival de primavera");
+    await user.type(screen.getByLabelText("Fecha"), "2026-09-20");
+    await user.click(screen.getByRole("button", { name: /Agregar actividad/ }));
+
+    await waitFor(() => expect(config.createSchoolEvent).toHaveBeenCalled());
+    // And it never touches the closed days, which are what move a due date.
+    expect(config.createNonWorkingPeriod).not.toHaveBeenCalled();
+  });
+
+  it("lists the agenda beside the closed days", async () => {
+    config.listSchoolEvents.mockResolvedValue([
+      { id: "ev-1", cycleId: "c1", title: "Junta de padres", description: "", startsOn: "2026-09-10", endsOn: "2026-09-10" },
+    ]);
+    render(<CalendarPanel cycle={cycle} />);
+
+    expect(await screen.findByText("Junta de padres")).toBeInTheDocument();
+    expect(screen.getByText("Independencia")).toBeInTheDocument();
   });
 });

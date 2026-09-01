@@ -52,10 +52,12 @@ type tuitionPlanModel struct {
 	// is divided into equal monthly parts. Raw bytes and not a JSON helper type:
 	// one column does not justify pulling a driver for another database into a
 	// Postgres service.
-	Schedule  []byte    `gorm:"column:schedule;type:jsonb"`
-	Active    bool      `gorm:"column:active"`
-	CreatedAt time.Time `gorm:"column:created_at"`
-	UpdatedAt time.Time `gorm:"column:updated_at"`
+	Schedule []byte `gorm:"column:schedule;type:jsonb"`
+	// MonthlyDiscountCents comes off every month of this level.
+	MonthlyDiscountCents int64     `gorm:"column:monthly_discount_cents"`
+	Active               bool      `gorm:"column:active"`
+	CreatedAt            time.Time `gorm:"column:created_at"`
+	UpdatedAt            time.Time `gorm:"column:updated_at"`
 }
 
 func (tuitionPlanModel) TableName() string { return "tuition_plans" }

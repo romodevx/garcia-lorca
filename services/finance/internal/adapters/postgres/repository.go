@@ -834,6 +834,7 @@ func (r *Repository) UpsertTuitionPlan(ctx context.Context, p domain.TuitionPlan
 				"first_billed_month", "due_day", "late_fee_cents", "active", "updated_at",
 				"late_fee_daily_cents", "late_fee_mode", "surcharge_counts_all_days",
 				"early_payment_cents", "early_payment_days", "schedule",
+				"monthly_discount_cents",
 			}),
 		}).Create(&model).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "storing the tuition table", err)

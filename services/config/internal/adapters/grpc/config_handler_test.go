@@ -39,6 +39,7 @@ type fakeCatalog struct {
 	teachers    map[string]domain.Teacher
 	assignments map[string]domain.TeachingAssignment
 	periods     []domain.NonWorkingPeriod
+	events      []domain.SchoolEvent
 	unique      map[string]bool
 }
 
@@ -62,6 +63,31 @@ func (f *fakeCatalog) claim(key string) error {
 	}
 	f.unique[key] = true
 	return nil
+}
+
+func (f *fakeCatalog) CreateSchoolEvent(_ context.Context, e domain.SchoolEvent) error {
+	f.events = append(f.events, e)
+	return nil
+}
+
+func (f *fakeCatalog) ListSchoolEvents(_ context.Context, cycleID string) ([]domain.SchoolEvent, error) {
+	out := make([]domain.SchoolEvent, 0, len(f.events))
+	for _, e := range f.events {
+		if e.CycleID() == cycleID {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeCatalog) DeleteSchoolEvent(_ context.Context, id string) error {
+	for i, e := range f.events {
+		if e.ID() == id {
+			f.events = append(f.events[:i], f.events[i+1:]...)
+			return nil
+		}
+	}
+	return glerrors.ErrNotFound
 }
 
 func (f *fakeCatalog) CreateNonWorkingPeriod(_ context.Context, p domain.NonWorkingPeriod) error {

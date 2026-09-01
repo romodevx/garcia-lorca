@@ -35,7 +35,8 @@ func toDomainPlan(m tuitionPlanModel) (domain.TuitionPlan, error) {
 		EnrollmentCents: m.EnrollmentCents, MonthlyCents: m.MonthlyCents,
 		Months: m.Months, FirstBilledMonth: m.FirstBilledMonth,
 		DueDay: m.DueDay, LateFeeCents: m.LateFeeCents, Active: m.Active,
-		Schedule: schedule,
+		Schedule:             schedule,
+		MonthlyDiscountCents: m.MonthlyDiscountCents,
 		Policy: domain.CollectionPolicy{
 			// A row written before M16 has mode 'monthly' by default, so it keeps
 			// meaning exactly what it meant when it was billed.
@@ -61,6 +62,7 @@ func fromDomainPlan(p domain.TuitionPlan) tuitionPlanModel {
 		EarlyPaymentCents:      p.Policy().EarlyPaymentCents,
 		EarlyPaymentDays:       p.Policy().EarlyPaymentDays,
 		Schedule:               scheduleFromDomain(p.Schedule()),
+		MonthlyDiscountCents:   p.MonthlyDiscountCents(),
 	}
 }
 

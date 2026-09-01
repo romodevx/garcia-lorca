@@ -685,6 +685,13 @@ export interface TuitionPlan {
    * the year is divided into equal parts, which is what most schools do.
    */
   schedule: Installment[];
+  /**
+   * A fixed amount off every month of this level — the school's arrangement for
+   * maternal, or for any level it prices differently. Set once here rather than
+   * typed per pupil, which is the difference between a rule and four hundred
+   * chances to mistype it.
+   */
+  monthlyDiscountCents: number;
 }
 
 /**
@@ -750,9 +757,14 @@ export async function upsertTuitionPlan(baseURL: string, input: TuitionPlanInput
  * must not read as "daily surcharge of nothing".
  */
 export async function listTuitionPlans(baseURL: string, cycleId: string): Promise<TuitionPlan[]> {
-  const plans = await getList<Partial<TuitionPlan> & Omit<TuitionPlan, "policy" | "schedule">>(
+  const plans = await getList<Partial<TuitionPlan> & Omit<TuitionPlan, "policy" | "schedule" | "monthlyDiscountCents">>(
     baseURL, `/tuition-plans?cycleId=${encodeURIComponent(cycleId)}`, "plans");
-  return plans.map((p) => ({ ...p, policy: p.policy ?? emptyPolicy(), schedule: p.schedule ?? [] }));
+  return plans.map((p) => ({
+    ...p,
+    policy: p.policy ?? emptyPolicy(),
+    schedule: p.schedule ?? [],
+    monthlyDiscountCents: p.monthlyDiscountCents ?? 0,
+  }));
 }
 
 function emptyPolicy(): CollectionPolicy {

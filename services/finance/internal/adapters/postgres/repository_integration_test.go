@@ -52,6 +52,7 @@ var migrationFiles = []string{
 	"../../../../../migrations/finance/0008_discount_reason.sql",
 	"../../../../../migrations/finance/0009_card_type.sql",
 	"../../../../../migrations/finance/0010_tuition_schedule.sql",
+	"../../../../../migrations/finance/0011_level_discount.sql",
 }
 
 var (

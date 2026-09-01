@@ -438,6 +438,65 @@ func toNonWorkingPeriod(p *configv1.NonWorkingPeriod) NonWorkingPeriod {
 	}
 }
 
+// --- school agenda (M16) ---------------------------------------------------
+
+// SchoolEvent is something the school DOES, as opposed to a day it is shut. The
+// distinction is not cosmetic: a closed day moves a due date and an event never
+// may.
+type SchoolEvent struct {
+	ID          string `json:"id"`
+	CycleID     string `json:"cycleId"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	StartsOn    string `json:"startsOn"`
+	EndsOn      string `json:"endsOn"`
+	// At most one is set; neither means the whole school.
+	LevelID string `json:"levelId,omitempty"`
+	GroupID string `json:"groupId,omitempty"`
+}
+
+// CreateSchoolEvent records something the school does.
+func (c *ConfigClient) CreateSchoolEvent(ctx context.Context, in SchoolEvent) (SchoolEvent, error) {
+	res, err := c.rpc.CreateSchoolEvent(ctx, connect.NewRequest(&configv1.CreateSchoolEventRequest{
+		CycleId: in.CycleID, Title: in.Title, Description: in.Description,
+		StartsOn: in.StartsOn, EndsOn: in.EndsOn,
+		LevelId: in.LevelID, GroupId: in.GroupID,
+	}))
+	if err != nil {
+		return SchoolEvent{}, err
+	}
+	return toSchoolEvent(res.Msg.GetEvent()), nil
+}
+
+// ListSchoolEvents returns a cycle's agenda, earliest first.
+func (c *ConfigClient) ListSchoolEvents(ctx context.Context, cycleID string) ([]SchoolEvent, error) {
+	res, err := c.rpc.ListSchoolEvents(ctx, connect.NewRequest(&configv1.ListSchoolEventsRequest{
+		CycleId: cycleID,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SchoolEvent, 0, len(res.Msg.GetEvents()))
+	for _, e := range res.Msg.GetEvents() {
+		out = append(out, toSchoolEvent(e))
+	}
+	return out, nil
+}
+
+// DeleteSchoolEvent removes one event.
+func (c *ConfigClient) DeleteSchoolEvent(ctx context.Context, id string) error {
+	_, err := c.rpc.DeleteSchoolEvent(ctx, connect.NewRequest(&configv1.DeleteSchoolEventRequest{Id: id}))
+	return err
+}
+
+func toSchoolEvent(e *configv1.SchoolEvent) SchoolEvent {
+	return SchoolEvent{
+		ID: e.GetId(), CycleID: e.GetCycleId(), Title: e.GetTitle(),
+		Description: e.GetDescription(), StartsOn: e.GetStartsOn(), EndsOn: e.GetEndsOn(),
+		LevelID: e.GetLevelId(), GroupID: e.GetGroupId(),
+	}
+}
+
 // --- teaching_assignments -------------------------------------------------
 
 // CreateTeachingAssignment binds a teacher to a (group, subject). The config

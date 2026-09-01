@@ -171,3 +171,35 @@ func TestDailyModeRequiresARate(t *testing.T) {
 		t.Fatal("a daily plan with no rate was accepted")
 	}
 }
+
+// The school gives maternal a discount, and any level may have one. It is a
+// fixed amount off each month, set once on the tuition table rather than typed
+// per pupil per month — which is the difference between a rule and four hundred
+// chances to mistype it.
+func TestAPlanCanCarryALevelDiscount(t *testing.T) {
+	plan, err := domain.NewTuitionPlan(domain.TuitionPlanSpec{
+		ID: "tp-1", TenantID: "t1", CycleID: "c1", LevelID: "lv-maternal",
+		EnrollmentCents: 200000, MonthlyCents: 320000, Months: 11,
+		FirstBilledMonth: 9, DueDay: 10, Active: true,
+		MonthlyDiscountCents: 50000,
+	})
+	if err != nil {
+		t.Fatalf("NewTuitionPlan: %v", err)
+	}
+	if plan.MonthlyDiscountCents() != 50000 {
+		t.Errorf("discount = %d, want 50000", plan.MonthlyDiscountCents())
+	}
+}
+
+// A discount bigger than the month is a charge that owes negative money. The
+// database would refuse it; the domain says which number is wrong.
+func TestALevelDiscountCannotExceedTheMonth(t *testing.T) {
+	_, err := domain.NewTuitionPlan(domain.TuitionPlanSpec{
+		ID: "tp-1", TenantID: "t1", CycleID: "c1", LevelID: "lv-1",
+		MonthlyCents: 320000, Months: 11, FirstBilledMonth: 9, DueDay: 10, Active: true,
+		MonthlyDiscountCents: 400000,
+	})
+	if glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("discount over the month: want KindInvalid, got %v", err)
+	}
+}

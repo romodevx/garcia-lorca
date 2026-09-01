@@ -40,6 +40,9 @@ type TuitionPlanInput struct {
 	// Schedule replaces the uniform monthly payment with named amounts per
 	// month. Empty keeps the uniform year.
 	Schedule []domain.Installment
+	// MonthlyDiscountCents comes off every month of this level — the school's
+	// arrangement for maternal, or for any level it prices differently.
+	MonthlyDiscountCents int64
 }
 
 // BillingResult is what a run did. Skipped counts the charges that already
@@ -69,8 +72,9 @@ func (s *FinanceService) UpsertTuitionPlan(ctx context.Context, in TuitionPlanIn
 		EnrollmentCents: in.EnrollmentCents, MonthlyCents: in.MonthlyCents,
 		Months: in.Months, FirstBilledMonth: in.FirstBilledMonth,
 		DueDay: in.DueDay, LateFeeCents: in.LateFeeCents, Active: in.Active,
-		Policy:   in.Policy,
-		Schedule: in.Schedule,
+		Policy:               in.Policy,
+		Schedule:             in.Schedule,
+		MonthlyDiscountCents: in.MonthlyDiscountCents,
 	})
 	if err != nil {
 		return domain.TuitionPlan{}, err
@@ -204,6 +208,15 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 			})
 			if err != nil {
 				return BillingResult{}, err
+			}
+			if d := plan.MonthlyDiscountCents(); d > 0 {
+				// The level's standing arrangement, applied by the run so nobody
+				// types it per pupil. It says why, so a parent asking is
+				// answered by the row itself.
+				monthly, err = monthly.WithDiscount(d, 0, domain.ReasonLevelDiscount)
+				if err != nil {
+					return BillingResult{}, err
+				}
 			}
 			wantedTuition = append(wantedTuition, monthly)
 		}

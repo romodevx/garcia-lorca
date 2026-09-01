@@ -687,6 +687,92 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
 
+  /api/v1/config/events:
+    get:
+      tags: [config]
+      summary: The school's agenda
+      description: >
+        What the school DOES: festivals, parents' meetings, exam weeks. A
+        different list from the closed days, and deliberately so — finance reads
+        the closed days to move a due date and stop a surcharge, and an activity
+        must never do either. A festival on the 10th does not mean nobody could
+        pay on the 10th.
+      operationId: listSchoolEvents
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: cycleId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The cycle's agenda, earliest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: '#/components/schemas/SchoolEvent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+    post:
+      tags: [config]
+      summary: Put something on the agenda
+      description: >
+        A one-day event needs only startsOn. The audience is one level, one
+        group, or — with neither — the whole school.
+      operationId: createSchoolEvent
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cycleId, title, startsOn]
+              properties:
+                cycleId: { type: string, format: uuid }
+                title: { type: string, minLength: 1, maxLength: 120 }
+                description: { type: string, maxLength: 500 }
+                startsOn: { type: string, format: date }
+                endsOn: { type: string, format: date }
+                levelId: { type: string, format: uuid }
+                groupId: { type: string, format: uuid }
+      responses:
+        '201':
+          description: The stored event.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SchoolEvent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
+  /api/v1/config/events/{id}:
+    delete:
+      tags: [config]
+      summary: Take something off the agenda
+      operationId: deleteSchoolEvent
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      responses:
+        '204': { description: Removed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
   /api/v1/config/calendar:
     get:
       tags: [config]
@@ -1280,6 +1366,24 @@ components:
         hasAccount:
           type: boolean
           description: Whether this contact can open the family app.
+
+    SchoolEvent:
+      type: object
+      description: >
+        Something the school DOES, as opposed to a day it is shut. Both ends
+        inclusive; a one-day event has startsOn == endsOn. levelId and groupId
+        are the audience — at most one is set, and neither means the whole
+        school.
+      required: [id, cycleId, title, startsOn, endsOn]
+      properties:
+        id: { type: string, format: uuid }
+        cycleId: { type: string, format: uuid }
+        title: { type: string, example: Festival de primavera }
+        description: { type: string }
+        startsOn: { type: string, format: date }
+        endsOn: { type: string, format: date }
+        levelId: { type: string, format: uuid }
+        groupId: { type: string, format: uuid }
 
     NonWorkingPeriod:
       type: object

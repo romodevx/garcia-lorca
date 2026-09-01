@@ -190,3 +190,36 @@ func fromDomainNonWorkingPeriod(p domain.NonWorkingPeriod) nonWorkingPeriodModel
 func toDomainNonWorkingPeriod(m nonWorkingPeriodModel) (domain.NonWorkingPeriod, error) {
 	return domain.NewNonWorkingPeriod(m.ID, m.TenantID, m.CycleID, m.Label, m.Kind, m.StartsOn, m.EndsOn)
 }
+
+// --- school events (M16) ---------------------------------------------------
+
+func fromDomainSchoolEvent(e domain.SchoolEvent) schoolEventModel {
+	m := schoolEventModel{
+		ID:          e.ID(),
+		TenantID:    e.TenantID(),
+		CycleID:     e.CycleID(),
+		Title:       e.Title(),
+		Description: e.Description(),
+		StartsOn:    e.From(),
+		EndsOn:      e.To(),
+	}
+	if id := e.Audience().LevelID; id != "" {
+		m.LevelID = &id
+	}
+	if id := e.Audience().GroupID; id != "" {
+		m.GroupID = &id
+	}
+	return m
+}
+
+func toDomainSchoolEvent(m schoolEventModel) (domain.SchoolEvent, error) {
+	audience := domain.EventAudience{}
+	if m.LevelID != nil {
+		audience.LevelID = *m.LevelID
+	}
+	if m.GroupID != nil {
+		audience.GroupID = *m.GroupID
+	}
+	return domain.NewSchoolEvent(m.ID, m.TenantID, m.CycleID, m.Title, m.Description,
+		m.StartsOn, m.EndsOn, audience)
+}

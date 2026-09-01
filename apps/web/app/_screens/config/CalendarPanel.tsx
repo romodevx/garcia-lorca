@@ -5,11 +5,15 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactElement } f
 import { Btn } from "../../_design/Controls";
 import {
   createNonWorkingPeriod,
+  createSchoolEvent,
   deleteNonWorkingPeriod,
+  deleteSchoolEvent,
   listNonWorkingPeriods,
+  listSchoolEvents,
   type Cycle,
   type NonWorkingKind,
   type NonWorkingPeriod,
+  type SchoolEvent,
 } from "../../config/api";
 import { EmptyHint, ErrorAlert, Section, TextField } from "./parts";
 
@@ -37,6 +41,10 @@ export interface CalendarPanelProps {
  */
 export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
   const [periods, setPeriods] = useState<NonWorkingPeriod[]>([]);
+  const [events, setEvents] = useState<SchoolEvent[]>([]);
+  const [eventTitle, setEventTitle] = useState("");
+  const [eventFrom, setEventFrom] = useState("");
+  const [eventTo, setEventTo] = useState("");
   const [label, setLabel] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -48,6 +56,9 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
     listNonWorkingPeriods(API_URL, cycle.id)
       .then(setPeriods)
       .catch(() => setError("No pudimos cargar el calendario."));
+    listSchoolEvents(API_URL, cycle.id)
+      .then(setEvents)
+      .catch(() => setError("No pudimos cargar la agenda."));
   }, [cycle.id]);
 
   useEffect(reload, [reload]);
@@ -77,6 +88,41 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
       setError(cause instanceof Error ? cause.message : "No se pudo agregar.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const addEvent = async (e: FormEvent): Promise<void> => {
+    e.preventDefault();
+    if (eventTitle.trim() === "" || eventFrom.trim() === "") {
+      setError("Una actividad necesita nombre y fecha.");
+      return;
+    }
+    setSaving(true);
+    setError(undefined);
+    try {
+      await createSchoolEvent(API_URL, {
+        cycleId: cycle.id,
+        title: eventTitle.trim(),
+        startsOn: eventFrom.trim(),
+        ...(eventTo.trim() !== "" ? { endsOn: eventTo.trim() } : {}),
+      });
+      setEventTitle("");
+      setEventFrom("");
+      setEventTo("");
+      reload();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "No se pudo agregar la actividad.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeEvent = async (event: SchoolEvent): Promise<void> => {
+    try {
+      await deleteSchoolEvent(API_URL, event.id);
+      reload();
+    } catch {
+      setError("No se pudo quitar esa actividad.");
     }
   };
 
@@ -131,8 +177,44 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
             );
           })}
         </div>
-        <Btn type="submit" icon="plus" style={{ opacity: saving ? 0.5 : 1 }}>Agregar</Btn>
+        <Btn type="submit" icon="plus" style={{ opacity: saving ? 0.5 : 1 }}>Agregar día cerrado</Btn>
       </form>
+      <div style={{ borderTop: "1px solid var(--border)", marginTop: 22, paddingTop: 18 }}>
+        <p style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>Actividades</p>
+        <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 2, marginBottom: 12 }}>
+          Lo que hace la escuela: juntas, festivales, semanas de exámenes.
+          A diferencia de los días cerrados, <b>no mueven fechas de pago</b>.
+        </p>
+
+        {events.length === 0 && <EmptyHint>Todavía no hay actividades en la agenda.</EmptyHint>}
+        {events.length > 0 && (
+          <div style={{ borderRadius: "var(--r-md)", border: "1px solid var(--border)", overflow: "hidden", marginBottom: 16 }}>
+            {events.map((ev) => (
+              <div key={ev.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 16px", borderTop: "1px solid var(--border)" }}>
+                <span style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{ev.title}</span>
+                <span style={{ fontSize: 13.5, color: "var(--text-muted)" }}>
+                  {ev.startsOn === ev.endsOn ? ev.startsOn : `${ev.startsOn} → ${ev.endsOn}`}
+                </span>
+                <div style={{ flex: 1 }} />
+                <button
+                  onClick={() => void removeEvent(ev)}
+                  aria-label={`Quitar ${ev.title}`}
+                  style={{ background: "transparent", border: "none", color: "var(--text-muted)", fontSize: 13.5, fontWeight: 600, cursor: "pointer" }}>
+                  Quitar
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <form onSubmit={(e) => void addEvent(e)} style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div style={{ flex: "2 1 200px" }}><TextField label="Actividad" value={eventTitle} onChange={setEventTitle} placeholder="Festival de primavera" /></div>
+          <div style={{ flex: "1 1 150px" }}><TextField label="Fecha" value={eventFrom} onChange={setEventFrom} placeholder="2026-09-20" /></div>
+          <div style={{ flex: "1 1 150px" }}><TextField label="Hasta (opcional)" value={eventTo} onChange={setEventTo} placeholder="2026-09-22" /></div>
+          <Btn type="submit" icon="plus" style={{ opacity: saving ? 0.5 : 1 }}>Agregar actividad</Btn>
+        </form>
+      </div>
+
       {error !== undefined && <ErrorAlert message={error} />}
     </Section>
   );

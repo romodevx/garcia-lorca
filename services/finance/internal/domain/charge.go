@@ -178,6 +178,10 @@ const (
 	// later nobody could tell an automatic discount from a decision somebody
 	// made at the counter.
 	ReasonEarlyPaymentGranted = "pronto_pago_autorizado"
+	// ReasonLevelDiscount is the school's standing arrangement for a whole
+	// level — maternal, most often. Set once on the tuition table and applied by
+	// the billing run, never typed per pupil.
+	ReasonLevelDiscount = "descuento_nivel"
 )
 
 // DiscountReason is why the charge carries the discount it does. Empty on the

@@ -48,6 +48,9 @@ type TuitionPlanSpec struct {
 	// Schedule replaces the uniform monthly payment with named amounts per
 	// month. Empty keeps the uniform schedule.
 	Schedule []Installment
+	// MonthlyDiscountCents comes off every month of this level. Zero is no
+	// discount, which is what most levels have.
+	MonthlyDiscountCents int64
 }
 
 // Installment is one payment of the year: which calendar month it falls in and
@@ -90,11 +93,12 @@ type TuitionPlan struct {
 	months           int
 	firstBilledMonth int
 
-	dueDay       int
-	lateFeeCents int64
-	policy       CollectionPolicy
-	schedule     []Installment
-	active       bool
+	dueDay               int
+	lateFeeCents         int64
+	policy               CollectionPolicy
+	schedule             []Installment
+	monthlyDiscountCents int64
+	active               bool
 }
 
 // NewTuitionPlan validates a school's statement of what a level costs.
@@ -128,6 +132,14 @@ func NewTuitionPlan(spec TuitionPlanSpec) (TuitionPlan, error) {
 	if spec.Policy.LateFeeDailyCents < 0 || spec.Policy.EarlyPaymentCents < 0 || spec.Policy.EarlyPaymentDays < 0 {
 		return TuitionPlan{}, glerrors.New(glerrors.KindInvalid, "an amount cannot be negative")
 	}
+	if spec.MonthlyDiscountCents < 0 {
+		return TuitionPlan{}, glerrors.New(glerrors.KindInvalid, "a discount cannot be negative")
+	}
+	if spec.MonthlyDiscountCents > spec.MonthlyCents {
+		// A charge that owes negative money would pay for itself and then some.
+		return TuitionPlan{}, glerrors.New(glerrors.KindInvalid,
+			"the discount cannot be bigger than the month it comes off")
+	}
 	for _, i := range spec.Schedule {
 		if i.Month < 1 || i.Month > 12 {
 			return TuitionPlan{}, glerrors.New(glerrors.KindInvalid, "a payment must fall in a month from 1 to 12")
@@ -144,8 +156,9 @@ func NewTuitionPlan(spec TuitionPlanSpec) (TuitionPlan, error) {
 		enrollmentCents: spec.EnrollmentCents, monthlyCents: spec.MonthlyCents,
 		months: spec.Months, firstBilledMonth: spec.FirstBilledMonth,
 		dueDay: spec.DueDay, lateFeeCents: spec.LateFeeCents, active: spec.Active,
-		policy:   spec.Policy,
-		schedule: spec.Schedule,
+		policy:               spec.Policy,
+		schedule:             spec.Schedule,
+		monthlyDiscountCents: spec.MonthlyDiscountCents,
 	}, nil
 }
 
@@ -208,6 +221,12 @@ func (p TuitionPlan) BilledMonths(cycleStart time.Time) []time.Time {
 	}
 	return out
 }
+
+// MonthlyDiscountCents is what comes off every month of this level — the
+// school's arrangement for maternal, or for any level it decides to price
+// differently. It is set once on the table rather than typed per pupil, which
+// is the difference between a rule and four hundred chances to mistype it.
+func (p TuitionPlan) MonthlyDiscountCents() int64 { return p.monthlyDiscountCents }
 
 // Schedule is the plan's explicit payment plan, empty when the year is divided
 // into equal monthly parts.

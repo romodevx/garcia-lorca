@@ -511,17 +511,18 @@ func connectErr(err error) *connect.Error {
 func (h *FinanceHandler) UpsertTuitionPlan(ctx context.Context, req *connect.Request[financev1.UpsertTuitionPlanRequest]) (*connect.Response[financev1.UpsertTuitionPlanResponse], error) {
 	m := req.Msg
 	plan, err := h.finance.UpsertTuitionPlan(ctx, usecase.TuitionPlanInput{
-		CycleID:          m.GetCycleId(),
-		LevelID:          m.GetLevelId(),
-		EnrollmentCents:  m.GetEnrollmentCents(),
-		MonthlyCents:     m.GetMonthlyCents(),
-		Months:           int(m.GetMonths()),
-		FirstBilledMonth: int(m.GetFirstBilledMonth()),
-		DueDay:           int(m.GetDueDay()),
-		LateFeeCents:     m.GetLateFeeCents(),
-		Active:           m.GetActive(),
-		Policy:           toDomainPolicy(m.GetPolicy()),
-		Schedule:         toDomainSchedule(m.GetSchedule()),
+		CycleID:              m.GetCycleId(),
+		LevelID:              m.GetLevelId(),
+		EnrollmentCents:      m.GetEnrollmentCents(),
+		MonthlyCents:         m.GetMonthlyCents(),
+		Months:               int(m.GetMonths()),
+		FirstBilledMonth:     int(m.GetFirstBilledMonth()),
+		DueDay:               int(m.GetDueDay()),
+		LateFeeCents:         m.GetLateFeeCents(),
+		Active:               m.GetActive(),
+		Policy:               toDomainPolicy(m.GetPolicy()),
+		Schedule:             toDomainSchedule(m.GetSchedule()),
+		MonthlyDiscountCents: m.GetMonthlyDiscountCents(),
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -561,19 +562,20 @@ func (h *FinanceHandler) RunBilling(ctx context.Context, req *connect.Request[fi
 // toProtoPlan maps a domain TuitionPlan to its proto message.
 func toProtoPlan(p domain.TuitionPlan) *financev1.TuitionPlan {
 	return &financev1.TuitionPlan{
-		Id:               p.ID(),
-		TenantId:         p.TenantID(),
-		CycleId:          p.CycleID(),
-		LevelId:          p.LevelID(),
-		EnrollmentCents:  p.EnrollmentCents(),
-		MonthlyCents:     p.MonthlyCents(),
-		Months:           int32(p.Months()),
-		FirstBilledMonth: int32(p.FirstBilledMonth()),
-		DueDay:           int32(p.DueDay()),
-		LateFeeCents:     p.LateFeeCents(),
-		Active:           p.Active(),
-		Policy:           toProtoPolicy(p.Policy()),
-		Schedule:         toProtoSchedule(p.Schedule()),
+		Id:                   p.ID(),
+		TenantId:             p.TenantID(),
+		CycleId:              p.CycleID(),
+		LevelId:              p.LevelID(),
+		EnrollmentCents:      p.EnrollmentCents(),
+		MonthlyCents:         p.MonthlyCents(),
+		Months:               int32(p.Months()),
+		FirstBilledMonth:     int32(p.FirstBilledMonth()),
+		DueDay:               int32(p.DueDay()),
+		LateFeeCents:         p.LateFeeCents(),
+		Active:               p.Active(),
+		Policy:               toProtoPolicy(p.Policy()),
+		Schedule:             toProtoSchedule(p.Schedule()),
+		MonthlyDiscountCents: p.MonthlyDiscountCents(),
 	}
 }
 

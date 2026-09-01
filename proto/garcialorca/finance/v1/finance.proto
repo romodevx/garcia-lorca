@@ -448,6 +448,11 @@ message TuitionPlan {
   // An explicit payment plan, replacing the uniform monthly amount. Empty means
   // the year is divided into equal parts, which is what most schools do.
   repeated Installment schedule = 13;
+  // A fixed amount off every month of this level — the school's arrangement for
+  // maternal, or for any level it prices differently. Set once here rather than
+  // typed per pupil, which is the difference between a rule and four hundred
+  // chances to mistype it.
+  int64 monthly_discount_cents = 14;
 }
 
 // Installment is one payment of the year: the calendar month it falls in and
@@ -495,6 +500,7 @@ message UpsertTuitionPlanRequest {
   bool active = 9;
   CollectionPolicy policy = 10;
   repeated Installment schedule = 11;
+  int64 monthly_discount_cents = 12;
 }
 
 message UpsertTuitionPlanResponse {

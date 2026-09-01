@@ -304,3 +304,72 @@ func TestADueDateOnAClosedDayMovesToTheNextWorkingDay(t *testing.T) {
 		t.Errorf("October fell due on the %d, want the 13th — the first day the school was open", october.Day())
 	}
 }
+
+// The school's arrangement for maternal: a fixed amount off every month of that
+// level. It is set once on the tuition table, and the run applies it to every
+// pupil in the level without anybody typing it four hundred times.
+func TestALevelDiscountComesOffEveryMonth(t *testing.T) {
+	f := billingFixture(t)
+	if _, err := f.svc.UpsertTuitionPlan(context.Background(), usecase.TuitionPlanInput{
+		CycleID: testCycle, LevelID: testLevel,
+		EnrollmentCents: 50000, MonthlyCents: 320000,
+		Months: 10, FirstBilledMonth: 9, DueDay: 10, Active: true,
+		MonthlyDiscountCents: 50000,
+	}); err != nil {
+		t.Fatalf("seed plan: %v", err)
+	}
+
+	runOn(t, f, "2026-09-15")
+
+	charges, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	if err != nil {
+		t.Fatalf("ListCharges: %v", err)
+	}
+	tuition := f.repo.conceptIDOfKind(domain.KindTuition)
+	var discounted, months int
+	for _, c := range charges {
+		if c.Charge.ConceptID() != tuition {
+			continue
+		}
+		months++
+		if c.Charge.Discount().Int64() == 50000 && c.Charge.Effective().Int64() == 270000 {
+			discounted++
+		}
+	}
+	if months == 0 || discounted != months {
+		t.Errorf("%d of %d months carry the level discount, want all of them", discounted, months)
+	}
+	// And it says why, so a parent asking is answered by the row itself.
+	for _, c := range charges {
+		if c.Charge.ConceptID() == tuition && c.Charge.DiscountReason() != domain.ReasonLevelDiscount {
+			t.Errorf("discount reason = %q, want the level arrangement", c.Charge.DiscountReason())
+			break
+		}
+	}
+}
+
+// The inscription is not a month, so a monthly discount does not touch it.
+func TestALevelDiscountDoesNotTouchTheInscription(t *testing.T) {
+	f := billingFixture(t)
+	if _, err := f.svc.UpsertTuitionPlan(context.Background(), usecase.TuitionPlanInput{
+		CycleID: testCycle, LevelID: testLevel,
+		EnrollmentCents: 50000, MonthlyCents: 320000,
+		Months: 10, FirstBilledMonth: 9, DueDay: 10, Active: true,
+		MonthlyDiscountCents: 50000,
+	}); err != nil {
+		t.Fatalf("seed plan: %v", err)
+	}
+
+	runOn(t, f, "2026-09-15")
+
+	charges, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	if err != nil {
+		t.Fatalf("ListCharges: %v", err)
+	}
+	enrollment := f.repo.conceptIDOfKind(domain.KindEnrollment)
+	for _, c := range charges {
+		if c.Charge.ConceptID() == enrollment && c.Charge.Discount().Int64() != 0 {
+			t.Errorf("the inscription was discounted by %d", c.Charge.Discount().Int64())
+		}
+	}
+}

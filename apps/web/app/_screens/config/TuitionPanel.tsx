@@ -276,6 +276,9 @@ function PlanForm({
   // An explicit payment plan, written as "9:1000, 12:500, 3:1500" — month and
   // amount. Empty keeps the equal year, which is what most schools want.
   const [schedule, setSchedule] = useState(scheduleToText(plan?.schedule ?? []));
+  // The school's standing arrangement for this level — maternal, most often.
+  const [levelDiscount, setLevelDiscount] = useState(
+    plan === undefined || plan.monthlyDiscountCents === 0 ? "" : centsToPesos(plan.monthlyDiscountCents));
   const [error, setError] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState(false);
 
@@ -316,6 +319,13 @@ function PlanForm({
       setError(`Los días de pronto pago van de 0 a ${MAX_DUE_DAY}.`);
       return;
     }
+    const discountCents = pesosToCents(levelDiscount) ?? 0;
+    if (discountCents > monthlyCents) {
+      // The same rule the database enforces. A charge that owes negative money
+      // would pay for itself and then some.
+      setError("El descuento no puede ser mayor que la colegiatura del mes.");
+      return;
+    }
     const plan = textToSchedule(schedule);
     if (plan === null) {
       setError("Las cuotas se escriben mes:monto, por ejemplo 9:3200, 12:1600, 3:4800.");
@@ -338,6 +348,7 @@ function PlanForm({
         lateFeeCents: pesosToCents(lateFee) ?? 0,
         active: true,
         schedule: plan,
+        monthlyDiscountCents: discountCents,
         policy: {
           dailyMode,
           lateFeeDailyCents: dailyCents,
@@ -390,6 +401,7 @@ function PlanForm({
           <TextField label="Recargo por día" value={dailyFee} onChange={setDailyFee} placeholder="10" />
           <TextField label="Pronto pago (monto)" value={earlyAmount} onChange={setEarlyAmount} placeholder="100" />
           <TextField label="Pronto pago (días hábiles)" value={earlyDays} onChange={setEarlyDays} placeholder="5" />
+          <TextField label="Descuento del nivel (por mes)" value={levelDiscount} onChange={setLevelDiscount} placeholder="500" />
         </div>
         <label style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, cursor: "pointer" }}>
           <input

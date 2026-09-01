@@ -31,6 +31,11 @@ type fakeConfig struct {
 	periodsCycle  string
 	deletedPeriod string
 
+	eventIn      client.SchoolEvent
+	events       []client.SchoolEvent
+	eventsCycle  string
+	deletedEvent string
+
 	gradeLevelIn   client.CreateGradeLevelInput
 	gradeLevels    []client.GradeLevelResult
 	gradeLevelsFor string // captured level_id filter on list
@@ -63,6 +68,26 @@ type fakeConfig struct {
 	asgTeacher    string
 
 	err error
+}
+
+func (f *fakeConfig) CreateSchoolEvent(_ context.Context, in client.SchoolEvent) (client.SchoolEvent, error) {
+	f.eventIn = in
+	if f.err != nil {
+		return client.SchoolEvent{}, f.err
+	}
+	out := in
+	out.ID = "ev-1"
+	return out, nil
+}
+
+func (f *fakeConfig) ListSchoolEvents(_ context.Context, cycleID string) ([]client.SchoolEvent, error) {
+	f.eventsCycle = cycleID
+	return f.events, f.err
+}
+
+func (f *fakeConfig) DeleteSchoolEvent(_ context.Context, id string) error {
+	f.deletedEvent = id
+	return f.err
 }
 
 func (f *fakeConfig) CreateNonWorkingPeriod(_ context.Context, cycleID, label, kind, startsOn, endsOn string) (client.NonWorkingPeriod, error) {
@@ -533,5 +558,21 @@ func TestConfigListNonWorkingPeriodsScopesToTheCycle(t *testing.T) {
 	}
 	if svc.periodsCycle != "c1" {
 		t.Errorf("forwarded cycle = %q, want c1", svc.periodsCycle)
+	}
+}
+
+// A one-day event is entered once. Same reasoning as a single-day holiday.
+func TestConfigSingleDayEventNeedsOnlyOneDate(t *testing.T) {
+	svc := &fakeConfig{}
+	h := handler.NewConfigHandler(svc)
+
+	rec := doReq(t, h.CreateSchoolEvent, http.MethodPost, "/api/v1/config/events",
+		`{"cycleId":"c1","title":"Festival de primavera","startsOn":"2026-09-20"}`)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+	if svc.eventIn.EndsOn != "2026-09-20" {
+		t.Errorf("endsOn forwarded as %q, want the start date filled in", svc.eventIn.EndsOn)
 	}
 }

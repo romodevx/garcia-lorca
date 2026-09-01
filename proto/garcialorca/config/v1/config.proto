@@ -83,6 +83,16 @@ service ConfigService {
   // be removable, or the calendar becomes untrustworthy and stops being used.
   rpc DeleteNonWorkingPeriod(DeleteNonWorkingPeriodRequest) returns (DeleteNonWorkingPeriodResponse);
 
+  // --- school agenda (M16) ---
+  // CreateSchoolEvent records something the school DOES: a festival, a parents'
+  // meeting, an exam week. Deliberately separate from the closed days — finance
+  // reads those to move a due date, and an activity must never do that.
+  rpc CreateSchoolEvent(CreateSchoolEventRequest) returns (CreateSchoolEventResponse);
+  // ListSchoolEvents returns a cycle's agenda, earliest first.
+  rpc ListSchoolEvents(ListSchoolEventsRequest) returns (ListSchoolEventsResponse);
+  // DeleteSchoolEvent removes one event.
+  rpc DeleteSchoolEvent(DeleteSchoolEventRequest) returns (DeleteSchoolEventResponse);
+
   // --- teachers (catalog person records; NOT login accounts) ---
   // CreateTeacher adds a teacher catalog record (user_id reserved, may be empty).
   rpc CreateTeacher(CreateTeacherRequest) returns (CreateTeacherResponse);
@@ -581,3 +591,50 @@ message DeleteNonWorkingPeriodRequest {
 // DeleteNonWorkingPeriodResponse is empty: the removal either happened or the
 // call failed.
 message DeleteNonWorkingPeriodResponse {}
+
+// --- School agenda (M16) ---------------------------------------------------
+
+// SchoolEvent is something the school does. Dates are plain YYYY-MM-DD, both
+// ends inclusive, for the same reason a holiday is: a school day is a calendar
+// day, and a timestamp would invite a timezone to move it.
+//
+// level_id and group_id are the audience: at most one is set, and neither means
+// the whole school.
+message SchoolEvent {
+  string id = 1;
+  string cycle_id = 2;
+  string title = 3;
+  string description = 4;
+  string starts_on = 5;
+  string ends_on = 6;
+  string level_id = 7;
+  string group_id = 8;
+}
+
+message CreateSchoolEventRequest {
+  string cycle_id = 1;
+  string title = 2;
+  string description = 3;
+  string starts_on = 4;
+  string ends_on = 5;
+  string level_id = 6;  // optional; empty and group_id empty = whole school
+  string group_id = 7;  // optional
+}
+
+message CreateSchoolEventResponse {
+  SchoolEvent event = 1;
+}
+
+message ListSchoolEventsRequest {
+  string cycle_id = 1;
+}
+
+message ListSchoolEventsResponse {
+  repeated SchoolEvent events = 1;
+}
+
+message DeleteSchoolEventRequest {
+  string id = 1;
+}
+
+message DeleteSchoolEventResponse {}

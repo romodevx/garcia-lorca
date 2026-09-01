@@ -24,7 +24,7 @@ beforeEach(() => {
   finance.listTuitionPlans.mockResolvedValue([
     { id: "tp1", cycleId: "c1", levelId: "lv2", enrollmentCents: 500000, monthlyCents: 320000,
       months: 10, firstBilledMonth: 9, dueDay: 10, lateFeeCents: 15000, active: true,
-      policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 }, schedule: [] },
+      policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 }, schedule: [], monthlyDiscountCents: 0 },
   ]);
 });
 afterEach(() => vi.clearAllMocks());
@@ -64,7 +64,7 @@ describe("the tuition table", () => {
     finance.upsertTuitionPlan.mockResolvedValue({
       id: "tp2", cycleId: "c1", levelId: "lv1", enrollmentCents: 400000, monthlyCents: 250000,
       months: 11, firstBilledMonth: 8, dueDay: 5, lateFeeCents: 10000, active: true,
-      policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 }, schedule: [],
+      policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 }, schedule: [], monthlyDiscountCents: 0,
     });
     render(<TuitionPanel cycle={cycle} levels={levels} />);
     await screen.findByText("Primaria");
@@ -216,6 +216,37 @@ describe("TuitionPanel — cuotas por período", () => {
     await user.click(screen.getByRole("button", { name: /Guardar tabulador/ }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/mes:monto/);
+    expect(finance.upsertTuitionPlan).not.toHaveBeenCalled();
+  });
+
+  // The school's arrangement for maternal: one number on the tuition table
+  // instead of a discount typed onto four hundred charges.
+  it("saves a standing discount for the level", async () => {
+    const user = userEvent.setup();
+    render(<TuitionPanel cycle={cycle} levels={levels} />);
+
+    await screen.findByRole("row", { name: /Kínder/ });
+    await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
+    await user.type(screen.getByLabelText("Colegiatura mensual"), "3200");
+    await user.type(screen.getByLabelText("Descuento del nivel (por mes)"), "500");
+    await user.click(screen.getByRole("button", { name: /Guardar tabulador/ }));
+
+    await waitFor(() => expect(finance.upsertTuitionPlan).toHaveBeenCalled());
+    expect(finance.upsertTuitionPlan.mock.calls[0]?.[1]?.monthlyDiscountCents).toBe(50000);
+  });
+
+  // A discount bigger than the month would be a charge that owes negative money.
+  it("refuses a discount bigger than the month", async () => {
+    const user = userEvent.setup();
+    render(<TuitionPanel cycle={cycle} levels={levels} />);
+
+    await screen.findByRole("row", { name: /Kínder/ });
+    await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
+    await user.type(screen.getByLabelText("Colegiatura mensual"), "3200");
+    await user.type(screen.getByLabelText("Descuento del nivel (por mes)"), "4000");
+    await user.click(screen.getByRole("button", { name: /Guardar tabulador/ }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/no puede ser mayor/);
     expect(finance.upsertTuitionPlan).not.toHaveBeenCalled();
   });
 });

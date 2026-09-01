@@ -547,6 +547,8 @@ type TuitionPlan struct {
 	Active           bool             `json:"active"`
 	Policy           CollectionPolicy `json:"policy"`
 	Schedule         []Installment    `json:"schedule"`
+	// MonthlyDiscountCents comes off every month of this level.
+	MonthlyDiscountCents int64 `json:"monthlyDiscountCents"`
 }
 
 // Installment is one payment of the year: the month it falls in and how much of
@@ -572,17 +574,18 @@ type CollectionPolicy struct {
 
 // TuitionPlanInput is what the panel sends to price a level.
 type TuitionPlanInput struct {
-	CycleID          string           `json:"cycleId"`
-	LevelID          string           `json:"levelId"`
-	EnrollmentCents  int64            `json:"enrollmentCents"`
-	MonthlyCents     int64            `json:"monthlyCents"`
-	Months           int              `json:"months"`
-	FirstBilledMonth int              `json:"firstBilledMonth"`
-	DueDay           int              `json:"dueDay"`
-	LateFeeCents     int64            `json:"lateFeeCents"`
-	Active           bool             `json:"active"`
-	Policy           CollectionPolicy `json:"policy"`
-	Schedule         []Installment    `json:"schedule"`
+	CycleID              string           `json:"cycleId"`
+	LevelID              string           `json:"levelId"`
+	EnrollmentCents      int64            `json:"enrollmentCents"`
+	MonthlyCents         int64            `json:"monthlyCents"`
+	Months               int              `json:"months"`
+	FirstBilledMonth     int              `json:"firstBilledMonth"`
+	DueDay               int              `json:"dueDay"`
+	LateFeeCents         int64            `json:"lateFeeCents"`
+	Active               bool             `json:"active"`
+	Policy               CollectionPolicy `json:"policy"`
+	Schedule             []Installment    `json:"schedule"`
+	MonthlyDiscountCents int64            `json:"monthlyDiscountCents"`
 }
 
 // BillingRun is what a run did, as the panel reports it back to the person who

@@ -547,3 +547,62 @@ func toProtoNonWorkingPeriod(p domain.NonWorkingPeriod) *configv1.NonWorkingPeri
 		EndsOn:   p.To().Format(dateLayout),
 	}
 }
+
+// --- school agenda (M16) ---------------------------------------------------
+
+func (h *ConfigHandler) CreateSchoolEvent(ctx context.Context, req *connect.Request[configv1.CreateSchoolEventRequest]) (*connect.Response[configv1.CreateSchoolEventResponse], error) {
+	m := req.Msg
+	from, err := parseDate(m.GetStartsOn())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	// A one-day event may send only the start; repeating the date is noise.
+	to := from
+	if raw := m.GetEndsOn(); raw != "" {
+		to, err = parseDate(raw)
+		if err != nil {
+			return nil, connectErr(err)
+		}
+	}
+	event, err := h.catalog.CreateSchoolEvent(ctx, usecase.SchoolEventInput{
+		CycleID: m.GetCycleId(), Title: m.GetTitle(), Description: m.GetDescription(),
+		From: from, To: to,
+		Audience: domain.EventAudience{LevelID: m.GetLevelId(), GroupID: m.GetGroupId()},
+	})
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.CreateSchoolEventResponse{Event: toProtoSchoolEvent(event)}), nil
+}
+
+func (h *ConfigHandler) ListSchoolEvents(ctx context.Context, req *connect.Request[configv1.ListSchoolEventsRequest]) (*connect.Response[configv1.ListSchoolEventsResponse], error) {
+	events, err := h.catalog.ListSchoolEvents(ctx, req.Msg.GetCycleId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	out := make([]*configv1.SchoolEvent, 0, len(events))
+	for _, e := range events {
+		out = append(out, toProtoSchoolEvent(e))
+	}
+	return connect.NewResponse(&configv1.ListSchoolEventsResponse{Events: out}), nil
+}
+
+func (h *ConfigHandler) DeleteSchoolEvent(ctx context.Context, req *connect.Request[configv1.DeleteSchoolEventRequest]) (*connect.Response[configv1.DeleteSchoolEventResponse], error) {
+	if err := h.catalog.DeleteSchoolEvent(ctx, req.Msg.GetId()); err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.DeleteSchoolEventResponse{}), nil
+}
+
+func toProtoSchoolEvent(e domain.SchoolEvent) *configv1.SchoolEvent {
+	return &configv1.SchoolEvent{
+		Id:          e.ID(),
+		CycleId:     e.CycleID(),
+		Title:       e.Title(),
+		Description: e.Description(),
+		StartsOn:    e.From().Format(dateLayout),
+		EndsOn:      e.To().Format(dateLayout),
+		LevelId:     e.Audience().LevelID,
+		GroupId:     e.Audience().GroupID,
+	}
+}
