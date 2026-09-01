@@ -184,3 +184,57 @@ func TestSettlingOneMonthDoesNotStopAnother(t *testing.T) {
 		t.Fatalf("September surcharge = %d, want %d — paying October must not pause it", got, 40*1000)
 	}
 }
+
+// The owner's arithmetic, in his own numbers. The surcharge starts the day AFTER
+// the due date: pay on the 11th and you owe one day, not two.
+func TestTheOwnersDailyNumbers(t *testing.T) {
+	cal := schoolcal.New(nil)
+	due := on(2026, time.September, 10)
+
+	tests := []struct {
+		name string
+		paid time.Time
+		want int64 // in cents
+	}{
+		{"pays on the due date itself", on(2026, time.September, 10), 0},
+		{"pays the 11th: one day", on(2026, time.September, 11), 1000},
+		{"pays the 20th: ten days", on(2026, time.September, 20), 10000},
+		{"pays the 30th: twenty days", on(2026, time.September, 30), 20000},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := domain.Surcharge(policy(), cal, due, tt.paid)
+			if got != tt.want {
+				t.Errorf("paying %s: surcharge = %d cents ($%.2f), want %d ($%.2f)",
+					tt.paid.Format("2 Jan"), got, float64(got)/100, tt.want, float64(tt.want)/100)
+			}
+		})
+	}
+}
+
+// The surcharge does NOT stop at the end of the month it fell due in. The
+// owner's examples were all inside September (11th, 20th, 30th) and read as if
+// "del 10 al fin de mes" might be a cap; asked directly, he confirmed it keeps
+// running until that month is settled.
+//
+// Pinned as its own test because the alternative is defensible and cheap to
+// implement by accident: a surcharge frozen at month-end costs a family the same
+// whether they pay on 1 October or in March, which removes every reason to pay.
+func TestTheSurchargeDoesNotStopAtMonthEnd(t *testing.T) {
+	cal := schoolcal.New(nil)
+	due := on(2026, time.September, 10)
+
+	endOfMonth := domain.Surcharge(policy(), cal, due, on(2026, time.September, 30))
+	nextMonth := domain.Surcharge(policy(), cal, due, on(2026, time.October, 10))
+	muchLater := domain.Surcharge(policy(), cal, due, on(2027, time.March, 10))
+
+	if nextMonth <= endOfMonth {
+		t.Fatalf("30 Sep = %d, 10 Oct = %d — the surcharge froze at month end", endOfMonth, nextMonth)
+	}
+	if want := int64(30 * 1000); nextMonth != want {
+		t.Errorf("10 Oct surcharge = %d, want %d (30 days)", nextMonth, want)
+	}
+	if muchLater <= nextMonth {
+		t.Errorf("six months late (%d) is not more than one month late (%d)", muchLater, nextMonth)
+	}
+}

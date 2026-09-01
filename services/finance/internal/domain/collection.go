@@ -37,10 +37,18 @@ type CollectionPolicy struct {
 
 // Surcharge is what a charge has accrued for being late, as of paidOn.
 //
-// The rule the school gave, in their own example: tuition falls due on the 10th
-// of September and the family pays on the 10th of October, so they owe thirty
-// days of surcharge on top of the month. It keeps accruing until THAT month is
-// settled — paying something else does not stop it.
+// The rule the school gave, in their own numbers: tuition falls due on the 10th,
+// and the count starts the day AFTER. Pay on the 11th and you owe one day; on
+// the 20th, ten; on the 30th, twenty.
+//
+// It does NOT stop at the end of the month it fell due in. Asked directly, the
+// owner confirmed it keeps running until THAT month is settled — a surcharge
+// frozen at month end costs a family the same whether they pay on 1 October or
+// in March, which removes every reason to pay. There is deliberately no ceiling
+// either; if one is ever wanted it belongs in the policy, not here.
+//
+// Paying a different month does not pause it. Each month answers for itself,
+// which is what makes a statement explainable to a parent.
 //
 // Derived, never stored. A daily surcharge written as charge rows would be ~30
 // rows per pupil per month — 12,000 a month for this school — and would still be
