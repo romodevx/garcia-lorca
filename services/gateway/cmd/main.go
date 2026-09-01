@@ -430,6 +430,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/finance/deposits", financeWrite(financeH.RegisterDeposit))
 	mux.Handle("POST /api/v1/finance/deposits/preview", financeRead(financeH.PreviewDeposit))
 	mux.Handle("GET /api/v1/finance/deposits", financeRead(financeH.ListDeposits))
+	mux.Handle("GET /api/v1/finance/expected", financeRead(financeH.ExpectedToday))
 	mux.Handle("GET /api/v1/finance/cash-up", financeRead(financeH.DailyCashUp))
 	mux.Handle("GET /api/v1/finance/income", financeRead(financeH.IncomeByConcept))
 	mux.Handle("POST /api/v1/finance/deposits/{id}/void", financeWrite(financeH.VoidDeposit))

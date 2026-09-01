@@ -7,6 +7,7 @@ import { CollectDrawer } from "./CollectDrawer";
 
 vi.mock("../../finance/api", () => ({
   getAccount: vi.fn(),
+  getExpected: vi.fn(),
   previewDeposit: vi.fn(),
   registerDeposit: vi.fn(),
 }));
@@ -32,6 +33,9 @@ beforeEach(() => {
     totalBalanceCents: 640000,
     unallocatedCents: 0,
   });
+  finance.getExpected.mockResolvedValue({
+    amountCents: 670000, surchargeCents: 30000, discountCents: 0, annualBalanceCents: 640000,
+  });
   finance.previewDeposit.mockResolvedValue({
     allocations: [payment("p1", "ch-sep", 320000)],
     surcharges: [],
@@ -43,11 +47,50 @@ afterEach(() => vi.clearAllMocks());
 describe("CollectDrawer", () => {
   // The counter shows ONE number: what the family owes. Everything else is
   // detail the cashier does not have to read out.
-  it("leads with what the family owes", async () => {
+  // The counter leads with what should be paid TODAY, not with the year: that
+  // is the figure the cashier reads aloud and the parent hands over.
+  it("leads with the amount expected today, with the year beside it", async () => {
     render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} />);
 
-    expect(await screen.findByTestId("amount-owed")).toHaveTextContent("6,400");
+    expect(await screen.findByTestId("amount-expected")).toHaveTextContent("6,700");
+    expect(screen.getByTestId("amount-owed")).toHaveTextContent("6,400");
     expect(screen.getByRole("heading", { name: /Valentina Cruz/ })).toBeInTheDocument();
+  });
+
+  // Zero means "paid exactly right" — the only value the office wants to see.
+  it("shows the difference against what was expected", async () => {
+    const user = userEvent.setup();
+    render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} />);
+    await screen.findByTestId("amount-expected");
+
+    // Pre-filled with the expected figure, so it starts at zero.
+    expect(screen.getByTestId("difference")).toHaveTextContent("0.00");
+
+    await user.clear(screen.getByLabelText("Monto recibido"));
+    await user.type(screen.getByLabelText("Monto recibido"), "6000");
+
+    expect(await screen.findByTestId("difference")).toHaveTextContent("700");
+  });
+
+  // The father who always pays on the 5th and missed by a day. The school
+  // decides; the system records that somebody decided.
+  it("can grant the early-payment reward by hand", async () => {
+    const user = userEvent.setup();
+    finance.registerDeposit.mockResolvedValue({
+      deposit: {
+        id: "dep-1", studentId: "s1", amountCents: 310000, method: "cash", reference: "",
+        paidAt: "2026-09-20T00:00:00Z", calendarVersion: "abc",
+      },
+      allocations: [], surcharges: [], unallocatedCents: 0, replayed: false,
+    });
+    render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} />);
+    await screen.findByTestId("amount-expected");
+
+    await user.click(screen.getByLabelText("Aplicar pronto pago"));
+    await user.click(screen.getByRole("button", { name: /Cobrar/ }));
+
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
+    expect(finance.registerDeposit.mock.calls[0]?.[1]?.grantEarlyPayment).toBe(true);
   });
 
   // One field. The cashier types what was handed over and the system says what
@@ -55,8 +98,9 @@ describe("CollectDrawer", () => {
   it("shows what the typed amount would cover, before anything is taken", async () => {
     const user = userEvent.setup();
     render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} />);
-    await screen.findByTestId("amount-owed");
+    await screen.findByTestId("amount-expected");
 
+    await user.clear(screen.getByLabelText("Monto recibido"));
     await user.type(screen.getByLabelText("Monto recibido"), "6700");
 
     await waitFor(() => expect(finance.previewDeposit).toHaveBeenCalled());
@@ -81,8 +125,9 @@ describe("CollectDrawer", () => {
     });
     const onCollected = vi.fn();
     render(<CollectDrawer student={student} onClose={() => {}} onCollected={onCollected} />);
-    await screen.findByTestId("amount-owed");
+    await screen.findByTestId("amount-expected");
 
+    await user.clear(screen.getByLabelText("Monto recibido"));
     await user.type(screen.getByLabelText("Monto recibido"), "6700");
     await user.click(screen.getByRole("button", { name: /Cobrar/ }));
 
@@ -108,8 +153,9 @@ describe("CollectDrawer", () => {
       allocations: [], surcharges: [], unallocatedCents: 0, replayed: false,
     });
     render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} />);
-    await screen.findByTestId("amount-owed");
+    await screen.findByTestId("amount-expected");
 
+    await user.clear(screen.getByLabelText("Monto recibido"));
     await user.type(screen.getByLabelText("Monto recibido"), "3200{Enter}");
 
     await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
@@ -119,7 +165,7 @@ describe("CollectDrawer", () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     render(<CollectDrawer student={student} onClose={onClose} onCollected={() => {}} />);
-    await screen.findByTestId("amount-owed");
+    await screen.findByTestId("amount-expected");
 
     await user.keyboard("{Escape}");
 
@@ -133,8 +179,9 @@ describe("CollectDrawer", () => {
     const user = userEvent.setup();
     finance.registerDeposit.mockRejectedValue(new Error("la fecha del pago no puede estar en el futuro"));
     render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} />);
-    await screen.findByTestId("amount-owed");
+    await screen.findByTestId("amount-expected");
 
+    await user.clear(screen.getByLabelText("Monto recibido"));
     await user.type(screen.getByLabelText("Monto recibido"), "6700");
     await user.click(screen.getByRole("button", { name: /Cobrar/ }));
 
@@ -144,8 +191,9 @@ describe("CollectDrawer", () => {
   it("refuses to send an amount that is not money", async () => {
     const user = userEvent.setup();
     render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} />);
-    await screen.findByTestId("amount-owed");
+    await screen.findByTestId("amount-expected");
 
+    await user.clear(screen.getByLabelText("Monto recibido"));
     await user.type(screen.getByLabelText("Monto recibido"), "0");
     await user.click(screen.getByRole("button", { name: /Cobrar/ }));
 

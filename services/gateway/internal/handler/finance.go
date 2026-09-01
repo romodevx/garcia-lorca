@@ -26,7 +26,8 @@ type FinanceService interface {
 	CancelCharge(ctx context.Context, chargeID string) (client.Charge, error)
 	RegisterPaymentAt(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time) (client.Payment, client.Charge, error)
 	GetAccount(ctx context.Context, studentID string) (client.AccountStatement, error)
-	RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time) (client.DepositResult, error)
+	RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool) (client.DepositResult, error)
+	ExpectedToday(ctx context.Context, studentID, on string) (client.Expected, error)
 	PreviewDeposit(ctx context.Context, studentID string, amountCents int64, paidAt time.Time) (client.DepositResult, error)
 	ListDeposits(ctx context.Context, studentID string) ([]client.Deposit, error)
 	DailyCashUp(ctx context.Context, day string) (client.CashUp, error)
@@ -355,6 +356,9 @@ type registerDepositRequest struct {
 	Reference      string `json:"reference"`
 	PaidAt         string `json:"paidAt"`
 	IdempotencyKey string `json:"idempotencyKey"`
+	// GrantEarlyPayment honours the reward after the window closed, because the
+	// school decided to. Recorded as a decision, not as the rule firing.
+	GrantEarlyPayment bool `json:"grantEarlyPayment"`
 }
 
 type voidDepositRequest struct {
@@ -377,7 +381,7 @@ func (h *FinanceHandler) RegisterDeposit(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	got, derr := h.svc.RegisterDeposit(r.Context(), req.StudentID, req.AmountCents,
-		req.Method, req.Reference, req.IdempotencyKey, paidAt)
+		req.Method, req.Reference, req.IdempotencyKey, paidAt, req.GrantEarlyPayment)
 	if derr != nil {
 		writeConnectError(w, derr)
 		return
@@ -422,6 +426,25 @@ func (h *FinanceHandler) PreviewDeposit(w http.ResponseWriter, r *http.Request) 
 		"surcharges":       toChargeResponses(got.Surcharges),
 		"unallocatedCents": got.UnallocatedCents,
 	})
+}
+
+// ExpectedToday handles GET /api/v1/finance/expected?studentId=…&on=… — what a
+// family must hand over today to be current. The counter shows it as "Monto
+// esperado" and never lets anybody edit it.
+func (h *FinanceHandler) ExpectedToday(w http.ResponseWriter, r *http.Request) {
+	on := strings.TrimSpace(r.URL.Query().Get("on"))
+	if on != "" {
+		if _, err := time.Parse("2006-01-02", on); err != nil {
+			http.Error(w, "on must be a date like 2026-10-10", http.StatusBadRequest)
+			return
+		}
+	}
+	expected, err := h.svc.ExpectedToday(r.Context(), r.URL.Query().Get("studentId"), on)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, expected)
 }
 
 // ListDeposits handles GET /api/v1/finance/deposits?studentId=…

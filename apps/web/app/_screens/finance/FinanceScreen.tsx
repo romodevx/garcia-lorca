@@ -277,14 +277,13 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <div style={{ width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--orange)", color: "#fff", boxShadow: "0 6px 16px color-mix(in oklab, var(--orange) 38%, transparent)" }}><Icon name="finance" size={30} /></div>
           <div>
-            <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Finanzas y Adeudos</h1>
-            <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Ciclo {cycleName} · Colegiaturas y conceptos</p>
+            <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Finanzas</h1>
+            <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Ciclo {cycleName} · Ingresos recibidos y adeudos</p>
           </div>
         </div>
         <div style={{ display: "flex", gap: 12 }}>
           <Btn kind="ghost" icon="download" onClick={() => exportView()}>Exportar</Btn>
           <Btn kind="ghost" icon="finance" onClick={() => setCashUp(true)}>Corte de caja</Btn>
-          <Btn icon="card" onClick={() => setPicking(true)}>Cobrar</Btn>
         </div>
       </div>
 
@@ -300,6 +299,14 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
           </div>
         ))}
       </div>
+
+      {/* What came IN, before what is owed. The director's first question is
+          how the month is going, and it used to take opening a drawer. */}
+      <div className="fade-up" style={{ marginBottom: 26 }}>
+        <IncomePanel from={monthStart()} to={today()} />
+      </div>
+
+      <h2 className="fade-up" style={{ fontSize: 20, fontWeight: 700, color: "var(--text)", marginBottom: 14 }}>Adeudos</h2>
 
       <div className="fade-up" style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginBottom: 18 }}>
         <div style={{ display: "flex", gap: 6, padding: 5, background: "var(--surface-3)", borderRadius: "var(--r-pill)", border: "1px solid var(--border)" }}>
@@ -379,11 +386,8 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
               </div>
               <button onClick={() => setCashUp(false)} aria-label="Cerrar" style={{ ...qb, width: 40, height: 40 }}><Icon name="close" size={19} /></button>
             </div>
-            <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px", display: "flex", flexDirection: "column", gap: 24 }}>
+            <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px" }}>
               <CashUpPanel day="" />
-              {/* The month so far, under the day: closing the till and knowing
-                  how the month is going are the same sitting. */}
-              <IncomePanel from={monthStart()} to={today()} />
             </div>
           </div>
         </div>

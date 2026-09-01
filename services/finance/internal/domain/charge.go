@@ -169,6 +169,15 @@ const (
 	// ReasonEarlyPayment is the pronto pago: a fixed amount off a month settled
 	// inside the early window.
 	ReasonEarlyPayment = "pronto_pago"
+	// ReasonEarlyPaymentGranted is the same reward given OUTSIDE the window,
+	// because the school decided to honour it — the parent who always pays on
+	// the 5th and missed by a day.
+	//
+	// It is a separate reason on purpose. Recording it as an ordinary pronto
+	// pago would make the rule look like it fired when it did not, and a month
+	// later nobody could tell an automatic discount from a decision somebody
+	// made at the counter.
+	ReasonEarlyPaymentGranted = "pronto_pago_autorizado"
 )
 
 // DiscountReason is why the charge carries the discount it does. Empty on the

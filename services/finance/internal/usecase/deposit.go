@@ -22,6 +22,11 @@ type DepositInput struct {
 	Reference      string
 	PaidAt         time.Time
 	IdempotencyKey string
+	// GrantEarlyPayment honours the early-payment reward even though the money
+	// arrived after the window closed. It is the school saying yes to a parent
+	// who is always punctual and slipped once — a decision, never a default,
+	// and it is recorded as one.
+	GrantEarlyPayment bool
 }
 
 // DepositResult is what the money did, in the shape a receipt needs.
@@ -153,6 +158,7 @@ func (s *FinanceService) prepareDeposit(ctx context.Context, in DepositInput) (d
 		tuitionID:   tuition.ID(),
 		paidOn:      when,
 		description: lateFeeConceptName,
+		grantEarly:  in.GrantEarlyPayment,
 	}, nil
 }
 
@@ -199,6 +205,112 @@ func (s *FinanceService) IncomeByConcept(ctx context.Context, from, to time.Time
 		income.TotalCents += l.AmountCents
 	}
 	return income, nil
+}
+
+// Expected is what a family must hand over today to be current: the months
+// already due, what being late has cost, and what paying early saves.
+//
+// It is what the counter shows as "Monto esperado" and never lets anybody edit.
+// The captured amount is compared against it, and the difference is recorded —
+// which is the whole point: the school wants to know when a payment did not
+// match, not to be stopped from taking it.
+type Expected struct {
+	AmountCents    int64
+	SurchargeCents int64
+	DiscountCents  int64
+	// AnnualBalanceCents is the whole year still owed. Shown beside the expected
+	// figure so nobody confuses "what is due today" with "what is left".
+	AnnualBalanceCents int64
+}
+
+// ExpectedToday works out what is due as of a date.
+//
+// Only the months whose date has arrived. The year is billed up front, but
+// asking a family for all of it at the counter is not what that figure means.
+func (s *FinanceService) ExpectedToday(ctx context.Context, studentID string, on time.Time) (Expected, error) {
+	when := on
+	if when.IsZero() {
+		when = s.now()
+	}
+	calendar, _ := s.schoolCalendar(ctx, studentID)
+	policy, err := s.policyFor(ctx, studentID)
+	if err != nil {
+		return Expected{}, err
+	}
+	lateFee, err := s.repo.EnsureConceptOfKind(ctx, s.newID(), domain.KindLateFee, lateFeeConceptName)
+	if err != nil {
+		return Expected{}, err
+	}
+	tuition, err := s.repo.EnsureConceptOfKind(ctx, s.newID(), domain.KindTuition, tuitionConceptName)
+	if err != nil {
+		return Expected{}, err
+	}
+	charges, err := s.repo.ListCharges(ctx, studentID, "")
+	if err != nil {
+		return Expected{}, err
+	}
+
+	var out Expected
+	materialised := map[string]int64{}
+	for _, c := range charges {
+		if c.Charge.Status() == domain.StatusCancelled || c.Charge.ConceptID() != lateFee.ID() {
+			continue
+		}
+		if parent, ok := surchargeParent(c.Charge.ExternalRef()); ok {
+			materialised[parent] += c.Charge.Effective().Int64()
+		}
+	}
+
+	for _, c := range charges {
+		if c.Charge.Status() == domain.StatusCancelled || owed(c) <= 0 {
+			continue
+		}
+		out.AnnualBalanceCents += owed(c)
+		if !expectedBy(c.Charge.DueDate(), when) {
+			// Billed, but not yet asked for.
+			continue
+		}
+		out.AmountCents += owed(c)
+
+		if c.Charge.ConceptID() == lateFee.ID() {
+			out.SurchargeCents += owed(c)
+			continue
+		}
+		// What the daily rule has earned and nobody has written down yet.
+		if p := policy; p.DailyMode {
+			pending := domain.Surcharge(p, calendar, c.Charge.DueDate(), when) - materialised[c.Charge.ID()]
+			if pending > 0 {
+				out.AmountCents += pending
+				out.SurchargeCents += pending
+			}
+		}
+		if c.Charge.ConceptID() == tuition.ID() && c.Charge.Discount().Int64() == 0 {
+			due := c.Charge.DueDate()
+			monthStart := time.Date(due.Year(), due.Month(), 1, 0, 0, 0, 0, due.Location())
+			if d := domain.EarlyPaymentDiscount(policy, calendar, monthStart, when); d > 0 {
+				out.DiscountCents += d
+				out.AmountCents -= d
+			}
+		}
+	}
+	if out.AmountCents < 0 {
+		out.AmountCents = 0
+	}
+	return out, nil
+}
+
+// expectedBy decides whether a charge is being asked for as of a date: it has
+// fallen due, or it falls due later THIS MONTH.
+//
+// The second half is the point of the early-payment reward. In September a
+// family pays September, and they pay it before the 10th precisely to earn the
+// discount — a rule that only counted arrived due dates would show them nothing
+// to pay and quietly deny the reward it exists to give.
+func expectedBy(due, when time.Time) bool {
+	if !due.After(when) {
+		return true
+	}
+	return due.Year() == when.Year() && due.Month() == when.Month()
 }
 
 // CashUp is the day's takings: one number per method, the total, and the list
@@ -258,6 +370,8 @@ type depositPlanner struct {
 	tuitionID   string
 	paidOn      time.Time
 	description string
+	// grantEarly carries the school's decision to honour the reward late.
+	grantEarly bool
 }
 
 // plan turns the student's locked charges into the writes this deposit makes.
@@ -429,10 +543,16 @@ func (p *depositPlanner) earlyPayment(c ports.ChargeWithPaid, budget int64) (dom
 	due := c.Charge.DueDate()
 	monthStart := time.Date(due.Year(), due.Month(), 1, 0, 0, 0, 0, due.Location())
 	discount := domain.EarlyPaymentDiscount(p.policy, p.calendar, monthStart, p.paidOn)
+	reason := domain.ReasonEarlyPayment
+	if discount <= 0 && p.grantEarly {
+		// Outside the window, but the school said yes. Same amount, different
+		// reason, so a report can always tell the rule from the decision.
+		discount, reason = p.policy.EarlyPaymentCents, domain.ReasonEarlyPaymentGranted
+	}
 	if discount <= 0 || budget < owed(c)-discount {
 		return domain.Charge{}, false, nil
 	}
-	reduced, err := c.Charge.WithDiscount(discount, c.PaidCents, domain.ReasonEarlyPayment)
+	reduced, err := c.Charge.WithDiscount(discount, c.PaidCents, reason)
 	if err != nil {
 		return domain.Charge{}, false, err
 	}

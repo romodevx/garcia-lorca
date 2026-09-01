@@ -29,13 +29,13 @@ describe("CommandPaletteHost", () => {
   it("lists enabled modules (localized) when open", () => {
     withFlags(<Harness onNavigate={() => {}} />);
     expect(screen.getByText("Estudiantes")).toBeInTheDocument();
-    expect(screen.getByText("Finanzas y adeudos")).toBeInTheDocument();
+    expect(screen.getByText("Finanzas")).toBeInTheDocument();
   });
 
   it("does NOT surface commands of a disabled module", () => {
     withFlags(<Harness onNavigate={() => {}} />, { module_students: true });
     fireEvent.change(screen.getByPlaceholderText(/Buscar/), { target: { value: "finanzas" } });
-    expect(screen.queryByText("Finanzas y adeudos")).toBeNull();
+    expect(screen.queryByText("Finanzas")).toBeNull();
   });
 
   it("matches accent-insensitively via the create alias ('nuevo estudiante')", () => {
@@ -66,7 +66,7 @@ describe("CommandPaletteHost", () => {
     });
     expect(screen.getByText("Calificaciones")).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText(/Buscar/), { target: { value: "finanzas" } });
-    expect(screen.queryByText("Finanzas y adeudos")).toBeNull();
+    expect(screen.queryByText("Finanzas")).toBeNull();
   });
 
   it("opens on Cmd+K", () => {

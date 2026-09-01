@@ -56,7 +56,7 @@ afterEach(() => vi.clearAllMocks());
 describe("FinanceScreen", () => {
   it("resolves student names and shows charge status", async () => {
     render(<FinanceScreen onBack={() => {}} />);
-    expect(await screen.findByRole("heading", { name: "Finanzas y Adeudos" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Finanzas" })).toBeInTheDocument();
     expect(await screen.findByText("Valentina Cruz")).toBeInTheDocument();
     expect(screen.getByText("Mateo Sánchez")).toBeInTheDocument();
     // ch2 is fully paid → "Al corriente"; ch1 has a balance → a "Registrar pago" action
@@ -159,25 +159,6 @@ describe("PayDrawer — money safety", () => {
     await user.clear(screen.getByRole("dialog", { name: /Registrar pago/i }).querySelector("input")!);
     await user.click(screen.getByTestId("pay-drawer-backdrop"));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: /Registrar pago/i })).not.toBeInTheDocument());
-  });
-});
-
-describe("FinanceScreen — cobrar", () => {
-  // The counter's entry point is a pupil, not a charge. A cashier is handed
-  // money by a parent who says a name; making them find the right row of the
-  // right month first is what sent the office back to the notebook.
-  it("opens the counter by finding the pupil", async () => {
-    const user = userEvent.setup();
-    finance.getAccount.mockResolvedValue({ charges: [], payments: [], totalBalanceCents: 640000, unallocatedCents: 0 });
-    render(<FinanceScreen onBack={() => {}} />);
-    await screen.findByText("Valentina Cruz");
-
-    await user.click(screen.getByRole("button", { name: /^Cobrar$/ }));
-    await user.type(screen.getByLabelText("Buscar alumno"), "Valen");
-    await user.click(await screen.findByRole("button", { name: /Valentina Cruz/ }));
-
-    expect(await screen.findByRole("dialog", { name: "Cobrar" })).toBeInTheDocument();
-    expect(await screen.findByTestId("amount-owed")).toHaveTextContent("6,400");
   });
 });
 

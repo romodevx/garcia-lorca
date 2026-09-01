@@ -99,6 +99,11 @@ service FinanceService {
   // changes hands. A projection, not a promise: the charges are read without a
   // lock, so a payment landing in between changes the answer.
   rpc PreviewDeposit(PreviewDepositRequest) returns (PreviewDepositResponse);
+  // ExpectedToday is what a family must hand over today to be current: the
+  // months already due (and the one due later this month, which is how the
+  // early-payment reward is earned), what being late has cost, and what paying
+  // early saves. The counter shows it and never lets anybody edit it.
+  rpc ExpectedToday(ExpectedTodayRequest) returns (ExpectedTodayResponse);
   // ListDeposits returns a student's deposits, newest first.
   rpc ListDeposits(ListDepositsRequest) returns (ListDepositsResponse);
   // DailyCashUp is the day's takings: one number per method, the total, and the
@@ -541,6 +546,11 @@ message RegisterDepositRequest {
   // idempotency_key is optional; a repeat under the same key returns what was
   // stored the first time and collects nothing.
   string idempotency_key = 6;
+  // grant_early_payment honours the early-payment reward even though the money
+  // arrived after the window closed — the parent who is always punctual and
+  // slipped once. A decision, never a default: it is recorded under its own
+  // discount reason so a report can tell it from the rule firing.
+  bool grant_early_payment = 7;
 }
 
 message RegisterDepositResponse {
@@ -623,4 +633,21 @@ message IncomeLine {
 message IncomeByConceptResponse {
   repeated IncomeLine lines = 1;
   int64 total_cents = 2;
+}
+
+// ExpectedTodayRequest asks what is due as of a date.
+message ExpectedTodayRequest {
+  string student_id = 1;
+  string on = 2;  // YYYY-MM-DD; empty means today
+}
+
+// ExpectedTodayResponse is the figure the counter reads aloud, with the parts
+// that make it up.
+message ExpectedTodayResponse {
+  int64 amount_cents = 1;
+  int64 surcharge_cents = 2;
+  int64 discount_cents = 3;
+  // The whole year still owed, shown beside it so nobody confuses "what is due
+  // today" with "what is left".
+  int64 annual_balance_cents = 4;
 }

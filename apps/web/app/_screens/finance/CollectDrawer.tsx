@@ -5,15 +5,28 @@ import { Btn } from "../../_design/Controls";
 import { Icon } from "../../_design/Icon";
 import {
   getAccount,
+  getExpected,
   previewDeposit,
   registerDeposit,
   type Charge,
   type DepositResult,
+  type Expected,
   type Payment,
   type PaymentMethod,
 } from "../../finance/api";
 import { API_URL } from "../../api-url";
-import { formatCents, pesosToCents } from "./money";
+import { centsToPesosInput, formatCents, pesosToCents } from "./money";
+
+/**
+ * What is missing, or over, against what should have been paid. Zero when the
+ * family paid exactly right — which is the number the counter looks for.
+ *
+ * An unreadable amount counts as nothing captured, so the difference is the
+ * whole expected figure rather than NaN.
+ */
+function difference(captured: number, expectedCents: number): number {
+  return expectedCents - (Number.isFinite(captured) ? captured : 0);
+}
 
 /** One key per attempt, kept across retries: a double click must not cost twice. */
 function newAttemptKey(): string {
@@ -65,7 +78,11 @@ export interface CollectDrawerProps {
 export function CollectDrawer({ student, onClose, onCollected }: CollectDrawerProps): ReactElement {
   const [owed, setOwed] = useState<number | null>(null);
   const [credit, setCredit] = useState(0);
+  const [expected, setExpected] = useState<Expected | null>(null);
   const [amount, setAmount] = useState("");
+  // The school honouring the early-payment reward after the window closed. A
+  // decision somebody makes, which is why it is a switch and not a default.
+  const [grantEarly, setGrantEarly] = useState(false);
   const [method, setMethod] = useState<PaymentMethod>("cash");
   const [reference, setReference] = useState("");
   const [preview, setPreview] = useState<{ allocations: Payment[]; surcharges: Charge[]; unallocatedCents: number } | null>(null);
@@ -92,6 +109,21 @@ export function CollectDrawer({ student, onClose, onCollected }: CollectDrawerPr
         describe.current = new Map(account.charges.map((c) => [c.id, c.description]));
       })
       .catch(() => { if (live) { setOwed(0); } });
+    // What is due TODAY, which is not the same question as what is left for the
+    // year. The cashier reads this figure aloud.
+    getExpected(API_URL, student.id)
+      .then((e) => {
+        if (!live) {
+          return;
+        }
+        setExpected(e);
+        // Pre-filled with what should be paid: the common case is a family
+        // paying exactly that, and retyping it is a chance to mistype it.
+        if (e.amountCents > 0) {
+          setAmount(centsToPesosInput(e.amountCents));
+        }
+      })
+      .catch(() => {});
     return () => { live = false; };
   }, [student.id]);
 
@@ -133,6 +165,7 @@ export function CollectDrawer({ student, onClose, onCollected }: CollectDrawerPr
         method,
         reference: reference.trim(),
         idempotencyKey: attemptKey,
+        ...(grantEarly ? { grantEarlyPayment: true } : {}),
       });
       setReceipt(result);
       onCollected();
@@ -141,7 +174,7 @@ export function CollectDrawer({ student, onClose, onCollected }: CollectDrawerPr
     } finally {
       setSaving(false);
     }
-  }, [ready, student.id, cents, method, reference, attemptKey, onCollected]);
+  }, [ready, student.id, cents, method, reference, attemptKey, grantEarly, onCollected]);
 
   return (
     <div
@@ -170,10 +203,15 @@ export function CollectDrawer({ student, onClose, onCollected }: CollectDrawerPr
               style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
               <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px", display: "flex", flexDirection: "column", gap: 20 }}>
                 <div style={{ padding: "18px 20px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
-                  <span style={{ fontSize: 14, color: "var(--text-muted)" }}>Debe</span>
-                  <div data-testid="amount-owed" style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 38, color: "var(--text)", marginTop: 4 }}>
-                    {owed === null ? "…" : formatCents(owed)}
+                  <span style={{ fontSize: 14, color: "var(--text-muted)" }}>Monto esperado hoy</span>
+                  <div data-testid="amount-expected" style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 38, color: "var(--text)", marginTop: 4 }}>
+                    {expected === null ? "…" : formatCents(expected.amountCents)}
                   </div>
+                  <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 6 }}>
+                    {expected !== null && expected.surchargeCents > 0 && `Incluye ${formatCents(expected.surchargeCents)} de recargo. `}
+                    {expected !== null && expected.discountCents > 0 && `Ya con ${formatCents(expected.discountCents)} de pronto pago. `}
+                    Del año debe <b data-testid="amount-owed">{owed === null ? "…" : formatCents(owed)}</b>.
+                  </p>
                   {credit > 0 && (
                     <p style={{ fontSize: 13.5, color: "var(--text-muted)", marginTop: 6 }}>
                       Tiene {formatCents(credit)} a favor.
@@ -187,6 +225,26 @@ export function CollectDrawer({ student, onClose, onCollected }: CollectDrawerPr
                     <input autoFocus inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} aria-label="Monto recibido" placeholder="0.00" style={field} />
                   </div>
                 </label>
+
+                {expected !== null && (
+                  <div
+                    data-testid="difference"
+                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderRadius: "var(--r-md)", background: difference(cents, expected.amountCents) === 0 ? "var(--ok-bg)" : "var(--warn-bg)" }}>
+                    <span style={{ fontSize: 14, color: "var(--text-muted)" }}>Diferencia</span>
+                    <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 17, color: difference(cents, expected.amountCents) === 0 ? "var(--ok-fg)" : "var(--warn-fg)" }}>
+                      {formatCents(difference(cents, expected.amountCents))}
+                    </span>
+                  </div>
+                )}
+
+                {expected !== null && expected.discountCents === 0 && (
+                  <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                    <input type="checkbox" checked={grantEarly} onChange={(e) => setGrantEarly(e.target.checked)} aria-label="Aplicar pronto pago" style={{ width: 18, height: 18 }} />
+                    <span style={{ fontSize: 14, color: "var(--text-muted)" }}>
+                      Aplicar pronto pago de todos modos
+                    </span>
+                  </label>
+                )}
 
                 {preview !== null && (
                   <div data-testid="preview" style={{ borderRadius: "var(--r-md)", border: "1px solid var(--border)", overflow: "hidden" }}>

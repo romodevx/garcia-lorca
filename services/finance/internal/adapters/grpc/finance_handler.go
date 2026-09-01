@@ -220,6 +220,9 @@ func (h *FinanceHandler) RegisterDeposit(ctx context.Context, req *connect.Reque
 		Reference:      m.GetReference(),
 		PaidAt:         paidAt,
 		IdempotencyKey: m.GetIdempotencyKey(),
+		// The school honouring the reward late is a decision it makes at the
+		// counter; the use case records it as one.
+		GrantEarlyPayment: m.GetGrantEarlyPayment(),
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -273,6 +276,28 @@ func (h *FinanceHandler) PreviewDeposit(ctx context.Context, req *connect.Reques
 		Allocations:      allocations,
 		Surcharges:       surcharges,
 		UnallocatedCents: got.UnallocatedCents,
+	}), nil
+}
+
+// ExpectedToday is what a family must hand over today to be current.
+func (h *FinanceHandler) ExpectedToday(ctx context.Context, req *connect.Request[financev1.ExpectedTodayRequest]) (*connect.Response[financev1.ExpectedTodayResponse], error) {
+	on := time.Time{}
+	if raw := req.Msg.GetOn(); raw != "" {
+		parsed, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			return nil, connectErr(glerrors.New(glerrors.KindInvalid, "date must be YYYY-MM-DD"))
+		}
+		on = parsed
+	}
+	expected, err := h.finance.ExpectedToday(ctx, req.Msg.GetStudentId(), on)
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&financev1.ExpectedTodayResponse{
+		AmountCents:        expected.AmountCents,
+		SurchargeCents:     expected.SurchargeCents,
+		DiscountCents:      expected.DiscountCents,
+		AnnualBalanceCents: expected.AnnualBalanceCents,
 	}), nil
 }
 

@@ -44,7 +44,10 @@ export interface ModuleDef {
 export const MODULES: readonly ModuleDef[] = [
   { id: "students", label: "Estudiantes", icon: "students", color: "forest", desc: "Alumnos y admisión", badge: null, flag: "module_students", perm: "students:read" },
   { id: "teachers", label: "Docentes", icon: "user", color: "purple", desc: "Plantilla y asignaturas", badge: null, flag: "module_teachers", perm: ["teachers:read", "teachers:write"] },
-  { id: "finance", label: "Finanzas y Adeudos", icon: "finance", color: "orange", desc: "Colegiaturas y adeudos", badge: null, flag: "module_finance", perm: "finance:read" },
+  // Two doors on the same money, because two different people walk through
+  // them: the front desk taking a payment, and the director reading the month.
+  { id: "payments", label: "Registro de Pagos", icon: "card", color: "forest", desc: "Cobrar en ventanilla", badge: null, flag: "module_finance", perm: "finance:write" },
+  { id: "finance", label: "Finanzas", icon: "finance", color: "orange", desc: "Ingresos y adeudos", badge: null, flag: "module_finance", perm: "finance:read" },
   // QR capture is deferred; the module ships as the daily pass list.
   // Any-of: directors/admins pass lists via attendance:read; teachers use their
   // self-scoped attendance_own:read surface. Either permission reveals the tile.

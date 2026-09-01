@@ -122,6 +122,22 @@ export interface RegisterDepositInput {
   paidAt?: string;
   /** One key per ATTEMPT: a retry returns the deposit already stored. */
   idempotencyKey?: string;
+  /**
+   * Honours the early-payment reward after the window closed, because the
+   * school decided to — the parent who is always punctual and slipped once.
+   * Recorded under its own discount reason, so a report can always tell a
+   * decision from the rule firing.
+   */
+  grantEarlyPayment?: boolean;
+}
+
+/** What a family must hand over today to be current. */
+export interface Expected {
+  amountCents: number;
+  surchargeCents: number;
+  discountCents: number;
+  /** The whole year still owed — not the same question as what is due today. */
+  annualBalanceCents: number;
 }
 
 export interface PreviewDepositInput {
@@ -501,6 +517,22 @@ export async function previewDeposit(baseURL: string, input: PreviewDepositInput
   };
 }
 
+/**
+ * What a family must hand over today to be current: the months already due
+ * (and the one due later this month, which is how the early-payment reward is
+ * earned), what being late has cost, and what paying early saves.
+ */
+export async function getExpected(baseURL: string, studentId: string, on = ""): Promise<Expected> {
+  const query = on === "" ? "" : `&on=${encodeURIComponent(on)}`;
+  const res = await getJSON<Partial<Expected>>(baseURL, `/expected?studentId=${encodeURIComponent(studentId)}${query}`);
+  return {
+    amountCents: res.amountCents ?? 0,
+    surchargeCents: res.surchargeCents ?? 0,
+    discountCents: res.discountCents ?? 0,
+    annualBalanceCents: res.annualBalanceCents ?? 0,
+  };
+}
+
 /** A family's deposits, newest first. */
 export async function listDeposits(baseURL: string, studentId: string): Promise<Deposit[]> {
   const rows = await getList<Wire<Deposit, "method">>(baseURL, `/deposits?studentId=${encodeURIComponent(studentId)}`, "deposits");
@@ -597,6 +629,7 @@ function depositBody(input: RegisterDepositInput): Record<string, unknown> {
     ...(input.idempotencyKey !== undefined && input.idempotencyKey !== ""
       ? { idempotencyKey: input.idempotencyKey }
       : {}),
+    ...(input.grantEarlyPayment === true ? { grantEarlyPayment: true } : {}),
   };
 }
 

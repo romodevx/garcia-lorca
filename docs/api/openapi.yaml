@@ -865,6 +865,13 @@ paths:
                     bug waiting to move a payment across a due date. Empty means
                     today; a future date is refused.
                 idempotencyKey: { type: string }
+                grantEarlyPayment:
+                  type: boolean
+                  description: >
+                    Honours the early-payment reward after the window closed,
+                    because the school decided to — the parent who is always
+                    punctual and slipped once. Recorded under its own discount
+                    reason so a report can tell a decision from the rule firing.
       responses:
         '201':
           description: The deposit and what it covered.
@@ -897,6 +904,49 @@ paths:
                   deposits:
                     type: array
                     items: { $ref: '#/components/schemas/Deposit' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
+  /api/v1/finance/expected:
+    get:
+      tags: [finance-payments]
+      summary: What a family must hand over today
+      description: >
+        The months already due — plus the one due later THIS month, which is how
+        the early-payment reward is earned — what being late has cost, and what
+        paying early saves. The counter shows it as "Monto esperado" and never
+        lets anybody edit it; the captured amount is compared against it and the
+        difference is recorded rather than blocking the payment.
+
+
+        Not the same question as the annual balance, which is returned beside it.
+      operationId: expectedToday
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: studentId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - name: on
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: The day to work it out for. Empty means today.
+      responses:
+        '200':
+          description: What is due today, and what makes it up.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [amountCents, surchargeCents, discountCents, annualBalanceCents]
+                properties:
+                  amountCents: { type: integer, format: int64, minimum: 0 }
+                  surchargeCents: { type: integer, format: int64, minimum: 0 }
+                  discountCents: { type: integer, format: int64, minimum: 0 }
+                  annualBalanceCents: { type: integer, format: int64, minimum: 0 }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }

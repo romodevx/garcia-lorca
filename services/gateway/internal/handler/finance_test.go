@@ -67,28 +67,38 @@ type fakeFinance struct {
 	overdueCycle string
 	overdue      []client.Charge
 
-	depositStudent string
-	depositAmount  int64
-	depositMethod  string
-	depositKey     string
-	depositPaidAt  time.Time
-	depositResult  client.DepositResult
-	deposits       []client.Deposit
-	incomeFrom     string
-	incomeTo       string
-	income         client.Income
-	cashUpDay      string
-	cashUp         client.CashUp
-	voidedDeposit  string
-	voidReason     string
+	depositStudent  string
+	depositAmount   int64
+	depositMethod   string
+	depositKey      string
+	depositPaidAt   time.Time
+	depositResult   client.DepositResult
+	deposits        []client.Deposit
+	expectedStudent string
+	expectedOn      string
+	expected        client.Expected
+	depositGranted  bool
+	incomeFrom      string
+	incomeTo        string
+	income          client.Income
+	cashUpDay       string
+	cashUp          client.CashUp
+	voidedDeposit   string
+	voidReason      string
 
 	charge client.Charge
 	err    error
 }
 
-func (f *fakeFinance) RegisterDeposit(_ context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time) (client.DepositResult, error) {
+func (f *fakeFinance) ExpectedToday(_ context.Context, studentID, on string) (client.Expected, error) {
+	f.expectedStudent, f.expectedOn = studentID, on
+	return f.expected, f.err
+}
+
+func (f *fakeFinance) RegisterDeposit(_ context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool) (client.DepositResult, error) {
 	f.depositStudent, f.depositAmount, f.depositMethod = studentID, amountCents, method
 	f.depositKey, f.depositPaidAt = idempotencyKey, paidAt
+	f.depositGranted = grantEarlyPayment
 	if f.err != nil {
 		return client.DepositResult{}, f.err
 	}

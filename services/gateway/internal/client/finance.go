@@ -292,13 +292,14 @@ type DepositResult struct {
 
 // RegisterDeposit takes money without being told what it pays for and splits it
 // across what the family owes, oldest first.
-func (c *FinanceClient) RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time) (DepositResult, error) {
+func (c *FinanceClient) RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool) (DepositResult, error) {
 	req := &financev1.RegisterDepositRequest{
-		StudentId:      studentID,
-		AmountCents:    amountCents,
-		Method:         method,
-		Reference:      reference,
-		IdempotencyKey: idempotencyKey,
+		StudentId:         studentID,
+		AmountCents:       amountCents,
+		Method:            method,
+		Reference:         reference,
+		IdempotencyKey:    idempotencyKey,
+		GrantEarlyPayment: grantEarlyPayment,
 	}
 	if !paidAt.IsZero() {
 		req.PaidAt = timestamppb.New(paidAt)
@@ -338,6 +339,30 @@ func (c *FinanceClient) PreviewDeposit(ctx context.Context, studentID string, am
 		Allocations:      allocations,
 		Surcharges:       toCharges(res.Msg.GetSurcharges()),
 		UnallocatedCents: res.Msg.GetUnallocatedCents(),
+	}, nil
+}
+
+// Expected is what a family must hand over today to be current.
+type Expected struct {
+	AmountCents        int64 `json:"amountCents"`
+	SurchargeCents     int64 `json:"surchargeCents"`
+	DiscountCents      int64 `json:"discountCents"`
+	AnnualBalanceCents int64 `json:"annualBalanceCents"`
+}
+
+// ExpectedToday asks what is due as of a date ("" = today).
+func (c *FinanceClient) ExpectedToday(ctx context.Context, studentID, on string) (Expected, error) {
+	res, err := c.rpc.ExpectedToday(ctx, connect.NewRequest(&financev1.ExpectedTodayRequest{
+		StudentId: studentID, On: on,
+	}))
+	if err != nil {
+		return Expected{}, err
+	}
+	return Expected{
+		AmountCents:        res.Msg.GetAmountCents(),
+		SurchargeCents:     res.Msg.GetSurchargeCents(),
+		DiscountCents:      res.Msg.GetDiscountCents(),
+		AnnualBalanceCents: res.Msg.GetAnnualBalanceCents(),
 	}, nil
 }
 

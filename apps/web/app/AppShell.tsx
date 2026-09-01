@@ -18,6 +18,7 @@ import { Login } from "./_screens/Login";
 import { ChangePassword } from "./_screens/ChangePassword";
 import { ModulePlaceholder } from "./_screens/ModulePlaceholder";
 import { AnnouncementsScreen } from "./_screens/announcements/AnnouncementsScreen";
+import { PaymentsScreen } from "./_screens/payments/PaymentsScreen";
 import { useTheme } from "./theme/ThemeProvider";
 import { login as apiLogin, changePassword as apiChangePassword, logout as apiLogout, me as apiMe, refresh as apiRefresh, type MeResult } from "./auth/api";
 
@@ -29,6 +30,7 @@ type View =
   | { screen: "dashboard" }
   | { screen: "finance" }
   | { screen: "announcements" }
+  | { screen: "payments" }
   | { screen: "config" }
   | { screen: "students" }
   | { screen: "grades" }
@@ -236,6 +238,10 @@ export function AppShell(): ReactElement {
       setView({ screen: "uniforms" });
       return;
     }
+    if (id === "payments") {
+      setView({ screen: "payments" });
+      return;
+    }
     if (id === "announcements") {
       setView({ screen: "announcements" });
       return;
@@ -283,6 +289,12 @@ export function AppShell(): ReactElement {
           // Flag OFF: do not render the finance surface; show the friendly stub
           // instead so navigation never dead-ends. (Backend 404 is authoritative.)
           <ModulePlaceholder m={MODULES.find((m) => m.id === "finance") as ModuleDef} onBack={home} />
+        ))}
+      {view.screen === "payments" &&
+        (financeEnabled ? (
+          <PaymentsScreen onBack={home} />
+        ) : (
+          <ModulePlaceholder m={MODULES.find((m) => m.id === "payments") as ModuleDef} onBack={home} />
         ))}
       {view.screen === "announcements" &&
         (commsEnabled ? (
