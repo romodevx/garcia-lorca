@@ -1044,6 +1044,133 @@ Modo: [subagent-only] en las tres fases. Sin cobertura cross-model.
 
 ---
 
+## RESPUESTAS DEL DUEÑO — gate cerrado (2026-08-31)
+
+### D1 · "Sí tiene nivel maternal, falta incluirlo"
+
+**Confirmado el bloqueador disfrazado.** La escuela tiene maternal y el sistema no lo
+admite. Esto sube al primer lugar de la lista: **no es una petición, es que una parte del
+padrón no cabe en el sistema.**
+
+Y no es un `CHECK` de una línea. "Qué es un nivel" vive en **tres lugares incompatibles**:
+
+```
+config.levels          TABLA libre        ← aquí sí cabe maternal hoy
+students CHECK (…)     enum codificado    ← lo rechaza
+uniforms CHECK (…) ×2  enum codificado    ← lo rechaza
++ 2 enums de proto, 2 clientes del gateway, 5 archivos del front
+```
+
+**Alcance real: ~11 archivos, 2 servicios, 2 protos.** Un día de trabajo, no una hora.
+
+**Y el "descuento maternal" desaparece como feature**: una vez que el nivel existe, es un
+renglón de `tuition_plans` con su propia colegiatura — que ya funciona. **Cero código.**
+
+### D2 · "El pronto pago es una cantidad fija"
+
+Resuelta la contradicción (mi premisa P3, y la duda C9 sobre si yo la había inventado).
+**Es un monto fijo, no un porcentaje.** Simplifica el modelo: una columna de centavos, sin
+base de cálculo que discutir ni redondeo que definir.
+
+### D3 · "Si paga 6000 no dice nada; captura, marca los meses pagados y baja el total anual"
+
+**Esta respuesta elimina el campo "Diferencia" del diseño**, y con él la contradicción que
+la voz de diseño marcó como crítica.
+
+Lo que el director describe no es una conciliación — es un **abono a cuenta**:
+
+```
+LO QUE PEDÍA LA ESPECIFICACIÓN        LO QUE EL DIRECTOR QUIERE
+┌────────────────────────────┐        ┌────────────────────────────┐
+│ Esperado    $ 5,700        │        │  Debe al año   $ 13,000    │
+│ Capturado   [$ 6,000]      │        │  Abona         [$  6,000]  │
+│ Diferencia  -$   300  ← ?? │        │  ─────────────────────────  │
+└────────────────────────────┘        │  sep oct nov dic ene feb ✓ │
+                                       │  Queda         $  7,000    │
+                                       └────────────────────────────┘
+```
+
+**Consecuencias:**
+- Se cae `Esperado / Capturado / Diferencia` como triple. Queda **un** número que importa
+  (lo que debe) y **un** campo (lo que abona).
+- El "monto esperado" no desaparece: sirve para **una** cosa, decidir si aplica pronto
+  pago o recargo según la fecha. Pero es un cálculo interno, no una casilla que la cajera
+  concilia.
+- La pantalla se vuelve más simple que la que se pidió. La voz de diseño puntuó
+  3/10 en velocidad de uso repetido; esto es justo lo que la sube.
+
+---
+
+## LISTA DE TAREAS — orden de ejecución
+
+### Bloque 0 · Bugs vivos de dinero (antes de cualquier feature)
+
+| # | Tarea | Dónde | Por qué ahora |
+|---|---|---|---|
+| T1 | Clave de idempotencia en el cajón de pago | `FinanceScreen.tsx:76` | **Doble cobro alcanzable hoy** |
+| T2 | Guardia de cambios en el fondo del modal | `FinanceScreen.tsx:87` | Un clic borra un pago capturado |
+| T3 | Paginación en `ListOverdue` y `ListCharges` | `repository.go:32,379,606` | **La escuela se sub-factura** pasando 500 vencidos |
+
+### Bloque 1 · El bloqueador que el director nombró sin saberlo
+
+| # | Tarea | Alcance |
+|---|---|---|
+| T4 | **Nivel maternal**: migraciones, 2 protos, 2 clientes, 5 pantallas | ~11 archivos, 2 servicios |
+| T5 | Colegiatura de maternal | 1 renglón de `tuition_plans` — **cero código** |
+
+### Bloque 2 · El calendario, del que cuelga todo lo demás
+
+| # | Tarea | Notas |
+|---|---|---|
+| T6 | `paid_at` en `RegisterPaymentRequest` + caso de uso + formulario | 1 día. **Sin esto ninguna regla de cobro funciona** |
+| T7 | Calendario escolar en `config` + `pkg/schoolcal` | Parte de cero (E1/C1) |
+| T8 | Timeout de 2-3s en la lectura del calendario | Sin él, D3 es indeployable (E6) |
+| T9 | Caché con TTL en minutos + versión estampada en el pago | No por ciclo (E7) |
+
+### Bloque 3 · Cobro
+
+| # | Tarea | Notas |
+|---|---|---|
+| T10 | `late_fee_daily_cents` + `late_fee_mode` — **columnas nuevas** | Reinterpretar la vieja = ×30 (E3) |
+| T11 | Pronto pago como **monto fijo** + columna de motivo/auditoría | D2. El `TODO(finance)` de auditoría es prerrequisito, no seguimiento |
+| T12 | Recargo: derivar para mostrar, **materializar al aplicar** | Mi diseño derivado no cobraba (E1) |
+
+### Bloque 4 · El abono a cuenta
+
+| # | Tarea | Notas |
+|---|---|---|
+| T13 | Agregado `deposits` + `payment_allocations` con RLS | `payments.charge_id` es NOT NULL (C6) |
+| T14 | Idempotencia sobre `deposits`, no sobre asignaciones | El lock actual desaparece (E-1.3) |
+| T15 | Bloqueo determinista por `due_date, id` | Ordenar por `external_ref` reparte al revés (E8) |
+| T16 | `PaymentRegistered` re-anclado al depósito | Hoy serían **6 push por un pago** (E2) |
+| T17 | Outbox transaccional para `ChargeSettled` | Un fallo deja al alumno "en trámite" para siempre (E5) |
+| T18 | `UnallocatedCents` en el estado de cuenta | El saldo a favor hoy es invisible (E9) |
+| T19 | `VoidPayment` por asiento, nunca `DELETE` | Un error mueve seis meses (2.1) |
+
+### Bloque 5 · Pantalla
+
+| # | Tarea |
+|---|---|
+| T20 | Modal: **un** número (debe) + **un** campo (abona) + vista previa del reparto |
+| T21 | `<form>` real: Enter guarda, Esc cierra, foco atrapado |
+| T22 | Búsqueda de alumno como punto de entrada |
+| T23 | Folio + recibo imprimible |
+| T24 | **Corte de caja diario** — el artefacto que hace que el director suelte la libreta |
+
+### Bloque 6 · Lo demás, ya sin prisa
+
+T25 multicontacto (`guardian_user_id` nullable + backfill, 6 despliegues) ·
+T26 avisos por grupo/nivel (ruta de escritura nueva) · T27 ingresos por concepto ·
+T28 export genérico "exportar esta vista".
+
+**Diferidas:** inventario genérico, calendario de actividades, PDF del estado de cuenta,
+colegiatura partida por período.
+
+**26 tareas. Estimado con CC: ~4-6 días de trabajo real**, con la firma pedida al terminar
+el Bloque 2.
+
+---
+
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |
@@ -1060,7 +1187,9 @@ verifying each finding against the tree, not on two models agreeing.
 500-row cap, backdrop discard). One disguised blocker outranks the whole list: the school
 likely cannot enroll its Maternal pupils. Three questions go to the director before any code.
 
-**UNRESOLVED DECISIONS:**
-- **D1** — Does the school have a Maternal level, and are those pupils in the system today?
-- **D2** — Pronto pago: percentage of what, or a fixed amount?
-- **D3** — A parent pays $6,000 at the window: what should "Diferencia" show?
+**RESOLVED AT THE GATE (2026-08-31):** D1 → the school HAS a Maternal level and it is
+missing from the system, confirming the disguised blocker · D2 → pronto pago is a FIXED
+amount · D3 → no Diferencia field; the payment is a credit against the annual debt, which
+removes the design contradiction outright.
+
+NO UNRESOLVED DECISIONS
