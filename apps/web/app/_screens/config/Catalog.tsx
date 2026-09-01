@@ -34,6 +34,7 @@ import { GradeLevelsPanel } from "./GradeLevelsPanel";
 import { GroupsPanel } from "./GroupsPanel";
 import { LevelsPanel } from "./LevelsPanel";
 import { TuitionPanel } from "./TuitionPanel";
+import { CalendarPanel } from "./CalendarPanel";
 import { SubjectsPanel } from "./SubjectsPanel";
 import { TermsPanel } from "./TermsPanel";
 
@@ -226,6 +227,7 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
             a director's eyes here, next to the levels it prices.
           */}
           {selectedCycle !== undefined && <TuitionPanel cycle={selectedCycle} levels={levels} />}
+          {selectedCycle !== undefined && <CalendarPanel cycle={selectedCycle} />}
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 18 }}>
             <LevelsPanel levels={levels} selectedLevelId={selectedLevelId} onSelect={setSelectedLevelId} onCreate={handleCreateLevel} />

@@ -381,6 +381,63 @@ func (c *ConfigClient) ListTeachers(ctx context.Context) ([]Teacher, error) {
 	return out, nil
 }
 
+// --- school calendar (M16) -------------------------------------------------
+
+// NonWorkingPeriod is a day, or a run of days, the school does not operate.
+// Dates are plain YYYY-MM-DD: a holiday is a calendar day, and a timestamp
+// would invite a timezone to move it.
+type NonWorkingPeriod struct {
+	ID       string `json:"id"`
+	CycleID  string `json:"cycleId"`
+	Label    string `json:"label"`
+	Kind     string `json:"kind"`
+	StartsOn string `json:"startsOn"`
+	EndsOn   string `json:"endsOn"`
+}
+
+// CreateNonWorkingPeriod adds a holiday, vacation or suspension to a cycle.
+func (c *ConfigClient) CreateNonWorkingPeriod(ctx context.Context, cycleID, label, kind, startsOn, endsOn string) (NonWorkingPeriod, error) {
+	res, err := c.rpc.CreateNonWorkingPeriod(ctx, connect.NewRequest(&configv1.CreateNonWorkingPeriodRequest{
+		CycleId: cycleID, Label: label, Kind: kind, StartsOn: startsOn, EndsOn: endsOn,
+	}))
+	if err != nil {
+		return NonWorkingPeriod{}, err
+	}
+	return toNonWorkingPeriod(res.Msg.GetPeriod()), nil
+}
+
+// ListNonWorkingPeriods lists a cycle's closed days, earliest first.
+func (c *ConfigClient) ListNonWorkingPeriods(ctx context.Context, cycleID string) ([]NonWorkingPeriod, error) {
+	res, err := c.rpc.ListNonWorkingPeriods(ctx, connect.NewRequest(&configv1.ListNonWorkingPeriodsRequest{
+		CycleId: cycleID,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]NonWorkingPeriod, 0, len(res.Msg.GetPeriods()))
+	for _, p := range res.Msg.GetPeriods() {
+		out = append(out, toNonWorkingPeriod(p))
+	}
+	return out, nil
+}
+
+// DeleteNonWorkingPeriod removes one period.
+func (c *ConfigClient) DeleteNonWorkingPeriod(ctx context.Context, id string) error {
+	_, err := c.rpc.DeleteNonWorkingPeriod(ctx, connect.NewRequest(&configv1.DeleteNonWorkingPeriodRequest{Id: id}))
+	return err
+}
+
+func toNonWorkingPeriod(p *configv1.NonWorkingPeriod) NonWorkingPeriod {
+	return NonWorkingPeriod{
+		ID:       p.GetId(),
+		CycleID:  p.GetCycleId(),
+		Label:    p.GetLabel(),
+		Kind:     p.GetKind(),
+		StartsOn: p.GetStartsOn(),
+		EndsOn:   p.GetEndsOn(),
+	}
+}
+
 // --- teaching_assignments -------------------------------------------------
 
 // CreateTeachingAssignment binds a teacher to a (group, subject). The config

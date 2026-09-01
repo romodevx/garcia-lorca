@@ -26,6 +26,11 @@ type fakeConfig struct {
 	levelIn client.CreateLevelInput
 	levels  []client.LevelResult
 
+	periodIn      client.NonWorkingPeriod
+	periods       []client.NonWorkingPeriod
+	periodsCycle  string
+	deletedPeriod string
+
 	gradeLevelIn   client.CreateGradeLevelInput
 	gradeLevels    []client.GradeLevelResult
 	gradeLevelsFor string // captured level_id filter on list
@@ -58,6 +63,24 @@ type fakeConfig struct {
 	asgTeacher    string
 
 	err error
+}
+
+func (f *fakeConfig) CreateNonWorkingPeriod(_ context.Context, cycleID, label, kind, startsOn, endsOn string) (client.NonWorkingPeriod, error) {
+	f.periodIn = client.NonWorkingPeriod{CycleID: cycleID, Label: label, Kind: kind, StartsOn: startsOn, EndsOn: endsOn}
+	if f.err != nil {
+		return client.NonWorkingPeriod{}, f.err
+	}
+	return client.NonWorkingPeriod{ID: "per-1", CycleID: cycleID, Label: label, Kind: kind, StartsOn: startsOn, EndsOn: endsOn}, nil
+}
+
+func (f *fakeConfig) ListNonWorkingPeriods(_ context.Context, cycleID string) ([]client.NonWorkingPeriod, error) {
+	f.periodsCycle = cycleID
+	return f.periods, f.err
+}
+
+func (f *fakeConfig) DeleteNonWorkingPeriod(_ context.Context, id string) error {
+	f.deletedPeriod = id
+	return f.err
 }
 
 func (f *fakeConfig) CreateCycle(_ context.Context, in client.CreateCycleInput) (client.CycleResult, error) {
@@ -478,4 +501,37 @@ func (f *fakeConfig) ActivateCycle(_ context.Context, id string) (client.CycleRe
 		return client.CycleResult{}, f.err
 	}
 	return client.CycleResult{ID: id, Name: "2026-2027", Status: "active"}, nil
+}
+
+// --- school calendar (M16) -------------------------------------------------
+
+// A single-day holiday is entered once, not twice. Making a person type the
+// same date in two fields is how a calendar stops getting maintained.
+func TestConfigSingleDayHolidayNeedsOnlyOneDate(t *testing.T) {
+	svc := &fakeConfig{}
+	h := handler.NewConfigHandler(svc)
+
+	rec := doReq(t, h.CreateNonWorkingPeriod, http.MethodPost, "/api/v1/config/calendar",
+		`{"cycleId":"c1","label":"Independencia","kind":"holiday","startsOn":"2026-09-16"}`)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+	if svc.periodIn.EndsOn != "2026-09-16" {
+		t.Errorf("endsOn forwarded as %q, want the start date filled in", svc.periodIn.EndsOn)
+	}
+}
+
+func TestConfigListNonWorkingPeriodsScopesToTheCycle(t *testing.T) {
+	svc := &fakeConfig{periods: []client.NonWorkingPeriod{{ID: "per-1", Label: "Independencia"}}}
+	h := handler.NewConfigHandler(svc)
+
+	rec := doReq(t, h.ListNonWorkingPeriods, http.MethodGet, "/api/v1/config/calendar?cycleId=c1", "")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if svc.periodsCycle != "c1" {
+		t.Errorf("forwarded cycle = %q, want c1", svc.periodsCycle)
+	}
 }

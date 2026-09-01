@@ -565,6 +565,99 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
 
+  /api/v1/config/calendar:
+    get:
+      tags: [config]
+      summary: The days the school is closed
+      description: >
+        Holidays, vacations and suspensions for one cycle. Not decoration: the
+        early-payment window is counted in WORKING days, so a holiday nobody
+        entered moves a family's deadline — quietly, and in the school's favour.
+      operationId: listNonWorkingPeriods
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: cycleId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The cycle's closed days, earliest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [periods]
+                properties:
+                  periods:
+                    type: array
+                    items: { $ref: '#/components/schemas/NonWorkingPeriod' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+    post:
+      tags: [config]
+      summary: Close a day, or a run of days
+      description: >
+        A single holiday needs only startsOn — the edge fills in the end. Asking
+        for the same date twice is how a calendar stops being maintained.
+      operationId: createNonWorkingPeriod
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cycleId, label, kind, startsOn]
+              properties:
+                cycleId: { type: string, format: uuid }
+                label:
+                  type: string
+                  minLength: 1
+                  description: What a person reads on the calendar, and in the explanation of a moved deadline.
+                kind: { type: string, enum: [holiday, vacation] }
+                startsOn: { type: string, format: date }
+                endsOn:
+                  type: string
+                  format: date
+                  description: Inclusive. Omitted for a single day.
+      responses:
+        '201':
+          description: The stored period.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NonWorkingPeriod' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+        '409':
+          description: This cycle already has a closure with that name.
+
+  /api/v1/config/calendar/{id}:
+    delete:
+      tags: [config]
+      summary: Remove a day entered by mistake
+      description: >
+        A calendar that cannot be corrected stops being trusted, and the school
+        goes back to a sheet on the wall.
+      operationId: deleteNonWorkingPeriod
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      responses:
+        '204': { description: Removed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
   /api/v1/finance/tuition-plans:
     get:
       tags: [finance-tuition]
@@ -946,6 +1039,21 @@ components:
           description: Fixed surcharge added once per completed overdue month. Zero disables it.
         active: { type: boolean }
         policy: { $ref: '#/components/schemas/CollectionPolicy' }
+
+    NonWorkingPeriod:
+      type: object
+      description: >
+        A day, or a run of days, the school does not operate. Both ends
+        inclusive; a single-day holiday has startsOn == endsOn. Plain calendar
+        dates, never timestamps — a timezone would move a holiday.
+      required: [id, cycleId, label, kind, startsOn, endsOn]
+      properties:
+        id: { type: string, format: uuid }
+        cycleId: { type: string, format: uuid }
+        label: { type: string, example: Independencia }
+        kind: { type: string, enum: [holiday, vacation] }
+        startsOn: { type: string, format: date }
+        endsOn: { type: string, format: date }
 
     CollectionPolicy:
       type: object

@@ -297,6 +297,9 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/config/subjects", configRead(configH.ListSubjects))
 	mux.Handle("POST /api/v1/config/terms", configWrite(configH.CreateTerm))
 	mux.Handle("GET /api/v1/config/terms", configRead(configH.ListTerms))
+	mux.Handle("POST /api/v1/config/calendar", configWrite(configH.CreateNonWorkingPeriod))
+	mux.Handle("GET /api/v1/config/calendar", configRead(configH.ListNonWorkingPeriods))
+	mux.Handle("DELETE /api/v1/config/calendar/{id}", configWrite(configH.DeleteNonWorkingPeriod))
 	mux.Handle("POST /api/v1/config/groups", configWrite(configH.CreateGroup))
 	mux.Handle("GET /api/v1/config/groups", configRead(configH.ListGroups))
 

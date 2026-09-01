@@ -173,7 +173,9 @@ describe("getAccount", () => {
 
     const res = await getAccount(BASE, "st1");
 
-    expect(res).toEqual({ charges: [charge], payments: [payment], totalBalanceCents: 185000 });
+    // The statement now also carries the family's credit; an older gateway that
+    // does not send it reads as zero rather than undefined.
+    expect(res).toEqual({ charges: [charge], payments: [payment], totalBalanceCents: 185000, unallocatedCents: 0 });
     const [url, init] = lastCall(fetchMock);
     expect(url).toBe("http://gw/api/v1/finance/accounts/st1");
     expect(init.credentials).toBe("include");
@@ -181,7 +183,7 @@ describe("getAccount", () => {
 
   it("defaults the statement to empty lists and a zero balance", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({})));
-    await expect(getAccount(BASE, "st1")).resolves.toEqual({ charges: [], payments: [], totalBalanceCents: 0 });
+    await expect(getAccount(BASE, "st1")).resolves.toEqual({ charges: [], payments: [], totalBalanceCents: 0, unallocatedCents: 0 });
   });
 });
 

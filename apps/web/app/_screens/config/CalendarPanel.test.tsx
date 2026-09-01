@@ -1,0 +1,74 @@
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import * as configApi from "../../config/api";
+import { CalendarPanel } from "./CalendarPanel";
+
+vi.mock("../../config/api", () => ({
+  listNonWorkingPeriods: vi.fn(),
+  createNonWorkingPeriod: vi.fn(),
+  deleteNonWorkingPeriod: vi.fn(),
+}));
+const config = vi.mocked(configApi);
+
+const cycle = { id: "c1", name: "2026-2027", status: "active" as const, startsOn: "2026-08-01", endsOn: "2027-06-30" };
+
+beforeEach(() => {
+  config.listNonWorkingPeriods.mockResolvedValue([
+    { id: "per-1", cycleId: "c1", label: "Independencia", kind: "holiday", startsOn: "2026-09-16", endsOn: "2026-09-16" },
+  ]);
+});
+afterEach(() => vi.clearAllMocks());
+
+describe("CalendarPanel", () => {
+  it("lists the days the school is closed", async () => {
+    render(<CalendarPanel cycle={cycle} />);
+
+    expect(await screen.findByText("Independencia")).toBeInTheDocument();
+  });
+
+  // A single holiday is one date. Making a person type it twice is how a
+  // calendar stops being maintained, and an unmaintained calendar quietly moves
+  // every early-payment deadline.
+  it("adds a single-day holiday from one date", async () => {
+    const user = userEvent.setup();
+    config.createNonWorkingPeriod.mockResolvedValue({
+      id: "per-2", cycleId: "c1", label: "Revolución", kind: "holiday", startsOn: "2026-11-20", endsOn: "2026-11-20",
+    });
+    render(<CalendarPanel cycle={cycle} />);
+    await screen.findByText("Independencia");
+
+    await user.type(screen.getByLabelText("Nombre"), "Revolución");
+    await user.type(screen.getByLabelText("Del día"), "2026-11-20");
+    await user.click(screen.getByRole("button", { name: /Agregar/ }));
+
+    await waitFor(() => expect(config.createNonWorkingPeriod).toHaveBeenCalled());
+    const sent = config.createNonWorkingPeriod.mock.calls[0]?.[1];
+    expect(sent?.label).toBe("Revolución");
+    expect(sent?.startsOn).toBe("2026-11-20");
+    expect(sent?.endsOn).toBeUndefined();
+  });
+
+  it("refuses to add a closure with no name", async () => {
+    const user = userEvent.setup();
+    render(<CalendarPanel cycle={cycle} />);
+    await screen.findByText("Independencia");
+
+    await user.type(screen.getByLabelText("Del día"), "2026-11-20");
+    await user.click(screen.getByRole("button", { name: /Agregar/ }));
+
+    expect(config.createNonWorkingPeriod).not.toHaveBeenCalled();
+  });
+
+  it("removes a day entered by mistake", async () => {
+    const user = userEvent.setup();
+    config.deleteNonWorkingPeriod.mockResolvedValue(undefined);
+    render(<CalendarPanel cycle={cycle} />);
+    await screen.findByText("Independencia");
+
+    await user.click(screen.getByRole("button", { name: /Quitar Independencia/ }));
+
+    await waitFor(() => expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-1"));
+  });
+});

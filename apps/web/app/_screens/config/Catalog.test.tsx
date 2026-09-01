@@ -21,6 +21,9 @@ vi.mock("../../config/api", () => ({
   createGroup: vi.fn(),
   listTerms: vi.fn(),
   createTerm: vi.fn(),
+  listNonWorkingPeriods: vi.fn(),
+  createNonWorkingPeriod: vi.fn(),
+  deleteNonWorkingPeriod: vi.fn(),
 }));
 
 const mocked = vi.mocked(api);
@@ -29,6 +32,7 @@ beforeEach(() => {
   mocked.listCycles.mockResolvedValue([]);
   mocked.listLevels.mockResolvedValue([]);
   mocked.listGradeLevels.mockResolvedValue([]);
+  mocked.listNonWorkingPeriods.mockResolvedValue([]);
   mocked.listSubjects.mockResolvedValue([]);
   mocked.listGroups.mockResolvedValue([]);
   mocked.listTerms.mockResolvedValue([]);
