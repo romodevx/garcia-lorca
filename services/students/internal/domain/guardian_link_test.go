@@ -83,3 +83,42 @@ func TestParseRelationshipNormalizesAndRejects(t *testing.T) {
 		})
 	}
 }
+
+// A grandmother who may collect the child is a contact the school needs, and
+// she has no reason to have a login. Requiring one is why the office kept the
+// second number on paper.
+func TestAContactMayHaveNoAccount(t *testing.T) {
+	link, err := domain.NewContact("gl-1", "t1", "st-1", domain.RelationshipOther,
+		domain.ContactPerson{FullName: "Rosa Méndez", Phone: "5551234567"})
+	if err != nil {
+		t.Fatalf("NewContact: %v", err)
+	}
+	if link.GuardianUserID() != "" {
+		t.Errorf("user id = %q, want empty — this contact has no account", link.GuardianUserID())
+	}
+	if link.FullName() != "Rosa Méndez" || link.Phone() != "5551234567" {
+		t.Errorf("contact wrong: %+v", link)
+	}
+}
+
+// A contact with neither an account nor a name is nobody, and a row for nobody
+// is a phone number the office cannot use.
+func TestAContactMustBeSomebody(t *testing.T) {
+	_, err := domain.NewContact("gl-1", "t1", "st-1", domain.RelationshipOther, domain.ContactPerson{Phone: "5551234567"})
+	if glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("nameless account-less contact: want KindInvalid, got %v", err)
+	}
+}
+
+// A guardian with an account keeps working exactly as before, and may now also
+// carry the phone that actually answers.
+func TestALinkedGuardianCanCarryAPhone(t *testing.T) {
+	link, err := domain.NewGuardianLink("gl-1", "t1", "user-1", "st-1", domain.RelationshipMother)
+	if err != nil {
+		t.Fatalf("NewGuardianLink: %v", err)
+	}
+	withPhone := link.WithPerson(domain.ContactPerson{FullName: "Ana Cruz", Phone: "5559876543"})
+	if withPhone.Phone() != "5559876543" || withPhone.GuardianUserID() != "user-1" {
+		t.Errorf("contact details did not attach: %+v", withPhone)
+	}
+}

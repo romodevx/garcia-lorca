@@ -28,7 +28,24 @@ type fakeGuardians struct {
 	listStudentID string
 	links         []client.GuardianLink
 
+	contactStudentID string
+	contactName      string
+	contactPhone     string
+	contact          client.GuardianLink
+
 	err error
+}
+
+func (f *fakeGuardians) AddContact(_ context.Context, studentID, relationship, fullName, phone, email string) (client.GuardianLink, error) {
+	f.contactStudentID, f.contactName, f.contactPhone = studentID, fullName, phone
+	if f.err != nil {
+		return client.GuardianLink{}, f.err
+	}
+	f.contact = client.GuardianLink{
+		ID: "gl-9", StudentID: studentID, Relationship: relationship,
+		FullName: fullName, Phone: phone, Email: email,
+	}
+	return f.contact, nil
 }
 
 func (f *fakeGuardians) LinkGuardian(_ context.Context, guardianUserID, studentID, relationship string) (client.GuardianLink, error) {
@@ -223,5 +240,33 @@ func TestListGuardiansForStudentPropagatesErrorKind(t *testing.T) {
 	h.ListGuardiansForStudent(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+// A contact with no account is the ordinary case, and the response has to say
+// plainly that this person cannot open the app — otherwise the office assumes
+// they can and stops calling.
+func TestAddContactReturnsSomebodyWithoutAnAccount(t *testing.T) {
+	svc := &fakeGuardians{}
+	h := handler.NewGuardiansHandler(svc)
+
+	rec := doReq(t, h.AddContact, http.MethodPost, "/api/v1/contacts",
+		`{"studentId":"stu-1","relationship":"other","fullName":"Rosa Méndez","phone":"5551234567"}`)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+	if svc.contactName != "Rosa Méndez" || svc.contactPhone != "5551234567" {
+		t.Errorf("forwarded %q / %q", svc.contactName, svc.contactPhone)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["hasAccount"] != false {
+		t.Errorf("hasAccount = %v, want false", body["hasAccount"])
+	}
+	if body["phone"] != "5551234567" {
+		t.Errorf("phone = %v", body["phone"])
 	}
 }

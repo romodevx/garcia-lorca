@@ -565,6 +565,53 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
 
+  /api/v1/contacts:
+    post:
+      tags: [students]
+      summary: Record somebody the school can call
+      description: >
+        A contact is a person, not an account: a grandmother who may collect the
+        child, or the phone that actually answers. Most of a pupil's contacts are
+        these.
+
+
+        Separate from linking a guardian, because the two answer different
+        questions — one grants access to the family app, the other writes down
+        the number that answers. Conflating them is why the second number stayed
+        on paper and the system showed one contact per pupil as though that were
+        the truth.
+      operationId: addContact
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [studentId, relationship, fullName]
+              properties:
+                studentId: { type: string, format: uuid }
+                relationship: { type: string, enum: [mother, father, guardian, other] }
+                fullName:
+                  type: string
+                  minLength: 1
+                  description: >
+                    Required. A phone number with no name attached is a number
+                    nobody can use.
+                phone: { type: string }
+                email: { type: string }
+      responses:
+        '201':
+          description: The stored contact. hasAccount is false unless they can open the family app.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Contact' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
   /api/v1/comms/announcements:
     post:
       tags: [comms]
@@ -1141,6 +1188,27 @@ components:
           description: Fixed surcharge added once per completed overdue month. Zero disables it.
         active: { type: boolean }
         policy: { $ref: '#/components/schemas/CollectionPolicy' }
+
+    Contact:
+      type: object
+      description: >
+        Somebody the school can reach about a pupil. A contact WITH an account
+        is a family that can open the app; one without is a phone number the
+        office calls. Both are contacts, and there is one list.
+      required: [id, studentId, relationship, hasAccount]
+      properties:
+        id: { type: string, format: uuid }
+        studentId: { type: string, format: uuid }
+        guardianUserId:
+          type: string
+          description: Empty when the contact has no account.
+        relationship: { type: string, enum: [mother, father, guardian, other] }
+        fullName: { type: string }
+        phone: { type: string }
+        email: { type: string }
+        hasAccount:
+          type: boolean
+          description: Whether this contact can open the family app.
 
     NonWorkingPeriod:
       type: object

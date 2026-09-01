@@ -92,18 +92,33 @@ func guardianLinkToDomain(m guardianStudentModel) (domain.GuardianLink, error) {
 	if err != nil {
 		return domain.GuardianLink{}, glerrors.Wrap(glerrors.KindInternal, "unknown relationship in db", err)
 	}
-	return domain.NewGuardianLink(m.ID, m.TenantID, m.GuardianUserID, m.StudentID, rel)
+	person := domain.ContactPerson{FullName: m.FullName, Phone: m.Phone, Email: m.Email}
+	if m.GuardianUserID == nil || *m.GuardianUserID == "" {
+		return domain.NewContact(m.ID, m.TenantID, m.StudentID, rel, person)
+	}
+	link, err := domain.NewGuardianLink(m.ID, m.TenantID, *m.GuardianUserID, m.StudentID, rel)
+	if err != nil {
+		return domain.GuardianLink{}, err
+	}
+	return link.WithPerson(person), nil
 }
 
 // guardianLinkFromDomain projects a domain GuardianLink into its GORM row.
 func guardianLinkFromDomain(l domain.GuardianLink) guardianStudentModel {
-	return guardianStudentModel{
-		ID:             l.ID(),
-		TenantID:       l.TenantID(),
-		GuardianUserID: l.GuardianUserID(),
-		StudentID:      l.StudentID(),
-		Relationship:   l.Relationship().String(),
+	m := guardianStudentModel{
+		ID:           l.ID(),
+		TenantID:     l.TenantID(),
+		StudentID:    l.StudentID(),
+		Relationship: l.Relationship().String(),
+		FullName:     l.FullName(),
+		Phone:        l.Phone(),
+		Email:        l.Email(),
 	}
+	if l.HasAccount() {
+		userID := l.GuardianUserID()
+		m.GuardianUserID = &userID
+	}
+	return m
 }
 
 // transferFromDomain projects a domain EnrollmentTransfer into its GORM row.

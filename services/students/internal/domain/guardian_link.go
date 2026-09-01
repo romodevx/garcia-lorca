@@ -62,19 +62,67 @@ type GuardianLink struct {
 	guardianUserID string
 	studentID      string
 	relationship   Relationship
+	person         ContactPerson
 }
 
-// NewGuardianLink builds a validated GuardianLink. Every identity reference is
-// required and the relationship must be a real one.
-func NewGuardianLink(id, tenantID, guardianUserID, studentID string, relationship Relationship) (GuardianLink, error) {
+// ContactPerson is who to call: the details of a contact that have nothing to do
+// with whether they can log in.
+//
+// They exist because most of a pupil's contacts have no account. A grandmother
+// who may collect the child, or the father whose phone actually answers, is
+// somebody the school needs recorded — and requiring a login first is why the
+// office kept the second number on paper.
+type ContactPerson struct {
+	FullName string
+	Phone    string
+	Email    string
+}
+
+// NewContact builds a contact who may have no account at all: a name and,
+// usually, a phone. A contact with neither an account nor a name is nobody, and
+// a row for nobody is a number the office cannot use.
+func NewContact(id, tenantID, studentID string, relationship Relationship, person ContactPerson) (GuardianLink, error) {
+	if strings.TrimSpace(person.FullName) == "" {
+		return GuardianLink{}, glerrors.New(glerrors.KindInvalid, "a contact without an account needs a name")
+	}
+	link, err := newLink(id, tenantID, studentID, relationship)
+	if err != nil {
+		return GuardianLink{}, err
+	}
+	return link.WithPerson(person), nil
+}
+
+// WithPerson attaches (or replaces) the contact details. A guardian with an
+// account may carry a phone too: the account says who can log in, the phone says
+// who answers, and they are not the same question.
+func (l GuardianLink) WithPerson(person ContactPerson) GuardianLink {
+	l.person = ContactPerson{
+		FullName: strings.TrimSpace(person.FullName),
+		Phone:    strings.TrimSpace(person.Phone),
+		Email:    strings.TrimSpace(person.Email),
+	}
+	return l
+}
+
+// FullName is the contact's name as the office would read it aloud.
+func (l GuardianLink) FullName() string { return l.person.FullName }
+
+// Phone is the number to call. Empty for a contact recorded only as an account.
+func (l GuardianLink) Phone() string { return l.person.Phone }
+
+// Email is the contact's address, if the school has one.
+func (l GuardianLink) Email() string { return l.person.Email }
+
+// HasAccount reports whether this contact can open the family app.
+func (l GuardianLink) HasAccount() bool { return l.guardianUserID != "" }
+
+// newLink is the part both constructors share: identity and relationship.
+func newLink(id, tenantID, studentID string, relationship Relationship) (GuardianLink, error) {
 	if strings.TrimSpace(id) == "" {
 		return GuardianLink{}, glerrors.New(glerrors.KindInvalid, "guardian link id is required")
 	}
 	if strings.TrimSpace(tenantID) == "" {
 		return GuardianLink{}, glerrors.New(glerrors.KindInvalid, "tenant id is required")
-	}
-	if strings.TrimSpace(guardianUserID) == "" {
-		return GuardianLink{}, glerrors.New(glerrors.KindInvalid, "guardian user id is required")
 	}
 	if strings.TrimSpace(studentID) == "" {
 		return GuardianLink{}, glerrors.New(glerrors.KindInvalid, "student id is required")
@@ -83,12 +131,22 @@ func NewGuardianLink(id, tenantID, guardianUserID, studentID string, relationshi
 		return GuardianLink{}, glerrors.New(glerrors.KindInvalid, "a valid relationship is required")
 	}
 	return GuardianLink{
-		id:             id,
-		tenantID:       tenantID,
-		guardianUserID: guardianUserID,
-		studentID:      studentID,
-		relationship:   relationship,
+		id: id, tenantID: tenantID, studentID: studentID, relationship: relationship,
 	}, nil
+}
+
+// NewGuardianLink builds a validated GuardianLink. Every identity reference is
+// required and the relationship must be a real one.
+func NewGuardianLink(id, tenantID, guardianUserID, studentID string, relationship Relationship) (GuardianLink, error) {
+	if strings.TrimSpace(guardianUserID) == "" {
+		return GuardianLink{}, glerrors.New(glerrors.KindInvalid, "guardian user id is required")
+	}
+	link, err := newLink(id, tenantID, studentID, relationship)
+	if err != nil {
+		return GuardianLink{}, err
+	}
+	link.guardianUserID = guardianUserID
+	return link, nil
 }
 
 // Accessors.

@@ -234,11 +234,16 @@ func (c *StudentsClient) WithdrawEnrollment(ctx context.Context, id string) (Enr
 // own their own tables, so it is not an FK). Relationship is one of
 // mother|father|guardian|other.
 type GuardianLink struct {
-	ID             string
-	TenantID       string
+	ID string
+	// GuardianUserID is empty for a contact with no account: a grandmother the
+	// school can call, rather than a family that can open the app.
 	GuardianUserID string
+	TenantID       string
 	StudentID      string
 	Relationship   string
+	FullName       string
+	Phone          string
+	Email          string
 }
 
 // LinkGuardian links a guardian (an iam user) to a student. Connect error codes
@@ -257,6 +262,22 @@ func (c *StudentsClient) LinkGuardian(ctx context.Context, guardianUserID, stude
 		return GuardianLink{}, err
 	}
 	return toGuardianLink(res.Msg.GetLink()), nil
+}
+
+// AddContact records somebody the school can reach about a pupil, with no
+// account and no login.
+func (c *StudentsClient) AddContact(ctx context.Context, studentID, relationship, fullName, phone, email string) (GuardianLink, error) {
+	res, err := c.rpc.AddContact(ctx, connect.NewRequest(&studentsv1.AddContactRequest{
+		StudentId:    studentID,
+		Relationship: relationship,
+		FullName:     fullName,
+		Phone:        phone,
+		Email:        email,
+	}))
+	if err != nil {
+		return GuardianLink{}, err
+	}
+	return toGuardianLink(res.Msg.GetContact()), nil
 }
 
 // UnlinkGuardian removes a guardian↔student link. It is NOT idempotent: the
@@ -310,6 +331,9 @@ func toGuardianLink(l *studentsv1.GuardianLink) GuardianLink {
 		GuardianUserID: l.GetGuardianUserId(),
 		StudentID:      l.GetStudentId(),
 		Relationship:   l.GetRelationship(),
+		FullName:       l.GetFullName(),
+		Phone:          l.GetPhone(),
+		Email:          l.GetEmail(),
 	}
 }
 

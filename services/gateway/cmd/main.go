@@ -272,6 +272,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 		return guard.Protect("students", requireAuthChanged(middleware.RequirePermission("guardians:read")(http.HandlerFunc(h))))
 	}
 	mux.Handle("POST /api/v1/guardians", guardiansWrite(guardiansH.LinkGuardian))
+	mux.Handle("POST /api/v1/contacts", guardiansWrite(guardiansH.AddContact))
 	mux.Handle("POST /api/v1/guardians/unlink", guardiansWrite(guardiansH.UnlinkGuardian))
 	mux.Handle("GET /api/v1/students/{studentId}/guardians", guardiansRead(guardiansH.ListGuardiansForStudent))
 

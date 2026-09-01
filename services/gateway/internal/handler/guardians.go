@@ -12,6 +12,7 @@ import (
 // StudentsClient implements it.
 type GuardiansService interface {
 	LinkGuardian(ctx context.Context, guardianUserID, studentID, relationship string) (client.GuardianLink, error)
+	AddContact(ctx context.Context, studentID, relationship, fullName, phone, email string) (client.GuardianLink, error)
 	UnlinkGuardian(ctx context.Context, guardianUserID, studentID string) error
 	ListGuardiansForStudent(ctx context.Context, studentID string) ([]client.GuardianLink, error)
 }
@@ -59,6 +60,12 @@ type guardianLinkResponse struct {
 	GuardianUserID string `json:"guardianUserId"`
 	StudentID      string `json:"studentId"`
 	Relationship   string `json:"relationship"`
+	FullName       string `json:"fullName"`
+	Phone          string `json:"phone"`
+	Email          string `json:"email"`
+	// HasAccount is what the screen actually asks: can this contact open the
+	// family app, or is it a phone number the office calls?
+	HasAccount bool `json:"hasAccount"`
 }
 
 func toGuardianLinkResponse(l client.GuardianLink) guardianLinkResponse {
@@ -68,6 +75,10 @@ func toGuardianLinkResponse(l client.GuardianLink) guardianLinkResponse {
 		GuardianUserID: l.GuardianUserID,
 		StudentID:      l.StudentID,
 		Relationship:   l.Relationship,
+		FullName:       l.FullName,
+		Phone:          l.Phone,
+		Email:          l.Email,
+		HasAccount:     l.GuardianUserID != "",
 	}
 }
 
@@ -108,6 +119,35 @@ func (h *GuardiansHandler) UnlinkGuardian(w http.ResponseWriter, r *http.Request
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// contactRequest is a person, not an account.
+type contactRequest struct {
+	StudentID    string `json:"studentId"`
+	Relationship string `json:"relationship"`
+	FullName     string `json:"fullName"`
+	Phone        string `json:"phone"`
+	Email        string `json:"email"`
+}
+
+// AddContact handles POST /api/v1/contacts — record somebody the school can
+// reach about a pupil, with no account and no login.
+//
+// It is separate from LinkGuardian because the two answer different questions:
+// one grants access to the family app, the other writes down the number that
+// answers. Conflating them is why the school kept the second number on paper.
+func (h *GuardiansHandler) AddContact(w http.ResponseWriter, r *http.Request) {
+	var req contactRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	contact, err := h.svc.AddContact(r.Context(), req.StudentID, req.Relationship, req.FullName, req.Phone, req.Email)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, toGuardianLinkResponse(contact))
 }
 
 // ListGuardiansForStudent handles GET /api/v1/students/{studentId}/guardians —

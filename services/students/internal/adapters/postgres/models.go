@@ -62,11 +62,18 @@ func (enrollmentTransferModel) TableName() string { return "enrollment_transfers
 // link between a guardian (an iam user — a plain UUID, RPC-validated, never an FK)
 // and a student of this context.
 type guardianStudentModel struct {
-	ID             string `gorm:"column:id;primaryKey"`
-	TenantID       string `gorm:"column:tenant_id"`
-	GuardianUserID string `gorm:"column:guardian_user_id"`
-	StudentID      string `gorm:"column:student_id"`
-	Relationship   string `gorm:"column:relationship"`
+	ID string `gorm:"column:id;primaryKey"`
+	// GuardianUserID is NULL for a contact with no account — a grandmother the
+	// school can call. It is *string and not "" because the UNIQUE index depends
+	// on it: Postgres does not collide NULLs, which is exactly what lets one
+	// pupil have several account-less contacts.
+	GuardianUserID *string `gorm:"column:guardian_user_id"`
+	TenantID       string  `gorm:"column:tenant_id"`
+	StudentID      string  `gorm:"column:student_id"`
+	Relationship   string  `gorm:"column:relationship"`
+	FullName       string  `gorm:"column:full_name"`
+	Phone          string  `gorm:"column:phone"`
+	Email          string  `gorm:"column:email"`
 	CreatedAt      time.Time
 }
 

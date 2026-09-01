@@ -195,6 +195,23 @@ func (h *StudentsHandler) LinkGuardian(ctx context.Context, req *connect.Request
 	return connect.NewResponse(&studentsv1.LinkGuardianResponse{Link: toProtoGuardianLink(link)}), nil
 }
 
+// AddContact records somebody the school can reach about a pupil, with no
+// account.
+func (h *StudentsHandler) AddContact(ctx context.Context, req *connect.Request[studentsv1.AddContactRequest]) (*connect.Response[studentsv1.AddContactResponse], error) {
+	m := req.Msg
+	contact, err := h.guardian.AddContact(ctx, usecase.ContactInput{
+		StudentID:    m.GetStudentId(),
+		Relationship: m.GetRelationship(),
+		FullName:     m.GetFullName(),
+		Phone:        m.GetPhone(),
+		Email:        m.GetEmail(),
+	})
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.AddContactResponse{Contact: toProtoGuardianLink(contact)}), nil
+}
+
 // UnlinkGuardian removes a guardian ↔ student link. An unknown link is NotFound.
 func (h *StudentsHandler) UnlinkGuardian(ctx context.Context, req *connect.Request[studentsv1.UnlinkGuardianRequest]) (*connect.Response[studentsv1.UnlinkGuardianResponse], error) {
 	m := req.Msg
@@ -258,6 +275,9 @@ func toProtoGuardianLink(l domain.GuardianLink) *studentsv1.GuardianLink {
 		GuardianUserId: l.GuardianUserID(),
 		StudentId:      l.StudentID(),
 		Relationship:   l.Relationship().String(),
+		FullName:       l.FullName(),
+		Phone:          l.Phone(),
+		Email:          l.Email(),
 	}
 }
 
