@@ -11,14 +11,22 @@
 # service, which is reversible in one command.
 name: Deploy dev
 
+# Runs AFTER CI finishes on dev, not in parallel with it.
+#
+# This used to trigger on push and then poll for CI with a third-party action.
+# That action failed on every single real run — it needs permissions the job
+# does not obviously need, and reports a 403 as a Ruby backtrace from octokit,
+# so each failure cost a diagnosis. workflow_run is the native mechanism for
+# exactly this and removes both the dependency and the polling.
+#
+# NOTE: a workflow_run workflow always runs the version of THIS FILE on the
+# default branch, not the version in the commit that triggered it. Editing it on
+# a feature branch has no effect until it lands there.
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [dev]
-    # Documentation and plan changes cannot alter a running service.
-    paths-ignore:
-      - "**/*.md"
-      - ".claude/**"
-      - "docs/**"
   workflow_dispatch:
 
 # Never let two deploys race onto the same services. A newer push supersedes an
@@ -28,12 +36,10 @@ concurrency:
   cancel-in-progress: true
 
 # Declaring a permissions block opts OUT of the defaults, so every scope the job
-# needs has to be listed. Omitting `checks: read` is what made the first real run
-# die in 25s: the wait-on-check step cannot query check runs without it, and the
-# failure surfaces as a Ruby stack trace from octokit rather than "403".
+# needs must be listed. `checks: read` used to be here for the polling step; the
+# workflow_run trigger replaced it and needs no check access at all.
 permissions:
   contents: read
-  checks: read # read the CI check runs on this commit
   id-token: write # mint the OIDC token for keyless auth to Google
 
 env:
@@ -45,19 +51,22 @@ jobs:
   deploy:
     name: build images and roll out
     runs-on: ubuntu-latest
-    # Do not deploy a commit whose tests did not pass. CI runs on the same push;
-    # this waits for it rather than duplicating it.
+    # A red CI must never reach the demo. workflow_dispatch has no triggering
+    # run, so it is allowed through deliberately — a manual deploy is a human
+    # decision.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     steps:
+      # Check out the commit CI actually tested, not whatever dev points at now.
+      # They differ the moment two pushes land close together, and deploying an
+      # untested tree is the exact thing this gate exists to prevent.
       - uses: actions/checkout@v4
-
-      - name: Wait for CI to pass on this commit
-        uses: lewagon/wait-on-check-action@v1.3.4
         with:
-          ref: ${{ github.sha }}
-          check-name: "ci"
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 20
-          allowed-conclusions: success
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Resolve the commit being deployed
+        run: echo "SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - id: auth
         name: Authenticate to Google Cloud (keyless)
@@ -74,7 +83,7 @@ jobs:
           gcloud builds submit \
             --project="$PROJECT_ID" \
             --config=deploy/cloudbuild/cloudbuild.yaml \
-            --substitutions=_TAG="$GITHUB_SHA",_DEPLOY=false \
+            --substitutions=_TAG="$SHA",_DEPLOY=false \
             --service-account="projects/$PROJECT_ID/serviceAccounts/${{ vars.GCP_DEPLOY_SA }}"
 
       - name: Roll out the new revisions
@@ -84,7 +93,7 @@ jobs:
             echo "--- $svc"
             gcloud run services update "$svc" \
               --project="$PROJECT_ID" --region="$REGION" --quiet \
-              --image="$REGION-docker.pkg.dev/$PROJECT_ID/$AR_REPO/$svc:$GITHUB_SHA"
+              --image="$REGION-docker.pkg.dev/$PROJECT_ID/$AR_REPO/$svc:$SHA"
           done
 
       - name: Smoke test — the demo must actually answer
