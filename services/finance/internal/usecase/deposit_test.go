@@ -255,3 +255,37 @@ func TestPayingLateTakesNoDiscount(t *testing.T) {
 		t.Errorf("unallocated = %d, want 0", got.UnallocatedCents)
 	}
 }
+
+// Before taking the money, the cashier has to be able to say out loud what it
+// will cover. The preview runs the same split as the real thing and writes
+// nothing.
+func TestPreviewShowsTheSplitWithoutTakingTheMoney(t *testing.T) {
+	f := depositFixture(t)
+
+	preview, err := f.svc.PreviewDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 670000, Method: domain.MethodCash,
+		PaidAt: time.Date(2026, time.October, 10, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("PreviewDeposit: %v", err)
+	}
+	if len(preview.Allocations) != 3 {
+		t.Errorf("preview split into %d, want 3 (September, its surcharge, October)", len(preview.Allocations))
+	}
+	if preview.UnallocatedCents != 0 {
+		t.Errorf("preview credit = %d, want 0", preview.UnallocatedCents)
+	}
+
+	account, err := f.svc.GetAccount(context.Background(), testStudent)
+	if err != nil {
+		t.Fatalf("GetAccount: %v", err)
+	}
+	if len(account.Payments) != 1 {
+		// Only the inscription the fixture settled. A preview that collected
+		// money would show up here.
+		t.Errorf("the preview moved money: %d payments on the account", len(account.Payments))
+	}
+	if account.TotalBalanceCents != 640000 {
+		t.Errorf("balance = %d after a preview, want the untouched 640000", account.TotalBalanceCents)
+	}
+}

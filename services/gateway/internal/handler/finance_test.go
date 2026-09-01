@@ -90,6 +90,11 @@ func (f *fakeFinance) RegisterDeposit(_ context.Context, studentID string, amoun
 	return f.depositResult, nil
 }
 
+func (f *fakeFinance) PreviewDeposit(_ context.Context, studentID string, amountCents int64, paidAt time.Time) (client.DepositResult, error) {
+	f.depositStudent, f.depositAmount, f.depositPaidAt = studentID, amountCents, paidAt
+	return f.depositResult, f.err
+}
+
 func (f *fakeFinance) ListDeposits(_ context.Context, studentID string) ([]client.Deposit, error) {
 	f.depositStudent = studentID
 	return f.deposits, f.err

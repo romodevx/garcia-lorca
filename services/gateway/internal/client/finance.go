@@ -320,6 +320,27 @@ func (c *FinanceClient) RegisterDeposit(ctx context.Context, studentID string, a
 	}, nil
 }
 
+// PreviewDeposit says what an amount would cover, without taking it.
+func (c *FinanceClient) PreviewDeposit(ctx context.Context, studentID string, amountCents int64, paidAt time.Time) (DepositResult, error) {
+	req := &financev1.PreviewDepositRequest{StudentId: studentID, AmountCents: amountCents}
+	if !paidAt.IsZero() {
+		req.PaidAt = timestamppb.New(paidAt)
+	}
+	res, err := c.rpc.PreviewDeposit(ctx, connect.NewRequest(req))
+	if err != nil {
+		return DepositResult{}, err
+	}
+	allocations := make([]Payment, 0, len(res.Msg.GetAllocations()))
+	for _, p := range res.Msg.GetAllocations() {
+		allocations = append(allocations, toPayment(p))
+	}
+	return DepositResult{
+		Allocations:      allocations,
+		Surcharges:       toCharges(res.Msg.GetSurcharges()),
+		UnallocatedCents: res.Msg.GetUnallocatedCents(),
+	}, nil
+}
+
 // ListDeposits returns a student's deposits, newest first.
 func (c *FinanceClient) ListDeposits(ctx context.Context, studentID string) ([]Deposit, error) {
 	res, err := c.rpc.ListDeposits(ctx, connect.NewRequest(&financev1.ListDepositsRequest{

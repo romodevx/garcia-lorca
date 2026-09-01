@@ -56,48 +56,9 @@ type DepositResult struct {
 // Friday. A future date is refused: it is the classic counter typo (2027 for
 // 2026) and it silently lifts the money out of every overdue calculation.
 func (s *FinanceService) RegisterDeposit(ctx context.Context, in DepositInput) (DepositResult, error) {
-	when := in.PaidAt
-	if when.IsZero() {
-		when = s.now()
-	} else if when.After(s.now()) {
-		return DepositResult{}, glerrors.New(glerrors.KindInvalid,
-			"la fecha del pago no puede estar en el futuro")
-	}
-
-	student, err := s.students.ByID(ctx, in.StudentID)
-	if err != nil {
-		return DepositResult{}, glerrors.New(glerrors.KindInvalid, "student not found")
-	}
-
-	calendar, calendarVersion := s.schoolCalendar(ctx, in.StudentID)
-	policy, err := s.policyFor(ctx, student.ID)
+	deposit, planner, err := s.prepareDeposit(ctx, in)
 	if err != nil {
 		return DepositResult{}, err
-	}
-	lateFee, err := s.repo.EnsureConceptOfKind(ctx, s.newID(), domain.KindLateFee, lateFeeConceptName)
-	if err != nil {
-		return DepositResult{}, err
-	}
-	tuition, err := s.repo.EnsureConceptOfKind(ctx, s.newID(), domain.KindTuition, tuitionConceptName)
-	if err != nil {
-		return DepositResult{}, err
-	}
-
-	deposit, err := domain.NewDeposit(s.newID(), s.tenantID, in.StudentID, in.AmountCents,
-		in.Method, in.Reference, when, in.IdempotencyKey, calendarVersion)
-	if err != nil {
-		return DepositResult{}, err
-	}
-
-	planner := &depositPlanner{
-		svc:         s,
-		deposit:     deposit,
-		policy:      policy,
-		calendar:    calendar,
-		lateFeeID:   lateFee.ID(),
-		tuitionID:   tuition.ID(),
-		paidOn:      when,
-		description: lateFeeConceptName,
 	}
 
 	record, replayed, err := s.repo.RegisterDeposit(ctx, deposit, planner.plan)
@@ -113,6 +74,85 @@ func (s *FinanceService) RegisterDeposit(ctx context.Context, in DepositInput) (
 		Allocations:      record.Allocations,
 		UnallocatedCents: record.UnallocatedCents,
 		Replayed:         replayed,
+	}, nil
+}
+
+// PreviewDeposit says what an amount would cover, without taking it.
+//
+// A cashier has to be able to tell a parent what their money pays for BEFORE
+// taking it. It runs the same split as the real thing — same rule, same order,
+// same surcharge arithmetic — and writes nothing.
+//
+// It is a projection, not a promise. The charges are read without the lock the
+// real call takes, so a payment landing between the preview and the deposit
+// changes the answer. That is the correct trade: holding a row lock open while
+// a person decides would block the counter.
+func (s *FinanceService) PreviewDeposit(ctx context.Context, in DepositInput) (DepositResult, error) {
+	deposit, planner, err := s.prepareDeposit(ctx, in)
+	if err != nil {
+		return DepositResult{}, err
+	}
+	open, err := s.repo.ListCharges(ctx, in.StudentID, "")
+	if err != nil {
+		return DepositResult{}, err
+	}
+	write, err := planner.plan(open)
+	if err != nil {
+		return DepositResult{}, err
+	}
+	return DepositResult{
+		Deposit:          deposit,
+		Surcharges:       write.Surcharges,
+		Allocations:      write.Allocations,
+		UnallocatedCents: write.UnallocatedCents,
+	}, nil
+}
+
+// prepareDeposit builds the deposit and the planner both paths need: the date
+// rules, the student, the calendar, the collection policy and the two system
+// concepts the split may have to reach for.
+func (s *FinanceService) prepareDeposit(ctx context.Context, in DepositInput) (domain.Deposit, *depositPlanner, error) {
+	when := in.PaidAt
+	if when.IsZero() {
+		when = s.now()
+	} else if when.After(s.now()) {
+		return domain.Deposit{}, nil, glerrors.New(glerrors.KindInvalid,
+			"la fecha del pago no puede estar en el futuro")
+	}
+
+	student, err := s.students.ByID(ctx, in.StudentID)
+	if err != nil {
+		return domain.Deposit{}, nil, glerrors.New(glerrors.KindInvalid, "student not found")
+	}
+
+	calendar, calendarVersion := s.schoolCalendar(ctx, in.StudentID)
+	policy, err := s.policyFor(ctx, student.ID)
+	if err != nil {
+		return domain.Deposit{}, nil, err
+	}
+	lateFee, err := s.repo.EnsureConceptOfKind(ctx, s.newID(), domain.KindLateFee, lateFeeConceptName)
+	if err != nil {
+		return domain.Deposit{}, nil, err
+	}
+	tuition, err := s.repo.EnsureConceptOfKind(ctx, s.newID(), domain.KindTuition, tuitionConceptName)
+	if err != nil {
+		return domain.Deposit{}, nil, err
+	}
+
+	deposit, err := domain.NewDeposit(s.newID(), s.tenantID, in.StudentID, in.AmountCents,
+		in.Method, in.Reference, when, in.IdempotencyKey, calendarVersion)
+	if err != nil {
+		return domain.Deposit{}, nil, err
+	}
+	return deposit, &depositPlanner{
+		svc:         s,
+		deposit:     deposit,
+		policy:      policy,
+		calendar:    calendar,
+		lateFeeID:   lateFee.ID(),
+		tuitionID:   tuition.ID(),
+		paidOn:      when,
+		description: lateFeeConceptName,
 	}, nil
 }
 

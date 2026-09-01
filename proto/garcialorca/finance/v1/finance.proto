@@ -93,6 +93,12 @@ service FinanceService {
   // splits it across what the family owes: oldest first, surcharges included,
   // and whatever is left stays as their credit.
   rpc RegisterDeposit(RegisterDepositRequest) returns (RegisterDepositResponse);
+  // PreviewDeposit says what an amount WOULD cover, without taking it. Same
+  // rule, same order, same arithmetic as RegisterDeposit, and it writes nothing
+  // — so a cashier can tell a parent what their money pays for before it
+  // changes hands. A projection, not a promise: the charges are read without a
+  // lock, so a payment landing in between changes the answer.
+  rpc PreviewDeposit(PreviewDepositRequest) returns (PreviewDepositResponse);
   // ListDeposits returns a student's deposits, newest first.
   rpc ListDeposits(ListDepositsRequest) returns (ListDepositsResponse);
   // VoidDeposit cancels a deposit and releases what it settled. The row stays,
@@ -558,3 +564,18 @@ message VoidDepositRequest {
 }
 
 message VoidDepositResponse {}
+
+// PreviewDepositRequest asks what an amount would cover. It carries no
+// idempotency key: nothing is written, so there is nothing to deduplicate.
+message PreviewDepositRequest {
+  string student_id = 1;
+  int64 amount_cents = 2;
+  google.protobuf.Timestamp paid_at = 3;
+}
+
+// PreviewDepositResponse is the projected split.
+message PreviewDepositResponse {
+  repeated Payment allocations = 1;
+  repeated Charge surcharges = 2;
+  int64 unallocated_cents = 3;
+}

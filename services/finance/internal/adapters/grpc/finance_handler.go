@@ -243,6 +243,39 @@ func (h *FinanceHandler) RegisterDeposit(ctx context.Context, req *connect.Reque
 	}), nil
 }
 
+// PreviewDeposit says what an amount would cover, without taking it.
+func (h *FinanceHandler) PreviewDeposit(ctx context.Context, req *connect.Request[financev1.PreviewDepositRequest]) (*connect.Response[financev1.PreviewDepositResponse], error) {
+	m := req.Msg
+	var paidAt time.Time
+	if ts := m.GetPaidAt(); ts != nil {
+		paidAt = ts.AsTime()
+	}
+	got, err := h.finance.PreviewDeposit(ctx, usecase.DepositInput{
+		StudentID:   m.GetStudentId(),
+		AmountCents: m.GetAmountCents(),
+		// A preview needs no method: nothing is stored, and cash and a transfer
+		// cover the same months. Cash keeps the domain constructor satisfied.
+		Method: domain.MethodCash,
+		PaidAt: paidAt,
+	})
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	allocations := make([]*financev1.Payment, 0, len(got.Allocations))
+	for _, p := range got.Allocations {
+		allocations = append(allocations, toProtoPayment(p))
+	}
+	surcharges := make([]*financev1.Charge, 0, len(got.Surcharges))
+	for _, c := range got.Surcharges {
+		surcharges = append(surcharges, toProtoCharge(ports.ChargeWithPaid{Charge: c}))
+	}
+	return connect.NewResponse(&financev1.PreviewDepositResponse{
+		Allocations:      allocations,
+		Surcharges:       surcharges,
+		UnallocatedCents: got.UnallocatedCents,
+	}), nil
+}
+
 // ListDeposits returns a student's deposits, newest first.
 func (h *FinanceHandler) ListDeposits(ctx context.Context, req *connect.Request[financev1.ListDepositsRequest]) (*connect.Response[financev1.ListDepositsResponse], error) {
 	deposits, err := h.finance.ListDeposits(ctx, req.Msg.GetStudentId())

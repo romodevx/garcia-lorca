@@ -27,6 +27,7 @@ type FinanceService interface {
 	RegisterPaymentAt(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time) (client.Payment, client.Charge, error)
 	GetAccount(ctx context.Context, studentID string) (client.AccountStatement, error)
 	RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time) (client.DepositResult, error)
+	PreviewDeposit(ctx context.Context, studentID string, amountCents int64, paidAt time.Time) (client.DepositResult, error)
 	ListDeposits(ctx context.Context, studentID string) ([]client.Deposit, error)
 	VoidDeposit(ctx context.Context, id, reason string) error
 	ListOverdue(ctx context.Context, cycleID string) ([]client.Charge, error)
@@ -370,6 +371,35 @@ func (h *FinanceHandler) RegisterDeposit(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusCreated, got)
+}
+
+// PreviewDeposit handles POST /api/v1/finance/deposits/preview: what an amount
+// WOULD cover. It writes nothing, so the cashier can say it out loud before the
+// money changes hands.
+func (h *FinanceHandler) PreviewDeposit(w http.ResponseWriter, r *http.Request) {
+	var req registerDepositRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	paidAt, err := parseCounterDate(req.PaidAt)
+	if err != nil {
+		http.Error(w, "paidAt must be a date like 2026-09-04", http.StatusBadRequest)
+		return
+	}
+	got, perr := h.svc.PreviewDeposit(r.Context(), req.StudentID, req.AmountCents, paidAt)
+	if perr != nil {
+		writeConnectError(w, perr)
+		return
+	}
+	// Only the three fields a preview HAS. Returning the deposit shape would put
+	// an empty deposit on the wire, and an empty deposit is a thing that reads
+	// like a real one.
+	writeJSON(w, http.StatusOK, map[string]any{
+		"allocations":      got.Allocations,
+		"surcharges":       got.Surcharges,
+		"unallocatedCents": got.UnallocatedCents,
+	})
 }
 
 // ListDeposits handles GET /api/v1/finance/deposits?studentId=…

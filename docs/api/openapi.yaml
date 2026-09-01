@@ -697,6 +697,43 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
 
+  /api/v1/finance/deposits/preview:
+    post:
+      tags: [finance-payments]
+      summary: What an amount would cover, without taking it
+      description: >
+        Same rule, same order, same arithmetic as taking the deposit, and it
+        writes nothing — so a cashier can tell a parent what their money pays for
+        before it changes hands.
+
+
+        A projection, not a promise: the charges are read without the lock the
+        real call takes, so a payment landing in between changes the answer.
+      operationId: previewDeposit
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [studentId, amountCents]
+              properties:
+                studentId: { type: string, format: uuid }
+                amountCents: { type: integer, format: int64, minimum: 1 }
+                paidAt: { type: string, format: date }
+      responses:
+        '200':
+          description: The projected split.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DepositPreview' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
   /api/v1/finance/deposits/{id}/void:
     post:
       tags: [finance-payments]
@@ -980,6 +1017,27 @@ components:
           description: >
             The deposit already existed under this idempotency key and nothing
             was collected a second time.
+
+    DepositPreview:
+      type: object
+      description: >
+        What an amount would cover. No deposit: nothing was taken, and an empty
+        deposit on the wire reads like a real one.
+      required: [allocations, surcharges, unallocatedCents]
+      properties:
+        allocations:
+          type: array
+          description: Where the money would land, oldest debt first.
+          items: { type: object }
+        surcharges:
+          type: array
+          description: The surcharge rows the payment would make real.
+          items: { type: object }
+        unallocatedCents:
+          type: integer
+          format: int64
+          minimum: 0
+          description: What would be left over as the family's credit.
 
     BillingRun:
       type: object
