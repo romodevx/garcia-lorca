@@ -1,6 +1,9 @@
 package postgres
 
 import (
+	"encoding/json"
+
+	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/finance/internal/domain"
 )
 
@@ -23,11 +26,16 @@ func toDomainConcept(m chargeConceptModel) (domain.ChargeConcept, error) {
 
 // toDomainPlan rebuilds a tuition table from its row.
 func toDomainPlan(m tuitionPlanModel) (domain.TuitionPlan, error) {
+	schedule, err := scheduleToDomain(m.Schedule)
+	if err != nil {
+		return domain.TuitionPlan{}, err
+	}
 	return domain.NewTuitionPlan(domain.TuitionPlanSpec{
 		ID: m.ID, TenantID: m.TenantID, CycleID: m.CycleID, LevelID: m.LevelID,
 		EnrollmentCents: m.EnrollmentCents, MonthlyCents: m.MonthlyCents,
 		Months: m.Months, FirstBilledMonth: m.FirstBilledMonth,
 		DueDay: m.DueDay, LateFeeCents: m.LateFeeCents, Active: m.Active,
+		Schedule: schedule,
 		Policy: domain.CollectionPolicy{
 			// A row written before M16 has mode 'monthly' by default, so it keeps
 			// meaning exactly what it meant when it was billed.
@@ -52,7 +60,35 @@ func fromDomainPlan(p domain.TuitionPlan) tuitionPlanModel {
 		SurchargeCountsAllDays: p.Policy().SurchargeCountsAllDays,
 		EarlyPaymentCents:      p.Policy().EarlyPaymentCents,
 		EarlyPaymentDays:       p.Policy().EarlyPaymentDays,
+		Schedule:               scheduleFromDomain(p.Schedule()),
 	}
+}
+
+// scheduleToDomain reads the stored payment plan. A row written before the
+// schedule existed holds "[]" and yields none, which is the uniform year.
+func scheduleToDomain(raw []byte) ([]domain.Installment, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var out []domain.Installment
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "reading the tuition schedule", err)
+	}
+	return out, nil
+}
+
+func scheduleFromDomain(in []domain.Installment) []byte {
+	if len(in) == 0 {
+		return []byte("[]")
+	}
+	raw, err := json.Marshal(in)
+	if err != nil {
+		// Marshalling a slice of two ints cannot fail; an empty list is still
+		// a valid schedule, so this degrades to the uniform year rather than
+		// losing the write.
+		return []byte("[]")
+	}
+	return []byte(raw)
 }
 
 // lateFeeMode is the column's vocabulary. Spelled out rather than stored as a

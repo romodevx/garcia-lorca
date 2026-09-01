@@ -24,7 +24,7 @@ beforeEach(() => {
   finance.listTuitionPlans.mockResolvedValue([
     { id: "tp1", cycleId: "c1", levelId: "lv2", enrollmentCents: 500000, monthlyCents: 320000,
       months: 10, firstBilledMonth: 9, dueDay: 10, lateFeeCents: 15000, active: true,
-      policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 } },
+      policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 }, schedule: [] },
   ]);
 });
 afterEach(() => vi.clearAllMocks());
@@ -64,7 +64,7 @@ describe("the tuition table", () => {
     finance.upsertTuitionPlan.mockResolvedValue({
       id: "tp2", cycleId: "c1", levelId: "lv1", enrollmentCents: 400000, monthlyCents: 250000,
       months: 11, firstBilledMonth: 8, dueDay: 5, lateFeeCents: 10000, active: true,
-      policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 },
+      policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 }, schedule: [],
     });
     render(<TuitionPanel cycle={cycle} levels={levels} />);
     await screen.findByText("Primaria");
@@ -177,6 +177,45 @@ describe("TuitionPanel — cobranza", () => {
     await user.click(screen.getByRole("button", { name: /Guardar tabulador/ }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/recargo diario necesita un monto/);
+    expect(finance.upsertTuitionPlan).not.toHaveBeenCalled();
+  });
+});
+
+describe("TuitionPanel — cuotas por período", () => {
+  // "Once meses, pero diciembre a la mitad y la otra mitad en marzo" is the
+  // school's own example. One line, because they state it once a year and read
+  // it back against a printed circular far more often than they edit it.
+  it("saves a split year written as mes:monto", async () => {
+    const user = userEvent.setup();
+    render(<TuitionPanel cycle={cycle} levels={levels} />);
+
+    await screen.findByRole("row", { name: /Kínder/ });
+    await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
+    await user.type(screen.getByLabelText("Colegiatura mensual"), "3200");
+    await user.type(screen.getByLabelText("Cuotas"), "9:3200, 12:1600, 3:4800");
+    await user.click(screen.getByRole("button", { name: /Guardar tabulador/ }));
+
+    await waitFor(() => expect(finance.upsertTuitionPlan).toHaveBeenCalled());
+    expect(finance.upsertTuitionPlan.mock.calls[0]?.[1]?.schedule).toEqual([
+      { month: 9, amountCents: 320000 },
+      { month: 12, amountCents: 160000 },
+      { month: 3, amountCents: 480000 },
+    ]);
+  });
+
+  // A schedule nobody can parse would silently become "equal months", which is
+  // the school's money quietly moving to different dates.
+  it("refuses a schedule it cannot read", async () => {
+    const user = userEvent.setup();
+    render(<TuitionPanel cycle={cycle} levels={levels} />);
+
+    await screen.findByRole("row", { name: /Kínder/ });
+    await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
+    await user.type(screen.getByLabelText("Colegiatura mensual"), "3200");
+    await user.type(screen.getByLabelText("Cuotas"), "diciembre la mitad");
+    await user.click(screen.getByRole("button", { name: /Guardar tabulador/ }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/mes:monto/);
     expect(finance.upsertTuitionPlan).not.toHaveBeenCalled();
   });
 });

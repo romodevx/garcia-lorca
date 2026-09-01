@@ -9,6 +9,7 @@ import {
   runBilling,
   upsertTuitionPlan,
   type BillingRun,
+  type Installment,
   type TuitionPlan,
 } from "../../finance/api";
 import { EmptyHint, ErrorAlert, Section, TextField } from "./parts";
@@ -42,6 +43,40 @@ export function pesosToCents(raw: string): number | null {
 /** Cents back into the pesos a person reads, always with both decimals. */
 export function centsToPesos(cents: number): string {
   return (cents / 100).toFixed(2);
+}
+
+/**
+ * The payment plan as a person writes it: "9:3200, 12:1600, 3:4800" — month and
+ * amount in pesos, in the order they are collected.
+ *
+ * Text and not a row builder because a school states this once a year and reads
+ * it back far more often than it edits it. One line is easier to check against
+ * a printed circular than eleven boxes.
+ */
+export function textToSchedule(raw: string): Installment[] | null {
+  const trimmed = raw.trim();
+  if (trimmed === "") {
+    return [];
+  }
+  const out: Installment[] = [];
+  for (const part of trimmed.split(",")) {
+    const [month, amount] = part.split(":");
+    if (month === undefined || amount === undefined) {
+      return null;
+    }
+    const m = wholeInRange(month.trim(), 1, 12);
+    const cents = pesosToCents(amount.trim());
+    if (m === null || cents === null || cents <= 0) {
+      return null;
+    }
+    out.push({ month: m, amountCents: cents });
+  }
+  return out;
+}
+
+/** The same plan, back as text, for the form to show. */
+export function scheduleToText(schedule: readonly Installment[]): string {
+  return schedule.map((i) => `${i.month}:${centsToPesos(i.amountCents)}`).join(", ");
 }
 
 /** Reads a whole number in a range, or null. Same reasoning as pesosToCents. */
@@ -238,6 +273,9 @@ function PlanForm({
   const [earlyAmount, setEarlyAmount] = useState(
     plan === undefined || plan.policy.earlyPaymentCents === 0 ? "" : centsToPesos(plan.policy.earlyPaymentCents));
   const [earlyDays, setEarlyDays] = useState(String(plan?.policy.earlyPaymentDays ?? 0));
+  // An explicit payment plan, written as "9:1000, 12:500, 3:1500" — month and
+  // amount. Empty keeps the equal year, which is what most schools want.
+  const [schedule, setSchedule] = useState(scheduleToText(plan?.schedule ?? []));
   const [error, setError] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState(false);
 
@@ -278,6 +316,11 @@ function PlanForm({
       setError(`Los días de pronto pago van de 0 a ${MAX_DUE_DAY}.`);
       return;
     }
+    const plan = textToSchedule(schedule);
+    if (plan === null) {
+      setError("Las cuotas se escriben mes:monto, por ejemplo 9:3200, 12:1600, 3:4800.");
+      return;
+    }
 
     setPending(true);
     setError(undefined);
@@ -294,6 +337,7 @@ function PlanForm({
         dueDay: day,
         lateFeeCents: pesosToCents(lateFee) ?? 0,
         active: true,
+        schedule: plan,
         policy: {
           dailyMode,
           lateFeeDailyCents: dailyCents,
@@ -360,6 +404,18 @@ function PlanForm({
           </span>
         </label>
       </div>
+      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14, marginBottom: 12 }}>
+        <p style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text-muted)", marginBottom: 4 }}>
+          Cuotas por período (opcional)
+        </p>
+        <p style={{ fontSize: 12.5, color: "var(--text-faint)", marginBottom: 10 }}>
+          Déjalo vacío para cobrar la mensualidad igual todos los meses. Para partirla,
+          escribe mes:monto — por ejemplo <b>9:3200, 12:1600, 3:4800</b> cobra la mitad de
+          diciembre en marzo.
+        </p>
+        <TextField label="Cuotas" value={schedule} onChange={setSchedule} placeholder="9:3200, 10:3200, 12:1600, 3:4800" />
+      </div>
+
       <div style={{ display: "flex", gap: 10 }}>
         <Btn type="submit" icon="check" disabled={pending}>
           Guardar tabulador

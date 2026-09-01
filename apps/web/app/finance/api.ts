@@ -680,6 +680,26 @@ export interface TuitionPlan {
   lateFeeCents: number;
   active: boolean;
   policy: CollectionPolicy;
+  /**
+   * An explicit payment plan, replacing the uniform monthly amount. Empty means
+   * the year is divided into equal parts, which is what most schools do.
+   */
+  schedule: Installment[];
+}
+
+/**
+ * One payment of the year: the month it falls in and how much of the tuition it
+ * collects.
+ *
+ * A school does not always divide the year into equal parts. "Once meses, pero
+ * diciembre a la mitad y la otra mitad en marzo" is a real arrangement —
+ * families are short in December — and a plan that can only say "N equal
+ * payments" cannot express it.
+ */
+export interface Installment {
+  /** 1-12. The year comes from the cycle, so a plan may run past December. */
+  month: number;
+  amountCents: number;
 }
 
 /**
@@ -730,9 +750,9 @@ export async function upsertTuitionPlan(baseURL: string, input: TuitionPlanInput
  * must not read as "daily surcharge of nothing".
  */
 export async function listTuitionPlans(baseURL: string, cycleId: string): Promise<TuitionPlan[]> {
-  const plans = await getList<Partial<TuitionPlan> & Omit<TuitionPlan, "policy">>(
+  const plans = await getList<Partial<TuitionPlan> & Omit<TuitionPlan, "policy" | "schedule">>(
     baseURL, `/tuition-plans?cycleId=${encodeURIComponent(cycleId)}`, "plans");
-  return plans.map((p) => ({ ...p, policy: p.policy ?? emptyPolicy() }));
+  return plans.map((p) => ({ ...p, policy: p.policy ?? emptyPolicy(), schedule: p.schedule ?? [] }));
 }
 
 function emptyPolicy(): CollectionPolicy {

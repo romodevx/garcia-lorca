@@ -43,14 +43,19 @@ type tuitionPlanModel struct {
 	// M16 collection policy. late_fee_mode decides which of the two surcharge
 	// rules applies; existing rows default to 'monthly' so nothing already billed
 	// changes meaning.
-	LateFeeDailyCents      int64     `gorm:"column:late_fee_daily_cents"`
-	LateFeeMode            string    `gorm:"column:late_fee_mode"`
-	SurchargeCountsAllDays bool      `gorm:"column:surcharge_counts_all_days"`
-	EarlyPaymentCents      int64     `gorm:"column:early_payment_cents"`
-	EarlyPaymentDays       int       `gorm:"column:early_payment_days"`
-	Active                 bool      `gorm:"column:active"`
-	CreatedAt              time.Time `gorm:"column:created_at"`
-	UpdatedAt              time.Time `gorm:"column:updated_at"`
+	LateFeeDailyCents      int64  `gorm:"column:late_fee_daily_cents"`
+	LateFeeMode            string `gorm:"column:late_fee_mode"`
+	SurchargeCountsAllDays bool   `gorm:"column:surcharge_counts_all_days"`
+	EarlyPaymentCents      int64  `gorm:"column:early_payment_cents"`
+	EarlyPaymentDays       int    `gorm:"column:early_payment_days"`
+	// Schedule is the plan's explicit payment plan as JSON, "[]" when the year
+	// is divided into equal monthly parts. Raw bytes and not a JSON helper type:
+	// one column does not justify pulling a driver for another database into a
+	// Postgres service.
+	Schedule  []byte    `gorm:"column:schedule;type:jsonb"`
+	Active    bool      `gorm:"column:active"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+	UpdatedAt time.Time `gorm:"column:updated_at"`
 }
 
 func (tuitionPlanModel) TableName() string { return "tuition_plans" }

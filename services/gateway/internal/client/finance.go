@@ -546,6 +546,16 @@ type TuitionPlan struct {
 	LateFeeCents     int64            `json:"lateFeeCents"`
 	Active           bool             `json:"active"`
 	Policy           CollectionPolicy `json:"policy"`
+	Schedule         []Installment    `json:"schedule"`
+}
+
+// Installment is one payment of the year: the month it falls in and how much of
+// the tuition it collects. A school does not always divide the year into equal
+// parts — "diciembre a la mitad y la otra mitad en marzo" is a real
+// arrangement.
+type Installment struct {
+	Month       int   `json:"month"`
+	AmountCents int64 `json:"amountCents"`
 }
 
 // CollectionPolicy is what a late payment costs and what an early one saves.
@@ -572,6 +582,7 @@ type TuitionPlanInput struct {
 	LateFeeCents     int64            `json:"lateFeeCents"`
 	Active           bool             `json:"active"`
 	Policy           CollectionPolicy `json:"policy"`
+	Schedule         []Installment    `json:"schedule"`
 }
 
 // BillingRun is what a run did, as the panel reports it back to the person who
@@ -596,6 +607,7 @@ func (c *FinanceClient) UpsertTuitionPlan(ctx context.Context, in TuitionPlanInp
 		DueDay:           int32(in.DueDay),
 		LateFeeCents:     in.LateFeeCents,
 		Active:           in.Active,
+		Schedule:         scheduleToProto(in.Schedule),
 		Policy: &financev1.CollectionPolicy{
 			DailyMode:              in.Policy.DailyMode,
 			LateFeeDailyCents:      in.Policy.LateFeeDailyCents,
@@ -649,6 +661,22 @@ func (c *FinanceClient) RunBilling(ctx context.Context, cycleID, asOfDate string
 	}, nil
 }
 
+func scheduleToProto(in []Installment) []*financev1.Installment {
+	out := make([]*financev1.Installment, 0, len(in))
+	for _, i := range in {
+		out = append(out, &financev1.Installment{Month: int32(i.Month), AmountCents: i.AmountCents})
+	}
+	return out
+}
+
+func scheduleFromProto(in []*financev1.Installment) []Installment {
+	out := make([]Installment, 0, len(in))
+	for _, i := range in {
+		out = append(out, Installment{Month: int(i.GetMonth()), AmountCents: i.GetAmountCents()})
+	}
+	return out
+}
+
 func toTuitionPlan(p *financev1.TuitionPlan) TuitionPlan {
 	return TuitionPlan{
 		ID:               p.GetId(),
@@ -661,6 +689,7 @@ func toTuitionPlan(p *financev1.TuitionPlan) TuitionPlan {
 		DueDay:           int(p.GetDueDay()),
 		LateFeeCents:     p.GetLateFeeCents(),
 		Active:           p.GetActive(),
+		Schedule:         scheduleFromProto(p.GetSchedule()),
 		Policy: CollectionPolicy{
 			DailyMode:              p.GetPolicy().GetDailyMode(),
 			LateFeeDailyCents:      p.GetPolicy().GetLateFeeDailyCents(),

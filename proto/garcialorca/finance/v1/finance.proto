@@ -445,6 +445,22 @@ message TuitionPlan {
   int64 late_fee_cents = 10;
   bool active = 11;
   CollectionPolicy policy = 12;
+  // An explicit payment plan, replacing the uniform monthly amount. Empty means
+  // the year is divided into equal parts, which is what most schools do.
+  repeated Installment schedule = 13;
+}
+
+// Installment is one payment of the year: the calendar month it falls in and
+// how much of the tuition it collects.
+//
+// It exists because a school does not always divide the year into equal parts.
+// "Once meses, pero diciembre a la mitad y la otra mitad en marzo" is a real
+// arrangement, and a plan that can only say "N equal payments" cannot express
+// it. The year is worked out from the cycle, so a schedule running past
+// December continues into the next one.
+message Installment {
+  int32 month = 1;  // 1-12
+  int64 amount_cents = 2;
 }
 
 // CollectionPolicy is what a late payment costs and what an early one saves,
@@ -478,6 +494,7 @@ message UpsertTuitionPlanRequest {
   int64 late_fee_cents = 8;
   bool active = 9;
   CollectionPolicy policy = 10;
+  repeated Installment schedule = 11;
 }
 
 message UpsertTuitionPlanResponse {

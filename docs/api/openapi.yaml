@@ -1342,6 +1342,9 @@ components:
         lateFeeCents: { type: integer, format: int64, minimum: 0 }
         active: { type: boolean }
         policy: { $ref: '#/components/schemas/CollectionPolicy' }
+        schedule:
+          type: array
+          items: { $ref: '#/components/schemas/Installment' }
 
     Deposit:
       type: object

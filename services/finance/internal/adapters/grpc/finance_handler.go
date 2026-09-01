@@ -521,6 +521,7 @@ func (h *FinanceHandler) UpsertTuitionPlan(ctx context.Context, req *connect.Req
 		LateFeeCents:     m.GetLateFeeCents(),
 		Active:           m.GetActive(),
 		Policy:           toDomainPolicy(m.GetPolicy()),
+		Schedule:         toDomainSchedule(m.GetSchedule()),
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -572,6 +573,7 @@ func toProtoPlan(p domain.TuitionPlan) *financev1.TuitionPlan {
 		LateFeeCents:     p.LateFeeCents(),
 		Active:           p.Active(),
 		Policy:           toProtoPolicy(p.Policy()),
+		Schedule:         toProtoSchedule(p.Schedule()),
 	}
 }
 
@@ -589,6 +591,27 @@ func toDomainPolicy(p *financev1.CollectionPolicy) domain.CollectionPolicy {
 		EarlyPaymentCents:      p.GetEarlyPaymentCents(),
 		EarlyPaymentDays:       int(p.GetEarlyPaymentDays()),
 	}
+}
+
+// toDomainSchedule reads an explicit payment plan off the wire. An absent list
+// is the uniform year, which is what a client written before this sends.
+func toDomainSchedule(in []*financev1.Installment) []domain.Installment {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]domain.Installment, 0, len(in))
+	for _, i := range in {
+		out = append(out, domain.Installment{Month: int(i.GetMonth()), AmountCents: i.GetAmountCents()})
+	}
+	return out
+}
+
+func toProtoSchedule(in []domain.Installment) []*financev1.Installment {
+	out := make([]*financev1.Installment, 0, len(in))
+	for _, i := range in {
+		out = append(out, &financev1.Installment{Month: int32(i.Month), AmountCents: i.AmountCents})
+	}
+	return out
 }
 
 func toProtoPolicy(p domain.CollectionPolicy) *financev1.CollectionPolicy {

@@ -45,6 +45,30 @@ type TuitionPlanSpec struct {
 	// late-fee rule in the same breath, and last year's charges must still
 	// reconcile against last year's rules.
 	Policy CollectionPolicy
+	// Schedule replaces the uniform monthly payment with named amounts per
+	// month. Empty keeps the uniform schedule.
+	Schedule []Installment
+}
+
+// Installment is one payment of the year: which calendar month it falls in and
+// how much of the year's tuition it collects.
+//
+// It exists because a school does not always divide the year into equal parts.
+// "Once meses, pero diciembre a la mitad y la otra mitad en marzo" is a real
+// arrangement — families are short in December — and a plan that can only
+// express N equal payments cannot say it.
+type Installment struct {
+	// Month is 1-12. The year is worked out from the cycle, so a schedule that
+	// runs past December continues into the next one.
+	Month int
+	// AmountCents is what this payment collects. It need not equal any other.
+	AmountCents int64
+}
+
+// DueInstallment is one installment placed on the calendar.
+type DueInstallment struct {
+	DueOn       time.Time
+	AmountCents int64
 }
 
 // TuitionPlan is what one level costs in one cycle: the inscription, the monthly
@@ -69,6 +93,7 @@ type TuitionPlan struct {
 	dueDay       int
 	lateFeeCents int64
 	policy       CollectionPolicy
+	schedule     []Installment
 	active       bool
 }
 
@@ -103,13 +128,24 @@ func NewTuitionPlan(spec TuitionPlanSpec) (TuitionPlan, error) {
 	if spec.Policy.LateFeeDailyCents < 0 || spec.Policy.EarlyPaymentCents < 0 || spec.Policy.EarlyPaymentDays < 0 {
 		return TuitionPlan{}, glerrors.New(glerrors.KindInvalid, "an amount cannot be negative")
 	}
+	for _, i := range spec.Schedule {
+		if i.Month < 1 || i.Month > 12 {
+			return TuitionPlan{}, glerrors.New(glerrors.KindInvalid, "a payment must fall in a month from 1 to 12")
+		}
+		if i.AmountCents <= 0 {
+			// A payment of nothing is a charge for nothing: it would sit in a
+			// family's statement forever, already settled and never explained.
+			return TuitionPlan{}, glerrors.New(glerrors.KindInvalid, "a payment must be for some money")
+		}
+	}
 
 	return TuitionPlan{
 		id: spec.ID, tenantID: spec.TenantID, cycleID: spec.CycleID, levelID: spec.LevelID,
 		enrollmentCents: spec.EnrollmentCents, monthlyCents: spec.MonthlyCents,
 		months: spec.Months, firstBilledMonth: spec.FirstBilledMonth,
 		dueDay: spec.DueDay, lateFeeCents: spec.LateFeeCents, active: spec.Active,
-		policy: spec.Policy,
+		policy:   spec.Policy,
+		schedule: spec.Schedule,
 	}, nil
 }
 
@@ -169,6 +205,50 @@ func (p TuitionPlan) BilledMonths(cycleStart time.Time) []time.Time {
 	out := make([]time.Time, 0, p.months)
 	for i := 0; i < p.months; i++ {
 		out = append(out, first.AddDate(0, i, 0))
+	}
+	return out
+}
+
+// Schedule is the plan's explicit payment plan, empty when the year is divided
+// into equal monthly parts.
+func (p TuitionPlan) Schedule() []Installment { return p.schedule }
+
+// Installments places the year's payments on the calendar: what falls due, when,
+// and for how much.
+//
+// Without a schedule this is the uniform year the plan has always billed — N
+// equal payments, one a month. With one, it is exactly what the school wrote
+// down, which is how "diciembre a la mitad y la otra mitad en marzo" becomes
+// something the billing run can issue.
+func (p TuitionPlan) Installments(cycleStart time.Time) []DueInstallment {
+	if len(p.schedule) == 0 {
+		months := p.BilledMonths(cycleStart)
+		out := make([]DueInstallment, 0, len(months))
+		for _, due := range months {
+			out = append(out, DueInstallment{DueOn: due, AmountCents: p.monthlyCents})
+		}
+		return out
+	}
+
+	year := cycleStart.Year()
+	if int(cycleStart.Month()) > p.schedule[0].Month {
+		year++
+	}
+	out := make([]DueInstallment, 0, len(p.schedule))
+	previous := 0
+	for _, i := range p.schedule {
+		// The schedule is read in the order the school wrote it, so a month
+		// number that goes backwards means the year turned: September to July
+		// runs across two calendar years, and nobody writing it down thinks of
+		// that as two lists.
+		if previous != 0 && i.Month < previous {
+			year++
+		}
+		previous = i.Month
+		out = append(out, DueInstallment{
+			DueOn:       time.Date(year, time.Month(i.Month), p.dueDay, 0, 0, 0, 0, cycleStart.Location()),
+			AmountCents: i.AmountCents,
+		})
 	}
 	return out
 }

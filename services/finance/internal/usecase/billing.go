@@ -37,6 +37,9 @@ type TuitionPlanInput struct {
 	// Policy is the M16 collection rule. Zero value keeps the original monthly
 	// surcharge, so a caller written before M16 goes on meaning what it meant.
 	Policy domain.CollectionPolicy
+	// Schedule replaces the uniform monthly payment with named amounts per
+	// month. Empty keeps the uniform year.
+	Schedule []domain.Installment
 }
 
 // BillingResult is what a run did. Skipped counts the charges that already
@@ -66,7 +69,8 @@ func (s *FinanceService) UpsertTuitionPlan(ctx context.Context, in TuitionPlanIn
 		EnrollmentCents: in.EnrollmentCents, MonthlyCents: in.MonthlyCents,
 		Months: in.Months, FirstBilledMonth: in.FirstBilledMonth,
 		DueDay: in.DueDay, LateFeeCents: in.LateFeeCents, Active: in.Active,
-		Policy: in.Policy,
+		Policy:   in.Policy,
+		Schedule: in.Schedule,
 	})
 	if err != nil {
 		return domain.TuitionPlan{}, err
@@ -182,13 +186,16 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 		//
 		// A future month owes nothing extra: it is not overdue, so it accrues no
 		// surcharge until its own due date passes.
-		for _, due := range plan.BilledMonths(cycle.StartsOn) {
+		for _, item := range plan.Installments(cycle.StartsOn) {
+			due := item.DueOn
 			monthly, err := s.buildCharge(chargeSpec{
 				studentID:   enr.StudentID,
 				cycleID:     cycleID,
 				conceptID:   concepts[domain.KindTuition].ID(),
 				description: fmt.Sprintf("%s %s", tuitionConceptName, due.Format("2006-01")),
-				amount:      plan.MonthlyCents(),
+				// What THIS payment collects, which under a split schedule is
+				// not the same every month.
+				amount: item.AmountCents,
 				// Moved off a closed day, but the ref below still names the
 				// ORIGINAL month: the charge must stay the same charge even if
 				// the calendar is edited afterwards.
