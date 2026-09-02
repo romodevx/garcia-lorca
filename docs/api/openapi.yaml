@@ -1390,6 +1390,26 @@ components:
             Empty means the year is divided into equal parts, which is what most
             schools do.
           items: { $ref: '#/components/schemas/Installment' }
+        monthlyDiscountCents:
+          type: integer
+          format: int64
+          minimum: 0
+          example: 50000
+          description: A fixed amount off every month of this level.
+        fees:
+          type: array
+          description: >
+            The extras collected on top of the tuition, each split across the
+            months the school chose. Empty is the ordinary state.
+          items: { $ref: '#/components/schemas/Fee' }
+        enrollmentDueOn:
+          type: string
+          format: date
+          example: "2026-06-30"
+          description: >
+            The deadline the school set for the inscription. Empty keeps the
+            default rule — the due day in the cycle's first month — so a plan
+            written before this field existed goes on meaning what it meant.
 
     Contact:
       type: object
@@ -1457,6 +1477,34 @@ components:
         month: { type: integer, minimum: 1, maximum: 12 }
         amountCents: { type: integer, format: int64, minimum: 1 }
 
+    Fee:
+      type: object
+      description: >
+        Money the school collects on top of the monthly tuition, spread across
+        the months it chooses. "La cuota de julio" is charged for a month the
+        school year does not bill, so it is collected inside months that it
+        does. amountCents is the WHOLE fee, not the monthly share: the school
+        states what it collects and the server divides it, putting the remainder
+        of an uneven division on the first payment so no cent is lost.
+      required: [name, amountCents, months]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          example: Cuota de Julio
+          description: >
+            What the family reads on the statement, and the whole explanation of
+            why a month costs more than the tabulador says.
+        amountCents: { type: integer, format: int64, minimum: 1, example: 160000 }
+        months:
+          type: array
+          minItems: 1
+          description: >
+            The calendar months it is divided between, in the order chosen. One
+            month is a fee that is not split. A month listed twice is refused.
+          items: { type: integer, minimum: 1, maximum: 12 }
+          example: [9, 10]
+
     CollectionPolicy:
       type: object
       description: >
@@ -1513,6 +1561,11 @@ components:
         schedule:
           type: array
           items: { $ref: '#/components/schemas/Installment' }
+        monthlyDiscountCents: { type: integer, format: int64, minimum: 0 }
+        fees:
+          type: array
+          items: { $ref: '#/components/schemas/Fee' }
+        enrollmentDueOn: { type: string, format: date, example: "2026-06-30" }
 
     Deposit:
       type: object
@@ -1633,6 +1686,17 @@ components:
         tuitionCreated: { type: integer, example: 30 }
         enrollmentCreated: { type: integer, example: 10 }
         lateFeesCreated: { type: integer, example: 4 }
+        feesCreated:
+          type: integer
+          example: 8
+          description: Charges issued for the extras collected on top of the tuition.
+        enrollmentMoved:
+          type: integer
+          example: 0
+          description: >
+            Inscriptions whose deadline the run corrected to match the tuition
+            table. The run never re-issues a charge it has written, so this is
+            how a deadline changed after billing reaches pupils already charged.
         skipped:
           type: integer
           example: 6

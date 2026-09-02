@@ -344,6 +344,10 @@ func TestRepricingALevelUpdatesEveryColumn(t *testing.T) {
 			{Month: 12, AmountCents: 160000},
 			{Month: 3, AmountCents: 480000},
 		},
+		Fees: []domain.Fee{
+			{Name: "Cuota de Julio", AmountCents: 160000, Months: []int{9, 10}},
+		},
+		EnrollmentDueOn: time.Date(2026, time.June, 30, 0, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
 		t.Fatalf("NewTuitionPlan: %v", err)
@@ -361,6 +365,12 @@ func TestRepricingALevelUpdatesEveryColumn(t *testing.T) {
 	}
 	if len(stored.Schedule()) != 3 || stored.Schedule()[1].AmountCents != 160000 {
 		t.Errorf("the split schedule did not survive: %+v", stored.Schedule())
+	}
+	if len(stored.Fees()) != 1 || stored.Fees()[0].AmountCents != 160000 || len(stored.Fees()[0].Months) != 2 {
+		t.Errorf("the level fees did not survive the update: %+v", stored.Fees())
+	}
+	if got := stored.EnrollmentDueOn().Format("2006-01-02"); got != "2026-06-30" {
+		t.Errorf("the inscription deadline did not survive the update: %s", got)
 	}
 }
 

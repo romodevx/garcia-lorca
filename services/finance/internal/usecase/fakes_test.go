@@ -273,6 +273,22 @@ func (f *fakeRepo) CreateChargesBulk(_ context.Context, cs []domain.Charge) (int
 	return created, nil
 }
 
+// The fake moves what the real repository moves: unpaid charges whose date
+// actually differs, named by external ref.
+func (f *fakeRepo) RescheduleUnpaid(_ context.Context, items []ports.ChargeReschedule) (int, error) {
+	moved := 0
+	for _, item := range items {
+		for id, c := range f.charges {
+			if c.ExternalRef() != item.ExternalRef || c.DueDate().Equal(item.DueOn) || f.paidFor(id) > 0 {
+				continue
+			}
+			f.charges[id] = c.WithDueDate(item.DueOn)
+			moved++
+		}
+	}
+	return moved, nil
+}
+
 func (f *fakeRepo) GetCharge(_ context.Context, id string) (ports.ChargeWithPaid, error) {
 	c, ok := f.charges[id]
 	if !ok {

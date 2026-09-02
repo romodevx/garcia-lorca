@@ -83,6 +83,11 @@ const (
 	KindTuition    = "tuition"
 	KindEnrollment = "enrollment"
 	KindLateFee    = "late_fee"
+	// KindFee is the extra a school collects on top of the tuition — the July
+	// fee, the graduation fee. One concept covers them all; which fee a charge
+	// is for is in its description, because a school invents these every year
+	// and a kind per fee would be a migration per invention.
+	KindFee = "fee"
 )
 
 // Kind reports what the concept IS, independent of what it was named.
@@ -94,7 +99,7 @@ func (c ChargeConcept) Kind() string { return c.kind }
 // claim a system kind.
 func (c ChargeConcept) WithKind(kind string) (ChargeConcept, error) {
 	switch kind {
-	case KindCustom, KindTuition, KindEnrollment, KindLateFee:
+	case KindCustom, KindTuition, KindEnrollment, KindLateFee, KindFee:
 		c.kind = kind
 		return c, nil
 	default:

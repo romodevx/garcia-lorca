@@ -207,6 +207,66 @@ func (r *Repository) CreateCharge(ctx context.Context, c domain.Charge) (domain.
 // batch. Postgres reports only the rows actually inserted, so re-running a
 // generation is idempotent and the caller can infer the skipped count from
 // len(cs) - created.
+// RescheduleUnpaid moves the due date of charges named by external ref.
+//
+// The run never re-issues a charge it has already written — that is what makes
+// it idempotent — and that left a school unable to correct a deadline it had
+// already billed: setting the inscription's date did nothing for the four
+// hundred pupils already charged, so the setting looked broken.
+//
+// Two guards, both in the WHERE and not in Go: a charge is moved only when it is
+// UNPAID and only when the date actually differs. Unpaid, because a settled
+// charge is history and re-dating it would rewrite when a family was due to pay
+// something they have already paid. Different, because the returned count is
+// what the run reports to a person, and "moved 400" every month teaches them to
+// stop reading it.
+func (r *Repository) RescheduleUnpaid(ctx context.Context, items []ports.ChargeReschedule) (int, error) {
+	if len(items) == 0 {
+		return 0, nil
+	}
+	refs := make([]string, 0, len(items))
+	dueByRef := make(map[string]time.Time, len(items))
+	for _, item := range items {
+		if _, seen := dueByRef[item.ExternalRef]; seen {
+			continue
+		}
+		refs = append(refs, item.ExternalRef)
+		dueByRef[item.ExternalRef] = item.DueOn
+	}
+
+	var moved int
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		// One statement per distinct date rather than one per charge: a school
+		// prices a level at a time, so the four hundred pupils of a level share
+		// the one deadline. Grouping keeps this a handful of round trips instead
+		// of four hundred.
+		byDate := make(map[time.Time][]string, len(refs))
+		for _, ref := range refs {
+			due := dueByRef[ref]
+			byDate[due] = append(byDate[due], ref)
+		}
+		for due, group := range byDate {
+			res := tx.Model(&chargeModel{}).
+				Where("external_ref IN ?", group).
+				Where("due_date <> ?", due).
+				Where("status <> ?", domain.StatusCancelled).
+				// Nothing collected. The subquery is the same tenant-bound view
+				// the policy allows, so RLS still applies to it.
+				Where("NOT EXISTS (SELECT 1 FROM payments p WHERE p.charge_id = charges.id)").
+				Updates(map[string]any{"due_date": due, "updated_at": gorm.Expr("now()")})
+			if res.Error != nil {
+				return glerrors.Wrap(glerrors.KindInternal, "moving a deadline", res.Error)
+			}
+			moved += int(res.RowsAffected)
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return moved, nil
+}
+
 func (r *Repository) CreateChargesBulk(ctx context.Context, cs []domain.Charge) (int, error) {
 	if len(cs) == 0 {
 		return 0, nil
@@ -842,7 +902,7 @@ func (r *Repository) UpsertTuitionPlan(ctx context.Context, p domain.TuitionPlan
 				"first_billed_month", "due_day", "late_fee_cents", "active", "updated_at",
 				"late_fee_daily_cents", "late_fee_mode", "surcharge_counts_all_days",
 				"early_payment_cents", "early_payment_days", "schedule",
-				"monthly_discount_cents",
+				"monthly_discount_cents", "fees", "enrollment_due_on",
 			}),
 		}).Create(&model).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "storing the tuition table", err)

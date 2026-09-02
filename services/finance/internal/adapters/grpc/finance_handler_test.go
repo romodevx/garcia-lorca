@@ -90,6 +90,7 @@ type fakeRepo struct {
 	concepts map[string]domain.ChargeConcept
 	charges  map[string]domain.Charge
 	payments map[string][]domain.Payment // keyed by charge id
+	plans    []domain.TuitionPlan
 }
 
 func newFakeRepo() *fakeRepo {
@@ -787,12 +788,32 @@ func (f *fakeRepo) EnsureConceptOfKind(_ context.Context, id, kind, name string)
 	return c.WithKind(kind)
 }
 
+// The fake keeps the plan it was handed. It used to return nil from the list,
+// which meant any test reading a plan back was measuring the fake rather than
+// the adapter — and the adapter is where fields have twice gone missing.
+func (f *fakeRepo) RescheduleUnpaid(_ context.Context, _ []ports.ChargeReschedule) (int, error) {
+	return 0, nil
+}
+
 func (f *fakeRepo) UpsertTuitionPlan(_ context.Context, p domain.TuitionPlan) (domain.TuitionPlan, error) {
+	for i, existing := range f.plans {
+		if existing.CycleID() == p.CycleID() && existing.LevelID() == p.LevelID() {
+			f.plans[i] = p
+			return p, nil
+		}
+	}
+	f.plans = append(f.plans, p)
 	return p, nil
 }
 
-func (f *fakeRepo) ListTuitionPlans(_ context.Context, _ string) ([]domain.TuitionPlan, error) {
-	return nil, nil
+func (f *fakeRepo) ListTuitionPlans(_ context.Context, cycleID string) ([]domain.TuitionPlan, error) {
+	var out []domain.TuitionPlan
+	for _, p := range f.plans {
+		if p.CycleID() == cycleID {
+			out = append(out, p)
+		}
+	}
+	return out, nil
 }
 
 type fakeCatalog struct{}

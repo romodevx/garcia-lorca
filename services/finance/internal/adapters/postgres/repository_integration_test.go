@@ -17,6 +17,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -31,6 +32,7 @@ import (
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	pgadapter "github.com/garcia-lorca/services/finance/internal/adapters/postgres"
 	"github.com/garcia-lorca/services/finance/internal/domain"
+	"github.com/garcia-lorca/services/finance/internal/ports"
 )
 
 const (
@@ -39,21 +41,27 @@ const (
 	tenantB = "22222222-2222-2222-2222-222222222222"
 )
 
-// migrationFiles are applied in order before the app role is granted, so the
-// non-owner role gets privileges on every table.
-var migrationFiles = []string{
-	"../../../../../migrations/finance/0001_init.sql",
-	"../../../../../migrations/finance/0002_payment_idempotency.sql",
-	"../../../../../migrations/finance/0003_charge_external_ref.sql",
-	"../../../../../migrations/finance/0004_concept_kind.sql",
-	"../../../../../migrations/finance/0005_tuition_plans.sql",
-	"../../../../../migrations/finance/0006_collection_policy.sql",
-	"../../../../../migrations/finance/0007_deposits.sql",
-	"../../../../../migrations/finance/0008_discount_reason.sql",
-	"../../../../../migrations/finance/0009_card_type.sql",
-	"../../../../../migrations/finance/0010_tuition_schedule.sql",
-	"../../../../../migrations/finance/0011_level_discount.sql",
-	"../../../../../migrations/finance/0012_outbox.sql",
+// migrationDir holds the migrations applied, in filename order, before the app
+// role is granted — so the non-owner role gets privileges on every table.
+//
+// Globbed rather than listed. The list used to be written out by hand, and a
+// migration added without remembering to append it here failed every test that
+// touched the new column, in a way that read as a code bug rather than a
+// forgotten line.
+const migrationDir = "../../../../../migrations/finance"
+
+func migrationFiles() ([]string, error) {
+	files, err := filepath.Glob(filepath.Join(migrationDir, "*.sql"))
+	if err != nil {
+		return nil, err
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no migrations found in %s", migrationDir)
+	}
+	// Glob sorts already; sorting again says the order is load-bearing rather
+	// than incidental.
+	slices.Sort(files)
+	return files, nil
 }
 
 var (
@@ -131,7 +139,11 @@ func open(dsn string) (*gorm.DB, error) {
 }
 
 func migrate(db *gorm.DB) error {
-	for _, f := range migrationFiles {
+	files, err := migrationFiles()
+	if err != nil {
+		return err
+	}
+	for _, f := range files {
 		sql, err := os.ReadFile(f)
 		if err != nil {
 			return err
@@ -1006,4 +1018,115 @@ func withExternalRef(t *testing.T, c domain.Charge, ref string) domain.Charge {
 		t.Fatalf("WithExternalRef(%q): %v", ref, err)
 	}
 	return tagged
+}
+
+// RescheduleUnpaid is what makes a corrected deadline reach the pupils already
+// billed: the run never re-issues a charge it has written, so without this a
+// school could set the inscription's date and see nothing happen to anybody.
+//
+// The guards are in SQL, so they are tested here and not against a fake.
+func TestRescheduleUnpaidMovesOnlyWhatItShould(t *testing.T) {
+	ctx := context.Background()
+	const conceptID = "c0000000-0000-0000-0000-0000000000fc"
+	const cycle = "a0000000-0000-0000-0000-0000000000fc"
+	repo := appRepo(t, tenantA)
+	if _, err := repo.CreateConcept(ctx, newConcept(t, conceptID, tenantA, "reschedule", 8000)); err != nil {
+		t.Fatalf("seed concept: %v", err)
+	}
+
+	seed := func(idSuffix, student, ref string) domain.Charge {
+		c := newCharge(t, "e0000000-0000-0000-0000-0000000000"+idSuffix,
+			tenantA, student, cycle, conceptID, 8000, 0, today)
+		withRef, err := c.WithExternalRef(ref)
+		if err != nil {
+			t.Fatalf("external ref: %v", err)
+		}
+		if _, err := repo.CreateCharge(ctx, withRef); err != nil {
+			t.Fatalf("seed charge %s: %v", ref, err)
+		}
+		return withRef
+	}
+
+	unpaid := seed("c1", "50000000-0000-0000-0000-0000000000c1", "enrollment:"+cycle+":c1")
+	paid := seed("c2", "50000000-0000-0000-0000-0000000000c2", "enrollment:"+cycle+":c2")
+	sameDay := seed("c3", "50000000-0000-0000-0000-0000000000c3", "enrollment:"+cycle+":c3")
+
+	// Something has been collected against the second one, so it is history.
+	if _, _, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000c2",
+		tenantA, paid.ID(), 1000, today), derive, nil); err != nil {
+		t.Fatalf("seed payment: %v", err)
+	}
+
+	moveTo := today.AddDate(0, -2, 0)
+	moved, err := repo.RescheduleUnpaid(ctx, []ports.ChargeReschedule{
+		{ExternalRef: unpaid.ExternalRef(), DueOn: moveTo},
+		{ExternalRef: paid.ExternalRef(), DueOn: moveTo},
+		// Already on the day asked for: not a move, and must not be counted as
+		// one, or the run would report four hundred moves every month.
+		{ExternalRef: sameDay.ExternalRef(), DueOn: today},
+	})
+	if err != nil {
+		t.Fatalf("RescheduleUnpaid: %v", err)
+	}
+	if moved != 1 {
+		t.Fatalf("moved = %d, want 1 — only the unpaid charge whose date differs", moved)
+	}
+
+	got, err := repo.GetCharge(ctx, unpaid.ID())
+	if err != nil {
+		t.Fatalf("GetCharge: %v", err)
+	}
+	if !got.Charge.DueDate().Equal(moveTo) {
+		t.Errorf("the unpaid charge falls due %s, want %s",
+			got.Charge.DueDate().Format("2006-01-02"), moveTo.Format("2006-01-02"))
+	}
+	settled, err := repo.GetCharge(ctx, paid.ID())
+	if err != nil {
+		t.Fatalf("GetCharge: %v", err)
+	}
+	if !settled.Charge.DueDate().Equal(today) {
+		t.Errorf("a charge with money on it was re-dated to %s",
+			settled.Charge.DueDate().Format("2006-01-02"))
+	}
+}
+
+// One tenant cannot move another's deadlines. The update runs under RLS as the
+// non-owner `app` role, so this is the write side of the same posture the
+// isolation tests above pin for reads.
+func TestRescheduleUnpaidCannotReachAnotherTenant(t *testing.T) {
+	ctx := context.Background()
+	const conceptID = "c0000000-0000-0000-0000-0000000000fd"
+	const cycle = "a0000000-0000-0000-0000-0000000000fd"
+	ownerRepo := appRepo(t, tenantA)
+	if _, err := ownerRepo.CreateConcept(ctx, newConcept(t, conceptID, tenantA, "reschedule-rls", 8000)); err != nil {
+		t.Fatalf("seed concept: %v", err)
+	}
+	c := newCharge(t, "e0000000-0000-0000-0000-0000000000fd",
+		tenantA, "50000000-0000-0000-0000-0000000000fd", cycle, conceptID, 8000, 0, today)
+	withRef, err := c.WithExternalRef("enrollment:" + cycle + ":fd")
+	if err != nil {
+		t.Fatalf("external ref: %v", err)
+	}
+	if _, err := ownerRepo.CreateCharge(ctx, withRef); err != nil {
+		t.Fatalf("seed charge: %v", err)
+	}
+
+	intruder := appRepo(t, tenantB)
+	moved, err := intruder.RescheduleUnpaid(ctx, []ports.ChargeReschedule{
+		{ExternalRef: withRef.ExternalRef(), DueOn: today.AddDate(0, -2, 0)},
+	})
+	if err != nil {
+		t.Fatalf("RescheduleUnpaid: %v", err)
+	}
+	if moved != 0 {
+		t.Fatalf("tenant B moved %d of tenant A's charges", moved)
+	}
+
+	got, err := ownerRepo.GetCharge(ctx, withRef.ID())
+	if err != nil {
+		t.Fatalf("GetCharge: %v", err)
+	}
+	if !got.Charge.DueDate().Equal(today) {
+		t.Errorf("the deadline moved to %s", got.Charge.DueDate().Format("2006-01-02"))
+	}
 }

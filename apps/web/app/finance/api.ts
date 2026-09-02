@@ -692,6 +692,34 @@ export interface TuitionPlan {
    * chances to mistype it.
    */
   monthlyDiscountCents: number;
+  /**
+   * The extras the school collects on top of the tuition, each split across the
+   * months it chose. Empty is the ordinary state.
+   */
+  fees: Fee[];
+  /**
+   * The deadline the school set for the inscription (YYYY-MM-DD). Empty keeps
+   * the default rule — the due day in the cycle's first month.
+   */
+  enrollmentDueOn: string;
+}
+
+/**
+ * Money the school collects on top of the monthly tuition, spread across the
+ * months it chooses.
+ *
+ * A school's year and its calendar do not agree: "la cuota de julio" is charged
+ * for a month the year does not bill, so it is collected inside months that it
+ * does. `amountCents` is the WHOLE fee, not the monthly share — the school says
+ * what it collects and the server divides it, so nobody is doing arithmetic in
+ * a form field.
+ */
+export interface Fee {
+  /** What the family reads, and the whole explanation of a dearer month. */
+  name: string;
+  amountCents: number;
+  /** The calendar months it is divided between, in the order chosen. */
+  months: number[];
 }
 
 /**
@@ -738,6 +766,14 @@ export interface BillingRun {
   tuitionCreated: number;
   enrollmentCreated: number;
   lateFeesCreated: number;
+  /** Charges issued for the extras collected on top of the tuition. */
+  feesCreated: number;
+  /**
+   * Inscriptions whose deadline the run corrected to match the tuition table.
+   * The run never re-issues a charge it has written, so this is how a deadline
+   * changed after billing reaches pupils who were already charged.
+   */
+  enrollmentMoved: number;
   /** Already existed. On a second press this is everything — that IS the proof. */
   skipped: number;
   /** Levels nobody has priced. Reported, never billed at zero. */
@@ -757,13 +793,17 @@ export async function upsertTuitionPlan(baseURL: string, input: TuitionPlanInput
  * must not read as "daily surcharge of nothing".
  */
 export async function listTuitionPlans(baseURL: string, cycleId: string): Promise<TuitionPlan[]> {
-  const plans = await getList<Partial<TuitionPlan> & Omit<TuitionPlan, "policy" | "schedule" | "monthlyDiscountCents">>(
-    baseURL, `/tuition-plans?cycleId=${encodeURIComponent(cycleId)}`, "plans");
+  const plans = await getList<
+    Partial<TuitionPlan> &
+      Omit<TuitionPlan, "policy" | "schedule" | "monthlyDiscountCents" | "fees" | "enrollmentDueOn">
+  >(baseURL, `/tuition-plans?cycleId=${encodeURIComponent(cycleId)}`, "plans");
   return plans.map((p) => ({
     ...p,
     policy: p.policy ?? emptyPolicy(),
     schedule: p.schedule ?? [],
     monthlyDiscountCents: p.monthlyDiscountCents ?? 0,
+    fees: p.fees ?? [],
+    enrollmentDueOn: p.enrollmentDueOn ?? "",
   }));
 }
 

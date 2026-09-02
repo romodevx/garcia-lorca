@@ -292,7 +292,7 @@ func TestADueDateOnAClosedDayMovesToTheNextWorkingDay(t *testing.T) {
 	}
 	var october time.Time
 	for _, c := range charges {
-		if strings.Contains(c.Charge.Description(), "2026-10") {
+		if strings.Contains(c.Charge.Description(), "octubre 2026") {
 			october = c.Charge.DueDate()
 		}
 	}

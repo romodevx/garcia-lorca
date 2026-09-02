@@ -265,6 +265,17 @@ type FinanceRepository interface {
 	// NOTHING) instead of failing the batch. It returns how many rows were
 	// actually written, which makes re-running a generation idempotent.
 	CreateChargesBulk(ctx context.Context, cs []domain.Charge) (createdCount int, err error)
+	// RescheduleUnpaid moves the due date of charges identified by external ref.
+	//
+	// It exists because the run never touches a charge it already issued, which
+	// is what makes it idempotent — and that left the school unable to correct a
+	// deadline it had already billed. Setting the inscription's due date did
+	// nothing for pupils already charged, so the setting looked broken.
+	//
+	// It moves ONLY what is unpaid and only where the date actually differs. A
+	// settled charge is history; re-dating it would rewrite when a family was
+	// due to pay something they have already paid.
+	RescheduleUnpaid(ctx context.Context, items []ChargeReschedule) (movedCount int, err error)
 	// GetCharge loads one charge together with its collected total; a missing id
 	// yields glerrors.ErrNotFound.
 	GetCharge(ctx context.Context, id string) (ChargeWithPaid, error)
@@ -409,3 +420,9 @@ type OverdueCursor struct {
 
 // IsZero reports the start-from-the-beginning position.
 func (c OverdueCursor) IsZero() bool { return c.ID == "" && c.DueDate.IsZero() }
+
+// ChargeReschedule is one charge's new deadline, named by its external ref.
+type ChargeReschedule struct {
+	ExternalRef string
+	DueOn       time.Time
+}

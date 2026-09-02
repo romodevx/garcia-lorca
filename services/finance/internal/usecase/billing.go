@@ -19,7 +19,27 @@ const (
 	tuitionConceptName    = "Colegiatura"
 	enrollmentConceptName = "Inscripción"
 	lateFeeConceptName    = "Recargo por pago tardío"
+	feeConceptName        = "Cuota"
 )
+
+// monthNamesES names the months the way the school says them out loud.
+//
+// "Colegiatura 2026-09" is a machine's idea of a month. These rows are read to
+// parents over the phone and printed on statements, and nobody on the other end
+// of that call is holding a calendar to decode 09.
+//
+// Spanish and not a locale lookup: this school is in Mexico and every other
+// string the family reads is already Spanish. A translation layer here would be
+// one indirection standing in front of one answer.
+var monthNamesES = [...]string{
+	"enero", "febrero", "marzo", "abril", "mayo", "junio",
+	"julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+}
+
+// monthInWords is "septiembre 2026".
+func monthInWords(t time.Time) string {
+	return fmt.Sprintf("%s %d", monthNamesES[int(t.Month())-1], t.Year())
+}
 
 const enrolmentStatusActive = "active"
 
@@ -43,6 +63,12 @@ type TuitionPlanInput struct {
 	// MonthlyDiscountCents comes off every month of this level — the school's
 	// arrangement for maternal, or for any level it prices differently.
 	MonthlyDiscountCents int64
+	// Fees are the extra amounts collected on top of the tuition, each split
+	// across the months the school chose.
+	Fees []domain.Fee
+	// EnrollmentDueOn is the deadline the school set for the inscription. Zero
+	// keeps the rule the run has always used.
+	EnrollmentDueOn time.Time
 }
 
 // BillingResult is what a run did. Skipped counts the charges that already
@@ -55,6 +81,11 @@ type BillingResult struct {
 	TuitionCreated    int
 	EnrollmentCreated int
 	LateFeesCreated   int
+	FeesCreated       int
+	// EnrollmentMoved counts inscriptions whose deadline the run corrected to
+	// match the tuition table. Reported because a run that silently moves four
+	// hundred due dates is one nobody can audit.
+	EnrollmentMoved   int
 	Skipped           int
 	LevelsWithoutPlan []string
 }
@@ -75,6 +106,8 @@ func (s *FinanceService) UpsertTuitionPlan(ctx context.Context, in TuitionPlanIn
 		Policy:               in.Policy,
 		Schedule:             in.Schedule,
 		MonthlyDiscountCents: in.MonthlyDiscountCents,
+		Fees:                 in.Fees,
+		EnrollmentDueOn:      in.EnrollmentDueOn,
 	})
 	if err != nil {
 		return domain.TuitionPlan{}, err
@@ -154,7 +187,7 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 	// Kept apart so the counts reported back are exact. A single bulk insert
 	// returns one number, and splitting it afterwards would be arithmetic
 	// pretending to be knowledge.
-	var wantedEnrollment, wantedTuition []domain.Charge
+	var wantedEnrollment, wantedTuition, wantedFees []domain.Charge
 	for _, enr := range enrollments {
 		if enr.Status != enrolmentStatusActive {
 			continue
@@ -193,10 +226,13 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 		for _, item := range plan.Installments(cycle.StartsOn) {
 			due := item.DueOn
 			monthly, err := s.buildCharge(chargeSpec{
-				studentID:   enr.StudentID,
-				cycleID:     cycleID,
-				conceptID:   concepts[domain.KindTuition].ID(),
-				description: fmt.Sprintf("%s %s", tuitionConceptName, due.Format("2006-01")),
+				studentID: enr.StudentID,
+				cycleID:   cycleID,
+				conceptID: concepts[domain.KindTuition].ID(),
+				// In words, for the person reading it. The ref below stays
+				// "2006-01": it is the charge's identity, and renaming a month
+				// must never re-issue it.
+				description: fmt.Sprintf("%s %s", tuitionConceptName, monthInWords(due)),
 				// What THIS payment collects, which under a split schedule is
 				// not the same every month.
 				amount: item.AmountCents,
@@ -220,13 +256,55 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 			}
 			wantedTuition = append(wantedTuition, monthly)
 		}
+
+		// The extras the school collects on top of the tuition, each already
+		// divided between the months it chose. They are separate charges and
+		// not added into the month's tuition on purpose: a family that owes
+		// $4,000 in September is owed an explanation of the $800, and a tuition
+		// row that no longer matches the tabulador is one nobody can reconcile.
+		for _, item := range plan.FeeInstallments(cycle.StartsOn) {
+			charge, err := s.buildCharge(chargeSpec{
+				studentID:   enr.StudentID,
+				cycleID:     cycleID,
+				conceptID:   concepts[domain.KindFee].ID(),
+				description: feeDescription(item),
+				amount:      item.AmountCents,
+				due:         calendar.NextWorkingDay(item.DueOn),
+				ref: fmt.Sprintf("fee:%s:%s:%s:%s", cycleID, enr.StudentID,
+					feeSlug(item.Name), item.DueOn.Format("2006-01")),
+			})
+			if err != nil {
+				return BillingResult{}, err
+			}
+			wantedFees = append(wantedFees, charge)
+		}
 	}
 
 	enrollmentCreated, err := s.repo.CreateChargesBulk(ctx, wantedEnrollment)
 	if err != nil {
 		return BillingResult{}, err
 	}
+	// The inscriptions that already existed keep their original due date, and
+	// the school may have changed the deadline since. Correcting it is the only
+	// way the setting reaches a pupil who was billed before it was typed — the
+	// bulk insert above skips them by design.
+	//
+	// Only the inscription, and only when it is unpaid. Tuition months are not
+	// re-dated: moving eleven deadlines because somebody adjusted the due day is
+	// a bigger thing than a school expects from pressing "generar".
+	moves := make([]ports.ChargeReschedule, 0, len(wantedEnrollment))
+	for _, c := range wantedEnrollment {
+		moves = append(moves, ports.ChargeReschedule{ExternalRef: c.ExternalRef(), DueOn: c.DueDate()})
+	}
+	enrollmentMoved, err := s.repo.RescheduleUnpaid(ctx, moves)
+	if err != nil {
+		return BillingResult{}, err
+	}
 	tuitionCreated, err := s.repo.CreateChargesBulk(ctx, wantedTuition)
+	if err != nil {
+		return BillingResult{}, err
+	}
+	feesCreated, err := s.repo.CreateChargesBulk(ctx, wantedFees)
 	if err != nil {
 		return BillingResult{}, err
 	}
@@ -244,12 +322,14 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 		return BillingResult{}, err
 	}
 
-	wanted := len(wantedEnrollment) + len(wantedTuition) + len(lateFees)
-	created := enrollmentCreated + tuitionCreated + lateCreated
+	wanted := len(wantedEnrollment) + len(wantedTuition) + len(wantedFees) + len(lateFees)
+	created := enrollmentCreated + tuitionCreated + feesCreated + lateCreated
 	return BillingResult{
 		TuitionCreated:    tuitionCreated,
 		EnrollmentCreated: enrollmentCreated,
 		LateFeesCreated:   lateCreated,
+		FeesCreated:       feesCreated,
+		EnrollmentMoved:   enrollmentMoved,
 		Skipped:           wanted - created,
 		LevelsWithoutPlan: s.levelsWithoutPlan(ctx, planByLevel),
 	}, nil
@@ -263,6 +343,7 @@ func (s *FinanceService) systemConcepts(ctx context.Context) (map[string]domain.
 		domain.KindTuition:    tuitionConceptName,
 		domain.KindEnrollment: enrollmentConceptName,
 		domain.KindLateFee:    lateFeeConceptName,
+		domain.KindFee:        feeConceptName,
 	} {
 		c, err := s.repo.EnsureConceptOfKind(ctx, s.newID(), kind, name)
 		if err != nil {
@@ -430,7 +511,44 @@ func (s *FinanceService) buildCharge(spec chargeSpec) (domain.Charge, error) {
 // the month the school year opens. A family owes it from the start of the year,
 // not from the first tuition.
 func enrollmentDueDate(cycleStart time.Time, plan domain.TuitionPlan) time.Time {
+	// The school's own deadline wins. The inscription is a separate charge with
+	// a separate arrangement — collected in June for a year that opens in
+	// August — and deriving it from the cycle made that impossible to say.
+	if due := plan.EnrollmentDueOn(); !due.IsZero() {
+		return due
+	}
 	return time.Date(cycleStart.Year(), cycleStart.Month(), plan.DueDay(), 0, 0, 0, 0, cycleStart.Location())
+}
+
+// feeDescription is what the family reads. A fee collected in one month is just
+// the fee; a split one says which part it is, so two rows for the same fee are
+// not mistaken for a double bill.
+func feeDescription(i domain.FeeInstallment) string {
+	if i.Of <= 1 {
+		return i.Name
+	}
+	return fmt.Sprintf("%s (%d de %d)", i.Name, i.Part, i.Of)
+}
+
+// feeSlug is the fee's stable identity inside a charge ref.
+//
+// It is derived from the NAME because that is all a fee has — the list lives in
+// the plan's JSON and its entries carry no id. Lower-cased and stripped of
+// everything but letters and digits so that fixing the capitalisation of "Cuota
+// de Julio" does not re-issue the whole school's charges.
+func feeSlug(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(name) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		// A name of nothing but punctuation still needs an identity, or every
+		// such fee would collide with every other.
+		return "cuota"
+	}
+	return b.String()
 }
 
 // resolveAsOf reads the date the run should pretend it is. An empty value means

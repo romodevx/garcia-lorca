@@ -8,6 +8,7 @@ package grpcadapter
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	connect "connectrpc.com/connect"
@@ -520,6 +521,10 @@ func connectErr(err error) *connect.Error {
 // UpsertTuitionPlan sets what one level of one cycle costs.
 func (h *FinanceHandler) UpsertTuitionPlan(ctx context.Context, req *connect.Request[financev1.UpsertTuitionPlanRequest]) (*connect.Response[financev1.UpsertTuitionPlanResponse], error) {
 	m := req.Msg
+	enrollmentDue, err := parsePlanDate(m.GetEnrollmentDueOn())
+	if err != nil {
+		return nil, connectErr(err)
+	}
 	plan, err := h.finance.UpsertTuitionPlan(ctx, usecase.TuitionPlanInput{
 		CycleID:              m.GetCycleId(),
 		LevelID:              m.GetLevelId(),
@@ -533,6 +538,8 @@ func (h *FinanceHandler) UpsertTuitionPlan(ctx context.Context, req *connect.Req
 		Policy:               toDomainPolicy(m.GetPolicy()),
 		Schedule:             toDomainSchedule(m.GetSchedule()),
 		MonthlyDiscountCents: m.GetMonthlyDiscountCents(),
+		Fees:                 toDomainFees(m.GetFees()),
+		EnrollmentDueOn:      enrollmentDue,
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -564,6 +571,8 @@ func (h *FinanceHandler) RunBilling(ctx context.Context, req *connect.Request[fi
 		TuitionCreated:    int32(got.TuitionCreated),
 		EnrollmentCreated: int32(got.EnrollmentCreated),
 		LateFeesCreated:   int32(got.LateFeesCreated),
+		FeesCreated:       int32(got.FeesCreated),
+		EnrollmentMoved:   int32(got.EnrollmentMoved),
 		Skipped:           int32(got.Skipped),
 		LevelsWithoutPlan: got.LevelsWithoutPlan,
 	}), nil
@@ -586,7 +595,66 @@ func toProtoPlan(p domain.TuitionPlan) *financev1.TuitionPlan {
 		Policy:               toProtoPolicy(p.Policy()),
 		Schedule:             toProtoSchedule(p.Schedule()),
 		MonthlyDiscountCents: p.MonthlyDiscountCents(),
+		Fees:                 toProtoFees(p.Fees()),
+		EnrollmentDueOn:      formatPlanDate(p.EnrollmentDueOn()),
 	}
+}
+
+// toDomainFees reads the level's extra fees off the wire. An absent list is a
+// level that collects only its tuition, which is what a client written before
+// this sends.
+func toDomainFees(in []*financev1.Fee) []domain.Fee {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]domain.Fee, 0, len(in))
+	for _, f := range in {
+		months := make([]int, 0, len(f.GetMonths()))
+		for _, m := range f.GetMonths() {
+			months = append(months, int(m))
+		}
+		out = append(out, domain.Fee{
+			Name:        f.GetName(),
+			AmountCents: f.GetAmountCents(),
+			Months:      months,
+		})
+	}
+	return out
+}
+
+func toProtoFees(in []domain.Fee) []*financev1.Fee {
+	out := make([]*financev1.Fee, 0, len(in))
+	for _, f := range in {
+		months := make([]int32, 0, len(f.Months))
+		for _, m := range f.Months {
+			months = append(months, int32(m))
+		}
+		out = append(out, &financev1.Fee{Name: f.Name, AmountCents: f.AmountCents, Months: months})
+	}
+	return out
+}
+
+// parsePlanDate reads an optional YYYY-MM-DD off the wire.
+//
+// A malformed date is REFUSED rather than read as "unset". Swallowing it would
+// move every inscription of the level back to the default rule, silently, and
+// the school would find out from the due dates months later.
+func parsePlanDate(s string) (time.Time, error) {
+	if strings.TrimSpace(s) == "" {
+		return time.Time{}, nil
+	}
+	t, err := time.Parse(dueDateLayout, s)
+	if err != nil {
+		return time.Time{}, glerrors.New(glerrors.KindInvalid, "the date is written YYYY-MM-DD")
+	}
+	return t, nil
+}
+
+func formatPlanDate(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(dueDateLayout)
 }
 
 // toDomainPolicy reads the collection rule off the wire. A nil message is the

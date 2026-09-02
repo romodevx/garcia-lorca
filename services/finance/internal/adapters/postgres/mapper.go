@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"encoding/json"
+	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/finance/internal/domain"
@@ -30,6 +31,14 @@ func toDomainPlan(m tuitionPlanModel) (domain.TuitionPlan, error) {
 	if err != nil {
 		return domain.TuitionPlan{}, err
 	}
+	fees, err := feesToDomain(m.Fees)
+	if err != nil {
+		return domain.TuitionPlan{}, err
+	}
+	var enrollmentDue time.Time
+	if m.EnrollmentDueOn != nil {
+		enrollmentDue = *m.EnrollmentDueOn
+	}
 	return domain.NewTuitionPlan(domain.TuitionPlanSpec{
 		ID: m.ID, TenantID: m.TenantID, CycleID: m.CycleID, LevelID: m.LevelID,
 		EnrollmentCents: m.EnrollmentCents, MonthlyCents: m.MonthlyCents,
@@ -37,6 +46,8 @@ func toDomainPlan(m tuitionPlanModel) (domain.TuitionPlan, error) {
 		DueDay: m.DueDay, LateFeeCents: m.LateFeeCents, Active: m.Active,
 		Schedule:             schedule,
 		MonthlyDiscountCents: m.MonthlyDiscountCents,
+		Fees:                 fees,
+		EnrollmentDueOn:      enrollmentDue,
 		Policy: domain.CollectionPolicy{
 			// A row written before M16 has mode 'monthly' by default, so it keeps
 			// meaning exactly what it meant when it was billed.
@@ -63,7 +74,45 @@ func fromDomainPlan(p domain.TuitionPlan) tuitionPlanModel {
 		EarlyPaymentDays:       p.Policy().EarlyPaymentDays,
 		Schedule:               scheduleFromDomain(p.Schedule()),
 		MonthlyDiscountCents:   p.MonthlyDiscountCents(),
+		Fees:                   feesFromDomain(p.Fees()),
+		EnrollmentDueOn:        enrollmentDueFromDomain(p.EnrollmentDueOn()),
 	}
+}
+
+// feesToDomain reads the stored fees. A row written before fees existed holds
+// "[]" and yields none, which is a level that collects only its tuition.
+func feesToDomain(raw []byte) ([]domain.Fee, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var out []domain.Fee
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "reading the level fees", err)
+	}
+	return out, nil
+}
+
+func feesFromDomain(in []domain.Fee) []byte {
+	if len(in) == 0 {
+		return []byte("[]")
+	}
+	raw, err := json.Marshal(in)
+	if err != nil {
+		// Marshalling names and ints cannot fail. An empty list is still a
+		// valid answer, so this degrades to "no fees" rather than losing the
+		// whole tuition table.
+		return []byte("[]")
+	}
+	return raw
+}
+
+// enrollmentDueFromDomain keeps "the school set no deadline" as NULL. Writing
+// the zero time instead would bill every inscription as due in year 1.
+func enrollmentDueFromDomain(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }
 
 // scheduleToDomain reads the stored payment plan. A row written before the

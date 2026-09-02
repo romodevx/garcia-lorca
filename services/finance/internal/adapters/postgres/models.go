@@ -53,6 +53,13 @@ type tuitionPlanModel struct {
 	// one column does not justify pulling a driver for another database into a
 	// Postgres service.
 	Schedule []byte `gorm:"column:schedule;type:jsonb"`
+	// Fees are the extra amounts collected on top of the tuition, as JSON, "[]"
+	// when the level has none. Raw bytes for the same reason as Schedule.
+	Fees []byte `gorm:"column:fees;type:jsonb"`
+	// EnrollmentDueOn is the deadline the school set for the inscription. NULL
+	// when it set none, which is what makes the run fall back to the old rule
+	// instead of billing everything due on the zero date.
+	EnrollmentDueOn *time.Time `gorm:"column:enrollment_due_on"`
 	// MonthlyDiscountCents comes off every month of this level.
 	MonthlyDiscountCents int64     `gorm:"column:monthly_discount_cents"`
 	Active               bool      `gorm:"column:active"`

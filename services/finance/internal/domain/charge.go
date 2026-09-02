@@ -234,6 +234,17 @@ func (c Charge) WithExternalRef(ref string) (Charge, error) {
 	return c, nil
 }
 
+// WithDueDate returns a copy falling due on another day.
+//
+// It carries no validation because a due date has none to apply: any day is a
+// day a school may ask to be paid on. The rule about WHICH charges may be moved
+// — unpaid ones only — belongs to the caller that knows what has been collected,
+// which is the repository holding the row lock.
+func (c Charge) WithDueDate(due time.Time) Charge {
+	c.dueDate = due
+	return c
+}
+
 // CancelIfUnpaid returns a cancelled copy ONLY if nothing has been collected
 // against the charge. Cancel deliberately voids a charge regardless of its
 // payments (the school does that on purpose, see above); this is the guarded

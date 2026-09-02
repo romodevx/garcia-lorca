@@ -51,6 +51,13 @@ type TuitionPlanSpec struct {
 	// MonthlyDiscountCents comes off every month of this level. Zero is no
 	// discount, which is what most levels have.
 	MonthlyDiscountCents int64
+	// Fees are the extra amounts the school collects on top of the tuition,
+	// each spread across the months it chose. Empty is the ordinary state.
+	Fees []Fee
+	// EnrollmentDueOn is the day the inscription falls due. Zero keeps the rule
+	// the run has always used — the plan's due day in the cycle's first month —
+	// so a plan written before this field goes on meaning what it meant.
+	EnrollmentDueOn time.Time
 }
 
 // Installment is one payment of the year: which calendar month it falls in and
@@ -98,6 +105,8 @@ type TuitionPlan struct {
 	policy               CollectionPolicy
 	schedule             []Installment
 	monthlyDiscountCents int64
+	fees                 []Fee
+	enrollmentDueOn      time.Time
 	active               bool
 }
 
@@ -140,6 +149,14 @@ func NewTuitionPlan(spec TuitionPlanSpec) (TuitionPlan, error) {
 		return TuitionPlan{}, glerrors.New(glerrors.KindInvalid,
 			"the discount cannot be bigger than the month it comes off")
 	}
+	if len(spec.Fees) > maxFeesPerPlan {
+		return TuitionPlan{}, glerrors.New(glerrors.KindInvalid, "that is more fees than a level can carry")
+	}
+	for _, f := range spec.Fees {
+		if err := f.validate(); err != nil {
+			return TuitionPlan{}, err
+		}
+	}
 	for _, i := range spec.Schedule {
 		if i.Month < 1 || i.Month > 12 {
 			return TuitionPlan{}, glerrors.New(glerrors.KindInvalid, "a payment must fall in a month from 1 to 12")
@@ -159,6 +176,8 @@ func NewTuitionPlan(spec TuitionPlanSpec) (TuitionPlan, error) {
 		policy:               spec.Policy,
 		schedule:             spec.Schedule,
 		monthlyDiscountCents: spec.MonthlyDiscountCents,
+		fees:                 spec.Fees,
+		enrollmentDueOn:      spec.EnrollmentDueOn,
 	}, nil
 }
 
@@ -292,4 +311,44 @@ func OverdueMonths(due, asOf time.Time) int {
 		return 0
 	}
 	return months
+}
+
+// Fees are the extra amounts this level collects on top of the tuition.
+func (p TuitionPlan) Fees() []Fee { return p.fees }
+
+// EnrollmentDueOn is the day the inscription falls due, or the zero time when
+// the school did not set one and the run should derive it.
+func (p TuitionPlan) EnrollmentDueOn() time.Time { return p.enrollmentDueOn }
+
+// FeeInstallments places every fee's shares on the calendar: what falls due,
+// when, for how much, and which part of which fee it is.
+//
+// The year is worked out the same way the tuition's is — forward from the cycle,
+// turning when a month number goes backwards — because a school that writes
+// "septiembre y febrero" is not thinking about two calendar years, and should
+// not have to.
+func (p TuitionPlan) FeeInstallments(cycleStart time.Time) []FeeInstallment {
+	var out []FeeInstallment
+	for _, f := range p.fees {
+		shares := f.shares()
+		year := cycleStart.Year()
+		if int(cycleStart.Month()) > f.Months[0] {
+			year++
+		}
+		previous := 0
+		for i, month := range f.Months {
+			if previous != 0 && month < previous {
+				year++
+			}
+			previous = month
+			out = append(out, FeeInstallment{
+				Name:        strings.TrimSpace(f.Name),
+				Part:        i + 1,
+				Of:          len(f.Months),
+				DueOn:       time.Date(year, time.Month(month), p.dueDay, 0, 0, 0, 0, cycleStart.Location()),
+				AmountCents: shares[i],
+			})
+		}
+	}
+	return out
 }

@@ -462,6 +462,34 @@ message TuitionPlan {
   // typed per pupil, which is the difference between a rule and four hundred
   // chances to mistype it.
   int64 monthly_discount_cents = 14;
+  // The extras collected on top of the tuition, each split across the months
+  // the school chose. Empty is the ordinary state.
+  repeated Fee fees = 15;
+  // The deadline the school set for the inscription (YYYY-MM-DD). Empty keeps
+  // the rule the run has always used — the due day in the cycle's first month —
+  // so a plan written before this field goes on meaning what it meant.
+  string enrollment_due_on = 16;
+}
+
+// Fee is money the school collects on top of the monthly tuition, spread across
+// the months it chooses.
+//
+// It exists because a school's year and its calendar do not agree. "La cuota de
+// julio" is charged for a month the year does not bill, so it has to be
+// collected inside months that it does. Saying that used to mean hand-writing a
+// schedule of month:amount pairs, which priced the tuition and the fee as one
+// number and left nobody able to explain either.
+message Fee {
+  // What the family reads on the statement, and the whole explanation of why a
+  // month costs more than the tabulador says.
+  string name = 1;
+  // The WHOLE fee, not the monthly share. The school states what it collects;
+  // dividing it is the server's job, not the director's.
+  int64 amount_cents = 2;
+  // The calendar months (1-12) it is divided between, in the order chosen. One
+  // month is a fee that is not split. The remainder of an uneven division goes
+  // to the first payment, so no cent is lost.
+  repeated int32 months = 3;
 }
 
 // Installment is one payment of the year: the calendar month it falls in and
@@ -510,6 +538,9 @@ message UpsertTuitionPlanRequest {
   CollectionPolicy policy = 10;
   repeated Installment schedule = 11;
   int64 monthly_discount_cents = 12;
+  repeated Fee fees = 13;
+  // YYYY-MM-DD, or empty for the default rule.
+  string enrollment_due_on = 14;
 }
 
 message UpsertTuitionPlanResponse {
@@ -540,6 +571,12 @@ message RunBillingResponse {
   int32 enrollment_created = 2;
   int32 late_fees_created = 3;
   int32 skipped = 4;
+  // Charges issued for the extras collected on top of the tuition.
+  int32 fees_created = 6;
+  // Inscriptions whose deadline the run corrected to match the tuition table.
+  // Reported because a run that silently moves four hundred due dates is one
+  // nobody can audit.
+  int32 enrollment_moved = 7;
   // Levels of the cycle with no tuition table. They are NOT billed at zero —
   // they are reported, so a school notices it forgot one instead of discovering
   // it in June.

@@ -10,9 +10,10 @@ import {
   runBilling,
   upsertTuitionPlan,
   type BillingRun,
-  type Installment,
+  type Fee,
   type TuitionPlan,
 } from "../../finance/api";
+import { formatCents } from "../finance/money";
 import { EmptyHint, ErrorAlert, Section, TextField } from "./parts";
 
 import { API_URL } from "../../api-url";
@@ -47,37 +48,83 @@ export function centsToPesos(cents: number): string {
 }
 
 /**
- * The payment plan as a person writes it: "9:3200, 12:1600, 3:4800" — month and
- * amount in pesos, in the order they are collected.
+ * The months of the school year, in the order they are collected, each labelled
+ * the way a person says it.
  *
- * Text and not a row builder because a school states this once a year and reads
- * it back far more often than it edits it. One line is easier to check against
- * a printed circular than eleven boxes.
+ * Derived from the plan being edited rather than from the calendar: a year that
+ * opens in August and bills from September reaches June of the NEXT year, and a
+ * picker that offered bare month names would make "junio" ambiguous in exactly
+ * the case where getting it wrong costs a family a month.
  */
-export function textToSchedule(raw: string): Installment[] | null {
-  const trimmed = raw.trim();
-  if (trimmed === "") {
-    return [];
+export function billedMonths(cycleStartsOn: string, firstMonth: number, count: number): BilledMonth[] {
+  const start = new Date(`${cycleStartsOn}T00:00:00`);
+  let year = start.getFullYear();
+  if (start.getMonth() + 1 > firstMonth) {
+    // The first billed month already passed this calendar year, so the school
+    // means the one after the year turns.
+    year++;
   }
-  const out: Installment[] = [];
-  for (const part of trimmed.split(",")) {
-    const [month, amount] = part.split(":");
-    if (month === undefined || amount === undefined) {
-      return null;
-    }
-    const m = wholeInRange(month.trim(), 1, 12);
-    const cents = pesosToCents(amount.trim());
-    if (m === null || cents === null || cents <= 0) {
-      return null;
-    }
-    out.push({ month: m, amountCents: cents });
+  const out: BilledMonth[] = [];
+  for (let i = 0; i < count; i++) {
+    const month = ((firstMonth - 1 + i) % 12) + 1;
+    if (i > 0 && month === 1) year++;
+    out.push({ month, year, label: `${MONTH_NAMES[month - 1]} ${year}` });
   }
   return out;
 }
 
-/** The same plan, back as text, for the form to show. */
-export function scheduleToText(schedule: readonly Installment[]): string {
-  return schedule.map((i) => `${i.month}:${centsToPesos(i.amountCents)}`).join(", ");
+/** One month of the year, named the way the school says it. */
+export interface BilledMonth {
+  month: number;
+  year: number;
+  label: string;
+}
+
+/**
+ * What each month ends up costing once the fees are added.
+ *
+ * This is the answer to the only question the director actually has: "¿cuánto
+ * se le cobra en septiembre?". The system does the dividing, so the screen has
+ * to show the sum before anything is saved — otherwise the arithmetic is a
+ * promise rather than a fact.
+ */
+export function monthlyTotals(months: BilledMonth[], monthlyCents: number, fees: readonly Fee[]): MonthTotal[] {
+  const extra = new Map<number, number>();
+  for (const fee of fees) {
+    for (const [i, share] of feeShares(fee).entries()) {
+      const month = fee.months[i];
+      if (month === undefined) continue;
+      extra.set(month, (extra.get(month) ?? 0) + share);
+    }
+  }
+  return months.map((m) => ({
+    ...m,
+    feeCents: extra.get(m.month) ?? 0,
+    totalCents: monthlyCents + (extra.get(m.month) ?? 0),
+  }));
+}
+
+/** A month with what the fees add to it. */
+export interface MonthTotal extends BilledMonth {
+  feeCents: number;
+  totalCents: number;
+}
+
+/**
+ * A fee divided between its months, losing no cent.
+ *
+ * The remainder goes to the FIRST payment, exactly as the server does it. Two
+ * implementations of one rule is a risk, but the alternative is a screen that
+ * promises $333.33 three times while the school is charged $1,000 — and the
+ * person deciding needs the true number before they save, not after.
+ */
+export function feeShares(fee: Fee): number[] {
+  const n = fee.months.length;
+  if (n === 0) return [];
+  const base = Math.floor(fee.amountCents / n);
+  const out = new Array<number>(n).fill(base);
+  out[0] = base + (fee.amountCents - base * n);
+  return out;
 }
 
 /** Reads a whole number in a range, or null. Same reasoning as pesosToCents. */
@@ -234,9 +281,15 @@ function RunSummary({ run }: { run: BillingRun }): ReactElement {
     >
       <p>
         Se generaron <strong>{run.tuitionCreated} colegiaturas</strong>,{" "}
-        {run.enrollmentCreated} inscripciones y {run.lateFeesCreated} recargos.{" "}
-        {run.skipped} ya existían.
+        {run.enrollmentCreated} inscripciones, {run.feesCreated} cuotas y{" "}
+        {run.lateFeesCreated} recargos. {run.skipped} ya existían.
       </p>
+      {run.enrollmentMoved > 0 && (
+        <p style={{ marginTop: 8 }}>
+          Se corrigió la fecha límite de <strong>{run.enrollmentMoved} inscripciones</strong> que
+          ya estaban cobradas.
+        </p>
+      )}
       {run.levelsWithoutPlan.length > 0 && (
         <p style={{ marginTop: 8, fontWeight: 600 }}>
           Sin tabulador, no se cobró nada: {run.levelsWithoutPlan.join(", ")}.
@@ -264,7 +317,6 @@ function PlanForm({
   const [months, setMonths] = useState(String(plan?.months ?? 10));
   const [firstMonth, setFirstMonth] = useState(String(plan?.firstBilledMonth ?? 9));
   const [dueDay, setDueDay] = useState(String(plan?.dueDay ?? 10));
-  const [lateFee, setLateFee] = useState(plan === undefined ? "" : centsToPesos(plan.lateFeeCents));
   // The M16 collection rule. Daily mode replaces the fixed monthly surcharge
   // with an amount charged for every day the money is late.
   const [dailyMode, setDailyMode] = useState(plan?.policy.dailyMode ?? false);
@@ -274,12 +326,12 @@ function PlanForm({
   const [earlyAmount, setEarlyAmount] = useState(
     plan === undefined || plan.policy.earlyPaymentCents === 0 ? "" : centsToPesos(plan.policy.earlyPaymentCents));
   const [earlyDays, setEarlyDays] = useState(String(plan?.policy.earlyPaymentDays ?? 0));
-  // An explicit payment plan, written as "9:1000, 12:500, 3:1500" — month and
-  // amount. Empty keeps the equal year, which is what most schools want.
-  const [schedule, setSchedule] = useState(scheduleToText(plan?.schedule ?? []));
-  // The school's standing arrangement for this level — maternal, most often.
-  const [levelDiscount, setLevelDiscount] = useState(
-    plan === undefined || plan.monthlyDiscountCents === 0 ? "" : centsToPesos(plan.monthlyDiscountCents));
+  // The inscription's own deadline. It is a separate charge and the school
+  // collects it on its own date — in June, for a year that opens in August.
+  const [enrollmentDue, setEnrollmentDue] = useState(plan?.enrollmentDueOn ?? "");
+  // The extras collected on top of the tuition, each already whole: the school
+  // states what it collects and the system divides it.
+  const [fees, setFees] = useState<Fee[]>(plan?.fees ?? []);
   const [error, setError] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState(false);
 
@@ -319,16 +371,11 @@ function PlanForm({
       setError(`Los días de pronto pago van de 0 a ${MAX_DUE_DAY}.`);
       return;
     }
-    const discountCents = pesosToCents(levelDiscount) ?? 0;
-    if (discountCents > monthlyCents) {
-      // The same rule the database enforces. A charge that owes negative money
-      // would pay for itself and then some.
-      setError("El descuento no puede ser mayor que la colegiatura del mes.");
-      return;
-    }
-    const plan = textToSchedule(schedule);
-    if (plan === null) {
-      setError("Las cuotas se escriben mes:monto, por ejemplo 9:3200, 12:1600, 3:4800.");
+    if (enrollmentDue.trim() !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(enrollmentDue.trim())) {
+      // Refused here rather than sent: the server reads an unparseable date as
+      // "no deadline", which would move every inscription of this level back to
+      // the default rule without saying so.
+      setError("La fecha límite de inscripción se escribe aaaa-mm-dd, por ejemplo 2026-06-30.");
       return;
     }
 
@@ -345,10 +392,17 @@ function PlanForm({
         months: count,
         firstBilledMonth: startMonth,
         dueDay: day,
-        lateFeeCents: pesosToCents(lateFee) ?? 0,
+        // The school does not use the fixed monthly surcharge or the level
+        // discount, and asked for both to go. Zero is what disables them
+        // downstream, so a level that used to carry one is cleared by saving.
+        lateFeeCents: 0,
+        monthlyDiscountCents: 0,
+        // The mes:monto schedule went with them: splitting a payment is what
+        // the fees below do now, and saying it twice invited two answers.
+        schedule: [],
         active: true,
-        schedule: plan,
-        monthlyDiscountCents: discountCents,
+        fees,
+        enrollmentDueOn: enrollmentDue.trim(),
         policy: {
           dailyMode,
           lateFeeDailyCents: dailyCents,
@@ -382,7 +436,12 @@ function PlanForm({
         <TextField label="Mensualidades" value={months} onChange={setMonths} placeholder="10" />
         <TextField label="Mes de inicio" value={firstMonth} onChange={setFirstMonth} placeholder="9" />
         <TextField label="Día límite" value={dueDay} onChange={setDueDay} placeholder="10" />
-        <TextField label="Recargo por mes vencido" value={lateFee} onChange={setLateFee} placeholder="150" />
+        <TextField
+          label="Fecha límite de inscripción"
+          value={enrollmentDue}
+          onChange={setEnrollmentDue}
+          placeholder="2026-06-30"
+        />
       </div>
 
       <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14, marginBottom: 12 }}>
@@ -405,7 +464,6 @@ function PlanForm({
           <TextField label="Recargo por día" value={dailyFee} onChange={setDailyFee} placeholder="10" />
           <TextField label="Pronto pago (monto)" value={earlyAmount} onChange={setEarlyAmount} placeholder="100" />
           <TextField label="Pronto pago (días hábiles)" value={earlyDays} onChange={setEarlyDays} placeholder="5" />
-          <TextField label="Descuento del nivel (por mes)" value={levelDiscount} onChange={setLevelDiscount} placeholder="500" />
         </div>
         <label style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, cursor: "pointer" }}>
           <input
@@ -420,20 +478,182 @@ function PlanForm({
           </span>
         </label>
       </div>
-      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14, marginBottom: 12 }}>
-        <p style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text-muted)", marginBottom: 4 }}>
-          Cuotas por período (opcional)
-        </p>
-        <p style={{ fontSize: 12.5, color: "var(--text-faint)", marginBottom: 10 }}>
-          Déjalo vacío para cobrar la mensualidad igual todos los meses. Para partirla,
-          escribe mes:monto — por ejemplo <b>9:3200, 12:1600, 3:4800</b> cobra la mitad de
-          diciembre en marzo.
-        </p>
-        <TextField label="Cuotas" value={schedule} onChange={setSchedule} placeholder="9:3200, 10:3200, 12:1600, 3:4800" />
-      </div>
+      <FeesSection
+        cycle={cycle}
+        firstMonth={wholeInRange(firstMonth, 1, 12) ?? 9}
+        months={wholeInRange(months, 1, 12) ?? 10}
+        monthlyCents={pesosToCents(monthly) ?? 0}
+        fees={fees}
+        onChange={setFees}
+        onError={setError}
+      />
 
     </SlideOver>
   );
 }
 
 const cell = { padding: "10px 8px" } as const;
+
+/**
+ * The extras a school collects on top of the tuition.
+ *
+ * This replaced a text box that asked for "9:3200, 12:1600, 3:4800". The school
+ * called that confusing and they were right: it made the director do the
+ * arithmetic, express the tuition and the extra as one number, and then read it
+ * back a year later with no way to tell which part was which.
+ *
+ * What it asks for now is what the school actually says out loud: this is the
+ * July fee, it is $1,600, collect it in September and October. The dividing is
+ * the system's job, and the table underneath shows what each month ends up
+ * costing so the sum is a fact before anything is saved rather than a promise.
+ */
+function FeesSection({
+  cycle,
+  firstMonth,
+  months,
+  monthlyCents,
+  fees,
+  onChange,
+  onError,
+}: {
+  cycle: Cycle;
+  firstMonth: number;
+  months: number;
+  monthlyCents: number;
+  fees: Fee[];
+  onChange: (fees: Fee[]) => void;
+  onError: (message: string) => void;
+}): ReactElement {
+  const [name, setName] = useState("");
+  const [amount, setAmount] = useState("");
+  const [picked, setPicked] = useState<number[]>([]);
+
+  const calendar = billedMonths(cycle.startsOn, firstMonth, months);
+  const totals = monthlyTotals(calendar, monthlyCents, fees);
+
+  const add = (): void => {
+    const cents = pesosToCents(amount);
+    if (name.trim() === "" || cents === null || cents <= 0) {
+      onError("Una cuota necesita nombre y monto.");
+      return;
+    }
+    if (picked.length === 0) {
+      onError("Elige en qué meses se cobra la cuota.");
+      return;
+    }
+    if (cents < picked.length) {
+      // Split so thin a share rounds to nothing. The server refuses it too; a
+      // person should not need a round trip to learn so.
+      onError("La cuota es muy chica para partirla entre esos meses.");
+      return;
+    }
+    // Kept in the order the year collects them, not the order they were
+    // clicked: the parts are numbered "1 de 2" on the family's statement, and
+    // part 1 falling after part 2 is a support call.
+    const order = calendar.map((m) => m.month);
+    onChange([...fees, {
+      name: name.trim(),
+      amountCents: cents,
+      months: [...picked].sort((a, b) => order.indexOf(a) - order.indexOf(b)),
+    }]);
+    setName("");
+    setAmount("");
+    setPicked([]);
+  };
+
+  const toggle = (month: number): void => {
+    setPicked((current) =>
+      current.includes(month) ? current.filter((m) => m !== month) : [...current, month]);
+  };
+
+  const labelOf = (month: number): string =>
+    calendar.find((m) => m.month === month)?.label ?? MONTH_NAMES[month - 1] ?? "";
+
+  return (
+    <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14, marginBottom: 12 }}>
+      <p style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text-muted)", marginBottom: 4 }}>
+        Cuotas (opcional)
+      </p>
+      <p style={{ fontSize: 12.5, color: "var(--text-faint)", marginBottom: 12 }}>
+        Lo que se cobra aparte de la colegiatura — la cuota de julio, la graduación.
+        Escribe el monto <b>completo</b> y elige en qué meses se cobra: el sistema lo parte
+        y lo suma a esos meses.
+      </p>
+
+      {fees.length > 0 && (
+        <div style={{ borderRadius: "var(--r-md)", border: "1px solid var(--border)", overflow: "hidden", marginBottom: 14 }}>
+          {fees.map((fee, index) => (
+            <div
+              key={`${fee.name}-${index}`}
+              style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderTop: index === 0 ? "none" : "1px solid var(--border)" }}>
+              <div style={{ minWidth: 0 }}>
+                <p style={{ fontSize: 14.5, fontWeight: 600, color: "var(--text)" }}>{fee.name}</p>
+                <p style={{ fontSize: 12.5, color: "var(--text-muted)" }}>
+                  {formatCents(fee.amountCents)} ·{" "}
+                  {feeShares(fee)
+                    .map((share, i) => `${formatCents(share)} en ${labelOf(fee.months[i] ?? 0)}`)
+                    .join(" · ")}
+                </p>
+              </div>
+              <div style={{ flex: 1 }} />
+              <button
+                type="button"
+                onClick={() => onChange(fees.filter((_, i) => i !== index))}
+                aria-label={`Quitar ${fee.name}`}
+                style={{ background: "transparent", border: "none", color: "var(--text-muted)", fontSize: 13.5, fontWeight: 600, cursor: "pointer" }}>
+                Quitar
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginBottom: 12 }}>
+        <TextField label="Nombre de la cuota" value={name} onChange={setName} placeholder="Cuota de Julio" />
+        <TextField label="Monto total" value={amount} onChange={setAmount} placeholder="1600" />
+      </div>
+      <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-muted)", marginBottom: 8 }}>
+        ¿En qué meses se cobra?
+      </p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+        {calendar.map((m) => {
+          const on = picked.includes(m.month);
+          return (
+            <button
+              key={`${m.year}-${m.month}`}
+              type="button"
+              onClick={() => toggle(m.month)}
+              aria-pressed={on}
+              style={{ height: 38, padding: "0 14px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>
+              {m.label}
+            </button>
+          );
+        })}
+      </div>
+      <Btn kind="ghost" icon="plus" onClick={add}>Agregar cuota</Btn>
+
+      {fees.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-muted)", marginBottom: 8 }}>
+            Lo que se cobrará cada mes
+          </p>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
+            <tbody>
+              {totals.map((m) => (
+                <tr key={`${m.year}-${m.month}`} style={{ borderTop: "1px solid var(--border)" }}>
+                  <td style={{ padding: "7px 4px", color: "var(--text-muted)" }}>{m.label}</td>
+                  <td style={{ padding: "7px 4px", textAlign: "right", color: "var(--text-muted)" }}>
+                    {m.feeCents > 0 ? `+ ${formatCents(m.feeCents)}` : ""}
+                  </td>
+                  <td style={{ padding: "7px 4px", textAlign: "right", fontWeight: 700, color: "var(--text)" }}>
+                    {formatCents(m.totalCents)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

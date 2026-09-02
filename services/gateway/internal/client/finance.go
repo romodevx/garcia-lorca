@@ -549,6 +549,24 @@ type TuitionPlan struct {
 	Schedule         []Installment    `json:"schedule"`
 	// MonthlyDiscountCents comes off every month of this level.
 	MonthlyDiscountCents int64 `json:"monthlyDiscountCents"`
+	// Fees are the extras collected on top of the tuition, each split across
+	// the months the school chose.
+	Fees []Fee `json:"fees"`
+	// EnrollmentDueOn is the deadline the school set for the inscription
+	// (YYYY-MM-DD), empty when it set none.
+	EnrollmentDueOn string `json:"enrollmentDueOn"`
+}
+
+// Fee is money the school collects on top of the monthly tuition, spread across
+// the months it chooses.
+//
+// "La cuota de julio" is charged for a month the school year does not bill, so
+// it is collected inside months that it does. AmountCents is the WHOLE fee: the
+// school states what it collects, and dividing it is the server's job.
+type Fee struct {
+	Name        string `json:"name"`
+	AmountCents int64  `json:"amountCents"`
+	Months      []int  `json:"months"`
 }
 
 // Installment is one payment of the year: the month it falls in and how much of
@@ -586,14 +604,19 @@ type TuitionPlanInput struct {
 	Policy               CollectionPolicy `json:"policy"`
 	Schedule             []Installment    `json:"schedule"`
 	MonthlyDiscountCents int64            `json:"monthlyDiscountCents"`
+	Fees                 []Fee            `json:"fees"`
+	EnrollmentDueOn      string           `json:"enrollmentDueOn"`
 }
 
 // BillingRun is what a run did, as the panel reports it back to the person who
 // pressed the button.
 type BillingRun struct {
-	TuitionCreated    int      `json:"tuitionCreated"`
-	EnrollmentCreated int      `json:"enrollmentCreated"`
-	LateFeesCreated   int      `json:"lateFeesCreated"`
+	TuitionCreated    int `json:"tuitionCreated"`
+	EnrollmentCreated int `json:"enrollmentCreated"`
+	LateFeesCreated   int `json:"lateFeesCreated"`
+	FeesCreated       int `json:"feesCreated"`
+	// EnrollmentMoved counts inscriptions whose deadline the run corrected.
+	EnrollmentMoved   int      `json:"enrollmentMoved"`
 	Skipped           int      `json:"skipped"`
 	LevelsWithoutPlan []string `json:"levelsWithoutPlan"`
 }
@@ -624,6 +647,8 @@ func tuitionPlanRequest(in TuitionPlanInput) *financev1.UpsertTuitionPlanRequest
 		Active:               in.Active,
 		Schedule:             scheduleToProto(in.Schedule),
 		MonthlyDiscountCents: in.MonthlyDiscountCents,
+		Fees:                 feesToProto(in.Fees),
+		EnrollmentDueOn:      in.EnrollmentDueOn,
 		Policy: &financev1.CollectionPolicy{
 			DailyMode:              in.Policy.DailyMode,
 			LateFeeDailyCents:      in.Policy.LateFeeDailyCents,
@@ -657,7 +682,13 @@ func (c *FinanceClient) RunBilling(ctx context.Context, cycleID, asOfDate string
 	if err != nil {
 		return BillingRun{}, err
 	}
-	m := res.Msg
+	return toBillingRun(res.Msg), nil
+}
+
+// toBillingRun reads what the run did. Pulled out of the call for the same
+// reason tuitionPlanRequest was: a count that is added to the proto and not
+// copied here never reaches the person who pressed the button.
+func toBillingRun(m *financev1.RunBillingResponse) BillingRun {
 	levels := m.GetLevelsWithoutPlan()
 	if levels == nil {
 		// A JSON null would make the panel test for it; an empty list reads the
@@ -668,9 +699,35 @@ func (c *FinanceClient) RunBilling(ctx context.Context, cycleID, asOfDate string
 		TuitionCreated:    int(m.GetTuitionCreated()),
 		EnrollmentCreated: int(m.GetEnrollmentCreated()),
 		LateFeesCreated:   int(m.GetLateFeesCreated()),
+		FeesCreated:       int(m.GetFeesCreated()),
+		EnrollmentMoved:   int(m.GetEnrollmentMoved()),
 		Skipped:           int(m.GetSkipped()),
 		LevelsWithoutPlan: levels,
-	}, nil
+	}
+}
+
+func feesToProto(in []Fee) []*financev1.Fee {
+	out := make([]*financev1.Fee, 0, len(in))
+	for _, f := range in {
+		months := make([]int32, 0, len(f.Months))
+		for _, m := range f.Months {
+			months = append(months, int32(m))
+		}
+		out = append(out, &financev1.Fee{Name: f.Name, AmountCents: f.AmountCents, Months: months})
+	}
+	return out
+}
+
+func feesFromProto(in []*financev1.Fee) []Fee {
+	out := make([]Fee, 0, len(in))
+	for _, f := range in {
+		months := make([]int, 0, len(f.GetMonths()))
+		for _, m := range f.GetMonths() {
+			months = append(months, int(m))
+		}
+		out = append(out, Fee{Name: f.GetName(), AmountCents: f.GetAmountCents(), Months: months})
+	}
+	return out
 }
 
 func scheduleToProto(in []Installment) []*financev1.Installment {
@@ -703,6 +760,8 @@ func toTuitionPlan(p *financev1.TuitionPlan) TuitionPlan {
 		Active:               p.GetActive(),
 		Schedule:             scheduleFromProto(p.GetSchedule()),
 		MonthlyDiscountCents: p.GetMonthlyDiscountCents(),
+		Fees:                 feesFromProto(p.GetFees()),
+		EnrollmentDueOn:      p.GetEnrollmentDueOn(),
 		Policy: CollectionPolicy{
 			DailyMode:              p.GetPolicy().GetDailyMode(),
 			LateFeeDailyCents:      p.GetPolicy().GetLateFeeDailyCents(),
