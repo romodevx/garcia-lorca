@@ -71,6 +71,9 @@ type AccountStatement struct {
 	Charges           []Charge
 	Payments          []Payment
 	TotalBalanceCents int64
+	// UnallocatedCents is money the family has handed over that no charge has
+	// claimed — their credit with the school.
+	UnallocatedCents int64
 }
 
 // NewFinanceClient builds a FinanceClient targeting the finance base URL over
@@ -247,6 +250,7 @@ func (c *FinanceClient) GetAccount(ctx context.Context, studentID string) (Accou
 		Charges:           toCharges(res.Msg.GetCharges()),
 		Payments:          payments,
 		TotalBalanceCents: res.Msg.GetTotalBalanceCents(),
+		UnallocatedCents:  res.Msg.GetUnallocatedCents(),
 	}, nil
 }
 
@@ -260,6 +264,217 @@ func (c *FinanceClient) ListOverdue(ctx context.Context, cycleID string) ([]Char
 		return nil, err
 	}
 	return toCharges(res.Msg.GetCharges()), nil
+}
+
+// --- deposits (M16) --------------------------------------------------------
+
+// Deposit is money as it arrived, before it was decided what it pays.
+type Deposit struct {
+	ID              string `json:"id"`
+	StudentID       string `json:"studentId"`
+	AmountCents     int64  `json:"amountCents"`
+	Method          string `json:"method"`
+	Reference       string `json:"reference"`
+	PaidAt          string `json:"paidAt"`
+	CalendarVersion string `json:"calendarVersion"`
+	// CardType is debit or credit on a card payment, empty otherwise.
+	CardType   string `json:"cardType,omitempty"`
+	VoidedAt   string `json:"voidedAt,omitempty"`
+	VoidReason string `json:"voidReason,omitempty"`
+}
+
+// DepositResult is what the money did, in the shape a receipt needs.
+type DepositResult struct {
+	Deposit          Deposit   `json:"deposit"`
+	Allocations      []Payment `json:"allocations"`
+	Surcharges       []Charge  `json:"surcharges"`
+	UnallocatedCents int64     `json:"unallocatedCents"`
+	Replayed         bool      `json:"replayed"`
+}
+
+// RegisterDeposit takes money without being told what it pays for and splits it
+// across what the family owes, oldest first.
+func (c *FinanceClient) RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string) (DepositResult, error) {
+	req := &financev1.RegisterDepositRequest{
+		StudentId:         studentID,
+		AmountCents:       amountCents,
+		Method:            method,
+		Reference:         reference,
+		IdempotencyKey:    idempotencyKey,
+		GrantEarlyPayment: grantEarlyPayment,
+		CardType:          cardType,
+	}
+	if !paidAt.IsZero() {
+		req.PaidAt = timestamppb.New(paidAt)
+	}
+	res, err := c.rpc.RegisterDeposit(ctx, connect.NewRequest(req))
+	if err != nil {
+		return DepositResult{}, err
+	}
+	allocations := make([]Payment, 0, len(res.Msg.GetAllocations()))
+	for _, p := range res.Msg.GetAllocations() {
+		allocations = append(allocations, toPayment(p))
+	}
+	return DepositResult{
+		Deposit:          toDeposit(res.Msg.GetDeposit()),
+		Allocations:      allocations,
+		Surcharges:       toCharges(res.Msg.GetSurcharges()),
+		UnallocatedCents: res.Msg.GetUnallocatedCents(),
+		Replayed:         res.Msg.GetReplayed(),
+	}, nil
+}
+
+// PreviewDeposit says what an amount would cover, without taking it.
+func (c *FinanceClient) PreviewDeposit(ctx context.Context, studentID string, amountCents int64, paidAt time.Time) (DepositResult, error) {
+	req := &financev1.PreviewDepositRequest{StudentId: studentID, AmountCents: amountCents}
+	if !paidAt.IsZero() {
+		req.PaidAt = timestamppb.New(paidAt)
+	}
+	res, err := c.rpc.PreviewDeposit(ctx, connect.NewRequest(req))
+	if err != nil {
+		return DepositResult{}, err
+	}
+	allocations := make([]Payment, 0, len(res.Msg.GetAllocations()))
+	for _, p := range res.Msg.GetAllocations() {
+		allocations = append(allocations, toPayment(p))
+	}
+	return DepositResult{
+		Allocations:      allocations,
+		Surcharges:       toCharges(res.Msg.GetSurcharges()),
+		UnallocatedCents: res.Msg.GetUnallocatedCents(),
+	}, nil
+}
+
+// Expected is what a family must hand over today to be current.
+type Expected struct {
+	AmountCents        int64 `json:"amountCents"`
+	SurchargeCents     int64 `json:"surchargeCents"`
+	DiscountCents      int64 `json:"discountCents"`
+	AnnualBalanceCents int64 `json:"annualBalanceCents"`
+}
+
+// ExpectedToday asks what is due as of a date ("" = today).
+func (c *FinanceClient) ExpectedToday(ctx context.Context, studentID, on string) (Expected, error) {
+	res, err := c.rpc.ExpectedToday(ctx, connect.NewRequest(&financev1.ExpectedTodayRequest{
+		StudentId: studentID, On: on,
+	}))
+	if err != nil {
+		return Expected{}, err
+	}
+	return Expected{
+		AmountCents:        res.Msg.GetAmountCents(),
+		SurchargeCents:     res.Msg.GetSurchargeCents(),
+		DiscountCents:      res.Msg.GetDiscountCents(),
+		AnnualBalanceCents: res.Msg.GetAnnualBalanceCents(),
+	}, nil
+}
+
+// ListDeposits returns a student's deposits, newest first.
+func (c *FinanceClient) ListDeposits(ctx context.Context, studentID string) ([]Deposit, error) {
+	res, err := c.rpc.ListDeposits(ctx, connect.NewRequest(&financev1.ListDepositsRequest{
+		StudentId: studentID,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Deposit, 0, len(res.Msg.GetDeposits()))
+	for _, d := range res.Msg.GetDeposits() {
+		out = append(out, toDeposit(d))
+	}
+	return out, nil
+}
+
+// CashUp is a day's takings: one number per method, the total, and the list
+// behind them.
+type CashUp struct {
+	Deposits      []Deposit `json:"deposits"`
+	Cancelled     []Deposit `json:"cancelled"`
+	CashCents     int64     `json:"cashCents"`
+	CardCents     int64     `json:"cardCents"`
+	TransferCents int64     `json:"transferCents"`
+	TotalCents    int64     `json:"totalCents"`
+}
+
+// DailyCashUp returns what came in on one day, and in what form.
+func (c *FinanceClient) DailyCashUp(ctx context.Context, day string) (CashUp, error) {
+	res, err := c.rpc.DailyCashUp(ctx, connect.NewRequest(&financev1.DailyCashUpRequest{Day: day}))
+	if err != nil {
+		return CashUp{}, err
+	}
+	return CashUp{
+		Deposits:      toDeposits(res.Msg.GetDeposits()),
+		Cancelled:     toDeposits(res.Msg.GetCancelled()),
+		CashCents:     res.Msg.GetCashCents(),
+		CardCents:     res.Msg.GetCardCents(),
+		TransferCents: res.Msg.GetTransferCents(),
+		TotalCents:    res.Msg.GetTotalCents(),
+	}, nil
+}
+
+func toDeposits(ds []*financev1.Deposit) []Deposit {
+	out := make([]Deposit, 0, len(ds))
+	for _, d := range ds {
+		out = append(out, toDeposit(d))
+	}
+	return out
+}
+
+// IncomeLine is what one concept earned in a period.
+type IncomeLine struct {
+	ConceptID   string `json:"conceptId"`
+	Concept     string `json:"concept"`
+	AmountCents int64  `json:"amountCents"`
+}
+
+// Income is a period's takings, by what the school charged for.
+type Income struct {
+	Lines      []IncomeLine `json:"lines"`
+	TotalCents int64        `json:"totalCents"`
+}
+
+// IncomeByConcept returns what came in between two days, biggest line first.
+func (c *FinanceClient) IncomeByConcept(ctx context.Context, from, to string) (Income, error) {
+	res, err := c.rpc.IncomeByConcept(ctx, connect.NewRequest(&financev1.IncomeByConceptRequest{
+		From: from, To: to,
+	}))
+	if err != nil {
+		return Income{}, err
+	}
+	lines := make([]IncomeLine, 0, len(res.Msg.GetLines()))
+	for _, l := range res.Msg.GetLines() {
+		lines = append(lines, IncomeLine{
+			ConceptID: l.GetConceptId(), Concept: l.GetConcept(), AmountCents: l.GetAmountCents(),
+		})
+	}
+	return Income{Lines: lines, TotalCents: res.Msg.GetTotalCents()}, nil
+}
+
+// VoidDeposit cancels a deposit and releases what it settled.
+func (c *FinanceClient) VoidDeposit(ctx context.Context, id, reason string) error {
+	_, err := c.rpc.VoidDeposit(ctx, connect.NewRequest(&financev1.VoidDepositRequest{
+		Id: id, Reason: reason,
+	}))
+	return err
+}
+
+func toDeposit(d *financev1.Deposit) Deposit {
+	out := Deposit{
+		ID:              d.GetId(),
+		StudentID:       d.GetStudentId(),
+		AmountCents:     d.GetAmountCents(),
+		Method:          d.GetMethod(),
+		Reference:       d.GetReference(),
+		CalendarVersion: d.GetCalendarVersion(),
+		CardType:        d.GetCardType(),
+		VoidReason:      d.GetVoidReason(),
+	}
+	if ts := d.GetPaidAt(); ts != nil {
+		out.PaidAt = ts.AsTime().Format(time.RFC3339)
+	}
+	if ts := d.GetVoidedAt(); ts != nil {
+		out.VoidedAt = ts.AsTime().Format(time.RFC3339)
+	}
+	return out
 }
 
 func toChargeConcept(c *financev1.ChargeConcept) ChargeConcept {
@@ -320,58 +535,128 @@ func toPayment(p *financev1.Payment) Payment {
 
 // TuitionPlan is the edge's view of what one level costs in one cycle.
 type TuitionPlan struct {
-	ID               string `json:"id"`
-	CycleID          string `json:"cycleId"`
-	LevelID          string `json:"levelId"`
-	EnrollmentCents  int64  `json:"enrollmentCents"`
-	MonthlyCents     int64  `json:"monthlyCents"`
-	Months           int    `json:"months"`
-	FirstBilledMonth int    `json:"firstBilledMonth"`
-	DueDay           int    `json:"dueDay"`
-	LateFeeCents     int64  `json:"lateFeeCents"`
-	Active           bool   `json:"active"`
+	ID               string           `json:"id"`
+	CycleID          string           `json:"cycleId"`
+	LevelID          string           `json:"levelId"`
+	EnrollmentCents  int64            `json:"enrollmentCents"`
+	MonthlyCents     int64            `json:"monthlyCents"`
+	Months           int              `json:"months"`
+	FirstBilledMonth int              `json:"firstBilledMonth"`
+	DueDay           int              `json:"dueDay"`
+	LateFeeCents     int64            `json:"lateFeeCents"`
+	Active           bool             `json:"active"`
+	Policy           CollectionPolicy `json:"policy"`
+	Schedule         []Installment    `json:"schedule"`
+	// MonthlyDiscountCents comes off every month of this level.
+	MonthlyDiscountCents int64 `json:"monthlyDiscountCents"`
+	// Fees are the extras collected on top of the tuition, each split across
+	// the months the school chose.
+	Fees []Fee `json:"fees"`
+	// EnrollmentDueOn is the deadline the school set for the inscription
+	// (YYYY-MM-DD), empty when it set none.
+	EnrollmentDueOn string `json:"enrollmentDueOn"`
+}
+
+// Fee is money the school collects on top of the monthly tuition, spread across
+// the months it chooses.
+//
+// "La cuota de julio" is charged for a month the school year does not bill, so
+// it is collected inside months that it does. AmountCents is the WHOLE fee: the
+// school states what it collects, and dividing it is the server's job.
+type Fee struct {
+	Name        string `json:"name"`
+	AmountCents int64  `json:"amountCents"`
+	Months      []int  `json:"months"`
+}
+
+// Installment is one payment of the year: the month it falls in and how much of
+// the tuition it collects. A school does not always divide the year into equal
+// parts — "diciembre a la mitad y la otra mitad en marzo" is a real
+// arrangement.
+type Installment struct {
+	Month       int   `json:"month"`
+	AmountCents int64 `json:"amountCents"`
+}
+
+// CollectionPolicy is what a late payment costs and what an early one saves.
+// It rides with the tuition plan because that is where a price lives.
+type CollectionPolicy struct {
+	// DailyMode picks the rule: false keeps the fixed monthly surcharge, true
+	// charges LateFeeDailyCents for every day the money is late.
+	DailyMode              bool  `json:"dailyMode"`
+	LateFeeDailyCents      int64 `json:"lateFeeDailyCents"`
+	SurchargeCountsAllDays bool  `json:"surchargeCountsAllDays"`
+	EarlyPaymentCents      int64 `json:"earlyPaymentCents"`
+	EarlyPaymentDays       int   `json:"earlyPaymentDays"`
 }
 
 // TuitionPlanInput is what the panel sends to price a level.
 type TuitionPlanInput struct {
-	CycleID          string `json:"cycleId"`
-	LevelID          string `json:"levelId"`
-	EnrollmentCents  int64  `json:"enrollmentCents"`
-	MonthlyCents     int64  `json:"monthlyCents"`
-	Months           int    `json:"months"`
-	FirstBilledMonth int    `json:"firstBilledMonth"`
-	DueDay           int    `json:"dueDay"`
-	LateFeeCents     int64  `json:"lateFeeCents"`
-	Active           bool   `json:"active"`
+	CycleID              string           `json:"cycleId"`
+	LevelID              string           `json:"levelId"`
+	EnrollmentCents      int64            `json:"enrollmentCents"`
+	MonthlyCents         int64            `json:"monthlyCents"`
+	Months               int              `json:"months"`
+	FirstBilledMonth     int              `json:"firstBilledMonth"`
+	DueDay               int              `json:"dueDay"`
+	LateFeeCents         int64            `json:"lateFeeCents"`
+	Active               bool             `json:"active"`
+	Policy               CollectionPolicy `json:"policy"`
+	Schedule             []Installment    `json:"schedule"`
+	MonthlyDiscountCents int64            `json:"monthlyDiscountCents"`
+	Fees                 []Fee            `json:"fees"`
+	EnrollmentDueOn      string           `json:"enrollmentDueOn"`
 }
 
 // BillingRun is what a run did, as the panel reports it back to the person who
 // pressed the button.
 type BillingRun struct {
-	TuitionCreated    int      `json:"tuitionCreated"`
-	EnrollmentCreated int      `json:"enrollmentCreated"`
-	LateFeesCreated   int      `json:"lateFeesCreated"`
+	TuitionCreated    int `json:"tuitionCreated"`
+	EnrollmentCreated int `json:"enrollmentCreated"`
+	LateFeesCreated   int `json:"lateFeesCreated"`
+	FeesCreated       int `json:"feesCreated"`
+	// EnrollmentMoved counts inscriptions whose deadline the run corrected.
+	EnrollmentMoved   int      `json:"enrollmentMoved"`
 	Skipped           int      `json:"skipped"`
 	LevelsWithoutPlan []string `json:"levelsWithoutPlan"`
 }
 
 // UpsertTuitionPlan sets what one level of one cycle costs.
 func (c *FinanceClient) UpsertTuitionPlan(ctx context.Context, in TuitionPlanInput) (TuitionPlan, error) {
-	res, err := c.rpc.UpsertTuitionPlan(ctx, connect.NewRequest(&financev1.UpsertTuitionPlanRequest{
-		CycleId:          in.CycleID,
-		LevelId:          in.LevelID,
-		EnrollmentCents:  in.EnrollmentCents,
-		MonthlyCents:     in.MonthlyCents,
-		Months:           int32(in.Months),
-		FirstBilledMonth: int32(in.FirstBilledMonth),
-		DueDay:           int32(in.DueDay),
-		LateFeeCents:     in.LateFeeCents,
-		Active:           in.Active,
-	}))
+	res, err := c.rpc.UpsertTuitionPlan(ctx, connect.NewRequest(tuitionPlanRequest(in)))
 	if err != nil {
 		return TuitionPlan{}, err
 	}
 	return toTuitionPlan(res.Msg.GetPlan()), nil
+}
+
+// tuitionPlanRequest builds the wire message. Pulled out of the call so the
+// mapping is testable on its own: it was silently missing two fields — they
+// existed on the struct, carried JSON tags, and were never copied — and the
+// screen saved a plan the API answered as zeros while everything compiled.
+func tuitionPlanRequest(in TuitionPlanInput) *financev1.UpsertTuitionPlanRequest {
+	return &financev1.UpsertTuitionPlanRequest{
+		CycleId:              in.CycleID,
+		LevelId:              in.LevelID,
+		EnrollmentCents:      in.EnrollmentCents,
+		MonthlyCents:         in.MonthlyCents,
+		Months:               int32(in.Months),
+		FirstBilledMonth:     int32(in.FirstBilledMonth),
+		DueDay:               int32(in.DueDay),
+		LateFeeCents:         in.LateFeeCents,
+		Active:               in.Active,
+		Schedule:             scheduleToProto(in.Schedule),
+		MonthlyDiscountCents: in.MonthlyDiscountCents,
+		Fees:                 feesToProto(in.Fees),
+		EnrollmentDueOn:      in.EnrollmentDueOn,
+		Policy: &financev1.CollectionPolicy{
+			DailyMode:              in.Policy.DailyMode,
+			LateFeeDailyCents:      in.Policy.LateFeeDailyCents,
+			SurchargeCountsAllDays: in.Policy.SurchargeCountsAllDays,
+			EarlyPaymentCents:      in.Policy.EarlyPaymentCents,
+			EarlyPaymentDays:       int32(in.Policy.EarlyPaymentDays),
+		},
+	}
 }
 
 // ListTuitionPlans returns the whole tuition table of a cycle.
@@ -397,7 +682,13 @@ func (c *FinanceClient) RunBilling(ctx context.Context, cycleID, asOfDate string
 	if err != nil {
 		return BillingRun{}, err
 	}
-	m := res.Msg
+	return toBillingRun(res.Msg), nil
+}
+
+// toBillingRun reads what the run did. Pulled out of the call for the same
+// reason tuitionPlanRequest was: a count that is added to the proto and not
+// copied here never reaches the person who pressed the button.
+func toBillingRun(m *financev1.RunBillingResponse) BillingRun {
 	levels := m.GetLevelsWithoutPlan()
 	if levels == nil {
 		// A JSON null would make the panel test for it; an empty list reads the
@@ -408,22 +699,75 @@ func (c *FinanceClient) RunBilling(ctx context.Context, cycleID, asOfDate string
 		TuitionCreated:    int(m.GetTuitionCreated()),
 		EnrollmentCreated: int(m.GetEnrollmentCreated()),
 		LateFeesCreated:   int(m.GetLateFeesCreated()),
+		FeesCreated:       int(m.GetFeesCreated()),
+		EnrollmentMoved:   int(m.GetEnrollmentMoved()),
 		Skipped:           int(m.GetSkipped()),
 		LevelsWithoutPlan: levels,
-	}, nil
+	}
+}
+
+func feesToProto(in []Fee) []*financev1.Fee {
+	out := make([]*financev1.Fee, 0, len(in))
+	for _, f := range in {
+		months := make([]int32, 0, len(f.Months))
+		for _, m := range f.Months {
+			months = append(months, int32(m))
+		}
+		out = append(out, &financev1.Fee{Name: f.Name, AmountCents: f.AmountCents, Months: months})
+	}
+	return out
+}
+
+func feesFromProto(in []*financev1.Fee) []Fee {
+	out := make([]Fee, 0, len(in))
+	for _, f := range in {
+		months := make([]int, 0, len(f.GetMonths()))
+		for _, m := range f.GetMonths() {
+			months = append(months, int(m))
+		}
+		out = append(out, Fee{Name: f.GetName(), AmountCents: f.GetAmountCents(), Months: months})
+	}
+	return out
+}
+
+func scheduleToProto(in []Installment) []*financev1.Installment {
+	out := make([]*financev1.Installment, 0, len(in))
+	for _, i := range in {
+		out = append(out, &financev1.Installment{Month: int32(i.Month), AmountCents: i.AmountCents})
+	}
+	return out
+}
+
+func scheduleFromProto(in []*financev1.Installment) []Installment {
+	out := make([]Installment, 0, len(in))
+	for _, i := range in {
+		out = append(out, Installment{Month: int(i.GetMonth()), AmountCents: i.GetAmountCents()})
+	}
+	return out
 }
 
 func toTuitionPlan(p *financev1.TuitionPlan) TuitionPlan {
 	return TuitionPlan{
-		ID:               p.GetId(),
-		CycleID:          p.GetCycleId(),
-		LevelID:          p.GetLevelId(),
-		EnrollmentCents:  p.GetEnrollmentCents(),
-		MonthlyCents:     p.GetMonthlyCents(),
-		Months:           int(p.GetMonths()),
-		FirstBilledMonth: int(p.GetFirstBilledMonth()),
-		DueDay:           int(p.GetDueDay()),
-		LateFeeCents:     p.GetLateFeeCents(),
-		Active:           p.GetActive(),
+		ID:                   p.GetId(),
+		CycleID:              p.GetCycleId(),
+		LevelID:              p.GetLevelId(),
+		EnrollmentCents:      p.GetEnrollmentCents(),
+		MonthlyCents:         p.GetMonthlyCents(),
+		Months:               int(p.GetMonths()),
+		FirstBilledMonth:     int(p.GetFirstBilledMonth()),
+		DueDay:               int(p.GetDueDay()),
+		LateFeeCents:         p.GetLateFeeCents(),
+		Active:               p.GetActive(),
+		Schedule:             scheduleFromProto(p.GetSchedule()),
+		MonthlyDiscountCents: p.GetMonthlyDiscountCents(),
+		Fees:                 feesFromProto(p.GetFees()),
+		EnrollmentDueOn:      p.GetEnrollmentDueOn(),
+		Policy: CollectionPolicy{
+			DailyMode:              p.GetPolicy().GetDailyMode(),
+			LateFeeDailyCents:      p.GetPolicy().GetLateFeeDailyCents(),
+			SurchargeCountsAllDays: p.GetPolicy().GetSurchargeCountsAllDays(),
+			EarlyPaymentCents:      p.GetPolicy().GetEarlyPaymentCents(),
+			EarlyPaymentDays:       int(p.GetPolicy().GetEarlyPaymentDays()),
+		},
 	}
 }

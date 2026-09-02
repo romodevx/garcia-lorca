@@ -17,6 +17,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -31,6 +32,7 @@ import (
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	pgadapter "github.com/garcia-lorca/services/finance/internal/adapters/postgres"
 	"github.com/garcia-lorca/services/finance/internal/domain"
+	"github.com/garcia-lorca/services/finance/internal/ports"
 )
 
 const (
@@ -39,14 +41,27 @@ const (
 	tenantB = "22222222-2222-2222-2222-222222222222"
 )
 
-// migrationFiles are applied in order before the app role is granted, so the
-// non-owner role gets privileges on every table.
-var migrationFiles = []string{
-	"../../../../../migrations/finance/0001_init.sql",
-	"../../../../../migrations/finance/0002_payment_idempotency.sql",
-	"../../../../../migrations/finance/0003_charge_external_ref.sql",
-	"../../../../../migrations/finance/0004_concept_kind.sql",
-	"../../../../../migrations/finance/0005_tuition_plans.sql",
+// migrationDir holds the migrations applied, in filename order, before the app
+// role is granted — so the non-owner role gets privileges on every table.
+//
+// Globbed rather than listed. The list used to be written out by hand, and a
+// migration added without remembering to append it here failed every test that
+// touched the new column, in a way that read as a code bug rather than a
+// forgotten line.
+const migrationDir = "../../../../../migrations/finance"
+
+func migrationFiles() ([]string, error) {
+	files, err := filepath.Glob(filepath.Join(migrationDir, "*.sql"))
+	if err != nil {
+		return nil, err
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no migrations found in %s", migrationDir)
+	}
+	// Glob sorts already; sorting again says the order is load-bearing rather
+	// than incidental.
+	slices.Sort(files)
+	return files, nil
 }
 
 var (
@@ -124,7 +139,11 @@ func open(dsn string) (*gorm.DB, error) {
 }
 
 func migrate(db *gorm.DB) error {
-	for _, f := range migrationFiles {
+	files, err := migrationFiles()
+	if err != nil {
+		return err
+	}
+	for _, f := range files {
 		sql, err := os.ReadFile(f)
 		if err != nil {
 			return err
@@ -337,7 +356,7 @@ func TestRLSIsolatesPayments(t *testing.T) {
 		student   = "50000000-0000-0000-0000-0000000000a3"
 	)
 	seedConceptAndCharge(t, tenantA, conceptID, "rls-payment", chargeID, student, cycleOne, 10000, 0, today)
-	if _, _, _, err := appRepo(t, tenantA).RegisterPayment(ctx, newPayment(t, paymentID, tenantA, chargeID, 5000, paidAt), derive); err != nil {
+	if _, _, _, err := appRepo(t, tenantA).RegisterPayment(ctx, newPayment(t, paymentID, tenantA, chargeID, 5000, paidAt), derive, nil); err != nil {
 		t.Fatalf("seed payment: %v", err)
 	}
 
@@ -376,7 +395,7 @@ func TestRegisterPaymentIsAtomicAndDerivesStatus(t *testing.T) {
 	seedConceptAndCharge(t, tenantA, conceptID, "atomic-payment", chargeID, student, cycleOne, 10000, 0, today)
 	repo := appRepo(t, tenantA)
 
-	_, first, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000b1", tenantA, chargeID, 4000, paidAt), derive)
+	_, first, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000b1", tenantA, chargeID, 4000, paidAt), derive, nil)
 	if err != nil {
 		t.Fatalf("first payment: %v", err)
 	}
@@ -384,7 +403,7 @@ func TestRegisterPaymentIsAtomicAndDerivesStatus(t *testing.T) {
 		t.Errorf("after 4000: paid = %d, status = %q; want 4000 / partially_paid", first.PaidCents, first.Charge.Status())
 	}
 
-	_, second, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000b2", tenantA, chargeID, 6000, paidAt.Add(time.Hour)), derive)
+	_, second, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000b2", tenantA, chargeID, 6000, paidAt.Add(time.Hour)), derive, nil)
 	if err != nil {
 		t.Fatalf("second payment: %v", err)
 	}
@@ -393,7 +412,7 @@ func TestRegisterPaymentIsAtomicAndDerivesStatus(t *testing.T) {
 	}
 
 	// One cent more than owed: derive vetoes it and the transaction rolls back.
-	if _, _, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000b3", tenantA, chargeID, 1, paidAt.Add(2*time.Hour)), derive); err == nil {
+	if _, _, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000b3", tenantA, chargeID, 1, paidAt.Add(2*time.Hour)), derive, nil); err == nil {
 		t.Fatal("overpay was accepted; derive must veto it")
 	}
 	if n := countPayments(t, tenantA, chargeID); n != 2 {
@@ -433,7 +452,7 @@ func TestRegisterPaymentRejectsCancelled(t *testing.T) {
 		t.Fatalf("stored status = %q, want cancelled", saved.Status())
 	}
 
-	if _, _, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000b4", tenantA, chargeID, 1000, paidAt), derive); err == nil {
+	if _, _, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000b4", tenantA, chargeID, 1000, paidAt), derive, nil); err == nil {
 		t.Fatal("payment against a cancelled charge was accepted")
 	}
 	if n := countPayments(t, tenantA, chargeID); n != 0 {
@@ -467,7 +486,7 @@ func TestRegisterPaymentIsIdempotent(t *testing.T) {
 	repo := appRepo(t, tenantA)
 
 	stored, first, replayed, err := repo.RegisterPayment(ctx,
-		newKeyedPayment(t, firstID, tenantA, chargeID, 4000, paidAt, "attempt-1"), derive)
+		newKeyedPayment(t, firstID, tenantA, chargeID, 4000, paidAt, "attempt-1"), derive, nil)
 	if err != nil {
 		t.Fatalf("first payment: %v", err)
 	}
@@ -481,7 +500,7 @@ func TestRegisterPaymentIsIdempotent(t *testing.T) {
 	// The same attempt again — a retry after a lost response. It must return the
 	// payment already stored, NOT a new one.
 	again, second, replayed, err := repo.RegisterPayment(ctx,
-		newKeyedPayment(t, retryID, tenantA, chargeID, 4000, paidAt.Add(time.Minute), "attempt-1"), derive)
+		newKeyedPayment(t, retryID, tenantA, chargeID, 4000, paidAt.Add(time.Minute), "attempt-1"), derive, nil)
 	if err != nil {
 		t.Fatalf("retry: %v", err)
 	}
@@ -502,14 +521,14 @@ func TestRegisterPaymentIsIdempotent(t *testing.T) {
 	// A different key is a different attempt, and an absent key opts out of
 	// deduplication entirely — both still collect.
 	if _, _, replayed, err = repo.RegisterPayment(ctx,
-		newKeyedPayment(t, otherID, tenantA, chargeID, 3000, paidAt.Add(time.Hour), "attempt-2"), derive); err != nil {
+		newKeyedPayment(t, otherID, tenantA, chargeID, 3000, paidAt.Add(time.Hour), "attempt-2"), derive, nil); err != nil {
 		t.Fatalf("second attempt: %v", err)
 	}
 	if replayed {
 		t.Error("a distinct key was treated as a replay")
 	}
 	_, third, _, err := repo.RegisterPayment(ctx,
-		newPayment(t, keylessID, tenantA, chargeID, 3000, paidAt.Add(2*time.Hour)), derive)
+		newPayment(t, keylessID, tenantA, chargeID, 3000, paidAt.Add(2*time.Hour)), derive, nil)
 	if err != nil {
 		t.Fatalf("keyless payment: %v", err)
 	}
@@ -676,7 +695,7 @@ func TestGetAccountBalanceMath(t *testing.T) {
 	seedConceptAndCharge(t, tenantA, conceptTwo, "balance-uniform", chargeTwo, student, cycleOne, 5000, 0, tomorrow())
 
 	repo := appRepo(t, tenantA)
-	if _, _, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000d1", tenantA, chargeOne, 3000, paidAt), derive); err != nil {
+	if _, _, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000d1", tenantA, chargeOne, 3000, paidAt), derive, nil); err != nil {
 		t.Fatalf("partial payment: %v", err)
 	}
 
@@ -734,7 +753,7 @@ func TestListOverdueSelectsPastDueWithBalance(t *testing.T) {
 	seed(cancelledID, "50000000-0000-0000-0000-0000000000e4", yesterday())
 
 	// Past due but fully collected: no balance, so not overdue.
-	if _, _, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000e3", tenantA, settledID, 1000, paidAt), derive); err != nil {
+	if _, _, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000e3", tenantA, settledID, 1000, paidAt), derive, nil); err != nil {
 		t.Fatalf("settle charge: %v", err)
 	}
 	// Past due but withdrawn by the school: cancelled is never overdue.
@@ -945,7 +964,7 @@ func TestCancelChargeIfUnpaidRefusesCollectedMoney(t *testing.T) {
 		t.Fatalf("seed charge: %v", err)
 	}
 	if _, _, _, err := repo.RegisterPayment(ctx,
-		newPayment(t, "e0000000-0000-0000-0000-00000000ab07", tenantA, chargeID, 89000, paidAt), derive); err != nil {
+		newPayment(t, "e0000000-0000-0000-0000-00000000ab07", tenantA, chargeID, 89000, paidAt), derive, nil); err != nil {
 		t.Fatalf("cashier collects: %v", err)
 	}
 
@@ -999,4 +1018,115 @@ func withExternalRef(t *testing.T, c domain.Charge, ref string) domain.Charge {
 		t.Fatalf("WithExternalRef(%q): %v", ref, err)
 	}
 	return tagged
+}
+
+// RescheduleUnpaid is what makes a corrected deadline reach the pupils already
+// billed: the run never re-issues a charge it has written, so without this a
+// school could set the inscription's date and see nothing happen to anybody.
+//
+// The guards are in SQL, so they are tested here and not against a fake.
+func TestRescheduleUnpaidMovesOnlyWhatItShould(t *testing.T) {
+	ctx := context.Background()
+	const conceptID = "c0000000-0000-0000-0000-0000000000fc"
+	const cycle = "a0000000-0000-0000-0000-0000000000fc"
+	repo := appRepo(t, tenantA)
+	if _, err := repo.CreateConcept(ctx, newConcept(t, conceptID, tenantA, "reschedule", 8000)); err != nil {
+		t.Fatalf("seed concept: %v", err)
+	}
+
+	seed := func(idSuffix, student, ref string) domain.Charge {
+		c := newCharge(t, "e0000000-0000-0000-0000-0000000000"+idSuffix,
+			tenantA, student, cycle, conceptID, 8000, 0, today)
+		withRef, err := c.WithExternalRef(ref)
+		if err != nil {
+			t.Fatalf("external ref: %v", err)
+		}
+		if _, err := repo.CreateCharge(ctx, withRef); err != nil {
+			t.Fatalf("seed charge %s: %v", ref, err)
+		}
+		return withRef
+	}
+
+	unpaid := seed("c1", "50000000-0000-0000-0000-0000000000c1", "enrollment:"+cycle+":c1")
+	paid := seed("c2", "50000000-0000-0000-0000-0000000000c2", "enrollment:"+cycle+":c2")
+	sameDay := seed("c3", "50000000-0000-0000-0000-0000000000c3", "enrollment:"+cycle+":c3")
+
+	// Something has been collected against the second one, so it is history.
+	if _, _, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000c2",
+		tenantA, paid.ID(), 1000, today), derive, nil); err != nil {
+		t.Fatalf("seed payment: %v", err)
+	}
+
+	moveTo := today.AddDate(0, -2, 0)
+	moved, err := repo.RescheduleUnpaid(ctx, []ports.ChargeReschedule{
+		{ExternalRef: unpaid.ExternalRef(), DueOn: moveTo},
+		{ExternalRef: paid.ExternalRef(), DueOn: moveTo},
+		// Already on the day asked for: not a move, and must not be counted as
+		// one, or the run would report four hundred moves every month.
+		{ExternalRef: sameDay.ExternalRef(), DueOn: today},
+	})
+	if err != nil {
+		t.Fatalf("RescheduleUnpaid: %v", err)
+	}
+	if moved != 1 {
+		t.Fatalf("moved = %d, want 1 — only the unpaid charge whose date differs", moved)
+	}
+
+	got, err := repo.GetCharge(ctx, unpaid.ID())
+	if err != nil {
+		t.Fatalf("GetCharge: %v", err)
+	}
+	if !got.Charge.DueDate().Equal(moveTo) {
+		t.Errorf("the unpaid charge falls due %s, want %s",
+			got.Charge.DueDate().Format("2006-01-02"), moveTo.Format("2006-01-02"))
+	}
+	settled, err := repo.GetCharge(ctx, paid.ID())
+	if err != nil {
+		t.Fatalf("GetCharge: %v", err)
+	}
+	if !settled.Charge.DueDate().Equal(today) {
+		t.Errorf("a charge with money on it was re-dated to %s",
+			settled.Charge.DueDate().Format("2006-01-02"))
+	}
+}
+
+// One tenant cannot move another's deadlines. The update runs under RLS as the
+// non-owner `app` role, so this is the write side of the same posture the
+// isolation tests above pin for reads.
+func TestRescheduleUnpaidCannotReachAnotherTenant(t *testing.T) {
+	ctx := context.Background()
+	const conceptID = "c0000000-0000-0000-0000-0000000000fd"
+	const cycle = "a0000000-0000-0000-0000-0000000000fd"
+	ownerRepo := appRepo(t, tenantA)
+	if _, err := ownerRepo.CreateConcept(ctx, newConcept(t, conceptID, tenantA, "reschedule-rls", 8000)); err != nil {
+		t.Fatalf("seed concept: %v", err)
+	}
+	c := newCharge(t, "e0000000-0000-0000-0000-0000000000fd",
+		tenantA, "50000000-0000-0000-0000-0000000000fd", cycle, conceptID, 8000, 0, today)
+	withRef, err := c.WithExternalRef("enrollment:" + cycle + ":fd")
+	if err != nil {
+		t.Fatalf("external ref: %v", err)
+	}
+	if _, err := ownerRepo.CreateCharge(ctx, withRef); err != nil {
+		t.Fatalf("seed charge: %v", err)
+	}
+
+	intruder := appRepo(t, tenantB)
+	moved, err := intruder.RescheduleUnpaid(ctx, []ports.ChargeReschedule{
+		{ExternalRef: withRef.ExternalRef(), DueOn: today.AddDate(0, -2, 0)},
+	})
+	if err != nil {
+		t.Fatalf("RescheduleUnpaid: %v", err)
+	}
+	if moved != 0 {
+		t.Fatalf("tenant B moved %d of tenant A's charges", moved)
+	}
+
+	got, err := ownerRepo.GetCharge(ctx, withRef.ID())
+	if err != nil {
+		t.Fatalf("GetCharge: %v", err)
+	}
+	if !got.Charge.DueDate().Equal(today) {
+		t.Errorf("the deadline moved to %s", got.Charge.DueDate().Format("2006-01-02"))
+	}
 }

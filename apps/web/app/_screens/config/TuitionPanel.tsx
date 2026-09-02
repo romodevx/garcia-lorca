@@ -1,16 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent, type ReactElement } from "react";
+import { useCallback, useEffect, useState, type ReactElement } from "react";
 
 import { Btn } from "../../_design/Controls";
+import { SlideOver } from "../../_design/SlideOver";
 import type { Cycle, Level } from "../../config/api";
 import {
   listTuitionPlans,
   runBilling,
   upsertTuitionPlan,
   type BillingRun,
+  type Fee,
   type TuitionPlan,
 } from "../../finance/api";
+import { formatCents } from "../finance/money";
 import { EmptyHint, ErrorAlert, Section, TextField } from "./parts";
 
 import { API_URL } from "../../api-url";
@@ -42,6 +45,86 @@ export function pesosToCents(raw: string): number | null {
 /** Cents back into the pesos a person reads, always with both decimals. */
 export function centsToPesos(cents: number): string {
   return (cents / 100).toFixed(2);
+}
+
+/**
+ * The months of the school year, in the order they are collected, each labelled
+ * the way a person says it.
+ *
+ * Derived from the plan being edited rather than from the calendar: a year that
+ * opens in August and bills from September reaches June of the NEXT year, and a
+ * picker that offered bare month names would make "junio" ambiguous in exactly
+ * the case where getting it wrong costs a family a month.
+ */
+export function billedMonths(cycleStartsOn: string, firstMonth: number, count: number): BilledMonth[] {
+  const start = new Date(`${cycleStartsOn}T00:00:00`);
+  let year = start.getFullYear();
+  if (start.getMonth() + 1 > firstMonth) {
+    // The first billed month already passed this calendar year, so the school
+    // means the one after the year turns.
+    year++;
+  }
+  const out: BilledMonth[] = [];
+  for (let i = 0; i < count; i++) {
+    const month = ((firstMonth - 1 + i) % 12) + 1;
+    if (i > 0 && month === 1) year++;
+    out.push({ month, year, label: `${MONTH_NAMES[month - 1]} ${year}` });
+  }
+  return out;
+}
+
+/** One month of the year, named the way the school says it. */
+export interface BilledMonth {
+  month: number;
+  year: number;
+  label: string;
+}
+
+/**
+ * What each month ends up costing once the fees are added.
+ *
+ * This is the answer to the only question the director actually has: "¿cuánto
+ * se le cobra en septiembre?". The system does the dividing, so the screen has
+ * to show the sum before anything is saved — otherwise the arithmetic is a
+ * promise rather than a fact.
+ */
+export function monthlyTotals(months: BilledMonth[], monthlyCents: number, fees: readonly Fee[]): MonthTotal[] {
+  const extra = new Map<number, number>();
+  for (const fee of fees) {
+    for (const [i, share] of feeShares(fee).entries()) {
+      const month = fee.months[i];
+      if (month === undefined) continue;
+      extra.set(month, (extra.get(month) ?? 0) + share);
+    }
+  }
+  return months.map((m) => ({
+    ...m,
+    feeCents: extra.get(m.month) ?? 0,
+    totalCents: monthlyCents + (extra.get(m.month) ?? 0),
+  }));
+}
+
+/** A month with what the fees add to it. */
+export interface MonthTotal extends BilledMonth {
+  feeCents: number;
+  totalCents: number;
+}
+
+/**
+ * A fee divided between its months, losing no cent.
+ *
+ * The remainder goes to the FIRST payment, exactly as the server does it. Two
+ * implementations of one rule is a risk, but the alternative is a screen that
+ * promises $333.33 three times while the school is charged $1,000 — and the
+ * person deciding needs the true number before they save, not after.
+ */
+export function feeShares(fee: Fee): number[] {
+  const n = fee.months.length;
+  if (n === 0) return [];
+  const base = Math.floor(fee.amountCents / n);
+  const out = new Array<number>(n).fill(base);
+  out[0] = base + (fee.amountCents - base * n);
+  return out;
 }
 
 /** Reads a whole number in a range, or null. Same reasoning as pesosToCents. */
@@ -135,7 +218,9 @@ export function TuitionPanel({ cycle, levels }: TuitionPanelProps): ReactElement
                       </td>
                       <td style={cell}>día {plan.dueDay}</td>
                       <td style={cell}>
-                        {plan.lateFeeCents === 0 ? "—" : `$${centsToPesos(plan.lateFeeCents)}`}
+                        {plan.policy.dailyMode
+                          ? `$${centsToPesos(plan.policy.lateFeeDailyCents)} / día`
+                          : plan.lateFeeCents === 0 ? "—" : `$${centsToPesos(plan.lateFeeCents)}`}
                       </td>
                     </>
                   )}
@@ -196,9 +281,15 @@ function RunSummary({ run }: { run: BillingRun }): ReactElement {
     >
       <p>
         Se generaron <strong>{run.tuitionCreated} colegiaturas</strong>,{" "}
-        {run.enrollmentCreated} inscripciones y {run.lateFeesCreated} recargos.{" "}
-        {run.skipped} ya existían.
+        {run.enrollmentCreated} inscripciones, {run.feesCreated} cuotas y{" "}
+        {run.lateFeesCreated} recargos. {run.skipped} ya existían.
       </p>
+      {run.enrollmentMoved > 0 && (
+        <p style={{ marginTop: 8 }}>
+          Se corrigió la fecha límite de <strong>{run.enrollmentMoved} inscripciones</strong> que
+          ya estaban cobradas.
+        </p>
+      )}
       {run.levelsWithoutPlan.length > 0 && (
         <p style={{ marginTop: 8, fontWeight: 600 }}>
           Sin tabulador, no se cobró nada: {run.levelsWithoutPlan.join(", ")}.
@@ -226,12 +317,25 @@ function PlanForm({
   const [months, setMonths] = useState(String(plan?.months ?? 10));
   const [firstMonth, setFirstMonth] = useState(String(plan?.firstBilledMonth ?? 9));
   const [dueDay, setDueDay] = useState(String(plan?.dueDay ?? 10));
-  const [lateFee, setLateFee] = useState(plan === undefined ? "" : centsToPesos(plan.lateFeeCents));
+  // The M16 collection rule. Daily mode replaces the fixed monthly surcharge
+  // with an amount charged for every day the money is late.
+  const [dailyMode, setDailyMode] = useState(plan?.policy.dailyMode ?? false);
+  const [dailyFee, setDailyFee] = useState(
+    plan === undefined || plan.policy.lateFeeDailyCents === 0 ? "" : centsToPesos(plan.policy.lateFeeDailyCents));
+  const [allDays, setAllDays] = useState(plan?.policy.surchargeCountsAllDays ?? true);
+  const [earlyAmount, setEarlyAmount] = useState(
+    plan === undefined || plan.policy.earlyPaymentCents === 0 ? "" : centsToPesos(plan.policy.earlyPaymentCents));
+  const [earlyDays, setEarlyDays] = useState(String(plan?.policy.earlyPaymentDays ?? 0));
+  // The inscription's own deadline. It is a separate charge and the school
+  // collects it on its own date — in June, for a year that opens in August.
+  const [enrollmentDue, setEnrollmentDue] = useState(plan?.enrollmentDueOn ?? "");
+  // The extras collected on top of the tuition, each already whole: the school
+  // states what it collects and the system divides it.
+  const [fees, setFees] = useState<Fee[]>(plan?.fees ?? []);
   const [error, setError] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState(false);
 
-  const submit = async (e: FormEvent): Promise<void> => {
-    e.preventDefault();
+  const submit = async (): Promise<void> => {
     const monthlyCents = pesosToCents(monthly);
     if (monthlyCents === null) {
       setError("Escribe la colegiatura mensual, en pesos.");
@@ -255,6 +359,26 @@ function PlanForm({
       return;
     }
 
+    const dailyCents = pesosToCents(dailyFee) ?? 0;
+    if (dailyMode && dailyCents <= 0) {
+      // The same rule the database enforces. Said here so the person reads what
+      // is missing instead of a constraint violation.
+      setError("El recargo diario necesita un monto, o no cobraría nada.");
+      return;
+    }
+    const window = wholeInRange(earlyDays, 0, MAX_DUE_DAY);
+    if (window === null) {
+      setError(`Los días de pronto pago van de 0 a ${MAX_DUE_DAY}.`);
+      return;
+    }
+    if (enrollmentDue.trim() !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(enrollmentDue.trim())) {
+      // Refused here rather than sent: the server reads an unparseable date as
+      // "no deadline", which would move every inscription of this level back to
+      // the default rule without saying so.
+      setError("La fecha límite de inscripción se escribe aaaa-mm-dd, por ejemplo 2026-06-30.");
+      return;
+    }
+
     setPending(true);
     setError(undefined);
     try {
@@ -268,8 +392,24 @@ function PlanForm({
         months: count,
         firstBilledMonth: startMonth,
         dueDay: day,
-        lateFeeCents: pesosToCents(lateFee) ?? 0,
+        // The school does not use the fixed monthly surcharge or the level
+        // discount, and asked for both to go. Zero is what disables them
+        // downstream, so a level that used to carry one is cleared by saving.
+        lateFeeCents: 0,
+        monthlyDiscountCents: 0,
+        // The mes:monto schedule went with them: splitting a payment is what
+        // the fees below do now, and saying it twice invited two answers.
+        schedule: [],
         active: true,
+        fees,
+        enrollmentDueOn: enrollmentDue.trim(),
+        policy: {
+          dailyMode,
+          lateFeeDailyCents: dailyCents,
+          surchargeCountsAllDays: allDays,
+          earlyPaymentCents: pesosToCents(earlyAmount) ?? 0,
+          earlyPaymentDays: window,
+        },
       });
       onSaved();
     } catch {
@@ -280,31 +420,240 @@ function PlanForm({
   };
 
   return (
-    <form
-      aria-label="Tabulador del nivel"
-      onSubmit={(e) => void submit(e)}
-      style={{ padding: 16, borderRadius: "var(--r-md)", background: "var(--surface-2)", marginBottom: 16 }}
+    <SlideOver
+      title={`Precios de ${level.name}`}
+      subtitle="Inscripción, colegiatura, cobranza y cuotas"
+      icon="finance"
+      submitLabel="Guardar tabulador"
+      pending={pending}
+      error={error}
+      onClose={onClose}
+      onSubmit={() => void submit()}
     >
-      <p style={{ fontWeight: 700, marginBottom: 12 }}>{level.name}</p>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginBottom: 12 }}>
         <TextField label="Inscripción" value={enrollment} onChange={setEnrollment} placeholder="5000" />
         <TextField label="Colegiatura mensual" value={monthly} onChange={setMonthly} placeholder="3200" />
         <TextField label="Mensualidades" value={months} onChange={setMonths} placeholder="10" />
         <TextField label="Mes de inicio" value={firstMonth} onChange={setFirstMonth} placeholder="9" />
         <TextField label="Día límite" value={dueDay} onChange={setDueDay} placeholder="10" />
-        <TextField label="Recargo por mes vencido" value={lateFee} onChange={setLateFee} placeholder="150" />
+        <TextField
+          label="Fecha límite de inscripción"
+          value={enrollmentDue}
+          onChange={setEnrollmentDue}
+          placeholder="2026-06-30"
+        />
       </div>
-      <div style={{ display: "flex", gap: 10 }}>
-        <Btn type="submit" icon="check" disabled={pending}>
-          Guardar tabulador
-        </Btn>
-        <Btn kind="ghost" onClick={onClose}>
-          Cancelar
-        </Btn>
+
+      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14, marginBottom: 12 }}>
+        <p style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text-muted)", marginBottom: 10 }}>
+          Cobranza
+        </p>
+        <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={dailyMode}
+            onChange={(e) => setDailyMode(e.target.checked)}
+            aria-label="Cobrar recargo por día"
+            style={{ width: 18, height: 18 }}
+          />
+          <span style={{ fontSize: 14, color: "var(--text)" }}>
+            Cobrar recargo por día en vez del monto fijo mensual
+          </span>
+        </label>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
+          <TextField label="Recargo por día" value={dailyFee} onChange={setDailyFee} placeholder="10" />
+          <TextField label="Pronto pago (monto)" value={earlyAmount} onChange={setEarlyAmount} placeholder="100" />
+          <TextField label="Pronto pago (días hábiles)" value={earlyDays} onChange={setEarlyDays} placeholder="5" />
+        </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={allDays}
+            onChange={(e) => setAllDays(e.target.checked)}
+            aria-label="Contar sábados, domingos y feriados"
+            style={{ width: 18, height: 18 }}
+          />
+          <span style={{ fontSize: 14, color: "var(--text)" }}>
+            Contar sábados, domingos y feriados en el recargo
+          </span>
+        </label>
       </div>
-      {error !== undefined && <ErrorAlert message={error} />}
-    </form>
+      <FeesSection
+        cycle={cycle}
+        firstMonth={wholeInRange(firstMonth, 1, 12) ?? 9}
+        months={wholeInRange(months, 1, 12) ?? 10}
+        monthlyCents={pesosToCents(monthly) ?? 0}
+        fees={fees}
+        onChange={setFees}
+        onError={setError}
+      />
+
+    </SlideOver>
   );
 }
 
 const cell = { padding: "10px 8px" } as const;
+
+/**
+ * The extras a school collects on top of the tuition.
+ *
+ * This replaced a text box that asked for "9:3200, 12:1600, 3:4800". The school
+ * called that confusing and they were right: it made the director do the
+ * arithmetic, express the tuition and the extra as one number, and then read it
+ * back a year later with no way to tell which part was which.
+ *
+ * What it asks for now is what the school actually says out loud: this is the
+ * July fee, it is $1,600, collect it in September and October. The dividing is
+ * the system's job, and the table underneath shows what each month ends up
+ * costing so the sum is a fact before anything is saved rather than a promise.
+ */
+function FeesSection({
+  cycle,
+  firstMonth,
+  months,
+  monthlyCents,
+  fees,
+  onChange,
+  onError,
+}: {
+  cycle: Cycle;
+  firstMonth: number;
+  months: number;
+  monthlyCents: number;
+  fees: Fee[];
+  onChange: (fees: Fee[]) => void;
+  onError: (message: string) => void;
+}): ReactElement {
+  const [name, setName] = useState("");
+  const [amount, setAmount] = useState("");
+  const [picked, setPicked] = useState<number[]>([]);
+
+  const calendar = billedMonths(cycle.startsOn, firstMonth, months);
+  const totals = monthlyTotals(calendar, monthlyCents, fees);
+
+  const add = (): void => {
+    const cents = pesosToCents(amount);
+    if (name.trim() === "" || cents === null || cents <= 0) {
+      onError("Una cuota necesita nombre y monto.");
+      return;
+    }
+    if (picked.length === 0) {
+      onError("Elige en qué meses se cobra la cuota.");
+      return;
+    }
+    if (cents < picked.length) {
+      // Split so thin a share rounds to nothing. The server refuses it too; a
+      // person should not need a round trip to learn so.
+      onError("La cuota es muy chica para partirla entre esos meses.");
+      return;
+    }
+    // Kept in the order the year collects them, not the order they were
+    // clicked: the parts are numbered "1 de 2" on the family's statement, and
+    // part 1 falling after part 2 is a support call.
+    const order = calendar.map((m) => m.month);
+    onChange([...fees, {
+      name: name.trim(),
+      amountCents: cents,
+      months: [...picked].sort((a, b) => order.indexOf(a) - order.indexOf(b)),
+    }]);
+    setName("");
+    setAmount("");
+    setPicked([]);
+  };
+
+  const toggle = (month: number): void => {
+    setPicked((current) =>
+      current.includes(month) ? current.filter((m) => m !== month) : [...current, month]);
+  };
+
+  const labelOf = (month: number): string =>
+    calendar.find((m) => m.month === month)?.label ?? MONTH_NAMES[month - 1] ?? "";
+
+  return (
+    <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14, marginBottom: 12 }}>
+      <p style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text-muted)", marginBottom: 4 }}>
+        Cuotas (opcional)
+      </p>
+      <p style={{ fontSize: 12.5, color: "var(--text-faint)", marginBottom: 12 }}>
+        Lo que se cobra aparte de la colegiatura — la cuota de julio, la graduación.
+        Escribe el monto <b>completo</b> y elige en qué meses se cobra: el sistema lo parte
+        y lo suma a esos meses.
+      </p>
+
+      {fees.length > 0 && (
+        <div style={{ borderRadius: "var(--r-md)", border: "1px solid var(--border)", overflow: "hidden", marginBottom: 14 }}>
+          {fees.map((fee, index) => (
+            <div
+              key={`${fee.name}-${index}`}
+              style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderTop: index === 0 ? "none" : "1px solid var(--border)" }}>
+              <div style={{ minWidth: 0 }}>
+                <p style={{ fontSize: 14.5, fontWeight: 600, color: "var(--text)" }}>{fee.name}</p>
+                <p style={{ fontSize: 12.5, color: "var(--text-muted)" }}>
+                  {formatCents(fee.amountCents)} ·{" "}
+                  {feeShares(fee)
+                    .map((share, i) => `${formatCents(share)} en ${labelOf(fee.months[i] ?? 0)}`)
+                    .join(" · ")}
+                </p>
+              </div>
+              <div style={{ flex: 1 }} />
+              <button
+                type="button"
+                onClick={() => onChange(fees.filter((_, i) => i !== index))}
+                aria-label={`Quitar ${fee.name}`}
+                style={{ background: "transparent", border: "none", color: "var(--text-muted)", fontSize: 13.5, fontWeight: 600, cursor: "pointer" }}>
+                Quitar
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginBottom: 12 }}>
+        <TextField label="Nombre de la cuota" value={name} onChange={setName} placeholder="Cuota de Julio" />
+        <TextField label="Monto total" value={amount} onChange={setAmount} placeholder="1600" />
+      </div>
+      <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-muted)", marginBottom: 8 }}>
+        ¿En qué meses se cobra?
+      </p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+        {calendar.map((m) => {
+          const on = picked.includes(m.month);
+          return (
+            <button
+              key={`${m.year}-${m.month}`}
+              type="button"
+              onClick={() => toggle(m.month)}
+              aria-pressed={on}
+              style={{ height: 38, padding: "0 14px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>
+              {m.label}
+            </button>
+          );
+        })}
+      </div>
+      <Btn kind="ghost" icon="plus" onClick={add}>Agregar cuota</Btn>
+
+      {fees.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-muted)", marginBottom: 8 }}>
+            Lo que se cobrará cada mes
+          </p>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
+            <tbody>
+              {totals.map((m) => (
+                <tr key={`${m.year}-${m.month}`} style={{ borderTop: "1px solid var(--border)" }}>
+                  <td style={{ padding: "7px 4px", color: "var(--text-muted)" }}>{m.label}</td>
+                  <td style={{ padding: "7px 4px", textAlign: "right", color: "var(--text-muted)" }}>
+                    {m.feeCents > 0 ? `+ ${formatCents(m.feeCents)}` : ""}
+                  </td>
+                  <td style={{ padding: "7px 4px", textAlign: "right", fontWeight: 700, color: "var(--text)" }}>
+                    {formatCents(m.totalCents)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

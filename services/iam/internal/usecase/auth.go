@@ -78,8 +78,20 @@ type AuthResult struct {
 	MustChangePassword bool
 }
 
-// Authenticate verifies credentials and issues an access + refresh token pair.
+// Authenticate verifies credentials and issues a STAFF session — the school's
+// panel, which closes after fifteen idle minutes.
+//
+// It is the safe default: a caller that does not say which surface it is gets
+// the shorter life, because guessing wrong that way costs somebody a login and
+// guessing wrong the other way leaves an office session open all afternoon.
 func (s *AuthService) Authenticate(ctx context.Context, rawEmail, password string) (AuthResult, error) {
+	return s.AuthenticateAs(ctx, rawEmail, password, domain.SessionStaff)
+}
+
+// AuthenticateAs verifies credentials and issues a session of the given kind.
+// The KIND comes from the surface the request arrived on — the panel or the
+// family app — never from anything the caller can set.
+func (s *AuthService) AuthenticateAs(ctx context.Context, rawEmail, password string, kind domain.SessionKind) (AuthResult, error) {
 	email, err := domain.NewEmail(rawEmail)
 	if err != nil {
 		return AuthResult{}, err // KindInvalid: malformed input, not an auth attempt.
@@ -101,7 +113,7 @@ func (s *AuthService) Authenticate(ctx context.Context, rawEmail, password strin
 		return AuthResult{}, glerrors.New(glerrors.KindForbidden, "account is not active")
 	}
 
-	res, err := s.issueFor(ctx, user)
+	res, err := s.issueFor(ctx, user, kind)
 	if err != nil {
 		return AuthResult{}, err
 	}
@@ -114,7 +126,7 @@ func (s *AuthService) Authenticate(ctx context.Context, rawEmail, password strin
 // the password revokes every refresh token issued before it (a stolen token
 // stops working the moment the password is changed).
 func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (AuthResult, error) {
-	userID, issuedAt, err := s.validator.ParseRefreshToken(ctx, refreshToken)
+	userID, issuedAt, kind, err := s.validator.ParseRefreshToken(ctx, refreshToken)
 	if err != nil {
 		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid refresh token")
 	}
@@ -136,7 +148,9 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (Au
 	if !user.CanAuthenticate() {
 		return AuthResult{}, glerrors.New(glerrors.KindForbidden, "account is not active")
 	}
-	return s.issueFor(ctx, user)
+	// The rotated pair keeps the session's kind, so a family session stays long
+	// and a staff one stays short. It cannot promote itself by rotating.
+	return s.issueFor(ctx, user, kind)
 }
 
 // ChangePassword sets a new password for the principal identified by accessToken
@@ -201,13 +215,13 @@ func (s *AuthService) RevokeRole(ctx context.Context, userID, roleID string) err
 }
 
 // issueFor mints a fresh access + refresh pair for an authenticated user.
-func (s *AuthService) issueFor(ctx context.Context, user domain.User) (AuthResult, error) {
+func (s *AuthService) issueFor(ctx context.Context, user domain.User, kind domain.SessionKind) (AuthResult, error) {
 	claims := domain.NewAccessClaims(user, s.now(), s.accessTTL)
 	access, err := s.issuer.IssueAccessToken(ctx, claims)
 	if err != nil {
 		return AuthResult{}, err
 	}
-	refresh, err := s.issuer.IssueRefreshToken(ctx, user.ID())
+	refresh, err := s.issuer.IssueRefreshToken(ctx, user.ID(), kind)
 	if err != nil {
 		return AuthResult{}, err
 	}

@@ -272,6 +272,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 		return guard.Protect("students", requireAuthChanged(middleware.RequirePermission("guardians:read")(http.HandlerFunc(h))))
 	}
 	mux.Handle("POST /api/v1/guardians", guardiansWrite(guardiansH.LinkGuardian))
+	mux.Handle("POST /api/v1/contacts", guardiansWrite(guardiansH.AddContact))
 	mux.Handle("POST /api/v1/guardians/unlink", guardiansWrite(guardiansH.UnlinkGuardian))
 	mux.Handle("GET /api/v1/students/{studentId}/guardians", guardiansRead(guardiansH.ListGuardiansForStudent))
 
@@ -297,6 +298,12 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/config/subjects", configRead(configH.ListSubjects))
 	mux.Handle("POST /api/v1/config/terms", configWrite(configH.CreateTerm))
 	mux.Handle("GET /api/v1/config/terms", configRead(configH.ListTerms))
+	mux.Handle("POST /api/v1/config/events", configWrite(configH.CreateSchoolEvent))
+	mux.Handle("GET /api/v1/config/events", configRead(configH.ListSchoolEvents))
+	mux.Handle("DELETE /api/v1/config/events/{id}", configWrite(configH.DeleteSchoolEvent))
+	mux.Handle("POST /api/v1/config/calendar", configWrite(configH.CreateNonWorkingPeriod))
+	mux.Handle("GET /api/v1/config/calendar", configRead(configH.ListNonWorkingPeriods))
+	mux.Handle("DELETE /api/v1/config/calendar/{id}", configWrite(configH.DeleteNonWorkingPeriod))
 	mux.Handle("POST /api/v1/config/groups", configWrite(configH.CreateGroup))
 	mux.Handle("GET /api/v1/config/groups", configRead(configH.ListGroups))
 
@@ -423,6 +430,13 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/finance/charges/{id}/cancel", financeWrite(financeH.CancelCharge))
 	mux.Handle("GET /api/v1/finance/charges", financeRead(financeH.ListCharges))
 	mux.Handle("POST /api/v1/finance/payments", financeWrite(financeH.RegisterPayment))
+	mux.Handle("POST /api/v1/finance/deposits", financeWrite(financeH.RegisterDeposit))
+	mux.Handle("POST /api/v1/finance/deposits/preview", financeRead(financeH.PreviewDeposit))
+	mux.Handle("GET /api/v1/finance/deposits", financeRead(financeH.ListDeposits))
+	mux.Handle("GET /api/v1/finance/expected", financeRead(financeH.ExpectedToday))
+	mux.Handle("GET /api/v1/finance/cash-up", financeRead(financeH.DailyCashUp))
+	mux.Handle("GET /api/v1/finance/income", financeRead(financeH.IncomeByConcept))
+	mux.Handle("POST /api/v1/finance/deposits/{id}/void", financeWrite(financeH.VoidDeposit))
 	mux.Handle("GET /api/v1/finance/accounts/{studentId}", financeRead(financeH.GetAccount))
 	mux.Handle("GET /api/v1/finance/overdue", financeRead(financeH.ListOverdue))
 
@@ -466,6 +480,11 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/comms/devices", commsWrite(commsH.RegisterDevice))
 	mux.Handle("GET /api/v1/comms/notifications", commsRead(commsH.ListNotifications))
 	mux.Handle("POST /api/v1/comms/notifications/{id}/read", commsWrite(commsH.MarkRead))
+	// An announcement is a comms write, but the audience is resolved here at the
+	// edge: config and students already answer "who is in 1° A", and comms
+	// deliberately does not know what a group is.
+	announcementsH := handler.NewAnnouncementHandler(commsClient, studentsClient, configClient)
+	mux.Handle("POST /api/v1/comms/announcements", commsWrite(announcementsH.Announce))
 
 	// M12 uniforms (the school's uniform shop). Stage one: the catalogue, the
 	// storeroom and the counter sale. Every route sits behind

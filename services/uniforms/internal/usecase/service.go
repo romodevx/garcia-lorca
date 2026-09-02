@@ -48,6 +48,9 @@ type CreateItemInput struct {
 	Description string
 	Level       domain.Level
 	PriceCents  int64
+	// Category is uniform, book, supply or other. Empty means uniform, which is
+	// what every item was before the module sold anything else.
+	Category string
 }
 
 // CreateItem puts a garment on sale.
@@ -55,6 +58,12 @@ func (s *Service) CreateItem(ctx context.Context, in CreateItemInput) (domain.It
 	item, err := domain.NewItem(s.newID(), s.tenantID, in.Code, in.Name, in.Description, in.Level, in.PriceCents)
 	if err != nil {
 		return domain.Item{}, err
+	}
+	if in.Category != "" {
+		item, err = item.WithCategory(in.Category)
+		if err != nil {
+			return domain.Item{}, err
+		}
 	}
 	return s.repo.CreateItem(ctx, item)
 }
@@ -65,6 +74,7 @@ type UpdateItemInput struct {
 	ID          string
 	Name        string
 	Description string
+	Category    string
 	Level       domain.Level
 	PriceCents  int64
 	Active      bool
@@ -81,6 +91,12 @@ func (s *Service) UpdateItem(ctx context.Context, in UpdateItemInput) (domain.It
 	updated, err := current.WithDetails(in.Name, in.Description, in.Level, in.PriceCents)
 	if err != nil {
 		return domain.Item{}, err
+	}
+	if in.Category != "" {
+		updated, err = updated.WithCategory(in.Category)
+		if err != nil {
+			return domain.Item{}, err
+		}
 	}
 	if in.Active {
 		updated = updated.Restore()

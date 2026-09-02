@@ -111,6 +111,53 @@ func (s *GuardianService) requireGuardianUser(ctx context.Context, guardianUserI
 	return nil
 }
 
+// ContactInput is a person the school can reach about a pupil. Most of them
+// have no account, which is the whole reason this exists.
+type ContactInput struct {
+	StudentID    string
+	Relationship string
+	FullName     string
+	Phone        string
+	Email        string
+}
+
+// AddContact records somebody the school can call about a pupil, with no
+// account and no login.
+//
+// Before this, recording that a grandmother may collect the child meant first
+// creating an iam user for her — so the school did not record it, and the office
+// kept the second number on paper while the system showed one contact per pupil
+// as though that were the truth.
+//
+// The pupil is checked; nothing else can be. There is no user to validate,
+// which is the point: a contact is a name and a number, not an account.
+func (s *GuardianService) AddContact(ctx context.Context, in ContactInput) (domain.GuardianLink, error) {
+	rel, err := domain.ParseRelationship(in.Relationship)
+	if err != nil {
+		return domain.GuardianLink{}, err
+	}
+	student, err := s.students.FindByID(ctx, in.StudentID)
+	if err != nil {
+		if glerrors.KindOf(err) == glerrors.KindNotFound {
+			return domain.GuardianLink{}, glerrors.New(glerrors.KindInvalid, "student not found")
+		}
+		return domain.GuardianLink{}, err
+	}
+
+	contact, err := domain.NewContact(s.newID(), s.tenant, student.ID(), rel, domain.ContactPerson{
+		FullName: in.FullName,
+		Phone:    in.Phone,
+		Email:    in.Email,
+	})
+	if err != nil {
+		return domain.GuardianLink{}, err
+	}
+	if err := s.guardians.Link(ctx, contact); err != nil {
+		return domain.GuardianLink{}, err
+	}
+	return contact, nil
+}
+
 // UnlinkGuardian removes a guardian ↔ student link. An unknown link is
 // KindNotFound.
 func (s *GuardianService) UnlinkGuardian(ctx context.Context, guardianUserID, studentID string) error {

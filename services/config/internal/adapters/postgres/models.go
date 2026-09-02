@@ -123,3 +123,38 @@ type teachingAssignmentModel struct {
 }
 
 func (teachingAssignmentModel) TableName() string { return "teaching_assignments" }
+
+// nonWorkingPeriodModel is the GORM row for `non_working_periods` (M16): the
+// days the school is shut. Stored as a RANGE with both ends inclusive; the
+// domain expands it into days for the working-day arithmetic.
+type nonWorkingPeriodModel struct {
+	ID        string    `gorm:"column:id;primaryKey"`
+	TenantID  string    `gorm:"column:tenant_id"`
+	CycleID   string    `gorm:"column:cycle_id"`
+	Label     string    `gorm:"column:label"`
+	Kind      string    `gorm:"column:kind"`
+	StartsOn  time.Time `gorm:"column:starts_on"`
+	EndsOn    time.Time `gorm:"column:ends_on"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+}
+
+func (nonWorkingPeriodModel) TableName() string { return "non_working_periods" }
+
+// schoolEventModel is the GORM row for `school_events` (M16): the agenda, as
+// opposed to the closed days. Kept in its own table so an activity can never
+// move a due date — see the migration for why that matters.
+type schoolEventModel struct {
+	ID          string    `gorm:"column:id;primaryKey"`
+	TenantID    string    `gorm:"column:tenant_id"`
+	CycleID     string    `gorm:"column:cycle_id"`
+	Title       string    `gorm:"column:title"`
+	Description string    `gorm:"column:description"`
+	StartsOn    time.Time `gorm:"column:starts_on"`
+	EndsOn      time.Time `gorm:"column:ends_on"`
+	// NULL in both means the whole school. At most one is ever set.
+	LevelID   *string   `gorm:"column:level_id"`
+	GroupID   *string   `gorm:"column:group_id"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+}
+
+func (schoolEventModel) TableName() string { return "school_events" }

@@ -40,7 +40,8 @@ func (h *IAMHandler) Health(ctx context.Context, _ *connect.Request[iamv1.Health
 }
 
 func (h *IAMHandler) Login(ctx context.Context, req *connect.Request[iamv1.LoginRequest]) (*connect.Response[iamv1.LoginResponse], error) {
-	res, err := h.auth.Authenticate(ctx, req.Msg.GetEmail(), req.Msg.GetPassword())
+	res, err := h.auth.AuthenticateAs(ctx, req.Msg.GetEmail(), req.Msg.GetPassword(),
+		sessionKindOf(req.Msg.GetSessionKind()))
 	if err != nil {
 		return nil, connectErr(err)
 	}
@@ -274,4 +275,14 @@ func connectErr(err error) *connect.Error {
 	default:
 		return connect.NewError(connect.CodeInternal, glerrors.New(glerrors.KindInternal, "internal error"))
 	}
+}
+
+// sessionKindOf reads the surface off the wire. UNSPECIFIED — which is what an
+// older client sends — is a STAFF session: the shorter life, because that is the
+// safe direction to be wrong in.
+func sessionKindOf(kind iamv1.SessionKind) domain.SessionKind {
+	if kind == iamv1.SessionKind_SESSION_KIND_FAMILY {
+		return domain.SessionFamily
+	}
+	return domain.SessionStaff
 }

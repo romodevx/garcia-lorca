@@ -565,6 +565,307 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
 
+  /api/v1/contacts:
+    post:
+      tags: [students]
+      summary: Record somebody the school can call
+      description: >
+        A contact is a person, not an account: a grandmother who may collect the
+        child, or the phone that actually answers. Most of a pupil's contacts are
+        these.
+
+
+        Separate from linking a guardian, because the two answer different
+        questions — one grants access to the family app, the other writes down
+        the number that answers. Conflating them is why the second number stayed
+        on paper and the system showed one contact per pupil as though that were
+        the truth.
+      operationId: addContact
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [studentId, relationship, fullName]
+              properties:
+                studentId: { type: string, format: uuid }
+                relationship: { type: string, enum: [mother, father, guardian, other] }
+                fullName:
+                  type: string
+                  minLength: 1
+                  description: >
+                    Required. A phone number with no name attached is a number
+                    nobody can use.
+                phone: { type: string }
+                email: { type: string }
+      responses:
+        '201':
+          description: The stored contact. hasAccount is false unless they can open the family app.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Contact' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
+  /api/v1/comms/announcements:
+    post:
+      tags: [comms]
+      summary: Tell a group, a level, or the whole school
+      description: >
+        One message, one audience: every ACTIVE pupil of a group, of every group
+        under a level, or of the cycle. A pupil who left mid-year is not in the
+        group any more — sending them the junta is how a school looks like it
+        does not know who its pupils are.
+
+
+        The audience is resolved here at the edge, because config and students
+        already answer "who is in 1° A". Comms receives a list of pupils and does
+        not know what a group is.
+
+
+        Send an idempotencyKey. One announcement can reach four hundred families,
+        and a phone buzzing twice for the same junta is what makes a school turn
+        notifications off for good.
+      operationId: announce
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scope, cycleId, title, body, idempotencyKey]
+              properties:
+                scope: { type: string, enum: [student, group, level, cycle] }
+                targetId:
+                  type: string
+                  format: uuid
+                  description: >
+                    The pupil, group or level. Unused for a whole-cycle
+                    announcement, and ignored when targetIds carries a list.
+                targetIds:
+                  type: array
+                  items: { type: string, format: uuid }
+                  description: >
+                    Several groups (or levels) at once — "1° A y 1° B" is one
+                    message the school writes once, not two it writes twice and
+                    sends at different times. A pupil in two of them hears it
+                    once.
+                cycleId: { type: string, format: uuid }
+                title: { type: string, minLength: 1 }
+                body: { type: string, minLength: 1 }
+                idempotencyKey: { type: string, minLength: 1 }
+      responses:
+        '201':
+          description: Sent.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [created, audience]
+                properties:
+                  created:
+                    type: integer
+                    description: >
+                      How many families it actually reached. A retry reports
+                      zero: it delivered nothing new.
+                  audience:
+                    type: integer
+                    description: How many pupils the scope named.
+        '400':
+          description: >
+            A malformed body, an unknown scope, or an audience of nobody. An
+            empty audience is refused rather than reported as sent — otherwise
+            the office believes a message went out that never did.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
+  /api/v1/config/events:
+    get:
+      tags: [config]
+      summary: The school's agenda
+      description: >
+        What the school DOES: festivals, parents' meetings, exam weeks. A
+        different list from the closed days, and deliberately so — finance reads
+        the closed days to move a due date and stop a surcharge, and an activity
+        must never do either. A festival on the 10th does not mean nobody could
+        pay on the 10th.
+      operationId: listSchoolEvents
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: cycleId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The cycle's agenda, earliest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: '#/components/schemas/SchoolEvent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+    post:
+      tags: [config]
+      summary: Put something on the agenda
+      description: >
+        A one-day event needs only startsOn. The audience is one level, one
+        group, or — with neither — the whole school.
+      operationId: createSchoolEvent
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cycleId, title, startsOn]
+              properties:
+                cycleId: { type: string, format: uuid }
+                title: { type: string, minLength: 1, maxLength: 120 }
+                description: { type: string, maxLength: 500 }
+                startsOn: { type: string, format: date }
+                endsOn: { type: string, format: date }
+                levelId: { type: string, format: uuid }
+                groupId: { type: string, format: uuid }
+      responses:
+        '201':
+          description: The stored event.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SchoolEvent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
+  /api/v1/config/events/{id}:
+    delete:
+      tags: [config]
+      summary: Take something off the agenda
+      operationId: deleteSchoolEvent
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      responses:
+        '204': { description: Removed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
+  /api/v1/config/calendar:
+    get:
+      tags: [config]
+      summary: The days the school is closed
+      description: >
+        Holidays, vacations and suspensions for one cycle. Not decoration: the
+        early-payment window is counted in WORKING days, so a holiday nobody
+        entered moves a family's deadline — quietly, and in the school's favour.
+      operationId: listNonWorkingPeriods
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: cycleId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The cycle's closed days, earliest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [periods]
+                properties:
+                  periods:
+                    type: array
+                    items: { $ref: '#/components/schemas/NonWorkingPeriod' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+    post:
+      tags: [config]
+      summary: Close a day, or a run of days
+      description: >
+        A single holiday needs only startsOn — the edge fills in the end. Asking
+        for the same date twice is how a calendar stops being maintained.
+      operationId: createNonWorkingPeriod
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cycleId, label, kind, startsOn]
+              properties:
+                cycleId: { type: string, format: uuid }
+                label:
+                  type: string
+                  minLength: 1
+                  description: What a person reads on the calendar, and in the explanation of a moved deadline.
+                kind: { type: string, enum: [holiday, vacation] }
+                startsOn: { type: string, format: date }
+                endsOn:
+                  type: string
+                  format: date
+                  description: Inclusive. Omitted for a single day.
+      responses:
+        '201':
+          description: The stored period.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NonWorkingPeriod' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+        '409':
+          description: This cycle already has a closure with that name.
+
+  /api/v1/config/calendar/{id}:
+    delete:
+      tags: [config]
+      summary: Remove a day entered by mistake
+      description: >
+        A calendar that cannot be corrected stops being trusted, and the school
+        goes back to a sheet on the wall.
+      operationId: deleteNonWorkingPeriod
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      responses:
+        '204': { description: Removed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
   /api/v1/finance/tuition-plans:
     get:
       tags: [finance-tuition]
@@ -617,6 +918,327 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/TuitionPlan' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
+  /api/v1/finance/deposits:
+    post:
+      tags: [finance-payments]
+      summary: Take money without being told what it pays for
+      description: >
+        A parent hands over an amount and says nothing else. The split lands on
+        the oldest debt first, then the surcharge that debt earned, then the next
+        month, and whatever is left over stays as the family's credit. The
+        response carries the whole split so a receipt can be printed without a
+        second call while the parent waits.
+
+
+        Send an idempotencyKey: the retry a lost response provokes must not cost
+        the family twice.
+      operationId: registerDeposit
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [studentId, amountCents, method]
+              properties:
+                studentId: { type: string, format: uuid }
+                amountCents: { type: integer, format: int64, minimum: 1 }
+                method: { type: string, enum: [cash, card, transfer] }
+                cardType:
+                  type: string
+                  enum: [debit, credit]
+                  description: Only on a card. A card type on cash is refused.
+                reference: { type: string }
+                paidAt:
+                  type: string
+                  format: date
+                  description: >
+                    The day the money changed hands, which is not always the day
+                    it was keyed — every collection rule is a function of it. A
+                    date, not an instant: a time zone on a cashier's clock is a
+                    bug waiting to move a payment across a due date. Empty means
+                    today; a future date is refused.
+                idempotencyKey: { type: string }
+                grantEarlyPayment:
+                  type: boolean
+                  description: >
+                    Honours the early-payment reward after the window closed,
+                    because the school decided to — the parent who is always
+                    punctual and slipped once. Recorded under its own discount
+                    reason so a report can tell a decision from the rule firing.
+      responses:
+        '201':
+          description: The deposit and what it covered.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DepositResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+    get:
+      tags: [finance-payments]
+      summary: A family's deposits, newest first
+      operationId: listDeposits
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: studentId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The deposits.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deposits]
+                properties:
+                  deposits:
+                    type: array
+                    items: { $ref: '#/components/schemas/Deposit' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
+  /api/v1/finance/expected:
+    get:
+      tags: [finance-payments]
+      summary: What a family must hand over today
+      description: >
+        The months already due — plus the one due later THIS month, which is how
+        the early-payment reward is earned — what being late has cost, and what
+        paying early saves. The counter shows it as "Monto esperado" and never
+        lets anybody edit it; the captured amount is compared against it and the
+        difference is recorded rather than blocking the payment.
+
+
+        Not the same question as the annual balance, which is returned beside it.
+      operationId: expectedToday
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: studentId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - name: on
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: The day to work it out for. Empty means today.
+      responses:
+        '200':
+          description: What is due today, and what makes it up.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [amountCents, surchargeCents, discountCents, annualBalanceCents]
+                properties:
+                  amountCents: { type: integer, format: int64, minimum: 0 }
+                  surchargeCents: { type: integer, format: int64, minimum: 0 }
+                  discountCents: { type: integer, format: int64, minimum: 0 }
+                  annualBalanceCents: { type: integer, format: int64, minimum: 0 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
+  /api/v1/finance/deposits/preview:
+    post:
+      tags: [finance-payments]
+      summary: What an amount would cover, without taking it
+      description: >
+        Same rule, same order, same arithmetic as taking the deposit, and it
+        writes nothing — so a cashier can tell a parent what their money pays for
+        before it changes hands.
+
+
+        A projection, not a promise: the charges are read without the lock the
+        real call takes, so a payment landing in between changes the answer.
+      operationId: previewDeposit
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [studentId, amountCents]
+              properties:
+                studentId: { type: string, format: uuid }
+                amountCents: { type: integer, format: int64, minimum: 1 }
+                paidAt: { type: string, format: date }
+      responses:
+        '200':
+          description: The projected split.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DepositPreview' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
+  /api/v1/finance/deposits/{id}/void:
+    post:
+      tags: [finance-payments]
+      summary: Cancel a deposit and release what it settled
+      description: >
+        A cashier who keys $67,000 instead of $6,700 has to be able to undo it.
+        The row survives with its reason — a school that deletes money rows
+        cannot explain its own ledger — and the debts it paid go back to being
+        owed.
+      operationId: voidDeposit
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  description: >
+                    Required. Without one, a cancelled deposit is an unexplained
+                    hole in the day's takings.
+      responses:
+        '204': { description: Cancelled. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+        '409':
+          description: The deposit was already cancelled.
+
+  /api/v1/finance/cash-up:
+    get:
+      tags: [finance-payments]
+      summary: The day's takings
+      description: >
+        What came in on one day and in what form — cash, card, transfer — with
+        the list behind each number. This is what a school closes the day with,
+        instead of adding up a notebook.
+
+
+        Cancelled deposits count for nothing and are listed anyway: a cash-up
+        that hid them could not explain why the drawer holds less than the
+        receipts say.
+      operationId: dailyCashUp
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: day
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: The day the money changed hands. Empty means today.
+      responses:
+        '200':
+          description: The day's takings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CashUp' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
+  /api/v1/finance/income:
+    get:
+      tags: [finance-payments]
+      summary: What the school earned, by what it charged for
+      description: >
+        Income between two days, biggest line first. Counted on the day the
+        money changed hands, not the day the charge was issued: for anyone
+        paying late the two are months apart, and reporting on the charge date
+        credits October with September's arrears.
+
+
+        Both dates are required. A report over "everything since the beginning"
+        is almost never what was meant, and it is the kind of mistake that gets
+        read as a real number.
+      operationId: incomeByConcept
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+          description: Inclusive.
+      responses:
+        '200':
+          description: The period's income.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Income' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
+  /api/v1/finance/outbox/drain:
+    post:
+      tags: [finance-payments]
+      summary: Publish the events still waiting
+      description: >
+        A payment queues its events in the same transaction as the money and
+        drains them the moment it commits, so the ordinary case needs nobody and
+        an empty queue is the normal answer.
+
+
+        This exists for what that cannot cover: the broker was down, or the
+        process died between the commit and the send. Without it, a family could
+        pay and the pupil stay "en trámite" forever — the event that marks them
+        inscribed would simply be gone, with nothing able to notice.
+
+
+        Safe to call repeatedly. The service also sweeps on its own timer.
+      operationId: drainFinanceOutbox
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                limit:
+                  type: integer
+                  minimum: 0
+                  description: How many to publish in this pass. Zero uses the service's batch size.
+      responses:
+        '200':
+          description: How many events actually went out. Zero is the ordinary answer.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [published]
+                properties:
+                  published: { type: integer, minimum: 0 }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
@@ -760,6 +1382,167 @@ components:
           example: 15000
           description: Fixed surcharge added once per completed overdue month. Zero disables it.
         active: { type: boolean }
+        policy: { $ref: '#/components/schemas/CollectionPolicy' }
+        schedule:
+          type: array
+          description: >
+            An explicit payment plan, replacing the uniform monthly amount.
+            Empty means the year is divided into equal parts, which is what most
+            schools do.
+          items: { $ref: '#/components/schemas/Installment' }
+        monthlyDiscountCents:
+          type: integer
+          format: int64
+          minimum: 0
+          example: 50000
+          description: A fixed amount off every month of this level.
+        fees:
+          type: array
+          description: >
+            The extras collected on top of the tuition, each split across the
+            months the school chose. Empty is the ordinary state.
+          items: { $ref: '#/components/schemas/Fee' }
+        enrollmentDueOn:
+          type: string
+          format: date
+          example: "2026-06-30"
+          description: >
+            The deadline the school set for the inscription. Empty keeps the
+            default rule — the due day in the cycle's first month — so a plan
+            written before this field existed goes on meaning what it meant.
+
+    Contact:
+      type: object
+      description: >
+        Somebody the school can reach about a pupil. A contact WITH an account
+        is a family that can open the app; one without is a phone number the
+        office calls. Both are contacts, and there is one list.
+      required: [id, studentId, relationship, hasAccount]
+      properties:
+        id: { type: string, format: uuid }
+        studentId: { type: string, format: uuid }
+        guardianUserId:
+          type: string
+          description: Empty when the contact has no account.
+        relationship: { type: string, enum: [mother, father, guardian, other] }
+        fullName: { type: string }
+        phone: { type: string }
+        email: { type: string }
+        hasAccount:
+          type: boolean
+          description: Whether this contact can open the family app.
+
+    SchoolEvent:
+      type: object
+      description: >
+        Something the school DOES, as opposed to a day it is shut. Both ends
+        inclusive; a one-day event has startsOn == endsOn. levelId and groupId
+        are the audience — at most one is set, and neither means the whole
+        school.
+      required: [id, cycleId, title, startsOn, endsOn]
+      properties:
+        id: { type: string, format: uuid }
+        cycleId: { type: string, format: uuid }
+        title: { type: string, example: Festival de primavera }
+        description: { type: string }
+        startsOn: { type: string, format: date }
+        endsOn: { type: string, format: date }
+        levelId: { type: string, format: uuid }
+        groupId: { type: string, format: uuid }
+
+    NonWorkingPeriod:
+      type: object
+      description: >
+        A day, or a run of days, the school does not operate. Both ends
+        inclusive; a single-day holiday has startsOn == endsOn. Plain calendar
+        dates, never timestamps — a timezone would move a holiday.
+      required: [id, cycleId, label, kind, startsOn, endsOn]
+      properties:
+        id: { type: string, format: uuid }
+        cycleId: { type: string, format: uuid }
+        label: { type: string, example: Independencia }
+        kind: { type: string, enum: [holiday, vacation] }
+        startsOn: { type: string, format: date }
+        endsOn: { type: string, format: date }
+
+    Installment:
+      type: object
+      description: >
+        One payment of the year. A school does not always divide the year into
+        equal parts — "once meses, pero diciembre a la mitad y la otra mitad en
+        marzo" is a real arrangement, and N-equal-payments cannot express it.
+        The year comes from the cycle, so a schedule may run past December.
+      required: [month, amountCents]
+      properties:
+        month: { type: integer, minimum: 1, maximum: 12 }
+        amountCents: { type: integer, format: int64, minimum: 1 }
+
+    Fee:
+      type: object
+      description: >
+        Money the school collects on top of the monthly tuition, spread across
+        the months it chooses. "La cuota de julio" is charged for a month the
+        school year does not bill, so it is collected inside months that it
+        does. amountCents is the WHOLE fee, not the monthly share: the school
+        states what it collects and the server divides it, putting the remainder
+        of an uneven division on the first payment so no cent is lost.
+      required: [name, amountCents, months]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          example: Cuota de Julio
+          description: >
+            What the family reads on the statement, and the whole explanation of
+            why a month costs more than the tabulador says.
+        amountCents: { type: integer, format: int64, minimum: 1, example: 160000 }
+        months:
+          type: array
+          minItems: 1
+          description: >
+            The calendar months it is divided between, in the order chosen. One
+            month is a fee that is not split. A month listed twice is refused.
+          items: { type: integer, minimum: 1, maximum: 12 }
+          example: [9, 10]
+
+    CollectionPolicy:
+      type: object
+      description: >
+        What a late payment costs and what an early one saves. It rides with the
+        tuition table because that is where a price lives.
+      properties:
+        dailyMode:
+          type: boolean
+          description: >
+            Picks the rule. false keeps the fixed monthly surcharge above. true
+            charges lateFeeDailyCents for every day the money is late, and the
+            monthly run stops issuing surcharge charges — the amount changes
+            every night, so it is worked out at the moment of payment instead.
+        lateFeeDailyCents:
+          type: integer
+          format: int64
+          minimum: 0
+          example: 1000
+          description: The daily surcharge. Required when dailyMode is true.
+        surchargeCountsAllDays:
+          type: boolean
+          description: >
+            Counts Saturdays, Sundays and holidays. The school said yes — the
+            money is late on a Sunday too.
+        earlyPaymentCents:
+          type: integer
+          format: int64
+          minimum: 0
+          example: 10000
+          description: >
+            A fixed amount off, per month settled, when the family pays inside
+            the early window. Zero disables it.
+        earlyPaymentDays:
+          type: integer
+          minimum: 0
+          maximum: 28
+          example: 10
+          description: How many WORKING days the early window lasts, from the first of the month.
 
     TuitionPlanInput:
       type: object
@@ -774,6 +1557,126 @@ components:
         dueDay: { type: integer, minimum: 1, maximum: 28 }
         lateFeeCents: { type: integer, format: int64, minimum: 0 }
         active: { type: boolean }
+        policy: { $ref: '#/components/schemas/CollectionPolicy' }
+        schedule:
+          type: array
+          items: { $ref: '#/components/schemas/Installment' }
+        monthlyDiscountCents: { type: integer, format: int64, minimum: 0 }
+        fees:
+          type: array
+          items: { $ref: '#/components/schemas/Fee' }
+        enrollmentDueOn: { type: string, format: date, example: "2026-06-30" }
+
+    Deposit:
+      type: object
+      description: Money as it arrived, before it was decided what it pays.
+      required: [id, studentId, amountCents, method, paidAt]
+      properties:
+        id: { type: string, format: uuid }
+        studentId: { type: string, format: uuid }
+        amountCents: { type: integer, format: int64, minimum: 1, example: 670000 }
+        method: { type: string, enum: [cash, card, transfer] }
+        cardType:
+          type: string
+          enum: ['', debit, credit]
+          description: >
+            Which kind of card. Not a payment method — the money still arrives
+            by card — but the terminal the office reconciles against at month
+            end knows the difference. Empty for cash and transfers.
+        reference:
+          type: string
+          description: What identifies the money itself — a folio, a transfer id, a card slip.
+        paidAt: { type: string, format: date-time }
+        calendarVersion:
+          type: string
+          description: >
+            The school calendar the split was worked out against. "unavailable"
+            means the calendar could not be read and the deadline was computed
+            without the school's holidays.
+        voidedAt: { type: [string, 'null'], format: date-time }
+        voidReason: { type: string }
+
+    DepositResult:
+      type: object
+      description: What a deposit did, in the shape a receipt needs.
+      required: [deposit, allocations, surcharges, unallocatedCents, replayed]
+      properties:
+        deposit: { $ref: '#/components/schemas/Deposit' }
+        allocations:
+          type: array
+          description: The payments the deposit split into, oldest debt first.
+          items: { type: object }
+        surcharges:
+          type: array
+          description: >
+            The surcharge charges this deposit made real. Under the daily rule a
+            row exists only where money landed on it.
+          items: { type: object }
+        unallocatedCents:
+          type: integer
+          format: int64
+          minimum: 0
+          description: What no charge claimed — the family's credit with the school.
+        replayed:
+          type: boolean
+          description: >
+            The deposit already existed under this idempotency key and nothing
+            was collected a second time.
+
+    DepositPreview:
+      type: object
+      description: >
+        What an amount would cover. No deposit: nothing was taken, and an empty
+        deposit on the wire reads like a real one.
+      required: [allocations, surcharges, unallocatedCents]
+      properties:
+        allocations:
+          type: array
+          description: Where the money would land, oldest debt first.
+          items: { type: object }
+        surcharges:
+          type: array
+          description: The surcharge rows the payment would make real.
+          items: { type: object }
+        unallocatedCents:
+          type: integer
+          format: int64
+          minimum: 0
+          description: What would be left over as the family's credit.
+
+    Income:
+      type: object
+      description: A period's takings, by what the school charged for.
+      required: [lines, totalCents]
+      properties:
+        lines:
+          type: array
+          description: Biggest first — a report is read from the top.
+          items:
+            type: object
+            required: [conceptId, concept, amountCents]
+            properties:
+              conceptId: { type: string, format: uuid }
+              concept: { type: string, example: Colegiatura }
+              amountCents: { type: integer, format: int64, minimum: 0 }
+        totalCents: { type: integer, format: int64, minimum: 0 }
+
+    CashUp:
+      type: object
+      description: One day's takings, split by how the money arrived.
+      required: [deposits, cancelled, cashCents, cardCents, transferCents, totalCents]
+      properties:
+        deposits:
+          type: array
+          items: { $ref: '#/components/schemas/Deposit' }
+        cancelled:
+          type: array
+          description: Voided that day. They count for nothing and are shown anyway.
+          items: { $ref: '#/components/schemas/Deposit' }
+        cashCents: { type: integer, format: int64, minimum: 0 }
+        cardCents: { type: integer, format: int64, minimum: 0 }
+        transferCents: { type: integer, format: int64, minimum: 0 }
+        totalCents: { type: integer, format: int64, minimum: 0 }
 
     BillingRun:
       type: object
@@ -783,6 +1686,17 @@ components:
         tuitionCreated: { type: integer, example: 30 }
         enrollmentCreated: { type: integer, example: 10 }
         lateFeesCreated: { type: integer, example: 4 }
+        feesCreated:
+          type: integer
+          example: 8
+          description: Charges issued for the extras collected on top of the tuition.
+        enrollmentMoved:
+          type: integer
+          example: 0
+          description: >
+            Inscriptions whose deadline the run corrected to match the tuition
+            table. The run never re-issues a charge it has written, so this is
+            how a deadline changed after billing reaches pupils already charged.
         skipped:
           type: integer
           example: 6
@@ -844,9 +1758,20 @@ components:
           minimum: 0
           description: Integer cents, as everywhere money appears.
         active: { type: boolean }
+        category: { $ref: '#/components/schemas/ItemCategory' }
         sizes:
           type: array
           items: { $ref: '#/components/schemas/StockLevel' }
+
+    ItemCategory:
+      type: string
+      enum: [uniform, book, supply, other]
+      default: uniform
+      description: >
+        What kind of thing this is. The module sells whatever the school sells —
+        the stock rules, the append-only ledger and the counter sale were never
+        about clothing, only the vocabulary was. Everything stored before
+        categories existed is a uniform, which is the truth about it.
 
     CreateItemRequest:
       type: object
@@ -855,6 +1780,7 @@ components:
         code: { type: string, minLength: 1, maxLength: 40 }
         name: { type: string, minLength: 1, maxLength: 120 }
         description: { type: string, maxLength: 500 }
+        category: { $ref: '#/components/schemas/ItemCategory' }
         level: { $ref: '#/components/schemas/Level' }
         priceCents: { type: integer, minimum: 0 }
 

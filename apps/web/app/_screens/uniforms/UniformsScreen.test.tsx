@@ -23,6 +23,7 @@ const jumper: UniformItem = {
   level: "",
   priceCents: 65000,
   active: true,
+  category: "uniform",
   sizes: [
     { id: "st-m", itemId: "it-1", sizeLabel: "M", sizeOrder: 2, onHand: 6, reserved: 0, available: 6, minStock: 2, belowMinimum: false },
     { id: "st-g", itemId: "it-1", sizeLabel: "G", sizeOrder: 3, onHand: 1, reserved: 1, available: 0, minStock: 2, belowMinimum: true },
@@ -388,5 +389,33 @@ describe("toRows", () => {
       fulfillments: [{ ...order.fulfillments[0]!, requiresAttention: true }],
     };
     expect(toRows([flagged])[0]?.statusLabel).toBe("Requiere atención");
+  });
+});
+
+describe("UniformsScreen — el inventario no es sólo ropa", () => {
+  // The school sells books too. The module already does the hard parts — stock
+  // that cannot go negative, an append-only ledger, a counter sale that bills
+  // finance — and none of that was ever about clothing.
+  it("registers a book, not just a garment", async () => {
+    const user = userEvent.setup();
+    const fetchMock = stubCatalogue([]);
+    render(<UniformsScreen onBack={() => {}} />);
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Catálogo" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Catálogo" }));
+
+    // Two buttons offer it: the header and the empty-state hint. Either does.
+    await user.click((await screen.findAllByRole("button", { name: /Nuevo artículo/ }))[0] as HTMLElement);
+    await user.click(screen.getByLabelText("Libro"));
+    await user.type(screen.getByLabelText(/Nombre/), "Libro de matemáticas 3°");
+    await user.type(screen.getByLabelText(/Clave/), "LIB-MAT-3");
+    await user.type(screen.getByLabelText(/Precio/), "450");
+    await user.click(screen.getByRole("button", { name: /Guardar|Crear/ }));
+
+    await waitFor(() => {
+      const posted = fetchMock.mock.calls.find(([, init]) => (init as RequestInit)?.method === "POST");
+      expect(posted).toBeDefined();
+      const body = JSON.parse((posted?.[1] as RequestInit).body as string) as Record<string, unknown>;
+      expect(body.category).toBe("book");
+    });
   });
 });

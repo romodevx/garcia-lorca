@@ -11,6 +11,11 @@ import { centsToPesosInput, formatCents, pesosToCents } from "./money";
 import { listStudents, type Student } from "../../students/api";
 
 import { API_URL } from "../../api-url";
+import { CollectDrawer, type CollectStudent } from "./CollectDrawer";
+import { StudentPicker } from "./StudentPicker";
+import { CashUpPanel } from "./CashUpPanel";
+import { IncomePanel } from "./IncomePanel";
+import { csvName, downloadCsv, toCsv, type CsvColumn } from "../../_lib/csv";
 
 /** One key per payment attempt. Mirrors PaymentPanel, which had it right. */
 function newAttemptKey(): string {
@@ -139,6 +144,42 @@ function PayDrawer({ charge, name, onClose, onPaid }: { charge: Charge; name: st
   );
 }
 
+/** "2026-09" as a person reads it. */
+function monthName(iso: string): string {
+  const [year, month] = iso.split("-");
+  const names = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+  const name = names[Number(month) - 1];
+  return name === undefined ? iso : `${name} ${year}`;
+}
+
+/** Today, as the wire wants it. */
+function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/** The first of the current month. */
+function monthStart(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
+/** The columns the school reads in Excel, in the order the table shows them. */
+const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
+  { label: "Alumno", value: (r) => r.name },
+  { label: "Nivel", value: (r) => r.level },
+  { label: "Grupo", value: (r) => r.grade },
+  { label: "Concepto", value: (r) => r.charge.description },
+  { label: "Vence", value: (r) => r.charge.dueDate },
+  // Pesos with two decimals, not cents: the file is read by a person, and the
+  // column is summed in Excel.
+  { label: "Importe", value: (r) => (r.charge.amountCents / 100).toFixed(2) },
+  { label: "Descuento", value: (r) => (r.charge.discountCents / 100).toFixed(2) },
+  { label: "Pagado", value: (r) => (r.charge.paidCents / 100).toFixed(2) },
+  { label: "Saldo", value: (r) => (r.charge.remainingCents / 100).toFixed(2) },
+  { label: "Estado", value: (r) => STATUS[r.visual].label },
+];
+
 export interface FinanceScreenProps {
   onBack: () => void;
 }
@@ -151,7 +192,16 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"all" | "overdue" | "due" | "paid">("all");
   const [q, setQ] = useState("");
+  // Which month's charges to look at. The school reads its debt a month at a
+  // time — "¿quién debe septiembre?" — and a year of rows on one screen is not
+  // an answer to that.
+  const [month, setMonth] = useState("todos");
   const [pay, setPay] = useState<Row | null>(null);
+  // The counter: pick a pupil, then take whatever the parent hands over. Kept
+  // separate from `pay`, which is the older per-charge path.
+  const [picking, setPicking] = useState(false);
+  const [collecting, setCollecting] = useState<CollectStudent | null>(null);
+  const [cashUp, setCashUp] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(0);
@@ -195,14 +245,22 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
     pending: charges.filter((c) => c.status !== "cancelled").reduce((a, c) => a + Math.max(0, c.remainingCents), 0),
   }), [charges]);
 
+  // The months the cycle actually has charges in, newest last, as YYYY-MM.
+  const months = useMemo(
+    () => [...new Set(charges.map((c) => c.dueDate.slice(0, 7)))].sort(),
+    [charges],
+  );
+
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return rows
-      .filter((r) => (tab === "all" || r.visual === tab) && (needle === "" || r.name.toLowerCase().includes(needle) || r.charge.description.toLowerCase().includes(needle)))
+      .filter((r) => (tab === "all" || r.visual === tab)
+        && (month === "todos" || r.charge.dueDate.startsWith(month))
+        && (needle === "" || r.name.toLowerCase().includes(needle) || r.charge.description.toLowerCase().includes(needle)))
       .sort((a, b) => a.name.localeCompare(b.name, "es"));
-  }, [rows, tab, q]);
+  }, [rows, tab, month, q]);
 
-  useEffect(() => { setPage(0); }, [tab, q, pageSize]);
+  useEffect(() => { setPage(0); }, [tab, month, q, pageSize]);
   const total = filtered.length;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const cur = Math.min(page, pageCount - 1);
@@ -212,6 +270,14 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
 
   const cycleName = cycles.find((c) => c.status === "active")?.name ?? cycles[0]?.name ?? "—";
   const activeCycleId = cycles.find((c) => c.status === "active")?.id ?? cycles[0]?.id;
+  // "Exportar esta vista" means the list on screen: the tab picked and the
+  // search typed, not everything the school has ever charged. Building it from
+  // `filtered` is what makes the file match what the person is looking at.
+  const exportView = (): void => {
+    downloadCsv(csvName("adeudos", new Date()), toCsv(EXPORT_COLUMNS, filtered));
+    say(`${filtered.length} renglones exportados`);
+  };
+
   const onPaid = (): void => { setPay(null); if (activeCycleId !== undefined) load(activeCycleId); say("Pago registrado"); };
 
   const tabs: [typeof tab, string][] = [["all", "Todos"], ["overdue", "Vencidos"], ["due", "Por vencer"], ["paid", "Pagados"]];
@@ -232,12 +298,13 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <div style={{ width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--orange)", color: "#fff", boxShadow: "0 6px 16px color-mix(in oklab, var(--orange) 38%, transparent)" }}><Icon name="finance" size={30} /></div>
           <div>
-            <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Finanzas y Adeudos</h1>
-            <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Ciclo {cycleName} · Colegiaturas y conceptos</p>
+            <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Finanzas</h1>
+            <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Ciclo {cycleName} · Ingresos recibidos y adeudos</p>
           </div>
         </div>
         <div style={{ display: "flex", gap: 12 }}>
-          <Btn kind="ghost" icon="download" onClick={() => say("Exportación generada")}>Exportar</Btn>
+          <Btn kind="ghost" icon="download" onClick={() => exportView()}>Exportar</Btn>
+          <Btn kind="ghost" icon="finance" onClick={() => setCashUp(true)}>Corte de caja</Btn>
         </div>
       </div>
 
@@ -254,6 +321,14 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
         ))}
       </div>
 
+      {/* What came IN, before what is owed. The director's first question is
+          how the month is going, and it used to take opening a drawer. */}
+      <div className="fade-up" style={{ marginBottom: 26 }}>
+        <IncomePanel from={monthStart()} to={today()} />
+      </div>
+
+      <h2 className="fade-up" style={{ fontSize: 20, fontWeight: 700, color: "var(--text)", marginBottom: 14 }}>Adeudos</h2>
+
       <div className="fade-up" style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginBottom: 18 }}>
         <div style={{ display: "flex", gap: 6, padding: 5, background: "var(--surface-3)", borderRadius: "var(--r-pill)", border: "1px solid var(--border)" }}>
           {tabs.map(([id, label]) => {
@@ -265,6 +340,16 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
             );
           })}
         </div>
+        {months.length > 1 && (
+          <select
+            aria-label="Mes"
+            value={month}
+            onChange={(e) => setMonth(e.target.value)}
+            style={{ height: 48, padding: "0 14px", borderRadius: "var(--r-pill)", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 14.5, cursor: "pointer" }}>
+            <option value="todos">Todos los meses</option>
+            {months.map((m) => <option key={m} value={m}>{monthName(m)}</option>)}
+          </select>
+        )}
         <div style={{ position: "relative", flex: 1, minWidth: 230, maxWidth: 360 }}>
           <span style={{ position: "absolute", left: 16, top: "50%", transform: "translateY(-50%)", color: "var(--text-faint)" }}><Icon name="search" size={19} /></span>
           <input value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar" placeholder="Buscar alumno o concepto…" style={{ width: "100%", height: 48, paddingLeft: 46, paddingRight: 16, borderRadius: "var(--r-pill)", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 15, outline: "none" }} />
@@ -308,8 +393,45 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
       </div>
 
       {pay !== null && <PayDrawer charge={pay.charge} name={pay.name} onClose={() => setPay(null)} onPaid={onPaid} />}
+      {picking && (
+        <StudentPicker
+          students={[...studentMap.values()].map((s) => ({ id: s.id, firstName: s.firstName, lastName: s.lastName, gradeGroup: s.gradeGroup }))}
+          onPick={(s) => { setPicking(false); setCollecting(s); }}
+          onClose={() => setPicking(false)}
+        />
+      )}
+      {cashUp && (
+        <div
+          data-testid="cash-up-backdrop"
+          onClick={() => setCashUp(false)}
+          style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(6,20,12,.5)", backdropFilter: "blur(4px)", display: "flex", justifyContent: "flex-end" }}>
+          <div
+            role="dialog"
+            aria-label="Corte de caja"
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: "min(520px, 100%)", height: "100%", background: "var(--surface-2)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow-pop)", display: "flex", flexDirection: "column", animation: "slideIn .28s var(--ease) both" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "22px 26px", borderBottom: "1px solid var(--border)", background: "var(--surface)" }}>
+              <div style={{ flex: 1 }}>
+                <h2 style={{ fontSize: 21, fontWeight: 700, color: "var(--text)" }}>Corte de caja</h2>
+                <p style={{ fontSize: 13.5, color: "var(--text-muted)", marginTop: 2 }}>Lo recibido hoy, por forma de pago</p>
+              </div>
+              <button onClick={() => setCashUp(false)} aria-label="Cerrar" style={{ ...qb, width: 40, height: 40 }}><Icon name="close" size={19} /></button>
+            </div>
+            <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px" }}>
+              <CashUpPanel day="" />
+            </div>
+          </div>
+        </div>
+      )}
+      {collecting !== null && (
+        <CollectDrawer
+          student={collecting}
+          onClose={() => setCollecting(null)}
+          onCollected={() => { if (activeCycleId !== undefined) { load(activeCycleId); } say("Cobro registrado"); }}
+        />
+      )}
       {toast !== null && (
-        <div style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>
+        <div role="status" style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>
           <Icon name="check" size={20} stroke={2.6} />{toast}
         </div>
       )}

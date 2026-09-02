@@ -72,6 +72,27 @@ service ConfigService {
   // ListGroups lists the groups of a cycle (scoped by cycle_id, optional grade_level_id).
   rpc ListGroups(ListGroupsRequest) returns (ListGroupsResponse);
 
+  // --- school calendar (M16) ---
+  // CreateNonWorkingPeriod adds a holiday, vacation or suspension to a cycle.
+  rpc CreateNonWorkingPeriod(CreateNonWorkingPeriodRequest) returns (CreateNonWorkingPeriodResponse);
+  // ListNonWorkingPeriods lists every closed day range of a cycle. This is the
+  // read the collection rules make: finance asks config what days the school is
+  // shut, rather than every module carrying its own idea of the calendar.
+  rpc ListNonWorkingPeriods(ListNonWorkingPeriodsRequest) returns (ListNonWorkingPeriodsResponse);
+  // DeleteNonWorkingPeriod removes one period. A day entered by mistake has to
+  // be removable, or the calendar becomes untrustworthy and stops being used.
+  rpc DeleteNonWorkingPeriod(DeleteNonWorkingPeriodRequest) returns (DeleteNonWorkingPeriodResponse);
+
+  // --- school agenda (M16) ---
+  // CreateSchoolEvent records something the school DOES: a festival, a parents'
+  // meeting, an exam week. Deliberately separate from the closed days — finance
+  // reads those to move a due date, and an activity must never do that.
+  rpc CreateSchoolEvent(CreateSchoolEventRequest) returns (CreateSchoolEventResponse);
+  // ListSchoolEvents returns a cycle's agenda, earliest first.
+  rpc ListSchoolEvents(ListSchoolEventsRequest) returns (ListSchoolEventsResponse);
+  // DeleteSchoolEvent removes one event.
+  rpc DeleteSchoolEvent(DeleteSchoolEventRequest) returns (DeleteSchoolEventResponse);
+
   // --- teachers (catalog person records; NOT login accounts) ---
   // CreateTeacher adds a teacher catalog record (user_id reserved, may be empty).
   rpc CreateTeacher(CreateTeacherRequest) returns (CreateTeacherResponse);
@@ -521,3 +542,99 @@ message ListTeachingAssignmentsRequest {
 message ListTeachingAssignmentsResponse {
   repeated TeachingAssignment teaching_assignments = 1;
 }
+
+// --- School calendar (M16) ------------------------------------------------
+
+// NonWorkingPeriod is a day, or a run of days, on which the school does not
+// operate. Both ends are inclusive; a single-day holiday has starts_on ==
+// ends_on. Dates are plain YYYY-MM-DD strings, not timestamps: a holiday is a
+// calendar day everywhere in Mexico, and a timestamp would invite a timezone
+// to move it.
+message NonWorkingPeriod {
+  string id = 1;
+  string cycle_id = 2;
+  string label = 3;
+  string kind = 4;  // holiday | vacation
+  string starts_on = 5;
+  string ends_on = 6;
+}
+
+// CreateNonWorkingPeriodRequest adds one closed period to a cycle.
+message CreateNonWorkingPeriodRequest {
+  string cycle_id = 1;
+  string label = 2;
+  string kind = 3;
+  string starts_on = 4;
+  string ends_on = 5;
+}
+
+// CreateNonWorkingPeriodResponse returns the created period.
+message CreateNonWorkingPeriodResponse {
+  NonWorkingPeriod period = 1;
+}
+
+// ListNonWorkingPeriodsRequest lists the closed periods of one cycle.
+message ListNonWorkingPeriodsRequest {
+  string cycle_id = 1;
+}
+
+// ListNonWorkingPeriodsResponse returns them ordered by start date.
+message ListNonWorkingPeriodsResponse {
+  repeated NonWorkingPeriod periods = 1;
+}
+
+// DeleteNonWorkingPeriodRequest removes one period by id.
+message DeleteNonWorkingPeriodRequest {
+  string id = 1;
+}
+
+// DeleteNonWorkingPeriodResponse is empty: the removal either happened or the
+// call failed.
+message DeleteNonWorkingPeriodResponse {}
+
+// --- School agenda (M16) ---------------------------------------------------
+
+// SchoolEvent is something the school does. Dates are plain YYYY-MM-DD, both
+// ends inclusive, for the same reason a holiday is: a school day is a calendar
+// day, and a timestamp would invite a timezone to move it.
+//
+// level_id and group_id are the audience: at most one is set, and neither means
+// the whole school.
+message SchoolEvent {
+  string id = 1;
+  string cycle_id = 2;
+  string title = 3;
+  string description = 4;
+  string starts_on = 5;
+  string ends_on = 6;
+  string level_id = 7;
+  string group_id = 8;
+}
+
+message CreateSchoolEventRequest {
+  string cycle_id = 1;
+  string title = 2;
+  string description = 3;
+  string starts_on = 4;
+  string ends_on = 5;
+  string level_id = 6;  // optional; empty and group_id empty = whole school
+  string group_id = 7;  // optional
+}
+
+message CreateSchoolEventResponse {
+  SchoolEvent event = 1;
+}
+
+message ListSchoolEventsRequest {
+  string cycle_id = 1;
+}
+
+message ListSchoolEventsResponse {
+  repeated SchoolEvent events = 1;
+}
+
+message DeleteSchoolEventRequest {
+  string id = 1;
+}
+
+message DeleteSchoolEventResponse {}

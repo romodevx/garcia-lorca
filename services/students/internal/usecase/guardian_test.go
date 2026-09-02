@@ -33,6 +33,14 @@ func (r *fakeGuardianRepo) Link(_ context.Context, l domain.GuardianLink) error 
 	if r.linkErr != nil {
 		return r.linkErr
 	}
+	// Mirrors the DB, where guardian_user_id is NULL for an account-less
+	// contact: Postgres does not collide NULLs, so several contacts without an
+	// account may sit on the same pupil. A fake that collided them would refuse
+	// something production accepts.
+	if !l.HasAccount() {
+		r.links[l.ID()] = l
+		return nil
+	}
 	key := guardianKey(l.TenantID(), l.GuardianUserID(), l.StudentID())
 	if _, ok := r.links[key]; ok {
 		return glerrors.New(glerrors.KindConflict, "guardian is already linked to this student")

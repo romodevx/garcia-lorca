@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
@@ -26,6 +26,11 @@ vi.mock("./finance/api", () => ({
   getOverdue: vi.fn().mockResolvedValue([]),
   registerPayment: vi.fn(),
   getAccount: vi.fn(),
+  getIncome: vi.fn().mockResolvedValue({ lines: [], totalCents: 0 }),
+  getCashUp: vi.fn().mockResolvedValue({ deposits: [], cancelled: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0 }),
+  getExpected: vi.fn().mockResolvedValue({ amountCents: 0, surchargeCents: 0, discountCents: 0, annualBalanceCents: 0 }),
+  previewDeposit: vi.fn(),
+  registerDeposit: vi.fn(),
 }));
 
 vi.mock("./config/api", () => ({
@@ -91,7 +96,7 @@ describe("AppShell navigation flow", () => {
 
     // Open Finanzas (KPI shortcut) — finance flag is ON, so the real surface shows.
     await user.click(screen.getByRole("button", { name: /Por cobrar/ }));
-    expect(await screen.findByRole("heading", { name: "Finanzas y Adeudos" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Finanzas" })).toBeInTheDocument();
 
     // Back home.
     await user.click(screen.getByRole("button", { name: /Volver al inicio/ }));
@@ -252,7 +257,7 @@ describe("AppShell navigation flow", () => {
     fireEvent.keyDown(window, { key: "k", metaKey: true });
     await user.click(await screen.findByText("Registrar pago"));
 
-    expect(await screen.findByRole("heading", { name: "Finanzas y Adeudos" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Finanzas" })).toBeInTheDocument();
   });
 
   it("falls back to the placeholder when module_finance is OFF (UX gating)", async () => {
@@ -273,7 +278,35 @@ describe("AppShell navigation flow", () => {
 
     // Flag OFF → friendly stub, not the real finance table. The placeholder
     // shows the "Módulo «...»" heading; the real surface shows the status tablist.
-    expect(await screen.findByRole("heading", { name: /Módulo «Finanzas y Adeudos»/ })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /Módulo «Finanzas»/ })).toBeInTheDocument();
     expect(screen.queryByRole("tablist", { name: "Filtrar por estado" })).not.toBeInTheDocument();
+  });
+});
+
+describe("AppShell — sesión por inactividad", () => {
+  // The school's rule, end to end: the panel closes itself and says why. On a
+  // shared office computer, walking away has to end the session.
+  it("closes the session after fifteen idle minutes and explains it", async () => {
+    // Fake timers BEFORE the render: the watchdog's interval is created on
+    // mount, and one created under real timers would never see the clock move.
+    // shouldAdvanceTime keeps the session probe's promises resolving.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockMe.mockResolvedValueOnce({ userId: "u1", email: "owner@example.com", permissions: [] });
+      render(
+        <Providers flags={{}}>
+          <AppShell />
+        </Providers>,
+      );
+      // Wait for the live session to land, or the hook has nothing to close.
+      await screen.findByRole("button", { name: /Salir|Cerrar sesión/i });
+
+      await act(async () => { vi.advanceTimersByTime(16 * 60 * 1000); });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(mockLogout).toHaveBeenCalled();
+    expect(await screen.findByText(/inactividad/i)).toBeInTheDocument();
   });
 });

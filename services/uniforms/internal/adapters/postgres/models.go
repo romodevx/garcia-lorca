@@ -10,16 +10,19 @@ import "time"
 // meaningful — it means the garment applies to every level — and an empty string
 // would be a different, wrong answer.
 type itemModel struct {
-	ID          string    `gorm:"column:id;primaryKey"`
-	TenantID    string    `gorm:"column:tenant_id"`
-	Code        string    `gorm:"column:code"`
-	Name        string    `gorm:"column:name"`
-	Description string    `gorm:"column:description"`
-	Level       *string   `gorm:"column:level"`
-	PriceCents  int64     `gorm:"column:price_cents"`
-	Active      bool      `gorm:"column:active"`
-	CreatedAt   time.Time `gorm:"column:created_at"`
-	UpdatedAt   time.Time `gorm:"column:updated_at"`
+	ID          string  `gorm:"column:id;primaryKey"`
+	TenantID    string  `gorm:"column:tenant_id"`
+	Code        string  `gorm:"column:code"`
+	Name        string  `gorm:"column:name"`
+	Description string  `gorm:"column:description"`
+	Level       *string `gorm:"column:level"`
+	PriceCents  int64   `gorm:"column:price_cents"`
+	Active      bool    `gorm:"column:active"`
+	// What kind of thing this is: uniform, book, supply or other. A row written
+	// before the module sold anything but clothing holds 'uniform'.
+	Category  string    `gorm:"column:category"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+	UpdatedAt time.Time `gorm:"column:updated_at"`
 }
 
 func (itemModel) TableName() string { return "uniform_items" }

@@ -67,8 +67,69 @@ type fakeFinance struct {
 	overdueCycle string
 	overdue      []client.Charge
 
+	depositStudent  string
+	depositAmount   int64
+	depositMethod   string
+	depositKey      string
+	depositPaidAt   time.Time
+	depositResult   client.DepositResult
+	deposits        []client.Deposit
+	expectedStudent string
+	expectedOn      string
+	expected        client.Expected
+	depositGranted  bool
+	depositCardType string
+	incomeFrom      string
+	incomeTo        string
+	income          client.Income
+	cashUpDay       string
+	cashUp          client.CashUp
+	voidedDeposit   string
+	voidReason      string
+
 	charge client.Charge
 	err    error
+}
+
+func (f *fakeFinance) ExpectedToday(_ context.Context, studentID, on string) (client.Expected, error) {
+	f.expectedStudent, f.expectedOn = studentID, on
+	return f.expected, f.err
+}
+
+func (f *fakeFinance) RegisterDeposit(_ context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string) (client.DepositResult, error) {
+	f.depositCardType = cardType
+	f.depositStudent, f.depositAmount, f.depositMethod = studentID, amountCents, method
+	f.depositKey, f.depositPaidAt = idempotencyKey, paidAt
+	f.depositGranted = grantEarlyPayment
+	if f.err != nil {
+		return client.DepositResult{}, f.err
+	}
+	return f.depositResult, nil
+}
+
+func (f *fakeFinance) PreviewDeposit(_ context.Context, studentID string, amountCents int64, paidAt time.Time) (client.DepositResult, error) {
+	f.depositStudent, f.depositAmount, f.depositPaidAt = studentID, amountCents, paidAt
+	return f.depositResult, f.err
+}
+
+func (f *fakeFinance) ListDeposits(_ context.Context, studentID string) ([]client.Deposit, error) {
+	f.depositStudent = studentID
+	return f.deposits, f.err
+}
+
+func (f *fakeFinance) DailyCashUp(_ context.Context, day string) (client.CashUp, error) {
+	f.cashUpDay = day
+	return f.cashUp, f.err
+}
+
+func (f *fakeFinance) IncomeByConcept(_ context.Context, from, to string) (client.Income, error) {
+	f.incomeFrom, f.incomeTo = from, to
+	return f.income, f.err
+}
+
+func (f *fakeFinance) VoidDeposit(_ context.Context, id, reason string) error {
+	f.voidedDeposit, f.voidReason = id, reason
+	return f.err
 }
 
 func (f *fakeFinance) CreateConcept(_ context.Context, name string, defaultAmountCents int64, recurrence string) (client.ChargeConcept, error) {
@@ -688,5 +749,133 @@ func TestFinanceRunBillingReportsWhatItDid(t *testing.T) {
 	levels, ok := out["levelsWithoutPlan"].([]any)
 	if !ok || len(levels) != 1 || levels[0] != "Kínder" {
 		t.Errorf("levels without a plan = %v; a level nobody priced must reach the screen", out["levelsWithoutPlan"])
+	}
+}
+
+// --- deposits (M16) --------------------------------------------------------
+
+// The counter sends an amount and a date, never a list of what it covers. The
+// response has to carry the split, or the cashier cannot print a receipt
+// without a second round trip while a parent waits.
+func TestFinanceRegisterDepositReturns201AndTheSplit(t *testing.T) {
+	svc := &fakeFinance{depositResult: client.DepositResult{
+		Deposit:          client.Deposit{ID: "dep-1", AmountCents: 670000},
+		UnallocatedCents: 0,
+	}}
+	h := handler.NewFinanceHandler(svc)
+
+	rec := doReq(t, h.RegisterDeposit, http.MethodPost, "/api/v1/finance/deposits",
+		`{"studentId":"stu-1","amountCents":670000,"method":"cash","paidAt":"2026-10-10","idempotencyKey":"k1"}`)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+	if svc.depositStudent != "stu-1" || svc.depositAmount != 670000 || svc.depositKey != "k1" {
+		t.Errorf("forwarded input = %q %d %q", svc.depositStudent, svc.depositAmount, svc.depositKey)
+	}
+	if svc.depositPaidAt.Format("2006-01-02") != "2026-10-10" {
+		t.Errorf("paidAt = %v, want 2026-10-10", svc.depositPaidAt)
+	}
+}
+
+// A cashier keying "10/10/2026" must be told, not have the money silently
+// stamped today — which would put it on the wrong side of a due date.
+func TestFinanceRegisterDepositRejectsAMalformedDate(t *testing.T) {
+	h := handler.NewFinanceHandler(&fakeFinance{})
+
+	rec := doReq(t, h.RegisterDeposit, http.MethodPost, "/api/v1/finance/deposits",
+		`{"studentId":"stu-1","amountCents":100000,"method":"cash","paidAt":"10/10/2026"}`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+// Cancelling without a reason leaves an unexplained hole in the day's takings,
+// so the edge refuses it before the money service is ever asked.
+func TestFinanceVoidDepositNeedsAReason(t *testing.T) {
+	svc := &fakeFinance{}
+	h := handler.NewFinanceHandler(svc)
+
+	rec := doReq(t, h.VoidDeposit, http.MethodPost, "/api/v1/finance/deposits/dep-1/void", `{"reason":"   "}`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+	if svc.voidedDeposit != "" {
+		t.Errorf("the service was asked to cancel %q despite the missing reason", svc.voidedDeposit)
+	}
+}
+
+// A period with a missing or malformed bound is refused at the edge. A report
+// over "everything" reads like a real number and is nobody's question.
+func TestFinanceIncomeNeedsBothDates(t *testing.T) {
+	svc := &fakeFinance{}
+	h := handler.NewFinanceHandler(svc)
+
+	rec := doReq(t, h.IncomeByConcept, http.MethodGet, "/api/v1/finance/income?from=2026-10-01", "")
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+	if svc.incomeFrom != "" {
+		t.Error("the service was asked for an unbounded period")
+	}
+}
+
+// The bug this pins: client.Payment and client.Charge carry no JSON tags, so
+// writing them straight through put "AmountCents" on the wire where the rest of
+// finance puts "amountCents". Everything compiled, every unit test passed, and
+// the counter showed blank amounts. Only running it found it.
+func TestFinanceDepositAllocationsUseTheSameKeysAsEveryOtherEndpoint(t *testing.T) {
+	svc := &fakeFinance{depositResult: client.DepositResult{
+		Deposit:     client.Deposit{ID: "dep-1", AmountCents: 670000},
+		Allocations: []client.Payment{{ID: "p1", ChargeID: "ch1", AmountCents: 320000, Method: "cash"}},
+		Surcharges:  []client.Charge{{ID: "ch2", Description: "Recargo", AmountCents: 30000}},
+	}}
+	h := handler.NewFinanceHandler(svc)
+
+	rec := doReq(t, h.RegisterDeposit, http.MethodPost, "/api/v1/finance/deposits",
+		`{"studentId":"stu-1","amountCents":670000,"method":"cash"}`)
+
+	var body struct {
+		Allocations []map[string]any `json:"allocations"`
+		Surcharges  []map[string]any `json:"surcharges"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Allocations) != 1 {
+		t.Fatalf("allocations = %d, want 1", len(body.Allocations))
+	}
+	if body.Allocations[0]["amountCents"] != float64(320000) {
+		t.Errorf("allocation keys are wrong: %v", body.Allocations[0])
+	}
+	if body.Allocations[0]["chargeId"] != "ch1" {
+		t.Errorf("chargeId missing from the allocation: %v", body.Allocations[0])
+	}
+	if len(body.Surcharges) != 1 || body.Surcharges[0]["amountCents"] != float64(30000) {
+		t.Errorf("surcharge keys are wrong: %v", body.Surcharges)
+	}
+}
+
+// Same for the preview, which the counter calls on every keystroke.
+func TestFinancePreviewUsesTheSameKeys(t *testing.T) {
+	svc := &fakeFinance{depositResult: client.DepositResult{
+		Allocations: []client.Payment{{ID: "p1", ChargeID: "ch1", AmountCents: 320000, Method: "cash"}},
+	}}
+	h := handler.NewFinanceHandler(svc)
+
+	rec := doReq(t, h.PreviewDeposit, http.MethodPost, "/api/v1/finance/deposits/preview",
+		`{"studentId":"stu-1","amountCents":670000}`)
+
+	var body struct {
+		Allocations []map[string]any `json:"allocations"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Allocations) != 1 || body.Allocations[0]["chargeId"] != "ch1" {
+		t.Errorf("preview allocation keys are wrong: %v", body.Allocations)
 	}
 }

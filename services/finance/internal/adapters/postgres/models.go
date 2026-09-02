@@ -30,19 +30,41 @@ func (chargeConceptModel) TableName() string { return "charge_concepts" }
 // one cycle. CycleID and LevelID are cross-service UUIDs validated by RPC, so
 // they carry no FK here.
 type tuitionPlanModel struct {
-	ID               string    `gorm:"column:id;primaryKey"`
-	TenantID         string    `gorm:"column:tenant_id"`
-	CycleID          string    `gorm:"column:cycle_id"`
-	LevelID          string    `gorm:"column:level_id"`
-	EnrollmentCents  int64     `gorm:"column:enrollment_cents"`
-	MonthlyCents     int64     `gorm:"column:monthly_cents"`
-	Months           int       `gorm:"column:months"`
-	FirstBilledMonth int       `gorm:"column:first_billed_month"`
-	DueDay           int       `gorm:"column:due_day"`
-	LateFeeCents     int64     `gorm:"column:late_fee_cents"`
-	Active           bool      `gorm:"column:active"`
-	CreatedAt        time.Time `gorm:"column:created_at"`
-	UpdatedAt        time.Time `gorm:"column:updated_at"`
+	ID               string `gorm:"column:id;primaryKey"`
+	TenantID         string `gorm:"column:tenant_id"`
+	CycleID          string `gorm:"column:cycle_id"`
+	LevelID          string `gorm:"column:level_id"`
+	EnrollmentCents  int64  `gorm:"column:enrollment_cents"`
+	MonthlyCents     int64  `gorm:"column:monthly_cents"`
+	Months           int    `gorm:"column:months"`
+	FirstBilledMonth int    `gorm:"column:first_billed_month"`
+	DueDay           int    `gorm:"column:due_day"`
+	LateFeeCents     int64  `gorm:"column:late_fee_cents"`
+	// M16 collection policy. late_fee_mode decides which of the two surcharge
+	// rules applies; existing rows default to 'monthly' so nothing already billed
+	// changes meaning.
+	LateFeeDailyCents      int64  `gorm:"column:late_fee_daily_cents"`
+	LateFeeMode            string `gorm:"column:late_fee_mode"`
+	SurchargeCountsAllDays bool   `gorm:"column:surcharge_counts_all_days"`
+	EarlyPaymentCents      int64  `gorm:"column:early_payment_cents"`
+	EarlyPaymentDays       int    `gorm:"column:early_payment_days"`
+	// Schedule is the plan's explicit payment plan as JSON, "[]" when the year
+	// is divided into equal monthly parts. Raw bytes and not a JSON helper type:
+	// one column does not justify pulling a driver for another database into a
+	// Postgres service.
+	Schedule []byte `gorm:"column:schedule;type:jsonb"`
+	// Fees are the extra amounts collected on top of the tuition, as JSON, "[]"
+	// when the level has none. Raw bytes for the same reason as Schedule.
+	Fees []byte `gorm:"column:fees;type:jsonb"`
+	// EnrollmentDueOn is the deadline the school set for the inscription. NULL
+	// when it set none, which is what makes the run fall back to the old rule
+	// instead of billing everything due on the zero date.
+	EnrollmentDueOn *time.Time `gorm:"column:enrollment_due_on"`
+	// MonthlyDiscountCents comes off every month of this level.
+	MonthlyDiscountCents int64     `gorm:"column:monthly_discount_cents"`
+	Active               bool      `gorm:"column:active"`
+	CreatedAt            time.Time `gorm:"column:created_at"`
+	UpdatedAt            time.Time `gorm:"column:updated_at"`
 }
 
 func (tuitionPlanModel) TableName() string { return "tuition_plans" }
@@ -53,16 +75,19 @@ func (tuitionPlanModel) TableName() string { return "tuition_plans" }
 // date part is meaningful. Status is a cached projection of the payments posted
 // against the charge (plus the terminal cancelled state).
 type chargeModel struct {
-	ID            string    `gorm:"column:id;primaryKey"`
-	TenantID      string    `gorm:"column:tenant_id"`
-	StudentID     string    `gorm:"column:student_id"`
-	CycleID       string    `gorm:"column:cycle_id"`
-	ConceptID     string    `gorm:"column:concept_id"`
-	Description   string    `gorm:"column:description"`
-	AmountCents   int64     `gorm:"column:amount_cents"`
-	DiscountCents int64     `gorm:"column:discount_cents"`
-	DueDate       time.Time `gorm:"column:due_date"`
-	Status        string    `gorm:"column:status"`
+	ID            string `gorm:"column:id;primaryKey"`
+	TenantID      string `gorm:"column:tenant_id"`
+	StudentID     string `gorm:"column:student_id"`
+	CycleID       string `gorm:"column:cycle_id"`
+	ConceptID     string `gorm:"column:concept_id"`
+	Description   string `gorm:"column:description"`
+	AmountCents   int64  `gorm:"column:amount_cents"`
+	DiscountCents int64  `gorm:"column:discount_cents"`
+	// Why the discount exists. Empty on the ones given before there was
+	// anywhere to record it, which is the truth about them.
+	DiscountReason string    `gorm:"column:discount_reason"`
+	DueDate        time.Time `gorm:"column:due_date"`
+	Status         string    `gorm:"column:status"`
 	// ExternalRef ties the charge to the row that caused it in another module
 	// (a uniforms fulfillment, say). Empty means the school's own charge; the
 	// empty string is what the "one concept per cycle" partial index covers, so
@@ -92,6 +117,48 @@ type paymentModel struct {
 	IdempotencyKey string    `gorm:"column:idempotency_key"`
 	PaidAt         time.Time `gorm:"column:paid_at"`
 	CreatedAt      time.Time `gorm:"column:created_at"`
+	// DepositID is set when this payment is one slice of a deposit. NULL means a
+	// payment made the old way, against one named charge.
+	DepositID *string `gorm:"column:deposit_id"`
 }
 
 func (paymentModel) TableName() string { return "payments" }
+
+// depositModel is the GORM row for `deposits` (M16): money as it arrived,
+// before it was decided what it pays. Its allocations are payments carrying
+// deposit_id, so there is still exactly one place that answers "what has been
+// collected against this charge".
+type depositModel struct {
+	ID              string     `gorm:"column:id;primaryKey"`
+	TenantID        string     `gorm:"column:tenant_id"`
+	StudentID       string     `gorm:"column:student_id"`
+	AmountCents     int64      `gorm:"column:amount_cents"`
+	Method          string     `gorm:"column:method"`
+	Reference       string     `gorm:"column:reference"`
+	PaidAt          time.Time  `gorm:"column:paid_at"`
+	IdempotencyKey  string     `gorm:"column:idempotency_key"`
+	CalendarVersion string     `gorm:"column:calendar_version"`
+	CardType        string     `gorm:"column:card_type"`
+	VoidedAt        *time.Time `gorm:"column:voided_at"`
+	VoidReason      string     `gorm:"column:void_reason"`
+	CreatedAt       time.Time  `gorm:"column:created_at"`
+}
+
+func (depositModel) TableName() string { return "deposits" }
+
+// outboxModel is the GORM row for `finance_outbox`: a domain event queued in
+// the same transaction that produced it, waiting to be published.
+type outboxModel struct {
+	// The database mints the id. An outbox row has no domain identity — it is a
+	// queue entry — so nothing upstream has a name for it, and the `default` tag
+	// is what stops GORM sending an empty string for a uuid column.
+	ID          string     `gorm:"column:id;primaryKey;default:gen_random_uuid()"`
+	TenantID    string     `gorm:"column:tenant_id"`
+	EventType   string     `gorm:"column:event_type"`
+	Payload     []byte     `gorm:"column:payload;type:jsonb"`
+	CreatedAt   time.Time  `gorm:"column:created_at"`
+	PublishedAt *time.Time `gorm:"column:published_at"`
+	Attempts    int        `gorm:"column:attempts"`
+}
+
+func (outboxModel) TableName() string { return "finance_outbox" }

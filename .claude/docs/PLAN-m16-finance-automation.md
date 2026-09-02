@@ -1193,3 +1193,141 @@ amount · D3 → no Diferencia field; the payment is a credit against the annual
 removes the design contradiction outright.
 
 NO UNRESOLVED DECISIONS
+
+---
+
+## LAS REGLAS DE COBRO, EN PALABRAS DEL DUEÑO (2026-09-01)
+
+### R1 · El recargo corre TODOS los días
+
+> *"si el recargo sí sábados domingos y feriados"*
+
+Recargo = tarifa diaria × **días naturales** desde el vencimiento. `CalendarDaysBetween`,
+no `WorkingDaysBetween`.
+
+**Consecuencia que conviene tener presente:** el calendario escolar **no interviene en el
+recargo**. Sirve solo para la ventana de pronto pago ("los primeros N días hábiles"), que
+sí se cuenta en días hábiles. Fue buena decisión que `pkg/schoolcal` respondiera las dos
+preguntas: la respuesta del dueño usa una y la otra sigue haciendo falta.
+
+### R2 · El pronto pago se aplica por cada mes que se paga
+
+> *"si paga 6 meses se le aplica durante los 6 meses la cuota de pronto pago"*
+
+Es un monto fijo **por mes liquidado**, no por transacción. Pagar 6 meses puntual
+= 6 × descuento. Encaja sin fricción con el `discount` que ya existe en `charge.go`:
+cada cargo mensual lleva el suyo.
+
+### R3 · El recargo se conserva y sigue creciendo hasta que se pague
+
+> *"se conserva. Si el padre después del día 10 paga cada mes se le genera diario el
+> recargo hasta que pague. Si paga el siguiente día 10 debe pagar el mes anterior más los
+> 10 pesos diarios que se generaron más el mes actual. Si no, le sigue generando recargos"*
+
+La regla completa, con el ejemplo del dueño:
+
+```
+día 10 sep    vence la colegiatura de septiembre
+día 11 sep    empieza a correr el recargo: $10 por día natural
+...
+día 10 oct    el padre paga. Debe:
+                colegiatura septiembre     $3,200
+                recargo 30 días × $10      $  300
+                colegiatura octubre        $3,200   (vence hoy, sin recargo)
+                ─────────────────────────────────
+                                           $6,700
+
+              si NO paga, el recargo de septiembre sigue corriendo
+              y el de octubre empieza el día 11
+```
+
+**Lo que esto fija en el diseño:**
+- El recargo se acumula **por cargo mensual**, no por alumno. Cada mes tiene el suyo.
+- Deja de correr cuando **ese** mes queda liquidado, no cuando el alumno paga algo.
+- Nunca se perdona por sí solo: perdonarlo es un acto explícito, que es justo lo que hace
+  el botón de "aplicar pronto pago" y por eso necesita quedar asentado.
+
+**Esto confirma el diseño al que llegó la revisión de ingeniería:** derivar el recargo para
+mostrarlo (crece todos los días, sin escribir 30 renglones al mes) y **materializarlo como
+cargo real en el momento en que se le aplica dinero**. Los renglones existen solo donde
+hubo movimiento.
+
+---
+
+## LO CONSTRUIDO (2026-09-01, rama `feature/m16-billing-calendar`)
+
+Todo local, sin empujar, por instrucción del dueño: *"has todo local no subas ningún
+commit… hasta terminar empujamos para no estar consumiendo minutos de actions"*.
+
+### Bloque 0 · Bugs vivos de dinero
+- **T1** clave de idempotencia en el cajón de pago · **T2** guardia del fondo del modal
+  · **T3** paginación por keyset en `ListOverdue` (la corrida ya no se detiene en 500).
+
+### Bloque 1 · Maternal
+- **T4/T5** nivel maternal en migraciones, protos, clientes y pantallas.
+
+### Bloque 2 · El calendario
+- **T6** `paid_at` de punta a punta (proto → caso de uso → gateway → formulario).
+- **T7** `pkg/schoolcal` (aritmética de días hábiles, 96.9% de cobertura) +
+  `non_working_periods` en config con RLS + RPCs + **pantalla en Configuración**.
+  El calendario ya se puede llenar; antes tenía tabla y dominio y ninguna forma de entrar.
+- **T8/T9** `CachedCalendar`: TTL de 5 min, corte a 3 s, huella de versión y bandera
+  `Stale`. Nunca falla un cobro por una lectura lenta; degrada a lo último conocido y,
+  sin nada en caché, a "solo fines de semana" diciéndolo (`calendar_version=unavailable`).
+
+### Bloque 3 · Cobro
+- **T10** `late_fee_daily_cents` + `late_fee_mode` como **columnas nuevas** (0006).
+  En modo diario la corrida mensual **no emite** cargos de recargo: el monto cambia cada
+  noche y un cargo escrito hoy sería un número equivocado mañana.
+- **T11** pronto pago como monto fijo **por mes liquidado**, y solo cuando el dinero
+  alcanza a liquidar ese mes. Forzó la columna que faltaba desde la Fase 7:
+  `discount_reason` (0008). Todo descuento dice por qué existe.
+- **T12** recargo derivado al momento del pago y **materializado solo donde cayó dinero**,
+  restando lo ya materializado para no cobrar dos veces los mismos días.
+
+### Bloque 4 · El abono
+- **T13** `deposits` (0007) + asignaciones como pagos con `deposit_id`: **una sola** fuente
+  para "cuánto se ha cobrado de este cargo".
+- **T14** idempotencia sobre el depósito · **T15** reparto determinista `(due_date, id)`
+  decidido **dentro** de la transacción, con los cargos bloqueados · **T16** un
+  `PaymentRegistered` por depósito, no seis · **T18** `UnallocatedCents` (el saldo a favor)
+  en el estado de cuenta · **T19** `VoidDeposit` por asiento, con motivo obligatorio.
+- **T17 HECHO** (2026-09-01, después de que el dueño aclarara que `dev` es la demo diaria
+  hasta la entrega del 30 de noviembre): outbox transaccional en `finance_outbox`. El
+  evento se escribe en la MISMA transacción que el dinero; el pago drena al confirmar y
+  un barrido cada 30 s recoge lo que quedó. `FOR UPDATE SKIP LOCKED`, así que dos
+  instancias no publican dos veces. Probado apagando el emulador: el cobro contestó 201
+  en 1.07 s y los eventos salieron solos al volver el broker.
+- **Bug propio en el camino:** la primera versión drenaba sin límite de tiempo y con el
+  broker caído **la ventanilla se colgaba** — convertí "se pierde un evento" en "la caja
+  se traba", que es peor. Ahora el drenado del camino de pago tiene tope de 1 segundo.
+
+### Bloque 5 · Pantalla
+- **T20/T21/T22** ventanilla nueva: buscar alumno → **un número** (lo que debe) y **un
+  campo** (lo que entrega). La vista previa la calcula el servidor con el mismo planificador
+  que cobra (`PreviewDeposit`), así que no puede desviarse. `<form>` real: Enter cobra,
+  Esc cierra.
+- **T23** recibo con folio legible · **T24** **corte de caja** diario, con los cancelados
+  a la vista contados en cero.
+
+### Bloque 6
+- **T25** multicontacto: `guardian_user_id` **nullable** + nombre/teléfono/correo (0005).
+  Un contacto con cuenta es una familia que entra a la app; uno sin cuenta es un teléfono
+  al que la escuela llama. Panel en la ficha del alumno.
+- **T26** avisos por grupo, nivel o escuela completa. La audiencia se resuelve en el
+  gateway; comms recibe una lista de alumnos y no sabe qué es un grupo.
+- **T27** ingresos por concepto (consulta agrupada + panel bajo el corte de caja).
+- **T28** "exportar esta vista" de verdad, en finanzas y en alumnos. Antes era un toast
+  que no generaba archivo.
+
+### Verificación
+- `buf lint` limpio; los 14 módulos del workspace compilan, pasan `go vet` y sus pruebas.
+- Integración contra Postgres real (testcontainers) para depósitos, ingresos, contactos
+  y calendario, incluyendo RLS por tabla nueva.
+- Web: 594 pruebas verdes, `tsc` y `eslint` limpios.
+- `docs/api/openapi.yaml` documenta cada endpoint nuevo y pasa el lint de Redocly.
+
+### Lo que queda
+- Diferidas desde el inicio: inventario genérico, calendario de actividades, PDF del estado
+  de cuenta, colegiatura partida por período.
+- Nada de esto se ha desplegado: el branch no se ha empujado.

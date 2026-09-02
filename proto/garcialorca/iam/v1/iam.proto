@@ -144,9 +144,28 @@ message Claims {
 
 // --- Login / tokens -------------------------------------------------------
 
+// SessionKind is which surface the session belongs to, and therefore how long
+// it may sit unused before it must be logged in again.
+//
+// Two surfaces, two lifetimes, and the difference is not a preference. The
+// school's panel sits on a shared desk: somebody walks away and the session has
+// to be over. The family app lives on a parent's own phone, where logging them
+// out every quarter of an hour would teach them to stop opening it.
+enum SessionKind {
+  // Unspecified is the school's panel — the SHORTER life. A caller that says
+  // nothing gets it, because guessing wrong that way costs a login and guessing
+  // wrong the other way leaves an office session open all afternoon.
+  SESSION_KIND_UNSPECIFIED = 0;
+  SESSION_KIND_STAFF = 1;
+  SESSION_KIND_FAMILY = 2;
+}
+
 message LoginRequest {
   string email = 1;
   string password = 2;
+  // Which surface is logging in. It comes from the ROUTE the request arrived
+  // on, never from anything a user can type.
+  SessionKind session_kind = 3;
 }
 
 message LoginResponse {

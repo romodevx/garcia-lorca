@@ -135,3 +135,18 @@ func toDevice(d *commsv1.Device) Device {
 		Platform: d.GetPlatform(),
 	}
 }
+
+// Announce sends one message to many families at once. The audience is a list
+// of pupils; comms does not know what a group is.
+func (c *CommsClient) Announce(ctx context.Context, studentIDs []string, title, body, idempotencyKey string) (int, error) {
+	res, err := c.rpc.Announce(ctx, connect.NewRequest(&commsv1.AnnounceRequest{
+		StudentIds:     studentIDs,
+		Title:          title,
+		Body:           body,
+		IdempotencyKey: idempotencyKey,
+	}))
+	if err != nil {
+		return 0, err
+	}
+	return int(res.Msg.GetCreated()), nil
+}

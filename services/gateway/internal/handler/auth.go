@@ -15,6 +15,7 @@ import (
 // handler is testable with a fake). The Connect AuthClient implements it.
 type LoginService interface {
 	Login(ctx context.Context, email, password string) (client.LoginResult, error)
+	LoginAs(ctx context.Context, email, password string, kind client.SessionKind) (client.LoginResult, error)
 	Refresh(ctx context.Context, refreshToken string) (client.LoginResult, error)
 	ChangePassword(ctx context.Context, accessToken, currentPassword, newPassword string) error
 }
@@ -62,7 +63,16 @@ const (
 	accessCookie  = "gl_access"
 	refreshCookie = "gl_refresh"
 	refreshPath   = "/api/v1/auth" // refresh cookie only sent to auth endpoints
-	refreshMaxAge = 24 * 3600      // seconds; refresh cookie lifetime
+	// The panel's session closes after fifteen idle minutes — the school's own
+	// rule, for a computer that sits on a shared desk. The cookie is re-set on
+	// every refresh, and the panel refreshes while somebody is using it, so this
+	// is a window of INACTIVITY and not a cap on how long a shift can last.
+	//
+	// It matches the refresh token's own lifetime for a staff session. The
+	// browser dropping the cookie and iam refusing the token are two locks on
+	// the same door: one keeps the next person at that desk out, the other keeps
+	// out somebody who copied the cookie.
+	refreshMaxAge = 15 * 60 // seconds; staff refresh cookie lifetime
 )
 
 type loginRequest struct {
@@ -218,7 +228,9 @@ func (h *AuthHandler) MobileLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	res, err := h.auth.Login(r.Context(), req.Email, req.Password)
+	// The family app: a parent's own phone, so the session lasts a day rather
+	// than closing the moment they put the phone down.
+	res, err := h.auth.LoginAs(r.Context(), req.Email, req.Password, client.SessionFamily)
 	if err != nil {
 		http.Error(w, http.StatusText(httpStatusFor(err)), httpStatusFor(err))
 		return

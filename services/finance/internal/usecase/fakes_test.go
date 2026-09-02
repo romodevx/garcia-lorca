@@ -85,15 +85,44 @@ func (f *fakeEnrollments) ListByCycle(_ context.Context, cycleID, groupID string
 	return out, nil
 }
 
+func (f *fakeEnrollments) ListByStudent(_ context.Context, studentID string) ([]ports.EnrollmentRef, error) {
+	var out []ports.EnrollmentRef
+	for _, rows := range f.byCycle {
+		for _, e := range rows {
+			if e.StudentID == studentID {
+				out = append(out, e)
+			}
+		}
+	}
+	return out, nil
+}
+
+// fakeCalendar answers with whatever days the test says the school is shut.
+type fakeCalendar struct {
+	days []time.Time
+}
+
+func (f *fakeCalendar) NonWorkingDays(_ context.Context, _ string) (ports.CalendarSnapshot, error) {
+	return ports.CalendarSnapshot{Days: f.days, Version: "test"}, nil
+}
+
 // --- publisher ---------------------------------------------------------------
 
 type spyPublisher struct {
 	events  []ports.PaymentRegisteredEvent
 	settled []ports.ChargeSettledEvent
 	err     error
+	// settledErr fails ONLY the settled publication, which is how a broker
+	// outage is simulated without also breaking the receipt notification.
+	settledErr   error
+	settledCalls int
 }
 
 func (s *spyPublisher) PublishChargeSettled(_ context.Context, e ports.ChargeSettledEvent) error {
+	s.settledCalls++
+	if s.settledErr != nil {
+		return s.settledErr
+	}
 	s.settled = append(s.settled, e)
 	return s.err
 }
@@ -110,6 +139,14 @@ type fakeRepo struct {
 	charges  map[string]domain.Charge
 	payments map[string][]domain.Payment // keyed by charge id
 	plans    map[string]domain.TuitionPlan
+	deposits []domain.Deposit
+	// depositOfPayment stands in for payments.deposit_id: which deposit an
+	// allocation came from, so voiding can find and release exactly those.
+	depositOfPayment map[string]string
+	// outbox mirrors the real table: an event queued in the same "transaction"
+	// as the money, still there when publishing fails. A fake that dropped it
+	// would prove the opposite of what these tests claim.
+	outbox []ports.OutboxEvent
 
 	// Recorded call arguments, for the tests that assert on the call itself.
 	overdueCycleID      string
@@ -124,6 +161,8 @@ func newFakeRepo() *fakeRepo {
 		charges:  map[string]domain.Charge{},
 		payments: map[string][]domain.Payment{},
 		plans:    map[string]domain.TuitionPlan{},
+
+		depositOfPayment: map[string]string{},
 	}
 }
 
@@ -234,6 +273,22 @@ func (f *fakeRepo) CreateChargesBulk(_ context.Context, cs []domain.Charge) (int
 	return created, nil
 }
 
+// The fake moves what the real repository moves: unpaid charges whose date
+// actually differs, named by external ref.
+func (f *fakeRepo) RescheduleUnpaid(_ context.Context, items []ports.ChargeReschedule) (int, error) {
+	moved := 0
+	for _, item := range items {
+		for id, c := range f.charges {
+			if c.ExternalRef() != item.ExternalRef || c.DueDate().Equal(item.DueOn) || f.paidFor(id) > 0 {
+				continue
+			}
+			f.charges[id] = c.WithDueDate(item.DueOn)
+			moved++
+		}
+	}
+	return moved, nil
+}
+
 func (f *fakeRepo) GetCharge(_ context.Context, id string) (ports.ChargeWithPaid, error) {
 	c, ok := f.charges[id]
 	if !ok {
@@ -274,6 +329,7 @@ func (f *fakeRepo) RegisterPayment(
 	_ context.Context,
 	p domain.Payment,
 	derive func(charge domain.Charge, newPaidCents int64) (string, error),
+	outbox func(charge ports.ChargeWithPaid) []ports.OutboxEvent,
 ) (domain.Payment, ports.ChargeWithPaid, bool, error) {
 	c, ok := f.charges[p.ChargeID()]
 	if !ok {
@@ -296,7 +352,242 @@ func (f *fakeRepo) RegisterPayment(
 	// the callback returned — recorded above for the tests to assert on.
 	updated := c.WithStatus(newPaid)
 	f.charges[c.ID()] = updated
-	return p, ports.ChargeWithPaid{Charge: updated, PaidCents: newPaid}, false, nil
+	result := ports.ChargeWithPaid{Charge: updated, PaidCents: newPaid}
+	if outbox != nil {
+		f.outbox = append(f.outbox, outbox(result)...)
+	}
+	return p, result, false, nil
+}
+
+// RegisterDeposit mirrors the real repository closely enough to be worth
+// trusting: it dedupes on the key, hands the planner the student's live charges
+// with their collected totals, and refuses an allocation that would overpay —
+// which is the veto the transaction exists to run.
+func (f *fakeRepo) RegisterDeposit(
+	_ context.Context,
+	d domain.Deposit,
+	plan func(open []ports.ChargeWithPaid) (ports.DepositWrite, error),
+	outbox func(record ports.DepositRecord) []ports.OutboxEvent,
+) (ports.DepositRecord, bool, error) {
+	if original, found := f.depositByKey(d.IdempotencyKey()); found {
+		var allocations []domain.Payment
+		var allocated int64
+		for _, ps := range f.payments {
+			for _, p := range ps {
+				if f.depositOfPayment[p.ID()] == original.ID() {
+					allocations = append(allocations, p)
+					allocated += p.Amount().Int64()
+				}
+			}
+		}
+		sort.Slice(allocations, func(i, j int) bool { return allocations[i].ID() < allocations[j].ID() })
+		return ports.DepositRecord{
+			Deposit:          original,
+			Allocations:      allocations,
+			UnallocatedCents: original.Amount().Int64() - allocated,
+		}, true, nil
+	}
+
+	var open []ports.ChargeWithPaid
+	for _, c := range f.charges {
+		if c.StudentID() != d.StudentID() || c.Status() == domain.StatusCancelled {
+			continue
+		}
+		open = append(open, ports.ChargeWithPaid{Charge: c, PaidCents: f.paidFor(c.ID())})
+	}
+	sort.Slice(open, func(i, j int) bool {
+		if !open[i].Charge.DueDate().Equal(open[j].Charge.DueDate()) {
+			return open[i].Charge.DueDate().Before(open[j].Charge.DueDate())
+		}
+		return open[i].Charge.ID() < open[j].Charge.ID()
+	})
+
+	write, err := plan(open)
+	if err != nil {
+		return ports.DepositRecord{}, false, err
+	}
+
+	f.deposits = append(f.deposits, d)
+	for _, c := range write.Discounted {
+		f.charges[c.ID()] = c
+	}
+	for _, fee := range write.Surcharges {
+		f.charges[fee.ID()] = fee
+	}
+	var settled []ports.ChargeWithPaid
+	for _, p := range write.Allocations {
+		c, ok := f.charges[p.ChargeID()]
+		if !ok {
+			return ports.DepositRecord{}, false, glerrors.New(glerrors.KindInternal,
+				"deposit allocated to a charge that is not in the transaction")
+		}
+		newPaid := f.paidFor(p.ChargeID()) + p.Amount().Int64()
+		if newPaid > c.Effective().Int64() {
+			return ports.DepositRecord{}, false, glerrors.New(glerrors.KindInternal,
+				"deposit allocated more than a charge owed")
+		}
+		f.payments[p.ChargeID()] = append(f.payments[p.ChargeID()], p)
+		f.depositOfPayment[p.ID()] = d.ID()
+		updated := c.WithStatus(newPaid)
+		f.charges[c.ID()] = updated
+		if updated.Status() == domain.StatusPaid {
+			settled = append(settled, ports.ChargeWithPaid{Charge: updated, PaidCents: newPaid})
+		}
+	}
+	record := ports.DepositRecord{
+		Deposit:          d,
+		Surcharges:       write.Surcharges,
+		Allocations:      write.Allocations,
+		UnallocatedCents: write.UnallocatedCents,
+		Settled:          settled,
+	}
+	if outbox != nil {
+		f.outbox = append(f.outbox, outbox(record)...)
+	}
+	return record, false, nil
+}
+
+// DrainOutbox mirrors the real one: an event the publisher refuses STAYS. A
+// fake that removed it regardless would make the retry test pass against a
+// service that loses events.
+func (f *fakeRepo) DrainOutbox(_ context.Context, limit int, publish func(ports.OutboxEvent) error) (int, error) {
+	published := 0
+	var kept []ports.OutboxEvent
+	for i, e := range f.outbox {
+		if i >= limit {
+			kept = append(kept, f.outbox[i:]...)
+			break
+		}
+		if err := publish(e); err != nil {
+			kept = append(kept, e)
+			continue
+		}
+		published++
+	}
+	f.outbox = kept
+	return published, nil
+}
+
+// pendingOutbox is how many events are still waiting to go out.
+func (f *fakeRepo) pendingOutbox() int { return len(f.outbox) }
+
+func (f *fakeRepo) depositByKey(key string) (domain.Deposit, bool) {
+	if key == "" {
+		return domain.Deposit{}, false
+	}
+	for _, d := range f.deposits {
+		if d.IdempotencyKey() == key && !d.Voided() {
+			return d, true
+		}
+	}
+	return domain.Deposit{}, false
+}
+
+func (f *fakeRepo) UnallocatedCents(_ context.Context, studentID string) (int64, error) {
+	var deposited int64
+	live := map[string]bool{}
+	for _, d := range f.deposits {
+		if d.StudentID() != studentID || d.Voided() {
+			continue
+		}
+		deposited += d.Amount().Int64()
+		live[d.ID()] = true
+	}
+	var allocated int64
+	for _, ps := range f.payments {
+		for _, p := range ps {
+			if live[f.depositOfPayment[p.ID()]] {
+				allocated += p.Amount().Int64()
+			}
+		}
+	}
+	return deposited - allocated, nil
+}
+
+func (f *fakeRepo) IncomeLines(_ context.Context, from, to time.Time) ([]ports.IncomeLine, error) {
+	end := to.AddDate(0, 0, 1)
+	byConcept := map[string]int64{}
+	for chargeID, ps := range f.payments {
+		charge, ok := f.charges[chargeID]
+		if !ok || charge.Status() == domain.StatusCancelled {
+			continue
+		}
+		for _, p := range ps {
+			if p.PaidAt().Before(from) || !p.PaidAt().Before(end) {
+				continue
+			}
+			byConcept[charge.ConceptID()] += p.Amount().Int64()
+		}
+	}
+	out := make([]ports.IncomeLine, 0, len(byConcept))
+	for conceptID, cents := range byConcept {
+		out = append(out, ports.IncomeLine{
+			ConceptID:   conceptID,
+			Concept:     f.concepts[conceptID].Name(),
+			AmountCents: cents,
+		})
+	}
+	return out, nil
+}
+
+func (f *fakeRepo) GetDeposit(_ context.Context, id string) (domain.Deposit, error) {
+	for _, d := range f.deposits {
+		if d.ID() == id {
+			return d, nil
+		}
+	}
+	return domain.Deposit{}, glerrors.ErrNotFound
+}
+
+func (f *fakeRepo) ListDeposits(_ context.Context, studentID string) ([]domain.Deposit, error) {
+	out := make([]domain.Deposit, 0, len(f.deposits))
+	for _, d := range f.deposits {
+		if studentID != "" && d.StudentID() != studentID {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out, nil
+}
+
+func (f *fakeRepo) ListDepositsOn(_ context.Context, day time.Time) ([]domain.Deposit, error) {
+	var out []domain.Deposit
+	for _, d := range f.deposits {
+		if d.PaidAt().Year() == day.Year() && d.PaidAt().YearDay() == day.YearDay() {
+			out = append(out, d)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeRepo) VoidDeposit(_ context.Context, d domain.Deposit) error {
+	for i, stored := range f.deposits {
+		if stored.ID() != d.ID() {
+			continue
+		}
+		if stored.Voided() {
+			return glerrors.New(glerrors.KindConflict, "this deposit is already cancelled")
+		}
+		f.deposits[i] = d
+		touched := map[string]bool{}
+		for chargeID, ps := range f.payments {
+			var kept []domain.Payment
+			for _, p := range ps {
+				if f.depositOfPayment[p.ID()] == d.ID() {
+					touched[chargeID] = true
+					continue
+				}
+				kept = append(kept, p)
+			}
+			f.payments[chargeID] = kept
+		}
+		for chargeID := range touched {
+			c := f.charges[chargeID]
+			f.charges[chargeID] = c.WithStatus(f.paidFor(chargeID))
+		}
+		return nil
+	}
+	return glerrors.ErrNotFound
 }
 
 // byIdempotencyKey finds a payment already posted under key. An empty key never
@@ -410,7 +701,12 @@ type fixture struct {
 	cycles      *fakeCycles
 	enrollments *fakeEnrollments
 	catalog     *fakeCatalog
+	calendar    *fakeCalendar
 	publisher   *spyPublisher
+	// clock is what the service reads for "now". It starts at fixedNow and a
+	// test may move it forward — the collection rules are all functions of a
+	// date, so a test that cannot say what day it is cannot exercise them.
+	clock time.Time
 }
 
 // newFixture wires a service over fresh doubles: one active student, one cycle,
@@ -423,10 +719,12 @@ func newFixture(t *testing.T) *fixture {
 		cycles:      &fakeCycles{byID: map[string]ports.CycleRef{testCycle: {ID: testCycle}}},
 		enrollments: &fakeEnrollments{byCycle: map[string][]ports.EnrollmentRef{}},
 		catalog:     &fakeCatalog{},
+		calendar:    &fakeCalendar{},
 		publisher:   &spyPublisher{},
 	}
-	f.svc = usecase.NewFinanceService(f.repo, f.students, f.cycles, f.enrollments, f.catalog, f.publisher,
-		testTenant, seqID("id"), func() time.Time { return fixedNow })
+	f.clock = fixedNow
+	f.svc = usecase.NewFinanceService(f.repo, f.students, f.cycles, f.enrollments, f.catalog, f.calendar, f.publisher,
+		testTenant, seqID("id"), func() time.Time { return f.clock })
 	return f
 }
 

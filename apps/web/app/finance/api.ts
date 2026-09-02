@@ -56,6 +56,13 @@ export interface Charge {
 /** How the money came in at the window. */
 export type PaymentMethod = "cash" | "card" | "transfer";
 
+/**
+ * Which kind of card. Not a payment method — the money still arrives by card —
+ * but the terminal the office reconciles against at month end knows the
+ * difference, so the ledger records it.
+ */
+export type CardType = "debit" | "credit";
+
 export interface Payment {
   id: string;
   chargeId: string;
@@ -70,6 +77,84 @@ export interface AccountStatement {
   charges: Charge[];
   payments: Payment[];
   totalBalanceCents: number;
+  /** Money the family has handed over that no charge has claimed. */
+  unallocatedCents: number;
+}
+
+/**
+ * Money as it arrived, before it was decided what it pays. The counter records
+ * ONE amount; which months it covers is worked out server-side, oldest first.
+ */
+export interface Deposit {
+  id: string;
+  studentId: string;
+  amountCents: number;
+  method: PaymentMethod;
+  reference: string;
+  paidAt: string;
+  /**
+   * The school calendar the split was worked out against. "unavailable" means
+   * the calendar could not be read and the deadline was computed without the
+   * school's holidays — worth showing on a receipt somebody may dispute.
+   */
+  calendarVersion: string;
+  /** debit or credit on a card payment; absent otherwise. */
+  cardType?: CardType;
+  voidedAt?: string;
+  voidReason?: string;
+}
+
+/** What a deposit did: where the money landed and what is left over. */
+export interface DepositResult {
+  deposit: Deposit;
+  allocations: Payment[];
+  surcharges: Charge[];
+  /** Money no charge claimed — the family's credit with the school. */
+  unallocatedCents: number;
+  /** The deposit already existed under this key; nothing was collected again. */
+  replayed: boolean;
+}
+
+/** What an amount WOULD cover. No deposit, because nothing was taken. */
+export interface DepositPreview {
+  allocations: Payment[];
+  surcharges: Charge[];
+  unallocatedCents: number;
+}
+
+export interface RegisterDepositInput {
+  studentId: string;
+  amountCents: number;
+  method: PaymentMethod;
+  reference: string;
+  /** The DAY the money changed hands, "2026-10-10". Omitted ⇒ the server stamps today. */
+  paidAt?: string;
+  /** One key per ATTEMPT: a retry returns the deposit already stored. */
+  idempotencyKey?: string;
+  /**
+   * Honours the early-payment reward after the window closed, because the
+   * school decided to — the parent who is always punctual and slipped once.
+   * Recorded under its own discount reason, so a report can always tell a
+   * decision from the rule firing.
+   */
+  grantEarlyPayment?: boolean;
+  /** debit or credit. Only meaningful when the method is card. */
+  cardType?: CardType;
+}
+
+/** What a family must hand over today to be current. */
+export interface Expected {
+  amountCents: number;
+  surchargeCents: number;
+  discountCents: number;
+  /** The whole year still owed — not the same question as what is due today. */
+  annualBalanceCents: number;
+}
+
+export interface PreviewDepositInput {
+  studentId: string;
+  amountCents: number;
+  paidAt?: string;
 }
 
 /** The payment plus the charge with its recomputed paid/remaining/status. */
@@ -385,11 +470,195 @@ export async function getAccount(baseURL: string, studentId: string): Promise<Ac
     charges?: Wire<Charge, "status">[];
     payments?: Wire<Payment, "method">[];
     totalBalanceCents?: number;
+    unallocatedCents?: number;
   }>(baseURL, `/accounts/${studentId}`);
   return {
     charges: (res.charges ?? []).map(toCharge),
     payments: (res.payments ?? []).map(toPayment),
     totalBalanceCents: res.totalBalanceCents ?? 0,
+    unallocatedCents: res.unallocatedCents ?? 0,
+  };
+}
+
+// --- deposits (M16) ---------------------------------------------------------
+
+/**
+ * Take money without being told what it pays for. The response carries the
+ * whole split, so a receipt can be printed without a second call while the
+ * parent is still at the counter.
+ *
+ * Send an `idempotencyKey`: a double click or a retried request must not cost
+ * the family twice.
+ */
+export async function registerDeposit(baseURL: string, input: RegisterDepositInput): Promise<DepositResult> {
+  const res = await sendJSON<{
+    deposit: Wire<Deposit, "method">;
+    allocations?: Wire<Payment, "method">[];
+    surcharges?: Wire<Charge, "status">[];
+    unallocatedCents?: number;
+    replayed?: boolean;
+  }>(baseURL, "/deposits", "POST", depositBody(input));
+  return {
+    deposit: toDeposit(res.deposit),
+    allocations: (res.allocations ?? []).map(toPayment),
+    surcharges: (res.surcharges ?? []).map(toCharge),
+    unallocatedCents: res.unallocatedCents ?? 0,
+    replayed: res.replayed ?? false,
+  };
+}
+
+/**
+ * What an amount WOULD cover. Same rule as taking it, and it writes nothing, so
+ * the cashier can say it out loud before the money changes hands.
+ */
+export async function previewDeposit(baseURL: string, input: PreviewDepositInput): Promise<DepositPreview> {
+  const res = await sendJSON<{
+    allocations?: Wire<Payment, "method">[];
+    surcharges?: Wire<Charge, "status">[];
+    unallocatedCents?: number;
+  }>(baseURL, "/deposits/preview", "POST", {
+    studentId: input.studentId,
+    amountCents: input.amountCents,
+    ...(input.paidAt !== undefined && input.paidAt !== "" ? { paidAt: input.paidAt } : {}),
+  });
+  return {
+    allocations: (res.allocations ?? []).map(toPayment),
+    surcharges: (res.surcharges ?? []).map(toCharge),
+    unallocatedCents: res.unallocatedCents ?? 0,
+  };
+}
+
+/**
+ * What a family must hand over today to be current: the months already due
+ * (and the one due later this month, which is how the early-payment reward is
+ * earned), what being late has cost, and what paying early saves.
+ */
+export async function getExpected(baseURL: string, studentId: string, on = ""): Promise<Expected> {
+  const query = on === "" ? "" : `&on=${encodeURIComponent(on)}`;
+  const res = await getJSON<Partial<Expected>>(baseURL, `/expected?studentId=${encodeURIComponent(studentId)}${query}`);
+  return {
+    amountCents: res.amountCents ?? 0,
+    surchargeCents: res.surchargeCents ?? 0,
+    discountCents: res.discountCents ?? 0,
+    annualBalanceCents: res.annualBalanceCents ?? 0,
+  };
+}
+
+/** A family's deposits, newest first. */
+export async function listDeposits(baseURL: string, studentId: string): Promise<Deposit[]> {
+  const rows = await getList<Wire<Deposit, "method">>(baseURL, `/deposits?studentId=${encodeURIComponent(studentId)}`, "deposits");
+  return rows.map(toDeposit);
+}
+
+/**
+ * Cancel a deposit and release what it settled. The reason is required — a
+ * cancelled deposit without one is an unexplained hole in the day's takings.
+ */
+export async function voidDeposit(baseURL: string, id: string, reason: string): Promise<void> {
+  const res = await authFetch(url(baseURL, `${BASE_PATH}/deposits/${id}/void`), {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason }),
+  });
+  if (!res.ok) {
+    throw await failure(res);
+  }
+}
+
+/** One day's takings, split by how the money arrived. */
+export interface CashUp {
+  deposits: Deposit[];
+  /** Voided that day. They count for nothing and are shown anyway. */
+  cancelled: Deposit[];
+  cashCents: number;
+  cardCents: number;
+  transferCents: number;
+  totalCents: number;
+}
+
+/**
+ * What came in on one day. This is what a school closes the day with, instead
+ * of adding up a notebook. An empty `day` means today.
+ */
+export async function getCashUp(baseURL: string, day: string): Promise<CashUp> {
+  const res = await getJSON<{
+    deposits?: Wire<Deposit, "method">[];
+    cancelled?: Wire<Deposit, "method">[];
+    cashCents?: number;
+    cardCents?: number;
+    transferCents?: number;
+    totalCents?: number;
+  }>(baseURL, day === "" ? "/cash-up" : `/cash-up?day=${encodeURIComponent(day)}`);
+  return {
+    deposits: (res.deposits ?? []).map(toDeposit),
+    cancelled: (res.cancelled ?? []).map(toDeposit),
+    cashCents: res.cashCents ?? 0,
+    cardCents: res.cardCents ?? 0,
+    transferCents: res.transferCents ?? 0,
+    totalCents: res.totalCents ?? 0,
+  };
+}
+
+/** What one concept earned in a period. */
+export interface IncomeLine {
+  conceptId: string;
+  concept: string;
+  amountCents: number;
+}
+
+/** A period's income, biggest line first. */
+export interface Income {
+  lines: IncomeLine[];
+  totalCents: number;
+}
+
+/**
+ * What the school earned between two days, by what it charged for.
+ *
+ * Counted on the day the money changed hands, not the day the charge was
+ * issued: for anyone paying late the two are months apart, and reporting on the
+ * charge date credits October with September's arrears.
+ */
+export async function getIncome(baseURL: string, from: string, to: string): Promise<Income> {
+  const res = await getJSON<{ lines?: IncomeLine[]; totalCents?: number }>(
+    baseURL,
+    `/income?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+  );
+  return { lines: res.lines ?? [], totalCents: res.totalCents ?? 0 };
+}
+
+function depositBody(input: RegisterDepositInput): Record<string, unknown> {
+  return {
+    studentId: input.studentId,
+    amountCents: input.amountCents,
+    method: input.method,
+    reference: input.reference,
+    // Omitted when the money is captured the day it arrived: the gateway reads
+    // an absent paidAt as "today".
+    ...(input.paidAt !== undefined && input.paidAt !== "" ? { paidAt: input.paidAt } : {}),
+    ...(input.idempotencyKey !== undefined && input.idempotencyKey !== ""
+      ? { idempotencyKey: input.idempotencyKey }
+      : {}),
+    ...(input.grantEarlyPayment === true ? { grantEarlyPayment: true } : {}),
+    // Sent only on a card: the server refuses a card type on cash, and rightly.
+    ...(input.method === "card" && input.cardType !== undefined ? { cardType: input.cardType } : {}),
+  };
+}
+
+function toDeposit(d: Wire<Deposit, "method">): Deposit {
+  return {
+    id: d.id,
+    studentId: d.studentId,
+    amountCents: d.amountCents,
+    method: d.method as PaymentMethod,
+    reference: d.reference ?? "",
+    paidAt: d.paidAt,
+    calendarVersion: d.calendarVersion ?? "",
+    // The wire sends "" for cash and transfers; the type says "absent".
+    ...(d.cardType !== undefined && String(d.cardType) !== "" ? { cardType: d.cardType } : {}),
+    ...(d.voidedAt !== undefined ? { voidedAt: d.voidedAt } : {}),
+    ...(d.voidReason !== undefined ? { voidReason: d.voidReason } : {}),
   };
 }
 
@@ -410,6 +679,84 @@ export interface TuitionPlan {
   /** Fixed surcharge added once per completed overdue month. Zero disables it. */
   lateFeeCents: number;
   active: boolean;
+  policy: CollectionPolicy;
+  /**
+   * An explicit payment plan, replacing the uniform monthly amount. Empty means
+   * the year is divided into equal parts, which is what most schools do.
+   */
+  schedule: Installment[];
+  /**
+   * A fixed amount off every month of this level — the school's arrangement for
+   * maternal, or for any level it prices differently. Set once here rather than
+   * typed per pupil, which is the difference between a rule and four hundred
+   * chances to mistype it.
+   */
+  monthlyDiscountCents: number;
+  /**
+   * The extras the school collects on top of the tuition, each split across the
+   * months it chose. Empty is the ordinary state.
+   */
+  fees: Fee[];
+  /**
+   * The deadline the school set for the inscription (YYYY-MM-DD). Empty keeps
+   * the default rule — the due day in the cycle's first month.
+   */
+  enrollmentDueOn: string;
+}
+
+/**
+ * Money the school collects on top of the monthly tuition, spread across the
+ * months it chooses.
+ *
+ * A school's year and its calendar do not agree: "la cuota de julio" is charged
+ * for a month the year does not bill, so it is collected inside months that it
+ * does. `amountCents` is the WHOLE fee, not the monthly share — the school says
+ * what it collects and the server divides it, so nobody is doing arithmetic in
+ * a form field.
+ */
+export interface Fee {
+  /** What the family reads, and the whole explanation of a dearer month. */
+  name: string;
+  amountCents: number;
+  /** The calendar months it is divided between, in the order chosen. */
+  months: number[];
+}
+
+/**
+ * One payment of the year: the month it falls in and how much of the tuition it
+ * collects.
+ *
+ * A school does not always divide the year into equal parts. "Once meses, pero
+ * diciembre a la mitad y la otra mitad en marzo" is a real arrangement —
+ * families are short in December — and a plan that can only say "N equal
+ * payments" cannot express it.
+ */
+export interface Installment {
+  /** 1-12. The year comes from the cycle, so a plan may run past December. */
+  month: number;
+  amountCents: number;
+}
+
+/**
+ * What a late payment costs and what an early one saves. It rides with the
+ * tuition table because that is where a price lives, and it is per level: a
+ * school may treat maternal differently from preparatoria.
+ */
+export interface CollectionPolicy {
+  /**
+   * Picks the rule. false keeps the fixed monthly surcharge above; true charges
+   * `lateFeeDailyCents` for every day the money is late, and the monthly run
+   * stops issuing surcharge charges — the amount changes every night, so it is
+   * worked out at the moment of payment instead.
+   */
+  dailyMode: boolean;
+  lateFeeDailyCents: number;
+  /** Counts Saturdays, Sundays and holidays: the money is late on a Sunday too. */
+  surchargeCountsAllDays: boolean;
+  /** A fixed amount off, per month settled, inside the early window. */
+  earlyPaymentCents: number;
+  /** How many WORKING days that window lasts, from the first of the month. */
+  earlyPaymentDays: number;
 }
 
 export type TuitionPlanInput = Omit<TuitionPlan, "id">;
@@ -419,6 +766,14 @@ export interface BillingRun {
   tuitionCreated: number;
   enrollmentCreated: number;
   lateFeesCreated: number;
+  /** Charges issued for the extras collected on top of the tuition. */
+  feesCreated: number;
+  /**
+   * Inscriptions whose deadline the run corrected to match the tuition table.
+   * The run never re-issues a charge it has written, so this is how a deadline
+   * changed after billing reaches pupils who were already charged.
+   */
+  enrollmentMoved: number;
   /** Already existed. On a second press this is everything — that IS the proof. */
   skipped: number;
   /** Levels nobody has priced. Reported, never billed at zero. */
@@ -430,9 +785,36 @@ export async function upsertTuitionPlan(baseURL: string, input: TuitionPlanInput
   return sendJSON<TuitionPlan>(baseURL, "/tuition-plans", "PUT", input);
 }
 
-/** The whole tuition table of a cycle. */
+/**
+ * The whole tuition table of a cycle.
+ *
+ * A plan stored before M16 comes back without a policy, so it is filled in with
+ * the zero rule — the fixed monthly surcharge it already had. A missing field
+ * must not read as "daily surcharge of nothing".
+ */
 export async function listTuitionPlans(baseURL: string, cycleId: string): Promise<TuitionPlan[]> {
-  return getList<TuitionPlan>(baseURL, `/tuition-plans?cycleId=${encodeURIComponent(cycleId)}`, "plans");
+  const plans = await getList<
+    Partial<TuitionPlan> &
+      Omit<TuitionPlan, "policy" | "schedule" | "monthlyDiscountCents" | "fees" | "enrollmentDueOn">
+  >(baseURL, `/tuition-plans?cycleId=${encodeURIComponent(cycleId)}`, "plans");
+  return plans.map((p) => ({
+    ...p,
+    policy: p.policy ?? emptyPolicy(),
+    schedule: p.schedule ?? [],
+    monthlyDiscountCents: p.monthlyDiscountCents ?? 0,
+    fees: p.fees ?? [],
+    enrollmentDueOn: p.enrollmentDueOn ?? "",
+  }));
+}
+
+function emptyPolicy(): CollectionPolicy {
+  return {
+    dailyMode: false,
+    lateFeeDailyCents: 0,
+    surchargeCountsAllDays: true,
+    earlyPaymentCents: 0,
+    earlyPaymentDays: 0,
+  };
 }
 
 /**

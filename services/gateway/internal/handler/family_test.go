@@ -916,3 +916,28 @@ func TestFamilyByChildRoutesWithoutPrincipalAre401(t *testing.T) {
 		}
 	}
 }
+
+// A parent who overpaid must see the credit the school is holding for them. The
+// school's own statement carries it; showing the family only the debt would
+// tell them they owe money that is already paid.
+func TestFamilyAccountShowsTheCredit(t *testing.T) {
+	finance := &fakeFamilyFinance{account: client.AccountStatement{
+		TotalBalanceCents: 320000,
+		UnallocatedCents:  180000,
+	}}
+	h := handler.NewFamilyHandler(oneChild(), &fakeFamilyComms{}, finance, nil, nil, nil)
+
+	rec := httptest.NewRecorder()
+	h.Account(rec, guardianRequest(http.MethodGet, "/api/v1/family/students/stu-1/account", "usr-9", "studentId", "stu-1"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["unallocatedCents"] != float64(180000) {
+		t.Errorf("unallocatedCents = %v, want 180000", body["unallocatedCents"])
+	}
+}

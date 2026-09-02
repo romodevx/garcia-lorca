@@ -2,12 +2,25 @@
 
 import { useCallback, useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
-import { createItem, updateItem, UniformsError, upsertSizes, type Level, type SizeSpec, type UniformItem } from "../../uniforms/api";
+import { createItem, updateItem, UniformsError, upsertSizes, type ItemCategory, type Level, type SizeSpec, type UniformItem } from "../../uniforms/api";
 import { Drawer } from "./InventoryPanel";
 import { EmptyState, ErrorNote, field, label, money } from "./parts";
 
 import { API_URL } from "../../api-url";
 
+
+// What the school sells. The module was only ever about clothing in its
+// vocabulary — the stock rules, the ledger and the counter sale never were.
+const CATEGORIES: { id: ItemCategory; label: string }[] = [
+  { id: "uniform", label: "Uniforme" },
+  { id: "book", label: "Libro" },
+  { id: "supply", label: "Papelería" },
+  { id: "other", label: "Otro" },
+];
+
+const CATEGORY_LABEL: Record<string, string> = {
+  uniform: "Uniforme", book: "Libro", supply: "Papelería", other: "Otro",
+};
 
 const LEVELS: { id: Level; label: string }[] = [
   { id: "", label: "Todos los niveles" },
@@ -71,7 +84,7 @@ export function CatalogPanel({
 
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <Btn icon="plus" onClick={() => setCreating(true)}>
-          Nueva prenda
+          Nuevo artículo
         </Btn>
       </div>
 
@@ -82,7 +95,7 @@ export function CatalogPanel({
           hint="Una prenda es un artículo del uniforme: playera, pantalón, suéter. Después le generas todas sus tallas de un golpe."
           action={
             <Btn icon="plus" onClick={() => setCreating(true)}>
-              Nueva prenda
+              Nuevo artículo
             </Btn>
           }
         />
@@ -109,7 +122,7 @@ export function CatalogPanel({
                   {!item.active && <span style={{ fontSize: 12.5, color: "var(--text-faint)" }}> · retirada</span>}
                 </p>
                 <p style={{ fontSize: 13.5, color: "var(--text-muted)" }}>
-                  {item.code} · {money(item.priceCents)} ·{" "}
+                  {CATEGORY_LABEL[item.category] ?? "Uniforme"} · {item.code} · {money(item.priceCents)} ·{" "}
                   {item.level === "" ? "todos los niveles" : LEVELS.find((l) => l.id === item.level)?.label}
                 </p>
               </div>
@@ -169,6 +182,7 @@ function CreateDrawer({
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [level, setLevel] = useState<Level>("");
+  const [category, setCategory] = useState<ItemCategory>("uniform");
   const [pesos, setPesos] = useState("");
   const [pending, setPending] = useState(false);
 
@@ -178,7 +192,7 @@ function CreateDrawer({
   const save = useCallback(async (): Promise<void> => {
     setPending(true);
     try {
-      const created = await createItem(API_URL, { code: code.trim(), name: name.trim(), level, priceCents });
+      const created = await createItem(API_URL, { code: code.trim(), name: name.trim(), level, priceCents, category });
       onDone(created);
     } catch (err) {
       onError(err instanceof UniformsError ? err : new UniformsError("internal", "Algo salió mal"));
@@ -186,21 +200,45 @@ function CreateDrawer({
     } finally {
       setPending(false);
     }
-  }, [code, level, name, onClose, onDone, onError, priceCents]);
+  }, [category, code, level, name, onClose, onDone, onError, priceCents]);
 
   return (
-    <Drawer title="Nueva prenda" icon="plus" onClose={onClose}>
+    <Drawer title="Nuevo artículo" icon="plus" onClose={onClose}>
+      <p style={label}>Tipo</p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+        {CATEGORIES.map((option) => (
+          <button
+            key={option.id}
+            aria-pressed={category === option.id}
+            aria-label={option.label}
+            onClick={() => setCategory(option.id)}
+            style={{
+              height: 38,
+              padding: "0 14px",
+              borderRadius: 99,
+              fontSize: 13.5,
+              fontWeight: 600,
+              cursor: "pointer",
+              border: `1.5px solid ${category === option.id ? "var(--purple)" : "var(--border)"}`,
+              background: category === option.id ? "color-mix(in oklab, var(--purple) 12%, var(--surface))" : "var(--surface)",
+              color: category === option.id ? "var(--purple)" : "var(--text-muted)",
+            }}>
+            {option.label}
+          </button>
+        ))}
+      </div>
+
       <label style={label} htmlFor="item-name">
         Nombre
       </label>
-      <input id="item-name" style={field} placeholder="Suéter verde" value={name} onChange={(e) => setName(e.target.value)} />
+      <input id="item-name" style={field} placeholder={category === "book" ? "Libro de matemáticas 3°" : "Suéter verde"} value={name} onChange={(e) => setName(e.target.value)} />
 
       <label style={{ ...label, marginTop: 16 }} htmlFor="item-code">
         Clave
       </label>
       <input id="item-code" style={field} placeholder="SUE-VER" value={code} onChange={(e) => setCode(e.target.value)} />
       <p style={{ fontSize: 12.5, color: "var(--text-faint)", marginTop: 6 }}>
-        La clave no se puede cambiar después: es como se refieren a la prenda los pedidos ya hechos.
+        La clave no se puede cambiar después: es como se refieren al artículo los pedidos ya hechos.
       </p>
 
       <p style={{ ...label, marginTop: 16 }}>Nivel</p>

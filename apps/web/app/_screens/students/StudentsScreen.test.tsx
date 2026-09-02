@@ -137,3 +137,47 @@ describe("StudentsScreen", () => {
     );
   });
 });
+
+describe("StudentsScreen — por salón", () => {
+  // The director counts heads per classroom before deciding to open another
+  // group. It follows the filters, because that is the count they mean.
+  it("counts pupils per classroom, and follows the filter", async () => {
+    const user = userEvent.setup();
+    render(<StudentsScreen onBack={() => {}} />);
+    await screen.findByText("Valentina Cruz");
+
+    const perGroup = await screen.findByTestId("per-group");
+    expect(perGroup).toHaveTextContent("1° A");
+
+    await user.type(screen.getByLabelText("Buscar"), "Valentina");
+
+    expect(await screen.findByTestId("per-group")).toHaveTextContent("1");
+  });
+});
+
+describe("StudentsScreen — la lista que no cargó", () => {
+  // The same lie as the counter had: a roll that could not be read showed as
+  // "Sin alumnos en esta vista", so the office was told there are no pupils
+  // when the truth was that nobody could ask. It is the message that sent
+  // somebody looking for a registration problem that did not exist.
+  it("says it could not read the roll, instead of reporting no pupils", async () => {
+    students.listStudents.mockRejectedValue(new Error("students is down"));
+
+    render(<StudentsScreen onBack={() => {}} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/No pudimos cargar/i);
+    expect(screen.queryByText(/Sin alumnos en esta vista/)).not.toBeInTheDocument();
+  });
+
+  it("can retry", async () => {
+    const user = userEvent.setup();
+    students.listStudents.mockRejectedValueOnce(new Error("students is down"));
+    render(<StudentsScreen onBack={() => {}} />);
+    await screen.findByRole("alert");
+
+    students.listStudents.mockResolvedValue([mk("1", "Valentina", "Cruz", "enrolled")]);
+    await user.click(screen.getByRole("button", { name: /Reintentar/ }));
+
+    expect(await screen.findByText("Valentina Cruz")).toBeInTheDocument();
+  });
+});

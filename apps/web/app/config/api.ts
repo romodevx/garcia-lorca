@@ -186,6 +186,124 @@ function query(params: Record<string, string | undefined>): string {
   return qs === "" ? "" : `?${qs}`;
 }
 
+// --- school calendar (M16) -------------------------------------------------
+
+/** What the school calls a closed day. Two kinds, because a public holiday is
+ * not a vacation the school chose — the billing rules treat them identically,
+ * the activity calendar does not. */
+export type NonWorkingKind = "holiday" | "vacation";
+
+/** A day, or a run of days, the school does not operate. Both ends inclusive. */
+export interface NonWorkingPeriod {
+  id: string;
+  cycleId: string;
+  label: string;
+  kind: NonWorkingKind;
+  startsOn: string;
+  endsOn: string;
+}
+
+export interface CreateNonWorkingPeriodInput {
+  cycleId: string;
+  label: string;
+  kind: NonWorkingKind;
+  /** "2026-09-16". A calendar day, never a timestamp. */
+  startsOn: string;
+  /** Omitted for a single day — the gateway fills it in from startsOn. */
+  endsOn?: string;
+}
+
+/** Adds a holiday, vacation or suspension to a cycle. */
+export function createNonWorkingPeriod(baseURL: string, input: CreateNonWorkingPeriodInput): Promise<NonWorkingPeriod> {
+  return postJSON<NonWorkingPeriod>(baseURL, "/calendar", {
+    cycleId: input.cycleId,
+    label: input.label,
+    kind: input.kind,
+    startsOn: input.startsOn,
+    ...(input.endsOn !== undefined && input.endsOn !== "" ? { endsOn: input.endsOn } : {}),
+  });
+}
+
+/** A cycle's closed days, earliest first. */
+export function listNonWorkingPeriods(baseURL: string, cycleId: string): Promise<NonWorkingPeriod[]> {
+  return getList<NonWorkingPeriod>(baseURL, `/calendar${query({ cycleId })}`, "periods");
+}
+
+/**
+ * Removes one period. A day entered by mistake has to be removable, or the
+ * calendar stops being trusted and the school goes back to a sheet on the wall.
+ */
+export async function deleteNonWorkingPeriod(baseURL: string, id: string): Promise<void> {
+  const res = await authFetch(url(baseURL, `${BASE_PATH}/calendar/${id}`), {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw await configFailure(res);
+  }
+}
+
+// --- school agenda (M16) ---------------------------------------------------
+
+/**
+ * Something the school DOES: a festival, a parents' meeting, an exam week.
+ *
+ * It is not a closed day, and the difference is not cosmetic. A closed day
+ * moves a due date and stops a surcharge; an event never may. A festival on the
+ * 10th does not mean nobody could pay on the 10th.
+ */
+export interface SchoolEvent {
+  id: string;
+  cycleId: string;
+  title: string;
+  description: string;
+  startsOn: string;
+  endsOn: string;
+  /** At most one is set; neither means the whole school. */
+  levelId?: string;
+  groupId?: string;
+}
+
+export interface CreateSchoolEventInput {
+  cycleId: string;
+  title: string;
+  description?: string;
+  startsOn: string;
+  /** Omitted for a one-day event — the gateway fills it in. */
+  endsOn?: string;
+  levelId?: string;
+  groupId?: string;
+}
+
+/** Records something the school does. */
+export function createSchoolEvent(baseURL: string, input: CreateSchoolEventInput): Promise<SchoolEvent> {
+  return postJSON<SchoolEvent>(baseURL, "/events", {
+    cycleId: input.cycleId,
+    title: input.title,
+    description: input.description ?? "",
+    startsOn: input.startsOn,
+    ...(input.endsOn !== undefined && input.endsOn !== "" ? { endsOn: input.endsOn } : {}),
+    ...(input.levelId !== undefined && input.levelId !== "" ? { levelId: input.levelId } : {}),
+    ...(input.groupId !== undefined && input.groupId !== "" ? { groupId: input.groupId } : {}),
+  });
+}
+
+/** A cycle's agenda, earliest first. */
+export function listSchoolEvents(baseURL: string, cycleId: string): Promise<SchoolEvent[]> {
+  return getList<SchoolEvent>(baseURL, `/events${query({ cycleId })}`, "events");
+}
+
+/** Removes a date entered by mistake. */
+export async function deleteSchoolEvent(baseURL: string, id: string): Promise<void> {
+  const res = await authFetch(url(baseURL, `${BASE_PATH}/events/${id}`), {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw await configFailure(res);
+  }
+}
+
 // --- cycles ---------------------------------------------------------------
 
 export function createCycle(baseURL: string, input: CreateCycleInput): Promise<Cycle> {

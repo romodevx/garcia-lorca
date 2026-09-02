@@ -250,6 +250,83 @@ func (s *CatalogService) ListGroups(ctx context.Context, cycleID, gradeLevelID s
 // CreateTeacher validates and persists a new teacher (a catalog person record,
 // not a login account). `userID` is optional ("" = no IAM link yet). A duplicate
 // email (per tenant) surfaces as KindConflict from the repo.
+// SchoolEventInput is something the school does: a festival, a parents' meeting,
+// an exam week.
+type SchoolEventInput struct {
+	CycleID     string
+	Title       string
+	Description string
+	From        time.Time
+	To          time.Time
+	// Audience is one level, one group, or — left empty — the whole school.
+	Audience domain.EventAudience
+}
+
+// CreateSchoolEvent records something the school DOES.
+//
+// It is stored apart from the closed days on purpose. finance reads
+// non_working_periods to move a due date and stop a surcharge; an activity must
+// never do either. A festival on the 10th does not mean nobody could pay on the
+// 10th, and one table with a kind column would put the school's agenda one typo
+// away from moving four hundred families' deadlines.
+func (s *CatalogService) CreateSchoolEvent(ctx context.Context, in SchoolEventInput) (domain.SchoolEvent, error) {
+	if _, err := s.repo.GetCycle(ctx, in.CycleID); err != nil {
+		return domain.SchoolEvent{}, glerrors.New(glerrors.KindInvalid, "cycle does not exist")
+	}
+	event, err := domain.NewSchoolEvent(s.newID(), s.tenant, in.CycleID,
+		in.Title, in.Description, in.From, in.To, in.Audience)
+	if err != nil {
+		return domain.SchoolEvent{}, err
+	}
+	if err := s.repo.CreateSchoolEvent(ctx, event); err != nil {
+		return domain.SchoolEvent{}, err
+	}
+	return event, nil
+}
+
+// ListSchoolEvents returns a cycle's agenda, earliest first.
+func (s *CatalogService) ListSchoolEvents(ctx context.Context, cycleID string) ([]domain.SchoolEvent, error) {
+	return s.repo.ListSchoolEvents(ctx, cycleID)
+}
+
+// DeleteSchoolEvent removes one event (KindNotFound if absent).
+func (s *CatalogService) DeleteSchoolEvent(ctx context.Context, id string) error {
+	return s.repo.DeleteSchoolEvent(ctx, id)
+}
+
+// --- school calendar (M16) -------------------------------------------------
+
+// CreateNonWorkingPeriod records a day, or a run of days, on which the school
+// does not operate.
+//
+// The cycle is checked first. A calendar hanging from a school year that does
+// not exist is a typo, and the cost of finding out later is a due date that
+// moves in March for a reason nobody can explain.
+func (s *CatalogService) CreateNonWorkingPeriod(ctx context.Context, cycleID, label, kind string, from, to time.Time) (domain.NonWorkingPeriod, error) {
+	if _, err := s.repo.GetCycle(ctx, cycleID); err != nil {
+		return domain.NonWorkingPeriod{}, glerrors.New(glerrors.KindInvalid, "cycle does not exist")
+	}
+	p, err := domain.NewNonWorkingPeriod(s.newID(), s.tenant, cycleID, label, kind, from, to)
+	if err != nil {
+		return domain.NonWorkingPeriod{}, err
+	}
+	if err := s.repo.CreateNonWorkingPeriod(ctx, p); err != nil {
+		return domain.NonWorkingPeriod{}, err
+	}
+	return p, nil
+}
+
+// ListNonWorkingPeriods returns the closed periods of a cycle, ordered by start
+// date.
+func (s *CatalogService) ListNonWorkingPeriods(ctx context.Context, cycleID string) ([]domain.NonWorkingPeriod, error) {
+	return s.repo.ListNonWorkingPeriods(ctx, cycleID)
+}
+
+// DeleteNonWorkingPeriod removes one period (KindNotFound if absent).
+func (s *CatalogService) DeleteNonWorkingPeriod(ctx context.Context, id string) error {
+	return s.repo.DeleteNonWorkingPeriod(ctx, id)
+}
+
 func (s *CatalogService) CreateTeacher(ctx context.Context, firstName, lastName, email, userID string) (domain.Teacher, error) {
 	te, err := domain.NewTeacher(s.newID(), s.tenant, firstName, lastName, email, userID)
 	if err != nil {

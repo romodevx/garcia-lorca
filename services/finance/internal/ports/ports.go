@@ -78,6 +78,10 @@ type CycleReader interface {
 // use case's job, so the caller sees exactly what students reported.
 type EnrollmentReader interface {
 	ListByCycle(ctx context.Context, cycleID, groupID string) ([]EnrollmentRef, error)
+	// ListByStudent returns one student's enrolments across every cycle. A
+	// deposit needs it to find where the pupil sits: the group leads to the
+	// level, and the level's tuition table carries the collection rule.
+	ListByStudent(ctx context.Context, studentID string) ([]EnrollmentRef, error)
 }
 
 // PaymentRegisteredEvent announces that money was collected. Consumers (comms
@@ -136,6 +140,93 @@ type CatalogReader interface {
 	GroupLevels(ctx context.Context, cycleID string) ([]GroupLevel, error)
 }
 
+// CalendarSnapshot is the school calendar as finance saw it at one moment: the
+// days the school is shut, plus a version to stamp on whatever was computed
+// from it.
+//
+// Version exists so a recomputation months later can tell whether it is looking
+// at the same calendar the cashier saw. Stale says the snapshot did not come
+// fresh from config — either it was served from cache after a failed read, or
+// config was unreachable and this is the weekends-only fallback. A number
+// derived from a stale calendar is still a number a person has to defend, so it
+// is recorded as such rather than passed off as current.
+type CalendarSnapshot struct {
+	Days    []time.Time
+	Version string
+	Stale   bool
+}
+
+// CalendarReader tells finance which days the school does not operate. config
+// owns the calendar; finance only reads it, and only to work out deadlines
+// counted in working days.
+type CalendarReader interface {
+	NonWorkingDays(ctx context.Context, cycleID string) (CalendarSnapshot, error)
+}
+
+// DepositWrite is everything one deposit turns into: the surcharge charges it
+// makes real, the payments that split it across debts, and what is left over.
+//
+// It is produced by a callback the repository runs INSIDE the transaction, with
+// the student's open charges already locked. Planning outside and writing inside
+// would reopen the race the lock exists to close: two cashiers taking money from
+// the same family at once would each plan against the same balance and both
+// allocate it.
+type DepositWrite struct {
+	// Surcharges are late-fee charges materialised because this money is landing
+	// on them. The daily rule is derived, not billed, so a surcharge row exists
+	// only where there was movement.
+	Surcharges []domain.Charge
+	// Discounted are charges whose discount this deposit changed — the
+	// early-payment reward, granted only where the money actually settles the
+	// month. They are written before the allocations that assume the new amount.
+	Discounted []domain.Charge
+	// Allocations are the payments, each naming the charge it lands on.
+	Allocations []domain.Payment
+	// UnallocatedCents is the family's credit: money beyond what they owed.
+	UnallocatedCents int64
+}
+
+// IncomeLine is what one concept earned in a period.
+type IncomeLine struct {
+	ConceptID   string
+	Concept     string
+	AmountCents int64
+}
+
+// DepositRecord is a stored deposit with what it did.
+type DepositRecord struct {
+	Deposit          domain.Deposit
+	Surcharges       []domain.Charge
+	Allocations      []domain.Payment
+	UnallocatedCents int64
+	// Settled names the charges this deposit closed. The caller announces them,
+	// and only them: a consumer that releases goods on ChargeSettled must never
+	// act on a partial payment.
+	Settled []ChargeWithPaid
+}
+
+// The event types the outbox carries. They are the names the messaging boundary
+// stamps, so a row read with psql says what it is without a lookup.
+const (
+	OutboxChargeSettled     = "ChargeSettled"
+	OutboxPaymentRegistered = "PaymentRegistered"
+)
+
+// OutboxEvent is a domain event queued inside the transaction that produced it.
+//
+// It exists because publishing after a commit has no second chance: a broker
+// that is down, or a container that dies in between, loses the event and nothing
+// notices. Written here, either the payment and its event both land or neither
+// does, and a publication that fails is simply tried again.
+//
+// Payload is JSON of the domain event, not proto bytes. What goes on the wire is
+// the adapter's business; what belongs in a durable queue is the fact, in a form
+// a person debugging a stuck row can read.
+type OutboxEvent struct {
+	Type    string
+	Payload []byte
+}
+
 // PaymentPublisher emits the finance domain events. Publishing is best-effort
 // and happens after the payment is durably stored: a broker outage must never
 // lose money that was already collected, so the use case ignores the returned
@@ -174,6 +265,17 @@ type FinanceRepository interface {
 	// NOTHING) instead of failing the batch. It returns how many rows were
 	// actually written, which makes re-running a generation idempotent.
 	CreateChargesBulk(ctx context.Context, cs []domain.Charge) (createdCount int, err error)
+	// RescheduleUnpaid moves the due date of charges identified by external ref.
+	//
+	// It exists because the run never touches a charge it already issued, which
+	// is what makes it idempotent — and that left the school unable to correct a
+	// deadline it had already billed. Setting the inscription's due date did
+	// nothing for pupils already charged, so the setting looked broken.
+	//
+	// It moves ONLY what is unpaid and only where the date actually differs. A
+	// settled charge is history; re-dating it would rewrite when a family was
+	// due to pay something they have already paid.
+	RescheduleUnpaid(ctx context.Context, items []ChargeReschedule) (movedCount int, err error)
 	// GetCharge loads one charge together with its collected total; a missing id
 	// yields glerrors.ErrNotFound.
 	GetCharge(ctx context.Context, id string) (ChargeWithPaid, error)
@@ -181,6 +283,56 @@ type FinanceRepository interface {
 	// tenant-bound query rather than a payment lookup per charge (no N+1). An
 	// empty studentID or cycleID skips that filter.
 	ListCharges(ctx context.Context, studentID, cycleID string) ([]ChargeWithPaid, error)
+	// RegisterDeposit stores money as it arrived and the payments it splits
+	// into, in ONE transaction. plan is run inside that transaction with the
+	// student's open charges locked and their collected totals already summed,
+	// so the split is decided against a balance that cannot move under it.
+	//
+	// A repeat under the same idempotency key returns what was stored the first
+	// time (replayed = true) and collects nothing: the retry a lost response
+	// provokes must not cost a family twice.
+	//
+	// outbox runs inside the same transaction, after the allocations are
+	// applied, and returns the events the deposit produced.
+	RegisterDeposit(ctx context.Context, d domain.Deposit,
+		plan func(open []ChargeWithPaid) (DepositWrite, error),
+		outbox func(record DepositRecord) []OutboxEvent) (DepositRecord, bool, error)
+
+	// UnallocatedCents is money a family has handed over that no charge has
+	// claimed: the sum of their live deposits, less what those deposits paid.
+	// Cancelled deposits do not count — that money went back.
+	UnallocatedCents(ctx context.Context, studentID string) (int64, error)
+
+	// IncomeLines sums what was collected between two dates, grouped by the
+	// concept the money was charged for. Cancelled charges are excluded: money
+	// against a voided charge is a correction to make, not income to report.
+	IncomeLines(ctx context.Context, from, to time.Time) ([]IncomeLine, error)
+
+	// DrainOutbox publishes the events waiting in the outbox, oldest first, and
+	// marks the ones that went out.
+	//
+	// publish is called per event; an event it refuses stays unpublished, its
+	// attempt count climbs, and the next drain tries it again. Rows are taken
+	// under SKIP LOCKED so two instances draining at once never publish the same
+	// event twice.
+	DrainOutbox(ctx context.Context, limit int, publish func(OutboxEvent) error) (int, error)
+
+	// GetDeposit returns one deposit by id, or KindNotFound.
+	GetDeposit(ctx context.Context, id string) (domain.Deposit, error)
+
+	// ListDeposits returns a student's deposits, newest first.
+	ListDeposits(ctx context.Context, studentID string) ([]domain.Deposit, error)
+
+	// ListDepositsOn returns every deposit taken on one day, cancelled ones
+	// included — the day's cash-up decides what to do with those, and a reader
+	// that never saw them could not explain a gap.
+	ListDepositsOn(ctx context.Context, day time.Time) ([]domain.Deposit, error)
+
+	// VoidDeposit cancels a deposit and releases its allocations, in one
+	// transaction. The deposit row survives with its reason; the payments it
+	// created do not, so the charges they settled go back to being owed.
+	VoidDeposit(ctx context.Context, d domain.Deposit) error
+
 	// CancelChargeIfUnpaid voids a charge only if nothing was collected against
 	// it, deciding under the charge's row lock so the read cannot go stale
 	// before the write. A charge with payments is KindConflict. Automated
@@ -207,10 +359,16 @@ type FinanceRepository interface {
 	// second insert, no derive, no status change. An empty key opts out (every
 	// call posts a payment) and always reports replayed=false. The caller uses
 	// the flag to suppress the side effects of a retry, notably the event.
+	//
+	// outbox runs inside the SAME transaction, after the status is derived, and
+	// returns the events this payment produced. Queuing them here rather than
+	// publishing after the commit is what stops an event being lost when the
+	// broker is down or the container dies in between.
 	RegisterPayment(
 		ctx context.Context,
 		p domain.Payment,
 		derive func(charge domain.Charge, newPaidCents int64) (status string, err error),
+		outbox func(charge ChargeWithPaid) []OutboxEvent,
 	) (stored domain.Payment, charge ChargeWithPaid, replayed bool, err error)
 	// ListPayments returns every payment posted against the student's charges,
 	// for the account statement.
@@ -262,3 +420,9 @@ type OverdueCursor struct {
 
 // IsZero reports the start-from-the-beginning position.
 func (c OverdueCursor) IsZero() bool { return c.ID == "" && c.DueDate.IsZero() }
+
+// ChargeReschedule is one charge's new deadline, named by its external ref.
+type ChargeReschedule struct {
+	ExternalRef string
+	DueOn       time.Time
+}

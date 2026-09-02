@@ -17,6 +17,8 @@ import { listCycles, listGradeLevels, listGroups, listLevels, type Cycle, type G
 import { enrollIntoGrade, StudentsError, type Placement } from "../../students/api";
 
 import { API_URL } from "../../api-url";
+import { csvName, downloadCsv, toCsv, type CsvColumn } from "../../_lib/csv";
+import { ContactsPanel } from "./ContactsPanel";
 
 
 // ── admission status → pill (design language) ──
@@ -348,6 +350,7 @@ function StudentSheet({ st, groups, onClose, onEnroll }: { st: Student; groups: 
               <span style={{ fontSize: 14.5, fontWeight: 600, color: "var(--text)", textAlign: "right" }}>{v}</span>
             </div>
           ))}
+          <ContactsPanel studentId={st.id} />
           {groups.length > 0 && (
             <div style={{ padding: "18px 0" }}>
               <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Inscribir en grupo</span>
@@ -373,12 +376,24 @@ export interface StudentsScreenProps {
   onBack: () => void;
 }
 
+/** What the school reads in Excel, in the order the table shows it. */
+const EXPORT_COLUMNS: readonly CsvColumn<Student>[] = [
+  { label: "Apellidos", value: (s) => s.lastName },
+  { label: "Nombre", value: (s) => s.firstName },
+  { label: "CURP", value: (s) => s.curp },
+  { label: "Nivel", value: (s) => s.level },
+  { label: "Grado y grupo", value: (s) => s.gradeGroup },
+  { label: "Tutor", value: (s) => s.guardianName },
+  { label: "Estado", value: (s) => statusOf(s.admissionStatus).label },
+];
+
 export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
   const [students, setStudents] = useState<Student[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [tab, setTab] = useState<"all" | "active" | "pending" | "inactive">("all");
   const [level, setLevel] = useState("Todos");
   const [q, setQ] = useState("");
@@ -399,7 +414,14 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
   useEffect(() => () => { if (toastTimer.current !== null) clearTimeout(toastTimer.current); }, []);
 
   const reload = useCallback((): void => {
-    listStudents(API_URL).then(setStudents).catch(() => {}).finally(() => setLoading(false));
+    // Three states, not two. An empty roll and a roll we could not read look
+    // identical on screen and mean opposite things — "no pupils match" versus
+    // "we do not know" — and the office reading the first when the truth is the
+    // second goes looking for a problem that is not there.
+    listStudents(API_URL)
+      .then((rows) => { setStudents(rows); setLoadFailed(false); })
+      .catch(() => setLoadFailed(true))
+      .finally(() => setLoading(false));
   }, []);
   useEffect(() => {
     reload();
@@ -419,6 +441,14 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
   }), [students]);
   const levelsPresent = useMemo(() => Array.from(new Set(students.map((s) => s.level))), [students]);
 
+
+  // The padrón as it is on screen: the tab, the level and the search. A file
+  // that quietly held every pupil would look right and be wrong.
+  const exportView = (): void => {
+    downloadCsv(csvName("alumnos", new Date()), toCsv(EXPORT_COLUMNS, filtered));
+    say(`${filtered.length} alumnos exportados`);
+  };
+
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return students
@@ -426,6 +456,17 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
         (needle === "" || `${s.firstName} ${s.lastName}`.toLowerCase().includes(needle) || s.curp.toLowerCase().includes(needle) || s.guardianName.toLowerCase().includes(needle)))
       .sort((a, b) => `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`, "es"));
   }, [students, tab, level, q]);
+
+  // How many pupils sit in each classroom, over whatever filter is on. The
+  // school asked for it and it is the number a director counts by hand before
+  // deciding whether to open another group.
+  const perGroup = useMemo(() => {
+    const counted = new Map<string, number>();
+    for (const s of filtered) {
+      counted.set(s.gradeGroup, (counted.get(s.gradeGroup) ?? 0) + 1);
+    }
+    return [...counted.entries()].sort((a, b) => a[0].localeCompare(b[0], "es"));
+  }, [filtered]);
 
   // Any filter change (or a new page size) sends the view back to the first page.
   useEffect(() => { setPage(0); }, [tab, level, q, pageSize]);
@@ -492,7 +533,7 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
           </div>
         </div>
         <div style={{ display: "flex", gap: 12 }}>
-          <Btn kind="ghost" icon="download" onClick={() => say("Exportación generada")}>Exportar</Btn>
+          <Btn kind="ghost" icon="download" onClick={() => exportView()}>Exportar</Btn>
           <Btn icon="plus" onClick={() => setAdd(true)} style={{ height: 52, fontSize: 16.5 }}>Nuevo alumno</Btn>
         </div>
       </div>
@@ -536,6 +577,20 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
         {anyFilter && <button onClick={clear} style={{ height: 38, padding: "0 14px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, color: "var(--text-muted)", background: "var(--surface-3)", border: "1px solid var(--border)", cursor: "pointer" }}><Icon name="close" size={15} />Limpiar</button>}
       </div>
 
+      {/* How many sit in each classroom, under whatever filter is on. It is the
+          number a director counts by hand before deciding to open a group. */}
+      {perGroup.length > 0 && (
+        <div data-testid="per-group" className="fade-up" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: ".04em" }}>Por salón</span>
+          {perGroup.map(([group, n]) => (
+            <span key={group} style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, padding: "0 12px", borderRadius: 99, background: "var(--surface-3)", border: "1px solid var(--border)", fontSize: 13, color: "var(--text-muted)" }}>
+              {group}
+              <b style={{ color: "var(--text)", fontFamily: "var(--font-display)" }}>{n}</b>
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="fade-up" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-xl)", boxShadow: "var(--shadow-card)", overflow: "hidden" }}>
         <div style={{ display: "grid", gridTemplateColumns: "2.4fr 1.1fr 1.6fr 1fr auto", gap: 16, padding: "14px 24px 12px", borderBottom: "1px solid var(--border)", fontSize: 12.5, fontWeight: 700, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: ".04em" }}>
           <div>Alumno</div><div>Nivel</div><div>Tutor</div><div>Estado</div><div style={{ width: 84 }} />
@@ -543,6 +598,16 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
         <div style={{ padding: 8 }}>
           {loading ? (
             <div style={{ padding: "56px", textAlign: "center", color: "var(--text-muted)" }}>Cargando…</div>
+          ) : loadFailed ? (
+            <div role="alert" style={{ padding: "56px 20px", textAlign: "center" }}>
+              <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 19, color: "var(--bad-fg)" }}>No pudimos cargar los alumnos</div>
+              <div style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 6 }}>
+                No es que no haya — no los pudimos leer. Vuelve a intentar en un momento.
+              </div>
+              <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 22 }}>
+                <Btn kind="ghost" onClick={() => { setLoading(true); reload(); }}>Reintentar</Btn>
+              </div>
+            </div>
           ) : filtered.length === 0 ? (
             <div style={{ padding: "56px 20px", textAlign: "center" }}>
               <div style={{ width: 70, height: 70, borderRadius: 20, margin: "0 auto 16px", display: "grid", placeItems: "center", background: "color-mix(in oklab, var(--forest) 12%, var(--surface))", color: "var(--forest)" }}><Icon name="students" size={36} stroke={1.9} /></div>

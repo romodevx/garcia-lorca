@@ -51,19 +51,39 @@ func runOn(t *testing.T, f *fixture, day string) usecase.BillingResult {
 	return got
 }
 
-// The run bills only the months whose due date has ARRIVED. A school that opens
-// in September must not hand a family ten months of debt on day one.
-func TestRunBillingChargesOnlyTheMonthsThatHaveComeDue(t *testing.T) {
+// The run issues the WHOLE year at once: the eleven months and the inscription,
+// due dates and all.
+//
+// The school asked for this in as many words — "el monto total que debe pagar el
+// año" — and it is what makes the rest work. A family that hands over $6,000 in
+// September has six months marked paid, which cannot happen if those months are
+// not charges yet. The earlier rule (bill a month when it falls due) left the
+// other five as an unexplained credit.
+func TestRunBillingIssuesTheWholeYearUpFront(t *testing.T) {
 	f := billingFixture(t)
 
-	// 15 November: September, October and November are due. December is not.
+	// 15 November, but the year is billed in full: the plan has ten months.
 	got := runOn(t, f, "2026-11-15")
 
-	if got.TuitionCreated != 3 {
-		t.Errorf("tuition created = %d, want 3 (Sep, Oct, Nov)", got.TuitionCreated)
+	if got.TuitionCreated != 10 {
+		t.Errorf("tuition created = %d, want 10 — the whole year", got.TuitionCreated)
 	}
 	if got.EnrollmentCreated != 1 {
 		t.Errorf("enrollment created = %d, want 1", got.EnrollmentCreated)
+	}
+}
+
+// Billing the year up front must not bill the FUTURE as overdue. A month that
+// has not arrived owes nothing extra, and a family opening the app in September
+// must not find surcharges on June.
+func TestTheFutureMonthsCarryNoSurcharge(t *testing.T) {
+	f := billingFixture(t)
+
+	got := runOn(t, f, "2026-11-12")
+
+	// Only September (2 months late), October (1) and the inscription (3).
+	if got.LateFeesCreated != 6 {
+		t.Errorf("late fees = %d, want 6 — nothing accrues on a month that has not come due", got.LateFeesCreated)
 	}
 }
 
@@ -214,5 +234,142 @@ func TestRunBillingAccruesBeyondTheListCap(t *testing.T) {
 	if got.LateFeesCreated != pupils {
 		t.Fatalf("late fees = %d, want exactly %d — the run stopped at the read cap and silently under-billed the newest debt",
 			got.LateFeesCreated, pupils)
+	}
+}
+
+// dailyFixture is the same school on the owner's new rule: $10 a day from the
+// day after the due date, every day of the week, and no fixed monthly fee.
+func dailyFixture(t *testing.T) *fixture {
+	t.Helper()
+	f := billingFixture(t)
+	if _, err := f.svc.UpsertTuitionPlan(context.Background(), usecase.TuitionPlanInput{
+		CycleID: testCycle, LevelID: testLevel,
+		EnrollmentCents: 50000, MonthlyCents: 320000,
+		Months: 10, FirstBilledMonth: 9, DueDay: 10, Active: true,
+		Policy: domain.CollectionPolicy{
+			DailyMode: true, LateFeeDailyCents: 1000, SurchargeCountsAllDays: true,
+		},
+	}); err != nil {
+		t.Fatalf("seed daily plan: %v", err)
+	}
+	return f
+}
+
+// Under the daily rule the monthly run must NOT issue surcharge charges. What is
+// owed in surcharge changes every night; a charge written today would be wrong
+// tomorrow and would still be sitting in the family's balance. The amount is
+// derived at the moment of payment instead.
+func TestDailyModeIssuesNoSurchargeCharges(t *testing.T) {
+	f := dailyFixture(t)
+
+	got := runOn(t, f, "2026-11-12")
+
+	if got.LateFeesCreated != 0 {
+		t.Errorf("late fees created = %d, want 0 — the daily rule is derived, not charged", got.LateFeesCreated)
+	}
+	// The tuition itself is still billed — the whole year of it. Turning the
+	// surcharge rule off must not turn the school's income off with it.
+	if got.TuitionCreated != 10 {
+		t.Errorf("tuition created = %d, want 10", got.TuitionCreated)
+	}
+}
+
+// A due date on a day the school is shut is a date nobody could have paid on.
+// It moves to the next working day, and only then does being late start
+// costing: the review asks for exactly this, and the surcharge rule counting
+// every day makes it matter — an unmoved holiday would charge a family for the
+// day the office was closed.
+func TestADueDateOnAClosedDayMovesToTheNextWorkingDay(t *testing.T) {
+	f := billingFixture(t)
+	// 10 October 2026 is a Saturday, and the school also closes the Monday.
+	f.calendar.days = []time.Time{time.Date(2026, time.October, 12, 0, 0, 0, 0, time.UTC)}
+
+	runOn(t, f, "2026-11-15")
+
+	charges, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	if err != nil {
+		t.Fatalf("ListCharges: %v", err)
+	}
+	var october time.Time
+	for _, c := range charges {
+		if strings.Contains(c.Charge.Description(), "octubre 2026") {
+			october = c.Charge.DueDate()
+		}
+	}
+	if october.IsZero() {
+		t.Fatal("October was not billed")
+	}
+	// Saturday 10 → Sunday 11 → Monday 12 is closed → Tuesday 13.
+	if october.Day() != 13 {
+		t.Errorf("October fell due on the %d, want the 13th — the first day the school was open", october.Day())
+	}
+}
+
+// The school's arrangement for maternal: a fixed amount off every month of that
+// level. It is set once on the tuition table, and the run applies it to every
+// pupil in the level without anybody typing it four hundred times.
+func TestALevelDiscountComesOffEveryMonth(t *testing.T) {
+	f := billingFixture(t)
+	if _, err := f.svc.UpsertTuitionPlan(context.Background(), usecase.TuitionPlanInput{
+		CycleID: testCycle, LevelID: testLevel,
+		EnrollmentCents: 50000, MonthlyCents: 320000,
+		Months: 10, FirstBilledMonth: 9, DueDay: 10, Active: true,
+		MonthlyDiscountCents: 50000,
+	}); err != nil {
+		t.Fatalf("seed plan: %v", err)
+	}
+
+	runOn(t, f, "2026-09-15")
+
+	charges, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	if err != nil {
+		t.Fatalf("ListCharges: %v", err)
+	}
+	tuition := f.repo.conceptIDOfKind(domain.KindTuition)
+	var discounted, months int
+	for _, c := range charges {
+		if c.Charge.ConceptID() != tuition {
+			continue
+		}
+		months++
+		if c.Charge.Discount().Int64() == 50000 && c.Charge.Effective().Int64() == 270000 {
+			discounted++
+		}
+	}
+	if months == 0 || discounted != months {
+		t.Errorf("%d of %d months carry the level discount, want all of them", discounted, months)
+	}
+	// And it says why, so a parent asking is answered by the row itself.
+	for _, c := range charges {
+		if c.Charge.ConceptID() == tuition && c.Charge.DiscountReason() != domain.ReasonLevelDiscount {
+			t.Errorf("discount reason = %q, want the level arrangement", c.Charge.DiscountReason())
+			break
+		}
+	}
+}
+
+// The inscription is not a month, so a monthly discount does not touch it.
+func TestALevelDiscountDoesNotTouchTheInscription(t *testing.T) {
+	f := billingFixture(t)
+	if _, err := f.svc.UpsertTuitionPlan(context.Background(), usecase.TuitionPlanInput{
+		CycleID: testCycle, LevelID: testLevel,
+		EnrollmentCents: 50000, MonthlyCents: 320000,
+		Months: 10, FirstBilledMonth: 9, DueDay: 10, Active: true,
+		MonthlyDiscountCents: 50000,
+	}); err != nil {
+		t.Fatalf("seed plan: %v", err)
+	}
+
+	runOn(t, f, "2026-09-15")
+
+	charges, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	if err != nil {
+		t.Fatalf("ListCharges: %v", err)
+	}
+	enrollment := f.repo.conceptIDOfKind(domain.KindEnrollment)
+	for _, c := range charges {
+		if c.Charge.ConceptID() == enrollment && c.Charge.Discount().Int64() != 0 {
+			t.Errorf("the inscription was discounted by %d", c.Charge.Discount().Int64())
+		}
 	}
 }

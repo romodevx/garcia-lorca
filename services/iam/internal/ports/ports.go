@@ -80,7 +80,11 @@ type PasswordHasher interface {
 // the full claims; refresh tokens carry just enough to re-mint (the user id).
 type TokenIssuer interface {
 	IssueAccessToken(ctx context.Context, claims domain.Claims) (string, error)
-	IssueRefreshToken(ctx context.Context, userID string) (string, error)
+	//
+	// The kind decides how long the token may sit unused: a staff session
+	// closes after fifteen idle minutes, a family one lasts a day. It is stamped
+	// into the token so a rotation cannot promote itself to the longer life.
+	IssueRefreshToken(ctx context.Context, userID string, kind domain.SessionKind) (string, error)
 }
 
 // TokenValidator verifies signed tokens. An invalid signature or an expired
@@ -90,5 +94,5 @@ type TokenValidator interface {
 	// ParseRefreshToken returns the subject (user id) and issued-at instant of a
 	// valid refresh token. The issued-at supports revoking tokens minted before
 	// the user's last password change.
-	ParseRefreshToken(ctx context.Context, token string) (userID string, issuedAt time.Time, err error)
+	ParseRefreshToken(ctx context.Context, token string) (userID string, issuedAt time.Time, kind domain.SessionKind, err error)
 }

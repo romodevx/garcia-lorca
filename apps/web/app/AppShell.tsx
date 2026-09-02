@@ -17,16 +17,21 @@ import { GradesScreen } from "./_screens/grades/GradesScreen";
 import { Login } from "./_screens/Login";
 import { ChangePassword } from "./_screens/ChangePassword";
 import { ModulePlaceholder } from "./_screens/ModulePlaceholder";
+import { AnnouncementsScreen } from "./_screens/announcements/AnnouncementsScreen";
+import { PaymentsScreen } from "./_screens/payments/PaymentsScreen";
 import { useTheme } from "./theme/ThemeProvider";
 import { login as apiLogin, changePassword as apiChangePassword, logout as apiLogout, me as apiMe, refresh as apiRefresh, type MeResult } from "./auth/api";
 
 import { API_URL } from "./api-url";
+import { useSessionTimeout } from "./auth/useSessionTimeout";
 
 type View =
   | { screen: "login" }
   | { screen: "changePassword" }
   | { screen: "dashboard" }
   | { screen: "finance" }
+  | { screen: "announcements" }
+  | { screen: "payments" }
   | { screen: "config" }
   | { screen: "students" }
   | { screen: "grades" }
@@ -92,6 +97,9 @@ export function AppShell(): ReactElement {
   // The single flag read for the finance surface (UX-only; the gateway is the
   // security boundary). Hooks must run unconditionally, so we read it here.
   const financeEnabled = useFlag("module_finance");
+  // UX only, like every other flag read here: the gateway's 404 is what actually
+  // keeps a disabled module unreachable.
+  const commsEnabled = useFlag("module_comms");
   // The academic-catalog surface is gated by module_config (UX-only; the gateway
   // is the boundary). The "settings" module (Configuración) opens this catalog.
   const configEnabled = useFlag("module_config");
@@ -201,6 +209,27 @@ export function AppShell(): ReactElement {
     setPrincipal(undefined);
     setView({ screen: "login" });
   };
+
+  // The school's session rule. The panel runs on a computer at the front desk:
+  // somebody walks away to attend a parent, and the next person who sits down
+  // must not find an open session holding the school's money.
+  //
+  // The server enforces it too — a staff session that has sat unused for fifteen
+  // minutes is refused, and the cookie expires with it. This is what makes it
+  // immediate and explained, rather than a surprise on the next click.
+  useSessionTimeout({
+    onExpire: () => {
+      if (principal === undefined) {
+        // Nobody is signed in; there is nothing to close.
+        return;
+      }
+      logout();
+      setAuthError("Cerramos la sesión por inactividad. Vuelve a entrar.");
+    },
+    // Renews while somebody is working, so a cashier entering payments for an
+    // hour never meets a login screen mid-entry.
+    onKeepAlive: () => { void apiRefresh(API_URL).catch(() => {}); },
+  });
   const home = (): void => setView({ screen: "dashboard" });
   const open = useCallback((id: string, _intent?: string): void => {
     if (id === "finance") {
@@ -229,6 +258,14 @@ export function AppShell(): ReactElement {
     }
     if (id === "uniforms") {
       setView({ screen: "uniforms" });
+      return;
+    }
+    if (id === "payments") {
+      setView({ screen: "payments" });
+      return;
+    }
+    if (id === "announcements") {
+      setView({ screen: "announcements" });
       return;
     }
     if (id === "admin") {
@@ -274,6 +311,20 @@ export function AppShell(): ReactElement {
           // Flag OFF: do not render the finance surface; show the friendly stub
           // instead so navigation never dead-ends. (Backend 404 is authoritative.)
           <ModulePlaceholder m={MODULES.find((m) => m.id === "finance") as ModuleDef} onBack={home} />
+        ))}
+      {view.screen === "payments" &&
+        (financeEnabled ? (
+          <PaymentsScreen onBack={home} />
+        ) : (
+          <ModulePlaceholder m={MODULES.find((m) => m.id === "payments") as ModuleDef} onBack={home} />
+        ))}
+      {view.screen === "announcements" &&
+        (commsEnabled ? (
+          <AnnouncementsScreen onBack={home} />
+        ) : (
+          // Flag OFF: never render the send surface; the friendly stub keeps
+          // navigation from dead-ending. (Backend 404 is authoritative.)
+          <ModulePlaceholder m={MODULES.find((m) => m.id === "announcements") as ModuleDef} onBack={home} />
         ))}
       {view.screen === "config" &&
         (configEnabled ? (

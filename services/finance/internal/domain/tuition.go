@@ -39,6 +39,46 @@ type TuitionPlanSpec struct {
 	DueDay       int
 	LateFeeCents int64
 	Active       bool
+
+	// Policy is what this level costs for paying late and saves for paying early.
+	// It travels with the plan because a school raises tuition and changes its
+	// late-fee rule in the same breath, and last year's charges must still
+	// reconcile against last year's rules.
+	Policy CollectionPolicy
+	// Schedule replaces the uniform monthly payment with named amounts per
+	// month. Empty keeps the uniform schedule.
+	Schedule []Installment
+	// MonthlyDiscountCents comes off every month of this level. Zero is no
+	// discount, which is what most levels have.
+	MonthlyDiscountCents int64
+	// Fees are the extra amounts the school collects on top of the tuition,
+	// each spread across the months it chose. Empty is the ordinary state.
+	Fees []Fee
+	// EnrollmentDueOn is the day the inscription falls due. Zero keeps the rule
+	// the run has always used — the plan's due day in the cycle's first month —
+	// so a plan written before this field goes on meaning what it meant.
+	EnrollmentDueOn time.Time
+}
+
+// Installment is one payment of the year: which calendar month it falls in and
+// how much of the year's tuition it collects.
+//
+// It exists because a school does not always divide the year into equal parts.
+// "Once meses, pero diciembre a la mitad y la otra mitad en marzo" is a real
+// arrangement — families are short in December — and a plan that can only
+// express N equal payments cannot say it.
+type Installment struct {
+	// Month is 1-12. The year is worked out from the cycle, so a schedule that
+	// runs past December continues into the next one.
+	Month int
+	// AmountCents is what this payment collects. It need not equal any other.
+	AmountCents int64
+}
+
+// DueInstallment is one installment placed on the calendar.
+type DueInstallment struct {
+	DueOn       time.Time
+	AmountCents int64
 }
 
 // TuitionPlan is what one level costs in one cycle: the inscription, the monthly
@@ -60,9 +100,14 @@ type TuitionPlan struct {
 	months           int
 	firstBilledMonth int
 
-	dueDay       int
-	lateFeeCents int64
-	active       bool
+	dueDay               int
+	lateFeeCents         int64
+	policy               CollectionPolicy
+	schedule             []Installment
+	monthlyDiscountCents int64
+	fees                 []Fee
+	enrollmentDueOn      time.Time
+	active               bool
 }
 
 // NewTuitionPlan validates a school's statement of what a level costs.
@@ -86,11 +131,53 @@ func NewTuitionPlan(spec TuitionPlanSpec) (TuitionPlan, error) {
 		return TuitionPlan{}, glerrors.New(glerrors.KindInvalid,
 			"the due day must be between 1 and 28, so it exists in February too")
 	}
+	if spec.Policy.DailyMode && spec.Policy.LateFeeDailyCents <= 0 {
+		// The same rule the database enforces (tuition_plans_daily_rate_ck).
+		// Caught here too so a half-configured plan is refused where the message
+		// can say what is missing, not as a constraint violation.
+		return TuitionPlan{}, glerrors.New(glerrors.KindInvalid,
+			"a daily late-fee rule needs a daily rate, or it charges nothing")
+	}
+	if spec.Policy.LateFeeDailyCents < 0 || spec.Policy.EarlyPaymentCents < 0 || spec.Policy.EarlyPaymentDays < 0 {
+		return TuitionPlan{}, glerrors.New(glerrors.KindInvalid, "an amount cannot be negative")
+	}
+	if spec.MonthlyDiscountCents < 0 {
+		return TuitionPlan{}, glerrors.New(glerrors.KindInvalid, "a discount cannot be negative")
+	}
+	if spec.MonthlyDiscountCents > spec.MonthlyCents {
+		// A charge that owes negative money would pay for itself and then some.
+		return TuitionPlan{}, glerrors.New(glerrors.KindInvalid,
+			"the discount cannot be bigger than the month it comes off")
+	}
+	if len(spec.Fees) > maxFeesPerPlan {
+		return TuitionPlan{}, glerrors.New(glerrors.KindInvalid, "that is more fees than a level can carry")
+	}
+	for _, f := range spec.Fees {
+		if err := f.validate(); err != nil {
+			return TuitionPlan{}, err
+		}
+	}
+	for _, i := range spec.Schedule {
+		if i.Month < 1 || i.Month > 12 {
+			return TuitionPlan{}, glerrors.New(glerrors.KindInvalid, "a payment must fall in a month from 1 to 12")
+		}
+		if i.AmountCents <= 0 {
+			// A payment of nothing is a charge for nothing: it would sit in a
+			// family's statement forever, already settled and never explained.
+			return TuitionPlan{}, glerrors.New(glerrors.KindInvalid, "a payment must be for some money")
+		}
+	}
+
 	return TuitionPlan{
 		id: spec.ID, tenantID: spec.TenantID, cycleID: spec.CycleID, levelID: spec.LevelID,
 		enrollmentCents: spec.EnrollmentCents, monthlyCents: spec.MonthlyCents,
 		months: spec.Months, firstBilledMonth: spec.FirstBilledMonth,
 		dueDay: spec.DueDay, lateFeeCents: spec.LateFeeCents, active: spec.Active,
+		policy:               spec.Policy,
+		schedule:             spec.Schedule,
+		monthlyDiscountCents: spec.MonthlyDiscountCents,
+		fees:                 spec.Fees,
+		enrollmentDueOn:      spec.EnrollmentDueOn,
 	}, nil
 }
 
@@ -121,6 +208,10 @@ func (p TuitionPlan) FirstBilledMonth() int { return p.firstBilledMonth }
 // DueDay is the day of the month a payment falls due.
 func (p TuitionPlan) DueDay() int { return p.dueDay }
 
+// Policy is the collection rule that applies to this plan's charges: what a late
+// payment costs per day and what an early one saves.
+func (p TuitionPlan) Policy() CollectionPolicy { return p.policy }
+
 // LateFeeCents is the fixed surcharge added once per completed overdue month.
 func (p TuitionPlan) LateFeeCents() int64 { return p.lateFeeCents }
 
@@ -150,6 +241,56 @@ func (p TuitionPlan) BilledMonths(cycleStart time.Time) []time.Time {
 	return out
 }
 
+// MonthlyDiscountCents is what comes off every month of this level — the
+// school's arrangement for maternal, or for any level it decides to price
+// differently. It is set once on the table rather than typed per pupil, which
+// is the difference between a rule and four hundred chances to mistype it.
+func (p TuitionPlan) MonthlyDiscountCents() int64 { return p.monthlyDiscountCents }
+
+// Schedule is the plan's explicit payment plan, empty when the year is divided
+// into equal monthly parts.
+func (p TuitionPlan) Schedule() []Installment { return p.schedule }
+
+// Installments places the year's payments on the calendar: what falls due, when,
+// and for how much.
+//
+// Without a schedule this is the uniform year the plan has always billed — N
+// equal payments, one a month. With one, it is exactly what the school wrote
+// down, which is how "diciembre a la mitad y la otra mitad en marzo" becomes
+// something the billing run can issue.
+func (p TuitionPlan) Installments(cycleStart time.Time) []DueInstallment {
+	if len(p.schedule) == 0 {
+		months := p.BilledMonths(cycleStart)
+		out := make([]DueInstallment, 0, len(months))
+		for _, due := range months {
+			out = append(out, DueInstallment{DueOn: due, AmountCents: p.monthlyCents})
+		}
+		return out
+	}
+
+	year := cycleStart.Year()
+	if int(cycleStart.Month()) > p.schedule[0].Month {
+		year++
+	}
+	out := make([]DueInstallment, 0, len(p.schedule))
+	previous := 0
+	for _, i := range p.schedule {
+		// The schedule is read in the order the school wrote it, so a month
+		// number that goes backwards means the year turned: September to July
+		// runs across two calendar years, and nobody writing it down thinks of
+		// that as two lists.
+		if previous != 0 && i.Month < previous {
+			year++
+		}
+		previous = i.Month
+		out = append(out, DueInstallment{
+			DueOn:       time.Date(year, time.Month(i.Month), p.dueDay, 0, 0, 0, 0, cycleStart.Location()),
+			AmountCents: i.AmountCents,
+		})
+	}
+	return out
+}
+
 // OverdueMonths counts COMPLETED months between a due date and a given day.
 //
 // Completed months and not days, because the surcharge rule is monthly: running
@@ -170,4 +311,44 @@ func OverdueMonths(due, asOf time.Time) int {
 		return 0
 	}
 	return months
+}
+
+// Fees are the extra amounts this level collects on top of the tuition.
+func (p TuitionPlan) Fees() []Fee { return p.fees }
+
+// EnrollmentDueOn is the day the inscription falls due, or the zero time when
+// the school did not set one and the run should derive it.
+func (p TuitionPlan) EnrollmentDueOn() time.Time { return p.enrollmentDueOn }
+
+// FeeInstallments places every fee's shares on the calendar: what falls due,
+// when, for how much, and which part of which fee it is.
+//
+// The year is worked out the same way the tuition's is — forward from the cycle,
+// turning when a month number goes backwards — because a school that writes
+// "septiembre y febrero" is not thinking about two calendar years, and should
+// not have to.
+func (p TuitionPlan) FeeInstallments(cycleStart time.Time) []FeeInstallment {
+	var out []FeeInstallment
+	for _, f := range p.fees {
+		shares := f.shares()
+		year := cycleStart.Year()
+		if int(cycleStart.Month()) > f.Months[0] {
+			year++
+		}
+		previous := 0
+		for i, month := range f.Months {
+			if previous != 0 && month < previous {
+				year++
+			}
+			previous = month
+			out = append(out, FeeInstallment{
+				Name:        strings.TrimSpace(f.Name),
+				Part:        i + 1,
+				Of:          len(f.Months),
+				DueOn:       time.Date(year, time.Month(month), p.dueDay, 0, 0, 0, 0, cycleStart.Location()),
+				AmountCents: shares[i],
+			})
+		}
+	}
+	return out
 }

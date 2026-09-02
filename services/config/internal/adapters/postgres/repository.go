@@ -597,3 +597,108 @@ func translateFindErr(err error) error {
 	}
 	return glerrors.Wrap(glerrors.KindInternal, "query failed", err)
 }
+
+// --- school calendar (M16) -------------------------------------------------
+
+// CreateNonWorkingPeriod persists a closed period. The same label twice in one
+// cycle is a duplicate entry, not two closures, so it comes back KindConflict.
+func (r *Repository) CreateNonWorkingPeriod(ctx context.Context, p domain.NonWorkingPeriod) error {
+	model := fromDomainNonWorkingPeriod(p)
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		return translateCreateErr(tx.Create(&model).Error, "creating non-working period",
+			"this cycle already has a period with that name")
+	})
+}
+
+// ListNonWorkingPeriods returns every closed period of a cycle, earliest first.
+// The order is part of the contract: a person reads this as a calendar.
+func (r *Repository) ListNonWorkingPeriods(ctx context.Context, cycleID string) ([]domain.NonWorkingPeriod, error) {
+	var out []domain.NonWorkingPeriod
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var rows []nonWorkingPeriodModel
+		if err := tx.Where("cycle_id = ?", cycleID).Order("starts_on, id").Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing non-working periods", err)
+		}
+		out = make([]domain.NonWorkingPeriod, 0, len(rows))
+		for _, m := range rows {
+			p, derr := toDomainNonWorkingPeriod(m)
+			if derr != nil {
+				return derr
+			}
+			out = append(out, p)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// DeleteNonWorkingPeriod removes one period. An id that matches no row is
+// KindNotFound rather than a silent success: the caller asked for a day to stop
+// being closed, and needs to know whether it did.
+func (r *Repository) DeleteNonWorkingPeriod(ctx context.Context, id string) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Where("id = ?", id).Delete(&nonWorkingPeriodModel{})
+		if res.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "deleting non-working period", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return glerrors.ErrNotFound
+		}
+		return nil
+	})
+}
+
+// --- school events (M16) ---------------------------------------------------
+
+// CreateSchoolEvent persists something the school does.
+func (r *Repository) CreateSchoolEvent(ctx context.Context, e domain.SchoolEvent) error {
+	model := fromDomainSchoolEvent(e)
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		return translateCreateErr(tx.Create(&model).Error, "creating school event",
+			"this event already exists")
+	})
+}
+
+// ListSchoolEvents returns a cycle's agenda, earliest first. The order is part
+// of the contract: a person reads this as a calendar.
+func (r *Repository) ListSchoolEvents(ctx context.Context, cycleID string) ([]domain.SchoolEvent, error) {
+	var out []domain.SchoolEvent
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var rows []schoolEventModel
+		if err := tx.Where("cycle_id = ?", cycleID).Order("starts_on, id").Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing school events", err)
+		}
+		out = make([]domain.SchoolEvent, 0, len(rows))
+		for _, m := range rows {
+			e, derr := toDomainSchoolEvent(m)
+			if derr != nil {
+				return derr
+			}
+			out = append(out, e)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// DeleteSchoolEvent removes one event. An id that matches no row is
+// KindNotFound rather than a silent success: somebody asked for a date to come
+// off the calendar and needs to know whether it did.
+func (r *Repository) DeleteSchoolEvent(ctx context.Context, id string) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Where("id = ?", id).Delete(&schoolEventModel{})
+		if res.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "deleting school event", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return glerrors.ErrNotFound
+		}
+		return nil
+	})
+}

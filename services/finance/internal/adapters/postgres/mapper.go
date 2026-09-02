@@ -1,6 +1,10 @@
 package postgres
 
 import (
+	"encoding/json"
+	"time"
+
+	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/finance/internal/domain"
 )
 
@@ -23,11 +27,36 @@ func toDomainConcept(m chargeConceptModel) (domain.ChargeConcept, error) {
 
 // toDomainPlan rebuilds a tuition table from its row.
 func toDomainPlan(m tuitionPlanModel) (domain.TuitionPlan, error) {
+	schedule, err := scheduleToDomain(m.Schedule)
+	if err != nil {
+		return domain.TuitionPlan{}, err
+	}
+	fees, err := feesToDomain(m.Fees)
+	if err != nil {
+		return domain.TuitionPlan{}, err
+	}
+	var enrollmentDue time.Time
+	if m.EnrollmentDueOn != nil {
+		enrollmentDue = *m.EnrollmentDueOn
+	}
 	return domain.NewTuitionPlan(domain.TuitionPlanSpec{
 		ID: m.ID, TenantID: m.TenantID, CycleID: m.CycleID, LevelID: m.LevelID,
 		EnrollmentCents: m.EnrollmentCents, MonthlyCents: m.MonthlyCents,
 		Months: m.Months, FirstBilledMonth: m.FirstBilledMonth,
 		DueDay: m.DueDay, LateFeeCents: m.LateFeeCents, Active: m.Active,
+		Schedule:             schedule,
+		MonthlyDiscountCents: m.MonthlyDiscountCents,
+		Fees:                 fees,
+		EnrollmentDueOn:      enrollmentDue,
+		Policy: domain.CollectionPolicy{
+			// A row written before M16 has mode 'monthly' by default, so it keeps
+			// meaning exactly what it meant when it was billed.
+			DailyMode:              m.LateFeeMode == "daily",
+			LateFeeDailyCents:      m.LateFeeDailyCents,
+			SurchargeCountsAllDays: m.SurchargeCountsAllDays,
+			EarlyPaymentCents:      m.EarlyPaymentCents,
+			EarlyPaymentDays:       m.EarlyPaymentDays,
+		},
 	})
 }
 
@@ -38,7 +67,88 @@ func fromDomainPlan(p domain.TuitionPlan) tuitionPlanModel {
 		EnrollmentCents: p.EnrollmentCents(), MonthlyCents: p.MonthlyCents(),
 		Months: p.Months(), FirstBilledMonth: p.FirstBilledMonth(),
 		DueDay: p.DueDay(), LateFeeCents: p.LateFeeCents(), Active: p.Active(),
+		LateFeeDailyCents:      p.Policy().LateFeeDailyCents,
+		LateFeeMode:            lateFeeMode(p.Policy().DailyMode),
+		SurchargeCountsAllDays: p.Policy().SurchargeCountsAllDays,
+		EarlyPaymentCents:      p.Policy().EarlyPaymentCents,
+		EarlyPaymentDays:       p.Policy().EarlyPaymentDays,
+		Schedule:               scheduleFromDomain(p.Schedule()),
+		MonthlyDiscountCents:   p.MonthlyDiscountCents(),
+		Fees:                   feesFromDomain(p.Fees()),
+		EnrollmentDueOn:        enrollmentDueFromDomain(p.EnrollmentDueOn()),
 	}
+}
+
+// feesToDomain reads the stored fees. A row written before fees existed holds
+// "[]" and yields none, which is a level that collects only its tuition.
+func feesToDomain(raw []byte) ([]domain.Fee, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var out []domain.Fee
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "reading the level fees", err)
+	}
+	return out, nil
+}
+
+func feesFromDomain(in []domain.Fee) []byte {
+	if len(in) == 0 {
+		return []byte("[]")
+	}
+	raw, err := json.Marshal(in)
+	if err != nil {
+		// Marshalling names and ints cannot fail. An empty list is still a
+		// valid answer, so this degrades to "no fees" rather than losing the
+		// whole tuition table.
+		return []byte("[]")
+	}
+	return raw
+}
+
+// enrollmentDueFromDomain keeps "the school set no deadline" as NULL. Writing
+// the zero time instead would bill every inscription as due in year 1.
+func enrollmentDueFromDomain(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
+}
+
+// scheduleToDomain reads the stored payment plan. A row written before the
+// schedule existed holds "[]" and yields none, which is the uniform year.
+func scheduleToDomain(raw []byte) ([]domain.Installment, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var out []domain.Installment
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "reading the tuition schedule", err)
+	}
+	return out, nil
+}
+
+func scheduleFromDomain(in []domain.Installment) []byte {
+	if len(in) == 0 {
+		return []byte("[]")
+	}
+	raw, err := json.Marshal(in)
+	if err != nil {
+		// Marshalling a slice of two ints cannot fail; an empty list is still
+		// a valid schedule, so this degrades to the uniform year rather than
+		// losing the write.
+		return []byte("[]")
+	}
+	return []byte(raw)
+}
+
+// lateFeeMode is the column's vocabulary. Spelled out rather than stored as a
+// boolean so a person reading the table sees which rule a plan is on.
+func lateFeeMode(daily bool) string {
+	if daily {
+		return "daily"
+	}
+	return "monthly"
 }
 
 // fromDomainConcept projects a domain ChargeConcept into its GORM row.
@@ -73,6 +183,12 @@ func toDomainCharge(m chargeModel, paidCents int64) (domain.Charge, error) {
 	if err != nil {
 		return domain.Charge{}, err
 	}
+	if m.DiscountCents > 0 {
+		c, err = c.WithDiscount(m.DiscountCents, paidCents, m.DiscountReason)
+		if err != nil {
+			return domain.Charge{}, err
+		}
+	}
 	if m.ExternalRef != "" {
 		c, err = c.WithExternalRef(m.ExternalRef)
 		if err != nil {
@@ -89,17 +205,18 @@ func toDomainCharge(m chargeModel, paidCents int64) (domain.Charge, error) {
 // CreatedAt/UpdatedAt are left zero so the DB assigns them via DEFAULT now().
 func fromDomainCharge(c domain.Charge) chargeModel {
 	return chargeModel{
-		ID:            c.ID(),
-		TenantID:      c.TenantID(),
-		StudentID:     c.StudentID(),
-		CycleID:       c.CycleID(),
-		ConceptID:     c.ConceptID(),
-		Description:   c.Description(),
-		AmountCents:   c.Amount().Int64(),
-		DiscountCents: c.Discount().Int64(),
-		DueDate:       c.DueDate(),
-		Status:        c.Status(),
-		ExternalRef:   c.ExternalRef(),
+		ID:             c.ID(),
+		TenantID:       c.TenantID(),
+		StudentID:      c.StudentID(),
+		CycleID:        c.CycleID(),
+		ConceptID:      c.ConceptID(),
+		Description:    c.Description(),
+		AmountCents:    c.Amount().Int64(),
+		DiscountCents:  c.Discount().Int64(),
+		DiscountReason: c.DiscountReason(),
+		DueDate:        c.DueDate(),
+		Status:         c.Status(),
+		ExternalRef:    c.ExternalRef(),
 	}
 }
 
@@ -122,4 +239,48 @@ func fromDomainPayment(p domain.Payment) paymentModel {
 		IdempotencyKey: p.IdempotencyKey(),
 		PaidAt:         p.PaidAt(),
 	}
+}
+
+// --- deposits (M16) --------------------------------------------------------
+
+func fromDomainDeposit(d domain.Deposit) depositModel {
+	m := depositModel{
+		ID:              d.ID(),
+		TenantID:        d.TenantID(),
+		StudentID:       d.StudentID(),
+		AmountCents:     d.Amount().Int64(),
+		Method:          d.Method(),
+		Reference:       d.Reference(),
+		PaidAt:          d.PaidAt(),
+		IdempotencyKey:  d.IdempotencyKey(),
+		CalendarVersion: d.CalendarVersion(),
+		CardType:        d.CardType(),
+		VoidReason:      d.VoidReason(),
+	}
+	if d.Voided() {
+		at := d.VoidedAt()
+		m.VoidedAt = &at
+	}
+	return m
+}
+
+func toDomainDeposit(m depositModel) (domain.Deposit, error) {
+	d, err := domain.NewDeposit(m.ID, m.TenantID, m.StudentID, m.AmountCents,
+		m.Method, m.Reference, m.PaidAt, m.IdempotencyKey, m.CalendarVersion)
+	if err != nil {
+		return domain.Deposit{}, err
+	}
+	if m.CardType != "" {
+		d, err = d.WithCardType(m.CardType)
+		if err != nil {
+			return domain.Deposit{}, err
+		}
+	}
+	if m.VoidedAt == nil {
+		return d, nil
+	}
+	// Rehydrate rather than Void: the constructor is for new money and
+	// deliberately cannot produce a cancelled deposit, but a stored one has to
+	// come back exactly as it was written, reason included.
+	return d.Rehydrate(*m.VoidedAt, m.VoidReason), nil
 }

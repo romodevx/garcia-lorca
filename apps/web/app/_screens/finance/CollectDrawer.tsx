@@ -1,0 +1,399 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement } from "react";
+import { Btn } from "../../_design/Controls";
+import { Icon } from "../../_design/Icon";
+import {
+  getAccount,
+  getExpected,
+  previewDeposit,
+  registerDeposit,
+  type Charge,
+  type DepositResult,
+  type Expected,
+  type CardType,
+  type Payment,
+  type PaymentMethod,
+} from "../../finance/api";
+import { API_URL } from "../../api-url";
+import { centsToPesosInput, formatCents, pesosToCents } from "./money";
+
+/**
+ * What is missing, or over, against what should have been paid. Zero when the
+ * family paid exactly right — which is the number the counter looks for.
+ *
+ * An unreadable amount counts as nothing captured, so the difference is the
+ * whole expected figure rather than NaN.
+ */
+function difference(captured: number, expectedCents: number): number {
+  return expectedCents - (Number.isFinite(captured) ? captured : 0);
+}
+
+/** One key per attempt, kept across retries: a double click must not cost twice. */
+function newAttemptKey(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+/** How long the typing has to stop before we ask the server what it covers. */
+const PREVIEW_DEBOUNCE_MS = 350;
+
+const METHODS: { value: PaymentMethod; label: string }[] = [
+  { value: "cash", label: "Efectivo" },
+  { value: "card", label: "Tarjeta" },
+  { value: "transfer", label: "Transferencia" },
+];
+
+const field: CSSProperties = {
+  width: "100%", height: 64, padding: "0 18px", borderRadius: "var(--r-md)",
+  border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)",
+  fontSize: 30, fontFamily: "var(--font-display)", fontWeight: 700, outline: "none",
+};
+const closeBtn: CSSProperties = {
+  width: 40, height: 40, borderRadius: "50%", display: "grid", placeItems: "center",
+  background: "var(--surface-3)", border: "1px solid var(--border)", color: "var(--text-muted)", cursor: "pointer",
+};
+
+/** The pupil the counter is collecting for. Only what the header needs. */
+export interface CollectStudent {
+  id: string;
+  firstName: string;
+  lastName: string;
+  gradeGroup?: string;
+}
+
+export interface CollectDrawerProps {
+  student: CollectStudent;
+  onClose: () => void;
+  onCollected: () => void;
+}
+
+/**
+ * The counter, as the school actually works it: ONE number (what the family
+ * owes) and ONE field (what they handed over).
+ *
+ * The cashier is not asked which months the money covers. That question is the
+ * reason the old screen went unused — it made a person do, per parent, the
+ * arithmetic the system already knows how to do. Here the split is previewed
+ * while they type and taken when they press Enter.
+ */
+export function CollectDrawer({ student, onClose, onCollected }: CollectDrawerProps): ReactElement {
+  const [owed, setOwed] = useState<number | null>(null);
+  const [credit, setCredit] = useState(0);
+  const [expected, setExpected] = useState<Expected | null>(null);
+  const [amount, setAmount] = useState("");
+  // The school honouring the early-payment reward after the window closed. A
+  // decision somebody makes, which is why it is a switch and not a default.
+  const [grantEarly, setGrantEarly] = useState(false);
+  const [method, setMethod] = useState<PaymentMethod>("cash");
+  // Debit or credit, asked for only once the money is on a card. The office
+  // reconciles against the terminal at month end.
+  const [cardType, setCardType] = useState<CardType>("debit");
+  const [reference, setReference] = useState("");
+  const [preview, setPreview] = useState<{ allocations: Payment[]; surcharges: Charge[]; unallocatedCents: number } | null>(null);
+  const [receipt, setReceipt] = useState<DepositResult | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [attemptKey] = useState(newAttemptKey);
+  const describe = useRef<Map<string, string>>(new Map());
+
+  const name = `${student.firstName} ${student.lastName}`;
+  const cents = pesosToCents(amount);
+  const ready = Number.isFinite(cents) && cents > 0 && !saving;
+
+  useEffect(() => {
+    let live = true;
+    getAccount(API_URL, student.id)
+      .then((account) => {
+        if (!live) {
+          return;
+        }
+        setOwed(account.totalBalanceCents);
+        setCredit(account.unallocatedCents);
+        // The split comes back as charge ids; a person reads month names.
+        describe.current = new Map(account.charges.map((c) => [c.id, c.description]));
+      })
+      .catch(() => { if (live) { setOwed(0); } });
+    // What is due TODAY, which is not the same question as what is left for the
+    // year. The cashier reads this figure aloud.
+    getExpected(API_URL, student.id)
+      .then((e) => {
+        if (!live) {
+          return;
+        }
+        setExpected(e);
+        // Pre-filled with what should be paid: the common case is a family
+        // paying exactly that, and retyping it is a chance to mistype it.
+        if (e.amountCents > 0) {
+          setAmount(centsToPesosInput(e.amountCents));
+        }
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [student.id]);
+
+  // Ask the server what the typed amount covers, once the typing settles. The
+  // rule lives in one place — the same planner that takes the money — so the
+  // preview can never drift from what actually happens.
+  useEffect(() => {
+    if (!Number.isFinite(cents) || cents <= 0 || receipt !== null) {
+      setPreview(null);
+      return;
+    }
+    let live = true;
+    const timer = setTimeout(() => {
+      previewDeposit(API_URL, { studentId: student.id, amountCents: cents })
+        .then((p) => { if (live) { setPreview(p); } })
+        .catch(() => { if (live) { setPreview(null); } });
+    }, PREVIEW_DEBOUNCE_MS);
+    return () => { live = false; clearTimeout(timer); };
+  }, [cents, student.id, receipt]);
+
+  // Escape closes. Nothing is at risk: the money has not been taken, and the
+  // amount is one field to retype.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => { if (e.key === "Escape") { onClose(); } };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const submit = useCallback(async (): Promise<void> => {
+    if (!ready) {
+      return;
+    }
+    setSaving(true);
+    setError(undefined);
+    try {
+      const result = await registerDeposit(API_URL, {
+        studentId: student.id,
+        amountCents: cents,
+        method,
+        reference: reference.trim(),
+        idempotencyKey: attemptKey,
+        ...(grantEarly ? { grantEarlyPayment: true } : {}),
+        ...(method === "card" ? { cardType } : {}),
+      });
+      setReceipt(result);
+      onCollected();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "No se pudo registrar el cobro.");
+    } finally {
+      setSaving(false);
+    }
+  }, [ready, student.id, cents, method, cardType, reference, attemptKey, grantEarly, onCollected]);
+
+  return (
+    <div
+      data-testid="collect-backdrop"
+      style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(6,20,12,.5)", backdropFilter: "blur(4px)", display: "flex", justifyContent: "flex-end" }}>
+      <div
+        role="dialog"
+        aria-label="Cobrar"
+        style={{ width: "min(520px, 100%)", height: "100%", background: "var(--surface)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow-pop)", display: "flex", flexDirection: "column", animation: "slideIn .28s var(--ease) both" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "22px 26px", borderBottom: "1px solid var(--border)" }}>
+          <div style={{ width: 48, height: 48, borderRadius: 14, display: "grid", placeItems: "center", background: "var(--forest)", color: "#fff" }}>
+            <Icon name="card" size={26} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <h2 style={{ fontSize: 21, fontWeight: 700, color: "var(--text)" }}>Cobrar · {name}</h2>
+            <p style={{ fontSize: 13.5, color: "var(--text-muted)", marginTop: 2 }}>{student.gradeGroup ?? ""}</p>
+          </div>
+          <button onClick={onClose} aria-label="Cerrar" style={closeBtn}><Icon name="close" size={19} /></button>
+        </div>
+
+        {receipt !== null
+          ? <Receipt result={receipt} describe={describe.current} onClose={onClose} />
+          : (
+            <form
+              onSubmit={(e) => { e.preventDefault(); void submit(); }}
+              style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+              <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px", display: "flex", flexDirection: "column", gap: 20 }}>
+                <div style={{ padding: "18px 20px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
+                  <span style={{ fontSize: 14, color: "var(--text-muted)" }}>Monto esperado hoy</span>
+                  <div data-testid="amount-expected" style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 38, color: "var(--text)", marginTop: 4 }}>
+                    {expected === null ? "…" : formatCents(expected.amountCents)}
+                  </div>
+                  <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 6 }}>
+                    {expected !== null && expected.surchargeCents > 0 && `Incluye ${formatCents(expected.surchargeCents)} de recargo. `}
+                    {expected !== null && expected.discountCents > 0 && `Ya con ${formatCents(expected.discountCents)} de pronto pago. `}
+                    Del año debe <b data-testid="amount-owed">{owed === null ? "…" : formatCents(owed)}</b>.
+                  </p>
+                  {credit > 0 && (
+                    <p style={{ fontSize: 13.5, color: "var(--text-muted)", marginTop: 6 }}>
+                      Tiene {formatCents(credit)} a favor.
+                    </p>
+                  )}
+                </div>
+
+                <label style={{ display: "block" }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Monto recibido</span>
+                  <div style={{ marginTop: 8 }}>
+                    <input autoFocus inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} aria-label="Monto recibido" placeholder="0.00" style={field} />
+                  </div>
+                </label>
+
+                {expected !== null && (
+                  <div
+                    data-testid="difference"
+                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderRadius: "var(--r-md)", background: difference(cents, expected.amountCents) === 0 ? "var(--ok-bg)" : "var(--warn-bg)" }}>
+                    <span style={{ fontSize: 14, color: "var(--text-muted)" }}>Diferencia</span>
+                    <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 17, color: difference(cents, expected.amountCents) === 0 ? "var(--ok-fg)" : "var(--warn-fg)" }}>
+                      {formatCents(difference(cents, expected.amountCents))}
+                    </span>
+                  </div>
+                )}
+
+                {expected !== null && expected.discountCents === 0 && (
+                  <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                    <input type="checkbox" checked={grantEarly} onChange={(e) => setGrantEarly(e.target.checked)} aria-label="Aplicar pronto pago" style={{ width: 18, height: 18 }} />
+                    <span style={{ fontSize: 14, color: "var(--text-muted)" }}>
+                      Aplicar pronto pago de todos modos
+                    </span>
+                  </label>
+                )}
+
+                {preview !== null && (
+                  <div data-testid="preview" style={{ borderRadius: "var(--r-md)", border: "1px solid var(--border)", overflow: "hidden" }}>
+                    <div style={{ padding: "10px 16px", background: "var(--surface-2)", fontSize: 13, fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--font-display)" }}>
+                      Cubre
+                    </div>
+                    {preview.allocations.map((a) => (
+                      <div key={a.id} style={{ display: "flex", justifyContent: "space-between", padding: "12px 16px", borderTop: "1px solid var(--border)" }}>
+                        <span style={{ fontSize: 14.5, color: "var(--text)" }}>{label(a.chargeId, preview.surcharges, describe.current)}</span>
+                        <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, color: "var(--text)" }}>{formatCents(a.amountCents)}</span>
+                      </div>
+                    ))}
+                    {preview.allocations.length === 0 && (
+                      <p style={{ padding: "12px 16px", margin: 0, fontSize: 14, color: "var(--text-muted)" }}>
+                        No hay nada vencido; todo queda a favor.
+                      </p>
+                    )}
+                    {preview.unallocatedCents > 0 && (
+                      <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 16px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>
+                        <span style={{ fontSize: 14.5, color: "var(--text-muted)" }}>Queda a favor</span>
+                        <span data-testid="credit" style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, color: "var(--forest)" }}>
+                          {formatCents(preview.unallocatedCents)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Método</span>
+                  <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                    {METHODS.map((m) => {
+                      const on = method === m.value;
+                      return (
+                        <button
+                          key={m.value}
+                          type="button"
+                          onClick={() => setMethod(m.value)}
+                          style={{ height: 44, padding: "0 18px", borderRadius: 99, fontSize: 14.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>
+                          {m.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {method === "card" && (
+                  <div>
+                    <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Tipo de tarjeta</span>
+                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                      {([["debit", "Débito"], ["credit", "Crédito"]] as [CardType, string][]).map(([value, label]) => {
+                        const on = cardType === value;
+                        return (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() => setCardType(value)}
+                            aria-label={label}
+                            style={{ height: 44, padding: "0 18px", borderRadius: 99, fontSize: 14.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <label style={{ display: "block" }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Referencia (opcional)</span>
+                  <div style={{ marginTop: 8 }}>
+                    <input value={reference} onChange={(e) => setReference(e.target.value)} aria-label="Referencia" placeholder="Folio, transferencia…" style={{ ...field, height: 50, fontSize: 15.5, fontWeight: 400 }} />
+                  </div>
+                </label>
+
+                {error !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{error}</p>}
+              </div>
+
+              <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "18px 26px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>
+                <Btn kind="ghost" type="button" onClick={onClose}>Cancelar</Btn>
+                <div style={{ flex: 1 }} />
+                <Btn icon="check" type="submit" style={{ opacity: ready ? 1 : 0.45, height: 52, fontSize: 16 }}>Cobrar</Btn>
+              </div>
+            </form>
+          )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * What one allocation covered, in words. A surcharge created by this very
+ * payment is not in the account read, so its description comes from the result
+ * itself.
+ */
+function label(chargeId: string, surcharges: Charge[], known: Map<string, string>): string {
+  const fresh = surcharges.find((c) => c.id === chargeId);
+  if (fresh !== undefined) {
+    return fresh.description;
+  }
+  return known.get(chargeId) ?? "Cargo";
+}
+
+/**
+ * The receipt. A folio a parent can quote and a list they can check, printable
+ * because a school hands over paper.
+ */
+function Receipt({ result, describe, onClose }: { result: DepositResult; describe: Map<string, string>; onClose: () => void }): ReactElement {
+  return (
+    <div data-testid="receipt" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px", display: "flex", flexDirection: "column", gap: 18 }}>
+        <div style={{ padding: "18px 20px", borderRadius: "var(--r-md)", background: "var(--ok-bg)", border: "1px solid var(--border)" }}>
+          <span style={{ fontSize: 14, color: "var(--ok-fg)" }}>Cobrado</span>
+          <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 34, color: "var(--ok-fg)", marginTop: 4 }}>
+            {formatCents(result.deposit.amountCents)}
+          </div>
+          <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 8 }}>
+            Folio {folio(result.deposit.id)}
+            {result.replayed && " · ya estaba registrado, no se cobró de nuevo"}
+          </p>
+        </div>
+        <div style={{ borderRadius: "var(--r-md)", border: "1px solid var(--border)", overflow: "hidden" }}>
+          {result.allocations.map((a) => (
+            <div key={a.id} style={{ display: "flex", justifyContent: "space-between", padding: "12px 16px", borderTop: "1px solid var(--border)" }}>
+              <span style={{ fontSize: 14.5, color: "var(--text)" }}>{label(a.chargeId, result.surcharges, describe)}</span>
+              <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15 }}>{formatCents(a.amountCents)}</span>
+            </div>
+          ))}
+        </div>
+        {result.unallocatedCents > 0 && (
+          <p style={{ fontSize: 14, color: "var(--text-muted)", margin: 0 }}>
+            Quedan {formatCents(result.unallocatedCents)} a favor de la familia.
+          </p>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "18px 26px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>
+        <Btn kind="ghost" type="button" onClick={() => window.print()}>Imprimir</Btn>
+        <div style={{ flex: 1 }} />
+        <Btn icon="check" type="button" onClick={onClose}>Listo</Btn>
+      </div>
+    </div>
+  );
+}
+
+/** A folio a person can read aloud: the tail of the deposit id, uppercased. */
+function folio(id: string): string {
+  return id.replace(/-/g, "").slice(-8).toUpperCase();
+}

@@ -483,3 +483,126 @@ func (h *ConfigHandler) ActivateCycle(ctx context.Context, req *connect.Request[
 	}
 	return connect.NewResponse(&configv1.ActivateCycleResponse{Cycle: toProtoCycle(cycle)}), nil
 }
+
+// --- school calendar (M16) -------------------------------------------------
+
+// dateLayout is how a calendar day travels on the wire. A plain YYYY-MM-DD, not
+// a timestamp: a holiday is a calendar day everywhere in Mexico, and a timestamp
+// would invite a timezone to move it a day either way.
+const dateLayout = "2006-01-02"
+
+func (h *ConfigHandler) CreateNonWorkingPeriod(ctx context.Context, req *connect.Request[configv1.CreateNonWorkingPeriodRequest]) (*connect.Response[configv1.CreateNonWorkingPeriodResponse], error) {
+	from, err := parseDate(req.Msg.GetStartsOn())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	to, err := parseDate(req.Msg.GetEndsOn())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	p, err := h.catalog.CreateNonWorkingPeriod(ctx, req.Msg.GetCycleId(), req.Msg.GetLabel(), req.Msg.GetKind(), from, to)
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.CreateNonWorkingPeriodResponse{Period: toProtoNonWorkingPeriod(p)}), nil
+}
+
+func (h *ConfigHandler) ListNonWorkingPeriods(ctx context.Context, req *connect.Request[configv1.ListNonWorkingPeriodsRequest]) (*connect.Response[configv1.ListNonWorkingPeriodsResponse], error) {
+	periods, err := h.catalog.ListNonWorkingPeriods(ctx, req.Msg.GetCycleId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	out := make([]*configv1.NonWorkingPeriod, 0, len(periods))
+	for _, p := range periods {
+		out = append(out, toProtoNonWorkingPeriod(p))
+	}
+	return connect.NewResponse(&configv1.ListNonWorkingPeriodsResponse{Periods: out}), nil
+}
+
+func (h *ConfigHandler) DeleteNonWorkingPeriod(ctx context.Context, req *connect.Request[configv1.DeleteNonWorkingPeriodRequest]) (*connect.Response[configv1.DeleteNonWorkingPeriodResponse], error) {
+	if err := h.catalog.DeleteNonWorkingPeriod(ctx, req.Msg.GetId()); err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.DeleteNonWorkingPeriodResponse{}), nil
+}
+
+// parseDate reads a wire date. A malformed one is the caller's mistake, so it
+// comes back KindInvalid rather than as a zero date that would silently mean
+// year one.
+func parseDate(s string) (time.Time, error) {
+	d, err := time.Parse(dateLayout, s)
+	if err != nil {
+		return time.Time{}, glerrors.New(glerrors.KindInvalid, "date must be YYYY-MM-DD")
+	}
+	return d, nil
+}
+
+func toProtoNonWorkingPeriod(p domain.NonWorkingPeriod) *configv1.NonWorkingPeriod {
+	return &configv1.NonWorkingPeriod{
+		Id:       p.ID(),
+		CycleId:  p.CycleID(),
+		Label:    p.Label(),
+		Kind:     p.Kind(),
+		StartsOn: p.From().Format(dateLayout),
+		EndsOn:   p.To().Format(dateLayout),
+	}
+}
+
+// --- school agenda (M16) ---------------------------------------------------
+
+func (h *ConfigHandler) CreateSchoolEvent(ctx context.Context, req *connect.Request[configv1.CreateSchoolEventRequest]) (*connect.Response[configv1.CreateSchoolEventResponse], error) {
+	m := req.Msg
+	from, err := parseDate(m.GetStartsOn())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	// A one-day event may send only the start; repeating the date is noise.
+	to := from
+	if raw := m.GetEndsOn(); raw != "" {
+		to, err = parseDate(raw)
+		if err != nil {
+			return nil, connectErr(err)
+		}
+	}
+	event, err := h.catalog.CreateSchoolEvent(ctx, usecase.SchoolEventInput{
+		CycleID: m.GetCycleId(), Title: m.GetTitle(), Description: m.GetDescription(),
+		From: from, To: to,
+		Audience: domain.EventAudience{LevelID: m.GetLevelId(), GroupID: m.GetGroupId()},
+	})
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.CreateSchoolEventResponse{Event: toProtoSchoolEvent(event)}), nil
+}
+
+func (h *ConfigHandler) ListSchoolEvents(ctx context.Context, req *connect.Request[configv1.ListSchoolEventsRequest]) (*connect.Response[configv1.ListSchoolEventsResponse], error) {
+	events, err := h.catalog.ListSchoolEvents(ctx, req.Msg.GetCycleId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	out := make([]*configv1.SchoolEvent, 0, len(events))
+	for _, e := range events {
+		out = append(out, toProtoSchoolEvent(e))
+	}
+	return connect.NewResponse(&configv1.ListSchoolEventsResponse{Events: out}), nil
+}
+
+func (h *ConfigHandler) DeleteSchoolEvent(ctx context.Context, req *connect.Request[configv1.DeleteSchoolEventRequest]) (*connect.Response[configv1.DeleteSchoolEventResponse], error) {
+	if err := h.catalog.DeleteSchoolEvent(ctx, req.Msg.GetId()); err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.DeleteSchoolEventResponse{}), nil
+}
+
+func toProtoSchoolEvent(e domain.SchoolEvent) *configv1.SchoolEvent {
+	return &configv1.SchoolEvent{
+		Id:          e.ID(),
+		CycleId:     e.CycleID(),
+		Title:       e.Title(),
+		Description: e.Description(),
+		StartsOn:    e.From().Format(dateLayout),
+		EndsOn:      e.To().Format(dateLayout),
+		LevelId:     e.Audience().LevelID,
+		GroupId:     e.Audience().GroupID,
+	}
+}

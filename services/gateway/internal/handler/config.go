@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
@@ -26,6 +27,12 @@ type ConfigService interface {
 	ListGroups(ctx context.Context, cycleID, gradeLevelID string) ([]client.GroupResult, error)
 	CreateTeacher(ctx context.Context, firstName, lastName, email, userID string) (client.Teacher, error)
 	ListTeachers(ctx context.Context) ([]client.Teacher, error)
+	CreateNonWorkingPeriod(ctx context.Context, cycleID, label, kind, startsOn, endsOn string) (client.NonWorkingPeriod, error)
+	ListNonWorkingPeriods(ctx context.Context, cycleID string) ([]client.NonWorkingPeriod, error)
+	DeleteNonWorkingPeriod(ctx context.Context, id string) error
+	CreateSchoolEvent(ctx context.Context, in client.SchoolEvent) (client.SchoolEvent, error)
+	ListSchoolEvents(ctx context.Context, cycleID string) ([]client.SchoolEvent, error)
+	DeleteSchoolEvent(ctx context.Context, id string) error
 	CreateTeachingAssignment(ctx context.Context, groupID, subjectID, teacherID string) (client.TeachingAssignment, error)
 	ListTeachingAssignments(ctx context.Context, cycleID, groupID, teacherID string) ([]client.TeachingAssignment, error)
 }
@@ -592,4 +599,99 @@ func (h *ConfigHandler) ActivateCycle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, toCycleResponse(cycle))
+}
+
+// --- school calendar (M16) -------------------------------------------------
+
+type nonWorkingPeriodRequest struct {
+	CycleID  string `json:"cycleId"`
+	Label    string `json:"label"`
+	Kind     string `json:"kind"`
+	StartsOn string `json:"startsOn"`
+	EndsOn   string `json:"endsOn"`
+}
+
+// CreateNonWorkingPeriod handles POST /api/v1/config/calendar: a day, or a run
+// of days, the school does not operate. The collection rules read it, and so
+// will the activity calendar.
+func (h *ConfigHandler) CreateNonWorkingPeriod(w http.ResponseWriter, r *http.Request) {
+	var req nonWorkingPeriodRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	// A single-day holiday may send only startsOn; repeating it is noise at the
+	// call site, so the edge fills it in.
+	if strings.TrimSpace(req.EndsOn) == "" {
+		req.EndsOn = req.StartsOn
+	}
+	period, err := h.svc.CreateNonWorkingPeriod(r.Context(), req.CycleID, req.Label, req.Kind, req.StartsOn, req.EndsOn)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, period)
+}
+
+// ListNonWorkingPeriods handles GET /api/v1/config/calendar?cycleId=…
+func (h *ConfigHandler) ListNonWorkingPeriods(w http.ResponseWriter, r *http.Request) {
+	periods, err := h.svc.ListNonWorkingPeriods(r.Context(), r.URL.Query().Get("cycleId"))
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"periods": periods})
+}
+
+// DeleteNonWorkingPeriod handles DELETE /api/v1/config/calendar/{id}. A day
+// entered by mistake has to be removable, or the calendar stops being trusted
+// and the school goes back to a sheet on the wall.
+func (h *ConfigHandler) DeleteNonWorkingPeriod(w http.ResponseWriter, r *http.Request) {
+	if err := h.svc.DeleteNonWorkingPeriod(r.Context(), r.PathValue("id")); err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- school agenda (M16) ---------------------------------------------------
+
+// CreateSchoolEvent handles POST /api/v1/config/events: something the school
+// DOES. It is a different endpoint from the calendar of closed days, and that
+// is the point — a festival on the 10th does not mean nobody could pay on the
+// 10th, and only the closed days move a due date.
+func (h *ConfigHandler) CreateSchoolEvent(w http.ResponseWriter, r *http.Request) {
+	var req client.SchoolEvent
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.EndsOn) == "" {
+		req.EndsOn = req.StartsOn
+	}
+	event, err := h.svc.CreateSchoolEvent(r.Context(), req)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, event)
+}
+
+// ListSchoolEvents handles GET /api/v1/config/events?cycleId=…
+func (h *ConfigHandler) ListSchoolEvents(w http.ResponseWriter, r *http.Request) {
+	events, err := h.svc.ListSchoolEvents(r.Context(), r.URL.Query().Get("cycleId"))
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"events": events})
+}
+
+// DeleteSchoolEvent handles DELETE /api/v1/config/events/{id}.
+func (h *ConfigHandler) DeleteSchoolEvent(w http.ResponseWriter, r *http.Request) {
+	if err := h.svc.DeleteSchoolEvent(r.Context(), r.PathValue("id")); err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

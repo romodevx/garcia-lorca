@@ -25,10 +25,17 @@ type fakeLogin struct {
 	gotEmail        string
 	gotPassword     string
 	gotRefreshToken string
+	gotKind         client.SessionKind
 }
 
 func (f *fakeLogin) Login(_ context.Context, email, password string) (client.LoginResult, error) {
 	f.gotEmail, f.gotPassword = email, password
+	f.gotKind = client.SessionStaff
+	return f.res, f.err
+}
+
+func (f *fakeLogin) LoginAs(_ context.Context, email, password string, kind client.SessionKind) (client.LoginResult, error) {
+	f.gotEmail, f.gotPassword, f.gotKind = email, password, kind
 	return f.res, f.err
 }
 
@@ -569,3 +576,47 @@ func TestMobileRefreshRejectedTokenIs401(t *testing.T) {
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+// The panel and the family app get different sessions, and the difference comes
+// from the ROUTE, not from anything the caller can put in the body.
+//
+// It is the school's rule: a computer on a shared office desk has to close when
+// somebody walks away, and a parent's own phone must not log them out every
+// quarter of an hour.
+func TestTheSurfaceDecidesTheSessionLength(t *testing.T) {
+	svc := &fakeLogin{res: client.LoginResult{AccessToken: "a", RefreshToken: "r", ExpiresIn: 900}}
+	h := handler.NewAuthHandler(svc)
+
+	doReq(t, h.Login, http.MethodPost, "/api/v1/auth/login", `{"email":"a@b.c","password":"x"}`)
+	if svc.gotKind != client.SessionStaff {
+		t.Errorf("the panel logged in as %q, want staff", svc.gotKind)
+	}
+
+	doReq(t, h.MobileLogin, http.MethodPost, "/api/v1/auth/mobile/login", `{"email":"a@b.c","password":"x"}`)
+	if svc.gotKind != client.SessionFamily {
+		t.Errorf("the family app logged in as %q, want family", svc.gotKind)
+	}
+}
+
+// The panel's refresh cookie dies with the session. A cookie outliving the token
+// it carries would leave the browser sending a credential the server has already
+// stopped honouring — a login screen that arrives one request late.
+func TestTheStaffRefreshCookieMatchesTheIdleWindow(t *testing.T) {
+	svc := &fakeLogin{res: client.LoginResult{AccessToken: "a", RefreshToken: "r", ExpiresIn: 900}}
+	h := handler.NewAuthHandler(svc)
+
+	rec := doReq(t, h.Login, http.MethodPost, "/api/v1/auth/login", `{"email":"a@b.c","password":"x"}`)
+
+	var refresh *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "gl_refresh" {
+			refresh = c
+		}
+	}
+	if refresh == nil {
+		t.Fatal("no refresh cookie was set")
+	}
+	if refresh.MaxAge != 15*60 {
+		t.Errorf("refresh cookie lives %d seconds, want 900 — the idle window", refresh.MaxAge)
+	}
+}

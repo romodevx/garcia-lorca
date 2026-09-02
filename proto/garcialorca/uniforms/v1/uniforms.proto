@@ -136,6 +136,11 @@ message Item {
   int64 price_cents = 7;
   bool active = 8;
   repeated StockLevel sizes = 9;
+  // What kind of thing this is: uniform | book | supply | other. The module
+  // sells whatever the school sells — the stock rules, the ledger and the
+  // counter sale were never about clothing, only the vocabulary was. Empty on
+  // an older client means uniform, which is what everything already stored is.
+  string category = 10;
 }
 
 // StockLevel is one garment in one size. available is DERIVED (on_hand minus
@@ -266,6 +271,8 @@ message CreateItemRequest {
   // LEVEL_UNSPECIFIED means every level.
   Level level = 4;
   int64 price_cents = 5;
+  // uniform | book | supply | other. Empty means uniform.
+  string category = 6;
 }
 
 message CreateItemResponse {
@@ -279,6 +286,8 @@ message UpdateItemRequest {
   Level level = 4;
   int64 price_cents = 5;
   bool active = 6;
+  // uniform | book | supply | other. Empty leaves the category as it was.
+  string category = 7;
 }
 
 message UpdateItemResponse {

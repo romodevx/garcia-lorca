@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, type FormEvent, type ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
+import { SlideOver } from "../../_design/SlideOver";
 import { ConfigError, type Cycle, type CreateCycleInput } from "../../config/api";
 import { DateField, EmptyHint, ErrorAlert, Section, SelectChip, TextField } from "./parts";
 
@@ -38,8 +39,16 @@ const STATUS_LABEL: Record<string, string> = {
   closed: "Cerrado",
 };
 
-/** Pick an existing cycle or create one (status omitted → server defaults draft). */
+/**
+ * Pick the school year to configure, or start a new one.
+ *
+ * The form used to sit open underneath the list, so the screen showed a choice
+ * and a creation form at once and the school called it confusing. Creating is
+ * now a drawer — the same one a new pupil or a payment opens — and this panel
+ * does one thing: which year are we working on.
+ */
 export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActivate }: CycleBarProps): ReactElement {
+  const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [startsOn, setStartsOn] = useState("");
   const [endsOn, setEndsOn] = useState("");
@@ -50,7 +59,9 @@ export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActiva
   const selected = cycles.find((c) => c.id === selectedCycleId);
 
   const activate = async (): Promise<void> => {
-    if (selected === undefined) return;
+    if (selected === undefined) {
+      return;
+    }
     setActivating(true);
     setError(undefined);
     try {
@@ -62,10 +73,12 @@ export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActiva
     }
   };
 
-  const canSubmit = name.trim() !== "" && startsOn !== "" && endsOn !== "" && !pending;
-
-  const submit = async (e: FormEvent): Promise<void> => {
-    e.preventDefault();
+  const submit = async (): Promise<void> => {
+    if (name.trim() === "" || startsOn === "" || endsOn === "") {
+      // A sentence, not a dead button: the person can see which field is missing.
+      setError("Escribe el nombre del ciclo y sus dos fechas.");
+      return;
+    }
     setPending(true);
     setError(undefined);
     try {
@@ -73,6 +86,7 @@ export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActiva
       setName("");
       setStartsOn("");
       setEndsOn("");
+      setCreating(false);
     } catch (err) {
       setError(cycleFailureMessage(err));
     } finally {
@@ -81,9 +95,9 @@ export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActiva
   };
 
   return (
-    <Section title="Ciclo escolar" subtitle="Elige el ciclo a configurar o crea uno nuevo.">
+    <Section title="Ciclo escolar" subtitle="El año que estás configurando.">
       {cycles.length > 0 ? (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
           {cycles.map((c) => (
             <SelectChip key={c.id} selected={c.id === selectedCycleId} onClick={() => onSelect(c.id)}>
               {c.name} · {STATUS_LABEL[c.status] ?? c.status}
@@ -91,45 +105,49 @@ export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActiva
           ))}
         </div>
       ) : (
-        <EmptyHint>Aún no hay ciclos. Crea el primero para empezar.</EmptyHint>
+        <EmptyHint>Todavía no hay ciclos. Crea el primero para empezar.</EmptyHint>
       )}
 
-      {/*
-        A cycle is created as a draft, and until this button existed nothing could
-        move it — so every school year read "Borrador" while the panel quietly
-        resolved "the active cycle" to whichever came first. That fallback is
-        right exactly while a school has one year and wrong from the second on.
-      */}
-      {selected !== undefined && (
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18, flexWrap: "wrap" }}>
-          {selected.status === "active" ? (
-            <p style={{ fontSize: 14, color: "var(--text-muted)", margin: 0 }}>
-              <strong>{selected.name}</strong> es el ciclo en curso.
-            </p>
-          ) : (
-            <>
-              <Btn icon="check" onClick={() => void activate()} disabled={activating}>
-                {activating ? "Activando…" : "Activar ciclo"}
-              </Btn>
-              <p style={{ fontSize: 13.5, color: "var(--text-muted)", margin: 0 }}>
-                El colegio trabaja sobre el ciclo activo: inscripciones, grupos y colegiaturas.
-              </p>
-            </>
-          )}
-        </div>
-      )}
-
-      <form aria-label="Agregar ciclo" onSubmit={submit}>
-        <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr auto", gap: 12, alignItems: "end" }}>
-          <TextField label="Nombre del ciclo" value={name} onChange={setName} placeholder="2026-2027" />
-          <DateField label="Inicio del ciclo" value={startsOn} onChange={setStartsOn} />
-          <DateField label="Fin del ciclo" value={endsOn} onChange={setEndsOn} />
-          <Btn type="submit" icon="plus" disabled={!canSubmit}>
-            Crear ciclo
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <Btn icon="plus" onClick={() => { setError(undefined); setCreating(true); }}>Nuevo ciclo</Btn>
+        {selected !== undefined && selected.status !== "active" && (
+          <Btn kind="ghost" icon="check" onClick={() => void activate()} disabled={activating}>
+            {activating ? "Activando…" : `Activar ciclo ${selected.name}`}
           </Btn>
-        </div>
-      </form>
-      {error !== undefined && <ErrorAlert message={error} />}
+        )}
+        {selected !== undefined && selected.status === "active" && (
+          <p style={{ alignSelf: "center", fontSize: 13.5, color: "var(--text-muted)", margin: 0 }}>
+            {selected.name} es el ciclo en curso.
+          </p>
+        )}
+      </div>
+      {error !== undefined && !creating && <ErrorAlert message={error} />}
+
+      {creating && (
+        <SlideOver
+          title="Nuevo ciclo escolar"
+          subtitle="El año que la escuela va a cursar"
+          icon="calendar"
+          submitLabel="Crear ciclo"
+          pending={pending}
+          error={error}
+          onClose={() => { setCreating(false); setError(undefined); }}
+          onSubmit={() => void submit()}
+        >
+          <TextField label="Nombre" value={name} onChange={setName} placeholder="2026-2027" />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <DateField label="Inicia" value={startsOn} onChange={setStartsOn} />
+            <DateField label="Termina" value={endsOn} onChange={setEndsOn} />
+          </div>
+          <div style={{ display: "flex", gap: 11, padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
+            <span style={{ color: "var(--forest)", flexShrink: 0, marginTop: 1 }}>i</span>
+            <p style={{ fontSize: 13.5, color: "var(--text-muted)", lineHeight: 1.5, margin: 0 }}>
+              Nace como <strong>borrador</strong>. Nada cambia para la escuela hasta que lo actives,
+              y activarlo deja en pausa el ciclo anterior.
+            </p>
+          </div>
+        </SlideOver>
+      )}
     </Section>
   );
 }

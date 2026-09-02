@@ -131,3 +131,37 @@ func TestRetiredItemCannotStartNewOrders(t *testing.T) {
 		t.Errorf("want KindInvalid ordering a retired garment, got %v", err)
 	}
 }
+
+// The school sells books and whatever else it decides to sell. The module
+// already does the hard parts — stock that cannot go negative, an append-only
+// ledger, a counter sale that bills finance — and none of that is about
+// clothing.
+func TestAnItemCarriesItsCategory(t *testing.T) {
+	item, err := domain.NewItem("it-1", "t1", "LIB-1", "Libro de matemáticas", "",
+		domain.LevelPrimaria, 45000)
+	if err != nil {
+		t.Fatalf("NewItem: %v", err)
+	}
+	// Everything stored before this is a uniform, which is the truth about it.
+	if item.Category() != domain.CategoryUniform {
+		t.Errorf("category = %q, want uniform by default", item.Category())
+	}
+
+	book, err := item.WithCategory(domain.CategoryBook)
+	if err != nil {
+		t.Fatalf("WithCategory: %v", err)
+	}
+	if book.Category() != domain.CategoryBook {
+		t.Errorf("category = %q, want book", book.Category())
+	}
+}
+
+func TestAnUnknownCategoryIsRefused(t *testing.T) {
+	item, err := domain.NewItem("it-1", "t1", "LIB-1", "Libro", "", domain.LevelPrimaria, 45000)
+	if err != nil {
+		t.Fatalf("NewItem: %v", err)
+	}
+	if _, err := item.WithCategory("mascota"); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("unknown category: want KindInvalid, got %v", err)
+	}
+}

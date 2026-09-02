@@ -61,6 +61,11 @@ service StudentsService {
   // link for the same (guardian, student) is an AlreadyExists error.
   rpc LinkGuardian(LinkGuardianRequest) returns (LinkGuardianResponse);
 
+  // AddContact records somebody the school can reach about a pupil, with no
+  // account and no login: a grandmother who may collect the child, or the phone
+  // that actually answers. Most of a pupil's contacts are these.
+  rpc AddContact(AddContactRequest) returns (AddContactResponse);
+
   // UnlinkGuardian removes a guardian↔student link. An unknown link is a
   // NotFound error.
   rpc UnlinkGuardian(UnlinkGuardianRequest) returns (UnlinkGuardianResponse);
@@ -294,9 +299,16 @@ message WithdrawEnrollmentResponse {
 message GuardianLink {
   string id = 1;
   string tenant_id = 2;
+  // Empty for a contact with no account: a grandmother the school can call.
+  // A contact WITH a user id is a family that can open the app.
   string guardian_user_id = 3;
   string student_id = 4;
   string relationship = 5;
+  // Who to call. Present for contacts recorded by the office; empty on links
+  // created before M16, which carried only an account.
+  string full_name = 6;
+  string phone = 7;
+  string email = 8;
 }
 
 message LinkGuardianRequest {
@@ -330,4 +342,17 @@ message ListStudentsForGuardianRequest {
 
 message ListStudentsForGuardianResponse {
   repeated GuardianLink links = 1;
+}
+
+// AddContactRequest records a person, not an account.
+message AddContactRequest {
+  string student_id = 1;
+  string relationship = 2;  // mother | father | guardian | other
+  string full_name = 3;
+  string phone = 4;
+  string email = 5;
+}
+
+message AddContactResponse {
+  GuardianLink contact = 1;
 }

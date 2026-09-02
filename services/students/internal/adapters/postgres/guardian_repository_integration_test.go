@@ -188,3 +188,69 @@ func TestRLSIsolatesGuardianLinks(t *testing.T) {
 		t.Errorf("tenant A's delete leaked into tenant B: %d links remain", len(after))
 	}
 }
+
+// A pupil has several contacts and most have no account. The UNIQUE index is on
+// (tenant, guardian_user_id, student) and Postgres does not collide NULLs —
+// which is exactly what makes this work, and exactly the kind of thing that is
+// right in a fake and wrong against SQL.
+func TestSeveralContactsWithoutAnAccountOnOnePupil(t *testing.T) {
+	repo := appRepo(t, tenantA)
+	ctx := context.Background()
+	studentID := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-0000000000c1", "COXA050312MDFRNN21")
+
+	for i, person := range []domain.ContactPerson{
+		{FullName: "Rosa Méndez", Phone: "5551234567"},
+		{FullName: "Luis Cruz", Phone: "5559876543"},
+	} {
+		contact, err := domain.NewContact(
+			"f0000000-0000-0000-0000-0000000000e"+string(rune('1'+i)),
+			tenantA, studentID, domain.RelationshipOther, person)
+		if err != nil {
+			t.Fatalf("NewContact(%s): %v", person.FullName, err)
+		}
+		if err := repo.Link(ctx, contact); err != nil {
+			t.Fatalf("Link(%s): %v", person.FullName, err)
+		}
+	}
+
+	// The guardian with an account sits in the same list.
+	if err := repo.Link(ctx, guardianLink(t, "f0000000-0000-0000-0000-0000000000e9",
+		tenantA, guardianOne, studentID, domain.RelationshipMother)); err != nil {
+		t.Fatalf("Link(guardian): %v", err)
+	}
+
+	contacts, err := repo.ListByStudent(ctx, studentID)
+	if err != nil {
+		t.Fatalf("ListByStudent: %v", err)
+	}
+	if len(contacts) != 3 {
+		t.Fatalf("listed %d contacts, want 3", len(contacts))
+	}
+	var withAccount, phones int
+	for _, c := range contacts {
+		if c.HasAccount() {
+			withAccount++
+		}
+		if c.Phone() != "" {
+			phones++
+		}
+	}
+	if withAccount != 1 {
+		t.Errorf("%d contacts can open the app, want exactly the linked guardian", withAccount)
+	}
+	if phones != 2 {
+		t.Errorf("%d contacts carry a phone, want 2", phones)
+	}
+
+	// The family read path is unchanged: it asks by user id and never sees the
+	// account-less rows.
+	byGuardian, err := repo.ListByGuardian(ctx, guardianOne)
+	if err != nil {
+		t.Fatalf("ListByGuardian: %v", err)
+	}
+	for _, c := range byGuardian {
+		if !c.HasAccount() {
+			t.Errorf("the family read path returned an account-less contact: %+v", c)
+		}
+	}
+}

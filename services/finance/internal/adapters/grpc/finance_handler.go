@@ -8,6 +8,7 @@ package grpcadapter
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	connect "connectrpc.com/connect"
@@ -190,6 +191,7 @@ func (h *FinanceHandler) GetAccount(ctx context.Context, req *connect.Request[fi
 		Charges:           toProtoCharges(statement.Charges),
 		Payments:          payments,
 		TotalBalanceCents: statement.TotalBalanceCents,
+		UnallocatedCents:  statement.UnallocatedCents,
 	}), nil
 }
 
@@ -200,6 +202,225 @@ func (h *FinanceHandler) ListOverdue(ctx context.Context, req *connect.Request[f
 		return nil, connectErr(err)
 	}
 	return connect.NewResponse(&financev1.ListOverdueResponse{Charges: toProtoCharges(charges)}), nil
+}
+
+// --- deposits (M16) --------------------------------------------------------
+
+// RegisterDeposit takes money without being told what it pays for.
+func (h *FinanceHandler) RegisterDeposit(ctx context.Context, req *connect.Request[financev1.RegisterDepositRequest]) (*connect.Response[financev1.RegisterDepositResponse], error) {
+	m := req.Msg
+	// An unset paid_at becomes the zero time, which the use case reads as "now".
+	var paidAt time.Time
+	if ts := m.GetPaidAt(); ts != nil {
+		paidAt = ts.AsTime()
+	}
+	got, err := h.finance.RegisterDeposit(ctx, usecase.DepositInput{
+		StudentID:      m.GetStudentId(),
+		AmountCents:    m.GetAmountCents(),
+		Method:         m.GetMethod(),
+		Reference:      m.GetReference(),
+		PaidAt:         paidAt,
+		IdempotencyKey: m.GetIdempotencyKey(),
+		// The school honouring the reward late is a decision it makes at the
+		// counter; the use case records it as one.
+		GrantEarlyPayment: m.GetGrantEarlyPayment(),
+		CardType:          m.GetCardType(),
+	})
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	allocations := make([]*financev1.Payment, 0, len(got.Allocations))
+	for _, p := range got.Allocations {
+		allocations = append(allocations, toProtoPayment(p))
+	}
+	surcharges := make([]*financev1.Charge, 0, len(got.Surcharges))
+	for _, c := range got.Surcharges {
+		// A freshly materialised surcharge has collected nothing yet by
+		// definition: it did not exist a moment ago.
+		surcharges = append(surcharges, toProtoCharge(ports.ChargeWithPaid{Charge: c}))
+	}
+	return connect.NewResponse(&financev1.RegisterDepositResponse{
+		Deposit:          toProtoDeposit(got.Deposit),
+		Allocations:      allocations,
+		Surcharges:       surcharges,
+		UnallocatedCents: got.UnallocatedCents,
+		Replayed:         got.Replayed,
+	}), nil
+}
+
+// PreviewDeposit says what an amount would cover, without taking it.
+func (h *FinanceHandler) PreviewDeposit(ctx context.Context, req *connect.Request[financev1.PreviewDepositRequest]) (*connect.Response[financev1.PreviewDepositResponse], error) {
+	m := req.Msg
+	var paidAt time.Time
+	if ts := m.GetPaidAt(); ts != nil {
+		paidAt = ts.AsTime()
+	}
+	got, err := h.finance.PreviewDeposit(ctx, usecase.DepositInput{
+		StudentID:   m.GetStudentId(),
+		AmountCents: m.GetAmountCents(),
+		// A preview needs no method: nothing is stored, and cash and a transfer
+		// cover the same months. Cash keeps the domain constructor satisfied.
+		Method: domain.MethodCash,
+		PaidAt: paidAt,
+	})
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	allocations := make([]*financev1.Payment, 0, len(got.Allocations))
+	for _, p := range got.Allocations {
+		allocations = append(allocations, toProtoPayment(p))
+	}
+	surcharges := make([]*financev1.Charge, 0, len(got.Surcharges))
+	for _, c := range got.Surcharges {
+		surcharges = append(surcharges, toProtoCharge(ports.ChargeWithPaid{Charge: c}))
+	}
+	return connect.NewResponse(&financev1.PreviewDepositResponse{
+		Allocations:      allocations,
+		Surcharges:       surcharges,
+		UnallocatedCents: got.UnallocatedCents,
+	}), nil
+}
+
+// ExpectedToday is what a family must hand over today to be current.
+func (h *FinanceHandler) ExpectedToday(ctx context.Context, req *connect.Request[financev1.ExpectedTodayRequest]) (*connect.Response[financev1.ExpectedTodayResponse], error) {
+	on := time.Time{}
+	if raw := req.Msg.GetOn(); raw != "" {
+		parsed, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			return nil, connectErr(glerrors.New(glerrors.KindInvalid, "date must be YYYY-MM-DD"))
+		}
+		on = parsed
+	}
+	expected, err := h.finance.ExpectedToday(ctx, req.Msg.GetStudentId(), on)
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&financev1.ExpectedTodayResponse{
+		AmountCents:        expected.AmountCents,
+		SurchargeCents:     expected.SurchargeCents,
+		DiscountCents:      expected.DiscountCents,
+		AnnualBalanceCents: expected.AnnualBalanceCents,
+	}), nil
+}
+
+// ListDeposits returns a student's deposits, newest first.
+func (h *FinanceHandler) ListDeposits(ctx context.Context, req *connect.Request[financev1.ListDepositsRequest]) (*connect.Response[financev1.ListDepositsResponse], error) {
+	deposits, err := h.finance.ListDeposits(ctx, req.Msg.GetStudentId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	out := make([]*financev1.Deposit, 0, len(deposits))
+	for _, d := range deposits {
+		out = append(out, toProtoDeposit(d))
+	}
+	return connect.NewResponse(&financev1.ListDepositsResponse{Deposits: out}), nil
+}
+
+// DailyCashUp is the day's takings, split by how the money arrived.
+func (h *FinanceHandler) DailyCashUp(ctx context.Context, req *connect.Request[financev1.DailyCashUpRequest]) (*connect.Response[financev1.DailyCashUpResponse], error) {
+	day := time.Now()
+	if raw := req.Msg.GetDay(); raw != "" {
+		parsed, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			return nil, connectErr(glerrors.New(glerrors.KindInvalid, "day must be YYYY-MM-DD"))
+		}
+		day = parsed
+	}
+	cut, err := h.finance.DailyCashUp(ctx, day)
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&financev1.DailyCashUpResponse{
+		Deposits:      toProtoDeposits(cut.Deposits),
+		Cancelled:     toProtoDeposits(cut.Cancelled),
+		CashCents:     cut.ByMethod[domain.MethodCash],
+		CardCents:     cut.ByMethod[domain.MethodCard],
+		TransferCents: cut.ByMethod[domain.MethodTransfer],
+		TotalCents:    cut.TotalCents,
+	}), nil
+}
+
+func toProtoDeposits(ds []domain.Deposit) []*financev1.Deposit {
+	out := make([]*financev1.Deposit, 0, len(ds))
+	for _, d := range ds {
+		out = append(out, toProtoDeposit(d))
+	}
+	return out
+}
+
+// IncomeByConcept is what the school earned in a period.
+func (h *FinanceHandler) IncomeByConcept(ctx context.Context, req *connect.Request[financev1.IncomeByConceptRequest]) (*connect.Response[financev1.IncomeByConceptResponse], error) {
+	from, err := parseIncomeDate(req.Msg.GetFrom())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	to, err := parseIncomeDate(req.Msg.GetTo())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	income, err := h.finance.IncomeByConcept(ctx, from, to)
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	lines := make([]*financev1.IncomeLine, 0, len(income.Lines))
+	for _, l := range income.Lines {
+		lines = append(lines, &financev1.IncomeLine{
+			ConceptId: l.ConceptID, Concept: l.Concept, AmountCents: l.AmountCents,
+		})
+	}
+	return connect.NewResponse(&financev1.IncomeByConceptResponse{
+		Lines: lines, TotalCents: income.TotalCents,
+	}), nil
+}
+
+// parseIncomeDate reads a period bound. Empty is refused rather than defaulted:
+// a report over "everything since the beginning" is almost never what was meant,
+// and it is the kind of mistake read as a real number.
+func parseIncomeDate(raw string) (time.Time, error) {
+	if raw == "" {
+		return time.Time{}, glerrors.New(glerrors.KindInvalid, "the period needs both dates")
+	}
+	d, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return time.Time{}, glerrors.New(glerrors.KindInvalid, "dates must be YYYY-MM-DD")
+	}
+	return d, nil
+}
+
+// VoidDeposit cancels a deposit and releases what it settled.
+func (h *FinanceHandler) VoidDeposit(ctx context.Context, req *connect.Request[financev1.VoidDepositRequest]) (*connect.Response[financev1.VoidDepositResponse], error) {
+	if err := h.finance.VoidDeposit(ctx, req.Msg.GetId(), req.Msg.GetReason()); err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&financev1.VoidDepositResponse{}), nil
+}
+
+func toProtoDeposit(d domain.Deposit) *financev1.Deposit {
+	out := &financev1.Deposit{
+		Id:              d.ID(),
+		StudentId:       d.StudentID(),
+		AmountCents:     d.Amount().Int64(),
+		Method:          d.Method(),
+		Reference:       d.Reference(),
+		PaidAt:          timestamppb.New(d.PaidAt()),
+		CalendarVersion: d.CalendarVersion(),
+		CardType:        d.CardType(),
+		VoidReason:      d.VoidReason(),
+	}
+	if d.Voided() {
+		out.VoidedAt = timestamppb.New(d.VoidedAt())
+	}
+	return out
+}
+
+// DrainOutbox publishes the events still waiting.
+func (h *FinanceHandler) DrainOutbox(ctx context.Context, req *connect.Request[financev1.DrainOutboxRequest]) (*connect.Response[financev1.DrainOutboxResponse], error) {
+	limit := int(req.Msg.GetLimit())
+	published, err := h.finance.DrainOutbox(ctx, limit)
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&financev1.DrainOutboxResponse{Published: int32(published)}), nil
 }
 
 // ExportContpaqi is the CONTPAQi XML export (spike S02). The contract reserves
@@ -300,16 +521,25 @@ func connectErr(err error) *connect.Error {
 // UpsertTuitionPlan sets what one level of one cycle costs.
 func (h *FinanceHandler) UpsertTuitionPlan(ctx context.Context, req *connect.Request[financev1.UpsertTuitionPlanRequest]) (*connect.Response[financev1.UpsertTuitionPlanResponse], error) {
 	m := req.Msg
+	enrollmentDue, err := parsePlanDate(m.GetEnrollmentDueOn())
+	if err != nil {
+		return nil, connectErr(err)
+	}
 	plan, err := h.finance.UpsertTuitionPlan(ctx, usecase.TuitionPlanInput{
-		CycleID:          m.GetCycleId(),
-		LevelID:          m.GetLevelId(),
-		EnrollmentCents:  m.GetEnrollmentCents(),
-		MonthlyCents:     m.GetMonthlyCents(),
-		Months:           int(m.GetMonths()),
-		FirstBilledMonth: int(m.GetFirstBilledMonth()),
-		DueDay:           int(m.GetDueDay()),
-		LateFeeCents:     m.GetLateFeeCents(),
-		Active:           m.GetActive(),
+		CycleID:              m.GetCycleId(),
+		LevelID:              m.GetLevelId(),
+		EnrollmentCents:      m.GetEnrollmentCents(),
+		MonthlyCents:         m.GetMonthlyCents(),
+		Months:               int(m.GetMonths()),
+		FirstBilledMonth:     int(m.GetFirstBilledMonth()),
+		DueDay:               int(m.GetDueDay()),
+		LateFeeCents:         m.GetLateFeeCents(),
+		Active:               m.GetActive(),
+		Policy:               toDomainPolicy(m.GetPolicy()),
+		Schedule:             toDomainSchedule(m.GetSchedule()),
+		MonthlyDiscountCents: m.GetMonthlyDiscountCents(),
+		Fees:                 toDomainFees(m.GetFees()),
+		EnrollmentDueOn:      enrollmentDue,
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -341,6 +571,8 @@ func (h *FinanceHandler) RunBilling(ctx context.Context, req *connect.Request[fi
 		TuitionCreated:    int32(got.TuitionCreated),
 		EnrollmentCreated: int32(got.EnrollmentCreated),
 		LateFeesCreated:   int32(got.LateFeesCreated),
+		FeesCreated:       int32(got.FeesCreated),
+		EnrollmentMoved:   int32(got.EnrollmentMoved),
 		Skipped:           int32(got.Skipped),
 		LevelsWithoutPlan: got.LevelsWithoutPlan,
 	}), nil
@@ -349,16 +581,125 @@ func (h *FinanceHandler) RunBilling(ctx context.Context, req *connect.Request[fi
 // toProtoPlan maps a domain TuitionPlan to its proto message.
 func toProtoPlan(p domain.TuitionPlan) *financev1.TuitionPlan {
 	return &financev1.TuitionPlan{
-		Id:               p.ID(),
-		TenantId:         p.TenantID(),
-		CycleId:          p.CycleID(),
-		LevelId:          p.LevelID(),
-		EnrollmentCents:  p.EnrollmentCents(),
-		MonthlyCents:     p.MonthlyCents(),
-		Months:           int32(p.Months()),
-		FirstBilledMonth: int32(p.FirstBilledMonth()),
-		DueDay:           int32(p.DueDay()),
-		LateFeeCents:     p.LateFeeCents(),
-		Active:           p.Active(),
+		Id:                   p.ID(),
+		TenantId:             p.TenantID(),
+		CycleId:              p.CycleID(),
+		LevelId:              p.LevelID(),
+		EnrollmentCents:      p.EnrollmentCents(),
+		MonthlyCents:         p.MonthlyCents(),
+		Months:               int32(p.Months()),
+		FirstBilledMonth:     int32(p.FirstBilledMonth()),
+		DueDay:               int32(p.DueDay()),
+		LateFeeCents:         p.LateFeeCents(),
+		Active:               p.Active(),
+		Policy:               toProtoPolicy(p.Policy()),
+		Schedule:             toProtoSchedule(p.Schedule()),
+		MonthlyDiscountCents: p.MonthlyDiscountCents(),
+		Fees:                 toProtoFees(p.Fees()),
+		EnrollmentDueOn:      formatPlanDate(p.EnrollmentDueOn()),
+	}
+}
+
+// toDomainFees reads the level's extra fees off the wire. An absent list is a
+// level that collects only its tuition, which is what a client written before
+// this sends.
+func toDomainFees(in []*financev1.Fee) []domain.Fee {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]domain.Fee, 0, len(in))
+	for _, f := range in {
+		months := make([]int, 0, len(f.GetMonths()))
+		for _, m := range f.GetMonths() {
+			months = append(months, int(m))
+		}
+		out = append(out, domain.Fee{
+			Name:        f.GetName(),
+			AmountCents: f.GetAmountCents(),
+			Months:      months,
+		})
+	}
+	return out
+}
+
+func toProtoFees(in []domain.Fee) []*financev1.Fee {
+	out := make([]*financev1.Fee, 0, len(in))
+	for _, f := range in {
+		months := make([]int32, 0, len(f.Months))
+		for _, m := range f.Months {
+			months = append(months, int32(m))
+		}
+		out = append(out, &financev1.Fee{Name: f.Name, AmountCents: f.AmountCents, Months: months})
+	}
+	return out
+}
+
+// parsePlanDate reads an optional YYYY-MM-DD off the wire.
+//
+// A malformed date is REFUSED rather than read as "unset". Swallowing it would
+// move every inscription of the level back to the default rule, silently, and
+// the school would find out from the due dates months later.
+func parsePlanDate(s string) (time.Time, error) {
+	if strings.TrimSpace(s) == "" {
+		return time.Time{}, nil
+	}
+	t, err := time.Parse(dueDateLayout, s)
+	if err != nil {
+		return time.Time{}, glerrors.New(glerrors.KindInvalid, "the date is written YYYY-MM-DD")
+	}
+	return t, nil
+}
+
+func formatPlanDate(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(dueDateLayout)
+}
+
+// toDomainPolicy reads the collection rule off the wire. A nil message is the
+// zero policy, which is the original monthly rule — an older client that does
+// not know about M16 keeps meaning exactly what it meant.
+func toDomainPolicy(p *financev1.CollectionPolicy) domain.CollectionPolicy {
+	if p == nil {
+		return domain.CollectionPolicy{}
+	}
+	return domain.CollectionPolicy{
+		DailyMode:              p.GetDailyMode(),
+		LateFeeDailyCents:      p.GetLateFeeDailyCents(),
+		SurchargeCountsAllDays: p.GetSurchargeCountsAllDays(),
+		EarlyPaymentCents:      p.GetEarlyPaymentCents(),
+		EarlyPaymentDays:       int(p.GetEarlyPaymentDays()),
+	}
+}
+
+// toDomainSchedule reads an explicit payment plan off the wire. An absent list
+// is the uniform year, which is what a client written before this sends.
+func toDomainSchedule(in []*financev1.Installment) []domain.Installment {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]domain.Installment, 0, len(in))
+	for _, i := range in {
+		out = append(out, domain.Installment{Month: int(i.GetMonth()), AmountCents: i.GetAmountCents()})
+	}
+	return out
+}
+
+func toProtoSchedule(in []domain.Installment) []*financev1.Installment {
+	out := make([]*financev1.Installment, 0, len(in))
+	for _, i := range in {
+		out = append(out, &financev1.Installment{Month: int32(i.Month), AmountCents: i.AmountCents})
+	}
+	return out
+}
+
+func toProtoPolicy(p domain.CollectionPolicy) *financev1.CollectionPolicy {
+	return &financev1.CollectionPolicy{
+		DailyMode:              p.DailyMode,
+		LateFeeDailyCents:      p.LateFeeDailyCents,
+		SurchargeCountsAllDays: p.SurchargeCountsAllDays,
+		EarlyPaymentCents:      p.EarlyPaymentCents,
+		EarlyPaymentDays:       int32(p.EarlyPaymentDays),
 	}
 }

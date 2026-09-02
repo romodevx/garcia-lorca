@@ -76,6 +76,9 @@ type createItemRequest struct {
 	Description string `json:"description"`
 	Level       string `json:"level"`
 	PriceCents  int64  `json:"priceCents"`
+	// Category is uniform, book, supply or other. Empty means uniform, which is
+	// what everything in this module was before the school sold anything else.
+	Category string `json:"category"`
 }
 
 // CreateItem: POST /api/v1/uniforms/items
@@ -86,7 +89,7 @@ func (h *UniformsHandler) CreateItem(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := h.svc.CreateItem(r.Context(), client.CreateItemInput{
 		Code: body.Code, Name: body.Name, Description: body.Description,
-		Level: body.Level, PriceCents: body.PriceCents,
+		Level: body.Level, PriceCents: body.PriceCents, Category: body.Category,
 	})
 	if err != nil {
 		writeUniformsError(w, err)
@@ -101,6 +104,7 @@ type updateItemRequest struct {
 	Level       string `json:"level"`
 	PriceCents  int64  `json:"priceCents"`
 	Active      bool   `json:"active"`
+	Category    string `json:"category"`
 }
 
 // UpdateItem: PUT /api/v1/uniforms/items/{id}
@@ -112,6 +116,7 @@ func (h *UniformsHandler) UpdateItem(w http.ResponseWriter, r *http.Request) {
 	item, err := h.svc.UpdateItem(r.Context(), client.UpdateItemInput{
 		ID: r.PathValue("id"), Name: body.Name, Description: body.Description,
 		Level: body.Level, PriceCents: body.PriceCents, Active: body.Active,
+		Category: body.Category,
 	})
 	if err != nil {
 		writeUniformsError(w, err)

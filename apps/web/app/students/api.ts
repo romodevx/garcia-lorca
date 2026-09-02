@@ -232,3 +232,67 @@ export function transfer(baseURL: string, input: TransferInput): Promise<Enrollm
 export function withdraw(baseURL: string, enrollmentId: string): Promise<Enrollment> {
   return postJSON<Enrollment>(baseURL, "/enrollments/withdraw", { enrollmentId });
 }
+
+// --- contacts (M16) ---------------------------------------------------------
+
+/** How a contact relates to the pupil. */
+export type Relationship = "mother" | "father" | "guardian" | "other";
+
+/**
+ * Somebody the school can reach about a pupil.
+ *
+ * A contact WITH an account is a family that can open the app; one WITHOUT is a
+ * phone number the office calls. Most of a pupil's contacts are the second kind,
+ * which is why recording one no longer requires creating a login.
+ */
+export interface Contact {
+  id: string;
+  studentId: string;
+  guardianUserId: string;
+  relationship: Relationship;
+  fullName: string;
+  phone: string;
+  email: string;
+  /** Whether this contact can open the family app. */
+  hasAccount: boolean;
+}
+
+export interface AddContactInput {
+  studentId: string;
+  relationship: Relationship;
+  fullName: string;
+  phone?: string;
+  email?: string;
+}
+
+/** The people the school can call about one pupil. */
+export async function listContacts(baseURL: string, studentId: string): Promise<Contact[]> {
+  const res = await authFetch(`${baseURL.replace(/\/+$/, "")}/api/v1/students/${studentId}/guardians`, {
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw await studentsFailure(res);
+  }
+  const data = (await res.json()) as { guardians?: Contact[]; links?: Contact[] };
+  return data.guardians ?? data.links ?? [];
+}
+
+/** Records somebody the school can call, with no account and no login. */
+export async function addContact(baseURL: string, input: AddContactInput): Promise<Contact> {
+  const res = await authFetch(`${baseURL.replace(/\/+$/, "")}/api/v1/contacts`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      studentId: input.studentId,
+      relationship: input.relationship,
+      fullName: input.fullName,
+      ...(input.phone !== undefined && input.phone !== "" ? { phone: input.phone } : {}),
+      ...(input.email !== undefined && input.email !== "" ? { email: input.email } : {}),
+    }),
+  });
+  if (!res.ok) {
+    throw await studentsFailure(res);
+  }
+  return (await res.json()) as Contact;
+}

@@ -71,7 +71,12 @@ const (
 	readHeaderTimeout = 10 * time.Second
 	readTimeout       = 30 * time.Second
 	writeTimeout      = 30 * time.Second
-	idleTimeout       = 120 * time.Second
+	// outboxSweep is how often stranded events are looked for. Seconds, not
+	// minutes: the events it rescues are the ones that decide whether a pupil
+	// who paid shows as inscribed, and a demo runs every day.
+	outboxSweep = 30 * time.Second
+
+	idleTimeout = 120 * time.Second
 	// shutdownTimeout bounds the drain: past it, Shutdown stops waiting for
 	// in-flight requests rather than holding the process open indefinitely.
 	shutdownTimeout = 15 * time.Second
@@ -89,7 +94,7 @@ func main() {
 // run is the process lifecycle: build the composition root, serve until the
 // listener stops, and release the event transport on the way out.
 func run(ctx context.Context, log *slog.Logger) error {
-	mux, events, consumer, err := buildMux(ctx, log)
+	mux, events, consumer, drain, err := buildMux(ctx, log)
 	if err != nil {
 		return err
 	}
@@ -145,6 +150,34 @@ func run(ctx context.Context, log *slog.Logger) error {
 		return srv.Shutdown(shutdownCtx)
 	})
 
+	// The outbox sweep. A payment drains its own events the moment it commits,
+	// so this is for what that cannot cover: the broker was down, or the process
+	// died between the commit and the send. Without it a family could pay and
+	// the pupil stay "en trámite" forever, with nothing able to notice.
+	group.Go(func() error {
+		ticker := time.NewTicker(outboxSweep)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-groupCtx.Done():
+				return nil
+			case <-ticker.C:
+				published, err := drain(groupCtx)
+				if err != nil {
+					// Never fatal: a sweep that cannot run must not take the
+					// ledger down. The next tick tries again.
+					log.Warn("finance could not drain the outbox", slog.Any("error", err))
+					continue
+				}
+				if published > 0 {
+					// Only when it did something. A line every thirty seconds
+					// saying "nothing" is a log nobody reads.
+					log.Info("finance published stranded events", slog.Int("count", published))
+				}
+			}
+		}
+	})
+
 	closeSubscriber, err := startSubscriber(groupCtx, group, consumer, log)
 	if err != nil {
 		// The group already owns the server and its shutdown watcher; returning
@@ -167,14 +200,14 @@ func run(ctx context.Context, log *slog.Logger) error {
 // buildMux is the composition root: config → adapters (both reader clients,
 // repo and publisher) → use case → Connect handler, returning the mounted routes
 // plus the event publisher the caller must close on shutdown.
-func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.PublisherCloser, *pubsubadapter.Consumer, error) {
+func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.PublisherCloser, *pubsubadapter.Consumer, func(context.Context) (int, error), error) {
 	// Single-tenant for this phase: the tenant is fixed here (not derived from
 	// the caller), so RLS binds this one tenant for every request. See ADR 0001.
 	tenantID := envOr("FINANCE_TENANT_ID", defaultTenant)
 
 	db, err := openDB()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	repo := pgadapter.NewRepository(db, tenantID)
@@ -188,18 +221,28 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	studentsBaseURL := envOr("STUDENTS_BASE_URL", defaultStudentsBaseURL)
 	configBaseURL := envOr("CONFIG_BASE_URL", defaultConfigBaseURL)
 	studentsClient := studentsclient.New(studentsBaseURL, gcpauth.HTTPClient(ctx, studentsBaseURL))
+	// How long the school calendar is held, and how long a read of it may take.
+	// Minutes, not per cycle: a holiday entered this morning has to be visible
+	// this morning. Seconds, not indefinitely: a cashier is standing in front of
+	// a parent, and a slow config service must not become a slow counter.
+	const (
+		calendarTTL     = 5 * time.Minute
+		calendarTimeout = 3 * time.Second
+	)
+
 	cyclesClient := configclient.New(configBaseURL, gcpauth.HTTPClient(ctx, configBaseURL))
 
 	events, err := gcp.PublisherFromEnv(ctx, log)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	publisher := pubsubadapter.NewEventPublisher(events)
 
 	newID := func() string { return uuid.NewString() }
 	// cyclesClient is the config client twice over: it answers both "is this a
 	// real school year" and "which level does this group belong to".
-	svc := usecase.NewFinanceService(repo, studentsClient, cyclesClient, studentsClient, cyclesClient, publisher, tenantID, newID, time.Now)
+	svc := usecase.NewFinanceService(repo, studentsClient, cyclesClient, studentsClient, cyclesClient,
+		configclient.NewCachedCalendar(cyclesClient, calendarTTL, calendarTimeout), publisher, tenantID, newID, time.Now)
 	health := usecase.NewHealthService(serviceName)
 	handler := grpcadapter.NewFinanceHandler(svc, health)
 	consumer := pubsubadapter.NewConsumer(svc, log)
@@ -215,7 +258,7 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	// to pull, so events arrive as authenticated POSTs instead. Mounted always —
 	// harmless locally, where the pull loop below does the work.
 	mux.Handle("POST /pubsub", gcp.NewPushHandler(consumer.Handle, os.Getenv("PUBSUB_PUSH_SA_EMAIL"), log))
-	return mux, events, consumer, nil
+	return mux, events, consumer, func(c context.Context) (int, error) { return svc.DrainOutbox(c, 0) }, nil
 }
 
 // openDB opens the GORM Postgres pool, resolving its DSN via pkg/dbdsn:

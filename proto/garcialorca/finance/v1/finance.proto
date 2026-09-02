@@ -88,6 +88,36 @@ service FinanceService {
   // follow-up.
   rpc ListOverdue(ListOverdueRequest) returns (ListOverdueResponse);
 
+  // --- deposits (M16: money that arrives before it is decided what it pays) ---
+  // RegisterDeposit takes an amount without being told what it covers, and
+  // splits it across what the family owes: oldest first, surcharges included,
+  // and whatever is left stays as their credit.
+  rpc RegisterDeposit(RegisterDepositRequest) returns (RegisterDepositResponse);
+  // PreviewDeposit says what an amount WOULD cover, without taking it. Same
+  // rule, same order, same arithmetic as RegisterDeposit, and it writes nothing
+  // — so a cashier can tell a parent what their money pays for before it
+  // changes hands. A projection, not a promise: the charges are read without a
+  // lock, so a payment landing in between changes the answer.
+  rpc PreviewDeposit(PreviewDepositRequest) returns (PreviewDepositResponse);
+  // ExpectedToday is what a family must hand over today to be current: the
+  // months already due (and the one due later this month, which is how the
+  // early-payment reward is earned), what being late has cost, and what paying
+  // early saves. The counter shows it and never lets anybody edit it.
+  rpc ExpectedToday(ExpectedTodayRequest) returns (ExpectedTodayResponse);
+  // ListDeposits returns a student's deposits, newest first.
+  rpc ListDeposits(ListDepositsRequest) returns (ListDepositsResponse);
+  // DailyCashUp is the day's takings: one number per method, the total, and the
+  // list behind them. The artefact that replaces the notebook — at close of day
+  // the office can say what came in without adding anything up by hand.
+  rpc DailyCashUp(DailyCashUpRequest) returns (DailyCashUpResponse);
+  // IncomeByConcept is what the school earned in a period, by what it charged
+  // for. Counted on the day the money changed hands, not the day the charge was
+  // issued: the two are months apart for anyone paying late.
+  rpc IncomeByConcept(IncomeByConceptRequest) returns (IncomeByConceptResponse);
+  // VoidDeposit cancels a deposit and releases what it settled. The row stays,
+  // with its reason: a school that deletes money rows cannot explain its ledger.
+  rpc VoidDeposit(VoidDepositRequest) returns (VoidDepositResponse);
+
   // --- tuition (M15: what each level costs, and the monthly run) ---
   // UpsertTuitionPlan sets (or replaces) the tuition table for one level of one
   // cycle. Keyed by (cycle, level): a school raises tuition each year, and the
@@ -105,6 +135,15 @@ service FinanceService {
   // unique per tenant — so a button and a scheduler may both call it, and calling
   // it twice on the same day charges nobody twice.
   rpc RunBilling(RunBillingRequest) returns (RunBillingResponse);
+
+  // DrainOutbox publishes the events waiting in the outbox and reports how many
+  // went out.
+  //
+  // A payment drains straight after committing, so the ordinary case needs
+  // nobody. This exists for the case that ordinary path cannot cover: the broker
+  // was down, or the container died between the commit and the send. A scheduler
+  // calls it on a timer, and an empty queue is the normal answer.
+  rpc DrainOutbox(DrainOutboxRequest) returns (DrainOutboxResponse);
 
   // ExportContpaqi produces a CONTPAQi-format XML export (spike S02).
   // TODO(M05/S02): real field mapping + period/account filters.
@@ -329,6 +368,9 @@ message GetAccountResponse {
   repeated Charge charges = 1;
   repeated Payment payments = 2;
   int64 total_balance_cents = 3;
+  // Money the family has handed over that no charge has claimed: an
+  // overpayment, or a deposit made before the month was billed.
+  int64 unallocated_cents = 4;
 }
 
 message ListOverdueRequest {
@@ -411,7 +453,77 @@ message TuitionPlan {
   // Fixed surcharge added once per completed overdue month. Zero disables it.
   int64 late_fee_cents = 10;
   bool active = 11;
+  CollectionPolicy policy = 12;
+  // An explicit payment plan, replacing the uniform monthly amount. Empty means
+  // the year is divided into equal parts, which is what most schools do.
+  repeated Installment schedule = 13;
+  // A fixed amount off every month of this level — the school's arrangement for
+  // maternal, or for any level it prices differently. Set once here rather than
+  // typed per pupil, which is the difference between a rule and four hundred
+  // chances to mistype it.
+  int64 monthly_discount_cents = 14;
+  // The extras collected on top of the tuition, each split across the months
+  // the school chose. Empty is the ordinary state.
+  repeated Fee fees = 15;
+  // The deadline the school set for the inscription (YYYY-MM-DD). Empty keeps
+  // the rule the run has always used — the due day in the cycle's first month —
+  // so a plan written before this field goes on meaning what it meant.
+  string enrollment_due_on = 16;
 }
+
+// Fee is money the school collects on top of the monthly tuition, spread across
+// the months it chooses.
+//
+// It exists because a school's year and its calendar do not agree. "La cuota de
+// julio" is charged for a month the year does not bill, so it has to be
+// collected inside months that it does. Saying that used to mean hand-writing a
+// schedule of month:amount pairs, which priced the tuition and the fee as one
+// number and left nobody able to explain either.
+message Fee {
+  // What the family reads on the statement, and the whole explanation of why a
+  // month costs more than the tabulador says.
+  string name = 1;
+  // The WHOLE fee, not the monthly share. The school states what it collects;
+  // dividing it is the server's job, not the director's.
+  int64 amount_cents = 2;
+  // The calendar months (1-12) it is divided between, in the order chosen. One
+  // month is a fee that is not split. The remainder of an uneven division goes
+  // to the first payment, so no cent is lost.
+  repeated int32 months = 3;
+}
+
+// Installment is one payment of the year: the calendar month it falls in and
+// how much of the tuition it collects.
+//
+// It exists because a school does not always divide the year into equal parts.
+// "Once meses, pero diciembre a la mitad y la otra mitad en marzo" is a real
+// arrangement, and a plan that can only say "N equal payments" cannot express
+// it. The year is worked out from the cycle, so a schedule running past
+// December continues into the next one.
+message Installment {
+  int32 month = 1;  // 1-12
+  int64 amount_cents = 2;
+}
+
+// CollectionPolicy is what a late payment costs and what an early one saves,
+// for one tuition table. It rides with the plan because that is where a price
+// lives.
+message CollectionPolicy {
+  // daily_mode picks which surcharge rule applies. false keeps the original one
+  // (late_fee_cents, once per completed overdue month); true charges
+  // late_fee_daily_cents for every day the money is late, and the monthly run
+  // stops issuing surcharge charges because the amount changes every night.
+  bool daily_mode = 1;
+  int64 late_fee_daily_cents = 2;
+  // surcharge_counts_all_days counts Saturdays, Sundays and holidays. The school
+  // said yes: the money is late on a Sunday too.
+  bool surcharge_counts_all_days = 3;
+  // A fixed amount off, per month settled, when the family pays within the first
+  // early_payment_days working days of the month. Zero disables it.
+  int64 early_payment_cents = 4;
+  int32 early_payment_days = 5;
+}
+
 
 message UpsertTuitionPlanRequest {
   string cycle_id = 1;
@@ -423,6 +535,12 @@ message UpsertTuitionPlanRequest {
   int32 due_day = 7;
   int64 late_fee_cents = 8;
   bool active = 9;
+  CollectionPolicy policy = 10;
+  repeated Installment schedule = 11;
+  int64 monthly_discount_cents = 12;
+  repeated Fee fees = 13;
+  // YYYY-MM-DD, or empty for the default rule.
+  string enrollment_due_on = 14;
 }
 
 message UpsertTuitionPlanResponse {
@@ -453,8 +571,170 @@ message RunBillingResponse {
   int32 enrollment_created = 2;
   int32 late_fees_created = 3;
   int32 skipped = 4;
+  // Charges issued for the extras collected on top of the tuition.
+  int32 fees_created = 6;
+  // Inscriptions whose deadline the run corrected to match the tuition table.
+  // Reported because a run that silently moves four hundred due dates is one
+  // nobody can audit.
+  int32 enrollment_moved = 7;
   // Levels of the cycle with no tuition table. They are NOT billed at zero —
   // they are reported, so a school notices it forgot one instead of discovering
   // it in June.
   repeated string levels_without_plan = 5;
+}
+
+// --- Deposits (M16) --------------------------------------------------------
+
+// Deposit is money as it arrived: one amount, one date, one receipt.
+message Deposit {
+  string id = 1;
+  string student_id = 2;
+  int64 amount_cents = 3;
+  // method is one of: cash | card | transfer.
+  string method = 4;
+  string reference = 5;
+  google.protobuf.Timestamp paid_at = 6;
+  // The school calendar the split was worked out against. 'unavailable' means
+  // the calendar could not be read and the deadline was computed without the
+  // school's holidays.
+  string calendar_version = 7;
+  google.protobuf.Timestamp voided_at = 8;
+  string void_reason = 9;
+  // debit | credit on a card payment, empty otherwise. Not a payment method —
+  // the money still arrives by card — but the terminal the office reconciles
+  // against at month end knows the difference.
+  string card_type = 10;
+}
+
+message RegisterDepositRequest {
+  string student_id = 1;
+  int64 amount_cents = 2;
+  // method is one of: cash | card | transfer.
+  string method = 3;
+  string reference = 4;
+  // paid_at is when the money changed hands, which is not always when it was
+  // keyed. Every collection rule is a function of it. Empty means now; a future
+  // date is refused.
+  google.protobuf.Timestamp paid_at = 5;
+  // idempotency_key is optional; a repeat under the same key returns what was
+  // stored the first time and collects nothing.
+  string idempotency_key = 6;
+  // grant_early_payment honours the early-payment reward even though the money
+  // arrived after the window closed — the parent who is always punctual and
+  // slipped once. A decision, never a default: it is recorded under its own
+  // discount reason so a report can tell it from the rule firing.
+  bool grant_early_payment = 7;
+  // debit | credit, only when method is card.
+  string card_type = 8;
+}
+
+message RegisterDepositResponse {
+  Deposit deposit = 1;
+  // The payments the deposit split into, oldest debt first.
+  repeated Payment allocations = 2;
+  // The surcharge charges this deposit made real. A row exists only where money
+  // landed on it.
+  repeated Charge surcharges = 3;
+  // What no charge claimed: the family's credit.
+  int64 unallocated_cents = 4;
+  // replayed says the deposit already existed under this idempotency key.
+  bool replayed = 5;
+}
+
+message ListDepositsRequest {
+  string student_id = 1;
+}
+
+message ListDepositsResponse {
+  repeated Deposit deposits = 1;
+}
+
+message VoidDepositRequest {
+  string id = 1;
+  // reason is required: a cancelled deposit without one is an unexplained hole
+  // in the day's takings.
+  string reason = 2;
+}
+
+message VoidDepositResponse {}
+
+// PreviewDepositRequest asks what an amount would cover. It carries no
+// idempotency key: nothing is written, so there is nothing to deduplicate.
+message PreviewDepositRequest {
+  string student_id = 1;
+  int64 amount_cents = 2;
+  google.protobuf.Timestamp paid_at = 3;
+}
+
+// PreviewDepositResponse is the projected split.
+message PreviewDepositResponse {
+  repeated Payment allocations = 1;
+  repeated Charge surcharges = 2;
+  int64 unallocated_cents = 3;
+}
+
+// DailyCashUpRequest asks for one day's takings.
+message DailyCashUpRequest {
+  // The day the money changed hands, as YYYY-MM-DD. Empty means today.
+  string day = 1;
+}
+
+// DailyCashUpResponse is what came in, and in what form.
+message DailyCashUpResponse {
+  repeated Deposit deposits = 1;
+  // Cancelled deposits count for nothing and are listed anyway: a cash-up that
+  // hid them could not explain why the drawer holds less than the receipts say.
+  repeated Deposit cancelled = 2;
+  int64 cash_cents = 3;
+  int64 card_cents = 4;
+  int64 transfer_cents = 5;
+  int64 total_cents = 6;
+}
+
+// IncomeByConceptRequest asks what came in between two days, both inclusive.
+message IncomeByConceptRequest {
+  string from = 1;  // YYYY-MM-DD
+  string to = 2;    // YYYY-MM-DD, inclusive
+}
+
+// IncomeLine is what one concept earned in the period.
+message IncomeLine {
+  string concept_id = 1;
+  string concept = 2;
+  int64 amount_cents = 3;
+}
+
+// IncomeByConceptResponse is the period's income, biggest line first.
+message IncomeByConceptResponse {
+  repeated IncomeLine lines = 1;
+  int64 total_cents = 2;
+}
+
+// ExpectedTodayRequest asks what is due as of a date.
+message ExpectedTodayRequest {
+  string student_id = 1;
+  string on = 2;  // YYYY-MM-DD; empty means today
+}
+
+// ExpectedTodayResponse is the figure the counter reads aloud, with the parts
+// that make it up.
+message ExpectedTodayResponse {
+  int64 amount_cents = 1;
+  int64 surcharge_cents = 2;
+  int64 discount_cents = 3;
+  // The whole year still owed, shown beside it so nobody confuses "what is due
+  // today" with "what is left".
+  int64 annual_balance_cents = 4;
+}
+
+// DrainOutboxRequest asks for the waiting events to be published.
+message DrainOutboxRequest {
+  // How many to publish in this pass. Zero means the service's own batch size.
+  int32 limit = 1;
+}
+
+// DrainOutboxResponse reports how many actually went out. Zero is the ordinary
+// answer: the payment path drains its own events.
+message DrainOutboxResponse {
+  int32 published = 1;
 }

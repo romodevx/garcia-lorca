@@ -332,6 +332,10 @@ func (h *FamilyHandler) Account(w http.ResponseWriter, r *http.Request) {
 		"charges":           toChargeResponses(res.Charges),
 		"payments":          payments,
 		"totalBalanceCents": res.TotalBalanceCents,
+		// The family's credit. The school sees it on its own statement, and a
+		// parent who overpaid seeing only the debt would be told they owe money
+		// the school is already holding for them.
+		"unallocatedCents": res.UnallocatedCents,
 	})
 }
 

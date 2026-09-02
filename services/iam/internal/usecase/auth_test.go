@@ -158,13 +158,20 @@ type fakeTokens struct {
 	lastClaims      domain.Claims
 	refreshFor      string
 	refreshIssuedAt time.Time // issued-at reported by ParseRefreshToken (zero ⇒ no floor)
+	// lastKind is the session kind the last refresh token was issued for, and
+	// refreshKind is what ParseRefreshToken reports back — the two together are
+	// how "a rotation keeps its kind" is observable.
+	lastKind    domain.SessionKind
+	refreshKind domain.SessionKind
 }
 
 func (t *fakeTokens) IssueAccessToken(_ context.Context, claims domain.Claims) (string, error) {
 	t.lastClaims = claims
 	return "access:" + claims.Subject, nil
 }
-func (t *fakeTokens) IssueRefreshToken(_ context.Context, userID string) (string, error) {
+func (t *fakeTokens) IssueRefreshToken(_ context.Context, userID string, kind domain.SessionKind) (string, error) {
+	t.lastKind = kind
+	t.refreshKind = kind
 	return "refresh:" + userID, nil
 }
 func (t *fakeTokens) ValidateAccessToken(_ context.Context, token string) (domain.Claims, error) {
@@ -173,11 +180,11 @@ func (t *fakeTokens) ValidateAccessToken(_ context.Context, token string) (domai
 	}
 	return domain.Claims{}, glerrors.ErrUnauthorized
 }
-func (t *fakeTokens) ParseRefreshToken(_ context.Context, token string) (string, time.Time, error) {
+func (t *fakeTokens) ParseRefreshToken(_ context.Context, token string) (string, time.Time, domain.SessionKind, error) {
 	if token == "refresh:u1" {
-		return "u1", t.refreshIssuedAt, nil
+		return "u1", t.refreshIssuedAt, t.refreshKind, nil
 	}
-	return "", time.Time{}, glerrors.ErrUnauthorized
+	return "", time.Time{}, domain.SessionStaff, glerrors.ErrUnauthorized
 }
 
 // --- fixtures --------------------------------------------------------------
@@ -492,7 +499,7 @@ type failingIssuer struct{}
 func (failingIssuer) IssueAccessToken(context.Context, domain.Claims) (string, error) {
 	return "", glerrors.New(glerrors.KindInternal, "signing failed")
 }
-func (failingIssuer) IssueRefreshToken(context.Context, string) (string, error) {
+func (failingIssuer) IssueRefreshToken(context.Context, string, domain.SessionKind) (string, error) {
 	return "refresh", nil
 }
 
