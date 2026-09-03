@@ -50,6 +50,18 @@ const (
 func main() {
 	log := logger.Default()
 
+	// One-off maintenance runs as a subcommand of this same binary: it needs the
+	// database connection, the tenant and the postgres adapter this service
+	// already knows how to build, and a second image would have been a second
+	// copy of all of it. See import_users.go.
+	if len(os.Args) > 1 && os.Args[1] == "import-users" {
+		if err := runImportUsers(log); err != nil {
+			log.Error("import-users failed", slog.Any("error", err))
+			os.Exit(1)
+		}
+		return
+	}
+
 	mux, err := buildMux(log)
 	if err != nil {
 		log.Error("iam failed to start", slog.Any("error", err))
