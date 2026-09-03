@@ -100,13 +100,33 @@ jobs:
         run: |
           set -euo pipefail
           WEB=$(gcloud run services describe web --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')
-          echo "web: $WEB"
-          # /healthz proves the container serves; /login proves Next rendered.
-          for path in /healthz /login; do
-            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 "$WEB$path")
-            echo "  $path -> $code"
-            [ "$code" = "200" ] || { echo "::error::$path returned $code"; exit 1; }
-          done
+          GW=$(gcloud run services describe gateway --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')
+          echo "web:     $WEB"
+          echo "gateway: $GW"
+
+          # NOT /healthz. Cloud Run RESERVES that path: it answers 404 from its
+          # own front end and the request never reaches the container, so no
+          # service deployed here can ever pass a public check on it. Measured:
+          # /healthz came back 404 with no `server` header and left no entry in
+          # the container's request log, while its neighbours /health and
+          # /healthzz returned the app's own 404 with `server: Google Frontend`.
+          # The startup probe in deploy/terraform/modules/cloud_run/main.tf still
+          # uses /healthz and still works — Cloud Run probes the container port
+          # directly, below the front end doing the interception.
+          #
+          # /login proves Next rendered a page. /readyz proves more than the old
+          # check ever did: the gateway calls iam end to end to answer it, so a
+          # green smoke test now means the API is actually reachable, not just
+          # that the web container served HTML over a dead backend.
+          fail=0
+          check() {
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 "$1$2")
+            echo "  $1$2 -> $code"
+            [ "$code" = "200" ] || { echo "::error::$1$2 returned $code"; fail=1; }
+          }
+          check "$WEB" /login
+          check "$GW" /readyz
+          [ "$fail" = "0" ] || exit 1
 
       - name: Confirm nothing was left warm
         run: |

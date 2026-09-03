@@ -200,7 +200,16 @@ resource "google_project_iam_member" "build_roles" {
     # because the source-staging step fails first, so the bucket error was the
     # only one anybody ever saw.
     "roles/cloudbuild.builds.editor",
-    # NOTE: the storage grants are deliberately NOT here. See
+    # Bucket METADATA at project scope, and nothing else: bucketViewer is
+    # exactly two permissions, storage.buckets.get and storage.buckets.list.
+    # `gcloud builds submit` resolves the staging bucket before it uploads, and
+    # a binding on the bucket alone did not satisfy that lookup (verified: the
+    # run after granting it failed identically). Google's own guidance here is
+    # roles/storage.admin, which is 105 permissions and would hand a CI build
+    # object access to every bucket in the project — including the terraform
+    # state. Two permissions buy the same lookup without that.
+    "roles/storage.bucketViewer",
+    # NOTE: the storage OBJECT grants are deliberately NOT here. See
     # build_staging_bucket below — project-wide object access reached the
     # terraform state bucket, which is not something a CI build should hold.
     "roles/run.admin",              # the _DEPLOY=true step updates services
