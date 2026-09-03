@@ -192,20 +192,49 @@ resource "google_project_iam_member" "build_roles" {
     # describe both halves while the role granted one. The submit UPLOADS first,
     # so it needs to create objects too — every run since died at step 6 with
     # "The user is forbidden from accessing the bucket [PROJECT_cloudbuild]".
-    "roles/storage.objectAdmin",
-    # The other half of that same error. Submitting a build AS this SA consumes
-    # the project's services on its own behalf, which needs
-    # serviceusage.services.use — the permission the error message names by hand
-    # ("Giving the user a role with this permission ... may fix this issue").
-    # Neither role is enough alone: one lets it write the tarball, the other lets
-    # it ask Cloud Build to read it.
+    # serviceusage.services.use — the permission gcloud's error message names by
+    # hand. Necessary, but on its own it fixed nothing (verified: the run after
+    # granting it failed identically).
     "roles/serviceusage.serviceUsageConsumer",
+    # Without this the SA could not create a build at all. It stayed hidden
+    # because the source-staging step fails first, so the bucket error was the
+    # only one anybody ever saw.
+    "roles/cloudbuild.builds.editor",
+    # NOTE: the storage grants are deliberately NOT here. See
+    # build_staging_bucket below — project-wide object access reached the
+    # terraform state bucket, which is not something a CI build should hold.
     "roles/run.admin",              # the _DEPLOY=true step updates services
     "roles/iam.serviceAccountUser", # deploy a revision that RUNS AS the runtime SA
   ])
   project = var.project_id
   role    = each.value
   member  = "serviceAccount:${google_service_account.build.email}"
+}
+
+# ---- Staging bucket for `gcloud builds submit` ------------------------------
+# Cloud Build stages the source tarball in gs://PROJECT_cloudbuild, which it
+# creates on first use and which terraform therefore does not own. Only the IAM
+# on it is managed here.
+#
+# SCOPED TO THIS BUCKET ON PURPOSE. These two roles lived in build_roles at the
+# PROJECT level, which reached every bucket the project has — including
+# garcia-lorca-tfstate, the terraform state. A CI build that can rewrite state
+# decides what the next apply does, so a compromised build became a compromised
+# environment. Nothing needed that: the build touches exactly one bucket.
+#
+# legacyBucketReader carries storage.buckets.get, the permission whose absence
+# produced "The user is forbidden from accessing the bucket" — and it is
+# bucket-only by design: granting it on a project is rejected outright with
+# "Role roles/storage.legacyBucketReader is not supported for this resource".
+# The error was telling us where the grant belonged.
+resource "google_storage_bucket_iam_member" "build_staging_bucket" {
+  for_each = toset([
+    "roles/storage.legacyBucketReader", # see the bucket (get)
+    "roles/storage.objectAdmin",        # upload the source tarball, read it back
+  ])
+  bucket = "${var.project_id}_cloudbuild"
+  role   = each.value
+  member = "serviceAccount:${google_service_account.build.email}"
 }
 
 # run.admin lets the build update a service; actually setting that service's
