@@ -195,6 +195,10 @@ resource "google_project_iam_member" "build_roles" {
     # serviceusage.services.use — the permission gcloud's error message names by
     # hand. Necessary, but on its own it fixed nothing (verified: the run after
     # granting it failed identically).
+    #
+    # The OBJECT grants that used to be described here moved to
+    # build_staging_bucket, scoped to the one bucket. What stays at project level
+    # is only what cannot be bucket-scoped.
     "roles/serviceusage.serviceUsageConsumer",
     # Without this the SA could not create a build at all. It stayed hidden
     # because the source-staging step fails first, so the bucket error was the

@@ -21,8 +21,16 @@ import (
 // tokenVerifier is the slice of the Admin SDK's auth client this adapter uses.
 // Declared here, where it is consumed, so the policy above can be tested
 // without a project, a network or a key.
+//
+// The CHECKING variant, not plain VerifyIDToken. A plain verify accepts a token
+// for the rest of its ~1h life even after the account's password was reset or
+// the account was disabled at the provider — and this service would then mint a
+// fresh 15-minute access token and a 24-hour refresh from it. That would quietly
+// undo the revocation-on-password-change guarantee the password path was built
+// to give (RefreshToken's password_changed_at floor, ADR 0005). Revoking has to
+// mean revoked on both doors.
 type tokenVerifier interface {
-	VerifyIDToken(ctx context.Context, idToken string) (*firebaseauth.Token, error)
+	VerifyIDTokenAndCheckRevoked(ctx context.Context, idToken string) (*firebaseauth.Token, error)
 }
 
 // Verifier implements ports.IDTokenVerifier over Identity Platform.
@@ -61,7 +69,7 @@ func errUnauthorized() error {
 
 // Verify checks an ID token and reports the identity it proves.
 func (v *Verifier) Verify(ctx context.Context, idToken string) (ports.VerifiedIdentity, error) {
-	token, err := v.sdk.VerifyIDToken(ctx, idToken)
+	token, err := v.sdk.VerifyIDTokenAndCheckRevoked(ctx, idToken)
 	if err != nil || token == nil {
 		return ports.VerifiedIdentity{}, errUnauthorized()
 	}

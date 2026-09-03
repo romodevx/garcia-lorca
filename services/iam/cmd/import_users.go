@@ -29,9 +29,20 @@ exactly what the service already knows how to build: the database connection,
 the tenant, the postgres adapter. A second binary would have been a second copy
 of all of it.
 
-Idempotent. The provider upserts by uid, and the uid we send IS our user id, so
-running it twice converges instead of duplicating. Safe to re-run after fixing
-one bad row.
+Re-runnable BEFORE cutover, and only before. The provider upserts by uid and the
+uid we send IS our user id, so a second run converges instead of duplicating —
+while Postgres is still the only place passwords change.
+
+AFTER cutover it is destructive, and that is worth stating plainly: ImportUsers
+OVERWRITES passwordHash. Once people start changing or resetting passwords at
+the provider, a re-run silently reverts each of them to the stale bcrypt hash
+still sitting in Postgres, and the only symptom is somebody's new password no
+longer working, with no error anywhere.
+
+The same divergence opens from the other side on day one: AuthService.
+ChangePassword writes to Postgres and never to the provider. F6 has to close
+that — by routing password changes to the provider, or by removing our own
+password path — BEFORE the cutover, not after.
 
 	IDENTITY_PLATFORM_PROJECT=garcia-lorca ./iam import-users
 */
@@ -103,7 +114,17 @@ func runImportUsers(log *slog.Logger) error {
 				"email", chunk[e.Index].Email, "reason", e.Reason)
 		}
 		if res.FailureCount > 0 {
-			return fmt.Errorf("provider rejected %d of %d users; nothing further imported", res.FailureCount, len(chunk))
+			// Stop, and say how far it got. Earlier chunks are already committed
+			// at the provider, so "nothing was imported" would be a lie an
+			// operator might act on. Re-running after fixing the named rows is
+			// safe: the upsert converges.
+			//
+			// The rejection to expect is EMAIL_EXISTS, from an account somebody
+			// registered out of band at an address that is also in `users.email`
+			// — self sign-up is on and allow_duplicate_emails is off. Deleting
+			// that account in the console unblocks the run.
+			return fmt.Errorf("provider rejected %d of %d users in this batch; %d imported before this point, re-run after fixing the rows logged above",
+				res.FailureCount, len(chunk), imported)
 		}
 		imported += res.SuccessCount
 	}

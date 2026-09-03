@@ -36,9 +36,11 @@ why the fake returns a *firebaseauth.Token and not a hand-rolled struct.
 type fakeSDK struct {
 	token *firebaseauth.Token
 	err   error
+	calls int
 }
 
-func (f fakeSDK) VerifyIDToken(_ context.Context, _ string) (*firebaseauth.Token, error) {
+func (f *fakeSDK) VerifyIDTokenAndCheckRevoked(_ context.Context, _ string) (*firebaseauth.Token, error) {
+	f.calls++
 	return f.token, f.err
 }
 
@@ -47,7 +49,7 @@ func tokenWith(uid string, claims map[string]any) *firebaseauth.Token {
 }
 
 func TestVerifyReturnsIdentityForVerifiedEmail(t *testing.T) {
-	v := googleid.NewVerifier(fakeSDK{token: tokenWith("google-uid-1", map[string]any{
+	v := googleid.NewVerifier(&fakeSDK{token: tokenWith("google-uid-1", map[string]any{
 		"email":          "ana@garcialorca.mx",
 		"email_verified": true,
 	})})
@@ -67,7 +69,7 @@ func TestVerifyReturnsIdentityForVerifiedEmail(t *testing.T) {
 func TestVerifyRejectsUnverifiedEmail(t *testing.T) {
 	// The impersonation case. The provider vouches that this token is real; it
 	// does NOT vouch that the holder owns the mailbox.
-	v := googleid.NewVerifier(fakeSDK{token: tokenWith("google-uid-2", map[string]any{
+	v := googleid.NewVerifier(&fakeSDK{token: tokenWith("google-uid-2", map[string]any{
 		"email":          "director@garcialorca.edu.mx",
 		"email_verified": false,
 	})})
@@ -81,7 +83,7 @@ func TestVerifyRejectsUnverifiedEmail(t *testing.T) {
 func TestVerifyRejectsMissingEmailVerifiedClaim(t *testing.T) {
 	// Absent is not the same as true. A token shaped differently by a future
 	// provider change must fail closed, not default to trusted.
-	v := googleid.NewVerifier(fakeSDK{token: tokenWith("google-uid-3", map[string]any{
+	v := googleid.NewVerifier(&fakeSDK{token: tokenWith("google-uid-3", map[string]any{
 		"email": "ana@garcialorca.mx",
 	})})
 
@@ -94,7 +96,7 @@ func TestVerifyRejectsMissingEmailVerifiedClaim(t *testing.T) {
 func TestVerifyRejectsMissingEmail(t *testing.T) {
 	// Phone or anonymous sign-in would produce this. Both are disabled in the
 	// provider config, and this is the second lock on that door.
-	v := googleid.NewVerifier(fakeSDK{token: tokenWith("google-uid-4", map[string]any{
+	v := googleid.NewVerifier(&fakeSDK{token: tokenWith("google-uid-4", map[string]any{
 		"email_verified": true,
 	})})
 
@@ -108,7 +110,7 @@ func TestVerifyTranslatesSDKFailure(t *testing.T) {
 	// A bad signature, a wrong audience, an expired token: the SDK's own error.
 	// It must arrive at the use case as KindUnauthorized and nothing else — the
 	// caller learns that it failed, never why.
-	v := googleid.NewVerifier(fakeSDK{err: errors.New("id token has invalid signature")})
+	v := googleid.NewVerifier(&fakeSDK{err: errors.New("id token has invalid signature")})
 
 	_, err := v.Verify(context.Background(), "any-token")
 	if glerrors.KindOf(err) != glerrors.KindUnauthorized {
@@ -116,5 +118,30 @@ func TestVerifyTranslatesSDKFailure(t *testing.T) {
 	}
 	if got := glerrors.SafeMessage(err); got == "id token has invalid signature" {
 		t.Error("the SDK's message reached the caller; it must not leak verification detail")
+	}
+}
+
+func TestVerifyChecksRevocation(t *testing.T) {
+	// Plain VerifyIDToken accepts a token for the rest of its ~1h life even
+	// after the account's password was reset or the account was disabled at the
+	// provider. This service would then mint a fresh 15-minute access token AND
+	// a 24-hour refresh from it — quietly undoing the revocation-on-password-
+	// change guarantee the password path was deliberately built to give
+	// (RefreshToken's password_changed_at floor, ADR 0005).
+	//
+	// So the adapter must use the checking variant. This test exists to make
+	// that a decision the code states, not one a future edit can drop by
+	// swapping a method name.
+	sdk := &fakeSDK{token: tokenWith("google-uid-1", map[string]any{
+		"email":          "ana@garcialorca.mx",
+		"email_verified": true,
+	})}
+	v := googleid.NewVerifier(sdk)
+
+	if _, err := v.Verify(context.Background(), "any-token"); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if sdk.calls != 1 {
+		t.Fatalf("revocation-checking verify called %d times, want 1", sdk.calls)
 	}
 }
