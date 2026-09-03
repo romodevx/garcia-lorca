@@ -49,7 +49,12 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
-      testIgnore: [/.*\.mobile\.spec\.ts/, /demo-data\.spec\.ts/],
+      // The palette spec belongs to `demo`, and adding it there is not enough:
+      // this project matches everything it does not ignore, so without the
+      // third entry the palette ran here TOO — against the database global
+      // setup had just truncated, which is the one place its record results
+      // can never exist.
+      testIgnore: [/.*\.mobile\.spec\.ts/, /demo-data\.spec\.ts/, /palette\.spec\.ts/],
     },
     // The storeroom is worked from a phone, standing between the shelves, so the
     // narrow layout is a real surface and gets a real run.

@@ -33,13 +33,13 @@
   /* Motion */
   --ease: cubic-bezier(.22,.61,.36,1);
 
-  /* Stacking. These were inline numbers scattered across components (the top
-     bar at 30, toasts at 80), which is how "above the top bar" stops being a
-     specification and becomes a guess. The palette sits above everything
-     because it is summoned on top of whatever you were doing. */
-  --z-topbar: 30;
-  --z-drawer: 60;
-  --z-toast:  80;
+  /* The palette is summoned on top of whatever you were doing, so it sits
+     above every layer this app already uses: drawers at 70, toasts at 80.
+     Only this one token exists, because only this one is used — a --z-drawer
+     invented here would be a second opinion about a number that already lives
+     in nineteen components, and the first component written against it would
+     render underneath the drawers it was meant to match. Converting those is
+     its own task. */
   --z-palette: 100;
 }
 
@@ -133,6 +133,17 @@ input { font-family: var(--font-ui); }
 *::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 99px; border: 3px solid transparent; background-clip: content-box; }
 *::-webkit-scrollbar-track { background: transparent; }
 
+/* The top bar's search trigger. These were inline on the element until the
+   phone media query needed to override them and could not: an inline style
+   beats an author rule, so the box kept its desktop width on a 412px screen
+   and crushed its own placeholder to 0px. */
+.topbar-search {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 520px;
+  margin-left: 8px;
+}
+
 /* focus ring */
 :focus-visible { outline: 3px solid color-mix(in oklab, var(--lime) 55%, transparent); outline-offset: 2px; }
 
@@ -149,12 +160,19 @@ input { font-family: var(--font-ui); }
  * made a tap land on the tile next door.
  *
  * Below the same 768px breakpoint the modules use, it gives up what it can
- * afford to: the ⌘K badge (not a phone gesture) and the account chip's label.
+ * afford to: the search's label, the ⌘K badge, and the account chip's label.
  *
- * The search PLACEHOLDER stays. It used to collapse to a bare magnifier, which
- * removed the only place the palette says what it can do — and removed it
- * exactly where the keyboard shortcut is impossible, so a phone user had no way
- * left to find out the feature exists.
+ * The placeholder was kept here for one revision, because it is the only
+ * surface that tells a phone user the palette exists — ⌘K is not available to
+ * them. Measured at 412px it does not fit: 384px of usable row, of which the
+ * account actions take 178 and the logo most of the rest, leaving ~73px for a
+ * 203px string. It rendered as a 6.7px sliver of a word, which teaches less
+ * than the magnifier does. The button keeps its aria-label (the full
+ * placeholder sentence), so assistive tech still reads what it opens.
+ *
+ * Making it visible needs a layout decision nobody has taken yet — dropping an
+ * action icon, or letting the bar wrap to a second row on phones. Until then
+ * the honest thing is the icon.
  */
 @media (max-width: 768px) {
   .topbar {
@@ -167,26 +185,27 @@ input { font-family: var(--font-ui); }
      min-width:auto — it refuses to shrink below its content — which is how
      keeping this text once pushed the page 196px sideways. */
   .topbar-search {
-    flex: 1 1 auto;
-    min-width: 0;
     max-width: none;
     margin-left: 0;
   }
+  /* The spacer also claimed `flex: 1`, so it took half of what little room the
+     phone had and left the search a 22px sliver. On a desk it separates the
+     search from the account chip; on a phone there is nothing to separate. */
+  .topbar-spacer {
+    display: none;
+  }
+  .topbar-search-text,
   .topbar-search-kbd,
   .topbar-user-text {
     display: none;
   }
+  /* Wide enough to be hit. It was a 48px square before, and briefly a 34px
+     sliver when the placeholder was competing for the same room; the floor a
+     thumb needs is 44. */
   .topbar-search button {
-    min-width: 0;
+    min-width: 44px;
     padding: 0 14px;
-  }
-  .topbar-search-text {
-    /* One line, clipped rather than wrapped: the bar is 64px tall. */
-    min-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    font-size: 14.5px;
+    justify-content: center;
   }
   .topbar-actions {
     gap: 6px;

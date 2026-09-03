@@ -54,7 +54,14 @@ export function TopBar({
         The search box is a TRIGGER for the Command Palette (Cmd+K), not an
         input: click or ⌘K opens the omnidirectional navigate+execute palette.
       */}
-      <div className="topbar-search" style={{ flex: 1, maxWidth: 520, marginLeft: 8 }}>
+      {/*
+        Width lives in globals.css, not here. An inline style beats an author
+        rule without !important, so while these three were inline the phone
+        media query could not shrink the search box — it silently kept its
+        desktop `flex: 1; max-width: 520px` and squeezed the placeholder to
+        zero. How wide this is at a given viewport is the stylesheet's call.
+      */}
+      <div className="topbar-search">
         <button
           type="button"
           onClick={onOpenPalette}
