@@ -220,9 +220,15 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # package-manager-cache is OFF on purpose. v5 turned it on by default: it
+      # reads package.json#packageManager, sees pnpm, and shells out to `pnpm`
+      # to find the store — one step BEFORE corepack puts pnpm on the PATH, so
+      # it dies with "Unable to locate executable file: pnpm". This job already
+      # caches that store itself, a few steps down, with a key it controls.
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
 
       # corepack pins pnpm to package.json#packageManager. `npm`/`yarn` are
       # forbidden here and the root `preinstall` guard (only-allow pnpm) enforces it.
@@ -290,9 +296,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Same v5 default, same failure: it would shell out to pnpm before
+      # anything installs it. This job installs one linter and caches nothing.
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
+          package-manager-cache: false
 
       # The canon is spec-first: the REST contract is written and linted BEFORE
       # the handlers exist. A contract nobody validates drifts from the code
