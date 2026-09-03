@@ -39,6 +39,11 @@ type AuthService struct {
 	hasher    ports.PasswordHasher
 	issuer    ports.TokenIssuer
 	validator ports.TokenValidator
+	// idTokens verifies ID tokens from an external identity provider. NIL is a
+	// valid state: environments with no provider configured simply refuse that
+	// sign-in path (see AuthenticateWithIDToken), rather than the service
+	// refusing to boot. Password sign-in never touches it.
+	idTokens  ports.IDTokenVerifier
 	tenantID  string
 	accessTTL time.Duration
 	now       func() time.Time
@@ -53,6 +58,7 @@ func NewAuthService(
 	hasher ports.PasswordHasher,
 	issuer ports.TokenIssuer,
 	validator ports.TokenValidator,
+	idTokens ports.IDTokenVerifier,
 	tenantID string,
 	accessTTL time.Duration,
 	now func() time.Time,
@@ -63,6 +69,7 @@ func NewAuthService(
 		hasher:    hasher,
 		issuer:    issuer,
 		validator: validator,
+		idTokens:  idTokens,
 		tenantID:  tenantID,
 		accessTTL: accessTTL,
 		now:       now,
@@ -107,6 +114,58 @@ func (s *AuthService) AuthenticateAs(ctx context.Context, rawEmail, password str
 		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid credentials")
 	}
 	if err := s.hasher.Verify(hash, password); err != nil {
+		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid credentials")
+	}
+	if !user.CanAuthenticate() {
+		return AuthResult{}, glerrors.New(glerrors.KindForbidden, "account is not active")
+	}
+
+	res, err := s.issueFor(ctx, user, kind)
+	if err != nil {
+		return AuthResult{}, err
+	}
+	res.MustChangePassword = user.MustChangePassword()
+	return res, nil
+}
+
+// AuthenticateWithIDToken signs a user in with an ID token from the external
+// identity provider and issues OUR OWN session — the same pair a password login
+// produces.
+//
+// That is the point of doing it here rather than at the edge. The provider owns
+// password storage, recovery and MFA; this service keeps owning the session, so
+// the gateway, its HttpOnly cookies, the mobile Bearer flow, our TTLs and the
+// "a password change revokes older refresh tokens" rule all continue to work
+// untouched.
+//
+// Verifying at the provider is NOT authorization. It establishes an email; the
+// user row behind that email is what carries the roles and permissions, and a
+// caller with no row here gets the same generic refusal as a bad token — never
+// a hint that the address is unknown.
+func (s *AuthService) AuthenticateWithIDToken(ctx context.Context, idToken string, kind domain.SessionKind) (AuthResult, error) {
+	if s.idTokens == nil {
+		// Fail closed. An environment with no provider configured refuses this
+		// path outright; it must never fall through to accepting an unchecked
+		// token.
+		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid credentials")
+	}
+
+	identity, err := s.idTokens.Verify(ctx, idToken)
+	if err != nil {
+		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid credentials")
+	}
+
+	email, err := domain.NewEmail(identity.Email)
+	if err != nil {
+		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid credentials")
+	}
+
+	user, _, err := s.users.FindAuthByEmail(ctx, s.tenantID, email)
+	if err != nil {
+		// No user row for a verified address. Same generic refusal as a bad
+		// token: the provider already knows the address exists, but we do not
+		// confirm whether it exists HERE. No timing equalizer is needed — unlike
+		// the password path, nothing on this branch runs a hash.
 		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid credentials")
 	}
 	if !user.CanAuthenticate() {

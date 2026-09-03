@@ -83,7 +83,11 @@ func buildMux(log *slog.Logger) (*http.ServeMux, error) {
 	}
 	tokens := jwt.NewHMAC(secret, tokenIssuer, refreshTTL, time.Now)
 
-	auth := usecase.NewAuthService(userRepo, roleRepo, hasher, tokens, tokens, tenantID, accessTokenTTL, time.Now)
+	// nil verifier: no external identity provider is wired in this build yet, so
+	// AuthenticateWithIDToken fails closed and password sign-in is unaffected.
+	// The Google adapter lands next (F2 of PLAN-identity-platform.md); passing
+	// nil here is a configured absence, not an oversight.
+	auth := usecase.NewAuthService(userRepo, roleRepo, hasher, tokens, tokens, nil, tenantID, accessTokenTTL, time.Now)
 	admin := usecase.NewAdminService(userRepo, roleRepo, hasher, tenantID, func() string { return uuid.NewString() })
 	health := usecase.NewHealthService(serviceName)
 	iamHandler := grpcadapter.NewIAMHandler(auth, admin, health)

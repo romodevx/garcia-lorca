@@ -96,3 +96,30 @@ type TokenValidator interface {
 	// the user's last password change.
 	ParseRefreshToken(ctx context.Context, token string) (userID string, issuedAt time.Time, kind domain.SessionKind, err error)
 }
+
+// VerifiedIdentity is what an external identity provider proves about a caller:
+// that whoever holds the token controls this email address on that provider.
+//
+// It carries no roles and no permissions ON PURPOSE. Those live in our own
+// database, and the distinction is the whole security model: the provider says
+// WHO you are, this service decides WHAT you may do. A provider that started
+// claiming permissions would be a provider that could grant itself any.
+type VerifiedIdentity struct {
+	// Email is the verified address. It is the join key back to `users.email`,
+	// which is unique per tenant.
+	Email string
+	// Subject is the provider's own stable id for the account. Not used to
+	// authorize anything; kept so a future audit trail can tell two accounts
+	// apart after somebody changes their email address.
+	Subject string
+}
+
+// IDTokenVerifier checks an ID token minted by an external identity provider
+// (Identity Platform) and reports the identity it proves. A bad signature, a
+// wrong issuer or audience, and an expired token are all KindUnauthorized.
+//
+// Consumer-defined, so the use case is testable without the network and the
+// provider stays replaceable: nothing above this line knows it is Google.
+type IDTokenVerifier interface {
+	Verify(ctx context.Context, idToken string) (VerifiedIdentity, error)
+}

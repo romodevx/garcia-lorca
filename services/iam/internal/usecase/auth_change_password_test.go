@@ -75,7 +75,7 @@ func (cpValidator) ParseRefreshToken(context.Context, string) (string, time.Time
 
 func newCPService(users *cpUsers) *usecase.AuthService {
 	// roles/issuer are unused by ChangePassword; pass nil where safe.
-	return usecase.NewAuthService(users, nil, cpHasher{}, nil, cpValidator{},
+	return usecase.NewAuthService(users, nil, cpHasher{}, nil, cpValidator{}, nil,
 		cpTenantID, 15*time.Minute, time.Now)
 }
 
