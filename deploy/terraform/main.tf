@@ -186,11 +186,22 @@ resource "google_project_iam_member" "build_roles" {
     "roles/logging.logWriter",       # required when a build names its own SA
     # `gcloud builds submit` uploads the source tarball to gs://PROJECT_cloudbuild
     # and the build then READS it back. A user-specified SA does not inherit the
-    # legacy Cloud Build agent's access to that bucket, so without this every
-    # submit dies with "does not have storage.objects.get access" before step 1.
-    "roles/storage.objectViewer",
-    "roles/run.admin",               # the _DEPLOY=true step updates services
-    "roles/iam.serviceAccountUser",  # deploy a revision that RUNS AS the runtime SA
+    # legacy Cloud Build agent's access to that bucket.
+    #
+    # objectViewer alone covers only the READ half, and the comment above used to
+    # describe both halves while the role granted one. The submit UPLOADS first,
+    # so it needs to create objects too — every run since died at step 6 with
+    # "The user is forbidden from accessing the bucket [PROJECT_cloudbuild]".
+    "roles/storage.objectAdmin",
+    # The other half of that same error. Submitting a build AS this SA consumes
+    # the project's services on its own behalf, which needs
+    # serviceusage.services.use — the permission the error message names by hand
+    # ("Giving the user a role with this permission ... may fix this issue").
+    # Neither role is enough alone: one lets it write the tarball, the other lets
+    # it ask Cloud Build to read it.
+    "roles/serviceusage.serviceUsageConsumer",
+    "roles/run.admin",              # the _DEPLOY=true step updates services
+    "roles/iam.serviceAccountUser", # deploy a revision that RUNS AS the runtime SA
   ])
   project = var.project_id
   role    = each.value
