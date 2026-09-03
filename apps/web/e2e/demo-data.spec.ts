@@ -87,8 +87,8 @@ test.describe("the demo's data is really there", () => {
 
   test("the storeroom has garments on the shelf", async ({ page }) => {
     await signIn(page);
-    await openModule(page, "Uniformes");
-    await page.getByRole("tab", { name: "Inventario" }).click();
+    await openModule(page, "Inventario");
+    await page.getByRole("tab", { name: "Existencias" }).click();
 
     // "0 disponibles" everywhere is what an unseeded shop looks like.
     await expect(page.getByText(/\d+ disponibles/).first()).toBeVisible();
@@ -96,7 +96,7 @@ test.describe("the demo's data is really there", () => {
 
   test("the order list shows the sales the school has made", async ({ page }) => {
     await signIn(page);
-    await openModule(page, "Uniformes");
+    await openModule(page, "Inventario");
     await page.getByRole("tab", { name: "Pedidos" }).click();
 
     await expect(page.getByText(/U-\d{4}-\d{6}/).first()).toBeVisible();

@@ -1,5 +1,6 @@
 "use client";
 
+import * as Dialog from "@radix-ui/react-dialog";
 import { Command } from "cmdk";
 import { type ReactNode, useMemo, useState } from "react";
 
@@ -94,6 +95,30 @@ export function CommandPalette({
       shouldFilter={false}
       label={labels.placeholder}
     >
+      {/*
+        Radix labels its dialog by REFERENCE: it puts `aria-labelledby` on the
+        content pointing at the id a `Dialog.Title` would claim. cmdk renders
+        none, so that attribute pointed at nothing — and since aria-labelledby
+        outranks aria-label, the dialog carried a broken label that overrode the
+        working one cmdk sets from `label`. Rendering the Title (kept off-screen,
+        because the input's placeholder already says this on screen) is what
+        makes the reference resolve.
+      */}
+      <Dialog.Title
+        style={{
+          position: "absolute",
+          width: 1,
+          height: 1,
+          margin: -1,
+          padding: 0,
+          overflow: "hidden",
+          clip: "rect(0 0 0 0)",
+          whiteSpace: "nowrap",
+          border: 0,
+        }}
+      >
+        {labels.placeholder}
+      </Dialog.Title>
       <Command.Input
         placeholder={labels.placeholder}
         value={activeQuery}

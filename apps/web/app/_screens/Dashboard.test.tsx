@@ -37,10 +37,10 @@ describe("Dashboard", () => {
     expect(expected.map((m) => screen.getByText(m.label))).toHaveLength(expected.length);
   });
 
-  it("hides modules the owner has no backend permission for (Becas/Uniformes/Facturación/Reportes)", () => {
+  it("hides modules the owner has no backend permission for (Becas/Inventario/Facturación/Reportes)", () => {
     render(<Dashboard user={USERS.admin} onOpen={() => {}} permissions={OWNER_PERMS} now={NOW} />);
 
-    for (const label of ["Becas", "Uniformes", "Facturación", "Reportes"]) {
+    for (const label of ["Becas", "Inventario", "Facturación", "Reportes"]) {
       expect(screen.queryByText(label)).not.toBeInTheDocument();
     }
   });

@@ -24,15 +24,15 @@ test.describe("the school on a phone", () => {
     );
     expect(overflow, "the dashboard scrolls sideways on a phone").toBeLessThanOrEqual(1);
 
-    await openModule(page, "Uniformes");
-    await expect(page.getByRole("heading", { name: "Uniformes", level: 1 })).toBeVisible();
+    await openModule(page, "Inventario");
+    await expect(page.getByRole("heading", { name: "Inventario", level: 1 })).toBeVisible();
   });
 
   test("the till's four tabs are all reachable at phone width", async ({ page }) => {
     await signIn(page);
-    await openModule(page, "Uniformes");
+    await openModule(page, "Inventario");
 
-    for (const name of ["Mostrador", "Pedidos", "Inventario", "Catálogo"]) {
+    for (const name of ["Mostrador", "Pedidos", "Existencias", "Catálogo"]) {
       await page.getByRole("tab", { name }).click();
       await expect(page.getByRole("tab", { name })).toHaveAttribute("aria-selected", "true");
     }

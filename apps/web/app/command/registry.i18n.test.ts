@@ -25,6 +25,27 @@ describe("the palette can name every module it offers", () => {
         });
       }
 
+      // Spanish is the product's own language, not a translation of it: the
+      // dashboard tiles render `MODULES[].label` directly and there is no
+      // Spanish string to disagree with them. So in `es` the palette must call
+      // a module by the SAME name its tile does.
+      //
+      // A key that merely EXISTS is not enough, and that is not hypothetical:
+      // the storeroom module was renamed Uniformes → Inventario in data.ts and
+      // the palette kept saying "Uniformes", so the same module answered to two
+      // names on the same screen — the tile said one thing and the search box
+      // another. Every key was present the whole time.
+      if (locale === "es") {
+        for (const module of MODULES) {
+          it(`nav.${module.id} is the name the tile shows`, () => {
+            expect(
+              palette[`nav.${module.id}`],
+              `the palette calls "${module.id}" something other than its tile does`,
+            ).toBe(module.label);
+          });
+        }
+      }
+
       // The action commands ("cobrar", "pasar lista"…) name their own keys, and a
       // typo there fails the same way.
       for (const action of ACTIONS) {

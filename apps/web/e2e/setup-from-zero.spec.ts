@@ -36,10 +36,10 @@ test.describe.serial("setting up a school from zero", () => {
 
   test("the dashboard offers the modules to configure", async ({ page }) => {
     await signIn(page);
-    // Uniformes is checked by name on purpose: its tile was invisible for a
+    // Inventario is checked by name on purpose: its tile was invisible for a
     // whole slice because it asked for a permission that had been retired, and
     // nothing failed anywhere.
-    for (const name of ["Estudiantes", "Finanzas", "Calificaciones", "Asistencia", "Uniformes", "Configuración"]) {
+    for (const name of ["Estudiantes", "Finanzas", "Calificaciones", "Asistencia", "Inventario", "Configuración"]) {
       await expect(page.getByText(name, { exact: false }).first()).toBeVisible();
     }
   });
@@ -203,7 +203,7 @@ test.describe.serial("setting up a school from zero", () => {
 
   test("4 · the uniform shop's catalogue", async ({ page }) => {
     await signIn(page);
-    await openModule(page, "Uniformes");
+    await openModule(page, "Inventario");
     await page.getByRole("tab", { name: "Catálogo" }).click();
     await page.getByRole("button", { name: "Nueva prenda" }).first().click();
 
@@ -225,8 +225,8 @@ test.describe.serial("setting up a school from zero", () => {
 
   test("5 · the first box arrives", async ({ page }) => {
     await signIn(page);
-    await openModule(page, "Uniformes");
-    await page.getByRole("tab", { name: "Inventario" }).click();
+    await openModule(page, "Inventario");
+    await page.getByRole("tab", { name: "Existencias" }).click();
     await page.getByRole("button", { name: "Entrada de almacén" }).click();
 
     await page.getByLabel("Prenda").selectOption({ label: garment });
@@ -242,7 +242,7 @@ test.describe.serial("setting up a school from zero", () => {
 
   test("6 · the first sale", async ({ page }) => {
     await signIn(page);
-    await openModule(page, "Uniformes");
+    await openModule(page, "Inventario");
 
     await addToBasket(page, garment, "M");
     await pickStudent(page, `Zoe Villalobos ${tag}`);
@@ -255,18 +255,18 @@ test.describe.serial("setting up a school from zero", () => {
 
   test("7 · the sale is in the order list and the stock went down", async ({ page }) => {
     await signIn(page);
-    await openModule(page, "Uniformes");
+    await openModule(page, "Inventario");
 
     await page.getByRole("tab", { name: "Pedidos" }).click();
     await expect(page.getByText(/U-\d{4}-\d{6}/).first()).toBeVisible();
 
-    await page.getByRole("tab", { name: "Inventario" }).click();
+    await page.getByRole("tab", { name: "Existencias" }).click();
     await expect(page.getByText("5 disponibles").first()).toBeVisible();
   });
 
   test("8 · the till refuses to sell what is not there", async ({ page }) => {
     await signIn(page);
-    await openModule(page, "Uniformes");
+    await openModule(page, "Inventario");
 
     // Three of the two G there are.
     for (let i = 0; i < 3; i++) {
@@ -290,7 +290,7 @@ test.describe.serial("setting up a school from zero", () => {
 
   test("9 · a sale with no pupil still has to say who bought it", async ({ page }) => {
     await signIn(page);
-    await openModule(page, "Uniformes");
+    await openModule(page, "Inventario");
 
     await addToBasket(page, garment, "CH");
     await page.getByRole("button", { name: "Venta sin alumno" }).click();
@@ -304,8 +304,8 @@ test.describe.serial("setting up a school from zero", () => {
 
   test("10 · a stock correction will not go through without a reason", async ({ page }) => {
     await signIn(page);
-    await openModule(page, "Uniformes");
-    await page.getByRole("tab", { name: "Inventario" }).click();
+    await openModule(page, "Inventario");
+    await page.getByRole("tab", { name: "Existencias" }).click();
     await page.getByRole("button", { name: new RegExp(`Ajustar ${garment} talla M`) }).click();
 
     await page.getByLabel("Diferencia").fill("-1");

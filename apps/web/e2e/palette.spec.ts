@@ -100,6 +100,30 @@ test.describe("the command palette is visible", () => {
     await expect(page.locator("[cmdk-empty]")).toContainText(/Escribe para navegar o crear/i);
   });
 
+  test("announces itself to a screen reader", async ({ page }) => {
+    await signIn(page);
+    await openPalette(page);
+
+    // Radix labels its dialog by REFERENCE (`aria-labelledby` → a DialogTitle
+    // it expects you to render). cmdk renders none, so the attribute pointed at
+    // an id that did not exist — and `aria-labelledby` outranks `aria-label`
+    // per ARIA, so the dialog carried a broken label that overrode the working
+    // one. Whether anything is announced then is up to the AT.
+    const labelledBy = await page.locator("[cmdk-dialog]").evaluate((el) => {
+      const id = el.getAttribute("aria-labelledby");
+      return { id, resolves: id === null ? null : document.getElementById(id) !== null };
+    });
+    if (labelledBy.id !== null) {
+      expect(
+        labelledBy.resolves,
+        `aria-labelledby="${labelledBy.id}" points at an element that does not exist`,
+      ).toBe(true);
+    }
+
+    // And the name it resolves to is the one a person would expect to hear.
+    await expect(page.getByRole("dialog", { name: /buscar o ejecutar/i })).toBeVisible();
+  });
+
   test("closes on Escape", async ({ page }) => {
     await signIn(page);
     await openPalette(page);

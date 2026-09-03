@@ -20,7 +20,7 @@ type TabId = "counter" | "orders" | "inventory" | "catalog";
  * FOUR TABS, and that is a new pattern in this system — Estudiantes, Finanzas
  * and Asistencia all resolve to one screen. It is a deliberate exception, not an
  * inherited habit: the four jobs here run at genuinely different rhythms.
- * Mostrador is used every day, Inventario every week, Catálogo once a cycle, and
+ * Mostrador is used every day, Existencias every week, Catálogo once a cycle, and
  * Pedidos is a log. Folding them together would make the daily job compete with
  * the yearly one for the same space.
  *
@@ -126,7 +126,7 @@ export function UniformsScreen({
   const tabs: { id: TabId; label: string; hidden?: boolean }[] = [
     { id: "counter", label: "Mostrador" },
     { id: "orders", label: "Pedidos", hidden: !canSeeOrders },
-    { id: "inventory", label: "Inventario" },
+    { id: "inventory", label: "Existencias" },
     { id: "catalog", label: "Catálogo" },
   ];
 
@@ -157,7 +157,7 @@ export function UniformsScreen({
           <Icon name="uniforms" size={30} />
         </div>
         <div style={{ minWidth: 0 }}>
-          <h1 style={{ fontSize: narrow ? 24 : 30, fontWeight: 800, color: "var(--text)" }}>Uniformes</h1>
+          <h1 style={{ fontSize: narrow ? 24 : 30, fontWeight: 800, color: "var(--text)" }}>Inventario</h1>
           <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>
             {items === null ? "Cargando…" : `${items.length} ${items.length === 1 ? "prenda" : "prendas"} en catálogo`}
           </p>

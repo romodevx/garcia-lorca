@@ -80,7 +80,7 @@ const uniformsModule = (): ModuleDef => {
  *
  * Every permission this registry names must be one somebody can actually hold.
  */
-describe("Uniformes module", () => {
+describe("Inventario module", () => {
   it("is visible to a storeroom principal, who holds no student-data permission", () => {
     expect(isModuleVisible(uniformsModule(), ["uniforms:stock"])).toBe(true);
   });
