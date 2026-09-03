@@ -44,19 +44,22 @@ func NewVerifier(sdk tokenVerifier) *Verifier {
 	return &Verifier{sdk: sdk}
 }
 
-// NewFromProject builds a Verifier for a Google Cloud project using Application
-// Default Credentials — on Cloud Run, the runtime service account, with no key
-// file anywhere.
-func NewFromProject(ctx context.Context, projectID string) (*Verifier, error) {
+// NewFromProject builds both adapters for a Google Cloud project from ONE SDK
+// client, using Application Default Credentials — on Cloud Run, the runtime
+// service account, with no key file anywhere.
+//
+// Both at once because they are two views of the same client and building the
+// Firebase app twice would open two of everything underneath for no reason.
+func NewFromProject(ctx context.Context, projectID string) (*Verifier, *Provisioner, error) {
 	app, err := firebase.NewApp(ctx, &firebase.Config{ProjectID: projectID})
 	if err != nil {
-		return nil, glerrors.Wrap(glerrors.KindInternal, "identity provider init", err)
+		return nil, nil, glerrors.Wrap(glerrors.KindInternal, "identity provider init", err)
 	}
 	client, err := app.Auth(ctx)
 	if err != nil {
-		return nil, glerrors.Wrap(glerrors.KindInternal, "identity provider auth client", err)
+		return nil, nil, glerrors.Wrap(glerrors.KindInternal, "identity provider auth client", err)
 	}
-	return &Verifier{sdk: client}, nil
+	return &Verifier{sdk: client}, &Provisioner{sdk: client}, nil
 }
 
 // errUnauthorized is the ONE answer this adapter gives for every failure. A

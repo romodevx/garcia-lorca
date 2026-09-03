@@ -123,3 +123,16 @@ type VerifiedIdentity struct {
 type IDTokenVerifier interface {
 	Verify(ctx context.Context, idToken string) (VerifiedIdentity, error)
 }
+
+// IdentityProvisioner creates accounts at the external identity provider.
+//
+// Deliberately NO password parameter. An account is created without one and its
+// owner sets it through a link they receive, which is what proves they control
+// the mailbox — so the address ends up verified because they verified it, not
+// because we asserted it. Nobody else ever knows their password, and this
+// service stores no second copy of a credential to drift or leak.
+//
+// A duplicate address is a KindConflict error.
+type IdentityProvisioner interface {
+	CreateAccount(ctx context.Context, email, displayName string) error
+}

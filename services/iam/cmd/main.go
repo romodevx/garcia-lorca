@@ -104,8 +104,9 @@ func buildMux(log *slog.Logger) (*http.ServeMux, error) {
 	// Nothing is inferred from ambient credentials: the project is stated or the
 	// path is closed.
 	var idTokens ports.IDTokenVerifier
+	var provisioner ports.IdentityProvisioner
 	if project := os.Getenv("IDENTITY_PLATFORM_PROJECT"); project != "" {
-		v, err := googleid.NewFromProject(context.Background(), project)
+		v, p, err := googleid.NewFromProject(context.Background(), project)
 		if err != nil {
 			// Fatal on purpose. A misconfigured provider that boots anyway would
 			// silently refuse every sign-in through it, and the only symptom would
@@ -113,11 +114,15 @@ func buildMux(log *slog.Logger) (*http.ServeMux, error) {
 			return nil, err
 		}
 		idTokens = v
+		provisioner = p
 		log.Info("identity provider wired", "project", project)
 	}
 
 	auth := usecase.NewAuthService(userRepo, roleRepo, hasher, tokens, tokens, idTokens, tenantID, accessTokenTTL, time.Now)
-	admin := usecase.NewAdminService(userRepo, roleRepo, hasher, tenantID, func() string { return uuid.NewString() })
+	// provisioner comes from the SAME optional provider above: with no project
+	// named it stays nil, InviteUser refuses, and the older password-based
+	// CreateUser is untouched.
+	admin := usecase.NewAdminService(userRepo, roleRepo, hasher, provisioner, tenantID, func() string { return uuid.NewString() })
 	health := usecase.NewHealthService(serviceName)
 	iamHandler := grpcadapter.NewIAMHandler(auth, admin, health)
 

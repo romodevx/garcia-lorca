@@ -142,7 +142,7 @@ func newHandlerWithUsers(t *testing.T, mustChange bool) (*grpcadapter.IAMHandler
 	tokens := jwt.NewHMAC([]byte(strings.Repeat("gl-key-", 6)), "garcia-lorca", time.Hour, time.Now)
 	roles := &fakeRoles{known: "r1"}
 	auth := usecase.NewAuthService(users, roles, hasher, tokens, tokens, nil, "t1", 15*time.Minute, time.Now)
-	admin := usecase.NewAdminService(users, roles, hasher, "t1", func() string { return "generated-id" })
+	admin := usecase.NewAdminService(users, roles, hasher, nil, "t1", func() string { return "generated-id" })
 	return grpcadapter.NewIAMHandler(auth, admin, usecase.NewHealthService("iam")), users
 }
 
@@ -287,7 +287,7 @@ func handlerOver(t *testing.T, users *fakeUsers, roles *fakeRoles) *grpcadapter.
 	hasher := bcrypt.NewHasher(4)
 	tokens := jwt.NewHMAC([]byte(strings.Repeat("gl-key-", 6)), "garcia-lorca", time.Hour, time.Now)
 	auth := usecase.NewAuthService(users, roles, hasher, tokens, tokens, nil, "t1", 15*time.Minute, time.Now)
-	admin := usecase.NewAdminService(users, roles, hasher, "t1", func() string { return "generated-id" })
+	admin := usecase.NewAdminService(users, roles, hasher, nil, "t1", func() string { return "generated-id" })
 	return grpcadapter.NewIAMHandler(auth, admin, usecase.NewHealthService("iam"))
 }
 
