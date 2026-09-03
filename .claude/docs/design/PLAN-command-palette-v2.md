@@ -691,3 +691,63 @@ con `inset:8px`, no hoja inferior), N2 (`max-height` + `top:12vh`), N3 (selector
   de este plan (E1, E2, E3) + aportaron 10 hallazgos. Consenso CEO↔Diseño en el reto al modal:
   **planteado y rechazado por el dueño.**
 - **VERDICT:** APROBADO. Listo para implementar T1.
+
+---
+
+## T1 — HECHO (`6e13cc59`, rama `feature/palette-visible`)
+
+Rojo→verde con `e2e/palette.spec.ts` (4 pruebas, navegador real, proyecto `demo`).
+Medición del defecto antes de tocar nada: `[cmdk-dialog]` en `position:static`,
+`z-index:auto`, fondo `rgba(0,0,0,0)`, rect y=646 h=344 en ventana de 720, y
+`elementFromPoint` al centro devolvía **NOTHING**.
+
+Entregado: N2 (tope+scroll, anclado a `top:12vh`), N3 (fila activa visible), N4 (`ui.hint`
+en el vacío), N5 (texto del buscador se conserva en teléfono), N6 (diálogo centrado, **no**
+hoja inferior), N7 (tokens de z-index), N9 (subtítulo en su propia línea), tema oscuro,
+`prefers-reduced-motion`.
+
+**Verificación:** 647 tests unitarios verdes · 4/4 e2e del palette · 3/3 e2e móvil ·
+`tsc --noEmit` limpio · capturas revisadas a ojo.
+
+### Dos cosas que sólo se vieron al mirar la pantalla
+
+1. **N10 evaluado y RECHAZADO.** La voz de diseño pedía apagar las fichas de color
+   ("10 fichas = confeti"). En pantalla, las fichas del palette **son idénticas a las del
+   dashboard justo debajo**, que es la consistencia que exige el mandato de design system.
+   Apagarlas habría roto el vínculo visual. Se conservan.
+
+2. **Hueco NUEVO para T4:** escribir `alumno` **no** ofrece el módulo Estudiantes — sólo
+   las acciones de crear. `match.ts` puntúa **título + alias**, y `nav.students` se llama
+   "Estudiantes" sin alias; "Alumnos y admisión" es sólo su `subtitle`, que no se puntúa.
+   **Es literalmente el primer ejemplo del spec del dueño** ("Usuario escribe 'alumno' →
+   Módulo Estudiantes + Crear alumno"). **T4 debe dar alias a los comandos `nav`,** no sólo
+   a los `create`.
+
+### Fallo preexistente, NO de este trabajo
+`demo-data.spec.ts` espera `400 alumnos`; la base tiene **401** (verificado en Postgres antes
+de escribir una línea de código). Es deriva de datos de la demo, no del palette. Se decide
+aparte: o se re-siembra, o el test pasa a un piso (`>= 400`).
+
+### Correcciones de /code-review a T1 (`add35f16`)
+
+Tres hallazgos, los tres verificados midiendo antes de tocar:
+
+1. **El cambio móvil de N5 era código muerto y empeoró su propio objetivo.**
+   `TopBar.tsx` llevaba `flex/maxWidth/marginLeft` **en línea**, y lo inline gana a una regla
+   de autor: de la media query sólo aterrizaba `min-width`. Medido a 412 px: buscador 22.3 px,
+   **área táctil 34 px** (bajo el mínimo de 44 y peor que los 54 previos), texto **0 px**.
+   El ancho se movió a `globals.css` y `.topbar-spacer` se oculta en teléfono → botón 72.7 px.
+   Pero el texto sólo llega a 6.7 px: **384 px útiles, 178 se los llevan las acciones**, y la
+   cadena mide 203. **N5 se revierte** — un fragmento de 6.7 px enseña menos que la lupa.
+   `aria-label` conserva la frase completa.
+   > **Decisión pendiente del dueño:** para que el texto quepa hay que quitar un icono de
+   > acciones o dejar que la barra pase a dos filas en teléfono. Es layout, no CSS.
+2. **`palette.spec.ts` corría también en `chromium`**, cuyo global setup **TRUNCA** la base —
+   lo contrario de lo que dice su propia cabecera. Añadirlo al `testMatch` de `demo` no bastaba.
+3. **Los tokens de z-index mentían.** Drawers reales en 70, toasts en 80; `--z-drawer: 60`
+   habría dejado un componente nuevo **debajo** de los drawers. Queda sólo `--z-palette`.
+
+**Lección que deja el 1:** `narrow.mobile.spec.ts` sólo pregunta si la página desborda de lado.
+Siguió en verde con un buscador de 22 px y un objetivo táctil de 34. **"Cabe" y "se puede usar"
+son dos afirmaciones distintas y sólo la primera tenía prueba.** Ahora hay
+`e2e/palette.mobile.spec.ts` para la segunda.
