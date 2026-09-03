@@ -61,7 +61,10 @@ export default defineConfig({
     {
       name: "demo",
       use: { ...devices["Desktop Chrome"] },
-      testMatch: /demo-data\.spec\.ts/,
+      // The palette joins this project rather than the from-zero one: it
+      // navigates and never mutates, so it is safe against the seeded database,
+      // and its record results need a school that actually has pupils in it.
+      testMatch: /(demo-data|palette)\.spec\.ts/,
     },
   ],
 });

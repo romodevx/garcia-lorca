@@ -81,6 +81,7 @@ export function CommandPaletteHost({ open, onOpenChange, onNavigate, permissions
     () => ({
       placeholder: t("ui.placeholder"),
       empty: t("ui.empty"),
+      hint: t("ui.hint"),
       groups: {
         module: t("group.module"),
         create: t("group.create"),

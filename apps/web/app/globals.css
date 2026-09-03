@@ -32,6 +32,15 @@
 
   /* Motion */
   --ease: cubic-bezier(.22,.61,.36,1);
+
+  /* Stacking. These were inline numbers scattered across components (the top
+     bar at 30, toasts at 80), which is how "above the top bar" stops being a
+     specification and becomes a guess. The palette sits above everything
+     because it is summoned on top of whatever you were doing. */
+  --z-topbar: 30;
+  --z-drawer: 60;
+  --z-toast:  80;
+  --z-palette: 100;
 }
 
 /* ---------------- LIGHT THEME ---------------- */
@@ -140,9 +149,12 @@ input { font-family: var(--font-ui); }
  * made a tap land on the tile next door.
  *
  * Below the same 768px breakpoint the modules use, it gives up what it can
- * afford to: the search collapses to its icon (⌘K is not a phone gesture
- * anyway) and the account chip to its avatar. Nothing is removed, only the
- * labels of things that still have an icon and an accessible name.
+ * afford to: the ⌘K badge (not a phone gesture) and the account chip's label.
+ *
+ * The search PLACEHOLDER stays. It used to collapse to a bare magnifier, which
+ * removed the only place the palette says what it can do — and removed it
+ * exactly where the keyboard shortcut is impossible, so a phone user had no way
+ * left to find out the feature exists.
  */
 @media (max-width: 768px) {
   .topbar {
@@ -150,20 +162,31 @@ input { font-family: var(--font-ui); }
     gap: 10px;
     padding: 0 14px;
   }
+  /* `min-width: 0` on every link of the chain is what makes the placeholder
+     able to CLIP instead of demanding its full width. A flex item defaults to
+     min-width:auto — it refuses to shrink below its content — which is how
+     keeping this text once pushed the page 196px sideways. */
   .topbar-search {
-    flex: 0 0 auto;
+    flex: 1 1 auto;
+    min-width: 0;
     max-width: none;
     margin-left: 0;
   }
-  .topbar-search-text,
   .topbar-search-kbd,
   .topbar-user-text {
     display: none;
   }
   .topbar-search button {
-    width: 48px;
-    padding: 0;
-    justify-content: center;
+    min-width: 0;
+    padding: 0 14px;
+  }
+  .topbar-search-text {
+    /* One line, clipped rather than wrapped: the bar is 64px tall. */
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 14.5px;
   }
   .topbar-actions {
     gap: 6px;
@@ -180,4 +203,162 @@ input { font-family: var(--font-ui); }
     height: 30px !important;
     width: auto;
   }
+}
+
+/* ============================================================
+   COMMAND PALETTE (⌘K)
+
+   `cmdk` ships no stylesheet of its own — by design, it is headless. Without
+   the rules below `Command.Dialog` mounts into its portal with
+   `position: static` and no background, which put the shipped palette 646px
+   down a 720px window, transparent, with nothing painted at its centre. It
+   opened correctly and could not be seen. Everything here is load-bearing.
+
+   Covered by e2e/palette.spec.ts, in a real browser: jsdom applies no CSS, so
+   no unit test can defend this file.
+   ============================================================ */
+
+:root {
+  /* The icon tile is drawn by CommandPaletteHost at 30px; the subtitle indents
+     past it, so the two numbers have to agree. */
+  --palette-icon: 30px;
+  --palette-gap: 12px;
+}
+
+[cmdk-overlay] {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-palette);
+  background: rgba(8, 24, 14, .38);
+  backdrop-filter: blur(3px);
+  animation: palette-fade .14s var(--ease) both;
+}
+
+[cmdk-dialog] {
+  position: fixed;
+  /* Anchored near the top rather than centred: a centred box moves up and down
+     as results come and go, and the thing you are reading slides out from
+     under your eyes while you type. */
+  top: 12vh;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: calc(var(--z-palette) + 1);
+  width: min(640px, calc(100vw - 32px));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  animation: palette-pop .16s var(--ease) both;
+}
+
+[cmdk-root] { display: flex; flex-direction: column; min-height: 0; }
+
+[cmdk-input] {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-ui);
+  /* 16px is the floor that stops iOS zooming the page on focus. */
+  font-size: 16px;
+  padding: 18px 20px;
+  outline: none;
+}
+[cmdk-input]::placeholder { color: var(--text-faint); }
+
+[cmdk-list] {
+  /* The cap is the point: ten rows plus their group headings ran past the
+     bottom of the 1366×768 laptops the school actually uses. */
+  max-height: min(56vh, 380px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding: 8px;
+  padding: 8px;
+}
+
+[cmdk-group-heading] {
+  padding: 10px 12px 6px;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+[cmdk-item] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--palette-gap);
+  min-height: 46px;
+  padding: 6px 12px;
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 14.5px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+/* The icon tile, drawn by the host. */
+[cmdk-item] > [aria-hidden] { flex: 0 0 auto; }
+/* The title takes the rest of the line; the subtitle drops to its own line and
+   lines up under the title rather than under the icon. */
+[cmdk-item] > span:not([aria-hidden]):not([data-subtitle]) { flex: 1 1 auto; min-width: 0; }
+[cmdk-item] > [data-subtitle] {
+  flex: 1 0 100%;
+  margin-left: calc(var(--palette-icon) + var(--palette-gap));
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-faint);
+}
+
+/* cmdk marks the active row with [data-selected] and never moves DOM focus
+   there, so the app's global :focus-visible ring can never fire for it. Style
+   it explicitly or the arrow keys move an invisible cursor. */
+[cmdk-item][data-selected="true"] {
+  background: var(--surface-2);
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+[cmdk-item]:hover:not([data-selected="true"]) { background: var(--surface-3); }
+
+[cmdk-empty] {
+  padding: 34px 20px;
+  text-align: center;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+[cmdk-empty] [data-hint] {
+  display: block;
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-faint);
+}
+
+@keyframes palette-fade { from { opacity: 0 } to { opacity: 1 } }
+@keyframes palette-pop {
+  from { opacity: 0; transform: translateX(-50%) translateY(-6px) scale(.985) }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [cmdk-overlay], [cmdk-dialog] { animation: none; }
+}
+
+@media (max-width: 768px) {
+  /* Not a bottom sheet. This audience works at a desk; the phone audience is
+     the family app, which has its own native modal. A sheet plus the software
+     keyboard leaves a third of the screen for results. */
+  [cmdk-dialog] {
+    top: 8px;
+    width: calc(100vw - 16px);
+  }
+  [cmdk-list] { max-height: min(62vh, 340px); }
 }

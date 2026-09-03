@@ -19,6 +19,11 @@ import { type Command as GLCommand, type CommandKind, KIND_ORDER } from "./types
 export interface CommandPaletteLabels {
   readonly placeholder: string;
   readonly empty: string;
+  /**
+   * Shown under `empty`. "No results" on its own is a dead end, and it arrives
+   * at the moment the user is most ready to be told what this box is for.
+   */
+  readonly hint?: string;
   /** Heading per kind, e.g. { module: "Módulos", create: "Crear", … }. */
   readonly groups: Record<CommandKind, string>;
 }
@@ -96,7 +101,10 @@ export function CommandPalette({
       />
       <Command.List>
         {results.length === 0 ? (
-          <Command.Empty>{labels.empty}</Command.Empty>
+          <Command.Empty>
+            {labels.empty}
+            {labels.hint !== undefined ? <span data-hint>{labels.hint}</span> : null}
+          </Command.Empty>
         ) : (
           KINDS_IN_ORDER.filter((kind) => byKind.has(kind)).map((kind) => (
             <Command.Group key={kind} heading={labels.groups[kind]}>
