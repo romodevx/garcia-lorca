@@ -30,9 +30,11 @@ import (
 	"github.com/garcia-lorca/pkg/dbpool"
 	"github.com/garcia-lorca/pkg/logger"
 	"github.com/garcia-lorca/services/iam/internal/adapters/bcrypt"
+	"github.com/garcia-lorca/services/iam/internal/adapters/googleid"
 	grpcadapter "github.com/garcia-lorca/services/iam/internal/adapters/grpc"
 	"github.com/garcia-lorca/services/iam/internal/adapters/jwt"
 	pgadapter "github.com/garcia-lorca/services/iam/internal/adapters/postgres"
+	"github.com/garcia-lorca/services/iam/internal/ports"
 	"github.com/garcia-lorca/services/iam/internal/usecase"
 )
 
@@ -83,11 +85,26 @@ func buildMux(log *slog.Logger) (*http.ServeMux, error) {
 	}
 	tokens := jwt.NewHMAC(secret, tokenIssuer, refreshTTL, time.Now)
 
-	// nil verifier: no external identity provider is wired in this build yet, so
-	// AuthenticateWithIDToken fails closed and password sign-in is unaffected.
-	// The Google adapter lands next (F2 of PLAN-identity-platform.md); passing
-	// nil here is a configured absence, not an oversight.
-	auth := usecase.NewAuthService(userRepo, roleRepo, hasher, tokens, tokens, nil, tenantID, accessTokenTTL, time.Now)
+	// The external identity provider is OPTIONAL and off unless named. An empty
+	// IDENTITY_PLATFORM_PROJECT leaves the verifier nil, which makes
+	// AuthenticateWithIDToken refuse outright — local and any environment that
+	// has not been migrated keep signing in with a password and are unaffected.
+	// Nothing is inferred from ambient credentials: the project is stated or the
+	// path is closed.
+	var idTokens ports.IDTokenVerifier
+	if project := os.Getenv("IDENTITY_PLATFORM_PROJECT"); project != "" {
+		v, err := googleid.NewFromProject(context.Background(), project)
+		if err != nil {
+			// Fatal on purpose. A misconfigured provider that boots anyway would
+			// silently refuse every sign-in through it, and the only symptom would
+			// be users unable to log in with no error to read anywhere.
+			return nil, err
+		}
+		idTokens = v
+		log.Info("identity provider wired", "project", project)
+	}
+
+	auth := usecase.NewAuthService(userRepo, roleRepo, hasher, tokens, tokens, idTokens, tenantID, accessTokenTTL, time.Now)
 	admin := usecase.NewAdminService(userRepo, roleRepo, hasher, tenantID, func() string { return uuid.NewString() })
 	health := usecase.NewHealthService(serviceName)
 	iamHandler := grpcadapter.NewIAMHandler(auth, admin, health)
