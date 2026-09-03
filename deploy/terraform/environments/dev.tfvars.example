@@ -97,3 +97,20 @@ seed_owner_secret = true
 # ---- Scheduled billing run ------------------------------------------------
 # OFF for a demo: a job that bills the wrong school cycle is worse than no job.
 billing_schedule_enabled = false
+
+# ---- Identity Platform ----------------------------------------------------
+# F1 of .claude/docs/PLAN-identity-platform.md. Provisioning ONLY: nothing
+# authenticates through it until the gateway is cut over (F6), so turning this
+# on cannot affect the login a live demo is using.
+#
+# Free below 50,000 monthly active users. A school of ~1,500 (pupils, staff and
+# guardians) stays inside that by two orders of magnitude.
+enable_identity_platform = true
+
+# Domains allowed to complete OAuth redirects and password-reset action links.
+# No scheme, no trailing slash. Passed explicitly rather than derived from the
+# web module, so this config does not depend on the Cloud Run deploy.
+# The school's own domain (ceglorca.com) is NOT required to migrate: Identity
+# Platform sends reset mail from its own sender to whatever address the user
+# has. Add it later (F7) only to get a nicer From: line.
+identity_platform_authorized_domains = ["localhost", "web-xxxxxxxx-uc.a.run.app"]
