@@ -20,6 +20,8 @@ import { ModulePlaceholder } from "./_screens/ModulePlaceholder";
 import { AnnouncementsScreen } from "./_screens/announcements/AnnouncementsScreen";
 import { PaymentsScreen } from "./_screens/payments/PaymentsScreen";
 import { useTheme } from "./theme/ThemeProvider";
+import { loginWithProvider } from "./auth/provider";
+import { providerLoginEnabled } from "./auth/providerFlag";
 import { login as apiLogin, changePassword as apiChangePassword, logout as apiLogout, me as apiMe, refresh as apiRefresh, type MeResult } from "./auth/api";
 
 import { API_URL } from "./api-url";
@@ -158,7 +160,20 @@ export function AppShell(): ReactElement {
     setPending(true);
     setAuthError(undefined);
     try {
-      const res = await apiLogin(API_URL, email, password);
+      // Which door: the provider when this build is cut over, our own password
+      // endpoint otherwise. Same form, same result shape, same HttpOnly cookies
+      // either way — the only difference is who checks the password. Flipping
+      // the flag back is a deploy, which is the reversibility this needs.
+      // The provider SDK is imported LAZILY, and only when this build actually
+      // uses it. A static import cost 468 KB of client JavaScript in every
+      // build, including the ones with the flag off — measured, not guessed.
+      let res;
+      if (providerLoginEnabled()) {
+        const { firebaseIdToken } = await import("./auth/firebase");
+        res = await loginWithProvider(API_URL, email, password, firebaseIdToken);
+      } else {
+        res = await apiLogin(API_URL, email, password);
+      }
       if (res.mustChangePassword) {
         setView({ screen: "changePassword" });
         return;
