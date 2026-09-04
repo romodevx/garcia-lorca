@@ -21,10 +21,15 @@ credential nobody chose, and — the one that mattered for this migration — th
 account is usable before its owner has ever proved they can read mail at that
 address.
 
-The new shape: the account is created at the provider with NO password. The
-person receives a link and sets one themselves. Using that link is what proves
-they control the mailbox, so the address ends up verified because they verified
-it, not because we asserted it.
+The new shape: the account is created at the provider with NO password. Its
+owner sets one through a reset link, and using that link is what proves they
+control the mailbox, so the address ends up verified because they verified it,
+not because we asserted it.
+
+SENDING that link is NOT this function's job and no test here pretends it is —
+an earlier version of this comment did, which is exactly the kind of claim that
+reads as covered. iam has no mail sender; the admin screen asks the provider to
+deliver it.
 
 The consequence worth naming: a mistyped address now fails LOUDLY and early —
 the invitation never arrives and the account is never usable. Under the old

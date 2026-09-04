@@ -54,11 +54,20 @@ func NewAdminService(
 
 // InviteUser creates a principal WITHOUT anybody inventing a password for them.
 //
-// The account is created at the provider with no password; its owner sets one
-// through a link they receive, and using that link is what proves they control
-// the mailbox. The address therefore ends up verified because they verified it,
-// not because we asserted it — and a mistyped address fails loudly and early,
-// because the invitation never arrives and the account is never usable.
+// The account is created at the provider with no password. Its owner sets the
+// first one through a password-reset link, and using that link is what proves
+// they control the mailbox: the address ends up verified because they verified
+// it, not because we asserted it. A mistyped address then fails loudly and
+// early — the link never arrives and the account is never usable — instead of
+// sitting there as a pre-verified account its real owner could later claim.
+//
+// WHAT THIS FUNCTION DOES NOT DO: send that link. Nothing here emails anybody.
+// This service has no mail sender (comms does push, not email) and the Admin SDK
+// generates action links without delivering them, so the send belongs to the
+// caller — the admin screen asks the provider to mail it, which also gives the
+// director a "resend invitation" button that doubles as the password reset iam
+// never had. Until that screen exists, an invited account is created and
+// unreachable, and this comment says so rather than implying otherwise.
 //
 // Contrast CreateUser below, which takes a temporary password the director
 // types and hands over: somebody else knows your password, this service stores

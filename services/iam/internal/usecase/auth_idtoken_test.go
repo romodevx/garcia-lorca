@@ -71,6 +71,22 @@ func idTokenService(t *testing.T, status domain.Status) (*usecase.AuthService, *
 	return svc, verifier
 }
 
+// changePasswordFixture builds the collaborators for a password-path test.
+func changePasswordFixture(t *testing.T) (*fakeUsers, *fakeRoles, fakeHasher, *fakeTokens) {
+	t.Helper()
+	email, _ := domain.NewEmail("ana@garcialorca.mx")
+	role, _ := domain.NewRole("r1", "Docente", []string{"students:read"})
+	user, _ := domain.NewUser("u1", testTenant, email, "Ana", domain.StatusActive, false, []domain.Role{role})
+	users := &fakeUsers{
+		byEmail: map[domain.Email]struct {
+			user domain.User
+			hash string
+		}{email: {user: user, hash: "h:secret"}},
+		byID: map[string]domain.User{"u1": user},
+	}
+	return users, &fakeRoles{}, fakeHasher{}, &fakeTokens{}
+}
+
 func TestAuthenticateWithIDTokenIssuesOurOwnSession(t *testing.T) {
 	svc, verifier := idTokenService(t, domain.StatusActive)
 
@@ -154,5 +170,40 @@ func TestAuthenticateWithIDTokenFailsClosedWithoutVerifier(t *testing.T) {
 	}
 	if glerrors.KindOf(err) != glerrors.KindUnauthorized {
 		t.Fatalf("error = %v, want KindUnauthorized", err)
+	}
+}
+
+func TestChangePasswordRefusesWhenTheProviderOwnsCredentials(t *testing.T) {
+	svc, _ := idTokenService(t, domain.StatusActive)
+
+	// Once the provider authenticates people, OUR stored password is no longer
+	// the credential that opens the door. Writing a new one to Postgres would
+	// report success, clear must_change_password, and change NOTHING about what
+	// actually lets somebody in.
+	//
+	// That is worse than having no rotation at all. Somebody whose password was
+	// compromised rotates it, sees a confirmation, and closes the incident —
+	// while the attacker's copy keeps working. A refusal is honest; a silent
+	// no-op is a lie the user acts on.
+	err := svc.ChangePassword(context.Background(), "access:u1", "vieja", "nueva")
+	if err == nil {
+		t.Fatal("want a refusal while an identity provider is configured, got nil")
+	}
+	if glerrors.KindOf(err) != glerrors.KindInternal {
+		t.Fatalf("error = %v (kind %v), want KindInternal — the caller did nothing wrong",
+			err, glerrors.KindOf(err))
+	}
+}
+
+func TestChangePasswordStillWorksWithoutAProvider(t *testing.T) {
+	// The password path is untouched wherever the provider is not configured:
+	// local development, and every environment before the cutover. This test is
+	// what keeps the refusal above from becoming a blanket outage.
+	users, roles, hasher, tokens := changePasswordFixture(t)
+	svc := usecase.NewAuthService(users, roles, hasher, tokens, tokens, nil, testTenant, 15*time.Minute,
+		func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) })
+
+	if err := svc.ChangePassword(context.Background(), "access:u1", "secret", "nueva-larga-123"); err != nil {
+		t.Fatalf("ChangePassword without a provider: %v", err)
 	}
 }

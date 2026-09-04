@@ -192,6 +192,9 @@ func main() {
 //	POST /api/v1/teachers/{id}/user → ModuleGuard(teachers) → RequireAuth →
 //	                             rotation → RequirePermission(teachers:write) →
 //	                             validate iam user (GetUser) then config SetTeacherUser
+//	POST /api/v1/auth/google   → per-IP rate limit (the SAME limiter as the
+//	                             password login) → iam LoginWithIDToken → OUR
+//	                             HttpOnly cookies (unauthenticated)
 //	/healthz, /readyz          → liveness + iam reachability
 //
 // `flags` (via middleware.NewModuleGuard) is the module-visibility boundary:

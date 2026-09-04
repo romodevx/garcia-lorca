@@ -20,6 +20,7 @@ import { ModulePlaceholder } from "./_screens/ModulePlaceholder";
 import { AnnouncementsScreen } from "./_screens/announcements/AnnouncementsScreen";
 import { PaymentsScreen } from "./_screens/payments/PaymentsScreen";
 import { useTheme } from "./theme/ThemeProvider";
+import { endSession } from "./auth/logout";
 import { loginWithProvider } from "./auth/provider";
 import { providerLoginEnabled } from "./auth/providerFlag";
 import { login as apiLogin, changePassword as apiChangePassword, logout as apiLogout, me as apiMe, refresh as apiRefresh, type MeResult } from "./auth/api";
@@ -220,7 +221,16 @@ export function AppShell(): ReactElement {
   };
 
   const logout = (): void => {
-    void apiLogout(API_URL).catch(() => {});
+    // BOTH halves. Our cookies are only half the session once the provider is in
+    // play: while its own session lives, a fresh ID token can be minted with no
+    // password and exchanged at /api/v1/auth/google for a complete new set of
+    // cookies. On the shared front-desk machine that means "Cerrar sesión" logs
+    // nobody out. The idle timeout below routes through here for the same
+    // reason.
+    //
+    // The SDK is imported lazily and only when it is in use — signing out of a
+    // session that was never started is not worth 468 KB.
+    void endSession(API_URL, apiLogout, providerLoginEnabled(), () => import("./auth/firebase"));
     setPrincipal(undefined);
     setView({ screen: "login" });
   };

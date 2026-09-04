@@ -1,12 +1,18 @@
 package googleid
 
 import (
+	"errors"
+
 	firebaseauth "firebase.google.com/go/v4/auth"
 	"firebase.google.com/go/v4/auth/hash"
 
-	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/iam/internal/domain"
 )
+
+// ErrAlreadyProviderManaged marks a user whose credential the provider already
+// owns — a row written by InviteUser, which stores no hash. Not a failure: there
+// is simply nothing to import for that person.
+var ErrAlreadyProviderManaged = errors.New("account is already managed by the provider")
 
 // ImportUser is one account on its way into the provider, in a plain shape so
 // the mapping can be asserted without building SDK types in a test.
@@ -28,10 +34,16 @@ type ImportUser struct {
 // daily, that was the largest risk in the plan.
 func ToImportUser(user domain.User, passwordHash string) (ImportUser, error) {
 	if passwordHash == "" {
-		// An account imported with no password is one anybody could claim by
-		// "resetting" it. Refuse, and let the operator go look at the row.
-		return ImportUser{}, glerrors.New(glerrors.KindInvalid,
-			"user "+user.ID()+" has no stored password hash")
+		// No stored hash means this account is ALREADY the provider's: InviteUser
+		// writes rows with no hash on purpose, because the provider owns the
+		// credential. There is nothing to import and nothing wrong.
+		//
+		// This used to abort the whole run, which made the command unusable
+		// forever the moment anybody was invited — it would die on the first
+		// invited row and never reach the rest. Skipping is both correct and the
+		// only thing that keeps a migration re-runnable in a system that is
+		// half-migrated by design.
+		return ImportUser{}, ErrAlreadyProviderManaged
 	}
 	return ImportUser{
 		UID:         user.ID(),

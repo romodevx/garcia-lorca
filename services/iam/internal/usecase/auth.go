@@ -218,6 +218,24 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (Au
 // forced-rotation flag). An invalid token or a wrong current password is
 // Unauthorized; a too-short new password is Invalid.
 func (s *AuthService) ChangePassword(ctx context.Context, accessToken, currentPassword, newPassword string) error {
+	// FIRST, before validating anything about the new password.
+	//
+	// Where an identity provider is configured, it owns credentials: it is what
+	// actually checks a password at sign-in. Writing a new hash to Postgres here
+	// would report success, clear must_change_password, and change NOTHING about
+	// what lets somebody in — the old password would keep working.
+	//
+	// That is worse than offering no rotation at all. Somebody whose password
+	// was compromised rotates it, sees the confirmation, and closes the
+	// incident, while the attacker's copy still opens the door. Refusing is
+	// honest; a silent no-op is a lie the user acts on.
+	//
+	// Rotation lives at the provider once it is in play: the invitation link is
+	// also the reset link (see AdminService.InviteUser).
+	if s.idTokens != nil {
+		return glerrors.New(glerrors.KindInternal,
+			"passwords are managed by the identity provider; use its password reset")
+	}
 	if len(newPassword) < minPasswordLen {
 		return glerrors.New(glerrors.KindInvalid, "new password is too short")
 	}

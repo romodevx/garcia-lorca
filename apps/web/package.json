@@ -21,7 +21,7 @@
     "@garcia-lorca/i18n": "workspace:*",
     "@garcia-lorca/ui": "workspace:*",
     "@tanstack/react-query": "5.101.0",
-    "firebase": "^12.18.0",
+    "firebase": "12.18.0",
     "next": "16.2.9",
     "next-intl": "4.13.0",
     "react": "19.2.7",

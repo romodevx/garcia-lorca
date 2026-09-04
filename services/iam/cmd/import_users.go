@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -74,16 +75,24 @@ func runImportUsers(log *slog.Logger) error {
 	// exactly the right shape here: this runs once, over tens of accounts, and
 	// it costs no new port method that the service would then carry forever.
 	batch := make([]googleid.ImportUser, 0, len(all))
+	skipped := 0
 	for _, u := range all {
 		_, hash, err := users.FindAuthByID(ctx, u.ID())
 		if err != nil {
 			return fmt.Errorf("reading credentials for %s: %w", u.ID(), err)
 		}
 		imp, err := googleid.ToImportUser(u, hash)
+		if errors.Is(err, googleid.ErrAlreadyProviderManaged) {
+			// Invited accounts have no hash here because the provider already
+			// holds their credential. Nothing to import, and saying so out loud
+			// beats a silent skip an operator has to infer from a count.
+			skipped++
+			continue
+		}
 		if err != nil {
-			// Refuse the whole run rather than skip a row. A user silently left
-			// behind is a user who cannot sign in after the cutover, and nobody
-			// would find out until they tried.
+			// Any OTHER problem refuses the whole run rather than skip a row. A
+			// user silently left behind is a user who cannot sign in after the
+			// cutover, and nobody would find out until they tried.
 			return fmt.Errorf("preparing %s: %w", u.Email().String(), err)
 		}
 		batch = append(batch, imp)
@@ -129,6 +138,7 @@ func runImportUsers(log *slog.Logger) error {
 		imported += res.SuccessCount
 	}
 
-	log.Info("users imported with their existing passwords", "count", imported, "project", project)
+	log.Info("users imported with their existing passwords",
+		"count", imported, "alreadyAtProvider", skipped, "project", project)
 	return nil
 }

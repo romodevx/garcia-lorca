@@ -1,6 +1,7 @@
 package googleid_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/garcia-lorca/services/iam/internal/adapters/googleid"
@@ -96,13 +97,18 @@ func TestToImportUserDisablesSuspendedAccounts(t *testing.T) {
 	}
 }
 
-func TestToImportUserRejectsEmptyHash(t *testing.T) {
-	u := fixtureUser(t, "u3", "sinhash@garcialorca.mx", "Sin", domain.StatusActive)
+func TestToImportUserSkipsAccountsTheProviderAlreadyOwns(t *testing.T) {
+	u := fixtureUser(t, "u3", "invitada@garcialorca.mx", "Invitada", domain.StatusActive)
 
-	// A user with no stored hash would be imported with no password at all,
-	// which is an account anybody could then claim by "resetting" it. Refuse and
-	// let the operator see the row, rather than quietly creating a weak account.
-	if _, err := googleid.ToImportUser(u, ""); err == nil {
-		t.Fatal("want an error for an empty password hash, got nil")
+	// No stored hash means InviteUser created this account and the provider
+	// already holds its credential. Nothing to import, and NOT a failure.
+	//
+	// This used to be a hard error that aborted the entire run, which made the
+	// command unusable forever the moment anybody was invited: it died on the
+	// first invited row and never reached the rest. A migration in a system that
+	// is half-migrated by design has to be able to skip what is already done.
+	_, err := googleid.ToImportUser(u, "")
+	if !errors.Is(err, googleid.ErrAlreadyProviderManaged) {
+		t.Fatalf("error = %v, want ErrAlreadyProviderManaged", err)
 	}
 }

@@ -78,6 +78,23 @@ resource "google_identity_platform_config" "auth" {
     allow_duplicate_emails = false
   }
 
+  # Nobody signs themselves up. Accounts are created by the school, through
+  # AdminService.InviteUser, and that is the ONLY way in.
+  #
+  # Without this the web API key — which is public by design and ships in the
+  # browser bundle — lets anyone create an account at any address in the project.
+  # They could not impersonate a real user (the verifier demands a VERIFIED
+  # email, so the address has to be one they actually receive mail at), but they
+  # would control the provider's entry for addresses the school has not invited
+  # yet, and the school would lose ownership of its own identity lifecycle:
+  # inviting that person then fails with EMAIL_EXISTS and needs a console
+  # deletion to unblock.
+  client {
+    permissions {
+      disabled_user_signup = true
+    }
+  }
+
   # Domains allowed to complete OAuth redirects and password-reset action links.
   #
   # Passed in rather than read from module.web.uri. Deriving it looked tidier and
