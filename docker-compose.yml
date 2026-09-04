@@ -135,7 +135,23 @@ services:
 
   iam:
     <<: *go-service
-    environment: { <<: *go-env, SERVICE: iam }
+    environment:
+      <<: *go-env
+      SERVICE: iam
+      # Identity Platform, for developing the provider sign-in path locally.
+      # EMPTY BY DEFAULT: with no project named, iam's verifier stays nil and
+      # LoginWithIDToken refuses, so the ordinary password login is untouched.
+      # Export IDENTITY_PLATFORM_PROJECT before `make run` to switch it on.
+      IDENTITY_PLATFORM_PROJECT: "${IDENTITY_PLATFORM_PROJECT:-}"
+      # The Admin SDK authenticates with Application Default Credentials. Mounted
+      # read-only from the host below; nothing is baked into the image.
+      GOOGLE_APPLICATION_CREDENTIALS: /gcloud/application_default_credentials.json
+    volumes:
+      - .:/workspace
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+      # Read-only, and only for iam: no other service talks to the provider.
+      - ${HOME}/.config/gcloud:/gcloud:ro
     ports: ["8091:8080"]
 
   students:

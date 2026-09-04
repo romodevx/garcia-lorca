@@ -54,6 +54,27 @@ func (h *IAMHandler) Login(ctx context.Context, req *connect.Request[iamv1.Login
 	}), nil
 }
 
+// LoginWithIDToken exchanges a provider ID token for OUR session pair.
+//
+// The session KIND comes from the request, which is set by the ROUTE the call
+// arrived on at the edge, never by anything the person signing in can type —
+// the same rule Login follows. Otherwise a staff sign-in could ask for the
+// day-long family session.
+func (h *IAMHandler) LoginWithIDToken(ctx context.Context, req *connect.Request[iamv1.LoginWithIDTokenRequest]) (*connect.Response[iamv1.LoginWithIDTokenResponse], error) {
+	res, err := h.auth.AuthenticateWithIDToken(ctx, req.Msg.GetIdToken(),
+		sessionKindOf(req.Msg.GetSessionKind()))
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&iamv1.LoginWithIDTokenResponse{
+		AccessToken:        res.AccessToken,
+		RefreshToken:       res.RefreshToken,
+		ExpiresIn:          res.ExpiresIn,
+		User:               toProtoUser(res.User),
+		MustChangePassword: res.MustChangePassword,
+	}), nil
+}
+
 func (h *IAMHandler) RefreshToken(ctx context.Context, req *connect.Request[iamv1.RefreshTokenRequest]) (*connect.Response[iamv1.RefreshTokenResponse], error) {
 	res, err := h.auth.RefreshToken(ctx, req.Msg.GetRefreshToken())
 	if err != nil {

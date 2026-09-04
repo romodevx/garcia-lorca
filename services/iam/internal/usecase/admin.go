@@ -19,11 +19,16 @@ import (
 // ever reaches the repository, and the account is flagged must_change_password so
 // the Phase-1 forced-rotation flow applies at first login.
 type AdminService struct {
-	users    ports.UserRepository
-	roles    ports.RoleRepository
-	hasher   ports.PasswordHasher
-	tenantID string
-	newID    func() string
+	users  ports.UserRepository
+	roles  ports.RoleRepository
+	hasher ports.PasswordHasher
+	// provisioner creates the account at the external identity provider. NIL is
+	// a valid state — an environment with no provider configured simply cannot
+	// invite anyone (InviteUser refuses), while the older password-based
+	// CreateUser keeps working.
+	provisioner ports.IdentityProvisioner
+	tenantID    string
+	newID       func() string
 }
 
 // NewAdminService wires the admin use case. `tenantID` is the single-tenant scope
@@ -33,16 +38,82 @@ func NewAdminService(
 	users ports.UserRepository,
 	roles ports.RoleRepository,
 	hasher ports.PasswordHasher,
+	provisioner ports.IdentityProvisioner,
 	tenantID string,
 	newID func() string,
 ) *AdminService {
 	return &AdminService{
-		users:    users,
-		roles:    roles,
-		hasher:   hasher,
-		tenantID: tenantID,
-		newID:    newID,
+		users:       users,
+		roles:       roles,
+		hasher:      hasher,
+		provisioner: provisioner,
+		tenantID:    tenantID,
+		newID:       newID,
 	}
+}
+
+// InviteUser creates a principal WITHOUT anybody inventing a password for them.
+//
+// The account is created at the provider with no password. Its owner sets the
+// first one through a password-reset link, and using that link is what proves
+// they control the mailbox: the address ends up verified because they verified
+// it, not because we asserted it. A mistyped address then fails loudly and
+// early — the link never arrives and the account is never usable — instead of
+// sitting there as a pre-verified account its real owner could later claim.
+//
+// WHAT THIS FUNCTION DOES NOT DO: send that link. Nothing here emails anybody.
+// This service has no mail sender (comms does push, not email) and the Admin SDK
+// generates action links without delivering them, so the send belongs to the
+// caller — the admin screen asks the provider to mail it, which also gives the
+// director a "resend invitation" button that doubles as the password reset iam
+// never had. Until that screen exists, an invited account is created and
+// unreachable, and this comment says so rather than implying otherwise.
+//
+// Contrast CreateUser below, which takes a temporary password the director
+// types and hands over: somebody else knows your password, this service stores
+// a credential nobody chose, and the account works before its owner has proved
+// anything about the address.
+//
+// ORDER IS LOAD-BEARING: the provider first, the row second. A row written
+// before a refused provider call would leave a user who exists here, holds
+// permissions, and can never sign in — invisible until somebody tries.
+func (s *AdminService) InviteUser(ctx context.Context, rawEmail, displayName string, roleIDs []string) (domain.User, error) {
+	email, err := domain.NewEmail(rawEmail)
+	if err != nil {
+		return domain.User{}, err // KindInvalid, before either side is touched.
+	}
+	if s.provisioner == nil {
+		// KindInternal, not KindInvalid: the caller did nothing wrong, the
+		// environment is missing a provider.
+		return domain.User{}, glerrors.New(glerrors.KindInternal,
+			"no identity provider is configured; cannot invite users")
+	}
+
+	assigned, err := s.resolveRoles(ctx, roleIDs)
+	if err != nil {
+		return domain.User{}, err
+	}
+
+	if err := s.provisioner.CreateAccount(ctx, email.String(), displayName); err != nil {
+		return domain.User{}, err
+	}
+
+	// mustChangePassword is FALSE: there is no password to change. The owner
+	// chooses their first one through the invitation.
+	user, err := domain.NewUser(s.newID(), s.tenantID, email, displayName, domain.StatusActive, false, assigned)
+	if err != nil {
+		return domain.User{}, err
+	}
+
+	// No hash. The provider owns credentials; a second copy here would be one
+	// more thing to drift, leak, or be reverted by a re-import.
+	if err := s.users.CreateUser(ctx, user, ""); err != nil {
+		return domain.User{}, err // KindConflict on duplicate email
+	}
+	if err := s.users.SetUserRoles(ctx, user.ID(), roleIDs); err != nil {
+		return domain.User{}, err
+	}
+	return user, nil
 }
 
 // CreateUser provisions a new principal from an admin-supplied temporary

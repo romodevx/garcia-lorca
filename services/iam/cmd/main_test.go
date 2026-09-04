@@ -35,8 +35,8 @@ func TestJWTSecret(t *testing.T) {
 		wantValue string
 	}{
 		{
-			name:      "explicit secret is used verbatim in any environment",
-			appEnv:    "prod",
+			name:   "explicit secret is used verbatim in any environment",
+			appEnv: "prod",
 			// Deliberately unmistakable as a fixture. A leetspeak value here read
 			// as a "Generic High Entropy Secret" to the repository secret scanner
 			// and failed the PR — a false positive, but one that trains people to

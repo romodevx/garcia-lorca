@@ -26,6 +26,7 @@ type fakeLogin struct {
 	gotPassword     string
 	gotRefreshToken string
 	gotKind         client.SessionKind
+	gotIDToken      string
 }
 
 func (f *fakeLogin) Login(_ context.Context, email, password string) (client.LoginResult, error) {
@@ -36,6 +37,11 @@ func (f *fakeLogin) Login(_ context.Context, email, password string) (client.Log
 
 func (f *fakeLogin) LoginAs(_ context.Context, email, password string, kind client.SessionKind) (client.LoginResult, error) {
 	f.gotEmail, f.gotPassword, f.gotKind = email, password, kind
+	return f.res, f.err
+}
+
+func (f *fakeLogin) LoginWithIDToken(_ context.Context, idToken string, kind client.SessionKind) (client.LoginResult, error) {
+	f.gotIDToken, f.gotKind = idToken, kind
 	return f.res, f.err
 }
 

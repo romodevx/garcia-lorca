@@ -30,9 +30,11 @@ import (
 	"github.com/garcia-lorca/pkg/dbpool"
 	"github.com/garcia-lorca/pkg/logger"
 	"github.com/garcia-lorca/services/iam/internal/adapters/bcrypt"
+	"github.com/garcia-lorca/services/iam/internal/adapters/googleid"
 	grpcadapter "github.com/garcia-lorca/services/iam/internal/adapters/grpc"
 	"github.com/garcia-lorca/services/iam/internal/adapters/jwt"
 	pgadapter "github.com/garcia-lorca/services/iam/internal/adapters/postgres"
+	"github.com/garcia-lorca/services/iam/internal/ports"
 	"github.com/garcia-lorca/services/iam/internal/usecase"
 )
 
@@ -47,6 +49,18 @@ const (
 
 func main() {
 	log := logger.Default()
+
+	// One-off maintenance runs as a subcommand of this same binary: it needs the
+	// database connection, the tenant and the postgres adapter this service
+	// already knows how to build, and a second image would have been a second
+	// copy of all of it. See import_users.go.
+	if len(os.Args) > 1 && os.Args[1] == "import-users" {
+		if err := runImportUsers(log); err != nil {
+			log.Error("import-users failed", slog.Any("error", err))
+			os.Exit(1)
+		}
+		return
+	}
 
 	mux, err := buildMux(log)
 	if err != nil {
@@ -83,8 +97,32 @@ func buildMux(log *slog.Logger) (*http.ServeMux, error) {
 	}
 	tokens := jwt.NewHMAC(secret, tokenIssuer, refreshTTL, time.Now)
 
-	auth := usecase.NewAuthService(userRepo, roleRepo, hasher, tokens, tokens, tenantID, accessTokenTTL, time.Now)
-	admin := usecase.NewAdminService(userRepo, roleRepo, hasher, tenantID, func() string { return uuid.NewString() })
+	// The external identity provider is OPTIONAL and off unless named. An empty
+	// IDENTITY_PLATFORM_PROJECT leaves the verifier nil, which makes
+	// AuthenticateWithIDToken refuse outright — local and any environment that
+	// has not been migrated keep signing in with a password and are unaffected.
+	// Nothing is inferred from ambient credentials: the project is stated or the
+	// path is closed.
+	var idTokens ports.IDTokenVerifier
+	var provisioner ports.IdentityProvisioner
+	if project := os.Getenv("IDENTITY_PLATFORM_PROJECT"); project != "" {
+		v, p, err := googleid.NewFromProject(context.Background(), project)
+		if err != nil {
+			// Fatal on purpose. A misconfigured provider that boots anyway would
+			// silently refuse every sign-in through it, and the only symptom would
+			// be users unable to log in with no error to read anywhere.
+			return nil, err
+		}
+		idTokens = v
+		provisioner = p
+		log.Info("identity provider wired", "project", project)
+	}
+
+	auth := usecase.NewAuthService(userRepo, roleRepo, hasher, tokens, tokens, idTokens, tenantID, accessTokenTTL, time.Now)
+	// provisioner comes from the SAME optional provider above: with no project
+	// named it stays nil, InviteUser refuses, and the older password-based
+	// CreateUser is untouched.
+	admin := usecase.NewAdminService(userRepo, roleRepo, hasher, provisioner, tenantID, func() string { return uuid.NewString() })
 	health := usecase.NewHealthService(serviceName)
 	iamHandler := grpcadapter.NewIAMHandler(auth, admin, health)
 

@@ -23,6 +23,21 @@ service IamService {
   // refresh token. iam is the only issuer of both.
   rpc Login(LoginRequest) returns (LoginResponse);
 
+  // LoginWithIDToken exchanges an ID token from the external identity provider
+  // for the SAME session pair Login issues. The client authenticates against
+  // Identity Platform, hands us the resulting token ONCE, and iam mints its own
+  // access and refresh from it.
+  //
+  // The exchange lives here rather than at the edge so the session stays ours:
+  // the gateway keeps setting HttpOnly cookies, mobile keeps its Bearer flow,
+  // and our TTLs and revocation rules are unchanged. What moves to the provider
+  // is password storage, recovery and MFA — never the session.
+  //
+  // Verifying at the provider is NOT authorization: it establishes an email,
+  // and the user row behind it carries the roles. An unknown address gets the
+  // same generic refusal as a bad token.
+  rpc LoginWithIDToken(LoginWithIDTokenRequest) returns (LoginWithIDTokenResponse);
+
   // RefreshToken exchanges a valid refresh token for a fresh access token (and a
   // rotated refresh token). Lets sessions outlive the short access TTL without
   // re-entering credentials.
@@ -166,6 +181,27 @@ message LoginRequest {
   // Which surface is logging in. It comes from the ROUTE the request arrived
   // on, never from anything a user can type.
   SessionKind session_kind = 3;
+}
+
+message LoginWithIDTokenRequest {
+  // The ID token minted by the identity provider for this user.
+  string id_token = 1;
+  // Which surface is logging in. As with Login, it comes from the ROUTE the
+  // request arrived on, never from anything a caller can set — otherwise a
+  // staff token could ask for the longer-lived family session.
+  SessionKind session_kind = 2;
+}
+
+// Same shape as LoginResponse, because both paths end in the same place: our
+// own access and refresh pair. It is a separate type because buf's lint rule
+// forbids sharing a response across RPCs — the two must be kept in step by
+// hand, and a field added to one belongs in the other.
+message LoginWithIDTokenResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  int64 expires_in = 3; // access token TTL in seconds
+  User user = 4;
+  bool must_change_password = 5;
 }
 
 message LoginResponse {

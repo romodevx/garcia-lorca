@@ -39,6 +39,11 @@ type AuthService struct {
 	hasher    ports.PasswordHasher
 	issuer    ports.TokenIssuer
 	validator ports.TokenValidator
+	// idTokens verifies ID tokens from an external identity provider. NIL is a
+	// valid state: environments with no provider configured simply refuse that
+	// sign-in path (see AuthenticateWithIDToken), rather than the service
+	// refusing to boot. Password sign-in never touches it.
+	idTokens  ports.IDTokenVerifier
 	tenantID  string
 	accessTTL time.Duration
 	now       func() time.Time
@@ -53,6 +58,7 @@ func NewAuthService(
 	hasher ports.PasswordHasher,
 	issuer ports.TokenIssuer,
 	validator ports.TokenValidator,
+	idTokens ports.IDTokenVerifier,
 	tenantID string,
 	accessTTL time.Duration,
 	now func() time.Time,
@@ -63,6 +69,7 @@ func NewAuthService(
 		hasher:    hasher,
 		issuer:    issuer,
 		validator: validator,
+		idTokens:  idTokens,
 		tenantID:  tenantID,
 		accessTTL: accessTTL,
 		now:       now,
@@ -121,6 +128,65 @@ func (s *AuthService) AuthenticateAs(ctx context.Context, rawEmail, password str
 	return res, nil
 }
 
+// AuthenticateWithIDToken signs a user in with an ID token from the external
+// identity provider and issues OUR OWN session — the same pair a password login
+// produces.
+//
+// That is the point of doing it here rather than at the edge. The provider owns
+// password storage, recovery and MFA; this service keeps owning the session, so
+// the gateway, its HttpOnly cookies, the mobile Bearer flow, our TTLs and the
+// "a password change revokes older refresh tokens" rule all continue to work
+// untouched.
+//
+// Verifying at the provider is NOT authorization. It establishes an email; the
+// user row behind that email is what carries the roles and permissions, and a
+// caller with no row here gets the same generic refusal as a bad token — never
+// a hint that the address is unknown.
+func (s *AuthService) AuthenticateWithIDToken(ctx context.Context, idToken string, kind domain.SessionKind) (AuthResult, error) {
+	if s.idTokens == nil {
+		// Fail closed. An environment with no provider configured refuses this
+		// path outright; it must never fall through to accepting an unchecked
+		// token.
+		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid credentials")
+	}
+
+	identity, err := s.idTokens.Verify(ctx, idToken)
+	if err != nil {
+		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid credentials")
+	}
+
+	email, err := domain.NewEmail(identity.Email)
+	if err != nil {
+		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid credentials")
+	}
+
+	user, _, err := s.users.FindAuthByEmail(ctx, s.tenantID, email)
+	if err != nil {
+		// No user row for a verified address. Same generic refusal as a bad
+		// token: the provider already knows the address exists, but we do not
+		// confirm whether it exists HERE. No timing equalizer is needed — unlike
+		// the password path, nothing on this branch runs a hash.
+		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid credentials")
+	}
+	if !user.CanAuthenticate() {
+		return AuthResult{}, glerrors.New(glerrors.KindForbidden, "account is not active")
+	}
+
+	// NOT propagating MustChangePassword, deliberately.
+	//
+	// The flag is a leftover from the password era, and carrying it here trapped
+	// a real user: signing in through the provider answered true, the app routed
+	// her to the change-password screen, and ChangePassword refused — correctly,
+	// because the provider owns credentials now. She could sign in and never get
+	// in. Found by running it; no test with a double would have shown it, because
+	// the trap only exists when both halves are true at once.
+	//
+	// Where the provider holds the credential there is no password of ours to
+	// change, so false is the honest answer. Password lifecycle belongs to the
+	// provider's own reset flow.
+	return s.issueFor(ctx, user, kind)
+}
+
 // RefreshToken exchanges a valid refresh token for a fresh, rotated pair. A
 // token minted before the user's last password change is rejected, so rotating
 // the password revokes every refresh token issued before it (a stolen token
@@ -159,6 +225,24 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (Au
 // forced-rotation flag). An invalid token or a wrong current password is
 // Unauthorized; a too-short new password is Invalid.
 func (s *AuthService) ChangePassword(ctx context.Context, accessToken, currentPassword, newPassword string) error {
+	// FIRST, before validating anything about the new password.
+	//
+	// Where an identity provider is configured, it owns credentials: it is what
+	// actually checks a password at sign-in. Writing a new hash to Postgres here
+	// would report success, clear must_change_password, and change NOTHING about
+	// what lets somebody in — the old password would keep working.
+	//
+	// That is worse than offering no rotation at all. Somebody whose password
+	// was compromised rotates it, sees the confirmation, and closes the
+	// incident, while the attacker's copy still opens the door. Refusing is
+	// honest; a silent no-op is a lie the user acts on.
+	//
+	// Rotation lives at the provider once it is in play: the invitation link is
+	// also the reset link (see AdminService.InviteUser).
+	if s.idTokens != nil {
+		return glerrors.New(glerrors.KindInternal,
+			"passwords are managed by the identity provider; use its password reset")
+	}
 	if len(newPassword) < minPasswordLen {
 		return glerrors.New(glerrors.KindInvalid, "new password is too short")
 	}

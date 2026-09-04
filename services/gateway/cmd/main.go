@@ -192,6 +192,9 @@ func main() {
 //	POST /api/v1/teachers/{id}/user → ModuleGuard(teachers) → RequireAuth →
 //	                             rotation → RequirePermission(teachers:write) →
 //	                             validate iam user (GetUser) then config SetTeacherUser
+//	POST /api/v1/auth/google   → per-IP rate limit (the SAME limiter as the
+//	                             password login) → iam LoginWithIDToken → OUR
+//	                             HttpOnly cookies (unauthenticated)
 //	/healthz, /readyz          → liveness + iam reachability
 //
 // `flags` (via middleware.NewModuleGuard) is the module-visibility boundary:
@@ -219,6 +222,11 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// unauthenticated like their web siblings, and MobileLogin shares the SAME
 	// per-IP loginLimiter instance, so a brute-force attempt cannot dodge the
 	// budget by switching to the mobile door.
+	// The identity-provider exchange shares the SAME per-IP limiter as the
+	// password login. It is a cheaper call for us — no bcrypt — but it is still
+	// a door into a session, and a brute-force budget that a second door can
+	// dodge is not a budget.
+	mux.Handle("POST /api/v1/auth/google", loginLimiter.Middleware(http.HandlerFunc(authH.GoogleLogin)))
 	mux.Handle("POST /api/v1/auth/mobile/login", loginLimiter.Middleware(http.HandlerFunc(authH.MobileLogin)))
 	mux.HandleFunc("POST /api/v1/auth/mobile/refresh", authH.MobileRefresh)
 	mux.Handle("GET /api/v1/me", requireAuthChanged(http.HandlerFunc(authH.Me)))
