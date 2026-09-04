@@ -172,12 +172,19 @@ func (s *AuthService) AuthenticateWithIDToken(ctx context.Context, idToken strin
 		return AuthResult{}, glerrors.New(glerrors.KindForbidden, "account is not active")
 	}
 
-	res, err := s.issueFor(ctx, user, kind)
-	if err != nil {
-		return AuthResult{}, err
-	}
-	res.MustChangePassword = user.MustChangePassword()
-	return res, nil
+	// NOT propagating MustChangePassword, deliberately.
+	//
+	// The flag is a leftover from the password era, and carrying it here trapped
+	// a real user: signing in through the provider answered true, the app routed
+	// her to the change-password screen, and ChangePassword refused — correctly,
+	// because the provider owns credentials now. She could sign in and never get
+	// in. Found by running it; no test with a double would have shown it, because
+	// the trap only exists when both halves are true at once.
+	//
+	// Where the provider holds the credential there is no password of ours to
+	// change, so false is the honest answer. Password lifecycle belongs to the
+	// provider's own reset flow.
+	return s.issueFor(ctx, user, kind)
 }
 
 // RefreshToken exchanges a valid refresh token for a fresh, rotated pair. A

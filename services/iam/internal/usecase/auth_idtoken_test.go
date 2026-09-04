@@ -207,3 +207,40 @@ func TestChangePasswordStillWorksWithoutAProvider(t *testing.T) {
 		t.Fatalf("ChangePassword without a provider: %v", err)
 	}
 }
+
+func TestAuthenticateWithIDTokenNeverDemandsAPasswordChange(t *testing.T) {
+	// A user row still carrying must_change_password from the password era.
+	email, _ := domain.NewEmail("ana@garcialorca.mx")
+	role, _ := domain.NewRole("r1", "Docente", []string{"students:read"})
+	user, _ := domain.NewUser("u1", testTenant, email, "Ana", domain.StatusActive, true, []domain.Role{role})
+	users := &fakeUsers{
+		byEmail: map[domain.Email]struct {
+			user domain.User
+			hash string
+		}{email: {user: user, hash: "h:secret"}},
+		byID: map[string]domain.User{"u1": user},
+	}
+	verifier := &fakeIDTokens{verified: map[string]ports.VerifiedIdentity{
+		"google:ana": {Email: "ana@garcialorca.mx", Subject: "google-uid-1"},
+	}}
+	svc := usecase.NewAuthService(users, &fakeRoles{}, fakeHasher{}, &fakeTokens{}, &fakeTokens{},
+		verifier, testTenant, 15*time.Minute,
+		func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) })
+
+	res, err := svc.AuthenticateWithIDToken(context.Background(), "google:ana", domain.SessionStaff)
+	if err != nil {
+		t.Fatalf("AuthenticateWithIDToken: %v", err)
+	}
+
+	// This trapped a real user, and only running it found the trap: signing in
+	// through the provider answered mustChangePassword=true, the app routed her
+	// to the change-password screen, and ChangePassword answered 500 because the
+	// provider owns credentials now. No way forward, no way in.
+	//
+	// The flag is a leftover from the password era. Where the provider holds the
+	// credential there is no password of ours to change, so the honest answer is
+	// false — password lifecycle belongs to the provider's own reset flow.
+	if res.MustChangePassword {
+		t.Fatal("the provider path demanded a password change that cannot be performed")
+	}
+}
