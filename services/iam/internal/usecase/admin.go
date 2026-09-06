@@ -113,6 +113,17 @@ func (s *AdminService) InviteUser(ctx context.Context, rawEmail, displayName str
 	if err := s.users.SetUserRoles(ctx, user.ID(), roleIDs); err != nil {
 		return domain.User{}, err
 	}
+
+	// Last, and NOT rolled back if it fails. An account created and never
+	// announced is one nobody can use and the director has nothing to hand the
+	// person — so the caller is told. But deleting the account over one
+	// undelivered email would throw away something perfectly good and, worse,
+	// free the address for somebody else to register. Resending is the fix, and
+	// resending needs the account to still be there.
+	if err := s.provisioner.SendInvitation(ctx, email.String()); err != nil {
+		return user, glerrors.Wrap(glerrors.KindInternal,
+			"the account was created but the invitation could not be sent; resend it", err)
+	}
 	return user, nil
 }
 
