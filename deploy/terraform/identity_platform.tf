@@ -116,3 +116,42 @@ output "identity_platform_enabled" {
   description = "Whether Identity Platform is provisioned in this environment."
   value       = var.enable_identity_platform
 }
+
+# ---- What the runtime needs from the provider ------------------------------
+# A role with EXACTLY two permissions, and it is custom because no predefined
+# one fits:
+#
+#   firebaseauth.viewer  has users.get but not users.create — InviteUser fails.
+#   firebaseauth.editor  and firebaseauth.admin are the SAME 16 permissions, and
+#                        both include users.delete and configs.update. A running
+#                        service that can rewrite the provider config could
+#                        re-enable the self sign-up disabled above, which is a
+#                        security fix undoing itself from inside.
+#
+# So: get (the revocation check in VerifyIDTokenAndCheckRevoked) and create
+# (InviteUser). Nothing else.
+resource "google_project_iam_custom_role" "identity_runtime" {
+  count = var.enable_identity_platform ? 1 : 0
+
+  project     = var.project_id
+  role_id     = "garciaLorcaIdentityRuntime"
+  title       = "García Lorca — identity runtime"
+  description = "Verify ID tokens (revocation check) and create invited accounts. Nothing else."
+  permissions = [
+    "firebaseauth.users.get",
+    "firebaseauth.users.create",
+  ]
+}
+
+# NOTE, and it is a real one: every service shares google_service_account.runtime,
+# so this grant reaches students, finance and the rest, not only iam. The role is
+# two permissions wide, so the widening is small — but it IS a widening, and the
+# clean fix is a service account per service. That is its own task; recorded here
+# rather than left for somebody to discover.
+resource "google_project_iam_member" "runtime_identity" {
+  count = var.enable_identity_platform ? 1 : 0
+
+  project = var.project_id
+  role    = google_project_iam_custom_role.identity_runtime[0].id
+  member  = "serviceAccount:${google_service_account.runtime.email}"
+}

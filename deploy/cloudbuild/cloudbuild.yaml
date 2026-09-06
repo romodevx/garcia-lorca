@@ -23,6 +23,19 @@ substitutions:
   # trigger overrides it with _TAG=${_TAG} so infra and revision agree.
   _TAG: latest
 
+  # Identity Platform, for the web bundle. ALL EMPTY BY DEFAULT: an image built
+  # without them has the provider sign-in off, because providerLoginEnabled()
+  # requires the flag AND an api key — a half-set build cannot half-enable it.
+  #
+  # NEXT_PUBLIC_* is inlined at build time, so switching the provider on is a
+  # REBUILD, not a redeploy. That is the property worth having for the door
+  # everybody comes through: no console toggle can turn it on or off, and going
+  # back is the same operation as going forward.
+  _AUTH_PROVIDER: ""
+  _FIREBASE_API_KEY: ""
+  _FIREBASE_AUTH_DOMAIN: ""
+  _FIREBASE_PROJECT_ID: ""
+
 options:
   logging: CLOUD_LOGGING_ONLY
   # COST: no machineType set, so builds run on the DEFAULT machine (e2-medium),
@@ -256,7 +269,15 @@ steps:
         set -euo pipefail
         export DOCKER_BUILDKIT=1
         IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/web:${_TAG}"
-        docker build -f apps/web/Dockerfile -t "$$IMG" .
+        # NEXT_PUBLIC_* is inlined at BUILD time, so the provider cannot be
+        # switched on by redeploying: it needs a rebuild. Empty substitutions
+        # (the default) produce an image with the provider sign-in off.
+        docker build -f apps/web/Dockerfile -t "$$IMG" \
+          --build-arg NEXT_PUBLIC_AUTH_PROVIDER="${_AUTH_PROVIDER}" \
+          --build-arg NEXT_PUBLIC_FIREBASE_API_KEY="${_FIREBASE_API_KEY}" \
+          --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="${_FIREBASE_AUTH_DOMAIN}" \
+          --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID="${_FIREBASE_PROJECT_ID}" \
+          .
         docker push "$$IMG"
     waitFor: ["web-build", "sourcemap-gate"]
 

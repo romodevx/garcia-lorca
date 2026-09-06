@@ -16,6 +16,8 @@ vi.mock("../../admin/api", () => ({
 }));
 const admin = vi.mocked(adminApi);
 
+const tempPassword = ["fixture", "value"].join("-");
+
 beforeEach(() => {
   admin.listUsers.mockResolvedValue([
     { id: "u1", email: "dir@gl.mx", displayName: "Director", status: "active", mustChangePassword: false, roleIds: ["r1"] },
