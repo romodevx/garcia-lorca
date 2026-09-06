@@ -615,6 +615,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// handler is what stops an admin inviting an owner-powered account to an
 	// address it controls.
 	mux.Handle("POST /api/v1/users/invite", iamAdmin("users:write", adminH.InviteUser))
+	mux.Handle("POST /api/v1/users/{id}/invite", iamAdmin("users:write", adminH.ResendInvitation))
 	mux.Handle("GET /api/v1/users", iamAdmin("users:read", adminH.ListUsers))
 	mux.Handle("GET /api/v1/users/{id}", iamAdmin("users:read", adminH.GetUser))
 	mux.Handle("POST /api/v1/users/{id}/status", iamAdmin("users:write", adminH.SetUserStatus))

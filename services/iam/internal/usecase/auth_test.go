@@ -76,6 +76,23 @@ func (f *fakeUsers) CreateUser(_ context.Context, user domain.User, passwordHash
 		return glerrors.New(glerrors.KindConflict, "email already exists")
 	}
 	f.created = append(f.created, createdUser{user: user, hash: passwordHash})
+	// Register it, the way a repository does. Recording the call without storing
+	// the row made this double lie about the most basic thing a repository
+	// promises: what you create, you can then find.
+	if f.byEmail == nil {
+		f.byEmail = map[domain.Email]struct {
+			user domain.User
+			hash string
+		}{}
+	}
+	if f.byID == nil {
+		f.byID = map[string]domain.User{}
+	}
+	f.byEmail[user.Email()] = struct {
+		user domain.User
+		hash string
+	}{user: user, hash: passwordHash}
+	f.byID[user.ID()] = user
 	return nil
 }
 

@@ -18,6 +18,7 @@ import {
   type CreateUserInput,
   type InviteUserInput,
   inviteUser,
+  resendInvitation,
   type Role,
 } from "../../admin/api";
 import { providerLoginEnabled } from "../../auth/providerFlag";
@@ -107,6 +108,7 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
   const onInviteUser = async (input: InviteUserInput): Promise<void> => { await inviteUser(API_URL, input); setAddUser(false); reload(); say(`Invitación enviada · ${input.email}`); };
   const onCreateRole = async (input: CreateRoleInput): Promise<void> => { await createRole(API_URL, input); setAddRole(false); reload(); say(`Rol creado · ${input.name}`); };
   const onSuspend = async (u: AdminUser): Promise<void> => { await setUserStatus(API_URL, u.id, u.status === "active" ? "suspended" : "active"); reload(); say(u.status === "active" ? "Usuario suspendido" : "Usuario reactivado"); };
+  const onResend = async (u: AdminUser): Promise<void> => { try { await resendInvitation(API_URL, u.id); say(`Enlace enviado · ${u.email}`); } catch { say("No se pudo enviar el enlace"); } };
   const onSaveUserRoles = async (u: AdminUser, roleIds: string[]): Promise<void> => { try { await setUserRoles(API_URL, u.id, roleIds); setEditRoles(null); reload(); say("Roles actualizados"); } catch { say("No se pudieron guardar los roles"); } };
   const onSavePerms = async (r: Role, permissions: string[]): Promise<void> => { try { await setRolePermissions(API_URL, r.id, permissions); setEditPerms(null); reload(); say("Permisos actualizados"); } catch { say("No se pudieron guardar los permisos"); } };
 
@@ -168,6 +170,7 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
                 <div><StatusPill active={u.status === "active"} /></div>
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                   <button onClick={() => setEditRoles(u)} style={{ height: 38, padding: "0 14px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, color: "var(--forest)", background: "var(--surface-3)", border: "1px solid var(--border)", cursor: "pointer" }}>Roles</button>
+                  {invites && <button onClick={() => void onResend(u)} style={{ height: 38, padding: "0 14px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, color: "var(--forest)", background: "var(--surface-3)", border: "1px solid var(--border)", cursor: "pointer" }}>Reenviar acceso</button>}
                   <button onClick={() => void onSuspend(u)} style={{ height: 38, padding: "0 14px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, color: u.status === "active" ? "var(--bad-fg)" : "var(--forest)", background: "var(--surface-3)", border: "1px solid var(--border)", cursor: "pointer" }}>{u.status === "active" ? "Suspender" : "Reactivar"}</button>
                 </div>
               </div>
@@ -254,7 +257,7 @@ function InviteUserDrawer({ roles, onClose, onSave }: { roles: readonly Role[]; 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>{roles.map((r) => <button key={r.id} onClick={() => toggle(r.id)} style={chip(sel.includes(r.id), "lime")}>{r.name}</button>)}</div>
         </div>
         <p style={{ fontSize: 13.5, color: "var(--text-muted)", margin: 0, lineHeight: 1.5 }}>
-          No se define ninguna contraseña aquí: la persona elegirá la suya desde el enlace que reciba. Si no le llega, vuelve a invitarla con el mismo correo y se le reenvía.
+          No se define ninguna contraseña aquí: la persona elegirá la suya desde el enlace que reciba. Si no le llega, usa «Reenviar acceso» en su renglón de la tabla.
         </p>
         {err !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{err}</p>}
       </>

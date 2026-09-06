@@ -68,6 +68,9 @@ func (f *fakeUsers) CreateUser(_ context.Context, user domain.User, passwordHash
 		return f.createErr
 	}
 	f.created = &createdUser{user: user, hash: passwordHash}
+	// A repository can find what it just stored. Recording the call without
+	// storing the row made this double lie about exactly that.
+	f.user = user
 	return nil
 }
 func (f *fakeUsers) ListUsers(context.Context) ([]domain.User, error) { return f.listOut, nil }

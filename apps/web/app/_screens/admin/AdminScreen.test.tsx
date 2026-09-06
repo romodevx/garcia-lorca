@@ -11,6 +11,7 @@ vi.mock("../../admin/api", () => ({
   listRoles: vi.fn(),
   createUser: vi.fn(),
   inviteUser: vi.fn(),
+  resendInvitation: vi.fn(),
   createRole: vi.fn(),
   setRolePermissions: vi.fn(),
   setUserStatus: vi.fn(),
@@ -87,6 +88,31 @@ describe("AdminScreen", () => {
 
     expect(admin.createUser).toHaveBeenCalledWith(expect.any(String), { email: "nueva@gl.mx", displayName: "Nueva Maestra", tempPassword: tempPassword, roleIds: [] });
     expect(admin.inviteUser).not.toHaveBeenCalled();
+  });
+
+  // The invitation that never arrived and the forgotten password are the same
+  // button, and it lives on the person's own row — not behind retyping their
+  // address into the new-user form, which is a conflict, not a resend.
+  it("resends access from the user row when the provider is on", async () => {
+    flag.providerLoginEnabled.mockReturnValue(true);
+    const user = userEvent.setup();
+    admin.resendInvitation.mockResolvedValue(undefined);
+    render(<AdminScreen onBack={() => {}} />);
+    await screen.findByText("Director");
+
+    await user.click(screen.getByRole("button", { name: "Reenviar acceso" }));
+
+    expect(admin.resendInvitation).toHaveBeenCalledWith(expect.any(String), "u1");
+    expect(await screen.findByText(/Enlace enviado/)).toBeInTheDocument();
+  });
+
+  // With the provider off there is no link to send, so offering the button
+  // would be offering something that cannot work.
+  it("offers no resend when the provider is off", async () => {
+    flag.providerLoginEnabled.mockReturnValue(false);
+    render(<AdminScreen onBack={() => {}} />);
+    await screen.findByText("Director");
+    expect(screen.queryByRole("button", { name: "Reenviar acceso" })).not.toBeInTheDocument();
   });
 
   it("creates a role from the drawer with checked permissions", async () => {

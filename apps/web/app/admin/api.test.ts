@@ -3,6 +3,7 @@ import {
   createRole,
   createUser,
   inviteUser,
+  resendInvitation,
   linkTeacherUser,
   listRoles,
   listUsers,
@@ -102,6 +103,27 @@ describe("inviteUser", () => {
   it("throws on a non-ok response", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 409 })));
     await expect(inviteUser(BASE, { email: "x@example.com", displayName: "X", roleIds: [] })).rejects.toThrow();
+  });
+});
+
+describe("resendInvitation", () => {
+  it("POSTs to the user's own invite path, with no body of its own", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await resendInvitation(BASE, "usr-7");
+
+    const [url, init] = lastCall(fetchMock);
+    // Keyed by the user id in the PATH. An email-keyed resend would be a way to
+    // make this system mail a password link to any address at all.
+    expect(url).toBe("http://gw/api/v1/users/usr-7/invite");
+    expect(init.method).toBe("POST");
+    expect(init.credentials).toBe("include");
+  });
+
+  it("throws on a non-ok response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 404 })));
+    await expect(resendInvitation(BASE, "nope")).rejects.toThrow();
   });
 });
 

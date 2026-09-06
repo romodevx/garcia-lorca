@@ -138,6 +138,15 @@ func (h *IAMHandler) InviteUser(ctx context.Context, req *connect.Request[iamv1.
 	return connect.NewResponse(&iamv1.InviteUserResponse{User: toProtoUser(user)}), nil
 }
 
+// ResendInvitation mails an existing user a fresh link to set a password —
+// both the invitation that never arrived and the administrator password reset.
+func (h *IAMHandler) ResendInvitation(ctx context.Context, req *connect.Request[iamv1.ResendInvitationRequest]) (*connect.Response[iamv1.ResendInvitationResponse], error) {
+	if err := h.admin.ResendInvitation(ctx, req.Msg.GetUserId()); err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&iamv1.ResendInvitationResponse{}), nil
+}
+
 func (h *IAMHandler) CreateUser(ctx context.Context, req *connect.Request[iamv1.CreateUserRequest]) (*connect.Response[iamv1.CreateUserResponse], error) {
 	user, err := h.admin.CreateUser(ctx, req.Msg.GetEmail(), req.Msg.GetDisplayName(), req.Msg.GetTempPassword(), req.Msg.GetRoleIds())
 	if err != nil {

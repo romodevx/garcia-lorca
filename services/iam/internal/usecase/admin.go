@@ -124,6 +124,29 @@ func (s *AdminService) InviteUser(ctx context.Context, rawEmail, displayName str
 	return user, nil
 }
 
+// ResendInvitation mails an existing user a fresh link to set a password.
+//
+// One operation covering two situations that are the same thing underneath: the
+// person whose invitation never arrived, and the person who forgot their
+// password. For an account with no password the link chooses the first one; for
+// one that has a password it replaces it. This is the administrator password
+// reset iam never had, and one of the reasons the migration happened.
+//
+// Keyed by USER ID, not by email, and deliberately: it can only ever mail
+// somebody who is already a user here. An email-keyed version would be a way to
+// make this system send a password-reset link to any address at all.
+func (s *AdminService) ResendInvitation(ctx context.Context, userID string) error {
+	if s.provisioner == nil {
+		return glerrors.New(glerrors.KindInternal,
+			"no identity provider is configured; cannot send invitations")
+	}
+	user, err := s.users.FindByID(ctx, userID)
+	if err != nil {
+		return err // KindNotFound for an unknown id
+	}
+	return s.provisioner.SendInvitation(ctx, user.Email().String())
+}
+
 // CreateUser provisions a new principal from an admin-supplied temporary
 // password and assigns the given roles. The temp password is hashed (never
 // stored in plaintext) and the account is flagged must_change_password. Every

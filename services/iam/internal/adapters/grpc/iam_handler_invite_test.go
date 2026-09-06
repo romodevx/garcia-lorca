@@ -121,3 +121,40 @@ func handlerWithProvisioner(t *testing.T, users *fakeUsers, roles *fakeRoles, pr
 	admin := usecase.NewAdminService(users, roles, hasher, prov, "t1", func() string { return "generated-id" })
 	return grpcadapter.NewIAMHandler(auth, admin, usecase.NewHealthService("iam"))
 }
+
+// TestResendInvitationMailsTheUser: reachable over the wire, and it mails the
+// address the user row carries — not one the caller supplies.
+func TestResendInvitationMailsTheUser(t *testing.T) {
+	prov := &recordingProvisioner{}
+	users := &fakeUsers{}
+	h := handlerWithProvisioner(t, users, &fakeRoles{known: "r1"}, prov)
+
+	created, err := h.InviteUser(context.Background(), connect.NewRequest(&iamv1.InviteUserRequest{
+		Email: "rezagada@garcialorca.mx", DisplayName: "Rezagada",
+	}))
+	if err != nil {
+		t.Fatalf("invite: %v", err)
+	}
+	prov.sent = nil
+
+	if _, err := h.ResendInvitation(context.Background(), connect.NewRequest(&iamv1.ResendInvitationRequest{
+		UserId: created.Msg.GetUser().GetId(),
+	})); err != nil {
+		t.Fatalf("resend: %v", err)
+	}
+	if len(prov.sent) != 1 || prov.sent[0] != "rezagada@garcialorca.mx" {
+		t.Fatalf("sent = %v", prov.sent)
+	}
+}
+
+// TestResendInvitationForAnUnknownUserIsNotFound.
+func TestResendInvitationForAnUnknownUserIsNotFound(t *testing.T) {
+	prov := &recordingProvisioner{}
+	h := handlerWithProvisioner(t, &fakeUsers{}, &fakeRoles{known: "r1"}, prov)
+
+	_, err := h.ResendInvitation(context.Background(), connect.NewRequest(&iamv1.ResendInvitationRequest{UserId: "no-existe"}))
+	assertCode(t, err, connect.CodeNotFound)
+	if len(prov.sent) != 0 {
+		t.Fatal("nothing may be mailed for an unknown user")
+	}
+}

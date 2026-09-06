@@ -16,6 +16,7 @@ import (
 type AdminService interface {
 	CreateUser(ctx context.Context, email, displayName, tempPassword string, roleIDs []string) (client.User, error)
 	InviteUser(ctx context.Context, email, displayName string, roleIDs []string) (client.User, error)
+	ResendInvitation(ctx context.Context, userID string) error
 	GetUser(ctx context.Context, id string) (client.User, error)
 	ListUsers(ctx context.Context) ([]client.User, error)
 	SetUserStatus(ctx context.Context, userID, status string) (client.User, error)
@@ -233,6 +234,18 @@ func (h *AdminHandler) InviteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, toUserResponse(res))
+}
+
+// ResendInvitation handles POST /api/v1/users/{id}/invite: mail this user a
+// fresh link to set a password. No subset guard applies — no roles change, and
+// the link goes to the address the user row already carries, so the only person
+// who can use it is that user.
+func (h *AdminHandler) ResendInvitation(w http.ResponseWriter, r *http.Request) {
+	if err := h.svc.ResendInvitation(r.Context(), r.PathValue("id")); err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ListUsers handles GET /api/v1/users.

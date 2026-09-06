@@ -68,6 +68,10 @@ func (f *fakeAdmin) InviteUser(_ context.Context, _, _ string, _ []string) (clie
 	return client.User{}, errors.New("fakeAdmin: InviteUser not wired for this test")
 }
 
+func (f *fakeAdmin) ResendInvitation(_ context.Context, _ string) error {
+	return errors.New("fakeAdmin: ResendInvitation not wired for this test")
+}
+
 func (f *fakeAdmin) GetUser(_ context.Context, id string) (client.User, error) {
 	if f.getUserErr != nil {
 		return client.User{}, f.getUserErr

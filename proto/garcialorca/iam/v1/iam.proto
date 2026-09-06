@@ -81,9 +81,21 @@ service IamService {
   // account somebody else could later claim. It also means no administrator
   // ever knows another person's password.
   //
-  // Calling it again for an address that already exists RESENDS the link, which
-  // is the same operation as an administrator password reset.
+  // An address that already has an account is a CONFLICT, not a resend: the
+  // director is re-adding somebody who is already there and should be told.
+  // Use ResendInvitation for the person who never got their mail.
   rpc InviteUser(InviteUserRequest) returns (InviteUserResponse);
+
+  // ResendInvitation mails the account's owner a fresh link to set a password.
+  //
+  // It is BOTH halves of one need: the person whose invitation never arrived,
+  // and the person who forgot their password. Same link either way — for an
+  // account with no password it chooses the first, for one that has a password
+  // it replaces it. This is the administrator password reset iam never had.
+  //
+  // Keyed by user id, not by email, so it can only ever target somebody who is
+  // already a user here — it cannot be pointed at an arbitrary address.
+  rpc ResendInvitation(ResendInvitationRequest) returns (ResendInvitationResponse);
 
   // GetUser fetches a user by id, including its assigned role ids.
   rpc GetUser(GetUserRequest) returns (GetUserResponse);
@@ -312,6 +324,13 @@ message InviteUserRequest {
 message InviteUserResponse {
   User user = 1;
 }
+
+// ResendInvitationRequest names the existing user to mail a fresh link to.
+message ResendInvitationRequest {
+  string user_id = 1;
+}
+
+message ResendInvitationResponse {}
 
 // GetUserRequest fetches a user by id.
 message GetUserRequest {

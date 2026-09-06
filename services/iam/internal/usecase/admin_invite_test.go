@@ -40,7 +40,8 @@ become a way in for whoever really owns that address.
 // fakeProvisioner implements ports.IdentityProvisioner.
 type fakeProvisioner struct {
 	created []string // emails, in call order
-	invited string   // address the invitation went to
+	invited string   // address the LAST invitation went to
+	sent    []string // every address invited, in call order
 	err     error
 	sendErr error
 }
@@ -50,6 +51,7 @@ func (f *fakeProvisioner) SendInvitation(_ context.Context, email string) error 
 		return f.sendErr
 	}
 	f.invited = email
+	f.sent = append(f.sent, email)
 	return nil
 }
 
