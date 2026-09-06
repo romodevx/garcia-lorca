@@ -78,6 +78,10 @@ locals {
   # this on is therefore a deliberate, reversible act.
   iam_env = merge(local.common_env, {
     IDENTITY_PLATFORM_PROJECT = var.enable_identity_platform ? var.project_id : ""
+    # Sending invitations. Without it the sign-in path is unaffected and only
+    # inviting refuses — so an environment that provisions the provider but
+    # forgets this key degrades to "cannot add people", never to "cannot log in".
+    IDENTITY_PLATFORM_API_KEY = var.enable_identity_platform ? var.identity_platform_api_key : ""
   })
 
   gateway_env = merge(local.common_env, {

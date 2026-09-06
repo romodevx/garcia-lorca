@@ -27,6 +27,27 @@ variable "enable_identity_platform" {
   default     = false
 }
 
+variable "identity_platform_api_key" {
+  description = <<-EOT
+    The Identity Platform WEB api key, used by iam for exactly one thing: asking
+    the provider to MAIL an invitation or password-reset link. Nothing else in
+    the service needs it.
+
+    It is not a secret, and treating it as one would be cargo cult: this is the
+    same public key the browser bundle carries, Google documents it as public,
+    and the only thing it can do on this endpoint is send a link to an address
+    that already owns the account — an attacker holding it can mail somebody
+    their own reset link and nothing more. The service-account credentials, which
+    ARE sensitive, stay in Application Default Credentials.
+
+    Empty is a valid, deliberate state: sign-in keeps working, and an attempt to
+    invite refuses with a message naming the missing configuration instead of
+    creating an account nobody can ever reach.
+  EOT
+  type        = string
+  default     = ""
+}
+
 variable "identity_platform_authorized_domains" {
   description = <<-EOT
     Domains allowed to complete OAuth redirects and password-reset action links.
