@@ -2,14 +2,17 @@ import { act, fireEvent, screen } from "@testing-library/react-native";
 import IndexRoute from "./index";
 import { renderWithProviders } from "@/src/test/renderWithProviders";
 
-// login is mocked to succeed AND persist a token pair, so the post-login
-// notifications fetch (FIX 2b) has an access token to authenticate with.
+// signIn — the route's actual dependency since the provider path landed — is
+// mocked to succeed AND persist a token pair, so the post-login notifications
+// fetch (FIX 2b) has an access token to authenticate with. Mocking `login`
+// instead would not intercept anything: signIn imports it directly, not through
+// this barrel.
 jest.mock("@/src/api", () => {
   const actual = jest.requireActual("@/src/api");
   return {
     __esModule: true,
     ...actual,
-    login: jest.fn(async () => {
+    signIn: jest.fn(async () => {
       await actual.saveTokens({ accessToken: "a1", refreshToken: "r1" });
       return { mustChangePassword: false };
     }),
