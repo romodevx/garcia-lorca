@@ -123,11 +123,17 @@ describe("the shop's shell", () => {
     render(<UniformsScreen onBack={() => {}} permissions={ALL} />);
 
     // The G is both empty and below its minimum; the M is neither.
+    //
+    // Waits for the COUNT, not for the label. Waiting on "Bajo mínimo" and then
+    // reading the number synchronously is a race: the label ships with the card
+    // shell, while the number waits on the catalogue. Both land in the same tick
+    // on a laptop and do not on a slow builder — this test failed exactly once,
+    // in Cloud Build, at 636s for a suite that runs in 8s locally, and blocked a
+    // deploy of code that had nothing to do with uniforms.
     await waitFor(() => {
-      expect(screen.getByText("Bajo mínimo")).toBeInTheDocument();
+      const low = screen.getByText("Bajo mínimo").closest("button");
+      expect(within(low as HTMLElement).getByText("1")).toBeInTheDocument();
     });
-    const low = screen.getByText("Bajo mínimo").closest("button");
-    expect(within(low as HTMLElement).getByText("1")).toBeInTheDocument();
   });
 });
 
