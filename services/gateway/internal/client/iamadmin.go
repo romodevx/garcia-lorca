@@ -28,6 +28,25 @@ type Role struct {
 	Permissions []string
 }
 
+// InviteUser provisions an identity with NO password and has the provider mail
+// its owner the link that sets the first one. Preferred over CreateUser: nobody
+// but the account's owner ever knows the password, and a mistyped address never
+// becomes a working account.
+//
+// Calling it for an address that already exists resends the link, which is the
+// same operation as an administrator password reset.
+func (c *AuthClient) InviteUser(ctx context.Context, email, displayName string, roleIDs []string) (User, error) {
+	res, err := c.rpc.InviteUser(ctx, connect.NewRequest(&iamv1.InviteUserRequest{
+		Email:       email,
+		DisplayName: displayName,
+		RoleIds:     roleIDs,
+	}))
+	if err != nil {
+		return User{}, err
+	}
+	return toUser(res.Msg.GetUser()), nil
+}
+
 // CreateUser provisions a new identity with a temporary password (the user must
 // rotate it at first login) and assigns the given roles. Connect error codes
 // propagate (AlreadyExists on a duplicate email, InvalidArgument on a bad field)

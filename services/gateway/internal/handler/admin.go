@@ -15,6 +15,7 @@ import (
 // against the current one (from GetUser) and applies the delta.
 type AdminService interface {
 	CreateUser(ctx context.Context, email, displayName, tempPassword string, roleIDs []string) (client.User, error)
+	InviteUser(ctx context.Context, email, displayName string, roleIDs []string) (client.User, error)
 	GetUser(ctx context.Context, id string) (client.User, error)
 	ListUsers(ctx context.Context) ([]client.User, error)
 	SetUserStatus(ctx context.Context, userID, status string) (client.User, error)
@@ -171,6 +172,14 @@ type createUserRequest struct {
 	RoleIDs      []string `json:"roleIds"`
 }
 
+// inviteUserRequest carries no password field, and that is the design: the
+// account's owner chooses the first one through the emailed link.
+type inviteUserRequest struct {
+	Email       string   `json:"email"`
+	DisplayName string   `json:"displayName"`
+	RoleIDs     []string `json:"roleIds"`
+}
+
 // CreateUser handles POST /api/v1/users: provisions an identity with a temporary
 // password (the user must rotate it at first login) and the given roles.
 func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
@@ -190,6 +199,35 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := h.svc.CreateUser(r.Context(), req.Email, req.DisplayName, req.TempPassword, req.RoleIDs)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, toUserResponse(res))
+}
+
+// InviteUser handles POST /api/v1/users/invite: create the account with no
+// password and let the provider mail its owner the link that sets one.
+//
+// The subset guard matters MORE here than on CreateUser. An unchecked invite is
+// a direct route to owner: send the invitation for an owner-powered account to
+// an address you control, open the link, pick the password. So the caller may
+// only invite into roles whose permissions it already holds, and a refusal must
+// happen BEFORE iam is asked, so no account exists for a rejected request.
+func (h *AdminHandler) InviteUser(w http.ResponseWriter, r *http.Request) {
+	var req inviteUserRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if perm, ok, err := h.callerCanAssign(r.Context(), req.RoleIDs); err != nil {
+		writeConnectError(w, err)
+		return
+	} else if !ok {
+		forbidAssign(w, perm)
+		return
+	}
+	res, err := h.svc.InviteUser(r.Context(), req.Email, req.DisplayName, req.RoleIDs)
 	if err != nil {
 		writeConnectError(w, err)
 		return

@@ -43,6 +43,18 @@ export interface CreateUserInput {
   roleIds: string[];
 }
 
+/**
+ * Inviting somebody. NO password field, and that absence is the feature: the
+ * account is created without one and its owner chooses the first through a link
+ * the identity provider emails them. Nobody else ever knows it, and a mistyped
+ * address never becomes a working account — the mail simply never arrives.
+ */
+export interface InviteUserInput {
+  email: string;
+  displayName: string;
+  roleIds: string[];
+}
+
 export interface Role {
   id: string;
   name: string;
@@ -94,6 +106,13 @@ export function listUsers(baseURL: string): Promise<AdminUser[]> {
 
 export function createUser(baseURL: string, input: CreateUserInput): Promise<AdminUser> {
   return postJSON<AdminUser>(baseURL, "/users", input);
+}
+
+/** Invite: create the account with no password and have the provider mail its
+ * owner the link that sets one. Calling it again for the same address resends
+ * that link, which is also the administrator password reset. */
+export function inviteUser(baseURL: string, input: InviteUserInput): Promise<AdminUser> {
+  return postJSON<AdminUser>(baseURL, "/users/invite", input);
 }
 
 export function setUserStatus(baseURL: string, id: string, status: UserStatus): Promise<AdminUser> {

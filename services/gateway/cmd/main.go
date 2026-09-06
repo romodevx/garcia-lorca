@@ -610,6 +610,11 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 		return guard.Protect("iam", requireAuthChanged(middleware.RequirePermission(perm)(http.HandlerFunc(h))))
 	}
 	mux.Handle("POST /api/v1/users", iamAdmin("users:write", adminH.CreateUser))
+	// Invite is the preferred way to add somebody: no password is invented for
+	// them. It is users:write like create, and the caller-subset guard inside the
+	// handler is what stops an admin inviting an owner-powered account to an
+	// address it controls.
+	mux.Handle("POST /api/v1/users/invite", iamAdmin("users:write", adminH.InviteUser))
 	mux.Handle("GET /api/v1/users", iamAdmin("users:read", adminH.ListUsers))
 	mux.Handle("GET /api/v1/users/{id}", iamAdmin("users:read", adminH.GetUser))
 	mux.Handle("POST /api/v1/users/{id}/status", iamAdmin("users:write", adminH.SetUserStatus))

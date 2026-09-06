@@ -71,6 +71,20 @@ service IamService {
   // forced ChangePassword rotation. Optionally assigns roles at creation.
   rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
 
+  // InviteUser provisions a new principal WITHOUT anybody inventing a password
+  // for them: the account is created at the identity provider with no password,
+  // and the provider emails a link its owner uses to choose the first one.
+  //
+  // Prefer this over CreateUser. Using the link is what proves the person
+  // controls that mailbox, so a mistyped address fails loudly — the mail never
+  // arrives and the account is never usable — instead of becoming a working
+  // account somebody else could later claim. It also means no administrator
+  // ever knows another person's password.
+  //
+  // Calling it again for an address that already exists RESENDS the link, which
+  // is the same operation as an administrator password reset.
+  rpc InviteUser(InviteUserRequest) returns (InviteUserResponse);
+
   // GetUser fetches a user by id, including its assigned role ids.
   rpc GetUser(GetUserRequest) returns (GetUserResponse);
 
@@ -281,6 +295,21 @@ message CreateUserRequest {
 
 // CreateUserResponse returns the created user.
 message CreateUserResponse {
+  User user = 1;
+}
+
+// InviteUserRequest provisions a principal with no password. There is no
+// password field, and that is the point: the account's owner chooses the first
+// one through the emailed link. role_ids optionally assigns roles at creation.
+message InviteUserRequest {
+  string email = 1;
+  string display_name = 2;
+  repeated string role_ids = 3;
+}
+
+// InviteUserResponse returns the created user. must_change_password is false on
+// it — there is no temporary password to rotate.
+message InviteUserResponse {
   User user = 1;
 }
 

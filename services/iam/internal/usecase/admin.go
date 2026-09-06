@@ -61,13 +61,10 @@ func NewAdminService(
 // early — the link never arrives and the account is never usable — instead of
 // sitting there as a pre-verified account its real owner could later claim.
 //
-// WHAT THIS FUNCTION DOES NOT DO: send that link. Nothing here emails anybody.
-// This service has no mail sender (comms does push, not email) and the Admin SDK
-// generates action links without delivering them, so the send belongs to the
-// caller — the admin screen asks the provider to mail it, which also gives the
-// director a "resend invitation" button that doubles as the password reset iam
-// never had. Until that screen exists, an invited account is created and
-// unreachable, and this comment says so rather than implying otherwise.
+// The link IS sent, from here, by the provider itself. That send doubles as the
+// "resend invitation" button and as the administrator password reset iam never
+// had: for an account with no password the link chooses the first one, and for
+// one that has a password it resets it. Same request either way.
 //
 // Contrast CreateUser below, which takes a temporary password the director
 // types and hands over: somebody else knows your password, this service stores
