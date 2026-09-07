@@ -26,6 +26,7 @@ import { providerLoginEnabled } from "./auth/providerFlag";
 import { login as apiLogin, changePassword as apiChangePassword, logout as apiLogout, me as apiMe, refresh as apiRefresh, type MeResult } from "./auth/api";
 
 import { API_URL } from "./api-url";
+import { onSessionLost } from "./auth/authFetch";
 import { useSessionTimeout } from "./auth/useSessionTimeout";
 
 type View =
@@ -260,6 +261,25 @@ export function AppShell(): ReactElement {
   // The server enforces it too — a staff session that has sat unused for fifteen
   // minutes is refused, and the cookie expires with it. This is what makes it
   // immediate and explained, rather than a surprise on the next click.
+  // The server can get there first. The client timer and the server's refresh
+  // window are both fifteen minutes of inactivity, so at the boundary it is a
+  // race — and when the server wins, the next click comes back 401 while the
+  // app still believes it has a session. Every panel wraps its calls in a
+  // blanket catch, so that 401 surfaced as a domain error: the owner was told
+  // "No se pudo crear el grado. Revisa que no exista ya con ese orden" for a
+  // session that had simply ended, and reasonably asked what "orden" meant
+  // (dev, 2026-09-07).
+  //
+  // A refused refresh is unambiguous, so whoever notices first — the timer or
+  // the server — the person now reads the same sentence.
+  useEffect(() => onSessionLost(() => {
+    logout();
+    setPrincipal(undefined);
+    setPrincipalFailed(false);
+    setView({ screen: "login" });
+    setAuthError("Tu sesión terminó. Vuelve a entrar.");
+  }), []);
+
   useSessionTimeout({
     onExpire: () => {
       if (principal === undefined) {
