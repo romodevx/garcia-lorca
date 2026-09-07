@@ -152,6 +152,46 @@ jobs:
           check "$GW" /readyz
           [ "$fail" = "0" ] || exit 1
 
+      # Answers the one question a "Deploy dev failed" email cannot: is the
+      # demo up, and on WHICH commit? A failed build rolls nothing out, so dev
+      # keeps serving the previous revision — it is not broken, it is just not
+      # updated. That distinction was invisible until now: the email looked the
+      # same either way, and the honest reading of it was "the demo is down".
+      #
+      # always() on purpose: the summary is worth MORE on a failure than on a
+      # success, and this step must never be the thing that turns a green run
+      # red, hence the trailing `|| true`.
+      - name: Say what dev is actually running
+        if: always()
+        run: |
+          set -uo pipefail
+          {
+            echo "## Estado de dev"
+            echo
+            echo "Commit que se intentaba desplegar: \`${SHA:-desconocido}\`"
+            echo
+            echo "| servicio | imagen en ejecución | responde |"
+            echo "| --- | --- | --- |"
+            for svc in web gateway iam; do
+              img=$(gcloud run services describe "$svc" --project="$PROJECT_ID" --region="$REGION" \
+                      --format='value(spec.template.spec.containers[0].image)' 2>/dev/null | sed 's|.*:||')
+              url=$(gcloud run services describe "$svc" --project="$PROJECT_ID" --region="$REGION" \
+                      --format='value(status.url)' 2>/dev/null)
+              path=/login; [ "$svc" = "gateway" ] && path=/readyz; [ "$svc" = "iam" ] && path=""
+              code=""
+              [ -n "$path" ] && code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$url$path" || echo 000)
+              echo "| $svc | \`${img:0:8}\` | ${code:-—} |"
+            done
+            echo
+            if [ "${SHA:-}" != "" ] && gcloud run services describe web --project="$PROJECT_ID" --region="$REGION" \
+                 --format='value(spec.template.spec.containers[0].image)' 2>/dev/null | grep -q "$SHA"; then
+              echo "**dev está en este commit.** El despliegue llegó hasta el final."
+            else
+              echo "**dev NO está en este commit: sigue en la versión anterior, y sigue funcionando.**"
+              echo "Un build que falla no despliega nada, así que la demo no se rompe — sólo se queda atrás."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY" || true
+
       - name: Confirm nothing was left warm
         run: |
           # A deploy must never quietly raise min-instances. This is the cost
