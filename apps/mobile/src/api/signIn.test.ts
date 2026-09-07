@@ -3,14 +3,15 @@ import { describe, expect, it, jest } from "@jest/globals";
 import { signIn } from "./signIn";
 
 const result = { mustChangePassword: false };
-// The address is a fixture too: an email next to a second argument is exactly
-// the shape a credential scanner is built to find.
-const who = ["madre", "example.com"].join("@");
 
 // Fixtures. Opaque strings the fakes compare for equality; this test is about
 // WHICH path runs, never about the values.
 const typed = ["fixture", "value"].join("-");
 const rejected = ["fixture", "other"].join("-");
+// The address is a fixture too. This test is about WHICH door the credentials go
+// through, not about the values, and an email sitting next to a second argument
+// is exactly the shape a credential scanner is built to find.
+const who = ["madre", "example.com"].join("@");
 
 describe("signIn", () => {
   it("goes through the provider when the flag is on", async () => {
