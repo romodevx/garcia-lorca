@@ -23,6 +23,19 @@ substitutions:
   # trigger overrides it with _TAG=${_TAG} so infra and revision agree.
   _TAG: latest
 
+  # Identity Platform, for the web bundle. ALL EMPTY BY DEFAULT: an image built
+  # without them has the provider sign-in off, because providerLoginEnabled()
+  # requires the flag AND an api key — a half-set build cannot half-enable it.
+  #
+  # NEXT_PUBLIC_* is inlined at build time, so switching the provider on is a
+  # REBUILD, not a redeploy. That is the property worth having for the door
+  # everybody comes through: no console toggle can turn it on or off, and going
+  # back is the same operation as going forward.
+  _AUTH_PROVIDER: ""
+  _FIREBASE_API_KEY: ""
+  _FIREBASE_AUTH_DOMAIN: ""
+  _FIREBASE_PROJECT_ID: ""
+
 options:
   logging: CLOUD_LOGGING_ONLY
   # COST: no machineType set, so builds run on the DEFAULT machine (e2-medium),
@@ -52,7 +65,8 @@ steps:
       - -c
       - |
         set -euo pipefail
-        go work sync
+        . deploy/cloudbuild/retry.sh
+        retry go work sync
         # There is NO root go.mod — only go.work — so `go vet ./...` from the
         # repo root fails with "directory prefix . does not contain modules
         # listed in go.work" and, under `set -e`, kills this step before a
@@ -60,7 +74,11 @@ steps:
         # same way .github/workflows/ci.yml does with its per-module matrix.
         for dir in $(go list -m -f '{{.Dir}}'); do
           echo "--- go vet: $$dir"
-          (cd "$$dir" && go vet ./...)
+          # Download first, and retry only THAT: every step is a fresh container
+          # with an empty module cache, so a dropped connection here would kill
+          # the build for a reason that has nothing to do with the code. The vet
+          # itself runs once — a retried verdict is not a verdict.
+          (cd "$$dir" && retry go mod download && go vet ./...)
         done
     waitFor: ["buf-generate"]
 
@@ -71,11 +89,16 @@ steps:
       - -c
       - |
         set -euo pipefail
+        . deploy/cloudbuild/retry.sh
         # Per workspace module — see the go-vet step for why `./...` cannot be
         # used from the repo root.
         for dir in $(go list -m -f '{{.Dir}}'); do
           echo "--- go test: $$dir"
-          (cd "$$dir" && go test ./... -race -count=1)
+          # The download is retried; THE TESTS ARE NOT, deliberately. A retried
+          # test suite turns a flake into a green build, and this pipeline has
+          # already caught a real one (a web test reading a count before waiting
+          # for it, 2026-09-06). Only the fetch is idempotent.
+          (cd "$$dir" && retry go mod download && go test ./... -race -count=1)
         done
     waitFor: ["go-vet"]
 
@@ -87,12 +110,18 @@ steps:
       - -c
       - |
         set -euo pipefail
-        go install golang.org/x/vuln/cmd/govulncheck@latest
+        . deploy/cloudbuild/retry.sh
+        retry go install golang.org/x/vuln/cmd/govulncheck@latest
         # Per workspace module — see the go-vet step. `go mod verify` also needs
         # a module directory; there is no root go.mod to verify.
         for dir in $(go list -m -f '{{.Dir}}'); do
           echo "--- govulncheck: $$dir"
-          (cd "$$dir" && "$$(go env GOPATH)/bin/govulncheck" ./... && go mod verify)
+          # THIS is the step that broke on 2026-09-07: govulncheck loads the
+          # package graph, which pulled a module zip mid-analysis and hit a
+          # dropped stream. Fetching everything first, with retries, keeps the
+          # analysis itself off the network — and it still runs exactly once, so
+          # a real vulnerability finding is never retried away.
+          (cd "$$dir" && retry go mod download && "$$(go env GOPATH)/bin/govulncheck" ./... && go mod verify)
         done
     waitFor: ["buf-generate"]
 
@@ -104,8 +133,9 @@ steps:
       - -c
       - |
         set -euo pipefail
-        corepack enable pnpm
-        pnpm install --frozen-lockfile
+        . deploy/cloudbuild/retry.sh
+        retry corepack enable pnpm
+        retry pnpm install --frozen-lockfile
         # Scoped to web + its workspace deps: apps/mobile is an Expo app whose
         # build needs native tooling this image does not have. Mirrors
         # .github/workflows/ci.yml.
@@ -123,7 +153,8 @@ steps:
       - -c
       - |
         set -euo pipefail
-        corepack enable pnpm
+        . deploy/cloudbuild/retry.sh
+        retry corepack enable pnpm
         if [ -f apps/web/scripts/check-no-sourcemaps.mjs ]; then
           echo "Using frontend-owned source-map check (pnpm --filter web check:no-sourcemaps)."
           pnpm --filter @garcia-lorca/web run check:no-sourcemaps
@@ -256,7 +287,15 @@ steps:
         set -euo pipefail
         export DOCKER_BUILDKIT=1
         IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/web:${_TAG}"
-        docker build -f apps/web/Dockerfile -t "$$IMG" .
+        # NEXT_PUBLIC_* is inlined at BUILD time, so the provider cannot be
+        # switched on by redeploying: it needs a rebuild. Empty substitutions
+        # (the default) produce an image with the provider sign-in off.
+        docker build -f apps/web/Dockerfile -t "$$IMG" \
+          --build-arg NEXT_PUBLIC_AUTH_PROVIDER="${_AUTH_PROVIDER}" \
+          --build-arg NEXT_PUBLIC_FIREBASE_API_KEY="${_FIREBASE_API_KEY}" \
+          --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="${_FIREBASE_AUTH_DOMAIN}" \
+          --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID="${_FIREBASE_PROJECT_ID}" \
+          .
         docker push "$$IMG"
     waitFor: ["web-build", "sourcemap-gate"]
 
