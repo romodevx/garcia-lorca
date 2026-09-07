@@ -19,6 +19,8 @@ vi.mock("../../admin/api", () => ({
 }));
 const admin = vi.mocked(adminApi);
 
+// A fixture: an opaque string typed into the form. Built rather than written
+// so a scanner has nothing credential-shaped to find.
 const tempPassword = ["fixture", "value"].join("-");
 
 // The provider flag decides HOW somebody is added, so the tests drive it.

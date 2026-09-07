@@ -7,6 +7,8 @@ const result = { mustChangePassword: false };
 // the shape a credential scanner is built to find.
 const who = ["madre", "example.com"].join("@");
 
+// Fixtures. Opaque strings the fakes compare for equality; this test is about
+// WHICH path runs, never about the values.
 const typed = ["fixture", "value"].join("-");
 const rejected = ["fixture", "other"].join("-");
 
