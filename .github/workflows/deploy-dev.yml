@@ -46,6 +46,8 @@ env:
   PROJECT_ID: garcia-lorca
   REGION: us-central1
   AR_REPO: garcia-lorca
+  ENVIRONMENT: dev
+  SQL_INSTANCE: garcia-lorca-dev
 
 jobs:
   deploy:
@@ -102,6 +104,66 @@ jobs:
             --config=deploy/cloudbuild/cloudbuild.yaml \
             --substitutions=_TAG="$SHA",_DEPLOY=false,_AUTH_PROVIDER="$AUTH_PROVIDER",_FIREBASE_API_KEY="$FIREBASE_API_KEY",_FIREBASE_AUTH_DOMAIN="$FIREBASE_AUTH_DOMAIN",_FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID" \
             --service-account="projects/$PROJECT_ID/serviceAccounts/${{ vars.GCP_DEPLOY_SA }}"
+
+      # SCHEMA FIRST, THEN THE CODE THAT NEEDS IT.
+      #
+      # This step exists because it was missing. Applying migrations to dev was a
+      # manual script, so the deployed code ran ahead of the schema for NINE DAYS
+      # and eleven migrations, and the way anybody found out was a colegiatura
+      # refusing to save in front of the school (2026-09-07): the finance service
+      # answered 500 because `tuition_plans.schedule` did not exist. The calendar
+      # was 500ing too, and the outbox poller had been erroring every thirty
+      # seconds the whole time.
+      #
+      # Local could never drift like that — docker-compose makes every service
+      # wait on the migrator — so the gap only ever existed in the deployed
+      # environment, which is the one the school looks at.
+      #
+      # BEFORE the rollout, not after: new code needs the new schema, and the
+      # migrations are additive by convention so the running (old) revision keeps
+      # working across the gap. If this step fails the job stops here and NOTHING
+      # is rolled out — the demo stays on the previous version, which works.
+      - name: Apply the migrations (schema before code)
+        run: |
+          set -euo pipefail
+          . deploy/cloudbuild/retry.sh
+
+          # psql is what migrate-cloud.sh drives. Preinstalled on the current
+          # runner image, checked rather than assumed: an image change would
+          # otherwise fail here with "psql: not found" and read like a database
+          # problem.
+          command -v psql >/dev/null || retry sudo apt-get install -y --no-install-recommends postgresql-client
+
+          # Into the runner's own temp dir, not /usr/local/bin: writability there
+          # is a property of the current image, and this step must not be the
+          # thing that breaks when that changes.
+          PROXY="$RUNNER_TEMP/cloud-sql-proxy"
+          retry curl -sfL -o "$PROXY" \
+            https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.14.1/cloud-sql-proxy.linux.amd64
+          chmod +x "$PROXY"
+
+          # The proxy authenticates with the same short-lived token this job
+          # already holds; no key material anywhere.
+          "$PROXY" --port 5432 "$PROJECT_ID:$REGION:$SQL_INSTANCE" &
+          PROXY_PID=$!
+          trap 'kill $PROXY_PID 2>/dev/null || true' EXIT
+          ready=0
+          for _ in $(seq 1 30); do
+            if (echo > /dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then ready=1; break; fi
+            sleep 1
+          done
+          # Fail HERE with a sentence, rather than thirty seconds later with a
+          # connection refused that reads like the database is down.
+          [ "$ready" = "1" ] || { echo "::error::the Cloud SQL proxy never came up"; exit 1; }
+
+          # As the MIGRATOR role, not the app role: scripts/migrate-cloud.sh runs
+          # the role setup and the migrations under one identity on purpose (see
+          # its header — ALTER DEFAULT PRIVILEGES is per-grantor).
+          PW=$(retry gcloud secrets versions access latest \
+                 --secret="garcia-lorca-db-migrator-password-$ENVIRONMENT" --project="$PROJECT_ID")
+          ENCODED=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.stdin.read().strip(), safe=""))' <<< "$PW")
+          DATABASE_URL="postgresql://migrator:$ENCODED@127.0.0.1:5432/garcia_lorca?sslmode=disable" \
+            sh scripts/migrate-cloud.sh
 
       - name: Roll out the new revisions
         run: |

@@ -218,10 +218,37 @@ resource "google_project_iam_member" "build_roles" {
     # terraform state bucket, which is not something a CI build should hold.
     "roles/run.admin",              # the _DEPLOY=true step updates services
     "roles/iam.serviceAccountUser", # deploy a revision that RUNS AS the runtime SA
+    # Connect to Cloud SQL through the Auth Proxy, so the deploy can apply the
+    # migrations before it rolls out the images that need them. Project-scoped
+    # because that is the only scope cloudsql.client has; it grants the ability
+    # to OPEN a connection, not to read anything — the database still asks for a
+    # role and a password, which is the grant below and nothing wider.
+    "roles/cloudsql.client",
   ])
   project = var.project_id
   role    = each.value
   member  = "serviceAccount:${google_service_account.build.email}"
+}
+
+# ---- The migrator password, for the deploy's migration step -----------------
+#
+# SCOPED TO THIS ONE SECRET, deliberately, and for the same reason the storage
+# grants below are scoped to one bucket: roles/secretmanager.secretAccessor at
+# project level would hand a CI build the IAM signing key, the database
+# application password and the owner's temporary password. A build that can read
+# every secret is a build whose compromise is total.
+#
+# What this buys: the deploy can run scripts/migrate-cloud.sh as the migrator
+# role before rolling out images. Applying the schema was manual, so dev drifted
+# ELEVEN migrations behind the deployed code and nobody found out until a
+# colegiatura failed to save in front of the school (2026-09-07).
+resource "google_secret_manager_secret_iam_member" "build_reads_migrator_password" {
+  count = var.use_cloud_sql ? 1 : 0
+
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.db_migrator_password[0].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.build.email}"
 }
 
 # ---- Staging bucket for `gcloud builds submit` ------------------------------
