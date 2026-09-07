@@ -40,7 +40,19 @@ become a way in for whoever really owns that address.
 // fakeProvisioner implements ports.IdentityProvisioner.
 type fakeProvisioner struct {
 	created []string // emails, in call order
+	invited string   // address the LAST invitation went to
+	sent    []string // every address invited, in call order
 	err     error
+	sendErr error
+}
+
+func (f *fakeProvisioner) SendInvitation(_ context.Context, email string) error {
+	if f.sendErr != nil {
+		return f.sendErr
+	}
+	f.invited = email
+	f.sent = append(f.sent, email)
+	return nil
 }
 
 func (f *fakeProvisioner) CreateAccount(_ context.Context, email, _ string) error {
@@ -153,5 +165,41 @@ func TestInviteUserFailsClosedWithoutProvisioner(t *testing.T) {
 	}
 	if len(users.created) != 0 {
 		t.Errorf("a local row was written with no provider to back it: %+v", users.created)
+	}
+}
+
+func TestInviteUserSendsTheInvitation(t *testing.T) {
+	prov := &fakeProvisioner{}
+	svc, _ := inviteService(t, prov)
+
+	if _, err := svc.InviteUser(context.Background(), "ana@garcialorca.mx", "Ana", []string{"r1"}); err != nil {
+		t.Fatalf("InviteUser: %v", err)
+	}
+
+	// An account created and never announced is an account nobody can use, and
+	// the director has nothing to hand the person. Creating without sending was
+	// the state this code shipped in for one commit, with a doc comment claiming
+	// otherwise — the claim is now a test.
+	if prov.invited != "ana@garcialorca.mx" {
+		t.Fatalf("invitation sent to %q, want the invited address", prov.invited)
+	}
+}
+
+func TestInviteUserReportsAnUnsentInvitation(t *testing.T) {
+	prov := &fakeProvisioner{sendErr: errors.New("quota exhausted")}
+	svc, users := inviteService(t, prov)
+
+	_, err := svc.InviteUser(context.Background(), "ana@garcialorca.mx", "Ana", []string{"r1"})
+	if err == nil {
+		t.Fatal("want an error when the invitation cannot be sent, got nil")
+	}
+
+	// The row and the account STAY. Rolling them back would delete an account
+	// that is perfectly good and, worse, free the address for somebody else to
+	// register. What is missing is one email, and resending is exactly the
+	// operation that fixes it — so the caller is told, and the state it needs is
+	// still there.
+	if len(users.created) != 1 {
+		t.Errorf("the user row was rolled back over an unsent email: %+v", users.created)
 	}
 }

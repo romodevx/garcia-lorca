@@ -20,6 +20,15 @@ Expo (Expo Router) mobile surface for García Lorca (parent/student facing).
 - Only `EXPO_PUBLIC_*` env vars reach the bundle. No secrets/internal URLs.
   `EXPO_PUBLIC_API_URL` → gateway base URL.
 
+  Identity Platform sign-in (off unless BOTH are set):
+  `EXPO_PUBLIC_AUTH_PROVIDER=identity-platform` plus
+  `EXPO_PUBLIC_FIREBASE_API_KEY`, `EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN`,
+  `EXPO_PUBLIC_FIREBASE_PROJECT_ID`. With the flag off the app signs in through
+  `/api/v1/auth/mobile/login` exactly as before. None of these is a secret — a
+  Firebase web config is public by design and the gateway is the security
+  boundary — but they ARE build-time, so turning the provider on or off is a
+  rebuild, not a setting.
+
 ## Feature flags
 
 Same UX-only gating as web, via `@garcia-lorca/ui/flags` (`FlagsProvider` at the

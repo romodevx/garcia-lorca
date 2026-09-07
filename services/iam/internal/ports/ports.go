@@ -135,4 +135,14 @@ type IDTokenVerifier interface {
 // A duplicate address is a KindConflict error.
 type IdentityProvisioner interface {
 	CreateAccount(ctx context.Context, email, displayName string) error
+
+	// SendInvitation asks the provider to email this address the link that lets
+	// its owner set a first password. Using that link is what proves they read
+	// mail there, so it is also what makes the address verified.
+	//
+	// The same call is the password RESET the old iam never had: for an account
+	// that already exists, "resend the invitation" and "I forgot my password"
+	// are one operation. That is why it is separate from CreateAccount rather
+	// than folded into it.
+	SendInvitation(ctx context.Context, email string) error
 }

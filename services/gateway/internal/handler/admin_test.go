@@ -3,6 +3,7 @@ package handler_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -58,6 +59,17 @@ func (f *fakeAdmin) CreateUser(_ context.Context, email, displayName, tempPasswo
 		return client.User{}, f.err
 	}
 	return client.User{ID: "usr-1", Email: email, DisplayName: displayName, Status: "active", MustChangePassword: true, RoleIDs: roleIDs}, nil
+}
+
+// InviteUser is not exercised through this double — admin_invite_test.go uses
+// its own, which records the call. Failing loudly here means a test that reaches
+// the invite path by accident says so instead of quietly passing.
+func (f *fakeAdmin) InviteUser(_ context.Context, _, _ string, _ []string) (client.User, error) {
+	return client.User{}, errors.New("fakeAdmin: InviteUser not wired for this test")
+}
+
+func (f *fakeAdmin) ResendInvitation(_ context.Context, _ string) error {
+	return errors.New("fakeAdmin: ResendInvitation not wired for this test")
 }
 
 func (f *fakeAdmin) GetUser(_ context.Context, id string) (client.User, error) {

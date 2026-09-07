@@ -78,12 +78,29 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v3
 
       - name: Build and push the ten images
+        env:
+          # Identity Platform, for the WEB bundle only. NEXT_PUBLIC_* is inlined
+          # at build time, so which door the panel uses is decided HERE and
+          # nowhere else: turning the provider on or off is a rebuild, never a
+          # console switch, and going back is the same operation as going
+          # forward.
+          #
+          # They come from repository variables rather than literals so the
+          # cutover is a settings change plus a re-run, and so the (public,
+          # by-design) Firebase web key does not sit in the tree tripping the
+          # secret scanner. UNSET means empty means provider OFF — the default,
+          # and the safe one: providerLoginEnabled() needs BOTH the mode and the
+          # key before it turns anything on.
+          AUTH_PROVIDER: ${{ vars.AUTH_PROVIDER }}
+          FIREBASE_API_KEY: ${{ vars.FIREBASE_API_KEY }}
+          FIREBASE_AUTH_DOMAIN: ${{ vars.FIREBASE_AUTH_DOMAIN }}
+          FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
         run: |
           set -euo pipefail
           gcloud builds submit \
             --project="$PROJECT_ID" \
             --config=deploy/cloudbuild/cloudbuild.yaml \
-            --substitutions=_TAG="$SHA",_DEPLOY=false \
+            --substitutions=_TAG="$SHA",_DEPLOY=false,_AUTH_PROVIDER="$AUTH_PROVIDER",_FIREBASE_API_KEY="$FIREBASE_API_KEY",_FIREBASE_AUTH_DOMAIN="$FIREBASE_AUTH_DOMAIN",_FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID" \
             --service-account="projects/$PROJECT_ID/serviceAccounts/${{ vars.GCP_DEPLOY_SA }}"
 
       - name: Roll out the new revisions

@@ -61,13 +61,10 @@ func NewAdminService(
 // early — the link never arrives and the account is never usable — instead of
 // sitting there as a pre-verified account its real owner could later claim.
 //
-// WHAT THIS FUNCTION DOES NOT DO: send that link. Nothing here emails anybody.
-// This service has no mail sender (comms does push, not email) and the Admin SDK
-// generates action links without delivering them, so the send belongs to the
-// caller — the admin screen asks the provider to mail it, which also gives the
-// director a "resend invitation" button that doubles as the password reset iam
-// never had. Until that screen exists, an invited account is created and
-// unreachable, and this comment says so rather than implying otherwise.
+// The link IS sent, from here, by the provider itself. That send doubles as the
+// "resend invitation" button and as the administrator password reset iam never
+// had: for an account with no password the link chooses the first one, and for
+// one that has a password it resets it. Same request either way.
 //
 // Contrast CreateUser below, which takes a temporary password the director
 // types and hands over: somebody else knows your password, this service stores
@@ -113,7 +110,41 @@ func (s *AdminService) InviteUser(ctx context.Context, rawEmail, displayName str
 	if err := s.users.SetUserRoles(ctx, user.ID(), roleIDs); err != nil {
 		return domain.User{}, err
 	}
+
+	// Last, and NOT rolled back if it fails. An account created and never
+	// announced is one nobody can use and the director has nothing to hand the
+	// person — so the caller is told. But deleting the account over one
+	// undelivered email would throw away something perfectly good and, worse,
+	// free the address for somebody else to register. Resending is the fix, and
+	// resending needs the account to still be there.
+	if err := s.provisioner.SendInvitation(ctx, email.String()); err != nil {
+		return user, glerrors.Wrap(glerrors.KindInternal,
+			"the account was created but the invitation could not be sent; resend it", err)
+	}
 	return user, nil
+}
+
+// ResendInvitation mails an existing user a fresh link to set a password.
+//
+// One operation covering two situations that are the same thing underneath: the
+// person whose invitation never arrived, and the person who forgot their
+// password. For an account with no password the link chooses the first one; for
+// one that has a password it replaces it. This is the administrator password
+// reset iam never had, and one of the reasons the migration happened.
+//
+// Keyed by USER ID, not by email, and deliberately: it can only ever mail
+// somebody who is already a user here. An email-keyed version would be a way to
+// make this system send a password-reset link to any address at all.
+func (s *AdminService) ResendInvitation(ctx context.Context, userID string) error {
+	if s.provisioner == nil {
+		return glerrors.New(glerrors.KindInternal,
+			"no identity provider is configured; cannot send invitations")
+	}
+	user, err := s.users.FindByID(ctx, userID)
+	if err != nil {
+		return err // KindNotFound for an unknown id
+	}
+	return s.provisioner.SendInvitation(ctx, user.Email().String())
 }
 
 // CreateUser provisions a new principal from an admin-supplied temporary

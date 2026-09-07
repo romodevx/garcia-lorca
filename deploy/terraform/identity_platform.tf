@@ -27,6 +27,27 @@ variable "enable_identity_platform" {
   default     = false
 }
 
+variable "identity_platform_api_key" {
+  description = <<-EOT
+    The Identity Platform WEB api key, used by iam for exactly one thing: asking
+    the provider to MAIL an invitation or password-reset link. Nothing else in
+    the service needs it.
+
+    It is not a secret, and treating it as one would be cargo cult: this is the
+    same public key the browser bundle carries, Google documents it as public,
+    and the only thing it can do on this endpoint is send a link to an address
+    that already owns the account — an attacker holding it can mail somebody
+    their own reset link and nothing more. The service-account credentials, which
+    ARE sensitive, stay in Application Default Credentials.
+
+    Empty is a valid, deliberate state: sign-in keeps working, and an attempt to
+    invite refuses with a message naming the missing configuration instead of
+    creating an account nobody can ever reach.
+  EOT
+  type        = string
+  default     = ""
+}
+
 variable "identity_platform_authorized_domains" {
   description = <<-EOT
     Domains allowed to complete OAuth redirects and password-reset action links.
@@ -115,4 +136,43 @@ resource "google_identity_platform_config" "auth" {
 output "identity_platform_enabled" {
   description = "Whether Identity Platform is provisioned in this environment."
   value       = var.enable_identity_platform
+}
+
+# ---- What the runtime needs from the provider ------------------------------
+# A role with EXACTLY two permissions, and it is custom because no predefined
+# one fits:
+#
+#   firebaseauth.viewer  has users.get but not users.create — InviteUser fails.
+#   firebaseauth.editor  and firebaseauth.admin are the SAME 16 permissions, and
+#                        both include users.delete and configs.update. A running
+#                        service that can rewrite the provider config could
+#                        re-enable the self sign-up disabled above, which is a
+#                        security fix undoing itself from inside.
+#
+# So: get (the revocation check in VerifyIDTokenAndCheckRevoked) and create
+# (InviteUser). Nothing else.
+resource "google_project_iam_custom_role" "identity_runtime" {
+  count = var.enable_identity_platform ? 1 : 0
+
+  project     = var.project_id
+  role_id     = "garciaLorcaIdentityRuntime"
+  title       = "García Lorca — identity runtime"
+  description = "Verify ID tokens (revocation check) and create invited accounts. Nothing else."
+  permissions = [
+    "firebaseauth.users.get",
+    "firebaseauth.users.create",
+  ]
+}
+
+# NOTE, and it is a real one: every service shares google_service_account.runtime,
+# so this grant reaches students, finance and the rest, not only iam. The role is
+# two permissions wide, so the widening is small — but it IS a widening, and the
+# clean fix is a service account per service. That is its own task; recorded here
+# rather than left for somebody to discover.
+resource "google_project_iam_member" "runtime_identity" {
+  count = var.enable_identity_platform ? 1 : 0
+
+  project = var.project_id
+  role    = google_project_iam_custom_role.identity_runtime[0].id
+  member  = "serviceAccount:${google_service_account.runtime.email}"
 }

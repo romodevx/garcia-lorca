@@ -43,6 +43,18 @@ export interface CreateUserInput {
   roleIds: string[];
 }
 
+/**
+ * Inviting somebody. NO password field, and that absence is the feature: the
+ * account is created without one and its owner chooses the first through a link
+ * the identity provider emails them. Nobody else ever knows it, and a mistyped
+ * address never becomes a working account — the mail simply never arrives.
+ */
+export interface InviteUserInput {
+  email: string;
+  displayName: string;
+  roleIds: string[];
+}
+
 export interface Role {
   id: string;
   name: string;
@@ -94,6 +106,25 @@ export function listUsers(baseURL: string): Promise<AdminUser[]> {
 
 export function createUser(baseURL: string, input: CreateUserInput): Promise<AdminUser> {
   return postJSON<AdminUser>(baseURL, "/users", input);
+}
+
+/** Invite: create the account with no password and have the provider mail its
+ * owner the link that sets one. An address that already has an account is a
+ * conflict, not a resend — resendInvitation is that. */
+export function inviteUser(baseURL: string, input: InviteUserInput): Promise<AdminUser> {
+  return postJSON<AdminUser>(baseURL, "/users/invite", input);
+}
+
+/** Mail an existing user a fresh link to set a password: the invitation that
+ * never arrived, and the administrator password reset, are one operation. */
+export async function resendInvitation(baseURL: string, id: string): Promise<void> {
+  const res = await authFetch(url(baseURL, `${BASE_PATH}/users/${id}/invite`), {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw new Error(`admin resend invitation: HTTP ${res.status}`);
+  }
 }
 
 export function setUserStatus(baseURL: string, id: string, status: UserStatus): Promise<AdminUser> {

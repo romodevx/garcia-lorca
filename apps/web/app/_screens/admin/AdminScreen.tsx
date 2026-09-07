@@ -16,8 +16,12 @@ import {
   type AdminUser,
   type CreateRoleInput,
   type CreateUserInput,
+  type InviteUserInput,
+  inviteUser,
+  resendInvitation,
   type Role,
 } from "../../admin/api";
+import { providerLoginEnabled } from "../../auth/providerFlag";
 import { PERMISSION_CATALOG } from "./catalog";
 
 import { API_URL } from "../../api-url";
@@ -76,6 +80,10 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
   const [tab, setTab] = useState<"users" | "roles">("users");
   const [q, setQ] = useState("");
   const [addUser, setAddUser] = useState(false);
+  // With the identity provider on, adding somebody is an INVITATION: no
+  // administrator invents a password, and the account only becomes usable once
+  // its owner opens the link — which is also the proof they read mail there.
+  const invites = providerLoginEnabled();
   const [addRole, setAddRole] = useState(false);
   const [editRoles, setEditRoles] = useState<AdminUser | null>(null);
   const [editPerms, setEditPerms] = useState<Role | null>(null);
@@ -97,8 +105,10 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
   const rolesF = roles.filter((r) => needle === "" || r.name.toLowerCase().includes(needle));
 
   const onCreateUser = async (input: CreateUserInput): Promise<void> => { await createUser(API_URL, input); setAddUser(false); reload(); say(`Usuario creado · ${input.displayName}`); };
+  const onInviteUser = async (input: InviteUserInput): Promise<void> => { await inviteUser(API_URL, input); setAddUser(false); reload(); say(`Invitación enviada · ${input.email}`); };
   const onCreateRole = async (input: CreateRoleInput): Promise<void> => { await createRole(API_URL, input); setAddRole(false); reload(); say(`Rol creado · ${input.name}`); };
   const onSuspend = async (u: AdminUser): Promise<void> => { await setUserStatus(API_URL, u.id, u.status === "active" ? "suspended" : "active"); reload(); say(u.status === "active" ? "Usuario suspendido" : "Usuario reactivado"); };
+  const onResend = async (u: AdminUser): Promise<void> => { try { await resendInvitation(API_URL, u.id); say(`Enlace enviado · ${u.email}`); } catch { say("No se pudo enviar el enlace"); } };
   const onSaveUserRoles = async (u: AdminUser, roleIds: string[]): Promise<void> => { try { await setUserRoles(API_URL, u.id, roleIds); setEditRoles(null); reload(); say("Roles actualizados"); } catch { say("No se pudieron guardar los roles"); } };
   const onSavePerms = async (r: Role, permissions: string[]): Promise<void> => { try { await setRolePermissions(API_URL, r.id, permissions); setEditPerms(null); reload(); say("Permisos actualizados"); } catch { say("No se pudieron guardar los permisos"); } };
 
@@ -160,6 +170,7 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
                 <div><StatusPill active={u.status === "active"} /></div>
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                   <button onClick={() => setEditRoles(u)} style={{ height: 38, padding: "0 14px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, color: "var(--forest)", background: "var(--surface-3)", border: "1px solid var(--border)", cursor: "pointer" }}>Roles</button>
+                  {invites && <button onClick={() => void onResend(u)} style={{ height: 38, padding: "0 14px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, color: "var(--forest)", background: "var(--surface-3)", border: "1px solid var(--border)", cursor: "pointer" }}>Reenviar acceso</button>}
                   <button onClick={() => void onSuspend(u)} style={{ height: 38, padding: "0 14px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, color: u.status === "active" ? "var(--bad-fg)" : "var(--forest)", background: "var(--surface-3)", border: "1px solid var(--border)", cursor: "pointer" }}>{u.status === "active" ? "Suspender" : "Reactivar"}</button>
                 </div>
               </div>
@@ -178,7 +189,9 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
         )}
       </div>
 
-      {addUser && <CreateUserDrawer roles={roles} onClose={() => setAddUser(false)} onSave={onCreateUser} />}
+      {addUser && (invites
+        ? <InviteUserDrawer roles={roles} onClose={() => setAddUser(false)} onSave={onInviteUser} />
+        : <CreateUserDrawer roles={roles} onClose={() => setAddUser(false)} onSave={onCreateUser} />)}
       {addRole && <CreateRoleDrawer onClose={() => setAddRole(false)} onSave={onCreateRole} />}
       {editRoles !== null && <EditRolesDrawer user={editRoles} roles={roles} onClose={() => setEditRoles(null)} onSave={(ids) => onSaveUserRoles(editRoles, ids)} />}
       {editPerms !== null && <EditPermsDrawer role={editPerms} onClose={() => setEditPerms(null)} onSave={(ps) => onSavePerms(editPerms, ps)} />}
@@ -206,6 +219,46 @@ function CreateUserDrawer({ roles, onClose, onSave }: { roles: readonly Role[]; 
         <div><span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Roles</span>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>{roles.map((r) => <button key={r.id} onClick={() => toggle(r.id)} style={chip(sel.includes(r.id), "lime")}>{r.name}</button>)}</div>
         </div>
+        {err !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{err}</p>}
+      </>
+    </Drawer>
+  );
+}
+
+/**
+ * The invitation drawer. Same fields as CreateUserDrawer MINUS the password —
+ * that absence is the whole change, so it is stated rather than left to be
+ * noticed: the person chooses their own first password from the emailed link,
+ * and nobody at the school ever knows it.
+ */
+function InviteUserDrawer({ roles, onClose, onSave }: { roles: readonly Role[]; onClose: () => void; onSave: (i: InviteUserInput) => Promise<void> }): ReactElement {
+  const [email, setEmail] = useState("");
+  const [displayName, setName] = useState("");
+  const [sel, setSel] = useState<string[]>([]);
+  const [err, setErr] = useState<string | undefined>(undefined);
+  const [sending, setSending] = useState(false);
+  const ready = email.includes("@") && displayName.trim().length > 1 && !sending;
+  const toggle = (id: string): void => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  const submit = async (): Promise<void> => {
+    setSending(true);
+    try { await onSave({ email: email.trim(), displayName: displayName.trim(), roleIds: sel }); }
+    // The account may well exist and only the mail have failed, so the message
+    // says what to do next instead of implying nothing happened.
+    catch { setErr("No se pudo enviar la invitación (¿correo duplicado?). Verifica el correo y vuelve a intentar."); }
+    finally { setSending(false); }
+  };
+  return (
+    <Drawer title="Invitar usuario" subtitle="Recibirá un correo para elegir su contraseña" icon="user" onClose={onClose}
+      footer={<><Btn kind="ghost" onClick={onClose}>Cancelar</Btn><div style={{ flex: 1 }} /><Btn icon="check" onClick={() => void submit()} style={{ opacity: ready ? 1 : 0.45, pointerEvents: ready ? "auto" : "none", height: 52 }}>{sending ? "Enviando…" : "Enviar invitación"}</Btn></>}>
+      <>
+        {labelField("Correo", <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nombre@garcialorca.edu.mx" style={fi} />, true)}
+        {labelField("Nombre para mostrar", <input value={displayName} onChange={(e) => setName(e.target.value)} placeholder="Nombre del usuario" style={fi} />, true)}
+        <div><span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Roles</span>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>{roles.map((r) => <button key={r.id} onClick={() => toggle(r.id)} style={chip(sel.includes(r.id), "lime")}>{r.name}</button>)}</div>
+        </div>
+        <p style={{ fontSize: 13.5, color: "var(--text-muted)", margin: 0, lineHeight: 1.5 }}>
+          No se define ninguna contraseña aquí: la persona elegirá la suya desde el enlace que reciba. Si no le llega, usa «Reenviar acceso» en su renglón de la tabla.
+        </p>
         {err !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{err}</p>}
       </>
     </Drawer>

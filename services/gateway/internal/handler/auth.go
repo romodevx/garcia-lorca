@@ -291,6 +291,41 @@ func (h *AuthHandler) MobileLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// MobileGoogleLogin handles POST /api/v1/auth/mobile/google: the family app
+// authenticates against the identity provider and exchanges the resulting ID
+// token for OUR token pair, returned in the BODY (a React Native client has no
+// cookie jar, so the app owns storage — exactly as MobileLogin already works).
+//
+// Routing it through us is the point. Letting the app carry the provider's own
+// token would hand session lifetime to the provider and quietly undo our TTLs,
+// our rotation, our revocation and the session-generation guard the app already
+// relies on. The provider establishes WHO; the session stays ours.
+func (h *AuthHandler) MobileGoogleLogin(w http.ResponseWriter, r *http.Request) {
+	var req googleLoginRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.IDToken) == "" {
+		http.Error(w, "id token is required", http.StatusBadRequest)
+		return
+	}
+	// SessionFamily because this is the family app's route: a parent's own
+	// phone, so the session lasts a day. The kind belongs to the route, never
+	// to the body — otherwise a staff sign-in could ask for the longer life.
+	res, err := h.auth.LoginWithIDToken(r.Context(), req.IDToken, client.SessionFamily)
+	if err != nil {
+		http.Error(w, http.StatusText(httpStatusFor(err)), httpStatusFor(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, mobileLoginResponse{
+		AccessToken:        res.AccessToken,
+		RefreshToken:       res.RefreshToken,
+		ExpiresIn:          res.ExpiresIn,
+		MustChangePassword: res.MustChangePassword,
+	})
+}
+
 // MobileRefresh handles POST /api/v1/auth/mobile/refresh. Unlike the web Refresh
 // it reads the refresh token from the BODY (never a cookie) and returns the
 // rotated pair in the body, setting no cookies. A missing token is 401, exactly

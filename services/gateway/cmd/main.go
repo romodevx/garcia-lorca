@@ -228,6 +228,11 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// dodge is not a budget.
 	mux.Handle("POST /api/v1/auth/google", loginLimiter.Middleware(http.HandlerFunc(authH.GoogleLogin)))
 	mux.Handle("POST /api/v1/auth/mobile/login", loginLimiter.Middleware(http.HandlerFunc(authH.MobileLogin)))
+	// The provider door for the family app. Same limiter as every other login
+	// route: it is cheaper for us (no bcrypt) but it is still a door to a
+	// session, and a brute-force budget a second door walks around is not a
+	// budget.
+	mux.Handle("POST /api/v1/auth/mobile/google", loginLimiter.Middleware(http.HandlerFunc(authH.MobileGoogleLogin)))
 	mux.HandleFunc("POST /api/v1/auth/mobile/refresh", authH.MobileRefresh)
 	mux.Handle("GET /api/v1/me", requireAuthChanged(http.HandlerFunc(authH.Me)))
 	// change-password is the one deliberate exception: it stays reachable while
@@ -610,6 +615,12 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 		return guard.Protect("iam", requireAuthChanged(middleware.RequirePermission(perm)(http.HandlerFunc(h))))
 	}
 	mux.Handle("POST /api/v1/users", iamAdmin("users:write", adminH.CreateUser))
+	// Invite is the preferred way to add somebody: no password is invented for
+	// them. It is users:write like create, and the caller-subset guard inside the
+	// handler is what stops an admin inviting an owner-powered account to an
+	// address it controls.
+	mux.Handle("POST /api/v1/users/invite", iamAdmin("users:write", adminH.InviteUser))
+	mux.Handle("POST /api/v1/users/{id}/invite", iamAdmin("users:write", adminH.ResendInvitation))
 	mux.Handle("GET /api/v1/users", iamAdmin("users:read", adminH.ListUsers))
 	mux.Handle("GET /api/v1/users/{id}", iamAdmin("users:read", adminH.GetUser))
 	mux.Handle("POST /api/v1/users/{id}/status", iamAdmin("users:write", adminH.SetUserStatus))

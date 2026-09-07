@@ -1,6 +1,6 @@
 module github.com/garcia-lorca/services/billing
 
-go 1.24
+go 1.25.0
 
 require github.com/garcia-lorca/pkg v0.0.0
 

@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createRole,
   createUser,
+  inviteUser,
+  resendInvitation,
   linkTeacherUser,
   listRoles,
   listUsers,
@@ -68,6 +70,60 @@ describe("createUser", () => {
     await expect(
       createUser(BASE, { email: "x@example.com", displayName: "X", tempPassword: "init-pw-123", roleIds: [] }),
     ).rejects.toThrow();
+  });
+});
+
+describe("inviteUser", () => {
+  it("POSTs to /users/invite with no password in the body", async () => {
+    const invited = { ...sampleUser, mustChangePassword: false };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(invited, 201));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await inviteUser(BASE, {
+      email: "director@example.com",
+      displayName: "Directora",
+      roleIds: ["r1"],
+    });
+
+    expect(res).toEqual(invited);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/users/invite");
+    expect(init.method).toBe("POST");
+    expect(init.credentials).toBe("include");
+    // No password field of any spelling. The account's owner picks their own
+    // through the emailed link; anything here would put a credential back into
+    // a flow whose entire purpose is not having one.
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(body).toEqual({ email: "director@example.com", displayName: "Directora", roleIds: ["r1"] });
+    for (const key of ["password", "tempPassword", "temp_password"]) {
+      expect(body).not.toHaveProperty(key);
+    }
+  });
+
+  it("throws on a non-ok response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 409 })));
+    await expect(inviteUser(BASE, { email: "x@example.com", displayName: "X", roleIds: [] })).rejects.toThrow();
+  });
+});
+
+describe("resendInvitation", () => {
+  it("POSTs to the user's own invite path, with no body of its own", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await resendInvitation(BASE, "usr-7");
+
+    const [url, init] = lastCall(fetchMock);
+    // Keyed by the user id in the PATH. An email-keyed resend would be a way to
+    // make this system mail a password link to any address at all.
+    expect(url).toBe("http://gw/api/v1/users/usr-7/invite");
+    expect(init.method).toBe("POST");
+    expect(init.credentials).toBe("include");
+  });
+
+  it("throws on a non-ok response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 404 })));
+    await expect(resendInvitation(BASE, "nope")).rejects.toThrow();
   });
 });
 

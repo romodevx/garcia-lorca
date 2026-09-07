@@ -107,6 +107,12 @@ billing_schedule_enabled = false
 # guardians) stays inside that by two orders of magnitude.
 enable_identity_platform = true
 
+# The WEB api key (Firebase console → project settings, or
+# `gcloud services api-keys list`). Only used to MAIL invitation and
+# password-reset links; it is the same public key the browser carries.
+# Leave empty and sign-in still works — only inviting refuses.
+identity_platform_api_key = ""
+
 # Domains allowed to complete OAuth redirects and password-reset action links.
 # No scheme, no trailing slash. Passed explicitly rather than derived from the
 # web module, so this config does not depend on the Cloud Run deploy.

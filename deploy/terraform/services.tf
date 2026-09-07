@@ -71,6 +71,19 @@ locals {
   # module-visibility list the gateway enforces (default-deny); each *_BASE_URL
   # points at the internal service's Cloud Run URL. Mirrors docker-compose.yml
   # and the env the gateway reads (services/gateway/cmd/main.go).
+  # iam is the only service that talks to the identity provider, so the setting
+  # lives here and not in common_env. EMPTY unless the environment provisions
+  # Identity Platform: with no project named, iam's verifier stays nil, the
+  # provider sign-in path refuses, and the password login is untouched. Turning
+  # this on is therefore a deliberate, reversible act.
+  iam_env = merge(local.common_env, {
+    IDENTITY_PLATFORM_PROJECT = var.enable_identity_platform ? var.project_id : ""
+    # Sending invitations. Without it the sign-in path is unaffected and only
+    # inviting refuses — so an environment that provisions the provider but
+    # forgets this key degrades to "cannot add people", never to "cannot log in".
+    IDENTITY_PLATFORM_API_KEY = var.enable_identity_platform ? var.identity_platform_api_key : ""
+  })
+
   gateway_env = merge(local.common_env, {
     # The authoritative module-visibility list (default-deny). `teachers` and
     # `uniforms` were missing: teachers guards /api/v1/teachers +teaching
@@ -226,7 +239,7 @@ module "iam" {
   ingress = "INGRESS_TRAFFIC_ALL"
 
   cloudsql_instances = local.cloudsql_instances
-  env                = local.common_env
+  env                = local.iam_env
   secret_env         = local.iam_secret_env
 
   depends_on = [google_project_service.apis]

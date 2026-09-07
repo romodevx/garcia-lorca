@@ -28,6 +28,33 @@ type Role struct {
 	Permissions []string
 }
 
+// InviteUser provisions an identity with NO password and has the provider mail
+// its owner the link that sets the first one. Preferred over CreateUser: nobody
+// but the account's owner ever knows the password, and a mistyped address never
+// becomes a working account.
+//
+// An address that already has an account is a conflict, not a resend — see
+// ResendInvitation for that.
+func (c *AuthClient) InviteUser(ctx context.Context, email, displayName string, roleIDs []string) (User, error) {
+	res, err := c.rpc.InviteUser(ctx, connect.NewRequest(&iamv1.InviteUserRequest{
+		Email:       email,
+		DisplayName: displayName,
+		RoleIds:     roleIDs,
+	}))
+	if err != nil {
+		return User{}, err
+	}
+	return toUser(res.Msg.GetUser()), nil
+}
+
+// ResendInvitation mails an existing user a fresh link to set a password: the
+// invitation that never arrived, and the administrator password reset, are the
+// same operation.
+func (c *AuthClient) ResendInvitation(ctx context.Context, userID string) error {
+	_, err := c.rpc.ResendInvitation(ctx, connect.NewRequest(&iamv1.ResendInvitationRequest{UserId: userID}))
+	return err
+}
+
 // CreateUser provisions a new identity with a temporary password (the user must
 // rotate it at first login) and assigns the given roles. Connect error codes
 // propagate (AlreadyExists on a duplicate email, InvalidArgument on a bad field)

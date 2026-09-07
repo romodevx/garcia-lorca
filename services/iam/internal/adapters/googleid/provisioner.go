@@ -17,12 +17,25 @@ type accountCreator interface {
 
 // Provisioner implements ports.IdentityProvisioner over Identity Platform.
 type Provisioner struct {
-	sdk accountCreator
+	sdk     accountCreator
+	inviter *Inviter
+}
+
+// SendInvitation delegates to the Inviter: creating the account and announcing
+// it are one port because they are one job, but they reach the provider through
+// two different doors — the Admin SDK creates, the public toolkit endpoint
+// sends.
+func (p *Provisioner) SendInvitation(ctx context.Context, email string) error {
+	if p.inviter == nil {
+		return glerrors.New(glerrors.KindInternal,
+			"no identity provider api key configured; cannot send invitations")
+	}
+	return p.inviter.SendInvitation(ctx, email)
 }
 
 // NewProvisioner wraps an SDK client.
-func NewProvisioner(sdk accountCreator) *Provisioner {
-	return &Provisioner{sdk: sdk}
+func NewProvisioner(sdk accountCreator, inviter *Inviter) *Provisioner {
+	return &Provisioner{sdk: sdk, inviter: inviter}
 }
 
 // CreateAccount creates the account WITHOUT a password and WITHOUT marking the
