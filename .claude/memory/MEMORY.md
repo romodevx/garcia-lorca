@@ -11,3 +11,4 @@ One line per memory file. Load this first; open the file when relevant.
 - [command-palette](command-palette.md) — Cmd+K omnidirectional search (navigate + execute, min clicks); the per-module registration CONTRACT every module must feed.
 - [ux-minimum-clicks](ux-minimum-clicks.md) — UX north star: everything easy, fewest clicks, command-palette-first; an acceptance criterion, not decoration.
 - [module-docs-deactivated](module-docs-deactivated.md) — Documentos (M09/`module_docs`) desactivado del panel (web+mobile) por decisión del colegio; NO borrado, reactivable quitando `hidden`.
+- [Corte a Identity Platform (2026-09)](identity-platform-cutover-2026-09.md) — dev entra por el proveedor; los 3 interruptores, y el rol a medida que `-target=module.iam` no crea (401 mudo).
