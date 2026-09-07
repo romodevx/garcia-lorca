@@ -87,6 +87,22 @@ func (u User) CanAuthenticate() bool { return u.status == StatusActive }
 // password and must rotate it before doing anything else.
 func (u User) MustChangePassword() bool { return u.mustChangePassword }
 
+// WithoutPendingRotation returns the user with the forced-rotation flag cleared.
+//
+// The flag means "this account holds a temporary password somebody else chose,
+// and the only allowed action is replacing it". When an external provider owns
+// the credential that sentence is not true of anything: there is no password of
+// ours to replace. Carrying the flag into a provider session makes the gateway
+// refuse every route while the login itself looks perfectly fine.
+//
+// A value method returning a copy, not a mutation: the row in the database is
+// untouched, so an account can still fall back to the password path with its
+// rotation still pending if the provider is ever switched off.
+func (u User) WithoutPendingRotation() User {
+	u.mustChangePassword = false
+	return u
+}
+
 // PasswordChangedAt returns the instant the credential was last rotated (zero if
 // unknown — imposes no refresh-token revocation floor).
 func (u User) PasswordChangedAt() time.Time { return u.passwordChangedAt }

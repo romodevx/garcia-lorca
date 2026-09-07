@@ -184,6 +184,9 @@ func (s *AuthService) AuthenticateWithIDToken(ctx context.Context, idToken strin
 	// Where the provider holds the credential there is no password of ours to
 	// change, so false is the honest answer. Password lifecycle belongs to the
 	// provider's own reset flow.
+	//
+	// It comes off the TOKEN too, and that is the half with teeth — see issueFor,
+	// which does it for every token this service mints, refreshes included.
 	return s.issueFor(ctx, user, kind)
 }
 
@@ -300,6 +303,28 @@ func (s *AuthService) RevokeRole(ctx context.Context, userID, roleID string) err
 
 // issueFor mints a fresh access + refresh pair for an authenticated user.
 func (s *AuthService) issueFor(ctx context.Context, user domain.User, kind domain.SessionKind) (AuthResult, error) {
+	// WHERE THE PROVIDER OWNS CREDENTIALS, NO TOKEN CARRIES THE ROTATION FLAG.
+	//
+	// It lives here rather than at each call site because tokens are minted from
+	// three places — password login, provider login, and REFRESH — and clearing
+	// it at login alone left the worst of the three unfixed: a refresh re-reads
+	// the row and re-stamps the claim, so a session that had been working went
+	// inert fifteen minutes in, with no error and nothing anybody did.
+	//
+	// The flag means "this account holds a temporary password somebody else
+	// chose, and the only allowed action is replacing it". With a provider
+	// configured that is not true of anything: ChangePassword already refuses,
+	// so an account carrying the flag would be told to rotate a password it
+	// cannot rotate, while the gateway's rotation gate refuses every route in the
+	// meantime. Found in the deployed demo (2026-09-07): login fine, panel empty,
+	// no error anywhere, because the web asks /me for its permissions and
+	// swallows the 403 on purpose.
+	//
+	// The ROW is untouched, so switching the provider off restores the old
+	// behaviour exactly, pending rotations included.
+	if s.idTokens != nil {
+		user = user.WithoutPendingRotation()
+	}
 	claims := domain.NewAccessClaims(user, s.now(), s.accessTTL)
 	access, err := s.issuer.IssueAccessToken(ctx, claims)
 	if err != nil {

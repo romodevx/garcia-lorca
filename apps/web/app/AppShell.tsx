@@ -93,6 +93,27 @@ export function AppShell(): ReactElement {
   const { theme, toggle } = useTheme();
   const [view, setView] = useState<View>({ screen: "login" });
   const [principal, setPrincipal] = useState<MeResult | undefined>(undefined);
+  // Distinct from "principal is undefined": that means the answer is still
+  // coming, and the dashboard shows a skeleton for it. A FAILURE shown as a
+  // skeleton shimmers forever — which is exactly what a broken session looked
+  // like in the demo (dev, 2026-09-07) until somebody reported "no veo ningún
+  // módulo".
+  const [principalFailed, setPrincipalFailed] = useState(false);
+
+  // Loading the caller's permissions, and recording whether it worked. Shared by
+  // the login flow and the retry button so both go through the same path.
+  const loadPrincipal = async (): Promise<void> => {
+    try {
+      setPrincipal(await apiMe(API_URL));
+      setPrincipalFailed(false);
+    } catch {
+      // The session may be perfectly valid and this call still fail — the
+      // gateway refuses every route while a rotation is pending, for one. The
+      // chrome falls back to its static identity, but the dashboard must SAY it
+      // could not resolve the permissions rather than pretend to be loading.
+      setPrincipalFailed(true);
+    }
+  };
   const [authError, setAuthError] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -180,13 +201,10 @@ export function AppShell(): ReactElement {
         return;
       }
       // Login only returns session metadata; fetch the principal so the chrome
-      // shows the real identity. A failure here is non-fatal — the static
-      // fallback chrome renders and the dashboard still opens.
-      try {
-        setPrincipal(await apiMe(API_URL));
-      } catch {
-        // Keep the fallback chrome; the session is still valid.
-      }
+      // shows the real identity and the dashboard knows what to show. A failure
+      // is non-fatal for the chrome but NOT invisible: loadPrincipal records it
+      // and the dashboard says so.
+      await loadPrincipal();
       setView({ screen: "dashboard" });
     } catch {
       setAuthError("Correo o contraseña incorrectos.");
@@ -328,7 +346,15 @@ export function AppShell(): ReactElement {
     <div className="app-root" style={{ minHeight: "100vh" }}>
       <TopBar user={user} theme={theme} onToggle={toggle} onHome={home} onLogout={logout} onOpenPalette={() => setPaletteOpen(true)} />
       <CommandPaletteHost open={paletteOpen} onOpenChange={setPaletteOpen} onNavigate={navigate} permissions={principal?.permissions} />
-      {view.screen === "dashboard" && <Dashboard user={user} onOpen={open} permissions={principal?.permissions} />}
+      {view.screen === "dashboard" && (
+        <Dashboard
+          user={user}
+          onOpen={open}
+          permissions={principal?.permissions}
+          permissionsFailed={principalFailed}
+          onRetryPermissions={() => void loadPrincipal()}
+        />
+      )}
       {view.screen === "finance" &&
         (financeEnabled ? (
           <FinanceScreen onBack={home} />

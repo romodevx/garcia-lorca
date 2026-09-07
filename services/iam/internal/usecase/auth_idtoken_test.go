@@ -71,6 +71,34 @@ func idTokenService(t *testing.T, status domain.Status) (*usecase.AuthService, *
 	return svc, verifier
 }
 
+// idTokenServiceWithRotationPending builds the same service over a user who
+// still carries must_change_password=true — an account seeded with a temporary
+// password before the provider owned credentials. It returns the token issuer so
+// a test can inspect the CLAIMS, which is where the flag did its damage.
+func idTokenServiceWithRotationPending(t *testing.T) (*usecase.AuthService, *fakeTokens) {
+	t.Helper()
+	email, _ := domain.NewEmail("ana@garcialorca.mx")
+	role, _ := domain.NewRole("r1", "Docente", []string{"students:read"})
+	user, _ := domain.NewUser("u1", testTenant, email, "Ana", domain.StatusActive, true, []domain.Role{role})
+	users := &fakeUsers{
+		byEmail: map[domain.Email]struct {
+			user domain.User
+			hash string
+		}{email: {user: user, hash: "h:secret"}},
+		byID: map[string]domain.User{"u1": user},
+	}
+	verifier := &fakeIDTokens{verified: map[string]ports.VerifiedIdentity{
+		"google:ana": {Email: "ana@garcialorca.mx", Subject: "google-uid-1"},
+	}}
+	tokens := &fakeTokens{}
+	now := func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) }
+	svc := usecase.NewAuthService(
+		users, &fakeRoles{}, fakeHasher{}, tokens, tokens,
+		verifier, testTenant, 15*time.Minute, now,
+	)
+	return svc, tokens
+}
+
 // changePasswordFixture builds the collaborators for a password-path test.
 func changePasswordFixture(t *testing.T) (*fakeUsers, *fakeRoles, fakeHasher, *fakeTokens) {
 	t.Helper()
@@ -242,5 +270,56 @@ func TestAuthenticateWithIDTokenNeverDemandsAPasswordChange(t *testing.T) {
 	// false — password lifecycle belongs to the provider's own reset flow.
 	if res.MustChangePassword {
 		t.Fatal("the provider path demanded a password change that cannot be performed")
+	}
+}
+
+// TestProviderLoginDoesNotCarryTheRotationFlagInTheTOKEN.
+//
+// The regression this exists for, found in the deployed demo on 2026-09-07: an
+// account seeded with a temporary password still carried
+// must_change_password=true. Signing in through the provider answered false in
+// the RESPONSE — correctly, there is no password of ours to rotate — but the
+// ACCESS TOKEN still carried true, and the gateway's rotation gate refuses every
+// protected route while that claim is set.
+//
+// The result was the worst shape a bug can take: a login that succeeds, a
+// dashboard that opens, and a session that can do nothing. The web asks /me for
+// the caller's permissions, swallowed the 403 in a deliberately non-fatal catch,
+// and rendered a panel with no modules at all. No error anywhere.
+//
+// Suppressing the flag in the response but not in the token was half a fix. The
+// token is where it had teeth.
+func TestProviderLoginDoesNotCarryTheRotationFlagInTheToken(t *testing.T) {
+	svc, tokens := idTokenServiceWithRotationPending(t)
+
+	res, err := svc.AuthenticateWithIDToken(context.Background(), "google:ana", domain.SessionStaff)
+	if err != nil {
+		t.Fatalf("AuthenticateWithIDToken: %v", err)
+	}
+	if res.MustChangePassword {
+		t.Error("the response claims a rotation is pending; the provider owns the password")
+	}
+	if tokens.lastClaims.MustChangePassword {
+		t.Fatal("the ACCESS TOKEN carries must_change_password: every protected route will answer 403 while the login looks fine")
+	}
+}
+
+// TestRefreshDoesNotReintroduceTheRotationFlag — the same bug with a delayed
+// fuse. RefreshToken re-reads the row and mints fresh claims from it, so
+// clearing the flag only at login would put it back fifteen minutes later and
+// kill a session that had been working: the panel would empty out mid-use, with
+// no error and no action from anybody.
+func TestRefreshDoesNotReintroduceTheRotationFlag(t *testing.T) {
+	svc, tokens := idTokenServiceWithRotationPending(t)
+
+	first, err := svc.AuthenticateWithIDToken(context.Background(), "google:ana", domain.SessionStaff)
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if _, err := svc.RefreshToken(context.Background(), first.RefreshToken); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	if tokens.lastClaims.MustChangePassword {
+		t.Fatal("the refreshed token carries must_change_password: the session goes inert fifteen minutes in")
 	}
 }
