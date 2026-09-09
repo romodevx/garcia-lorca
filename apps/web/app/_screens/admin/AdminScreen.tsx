@@ -16,6 +16,8 @@ import {
   type AdminUser,
   type CreateRoleInput,
   type CreateUserInput,
+  type Invitation,
+  type UserStatus,
   type InviteUserInput,
   inviteUser,
   resendInvitation,
@@ -32,11 +34,26 @@ const qb: CSSProperties = { width: 36, height: 36, borderRadius: "50%", display:
 const fi: CSSProperties = { width: "100%", height: 50, padding: "0 16px", borderRadius: "var(--r-md)", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 15.5, outline: "none" };
 const chip = (on: boolean, color: string): CSSProperties => ({ height: 40, padding: "0 15px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", border: `1.5px solid ${on ? `var(--${color})` : "var(--border)"}`, background: on ? `color-mix(in oklab, var(--${color}) 12%, var(--surface))` : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" });
 
-function StatusPill({ active }: { active: boolean }): ReactElement {
-  const dot = active ? "var(--forest)" : "var(--red)";
+/**
+ * The pill was a boolean and the world has three states.
+ *
+ * "Invitado" is the one that did not exist: an account that was created and
+ * that nobody has opened. Drawing it as "Suspendido" — which is what a boolean
+ * had to do — told the director that somebody had been shut out when in fact
+ * they had never been let in.
+ */
+const PILL = {
+  active: { label: "Activo", bg: "var(--ok-bg)", fg: "var(--ok-fg)", dot: "var(--forest)" },
+  invited: { label: "Invitado", bg: "var(--warn-bg)", fg: "var(--warn-fg)", dot: "var(--yellow)" },
+  suspended: { label: "Suspendido", bg: "var(--bad-bg)", fg: "var(--bad-fg)", dot: "var(--red)" },
+  unknown: { label: "Desconocido", bg: "var(--bad-bg)", fg: "var(--bad-fg)", dot: "var(--red)" },
+} as const;
+
+function StatusPill({ status }: { status: UserStatus }): ReactElement {
+  const p = PILL[status] ?? PILL.unknown;
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "5px 12px 5px 10px", borderRadius: 99, background: active ? "var(--ok-bg)" : "var(--bad-bg)", color: active ? "var(--ok-fg)" : "var(--bad-fg)", fontWeight: 700, fontSize: 13, fontFamily: "var(--font-display)" }}>
-      <span style={{ width: 9, height: 9, borderRadius: 99, background: dot, boxShadow: `0 0 0 3px color-mix(in oklab, ${dot} 22%, transparent)` }} />{active ? "Activo" : "Suspendido"}
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "5px 12px 5px 10px", borderRadius: 99, background: p.bg, color: p.fg, fontWeight: 700, fontSize: 13, fontFamily: "var(--font-display)" }}>
+      <span style={{ width: 9, height: 9, borderRadius: 99, background: p.dot, boxShadow: `0 0 0 3px color-mix(in oklab, ${p.dot} 22%, transparent)` }} />{p.label}
     </span>
   );
 }
@@ -88,6 +105,8 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
   const [editRoles, setEditRoles] = useState<AdminUser | null>(null);
   const [editPerms, setEditPerms] = useState<Role | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [handover, setHandover] = useState<{ user: AdminUser; invitation: Invitation } | null>(null);
+  const [copied, setCopied] = useState(false);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
   const say = (m: string): void => { setToast(m); setTimeout(() => setToast(null), 2600); };
 
@@ -98,17 +117,55 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
   useEffect(() => reload(), [reload]);
 
   const roleName = useCallback((id: string): string => roles.find((r) => r.id === id)?.name ?? id, [roles]);
-  const stats = useMemo(() => ({ users: users.length, roles: roles.length, active: users.filter((u) => u.status === "active").length, suspended: users.filter((u) => u.status !== "active").length }), [users, roles]);
+  const stats = useMemo(() => ({ users: users.length, roles: roles.length, active: users.filter((u) => u.status === "active").length, suspended: users.filter((u) => u.status === "suspended").length, invited: users.filter((u) => u.status === "invited").length }), [users, roles]);
 
   const needle = q.trim().toLowerCase();
   const usersF = users.filter((u) => needle === "" || u.displayName.toLowerCase().includes(needle) || u.email.toLowerCase().includes(needle));
   const rolesF = roles.filter((r) => needle === "" || r.name.toLowerCase().includes(needle));
 
   const onCreateUser = async (input: CreateUserInput): Promise<void> => { await createUser(API_URL, input); setAddUser(false); reload(); say(`Usuario creado · ${input.displayName}`); };
-  const onInviteUser = async (input: InviteUserInput): Promise<void> => { await inviteUser(API_URL, input); setAddUser(false); reload(); say(`Invitación enviada · ${input.email}`); };
+  const onInviteUser = async (input: InviteUserInput): Promise<void> => {
+    const created = await inviteUser(API_URL, input);
+    setAddUser(false);
+    reload();
+    if (created.invitation.sent) {
+      say(`Invitación enviada · ${input.email}`);
+      return;
+    }
+    // The account exists and the message did not go out. Saying "invitación
+    // enviada" here is the exact sentence that made this bug invisible.
+    setHandover({ user: created, invitation: created.invitation });
+  };
   const onCreateRole = async (input: CreateRoleInput): Promise<void> => { await createRole(API_URL, input); setAddRole(false); reload(); say(`Rol creado · ${input.name}`); };
   const onSuspend = async (u: AdminUser): Promise<void> => { await setUserStatus(API_URL, u.id, u.status === "active" ? "suspended" : "active"); reload(); say(u.status === "active" ? "Usuario suspendido" : "Usuario reactivado"); };
-  const onResend = async (u: AdminUser): Promise<void> => { try { await resendInvitation(API_URL, u.id); say(`Enlace enviado · ${u.email}`); } catch { say("No se pudo enviar el enlace"); } };
+  /**
+   * Resending, and telling the truth about it.
+   *
+   * The old version said "Enlace enviado" on success and "No se pudo enviar el
+   * enlace" on any failure at all — including an expired session, which it
+   * reported as a mail problem. Both halves were wrong in the same way: they
+   * described what we HOPED happened instead of what did.
+   *
+   * Now the outcome decides. Delivered: a toast, done. Not delivered: the link
+   * stays on screen with the reason, because a director who cannot mail somebody
+   * can still hand them the link.
+   */
+  const onResend = async (u: AdminUser): Promise<void> => {
+    try {
+      const inv = await resendInvitation(API_URL, u.id);
+      if (inv.sent) {
+        say(`Invitación enviada · ${u.email}`);
+        return;
+      }
+      setHandover({ user: u, invitation: inv });
+    } catch (e) {
+      // A dead session is not a mail problem, and saying so sent the director
+      // looking at the mail server for an hour. Same lesson as
+      // blanket-catch-reports-dead-session-as-domain-error.
+      const dead = e instanceof Error && e.message.includes("401");
+      say(dead ? "Tu sesión caducó. Vuelve a entrar." : "No se pudo generar la invitación");
+    }
+  };
   const onSaveUserRoles = async (u: AdminUser, roleIds: string[]): Promise<void> => { try { await setUserRoles(API_URL, u.id, roleIds); setEditRoles(null); reload(); say("Roles actualizados"); } catch { say("No se pudieron guardar los roles"); } };
   const onSavePerms = async (r: Role, permissions: string[]): Promise<void> => { try { await setRolePermissions(API_URL, r.id, permissions); setEditPerms(null); reload(); say("Permisos actualizados"); } catch { say("No se pudieron guardar los permisos"); } };
 
@@ -167,10 +224,14 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
                   <div style={{ minWidth: 0 }}><div style={{ fontWeight: 600, fontSize: 15.5, color: "var(--text)" }}>{u.displayName}</div><div style={{ fontSize: 12.5, color: "var(--text-faint)" }}>{u.email}</div></div>
                 </div>
                 <div style={{ fontSize: 13.5, color: "var(--text-muted)" }}>{(u.roleIds ?? []).length > 0 ? (u.roleIds ?? []).map(roleName).join(", ") : "Sin roles"}</div>
-                <div><StatusPill active={u.status === "active"} /></div>
+                <div><StatusPill status={u.status} /></div>
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                   <button onClick={() => setEditRoles(u)} style={{ height: 38, padding: "0 14px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, color: "var(--forest)", background: "var(--surface-3)", border: "1px solid var(--border)", cursor: "pointer" }}>Roles</button>
-                  {invites && <button onClick={() => void onResend(u)} style={{ height: 38, padding: "0 14px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, color: "var(--forest)", background: "var(--surface-3)", border: "1px solid var(--border)", cursor: "pointer" }}>Reenviar acceso</button>}
+                  {/* ONLY for somebody who has not walked through the door
+                      yet. It used to render on everybody, including accounts in
+                      daily use, which is what the owner reported. The backend
+                      refuses those too — this is the courtesy, that is the rule. */}
+                  {invites && u.status !== "active" && <button onClick={() => void onResend(u)} style={{ height: 38, padding: "0 14px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, color: "var(--forest)", background: "var(--surface-3)", border: "1px solid var(--border)", cursor: "pointer" }}>Reenviar invitación</button>}
                   <button onClick={() => void onSuspend(u)} style={{ height: 38, padding: "0 14px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, color: u.status === "active" ? "var(--bad-fg)" : "var(--forest)", background: "var(--surface-3)", border: "1px solid var(--border)", cursor: "pointer" }}>{u.status === "active" ? "Suspender" : "Reactivar"}</button>
                 </div>
               </div>
@@ -195,6 +256,15 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
       {addRole && <CreateRoleDrawer onClose={() => setAddRole(false)} onSave={onCreateRole} />}
       {editRoles !== null && <EditRolesDrawer user={editRoles} roles={roles} onClose={() => setEditRoles(null)} onSave={(ids) => onSaveUserRoles(editRoles, ids)} />}
       {editPerms !== null && <EditPermsDrawer role={editPerms} onClose={() => setEditPerms(null)} onSave={(ps) => onSavePerms(editPerms, ps)} />}
+      {handover !== null && (
+        <HandoverDrawer
+          user={handover.user}
+          invitation={handover.invitation}
+          copied={copied}
+          onCopy={() => { void navigator.clipboard.writeText(handover.invitation.url).then(() => setCopied(true)); }}
+          onClose={() => { setHandover(null); setCopied(false); }}
+        />
+      )}
       {toast !== null && <div style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}><Icon name="check" size={20} stroke={2.6} />{toast}</div>}
     </div>
   );
@@ -319,3 +389,84 @@ function PermChecklist({ selected, onToggle }: { selected: string[]; onToggle: (
     </div>
   );
 }
+
+/**
+ * What to do when the mail did not go out.
+ *
+ * This is the screen the whole change exists for. Before it, an undelivered
+ * invitation produced a green toast saying "Invitación enviada" and nothing
+ * else — so the director told somebody to check an inbox nothing had reached,
+ * and the failure stayed invisible for a week.
+ *
+ * It does two things a toast cannot: it says WHY in words the director can act
+ * on, and it hands over the link, which is the only way to give somebody access
+ * while the school still has no mail server configured.
+ */
+function HandoverDrawer({ user, invitation, copied, onCopy, onClose }: { user: AdminUser; invitation: Invitation; copied: boolean; onCopy: () => void; onClose: () => void }): ReactElement {
+  return (
+    <Drawer
+      title="El correo no salió"
+      subtitle={`La cuenta de ${user.displayName} sí quedó creada`}
+      icon="warning"
+      onClose={onClose}
+      footer={<Btn icon="check" onClick={onClose}>Entendido</Btn>}
+    >
+      <div style={{ display: "grid", gap: 18 }}>
+        <div style={{ padding: "13px 15px", borderRadius: "var(--r-md)", background: "var(--warn-bg)", color: "var(--warn-fg)", fontSize: 14, lineHeight: 1.5 }}>
+          {humanSendError(invitation.sendError)}
+        </div>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-muted)", marginBottom: 8 }}>
+            Pásale este enlace a {user.displayName}
+          </div>
+          <div style={{ padding: "12px 14px", borderRadius: "var(--r-md)", border: "1px solid var(--border)", background: "var(--surface-3)", fontSize: 12.5, wordBreak: "break-all", color: "var(--text)", fontFamily: "ui-monospace, monospace" }}>
+            {invitation.url}
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <Btn kind="ghost" icon={copied ? "check" : "documents"} onClick={onCopy}>
+              {copied ? "Copiado" : "Copiar enlace"}
+            </Btn>
+          </div>
+        </div>
+        <p style={{ fontSize: 13.5, color: "var(--text-faint)", lineHeight: 1.5 }}>
+          {expiryPhrase(invitation.expiresAt)} Después deja de servir y tendrás que reenviar la invitación.
+        </p>
+      </div>
+    </Drawer>
+  );
+}
+
+/**
+ * The mail server's own words are for whoever fixes the server. The director
+ * needs the sentence that tells them what to do next.
+ */
+function humanSendError(raw: string | undefined): string {
+  const text = raw ?? "";
+  if (text === "") return "No pudimos enviar el correo.";
+  if (text.includes("no hay un servidor de correo")) {
+    return "Todavía no hay un servidor de correo configurado, así que el sistema no puede enviar nada por su cuenta. Entrégale el enlace tú.";
+  }
+  if (text.includes("rechazó nuestra contraseña")) {
+    return "El servidor de correo del colegio rechazó nuestra contraseña. Hay que renovarla; mientras tanto, entrégale el enlace tú.";
+  }
+  if (text.includes("no respondió") || text.includes("contactar")) {
+    return "El servidor de correo no respondió. Puede ser pasajero: entrégale el enlace y vuelve a intentar el envío más tarde.";
+  }
+  if (text.includes("rechazó esa dirección")) {
+    return "El servidor de correo rechazó esa dirección. Revisa que esté bien escrita.";
+  }
+  return "No pudimos enviar el correo. Entrégale el enlace tú.";
+}
+
+/** The deadline as a person would say it, never as an ISO string. */
+function expiryPhrase(iso: string): string {
+  if (iso === "") return "El enlace tiene vigencia limitada.";
+  const when = new Date(iso);
+  if (Number.isNaN(when.getTime())) return "El enlace tiene vigencia limitada.";
+  const hours = Math.round((when.getTime() - Date.now()) / 3_600_000);
+  if (hours <= 0) return "El enlace ya venció.";
+  if (hours <= 12) return `El enlace funciona durante las próximas ${hours} horas.`;
+  return `El enlace funciona hasta el ${when.getDate()} de ${MONTHS[when.getMonth()]} a las ${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")}.`;
+}
+
+const MONTHS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];

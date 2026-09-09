@@ -51,7 +51,14 @@ describe("AdminScreen", () => {
   it("invites instead of creating when the identity provider is on", async () => {
     flag.providerLoginEnabled.mockReturnValue(true);
     const user = userEvent.setup();
-    admin.inviteUser.mockResolvedValue({ id: "u9", email: "nueva@gl.mx", displayName: "Nueva", status: "active", mustChangePassword: false, roleIds: ["r1"] });
+    admin.inviteUser.mockResolvedValue({
+      id: "u9", email: "nueva@gl.mx", displayName: "Nueva",
+      // "invited", not "active". An account nobody has opened yet is not in
+      // use, and this fixture claiming otherwise is what let the resend button
+      // render on everybody.
+      status: "invited", mustChangePassword: false, roleIds: ["r1"],
+      invitation: { url: "https://escuela.example/activar?token=t", expiresAt: "", sent: true },
+    });
     render(<AdminScreen onBack={() => {}} />);
     await screen.findByText("Director");
 
@@ -92,20 +99,59 @@ describe("AdminScreen", () => {
     expect(admin.inviteUser).not.toHaveBeenCalled();
   });
 
-  // The invitation that never arrived and the forgotten password are the same
-  // button, and it lives on the person's own row — not behind retyping their
+  // The invitation lives on the person's own row — not behind retyping their
   // address into the new-user form, which is a conflict, not a resend.
-  it("resends access from the user row when the provider is on", async () => {
+  //
+  // THIS TEST USED TO ASSERT THE BUG. Its fixture user is `u1`, status "active",
+  // and it checked that the button WAS there — the exact behaviour the owner
+  // reported as broken. A green suite was affirming it. Fixing the product meant
+  // rewriting the assertion, not adding one next to it.
+  it("resends the invitation from the row of somebody who has not entered yet", async () => {
     flag.providerLoginEnabled.mockReturnValue(true);
     const user = userEvent.setup();
-    admin.resendInvitation.mockResolvedValue(undefined);
+    admin.listUsers.mockResolvedValue([
+      { id: "u2", email: "nueva@gl.mx", displayName: "Nueva Maestra", status: "invited", mustChangePassword: false, roleIds: ["r1"] },
+    ]);
+    admin.resendInvitation.mockResolvedValue({ url: "https://escuela.example/activar?token=t", expiresAt: "", sent: true });
     render(<AdminScreen onBack={() => {}} />);
-    await screen.findByText("Director");
+    await screen.findByText("Nueva Maestra");
 
-    await user.click(screen.getByRole("button", { name: "Reenviar acceso" }));
+    await user.click(screen.getByRole("button", { name: "Reenviar invitación" }));
 
-    expect(admin.resendInvitation).toHaveBeenCalledWith(expect.any(String), "u1");
-    expect(await screen.findByText(/Enlace enviado/)).toBeInTheDocument();
+    expect(admin.resendInvitation).toHaveBeenCalledWith(expect.any(String), "u2");
+    expect(await screen.findByText(/Invitación enviada/)).toBeInTheDocument();
+  });
+
+  // The owner's third request, asserted negatively: once somebody is in, the
+  // option to re-invite them is gone.
+  it("offers no resend on an account that is already active", async () => {
+    flag.providerLoginEnabled.mockReturnValue(true);
+    render(<AdminScreen onBack={() => {}} />);
+    await screen.findByText("Director"); // fixture u1, status "active"
+    expect(screen.queryByRole("button", { name: "Reenviar invitación" })).not.toBeInTheDocument();
+  });
+
+  // An undelivered invitation must not be reported as a delivered one. The link
+  // stays on screen so the director can hand access over by hand.
+  it("hands over the link when the mail did not go out", async () => {
+    flag.providerLoginEnabled.mockReturnValue(true);
+    const user = userEvent.setup();
+    admin.listUsers.mockResolvedValue([
+      { id: "u2", email: "nueva@gl.mx", displayName: "Nueva Maestra", status: "invited", mustChangePassword: false, roleIds: ["r1"] },
+    ]);
+    admin.resendInvitation.mockResolvedValue({
+      url: "https://escuela.example/activar?token=abc",
+      expiresAt: "",
+      sent: false,
+      sendError: "no hay un servidor de correo configurado",
+    });
+    render(<AdminScreen onBack={() => {}} />);
+    await screen.findByText("Nueva Maestra");
+
+    await user.click(screen.getByRole("button", { name: "Reenviar invitación" }));
+
+    expect(await screen.findByText(/El correo no salió/)).toBeInTheDocument();
+    expect(screen.getByText(/token=abc/)).toBeInTheDocument();
   });
 
   // With the provider off there is no link to send, so offering the button
@@ -114,7 +160,7 @@ describe("AdminScreen", () => {
     flag.providerLoginEnabled.mockReturnValue(false);
     render(<AdminScreen onBack={() => {}} />);
     await screen.findByText("Director");
-    expect(screen.queryByRole("button", { name: "Reenviar acceso" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reenviar invitación" })).not.toBeInTheDocument();
   });
 
   it("creates a role from the drawer with checked permissions", async () => {
