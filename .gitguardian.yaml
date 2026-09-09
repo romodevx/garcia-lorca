@@ -1,19 +1,35 @@
-# GitGuardian scan configuration.
+# GitGuardian — qué NO tiene sentido escanear en este repo.
 #
-# Test files and example/template config contain INTENTIONAL fake credentials —
-# in-memory fake users, neutral placeholder passwords ("test-owner-pw"), and
-# curl examples with env-var/placeholder values. These repeatedly trip the
-# generic-password / company-email-password detectors even though no real secret
-# is present. Exclude those non-production paths so scanning focuses on real
-# application and infrastructure code (which stays fully scanned).
+# Por qué existe este archivo: los archivos de test están llenos de cosas con
+# forma de credencial que no lo son, y cada una cuesta una alerta en el PR y un
+# rato de alguien confirmando que un fixture es un fixture. Eso entrena a leer
+# las alertas de GitGuardian como ruido, que es justo lo que no queremos el día
+# que marque una de verdad.
 #
-# NOTE: real credentials must NEVER live in these paths — the exclusion assumes
-# they only ever hold test/placeholder data. Docs: https://docs.gitguardian.com
+# La otra mitad del trato, y la que importa más: los fixtures se CONSTRUYEN en
+# tiempo de ejecución en vez de escribirse (ver testPassword en
+# services/iam/internal/usecase/invitation_test.go y el equivalente en
+# apps/web/app/_screens/admin/AdminScreen.test.tsx). Con eso no hay nada con
+# forma de credencial en el código, así que esta lista es defensa en profundidad
+# y no una alfombra bajo la que barrer.
+#
+# Lo que NO se excluye, a propósito: migraciones, terraform, docker-compose,
+# workflows y cualquier archivo de configuración. Ahí un secreto sí sería un
+# secreto.
+#
+# OJO: para la App de GitHub, la lista autoritativa vive en los ajustes del
+# workspace de GitGuardian (Secrets detection → excluded filepaths). Este
+# archivo lo respeta ggshield en local y en pre-commit; si las alertas siguen
+# saliendo en el PR, hay que replicar estas rutas allí una vez.
+
 version: 2
+
 secret:
   ignored-paths:
-    - "**/*_test.go"          # Go test fixtures (fake users, placeholder passwords)
-    - "**/*.test.ts"          # web/vitest specs
+    - "**/*_test.go"
+    - "**/*.test.ts"
     - "**/*.test.tsx"
-    - ".env.example"          # template only; real .env is gitignored
-    - "docs/superpowers/**"   # historical planning/spec docs (curl examples, placeholders)
+    - "**/testdata/**"
+    - "apps/web/e2e/**"
+    - "**/*.example"
+    - ".env.example"

@@ -49,8 +49,8 @@ type AuthService struct {
 	// simply skips that cleanup.
 	invitations ports.InvitationRepository
 	tenantID    string
-	accessTTL time.Duration
-	now       func() time.Time
+	accessTTL   time.Duration
+	now         func() time.Time
 }
 
 // NewAuthService wires the use case. `tenantID` is the single-tenant scope for

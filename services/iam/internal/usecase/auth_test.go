@@ -29,12 +29,12 @@ type fakeUsers struct {
 	removed [][2]string
 
 	// admin-surface recording
-	created   []createdUser            // CreateUser calls
-	listOut   []domain.User            // ListUsers return
+	created      []createdUser            // CreateUser calls
+	listOut      []domain.User            // ListUsers return
 	statusSet    map[string]domain.Status // SetStatus calls
 	passwordsSet map[string]string        // UpdatePassword calls
 	rotated      map[string]bool          // TouchPasswordChangedAt calls
-	rolesSet  map[string][]string      // SetUserRoles calls
+	rolesSet     map[string][]string      // SetUserRoles calls
 }
 
 func (f *fakeUsers) FindAuthByEmail(_ context.Context, _ string, email domain.Email) (domain.User, string, error) {

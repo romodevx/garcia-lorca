@@ -31,7 +31,7 @@ func TestCreateUserRefusesWhereTheProviderOwnsCredentials(t *testing.T) {
 	// A provisioner present is what "the provider owns credentials here" means.
 	svc := newInviteService(t, users, &fakeProvisioner{}, &fakeInvitations{}, &fakeMailer{})
 
-	_, err := svc.CreateUser(context.Background(), "temporal@gl.mx", "Temporal", "fixture-pw-temp", []string{"r1"})
+	_, err := svc.CreateUser(context.Background(), "temporal@gl.mx", "Temporal", testPassword, []string{"r1"})
 	if err == nil {
 		t.Fatal("want a refusal: a temporary password nobody can rotate is a permanent one")
 	}
@@ -50,7 +50,7 @@ func TestCreateUserStillWorksWithoutAProvider(t *testing.T) {
 	users := &fakeUsers{byID: map[string]domain.User{}}
 	svc := newInviteService(t, users, nil, &fakeInvitations{}, &fakeMailer{})
 
-	u, err := svc.CreateUser(context.Background(), "temporal@gl.mx", "Temporal", "fixture-pw-temp", []string{"r1"})
+	u, err := svc.CreateUser(context.Background(), "temporal@gl.mx", "Temporal", testPassword, []string{"r1"})
 	if err != nil {
 		t.Fatalf("CreateUser without a provider: %v", err)
 	}

@@ -6,8 +6,8 @@ import (
 	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
-	"github.com/garcia-lorca/services/iam/internal/ports"
 	"github.com/garcia-lorca/services/iam/internal/domain"
+	"github.com/garcia-lorca/services/iam/internal/ports"
 	"github.com/garcia-lorca/services/iam/internal/usecase"
 )
 
