@@ -136,13 +136,65 @@ type IDTokenVerifier interface {
 type IdentityProvisioner interface {
 	CreateAccount(ctx context.Context, email, displayName string) error
 
-	// SendInvitation asks the provider to email this address the link that lets
-	// its owner set a first password. Using that link is what proves they read
-	// mail there, so it is also what makes the address verified.
+	// SetPassword writes the credential its owner just chose, and marks the
+	// address verified because following the link is what proved they read mail
+	// there.
 	//
-	// The same call is the password RESET the old iam never had: for an account
-	// that already exists, "resend the invitation" and "I forgot my password"
-	// are one operation. That is why it is separate from CreateAccount rather
-	// than folded into it.
-	SendInvitation(ctx context.Context, email string) error
+	// This replaced SendInvitation, which asked the provider to MAIL the link.
+	// The provider accepted those requests with HTTP 200 and delivered nothing —
+	// measured, repeatedly, including to an address that did not exist — so the
+	// call reported success for a message nobody ever got. Delivery is ours now;
+	// the provider is left doing the one thing it does well, holding the
+	// credential.
+	SetPassword(ctx context.Context, email, password string) error
+}
+
+// InvitationRepository stores the single-use tokens that let somebody set a
+// password without being logged in.
+//
+// Every method is tenant-bound in the adapter (pkg/authctx), and NONE of them
+// takes a tenant parameter — deliberately. The redeem endpoints are anonymous,
+// so if the tenant travelled in the request it would be caller-controlled, and
+// the RLS story would quietly become "whatever the URL said". The tenant is
+// fixed at construction instead, where a caller cannot reach it.
+type InvitationRepository interface {
+	// Issue stores a new invitation, REPLACING any live one the user still has
+	// for the same purpose. Replacing rather than inserting is what makes
+	// "resend" kill the previous link: two live invitations would mean an old
+	// mail still works after the director sent a new one.
+	Issue(ctx context.Context, inv domain.Invitation) error
+
+	// Consume spends the token and returns what it was, atomically: it must
+	// match the hash, be unconsumed, and be unexpired in ONE statement. Two
+	// simultaneous redemptions therefore leave exactly one winner, and the
+	// loser is indistinguishable from a token that never existed.
+	//
+	// Every failure — unknown, expired, already spent — is KindNotFound with
+	// the same message. Telling them apart would be an oracle for guessing.
+	Consume(ctx context.Context, tokenHash string, now time.Time) (domain.Invitation, error)
+
+	// MarkSent records the outcome of trying to deliver the invitation.
+	// sendErr is empty on success. This is what the admin screen reads to show
+	// "Sin enviar" instead of leaving the director to guess.
+	MarkSent(ctx context.Context, invitationID string, sentAt time.Time, sendErr string) error
+
+	// ListLive returns every unconsumed, unexpired invitation in the tenant,
+	// keyed by user id. ONE query, not one per user: the admin list renders a
+	// state pill per row and a naive implementation is an N+1 waiting to happen.
+	ListLive(ctx context.Context, now time.Time) (map[string]domain.Invitation, error)
+}
+
+// Mailer delivers a message. One method, defined here because iam is what
+// needs it, so the transport stays a detail that can be swapped without the use
+// case noticing.
+//
+// NIL IS A VALID STATE, and it is the state the school starts in: with no mail
+// configured, inviting still works and the use case reports that the message did
+// not go out, so the director can hand the link over another way. That beats
+// refusing to create accounts until somebody finds an SMTP password.
+type Mailer interface {
+	// Send delivers one message. Implementations must enforce their own
+	// deadline: this call sits in a request path and net/smtp will otherwise
+	// hang on a half-open connection until the OS gives up.
+	Send(ctx context.Context, to, subject, htmlBody, textBody string) error
 }

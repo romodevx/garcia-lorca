@@ -50,7 +50,7 @@ func idTokenHandler(t *testing.T) *grpcadapter.IAMHandler {
 	tokens := jwt.NewHMAC([]byte(strings.Repeat("gl-key-", 6)), "garcia-lorca", time.Hour, time.Now)
 	roles := &fakeRoles{known: "r1"}
 	auth := usecase.NewAuthService(users, roles, hasher, tokens, tokens, stubIDTokens{}, "t1", 15*time.Minute, time.Now)
-	admin := usecase.NewAdminService(users, roles, hasher, nil, "t1", func() string { return "generated-id" })
+	admin := usecase.NewAdminService(users, roles, hasher, nil, nil, nil, "", "t1", func() string { return "generated-id" }, nil)
 	return grpcadapter.NewIAMHandler(auth, admin, usecase.NewHealthService("iam"))
 }
 

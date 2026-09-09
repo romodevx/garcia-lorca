@@ -97,6 +97,16 @@ service IamService {
   // already a user here — it cannot be pointed at an arbitrary address.
   rpc ResendInvitation(ResendInvitationRequest) returns (ResendInvitationResponse);
 
+  // AcceptInvitation redeems an invitation token and sets the password its
+  // owner just chose. UNAUTHENTICATED — the token is the credential, which is
+  // why it is single-use, short-lived and 256 bits wide.
+  rpc AcceptInvitation(AcceptInvitationRequest) returns (AcceptInvitationResponse);
+
+  // RequestPasswordReset is the endpoint behind "I forgot my password", which
+  // until now was a dead anchor on the login screen. UNAUTHENTICATED, and
+  // deliberately uninformative: same answer whether or not the address exists.
+  rpc RequestPasswordReset(RequestPasswordResetRequest) returns (RequestPasswordResetResponse);
+
   // GetUser fetches a user by id, including its assigned role ids.
   rpc GetUser(GetUserRequest) returns (GetUserResponse);
 
@@ -140,6 +150,12 @@ enum UserStatus {
   USER_STATUS_UNSPECIFIED = 0;
   USER_STATUS_ACTIVE = 1;
   USER_STATUS_SUSPENDED = 2;
+  // The account exists and holds roles, and nobody has opened it yet: its owner
+  // has not proved they read mail at that address. It cannot log in. This is
+  // the difference between "created" and "usable", which the system had no way
+  // to say before — so a mistyped address became a working account nobody could
+  // reach, and the resend button had no state to key on.
+  USER_STATUS_INVITED = 3;
 }
 
 // User is the IAM principal. `email` is unique per tenant. `tenant_id` is
@@ -319,10 +335,31 @@ message InviteUserRequest {
   repeated string role_ids = 3;
 }
 
-// InviteUserResponse returns the created user. must_change_password is false on
-// it — there is no temporary password to rotate.
+// InviteUserResponse returns the created user plus what happened to the
+// invitation. must_change_password is false on it — there is no temporary
+// password to rotate.
 message InviteUserResponse {
   User user = 1;
+  Invitation invitation = 2;
+}
+
+// Invitation is what the caller learns after a link is issued.
+//
+// `sent` is the field that did not exist before, and its absence was the bug:
+// the identity provider answered 200 to sends it silently dropped, so
+// "invitation sent" was a sentence nobody could check. Now the caller is told
+// whether the message actually left, and why not when it did not.
+message Invitation {
+  // The activation link. Returned so an administrator can hand it over when the
+  // mail did not go out — which, with no relay configured, is every time. It
+  // grants no power the administrator does not already hold over that account.
+  string url = 1;
+  // When the link stops working.
+  google.protobuf.Timestamp expires_at = 2;
+  // Whether the message actually left.
+  bool sent = 3;
+  // Why it did not, in the mail server's own words. Empty when sent.
+  string send_error = 4;
 }
 
 // ResendInvitationRequest names the existing user to mail a fresh link to.
@@ -330,7 +367,30 @@ message ResendInvitationRequest {
   string user_id = 1;
 }
 
-message ResendInvitationResponse {}
+message ResendInvitationResponse {
+  Invitation invitation = 1;
+}
+
+// AcceptInvitationRequest redeems a token and sets the password its owner
+// chose. Unauthenticated: the token IS the authentication.
+message AcceptInvitationRequest {
+  string token = 1;
+  string password = 2;
+}
+
+message AcceptInvitationResponse {}
+
+// RequestPasswordResetRequest asks for a reset link.
+//
+// The response is empty and always successful, whatever happens. Reporting
+// whether the address has an account would turn this unauthenticated endpoint
+// into a way to read the school's staff and guardian directory one request at
+// a time.
+message RequestPasswordResetRequest {
+  string email = 1;
+}
+
+message RequestPasswordResetResponse {}
 
 // GetUserRequest fetches a user by id.
 message GetUserRequest {

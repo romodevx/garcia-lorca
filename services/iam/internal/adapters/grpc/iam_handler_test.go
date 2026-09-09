@@ -82,7 +82,25 @@ func (f *fakeUsers) SetStatus(_ context.Context, userID string, status domain.St
 		f.statusSet = map[string]domain.Status{}
 	}
 	f.statusSet[userID] = status
+	// APPLY it, do not merely record it. A double that remembers the call but
+	// keeps handing back the old row lies about the one thing a repository
+	// promises: what you write, you then read back. That lie made a test pass
+	// while ResendInvitation happily re-invited an account that had just been
+	// activated.
+	if userID == f.user.ID() {
+		f.user = rebuildWithStatus(f.user, status)
+	}
 	return nil
+}
+
+// rebuildWithStatus is the only way to change a domain User's status from
+// outside the domain: it is immutable by construction, which is the point.
+func rebuildWithStatus(u domain.User, status domain.Status) domain.User {
+	rebuilt, err := domain.NewUser(u.ID(), "t1", u.Email(), u.DisplayName(), status, u.MustChangePassword(), nil)
+	if err != nil {
+		return u
+	}
+	return rebuilt
 }
 func (f *fakeUsers) SetUserRoles(_ context.Context, userID string, roleIDs []string) error {
 	if f.rolesSet == nil {
@@ -145,7 +163,7 @@ func newHandlerWithUsers(t *testing.T, mustChange bool) (*grpcadapter.IAMHandler
 	tokens := jwt.NewHMAC([]byte(strings.Repeat("gl-key-", 6)), "garcia-lorca", time.Hour, time.Now)
 	roles := &fakeRoles{known: "r1"}
 	auth := usecase.NewAuthService(users, roles, hasher, tokens, tokens, nil, "t1", 15*time.Minute, time.Now)
-	admin := usecase.NewAdminService(users, roles, hasher, nil, "t1", func() string { return "generated-id" })
+	admin := usecase.NewAdminService(users, roles, hasher, nil, nil, nil, "", "t1", func() string { return "generated-id" }, nil)
 	return grpcadapter.NewIAMHandler(auth, admin, usecase.NewHealthService("iam")), users
 }
 
@@ -290,7 +308,7 @@ func handlerOver(t *testing.T, users *fakeUsers, roles *fakeRoles) *grpcadapter.
 	hasher := bcrypt.NewHasher(4)
 	tokens := jwt.NewHMAC([]byte(strings.Repeat("gl-key-", 6)), "garcia-lorca", time.Hour, time.Now)
 	auth := usecase.NewAuthService(users, roles, hasher, tokens, tokens, nil, "t1", 15*time.Minute, time.Now)
-	admin := usecase.NewAdminService(users, roles, hasher, nil, "t1", func() string { return "generated-id" })
+	admin := usecase.NewAdminService(users, roles, hasher, nil, nil, nil, "", "t1", func() string { return "generated-id" }, nil)
 	return grpcadapter.NewIAMHandler(auth, admin, usecase.NewHealthService("iam"))
 }
 

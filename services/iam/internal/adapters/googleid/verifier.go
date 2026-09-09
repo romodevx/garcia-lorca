@@ -50,7 +50,7 @@ func NewVerifier(sdk tokenVerifier) *Verifier {
 //
 // Both at once because they are two views of the same client and building the
 // Firebase app twice would open two of everything underneath for no reason.
-func NewFromProject(ctx context.Context, projectID, apiKey string) (*Verifier, *Provisioner, error) {
+func NewFromProject(ctx context.Context, projectID string) (*Verifier, *Provisioner, error) {
 	app, err := firebase.NewApp(ctx, &firebase.Config{ProjectID: projectID})
 	if err != nil {
 		return nil, nil, glerrors.Wrap(glerrors.KindInternal, "identity provider init", err)
@@ -59,10 +59,10 @@ func NewFromProject(ctx context.Context, projectID, apiKey string) (*Verifier, *
 	if err != nil {
 		return nil, nil, glerrors.Wrap(glerrors.KindInternal, "identity provider auth client", err)
 	}
-	// The api key is only needed to SEND invitations. Empty is a valid state:
-	// sign-in still works, and an attempt to invite says so instead of failing
-	// silently.
-	return &Verifier{sdk: client}, &Provisioner{sdk: client, inviter: NewInviter(apiKey, "", nil)}, nil
+	// No api key any more. It existed to call the public endpoint that mailed
+	// invitations — the endpoint that accepted every send and delivered none.
+	// Both adapters now run on Application Default Credentials alone.
+	return &Verifier{sdk: client}, &Provisioner{sdk: client}, nil
 }
 
 // errUnauthorized is the ONE answer this adapter gives for every failure. A

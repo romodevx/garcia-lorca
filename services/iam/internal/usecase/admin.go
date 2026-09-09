@@ -2,7 +2,13 @@ package usecase
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"net/url"
 	"strings"
+	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/iam/internal/domain"
@@ -27,8 +33,21 @@ type AdminService struct {
 	// invite anyone (InviteUser refuses), while the older password-based
 	// CreateUser keeps working.
 	provisioner ports.IdentityProvisioner
+	// invitations stores the single-use tokens that let somebody set a password
+	// without being logged in.
+	invitations ports.InvitationRepository
+	// mailer delivers those tokens. NIL is a valid, expected state: the school
+	// has no SMTP credential yet, and refusing to create accounts until one
+	// appears would be worse than handing the director a link to pass on.
+	mailer ports.Mailer
+	// activateURL is where an invitation link points — our own page, not the
+	// provider's English one.
+	activateURL string
 	tenantID    string
 	newID       func() string
+	// now is injected so every expiry assertion is deterministic. A bare
+	// time.Now() here would make "expires in 24 hours" untestable.
+	now func() time.Time
 }
 
 // NewAdminService wires the admin use case. `tenantID` is the single-tenant scope
@@ -39,16 +58,27 @@ func NewAdminService(
 	roles ports.RoleRepository,
 	hasher ports.PasswordHasher,
 	provisioner ports.IdentityProvisioner,
+	invitations ports.InvitationRepository,
+	mailer ports.Mailer,
+	activateURL string,
 	tenantID string,
 	newID func() string,
+	now func() time.Time,
 ) *AdminService {
+	if now == nil {
+		now = time.Now
+	}
 	return &AdminService{
 		users:       users,
 		roles:       roles,
 		hasher:      hasher,
 		provisioner: provisioner,
+		invitations: invitations,
+		mailer:      mailer,
+		activateURL: activateURL,
 		tenantID:    tenantID,
 		newID:       newID,
+		now:         now,
 	}
 }
 
@@ -74,77 +104,273 @@ func NewAdminService(
 // ORDER IS LOAD-BEARING: the provider first, the row second. A row written
 // before a refused provider call would leave a user who exists here, holds
 // permissions, and can never sign in — invisible until somebody tries.
-func (s *AdminService) InviteUser(ctx context.Context, rawEmail, displayName string, roleIDs []string) (domain.User, error) {
+func (s *AdminService) InviteUser(ctx context.Context, rawEmail, displayName string, roleIDs []string) (Invitation, error) {
 	email, err := domain.NewEmail(rawEmail)
 	if err != nil {
-		return domain.User{}, err // KindInvalid, before either side is touched.
+		return Invitation{}, err // KindInvalid, before either side is touched.
 	}
 	if s.provisioner == nil {
 		// KindInternal, not KindInvalid: the caller did nothing wrong, the
 		// environment is missing a provider.
-		return domain.User{}, glerrors.New(glerrors.KindInternal,
+		return Invitation{}, glerrors.New(glerrors.KindInternal,
 			"no identity provider is configured; cannot invite users")
 	}
 
 	assigned, err := s.resolveRoles(ctx, roleIDs)
 	if err != nil {
-		return domain.User{}, err
+		return Invitation{}, err
 	}
 
 	if err := s.provisioner.CreateAccount(ctx, email.String(), displayName); err != nil {
-		return domain.User{}, err
+		return Invitation{}, err
 	}
 
-	// mustChangePassword is FALSE: there is no password to change. The owner
-	// chooses their first one through the invitation.
-	user, err := domain.NewUser(s.newID(), s.tenantID, email, displayName, domain.StatusActive, false, assigned)
+	// StatusInvited, not StatusActive. This is the line the whole feature turns
+	// on: the account exists and holds roles, and it cannot be used until its
+	// owner opens the link. Before it, "created" and "usable" were the same
+	// word, so a mistyped address became a working account nobody could reach
+	// and the resend button had no state to key on.
+	user, err := domain.NewUser(s.newID(), s.tenantID, email, displayName, domain.StatusInvited, false, assigned)
 	if err != nil {
-		return domain.User{}, err
+		return Invitation{}, err
 	}
 
 	// No hash. The provider owns credentials; a second copy here would be one
 	// more thing to drift, leak, or be reverted by a re-import.
 	if err := s.users.CreateUser(ctx, user, ""); err != nil {
-		return domain.User{}, err // KindConflict on duplicate email
+		return Invitation{}, err // KindConflict on duplicate email
 	}
 	if err := s.users.SetUserRoles(ctx, user.ID(), roleIDs); err != nil {
-		return domain.User{}, err
+		return Invitation{}, err
 	}
 
-	// Last, and NOT rolled back if it fails. An account created and never
-	// announced is one nobody can use and the director has nothing to hand the
-	// person — so the caller is told. But deleting the account over one
-	// undelivered email would throw away something perfectly good and, worse,
-	// free the address for somebody else to register. Resending is the fix, and
-	// resending needs the account to still be there.
-	if err := s.provisioner.SendInvitation(ctx, email.String()); err != nil {
-		return user, glerrors.Wrap(glerrors.KindInternal,
-			"the account was created but the invitation could not be sent; resend it", err)
+	out, err := s.issueAndSend(ctx, user, domain.PurposeInvitation, domain.InvitationLifetime)
+	if err != nil {
+		return Invitation{}, err
 	}
-	return user, nil
+	out.User = user
+	return out, nil
 }
 
-// ResendInvitation mails an existing user a fresh link to set a password.
+// ResendInvitation mints a FRESH token for somebody who has not walked through
+// the door yet, killing whatever link they had before.
 //
-// One operation covering two situations that are the same thing underneath: the
-// person whose invitation never arrived, and the person who forgot their
-// password. For an account with no password the link chooses the first one; for
-// one that has a password it replaces it. This is the administrator password
-// reset iam never had, and one of the reasons the migration happened.
+// It refuses on an account that is already active, and that refusal is the
+// feature: the button disappearing from the screen is a courtesy, this is the
+// boundary. Somebody who has a working password does not need an invitation,
+// and handing out one anyway would be a way to hand out access to an account
+// that is already in use.
 //
-// Keyed by USER ID, not by email, and deliberately: it can only ever mail
-// somebody who is already a user here. An email-keyed version would be a way to
-// make this system send a password-reset link to any address at all.
-func (s *AdminService) ResendInvitation(ctx context.Context, userID string) error {
-	if s.provisioner == nil {
-		return glerrors.New(glerrors.KindInternal,
-			"no identity provider is configured; cannot send invitations")
-	}
+// Keyed by USER ID, never by email. An email-keyed version would be a way to
+// make this system mail an access link to any address at all.
+func (s *AdminService) ResendInvitation(ctx context.Context, userID string) (Invitation, error) {
 	user, err := s.users.FindByID(ctx, userID)
 	if err != nil {
-		return err // KindNotFound for an unknown id
+		return Invitation{}, err // KindNotFound for an unknown id
 	}
-	return s.provisioner.SendInvitation(ctx, user.Email().String())
+	if user.Status() == domain.StatusActive {
+		return Invitation{}, glerrors.New(glerrors.KindInvalid,
+			"this account is already active; it does not need an invitation")
+	}
+	out, err := s.issueAndSend(ctx, user, domain.PurposeInvitation, domain.InvitationLifetime)
+	if err != nil {
+		return Invitation{}, err
+	}
+	out.User = user
+	return out, nil
+}
+
+// RequestPasswordReset mails somebody a short-lived link to choose a new
+// password. It is the endpoint behind "I forgot my password", which until now
+// was a dead anchor on the login screen.
+//
+// IT NEVER REPORTS ANYTHING. Not whether the address exists, not whether the
+// mail went out, not whether the mailer is even configured. The endpoint is
+// anonymous, so any difference between "that address has an account" and "it
+// does not" is a way to read the school's staff and guardian directory one
+// request at a time.
+//
+// For the same reason the send is fire-and-forget rather than awaited: with a
+// synchronous send, an address with an account costs a few hundred milliseconds
+// and one without costs five, which is the same oracle measured with a stopwatch
+// instead of read off the response.
+func (s *AdminService) RequestPasswordReset(ctx context.Context, rawEmail string) error {
+	email, err := domain.NewEmail(rawEmail)
+	if err != nil {
+		return nil // A malformed address has no account either. Say nothing.
+	}
+	user, _, err := s.users.FindAuthByEmail(ctx, s.tenantID, email)
+	if err != nil {
+		return nil // Unknown address. Same silence, same shape, same timing.
+	}
+	// A reset for somebody who never set a first password is still an
+	// invitation: consuming it has to activate the account, or they would set a
+	// password and remain unable to log in.
+	purpose, lifetime := domain.PurposeReset, domain.ResetLifetime
+	if user.Status() == domain.StatusInvited {
+		purpose, lifetime = domain.PurposeInvitation, domain.InvitationLifetime
+	}
+	if _, err := s.issueAndSend(ctx, user, purpose, lifetime); err != nil {
+		return nil // Even a failure here is not the caller's business.
+	}
+	return nil
+}
+
+// AcceptInvitation is the redemption: somebody arrives with a token and the
+// password they just chose.
+//
+// ORDER IS LOAD-BEARING, and it is not the obvious one:
+//
+//  1. Validate the password BEFORE anything is spent. A token burned on a
+//     password the domain was always going to reject locks somebody out over a
+//     typo.
+//  2. Consume the token. One statement, matching the hash AND unconsumed AND
+//     unexpired, so two simultaneous redemptions leave exactly one winner.
+//  3. Write the credential at the provider. If this fails the account is NOT
+//     activated, so the person never ends up "active" with no password.
+//  4. Activate — and ONLY for an invitation. A reset leaves the status exactly
+//     as it found it, because otherwise a suspended person resets their
+//     password and walks back in through the front door.
+func (s *AdminService) AcceptInvitation(ctx context.Context, token, password string) error {
+	if len(password) < minPasswordLen {
+		return glerrors.New(glerrors.KindInvalid, "the password is too short")
+	}
+	inv, err := s.invitations.Consume(ctx, hashToken(token), s.now())
+	if err != nil {
+		// Unknown, expired and already-spent all arrive here as the same
+		// KindNotFound. Telling them apart would be an oracle for guessing.
+		return err
+	}
+	user, err := s.users.FindByID(ctx, inv.UserID())
+	if err != nil {
+		return err
+	}
+	if err := s.setCredential(ctx, user, password); err != nil {
+		return err
+	}
+	if !inv.ActivatesAccount() {
+		return nil
+	}
+	return s.users.SetStatus(ctx, user.ID(), domain.StatusActive)
+}
+
+// setCredential writes the password wherever this environment keeps
+// credentials, and refuses if that is nowhere.
+//
+// With a provider configured it owns the credential and a local hash would be a
+// second copy to drift. Without one — local development, CI — the local hash IS
+// the credential. Writing neither is the failure mode that matters: it would
+// leave an ACTIVE account whose stored hash is the empty string.
+func (s *AdminService) setCredential(ctx context.Context, user domain.User, password string) error {
+	if s.provisioner != nil {
+		return s.provisioner.SetPassword(ctx, user.Email().String(), password)
+	}
+	if s.hasher == nil {
+		return glerrors.New(glerrors.KindInternal,
+			"no credential store is configured; cannot set a password")
+	}
+	hash, err := s.hasher.Hash(password)
+	if err != nil {
+		return err
+	}
+	return s.users.UpdatePassword(ctx, user.ID(), hash)
+}
+
+// Invitation is what the caller gets back after an invitation is issued: enough
+// to tell the director what happened, and nothing that would be unsafe to show
+// them.
+type Invitation struct {
+	User domain.User
+	// URL is the activation link. Returned so the director can hand it over
+	// when the mail did not go out — which, with no SMTP credential yet, is
+	// every time. It grants no power the director does not already hold over
+	// that account.
+	URL       string
+	ExpiresAt time.Time
+	// Sent says whether the message actually left. It is the signal that did
+	// not exist before: the provider answered 200 to sends it silently dropped,
+	// so "invitation sent" was a sentence nobody could check.
+	Sent bool
+	// SendError is why it did not, in the provider's words. Empty when Sent.
+	SendError string
+}
+
+// issueAndSend mints a token, stores only its hash, and tries to deliver it.
+//
+// Minting and delivering are together because they are one act; what is NOT
+// shared is the delivery POLICY. An invitation is sent while a director watches
+// and needs the truth; a reset is sent to nobody watching and must cost the
+// same time whether or not the account exists. RequestPasswordReset therefore
+// discards this result rather than reporting it.
+func (s *AdminService) issueAndSend(ctx context.Context, user domain.User, purpose domain.InvitationPurpose, lifetime time.Duration) (Invitation, error) {
+	if s.invitations == nil {
+		return Invitation{}, glerrors.New(glerrors.KindInternal,
+			"no invitation store is configured")
+	}
+	token, err := newToken()
+	if err != nil {
+		return Invitation{}, err
+	}
+	expires := s.now().Add(lifetime)
+	inv, err := domain.NewInvitation(s.newID(), user.ID(), hashToken(token), purpose, expires, time.Time{})
+	if err != nil {
+		return Invitation{}, err
+	}
+	// Issue REPLACES any live token this user still holds for this purpose.
+	// Two live invitations would mean an old mail still opens the door after
+	// the director sent a new one.
+	if err := s.invitations.Issue(ctx, inv); err != nil {
+		return Invitation{}, err
+	}
+
+	out := Invitation{
+		URL:       s.activateURL + "?token=" + url.QueryEscape(token),
+		ExpiresAt: expires,
+	}
+	sendErr := s.deliver(ctx, user, out.URL, expires)
+	if sendErr == nil {
+		out.Sent = true
+	} else {
+		out.SendError = sendErr.Error()
+	}
+	// Recorded either way, so the admin screen can show "Sin enviar" with a
+	// reason instead of leaving the director to guess. A failure to record must
+	// not turn a successful invitation into an error.
+	_ = s.invitations.MarkSent(ctx, inv.ID(), s.now(), out.SendError)
+	return out, nil
+}
+
+// deliver hands the message to the mailer, or explains why it could not.
+func (s *AdminService) deliver(ctx context.Context, user domain.User, link string, expires time.Time) error {
+	if s.mailer == nil {
+		// Not an error the caller should fail on — it is the school's current
+		// state — but it must be SAID. Silence here is the bug being fixed.
+		return glerrors.New(glerrors.KindInternal,
+			"no hay un servidor de correo configurado; entrega el enlace tú mismo")
+	}
+	subject, html, text := invitationMessage(user.DisplayName(), link, expires)
+	return s.mailer.Send(ctx, user.Email().String(), subject, html, text)
+}
+
+// newToken mints 32 bytes of cryptographic randomness, base64url-encoded.
+//
+// 256 bits: unguessable by construction, so the token needs no rate limit of
+// its own to be safe against a brute force. The clear value is returned once
+// and never stored.
+func newToken() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", glerrors.Wrap(glerrors.KindInternal, "minting an invitation token", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+// hashToken is what gets stored. A database dump therefore leaks nothing
+// usable, and lookups compare hashes through an index rather than comparing
+// secrets byte by byte.
+func hashToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }
 
 // CreateUser provisions a new principal from an admin-supplied temporary
