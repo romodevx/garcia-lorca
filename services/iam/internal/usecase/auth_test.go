@@ -31,7 +31,8 @@ type fakeUsers struct {
 	// admin-surface recording
 	created   []createdUser            // CreateUser calls
 	listOut   []domain.User            // ListUsers return
-	statusSet map[string]domain.Status // SetStatus calls
+	statusSet    map[string]domain.Status // SetStatus calls
+	passwordsSet map[string]string        // UpdatePassword calls
 	rolesSet  map[string][]string      // SetUserRoles calls
 }
 
@@ -59,7 +60,17 @@ func (f *fakeUsers) FindAuthByID(_ context.Context, userID string) (domain.User,
 	return rec.user, rec.hash, nil
 }
 
-func (f *fakeUsers) UpdatePassword(_ context.Context, _, _ string) error { return nil }
+func (f *fakeUsers) UpdatePassword(_ context.Context, userID, hash string) error {
+	// RECORD it. Returning nil and forgetting made this double unable to tell
+	// "the password was stored" from "nothing happened", which is the exact
+	// difference between an activated account and an active one with no
+	// credential at all.
+	if f.passwordsSet == nil {
+		f.passwordsSet = map[string]string{}
+	}
+	f.passwordsSet[userID] = hash
+	return nil
+}
 
 func (f *fakeUsers) AddRole(_ context.Context, userID, roleID string) error {
 	f.added = append(f.added, [2]string{userID, roleID})

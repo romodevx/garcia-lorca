@@ -132,17 +132,33 @@ func TestInviteUserCreatesTheAccountAndMailsTheLink(t *testing.T) {
 }
 
 // TestInviteUserWithoutProviderIsInternal: an environment with no provider
-// cannot invite. It must say so rather than write a user nobody can sign in as.
-func TestInviteUserWithoutProviderIsInternal(t *testing.T) {
+// Without a provider, inviting WORKS — and this test asserted the opposite.
+//
+// The old rule made sense while the provider was also what mailed the link:
+// with no provider there was no way to reach the person, so writing a user row
+// would have created somebody nobody could ever sign in as. Now the token and
+// the delivery are ours, so a missing Identity Platform project says nothing
+// about whether an account can be handed out. It is what local development and
+// CI run as, and refusing there meant the flow could not be exercised at all
+// without a Google project.
+func TestInviteUserWorksWithoutAProvider(t *testing.T) {
 	users := &fakeUsers{}
 	h := handlerWithProvisioner(t, users, &fakeRoles{known: "r1"}, nil)
 
-	_, err := h.InviteUser(context.Background(), connect.NewRequest(&iamv1.InviteUserRequest{
+	res, err := h.InviteUser(context.Background(), connect.NewRequest(&iamv1.InviteUserRequest{
 		Email: "alguien@garcialorca.mx", DisplayName: "Alguien",
 	}))
-	assertCode(t, err, connect.CodeInternal)
-	if users.created != nil {
-		t.Fatal("no user row may be written when the provider is missing")
+	if err != nil {
+		t.Fatalf("InviteUser without a provider: %v", err)
+	}
+	if users.created == nil {
+		t.Fatal("no user row was written")
+	}
+	if res.Msg.GetUser().GetStatus() != iamv1.UserStatus_USER_STATUS_INVITED {
+		t.Errorf("status = %v, want INVITED", res.Msg.GetUser().GetStatus())
+	}
+	if res.Msg.GetInvitation().GetUrl() == "" {
+		t.Error("no activation link returned")
 	}
 }
 

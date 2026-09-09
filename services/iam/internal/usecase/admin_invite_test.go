@@ -157,17 +157,28 @@ func TestInviteUserRejectsMalformedEmail(t *testing.T) {
 	}
 }
 
-func TestInviteUserFailsClosedWithoutProvisioner(t *testing.T) {
+// The inverse of what this test used to assert, and the inversion is the point.
+//
+// It refused to invite without a provider, because back then the provider was
+// also what mailed the link: a row with no way to reach its owner was the ghost
+// user the write ordering exists to prevent. Now the token and the delivery are
+// ours, so the users row IS the account when there is no provider — which is
+// what local development and CI run as, and what the school will run as until
+// its Identity Platform project is wired.
+func TestInviteUserWorksWithoutAProvisioner(t *testing.T) {
 	svc, users := inviteService(t, nil)
 
-	// No provider configured means no account can be created, and therefore no
-	// row either. Creating the row anyway would produce exactly the ghost user
-	// the ordering above exists to prevent.
-	_, err := svc.InviteUser(context.Background(), "ana@garcialorca.mx", "Ana", []string{"r1"})
-	if err == nil {
-		t.Fatal("want an error with no provisioner configured, got nil")
+	out, err := svc.InviteUser(context.Background(), "ana@garcialorca.mx", "Ana", []string{"r1"})
+	if err != nil {
+		t.Fatalf("InviteUser without a provisioner: %v", err)
 	}
-	if len(users.created) != 0 {
-		t.Errorf("a local row was written with no provider to back it: %+v", users.created)
+	if len(users.created) != 1 {
+		t.Fatalf("created %d rows, want 1", len(users.created))
+	}
+	if out.User.Status() != domain.StatusInvited {
+		t.Errorf("status = %v, want StatusInvited", out.User.Status())
+	}
+	if out.URL == "" {
+		t.Error("no activation link returned")
 	}
 }

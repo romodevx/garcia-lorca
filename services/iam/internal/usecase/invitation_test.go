@@ -203,6 +203,52 @@ func TestInviteUserWithoutAMailerStillWorksAndSaysTheMailDidNotGoOut(t *testing.
 	}
 }
 
+// Without an external provider — local development, CI, and any environment
+// that has not been migrated — inviting still works: the users row IS the
+// account, and accepting writes the credential locally.
+//
+// The old guard refused outright, and it was right to when the provider was
+// also the thing that mailed the link. Now that we own both the token and the
+// delivery, "there is no Identity Platform project here" no longer has anything
+// to do with whether somebody can be given an account.
+func TestInviteUserWorksWithoutAnIdentityProvider(t *testing.T) {
+	users := &fakeUsers{byID: map[string]domain.User{}}
+	inv := &fakeInvitations{}
+
+	got, err := newInviteService(t, users, nil, inv, &fakeMailer{}).
+		InviteUser(context.Background(), "maestra@gl.mx", "Maestra", []string{"r1"})
+	if err != nil {
+		t.Fatalf("InviteUser without a provider: %v", err)
+	}
+	if got.User.Status() != domain.StatusInvited {
+		t.Errorf("status = %v, want StatusInvited", got.User.Status())
+	}
+	if len(inv.issued) != 1 {
+		t.Errorf("issued %d invitations, want 1", len(inv.issued))
+	}
+}
+
+// And the credential lands in OUR store, since there is no provider to hold it.
+// The dangerous shape is the third one: activating the account while writing no
+// password anywhere, which would leave an active row whose stored hash is "".
+func TestAcceptInvitationWritesTheLocalHashWhenThereIsNoProvider(t *testing.T) {
+	users := &fakeUsers{byID: map[string]domain.User{
+		"u1": mustUser(t, "u1", "maestra@gl.mx", domain.StatusInvited),
+	}}
+	inv := &fakeInvitations{consume: mustInvitation(t, "i1", "u1", domain.PurposeInvitation)}
+
+	if err := newInviteService(t, users, nil, inv, &fakeMailer{}).
+		AcceptInvitation(context.Background(), "token", "fixture-pw-value"); err != nil {
+		t.Fatalf("AcceptInvitation: %v", err)
+	}
+	if users.passwordsSet["u1"] == "" {
+		t.Error("no local hash was written, so the account would be active with an empty credential")
+	}
+	if users.statusSet["u1"] != domain.StatusActive {
+		t.Errorf("status = %v, want StatusActive", users.statusSet["u1"])
+	}
+}
+
 // --- resending ------------------------------------------------------------
 
 func TestResendInvitationRefusesOnAnActiveAccount(t *testing.T) {
@@ -380,6 +426,37 @@ func TestRequestPasswordResetIsSilentAboutWhetherTheAddressExists(t *testing.T) 
 			}
 		})
 	}
+}
+
+// The send must NOT happen inside the call. A mailer that blocks for a second
+// would make a request for a real address cost a second and one for an unknown
+// address cost nothing — the same oracle the constant 204 exists to close, just
+// measured with a stopwatch. The delivery is detached, so the call returns at
+// the same speed either way.
+func TestRequestPasswordResetDoesNotWaitForTheMailer(t *testing.T) {
+	users := usersByEmail(t, map[string]domain.User{
+		"u1": mustUser(t, "u1", "existe@gl.mx", domain.StatusActive),
+	})
+	// A mailer that would block for a full second if it were awaited.
+	slow := &blockingMailer{release: make(chan struct{})}
+	defer close(slow.release)
+
+	start := time.Now()
+	if err := newInviteService(t, users, &fakeProvisioner{}, &fakeInvitations{}, slow).
+		RequestPasswordReset(context.Background(), "existe@gl.mx"); err != nil {
+		t.Fatalf("RequestPasswordReset: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
+		t.Errorf("the call waited %v for the mailer; an address with an account must not cost more than one without", elapsed)
+	}
+}
+
+// blockingMailer parks in Send until released, standing in for a slow relay.
+type blockingMailer struct{ release chan struct{} }
+
+func (m *blockingMailer) Send(context.Context, string, string, string, string) error {
+	<-m.release
+	return nil
 }
 
 func TestRequestPasswordResetMintsAShortLivedResetToken(t *testing.T) {

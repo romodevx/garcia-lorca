@@ -109,20 +109,27 @@ func (s *AdminService) InviteUser(ctx context.Context, rawEmail, displayName str
 	if err != nil {
 		return Invitation{}, err // KindInvalid, before either side is touched.
 	}
-	if s.provisioner == nil {
-		// KindInternal, not KindInvalid: the caller did nothing wrong, the
-		// environment is missing a provider.
-		return Invitation{}, glerrors.New(glerrors.KindInternal,
-			"no identity provider is configured; cannot invite users")
-	}
-
 	assigned, err := s.resolveRoles(ctx, roleIDs)
 	if err != nil {
 		return Invitation{}, err
 	}
 
-	if err := s.provisioner.CreateAccount(ctx, email.String(), displayName); err != nil {
-		return Invitation{}, err
+	// A provider is OPTIONAL now, and this used to be a hard refusal.
+	//
+	// It was right to refuse when the provider was also the thing that mailed
+	// the link: without one there was no way to reach the person. Now we own
+	// both the token and the delivery, so "this environment has no Identity
+	// Platform project" says nothing about whether somebody can be given an
+	// account. Where there is a provider it holds the credential; where there
+	// is not, the users row is the account and accepting writes the hash here.
+	//
+	// ORDER IS LOAD-BEARING: the provider first, the row second. A row written
+	// before a refused provider call would leave a user who exists here, holds
+	// permissions, and can never sign in — invisible until somebody tries.
+	if s.provisioner != nil {
+		if err := s.provisioner.CreateAccount(ctx, email.String(), displayName); err != nil {
+			return Invitation{}, err
+		}
 	}
 
 	// StatusInvited, not StatusActive. This is the line the whole feature turns
@@ -210,9 +217,22 @@ func (s *AdminService) RequestPasswordReset(ctx context.Context, rawEmail string
 	if user.Status() == domain.StatusInvited {
 		purpose, lifetime = domain.PurposeInvitation, domain.InvitationLifetime
 	}
-	if _, err := s.issueAndSend(ctx, user, purpose, lifetime); err != nil {
+	inv, out, err := s.issueToken(ctx, user, purpose, lifetime)
+	if err != nil {
 		return nil // Even a failure here is not the caller's business.
 	}
+	// DETACHED, and this is the difference between a promise and a property.
+	//
+	// Sending inside the request would cost a few hundred milliseconds for an
+	// address that has an account and almost nothing for one that does not —
+	// the same oracle the constant response exists to close, just measured with
+	// a stopwatch instead of read off the status code. Nobody is waiting on
+	// this call, so nothing is lost by letting it finish on its own.
+	//
+	// context.WithoutCancel keeps the values (tenant binding, tracing) while
+	// dropping the deadline, so the send is not killed the instant the HTTP
+	// response is written.
+	go s.sendAndRecord(context.WithoutCancel(ctx), user, inv, out)
 	return nil
 }
 
@@ -303,41 +323,52 @@ type Invitation struct {
 // same time whether or not the account exists. RequestPasswordReset therefore
 // discards this result rather than reporting it.
 func (s *AdminService) issueAndSend(ctx context.Context, user domain.User, purpose domain.InvitationPurpose, lifetime time.Duration) (Invitation, error) {
+	inv, out, err := s.issueToken(ctx, user, purpose, lifetime)
+	if err != nil {
+		return Invitation{}, err
+	}
+	return s.sendAndRecord(ctx, user, inv, out), nil
+}
+
+// issueToken mints a token, stores only its hash, and builds the link.
+func (s *AdminService) issueToken(ctx context.Context, user domain.User, purpose domain.InvitationPurpose, lifetime time.Duration) (domain.Invitation, Invitation, error) {
 	if s.invitations == nil {
-		return Invitation{}, glerrors.New(glerrors.KindInternal,
+		return domain.Invitation{}, Invitation{}, glerrors.New(glerrors.KindInternal,
 			"no invitation store is configured")
 	}
 	token, err := newToken()
 	if err != nil {
-		return Invitation{}, err
+		return domain.Invitation{}, Invitation{}, err
 	}
 	expires := s.now().Add(lifetime)
 	inv, err := domain.NewInvitation(s.newID(), user.ID(), hashToken(token), purpose, expires, time.Time{})
 	if err != nil {
-		return Invitation{}, err
+		return domain.Invitation{}, Invitation{}, err
 	}
 	// Issue REPLACES any live token this user still holds for this purpose.
 	// Two live invitations would mean an old mail still opens the door after
 	// the director sent a new one.
 	if err := s.invitations.Issue(ctx, inv); err != nil {
-		return Invitation{}, err
+		return domain.Invitation{}, Invitation{}, err
 	}
-
-	out := Invitation{
+	return inv, Invitation{
 		URL:       s.activateURL + "?token=" + url.QueryEscape(token),
 		ExpiresAt: expires,
-	}
-	sendErr := s.deliver(ctx, user, out.URL, expires)
-	if sendErr == nil {
-		out.Sent = true
-	} else {
+	}, nil
+}
+
+// sendAndRecord delivers the message and writes down what happened.
+func (s *AdminService) sendAndRecord(ctx context.Context, user domain.User, inv domain.Invitation, out Invitation) Invitation {
+	if sendErr := s.deliver(ctx, user, out.URL, out.ExpiresAt); sendErr != nil {
 		out.SendError = sendErr.Error()
+	} else {
+		out.Sent = true
 	}
 	// Recorded either way, so the admin screen can show "Sin enviar" with a
 	// reason instead of leaving the director to guess. A failure to record must
 	// not turn a successful invitation into an error.
 	_ = s.invitations.MarkSent(ctx, inv.ID(), s.now(), out.SendError)
-	return out, nil
+	return out
 }
 
 // deliver hands the message to the mailer, or explains why it could not.
