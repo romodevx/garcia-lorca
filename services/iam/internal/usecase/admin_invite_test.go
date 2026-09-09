@@ -47,6 +47,19 @@ type fakeProvisioner struct {
 	passwordFor string
 	err         error
 	setErr      error
+	// providerSent records the TEMPORARY path where the provider mails its own
+	// link, so a test can tell "our message went out" from "we asked Google to
+	// send its own" — two outcomes the director experiences very differently.
+	providerSent    []string
+	providerSendErr error
+}
+
+func (f *fakeProvisioner) SendPasswordSetupEmail(_ context.Context, email string) error {
+	if f.providerSendErr != nil {
+		return f.providerSendErr
+	}
+	f.providerSent = append(f.providerSent, email)
+	return nil
 }
 
 func (f *fakeProvisioner) SetPassword(_ context.Context, email, _ string) error {

@@ -39,6 +39,7 @@ type fakeInvitations struct {
 	issued   []domain.Invitation
 	live     map[string]domain.Invitation
 	consumed []string // token hashes, in call order
+	revoked  []string // user ids whose live invitations were killed
 	marked   []string // "<id>:<err>" per MarkSent call
 	issueErr error
 	consume  domain.Invitation
@@ -59,6 +60,11 @@ func (f *fakeInvitations) Consume(_ context.Context, tokenHash string, _ time.Ti
 		return domain.Invitation{}, f.consErr
 	}
 	return f.consume, nil
+}
+
+func (f *fakeInvitations) Revoke(_ context.Context, userID string) error {
+	f.revoked = append(f.revoked, userID)
+	return nil
 }
 
 func (f *fakeInvitations) MarkSent(_ context.Context, id string, _ time.Time, sendErr string) error {
@@ -183,69 +189,6 @@ func TestInviteUserReportsAnUndeliveredInvitationAndKeepsTheAccount(t *testing.T
 	}
 	if len(inv.marked) != 1 || !strings.Contains(inv.marked[0], "535") {
 		t.Errorf("MarkSent recorded %v, want the failure reason stored on the row", inv.marked)
-	}
-}
-
-// With NO mailer at all — the state the school starts in — inviting still
-// works and says so. Refusing here would make "we have no SMTP password yet"
-// mean "nobody can be given an account".
-func TestInviteUserWithoutAMailerStillWorksAndSaysTheMailDidNotGoOut(t *testing.T) {
-	users := &fakeUsers{byID: map[string]domain.User{}}
-	inv := &fakeInvitations{}
-
-	got, err := newInviteService(t, users, &fakeProvisioner{}, inv, nil).
-		InviteUser(context.Background(), "maestra@gl.mx", "Maestra", []string{"r1"})
-	if err != nil {
-		t.Fatalf("InviteUser: %v", err)
-	}
-	if got.Sent || got.URL == "" || got.SendError == "" {
-		t.Errorf("want Sent=false with a URL and a stated reason, got %+v", got)
-	}
-}
-
-// Without an external provider — local development, CI, and any environment
-// that has not been migrated — inviting still works: the users row IS the
-// account, and accepting writes the credential locally.
-//
-// The old guard refused outright, and it was right to when the provider was
-// also the thing that mailed the link. Now that we own both the token and the
-// delivery, "there is no Identity Platform project here" no longer has anything
-// to do with whether somebody can be given an account.
-func TestInviteUserWorksWithoutAnIdentityProvider(t *testing.T) {
-	users := &fakeUsers{byID: map[string]domain.User{}}
-	inv := &fakeInvitations{}
-
-	got, err := newInviteService(t, users, nil, inv, &fakeMailer{}).
-		InviteUser(context.Background(), "maestra@gl.mx", "Maestra", []string{"r1"})
-	if err != nil {
-		t.Fatalf("InviteUser without a provider: %v", err)
-	}
-	if got.User.Status() != domain.StatusInvited {
-		t.Errorf("status = %v, want StatusInvited", got.User.Status())
-	}
-	if len(inv.issued) != 1 {
-		t.Errorf("issued %d invitations, want 1", len(inv.issued))
-	}
-}
-
-// And the credential lands in OUR store, since there is no provider to hold it.
-// The dangerous shape is the third one: activating the account while writing no
-// password anywhere, which would leave an active row whose stored hash is "".
-func TestAcceptInvitationWritesTheLocalHashWhenThereIsNoProvider(t *testing.T) {
-	users := &fakeUsers{byID: map[string]domain.User{
-		"u1": mustUser(t, "u1", "maestra@gl.mx", domain.StatusInvited),
-	}}
-	inv := &fakeInvitations{consume: mustInvitation(t, "i1", "u1", domain.PurposeInvitation)}
-
-	if err := newInviteService(t, users, nil, inv, &fakeMailer{}).
-		AcceptInvitation(context.Background(), "token", "fixture-pw-value"); err != nil {
-		t.Fatalf("AcceptInvitation: %v", err)
-	}
-	if users.passwordsSet["u1"] == "" {
-		t.Error("no local hash was written, so the account would be active with an empty credential")
-	}
-	if users.statusSet["u1"] != domain.StatusActive {
-		t.Errorf("status = %v, want StatusActive", users.statusSet["u1"])
 	}
 }
 

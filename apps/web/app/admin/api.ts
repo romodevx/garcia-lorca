@@ -138,6 +138,17 @@ export interface Invitation {
   expiresAt: string;
   sent: boolean;
   sendError?: string;
+  /**
+   * Which road the message took. The two are not equivalent and the director
+   * has to know which one they just sent.
+   *
+   *   "smtp"     our own message: this link, 24 h, our page, in Spanish.
+   *   "provider" Firebase's OWN link instead: 1 h, its page in English, and a
+   *              shared sender Gmail tends to file as spam. Temporary, until
+   *              the school hands over an SMTP credential.
+   *   undefined  nothing went out; the link is there to hand over.
+   */
+  via?: "smtp" | "provider";
 }
 
 export interface InvitedUser extends AdminUser {

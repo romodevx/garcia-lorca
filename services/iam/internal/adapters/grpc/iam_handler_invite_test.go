@@ -31,12 +31,21 @@ import (
 type recordingProvisioner struct {
 	created []string
 	// passwords is the addresses whose credential was written, in call order.
-	passwords []string
-	setErr    error
+	passwords    []string
+	providerSent []string
+	setErr       error
 }
 
 func (p *recordingProvisioner) CreateAccount(_ context.Context, email, _ string) error {
 	p.created = append(p.created, email)
+	return nil
+}
+
+// providerSent records the temporary road where the provider mails its own
+// link — a different outcome from our own message going out, and the director
+// experiences the two very differently.
+func (p *recordingProvisioner) SendPasswordSetupEmail(_ context.Context, email string) error {
+	p.providerSent = append(p.providerSent, email)
 	return nil
 }
 
@@ -89,6 +98,15 @@ func (s *stubInvitations) Consume(_ context.Context, hash string, now time.Time)
 	}
 	delete(s.live, hash)
 	return inv, nil
+}
+
+func (s *stubInvitations) Revoke(_ context.Context, userID string) error {
+	for h, inv := range s.live {
+		if inv.UserID() == userID {
+			delete(s.live, h)
+		}
+	}
+	return nil
 }
 
 func (s *stubInvitations) MarkSent(context.Context, string, time.Time, string) error { return nil }
@@ -223,7 +241,7 @@ func handlerWithMailer(t *testing.T, users *fakeUsers, roles *fakeRoles, prov po
 	t.Helper()
 	hasher := bcrypt.NewHasher(4)
 	tokens := jwt.NewHMAC([]byte(strings.Repeat("gl-key-", 6)), "garcia-lorca", time.Hour, time.Now)
-	auth := usecase.NewAuthService(users, roles, hasher, tokens, tokens, nil, "t1", 15*time.Minute, time.Now)
+	auth := usecase.NewAuthService(users, roles, hasher, tokens, tokens, nil, nil, "t1", 15*time.Minute, time.Now)
 	n := 0
 	admin := usecase.NewAdminService(users, roles, hasher, prov, &stubInvitations{}, mail,
 		"https://escuela.example/activar", "t1",

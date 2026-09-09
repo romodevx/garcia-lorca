@@ -66,7 +66,7 @@ func idTokenService(t *testing.T, status domain.Status) (*usecase.AuthService, *
 	now := func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) }
 	svc := usecase.NewAuthService(
 		users, &fakeRoles{}, fakeHasher{}, &fakeTokens{}, &fakeTokens{},
-		verifier, testTenant, 15*time.Minute, now,
+		verifier, nil, testTenant, 15*time.Minute, now,
 	)
 	return svc, verifier
 }
@@ -94,7 +94,7 @@ func idTokenServiceWithRotationPending(t *testing.T) (*usecase.AuthService, *fak
 	now := func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) }
 	svc := usecase.NewAuthService(
 		users, &fakeRoles{}, fakeHasher{}, tokens, tokens,
-		verifier, testTenant, 15*time.Minute, now,
+		verifier, nil, testTenant, 15*time.Minute, now,
 	)
 	return svc, tokens
 }
@@ -187,7 +187,7 @@ func TestAuthenticateWithIDTokenFailsClosedWithoutVerifier(t *testing.T) {
 	// nil verifier: the environment has no identity provider configured.
 	svc := usecase.NewAuthService(
 		users, &fakeRoles{}, fakeHasher{}, &fakeTokens{}, &fakeTokens{},
-		nil, testTenant, 15*time.Minute, now,
+		nil, nil, testTenant, 15*time.Minute, now,
 	)
 
 	// Fail CLOSED. An unconfigured provider must refuse, never wave people
@@ -228,7 +228,7 @@ func TestChangePasswordStillWorksWithoutAProvider(t *testing.T) {
 	// local development, and every environment before the cutover. This test is
 	// what keeps the refusal above from becoming a blanket outage.
 	users, roles, hasher, tokens := changePasswordFixture(t)
-	svc := usecase.NewAuthService(users, roles, hasher, tokens, tokens, nil, testTenant, 15*time.Minute,
+	svc := usecase.NewAuthService(users, roles, hasher, tokens, tokens, nil, nil, testTenant, 15*time.Minute,
 		func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) })
 
 	if err := svc.ChangePassword(context.Background(), "access:u1", "secret", "nueva-larga-123"); err != nil {
@@ -252,7 +252,7 @@ func TestAuthenticateWithIDTokenNeverDemandsAPasswordChange(t *testing.T) {
 		"google:ana": {Email: "ana@garcialorca.mx", Subject: "google-uid-1"},
 	}}
 	svc := usecase.NewAuthService(users, &fakeRoles{}, fakeHasher{}, &fakeTokens{}, &fakeTokens{},
-		verifier, testTenant, 15*time.Minute,
+		verifier, nil, testTenant, 15*time.Minute,
 		func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) })
 
 	res, err := svc.AuthenticateWithIDToken(context.Background(), "google:ana", domain.SessionStaff)

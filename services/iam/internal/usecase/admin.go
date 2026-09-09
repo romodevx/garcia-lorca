@@ -313,6 +313,14 @@ type Invitation struct {
 	Sent bool
 	// SendError is why it did not, in the provider's words. Empty when Sent.
 	SendError string
+	// Via says WHICH road the message took, because the two are not equivalent
+	// and the person reading the screen has to know which one they got.
+	//
+	//   "smtp"     our own message: our link, twenty-four hours, our page.
+	//   "provider" the identity provider's: ITS link, one hour, its page, and a
+	//              shared sender that Gmail tends to file as spam.
+	//   ""         nothing went out; the link is on screen to hand over.
+	Via string
 }
 
 // issueAndSend mints a token, stores only its hash, and tries to deliver it.
@@ -359,10 +367,10 @@ func (s *AdminService) issueToken(ctx context.Context, user domain.User, purpose
 
 // sendAndRecord delivers the message and writes down what happened.
 func (s *AdminService) sendAndRecord(ctx context.Context, user domain.User, inv domain.Invitation, out Invitation) Invitation {
-	if sendErr := s.deliver(ctx, user, out.URL, out.ExpiresAt); sendErr != nil {
+	if via, sendErr := s.deliver(ctx, user, out.URL, out.ExpiresAt); sendErr != nil {
 		out.SendError = sendErr.Error()
 	} else {
-		out.Sent = true
+		out.Sent, out.Via = true, via
 	}
 	// Recorded either way, so the admin screen can show "Sin enviar" with a
 	// reason instead of leaving the director to guess. A failure to record must
@@ -371,16 +379,44 @@ func (s *AdminService) sendAndRecord(ctx context.Context, user domain.User, inv 
 	return out
 }
 
-// deliver hands the message to the mailer, or explains why it could not.
-func (s *AdminService) deliver(ctx context.Context, user domain.User, link string, expires time.Time) error {
-	if s.mailer == nil {
-		// Not an error the caller should fail on — it is the school's current
-		// state — but it must be SAID. Silence here is the bug being fixed.
-		return glerrors.New(glerrors.KindInternal,
-			"no hay un servidor de correo configurado; entrega el enlace tú mismo")
+// deliver tries the roads out, best first, and reports which one it took.
+//
+// THE ORDER IS THE POLICY:
+//
+//  1. Our own mailer, when one is configured. It carries our link — the
+//     twenty-four hours the school asked for, our page, in Spanish — and it
+//     tells us whether the relay accepted the message.
+//
+//  2. The identity provider, otherwise. TEMPORARY, and chosen by the owner with
+//     the trade on the table: mail that goes out today without waiting on an
+//     SMTP credential, at the cost of Google's link (one hour), Google's page
+//     (English), and a shared sender Gmail tends to treat as spam. The seam it
+//     opens — the password gets set where we cannot see it — is closed by
+//     activating on first provider sign-in.
+//
+//  3. Neither. Not a failure to hide: the account exists, the link is returned,
+//     and the screen hands it over. Refusing instead would turn "nobody has
+//     given us an SMTP password yet" into "nobody can be given an account".
+//
+// The first road that works wins, and a configured mailer always beats the
+// provider — so the day the school's credential arrives, this stops using
+// Firebase on its own, with nothing to remember to switch off.
+func (s *AdminService) deliver(ctx context.Context, user domain.User, link string, expires time.Time) (via string, err error) {
+	if s.mailer != nil {
+		subject, html, text := invitationMessage(user.DisplayName(), link, expires)
+		if err := s.mailer.Send(ctx, user.Email().String(), subject, html, text); err != nil {
+			return "", err
+		}
+		return "smtp", nil
 	}
-	subject, html, text := invitationMessage(user.DisplayName(), link, expires)
-	return s.mailer.Send(ctx, user.Email().String(), subject, html, text)
+	if s.provisioner != nil {
+		if err := s.provisioner.SendPasswordSetupEmail(ctx, user.Email().String()); err != nil {
+			return "", err
+		}
+		return "provider", nil
+	}
+	return "", glerrors.New(glerrors.KindInternal,
+		"no hay un servidor de correo configurado; entrega el enlace tú mismo")
 }
 
 // newToken mints 32 bytes of cryptographic randomness, base64url-encoded.

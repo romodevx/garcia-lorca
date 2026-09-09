@@ -147,6 +147,22 @@ type IdentityProvisioner interface {
 	// the provider is left doing the one thing it does well, holding the
 	// credential.
 	SetPassword(ctx context.Context, email, password string) error
+
+	// SendPasswordSetupEmail asks the PROVIDER to mail its own set-a-password
+	// link. TEMPORARY, and the owner chose it knowingly.
+	//
+	// What it costs, stated plainly: the link is Google's, so it expires in one
+	// hour instead of twenty-four, it lands on Google's page in English instead
+	// of ours, and it is sent from a shared address that Gmail files as spam.
+	// None of that is fixable from here.
+	//
+	// What it buys: mail that goes out today, with no SMTP credential from
+	// anybody. The seam it leaves — the password gets set on a page we cannot
+	// see — is closed by activating on first provider sign-in
+	// (AuthService.AuthenticateWithIDToken), which is why that exists.
+	//
+	// It is the LAST fallback: a configured mailer always wins.
+	SendPasswordSetupEmail(ctx context.Context, email string) error
 }
 
 // InvitationRepository stores the single-use tokens that let somebody set a
@@ -177,6 +193,14 @@ type InvitationRepository interface {
 	// sendErr is empty on success. This is what the admin screen reads to show
 	// "Sin enviar" instead of leaving the director to guess.
 	MarkSent(ctx context.Context, invitationID string, sentAt time.Time, sendErr string) error
+
+	// Revoke kills every live invitation a user still holds.
+	//
+	// Called when somebody activates by signing in rather than by redeeming our
+	// link — which is what happens while the identity provider carries the mail.
+	// Without it, a link handed out hours earlier would keep being able to set
+	// the password of an account that is now in daily use.
+	Revoke(ctx context.Context, userID string) error
 
 	// ListLive returns every unconsumed, unexpired invitation in the tenant,
 	// keyed by user id. ONE query, not one per user: the admin list renders a

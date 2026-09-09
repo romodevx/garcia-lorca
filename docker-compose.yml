@@ -153,6 +153,10 @@ services:
       # Where an invitation link points. It has to be the address the browser
       # can actually reach, which locally is the host port, not the container's.
       # Getting this wrong produces a link that looks right and 404s.
+      # The WEB api key. Public by design — it ships in the browser bundle — and
+      # needed for exactly one thing: the temporary path where the provider
+      # mails its own set-a-password link.
+      IDENTITY_PLATFORM_API_KEY: "${IDENTITY_PLATFORM_API_KEY:-}"
       PUBLIC_WEB_URL: "http://localhost:${WEB_HOST_PORT:-3000}"
       # The relay that carries invitations. EMPTY IS A VALID STATE: with no
       # relay, inviting still works and reports the link so it can be handed

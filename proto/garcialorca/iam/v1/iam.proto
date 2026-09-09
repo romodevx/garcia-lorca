@@ -360,6 +360,14 @@ message Invitation {
   bool sent = 3;
   // Why it did not, in the mail server's own words. Empty when sent.
   string send_error = 4;
+  // WHICH road the message took, because the two are not equivalent and whoever
+  // reads the screen has to know which one they got.
+  //
+  //   "smtp"     our own message: this link, twenty-four hours, our page.
+  //   "provider" the identity provider's OWN link instead: one hour, its page,
+  //              and a shared sender that Gmail tends to file as spam.
+  //   ""         nothing went out; the link is there to hand over.
+  string via = 5;
 }
 
 // ResendInvitationRequest names the existing user to mail a fresh link to.

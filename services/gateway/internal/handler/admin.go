@@ -269,10 +269,11 @@ type invitationResponse struct {
 	ExpiresAt string `json:"expiresAt"`
 	Sent      bool   `json:"sent"`
 	SendError string `json:"sendError,omitempty"`
+	Via       string `json:"via,omitempty"`
 }
 
 func toInvitationResponse(inv client.Invitation) invitationResponse {
-	out := invitationResponse{URL: inv.URL, Sent: inv.Sent, SendError: inv.SendError}
+	out := invitationResponse{URL: inv.URL, Sent: inv.Sent, SendError: inv.SendError, Via: inv.Via}
 	if !inv.ExpiresAt.IsZero() {
 		out.ExpiresAt = inv.ExpiresAt.UTC().Format(time.RFC3339)
 	}

@@ -136,6 +136,21 @@ func (r *InvitationRepo) MarkSent(ctx context.Context, invitationID string, sent
 	})
 }
 
+// Revoke kills every live invitation this user holds.
+//
+// Deleting rather than marking consumed: an invitation nobody redeemed is not a
+// spent token, it is a token that stopped being relevant, and keeping the row
+// would only make the partial unique index reject the next one.
+func (r *InvitationRepo) Revoke(ctx context.Context, userID string) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := tx.Where("user_id = ? AND consumed_at IS NULL", userID).
+			Delete(&invitationModel{}).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "revoking live invitations", err)
+		}
+		return nil
+	})
+}
+
 // ListLive returns every unconsumed, unexpired invitation, keyed by user id.
 //
 // ONE query for the whole list. The admin screen draws a state pill per row, and

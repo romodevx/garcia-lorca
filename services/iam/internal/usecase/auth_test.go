@@ -231,7 +231,7 @@ func fixtureService(t *testing.T, status domain.Status) (*usecase.AuthService, *
 	}
 	roles := &fakeRoles{byID: map[string]domain.Role{"r1": role, "r2": role}}
 	now := func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) }
-	svc := usecase.NewAuthService(users, roles, fakeHasher{}, &fakeTokens{}, &fakeTokens{}, nil, testTenant, 15*time.Minute, now)
+	svc := usecase.NewAuthService(users, roles, fakeHasher{}, &fakeTokens{}, &fakeTokens{}, nil, nil, testTenant, 15*time.Minute, now)
 	return svc, users
 }
 
@@ -269,7 +269,7 @@ func TestAuthenticateSurfacesMustChangePassword(t *testing.T) {
 	}
 	roles := &fakeRoles{byID: map[string]domain.Role{"r1": role}}
 	now := func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) }
-	svc := usecase.NewAuthService(users, roles, fakeHasher{}, &fakeTokens{}, &fakeTokens{}, nil, testTenant, 15*time.Minute, now)
+	svc := usecase.NewAuthService(users, roles, fakeHasher{}, &fakeTokens{}, &fakeTokens{}, nil, nil, testTenant, 15*time.Minute, now)
 
 	res, err := svc.Authenticate(context.Background(), "ana@garcialorca.mx", "secret")
 	if err != nil {
@@ -325,7 +325,7 @@ func TestAuthenticateUnknownEmailStillPerformsHashVerification(t *testing.T) {
 	}
 	hasher := &countingHasher{}
 	now := func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) }
-	svc := usecase.NewAuthService(users, &fakeRoles{}, hasher, &fakeTokens{}, &fakeTokens{}, nil, testTenant, 15*time.Minute, now)
+	svc := usecase.NewAuthService(users, &fakeRoles{}, hasher, &fakeTokens{}, &fakeTokens{}, nil, nil, testTenant, 15*time.Minute, now)
 
 	_, err := svc.Authenticate(context.Background(), "nobody@garcialorca.mx", "secret")
 	if glerrors.KindOf(err) != glerrors.KindUnauthorized {
@@ -440,7 +440,7 @@ func refreshFixture(t *testing.T, changedAt, refreshIssuedAt time.Time) *usecase
 	roles := &fakeRoles{byID: map[string]domain.Role{"r1": role}}
 	now := func() time.Time { return changedAt.Add(time.Hour) }
 	validator := &fakeTokens{refreshIssuedAt: refreshIssuedAt}
-	return usecase.NewAuthService(users, roles, fakeHasher{}, &fakeTokens{}, validator, nil, testTenant, 15*time.Minute, now)
+	return usecase.NewAuthService(users, roles, fakeHasher{}, &fakeTokens{}, validator, nil, nil, testTenant, 15*time.Minute, now)
 }
 
 // SECURITY: a refresh token minted BEFORE the last password change is revoked —
@@ -542,7 +542,7 @@ func TestAuthenticatePropagatesIssuerError(t *testing.T) {
 		byID: map[string]domain.User{"u1": user},
 	}
 	now := func() time.Time { return time.Unix(0, 0).UTC() }
-	svc := usecase.NewAuthService(users, &fakeRoles{}, fakeHasher{}, failingIssuer{}, &fakeTokens{}, nil, testTenant, time.Minute, now)
+	svc := usecase.NewAuthService(users, &fakeRoles{}, fakeHasher{}, failingIssuer{}, &fakeTokens{}, nil, nil, testTenant, time.Minute, now)
 
 	_, err := svc.Authenticate(context.Background(), "ana@garcialorca.mx", "secret")
 	if glerrors.KindOf(err) != glerrors.KindInternal {

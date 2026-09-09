@@ -178,6 +178,7 @@ func toProtoInvitation(inv usecase.Invitation) *iamv1.Invitation {
 		ExpiresAt: timestamppb.New(inv.ExpiresAt),
 		Sent:      inv.Sent,
 		SendError: inv.SendError,
+		Via:       inv.Via,
 	}
 }
 

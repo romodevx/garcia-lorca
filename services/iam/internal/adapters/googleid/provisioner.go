@@ -26,6 +26,10 @@ type accountCreator interface {
 // Provisioner implements ports.IdentityProvisioner over Identity Platform.
 type Provisioner struct {
 	sdk accountCreator
+	// inviter is the TEMPORARY path where the provider mails its own link.
+	// NIL when no web api key is configured, which makes SendPasswordSetupEmail
+	// refuse with a message naming what is missing.
+	inviter *Inviter
 }
 
 // SetPassword writes the credential its owner just chose and marks the address
@@ -56,9 +60,19 @@ func (p *Provisioner) SetPassword(ctx context.Context, email, password string) e
 	return nil
 }
 
+// SendPasswordSetupEmail delegates to the Inviter. See its doc for what this
+// path costs and why it exists anyway.
+func (p *Provisioner) SendPasswordSetupEmail(ctx context.Context, email string) error {
+	if p.inviter == nil {
+		return glerrors.New(glerrors.KindInternal,
+			"no hay llave del proveedor configurada; no se puede enviar por Firebase")
+	}
+	return p.inviter.SendPasswordSetupEmail(ctx, email)
+}
+
 // NewProvisioner wraps an SDK client.
-func NewProvisioner(sdk accountCreator) *Provisioner {
-	return &Provisioner{sdk: sdk}
+func NewProvisioner(sdk accountCreator, inviter *Inviter) *Provisioner {
+	return &Provisioner{sdk: sdk, inviter: inviter}
 }
 
 // CreateAccount creates the account WITHOUT a password and WITHOUT marking the

@@ -139,7 +139,7 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
     setAddUser(false);
     reload();
     if (created.invitation.sent) {
-      say(`Invitación enviada · ${input.email}`);
+      say(sentMessage(created.invitation, input.email));
       return;
     }
     // The account exists and the message did not go out. Saying "invitación
@@ -164,7 +164,7 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
     try {
       const inv = await resendInvitation(API_URL, u.id);
       if (inv.sent) {
-        say(`Invitación enviada · ${u.email}`);
+        say(sentMessage(inv, u.email));
         return;
       }
       setHandover({ user: u, invitation: inv });
@@ -398,6 +398,21 @@ function PermChecklist({ selected, onToggle }: { selected: string[]; onToggle: (
       ))}
     </div>
   );
+}
+
+/**
+ * What the director is told after a message actually goes out.
+ *
+ * The two roads are not the same promise and saying "Invitación enviada" for
+ * both would be the old lie in a new place. Through Firebase the person gets
+ * GOOGLE's link — one hour, its own page — and it lands in spam often enough
+ * that not warning about it is setting the director up to be told "no me llegó".
+ */
+function sentMessage(inv: Invitation, email: string): string {
+  if (inv.via === "provider") {
+    return `Enviado por Firebase · ${email} · vence en 1 hora, dile que revise spam`;
+  }
+  return `Invitación enviada · ${email}`;
 }
 
 /**

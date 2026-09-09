@@ -56,6 +56,7 @@ type Invitation struct {
 	ExpiresAt time.Time
 	Sent      bool
 	SendError string
+	Via       string
 }
 
 func toInvitation(p *iamv1.Invitation) Invitation {
@@ -67,6 +68,7 @@ func toInvitation(p *iamv1.Invitation) Invitation {
 		ExpiresAt: p.GetExpiresAt().AsTime(),
 		Sent:      p.GetSent(),
 		SendError: p.GetSendError(),
+		Via:       p.GetVia(),
 	}
 }
 

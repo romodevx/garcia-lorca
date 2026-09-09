@@ -108,7 +108,7 @@ func buildMux(log *slog.Logger) (*http.ServeMux, error) {
 	var idTokens ports.IDTokenVerifier
 	var provisioner ports.IdentityProvisioner
 	if project := os.Getenv("IDENTITY_PLATFORM_PROJECT"); project != "" {
-		v, p, err := googleid.NewFromProject(context.Background(), project)
+		v, p, err := googleid.NewFromProject(context.Background(), project, os.Getenv("IDENTITY_PLATFORM_API_KEY"))
 		if err != nil {
 			// Fatal on purpose. A misconfigured provider that boots anyway would
 			// silently refuse every sign-in through it, and the only symptom would
@@ -120,12 +120,12 @@ func buildMux(log *slog.Logger) (*http.ServeMux, error) {
 		log.Info("identity provider wired", "project", project)
 	}
 
-	auth := usecase.NewAuthService(userRepo, roleRepo, hasher, tokens, tokens, idTokens, tenantID, accessTokenTTL, time.Now)
+	invitationRepo := pgadapter.NewInvitationRepo(db, tenantID)
+
+	auth := usecase.NewAuthService(userRepo, roleRepo, hasher, tokens, tokens, idTokens, invitationRepo, tenantID, accessTokenTTL, time.Now)
 	// provisioner comes from the SAME optional provider above: with no project
 	// named it stays nil, InviteUser refuses, and the older password-based
 	// CreateUser is untouched.
-	invitationRepo := pgadapter.NewInvitationRepo(db, tenantID)
-
 	// The mailer is OPTIONAL and its absence is a supported state, not a
 	// degraded one. With no relay configured, inviting still works and the use
 	// case reports that the message did not go out, so the director can hand the
