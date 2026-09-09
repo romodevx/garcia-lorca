@@ -3,7 +3,6 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as adminApi from "../../admin/api";
-import * as providerFlag from "../../auth/providerFlag";
 import { AdminScreen } from "./AdminScreen";
 
 vi.mock("../../admin/api", () => ({
@@ -19,14 +18,6 @@ vi.mock("../../admin/api", () => ({
 }));
 const admin = vi.mocked(adminApi);
 
-// A fixture: an opaque string typed into the form. Built rather than written
-// so a scanner has nothing credential-shaped to find.
-const tempPassword = ["fixture", "value"].join("-");
-
-// The provider flag decides HOW somebody is added, so the tests drive it.
-vi.mock("../../auth/providerFlag", () => ({ providerLoginEnabled: vi.fn(() => false) }));
-const flag = vi.mocked(providerFlag);
-
 beforeEach(() => {
   admin.listUsers.mockResolvedValue([
     { id: "u1", email: "dir@gl.mx", displayName: "Director", status: "active", mustChangePassword: false, roleIds: ["r1"] },
@@ -34,7 +25,6 @@ beforeEach(() => {
   admin.listRoles.mockResolvedValue([{ id: "r1", name: "owner", permissions: ["users:read"] }]);
 });
 afterEach(() => vi.clearAllMocks());
-beforeEach(() => flag.providerLoginEnabled.mockReturnValue(false));
 
 describe("AdminScreen", () => {
   it("shows the users table with roles and status", async () => {
@@ -49,9 +39,15 @@ describe("AdminScreen", () => {
   // invent a password for them: the account is created empty and its owner sets
   // the first one from the emailed link.
   it("invites instead of creating when the identity provider is on", async () => {
-    flag.providerLoginEnabled.mockReturnValue(true);
     const user = userEvent.setup();
-    admin.inviteUser.mockResolvedValue({ id: "u9", email: "nueva@gl.mx", displayName: "Nueva", status: "active", mustChangePassword: false, roleIds: ["r1"] });
+    admin.inviteUser.mockResolvedValue({
+      id: "u9", email: "nueva@gl.mx", displayName: "Nueva",
+      // "invited", not "active". An account nobody has opened yet is not in
+      // use, and this fixture claiming otherwise is what let the resend button
+      // render on everybody.
+      status: "invited", mustChangePassword: false, roleIds: ["r1"],
+      invitation: { url: "https://escuela.example/activar?token=t", expiresAt: "", sent: true },
+    });
     render(<AdminScreen onBack={() => {}} />);
     await screen.findByText("Director");
 
@@ -72,49 +68,70 @@ describe("AdminScreen", () => {
     expect(admin.createUser).not.toHaveBeenCalled();
   });
 
-  // The other direction, so the flag is proven to actually switch behaviour
-  // rather than the new path merely existing.
-  it("still creates with a temporary password when the provider is off", async () => {
-    flag.providerLoginEnabled.mockReturnValue(false);
+  // The invitation lives on the person's own row — not behind retyping their
+  // address into the new-user form, which is a conflict, not a resend.
+  //
+  // THIS TEST USED TO ASSERT THE BUG. Its fixture user is `u1`, status "active",
+  // and it checked that the button WAS there — the exact behaviour the owner
+  // reported as broken. A green suite was affirming it. Fixing the product meant
+  // rewriting the assertion, not adding one next to it.
+  it("resends the invitation from the row of somebody who has not entered yet", async () => {
     const user = userEvent.setup();
-    admin.createUser.mockResolvedValue({ id: "u9", email: "nueva@gl.mx", displayName: "Nueva", status: "active", mustChangePassword: true, roleIds: [] });
+    admin.listUsers.mockResolvedValue([
+      { id: "u2", email: "nueva@gl.mx", displayName: "Nueva Maestra", status: "invited", mustChangePassword: false, roleIds: ["r1"] },
+    ]);
+    admin.resendInvitation.mockResolvedValue({ url: "https://escuela.example/activar?token=t", expiresAt: "", sent: true });
+    render(<AdminScreen onBack={() => {}} />);
+    await screen.findByText("Nueva Maestra");
+
+    await user.click(screen.getByRole("button", { name: "Reenviar invitación" }));
+
+    expect(admin.resendInvitation).toHaveBeenCalledWith(expect.any(String), "u2");
+    expect(await screen.findByText(/Invitación enviada/)).toBeInTheDocument();
+  });
+
+  // The owner's third request, asserted negatively: once somebody is in, the
+  // option to re-invite them is gone.
+  it("offers no resend on an account that is already active", async () => {
+    render(<AdminScreen onBack={() => {}} />);
+    await screen.findByText("Director"); // fixture u1, status "active"
+    expect(screen.queryByRole("button", { name: "Reenviar invitación" })).not.toBeInTheDocument();
+  });
+
+  // An undelivered invitation must not be reported as a delivered one. The link
+  // stays on screen so the director can hand access over by hand.
+  it("hands over the link when the mail did not go out", async () => {
+    const user = userEvent.setup();
+    admin.listUsers.mockResolvedValue([
+      { id: "u2", email: "nueva@gl.mx", displayName: "Nueva Maestra", status: "invited", mustChangePassword: false, roleIds: ["r1"] },
+    ]);
+    admin.resendInvitation.mockResolvedValue({
+      url: "https://escuela.example/activar?token=abc",
+      expiresAt: "",
+      sent: false,
+      sendError: "no hay un servidor de correo configurado",
+    });
+    render(<AdminScreen onBack={() => {}} />);
+    await screen.findByText("Nueva Maestra");
+
+    await user.click(screen.getByRole("button", { name: "Reenviar invitación" }));
+
+    expect(await screen.findByText(/El correo no salió/)).toBeInTheDocument();
+    expect(screen.getByText(/token=abc/)).toBeInTheDocument();
+  });
+
+  // Adding somebody is always an invitation now, so the temp-password drawer is
+  // gone from the screen. The old pair of tests here asserted that the provider
+  // flag switched between the two, which stopped being a real behaviour once
+  // the token and the delivery became ours.
+  it("always invites, never asks the director to invent a password", async () => {
+    const user = userEvent.setup();
     render(<AdminScreen onBack={() => {}} />);
     await screen.findByText("Director");
 
     await user.click(screen.getByRole("button", { name: /Nuevo usuario/ }));
-    const dialog = await screen.findByRole("dialog", { name: "Nuevo usuario" });
-    await user.type(within(dialog).getByPlaceholderText(/garcialorca/), "nueva@gl.mx");
-    await user.type(within(dialog).getByPlaceholderText(/Nombre del usuario/), "Nueva Maestra");
-    await user.type(within(dialog).getByPlaceholderText(/primer ingreso/), tempPassword);
-    await user.click(within(dialog).getByRole("button", { name: "Crear usuario" }));
-
-    expect(admin.createUser).toHaveBeenCalledWith(expect.any(String), { email: "nueva@gl.mx", displayName: "Nueva Maestra", tempPassword: tempPassword, roleIds: [] });
-    expect(admin.inviteUser).not.toHaveBeenCalled();
-  });
-
-  // The invitation that never arrived and the forgotten password are the same
-  // button, and it lives on the person's own row — not behind retyping their
-  // address into the new-user form, which is a conflict, not a resend.
-  it("resends access from the user row when the provider is on", async () => {
-    flag.providerLoginEnabled.mockReturnValue(true);
-    const user = userEvent.setup();
-    admin.resendInvitation.mockResolvedValue(undefined);
-    render(<AdminScreen onBack={() => {}} />);
-    await screen.findByText("Director");
-
-    await user.click(screen.getByRole("button", { name: "Reenviar acceso" }));
-
-    expect(admin.resendInvitation).toHaveBeenCalledWith(expect.any(String), "u1");
-    expect(await screen.findByText(/Enlace enviado/)).toBeInTheDocument();
-  });
-
-  // With the provider off there is no link to send, so offering the button
-  // would be offering something that cannot work.
-  it("offers no resend when the provider is off", async () => {
-    flag.providerLoginEnabled.mockReturnValue(false);
-    render(<AdminScreen onBack={() => {}} />);
-    await screen.findByText("Director");
-    expect(screen.queryByRole("button", { name: "Reenviar acceso" })).not.toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog", { name: "Invitar usuario" });
+    expect(within(dialog).queryByPlaceholderText(/primer ingreso/)).not.toBeInTheDocument();
   });
 
   it("creates a role from the drawer with checked permissions", async () => {
@@ -132,5 +149,27 @@ describe("AdminScreen", () => {
     await user.click(within(dialog).getByRole("button", { name: "Crear rol" }));
 
     expect(admin.createRole).toHaveBeenCalledWith(expect.any(String), { name: "Coordinación", permissions: ["users:read"] });
+  });
+
+  // Both actions are gated on the row's state, and both used to be gated on
+  // "not active", which is not the same thing.
+  //
+  // "Reactivar" on an `Invitado` row set the account active with no password:
+  // its invitation link then refused (activation only happens from `invited`),
+  // and so did resending. One click made a person unreachable.
+  it("offers neither Reactivar nor a stale resend on the wrong row states", async () => {
+    admin.listUsers.mockResolvedValue([
+      { id: "u2", email: "invitada@gl.mx", displayName: "Invitada", status: "invited", mustChangePassword: false, roleIds: [] },
+      { id: "u3", email: "suspendida@gl.mx", displayName: "Suspendida", status: "suspended", mustChangePassword: false, roleIds: [] },
+    ]);
+    render(<AdminScreen onBack={() => {}} />);
+    await screen.findByText("Invitada");
+
+    // The invited row: it can be re-invited, and it must NOT be "reactivated".
+    expect(screen.getByRole("button", { name: "Reenviar invitación" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reactivar" })).toBeInTheDocument();
+    // Exactly one Reactivar — the suspended row's — and no resend on it.
+    expect(screen.getAllByRole("button", { name: "Reactivar" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Reenviar invitación" })).toHaveLength(1);
   });
 });

@@ -149,6 +149,27 @@ func (r *UserRepo) UpdatePassword(ctx context.Context, userID, newHash string) e
 	})
 }
 
+// TouchPasswordChangedAt stamps the rotation instant without touching the hash.
+//
+// For an account whose credential lives at the identity provider there is no
+// local hash to write, but the revocation floor still has to move: RefreshToken
+// refuses anything minted before it, which is what makes a password change
+// invalidate older sessions.
+func (r *UserRepo) TouchPasswordChangedAt(ctx context.Context, userID string) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Model(&userModel{}).
+			Where("id = ?", userID).
+			Update("password_changed_at", gorm.Expr("now()"))
+		if res.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "stamping the password rotation", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return glerrors.ErrNotFound
+		}
+		return nil
+	})
+}
+
 // AddRole assigns a role to a user (idempotent: a duplicate assignment is a no-op).
 func (r *UserRepo) AddRole(ctx context.Context, userID, roleID string) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {

@@ -59,9 +59,10 @@ func NewFromProject(ctx context.Context, projectID, apiKey string) (*Verifier, *
 	if err != nil {
 		return nil, nil, glerrors.Wrap(glerrors.KindInternal, "identity provider auth client", err)
 	}
-	// The api key is only needed to SEND invitations. Empty is a valid state:
-	// sign-in still works, and an attempt to invite says so instead of failing
-	// silently.
+	// The api key is only needed for the TEMPORARY path where the provider mails
+	// its own link. Empty is a valid state: sign-in and password writing run on
+	// Application Default Credentials, and an attempt to send that way says what
+	// is missing instead of failing quietly.
 	return &Verifier{sdk: client}, &Provisioner{sdk: client, inviter: NewInviter(apiKey, "", nil)}, nil
 }
 

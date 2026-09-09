@@ -99,8 +99,12 @@ func main() {
 	// in-process (fine while the gateway runs at min-instances=1).
 	loginRL := config.ParseLoginRateLimit(os.Getenv)
 	loginLimiter := middleware.NewRateLimiter(loginRL.Burst, loginRL.RefillPerSec(), time.Now)
+	// A SEPARATE bucket for the invitation doors. Same size, different budget:
+	// see the comment at the routes for why sharing the login one would let a
+	// public endpoint lock the school out of logging in.
+	inviteLimiter := middleware.NewRateLimiter(loginRL.Burst, loginRL.RefillPerSec(), time.Now)
 
-	mux := newMux(iamHealth, authClient, studentsClient, configClient, gradesClient, financeClient, attendanceClient, commsClient, uniformsClient, flags, loginLimiter)
+	mux := newMux(iamHealth, authClient, studentsClient, configClient, gradesClient, financeClient, attendanceClient, commsClient, uniformsClient, flags, loginLimiter, inviteLimiter)
 
 	log.Info("gateway starting",
 		slog.String("addr", addr),
@@ -199,7 +203,7 @@ func main() {
 //
 // `flags` (via middleware.NewModuleGuard) is the module-visibility boundary:
 // disabled module ⇒ 404, evaluated before auth so a hidden module is invisible.
-func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, configClient *client.ConfigClient, gradesClient *client.GradesClient, financeClient *client.FinanceClient, attendanceClient *client.AttendanceClient, commsClient *client.CommsClient, uniformsClient *client.UniformsClient, flags featureflag.Checker, loginLimiter *middleware.RateLimiter) *http.ServeMux {
+func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, configClient *client.ConfigClient, gradesClient *client.GradesClient, financeClient *client.FinanceClient, attendanceClient *client.AttendanceClient, commsClient *client.CommsClient, uniformsClient *client.UniformsClient, flags featureflag.Checker, loginLimiter, inviteLimiter *middleware.RateLimiter) *http.ServeMux {
 	mux := http.NewServeMux()
 	handler.NewHealthHandler(iamHealth).Register(mux)
 
@@ -226,6 +230,19 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// password login. It is a cheaper call for us — no bcrypt — but it is still
 	// a door into a session, and a brute-force budget that a second door can
 	// dodge is not a budget.
+	// The invitation doors get their OWN limiter instance, never the login one.
+	//
+	// Sharing it would have been one line and a real hole: behind Cloud Run the
+	// limiter keys on the connection's remote address, which is the Google front
+	// end for every request (TRUST_PROXY is off until XFF is verified — see
+	// deploy/README.md), so that bucket is in practice ONE budget for the whole
+	// school. Hanging a public password-reset endpoint off it would let any
+	// client spend the budget and lock everyone out of logging in, during a
+	// school day.
+	invitationH := handler.NewInvitationHandler(authClient)
+	mux.Handle("POST /api/v1/auth/invitations/accept", inviteLimiter.Middleware(http.HandlerFunc(invitationH.Accept)))
+	mux.Handle("POST /api/v1/auth/password-reset", inviteLimiter.Middleware(http.HandlerFunc(invitationH.RequestReset)))
+
 	mux.Handle("POST /api/v1/auth/google", loginLimiter.Middleware(http.HandlerFunc(authH.GoogleLogin)))
 	mux.Handle("POST /api/v1/auth/mobile/login", loginLimiter.Middleware(http.HandlerFunc(authH.MobileLogin)))
 	// The provider door for the family app. Same limiter as every other login

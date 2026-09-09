@@ -107,11 +107,16 @@ describe("inviteUser", () => {
 });
 
 describe("resendInvitation", () => {
-  it("POSTs to the user's own invite path, with no body of its own", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+  it("POSTs to the user's own invite path and returns the delivery outcome", async () => {
+    // 200 with a body, not 204. "No content" made a delivered invitation and a
+    // dropped one look identical to the caller — which is how the original
+    // failure went a week without anybody noticing.
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ url: "https://escuela.example/activar?token=t", expiresAt: "", sent: false, sendError: "no hay un servidor de correo configurado" }),
+    );
     vi.stubGlobal("fetch", fetchMock);
 
-    await resendInvitation(BASE, "usr-7");
+    const inv = await resendInvitation(BASE, "usr-7");
 
     const [url, init] = lastCall(fetchMock);
     // Keyed by the user id in the PATH. An email-keyed resend would be a way to
@@ -119,6 +124,9 @@ describe("resendInvitation", () => {
     expect(url).toBe("http://gw/api/v1/users/usr-7/invite");
     expect(init.method).toBe("POST");
     expect(init.credentials).toBe("include");
+    expect(inv.sent).toBe(false);
+    expect(inv.url).toContain("token=t");
+    expect(inv.sendError).toContain("servidor de correo");
   });
 
   it("throws on a non-ok response", async () => {

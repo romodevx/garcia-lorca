@@ -4,6 +4,9 @@ import { useState, type CSSProperties, type ReactElement } from "react";
 import { LogoBadge } from "../_design/Brand";
 import { Btn, ThemeToggle } from "../_design/Controls";
 import { Icon } from "../_design/Icon";
+import { requestPasswordReset } from "../auth/api";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 import type { Theme } from "../theme/theme-script";
 
 export interface LoginProps {
@@ -59,6 +62,9 @@ export function Login({ theme, onToggle, onSubmit, error, pending }: LoginProps)
   const [email, setEmail] = useState("");
   const [pwd, setPwd] = useState("");
   const [show, setShow] = useState(false);
+  const [forgot, setForgot] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [sent, setSent] = useState(false);
 
   return (
     <div className="app-root" style={{ minHeight: "100vh", display: "grid", gridTemplateColumns: "1.05fr .95fr" }}>
@@ -188,13 +194,17 @@ export function Login({ theme, onToggle, onSubmit, error, pending }: LoginProps)
               <input type="checkbox" defaultChecked style={{ width: 18, height: 18, accentColor: "var(--lime)" }} />
               Recordarme
             </label>
-            <a
-              href="#"
-              onClick={(e) => e.preventDefault()}
-              style={{ fontSize: 14, fontWeight: 600, color: "var(--forest)", textDecoration: "none" }}
+            {/* This was `href="#"` with preventDefault: an anchor that had
+                never been connected to anything. A teacher who forgot their
+                password had no way back in and the director could not help
+                them either. */}
+            <button
+              type="button"
+              onClick={() => { setForgot(true); setSent(false); }}
+              style={{ fontSize: 14, fontWeight: 600, color: "var(--forest)", background: "transparent", border: "none", cursor: "pointer", padding: 0 }}
             >
               ¿Olvidaste tu contraseña?
-            </a>
+            </button>
           </div>
 
           <Btn full icon="logout" onClick={() => void onSubmit(email, pwd)} disabled={pending} style={{ height: 54, fontSize: 17 }}>
@@ -206,12 +216,82 @@ export function Login({ theme, onToggle, onSubmit, error, pending }: LoginProps)
             </p>
           ) : null}
 
+          {forgot ? (
+            <ForgotPanel
+              email={forgotEmail}
+              sent={sent}
+              onEmail={setForgotEmail}
+              onSend={() => {
+                // Fire and forget, and the screen says the same thing whatever
+                // comes back. Reporting whether the address has an account
+                // would turn this into a way to read the school's directory one
+                // guess at a time.
+                void requestPasswordReset(API_URL, forgotEmail);
+                setSent(true);
+              }}
+              onClose={() => setForgot(false)}
+            />
+          ) : null}
+
           <p style={{ textAlign: "center", color: "var(--text-faint)", fontSize: 13, marginTop: 24 }}>
             ¿Problemas para entrar? Escribe a{" "}
             <span style={{ color: "var(--forest)", fontWeight: 600 }}>soporte@garcialorca.edu.mx</span>
           </p>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Asking for a reset link.
+ *
+ * The answer is ALWAYS the same sentence — "if that address has an account" —
+ * and it is phrased that way on purpose. This is an unauthenticated form on a
+ * system that holds minors' records; confirming that an address is registered
+ * would make it a directory anyone could read, one guess at a time.
+ *
+ * It also tells people to check spam. The mail comes from a school's own
+ * server, not a big sender, so some of it will land there and a person who is
+ * not told to look will conclude nothing was sent — which is the failure this
+ * whole change exists to end.
+ */
+function ForgotPanel({ email, sent, onEmail, onSend, onClose }: { email: string; sent: boolean; onEmail: (v: string) => void; onSend: () => void; onClose: () => void }): ReactElement {
+  return (
+    <div style={{ marginTop: 18, padding: "18px 18px 16px", borderRadius: "var(--r-lg)", border: "1px solid var(--border)", background: "var(--surface-3)" }}>
+      {sent ? (
+        <>
+          <div style={{ fontWeight: 700, fontSize: 15, color: "var(--text)", marginBottom: 6 }}>Revisa tu correo</div>
+          <p style={{ fontSize: 14, color: "var(--text-muted)", lineHeight: 1.5 }}>
+            Si esa dirección tiene una cuenta, te llegará un correo en los próximos minutos. Revisa también tu carpeta de correo no deseado.
+          </p>
+          <div style={{ marginTop: 12 }}>
+            <Btn kind="ghost" icon="back" onClick={onClose}>Volver</Btn>
+          </div>
+        </>
+      ) : (
+        <>
+          <label htmlFor="forgot-email" style={{ display: "block", fontWeight: 700, fontSize: 15, color: "var(--text)", marginBottom: 6 }}>
+            ¿Cuál es tu correo?
+          </label>
+          <p style={{ fontSize: 13.5, color: "var(--text-muted)", marginBottom: 10 }}>
+            Te mandamos un enlace para que elijas una contraseña nueva.
+          </p>
+          <input
+            id="forgot-email"
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => onEmail(e.target.value)}
+            placeholder="tucorreo@garcialorca.edu.mx"
+            style={{ width: "100%", height: 48, padding: "0 14px", borderRadius: "var(--r-md)", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 15, outline: "none" }}
+          />
+          <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+            <Btn icon="mail" onClick={onSend} disabled={email.trim() === ""}>Enviar enlace</Btn>
+            <Btn kind="ghost" onClick={onClose}>Cancelar</Btn>
+          </div>
+        </>
+      )}
     </div>
   );
 }

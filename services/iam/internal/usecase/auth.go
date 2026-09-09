@@ -43,10 +43,14 @@ type AuthService struct {
 	// valid state: environments with no provider configured simply refuse that
 	// sign-in path (see AuthenticateWithIDToken), rather than the service
 	// refusing to boot. Password sign-in never touches it.
-	idTokens  ports.IDTokenVerifier
-	tenantID  string
-	accessTTL time.Duration
-	now       func() time.Time
+	idTokens ports.IDTokenVerifier
+	// invitations is used for ONE thing here: killing a user's outstanding links
+	// the moment they activate. NIL is valid — an environment without the store
+	// simply skips that cleanup.
+	invitations ports.InvitationRepository
+	tenantID    string
+	accessTTL   time.Duration
+	now         func() time.Time
 }
 
 // NewAuthService wires the use case. `tenantID` is the single-tenant scope for
@@ -59,20 +63,22 @@ func NewAuthService(
 	issuer ports.TokenIssuer,
 	validator ports.TokenValidator,
 	idTokens ports.IDTokenVerifier,
+	invitations ports.InvitationRepository,
 	tenantID string,
 	accessTTL time.Duration,
 	now func() time.Time,
 ) *AuthService {
 	return &AuthService{
-		users:     users,
-		roles:     roles,
-		hasher:    hasher,
-		issuer:    issuer,
-		validator: validator,
-		idTokens:  idTokens,
-		tenantID:  tenantID,
-		accessTTL: accessTTL,
-		now:       now,
+		users:       users,
+		roles:       roles,
+		hasher:      hasher,
+		issuer:      issuer,
+		validator:   validator,
+		idTokens:    idTokens,
+		invitations: invitations,
+		tenantID:    tenantID,
+		accessTTL:   accessTTL,
+		now:         now,
 	}
 }
 
@@ -168,7 +174,35 @@ func (s *AuthService) AuthenticateWithIDToken(ctx context.Context, idToken strin
 		// the password path, nothing on this branch runs a hash.
 		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid credentials")
 	}
-	if !user.CanAuthenticate() {
+	// ACTIVATION HAPPENS HERE, and it has to, because of where the password was
+	// set.
+	//
+	// While the identity provider carries the invitation mail, its link lands on
+	// ITS page: the person chooses a password somewhere we cannot see, and
+	// nothing ever tells us they did. Without this they would stay `invited`
+	// forever — unable to log in, with the resend button stuck on their row.
+	//
+	// So activation stops meaning "you redeemed our token" and starts meaning
+	// "you proved you can sign in", which is the truer of the two and covers
+	// both paths. The proof is real: the provider verified an address and a
+	// password it holds, which is exactly what our own link was ever asking for.
+	//
+	// ONLY from `invited`, and only on THIS path. A suspended account stays
+	// suspended — that is somebody's decision, and still holding the password
+	// says nothing about it. And the local-password path never activates: the
+	// hash it checks could not have been set by anyone who was not already
+	// through the door, so it proves nothing new.
+	if user.Status() == domain.StatusInvited {
+		if err := s.users.SetStatus(ctx, user.ID(), domain.StatusActive); err != nil {
+			return AuthResult{}, err
+		}
+		// Whatever links they were still holding die now. One handed out hours
+		// ago must not keep being able to set the password of an account that
+		// is from this moment in daily use.
+		if s.invitations != nil {
+			_ = s.invitations.Revoke(ctx, user.ID())
+		}
+	} else if !user.CanAuthenticate() {
 		return AuthResult{}, glerrors.New(glerrors.KindForbidden, "account is not active")
 	}
 
@@ -242,9 +276,14 @@ func (s *AuthService) ChangePassword(ctx context.Context, accessToken, currentPa
 	//
 	// Rotation lives at the provider once it is in play: the invitation link is
 	// also the reset link (see AdminService.InviteUser).
+	// KindInvalid, not KindInternal. The old kind mapped to HTTP 500 at the
+	// gateway for a precondition the caller can do nothing about: it paged as a
+	// server fault, and the screen showed a generic failure instead of the one
+	// sentence that helps. The way to change a provider-held password is the
+	// reset link, which this system now has.
 	if s.idTokens != nil {
-		return glerrors.New(glerrors.KindInternal,
-			"passwords are managed by the identity provider; use its password reset")
+		return glerrors.New(glerrors.KindInvalid,
+			"la contraseña la guarda el proveedor; usa \"olvidé mi contraseña\" para cambiarla")
 	}
 	if len(newPassword) < minPasswordLen {
 		return glerrors.New(glerrors.KindInvalid, "new password is too short")

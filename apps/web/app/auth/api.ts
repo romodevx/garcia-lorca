@@ -92,3 +92,44 @@ export async function logout(baseURL: string): Promise<void> {
     throw new Error(`logout: HTTP ${res.status}`);
   }
 }
+
+/**
+ * Redeem an invitation and set the password its owner just chose.
+ *
+ * The token goes in the BODY, never the URL. The activation page reads it from
+ * its own query string — where the mail had to put it — and posts it from
+ * there, so it does not travel again into access logs or into the Referer
+ * header the page sends to every third-party resource it loads.
+ *
+ * A dead token throws. Unknown, expired and already-used are one error on
+ * purpose: telling them apart would be a way to probe which tokens exist.
+ */
+export async function acceptInvitation(baseURL: string, token: string, password: string): Promise<void> {
+  const res = await fetch(url(baseURL, "/api/v1/auth/invitations/accept"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, password }),
+  });
+  if (!res.ok) {
+    throw new Error(`accept invitation: HTTP ${res.status}`);
+  }
+}
+
+/**
+ * Ask for a password-reset link.
+ *
+ * It NEVER throws for a business reason and never reports whether the address
+ * has an account. The screen says the same sentence either way. Anything else
+ * would turn this into a way to read the school's staff and guardian directory
+ * one request at a time.
+ */
+export async function requestPasswordReset(baseURL: string, email: string): Promise<void> {
+  await fetch(url(baseURL, "/api/v1/auth/password-reset"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  }).catch(() => {
+    // Even a network failure is not reported differently: the caller must not be
+    // able to tell one outcome from another.
+  });
+}

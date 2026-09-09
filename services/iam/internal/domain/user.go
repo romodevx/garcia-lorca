@@ -18,6 +18,11 @@ const (
 	StatusActive
 	// StatusSuspended: the account exists but cannot log in.
 	StatusSuspended
+	// StatusInvited: the account was created and its owner has not yet proved
+	// they read the mailbox. It holds roles and cannot log in. This is the
+	// difference between "created" and "usable" — before it existed, a mistyped
+	// address became a working account nobody could reach.
+	StatusInvited
 )
 
 // User is the IAM principal: a stable identity with an email (unique per

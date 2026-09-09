@@ -24,7 +24,19 @@ import type { Teacher } from "../teachers/api";
 
 import { authFetch } from "../auth/authFetch";
 
-export type UserStatus = "active" | "suspended";
+/**
+ * "invited" is the state that did not exist, and its absence was three bugs.
+ *
+ * An account was created `active`, so nothing recorded the difference between
+ * "somebody made this account" and "somebody is using it" — which is exactly
+ * what the resend button needs to know when to hide, and what made a mistyped
+ * address into a working account nobody could reach.
+ *
+ * "unknown" is the gateway's honest answer for a status this build does not
+ * recognise. It exists because the gateway used to answer "" and the UI drew
+ * those users as suspended: a plausible screen telling a lie.
+ */
+export type UserStatus = "active" | "suspended" | "invited" | "unknown";
 
 export interface AdminUser {
   id: string;
@@ -111,13 +123,53 @@ export function createUser(baseURL: string, input: CreateUserInput): Promise<Adm
 /** Invite: create the account with no password and have the provider mail its
  * owner the link that sets one. An address that already has an account is a
  * conflict, not a resend — resendInvitation is that. */
-export function inviteUser(baseURL: string, input: InviteUserInput): Promise<AdminUser> {
-  return postJSON<AdminUser>(baseURL, "/users/invite", input);
+/**
+ * What came of issuing a link.
+ *
+ * `sent` is the field whose absence was the original bug: the identity provider
+ * answered 200 to messages it silently dropped, so "invitación enviada" was a
+ * sentence nobody could check — not the director, not us. Now the answer says
+ * whether the message actually left, and when it did not, why, plus the link so
+ * access can still be handed over by hand.
+ */
+export interface Invitation {
+  url: string;
+  /** RFC3339. Empty when no invitation was issued. */
+  expiresAt: string;
+  sent: boolean;
+  sendError?: string;
+  /**
+   * Which road the message took. The two are not equivalent and the director
+   * has to know which one they just sent.
+   *
+   *   "smtp"     our own message: this link, 24 h, our page, in Spanish.
+   *   "provider" Firebase's OWN link instead: 1 h, its page in English, and a
+   *              shared sender Gmail tends to file as spam. Temporary, until
+   *              the school hands over an SMTP credential.
+   *   undefined  nothing went out; the link is there to hand over.
+   */
+  via?: "smtp" | "provider";
 }
 
-/** Mail an existing user a fresh link to set a password: the invitation that
- * never arrived, and the administrator password reset, are one operation. */
-export async function resendInvitation(baseURL: string, id: string): Promise<void> {
+export interface InvitedUser extends AdminUser {
+  invitation: Invitation;
+}
+
+export function inviteUser(baseURL: string, input: InviteUserInput): Promise<InvitedUser> {
+  return postJSON<InvitedUser>(baseURL, "/users/invite", input);
+}
+
+/**
+ * Mint a fresh link for somebody who has not walked through the door yet.
+ *
+ * The backend refuses on an account that is already active. The button being
+ * hidden is a courtesy; that refusal is the rule.
+ *
+ * Returns the outcome rather than nothing. It used to answer 204, which made a
+ * delivered invitation and a dropped one look identical from here — which is
+ * how the original failure went a week without anybody noticing.
+ */
+export async function resendInvitation(baseURL: string, id: string): Promise<Invitation> {
   const res = await authFetch(url(baseURL, `${BASE_PATH}/users/${id}/invite`), {
     method: "POST",
     credentials: "include",
@@ -125,6 +177,7 @@ export async function resendInvitation(baseURL: string, id: string): Promise<voi
   if (!res.ok) {
     throw new Error(`admin resend invitation: HTTP ${res.status}`);
   }
+  return (await res.json()) as Invitation;
 }
 
 export function setUserStatus(baseURL: string, id: string, status: UserStatus): Promise<AdminUser> {
