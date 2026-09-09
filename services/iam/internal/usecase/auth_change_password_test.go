@@ -33,6 +33,8 @@ func (f *cpUsers) FindByID(context.Context, string) (domain.User, error) { retur
 func (f *cpUsers) FindAuthByID(context.Context, string) (domain.User, string, error) {
 	return f.user, f.hash, f.findErr
 }
+func (f *cpUsers) TouchPasswordChangedAt(context.Context, string) error { return nil }
+
 func (f *cpUsers) UpdatePassword(_ context.Context, _, newHash string) error {
 	f.updated, f.newHash = true, newHash
 	return nil

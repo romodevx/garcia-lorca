@@ -48,6 +48,18 @@ type AdminService struct {
 	// now is injected so every expiry assertion is deterministic. A bare
 	// time.Now() here would make "expires in 24 hours" untestable.
 	now func() time.Time
+	// sleep pads the password-reset response to a constant cost. Injected for
+	// the same reason as the clock: a test must be able to read what was padded
+	// instead of waiting for it.
+	sleep func(time.Duration)
+}
+
+// AdminOption tunes the service. There is one today and it exists for tests.
+type AdminOption func(*AdminService)
+
+// WithSleeper replaces the real timer used to pad the password-reset response.
+func WithSleeper(f func(time.Duration)) AdminOption {
+	return func(s *AdminService) { s.sleep = f }
 }
 
 // NewAdminService wires the admin use case. `tenantID` is the single-tenant scope
@@ -64,11 +76,12 @@ func NewAdminService(
 	tenantID string,
 	newID func() string,
 	now func() time.Time,
+	opts ...AdminOption,
 ) *AdminService {
 	if now == nil {
 		now = time.Now
 	}
-	return &AdminService{
+	svc := &AdminService{
 		users:       users,
 		roles:       roles,
 		hasher:      hasher,
@@ -79,8 +92,29 @@ func NewAdminService(
 		tenantID:    tenantID,
 		newID:       newID,
 		now:         now,
+		sleep:       time.Sleep,
 	}
+	for _, opt := range opts {
+		opt(svc)
+	}
+	return svc
 }
+
+// resetFloor is what every password-reset request costs, whatever the answer.
+//
+// The send is back INSIDE the request, and it had to come back: it was detached
+// into a goroutine to close the timing oracle, and on Cloud Run with cpu_idle
+// and scale-to-zero — how iam runs in dev — the CPU is throttled the instant the
+// response is written and the instance is reclaimed. The mail never left and the
+// failure was never recorded. A silent non-delivery is the exact thing this
+// change exists to end, so "works" wins over "elegant".
+//
+// Which puts the oracle back, and this closes it the blunt way: an address with
+// an account costs a mail round trip, one without costs a lookup, so both are
+// padded to the same floor. It is uglier than detaching and it is honest —
+// nobody is waiting on this endpoint, and a public form that answers faster for
+// addresses that exist is a directory anyone can read.
+const resetFloor = 900 * time.Millisecond
 
 // InviteUser creates a principal WITHOUT anybody inventing a password for them.
 //
@@ -207,38 +241,40 @@ func (s *AdminService) ResendInvitation(ctx context.Context, userID string) (Inv
 // and one without costs five, which is the same oracle measured with a stopwatch
 // instead of read off the response.
 func (s *AdminService) RequestPasswordReset(ctx context.Context, rawEmail string) error {
+	// Padded on EVERY path, including the ones that return early, so the cheap
+	// answers cost what the expensive one does.
+	defer s.padTo(s.now())
+
 	email, err := domain.NewEmail(rawEmail)
 	if err != nil {
 		return nil // A malformed address has no account either. Say nothing.
 	}
 	user, _, err := s.users.FindAuthByEmail(ctx, s.tenantID, email)
 	if err != nil {
-		return nil // Unknown address. Same silence, same shape, same timing.
+		return nil // Unknown address. Same silence, same shape, same cost.
 	}
-	// A reset for somebody who never set a first password is still an
-	// invitation: consuming it has to activate the account, or they would set a
-	// password and remain unable to log in.
-	purpose, lifetime := domain.PurposeReset, domain.ResetLifetime
-	if user.Status() == domain.StatusInvited {
-		purpose, lifetime = domain.PurposeInvitation, domain.InvitationLifetime
+	// ACTIVE ONLY, and this is a guard rather than a policy preference.
+	//
+	// It used to escalate an `invited` account to a fresh invitation token, and
+	// issuing one DELETES the live row for that user and purpose. So anyone who
+	// knew an invitee's address could destroy the link the director had just
+	// handed over, from an endpoint with no session, repeatably, with no signal
+	// to anybody. A person who lost their invitation asks the school to resend
+	// it; that is a button, and it is behind an administrator.
+	if user.Status() != domain.StatusActive {
+		return nil
 	}
-	inv, out, err := s.issueToken(ctx, user, purpose, lifetime)
-	if err != nil {
+	if _, err := s.issueAndSend(ctx, user, domain.PurposeReset, domain.ResetLifetime); err != nil {
 		return nil // Even a failure here is not the caller's business.
 	}
-	// DETACHED, and this is the difference between a promise and a property.
-	//
-	// Sending inside the request would cost a few hundred milliseconds for an
-	// address that has an account and almost nothing for one that does not —
-	// the same oracle the constant response exists to close, just measured with
-	// a stopwatch instead of read off the status code. Nobody is waiting on
-	// this call, so nothing is lost by letting it finish on its own.
-	//
-	// context.WithoutCancel keeps the values (tenant binding, tracing) while
-	// dropping the deadline, so the send is not killed the instant the HTTP
-	// response is written.
-	go s.sendAndRecord(context.WithoutCancel(ctx), user, inv, out)
 	return nil
+}
+
+// padTo holds the response until the request has cost resetFloor.
+func (s *AdminService) padTo(start time.Time) {
+	if elapsed := s.now().Sub(start); elapsed < resetFloor {
+		s.sleep(resetFloor - elapsed)
+	}
 }
 
 // AcceptInvitation is the redemption: somebody arrives with a token and the
@@ -283,6 +319,13 @@ func (s *AdminService) AcceptInvitation(ctx context.Context, token, password str
 		return errInvitationDead()
 	}
 	if err := s.setCredential(ctx, user, password); err != nil {
+		// HAND THE TOKEN BACK. Consuming first is what makes two simultaneous
+		// redemptions leave exactly one winner, so the order stays — but a
+		// provider that answers 503 must not cost somebody their only way in.
+		// Without this, the token is spent, the retry says "esta invitación ya
+		// no es válida", and the resend guard refuses a new one, so a transient
+		// failure locks a person out permanently.
+		_ = s.invitations.Release(ctx, inv.ID())
 		return err
 	}
 	if !inv.ActivatesAccount() {
@@ -300,7 +343,17 @@ func (s *AdminService) AcceptInvitation(ctx context.Context, token, password str
 // leave an ACTIVE account whose stored hash is the empty string.
 func (s *AdminService) setCredential(ctx context.Context, user domain.User, password string) error {
 	if s.provisioner != nil {
-		return s.provisioner.SetPassword(ctx, user.Email().String(), password)
+		if err := s.provisioner.SetPassword(ctx, user.Email().String(), password); err != nil {
+			return err
+		}
+		// Stamp the rotation instant even though the credential lives elsewhere.
+		//
+		// RefreshToken rejects any token minted before password_changed_at
+		// (ADR 0005), which is how changing a password revokes older sessions.
+		// The local path gets that for free from UpdatePassword; the provider
+		// path wrote nothing, so a refresh token stolen before "I forgot my
+		// password" kept working for its full life after it.
+		return s.users.TouchPasswordChangedAt(ctx, user.ID())
 	}
 	if s.hasher == nil {
 		return glerrors.New(glerrors.KindInternal,

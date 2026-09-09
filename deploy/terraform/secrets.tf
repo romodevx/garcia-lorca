@@ -166,3 +166,30 @@ resource "google_secret_manager_secret_version" "owner_temp_password" {
 # Additional service secrets (FCM key, CONTPAQi creds, etc.) follow the same
 # pattern: one google_secret_manager_secret container here, value written out of
 # band, referenced by services via the module's secret_env.
+
+# ---- SMTP relay password ---------------------------------------------------
+# This one IS a secret, unlike the identity-provider web key: it can send mail
+# as the school. It goes through Secret Manager and reaches only iam, mounted as
+# secret_env rather than a plain variable — a plain one lands in the Cloud Run
+# revision spec (readable with run.viewer), in terraform plan output, and in
+# remote state.
+#
+# The secret exists even when empty: a container that mounts a missing secret
+# fails to start, and "no relay configured yet" has to remain a bootable state.
+resource "google_secret_manager_secret" "smtp_password" {
+  project   = var.project_id
+  secret_id = "garcia-lorca-smtp-password-${var.env}"
+  labels    = local.labels
+
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "smtp_password" {
+  secret = google_secret_manager_secret.smtp_password.id
+  # Empty is the expected state until the school hands over a mailbox. The
+  # mailer treats an empty password as "no relay" and falls back to having the
+  # identity provider send its own link.
+  secret_data = var.smtp_password
+}

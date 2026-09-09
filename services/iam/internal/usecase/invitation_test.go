@@ -40,6 +40,7 @@ type fakeInvitations struct {
 	live     map[string]domain.Invitation
 	consumed []string // token hashes, in call order
 	revoked  []string // user ids whose live invitations were killed
+	released []string // invitation ids handed back after a failed redemption
 	marked   []string // "<id>:<err>" per MarkSent call
 	issueErr error
 	consume  domain.Invitation
@@ -60,6 +61,11 @@ func (f *fakeInvitations) Consume(_ context.Context, tokenHash string, _ time.Ti
 		return domain.Invitation{}, f.consErr
 	}
 	return f.consume, nil
+}
+
+func (f *fakeInvitations) Release(_ context.Context, id string) error {
+	f.released = append(f.released, id)
+	return nil
 }
 
 func (f *fakeInvitations) Revoke(_ context.Context, userID string) error {
@@ -106,6 +112,10 @@ func newInviteService(t *testing.T, users *fakeUsers, prov ports.IdentityProvisi
 		users, roles, &fakeHasher{}, prov, inv, mail,
 		"https://escuela.example/activar",
 		"t1", seqIDs(), fixedClock(testNow),
+		// No real waiting. The reset path pads its response to a fixed floor,
+		// which is a property to assert, not one to sit through: left real it
+		// added seconds to the suite for nothing.
+		usecase.WithSleeper(func(time.Duration) {}),
 	)
 }
 
@@ -357,37 +367,6 @@ func TestRequestPasswordResetIsSilentAboutWhetherTheAddressExists(t *testing.T) 
 	}
 }
 
-// The send must NOT happen inside the call. A mailer that blocks for a second
-// would make a request for a real address cost a second and one for an unknown
-// address cost nothing — the same oracle the constant 204 exists to close, just
-// measured with a stopwatch. The delivery is detached, so the call returns at
-// the same speed either way.
-func TestRequestPasswordResetDoesNotWaitForTheMailer(t *testing.T) {
-	users := usersByEmail(t, map[string]domain.User{
-		"u1": mustUser(t, "u1", "existe@gl.mx", domain.StatusActive),
-	})
-	// A mailer that would block for a full second if it were awaited.
-	slow := &blockingMailer{release: make(chan struct{})}
-	defer close(slow.release)
-
-	start := time.Now()
-	if err := newInviteService(t, users, &fakeProvisioner{}, &fakeInvitations{}, slow).
-		RequestPasswordReset(context.Background(), "existe@gl.mx"); err != nil {
-		t.Fatalf("RequestPasswordReset: %v", err)
-	}
-	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
-		t.Errorf("the call waited %v for the mailer; an address with an account must not cost more than one without", elapsed)
-	}
-}
-
-// blockingMailer parks in Send until released, standing in for a slow relay.
-type blockingMailer struct{ release chan struct{} }
-
-func (m *blockingMailer) Send(context.Context, string, string, string, string) error {
-	<-m.release
-	return nil
-}
-
 func TestRequestPasswordResetMintsAShortLivedResetToken(t *testing.T) {
 	users := usersByEmail(t, map[string]domain.User{
 		"u1": mustUser(t, "u1", "existe@gl.mx", domain.StatusActive),
@@ -590,5 +569,133 @@ func TestReactivatingAnAccountRevokesNothing(t *testing.T) {
 	}
 	if len(inv.revoked) != 0 {
 		t.Errorf("revoked = %v on reactivation", inv.revoked)
+	}
+}
+
+// --- lo que la revisión de código encontró ---------------------------------
+
+/*
+Four defects, and three of them come from the same habit: writing a comment that
+states a property and not writing the test that would have held me to it.
+
+  1. The reset send was detached into a goroutine to close a timing oracle. On
+     Cloud Run with cpu_idle and scale-to-zero — which is exactly how dev runs
+     iam — the CPU is throttled the moment the response is written and the
+     instance is reclaimed. The mail never goes out and the failure is never
+     recorded: the precise invisible-undelivered-message failure this whole
+     change exists to end, reintroduced by its own fix.
+  2. AcceptInvitation spent the token BEFORE writing the credential, so a
+     provider failure left the person locked out with a dead link. The test that
+     was supposed to cover this is literally called "KeepsTheTokenAlive" and
+     only ever checked that the account was not activated.
+  3. A provider-side password change never stamped password_changed_at, so
+     refresh tokens minted before "I forgot my password" kept working.
+  4. An anonymous caller who knew an invitee's address could destroy the
+     invitation the director had just handed over.
+*/
+
+// The mailer must be called BEFORE the call returns. Detaching it is what made
+// the message vanish on a throttled instance.
+func TestRequestPasswordResetSendsBeforeReturning(t *testing.T) {
+	users := usersByEmail(t, map[string]domain.User{
+		"u1": mustUser(t, "u1", "activa@gl.mx", domain.StatusActive),
+	})
+	mail := &fakeMailer{}
+
+	if err := newInviteService(t, users, &fakeProvisioner{}, &fakeInvitations{}, mail).
+		RequestPasswordReset(context.Background(), "activa@gl.mx"); err != nil {
+		t.Fatalf("RequestPasswordReset: %v", err)
+	}
+	if len(mail.to) != 1 {
+		t.Fatalf("mailer called %d times by the time the call returned; the send must not outlive the request", len(mail.to))
+	}
+}
+
+// And both branches must still cost the same from outside. Sending inline
+// reopens the oracle unless the cheap branch is padded to the same floor.
+func TestRequestPasswordResetCostsTheSameWhetherOrNotTheAddressExists(t *testing.T) {
+	var slept []time.Duration
+	run := func(byID map[string]domain.User) {
+		users := usersByEmail(t, byID)
+		svc := usecase.NewAdminService(
+			users, &fakeRoles{byID: map[string]domain.Role{}}, &fakeHasher{},
+			&fakeProvisioner{}, &fakeInvitations{}, &fakeMailer{},
+			"https://escuela.example/activar", "t1", seqIDs(), fixedClock(testNow),
+			usecase.WithSleeper(func(d time.Duration) { slept = append(slept, d) }),
+		)
+		_ = svc.RequestPasswordReset(context.Background(), "activa@gl.mx")
+	}
+	run(map[string]domain.User{"u1": mustUser(t, "u1", "activa@gl.mx", domain.StatusActive)})
+	run(map[string]domain.User{})
+
+	if len(slept) != 2 {
+		t.Fatalf("padded %d times, want both branches padded: %v", len(slept), slept)
+	}
+	if slept[0] != slept[1] {
+		t.Errorf("known address padded %v, unknown %v — the difference is the oracle", slept[0], slept[1])
+	}
+}
+
+// A failed credential write must LEAVE THE TOKEN USABLE. Otherwise a provider
+// hiccup burns somebody's only way in and the resend guard refuses them a new
+// one, because their account is no longer `invited`... it never stopped being
+// `invited`, but the token is gone.
+func TestAcceptInvitationReleasesTheTokenWhenTheCredentialWriteFails(t *testing.T) {
+	users := &fakeUsers{byID: map[string]domain.User{
+		"u1": mustUser(t, "u1", "maestra@gl.mx", domain.StatusInvited),
+	}}
+	prov := &fakeProvisioner{setErr: errors.New("provider down")}
+	inv := &fakeInvitations{consume: mustInvitation(t, "i1", "u1", domain.PurposeInvitation)}
+
+	if err := newInviteService(t, users, prov, inv, &fakeMailer{}).
+		AcceptInvitation(context.Background(), "token", "fixture-pw-value"); err == nil {
+		t.Fatal("want an error when the provider refuses")
+	}
+	if len(inv.released) != 1 || inv.released[0] != "i1" {
+		t.Errorf("released = %v, want the spent token handed back so the person can retry", inv.released)
+	}
+}
+
+// Changing the credential at the provider must still revoke older sessions.
+// The local path stamps password_changed_at through UpdatePassword; the
+// provider path wrote nothing, so a refresh token stolen before the reset kept
+// working for its full life afterwards.
+func TestAcceptInvitationRevokesOlderSessionsInProviderMode(t *testing.T) {
+	users := &fakeUsers{byID: map[string]domain.User{
+		"u1": mustUser(t, "u1", "maestra@gl.mx", domain.StatusInvited),
+	}}
+	inv := &fakeInvitations{consume: mustInvitation(t, "i1", "u1", domain.PurposeInvitation)}
+
+	if err := newInviteService(t, users, &fakeProvisioner{}, inv, &fakeMailer{}).
+		AcceptInvitation(context.Background(), "token", "fixture-pw-value"); err != nil {
+		t.Fatalf("AcceptInvitation: %v", err)
+	}
+	if !users.rotated["u1"] {
+		t.Error("password_changed_at was not stamped, so refresh tokens older than the reset still work")
+	}
+}
+
+// An anonymous caller must not be able to touch an account that is not active.
+// Escalating to a fresh invitation replaced the live row, so knowing an
+// invitee's address was enough to destroy the link the director had just
+// handed over.
+func TestRequestPasswordResetLeavesNonActiveAccountsAlone(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		st   domain.Status
+	}{{"invited", domain.StatusInvited}, {"suspended", domain.StatusSuspended}} {
+		t.Run(tc.name, func(t *testing.T) {
+			users := usersByEmail(t, map[string]domain.User{
+				"u1": mustUser(t, "u1", "pendiente@gl.mx", tc.st),
+			})
+			inv := &fakeInvitations{}
+			if err := newInviteService(t, users, &fakeProvisioner{}, inv, &fakeMailer{}).
+				RequestPasswordReset(context.Background(), "pendiente@gl.mx"); err != nil {
+				t.Fatalf("RequestPasswordReset: %v", err)
+			}
+			if len(inv.issued) != 0 {
+				t.Errorf("issued %d tokens for a %s account; an anonymous call must not replace its live invitation", len(inv.issued), tc.name)
+			}
+		})
 	}
 }

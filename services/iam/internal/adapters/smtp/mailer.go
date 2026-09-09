@@ -19,7 +19,9 @@ package smtp
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"fmt"
 	"mime"
 	"net"
@@ -157,6 +159,28 @@ func (m *Mailer) Send(ctx context.Context, to, subject, htmlBody, textBody strin
 	return nil
 }
 
+// messageID mints a globally unique identifier for one message, in the sender's
+// own domain. Random rather than sequential: a counter would leak how much mail
+// the school sends.
+func (m *Mailer) messageID() string {
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		// Unreachable in practice, and a slightly weaker id is still far better
+		// than no Message-ID at all — which is what filters punish.
+		return fmt.Sprintf("%d.%s", time.Now().UnixNano(), m.senderDomain())
+	}
+	return fmt.Sprintf("%s.%s", hex.EncodeToString(buf[:]), m.senderDomain())
+}
+
+// senderDomain is the part of the envelope sender after the @, falling back to
+// the relay host when the address is not shaped as expected.
+func (m *Mailer) senderDomain() string {
+	if at := strings.LastIndex(m.fromAddr, "@"); at >= 0 && at+1 < len(m.fromAddr) {
+		return m.fromAddr[at+1:]
+	}
+	return m.host
+}
+
 // guardHeader refuses anything that could break out of a header line.
 //
 // A display name or an address carrying CR or LF would let whoever typed it
@@ -187,6 +211,18 @@ func (m *Mailer) compose(to, subject, htmlBody, textBody string) (string, error)
 	fmt.Fprintf(&b, "From: %s <%s>\r\n", enc.Encode("utf-8", m.fromName), m.fromAddr)
 	fmt.Fprintf(&b, "To: %s\r\n", to)
 	fmt.Fprintf(&b, "Subject: %s\r\n", enc.Encode("utf-8", subject))
+	// Date and Message-ID, and their absence was not a detail.
+	//
+	// Date is mandatory under RFC 5322 and some relays refuse a message without
+	// it outright. Both are among the signals spam filters weigh most heavily,
+	// and this adapter exists precisely to get invitations OUT of the junk
+	// folder — shipping it without the two headers that matter most would have
+	// been solving the problem while carrying it along.
+	//
+	// The Message-ID domain is taken from the sender, so it matches the domain
+	// the message claims to come from.
+	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().Format(time.RFC1123Z))
+	fmt.Fprintf(&b, "Message-ID: <%s>\r\n", m.messageID())
 	b.WriteString("MIME-Version: 1.0\r\n")
 	fmt.Fprintf(&b, "Content-Type: multipart/alternative; boundary=%q\r\n\r\n", boundary)
 

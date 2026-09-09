@@ -136,6 +136,21 @@ func (r *InvitationRepo) MarkSent(ctx context.Context, invitationID string, sent
 	})
 }
 
+// Release hands a spent token back, undoing a Consume whose follow-up failed.
+//
+// Guarded on `consumed_at IS NOT NULL` so it can only ever undo a consumption,
+// never resurrect a token somebody already redeemed successfully.
+func (r *InvitationRepo) Release(ctx context.Context, invitationID string) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := tx.Model(&invitationModel{}).
+			Where("id = ? AND consumed_at IS NOT NULL", invitationID).
+			Update("consumed_at", nil).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "releasing the invitation", err)
+		}
+		return nil
+	})
+}
+
 // Revoke kills every live invitation this user holds.
 //
 // Deleting rather than marking consumed: an invitation nobody redeemed is not a

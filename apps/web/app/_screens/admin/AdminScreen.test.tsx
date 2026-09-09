@@ -150,4 +150,26 @@ describe("AdminScreen", () => {
 
     expect(admin.createRole).toHaveBeenCalledWith(expect.any(String), { name: "Coordinación", permissions: ["users:read"] });
   });
+
+  // Both actions are gated on the row's state, and both used to be gated on
+  // "not active", which is not the same thing.
+  //
+  // "Reactivar" on an `Invitado` row set the account active with no password:
+  // its invitation link then refused (activation only happens from `invited`),
+  // and so did resending. One click made a person unreachable.
+  it("offers neither Reactivar nor a stale resend on the wrong row states", async () => {
+    admin.listUsers.mockResolvedValue([
+      { id: "u2", email: "invitada@gl.mx", displayName: "Invitada", status: "invited", mustChangePassword: false, roleIds: [] },
+      { id: "u3", email: "suspendida@gl.mx", displayName: "Suspendida", status: "suspended", mustChangePassword: false, roleIds: [] },
+    ]);
+    render(<AdminScreen onBack={() => {}} />);
+    await screen.findByText("Invitada");
+
+    // The invited row: it can be re-invited, and it must NOT be "reactivated".
+    expect(screen.getByRole("button", { name: "Reenviar invitación" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reactivar" })).toBeInTheDocument();
+    // Exactly one Reactivar — the suspended row's — and no resend on it.
+    expect(screen.getAllByRole("button", { name: "Reactivar" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Reenviar invitación" })).toHaveLength(1);
+  });
 });

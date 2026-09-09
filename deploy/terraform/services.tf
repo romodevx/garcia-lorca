@@ -65,6 +65,13 @@ locals {
       secret_id = google_secret_manager_secret.iam_jwt_secret.secret_id
       version   = "latest"
     }
+    # The relay password. It can send mail as the school, so it goes the same
+    # way every other credential here does — not as a plain variable, which is
+    # what its own doc in variables.tf said and the first version did anyway.
+    SMTP_PASSWORD = {
+      secret_id = google_secret_manager_secret.smtp_password.secret_id
+      version   = "latest"
+    }
   })
 
   # Gateway → internal service wiring. ENABLED_MODULES is the authoritative
@@ -95,7 +102,6 @@ locals {
     SMTP_HOST      = var.smtp_host
     SMTP_PORT      = var.smtp_port
     SMTP_USERNAME  = var.smtp_username
-    SMTP_PASSWORD  = var.smtp_password
     SMTP_FROM      = var.smtp_from
     SMTP_FROM_NAME = var.smtp_from_name
   })

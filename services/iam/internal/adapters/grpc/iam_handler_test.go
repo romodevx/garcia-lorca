@@ -56,6 +56,8 @@ func (f *fakeUsers) FindAuthByID(_ context.Context, id string) (domain.User, str
 	}
 	return domain.User{}, "", glerrors.ErrNotFound
 }
+func (f *fakeUsers) TouchPasswordChangedAt(context.Context, string) error { return nil }
+
 func (f *fakeUsers) UpdatePassword(_ context.Context, _, _ string) error {
 	f.updated = true
 	return nil

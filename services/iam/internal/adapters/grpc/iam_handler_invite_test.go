@@ -100,6 +100,8 @@ func (s *stubInvitations) Consume(_ context.Context, hash string, now time.Time)
 	return inv, nil
 }
 
+func (s *stubInvitations) Release(_ context.Context, id string) error { return nil }
+
 func (s *stubInvitations) Revoke(_ context.Context, userID string) error {
 	for h, inv := range s.live {
 		if inv.UserID() == userID {

@@ -33,6 +33,7 @@ type fakeUsers struct {
 	listOut   []domain.User            // ListUsers return
 	statusSet    map[string]domain.Status // SetStatus calls
 	passwordsSet map[string]string        // UpdatePassword calls
+	rotated      map[string]bool          // TouchPasswordChangedAt calls
 	rolesSet  map[string][]string      // SetUserRoles calls
 }
 
@@ -69,6 +70,14 @@ func (f *fakeUsers) UpdatePassword(_ context.Context, userID, hash string) error
 		f.passwordsSet = map[string]string{}
 	}
 	f.passwordsSet[userID] = hash
+	return nil
+}
+
+func (f *fakeUsers) TouchPasswordChangedAt(_ context.Context, userID string) error {
+	if f.rotated == nil {
+		f.rotated = map[string]bool{}
+	}
+	f.rotated[userID] = true
 	return nil
 }
 

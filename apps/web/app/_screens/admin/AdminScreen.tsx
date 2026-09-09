@@ -241,8 +241,20 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
                       yet. It used to render on everybody, including accounts in
                       daily use, which is what the owner reported. The backend
                       refuses those too — this is the courtesy, that is the rule. */}
-                  {invites && u.status !== "active" && <button onClick={() => void onResend(u)} style={{ height: 38, padding: "0 14px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, color: "var(--forest)", background: "var(--surface-3)", border: "1px solid var(--border)", cursor: "pointer" }}>Reenviar invitación</button>}
-                  <button onClick={() => void onSuspend(u)} style={{ height: 38, padding: "0 14px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, color: u.status === "active" ? "var(--bad-fg)" : "var(--forest)", background: "var(--surface-3)", border: "1px solid var(--border)", cursor: "pointer" }}>{u.status === "active" ? "Suspender" : "Reactivar"}</button>
+                  {/* ONLY `invited`. It used to be `!== "active"`, which put the
+                      button on suspended rows too — where the backend refuses,
+                      and the refusal surfaced as "no se pudo generar la
+                      invitación": a mail failure that never happened. */}
+                  {invites && u.status === "invited" && <button onClick={() => void onResend(u)} style={{ height: 38, padding: "0 14px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, color: "var(--forest)", background: "var(--surface-3)", border: "1px solid var(--border)", cursor: "pointer" }}>Reenviar invitación</button>}
+                  {/* Suspender/Reactivar moves between those two states and
+                      NOTHING else. "Reactivar" used to render on an `Invitado`
+                      row and set it active — leaving an account with no
+                      password that its own invitation link then refused
+                      (activation only happens from `invited`), and that resend
+                      refused too. One click made a person unreachable. */}
+                  {(u.status === "active" || u.status === "suspended") && (
+                    <button onClick={() => void onSuspend(u)} style={{ height: 38, padding: "0 14px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, color: u.status === "active" ? "var(--bad-fg)" : "var(--forest)", background: "var(--surface-3)", border: "1px solid var(--border)", cursor: "pointer" }}>{u.status === "active" ? "Suspender" : "Reactivar"}</button>
+                  )}
                 </div>
               </div>
             ))}

@@ -34,6 +34,16 @@ type UserRepository interface {
 	// UpdatePassword sets a new hash and clears must_change_password.
 	UpdatePassword(ctx context.Context, userID, newHash string) error
 
+	// TouchPasswordChangedAt stamps the rotation instant WITHOUT touching the
+	// stored hash.
+	//
+	// It exists for the case where the credential lives at an external provider:
+	// there is no local hash to write, but RefreshToken still rejects tokens
+	// minted before this instant (ADR 0005), and that is how a password change
+	// revokes older sessions. Without it, a reset done at the provider left
+	// every previously stolen refresh token working.
+	TouchPasswordChangedAt(ctx context.Context, userID string) error
+
 	// AddRole / RemoveRole change a user's role assignments.
 	AddRole(ctx context.Context, userID, roleID string) error
 	RemoveRole(ctx context.Context, userID, roleID string) error
@@ -193,6 +203,15 @@ type InvitationRepository interface {
 	// sendErr is empty on success. This is what the admin screen reads to show
 	// "Sin enviar" instead of leaving the director to guess.
 	MarkSent(ctx context.Context, invitationID string, sentAt time.Time, sendErr string) error
+
+	// Release hands a spent token back, undoing a Consume whose follow-up work
+	// failed.
+	//
+	// Consuming before writing the credential is what keeps two simultaneous
+	// redemptions to one winner, so that order stays — but it means a provider
+	// answering 503 would otherwise burn somebody's only way in, and the resend
+	// guard would refuse them a new one. This is the compensating half.
+	Release(ctx context.Context, invitationID string) error
 
 	// Revoke kills every live invitation a user still holds.
 	//
