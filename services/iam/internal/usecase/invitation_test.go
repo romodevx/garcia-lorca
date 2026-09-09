@@ -232,20 +232,6 @@ func TestResendInvitationMintsAFreshTwentyFourHourToken(t *testing.T) {
 	}
 }
 
-// A suspended account is not an invited one, but the director may still need to
-// give its owner a way back in once reactivated. Resending is allowed; what is
-// forbidden is resending to somebody who is already through the door.
-func TestResendInvitationAllowedOnSuspended(t *testing.T) {
-	users := &fakeUsers{byID: map[string]domain.User{
-		"u1": mustUser(t, "u1", "suspendida@gl.mx", domain.StatusSuspended),
-	}}
-	inv := &fakeInvitations{}
-	if _, err := newInviteService(t, users, &fakeProvisioner{}, inv, &fakeMailer{}).
-		ResendInvitation(context.Background(), "u1"); err != nil {
-		t.Fatalf("ResendInvitation on suspended: %v", err)
-	}
-}
-
 // --- accepting ------------------------------------------------------------
 
 func TestAcceptInvitationSetsThePasswordThenActivates(t *testing.T) {
@@ -462,4 +448,147 @@ func mustInvitation(t *testing.T, id, userID string, p domain.InvitationPurpose)
 		t.Fatalf("NewInvitation: %v", err)
 	}
 	return inv
+}
+
+// --- lo que la revisión de seguridad encontró ------------------------------
+
+/*
+Two findings from the security review of this branch, and they are the same
+mistake seen from two sides: an invitation token was treated as authority to
+make an account active, without ever asking what the account is now.
+
+  1. AcceptInvitation set `active` from ANY state. An invitation mailed to
+     somebody the school then suspended still worked — the suspended person
+     opens the link they already have, sets a password, and is back in.
+
+  2. ResendInvitation refused only `active`, so a suspended account could be
+     re-invited on demand, which turned (1) from a 24-hour window into a button.
+
+Chained with the resend response carrying the link, a delegated administrator
+holding `users:write` could suspend the owner, pull a fresh token, redeem it
+anonymously with a password of their choosing, and land as owner — with the
+account back in `active` so the tampering left almost no trace.
+
+The rule the codebase already states twice and did not apply here: an account's
+status is somebody's decision, and holding a token says nothing about it.
+*/
+
+// A token minted while the account was `invited` must NOT work after the
+// account is suspended — and must not rewrite the credential either, so the
+// refusal has to come BEFORE the provider is touched.
+func TestAcceptInvitationRefusesOnceTheAccountIsSuspended(t *testing.T) {
+	users := &fakeUsers{byID: map[string]domain.User{
+		"u1": mustUser(t, "u1", "suspendida@gl.mx", domain.StatusSuspended),
+	}}
+	prov := &fakeProvisioner{}
+	inv := &fakeInvitations{consume: mustInvitation(t, "i1", "u1", domain.PurposeInvitation)}
+
+	err := newInviteService(t, users, prov, inv, &fakeMailer{}).
+		AcceptInvitation(context.Background(), "token", "fixture-pw-value")
+
+	// The SAME answer as a dead token. Anything else tells the holder what
+	// state the account is in.
+	if err == nil || glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Fatalf("want KindNotFound, got %v", err)
+	}
+	if _, touched := users.statusSet["u1"]; touched {
+		t.Error("a suspended account was reactivated by redeeming an invitation")
+	}
+	if prov.passwordFor != "" {
+		t.Error("the credential was rewritten on an account the school had locked out")
+	}
+}
+
+// An invitation for an account that is already active is dead too. Live tokens
+// should not survive activation, so reaching this means something is stale.
+func TestAcceptInvitationRefusesOnceTheAccountIsActive(t *testing.T) {
+	users := &fakeUsers{byID: map[string]domain.User{
+		"u1": mustUser(t, "u1", "activa@gl.mx", domain.StatusActive),
+	}}
+	prov := &fakeProvisioner{}
+	inv := &fakeInvitations{consume: mustInvitation(t, "i1", "u1", domain.PurposeInvitation)}
+
+	err := newInviteService(t, users, prov, inv, &fakeMailer{}).
+		AcceptInvitation(context.Background(), "token", "fixture-pw-value")
+	if err == nil || glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Fatalf("want KindNotFound, got %v", err)
+	}
+	if prov.passwordFor != "" {
+		t.Error("an active account's password was rewritten by a stale invitation")
+	}
+}
+
+// A RESET on a suspended account still rotates the credential and still leaves
+// the suspension alone. That was already right; this pins it so the fix above
+// does not tighten it into a refusal.
+func TestAcceptResetStillWorksOnASuspendedAccount(t *testing.T) {
+	users := &fakeUsers{byID: map[string]domain.User{
+		"u1": mustUser(t, "u1", "suspendida@gl.mx", domain.StatusSuspended),
+	}}
+	prov := &fakeProvisioner{}
+	inv := &fakeInvitations{consume: mustInvitation(t, "i1", "u1", domain.PurposeReset)}
+
+	if err := newInviteService(t, users, prov, inv, &fakeMailer{}).
+		AcceptInvitation(context.Background(), "token", "fixture-pw-value"); err != nil {
+		t.Fatalf("AcceptInvitation(reset): %v", err)
+	}
+	if prov.passwordFor != "suspendida@gl.mx" {
+		t.Error("a reset must still rotate the credential")
+	}
+	if _, touched := users.statusSet["u1"]; touched {
+		t.Error("a reset changed the status")
+	}
+}
+
+// Resending is for people who have not walked through the door — not for
+// accounts somebody deliberately locked out. Allowing it made the suspension
+// reversible on demand.
+func TestResendInvitationRefusesOnASuspendedAccount(t *testing.T) {
+	users := &fakeUsers{byID: map[string]domain.User{
+		"u1": mustUser(t, "u1", "suspendida@gl.mx", domain.StatusSuspended),
+	}}
+	inv := &fakeInvitations{}
+
+	_, err := newInviteService(t, users, &fakeProvisioner{}, inv, &fakeMailer{}).
+		ResendInvitation(context.Background(), "u1")
+	if err == nil || glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Fatalf("want KindInvalid, got %v", err)
+	}
+	if len(inv.issued) != 0 {
+		t.Error("a fresh token was minted for an account the school had locked out")
+	}
+}
+
+// Suspending kills whatever links the person is still holding. Without this the
+// token already sitting in their mailbox outlives the decision to lock them out.
+func TestSuspendingAnAccountRevokesItsLiveInvitations(t *testing.T) {
+	users := &fakeUsers{byID: map[string]domain.User{
+		"u1": mustUser(t, "u1", "maestra@gl.mx", domain.StatusInvited),
+	}}
+	inv := &fakeInvitations{}
+	svc := newInviteService(t, users, &fakeProvisioner{}, inv, &fakeMailer{})
+
+	if err := svc.SetUserStatus(context.Background(), "u1", domain.StatusSuspended); err != nil {
+		t.Fatalf("SetUserStatus: %v", err)
+	}
+	if len(inv.revoked) != 1 || inv.revoked[0] != "u1" {
+		t.Errorf("revoked = %v, want the live invitations killed on suspension", inv.revoked)
+	}
+}
+
+// Reactivating must NOT revoke: there is nothing outstanding to kill, and a
+// blanket revoke here would be a write nobody asked for.
+func TestReactivatingAnAccountRevokesNothing(t *testing.T) {
+	users := &fakeUsers{byID: map[string]domain.User{
+		"u1": mustUser(t, "u1", "maestra@gl.mx", domain.StatusSuspended),
+	}}
+	inv := &fakeInvitations{}
+	svc := newInviteService(t, users, &fakeProvisioner{}, inv, &fakeMailer{})
+
+	if err := svc.SetUserStatus(context.Background(), "u1", domain.StatusActive); err != nil {
+		t.Fatalf("SetUserStatus: %v", err)
+	}
+	if len(inv.revoked) != 0 {
+		t.Errorf("revoked = %v on reactivation", inv.revoked)
+	}
 }

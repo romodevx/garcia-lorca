@@ -119,6 +119,10 @@ func forbidAssign(w http.ResponseWriter, perm string) {
 	http.Error(w, "forbidden: cannot assign a role granting a permission you do not hold: "+perm, http.StatusForbidden)
 }
 
+func forbidReach(w http.ResponseWriter, perm string) {
+	http.Error(w, "forbidden: cannot issue access to an account holding a permission you do not hold: "+perm, http.StatusForbidden)
+}
+
 // --- wire shapes ----------------------------------------------------------
 
 type userResponse struct {
@@ -240,12 +244,40 @@ func (h *AdminHandler) InviteUser(w http.ResponseWriter, r *http.Request) {
 	}{toUserResponse(res), toInvitationResponse(inv)})
 }
 
-// ResendInvitation handles POST /api/v1/users/{id}/invite: mail this user a
-// fresh link to set a password. No subset guard applies — no roles change, and
-// the link goes to the address the user row already carries, so the only person
-// who can use it is that user.
+// ResendInvitation handles POST /api/v1/users/{id}/invite: mint a fresh link
+// for somebody who has not walked through the door yet.
+//
+// THE SUBSET GUARD APPLIES HERE, and the comment that used to sit in its place
+// explained why it did not: "the link goes to the address the user row already
+// carries, so the only person who can use it is that user." That was true while
+// the route answered 204 and the message was the only way to reach the link. It
+// stopped being true when the response started carrying the URL.
+//
+// What that opened: this endpoint does not GRANT a permission, it hands over an
+// account — so it walked straight around the fence that keeps a `users:write`
+// holder inside its own permission subset everywhere else. A delegated
+// administrator could pull the access link of a principal whose powers it was
+// never given, redeem it anonymously with a password of its choosing, and
+// arrive as that person.
+//
+// So the same rule as assigning a role, for the same reason: you may only reach
+// an account whose permissions you already hold.
 func (h *AdminHandler) ResendInvitation(w http.ResponseWriter, r *http.Request) {
-	inv, err := h.svc.ResendInvitation(r.Context(), r.PathValue("id"))
+	id := r.PathValue("id")
+	target, err := h.svc.GetUser(r.Context(), id)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	if perm, ok, err := h.callerCanAssign(r.Context(), target.RoleIDs); err != nil {
+		writeConnectError(w, err)
+		return
+	} else if !ok {
+		forbidReach(w, perm)
+		return
+	}
+
+	inv, err := h.svc.ResendInvitation(r.Context(), id)
 	if err != nil {
 		writeConnectError(w, err)
 		return
@@ -273,7 +305,14 @@ type invitationResponse struct {
 }
 
 func toInvitationResponse(inv client.Invitation) invitationResponse {
-	out := invitationResponse{URL: inv.URL, Sent: inv.Sent, SendError: inv.SendError, Via: inv.Via}
+	out := invitationResponse{Sent: inv.Sent, SendError: inv.SendError, Via: inv.Via}
+	// The link comes back ONLY when nothing was delivered. That is the case it
+	// exists for — an administrator who cannot mail somebody still needs a way
+	// to hand access over. Once the message has gone out it buys nothing, and
+	// every extra copy of a token is another place it can leak from.
+	if !inv.Sent {
+		out.URL = inv.URL
+	}
 	if !inv.ExpiresAt.IsZero() {
 		out.ExpiresAt = inv.ExpiresAt.UTC().Format(time.RFC3339)
 	}

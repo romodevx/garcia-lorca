@@ -175,9 +175,14 @@ func (s *AdminService) ResendInvitation(ctx context.Context, userID string) (Inv
 	if err != nil {
 		return Invitation{}, err // KindNotFound for an unknown id
 	}
-	if user.Status() == domain.StatusActive {
+	// ONLY an invited account. This used to refuse just `active`, which let a
+	// SUSPENDED one be re-invited on demand — and since redeeming an invitation
+	// activated the account, that was an un-suspend button wearing a different
+	// name. Suspension is somebody's decision; the way back is reactivating the
+	// account, not minting a new way in.
+	if user.Status() != domain.StatusInvited {
 		return Invitation{}, glerrors.New(glerrors.KindInvalid,
-			"this account is already active; it does not need an invitation")
+			"esta cuenta no está esperando una invitación")
 	}
 	out, err := s.issueAndSend(ctx, user, domain.PurposeInvitation, domain.InvitationLifetime)
 	if err != nil {
@@ -264,6 +269,18 @@ func (s *AdminService) AcceptInvitation(ctx context.Context, token, password str
 	user, err := s.users.FindByID(ctx, inv.UserID())
 	if err != nil {
 		return err
+	}
+	// The account's CURRENT state decides, not the token's purpose. Reading the
+	// purpose alone treated an invitation as authority to make an account
+	// active from any state — so a person the school suspended after inviting
+	// them could open the link they already had and come straight back in.
+	//
+	// Checked BEFORE setCredential, so a locked-out account does not even get
+	// its password rewritten. And it answers with the SAME error as a dead
+	// token: telling the holder "that account is suspended" would leak the
+	// account's state to whoever is holding the link.
+	if inv.ActivatesAccount() && user.Status() != domain.StatusInvited {
+		return errInvitationDead()
 	}
 	if err := s.setCredential(ctx, user, password); err != nil {
 		return err
@@ -419,6 +436,14 @@ func (s *AdminService) deliver(ctx context.Context, user domain.User, link strin
 		"no hay un servidor de correo configurado; entrega el enlace tú mismo")
 }
 
+// errInvitationDead is the ONE answer for every unusable token: unknown,
+// expired, already spent, or aimed at an account that is no longer waiting for
+// it. They must stay indistinguishable — each difference is a question somebody
+// holding a link could ask about an account they do not own.
+func errInvitationDead() error {
+	return glerrors.New(glerrors.KindNotFound, "esta invitación ya no es válida")
+}
+
 // newToken mints 32 bytes of cryptographic randomness, base64url-encoded.
 //
 // 256 bits: unguessable by construction, so the token needs no rate limit of
@@ -513,7 +538,17 @@ func (s *AdminService) ListUsers(ctx context.Context) ([]domain.User, error) {
 // SetUserStatus activates or suspends an account. A suspended account cannot
 // authenticate (domain.User.CanAuthenticate enforces this at login).
 func (s *AdminService) SetUserStatus(ctx context.Context, userID string, status domain.Status) error {
-	return s.users.SetStatus(ctx, userID, status)
+	if err := s.users.SetStatus(ctx, userID, status); err != nil {
+		return err
+	}
+	// Locking somebody out has to reach the links they are still holding.
+	// Otherwise the invitation sitting in their mailbox outlives the decision,
+	// and the guard in AcceptInvitation is the only thing standing between it
+	// and a way back in. Two locks on the same door, deliberately.
+	if status == domain.StatusSuspended && s.invitations != nil {
+		_ = s.invitations.Revoke(ctx, userID)
+	}
+	return nil
 }
 
 // CreateRole creates a role from a name and a set of "resource:action"
