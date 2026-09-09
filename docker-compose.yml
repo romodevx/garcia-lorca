@@ -154,6 +154,17 @@ services:
       # can actually reach, which locally is the host port, not the container's.
       # Getting this wrong produces a link that looks right and 404s.
       PUBLIC_WEB_URL: "http://localhost:${WEB_HOST_PORT:-3000}"
+      # The relay that carries invitations. EMPTY IS A VALID STATE: with no
+      # relay, inviting still works and reports the link so it can be handed
+      # over by hand. Fill these in and the same button starts mailing, with no
+      # code change — the school's own server when its credential arrives, any
+      # authenticated relay before that.
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_USERNAME: "${SMTP_USERNAME:-}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
+      SMTP_FROM: "${SMTP_FROM:-}"
+      SMTP_FROM_NAME: "${SMTP_FROM_NAME:-Colegio García Lorca}"
     volumes:
       - .:/workspace
       - go-mod-cache:/go/pkg/mod
