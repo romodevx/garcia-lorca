@@ -58,6 +58,10 @@ type TuitionPlanSpec struct {
 	// the run has always used — the plan's due day in the cycle's first month —
 	// so a plan written before this field goes on meaning what it meant.
 	EnrollmentDueOn time.Time
+	// EnrollmentConcepts breaks the inscription into the lines the school prints,
+	// each priced by when the family settles it. Empty keeps EnrollmentCents,
+	// which is what every plan written before ADR 0011 means.
+	EnrollmentConcepts []EnrollmentConcept
 }
 
 // Installment is one payment of the year: which calendar month it falls in and
@@ -107,6 +111,7 @@ type TuitionPlan struct {
 	monthlyDiscountCents int64
 	fees                 []Fee
 	enrollmentDueOn      time.Time
+	enrollmentConcepts   []EnrollmentConcept
 	active               bool
 }
 
@@ -157,6 +162,25 @@ func NewTuitionPlan(spec TuitionPlanSpec) (TuitionPlan, error) {
 			return TuitionPlan{}, err
 		}
 	}
+	if len(spec.EnrollmentConcepts) > maxEnrollmentConcepts {
+		return TuitionPlan{}, glerrors.New(glerrors.KindInvalid,
+			"that is more lines than an inscription can carry")
+	}
+	seenConcept := make(map[string]bool, len(spec.EnrollmentConcepts))
+	for _, c := range spec.EnrollmentConcepts {
+		if err := c.validate(); err != nil {
+			return TuitionPlan{}, err
+		}
+		// Two lines with one name cannot be told apart on a receipt, and the
+		// charge's reference is derived from that name (ADR 0008 + 0011) — so
+		// one of the two would silently never be issued.
+		name := strings.ToLower(strings.TrimSpace(c.Name))
+		if seenConcept[name] {
+			return TuitionPlan{}, glerrors.New(glerrors.KindInvalid,
+				"two lines of the inscription share a name")
+		}
+		seenConcept[name] = true
+	}
 	for _, i := range spec.Schedule {
 		if i.Month < 1 || i.Month > 12 {
 			return TuitionPlan{}, glerrors.New(glerrors.KindInvalid, "a payment must fall in a month from 1 to 12")
@@ -178,6 +202,7 @@ func NewTuitionPlan(spec TuitionPlanSpec) (TuitionPlan, error) {
 		monthlyDiscountCents: spec.MonthlyDiscountCents,
 		fees:                 spec.Fees,
 		enrollmentDueOn:      spec.EnrollmentDueOn,
+		enrollmentConcepts:   spec.EnrollmentConcepts,
 	}, nil
 }
 
@@ -289,6 +314,49 @@ func (p TuitionPlan) Installments(cycleStart time.Time) []DueInstallment {
 		})
 	}
 	return out
+}
+
+// InstallmentsFrom is the part of the year a pupil who arrived on joinedOn owes.
+//
+// The run bills the WHOLE year up front, which is right for everybody who was
+// there when it opened and wrong for anybody who was not: a pupil who arrives in
+// March would be billed for September, for months the school never taught them.
+//
+// The month they arrive in IS theirs — the school's rule is that the first
+// payment is the inscription plus the current month's tuition — but they are not
+// late for it. March fell due on the 10th and they enrolled on the 20th;
+// charging them a surcharge for ten days they were not yet a pupil is money the
+// school cannot defend. So that first deadline moves to the day they joined, and
+// only that one. It stays inside the same calendar month, which is what keeps
+// the charge's reference (and therefore its identity) unchanged.
+//
+// A zero joinedOn is every pupil enrolled before the join date was recorded at
+// all. They get the whole year, exactly as they do today.
+func (p TuitionPlan) InstallmentsFrom(cycleStart, joinedOn time.Time) []DueInstallment {
+	all := p.Installments(cycleStart)
+	if joinedOn.IsZero() || !joinedOn.After(cycleStart) {
+		return all
+	}
+
+	joinedMonth := monthIndex(joinedOn)
+	out := make([]DueInstallment, 0, len(all))
+	for _, item := range all {
+		if monthIndex(item.DueOn) < joinedMonth {
+			continue
+		}
+		if len(out) == 0 && item.DueOn.Before(joinedOn) {
+			item.DueOn = joinedOn
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+// monthIndex orders a date by month across year boundaries, so a school year
+// running September to June compares without anybody writing the year down
+// twice.
+func monthIndex(t time.Time) int {
+	return t.Year()*monthsInYear + int(t.Month())
 }
 
 // OverdueMonths counts COMPLETED months between a due date and a given day.
