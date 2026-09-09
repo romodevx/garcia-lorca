@@ -276,9 +276,14 @@ func (s *AuthService) ChangePassword(ctx context.Context, accessToken, currentPa
 	//
 	// Rotation lives at the provider once it is in play: the invitation link is
 	// also the reset link (see AdminService.InviteUser).
+	// KindInvalid, not KindInternal. The old kind mapped to HTTP 500 at the
+	// gateway for a precondition the caller can do nothing about: it paged as a
+	// server fault, and the screen showed a generic failure instead of the one
+	// sentence that helps. The way to change a provider-held password is the
+	// reset link, which this system now has.
 	if s.idTokens != nil {
-		return glerrors.New(glerrors.KindInternal,
-			"passwords are managed by the identity provider; use its password reset")
+		return glerrors.New(glerrors.KindInvalid,
+			"la contraseña la guarda el proveedor; usa \"olvidé mi contraseña\" para cambiarla")
 	}
 	if len(newPassword) < minPasswordLen {
 		return glerrors.New(glerrors.KindInvalid, "new password is too short")

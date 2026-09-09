@@ -217,9 +217,14 @@ func TestChangePasswordRefusesWhenTheProviderOwnsCredentials(t *testing.T) {
 	if err == nil {
 		t.Fatal("want a refusal while an identity provider is configured, got nil")
 	}
-	if glerrors.KindOf(err) != glerrors.KindInternal {
-		t.Fatalf("error = %v (kind %v), want KindInternal — the caller did nothing wrong",
-			err, glerrors.KindOf(err))
+	// KindInvalid, not KindInternal. "The caller did nothing wrong" was the
+	// right instinct and the wrong conclusion: KindInternal maps to HTTP 500 at
+	// the gateway, so a precondition the caller can act on paged as a server
+	// fault and the screen showed a generic failure instead of the one sentence
+	// that helps. The caller DID ask for the wrong thing, and there is a right
+	// thing — the reset link, which this system now has.
+	if glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Fatalf("error = %v (kind %v), want KindInvalid", err, glerrors.KindOf(err))
 	}
 }
 

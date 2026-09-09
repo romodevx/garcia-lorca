@@ -532,6 +532,23 @@ func hashToken(token string) string {
 // SetUserRoles. Promote to a single-tx CreateUserWithRoles if provisioning must
 // be all-or-nothing.
 func (s *AdminService) CreateUser(ctx context.Context, rawEmail, displayName, tempPassword string, roleIDs []string) (domain.User, error) {
+	// NOT WHERE THE PROVIDER OWNS CREDENTIALS, and this closes a trap rather
+	// than expressing a preference.
+	//
+	// In that environment `issueFor` strips the rotation flag from every token
+	// and ChangePassword refuses — both right, because there is no local
+	// password to replace. But this function kept handing out temporary ones
+	// anyway, so the account ended up holding a password a director typed, with
+	// nothing forcing a rotation and no way to perform one. A credential
+	// somebody else knows, valid indefinitely.
+	//
+	// Refusing here beats re-adding the flag, which would only send the person
+	// to a screen that cannot help them. Invite them instead: nobody but the
+	// account's owner ever learns the password.
+	if s.provisioner != nil {
+		return domain.User{}, glerrors.New(glerrors.KindInvalid,
+			"aquí las contraseñas las guarda el proveedor; invita al usuario en vez de asignarle una")
+	}
 	if strings.TrimSpace(tempPassword) == "" {
 		return domain.User{}, glerrors.New(glerrors.KindInvalid, "temporary password is required")
 	}
