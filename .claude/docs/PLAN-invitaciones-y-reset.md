@@ -31,7 +31,48 @@ Fecha: 2026-09-08
 
 ## Los tres hallazgos que cambian el plan (sondas en vivo contra el proyecto `garcia-lorca`)
 
-### H1 — El proveedor acepta el envío y **no entrega nada**. Verificado.
+### H1 — CORREGIDA (2026-09-09): el proveedor **sí entrega**; el correo cae en spam
+
+**Lo que escribí abajo es falso y lo dejo tachado en vez de borrarlo**, porque el
+error importa más que la conclusión.
+
+El dueño recibió el correo de `noreply@garcia-lorca.firebaseapp.com`. **Estaba en
+spam.** Mis cuatro sondas las di por no entregadas apoyándome en búsquedas
+`in:anywhere` sobre su Gmail — y una búsqueda posterior de `in:spam` devuelve
+**completamente vacío**, lo cual no es que el spam esté vacío: es que el conector
+no puede verlo. Concluí "no entrega nada" desde una herramienta que era ciega
+justo donde estaba la respuesta. Cuatro sondas coincidentes no son cuatro
+pruebas cuando las cuatro miran por la misma ventana tapiada.
+
+**Diagnóstico correcto:** el remitente por defecto de Identity Platform entrega,
+y Gmail lo clasifica como spam. Es un problema de **reputación del remitente**,
+no de entrega.
+
+**Qué NO cambia:** ninguna de las tres decisiones. Las 24 horas siguen sin poder
+salir de Firebase (1 h, sin campo configurable — verificado dos veces); el estado
+`invited` y el botón que se esconde siguen necesitando dominio nuestro; y el
+`200` sigue sin distinguir entregado de perdido. El enfoque B se sostiene.
+
+**Qué SÍ cambia, y es lo que estaba mal enfocado:** el enemigo es el spam, no el
+silencio. Eso vuelve la alineación del remitente un requisito, no un adorno:
+- El servidor del colegio con su SPF (H4) es mejor que Firebase **justo en este
+  eje**, que es el único que importaba.
+- `_dmarc.ceglorca.com` está en `p=none` — el dominio del colegio es suplantable
+  y no pide nada a los buzones receptores. Sube de "hito de handover" a **tarea
+  con consecuencia medible**: sin DKIM+DMARC, nuestro correo repetirá el destino
+  del de Google.
+- Cualquier relé intermedio (Gmail con contraseña de aplicación) manda desde un
+  `@gmail.com`, no desde el colegio. Sirve para probar; no para la entrega final.
+
+**Lección de método, anotada porque volverá a pasar:** una herramienta que
+devuelve "nada" y una que devuelve "no puedo ver" se leen igual desde fuera. Antes
+de convertir un vacío en un hallazgo, hay que comprobar que la herramienta puede
+ver algo — un `in:spam` que devuelve cero en cualquier buzón real era la señal, y
+la pasé por alto.
+
+---
+
+### ~~H1 (versión original, INCORRECTA)~~ — El proveedor acepta el envío y no entrega nada
 
 Tres sondas contra `accounts:sendOobCode` con la llave web de `dev.tfvars`:
 

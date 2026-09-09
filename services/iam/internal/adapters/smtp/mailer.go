@@ -1,12 +1,20 @@
 // Package smtp delivers mail over an authenticated SMTP relay.
 //
-// It exists because the identity provider's own sender does not deliver. That
-// was measured, not assumed: `accounts:sendOobCode` answered HTTP 200 for a
-// passwordless account, for an account with a password, for a real account with
-// prior sign-ins, and for an address that did not exist at all — and not one
-// message arrived. With email-enumeration protection on, that 200 cannot even
-// distinguish "sent" from "there is nobody here", so the failure was invisible
-// from inside the product.
+// It exists because the identity provider's own sender lands in spam.
+//
+// The first version of this comment said it "does not deliver", which was
+// wrong: the messages arrived, Gmail filed them as junk, and the search used to
+// check could not see the spam folder. The failure was real and the diagnosis
+// was not, so the reasoning is worth keeping straight — what this adapter buys
+// is a sender we can ALIGN (SPF, and DKIM once the school's DNS is reachable),
+// which is the only thing that moves a message out of the junk folder. Google's
+// default `noreply@<project>.firebaseapp.com` is shared, unaligned with any
+// domain the recipient recognises, and nothing we can improve.
+//
+// What stands from the original reasoning: with email-enumeration protection on,
+// `sendOobCode` answers HTTP 200 for an address that has no account at all, so
+// the provider's success is not evidence a message went anywhere. That is why
+// this port reports a real error and the row records it.
 package smtp
 
 import (
