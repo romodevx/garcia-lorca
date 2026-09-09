@@ -537,18 +537,13 @@ func feeDescription(i domain.FeeInstallment) string {
 // everything but letters and digits so that fixing the capitalisation of "Cuota
 // de Julio" does not re-issue the whole school's charges.
 func feeSlug(name string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(name) {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-		}
-	}
-	if b.Len() == 0 {
+	b := domain.Slugify(name)
+	if b == "" {
 		// A name of nothing but punctuation still needs an identity, or every
 		// such fee would collide with every other.
 		return "cuota"
 	}
-	return b.String()
+	return b
 }
 
 // resolveAsOf reads the date the run should pretend it is. An empty value means

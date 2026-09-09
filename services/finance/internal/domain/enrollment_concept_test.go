@@ -180,3 +180,82 @@ func TestThereIsALimitToHowManyConceptsAndStepsAPlanCarries(t *testing.T) {
 		t.Fatalf("13 steps: err = %v, want KindInvalid", err)
 	}
 }
+
+// A concept whose ladder is empty must not take the process down. validate()
+// refuses one, so this is unreachable through a constructed plan — but the type
+// is exported with exported fields, and a handler pricing a preview straight off
+// a request payload holds one before any plan exists.
+func TestPricingAMalformedConceptDoesNotPanic(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("AmountOn panicked on a concept with no steps: %v", r)
+		}
+	}()
+	empty := domain.EnrollmentConcept{Name: "Inscripción"}
+	if got := empty.AmountOn(day(2027, time.March, 1)); got != 0 {
+		t.Errorf("AmountOn = %d, want 0 for a concept that prices nothing", got)
+	}
+}
+
+// The uniqueness guard has to normalize exactly as hard as the identity it
+// protects. "Cuota APF" and "Cuota A.P.F." are two names to a human and ONE
+// external_ref to the ledger, so CreateChargesBulk would drop one line on
+// conflict and report it as skipped: the family is under-billed for the year and
+// nothing says so.
+func TestTwoNamesThatCollapseToOneReferenceAreRefused(t *testing.T) {
+	tier := []domain.PriceTier{{EffectiveFrom: day(2027, time.January, 1), AmountCents: 85000}}
+	for _, pair := range [][2]string{
+		{"Cuota APF", "Cuota A.P.F."},
+		{"Cuota APF", "cuota  apf"},
+		{"Gastos adm y seguro", "GASTOS-ADM-Y-SEGURO"},
+	} {
+		t.Run(pair[0]+" vs "+pair[1], func(t *testing.T) {
+			_, err := domain.NewTuitionPlan(domain.TuitionPlanSpec{
+				ID: "tp-1", TenantID: "t-1", CycleID: "c-1", LevelID: "lv-1",
+				MonthlyCents: 320000, Months: 10, FirstBilledMonth: 9, DueDay: 10,
+				EnrollmentConcepts: []domain.EnrollmentConcept{
+					{Name: pair[0], Tiers: tier},
+					{Name: pair[1], Tiers: tier},
+				},
+			})
+			if err == nil || glerrors.KindOf(err) != glerrors.KindInvalid {
+				t.Fatalf("err = %v, want KindInvalid", err)
+			}
+		})
+	}
+}
+
+// Names that only LOOK alike are still two concepts. The guard must not be so
+// eager that a school cannot print two lines it means to print.
+func TestNamesThatMerelyResembleEachOtherAreBothAllowed(t *testing.T) {
+	tier := []domain.PriceTier{{EffectiveFrom: day(2027, time.January, 1), AmountCents: 85000}}
+	_, err := domain.NewTuitionPlan(domain.TuitionPlanSpec{
+		ID: "tp-1", TenantID: "t-1", CycleID: "c-1", LevelID: "lv-1",
+		MonthlyCents: 320000, Months: 10, FirstBilledMonth: 9, DueDay: 10,
+		EnrollmentConcepts: []domain.EnrollmentConcept{
+			{Name: "Cuota APF 1", Tiers: tier},
+			{Name: "Cuota APF 2", Tiers: tier},
+		},
+	})
+	if err != nil {
+		t.Fatalf("two genuinely different names were refused: %v", err)
+	}
+}
+
+// EnrollmentCents and EnrollmentConcepts are two answers to one question, and
+// during the rollout four callers still read the first one
+// (usecase/billing.go, usecase/enrollment_charge.go, the grpc handler and the
+// gateway client). A plan carrying both would show $5,000 in the editor while
+// the statement totals $7,750, with nothing saying they disagree. Made
+// unrepresentable rather than documented.
+func TestAPlanCannotCarryBothASingleInscriptionAndConcepts(t *testing.T) {
+	_, err := domain.NewTuitionPlan(domain.TuitionPlanSpec{
+		ID: "tp-1", TenantID: "t-1", CycleID: "c-1", LevelID: "lv-1",
+		EnrollmentCents: 500000,
+		MonthlyCents:    320000, Months: 10, FirstBilledMonth: 9, DueDay: 10,
+		EnrollmentConcepts: []domain.EnrollmentConcept{inscriptionLadder()},
+	})
+	if err == nil || glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Fatalf("err = %v, want KindInvalid", err)
+	}
+}

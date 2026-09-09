@@ -256,6 +256,7 @@ Las Etapas 0–3 son secuenciales de verdad: comparten `tuition.go` y `billing.g
 | **Dos aritméticas del tramo** (Go y TypeScript) | La pantalla promete un total y el servidor cobra otro | El front sólo **previsualiza**; el servidor manda. Mismo trato que `feeShares`, que ya vive duplicada a conciencia |
 | **`dev` es la demo en vivo** | Un cambio a medias en el cobro se ve en la demo diaria | Rama propia hasta que las dos compuertas pasen; `dev` sólo recibe el módulo completo |
 | **Migración sobre datos reales** | `dev` en GCP tiene planes ya configurados | El default `'[]'` deja todo plan existente cobrando exactamente lo que cobra hoy |
+| **El día del colegio es el día UTC** | El colegio está en UTC-6 y el servicio trata el día UTC como el día escolar (`resolveAsOf` trunca `now().UTC()`). A las 18:30 hora local ya es el día siguiente para el sistema: una familia cotizada el 28-feb a esa hora paga el precio de marzo | **Preexistente y transversal** — ya afecta vencimientos, recargo diario y ventana de pronto pago. Corregirlo sólo en la escalera la dejaría 6 h desfasada del recargo en el mismo estado de cuenta, que es peor que un sistema desfasado de forma consistente. Va en un solo lugar, donde `now()` se convierte en fecha, contra una zona horaria del colegio que el servicio todavía no tiene. **Carry-forward, fuera de M18** |
 
 ---
 

@@ -171,15 +171,26 @@ func NewTuitionPlan(spec TuitionPlanSpec) (TuitionPlan, error) {
 		if err := c.validate(); err != nil {
 			return TuitionPlan{}, err
 		}
-		// Two lines with one name cannot be told apart on a receipt, and the
-		// charge's reference is derived from that name (ADR 0008 + 0011) — so
-		// one of the two would silently never be issued.
-		name := strings.ToLower(strings.TrimSpace(c.Name))
+		// Compared as the SLUG, not as the name, because the slug is what the
+		// charge's reference is built from (ADR 0008 + 0011). "Cuota APF" and
+		// "Cuota A.P.F." are two names to a human and one reference to the
+		// ledger: ON CONFLICT would drop the second line, report it as skipped,
+		// and under-bill the family for the whole year without saying so.
+		name := Slugify(c.Name)
 		if seenConcept[name] {
 			return TuitionPlan{}, glerrors.New(glerrors.KindInvalid,
 				"two lines of the inscription share a name")
 		}
 		seenConcept[name] = true
+	}
+	if len(spec.EnrollmentConcepts) > 0 && spec.EnrollmentCents != 0 {
+		// Two answers to one question. EnrollmentCents is still read by the
+		// billing run, the enrolment consumer, the grpc handler and the gateway
+		// client, so a plan carrying both would price the inscription at one
+		// number in the editor and another on the statement, with nothing saying
+		// they disagree. Refused rather than documented.
+		return TuitionPlan{}, glerrors.New(glerrors.KindInvalid,
+			"an inscription is either one amount or a list of concepts, not both")
 	}
 	for _, i := range spec.Schedule {
 		if i.Month < 1 || i.Month > 12 {
@@ -344,7 +355,11 @@ func (p TuitionPlan) InstallmentsFrom(cycleStart, joinedOn time.Time) []DueInsta
 		if monthIndex(item.DueOn) < joinedMonth {
 			continue
 		}
-		if len(out) == 0 && item.DueOn.Before(joinedOn) {
+		if monthIndex(item.DueOn) == joinedMonth && item.DueOn.Before(joinedOn) {
+			// EVERY payment of their own month, not just the first: a year split
+			// "diciembre a la mitad" has two payments in one month, and the
+			// second one left on the plan's day was overdue the moment they
+			// enrolled.
 			item.DueOn = joinedOn
 		}
 		out = append(out, item)

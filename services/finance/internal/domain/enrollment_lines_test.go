@@ -252,3 +252,42 @@ func TestJoiningMidYearKeepsTheSplitAmounts(t *testing.T) {
 		t.Errorf("last payment %s, want March 2027", got[1].DueOn.Format("2006-01"))
 	}
 }
+
+// EVERY payment of the join month moves, not just the first one kept.
+//
+// Schedule validation allows two payments in one month — "diciembre a la mitad"
+// split within December is a real arrangement — and a pupil joining on the 20th
+// found the second one still dated the 10th, overdue the moment they enrolled.
+// That is precisely the surcharge-for-days-they-were-not-a-pupil this rule
+// exists to prevent.
+func TestEveryPaymentOfTheJoinMonthMovesToTheDayTheyJoined(t *testing.T) {
+	plan, err := domain.NewTuitionPlan(domain.TuitionPlanSpec{
+		ID: "tp-1", TenantID: "t-1", CycleID: "c-1", LevelID: "lv-1",
+		MonthlyCents: 320000, Months: 3, FirstBilledMonth: 3, DueDay: 10,
+		Schedule: []domain.Installment{
+			{Month: 3, AmountCents: 160000},
+			{Month: 3, AmountCents: 160000},
+			{Month: 4, AmountCents: 320000},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewTuitionPlan: %v", err)
+	}
+	cycleStart := day(2026, time.August, 1)
+	joined := day(2027, time.March, 20)
+
+	got := plan.InstallmentsFrom(cycleStart, joined)
+
+	if len(got) != 3 {
+		t.Fatalf("want 3 payments, got %d", len(got))
+	}
+	for i := 0; i < 2; i++ {
+		if !got[i].DueOn.Equal(joined) {
+			t.Errorf("March payment %d due %s, want the join day %s",
+				i+1, got[i].DueOn.Format("2006-01-02"), joined.Format("2006-01-02"))
+		}
+	}
+	if got[2].DueOn.Day() != 10 {
+		t.Errorf("April due on the %d, want the plan's day 10", got[2].DueOn.Day())
+	}
+}

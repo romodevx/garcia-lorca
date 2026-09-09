@@ -53,7 +53,24 @@ type EnrollmentConcept struct {
 // Before the first step, the first step's amount. Zero would price the year free
 // for anybody who enquired in December, and a concept nobody was charged for is
 // one the school discovers in June.
+//
+// `on` must be the SCHOOL'S calendar day, and this service's convention is that
+// the school's day is the UTC day: resolveAsOf truncates now().UTC() to UTC
+// midnight, and a tier's effective_from parses from YYYY-MM-DD to the same. The
+// school is UTC-6, so that convention runs ~6 hours ahead of the office clock —
+// which it already does for due dates, for the daily surcharge and for the
+// early-payment window. Correcting it here alone would put the ladder 6 hours
+// out of step with the surcharge on the same statement, which is worse than a
+// system that is consistently offset. It belongs in one place, where now()
+// becomes a date, against a school timezone this service does not yet hold.
 func (c EnrollmentConcept) AmountOn(on time.Time) int64 {
+	if len(c.Tiers) == 0 {
+		// validate() refuses a ladder with no steps, so this cannot happen on a
+		// concept that reached a plan. It can happen on one a handler is holding
+		// straight off a request payload, and a price quote must not be able to
+		// take the service down.
+		return 0
+	}
 	amount := c.Tiers[0].AmountCents
 	for _, tier := range c.Tiers {
 		if tier.EffectiveFrom.After(on) {
@@ -96,6 +113,28 @@ func (c EnrollmentConcept) validate() error {
 		previous = tier.EffectiveFrom
 	}
 	return nil
+}
+
+// Slugify reduces a name to the ASCII letters and digits in it, lowercased.
+//
+// It exists because a concept's NAME is what its charge reference is built from
+// (ADR 0008 + 0011), and a reference is an identity: two names that reduce to
+// one slug are one charge, and the second line the school meant to print would
+// be silently dropped by ON CONFLICT and reported as skipped.
+//
+// So the uniqueness guard and the reference builder must reduce names exactly
+// as hard as each other, which is only guaranteed by there being one function.
+// An empty result is a legal answer here; callers that need a reference of their
+// own supply the fallback, because the fallback differs per kind of charge and
+// changing an existing one would re-issue every charge that carries it.
+func Slugify(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(name) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // EnrollmentLine is one line of the inscription, priced for a day.
