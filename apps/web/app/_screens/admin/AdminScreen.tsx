@@ -23,7 +23,6 @@ import {
   resendInvitation,
   type Role,
 } from "../../admin/api";
-import { providerLoginEnabled } from "../../auth/providerFlag";
 import { PERMISSION_CATALOG } from "./catalog";
 
 import { API_URL } from "../../api-url";
@@ -97,10 +96,21 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
   const [tab, setTab] = useState<"users" | "roles">("users");
   const [q, setQ] = useState("");
   const [addUser, setAddUser] = useState(false);
-  // With the identity provider on, adding somebody is an INVITATION: no
-  // administrator invents a password, and the account only becomes usable once
-  // its owner opens the link — which is also the proof they read mail there.
-  const invites = providerLoginEnabled();
+  // Adding somebody is ALWAYS an invitation now, and this used to depend on the
+  // identity-provider flag.
+  //
+  // That dependency made sense while the provider was what mailed the link:
+  // with the flag off there was nothing to send, so offering the button was
+  // offering something that could not work. The token and the delivery are ours
+  // now, so an environment with no Identity Platform project invites exactly
+  // like one that has it — which is also what made this flow impossible to
+  // exercise locally, where the flag is off.
+  //
+  // What it replaces is worth naming: the older path had the director type a
+  // temporary password and hand it over. Somebody else knew your password, the
+  // system stored a credential nobody chose, and the account worked before its
+  // owner had proved anything about the address.
+  const invites = true;
   const [addRole, setAddRole] = useState(false);
   const [editRoles, setEditRoles] = useState<AdminUser | null>(null);
   const [editPerms, setEditPerms] = useState<Role | null>(null);

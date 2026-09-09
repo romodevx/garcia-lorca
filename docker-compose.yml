@@ -150,7 +150,10 @@ services:
       # It is the same public key a browser would carry, and the only thing it
       # can do here is send a link to an address that already owns the account.
       # Empty is valid: sign-in still works and inviting says why it cannot.
-      IDENTITY_PLATFORM_API_KEY: "${IDENTITY_PLATFORM_API_KEY:-}"
+      # Where an invitation link points. It has to be the address the browser
+      # can actually reach, which locally is the host port, not the container's.
+      # Getting this wrong produces a link that looks right and 404s.
+      PUBLIC_WEB_URL: "http://localhost:${WEB_HOST_PORT:-3000}"
     volumes:
       - .:/workspace
       - go-mod-cache:/go/pkg/mod

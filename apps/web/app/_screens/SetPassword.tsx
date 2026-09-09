@@ -119,7 +119,10 @@ export function SetPassword({ email, heading, intro, cta, pending, error, onSubm
           ) : null}
 
           <div style={{ marginTop: 22 }}>
-            <Btn full icon="check" disabled={!ready} style={{ height: 54, fontSize: 17 }}>
+            {/* type="submit", explicitly. Btn defaults to type="button", so
+                without this the button sits inside the form and does nothing —
+                the field fills, the click lands, and the page never moves. */}
+            <Btn full type="submit" icon="check" disabled={!ready} style={{ height: 54, fontSize: 17 }}>
               {pending ? "Guardando…" : cta}
             </Btn>
           </div>
