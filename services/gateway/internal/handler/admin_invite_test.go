@@ -21,18 +21,25 @@ type inviteAdmin struct {
 	resentTo string
 }
 
-func (f *inviteAdmin) ResendInvitation(_ context.Context, userID string) error {
+func (f *inviteAdmin) ResendInvitation(_ context.Context, userID string) (client.Invitation, error) {
 	f.resentTo = userID
-	return f.err
+	if f.err != nil {
+		return client.Invitation{}, f.err
+	}
+	return client.Invitation{URL: "https://escuela.example/activar?token=t", Sent: true}, nil
 }
 
-func (f *inviteAdmin) InviteUser(_ context.Context, email, displayName string, roleIDs []string) (client.User, error) {
+func (f *inviteAdmin) InviteUser(_ context.Context, email, displayName string, roleIDs []string) (client.User, client.Invitation, error) {
 	f.called = true
 	f.inviteIn.email, f.inviteIn.display, f.inviteIn.roleIDs = email, displayName, roleIDs
 	if f.err != nil {
-		return client.User{}, f.err
+		return client.User{}, client.Invitation{}, f.err
 	}
-	return client.User{ID: "usr-2", Email: email, DisplayName: displayName, Status: "active", RoleIDs: roleIDs}, nil
+	// Status "invited": an account nobody has opened yet is not active, and the
+	// fixture used to say otherwise — which is the state the resend button now
+	// keys on.
+	return client.User{ID: "usr-2", Email: email, DisplayName: displayName, Status: "invited", RoleIDs: roleIDs},
+		client.Invitation{URL: "https://escuela.example/activar?token=t", Sent: true}, nil
 }
 
 // TestAdminInviteUser: the route exists, reaches iam, and answers with the user.
@@ -111,14 +118,30 @@ func TestAdminInviteUserRejectsAMalformedBody(t *testing.T) {
 
 // TestAdminResendInvitation: the route reaches iam with the USER ID from the
 // path. Keyed by id, so it can never be aimed at an arbitrary address.
+//
+// It answers 200 WITH A BODY, and it used to answer 204. That change is the
+// feature: "no content" made a delivered invitation and a dropped one look
+// identical to the caller, which is exactly how the original bug stayed
+// invisible. The body now says whether the message left, why not, and what link
+// to hand over instead.
 func TestAdminResendInvitation(t *testing.T) {
 	f := &inviteAdmin{}
 	h := http.HandlerFunc(newAdminHandler(f, &fakeLinker{}).ResendInvitation)
 	w := doAdminReq(t, h, http.MethodPost, "/api/v1/users/usr-7/invite", "", "id", "usr-7")
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
 	}
 	if f.resentTo != "usr-7" {
 		t.Errorf("resent to %q, want usr-7", f.resentTo)
+	}
+	var body struct {
+		URL  string `json:"url"`
+		Sent bool   `json:"sent"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decoding the response: %v", err)
+	}
+	if !body.Sent || body.URL == "" {
+		t.Errorf("body = %+v, want the delivery outcome and the link", body)
 	}
 }

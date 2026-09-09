@@ -64,12 +64,12 @@ func (f *fakeAdmin) CreateUser(_ context.Context, email, displayName, tempPasswo
 // InviteUser is not exercised through this double — admin_invite_test.go uses
 // its own, which records the call. Failing loudly here means a test that reaches
 // the invite path by accident says so instead of quietly passing.
-func (f *fakeAdmin) InviteUser(_ context.Context, _, _ string, _ []string) (client.User, error) {
-	return client.User{}, errors.New("fakeAdmin: InviteUser not wired for this test")
+func (f *fakeAdmin) InviteUser(_ context.Context, _, _ string, _ []string) (client.User, client.Invitation, error) {
+	return client.User{}, client.Invitation{}, errors.New("fakeAdmin: InviteUser not wired for this test")
 }
 
-func (f *fakeAdmin) ResendInvitation(_ context.Context, _ string) error {
-	return errors.New("fakeAdmin: ResendInvitation not wired for this test")
+func (f *fakeAdmin) ResendInvitation(_ context.Context, _ string) (client.Invitation, error) {
+	return client.Invitation{}, errors.New("fakeAdmin: ResendInvitation not wired for this test")
 }
 
 func (f *fakeAdmin) GetUser(_ context.Context, id string) (client.User, error) {

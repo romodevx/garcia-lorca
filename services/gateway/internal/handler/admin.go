@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"time"
 	"net/http"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
@@ -15,8 +16,8 @@ import (
 // against the current one (from GetUser) and applies the delta.
 type AdminService interface {
 	CreateUser(ctx context.Context, email, displayName, tempPassword string, roleIDs []string) (client.User, error)
-	InviteUser(ctx context.Context, email, displayName string, roleIDs []string) (client.User, error)
-	ResendInvitation(ctx context.Context, userID string) error
+	InviteUser(ctx context.Context, email, displayName string, roleIDs []string) (client.User, client.Invitation, error)
+	ResendInvitation(ctx context.Context, userID string) (client.Invitation, error)
 	GetUser(ctx context.Context, id string) (client.User, error)
 	ListUsers(ctx context.Context) ([]client.User, error)
 	SetUserStatus(ctx context.Context, userID, status string) (client.User, error)
@@ -228,12 +229,15 @@ func (h *AdminHandler) InviteUser(w http.ResponseWriter, r *http.Request) {
 		forbidAssign(w, perm)
 		return
 	}
-	res, err := h.svc.InviteUser(r.Context(), req.Email, req.DisplayName, req.RoleIDs)
+	res, inv, err := h.svc.InviteUser(r.Context(), req.Email, req.DisplayName, req.RoleIDs)
 	if err != nil {
 		writeConnectError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, toUserResponse(res))
+	writeJSON(w, http.StatusCreated, struct {
+		userResponse
+		Invitation invitationResponse `json:"invitation"`
+	}{toUserResponse(res), toInvitationResponse(inv)})
 }
 
 // ResendInvitation handles POST /api/v1/users/{id}/invite: mail this user a
@@ -241,11 +245,38 @@ func (h *AdminHandler) InviteUser(w http.ResponseWriter, r *http.Request) {
 // the link goes to the address the user row already carries, so the only person
 // who can use it is that user.
 func (h *AdminHandler) ResendInvitation(w http.ResponseWriter, r *http.Request) {
-	if err := h.svc.ResendInvitation(r.Context(), r.PathValue("id")); err != nil {
+	inv, err := h.svc.ResendInvitation(r.Context(), r.PathValue("id"))
+	if err != nil {
 		writeConnectError(w, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	// 200 with a body, not 204. The caller needs to know whether the message
+	// actually left — and, when it did not, what link to hand over instead.
+	// Answering "no content" was the shape that let an undelivered invitation
+	// look exactly like a delivered one.
+	writeJSON(w, http.StatusOK, toInvitationResponse(inv))
+}
+
+// invitationResponse is what the admin screen renders.
+//
+// `sent` and `sendError` exist so the director is never told "invitación
+// enviada" about a message that was dropped, which is the bug this whole change
+// is here to fix. `url` rides along only as the fallback for handing access
+// over by hand; it grants nothing the administrator does not already hold over
+// that account.
+type invitationResponse struct {
+	URL       string `json:"url"`
+	ExpiresAt string `json:"expiresAt"`
+	Sent      bool   `json:"sent"`
+	SendError string `json:"sendError,omitempty"`
+}
+
+func toInvitationResponse(inv client.Invitation) invitationResponse {
+	out := invitationResponse{URL: inv.URL, Sent: inv.Sent, SendError: inv.SendError}
+	if !inv.ExpiresAt.IsZero() {
+		out.ExpiresAt = inv.ExpiresAt.UTC().Format(time.RFC3339)
+	}
+	return out
 }
 
 // ListUsers handles GET /api/v1/users.
