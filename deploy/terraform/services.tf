@@ -82,6 +82,22 @@ locals {
     # inviting refuses — so an environment that provisions the provider but
     # forgets this key degrades to "cannot add people", never to "cannot log in".
     IDENTITY_PLATFORM_API_KEY = var.enable_identity_platform ? var.identity_platform_api_key : ""
+
+    # Where an invitation link points. iam defaults to localhost when this is
+    # unset, which in a deployed environment produces a link that looks correct
+    # and goes nowhere — the kind of failure the person receiving it cannot
+    # diagnose and the director cannot see.
+    PUBLIC_WEB_URL = var.public_web_url
+
+    # The mail relay. EMPTY IS THE EXPECTED STATE until the school hands over a
+    # mailbox: with none, invitations still work and fall back to having the
+    # identity provider send its own link, and the admin screen says so.
+    SMTP_HOST      = var.smtp_host
+    SMTP_PORT      = var.smtp_port
+    SMTP_USERNAME  = var.smtp_username
+    SMTP_PASSWORD  = var.smtp_password
+    SMTP_FROM      = var.smtp_from
+    SMTP_FROM_NAME = var.smtp_from_name
   })
 
   gateway_env = merge(local.common_env, {
@@ -215,12 +231,18 @@ module "gateway" {
 module "iam" {
   source = "./modules/cloud_run"
 
-  name                  = "iam"
-  project_id            = var.project_id
-  environment           = var.env
-  region                = var.region
-  image                 = lookup(local.image, "iam", "${local.registry_path}/iam:${var.image_tag}")
-  service_account_email = google_service_account.runtime.email
+  name        = "iam"
+  project_id  = var.project_id
+  environment = var.env
+  region      = var.region
+  image       = lookup(local.image, "iam", "${local.registry_path}/iam:${var.image_tag}")
+  # iam gets its OWN service account, and it is the only service that does.
+  #
+  # It is the only one that talks to the identity provider, and the permission it
+  # needs — writing somebody's password — is the one permission you would least
+  # like nine unrelated services to inherit. They all share
+  # google_service_account.runtime; iam does not.
+  service_account_email = google_service_account.iam_runtime.email
 
   # Warm by default (prod); dev tfvars flips these to scale-to-zero.
   min_instances     = var.iam_min_instances

@@ -214,3 +214,70 @@ variable "billing_schedule_timezone" {
   type        = string
   default     = "America/Mexico_City"
 }
+
+# ---- Invitations and outgoing mail -----------------------------------------
+
+variable "public_web_url" {
+  description = <<-EOT
+    Public origin of the web app, with no trailing slash. Invitation links are
+    built from it.
+
+    It has no default on purpose. iam falls back to localhost when the variable
+    is empty, which in a deployed environment produces a link that looks correct
+    and goes nowhere — and neither the person receiving it nor the director
+    sending it can tell why.
+  EOT
+  type        = string
+}
+
+variable "smtp_host" {
+  description = <<-EOT
+    Mail relay for invitations and password resets. EMPTY IS THE EXPECTED STATE
+    until the school hands over a mailbox: with no relay, invitations still work
+    and fall back to having the identity provider send its own link, and the
+    admin screen says which road the message took.
+
+    The destination is the school's own server (mail.ceglorca.com), whose SPF
+    already authorises it — no DNS change needed, only a credential.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "smtp_port" {
+  description = "SMTP port. 587 (STARTTLS) unless the relay says otherwise."
+  type        = string
+  default     = "587"
+}
+
+variable "smtp_username" {
+  description = "SMTP account. Empty disables our own sending (see smtp_host)."
+  type        = string
+  default     = ""
+}
+
+variable "smtp_password" {
+  description = <<-EOT
+    SMTP password. Unlike the identity-provider web key, this one IS a secret:
+    it can send mail as the school. It belongs in the secret manager and must
+    never be committed to a tfvars file.
+  EOT
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "smtp_from" {
+  description = "Envelope sender. Defaults to smtp_username when empty."
+  type        = string
+  default     = ""
+}
+
+variable "smtp_from_name" {
+  description = <<-EOT
+    The name a person actually reads in their inbox list, which matters more for
+    delivery and trust than the address does.
+  EOT
+  type        = string
+  default     = "Colegio García Lorca"
+}

@@ -157,22 +157,67 @@ resource "google_project_iam_custom_role" "identity_runtime" {
   project     = var.project_id
   role_id     = "garciaLorcaIdentityRuntime"
   title       = "García Lorca — identity runtime"
-  description = "Verify ID tokens (revocation check) and create invited accounts. Nothing else."
+  description = "Verify ID tokens, create invited accounts, and write the password their owner chose. Nothing else."
   permissions = [
     "firebaseauth.users.get",
     "firebaseauth.users.create",
+    # Writing the password its owner just chose, when they arrive through OUR
+    # activation page (AdminService.AcceptInvitation → Provisioner.SetPassword).
+    #
+    # This is a real widening and worth naming: it lets whatever holds this role
+    # set the password of ANY account in the project, the director's included.
+    # That is why it no longer sits on the shared runtime account — see
+    # google_service_account.iam_runtime below.
+    #
+    # The alternative was to keep only get+create and let Identity Platform's own
+    # link be the only way anybody ever sets a password. That works, and it is
+    # what the provider-sends path does — but it caps every invitation at
+    # Google's one hour, which is the requirement the school asked us not to cap.
+    "firebaseauth.users.update",
   ]
 }
 
-# NOTE, and it is a real one: every service shares google_service_account.runtime,
-# so this grant reaches students, finance and the rest, not only iam. The role is
-# two permissions wide, so the widening is small — but it IS a widening, and the
-# clean fix is a service account per service. That is its own task; recorded here
-# rather than left for somebody to discover.
+# iam's OWN service account.
+#
+# The note that used to sit here said every service shared
+# google_service_account.runtime, so this grant reached students, finance and the
+# rest — and that the clean fix was an account per service, left as its own task.
+# Adding firebaseauth.users.update is what made that task due: a permission that
+# can set the director's password had no business reaching nine services that
+# never talk to the identity provider.
+#
+# Only iam is split out. The other nine keep sharing, because nothing about this
+# change makes their situation worse, and a ten-way split inside a PR that
+# already touches twenty files is how a deploy breaks.
+resource "google_service_account" "iam_runtime" {
+  account_id   = "gl-iam-runtime"
+  display_name = "García Lorca — iam runtime"
+  description  = "Runtime identity for the iam service only. Holds the identity-provider permissions no other service should have."
+}
+
+# What iam still needs after leaving the shared account.
+#
+# Verified against what the service actually does rather than copied wholesale:
+# it opens Postgres and reads secrets, and that is all. It publishes no events
+# (internal/adapters/pubsub holds only a doc.go) and calls no other Cloud Run
+# service, so the Pub/Sub roles the shared account carries are deliberately NOT
+# reproduced here — leaving the account is worth nothing if it arrives with
+# everything it was leaving behind.
+#
+# Callers are unaffected: run.invoker is granted to the CALLER, and the gateway
+# keeps the shared account.
+resource "google_project_iam_member" "iam_runtime_grants" {
+  for_each = toset(["roles/cloudsql.client", "roles/secretmanager.secretAccessor"])
+
+  project = var.project_id
+  role    = each.value
+  member  = "serviceAccount:${google_service_account.iam_runtime.email}"
+}
+
 resource "google_project_iam_member" "runtime_identity" {
   count = var.enable_identity_platform ? 1 : 0
 
   project = var.project_id
   role    = google_project_iam_custom_role.identity_runtime[0].id
-  member  = "serviceAccount:${google_service_account.runtime.email}"
+  member  = "serviceAccount:${google_service_account.iam_runtime.email}"
 }
