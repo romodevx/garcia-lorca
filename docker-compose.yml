@@ -340,6 +340,16 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: "http://localhost:8080"
       WATCHPACK_POLLING: "true"
+      # These MUST track iam's IDENTITY_PLATFORM_* settings, and the half-set
+      # state is worse than either end. With the provider on for iam but off
+      # here, an invited person receives the provider's mail, sets a password at
+      # Google, and then cannot sign in: the web asks for OUR password and the
+      # user row has no hash. Nothing reports it — they simply bounce off the
+      # login screen. Setting both, or neither, is the only coherent pair.
+      NEXT_PUBLIC_AUTH_PROVIDER: "${NEXT_PUBLIC_AUTH_PROVIDER:-}"
+      NEXT_PUBLIC_FIREBASE_API_KEY: "${IDENTITY_PLATFORM_API_KEY:-}"
+      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: "${IDENTITY_PLATFORM_PROJECT:-}.firebaseapp.com"
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: "${IDENTITY_PLATFORM_PROJECT:-}"
     # Host port configurable to dodge another local dev server on 3000.
     ports: ["${WEB_HOST_PORT:-3000}:3000"]
     volumes:
