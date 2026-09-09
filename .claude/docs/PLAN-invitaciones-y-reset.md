@@ -1581,3 +1581,58 @@ no una nota al pie.
 tareas restantes se pueden escribir y testear (el puerto `Mailer` se prueba contra un servidor
 falso en memoria, sin red), pero **no se pueden verificar en dev ni enseñar en la demo**.
 Pedirla es la acción con más apalancamiento del proyecto ahora mismo.
+
+---
+
+# ESTADO — 2026-09-09
+
+## Implementado y verificado corriendo
+
+El ciclo entero funciona en local y el camino que eligió el dueño está probado
+contra Firebase de verdad: **el correo llega, y llega a spam**. El dueño lo dio
+por bueno para el interino.
+
+| Pieza | Estado |
+|---|---|
+| Tabla `user_invitations` con `purpose`, `consumed_at` y RLS | hecho |
+| Estado `invited` en las cinco capas | hecho |
+| Token propio de 24 h, un solo uso, sólo el hash guardado | hecho |
+| `/activar` propia, en español, responsive a 390 px | hecho |
+| Botón de reenvío sólo en quien no ha entrado | hecho |
+| "¿Olvidaste tu contraseña?" conectado, respuesta constante | hecho |
+| Envío por el proveedor mientras no haya SMTP | hecho y **verificado con correo recibido** |
+| Activación al entrar (cierra la costura del camino de Firebase) | hecho |
+| Registro abierto del proyecto cerrado | hecho |
+
+## La decisión del dueño sobre el interino, y su precio
+
+Firebase manda el correo hasta que llegue la credencial del colegio. El precio,
+aceptado con los datos en la mano: **el enlace es de Google (una hora), la página
+es suya en inglés, y el remitente compartido cae en spam.** Confirmado en la
+práctica, no en teoría.
+
+Es temporal **por construcción**: la cadena de entrega es relé propio → proveedor
+→ enlace en pantalla, y el primero que funciona gana. El día que existan las
+variables SMTP, el relé propio se impone solo. No hay nada que acordarse de apagar.
+
+## Lo que falta para dev
+
+El workflow de despliegue **mueve imágenes, no infraestructura** — está escrito en
+su cabecera y es deliberado. Comprobado contra el servicio vivo:
+
+- `IDENTITY_PLATFORM_PROJECT` y `IDENTITY_PLATFORM_API_KEY` **ya están puestos**, así
+  que el camino de Firebase funciona con sólo mergear.
+- `PUBLIC_WEB_URL` **no está**: el enlace de respaldo se construiría contra
+  localhost.
+- `iam` sigue con la cuenta compartida, **sin `firebaseauth.users.update`**: nuestra
+  `/activar` fallaría con error de permisos.
+
+Ambas resueltas en terraform, y ambas exigen **un `terraform apply` a mano** tras
+el merge.
+
+## Lo que sigue abierto
+
+- La credencial de `no-reply@ceglorca.com`. Es lo único que separa el interino del
+  estado final.
+- `_dmarc.ceglorca.com` en `p=none`. Sin alinear el remitente, nuestro correo
+  repetirá el destino del de Google: spam.
