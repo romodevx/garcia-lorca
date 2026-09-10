@@ -3,8 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Cycle, Level } from "../../config/api";
+import type { EnrollmentConcept } from "../../finance/api";
 import * as financeApi from "../../finance/api";
-import { TuitionPanel, pesosToCents, centsToPesos } from "./TuitionPanel";
+import { TuitionPanel, pesosToCents, centsToPesos, inscriptionTotals, ladderProblem } from "./TuitionPanel";
 
 vi.mock("../../finance/api", () => ({
   listTuitionPlans: vi.fn(),
@@ -24,7 +25,7 @@ beforeEach(() => {
   finance.listTuitionPlans.mockResolvedValue([
     { id: "tp1", cycleId: "c1", levelId: "lv2", enrollmentCents: 500000, monthlyCents: 320000,
       months: 10, firstBilledMonth: 9, dueDay: 10, lateFeeCents: 15000, active: true,
-      policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 }, schedule: [], monthlyDiscountCents: 0, fees: [], enrollmentDueOn: "" },
+      policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 }, schedule: [], monthlyDiscountCents: 0, fees: [], enrollmentDueOn: "", enrollmentConcepts: [] },
   ]);
 });
 afterEach(() => vi.clearAllMocks());
@@ -64,7 +65,7 @@ describe("the tuition table", () => {
     finance.upsertTuitionPlan.mockResolvedValue({
       id: "tp2", cycleId: "c1", levelId: "lv1", enrollmentCents: 400000, monthlyCents: 250000,
       months: 11, firstBilledMonth: 8, dueDay: 5, lateFeeCents: 10000, active: true,
-      policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 }, schedule: [], monthlyDiscountCents: 0, fees: [], enrollmentDueOn: "",
+      policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 }, schedule: [], monthlyDiscountCents: 0, fees: [], enrollmentDueOn: "", enrollmentConcepts: [],
     });
     render(<TuitionPanel cycle={cycle} levels={levels} />);
     await screen.findByText("Primaria");
@@ -249,7 +250,7 @@ describe("the inscription's own deadline", () => {
     await user.click(within(drawer).getByRole("button", { name: "Guardar tabulador" }));
 
     await waitFor(() => expect(finance.upsertTuitionPlan).toHaveBeenCalled());
-    expect(finance.upsertTuitionPlan.mock.calls[0]?.[1]).toMatchObject({ enrollmentDueOn: "2026-06-30" });
+    expect(finance.upsertTuitionPlan.mock.calls[0]?.[1]).toMatchObject({ enrollmentDueOn: "2026-06-30", enrollmentConcepts: [] });
   });
 
   it("says so rather than sending a date nobody can read", async () => {
@@ -339,7 +340,7 @@ describe("cuotas — the extra a school collects on top of the tuition", () => {
       { id: "tp1", cycleId: "c1", levelId: "lv2", enrollmentCents: 500000, monthlyCents: 320000,
         months: 10, firstBilledMonth: 9, dueDay: 10, lateFeeCents: 0, active: true,
         policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 },
-        schedule: [], monthlyDiscountCents: 0, enrollmentDueOn: "",
+        schedule: [], monthlyDiscountCents: 0, enrollmentDueOn: "", enrollmentConcepts: [],
         fees: [{ name: "Cuota de Julio", amountCents: 160000, months: [9, 10] }] },
     ]);
     const user = userEvent.setup();
@@ -395,4 +396,80 @@ it("says nothing about deadlines when it moved none", async () => {
   await user.click(screen.getByRole("button", { name: /Generar cargos del mes/ }));
 
   expect(await screen.findByRole("status")).not.toHaveTextContent(/fecha límite/);
+});
+
+describe("la escalera de la inscripción", () => {
+  const ladder: EnrollmentConcept[] = [
+    {
+      name: "Inscripción",
+      tiers: [
+        { effectiveFrom: "2027-01-01", amountCents: 220000 },
+        { effectiveFrom: "2027-03-01", amountCents: 330000 },
+        { effectiveFrom: "2027-04-01", amountCents: 440000 },
+      ],
+    },
+    { name: "Gastos adm y seguro", tiers: [{ effectiveFrom: "2027-01-01", amountCents: 470000 }] },
+    {
+      name: "Cuota Asociación Padres de Familia",
+      tiers: [{ effectiveFrom: "2027-01-01", amountCents: 85000 }],
+    },
+  ];
+
+  // The flyer's own totals. The director's only real question is "¿cuánto se le
+  // cobra si se inscribe en marzo?", and the screen has to answer it before
+  // anything is saved — otherwise the arithmetic is a promise, not a fact.
+  it("suma lo que el folleto dice, por tramo", () => {
+    expect(inscriptionTotals(ladder)).toEqual([
+      { effectiveFrom: "2027-01-01", totalCents: 775000 },
+      { effectiveFrom: "2027-03-01", totalCents: 885000 },
+      { effectiveFrom: "2027-04-01", totalCents: 995000 },
+    ]);
+  });
+
+  // A concept that does not move still counts in every tier. Reading only the
+  // steps that were typed would price March at $3,300 instead of $8,850.
+  it("los conceptos planos cuentan en todos los tramos", () => {
+    const flat: EnrollmentConcept[] = [
+      { name: "Cuota", tiers: [{ effectiveFrom: "2027-01-01", amountCents: 85000 }] },
+    ];
+    expect(inscriptionTotals(flat)).toEqual([{ effectiveFrom: "2027-01-01", totalCents: 85000 }]);
+  });
+
+  it("sin conceptos no hay tramos que mostrar", () => {
+    expect(inscriptionTotals([])).toEqual([]);
+  });
+
+  // The ladder is a one-way ratchet server-side (ADR 0011). The screen must say
+  // so before the save fails, not after.
+  it("avisa cuando un escalón cuesta menos que el anterior", () => {
+    const down: EnrollmentConcept[] = [
+      {
+        name: "Inscripción",
+        tiers: [
+          { effectiveFrom: "2027-01-01", amountCents: 330000 },
+          { effectiveFrom: "2027-03-01", amountCents: 33000 },
+        ],
+      },
+    ];
+    expect(ladderProblem(down)).toMatch(/menos/i);
+    expect(ladderProblem(ladder)).toBe("");
+  });
+
+  it("avisa cuando dos conceptos se llaman igual", () => {
+    const twins: EnrollmentConcept[] = [
+      { name: "Cuota APF", tiers: [{ effectiveFrom: "2027-01-01", amountCents: 85000 }] },
+      { name: "Cuota A.P.F.", tiers: [{ effectiveFrom: "2027-01-01", amountCents: 85000 }] },
+    ];
+    expect(ladderProblem(twins)).toMatch(/nombre/i);
+  });
+
+  it("avisa cuando un escalón no tiene fecha o no tiene monto", () => {
+    expect(
+      ladderProblem([{ name: "Inscripción", tiers: [{ effectiveFrom: "", amountCents: 220000 }] }]),
+    ).toMatch(/fecha/i);
+    expect(
+      ladderProblem([{ name: "Inscripción", tiers: [{ effectiveFrom: "2027-01-01", amountCents: 0 }] }]),
+    ).toMatch(/monto/i);
+    expect(ladderProblem([{ name: "", tiers: [] }])).toMatch(/nombre/i);
+  });
 });

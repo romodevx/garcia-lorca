@@ -10,7 +10,9 @@ import {
   runBilling,
   upsertTuitionPlan,
   type BillingRun,
+  type EnrollmentConcept,
   type Fee,
+  type PriceTier,
   type TuitionPlan,
 } from "../../finance/api";
 import { formatCents } from "../finance/money";
@@ -125,6 +127,91 @@ export function feeShares(fee: Fee): number[] {
   const out = new Array<number>(n).fill(base);
   out[0] = base + (fee.amountCents - base * n);
   return out;
+}
+
+/**
+ * What joining costs on each date the price changes.
+ *
+ * This is the answer to the director's only real question: "¿cuánto se le cobra
+ * si se inscribe en marzo?". Every concept counts in every tier — a flat $4,700
+ * is charged in March too — so reading only the steps that were typed would
+ * price March at $3,300 instead of $8,850. The system does the arithmetic, so
+ * the screen has to show the sum BEFORE anything is saved, or the total is a
+ * promise rather than a fact.
+ *
+ * The rule matches the server's exactly (domain.AmountOn): the step that applies
+ * is the last one whose date has arrived; before the first, the first.
+ */
+export function inscriptionTotals(concepts: readonly EnrollmentConcept[]): InscriptionTotal[] {
+  const dates = [...new Set(concepts.flatMap((c) => c.tiers.map((t) => t.effectiveFrom)))]
+    .filter((d) => d !== "")
+    .sort();
+  return dates.map((effectiveFrom) => ({
+    effectiveFrom,
+    totalCents: concepts.reduce((sum, c) => sum + amountOn(c, effectiveFrom), 0),
+  }));
+}
+
+/** What the inscription costs on one date, as one line per tier. */
+export interface InscriptionTotal {
+  effectiveFrom: string;
+  totalCents: number;
+}
+
+/** One concept's price on a date — the server's rule, in the browser. */
+function amountOn(concept: EnrollmentConcept, on: string): number {
+  const arrived = concept.tiers.filter((t) => t.effectiveFrom !== "" && t.effectiveFrom <= on);
+  if (arrived.length === 0) {
+    const earliest = [...concept.tiers].sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom))[0];
+    return earliest?.amountCents ?? 0;
+  }
+  return arrived.reduce((best, t) => (t.effectiveFrom > best.effectiveFrom ? t : best)).amountCents;
+}
+
+/**
+ * What the server would refuse, said here first.
+ *
+ * Every rule below is one the domain enforces (ADR 0011). Repeating them costs a
+ * duplicated rule, and the alternative costs the director a save that fails with
+ * a message written for a programmer. The server still decides; this only stops
+ * the trip.
+ */
+export function ladderProblem(concepts: readonly EnrollmentConcept[]): string {
+  const seen = new Set<string>();
+  for (const concept of concepts) {
+    if (concept.name.trim() === "") {
+      return "Cada renglón de la inscripción necesita un nombre.";
+    }
+    // Compared as the SLUG, because that is what the charge's reference is built
+    // from: "Cuota APF" and "Cuota A.P.F." are two names for a person and ONE
+    // charge for the ledger, and the second line would never be issued.
+    const slug = concept.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (seen.has(slug)) {
+      return `Dos renglones se llaman casi igual ("${concept.name}"). Ponles nombres que se distingan.`;
+    }
+    seen.add(slug);
+
+    if (concept.tiers.length === 0) {
+      return `Falta decir cuánto cuesta "${concept.name}", y desde cuándo.`;
+    }
+    let previous: PriceTier | null = null;
+    for (const tier of concept.tiers) {
+      if (tier.effectiveFrom === "") {
+        return `Falta la fecha desde la que aplica un monto de "${concept.name}".`;
+      }
+      if (tier.amountCents <= 0) {
+        return `Falta el monto de "${concept.name}" a partir del ${tier.effectiveFrom}.`;
+      }
+      if (previous && tier.effectiveFrom <= previous.effectiveFrom) {
+        return `Las fechas de "${concept.name}" deben ir hacia adelante, una por escalón.`;
+      }
+      if (previous && tier.amountCents < previous.amountCents) {
+        return `Un escalón de "${concept.name}" cuesta menos que el anterior. La inscripción sólo sube.`;
+      }
+      previous = tier;
+    }
+  }
+  return "";
 }
 
 /** Reads a whole number in a range, or null. Same reasoning as pesosToCents. */
@@ -332,6 +419,9 @@ function PlanForm({
   // The extras collected on top of the tuition, each already whole: the school
   // states what it collects and the system divides it.
   const [fees, setFees] = useState<Fee[]>(plan?.fees ?? []);
+  // The inscription, as the price list prints it: one line per concept, each
+  // with what it costs from a date onward.
+  const [concepts, setConcepts] = useState<EnrollmentConcept[]>(plan?.enrollmentConcepts ?? []);
   const [error, setError] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState(false);
 
@@ -371,6 +461,14 @@ function PlanForm({
       setError(`Los días de pronto pago van de 0 a ${MAX_DUE_DAY}.`);
       return;
     }
+    const ladder = ladderProblem(concepts);
+    if (ladder !== "") {
+      // Every one of these is a rule the server enforces too. Said here so the
+      // director reads what is wrong instead of a message written for a
+      // programmer, three seconds later.
+      setError(ladder);
+      return;
+    }
     if (enrollmentDue.trim() !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(enrollmentDue.trim())) {
       // Refused here rather than sent: the server reads an unparseable date as
       // "no deadline", which would move every inscription of this level back to
@@ -387,7 +485,10 @@ function PlanForm({
         levelId: level.id,
         // An unset inscription or surcharge means zero, and zero is a real
         // answer here: some schools charge neither.
-        enrollmentCents: pesosToCents(enrollment) ?? 0,
+        // One shape or the other, never both — the server refuses a plan that
+        // carries a single amount AND a list of concepts (ADR 0011).
+        enrollmentCents: concepts.length > 0 ? 0 : pesosToCents(enrollment) ?? 0,
+        enrollmentConcepts: concepts,
         monthlyCents,
         months: count,
         firstBilledMonth: startMonth,
@@ -478,6 +579,7 @@ function PlanForm({
           </span>
         </label>
       </div>
+      <InscriptionSection concepts={concepts} onChange={setConcepts} onError={setError} />
       <FeesSection
         cycle={cycle}
         firstMonth={wholeInRange(firstMonth, 1, 12) ?? 9}
@@ -493,6 +595,131 @@ function PlanForm({
 }
 
 const cell = { padding: "10px 8px" } as const;
+
+/**
+ * The inscription, as the school's price list prints it: one line per concept,
+ * each with what it costs from a date onward.
+ *
+ * The totals table is the point of the whole section. The director's question is
+ * never "¿cuánto vale el escalón de marzo?" — it is "¿cuánto se le cobra a
+ * alguien que se inscribe en marzo?", which is the sum of every line at that
+ * date, flat ones included. Making them add it up by hand is how a school
+ * publishes a flyer that its own system contradicts.
+ */
+function InscriptionSection({ concepts, onChange, onError }: InscriptionSectionProps): ReactElement {
+  const [name, setName] = useState("");
+  const [from, setFrom] = useState("");
+  const [amount, setAmount] = useState("");
+
+  const addTier = (): void => {
+    const cents = pesosToCents(amount);
+    if (name.trim() === "" || cents === null || from.trim() === "") {
+      onError("Para agregar un escalón: nombre, fecha desde la que aplica y monto.");
+      return;
+    }
+    onError(undefined);
+    setAmount("");
+    const tier: PriceTier = { effectiveFrom: from.trim(), amountCents: cents };
+    const existing = concepts.findIndex(
+      (c) => c.name.trim().toLowerCase() === name.trim().toLowerCase());
+    if (existing === -1) {
+      onChange([...concepts, { name: name.trim(), tiers: [tier] }]);
+      return;
+    }
+    // Kept in date order so the ladder reads the way it is charged. The server
+    // refuses one written backwards, and sorting here means the director can
+    // type the steps in whatever order they remember them.
+    onChange(concepts.map((c, i) => i !== existing ? c : {
+      ...c,
+      tiers: [...c.tiers.filter((t) => t.effectiveFrom !== tier.effectiveFrom), tier]
+        .sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom)),
+    }));
+  };
+
+  const totals = inscriptionTotals(concepts);
+  const problem = ladderProblem(concepts);
+
+  return (
+    <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14, marginBottom: 12 }}>
+      <p style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text-muted)", marginBottom: 4 }}>
+        Inscripción por conceptos (opcional)
+      </p>
+      <p style={{ fontSize: 12.5, color: "var(--text-faint)", marginBottom: 12 }}>
+        Lo que se cobra por inscribirse, renglón por renglón, con lo que cuesta cada uno
+        <b> a partir de</b> una fecha. Si un concepto no cambia de precio, basta un escalón.
+        Al usar esta lista, el monto único de arriba deja de aplicar.
+      </p>
+
+      {concepts.length > 0 && (
+        <div style={{ borderRadius: "var(--r-md)", border: "1px solid var(--border)", overflow: "hidden", marginBottom: 14 }}>
+          {concepts.map((concept, index) => (
+            <div
+              key={`${concept.name}-${index}`}
+              style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderTop: index === 0 ? "none" : "1px solid var(--border)" }}>
+              <div style={{ minWidth: 0 }}>
+                <p style={{ fontSize: 14.5, fontWeight: 600, color: "var(--text)" }}>{concept.name}</p>
+                <p style={{ fontSize: 12.5, color: "var(--text-muted)" }}>
+                  {concept.tiers
+                    .map((t) => `${formatCents(t.amountCents)} desde ${t.effectiveFrom}`)
+                    .join(" · ")}
+                </p>
+              </div>
+              <div style={{ flex: 1 }} />
+              <button
+                type="button"
+                onClick={() => onChange(concepts.filter((_, i) => i !== index))}
+                aria-label={`Quitar ${concept.name}`}
+                style={{ background: "transparent", border: "none", color: "var(--text-muted)", fontSize: 13.5, fontWeight: 600, cursor: "pointer" }}>
+                Quitar
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 12 }}>
+        <TextField label="Concepto" value={name} onChange={setName} placeholder="Inscripción" />
+        <TextField label="Vigente desde" value={from} onChange={setFrom} placeholder="2027-01-01" />
+        <TextField label="Monto" value={amount} onChange={setAmount} placeholder="2200" />
+      </div>
+      <Btn kind="ghost" icon="plus" onClick={addTier}>Agregar escalón</Btn>
+
+      {problem !== "" && (
+        <p role="alert" style={{ marginTop: 12, fontSize: 13, fontWeight: 600, color: "var(--danger-fg, #b42318)" }}>
+          {problem}
+        </p>
+      )}
+
+      {totals.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-muted)", marginBottom: 8 }}>
+            Total a pagar por inscribirse
+          </p>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
+            <tbody>
+              {totals.map((t) => (
+                <tr key={t.effectiveFrom} style={{ borderTop: "1px solid var(--border)" }}>
+                  <td style={{ padding: "7px 4px", color: "var(--text-muted)" }}>
+                    Desde el {t.effectiveFrom}
+                  </td>
+                  <td style={{ padding: "7px 4px", textAlign: "right", fontWeight: 700, color: "var(--text)" }}>
+                    {formatCents(t.totalCents)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface InscriptionSectionProps {
+  concepts: EnrollmentConcept[];
+  onChange: (concepts: EnrollmentConcept[]) => void;
+  onError: (message: string | undefined) => void;
+}
 
 /**
  * The extras a school collects on top of the tuition.

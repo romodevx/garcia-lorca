@@ -446,7 +446,7 @@ describe("Finance — estado de cuenta", () => {
       charges: [overdueCharge],
       payments: [{ id: "p1", chargeId: "ch1", amountCents: 50000, method: "cash" as const, reference: "", paidAt: "2026-09-01T10:00:00Z" }],
       totalBalanceCents: 135000,
-      unallocatedCents: 0,
+      unallocatedCents: 0, dueTodayCents: 0, surchargeCents: 0, earlyDiscountCents: 0, asOf: "",
     });
 
     renderFinance();

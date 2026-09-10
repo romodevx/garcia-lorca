@@ -74,19 +74,47 @@ export function AccountPanel({ students, onLoad }: AccountPanelProps): ReactElem
           <div style={{ display: "grid", gap: 16 }}>
             <div
               style={{
-                display: "flex",
-                alignItems: "baseline",
-                gap: 12,
                 padding: "16px 20px",
                 borderRadius: "var(--r-lg)",
                 background: "var(--surface-3)",
                 border: "1px solid var(--border)",
               }}
             >
-              <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-muted)" }}>{t("account.balance")}</span>
-              <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 26, color: "var(--text)" }}>
-                {formatCents(statement.totalBalanceCents)}
-              </span>
+              {/*
+                What is being asked for TODAY leads, and the year's balance sits
+                beside it. Both are true at once, and a family shown only the
+                year is told a number nobody is asking them for.
+
+                An empty asOf means the gateway is older than M18 and sent
+                nothing. Rendering $0.00 there would tell a family that owes
+                money that they owe none, so the figure is withheld instead.
+              */}
+              <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-muted)" }}>
+                  A pagar hoy
+                </span>
+                <span
+                  data-testid="due-today"
+                  style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 30, color: "var(--text)" }}>
+                  {statement.asOf === "" ? "—" : formatCents(statement.dueTodayCents)}
+                </span>
+                <div style={{ flex: 1 }} />
+                <span style={{ fontSize: 13.5, color: "var(--text-muted)" }}>{t("account.balance")}</span>
+                <span
+                  data-testid="year-balance"
+                  style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 19, color: "var(--text-muted)" }}>
+                  {formatCents(statement.totalBalanceCents)}
+                </span>
+              </div>
+              {statement.asOf !== "" && (
+                <p
+                  data-testid="due-today-parts"
+                  style={{ marginTop: 6, fontSize: 12.5, color: "var(--text-faint)" }}>
+                  {statement.surchargeCents > 0 && `Incluye ${formatCents(statement.surchargeCents)} de recargo. `}
+                  {statement.earlyDiscountCents > 0 && `Ya con ${formatCents(statement.earlyDiscountCents)} de pronto pago. `}
+                  Al {statement.asOf}.
+                </p>
+              )}
             </div>
 
             <div>
