@@ -279,7 +279,7 @@ func (f *fakeRepo) RepriceUnpaid(_ context.Context, items []ports.ChargeReprice)
 	repriced := 0
 	for _, item := range items {
 		for id, c := range f.charges {
-			if c.ExternalRef() != item.ExternalRef || c.Amount().Int64() == item.AmountCents ||
+			if c.ExternalRef() != item.ExternalRef || c.Amount().Int64() >= item.AmountCents ||
 				c.Status() == domain.StatusCancelled || c.Discount().Int64() > 0 || f.paidFor(id) > 0 {
 				continue
 			}

@@ -215,7 +215,7 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 		// zero permanent. That is the "family charged nothing" this file warns
 		// about below, produced by the feature meant to prevent it.
 		lines, err := s.enrollmentCharges(enr.StudentID, cycleID, concepts[domain.KindEnrollment].ID(),
-			plan, asOf, calendar.NextWorkingDay(enrollmentDueDate(cycle.StartsOn, plan)))
+			plan, asOf, calendar.NextWorkingDay(enrollmentDueDate(cycle.StartsOn, plan, enr.EnrolledAt)))
 		if err != nil {
 			return BillingResult{}, err
 		}
@@ -546,7 +546,14 @@ func (s *FinanceService) enrollmentCharges(
 		description, ref := enrollmentConceptName, fmt.Sprintf("enrollment:%s:%s", cycleID, studentID)
 		if line.Name != "" {
 			description = line.Name
-			ref = fmt.Sprintf("enrollment:%s:%s:%s", cycleID, studentID, domain.Slugify(line.Name))
+			// The fallback Slugify's own doc says the caller supplies. A name of
+			// nothing but punctuation would otherwise end the reference in a
+			// colon and say nothing about which line it is.
+			slug := domain.Slugify(line.Name)
+			if slug == "" {
+				slug = "concepto"
+			}
+			ref = fmt.Sprintf("enrollment:%s:%s:%s", cycleID, studentID, slug)
 		}
 		charge, err := s.buildCharge(chargeSpec{
 			studentID: studentID, cycleID: cycleID, conceptID: conceptID,
@@ -584,14 +591,27 @@ func repriceable(charges []domain.Charge) []ports.ChargeReprice {
 // enrollmentDueDate is the day the inscription falls due: the plan's due day in
 // the month the school year opens. A family owes it from the start of the year,
 // not from the first tuition.
-func enrollmentDueDate(cycleStart time.Time, plan domain.TuitionPlan) time.Time {
+func enrollmentDueDate(cycleStart time.Time, plan domain.TuitionPlan, joinedOn time.Time) time.Time {
 	// The school's own deadline wins. The inscription is a separate charge with
 	// a separate arrangement — collected in June for a year that opens in
 	// August — and deriving it from the cycle made that impossible to say.
-	if due := plan.EnrollmentDueOn(); !due.IsZero() {
-		return due
+	due := plan.EnrollmentDueOn()
+	if due.IsZero() {
+		due = time.Date(cycleStart.Year(), cycleStart.Month(), plan.DueDay(), 0, 0, 0, 0, cycleStart.Location())
 	}
-	return time.Date(cycleStart.Year(), cycleStart.Month(), plan.DueDay(), 0, 0, 0, 0, cycleStart.Location())
+	// A pupil who arrives in March is not six months late for it. The tuition
+	// already refuses to charge them for months they were not a pupil
+	// (InstallmentsFrom); the inscription was still handed to them dated in
+	// September, overdue the day it was issued, and accrueLateFees does not spare
+	// inscriptions — six surcharges on the first run.
+	//
+	// Unlike the tuition, this deadline may leave its calendar month: the
+	// inscription's external_ref carries no month, so the charge's identity does
+	// not move with it.
+	if !joinedOn.IsZero() && joinedOn.After(due) {
+		return joinedOn
+	}
+	return due
 }
 
 // feeDescription is what the family reads. A fee collected in one month is just

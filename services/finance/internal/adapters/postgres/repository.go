@@ -434,7 +434,12 @@ func (r *Repository) RepriceUnpaid(ctx context.Context, items []ports.ChargeRepr
 		for amount, group := range byAmount {
 			res := tx.Model(&chargeModel{}).
 				Where("external_ref IN ?", group).
-				Where("amount_cents <> ?", amount).
+				// Only upward. A school that edits its table cheaper must not
+				// walk four hundred already-quoted inscriptions down with it: a
+				// charge that has been issued is a number a family has been told,
+				// and lowering it is a decision somebody makes by hand — which is
+				// what a discount is for.
+				Where("amount_cents < ?", amount).
 				Where("status <> ?", domain.StatusCancelled).
 				// Nothing negotiated. A discount is a price a PERSON decided for
 				// one family, and a price list must not overwrite it. The full

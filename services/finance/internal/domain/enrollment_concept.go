@@ -13,6 +13,11 @@ import (
 const (
 	maxEnrollmentConcepts = 12
 	maxTiersPerConcept    = 12
+	// maxConceptName bounds what the family reads. The name travels to
+	// charges.description and to the plan's JSON, and the run multiplies it by
+	// twelve lines times every pupil of the level — the same amplification the
+	// two counts above exist to stop. 120 runes is what a statement can print.
+	maxConceptName = 120
 )
 
 // PriceTier is what a concept costs from a date onward.
@@ -130,6 +135,9 @@ func (c EnrollmentConcept) validate() error {
 		return glerrors.New(glerrors.KindInvalid,
 			"a line of the inscription needs a name, or nobody can say what it is for")
 	}
+	if len([]rune(c.Name)) > maxConceptName {
+		return glerrors.New(glerrors.KindInvalid, "that name is longer than a statement can print")
+	}
 	if len(c.Tiers) == 0 {
 		return glerrors.New(glerrors.KindInvalid, "set what the concept costs, from when")
 	}
@@ -146,6 +154,14 @@ func (c EnrollmentConcept) validate() error {
 			// A step for nothing is a charge for nothing: it would sit in a
 			// family's statement forever, already settled and never explained.
 			return glerrors.New(glerrors.KindInvalid, "a price step must be for some money")
+		}
+		if tier.AmountCents > MaxCents {
+			// Refused HERE, where the person typing it can be told. NewCents only
+			// catches it when the charge is built — which is the billing run, at
+			// night, where the error aborts the WHOLE cycle rather than one line,
+			// and now also the deposit path, where it would stop the counter
+			// taking money from anybody in that level.
+			return glerrors.New(glerrors.KindInvalid, "that is more money than a price step can hold")
 		}
 		if !previous.IsZero() && tier.AmountCents < previousAmount {
 			// Everything else leans on the ladder being a one-way ratchet: ADR

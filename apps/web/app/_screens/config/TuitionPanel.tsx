@@ -620,8 +620,13 @@ function InscriptionSection({ concepts, onChange, onError }: InscriptionSectionP
     onError(undefined);
     setAmount("");
     const tier: PriceTier = { effectiveFrom: from.trim(), amountCents: cents };
-    const existing = concepts.findIndex(
-      (c) => c.name.trim().toLowerCase() === name.trim().toLowerCase());
+    // Matched by SLUG, the same way ladderProblem refuses duplicates and the
+    // server builds the charge's reference. Matching by name instead let
+    // "Cuota APF" and "Cuota A.P.F." become two rows that the validation then
+    // rejected — the director ended up at an error instead of at the merge they
+    // meant.
+    const slugOf = (raw: string): string => raw.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const existing = concepts.findIndex((c) => slugOf(c.name) === slugOf(name));
     if (existing === -1) {
       onChange([...concepts, { name: name.trim(), tiers: [tier] }]);
       return;

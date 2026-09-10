@@ -85,7 +85,7 @@ func (s *FinanceService) EnsureEnrollmentCharge(ctx context.Context, cycleID, st
 		joined = s.now()
 	}
 	charges, err := s.enrollmentCharges(studentID, cycleID, concept.ID(),
-		plan, joined, enrollmentDueDate(cycle.StartsOn, plan))
+		plan, joined, enrollmentDueDate(cycle.StartsOn, plan, joinedOn))
 	if err != nil {
 		return false, err
 	}

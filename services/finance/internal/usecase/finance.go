@@ -536,10 +536,11 @@ func (s *FinanceService) GetAccount(ctx context.Context, studentID string) (Acco
 		balance += max(0, c.Charge.Effective().Int64()-c.PaidCents)
 	}
 	// What the counter would collect today, through the SAME arithmetic the
-	// counter uses. Reimplementing it here would be two answers to one question,
-	// and the whole point of the field is that there is only one.
+	// counter uses — but against the charges ALREADY read above, and without the
+	// two idempotent writes EnsureConceptOfKind performs. A statement is a read,
+	// and this is the endpoint the parents' app hits most.
 	when := s.now()
-	expected, err := s.ExpectedToday(ctx, studentID, when)
+	expected, err := s.expectedForStatement(ctx, studentID, charges, when)
 	if err != nil {
 		return AccountStatement{}, err
 	}
@@ -553,6 +554,40 @@ func (s *FinanceService) GetAccount(ctx context.Context, studentID string) (Acco
 		EarlyDiscountCents: expected.DiscountCents,
 		AsOf:               when.Format(dueDateLayout),
 	}, nil
+}
+
+// expectedForStatement is what the counter would collect today, worked out from
+// charges the caller has already loaded.
+//
+// It resolves the concepts by READING the catalog rather than ensuring them:
+// a statement must not write, and by the time a family has charges at all, the
+// concepts those charges point at necessarily exist. A school with no concepts
+// yet has no charges either, and the arithmetic over an empty list is zero
+// whichever id it was given.
+func (s *FinanceService) expectedForStatement(
+	ctx context.Context, studentID string, charges []ports.ChargeWithPaid, when time.Time,
+) (Expected, error) {
+	calendar, _ := s.schoolCalendar(ctx, studentID)
+	plan, err := s.planFor(ctx, studentID)
+	if err != nil {
+		return Expected{}, err
+	}
+	byKind, err := s.repo.ListConcepts(ctx, true)
+	if err != nil {
+		return Expected{}, err
+	}
+	var lateFeeID, tuitionID, enrolmentID string
+	for _, c := range byKind {
+		switch c.Kind() {
+		case domain.KindLateFee:
+			lateFeeID = c.ID()
+		case domain.KindTuition:
+			tuitionID = c.ID()
+		case domain.KindEnrollment:
+			enrolmentID = c.ID()
+		}
+	}
+	return expectedFrom(charges, plan, calendar, lateFeeID, tuitionID, enrolmentID, when)
 }
 
 // ListOverdue returns the charges past due that still owe money, as of the
