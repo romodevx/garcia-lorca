@@ -114,6 +114,43 @@ describe("family API client", () => {
       expect(lastUrl(fetchMock)).toContain("/api/v1/family/students/s1/account");
     });
 
+    // What the school is asking for TODAY, which is not the same as the year.
+    // The parent is the one person who cannot walk to the office and ask.
+    it("carries the day's figure and the day it was worked out for", async () => {
+      globalThis.fetch = jest.fn().mockResolvedValue(
+        jsonOk({
+          charges: [],
+          payments: [],
+          totalBalanceCents: 3200000,
+          dueTodayCents: 775000,
+          surchargeCents: 15000,
+          earlyDiscountCents: 10000,
+          asOf: "2026-11-20",
+        }),
+      ) as unknown as typeof fetch;
+
+      const account = await getAccount("s1");
+
+      expect(account.dueTodayCents).toBe(775000);
+      expect(account.surchargeCents).toBe(15000);
+      expect(account.earlyDiscountCents).toBe(10000);
+      expect(account.asOf).toBe("2026-11-20");
+    });
+
+    // A gateway older than M18 sends none of it. Zero would tell a family that
+    // owes money that they owe nothing, so the EMPTY asOf is what the screen
+    // reads to withhold the figure instead of inventing one.
+    it("leaves the day unknown when the gateway did not send it", async () => {
+      globalThis.fetch = jest.fn().mockResolvedValue(
+        jsonOk({ charges: [], payments: [], totalBalanceCents: 240000 }),
+      ) as unknown as typeof fetch;
+
+      const account = await getAccount("s1");
+
+      expect(account.asOf).toBe("");
+      expect(account.dueTodayCents).toBe(0);
+    });
+
     it("throws an ApiError on a non-2xx response", async () => {
       globalThis.fetch = jest.fn().mockResolvedValue(notOk(404)) as unknown as typeof fetch;
       await expect(getAccount("s1")).rejects.toMatchObject({ status: 404 });
