@@ -71,14 +71,57 @@ func (c EnrollmentConcept) AmountOn(on time.Time) int64 {
 		// take the service down.
 		return 0
 	}
-	amount := c.Tiers[0].AmountCents
+	// The step with the LATEST date that has arrived — found by scanning, not by
+	// stopping at the first future one. validate() checks the order, but this
+	// method is reached before it (see the guard above), and a ladder written
+	// backwards would otherwise return March's price for a January date: wrong
+	// money, no error, no panic.
+	amount, best := c.Tiers[0].AmountCents, time.Time{}
 	for _, tier := range c.Tiers {
 		if tier.EffectiveFrom.After(on) {
-			break
+			continue
 		}
-		amount = tier.AmountCents
+		if best.IsZero() || tier.EffectiveFrom.After(best) {
+			amount, best = tier.AmountCents, tier.EffectiveFrom
+		}
+	}
+	if best.IsZero() {
+		// Nothing has arrived yet: the earliest step, which on a validated ladder
+		// is the first one.
+		earliest := c.Tiers[0]
+		for _, tier := range c.Tiers {
+			if tier.EffectiveFrom.Before(earliest.EffectiveFrom) {
+				earliest = tier
+			}
+		}
+		return earliest.AmountCents
 	}
 	return amount
+}
+
+// clone returns a concept that shares nothing with this one.
+func (c EnrollmentConcept) clone() EnrollmentConcept {
+	c.Tiers = append([]PriceTier(nil), c.Tiers...)
+	return c
+}
+
+// cloneConcepts copies a whole inscription, ladders and all.
+//
+// TuitionPlan presents itself as an immutable value, and AmountOn depends
+// ABSOLUTELY on an order that is checked exactly once, in the constructor. The
+// grpc handler builds this slice and hands it straight over; without a copy it
+// still owns the plan's prices, and any later sort or reslice there would move
+// the ladder behind every guard that already ran. For money that is a stronger
+// reason to copy than it was for fees.
+func cloneConcepts(in []EnrollmentConcept) []EnrollmentConcept {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]EnrollmentConcept, 0, len(in))
+	for _, c := range in {
+		out = append(out, c.clone())
+	}
+	return out
 }
 
 // validate reports what a school cannot mean by one line of its inscription.
@@ -94,6 +137,7 @@ func (c EnrollmentConcept) validate() error {
 		return glerrors.New(glerrors.KindInvalid, "that is more price steps than a concept can carry")
 	}
 	var previous time.Time
+	var previousAmount int64
 	for _, tier := range c.Tiers {
 		if tier.EffectiveFrom.IsZero() {
 			return glerrors.New(glerrors.KindInvalid, "a price step needs the date it starts applying")
@@ -103,6 +147,15 @@ func (c EnrollmentConcept) validate() error {
 			// family's statement forever, already settled and never explained.
 			return glerrors.New(glerrors.KindInvalid, "a price step must be for some money")
 		}
+		if !previous.IsZero() && tier.AmountCents < previousAmount {
+			// Everything else leans on the ladder being a one-way ratchet: ADR
+			// 0011, the freeze rule, and the re-price that walks issued charges
+			// forward. A transposed digit — 33,000 for 3,300 — would otherwise
+			// take four hundred inscriptions DOWN, below what the families were
+			// already quoted, with nothing recording that it happened.
+			return glerrors.New(glerrors.KindInvalid,
+				"a price step cannot cost less than the one before it")
+		}
 		if !previous.IsZero() && !tier.EffectiveFrom.After(previous) {
 			// Out of order, or two steps on one day. Sorting it here would be
 			// guessing which price the school meant on the day they collide, and
@@ -110,7 +163,7 @@ func (c EnrollmentConcept) validate() error {
 			return glerrors.New(glerrors.KindInvalid,
 				"the price steps must run forwards in time, one date each")
 		}
-		previous = tier.EffectiveFrom
+		previous, previousAmount = tier.EffectiveFrom, tier.AmountCents
 	}
 	return nil
 }
@@ -168,4 +221,6 @@ func (p TuitionPlan) EnrollmentLinesOn(on time.Time) []EnrollmentLine {
 
 // EnrollmentConcepts are the lines this level's inscription is broken into,
 // empty when the plan carries the single amount it always did.
-func (p TuitionPlan) EnrollmentConcepts() []EnrollmentConcept { return p.enrollmentConcepts }
+func (p TuitionPlan) EnrollmentConcepts() []EnrollmentConcept {
+	return cloneConcepts(p.enrollmentConcepts)
+}

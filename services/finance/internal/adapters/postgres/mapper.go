@@ -66,7 +66,11 @@ func toDomainPlan(m tuitionPlanModel) (domain.TuitionPlan, error) {
 }
 
 // fromDomainPlan projects a tuition table into its GORM row.
-func fromDomainPlan(p domain.TuitionPlan) tuitionPlanModel {
+func fromDomainPlan(p domain.TuitionPlan) (tuitionPlanModel, error) {
+	concepts, err := enrollmentConceptsFromDomain(p.EnrollmentConcepts())
+	if err != nil {
+		return tuitionPlanModel{}, err
+	}
 	return tuitionPlanModel{
 		ID: p.ID(), TenantID: p.TenantID(), CycleID: p.CycleID(), LevelID: p.LevelID(),
 		EnrollmentCents: p.EnrollmentCents(), MonthlyCents: p.MonthlyCents(),
@@ -81,19 +85,17 @@ func fromDomainPlan(p domain.TuitionPlan) tuitionPlanModel {
 		MonthlyDiscountCents:   p.MonthlyDiscountCents(),
 		Fees:                   feesFromDomain(p.Fees()),
 		EnrollmentDueOn:        enrollmentDueFromDomain(p.EnrollmentDueOn()),
-		EnrollmentConcepts:     enrollmentConceptsFromDomain(p.EnrollmentConcepts()),
-	}
+		EnrollmentConcepts:     concepts,
+	}, nil
 }
 
-// tierDay is how a price step's boundary is stored: the calendar day the school
-// wrote down, and nothing else.
+// A price step's boundary is stored as the calendar day the school wrote down —
+// dateLayout, the same one the rest of this package uses — and nothing else.
 //
 // Marshalling domain.PriceTier straight to JSON would store an INSTANT with an
 // offset, and this service is already six hours out of step with the school it
 // serves (see AmountOn). A boundary that could drift by a timezone is one that
 // moves a family between $2,200 and $3,300 depending on how a row was written.
-const tierDay = "2006-01-02"
-
 // priceTierJSON and enrollmentConceptJSON are the stored shape. They live here,
 // in the adapter, because the storage format is not the domain's business — and
 // because pinning it explicitly is what stops a field rename in the domain
@@ -123,7 +125,7 @@ func enrollmentConceptsToDomain(raw []byte) ([]domain.EnrollmentConcept, error) 
 	for _, c := range stored {
 		tiers := make([]domain.PriceTier, 0, len(c.Tiers))
 		for _, tier := range c.Tiers {
-			day, err := time.Parse(tierDay, tier.EffectiveFrom)
+			day, err := time.Parse(dateLayout, tier.EffectiveFrom)
 			if err != nil {
 				// NOT degraded to "no ladder". A concept that lost its steps
 				// would be priced at nothing and the school would find out in
@@ -138,16 +140,16 @@ func enrollmentConceptsToDomain(raw []byte) ([]domain.EnrollmentConcept, error) 
 	return out, nil
 }
 
-func enrollmentConceptsFromDomain(in []domain.EnrollmentConcept) []byte {
+func enrollmentConceptsFromDomain(in []domain.EnrollmentConcept) ([]byte, error) {
 	if len(in) == 0 {
-		return []byte("[]")
+		return []byte("[]"), nil
 	}
 	stored := make([]enrollmentConceptJSON, 0, len(in))
 	for _, c := range in {
 		tiers := make([]priceTierJSON, 0, len(c.Tiers))
 		for _, tier := range c.Tiers {
 			tiers = append(tiers, priceTierJSON{
-				EffectiveFrom: tier.EffectiveFrom.Format(tierDay),
+				EffectiveFrom: tier.EffectiveFrom.Format(dateLayout),
 				AmountCents:   tier.AmountCents,
 			})
 		}
@@ -155,12 +157,14 @@ func enrollmentConceptsFromDomain(in []domain.EnrollmentConcept) []byte {
 	}
 	raw, err := json.Marshal(stored)
 	if err != nil {
-		// Marshalling names, dates and ints cannot fail. Unlike fees, this does
-		// NOT degrade to "[]": an empty list here means "charge the single
-		// EnrollmentCents", which for a plan that has none is charging nothing.
-		return nil
+		// Reported, never degraded. Unlike fees, an empty list here does not mean
+		// "no extras" — it means "charge the single EnrollmentCents", which for a
+		// plan that has none is charging the family nothing. And returning nil
+		// into a NOT NULL column would surface as a not-null violation with the
+		// real cause already thrown away.
+		return nil, glerrors.Wrap(glerrors.KindInternal, "storing the inscription concepts", err)
 	}
-	return raw
+	return raw, nil
 }
 
 // feesToDomain reads the stored fees. A row written before fees existed holds

@@ -259,3 +259,105 @@ func TestAPlanCannotCarryBothASingleInscriptionAndConcepts(t *testing.T) {
 		t.Fatalf("err = %v, want KindInvalid", err)
 	}
 }
+
+// R2. The ladder only ever climbs.
+//
+// Everything else in the design leans on that: ADR 0011 ("la deuda sube sola"),
+// the freeze rule — which is only defensible as a one-way ratchet, because a
+// family can be surprised upward but never billed below what they were already
+// quoted — and the re-price itself. A transposed digit (33,000 for 3,300) would
+// otherwise walk four hundred issued inscriptions DOWN with nothing recording
+// that it happened.
+func TestAPriceLadderCannotGoDown(t *testing.T) {
+	_, err := domain.NewTuitionPlan(domain.TuitionPlanSpec{
+		ID: "tp-1", TenantID: "t-1", CycleID: "c-1", LevelID: "lv-1",
+		MonthlyCents: 320000, Months: 10, FirstBilledMonth: 9, DueDay: 10,
+		EnrollmentConcepts: []domain.EnrollmentConcept{{
+			Name: "Inscripción",
+			Tiers: []domain.PriceTier{
+				{EffectiveFrom: day(2027, time.January, 1), AmountCents: 330000},
+				{EffectiveFrom: day(2027, time.March, 1), AmountCents: 33000},
+			},
+		}},
+	})
+	if err == nil || glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Fatalf("err = %v, want KindInvalid", err)
+	}
+}
+
+// A step that repeats the same price is not a mistake — a school may write the
+// months out in full and leave two of them alike.
+func TestAPriceLadderMayStandStill(t *testing.T) {
+	_, err := domain.NewTuitionPlan(domain.TuitionPlanSpec{
+		ID: "tp-1", TenantID: "t-1", CycleID: "c-1", LevelID: "lv-1",
+		MonthlyCents: 320000, Months: 10, FirstBilledMonth: 9, DueDay: 10,
+		EnrollmentConcepts: []domain.EnrollmentConcept{{
+			Name: "Gastos adm y seguro",
+			Tiers: []domain.PriceTier{
+				{EffectiveFrom: day(2027, time.January, 1), AmountCents: 470000},
+				{EffectiveFrom: day(2027, time.March, 1), AmountCents: 470000},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("a flat second step was refused: %v", err)
+	}
+}
+
+// R8. AmountOn must not depend on an ordering it does not itself check.
+//
+// Its own doc says it is reached by "a handler holding one straight off a
+// request payload" — before validate() has run. Stopping at the first future
+// step would return March's price for a January date on a ladder written
+// backwards: wrong money, no error, no panic.
+func TestPricingDoesNotTrustAnOrderItDidNotCheck(t *testing.T) {
+	backwards := domain.EnrollmentConcept{
+		Name: "Inscripción",
+		Tiers: []domain.PriceTier{
+			{EffectiveFrom: day(2027, time.March, 1), AmountCents: 330000},
+			{EffectiveFrom: day(2027, time.January, 1), AmountCents: 220000},
+		},
+	}
+	if got := backwards.AmountOn(day(2027, time.January, 15)); got != 220000 {
+		t.Errorf("AmountOn(15 Jan) = %d, want January's 220000", got)
+	}
+	if got := backwards.AmountOn(day(2027, time.March, 15)); got != 330000 {
+		t.Errorf("AmountOn(15 Mar) = %d, want March's 330000", got)
+	}
+}
+
+// R4. A plan is a value: what it costs must not change under it.
+//
+// AmountOn depends absolutely on tier order, and that order is checked ONCE, in
+// the constructor. The grpc handler builds the concept slice and hands it
+// straight over, so without a copy it still owns the plan's prices — and any
+// later sort, dedupe or reslice there would move the ladder behind every guard
+// that already ran.
+func TestAPlansPricesCannotBeChangedFromOutside(t *testing.T) {
+	tiers := []domain.PriceTier{
+		{EffectiveFrom: day(2027, time.January, 1), AmountCents: 220000},
+		{EffectiveFrom: day(2027, time.March, 1), AmountCents: 330000},
+	}
+	concepts := []domain.EnrollmentConcept{{Name: "Inscripción", Tiers: tiers}}
+	plan, err := domain.NewTuitionPlan(domain.TuitionPlanSpec{
+		ID: "tp-1", TenantID: "t-1", CycleID: "c-1", LevelID: "lv-1",
+		MonthlyCents: 320000, Months: 10, FirstBilledMonth: 9, DueDay: 10,
+		EnrollmentConcepts: concepts,
+	})
+	if err != nil {
+		t.Fatalf("NewTuitionPlan: %v", err)
+	}
+
+	// The caller reuses what it handed over, and a reader writes into the getter.
+	concepts[0].Name = "Otra cosa"
+	tiers[0].AmountCents = 1
+	plan.EnrollmentConcepts()[0].Tiers[1].AmountCents = 2
+
+	lines := plan.EnrollmentLinesOn(day(2027, time.January, 15))
+	if lines[0].Name != "Inscripción" || lines[0].AmountCents != 220000 {
+		t.Errorf("January = %q/%d, want Inscripción/220000", lines[0].Name, lines[0].AmountCents)
+	}
+	if got := plan.EnrollmentLinesOn(day(2027, time.March, 15))[0].AmountCents; got != 330000 {
+		t.Errorf("March = %d, want 330000", got)
+	}
+}

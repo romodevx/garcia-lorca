@@ -957,9 +957,12 @@ func recurrenceFor(kind string) string {
 // charge already issued carries its own amount, so correcting a typo cannot
 // disturb what a family already owes.
 func (r *Repository) UpsertTuitionPlan(ctx context.Context, p domain.TuitionPlan) (domain.TuitionPlan, error) {
-	model := fromDomainPlan(p)
+	model, err := fromDomainPlan(p)
+	if err != nil {
+		return domain.TuitionPlan{}, err
+	}
 	var out domain.TuitionPlan
-	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+	err = r.withTenant(ctx, func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "tenant_id"}, {Name: "cycle_id"}, {Name: "level_id"}},
 			// EVERY mutable column. A list that misses one silently keeps the

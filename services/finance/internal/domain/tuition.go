@@ -213,7 +213,7 @@ func NewTuitionPlan(spec TuitionPlanSpec) (TuitionPlan, error) {
 		monthlyDiscountCents: spec.MonthlyDiscountCents,
 		fees:                 spec.Fees,
 		enrollmentDueOn:      spec.EnrollmentDueOn,
-		enrollmentConcepts:   spec.EnrollmentConcepts,
+		enrollmentConcepts:   cloneConcepts(spec.EnrollmentConcepts),
 	}, nil
 }
 
@@ -384,7 +384,7 @@ func OverdueMonths(due, asOf time.Time) int {
 	if !asOf.After(due) {
 		return 0
 	}
-	months := (asOf.Year()-due.Year())*monthsInYear + int(asOf.Month()) - int(due.Month())
+	months := monthIndex(asOf) - monthIndex(due)
 	if asOf.Day() < due.Day() {
 		// The calendar month turned but the day of the month has not arrived, so
 		// the latest month is not complete.

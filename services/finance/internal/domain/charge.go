@@ -260,11 +260,12 @@ func (c Charge) WithAmount(amountCents int64) (Charge, error) {
 	if err != nil {
 		return Charge{}, err
 	}
-	if c.discount > amount {
-		// A charge that owes negative money would pay for itself and then some.
-		// Reachable now that the amount moves: a scholarship written against
-		// January's $2,200 outlives a re-price only if it still fits.
-		return Charge{}, glerrors.New(glerrors.KindInvalid, "discount cannot exceed amount")
+	// The same guard WithDiscount uses, through the same function: a charge that
+	// owed negative money would pay for itself and then some. Reachable now that
+	// the amount moves — a scholarship written against January's $2,200 outlives
+	// a re-price only if it still fits.
+	if _, err := validateDiscount(amount, c.discount.Int64()); err != nil {
+		return Charge{}, err
 	}
 	c.amount = amount
 	return c, nil
