@@ -79,6 +79,19 @@ export interface AccountStatement {
   totalBalanceCents: number;
   /** Money the family has handed over that no charge has claimed. */
   unallocatedCents: number;
+  /**
+   * What the school is asking for TODAY: the months that have come due, already
+   * carrying the surcharge that has accrued and net of the early-payment reward.
+   *
+   * `totalBalanceCents` above is what the YEAR still owes. Both are true at once,
+   * and showing only the first tells a family a number nobody is asking them for.
+   */
+  dueTodayCents: number;
+  /** Its parts, so the screen can explain its own figure. */
+  surchargeCents: number;
+  earlyDiscountCents: number;
+  /** The day those three were worked out for. They move overnight. */
+  asOf: string;
 }
 
 /**
@@ -471,12 +484,23 @@ export async function getAccount(baseURL: string, studentId: string): Promise<Ac
     payments?: Wire<Payment, "method">[];
     totalBalanceCents?: number;
     unallocatedCents?: number;
+    dueTodayCents?: number;
+    surchargeCents?: number;
+    earlyDiscountCents?: number;
+    asOf?: string;
   }>(baseURL, `/accounts/${studentId}`);
   return {
     charges: (res.charges ?? []).map(toCharge),
     payments: (res.payments ?? []).map(toPayment),
     totalBalanceCents: res.totalBalanceCents ?? 0,
     unallocatedCents: res.unallocatedCents ?? 0,
+    // A gateway written before M18 sends none of these. Zero would read as "the
+    // family owes nothing today", so the screen is told the truth — that the day
+    // is unknown — through an empty asOf, and decides for itself what to show.
+    dueTodayCents: res.dueTodayCents ?? 0,
+    surchargeCents: res.surchargeCents ?? 0,
+    earlyDiscountCents: res.earlyDiscountCents ?? 0,
+    asOf: res.asOf ?? "",
   };
 }
 
@@ -702,6 +726,32 @@ export interface TuitionPlan {
    * the default rule — the due day in the cycle's first month.
    */
   enrollmentDueOn: string;
+  /**
+   * The lines the inscription is broken into, each with its own price ladder.
+   * Empty keeps `enrollmentCents`; the two are mutually exclusive (ADR 0011).
+   */
+  enrollmentConcepts: EnrollmentConcept[];
+}
+
+/**
+ * One line of the inscription: a name the family reads and what it costs
+ * depending on WHEN they settle it.
+ *
+ * Deliberately NOT a Fee. A Fee is one amount divided between months; this is
+ * one amount that CHANGES with the month — the school's price list doubles the
+ * inscription between January and April, and that ladder is the whole incentive
+ * to join early.
+ */
+export interface EnrollmentConcept {
+  name: string;
+  /** The ladder, ordered by date. It only ever climbs. */
+  tiers: PriceTier[];
+}
+
+/** What a concept costs from a date onward (YYYY-MM-DD). */
+export interface PriceTier {
+  effectiveFrom: string;
+  amountCents: number;
 }
 
 /**
@@ -795,7 +845,10 @@ export async function upsertTuitionPlan(baseURL: string, input: TuitionPlanInput
 export async function listTuitionPlans(baseURL: string, cycleId: string): Promise<TuitionPlan[]> {
   const plans = await getList<
     Partial<TuitionPlan> &
-      Omit<TuitionPlan, "policy" | "schedule" | "monthlyDiscountCents" | "fees" | "enrollmentDueOn">
+      Omit<
+        TuitionPlan,
+        "policy" | "schedule" | "monthlyDiscountCents" | "fees" | "enrollmentDueOn" | "enrollmentConcepts"
+      >
   >(baseURL, `/tuition-plans?cycleId=${encodeURIComponent(cycleId)}`, "plans");
   return plans.map((p) => ({
     ...p,
@@ -804,6 +857,9 @@ export async function listTuitionPlans(baseURL: string, cycleId: string): Promis
     monthlyDiscountCents: p.monthlyDiscountCents ?? 0,
     fees: p.fees ?? [],
     enrollmentDueOn: p.enrollmentDueOn ?? "",
+    // A plan stored before M18 comes back without them, which is the
+    // single-amount inscription it has always had.
+    enrollmentConcepts: p.enrollmentConcepts ?? [],
   }));
 }
 

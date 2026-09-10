@@ -34,6 +34,22 @@ type AccountStatement struct {
 	// Without it on the statement the office cannot tell a credit from a
 	// keying mistake, and the parent is the only one who knows it exists.
 	UnallocatedCents int64
+	// DueTodayCents is what is being asked for NOW: the months that have come
+	// due, carrying the surcharge the daily rule has earned and net of the
+	// early-payment reward.
+	//
+	// TotalBalanceCents above stays the plain arithmetic of charge minus paid —
+	// what the YEAR still owes. Before this field the parents' app showed that
+	// figure and the counter showed this one, and the two disagreed by design.
+	DueTodayCents int64
+	// The parts of DueTodayCents, so a family asking "why that number?" is
+	// answered by the statement rather than by a phone call.
+	SurchargeCents     int64
+	EarlyDiscountCents int64
+	// AsOf is the day the three figures above were worked out for, YYYY-MM-DD.
+	// They move on their own overnight, and a screen that cannot say which day it
+	// is quoting cannot be trusted the morning after.
+	AsOf string
 }
 
 // FinanceService runs the debt-and-payment ledger: the charge catalog, the
@@ -519,12 +535,59 @@ func (s *FinanceService) GetAccount(ctx context.Context, studentID string) (Acco
 		// not a discount on the student's other debts.
 		balance += max(0, c.Charge.Effective().Int64()-c.PaidCents)
 	}
+	// What the counter would collect today, through the SAME arithmetic the
+	// counter uses — but against the charges ALREADY read above, and without the
+	// two idempotent writes EnsureConceptOfKind performs. A statement is a read,
+	// and this is the endpoint the parents' app hits most.
+	when := s.now()
+	expected, err := s.expectedForStatement(ctx, studentID, charges, when)
+	if err != nil {
+		return AccountStatement{}, err
+	}
 	return AccountStatement{
-		Charges:           charges,
-		Payments:          payments,
-		TotalBalanceCents: balance,
-		UnallocatedCents:  credit,
+		Charges:            charges,
+		Payments:           payments,
+		TotalBalanceCents:  balance,
+		UnallocatedCents:   credit,
+		DueTodayCents:      expected.AmountCents,
+		SurchargeCents:     expected.SurchargeCents,
+		EarlyDiscountCents: expected.DiscountCents,
+		AsOf:               when.Format(dueDateLayout),
 	}, nil
+}
+
+// expectedForStatement is what the counter would collect today, worked out from
+// charges the caller has already loaded.
+//
+// It resolves the concepts by READING the catalog rather than ensuring them:
+// a statement must not write, and by the time a family has charges at all, the
+// concepts those charges point at necessarily exist. A school with no concepts
+// yet has no charges either, and the arithmetic over an empty list is zero
+// whichever id it was given.
+func (s *FinanceService) expectedForStatement(
+	ctx context.Context, studentID string, charges []ports.ChargeWithPaid, when time.Time,
+) (Expected, error) {
+	calendar, _ := s.schoolCalendar(ctx, studentID)
+	plan, err := s.planFor(ctx, studentID)
+	if err != nil {
+		return Expected{}, err
+	}
+	byKind, err := s.repo.ListConcepts(ctx, true)
+	if err != nil {
+		return Expected{}, err
+	}
+	var lateFeeID, tuitionID, enrolmentID string
+	for _, c := range byKind {
+		switch c.Kind() {
+		case domain.KindLateFee:
+			lateFeeID = c.ID()
+		case domain.KindTuition:
+			tuitionID = c.ID()
+		case domain.KindEnrollment:
+			enrolmentID = c.ID()
+		}
+	}
+	return expectedFrom(charges, plan, calendar, lateFeeID, tuitionID, enrolmentID, when)
 }
 
 // ListOverdue returns the charges past due that still owe money, as of the

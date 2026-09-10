@@ -371,6 +371,24 @@ message GetAccountResponse {
   // Money the family has handed over that no charge has claimed: an
   // overpayment, or a deposit made before the month was billed.
   int64 unallocated_cents = 4;
+  // What is being asked for TODAY, at the moment of the read: the months that
+  // have come due, already carrying the surcharge the daily rule has earned and
+  // net of the early-payment reward.
+  //
+  // total_balance_cents above is the plain arithmetic of charge minus paid, and
+  // stays that way — it is what the year still owes. This is what the family
+  // must hand over now, and it is the number the school quotes at the counter.
+  // Before this field the parents' app showed the first and the window showed
+  // the second, and the two disagreed by design.
+  int64 due_today_cents = 5;
+  // The parts of due_today_cents, so a family asking "why that number?" is
+  // answered by the statement rather than by a phone call.
+  int64 surcharge_cents = 6;
+  int64 early_discount_cents = 7;
+  // The day the figures above were worked out for, as YYYY-MM-DD. Carried
+  // because these amounts move on their own overnight, and a screen that cannot
+  // say which day it is quoting cannot be trusted the morning after.
+  string as_of = 8;
 }
 
 message ListOverdueRequest {
@@ -469,6 +487,44 @@ message TuitionPlan {
   // the rule the run has always used — the due day in the cycle's first month —
   // so a plan written before this field goes on meaning what it meant.
   string enrollment_due_on = 16;
+  // What joining this level actually costs, broken into the lines the school
+  // prints and priced by when the family settles them. Empty keeps
+  // enrollment_cents above, so a plan written before this field goes on meaning
+  // what it meant. See ADR 0011.
+  repeated EnrollmentConcept enrollment_concepts = 17;
+}
+
+// EnrollmentConcept is one line of the inscription: a name the family reads and
+// what it costs depending on WHEN it is settled.
+//
+// The school's price list does not charge one amount to join. It charges three
+// — inscription, administration and insurance, parents' association — and the
+// first of them doubles between January and April. The ladder is the whole
+// incentive: joining late costs more, and it goes on costing more until the
+// money arrives.
+//
+// This is deliberately NOT a Fee. A Fee is one amount divided between months;
+// this is one amount that CHANGES with the month. Folding either into the other
+// would leave neither able to explain itself, and both live on the same plan.
+message EnrollmentConcept {
+  // What the family reads on the statement. Unique within the plan, because two
+  // lines with one name cannot be told apart on a receipt.
+  string name = 1;
+  // The price ladder, ordered by effective_from. At least one step.
+  repeated PriceTier tiers = 2;
+}
+
+// PriceTier is what a concept costs from a date onward.
+//
+// "Vigente desde" and not a set of months: "de abril a septiembre" is one row
+// rather than six checkboxes, and nothing has to verify that no month was left
+// out or listed twice — a ladder covers the whole axis by construction.
+message PriceTier {
+  // YYYY-MM-DD. The tier that applies on a given day is the LAST one whose date
+  // has arrived; before the first one, the first one — a concept does not cost
+  // nothing for having been asked about early.
+  string effective_from = 1;
+  int64 amount_cents = 2;
 }
 
 // Fee is money the school collects on top of the monthly tuition, spread across
@@ -541,6 +597,8 @@ message UpsertTuitionPlanRequest {
   repeated Fee fees = 13;
   // YYYY-MM-DD, or empty for the default rule.
   string enrollment_due_on = 14;
+  // The inscription broken into priced lines. Empty keeps enrollment_cents.
+  repeated EnrollmentConcept enrollment_concepts = 15;
 }
 
 message UpsertTuitionPlanResponse {
@@ -577,6 +635,10 @@ message RunBillingResponse {
   // Reported because a run that silently moves four hundred due dates is one
   // nobody can audit.
   int32 enrollment_moved = 7;
+  // Unpaid inscriptions the run re-priced to the tier now in force. Reported for
+  // the same reason as enrollment_moved, and it matters more: this one moves
+  // money, not dates.
+  int32 enrollment_repriced = 8;
   // Levels of the cycle with no tuition table. They are NOT billed at zero —
   // they are reported, so a school notices it forgot one instead of discovering
   // it in June.

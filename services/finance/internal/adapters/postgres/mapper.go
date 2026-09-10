@@ -35,6 +35,10 @@ func toDomainPlan(m tuitionPlanModel) (domain.TuitionPlan, error) {
 	if err != nil {
 		return domain.TuitionPlan{}, err
 	}
+	concepts, err := enrollmentConceptsToDomain(m.EnrollmentConcepts)
+	if err != nil {
+		return domain.TuitionPlan{}, err
+	}
 	var enrollmentDue time.Time
 	if m.EnrollmentDueOn != nil {
 		enrollmentDue = *m.EnrollmentDueOn
@@ -48,6 +52,7 @@ func toDomainPlan(m tuitionPlanModel) (domain.TuitionPlan, error) {
 		MonthlyDiscountCents: m.MonthlyDiscountCents,
 		Fees:                 fees,
 		EnrollmentDueOn:      enrollmentDue,
+		EnrollmentConcepts:   concepts,
 		Policy: domain.CollectionPolicy{
 			// A row written before M16 has mode 'monthly' by default, so it keeps
 			// meaning exactly what it meant when it was billed.
@@ -61,7 +66,11 @@ func toDomainPlan(m tuitionPlanModel) (domain.TuitionPlan, error) {
 }
 
 // fromDomainPlan projects a tuition table into its GORM row.
-func fromDomainPlan(p domain.TuitionPlan) tuitionPlanModel {
+func fromDomainPlan(p domain.TuitionPlan) (tuitionPlanModel, error) {
+	concepts, err := enrollmentConceptsFromDomain(p.EnrollmentConcepts())
+	if err != nil {
+		return tuitionPlanModel{}, err
+	}
 	return tuitionPlanModel{
 		ID: p.ID(), TenantID: p.TenantID(), CycleID: p.CycleID(), LevelID: p.LevelID(),
 		EnrollmentCents: p.EnrollmentCents(), MonthlyCents: p.MonthlyCents(),
@@ -76,7 +85,86 @@ func fromDomainPlan(p domain.TuitionPlan) tuitionPlanModel {
 		MonthlyDiscountCents:   p.MonthlyDiscountCents(),
 		Fees:                   feesFromDomain(p.Fees()),
 		EnrollmentDueOn:        enrollmentDueFromDomain(p.EnrollmentDueOn()),
+		EnrollmentConcepts:     concepts,
+	}, nil
+}
+
+// A price step's boundary is stored as the calendar day the school wrote down —
+// dateLayout, the same one the rest of this package uses — and nothing else.
+//
+// Marshalling domain.PriceTier straight to JSON would store an INSTANT with an
+// offset, and this service is already six hours out of step with the school it
+// serves (see AmountOn). A boundary that could drift by a timezone is one that
+// moves a family between $2,200 and $3,300 depending on how a row was written.
+// priceTierJSON and enrollmentConceptJSON are the stored shape. They live here,
+// in the adapter, because the storage format is not the domain's business — and
+// because pinning it explicitly is what stops a field rename in the domain
+// silently orphaning every price list already saved.
+type priceTierJSON struct {
+	EffectiveFrom string `json:"effective_from"`
+	AmountCents   int64  `json:"amount_cents"`
+}
+
+type enrollmentConceptJSON struct {
+	Name  string          `json:"name"`
+	Tiers []priceTierJSON `json:"tiers"`
+}
+
+// enrollmentConceptsToDomain reads the stored inscription. A row written before
+// M18 holds "[]" and yields none, which is the single-amount inscription every
+// plan had until now.
+func enrollmentConceptsToDomain(raw []byte) ([]domain.EnrollmentConcept, error) {
+	if len(raw) == 0 {
+		return nil, nil
 	}
+	var stored []enrollmentConceptJSON
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "reading the inscription concepts", err)
+	}
+	out := make([]domain.EnrollmentConcept, 0, len(stored))
+	for _, c := range stored {
+		tiers := make([]domain.PriceTier, 0, len(c.Tiers))
+		for _, tier := range c.Tiers {
+			day, err := time.Parse(dateLayout, tier.EffectiveFrom)
+			if err != nil {
+				// NOT degraded to "no ladder". A concept that lost its steps
+				// would be priced at nothing and the school would find out in
+				// June; refusing the read is how somebody finds out today.
+				return nil, glerrors.Wrap(glerrors.KindInternal,
+					"reading the date a price step starts", err)
+			}
+			tiers = append(tiers, domain.PriceTier{EffectiveFrom: day, AmountCents: tier.AmountCents})
+		}
+		out = append(out, domain.EnrollmentConcept{Name: c.Name, Tiers: tiers})
+	}
+	return out, nil
+}
+
+func enrollmentConceptsFromDomain(in []domain.EnrollmentConcept) ([]byte, error) {
+	if len(in) == 0 {
+		return []byte("[]"), nil
+	}
+	stored := make([]enrollmentConceptJSON, 0, len(in))
+	for _, c := range in {
+		tiers := make([]priceTierJSON, 0, len(c.Tiers))
+		for _, tier := range c.Tiers {
+			tiers = append(tiers, priceTierJSON{
+				EffectiveFrom: tier.EffectiveFrom.Format(dateLayout),
+				AmountCents:   tier.AmountCents,
+			})
+		}
+		stored = append(stored, enrollmentConceptJSON{Name: c.Name, Tiers: tiers})
+	}
+	raw, err := json.Marshal(stored)
+	if err != nil {
+		// Reported, never degraded. Unlike fees, an empty list here does not mean
+		// "no extras" — it means "charge the single EnrollmentCents", which for a
+		// plan that has none is charging the family nothing. And returning nil
+		// into a NOT NULL column would surface as a not-null violation with the
+		// real cause already thrown away.
+		return nil, glerrors.Wrap(glerrors.KindInternal, "storing the inscription concepts", err)
+	}
+	return raw, nil
 }
 
 // feesToDomain reads the stored fees. A row written before fees existed holds

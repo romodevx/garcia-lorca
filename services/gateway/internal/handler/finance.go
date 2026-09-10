@@ -546,6 +546,12 @@ func (h *FinanceHandler) GetAccount(w http.ResponseWriter, r *http.Request) {
 		"payments":          payments,
 		"totalBalanceCents": res.TotalBalanceCents,
 		"unallocatedCents":  res.UnallocatedCents,
+		// The same figures the family's own statement carries, so the office and
+		// the parent are never quoting two different numbers.
+		"dueTodayCents":      res.DueTodayCents,
+		"surchargeCents":     res.SurchargeCents,
+		"earlyDiscountCents": res.EarlyDiscountCents,
+		"asOf":               res.AsOf,
 	})
 }
 

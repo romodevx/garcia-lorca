@@ -31,7 +31,7 @@ beforeEach(() => {
     ],
     payments: [],
     totalBalanceCents: 640000,
-    unallocatedCents: 0,
+    unallocatedCents: 0, dueTodayCents: 0, surchargeCents: 0, earlyDiscountCents: 0, asOf: "",
   });
   finance.getExpected.mockResolvedValue({
     amountCents: 670000, surchargeCents: 30000, discountCents: 0, annualBalanceCents: 640000,

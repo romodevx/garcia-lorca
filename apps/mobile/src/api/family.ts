@@ -65,6 +65,24 @@ export interface FamilyAccount {
   charges: FamilyCharge[];
   payments: FamilyPayment[];
   totalBalanceCents: number;
+  /**
+   * What the school is asking for TODAY: the months that have come due, already
+   * carrying the surcharge that has accrued and net of the early-payment reward.
+   *
+   * `totalBalanceCents` is what the YEAR still owes. Both are true at once, and
+   * a parent shown only the year is told a number nobody is asking them for —
+   * they are also the one person who cannot walk to the office and ask.
+   */
+  dueTodayCents: number;
+  /** Its parts, so the screen can explain its own figure. */
+  surchargeCents: number;
+  earlyDiscountCents: number;
+  /**
+   * The day those three were worked out for, YYYY-MM-DD. EMPTY when the gateway
+   * is older than M18 and sent none: the screen withholds the figure rather than
+   * showing $0.00 to a family that owes money.
+   */
+  asOf: string;
 }
 
 /** One numeric grade entry, enriched with its subject and term display names. */
@@ -131,6 +149,10 @@ export async function getAccount(studentId: string): Promise<FamilyAccount> {
     charges: data.charges ?? [],
     payments: data.payments ?? [],
     totalBalanceCents: data.totalBalanceCents ?? 0,
+    dueTodayCents: data.dueTodayCents ?? 0,
+    surchargeCents: data.surchargeCents ?? 0,
+    earlyDiscountCents: data.earlyDiscountCents ?? 0,
+    asOf: data.asOf ?? "",
   };
 }
 
