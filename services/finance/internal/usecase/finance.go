@@ -34,6 +34,22 @@ type AccountStatement struct {
 	// Without it on the statement the office cannot tell a credit from a
 	// keying mistake, and the parent is the only one who knows it exists.
 	UnallocatedCents int64
+	// DueTodayCents is what is being asked for NOW: the months that have come
+	// due, carrying the surcharge the daily rule has earned and net of the
+	// early-payment reward.
+	//
+	// TotalBalanceCents above stays the plain arithmetic of charge minus paid —
+	// what the YEAR still owes. Before this field the parents' app showed that
+	// figure and the counter showed this one, and the two disagreed by design.
+	DueTodayCents int64
+	// The parts of DueTodayCents, so a family asking "why that number?" is
+	// answered by the statement rather than by a phone call.
+	SurchargeCents     int64
+	EarlyDiscountCents int64
+	// AsOf is the day the three figures above were worked out for, YYYY-MM-DD.
+	// They move on their own overnight, and a screen that cannot say which day it
+	// is quoting cannot be trusted the morning after.
+	AsOf string
 }
 
 // FinanceService runs the debt-and-payment ledger: the charge catalog, the
@@ -519,11 +535,23 @@ func (s *FinanceService) GetAccount(ctx context.Context, studentID string) (Acco
 		// not a discount on the student's other debts.
 		balance += max(0, c.Charge.Effective().Int64()-c.PaidCents)
 	}
+	// What the counter would collect today, through the SAME arithmetic the
+	// counter uses. Reimplementing it here would be two answers to one question,
+	// and the whole point of the field is that there is only one.
+	when := s.now()
+	expected, err := s.ExpectedToday(ctx, studentID, when)
+	if err != nil {
+		return AccountStatement{}, err
+	}
 	return AccountStatement{
-		Charges:           charges,
-		Payments:          payments,
-		TotalBalanceCents: balance,
-		UnallocatedCents:  credit,
+		Charges:            charges,
+		Payments:           payments,
+		TotalBalanceCents:  balance,
+		UnallocatedCents:   credit,
+		DueTodayCents:      expected.AmountCents,
+		SurchargeCents:     expected.SurchargeCents,
+		EarlyDiscountCents: expected.DiscountCents,
+		AsOf:               when.Format(dueDateLayout),
 	}, nil
 }
 

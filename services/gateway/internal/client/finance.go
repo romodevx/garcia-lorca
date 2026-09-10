@@ -74,6 +74,16 @@ type AccountStatement struct {
 	// UnallocatedCents is money the family has handed over that no charge has
 	// claimed — their credit with the school.
 	UnallocatedCents int64
+	// DueTodayCents is what is being asked for NOW, already carrying the accrued
+	// surcharge and net of the early-payment reward. TotalBalanceCents above is
+	// what the YEAR still owes; before this field the parents' app showed that
+	// one and the counter showed this one.
+	DueTodayCents int64
+	// The parts of it, so the statement can explain its own number.
+	SurchargeCents     int64
+	EarlyDiscountCents int64
+	// AsOf is the day those three were worked out for, YYYY-MM-DD.
+	AsOf string
 }
 
 // NewFinanceClient builds a FinanceClient targeting the finance base URL over
@@ -247,10 +257,14 @@ func (c *FinanceClient) GetAccount(ctx context.Context, studentID string) (Accou
 		payments = append(payments, toPayment(p))
 	}
 	return AccountStatement{
-		Charges:           toCharges(res.Msg.GetCharges()),
-		Payments:          payments,
-		TotalBalanceCents: res.Msg.GetTotalBalanceCents(),
-		UnallocatedCents:  res.Msg.GetUnallocatedCents(),
+		Charges:            toCharges(res.Msg.GetCharges()),
+		Payments:           payments,
+		TotalBalanceCents:  res.Msg.GetTotalBalanceCents(),
+		DueTodayCents:      res.Msg.GetDueTodayCents(),
+		SurchargeCents:     res.Msg.GetSurchargeCents(),
+		EarlyDiscountCents: res.Msg.GetEarlyDiscountCents(),
+		AsOf:               res.Msg.GetAsOf(),
+		UnallocatedCents:   res.Msg.GetUnallocatedCents(),
 	}, nil
 }
 

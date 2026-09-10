@@ -188,10 +188,14 @@ func (h *FinanceHandler) GetAccount(ctx context.Context, req *connect.Request[fi
 		payments = append(payments, toProtoPayment(p))
 	}
 	return connect.NewResponse(&financev1.GetAccountResponse{
-		Charges:           toProtoCharges(statement.Charges),
-		Payments:          payments,
-		TotalBalanceCents: statement.TotalBalanceCents,
-		UnallocatedCents:  statement.UnallocatedCents,
+		Charges:            toProtoCharges(statement.Charges),
+		Payments:           payments,
+		TotalBalanceCents:  statement.TotalBalanceCents,
+		UnallocatedCents:   statement.UnallocatedCents,
+		DueTodayCents:      statement.DueTodayCents,
+		SurchargeCents:     statement.SurchargeCents,
+		EarlyDiscountCents: statement.EarlyDiscountCents,
+		AsOf:               statement.AsOf,
 	}), nil
 }
 

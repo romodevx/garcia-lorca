@@ -587,3 +587,68 @@ func TestPayingCollectsTheTierInForceOnTheDayTheMoneyArrives(t *testing.T) {
 	}
 	t.Fatal("no inscription charge found")
 }
+
+// Etapa 4. The statement the FAMILY reads must say what is owed TODAY.
+//
+// Until now GetAccount was the plain arithmetic of charge minus paid — the
+// whole year still owing — while the counter quoted the derived figure with the
+// accrued surcharge and the early-payment reward. Two numbers that disagreed by
+// design: the office said one thing and the app in the parent's hand said
+// another.
+func TestTheStatementSaysWhatIsOwedToday(t *testing.T) {
+	f := billingFixture(t)
+	runOn(t, f, "2026-09-15")
+	f.clock = aug(2026, time.November, 20)
+
+	got, err := f.svc.GetAccount(context.Background(), testStudent)
+	if err != nil {
+		t.Fatalf("GetAccount: %v", err)
+	}
+
+	// The year still owing is unchanged: ten months, the inscription, and the
+	// surcharges the run wrote down.
+	if got.TotalBalanceCents <= 0 {
+		t.Fatalf("total balance = %d, want the year still owed", got.TotalBalanceCents)
+	}
+	// What is being asked for today is a DIFFERENT, smaller number: only the
+	// months that have come due.
+	if got.DueTodayCents <= 0 {
+		t.Fatal("due today = 0 — the statement says the family owes nothing")
+	}
+	if got.DueTodayCents >= got.TotalBalanceCents {
+		t.Errorf("due today (%d) is not less than the year (%d) — the two numbers are the same figure",
+			got.DueTodayCents, got.TotalBalanceCents)
+	}
+	if got.AsOf != "2026-11-20" {
+		t.Errorf("as of %q, want 2026-11-20 — a screen that cannot say which day it quotes cannot be trusted", got.AsOf)
+	}
+}
+
+// The parts have to add up, or a family asking "why that number?" is answered by
+// a phone call instead of by the statement.
+func TestTheStatementExplainsTheNumberItQuotes(t *testing.T) {
+	f := billingFixture(t)
+	runOn(t, f, "2026-09-15")
+	f.clock = aug(2026, time.November, 20)
+
+	account, err := f.svc.GetAccount(context.Background(), testStudent)
+	if err != nil {
+		t.Fatalf("GetAccount: %v", err)
+	}
+	expected, err := f.svc.ExpectedToday(context.Background(), testStudent, f.clock)
+	if err != nil {
+		t.Fatalf("ExpectedToday: %v", err)
+	}
+
+	// One arithmetic, not two: the statement quotes exactly what the counter
+	// would collect on that day.
+	if account.DueTodayCents != expected.AmountCents {
+		t.Errorf("statement says %d, counter says %d", account.DueTodayCents, expected.AmountCents)
+	}
+	if account.SurchargeCents != expected.SurchargeCents {
+		t.Errorf("surcharge %d vs %d", account.SurchargeCents, expected.SurchargeCents)
+	}
+	if account.EarlyDiscountCents != expected.DiscountCents {
+		t.Errorf("early discount %d vs %d", account.EarlyDiscountCents, expected.DiscountCents)
+	}
+}
