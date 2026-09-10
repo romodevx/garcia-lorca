@@ -227,6 +227,23 @@ Orden fijo del repo: contrato → datos → backend (TDD) → frontend → QA �
 
 ---
 
+## 5b. Estado de ejecución (10-sep-2026)
+
+| Etapa | Estado | Commits |
+|---|---|---|
+| 0 · Contrato y ADR | ✅ | `d01f2fd9`, `78a776f2` |
+| 1 · Dominio | ✅ | `86855418`, `d1e9bc91` |
+| 2 · Persistencia | ✅ | `d91d5905`, `4db6cd67` |
+| 3 · Corrida y cobro | ✅ | `0d192f79`, `69ed2f87` |
+| 4 · Lectura en tiempo real | ✅ | `eee6ebd4` |
+| 5 · Frontend (web + móvil) | ✅ | `cc49ca14`, `e6819c65` |
+| 6 · QA y compuertas | 🟡 | E2E escrito (`apps/web/e2e/inscripcion-tramos.spec.ts`), **sin correr**: requiere el stack local arriba |
+
+Barrido de hallazgos: `5cd70e57`. Nueve de diez cerrados; queda R5 (gravedad baja).
+
+**Lo que falta para cerrar la etapa 6:** correr el E2E contra un stack levantado,
+y las compuertas de **security** y **tech-lead**.
+
 ## 6. Estimación
 
 | Etapa | Días |
