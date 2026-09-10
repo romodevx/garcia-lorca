@@ -249,11 +249,18 @@ func (s *FinanceService) ExpectedToday(ctx context.Context, studentID string, on
 		when = s.now()
 	}
 	calendar, _ := s.schoolCalendar(ctx, studentID)
-	policy, err := s.policyFor(ctx, studentID)
+	// The whole table, not just its policy: the inscription's price is a
+	// function of the day being asked about, and only the table knows the ladder.
+	plan, err := s.planFor(ctx, studentID)
 	if err != nil {
 		return Expected{}, err
 	}
+	policy := plan.Policy()
 	lateFee, err := s.repo.EnsureConceptOfKind(ctx, s.newID(), domain.KindLateFee, lateFeeConceptName)
+	if err != nil {
+		return Expected{}, err
+	}
+	enrolment, err := s.repo.EnsureConceptOfKind(ctx, s.newID(), domain.KindEnrollment, enrollmentConceptName)
 	if err != nil {
 		return Expected{}, err
 	}
@@ -280,6 +287,16 @@ func (s *FinanceService) ExpectedToday(ctx context.Context, studentID string, on
 	for _, c := range charges {
 		if c.Charge.Status() == domain.StatusCancelled || owed(c) <= 0 {
 			continue
+		}
+		// The ladder, at the day being asked about. Quoting the stored amount
+		// instead would show one number and collect another in the same
+		// transaction — see ladderPrice.
+		if amount, moves := ladderPrice(c, plan, enrolment.ID(), when); moves {
+			repriced, err := c.Charge.WithAmount(amount)
+			if err != nil {
+				return Expected{}, err
+			}
+			c.Charge = repriced
 		}
 		out.AnnualBalanceCents += owed(c)
 		if !expectedBy(c.Charge.DueDate(), when) {
@@ -411,10 +428,41 @@ type depositPlanner struct {
 // Reports ok=false when nothing should move, so the caller writes no row for a
 // price that did not change.
 func (p *depositPlanner) repriceInscription(c ports.ChargeWithPaid) (domain.Charge, bool, error) {
-	if c.Charge.ConceptID() != p.enrolmentID || c.PaidCents > 0 || c.Charge.Discount().Int64() > 0 {
+	amount, ok := ladderPrice(c, p.tuition, p.enrolmentID, p.paidOn)
+	if !ok {
 		return domain.Charge{}, false, nil
 	}
-	for _, line := range p.tuition.EnrollmentLinesOn(p.paidOn) {
+	moved, err := c.Charge.WithAmount(amount)
+	if err != nil {
+		return domain.Charge{}, false, err
+	}
+	return moved, true, nil
+}
+
+// ladderPrice is what one charge is worth on a day, and whether the ladder
+// applies to it at all.
+//
+// It is a package function and not a method on the planner because the QUOTE and
+// the COLLECTION must answer identically. When only the payment path knew this
+// rule, the counter showed the amount last written down while the same
+// transaction took the money at today's rung: the family left with a receipt for
+// one number owing another, and the freeze rule fixed the price at the higher
+// one. That is the outcome ADR 0011 says the rule exists to prevent.
+//
+// Reports ok=false when nothing should move, which is most charges: anything
+// that is not an inscription line, anything with money on it (the first peso
+// freezes the price), anything carrying a discount (a price a PERSON decided,
+// which a price list must not overwrite), and a line already at its rung.
+func ladderPrice(
+	c ports.ChargeWithPaid, plan domain.TuitionPlan, enrolmentConceptID string, on time.Time,
+) (int64, bool) {
+	if c.Charge.ConceptID() != enrolmentConceptID || c.PaidCents > 0 || c.Charge.Discount().Int64() > 0 {
+		return 0, false
+	}
+	if c.Charge.Status() == domain.StatusCancelled {
+		return 0, false
+	}
+	for _, line := range plan.EnrollmentLinesOn(on) {
 		// Matched on the description, which is what enrollmentCharges wrote and
 		// what the family reads. A plan with no concepts yields one unnamed line
 		// and matches nothing here, so a school that never adopted the ladder is
@@ -423,15 +471,11 @@ func (p *depositPlanner) repriceInscription(c ports.ChargeWithPaid) (domain.Char
 			continue
 		}
 		if line.AmountCents == c.Charge.Amount().Int64() {
-			return domain.Charge{}, false, nil
+			return 0, false
 		}
-		moved, err := c.Charge.WithAmount(line.AmountCents)
-		if err != nil {
-			return domain.Charge{}, false, err
-		}
-		return moved, true, nil
+		return line.AmountCents, true
 	}
-	return domain.Charge{}, false, nil
+	return 0, false
 }
 
 // plan turns the student's locked charges into the writes this deposit makes.

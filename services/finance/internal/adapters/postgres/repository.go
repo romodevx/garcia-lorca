@@ -531,12 +531,17 @@ func (r *Repository) ListCharges(ctx context.Context, studentID, cycleID string)
 func (r *Repository) SaveCharge(ctx context.Context, c domain.Charge) (domain.Charge, error) {
 	var out domain.Charge
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		// Deliberately NOT amount_cents. Both callers (ApplyDiscount and
+		// CancelCharge) read the charge, change it and write it back OUTSIDE a
+		// transaction; writing the price here would put the amount they read
+		// minutes ago back into the row, undoing a re-price that landed in
+		// between — the ladder walking backwards in silence, which is exactly
+		// what the one-way ratchet exists to prevent.
+		//
+		// Re-pricing has its own two paths, and both decide under a lock or in
+		// one statement: RepriceUnpaid for the run, DepositWrite.Repriced for the
+		// counter. A price that moves needs one of those, never this.
 		res := tx.Model(&chargeModel{}).Where("id = ?", c.ID()).Updates(map[string]any{
-			// amount_cents too: a charge's price MOVES now (the inscription
-			// ladder, ADR 0011), and a save that wrote every other field would
-			// take a re-priced charge, drop the re-price, return the row at the
-			// old price and report success.
-			"amount_cents":   c.Amount().Int64(),
 			"discount_cents": c.Discount().Int64(),
 			"status":         c.Status(),
 			"updated_at":     gorm.Expr("now()"),

@@ -383,6 +383,12 @@ func aug(y int, m time.Month, d int) time.Time {
 // ladderFixture is the school with the flyer's three-line inscription in place
 // of one amount: $2,200 until November, $3,300 after.
 func ladderFixture(t *testing.T) *fixture {
+	return ladderFixtureFrom(t, aug(2026, time.November, 1))
+}
+
+// ladderFixtureFrom is the same school with the second rung starting on a day
+// the caller chooses, so two of them can differ in exactly one thing.
+func ladderFixtureFrom(t *testing.T, secondRungFrom time.Time) *fixture {
 	t.Helper()
 	f := billingFixture(t)
 	flat := func(name string, cents int64) domain.EnrollmentConcept {
@@ -397,7 +403,7 @@ func ladderFixture(t *testing.T) *fixture {
 		EnrollmentConcepts: []domain.EnrollmentConcept{
 			{Name: "Inscripción", Tiers: []domain.PriceTier{
 				{EffectiveFrom: aug(2026, time.August, 1), AmountCents: 220000},
-				{EffectiveFrom: aug(2026, time.November, 1), AmountCents: 330000},
+				{EffectiveFrom: secondRungFrom, AmountCents: 330000},
 			}},
 			flat("Gastos adm y seguro", 470000),
 			flat("Cuota Asociación Padres de Familia", 85000),
@@ -650,5 +656,82 @@ func TestTheStatementExplainsTheNumberItQuotes(t *testing.T) {
 	}
 	if account.EarlyDiscountCents != expected.DiscountCents {
 		t.Errorf("early discount %d vs %d", account.EarlyDiscountCents, expected.DiscountCents)
+	}
+}
+
+// B1. The counter must quote the ladder, not the amount last written down.
+//
+// There is no nightly run: RunBilling fires only when somebody presses
+// "generar". So on 5 November the stored inscription still says September's
+// price, and a read path that trusts it quotes $2,200 while the payment path —
+// which DOES apply the ladder — takes the money at $3,300 inside the same
+// transaction. The family walks out with a receipt for one number owing
+// another, and the freeze rule has just fixed the price at the higher rung.
+//
+// Asserted as a DELTA between two schools identical in every way except WHEN
+// the second rung starts. Everything else — tuition months, surcharges, the
+// flat lines — cancels out, so what is left is the rung itself and nothing else
+// can make this pass by accident.
+func TestWhatIsQuotedIsWhatTheLadderSaysToday(t *testing.T) {
+	const when = "2026-11-05"
+
+	quote := func(t *testing.T, secondRungFrom time.Time) int64 {
+		t.Helper()
+		f := ladderFixtureFrom(t, secondRungFrom)
+		runOn(t, f, "2026-09-15")
+		day := aug(2026, time.November, 5)
+		f.clock = day
+		got, err := f.svc.ExpectedToday(context.Background(), testStudent, day)
+		if err != nil {
+			t.Fatalf("ExpectedToday: %v", err)
+		}
+		return got.AmountCents
+	}
+
+	// One school's second rung started on 1 November; the other's starts in
+	// December and has not arrived on the 5th.
+	arrived := quote(t, aug(2026, time.November, 1))
+	notYet := quote(t, aug(2026, time.December, 1))
+
+	if got := arrived - notYet; got != 110000 {
+		t.Fatalf("the quote moved by %d on %s, want the rung's 110000 — a quote that does not "+
+			"move is reading the stored amount, and the counter will collect more than it showed",
+			got, when)
+	}
+}
+
+// The same rule the ledger uses: a negotiated price is not re-quoted either.
+// Otherwise the screen would ask a scholarship family for the list price, and
+// the money taken would not match the money shown.
+func TestTheQuoteDoesNotRePriceWhatSomebodyNegotiated(t *testing.T) {
+	quote := func(t *testing.T, secondRungFrom time.Time) int64 {
+		t.Helper()
+		f := ladderFixtureFrom(t, secondRungFrom)
+		runOn(t, f, "2026-09-15")
+
+		list, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+		if err != nil {
+			t.Fatalf("ListCharges: %v", err)
+		}
+		for _, c := range list {
+			if c.Charge.Description() != "Inscripción" {
+				continue
+			}
+			// The whole inscription forgiven: a full scholarship.
+			if _, err := f.svc.ApplyDiscount(context.Background(), c.Charge.ID(), 220000, "beca completa"); err != nil {
+				t.Fatalf("ApplyDiscount: %v", err)
+			}
+		}
+		day := aug(2026, time.November, 5)
+		f.clock = day
+		got, err := f.svc.ExpectedToday(context.Background(), testStudent, day)
+		if err != nil {
+			t.Fatalf("ExpectedToday: %v", err)
+		}
+		return got.AmountCents
+	}
+
+	if got := quote(t, aug(2026, time.November, 1)) - quote(t, aug(2026, time.December, 1)); got != 0 {
+		t.Errorf("the quote moved by %d on a negotiated inscription, want 0", got)
 	}
 }

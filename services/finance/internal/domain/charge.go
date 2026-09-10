@@ -255,6 +255,11 @@ func (c Charge) WithDueDate(due time.Time) Charge {
 // collected against them, because the first peso freezes the price — belongs to
 // the caller that knows what has been paid, which is the repository writing it
 // in the same statement.
+//
+// A copy made here reaches the database through RepriceUnpaid or through a
+// deposit's Repriced set, and through NOTHING else. SaveCharge deliberately does
+// not write the amount: its callers read and write outside a transaction, so it
+// is the one path where a stale price could be put back.
 func (c Charge) WithAmount(amountCents int64) (Charge, error) {
 	amount, err := NewCents(amountCents)
 	if err != nil {
