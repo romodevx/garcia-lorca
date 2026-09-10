@@ -137,11 +137,15 @@ func (s *FinanceService) prepareDeposit(ctx context.Context, in DepositInput) (d
 	}
 
 	calendar, calendarVersion := s.schoolCalendar(ctx, in.StudentID)
-	policy, err := s.policyFor(ctx, student.ID)
+	plan, err := s.planFor(ctx, student.ID)
 	if err != nil {
 		return domain.Deposit{}, nil, err
 	}
 	lateFee, err := s.repo.EnsureConceptOfKind(ctx, s.newID(), domain.KindLateFee, lateFeeConceptName)
+	if err != nil {
+		return domain.Deposit{}, nil, err
+	}
+	enrolment, err := s.repo.EnsureConceptOfKind(ctx, s.newID(), domain.KindEnrollment, enrollmentConceptName)
 	if err != nil {
 		return domain.Deposit{}, nil, err
 	}
@@ -162,10 +166,12 @@ func (s *FinanceService) prepareDeposit(ctx context.Context, in DepositInput) (d
 	return deposit, &depositPlanner{
 		svc:         s,
 		deposit:     deposit,
-		policy:      policy,
+		tuition:     plan,
+		policy:      plan.Policy(),
 		calendar:    calendar,
 		lateFeeID:   lateFee.ID(),
 		tuitionID:   tuition.ID(),
+		enrolmentID: enrolment.ID(),
 		paidOn:      when,
 		description: lateFeeConceptName,
 		grantEarly:  in.GrantEarlyPayment,
@@ -372,8 +378,15 @@ func (s *FinanceService) ListDeposits(ctx context.Context, studentID string) ([]
 // stays a single expression of the rule rather than a closure over eight
 // variables.
 type depositPlanner struct {
-	svc         *FinanceService
-	deposit     domain.Deposit
+	svc     *FinanceService
+	deposit domain.Deposit
+	// tuition is the student's tuition table. The planner needs the whole thing
+	// and not just the policy now: the inscription's price is a function of the
+	// day the money arrives, and only the table knows the ladder.
+	//
+	// Named tuition and not plan because plan() is what this type DOES.
+	tuition     domain.TuitionPlan
+	enrolmentID string
 	policy      domain.CollectionPolicy
 	calendar    *schoolcal.Calendar
 	lateFeeID   string
@@ -382,6 +395,43 @@ type depositPlanner struct {
 	description string
 	// grantEarly carries the school's decision to honour the reward late.
 	grantEarly bool
+}
+
+// repriceInscription is the ladder applied at the counter: what this line of the
+// inscription costs on the day the money arrived.
+//
+// It carries the SAME two guards as the repository's bulk re-price, and for the
+// same reasons (ADR 0011). Nothing collected: the first peso freezes the price,
+// so a family holding a receipt never finds the statement disagreeing with it.
+// Nothing negotiated: a discount is a price a PERSON decided, and a price list
+// must not overwrite a decision made by hand — the full scholarship is the case
+// that proves it, because it never receives a peso and the payment guard alone
+// would never protect it.
+//
+// Reports ok=false when nothing should move, so the caller writes no row for a
+// price that did not change.
+func (p *depositPlanner) repriceInscription(c ports.ChargeWithPaid) (domain.Charge, bool, error) {
+	if c.Charge.ConceptID() != p.enrolmentID || c.PaidCents > 0 || c.Charge.Discount().Int64() > 0 {
+		return domain.Charge{}, false, nil
+	}
+	for _, line := range p.tuition.EnrollmentLinesOn(p.paidOn) {
+		// Matched on the description, which is what enrollmentCharges wrote and
+		// what the family reads. A plan with no concepts yields one unnamed line
+		// and matches nothing here, so a school that never adopted the ladder is
+		// untouched.
+		if line.Name == "" || line.Name != c.Charge.Description() {
+			continue
+		}
+		if line.AmountCents == c.Charge.Amount().Int64() {
+			return domain.Charge{}, false, nil
+		}
+		moved, err := c.Charge.WithAmount(line.AmountCents)
+		if err != nil {
+			return domain.Charge{}, false, err
+		}
+		return moved, true, nil
+	}
+	return domain.Charge{}, false, nil
 }
 
 // plan turns the student's locked charges into the writes this deposit makes.
@@ -401,12 +451,25 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 		newFees    = map[string]domain.Charge{}
 		fresh      []domain.Charge
 		discounted []domain.Charge
+		repriced   []domain.Charge
 	)
 	// budget walks alongside the items so the early-payment reward is only given
 	// where the money in hand actually settles that month. Granting it on a part
 	// payment would leave the month open at a price the school never set.
 	budget := p.deposit.Amount().Int64()
-	for _, c := range base {
+	for i, c := range base {
+		// The ladder, priced at the day the money arrived. The nightly run writes
+		// it down too, but a tier that turns over at midnight leaves the whole of
+		// the next day quoting yesterday's price until the run fires — and the
+		// person at the counter is being told a number right now.
+		if moved, ok, err := p.repriceInscription(c); err != nil {
+			return ports.DepositWrite{}, err
+		} else if ok {
+			repriced = append(repriced, moved)
+			c.Charge = moved
+			base[i] = c
+		}
+
 		charge, due := c.Charge, owed(c)
 		reduced, discountable, err := p.earlyPayment(c, budget)
 		if err != nil {
@@ -467,6 +530,7 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 		payments = append(payments, payment)
 	}
 	return ports.DepositWrite{
+		Repriced:         repriced,
 		Surcharges:       fresh,
 		Discounted:       discounted,
 		Allocations:      payments,
@@ -621,24 +685,38 @@ func (s *FinanceService) schoolCalendar(ctx context.Context, studentID string) (
 // the zero policy, which charges nothing extra — the school not having priced a
 // level must never invent a surcharge.
 func (s *FinanceService) policyFor(ctx context.Context, studentID string) (domain.CollectionPolicy, error) {
-	enrollment, err := s.activeEnrollment(ctx, studentID)
-	if err != nil || enrollment.CycleID == "" {
-		return domain.CollectionPolicy{}, nil
-	}
-	levels, err := s.levelOfGroup(ctx, enrollment.CycleID)
-	if err != nil {
-		return domain.CollectionPolicy{}, nil
-	}
-	plans, err := s.repo.ListTuitionPlans(ctx, enrollment.CycleID)
+	plan, err := s.planFor(ctx, studentID)
 	if err != nil {
 		return domain.CollectionPolicy{}, err
 	}
+	return plan.Policy(), nil
+}
+
+// planFor is the tuition table the student is priced by: through their active
+// enrolment to the group, through the group to the level, and the level's table.
+//
+// A zero plan means the student sits nowhere the school has priced. Every caller
+// treats that as "no special rule", which is what the deposit path did before
+// there was a plan to find.
+func (s *FinanceService) planFor(ctx context.Context, studentID string) (domain.TuitionPlan, error) {
+	enrollment, err := s.activeEnrollment(ctx, studentID)
+	if err != nil || enrollment.CycleID == "" {
+		return domain.TuitionPlan{}, nil
+	}
+	levels, err := s.levelOfGroup(ctx, enrollment.CycleID)
+	if err != nil {
+		return domain.TuitionPlan{}, nil
+	}
+	plans, err := s.repo.ListTuitionPlans(ctx, enrollment.CycleID)
+	if err != nil {
+		return domain.TuitionPlan{}, err
+	}
 	for _, p := range plans {
 		if p.LevelID() == levels[enrollment.GroupID] {
-			return p.Policy(), nil
+			return p, nil
 		}
 	}
-	return domain.CollectionPolicy{}, nil
+	return domain.TuitionPlan{}, nil
 }
 
 // activeEnrollment finds where a student currently sits. Everything about how

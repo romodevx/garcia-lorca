@@ -549,3 +549,41 @@ func TestRunBillingDoesNotChargeAMidYearJoinerForMonthsBeforeTheyArrived(t *test
 		}
 	}
 }
+
+// T13. The counter must collect the price of the day the money arrives.
+//
+// The nightly run writes the tier down, but a tier that turns over at midnight
+// leaves the whole of the next day quoting yesterday's price until the run
+// fires. So the payment path prices it again at paidOn, before the money is
+// split — and that write is what freezes it.
+func TestPayingCollectsTheTierInForceOnTheDayTheMoneyArrives(t *testing.T) {
+	f := ladderFixture(t)
+	runOn(t, f, "2026-09-15")
+
+	// November: the inscription's second rung. No run has fired since.
+	f.clock = aug(2026, time.November, 5)
+	if _, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 330000, Method: domain.MethodCash,
+		PaidAt: aug(2026, time.November, 5),
+	}); err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+
+	list, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	if err != nil {
+		t.Fatalf("ListCharges: %v", err)
+	}
+	for _, c := range list {
+		if c.Charge.Description() != "Inscripción" {
+			continue
+		}
+		if amount := c.Charge.Amount().Int64(); amount != 330000 {
+			t.Fatalf("Inscripción = %d, want November's 330000", amount)
+		}
+		if c.PaidCents != 330000 {
+			t.Errorf("collected %d against it, want the whole 330000", c.PaidCents)
+		}
+		return
+	}
+	t.Fatal("no inscription charge found")
+}

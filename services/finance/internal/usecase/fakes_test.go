@@ -427,6 +427,12 @@ func (f *fakeRepo) RegisterDeposit(
 	}
 
 	f.deposits = append(f.deposits, d)
+	// Re-prices first, exactly as the repository writes them: the discounts and
+	// the allocations that follow are both worked out against the new amount, and
+	// a fake that applied them later would veto a payment the real ledger accepts.
+	for _, c := range write.Repriced {
+		f.charges[c.ID()] = c
+	}
 	for _, c := range write.Discounted {
 		f.charges[c.ID()] = c
 	}

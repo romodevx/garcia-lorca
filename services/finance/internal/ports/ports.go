@@ -183,6 +183,11 @@ type DepositWrite struct {
 	// on them. The daily rule is derived, not billed, so a surcharge row exists
 	// only where there was movement.
 	Surcharges []domain.Charge
+	// Repriced are charges whose AMOUNT this deposit fixed: the inscription
+	// ladder priced at the day the money arrived. Written before everything
+	// else, because the discounts and the allocations are both worked out
+	// against the new number — and that write is what freezes the ladder.
+	Repriced []domain.Charge
 	// Discounted are charges whose discount this deposit changed — the
 	// early-payment reward, granted only where the money actually settles the
 	// month. They are written before the allocations that assume the new amount.

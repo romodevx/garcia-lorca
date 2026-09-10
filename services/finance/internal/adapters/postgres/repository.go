@@ -532,6 +532,11 @@ func (r *Repository) SaveCharge(ctx context.Context, c domain.Charge) (domain.Ch
 	var out domain.Charge
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		res := tx.Model(&chargeModel{}).Where("id = ?", c.ID()).Updates(map[string]any{
+			// amount_cents too: a charge's price MOVES now (the inscription
+			// ladder, ADR 0011), and a save that wrote every other field would
+			// take a re-priced charge, drop the re-price, return the row at the
+			// old price and report success.
+			"amount_cents":   c.Amount().Int64(),
 			"discount_cents": c.Discount().Int64(),
 			"status":         c.Status(),
 			"updated_at":     gorm.Expr("now()"),
@@ -1080,6 +1085,20 @@ func (r *Repository) RegisterDeposit(
 		// The discounts come first: the allocations that follow assume the new,
 		// lower amount, and a charge saved after them would be a row whose
 		// payments were computed against a price it no longer has.
+		// The re-prices come first of all: the discounts and the allocations that
+		// follow are both computed against the new amount, and a price written
+		// after them would be a row whose payments answer to a number it no
+		// longer has. This write is also what FREEZES the ladder — the money
+		// landing below is the first peso (ADR 0011).
+		for _, c := range write.Repriced {
+			if err := tx.Model(&chargeModel{}).Where("id = ?", c.ID()).Updates(map[string]any{
+				"amount_cents": c.Amount().Int64(),
+				"updated_at":   gorm.Expr("now()"),
+			}).Error; err != nil {
+				return glerrors.Wrap(glerrors.KindInternal, "re-pricing an inscription", err)
+			}
+		}
+
 		for _, c := range write.Discounted {
 			if err := tx.Model(&chargeModel{}).Where("id = ?", c.ID()).Updates(map[string]any{
 				"discount_cents":  c.Discount().Int64(),
@@ -1097,7 +1116,8 @@ func (r *Repository) RegisterDeposit(
 			}
 		}
 
-		settled, err := applyAllocations(tx, d, write.Allocations, replaceCharges(open, write.Discounted), write.Surcharges)
+		settled, err := applyAllocations(tx, d, write.Allocations,
+			replaceCharges(replaceCharges(open, write.Repriced), write.Discounted), write.Surcharges)
 		if err != nil {
 			return err
 		}
