@@ -56,6 +56,11 @@ type tuitionPlanModel struct {
 	// Fees are the extra amounts collected on top of the tuition, as JSON, "[]"
 	// when the level has none. Raw bytes for the same reason as Schedule.
 	Fees []byte `gorm:"column:fees;type:jsonb"`
+	// EnrollmentConcepts are the lines the inscription is broken into, each with
+	// its price ladder, as JSON — "[]" when the plan carries the single
+	// EnrollmentCents it always did. The two are mutually exclusive, enforced by
+	// the domain and by tuition_plans_one_inscription_shape_ck (migration 0015).
+	EnrollmentConcepts []byte `gorm:"column:enrollment_concepts;type:jsonb"`
 	// EnrollmentDueOn is the deadline the school set for the inscription. NULL
 	// when it set none, which is what makes the run fall back to the old rule
 	// instead of billing everything due on the zero date.

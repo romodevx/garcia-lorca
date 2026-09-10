@@ -276,6 +276,18 @@ type FinanceRepository interface {
 	// settled charge is history; re-dating it would rewrite when a family was
 	// due to pay something they have already paid.
 	RescheduleUnpaid(ctx context.Context, items []ChargeReschedule) (movedCount int, err error)
+	// RepriceUnpaid sets the amount of charges identified by external ref.
+	//
+	// It is what makes the school's price ladder true after the charge exists:
+	// an inscription issued in January at $2,200 is worth $3,300 in March, and
+	// goes on rising until it is settled (ADR 0011). The run writes the tier in
+	// force so the database agrees with what the family is being shown, rather
+	// than leaving the truth derived at read time and absent from every report.
+	//
+	// It moves ONLY what has taken no money at all. The first peso freezes the
+	// price: a family holding a receipt for a quoted amount must never find the
+	// statement disagreeing with it.
+	RepriceUnpaid(ctx context.Context, items []ChargeReprice) (repricedCount int, err error)
 	// GetCharge loads one charge together with its collected total; a missing id
 	// yields glerrors.ErrNotFound.
 	GetCharge(ctx context.Context, id string) (ChargeWithPaid, error)
@@ -420,6 +432,12 @@ type OverdueCursor struct {
 
 // IsZero reports the start-from-the-beginning position.
 func (c OverdueCursor) IsZero() bool { return c.ID == "" && c.DueDate.IsZero() }
+
+// ChargeReprice is one charge's new amount, named by its external ref.
+type ChargeReprice struct {
+	ExternalRef string
+	AmountCents int64
+}
 
 // ChargeReschedule is one charge's new deadline, named by its external ref.
 type ChargeReschedule struct {

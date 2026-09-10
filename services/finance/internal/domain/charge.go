@@ -245,6 +245,31 @@ func (c Charge) WithDueDate(due time.Time) Charge {
 	return c
 }
 
+// WithAmount returns a copy priced at a new amount, validated.
+//
+// The twin of WithDueDate, and it exists for the same kind of reason: the price
+// ladder of an inscription (ADR 0011) keeps rising until the money arrives, so a
+// charge already issued has to be able to say a new number.
+//
+// It does NOT decide WHICH charges may be re-priced. The rule — nothing
+// collected against them, because the first peso freezes the price — belongs to
+// the caller that knows what has been paid, which is the repository writing it
+// in the same statement.
+func (c Charge) WithAmount(amountCents int64) (Charge, error) {
+	amount, err := NewCents(amountCents)
+	if err != nil {
+		return Charge{}, err
+	}
+	if c.discount > amount {
+		// A charge that owes negative money would pay for itself and then some.
+		// Reachable now that the amount moves: a scholarship written against
+		// January's $2,200 outlives a re-price only if it still fits.
+		return Charge{}, glerrors.New(glerrors.KindInvalid, "discount cannot exceed amount")
+	}
+	c.amount = amount
+	return c, nil
+}
+
 // CancelIfUnpaid returns a cancelled copy ONLY if nothing has been collected
 // against the charge. Cancel deliberately voids a charge regardless of its
 // payments (the school does that on purpose, see above); this is the guarded

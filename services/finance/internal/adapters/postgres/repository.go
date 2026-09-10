@@ -400,6 +400,59 @@ func (r *Repository) CancelChargeIfUnpaid(ctx context.Context, id string) (ports
 	return out, nil
 }
 
+// RepriceUnpaid sets the amount of charges named by external ref, for the ones
+// nobody has paid anything against.
+//
+// Grouped by amount for the same reason RescheduleUnpaid groups by date: a
+// school prices a LEVEL, so the four hundred pupils of that level share the one
+// new price, and grouping keeps this a handful of round trips instead of four
+// hundred.
+//
+// The NOT EXISTS on payments is the enforcement point of ADR 0011's freeze rule,
+// and it lives here rather than in the use case because it has to be part of the
+// same statement that writes: a check that read first would leave a window where
+// a cashier takes money between the read and the update, and the family's
+// receipt would stop matching their statement.
+func (r *Repository) RepriceUnpaid(ctx context.Context, items []ports.ChargeReprice) (int, error) {
+	if len(items) == 0 {
+		return 0, nil
+	}
+	amountByRef := make(map[string]int64, len(items))
+	for _, item := range items {
+		if _, seen := amountByRef[item.ExternalRef]; seen {
+			continue
+		}
+		amountByRef[item.ExternalRef] = item.AmountCents
+	}
+
+	var repriced int
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		byAmount := make(map[int64][]string, len(amountByRef))
+		for ref, amount := range amountByRef {
+			byAmount[amount] = append(byAmount[amount], ref)
+		}
+		for amount, group := range byAmount {
+			res := tx.Model(&chargeModel{}).
+				Where("external_ref IN ?", group).
+				Where("amount_cents <> ?", amount).
+				Where("status <> ?", domain.StatusCancelled).
+				// Nothing collected. The subquery is the same tenant-bound view
+				// the policy allows, so RLS still applies to it.
+				Where("NOT EXISTS (SELECT 1 FROM payments p WHERE p.charge_id = charges.id)").
+				Updates(map[string]any{"amount_cents": amount, "updated_at": gorm.Expr("now()")})
+			if res.Error != nil {
+				return glerrors.Wrap(glerrors.KindInternal, "re-pricing an inscription", res.Error)
+			}
+			repriced += int(res.RowsAffected)
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return repriced, nil
+}
+
 // GetCharge loads one charge together with its collected total; a missing id
 // yields glerrors.ErrNotFound.
 func (r *Repository) GetCharge(ctx context.Context, id string) (ports.ChargeWithPaid, error) {
