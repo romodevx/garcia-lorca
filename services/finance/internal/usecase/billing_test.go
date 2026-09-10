@@ -373,3 +373,179 @@ func TestALevelDiscountDoesNotTouchTheInscription(t *testing.T) {
 		}
 	}
 }
+
+const cycleOpens = "2026-08-01"
+
+func aug(y int, m time.Month, d int) time.Time {
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+}
+
+// ladderFixture is the school with the flyer's three-line inscription in place
+// of one amount: $2,200 until November, $3,300 after.
+func ladderFixture(t *testing.T) *fixture {
+	t.Helper()
+	f := billingFixture(t)
+	flat := func(name string, cents int64) domain.EnrollmentConcept {
+		return domain.EnrollmentConcept{Name: name, Tiers: []domain.PriceTier{
+			{EffectiveFrom: aug(2026, time.August, 1), AmountCents: cents},
+		}}
+	}
+	if _, err := f.svc.UpsertTuitionPlan(context.Background(), usecase.TuitionPlanInput{
+		CycleID: testCycle, LevelID: testLevel,
+		MonthlyCents: 320000, Months: 10, FirstBilledMonth: 9, DueDay: 10,
+		LateFeeCents: 15000, Active: true,
+		EnrollmentConcepts: []domain.EnrollmentConcept{
+			{Name: "Inscripción", Tiers: []domain.PriceTier{
+				{EffectiveFrom: aug(2026, time.August, 1), AmountCents: 220000},
+				{EffectiveFrom: aug(2026, time.November, 1), AmountCents: 330000},
+			}},
+			flat("Gastos adm y seguro", 470000),
+			flat("Cuota Asociación Padres de Familia", 85000),
+		},
+	}); err != nil {
+		t.Fatalf("seed ladder plan: %v", err)
+	}
+	return f
+}
+
+// issuedTo maps a pupil's charges by description.
+func issuedTo(t *testing.T, f *fixture, student string) map[string]int64 {
+	t.Helper()
+	list, err := f.svc.ListCharges(context.Background(), student, testCycle)
+	if err != nil {
+		t.Fatalf("ListCharges: %v", err)
+	}
+	out := map[string]int64{}
+	for _, c := range list {
+		out[c.Charge.Description()] = c.Charge.Amount().Int64()
+	}
+	return out
+}
+
+// R1. The run must bill the LINES, never the single amount a concepts plan no
+// longer carries.
+//
+// A plan with concepts is forced to EnrollmentCents == 0 (ADR 0011) and
+// NewCents(0) is legal, so a run still reading that field issues a $0
+// inscription to every pupil of the level — and CreateChargesBulk's ON CONFLICT
+// makes that zero PERMANENT. It is the "family charged nothing is a problem a
+// school discovers in June" failure this file warns about, produced by the
+// feature meant to prevent it.
+func TestRunBillingIssuesOneChargePerInscriptionLine(t *testing.T) {
+	f := ladderFixture(t)
+
+	got := runOn(t, f, "2026-09-15")
+
+	if got.EnrollmentCreated != 3 {
+		t.Fatalf("enrollment charges = %d, want the flyer's 3 lines", got.EnrollmentCreated)
+	}
+	issued := issuedTo(t, f, testStudent)
+	for name, want := range map[string]int64{
+		"Inscripción":                        220000,
+		"Gastos adm y seguro":                470000,
+		"Cuota Asociación Padres de Familia": 85000,
+	} {
+		if issued[name] != want {
+			t.Errorf("%q = %d, want %d", name, issued[name], want)
+		}
+	}
+	for name, amount := range issued {
+		if amount == 0 {
+			t.Errorf("%q was issued for nothing", name)
+		}
+	}
+}
+
+// The ladder goes on climbing after the charge exists, and the run says how many
+// prices it moved: one that changes four hundred in silence is one nobody can audit.
+func TestRunBillingRepricesTheUnpaidInscription(t *testing.T) {
+	f := ladderFixture(t)
+	runOn(t, f, "2026-09-15")
+
+	got := runOn(t, f, "2026-11-15")
+
+	if got.EnrollmentRepriced != 1 {
+		t.Fatalf("repriced = %d, want 1", got.EnrollmentRepriced)
+	}
+	if amount := issuedTo(t, f, testStudent)["Inscripción"]; amount != 330000 {
+		t.Errorf("Inscripción = %d, want November's 330000", amount)
+	}
+}
+
+// R6. A scholarship is a price a PERSON decided. The ladder is the list price,
+// and it must never overwrite a decision somebody made by hand.
+//
+// The 100% case is the one that proves it: a free inscription never receives a
+// peso, so the freeze rule — which keys on payments — never protects it. Raising
+// the amount while the discount stands turns a gift into a debt.
+func TestTheLadderNeverRepricesWhatSomebodyNegotiated(t *testing.T) {
+	f := ladderFixture(t)
+	runOn(t, f, "2026-09-15")
+
+	list, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	if err != nil {
+		t.Fatalf("ListCharges: %v", err)
+	}
+	var inscription string
+	for _, c := range list {
+		if c.Charge.Description() == "Inscripción" {
+			inscription = c.Charge.ID()
+		}
+	}
+	// The whole inscription forgiven: a full scholarship.
+	if _, err := f.svc.ApplyDiscount(context.Background(), inscription, 220000, "beca completa"); err != nil {
+		t.Fatalf("ApplyDiscount: %v", err)
+	}
+
+	got := runOn(t, f, "2026-11-15")
+
+	if got.EnrollmentRepriced != 0 {
+		t.Errorf("repriced %d negotiated charges, want 0", got.EnrollmentRepriced)
+	}
+	after, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	if err != nil {
+		t.Fatalf("ListCharges: %v", err)
+	}
+	for _, c := range after {
+		if c.Charge.ID() != inscription {
+			continue
+		}
+		if owed := c.Charge.Effective().Int64(); owed != 0 {
+			t.Errorf("the free inscription now owes %d — a gift became a debt", owed)
+		}
+	}
+}
+
+// A plan that still carries one amount goes on billing exactly one inscription.
+func TestRunBillingStillIssuesTheSingleInscription(t *testing.T) {
+	f := billingFixture(t)
+
+	got := runOn(t, f, "2026-09-15")
+
+	if got.EnrollmentCreated != 1 {
+		t.Fatalf("enrollment charges = %d, want 1", got.EnrollmentCreated)
+	}
+	if amount := issuedTo(t, f, testStudent)["Inscripción"]; amount != 50000 {
+		t.Errorf("Inscripción = %d, want the plan's 50000", amount)
+	}
+}
+
+// D3. A pupil who arrives in March owes March onwards, not the whole year.
+func TestRunBillingDoesNotChargeAMidYearJoinerForMonthsBeforeTheyArrived(t *testing.T) {
+	f := billingFixture(t)
+	f.enrollments.byCycle[testCycle] = []ports.EnrollmentRef{{
+		ID: "enr-late", StudentID: "stu-late", GroupID: testGroup, CycleID: testCycle,
+		Status: "active", EnrolledAt: aug(2027, time.March, 20),
+	}}
+
+	got := runOn(t, f, "2027-03-25")
+
+	if got.TuitionCreated != 4 {
+		t.Errorf("tuition = %d, want March..June — 4 months", got.TuitionCreated)
+	}
+	for name := range issuedTo(t, f, "stu-late") {
+		if strings.Contains(name, "septiembre") || strings.Contains(name, "octubre") {
+			t.Errorf("%q was billed to a pupil who arrived in March", name)
+		}
+	}
+}

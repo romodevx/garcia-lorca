@@ -635,9 +635,12 @@ type BillingRun struct {
 	LateFeesCreated   int `json:"lateFeesCreated"`
 	FeesCreated       int `json:"feesCreated"`
 	// EnrollmentMoved counts inscriptions whose deadline the run corrected.
-	EnrollmentMoved   int      `json:"enrollmentMoved"`
-	Skipped           int      `json:"skipped"`
-	LevelsWithoutPlan []string `json:"levelsWithoutPlan"`
+	EnrollmentMoved int `json:"enrollmentMoved"`
+	// EnrollmentRepriced counts unpaid inscriptions moved to the tier now in
+	// force. Reported because this one moves money, not dates.
+	EnrollmentRepriced int      `json:"enrollmentRepriced"`
+	Skipped            int      `json:"skipped"`
+	LevelsWithoutPlan  []string `json:"levelsWithoutPlan"`
 }
 
 // UpsertTuitionPlan sets what one level of one cycle costs.
@@ -716,13 +719,14 @@ func toBillingRun(m *financev1.RunBillingResponse) BillingRun {
 		levels = []string{}
 	}
 	return BillingRun{
-		TuitionCreated:    int(m.GetTuitionCreated()),
-		EnrollmentCreated: int(m.GetEnrollmentCreated()),
-		LateFeesCreated:   int(m.GetLateFeesCreated()),
-		FeesCreated:       int(m.GetFeesCreated()),
-		EnrollmentMoved:   int(m.GetEnrollmentMoved()),
-		Skipped:           int(m.GetSkipped()),
-		LevelsWithoutPlan: levels,
+		TuitionCreated:     int(m.GetTuitionCreated()),
+		EnrollmentCreated:  int(m.GetEnrollmentCreated()),
+		LateFeesCreated:    int(m.GetLateFeesCreated()),
+		FeesCreated:        int(m.GetFeesCreated()),
+		EnrollmentMoved:    int(m.GetEnrollmentMoved()),
+		EnrollmentRepriced: int(m.GetEnrollmentRepriced()),
+		Skipped:            int(m.GetSkipped()),
+		LevelsWithoutPlan:  levels,
 	}
 }
 

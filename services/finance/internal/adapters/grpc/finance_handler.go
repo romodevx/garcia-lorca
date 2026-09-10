@@ -573,13 +573,14 @@ func (h *FinanceHandler) RunBilling(ctx context.Context, req *connect.Request[fi
 		return nil, connectErr(err)
 	}
 	return connect.NewResponse(&financev1.RunBillingResponse{
-		TuitionCreated:    int32(got.TuitionCreated),
-		EnrollmentCreated: int32(got.EnrollmentCreated),
-		LateFeesCreated:   int32(got.LateFeesCreated),
-		FeesCreated:       int32(got.FeesCreated),
-		EnrollmentMoved:   int32(got.EnrollmentMoved),
-		Skipped:           int32(got.Skipped),
-		LevelsWithoutPlan: got.LevelsWithoutPlan,
+		TuitionCreated:     int32(got.TuitionCreated),
+		EnrollmentCreated:  int32(got.EnrollmentCreated),
+		LateFeesCreated:    int32(got.LateFeesCreated),
+		FeesCreated:        int32(got.FeesCreated),
+		EnrollmentMoved:    int32(got.EnrollmentMoved),
+		EnrollmentRepriced: int32(got.EnrollmentRepriced),
+		Skipped:            int32(got.Skipped),
+		LevelsWithoutPlan:  got.LevelsWithoutPlan,
 	}), nil
 }
 

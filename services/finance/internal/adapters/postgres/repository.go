@@ -436,6 +436,18 @@ func (r *Repository) RepriceUnpaid(ctx context.Context, items []ports.ChargeRepr
 				Where("external_ref IN ?", group).
 				Where("amount_cents <> ?", amount).
 				Where("status <> ?", domain.StatusCancelled).
+				// Nothing negotiated. A discount is a price a PERSON decided for
+				// one family, and a price list must not overwrite it. The full
+				// scholarship proves the rule: it never receives a peso, so the
+				// payment guard below never protects it, and raising the amount
+				// while the discount stands turns a gift into a debt.
+				//
+				// It is also what keeps one row from killing the batch. This
+				// statement covers a whole level, and a downward re-price under a
+				// discount would violate CHECK (discount_cents <= amount_cents),
+				// rolling back every other pupil's price and failing the nightly
+				// run wholesale over one scholarship.
+				Where("discount_cents = 0").
 				// Nothing collected. The subquery is the same tenant-bound view
 				// the policy allows, so RLS still applies to it.
 				Where("NOT EXISTS (SELECT 1 FROM payments p WHERE p.charge_id = charges.id)").

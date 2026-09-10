@@ -54,6 +54,13 @@ type EnrollmentRef struct {
 	GroupID   string
 	CycleID   string
 	Status    string
+	// EnrolledAt is the day the pupil took their place. The run needs it to know
+	// which months are theirs: billing the whole year to somebody who arrived in
+	// March charges them for months the school never taught them.
+	//
+	// Zero for every enrolment recorded before finance started reading it, which
+	// the run treats as "was already there" — the whole year, exactly as today.
+	EnrolledAt time.Time
 }
 
 // StudentReader validates student references against the students bounded
@@ -284,9 +291,10 @@ type FinanceRepository interface {
 	// force so the database agrees with what the family is being shown, rather
 	// than leaving the truth derived at read time and absent from every report.
 	//
-	// It moves ONLY what has taken no money at all. The first peso freezes the
-	// price: a family holding a receipt for a quoted amount must never find the
-	// statement disagreeing with it.
+	// It moves ONLY what has taken no money and carries no discount. The first
+	// peso freezes the price — a family holding a receipt for a quoted amount
+	// must never find the statement disagreeing with it — and a discount is a
+	// price somebody decided by hand, which a price list must not overwrite.
 	RepriceUnpaid(ctx context.Context, items []ChargeReprice) (repricedCount int, err error)
 	// GetCharge loads one charge together with its collected total; a missing id
 	// yields glerrors.ErrNotFound.

@@ -16,8 +16,10 @@ package studentsclient
 import (
 	"context"
 	"net/http"
+	"time"
 
 	connect "connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	studentsv1 "github.com/garcia-lorca/gen/go/garcialorca/students/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/students/v1/studentsv1connect"
@@ -111,7 +113,20 @@ func toRef(e *studentsv1.Enrollment) ports.EnrollmentRef {
 		GroupID:   e.GetGroupId(),
 		CycleID:   e.GetCycleId(),
 		Status:    statusString(e.GetStatus()),
+		// AsTime() on an absent timestamp is the Unix epoch, not the zero time,
+		// and an epoch join date would put every pupil before every cycle — the
+		// same answer as zero here, but by accident rather than on purpose.
+		EnrolledAt: enrolledAt(e.GetEnrolledAt()),
 	}
+}
+
+// enrolledAt reads the day a pupil took their place, keeping "not recorded" as
+// the zero time rather than 1970.
+func enrolledAt(ts *timestamppb.Timestamp) time.Time {
+	if ts == nil {
+		return time.Time{}
+	}
+	return ts.AsTime()
 }
 
 // statusString maps the proto EnrollmentStatus enum to the lowercase status

@@ -2,7 +2,7 @@ package usecase
 
 import (
 	"context"
-	"fmt"
+	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/finance/internal/domain"
@@ -39,9 +39,10 @@ func (s *FinanceService) EnsureEnrollmentCharge(ctx context.Context, cycleID, st
 		return false, err
 	}
 	var groupID string
+	var joinedOn time.Time
 	for _, e := range enrollments {
 		if e.StudentID == studentID && e.Status == enrolmentStatusActive {
-			groupID = e.GroupID
+			groupID, joinedOn = e.GroupID, e.EnrolledAt
 			break
 		}
 	}
@@ -75,21 +76,22 @@ func (s *FinanceService) EnsureEnrollmentCharge(ctx context.Context, cycleID, st
 	if err != nil {
 		return false, err
 	}
-	charge, err := s.buildCharge(chargeSpec{
-		studentID:   studentID,
-		cycleID:     cycleID,
-		conceptID:   concept.ID(),
-		description: enrollmentConceptName,
-		amount:      plan.EnrollmentCents(),
-		due:         enrollmentDueDate(cycle.StartsOn, plan),
-		ref:         fmt.Sprintf("enrollment:%s:%s", cycleID, studentID),
-	})
+	// Priced at the day THEY joined, not at today. A pupil enrolled in February
+	// whose event is handled in March pays February's rung: the ladder answers
+	// "when did you join", and a redelivery days later must not cost the family
+	// more than the day they walked in.
+	joined := joinedOn
+	if joined.IsZero() {
+		joined = s.now()
+	}
+	charges, err := s.enrollmentCharges(studentID, cycleID, concept.ID(),
+		plan, joined, enrollmentDueDate(cycle.StartsOn, plan))
 	if err != nil {
 		return false, err
 	}
-	written, err := s.repo.CreateChargesBulk(ctx, []domain.Charge{charge})
+	written, err := s.repo.CreateChargesBulk(ctx, charges)
 	if err != nil {
 		return false, err
 	}
-	return written == 1, nil
+	return written > 0, nil
 }
