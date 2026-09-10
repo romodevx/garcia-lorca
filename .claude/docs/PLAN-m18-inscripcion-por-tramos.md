@@ -274,13 +274,19 @@ verificado en código antes de anotarlo; los tres que la revisión reportó sobr
 | R4 | **Aliasing del slice de conceptos.** `NewTuitionPlan` guarda el slice del llamador y `EnrollmentConcepts()` lo devuelve; los `Tiers` quedan compartidos dos veces. `AmountOn` depende **absolutamente** del orden y ese orden sólo se valida al construir, así que una normalización posterior en el handler devolvería el escalón equivocado sin error | `domain/tuition.go` | Media |
 | R5 | **Orden de sentencias no determinista** en `RepriceUnpaid`: recorre un mapa de Go, así que el orden de los UPDATE y de los refs dentro de cada `IN` cambia por llamada. Riesgo de interbloqueo entre corridas concurrentes | `adapters/postgres/repository.go` | Baja |
 
+| R6 | **La beca del 100% empieza a deber dinero.** Una inscripción gratis se registra como `discount = 220000` sobre `amount = 220000`. Nunca llega un peso —es gratis—, así que la guarda de congelación nunca la toca. En marzo el re-precio sube `amount` a 330000, el descuento se queda quieto, y `Effective() = amount − discount` pasa a **$1,100**. La familia a la que se le regaló la inscripción ahora debe, y el libro mayor no dice por qué | `adapters/postgres/repository.go` | **Crítica** |
+| R7 | **`Charge.WithAmount` no tiene camino de persistencia.** `SaveCharge` escribe sólo `discount_cents`, `status` y `updated_at` — no `amount_cents`. La T13 va a escribir `c.WithAmount(x)` seguido de `SaveCharge`: compila, no da error, tira el re-precio y devuelve la fila releída al precio VIEJO. El depósito se reparte contra un monto rancio y el recibo contradice el estado de cuenta — justo lo que la regla de congelación existe para evitar | `adapters/postgres/repository.go` | Alta |
+| R8 | **`AmountOn` supone un orden que no verifica, en el camino que su propio comentario dice que recibe entrada sin validar.** El comentario de la guarda de longitud dice que se alcanza desde "un handler sosteniendo uno directo del payload"; con tramos `[Mar 3300, Ene 2200]` el bucle rompe en el índice 0 y devuelve $3,300 como precio de enero. Dinero equivocado, sin error y sin pánico | `domain/enrollment_concept.go` | Media |
+| R9 | **El mapper se traga el error de `json.Marshal` y devuelve `nil`** a una columna `NOT NULL`. Mi comentario afirma que "NO degrada", y el código sí: la causa real se pierde y el operador ve una violación de not-null envuelta en "storing the tuition table". Contra `go-style.md` ("never ignore returned errors") y `code-quality.md` ("no swallowed errors"). `fromDomainPlan` debería devolver error, como ya hace `toDomainPlan` | `adapters/postgres/mapper.go` | Media |
+| R10 | **Tres duplicaciones que introduje:** `tierDay` es idéntico a `dateLayout` en el MISMO paquete; `WithAmount` reimplementa `validateDiscount` con el mensaje de error copiado; `monthIndex` duplica la aritmética que ya está en línea dentro de `OverdueMonths` | `mapper.go`, `charge.go`, `tuition.go` | Baja |
+
 **Rechazado, con razón:** normalizar `on` a día calendario dentro de `AmountOn`.
 `time.After` compara **instantes**, así que ni la `Location` del `time.Time` ni la lectura
 monotónica cambian el resultado — normalizar no arregla el escenario que la propia revisión
 describe. El problema real es el de la fila anterior (día UTC ≠ día escolar) y es
 transversal.
 
-R1 y R3 se resuelven dentro de la Etapa 3; R2 y R4 son de dominio y van antes.
+**Orden:** R6 y R7 van ANTES que nada — R6 le cobra a una beca del 100% y R7 hace que la T13 pierda el re-precio en silencio. Luego R2, R4, R8 (dominio) y R9, R10. R1 y R3 se resuelven dentro de la Etapa 3.
 
 ---
 
