@@ -87,3 +87,61 @@ func TestABadInscriptionDateIsRefused(t *testing.T) {
 		t.Errorf("got code %v, want invalid argument", connect.CodeOf(err))
 	}
 }
+
+// The inscription's price ladder must survive the wire too, in both directions.
+//
+// Same test, same reason, third time: the field exists in the proto and in the
+// domain, and an adapter that does not carry it turns a saved price list into a
+// silent nothing. A ladder is worse than most: enrollment_cents is forced to
+// zero whenever concepts are present, so dropping them stores an inscription
+// that costs the family nothing at all.
+func TestAPriceLadderSurvivesTheWireWhole(t *testing.T) {
+	f := newFixture(t)
+	sent := &financev1.UpsertTuitionPlanRequest{
+		CycleId: testCycle, LevelId: "lv-ladder",
+		MonthlyCents: 320000, Months: 11, FirstBilledMonth: 9, DueDay: 10, Active: true,
+		EnrollmentConcepts: []*financev1.EnrollmentConcept{
+			{Name: "Inscripción", Tiers: []*financev1.PriceTier{
+				{EffectiveFrom: "2027-01-01", AmountCents: 220000},
+				{EffectiveFrom: "2027-03-01", AmountCents: 330000},
+				{EffectiveFrom: "2027-04-01", AmountCents: 440000},
+			}},
+			{Name: "Gastos adm y seguro", Tiers: []*financev1.PriceTier{
+				{EffectiveFrom: "2027-01-01", AmountCents: 470000},
+			}},
+			{Name: "Cuota Asociación Padres de Familia", Tiers: []*financev1.PriceTier{
+				{EffectiveFrom: "2027-01-01", AmountCents: 85000},
+			}},
+		},
+	}
+
+	res, err := f.h.UpsertTuitionPlan(context.Background(), connect.NewRequest(sent))
+	if err != nil {
+		t.Fatalf("UpsertTuitionPlan: %v", err)
+	}
+	got := res.Msg.GetPlan().GetEnrollmentConcepts()
+	if len(got) != 3 {
+		t.Fatalf("got %d concepts back, want the 3 that were sent", len(got))
+	}
+
+	for i, want := range sent.GetEnrollmentConcepts() {
+		if got[i].GetName() != want.GetName() {
+			t.Errorf("concept %d name = %q, want %q", i, got[i].GetName(), want.GetName())
+		}
+		if len(got[i].GetTiers()) != len(want.GetTiers()) {
+			t.Fatalf("concept %q: %d steps back, want %d", want.GetName(),
+				len(got[i].GetTiers()), len(want.GetTiers()))
+		}
+		for j, wantTier := range want.GetTiers() {
+			gotTier := got[i].GetTiers()[j]
+			if gotTier.GetEffectiveFrom() != wantTier.GetEffectiveFrom() {
+				t.Errorf("concept %q step %d starts %q, want %q", want.GetName(), j,
+					gotTier.GetEffectiveFrom(), wantTier.GetEffectiveFrom())
+			}
+			if gotTier.GetAmountCents() != wantTier.GetAmountCents() {
+				t.Errorf("concept %q step %d = %d, want %d", want.GetName(), j,
+					gotTier.GetAmountCents(), wantTier.GetAmountCents())
+			}
+		}
+	}
+}

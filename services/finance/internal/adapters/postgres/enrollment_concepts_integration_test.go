@@ -340,3 +340,61 @@ func TestTheDatabaseAlsoRefusesBothShapesOfInscription(t *testing.T) {
 		t.Fatalf("refused by %v, want the one-inscription-shape check", err)
 	}
 }
+
+// Pricing a level that was ALREADY priced. The upsert's assignment list has to
+// carry every mutable column, and the one added by 0015 is the newest chance to
+// forget one — which is how the daily surcharge and the split schedule looked
+// saved and were not.
+//
+// Both directions, because they fail differently: forgetting the column on the
+// way IN stores an inscription of zero (enrollment_cents is assigned to 0, the
+// concepts stay '[]', and the shape CHECK is happy with that); forgetting it on
+// the way BACK OUT leaves concepts behind a non-zero amount and every later save
+// of that level dies on the CHECK with an opaque internal error.
+func TestRepricingALevelThatWasAlreadyPricedKeepsBothShapesStraight(t *testing.T) {
+	ctx := context.Background()
+	repo := appRepo(t, tenantA)
+	cycle := "a8000000-0000-0000-0000-0000000000c5"
+	level := "a8000000-0000-0000-0000-0000000000e5"
+
+	single, err := domain.NewTuitionPlan(domain.TuitionPlanSpec{
+		ID: "a8000000-0000-0000-0000-000000000005", TenantID: tenantA, CycleID: cycle, LevelID: level,
+		EnrollmentCents: 500000, MonthlyCents: 320000,
+		Months: 10, FirstBilledMonth: 9, DueDay: 10, Active: true,
+	})
+	if err != nil {
+		t.Fatalf("new plan: %v", err)
+	}
+	if _, err := repo.UpsertTuitionPlan(ctx, single); err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+
+	// Now the school breaks that one amount into the flyer's three lines.
+	stored, err := repo.UpsertTuitionPlan(ctx, newPlanWithConcepts(t,
+		"a8000000-0000-0000-0000-000000000006", tenantA, cycle, level, flyerConcepts()))
+	if err != nil {
+		t.Fatalf("second upsert: %v", err)
+	}
+	if n := len(stored.EnrollmentConcepts()); n != 3 {
+		t.Fatalf("after re-pricing an existing level: %d concepts, want 3", n)
+	}
+	var total int64
+	for _, l := range stored.EnrollmentLinesOn(ymd(2027, time.March, 3)) {
+		total += l.AmountCents
+	}
+	if total != 885000 {
+		t.Fatalf("inscription = %d, want March's 885000 — an inscription of 0 means the column was not assigned", total)
+	}
+
+	// And back again: the school decides one amount was simpler after all.
+	back, err := repo.UpsertTuitionPlan(ctx, single)
+	if err != nil {
+		t.Fatalf("third upsert: %v", err)
+	}
+	if n := len(back.EnrollmentConcepts()); n != 0 {
+		t.Fatalf("after going back to one amount: %d concepts, want none", n)
+	}
+	if got := back.EnrollmentCents(); got != 500000 {
+		t.Errorf("inscription = %d, want 500000", got)
+	}
+}

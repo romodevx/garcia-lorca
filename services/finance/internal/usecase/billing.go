@@ -69,6 +69,9 @@ type TuitionPlanInput struct {
 	// EnrollmentDueOn is the deadline the school set for the inscription. Zero
 	// keeps the rule the run has always used.
 	EnrollmentDueOn time.Time
+	// EnrollmentConcepts breaks the inscription into the lines the school prints,
+	// each with its own price ladder. Empty keeps EnrollmentCents.
+	EnrollmentConcepts []domain.EnrollmentConcept
 }
 
 // BillingResult is what a run did. Skipped counts the charges that already
@@ -108,6 +111,7 @@ func (s *FinanceService) UpsertTuitionPlan(ctx context.Context, in TuitionPlanIn
 		MonthlyDiscountCents: in.MonthlyDiscountCents,
 		Fees:                 in.Fees,
 		EnrollmentDueOn:      in.EnrollmentDueOn,
+		EnrollmentConcepts:   in.EnrollmentConcepts,
 	})
 	if err != nil {
 		return domain.TuitionPlan{}, err

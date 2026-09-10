@@ -525,6 +525,10 @@ func (h *FinanceHandler) UpsertTuitionPlan(ctx context.Context, req *connect.Req
 	if err != nil {
 		return nil, connectErr(err)
 	}
+	concepts, err := toDomainEnrollmentConcepts(m.GetEnrollmentConcepts())
+	if err != nil {
+		return nil, connectErr(err)
+	}
 	plan, err := h.finance.UpsertTuitionPlan(ctx, usecase.TuitionPlanInput{
 		CycleID:              m.GetCycleId(),
 		LevelID:              m.GetLevelId(),
@@ -540,6 +544,7 @@ func (h *FinanceHandler) UpsertTuitionPlan(ctx context.Context, req *connect.Req
 		MonthlyDiscountCents: m.GetMonthlyDiscountCents(),
 		Fees:                 toDomainFees(m.GetFees()),
 		EnrollmentDueOn:      enrollmentDue,
+		EnrollmentConcepts:   concepts,
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -597,7 +602,52 @@ func toProtoPlan(p domain.TuitionPlan) *financev1.TuitionPlan {
 		MonthlyDiscountCents: p.MonthlyDiscountCents(),
 		Fees:                 toProtoFees(p.Fees()),
 		EnrollmentDueOn:      formatPlanDate(p.EnrollmentDueOn()),
+		EnrollmentConcepts:   toProtoEnrollmentConcepts(p.EnrollmentConcepts()),
 	}
+}
+
+// toDomainEnrollmentConcepts reads the inscription's priced lines off the wire.
+// An absent list is the single-amount inscription every plan had until M18,
+// which is what a client written before this sends.
+//
+// A malformed date is REFUSED rather than skipped. A ladder that quietly lost a
+// step would charge a family the wrong tier for a year, and the request that
+// caused it would have looked like it worked.
+func toDomainEnrollmentConcepts(in []*financev1.EnrollmentConcept) ([]domain.EnrollmentConcept, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	out := make([]domain.EnrollmentConcept, 0, len(in))
+	for _, c := range in {
+		tiers := make([]domain.PriceTier, 0, len(c.GetTiers()))
+		for _, t := range c.GetTiers() {
+			from, err := parsePlanDate(t.GetEffectiveFrom())
+			if err != nil {
+				return nil, err
+			}
+			tiers = append(tiers, domain.PriceTier{EffectiveFrom: from, AmountCents: t.GetAmountCents()})
+		}
+		out = append(out, domain.EnrollmentConcept{Name: c.GetName(), Tiers: tiers})
+	}
+	return out, nil
+}
+
+func toProtoEnrollmentConcepts(in []domain.EnrollmentConcept) []*financev1.EnrollmentConcept {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]*financev1.EnrollmentConcept, 0, len(in))
+	for _, c := range in {
+		tiers := make([]*financev1.PriceTier, 0, len(c.Tiers))
+		for _, t := range c.Tiers {
+			tiers = append(tiers, &financev1.PriceTier{
+				EffectiveFrom: formatPlanDate(t.EffectiveFrom),
+				AmountCents:   t.AmountCents,
+			})
+		}
+		out = append(out, &financev1.EnrollmentConcept{Name: c.Name, Tiers: tiers})
+	}
+	return out
 }
 
 // toDomainFees reads the level's extra fees off the wire. An absent list is a
