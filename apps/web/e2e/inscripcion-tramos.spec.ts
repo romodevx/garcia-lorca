@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
 
-import { API_URL, apiAsOwner, runId, uniqueSuffix } from "./helpers";
+import { API_URL, apiAsOwner, uniqueSuffix } from "./helpers";
 
 /**
  * The school's printed price list, end to end.
@@ -56,22 +56,22 @@ function flyerConcepts(): unknown[] {
 }
 
 /** The whole school this spec needs: a cycle, a level, a group and a pupil. */
-async function school(api: APIRequestContext): Promise<{ cycleId: string; studentId: string }> {
+async function school(api: APIRequestContext): Promise<{ cycleId: string; levelId: string }> {
   const tag = uniqueSuffix();
 
   const cycle = await api.post(`${API_URL}/api/v1/config/cycles`, {
     data: { name: `M18 ${tag}`, startsOn: "2026-08-01", endsOn: "2027-06-30" },
   });
   expect(cycle.ok(), await cycle.text()).toBeTruthy();
-  const cycleId = (await cycle.json()).cycle.id as string;
+  const cycleId = (await cycle.json()).id as string;
 
   const level = await api.post(`${API_URL}/api/v1/config/levels`, {
     data: { name: `Preescolar ${tag}`, sepCode: `P${tag}`.slice(0, 8), enrollmentGranularity: "cycle" },
   });
   expect(level.ok(), await level.text()).toBeTruthy();
-  const levelId = (await level.json()).level.id as string;
+  const levelId = (await level.json()).id as string;
 
-  await api.put(`${API_URL}/api/v1/finance/tuition-plans`, {
+  const plan = await api.put(`${API_URL}/api/v1/finance/tuition-plans`, {
     data: {
       cycleId,
       levelId,
@@ -97,8 +97,9 @@ async function school(api: APIRequestContext): Promise<{ cycleId: string; studen
       },
     },
   });
+  expect(plan.ok(), await plan.text()).toBeTruthy();
 
-  return { cycleId, studentId: "" };
+  return { cycleId, levelId };
 }
 
 /** What the ladder quotes for one level of one cycle, as of a day. */
@@ -116,7 +117,7 @@ async function inscriptionTotal(api: APIRequestContext, cycleId: string, asOf: s
   }, 0);
 }
 
-test.describe(`la inscripción del folleto (${runId()})`, () => {
+test.describe("la inscripción del folleto", () => {
   test("el tabulador cobra los tres totales impresos", async ({ request }) => {
     const api = await apiAsOwner(request);
     const { cycleId } = await school(api);
@@ -132,12 +133,12 @@ test.describe(`la inscripción del folleto (${runId()})`, () => {
 
   test("la escalera sólo sube: el servidor refusa un escalón más barato", async ({ request }) => {
     const api = await apiAsOwner(request);
-    const { cycleId } = await school(api);
+    const { cycleId, levelId } = await school(api);
 
     const res = await api.put(`${API_URL}/api/v1/finance/tuition-plans`, {
       data: {
         cycleId,
-        levelId: "does-not-matter",
+        levelId,
         enrollmentCents: 0,
         // 33,000 typed as 3,300 — the transposed digit that would walk four
         // hundred issued inscriptions DOWN.
