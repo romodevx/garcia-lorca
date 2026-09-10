@@ -23,6 +23,10 @@ substitutions:
   # trigger overrides it with _TAG=${_TAG} so infra and revision agree.
   _TAG: latest
 
+  # The vulnerability scanner, pinned. See the govulncheck step for why, and keep
+  # this EQUAL to GOVULNCHECK_VERSION in .github/workflows/ci.yml.
+  _GOVULNCHECK_VERSION: v1.7.0
+
   # Identity Platform, for the web bundle. ALL EMPTY BY DEFAULT: an image built
   # without them has the provider sign-in off, because providerLoginEnabled()
   # requires the flag AND an api key — a half-set build cannot half-enable it.
@@ -111,7 +115,17 @@ steps:
       - |
         set -euo pipefail
         . deploy/cloudbuild/retry.sh
-        retry go install golang.org/x/vuln/cmd/govulncheck@latest
+        # PINNED, never @latest. On 2026-09-10 the deploy broke without a line of
+        # code changing: x/vuln v1.8.0 landed requiring Go >= 1.26, this image is
+        # 1.25 and fixes its toolchain, so the install failed on EVERY commit and
+        # the whole pipeline stopped — while CI stayed green, because CI already
+        # pins. `@latest` in a build step is a dependency somebody else can bump
+        # for you, which is what security.md means by "pin versions".
+        #
+        # Kept EQUAL to GOVULNCHECK_VERSION in .github/workflows/ci.yml. Two gates
+        # scanning with two versions is how one goes green and the other red for a
+        # reason nobody can see.
+        retry go install golang.org/x/vuln/cmd/govulncheck@${_GOVULNCHECK_VERSION}
         # Per workspace module — see the go-vet step. `go mod verify` also needs
         # a module directory; there is no root go.mod to verify.
         for dir in $(go list -m -f '{{.Dir}}'); do
