@@ -235,14 +235,32 @@ Orden fijo del repo: contrato → datos → backend (TDD) → frontend → QA �
 | 1 · Dominio | ✅ | `86855418`, `d1e9bc91` |
 | 2 · Persistencia | ✅ | `d91d5905`, `4db6cd67` |
 | 3 · Corrida y cobro | ✅ | `0d192f79`, `69ed2f87` |
-| 4 · Lectura en tiempo real | ✅ | `eee6ebd4` |
+| 4 · Lectura en tiempo real | ✅ | `eee6ebd4` (T14) + `f4a7b532` (**T15**) |
 | 5 · Frontend (web + móvil) | ✅ | `cc49ca14`, `e6819c65` |
-| 6 · QA y compuertas | 🟡 | E2E escrito (`apps/web/e2e/inscripcion-tramos.spec.ts`), **sin correr**: requiere el stack local arriba |
+| 6 · QA y compuertas | ✅ | E2E en verde contra el stack (`ac81b16c`, reescrito); compuertas de security y tech-lead pasadas tras corregir |
 
-Barrido de hallazgos: `5cd70e57`. Nueve de diez cerrados; queda R5 (gravedad baja).
+> **Corrección de método.** La etapa 4 estuvo marcada ✅ durante varios commits con
+> **T15 sin construir**: la di por cerrada porque existía su commit, no porque sus tareas
+> estuvieran hechas. El hueco costó B1 —el mostrador enseñaba un precio y cobraba otro en
+> la misma transacción— y no figuraba entre los hallazgos abiertos porque nadie lo estaba
+> buscando. **Una etapa se cierra por sus tareas, nunca por su commit.**
 
-**Lo que falta para cerrar la etapa 6:** correr el E2E contra un stack levantado,
-y las compuertas de **security** y **tech-lead**.
+### Compuertas (10-sep-2026)
+
+| Compuerta | Primer veredicto | Estado |
+|---|---|---|
+| Security | PASS CONDICIONADO — SEC-1 (alto), SEC-2, SEC-5 | **Corregidos** en `a4cae626` |
+| Tech-lead | **FAIL** — B1, B2 + I1–I4, M1–M5 | B1/B2/M2 en `f4a7b532`; I1/I2/I4 + SEC + M3/M4 en `a4cae626`; I3 reescrito |
+
+**El más grave fue SEC-1:** `paidAt` lo manda el cliente y sólo estaba acotado hacia el
+futuro, así que un depósito de un peso fechado antes del primer escalón bajaba la
+inscripción y la congelaba ahí, sin dejar descuento, razón ni evento. Se cierra junto con
+SEC-2 por un solo invariante: **un cargo emitido puede subir mientras no se pague, y nunca
+baja solo.**
+
+**Abierto a propósito:** R5/M5 — orden no determinista de sentencias en `RepriceUnpaid`.
+Gravedad baja y comparte forma con `RescheduleUnpaid`: se resuelve junto con él o no se
+resuelve.
 
 ## 6. Estimación
 
