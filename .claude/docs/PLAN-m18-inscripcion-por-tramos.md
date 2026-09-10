@@ -260,6 +260,30 @@ Las Etapas 0–3 son secuenciales de verdad: comparten `tuition.go` y `billing.g
 
 ---
 
+## 7b. Hallazgos de revisión pendientes (verificados 2026-09-09)
+
+Salieron de `/code-review max` sobre el estado de la rama tras la Etapa 2. Cada uno
+verificado en código antes de anotarlo; los tres que la revisión reportó sobre el
+`DoUpdates` y el cableado del handler **ya están corregidos** en `4db6cd67`.
+
+| # | Hallazgo | Dónde | Gravedad |
+|---|---|---|---|
+| R1 | **La corrida cobra una inscripción de $0.** Un plan con conceptos fuerza `EnrollmentCents = 0` (ADR 0011), `RunBilling` y `EnsureEnrollmentCharge` siguen leyendo ese campo, `NewCents(0)` es legal y `CreateChargesBulk` usa `ON CONFLICT DO NOTHING` — el cero es **permanente**. Es el fallo que `billing.go` advierte ("una familia a la que no se le cobra nada es un problema que el colegio descubre en junio"), producido por la función que existe para evitarlo | `usecase/billing.go:212`, `usecase/enrollment_charge.go:83` | **Crítica** |
+| R2 | **Nada exige que la escalera suba.** `validate()` obliga a que los tramos avancen en el tiempo y a que los montos sean > 0, pero no a que no bajen. Todo el diseño supone un trinquete de un solo sentido —ADR 0011 "la deuda sube sola", y la regla de congelación sólo es defendible así—. Un 33,000 tecleado como 3,300 camina cuatrocientas inscripciones **hacia abajo** sin dejar rastro | `domain/enrollment_concept.go` | Alta |
+| R3 | **`RepriceUnpaid` no pasa por la guarda de descuento.** `charges` lleva `CHECK (discount_cents <= amount_cents)` (0001, línea 64) y `Charge.WithAmount` existe justo para eso, pero el UPDATE en lote no lo usa. Un solo alumno becado hace que la sentencia —que cubre el nivel entero— viole el CHECK, `withTenant` revierte, y **ninguna** de las cuatrocientas se re-precia. Con R1 resuelto, eso es la corrida nocturna cayéndose entera por una beca, con un error que no nombra el cargo | `adapters/postgres/repository.go` | Alta |
+| R4 | **Aliasing del slice de conceptos.** `NewTuitionPlan` guarda el slice del llamador y `EnrollmentConcepts()` lo devuelve; los `Tiers` quedan compartidos dos veces. `AmountOn` depende **absolutamente** del orden y ese orden sólo se valida al construir, así que una normalización posterior en el handler devolvería el escalón equivocado sin error | `domain/tuition.go` | Media |
+| R5 | **Orden de sentencias no determinista** en `RepriceUnpaid`: recorre un mapa de Go, así que el orden de los UPDATE y de los refs dentro de cada `IN` cambia por llamada. Riesgo de interbloqueo entre corridas concurrentes | `adapters/postgres/repository.go` | Baja |
+
+**Rechazado, con razón:** normalizar `on` a día calendario dentro de `AmountOn`.
+`time.After` compara **instantes**, así que ni la `Location` del `time.Time` ni la lectura
+monotónica cambian el resultado — normalizar no arregla el escenario que la propia revisión
+describe. El problema real es el de la fila anterior (día UTC ≠ día escolar) y es
+transversal.
+
+R1 y R3 se resuelven dentro de la Etapa 3; R2 y R4 son de dominio y van antes.
+
+---
+
 ## 8. Lo que este plan NO hace
 
 - No toca becas (M08) ni su interacción con los tramos.
