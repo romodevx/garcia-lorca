@@ -61,6 +61,22 @@ COPY . .
 # env update on the Cloud Run service.
 ARG NEXT_PUBLIC_API_URL="/"
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+
+# Identity Platform. ALL EMPTY BY DEFAULT, which is what keeps the provider
+# sign-in off in any image built without them: providerLoginEnabled() needs both
+# the flag AND an api key, so a half-configured build cannot half-enable it.
+#
+# These are inlined into the client bundle, and that is fine — a Firebase web
+# config is public by design. The boundary is the gateway and the provider's own
+# rules, never the config being secret. Nothing here is a credential.
+ARG NEXT_PUBLIC_AUTH_PROVIDER=""
+ARG NEXT_PUBLIC_FIREBASE_API_KEY=""
+ARG NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=""
+ARG NEXT_PUBLIC_FIREBASE_PROJECT_ID=""
+ENV NEXT_PUBLIC_AUTH_PROVIDER=${NEXT_PUBLIC_AUTH_PROVIDER}
+ENV NEXT_PUBLIC_FIREBASE_API_KEY=${NEXT_PUBLIC_FIREBASE_API_KEY}
+ENV NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=${NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN}
+ENV NEXT_PUBLIC_FIREBASE_PROJECT_ID=${NEXT_PUBLIC_FIREBASE_PROJECT_ID}
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 

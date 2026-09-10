@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"time"
 	"net/http"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
@@ -15,6 +16,8 @@ import (
 // against the current one (from GetUser) and applies the delta.
 type AdminService interface {
 	CreateUser(ctx context.Context, email, displayName, tempPassword string, roleIDs []string) (client.User, error)
+	InviteUser(ctx context.Context, email, displayName string, roleIDs []string) (client.User, client.Invitation, error)
+	ResendInvitation(ctx context.Context, userID string) (client.Invitation, error)
 	GetUser(ctx context.Context, id string) (client.User, error)
 	ListUsers(ctx context.Context) ([]client.User, error)
 	SetUserStatus(ctx context.Context, userID, status string) (client.User, error)
@@ -116,6 +119,10 @@ func forbidAssign(w http.ResponseWriter, perm string) {
 	http.Error(w, "forbidden: cannot assign a role granting a permission you do not hold: "+perm, http.StatusForbidden)
 }
 
+func forbidReach(w http.ResponseWriter, perm string) {
+	http.Error(w, "forbidden: cannot issue access to an account holding a permission you do not hold: "+perm, http.StatusForbidden)
+}
+
 // --- wire shapes ----------------------------------------------------------
 
 type userResponse struct {
@@ -171,6 +178,14 @@ type createUserRequest struct {
 	RoleIDs      []string `json:"roleIds"`
 }
 
+// inviteUserRequest carries no password field, and that is the design: the
+// account's owner chooses the first one through the emailed link.
+type inviteUserRequest struct {
+	Email       string   `json:"email"`
+	DisplayName string   `json:"displayName"`
+	RoleIDs     []string `json:"roleIds"`
+}
+
 // CreateUser handles POST /api/v1/users: provisions an identity with a temporary
 // password (the user must rotate it at first login) and the given roles.
 func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
@@ -195,6 +210,113 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, toUserResponse(res))
+}
+
+// InviteUser handles POST /api/v1/users/invite: create the account with no
+// password and let the provider mail its owner the link that sets one.
+//
+// The subset guard matters MORE here than on CreateUser. An unchecked invite is
+// a direct route to owner: send the invitation for an owner-powered account to
+// an address you control, open the link, pick the password. So the caller may
+// only invite into roles whose permissions it already holds, and a refusal must
+// happen BEFORE iam is asked, so no account exists for a rejected request.
+func (h *AdminHandler) InviteUser(w http.ResponseWriter, r *http.Request) {
+	var req inviteUserRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if perm, ok, err := h.callerCanAssign(r.Context(), req.RoleIDs); err != nil {
+		writeConnectError(w, err)
+		return
+	} else if !ok {
+		forbidAssign(w, perm)
+		return
+	}
+	res, inv, err := h.svc.InviteUser(r.Context(), req.Email, req.DisplayName, req.RoleIDs)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, struct {
+		userResponse
+		Invitation invitationResponse `json:"invitation"`
+	}{toUserResponse(res), toInvitationResponse(inv)})
+}
+
+// ResendInvitation handles POST /api/v1/users/{id}/invite: mint a fresh link
+// for somebody who has not walked through the door yet.
+//
+// THE SUBSET GUARD APPLIES HERE, and the comment that used to sit in its place
+// explained why it did not: "the link goes to the address the user row already
+// carries, so the only person who can use it is that user." That was true while
+// the route answered 204 and the message was the only way to reach the link. It
+// stopped being true when the response started carrying the URL.
+//
+// What that opened: this endpoint does not GRANT a permission, it hands over an
+// account — so it walked straight around the fence that keeps a `users:write`
+// holder inside its own permission subset everywhere else. A delegated
+// administrator could pull the access link of a principal whose powers it was
+// never given, redeem it anonymously with a password of its choosing, and
+// arrive as that person.
+//
+// So the same rule as assigning a role, for the same reason: you may only reach
+// an account whose permissions you already hold.
+func (h *AdminHandler) ResendInvitation(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	target, err := h.svc.GetUser(r.Context(), id)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	if perm, ok, err := h.callerCanAssign(r.Context(), target.RoleIDs); err != nil {
+		writeConnectError(w, err)
+		return
+	} else if !ok {
+		forbidReach(w, perm)
+		return
+	}
+
+	inv, err := h.svc.ResendInvitation(r.Context(), id)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	// 200 with a body, not 204. The caller needs to know whether the message
+	// actually left — and, when it did not, what link to hand over instead.
+	// Answering "no content" was the shape that let an undelivered invitation
+	// look exactly like a delivered one.
+	writeJSON(w, http.StatusOK, toInvitationResponse(inv))
+}
+
+// invitationResponse is what the admin screen renders.
+//
+// `sent` and `sendError` exist so the director is never told "invitación
+// enviada" about a message that was dropped, which is the bug this whole change
+// is here to fix. `url` rides along only as the fallback for handing access
+// over by hand; it grants nothing the administrator does not already hold over
+// that account.
+type invitationResponse struct {
+	URL       string `json:"url"`
+	ExpiresAt string `json:"expiresAt"`
+	Sent      bool   `json:"sent"`
+	SendError string `json:"sendError,omitempty"`
+	Via       string `json:"via,omitempty"`
+}
+
+func toInvitationResponse(inv client.Invitation) invitationResponse {
+	out := invitationResponse{Sent: inv.Sent, SendError: inv.SendError, Via: inv.Via}
+	// The link comes back ONLY when nothing was delivered. That is the case it
+	// exists for — an administrator who cannot mail somebody still needs a way
+	// to hand access over. Once the message has gone out it buys nothing, and
+	// every extra copy of a token is another place it can leak from.
+	if !inv.Sent {
+		out.URL = inv.URL
+	}
+	if !inv.ExpiresAt.IsZero() {
+		out.ExpiresAt = inv.ExpiresAt.UTC().Format(time.RFC3339)
+	}
+	return out
 }
 
 // ListUsers handles GET /api/v1/users.

@@ -111,7 +111,19 @@ export function AccountScreen(): ReactElement {
     );
   }
 
-  const settled = (data?.totalBalanceCents ?? 0) <= 0;
+  // What the school is asking for TODAY leads; the year's balance sits beside it.
+  // Both are true at once, and a parent shown only the year is told a number
+  // nobody is asking them for — they are also the one person who cannot walk to
+  // the office and ask which is which.
+  //
+  // An EMPTY asOf means the gateway is older than M18 and sent none of it.
+  // Rendering the day's figure as $0.00 there would tell a family that owes
+  // $32,000 that they are settled — the same fabricated "Al corriente" this
+  // screen already refuses when the child bootstrap fails (bug_005). So the hero
+  // falls back to the year, and says nothing about today.
+  const hasToday = (data?.asOf ?? "") !== "";
+  const heroCents = hasToday ? (data?.dueTodayCents ?? 0) : (data?.totalBalanceCents ?? 0);
+  const settled = heroCents <= 0;
   const movements = data ? toLedger(data) : [];
 
   return (
@@ -120,14 +132,32 @@ export function AccountScreen(): ReactElement {
 
       <Card style={[styles.balanceHero, { marginTop: 12 }]}>
         <Text style={[styles.cap, { color: theme.colors.text2, fontFamily: theme.fonts.uiExtra }]}>
-          {settled ? "Saldo actual" : "Saldo por pagar"}
+          {hasToday ? "A pagar hoy" : settled ? "Saldo actual" : "Saldo por pagar"}
         </Text>
         <Text
           accessibilityLabel="Saldo"
           style={[styles.amount, { color: settled ? theme.colors.ok : theme.colors.text, fontFamily: theme.fonts.display }]}
         >
-          {pesos(Math.max(data?.totalBalanceCents ?? 0, 0))}
+          {pesos(Math.max(heroCents, 0))}
         </Text>
+        {hasToday && (
+          <>
+            <Text
+              accessibilityLabel="Saldo del año"
+              style={[styles.year, { color: theme.colors.text2, fontFamily: theme.fonts.ui }]}
+            >
+              {pesos(Math.max(data?.totalBalanceCents ?? 0, 0))}
+            </Text>
+            <Text
+              accessibilityLabel="Detalle del saldo"
+              style={[styles.detail, { color: theme.colors.text2, fontFamily: theme.fonts.ui }]}
+            >
+              {`${(data?.surchargeCents ?? 0) > 0 ? `Incluye ${pesos(data?.surchargeCents ?? 0)} de recargo. ` : ""}` +
+                `${(data?.earlyDiscountCents ?? 0) > 0 ? `Ya con ${pesos(data?.earlyDiscountCents ?? 0)} de pronto pago. ` : ""}` +
+                `Al ${data?.asOf ?? ""}.`}
+            </Text>
+          </>
+        )}
         <View style={styles.center}>
           {settled ? (
             <Chip kind="ok" icon="check">Al corriente</Chip>
@@ -173,6 +203,8 @@ function MovementRow({ movement, divider }: { movement: Movement; divider: boole
 
 const styles = StyleSheet.create({
   balanceHero: { padding: 22, alignItems: "center" },
+  year: { fontSize: 13, marginTop: 2 },
+  detail: { fontSize: 12, marginTop: 6, textAlign: "center" },
   cap: { fontSize: 13, fontWeight: "700", marginBottom: 4 },
   amount: { fontSize: 44, fontWeight: "800", letterSpacing: -1.5 },
   center: { alignItems: "center", marginTop: 12 },

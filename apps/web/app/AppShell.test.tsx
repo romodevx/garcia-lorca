@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
+import { authFetch } from "./auth/authFetch";
 import { Providers } from "./test-utils";
 import { changePassword as apiChangePassword, login as apiLogin, logout as apiLogout, me as apiMe, refresh as apiRefresh } from "./auth/api";
 
@@ -308,5 +309,37 @@ describe("AppShell — sesión por inactividad", () => {
 
     expect(mockLogout).toHaveBeenCalled();
     expect(await screen.findByText(/inactividad/i)).toBeInTheDocument();
+  });
+});
+
+describe("when the server ends the session mid-use", () => {
+  // The whole wiring, end to end: authFetch notices a refused refresh, the shell
+  // hears it, and the person reads what actually happened.
+  //
+  // Before this, the 401 went back to whichever panel made the call, and every
+  // panel wraps its calls in a blanket catch that reports a domain error. The
+  // owner was told "No se pudo crear el grado. Revisa que no exista ya con ese
+  // orden" for a session that had simply ended, and asked what "orden" meant —
+  // which is the right question to ask a sentence that made no sense
+  // (dev, 2026-09-07).
+  it("says the session ended, instead of blaming what the person typed", async () => {
+    // A live session on boot, so the shell starts where the owner was: inside.
+    mockMe.mockResolvedValueOnce({ userId: "u1", email: "owner@example.com", permissions: ["students:read"] });
+    render(
+      <Providers flags={{}}>
+        <AppShell />
+      </Providers>
+    );
+    expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
+
+    // The server refuses both the call and the refresh: the session is over.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 401 })));
+    await act(async () => {
+      await authFetch("/api/v1/config/grade-levels", { method: "POST" });
+    });
+
+    expect(await screen.findByText(/Tu sesión terminó/)).toBeInTheDocument();
+    // And back at the door, not stranded on a dashboard that can do nothing.
+    expect(screen.getByRole("button", { name: "Entrar al sistema" })).toBeInTheDocument();
   });
 });

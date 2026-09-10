@@ -173,9 +173,21 @@ describe("getAccount", () => {
 
     const res = await getAccount(BASE, "st1");
 
-    // The statement now also carries the family's credit; an older gateway that
-    // does not send it reads as zero rather than undefined.
-    expect(res).toEqual({ charges: [charge], payments: [payment], totalBalanceCents: 185000, unallocatedCents: 0 });
+    // The statement now also carries the family's credit and, since M18, what is
+    // being asked for TODAY. An older gateway sends neither; the credit reads as
+    // zero, and the day's figures come back with an EMPTY asOf — which is what
+    // lets a screen withhold them instead of rendering $0.00 at a family that
+    // owes money.
+    expect(res).toEqual({
+      charges: [charge],
+      payments: [payment],
+      totalBalanceCents: 185000,
+      unallocatedCents: 0,
+      dueTodayCents: 0,
+      surchargeCents: 0,
+      earlyDiscountCents: 0,
+      asOf: "",
+    });
     const [url, init] = lastCall(fetchMock);
     expect(url).toBe("http://gw/api/v1/finance/accounts/st1");
     expect(init.credentials).toBe("include");
@@ -183,7 +195,16 @@ describe("getAccount", () => {
 
   it("defaults the statement to empty lists and a zero balance", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({})));
-    await expect(getAccount(BASE, "st1")).resolves.toEqual({ charges: [], payments: [], totalBalanceCents: 0, unallocatedCents: 0 });
+    await expect(getAccount(BASE, "st1")).resolves.toEqual({
+      charges: [],
+      payments: [],
+      totalBalanceCents: 0,
+      unallocatedCents: 0,
+      dueTodayCents: 0,
+      surchargeCents: 0,
+      earlyDiscountCents: 0,
+      asOf: "",
+    });
   });
 });
 

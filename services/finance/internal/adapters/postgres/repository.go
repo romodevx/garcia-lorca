@@ -400,6 +400,76 @@ func (r *Repository) CancelChargeIfUnpaid(ctx context.Context, id string) (ports
 	return out, nil
 }
 
+// RepriceUnpaid sets the amount of charges named by external ref, for the ones
+// nobody has paid anything against.
+//
+// Grouped by amount for the same reason RescheduleUnpaid groups by date: a
+// school prices a LEVEL, so the four hundred pupils of that level share the one
+// new price, and grouping keeps this a handful of round trips instead of four
+// hundred.
+//
+// The NOT EXISTS on payments is the enforcement point of ADR 0011's freeze rule,
+// and it lives here rather than in the use case because it has to be part of the
+// same statement that writes: a check that read first would leave a window where
+// a cashier takes money between the read and the update, and the family's
+// receipt would stop matching their statement.
+func (r *Repository) RepriceUnpaid(ctx context.Context, items []ports.ChargeReprice) (int, error) {
+	if len(items) == 0 {
+		return 0, nil
+	}
+	amountByRef := make(map[string]int64, len(items))
+	for _, item := range items {
+		if _, seen := amountByRef[item.ExternalRef]; seen {
+			continue
+		}
+		amountByRef[item.ExternalRef] = item.AmountCents
+	}
+
+	var repriced int
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		byAmount := make(map[int64][]string, len(amountByRef))
+		for ref, amount := range amountByRef {
+			byAmount[amount] = append(byAmount[amount], ref)
+		}
+		for amount, group := range byAmount {
+			res := tx.Model(&chargeModel{}).
+				Where("external_ref IN ?", group).
+				// Only upward. A school that edits its table cheaper must not
+				// walk four hundred already-quoted inscriptions down with it: a
+				// charge that has been issued is a number a family has been told,
+				// and lowering it is a decision somebody makes by hand — which is
+				// what a discount is for.
+				Where("amount_cents < ?", amount).
+				Where("status <> ?", domain.StatusCancelled).
+				// Nothing negotiated. A discount is a price a PERSON decided for
+				// one family, and a price list must not overwrite it. The full
+				// scholarship proves the rule: it never receives a peso, so the
+				// payment guard below never protects it, and raising the amount
+				// while the discount stands turns a gift into a debt.
+				//
+				// It is also what keeps one row from killing the batch. This
+				// statement covers a whole level, and a downward re-price under a
+				// discount would violate CHECK (discount_cents <= amount_cents),
+				// rolling back every other pupil's price and failing the nightly
+				// run wholesale over one scholarship.
+				Where("discount_cents = 0").
+				// Nothing collected. The subquery is the same tenant-bound view
+				// the policy allows, so RLS still applies to it.
+				Where("NOT EXISTS (SELECT 1 FROM payments p WHERE p.charge_id = charges.id)").
+				Updates(map[string]any{"amount_cents": amount, "updated_at": gorm.Expr("now()")})
+			if res.Error != nil {
+				return glerrors.Wrap(glerrors.KindInternal, "re-pricing an inscription", res.Error)
+			}
+			repriced += int(res.RowsAffected)
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return repriced, nil
+}
+
 // GetCharge loads one charge together with its collected total; a missing id
 // yields glerrors.ErrNotFound.
 func (r *Repository) GetCharge(ctx context.Context, id string) (ports.ChargeWithPaid, error) {
@@ -466,6 +536,16 @@ func (r *Repository) ListCharges(ctx context.Context, studentID, cycleID string)
 func (r *Repository) SaveCharge(ctx context.Context, c domain.Charge) (domain.Charge, error) {
 	var out domain.Charge
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		// Deliberately NOT amount_cents. Both callers (ApplyDiscount and
+		// CancelCharge) read the charge, change it and write it back OUTSIDE a
+		// transaction; writing the price here would put the amount they read
+		// minutes ago back into the row, undoing a re-price that landed in
+		// between — the ladder walking backwards in silence, which is exactly
+		// what the one-way ratchet exists to prevent.
+		//
+		// Re-pricing has its own two paths, and both decide under a lock or in
+		// one statement: RepriceUnpaid for the run, DepositWrite.Repriced for the
+		// counter. A price that moves needs one of those, never this.
 		res := tx.Model(&chargeModel{}).Where("id = ?", c.ID()).Updates(map[string]any{
 			"discount_cents": c.Discount().Int64(),
 			"status":         c.Status(),
@@ -887,9 +967,12 @@ func recurrenceFor(kind string) string {
 // charge already issued carries its own amount, so correcting a typo cannot
 // disturb what a family already owes.
 func (r *Repository) UpsertTuitionPlan(ctx context.Context, p domain.TuitionPlan) (domain.TuitionPlan, error) {
-	model := fromDomainPlan(p)
+	model, err := fromDomainPlan(p)
+	if err != nil {
+		return domain.TuitionPlan{}, err
+	}
 	var out domain.TuitionPlan
-	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+	err = r.withTenant(ctx, func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "tenant_id"}, {Name: "cycle_id"}, {Name: "level_id"}},
 			// EVERY mutable column. A list that misses one silently keeps the
@@ -903,6 +986,7 @@ func (r *Repository) UpsertTuitionPlan(ctx context.Context, p domain.TuitionPlan
 				"late_fee_daily_cents", "late_fee_mode", "surcharge_counts_all_days",
 				"early_payment_cents", "early_payment_days", "schedule",
 				"monthly_discount_cents", "fees", "enrollment_due_on",
+				"enrollment_concepts",
 			}),
 		}).Create(&model).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "storing the tuition table", err)
@@ -1014,6 +1098,20 @@ func (r *Repository) RegisterDeposit(
 		// The discounts come first: the allocations that follow assume the new,
 		// lower amount, and a charge saved after them would be a row whose
 		// payments were computed against a price it no longer has.
+		// The re-prices come first of all: the discounts and the allocations that
+		// follow are both computed against the new amount, and a price written
+		// after them would be a row whose payments answer to a number it no
+		// longer has. This write is also what FREEZES the ladder — the money
+		// landing below is the first peso (ADR 0011).
+		for _, c := range write.Repriced {
+			if err := tx.Model(&chargeModel{}).Where("id = ?", c.ID()).Updates(map[string]any{
+				"amount_cents": c.Amount().Int64(),
+				"updated_at":   gorm.Expr("now()"),
+			}).Error; err != nil {
+				return glerrors.Wrap(glerrors.KindInternal, "re-pricing an inscription", err)
+			}
+		}
+
 		for _, c := range write.Discounted {
 			if err := tx.Model(&chargeModel{}).Where("id = ?", c.ID()).Updates(map[string]any{
 				"discount_cents":  c.Discount().Int64(),
@@ -1031,7 +1129,8 @@ func (r *Repository) RegisterDeposit(
 			}
 		}
 
-		settled, err := applyAllocations(tx, d, write.Allocations, replaceCharges(open, write.Discounted), write.Surcharges)
+		settled, err := applyAllocations(tx, d, write.Allocations,
+			replaceCharges(replaceCharges(open, write.Repriced), write.Discounted), write.Surcharges)
 		if err != nil {
 			return err
 		}

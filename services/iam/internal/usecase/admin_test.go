@@ -20,7 +20,7 @@ func mustRole(t *testing.T, id, name string, perms []string) domain.Role {
 }
 
 func newAdmin(users *fakeUsers, roles *fakeRoles, newID func() string) *usecase.AdminService {
-	return usecase.NewAdminService(users, roles, fakeHasher{}, testTenant, newID)
+	return usecase.NewAdminService(users, roles, fakeHasher{}, nil, nil, nil, "", testTenant, newID, nil)
 }
 
 func TestAdminCreateUserHashesTempPasswordAndAssignsRoles(t *testing.T) {

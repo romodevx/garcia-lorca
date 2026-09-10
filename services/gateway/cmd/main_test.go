@@ -563,6 +563,10 @@ func newTestGateway(t *testing.T, flags map[string]bool) *httptest.Server {
 		client.NewUniformsClient(uniSrv.URL, uniSrv.Client()),
 		featureflag.NewInMemory(flags),
 		loginLimiter,
+		// The invitation doors run on their own budget in production; the test
+		// harness passes the same instance because none of these tests probe
+		// rate limiting, and sharing keeps the fixture honest about that.
+		loginLimiter,
 	)
 	gw := httptest.NewServer(mux)
 	t.Cleanup(gw.Close)

@@ -74,6 +74,16 @@ type AccountStatement struct {
 	// UnallocatedCents is money the family has handed over that no charge has
 	// claimed — their credit with the school.
 	UnallocatedCents int64
+	// DueTodayCents is what is being asked for NOW, already carrying the accrued
+	// surcharge and net of the early-payment reward. TotalBalanceCents above is
+	// what the YEAR still owes; before this field the parents' app showed that
+	// one and the counter showed this one.
+	DueTodayCents int64
+	// The parts of it, so the statement can explain its own number.
+	SurchargeCents     int64
+	EarlyDiscountCents int64
+	// AsOf is the day those three were worked out for, YYYY-MM-DD.
+	AsOf string
 }
 
 // NewFinanceClient builds a FinanceClient targeting the finance base URL over
@@ -247,10 +257,14 @@ func (c *FinanceClient) GetAccount(ctx context.Context, studentID string) (Accou
 		payments = append(payments, toPayment(p))
 	}
 	return AccountStatement{
-		Charges:           toCharges(res.Msg.GetCharges()),
-		Payments:          payments,
-		TotalBalanceCents: res.Msg.GetTotalBalanceCents(),
-		UnallocatedCents:  res.Msg.GetUnallocatedCents(),
+		Charges:            toCharges(res.Msg.GetCharges()),
+		Payments:           payments,
+		TotalBalanceCents:  res.Msg.GetTotalBalanceCents(),
+		DueTodayCents:      res.Msg.GetDueTodayCents(),
+		SurchargeCents:     res.Msg.GetSurchargeCents(),
+		EarlyDiscountCents: res.Msg.GetEarlyDiscountCents(),
+		AsOf:               res.Msg.GetAsOf(),
+		UnallocatedCents:   res.Msg.GetUnallocatedCents(),
 	}, nil
 }
 
@@ -555,6 +569,22 @@ type TuitionPlan struct {
 	// EnrollmentDueOn is the deadline the school set for the inscription
 	// (YYYY-MM-DD), empty when it set none.
 	EnrollmentDueOn string `json:"enrollmentDueOn"`
+	// EnrollmentConcepts are the lines the inscription is broken into, each with
+	// its price ladder. Empty when the plan carries the single EnrollmentCents.
+	EnrollmentConcepts []EnrollmentConcept `json:"enrollmentConcepts"`
+}
+
+// EnrollmentConcept is one line of the inscription, with what it costs depending
+// on when the family settles it.
+type EnrollmentConcept struct {
+	Name  string      `json:"name"`
+	Tiers []PriceTier `json:"tiers"`
+}
+
+// PriceTier is what a concept costs from a date onward (YYYY-MM-DD).
+type PriceTier struct {
+	EffectiveFrom string `json:"effectiveFrom"`
+	AmountCents   int64  `json:"amountCents"`
 }
 
 // Fee is money the school collects on top of the monthly tuition, spread across
@@ -606,6 +636,9 @@ type TuitionPlanInput struct {
 	MonthlyDiscountCents int64            `json:"monthlyDiscountCents"`
 	Fees                 []Fee            `json:"fees"`
 	EnrollmentDueOn      string           `json:"enrollmentDueOn"`
+	// EnrollmentConcepts breaks the inscription into priced lines. Empty keeps
+	// EnrollmentCents; the two are mutually exclusive (ADR 0011).
+	EnrollmentConcepts []EnrollmentConcept `json:"enrollmentConcepts"`
 }
 
 // BillingRun is what a run did, as the panel reports it back to the person who
@@ -616,9 +649,12 @@ type BillingRun struct {
 	LateFeesCreated   int `json:"lateFeesCreated"`
 	FeesCreated       int `json:"feesCreated"`
 	// EnrollmentMoved counts inscriptions whose deadline the run corrected.
-	EnrollmentMoved   int      `json:"enrollmentMoved"`
-	Skipped           int      `json:"skipped"`
-	LevelsWithoutPlan []string `json:"levelsWithoutPlan"`
+	EnrollmentMoved int `json:"enrollmentMoved"`
+	// EnrollmentRepriced counts unpaid inscriptions moved to the tier now in
+	// force. Reported because this one moves money, not dates.
+	EnrollmentRepriced int      `json:"enrollmentRepriced"`
+	Skipped            int      `json:"skipped"`
+	LevelsWithoutPlan  []string `json:"levelsWithoutPlan"`
 }
 
 // UpsertTuitionPlan sets what one level of one cycle costs.
@@ -649,6 +685,7 @@ func tuitionPlanRequest(in TuitionPlanInput) *financev1.UpsertTuitionPlanRequest
 		MonthlyDiscountCents: in.MonthlyDiscountCents,
 		Fees:                 feesToProto(in.Fees),
 		EnrollmentDueOn:      in.EnrollmentDueOn,
+		EnrollmentConcepts:   enrollmentConceptsToProto(in.EnrollmentConcepts),
 		Policy: &financev1.CollectionPolicy{
 			DailyMode:              in.Policy.DailyMode,
 			LateFeeDailyCents:      in.Policy.LateFeeDailyCents,
@@ -696,13 +733,14 @@ func toBillingRun(m *financev1.RunBillingResponse) BillingRun {
 		levels = []string{}
 	}
 	return BillingRun{
-		TuitionCreated:    int(m.GetTuitionCreated()),
-		EnrollmentCreated: int(m.GetEnrollmentCreated()),
-		LateFeesCreated:   int(m.GetLateFeesCreated()),
-		FeesCreated:       int(m.GetFeesCreated()),
-		EnrollmentMoved:   int(m.GetEnrollmentMoved()),
-		Skipped:           int(m.GetSkipped()),
-		LevelsWithoutPlan: levels,
+		TuitionCreated:     int(m.GetTuitionCreated()),
+		EnrollmentCreated:  int(m.GetEnrollmentCreated()),
+		LateFeesCreated:    int(m.GetLateFeesCreated()),
+		FeesCreated:        int(m.GetFeesCreated()),
+		EnrollmentMoved:    int(m.GetEnrollmentMoved()),
+		EnrollmentRepriced: int(m.GetEnrollmentRepriced()),
+		Skipped:            int(m.GetSkipped()),
+		LevelsWithoutPlan:  levels,
 	}
 }
 
@@ -762,6 +800,7 @@ func toTuitionPlan(p *financev1.TuitionPlan) TuitionPlan {
 		MonthlyDiscountCents: p.GetMonthlyDiscountCents(),
 		Fees:                 feesFromProto(p.GetFees()),
 		EnrollmentDueOn:      p.GetEnrollmentDueOn(),
+		EnrollmentConcepts:   enrollmentConceptsFromProto(p.GetEnrollmentConcepts()),
 		Policy: CollectionPolicy{
 			DailyMode:              p.GetPolicy().GetDailyMode(),
 			LateFeeDailyCents:      p.GetPolicy().GetLateFeeDailyCents(),
@@ -770,4 +809,44 @@ func toTuitionPlan(p *financev1.TuitionPlan) TuitionPlan {
 			EarlyPaymentDays:       int(p.GetPolicy().GetEarlyPaymentDays()),
 		},
 	}
+}
+
+// enrollmentConceptsToProto and its twin carry the inscription's price ladder
+// across the edge. They are separate from feesToProto on purpose: a fee is one
+// amount split between months, a concept is one amount that CHANGES with the
+// month, and an adapter that blurred them would make both unreadable.
+func enrollmentConceptsToProto(in []EnrollmentConcept) []*financev1.EnrollmentConcept {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]*financev1.EnrollmentConcept, 0, len(in))
+	for _, c := range in {
+		tiers := make([]*financev1.PriceTier, 0, len(c.Tiers))
+		for _, t := range c.Tiers {
+			tiers = append(tiers, &financev1.PriceTier{
+				EffectiveFrom: t.EffectiveFrom,
+				AmountCents:   t.AmountCents,
+			})
+		}
+		out = append(out, &financev1.EnrollmentConcept{Name: c.Name, Tiers: tiers})
+	}
+	return out
+}
+
+func enrollmentConceptsFromProto(in []*financev1.EnrollmentConcept) []EnrollmentConcept {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]EnrollmentConcept, 0, len(in))
+	for _, c := range in {
+		tiers := make([]PriceTier, 0, len(c.GetTiers()))
+		for _, t := range c.GetTiers() {
+			tiers = append(tiers, PriceTier{
+				EffectiveFrom: t.GetEffectiveFrom(),
+				AmountCents:   t.GetAmountCents(),
+			})
+		}
+		out = append(out, EnrollmentConcept{Name: c.GetName(), Tiers: tiers})
+	}
+	return out
 }

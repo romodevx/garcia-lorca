@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	connect "connectrpc.com/connect"
 
@@ -16,6 +17,7 @@ import (
 type LoginService interface {
 	Login(ctx context.Context, email, password string) (client.LoginResult, error)
 	LoginAs(ctx context.Context, email, password string, kind client.SessionKind) (client.LoginResult, error)
+	LoginWithIDToken(ctx context.Context, idToken string, kind client.SessionKind) (client.LoginResult, error)
 	Refresh(ctx context.Context, refreshToken string) (client.LoginResult, error)
 	ChangePassword(ctx context.Context, accessToken, currentPassword, newPassword string) error
 }
@@ -80,6 +82,13 @@ type loginRequest struct {
 	Password string `json:"password"`
 }
 
+// googleLoginRequest carries ONLY the provider's ID token. No session kind: that
+// comes from the route, so a caller cannot ask for the longer-lived family
+// session from the staff panel.
+type googleLoginRequest struct {
+	IDToken string `json:"idToken"`
+}
+
 type loginResponse struct {
 	ExpiresIn          int64 `json:"expiresIn"`
 	MustChangePassword bool  `json:"mustChangePassword"`
@@ -125,6 +134,45 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := h.auth.Login(r.Context(), req.Email, req.Password)
+	if err != nil {
+		http.Error(w, http.StatusText(httpStatusFor(err)), httpStatusFor(err))
+		return
+	}
+	setAuthCookies(w, res)
+	writeJSON(w, http.StatusOK, loginResponse{
+		ExpiresIn:          res.ExpiresIn,
+		MustChangePassword: res.MustChangePassword,
+	})
+}
+
+// GoogleLogin exchanges an identity-provider ID token for OUR session cookies.
+//
+// This endpoint is what keeps the migration from costing us the property the
+// login has today. The browser authenticates against Identity Platform and ends
+// up holding an ID token that its SDK stores in IndexedDB, where any script on
+// the page can read it. Sending that token to every API call would turn an XSS
+// into a stolen session.
+//
+// So it arrives here ONCE and leaves as the same HttpOnly, Secure,
+// SameSite=Strict cookies the password login sets. The provider establishes WHO
+// the caller is; the session stays ours, with our TTLs and our revocation.
+//
+// The response never echoes the ID token back: the browser has no reason to
+// receive it again, and another copy is another thing for a script to find.
+func (h *AuthHandler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
+	var req googleLoginRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.IDToken) == "" {
+		// Refuse here rather than spend a round trip on iam to be told the same.
+		http.Error(w, "id token is required", http.StatusBadRequest)
+		return
+	}
+	// SessionStaff because this is the panel's route. The kind belongs to the
+	// route, never to the body.
+	res, err := h.auth.LoginWithIDToken(r.Context(), req.IDToken, client.SessionStaff)
 	if err != nil {
 		http.Error(w, http.StatusText(httpStatusFor(err)), httpStatusFor(err))
 		return
@@ -231,6 +279,41 @@ func (h *AuthHandler) MobileLogin(w http.ResponseWriter, r *http.Request) {
 	// The family app: a parent's own phone, so the session lasts a day rather
 	// than closing the moment they put the phone down.
 	res, err := h.auth.LoginAs(r.Context(), req.Email, req.Password, client.SessionFamily)
+	if err != nil {
+		http.Error(w, http.StatusText(httpStatusFor(err)), httpStatusFor(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, mobileLoginResponse{
+		AccessToken:        res.AccessToken,
+		RefreshToken:       res.RefreshToken,
+		ExpiresIn:          res.ExpiresIn,
+		MustChangePassword: res.MustChangePassword,
+	})
+}
+
+// MobileGoogleLogin handles POST /api/v1/auth/mobile/google: the family app
+// authenticates against the identity provider and exchanges the resulting ID
+// token for OUR token pair, returned in the BODY (a React Native client has no
+// cookie jar, so the app owns storage — exactly as MobileLogin already works).
+//
+// Routing it through us is the point. Letting the app carry the provider's own
+// token would hand session lifetime to the provider and quietly undo our TTLs,
+// our rotation, our revocation and the session-generation guard the app already
+// relies on. The provider establishes WHO; the session stays ours.
+func (h *AuthHandler) MobileGoogleLogin(w http.ResponseWriter, r *http.Request) {
+	var req googleLoginRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.IDToken) == "" {
+		http.Error(w, "id token is required", http.StatusBadRequest)
+		return
+	}
+	// SessionFamily because this is the family app's route: a parent's own
+	// phone, so the session lasts a day. The kind belongs to the route, never
+	// to the body — otherwise a staff sign-in could ask for the longer life.
+	res, err := h.auth.LoginWithIDToken(r.Context(), req.IDToken, client.SessionFamily)
 	if err != nil {
 		http.Error(w, http.StatusText(httpStatusFor(err)), httpStatusFor(err))
 		return

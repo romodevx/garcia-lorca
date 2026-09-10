@@ -69,6 +69,9 @@ type TuitionPlanInput struct {
 	// EnrollmentDueOn is the deadline the school set for the inscription. Zero
 	// keeps the rule the run has always used.
 	EnrollmentDueOn time.Time
+	// EnrollmentConcepts breaks the inscription into the lines the school prints,
+	// each with its own price ladder. Empty keeps EnrollmentCents.
+	EnrollmentConcepts []domain.EnrollmentConcept
 }
 
 // BillingResult is what a run did. Skipped counts the charges that already
@@ -85,9 +88,13 @@ type BillingResult struct {
 	// EnrollmentMoved counts inscriptions whose deadline the run corrected to
 	// match the tuition table. Reported because a run that silently moves four
 	// hundred due dates is one nobody can audit.
-	EnrollmentMoved   int
-	Skipped           int
-	LevelsWithoutPlan []string
+	EnrollmentMoved int
+	// EnrollmentRepriced counts unpaid inscriptions the run moved to the tier now
+	// in force. Reported for the same reason as EnrollmentMoved, and it matters
+	// more: this one moves money, not dates.
+	EnrollmentRepriced int
+	Skipped            int
+	LevelsWithoutPlan  []string
 }
 
 // UpsertTuitionPlan sets what one level of one cycle costs, replacing whatever
@@ -108,6 +115,7 @@ func (s *FinanceService) UpsertTuitionPlan(ctx context.Context, in TuitionPlanIn
 		MonthlyDiscountCents: in.MonthlyDiscountCents,
 		Fees:                 in.Fees,
 		EnrollmentDueOn:      in.EnrollmentDueOn,
+		EnrollmentConcepts:   in.EnrollmentConcepts,
 	})
 	if err != nil {
 		return domain.TuitionPlan{}, err
@@ -200,19 +208,18 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 			continue
 		}
 
-		enrolCharge, err := s.buildCharge(chargeSpec{
-			studentID:   enr.StudentID,
-			cycleID:     cycleID,
-			conceptID:   concepts[domain.KindEnrollment].ID(),
-			description: enrollmentConceptName,
-			amount:      plan.EnrollmentCents(),
-			due:         calendar.NextWorkingDay(enrollmentDueDate(cycle.StartsOn, plan)),
-			ref:         fmt.Sprintf("enrollment:%s:%s", cycleID, enr.StudentID),
-		})
+		// One charge per line the school prints, priced at the tier in force
+		// TODAY. Asking the plan for EnrollmentCents here instead would issue a
+		// charge for NOTHING on any plan that carries concepts — it is forced to
+		// zero (ADR 0011), NewCents(0) is legal, and the bulk insert makes that
+		// zero permanent. That is the "family charged nothing" this file warns
+		// about below, produced by the feature meant to prevent it.
+		lines, err := s.enrollmentCharges(enr.StudentID, cycleID, concepts[domain.KindEnrollment].ID(),
+			plan, asOf, calendar.NextWorkingDay(enrollmentDueDate(cycle.StartsOn, plan, enr.EnrolledAt)))
 		if err != nil {
 			return BillingResult{}, err
 		}
-		wantedEnrollment = append(wantedEnrollment, enrolCharge)
+		wantedEnrollment = append(wantedEnrollment, lines...)
 
 		// The WHOLE year, not just the months that have arrived. The school asked
 		// for "el monto total que debe pagar el año", and it is what makes a
@@ -223,7 +230,9 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 		//
 		// A future month owes nothing extra: it is not overdue, so it accrues no
 		// surcharge until its own due date passes.
-		for _, item := range plan.Installments(cycle.StartsOn) {
+		// From the month they arrived, not from the month the year opened. A
+		// pupil who joined in March was not taught September.
+		for _, item := range plan.InstallmentsFrom(cycle.StartsOn, enr.EnrolledAt) {
 			due := item.DueOn
 			monthly, err := s.buildCharge(chargeSpec{
 				studentID: enr.StudentID,
@@ -300,6 +309,14 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 	if err != nil {
 		return BillingResult{}, err
 	}
+	// The ladder goes on climbing after the charge exists. Written down rather
+	// than left derived, so the database agrees with what the family is shown and
+	// no report quotes a price nobody is charging. Only the unpaid and
+	// un-negotiated ones move — see repriceable below.
+	enrollmentRepriced, err := s.repo.RepriceUnpaid(ctx, repriceable(wantedEnrollment))
+	if err != nil {
+		return BillingResult{}, err
+	}
 	tuitionCreated, err := s.repo.CreateChargesBulk(ctx, wantedTuition)
 	if err != nil {
 		return BillingResult{}, err
@@ -325,13 +342,14 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 	wanted := len(wantedEnrollment) + len(wantedTuition) + len(wantedFees) + len(lateFees)
 	created := enrollmentCreated + tuitionCreated + feesCreated + lateCreated
 	return BillingResult{
-		TuitionCreated:    tuitionCreated,
-		EnrollmentCreated: enrollmentCreated,
-		LateFeesCreated:   lateCreated,
-		FeesCreated:       feesCreated,
-		EnrollmentMoved:   enrollmentMoved,
-		Skipped:           wanted - created,
-		LevelsWithoutPlan: s.levelsWithoutPlan(ctx, planByLevel),
+		TuitionCreated:     tuitionCreated,
+		EnrollmentCreated:  enrollmentCreated,
+		LateFeesCreated:    lateCreated,
+		FeesCreated:        feesCreated,
+		EnrollmentMoved:    enrollmentMoved,
+		EnrollmentRepriced: enrollmentRepriced,
+		Skipped:            wanted - created,
+		LevelsWithoutPlan:  s.levelsWithoutPlan(ctx, planByLevel),
 	}, nil
 }
 
@@ -507,17 +525,93 @@ func (s *FinanceService) buildCharge(spec chargeSpec) (domain.Charge, error) {
 	return charge.WithExternalRef(spec.ref)
 }
 
+// enrollmentCharges is what one pupil owes for joining, as of a day: one charge
+// per line the school prints, each at the tier in force.
+//
+// Shared by the run and the enrolment consumer, so a pupil billed by the event
+// and a pupil billed by the button get the same rows under the same references.
+// Two implementations of this would be two price lists.
+//
+// The reference carries the concept's SLUG, so three lines are three identities
+// and the run stays idempotent (ADR 0008 + 0011). A plan with no concepts keeps
+// the reference it has always had, so nothing already issued is re-billed under
+// a new name.
+func (s *FinanceService) enrollmentCharges(
+	studentID, cycleID, conceptID string,
+	plan domain.TuitionPlan, asOf, due time.Time,
+) ([]domain.Charge, error) {
+	lines := plan.EnrollmentLinesOn(asOf)
+	out := make([]domain.Charge, 0, len(lines))
+	for _, line := range lines {
+		description, ref := enrollmentConceptName, fmt.Sprintf("enrollment:%s:%s", cycleID, studentID)
+		if line.Name != "" {
+			description = line.Name
+			// The fallback Slugify's own doc says the caller supplies. A name of
+			// nothing but punctuation would otherwise end the reference in a
+			// colon and say nothing about which line it is.
+			slug := domain.Slugify(line.Name)
+			if slug == "" {
+				slug = "concepto"
+			}
+			ref = fmt.Sprintf("enrollment:%s:%s:%s", cycleID, studentID, slug)
+		}
+		charge, err := s.buildCharge(chargeSpec{
+			studentID: studentID, cycleID: cycleID, conceptID: conceptID,
+			description: description, amount: line.AmountCents, due: due, ref: ref,
+		})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, charge)
+	}
+	return out, nil
+}
+
+// repriceable turns the inscriptions the run WOULD issue into the re-pricing of
+// the ones already there.
+//
+// The repository refuses to touch a charge that has taken money — the first peso
+// freezes the price (ADR 0011) — and it also refuses one carrying a discount. A
+// discount is a price a PERSON decided for one family, and a price list must
+// never overwrite a decision somebody made by hand. The full scholarship is what
+// proves the rule: a free inscription never receives a peso, so the payment
+// guard never protects it, and raising the amount while the discount stands
+// would turn a gift into a debt.
+func repriceable(charges []domain.Charge) []ports.ChargeReprice {
+	out := make([]ports.ChargeReprice, 0, len(charges))
+	for _, c := range charges {
+		out = append(out, ports.ChargeReprice{
+			ExternalRef: c.ExternalRef(),
+			AmountCents: c.Amount().Int64(),
+		})
+	}
+	return out
+}
+
 // enrollmentDueDate is the day the inscription falls due: the plan's due day in
 // the month the school year opens. A family owes it from the start of the year,
 // not from the first tuition.
-func enrollmentDueDate(cycleStart time.Time, plan domain.TuitionPlan) time.Time {
+func enrollmentDueDate(cycleStart time.Time, plan domain.TuitionPlan, joinedOn time.Time) time.Time {
 	// The school's own deadline wins. The inscription is a separate charge with
 	// a separate arrangement — collected in June for a year that opens in
 	// August — and deriving it from the cycle made that impossible to say.
-	if due := plan.EnrollmentDueOn(); !due.IsZero() {
-		return due
+	due := plan.EnrollmentDueOn()
+	if due.IsZero() {
+		due = time.Date(cycleStart.Year(), cycleStart.Month(), plan.DueDay(), 0, 0, 0, 0, cycleStart.Location())
 	}
-	return time.Date(cycleStart.Year(), cycleStart.Month(), plan.DueDay(), 0, 0, 0, 0, cycleStart.Location())
+	// A pupil who arrives in March is not six months late for it. The tuition
+	// already refuses to charge them for months they were not a pupil
+	// (InstallmentsFrom); the inscription was still handed to them dated in
+	// September, overdue the day it was issued, and accrueLateFees does not spare
+	// inscriptions — six surcharges on the first run.
+	//
+	// Unlike the tuition, this deadline may leave its calendar month: the
+	// inscription's external_ref carries no month, so the charge's identity does
+	// not move with it.
+	if !joinedOn.IsZero() && joinedOn.After(due) {
+		return joinedOn
+	}
+	return due
 }
 
 // feeDescription is what the family reads. A fee collected in one month is just
@@ -537,18 +631,13 @@ func feeDescription(i domain.FeeInstallment) string {
 // everything but letters and digits so that fixing the capitalisation of "Cuota
 // de Julio" does not re-issue the whole school's charges.
 func feeSlug(name string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(name) {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-		}
-	}
-	if b.Len() == 0 {
+	b := domain.Slugify(name)
+	if b == "" {
 		// A name of nothing but punctuation still needs an identity, or every
 		// such fee would collide with every other.
 		return "cuota"
 	}
-	return b.String()
+	return b
 }
 
 // resolveAsOf reads the date the run should pretend it is. An empty value means

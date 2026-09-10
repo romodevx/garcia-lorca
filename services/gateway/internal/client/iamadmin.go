@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"time"
 
 	connect "connectrpc.com/connect"
 
@@ -26,6 +27,74 @@ type Role struct {
 	ID          string
 	Name        string
 	Permissions []string
+}
+
+// InviteUser provisions an identity with NO password and has the provider mail
+// its owner the link that sets the first one. Preferred over CreateUser: nobody
+// but the account's owner ever knows the password, and a mistyped address never
+// becomes a working account.
+//
+// An address that already has an account is a conflict, not a resend — see
+// ResendInvitation for that.
+func (c *AuthClient) InviteUser(ctx context.Context, email, displayName string, roleIDs []string) (User, Invitation, error) {
+	res, err := c.rpc.InviteUser(ctx, connect.NewRequest(&iamv1.InviteUserRequest{
+		Email:       email,
+		DisplayName: displayName,
+		RoleIds:     roleIDs,
+	}))
+	if err != nil {
+		return User{}, Invitation{}, err
+	}
+	return toUser(res.Msg.GetUser()), toInvitation(res.Msg.GetInvitation()), nil
+}
+
+// Invitation is what came of issuing the link: whether it was delivered, why
+// not, and — when it was not — the link itself, so the caller has something to
+// hand over.
+type Invitation struct {
+	URL       string
+	ExpiresAt time.Time
+	Sent      bool
+	SendError string
+	Via       string
+}
+
+func toInvitation(p *iamv1.Invitation) Invitation {
+	if p == nil {
+		return Invitation{}
+	}
+	return Invitation{
+		URL:       p.GetUrl(),
+		ExpiresAt: p.GetExpiresAt().AsTime(),
+		Sent:      p.GetSent(),
+		SendError: p.GetSendError(),
+		Via:       p.GetVia(),
+	}
+}
+
+// ResendInvitation mints a fresh link for somebody who has not walked through
+// the door yet. iam refuses on an account that is already active.
+func (c *AuthClient) ResendInvitation(ctx context.Context, userID string) (Invitation, error) {
+	res, err := c.rpc.ResendInvitation(ctx, connect.NewRequest(&iamv1.ResendInvitationRequest{UserId: userID}))
+	if err != nil {
+		return Invitation{}, err
+	}
+	return toInvitation(res.Msg.GetInvitation()), nil
+}
+
+// AcceptInvitation redeems a token and sets the password its owner chose.
+func (c *AuthClient) AcceptInvitation(ctx context.Context, token, password string) error {
+	_, err := c.rpc.AcceptInvitation(ctx, connect.NewRequest(&iamv1.AcceptInvitationRequest{
+		Token: token, Password: password,
+	}))
+	return err
+}
+
+// RequestPasswordReset asks iam to mail a reset link. It reports nothing about
+// whether the address exists, and neither does this wrapper.
+func (c *AuthClient) RequestPasswordReset(ctx context.Context, email string) error {
+	_, err := c.rpc.RequestPasswordReset(ctx, connect.NewRequest(&iamv1.RequestPasswordResetRequest{Email: email}))
+	return err
 }
 
 // CreateUser provisions a new identity with a temporary password (the user must
@@ -176,9 +245,23 @@ func toRole(r *iamv1.Role) Role {
 var userStatusNames = map[iamv1.UserStatus]string{
 	iamv1.UserStatus_USER_STATUS_ACTIVE:    "active",
 	iamv1.UserStatus_USER_STATUS_SUSPENDED: "suspended",
+	iamv1.UserStatus_USER_STATUS_INVITED:   "invited",
 }
 
-func userStatusName(s iamv1.UserStatus) string { return userStatusNames[s] }
+// userStatusName never returns the empty string, and that is the whole reason
+// this is a function and not a bare map read.
+//
+// It used to be `return userStatusNames[s]`, so a status with no entry shipped
+// as {"status":""} — no error, no log, nothing. The web then compared it to
+// "active", found it different, and drew every one of those users as
+// "Suspendido". A silent wrong answer is worse than a loud unknown one: the
+// screen would have looked plausible and been lying.
+func userStatusName(s iamv1.UserStatus) string {
+	if name, ok := userStatusNames[s]; ok {
+		return name
+	}
+	return "unknown"
+}
 
 func userStatusFromName(name string) iamv1.UserStatus {
 	for status, n := range userStatusNames {

@@ -135,7 +135,46 @@ services:
 
   iam:
     <<: *go-service
-    environment: { <<: *go-env, SERVICE: iam }
+    environment:
+      <<: *go-env
+      SERVICE: iam
+      # Identity Platform, for developing the provider sign-in path locally.
+      # EMPTY BY DEFAULT: with no project named, iam's verifier stays nil and
+      # LoginWithIDToken refuses, so the ordinary password login is untouched.
+      # Export IDENTITY_PLATFORM_PROJECT before `make run` to switch it on.
+      IDENTITY_PLATFORM_PROJECT: "${IDENTITY_PLATFORM_PROJECT:-}"
+      # The Admin SDK authenticates with Application Default Credentials. Mounted
+      # read-only from the host below; nothing is baked into the image.
+      GOOGLE_APPLICATION_CREDENTIALS: /gcloud/application_default_credentials.json
+      # The WEB api key, used only to ask the provider to MAIL an invitation.
+      # It is the same public key a browser would carry, and the only thing it
+      # can do here is send a link to an address that already owns the account.
+      # Empty is valid: sign-in still works and inviting says why it cannot.
+      # Where an invitation link points. It has to be the address the browser
+      # can actually reach, which locally is the host port, not the container's.
+      # Getting this wrong produces a link that looks right and 404s.
+      # The WEB api key. Public by design — it ships in the browser bundle — and
+      # needed for exactly one thing: the temporary path where the provider
+      # mails its own set-a-password link.
+      IDENTITY_PLATFORM_API_KEY: "${IDENTITY_PLATFORM_API_KEY:-}"
+      PUBLIC_WEB_URL: "http://localhost:${WEB_HOST_PORT:-3000}"
+      # The relay that carries invitations. EMPTY IS A VALID STATE: with no
+      # relay, inviting still works and reports the link so it can be handed
+      # over by hand. Fill these in and the same button starts mailing, with no
+      # code change — the school's own server when its credential arrives, any
+      # authenticated relay before that.
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_USERNAME: "${SMTP_USERNAME:-}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
+      SMTP_FROM: "${SMTP_FROM:-}"
+      SMTP_FROM_NAME: "${SMTP_FROM_NAME:-Colegio García Lorca}"
+    volumes:
+      - .:/workspace
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+      # Read-only, and only for iam: no other service talks to the provider.
+      - ${HOME}/.config/gcloud:/gcloud:ro
     ports: ["8091:8080"]
 
   students:
@@ -301,6 +340,16 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: "http://localhost:8080"
       WATCHPACK_POLLING: "true"
+      # These MUST track iam's IDENTITY_PLATFORM_* settings, and the half-set
+      # state is worse than either end. With the provider on for iam but off
+      # here, an invited person receives the provider's mail, sets a password at
+      # Google, and then cannot sign in: the web asks for OUR password and the
+      # user row has no hash. Nothing reports it — they simply bounce off the
+      # login screen. Setting both, or neither, is the only coherent pair.
+      NEXT_PUBLIC_AUTH_PROVIDER: "${NEXT_PUBLIC_AUTH_PROVIDER:-}"
+      NEXT_PUBLIC_FIREBASE_API_KEY: "${IDENTITY_PLATFORM_API_KEY:-}"
+      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: "${IDENTITY_PLATFORM_PROJECT:-}.firebaseapp.com"
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: "${IDENTITY_PLATFORM_PROJECT:-}"
     # Host port configurable to dodge another local dev server on 3000.
     ports: ["${WEB_HOST_PORT:-3000}:3000"]
     volumes:

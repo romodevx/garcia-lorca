@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	connect "connectrpc.com/connect"
@@ -30,9 +31,12 @@ import (
 	"github.com/garcia-lorca/pkg/dbpool"
 	"github.com/garcia-lorca/pkg/logger"
 	"github.com/garcia-lorca/services/iam/internal/adapters/bcrypt"
+	"github.com/garcia-lorca/services/iam/internal/adapters/googleid"
 	grpcadapter "github.com/garcia-lorca/services/iam/internal/adapters/grpc"
 	"github.com/garcia-lorca/services/iam/internal/adapters/jwt"
 	pgadapter "github.com/garcia-lorca/services/iam/internal/adapters/postgres"
+	smtpadapter "github.com/garcia-lorca/services/iam/internal/adapters/smtp"
+	"github.com/garcia-lorca/services/iam/internal/ports"
 	"github.com/garcia-lorca/services/iam/internal/usecase"
 )
 
@@ -47,6 +51,18 @@ const (
 
 func main() {
 	log := logger.Default()
+
+	// One-off maintenance runs as a subcommand of this same binary: it needs the
+	// database connection, the tenant and the postgres adapter this service
+	// already knows how to build, and a second image would have been a second
+	// copy of all of it. See import_users.go.
+	if len(os.Args) > 1 && os.Args[1] == "import-users" {
+		if err := runImportUsers(log); err != nil {
+			log.Error("import-users failed", slog.Any("error", err))
+			os.Exit(1)
+		}
+		return
+	}
 
 	mux, err := buildMux(log)
 	if err != nil {
@@ -83,8 +99,66 @@ func buildMux(log *slog.Logger) (*http.ServeMux, error) {
 	}
 	tokens := jwt.NewHMAC(secret, tokenIssuer, refreshTTL, time.Now)
 
-	auth := usecase.NewAuthService(userRepo, roleRepo, hasher, tokens, tokens, tenantID, accessTokenTTL, time.Now)
-	admin := usecase.NewAdminService(userRepo, roleRepo, hasher, tenantID, func() string { return uuid.NewString() })
+	// The external identity provider is OPTIONAL and off unless named. An empty
+	// IDENTITY_PLATFORM_PROJECT leaves the verifier nil, which makes
+	// AuthenticateWithIDToken refuse outright — local and any environment that
+	// has not been migrated keep signing in with a password and are unaffected.
+	// Nothing is inferred from ambient credentials: the project is stated or the
+	// path is closed.
+	var idTokens ports.IDTokenVerifier
+	var provisioner ports.IdentityProvisioner
+	if project := os.Getenv("IDENTITY_PLATFORM_PROJECT"); project != "" {
+		v, p, err := googleid.NewFromProject(context.Background(), project, os.Getenv("IDENTITY_PLATFORM_API_KEY"))
+		if err != nil {
+			// Fatal on purpose. A misconfigured provider that boots anyway would
+			// silently refuse every sign-in through it, and the only symptom would
+			// be users unable to log in with no error to read anywhere.
+			return nil, err
+		}
+		idTokens = v
+		provisioner = p
+		log.Info("identity provider wired", "project", project)
+	}
+
+	invitationRepo := pgadapter.NewInvitationRepo(db, tenantID)
+
+	auth := usecase.NewAuthService(userRepo, roleRepo, hasher, tokens, tokens, idTokens, invitationRepo, tenantID, accessTokenTTL, time.Now)
+	// provisioner comes from the SAME optional provider above: with no project
+	// named it stays nil, InviteUser refuses, and the older password-based
+	// CreateUser is untouched.
+	// The mailer is OPTIONAL and its absence is a supported state, not a
+	// degraded one. With no relay configured, inviting still works and the use
+	// case reports that the message did not go out, so the director can hand the
+	// link over another way. Refusing to boot would turn "the school has not
+	// given us an SMTP password yet" into "nobody can be given an account".
+	var mailer ports.Mailer
+	if m, ok := smtpadapter.New(smtpadapter.Config{
+		Host:     os.Getenv("SMTP_HOST"),
+		Port:     os.Getenv("SMTP_PORT"),
+		Username: os.Getenv("SMTP_USERNAME"),
+		Password: os.Getenv("SMTP_PASSWORD"),
+		FromAddr: os.Getenv("SMTP_FROM"),
+		FromName: os.Getenv("SMTP_FROM_NAME"),
+	}); ok {
+		mailer = m
+		log.Info("mailer wired", "host", os.Getenv("SMTP_HOST"))
+	} else {
+		log.Info("no mailer configured; invitations will report their link instead of sending it")
+	}
+
+	// Where an invitation link points. Our own page, in Spanish, on our own
+	// domain — not the provider's English action handler.
+	activateURL := os.Getenv("PUBLIC_WEB_URL")
+	if activateURL == "" {
+		activateURL = "http://localhost:3000"
+	}
+	activateURL = strings.TrimRight(activateURL, "/") + "/activar"
+
+	admin := usecase.NewAdminService(
+		userRepo, roleRepo, hasher, provisioner, invitationRepo, mailer,
+		activateURL, tenantID,
+		func() string { return uuid.NewString() }, time.Now,
+	)
 	health := usecase.NewHealthService(serviceName)
 	iamHandler := grpcadapter.NewIAMHandler(auth, admin, health)
 

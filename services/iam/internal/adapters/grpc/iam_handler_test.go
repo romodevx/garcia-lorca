@@ -56,6 +56,8 @@ func (f *fakeUsers) FindAuthByID(_ context.Context, id string) (domain.User, str
 	}
 	return domain.User{}, "", glerrors.ErrNotFound
 }
+func (f *fakeUsers) TouchPasswordChangedAt(context.Context, string) error { return nil }
+
 func (f *fakeUsers) UpdatePassword(_ context.Context, _, _ string) error {
 	f.updated = true
 	return nil
@@ -68,6 +70,9 @@ func (f *fakeUsers) CreateUser(_ context.Context, user domain.User, passwordHash
 		return f.createErr
 	}
 	f.created = &createdUser{user: user, hash: passwordHash}
+	// A repository can find what it just stored. Recording the call without
+	// storing the row made this double lie about exactly that.
+	f.user = user
 	return nil
 }
 func (f *fakeUsers) ListUsers(context.Context) ([]domain.User, error) { return f.listOut, nil }
@@ -79,7 +84,25 @@ func (f *fakeUsers) SetStatus(_ context.Context, userID string, status domain.St
 		f.statusSet = map[string]domain.Status{}
 	}
 	f.statusSet[userID] = status
+	// APPLY it, do not merely record it. A double that remembers the call but
+	// keeps handing back the old row lies about the one thing a repository
+	// promises: what you write, you then read back. That lie made a test pass
+	// while ResendInvitation happily re-invited an account that had just been
+	// activated.
+	if userID == f.user.ID() {
+		f.user = rebuildWithStatus(f.user, status)
+	}
 	return nil
+}
+
+// rebuildWithStatus is the only way to change a domain User's status from
+// outside the domain: it is immutable by construction, which is the point.
+func rebuildWithStatus(u domain.User, status domain.Status) domain.User {
+	rebuilt, err := domain.NewUser(u.ID(), "t1", u.Email(), u.DisplayName(), status, u.MustChangePassword(), nil)
+	if err != nil {
+		return u
+	}
+	return rebuilt
 }
 func (f *fakeUsers) SetUserRoles(_ context.Context, userID string, roleIDs []string) error {
 	if f.rolesSet == nil {
@@ -141,8 +164,8 @@ func newHandlerWithUsers(t *testing.T, mustChange bool) (*grpcadapter.IAMHandler
 	users := &fakeUsers{user: user, hash: hash}
 	tokens := jwt.NewHMAC([]byte(strings.Repeat("gl-key-", 6)), "garcia-lorca", time.Hour, time.Now)
 	roles := &fakeRoles{known: "r1"}
-	auth := usecase.NewAuthService(users, roles, hasher, tokens, tokens, "t1", 15*time.Minute, time.Now)
-	admin := usecase.NewAdminService(users, roles, hasher, "t1", func() string { return "generated-id" })
+	auth := usecase.NewAuthService(users, roles, hasher, tokens, tokens, nil, nil, "t1", 15*time.Minute, time.Now)
+	admin := usecase.NewAdminService(users, roles, hasher, nil, nil, nil, "", "t1", func() string { return "generated-id" }, nil)
 	return grpcadapter.NewIAMHandler(auth, admin, usecase.NewHealthService("iam")), users
 }
 
@@ -286,8 +309,8 @@ func handlerOver(t *testing.T, users *fakeUsers, roles *fakeRoles) *grpcadapter.
 	t.Helper()
 	hasher := bcrypt.NewHasher(4)
 	tokens := jwt.NewHMAC([]byte(strings.Repeat("gl-key-", 6)), "garcia-lorca", time.Hour, time.Now)
-	auth := usecase.NewAuthService(users, roles, hasher, tokens, tokens, "t1", 15*time.Minute, time.Now)
-	admin := usecase.NewAdminService(users, roles, hasher, "t1", func() string { return "generated-id" })
+	auth := usecase.NewAuthService(users, roles, hasher, tokens, tokens, nil, nil, "t1", 15*time.Minute, time.Now)
+	admin := usecase.NewAdminService(users, roles, hasher, nil, nil, nil, "", "t1", func() string { return "generated-id" }, nil)
 	return grpcadapter.NewIAMHandler(auth, admin, usecase.NewHealthService("iam"))
 }
 

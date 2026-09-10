@@ -100,3 +100,65 @@ describe("AccountScreen (real family account)", () => {
     expect(screen.queryByText("$0.00")).toBeNull();
   });
 });
+
+describe("AccountScreen — lo que se debe hoy", () => {
+  beforeEach(async () => {
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+  });
+  afterEach(async () => {
+    await clearTokens();
+  });
+
+  // The parent is the one person who cannot walk to the office and ask what is
+  // owed. The hero must lead with what the school is asking for TODAY, and keep
+  // the year's balance beside it rather than instead of it.
+  it("encabeza con lo del día y deja el año al lado", async () => {
+    mockFetch({
+      charges: [],
+      payments: [],
+      totalBalanceCents: 3200000,
+      dueTodayCents: 775000,
+      surchargeCents: 15000,
+      earlyDiscountCents: 10000,
+      asOf: "2026-11-20",
+    });
+
+    await renderWithProviders(<AccountScreen />);
+
+    await waitFor(() => expect(screen.getByLabelText("Saldo").props.children).toBe("$7,750.00"));
+    expect(screen.getByLabelText("Saldo del año").props.children).toBe("$32,000.00");
+  });
+
+  // A family asking "why that number?" has no counter to ask it at.
+  it("explica el recargo, el pronto pago y el día", async () => {
+    mockFetch({
+      charges: [],
+      payments: [],
+      totalBalanceCents: 3200000,
+      dueTodayCents: 775000,
+      surchargeCents: 15000,
+      earlyDiscountCents: 10000,
+      asOf: "2026-11-20",
+    });
+
+    await renderWithProviders(<AccountScreen />);
+
+    const note = await screen.findByLabelText("Detalle del saldo");
+    expect(String(note.props.children)).toContain("150.00");
+    expect(String(note.props.children)).toContain("100.00");
+    expect(String(note.props.children)).toContain("2026-11-20");
+  });
+
+  // A gateway older than M18 sends no asOf. Showing the day's figure as $0.00
+  // would tell a family that owes $32,000 that they are settled — the exact
+  // fabricated "Al corriente" this screen already refuses elsewhere (bug_005).
+  it("no inventa un saldo del día cuando el servidor no lo mandó", async () => {
+    mockFetch({ charges: [], payments: [], totalBalanceCents: 3200000 });
+
+    await renderWithProviders(<AccountScreen />);
+
+    await waitFor(() => expect(screen.getByLabelText("Saldo").props.children).toBe("$32,000.00"));
+    expect(screen.queryByLabelText("Saldo del año")).toBeNull();
+    expect(screen.queryByText("Al corriente")).toBeNull();
+  });
+});

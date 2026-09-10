@@ -336,6 +336,17 @@ func (h *FamilyHandler) Account(w http.ResponseWriter, r *http.Request) {
 		// parent who overpaid seeing only the debt would be told they owe money
 		// the school is already holding for them.
 		"unallocatedCents": res.UnallocatedCents,
+		// What the school is asking for TODAY, already with the surcharge that
+		// has accrued and net of the early-payment reward — the same figure the
+		// counter would quote. totalBalanceCents above is what the year still
+		// owes; a parent shown only that one is told a number nobody is asking
+		// them for.
+		"dueTodayCents": res.DueTodayCents,
+		// Its parts, so a parent asking why is answered by the screen.
+		"surchargeCents":     res.SurchargeCents,
+		"earlyDiscountCents": res.EarlyDiscountCents,
+		// The day it was worked out for: these move overnight.
+		"asOf": res.AsOf,
 	})
 }
 

@@ -18,6 +18,11 @@ const (
 	StatusActive
 	// StatusSuspended: the account exists but cannot log in.
 	StatusSuspended
+	// StatusInvited: the account was created and its owner has not yet proved
+	// they read the mailbox. It holds roles and cannot log in. This is the
+	// difference between "created" and "usable" — before it existed, a mistyped
+	// address became a working account nobody could reach.
+	StatusInvited
 )
 
 // User is the IAM principal: a stable identity with an email (unique per
@@ -86,6 +91,22 @@ func (u User) CanAuthenticate() bool { return u.status == StatusActive }
 // MustChangePassword reports whether the account still holds a temporary
 // password and must rotate it before doing anything else.
 func (u User) MustChangePassword() bool { return u.mustChangePassword }
+
+// WithoutPendingRotation returns the user with the forced-rotation flag cleared.
+//
+// The flag means "this account holds a temporary password somebody else chose,
+// and the only allowed action is replacing it". When an external provider owns
+// the credential that sentence is not true of anything: there is no password of
+// ours to replace. Carrying the flag into a provider session makes the gateway
+// refuse every route while the login itself looks perfectly fine.
+//
+// A value method returning a copy, not a mutation: the row in the database is
+// untouched, so an account can still fall back to the password path with its
+// rotation still pending if the provider is ever switched off.
+func (u User) WithoutPendingRotation() User {
+	u.mustChangePassword = false
+	return u
+}
 
 // PasswordChangedAt returns the instant the credential was last rotated (zero if
 // unknown — imposes no refresh-token revocation floor).

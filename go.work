@@ -1,4 +1,4 @@
-go 1.24
+go 1.25.0
 
 // García Lorca monorepo Go workspace.
 // Members: shared libs (pkg), generated code (gen/go), and each service module.

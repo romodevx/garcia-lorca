@@ -30,8 +30,7 @@ func newAuthServiceForSession(t *testing.T) (*usecase.AuthService, *fakeTokens) 
 	}
 	tokens := &fakeTokens{}
 	now := func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) }
-	svc := usecase.NewAuthService(users, &fakeRoles{}, fakeHasher{}, tokens, tokens,
-		testTenant, 15*time.Minute, now)
+	svc := usecase.NewAuthService(users, &fakeRoles{}, fakeHasher{}, tokens, tokens, nil, nil, testTenant, 15*time.Minute, now)
 	return svc, tokens
 }
 

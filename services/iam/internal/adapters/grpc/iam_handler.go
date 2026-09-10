@@ -54,6 +54,27 @@ func (h *IAMHandler) Login(ctx context.Context, req *connect.Request[iamv1.Login
 	}), nil
 }
 
+// LoginWithIDToken exchanges a provider ID token for OUR session pair.
+//
+// The session KIND comes from the request, which is set by the ROUTE the call
+// arrived on at the edge, never by anything the person signing in can type —
+// the same rule Login follows. Otherwise a staff sign-in could ask for the
+// day-long family session.
+func (h *IAMHandler) LoginWithIDToken(ctx context.Context, req *connect.Request[iamv1.LoginWithIDTokenRequest]) (*connect.Response[iamv1.LoginWithIDTokenResponse], error) {
+	res, err := h.auth.AuthenticateWithIDToken(ctx, req.Msg.GetIdToken(),
+		sessionKindOf(req.Msg.GetSessionKind()))
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&iamv1.LoginWithIDTokenResponse{
+		AccessToken:        res.AccessToken,
+		RefreshToken:       res.RefreshToken,
+		ExpiresIn:          res.ExpiresIn,
+		User:               toProtoUser(res.User),
+		MustChangePassword: res.MustChangePassword,
+	}), nil
+}
+
 func (h *IAMHandler) RefreshToken(ctx context.Context, req *connect.Request[iamv1.RefreshTokenRequest]) (*connect.Response[iamv1.RefreshTokenResponse], error) {
 	res, err := h.auth.RefreshToken(ctx, req.Msg.GetRefreshToken())
 	if err != nil {
@@ -104,6 +125,62 @@ func (h *IAMHandler) ChangePassword(ctx context.Context, req *connect.Request[ia
 }
 
 // --- admin surface (user/role CRUD) ----------------------------------------
+
+// InviteUser provisions a principal with no password and mails them the link
+// that sets the first one. Prefer it over CreateUser: nobody else ever knows
+// the person's password, and a mistyped address fails visibly instead of
+// becoming a working account.
+func (h *IAMHandler) InviteUser(ctx context.Context, req *connect.Request[iamv1.InviteUserRequest]) (*connect.Response[iamv1.InviteUserResponse], error) {
+	out, err := h.admin.InviteUser(ctx, req.Msg.GetEmail(), req.Msg.GetDisplayName(), req.Msg.GetRoleIds())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&iamv1.InviteUserResponse{
+		User:       toProtoUser(out.User),
+		Invitation: toProtoInvitation(out),
+	}), nil
+}
+
+// ResendInvitation mints a fresh link for somebody who has not walked through
+// the door yet, and refuses on an account that is already active.
+func (h *IAMHandler) ResendInvitation(ctx context.Context, req *connect.Request[iamv1.ResendInvitationRequest]) (*connect.Response[iamv1.ResendInvitationResponse], error) {
+	out, err := h.admin.ResendInvitation(ctx, req.Msg.GetUserId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&iamv1.ResendInvitationResponse{Invitation: toProtoInvitation(out)}), nil
+}
+
+// AcceptInvitation redeems a token. Unauthenticated by design: the token IS the
+// credential, which is why it is single-use, short-lived and 256 bits wide.
+func (h *IAMHandler) AcceptInvitation(ctx context.Context, req *connect.Request[iamv1.AcceptInvitationRequest]) (*connect.Response[iamv1.AcceptInvitationResponse], error) {
+	if err := h.admin.AcceptInvitation(ctx, req.Msg.GetToken(), req.Msg.GetPassword()); err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&iamv1.AcceptInvitationResponse{}), nil
+}
+
+// RequestPasswordReset always succeeds, whatever happened. Any difference
+// between "that address has an account" and "it does not" would turn this
+// unauthenticated endpoint into a directory read.
+func (h *IAMHandler) RequestPasswordReset(ctx context.Context, req *connect.Request[iamv1.RequestPasswordResetRequest]) (*connect.Response[iamv1.RequestPasswordResetResponse], error) {
+	if err := h.admin.RequestPasswordReset(ctx, req.Msg.GetEmail()); err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&iamv1.RequestPasswordResetResponse{}), nil
+}
+
+// toProtoInvitation carries the delivery outcome to the caller. The URL rides
+// along so an administrator can hand it over when no mail went out.
+func toProtoInvitation(inv usecase.Invitation) *iamv1.Invitation {
+	return &iamv1.Invitation{
+		Url:       inv.URL,
+		ExpiresAt: timestamppb.New(inv.ExpiresAt),
+		Sent:      inv.Sent,
+		SendError: inv.SendError,
+		Via:       inv.Via,
+	}
+}
 
 func (h *IAMHandler) CreateUser(ctx context.Context, req *connect.Request[iamv1.CreateUserRequest]) (*connect.Response[iamv1.CreateUserResponse], error) {
 	user, err := h.admin.CreateUser(ctx, req.Msg.GetEmail(), req.Msg.GetDisplayName(), req.Msg.GetTempPassword(), req.Msg.GetRoleIds())
@@ -231,6 +308,8 @@ func toProtoStatus(s domain.Status) iamv1.UserStatus {
 		return iamv1.UserStatus_USER_STATUS_ACTIVE
 	case domain.StatusSuspended:
 		return iamv1.UserStatus_USER_STATUS_SUSPENDED
+	case domain.StatusInvited:
+		return iamv1.UserStatus_USER_STATUS_INVITED
 	default:
 		return iamv1.UserStatus_USER_STATUS_UNSPECIFIED
 	}
@@ -245,6 +324,11 @@ func fromProtoStatus(s iamv1.UserStatus) (domain.Status, error) {
 		return domain.StatusActive, nil
 	case iamv1.UserStatus_USER_STATUS_SUSPENDED:
 		return domain.StatusSuspended, nil
+	// INVITED is deliberately absent, and its absence is a guard rather than an
+	// oversight. This function feeds SetUserStatus, so accepting it would let
+	// anyone holding users:write push a working account into a state that
+	// cannot log in and has no way out through the UI. Only accepting an
+	// invitation, or issuing one, may write `invited`.
 	default:
 		return domain.StatusUnspecified, glerrors.New(glerrors.KindInvalid, "user status is required")
 	}

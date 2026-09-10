@@ -46,7 +46,7 @@ beforeEach(() => {
   students.listStudents.mockResolvedValue([student("s1", "Valentina", "Cruz"), student("s2", "Mateo", "Sánchez")]);
   finance.listCharges.mockResolvedValue([charge("ch1", "s1", 100000), charge("ch2", "s2", 0)]);
   finance.getOverdue.mockResolvedValue([]);
-  finance.getAccount.mockResolvedValue({ charges: [], payments: [], totalBalanceCents: 0, unallocatedCents: 0 });
+  finance.getAccount.mockResolvedValue({ charges: [], payments: [], totalBalanceCents: 0, unallocatedCents: 0, dueTodayCents: 0, surchargeCents: 0, earlyDiscountCents: 0, asOf: "" });
   finance.previewDeposit.mockResolvedValue({ allocations: [], surcharges: [], unallocatedCents: 0 });
   finance.getCashUp.mockResolvedValue({ deposits: [], cancelled: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0 });
   finance.getIncome.mockResolvedValue({ lines: [], totalCents: 0 });

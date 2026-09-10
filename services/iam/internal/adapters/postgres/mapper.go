@@ -13,6 +13,7 @@ import (
 var statusToDomain = map[string]domain.Status{
 	"active":    domain.StatusActive,
 	"suspended": domain.StatusSuspended,
+	"invited":   domain.StatusInvited,
 }
 
 // statusToDB is the inverse of statusToDomain: it renders a domain Status onto
@@ -20,6 +21,7 @@ var statusToDomain = map[string]domain.Status{
 var statusToDB = map[domain.Status]string{
 	domain.StatusActive:    "active",
 	domain.StatusSuspended: "suspended",
+	domain.StatusInvited:   "invited",
 }
 
 // statusColumn renders a domain Status onto its text column, rejecting a status

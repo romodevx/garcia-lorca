@@ -73,6 +73,24 @@ func (c *AuthClient) LoginAs(ctx context.Context, email, password string, kind S
 	}, nil
 }
 
+// LoginWithIDToken exchanges a provider ID token for OUR session pair. The kind
+// comes from the ROUTE the request arrived on, exactly as it does for a password
+// login — never from anything the caller can set.
+func (c *AuthClient) LoginWithIDToken(ctx context.Context, idToken string, kind SessionKind) (LoginResult, error) {
+	res, err := c.rpc.LoginWithIDToken(ctx, connect.NewRequest(&iamv1.LoginWithIDTokenRequest{
+		IdToken: idToken, SessionKind: protoSessionKind(kind),
+	}))
+	if err != nil {
+		return LoginResult{}, err
+	}
+	return LoginResult{
+		AccessToken:        res.Msg.GetAccessToken(),
+		RefreshToken:       res.Msg.GetRefreshToken(),
+		ExpiresIn:          res.Msg.GetExpiresIn(),
+		MustChangePassword: res.Msg.GetMustChangePassword(),
+	}, nil
+}
+
 // Refresh exchanges a refresh token for a fresh, rotated token pair via iam.
 func (c *AuthClient) Refresh(ctx context.Context, refreshToken string) (LoginResult, error) {
 	res, err := c.rpc.RefreshToken(ctx, connect.NewRequest(&iamv1.RefreshTokenRequest{RefreshToken: refreshToken}))

@@ -373,3 +373,466 @@ func TestALevelDiscountDoesNotTouchTheInscription(t *testing.T) {
 		}
 	}
 }
+
+const cycleOpens = "2026-08-01"
+
+func aug(y int, m time.Month, d int) time.Time {
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+}
+
+// ladderFixture is the school with the flyer's three-line inscription in place
+// of one amount: $2,200 until November, $3,300 after.
+func ladderFixture(t *testing.T) *fixture {
+	return ladderFixtureFrom(t, aug(2026, time.November, 1))
+}
+
+// ladderFixtureFrom is the same school with the second rung starting on a day
+// the caller chooses, so two of them can differ in exactly one thing.
+func ladderFixtureFrom(t *testing.T, secondRungFrom time.Time) *fixture {
+	t.Helper()
+	f := billingFixture(t)
+	flat := func(name string, cents int64) domain.EnrollmentConcept {
+		return domain.EnrollmentConcept{Name: name, Tiers: []domain.PriceTier{
+			{EffectiveFrom: aug(2026, time.August, 1), AmountCents: cents},
+		}}
+	}
+	if _, err := f.svc.UpsertTuitionPlan(context.Background(), usecase.TuitionPlanInput{
+		CycleID: testCycle, LevelID: testLevel,
+		MonthlyCents: 320000, Months: 10, FirstBilledMonth: 9, DueDay: 10,
+		LateFeeCents: 15000, Active: true,
+		EnrollmentConcepts: []domain.EnrollmentConcept{
+			{Name: "Inscripción", Tiers: []domain.PriceTier{
+				{EffectiveFrom: aug(2026, time.August, 1), AmountCents: 220000},
+				{EffectiveFrom: secondRungFrom, AmountCents: 330000},
+			}},
+			flat("Gastos adm y seguro", 470000),
+			flat("Cuota Asociación Padres de Familia", 85000),
+		},
+	}); err != nil {
+		t.Fatalf("seed ladder plan: %v", err)
+	}
+	return f
+}
+
+// issuedTo maps a pupil's charges by description.
+func issuedTo(t *testing.T, f *fixture, student string) map[string]int64 {
+	t.Helper()
+	list, err := f.svc.ListCharges(context.Background(), student, testCycle)
+	if err != nil {
+		t.Fatalf("ListCharges: %v", err)
+	}
+	out := map[string]int64{}
+	for _, c := range list {
+		out[c.Charge.Description()] = c.Charge.Amount().Int64()
+	}
+	return out
+}
+
+// R1. The run must bill the LINES, never the single amount a concepts plan no
+// longer carries.
+//
+// A plan with concepts is forced to EnrollmentCents == 0 (ADR 0011) and
+// NewCents(0) is legal, so a run still reading that field issues a $0
+// inscription to every pupil of the level — and CreateChargesBulk's ON CONFLICT
+// makes that zero PERMANENT. It is the "family charged nothing is a problem a
+// school discovers in June" failure this file warns about, produced by the
+// feature meant to prevent it.
+func TestRunBillingIssuesOneChargePerInscriptionLine(t *testing.T) {
+	f := ladderFixture(t)
+
+	got := runOn(t, f, "2026-09-15")
+
+	if got.EnrollmentCreated != 3 {
+		t.Fatalf("enrollment charges = %d, want the flyer's 3 lines", got.EnrollmentCreated)
+	}
+	issued := issuedTo(t, f, testStudent)
+	for name, want := range map[string]int64{
+		"Inscripción":                        220000,
+		"Gastos adm y seguro":                470000,
+		"Cuota Asociación Padres de Familia": 85000,
+	} {
+		if issued[name] != want {
+			t.Errorf("%q = %d, want %d", name, issued[name], want)
+		}
+	}
+	for name, amount := range issued {
+		if amount == 0 {
+			t.Errorf("%q was issued for nothing", name)
+		}
+	}
+}
+
+// The ladder goes on climbing after the charge exists, and the run says how many
+// prices it moved: one that changes four hundred in silence is one nobody can audit.
+func TestRunBillingRepricesTheUnpaidInscription(t *testing.T) {
+	f := ladderFixture(t)
+	runOn(t, f, "2026-09-15")
+
+	got := runOn(t, f, "2026-11-15")
+
+	if got.EnrollmentRepriced != 1 {
+		t.Fatalf("repriced = %d, want 1", got.EnrollmentRepriced)
+	}
+	if amount := issuedTo(t, f, testStudent)["Inscripción"]; amount != 330000 {
+		t.Errorf("Inscripción = %d, want November's 330000", amount)
+	}
+}
+
+// R6. A scholarship is a price a PERSON decided. The ladder is the list price,
+// and it must never overwrite a decision somebody made by hand.
+//
+// The 100% case is the one that proves it: a free inscription never receives a
+// peso, so the freeze rule — which keys on payments — never protects it. Raising
+// the amount while the discount stands turns a gift into a debt.
+func TestTheLadderNeverRepricesWhatSomebodyNegotiated(t *testing.T) {
+	f := ladderFixture(t)
+	runOn(t, f, "2026-09-15")
+
+	list, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	if err != nil {
+		t.Fatalf("ListCharges: %v", err)
+	}
+	var inscription string
+	for _, c := range list {
+		if c.Charge.Description() == "Inscripción" {
+			inscription = c.Charge.ID()
+		}
+	}
+	// The whole inscription forgiven: a full scholarship.
+	if _, err := f.svc.ApplyDiscount(context.Background(), inscription, 220000, "beca completa"); err != nil {
+		t.Fatalf("ApplyDiscount: %v", err)
+	}
+
+	got := runOn(t, f, "2026-11-15")
+
+	if got.EnrollmentRepriced != 0 {
+		t.Errorf("repriced %d negotiated charges, want 0", got.EnrollmentRepriced)
+	}
+	after, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	if err != nil {
+		t.Fatalf("ListCharges: %v", err)
+	}
+	for _, c := range after {
+		if c.Charge.ID() != inscription {
+			continue
+		}
+		if owed := c.Charge.Effective().Int64(); owed != 0 {
+			t.Errorf("the free inscription now owes %d — a gift became a debt", owed)
+		}
+	}
+}
+
+// A plan that still carries one amount goes on billing exactly one inscription.
+func TestRunBillingStillIssuesTheSingleInscription(t *testing.T) {
+	f := billingFixture(t)
+
+	got := runOn(t, f, "2026-09-15")
+
+	if got.EnrollmentCreated != 1 {
+		t.Fatalf("enrollment charges = %d, want 1", got.EnrollmentCreated)
+	}
+	if amount := issuedTo(t, f, testStudent)["Inscripción"]; amount != 50000 {
+		t.Errorf("Inscripción = %d, want the plan's 50000", amount)
+	}
+}
+
+// D3. A pupil who arrives in March owes March onwards, not the whole year.
+func TestRunBillingDoesNotChargeAMidYearJoinerForMonthsBeforeTheyArrived(t *testing.T) {
+	f := billingFixture(t)
+	f.enrollments.byCycle[testCycle] = []ports.EnrollmentRef{{
+		ID: "enr-late", StudentID: "stu-late", GroupID: testGroup, CycleID: testCycle,
+		Status: "active", EnrolledAt: aug(2027, time.March, 20),
+	}}
+
+	got := runOn(t, f, "2027-03-25")
+
+	if got.TuitionCreated != 4 {
+		t.Errorf("tuition = %d, want March..June — 4 months", got.TuitionCreated)
+	}
+	for name := range issuedTo(t, f, "stu-late") {
+		if strings.Contains(name, "septiembre") || strings.Contains(name, "octubre") {
+			t.Errorf("%q was billed to a pupil who arrived in March", name)
+		}
+	}
+}
+
+// T13. The counter must collect the price of the day the money arrives.
+//
+// There is NO nightly run — RunBilling fires only when somebody presses
+// "generar" — so between one press and the next, the payment path is what puts
+// today's rung on the charge, before the money is split. That write is also what
+// freezes it.
+func TestPayingCollectsTheTierInForceOnTheDayTheMoneyArrives(t *testing.T) {
+	f := ladderFixture(t)
+	runOn(t, f, "2026-09-15")
+
+	// November: the inscription's second rung. No run has fired since.
+	f.clock = aug(2026, time.November, 5)
+	if _, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 330000, Method: domain.MethodCash,
+		PaidAt: aug(2026, time.November, 5),
+	}); err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+
+	list, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	if err != nil {
+		t.Fatalf("ListCharges: %v", err)
+	}
+	for _, c := range list {
+		if c.Charge.Description() != "Inscripción" {
+			continue
+		}
+		if amount := c.Charge.Amount().Int64(); amount != 330000 {
+			t.Fatalf("Inscripción = %d, want November's 330000", amount)
+		}
+		if c.PaidCents != 330000 {
+			t.Errorf("collected %d against it, want the whole 330000", c.PaidCents)
+		}
+		return
+	}
+	t.Fatal("no inscription charge found")
+}
+
+// Etapa 4. The statement the FAMILY reads must say what is owed TODAY.
+//
+// Until now GetAccount was the plain arithmetic of charge minus paid — the
+// whole year still owing — while the counter quoted the derived figure with the
+// accrued surcharge and the early-payment reward. Two numbers that disagreed by
+// design: the office said one thing and the app in the parent's hand said
+// another.
+func TestTheStatementSaysWhatIsOwedToday(t *testing.T) {
+	f := billingFixture(t)
+	runOn(t, f, "2026-09-15")
+	f.clock = aug(2026, time.November, 20)
+
+	got, err := f.svc.GetAccount(context.Background(), testStudent)
+	if err != nil {
+		t.Fatalf("GetAccount: %v", err)
+	}
+
+	// The year still owing is unchanged: ten months, the inscription, and the
+	// surcharges the run wrote down.
+	if got.TotalBalanceCents <= 0 {
+		t.Fatalf("total balance = %d, want the year still owed", got.TotalBalanceCents)
+	}
+	// What is being asked for today is a DIFFERENT, smaller number: only the
+	// months that have come due.
+	if got.DueTodayCents <= 0 {
+		t.Fatal("due today = 0 — the statement says the family owes nothing")
+	}
+	if got.DueTodayCents >= got.TotalBalanceCents {
+		t.Errorf("due today (%d) is not less than the year (%d) — the two numbers are the same figure",
+			got.DueTodayCents, got.TotalBalanceCents)
+	}
+	if got.AsOf != "2026-11-20" {
+		t.Errorf("as of %q, want 2026-11-20 — a screen that cannot say which day it quotes cannot be trusted", got.AsOf)
+	}
+}
+
+// The parts have to add up, or a family asking "why that number?" is answered by
+// a phone call instead of by the statement.
+func TestTheStatementExplainsTheNumberItQuotes(t *testing.T) {
+	f := billingFixture(t)
+	runOn(t, f, "2026-09-15")
+	f.clock = aug(2026, time.November, 20)
+
+	account, err := f.svc.GetAccount(context.Background(), testStudent)
+	if err != nil {
+		t.Fatalf("GetAccount: %v", err)
+	}
+	expected, err := f.svc.ExpectedToday(context.Background(), testStudent, f.clock)
+	if err != nil {
+		t.Fatalf("ExpectedToday: %v", err)
+	}
+
+	// One arithmetic, not two: the statement quotes exactly what the counter
+	// would collect on that day.
+	if account.DueTodayCents != expected.AmountCents {
+		t.Errorf("statement says %d, counter says %d", account.DueTodayCents, expected.AmountCents)
+	}
+	if account.SurchargeCents != expected.SurchargeCents {
+		t.Errorf("surcharge %d vs %d", account.SurchargeCents, expected.SurchargeCents)
+	}
+	if account.EarlyDiscountCents != expected.DiscountCents {
+		t.Errorf("early discount %d vs %d", account.EarlyDiscountCents, expected.DiscountCents)
+	}
+}
+
+// B1. The counter must quote the ladder, not the amount last written down.
+//
+// There is no nightly run: RunBilling fires only when somebody presses
+// "generar". So on 5 November the stored inscription still says September's
+// price, and a read path that trusts it quotes $2,200 while the payment path —
+// which DOES apply the ladder — takes the money at $3,300 inside the same
+// transaction. The family walks out with a receipt for one number owing
+// another, and the freeze rule has just fixed the price at the higher rung.
+//
+// Asserted as a DELTA between two schools identical in every way except WHEN
+// the second rung starts. Everything else — tuition months, surcharges, the
+// flat lines — cancels out, so what is left is the rung itself and nothing else
+// can make this pass by accident.
+func TestWhatIsQuotedIsWhatTheLadderSaysToday(t *testing.T) {
+	const when = "2026-11-05"
+
+	quote := func(t *testing.T, secondRungFrom time.Time) int64 {
+		t.Helper()
+		f := ladderFixtureFrom(t, secondRungFrom)
+		runOn(t, f, "2026-09-15")
+		day := aug(2026, time.November, 5)
+		f.clock = day
+		got, err := f.svc.ExpectedToday(context.Background(), testStudent, day)
+		if err != nil {
+			t.Fatalf("ExpectedToday: %v", err)
+		}
+		return got.AmountCents
+	}
+
+	// One school's second rung started on 1 November; the other's starts in
+	// December and has not arrived on the 5th.
+	arrived := quote(t, aug(2026, time.November, 1))
+	notYet := quote(t, aug(2026, time.December, 1))
+
+	if got := arrived - notYet; got != 110000 {
+		t.Fatalf("the quote moved by %d on %s, want the rung's 110000 — a quote that does not "+
+			"move is reading the stored amount, and the counter will collect more than it showed",
+			got, when)
+	}
+}
+
+// The same rule the ledger uses: a negotiated price is not re-quoted either.
+// Otherwise the screen would ask a scholarship family for the list price, and
+// the money taken would not match the money shown.
+func TestTheQuoteDoesNotRePriceWhatSomebodyNegotiated(t *testing.T) {
+	quote := func(t *testing.T, secondRungFrom time.Time) int64 {
+		t.Helper()
+		f := ladderFixtureFrom(t, secondRungFrom)
+		runOn(t, f, "2026-09-15")
+
+		list, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+		if err != nil {
+			t.Fatalf("ListCharges: %v", err)
+		}
+		for _, c := range list {
+			if c.Charge.Description() != "Inscripción" {
+				continue
+			}
+			// The whole inscription forgiven: a full scholarship.
+			if _, err := f.svc.ApplyDiscount(context.Background(), c.Charge.ID(), 220000, "beca completa"); err != nil {
+				t.Fatalf("ApplyDiscount: %v", err)
+			}
+		}
+		day := aug(2026, time.November, 5)
+		f.clock = day
+		got, err := f.svc.ExpectedToday(context.Background(), testStudent, day)
+		if err != nil {
+			t.Fatalf("ExpectedToday: %v", err)
+		}
+		return got.AmountCents
+	}
+
+	if got := quote(t, aug(2026, time.November, 1)) - quote(t, aug(2026, time.December, 1)); got != 0 {
+		t.Errorf("the quote moved by %d on a negotiated inscription, want 0", got)
+	}
+}
+
+// SEC-1. A back-dated payment must not walk the price DOWN.
+//
+// paidAt comes from the client and is only bounded in the future. Before this
+// guard it reached the ladder: a $1 deposit dated in December priced March's
+// inscription at the earliest rung, that peso froze it, and the $1,100
+// difference left no discount row, no reason and no event. Repeatable pupil by
+// pupil, and quieter than doing it by hand — which is what makes it the path an
+// insider picks.
+func TestABackDatedPaymentCannotLowerTheInscription(t *testing.T) {
+	f := ladderFixture(t)
+	runOn(t, f, "2026-09-15")
+	// November: the inscription is at the second rung.
+	f.clock = aug(2026, time.November, 20)
+	runOn(t, f, "2026-11-20")
+	if got := issuedTo(t, f, testStudent)["Inscripción"]; got != 330000 {
+		t.Fatalf("setup: Inscripción = %d, want November's 330000", got)
+	}
+
+	// A peso, dated back before the second rung ever started.
+	if _, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 100, Method: domain.MethodCash,
+		PaidAt: aug(2026, time.September, 1),
+	}); err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+
+	if got := issuedTo(t, f, testStudent)["Inscripción"]; got != 330000 {
+		t.Errorf("Inscripción = %d after a back-dated peso, want it held at 330000", got)
+	}
+}
+
+// SEC-2. The ratchet has to hold ACROSS saves, not only inside one list.
+//
+// validate() refuses a step cheaper than its predecessor within one concept.
+// Nothing compared the new plan against what was already issued, so editing the
+// table downward walked every unpaid inscription down with it — below what the
+// families had already been quoted, and with nothing recording it.
+func TestEditingTheTableDownwardDoesNotWalkIssuedChargesDown(t *testing.T) {
+	f := ladderFixture(t)
+	runOn(t, f, "2026-09-15")
+	if got := issuedTo(t, f, testStudent)["Inscripción"]; got != 220000 {
+		t.Fatalf("setup: Inscripción = %d, want 220000", got)
+	}
+
+	// The school re-prices the level cheaper — a correction, or a typo.
+	if _, err := f.svc.UpsertTuitionPlan(context.Background(), usecase.TuitionPlanInput{
+		CycleID: testCycle, LevelID: testLevel,
+		MonthlyCents: 320000, Months: 10, FirstBilledMonth: 9, DueDay: 10,
+		LateFeeCents: 15000, Active: true,
+		EnrollmentConcepts: []domain.EnrollmentConcept{
+			{Name: "Inscripción", Tiers: []domain.PriceTier{
+				{EffectiveFrom: aug(2026, time.August, 1), AmountCents: 22000},
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("UpsertTuitionPlan: %v", err)
+	}
+
+	got := runOn(t, f, "2026-09-20")
+
+	if got.EnrollmentRepriced != 0 {
+		t.Errorf("repriced %d charges downward, want 0", got.EnrollmentRepriced)
+	}
+	if amount := issuedTo(t, f, testStudent)["Inscripción"]; amount != 220000 {
+		t.Errorf("Inscripción = %d, want it held at the 220000 already quoted", amount)
+	}
+}
+
+// I1. D3 was only applied to the tuition. The inscription kept the cycle's first
+// due day, so a pupil who joined on 20 March was handed one due 10 September —
+// six months overdue the day it was issued, and accrueLateFees does not spare
+// inscriptions. Six surcharges on the first run, for months they were not a
+// pupil. It is the same money the tuition rule already refuses to charge.
+func TestTheInscriptionOfAMidYearJoinerIsNotBornOverdue(t *testing.T) {
+	f := billingFixture(t)
+	joined := aug(2027, time.March, 20)
+	f.enrollments.byCycle[testCycle] = []ports.EnrollmentRef{{
+		ID: "enr-late", StudentID: "stu-late", GroupID: testGroup, CycleID: testCycle,
+		Status: "active", EnrolledAt: joined,
+	}}
+
+	got := runOn(t, f, "2027-03-25")
+
+	list, err := f.svc.ListCharges(context.Background(), "stu-late", testCycle)
+	if err != nil {
+		t.Fatalf("ListCharges: %v", err)
+	}
+	for _, c := range list {
+		if c.Charge.Description() != "Inscripción" {
+			continue
+		}
+		if c.Charge.DueDate().Before(joined) {
+			t.Errorf("the inscription fell due %s, before the pupil joined on %s",
+				c.Charge.DueDate().Format("2006-01-02"), joined.Format("2006-01-02"))
+		}
+	}
+	if got.LateFeesCreated > 0 {
+		t.Errorf("%d surcharges on a pupil who arrived five days ago", got.LateFeesCreated)
+	}
+}

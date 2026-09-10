@@ -1,6 +1,6 @@
 module github.com/garcia-lorca/gen/go
 
-go 1.24
+go 1.25.0
 
 require (
 	connectrpc.com/connect v1.20.0

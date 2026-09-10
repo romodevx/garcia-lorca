@@ -23,6 +23,21 @@ service IamService {
   // refresh token. iam is the only issuer of both.
   rpc Login(LoginRequest) returns (LoginResponse);
 
+  // LoginWithIDToken exchanges an ID token from the external identity provider
+  // for the SAME session pair Login issues. The client authenticates against
+  // Identity Platform, hands us the resulting token ONCE, and iam mints its own
+  // access and refresh from it.
+  //
+  // The exchange lives here rather than at the edge so the session stays ours:
+  // the gateway keeps setting HttpOnly cookies, mobile keeps its Bearer flow,
+  // and our TTLs and revocation rules are unchanged. What moves to the provider
+  // is password storage, recovery and MFA — never the session.
+  //
+  // Verifying at the provider is NOT authorization: it establishes an email,
+  // and the user row behind it carries the roles. An unknown address gets the
+  // same generic refusal as a bad token.
+  rpc LoginWithIDToken(LoginWithIDTokenRequest) returns (LoginWithIDTokenResponse);
+
   // RefreshToken exchanges a valid refresh token for a fresh access token (and a
   // rotated refresh token). Lets sessions outlive the short access TTL without
   // re-entering credentials.
@@ -55,6 +70,42 @@ service IamService {
   // is created with must_change_password=true, so the first allowed action is the
   // forced ChangePassword rotation. Optionally assigns roles at creation.
   rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+
+  // InviteUser provisions a new principal WITHOUT anybody inventing a password
+  // for them: the account is created at the identity provider with no password,
+  // and the provider emails a link its owner uses to choose the first one.
+  //
+  // Prefer this over CreateUser. Using the link is what proves the person
+  // controls that mailbox, so a mistyped address fails loudly — the mail never
+  // arrives and the account is never usable — instead of becoming a working
+  // account somebody else could later claim. It also means no administrator
+  // ever knows another person's password.
+  //
+  // An address that already has an account is a CONFLICT, not a resend: the
+  // director is re-adding somebody who is already there and should be told.
+  // Use ResendInvitation for the person who never got their mail.
+  rpc InviteUser(InviteUserRequest) returns (InviteUserResponse);
+
+  // ResendInvitation mails the account's owner a fresh link to set a password.
+  //
+  // It is BOTH halves of one need: the person whose invitation never arrived,
+  // and the person who forgot their password. Same link either way — for an
+  // account with no password it chooses the first, for one that has a password
+  // it replaces it. This is the administrator password reset iam never had.
+  //
+  // Keyed by user id, not by email, so it can only ever target somebody who is
+  // already a user here — it cannot be pointed at an arbitrary address.
+  rpc ResendInvitation(ResendInvitationRequest) returns (ResendInvitationResponse);
+
+  // AcceptInvitation redeems an invitation token and sets the password its
+  // owner just chose. UNAUTHENTICATED — the token is the credential, which is
+  // why it is single-use, short-lived and 256 bits wide.
+  rpc AcceptInvitation(AcceptInvitationRequest) returns (AcceptInvitationResponse);
+
+  // RequestPasswordReset is the endpoint behind "I forgot my password", which
+  // until now was a dead anchor on the login screen. UNAUTHENTICATED, and
+  // deliberately uninformative: same answer whether or not the address exists.
+  rpc RequestPasswordReset(RequestPasswordResetRequest) returns (RequestPasswordResetResponse);
 
   // GetUser fetches a user by id, including its assigned role ids.
   rpc GetUser(GetUserRequest) returns (GetUserResponse);
@@ -99,6 +150,12 @@ enum UserStatus {
   USER_STATUS_UNSPECIFIED = 0;
   USER_STATUS_ACTIVE = 1;
   USER_STATUS_SUSPENDED = 2;
+  // The account exists and holds roles, and nobody has opened it yet: its owner
+  // has not proved they read mail at that address. It cannot log in. This is
+  // the difference between "created" and "usable", which the system had no way
+  // to say before — so a mistyped address became a working account nobody could
+  // reach, and the resend button had no state to key on.
+  USER_STATUS_INVITED = 3;
 }
 
 // User is the IAM principal. `email` is unique per tenant. `tenant_id` is
@@ -166,6 +223,27 @@ message LoginRequest {
   // Which surface is logging in. It comes from the ROUTE the request arrived
   // on, never from anything a user can type.
   SessionKind session_kind = 3;
+}
+
+message LoginWithIDTokenRequest {
+  // The ID token minted by the identity provider for this user.
+  string id_token = 1;
+  // Which surface is logging in. As with Login, it comes from the ROUTE the
+  // request arrived on, never from anything a caller can set — otherwise a
+  // staff token could ask for the longer-lived family session.
+  SessionKind session_kind = 2;
+}
+
+// Same shape as LoginResponse, because both paths end in the same place: our
+// own access and refresh pair. It is a separate type because buf's lint rule
+// forbids sharing a response across RPCs — the two must be kept in step by
+// hand, and a field added to one belongs in the other.
+message LoginWithIDTokenResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  int64 expires_in = 3; // access token TTL in seconds
+  User user = 4;
+  bool must_change_password = 5;
 }
 
 message LoginResponse {
@@ -247,6 +325,80 @@ message CreateUserRequest {
 message CreateUserResponse {
   User user = 1;
 }
+
+// InviteUserRequest provisions a principal with no password. There is no
+// password field, and that is the point: the account's owner chooses the first
+// one through the emailed link. role_ids optionally assigns roles at creation.
+message InviteUserRequest {
+  string email = 1;
+  string display_name = 2;
+  repeated string role_ids = 3;
+}
+
+// InviteUserResponse returns the created user plus what happened to the
+// invitation. must_change_password is false on it — there is no temporary
+// password to rotate.
+message InviteUserResponse {
+  User user = 1;
+  Invitation invitation = 2;
+}
+
+// Invitation is what the caller learns after a link is issued.
+//
+// `sent` is the field that did not exist before, and its absence was the bug:
+// the identity provider answered 200 to sends it silently dropped, so
+// "invitation sent" was a sentence nobody could check. Now the caller is told
+// whether the message actually left, and why not when it did not.
+message Invitation {
+  // The activation link. Returned so an administrator can hand it over when the
+  // mail did not go out — which, with no relay configured, is every time. It
+  // grants no power the administrator does not already hold over that account.
+  string url = 1;
+  // When the link stops working.
+  google.protobuf.Timestamp expires_at = 2;
+  // Whether the message actually left.
+  bool sent = 3;
+  // Why it did not, in the mail server's own words. Empty when sent.
+  string send_error = 4;
+  // WHICH road the message took, because the two are not equivalent and whoever
+  // reads the screen has to know which one they got.
+  //
+  //   "smtp"     our own message: this link, twenty-four hours, our page.
+  //   "provider" the identity provider's OWN link instead: one hour, its page,
+  //              and a shared sender that Gmail tends to file as spam.
+  //   ""         nothing went out; the link is there to hand over.
+  string via = 5;
+}
+
+// ResendInvitationRequest names the existing user to mail a fresh link to.
+message ResendInvitationRequest {
+  string user_id = 1;
+}
+
+message ResendInvitationResponse {
+  Invitation invitation = 1;
+}
+
+// AcceptInvitationRequest redeems a token and sets the password its owner
+// chose. Unauthenticated: the token IS the authentication.
+message AcceptInvitationRequest {
+  string token = 1;
+  string password = 2;
+}
+
+message AcceptInvitationResponse {}
+
+// RequestPasswordResetRequest asks for a reset link.
+//
+// The response is empty and always successful, whatever happens. Reporting
+// whether the address has an account would turn this unauthenticated endpoint
+// into a way to read the school's staff and guardian directory one request at
+// a time.
+message RequestPasswordResetRequest {
+  string email = 1;
+}
+
+message RequestPasswordResetResponse {}
 
 // GetUserRequest fetches a user by id.
 message GetUserRequest {

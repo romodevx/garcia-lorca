@@ -1,0 +1,336 @@
+# PLAN M18 — Inscripción por conceptos y tramos de precio
+
+Rama: `feature/inscripcion-por-tramos` (de `dev`) · Origen: petición del dueño con el
+folleto **Costos ciclo 2026/2027** en mano.
+Alcance UI: **sí** (configuración + estado de cuenta web + app del padre). Alcance DX: no.
+
+Módulo: **M05 Finance / M15 Colegiaturas** (extensión). **No nace un flag nuevo**: viaja
+dentro de `module_finance`, que ya está registrado.
+
+---
+
+## 0. La petición, tal como llegó
+
+El folleto del colegio dice, para Preescolar:
+
+| Concepto | Ene/Feb | Marzo | Abril a Sept |
+|---|---:|---:|---:|
+| Inscripción | $2,200 | $3,300 | $4,400 |
+| Gastos adm y seguro | $4,700 | $4,700 | $4,700 |
+| Cuota Asociación Padres de Familia | $850 | $850 | $850 |
+| **Total a pagar** | **$7,750** | **$8,850** | **$9,950** |
+
+De ahí salen cinco exigencias:
+
+1. La inscripción no es un monto: es **varios conceptos**, cada uno con su nombre.
+2. Cada concepto tiene **montos distintos según la fecha** en que se cubre.
+3. **Alumno nuevo a mitad del ciclo en curso:** al registrarlo se le cargan esos
+   conceptos **más la colegiatura**, como primer pago.
+4. **Alumno ya inscrito, ciclo siguiente:** al crear 2027-2028 y llegar enero se le
+   carga inscripción + colegiatura de enero. **Si no paga, el mes siguiente debe la
+   colegiatura corriente más la inscripción al precio del mes que corresponda.**
+5. El padre debe ver **en la app, al día de consulta, el saldo real** — ya con recargos y
+   pronto pago, que es como funciona hoy en ventanilla.
+
+---
+
+## 1. Decisiones del dueño (tomadas en el checkpoint, 9-sep-2026)
+
+| # | Decisión | Elegida |
+|---|---|---|
+| D1 | La inscripción impaga que sube de tramo | **Re-preciar el renglón abierto.** Un solo renglón que dice "Inscripción $3,300" y cambia solo. (Descartado: renglón de ajuste aparte.) |
+| D2 | Qué fecha fija el tramo | **La fecha de consulta/pago.** Mientras no esté pagada vale lo que valga hoy; al pagarse queda congelada. |
+| D3 | Alumno nuevo a mitad de ciclo | **Sólo colegiaturas desde su mes de ingreso.** |
+| D4 | Captura de los tramos | **"Vigente desde" + monto.** El tramo aplicable es el último cuya fecha ya pasó. |
+
+---
+
+## 2. Lo que ya existe y no hay que volver a construir
+
+| Pieza | Dónde | Sirve para |
+|---|---|---|
+| `TuitionPlan` por (ciclo, nivel) | `services/finance/internal/domain/tuition.go` | Colegiatura, calendario de meses, día de vencimiento, política de cobranza |
+| `CollectionPolicy` | `domain/collection.go` | Recargo diario y pronto pago, **derivados, nunca almacenados** |
+| `ExpectedToday` | `usecase/deposit.go:240` | Lo que se debe **al día de consulta**, con recargo devengado y pronto pago |
+| `depositPlanner.plan` | `usecase/deposit.go:389` | Ya sabe **modificar un cargo y persistirlo** cuando entra dinero (`discounted`) |
+| `RescheduleUnpaid` | `ports` + repo | Precedente de **corregir cargos impagos** desde la corrida |
+| `fees jsonb` en `tuition_plans` | `migrations/finance/0013` | Precedente de lista pequeña, propia del plan, leída y escrita entera |
+| `CollectDrawer` | `apps/web/.../CollectDrawer.tsx` | Registrar pago ya totaliza por alumno con `ExpectedToday` |
+
+---
+
+## 3. Los huecos reales (verificados en código)
+
+**H1 · La inscripción es un solo número.** `TuitionPlan.enrollmentCents` es un `int64`.
+No hay lista de conceptos ni tramos.
+`Fee` **no sirve** para esto: reparte *un* monto entre varios meses del año; aquí se
+necesita *un* monto que **cambia según cuándo se paga**. Son cosas distintas y meterlo en
+`Fee` haría ilegibles las dos.
+
+**H2 · El cargo es una foto inmutable.** `charge.go` documenta que `amount` es un
+snapshot y que editar el catálogo nunca reescribe un cargo emitido. D1 pide lo contrario
+para este caso. Se resuelve sin romper el invariante — ver §4.2.
+
+**H3 · La corrida factura el año completo a todo inscrito activo.**
+`RunBilling` (`billing.go:224`) recorre `plan.Installments(cycle.StartsOn)` para cada
+enrolamiento activo, sin mirar cuándo entró el alumno. Un alta en marzo hoy quedaría
+debiendo septiembre. **Es un defecto preexistente que D3 destapa.**
+
+**H4 · `EnrollmentRef` no trae la fecha de alta.** `ports.EnrollmentRef` tiene
+`ID/StudentID/GroupID/CycleID/Status`. El campo `enrolled_at` **ya existe en el proto de
+students** (`students.proto:233`), así que es mapeo, no contrato nuevo.
+
+**H5 · El estado de cuenta del padre NO es en tiempo real.**
+`GetAccount` (`finance.go:498`) es `Σ max(0, efectivo − pagado)`. No pasa por la lógica
+de `ExpectedToday`. El mostrador ve el número correcto y la app del papá no. Es
+exactamente lo que el dueño pidió y hoy no se cumple.
+
+---
+
+## 4. Diseño
+
+### 4.1 Dominio: `EnrollmentConcept` + `PriceTier`
+
+```go
+// PriceTier is what a concept costs from a date onward.
+type PriceTier struct {
+    EffectiveFrom time.Time
+    AmountCents   int64
+}
+
+// EnrollmentConcept is one line of the inscription: a name the family reads and
+// what it costs depending on when it is settled.
+type EnrollmentConcept struct {
+    Name  string
+    Tiers []PriceTier // ordered by EffectiveFrom, at least one
+}
+
+// AmountOn is what the concept costs as of a date: the last tier whose
+// EffectiveFrom has arrived. Before the first tier, the first tier's amount.
+func (c EnrollmentConcept) AmountOn(t time.Time) int64
+```
+
+`TuitionPlanSpec` gana `EnrollmentConcepts []EnrollmentConcept`.
+**Un plan sin conceptos sigue significando lo que significaba** (`enrollmentCents`, un
+renglón "Inscripción"), igual que se hizo con `EnrollmentDueOn` en 0013. Nada de lo ya
+configurado se rompe.
+
+Validación (misma severidad que `Fee.validate`): nombre requerido y único dentro del
+plan; al menos un tramo; tramos **estrictamente crecientes** por fecha; montos > 0; cotas
+`maxEnrollmentConcepts = 12`, `maxTiersPerConcept = 12`.
+
+### 4.2 Re-precio sin romper el invariante (D1 + D2)
+
+La forma segura es la que **este código ya usa para el recargo**:
+
+> *"Derived, never stored. […] The ledger materialises it as one real charge at the
+> moment money is applied to it, so rows exist where money moved."* — `collection.go`
+
+Se aplica igual a la inscripción:
+
+- **Se deriva al leer.** `GetAccount`, `ExpectedToday` y `ListCharges` piden el monto del
+  tramo vigente a la fecha de consulta mientras el cargo tenga `paid_cents == 0`.
+- **Se congela al cobrar.** `depositPlanner.plan` re-precia el cargo y lo persiste antes
+  de asignar el dinero — el mismo carril por donde ya viaja `discounted`.
+- **Se materializa en la corrida.** `RunBilling` escribe el tramo vigente en los cargos de
+  inscripción impagos (`RepriceUnpaid`, gemelo de `RescheduleUnpaid`), para que la base
+  concuerde con lo que la app muestra y ningún reporte mienta.
+
+Una sola función de dominio (`AmountOn`) sirve a los tres caminos. No hay dos aritméticas.
+
+**Regla de congelación: el primer peso congela.** Un abono parcial en enero fija el
+concepto en $2,200 aunque termine de pagarse en abril. Es la lectura generosa para la
+familia y la única que deja los pagos ya aplicados cuadrando. **Esta regla es
+consecuencia de D1 y hay que confirmarla en la revisión del ADR** — es el único borde
+donde "re-preciar el renglón" y "los pagos ya hechos no se reescriben" se tocan.
+
+### 4.3 Identidad del cargo
+
+`external_ref` pasa a ser por concepto:
+`enrollment:<cycle>:<student>:<slug-del-concepto>`.
+El `enrollment:<cycle>:<student>` de hoy se conserva para los planes sin conceptos. La
+unicidad por tenant (ADR 0008) es lo que mantiene la corrida idempotente, y sigue intacta.
+
+### 4.4 Alta a media marcha (D3)
+
+`TuitionPlan.InstallmentsFrom(cycleStart, joinedOn)` devuelve sólo las mensualidades cuyo
+mes es igual o posterior al de ingreso. `joinedOn` anterior al ciclo ⇒ año completo, que
+es el comportamiento de hoy y el de todos los alumnos que ya están.
+
+Los conceptos de inscripción del alumno nuevo se cotizan a **su fecha de alta**, y esa
+fecha es también la que arranca la regla de re-precio si no paga.
+
+---
+
+## 5. Ejecución
+
+Orden fijo del repo: contrato → datos → backend (TDD) → frontend → QA → gates → docs.
+**TDD estricto: ninguna línea de producción sin un test que falle primero.**
+
+### Etapa 0 — Contrato y decisión (0.5 d)
+
+| # | Tarea | Entregable |
+|---|---|---|
+| T1 | **ADR 0011 — Inscripción por tramos: precio derivado hasta el primer peso** | Documenta D1–D4, la regla de congelación, y por qué no choca con ADR 0008 ni con el invariante de `charge.go` |
+| T2 | Proto: `PriceTier`, `EnrollmentConcept`; campos en `TuitionPlan` y `UpsertTuitionPlanRequest`; `GetAccountResponse` gana saldo al día, recargo devengado y pronto pago | `buf lint` + `buf breaking` en verde (todo es campo nuevo ⇒ no rompe) |
+
+### Etapa 1 — Dominio, TDD puro sin I/O (1.5 d)
+
+| # | Tarea |
+|---|---|
+| T3 | `domain/enrollment_concept.go` + tabla de casos: tramos ordenados, fecha anterior al primer tramo, fecha exacta de corte, nombre duplicado, tramo sin monto, cotas |
+| T4 | `TuitionPlanSpec.EnrollmentConcepts` + validación + getter; test de que un plan **sin** conceptos sigue cobrando `enrollmentCents` |
+| T5 | `TuitionPlan.EnrollmentChargesOn(asOf)` → los renglones con su monto vigente. Caso del folleto como test: Preescolar al 15-ene = 7,750; al 3-mar = 8,850; al 20-abr = 9,950 |
+| T6 | `TuitionPlan.InstallmentsFrom(cycleStart, joinedOn)`: alta en septiembre = año completo; alta en marzo = marzo..junio; alta antes del ciclo = año completo |
+
+### Etapa 2 — Persistencia (1 d)
+
+| # | Tarea |
+|---|---|
+| T7 | Migración `0015_enrollment_concepts.sql`: `enrollment_concepts jsonb NOT NULL DEFAULT '[]'` + check de array, **mismo criterio que `fees` en 0013** (lista pequeña, propia del plan, leída y escrita entera). RLS heredada de `tuition_plans` |
+| T8 | `models.go` + `mapper.go` + test de integración (testcontainers): ida y vuelta con tres conceptos y tres tramos, y un plan viejo que sigue leyéndose |
+| T9 | `RepriceUnpaid` en `ports` + repo: escribe el monto vigente **sólo** en cargos de inscripción con `paid_cents = 0`. Test de aislamiento RLS incluido |
+
+### Etapa 3 — Corrida y cobro (2.5 d)
+
+| # | Tarea |
+|---|---|
+| T10 | `EnrollmentRef.EnrolledAt` + mapeo en `adapters/studentsclient` (el campo ya viaja en el proto de students) |
+| T11 | `RunBilling`: emite un cargo por concepto de inscripción, cotizado a `asOf`; usa `InstallmentsFrom` con la fecha de alta; llama `RepriceUnpaid`. `BillingResult` gana `EnrollmentRepriced` — una corrida que mueve 400 precios en silencio es una que nadie puede auditar |
+| T12 | `EnsureEnrollmentCharge` (consumidor de `StudentEnrolled`): mismos conceptos, cotizados a la fecha de alta, más la colegiatura del mes de ingreso — el "primer pago" del alumno nuevo |
+| T13 | `depositPlanner.plan`: re-precia y persiste el cargo de inscripción impago antes de asignar. Test de que un abono parcial **congela** el tramo |
+
+### Etapa 4 — Lectura en tiempo real (1 d)
+
+| # | Tarea |
+|---|---|
+| T14 | `GetAccount` devuelve saldo al día: monto vigente por tramo + recargo devengado − pronto pago. Reutiliza la aritmética de `ExpectedToday`, no la reimplementa |
+| T15 | `ExpectedToday` cotiza los conceptos de inscripción al `when` recibido |
+| T16 | Gateway: pasar los campos nuevos en `/finance/accounts/{id}` y en `/api/v1/family/students/{id}/account` |
+
+### Etapa 5 — Frontend (2.5 d)
+
+| # | Tarea |
+|---|---|
+| T17 | `TuitionPanel`: editor de conceptos de inscripción con tramos "vigente desde + monto"; **previsualización del total por tramo antes de guardar**, igual que ya hace `monthlyTotals` con las cuotas. Test de componente primero (Vitest/RTL) |
+| T18 | `AccountPanel` (web) muestra el saldo al día y **por qué** cambió el monto de la inscripción |
+| T19 | App del padre (Expo): estado de cuenta con el saldo al día de consulta |
+
+### Etapa 6 — QA y compuertas (1.5 d)
+
+| # | Tarea |
+|---|---|
+| T20 | E2E del folleto: configurar Preescolar 2026/2027 → alta en enero → consultar en marzo → ver $8,850 → pagar → verificar congelado |
+| T21 | E2E de alta a media marcha: alumno nuevo en marzo no debe septiembre |
+| T22 | Suites con flag ON y OFF; contract tests contra el OpenAPI; cobertura ≥ 80% en la lógica nueva |
+| T23 | Compuertas **security** y **tech-lead**; actualizar `MODULES.md`, `FLAGS.md` y la referencia de API generada |
+
+---
+
+## 5b. Estado de ejecución (10-sep-2026)
+
+| Etapa | Estado | Commits |
+|---|---|---|
+| 0 · Contrato y ADR | ✅ | `d01f2fd9`, `78a776f2` |
+| 1 · Dominio | ✅ | `86855418`, `d1e9bc91` |
+| 2 · Persistencia | ✅ | `d91d5905`, `4db6cd67` |
+| 3 · Corrida y cobro | ✅ | `0d192f79`, `69ed2f87` |
+| 4 · Lectura en tiempo real | ✅ | `eee6ebd4` (T14) + `f4a7b532` (**T15**) |
+| 5 · Frontend (web + móvil) | ✅ | `cc49ca14`, `e6819c65` |
+| 6 · QA y compuertas | ✅ | E2E en verde contra el stack (`ac81b16c`, reescrito); compuertas de security y tech-lead pasadas tras corregir |
+
+> **Corrección de método.** La etapa 4 estuvo marcada ✅ durante varios commits con
+> **T15 sin construir**: la di por cerrada porque existía su commit, no porque sus tareas
+> estuvieran hechas. El hueco costó B1 —el mostrador enseñaba un precio y cobraba otro en
+> la misma transacción— y no figuraba entre los hallazgos abiertos porque nadie lo estaba
+> buscando. **Una etapa se cierra por sus tareas, nunca por su commit.**
+
+### Compuertas (10-sep-2026)
+
+| Compuerta | Primer veredicto | Estado |
+|---|---|---|
+| Security | PASS CONDICIONADO — SEC-1 (alto), SEC-2, SEC-5 | **Corregidos** en `a4cae626` |
+| Tech-lead | **FAIL** — B1, B2 + I1–I4, M1–M5 | B1/B2/M2 en `f4a7b532`; I1/I2/I4 + SEC + M3/M4 en `a4cae626`; I3 reescrito |
+
+**El más grave fue SEC-1:** `paidAt` lo manda el cliente y sólo estaba acotado hacia el
+futuro, así que un depósito de un peso fechado antes del primer escalón bajaba la
+inscripción y la congelaba ahí, sin dejar descuento, razón ni evento. Se cierra junto con
+SEC-2 por un solo invariante: **un cargo emitido puede subir mientras no se pague, y nunca
+baja solo.**
+
+**Abierto a propósito:** R5/M5 — orden no determinista de sentencias en `RepriceUnpaid`.
+Gravedad baja y comparte forma con `RescheduleUnpaid`: se resuelve junto con él o no se
+resuelve.
+
+## 6. Estimación
+
+| Etapa | Días |
+|---|---:|
+| 0 · Contrato y decisión | 0.5 |
+| 1 · Dominio | 1.5 |
+| 2 · Persistencia | 1.0 |
+| 3 · Corrida y cobro | 2.5 |
+| 4 · Lectura en tiempo real | 1.0 |
+| 5 · Frontend | 2.5 |
+| 6 · QA y compuertas | 1.5 |
+| **Total** | **10.5 días hábiles** (≈ 2 semanas y media, un ingeniero) |
+
+Paralelizable a partir de la Etapa 2: el frontend (T17) puede arrancar contra el contrato
+congelado de T2 mientras el backend hace las Etapas 3 y 4. Con dos carriles, ≈ 7 días.
+
+Las Etapas 0–3 son secuenciales de verdad: comparten `tuition.go` y `billing.go`.
+
+---
+
+## 7. Riesgos
+
+| Riesgo | Qué pasa | Mitigación |
+|---|---|---|
+| **El re-precio y el abono parcial** | Una familia abona $1,000 en enero y paga el resto en abril. ¿Debe $1,200 o $3,400? | Regla explícita en el ADR: **el primer peso congela** ⇒ debe $1,200. Confirmar con el dueño al revisar el ADR |
+| **H3 es un defecto vivo** | Si hoy se da de alta un alumno a media marcha, ya se le está cargando el año completo | T11 lo corrige. Revisar si hay altas así en `dev` antes de desplegar |
+| **Dos aritméticas del tramo** (Go y TypeScript) | La pantalla promete un total y el servidor cobra otro | El front sólo **previsualiza**; el servidor manda. Mismo trato que `feeShares`, que ya vive duplicada a conciencia |
+| **`dev` es la demo en vivo** | Un cambio a medias en el cobro se ve en la demo diaria | Rama propia hasta que las dos compuertas pasen; `dev` sólo recibe el módulo completo |
+| **Migración sobre datos reales** | `dev` en GCP tiene planes ya configurados | El default `'[]'` deja todo plan existente cobrando exactamente lo que cobra hoy |
+| **El día del colegio es el día UTC** | El colegio está en UTC-6 y el servicio trata el día UTC como el día escolar (`resolveAsOf` trunca `now().UTC()`). A las 18:30 hora local ya es el día siguiente para el sistema: una familia cotizada el 28-feb a esa hora paga el precio de marzo | **Preexistente y transversal** — ya afecta vencimientos, recargo diario y ventana de pronto pago. Corregirlo sólo en la escalera la dejaría 6 h desfasada del recargo en el mismo estado de cuenta, que es peor que un sistema desfasado de forma consistente. Va en un solo lugar, donde `now()` se convierte en fecha, contra una zona horaria del colegio que el servicio todavía no tiene. **Carry-forward, fuera de M18** |
+
+---
+
+## 7b. Hallazgos de revisión pendientes (verificados 2026-09-09)
+
+Salieron de `/code-review max` sobre el estado de la rama tras la Etapa 2. Cada uno
+verificado en código antes de anotarlo; los tres que la revisión reportó sobre el
+`DoUpdates` y el cableado del handler **ya están corregidos** en `4db6cd67`.
+
+| # | Hallazgo | Dónde | Gravedad |
+|---|---|---|---|
+| ~~R1~~ ✅ | **La corrida cobra una inscripción de $0.** Un plan con conceptos fuerza `EnrollmentCents = 0` (ADR 0011), `RunBilling` y `EnsureEnrollmentCharge` siguen leyendo ese campo, `NewCents(0)` es legal y `CreateChargesBulk` usa `ON CONFLICT DO NOTHING` — el cero es **permanente**. Es el fallo que `billing.go` advierte ("una familia a la que no se le cobra nada es un problema que el colegio descubre en junio"), producido por la función que existe para evitarlo | `usecase/billing.go:212`, `usecase/enrollment_charge.go:83` | **Crítica** |
+| ~~R2~~ ✅ | **Nada exige que la escalera suba.** `validate()` obliga a que los tramos avancen en el tiempo y a que los montos sean > 0, pero no a que no bajen. Todo el diseño supone un trinquete de un solo sentido —ADR 0011 "la deuda sube sola", y la regla de congelación sólo es defendible así—. Un 33,000 tecleado como 3,300 camina cuatrocientas inscripciones **hacia abajo** sin dejar rastro | `domain/enrollment_concept.go` | Alta |
+| ~~R3~~ ✅ | **`RepriceUnpaid` no pasa por la guarda de descuento.** `charges` lleva `CHECK (discount_cents <= amount_cents)` (0001, línea 64) y `Charge.WithAmount` existe justo para eso, pero el UPDATE en lote no lo usa. Un solo alumno becado hace que la sentencia —que cubre el nivel entero— viole el CHECK, `withTenant` revierte, y **ninguna** de las cuatrocientas se re-precia. Con R1 resuelto, eso es la corrida nocturna cayéndose entera por una beca, con un error que no nombra el cargo | `adapters/postgres/repository.go` | Alta |
+| ~~R4~~ ✅ | **Aliasing del slice de conceptos.** `NewTuitionPlan` guarda el slice del llamador y `EnrollmentConcepts()` lo devuelve; los `Tiers` quedan compartidos dos veces. `AmountOn` depende **absolutamente** del orden y ese orden sólo se valida al construir, así que una normalización posterior en el handler devolvería el escalón equivocado sin error | `domain/tuition.go` | Media |
+| R5 | **Orden de sentencias no determinista** en `RepriceUnpaid`: recorre un mapa de Go, así que el orden de los UPDATE y de los refs dentro de cada `IN` cambia por llamada. Riesgo de interbloqueo entre corridas concurrentes | `adapters/postgres/repository.go` | Baja |
+
+| ~~R6~~ ✅ | **La beca del 100% empieza a deber dinero.** Una inscripción gratis se registra como `discount = 220000` sobre `amount = 220000`. Nunca llega un peso —es gratis—, así que la guarda de congelación nunca la toca. En marzo el re-precio sube `amount` a 330000, el descuento se queda quieto, y `Effective() = amount − discount` pasa a **$1,100**. La familia a la que se le regaló la inscripción ahora debe, y el libro mayor no dice por qué | `adapters/postgres/repository.go` | **Crítica** |
+| ~~R7~~ ✅ | **`Charge.WithAmount` no tiene camino de persistencia.** `SaveCharge` escribe sólo `discount_cents`, `status` y `updated_at` — no `amount_cents`. La T13 va a escribir `c.WithAmount(x)` seguido de `SaveCharge`: compila, no da error, tira el re-precio y devuelve la fila releída al precio VIEJO. El depósito se reparte contra un monto rancio y el recibo contradice el estado de cuenta — justo lo que la regla de congelación existe para evitar | `adapters/postgres/repository.go` | Alta |
+| ~~R8~~ ✅ | **`AmountOn` supone un orden que no verifica, en el camino que su propio comentario dice que recibe entrada sin validar.** El comentario de la guarda de longitud dice que se alcanza desde "un handler sosteniendo uno directo del payload"; con tramos `[Mar 3300, Ene 2200]` el bucle rompe en el índice 0 y devuelve $3,300 como precio de enero. Dinero equivocado, sin error y sin pánico | `domain/enrollment_concept.go` | Media |
+| ~~R9~~ ✅ | **El mapper se traga el error de `json.Marshal` y devuelve `nil`** a una columna `NOT NULL`. Mi comentario afirma que "NO degrada", y el código sí: la causa real se pierde y el operador ve una violación de not-null envuelta en "storing the tuition table". Contra `go-style.md` ("never ignore returned errors") y `code-quality.md` ("no swallowed errors"). `fromDomainPlan` debería devolver error, como ya hace `toDomainPlan` | `adapters/postgres/mapper.go` | Media |
+| ~~R10~~ ✅ | **Tres duplicaciones que introduje:** `tierDay` es idéntico a `dateLayout` en el MISMO paquete; `WithAmount` reimplementa `validateDiscount` con el mensaje de error copiado; `monthIndex` duplica la aritmética que ya está en línea dentro de `OverdueMonths` | `mapper.go`, `charge.go`, `tuition.go` | Baja |
+
+**Rechazado, con razón:** normalizar `on` a día calendario dentro de `AmountOn`.
+`time.After` compara **instantes**, así que ni la `Location` del `time.Time` ni la lectura
+monotónica cambian el resultado — normalizar no arregla el escenario que la propia revisión
+describe. El problema real es el de la fila anterior (día UTC ≠ día escolar) y es
+transversal.
+
+**Estado (10-sep-2026):** nueve de diez cerrados en las etapas 3 y en el barrido de dominio (`0d192f79`, `69ed2f87`, `5cd70e57`). Queda **R5** (orden no determinista de sentencias), de gravedad baja y que comparte forma con `RescheduleUnpaid` — se resuelve junto con él o no se resuelve.
+
+_Orden original: R6 y R7 iban ANTES que nada_ — R6 le cobra a una beca del 100% y R7 hace que la T13 pierda el re-precio en silencio. Luego R2, R4, R8 (dominio) y R9, R10. R1 y R3 se resuelven dentro de la Etapa 3.
+
+---
+
+## 8. Lo que este plan NO hace
+
+- No toca becas (M08) ni su interacción con los tramos.
+- No cambia la regla de recargo ni la de pronto pago: se reutilizan tal cual.
+- No genera un flag nuevo. Viaja dentro de `module_finance`.
+- No implementa notificación al padre cuando su inscripción sube de tramo. Vale la pena y
+  es otro trabajo (comms, M10).

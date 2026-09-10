@@ -791,6 +791,10 @@ func (f *fakeRepo) EnsureConceptOfKind(_ context.Context, id, kind, name string)
 // The fake keeps the plan it was handed. It used to return nil from the list,
 // which meant any test reading a plan back was measuring the fake rather than
 // the adapter — and the adapter is where fields have twice gone missing.
+func (f *fakeRepo) RepriceUnpaid(_ context.Context, _ []ports.ChargeReprice) (int, error) {
+	return 0, nil
+}
+
 func (f *fakeRepo) RescheduleUnpaid(_ context.Context, _ []ports.ChargeReschedule) (int, error) {
 	return 0, nil
 }

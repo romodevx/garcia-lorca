@@ -99,8 +99,12 @@ func main() {
 	// in-process (fine while the gateway runs at min-instances=1).
 	loginRL := config.ParseLoginRateLimit(os.Getenv)
 	loginLimiter := middleware.NewRateLimiter(loginRL.Burst, loginRL.RefillPerSec(), time.Now)
+	// A SEPARATE bucket for the invitation doors. Same size, different budget:
+	// see the comment at the routes for why sharing the login one would let a
+	// public endpoint lock the school out of logging in.
+	inviteLimiter := middleware.NewRateLimiter(loginRL.Burst, loginRL.RefillPerSec(), time.Now)
 
-	mux := newMux(iamHealth, authClient, studentsClient, configClient, gradesClient, financeClient, attendanceClient, commsClient, uniformsClient, flags, loginLimiter)
+	mux := newMux(iamHealth, authClient, studentsClient, configClient, gradesClient, financeClient, attendanceClient, commsClient, uniformsClient, flags, loginLimiter, inviteLimiter)
 
 	log.Info("gateway starting",
 		slog.String("addr", addr),
@@ -192,11 +196,14 @@ func main() {
 //	POST /api/v1/teachers/{id}/user → ModuleGuard(teachers) → RequireAuth →
 //	                             rotation → RequirePermission(teachers:write) →
 //	                             validate iam user (GetUser) then config SetTeacherUser
+//	POST /api/v1/auth/google   → per-IP rate limit (the SAME limiter as the
+//	                             password login) → iam LoginWithIDToken → OUR
+//	                             HttpOnly cookies (unauthenticated)
 //	/healthz, /readyz          → liveness + iam reachability
 //
 // `flags` (via middleware.NewModuleGuard) is the module-visibility boundary:
 // disabled module ⇒ 404, evaluated before auth so a hidden module is invisible.
-func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, configClient *client.ConfigClient, gradesClient *client.GradesClient, financeClient *client.FinanceClient, attendanceClient *client.AttendanceClient, commsClient *client.CommsClient, uniformsClient *client.UniformsClient, flags featureflag.Checker, loginLimiter *middleware.RateLimiter) *http.ServeMux {
+func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, configClient *client.ConfigClient, gradesClient *client.GradesClient, financeClient *client.FinanceClient, attendanceClient *client.AttendanceClient, commsClient *client.CommsClient, uniformsClient *client.UniformsClient, flags featureflag.Checker, loginLimiter, inviteLimiter *middleware.RateLimiter) *http.ServeMux {
 	mux := http.NewServeMux()
 	handler.NewHealthHandler(iamHealth).Register(mux)
 
@@ -219,7 +226,30 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// unauthenticated like their web siblings, and MobileLogin shares the SAME
 	// per-IP loginLimiter instance, so a brute-force attempt cannot dodge the
 	// budget by switching to the mobile door.
+	// The identity-provider exchange shares the SAME per-IP limiter as the
+	// password login. It is a cheaper call for us — no bcrypt — but it is still
+	// a door into a session, and a brute-force budget that a second door can
+	// dodge is not a budget.
+	// The invitation doors get their OWN limiter instance, never the login one.
+	//
+	// Sharing it would have been one line and a real hole: behind Cloud Run the
+	// limiter keys on the connection's remote address, which is the Google front
+	// end for every request (TRUST_PROXY is off until XFF is verified — see
+	// deploy/README.md), so that bucket is in practice ONE budget for the whole
+	// school. Hanging a public password-reset endpoint off it would let any
+	// client spend the budget and lock everyone out of logging in, during a
+	// school day.
+	invitationH := handler.NewInvitationHandler(authClient)
+	mux.Handle("POST /api/v1/auth/invitations/accept", inviteLimiter.Middleware(http.HandlerFunc(invitationH.Accept)))
+	mux.Handle("POST /api/v1/auth/password-reset", inviteLimiter.Middleware(http.HandlerFunc(invitationH.RequestReset)))
+
+	mux.Handle("POST /api/v1/auth/google", loginLimiter.Middleware(http.HandlerFunc(authH.GoogleLogin)))
 	mux.Handle("POST /api/v1/auth/mobile/login", loginLimiter.Middleware(http.HandlerFunc(authH.MobileLogin)))
+	// The provider door for the family app. Same limiter as every other login
+	// route: it is cheaper for us (no bcrypt) but it is still a door to a
+	// session, and a brute-force budget a second door walks around is not a
+	// budget.
+	mux.Handle("POST /api/v1/auth/mobile/google", loginLimiter.Middleware(http.HandlerFunc(authH.MobileGoogleLogin)))
 	mux.HandleFunc("POST /api/v1/auth/mobile/refresh", authH.MobileRefresh)
 	mux.Handle("GET /api/v1/me", requireAuthChanged(http.HandlerFunc(authH.Me)))
 	// change-password is the one deliberate exception: it stays reachable while
@@ -602,6 +632,12 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 		return guard.Protect("iam", requireAuthChanged(middleware.RequirePermission(perm)(http.HandlerFunc(h))))
 	}
 	mux.Handle("POST /api/v1/users", iamAdmin("users:write", adminH.CreateUser))
+	// Invite is the preferred way to add somebody: no password is invented for
+	// them. It is users:write like create, and the caller-subset guard inside the
+	// handler is what stops an admin inviting an owner-powered account to an
+	// address it controls.
+	mux.Handle("POST /api/v1/users/invite", iamAdmin("users:write", adminH.InviteUser))
+	mux.Handle("POST /api/v1/users/{id}/invite", iamAdmin("users:write", adminH.ResendInvitation))
 	mux.Handle("GET /api/v1/users", iamAdmin("users:read", adminH.ListUsers))
 	mux.Handle("GET /api/v1/users/{id}", iamAdmin("users:read", adminH.GetUser))
 	mux.Handle("POST /api/v1/users/{id}/status", iamAdmin("users:write", adminH.SetUserStatus))

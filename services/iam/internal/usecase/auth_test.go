@@ -29,10 +29,12 @@ type fakeUsers struct {
 	removed [][2]string
 
 	// admin-surface recording
-	created   []createdUser            // CreateUser calls
-	listOut   []domain.User            // ListUsers return
-	statusSet map[string]domain.Status // SetStatus calls
-	rolesSet  map[string][]string      // SetUserRoles calls
+	created      []createdUser            // CreateUser calls
+	listOut      []domain.User            // ListUsers return
+	statusSet    map[string]domain.Status // SetStatus calls
+	passwordsSet map[string]string        // UpdatePassword calls
+	rotated      map[string]bool          // TouchPasswordChangedAt calls
+	rolesSet     map[string][]string      // SetUserRoles calls
 }
 
 func (f *fakeUsers) FindAuthByEmail(_ context.Context, _ string, email domain.Email) (domain.User, string, error) {
@@ -59,7 +61,25 @@ func (f *fakeUsers) FindAuthByID(_ context.Context, userID string) (domain.User,
 	return rec.user, rec.hash, nil
 }
 
-func (f *fakeUsers) UpdatePassword(_ context.Context, _, _ string) error { return nil }
+func (f *fakeUsers) UpdatePassword(_ context.Context, userID, hash string) error {
+	// RECORD it. Returning nil and forgetting made this double unable to tell
+	// "the password was stored" from "nothing happened", which is the exact
+	// difference between an activated account and an active one with no
+	// credential at all.
+	if f.passwordsSet == nil {
+		f.passwordsSet = map[string]string{}
+	}
+	f.passwordsSet[userID] = hash
+	return nil
+}
+
+func (f *fakeUsers) TouchPasswordChangedAt(_ context.Context, userID string) error {
+	if f.rotated == nil {
+		f.rotated = map[string]bool{}
+	}
+	f.rotated[userID] = true
+	return nil
+}
 
 func (f *fakeUsers) AddRole(_ context.Context, userID, roleID string) error {
 	f.added = append(f.added, [2]string{userID, roleID})
@@ -76,6 +96,23 @@ func (f *fakeUsers) CreateUser(_ context.Context, user domain.User, passwordHash
 		return glerrors.New(glerrors.KindConflict, "email already exists")
 	}
 	f.created = append(f.created, createdUser{user: user, hash: passwordHash})
+	// Register it, the way a repository does. Recording the call without storing
+	// the row made this double lie about the most basic thing a repository
+	// promises: what you create, you can then find.
+	if f.byEmail == nil {
+		f.byEmail = map[domain.Email]struct {
+			user domain.User
+			hash string
+		}{}
+	}
+	if f.byID == nil {
+		f.byID = map[string]domain.User{}
+	}
+	f.byEmail[user.Email()] = struct {
+		user domain.User
+		hash string
+	}{user: user, hash: passwordHash}
+	f.byID[user.ID()] = user
 	return nil
 }
 
@@ -203,7 +240,7 @@ func fixtureService(t *testing.T, status domain.Status) (*usecase.AuthService, *
 	}
 	roles := &fakeRoles{byID: map[string]domain.Role{"r1": role, "r2": role}}
 	now := func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) }
-	svc := usecase.NewAuthService(users, roles, fakeHasher{}, &fakeTokens{}, &fakeTokens{}, testTenant, 15*time.Minute, now)
+	svc := usecase.NewAuthService(users, roles, fakeHasher{}, &fakeTokens{}, &fakeTokens{}, nil, nil, testTenant, 15*time.Minute, now)
 	return svc, users
 }
 
@@ -241,7 +278,7 @@ func TestAuthenticateSurfacesMustChangePassword(t *testing.T) {
 	}
 	roles := &fakeRoles{byID: map[string]domain.Role{"r1": role}}
 	now := func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) }
-	svc := usecase.NewAuthService(users, roles, fakeHasher{}, &fakeTokens{}, &fakeTokens{}, testTenant, 15*time.Minute, now)
+	svc := usecase.NewAuthService(users, roles, fakeHasher{}, &fakeTokens{}, &fakeTokens{}, nil, nil, testTenant, 15*time.Minute, now)
 
 	res, err := svc.Authenticate(context.Background(), "ana@garcialorca.mx", "secret")
 	if err != nil {
@@ -297,7 +334,7 @@ func TestAuthenticateUnknownEmailStillPerformsHashVerification(t *testing.T) {
 	}
 	hasher := &countingHasher{}
 	now := func() time.Time { return time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) }
-	svc := usecase.NewAuthService(users, &fakeRoles{}, hasher, &fakeTokens{}, &fakeTokens{}, testTenant, 15*time.Minute, now)
+	svc := usecase.NewAuthService(users, &fakeRoles{}, hasher, &fakeTokens{}, &fakeTokens{}, nil, nil, testTenant, 15*time.Minute, now)
 
 	_, err := svc.Authenticate(context.Background(), "nobody@garcialorca.mx", "secret")
 	if glerrors.KindOf(err) != glerrors.KindUnauthorized {
@@ -412,7 +449,7 @@ func refreshFixture(t *testing.T, changedAt, refreshIssuedAt time.Time) *usecase
 	roles := &fakeRoles{byID: map[string]domain.Role{"r1": role}}
 	now := func() time.Time { return changedAt.Add(time.Hour) }
 	validator := &fakeTokens{refreshIssuedAt: refreshIssuedAt}
-	return usecase.NewAuthService(users, roles, fakeHasher{}, &fakeTokens{}, validator, testTenant, 15*time.Minute, now)
+	return usecase.NewAuthService(users, roles, fakeHasher{}, &fakeTokens{}, validator, nil, nil, testTenant, 15*time.Minute, now)
 }
 
 // SECURITY: a refresh token minted BEFORE the last password change is revoked —
@@ -514,7 +551,7 @@ func TestAuthenticatePropagatesIssuerError(t *testing.T) {
 		byID: map[string]domain.User{"u1": user},
 	}
 	now := func() time.Time { return time.Unix(0, 0).UTC() }
-	svc := usecase.NewAuthService(users, &fakeRoles{}, fakeHasher{}, failingIssuer{}, &fakeTokens{}, testTenant, time.Minute, now)
+	svc := usecase.NewAuthService(users, &fakeRoles{}, fakeHasher{}, failingIssuer{}, &fakeTokens{}, nil, nil, testTenant, time.Minute, now)
 
 	_, err := svc.Authenticate(context.Background(), "ana@garcialorca.mx", "secret")
 	if glerrors.KindOf(err) != glerrors.KindInternal {

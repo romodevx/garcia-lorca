@@ -275,6 +275,25 @@ func (f *fakeRepo) CreateChargesBulk(_ context.Context, cs []domain.Charge) (int
 
 // The fake moves what the real repository moves: unpaid charges whose date
 // actually differs, named by external ref.
+func (f *fakeRepo) RepriceUnpaid(_ context.Context, items []ports.ChargeReprice) (int, error) {
+	repriced := 0
+	for _, item := range items {
+		for id, c := range f.charges {
+			if c.ExternalRef() != item.ExternalRef || c.Amount().Int64() >= item.AmountCents ||
+				c.Status() == domain.StatusCancelled || c.Discount().Int64() > 0 || f.paidFor(id) > 0 {
+				continue
+			}
+			updated, err := c.WithAmount(item.AmountCents)
+			if err != nil {
+				return 0, err
+			}
+			f.charges[id] = updated
+			repriced++
+		}
+	}
+	return repriced, nil
+}
+
 func (f *fakeRepo) RescheduleUnpaid(_ context.Context, items []ports.ChargeReschedule) (int, error) {
 	moved := 0
 	for _, item := range items {
@@ -408,6 +427,12 @@ func (f *fakeRepo) RegisterDeposit(
 	}
 
 	f.deposits = append(f.deposits, d)
+	// Re-prices first, exactly as the repository writes them: the discounts and
+	// the allocations that follow are both worked out against the new amount, and
+	// a fake that applied them later would veto a payment the real ledger accepts.
+	for _, c := range write.Repriced {
+		f.charges[c.ID()] = c
+	}
 	for _, c := range write.Discounted {
 		f.charges[c.ID()] = c
 	}

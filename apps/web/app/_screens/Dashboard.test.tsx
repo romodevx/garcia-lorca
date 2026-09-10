@@ -110,3 +110,35 @@ describe("Dashboard", () => {
     expect(onOpen).toHaveBeenCalledWith("finance");
   });
 });
+
+describe("Dashboard when the permissions could not be loaded", () => {
+  // The regression this exists for (dev, 2026-09-07): the gateway answered 403
+  // to /me, AppShell caught it as "non-fatal", and permissions stayed undefined
+  // — which rendered the LOADING SKELETON forever. The owner saw a panel that
+  // looked like it was still thinking and reported "no veo ningún módulo".
+  //
+  // A failure that renders as loading is worse than an error: it tells the
+  // person to wait for something that is never coming.
+  it("says so, instead of pretending it is still loading", () => {
+    render(<Dashboard user={USERS.admin} onOpen={() => {}} permissionsFailed now={NOW} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/permisos/i);
+    expect(screen.queryByTestId("modules-skeleton")).not.toBeInTheDocument();
+  });
+
+  it("offers a retry, so the way out is not logging out", async () => {
+    const onRetry = vi.fn();
+    const user = userEvent.setup();
+    render(<Dashboard user={USERS.admin} onOpen={() => {}} permissionsFailed onRetryPermissions={onRetry} now={NOW} />);
+
+    await user.click(screen.getByRole("button", { name: /reintentar/i }));
+    expect(onRetry).toHaveBeenCalled();
+  });
+
+  // And the ordinary loading state is untouched: undefined without a failure is
+  // still "we are asking", which is the honest reading of it.
+  it("still shows the skeleton while the answer is genuinely pending", () => {
+    render(<Dashboard user={USERS.admin} onOpen={() => {}} now={NOW} />);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});

@@ -20,9 +20,13 @@ import { ModulePlaceholder } from "./_screens/ModulePlaceholder";
 import { AnnouncementsScreen } from "./_screens/announcements/AnnouncementsScreen";
 import { PaymentsScreen } from "./_screens/payments/PaymentsScreen";
 import { useTheme } from "./theme/ThemeProvider";
+import { endSession } from "./auth/logout";
+import { loginWithProvider } from "./auth/provider";
+import { providerLoginEnabled } from "./auth/providerFlag";
 import { login as apiLogin, changePassword as apiChangePassword, logout as apiLogout, me as apiMe, refresh as apiRefresh, type MeResult } from "./auth/api";
 
 import { API_URL } from "./api-url";
+import { onSessionLost } from "./auth/authFetch";
 import { useSessionTimeout } from "./auth/useSessionTimeout";
 
 type View =
@@ -90,6 +94,27 @@ export function AppShell(): ReactElement {
   const { theme, toggle } = useTheme();
   const [view, setView] = useState<View>({ screen: "login" });
   const [principal, setPrincipal] = useState<MeResult | undefined>(undefined);
+  // Distinct from "principal is undefined": that means the answer is still
+  // coming, and the dashboard shows a skeleton for it. A FAILURE shown as a
+  // skeleton shimmers forever — which is exactly what a broken session looked
+  // like in the demo (dev, 2026-09-07) until somebody reported "no veo ningún
+  // módulo".
+  const [principalFailed, setPrincipalFailed] = useState(false);
+
+  // Loading the caller's permissions, and recording whether it worked. Shared by
+  // the login flow and the retry button so both go through the same path.
+  const loadPrincipal = async (): Promise<void> => {
+    try {
+      setPrincipal(await apiMe(API_URL));
+      setPrincipalFailed(false);
+    } catch {
+      // The session may be perfectly valid and this call still fail — the
+      // gateway refuses every route while a rotation is pending, for one. The
+      // chrome falls back to its static identity, but the dashboard must SAY it
+      // could not resolve the permissions rather than pretend to be loading.
+      setPrincipalFailed(true);
+    }
+  };
   const [authError, setAuthError] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -158,19 +183,29 @@ export function AppShell(): ReactElement {
     setPending(true);
     setAuthError(undefined);
     try {
-      const res = await apiLogin(API_URL, email, password);
+      // Which door: the provider when this build is cut over, our own password
+      // endpoint otherwise. Same form, same result shape, same HttpOnly cookies
+      // either way — the only difference is who checks the password. Flipping
+      // the flag back is a deploy, which is the reversibility this needs.
+      // The provider SDK is imported LAZILY, and only when this build actually
+      // uses it. A static import cost 468 KB of client JavaScript in every
+      // build, including the ones with the flag off — measured, not guessed.
+      let res;
+      if (providerLoginEnabled()) {
+        const { firebaseIdToken } = await import("./auth/firebase");
+        res = await loginWithProvider(API_URL, email, password, firebaseIdToken);
+      } else {
+        res = await apiLogin(API_URL, email, password);
+      }
       if (res.mustChangePassword) {
         setView({ screen: "changePassword" });
         return;
       }
       // Login only returns session metadata; fetch the principal so the chrome
-      // shows the real identity. A failure here is non-fatal — the static
-      // fallback chrome renders and the dashboard still opens.
-      try {
-        setPrincipal(await apiMe(API_URL));
-      } catch {
-        // Keep the fallback chrome; the session is still valid.
-      }
+      // shows the real identity and the dashboard knows what to show. A failure
+      // is non-fatal for the chrome but NOT invisible: loadPrincipal records it
+      // and the dashboard says so.
+      await loadPrincipal();
       setView({ screen: "dashboard" });
     } catch {
       setAuthError("Correo o contraseña incorrectos.");
@@ -205,7 +240,16 @@ export function AppShell(): ReactElement {
   };
 
   const logout = (): void => {
-    void apiLogout(API_URL).catch(() => {});
+    // BOTH halves. Our cookies are only half the session once the provider is in
+    // play: while its own session lives, a fresh ID token can be minted with no
+    // password and exchanged at /api/v1/auth/google for a complete new set of
+    // cookies. On the shared front-desk machine that means "Cerrar sesión" logs
+    // nobody out. The idle timeout below routes through here for the same
+    // reason.
+    //
+    // The SDK is imported lazily and only when it is in use — signing out of a
+    // session that was never started is not worth 468 KB.
+    void endSession(API_URL, apiLogout, providerLoginEnabled(), () => import("./auth/firebase"));
     setPrincipal(undefined);
     setView({ screen: "login" });
   };
@@ -217,6 +261,25 @@ export function AppShell(): ReactElement {
   // The server enforces it too — a staff session that has sat unused for fifteen
   // minutes is refused, and the cookie expires with it. This is what makes it
   // immediate and explained, rather than a surprise on the next click.
+  // The server can get there first. The client timer and the server's refresh
+  // window are both fifteen minutes of inactivity, so at the boundary it is a
+  // race — and when the server wins, the next click comes back 401 while the
+  // app still believes it has a session. Every panel wraps its calls in a
+  // blanket catch, so that 401 surfaced as a domain error: the owner was told
+  // "No se pudo crear el grado. Revisa que no exista ya con ese orden" for a
+  // session that had simply ended, and reasonably asked what "orden" meant
+  // (dev, 2026-09-07).
+  //
+  // A refused refresh is unambiguous, so whoever notices first — the timer or
+  // the server — the person now reads the same sentence.
+  useEffect(() => onSessionLost(() => {
+    logout();
+    setPrincipal(undefined);
+    setPrincipalFailed(false);
+    setView({ screen: "login" });
+    setAuthError("Tu sesión terminó. Vuelve a entrar.");
+  }), []);
+
   useSessionTimeout({
     onExpire: () => {
       if (principal === undefined) {
@@ -303,7 +366,15 @@ export function AppShell(): ReactElement {
     <div className="app-root" style={{ minHeight: "100vh" }}>
       <TopBar user={user} theme={theme} onToggle={toggle} onHome={home} onLogout={logout} onOpenPalette={() => setPaletteOpen(true)} />
       <CommandPaletteHost open={paletteOpen} onOpenChange={setPaletteOpen} onNavigate={navigate} permissions={principal?.permissions} />
-      {view.screen === "dashboard" && <Dashboard user={user} onOpen={open} permissions={principal?.permissions} />}
+      {view.screen === "dashboard" && (
+        <Dashboard
+          user={user}
+          onOpen={open}
+          permissions={principal?.permissions}
+          permissionsFailed={principalFailed}
+          onRetryPermissions={() => void loadPrincipal()}
+        />
+      )}
       {view.screen === "finance" &&
         (financeEnabled ? (
           <FinanceScreen onBack={home} />

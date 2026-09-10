@@ -65,12 +65,47 @@ locals {
       secret_id = google_secret_manager_secret.iam_jwt_secret.secret_id
       version   = "latest"
     }
+    # The relay password. It can send mail as the school, so it goes the same
+    # way every other credential here does — not as a plain variable, which is
+    # what its own doc in variables.tf said and the first version did anyway.
+    SMTP_PASSWORD = {
+      secret_id = google_secret_manager_secret.smtp_password.secret_id
+      version   = "latest"
+    }
   })
 
   # Gateway → internal service wiring. ENABLED_MODULES is the authoritative
   # module-visibility list the gateway enforces (default-deny); each *_BASE_URL
   # points at the internal service's Cloud Run URL. Mirrors docker-compose.yml
   # and the env the gateway reads (services/gateway/cmd/main.go).
+  # iam is the only service that talks to the identity provider, so the setting
+  # lives here and not in common_env. EMPTY unless the environment provisions
+  # Identity Platform: with no project named, iam's verifier stays nil, the
+  # provider sign-in path refuses, and the password login is untouched. Turning
+  # this on is therefore a deliberate, reversible act.
+  iam_env = merge(local.common_env, {
+    IDENTITY_PLATFORM_PROJECT = var.enable_identity_platform ? var.project_id : ""
+    # Sending invitations. Without it the sign-in path is unaffected and only
+    # inviting refuses — so an environment that provisions the provider but
+    # forgets this key degrades to "cannot add people", never to "cannot log in".
+    IDENTITY_PLATFORM_API_KEY = var.enable_identity_platform ? var.identity_platform_api_key : ""
+
+    # Where an invitation link points. iam defaults to localhost when this is
+    # unset, which in a deployed environment produces a link that looks correct
+    # and goes nowhere — the kind of failure the person receiving it cannot
+    # diagnose and the director cannot see.
+    PUBLIC_WEB_URL = var.public_web_url
+
+    # The mail relay. EMPTY IS THE EXPECTED STATE until the school hands over a
+    # mailbox: with none, invitations still work and fall back to having the
+    # identity provider send its own link, and the admin screen says so.
+    SMTP_HOST      = var.smtp_host
+    SMTP_PORT      = var.smtp_port
+    SMTP_USERNAME  = var.smtp_username
+    SMTP_FROM      = var.smtp_from
+    SMTP_FROM_NAME = var.smtp_from_name
+  })
+
   gateway_env = merge(local.common_env, {
     # The authoritative module-visibility list (default-deny). `teachers` and
     # `uniforms` were missing: teachers guards /api/v1/teachers +teaching
@@ -202,12 +237,18 @@ module "gateway" {
 module "iam" {
   source = "./modules/cloud_run"
 
-  name                  = "iam"
-  project_id            = var.project_id
-  environment           = var.env
-  region                = var.region
-  image                 = lookup(local.image, "iam", "${local.registry_path}/iam:${var.image_tag}")
-  service_account_email = google_service_account.runtime.email
+  name        = "iam"
+  project_id  = var.project_id
+  environment = var.env
+  region      = var.region
+  image       = lookup(local.image, "iam", "${local.registry_path}/iam:${var.image_tag}")
+  # iam gets its OWN service account, and it is the only service that does.
+  #
+  # It is the only one that talks to the identity provider, and the permission it
+  # needs — writing somebody's password — is the one permission you would least
+  # like nine unrelated services to inherit. They all share
+  # google_service_account.runtime; iam does not.
+  service_account_email = google_service_account.iam_runtime.email
 
   # Warm by default (prod); dev tfvars flips these to scale-to-zero.
   min_instances     = var.iam_min_instances
@@ -226,7 +267,7 @@ module "iam" {
   ingress = "INGRESS_TRAFFIC_ALL"
 
   cloudsql_instances = local.cloudsql_instances
-  env                = local.common_env
+  env                = local.iam_env
   secret_env         = local.iam_secret_env
 
   depends_on = [google_project_service.apis]

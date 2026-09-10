@@ -54,6 +54,13 @@ type EnrollmentRef struct {
 	GroupID   string
 	CycleID   string
 	Status    string
+	// EnrolledAt is the day the pupil took their place. The run needs it to know
+	// which months are theirs: billing the whole year to somebody who arrived in
+	// March charges them for months the school never taught them.
+	//
+	// Zero for every enrolment recorded before finance started reading it, which
+	// the run treats as "was already there" — the whole year, exactly as today.
+	EnrolledAt time.Time
 }
 
 // StudentReader validates student references against the students bounded
@@ -176,6 +183,11 @@ type DepositWrite struct {
 	// on them. The daily rule is derived, not billed, so a surcharge row exists
 	// only where there was movement.
 	Surcharges []domain.Charge
+	// Repriced are charges whose AMOUNT this deposit fixed: the inscription
+	// ladder priced at the day the money arrived. Written before everything
+	// else, because the discounts and the allocations are both worked out
+	// against the new number — and that write is what freezes the ladder.
+	Repriced []domain.Charge
 	// Discounted are charges whose discount this deposit changed — the
 	// early-payment reward, granted only where the money actually settles the
 	// month. They are written before the allocations that assume the new amount.
@@ -276,6 +288,19 @@ type FinanceRepository interface {
 	// settled charge is history; re-dating it would rewrite when a family was
 	// due to pay something they have already paid.
 	RescheduleUnpaid(ctx context.Context, items []ChargeReschedule) (movedCount int, err error)
+	// RepriceUnpaid sets the amount of charges identified by external ref.
+	//
+	// It is what makes the school's price ladder true after the charge exists:
+	// an inscription issued in January at $2,200 is worth $3,300 in March, and
+	// goes on rising until it is settled (ADR 0011). The run writes the tier in
+	// force so the database agrees with what the family is being shown, rather
+	// than leaving the truth derived at read time and absent from every report.
+	//
+	// It moves ONLY what has taken no money and carries no discount. The first
+	// peso freezes the price — a family holding a receipt for a quoted amount
+	// must never find the statement disagreeing with it — and a discount is a
+	// price somebody decided by hand, which a price list must not overwrite.
+	RepriceUnpaid(ctx context.Context, items []ChargeReprice) (repricedCount int, err error)
 	// GetCharge loads one charge together with its collected total; a missing id
 	// yields glerrors.ErrNotFound.
 	GetCharge(ctx context.Context, id string) (ChargeWithPaid, error)
@@ -420,6 +445,12 @@ type OverdueCursor struct {
 
 // IsZero reports the start-from-the-beginning position.
 func (c OverdueCursor) IsZero() bool { return c.ID == "" && c.DueDate.IsZero() }
+
+// ChargeReprice is one charge's new amount, named by its external ref.
+type ChargeReprice struct {
+	ExternalRef string
+	AmountCents int64
+}
 
 // ChargeReschedule is one charge's new deadline, named by its external ref.
 type ChargeReschedule struct {
