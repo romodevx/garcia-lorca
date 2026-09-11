@@ -12,10 +12,12 @@ import { COLOR, type ColorKey } from "../../_design/colors";
  * second look.
  */
 
-/** Money crosses the wire as integer cents; pesos exist only here. */
-export function money(cents: number): string {
-  return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(cents / 100);
-}
+/**
+ * Money crosses the wire as integer cents; pesos exist only at the boundary.
+ * Re-exported rather than reimplemented — this file had its own Intl formatter
+ * and the dashboard a third one that rounded to whole pesos.
+ */
+export { formatCents as money } from "../../_lib/money";
 
 /** The viewport below which the panel stops being a table and becomes cards. */
 export const NARROW = 768;

@@ -7,7 +7,7 @@ import { Icon, type IconName } from "../../_design/Icon";
 import type { ColorKey } from "../../_design/colors";
 import { listCycles, type Cycle } from "../../config/api";
 import { getOverdue, listCharges, registerPayment, type Charge, type PaymentMethod } from "../../finance/api";
-import { centsToPesosInput, formatCents, pesosToCents } from "./money";
+import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 import { listStudents, type Student } from "../../students/api";
 
 import { API_URL } from "../../api-url";

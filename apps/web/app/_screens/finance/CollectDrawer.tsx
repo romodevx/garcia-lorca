@@ -16,7 +16,7 @@ import {
   type PaymentMethod,
 } from "../../finance/api";
 import { API_URL } from "../../api-url";
-import { centsToPesosInput, formatCents, pesosToCents } from "./money";
+import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 
 /**
  * What is missing, or over, against what should have been paid. Zero when the

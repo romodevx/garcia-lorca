@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { Btn } from "../../_design/Controls";
 import type { AccountStatement } from "../../finance/api";
 import type { Student } from "../../students/api";
-import { formatCents } from "./money";
+import { formatCents } from "../../_lib/money";
 import { EmptyHint, ErrorAlert, Section, SelectField } from "./parts";
 
 export interface AccountPanelProps {

@@ -8,7 +8,7 @@ import { ConceptsPanel } from "./ConceptsPanel";
 import { FinanceHeader } from "./FinanceHeader";
 import { GeneratePanel } from "./GeneratePanel";
 import { PaymentPanel } from "./PaymentPanel";
-import { formatCents } from "./money";
+import { formatCents } from "../../_lib/money";
 import { SummaryCards, TabBar, Toast, type SummaryCard } from "./parts";
 import { collectable, totalsOf } from "./totals";
 import { useFinance, type FinanceSection } from "./useFinance";

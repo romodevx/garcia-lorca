@@ -15,7 +15,7 @@ import {
   type PriceTier,
   type TuitionPlan,
 } from "../../finance/api";
-import { formatCents } from "../finance/money";
+import { formatCents } from "../../_lib/money";
 import { EmptyHint, ErrorAlert, Section, TextField } from "./parts";
 
 import { API_URL } from "../../api-url";

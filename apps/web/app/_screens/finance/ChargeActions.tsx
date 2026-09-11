@@ -4,7 +4,7 @@ import { useState, type ReactElement } from "react";
 import { useTranslations } from "next-intl";
 import { Btn } from "../../_design/Controls";
 import type { Charge } from "../../finance/api";
-import { pesosToCents } from "./money";
+import { pesosToCents } from "../../_lib/money";
 import { ErrorAlert, TextField } from "./parts";
 
 export interface ChargeActionsProps {

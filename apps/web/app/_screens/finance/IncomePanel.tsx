@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactElement } from "react";
 import { getIncome, type Income } from "../../finance/api";
 import { API_URL } from "../../api-url";
-import { formatCents } from "./money";
+import { formatCents } from "../../_lib/money";
 
 export interface IncomePanelProps {
   /** Both inclusive, "2026-10-01" … "2026-10-31". */

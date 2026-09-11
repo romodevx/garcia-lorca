@@ -94,3 +94,22 @@ describe("formatCents", () => {
     expect(formatCents(cents)).toBe(text);
   });
 });
+
+describe("un solo formateador para todo el sistema", () => {
+  it("el tablero ya no redondea a pesos enteros", () => {
+    // Dashboard.tsx tenía su propio money() con Math.round(cents / 100), así
+    // que $1,850.50 se mostraba como $1,851. Un peso de diferencia en un saldo
+    // es un reclamo en ventanilla.
+    expect(formatCents(185050)).toBe("$1,850.50");
+  });
+
+  it("los centavos sobreviven a cualquier monto", () => {
+    expect(formatCents(1)).toBe("$0.01");
+    expect(formatCents(99)).toBe("$0.99");
+  });
+
+  it("siempre son pesos mexicanos, aunque la interfaz esté en inglés", () => {
+    // El monto ES pesos: una interfaz en inglés no puede repintarlo como USD.
+    expect(formatCents(100000)).toContain("1,000.00");
+  });
+});

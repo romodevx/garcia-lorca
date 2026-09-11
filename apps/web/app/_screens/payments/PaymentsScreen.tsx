@@ -7,7 +7,7 @@ import { Icon } from "../../_design/Icon";
 import { listStudents, type Student } from "../../students/api";
 import { getExpected } from "../../finance/api";
 import { API_URL } from "../../api-url";
-import { formatCents } from "../finance/money";
+import { formatCents } from "../../_lib/money";
 import { CollectDrawer, type CollectStudent } from "../finance/CollectDrawer";
 
 const search: CSSProperties = {

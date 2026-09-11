@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactElement } from "react";
 import { useTranslations } from "next-intl";
 import { Btn } from "../../_design/Controls";
 import type { Charge, PaymentMethod, RegisterPaymentInput } from "../../finance/api";
-import { centsToPesosInput, formatCents, pesosToCents } from "./money";
+import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 import { ErrorAlert, RadioGroup, Section, SelectField, TextField } from "./parts";
 
 const DEFAULT_METHOD: PaymentMethod = "cash";

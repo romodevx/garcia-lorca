@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactElement } from "react";
 import { Btn } from "../_design/Controls";
+import { formatCents as money } from "../_lib/money";
 import { Icon, type IconName } from "../_design/Icon";
 import { COLOR, type ColorKey } from "../_design/colors";
 import { MODULES, isModuleVisible, type ModuleDef, type UserProfile } from "../_design/data";
@@ -11,7 +12,6 @@ import { listStudents } from "../students/api";
 
 import { API_URL } from "../api-url";
 
-const money = (cents: number): string => "$" + Math.round(cents / 100).toLocaleString("es-MX");
 
 function ModuleCard({ m, i, onOpen }: { m: ModuleDef; i: number; onOpen: (id: string) => void }): ReactElement {
   const [hov, setHov] = useState(false);

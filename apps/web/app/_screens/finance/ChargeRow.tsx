@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { Icon } from "../../_design/Icon";
 import type { Charge } from "../../finance/api";
 import { ChargeActions } from "./ChargeActions";
-import { formatCents } from "./money";
+import { formatCents } from "../../_lib/money";
 import { StatusPill } from "./parts";
 
 /** Grid shared by the charge table's header and its rows. */

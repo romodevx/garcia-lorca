@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { Btn } from "../../_design/Controls";
 import type { Cycle, Group } from "../../config/api";
 import type { ChargeConcept, GenerateChargesInput } from "../../finance/api";
-import { pesosToCents } from "./money";
+import { pesosToCents } from "../../_lib/money";
 import { DateField, ErrorAlert, Section, SelectField, TextField } from "./parts";
 
 export interface GeneratePanelProps {
