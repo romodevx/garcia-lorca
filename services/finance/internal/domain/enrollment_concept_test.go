@@ -361,3 +361,106 @@ func TestAPlansPricesCannotBeChangedFromOutside(t *testing.T) {
 		t.Errorf("March = %d, want 330000", got)
 	}
 }
+
+// A price is valid BETWEEN two dates, because that is how the school writes it:
+// "Abril a Sept", not "de abril en adelante". Making the director translate a
+// range into an open-ended start is making them do arithmetic the flyer already
+// did.
+func TestAPriceMayCarryTheDayItStopsApplying(t *testing.T) {
+	_, err := domain.NewTuitionPlan(domain.TuitionPlanSpec{
+		ID: "tp-1", TenantID: "t-1", CycleID: "c-1", LevelID: "lv-1",
+		MonthlyCents: 320000, Months: 10, FirstBilledMonth: 9, DueDay: 10,
+		EnrollmentConcepts: []domain.EnrollmentConcept{{
+			Name: "Inscripción",
+			Tiers: []domain.PriceTier{
+				{EffectiveFrom: day(2027, time.January, 1), EffectiveTo: day(2027, time.February, 28), AmountCents: 220000},
+				{EffectiveFrom: day(2027, time.March, 1), EffectiveTo: day(2027, time.March, 31), AmountCents: 330000},
+				{EffectiveFrom: day(2027, time.April, 1), EffectiveTo: day(2027, time.September, 30), AmountCents: 440000},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("the flyer's own ranges were refused: %v", err)
+	}
+}
+
+// What the ranges cannot say. Each of these is a slip that would price a family
+// by accident rather than by decision.
+func TestARangeTheSchoolCannotMean(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		tiers []domain.PriceTier
+	}{
+		{
+			"ends before it starts",
+			[]domain.PriceTier{
+				{EffectiveFrom: day(2027, time.March, 1), EffectiveTo: day(2027, time.January, 1), AmountCents: 220000},
+			},
+		},
+		{
+			"two ranges that overlap",
+			[]domain.PriceTier{
+				{EffectiveFrom: day(2027, time.January, 1), EffectiveTo: day(2027, time.March, 15), AmountCents: 220000},
+				{EffectiveFrom: day(2027, time.March, 1), EffectiveTo: day(2027, time.March, 31), AmountCents: 330000},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := domain.NewTuitionPlan(domain.TuitionPlanSpec{
+				ID: "tp-1", TenantID: "t-1", CycleID: "c-1", LevelID: "lv-1",
+				MonthlyCents: 320000, Months: 10, FirstBilledMonth: 9, DueDay: 10,
+				EnrollmentConcepts: []domain.EnrollmentConcept{{Name: "Inscripción", Tiers: tc.tiers}},
+			})
+			if err == nil || glerrors.KindOf(err) != glerrors.KindInvalid {
+				t.Fatalf("err = %v, want KindInvalid", err)
+			}
+		})
+	}
+}
+
+// An open range — no closing date — is still legal: a concept the school has not
+// decided to end. Every plan written before ranges existed is exactly that.
+func TestARangeWithNoEndIsStillLegal(t *testing.T) {
+	_, err := domain.NewTuitionPlan(domain.TuitionPlanSpec{
+		ID: "tp-1", TenantID: "t-1", CycleID: "c-1", LevelID: "lv-1",
+		MonthlyCents: 320000, Months: 10, FirstBilledMonth: 9, DueDay: 10,
+		EnrollmentConcepts: []domain.EnrollmentConcept{{
+			Name:  "Cuota Asociación Padres de Familia",
+			Tiers: []domain.PriceTier{{EffectiveFrom: day(2027, time.January, 1), AmountCents: 85000}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("an open range was refused: %v", err)
+	}
+}
+
+// The owner's rule for a day no range covers: the LAST amount that took effect.
+// Pasada la última fecha el concepto sigue costando lo del último rango, y en un
+// hueco cuesta lo del rango anterior — nunca cero, y nunca nada.
+func TestOutsideEveryRangeTheLastPriceStands(t *testing.T) {
+	withGap := domain.EnrollmentConcept{
+		Name: "Inscripción",
+		Tiers: []domain.PriceTier{
+			{EffectiveFrom: day(2027, time.January, 1), EffectiveTo: day(2027, time.February, 28), AmountCents: 220000},
+			// Marzo queda sin cubrir a propósito.
+			{EffectiveFrom: day(2027, time.April, 1), EffectiveTo: day(2027, time.September, 30), AmountCents: 440000},
+		},
+	}
+	for _, tc := range []struct {
+		name string
+		on   time.Time
+		want int64
+	}{
+		{"dentro del primer rango", day(2027, time.January, 15), 220000},
+		{"en el hueco de marzo", day(2027, time.March, 15), 220000},
+		{"dentro del último rango", day(2027, time.April, 20), 440000},
+		{"después del último rango", day(2027, time.October, 15), 440000},
+		{"antes de todo", day(2026, time.December, 1), 220000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := withGap.AmountOn(tc.on); got != tc.want {
+				t.Errorf("AmountOn(%s) = %d, want %d", tc.on.Format("2006-01-02"), got, tc.want)
+			}
+		})
+	}
+}

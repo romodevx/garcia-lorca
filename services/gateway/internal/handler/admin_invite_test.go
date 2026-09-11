@@ -200,9 +200,9 @@ func doResend(t *testing.T, f *resendAdmin, perms []string, id string) *httptest
 func TestResendRefusesWhenTheTargetOutranksTheCaller(t *testing.T) {
 	f := &resendAdmin{
 		inviteAdmin: &inviteAdmin{},
-		target: client.User{ID: "owner-1", Status: "invited", RoleIDs: []string{"r-owner"}},
-		roles:  []client.Role{{ID: "r-owner", Permissions: []string{"users:write", "finance:read"}}},
-		inv:    client.Invitation{URL: "https://escuela.example/activar?token=secreto"},
+		target:      client.User{ID: "owner-1", Status: "invited", RoleIDs: []string{"r-owner"}},
+		roles:       []client.Role{{ID: "r-owner", Permissions: []string{"users:write", "finance:read"}}},
+		inv:         client.Invitation{URL: "https://escuela.example/activar?token=secreto"},
 	}
 	// The caller holds users:write but NOT finance:read.
 	w := doResend(t, f, []string{"users:write"}, "owner-1")
@@ -221,9 +221,9 @@ func TestResendRefusesWhenTheTargetOutranksTheCaller(t *testing.T) {
 func TestResendAllowedWhenTheCallerHoldsEverythingTheTargetDoes(t *testing.T) {
 	f := &resendAdmin{
 		inviteAdmin: &inviteAdmin{},
-		target: client.User{ID: "u2", Status: "invited", RoleIDs: []string{"r-maestro"}},
-		roles:  []client.Role{{ID: "r-maestro", Permissions: []string{"grades:create"}}},
-		inv:    client.Invitation{URL: "https://escuela.example/activar?token=t", Sent: false},
+		target:      client.User{ID: "u2", Status: "invited", RoleIDs: []string{"r-maestro"}},
+		roles:       []client.Role{{ID: "r-maestro", Permissions: []string{"grades:create"}}},
+		inv:         client.Invitation{URL: "https://escuela.example/activar?token=t", Sent: false},
 	}
 	w := doResend(t, f, []string{"users:write", "grades:create"}, "u2")
 	if w.Code != http.StatusOK {
@@ -240,8 +240,8 @@ func TestResendAllowedWhenTheCallerHoldsEverythingTheTargetDoes(t *testing.T) {
 func TestResendWithholdsTheLinkWhenTheMessageWentOut(t *testing.T) {
 	f := &resendAdmin{
 		inviteAdmin: &inviteAdmin{},
-		target: client.User{ID: "u2", Status: "invited", RoleIDs: []string{}},
-		inv:    client.Invitation{URL: "https://escuela.example/activar?token=secreto", Sent: true, Via: "smtp"},
+		target:      client.User{ID: "u2", Status: "invited", RoleIDs: []string{}},
+		inv:         client.Invitation{URL: "https://escuela.example/activar?token=secreto", Sent: true, Via: "smtp"},
 	}
 	w := doResend(t, f, []string{"users:write"}, "u2")
 	if w.Code != http.StatusOK {

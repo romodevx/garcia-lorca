@@ -2,8 +2,8 @@ package handler
 
 import (
 	"context"
-	"time"
 	"net/http"
+	"time"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/middleware"

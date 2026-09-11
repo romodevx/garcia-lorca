@@ -525,6 +525,14 @@ message PriceTier {
   // nothing for having been asked about early.
   string effective_from = 1;
   int64 amount_cents = 2;
+  // The last day this price applies (YYYY-MM-DD), empty when the school has not
+  // decided to end it.
+  //
+  // Carried because that is how a price list is written — "Abril a Sept", not
+  // "de abril en adelante" — and because two ranges that overlap are a slip
+  // worth refusing. It does NOT bound what is charged: a day no range covers is
+  // still priced, at the last amount that took effect.
+  string effective_to = 3;
 }
 
 // Fee is money the school collects on top of the monthly tuition, spread across

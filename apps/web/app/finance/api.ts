@@ -748,9 +748,17 @@ export interface EnrollmentConcept {
   tiers: PriceTier[];
 }
 
-/** What a concept costs from a date onward (YYYY-MM-DD). */
+/**
+ * What a concept costs between two dates (YYYY-MM-DD).
+ *
+ * `effectiveTo` may be empty: a price the school has not decided to end. It does
+ * NOT bound what is charged — a day no range covers is still priced, at the last
+ * amount that took effect — but it is how a price list is written, and two
+ * ranges that overlap are a slip worth refusing.
+ */
 export interface PriceTier {
   effectiveFrom: string;
+  effectiveTo: string;
   amountCents: number;
 }
 

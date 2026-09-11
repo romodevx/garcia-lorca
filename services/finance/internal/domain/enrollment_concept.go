@@ -27,7 +27,19 @@ const (
 // out or listed twice — a ladder covers the whole axis by construction.
 type PriceTier struct {
 	EffectiveFrom time.Time
-	AmountCents   int64
+	// EffectiveTo is the last day this price applies, or the zero time when the
+	// school has not decided to end it.
+	//
+	// It is carried because that is how the price list is WRITTEN — "Abril a
+	// Sept", not "de abril en adelante" — and making a director translate a
+	// range into an open-ended start is making them redo arithmetic the flyer
+	// already did. It also lets two ranges that overlap be caught as the slip
+	// they are.
+	//
+	// It does NOT bound what is charged: see AmountOn. A day no range covers is
+	// still priced, at the last amount that took effect.
+	EffectiveTo time.Time
+	AmountCents int64
 }
 
 // EnrollmentConcept is one line of the inscription: a name the family reads and
@@ -77,7 +89,12 @@ func (c EnrollmentConcept) AmountOn(on time.Time) int64 {
 		return 0
 	}
 	// The step with the LATEST date that has arrived — found by scanning, not by
-	// stopping at the first future one. validate() checks the order, but this
+	// stopping at the first future one.
+	//
+	// EffectiveTo is deliberately NOT consulted. The owner's rule for a day no
+	// range covers is "el último monto vigente": in a gap the previous price
+	// stands, and past the final range the final price stands. Never zero, never
+	// an error — a family cannot be told the school has no price for today. validate() checks the order, but this
 	// method is reached before it (see the guard above), and a ladder written
 	// backwards would otherwise return March's price for a January date: wrong
 	// money, no error, no panic.
@@ -144,7 +161,7 @@ func (c EnrollmentConcept) validate() error {
 	if len(c.Tiers) > maxTiersPerConcept {
 		return glerrors.New(glerrors.KindInvalid, "that is more price steps than a concept can carry")
 	}
-	var previous time.Time
+	var previous, previousTo time.Time
 	var previousAmount int64
 	for _, tier := range c.Tiers {
 		if tier.EffectiveFrom.IsZero() {
@@ -172,6 +189,16 @@ func (c EnrollmentConcept) validate() error {
 			return glerrors.New(glerrors.KindInvalid,
 				"a price step cannot cost less than the one before it")
 		}
+		if !tier.EffectiveTo.IsZero() && tier.EffectiveTo.Before(tier.EffectiveFrom) {
+			return glerrors.New(glerrors.KindInvalid,
+				"una vigencia no puede terminar antes de empezar")
+		}
+		if !previousTo.IsZero() && !tier.EffectiveFrom.After(previousTo) {
+			// Two ranges over one day is two prices for one day, and nothing
+			// downstream could say which the school meant.
+			return glerrors.New(glerrors.KindInvalid,
+				"dos vigencias del mismo concepto se enciman")
+		}
 		if !previous.IsZero() && !tier.EffectiveFrom.After(previous) {
 			// Out of order, or two steps on one day. Sorting it here would be
 			// guessing which price the school meant on the day they collide, and
@@ -179,7 +206,7 @@ func (c EnrollmentConcept) validate() error {
 			return glerrors.New(glerrors.KindInvalid,
 				"the price steps must run forwards in time, one date each")
 		}
-		previous, previousAmount = tier.EffectiveFrom, tier.AmountCents
+		previous, previousTo, previousAmount = tier.EffectiveFrom, tier.EffectiveTo, tier.AmountCents
 	}
 	return nil
 }
