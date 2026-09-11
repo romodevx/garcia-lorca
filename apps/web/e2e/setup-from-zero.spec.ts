@@ -157,14 +157,16 @@ test.describe.serial("setting up a school from zero", () => {
     // Scoped to the drawer: "CURP" also names the roster's search box, and an
     // unscoped match takes whichever came first in the DOM.
     const drawer = page.getByRole("dialog", { name: "Nuevo alumno" });
-    await drawer.getByRole("textbox", { name: "CURP *" }).fill(curpFor(tag));
-    await drawer.getByRole("textbox", { name: "Nombre *" }).fill("Zoe");
-    await drawer.getByRole("textbox", { name: "Apellidos *" }).fill(`Villalobos ${tag}`);
+    // Sin el " *": el asterisco es hermano del <label>, no su hijo, para que el
+    // nombre accesible del campo siga siendo "CURP" y no "CURP *".
+    await drawer.getByRole("textbox", { name: "CURP" }).fill(curpFor(tag));
+    await drawer.getByRole("textbox", { name: "Nombre" }).fill("Zoe");
+    await drawer.getByRole("textbox", { name: "Apellidos" }).fill(`Villalobos ${tag}`);
     // Level and grade are cascading selects, and the GROUP is never asked for:
     // it is chosen by whichever one still has a seat.
     await drawer.getByRole("combobox", { name: "Nivel" }).selectOption({ label: level });
     await drawer.getByRole("combobox", { name: "Grado" }).selectOption({ label: grade });
-    await drawer.getByRole("textbox", { name: "Tutor *" }).fill("Marisol Villalobos");
+    await drawer.getByRole("textbox", { name: "Tutor" }).fill("Marisol Villalobos");
     await drawer.getByRole("button", { name: "Crear alumno" }).click();
 
     await expect(page.getByText(`Villalobos ${tag}`, { exact: false }).first()).toBeVisible();

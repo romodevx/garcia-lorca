@@ -54,11 +54,26 @@ export default defineConfig({
       // third entry the palette ran here TOO — against the database global
       // setup had just truncated, which is the one place its record results
       // can never exist.
-      testIgnore: [/.*\.mobile\.spec\.ts/, /demo-data\.spec\.ts/, /palette\.spec\.ts/],
+      testIgnore: [
+        /.*\.mobile\.spec\.ts/,
+        /demo-data\.spec\.ts/,
+        /palette\.spec\.ts/,
+        // Tienen su propio viewport y su propio proyecto.
+        /responsive\.spec\.ts/,
+        /drawer\.spec\.ts/,
+      ],
     },
     // The storeroom is worked from a phone, standing between the shelves, so the
     // narrow layout is a real surface and gets a real run.
     { name: "mobile", use: { ...devices["Pixel 7"] }, testMatch: /.*\.mobile\.spec\.ts/ },
+    // Tablet acostada y monitor grande: los dos extremos que el sistema debe
+    // cubrir. Cada spec fija su propio viewport con test.use, así que aquí sólo
+    // se declara el proyecto que los recoge.
+    {
+      name: "responsive",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: /(responsive|drawer)\.spec\.ts/,
+    },
     // READ-ONLY, and run against a SEEDED database rather than an empty one. It
     // is the check you want an hour before a demo: not "can the system be built
     // from nothing" but "does the school we are about to show actually render".

@@ -560,6 +560,10 @@ function PlanForm({
       title={`Precios de ${level.name}`}
       subtitle="Inscripción, colegiatura, cobranza y cuotas"
       icon="finance"
+      // La forma más grande del sistema: inscripción multi-concepto con sus
+      // tramos de precio, colegiatura, cobranza y cuotas. Se capturaba por un
+      // túnel de 520px tuviera el monitor 1280 o 2560.
+      size="lg"
       submitLabel="Guardar tabulador"
       pending={pending}
       error={error}
