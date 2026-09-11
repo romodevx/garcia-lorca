@@ -15,6 +15,22 @@ vi.mock("../../finance/api", () => ({
 
 const finance = vi.mocked(financeApi);
 
+/**
+ * Captura la inscripción como la pide el formulario desde que dejó de haber un
+ * campo único: un concepto, y un monto con la fecha desde la que aplica.
+ */
+async function captureInscription(
+  user: ReturnType<typeof userEvent.setup>,
+  form: HTMLElement,
+  amount = "4000",
+): Promise<void> {
+  await user.type(within(form).getByLabelText("Nuevo concepto"), "Inscripción");
+  await user.click(within(form).getByRole("button", { name: /Agregar concepto/ }));
+  await user.type(within(form).getByLabelText("Monto"), amount);
+  await user.type(within(form).getByLabelText("Vigente desde"), "2026-08-01");
+  await user.click(within(form).getByRole("button", { name: /Agregar monto/ }));
+}
+
 const cycle: Cycle = { id: "c1", name: "2026-2027", status: "active", startsOn: "2026-08-01", endsOn: "2027-06-30" };
 const levels: Level[] = [
   { id: "lv1", name: "Kínder", sepCode: "K", enrollmentGranularity: "cycle" },
@@ -72,7 +88,7 @@ describe("the tuition table", () => {
 
     await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
     const form = await screen.findByRole("dialog", { name: /^Precios de / });
-    await user.type(within(form).getByLabelText("Inscripción"), "4000");
+    await captureInscription(user, form);
     await user.type(within(form).getByLabelText("Colegiatura mensual"), "2500");
     await user.clear(within(form).getByLabelText("Mensualidades"));
     await user.type(within(form).getByLabelText("Mensualidades"), "11");
@@ -84,7 +100,13 @@ describe("the tuition table", () => {
     const sent = finance.upsertTuitionPlan.mock.calls[0]?.[1];
     expect(sent).toMatchObject({
       cycleId: "c1", levelId: "lv1",
-      enrollmentCents: 400000, monthlyCents: 250000,
+      // La inscripción viaja en los conceptos; el monto único siempre va en cero.
+      enrollmentCents: 0,
+      enrollmentConcepts: [{
+        name: "Inscripción",
+        tiers: [{ effectiveFrom: "2026-08-01", effectiveTo: "", amountCents: 400000 }],
+      }],
+      monthlyCents: 250000,
       months: 11, dueDay: 5,
     });
   });
@@ -148,6 +170,7 @@ describe("TuitionPanel — cobranza", () => {
 
     await screen.findByRole("row", { name: /Kínder/ });
     await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
+    await captureInscription(user, screen.getByRole("dialog", { name: /^Precios de / }));
     await user.type(screen.getByLabelText("Colegiatura mensual"), "3200");
     await user.click(screen.getByLabelText("Cobrar recargo por día"));
     await user.type(screen.getByLabelText("Recargo por día"), "10");
@@ -245,18 +268,20 @@ describe("the inscription's own deadline", () => {
     finance.upsertTuitionPlan.mockResolvedValue({} as never);
     const drawer = await openPrices(user, /Kínder/);
 
+    await captureInscription(user, drawer);
     await user.type(within(drawer).getByLabelText("Colegiatura mensual"), "2500");
     await user.type(within(drawer).getByLabelText("Fecha límite de inscripción"), "2026-06-30");
     await user.click(within(drawer).getByRole("button", { name: "Guardar tabulador" }));
 
     await waitFor(() => expect(finance.upsertTuitionPlan).toHaveBeenCalled());
-    expect(finance.upsertTuitionPlan.mock.calls[0]?.[1]).toMatchObject({ enrollmentDueOn: "2026-06-30", enrollmentConcepts: [] });
+    expect(finance.upsertTuitionPlan.mock.calls[0]?.[1]).toMatchObject({ enrollmentDueOn: "2026-06-30" });
   });
 
   it("says so rather than sending a date nobody can read", async () => {
     const user = userEvent.setup();
     const drawer = await openPrices(user, /Kínder/);
 
+    await captureInscription(user, drawer);
     await user.type(within(drawer).getByLabelText("Colegiatura mensual"), "2500");
     await user.type(within(drawer).getByLabelText("Fecha límite de inscripción"), "30/06/2026");
     await user.click(within(drawer).getByRole("button", { name: "Guardar tabulador" }));
@@ -274,6 +299,7 @@ describe("cuotas — the extra a school collects on top of the tuition", () => {
     finance.upsertTuitionPlan.mockResolvedValue({} as never);
     const drawer = await openPrices(user, /Kínder/);
 
+    await captureInscription(user, drawer);
     await user.type(within(drawer).getByLabelText("Colegiatura mensual"), "2500");
     await user.type(within(drawer).getByLabelText("Nombre de la cuota"), "Cuota de Julio");
     await user.type(within(drawer).getByLabelText("Monto total"), "1600");
@@ -403,15 +429,15 @@ describe("la escalera de la inscripción", () => {
     {
       name: "Inscripción",
       tiers: [
-        { effectiveFrom: "2027-01-01", amountCents: 220000 },
-        { effectiveFrom: "2027-03-01", amountCents: 330000 },
-        { effectiveFrom: "2027-04-01", amountCents: 440000 },
+        { effectiveFrom: "2027-01-01", effectiveTo: "", amountCents: 220000 },
+        { effectiveFrom: "2027-03-01", effectiveTo: "", amountCents: 330000 },
+        { effectiveFrom: "2027-04-01", effectiveTo: "", amountCents: 440000 },
       ],
     },
-    { name: "Gastos adm y seguro", tiers: [{ effectiveFrom: "2027-01-01", amountCents: 470000 }] },
+    { name: "Gastos adm y seguro", tiers: [{ effectiveFrom: "2027-01-01", effectiveTo: "", amountCents: 470000 }] },
     {
       name: "Cuota Asociación Padres de Familia",
-      tiers: [{ effectiveFrom: "2027-01-01", amountCents: 85000 }],
+      tiers: [{ effectiveFrom: "2027-01-01", effectiveTo: "", amountCents: 85000 }],
     },
   ];
 
@@ -430,7 +456,7 @@ describe("la escalera de la inscripción", () => {
   // steps that were typed would price March at $3,300 instead of $8,850.
   it("los conceptos planos cuentan en todos los tramos", () => {
     const flat: EnrollmentConcept[] = [
-      { name: "Cuota", tiers: [{ effectiveFrom: "2027-01-01", amountCents: 85000 }] },
+      { name: "Cuota", tiers: [{ effectiveFrom: "2027-01-01", effectiveTo: "", amountCents: 85000 }] },
     ];
     expect(inscriptionTotals(flat)).toEqual([{ effectiveFrom: "2027-01-01", totalCents: 85000 }]);
   });
@@ -446,8 +472,8 @@ describe("la escalera de la inscripción", () => {
       {
         name: "Inscripción",
         tiers: [
-          { effectiveFrom: "2027-01-01", amountCents: 330000 },
-          { effectiveFrom: "2027-03-01", amountCents: 33000 },
+          { effectiveFrom: "2027-01-01", effectiveTo: "", amountCents: 330000 },
+          { effectiveFrom: "2027-03-01", effectiveTo: "", amountCents: 33000 },
         ],
       },
     ];
@@ -457,19 +483,74 @@ describe("la escalera de la inscripción", () => {
 
   it("avisa cuando dos conceptos se llaman igual", () => {
     const twins: EnrollmentConcept[] = [
-      { name: "Cuota APF", tiers: [{ effectiveFrom: "2027-01-01", amountCents: 85000 }] },
-      { name: "Cuota A.P.F.", tiers: [{ effectiveFrom: "2027-01-01", amountCents: 85000 }] },
+      { name: "Cuota APF", tiers: [{ effectiveFrom: "2027-01-01", effectiveTo: "", amountCents: 85000 }] },
+      { name: "Cuota A.P.F.", tiers: [{ effectiveFrom: "2027-01-01", effectiveTo: "", amountCents: 85000 }] },
     ];
     expect(ladderProblem(twins)).toMatch(/nombre/i);
   });
 
   it("avisa cuando un escalón no tiene fecha o no tiene monto", () => {
     expect(
-      ladderProblem([{ name: "Inscripción", tiers: [{ effectiveFrom: "", amountCents: 220000 }] }]),
+      ladderProblem([{ name: "Inscripción", tiers: [{ effectiveFrom: "", effectiveTo: "", amountCents: 220000 }] }]),
     ).toMatch(/fecha/i);
     expect(
-      ladderProblem([{ name: "Inscripción", tiers: [{ effectiveFrom: "2027-01-01", amountCents: 0 }] }]),
+      ladderProblem([{ name: "Inscripción", tiers: [{ effectiveFrom: "2027-01-01", effectiveTo: "", amountCents: 0 }] }]),
     ).toMatch(/monto/i);
     expect(ladderProblem([{ name: "", tiers: [] }])).toMatch(/nombre/i);
+  });
+});
+
+describe("la inscripción con vigencias", () => {
+  const withRanges: EnrollmentConcept[] = [
+    {
+      name: "Inscripción",
+      tiers: [
+        { effectiveFrom: "2027-01-01", effectiveTo: "2027-02-28", amountCents: 220000 },
+        { effectiveFrom: "2027-03-01", effectiveTo: "2027-03-31", amountCents: 330000 },
+        { effectiveFrom: "2027-04-01", effectiveTo: "2027-09-30", amountCents: 440000 },
+      ],
+    },
+    {
+      name: "Gastos adm y seguro",
+      tiers: [{ effectiveFrom: "2027-01-01", effectiveTo: "", amountCents: 470000 }],
+    },
+  ];
+
+  it("avisa cuando una vigencia termina antes de empezar", () => {
+    expect(
+      ladderProblem([
+        {
+          name: "Inscripción",
+          tiers: [{ effectiveFrom: "2027-03-01", effectiveTo: "2027-01-01", amountCents: 220000 }],
+        },
+      ]),
+    ).toMatch(/termina antes/i);
+  });
+
+  it("avisa cuando dos vigencias del mismo concepto se enciman", () => {
+    expect(
+      ladderProblem([
+        {
+          name: "Inscripción",
+          tiers: [
+            { effectiveFrom: "2027-01-01", effectiveTo: "2027-03-15", amountCents: 220000 },
+            { effectiveFrom: "2027-03-01", effectiveTo: "2027-03-31", amountCents: 330000 },
+          ],
+        },
+      ]),
+    ).toMatch(/encim/i);
+  });
+
+  it("una vigencia sin fecha de fin es válida", () => {
+    expect(ladderProblem(withRanges)).toBe("");
+  });
+
+  // La regla del dueño: fuera de todo rango se cobra el último monto vigente.
+  it("los totales siguen la regla del último monto vigente", () => {
+    expect(inscriptionTotals(withRanges)).toEqual([
+      { effectiveFrom: "2027-01-01", totalCents: 690000 },
+      { effectiveFrom: "2027-03-01", totalCents: 800000 },
+      { effectiveFrom: "2027-04-01", totalCents: 910000 },
+    ]);
   });
 });

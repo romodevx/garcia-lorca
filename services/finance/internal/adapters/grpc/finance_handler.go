@@ -630,7 +630,13 @@ func toDomainEnrollmentConcepts(in []*financev1.EnrollmentConcept) ([]domain.Enr
 			if err != nil {
 				return nil, err
 			}
-			tiers = append(tiers, domain.PriceTier{EffectiveFrom: from, AmountCents: t.GetAmountCents()})
+			to, err := parsePlanDate(t.GetEffectiveTo())
+			if err != nil {
+				return nil, err
+			}
+			tiers = append(tiers, domain.PriceTier{
+				EffectiveFrom: from, EffectiveTo: to, AmountCents: t.GetAmountCents(),
+			})
 		}
 		out = append(out, domain.EnrollmentConcept{Name: c.GetName(), Tiers: tiers})
 	}
@@ -647,6 +653,7 @@ func toProtoEnrollmentConcepts(in []domain.EnrollmentConcept) []*financev1.Enrol
 		for _, t := range c.Tiers {
 			tiers = append(tiers, &financev1.PriceTier{
 				EffectiveFrom: formatPlanDate(t.EffectiveFrom),
+				EffectiveTo:   formatPlanDate(t.EffectiveTo),
 				AmountCents:   t.AmountCents,
 			})
 		}

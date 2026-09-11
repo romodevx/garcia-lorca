@@ -584,7 +584,9 @@ type EnrollmentConcept struct {
 // PriceTier is what a concept costs from a date onward (YYYY-MM-DD).
 type PriceTier struct {
 	EffectiveFrom string `json:"effectiveFrom"`
-	AmountCents   int64  `json:"amountCents"`
+	// The last day the price applies, empty when the school set none.
+	EffectiveTo string `json:"effectiveTo"`
+	AmountCents int64  `json:"amountCents"`
 }
 
 // Fee is money the school collects on top of the monthly tuition, spread across
@@ -825,6 +827,7 @@ func enrollmentConceptsToProto(in []EnrollmentConcept) []*financev1.EnrollmentCo
 		for _, t := range c.Tiers {
 			tiers = append(tiers, &financev1.PriceTier{
 				EffectiveFrom: t.EffectiveFrom,
+				EffectiveTo:   t.EffectiveTo,
 				AmountCents:   t.AmountCents,
 			})
 		}
@@ -843,6 +846,7 @@ func enrollmentConceptsFromProto(in []*financev1.EnrollmentConcept) []Enrollment
 		for _, t := range c.GetTiers() {
 			tiers = append(tiers, PriceTier{
 				EffectiveFrom: t.GetEffectiveFrom(),
+				EffectiveTo:   t.GetEffectiveTo(),
 				AmountCents:   t.GetAmountCents(),
 			})
 		}

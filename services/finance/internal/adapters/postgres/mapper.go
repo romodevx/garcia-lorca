@@ -102,7 +102,10 @@ func fromDomainPlan(p domain.TuitionPlan) (tuitionPlanModel, error) {
 // silently orphaning every price list already saved.
 type priceTierJSON struct {
 	EffectiveFrom string `json:"effective_from"`
-	AmountCents   int64  `json:"amount_cents"`
+	// Empty when the school set no closing date. Omitted from the stored JSON so
+	// a row written before ranges existed reads back identically.
+	EffectiveTo string `json:"effective_to,omitempty"`
+	AmountCents int64  `json:"amount_cents"`
 }
 
 type enrollmentConceptJSON struct {
@@ -133,7 +136,17 @@ func enrollmentConceptsToDomain(raw []byte) ([]domain.EnrollmentConcept, error) 
 				return nil, glerrors.Wrap(glerrors.KindInternal,
 					"reading the date a price step starts", err)
 			}
-			tiers = append(tiers, domain.PriceTier{EffectiveFrom: day, AmountCents: tier.AmountCents})
+			var until time.Time
+			if tier.EffectiveTo != "" {
+				until, err = time.Parse(dateLayout, tier.EffectiveTo)
+				if err != nil {
+					return nil, glerrors.Wrap(glerrors.KindInternal,
+						"reading the date a price step stops", err)
+				}
+			}
+			tiers = append(tiers, domain.PriceTier{
+				EffectiveFrom: day, EffectiveTo: until, AmountCents: tier.AmountCents,
+			})
 		}
 		out = append(out, domain.EnrollmentConcept{Name: c.Name, Tiers: tiers})
 	}
@@ -148,10 +161,14 @@ func enrollmentConceptsFromDomain(in []domain.EnrollmentConcept) ([]byte, error)
 	for _, c := range in {
 		tiers := make([]priceTierJSON, 0, len(c.Tiers))
 		for _, tier := range c.Tiers {
-			tiers = append(tiers, priceTierJSON{
+			stored := priceTierJSON{
 				EffectiveFrom: tier.EffectiveFrom.Format(dateLayout),
 				AmountCents:   tier.AmountCents,
-			})
+			}
+			if !tier.EffectiveTo.IsZero() {
+				stored.EffectiveTo = tier.EffectiveTo.Format(dateLayout)
+			}
+			tiers = append(tiers, stored)
 		}
 		stored = append(stored, enrollmentConceptJSON{Name: c.Name, Tiers: tiers})
 	}
