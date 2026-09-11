@@ -114,10 +114,12 @@ describe("StudentsScreen", () => {
     const openButtons = screen.getAllByRole("button", { name: /Nuevo alumno/ });
     await user.click(openButtons[0] as HTMLElement);
     const dialog = await screen.findByRole("dialog", { name: "Nuevo alumno" });
-    await user.type(within(dialog).getByPlaceholderText("XXXX000000XXXXXX00"), "HEGA050312MDFRNN08");
-    await user.type(within(dialog).getByPlaceholderText("Ana Sofía"), "Nuevo");
-    await user.type(within(dialog).getByPlaceholderText("Ruiz Márquez"), "Alumno");
-    await user.type(within(dialog).getByPlaceholderText("Nombre del tutor"), "Tutor Nuevo");
+    // Por etiqueta y no por placeholder: el texto de reposo es decoración y
+    // cambia con el diseño; la etiqueta es lo que nombra al campo.
+    await user.type(within(dialog).getByLabelText("CURP"), "HEGA050312MDFRNN08");
+    await user.type(within(dialog).getByLabelText("Nombre"), "Nuevo");
+    await user.type(within(dialog).getByLabelText("Apellidos"), "Alumno");
+    await user.type(within(dialog).getByLabelText("Tutor"), "Tutor Nuevo");
     await user.selectOptions(within(dialog).getByLabelText("Nivel"), "lv-p");
     await user.selectOptions(await within(dialog).findByLabelText("Grado"), "gl-1");
     await user.click(within(dialog).getByRole("button", { name: "Crear alumno" }));
@@ -128,11 +130,11 @@ describe("StudentsScreen", () => {
       // never claim a group the pupil is not in.
       expect(students.createStudent).toHaveBeenCalledWith(expect.any(String), {
         curp: "HEGA050312MDFRNN08",
-        firstName: "Nuevo",
-        lastName: "Alumno",
+        firstName: "NUEVO",
+        lastName: "ALUMNO",
         level: "Primaria",
         gradeGroup: "",
-        guardianName: "Tutor Nuevo",
+        guardianName: "TUTOR NUEVO",
       }),
     );
   });

@@ -140,13 +140,23 @@ export function Login({ theme, onToggle, onSubmit, error, pending }: LoginProps)
                 <span style={{ position: "absolute", left: 16, top: "50%", transform: "translateY(-50%)", color: "var(--text-faint)" }}>
                   <Icon name="user" size={20} />
                 </span>
+                {/*
+                  A minúsculas al teclear, como en el resto del sistema. Esta
+                  pantalla no usa EmailField porque tiene su propio diseño con
+                  ícono dentro del campo, pero la regla es la misma — y aquí
+                  importa más que en ningún lado: el teclado que pone mayúscula
+                  inicial deja a alguien fuera sin que entienda por qué.
+                */}
                 <input
                   aria-label="Correo"
                   type="email"
                   autoComplete="username"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   placeholder="correo@colegio.mx"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => setEmail(e.target.value.toLowerCase())}
                   style={inp}
                 />
               </div>

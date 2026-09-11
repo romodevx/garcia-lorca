@@ -3,6 +3,7 @@
 import type { CSSProperties, ReactElement } from "react";
 import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
+import { DateField } from "../../_design/form";
 import { Icon, type IconName } from "../../_design/Icon";
 import type { ColorKey } from "../../_design/colors";
 import type { AttendanceStatus } from "../../attendance/api";
@@ -57,7 +58,9 @@ export function DirectorAttendance({ onBack, today }: DirectorAttendanceProps): 
       <div className="fade-up" style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
         <select value={cycleId} onChange={(e) => setCycleId(e.target.value)} aria-label="Ciclo" style={sel}>{cycles.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
         <select value={groupId} onChange={(e) => setGroupId(e.target.value)} aria-label="Grupo" style={sel}><option value="">Selecciona un grupo…</option>{groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}</select>
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} aria-label="Fecha" style={sel} />
+        <div style={{ minWidth: 0 }}>
+          <DateField label="Fecha" value={date} onChange={setDate} />
+        </div>
       </div>
 
       <div className="fade-up" style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 22 }}>

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactElement } from "react";
 import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
+import { EmailField, TextField } from "../../_design/form";
 import { Icon, type IconName } from "../../_design/Icon";
 import type { ColorKey } from "../../_design/colors";
 import {
@@ -305,9 +306,11 @@ function CreateUserDrawer({ roles, onClose, onSave }: { roles: readonly Role[]; 
     <Drawer title="Nuevo usuario" subtitle="Cuenta de acceso al sistema" icon="user" onClose={onClose}
       footer={<><Btn kind="ghost" onClick={onClose}>Cancelar</Btn><div style={{ flex: 1 }} /><Btn icon="check" onClick={() => void submit()} style={{ opacity: ready ? 1 : 0.45, pointerEvents: ready ? "auto" : "none", height: 52 }}>Crear usuario</Btn></>}>
       <>
-        {labelField("Correo", <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nombre@garcialorca.edu.mx" style={fi} />, true)}
-        {labelField("Nombre para mostrar", <input value={displayName} onChange={(e) => setName(e.target.value)} placeholder="Nombre del usuario" style={fi} />, true)}
-        {labelField("Contraseña temporal", <input value={tempPassword} onChange={(e) => setPw(e.target.value)} type="password" placeholder="La cambiará en el primer ingreso" style={fi} />, true)}
+        <EmailField label="Correo" value={email} onChange={setEmail} required placeholder="nombre@garcialorca.edu.mx" />
+        <TextField label="Nombre para mostrar" value={displayName} onChange={setName} uppercase required placeholder="NOMBRE DEL USUARIO" />
+        {/* La contraseña NO pasa por la capa de captura: nada de mayúsculas ni
+            de minúsculas debe tocarla, y su valor no se formatea nunca. */}
+        {labelField("Contraseña temporal", <input aria-label="Contraseña temporal" value={tempPassword} onChange={(e) => setPw(e.target.value)} type="password" placeholder="La cambiará en el primer ingreso" style={fi} />, true)}
         <div><span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Roles</span>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>{roles.map((r) => <button key={r.id} onClick={() => toggle(r.id)} style={chip(sel.includes(r.id), "lime")}>{r.name}</button>)}</div>
         </div>
@@ -343,8 +346,8 @@ function InviteUserDrawer({ roles, onClose, onSave }: { roles: readonly Role[]; 
     <Drawer title="Invitar usuario" subtitle="Recibirá un correo para elegir su contraseña" icon="user" onClose={onClose}
       footer={<><Btn kind="ghost" onClick={onClose}>Cancelar</Btn><div style={{ flex: 1 }} /><Btn icon="check" onClick={() => void submit()} style={{ opacity: ready ? 1 : 0.45, pointerEvents: ready ? "auto" : "none", height: 52 }}>{sending ? "Enviando…" : "Enviar invitación"}</Btn></>}>
       <>
-        {labelField("Correo", <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nombre@garcialorca.edu.mx" style={fi} />, true)}
-        {labelField("Nombre para mostrar", <input value={displayName} onChange={(e) => setName(e.target.value)} placeholder="Nombre del usuario" style={fi} />, true)}
+        <EmailField label="Correo" value={email} onChange={setEmail} required placeholder="nombre@garcialorca.edu.mx" />
+        <TextField label="Nombre para mostrar" value={displayName} onChange={setName} uppercase required placeholder="NOMBRE DEL USUARIO" />
         <div><span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Roles</span>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>{roles.map((r) => <button key={r.id} onClick={() => toggle(r.id)} style={chip(sel.includes(r.id), "lime")}>{r.name}</button>)}</div>
         </div>
@@ -367,7 +370,7 @@ function CreateRoleDrawer({ onClose, onSave }: { onClose: () => void; onSave: (i
     <Drawer title="Nuevo rol" subtitle="Conjunto de permisos" icon="shield" onClose={onClose}
       footer={<><Btn kind="ghost" onClick={onClose}>Cancelar</Btn><div style={{ flex: 1 }} /><Btn icon="check" onClick={() => void submit()} style={{ opacity: name.trim().length > 1 ? 1 : 0.45, pointerEvents: name.trim().length > 1 ? "auto" : "none", height: 52 }}>Crear rol</Btn></>}>
       <>
-        {labelField("Nombre del rol", <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Coordinación, Docente…" style={fi} />, true)}
+        <TextField label="Nombre del rol" value={name} onChange={setName} uppercase required placeholder="COORDINACIÓN, DOCENTE…" />
         <PermChecklist selected={sel} onToggle={toggle} />
         {err !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{err}</p>}
       </>

@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState, type CSSProperties, type FormEvent, type ReactElement } from "react";
+import { useCallback, useEffect, useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
+import { EmailField, SelectField, TextField } from "../../_design/form";
 import { Icon } from "../../_design/Icon";
 import { addContact, listContacts, type Contact, type Relationship } from "../../students/api";
 import { API_URL } from "../../api-url";
@@ -15,12 +16,6 @@ const RELATIONSHIPS: { value: Relationship; label: string }[] = [
 
 const RELATIONSHIP_LABEL: Record<string, string> = {
   mother: "Madre", father: "Padre", guardian: "Tutor", other: "Otro",
-};
-
-const input: CSSProperties = {
-  width: "100%", height: 44, padding: "0 14px", borderRadius: "var(--r-md)",
-  border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)",
-  fontSize: 15, outline: "none",
 };
 
 export interface ContactsPanelProps {
@@ -111,12 +106,23 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
       ))}
 
       <form onSubmit={(e) => void add(e)} style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
-        <input aria-label="Nombre del contacto" value={name} onChange={(e) => setName(e.target.value)} placeholder="Nombre" style={{ ...input, flex: "2 1 150px" }} />
-        <input aria-label="Teléfono del contacto" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Teléfono" style={{ ...input, flex: "1 1 120px" }} />
-        <input aria-label="Correo del contacto" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Correo" style={{ ...input, flex: "1 1 150px" }} />
-        <select aria-label="Parentesco" value={relationship} onChange={(e) => setRelationship(e.target.value as Relationship)} style={{ ...input, flex: "1 1 110px" }}>
-          {RELATIONSHIPS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-        </select>
+        <div style={{ flex: "2 1 150px", minWidth: 0 }}>
+          <TextField label="Nombre del contacto" value={name} onChange={setName} uppercase required placeholder="NOMBRE" />
+        </div>
+        <div style={{ flex: "1 1 120px", minWidth: 0 }}>
+          <TextField label="Teléfono del contacto" value={phone} onChange={setPhone} placeholder="Teléfono" />
+        </div>
+        <div style={{ flex: "1 1 150px", minWidth: 0 }}>
+          <EmailField label="Correo del contacto" value={email} onChange={setEmail} placeholder="correo@ejemplo.mx" />
+        </div>
+        <div style={{ flex: "1 1 110px", minWidth: 0 }}>
+          <SelectField
+            label="Parentesco"
+            value={relationship}
+            onChange={(v) => setRelationship(v as Relationship)}
+            options={RELATIONSHIPS.map((r) => ({ value: r.value, label: r.label }))}
+          />
+        </div>
         <Btn type="submit" icon="plus" style={{ opacity: saving ? 0.5 : 1 }}>Agregar</Btn>
       </form>
       {error !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 13.5, margin: "10px 0 0" }}>{error}</p>}

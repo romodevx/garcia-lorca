@@ -37,3 +37,25 @@ describe("Login", () => {
     expect(screen.getByRole("button", { name: "Entrando…" })).toBeDisabled();
   });
 });
+
+describe("el correo de la entrada", () => {
+  it("baja a minúsculas mientras se teclea", async () => {
+    // La regla es del sistema entero, y la puerta es la primera pantalla donde
+    // se escribe un correo. Además evita el caso clásico del teclado que pone
+    // mayúscula inicial y deja a alguien fuera sin entender por qué.
+    const user = userEvent.setup();
+    render(<Login theme="light" onToggle={() => {}} onSubmit={vi.fn()} pending={false} />);
+
+    const correo = screen.getByLabelText("Correo");
+    await user.type(correo, "Director@GarciaLorca.edu.MX");
+
+    expect(correo).toHaveValue("director@garcialorca.edu.mx");
+  });
+
+  it("no deja que el teclado del sistema ponga la mayúscula inicial", () => {
+    render(<Login theme="light" onToggle={() => {}} onSubmit={vi.fn()} pending={false} />);
+    const correo = screen.getByLabelText("Correo");
+    expect(correo).toHaveAttribute("autocapitalize", "none");
+    expect(correo).toHaveAttribute("spellcheck", "false");
+  });
+});

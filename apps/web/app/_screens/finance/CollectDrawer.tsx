@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
+import { MoneyField } from "../../_design/form";
 import { Icon } from "../../_design/Icon";
 import {
   getAccount,
@@ -224,12 +225,7 @@ export function CollectDrawer({ student, onClose, onCollected }: CollectDrawerPr
                   )}
                 </div>
 
-                <label style={{ display: "block" }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Monto recibido</span>
-                  <div style={{ marginTop: 8 }}>
-                    <input autoFocus inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} aria-label="Monto recibido" placeholder="0.00" style={field} />
-                  </div>
-                </label>
+                <MoneyField label="Monto recibido" value={amount} onChange={setAmount} required />
 
                 {expected !== null && (
                   <div

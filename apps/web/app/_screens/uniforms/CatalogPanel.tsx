@@ -2,6 +2,7 @@
 
 import { useCallback, useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
+import { MoneyField, TextField } from "../../_design/form";
 import { createItem, updateItem, UniformsError, upsertSizes, type ItemCategory, type Level, type SizeSpec, type UniformItem } from "../../uniforms/api";
 import { Drawer } from "./InventoryPanel";
 import { EmptyState, ErrorNote, field, label, money } from "./parts";
@@ -228,15 +229,18 @@ function CreateDrawer({
         ))}
       </div>
 
-      <label style={label} htmlFor="item-name">
-        Nombre
-      </label>
-      <input id="item-name" style={field} placeholder={category === "book" ? "Libro de matemáticas 3°" : "Suéter verde"} value={name} onChange={(e) => setName(e.target.value)} />
+      <TextField
+        label="Nombre"
+        value={name}
+        onChange={setName}
+        uppercase
+        required
+        placeholder={category === "book" ? "LIBRO DE MATEMÁTICAS 3°" : "SUÉTER VERDE"}
+      />
 
-      <label style={{ ...label, marginTop: 16 }} htmlFor="item-code">
-        Clave
-      </label>
-      <input id="item-code" style={field} placeholder="SUE-VER" value={code} onChange={(e) => setCode(e.target.value)} />
+      <div style={{ marginTop: 16 }}>
+        <TextField label="Clave" value={code} onChange={setCode} uppercase required placeholder="SUE-VER" />
+      </div>
       <p style={{ fontSize: 12.5, color: "var(--text-faint)", marginTop: 6 }}>
         La clave no se puede cambiar después: es como se refieren al artículo los pedidos ya hechos.
       </p>
@@ -264,10 +268,9 @@ function CreateDrawer({
         ))}
       </div>
 
-      <label style={{ ...label, marginTop: 16 }} htmlFor="item-price">
-        Precio
-      </label>
-      <input id="item-price" style={field} inputMode="decimal" placeholder="650.00" value={pesos} onChange={(e) => setPesos(e.target.value)} />
+      <div style={{ marginTop: 16 }}>
+        <MoneyField label="Precio" value={pesos} onChange={setPesos} required placeholder="650.00" />
+      </div>
 
       <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
         <Btn kind="ghost" onClick={onClose}>

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement } from "react";
 import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
+import { SelectField, TextField } from "../../_design/form";
 import { Icon, type IconName } from "../../_design/Icon";
 import type { ColorKey } from "../../_design/colors";
 import {
@@ -124,18 +125,36 @@ export function isSepLevel(name: string): boolean {
  * already is.
  */
 export function missingFieldMessage(draft: QuickAddDraft): string | undefined {
+  return Object.values(missingFields(draft))[0];
+}
+
+/**
+ * Lo mismo, pero por campo, para poder marcarlos TODOS a la vez.
+ *
+ * Devolver un solo mensaje era mejor que el botón gris y mudo que reemplazó,
+ * pero seguía obligando a guardar cinco veces para descubrir los cinco datos
+ * que faltaban. El texto de cada mensaje se conserva tal cual: un CURP de 17
+ * caracteres no está "vacío", y decir cuántos lleva es justo lo que esta
+ * pantalla ya sabía hacer bien.
+ *
+ * El orden de las llaves es el orden de lectura de la forma, así que el primero
+ * que devuelve `missingFieldMessage` sigue siendo el de más arriba.
+ */
+export function missingFields(draft: QuickAddDraft): Record<string, string> {
+  const found: Record<string, string> = {};
   const curp = draft.curp.trim();
-  if (curp === "") return "Escribe el CURP del alumno.";
-  if (curp.length !== CURP_LENGTH) {
-    return `El CURP debe tener ${CURP_LENGTH} caracteres; llevas ${curp.length}.`;
+  if (curp === "") {
+    found.curp = "Escribe el CURP del alumno.";
+  } else if (curp.length !== CURP_LENGTH) {
+    found.curp = `El CURP debe tener ${CURP_LENGTH} caracteres; llevas ${curp.length}.`;
   }
-  if (draft.firstName.trim().length < 2) return "Escribe el nombre del alumno.";
-  if (draft.lastName.trim().length < 2) return "Escribe los apellidos del alumno.";
-  if (draft.guardianName.trim().length < 3) return "Escribe el nombre del tutor.";
+  if (draft.firstName.trim().length < 2) found.firstName = "Escribe el nombre del alumno.";
+  if (draft.lastName.trim().length < 2) found.lastName = "Escribe los apellidos del alumno.";
+  if (draft.guardianName.trim().length < 3) found.guardianName = "Escribe el nombre del tutor.";
   if (draft.gradeLevelId !== undefined && draft.gradeLevelId === "") {
-    return "Elige el nivel y el grado al que entra.";
+    found.gradeLevelId = "Elige el nivel y el grado al que entra.";
   }
-  return undefined;
+  return found;
 }
 
 /**
@@ -186,6 +205,17 @@ function QuickAdd({
   const [gradeLevelId, setGradeLevelId] = useState("");
   const [grades, setGrades] = useState<GradeLevel[]>([]);
   const [guardianName, setGuardian] = useState("");
+  // Los faltantes vienen de missingFields, que conserva el mensaje propio de
+  // cada campo ("llevas 17 caracteres"), así que no se usa useRequired: ese
+  // hook da un mensaje genérico y aquí ya había uno mejor.
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const clearField = (key: string): void =>
+    setFieldErrors((prev) => {
+      if (prev[key] === undefined) return prev;
+      const rest = { ...prev };
+      delete rest[key];
+      return rest;
+    });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
@@ -208,13 +238,12 @@ function QuickAdd({
   }, [levelId]);
 
   const submit = async (): Promise<void> => {
-    // Validated on PRESS, not by greying the button out. A control that refuses
-    // and will not say why is the thing this replaced.
-    const missing = missingFieldMessage({ curp, firstName, lastName, guardianName, gradeLevelId });
-    if (missing !== undefined) {
-      setError(missing);
-      return;
-    }
+    // Se valida al PRESIONAR, no apagando el botón. Un control que se niega y no
+    // dice por qué es justo lo que esto reemplazó — y ahora se marcan todos los
+    // faltantes a la vez, en sus propios campos.
+    const missing = missingFields({ curp, firstName, lastName, guardianName, gradeLevelId });
+    setFieldErrors(missing);
+    if (Object.keys(missing).length > 0) return;
     const chosenLevel = levels.find((l) => l.id === levelId);
     if (chosenLevel === undefined) {
       setError("Elige el nivel y el grado al que entra.");
@@ -265,32 +294,69 @@ function QuickAdd({
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px", display: "flex", flexDirection: "column", gap: 18 }}>
-          <Field label="CURP" req>
-            <input autoFocus value={curp} onChange={(e) => setCurp(e.target.value)} placeholder="XXXX000000XXXXXX00" style={fi} />
-          </Field>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <Field label="Nombre" req><input value={firstName} onChange={(e) => setFirst(e.target.value)} placeholder="Ana Sofía" style={fi} /></Field>
-            <Field label="Apellidos" req><input value={lastName} onChange={(e) => setLast(e.target.value)} placeholder="Ruiz Márquez" style={fi} /></Field>
+          <TextField
+            label="CURP"
+            value={curp}
+            onChange={setCurp}
+            uppercase
+            required
+            placeholder="XXXX000000XXXXXX00"
+            error={fieldErrors.curp}
+            onClearError={() => clearField("curp")}
+          />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
+            <TextField
+              label="Nombre"
+              value={firstName}
+              onChange={setFirst}
+              uppercase
+              required
+              placeholder="ANA SOFÍA"
+              error={fieldErrors.firstName}
+              onClearError={() => clearField("firstName")}
+            />
+            <TextField
+              label="Apellidos"
+              value={lastName}
+              onChange={setLast}
+              uppercase
+              required
+              placeholder="RUIZ MÁRQUEZ"
+              error={fieldErrors.lastName}
+              onClearError={() => clearField("lastName")}
+            />
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <Field label="Nivel" req>
-              <select aria-label="Nivel" value={levelId} onChange={(e) => setLevelId(e.target.value)} style={fi}>
-                <option value="">Selecciona…</option>
-                {levels.map((l) => (
-                  <option key={l.id} value={l.id}>{l.name}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Grado" req>
-              <select aria-label="Grado" value={gradeLevelId} onChange={(e) => setGradeLevelId(e.target.value)} disabled={grades.length === 0} style={fi}>
-                <option value="">{levelId === "" ? "Elige un nivel primero" : "Selecciona…"}</option>
-                {grades.map((g) => (
-                  <option key={g.id} value={g.id}>{g.name}</option>
-                ))}
-              </select>
-            </Field>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
+            <SelectField
+              label="Nivel"
+              value={levelId}
+              onChange={setLevelId}
+              required
+              placeholder="Selecciona…"
+              options={levels.map((l) => ({ value: l.id, label: l.name }))}
+            />
+            <SelectField
+              label="Grado"
+              value={gradeLevelId}
+              onChange={setGradeLevelId}
+              required
+              disabled={grades.length === 0}
+              placeholder={levelId === "" ? "Elige un nivel primero" : "Selecciona…"}
+              options={grades.map((g) => ({ value: g.id, label: g.name }))}
+              error={fieldErrors.gradeLevelId}
+              onClearError={() => clearField("gradeLevelId")}
+            />
           </div>
-          <Field label="Tutor" req><input value={guardianName} onChange={(e) => setGuardian(e.target.value)} placeholder="Nombre del tutor" style={fi} /></Field>
+          <TextField
+            label="Tutor"
+            value={guardianName}
+            onChange={setGuardian}
+            uppercase
+            required
+            placeholder="NOMBRE DEL TUTOR"
+            error={fieldErrors.guardianName}
+            onClearError={() => clearField("guardianName")}
+          />
           <div style={{ display: "flex", gap: 11, padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
             <span style={{ color: "var(--forest)", flexShrink: 0, marginTop: 1 }}><Icon name="check" size={19} stroke={2.6} /></span>
             <p style={{ fontSize: 13.5, color: "var(--text-muted)", lineHeight: 1.5, margin: 0 }}>El grupo <strong>se asigna solo</strong>, según el cupo de cada salón: se llena A y el siguiente alumno pasa a B. Los documentos se cargan después.</p>
@@ -312,16 +378,6 @@ function QuickAdd({
     </div>
   );
 }
-
-function Field({ label, req, children }: { label: string; req?: boolean; children: ReactElement }): ReactElement {
-  return (
-    <label style={{ display: "block" }}>
-      <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>{label}{req === true && <b style={{ color: "var(--red)" }}> *</b>}</span>
-      <div style={{ marginTop: 8 }}>{children}</div>
-    </label>
-  );
-}
-const fi: CSSProperties = { width: "100%", height: 50, padding: "0 16px", borderRadius: "var(--r-md)", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 15.5, outline: "none" };
 
 // ── detail sheet ──
 function StudentSheet({ st, groups, onClose, onEnroll }: { st: Student; groups: readonly Group[]; onClose: () => void; onEnroll: (groupId: string) => Promise<void> }): ReactElement {

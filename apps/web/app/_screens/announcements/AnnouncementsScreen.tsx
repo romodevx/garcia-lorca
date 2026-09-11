@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
+import { TextField } from "../../_design/form";
 import { Icon } from "../../_design/Icon";
 import { announce, type AnnouncementScope } from "../../comms/api";
 import { listCycles, listGroups, listLevels, type Cycle, type Group, type Level } from "../../config/api";
@@ -187,10 +188,7 @@ export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): React
           </div>
         )}
 
-        <label style={{ display: "block" }}>
-          <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Título</span>
-          <input aria-label="Título" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Junta de padres" style={{ ...field, marginTop: 8 }} />
-        </label>
+        <TextField label="Título" value={title} onChange={setTitle} uppercase required placeholder="JUNTA DE PADRES" />
 
         <label style={{ display: "block" }}>
           <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Mensaje</span>
