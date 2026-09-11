@@ -52,7 +52,11 @@ env:
   BUF_VERSION: "1.50.0"
   GO_VERSION: "1.25.x"
   NODE_VERSION: "22"
-  GOVULNCHECK_VERSION: "v1.1.4"
+  # Kept EQUAL to _GOVULNCHECK_VERSION in deploy/cloudbuild/cloudbuild.yaml: two
+  # gates scanning with two versions is how one goes green and the other red for
+  # a reason nobody can see. v1.7.0 is the newest that runs on Go 1.25 — v1.8.0
+  # requires 1.26, which is what broke the deploy on 2026-09-10.
+  GOVULNCHECK_VERSION: "v1.7.0"
 
 jobs:
   # ---------------------------------------------------------------------------
