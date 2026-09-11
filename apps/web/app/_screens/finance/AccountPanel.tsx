@@ -6,7 +6,8 @@ import { Btn } from "../../_design/Controls";
 import type { AccountStatement } from "../../finance/api";
 import type { Student } from "../../students/api";
 import { formatCents } from "../../_lib/money";
-import { EmptyHint, ErrorAlert, Section, SelectField } from "./parts";
+import { SelectField } from "../../_design/form";
+import { EmptyHint, ErrorAlert, Section } from "./parts";
 
 export interface AccountPanelProps {
   students: readonly Student[];

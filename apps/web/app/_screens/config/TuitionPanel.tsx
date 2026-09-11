@@ -15,8 +15,9 @@ import {
   type PriceTier,
   type TuitionPlan,
 } from "../../finance/api";
-import { formatCents } from "../../_lib/money";
-import { EmptyHint, ErrorAlert, Section, TextField } from "./parts";
+import { centsToPesosInput, formatCents, pesosToCents as strictPesosToCents } from "../../_lib/money";
+import { DateField, MoneyField, NumberField, TextField } from "../../_design/form";
+import { EmptyHint, ErrorAlert, Section } from "./parts";
 
 import { API_URL } from "../../api-url";
 
@@ -30,23 +31,28 @@ const MONTH_NAMES = [
 ];
 
 /**
- * Reads pesos as a person types them and returns integer cents.
+ * Lee los pesos que una persona teclea y devuelve centavos enteros, o null.
  *
- * Everything behind this screen is integer cents, and the person in front of it
- * thinks in pesos. Returning null rather than 0 for nonsense is the whole point:
- * a blank that silently became zero would price a level free for a year.
+ * Delega en el lector de `_lib/money.ts` en vez de tener el suyo. El que vivía
+ * aquí borraba TODA coma con `replace(/[\s,$]/g, "")`, así que "1850,50" —una
+ * coma decimal, que es como se escribe en media Latinoamérica— se convertía en
+ * 185050 pesos: un sobrecobro de cien veces, multiplicado después por la
+ * generación masiva de cargos. Es el mismo defecto que `_lib/money.ts` ya había
+ * corregido y documentado; seguía vivo aquí porque esta pantalla tenía su
+ * propia copia del lector.
+ *
+ * El contrato `number | null` se conserva —lo esperan siete llamadas de este
+ * archivo— y devolver null en vez de 0 sigue siendo el punto: un vacío que se
+ * volviera cero dejaría un nivel gratis por un año.
  */
 export function pesosToCents(raw: string): number | null {
-  const cleaned = raw.replace(/[\s,$]/g, "");
-  if (cleaned === "" || !/^\d+(\.\d{1,2})?$/.test(cleaned)) return null;
-  // Rounded, not truncated: 0.1 + 0.2 in floating point is why this multiplies
-  // and then rounds instead of trusting the product.
-  return Math.round(Number(cleaned) * 100);
+  const cents = strictPesosToCents(raw);
+  return Number.isNaN(cents) ? null : cents;
 }
 
 /** Cents back into the pesos a person reads, always with both decimals. */
 export function centsToPesos(cents: number): string {
-  return (cents / 100).toFixed(2);
+  return centsToPesosInput(cents);
 }
 
 /**
@@ -500,13 +506,9 @@ function PlanForm({
       setError(ladder);
       return;
     }
-    if (enrollmentDue.trim() !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(enrollmentDue.trim())) {
-      // Refused here rather than sent: the server reads an unparseable date as
-      // "no deadline", which would move every inscription of this level back to
-      // the default rule without saying so.
-      setError("La fecha límite de inscripción se escribe aaaa-mm-dd, por ejemplo 2026-06-30.");
-      return;
-    }
+    // Aquí vivía una validación de formato aaaa-mm-dd y su mensaje. Con
+    // calendario, la fecha sólo puede llegar bien formada o vacía, así que ese
+    // error dejó de poder ocurrir.
 
     setPending(true);
     setError(undefined);
@@ -570,15 +572,20 @@ function PlanForm({
         Colegiatura
       </p>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginBottom: 12 }}>
-        <TextField label="Colegiatura mensual" value={monthly} onChange={setMonthly} placeholder="3200" />
-        <TextField label="Mensualidades" value={months} onChange={setMonths} placeholder="10" />
-        <TextField label="Mes de inicio" value={firstMonth} onChange={setFirstMonth} placeholder="9" />
-        <TextField label="Día límite" value={dueDay} onChange={setDueDay} placeholder="10" />
-        <TextField
+        <MoneyField label="Colegiatura mensual" value={monthly} onChange={setMonthly} placeholder="3200.00" />
+        <NumberField label="Mensualidades" value={months} onChange={setMonths} placeholder="10" />
+        <NumberField label="Mes de inicio" value={firstMonth} onChange={setFirstMonth} placeholder="9" />
+        {/*
+          Sin min/max nativos a propósito: esta pantalla ya revisa el rango y
+          explica por qué ("el 31 no existe en febrero"). El navegador, con
+          `max`, bloquearía el envío con un globo suyo, en su idioma, y esa
+          frase se perdería.
+        */}
+        <NumberField label="Día límite" value={dueDay} onChange={setDueDay} placeholder="10" />
+        <DateField
           label="Fecha límite de inscripción"
           value={enrollmentDue}
           onChange={setEnrollmentDue}
-          placeholder="2026-06-30"
         />
       </div>
 
@@ -599,9 +606,9 @@ function PlanForm({
           </span>
         </label>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
-          <TextField label="Recargo por día" value={dailyFee} onChange={setDailyFee} placeholder="10" />
-          <TextField label="Pronto pago (monto)" value={earlyAmount} onChange={setEarlyAmount} placeholder="100" />
-          <TextField label="Pronto pago (días hábiles)" value={earlyDays} onChange={setEarlyDays} placeholder="5" />
+          <MoneyField label="Recargo por día" value={dailyFee} onChange={setDailyFee} placeholder="10.00" />
+          <MoneyField label="Pronto pago (monto)" value={earlyAmount} onChange={setEarlyAmount} placeholder="100.00" />
+          <NumberField label="Pronto pago (días hábiles)" value={earlyDays} onChange={setEarlyDays} placeholder="5" />
         </div>
         <label style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, cursor: "pointer" }}>
           <input
@@ -689,7 +696,7 @@ function InscriptionSection({ concepts, onChange, onError }: InscriptionSectionP
 
       <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap", marginTop: 4 }}>
         <div style={{ flex: "1 1 240px" }}>
-          <TextField label="Nuevo concepto" value={name} onChange={setName} placeholder="Gastos adm y seguro" />
+          <TextField label="Nuevo concepto" value={name} onChange={setName} uppercase placeholder="GASTOS ADM Y SEGURO" />
         </div>
         <Btn kind="ghost" icon="plus" onClick={addConcept}>Agregar concepto</Btn>
       </div>
@@ -811,7 +818,7 @@ function ConceptCard({ concept, onChangeTiers, onRemove, onError }: ConceptCardP
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 10 }}>
-        <TextField label="Monto" value={amount} onChange={setAmount} placeholder="2200" />
+        <MoneyField label="Monto" value={amount} onChange={setAmount} placeholder="2200.00" />
         <DateField label="Vigente desde" value={from} onChange={setFrom} />
         <DateField label="Vigente hasta (opcional)" value={to} onChange={setTo} />
       </div>
@@ -825,33 +832,6 @@ interface ConceptCardProps {
   onChangeTiers: (tiers: PriceTier[]) => void;
   onRemove: () => void;
   onError: (message: string | undefined) => void;
-}
-
-/**
- * A real date picker. The first version asked for "2027-01-01" in a text box,
- * which is asking a person to be a date parser — and a typo there prices a whole
- * level wrong for a year.
- */
-function DateField({ label, value, onChange }: DateFieldProps): ReactElement {
-  return (
-    <label style={{ display: "block" }}>
-      <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--text-muted)", marginBottom: 6 }}>
-        {label}
-      </span>
-      <input
-        type="date"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        style={{ width: "100%", height: 42, padding: "0 12px", borderRadius: "var(--r-md)", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 14.5, fontFamily: "inherit" }}
-      />
-    </label>
-  );
-}
-
-interface DateFieldProps {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
 }
 
 interface InscriptionSectionProps {
@@ -975,8 +955,8 @@ function FeesSection({
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginBottom: 12 }}>
-        <TextField label="Nombre de la cuota" value={name} onChange={setName} placeholder="Cuota de Julio" />
-        <TextField label="Monto total" value={amount} onChange={setAmount} placeholder="1600" />
+        <TextField label="Nombre de la cuota" value={name} onChange={setName} uppercase placeholder="CUOTA DE JULIO" />
+        <MoneyField label="Monto total" value={amount} onChange={setAmount} placeholder="1600.00" />
       </div>
       <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-muted)", marginBottom: 8 }}>
         ¿En qué meses se cobra?

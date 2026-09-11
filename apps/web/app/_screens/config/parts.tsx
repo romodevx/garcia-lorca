@@ -1,24 +1,12 @@
 "use client";
 
-import type { ChangeEvent, CSSProperties, ReactElement, ReactNode } from "react";
+import type { CSSProperties, ReactElement, ReactNode } from "react";
 
 /**
  * Presentational primitives shared by the catalog panels. Kept dumb (no data
  * fetching) so each panel stays small and the design system (CSS tokens) is the
  * single source of visual truth. Every input is labelled for a11y + testability.
  */
-
-const inputStyle: CSSProperties = {
-  height: 44,
-  padding: "0 14px",
-  borderRadius: "var(--r-md)",
-  border: "1px solid var(--border)",
-  background: "var(--surface)",
-  color: "var(--text)",
-  fontSize: 15,
-  outline: "none",
-  width: "100%",
-};
 
 const labelStyle: CSSProperties = {
   display: "block",
@@ -56,120 +44,17 @@ export function Section({
   );
 }
 
-export function TextField({
-  label,
-  value,
-  onChange,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-}): ReactElement {
-  return (
-    <label style={{ display: "block" }}>
-      <span style={labelStyle}>{label}</span>
-      <input
-        aria-label={label}
-        value={value}
-        placeholder={placeholder}
-        onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
-        style={inputStyle}
-      />
-    </label>
-  );
-}
-
-export function NumberField({
-  label,
-  value,
-  onChange,
-  min = 0,
-}: {
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-  min?: number;
-}): ReactElement {
-  return (
-    <label style={{ display: "block" }}>
-      <span style={labelStyle}>{label}</span>
-      <input
-        type="number"
-        aria-label={label}
-        min={min}
-        value={Number.isNaN(value) ? "" : value}
-        onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(Number(e.target.value))}
-        style={inputStyle}
-      />
-    </label>
-  );
-}
-
-export function DateField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-}): ReactElement {
-  return (
-    <label style={{ display: "block" }}>
-      <span style={labelStyle}>{label}</span>
-      <input
-        type="date"
-        aria-label={label}
-        value={value}
-        onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
-        style={inputStyle}
-      />
-    </label>
-  );
-}
-
-export interface SelectOption {
-  value: string;
-  label: string;
-}
-
-export function SelectField({
-  label,
-  value,
-  options,
-  onChange,
-  placeholder,
-  disabled = false,
-}: {
-  label: string;
-  value: string;
-  options: readonly SelectOption[];
-  onChange: (value: string) => void;
-  placeholder?: string;
-  disabled?: boolean;
-}): ReactElement {
-  return (
-    <label style={{ display: "block" }}>
-      <span style={labelStyle}>{label}</span>
-      <select
-        aria-label={label}
-        value={value}
-        disabled={disabled}
-        onChange={(e: ChangeEvent<HTMLSelectElement>) => onChange(e.target.value)}
-        style={{ ...inputStyle, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.6 : 1 }}
-      >
-        <option value="">{placeholder ?? "Selecciona…"}</option>
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
+/*
+ * Aquí vivían TextField, NumberField, DateField y SelectField.
+ *
+ * Se fueron a app/_design/form/, que es donde captura TODO el sistema. Mientras
+ * estuvieron escondidos bajo _screens/config/, el resto de las pantallas no los
+ * encontró y dibujó sus propios inputs en línea: ~50 repartidos en 23 archivos,
+ * de los cuales sólo 3 usaban calendario y sólo 2 decían `required`.
+ *
+ * Lo que queda aquí es lo que de verdad sólo usa el catálogo: Section, el grupo
+ * de radios, la alerta, la pista de vacío y el chip de selección.
+ */
 
 export interface RadioOption<Value extends string = string> {
   value: Value;

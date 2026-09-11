@@ -8,7 +8,8 @@ import type {
   Teacher,
   TeachingAssignment,
 } from "../../teachers/api";
-import { EmptyHint, ErrorAlert, Section, SelectField, type SelectOption } from "../config/parts";
+import { SelectField, type SelectOption } from "../../_design/form";
+import { EmptyHint, ErrorAlert, Section } from "../config/parts";
 
 export interface AssignmentsPanelProps {
   cycles: readonly Cycle[];

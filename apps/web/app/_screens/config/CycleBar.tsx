@@ -4,7 +4,8 @@ import { useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { SlideOver } from "../../_design/SlideOver";
 import { ConfigError, type Cycle, type CreateCycleInput } from "../../config/api";
-import { DateField, EmptyHint, ErrorAlert, Section, SelectChip, TextField } from "./parts";
+import { DateField, TextField, useRequired } from "../../_design/form";
+import { EmptyHint, ErrorAlert, Section, SelectChip } from "./parts";
 
 export interface CycleBarProps {
   cycles: readonly Cycle[];
@@ -47,8 +48,12 @@ const STATUS_LABEL: Record<string, string> = {
  * now a drawer — the same one a new pupil or a payment opens — and this panel
  * does one thing: which year are we working on.
  */
+/** Fuera del componente: useRequired los toma como dependencia. */
+const CYCLE_REQUIRED = ["name", "startsOn", "endsOn"] as const;
+
 export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActivate }: CycleBarProps): ReactElement {
   const [creating, setCreating] = useState(false);
+  const form = useRequired(CYCLE_REQUIRED);
   const [name, setName] = useState("");
   const [startsOn, setStartsOn] = useState("");
   const [endsOn, setEndsOn] = useState("");
@@ -74,11 +79,9 @@ export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActiva
   };
 
   const submit = async (): Promise<void> => {
-    if (name.trim() === "" || startsOn === "" || endsOn === "") {
-      // A sentence, not a dead button: the person can see which field is missing.
-      setError("Escribe el nombre del ciclo y sus dos fechas.");
-      return;
-    }
+    // Cada campo que falta se marca en sí mismo. La frase que había aquí decía
+    // "escribe el nombre del ciclo y sus dos fechas" sin decir CUÁL faltaba.
+    if (!form.check({ name, startsOn, endsOn })) return;
     setPending(true);
     setError(undefined);
     try {
@@ -134,10 +137,33 @@ export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActiva
           onClose={() => { setCreating(false); setError(undefined); }}
           onSubmit={() => void submit()}
         >
-          <TextField label="Nombre" value={name} onChange={setName} placeholder="2026-2027" />
+          <TextField
+            label="Nombre"
+            value={name}
+            onChange={setName}
+            uppercase
+            required
+            placeholder="2026-2027"
+            error={form.errors.name}
+            onClearError={() => form.clear("name")}
+          />
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <DateField label="Inicia" value={startsOn} onChange={setStartsOn} />
-            <DateField label="Termina" value={endsOn} onChange={setEndsOn} />
+            <DateField
+              label="Inicia"
+              value={startsOn}
+              onChange={setStartsOn}
+              required
+              error={form.errors.startsOn}
+              onClearError={() => form.clear("startsOn")}
+            />
+            <DateField
+              label="Termina"
+              value={endsOn}
+              onChange={setEndsOn}
+              required
+              error={form.errors.endsOn}
+              onClearError={() => form.clear("endsOn")}
+            />
           </div>
           <div style={{ display: "flex", gap: 11, padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
             <span style={{ color: "var(--forest)", flexShrink: 0, marginTop: 1 }}>i</span>

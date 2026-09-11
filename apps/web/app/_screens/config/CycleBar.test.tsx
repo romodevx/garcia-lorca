@@ -79,3 +79,29 @@ describe("putting a school year into service", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/permiso/i);
   });
 });
+
+describe("la captura del ciclo", () => {
+  it("el nombre del ciclo se captura en mayúsculas y es obligatorio", async () => {
+    const user = userEvent.setup();
+    render(<CycleBar cycles={[]} selectedCycleId={undefined} onSelect={vi.fn()} onCreate={vi.fn()} onActivate={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: /Nuevo ciclo/ }));
+
+    const nombre = screen.getByLabelText("Nombre");
+    await user.type(nombre, "2026-2027 anual");
+    expect(nombre).toHaveValue("2026-2027 ANUAL");
+    expect(nombre).toHaveAttribute("aria-required", "true");
+  });
+
+  it("guardar en blanco marca los tres campos en rojo y no llama al API", async () => {
+    const onCreate = vi.fn();
+    const user = userEvent.setup();
+    render(<CycleBar cycles={[]} selectedCycleId={undefined} onSelect={vi.fn()} onCreate={onCreate} onActivate={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: /Nuevo ciclo/ }));
+    await user.click(screen.getByRole("button", { name: /Crear ciclo/ }));
+
+    expect(screen.getByLabelText("Nombre")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Inicia")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Termina")).toHaveAttribute("aria-invalid", "true");
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+});

@@ -3,7 +3,8 @@
 import { useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import type { CreateStudentInput } from "../../students/api";
-import { ErrorAlert, Section, SelectField, TextField, type SelectOption } from "../config/parts";
+import { SelectField, TextField, type SelectOption } from "../../_design/form";
+import { ErrorAlert, Section } from "../config/parts";
 
 // The admission level is a fixed enum on the students service; the gateway maps
 // these exact canonical (lowercase) values to the wire enum, so a free-text nivel
@@ -76,12 +77,12 @@ export function StudentCreatePanel({ onCreate }: StudentCreatePanelProps): React
     <Section title="Registrar alumno" subtitle="Alta de aspirante. La admisión inicia en «pendiente».">
       <form aria-label="Registrar alumno" onSubmit={submit}>
         <div style={{ display: "grid", gap: 12, marginBottom: 12 }}>
-          <TextField label="CURP" value={curp} onChange={setCurp} placeholder="XXXX000000XXXXXX00" />
-          <TextField label="Nombre" value={firstName} onChange={setFirstName} placeholder="Ada" />
-          <TextField label="Apellidos" value={lastName} onChange={setLastName} placeholder="Lovelace" />
-          <SelectField label="Nivel" value={level} options={LEVEL_OPTIONS} onChange={setLevel} placeholder="Selecciona un nivel…" />
-          <TextField label="Grado y grupo" value={gradeGroup} onChange={setGradeGroup} placeholder="1° A" />
-          <TextField label="Tutor" value={guardianName} onChange={setGuardianName} placeholder="Nombre del tutor" />
+          <TextField label="CURP" value={curp} onChange={setCurp} uppercase required placeholder="XXXX000000XXXXXX00" />
+          <TextField label="Nombre" value={firstName} onChange={setFirstName} uppercase required placeholder="ADA" />
+          <TextField label="Apellidos" value={lastName} onChange={setLastName} uppercase required placeholder="LOVELACE" />
+          <SelectField label="Nivel" value={level} options={LEVEL_OPTIONS} onChange={setLevel} required placeholder="Selecciona un nivel…" />
+          <TextField label="Grado y grupo" value={gradeGroup} onChange={setGradeGroup} uppercase placeholder="1° A" />
+          <TextField label="Tutor" value={guardianName} onChange={setGuardianName} uppercase placeholder="NOMBRE DEL TUTOR" />
         </div>
         <Btn type="submit" icon="plus" disabled={!canSubmit}>
           Registrar alumno

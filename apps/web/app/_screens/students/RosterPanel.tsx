@@ -3,7 +3,8 @@
 import { useEffect, useState, type ReactElement } from "react";
 import type { Cycle, Group } from "../../config/api";
 import type { Enrollment, Student, TransferInput } from "../../students/api";
-import { EmptyHint, ErrorAlert, Section, SelectField, type SelectOption } from "../config/parts";
+import { SelectField, type SelectOption } from "../../_design/form";
+import { EmptyHint, ErrorAlert, Section } from "../config/parts";
 import { EnrollmentRow } from "./EnrollmentRow";
 
 export interface RosterPanelProps {

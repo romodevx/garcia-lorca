@@ -4,7 +4,8 @@ import { useEffect, useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { SlideOver } from "../../_design/SlideOver";
 import type { CreateGradeLevelInput, GradeLevel, Level } from "../../config/api";
-import { EmptyHint, NumberField, Section, SelectChip, TextField } from "./parts";
+import { NumberField, TextField } from "../../_design/form";
+import { EmptyHint, Section, SelectChip } from "./parts";
 
 export interface GradeLevelsPanelProps {
   level: Level;
@@ -36,13 +37,15 @@ export function GradeLevelsPanel({
   const suggestion = nextOrdinal(gradeLevels);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
-  const [ordinal, setOrdinal] = useState(suggestion);
+  // Texto, no número: un campo de texto contiene texto, y Number("") es 0 —
+  // un orden 0 que nadie escribió.
+  const [ordinal, setOrdinal] = useState(String(suggestion));
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
   // The suggestion follows the list: adding a grade elsewhere, or switching
   // level, must not leave a stale number sitting in the form.
-  useEffect(() => { setOrdinal(nextOrdinal(gradeLevels)); }, [gradeLevels]);
+  useEffect(() => { setOrdinal(String(nextOrdinal(gradeLevels))); }, [gradeLevels]);
 
   const submit = async (): Promise<void> => {
     if (name.trim() === "") {
@@ -52,7 +55,7 @@ export function GradeLevelsPanel({
     setPending(true);
     setError(undefined);
     try {
-      await onCreate({ levelId: level.id, name: name.trim(), ordinal });
+      await onCreate({ levelId: level.id, name: name.trim(), ordinal: Number(ordinal) });
       setName("");
       setCreating(false);
     } catch {
@@ -89,8 +92,8 @@ export function GradeLevelsPanel({
           onClose={() => { setCreating(false); setError(undefined); }}
           onSubmit={() => void submit()}
         >
-          <TextField label="Nombre del grado" value={name} onChange={setName} placeholder="1° primaria" />
-          <NumberField label="Orden" value={ordinal} onChange={setOrdinal} min={1} />
+          <TextField label="Nombre del grado" value={name} onChange={setName} uppercase required placeholder="1° PRIMARIA" />
+          <NumberField label="Orden" value={ordinal} onChange={setOrdinal} required min={1} />
           <div style={{ display: "flex", gap: 11, padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
             <p style={{ fontSize: 13.5, color: "var(--text-muted)", lineHeight: 1.5, margin: 0 }}>
               El <strong>orden</strong> es el que verán las listas y las boletas. Ya viene sugerido

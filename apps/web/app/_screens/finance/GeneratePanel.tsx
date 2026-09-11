@@ -6,7 +6,8 @@ import { Btn } from "../../_design/Controls";
 import type { Cycle, Group } from "../../config/api";
 import type { ChargeConcept, GenerateChargesInput } from "../../finance/api";
 import { pesosToCents } from "../../_lib/money";
-import { DateField, ErrorAlert, Section, SelectField, TextField } from "./parts";
+import { DateField, SelectField, TextField } from "../../_design/form";
+import { ErrorAlert, Section } from "./parts";
 
 export interface GeneratePanelProps {
   concepts: readonly ChargeConcept[];

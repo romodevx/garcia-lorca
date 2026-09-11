@@ -4,7 +4,7 @@ import { useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import type { Group } from "../../config/api";
 import type { Enrollment, TransferInput } from "../../students/api";
-import { SelectField, TextField, type SelectOption } from "../config/parts";
+import { SelectField, TextField, type SelectOption } from "../../_design/form";
 
 export interface EnrollmentRowProps {
   enrollment: Enrollment;

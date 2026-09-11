@@ -10,7 +10,8 @@ import {
   type TeacherGroup,
   type TeachingAttendanceRosterRow,
 } from "../../teaching/api";
-import { DateField, EmptyHint, ErrorAlert, Section, SelectField, type SelectOption } from "../config/parts";
+import { DateField, SelectField, type SelectOption } from "../../_design/form";
+import { EmptyHint, ErrorAlert, Section } from "../config/parts";
 import { StatusCounters, StatusPicker, type CounterDef, type StatusOption } from "./parts";
 
 export interface TeacherAttendanceProps {

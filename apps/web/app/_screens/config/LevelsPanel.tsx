@@ -4,7 +4,8 @@ import { useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { SlideOver } from "../../_design/SlideOver";
 import type { CreateLevelInput, EnrollmentGranularity, Level } from "../../config/api";
-import { EmptyHint, RadioGroup, Section, SelectChip, TextField } from "./parts";
+import { TextField } from "../../_design/form";
+import { EmptyHint, RadioGroup, Section, SelectChip } from "./parts";
 
 export interface LevelsPanelProps {
   levels: readonly Level[];
@@ -87,8 +88,8 @@ export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate }: Lev
           onClose={() => { setCreating(false); setError(undefined); }}
           onSubmit={() => void submit()}
         >
-          <TextField label="Nombre" value={name} onChange={setName} placeholder="Primaria" />
-          <TextField label="Clave SEP" value={sepCode} onChange={setSepCode} placeholder="PRI" />
+          <TextField label="Nombre" value={name} onChange={setName} uppercase required placeholder="PRIMARIA" />
+          <TextField label="Clave SEP" value={sepCode} onChange={setSepCode} uppercase placeholder="PRI" />
           <RadioGroup legend="Inscripción" options={GRANULARITY_OPTIONS} value={granularity} onChange={setGranularity} />
           <div style={{ display: "flex", gap: 11, padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
             <p style={{ fontSize: 13.5, color: "var(--text-muted)", lineHeight: 1.5, margin: 0 }}>

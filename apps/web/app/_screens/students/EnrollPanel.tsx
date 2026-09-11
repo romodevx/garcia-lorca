@@ -4,7 +4,8 @@ import { useEffect, useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import type { Cycle, Group } from "../../config/api";
 import type { EnrollInput, Student } from "../../students/api";
-import { EmptyHint, ErrorAlert, Section, SelectField, type SelectOption } from "../config/parts";
+import { SelectField, type SelectOption } from "../../_design/form";
+import { EmptyHint, ErrorAlert, Section } from "../config/parts";
 
 export interface EnrollPanelProps {
   students: readonly Student[];

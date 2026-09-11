@@ -6,7 +6,8 @@ import type { Cycle } from "../../config/api";
 import type { Charge } from "../../finance/api";
 import type { Student } from "../../students/api";
 import { ACTION_COL_WIDTH, CHARGE_GRID, ChargeRow } from "./ChargeRow";
-import { AllClear, ErrorAlert, SelectField, TabBar } from "./parts";
+import { SelectField } from "../../_design/form";
+import { AllClear, ErrorAlert, TabBar } from "./parts";
 
 /** Which charges the table shows: the collection queue, or everything filtered. */
 export type ChargeFilter = "overdue" | "all";

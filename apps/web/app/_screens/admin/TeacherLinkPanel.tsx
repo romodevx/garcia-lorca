@@ -4,7 +4,8 @@ import { useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import type { AdminUser } from "../../admin/api";
 import type { Teacher } from "../../teachers/api";
-import { EmptyHint, ErrorAlert, Section, SelectField } from "./parts";
+import { SelectField } from "../../_design/form";
+import { EmptyHint, ErrorAlert, Section } from "./parts";
 
 export interface TeacherLinkPanelProps {
   teachers: readonly Teacher[];

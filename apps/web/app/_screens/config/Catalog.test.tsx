@@ -91,11 +91,11 @@ describe("Catalog — nested level → grade level", () => {
     ]);
     mocked.createLevel.mockResolvedValue({
       id: "l1",
-      name: "Primaria",
+      name: "PRIMARIA",
       sepCode: "PRI",
       enrollmentGranularity: "cycle",
     });
-    mocked.createGradeLevel.mockResolvedValue({ id: "g1", levelId: "l1", name: "1° primaria", ordinal: 1 });
+    mocked.createGradeLevel.mockResolvedValue({ id: "g1", levelId: "l1", name: "1° PRIMARIA", ordinal: 1 });
 
     render(<Catalog onBack={() => {}} />);
 
@@ -110,7 +110,7 @@ describe("Catalog — nested level → grade level", () => {
 
     await waitFor(() =>
       expect(mocked.createLevel).toHaveBeenCalledWith(expect.any(String), {
-        name: "Primaria",
+        name: "PRIMARIA",
         sepCode: "PRI",
         enrollmentGranularity: "cycle",
       }),
@@ -121,14 +121,14 @@ describe("Catalog — nested level → grade level", () => {
     await waitFor(() => expect(mocked.listGradeLevels).toHaveBeenCalledWith(expect.any(String), "l1"));
 
     await user.click(await screen.findByRole("button", { name: "Nuevo grado" }));
-    const gradeDrawer = await screen.findByRole("dialog", { name: /Nuevo grado en Primaria/ });
-    await user.type(within(gradeDrawer).getByLabelText("Nombre del grado"), "1° primaria");
+    const gradeDrawer = await screen.findByRole("dialog", { name: /Nuevo grado en PRIMARIA/ });
+    await user.type(within(gradeDrawer).getByLabelText("Nombre del grado"), "1° PRIMARIA");
     await user.click(within(gradeDrawer).getByRole("button", { name: "Crear grado" }));
 
     await waitFor(() =>
       expect(mocked.createGradeLevel).toHaveBeenCalledWith(expect.any(String), {
         levelId: "l1",
-        name: "1° primaria",
+        name: "1° PRIMARIA",
         ordinal: 1,
       }),
     );
@@ -146,7 +146,7 @@ describe("Catalog — todo se crea en modal", () => {
       { id: "c1", name: "2026-2027", status: "active", startsOn: "2026-08-01", endsOn: "2027-06-30" },
     ]);
     mocked.listLevels.mockResolvedValue([
-      { id: "l1", name: "Primaria", sepCode: "PRI", enrollmentGranularity: "cycle" },
+      { id: "l1", name: "PRIMARIA", sepCode: "PRI", enrollmentGranularity: "cycle" },
     ]);
 
     render(<Catalog onBack={() => {}} />);
@@ -175,7 +175,10 @@ describe("Catalog — todo se crea en modal", () => {
 
   // An incomplete form says which field is missing instead of presenting a dead
   // button that explains nothing.
-  it("says what is missing rather than disabling the button", async () => {
+  it("marca en el propio campo lo que falta, en vez de apagar el botón", async () => {
+    // Antes esto era una frase: "Escribe el nombre del ciclo y sus dos fechas".
+    // Decía que faltaba algo sin decir CUÁL, y en una forma de varios campos eso
+    // obliga a revisarlos todos. Ahora cada campo que falta se marca en sí mismo.
     const user = userEvent.setup();
     mocked.listCycles.mockResolvedValue([]);
 
@@ -185,7 +188,9 @@ describe("Catalog — todo se crea en modal", () => {
 
     await user.click(within(drawer).getByRole("button", { name: "Crear ciclo" }));
 
-    expect(await within(drawer).findByRole("alert")).toHaveTextContent(/nombre del ciclo y sus dos fechas/i);
+    expect(within(drawer).getByLabelText("Nombre")).toHaveAttribute("aria-invalid", "true");
+    expect(within(drawer).getByLabelText("Inicia")).toHaveAttribute("aria-invalid", "true");
+    expect(within(drawer).getByLabelText("Termina")).toHaveAttribute("aria-invalid", "true");
     expect(mocked.createCycle).not.toHaveBeenCalled();
   });
 });

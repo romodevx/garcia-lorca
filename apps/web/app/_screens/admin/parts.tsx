@@ -10,7 +10,8 @@ import type { CSSProperties, ReactElement, ReactNode } from "react";
  * control is labelled for a11y + testability.
  */
 
-export { EmptyHint, ErrorAlert, Section, SelectField, TextField } from "../config/parts";
+export { SelectField, TextField } from "../../_design/form";
+export { EmptyHint, ErrorAlert, Section } from "../config/parts";
 
 const legendStyle: CSSProperties = {
   fontSize: 13,

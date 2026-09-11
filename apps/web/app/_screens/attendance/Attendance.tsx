@@ -5,7 +5,8 @@ import { useTranslations } from "next-intl";
 import { Icon } from "../../_design/Icon";
 import { Toast } from "../../_design/Toast";
 import { PassList } from "./PassList";
-import { EmptyHint, ErrorAlert, DateField, Section, SelectField, StatusCounters, type SelectOption } from "./parts";
+import { DateField, SelectField, type SelectOption } from "../../_design/form";
+import { EmptyHint, ErrorAlert, Section, StatusCounters } from "./parts";
 import { usePassList } from "./usePassList";
 
 export interface AttendanceProps {

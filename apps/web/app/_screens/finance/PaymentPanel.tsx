@@ -5,7 +5,8 @@ import { useTranslations } from "next-intl";
 import { Btn } from "../../_design/Controls";
 import type { Charge, PaymentMethod, RegisterPaymentInput } from "../../finance/api";
 import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
-import { ErrorAlert, RadioGroup, Section, SelectField, TextField } from "./parts";
+import { SelectField, TextField } from "../../_design/form";
+import { ErrorAlert, RadioGroup, Section } from "./parts";
 
 const DEFAULT_METHOD: PaymentMethod = "cash";
 const METHODS: readonly PaymentMethod[] = ["cash", "card", "transfer"];

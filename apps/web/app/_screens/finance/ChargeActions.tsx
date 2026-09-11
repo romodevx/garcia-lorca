@@ -5,7 +5,8 @@ import { useTranslations } from "next-intl";
 import { Btn } from "../../_design/Controls";
 import type { Charge } from "../../finance/api";
 import { pesosToCents } from "../../_lib/money";
-import { ErrorAlert, TextField } from "./parts";
+import { TextField } from "../../_design/form";
+import { ErrorAlert } from "./parts";
 
 export interface ChargeActionsProps {
   charge: Charge;

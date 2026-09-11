@@ -11,7 +11,8 @@ import {
   type TeachingRosterRow,
   type TeachingTerm,
 } from "../../teaching/api";
-import { EmptyHint, ErrorAlert, Section, SelectField, type SelectOption } from "../config/parts";
+import { SelectField, type SelectOption } from "../../_design/form";
+import { EmptyHint, ErrorAlert, Section } from "../config/parts";
 import { GradeRow } from "./GradeRow";
 
 export interface TeacherCaptureProps {
