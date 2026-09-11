@@ -56,7 +56,7 @@ export function GeneratePanel({ concepts, cycles, cycleId, onCycleChange, groups
 
   return (
     <Section title={t("section.generate")} subtitle={t("hint.groupOptional")}>
-      <div style={{ display: "grid", gap: 14, maxWidth: 760 }}>
+      <div style={{ display: "grid", gap: 14 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
           <SelectField
             label={t("field.concept")}

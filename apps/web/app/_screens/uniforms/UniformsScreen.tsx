@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
+import { Page } from "../../_design/Page";
 import { listItems, UniformsError, type UniformItem } from "../../uniforms/api";
 import { CatalogPanel } from "./CatalogPanel";
 import { CounterSalePanel } from "./CounterSalePanel";
@@ -131,7 +132,7 @@ export function UniformsScreen({
   ];
 
   return (
-    <main style={{ maxWidth: 1180, margin: "0 auto", padding: narrow ? "20px 16px 60px" : "28px 32px 80px" }}>
+    <Page>
       <button
         onClick={onBack}
         style={{ display: "inline-flex", alignItems: "center", gap: 7, color: "var(--text-muted)", fontSize: 14.5, fontWeight: 600, marginBottom: 14 }}
@@ -222,6 +223,6 @@ export function UniformsScreen({
           <CatalogPanel items={items} onChanged={() => void load()} />
         )}
       </div>
-    </main>
+    </Page>
   );
 }

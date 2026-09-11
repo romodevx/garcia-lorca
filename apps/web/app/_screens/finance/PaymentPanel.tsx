@@ -95,7 +95,7 @@ export function PaymentPanel({ charges, selectedChargeId, onSelectCharge, studen
 
   return (
     <Section title={t("section.payment")} subtitle={t("hint.overpay")}>
-      <div style={{ display: "grid", gap: 14, maxWidth: 620 }}>
+      <div style={{ display: "grid", gap: 14 }}>
         <SelectField
           label={t("field.charge")}
           value={selectedChargeId}

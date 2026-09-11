@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
+import { Page } from "../../_design/Page";
 import {
   createRole,
   createUser,
@@ -92,7 +93,7 @@ export function Admin({ onBack }: AdminProps): ReactElement {
   }, []);
 
   return (
-    <div style={{ maxWidth: 1320, margin: "0 auto", padding: "24px 28px 64px" }}>
+    <Page>
       <button
         onClick={onBack}
         className="fade-up"
@@ -131,6 +132,6 @@ export function Admin({ onBack }: AdminProps): ReactElement {
           <TeacherLinkPanel teachers={teachers} users={users} onLink={handleLink} />
         </div>
       )}
-    </div>
+    </Page>
   );
 }

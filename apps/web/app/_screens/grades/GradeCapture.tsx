@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
+import { Page } from "../../_design/Page";
 import { listGroups, listSubjects, listTerms, type Group, type Subject, type Term } from "../../config/api";
 import {
   listTeachers,
@@ -114,7 +115,7 @@ export function GradeCapture({ onBack }: GradeCaptureProps): ReactElement {
   );
 
   return (
-    <div style={{ maxWidth: 1320, margin: "0 auto", padding: "24px 28px 64px" }}>
+    <Page>
       <button
         onClick={onBack}
         className="fade-up"
@@ -150,6 +151,6 @@ export function GradeCapture({ onBack }: GradeCaptureProps): ReactElement {
           />
         </div>
       )}
-    </div>
+    </Page>
   );
 }

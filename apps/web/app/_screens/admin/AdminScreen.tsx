@@ -6,6 +6,7 @@ import { Btn } from "../../_design/Controls";
 import { DrawerShell } from "../../_design/DrawerShell";
 import { EmailField, TextField } from "../../_design/form";
 import { Icon, type IconName } from "../../_design/Icon";
+import { Page } from "../../_design/Page";
 import type { ColorKey } from "../../_design/colors";
 import {
   createRole,
@@ -184,7 +185,7 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
   ];
 
   return (
-    <div style={{ maxWidth: 1320, margin: "0 auto", padding: "24px 28px 96px" }}>
+    <Page>
       <button onClick={onBack} className="fade-up" style={{ display: "inline-flex", alignItems: "center", gap: 7, color: "var(--text-muted)", fontSize: 14.5, fontWeight: 600, marginBottom: 14, cursor: "pointer" }}><Icon name="back" size={18} stroke={2.4} />Volver al inicio</button>
 
       <div className="fade-up" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16, marginBottom: 24 }}>
@@ -285,7 +286,7 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
         />
       )}
       {toast !== null && <div style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}><Icon name="check" size={20} stroke={2.6} />{toast}</div>}
-    </div>
+    </Page>
   );
 }
 

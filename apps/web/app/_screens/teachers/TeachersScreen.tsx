@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type ReactElement } from "react";
 
 import { Icon } from "../../_design/Icon";
+import { Page } from "../../_design/Page";
 import {
   listCycles,
   listGroups,
@@ -91,7 +92,7 @@ export function TeachersScreen({ onBack }: TeachersScreenProps): ReactElement {
   const linked = teachers.filter((t) => t.userId !== "").length;
 
   return (
-    <div style={{ maxWidth: 1320, margin: "0 auto", padding: "34px 28px 64px" }}>
+    <Page>
       <button
         onClick={onBack}
         className="fade-up"
@@ -139,7 +140,7 @@ export function TeachersScreen({ onBack }: TeachersScreenProps): ReactElement {
           />
         )}
       </div>
-    </div>
+    </Page>
   );
 }
 

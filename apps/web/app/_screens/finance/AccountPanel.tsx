@@ -51,7 +51,7 @@ export function AccountPanel({ students, onLoad }: AccountPanelProps): ReactElem
 
   return (
     <Section title={t("section.account")}>
-      <div style={{ display: "grid", gap: 16, maxWidth: 820 }}>
+      <div style={{ display: "grid", gap: 16 }}>
         <div style={{ display: "flex", gap: 14, alignItems: "flex-end", flexWrap: "wrap" }}>
           <div style={{ minWidth: 260 }}>
             <SelectField

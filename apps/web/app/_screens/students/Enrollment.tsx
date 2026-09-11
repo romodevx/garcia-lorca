@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
+import { Page } from "../../_design/Page";
 import { listGroups, listCycles, type Cycle, type Group } from "../../config/api";
 import {
   createStudent,
@@ -86,7 +87,7 @@ export function Enrollment({ onBack }: EnrollmentProps): ReactElement {
   }, []);
 
   return (
-    <div style={{ maxWidth: 1320, margin: "0 auto", padding: "24px 28px 64px" }}>
+    <Page>
       <button
         onClick={onBack}
         className="fade-up"
@@ -127,6 +128,6 @@ export function Enrollment({ onBack }: EnrollmentProps): ReactElement {
           </div>
         </div>
       )}
-    </div>
+    </Page>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
+import { Page } from "../../_design/Page";
 import type { AttendanceException, AttendanceStatus, Mark } from "../../attendance/api";
 import {
   getAttendanceRoster,
@@ -142,7 +143,7 @@ export function TeacherAttendance({ onBack, today }: TeacherAttendanceProps): Re
   const counters: readonly CounterDef[] = ORDER.map((status) => ({ status, label: LABEL[status], count: counts[status] }));
 
   return (
-    <div style={{ maxWidth: 1160, margin: "0 auto", padding: "24px 28px 96px" }}>
+    <Page>
       <button
         onClick={onBack}
         className="fade-up"
@@ -243,6 +244,6 @@ export function TeacherAttendance({ onBack, today }: TeacherAttendanceProps): Re
           </Section>
         </div>
       )}
-    </div>
+    </Page>
   );
 }
