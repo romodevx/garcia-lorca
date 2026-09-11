@@ -1,8 +1,21 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import HomePage from "./page";
-import { Providers } from "../test-utils";
+import { Providers, fakeRouter, resetFakeRouter, useFakePathname } from "../test-utils";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => fakeRouter,
+  usePathname: () => useFakePathname(),
+}));
+
+vi.mock("../auth/api", () => ({
+  login: vi.fn(),
+  changePassword: vi.fn(),
+  logout: vi.fn(),
+  refresh: vi.fn(() => Promise.reject(new Error("no session"))),
+  me: vi.fn(() => Promise.reject(new Error("no session"))),
+}));
 
 /**
  * El catch-all no mira el slug: quien decide qué pintar es <AppShell> al leer
@@ -11,13 +24,18 @@ import { Providers } from "../test-utils";
  * sólo existía "/", así que /finanzas era un 404 y F5 devolvía al tablero.
  */
 describe("la cáscara de la web", () => {
-  it("monta el shell, que arranca en la pantalla de entrada", () => {
+  beforeEach(() => resetFakeRouter("/"));
+
+  it("monta el shell, que sin sesión aterriza en la pantalla de entrada", async () => {
     render(
       <Providers>
         <HomePage />
       </Providers>
     );
-    expect(screen.getByRole("button", { name: "Entrar al sistema" })).toBeInTheDocument();
+
+    // Asíncrono a propósito: primero se pregunta si hay sesión. Pintar la
+    // entrada de inmediato la haría parpadear a quien recarga con sesión viva.
+    expect(await screen.findByRole("button", { name: "Entrar al sistema" })).toBeInTheDocument();
     expect(screen.getByText("Todo el colegio,", { exact: false })).toBeInTheDocument();
   });
 });
