@@ -1,0 +1,88 @@
+/**
+ * El mapa entre la barra de direcciones y la pantalla que se ve.
+ *
+ * Vive aparte de React a propósito: es la única pieza de navegación que puede
+ * probarse sin montar nada, y es la que define qué URLs existen. Hasta
+ * septiembre de 2026 la web entera respondía en "/" con la pantalla guardada en
+ * un useState, así que el navegador nunca veía una segunda página y el botón
+ * "atrás" sólo podía sacar del sitio.
+ */
+
+export type View =
+  | { screen: "login" }
+  | { screen: "changePassword" }
+  | { screen: "dashboard" }
+  | { screen: "finance" }
+  | { screen: "announcements" }
+  | { screen: "payments" }
+  | { screen: "config" }
+  | { screen: "students" }
+  | { screen: "grades" }
+  | { screen: "attendance" }
+  | { screen: "teachers" }
+  | { screen: "uniforms" }
+  | { screen: "admin" }
+  | { screen: "module"; moduleId: string };
+
+/** El prefijo de un módulo que aún no tiene pantalla propia. */
+const MODULE_PREFIX = "/modulo/";
+
+/**
+ * Las pantallas de una sola pieza. Los módulos sin backend van por
+ * MODULE_PREFIX, que lleva un id variable y no cabe en esta tabla.
+ */
+const BY_SCREEN = {
+  login: "/entrar",
+  changePassword: "/cambiar-contrasena",
+  dashboard: "/",
+  finance: "/finanzas",
+  announcements: "/avisos",
+  payments: "/pagos",
+  config: "/configuracion",
+  students: "/alumnos",
+  grades: "/calificaciones",
+  attendance: "/asistencia",
+  teachers: "/docentes",
+  uniforms: "/uniformes",
+  admin: "/administracion",
+} as const satisfies Record<Exclude<View["screen"], "module">, string>;
+
+const BY_PATH: ReadonlyMap<string, View> = new Map(
+  Object.entries(BY_SCREEN).map(([screen, path]) => [path, { screen } as View]),
+);
+
+/** La dirección que le corresponde a una pantalla. */
+export function viewToPath(view: View): string {
+  if (view.screen === "module") {
+    return `${MODULE_PREFIX}${view.moduleId}`;
+  }
+  return BY_SCREEN[view.screen];
+}
+
+/**
+ * La pantalla que le corresponde a una dirección.
+ *
+ * Una dirección que no reconocemos aterriza en el tablero: una pantalla en
+ * blanco por un dedazo en la URL es peor que llegar a casa. Eso vuelve a esta
+ * función total — para CUALQUIER texto devuelve una pantalla real—, que es lo
+ * que permite guardar el destino de un link directo como View ya resuelta y no
+ * como texto crudo. Un `?next=//evil.example.com` no tiene por dónde entrar.
+ */
+export function pathToView(pathname: string): View {
+  const clean =
+    pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+
+  const known = BY_PATH.get(clean);
+  if (known !== undefined) {
+    return known;
+  }
+
+  if (clean.startsWith(MODULE_PREFIX)) {
+    const moduleId = clean.slice(MODULE_PREFIX.length);
+    if (moduleId.length > 0 && !moduleId.includes("/")) {
+      return { screen: "module", moduleId };
+    }
+  }
+
+  return { screen: "dashboard" };
+}
