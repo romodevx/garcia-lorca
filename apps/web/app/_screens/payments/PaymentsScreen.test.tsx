@@ -62,7 +62,7 @@ describe("PaymentsScreen", () => {
     await user.type(screen.getByLabelText("Buscar alumno"), "Valen");
     await user.click(await screen.findByRole("button", { name: /Valentina Cruz/ }));
 
-    expect(await screen.findByRole("dialog", { name: "Cobrar" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: /^Cobrar/ })).toBeInTheDocument();
   });
 
   // THE BUG THIS EXISTS TO CLOSE.

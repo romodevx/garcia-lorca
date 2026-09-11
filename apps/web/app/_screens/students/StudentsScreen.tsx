@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement } from "react";
 import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
+import { DrawerShell } from "../../_design/DrawerShell";
 import { SelectField, TextField } from "../../_design/form";
 import { Icon, type IconName } from "../../_design/Icon";
 import type { ColorKey } from "../../_design/colors";
@@ -282,18 +283,25 @@ function QuickAdd({
   };
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(6,20,12,.5)", backdropFilter: "blur(4px)", display: "flex", justifyContent: "flex-end" }}>
-      <div onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Nuevo alumno" style={{ width: "min(520px, 100%)", height: "100%", background: "var(--surface)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow-pop)", display: "flex", flexDirection: "column", animation: "slideIn .28s var(--ease) both" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "22px 26px", borderBottom: "1px solid var(--border)" }}>
-          <div style={{ width: 48, height: 48, borderRadius: 14, display: "grid", placeItems: "center", background: "var(--forest)", color: "#fff" }}><Icon name="students" size={26} /></div>
-          <div style={{ flex: 1 }}>
-            <h2 style={{ fontSize: 21, fontWeight: 700, color: "var(--text)" }}>Nuevo alumno</h2>
-            <p style={{ fontSize: 13.5, color: "var(--text-muted)", marginTop: 2 }}>Alta rápida · la admisión inicia en trámite</p>
-          </div>
-          <button onClick={onClose} aria-label="Cerrar" style={{ ...qb, width: 40, height: 40 }}><Icon name="close" size={19} /></button>
-        </div>
-
-        <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px", display: "flex", flexDirection: "column", gap: 18 }}>
+    <DrawerShell
+      title="Nuevo alumno"
+      subtitle="Alta rápida · la admisión inicia en trámite"
+      icon="students"
+      onClose={onClose}
+      footer={
+        <>
+          <Btn kind="ghost" onClick={onClose}>Cancelar</Btn>
+          <div style={{ flex: 1 }} />
+          {/* "Crear", no "Guardar": esto hace un alumno que no existía. Y se
+              apaga SÓLO mientras la petición va en camino — una forma
+              incompleta recibe sus campos en rojo, no un control muerto. */}
+          <Btn icon="check" onClick={() => void submit()} disabled={saving} style={{ opacity: saving ? 0.45 : 1, height: 52, fontSize: 16 }}>
+            {saving ? "Creando…" : "Crear alumno"}
+          </Btn>
+        </>
+      }
+    >
+      <>
           <TextField
             label="CURP"
             value={curp}
@@ -362,20 +370,8 @@ function QuickAdd({
             <p style={{ fontSize: 13.5, color: "var(--text-muted)", lineHeight: 1.5, margin: 0 }}>El grupo <strong>se asigna solo</strong>, según el cupo de cada salón: se llena A y el siguiente alumno pasa a B. Los documentos se cargan después.</p>
           </div>
           {error !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{error}</p>}
-        </div>
-
-        <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "18px 26px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>
-          <Btn kind="ghost" onClick={onClose}>Cancelar</Btn>
-          <div style={{ flex: 1 }} />
-          {/* "Crear", not "Guardar": this makes a pupil that did not exist. And
-              disabled ONLY while the request is in flight — an incomplete form
-              gets a sentence, not a dead control. */}
-          <Btn icon="check" onClick={() => void submit()} disabled={saving} style={{ opacity: saving ? 0.45 : 1, height: 52, fontSize: 16 }}>
-            {saving ? "Creando…" : "Crear alumno"}
-          </Btn>
-        </div>
-      </div>
-    </div>
+      </>
+    </DrawerShell>
   );
 }
 
@@ -389,17 +385,29 @@ function StudentSheet({ st, groups, onClose, onEnroll }: { st: Student; groups: 
   ];
   const [gid, setGid] = useState("");
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(6,20,12,.5)", backdropFilter: "blur(4px)", display: "flex", justifyContent: "flex-end" }}>
-      <div onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Ficha del alumno" style={{ width: "min(460px,100%)", height: "100%", background: "var(--surface)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow-pop)", display: "flex", flexDirection: "column", animation: "slideIn .28s var(--ease) both" }}>
+    <DrawerShell
+      title="Ficha del alumno"
+      icon="students"
+      size="sm"
+      onClose={onClose}
+      header={
         <div style={{ padding: "26px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 16 }}>
           <Avatar name={`${st.firstName} ${st.lastName}`} color="forest" size={62} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <h2 style={{ fontSize: 20, fontWeight: 700, color: "var(--text)" }}>{st.firstName} {st.lastName}</h2>
             <div style={{ marginTop: 6 }}><StatusPill status={st.admissionStatus} /></div>
           </div>
-          <button onClick={onClose} aria-label="Cerrar" style={{ ...qb, width: 40, height: 40 }}><Icon name="close" size={19} /></button>
+          <button type="button" onClick={onClose} aria-label="Cerrar" style={{ width: 40, height: 40, borderRadius: "50%", display: "grid", placeItems: "center", background: "var(--surface-3)", border: "1px solid var(--border)", color: "var(--text-muted)", cursor: "pointer" }}><Icon name="close" size={19} /></button>
         </div>
-        <div style={{ flex: 1, overflowY: "auto", padding: "8px 26px" }}>
+      }
+      footer={
+        <>
+          <Btn kind="ghost" icon="documents" style={{ flex: 1 }}>Documentos</Btn>
+          <Btn icon="check" onClick={() => gid !== "" && void onEnroll(gid)} style={{ flex: 1, opacity: gid === "" ? 0.5 : 1, pointerEvents: gid === "" ? "none" : "auto" }}>Inscribir</Btn>
+        </>
+      }
+    >
+      <>
           {rows.map(([k, v]) => (
             <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 16, padding: "15px 0", borderBottom: "1px solid var(--border)" }}>
               <span style={{ fontSize: 14, color: "var(--text-muted)" }}>{k}</span>
@@ -418,13 +426,8 @@ function StudentSheet({ st, groups, onClose, onEnroll }: { st: Student; groups: 
               </div>
             </div>
           )}
-        </div>
-        <div style={{ display: "flex", gap: 10, padding: "18px 26px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>
-          <Btn kind="ghost" icon="documents" style={{ flex: 1 }}>Documentos</Btn>
-          <Btn icon="check" onClick={() => gid !== "" && void onEnroll(gid)} style={{ flex: 1, opacity: gid === "" ? 0.5 : 1, pointerEvents: gid === "" ? "none" : "auto" }}>Inscribir</Btn>
-        </div>
-      </div>
-    </div>
+      </>
+    </DrawerShell>
   );
 }
 

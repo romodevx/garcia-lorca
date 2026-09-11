@@ -50,7 +50,7 @@ describe("SlideOver", () => {
     await user.keyboard("{Escape}");
     expect(onClose).toHaveBeenCalledTimes(1);
 
-    await user.click(screen.getByTestId("slideover-backdrop"));
+    await user.click(screen.getByTestId("drawer-backdrop"));
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 
@@ -82,5 +82,66 @@ describe("SlideOver", () => {
   it("shows the reason a save was refused", () => {
     open({ error: "Ya existe un nivel con ese nombre." });
     expect(screen.getByRole("alert")).toHaveTextContent("Ya existe un nivel con ese nombre.");
+  });
+});
+
+describe("dónde se monta el cajón", () => {
+  const base = {
+    title: "Nuevo ciclo escolar",
+    subtitle: "El año que la escuela va a cursar",
+    icon: "calendar" as const,
+    submitLabel: "Crear ciclo",
+  };
+
+  it("sale a document.body, fuera de cualquier ancestro que pueda atraparlo", () => {
+    // EL DEFECTO QUE ESTO PREVIENE, visto en Configuración el 11-sep-2026:
+    // en Catalog.tsx el cajón nacía dentro de <div className="fade-up">, cuya
+    // animación de transform CREA UN BLOQUE CONTENEDOR. `inset: 0` dejaba de
+    // significar "el viewport" y pasaba a significar "esa columna de 1320px":
+    // el velo no cubría la barra superior, el cajón no llegaba al borde del
+    // monitor, y se podía cerrar sesión con el cajón "modal" abierto.
+    //
+    // Desde document.body ningún ancestro puede volver a capturarlo.
+    const { container } = render(
+      <div className="fade-up" style={{ transform: "translateY(0)" }}>
+        <SlideOver {...base} onClose={vi.fn()} onSubmit={vi.fn()}>
+          <p>contenido</p>
+        </SlideOver>
+      </div>,
+    );
+
+    expect(container.querySelector("[role=dialog]")).toBeNull();
+    expect(document.body.querySelector("[role=dialog]")).not.toBeNull();
+  });
+
+  it("se anuncia como modal", () => {
+    render(<SlideOver {...base} onClose={vi.fn()} onSubmit={vi.fn()}><p>c</p></SlideOver>);
+    expect(screen.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
+  });
+
+  it("una forma grande pide un cajón grande", () => {
+    // El tabulador de colegiaturas —inscripción multi-concepto, tramos,
+    // colegiatura, cobranza y cuotas— se capturaba por un túnel de 520px
+    // tuviera el monitor 1280 o 2560.
+    render(<SlideOver {...base} size="lg" onClose={vi.fn()} onSubmit={vi.fn()}><p>c</p></SlideOver>);
+    expect(screen.getByRole("dialog").className).toContain("drawer-lg");
+  });
+
+  it("el ancho vive en CSS, no en el JSX", () => {
+    // Un estilo en línea le gana a cualquier @media: mientras el ancho
+    // estuviera en el JSX, el cajón no podía responder al monitor.
+    render(<SlideOver {...base} onClose={vi.fn()} onSubmit={vi.fn()}><p>c</p></SlideOver>);
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.getAttribute("style") ?? "").not.toMatch(/width/);
+    expect(dialog.className).toContain("drawer-md");
+  });
+
+  it("mientras está abierto, la página de atrás no se desplaza", () => {
+    const { unmount } = render(
+      <SlideOver {...base} onClose={vi.fn()} onSubmit={vi.fn()}><p>c</p></SlideOver>
+    );
+    expect(document.body.style.overflow).toBe("hidden");
+    unmount();
+    expect(document.body.style.overflow).toBe("");
   });
 });

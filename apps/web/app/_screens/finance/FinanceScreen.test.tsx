@@ -146,7 +146,7 @@ describe("PayDrawer — money safety", () => {
     await user.clear(within(dialog).getByLabelText("Monto"));
     await user.type(within(dialog).getByLabelText("Monto"), "500");
 
-    await user.click(screen.getByTestId("pay-drawer-backdrop"));
+    await user.click(screen.getByTestId("drawer-backdrop"));
 
     expect(screen.getByRole("dialog", { name: /Registrar pago/i })).toBeInTheDocument();
     expect(within(dialog).getByLabelText("Monto")).toHaveValue("500");
@@ -157,7 +157,7 @@ describe("PayDrawer — money safety", () => {
     // The amount arrives pre-filled with the charge balance, so "untouched"
     // means clearing it — otherwise every drawer is dirty from the first paint.
     await user.clear(screen.getByRole("dialog", { name: /Registrar pago/i }).querySelector("input")!);
-    await user.click(screen.getByTestId("pay-drawer-backdrop"));
+    await user.click(screen.getByTestId("drawer-backdrop"));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: /Registrar pago/i })).not.toBeInTheDocument());
   });
 });

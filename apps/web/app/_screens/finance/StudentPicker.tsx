@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, type CSSProperties, type ReactElement } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactElement } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "../../_design/Icon";
 import type { CollectStudent } from "./CollectDrawer";
 
@@ -8,8 +9,10 @@ const overlay: CSSProperties = {
   position: "fixed", inset: 0, zIndex: 80, background: "rgba(6,20,12,.5)", backdropFilter: "blur(4px)",
   display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: "12vh",
 };
+// El ancho vive en globals.css (.modal-panel): un estilo en línea le gana a
+// cualquier @media, así que aquí no podría responder al monitor.
 const panel: CSSProperties = {
-  width: "min(560px, 92vw)", background: "var(--surface)", border: "1px solid var(--border)",
+  background: "var(--surface)", border: "1px solid var(--border)",
   borderRadius: "var(--r-xl)", boxShadow: "var(--shadow-pop)", overflow: "hidden",
 };
 const search: CSSProperties = {
@@ -33,8 +36,16 @@ export interface StudentPickerProps {
  * At most ten names are shown. A list longer than that is not read, it is
  * scrolled — and the answer is to type another letter.
  */
-export function StudentPicker({ students, onPick, onClose }: StudentPickerProps): ReactElement {
+export function StudentPicker({ students, onPick, onClose }: StudentPickerProps): ReactElement | null {
   const [q, setQ] = useState("");
+
+  // Por portal, como todo lo que se monta encima de la página. Sin él, un
+  // ancestro con `transform` animado —el .fade-up que este repo usa en todas
+  // partes— lo encerraría dentro de la columna de contenido, que es justo el
+  // defecto que el colegio vio en Configuración.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
 
   const matches = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -43,12 +54,12 @@ export function StudentPicker({ students, onPick, onClose }: StudentPickerProps)
       .slice(0, 10);
   }, [students, q]);
 
-  return (
+  return createPortal(
     <div
       style={overlay}
       onClick={onClose}
       onKeyDown={(e) => { if (e.key === "Escape") { onClose(); } }}>
-      <div role="dialog" aria-label="Buscar alumno para cobrar" style={panel} onClick={(e) => e.stopPropagation()}>
+      <div className="modal-panel" role="dialog" aria-modal="true" aria-label="Buscar alumno para cobrar" style={panel} onClick={(e) => e.stopPropagation()}>
         <div style={{ position: "relative", borderBottom: "1px solid var(--border)" }}>
           <span style={{ position: "absolute", left: 20, top: "50%", transform: "translateY(-50%)", color: "var(--text-faint)" }}>
             <Icon name="search" size={21} />
@@ -72,6 +83,7 @@ export function StudentPicker({ students, onPick, onClose }: StudentPickerProps)
           ))}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
