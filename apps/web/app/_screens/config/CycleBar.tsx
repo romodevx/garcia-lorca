@@ -138,7 +138,7 @@ export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActiva
           onSubmit={() => void submit()}
         >
           <TextField
-            label="Nombre"
+            label="Nombre del ciclo"
             value={name}
             onChange={setName}
             uppercase

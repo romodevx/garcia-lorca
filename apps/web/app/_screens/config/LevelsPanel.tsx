@@ -88,7 +88,7 @@ export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate }: Lev
           onClose={() => { setCreating(false); setError(undefined); }}
           onSubmit={() => void submit()}
         >
-          <TextField label="Nombre" value={name} onChange={setName} uppercase required placeholder="PRIMARIA" />
+          <TextField label="Nombre del nivel" value={name} onChange={setName} uppercase required placeholder="PRIMARIA" />
           <TextField label="Clave SEP" value={sepCode} onChange={setSepCode} uppercase placeholder="PRI" />
           <RadioGroup legend="Inscripción" options={GRANULARITY_OPTIONS} value={granularity} onChange={setGranularity} />
           <div style={{ display: "flex", gap: 11, padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>

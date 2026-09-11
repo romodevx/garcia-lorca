@@ -86,7 +86,7 @@ describe("la captura del ciclo", () => {
     render(<CycleBar cycles={[]} selectedCycleId={undefined} onSelect={vi.fn()} onCreate={vi.fn()} onActivate={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: /Nuevo ciclo/ }));
 
-    const nombre = screen.getByLabelText("Nombre");
+    const nombre = screen.getByLabelText("Nombre del ciclo");
     await user.type(nombre, "2026-2027 anual");
     expect(nombre).toHaveValue("2026-2027 ANUAL");
     expect(nombre).toHaveAttribute("aria-required", "true");
@@ -99,7 +99,7 @@ describe("la captura del ciclo", () => {
     await user.click(screen.getByRole("button", { name: /Nuevo ciclo/ }));
     await user.click(screen.getByRole("button", { name: /Crear ciclo/ }));
 
-    expect(screen.getByLabelText("Nombre")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Nombre del ciclo")).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByLabelText("Inicia")).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByLabelText("Termina")).toHaveAttribute("aria-invalid", "true");
     expect(onCreate).not.toHaveBeenCalled();

@@ -23,6 +23,7 @@ test.describe("el cajón cubre la pantalla", () => {
     await signIn(page);
     await page.goto("/configuracion");
     await page.getByRole("button", { name: /Nuevo ciclo/ }).first().click();
+    await expect(page.getByRole("dialog")).toBeVisible();
 
     const velo = await page.getByTestId("drawer-backdrop").boundingBox();
     const vp = page.viewportSize();
@@ -39,6 +40,7 @@ test.describe("el cajón cubre la pantalla", () => {
     await signIn(page);
     await page.goto("/configuracion");
     await page.getByRole("button", { name: /Nuevo ciclo/ }).first().click();
+    await expect(page.getByRole("dialog")).toBeVisible();
 
     const cerrar = page.getByRole("button", { name: "Cerrar sesión" });
     const caja = await cerrar.boundingBox();
@@ -59,6 +61,7 @@ test.describe("el cajón cubre la pantalla", () => {
     await signIn(page);
     await page.goto("/configuracion");
     await page.getByRole("button", { name: /Nuevo ciclo/ }).first().click();
+    await expect(page.getByRole("dialog")).toBeVisible();
 
     const caja = await page.getByRole("dialog").boundingBox();
     const vp = page.viewportSize();

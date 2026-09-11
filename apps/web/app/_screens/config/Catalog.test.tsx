@@ -61,7 +61,7 @@ describe("Catalog — cycles", () => {
     // shows a choice OR a form, never both at once.
     await user.click(await screen.findByRole("button", { name: "Nuevo ciclo" }));
     const drawer = await screen.findByRole("dialog", { name: "Nuevo ciclo escolar" });
-    await user.type(within(drawer).getByLabelText("Nombre"), "2026-2027");
+    await user.type(within(drawer).getByLabelText(/^Nombre del (ciclo|nivel)$/), "2026-2027");
     fireEvent.change(within(drawer).getByLabelText("Inicia"), { target: { value: "2026-08-01" } });
     fireEvent.change(within(drawer).getByLabelText("Termina"), { target: { value: "2027-06-30" } });
 
@@ -104,7 +104,7 @@ describe("Catalog — nested level → grade level", () => {
     // click on every single one.
     await user.click(await screen.findByRole("button", { name: "Nuevo nivel" }));
     const levelDrawer = await screen.findByRole("dialog", { name: "Nuevo nivel educativo" });
-    await user.type(within(levelDrawer).getByLabelText("Nombre"), "Primaria");
+    await user.type(within(levelDrawer).getByLabelText(/^Nombre del (ciclo|nivel)$/), "Primaria");
     await user.type(within(levelDrawer).getByLabelText("Clave SEP"), "PRI");
     await user.click(within(levelDrawer).getByRole("button", { name: "Crear nivel" }));
 
@@ -188,7 +188,7 @@ describe("Catalog — todo se crea en modal", () => {
 
     await user.click(within(drawer).getByRole("button", { name: "Crear ciclo" }));
 
-    expect(within(drawer).getByLabelText("Nombre")).toHaveAttribute("aria-invalid", "true");
+    expect(within(drawer).getByLabelText(/^Nombre del (ciclo|nivel)$/)).toHaveAttribute("aria-invalid", "true");
     expect(within(drawer).getByLabelText("Inicia")).toHaveAttribute("aria-invalid", "true");
     expect(within(drawer).getByLabelText("Termina")).toHaveAttribute("aria-invalid", "true");
     expect(mocked.createCycle).not.toHaveBeenCalled();
