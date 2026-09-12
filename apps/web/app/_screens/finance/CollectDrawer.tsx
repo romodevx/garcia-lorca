@@ -185,6 +185,11 @@ export function CollectDrawer({ student, onClose, onCollected }: CollectDrawerPr
       icon="card"
       size="lg"
       onClose={onClose}
+      // El velo original de este cajón NO tenía onClick ni Esc, a propósito: es
+      // la ventanilla, y el monto, la forma de pago y la referencia ya tecleados
+      // no pueden irse con un clic fuera de lugar. La cáscara común cierra por
+      // omisión, así que aquí hay que decirlo. El ✕ y Cancelar siguen cerrando.
+      dismissible={false}
       padded={false}
     >
       <>

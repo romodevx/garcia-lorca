@@ -37,6 +37,8 @@ export interface SlideOverProps {
   onClose: () => void;
   onSubmit: () => void;
   size?: SlideOverSize;
+  /** Ver DrawerShell: apaga el cierre por velo y por Esc, nunca el del botón. */
+  dismissible?: boolean;
   children: ReactNode;
 }
 
@@ -50,6 +52,7 @@ export function SlideOver({
   onClose,
   onSubmit,
   size = "md",
+  dismissible = true,
   children,
 }: SlideOverProps): ReactElement | null {
   return (
@@ -58,6 +61,7 @@ export function SlideOver({
       subtitle={subtitle}
       icon={icon}
       size={size}
+      dismissible={dismissible}
       onClose={onClose}
       onSubmit={() => {
         if (!pending) onSubmit();

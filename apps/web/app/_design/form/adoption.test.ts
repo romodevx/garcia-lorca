@@ -11,9 +11,22 @@ import { describe, expect, it } from "vitest";
  * fecha o capture un correo a mano falla aquí el día que se escribe.
  */
 
+/**
+ * El código sin sus comentarios.
+ *
+ * Hace falta: estas pruebas describen en un comentario el patrón que prohíben
+ * ("aquí vivía un `Number(x.replace(...)) * 100`"), y sin esto el escáner se
+ * denuncia a sí mismo leyendo la explicación.
+ */
+function soloCodigo(fuente: string): string {
+  return fuente
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+}
+
 const SCREENS = globSync("app/_screens/**/*.tsx", { cwd: process.cwd() })
   .filter((f) => !f.includes(".test."))
-  .map((f) => [f, readFileSync(f, "utf8")] as const);
+  .map((f) => [f, soloCodigo(readFileSync(f, "utf8"))] as const);
 
 /** La pantalla de entrada y las de contraseña no pasan por la capa. */
 const AUTH = ["Login.tsx", "ChangePassword.tsx", "SetPassword.tsx"];
@@ -61,10 +74,24 @@ describe("la capa de captura, en todo el sistema", () => {
   });
 
   it("nadie reimplementa el formateo de dinero", () => {
-    // Llegaron a existir cuatro lectores/formateadores de pesos; uno de ellos
-    // leía "1850,50" como $185,050.
+    // Llegaron a existir cuatro formateadores de pesos; uno redondeaba a pesos
+    // enteros y mostraba $1,851 por un saldo de $1,850.50.
     const offenders = SCREENS
       .filter(([, src]) => /Intl\.NumberFormat\([^)]*currency/.test(src) || /currency:\s*"MXN"/.test(src))
+      .map(([f]) => f);
+    expect(offenders).toEqual([]);
+  });
+
+  it("nadie LEE pesos con su propio parser", () => {
+    // Esta es la que faltaba, y por faltar dejó pasar dos sobrecobros de cien
+    // veces en uniformes. El patrón es siempre el mismo: quitar caracteres a la
+    // brava y multiplicar por 100. Al borrar TODA coma, "1850,50" se vuelve
+    // 185050 pesos — el precio de un suéter, o el cambio que se le devuelve a
+    // un padre en el mostrador.
+    //
+    // Formatear mal se ve; leer mal no se ve hasta que el dinero ya se movió.
+    const offenders = SCREENS
+      .filter(([, src]) => /Number\([^)]*replace\([^)]*\)\s*\)\s*\*\s*100/.test(src) || /parseFloat\([^)]*\)\s*\*\s*100/.test(src))
       .map(([f]) => f);
     expect(offenders).toEqual([]);
   });

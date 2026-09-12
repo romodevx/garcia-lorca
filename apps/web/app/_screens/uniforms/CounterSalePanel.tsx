@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState, type ReactElement } from "react";
+import { pesosToCents } from "../../_lib/money";
 import { Btn } from "../../_design/Controls";
 import { MoneyField } from "../../_design/form";
 import { Icon } from "../../_design/Icon";
@@ -57,8 +58,11 @@ export function CounterSalePanel({
 
   const total = useMemo(() => cart.reduce((sum, line) => sum + line.unitPriceCents * line.qty, 0), [cart]);
   const change = useMemo(() => {
-    const paid = Math.round(Number(received.replace(/[^0-9.]/g, "")) * 100);
-    return Number.isFinite(paid) && paid > total ? paid - total : 0;
+    // Estricto a propósito: el lector permisivo que había aquí leía "1850,50"
+    // como 185050 pesos y anunciaba un cambio cien veces mayor del que hay en
+    // la caja. Un monto que no se entiende no produce cambio.
+    const paid = pesosToCents(received);
+    return !Number.isNaN(paid) && paid > total ? paid - total : 0;
   }, [received, total]);
 
   const reset = useCallback((): void => {

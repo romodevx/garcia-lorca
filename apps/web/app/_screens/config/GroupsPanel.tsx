@@ -47,7 +47,14 @@ export function GroupsPanel({ cycle, gradeLevel, groups, onCreate }: GroupsPanel
     setPending(true);
     setError(undefined);
     try {
-      await onCreate({ cycleId: cycle.id, gradeLevelId: gradeLevel.id, name: name.trim(), capacity: Number(capacity) });
+      const capacityNumero = Number(capacity);
+      if (capacity.trim() === "" || !Number.isFinite(capacityNumero)) {
+        // Number("") es 0, y un 0 que nadie escribió es un dato falso: un grupo
+        // con cupo 0 no acepta alumnos y la asignación automática lo salta.
+        setError("El cupo del grupo es obligatorio.");
+        return;
+      }
+      await onCreate({ cycleId: cycle.id, gradeLevelId: gradeLevel.id, name: name.trim(), capacity: capacityNumero });
       setCreating(false);
     } catch {
       setError("No se pudo crear el grupo. Revisa que no exista ya con ese nombre.");

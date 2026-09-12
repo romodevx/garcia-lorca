@@ -47,10 +47,16 @@ test.describe("el cajón cubre la pantalla", () => {
     expect(caja, "el botón de cerrar sesión existe").not.toBeNull();
 
     // Quién recibiría el clic en ese punto: el velo, no el botón.
+    //
+    // El `el?.closest(...) !== null` que había aquí daba TRUE cuando
+    // elementFromPoint devolvía null — undefined !== null— así que la prueba
+    // pasaba sin que el velo tapara nada. Con `caja` en null el punto era (0,0),
+    // que además nunca cae sobre el botón.
+    expect(caja, "no se pudo ubicar el botón de cerrar sesión").not.toBeNull();
     const enCima = await page.evaluate(
       ([x, y]) => {
         const el = document.elementFromPoint(x as number, y as number);
-        return el?.closest("[data-testid=drawer-backdrop]") !== null;
+        return el !== null && el.closest("[data-testid=drawer-backdrop]") !== null;
       },
       [(caja?.x ?? 0) + (caja?.width ?? 0) / 2, (caja?.y ?? 0) + (caja?.height ?? 0) / 2],
     );

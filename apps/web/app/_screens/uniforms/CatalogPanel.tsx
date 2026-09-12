@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState, type ReactElement } from "react";
+import { pesosToCents } from "../../_lib/money";
 import { Btn } from "../../_design/Controls";
 import { MoneyField, TextField } from "../../_design/form";
 import { createItem, updateItem, UniformsError, upsertSizes, type ItemCategory, type Level, type SizeSpec, type UniformItem } from "../../uniforms/api";
@@ -187,8 +188,13 @@ function CreateDrawer({
   const [pesos, setPesos] = useState("");
   const [pending, setPending] = useState(false);
 
-  const priceCents = Math.round(Number(pesos.replace(/[^0-9.]/g, "")) * 100);
-  const valid = code.trim() !== "" && name.trim() !== "" && Number.isFinite(priceCents) && priceCents >= 0;
+  // El lector ESTRICTO de _lib/money. El que vivía aquí hacía
+  // `Number(pesos.replace(/[^0-9.]/g, "")) * 100`, que borra toda coma incluida
+  // la decimal: un precio escrito "1850,50" se guardaba como $185,050.
+  // MoneyField no salva de esto — cuando el texto no es un monto reconocible
+  // deliberadamente no lo corrige, para que la persona lo vea y lo arregle.
+  const priceCents = pesosToCents(pesos);
+  const valid = code.trim() !== "" && name.trim() !== "" && !Number.isNaN(priceCents);
 
   const save = useCallback(async (): Promise<void> => {
     setPending(true);

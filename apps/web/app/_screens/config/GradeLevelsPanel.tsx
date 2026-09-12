@@ -55,7 +55,14 @@ export function GradeLevelsPanel({
     setPending(true);
     setError(undefined);
     try {
-      await onCreate({ levelId: level.id, name: name.trim(), ordinal: Number(ordinal) });
+      const ordinalNumero = Number(ordinal);
+      if (ordinal.trim() === "" || !Number.isFinite(ordinalNumero)) {
+        // Number("") es 0, y un 0 que nadie escribió es un dato falso: un grupo
+        // con cupo 0 no acepta alumnos y la asignación automática lo salta.
+        setError("El orden del grado es obligatorio.");
+        return;
+      }
+      await onCreate({ levelId: level.id, name: name.trim(), ordinal: ordinalNumero });
       setName("");
       setCreating(false);
     } catch {

@@ -115,6 +115,17 @@ export function AppShell(): ReactElement {
   // un parpadeo de datos a quien no ha entrado) ni la pantalla de entrada (sería
   // un parpadeo de login a quien recarga con la sesión viva).
   const [restoring, setRestoring] = useState(true);
+
+  /**
+   * Si hay una sesión viva. NO es "ya cargó el principal".
+   *
+   * Son cosas distintas: `me()` puede fallar con la sesión perfectamente buena
+   * —el gateway rechaza todo mientras hay una rotación pendiente— y en ese caso
+   * el tablero dice que no pudo resolver los permisos y ofrece reintentar. Si la
+   * guardia mirara `principal`, esa persona acabaría en la pantalla de entrada
+   * sin haber perdido su sesión.
+   */
+  const [authenticated, setAuthenticated] = useState(false);
   const [principal, setPrincipal] = useState<MeResult | undefined>(undefined);
   // Distinct from "principal is undefined": that means the answer is still
   // coming, and the dashboard shows a skeleton for it. A FAILURE shown as a
@@ -196,6 +207,7 @@ export function AppShell(): ReactElement {
 
     void restore().then((alive) => {
       if (!active) return;
+      setAuthenticated(alive);
       const asked = pathToView(bootPath.current);
       if (!alive) {
         // Sólo vale la pena recordar un destino que NO sea el que se ofrece por
@@ -215,7 +227,10 @@ export function AppShell(): ReactElement {
     return () => {
       active = false;
     };
-    // Corre UNA vez, al montar: bootPath y goReplacing son estables.
+    // Corre UNA vez, al montar. `bootPath` es justamente la dirección CONGELADA
+    // con la que se abrió la pestaña, y volver a correr esto al navegar
+    // re-preguntaría la sesión en cada clic.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleLogin = async (email: string, password: string): Promise<void> => {
@@ -237,6 +252,12 @@ export function AppShell(): ReactElement {
         res = await apiLogin(API_URL, email, password);
       }
       if (res.mustChangePassword) {
+        // El destino pendiente se descarta aquí. Sin esto sobrevivía al cambio
+        // forzado —esta rama sale antes de la línea que lo limpia— y la
+        // SIGUIENTE persona que entrara en la misma pestaña compartida
+        // aterrizaba en el módulo que pidió la anterior.
+        pendingDestination.current = undefined;
+        setAuthenticated(true);
         // `replace`: una vez cambiada, esa pantalla ya no es un destino.
         goReplacing({ screen: "changePassword" });
         return;
@@ -245,6 +266,7 @@ export function AppShell(): ReactElement {
       // shows the real identity and the dashboard knows what to show. A failure
       // is non-fatal for the chrome but NOT invisible: loadPrincipal records it
       // and the dashboard says so.
+      setAuthenticated(true);
       await loadPrincipal();
       // De vuelta al link que trajo aquí a esta persona, si lo hubo.
       const target = pendingDestination.current ?? { screen: "dashboard" as const };
@@ -294,6 +316,7 @@ export function AppShell(): ReactElement {
     // session that was never started is not worth 468 KB.
     void endSession(API_URL, apiLogout, providerLoginEnabled(), () => import("./auth/firebase"));
     setPrincipal(undefined);
+    setAuthenticated(false);
     goReplacing({ screen: "login" });
   };
 
@@ -318,9 +341,13 @@ export function AppShell(): ReactElement {
   useEffect(() => onSessionLost(() => {
     logout();
     setPrincipal(undefined);
+    setAuthenticated(false);
     setPrincipalFailed(false);
     goReplacing({ screen: "login" });
     setAuthError("Tu sesión terminó. Vuelve a entrar.");
+    // Se suscribe UNA vez. Re-suscribir en cada render dejaría varios oyentes
+    // cerrando la misma sesión.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }), []);
 
   useSessionTimeout({
@@ -414,6 +441,31 @@ export function AppShell(): ReactElement {
         </span>
       </div>
     );
+  }
+
+  /**
+   * LA GUARDIA. Sin sesión no se pinta ninguna pantalla del sistema, diga lo que
+   * diga la dirección.
+   *
+   * Hace falta por dos caminos distintos que terminan igual:
+   *
+   * 1. `router.replace` mueve el pathname de forma ASÍNCRONA. El render que
+   *    sigue a la restauración trae `restoring` ya en false y todavía la
+   *    dirección vieja, así que un link directo a /finanzas se pintaba entero
+   *    —barra, módulo y sus llamadas— antes de que aterrizara el redirect.
+   *
+   * 2. `replace` sólo sustituye la entrada ACTUAL del historial. Las anteriores
+   *    siguen siendo rutas protegidas, así que después de cerrar sesión el botón
+   *    "atrás" volvía a pintar el tablero. En la computadora del mostrador eso
+   *    es justo lo que no debe pasar, y es lo que un comentario de este archivo
+   *    afirmaba haber evitado usando `replace` — no lo lograba.
+   *
+   * Esto es comodidad y respeto por quien mira la pantalla, NO un control de
+   * seguridad: el gateway sigue siendo la frontera y responde 401 sin cookie.
+   */
+  const publicScreen = view.screen === "login" || view.screen === "changePassword";
+  if (!authenticated && !publicScreen) {
+    return <Login theme={theme} onToggle={toggle} onSubmit={handleLogin} error={authError} pending={pending} />;
   }
 
   if (view.screen === "login") {

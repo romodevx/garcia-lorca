@@ -290,16 +290,28 @@ input { font-family: var(--font-ui); }
   .drawer-lg { width: min(1100px, 100%); }
 }
 
+/* El cuerpo del cajón. Vive aquí y no en el JSX por la misma razón que los
+   anchos: un estilo en línea le gana a cualquier @media, y mientras el
+   `display` estuvo en línea las dos columnas de abajo NUNCA se activaron. */
+.drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+/* El cobro trae su propia forma con su propio desplazamiento: aquí la caja no
+   manda, sólo aloja. */
+.drawer-body-bare { gap: 0; }
+
 /* En un monitor ancho la forma grande deja de ser una tira vertical de cuarenta
    campos. `break-inside` evita que una etiqueta quede en una columna y su campo
    en la otra. */
 @media (min-width: 1280px) {
-  .drawer-lg .drawer-body {
+  .drawer-lg .drawer-body:not(.drawer-body-bare) {
     display: block;
     column-count: 2;
     column-gap: 26px;
   }
-  .drawer-lg .drawer-body > * {
+  .drawer-lg .drawer-body:not(.drawer-body-bare) > * {
     break-inside: avoid;
     margin-bottom: 18px;
   }

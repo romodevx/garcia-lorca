@@ -83,6 +83,15 @@ export interface DrawerShellProps {
    * desplazamiento deja la de afuera rodando sobre la de adentro.
    */
   padded?: boolean;
+  /**
+   * Si un clic en el velo y la tecla Esc cierran. `true` por omisión.
+   *
+   * Se apaga donde hay algo que perder: una forma de cobro a medio capturar no
+   * puede irse por un clic fuera de lugar en el mostrador. Es SÓLO para esas
+   * dos vías — el botón ✕ y "Cancelar" siguen cerrando siempre, porque un
+   * control que no responde es peor que un cierre accidental.
+   */
+  dismissible?: boolean;
   children: ReactNode;
 }
 
@@ -96,15 +105,17 @@ export function DrawerShell({
   footer,
   header,
   padded = true,
+  dismissible = true,
   children,
 }: DrawerShellProps): ReactElement | null {
   useEffect(() => {
+    if (!dismissible) return;
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, dismissible]);
 
   // La página de atrás no se desplaza mientras el cajón está abierto: rodar la
   // lista por debajo hace perder el renglón que se estaba atendiendo.
@@ -169,12 +180,15 @@ export function DrawerShell({
       )}
 
       <div
-        className="drawer-body"
-        style={
-          padded
-            ? { flex: 1, overflowY: "auto", padding: "22px 26px", display: "flex", flexDirection: "column", gap: 18 }
-            : { flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }
-        }
+        className={padded ? "drawer-body" : "drawer-body drawer-body-bare"}
+        /*
+         * El `display` NO va en línea. Iba, y por eso las dos columnas del cajón
+         * grande nunca se activaron: un estilo en línea le gana a la regla de
+         * globals.css, y `column-count` ni siquiera aplica a un contenedor flex.
+         * Es la misma lección que este trabajo escribió sobre los anchos de
+         * página, repetida sin darse cuenta unas horas después.
+         */
+        style={padded ? { flex: 1, overflowY: "auto", padding: "22px 26px" } : { flex: 1, minHeight: 0 }}
       >
         {children}
       </div>
@@ -202,7 +216,7 @@ export function DrawerShell({
   return createPortal(
     <div
       data-testid="drawer-backdrop"
-      onClick={onClose}
+      onClick={dismissible ? onClose : undefined}
       style={{
         position: "fixed",
         inset: 0,

@@ -189,7 +189,12 @@ export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): React
           </div>
         )}
 
-        <TextField label="Título" value={title} onChange={setTitle} uppercase required placeholder="JUNTA DE PADRES" />
+        {/*
+          SIN `uppercase`. El título es lo que llega a la notificación del
+          celular de los papás, así que es cuerpo del aviso, no dato de
+          catálogo — y la propia capa de captura dice que un aviso no se grita.
+        */}
+        <TextField label="Título" value={title} onChange={setTitle} required placeholder="Junta de padres" />
 
         <label style={{ display: "block" }}>
           <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Mensaje</span>

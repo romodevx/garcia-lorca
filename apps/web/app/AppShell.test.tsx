@@ -448,3 +448,49 @@ describe("la dirección manda sobre la pantalla", () => {
     spy.mockRestore();
   });
 });
+
+describe("la guardia de sesión", () => {
+  it("un link directo sin sesión NUNCA pinta la pantalla protegida", async () => {
+    // `router.replace` actualiza el pathname de forma asíncrona. Si `restoring`
+    // se apaga en el mismo tick, el render siguiente trae restoring=false y la
+    // dirección VIEJA: /finanzas se pinta entero —barra, módulo y sus llamadas—
+    // antes de que aterrice el redirect. Es exactamente el parpadeo que el
+    // comentario de arriba decía evitar.
+    resetFakeRouter("/finanzas");
+    render(
+      <Providers flags={{ module_finance: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    await screen.findByRole("button", { name: "Entrar al sistema" });
+    expect(screen.queryByRole("heading", { name: "Finanzas" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cerrar sesión" })).toBeNull();
+  });
+
+  it("tras cerrar sesión, 'atrás' no revive el tablero", async () => {
+    // `replace` sólo sustituye la entrada ACTUAL del historial; las anteriores
+    // siguen siendo rutas protegidas. Sin una guardia sobre el principal, el
+    // botón atrás vuelve a pintar la cáscara del tablero para alguien que ya
+    // cerró sesión — en la computadora del mostrador, justo lo que no debe pasar.
+    resetFakeRouter("/finanzas");
+    mockMe.mockResolvedValue(OWNER_ME);
+    mockLogout.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(
+      <Providers flags={{ module_finance: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    await screen.findByRole("heading", { name: "Finanzas" });
+    await user.click(screen.getByRole("button", { name: "Cerrar sesión" }));
+    await screen.findByRole("button", { name: "Entrar al sistema" });
+
+    // El "atrás" del navegador: la dirección regresa sola a una ruta protegida.
+    act(() => { fakeRouter.push("/finanzas"); });
+
+    expect(screen.queryByRole("heading", { name: "Finanzas" })).toBeNull();
+    expect(await screen.findByRole("button", { name: "Entrar al sistema" })).toBeInTheDocument();
+  });
+});

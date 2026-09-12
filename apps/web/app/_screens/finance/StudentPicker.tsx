@@ -45,7 +45,6 @@ export function StudentPicker({ students, onPick, onClose }: StudentPickerProps)
   // defecto que el colegio vio en Configuración.
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-  if (!mounted) return null;
 
   const matches = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -53,6 +52,13 @@ export function StudentPicker({ students, onPick, onClose }: StudentPickerProps)
       .filter((s) => needle === "" || `${s.firstName} ${s.lastName}`.toLowerCase().includes(needle))
       .slice(0, 10);
   }, [students, q]);
+
+  // TODOS los hooks quedan arriba. Este `return` estuvo un rato encima del
+  // useMemo, y eso hacía que el primer render corriera tres hooks y el segundo
+  // cuatro: React tira "Rendered more hooks than during the previous render" y
+  // Finanzas → Cobrar se cae. Ahora la regla react-hooks/rules-of-hooks lo
+  // impide en todo el monorepo.
+  if (!mounted) return null;
 
   return createPortal(
     <div

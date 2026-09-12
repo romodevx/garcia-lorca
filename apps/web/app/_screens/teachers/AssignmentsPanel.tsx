@@ -155,7 +155,17 @@ export function AssignmentsPanel({
 
       <form aria-label="Asignar profesor" onSubmit={submit}>
         <div style={{ display: "grid", gap: 12, marginBottom: 12 }}>
-          <SelectField label="Ciclo" value={cycleId} options={cycleOptions} onChange={setCycleId} />
+          <SelectField
+            label="Ciclo"
+            value={cycleId}
+            options={cycleOptions}
+            onChange={setCycleId}
+            // Sin esta opción, cuando no hay ciclo activo el valor queda en ""
+            // y el <select> se pinta en blanco con selectedIndex -1: parece
+            // roto. El SelectField viejo siempre traía una opción vacía; el
+            // nuevo la trae sólo si se le da un texto.
+            placeholder="Selecciona un ciclo…"
+          />
           <SelectField
             label="Grupo"
             value={groupId}

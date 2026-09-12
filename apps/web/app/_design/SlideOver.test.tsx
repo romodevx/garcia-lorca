@@ -145,3 +145,52 @@ describe("dónde se monta el cajón", () => {
     expect(document.body.style.overflow).toBe("");
   });
 });
+
+describe("qué cierra el cajón", () => {
+  const base = {
+    title: "Cobrar",
+    icon: "card" as const,
+    submitLabel: "Cobrar",
+  };
+
+  it("con algo a medio capturar, el velo y Esc NO lo cierran", async () => {
+    // En el mostrador, perder un cobro a medio teclear por un clic fuera de
+    // lugar es la forma más rápida de que alguien deje de usar la pantalla.
+    const onClose = vi.fn();
+    render(
+      <SlideOver {...base} dismissible={false} onClose={onClose} onSubmit={vi.fn()}>
+        <p>c</p>
+      </SlideOver>
+    );
+
+    await userEvent.click(screen.getByTestId("drawer-backdrop"));
+    await userEvent.keyboard("{Escape}");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("pero el botón de cerrar SIEMPRE cierra", async () => {
+    // La protección es sólo contra el accidente. Un ✕ que no hace nada deja a
+    // la persona atrapada, que es peor que el cierre que se quería evitar.
+    const onClose = vi.fn();
+    render(
+      <SlideOver {...base} dismissible={false} onClose={onClose} onSubmit={vi.fn()}>
+        <p>c</p>
+      </SlideOver>
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Cerrar" }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("y Cancelar también", async () => {
+    const onClose = vi.fn();
+    render(
+      <SlideOver {...base} dismissible={false} onClose={onClose} onSubmit={vi.fn()}>
+        <p>c</p>
+      </SlideOver>
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(onClose).toHaveBeenCalled();
+  });
+});

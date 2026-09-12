@@ -102,10 +102,16 @@ function PayDrawer({ charge, name, onClose, onPaid }: { charge: Charge; name: st
       title="Registrar pago"
       subtitle={`${name} · ${charge.description}`}
       icon="card"
-      // Con la forma empezada, el clic afuera NO cierra: perder un pago a medio
-      // capturar por un clic perdido es la forma más rápida de que alguien deje
-      // de usar la pantalla.
-      onClose={dirty ? () => {} : onClose}
+      // Con la forma empezada, el velo y Esc dejan de cerrar: perder un pago a
+      // medio capturar por un clic perdido es la forma más rápida de que alguien
+      // deje de usar la pantalla.
+      //
+      // `onClose` sigue siendo el de verdad. Pasarle un () => {} apagaba también
+      // el ✕ y el botón Cancelar, porque DrawerShell usa esa misma función para
+      // las cuatro vías: la protección contra el accidente dejaba a la persona
+      // encerrada, que es peor.
+      dismissible={!dirty}
+      onClose={onClose}
       footer={
         <>
           <Btn kind="ghost" onClick={onClose}>Cancelar</Btn>
