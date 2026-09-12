@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as studentsApi from "../../students/api";
 import { ContactsPanel } from "./ContactsPanel";
 
-vi.mock("../../students/api", () => ({ listContacts: vi.fn(), addContact: vi.fn() }));
+vi.mock("../../students/api", () => ({ listContacts: vi.fn(), addContact: vi.fn(), inviteContactToApp: vi.fn() }));
 const students = vi.mocked(studentsApi);
 
 beforeEach(() => {
@@ -81,5 +81,113 @@ describe("ContactsPanel", () => {
 
     await waitFor(() => expect(students.addContact).toHaveBeenCalled());
     expect(students.addContact.mock.calls[0]?.[1]?.email).toBe("luis@example.com");
+  });
+});
+
+// --- dar acceso a la app ---------------------------------------------------
+
+describe("ContactsPanel — dar acceso a la app", () => {
+  // The whole point: a contact the office already typed becomes a family that
+  // can open the app, with one press, where the secretary already works.
+  it("gives a contact with an email access to the app", async () => {
+    const user = userEvent.setup();
+    students.listContacts.mockResolvedValue([
+      { id: "gl-2", studentId: "st-1", guardianUserId: "", relationship: "father", fullName: "Mateo Contreras", phone: "", email: "mateo@example.com", hasAccount: false },
+    ]);
+    students.inviteContactToApp.mockResolvedValue({
+      contact: { id: "gl-2", studentId: "st-1", guardianUserId: "usr-9", relationship: "father", fullName: "Mateo Contreras", phone: "", email: "mateo@example.com", hasAccount: true },
+      invitation: { url: "", expiresAt: "", sent: true, via: "smtp" },
+    });
+    render(<ContactsPanel studentId="st-1" />);
+    await screen.findByText("Mateo Contreras");
+
+    await user.click(screen.getByRole("button", { name: /Dar acceso a la app/ }));
+
+    await waitFor(() => expect(students.inviteContactToApp).toHaveBeenCalled());
+    expect(students.inviteContactToApp.mock.calls[0]?.[1]).toBe("st-1");
+    expect(students.inviteContactToApp.mock.calls[0]?.[2]).toBe("gl-2");
+  });
+
+  // A contact with no address has nowhere to receive the invitation, so the
+  // button is not offered: an action that cannot succeed should not be pressable.
+  it("does not offer the button to a contact with no email", async () => {
+    students.listContacts.mockResolvedValue([
+      { id: "gl-3", studentId: "st-1", guardianUserId: "", relationship: "other", fullName: "Rosa Méndez", phone: "5551234567", email: "", hasAccount: false },
+    ]);
+    render(<ContactsPanel studentId="st-1" />);
+    await screen.findByText("Rosa Méndez");
+
+    expect(screen.queryByRole("button", { name: /Dar acceso a la app/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/Falta el correo/)).toBeInTheDocument();
+  });
+
+  it("does not offer the button to somebody who already has the app", async () => {
+    students.listContacts.mockResolvedValue([
+      { id: "gl-1", studentId: "st-1", guardianUserId: "usr-1", relationship: "mother", fullName: "Ana Cruz", phone: "", email: "ana@example.com", hasAccount: true },
+    ]);
+    render(<ContactsPanel studentId="st-1" />);
+    await screen.findByText("Ana Cruz");
+
+    expect(screen.queryByRole("button", { name: /Dar acceso a la app/ })).not.toBeInTheDocument();
+  });
+
+  // THE ONE THE SCHOOL WILL LIVE WITH. The provider's message reliably lands in
+  // spam, so telling the office "correo enviado" and stopping there is how a
+  // family waits a week for a link that was always in their junk folder.
+  it("warns that the provider's message tends to land in spam", async () => {
+    const user = userEvent.setup();
+    students.listContacts.mockResolvedValue([
+      { id: "gl-2", studentId: "st-1", guardianUserId: "", relationship: "father", fullName: "Mateo Contreras", phone: "", email: "mateo@example.com", hasAccount: false },
+    ]);
+    students.inviteContactToApp.mockResolvedValue({
+      contact: { id: "gl-2", studentId: "st-1", guardianUserId: "usr-9", relationship: "father", fullName: "Mateo Contreras", phone: "", email: "mateo@example.com", hasAccount: true },
+      invitation: { url: "", expiresAt: "", sent: true, via: "provider" },
+    });
+    render(<ContactsPanel studentId="st-1" />);
+    await screen.findByText("Mateo Contreras");
+
+    await user.click(screen.getByRole("button", { name: /Dar acceso a la app/ }));
+
+    expect(await screen.findByText(/spam/i)).toBeInTheDocument();
+  });
+
+  // When the message did not leave, the office must get the link so it can hand
+  // access over by other means — and must NOT be told the mail went out.
+  it("shows the link to copy when the message never left", async () => {
+    const user = userEvent.setup();
+    students.listContacts.mockResolvedValue([
+      { id: "gl-2", studentId: "st-1", guardianUserId: "", relationship: "father", fullName: "Mateo Contreras", phone: "", email: "mateo@example.com", hasAccount: false },
+    ]);
+    students.inviteContactToApp.mockResolvedValue({
+      contact: { id: "gl-2", studentId: "st-1", guardianUserId: "usr-9", relationship: "father", fullName: "Mateo Contreras", phone: "", email: "mateo@example.com", hasAccount: true },
+      invitation: { url: "https://escuela/invite/abc", expiresAt: "", sent: false, sendError: "smtp: sin credencial", via: "" },
+    });
+    render(<ContactsPanel studentId="st-1" />);
+    await screen.findByText("Mateo Contreras");
+
+    await user.click(screen.getByRole("button", { name: /Dar acceso a la app/ }));
+
+    const link = await screen.findByDisplayValue("https://escuela/invite/abc");
+    expect(link).toBeInTheDocument();
+    expect(screen.getByText(/no se pudo enviar/i)).toBeInTheDocument();
+  });
+
+  // A parent with two children at the school signs in once. Saying "invitación
+  // enviada" about a message nobody sent would have the office waiting for it.
+  it("says the account already existed when nothing was sent", async () => {
+    const user = userEvent.setup();
+    students.listContacts.mockResolvedValue([
+      { id: "gl-2", studentId: "st-1", guardianUserId: "", relationship: "mother", fullName: "Lucía Herrera", phone: "", email: "lucia@example.com", hasAccount: false },
+    ]);
+    students.inviteContactToApp.mockResolvedValue({
+      contact: { id: "gl-2", studentId: "st-1", guardianUserId: "usr-old", relationship: "mother", fullName: "Lucía Herrera", phone: "", email: "lucia@example.com", hasAccount: true },
+      invitation: null,
+    });
+    render(<ContactsPanel studentId="st-1" />);
+    await screen.findByText("Lucía Herrera");
+
+    await user.click(screen.getByRole("button", { name: /Dar acceso a la app/ }));
+
+    expect(await screen.findByText(/ya tenía cuenta/i)).toBeInTheDocument();
   });
 });
