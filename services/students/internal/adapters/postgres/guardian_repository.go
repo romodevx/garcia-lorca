@@ -59,6 +59,67 @@ func (r *Repository) ListByGuardian(ctx context.Context, guardianUserID string) 
 	return r.listGuardianLinks(ctx, "guardian_user_id = ?", guardianUserID)
 }
 
+// ByID returns one contact by its own id. A row the bound tenant cannot see is
+// KindNotFound, so RLS makes a cross-tenant read indistinguishable from a
+// missing contact.
+func (r *Repository) ByID(ctx context.Context, id string) (domain.GuardianLink, error) {
+	var out domain.GuardianLink
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var row guardianStudentModel
+		if err := tx.Where("id = ?", id).First(&row).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return glerrors.ErrNotFound
+			}
+			return glerrors.Wrap(glerrors.KindInternal, "reading contact", err)
+		}
+		l, err := guardianLinkToDomain(row)
+		if err != nil {
+			return err
+		}
+		out = l
+		return nil
+	})
+	if err != nil {
+		return domain.GuardianLink{}, err
+	}
+	return out, nil
+}
+
+// AttachAccount sets the iam account on a contact that has none.
+//
+// The UPDATE is CONDITIONAL — `guardian_user_id IS NULL` rides in the WHERE, not
+// in an `if` above it. Two clerks granting access at the same time both read a
+// contact without an account; if the write were unconditional the second would
+// silently move the pupil to a different family. Guarded, the loser writes
+// nothing and is told so.
+//
+// Zero rows therefore means one of two things, and the difference does not
+// matter to the caller: the contact is gone, or it already has an account.
+// Both are answered as a conflict EXCEPT when the row is genuinely absent,
+// which we distinguish with a follow-up read so an unknown contact is not
+// reported as a duplicate.
+func (r *Repository) AttachAccount(ctx context.Context, l domain.GuardianLink) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Model(&guardianStudentModel{}).
+			Where("id = ? AND guardian_user_id IS NULL", l.ID()).
+			Update("guardian_user_id", l.GuardianUserID())
+		if res.Error != nil {
+			return translateGuardianWriteErr(res.Error)
+		}
+		if res.RowsAffected == 1 {
+			return nil
+		}
+		var exists int64
+		if err := tx.Model(&guardianStudentModel{}).Where("id = ?", l.ID()).Count(&exists).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "reading contact", err)
+		}
+		if exists == 0 {
+			return glerrors.ErrNotFound
+		}
+		return glerrors.New(glerrors.KindConflict, "this contact already has an account")
+	})
+}
+
 // listGuardianLinks is the shared read for both projections: same tenant-bound
 // transaction and mapping, only the filtered column differs.
 func (r *Repository) listGuardianLinks(ctx context.Context, where, value string) ([]domain.GuardianLink, error) {

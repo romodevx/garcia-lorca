@@ -280,6 +280,22 @@ func (c *StudentsClient) AddContact(ctx context.Context, studentID, relationship
 	return toGuardianLink(res.Msg.GetContact()), nil
 }
 
+// GrantContactAccess attaches an iam account to a contact the pupil already has,
+// so that family can open the app. studentID is not decoration: the students
+// service checks the contact belongs to it and answers NotFound when it does
+// not, which is what keeps a contact of another family out of reach.
+func (c *StudentsClient) GrantContactAccess(ctx context.Context, contactID, studentID, guardianUserID string) (GuardianLink, error) {
+	res, err := c.rpc.GrantContactAccess(ctx, connect.NewRequest(&studentsv1.GrantContactAccessRequest{
+		ContactId:      contactID,
+		StudentId:      studentID,
+		GuardianUserId: guardianUserID,
+	}))
+	if err != nil {
+		return GuardianLink{}, err
+	}
+	return toGuardianLink(res.Msg.GetContact()), nil
+}
+
 // UnlinkGuardian removes a guardian↔student link. It is NOT idempotent: the
 // students service answers NotFound when the pair is not linked, which the edge
 // surfaces as 404 so an admin revoking access learns there was nothing to revoke.

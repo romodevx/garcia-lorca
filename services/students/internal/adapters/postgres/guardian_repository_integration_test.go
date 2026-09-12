@@ -254,3 +254,130 @@ func TestSeveralContactsWithoutAnAccountOnOnePupil(t *testing.T) {
 		}
 	}
 }
+
+// TestGrantingAccessKeepsOneRow proves the whole point of AttachAccount: the
+// account lands on the contact that is already there. The office typed the
+// mother once; after she is given the app she is still one entry, still carrying
+// the phone that answers.
+func TestGrantingAccessKeepsOneRow(t *testing.T) {
+	repo := appRepo(t, tenantA)
+	ctx := context.Background()
+	studentID := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-0000000000d1", "COXA050312MDFRNN31")
+
+	contact, err := domain.NewContact("f0000000-0000-0000-0000-0000000000f1", tenantA, studentID,
+		domain.RelationshipMother,
+		domain.ContactPerson{FullName: "Ana Cruz", Phone: "5559876543", Email: "ana@example.com"})
+	if err != nil {
+		t.Fatalf("NewContact: %v", err)
+	}
+	if err := repo.Link(ctx, contact); err != nil {
+		t.Fatalf("Link: %v", err)
+	}
+
+	stored, err := repo.ByID(ctx, contact.ID())
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if stored.HasAccount() {
+		t.Fatal("a contact recorded by the office must start with no account")
+	}
+
+	withAccount, err := stored.WithAccount(guardianOne)
+	if err != nil {
+		t.Fatalf("WithAccount: %v", err)
+	}
+	if err := repo.AttachAccount(ctx, withAccount); err != nil {
+		t.Fatalf("AttachAccount: %v", err)
+	}
+
+	contacts, err := repo.ListByStudent(ctx, studentID)
+	if err != nil {
+		t.Fatalf("ListByStudent: %v", err)
+	}
+	if len(contacts) != 1 {
+		t.Fatalf("the pupil has %d contacts, want 1 — the account must not create a second person", len(contacts))
+	}
+	got := contacts[0]
+	if !got.HasAccount() || got.GuardianUserID() != guardianOne {
+		t.Errorf("account did not persist: %+v", got)
+	}
+	if got.FullName() != "Ana Cruz" || got.Phone() != "5559876543" {
+		t.Errorf("the person was lost on the way: %+v", got)
+	}
+
+	// And she is now reachable from the family read path, which is the entire
+	// purpose of giving her the account.
+	mine, err := repo.ListByGuardian(ctx, guardianOne)
+	if err != nil {
+		t.Fatalf("ListByGuardian: %v", err)
+	}
+	if len(mine) != 1 || mine[0].StudentID() != studentID {
+		t.Errorf("the guardian cannot see their child: %+v", mine)
+	}
+}
+
+// TestAttachAccountIsConditional proves the write refuses a contact that already
+// has an account. Two clerks granting access at the same time must not let the
+// second silently move the pupil to a different family: the UPDATE is guarded on
+// the account still being absent, so the loser gets a conflict, not the child.
+func TestAttachAccountIsConditional(t *testing.T) {
+	repo := appRepo(t, tenantA)
+	ctx := context.Background()
+	studentID := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-0000000000d2", "COXA050312MDFRNN41")
+
+	contact, err := domain.NewContact("f0000000-0000-0000-0000-0000000000f2", tenantA, studentID,
+		domain.RelationshipFather, domain.ContactPerson{FullName: "Mateo Contreras"})
+	if err != nil {
+		t.Fatalf("NewContact: %v", err)
+	}
+	if err := repo.Link(ctx, contact); err != nil {
+		t.Fatalf("Link: %v", err)
+	}
+
+	first, err := contact.WithAccount(guardianOne)
+	if err != nil {
+		t.Fatalf("WithAccount: %v", err)
+	}
+	if err := repo.AttachAccount(ctx, first); err != nil {
+		t.Fatalf("first AttachAccount: %v", err)
+	}
+
+	// The second caller still holds the pre-grant contact — exactly the stale
+	// read a race produces — and tries to attach a different account to it.
+	second, err := contact.WithAccount(guardianTwo)
+	if err != nil {
+		t.Fatalf("WithAccount(second): %v", err)
+	}
+	if err := repo.AttachAccount(ctx, second); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Errorf("racing grant: want KindConflict, got %v", err)
+	}
+
+	stored, err := repo.ByID(ctx, contact.ID())
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if stored.GuardianUserID() != guardianOne {
+		t.Errorf("the losing grant overwrote the winner: %+v", stored)
+	}
+}
+
+// TestByIDIsTenantScoped: a contact of another tenant is NOT FOUND, not
+// forbidden. RLS makes the two answers identical, so the reply never confirms
+// that somebody else's contact exists.
+func TestByIDIsTenantScoped(t *testing.T) {
+	ctx := context.Background()
+	studentID := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-0000000000d3", "COXA050312MDFRNN51")
+
+	contact, err := domain.NewContact("f0000000-0000-0000-0000-0000000000f3", tenantA, studentID,
+		domain.RelationshipOther, domain.ContactPerson{FullName: "Rosa Méndez"})
+	if err != nil {
+		t.Fatalf("NewContact: %v", err)
+	}
+	if err := appRepo(t, tenantA).Link(ctx, contact); err != nil {
+		t.Fatalf("Link: %v", err)
+	}
+
+	if _, err := appRepo(t, tenantB).ByID(ctx, contact.ID()); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("cross-tenant ByID: want KindNotFound, got %v", err)
+	}
+}

@@ -306,6 +306,18 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/guardians/unlink", guardiansWrite(guardiansH.UnlinkGuardian))
 	mux.Handle("GET /api/v1/students/{studentId}/guardians", guardiansRead(guardiansH.ListGuardiansForStudent))
 
+	// Giving a family the app: one action for the school, two services
+	// underneath (iam mints the account, students attaches it to the contact the
+	// office already typed). It decides WHO MAY SEE A CHILD, so it sits on
+	// guardians:write beside the links above — not on users:write, even though it
+	// creates an account, because the account is a means and the child is the
+	// subject. Before this existed there was no way at all: the anti-escalation
+	// guard refuses to assign `guardian` to anybody, which is why the owner now
+	// holds family:read (ADR 0012).
+	contactAccessH := handler.NewContactAccessHandler(authClient, studentsClient)
+	mux.Handle("POST /api/v1/students/{studentId}/guardians/{contactId}/invite",
+		guardiansWrite(contactAccessH.Invite))
+
 	// M04 config (academic catalog): flag-guarded, authenticated + rotation-
 	// enforced, permission-gated. Writes need config:write, reads config:read;
 	// every route sits behind guard.Protect("config", …) so module_config OFF ⇒

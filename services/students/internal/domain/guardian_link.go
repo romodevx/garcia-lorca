@@ -104,6 +104,28 @@ func (l GuardianLink) WithPerson(person ContactPerson) GuardianLink {
 	return l
 }
 
+// WithAccount attaches an iam account to a contact the school already recorded,
+// turning a phone number the office calls into a family that can open the app.
+//
+// It attaches to the row that is already there rather than creating a second
+// one: a pupil has ONE list of contacts, and a person who appears twice — once
+// as a name and once as an account — is a list the office stops trusting.
+//
+// Refuses a contact that already has an account. That is not a duplicate to
+// swallow: quietly replacing the user id would hand one family's child to
+// another, and the family read path authorizes on exactly this field.
+func (l GuardianLink) WithAccount(guardianUserID string) (GuardianLink, error) {
+	id := strings.TrimSpace(guardianUserID)
+	if id == "" {
+		return GuardianLink{}, glerrors.New(glerrors.KindInvalid, "guardian user id is required")
+	}
+	if l.HasAccount() {
+		return GuardianLink{}, glerrors.New(glerrors.KindConflict, "this contact already has an account")
+	}
+	l.guardianUserID = id
+	return l, nil
+}
+
 // FullName is the contact's name as the office would read it aloud.
 func (l GuardianLink) FullName() string { return l.person.FullName }
 

@@ -129,6 +129,15 @@ type GuardianRepository interface {
 	Link(ctx context.Context, l domain.GuardianLink) error
 	// Unlink removes a link. An unknown (or invisible) link is KindNotFound.
 	Unlink(ctx context.Context, guardianUserID, studentID string) error
+	// ByID returns one contact/link by its own id. A row the bound tenant cannot
+	// see is KindNotFound, so RLS makes a cross-tenant read indistinguishable
+	// from a missing contact.
+	ByID(ctx context.Context, id string) (domain.GuardianLink, error)
+	// AttachAccount sets the iam account on a contact that has none, keeping the
+	// row (and the person on it) as it is. The write is conditional on the
+	// contact STILL having no account: two grants racing must not let the second
+	// overwrite the first, so a contact that already has one is KindConflict.
+	AttachAccount(ctx context.Context, l domain.GuardianLink) error
 	// ListByStudent returns the links of one student (its guardians).
 	ListByStudent(ctx context.Context, studentID string) ([]domain.GuardianLink, error)
 	// ListByGuardian returns the links of one guardian (their students).

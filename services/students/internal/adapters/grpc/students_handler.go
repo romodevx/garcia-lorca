@@ -212,6 +212,23 @@ func (h *StudentsHandler) AddContact(ctx context.Context, req *connect.Request[s
 	return connect.NewResponse(&studentsv1.AddContactResponse{Contact: toProtoGuardianLink(contact)}), nil
 }
 
+// GrantContactAccess attaches an iam account to a contact the school already
+// recorded, so that family can open the app. The account must hold the guardian
+// role and be ACTIVE — a user that does not is an InvalidArgument, since the
+// resource the call addresses is the contact and the user id is an argument.
+//
+// A contact that belongs to a different pupil is NotFound, deliberately: the
+// same answer as a contact that does not exist, so the reply never confirms that
+// somebody else's contact is there.
+func (h *StudentsHandler) GrantContactAccess(ctx context.Context, req *connect.Request[studentsv1.GrantContactAccessRequest]) (*connect.Response[studentsv1.GrantContactAccessResponse], error) {
+	m := req.Msg
+	contact, err := h.guardian.GrantContactAccess(ctx, m.GetContactId(), m.GetStudentId(), m.GetGuardianUserId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.GrantContactAccessResponse{Contact: toProtoGuardianLink(contact)}), nil
+}
+
 // UnlinkGuardian removes a guardian ↔ student link. An unknown link is NotFound.
 func (h *StudentsHandler) UnlinkGuardian(ctx context.Context, req *connect.Request[studentsv1.UnlinkGuardianRequest]) (*connect.Response[studentsv1.UnlinkGuardianResponse], error) {
 	m := req.Msg
