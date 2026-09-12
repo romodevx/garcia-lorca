@@ -1,5 +1,5 @@
 import { act, fireEvent, screen } from "@testing-library/react-native";
-import IndexRoute from "./index";
+import IndexRoute from "../../app/index";
 import { renderWithProviders } from "@/src/test/renderWithProviders";
 
 // signIn — the route's actual dependency since the provider path landed — is

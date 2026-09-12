@@ -2,7 +2,7 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { router } from "expo-router";
 import { getAccessToken, saveTokens } from "@/src/api";
 import { renderWithProviders } from "@/src/test/renderWithProviders";
-import MasRoute from "./mas";
+import MasRoute from "../../app/mas";
 
 describe("MasRoute logout", () => {
   beforeEach(() => {
