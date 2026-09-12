@@ -66,6 +66,17 @@ service StudentsService {
   // that actually answers. Most of a pupil's contacts are these.
   rpc AddContact(AddContactRequest) returns (AddContactResponse);
 
+  // GrantContactAccess attaches an iam account to a contact the school already
+  // recorded, so that family can open the app. It does NOT create a second row:
+  // a pupil has one list of contacts, and a person who appears twice — once as a
+  // name, once as an account — is a list the office stops reading.
+  //
+  // student_id is required and checked here, not only at the edge: without it a
+  // caller could name any contact id and hand that family's child to an account
+  // of its choosing. A contact of another pupil is NotFound, never
+  // PermissionDenied, so the answer does not confirm it exists.
+  rpc GrantContactAccess(GrantContactAccessRequest) returns (GrantContactAccessResponse);
+
   // UnlinkGuardian removes a guardian↔student link. An unknown link is a
   // NotFound error.
   rpc UnlinkGuardian(UnlinkGuardianRequest) returns (UnlinkGuardianResponse);
@@ -319,6 +330,21 @@ message LinkGuardianRequest {
 
 message LinkGuardianResponse {
   GuardianLink link = 1;
+}
+
+// GrantContactAccessRequest gives an existing contact the account it needs to
+// open the family app. The guardian user must hold the `guardian` role and be
+// ACTIVE — the link IS the family read path's authorization.
+message GrantContactAccessRequest {
+  string contact_id = 1;
+  // The pupil the contact must belong to. Required: it is what stops a caller
+  // from reaching a contact of a family that is not the one it named.
+  string student_id = 2;
+  string guardian_user_id = 3;
+}
+
+message GrantContactAccessResponse {
+  GuardianLink contact = 1;
 }
 
 message UnlinkGuardianRequest {

@@ -122,3 +122,58 @@ func TestALinkedGuardianCanCarryAPhone(t *testing.T) {
 		t.Errorf("contact details did not attach: %+v", withPhone)
 	}
 }
+
+// A contact the school already recorded becomes a family that can open the app.
+// The account attaches to the row that is already there: the pupil keeps ONE
+// list of contacts, and the office keeps reading one name per person.
+func TestAContactGainsAnAccount(t *testing.T) {
+	contact, err := domain.NewContact("gl-1", "t1", "st-1", domain.RelationshipFather,
+		domain.ContactPerson{FullName: "Mateo Contreras", Phone: "5551234567", Email: "mateo@example.com"})
+	if err != nil {
+		t.Fatalf("NewContact: %v", err)
+	}
+	if contact.HasAccount() {
+		t.Fatal("a fresh contact must not have an account")
+	}
+
+	withAccount, err := contact.WithAccount("user-9")
+	if err != nil {
+		t.Fatalf("WithAccount: %v", err)
+	}
+	if !withAccount.HasAccount() || withAccount.GuardianUserID() != "user-9" {
+		t.Errorf("account did not attach: %+v", withAccount)
+	}
+	if withAccount.ID() != "gl-1" || withAccount.FullName() != "Mateo Contreras" {
+		t.Errorf("attaching an account must not disturb the person: %+v", withAccount)
+	}
+	if contact.HasAccount() {
+		t.Error("WithAccount must not mutate the receiver")
+	}
+}
+
+// Attaching an empty user id would silently produce a contact that claims an
+// account it does not have — and the family read path authorizes on exactly
+// that field.
+func TestAnAccountNeedsAUserID(t *testing.T) {
+	contact, err := domain.NewContact("gl-1", "t1", "st-1", domain.RelationshipFather,
+		domain.ContactPerson{FullName: "Mateo Contreras"})
+	if err != nil {
+		t.Fatalf("NewContact: %v", err)
+	}
+	if _, err := contact.WithAccount("   "); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("blank user id: want KindInvalid, got %v", err)
+	}
+}
+
+// Handing an account to a contact that already has one would quietly move a
+// pupil from one family to another. The second grant must be refused, not won
+// by whoever asked last.
+func TestAContactKeepsTheAccountItAlreadyHas(t *testing.T) {
+	linked, err := domain.NewGuardianLink("gl-1", "t1", "user-1", "st-1", domain.RelationshipMother)
+	if err != nil {
+		t.Fatalf("NewGuardianLink: %v", err)
+	}
+	if _, err := linked.WithAccount("user-2"); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Errorf("re-granting an account: want KindConflict, got %v", err)
+	}
+}

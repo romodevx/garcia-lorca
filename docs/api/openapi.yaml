@@ -612,6 +612,86 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
 
+  /api/v1/students/{studentId}/guardians/{contactId}/invite:
+    post:
+      tags: [students]
+      summary: Give a contact access to the family app
+      description: >
+        Turns a contact the school already recorded into a family that can open
+        the app. It does NOT create a second person: the account is attached to
+        the contact row that is already there, so the pupil still has one list of
+        contacts and the office still reads one name.
+
+
+        Until this existed there was no way at all. Creating the account by hand
+        and assigning the `guardian` role is refused for everybody — the
+        anti-escalation guard lets a caller assign only roles whose permissions
+        it already holds, and `family:read` was held by nobody. So no family
+        could be given the app without writing SQL.
+
+
+        The contact needs an email: it is where the invitation goes. The school
+        chooses no password — the family sets its own through the link, the same
+        posture as every other invited account.
+
+
+        IDEMPOTENT by email. Inviting a contact whose address already has an
+        account attaches that account rather than creating a duplicate, so a
+        retry after a failed send is safe and a mother of two children signs in
+        once for both.
+      operationId: inviteContactToApp
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - name: studentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: contactId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: >
+            The contact, now carrying an account.
+
+
+            `invitation` is present when an account was created for this
+            address. Read `invitation.sent` before telling anybody the mail went
+            out: when it is false, `invitation.url` is the link to hand over by
+            other means.
+
+
+            `invitation` is NULL when the address already had an account — the
+            mother of two children signs in once for both — and the contact was
+            simply attached to it. Nothing was sent, and nothing needed to be.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [contact]
+                properties:
+                  contact: { $ref: '#/components/schemas/Contact' }
+                  invitation:
+                    allOf: [{ $ref: '#/components/schemas/Invitation' }]
+                    nullable: true
+                    description: Absent when the address already had an account.
+        '400':
+          description: >
+            The contact has no email, or already has an account.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: >
+            No such contact for that pupil — or the students module is disabled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/comms/announcements:
     post:
       tags: [comms]
@@ -1431,6 +1511,35 @@ components:
         hasAccount:
           type: boolean
           description: Whether this contact can open the family app.
+
+    Invitation:
+      type: object
+      description: >
+        An access link that has been minted for somebody who has not walked
+        through the door yet.
+
+
+        `sent` and `sendError` exist so a director is never told "invitación
+        enviada" about a message that was dropped. `url` is the fallback for
+        handing access over by hand; it grants nothing the administrator does not
+        already hold over that account.
+      required: [url, expiresAt, sent]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: >
+            EMPTY when `sent` is true. The link is withheld once the message has
+            gone out: it buys nothing then, and every extra copy of a token is
+            another place it can leak from. It is returned only as the fallback
+            for a message that was dropped.
+        expiresAt: { type: string, format: date-time }
+        sent:
+          type: boolean
+          description: Whether the message actually left.
+        sendError:
+          type: string
+          description: Why it did not, when sent is false.
 
     SchoolEvent:
       type: object

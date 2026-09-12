@@ -590,6 +590,15 @@ func TestSeededRolesHoldTheirPermissions(t *testing.T) {
 			// can hand somebody the staff roster without handing them the whole
 			// academic catalogue.
 			"teachers:read", "teachers:write",
+			// The owner holds family:read so it can DELEGATE it: the edge's
+			// anti-escalation guard only lets a caller assign roles whose
+			// permissions it already holds, so without this nobody at all could
+			// assign `guardian` and no family could be given the app. Safe
+			// because for the owner it is strictly a subset of what it already
+			// reads — profile←students:read, account←finance:read,
+			// grades←grades:read, attendance←attendance:read,
+			// notifications←comms:read. See ADR 0012.
+			"family:read",
 		}},
 		{"guardian", []string{
 			"family:read",

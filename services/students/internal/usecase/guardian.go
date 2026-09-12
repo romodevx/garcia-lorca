@@ -14,12 +14,24 @@ import (
 // links, so a user without the role must never acquire one.
 const guardianRoleName = "guardian"
 
-// activeUserStatus is the only iam account status a guardian may be linked from.
-// It is the value the iamclient adapter projects into ports.UserRef.Status — the
-// string form of iam's USER_STATUS_ACTIVE enum. A suspended account must not gain
-// a link, for the same reason a role-less user must not: the link IS the family
-// read path's authorization.
-const activeUserStatus = "USER_STATUS_ACTIVE"
+// linkableUserStatuses are the iam account statuses a guardian may be linked
+// from. They are the values the iamclient adapter projects into
+// ports.UserRef.Status — the string forms of iam's UserStatus enum.
+//
+// An ALLOW-LIST, not a deny-list: the link IS the family read path's
+// authorization, so a status nobody thought about must fail closed. An
+// UNSPECIFIED status is iam failing to say, and guessing "probably fine" about
+// the field that decides who sees a child is the wrong way to be wrong.
+//
+// INVITED is in here, and the reason is the school's day: the office decides
+// today who the mother is, and she opens her link tomorrow. Refusing until she
+// does would mean a family cannot be recorded until it gets round to reading its
+// email — and she can read nothing meanwhile anyway, because an invited account
+// has no password and cannot sign in at all.
+//
+// SUSPENDED is not: that account could sign in once and was cut off, and handing
+// it a child undoes the cutting off.
+var linkableUserStatuses = []string{"USER_STATUS_ACTIVE", "USER_STATUS_INVITED"}
 
 // GuardianService links guardians to students. It orchestrates three seams: the
 // local StudentRepository (the student must exist in THIS context), the
@@ -27,7 +39,7 @@ const activeUserStatus = "USER_STATUS_ACTIVE"
 // tests). It depends only on ports + domain.
 //
 //	Link: student exists (local) ─> guardian user exists, holds the guardian
-//	      role, and its account is active (RPC) ─> persist the link
+//	      role, and its account is in a linkable state (RPC) ─> persist the link
 //	      (unique per pair)
 type GuardianService struct {
 	students  ports.StudentRepository
@@ -91,7 +103,8 @@ func (s *GuardianService) LinkGuardian(ctx context.Context, guardianUserID, stud
 }
 
 // requireGuardianUser resolves the user against iam and asserts it may act as a
-// guardian: it holds the guardian role AND its account is active. Only iam's
+// guardian: it holds the guardian role AND its account is in a linkable state
+// (see linkableUserStatuses). Only iam's
 // "does not exist" answer becomes a bad argument; any other failure (transport,
 // iam internal) propagates so the edge does not blame the caller for an outage.
 func (s *GuardianService) requireGuardianUser(ctx context.Context, guardianUserID string) error {
@@ -105,8 +118,8 @@ func (s *GuardianService) requireGuardianUser(ctx context.Context, guardianUserI
 	if !slices.Contains(user.Roles, guardianRoleName) {
 		return glerrors.New(glerrors.KindInvalid, "user is not a guardian")
 	}
-	if user.Status != activeUserStatus {
-		return glerrors.New(glerrors.KindInvalid, "guardian account is not active")
+	if !slices.Contains(linkableUserStatuses, user.Status) {
+		return glerrors.New(glerrors.KindInvalid, "guardian account cannot be linked in its current state")
 	}
 	return nil
 }
@@ -156,6 +169,48 @@ func (s *GuardianService) AddContact(ctx context.Context, in ContactInput) (doma
 		return domain.GuardianLink{}, err
 	}
 	return contact, nil
+}
+
+// GrantContactAccess turns a contact the school already recorded into a family
+// that can open the app, by attaching an iam account to the row that is already
+// there.
+//
+// WHY NOT JUST LinkGuardian. That creates a NEW row from a user id, which would
+// leave the pupil with two entries for one person: the contact the office typed
+// (a name and a phone) and a second one carrying only an account. A contact list
+// where the same mother appears twice is a list the office stops reading.
+//
+// The account is validated exactly as in LinkGuardian — it must hold the
+// guardian role and be ACTIVE — because the link IS the family read path's
+// authorization and it makes no difference how the link came to exist.
+//
+// studentID is a REQUIRED argument and it is checked here, in the service, not
+// only at the edge. Without it a caller holding a service credential could name
+// any contact id and hand that family's child to an account of its choosing. A
+// contact that belongs to another pupil answers KindNotFound rather than a
+// conflict or a refusal, so the answer does not confirm that the contact exists
+// (the same posture as ADR 0004 and ADR 0010).
+func (s *GuardianService) GrantContactAccess(ctx context.Context, contactID, studentID, guardianUserID string) (domain.GuardianLink, error) {
+	if err := s.requireGuardianUser(ctx, guardianUserID); err != nil {
+		return domain.GuardianLink{}, err
+	}
+
+	contact, err := s.guardians.ByID(ctx, contactID)
+	if err != nil {
+		return domain.GuardianLink{}, err
+	}
+	if contact.StudentID() != studentID {
+		return domain.GuardianLink{}, glerrors.ErrNotFound
+	}
+
+	withAccount, err := contact.WithAccount(guardianUserID)
+	if err != nil {
+		return domain.GuardianLink{}, err
+	}
+	if err := s.guardians.AttachAccount(ctx, withAccount); err != nil {
+		return domain.GuardianLink{}, err
+	}
+	return withAccount, nil
 }
 
 // UnlinkGuardian removes a guardian ↔ student link. An unknown link is

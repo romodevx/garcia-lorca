@@ -60,6 +60,16 @@ export async function signIn(page: Page, forceLogin = false): Promise<void> {
   }
 
   await page.goto("/");
+  // ESPERAR LA REDIRECCIÓN ANTES DE ESCRIBIR. "/" monta su propio formulario y
+  // en seguida navega a /entrar; el formulario de destino nace vacío, así que
+  // llenar el primero pierde lo escrito y el clic manda credenciales en blanco.
+  // La pantalla entonces dice "Correo o contraseña incorrectos" — un mensaje que
+  // acusa a la contraseña de un fallo que fue de tiempos, y que en esta máquina
+  // aparecía cada vez que el sondeo de sesión (/me 401 → refresh 401) tardaba lo
+  // suficiente. Es una carrera latente de toda la suite, no de un test.
+  await page.waitForURL("**/entrar", { timeout: 20_000 }).catch(() => {
+    // Si nunca redirige, el formulario de "/" es el bueno: seguir adelante.
+  });
   // By ROLE, not by label: "Contraseña" also matches the show-password button,
   // and a selector that resolves to two elements fails on the strictness rather
   // than on anything real.

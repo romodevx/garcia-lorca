@@ -277,6 +277,51 @@ export async function listContacts(baseURL: string, studentId: string): Promise<
   return data.guardians ?? data.links ?? [];
 }
 
+/**
+ * What came of asking for an invitation.
+ *
+ * `sent` is the only honest thing to read before telling anybody the mail went
+ * out, and even then it means "accepted by the channel", not "in their inbox" —
+ * see `via`. `url` is the fallback, returned ONLY when nothing was delivered.
+ */
+export interface Invitation {
+  url: string;
+  expiresAt: string;
+  sent: boolean;
+  sendError?: string;
+  /** "smtp" (the school's own mail) or "provider" (Google sends its own link). */
+  via?: string;
+}
+
+export interface ContactAccessResult {
+  contact: Contact;
+  /** Null when the address already had an account: nothing was sent. */
+  invitation: Invitation | null;
+}
+
+/**
+ * Gives a contact the school already recorded access to the family app.
+ *
+ * The account lands on THIS contact, so the pupil keeps one list. An address
+ * that already has an account is reused — a parent with two children signs in
+ * once — and then `invitation` comes back null because there was nothing to send.
+ */
+export async function inviteContactToApp(
+  baseURL: string,
+  studentId: string,
+  contactId: string,
+): Promise<ContactAccessResult> {
+  const root = baseURL.replace(/\/+$/, "");
+  const res = await authFetch(`${root}/api/v1/students/${studentId}/guardians/${contactId}/invite`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw await studentsFailure(res);
+  }
+  return (await res.json()) as ContactAccessResult;
+}
+
 /** Records somebody the school can call, with no account and no login. */
 export async function addContact(baseURL: string, input: AddContactInput): Promise<Contact> {
   const res = await authFetch(`${baseURL.replace(/\/+$/, "")}/api/v1/contacts`, {

@@ -49,6 +49,38 @@ func (r *fakeGuardianRepo) Link(_ context.Context, l domain.GuardianLink) error 
 	return nil
 }
 
+func (r *fakeGuardianRepo) ByID(_ context.Context, id string) (domain.GuardianLink, error) {
+	for _, l := range r.links {
+		if l.ID() == id {
+			return l, nil
+		}
+	}
+	return domain.GuardianLink{}, glerrors.ErrNotFound
+}
+
+// AttachAccount mirrors the real adapter's conditional UPDATE: it only writes
+// while the stored contact still has no account, so a second grant loses rather
+// than overwrites. Re-keying to the (tenant, guardian, student) key is how the
+// fake keeps enforcing the table's UNIQUE afterwards.
+func (r *fakeGuardianRepo) AttachAccount(_ context.Context, l domain.GuardianLink) error {
+	for key, stored := range r.links {
+		if stored.ID() != l.ID() {
+			continue
+		}
+		if stored.HasAccount() {
+			return glerrors.New(glerrors.KindConflict, "this contact already has an account")
+		}
+		newKey := guardianKey(l.TenantID(), l.GuardianUserID(), l.StudentID())
+		if _, taken := r.links[newKey]; taken {
+			return glerrors.New(glerrors.KindConflict, "guardian is already linked to this student")
+		}
+		delete(r.links, key)
+		r.links[newKey] = l
+		return nil
+	}
+	return glerrors.ErrNotFound
+}
+
 func (r *fakeGuardianRepo) Unlink(_ context.Context, guardianUserID, studentID string) error {
 	key := guardianKey(tenant, guardianUserID, studentID)
 	if _, ok := r.links[key]; !ok {
@@ -310,5 +342,194 @@ func TestListGuardiansForStudentAndStudentsForGuardian(t *testing.T) {
 	}
 	if len(studentsOfTwo) != 1 || studentsOfTwo[0].StudentID() != "stu-1" {
 		t.Errorf("usr-2 should guard only stu-1, got %+v", studentsOfTwo)
+	}
+}
+
+// --- GrantContactAccess ----------------------------------------------------
+
+// seedContact records an account-less contact on a pupil and returns it.
+func seedContact(t *testing.T, svc *usecase.GuardianService, studentID, name, email string) domain.GuardianLink {
+	t.Helper()
+	contact, err := svc.AddContact(context.Background(), usecase.ContactInput{
+		StudentID:    studentID,
+		Relationship: "father",
+		FullName:     name,
+		Email:        email,
+	})
+	if err != nil {
+		t.Fatalf("AddContact: %v", err)
+	}
+	return contact
+}
+
+// The school gives a contact it already recorded access to the app. The account
+// lands on the SAME row: one person, one entry in the pupil's contact list.
+func TestGrantContactAccessHappy(t *testing.T) {
+	svc, students, guardians, users := newGuardianService(t)
+	seedStudent(t, students, "stu-1")
+	seedGuardianUser(users, "user-1", "guardian")
+	contact := seedContact(t, svc, "stu-1", "Mateo Contreras", "mateo@example.com")
+
+	got, err := svc.GrantContactAccess(context.Background(), contact.ID(), "stu-1", "user-1")
+	if err != nil {
+		t.Fatalf("GrantContactAccess: %v", err)
+	}
+	if got.ID() != contact.ID() {
+		t.Errorf("id = %q, want the contact that was already there (%q)", got.ID(), contact.ID())
+	}
+	if got.GuardianUserID() != "user-1" || !got.HasAccount() {
+		t.Errorf("account did not attach: %+v", got)
+	}
+	if got.FullName() != "Mateo Contreras" {
+		t.Errorf("the person was lost: %+v", got)
+	}
+
+	links, err := guardians.ListByStudent(context.Background(), "stu-1")
+	if err != nil {
+		t.Fatalf("ListByStudent: %v", err)
+	}
+	if len(links) != 1 {
+		t.Fatalf("the pupil has %d contacts, want 1 — granting access must not create a second person", len(links))
+	}
+}
+
+// The same rule as linking: the family read path authorizes on this link, so a
+// user that does not hold the guardian role must never acquire one.
+func TestGrantContactAccessRequiresGuardianRole(t *testing.T) {
+	svc, students, _, users := newGuardianService(t)
+	seedStudent(t, students, "stu-1")
+	seedGuardianUser(users, "user-1", "admin")
+	contact := seedContact(t, svc, "stu-1", "Mateo Contreras", "mateo@example.com")
+
+	_, err := svc.GrantContactAccess(context.Background(), contact.ID(), "stu-1", "user-1")
+	if glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("role-less user: want KindInvalid, got %v", err)
+	}
+}
+
+// A suspended account must not gain a link, for the same reason a role-less one
+// must not: the link IS the authorization.
+func TestGrantContactAccessRequiresActiveAccount(t *testing.T) {
+	svc, students, _, users := newGuardianService(t)
+	seedStudent(t, students, "stu-1")
+	seedUserWithStatus(users, "user-1", "USER_STATUS_SUSPENDED", "guardian")
+	contact := seedContact(t, svc, "stu-1", "Mateo Contreras", "mateo@example.com")
+
+	_, err := svc.GrantContactAccess(context.Background(), contact.ID(), "stu-1", "user-1")
+	if glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("suspended account: want KindInvalid, got %v", err)
+	}
+}
+
+// THE SCOPING TEST. The pupil is a required argument and it is checked HERE, not
+// only at the edge: a caller that names somebody else's contact must not be able
+// to hand that family's child to an account of their choosing. Answering
+// NotFound (never a conflict or a 403) also refuses to confirm the contact
+// exists.
+func TestGrantContactAccessRefusesAContactOfAnotherPupil(t *testing.T) {
+	svc, students, _, users := newGuardianService(t)
+	seedStudent(t, students, "stu-1")
+	seedStudent(t, students, "stu-2")
+	seedGuardianUser(users, "user-1", "guardian")
+	contact := seedContact(t, svc, "stu-1", "Mateo Contreras", "mateo@example.com")
+
+	_, err := svc.GrantContactAccess(context.Background(), contact.ID(), "stu-2", "user-1")
+	if glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("contact of another pupil: want KindNotFound, got %v", err)
+	}
+}
+
+// An unknown contact is NotFound, not a crash and not a silent create.
+func TestGrantContactAccessUnknownContactIsNotFound(t *testing.T) {
+	svc, students, _, users := newGuardianService(t)
+	seedStudent(t, students, "stu-1")
+	seedGuardianUser(users, "user-1", "guardian")
+
+	_, err := svc.GrantContactAccess(context.Background(), "gl-nope", "stu-1", "user-1")
+	if glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("unknown contact: want KindNotFound, got %v", err)
+	}
+}
+
+// Granting access twice must not move the pupil to whoever asked last.
+func TestGrantContactAccessTwiceIsConflict(t *testing.T) {
+	svc, students, _, users := newGuardianService(t)
+	seedStudent(t, students, "stu-1")
+	seedGuardianUser(users, "user-1", "guardian")
+	seedGuardianUser(users, "user-2", "guardian")
+	contact := seedContact(t, svc, "stu-1", "Mateo Contreras", "mateo@example.com")
+
+	if _, err := svc.GrantContactAccess(context.Background(), contact.ID(), "stu-1", "user-1"); err != nil {
+		t.Fatalf("first grant: %v", err)
+	}
+	_, err := svc.GrantContactAccess(context.Background(), contact.ID(), "stu-1", "user-2")
+	if glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Errorf("second grant: want KindConflict, got %v", err)
+	}
+}
+
+// An iam outage is not the caller's fault: it must not surface as a bad request.
+func TestGrantContactAccessPropagatesUserReaderFailure(t *testing.T) {
+	svc, students, _, users := newGuardianService(t)
+	seedStudent(t, students, "stu-1")
+	contact := seedContact(t, svc, "stu-1", "Mateo Contreras", "mateo@example.com")
+	users.err = errors.New("iam unreachable")
+
+	_, err := svc.GrantContactAccess(context.Background(), contact.ID(), "stu-1", "user-1")
+	if glerrors.KindOf(err) == glerrors.KindInvalid {
+		t.Errorf("transport failure must not blame the caller, got %v", err)
+	}
+}
+
+// An INVITED account may be linked, and must be: the office decides today who
+// the mother is, and she opens her link tomorrow. Refusing the link until she
+// does would mean the school cannot record a family until that family gets round
+// to reading its email — and the account can read nothing meanwhile anyway,
+// because an invited account has no password and cannot sign in at all.
+//
+// The rule this corrects was written before invitations existed. It said
+// "active", but what it MEANT was "not suspended" — the test below still holds
+// that line.
+func TestGrantContactAccessAcceptsAnInvitedAccount(t *testing.T) {
+	svc, students, _, users := newGuardianService(t)
+	seedStudent(t, students, "stu-1")
+	seedUserWithStatus(users, "user-1", "USER_STATUS_INVITED", "guardian")
+	contact := seedContact(t, svc, "stu-1", "Lucía Herrera", "lucia@example.com")
+
+	got, err := svc.GrantContactAccess(context.Background(), contact.ID(), "stu-1", "user-1")
+	if err != nil {
+		t.Fatalf("an invited guardian must be linkable: %v", err)
+	}
+	if got.GuardianUserID() != "user-1" {
+		t.Errorf("account did not attach: %+v", got)
+	}
+}
+
+// Linking an invited account is fine; linking a SUSPENDED one is not. That
+// account could sign in once and was cut off — handing it a child undoes the
+// cutting off.
+func TestLinkGuardianStillRefusesASuspendedAccount(t *testing.T) {
+	svc, students, _, users := newGuardianService(t)
+	seedStudent(t, students, "stu-1")
+	seedUserWithStatus(users, "user-1", "USER_STATUS_SUSPENDED", "guardian")
+
+	_, err := svc.LinkGuardian(context.Background(), "user-1", "stu-1", "mother")
+	if glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("suspended account: want KindInvalid, got %v", err)
+	}
+}
+
+// An unspecified status is not a state anybody is in; it is iam failing to say.
+// Guessing "probably fine" about the field that authorizes a family read is the
+// wrong way to be wrong.
+func TestGrantContactAccessRefusesAnUnknownStatus(t *testing.T) {
+	svc, students, _, users := newGuardianService(t)
+	seedStudent(t, students, "stu-1")
+	seedUserWithStatus(users, "user-1", "USER_STATUS_UNSPECIFIED", "guardian")
+	contact := seedContact(t, svc, "stu-1", "Lucía Herrera", "lucia@example.com")
+
+	_, err := svc.GrantContactAccess(context.Background(), contact.ID(), "stu-1", "user-1")
+	if glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("unspecified status: want KindInvalid, got %v", err)
 	}
 }

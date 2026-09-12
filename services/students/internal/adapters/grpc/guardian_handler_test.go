@@ -43,6 +43,30 @@ func (s *fakeGuardianStore) Link(_ context.Context, l domain.GuardianLink) error
 	return nil
 }
 
+func (s *fakeGuardianStore) ByID(_ context.Context, id string) (domain.GuardianLink, error) {
+	for _, l := range s.links {
+		if l.ID() == id {
+			return l, nil
+		}
+	}
+	return domain.GuardianLink{}, glerrors.ErrNotFound
+}
+
+func (s *fakeGuardianStore) AttachAccount(_ context.Context, l domain.GuardianLink) error {
+	for key, stored := range s.links {
+		if stored.ID() != l.ID() {
+			continue
+		}
+		if stored.HasAccount() {
+			return glerrors.New(glerrors.KindConflict, "this contact already has an account")
+		}
+		delete(s.links, key)
+		s.links[l.GuardianUserID()+"|"+l.StudentID()] = l
+		return nil
+	}
+	return glerrors.ErrNotFound
+}
+
 func (s *fakeGuardianStore) Unlink(_ context.Context, guardianUserID, studentID string) error {
 	key := guardianUserID + "|" + studentID
 	if _, ok := s.links[key]; !ok {
@@ -229,5 +253,78 @@ func TestListGuardianLinksBothWays(t *testing.T) {
 	}
 	if links := forGuardian.Msg.GetLinks(); len(links) != 1 || links[0].GetStudentId() != studentID {
 		t.Errorf("ListStudentsForGuardian = %+v, want the seeded link", links)
+	}
+}
+
+// --- GrantContactAccess ----------------------------------------------------
+
+// addContact records an account-less contact through the handler and returns its id.
+func addContact(t *testing.T, h *grpcadapter.StudentsHandler, studentID string) string {
+	t.Helper()
+	res, err := h.AddContact(context.Background(), connect.NewRequest(&studentsv1.AddContactRequest{
+		StudentId:    studentID,
+		Relationship: "father",
+		FullName:     "Mateo Contreras",
+		Email:        "mateo@example.com",
+	}))
+	if err != nil {
+		t.Fatalf("AddContact: %v", err)
+	}
+	return res.Msg.GetContact().GetId()
+}
+
+func TestGrantContactAccessMapsTheContact(t *testing.T) {
+	h, studentID := guardianHandler(t)
+	contactID := addContact(t, h, studentID)
+
+	res, err := h.GrantContactAccess(context.Background(), connect.NewRequest(&studentsv1.GrantContactAccessRequest{
+		ContactId:      contactID,
+		StudentId:      studentID,
+		GuardianUserId: guardianUser,
+	}))
+	if err != nil {
+		t.Fatalf("GrantContactAccess: %v", err)
+	}
+	got := res.Msg.GetContact()
+	if got.GetId() != contactID {
+		t.Errorf("id = %q, want the contact that was already there (%q)", got.GetId(), contactID)
+	}
+	if got.GetGuardianUserId() != guardianUser {
+		t.Errorf("guardian user id = %q, want %q", got.GetGuardianUserId(), guardianUser)
+	}
+	if got.GetFullName() != "Mateo Contreras" {
+		t.Errorf("the person was lost in the mapping: %+v", got)
+	}
+}
+
+// A user that does not hold the guardian role is a bad ARGUMENT, not a missing
+// resource: the call addresses a contact that exists.
+func TestGrantContactAccessNonGuardianIsInvalidArgument(t *testing.T) {
+	h, studentID := guardianHandler(t)
+	contactID := addContact(t, h, studentID)
+
+	_, err := h.GrantContactAccess(context.Background(), connect.NewRequest(&studentsv1.GrantContactAccessRequest{
+		ContactId:      contactID,
+		StudentId:      studentID,
+		GuardianUserId: nonGuardianUser,
+	}))
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("code = %v, want InvalidArgument (err=%v)", connect.CodeOf(err), err)
+	}
+}
+
+// Naming a pupil the contact does not belong to answers NotFound — never
+// PermissionDenied, which would confirm the contact exists.
+func TestGrantContactAccessWrongPupilIsNotFound(t *testing.T) {
+	h, studentID := guardianHandler(t)
+	contactID := addContact(t, h, studentID)
+
+	_, err := h.GrantContactAccess(context.Background(), connect.NewRequest(&studentsv1.GrantContactAccessRequest{
+		ContactId:      contactID,
+		StudentId:      "00000000-0000-0000-0000-0000000000ff",
+		GuardianUserId: guardianUser,
+	}))
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Errorf("code = %v, want NotFound (err=%v)", connect.CodeOf(err), err)
 	}
 }
