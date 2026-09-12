@@ -3,7 +3,8 @@
 import { useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import type { AdminUser, CreateUserInput, Role } from "../../admin/api";
-import { CheckList, EmptyHint, ErrorAlert, Section, StatusPill, TextField } from "./parts";
+import { TextField } from "../../_design/form";
+import { CheckList, EmptyHint, ErrorAlert, Section, StatusPill } from "./parts";
 
 export interface UsersPanelProps {
   users: readonly AdminUser[];

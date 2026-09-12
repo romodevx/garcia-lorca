@@ -4,7 +4,8 @@ import { useEffect, useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { SlideOver } from "../../_design/SlideOver";
 import type { CreateGroupInput, Cycle, GradeLevel, Group } from "../../config/api";
-import { EmptyHint, NumberField, Section, TextField } from "./parts";
+import { NumberField, TextField } from "../../_design/form";
+import { EmptyHint, Section } from "./parts";
 
 export interface GroupsPanelProps {
   cycle: Cycle;
@@ -30,7 +31,7 @@ function nextLetter(groups: readonly Group[]): string {
 export function GroupsPanel({ cycle, gradeLevel, groups, onCreate }: GroupsPanelProps): ReactElement {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState(nextLetter(groups));
-  const [capacity, setCapacity] = useState(DEFAULT_CAPACITY);
+  const [capacity, setCapacity] = useState(String(DEFAULT_CAPACITY));
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
@@ -46,7 +47,14 @@ export function GroupsPanel({ cycle, gradeLevel, groups, onCreate }: GroupsPanel
     setPending(true);
     setError(undefined);
     try {
-      await onCreate({ cycleId: cycle.id, gradeLevelId: gradeLevel.id, name: name.trim(), capacity });
+      const capacityNumero = Number(capacity);
+      if (capacity.trim() === "" || !Number.isFinite(capacityNumero)) {
+        // Number("") es 0, y un 0 que nadie escribió es un dato falso: un grupo
+        // con cupo 0 no acepta alumnos y la asignación automática lo salta.
+        setError("El cupo del grupo es obligatorio.");
+        return;
+      }
+      await onCreate({ cycleId: cycle.id, gradeLevelId: gradeLevel.id, name: name.trim(), capacity: capacityNumero });
       setCreating(false);
     } catch {
       setError("No se pudo crear el grupo. Revisa que no exista ya con ese nombre.");
@@ -86,8 +94,8 @@ export function GroupsPanel({ cycle, gradeLevel, groups, onCreate }: GroupsPanel
           onSubmit={() => void submit()}
         >
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <TextField label="Nombre del grupo" value={name} onChange={setName} placeholder="A" />
-            <NumberField label="Cupo" value={capacity} onChange={setCapacity} min={0} />
+            <TextField label="Nombre del grupo" value={name} onChange={setName} uppercase required placeholder="A" />
+            <NumberField label="Cupo" value={capacity} onChange={setCapacity} required min={0} />
           </div>
           <div style={{ display: "flex", gap: 11, padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
             <p style={{ fontSize: 13.5, color: "var(--text-muted)", lineHeight: 1.5, margin: 0 }}>

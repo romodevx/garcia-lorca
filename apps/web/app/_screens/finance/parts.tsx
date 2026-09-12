@@ -13,16 +13,8 @@ import { COLOR, type ColorKey } from "../../_design/colors";
  * own unit tests, in `./money`.
  */
 
-export {
-  DateField,
-  EmptyHint,
-  ErrorAlert,
-  RadioGroup,
-  Section,
-  SelectField,
-  TextField,
-  type SelectOption,
-} from "../config/parts";
+export { DateField, SelectField, TextField, type SelectOption } from "../../_design/form";
+export { EmptyHint, ErrorAlert, RadioGroup, Section } from "../config/parts";
 
 /** A single labelled checkbox (`aria-label` = the visible label, for a11y + tests). */
 export function CheckBoxField({

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
+import { Page } from "../../_design/Page";
 import {
   captureGrade,
   getRoster,
@@ -11,7 +12,8 @@ import {
   type TeachingRosterRow,
   type TeachingTerm,
 } from "../../teaching/api";
-import { EmptyHint, ErrorAlert, Section, SelectField, type SelectOption } from "../config/parts";
+import { SelectField, type SelectOption } from "../../_design/form";
+import { EmptyHint, ErrorAlert, Section } from "../config/parts";
 import { GradeRow } from "./GradeRow";
 
 export interface TeacherCaptureProps {
@@ -110,7 +112,7 @@ export function TeacherCapture({ onBack }: TeacherCaptureProps): ReactElement {
   const termOptions: SelectOption[] = cycleTerms.map((t) => ({ value: t.id, label: t.name }));
 
   return (
-    <div style={{ maxWidth: 1160, margin: "0 auto", padding: "24px 28px 96px" }}>
+    <Page>
       <button
         onClick={onBack}
         className="fade-up"
@@ -191,6 +193,6 @@ export function TeacherCapture({ onBack }: TeacherCaptureProps): ReactElement {
           </Section>
         </div>
       )}
-    </div>
+    </Page>
   );
 }

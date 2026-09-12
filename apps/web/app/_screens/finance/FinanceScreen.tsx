@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactElement } from "react";
 import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
+import { DrawerShell } from "../../_design/DrawerShell";
 import { Icon, type IconName } from "../../_design/Icon";
+import { Page } from "../../_design/Page";
 import type { ColorKey } from "../../_design/colors";
 import { listCycles, type Cycle } from "../../config/api";
 import { getOverdue, listCharges, registerPayment, type Charge, type PaymentMethod } from "../../finance/api";
-import { centsToPesosInput, formatCents, pesosToCents } from "./money";
+import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 import { listStudents, type Student } from "../../students/api";
 
 import { API_URL } from "../../api-url";
@@ -40,7 +42,6 @@ const METHODS: { value: PaymentMethod; label: string }[] = [
   { value: "transfer", label: "Transferencia" },
 ];
 
-const qb: CSSProperties = { width: 36, height: 36, borderRadius: "50%", display: "grid", placeItems: "center", background: "var(--surface-3)", border: "1px solid var(--border)", color: "var(--text-muted)", cursor: "pointer" };
 const pager = (disabled: boolean): CSSProperties => ({ display: "inline-flex", alignItems: "center", gap: 6, height: 40, padding: "0 16px", borderRadius: 99, fontSize: 14, fontWeight: 600, fontFamily: "var(--font-display)", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.45 : 1 });
 const fi: CSSProperties = { width: "100%", height: 50, padding: "0 16px", borderRadius: "var(--r-md)", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 15.5, outline: "none" };
 
@@ -97,20 +98,29 @@ function PayDrawer({ charge, name, onClose, onPaid }: { charge: Charge; name: st
   };
 
   return (
-    <div
-      data-testid="pay-drawer-backdrop"
-      onClick={dirty ? undefined : onClose}
-      style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(6,20,12,.5)", backdropFilter: "blur(4px)", display: "flex", justifyContent: "flex-end" }}>
-      <div onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Registrar pago" style={{ width: "min(480px, 100%)", height: "100%", background: "var(--surface)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow-pop)", display: "flex", flexDirection: "column", animation: "slideIn .28s var(--ease) both" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "22px 26px", borderBottom: "1px solid var(--border)" }}>
-          <div style={{ width: 48, height: 48, borderRadius: 14, display: "grid", placeItems: "center", background: "var(--forest)", color: "#fff" }}><Icon name="card" size={26} /></div>
-          <div style={{ flex: 1 }}>
-            <h2 style={{ fontSize: 21, fontWeight: 700, color: "var(--text)" }}>Registrar pago</h2>
-            <p style={{ fontSize: 13.5, color: "var(--text-muted)", marginTop: 2 }}>{name} · {charge.description}</p>
-          </div>
-          <button onClick={onClose} aria-label="Cerrar" style={{ ...qb, width: 40, height: 40 }}><Icon name="close" size={19} /></button>
-        </div>
-        <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px", display: "flex", flexDirection: "column", gap: 18 }}>
+    <DrawerShell
+      title="Registrar pago"
+      subtitle={`${name} · ${charge.description}`}
+      icon="card"
+      // Con la forma empezada, el velo y Esc dejan de cerrar: perder un pago a
+      // medio capturar por un clic perdido es la forma más rápida de que alguien
+      // deje de usar la pantalla.
+      //
+      // `onClose` sigue siendo el de verdad. Pasarle un () => {} apagaba también
+      // el ✕ y el botón Cancelar, porque DrawerShell usa esa misma función para
+      // las cuatro vías: la protección contra el accidente dejaba a la persona
+      // encerrada, que es peor.
+      dismissible={!dirty}
+      onClose={onClose}
+      footer={
+        <>
+          <Btn kind="ghost" onClick={onClose}>Cancelar</Btn>
+          <div style={{ flex: 1 }} />
+          <Btn icon="check" onClick={() => void submit()} style={{ opacity: ready ? 1 : 0.45, pointerEvents: ready ? "auto" : "none", height: 52, fontSize: 16 }}>Registrar pago</Btn>
+        </>
+      }
+    >
+      <>
           <div style={{ display: "flex", justifyContent: "space-between", padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
             <span style={{ fontSize: 14, color: "var(--text-muted)" }}>Saldo del cargo</span>
             <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, color: "var(--text)" }}>{money(charge.remainingCents)}</span>
@@ -133,14 +143,8 @@ function PayDrawer({ charge, name, onClose, onPaid }: { charge: Charge; name: st
             <div style={{ marginTop: 8 }}><input value={reference} onChange={(e) => setReference(e.target.value)} aria-label="Referencia" placeholder="Folio, transferencia…" style={fi} /></div>
           </label>
           {error !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{error}</p>}
-        </div>
-        <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "18px 26px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>
-          <Btn kind="ghost" onClick={onClose}>Cancelar</Btn>
-          <div style={{ flex: 1 }} />
-          <Btn icon="check" onClick={() => void submit()} style={{ opacity: ready ? 1 : 0.45, pointerEvents: ready ? "auto" : "none", height: 52, fontSize: 16 }}>Registrar pago</Btn>
-        </div>
-      </div>
-    </div>
+      </>
+    </DrawerShell>
   );
 }
 
@@ -289,7 +293,7 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
   ];
 
   return (
-    <div style={{ maxWidth: 1320, margin: "0 auto", padding: "24px 28px 96px" }}>
+    <Page>
       <button onClick={onBack} className="fade-up" style={{ display: "inline-flex", alignItems: "center", gap: 7, color: "var(--text-muted)", fontSize: 14.5, fontWeight: 600, marginBottom: 14, cursor: "pointer" }}>
         <Icon name="back" size={18} stroke={2.4} />Volver al inicio
       </button>
@@ -401,27 +405,14 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
         />
       )}
       {cashUp && (
-        <div
-          data-testid="cash-up-backdrop"
-          onClick={() => setCashUp(false)}
-          style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(6,20,12,.5)", backdropFilter: "blur(4px)", display: "flex", justifyContent: "flex-end" }}>
-          <div
-            role="dialog"
-            aria-label="Corte de caja"
-            onClick={(e) => e.stopPropagation()}
-            style={{ width: "min(520px, 100%)", height: "100%", background: "var(--surface-2)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow-pop)", display: "flex", flexDirection: "column", animation: "slideIn .28s var(--ease) both" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "22px 26px", borderBottom: "1px solid var(--border)", background: "var(--surface)" }}>
-              <div style={{ flex: 1 }}>
-                <h2 style={{ fontSize: 21, fontWeight: 700, color: "var(--text)" }}>Corte de caja</h2>
-                <p style={{ fontSize: 13.5, color: "var(--text-muted)", marginTop: 2 }}>Lo recibido hoy, por forma de pago</p>
-              </div>
-              <button onClick={() => setCashUp(false)} aria-label="Cerrar" style={{ ...qb, width: 40, height: 40 }}><Icon name="close" size={19} /></button>
-            </div>
-            <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px" }}>
-              <CashUpPanel day="" />
-            </div>
-          </div>
-        </div>
+        <DrawerShell
+          title="Corte de caja"
+          subtitle="Lo recibido hoy, por forma de pago"
+          icon="finance"
+          onClose={() => setCashUp(false)}
+        >
+          <CashUpPanel day="" />
+        </DrawerShell>
       )}
       {collecting !== null && (
         <CollectDrawer
@@ -435,7 +426,7 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
           <Icon name="check" size={20} stroke={2.6} />{toast}
         </div>
       )}
-    </div>
+    </Page>
   );
 }
 

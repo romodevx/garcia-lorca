@@ -106,7 +106,10 @@ describe("the quick-add drawer", () => {
 
     await user.click(within(drawer).getByRole("button", { name: "Crear alumno" }));
 
-    expect(await within(drawer).findByRole("alert")).toHaveTextContent(/tutor/i);
+    // Ya no es UNA alerta arriba: cada campo que falta lleva la suya, así que
+    // se busca la del tutor en vez de "la" alerta del cajón.
+    expect(within(drawer).getByLabelText("Tutor")).toHaveAttribute("aria-invalid", "true");
+    expect(within(drawer).getAllByRole("alert").map((a) => a.textContent).join(" ")).toMatch(/tutor/i);
     expect(students.createStudent).not.toHaveBeenCalled();
   });
 
@@ -273,5 +276,65 @@ describe("a level that cannot hold a pupil", () => {
     expect(alert).toHaveTextContent(/Universidad/);
     expect(alert).toHaveTextContent(/Maternal/);
     expect(students.createStudent).not.toHaveBeenCalled();
+  });
+});
+
+describe("la captura del alta de alumno", () => {
+  async function abrirAlta(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> {
+    render(<StudentsScreen onBack={() => {}} />);
+    // Son dos: el del encabezado y el flotante.
+    await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
+    return screen.getByRole("dialog", { name: "Nuevo alumno" });
+  }
+
+  it("el nombre, los apellidos, el CURP y el tutor se capturan en mayúsculas", async () => {
+    const user = userEvent.setup();
+    const alta = await abrirAlta(user);
+
+    await user.type(within(alta).getByLabelText("Nombre"), "ana sofía");
+    await user.type(within(alta).getByLabelText("Apellidos"), "ruiz márquez");
+    await user.type(within(alta).getByLabelText("Tutor"), "josé ruiz");
+
+    expect(within(alta).getByLabelText("Nombre")).toHaveValue("ANA SOFÍA");
+    expect(within(alta).getByLabelText("Apellidos")).toHaveValue("RUIZ MÁRQUEZ");
+    expect(within(alta).getByLabelText("Tutor")).toHaveValue("JOSÉ RUIZ");
+  });
+
+  it("guardar en blanco marca CADA campo que falta, no uno solo", async () => {
+    // La validación ya daba un mensaje por campo, pero uno a la vez y en una
+    // sola frase arriba: había que guardar cinco veces para descubrir los cinco.
+    const user = userEvent.setup();
+    const alta = await abrirAlta(user);
+
+    await user.click(within(alta).getByRole("button", { name: "Crear alumno" }));
+
+    expect(within(alta).getByLabelText("CURP")).toHaveAttribute("aria-invalid", "true");
+    expect(within(alta).getByLabelText("Nombre")).toHaveAttribute("aria-invalid", "true");
+    expect(within(alta).getByLabelText("Apellidos")).toHaveAttribute("aria-invalid", "true");
+    expect(within(alta).getByLabelText("Tutor")).toHaveAttribute("aria-invalid", "true");
+    expect(students.createStudent).not.toHaveBeenCalled();
+  });
+
+  it("el rojo de un campo se limpia al escribir en él, y sólo en él", async () => {
+    const user = userEvent.setup();
+    const alta = await abrirAlta(user);
+    await user.click(within(alta).getByRole("button", { name: "Crear alumno" }));
+
+    await user.type(within(alta).getByLabelText("Nombre"), "A");
+
+    expect(within(alta).getByLabelText("Nombre")).not.toHaveAttribute("aria-invalid", "true");
+    expect(within(alta).getByLabelText("CURP")).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("conserva el mensaje que explica POR QUÉ falla, no sólo que falta", async () => {
+    // Un CURP de 17 caracteres no está "vacío": el mensaje tiene que decir que
+    // faltó uno, que es lo que esta pantalla ya sabía decir.
+    const user = userEvent.setup();
+    const alta = await abrirAlta(user);
+
+    await user.type(within(alta).getByLabelText("CURP"), "ROQA930615HDFMRN0");
+    await user.click(within(alta).getByRole("button", { name: "Crear alumno" }));
+
+    expect(within(alta).getByText(/18 caracteres.*17/)).toBeInTheDocument();
   });
 });

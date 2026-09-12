@@ -4,7 +4,8 @@ import { useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import type { CreateRoleInput, Role } from "../../admin/api";
 import { PERMISSION_CATALOG } from "./catalog";
-import { CheckList, EmptyHint, ErrorAlert, Section, TextField } from "./parts";
+import { TextField } from "../../_design/form";
+import { CheckList, EmptyHint, ErrorAlert, Section } from "./parts";
 
 export interface RolesPanelProps {
   roles: readonly Role[];

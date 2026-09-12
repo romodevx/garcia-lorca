@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
 import { getCashUp, type CashUp } from "../../finance/api";
 import { API_URL } from "../../api-url";
-import { formatCents } from "./money";
+import { formatCents } from "../../_lib/money";
 
 export interface CashUpPanelProps {
   /** The day the money changed hands, "2026-10-10". Empty means today. */

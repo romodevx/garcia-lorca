@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactElement } from "react";
 import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
+import { DrawerShell } from "../../_design/DrawerShell";
+import { EmailField, TextField } from "../../_design/form";
 import { Icon, type IconName } from "../../_design/Icon";
+import { Page } from "../../_design/Page";
 import type { ColorKey } from "../../_design/colors";
 import {
   createRole,
@@ -28,8 +31,6 @@ import { PERMISSION_CATALOG } from "./catalog";
 import { API_URL } from "../../api-url";
 
 const AV: ColorKey[] = ["lime", "forest", "orange", "purple", "yellow"];
-
-const qb: CSSProperties = { width: 36, height: 36, borderRadius: "50%", display: "grid", placeItems: "center", background: "var(--surface-3)", border: "1px solid var(--border)", color: "var(--text-muted)", cursor: "pointer" };
 const fi: CSSProperties = { width: "100%", height: 50, padding: "0 16px", borderRadius: "var(--r-md)", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 15.5, outline: "none" };
 const chip = (on: boolean, color: string): CSSProperties => ({ height: 40, padding: "0 15px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", border: `1.5px solid ${on ? `var(--${color})` : "var(--border)"}`, background: on ? `color-mix(in oklab, var(--${color}) 12%, var(--surface))` : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" });
 
@@ -57,22 +58,19 @@ function StatusPill({ status }: { status: UserStatus }): ReactElement {
   );
 }
 
-function Drawer({ title, subtitle, icon, onClose, children, footer }: { title: string; subtitle: string; icon: IconName; onClose: () => void; children: ReactElement; footer: ReactElement }): ReactElement {
+/**
+ * El cajón de administración. Conserva su pie propio —cada uno dice algo
+ * distinto— y delega todo lo demás en la cáscara común: portal, velo, Esc,
+ * aria-modal y el ancho, que vive en CSS.
+ *
+ * Era una copia a mano de <SlideOver>, una de ocho. Su ancho estaba pegado en
+ * el JSX ("min(520px, 100%)"), así que ninguna @media podía alcanzarlo.
+ */
+function Drawer({ title, subtitle, icon, onClose, children, footer }: { title: string; subtitle: string; icon: IconName; onClose: () => void; children: ReactElement; footer: ReactElement }): ReactElement | null {
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(6,20,12,.5)", backdropFilter: "blur(4px)", display: "flex", justifyContent: "flex-end" }}>
-      <div onClick={(e) => e.stopPropagation()} role="dialog" aria-label={title} style={{ width: "min(520px, 100%)", height: "100%", background: "var(--surface)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow-pop)", display: "flex", flexDirection: "column", animation: "slideIn .28s var(--ease) both" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "22px 26px", borderBottom: "1px solid var(--border)" }}>
-          <div style={{ width: 48, height: 48, borderRadius: 14, display: "grid", placeItems: "center", background: "var(--forest)", color: "#fff" }}><Icon name={icon} size={26} /></div>
-          <div style={{ flex: 1 }}>
-            <h2 style={{ fontSize: 21, fontWeight: 700, color: "var(--text)" }}>{title}</h2>
-            <p style={{ fontSize: 13.5, color: "var(--text-muted)", marginTop: 2 }}>{subtitle}</p>
-          </div>
-          <button onClick={onClose} aria-label="Cerrar" style={{ ...qb, width: 40, height: 40 }}><Icon name="close" size={19} /></button>
-        </div>
-        <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px", display: "flex", flexDirection: "column", gap: 18 }}>{children}</div>
-        <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "18px 26px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>{footer}</div>
-      </div>
-    </div>
+    <DrawerShell title={title} subtitle={subtitle} icon={icon} onClose={onClose} footer={footer}>
+      {children}
+    </DrawerShell>
   );
 }
 
@@ -187,7 +185,7 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
   ];
 
   return (
-    <div style={{ maxWidth: 1320, margin: "0 auto", padding: "24px 28px 96px" }}>
+    <Page>
       <button onClick={onBack} className="fade-up" style={{ display: "inline-flex", alignItems: "center", gap: 7, color: "var(--text-muted)", fontSize: 14.5, fontWeight: 600, marginBottom: 14, cursor: "pointer" }}><Icon name="back" size={18} stroke={2.4} />Volver al inicio</button>
 
       <div className="fade-up" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16, marginBottom: 24 }}>
@@ -288,7 +286,7 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
         />
       )}
       {toast !== null && <div style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}><Icon name="check" size={20} stroke={2.6} />{toast}</div>}
-    </div>
+    </Page>
   );
 }
 
@@ -305,9 +303,11 @@ function CreateUserDrawer({ roles, onClose, onSave }: { roles: readonly Role[]; 
     <Drawer title="Nuevo usuario" subtitle="Cuenta de acceso al sistema" icon="user" onClose={onClose}
       footer={<><Btn kind="ghost" onClick={onClose}>Cancelar</Btn><div style={{ flex: 1 }} /><Btn icon="check" onClick={() => void submit()} style={{ opacity: ready ? 1 : 0.45, pointerEvents: ready ? "auto" : "none", height: 52 }}>Crear usuario</Btn></>}>
       <>
-        {labelField("Correo", <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nombre@garcialorca.edu.mx" style={fi} />, true)}
-        {labelField("Nombre para mostrar", <input value={displayName} onChange={(e) => setName(e.target.value)} placeholder="Nombre del usuario" style={fi} />, true)}
-        {labelField("Contraseña temporal", <input value={tempPassword} onChange={(e) => setPw(e.target.value)} type="password" placeholder="La cambiará en el primer ingreso" style={fi} />, true)}
+        <EmailField label="Correo" value={email} onChange={setEmail} required placeholder="nombre@garcialorca.edu.mx" />
+        <TextField label="Nombre para mostrar" value={displayName} onChange={setName} uppercase required placeholder="NOMBRE DEL USUARIO" />
+        {/* La contraseña NO pasa por la capa de captura: nada de mayúsculas ni
+            de minúsculas debe tocarla, y su valor no se formatea nunca. */}
+        {labelField("Contraseña temporal", <input aria-label="Contraseña temporal" value={tempPassword} onChange={(e) => setPw(e.target.value)} type="password" placeholder="La cambiará en el primer ingreso" style={fi} />, true)}
         <div><span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Roles</span>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>{roles.map((r) => <button key={r.id} onClick={() => toggle(r.id)} style={chip(sel.includes(r.id), "lime")}>{r.name}</button>)}</div>
         </div>
@@ -343,8 +343,8 @@ function InviteUserDrawer({ roles, onClose, onSave }: { roles: readonly Role[]; 
     <Drawer title="Invitar usuario" subtitle="Recibirá un correo para elegir su contraseña" icon="user" onClose={onClose}
       footer={<><Btn kind="ghost" onClick={onClose}>Cancelar</Btn><div style={{ flex: 1 }} /><Btn icon="check" onClick={() => void submit()} style={{ opacity: ready ? 1 : 0.45, pointerEvents: ready ? "auto" : "none", height: 52 }}>{sending ? "Enviando…" : "Enviar invitación"}</Btn></>}>
       <>
-        {labelField("Correo", <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nombre@garcialorca.edu.mx" style={fi} />, true)}
-        {labelField("Nombre para mostrar", <input value={displayName} onChange={(e) => setName(e.target.value)} placeholder="Nombre del usuario" style={fi} />, true)}
+        <EmailField label="Correo" value={email} onChange={setEmail} required placeholder="nombre@garcialorca.edu.mx" />
+        <TextField label="Nombre para mostrar" value={displayName} onChange={setName} uppercase required placeholder="NOMBRE DEL USUARIO" />
         <div><span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Roles</span>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>{roles.map((r) => <button key={r.id} onClick={() => toggle(r.id)} style={chip(sel.includes(r.id), "lime")}>{r.name}</button>)}</div>
         </div>
@@ -367,7 +367,7 @@ function CreateRoleDrawer({ onClose, onSave }: { onClose: () => void; onSave: (i
     <Drawer title="Nuevo rol" subtitle="Conjunto de permisos" icon="shield" onClose={onClose}
       footer={<><Btn kind="ghost" onClick={onClose}>Cancelar</Btn><div style={{ flex: 1 }} /><Btn icon="check" onClick={() => void submit()} style={{ opacity: name.trim().length > 1 ? 1 : 0.45, pointerEvents: name.trim().length > 1 ? "auto" : "none", height: 52 }}>Crear rol</Btn></>}>
       <>
-        {labelField("Nombre del rol", <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Coordinación, Docente…" style={fi} />, true)}
+        <TextField label="Nombre del rol" value={name} onChange={setName} uppercase required placeholder="COORDINACIÓN, DOCENTE…" />
         <PermChecklist selected={sel} onToggle={toggle} />
         {err !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{err}</p>}
       </>

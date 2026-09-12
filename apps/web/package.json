@@ -10,7 +10,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "check:no-sourcemaps": "node scripts/check-no-sourcemaps.mjs .next/static",
-    "e2e": "playwright test --project=chromium --project=mobile",
+    "e2e": "playwright test --project=chromium --project=mobile --project=responsive",
     "e2e:ui": "playwright test --ui",
     "e2e:report": "playwright show-report",
     "e2e:demo": "playwright test --project=demo"

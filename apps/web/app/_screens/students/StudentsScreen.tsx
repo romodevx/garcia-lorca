@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement } from "react";
 import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
+import { DrawerShell } from "../../_design/DrawerShell";
+import { SelectField, TextField } from "../../_design/form";
 import { Icon, type IconName } from "../../_design/Icon";
+import { Page } from "../../_design/Page";
 import type { ColorKey } from "../../_design/colors";
 import {
   createStudent,
@@ -124,18 +127,36 @@ export function isSepLevel(name: string): boolean {
  * already is.
  */
 export function missingFieldMessage(draft: QuickAddDraft): string | undefined {
+  return Object.values(missingFields(draft))[0];
+}
+
+/**
+ * Lo mismo, pero por campo, para poder marcarlos TODOS a la vez.
+ *
+ * Devolver un solo mensaje era mejor que el botón gris y mudo que reemplazó,
+ * pero seguía obligando a guardar cinco veces para descubrir los cinco datos
+ * que faltaban. El texto de cada mensaje se conserva tal cual: un CURP de 17
+ * caracteres no está "vacío", y decir cuántos lleva es justo lo que esta
+ * pantalla ya sabía hacer bien.
+ *
+ * El orden de las llaves es el orden de lectura de la forma, así que el primero
+ * que devuelve `missingFieldMessage` sigue siendo el de más arriba.
+ */
+export function missingFields(draft: QuickAddDraft): Record<string, string> {
+  const found: Record<string, string> = {};
   const curp = draft.curp.trim();
-  if (curp === "") return "Escribe el CURP del alumno.";
-  if (curp.length !== CURP_LENGTH) {
-    return `El CURP debe tener ${CURP_LENGTH} caracteres; llevas ${curp.length}.`;
+  if (curp === "") {
+    found.curp = "Escribe el CURP del alumno.";
+  } else if (curp.length !== CURP_LENGTH) {
+    found.curp = `El CURP debe tener ${CURP_LENGTH} caracteres; llevas ${curp.length}.`;
   }
-  if (draft.firstName.trim().length < 2) return "Escribe el nombre del alumno.";
-  if (draft.lastName.trim().length < 2) return "Escribe los apellidos del alumno.";
-  if (draft.guardianName.trim().length < 3) return "Escribe el nombre del tutor.";
+  if (draft.firstName.trim().length < 2) found.firstName = "Escribe el nombre del alumno.";
+  if (draft.lastName.trim().length < 2) found.lastName = "Escribe los apellidos del alumno.";
+  if (draft.guardianName.trim().length < 3) found.guardianName = "Escribe el nombre del tutor.";
   if (draft.gradeLevelId !== undefined && draft.gradeLevelId === "") {
-    return "Elige el nivel y el grado al que entra.";
+    found.gradeLevelId = "Elige el nivel y el grado al que entra.";
   }
-  return undefined;
+  return found;
 }
 
 /**
@@ -186,6 +207,17 @@ function QuickAdd({
   const [gradeLevelId, setGradeLevelId] = useState("");
   const [grades, setGrades] = useState<GradeLevel[]>([]);
   const [guardianName, setGuardian] = useState("");
+  // Los faltantes vienen de missingFields, que conserva el mensaje propio de
+  // cada campo ("llevas 17 caracteres"), así que no se usa useRequired: ese
+  // hook da un mensaje genérico y aquí ya había uno mejor.
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const clearField = (key: string): void =>
+    setFieldErrors((prev) => {
+      if (prev[key] === undefined) return prev;
+      const rest = { ...prev };
+      delete rest[key];
+      return rest;
+    });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
@@ -208,13 +240,12 @@ function QuickAdd({
   }, [levelId]);
 
   const submit = async (): Promise<void> => {
-    // Validated on PRESS, not by greying the button out. A control that refuses
-    // and will not say why is the thing this replaced.
-    const missing = missingFieldMessage({ curp, firstName, lastName, guardianName, gradeLevelId });
-    if (missing !== undefined) {
-      setError(missing);
-      return;
-    }
+    // Se valida al PRESIONAR, no apagando el botón. Un control que se niega y no
+    // dice por qué es justo lo que esto reemplazó — y ahora se marcan todos los
+    // faltantes a la vez, en sus propios campos.
+    const missing = missingFields({ curp, firstName, lastName, guardianName, gradeLevelId });
+    setFieldErrors(missing);
+    if (Object.keys(missing).length > 0) return;
     const chosenLevel = levels.find((l) => l.id === levelId);
     if (chosenLevel === undefined) {
       setError("Elige el nivel y el grado al que entra.");
@@ -253,75 +284,97 @@ function QuickAdd({
   };
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(6,20,12,.5)", backdropFilter: "blur(4px)", display: "flex", justifyContent: "flex-end" }}>
-      <div onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Nuevo alumno" style={{ width: "min(520px, 100%)", height: "100%", background: "var(--surface)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow-pop)", display: "flex", flexDirection: "column", animation: "slideIn .28s var(--ease) both" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "22px 26px", borderBottom: "1px solid var(--border)" }}>
-          <div style={{ width: 48, height: 48, borderRadius: 14, display: "grid", placeItems: "center", background: "var(--forest)", color: "#fff" }}><Icon name="students" size={26} /></div>
-          <div style={{ flex: 1 }}>
-            <h2 style={{ fontSize: 21, fontWeight: 700, color: "var(--text)" }}>Nuevo alumno</h2>
-            <p style={{ fontSize: 13.5, color: "var(--text-muted)", marginTop: 2 }}>Alta rápida · la admisión inicia en trámite</p>
+    <DrawerShell
+      title="Nuevo alumno"
+      subtitle="Alta rápida · la admisión inicia en trámite"
+      icon="students"
+      onClose={onClose}
+      footer={
+        <>
+          <Btn kind="ghost" onClick={onClose}>Cancelar</Btn>
+          <div style={{ flex: 1 }} />
+          {/* "Crear", no "Guardar": esto hace un alumno que no existía. Y se
+              apaga SÓLO mientras la petición va en camino — una forma
+              incompleta recibe sus campos en rojo, no un control muerto. */}
+          <Btn icon="check" onClick={() => void submit()} disabled={saving} style={{ opacity: saving ? 0.45 : 1, height: 52, fontSize: 16 }}>
+            {saving ? "Creando…" : "Crear alumno"}
+          </Btn>
+        </>
+      }
+    >
+      <>
+          <TextField
+            label="CURP"
+            value={curp}
+            onChange={setCurp}
+            uppercase
+            required
+            placeholder="XXXX000000XXXXXX00"
+            error={fieldErrors.curp}
+            onClearError={() => clearField("curp")}
+          />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
+            <TextField
+              label="Nombre"
+              value={firstName}
+              onChange={setFirst}
+              uppercase
+              required
+              placeholder="ANA SOFÍA"
+              error={fieldErrors.firstName}
+              onClearError={() => clearField("firstName")}
+            />
+            <TextField
+              label="Apellidos"
+              value={lastName}
+              onChange={setLast}
+              uppercase
+              required
+              placeholder="RUIZ MÁRQUEZ"
+              error={fieldErrors.lastName}
+              onClearError={() => clearField("lastName")}
+            />
           </div>
-          <button onClick={onClose} aria-label="Cerrar" style={{ ...qb, width: 40, height: 40 }}><Icon name="close" size={19} /></button>
-        </div>
-
-        <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px", display: "flex", flexDirection: "column", gap: 18 }}>
-          <Field label="CURP" req>
-            <input autoFocus value={curp} onChange={(e) => setCurp(e.target.value)} placeholder="XXXX000000XXXXXX00" style={fi} />
-          </Field>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <Field label="Nombre" req><input value={firstName} onChange={(e) => setFirst(e.target.value)} placeholder="Ana Sofía" style={fi} /></Field>
-            <Field label="Apellidos" req><input value={lastName} onChange={(e) => setLast(e.target.value)} placeholder="Ruiz Márquez" style={fi} /></Field>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
+            <SelectField
+              label="Nivel"
+              value={levelId}
+              onChange={setLevelId}
+              required
+              placeholder="Selecciona…"
+              options={levels.map((l) => ({ value: l.id, label: l.name }))}
+            />
+            <SelectField
+              label="Grado"
+              value={gradeLevelId}
+              onChange={setGradeLevelId}
+              required
+              disabled={grades.length === 0}
+              placeholder={levelId === "" ? "Elige un nivel primero" : "Selecciona…"}
+              options={grades.map((g) => ({ value: g.id, label: g.name }))}
+              error={fieldErrors.gradeLevelId}
+              onClearError={() => clearField("gradeLevelId")}
+            />
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <Field label="Nivel" req>
-              <select aria-label="Nivel" value={levelId} onChange={(e) => setLevelId(e.target.value)} style={fi}>
-                <option value="">Selecciona…</option>
-                {levels.map((l) => (
-                  <option key={l.id} value={l.id}>{l.name}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Grado" req>
-              <select aria-label="Grado" value={gradeLevelId} onChange={(e) => setGradeLevelId(e.target.value)} disabled={grades.length === 0} style={fi}>
-                <option value="">{levelId === "" ? "Elige un nivel primero" : "Selecciona…"}</option>
-                {grades.map((g) => (
-                  <option key={g.id} value={g.id}>{g.name}</option>
-                ))}
-              </select>
-            </Field>
-          </div>
-          <Field label="Tutor" req><input value={guardianName} onChange={(e) => setGuardian(e.target.value)} placeholder="Nombre del tutor" style={fi} /></Field>
+          <TextField
+            label="Tutor"
+            value={guardianName}
+            onChange={setGuardian}
+            uppercase
+            required
+            placeholder="NOMBRE DEL TUTOR"
+            error={fieldErrors.guardianName}
+            onClearError={() => clearField("guardianName")}
+          />
           <div style={{ display: "flex", gap: 11, padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
             <span style={{ color: "var(--forest)", flexShrink: 0, marginTop: 1 }}><Icon name="check" size={19} stroke={2.6} /></span>
             <p style={{ fontSize: 13.5, color: "var(--text-muted)", lineHeight: 1.5, margin: 0 }}>El grupo <strong>se asigna solo</strong>, según el cupo de cada salón: se llena A y el siguiente alumno pasa a B. Los documentos se cargan después.</p>
           </div>
           {error !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{error}</p>}
-        </div>
-
-        <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "18px 26px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>
-          <Btn kind="ghost" onClick={onClose}>Cancelar</Btn>
-          <div style={{ flex: 1 }} />
-          {/* "Crear", not "Guardar": this makes a pupil that did not exist. And
-              disabled ONLY while the request is in flight — an incomplete form
-              gets a sentence, not a dead control. */}
-          <Btn icon="check" onClick={() => void submit()} disabled={saving} style={{ opacity: saving ? 0.45 : 1, height: 52, fontSize: 16 }}>
-            {saving ? "Creando…" : "Crear alumno"}
-          </Btn>
-        </div>
-      </div>
-    </div>
+      </>
+    </DrawerShell>
   );
 }
-
-function Field({ label, req, children }: { label: string; req?: boolean; children: ReactElement }): ReactElement {
-  return (
-    <label style={{ display: "block" }}>
-      <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>{label}{req === true && <b style={{ color: "var(--red)" }}> *</b>}</span>
-      <div style={{ marginTop: 8 }}>{children}</div>
-    </label>
-  );
-}
-const fi: CSSProperties = { width: "100%", height: 50, padding: "0 16px", borderRadius: "var(--r-md)", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 15.5, outline: "none" };
 
 // ── detail sheet ──
 function StudentSheet({ st, groups, onClose, onEnroll }: { st: Student; groups: readonly Group[]; onClose: () => void; onEnroll: (groupId: string) => Promise<void> }): ReactElement {
@@ -333,17 +386,29 @@ function StudentSheet({ st, groups, onClose, onEnroll }: { st: Student; groups: 
   ];
   const [gid, setGid] = useState("");
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(6,20,12,.5)", backdropFilter: "blur(4px)", display: "flex", justifyContent: "flex-end" }}>
-      <div onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Ficha del alumno" style={{ width: "min(460px,100%)", height: "100%", background: "var(--surface)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow-pop)", display: "flex", flexDirection: "column", animation: "slideIn .28s var(--ease) both" }}>
+    <DrawerShell
+      title="Ficha del alumno"
+      icon="students"
+      size="sm"
+      onClose={onClose}
+      header={
         <div style={{ padding: "26px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 16 }}>
           <Avatar name={`${st.firstName} ${st.lastName}`} color="forest" size={62} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <h2 style={{ fontSize: 20, fontWeight: 700, color: "var(--text)" }}>{st.firstName} {st.lastName}</h2>
             <div style={{ marginTop: 6 }}><StatusPill status={st.admissionStatus} /></div>
           </div>
-          <button onClick={onClose} aria-label="Cerrar" style={{ ...qb, width: 40, height: 40 }}><Icon name="close" size={19} /></button>
+          <button type="button" onClick={onClose} aria-label="Cerrar" style={{ width: 40, height: 40, borderRadius: "50%", display: "grid", placeItems: "center", background: "var(--surface-3)", border: "1px solid var(--border)", color: "var(--text-muted)", cursor: "pointer" }}><Icon name="close" size={19} /></button>
         </div>
-        <div style={{ flex: 1, overflowY: "auto", padding: "8px 26px" }}>
+      }
+      footer={
+        <>
+          <Btn kind="ghost" icon="documents" style={{ flex: 1 }}>Documentos</Btn>
+          <Btn icon="check" onClick={() => gid !== "" && void onEnroll(gid)} style={{ flex: 1, opacity: gid === "" ? 0.5 : 1, pointerEvents: gid === "" ? "none" : "auto" }}>Inscribir</Btn>
+        </>
+      }
+    >
+      <>
           {rows.map(([k, v]) => (
             <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 16, padding: "15px 0", borderBottom: "1px solid var(--border)" }}>
               <span style={{ fontSize: 14, color: "var(--text-muted)" }}>{k}</span>
@@ -362,13 +427,8 @@ function StudentSheet({ st, groups, onClose, onEnroll }: { st: Student; groups: 
               </div>
             </div>
           )}
-        </div>
-        <div style={{ display: "flex", gap: 10, padding: "18px 26px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>
-          <Btn kind="ghost" icon="documents" style={{ flex: 1 }}>Documentos</Btn>
-          <Btn icon="check" onClick={() => gid !== "" && void onEnroll(gid)} style={{ flex: 1, opacity: gid === "" ? 0.5 : 1, pointerEvents: gid === "" ? "none" : "auto" }}>Inscribir</Btn>
-        </div>
-      </div>
-    </div>
+      </>
+    </DrawerShell>
   );
 }
 
@@ -519,7 +579,7 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
   ];
 
   return (
-    <div style={{ maxWidth: 1320, margin: "0 auto", padding: "24px 28px 96px" }}>
+    <Page>
       <button onClick={onBack} className="fade-up" style={{ display: "inline-flex", alignItems: "center", gap: 7, color: "var(--text-muted)", fontSize: 14.5, fontWeight: 600, marginBottom: 14, cursor: "pointer" }}>
         <Icon name="back" size={18} stroke={2.4} />Volver al inicio
       </button>
@@ -652,7 +712,7 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
           <Icon name="check" size={20} stroke={2.6} />{toast}
         </div>
       )}
-    </div>
+    </Page>
   );
 }
 

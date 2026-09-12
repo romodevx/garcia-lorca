@@ -3,9 +3,11 @@
 import type { ReactElement } from "react";
 import { useTranslations } from "next-intl";
 import { Icon } from "../../_design/Icon";
+import { Page } from "../../_design/Page";
 import { Toast } from "../../_design/Toast";
 import { PassList } from "./PassList";
-import { EmptyHint, ErrorAlert, DateField, Section, SelectField, StatusCounters, type SelectOption } from "./parts";
+import { DateField, SelectField, type SelectOption } from "../../_design/form";
+import { EmptyHint, ErrorAlert, Section, StatusCounters } from "./parts";
 import { usePassList } from "./usePassList";
 
 export interface AttendanceProps {
@@ -31,7 +33,7 @@ export function Attendance({ onBack, today }: AttendanceProps): ReactElement {
   const groupOptions: SelectOption[] = list.groups.map((group) => ({ value: group.id, label: group.name }));
 
   return (
-    <div style={{ maxWidth: 1320, margin: "0 auto", padding: "24px 28px 64px" }}>
+    <Page>
       <button
         onClick={onBack}
         className="fade-up"
@@ -120,6 +122,6 @@ export function Attendance({ onBack, today }: AttendanceProps): ReactElement {
       )}
 
       {list.toast !== undefined && <Toast>{list.toast}</Toast>}
-    </div>
+    </Page>
   );
 }

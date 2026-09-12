@@ -5,8 +5,9 @@ import { useTranslations } from "next-intl";
 import { Btn } from "../../_design/Controls";
 import type { AccountStatement } from "../../finance/api";
 import type { Student } from "../../students/api";
-import { formatCents } from "./money";
-import { EmptyHint, ErrorAlert, Section, SelectField } from "./parts";
+import { formatCents } from "../../_lib/money";
+import { SelectField } from "../../_design/form";
+import { EmptyHint, ErrorAlert, Section } from "./parts";
 
 export interface AccountPanelProps {
   students: readonly Student[];
@@ -50,7 +51,7 @@ export function AccountPanel({ students, onLoad }: AccountPanelProps): ReactElem
 
   return (
     <Section title={t("section.account")}>
-      <div style={{ display: "grid", gap: 16, maxWidth: 820 }}>
+      <div style={{ display: "grid", gap: 16 }}>
         <div style={{ display: "flex", gap: 14, alignItems: "flex-end", flexWrap: "wrap" }}>
           <div style={{ minWidth: 260 }}>
             <SelectField

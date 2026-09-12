@@ -63,6 +63,14 @@ describe("pesos and cents", () => {
     expect(pesosToCents("abc")).toBeNull();
     expect(pesosToCents("-5")).toBeNull();
   });
+
+  it("la coma decimal NO se lee como separador de miles", () => {
+    // Este lector borraba TODA coma, así que "1850,50" se volvía 185050 pesos:
+    // un sobrecobro de cien veces, multiplicado además por la generación masiva
+    // de cargos. Es el mismo defecto que _lib/money.ts documenta haber
+    // corregido, que seguía vivo aquí en una cuarta copia del lector.
+    expect(pesosToCents("1850,50")).toBeNull();
+  });
 });
 
 describe("the tuition table", () => {
@@ -103,7 +111,7 @@ describe("the tuition table", () => {
       // La inscripción viaja en los conceptos; el monto único siempre va en cero.
       enrollmentCents: 0,
       enrollmentConcepts: [{
-        name: "Inscripción",
+        name: "INSCRIPCIÓN",
         tiers: [{ effectiveFrom: "2026-08-01", effectiveTo: "", amountCents: 400000 }],
       }],
       monthlyCents: 250000,
@@ -277,17 +285,16 @@ describe("the inscription's own deadline", () => {
     expect(finance.upsertTuitionPlan.mock.calls[0]?.[1]).toMatchObject({ enrollmentDueOn: "2026-06-30" });
   });
 
-  it("says so rather than sending a date nobody can read", async () => {
+  it("una fecha ilegible ya no puede escribirse", async () => {
+    // Esta prueba pedía el mensaje "se escribe aaaa-mm-dd" al teclear
+    // "30/06/2026". Ese mensaje se borró y no se repuso: con un calendario, la
+    // fecha sólo puede salir bien formada o vacía, así que el error dejó de
+    // poder ocurrir. Lo que se defiende ahora es la garantía que lo sustituye.
     const user = userEvent.setup();
     const drawer = await openPrices(user, /Kínder/);
 
-    await captureInscription(user, drawer);
-    await user.type(within(drawer).getByLabelText("Colegiatura mensual"), "2500");
-    await user.type(within(drawer).getByLabelText("Fecha límite de inscripción"), "30/06/2026");
-    await user.click(within(drawer).getByRole("button", { name: "Guardar tabulador" }));
-
-    expect(await within(drawer).findByRole("alert")).toHaveTextContent(/aaaa-mm-dd/i);
-    expect(finance.upsertTuitionPlan).not.toHaveBeenCalled();
+    const fecha = within(drawer).getByLabelText("Fecha límite de inscripción");
+    expect(fecha).toHaveAttribute("type", "date");
   });
 });
 
@@ -310,7 +317,7 @@ describe("cuotas — the extra a school collects on top of the tuition", () => {
 
     await waitFor(() => expect(finance.upsertTuitionPlan).toHaveBeenCalled());
     expect(finance.upsertTuitionPlan.mock.calls[0]?.[1]).toMatchObject({
-      fees: [{ name: "Cuota de Julio", amountCents: 160000, months: [9, 10] }],
+      fees: [{ name: "CUOTA DE JULIO", amountCents: 160000, months: [9, 10] }],
     });
   });
 
@@ -343,8 +350,8 @@ describe("cuotas — the extra a school collects on top of the tuition", () => {
     await user.click(within(drawer).getByRole("button", { name: "septiembre 2026" }));
     await user.click(within(drawer).getByRole("button", { name: "Agregar cuota" }));
 
-    expect(await within(drawer).findByText("Graduación")).toBeInTheDocument();
-    await user.click(within(drawer).getByRole("button", { name: "Quitar Graduación" }));
+    expect(await within(drawer).findByText("GRADUACIÓN")).toBeInTheDocument();
+    await user.click(within(drawer).getByRole("button", { name: "Quitar GRADUACIÓN" }));
     await waitFor(() => expect(within(drawer).queryByText("Graduación")).not.toBeInTheDocument());
   });
 
@@ -372,6 +379,9 @@ describe("cuotas — the extra a school collects on top of the tuition", () => {
     const user = userEvent.setup();
     const drawer = await openPrices(user, /Primaria/);
 
+    // Lo que ya está guardado se muestra TAL CUAL. La mayúscula es una regla de
+    // captura, no de despliegue: re-escribir lo que el colegio ya tiene haría
+    // que un dato pareciera haber cambiado sin que nadie lo tocara.
     expect(within(drawer).getByText("Cuota de Julio")).toBeInTheDocument();
   });
 });
@@ -427,7 +437,7 @@ it("says nothing about deadlines when it moved none", async () => {
 describe("la escalera de la inscripción", () => {
   const ladder: EnrollmentConcept[] = [
     {
-      name: "Inscripción",
+      name: "INSCRIPCIÓN",
       tiers: [
         { effectiveFrom: "2027-01-01", effectiveTo: "", amountCents: 220000 },
         { effectiveFrom: "2027-03-01", effectiveTo: "", amountCents: 330000 },
@@ -470,7 +480,7 @@ describe("la escalera de la inscripción", () => {
   it("avisa cuando un escalón cuesta menos que el anterior", () => {
     const down: EnrollmentConcept[] = [
       {
-        name: "Inscripción",
+        name: "INSCRIPCIÓN",
         tiers: [
           { effectiveFrom: "2027-01-01", effectiveTo: "", amountCents: 330000 },
           { effectiveFrom: "2027-03-01", effectiveTo: "", amountCents: 33000 },
@@ -491,10 +501,10 @@ describe("la escalera de la inscripción", () => {
 
   it("avisa cuando un escalón no tiene fecha o no tiene monto", () => {
     expect(
-      ladderProblem([{ name: "Inscripción", tiers: [{ effectiveFrom: "", effectiveTo: "", amountCents: 220000 }] }]),
+      ladderProblem([{ name: "INSCRIPCIÓN", tiers: [{ effectiveFrom: "", effectiveTo: "", amountCents: 220000 }] }]),
     ).toMatch(/fecha/i);
     expect(
-      ladderProblem([{ name: "Inscripción", tiers: [{ effectiveFrom: "2027-01-01", effectiveTo: "", amountCents: 0 }] }]),
+      ladderProblem([{ name: "INSCRIPCIÓN", tiers: [{ effectiveFrom: "2027-01-01", effectiveTo: "", amountCents: 0 }] }]),
     ).toMatch(/monto/i);
     expect(ladderProblem([{ name: "", tiers: [] }])).toMatch(/nombre/i);
   });
@@ -503,7 +513,7 @@ describe("la escalera de la inscripción", () => {
 describe("la inscripción con vigencias", () => {
   const withRanges: EnrollmentConcept[] = [
     {
-      name: "Inscripción",
+      name: "INSCRIPCIÓN",
       tiers: [
         { effectiveFrom: "2027-01-01", effectiveTo: "2027-02-28", amountCents: 220000 },
         { effectiveFrom: "2027-03-01", effectiveTo: "2027-03-31", amountCents: 330000 },
@@ -520,7 +530,7 @@ describe("la inscripción con vigencias", () => {
     expect(
       ladderProblem([
         {
-          name: "Inscripción",
+          name: "INSCRIPCIÓN",
           tiers: [{ effectiveFrom: "2027-03-01", effectiveTo: "2027-01-01", amountCents: 220000 }],
         },
       ]),
@@ -531,7 +541,7 @@ describe("la inscripción con vigencias", () => {
     expect(
       ladderProblem([
         {
-          name: "Inscripción",
+          name: "INSCRIPCIÓN",
           tiers: [
             { effectiveFrom: "2027-01-01", effectiveTo: "2027-03-15", amountCents: 220000 },
             { effectiveFrom: "2027-03-01", effectiveTo: "2027-03-31", amountCents: 330000 },
@@ -552,5 +562,43 @@ describe("la inscripción con vigencias", () => {
       { effectiveFrom: "2027-03-01", totalCents: 800000 },
       { effectiveFrom: "2027-04-01", totalCents: 910000 },
     ]);
+  });
+});
+
+describe("la captura del tabulador", () => {
+  it("la fecha límite de inscripción se elige en calendario", async () => {
+    // Se tecleaba como texto con placeholder "2026-06-30", y había un mensaje
+    // de error explicando el formato aaaa-mm-dd. Con calendario, ese error deja
+    // de poder ocurrir.
+    const user = userEvent.setup();
+    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    await screen.findByRole("row", { name: /Kínder/ });
+    await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
+
+    expect(await screen.findByLabelText("Fecha límite de inscripción")).toHaveAttribute("type", "date");
+  });
+
+  it("los montos se capturan en pesos y los conteos no", async () => {
+    const user = userEvent.setup();
+    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    await screen.findByRole("row", { name: /Kínder/ });
+    await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
+
+    await screen.findByLabelText("Colegiatura mensual");
+    // El dinero lleva su signo; las mensualidades y el día límite son conteos.
+    expect(screen.getAllByText("$").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("Mensualidades")).toHaveAttribute("type", "number");
+    expect(screen.getByLabelText("Día límite")).toHaveAttribute("type", "number");
+  });
+
+  it("el nombre de un concepto se captura en mayúsculas", async () => {
+    const user = userEvent.setup();
+    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    await screen.findByRole("row", { name: /Kínder/ });
+    await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
+
+    const nombre = await screen.findByLabelText("Nuevo concepto");
+    await user.type(nombre, "gastos adm");
+    expect(nombre).toHaveValue("GASTOS ADM");
   });
 });

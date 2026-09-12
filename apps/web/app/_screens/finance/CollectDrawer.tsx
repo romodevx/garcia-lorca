@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
-import { Icon } from "../../_design/Icon";
+import { DrawerShell } from "../../_design/DrawerShell";
+import { MoneyField } from "../../_design/form";
 import {
   getAccount,
   getExpected,
@@ -16,7 +17,7 @@ import {
   type PaymentMethod,
 } from "../../finance/api";
 import { API_URL } from "../../api-url";
-import { centsToPesosInput, formatCents, pesosToCents } from "./money";
+import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 
 /**
  * What is missing, or over, against what should have been paid. Zero when the
@@ -47,10 +48,6 @@ const field: CSSProperties = {
   width: "100%", height: 64, padding: "0 18px", borderRadius: "var(--r-md)",
   border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)",
   fontSize: 30, fontFamily: "var(--font-display)", fontWeight: 700, outline: "none",
-};
-const closeBtn: CSSProperties = {
-  width: 40, height: 40, borderRadius: "50%", display: "grid", placeItems: "center",
-  background: "var(--surface-3)", border: "1px solid var(--border)", color: "var(--text-muted)", cursor: "pointer",
 };
 
 /** The pupil the counter is collecting for. Only what the header needs. */
@@ -182,24 +179,20 @@ export function CollectDrawer({ student, onClose, onCollected }: CollectDrawerPr
   }, [ready, student.id, cents, method, cardType, reference, attemptKey, grantEarly, onCollected]);
 
   return (
-    <div
-      data-testid="collect-backdrop"
-      style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(6,20,12,.5)", backdropFilter: "blur(4px)", display: "flex", justifyContent: "flex-end" }}>
-      <div
-        role="dialog"
-        aria-label="Cobrar"
-        style={{ width: "min(520px, 100%)", height: "100%", background: "var(--surface)", borderLeft: "1px solid var(--border)", boxShadow: "var(--shadow-pop)", display: "flex", flexDirection: "column", animation: "slideIn .28s var(--ease) both" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "22px 26px", borderBottom: "1px solid var(--border)" }}>
-          <div style={{ width: 48, height: 48, borderRadius: 14, display: "grid", placeItems: "center", background: "var(--forest)", color: "#fff" }}>
-            <Icon name="card" size={26} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <h2 style={{ fontSize: 21, fontWeight: 700, color: "var(--text)" }}>Cobrar · {name}</h2>
-            <p style={{ fontSize: 13.5, color: "var(--text-muted)", marginTop: 2 }}>{student.gradeGroup ?? ""}</p>
-          </div>
-          <button onClick={onClose} aria-label="Cerrar" style={closeBtn}><Icon name="close" size={19} /></button>
-        </div>
-
+    <DrawerShell
+      title={`Cobrar · ${name}`}
+      subtitle={student.gradeGroup ?? ""}
+      icon="card"
+      size="lg"
+      onClose={onClose}
+      // El velo original de este cajón NO tenía onClick ni Esc, a propósito: es
+      // la ventanilla, y el monto, la forma de pago y la referencia ya tecleados
+      // no pueden irse con un clic fuera de lugar. La cáscara común cierra por
+      // omisión, así que aquí hay que decirlo. El ✕ y Cancelar siguen cerrando.
+      dismissible={false}
+      padded={false}
+    >
+      <>
         {receipt !== null
           ? <Receipt result={receipt} describe={describe.current} onClose={onClose} />
           : (
@@ -224,12 +217,7 @@ export function CollectDrawer({ student, onClose, onCollected }: CollectDrawerPr
                   )}
                 </div>
 
-                <label style={{ display: "block" }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Monto recibido</span>
-                  <div style={{ marginTop: 8 }}>
-                    <input autoFocus inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} aria-label="Monto recibido" placeholder="0.00" style={field} />
-                  </div>
-                </label>
+                <MoneyField label="Monto recibido" value={amount} onChange={setAmount} required />
 
                 {expected !== null && (
                   <div
@@ -334,8 +322,8 @@ export function CollectDrawer({ student, onClose, onCollected }: CollectDrawerPr
               </div>
             </form>
           )}
-      </div>
-    </div>
+      </>
+    </DrawerShell>
   );
 }
 

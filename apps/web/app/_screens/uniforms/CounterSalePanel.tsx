@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useMemo, useState, type ReactElement } from "react";
+import { pesosToCents } from "../../_lib/money";
 import { Btn } from "../../_design/Controls";
+import { MoneyField } from "../../_design/form";
 import { Icon } from "../../_design/Icon";
 import { counterSale, UniformsError, type SaleLine, type UniformItem, type UniformOrder } from "../../uniforms/api";
 import type { Student } from "../../students/api";
@@ -56,8 +58,11 @@ export function CounterSalePanel({
 
   const total = useMemo(() => cart.reduce((sum, line) => sum + line.unitPriceCents * line.qty, 0), [cart]);
   const change = useMemo(() => {
-    const paid = Math.round(Number(received.replace(/[^0-9.]/g, "")) * 100);
-    return Number.isFinite(paid) && paid > total ? paid - total : 0;
+    // Estricto a propósito: el lector permisivo que había aquí leía "1850,50"
+    // como 185050 pesos y anunciaba un cambio cien veces mayor del que hay en
+    // la caja. Un monto que no se entiende no produce cambio.
+    const paid = pesosToCents(received);
+    return !Number.isNaN(paid) && paid > total ? paid - total : 0;
   }, [received, total]);
 
   const reset = useCallback((): void => {
@@ -342,14 +347,9 @@ export function CounterSalePanel({
         )}
         {method === "cash" && cart.length > 0 && (
           <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-            <input
-              style={{ ...field, maxWidth: 180 }}
-              placeholder="Recibí"
-              inputMode="decimal"
-              value={received}
-              onChange={(e) => setReceived(e.target.value)}
-              aria-label="Efectivo recibido"
-            />
+            <div style={{ maxWidth: 180, minWidth: 0 }}>
+              <MoneyField label="Efectivo recibido" value={received} onChange={setReceived} />
+            </div>
             {change > 0 && (
               <span style={{ fontSize: 16, fontWeight: 700, color: "var(--forest)", fontFamily: "var(--font-display)" }}>
                 Cambio: {money(change)}

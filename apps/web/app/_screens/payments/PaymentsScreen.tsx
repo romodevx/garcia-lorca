@@ -4,10 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
 import { Icon } from "../../_design/Icon";
+import { Page } from "../../_design/Page";
 import { listStudents, type Student } from "../../students/api";
 import { getExpected } from "../../finance/api";
 import { API_URL } from "../../api-url";
-import { formatCents } from "../finance/money";
+import { formatCents } from "../../_lib/money";
 import { CollectDrawer, type CollectStudent } from "../finance/CollectDrawer";
 
 const search: CSSProperties = {
@@ -96,7 +97,7 @@ export function PaymentsScreen({ onBack }: PaymentsScreenProps): ReactElement {
   const say = (m: string): void => { setToast(m); setTimeout(() => setToast(null), 2600); };
 
   return (
-    <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px 28px 96px" }}>
+    <Page variant="reading">
       <button onClick={onBack} className="fade-up" style={{ display: "inline-flex", alignItems: "center", gap: 7, color: "var(--text-muted)", fontSize: 14.5, fontWeight: 600, marginBottom: 14, cursor: "pointer" }}>
         <Icon name="back" size={18} stroke={2.4} />Volver al inicio
       </button>
@@ -182,6 +183,6 @@ export function PaymentsScreen({ onBack }: PaymentsScreenProps): ReactElement {
           <Icon name="check" size={20} stroke={2.6} />{toast}
         </div>
       )}
-    </div>
+    </Page>
   );
 }

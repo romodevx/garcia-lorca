@@ -2,7 +2,8 @@
 
 import { useMemo, useState, type ReactElement } from "react";
 import type { AdmissionStatus, Student } from "../../students/api";
-import { EmptyHint, Section, TextField } from "../config/parts";
+import { TextField } from "../../_design/form";
+import { EmptyHint, Section } from "../config/parts";
 
 const STATUS_LABEL: Record<AdmissionStatus, string> = {
   pending: "Pendiente",

@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { useFlag } from "@garcia-lorca/ui/flags";
+import { pathToView, viewToPath, type View } from "./routing/routes";
 import { CommandPaletteHost } from "./command/CommandPaletteHost";
 import { TopBar } from "./_design/TopBar";
 import { MODULES, USERS, type ModuleDef, type Role, type UserProfile } from "./_design/data";
@@ -28,23 +30,6 @@ import { login as apiLogin, changePassword as apiChangePassword, logout as apiLo
 import { API_URL } from "./api-url";
 import { onSessionLost } from "./auth/authFetch";
 import { useSessionTimeout } from "./auth/useSessionTimeout";
-
-type View =
-  | { screen: "login" }
-  | { screen: "changePassword" }
-  | { screen: "dashboard" }
-  | { screen: "finance" }
-  | { screen: "announcements" }
-  | { screen: "payments" }
-  | { screen: "config" }
-  | { screen: "students" }
-  | { screen: "grades" }
-  | { screen: "attendance" }
-  | { screen: "teachers" }
-  | { screen: "uniforms" }
-  | { screen: "admin" }
-  | { screen: "module"; moduleId: string };
-
 
 // Chrome fallback: color + the institution subtitle used until a real per-user
 // profile lands. The identity itself now comes from the authenticated principal
@@ -92,7 +77,55 @@ function chromeUser(principal: MeResult | undefined): UserProfile {
  */
 export function AppShell(): ReactElement {
   const { theme, toggle } = useTheme();
-  const [view, setView] = useState<View>({ screen: "login" });
+  const router = useRouter();
+  const pathname = usePathname();
+
+  // La pantalla ES la dirección. Hasta septiembre de 2026 vivía en un useState
+  // y la web entera respondía en "/", así que el navegador nunca veía una
+  // segunda página: el botón "atrás" sólo podía sacar del sitio y F5 devolvía
+  // al tablero.
+  const view = pathToView(pathname);
+
+  /** Navegar dejando huella: "atrás" regresa aquí. */
+  const go = useCallback((next: View): void => { router.push(viewToPath(next)); }, [router]);
+
+  /**
+   * Navegar SIN dejar huella. Para las pantallas a las que no vale la pena
+   * regresar: el login tras cerrar sesión (en la computadora del mostrador,
+   * "atrás" reviviendo el tablero sería un problema, no una comodidad) y el
+   * cambio forzado de contraseña, que ya se resolvió.
+   */
+  const goReplacing = useCallback((next: View): void => { router.replace(viewToPath(next)); }, [router]);
+
+  // La dirección con la que se abrió la pestaña. Se congela al montar: es "a
+  // dónde iba esta persona", y no debe moverse cuando navegue después.
+  const bootPath = useRef(pathname);
+
+  /**
+   * A dónde iba quien tocó un link directo sin sesión viva.
+   *
+   * Se guarda como View YA RESUELTA, no como el texto de la URL: así el destino
+   * sólo puede ser una de las rutas que routes.ts reconoce, y un link de fuera
+   * no puede empujar a nadie a otro sitio. Vive en memoria del cliente y nunca
+   * en la barra de direcciones, que es donde un ?next= sería copiable.
+   */
+  const pendingDestination = useRef<View | undefined>(undefined);
+
+  // Mientras se pregunta si hay sesión no se puede pintar ni el tablero (sería
+  // un parpadeo de datos a quien no ha entrado) ni la pantalla de entrada (sería
+  // un parpadeo de login a quien recarga con la sesión viva).
+  const [restoring, setRestoring] = useState(true);
+
+  /**
+   * Si hay una sesión viva. NO es "ya cargó el principal".
+   *
+   * Son cosas distintas: `me()` puede fallar con la sesión perfectamente buena
+   * —el gateway rechaza todo mientras hay una rotación pendiente— y en ese caso
+   * el tablero dice que no pudo resolver los permisos y ofrece reintentar. Si la
+   * guardia mirara `principal`, esa persona acabaría en la pantalla de entrada
+   * sin haber perdido su sesión.
+   */
+  const [authenticated, setAuthenticated] = useState(false);
   const [principal, setPrincipal] = useState<MeResult | undefined>(undefined);
   // Distinct from "principal is undefined": that means the answer is still
   // coming, and the dashboard shows a skeleton for it. A FAILURE shown as a
@@ -143,40 +176,61 @@ export function AppShell(): ReactElement {
   const teachersEnabled = useFlag("module_teachers");
   const uniformsEnabled = useFlag("module_uniforms");
 
-  // Restore the session on boot: the auth cookies are HttpOnly (unreadable by
-  // JS), so we ask the gateway who we are. A live session lands straight on the
-  // dashboard — without this, every reload / deep-link / bookmark drops the user
-  // back to login even though the cookie is still valid. A rejection (no session,
-  // or a pending forced change) simply leaves the initial login screen in place.
+  /**
+   * Arranque: las cookies de sesión son HttpOnly (el JavaScript no las ve), así
+   * que se le pregunta al gateway quién somos. Una sesión viva deja la pantalla
+   * donde la dirección diga — recargar /finanzas se queda en Finanzas. Sin
+   * sesión restaurable se va a la entrada, guardando a dónde iba esta persona
+   * para devolverla ahí después.
+   */
   useEffect(() => {
     let active = true;
-    const restore = async (): Promise<void> => {
+
+    const restore = async (): Promise<boolean> => {
       try {
         const m = await apiMe(API_URL);
-        if (active) {
-          setPrincipal(m);
-          setView({ screen: "dashboard" });
-        }
-        return;
+        if (active) setPrincipal(m);
+        return true;
       } catch {
-        // The short-lived access cookie may have expired; fall through to the
-        // longer-lived refresh cookie, which can mint a fresh access token.
+        // La cookie de acceso es corta y pudo expirar; queda la de refresco,
+        // que sí puede acuñar una nueva.
       }
       try {
         await apiRefresh(API_URL);
         const m = await apiMe(API_URL);
-        if (active) {
-          setPrincipal(m);
-          setView({ screen: "dashboard" });
-        }
+        if (active) setPrincipal(m);
+        return true;
       } catch {
-        // No restorable session — stay on login.
+        return false;
       }
     };
-    void restore();
+
+    void restore().then((alive) => {
+      if (!active) return;
+      setAuthenticated(alive);
+      const asked = pathToView(bootPath.current);
+      if (!alive) {
+        // Sólo vale la pena recordar un destino que NO sea el que se ofrece por
+        // omisión: mandar a alguien "de vuelta" al tablero no es devolverlo a
+        // ningún lado.
+        if (asked.screen !== "login" && asked.screen !== "dashboard" && asked.screen !== "changePassword") {
+          pendingDestination.current = asked;
+        }
+        goReplacing({ screen: "login" });
+      } else if (asked.screen === "login" || asked.screen === "changePassword") {
+        // Con sesión viva, la pantalla de entrada no tiene nada que hacer.
+        goReplacing({ screen: "dashboard" });
+      }
+      setRestoring(false);
+    });
+
     return () => {
       active = false;
     };
+    // Corre UNA vez, al montar. `bootPath` es justamente la dirección CONGELADA
+    // con la que se abrió la pestaña, y volver a correr esto al navegar
+    // re-preguntaría la sesión en cada clic.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleLogin = async (email: string, password: string): Promise<void> => {
@@ -198,15 +252,26 @@ export function AppShell(): ReactElement {
         res = await apiLogin(API_URL, email, password);
       }
       if (res.mustChangePassword) {
-        setView({ screen: "changePassword" });
+        // El destino pendiente se descarta aquí. Sin esto sobrevivía al cambio
+        // forzado —esta rama sale antes de la línea que lo limpia— y la
+        // SIGUIENTE persona que entrara en la misma pestaña compartida
+        // aterrizaba en el módulo que pidió la anterior.
+        pendingDestination.current = undefined;
+        setAuthenticated(true);
+        // `replace`: una vez cambiada, esa pantalla ya no es un destino.
+        goReplacing({ screen: "changePassword" });
         return;
       }
       // Login only returns session metadata; fetch the principal so the chrome
       // shows the real identity and the dashboard knows what to show. A failure
       // is non-fatal for the chrome but NOT invisible: loadPrincipal records it
       // and the dashboard says so.
+      setAuthenticated(true);
       await loadPrincipal();
-      setView({ screen: "dashboard" });
+      // De vuelta al link que trajo aquí a esta persona, si lo hubo.
+      const target = pendingDestination.current ?? { screen: "dashboard" as const };
+      pendingDestination.current = undefined;
+      goReplacing(target);
     } catch {
       setAuthError("Correo o contraseña incorrectos.");
     } finally {
@@ -235,7 +300,7 @@ export function AppShell(): ReactElement {
     } catch {
       // Keep the fallback chrome; the fresh session is still valid.
     }
-    setView({ screen: "dashboard" });
+    goReplacing({ screen: "dashboard" });
     setPending(false);
   };
 
@@ -251,7 +316,8 @@ export function AppShell(): ReactElement {
     // session that was never started is not worth 468 KB.
     void endSession(API_URL, apiLogout, providerLoginEnabled(), () => import("./auth/firebase"));
     setPrincipal(undefined);
-    setView({ screen: "login" });
+    setAuthenticated(false);
+    goReplacing({ screen: "login" });
   };
 
   // The school's session rule. The panel runs on a computer at the front desk:
@@ -275,9 +341,13 @@ export function AppShell(): ReactElement {
   useEffect(() => onSessionLost(() => {
     logout();
     setPrincipal(undefined);
+    setAuthenticated(false);
     setPrincipalFailed(false);
-    setView({ screen: "login" });
+    goReplacing({ screen: "login" });
     setAuthError("Tu sesión terminó. Vuelve a entrar.");
+    // Se suscribe UNA vez. Re-suscribir en cada render dejaría varios oyentes
+    // cerrando la misma sesión.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }), []);
 
   useSessionTimeout({
@@ -293,50 +363,50 @@ export function AppShell(): ReactElement {
     // hour never meets a login screen mid-entry.
     onKeepAlive: () => { void apiRefresh(API_URL).catch(() => {}); },
   });
-  const home = (): void => setView({ screen: "dashboard" });
+  const home = (): void => go({ screen: "dashboard" });
   const open = useCallback((id: string, _intent?: string): void => {
     if (id === "finance") {
-      setView({ screen: "finance" });
+      go({ screen: "finance" });
       return;
     }
     if (id === "settings") {
-      setView({ screen: "config" });
+      go({ screen: "config" });
       return;
     }
     if (id === "students") {
-      setView({ screen: "students" });
+      go({ screen: "students" });
       return;
     }
     if (id === "grades") {
-      setView({ screen: "grades" });
+      go({ screen: "grades" });
       return;
     }
     if (id === "attendance") {
-      setView({ screen: "attendance" });
+      go({ screen: "attendance" });
       return;
     }
     if (id === "teachers") {
-      setView({ screen: "teachers" });
+      go({ screen: "teachers" });
       return;
     }
     if (id === "uniforms") {
-      setView({ screen: "uniforms" });
+      go({ screen: "uniforms" });
       return;
     }
     if (id === "payments") {
-      setView({ screen: "payments" });
+      go({ screen: "payments" });
       return;
     }
     if (id === "announcements") {
-      setView({ screen: "announcements" });
+      go({ screen: "announcements" });
       return;
     }
     if (id === "admin") {
-      setView({ screen: "admin" });
+      go({ screen: "admin" });
       return;
     }
-    setView({ screen: "module", moduleId: id });
-  }, []);
+    go({ screen: "module", moduleId: id });
+  }, [go]);
 
   // Command Palette navigation: a command route is `module:<id>` plus an optional
   // intent (`module:finance:payment` lands on the ventanilla form). Navigating IS
@@ -354,6 +424,49 @@ export function AppShell(): ReactElement {
     () => (view.screen === "module" ? MODULES.find((m) => m.id === view.moduleId) : undefined),
     [view]
   );
+
+  // Todavía preguntando si hay sesión. Pintar el tablero aquí enseñaría datos a
+  // quien no ha entrado; pintar la entrada haría parpadear un login a quien
+  // recarga con la sesión viva. Así que no se pinta ninguna de las dos.
+  if (restoring) {
+    return (
+      <div
+        className="app-root"
+        role="status"
+        aria-label="Abriendo el sistema"
+        style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}
+      >
+        <span style={{ color: "var(--text-faint)", fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 15 }}>
+          Abriendo el sistema…
+        </span>
+      </div>
+    );
+  }
+
+  /**
+   * LA GUARDIA. Sin sesión no se pinta ninguna pantalla del sistema, diga lo que
+   * diga la dirección.
+   *
+   * Hace falta por dos caminos distintos que terminan igual:
+   *
+   * 1. `router.replace` mueve el pathname de forma ASÍNCRONA. El render que
+   *    sigue a la restauración trae `restoring` ya en false y todavía la
+   *    dirección vieja, así que un link directo a /finanzas se pintaba entero
+   *    —barra, módulo y sus llamadas— antes de que aterrizara el redirect.
+   *
+   * 2. `replace` sólo sustituye la entrada ACTUAL del historial. Las anteriores
+   *    siguen siendo rutas protegidas, así que después de cerrar sesión el botón
+   *    "atrás" volvía a pintar el tablero. En la computadora del mostrador eso
+   *    es justo lo que no debe pasar, y es lo que un comentario de este archivo
+   *    afirmaba haber evitado usando `replace` — no lo lograba.
+   *
+   * Esto es comodidad y respeto por quien mira la pantalla, NO un control de
+   * seguridad: el gateway sigue siendo la frontera y responde 401 sin cookie.
+   */
+  const publicScreen = view.screen === "login" || view.screen === "changePassword";
+  if (!authenticated && !publicScreen) {
+    return <Login theme={theme} onToggle={toggle} onSubmit={handleLogin} error={authError} pending={pending} />;
+  }
 
   if (view.screen === "login") {
     return <Login theme={theme} onToggle={toggle} onSubmit={handleLogin} error={authError} pending={pending} />;

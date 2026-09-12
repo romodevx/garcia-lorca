@@ -24,7 +24,7 @@ import {
 } from "../../finance/api";
 import { listStudents, type Student } from "../../students/api";
 import type { ChargeFilter } from "./ChargesPanel";
-import { formatCents } from "./money";
+import { formatCents } from "../../_lib/money";
 
 import { API_URL } from "../../api-url";
 

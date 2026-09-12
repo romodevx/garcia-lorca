@@ -3,7 +3,8 @@
 import { useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import type { CreateTeacherInput, Teacher } from "../../teachers/api";
-import { EmptyHint, ErrorAlert, Section, TextField } from "../config/parts";
+import { EmailField, TextField } from "../../_design/form";
+import { EmptyHint, ErrorAlert, Section } from "../config/parts";
 
 export interface TeachersPanelProps {
   teachers: readonly Teacher[];
@@ -62,11 +63,11 @@ export function TeachersPanel({ teachers, onCreate }: TeachersPanelProps): React
 
       <form aria-label="Agregar profesor" onSubmit={submit}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-          <TextField label="Nombre" value={firstName} onChange={setFirstName} placeholder="Ada" />
-          <TextField label="Apellidos" value={lastName} onChange={setLastName} placeholder="Lovelace" />
+          <TextField label="Nombre" value={firstName} onChange={setFirstName} uppercase required placeholder="ADA" />
+          <TextField label="Apellidos" value={lastName} onChange={setLastName} uppercase required placeholder="LOVELACE" />
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12, alignItems: "end" }}>
-          <TextField label="Correo" value={email} onChange={setEmail} placeholder="ada@example.com" />
+          <EmailField label="Correo" value={email} onChange={setEmail} placeholder="ada@example.com" />
           <Btn type="submit" icon="plus" disabled={!canSubmit}>
             Crear profesor
           </Btn>

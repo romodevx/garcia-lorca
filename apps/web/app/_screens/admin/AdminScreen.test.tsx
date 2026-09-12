@@ -59,12 +59,12 @@ describe("AdminScreen", () => {
     expect(within(dialog).queryByLabelText(/Contraseña/)).not.toBeInTheDocument();
     expect(within(dialog).queryByPlaceholderText(/primer ingreso/)).not.toBeInTheDocument();
 
-    await user.type(within(dialog).getByPlaceholderText(/garcialorca/), "nueva@gl.mx");
-    await user.type(within(dialog).getByPlaceholderText(/Nombre del usuario/), "Nueva Maestra");
+    await user.type(within(dialog).getByLabelText("Correo"), "nueva@gl.mx");
+    await user.type(within(dialog).getByLabelText("Nombre para mostrar"), "Nueva Maestra");
     await user.click(within(dialog).getByRole("button", { name: "owner" }));
     await user.click(within(dialog).getByRole("button", { name: /Enviar invitación/ }));
 
-    expect(admin.inviteUser).toHaveBeenCalledWith(expect.any(String), { email: "nueva@gl.mx", displayName: "Nueva Maestra", roleIds: ["r1"] });
+    expect(admin.inviteUser).toHaveBeenCalledWith(expect.any(String), { email: "nueva@gl.mx", displayName: "NUEVA MAESTRA", roleIds: ["r1"] });
     expect(admin.createUser).not.toHaveBeenCalled();
   });
 
@@ -136,7 +136,7 @@ describe("AdminScreen", () => {
 
   it("creates a role from the drawer with checked permissions", async () => {
     const user = userEvent.setup();
-    admin.createRole.mockResolvedValue({ id: "r9", name: "Coordinación", permissions: ["users:read"] });
+    admin.createRole.mockResolvedValue({ id: "r9", name: "COORDINACIÓN", permissions: ["users:read"] });
     render(<AdminScreen onBack={() => {}} />);
     await screen.findByText("Director");
 
@@ -144,11 +144,11 @@ describe("AdminScreen", () => {
     await user.click(screen.getByRole("button", { name: "Roles 1" }));
     await user.click(screen.getByRole("button", { name: /Nuevo rol/ }));
     const dialog = await screen.findByRole("dialog", { name: "Nuevo rol" });
-    await user.type(within(dialog).getByPlaceholderText(/Coordinación/), "Coordinación");
+    await user.type(within(dialog).getByLabelText("Nombre del rol"), "Coordinación");
     await user.click(within(dialog).getByRole("button", { name: "Ver usuarios" }));
     await user.click(within(dialog).getByRole("button", { name: "Crear rol" }));
 
-    expect(admin.createRole).toHaveBeenCalledWith(expect.any(String), { name: "Coordinación", permissions: ["users:read"] });
+    expect(admin.createRole).toHaveBeenCalledWith(expect.any(String), { name: "COORDINACIÓN", permissions: ["users:read"] });
   });
 
   // Both actions are gated on the row's state, and both used to be gated on
@@ -172,4 +172,33 @@ describe("AdminScreen", () => {
     expect(screen.getAllByRole("button", { name: "Reactivar" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Reenviar invitación" })).toHaveLength(1);
   });
+});
+
+describe("la captura de administración", () => {
+  it("el correo de un usuario nuevo baja a minúsculas mientras se teclea", async () => {
+    const user = userEvent.setup();
+    render(<AdminScreen onBack={() => {}} />);
+    await user.click(await screen.findByRole("button", { name: /Nuevo usuario|Invitar usuario/ }));
+
+    const correo = screen.getByLabelText("Correo");
+    await user.type(correo, "Ana.Ruiz@CEGLORCA.COM");
+    expect(correo).toHaveValue("ana.ruiz@ceglorca.com");
+    expect(correo).toHaveAttribute("type", "email");
+  });
+
+  it("el nombre para mostrar se captura en mayúsculas", async () => {
+    const user = userEvent.setup();
+    render(<AdminScreen onBack={() => {}} />);
+    await user.click(await screen.findByRole("button", { name: /Nuevo usuario|Invitar usuario/ }));
+
+    const nombre = screen.getByLabelText("Nombre para mostrar");
+    await user.type(nombre, "ana ruiz");
+    expect(nombre).toHaveValue("ANA RUIZ");
+  });
+
+  // La contraseña temporal queda FUERA de la capa de captura a propósito —
+  // nada debe subirla ni bajarla— pero en este entorno el proveedor de
+  // identidad está activo y ese campo no existe, así que no hay camino que
+  // probarlo aquí. La garantía de fondo es que app/_design/form/ no tiene
+  // ninguna primitiva de contraseña.
 });

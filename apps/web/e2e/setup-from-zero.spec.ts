@@ -48,17 +48,24 @@ test.describe.serial("setting up a school from zero", () => {
     await signIn(page);
     await openModule(page, "Configuración");
 
-    await page.getByLabel("Nombre del ciclo").fill(cycle);
-    await page.getByLabel("Inicio del ciclo").fill("2026-08-31");
-    await page.getByLabel("Fin del ciclo").fill("2027-07-09");
-    await page.getByRole("button", { name: "Crear ciclo" }).click();
+    // Todo el catálogo se captura en cajones, no en formas en línea. Esta suite
+    // seguía escrita contra la versión en línea, y por eso pedía "Inicio del
+    // ciclo" cuando el campo dice "Inicia".
+    await page.getByRole("button", { name: "Nuevo ciclo" }).click();
+    const cicloNuevo = page.getByRole("dialog", { name: "Nuevo ciclo escolar" });
+    await cicloNuevo.getByLabel("Nombre del ciclo").fill(cycle);
+    await cicloNuevo.getByLabel("Inicia").fill("2026-08-31");
+    await cicloNuevo.getByLabel("Termina").fill("2027-07-09");
+    await cicloNuevo.getByRole("button", { name: "Crear ciclo" }).click();
 
-    await expect(page.getByRole("button", { name: new RegExp(cycle) })).toBeVisible();
+    // `.first()`: el chip del ciclo y el botón "Activar ciclo <nombre>" traen
+    // los dos el nombre. El chip es el que va primero en el DOM.
+    await expect(page.getByRole("button", { name: new RegExp(cycle, "i") }).first()).toBeVisible();
 
     // A cycle is born a draft. Everything downstream asks "which year is active"
     // — groups, tuition, enrolment — so putting it into service is part of
     // opening a school, not an afterthought.
-    await page.getByRole("button", { name: new RegExp(cycle) }).click();
+    await page.getByRole("button", { name: new RegExp(cycle, "i") }).first().click();
     await page.getByRole("button", { name: "Activar ciclo" }).click();
     await expect(page.getByText(/es el ciclo en curso/i)).toBeVisible();
   });
@@ -72,10 +79,15 @@ test.describe.serial("setting up a school from zero", () => {
     await signIn(page);
     await openModule(page, "Configuración");
 
-    await page.getByLabel("Nombre del ciclo").fill(cycle);
-    await page.getByLabel("Inicio del ciclo").fill("2026-08-31");
-    await page.getByLabel("Fin del ciclo").fill("2027-07-09");
-    await page.getByRole("button", { name: "Crear ciclo" }).click();
+    // Todo el catálogo se captura en cajones, no en formas en línea. Esta suite
+    // seguía escrita contra la versión en línea, y por eso pedía "Inicio del
+    // ciclo" cuando el campo dice "Inicia".
+    await page.getByRole("button", { name: "Nuevo ciclo" }).click();
+    const cicloNuevo = page.getByRole("dialog", { name: "Nuevo ciclo escolar" });
+    await cicloNuevo.getByLabel("Nombre del ciclo").fill(cycle);
+    await cicloNuevo.getByLabel("Inicia").fill("2026-08-31");
+    await cicloNuevo.getByLabel("Termina").fill("2027-07-09");
+    await cicloNuevo.getByRole("button", { name: "Crear ciclo" }).click();
 
     await expect(page.getByText(/Ya existe un ciclo con ese nombre/)).toBeVisible();
   });
@@ -83,31 +95,34 @@ test.describe.serial("setting up a school from zero", () => {
   test("2 · a level, a grade, a group and a subject", async ({ page }) => {
     await signIn(page);
     await openModule(page, "Configuración");
-    await page.getByRole("button", { name: new RegExp(cycle) }).click();
+    await page.getByRole("button", { name: new RegExp(cycle, "i") }).first().click();
 
-    await page.getByLabel("Nombre del nivel").fill(level);
-    await page.getByLabel("Clave SEP").fill(`P${tag.slice(-2).toUpperCase()}`);
-    // The level form will not submit until somebody says how pupils enrol in it,
-    // and the button stays disabled with no explanation until they do. Worth
-    // knowing before doing this in front of an audience.
-    await page.getByRole("radio", { name: "Por ciclo" }).check();
-    await page.getByRole("button", { name: "Crear nivel" }).click();
-    await expect(page.getByRole("button", { name: new RegExp(level) })).toBeVisible();
+    await page.getByRole("button", { name: "Nuevo nivel" }).click();
+    const nivelNuevo = page.getByRole("dialog", { name: "Nuevo nivel educativo" });
+    await nivelNuevo.getByLabel("Nombre del nivel").fill(level);
+    await nivelNuevo.getByLabel("Clave SEP").fill(`P${tag.slice(-2).toUpperCase()}`);
+    // El nivel no se guarda hasta que alguien dice cómo se inscribe en él.
+    await nivelNuevo.getByRole("radio", { name: "Por ciclo" }).check();
+    await nivelNuevo.getByRole("button", { name: "Crear nivel" }).click();
+    await expect(page.getByRole("button", { name: new RegExp(level, "i") }).first()).toBeVisible();
 
+    await page.getByRole("button", { name: "Nuevo grado" }).click();
     await page.getByLabel("Nombre del grado").fill(grade);
     await page.getByRole("button", { name: "Crear grado" }).click();
-    await expect(page.getByRole("button", { name: new RegExp(grade) })).toBeVisible();
+    await expect(page.getByRole("button", { name: new RegExp(grade, "i") }).first()).toBeVisible();
 
     // Creating the grade is not enough — the groups and subjects panels only
     // appear once a grade is SELECTED ("Selecciona un grado para gestionar
     // materias y grupos"). Worth knowing before doing this on stage: the screen
     // looks finished and half of it is not there yet.
-    await page.getByRole("button", { name: new RegExp(grade) }).click();
+    await page.getByRole("button", { name: new RegExp(grade, "i") }).first().click();
 
+    await page.getByRole("button", { name: "Nuevo grupo" }).click();
     await page.getByLabel("Nombre del grupo").fill(group);
     await page.getByRole("button", { name: "Crear grupo" }).click();
     await expect(page.getByText(group, { exact: false }).first()).toBeVisible();
 
+    await page.getByRole("button", { name: "Nueva materia" }).click();
     await page.getByLabel("Nombre de la materia").fill(subject);
     await page.getByRole("button", { name: "Crear materia" }).click();
     await expect(page.getByText(subject, { exact: false }).first()).toBeVisible();
@@ -133,10 +148,10 @@ test.describe.serial("setting up a school from zero", () => {
     // The assignment is the knot: (grupo, materia, profesor). The cycle is
     // derived server-side from the group, which is why it is never sent.
     const assign = page.getByRole("form", { name: "Asignar profesor" });
-    await assign.getByRole("combobox", { name: "Ciclo" }).selectOption({ label: cycle });
-    await assign.getByRole("combobox", { name: "Grupo" }).selectOption({ label: group });
-    await assign.getByRole("combobox", { name: "Materia" }).selectOption({ label: subject });
-    await assign.getByRole("combobox", { name: "Profesor" }).selectOption({ label: `Gabriela Rojas ${tag}` });
+    await assign.getByRole("combobox", { name: "Ciclo" }).selectOption({ label: comoSeGuarda(cycle) });
+    await assign.getByRole("combobox", { name: "Grupo" }).selectOption({ label: comoSeGuarda(group) });
+    await assign.getByRole("combobox", { name: "Materia" }).selectOption({ label: comoSeGuarda(subject) });
+    await assign.getByRole("combobox", { name: "Profesor" }).selectOption({ label: comoSeGuarda(`Gabriela Rojas ${tag}`) });
     await assign.getByRole("button", { name: "Asignar profesor" }).click();
 
     // The assignment list, not the dropdown that also carries the subject name:
@@ -157,14 +172,16 @@ test.describe.serial("setting up a school from zero", () => {
     // Scoped to the drawer: "CURP" also names the roster's search box, and an
     // unscoped match takes whichever came first in the DOM.
     const drawer = page.getByRole("dialog", { name: "Nuevo alumno" });
-    await drawer.getByRole("textbox", { name: "CURP *" }).fill(curpFor(tag));
-    await drawer.getByRole("textbox", { name: "Nombre *" }).fill("Zoe");
-    await drawer.getByRole("textbox", { name: "Apellidos *" }).fill(`Villalobos ${tag}`);
+    // Sin el " *": el asterisco es hermano del <label>, no su hijo, para que el
+    // nombre accesible del campo siga siendo "CURP" y no "CURP *".
+    await drawer.getByRole("textbox", { name: "CURP" }).fill(curpFor(tag));
+    await drawer.getByRole("textbox", { name: "Nombre" }).fill("Zoe");
+    await drawer.getByRole("textbox", { name: "Apellidos" }).fill(`Villalobos ${tag}`);
     // Level and grade are cascading selects, and the GROUP is never asked for:
     // it is chosen by whichever one still has a seat.
-    await drawer.getByRole("combobox", { name: "Nivel" }).selectOption({ label: level });
-    await drawer.getByRole("combobox", { name: "Grado" }).selectOption({ label: grade });
-    await drawer.getByRole("textbox", { name: "Tutor *" }).fill("Marisol Villalobos");
+    await drawer.getByRole("combobox", { name: "Nivel" }).selectOption({ label: comoSeGuarda(level) });
+    await drawer.getByRole("combobox", { name: "Grado" }).selectOption({ label: comoSeGuarda(grade) });
+    await drawer.getByRole("textbox", { name: "Tutor" }).fill("Marisol Villalobos");
     await drawer.getByRole("button", { name: "Crear alumno" }).click();
 
     await expect(page.getByText(`Villalobos ${tag}`, { exact: false }).first()).toBeVisible();
@@ -178,7 +195,7 @@ test.describe.serial("setting up a school from zero", () => {
   test("3c · what the level costs, and the month's charges", async ({ page }) => {
     await signIn(page);
     await openModule(page, "Configuración");
-    await page.getByRole("button", { name: new RegExp(cycle) }).click();
+    await page.getByRole("button", { name: new RegExp(cycle, "i") }).first().click();
 
     // Price the level the pupil is enrolled in.
     const row = page.getByRole("row").filter({ hasText: level });
@@ -335,6 +352,17 @@ test.describe.serial("setting up a school from zero", () => {
 async function addToBasket(page: Page, garmentName: string, size: string): Promise<void> {
   await page.getByRole("button", { name: new RegExp(`^${garmentName}`) }).click();
   await page.getByRole("button", { name: new RegExp(`^${size}\\s`) }).click();
+}
+
+/**
+ * Como el sistema guarda el nombre, no como se tecleó.
+ *
+ * Los nombres de catálogo y de personas se capturan en mayúsculas, así que una
+ * <option> ya no dice "Ciclo 5p7u" sino "CICLO 5P7U", y selectOption({label})
+ * compara exacto.
+ */
+function comoSeGuarda(nombre: string): string {
+  return nombre.toLocaleUpperCase("es-MX");
 }
 
 function curpFor(tag: string): string {

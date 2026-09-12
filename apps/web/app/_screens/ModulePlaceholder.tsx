@@ -3,6 +3,7 @@
 import type { ReactElement } from "react";
 import { Btn } from "../_design/Controls";
 import { Icon } from "../_design/Icon";
+import { Page } from "../_design/Page";
 import { COLOR } from "../_design/colors";
 import type { ModuleDef } from "../_design/data";
 
@@ -16,7 +17,7 @@ export function ModulePlaceholder({ m, onBack }: ModulePlaceholderProps): ReactE
   const c = COLOR[m.color] ?? COLOR.neutral;
   const neutral = m.color === "neutral";
   return (
-    <div style={{ maxWidth: 1320, margin: "0 auto", padding: "24px 28px 64px" }}>
+    <Page>
       <button
         onClick={onBack}
         className="fade-up"
@@ -85,6 +86,6 @@ export function ModulePlaceholder({ m, onBack }: ModulePlaceholderProps): ReactE
           </Btn>
         </div>
       </div>
-    </div>
+    </Page>
   );
 }

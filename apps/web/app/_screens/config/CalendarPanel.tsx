@@ -16,7 +16,8 @@ import {
   type NonWorkingPeriod,
   type SchoolEvent,
 } from "../../config/api";
-import { EmptyHint, ErrorAlert, Section, TextField } from "./parts";
+import { DateField, TextField, useRequired } from "../../_design/form";
+import { EmptyHint, ErrorAlert, Section } from "./parts";
 
 import { API_URL } from "../../api-url";
 
@@ -40,6 +41,13 @@ export interface CalendarPanelProps {
  * A single closure is one date. Asking for the same day twice is how a calendar
  * stops being maintained.
  */
+/**
+ * Los obligatorios, fuera del componente: `useRequired` los usa como
+ * dependencia, y un arreglo nuevo en cada render reharía sus callbacks.
+ */
+const DAY_REQUIRED = ["label", "from"] as const;
+const EVENT_REQUIRED = ["eventTitle", "eventFrom"] as const;
+
 export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
   const [periods, setPeriods] = useState<NonWorkingPeriod[]>([]);
   const [events, setEvents] = useState<SchoolEvent[]>([]);
@@ -56,6 +64,9 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
   // the same drawer the rest of the system uses.
   const [open, setOpen] = useState<"none" | "day" | "event">("none");
 
+  const dayForm = useRequired(DAY_REQUIRED);
+  const eventForm = useRequired(EVENT_REQUIRED);
+
   const reload = useCallback(() => {
     listNonWorkingPeriods(API_URL, cycle.id)
       .then(setPeriods)
@@ -68,10 +79,9 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
   useEffect(reload, [reload]);
 
   const add = async (): Promise<void> => {
-    if (label.trim() === "" || from.trim() === "") {
-      setError("Un día cerrado necesita nombre y fecha.");
-      return;
-    }
+    // Lo que falta se marca en el propio campo, en rojo. El mensaje suelto
+    // "necesita nombre y fecha" obligaba a adivinar cuál de los dos faltaba.
+    if (!dayForm.check({ label, from })) return;
     setSaving(true);
     setError(undefined);
     try {
@@ -96,10 +106,7 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
   };
 
   const addEvent = async (): Promise<void> => {
-    if (eventTitle.trim() === "" || eventFrom.trim() === "") {
-      setError("Una actividad necesita nombre y fecha.");
-      return;
-    }
+    if (!eventForm.check({ eventTitle, eventFrom })) return;
     setSaving(true);
     setError(undefined);
     try {
@@ -207,9 +214,25 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
           error={error}
           onClose={() => setOpen("none")}
           onSubmit={() => void add()}>
-          <TextField label="Nombre" value={label} onChange={setLabel} placeholder="Independencia" />
-          <TextField label="Del día" value={from} onChange={setFrom} placeholder="2026-09-16" />
-          <TextField label="Al día (opcional)" value={to} onChange={setTo} placeholder="2026-09-16" />
+          <TextField
+            label="Nombre"
+            value={label}
+            onChange={setLabel}
+            uppercase
+            required
+            placeholder="INDEPENDENCIA"
+            error={dayForm.errors.label}
+            onClearError={() => dayForm.clear("label")}
+          />
+          <DateField
+            label="Del día"
+            value={from}
+            onChange={setFrom}
+            required
+            error={dayForm.errors.from}
+            onClearError={() => dayForm.clear("from")}
+          />
+          <DateField label="Al día (opcional)" value={to} onChange={setTo} />
           <div>
             <p style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", marginBottom: 8 }}>Tipo</p>
             <div style={{ display: "flex", gap: 8 }}>
@@ -240,9 +263,25 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
           error={error}
           onClose={() => setOpen("none")}
           onSubmit={() => void addEvent()}>
-          <TextField label="Actividad" value={eventTitle} onChange={setEventTitle} placeholder="Festival de primavera" />
-          <TextField label="Fecha" value={eventFrom} onChange={setEventFrom} placeholder="2026-09-20" />
-          <TextField label="Hasta (opcional)" value={eventTo} onChange={setEventTo} placeholder="2026-09-22" />
+          <TextField
+            label="Actividad"
+            value={eventTitle}
+            onChange={setEventTitle}
+            uppercase
+            required
+            placeholder="FESTIVAL DE PRIMAVERA"
+            error={eventForm.errors.eventTitle}
+            onClearError={() => eventForm.clear("eventTitle")}
+          />
+          <DateField
+            label="Fecha"
+            value={eventFrom}
+            onChange={setEventFrom}
+            required
+            error={eventForm.errors.eventFrom}
+            onClearError={() => eventForm.clear("eventFrom")}
+          />
+          <DateField label="Hasta (opcional)" value={eventTo} onChange={setEventTo} />
         </SlideOver>
       )}
     </Section>

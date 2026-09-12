@@ -2,7 +2,9 @@
 
 import { useEffect, useState, type ReactElement } from "react";
 import { Btn } from "../_design/Controls";
+import { formatCents as money } from "../_lib/money";
 import { Icon, type IconName } from "../_design/Icon";
+import { Page } from "../_design/Page";
 import { COLOR, type ColorKey } from "../_design/colors";
 import { MODULES, isModuleVisible, type ModuleDef, type UserProfile } from "../_design/data";
 import { listCycles } from "../config/api";
@@ -11,7 +13,6 @@ import { listStudents } from "../students/api";
 
 import { API_URL } from "../api-url";
 
-const money = (cents: number): string => "$" + Math.round(cents / 100).toLocaleString("es-MX");
 
 function ModuleCard({ m, i, onOpen }: { m: ModuleDef; i: number; onOpen: (id: string) => void }): ReactElement {
   const [hov, setHov] = useState(false);
@@ -331,7 +332,7 @@ export function Dashboard({ user, onOpen, permissions, permissionsFailed = false
   }, []);
 
   return (
-    <div style={{ maxWidth: 1320, margin: "0 auto", padding: "34px 28px 64px" }}>
+    <Page>
       {/* welcome */}
       <div
         className="fade-up"
@@ -385,6 +386,6 @@ export function Dashboard({ user, onOpen, permissions, permissionsFailed = false
           ))}
         </div>
       )}
-    </div>
+    </Page>
   );
 }

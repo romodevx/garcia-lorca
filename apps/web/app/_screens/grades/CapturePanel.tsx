@@ -4,7 +4,8 @@ import { useEffect, useState, type ReactElement } from "react";
 import type { Term } from "../../config/api";
 import type { TeachingAssignment } from "../../teachers/api";
 import type { RosterRow } from "../../grades/api";
-import { EmptyHint, ErrorAlert, Section, SelectField, type SelectOption } from "../config/parts";
+import { SelectField, type SelectOption } from "../../_design/form";
+import { EmptyHint, ErrorAlert, Section } from "../config/parts";
 import { GradeRow } from "./GradeRow";
 
 export interface CapturePanelProps {

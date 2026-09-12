@@ -3,8 +3,17 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
 import { authFetch } from "./auth/authFetch";
-import { Providers } from "./test-utils";
+import { Providers, fakePath, fakeRouter, resetFakeRouter, useFakePathname } from "./test-utils";
 import { changePassword as apiChangePassword, login as apiLogin, logout as apiLogout, me as apiMe, refresh as apiRefresh } from "./auth/api";
+
+// La navegación ES la barra de direcciones. El router falso tiene estado real
+// (test-utils.tsx) para que un clic que navega vuelva a pintar, como en el
+// navegador; un vi.fn() suelto registraría el empujón y dejaría la prueba
+// mirando la pantalla anterior.
+vi.mock("next/navigation", () => ({
+  useRouter: () => fakeRouter,
+  usePathname: () => useFakePathname(),
+}));
 
 vi.mock("./auth/api", () => ({
   login: vi.fn(),
@@ -65,6 +74,8 @@ const mockMe = vi.mocked(apiMe);
 // explicitly. Without this, a resolved `me()` would leak into the login-first
 // and boot-restore tests.
 beforeEach(() => {
+  // La dirección es estado de módulo: sin esto se filtra de una prueba a otra.
+  resetFakeRouter("/");
   mockMe.mockReset();
   mockRefresh.mockReset();
   mockMe.mockRejectedValue(new Error("no session"));
@@ -74,6 +85,10 @@ beforeEach(() => {
 afterEach(() => vi.clearAllMocks());
 
 async function submitLogin(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  // El arranque muestra una espera breve mientras se pregunta si hay sesión;
+  // antes la pantalla de entrada se pintaba de inmediato porque era el estado
+  // inicial de un useState.
+  await screen.findByLabelText("Correo");
   await user.type(screen.getByLabelText("Correo"), "owner@example.com");
   await user.type(screen.getByLabelText("Contraseña"), "test-owner-pw");
   await user.click(screen.getByRole("button", { name: "Entrar al sistema" }));
@@ -341,5 +356,141 @@ describe("when the server ends the session mid-use", () => {
     expect(await screen.findByText(/Tu sesión terminó/)).toBeInTheDocument();
     // And back at the door, not stranded on a dashboard that can do nothing.
     expect(screen.getByRole("button", { name: "Entrar al sistema" })).toBeInTheDocument();
+  });
+});
+
+describe("la dirección manda sobre la pantalla", () => {
+  it("abrir un módulo cambia la dirección", async () => {
+    mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: false });
+    mockMe.mockRejectedValueOnce(new Error("no session")).mockResolvedValue(OWNER_ME);
+    const user = userEvent.setup();
+    render(
+      <Providers flags={{ module_finance: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    await submitLogin(user);
+    await screen.findByRole("heading", { name: /Módulos/ });
+    await user.click(screen.getByRole("button", { name: /Por cobrar/ }));
+
+    await screen.findByRole("heading", { name: "Finanzas" });
+    expect(fakePath()).toBe("/finanzas");
+  });
+
+  it("pinta la pantalla que dice la dirección, no la última visitada", async () => {
+    // Esto es lo que hace que F5 conserve el lugar: la pantalla sale de la URL.
+    resetFakeRouter("/finanzas");
+    mockMe.mockResolvedValue(OWNER_ME);
+    render(
+      <Providers flags={{ module_finance: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    expect(await screen.findByRole("heading", { name: "Finanzas" })).toBeInTheDocument();
+  });
+
+  it("sin sesión, un link directo manda a entrar y luego DEVUELVE al módulo pedido", async () => {
+    resetFakeRouter("/finanzas");
+    mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: false });
+    mockMe.mockRejectedValueOnce(new Error("no session")).mockResolvedValue(OWNER_ME);
+    const user = userEvent.setup();
+    render(
+      <Providers flags={{ module_finance: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    await submitLogin(user);
+    expect(await screen.findByRole("heading", { name: "Finanzas" })).toBeInTheDocument();
+    expect(fakePath()).toBe("/finanzas");
+  });
+
+  it("sin sesión y sin link, entrar aterriza en el tablero", async () => {
+    mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: false });
+    mockMe.mockRejectedValueOnce(new Error("no session")).mockResolvedValue(OWNER_ME);
+    const user = userEvent.setup();
+    render(
+      <Providers>
+        <AppShell />
+      </Providers>
+    );
+
+    await submitLogin(user);
+    await screen.findByRole("heading", { name: /Módulos/ });
+    expect(fakePath()).toBe("/");
+  });
+
+  it("cerrar sesión no deja el tablero en el historial", async () => {
+    // `replace`, no `push`: si "atrás" reviviera el tablero tras cerrar sesión,
+    // en la computadora del mostrador sería un problema, no una comodidad.
+    resetFakeRouter("/finanzas");
+    mockMe.mockResolvedValue(OWNER_ME);
+    mockLogout.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    const replaced: string[] = [];
+    const spy = vi.spyOn(fakeRouter, "replace").mockImplementation((p: string) => {
+      replaced.push(p);
+      fakeRouter.push(p);
+    });
+    render(
+      <Providers flags={{ module_finance: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    await screen.findByRole("heading", { name: "Finanzas" });
+    await user.click(screen.getByRole("button", { name: "Cerrar sesión" }));
+
+    await screen.findByRole("button", { name: "Entrar al sistema" });
+    expect(replaced).toContain("/entrar");
+    spy.mockRestore();
+  });
+});
+
+describe("la guardia de sesión", () => {
+  it("un link directo sin sesión NUNCA pinta la pantalla protegida", async () => {
+    // `router.replace` actualiza el pathname de forma asíncrona. Si `restoring`
+    // se apaga en el mismo tick, el render siguiente trae restoring=false y la
+    // dirección VIEJA: /finanzas se pinta entero —barra, módulo y sus llamadas—
+    // antes de que aterrice el redirect. Es exactamente el parpadeo que el
+    // comentario de arriba decía evitar.
+    resetFakeRouter("/finanzas");
+    render(
+      <Providers flags={{ module_finance: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    await screen.findByRole("button", { name: "Entrar al sistema" });
+    expect(screen.queryByRole("heading", { name: "Finanzas" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cerrar sesión" })).toBeNull();
+  });
+
+  it("tras cerrar sesión, 'atrás' no revive el tablero", async () => {
+    // `replace` sólo sustituye la entrada ACTUAL del historial; las anteriores
+    // siguen siendo rutas protegidas. Sin una guardia sobre el principal, el
+    // botón atrás vuelve a pintar la cáscara del tablero para alguien que ya
+    // cerró sesión — en la computadora del mostrador, justo lo que no debe pasar.
+    resetFakeRouter("/finanzas");
+    mockMe.mockResolvedValue(OWNER_ME);
+    mockLogout.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(
+      <Providers flags={{ module_finance: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    await screen.findByRole("heading", { name: "Finanzas" });
+    await user.click(screen.getByRole("button", { name: "Cerrar sesión" }));
+    await screen.findByRole("button", { name: "Entrar al sistema" });
+
+    // El "atrás" del navegador: la dirección regresa sola a una ruta protegida.
+    act(() => { fakeRouter.push("/finanzas"); });
+
+    expect(screen.queryByRole("heading", { name: "Finanzas" })).toBeNull();
+    expect(await screen.findByRole("button", { name: "Entrar al sistema" })).toBeInTheDocument();
   });
 });

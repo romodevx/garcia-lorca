@@ -224,6 +224,99 @@ input { font-family: var(--font-ui); }
   }
 }
 
+
+/* ============================================================
+   ANCHOS DE PÁGINA Y DE CAJÓN
+
+   Viven aquí, y no en el JSX, por la razón que este archivo ya documenta más
+   arriba a propósito de .topbar-search: un estilo en línea le gana a cualquier
+   regla de autor, así que mientras el ancho estuviera en el JSX no había
+   responsive posible, sólo media queries que no se aplicaban.
+
+   Había CINCO anchos de página distintos y ninguna regla que los explicara —
+   820 en Avisos, 900 en Ventanilla, 1160 en Asistencia y Calificaciones, 1180
+   en Uniformes, 1320 en el resto. En un monitor de 2560px, Avisos usaba el 32%.
+
+   El teléfono queda fuera a propósito: este sistema se usa en escritorio y en
+   tablet acostada. El almacén de uniformes es la excepción, se trabaja desde el
+   teléfono entre los estantes, y tiene su propia suite (narrow.mobile.spec.ts).
+   ============================================================ */
+
+:root {
+  --page-max: 1320px;
+  --page-pad: 28px;
+  /* La columna que se LEE. Un párrafo de 1800px hace que el ojo pierda el
+     renglón al regresar, así que Avisos y Ventanilla acotan su texto aunque la
+     página use todo el monitor. */
+  --reading-max: 960px;
+}
+
+/* Monitor grande: el contenido se ensancha y las rejillas meten más columnas.
+   La tipografía NO se escala — se pidió ver más, no ver más grande. */
+@media (min-width: 1600px) {
+  :root { --page-max: 1800px; }
+}
+
+/* Tablet acostada: el piso que debe verse perfecto. */
+@media (max-width: 1180px) {
+  :root { --page-pad: 18px; }
+}
+
+.page {
+  width: 100%;
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 24px var(--page-pad) 96px;
+}
+
+.page-reading > .page-column {
+  max-width: var(--reading-max);
+}
+
+/* El modal centrado del buscador de alumnos. No es un cajón lateral, pero su
+   ancho vive aquí por la misma razón. */
+.modal-panel { width: min(560px, 92vw); }
+@media (min-width: 1600px) { .modal-panel { width: min(680px, 92vw); } }
+
+/* ---- el cajón ---- */
+.drawer-sm { width: min(460px, 100%); }
+.drawer-md { width: min(560px, 100%); }
+/* El tabulador de colegiaturas —inscripción multi-concepto, tramos de precio,
+   colegiatura, cobranza y cuotas— se capturaba por un túnel de 520px, tuviera
+   el monitor 1280 o 2560. */
+.drawer-lg { width: min(920px, 100%); }
+
+@media (min-width: 1600px) {
+  .drawer-lg { width: min(1100px, 100%); }
+}
+
+/* El cuerpo del cajón. Vive aquí y no en el JSX por la misma razón que los
+   anchos: un estilo en línea le gana a cualquier @media, y mientras el
+   `display` estuvo en línea las dos columnas de abajo NUNCA se activaron. */
+.drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+/* El cobro trae su propia forma con su propio desplazamiento: aquí la caja no
+   manda, sólo aloja. */
+.drawer-body-bare { gap: 0; }
+
+/* En un monitor ancho la forma grande deja de ser una tira vertical de cuarenta
+   campos. `break-inside` evita que una etiqueta quede en una columna y su campo
+   en la otra. */
+@media (min-width: 1280px) {
+  .drawer-lg .drawer-body:not(.drawer-body-bare) {
+    display: block;
+    column-count: 2;
+    column-gap: 26px;
+  }
+  .drawer-lg .drawer-body:not(.drawer-body-bare) > * {
+    break-inside: avoid;
+    margin-bottom: 18px;
+  }
+}
+
 /* ============================================================
    COMMAND PALETTE (⌘K)
 

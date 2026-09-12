@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, type ReactElement } from "react";
+import { Page } from "../../_design/Page";
 import { useTranslations } from "next-intl";
 import { AccountPanel } from "./AccountPanel";
 import { ChargesPanel } from "./ChargesPanel";
@@ -8,7 +9,7 @@ import { ConceptsPanel } from "./ConceptsPanel";
 import { FinanceHeader } from "./FinanceHeader";
 import { GeneratePanel } from "./GeneratePanel";
 import { PaymentPanel } from "./PaymentPanel";
-import { formatCents } from "./money";
+import { formatCents } from "../../_lib/money";
 import { SummaryCards, TabBar, Toast, type SummaryCard } from "./parts";
 import { collectable, totalsOf } from "./totals";
 import { useFinance, type FinanceSection } from "./useFinance";
@@ -56,7 +57,7 @@ export function Finance({ onBack, intent }: FinanceProps): ReactElement {
   ];
 
   return (
-    <div style={{ maxWidth: 1320, margin: "0 auto", padding: "24px 28px 64px" }}>
+    <Page>
       <FinanceHeader onBack={onBack} />
 
       {fin.loadError !== undefined ? (
@@ -121,6 +122,6 @@ export function Finance({ onBack, intent }: FinanceProps): ReactElement {
       )}
 
       {fin.toast !== undefined && <Toast>{fin.toast}</Toast>}
-    </div>
+    </Page>
   );
 }

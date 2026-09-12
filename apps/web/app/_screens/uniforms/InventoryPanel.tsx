@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
+import { DrawerShell } from "../../_design/DrawerShell";
 import { Icon } from "../../_design/Icon";
 import { adjustStock, receiveStock, UniformsError, type UniformItem } from "../../uniforms/api";
 import { EmptyState, ErrorNote, field, label, StockPill } from "./parts";
@@ -422,6 +423,11 @@ function AdjustDrawer({
 }
 
 /** The slide-over the design system calls for. */
+/**
+ * El cajón del almacén. Era el noveno del sistema y el único con zIndex 50
+ * cuando los otros ocho usaban 70 — el corte de caja se le montaba encima.
+ * Ahora es la cáscara común, así que comparte ancho, portal y Esc con todos.
+ */
 export function Drawer({
   title,
   icon,
@@ -432,46 +438,10 @@ export function Drawer({
   icon: Parameters<typeof Icon>[0]["name"];
   onClose: () => void;
   children: React.ReactNode;
-}): ReactElement {
+}): ReactElement | null {
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(6,20,12,.5)",
-        backdropFilter: "blur(3px)",
-        display: "flex",
-        justifyContent: "flex-end",
-        zIndex: 50,
-      }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        style={{
-          width: "min(460px, 100%)",
-          height: "100%",
-          overflowY: "auto",
-          background: "var(--surface)",
-          padding: 24,
-          animation: "slideIn .2s var(--ease)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-          <div style={{ width: 40, height: 40, borderRadius: 13, display: "grid", placeItems: "center", background: "var(--forest)", color: "#fff" }}>
-            <Icon name={icon} size={20} />
-          </div>
-          <h2 style={{ fontSize: 19, fontWeight: 800, flex: 1, fontFamily: "var(--font-display)" }}>{title}</h2>
-          <button aria-label="Cerrar" onClick={onClose} style={{ color: "var(--text-muted)" }}>
-            <Icon name="close" size={22} />
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
+    <DrawerShell title={title} icon={icon} size="sm" onClose={onClose}>
+      {children}
+    </DrawerShell>
   );
 }

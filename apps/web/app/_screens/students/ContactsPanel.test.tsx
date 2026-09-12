@@ -48,7 +48,7 @@ describe("ContactsPanel", () => {
 
     await waitFor(() => expect(students.addContact).toHaveBeenCalled());
     const sent = students.addContact.mock.calls[0]?.[1];
-    expect(sent?.fullName).toBe("Luis Cruz");
+    expect(sent?.fullName).toBe("LUIS CRUZ");
     expect(sent?.phone).toBe("5550000000");
   });
 

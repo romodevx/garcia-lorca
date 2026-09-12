@@ -4,7 +4,8 @@ import { useEffect, useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { SlideOver } from "../../_design/SlideOver";
 import type { CreateTermInput, Cycle, Level, Term } from "../../config/api";
-import { DateField, EmptyHint, NumberField, Section, TextField } from "./parts";
+import { DateField, NumberField, TextField } from "../../_design/form";
+import { EmptyHint, Section } from "./parts";
 
 export interface TermsPanelProps {
   cycle: Cycle;
@@ -28,13 +29,13 @@ function nextOrdinal(terms: readonly Term[]): number {
 export function TermsPanel({ cycle, level, terms, onCreate }: TermsPanelProps): ReactElement {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
-  const [ordinal, setOrdinal] = useState(nextOrdinal(terms));
+  const [ordinal, setOrdinal] = useState(String(nextOrdinal(terms)));
   const [startsOn, setStartsOn] = useState("");
   const [endsOn, setEndsOn] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
-  useEffect(() => { setOrdinal(nextOrdinal(terms)); }, [terms]);
+  useEffect(() => { setOrdinal(String(nextOrdinal(terms))); }, [terms]);
 
   const submit = async (): Promise<void> => {
     if (name.trim() === "" || startsOn === "" || endsOn === "") {
@@ -44,7 +45,14 @@ export function TermsPanel({ cycle, level, terms, onCreate }: TermsPanelProps): 
     setPending(true);
     setError(undefined);
     try {
-      await onCreate({ cycleId: cycle.id, levelId: level.id, name: name.trim(), ordinal, startsOn, endsOn });
+      const ordinalNumero = Number(ordinal);
+      if (ordinal.trim() === "" || !Number.isFinite(ordinalNumero)) {
+        // Number("") es 0, y un 0 que nadie escribió es un dato falso: un grupo
+        // con cupo 0 no acepta alumnos y la asignación automática lo salta.
+        setError("El orden del periodo es obligatorio.");
+        return;
+      }
+      await onCreate({ cycleId: cycle.id, levelId: level.id, name: name.trim(), ordinal: ordinalNumero, startsOn, endsOn });
       setName("");
       setStartsOn("");
       setEndsOn("");
@@ -84,12 +92,12 @@ export function TermsPanel({ cycle, level, terms, onCreate }: TermsPanelProps): 
           onSubmit={() => void submit()}
         >
           <div style={{ display: "grid", gridTemplateColumns: "1.4fr .6fr", gap: 14 }}>
-            <TextField label="Nombre del periodo" value={name} onChange={setName} placeholder="T1" />
-            <NumberField label="Orden" value={ordinal} onChange={setOrdinal} min={1} />
+            <TextField label="Nombre del periodo" value={name} onChange={setName} uppercase required placeholder="T1" />
+            <NumberField label="Orden" value={ordinal} onChange={setOrdinal} required min={1} />
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <DateField label="Inicio del periodo" value={startsOn} onChange={setStartsOn} />
-            <DateField label="Fin del periodo" value={endsOn} onChange={setEndsOn} />
+            <DateField label="Inicio del periodo" value={startsOn} onChange={setStartsOn} required />
+            <DateField label="Fin del periodo" value={endsOn} onChange={setEndsOn} required />
           </div>
         </SlideOver>
       )}

@@ -2,7 +2,9 @@
 
 import { useEffect, useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
+import { TextField } from "../../_design/form";
 import { Icon } from "../../_design/Icon";
+import { Page } from "../../_design/Page";
 import { announce, type AnnouncementScope } from "../../comms/api";
 import { listCycles, listGroups, listLevels, type Cycle, type Group, type Level } from "../../config/api";
 import { listStudents, type Student } from "../../students/api";
@@ -126,7 +128,7 @@ export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): React
   };
 
   return (
-    <div style={{ maxWidth: 820, margin: "0 auto", padding: "24px 28px 96px" }}>
+    <Page variant="reading">
       <button onClick={onBack} className="fade-up" style={{ display: "inline-flex", alignItems: "center", gap: 7, color: "var(--text-muted)", fontSize: 14.5, fontWeight: 600, marginBottom: 14, cursor: "pointer" }}>
         <Icon name="back" size={18} stroke={2.4} />Volver al inicio
       </button>
@@ -187,10 +189,12 @@ export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): React
           </div>
         )}
 
-        <label style={{ display: "block" }}>
-          <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Título</span>
-          <input aria-label="Título" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Junta de padres" style={{ ...field, marginTop: 8 }} />
-        </label>
+        {/*
+          SIN `uppercase`. El título es lo que llega a la notificación del
+          celular de los papás, así que es cuerpo del aviso, no dato de
+          catálogo — y la propia capa de captura dice que un aviso no se grita.
+        */}
+        <TextField label="Título" value={title} onChange={setTitle} required placeholder="Junta de padres" />
 
         <label style={{ display: "block" }}>
           <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Mensaje</span>
@@ -216,6 +220,6 @@ export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): React
           <Btn icon="check" type="submit" style={{ opacity: sending ? 0.5 : 1, height: 50 }}>Enviar aviso</Btn>
         </div>
       </form>
-    </div>
+    </Page>
   );
 }

@@ -4,8 +4,9 @@ import { useState, type ReactElement } from "react";
 import { useTranslations } from "next-intl";
 import { Btn } from "../../_design/Controls";
 import type { ChargeConcept, CreateConceptInput, Recurrence, UpdateConceptInput } from "../../finance/api";
-import { centsToPesosInput, formatCents, pesosToCents } from "./money";
-import { CheckBoxField, EmptyHint, ErrorAlert, RadioGroup, Section, TextField } from "./parts";
+import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
+import { TextField } from "../../_design/form";
+import { CheckBoxField, EmptyHint, ErrorAlert, RadioGroup, Section } from "./parts";
 
 /** Blank draft = create mode; a draft with an id = editing that concept. */
 interface Draft {

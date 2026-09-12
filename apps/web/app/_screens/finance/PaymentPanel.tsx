@@ -4,8 +4,9 @@ import { useEffect, useState, type ReactElement } from "react";
 import { useTranslations } from "next-intl";
 import { Btn } from "../../_design/Controls";
 import type { Charge, PaymentMethod, RegisterPaymentInput } from "../../finance/api";
-import { centsToPesosInput, formatCents, pesosToCents } from "./money";
-import { ErrorAlert, RadioGroup, Section, SelectField, TextField } from "./parts";
+import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
+import { SelectField, TextField } from "../../_design/form";
+import { ErrorAlert, RadioGroup, Section } from "./parts";
 
 const DEFAULT_METHOD: PaymentMethod = "cash";
 const METHODS: readonly PaymentMethod[] = ["cash", "card", "transfer"];
@@ -94,7 +95,7 @@ export function PaymentPanel({ charges, selectedChargeId, onSelectCharge, studen
 
   return (
     <Section title={t("section.payment")} subtitle={t("hint.overpay")}>
-      <div style={{ display: "grid", gap: 14, maxWidth: 620 }}>
+      <div style={{ display: "grid", gap: 14 }}>
         <SelectField
           label={t("field.charge")}
           value={selectedChargeId}

@@ -4,7 +4,8 @@ import { useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { SlideOver } from "../../_design/SlideOver";
 import type { CreateSubjectInput, GradeLevel, Subject } from "../../config/api";
-import { EmptyHint, Section, TextField } from "./parts";
+import { TextField } from "../../_design/form";
+import { EmptyHint, Section } from "./parts";
 
 export interface SubjectsPanelProps {
   gradeLevel: GradeLevel;
@@ -64,7 +65,7 @@ export function SubjectsPanel({ gradeLevel, subjects, onCreate }: SubjectsPanelP
           onClose={() => { setCreating(false); setError(undefined); }}
           onSubmit={() => void submit()}
         >
-          <TextField label="Nombre de la materia" value={name} onChange={setName} placeholder="Matemáticas" />
+          <TextField label="Nombre de la materia" value={name} onChange={setName} uppercase required placeholder="MATEMÁTICAS" />
         </SlideOver>
       )}
     </Section>

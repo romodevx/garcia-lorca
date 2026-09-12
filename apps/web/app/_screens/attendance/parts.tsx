@@ -9,7 +9,8 @@ import type { AttendanceStatus } from "../../attendance/api";
  * imports everything visual from one place.
  */
 
-export { DateField, EmptyHint, ErrorAlert, Section, SelectField, type SelectOption } from "../config/parts";
+export { DateField, SelectField, type SelectOption } from "../../_design/form";
+export { EmptyHint, ErrorAlert, Section } from "../config/parts";
 
 /** Per-status tone: present is the calm default, the exceptions stand out. */
 const TONE: Record<AttendanceStatus, string> = {

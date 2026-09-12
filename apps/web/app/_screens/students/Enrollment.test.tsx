@@ -98,11 +98,11 @@ describe("Enrollment — register applicant", () => {
     const katherine = {
       id: "st9",
       curp: "CCCC000000CCCCCC03",
-      firstName: "Katherine",
-      lastName: "Johnson",
+      firstName: "KATHERINE",
+      lastName: "JOHNSON",
       level: "Primaria",
       gradeGroup: "1° A",
-      guardianName: "Joylette Coleman",
+      guardianName: "JOYLETTE COLEMAN",
       admissionStatus: "pending" as const,
     };
     students.createStudent.mockResolvedValue(katherine);
@@ -121,18 +121,18 @@ describe("Enrollment — register applicant", () => {
     await waitFor(() =>
       expect(students.createStudent).toHaveBeenCalledWith(expect.any(String), {
         curp: "CCCC000000CCCCCC03",
-        firstName: "Katherine",
-        lastName: "Johnson",
+        firstName: "KATHERINE",
+        lastName: "JOHNSON",
         level: "primaria",
         gradeGroup: "1° A",
-        guardianName: "Joylette Coleman",
+        guardianName: "JOYLETTE COLEMAN",
       }),
     );
 
     // The applicant is prepended to the enrollable list, so it appears in the
     // enroll panel's student picker without a page reload.
     const enrollForm = screen.getByRole("form", { name: "Inscribir alumno" });
-    expect(await within(enrollForm).findByRole("option", { name: "Katherine Johnson" })).toBeInTheDocument();
+    expect(await within(enrollForm).findByRole("option", { name: "KATHERINE JOHNSON" })).toBeInTheDocument();
   });
 });
 

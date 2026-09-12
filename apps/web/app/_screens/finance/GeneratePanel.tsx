@@ -5,8 +5,9 @@ import { useTranslations } from "next-intl";
 import { Btn } from "../../_design/Controls";
 import type { Cycle, Group } from "../../config/api";
 import type { ChargeConcept, GenerateChargesInput } from "../../finance/api";
-import { pesosToCents } from "./money";
-import { DateField, ErrorAlert, Section, SelectField, TextField } from "./parts";
+import { pesosToCents } from "../../_lib/money";
+import { DateField, SelectField, TextField } from "../../_design/form";
+import { ErrorAlert, Section } from "./parts";
 
 export interface GeneratePanelProps {
   concepts: readonly ChargeConcept[];
@@ -55,7 +56,7 @@ export function GeneratePanel({ concepts, cycles, cycleId, onCycleChange, groups
 
   return (
     <Section title={t("section.generate")} subtitle={t("hint.groupOptional")}>
-      <div style={{ display: "grid", gap: 14, maxWidth: 760 }}>
+      <div style={{ display: "grid", gap: 14 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
           <SelectField
             label={t("field.concept")}

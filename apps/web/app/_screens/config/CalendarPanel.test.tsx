@@ -50,7 +50,8 @@ describe("CalendarPanel", () => {
 
     await waitFor(() => expect(config.createNonWorkingPeriod).toHaveBeenCalled());
     const sent = config.createNonWorkingPeriod.mock.calls[0]?.[1];
-    expect(sent?.label).toBe("Revolución");
+    // Se captura en mayúsculas: el nombre del día cerrado es dato de catálogo.
+    expect(sent?.label).toBe("REVOLUCIÓN");
     expect(sent?.startsOn).toBe("2026-11-20");
     expect(sent?.endsOn).toBeUndefined();
   });
@@ -107,5 +108,56 @@ describe("CalendarPanel", () => {
 
     expect(await screen.findByText("Junta de padres")).toBeInTheDocument();
     expect(screen.getByText("Independencia")).toBeInTheDocument();
+  });
+});
+
+describe("la captura del calendario", () => {
+  it("las fechas de un día cerrado se eligen en calendario, no se teclean", async () => {
+    const user = userEvent.setup();
+    render(<CalendarPanel cycle={cycle} />);
+    await screen.findByText("Independencia");
+    await user.click(screen.getByRole("button", { name: "Nuevo día cerrado" }));
+
+    expect(screen.getByLabelText("Del día")).toHaveAttribute("type", "date");
+    expect(screen.getByLabelText("Al día (opcional)")).toHaveAttribute("type", "date");
+  });
+
+  it("las fechas de una actividad también", async () => {
+    const user = userEvent.setup();
+    render(<CalendarPanel cycle={cycle} />);
+    await screen.findByText("Independencia");
+    await user.click(screen.getByRole("button", { name: "Nueva actividad" }));
+
+    expect(screen.getByLabelText("Fecha")).toHaveAttribute("type", "date");
+    expect(screen.getByLabelText("Hasta (opcional)")).toHaveAttribute("type", "date");
+  });
+
+  it("el nombre del día cerrado se captura en mayúsculas", async () => {
+    const user = userEvent.setup();
+    render(<CalendarPanel cycle={cycle} />);
+    await screen.findByText("Independencia");
+    await user.click(screen.getByRole("button", { name: "Nuevo día cerrado" }));
+
+    const nombre = screen.getByLabelText("Nombre");
+    await user.type(nombre, "revolución");
+    expect(nombre).toHaveValue("REVOLUCIÓN");
+  });
+
+  it("lo obligatorio se marca en rojo al guardar, y se limpia al escribir", async () => {
+    const user = userEvent.setup();
+    render(<CalendarPanel cycle={cycle} />);
+    await screen.findByText("Independencia");
+    await user.click(screen.getByRole("button", { name: "Nuevo día cerrado" }));
+    await user.click(screen.getByRole("button", { name: "Agregar día cerrado" }));
+
+    expect(screen.getByLabelText("Nombre")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Del día")).toHaveAttribute("aria-invalid", "true");
+    // Lo opcional nunca se reclama.
+    expect(screen.getByLabelText("Al día (opcional)")).not.toHaveAttribute("aria-invalid", "true");
+    expect(config.createNonWorkingPeriod).not.toHaveBeenCalled();
+
+    await user.type(screen.getByLabelText("Nombre"), "R");
+    expect(screen.getByLabelText("Nombre")).not.toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Del día")).toHaveAttribute("aria-invalid", "true");
   });
 });
