@@ -674,9 +674,12 @@ paths:
                 properties:
                   contact: { $ref: '#/components/schemas/Contact' }
                   invitation:
-                    allOf: [{ $ref: '#/components/schemas/Invitation' }]
-                    nullable: true
-                    description: Absent when the address already had an account.
+                    # 3.1 spells nullability as a union with the null type; the
+                    # 3.0 `nullable: true` keyword does not exist here.
+                    description: Null when the address already had an account.
+                    oneOf:
+                      - $ref: '#/components/schemas/Invitation'
+                      - type: 'null'
         '400':
           description: >
             The contact has no email, or already has an account.

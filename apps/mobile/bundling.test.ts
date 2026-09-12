@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, relative, resolve } from "node:path";
 
@@ -26,7 +26,9 @@ describe("bundle resolution", () => {
   });
 
   it("declares `buffer` as a dependency, so the resolution is not a hoisting accident", () => {
-    const pkg = require("./package.json") as { dependencies: Record<string, string> };
+    const pkg = JSON.parse(readFileSync(resolve(__dirname, "package.json"), "utf8")) as {
+      dependencies: Record<string, string>;
+    };
     expect(pkg.dependencies).toHaveProperty("buffer");
   });
 
