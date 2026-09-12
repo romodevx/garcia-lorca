@@ -360,6 +360,48 @@ describe("restoring a session at boot", () => {
     expect(await screen.findByRole("button", { name: /Salir|Cerrar sesión/i })).toBeInTheDocument();
   });
 
+  // FOUND BY /qa (2026-09-12), with the database stopped for real. The retries
+  // run out, and the person is shown a bare login form — for a session that is
+  // still perfectly valid. They type their password, THAT fails too (the server
+  // is still down), and they conclude the system logged them out. It is the
+  // exact wrong conclusion, and it is the complaint this whole branch exists to
+  // answer.
+  //
+  // The session is not lost: the cookies are untouched and a reload once the
+  // server is back lands on the dashboard with no password. So the screen must
+  // say what is true — the server could not be reached — and must not imply the
+  // session ended.
+  it("says the server is unreachable, not that the session ended", async () => {
+    mockMe.mockRejectedValue(new HttpError(401, "me: HTTP 401"));
+    mockRefresh.mockRejectedValue(new HttpError(500, "refresh: HTTP 500"));
+
+    render(
+      <Providers flags={{}}>
+        <AppShell />
+      </Providers>,
+    );
+
+    expect(await screen.findByText(/no pudimos contactar al servidor/i)).toBeInTheDocument();
+    expect(screen.queryByText(/tu sesión terminó/i)).not.toBeInTheDocument();
+  });
+
+  // And the opposite must stay silent: somebody arriving with no session at all
+  // is not looking at an outage, and telling them the server is unreachable
+  // would be its own lie.
+  it("says nothing when there was simply no session", async () => {
+    mockMe.mockRejectedValue(new HttpError(401, "me: HTTP 401"));
+    mockRefresh.mockRejectedValue(new HttpError(401, "refresh: HTTP 401"));
+
+    render(
+      <Providers flags={{}}>
+        <AppShell />
+      </Providers>,
+    );
+
+    expect(await screen.findByRole("button", { name: /Entrar/i })).toBeInTheDocument();
+    expect(screen.queryByText(/no pudimos contactar al servidor/i)).not.toBeInTheDocument();
+  });
+
   // The other side of the line, which must not regress: a REFUSED rotation is
   // the server saying the session is over, and that goes to the login screen at
   // once rather than being retried.

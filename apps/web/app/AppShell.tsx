@@ -129,6 +129,13 @@ export function AppShell(): ReactElement {
   const [restoring, setRestoring] = useState(true);
 
   /**
+   * Si el arranque terminó sin sesión porque el servidor no contestó, y no
+   * porque la haya rechazado. Un ref y no estado: lo escribe `restore` y lo lee
+   * el `.then` del mismo efecto, sin necesidad de repintar entre los dos.
+   */
+  const unreachable = useRef(false);
+
+  /**
    * Si hay una sesión viva. NO es "ya cargó el principal".
    *
    * Son cosas distintas: `me()` puede fallar con la sesión perfectamente buena
@@ -198,6 +205,8 @@ export function AppShell(): ReactElement {
   useEffect(() => {
     let active = true;
 
+    // Distingue "no hay sesión" de "no pude preguntar". Ambas terminan en la
+    // pantalla de entrada, pero sólo una de las dos es culpa de quien mira.
     const restore = async (): Promise<boolean> => {
       try {
         const m = await apiMe(API_URL);
@@ -221,7 +230,19 @@ export function AppShell(): ReactElement {
           if (active) setPrincipal(m);
           return true;
         } catch (err) {
-          if (isRefusal(err) || attempt === RESTORE_ATTEMPTS - 1) {
+          if (isRefusal(err)) {
+            return false;
+          }
+          if (attempt === RESTORE_ATTEMPTS - 1) {
+            // Se acabaron los intentos y NUNCA hubo un rechazo: la sesión sigue
+            // viva y lo único que falló fue preguntar. Decirlo, porque la
+            // pantalla de entrada muda hace que la persona teclee su
+            // contraseña, falle también —el servidor sigue caído— y concluya
+            // que la sacamos. Encontrado con la base detenida de verdad
+            // (/qa, 12-sep-2026): al volver el servidor, recargar entra al
+            // tablero sin teclear nada, que es la prueba de que la sesión
+            // nunca se perdió.
+            unreachable.current = true;
             return false;
           }
           // Esperar un poco antes de volver a intentar: si el fallo fue por
@@ -236,6 +257,9 @@ export function AppShell(): ReactElement {
     void restore().then((alive) => {
       if (!active) return;
       setAuthenticated(alive);
+      if (!alive && unreachable.current) {
+        setAuthError("No pudimos contactar al servidor. Tu sesión sigue abierta — vuelve a intentar en un momento.");
+      }
       const asked = pathToView(bootPath.current);
       if (!alive) {
         // Sólo vale la pena recordar un destino que NO sea el que se ofrece por
