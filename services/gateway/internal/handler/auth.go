@@ -65,16 +65,23 @@ const (
 	accessCookie  = "gl_access"
 	refreshCookie = "gl_refresh"
 	refreshPath   = "/api/v1/auth" // refresh cookie only sent to auth endpoints
-	// The panel's session closes after fifteen idle minutes — the school's own
-	// rule, for a computer that sits on a shared desk. The cookie is re-set on
-	// every refresh, and the panel refreshes while somebody is using it, so this
-	// is a window of INACTIVITY and not a cap on how long a shift can last.
+	// The panel's session closes after a day of NOT being opened. The cookie is
+	// re-set on every refresh, and the panel refreshes while somebody is using
+	// it, so this is a window of INACTIVITY and not a cap on how long a shift
+	// can last: somebody who works in it daily is never asked again.
 	//
-	// It matches the refresh token's own lifetime for a staff session. The
-	// browser dropping the cookie and iam refusing the token are two locks on
-	// the same door: one keeps the next person at that desk out, the other keeps
-	// out somebody who copied the cookie.
-	refreshMaxAge = 15 * 60 // seconds; staff refresh cookie lifetime
+	// A POSITIVE Max-Age is also what makes the cookie persistent rather than
+	// one the browser discards when the window closes. That is the half that
+	// answers "I closed the tab and had to log in again" — the tokens' own
+	// lifetimes never mattered while the browser was throwing the cookie away.
+	//
+	// It matches the refresh token's own lifetime for a staff session
+	// (domain.staffRefreshTTL in iam), and the two numbers have to move
+	// together. Longer here and the browser keeps sending a credential the
+	// server already stopped honouring — a login screen one request late.
+	// Shorter here and the session is alive but unreachable, which is worse:
+	// nothing is wrong and everybody is locked out anyway.
+	refreshMaxAge = 24 * 60 * 60 // seconds; staff refresh cookie lifetime
 )
 
 type loginRequest struct {

@@ -21,7 +21,9 @@ const LOGIN_PATH = "/api/v1/auth/login";
  * blaming the user's data for its own dead session (dev, 2026-09-07).
  *
  * Announced HERE because this is the only place that knows the difference
- * between "this one call was refused" and "there is no session any more".
+ * between "this one call was refused" and "there is no session any more" — and
+ * between either of those and a refresh that simply did not get an answer. See
+ * RefreshOutcome: that third case must never reach these listeners.
  */
 type SessionLostListener = () => void;
 
@@ -44,12 +46,40 @@ function announceSessionLost(): void {
   }
 }
 
-let refreshInFlight: Promise<boolean> | null = null;
+/**
+ * What came back from a rotation attempt. THREE outcomes, not two, and the
+ * third one is the bug this type exists to make unrepresentable.
+ *
+ *  - "rotated": a new pair was issued. Retry the original call.
+ *  - "refused": the server looked at the refresh token and said no (401/403).
+ *    The session is over. This is the only outcome that ends it.
+ *  - "failed":  the server did not answer — a 500 from a busy database, a 503
+ *    while an instance wakes up, a 429 from the throttle, a dropped
+ *    connection. NOTHING is known about the session, so nothing is decided
+ *    about it.
+ *
+ * "failed" used to be folded into "refused" (the whole thing was `res.ok`), and
+ * that is how a database hiccup during a rotation put somebody back on the
+ * login screen holding a session that was perfectly valid. It got worse the
+ * busier the school was — every active session rotates on a timer, each
+ * rotation is another draw against a small connection pool — so it read as
+ * other people's logins ending yours.
+ */
+type RefreshOutcome = "rotated" | "refused" | "failed";
 
-function refreshOnce(origin: string): Promise<boolean> {
+/** The statuses that mean the server REFUSED the refresh token, not that it failed. */
+const REFUSED_STATUSES = new Set([401, 403]);
+
+let refreshInFlight: Promise<RefreshOutcome> | null = null;
+
+function refreshOnce(origin: string): Promise<RefreshOutcome> {
   refreshInFlight ??= fetch(`${origin}${REFRESH_PATH}`, { method: "POST", credentials: "include" })
-    .then((res) => res.ok)
-    .catch(() => false)
+    .then((res): RefreshOutcome => {
+      if (res.ok) return "rotated";
+      return REFUSED_STATUSES.has(res.status) ? "refused" : "failed";
+    })
+    // A rejected fetch is the network, never a verdict on the session.
+    .catch((): RefreshOutcome => "failed")
     .finally(() => {
       refreshInFlight = null;
     });
@@ -63,13 +93,15 @@ export async function authFetch(input: string, init?: RequestInit): Promise<Resp
   if (input.includes(REFRESH_PATH) || input.includes(LOGIN_PATH)) return res;
 
   const origin = new URL(input, globalThis.location?.href ?? "http://localhost").origin;
-  const refreshed = await refreshOnce(origin);
-  if (!refreshed) {
+  const outcome = await refreshOnce(origin);
+  if (outcome === "rotated") return fetch(input, init);
+
+  if (outcome === "refused") {
     // The refresh cookie is gone or refused: this is not a slow token, it is a
-    // finished session. Say so once; the caller still gets its 401 so nothing
-    // downstream changes shape.
+    // finished session. Say so once.
     announceSessionLost();
-    return res;
   }
-  return fetch(input, init);
+  // Either way the caller gets its 401, so nothing downstream changes shape. On
+  // "failed" that 401 is a retryable error and the session is left alone.
+  return res;
 }

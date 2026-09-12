@@ -85,8 +85,7 @@ func (h *HMAC) IssueAccessToken(_ context.Context, claims domain.Claims) (string
 }
 
 // IssueRefreshToken signs a refresh JWT for userID, expiring after the lifetime
-// its session kind allows: fifteen idle minutes for the school's panel, a day
-// for a parent's phone.
+// its session kind allows — a day, for either surface today.
 //
 // The kind is in the token, not in this service's configuration, because
 // rotating a token has to reproduce the same lifetime and the only thing that

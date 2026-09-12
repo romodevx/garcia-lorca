@@ -146,7 +146,7 @@ func TestTokenTypesAreNotInterchangeable(t *testing.T) {
 }
 
 func TestExpiredRefreshTokenIsUnauthorized(t *testing.T) {
-	issuer := adapterAt(t0) // staff refresh TTL = 15 min
+	issuer := adapterAt(t0) // staff refresh TTL = 24 h
 	rt, _ := issuer.IssueRefreshToken(context.Background(), "u1", domain.SessionStaff)
 
 	validator := adapterAt(t0.Add(25 * time.Hour))

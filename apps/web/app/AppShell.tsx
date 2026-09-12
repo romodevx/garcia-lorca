@@ -29,7 +29,8 @@ import { login as apiLogin, changePassword as apiChangePassword, logout as apiLo
 
 import { API_URL } from "./api-url";
 import { onSessionLost } from "./auth/authFetch";
-import { useSessionTimeout } from "./auth/useSessionTimeout";
+import { isRefusal } from "./auth/httpError";
+import { useSessionKeepAlive } from "./auth/useSessionKeepAlive";
 
 // Chrome fallback: color + the institution subtitle used until a real per-user
 // profile lands. The identity itself now comes from the authenticated principal
@@ -75,6 +76,17 @@ function chromeUser(principal: MeResult | undefined): UserProfile {
  * module surfaces will graduate to App Router routes gated by `FeatureGate` when
  * their backends land.
  */
+/**
+ * Cuántas veces se intenta rotar la sesión al arrancar antes de darse por
+ * vencido. Tres, porque un fallo pasajero rara vez sobrevive a dos esperas y
+ * seguir insistiendo sólo retrasa la pantalla de entrada de quien de verdad no
+ * tiene sesión.
+ */
+const RESTORE_ATTEMPTS = 3;
+
+/** Espera base entre intentos; crece con cada uno. */
+const RESTORE_BACKOFF_MS = 300;
+
 export function AppShell(): ReactElement {
   const { theme, toggle } = useTheme();
   const router = useRouter();
@@ -195,14 +207,30 @@ export function AppShell(): ReactElement {
         // La cookie de acceso es corta y pudo expirar; queda la de refresco,
         // que sí puede acuñar una nueva.
       }
-      try {
-        await apiRefresh(API_URL);
-        const m = await apiMe(API_URL);
-        if (active) setPrincipal(m);
-        return true;
-      } catch {
-        return false;
+      // Reintentar UN FALLO, nunca un rechazo.
+      //
+      // Que el gateway conteste 401 a la rotación significa que la sesión se
+      // acabó, y ahí la pantalla de entrada es la respuesta correcta. Que no
+      // conteste —500 de una base ocupada, 503 de una instancia despertando,
+      // la red— no dice nada sobre la sesión, y tratarlo igual era mandar a la
+      // pantalla de entrada a quien tenía la sesión perfectamente viva.
+      for (let attempt = 0; attempt < RESTORE_ATTEMPTS; attempt++) {
+        try {
+          await apiRefresh(API_URL);
+          const m = await apiMe(API_URL);
+          if (active) setPrincipal(m);
+          return true;
+        } catch (err) {
+          if (isRefusal(err) || attempt === RESTORE_ATTEMPTS - 1) {
+            return false;
+          }
+          // Esperar un poco antes de volver a intentar: si el fallo fue por
+          // contención, insistir en el mismo instante la empeora.
+          await new Promise((resolve) => setTimeout(resolve, RESTORE_BACKOFF_MS * (attempt + 1)));
+          if (!active) return false;
+        }
       }
+      return false;
     };
 
     void restore().then((alive) => {
@@ -309,8 +337,7 @@ export function AppShell(): ReactElement {
     // play: while its own session lives, a fresh ID token can be minted with no
     // password and exchanged at /api/v1/auth/google for a complete new set of
     // cookies. On the shared front-desk machine that means "Cerrar sesión" logs
-    // nobody out. The idle timeout below routes through here for the same
-    // reason.
+    // nobody out.
     //
     // The SDK is imported lazily and only when it is in use — signing out of a
     // session that was never started is not worth 468 KB.
@@ -320,24 +347,18 @@ export function AppShell(): ReactElement {
     goReplacing({ screen: "login" });
   };
 
-  // The school's session rule. The panel runs on a computer at the front desk:
-  // somebody walks away to attend a parent, and the next person who sits down
-  // must not find an open session holding the school's money.
+  // When the session is REFUSED, this is what the person reads.
   //
-  // The server enforces it too — a staff session that has sat unused for fifteen
-  // minutes is refused, and the cookie expires with it. This is what makes it
-  // immediate and explained, rather than a surprise on the next click.
-  // The server can get there first. The client timer and the server's refresh
-  // window are both fifteen minutes of inactivity, so at the boundary it is a
-  // race — and when the server wins, the next click comes back 401 while the
-  // app still believes it has a session. Every panel wraps its calls in a
-  // blanket catch, so that 401 surfaced as a domain error: the owner was told
-  // "No se pudo crear el grado. Revisa que no exista ya con ese orden" for a
-  // session that had simply ended, and reasonably asked what "orden" meant
-  // (dev, 2026-09-07).
+  // Without it, the 401 went back to whichever panel made the call, and every
+  // panel wraps its calls in a blanket catch that reports a domain error: the
+  // owner was told "No se pudo crear el grado. Revisa que no exista ya con ese
+  // orden" for a session that had simply ended, and reasonably asked what
+  // "orden" meant (dev, 2026-09-07).
   //
-  // A refused refresh is unambiguous, so whoever notices first — the timer or
-  // the server — the person now reads the same sentence.
+  // Only a REFUSAL arrives here — authFetch is what draws the line between a
+  // session the server rejected and a request that merely failed, and a failure
+  // must not land on this path. It used to, and it was how a database hiccup
+  // during a refresh threw somebody out of a session that was perfectly valid.
   useEffect(() => onSessionLost(() => {
     logout();
     setPrincipal(undefined);
@@ -350,17 +371,11 @@ export function AppShell(): ReactElement {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), []);
 
-  useSessionTimeout({
-    onExpire: () => {
-      if (principal === undefined) {
-        // Nobody is signed in; there is nothing to close.
-        return;
-      }
-      logout();
-      setAuthError("Cerramos la sesión por inactividad. Vuelve a entrar.");
-    },
-    // Renews while somebody is working, so a cashier entering payments for an
-    // hour never meets a login screen mid-entry.
+  // Renews while somebody is working, so a cashier entering payments for an
+  // hour never meets a login screen mid-entry. There is no longer a counterpart
+  // that CLOSES the session from here: the day-long window is the server's, and
+  // the browser does not get to end it early.
+  useSessionKeepAlive({
     onKeepAlive: () => { void apiRefresh(API_URL).catch(() => {}); },
   });
   const home = (): void => go({ screen: "dashboard" });

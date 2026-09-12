@@ -28,6 +28,12 @@ type fakeUsers struct {
 	added   [][2]string // (userID, roleID)
 	removed [][2]string
 
+	// findByIDErr, when set, is what FindByID fails with instead of looking the
+	// user up. It exists to stand in for the database being unavailable, which
+	// is a different answer from "there is no such user" and must stay so all
+	// the way out of the service.
+	findByIDErr error
+
 	// admin-surface recording
 	created      []createdUser            // CreateUser calls
 	listOut      []domain.User            // ListUsers return
@@ -46,6 +52,9 @@ func (f *fakeUsers) FindAuthByEmail(_ context.Context, _ string, email domain.Em
 }
 
 func (f *fakeUsers) FindByID(_ context.Context, userID string) (domain.User, error) {
+	if f.findByIDErr != nil {
+		return domain.User{}, f.findByIDErr
+	}
 	u, ok := f.byID[userID]
 	if !ok {
 		return domain.User{}, glerrors.ErrNotFound

@@ -92,11 +92,13 @@ type AuthResult struct {
 }
 
 // Authenticate verifies credentials and issues a STAFF session — the school's
-// panel, which closes after fifteen idle minutes.
+// panel.
 //
 // It is the safe default: a caller that does not say which surface it is gets
-// the shorter life, because guessing wrong that way costs somebody a login and
-// guessing wrong the other way leaves an office session open all afternoon.
+// the panel's session, which is the floor. The two lifetimes are equal today,
+// so this decides nothing about duration right now; it decides which surface
+// inherits a change when they diverge again, and the panel is the one that must
+// not be able to claim more by saying nothing.
 func (s *AuthService) Authenticate(ctx context.Context, rawEmail, password string) (AuthResult, error) {
 	return s.AuthenticateAs(ctx, rawEmail, password, domain.SessionStaff)
 }
@@ -235,6 +237,22 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (Au
 	}
 	user, err := s.users.FindByID(ctx, userID)
 	if err != nil {
+		// A MISSING USER AND A BROKEN DATABASE ARE DIFFERENT ANSWERS.
+		//
+		// Both used to come out of here as "invalid refresh token", which the
+		// gateway turns into 401 and the web obeys by ending the session. So a
+		// query that merely failed — a reset connection, an exhausted pool —
+		// made somebody type their password again on a session that was
+		// perfectly valid. It showed up as random logouts that got worse the
+		// more people were working, because every active session rotates on a
+		// timer and each rotation is another draw against the same small pool.
+		//
+		// Anything that is not "no such user" propagates with its own kind
+		// (KindInternal from translateFindErr), becomes a 500, and a 500 is
+		// something the client retries instead of obeying.
+		if glerrors.KindOf(err) != glerrors.KindNotFound {
+			return AuthResult{}, err
+		}
 		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid refresh token")
 	}
 	// Compare at whole-second granularity: a JWT's `iat` is Unix seconds (floored),

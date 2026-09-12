@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
 import { authFetch } from "./auth/authFetch";
+import { HttpError } from "./auth/httpError";
 import { Providers, fakePath, fakeRouter, resetFakeRouter, useFakePathname } from "./test-utils";
 import { changePassword as apiChangePassword, login as apiLogin, logout as apiLogout, me as apiMe, refresh as apiRefresh } from "./auth/api";
 
@@ -299,11 +300,17 @@ describe("AppShell navigation flow", () => {
   });
 });
 
-describe("AppShell — sesión por inactividad", () => {
-  // The school's rule, end to end: the panel closes itself and says why. On a
-  // shared office computer, walking away has to end the session.
-  it("closes the session after fifteen idle minutes and explains it", async () => {
-    // Fake timers BEFORE the render: the watchdog's interval is created on
+describe("AppShell — la sesión no se cierra por inactividad", () => {
+  // The panel used to close itself at fifteen idle minutes, for the shared
+  // computer at the front desk. The school asked for a day instead, and this is
+  // where that used to be decided: a watchdog in the browser called logout(),
+  // so the session was gone no matter what the server still honoured.
+  //
+  // Now nobody in the browser gets a vote. The server refuses a staff session
+  // that sat unused for a day and the cookie expires with it; two hours of
+  // nobody there must leave the panel exactly where it was.
+  it("leaves a panel nobody touched for two hours signed in", async () => {
+    // Fake timers BEFORE the render: the keep-alive interval is created on
     // mount, and one created under real timers would never see the clock move.
     // shouldAdvanceTime keeps the session probe's promises resolving.
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -314,16 +321,61 @@ describe("AppShell — sesión por inactividad", () => {
           <AppShell />
         </Providers>,
       );
-      // Wait for the live session to land, or the hook has nothing to close.
+      // Wait for the live session to land, or there is nothing to keep open.
       await screen.findByRole("button", { name: /Salir|Cerrar sesión/i });
 
-      await act(async () => { vi.advanceTimersByTime(16 * 60 * 1000); });
+      await act(async () => { vi.advanceTimersByTime(2 * 60 * 60 * 1000); });
     } finally {
       vi.useRealTimers();
     }
 
-    expect(mockLogout).toHaveBeenCalled();
-    expect(await screen.findByText(/inactividad/i)).toBeInTheDocument();
+    expect(mockLogout).not.toHaveBeenCalled();
+    expect(screen.queryByText(/inactividad/i)).not.toBeInTheDocument();
+    // Still inside, not on the login screen.
+    expect(screen.getByRole("button", { name: /Salir|Cerrar sesión/i })).toBeInTheDocument();
+  });
+});
+
+describe("restoring a session at boot", () => {
+  // THE OTHER HALF OF THE SAME DEFECT. The boot asks /me, and when the access
+  // cookie has expired it falls back to rotating the session. Any rejection at
+  // all from that rotation used to mean "no session": a 500 from a busy
+  // database, or a gateway instance still waking up, put somebody who had a
+  // perfectly good session on the login screen to type their password again.
+  //
+  // A failure is not a refusal. The restore retries it instead of obeying it.
+  it("does not send somebody to the login screen because the gateway hiccupped", async () => {
+    mockMe.mockRejectedValueOnce(new HttpError(401, "me: HTTP 401")); // access cookie expired
+    mockRefresh.mockRejectedValueOnce(new HttpError(500, "refresh: HTTP 500")); // busy database
+    mockRefresh.mockResolvedValueOnce({ expiresIn: 900 }); // the retry works
+    mockMe.mockResolvedValueOnce(OWNER_ME);
+
+    render(
+      <Providers flags={{}}>
+        <AppShell />
+      </Providers>,
+    );
+
+    // Signed in, on the dashboard — not on the login screen.
+    expect(await screen.findByRole("button", { name: /Salir|Cerrar sesión/i })).toBeInTheDocument();
+  });
+
+  // The other side of the line, which must not regress: a REFUSED rotation is
+  // the server saying the session is over, and that goes to the login screen at
+  // once rather than being retried.
+  it("goes to the login screen when the rotation is refused", async () => {
+    mockMe.mockRejectedValueOnce(new HttpError(401, "me: HTTP 401"));
+    mockRefresh.mockRejectedValueOnce(new HttpError(401, "refresh: HTTP 401"));
+
+    render(
+      <Providers flags={{}}>
+        <AppShell />
+      </Providers>,
+    );
+
+    expect(await screen.findByRole("button", { name: /Entrar/i })).toBeInTheDocument();
+    // Refused means refused: no second attempt.
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
   });
 });
 

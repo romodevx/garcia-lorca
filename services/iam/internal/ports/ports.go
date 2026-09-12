@@ -92,7 +92,7 @@ type TokenIssuer interface {
 	IssueAccessToken(ctx context.Context, claims domain.Claims) (string, error)
 	//
 	// The kind decides how long the token may sit unused: a staff session
-	// closes after fifteen idle minutes, a family one lasts a day. It is stamped
+	// and a family one both last a day, and may diverge again. It is stamped
 	// into the token so a rotation cannot promote itself to the longer life.
 	IssueRefreshToken(ctx context.Context, userID string, kind domain.SessionKind) (string, error)
 }

@@ -604,25 +604,51 @@ func TestTheSurfaceDecidesTheSessionLength(t *testing.T) {
 	}
 }
 
-// The panel's refresh cookie dies with the session. A cookie outliving the token
-// it carries would leave the browser sending a credential the server has already
-// stopped honouring — a login screen that arrives one request late.
+// refreshCookieFrom returns the gl_refresh cookie a login response set, or fails.
+func refreshCookieFrom(t *testing.T, rec *httptest.ResponseRecorder) *http.Cookie {
+	t.Helper()
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "gl_refresh" {
+			return c
+		}
+	}
+	t.Fatal("no refresh cookie was set")
+	return nil
+}
+
+// The panel's refresh cookie dies with the session, and the session is a day.
+// A cookie outliving the token it carries would leave the browser sending a
+// credential the server has already stopped honouring — a login screen that
+// arrives one request late. Shorter than the token is the other failure: the
+// session would be alive and unreachable, which is what fifteen minutes here
+// against a day in iam would produce.
 func TestTheStaffRefreshCookieMatchesTheIdleWindow(t *testing.T) {
 	svc := &fakeLogin{res: client.LoginResult{AccessToken: "a", RefreshToken: "r", ExpiresIn: 900}}
 	h := handler.NewAuthHandler(svc)
 
 	rec := doReq(t, h.Login, http.MethodPost, "/api/v1/auth/login", `{"email":"a@b.c","password":"x"}`)
 
-	var refresh *http.Cookie
-	for _, c := range rec.Result().Cookies() {
-		if c.Name == "gl_refresh" {
-			refresh = c
-		}
+	if got := refreshCookieFrom(t, rec).MaxAge; got != 24*60*60 {
+		t.Errorf("refresh cookie lives %d seconds, want 86400 — the day iam honours the token for", got)
 	}
-	if refresh == nil {
-		t.Fatal("no refresh cookie was set")
-	}
-	if refresh.MaxAge != 15*60 {
-		t.Errorf("refresh cookie lives %d seconds, want 900 — the idle window", refresh.MaxAge)
+}
+
+// THE SESSION SURVIVES CLOSING THE BROWSER, and a positive Max-Age is the whole
+// mechanism: it is what makes this a persistent cookie instead of a session
+// cookie the browser throws away on exit. Without it the tokens could last a
+// year and somebody who closed the tab would still be met by the login screen.
+//
+// Pinned separately from the number above because they can break apart: an
+// expression that computed to zero or to a negative would still "match" a
+// lifetime in review while quietly turning the cookie back into one that dies
+// with the window.
+func TestTheStaffSessionSurvivesClosingTheBrowser(t *testing.T) {
+	svc := &fakeLogin{res: client.LoginResult{AccessToken: "a", RefreshToken: "r", ExpiresIn: 900}}
+	h := handler.NewAuthHandler(svc)
+
+	rec := doReq(t, h.Login, http.MethodPost, "/api/v1/auth/login", `{"email":"a@b.c","password":"x"}`)
+
+	if got := refreshCookieFrom(t, rec).MaxAge; got <= 0 {
+		t.Errorf("refresh cookie Max-Age = %d: the browser would drop it on exit", got)
 	}
 }

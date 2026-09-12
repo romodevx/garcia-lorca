@@ -2,25 +2,35 @@ package domain_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/garcia-lorca/services/iam/internal/domain"
 )
 
-// Two surfaces, two lifetimes. The school's panel sits on a shared desk and has
-// to close when somebody walks away; the family app lives on a parent's own
-// phone and logging them out every quarter of an hour would make it unusable.
-func TestSessionKindsHaveDifferentLifetimes(t *testing.T) {
-	if domain.SessionStaff.RefreshTTL() >= domain.SessionFamily.RefreshTTL() {
-		t.Errorf("staff sessions (%v) should be shorter than family ones (%v)",
+// A day is the cap for EVERY surface. The kinds still exist as a seam — the
+// panel and the family app can diverge again without touching a caller — but
+// neither may hand out a session that outlives the school's own limit, and the
+// panel must never get the longer of the two.
+func TestNoSessionOutlivesADay(t *testing.T) {
+	for _, kind := range []domain.SessionKind{domain.SessionStaff, domain.SessionFamily} {
+		if kind.RefreshTTL() > 24*time.Hour {
+			t.Errorf("%v sessions last %v, which is longer than a day", kind, kind.RefreshTTL())
+		}
+	}
+	if domain.SessionStaff.RefreshTTL() > domain.SessionFamily.RefreshTTL() {
+		t.Errorf("the panel (%v) must never outlive a family session (%v)",
 			domain.SessionStaff.RefreshTTL(), domain.SessionFamily.RefreshTTL())
 	}
 }
 
-// The staff window is the school's own rule: fifteen minutes without using it
-// and the session is over.
-func TestTheStaffSessionClosesAfterFifteenIdleMinutes(t *testing.T) {
-	if got := domain.SessionStaff.RefreshTTL().Minutes(); got != 15 {
-		t.Errorf("staff refresh TTL = %v minutes, want 15", got)
+// The panel's session lasts a day of NOT being used, which is what makes
+// closing the browser and coming back the next morning land on the dashboard
+// instead of the login screen. It replaced a fifteen-minute idle window that
+// was the school's rule for a shared front desk; the school asked for the day
+// instead, knowing what it costs on that desk.
+func TestTheStaffSessionLastsADayOfDisuse(t *testing.T) {
+	if got := domain.SessionStaff.RefreshTTL(); got != 24*time.Hour {
+		t.Errorf("staff refresh TTL = %v, want 24h", got)
 	}
 }
 

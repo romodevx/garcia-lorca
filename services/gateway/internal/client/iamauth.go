@@ -39,8 +39,8 @@ func NewAuthClient(baseURL string, httpClient connect.HTTPClient) *AuthClient {
 // Login exchanges credentials for tokens via iam. Connect error codes propagate
 // (e.g. Unauthenticated for bad credentials) so the handler can map them.
 // SessionKind is which surface is logging in. It decides how long the session
-// may sit unused: the school's panel closes after fifteen idle minutes, a
-// parent's phone lasts a day.
+// may sit unused — a day, for the school's panel and for a parent's phone
+// alike, and the kinds stay apart so one can change without the other.
 type SessionKind string
 
 const (

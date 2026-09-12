@@ -3,7 +3,13 @@
  * ONLY in HttpOnly cookies the gateway sets — they are never in the JSON body and
  * are unreadable by JS. Every call uses credentials:"include" so the browser
  * carries those cookies; the responses expose only non-secret metadata.
+ *
+ * A failed call rejects with an HttpError carrying the STATUS, so a caller can
+ * tell the server refusing a credential from the server failing to answer. They
+ * are not the same thing and one of them must never end a session.
  */
+import { HttpError } from "./httpError";
+
 export interface LoginResult {
   expiresIn: number;
   mustChangePassword: boolean;
@@ -37,7 +43,7 @@ export async function login(baseURL: string, email: string, password: string): P
     body: JSON.stringify({ email, password }),
   });
   if (!res.ok) {
-    throw new Error(`login: HTTP ${res.status}`);
+    throw new HttpError(res.status, `login: HTTP ${res.status}`);
   }
   return (await res.json()) as LoginResult;
 }
@@ -53,7 +59,7 @@ export async function me(baseURL: string): Promise<MeResult> {
     credentials: "include",
   });
   if (!res.ok) {
-    throw new Error(`me: HTTP ${res.status}`);
+    throw new HttpError(res.status, `me: HTTP ${res.status}`);
   }
   return (await res.json()) as MeResult;
 }
@@ -66,7 +72,7 @@ export async function refresh(baseURL: string): Promise<RefreshResult> {
     credentials: "include",
   });
   if (!res.ok) {
-    throw new Error(`refresh: HTTP ${res.status}`);
+    throw new HttpError(res.status, `refresh: HTTP ${res.status}`);
   }
   return (await res.json()) as RefreshResult;
 }
@@ -79,7 +85,7 @@ export async function changePassword(baseURL: string, currentPassword: string, n
     body: JSON.stringify({ currentPassword, newPassword }),
   });
   if (!res.ok) {
-    throw new Error(`changePassword: HTTP ${res.status}`);
+    throw new HttpError(res.status, `changePassword: HTTP ${res.status}`);
   }
 }
 
@@ -89,7 +95,7 @@ export async function logout(baseURL: string): Promise<void> {
     credentials: "include",
   });
   if (!res.ok) {
-    throw new Error(`logout: HTTP ${res.status}`);
+    throw new HttpError(res.status, `logout: HTTP ${res.status}`);
   }
 }
 
@@ -111,7 +117,7 @@ export async function acceptInvitation(baseURL: string, token: string, password:
     body: JSON.stringify({ token, password }),
   });
   if (!res.ok) {
-    throw new Error(`accept invitation: HTTP ${res.status}`);
+    throw new HttpError(res.status, `accept invitation: HTTP ${res.status}`);
   }
 }
 

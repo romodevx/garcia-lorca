@@ -95,3 +95,61 @@ describe("when the session is truly gone", () => {
     stop();
   });
 });
+
+describe("when the refresh merely FAILS", () => {
+  // THE DEFECT THIS PINS. Every non-200 used to mean "you are signed out": the
+  // refresh was read as `res.ok`, so a 500 from a busy database, a 429 from the
+  // throttle, or a dropped connection all announced a lost session and put
+  // somebody back on the login screen with a session that was perfectly valid.
+  //
+  // It correlated with how many people were working, which is what made it look
+  // like other people's logins were ending yours: every active session rotates
+  // on a timer, each rotation is another draw against a small connection pool,
+  // and whoever drew the failure was thrown out.
+  //
+  // A refusal is the server saying no. A failure is the server not answering.
+  // Only the first one ends a session.
+  const failures: Array<[string, () => Promise<Response>]> = [
+    ["a 500 from a busy database", async () => new Response("", { status: 500 })],
+    ["a 503 while the service wakes up", async () => new Response("", { status: 503 })],
+    ["a 429 from the throttle", async () => new Response("", { status: 429 })],
+    ["a dropped connection", () => Promise.reject(new TypeError("network error"))],
+  ];
+
+  for (const [name, refreshOutcome] of failures) {
+    it(`does not end the session on ${name}`, async () => {
+      const seen: string[] = [];
+      const stop = onSessionLost(() => seen.push("lost"));
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response("", { status: 401 })) // original
+        .mockImplementationOnce(refreshOutcome); // refresh
+      vi.stubGlobal("fetch", fetchMock);
+
+      const out = await authFetch("http://gw/api/v1/config/grade-levels", { method: "POST" });
+
+      expect(seen).toEqual([]);
+      // The caller still gets its 401 — nothing downstream changes shape, and
+      // the request is retryable because the session was never ended.
+      expect(out.status).toBe(401);
+      stop();
+    });
+  }
+
+  // A 403 IS a refusal: the gateway answers it for a refresh token it will not
+  // honour. It has to keep ending the session.
+  it("still ends the session when the refresh is refused with 403", async () => {
+    const seen: string[] = [];
+    const stop = onSessionLost(() => seen.push("lost"));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("", { status: 401 })) // original
+      .mockResolvedValueOnce(new Response("", { status: 403 })); // refresh → refused
+    vi.stubGlobal("fetch", fetchMock);
+
+    await authFetch("http://gw/api/v1/config/grade-levels", { method: "POST" });
+
+    expect(seen).toEqual(["lost"]);
+    stop();
+  });
+});
