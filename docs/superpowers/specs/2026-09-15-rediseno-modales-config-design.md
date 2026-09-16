@@ -36,8 +36,8 @@ El envase lo elige el **número de campos**, no la importancia del registro.
 | Superficie | Campos | Envase | Hoy |
 |---|---|---|---|
 | Materia | 1 | Chip en el lugar | Cajón |
-| Grupo | 2 (nombre, cupo) | Chip en el lugar | Cajón |
-| Grado | 2 (nombre, orden→auto) | Chip en el lugar | Cajón |
+| Grupo | 2 (nombre, cupo) | Renglón, ambos propuestos | Cajón |
+| Grado | 2 (nombre, orden) | Renglón, orden propuesto | Cajón |
 | Actividad | 3 | Renglón en tabla | Cajón |
 | Día cerrado | 4 (tipo→Feriado) | Renglón en tabla | Cajón |
 | Periodo | 4 | Renglón en tabla | Cajón |
@@ -54,11 +54,20 @@ existen en la UI actual, son correctos, y no caben en un renglón.
 tablas → renglón editable al pie. Niveles, grados, materias y grupos se listan como *chips*
 → un chip vacío que se convierte en input al hacer clic. No se convierten chips en tablas.
 
-**Un chip captura un solo valor: el nombre.** Donde el registro trae un segundo campo, ese
-campo nace con un default y se edita después desde el propio renglón/ficha del registro:
-Grado → `orden` = el siguiente disponible; Grupo → `cupo` = el del último grupo creado en
-ese grado, o 25 si es el primero. Si algún día un alta de chip necesitara un tercer campo,
-esa alta ya no es un chip: sube a cajón compacto.
+**Un chip captura un solo valor: el nombre.** Sólo Materia califica.
+
+**Corrección hecha durante la implementación.** La spec mandaba Grado y Grupo al chip, con
+su segundo campo (`orden`, `cupo`) puesto por default y "editable después". Al construirlo
+se vio que **no hay ningún después**: no existe pantalla de edición para un grado ni para un
+grupo, así que esa regla habría eliminado la capacidad de intercalar un grado y la de abrir
+un salón más chico. Van en **renglón de dos celdas con el segundo valor propuesto**: Enter
+solo basta en el caso común y el dato sigue existiendo para el caso que no lo es. Lo mismo
+pasó con el tipo Feriado/Vacaciones de un día cerrado, que obligó a que el renglón supiera
+dibujar un `select`.
+
+La regla general que queda, y que es la que va al documento de reglas: **un default sustituye
+una pregunta sólo si el dato se puede corregir en algún lado.** Si no, el campo se queda y lo
+que se propone es su valor.
 
 ## 3. El tabulador como página
 
