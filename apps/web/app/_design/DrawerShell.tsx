@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useRef,
   useState,
   type CSSProperties,
   type FormEvent,
@@ -117,6 +118,80 @@ export function DrawerShell({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose, dismissible]);
 
+  /**
+   * El contrato de diálogo de WAI-ARIA APG: el foco ENTRA al abrir, se QUEDA
+   * dentro mientras está abierto, y VUELVE a donde estaba al cerrar.
+   *
+   * Las tres fallaban, y las tres fallan en silencio: con el ratón no se nota
+   * nada. Quien capturaba con el teclado abría el cajón y seguía tecleando en la
+   * página de atrás; al cerrar con Esc el foco caía en <body> y la siguiente
+   * tecla no iba a ningún lado.
+   *
+   * Vive aquí, una sola vez, porque trece pantallas montan esta cáscara y
+   * ninguna debería tener que acordarse.
+   */
+  const panelRef = useRef<HTMLElement | null>(null);
+
+  // El portal necesita un document, que en el render del servidor no existe.
+  // Vive aquí arriba porque el contrato de foco depende de él: mientras esto
+  // sea false no hay panel al que meter el foco.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    if (!mounted) return;
+    const returnTo = document.activeElement as HTMLElement | null;
+
+    const focusables = (): HTMLElement[] => {
+      const root = panelRef.current;
+      if (root === null) return [];
+      return Array.from(
+        root.querySelectorAll<HTMLElement>(
+          'input:not([type="hidden"]), select, textarea, button, a[href], [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((el) => !el.hasAttribute("disabled"));
+    };
+
+    // El primer CAMPO, no el primer elemento enfocable. Abrir con el foco en el
+    // botón de cerrar le pone a quien captura un control destructivo bajo el
+    // pulgar antes de que haya escrito nada.
+    const list = focusables();
+    const firstField = list.find((el) => el.tagName !== "BUTTON") ?? list[0];
+    firstField?.focus();
+
+    const onTab = (e: KeyboardEvent): void => {
+      if (e.key !== "Tab") return;
+      const current = focusables();
+      if (current.length === 0) return;
+      const first = current[0];
+      const last = current[current.length - 1];
+      if (first === undefined || last === undefined) return;
+      if (document.activeElement === (e.shiftKey ? first : last)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      }
+    };
+
+    /*
+     * WCAG 2.2 · 2.4.11 (Focus Not Obscured): el pie es pegajoso y puede quedar
+     * encima del campo que acaba de recibir el foco. `nearest` no mueve nada si
+     * el campo ya se ve — sólo corrige cuando de verdad quedó tapado.
+     */
+    const onFocusIn = (e: FocusEvent): void => {
+      const target = e.target as HTMLElement | null;
+      if (target === null || panelRef.current?.contains(target) !== true) return;
+      target.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    };
+
+    window.addEventListener("keydown", onTab);
+    window.addEventListener("focusin", onFocusIn);
+    return () => {
+      window.removeEventListener("keydown", onTab);
+      window.removeEventListener("focusin", onFocusIn);
+      returnTo?.focus();
+    };
+  }, [mounted]);
+
   // La página de atrás no se desplaza mientras el cajón está abierto: rodar la
   // lista por debajo hace perder el renglón que se estaba atendiendo.
   useEffect(() => {
@@ -127,9 +202,6 @@ export function DrawerShell({
     };
   }, []);
 
-  // El portal necesita un document, que en el render del servidor no existe.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
   if (!mounted) return null;
 
   const panelStyle: CSSProperties = {
@@ -229,6 +301,7 @@ export function DrawerShell({
     >
       {onSubmit !== undefined ? (
         <form
+          ref={panelRef as React.RefObject<HTMLFormElement>}
           onClick={stop}
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
@@ -244,6 +317,7 @@ export function DrawerShell({
         </form>
       ) : (
         <div
+          ref={panelRef as React.RefObject<HTMLDivElement>}
           onClick={stop}
           role="dialog"
           aria-modal="true"
