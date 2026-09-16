@@ -476,3 +476,54 @@ input { font-family: var(--font-ui); }
   }
   [cmdk-list] { max-height: min(62vh, 340px); }
 }
+
+/* ============================================================
+   PÁGINA DE ALTA
+
+   Para la forma que ya no cabe en un cajón. Una columna de lectura acotada, el
+   resumen pegado a un lado y el guardar pegado abajo: las dos cosas que no
+   pueden irse de la vista mientras alguien captura.
+
+   Los números viven aquí y no en el JSX por la misma razón de siempre en este
+   repo: un estilo en línea le gana a cualquier @media, y mientras el `display`
+   del cuerpo del cajón estuvo en línea sus columnas nunca se activaron.
+   ============================================================ */
+.create-page { display: flex; flex-direction: column; min-height: 100%; }
+
+.create-page-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 22px;
+  padding: 0 26px 26px;
+  align-items: start;
+}
+
+/* UNA columna, con ancho de lectura. Una forma de 1800px hace que el ojo pierda
+   el renglón al regresar, y fue justo tratar de llenar un monitor ancho lo que
+   llevó al flujo en dos columnas que causó todo esto. */
+.create-page-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 680px;
+}
+
+.create-page-aside { position: sticky; top: 22px; }
+
+.create-page-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 26px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  z-index: 5;
+}
+
+/* El resumen se pone al lado sólo cuando de verdad cabe. Abajo de eso va
+   después del cuerpo, que es donde estorba menos. */
+@media (min-width: 1100px) {
+  .create-page-grid { grid-template-columns: minmax(0, 1fr) 280px; }
+}
