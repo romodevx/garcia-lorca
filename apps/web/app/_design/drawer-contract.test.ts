@@ -36,3 +36,22 @@ describe("el cajón", () => {
     expect(offenders).toEqual([]);
   });
 });
+
+/**
+ * El flujo tipo periódico dentro de una forma.
+ *
+ * Baymard lo midió: el layout multicolumna hace que se omitan campos
+ * obligatorios y se llenen campos que no venían al caso, porque las columnas
+ * "jalan la atención en múltiples direcciones". En el cajón grande además había
+ * un agravante propio: el corte caía donde alcanzara la altura, así que agregar
+ * un concepto de inscripción hacía brincar de columna a "Cobranza" entera —
+ * la forma se reacomodaba bajo las manos de quien capturaba.
+ *
+ * Esta prueba mira el CSS porque lo que defiende no es la conducta de una
+ * pantalla: es que nadie lo vuelva a escribir.
+ */
+describe("las formas", () => {
+  it("no fluyen en columnas", () => {
+    expect(readFileSync("app/globals.css", "utf8")).not.toMatch(/column-count/);
+  });
+});

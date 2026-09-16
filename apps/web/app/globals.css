@@ -302,20 +302,22 @@ input { font-family: var(--font-ui); }
    manda, sólo aloja. */
 .drawer-body-bare { gap: 0; }
 
-/* En un monitor ancho la forma grande deja de ser una tira vertical de cuarenta
-   campos. `break-inside` evita que una etiqueta quede en una columna y su campo
-   en la otra. */
-@media (min-width: 1280px) {
-  .drawer-lg .drawer-body:not(.drawer-body-bare) {
-    display: block;
-    column-count: 2;
-    column-gap: 26px;
-  }
-  .drawer-lg .drawer-body:not(.drawer-body-bare) > * {
-    break-inside: avoid;
-    margin-bottom: 18px;
-  }
-}
+/* Aquí vivía un flujo en dos columnas para el cajón grande, y de ahí salía casi
+   todo lo que el colegio llamaba "amontonado".
+
+   El corte entre columnas caía DONDE ALCANZARA LA ALTURA, no donde terminaba una
+   idea: bastaba agregar un concepto de inscripción para que "Cobranza" brincara
+   de columna entera, reacomodando la forma bajo las manos de quien capturaba. Y
+   el renglón de error acababa al pie de la segunda columna, hablando de una
+   sección que estaba arriba en la primera.
+
+   Baymard además lo midió en general: el layout multicolumna provoca campos
+   obligatorios omitidos y campos innecesarios llenados, porque las columnas
+   jalan la atención en varias direcciones. Dos columnas "nunca se recomienda".
+
+   Una columna, siempre. La forma que ya no cabe en una columna no necesita dos:
+   necesita ser una página. El ancho .drawer-lg SE QUEDA — lo usa el cobro, que
+   monta cuerpo desnudo y al que esta regla nunca le aplicó. */
 
 /* ============================================================
    COMMAND PALETTE (⌘K)
