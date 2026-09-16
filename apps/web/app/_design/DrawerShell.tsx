@@ -205,9 +205,21 @@ export function DrawerShell({
   if (!mounted) return null;
 
   const panelStyle: CSSProperties = {
-    height: "100%",
+    /*
+     * La altura la pone la FORMA, no la pantalla.
+     *
+     * Con `height: 100%` un alta de tres campos —un feriado, un ciclo, un nivel—
+     * quedaba flotando arriba de un metro de blanco, con Guardar clavado hasta
+     * abajo: el ojo recorría el monitor entero para nada y la forma parecía
+     * incompleta. El techo de 85vh mantiene el desplazamiento dentro del cuerpo,
+     * que es lo que pide Carbon: encabezado y pie fijos, y si aun así no cabe,
+     * es señal de que eso debía ser una página.
+     */
+    height: "auto",
+    maxHeight: "85vh",
     background: "var(--surface)",
-    borderLeft: "1px solid var(--border)",
+    border: "1px solid var(--border)",
+    borderRadius: "var(--r-xl) 0 0 var(--r-xl)",
     boxShadow: "var(--shadow-pop)",
     display: "flex",
     flexDirection: "column",
@@ -297,6 +309,9 @@ export function DrawerShell({
         backdropFilter: "blur(4px)",
         display: "flex",
         justifyContent: "flex-end",
+        // Centrado a lo alto: el panel ya no se estira, así que sin esto se
+        // pegaría al borde superior del monitor.
+        alignItems: "center",
       }}
     >
       {onSubmit !== undefined ? (

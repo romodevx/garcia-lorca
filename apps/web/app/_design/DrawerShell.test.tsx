@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type ReactElement } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { DrawerShell } from "./DrawerShell";
 
@@ -66,5 +66,40 @@ describe("el contrato de foco del cajón", () => {
     await user.keyboard("{Escape}");
 
     expect(trigger).toHaveFocus();
+  });
+});
+
+describe("la altura del cajón", () => {
+  it("se ajusta a su contenido en vez de estirarse a la pantalla", () => {
+    render(
+      <DrawerShell title="Nuevo día cerrado" icon="calendar" onClose={() => {}}>
+        <input aria-label="Nombre" />
+      </DrawerShell>,
+    );
+
+    // Un alta de tres campos flotando arriba de un metro de blanco, con Guardar
+    // clavado hasta abajo, obliga al ojo a recorrer el monitor entero para nada.
+    const panel = screen.getByRole("dialog");
+    expect(panel).toHaveStyle({ height: "auto", maxHeight: "85vh" });
+  });
+});
+
+describe("WCAG 2.2 · 2.4.11 — el pie no cubre el campo enfocado", () => {
+  it("pide desplazar lo mínimo cuando un campo recibe el foco", async () => {
+    const user = userEvent.setup();
+    const scrollIntoView = vi.fn();
+    // jsdom no implementa scrollIntoView; se espía que el cajón lo pida.
+    Element.prototype.scrollIntoView = scrollIntoView;
+
+    render(
+      <DrawerShell title="Alta" icon="settings" onClose={() => {}} footer={<button>Guardar</button>}>
+        <input aria-label="Primero" />
+        <input aria-label="Último" />
+      </DrawerShell>,
+    );
+
+    await user.click(screen.getByLabelText("Último"));
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", behavior: "smooth" });
   });
 });
