@@ -63,7 +63,7 @@ test.describe("el cajón cubre la pantalla", () => {
     expect(enCima, "el clic llega al botón: el velo no lo tapa").toBe(true);
   });
 
-  test("el cajón toca el borde derecho del monitor", async ({ page }) => {
+  test("el cajón toca el borde derecho y mide lo que mide su forma", async ({ page }) => {
     await signIn(page);
     await page.goto("/configuracion");
     await page.getByRole("button", { name: /Nuevo ciclo/ }).first().click();
@@ -72,11 +72,21 @@ test.describe("el cajón cubre la pantalla", () => {
     const caja = await page.getByRole("dialog").boundingBox();
     const vp = page.viewportSize();
     expect(Math.round((caja?.x ?? 0) + (caja?.width ?? 0))).toBe(vp?.width);
-    expect(caja?.y, "el cajón no llega hasta arriba").toBe(0);
-    expect(Math.round(caja?.height ?? 0), "el cajón no llega hasta abajo").toBe(vp?.height);
+
+    /*
+     * Antes esta prueba exigía y=0 y alto = alto del monitor. Era cierto y era
+     * el defecto: "Nuevo ciclo escolar" son TRES campos, y estirarlos a toda la
+     * pantalla los dejaba flotando arriba de un metro de blanco con el botón de
+     * guardar clavado hasta abajo. Ahora la altura la pone el contenido, con
+     * techo de 85vh, y el panel queda centrado a lo alto.
+     */
+    const alto = caja?.height ?? 0;
+    expect(alto, "el cajón se volvió a estirar a toda la pantalla")
+      .toBeLessThan((vp?.height ?? 0) * 0.9);
+    expect(caja?.y ?? 0, "el cajón no está centrado a lo alto").toBeGreaterThan(0);
   });
 
-  test("la forma grande deja de ser un túnel de 520px", async ({ page, request }) => {
+  test("el tabulador es una página de una sola columna", async ({ page, request }) => {
     // El tabulador de colegiaturas —inscripción multi-concepto, tramos de
     // precio, colegiatura, cobranza y cuotas— se capturaba por ahí.
     //
@@ -97,7 +107,24 @@ test.describe("el cajón cubre la pantalla", () => {
     await page.getByRole("row", { name: new RegExp(`PRIMARIA ${sello}`) })
       .getByRole("button", { name: /Definir|Editar/ }).click();
 
-    const caja = await page.getByRole("dialog", { name: /^Precios de / }).boundingBox();
-    expect(caja?.width, "el cajón grande sigue siendo un túnel").toBeGreaterThan(900);
+    /*
+     * Ya no hay cajón que medir: el tabulador es una PÁGINA.
+     *
+     * Esta prueba nació midiendo que el cajón grande fuera ancho, porque la
+     * forma se capturaba por un túnel de 520px. Ensanchar el cajón sólo movió el
+     * problema: para que cupieran los catorce campos, el cuerpo fluía en dos
+     * columnas y el corte caía donde alcanzara la altura, de modo que agregar un
+     * concepto hacía brincar de columna a una sección entera mientras alguien
+     * escribía. Lo que se defiende ahora es que sea página y que su cuerpo sea
+     * UNA columna.
+     */
+    await expect(page.getByRole("heading", { name: /^Precios de / })).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+
+    const columnas = await page.evaluate(() => {
+      const body = document.querySelector(".create-page-body");
+      return body === null ? "" : getComputedStyle(body).columnCount;
+    });
+    expect(columnas, "la forma volvió a fluir en columnas").not.toBe("2");
   });
 });

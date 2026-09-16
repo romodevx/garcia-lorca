@@ -106,9 +106,11 @@ test.describe.serial("setting up a school from zero", () => {
     await nivelNuevo.getByRole("button", { name: "Crear nivel" }).click();
     await expect(page.getByRole("button", { name: new RegExp(level, "i") }).first()).toBeVisible();
 
+    // El grado ya no abre cajón: se captura en su propio renglón y el orden
+    // llega propuesto, así que basta el nombre y Enter.
     await page.getByRole("button", { name: "Nuevo grado" }).click();
     await page.getByLabel("Nombre del grado").fill(grade);
-    await page.getByRole("button", { name: "Crear grado" }).click();
+    await page.getByLabel("Nombre del grado").press("Enter");
     await expect(page.getByRole("button", { name: new RegExp(grade, "i") }).first()).toBeVisible();
 
     // Creating the grade is not enough — the groups and subjects panels only
@@ -117,14 +119,16 @@ test.describe.serial("setting up a school from zero", () => {
     // looks finished and half of it is not there yet.
     await page.getByRole("button", { name: new RegExp(grade, "i") }).first().click();
 
+    // El grupo también: la letra y el cupo llegan propuestos.
     await page.getByRole("button", { name: "Nuevo grupo" }).click();
     await page.getByLabel("Nombre del grupo").fill(group);
-    await page.getByRole("button", { name: "Crear grupo" }).click();
+    await page.getByLabel("Nombre del grupo").press("Enter");
     await expect(page.getByText(group, { exact: false }).first()).toBeVisible();
 
+    // Y la materia es un chip que se vuelve campo: un solo dato.
     await page.getByRole("button", { name: "Nueva materia" }).click();
     await page.getByLabel("Nombre de la materia").fill(subject);
-    await page.getByRole("button", { name: "Crear materia" }).click();
+    await page.getByLabel("Nombre de la materia").press("Enter");
     await expect(page.getByText(subject, { exact: false }).first()).toBeVisible();
   });
 
@@ -184,6 +188,15 @@ test.describe.serial("setting up a school from zero", () => {
     await drawer.getByRole("textbox", { name: "Tutor" }).fill("Marisol Villalobos");
     await drawer.getByRole("button", { name: "Crear alumno" }).click();
 
+    /*
+     * Se BUSCA, no se espera que caiga en la primera pantalla.
+     *
+     * La lista ordena por nombre y pagina; en una escuela con cuatrocientos
+     * alumnos el recién creado casi nunca está arriba. La versión anterior de
+     * esta línea sólo funcionaba con la base vacía, y entonces no probaba que el
+     * alumno existiera: probaba que la lista fuera corta.
+     */
+    await page.getByRole("textbox", { name: "Buscar" }).fill(`Villalobos ${tag}`);
     await expect(page.getByText(`Villalobos ${tag}`, { exact: false }).first()).toBeVisible();
   });
 
@@ -200,11 +213,21 @@ test.describe.serial("setting up a school from zero", () => {
     // Price the level the pupil is enrolled in.
     const row = page.getByRole("row").filter({ hasText: level });
     await row.getByRole("button", { name: /Definir|Editar/ }).click();
-    const form = page.getByRole("form", { name: "Tabulador del nivel" });
-    await form.getByLabel("Inscripción").fill("5000");
-    await form.getByLabel("Colegiatura mensual").fill("3200");
-    await form.getByLabel("Recargo por mes vencido").fill("150");
-    await form.getByRole("button", { name: "Guardar tabulador" }).click();
+
+    // El tabulador es una PÁGINA, no un cajón: catorce campos en cinco
+    // secciones no caben en uno sin partir la forma en columnas.
+    await expect(page.getByRole("heading", { name: /^Precios de / })).toBeVisible();
+
+    // La inscripción se captura por conceptos con su vigencia (ADR 0011): un
+    // monto único dejó de existir.
+    await page.getByLabel("Nuevo concepto").fill("INSCRIPCIÓN");
+    await page.getByRole("button", { name: /Agregar concepto/ }).click();
+    await page.getByLabel("Monto").fill("5000");
+    await page.getByLabel("Vigente desde").fill("2026-08-01");
+    await page.getByRole("button", { name: /Agregar monto/ }).click();
+
+    await page.getByLabel("Colegiatura mensual").fill("3200");
+    await page.getByRole("button", { name: "Guardar tabulador" }).click();
 
     await expect(page.getByRole("row").filter({ hasText: level })).toContainText("$3200.00");
 
