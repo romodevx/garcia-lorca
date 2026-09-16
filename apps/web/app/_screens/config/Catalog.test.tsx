@@ -120,10 +120,10 @@ describe("Catalog — nested level → grade level", () => {
     // reveals the grade-level form with the next ordinal (1) pre-filled.
     await waitFor(() => expect(mocked.listGradeLevels).toHaveBeenCalledWith(expect.any(String), "l1"));
 
+    // El grado NO abre cajón: se captura en su propio renglón, con el orden que
+    // sigue ya escrito, así que basta el nombre y Enter.
     await user.click(await screen.findByRole("button", { name: "Nuevo grado" }));
-    const gradeDrawer = await screen.findByRole("dialog", { name: /Nuevo grado en PRIMARIA/ });
-    await user.type(within(gradeDrawer).getByLabelText("Nombre del grado"), "1° PRIMARIA");
-    await user.click(within(gradeDrawer).getByRole("button", { name: "Crear grado" }));
+    await user.type(screen.getByLabelText("Nombre del grado"), "1° primaria{Enter}");
 
     await waitFor(() =>
       expect(mocked.createGradeLevel).toHaveBeenCalledWith(expect.any(String), {
@@ -132,6 +132,7 @@ describe("Catalog — nested level → grade level", () => {
         ordinal: 1,
       }),
     );
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
 

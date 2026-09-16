@@ -49,12 +49,23 @@ export interface InlineCreateRowProps {
    * aquí: eso se reclama al guardar, sobre la celda vacía.
    */
   rules?: Readonly<Record<string, FormatRule>>;
+  /**
+   * Lo que el sistema ya sabe y por lo tanto no pregunta: el orden que sigue, el
+   * cupo del último salón. Llega escrito, así que Enter solo basta — pero SIGUE
+   * SIENDO UN CAMPO, porque quitarlo quitaría la capacidad de intercalar un
+   * grado o abrir un salón más chico, y no hay otra pantalla donde corregirlo.
+   */
+  defaults?: Readonly<Record<string, string>>;
 }
 
 const NO_RULES: Readonly<Record<string, FormatRule>> = {};
+const NO_DEFAULTS: Readonly<Record<string, string>> = {};
 
-const empty = (columns: readonly InlineColumn[]): Record<string, string> =>
-  Object.fromEntries(columns.map((c) => [c.key, ""]));
+const blank = (
+  columns: readonly InlineColumn[],
+  defaults: Readonly<Record<string, string>>,
+): Record<string, string> =>
+  Object.fromEntries(columns.map((c) => [c.key, defaults[c.key] ?? ""]));
 
 function cellStyle(invalid: boolean): CSSProperties {
   return {
@@ -80,9 +91,13 @@ export function InlineCreateRow({
   onCreate,
   addLabel,
   rules = NO_RULES,
+  defaults = NO_DEFAULTS,
 }: InlineCreateRowProps): ReactElement {
   const [open, setOpen] = useState(false);
-  const [values, setValues] = useState<Record<string, string>>(() => empty(columns));
+  const [values, setValues] = useState<Record<string, string>>(() => blank(columns, defaults));
+  // Las celdas donde la persona ya escribió. Una propuesta puede ponerse al día
+  // sola; lo que alguien escribió, no se le mueve debajo de las manos.
+  const [touched, setTouched] = useState<Readonly<Record<string, true>>>({});
   const [missing, setMissing] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const firstRef = useRef<HTMLInputElement | null>(null);
@@ -95,9 +110,24 @@ export function InlineCreateRow({
     if (open) firstRef.current?.focus();
   }, [open]);
 
+  // La lista crece al guardar, así que la propuesta cambia (el orden que sigue
+  // ya no es el mismo). Se pone al día sola donde nadie ha escrito.
+  useEffect(() => {
+    setValues((prev) => {
+      let next = prev;
+      for (const [key, proposed] of Object.entries(defaults)) {
+        if (touched[key] === true || prev[key] === proposed) continue;
+        if (next === prev) next = { ...prev };
+        next[key] = proposed;
+      }
+      return next;
+    });
+  }, [defaults, touched]);
+
   const cancel = (): void => {
     setOpen(false);
-    setValues(empty(columns));
+    setValues(blank(columns, defaults));
+    setTouched({});
     setMissing(undefined);
   };
 
@@ -115,7 +145,8 @@ export function InlineCreateRow({
     setSaving(true);
     try {
       await onCreate({ ...values });
-      setValues(empty(columns));
+      setValues(blank(columns, defaults));
+      setTouched({});
       setMissing(undefined);
       // El renglón no se desmonta entre un alta y la siguiente, así que aquí sí
       // basta con pedir el foco de vuelta.
@@ -191,6 +222,7 @@ export function InlineCreateRow({
                     c.uppercase === true ? e.target.value.toUpperCase() : e.target.value;
                   const all = { ...values, [c.key]: next };
                   setValues(all);
+                  setTouched((prev) => (prev[c.key] === true ? prev : { ...prev, [c.key]: true }));
                   if (missing === c.key && next.trim() !== "") setMissing(undefined);
                   format.onChange(c.key, next, all);
                 }}
