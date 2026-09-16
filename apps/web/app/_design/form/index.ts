@@ -20,6 +20,7 @@
 
 export { Field, inputStyle, type FieldProps } from "./Field";
 export { useRequired, FALTA, type RequiredState } from "./useRequired";
+export { useFormatError, type FormatErrorState, type FormatRule } from "./useFormatError";
 export {
   EmailField,
   NumberField,
