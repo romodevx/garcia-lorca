@@ -30,7 +30,9 @@ import { useFormatError, type FormatRule } from "./form/useFormatError";
 export interface InlineColumn {
   key: string;
   label: string;
-  kind: "text" | "date" | "number";
+  kind: "text" | "date" | "number" | "select";
+  /** Sólo para `select`: lo que se puede elegir. */
+  options?: readonly { value: string; label: string }[];
   /** El catálogo se captura en mayúsculas, como en el resto del sistema. */
   uppercase?: boolean;
   required?: boolean;
@@ -98,7 +100,10 @@ export function InlineCreateRow({
   // Las celdas donde la persona ya escribió. Una propuesta puede ponerse al día
   // sola; lo que alguien escribió, no se le mueve debajo de las manos.
   const [touched, setTouched] = useState<Readonly<Record<string, true>>>({});
-  const [missing, setMissing] = useState<string | undefined>(undefined);
+  // TODOS los que faltan, no sólo el primero. Marcar de uno en uno manda a
+  // quien captura a descubrir el siguiente hueco hasta que se acaben; es la
+  // misma decisión que `useRequired` ya había tomado para los cajones.
+  const [missing, setMissing] = useState<Readonly<Record<string, true>>>({});
   const [saving, setSaving] = useState(false);
   const firstRef = useRef<HTMLInputElement | null>(null);
   const format = useFormatError(rules);
@@ -128,16 +133,18 @@ export function InlineCreateRow({
     setOpen(false);
     setValues(blank(columns, defaults));
     setTouched({});
-    setMissing(undefined);
+    setMissing({});
   };
 
   const save = async (): Promise<void> => {
-    const gap = columns.find(
+    const gaps = columns.filter(
       (c) => c.required === true && (values[c.key] ?? "").trim() === "",
     );
-    if (gap !== undefined) {
-      setMissing(gap.key);
-      document.querySelector<HTMLInputElement>(`[data-cell="${gap.key}"]`)?.focus();
+    if (gaps.length > 0) {
+      setMissing(Object.fromEntries(gaps.map((c) => [c.key, true as const])));
+      // El foco va al PRIMERO que falta en el orden de la pantalla, que es a
+      // donde el ojo va a ir de todas formas.
+      document.querySelector<HTMLElement>(`[data-cell="${gaps[0]?.key ?? ""}"]`)?.focus();
       return;
     }
     if (Object.keys(format.errors).length > 0) return;
@@ -147,7 +154,7 @@ export function InlineCreateRow({
       await onCreate({ ...values });
       setValues(blank(columns, defaults));
       setTouched({});
-      setMissing(undefined);
+      setMissing({});
       // El renglón no se desmonta entre un alta y la siguiente, así que aquí sí
       // basta con pedir el foco de vuelta.
       firstRef.current?.focus();
@@ -203,12 +210,34 @@ export function InlineCreateRow({
     >
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         {columns.map((c, i) => {
-          const invalid = missing === c.key || format.errors[c.key] !== undefined;
+          const invalid = missing[c.key] === true || format.errors[c.key] !== undefined;
           return (
             <div
               key={c.key}
               style={{ flex: c.width === undefined ? 1 : `0 0 ${c.width}px`, minWidth: 0 }}
             >
+              {c.kind === "select" ? (
+                <select
+                  data-cell={c.key}
+                  aria-label={c.label}
+                  aria-invalid={invalid ? "true" : undefined}
+                  value={values[c.key] ?? ""}
+                  onChange={(e) => {
+                    const all = { ...values, [c.key]: e.target.value };
+                    setValues(all);
+                    setTouched((prev) =>
+                      prev[c.key] === true ? prev : { ...prev, [c.key]: true },
+                    );
+                  }}
+                  style={cellStyle(invalid)}
+                >
+                  {(c.options ?? []).map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
               <input
                 ref={i === 0 ? firstRef : undefined}
                 data-cell={c.key}
@@ -223,12 +252,19 @@ export function InlineCreateRow({
                   const all = { ...values, [c.key]: next };
                   setValues(all);
                   setTouched((prev) => (prev[c.key] === true ? prev : { ...prev, [c.key]: true }));
-                  if (missing === c.key && next.trim() !== "") setMissing(undefined);
+                  if (missing[c.key] === true && next.trim() !== "") {
+                    setMissing((prev) => {
+                      const rest = { ...prev };
+                      delete rest[c.key];
+                      return rest;
+                    });
+                  }
                   format.onChange(c.key, next, all);
                 }}
                 onBlur={(e) => format.onBlur(c.key, e.target.value, values)}
                 style={cellStyle(invalid)}
               />
+              )}
             </div>
           );
         })}
