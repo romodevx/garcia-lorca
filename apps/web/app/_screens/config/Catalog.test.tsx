@@ -195,3 +195,35 @@ describe("Catalog — todo se crea en modal", () => {
     expect(mocked.createCycle).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Save & New donde de verdad sirve.
+ *
+ * Una escuela captura maternal, kínder y primaria de corrido. El nivel se queda
+ * en cajón porque elegir "por periodo" cambia cómo se inscribe el alumno todo el
+ * año y esa decisión necesita su párrafo — pero el cajón no tiene por qué
+ * cerrarse entre uno y otro.
+ */
+describe("crear varios niveles de corrido", () => {
+  it("guarda sin cerrar y deja el cajón listo para el siguiente", async () => {
+    const user = userEvent.setup();
+    mocked.listCycles.mockResolvedValue([
+      { id: "c1", name: "2026-2027", status: "active", startsOn: "2026-08-01", endsOn: "2027-06-30" },
+    ]);
+    mocked.createLevel.mockResolvedValue({
+      id: "l1", name: "MATERNAL", sepCode: "MAT", enrollmentGranularity: "cycle",
+    });
+
+    render(<Catalog onBack={() => {}} />);
+    await user.click(await screen.findByRole("button", { name: "Nuevo nivel" }));
+    const drawer = await screen.findByRole("dialog", { name: "Nuevo nivel educativo" });
+    await user.type(within(drawer).getByLabelText(/^Nombre del (ciclo|nivel)$/), "Maternal");
+    await user.type(within(drawer).getByLabelText("Clave SEP"), "MAT");
+
+    await user.click(within(drawer).getByRole("button", { name: "Guardar y crear otro" }));
+
+    await waitFor(() => expect(mocked.createLevel).toHaveBeenCalled());
+    expect(screen.getByRole("dialog", { name: "Nuevo nivel educativo" })).toBeInTheDocument();
+    expect(within(drawer).getByLabelText(/^Nombre del (ciclo|nivel)$/)).toHaveValue("");
+  });
+});
