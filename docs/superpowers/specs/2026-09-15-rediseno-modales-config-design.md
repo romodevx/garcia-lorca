@@ -90,9 +90,13 @@ velocidad se compra con defaults, contexto y menos decisiones.
 1. **Copiar del ciclo anterior** (tabulador). Verificado: no requiere backend nuevo —
    `listTuitionPlans(baseURL, cycleId)` ya recibe el ciclo. Los **montos se copian tal
    cual**; las **fechas se recorren exactamente un año** — misma fecha, año + 1 — lo que
-   aplica a las vigencias de cada tramo y a la fecha límite de inscripción. Si la fecha
-   resultante queda fuera del ciclo destino, se copia vacía y el campo se marca para que la
-   directora la capture: mejor un hueco visible que una fecha silenciosamente equivocada.
+   aplica a las vigencias de cada tramo y a la fecha límite de inscripción.
+   **Corrección hecha durante la implementación:** esta spec decía que una fecha que cayera
+   fuera del ciclo destino se copiara vacía. Está mal y una prueba lo demostró — la fecha
+   límite de inscripción cae fuera del ciclo POR DISEÑO (se cobra en junio para un año que
+   abre en agosto), así que esa regla la habría borrado en silencio en cada copia. No hay
+   comprobación de rango: el corrimiento es correcto por construcción y las fechas quedan
+   visibles y editables en la forma.
    Caso normal: Copiar → Mensual → escribir → Guardar = **3 clics**.
 2. **Enter guarda y reabre** en renglón y chip. Doce feriados sin soltar el teclado.
 3. **"Guardar y crear otro"** en los dos cajones restantes: conserva el contexto
