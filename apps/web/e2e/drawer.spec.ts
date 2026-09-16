@@ -63,7 +63,7 @@ test.describe("el cajón cubre la pantalla", () => {
     expect(enCima, "el clic llega al botón: el velo no lo tapa").toBe(true);
   });
 
-  test("el cajón toca el borde derecho y mide lo que mide su forma", async ({ page }) => {
+  test("el modal queda centrado y mide lo que mide su forma", async ({ page }) => {
     await signIn(page);
     await page.goto("/configuracion");
     await page.getByRole("button", { name: /Nuevo ciclo/ }).first().click();
@@ -71,19 +71,34 @@ test.describe("el cajón cubre la pantalla", () => {
 
     const caja = await page.getByRole("dialog").boundingBox();
     const vp = page.viewportSize();
-    expect(Math.round((caja?.x ?? 0) + (caja?.width ?? 0))).toBe(vp?.width);
+    const anchoVP = vp?.width ?? 0;
+    const altoVP = vp?.height ?? 0;
 
     /*
-     * Antes esta prueba exigía y=0 y alto = alto del monitor. Era cierto y era
-     * el defecto: "Nuevo ciclo escolar" son TRES campos, y estirarlos a toda la
-     * pantalla los dejaba flotando arriba de un metro de blanco con el botón de
-     * guardar clavado hasta abajo. Ahora la altura la pone el contenido, con
-     * techo de 85vh, y el panel queda centrado a lo alto.
+     * Esta prueba ha exigido tres cosas distintas, y cada cambio arregló lo que
+     * el anterior dejó:
+     *
+     *   1. Anclado a la derecha y de alto completo. Era un cajón y estaba bien.
+     *   2. Anclado a la derecha, de alto propio. "Nuevo ciclo escolar" son TRES
+     *      campos: estirarlos a toda la pantalla los dejaba arriba de un metro
+     *      de blanco con Guardar clavado hasta abajo.
+     *   3. Centrado. Al medir lo que mide su forma, seguir anclado lo dejaba
+     *      flotando contra un borde con el resto de la pantalla vacío.
+     *
+     * Se mide el CENTRO del panel contra el centro del monitor, con holgura de
+     * un 2%: exigir igualdad exacta convierte medio píxel de redondeo en rojo.
      */
-    const alto = caja?.height ?? 0;
-    expect(alto, "el cajón se volvió a estirar a toda la pantalla")
-      .toBeLessThan((vp?.height ?? 0) * 0.9);
-    expect(caja?.y ?? 0, "el cajón no está centrado a lo alto").toBeGreaterThan(0);
+    const centroX = (caja?.x ?? 0) + (caja?.width ?? 0) / 2;
+    const centroY = (caja?.y ?? 0) + (caja?.height ?? 0) / 2;
+    expect(Math.abs(centroX - anchoVP / 2), "el modal no está centrado a lo ancho")
+      .toBeLessThan(anchoVP * 0.02);
+    expect(Math.abs(centroY - altoVP / 2), "el modal no está centrado a lo alto")
+      .toBeLessThan(altoVP * 0.02);
+
+    expect(caja?.height ?? 0, "el modal se volvió a estirar a toda la pantalla")
+      .toBeLessThan(altoVP * 0.9);
+    expect(caja?.width ?? 0, "el modal se volvió a estirar a todo lo ancho")
+      .toBeLessThan(anchoVP * 0.9);
   });
 
   test("el tabulador es una página de una sola columna", async ({ page, request }) => {

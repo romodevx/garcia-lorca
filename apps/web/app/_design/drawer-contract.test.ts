@@ -17,13 +17,40 @@ const SCREENS = globSync("app/_screens/**/*.tsx", { cwd: process.cwd() })
   .filter((f) => !f.includes(".test."))
   .map((f) => [f, readFileSync(f, "utf8")] as const);
 
+/**
+ * Los diálogos dibujados a mano que ya existían, con nombre y fecha.
+ *
+ * La lista es una DEUDA declarada, no un permiso. Está aquí para que no pueda
+ * crecer en silencio: agregar un renglón cuesta explicar por qué, y eso es
+ * exactamente la conversación que esta prueba existe para forzar.
+ *
+ * `StudentPicker` apareció cuando la cáscara se centró: hasta entonces la firma
+ * que se buscaba era el anclaje a la derecha, y un buscador centrado se colaba.
+ * No es una copia del cajón —es una paleta tipo ⌘K, sin encabezado y con su
+ * lista creciendo bajo el campo— pero sí es un `role="dialog"` propio, y por eso
+ * NO tiene trampa de foco ni devuelve el foco al cerrar. Se puede convertir: no
+ * está anidado dentro del cajón de cobro, porque el buscador se cierra antes de
+ * abrirlo. No se hizo aquí porque toca el cobro en ventanilla, que es dinero.
+ */
+const KNOWN_HANDROLLED = ["app/_screens/finance/StudentPicker.tsx"];
+
 describe("el cajón", () => {
   it("nadie dibuja el suyo", () => {
     const offenders = SCREENS
-      // La firma del velo: fijo, pegado a los cuatro lados, empujando su
-      // contenido a la derecha. Un toast fijo abajo al centro no es un cajón.
-      .filter(([, src]) => /position:\s*"fixed",\s*inset:\s*0[\s\S]{0,220}justifyContent:\s*"flex-end"/.test(src))
-      .map(([f]) => f);
+      /*
+       * La firma del velo: fijo, pegado a los cuatro lados, y un `zIndex` alto
+       * acomodando su contenido. Antes bastaba con buscar `flex-end`, porque el
+       * panel iba anclado a la derecha; al centrarse, esa firma dejó de existir
+       * y la prueba habría dejado pasar la copia número diez sin decir nada.
+       *
+       * Un toast fijo abajo al centro no es un cajón: por eso se exige también
+       * el velo oscuro, que es lo que de verdad distingue a un modal.
+       */
+      .filter(([, src]) =>
+        /position:\s*"fixed",\s*inset:\s*0[\s\S]{0,320}background:\s*"rgba\(/.test(src),
+      )
+      .map(([f]) => f)
+      .filter((f) => !KNOWN_HANDROLLED.includes(f));
     expect(offenders).toEqual([]);
   });
 

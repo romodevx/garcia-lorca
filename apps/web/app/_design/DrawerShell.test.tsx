@@ -69,6 +69,30 @@ describe("el contrato de foco del cajón", () => {
   });
 });
 
+describe("dónde se presenta", () => {
+  /**
+   * Al centro, no contra un borde.
+   *
+   * Nació como cajón lateral y, mientras midió toda la pantalla, el anclaje a la
+   * derecha se leía como un panel. Al pasar a medir lo que mide su forma, ese
+   * mismo anclaje lo dejó flotando contra un borde con el resto de la pantalla
+   * vacío. Una forma que no toca ningún borde se lee como lo que es: una sola
+   * cosa que atender.
+   */
+  it("se presenta al centro, no contra un borde", () => {
+    render(
+      <DrawerShell title="Nuevo ciclo escolar" icon="calendar" onClose={() => {}}>
+        <input aria-label="Nombre" />
+      </DrawerShell>,
+    );
+
+    expect(screen.getByTestId("drawer-backdrop")).toHaveStyle({
+      justifyContent: "center",
+      alignItems: "center",
+    });
+  });
+});
+
 describe("la altura del cajón", () => {
   it("se ajusta a su contenido en vez de estirarse a la pantalla", () => {
     render(

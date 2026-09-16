@@ -219,11 +219,20 @@ export function DrawerShell({
     maxHeight: "85vh",
     background: "var(--surface)",
     border: "1px solid var(--border)",
-    borderRadius: "var(--r-xl) 0 0 var(--r-xl)",
+    // Redondeado por los cuatro lados: ya no se apoya en ningún borde.
+    borderRadius: "var(--r-xl)",
     boxShadow: "var(--shadow-pop)",
     display: "flex",
     flexDirection: "column",
-    animation: "slideIn .28s var(--ease) both",
+    /*
+     * `pop`, no `slideIn`.
+     *
+     * `slideIn` NO EXISTE como keyframe en globals.css, y llevaba tiempo así: el
+     * panel pedía una animación que el navegador no encontraba y aparecía de
+     * golpe. Ahora entra creciendo desde su propio centro, que además es de
+     * donde viene — deslizarse desde la derecha ya no querría decir nada.
+     */
+    animation: "pop .2s var(--ease) both",
   };
 
   const chrome = (
@@ -308,10 +317,20 @@ export function DrawerShell({
         background: "rgba(6,20,12,.5)",
         backdropFilter: "blur(4px)",
         display: "flex",
-        justifyContent: "flex-end",
-        // Centrado a lo alto: el panel ya no se estira, así que sin esto se
-        // pegaría al borde superior del monitor.
+        /*
+         * Al CENTRO, en los dos ejes.
+         *
+         * Esto nació anclado a la derecha, como cajón, y mientras midió toda la
+         * pantalla se leía bien. Cuando pasó a medir lo que mide su forma, el
+         * mismo anclaje dejó un panel chico flotando contra un borde con el
+         * resto de la pantalla vacío: ni panel ni diálogo.
+         *
+         * El relleno impide que toque los bordes en una pantalla angosta, donde
+         * `width: min(560px, 100%)` llegaría de lado a lado.
+         */
+        justifyContent: "center",
         alignItems: "center",
+        padding: 24,
       }}
     >
       {onSubmit !== undefined ? (
