@@ -194,3 +194,40 @@ describe("qué cierra el cajón", () => {
     expect(onClose).toHaveBeenCalled();
   });
 });
+
+/**
+ * Save & New.
+ *
+ * Una escuela no captura maternal, kínder y primaria con quince días de
+ * diferencia: los captura de corrido. Cerrar el cajón entre uno y otro cobra un
+ * viaje completo —volver a encontrar el botón, volver a abrir, volver a
+ * enfocar— por cada registro.
+ */
+describe("guardar y crear otro", () => {
+  it("no ofrece el secundario donde la pantalla no lo pide", () => {
+    open();
+    expect(screen.queryByRole("button", { name: "Guardar y crear otro" })).toBeNull();
+  });
+
+  it("guarda sin cerrar", async () => {
+    const user = userEvent.setup();
+    const onSubmitAndNew = vi.fn();
+    const onClose = vi.fn();
+    open({ onSubmitAndNew, onClose });
+
+    await user.click(screen.getByRole("button", { name: "Guardar y crear otro" }));
+
+    expect(onSubmitAndNew).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("no acepta clics mientras el guardado va en camino", async () => {
+    const user = userEvent.setup();
+    const onSubmitAndNew = vi.fn();
+    open({ onSubmitAndNew, pending: true });
+
+    await user.click(screen.getByRole("button", { name: "Guardar y crear otro" }));
+
+    expect(onSubmitAndNew).not.toHaveBeenCalled();
+  });
+});
