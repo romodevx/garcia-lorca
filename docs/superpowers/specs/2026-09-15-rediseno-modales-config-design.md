@@ -130,8 +130,13 @@ sombras nuevas**.
   cuerpo. Muere el metro de blanco.
 - `SlideOver`: gana el secundario "Guardar y crear otro".
 - `Toast`: gana acción, para el borrado con Deshacer.
-- `useRequired`: valida en `blur` además de al enviar; el error se limpia por tecla en cuanto
-  el valor es válido. Nunca se valida mientras se teclea.
+- `useRequired`: **se conserva su decisión actual** — un campo obligatorio **vacío** se
+  reclama al guardar, nunca al salir del campo. El código ya lo razonó y tiene razón:
+  *"reclamar campo por campo al salir de cada uno persigue con rojos a quien apenas va
+  llegando al siguiente"*. Lo que sí se agrega es validación en `blur` **sólo para datos
+  mal escritos** en un campo que la persona ya tocó (fecha imposible, monto negativo, fin
+  antes del inicio) — que es de lo que habla el hallazgo de Baymard. El error se limpia por
+  tecla en cuanto el valor vuelve a ser válido. Nunca se valida mientras se teclea.
 
 **Se borra**
 
