@@ -18,21 +18,18 @@ const SCREENS = globSync("app/_screens/**/*.tsx", { cwd: process.cwd() })
   .map((f) => [f, readFileSync(f, "utf8")] as const);
 
 /**
- * Los diálogos dibujados a mano que ya existían, con nombre y fecha.
+ * Los diálogos dibujados a mano que ya existían, con nombre y razón.
  *
- * La lista es una DEUDA declarada, no un permiso. Está aquí para que no pueda
- * crecer en silencio: agregar un renglón cuesta explicar por qué, y eso es
- * exactamente la conversación que esta prueba existe para forzar.
+ * La lista está VACÍA, y eso es el punto: existe para que una excepción tenga
+ * que escribirse y explicarse, no para que se acumulen.
  *
- * `StudentPicker` apareció cuando la cáscara se centró: hasta entonces la firma
- * que se buscaba era el anclaje a la derecha, y un buscador centrado se colaba.
- * No es una copia del cajón —es una paleta tipo ⌘K, sin encabezado y con su
- * lista creciendo bajo el campo— pero sí es un `role="dialog"` propio, y por eso
- * NO tiene trampa de foco ni devuelve el foco al cerrar. Se puede convertir: no
- * está anidado dentro del cajón de cobro, porque el buscador se cierra antes de
- * abrirlo. No se hizo aquí porque toca el cobro en ventanilla, que es dinero.
+ * Tuvo un renglón exactamente una vez. `StudentPicker` apareció cuando la
+ * cáscara se centró —hasta entonces la firma que se buscaba era el anclaje a la
+ * derecha, y un buscador centrado se colaba— y se convirtió en cuanto el dueño
+ * lo autorizó: su diálogo propio no tenía trampa de foco ni devolvía el foco al
+ * cerrar, y eso no se arregla catorce veces, se arregla en la cáscara.
  */
-const KNOWN_HANDROLLED = ["app/_screens/finance/StudentPicker.tsx"];
+const KNOWN_HANDROLLED: readonly string[] = [];
 
 describe("el cajón", () => {
   it("nadie dibuja el suyo", () => {
