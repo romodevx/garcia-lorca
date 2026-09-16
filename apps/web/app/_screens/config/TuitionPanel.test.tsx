@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Cycle, Level } from "../../config/api";
 import type { EnrollmentConcept } from "../../finance/api";
 import * as financeApi from "../../finance/api";
-import { TuitionPanel, pesosToCents, centsToPesos, inscriptionTotals, ladderProblem } from "./TuitionPanel";
+import { TuitionPanel } from "./TuitionPanel";
+import { pesosToCents, centsToPesos, inscriptionTotals, ladderProblem } from "./tuition-math";
 
 vi.mock("../../finance/api", () => ({
   listTuitionPlans: vi.fn(),
@@ -95,7 +96,9 @@ describe("the tuition table", () => {
     await screen.findByText("Primaria");
 
     await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
-    const form = await screen.findByRole("dialog", { name: /^Precios de / });
+    await screen.findByRole("heading", { name: /^Precios de / });
+    await expandCollapsedSections(user);
+    const form = document.body;
     await captureInscription(user, form);
     await user.type(within(form).getByLabelText("Colegiatura mensual"), "2500");
     await user.clear(within(form).getByLabelText("Mensualidades"));
@@ -125,7 +128,9 @@ describe("the tuition table", () => {
     await screen.findByText("Primaria");
 
     await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
-    const form = await screen.findByRole("dialog", { name: /^Precios de / });
+    await screen.findByRole("heading", { name: /^Precios de / });
+    await expandCollapsedSections(user);
+    const form = document.body;
     await user.type(within(form).getByLabelText("Colegiatura mensual"), "2500");
     await user.clear(within(form).getByLabelText("Día límite"));
     await user.type(within(form).getByLabelText("Día límite"), "31");
@@ -178,7 +183,8 @@ describe("TuitionPanel — cobranza", () => {
 
     await screen.findByRole("row", { name: /Kínder/ });
     await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
-    await captureInscription(user, screen.getByRole("dialog", { name: /^Precios de / }));
+    await expandCollapsedSections(user);
+    await captureInscription(user, document.body);
     await user.type(screen.getByLabelText("Colegiatura mensual"), "3200");
     await user.click(screen.getByLabelText("Cobrar recargo por día"));
     await user.type(screen.getByLabelText("Recargo por día"), "10");
@@ -203,6 +209,7 @@ describe("TuitionPanel — cobranza", () => {
 
     await screen.findByRole("row", { name: /Kínder/ });
     await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
+    await expandCollapsedSections(user);
     await user.type(screen.getByLabelText("Colegiatura mensual"), "3200");
     await user.click(screen.getByLabelText("Cobrar recargo por día"));
     await user.click(screen.getByRole("button", { name: /Guardar tabulador/ }));
@@ -216,12 +223,33 @@ describe("TuitionPanel — cobranza", () => {
 // request; splitting a payment is what a cuota does now. Their tests went with
 // them — what replaced them is pinned under "cuotas" below.
 
-/** Opens the price drawer of a level. */
+/**
+ * Abre el tabulador de un nivel.
+ *
+ * Ya NO es un cajón: catorce campos en cinco secciones son una página, y el
+ * encabezado de esa página es lo que se busca ahora. Las secciones plegables se
+ * abren aquí mismo, porque cada prueba de abajo mira campos que en la pantalla
+ * real están a un clic — no hay por qué repetir ese clic quince veces.
+ */
 async function openPrices(user: ReturnType<typeof userEvent.setup>, level: RegExp): Promise<HTMLElement> {
   render(<TuitionPanel cycle={cycle} levels={levels} />);
   await screen.findByText("Primaria");
   await user.click(within(screen.getByRole("row", { name: level })).getByRole("button", { name: /Definir|Editar/ }));
-  return screen.findByRole("dialog", { name: /^Precios de / });
+  await screen.findByRole("heading", { name: /^Precios de / });
+  await expandCollapsedSections(user);
+  return document.body;
+}
+
+/** Cobranza y Cuotas nacen plegadas: divulgación progresiva, no un secreto. */
+async function expandCollapsedSections(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  // El nombre accesible del encabezado lleva su número y su resumen:
+  // "3 Cobranza recargo fijo". Se busca por el nombre de la sección, no anclado.
+  for (const section of [/Cobranza/, /Cuotas/]) {
+    const button = screen.queryByRole("button", { name: section });
+    if (button !== null && button.getAttribute("aria-expanded") === "false") {
+      await user.click(button);
+    }
+  }
 }
 
 describe("what the school asked to stop seeing", () => {
