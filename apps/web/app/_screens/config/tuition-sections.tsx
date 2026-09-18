@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import { Btn } from "../../_design/Controls";
 import { DateField, MoneyField, TextField } from "../../_design/form";
@@ -27,6 +27,20 @@ import {
  */
 
 /**
+ * Lo que una sección tiene escrito y todavía no agregado.
+ *
+ * Existe porque el monto y la fecha de un tramo viven en el estado local de su
+ * tarjeta hasta que alguien aprieta "Agregar". Con el botón de guardar siempre a
+ * la vista, escribir el precio y guardar directo es el gesto natural, y ese
+ * precio se iba a la basura sin una palabra: el tabulador quedaba con un escalón
+ * de menos y cobraba mal todo el año.
+ *
+ * Devuelve el reclamo, o `undefined` si no hay nada pendiente. Se registra en un
+ * ref y no en estado para no repintar la forma en cada tecla.
+ */
+export type DraftCheck = () => string | undefined;
+
+/**
  * The inscription, as the school's price list prints it: one line per concept,
  * each with what it costs from a date onward.
  *
@@ -36,8 +50,29 @@ import {
  * date, flat ones included. Making them add it up by hand is how a school
  * publishes a flyer that its own system contradicts.
  */
-export function InscriptionSection({ concepts, onChange, onError }: InscriptionSectionProps): ReactElement {
+export function InscriptionSection({ concepts, onChange, onError, draftRef }: InscriptionSectionProps): ReactElement {
   const [name, setName] = useState("");
+  const cardDrafts = useRef(new Map<string, DraftCheck>());
+
+  const registerDraft = (concept: string, check: DraftCheck | undefined): void => {
+    if (check === undefined) cardDrafts.current.delete(concept);
+    else cardDrafts.current.set(concept, check);
+  };
+
+  // El nombre de un concepto escrito y sin agregar cuenta igual: es un renglón
+  // de la lista de precios que nadie va a cobrar.
+  if (draftRef !== undefined) {
+    draftRef.current = (): string | undefined => {
+      if (name.trim() !== "") {
+        return `Tienes el concepto "${name.trim()}" escrito sin agregar. Aprieta "Agregar concepto" o borra lo escrito.`;
+      }
+      for (const check of cardDrafts.current.values()) {
+        const problem = check();
+        if (problem !== undefined) return problem;
+      }
+      return undefined;
+    };
+  }
 
   const addConcept = (): void => {
     if (name.trim() === "") {
@@ -78,6 +113,7 @@ export function InscriptionSection({ concepts, onChange, onError }: InscriptionS
           onChangeTiers={(tiers) => patch(index, tiers)}
           onRemove={() => onChange(concepts.filter((_, i) => i !== index))}
           onError={onError}
+          registerDraft={registerDraft}
         />
       ))}
 
@@ -135,10 +171,21 @@ function slugOf(raw: string): string {
  * which is what the first version did — invited two rows for one concept and a
  * validation error instead of the merge the director meant.
  */
-function ConceptCard({ concept, onChangeTiers, onRemove, onError }: ConceptCardProps): ReactElement {
+function ConceptCard({ concept, onChangeTiers, onRemove, onError, registerDraft }: ConceptCardProps): ReactElement {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
+
+  // Se registra en cada render: la comprobación tiene que leer los valores de
+  // AHORA, y un registro que sólo corriera al montar leería los del principio.
+  useEffect(() => {
+    registerDraft(concept.name, () =>
+      amount.trim() !== "" || from.trim() !== "" || to.trim() !== ""
+        ? `Tienes un monto escrito en "${concept.name}" sin agregar. Aprieta "Agregar monto con su vigencia" o borra lo escrito.`
+        : undefined,
+    );
+    return () => registerDraft(concept.name, undefined);
+  });
 
   const addAmount = (): void => {
     const cents = pesosToCents(amount);
@@ -215,6 +262,8 @@ function ConceptCard({ concept, onChangeTiers, onRemove, onError }: ConceptCardP
 }
 
 interface ConceptCardProps {
+  /** Cómo avisar qué tiene escrito y sin agregar; `undefined` la da de baja. */
+  registerDraft: (name: string, check: DraftCheck | undefined) => void;
   concept: EnrollmentConcept;
   onChangeTiers: (tiers: PriceTier[]) => void;
   onRemove: () => void;
@@ -222,6 +271,8 @@ interface ConceptCardProps {
 }
 
 export interface InscriptionSectionProps {
+  /** Dónde dejar la comprobación de lo escrito y sin agregar. */
+  draftRef?: { current: DraftCheck } | undefined;
   concepts: EnrollmentConcept[];
   onChange: (concepts: EnrollmentConcept[]) => void;
   onError: (message: string | undefined) => void;
@@ -248,6 +299,7 @@ export function FeesSection({
   fees,
   onChange,
   onError,
+  draftRef,
 }: {
   cycle: Cycle;
   firstMonth: number;
@@ -256,10 +308,19 @@ export function FeesSection({
   fees: Fee[];
   onChange: (fees: Fee[]) => void;
   onError: (message: string) => void;
+  /** Dónde dejar la comprobación de lo escrito y sin agregar. */
+  draftRef?: { current: DraftCheck } | undefined;
 }): ReactElement {
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
   const [picked, setPicked] = useState<number[]>([]);
+
+  if (draftRef !== undefined) {
+    draftRef.current = (): string | undefined =>
+      name.trim() !== "" || amount.trim() !== "" || picked.length > 0
+        ? `Tienes la cuota "${name.trim() === "" ? "sin nombre" : name.trim()}" escrita sin agregar. Aprieta "Agregar cuota" o borra lo escrito.`
+        : undefined;
+  }
 
   const calendar = billedMonths(cycle.startsOn, firstMonth, months);
   const totals = monthlyTotals(calendar, monthlyCents, fees);

@@ -172,3 +172,135 @@ describe("copiar del ciclo anterior", () => {
     expect(screen.getByTestId("create-page-aside")).toHaveTextContent("Igual que 2025-2026");
   });
 });
+
+/**
+ * Dinero que se perdía sin decir nada, y un tope prestado de otro campo.
+ */
+describe("los montos de cobranza no se tragan en silencio", () => {
+  async function abrirCobranza(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+    open();
+    await user.click(screen.getByRole("button", { name: /Cobranza/ }));
+  }
+
+  /**
+   * `pesosToCents` devuelve null para "100.oo", "$100", "1,00". El código hacía
+   * `?? 0`: se guardaba cero sin una palabra, la pantalla volvía a mostrar el
+   * campo vacío, y TODAS las familias perdían el pronto pago el ciclo entero.
+   */
+  it("reclama un pronto pago que no se puede leer, en vez de guardarlo en cero", async () => {
+    const user = userEvent.setup();
+    await abrirCobranza(user);
+    await user.type(screen.getByLabelText("Colegiatura mensual"), "2800");
+    await user.type(screen.getByLabelText("Nuevo concepto"), "INSCRIPCIÓN");
+    await user.click(screen.getByRole("button", { name: /Agregar concepto/ }));
+    await user.type(screen.getByLabelText("Monto"), "4500");
+    await user.type(screen.getByLabelText("Vigente desde"), "2026-08-01");
+    await user.click(screen.getByRole("button", { name: /Agregar monto/ }));
+
+    await user.type(screen.getByLabelText("Pronto pago (monto)"), "100.oo");
+    await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/pronto pago/i);
+    expect(finance.upsertTuitionPlan).not.toHaveBeenCalled();
+  });
+
+  /**
+   * El tope de 28 es "un día que también existe en febrero". Los días de pronto
+   * pago son un CONTEO de días hábiles: no tienen por qué caber en un mes.
+   * Prestarle el tope volvía inguardable cualquier plan con 30.
+   */
+  it("acepta una ventana de pronto pago mayor a 28 días", async () => {
+    const user = userEvent.setup();
+    await abrirCobranza(user);
+    await user.type(screen.getByLabelText("Colegiatura mensual"), "2800");
+    await user.type(screen.getByLabelText("Nuevo concepto"), "INSCRIPCIÓN");
+    await user.click(screen.getByRole("button", { name: /Agregar concepto/ }));
+    await user.type(screen.getByLabelText("Monto"), "4500");
+    await user.type(screen.getByLabelText("Vigente desde"), "2026-08-01");
+    await user.click(screen.getByRole("button", { name: /Agregar monto/ }));
+
+    await user.clear(screen.getByLabelText("Pronto pago (días hábiles)"));
+    await user.type(screen.getByLabelText("Pronto pago (días hábiles)"), "30");
+    await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
+
+    expect(finance.upsertTuitionPlan).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ policy: expect.objectContaining({ earlyPaymentDays: 30 }) }),
+    );
+  });
+});
+
+/**
+ * `REGLAS-modales.md` §3: "Al enviar se dice qué falta y el foco va al primer
+ * campo con problema." Con Cobranza y Cuotas plegadas, el mensaje señalaba un
+ * campo que ni siquiera estaba en el DOM: quien captura apretaba Guardar, no veía
+ * cambiar nada y concluía que el botón estaba roto.
+ */
+describe("un error dentro de una sección plegada", () => {
+  it("abre la sección que lo contiene", async () => {
+    const user = userEvent.setup();
+    open();
+
+    // Se enciende el recargo por día y se vuelve a plegar la sección.
+    await user.click(screen.getByRole("button", { name: /Cobranza/ }));
+    await user.click(screen.getByLabelText("Cobrar recargo por día"));
+    await user.click(screen.getByRole("button", { name: /Cobranza/ }));
+    expect(screen.getByRole("button", { name: /Cobranza/ })).toHaveAttribute("aria-expanded", "false");
+
+    await user.type(screen.getByLabelText("Colegiatura mensual"), "2800");
+    await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/recargo diario/i);
+    expect(screen.getByRole("button", { name: /Cobranza/ })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByLabelText("Recargo por día")).toBeInTheDocument();
+  });
+});
+
+/**
+ * Lo tecleado en un tramo o una cuota que nadie "agregó".
+ *
+ * El monto y la fecha viven en el estado local de la tarjeta hasta que se aprieta
+ * "Agregar monto con su vigencia". Con el botón de guardar SIEMPRE a la vista en
+ * la barra de abajo, escribir el precio y guardar directo es el gesto natural — y
+ * el precio se iba a la basura sin una palabra, dejando un tabulador con un
+ * escalón de menos que cobra mal todo el año.
+ */
+describe("un monto escrito y no agregado", () => {
+  it("no se guarda el tabulador tirando el tramo a medio capturar", async () => {
+    const user = userEvent.setup();
+    open();
+    await user.type(screen.getByLabelText("Colegiatura mensual"), "2800");
+    await user.type(screen.getByLabelText("Nuevo concepto"), "INSCRIPCIÓN");
+    await user.click(screen.getByRole("button", { name: /Agregar concepto/ }));
+    await user.type(screen.getByLabelText("Monto"), "4500");
+    await user.type(screen.getByLabelText("Vigente desde"), "2026-08-01");
+    await user.click(screen.getByRole("button", { name: /Agregar monto/ }));
+
+    // Un SEGUNDO escalón, tecleado y no agregado.
+    await user.type(screen.getByLabelText("Monto"), "5200");
+    await user.type(screen.getByLabelText("Vigente desde"), "2026-10-01");
+    await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/INSCRIPCIÓN/);
+    expect(finance.upsertTuitionPlan).not.toHaveBeenCalled();
+  });
+
+  it("tampoco tira una cuota a medio capturar", async () => {
+    const user = userEvent.setup();
+    open();
+    await user.type(screen.getByLabelText("Colegiatura mensual"), "2800");
+    await user.type(screen.getByLabelText("Nuevo concepto"), "INSCRIPCIÓN");
+    await user.click(screen.getByRole("button", { name: /Agregar concepto/ }));
+    await user.type(screen.getByLabelText("Monto"), "4500");
+    await user.type(screen.getByLabelText("Vigente desde"), "2026-08-01");
+    await user.click(screen.getByRole("button", { name: /Agregar monto/ }));
+
+    await user.click(screen.getByRole("button", { name: /Cuotas/ }));
+    await user.type(screen.getByLabelText("Nombre de la cuota"), "CUOTA DE JULIO");
+    await user.type(screen.getByLabelText("Monto total"), "1600");
+    await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/cuota/i);
+    expect(finance.upsertTuitionPlan).not.toHaveBeenCalled();
+  });
+});

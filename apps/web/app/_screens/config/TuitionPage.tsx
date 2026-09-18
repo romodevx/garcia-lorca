@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactElement, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 
 import { Btn } from "../../_design/Controls";
 import { CreatePage } from "../../_design/CreatePage";
@@ -20,10 +20,11 @@ import {
   monthlyTotals,
   pesosToCents,
   seedConcepts,
+  wholeAtLeastZero,
   wholeInRange,
 } from "./tuition-math";
 import { copyPlanToCycle } from "./tuition-copy";
-import { FeesSection, InscriptionSection } from "./tuition-sections";
+import { FeesSection, InscriptionSection, type DraftCheck } from "./tuition-sections";
 
 /**
  * El tabulador de un nivel: lo que cuesta el año.
@@ -83,6 +84,24 @@ export function TuitionPage({
   const [concepts, setConcepts] = useState<EnrollmentConcept[]>(() => seedConcepts(plan, cycle));
   const [error, setError] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState(false);
+  // Cobranza y Cuotas nacen plegadas; un error de guardado las abre.
+  const [openCollection, setOpenCollection] = useState(false);
+  const [openFees, setOpenFees] = useState(false);
+  /**
+   * Lo que cada sección tiene escrito y sin agregar.
+   *
+   * En refs y no en estado: la comprobación corre al guardar, no en cada tecla,
+   * y ponerla en estado repintaría catorce campos por letra.
+   */
+  const inscriptionDraft = useRef<DraftCheck>(() => undefined);
+  const feesDraft = useRef<DraftCheck>(() => undefined);
+
+  /** Se queja Y abre la sección donde vive el campo, para no señalar al vacío. */
+  const complain = (message: string, section?: "collection" | "fees"): void => {
+    if (section === "collection") setOpenCollection(true);
+    if (section === "fees") setOpenFees(true);
+    setError(message);
+  };
 
   const copyPrevious = (): void => {
     if (previousPlan === undefined) return;
@@ -125,16 +144,35 @@ export function TuitionPage({
       setError("El mes de inicio va de 1 a 12.");
       return;
     }
-    const dailyCents = pesosToCents(dailyFee) ?? 0;
+    /*
+     * Los montos escritos SE LEEN O SE RECLAMAN; nunca se vuelven cero solos.
+     *
+     * `pesosToCents` devuelve null para "100.oo", "$100" o "1,00". El `?? 0` que
+     * vivía aquí guardaba cero sin una palabra y redibujaba el campo vacío: nadie
+     * podía saber que alguna vez se tecleó, y las familias perdían el pronto pago
+     * el ciclo completo.
+     */
+    const dailyCents = dailyFee.trim() === "" ? 0 : pesosToCents(dailyFee);
+    if (dailyCents === null) {
+      complain("El recargo por día no se entiende. Escríbelo en pesos, por ejemplo 10.00", "collection");
+      return;
+    }
     if (dailyMode && dailyCents <= 0) {
       // La misma regla que impone la base. Dicha aquí para que se lea qué falta
       // en vez de una violación de restricción.
-      setError("El recargo diario necesita un monto, o no cobraría nada.");
+      complain("El recargo diario necesita un monto, o no cobraría nada.", "collection");
       return;
     }
-    const window = wholeInRange(earlyDays, 0, MAX_DUE_DAY);
+    const earlyCents = earlyAmount.trim() === "" ? 0 : pesosToCents(earlyAmount);
+    if (earlyCents === null) {
+      complain("El monto de pronto pago no se entiende. Escríbelo en pesos, por ejemplo 100.00", "collection");
+      return;
+    }
+    // Sin el tope de MAX_DUE_DAY: eso es "un día que existe en febrero", y esto
+    // es un conteo de días hábiles.
+    const window = wholeAtLeastZero(earlyDays);
     if (window === null) {
-      setError(`Los días de pronto pago van de 0 a ${MAX_DUE_DAY}.`);
+      complain("Los días de pronto pago son un número entero de días, desde 0.", "collection");
       return;
     }
     if (concepts.length === 0) {
@@ -144,6 +182,12 @@ export function TuitionPage({
     const ladder = ladderProblem(concepts);
     if (ladder !== "") {
       setError(ladder);
+      return;
+    }
+    // Nada tecleado se tira por no haberlo "agregado": se dice y se detiene.
+    const pendiente = inscriptionDraft.current() ?? feesDraft.current();
+    if (pendiente !== undefined) {
+      complain(pendiente, feesDraft.current() !== undefined ? "fees" : undefined);
       return;
     }
 
@@ -173,7 +217,7 @@ export function TuitionPage({
           dailyMode,
           lateFeeDailyCents: dailyCents,
           surchargeCountsAllDays: allDays,
-          earlyPaymentCents: pesosToCents(earlyAmount) ?? 0,
+          earlyPaymentCents: earlyCents,
           earlyPaymentDays: window,
         },
       });
@@ -238,7 +282,12 @@ export function TuitionPage({
       </FormSection>
 
       <FormSection n={2} title="Inscripción" note={`${concepts.length} concepto${concepts.length === 1 ? "" : "s"}`}>
-        <InscriptionSection concepts={concepts} onChange={setConcepts} onError={setError} />
+        <InscriptionSection
+          concepts={concepts}
+          onChange={setConcepts}
+          onError={setError}
+          draftRef={inscriptionDraft}
+        />
         <DateField
           label="Fecha límite de inscripción"
           value={enrollmentDue}
@@ -246,7 +295,14 @@ export function TuitionPage({
         />
       </FormSection>
 
-      <FormSection n={3} title="Cobranza" note={collectionSummary} collapsible>
+      <FormSection
+        n={3}
+        title="Cobranza"
+        note={collectionSummary}
+        collapsible
+        open={openCollection}
+        onOpenChange={setOpenCollection}
+      >
         <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
           <input
             type="checkbox"
@@ -278,7 +334,14 @@ export function TuitionPage({
         </label>
       </FormSection>
 
-      <FormSection n={4} title="Cuotas" note={feesSummary} collapsible>
+      <FormSection
+        n={4}
+        title="Cuotas"
+        note={feesSummary}
+        collapsible
+        open={openFees}
+        onOpenChange={setOpenFees}
+      >
         <FeesSection
           cycle={cycle}
           firstMonth={wholeInRange(firstMonth, 1, 12) ?? 9}
@@ -287,6 +350,7 @@ export function TuitionPage({
           fees={fees}
           onChange={setFees}
           onError={setError}
+          draftRef={feesDraft}
         />
       </FormSection>
 
@@ -308,15 +372,28 @@ function FormSection({
   title,
   note,
   collapsible = false,
+  open,
+  onOpenChange,
   children,
 }: {
   n: number;
   title: string;
   note: string;
   collapsible?: boolean;
+  /**
+   * Plegado CONTROLADO desde la página, no guardado aquí dentro.
+   *
+   * Hace falta porque al guardar puede fallar un campo que vive en una sección
+   * plegada: el mensaje señalaba algo que ni siquiera estaba en el DOM, y quien
+   * captura apretaba Guardar, no veía cambiar nada y concluía que el botón
+   * estaba roto. La página abre la sección culpable antes de quejarse.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   children: ReactNode;
 }): ReactElement {
-  const [open, setOpen] = useState(!collapsible);
+  const isOpen = open ?? !collapsible;
+  const setOpen = (next: boolean): void => onOpenChange?.(next);
 
   const badge = (
     <span
@@ -326,8 +403,8 @@ function FormSection({
         borderRadius: "50%",
         display: "grid",
         placeItems: "center",
-        background: open ? "var(--forest)" : "var(--surface-3)",
-        color: open ? "#fff" : "var(--text-muted)",
+        background: isOpen ? "var(--forest)" : "var(--surface-3)",
+        color: isOpen ? "#fff" : "var(--text-muted)",
         fontSize: 12,
         fontWeight: 800,
         flex: "none",
@@ -357,8 +434,8 @@ function FormSection({
       {collapsible ? (
         <button
           type="button"
-          aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
+          aria-expanded={isOpen}
+          onClick={() => setOpen(!isOpen)}
           style={{
             display: "flex",
             alignItems: "center",
@@ -377,7 +454,7 @@ function FormSection({
           <Icon
             name="chevron"
             size={17}
-            style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform .18s var(--ease)" }}
+            style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform .18s var(--ease)" }}
           />
         </button>
       ) : (
@@ -394,7 +471,7 @@ function FormSection({
         </div>
       )}
 
-      {open && (
+      {isOpen && (
         <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
           {children}
         </div>

@@ -237,6 +237,19 @@ export function seedConcepts(plan: TuitionPlan | undefined, cycle: Cycle): Enrol
   }];
 }
 
+/**
+ * Un entero de cero para arriba, o null.
+ *
+ * Existe porque los DÍAS DE PRONTO PAGO se estaban validando con `MAX_DUE_DAY`,
+ * que significa "un día del mes que también existe en febrero". Son cosas
+ * distintas: el pronto pago es un CONTEO de días hábiles y no tiene por qué caber
+ * en un mes. Prestarle aquel tope volvía inguardable cualquier plan con 30.
+ */
+export function wholeAtLeastZero(raw: string): number | null {
+  if (!/^\d+$/.test(raw.trim())) return null;
+  return Number(raw.trim());
+}
+
 /** Reads a whole number in a range, or null. Same reasoning as pesosToCents. */
 export function wholeInRange(raw: string, min: number, max: number): number | null {
   if (!/^\d+$/.test(raw.trim())) return null;

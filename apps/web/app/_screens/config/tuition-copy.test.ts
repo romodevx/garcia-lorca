@@ -111,3 +111,42 @@ describe("copyPlanToCycle", () => {
     expect(PREVIOUS.enrollmentConcepts[0]?.tiers[0]?.effectiveFrom).toBe("2025-08-31");
   });
 });
+
+/**
+ * Los dos casos que una revisión encontró y que cuestan dinero en silencio.
+ */
+describe("copiar planes que no son el caso bonito", () => {
+  /**
+   * Un plan escrito ANTES de los conceptos (ADR 0011) lleva un solo
+   * `enrollmentCents` y ningún concepto. Copiarlo tal cual dejaba la inscripción
+   * en CERO: la tarjeta prometía "trae los montos tal cual" y el de inscripción
+   * desaparecía sin decir nada.
+   */
+  it("convierte la inscripción vieja de un solo monto en su concepto", () => {
+    const viejo: TuitionPlan = {
+      ...PREVIOUS,
+      enrollmentCents: 500000,
+      enrollmentConcepts: [],
+    };
+
+    const copia = copyPlanToCycle(viejo, TARGET);
+
+    expect(copia.enrollmentConcepts).toHaveLength(1);
+    expect(copia.enrollmentConcepts[0]?.tiers[0]?.amountCents).toBe(500000);
+    // El monto ya vive en el concepto: mandar los dos lo rechaza el servidor.
+    expect(copia.enrollmentCents).toBe(0);
+  });
+
+  /**
+   * 29 de febrero + un año no existe. Lo aritmético sobre el texto daba
+   * "2029-02-29", que un <input type="date"> no puede mostrar: la vigencia
+   * copiada desaparecía de la forma sin aviso.
+   */
+  it("recorre el 29 de febrero al 28, en vez de inventar un día que no existe", () => {
+    expect(shiftOneYear("2028-02-29")).toBe("2029-02-28");
+  });
+
+  it("no toca el 29 de febrero cuando el año destino sí lo tiene", () => {
+    expect(shiftOneYear("2027-02-28")).toBe("2028-02-28");
+  });
+});

@@ -1,5 +1,6 @@
 import type { Cycle } from "../../config/api";
 import type { TuitionPlan } from "../../finance/api";
+import { seedConcepts } from "./tuition-math";
 
 /**
  * El tabulador del año pasado, listo para el que empieza.
@@ -28,7 +29,17 @@ export function copyPlanToCycle(previous: TuitionPlan, target: Cycle): TuitionPl
     policy: { ...previous.policy },
     schedule: previous.schedule.map((i) => ({ ...i })),
     fees: previous.fees.map((f) => ({ ...f, months: [...f.months] })),
-    enrollmentConcepts: previous.enrollmentConcepts.map((c) => ({
+    /*
+     * `seedConcepts` y no los conceptos tal cual.
+     *
+     * Un plan escrito antes de ADR 0011 lleva UN `enrollmentCents` y ningún
+     * concepto. Copiar la lista vacía dejaba la inscripción en cero: la tarjeta
+     * prometía "trae los montos tal cual" y el de inscripción desaparecía sin
+     * decir nada, hasta que el guardado reclamaba "captura la inscripción" sobre
+     * un número que sí existía.
+     */
+    enrollmentCents: 0,
+    enrollmentConcepts: seedConcepts(previous, target).map((c) => ({
       ...c,
       tiers: c.tiers.map((t) => ({
         ...t,
@@ -59,5 +70,20 @@ export function copyPlanToCycle(previous: TuitionPlan, target: Cycle): TuitionPl
  */
 export function shiftOneYear(iso: string): string {
   if (iso === "") return "";
-  return `${String(Number(iso.slice(0, 4)) + 1)}${iso.slice(4)}`;
+  const year = Number(iso.slice(0, 4)) + 1;
+  const rest = iso.slice(4);
+  /*
+   * El 29 de febrero se recorre al 28.
+   *
+   * La aritmética sobre el texto daba "2029-02-29", un día que no existe: un
+   * <input type="date"> no puede mostrarlo, así que la vigencia copiada
+   * desaparecía de la forma sin aviso — y si llegaba al servidor, tumbaba el
+   * guardado entero con un mensaje sobre una fecha que nadie tecleó.
+   */
+  if (rest === "-02-29" && !isLeapYear(year)) return `${String(year)}-02-28`;
+  return `${String(year)}${rest}`;
+}
+
+function isLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
 }
