@@ -26,7 +26,16 @@ test.describe.serial("setting up a school from zero", () => {
   const grade = `1° ${tag}`;
   const group = `A ${tag}`;
   const subject = `Matemáticas ${tag}`;
-  const garment = `Suéter ${tag}`;
+  /*
+   * En MAYÚSCULAS desde el principio, como se guarda.
+   *
+   * La capa única de captura sube a mayúsculas todo dato de catálogo, así que el
+   * artículo queda como "SUÉTER 3N7K" en la base. El resto de la prueba lo
+   * buscaba con la caja original y no lo encontraba: el <select> de "Prenda"
+   * existía, vacío de la opción esperada. Es el mismo motivo por el que niveles y
+   * grupos ya pasaban por `comoSeGuarda`.
+   */
+  const garment = `SUÉTER ${tag.toUpperCase()}`;
   const garmentCode = `SUE-${tag.toUpperCase()}`;
 
   test("the director signs in", async ({ page }) => {
@@ -245,7 +254,11 @@ test.describe.serial("setting up a school from zero", () => {
     await signIn(page);
     await openModule(page, "Inventario");
     await page.getByRole("tab", { name: "Catálogo" }).click();
-    await page.getByRole("button", { name: "Nueva prenda" }).first().click();
+    // "Nuevo artículo", no "Nueva prenda": el inventario dejó de ser sólo de ropa
+    // en 491a2b9f y el botón se renombró con él. Esta prueba se quedó pidiendo el
+    // nombre viejo, así que llevaba desde entonces en rojo -- y con ella los seis
+    // pasos que vienen detrás, porque la suite es serial.
+    await page.getByRole("button", { name: "Nuevo artículo" }).first().click();
 
     await page.getByLabel("Nombre").fill(garment);
     await page.getByLabel("Clave").fill(garmentCode);
