@@ -48,6 +48,12 @@ export interface TuitionPanelProps {
 
 const cell = { padding: "10px 8px" } as const;
 
+/** Lo que cuesta inscribirse, venga de los conceptos o del monto único viejo. */
+function inscriptionShown(plan: TuitionPlan): number {
+  const porConceptos = inscriptionTotals(plan.enrollmentConcepts)[0]?.totalCents;
+  return porConceptos !== undefined && porConceptos > 0 ? porConceptos : plan.enrollmentCents;
+}
+
 /**
  * What each level costs, and the button that bills the month.
  *
@@ -69,13 +75,23 @@ export function TuitionPanel({
   // Los del ciclo anterior existen sólo para ofrecer "copiar de". Se piden una
   // vez y sin bloquear: si fallan, el atajo no aparece y todo lo demás sigue.
   const [previousPlans, setPreviousPlans] = useState<TuitionPlan[]>([]);
+  /**
+   * Tres estados, no dos. "Todavía no sé" y "no se cobra" se ven igual en
+   * pantalla y significan lo contrario: la tabla se dibujaba de inmediato con la
+   * lista vacía, así que durante la carga los cuatro niveles anunciaban "este
+   * nivel no se cobra" — una afirmación sobre dinero, dicha antes de saberla.
+   */
+  const [loaded, setLoaded] = useState(false);
   const [run, setRun] = useState<BillingRun | null>(null);
   const [error, setError] = useState<string | undefined>(undefined);
   const [running, setRunning] = useState(false);
 
   const reload = useCallback(() => {
     listTuitionPlans(API_URL, cycle.id)
-      .then(setPlans)
+      .then((rows) => {
+        setPlans(rows);
+        setLoaded(true);
+      })
       .catch(() => setError("No pudimos cargar los tabuladores."));
   }, [cycle.id]);
 
@@ -152,22 +168,27 @@ export function TuitionPanel({
                   <td style={{ ...cell, fontWeight: 600 }}>{level.name}</td>
                   {plan === undefined ? (
                     <td style={{ ...cell, color: "var(--text-faint)" }} colSpan={5}>
-                      Sin tabulador · este nivel no se cobra
+                      {loaded ? "Sin tabulador · este nivel no se cobra" : "Cargando…"}
                     </td>
                   ) : (
                     <>
                       {/*
-                        Se SUMAN los conceptos; `enrollmentCents` no se lee.
-                        Desde ADR 0011 ese campo viaja siempre en cero —el monto
-                        vive en los tramos de cada concepto— así que leerlo
-                        anunciaba como gratis una inscripción de miles de pesos.
-                        Es el primer escalón: lo que paga quien se inscribe en
-                        cuanto abre el periodo, que es el número que el colegio
-                        publica.
+                        Los conceptos SI los hay; si no, el monto único.
+                        
+                        Las dos formas existen y ninguna se puede ignorar. Un plan
+                        nuevo (ADR 0011) guarda `enrollmentCents` en cero y el
+                        dinero en los tramos de cada concepto: leer el campo
+                        anunciaba como gratis una inscripción de miles. Pero un
+                        plan escrito ANTES guarda lo contrario —el monto único y
+                        ninguna lista— y leer sólo los conceptos anuncia gratis
+                        exactamente los mismos miles. Los cuatro tabuladores del
+                        colegio sembrado son de ese segundo tipo.
+                        
+                        De los conceptos se toma el PRIMER escalón: lo que paga
+                        quien se inscribe en cuanto abre el periodo, que es el
+                        número que el colegio publica.
                       */}
-                      <td style={cell}>
-                        ${centsToPesos(inscriptionTotals(plan.enrollmentConcepts)[0]?.totalCents ?? 0)}
-                      </td>
+                      <td style={cell}>${centsToPesos(inscriptionShown(plan))}</td>
                       <td style={cell}>${centsToPesos(plan.monthlyCents)}</td>
                       <td style={cell}>
                         {plan.months} desde {MONTH_NAMES[plan.firstBilledMonth - 1]}

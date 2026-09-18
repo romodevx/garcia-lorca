@@ -685,3 +685,62 @@ describe("lo que la tabla dice que cuesta la inscripción", () => {
     expect(fila, "sigue anunciando la inscripción como gratis").not.toHaveTextContent("$0.00");
   });
 });
+
+/**
+ * ISSUE-002 — la inscripción de un plan VIEJO se anunciaba como $0.00.
+ *
+ * Al arreglar que la columna leyera los conceptos (ADR 0011) se rompió el otro
+ * lado: un plan escrito antes de los conceptos guarda UN `enrollmentCents` y la
+ * lista vacía, así que la columna pasó a decir cero. Los cuatro tabuladores del
+ * colegio sembrado son de ese tipo: la pantalla anunciaba las cuatro
+ * inscripciones como gratis.
+ */
+describe("la inscripción de un plan sin conceptos", () => {
+  it("cae al monto único en vez de decir cero", async () => {
+    finance.listTuitionPlans.mockResolvedValue([
+      {
+        id: "p1", cycleId: "c1", levelId: "lv1",
+        // Como lo guarda el seed y como lo guardaban todos los planes viejos.
+        enrollmentCents: 450000,
+        enrollmentConcepts: [],
+        monthlyCents: 280000, months: 10, firstBilledMonth: 9, dueDay: 10,
+        lateFeeCents: 0, active: true, monthlyDiscountCents: 0, schedule: [], fees: [],
+        enrollmentDueOn: "",
+        policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 },
+      },
+    ]);
+
+    render(<Host />);
+
+    const fila = await screen.findByRole("row", { name: /Kínder/ });
+    expect(fila).toHaveTextContent("4500.00");
+    expect(fila, "anuncia la inscripción como gratis").not.toHaveTextContent("$0.00");
+  });
+});
+
+/**
+ * ISSUE-001 — "Sin tabulador" dicho antes de saberlo.
+ *
+ * La tabla se dibuja de inmediato con la lista de planes vacía, así que durante
+ * la carga TODOS los niveles anuncian "Sin tabulador · este nivel no se cobra".
+ * Es la misma falla contra la que advierte el comentario de este archivo, en su
+ * otra forma: un colegio que lee eso no distingue "no se cobra" de "todavía no
+ * sabemos", y la frase está escrita como un hecho.
+ */
+describe("mientras los tabuladores cargan", () => {
+  it("no afirma que el nivel no se cobra", async () => {
+    let resolver: ((planes: never[]) => void) | undefined;
+    finance.listTuitionPlans.mockImplementation(
+      () => new Promise((resolve) => { resolver = resolve as (p: never[]) => void; }),
+    );
+
+    render(<Host />);
+
+    const fila = await screen.findByRole("row", { name: /Kínder/ });
+    expect(fila).not.toHaveTextContent("este nivel no se cobra");
+
+    resolver?.([]);
+    // Ya con la respuesta en mano, decirlo es correcto.
+    await waitFor(() => expect(screen.getByRole("row", { name: /Kínder/ })).toHaveTextContent("Sin tabulador"));
+  });
+});
