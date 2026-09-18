@@ -62,3 +62,4 @@ crash.log
 # Playwright run output: traces, videos and screenshots of the last run.
 apps/web/test-results/
 apps/web/playwright-report/
+.superpowers/

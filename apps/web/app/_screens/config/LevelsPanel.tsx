@@ -37,7 +37,16 @@ export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate }: Lev
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
-  const submit = async (): Promise<void> => {
+  /**
+   * `andNew` deja el cajón abierto y listo para el siguiente.
+   *
+   * Una escuela captura maternal, kínder y primaria de corrido, no uno cada
+   * quince días, y cerrar entre uno y otro cobra el viaje completo. El nivel se
+   * queda en cajón —y no baja a renglón como grados o materias— porque elegir
+   * "por periodo" cambia cómo se inscribe el alumno todo el año, y esa decisión
+   * necesita el párrafo que la explica.
+   */
+  const submit = async (andNew: boolean): Promise<void> => {
     if (name.trim() === "" || sepCode.trim() === "") {
       setError("Un nivel necesita nombre y clave SEP.");
       return;
@@ -53,7 +62,13 @@ export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate }: Lev
       setName("");
       setSepCode("");
       setGranularity("cycle");
-      setCreating(false);
+      if (andNew) {
+        // El cajón sigue montado, así que su primer campo sigue ahí; el foco
+        // vuelve a él para que el siguiente nivel se escriba sin tocar el ratón.
+        document.querySelector<HTMLInputElement>('[role="dialog"] input')?.focus();
+      } else {
+        setCreating(false);
+      }
     } catch {
       setError("No se pudo crear el nivel. Revisa que no exista ya con ese nombre.");
     } finally {
@@ -86,7 +101,8 @@ export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate }: Lev
           pending={pending}
           error={error}
           onClose={() => { setCreating(false); setError(undefined); }}
-          onSubmit={() => void submit()}
+          onSubmit={() => void submit(false)}
+          onSubmitAndNew={() => void submit(true)}
         >
           <TextField label="Nombre del nivel" value={name} onChange={setName} uppercase required placeholder="PRIMARIA" />
           <TextField label="Clave SEP" value={sepCode} onChange={setSepCode} uppercase placeholder="PRI" />

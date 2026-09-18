@@ -1,11 +1,10 @@
 "use client";
 
 import { useState, type ReactElement } from "react";
-import { Btn } from "../../_design/Controls";
-import { SlideOver } from "../../_design/SlideOver";
+
+import { InlineCreateChip } from "../../_design/InlineCreateChip";
 import type { CreateSubjectInput, GradeLevel, Subject } from "../../config/api";
-import { TextField } from "../../_design/form";
-import { EmptyHint, Section } from "./parts";
+import { EmptyHint, ErrorAlert, Section } from "./parts";
 
 export interface SubjectsPanelProps {
   gradeLevel: GradeLevel;
@@ -13,38 +12,25 @@ export interface SubjectsPanelProps {
   onCreate: (input: CreateSubjectInput) => Promise<void>;
 }
 
-/** Subjects of the selected grade level. */
-/** The subjects taught in a grade. List here, create in the drawer. */
+/**
+ * Las materias que se dan en un grado.
+ *
+ * Un solo dato, y diez o doce seguidos. Es el caso donde un cajón era más caro
+ * que la captura: abrir, escribir ocho letras, guardar, esperar el cierre, y
+ * otra vez. Ahora el chip se queda abierto y cada Enter agrega la siguiente.
+ */
 export function SubjectsPanel({ gradeLevel, subjects, onCreate }: SubjectsPanelProps): ReactElement {
-  const [creating, setCreating] = useState(false);
-  const [name, setName] = useState("");
-  const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
-
-  const submit = async (): Promise<void> => {
-    if (name.trim() === "") {
-      setError("Escribe el nombre de la materia.");
-      return;
-    }
-    setPending(true);
-    setError(undefined);
-    try {
-      await onCreate({ gradeLevelId: gradeLevel.id, name: name.trim() });
-      setName("");
-      setCreating(false);
-    } catch {
-      setError("No se pudo crear la materia. Revisa que no exista ya en este grado.");
-    } finally {
-      setPending(false);
-    }
-  };
 
   return (
     <Section title="Materias" subtitle={`De ${gradeLevel.name}.`}>
       {subjects.length > 0 ? (
         <ul style={{ listStyle: "none", padding: 0, margin: "0 0 16px", display: "grid", gap: 6 }}>
           {subjects.map((s) => (
-            <li key={s.id} style={{ padding: "8px 12px", borderRadius: "var(--r-md)", background: "var(--surface-2)", fontSize: 14 }}>
+            <li
+              key={s.id}
+              style={{ padding: "8px 12px", borderRadius: "var(--r-md)", background: "var(--surface-2)", fontSize: 14 }}
+            >
               {s.name}
             </li>
           ))}
@@ -53,21 +39,23 @@ export function SubjectsPanel({ gradeLevel, subjects, onCreate }: SubjectsPanelP
         <EmptyHint>Aún no hay materias en este grado.</EmptyHint>
       )}
 
-      <Btn icon="plus" onClick={() => { setError(undefined); setCreating(true); }}>Nueva materia</Btn>
+      <InlineCreateChip
+        label="Nueva materia"
+        fieldLabel="Nombre de la materia"
+        placeholder="MATEMÁTICAS"
+        onCreate={async (name) => {
+          setError(undefined);
+          try {
+            await onCreate({ gradeLevelId: gradeLevel.id, name });
+          } catch (cause) {
+            setError("No se pudo crear la materia. Revisa que no exista ya en este grado.");
+            // El chip conserva lo escrito sólo si se entera de que no se guardó.
+            throw cause;
+          }
+        }}
+      />
 
-      {creating && (
-        <SlideOver
-          title={`Nueva materia en ${gradeLevel.name}`}
-          icon="grades"
-          submitLabel="Crear materia"
-          pending={pending}
-          error={error}
-          onClose={() => { setCreating(false); setError(undefined); }}
-          onSubmit={() => void submit()}
-        >
-          <TextField label="Nombre de la materia" value={name} onChange={setName} uppercase required placeholder="MATEMÁTICAS" />
-        </SlideOver>
-      )}
+      {error !== undefined && <ErrorAlert message={error} />}
     </Section>
   );
 }
