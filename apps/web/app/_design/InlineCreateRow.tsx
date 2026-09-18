@@ -168,6 +168,16 @@ export function InlineCreateRow({
       // El renglón no se desmonta entre un alta y la siguiente, así que aquí sí
       // basta con pedir el foco de vuelta.
       firstRef.current?.focus();
+    } catch {
+      /*
+       * Se ATRAPA, y eso importa dos veces.
+       *
+       * Lo escrito se conserva: el panel ya dijo en su mensaje qué pasó, y
+       * vaciar el renglón obligaría a reescribir todo. Y la promesa no puede
+       * quedar suelta: `save()` se llama con `void` desde el manejador de
+       * teclas, así que un rechazo sin atrapar sale como "unhandled rejection"
+       * -- en la consola de quien usa la app, y como error de la suite.
+       */
     } finally {
       setSaving(false);
     }

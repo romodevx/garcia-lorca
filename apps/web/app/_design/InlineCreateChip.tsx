@@ -60,6 +60,16 @@ export function InlineCreateChip({
       await onCreate(name);
       setValue("");
       ref.current?.focus();
+    } catch {
+      /*
+       * Se ATRAPA, y eso importa dos veces.
+       *
+       * Lo escrito se conserva: el panel ya dijo en su mensaje qué pasó, y
+       * vaciar el renglón obligaría a reescribir todo. Y la promesa no puede
+       * quedar suelta: `save()` se llama con `void` desde el manejador de
+       * teclas, así que un rechazo sin atrapar sale como "unhandled rejection"
+       * -- en la consola de quien usa la app, y como error de la suite.
+       */
     } finally {
       setSaving(false);
     }
