@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactElement } from "re
 
 import { InlineCreateRow } from "../../_design/InlineCreateRow";
 import { UndoToast } from "../../_design/UndoToast";
+import { useUndoableRemoval } from "../../_design/useUndoableRemoval";
 import {
   createNonWorkingPeriod,
   createSchoolEvent,
@@ -62,11 +63,12 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
   const [events, setEvents] = useState<SchoolEvent[]>([]);
   const [error, setError] = useState<string | undefined>(undefined);
   /**
-   * Lo que se quitó de la lista pero todavía no del servidor. Ocho segundos para
-   * arrepentirse, en vez de un diálogo que se aprende a descartar sin leer.
+   * Lo quitado y todavía deshacible. El plazo lo lleva el hook: guardar un solo
+   * pendiente aquí hacía que quitar dos días seguidos perdiera el borrado del
+   * primero — desaparecía de la lista y seguía en el servidor.
    */
-  const [undoPeriod, setUndoPeriod] = useState<NonWorkingPeriod | undefined>(undefined);
-  const [undoEvent, setUndoEvent] = useState<SchoolEvent | undefined>(undefined);
+  const dayRemoval = useUndoableRemoval<NonWorkingPeriod>();
+  const eventRemoval = useUndoableRemoval<SchoolEvent>();
 
   const reload = useCallback(() => {
     listNonWorkingPeriods(API_URL, cycle.id)
@@ -156,7 +158,11 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
             <button
               onClick={() => {
                 setPeriods((prev) => prev.filter((x) => x.id !== p.id));
-                setUndoPeriod(p);
+                dayRemoval.remove(p, () => {
+                  void deleteNonWorkingPeriod(API_URL, p.id)
+                    .then(reload)
+                    .catch(() => setError("No se pudo quitar ese día."));
+                });
               }}
               aria-label={`Quitar ${p.label}`}
               style={removeStyle}
@@ -198,7 +204,11 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
               <button
                 onClick={() => {
                   setEvents((prev) => prev.filter((x) => x.id !== ev.id));
-                  setUndoEvent(ev);
+                  eventRemoval.remove(ev, () => {
+                    void deleteSchoolEvent(API_URL, ev.id)
+                      .then(reload)
+                      .catch(() => setError("No se pudo quitar esa actividad."));
+                  });
                 }}
                 aria-label={`Quitar ${ev.title}`}
                 style={removeStyle}
@@ -222,38 +232,26 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
 
       {error !== undefined && <ErrorAlert message={error} />}
 
-      {undoPeriod !== undefined && (
+      {dayRemoval.latest !== undefined && (
         <UndoToast
-          message={`Se quitó ${undoPeriod.label}`}
+          message={`Se quitó ${dayRemoval.latest.label}`}
           onUndo={() => {
+            const devueltos = dayRemoval.undo() ?? [];
             setPeriods((prev) =>
-              [...prev, undoPeriod].sort((a, b) => a.startsOn.localeCompare(b.startsOn)),
+              [...prev, ...devueltos].sort((a, b) => a.startsOn.localeCompare(b.startsOn)),
             );
-            setUndoPeriod(undefined);
-          }}
-          onCommit={() => {
-            void deleteNonWorkingPeriod(API_URL, undoPeriod.id)
-              .then(reload)
-              .catch(() => setError("No se pudo quitar ese día."));
-            setUndoPeriod(undefined);
           }}
         />
       )}
 
-      {undoEvent !== undefined && (
+      {eventRemoval.latest !== undefined && (
         <UndoToast
-          message={`Se quitó ${undoEvent.title}`}
+          message={`Se quitó ${eventRemoval.latest.title}`}
           onUndo={() => {
+            const devueltas = eventRemoval.undo() ?? [];
             setEvents((prev) =>
-              [...prev, undoEvent].sort((a, b) => a.startsOn.localeCompare(b.startsOn)),
+              [...prev, ...devueltas].sort((a, b) => a.startsOn.localeCompare(b.startsOn)),
             );
-            setUndoEvent(undefined);
-          }}
-          onCommit={() => {
-            void deleteSchoolEvent(API_URL, undoEvent.id)
-              .then(reload)
-              .catch(() => setError("No se pudo quitar esa actividad."));
-            setUndoEvent(undefined);
           }}
         />
       )}

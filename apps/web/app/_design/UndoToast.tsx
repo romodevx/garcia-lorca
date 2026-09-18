@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type ReactElement } from "react";
+import type { ReactElement } from "react";
 
 import { Icon } from "./Icon";
 
@@ -16,23 +16,20 @@ import { Icon } from "./Icon";
  *
  * El registro NO se borra del servidor hasta que se acaba el plazo: deshacer no
  * es "volverlo a crear", es que nunca llegó a irse.
+ *
+ * SÓLO ANUNCIA. El plazo lo lleva `useUndoableRemoval`, y esa separación es la
+ * corrección de dos defectos que tuvo cuando el reloj vivía aquí: sólo cabía un
+ * pendiente —quitar dos cosas seguidas perdía el borrado de la primera— y el
+ * efecto colgaba de un `onCommit` escrito en línea, así que cualquier repintado
+ * del panel reiniciaba los ocho segundos.
  */
-const GRACE_MS = 8000;
-
 export interface UndoToastProps {
   message: string;
   /** Restituir. Todavía no se había ido a ningún lado. */
   onUndo: () => void;
-  /** Se acabó el plazo: ahora sí, borrar de verdad. */
-  onCommit: () => void;
 }
 
-export function UndoToast({ message, onUndo, onCommit }: UndoToastProps): ReactElement {
-  useEffect(() => {
-    const id = setTimeout(onCommit, GRACE_MS);
-    return () => clearTimeout(id);
-  }, [onCommit]);
-
+export function UndoToast({ message, onUndo }: UndoToastProps): ReactElement {
   return (
     <div
       // `status` y no `alert`: se anuncia, pero no interrumpe ni roba el foco de

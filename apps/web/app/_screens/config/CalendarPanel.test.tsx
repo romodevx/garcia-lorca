@@ -183,3 +183,47 @@ describe("la captura del calendario", () => {
     expect(screen.getByLabelText("Del día")).toHaveAttribute("aria-invalid", "true");
   });
 });
+
+/**
+ * Quitar dos días seguidos.
+ *
+ * Con un solo pendiente guardado, el segundo "Quitar" sustituía al primero: la
+ * lista lo mostraba ido y el servidor nunca se enteraba. Para un día cerrado eso
+ * deja mal la ventana de pronto pago de TODAS las familias, en silencio.
+ */
+describe("quitar varios días dentro del mismo plazo", () => {
+  it("borra los dos, no sólo el último", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    config.deleteNonWorkingPeriod.mockResolvedValue(undefined);
+    config.listNonWorkingPeriods.mockResolvedValue([
+      { id: "per-1", cycleId: "c1", label: "INDEPENDENCIA", kind: "holiday", startsOn: "2026-09-16", endsOn: "2026-09-16" },
+      { id: "per-2", cycleId: "c1", label: "REVOLUCIÓN", kind: "holiday", startsOn: "2026-11-20", endsOn: "2026-11-20" },
+    ]);
+    render(<CalendarPanel cycle={cycle} />);
+    await screen.findByText("INDEPENDENCIA");
+
+    await user.click(screen.getByRole("button", { name: /Quitar INDEPENDENCIA/ }));
+    await act(async () => { vi.advanceTimersByTime(3000); });
+    await user.click(screen.getByRole("button", { name: /Quitar REVOLUCIÓN/ }));
+    await act(async () => { vi.advanceTimersByTime(8000); });
+
+    expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-1");
+    expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-2");
+    vi.useRealTimers();
+  });
+
+  // Irse de la pantalla dentro del plazo no puede cancelar un borrado que la
+  // lista ya mostró como hecho.
+  it("si la pantalla se cierra, el borrado se manda de inmediato", async () => {
+    const user = userEvent.setup();
+    config.deleteNonWorkingPeriod.mockResolvedValue(undefined);
+    const { unmount } = render(<CalendarPanel cycle={cycle} />);
+    await screen.findByText("Independencia");
+
+    await user.click(screen.getByRole("button", { name: /Quitar Independencia/ }));
+    unmount();
+
+    expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-1");
+  });
+});
