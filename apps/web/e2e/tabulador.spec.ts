@@ -15,23 +15,37 @@ import { API_URL, apiAsOwner, signIn, uniqueSuffix } from "./helpers";
  * rediseño cambió: que la forma sea una PÁGINA, que guarde, y que el atajo de
  * copiar del ciclo anterior exista de verdad — no sólo en el componente.
  *
- * CADA CORRIDA USA SUS PROPIOS AÑOS. El "ciclo anterior" se elige por fecha de
- * inicio, así que con fechas fijas el ANTERIOR de la corrida pasada empata con
- * el de ésta y a veces gana el que no tiene tabulador: la prueba fallaba una de
- * cada dos veces por sus propios datos. Los años se separan de tres en tres para
- * que ningún ciclo de otra corrida pueda colarse entre los dos de ésta.
+ * CADA CORRIDA USA SUS PROPIOS AÑOS, DERIVADOS DE SU SELLO.
+ *
+ * El "ciclo anterior" se elige por fecha de inicio, así que con fechas fijas el
+ * ANTERIOR de la corrida pasada empata con el de ésta y a veces gana el que no
+ * tiene tabulador. La primera versión de esto sacaba el año de `Date.now()`
+ * directamente, y eso estaba mal por dos razones: sólo tenía 300 resultados
+ * posibles —así que chocaba seguido consigo misma— y hacía que el resultado de
+ * la prueba dependiera de la hora, contra la regla de determinismo del repo.
+ *
+ * Ahora sale del MISMO sello que ya nombra a los ciclos: mismo sello, mismos
+ * años. La unicidad viene de la fixture, como en toda esta suite ("FIXTURES ARE
+ * UNIQUE PER RUN", helpers.ts), y no del reloj leído dos veces.
+ *
+ * Los años se separan de dos en dos para que ningún ciclo de otra corrida pueda
+ * colarse entre los dos de ésta, y el rango se acota a 2100-2898: no hay cómo
+ * borrar un ciclo por API, así que lo que se siembra se queda.
  */
-function añosDeLaCorrida(): { anterior: number; nuevo: number } {
-  const base = 2100 + (Date.now() % 300) * 3;
+function añosDeLaCorrida(sello: string): { anterior: number; nuevo: number } {
+  let hash = 7;
+  for (const ch of sello) hash = (hash * 31 + ch.charCodeAt(0)) % 400;
+  const base = 2100 + hash * 2;
   return { anterior: base, nuevo: base + 1 };
 }
+
 test.describe("el tabulador de un nivel", () => {
   test("se captura en la página y el precio queda en la tabla", async ({ page, request }) => {
     const sello = uniqueSuffix();
     const api = await apiAsOwner(request);
     const nivel = `KINDER ${sello}`;
 
-    const { anterior: año } = añosDeLaCorrida();
+    const { anterior: año } = añosDeLaCorrida(sello);
     await api.post(`${API_URL}/api/v1/config/cycles`, {
       data: { name: `CICLO ${sello}`, startsOn: `${año}-08-01`, endsOn: `${año + 1}-06-30` },
     });
@@ -79,7 +93,7 @@ test.describe("el tabulador de un nivel", () => {
     const api = await apiAsOwner(request);
     const nivel = `PRIMARIA ${sello}`;
 
-    const { anterior: añoPrevio, nuevo: añoNuevo } = añosDeLaCorrida();
+    const { anterior: añoPrevio, nuevo: añoNuevo } = añosDeLaCorrida(sello);
     const anterior = await api.post(`${API_URL}/api/v1/config/cycles`, {
       data: { name: `ANTERIOR ${sello}`, startsOn: `${añoPrevio}-08-01`, endsOn: `${añoPrevio + 1}-06-30` },
     });
