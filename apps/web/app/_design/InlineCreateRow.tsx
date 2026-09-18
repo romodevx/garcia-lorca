@@ -138,6 +138,9 @@ export function InlineCreateRow({
     setValues(blank(columns, defaults));
     setTouched({});
     setMissing({});
+    // También lo mal escrito: sin esto el renglón se reabría con las celdas
+    // pintadas de rojo y el reclamo viejo debajo, sobre campos vacíos.
+    format.reset();
   };
 
   const save = async (): Promise<void> => {

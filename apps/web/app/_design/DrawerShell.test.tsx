@@ -127,3 +127,68 @@ describe("WCAG 2.2 · 2.4.11 — el pie no cubre el campo enfocado", () => {
     expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", behavior: "smooth" });
   });
 });
+
+/**
+ * Los dos huecos que quedaban en el contrato de foco, y que sólo se ven con el
+ * teclado.
+ */
+describe("el contrato de foco, en los bordes", () => {
+  function HostConAutoFocus(): ReactElement {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <button onClick={() => setOpen(true)}>Cobrar</button>
+        {open && (
+          <DrawerShell title="Cobro" icon="finance" onClose={() => setOpen(false)}>
+            {/* Un cajón que enfoca su propio campo, como hace PayDrawer. */}
+            <input aria-label="Monto recibido" autoFocus />
+          </DrawerShell>
+        )}
+      </>
+    );
+  }
+
+  /**
+   * `returnTo` se leía en un efecto pasivo, que corre DESPUÉS de que React aplica
+   * `autoFocus`: se guardaba el propio campo del cajón, y al cerrar ese elemento
+   * ya no existe — el foco caía en <body>, justo lo que el contrato vino a evitar.
+   */
+  it("devuelve el foco aunque el cajón enfoque su propio campo al abrir", async () => {
+    const user = userEvent.setup();
+    render(<HostConAutoFocus />);
+    const trigger = screen.getByRole("button", { name: "Cobrar" });
+    await user.click(trigger);
+
+    await user.keyboard("{Escape}");
+
+    expect(trigger).toHaveFocus();
+  });
+
+  /**
+   * Con el cierre por velo apagado, un clic en el velo deja el foco en <body>:
+   * desde ahí Tab lo maneja el navegador y se va derecho a la página de atrás.
+   *
+   * El foco se saca a mano y no con un clic en el velo porque jsdom NO desenfoca
+   * al hacer clic en algo no enfocable, y un navegador real sí — la misma
+   * diferencia que escondió el defecto del chip deshabilitado. Lo que se prueba
+   * es la condición, no cómo se llega a ella.
+   */
+  it("recupera el foco cuando se fue del panel", async () => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <button>Botón de la página</button>
+        <DrawerShell title="Cobro" icon="finance" dismissible={false} onClose={() => {}}>
+          <input aria-label="Monto" />
+        </DrawerShell>
+      </>,
+    );
+
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.body).toHaveFocus();
+
+    await user.tab();
+
+    expect(screen.getByLabelText("Monto")).toHaveFocus();
+  });
+});

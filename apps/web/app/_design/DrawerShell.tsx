@@ -132,6 +132,19 @@ export function DrawerShell({
    */
   const panelRef = useRef<HTMLElement | null>(null);
 
+  /*
+   * A dónde vuelve el foco al cerrar, capturado EN EL PRIMER RENDER.
+   *
+   * Se leía dentro del efecto, que corre después del commit en el que React
+   * aplica `autoFocus`: en un cajón que enfoca su propio campo al abrir —el de
+   * cobro lo hace— se guardaba ese campo, que al cerrar ya no existe, y el foco
+   * caía en <body>. Justo la falla que este contrato vino a arreglar.
+   */
+  const returnToRef = useRef<HTMLElement | null>(null);
+  if (returnToRef.current === null && typeof document !== "undefined") {
+    returnToRef.current = document.activeElement as HTMLElement | null;
+  }
+
   // El portal necesita un document, que en el render del servidor no existe.
   // Vive aquí arriba porque el contrato de foco depende de él: mientras esto
   // sea false no hay panel al que meter el foco.
@@ -140,7 +153,6 @@ export function DrawerShell({
 
   useEffect(() => {
     if (!mounted) return;
-    const returnTo = document.activeElement as HTMLElement | null;
 
     const focusables = (): HTMLElement[] => {
       const root = panelRef.current;
@@ -152,12 +164,20 @@ export function DrawerShell({
       ).filter((el) => !el.hasAttribute("disabled"));
     };
 
-    // El primer CAMPO, no el primer elemento enfocable. Abrir con el foco en el
-    // botón de cerrar le pone a quien captura un control destructivo bajo el
-    // pulgar antes de que haya escrito nada.
-    const list = focusables();
-    const firstField = list.find((el) => el.tagName !== "BUTTON") ?? list[0];
-    firstField?.focus();
+    /*
+     * El primer CAMPO, no el primer elemento enfocable.
+     *
+     * Abrir con el foco en el botón de cerrar le pone a quien captura un control
+     * destructivo bajo el pulgar antes de que haya escrito nada. Se usa en los
+     * dos lugares que ponen foco —al abrir y al recuperarlo— para que el cajón
+     * no tenga dos opiniones sobre dónde empieza.
+     */
+    const firstField = (): HTMLElement | undefined => {
+      const list = focusables();
+      return list.find((el) => el.tagName !== "BUTTON") ?? list[0];
+    };
+
+    firstField()?.focus();
 
     const onTab = (e: KeyboardEvent): void => {
       if (e.key !== "Tab") return;
@@ -166,6 +186,21 @@ export function DrawerShell({
       const first = current[0];
       const last = current[current.length - 1];
       if (first === undefined || last === undefined) return;
+
+      /*
+       * Si el foco YA se fue del panel, se trae de vuelta.
+       *
+       * El ciclo sólo se cerraba en los bordes de adentro, así que bastaba con
+       * que el foco estuviera fuera —un clic en el velo con el cierre por velo
+       * apagado lo deja en <body>— para que Tab lo manejara el navegador y se
+       * fuera derecho a la página de atrás.
+       */
+      if (panelRef.current?.contains(document.activeElement) !== true) {
+        e.preventDefault();
+        (firstField() ?? first).focus();
+        return;
+      }
+
       if (document.activeElement === (e.shiftKey ? first : last)) {
         e.preventDefault();
         (e.shiftKey ? last : first).focus();
@@ -188,7 +223,7 @@ export function DrawerShell({
     return () => {
       window.removeEventListener("keydown", onTab);
       window.removeEventListener("focusin", onFocusIn);
-      returnTo?.focus();
+      returnToRef.current?.focus();
     };
   }, [mounted]);
 

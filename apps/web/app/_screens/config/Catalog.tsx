@@ -207,25 +207,23 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
   const selectedLevel = levels.find((l) => l.id === selectedLevelId);
   const selectedGradeLevel = gradeLevels.find((g) => g.id === selectedGradeLevelId);
 
-  // Capturar precios se lleva la pantalla completa. No hay encabezado, ni
-  // tarjetas, ni barra de ciclos detrás: la página trae su propia migaja y su
-  // propio pie, y Cancelar devuelve el catálogo entero.
-  if (pricingLevelId !== undefined && selectedCycle !== undefined) {
-    return (
-      <Page>
-        <TuitionPanel
-          cycle={selectedCycle}
-          levels={levels}
-          previousCycle={previousCycle}
-          pricingLevelId={pricingLevelId}
-          onPrice={setPricingLevelId}
-        />
-      </Page>
-    );
-  }
+  /*
+   * Capturar precios se lleva la pantalla completa: mientras esto es true, el
+   * catálogo entero no se dibuja.
+   *
+   * Se ESCONDE lo de alrededor en vez de devolver otro árbol. El retorno temprano
+   * que había aquí ponía a `<TuitionPanel>` en otra posición, así que React lo
+   * desmontaba y lo volvía a montar: su lista de planes se reiniciaba a vacía y
+   * `TuitionPage` sembraba sus campos desde `undefined`. "Editar" abría el
+   * tabulador EN BLANCO y guardar sobrescribía cuotas, cobranza, día límite y
+   * fecha de inscripción con los valores por omisión. El panel tiene que quedarse
+   * exactamente donde está.
+   */
+  const pricing = pricingLevelId !== undefined && selectedCycle !== undefined;
 
   return (
     <Page>
+      {!pricing && (
       <button
         onClick={onBack}
         className="fade-up"
@@ -234,7 +232,9 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
         <Icon name="back" size={18} stroke={2.4} />
         Volver al inicio
       </button>
+      )}
 
+      {!pricing && (
       <div className="fade-up" style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24 }}>
         <div style={{ width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--forest)", color: "#fff", boxShadow: "0 6px 16px color-mix(in oklab, var(--forest) 38%, transparent)" }}>
           <Icon name="settings" size={30} />
@@ -244,8 +244,9 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
           <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Ciclos, niveles, grados, materias, grupos y periodos</p>
         </div>
       </div>
+      )}
 
-      {!loading && loadError === undefined && (
+      {!pricing && !loading && loadError === undefined && (
         <div className="fade-up" style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 24 }}>
           {([["calendar", "lime", "Ciclos", cycles.length], ["graduation", "forest", "Niveles", levels.length], ["students", "purple", "Grados", gradeLevels.length]] as const).map(([icon, c, label, val], i) => (
             <div key={i} style={{ flex: "1 1 180px", minWidth: 0, display: "flex", alignItems: "center", gap: 14, padding: "16px 20px", borderRadius: "var(--r-lg)", background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "var(--shadow-card)" }}>
@@ -262,7 +263,9 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
         <p role="alert" className="fade-up" style={{ color: "var(--bad-fg)", fontSize: 15 }}>{loadError}</p>
       ) : (
         <div className="fade-up" style={{ display: "grid", gap: 18 }}>
-          <CycleBar cycles={cycles} selectedCycleId={selectedCycleId} onSelect={setSelectedCycleId} onCreate={handleCreateCycle} onActivate={handleActivateCycle} />
+          {!pricing && (
+            <CycleBar cycles={cycles} selectedCycleId={selectedCycleId} onSelect={setSelectedCycleId} onCreate={handleCreateCycle} onActivate={handleActivateCycle} />
+          )}
 
           {/*
             The money screen for the academic catalogue. It reads and writes
@@ -274,11 +277,13 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
               cycle={selectedCycle}
               levels={levels}
               previousCycle={previousCycle}
+              pricingLevelId={pricingLevelId}
               onPrice={setPricingLevelId}
             />
           )}
-          {selectedCycle !== undefined && <CalendarPanel cycle={selectedCycle} />}
+          {!pricing && selectedCycle !== undefined && <CalendarPanel cycle={selectedCycle} />}
 
+          {!pricing && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 18 }}>
             <LevelsPanel levels={levels} selectedLevelId={selectedLevelId} onSelect={setSelectedLevelId} onCreate={handleCreateLevel} />
 
@@ -311,6 +316,7 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
               />
             )}
           </div>
+          )}
         </div>
       )}
     </Page>

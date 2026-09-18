@@ -306,3 +306,36 @@ describe("InlineCreateRow bajo presión", () => {
     expect(fechasActividades).toHaveFocus();
   });
 });
+
+/**
+ * Cancelar tiene que dejar el renglón como nuevo.
+ *
+ * `cancel()` limpiaba valores, tocados y faltantes, pero NO los errores de
+ * formato: al reabrirlo las celdas volvían pintadas de rojo y con el reclamo
+ * viejo debajo, sobre campos vacíos.
+ */
+describe("Esc limpia también lo que estaba mal escrito", () => {
+  it("reabre el renglón sin el error de la vez pasada", async () => {
+    const user = userEvent.setup();
+    setup({
+      rules: {
+        endsOn: (value, all) => {
+          const from = all.startsOn ?? "";
+          return from !== "" && value < from ? "El fin es antes que el inicio." : undefined;
+        },
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Agregar día cerrado" }));
+    await user.type(screen.getByLabelText("Del día"), "2026-11-20");
+    await user.type(screen.getByLabelText("Al día"), "2026-11-01");
+    await user.tab();
+    expect(screen.getByText("El fin es antes que el inicio.")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Agregar día cerrado" }));
+
+    expect(screen.queryByText("El fin es antes que el inicio.")).toBeNull();
+    expect(screen.getByLabelText("Al día")).not.toHaveAttribute("aria-invalid", "true");
+  });
+});

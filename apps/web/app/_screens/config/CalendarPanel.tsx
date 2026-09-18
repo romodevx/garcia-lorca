@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import { InlineCreateRow } from "../../_design/InlineCreateRow";
 import { UndoToast } from "../../_design/UndoToast";
@@ -67,15 +67,31 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
    * pendiente aquí hacía que quitar dos días seguidos perdiera el borrado del
    * primero — desaparecía de la lista y seguía en el servidor.
    */
+  /*
+   * Lo que está en el limbo se filtra de TODO lo que llega del servidor.
+   *
+   * La lista de allá todavía trae el renglón quitado, así que una recarga dentro
+   * del plazo lo resucitaba en pantalla —con el toast de Deshacer aún visible— y
+   * ocho segundos después se iba solo. Peor: darle "Quitar" al resucitado
+   * encolaba un segundo borrado del mismo id, que falla.
+   *
+   * En refs para que `reload` no cambie de identidad en cada quitada: es
+   * dependencia de un efecto.
+   */
+  const pendingDays = useRef<readonly NonWorkingPeriod[]>([]);
+  const pendingEvents = useRef<readonly SchoolEvent[]>([]);
+
   const dayRemoval = useUndoableRemoval<NonWorkingPeriod>();
   const eventRemoval = useUndoableRemoval<SchoolEvent>();
+  pendingDays.current = dayRemoval.pending;
+  pendingEvents.current = eventRemoval.pending;
 
   const reload = useCallback(() => {
     listNonWorkingPeriods(API_URL, cycle.id)
-      .then(setPeriods)
+      .then((rows) => setPeriods(rows.filter((r) => !pendingDays.current.some((p) => p.id === r.id))))
       .catch(() => setError("No pudimos cargar el calendario."));
     listSchoolEvents(API_URL, cycle.id)
-      .then(setEvents)
+      .then((rows) => setEvents(rows.filter((r) => !pendingEvents.current.some((p) => p.id === r.id))))
       .catch(() => setError("No pudimos cargar la agenda."));
   }, [cycle.id]);
 

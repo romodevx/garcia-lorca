@@ -31,6 +31,15 @@ interface Pending<T> {
 export interface UndoableRemoval<T> {
   /** Lo último quitado y todavía deshacible, para anunciarlo. */
   readonly latest: T | undefined;
+  /**
+   * TODO lo quitado y todavía no borrado del servidor.
+   *
+   * Quien lo use tiene que filtrarlo de lo que vuelva a pedirle al servidor: la
+   * lista de allá todavía lo trae, así que una recarga dentro del plazo lo
+   * RESUCITABA en pantalla —con el toast de Deshacer aún visible— y ocho
+   * segundos después desaparecía solo.
+   */
+  readonly pending: readonly T[];
   /** Quita: la lista ya no lo muestra, el servidor todavía no se entera. */
   remove: (item: T, commit: () => void) => void;
   /** Devuelve lo último quitado y cancela su borrado. */
@@ -38,12 +47,12 @@ export interface UndoableRemoval<T> {
 }
 
 export function useUndoableRemoval<T>(): UndoableRemoval<T> {
-  const [latest, setLatest] = useState<T | undefined>(undefined);
+  const [items, setItems] = useState<readonly T[]>([]);
   const pending = useRef<Pending<T>[]>([]);
 
   const drop = useCallback((entry: Pending<T>): void => {
     pending.current = pending.current.filter((p) => p !== entry);
-    setLatest(pending.current[pending.current.length - 1]?.item);
+    setItems(pending.current.map((p) => p.item));
   }, []);
 
   const remove = useCallback(
@@ -57,7 +66,7 @@ export function useUndoableRemoval<T>(): UndoableRemoval<T> {
         }, GRACE_MS),
       };
       pending.current = [...pending.current, entry];
-      setLatest(item);
+      setItems(pending.current.map((p) => p.item));
     },
     [drop],
   );
@@ -83,5 +92,5 @@ export function useUndoableRemoval<T>(): UndoableRemoval<T> {
     [],
   );
 
-  return { latest, remove, undo };
+  return { latest: items[items.length - 1], pending: items, remove, undo };
 }

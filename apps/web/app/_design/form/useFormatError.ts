@@ -39,6 +39,8 @@ export interface FormatErrorState {
    * de días cerrados pretendía impedir.
    */
   checkAll: (all: Readonly<Record<string, string>>) => boolean;
+  /** Borrón y cuenta nueva: lo pide quien cancela la captura. */
+  reset: () => void;
 }
 
 export function useFormatError(
@@ -90,9 +92,12 @@ export function useFormatError(
     [rules],
   );
 
+  const reset = useCallback((): void => setErrors({}), []);
+
   return {
     errors,
     checkAll,
+    reset,
     onBlur: useCallback(
       (key, value, all) => evaluate(key, value, all, true),
       [evaluate],

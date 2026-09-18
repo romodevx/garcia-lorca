@@ -359,3 +359,48 @@ describe("capturar precios ocupa la pantalla", () => {
     expect(screen.queryByRole("heading", { name: /^Precios de / })).toBeNull();
   });
 });
+
+/**
+ * Editar un tabulador que YA existe.
+ *
+ * Al subir el estado a `Catalog` para que la página ocupe la pantalla, el retorno
+ * temprano puso `<TuitionPanel>` en OTRA posición del árbol: React lo desmonta y
+ * lo vuelve a montar, su lista de planes se reinicia a vacía, y `TuitionPage`
+ * siembra todos sus campos en inicializadores de `useState` que ya no se vuelven
+ * a correr. Resultado: "Editar" abría el tabulador EN BLANCO, y guardar
+ * sobrescribía cuotas, cobranza, día límite y fecha de inscripción con los
+ * valores por omisión de la forma.
+ */
+describe("editar un tabulador existente", () => {
+  it("llega con los valores del plan guardado, no en blanco", async () => {
+    const user = userEvent.setup();
+    mocked.listCycles.mockResolvedValue([
+      { id: "c1", name: "2026-2027", status: "active", startsOn: "2026-08-01", endsOn: "2027-06-30" },
+    ]);
+    mocked.listLevels.mockResolvedValue([
+      { id: "l1", name: "KÍNDER", sepCode: "KIN", enrollmentGranularity: "cycle" },
+    ]);
+    finance.listTuitionPlans.mockResolvedValue([
+      {
+        ...PLAN_ANTERIOR,
+        cycleId: "c1",
+        monthlyCents: 280000,
+        months: 11,
+        dueDay: 7,
+        enrollmentDueOn: "2026-06-30",
+        fees: [{ name: "CUOTA DE JULIO", amountCents: 160000, months: [9, 10] }],
+      },
+    ]);
+
+    render(<Catalog onBack={() => {}} />);
+    await user.click(await screen.findByRole("button", { name: /Editar/ }));
+    await screen.findByRole("heading", { name: /^Precios de / });
+
+    expect(screen.getByLabelText("Colegiatura mensual")).toHaveValue("2800.00");
+    expect(screen.getByLabelText("Mensualidades")).toHaveValue(11);
+    expect(screen.getByLabelText("Día límite")).toHaveValue(7);
+    expect(screen.getByLabelText("Fecha límite de inscripción")).toHaveValue("2026-06-30");
+    // Las cuotas guardadas siguen ahí: guardar no puede borrarlas.
+    expect(screen.getByRole("button", { name: /Cuotas/ })).toHaveTextContent("1");
+  });
+});

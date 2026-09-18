@@ -54,6 +54,23 @@ export function InscriptionSection({ concepts, onChange, onError, draftRef }: In
   const [name, setName] = useState("");
   const cardDrafts = useRef(new Map<string, DraftCheck>());
 
+  /*
+   * Al desmontarse deja de reclamar.
+   *
+   * `FormSection` sólo dibuja sus hijos mientras está abierta, así que plegar
+   * "Cuotas" desmonta esta sección y dejaba en el ref un cierre viejo sobre lo
+   * que se había tecleado. El siguiente "Guardar tabulador" se quejaba de una
+   * cuota que ya no existía —y al abrir la sección los campos estaban vacíos,
+   * porque el estado se había reiniciado—; el segundo clic sí guardaba. Se leía
+   * como un botón que a veces no hace nada.
+   */
+  useEffect(() => {
+    const ref = draftRef;
+    return () => {
+      if (ref !== undefined) ref.current = () => undefined;
+    };
+  }, [draftRef]);
+
   const registerDraft = (concept: string, check: DraftCheck | undefined): void => {
     if (check === undefined) cardDrafts.current.delete(concept);
     else cardDrafts.current.set(concept, check);
@@ -107,8 +124,14 @@ export function InscriptionSection({ concepts, onChange, onError, draftRef }: In
       </p>
 
       {concepts.map((concept, index) => (
+        /*
+          La llave va por NOMBRE, no por índice. Con el índice, quitar el
+          concepto #1 remontaba todos los de abajo y tiraba el monto que
+          tuvieran tecleado sin agregar — justo lo que `DraftCheck` existe para
+          proteger. El nombre es único: lo garantiza el guard de slug al agregar.
+        */
         <ConceptCard
-          key={`${concept.name}-${index}`}
+          key={concept.name}
           concept={concept}
           onChangeTiers={(tiers) => patch(index, tiers)}
           onRemove={() => onChange(concepts.filter((_, i) => i !== index))}
@@ -314,6 +337,15 @@ export function FeesSection({
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
   const [picked, setPicked] = useState<number[]>([]);
+
+  // Ver InscriptionSection: plegar la sección la desmonta, y un cierre viejo en
+  // el ref bloqueaba el siguiente guardado con una queja sobre algo inexistente.
+  useEffect(() => {
+    const ref = draftRef;
+    return () => {
+      if (ref !== undefined) ref.current = () => undefined;
+    };
+  }, [draftRef]);
 
   if (draftRef !== undefined) {
     draftRef.current = (): string | undefined =>

@@ -227,3 +227,35 @@ describe("quitar varios días dentro del mismo plazo", () => {
     expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-1");
   });
 });
+
+/**
+ * Agregar algo mientras un borrado está en su plazo de gracia.
+ *
+ * `reload()` vuelve a pedirle la lista al servidor, que TODAVÍA tiene el renglón
+ * quitado — así que reaparecía en pantalla con el toast de "Deshacer" todavía
+ * visible, y ocho segundos después se iba solo. Peor: darle "Quitar" al renglón
+ * resucitado encolaba un segundo borrado del mismo id, que falla.
+ */
+describe("borrado pendiente y recarga", () => {
+  it("lo quitado no reaparece cuando se agrega otra cosa", async () => {
+    const user = userEvent.setup();
+    config.createNonWorkingPeriod.mockResolvedValue({
+      id: "per-2", cycleId: "c1", label: "REVOLUCIÓN", kind: "holiday", startsOn: "2026-11-20", endsOn: "2026-11-20",
+    });
+    render(<CalendarPanel cycle={cycle} />);
+    await screen.findByText("Independencia");
+
+    await user.click(screen.getByRole("button", { name: /Quitar Independencia/ }));
+    expect(screen.queryByText("Independencia")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Nuevo día cerrado" }));
+    await user.type(screen.getByLabelText("Nombre"), "REVOLUCIÓN");
+    await user.type(screen.getByLabelText("Del día"), "2026-11-20");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(config.createNonWorkingPeriod).toHaveBeenCalled());
+
+    // La recarga trae de vuelta el renglón del servidor; no puede resucitarlo.
+    await waitFor(() => expect(config.listNonWorkingPeriods).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("Independencia")).toBeNull();
+  });
+});

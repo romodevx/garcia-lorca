@@ -304,3 +304,33 @@ describe("un monto escrito y no agregado", () => {
     expect(finance.upsertTuitionPlan).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Plegar "Cuotas" después de teclear en ella.
+ *
+ * `FormSection` sólo dibuja sus hijos mientras está abierta, así que plegarla
+ * desmonta `FeesSection` y dejaba en el ref un cierre viejo sobre lo tecleado:
+ * el siguiente "Guardar tabulador" se quejaba de una cuota que ya no existía, y
+ * al reabrir la sección los campos estaban vacíos. El segundo clic sí guardaba,
+ * así que se leía como un botón que a veces no hace nada.
+ */
+describe("plegar una sección después de escribir en ella", () => {
+  it("no bloquea el guardado con una queja sobre algo que ya no está", async () => {
+    const user = userEvent.setup();
+    open();
+    await user.type(screen.getByLabelText("Colegiatura mensual"), "2800");
+    await user.type(screen.getByLabelText("Nuevo concepto"), "INSCRIPCIÓN");
+    await user.click(screen.getByRole("button", { name: /Agregar concepto/ }));
+    await user.type(screen.getByLabelText("Monto"), "4500");
+    await user.type(screen.getByLabelText("Vigente desde"), "2026-08-01");
+    await user.click(screen.getByRole("button", { name: /Agregar monto/ }));
+
+    await user.click(screen.getByRole("button", { name: /Cuotas/ }));
+    await user.type(screen.getByLabelText("Nombre de la cuota"), "CUOTA DE JULIO");
+    await user.click(screen.getByRole("button", { name: /Cuotas/ }));
+
+    await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
+
+    expect(finance.upsertTuitionPlan).toHaveBeenCalled();
+  });
+});

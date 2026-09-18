@@ -184,10 +184,22 @@ export function TuitionPage({
       setError(ladder);
       return;
     }
-    // Nada tecleado se tira por no haberlo "agregado": se dice y se detiene.
-    const pendiente = inscriptionDraft.current() ?? feesDraft.current();
-    if (pendiente !== undefined) {
-      complain(pendiente, feesDraft.current() !== undefined ? "fees" : undefined);
+    /*
+     * Nada tecleado se tira por no haberlo "agregado": se dice y se detiene.
+     *
+     * Cada ref se consulta UNA vez. Consultarlas dos veces —una para el mensaje y
+     * otra para decidir qué sección abrir— hacía que, con borrador pendiente en
+     * las dos, el mensaje fuera el de Inscripción y la sección que se abría fuera
+     * Cuotas: señalando un lugar del que el mensaje no habla.
+     */
+    const inscripcionPendiente = inscriptionDraft.current();
+    const cuotaPendiente = feesDraft.current();
+    if (inscripcionPendiente !== undefined) {
+      complain(inscripcionPendiente);
+      return;
+    }
+    if (cuotaPendiente !== undefined) {
+      complain(cuotaPendiente, "fees");
       return;
     }
 
