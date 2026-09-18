@@ -630,3 +630,39 @@ describe("la captura del tabulador", () => {
     expect(nombre).toHaveValue("GASTOS ADM");
   });
 });
+
+/**
+ * La columna de inscripción de la tabla.
+ *
+ * Desde que la inscripción se captura por conceptos (ADR 0011), `enrollmentCents`
+ * viaja SIEMPRE en cero: el monto vive en los tramos de cada concepto. La tabla
+ * seguía leyendo ese cero, así que un nivel con inscripción de $4,500 se anunciaba
+ * como $0.00 — y este archivo advierte contra exactamente eso: "una escuela
+ * leyendo $0.00 en una columna no distingue 'gratis' de 'nadie lo llenó', y la
+ * diferencia es un año de colegiaturas sin cobrar".
+ */
+describe("lo que la tabla dice que cuesta la inscripción", () => {
+  it("suma los conceptos en vez de leer el cero que ya no significa nada", async () => {
+    finance.listTuitionPlans.mockResolvedValue([
+      {
+        id: "p1", cycleId: "c1", levelId: "lv1",
+        // Cero a propósito: es lo que el servidor guarda desde ADR 0011.
+        enrollmentCents: 0,
+        monthlyCents: 280000, months: 10, firstBilledMonth: 9, dueDay: 10,
+        lateFeeCents: 0, active: true, monthlyDiscountCents: 0, schedule: [], fees: [],
+        enrollmentDueOn: "",
+        enrollmentConcepts: [
+          { name: "INSCRIPCIÓN", tiers: [{ effectiveFrom: "2026-08-01", effectiveTo: "", amountCents: 450000 }] },
+          { name: "SEGURO", tiers: [{ effectiveFrom: "2026-08-01", effectiveTo: "", amountCents: 50000 }] },
+        ],
+        policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 },
+      },
+    ]);
+
+    render(<TuitionPanel cycle={cycle} levels={levels} />);
+
+    const fila = await screen.findByRole("row", { name: /Kínder/ });
+    expect(fila).toHaveTextContent("5000.00");
+    expect(fila, "sigue anunciando la inscripción como gratis").not.toHaveTextContent("$0.00");
+  });
+});

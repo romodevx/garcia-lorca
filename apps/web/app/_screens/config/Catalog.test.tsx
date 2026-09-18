@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "../../config/api";
+import * as financeApi from "../../finance/api";
 import { Catalog } from "./Catalog";
 
 // The screen talks to the gateway exclusively through the config api client, so
@@ -29,7 +30,29 @@ vi.mock("../../config/api", () => ({
   deleteSchoolEvent: vi.fn(),
 }));
 
+/*
+ * El tabulador vive en finance, no en config. Sin este mock, `listTuitionPlans`
+ * sale a la red de verdad, falla, y el panel se queda sin planes — que es
+ * exactamente el estado en el que "Copiar de…" no debe aparecer, así que la
+ * prueba pasaría por la razón equivocada.
+ */
+vi.mock("../../finance/api", () => ({
+  listTuitionPlans: vi.fn(),
+  upsertTuitionPlan: vi.fn(),
+  runBilling: vi.fn(),
+}));
+
 const mocked = vi.mocked(api);
+const finance = vi.mocked(financeApi);
+
+/** Un tabulador mínimo del ciclo anterior: lo que hace que haya algo que copiar. */
+const PLAN_ANTERIOR = {
+  id: "p1", cycleId: "c1", levelId: "l1", enrollmentCents: 0, monthlyCents: 280000,
+  months: 10, firstBilledMonth: 9, dueDay: 10, lateFeeCents: 0, active: true,
+  policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 },
+  schedule: [], monthlyDiscountCents: 0, fees: [], enrollmentDueOn: "",
+  enrollmentConcepts: [{ name: "INSCRIPCIÓN", tiers: [{ effectiveFrom: "2025-08-31", effectiveTo: "", amountCents: 450000 }] }],
+};
 
 beforeEach(() => {
   mocked.listCycles.mockResolvedValue([]);
@@ -40,6 +63,7 @@ beforeEach(() => {
   mocked.listSubjects.mockResolvedValue([]);
   mocked.listGroups.mockResolvedValue([]);
   mocked.listTerms.mockResolvedValue([]);
+  finance.listTuitionPlans.mockResolvedValue([]);
 });
 
 afterEach(() => vi.clearAllMocks());
@@ -225,5 +249,57 @@ describe("crear varios niveles de corrido", () => {
     await waitFor(() => expect(mocked.createLevel).toHaveBeenCalled());
     expect(screen.getByRole("dialog", { name: "Nuevo nivel educativo" })).toBeInTheDocument();
     expect(within(drawer).getByLabelText(/^Nombre del (ciclo|nivel)$/)).toHaveValue("");
+  });
+});
+
+/**
+ * El atajo que convierte la captura del tabulador en tres clics.
+ *
+ * `TuitionPanel` sabe ofrecerlo desde que el tabulador se volvió página, pero
+ * durante un rato nadie le pasó el ciclo anterior — así que "Copiar de…" no
+ * aparecía NUNCA en la app real, exactamente como el buscador de alumno que
+ * terminó borrándose por lo mismo. Un atajo que nadie puede alcanzar no existe.
+ */
+describe("el tabulador sabe de qué ciclo copiar", () => {
+  it("le pasa el ciclo inmediatamente anterior al seleccionado", async () => {
+    const user = userEvent.setup();
+    mocked.listCycles.mockResolvedValue([
+      { id: "c1", name: "2025-2026", status: "closed", startsOn: "2025-08-01", endsOn: "2026-06-30" },
+      { id: "c2", name: "2026-2027", status: "active", startsOn: "2026-08-01", endsOn: "2027-06-30" },
+    ]);
+    mocked.listLevels.mockResolvedValue([
+      { id: "l1", name: "KÍNDER", sepCode: "KIN", enrollmentGranularity: "cycle" },
+    ]);
+
+    // Sólo el ciclo anterior tiene tabulador: es lo que hace que haya algo que
+    // copiar, y de paso prueba que se pide el plan del ciclo CORRECTO.
+    finance.listTuitionPlans.mockImplementation(async (_url: string, cycleId: string) =>
+      cycleId === "c1" ? [PLAN_ANTERIOR] : [],
+    );
+
+    render(<Catalog onBack={() => {}} />);
+    await screen.findByRole("button", { name: /Definir|Editar/ });
+    await user.click(screen.getByRole("button", { name: /Definir|Editar/ }));
+
+    // El ciclo anterior es 2025-2026, no "el primero de la lista".
+    expect(await screen.findByRole("button", { name: "Copiar" })).toBeInTheDocument();
+    expect(screen.getByText(/Copiar de 2025-2026/)).toBeInTheDocument();
+  });
+
+  it("no lo ofrece cuando el ciclo seleccionado es el primero que hubo", async () => {
+    const user = userEvent.setup();
+    mocked.listCycles.mockResolvedValue([
+      { id: "c1", name: "2026-2027", status: "active", startsOn: "2026-08-01", endsOn: "2027-06-30" },
+    ]);
+    mocked.listLevels.mockResolvedValue([
+      { id: "l1", name: "KÍNDER", sepCode: "KIN", enrollmentGranularity: "cycle" },
+    ]);
+
+    render(<Catalog onBack={() => {}} />);
+    await screen.findByRole("button", { name: /Definir|Editar/ });
+    await user.click(screen.getByRole("button", { name: /Definir|Editar/ }));
+
+    await screen.findByRole("heading", { name: /^Precios de / });
+    expect(screen.queryByRole("button", { name: "Copiar" })).toBeNull();
   });
 });

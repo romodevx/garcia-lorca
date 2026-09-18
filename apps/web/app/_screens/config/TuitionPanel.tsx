@@ -6,7 +6,7 @@ import { Btn } from "../../_design/Controls";
 import type { Cycle, Level } from "../../config/api";
 import { listTuitionPlans, runBilling, type BillingRun, type TuitionPlan } from "../../finance/api";
 import { EmptyHint, ErrorAlert, Section } from "./parts";
-import { MONTH_NAMES, centsToPesos } from "./tuition-math";
+import { MONTH_NAMES, centsToPesos, inscriptionTotals } from "./tuition-math";
 import { TuitionPage } from "./TuitionPage";
 
 import { API_URL } from "../../api-url";
@@ -138,7 +138,18 @@ export function TuitionPanel({ cycle, levels, previousCycle }: TuitionPanelProps
                     </td>
                   ) : (
                     <>
-                      <td style={cell}>${centsToPesos(plan.enrollmentCents)}</td>
+                      {/*
+                        Se SUMAN los conceptos; `enrollmentCents` no se lee.
+                        Desde ADR 0011 ese campo viaja siempre en cero —el monto
+                        vive en los tramos de cada concepto— así que leerlo
+                        anunciaba como gratis una inscripción de miles de pesos.
+                        Es el primer escalón: lo que paga quien se inscribe en
+                        cuanto abre el periodo, que es el número que el colegio
+                        publica.
+                      */}
+                      <td style={cell}>
+                        ${centsToPesos(inscriptionTotals(plan.enrollmentConcepts)[0]?.totalCents ?? 0)}
+                      </td>
                       <td style={cell}>${centsToPesos(plan.monthlyCents)}</td>
                       <td style={cell}>
                         {plan.months} desde {MONTH_NAMES[plan.firstBilledMonth - 1]}

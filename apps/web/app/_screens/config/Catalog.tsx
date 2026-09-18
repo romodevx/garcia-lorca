@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import {
@@ -179,6 +179,21 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
 
 
   const selectedCycle = cycles.find((c) => c.id === selectedCycleId);
+
+  /**
+   * El ciclo inmediatamente anterior al seleccionado, que es de donde el
+   * tabulador ofrece copiar.
+   *
+   * Se elige por FECHA DE INICIO, no por el orden en que llegó la lista ni por
+   * el nombre: "2025-2026" y "2026-2027" ordenan bien como texto por casualidad,
+   * y un ciclo llamado "Verano" rompería esa casualidad sin avisar.
+   */
+  const previousCycle = useMemo(() => {
+    if (selectedCycle === undefined) return undefined;
+    return cycles
+      .filter((c) => c.startsOn < selectedCycle.startsOn)
+      .sort((a, b) => b.startsOn.localeCompare(a.startsOn))[0];
+  }, [cycles, selectedCycle]);
   const selectedLevel = levels.find((l) => l.id === selectedLevelId);
   const selectedGradeLevel = gradeLevels.find((g) => g.id === selectedGradeLevelId);
 
@@ -227,7 +242,7 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
             through finance — the ledger owns prices — but it belongs in front of
             a director's eyes here, next to the levels it prices.
           */}
-          {selectedCycle !== undefined && <TuitionPanel cycle={selectedCycle} levels={levels} />}
+          {selectedCycle !== undefined && <TuitionPanel cycle={selectedCycle} levels={levels} previousCycle={previousCycle} />}
           {selectedCycle !== undefined && <CalendarPanel cycle={selectedCycle} />}
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 18 }}>
