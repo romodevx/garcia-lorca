@@ -194,8 +194,35 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
       .filter((c) => c.startsOn < selectedCycle.startsOn)
       .sort((a, b) => b.startsOn.localeCompare(a.startsOn))[0];
   }, [cycles, selectedCycle]);
+  /**
+   * El nivel cuyo tabulador se está capturando.
+   *
+   * Vive aquí y no dentro de `TuitionPanel` porque capturar precios OCUPA la
+   * pantalla: mientras esto tiene valor, el catálogo entero no se dibuja. Con el
+   * estado adentro, la página salía entre la barra de ciclos y el calendario, y
+   * los chips de ciclo seguían clicables — cambiar de año a media captura
+   * re-apuntaba el guardado sin limpiar lo escrito.
+   */
+  const [pricingLevelId, setPricingLevelId] = useState<string | undefined>(undefined);
   const selectedLevel = levels.find((l) => l.id === selectedLevelId);
   const selectedGradeLevel = gradeLevels.find((g) => g.id === selectedGradeLevelId);
+
+  // Capturar precios se lleva la pantalla completa. No hay encabezado, ni
+  // tarjetas, ni barra de ciclos detrás: la página trae su propia migaja y su
+  // propio pie, y Cancelar devuelve el catálogo entero.
+  if (pricingLevelId !== undefined && selectedCycle !== undefined) {
+    return (
+      <Page>
+        <TuitionPanel
+          cycle={selectedCycle}
+          levels={levels}
+          previousCycle={previousCycle}
+          pricingLevelId={pricingLevelId}
+          onPrice={setPricingLevelId}
+        />
+      </Page>
+    );
+  }
 
   return (
     <Page>
@@ -242,7 +269,14 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
             through finance — the ledger owns prices — but it belongs in front of
             a director's eyes here, next to the levels it prices.
           */}
-          {selectedCycle !== undefined && <TuitionPanel cycle={selectedCycle} levels={levels} previousCycle={previousCycle} />}
+          {selectedCycle !== undefined && (
+            <TuitionPanel
+              cycle={selectedCycle}
+              levels={levels}
+              previousCycle={previousCycle}
+              onPrice={setPricingLevelId}
+            />
+          )}
           {selectedCycle !== undefined && <CalendarPanel cycle={selectedCycle} />}
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 18 }}>

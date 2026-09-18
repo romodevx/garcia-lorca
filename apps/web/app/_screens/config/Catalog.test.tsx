@@ -303,3 +303,59 @@ describe("el tabulador sabe de qué ciclo copiar", () => {
     expect(screen.queryByRole("button", { name: "Copiar" })).toBeNull();
   });
 });
+
+/**
+ * El tabulador OCUPA la pantalla mientras se captura.
+ *
+ * Nació renderizándose entre la barra de ciclos y el calendario, con todo el
+ * catálogo alrededor: no era una página, era un panel con migaja de página. Y no
+ * era sólo feo — el chip del ciclo seguía clicable, así que cambiar de año a
+ * media captura re-apuntaba el guardado SIN limpiar lo escrito: los precios del
+ * año viejo se escribían encima del nuevo.
+ */
+describe("capturar precios ocupa la pantalla", () => {
+  async function abrirTabulador(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+    mocked.listCycles.mockResolvedValue([
+      { id: "c1", name: "2025-2026", status: "closed", startsOn: "2025-08-01", endsOn: "2026-06-30" },
+      { id: "c2", name: "2026-2027", status: "active", startsOn: "2026-08-01", endsOn: "2027-06-30" },
+    ]);
+    mocked.listLevels.mockResolvedValue([
+      { id: "l1", name: "KÍNDER", sepCode: "KIN", enrollmentGranularity: "cycle" },
+    ]);
+    render(<Catalog onBack={() => {}} />);
+    await screen.findByRole("button", { name: /Definir|Editar/ });
+    await user.click(screen.getByRole("button", { name: /Definir|Editar/ }));
+    await screen.findByRole("heading", { name: /^Precios de / });
+  }
+
+  it("esconde el catálogo detrás mientras se captura", async () => {
+    const user = userEvent.setup();
+    await abrirTabulador(user);
+
+    // Nada del catálogo sigue a la vista: ni el encabezado, ni las tarjetas,
+    // ni los otros paneles.
+    expect(screen.queryByRole("heading", { name: "Configuración académica" })).toBeNull();
+    expect(screen.queryByText("Ciclo escolar")).toBeNull();
+    expect(screen.queryByText("Calendario escolar")).toBeNull();
+  });
+
+  // El defecto de dinero: sin la barra de ciclos no hay manera de re-apuntar el
+  // guardado a otro año a media captura.
+  it("no deja cambiar de ciclo con el tabulador abierto", async () => {
+    const user = userEvent.setup();
+    await abrirTabulador(user);
+
+    expect(screen.queryByRole("button", { name: /2026-2027/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Nuevo ciclo/ })).toBeNull();
+  });
+
+  it("Cancelar devuelve el catálogo entero", async () => {
+    const user = userEvent.setup();
+    await abrirTabulador(user);
+
+    await user.click(screen.getByRole("button", { name: "Cancelar" }));
+
+    expect(await screen.findByRole("heading", { name: "Configuración académica" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /^Precios de / })).toBeNull();
+  });
+});

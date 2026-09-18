@@ -1,11 +1,30 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Cycle, Level } from "../../config/api";
 import type { EnrollmentConcept } from "../../finance/api";
 import * as financeApi from "../../finance/api";
 import { TuitionPanel } from "./TuitionPanel";
+
+/**
+ * El panel ya no guarda a qué nivel se le están poniendo precios: eso vive en
+ * `Catalog`, porque capturar precios OCUPA la pantalla y el catálogo entero deja
+ * de dibujarse. Aquí se monta el anfitrión mínimo que hace ese trabajo.
+ */
+function Host(props: Partial<React.ComponentProps<typeof TuitionPanel>> = {}): React.ReactElement {
+  const [pricingLevelId, setPricingLevelId] = useState<string | undefined>(undefined);
+  return (
+    <TuitionPanel
+      cycle={cycle}
+      levels={levels}
+      pricingLevelId={pricingLevelId}
+      onPrice={setPricingLevelId}
+      {...props}
+    />
+  );
+}
 import { pesosToCents, centsToPesos, inscriptionTotals, ladderProblem } from "./tuition-math";
 
 vi.mock("../../finance/api", () => ({
@@ -76,7 +95,7 @@ describe("pesos and cents", () => {
 
 describe("the tuition table", () => {
   it("shows a row per level, priced or not", async () => {
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
 
     // Primaria is priced; Kínder is not, and must say so rather than show zeros
     // that read like a free school.
@@ -92,7 +111,7 @@ describe("the tuition table", () => {
       months: 11, firstBilledMonth: 8, dueDay: 5, lateFeeCents: 10000, active: true,
       policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 }, schedule: [], monthlyDiscountCents: 0, fees: [], enrollmentDueOn: "", enrollmentConcepts: [],
     });
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
     await screen.findByText("Primaria");
 
     await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
@@ -124,7 +143,7 @@ describe("the tuition table", () => {
 
   it("will not send a due day the calendar cannot honour", async () => {
     const user = userEvent.setup();
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
     await screen.findByText("Primaria");
 
     await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
@@ -149,7 +168,7 @@ describe("running the month", () => {
     finance.runBilling.mockResolvedValue({
       tuitionCreated: 30, enrollmentCreated: 10, lateFeesCreated: 4, feesCreated: 0, enrollmentMoved: 0, skipped: 6, levelsWithoutPlan: [],
     });
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
     await screen.findByText("Primaria");
 
     await user.click(screen.getByRole("button", { name: /Generar cargos/ }));
@@ -165,7 +184,7 @@ describe("running the month", () => {
       tuitionCreated: 0, enrollmentCreated: 0, lateFeesCreated: 0, feesCreated: 0, enrollmentMoved: 0, skipped: 0,
       levelsWithoutPlan: ["Kínder", "Preparatoria"],
     });
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
     await screen.findByText("Primaria");
 
     await user.click(screen.getByRole("button", { name: /Generar cargos/ }));
@@ -179,7 +198,7 @@ describe("TuitionPanel — cobranza", () => {
   // person could reach. This is that field.
   it("saves the daily surcharge and the early-payment reward", async () => {
     const user = userEvent.setup();
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
 
     await screen.findByRole("row", { name: /Kínder/ });
     await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
@@ -205,7 +224,7 @@ describe("TuitionPanel — cobranza", () => {
   // form says so before the round trip.
   it("refuses a daily rule with no amount", async () => {
     const user = userEvent.setup();
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
 
     await screen.findByRole("row", { name: /Kínder/ });
     await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
@@ -232,7 +251,7 @@ describe("TuitionPanel — cobranza", () => {
  * real están a un clic — no hay por qué repetir ese clic quince veces.
  */
 async function openPrices(user: ReturnType<typeof userEvent.setup>, level: RegExp): Promise<HTMLElement> {
-  render(<TuitionPanel cycle={cycle} levels={levels} />);
+  render(<Host />);
   await screen.findByText("Primaria");
   await user.click(within(screen.getByRole("row", { name: level })).getByRole("button", { name: /Definir|Editar/ }));
   await screen.findByRole("heading", { name: /^Precios de / });
@@ -421,7 +440,7 @@ describe("what the run reports", () => {
       tuitionCreated: 10, enrollmentCreated: 1, lateFeesCreated: 0, feesCreated: 8,
       enrollmentMoved: 0, skipped: 2, levelsWithoutPlan: [],
     });
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
     await screen.findByText("Primaria");
 
     await user.click(screen.getByRole("button", { name: /Generar cargos del mes/ }));
@@ -439,7 +458,7 @@ it("says when it corrected inscription deadlines already issued", async () => {
     tuitionCreated: 0, enrollmentCreated: 0, lateFeesCreated: 0, feesCreated: 0,
     enrollmentMoved: 400, skipped: 4010, levelsWithoutPlan: [],
   });
-  render(<TuitionPanel cycle={cycle} levels={levels} />);
+  render(<Host />);
   await screen.findByText("Primaria");
 
   await user.click(screen.getByRole("button", { name: /Generar cargos del mes/ }));
@@ -454,7 +473,7 @@ it("says nothing about deadlines when it moved none", async () => {
     tuitionCreated: 10, enrollmentCreated: 1, lateFeesCreated: 0, feesCreated: 2,
     enrollmentMoved: 0, skipped: 0, levelsWithoutPlan: [],
   });
-  render(<TuitionPanel cycle={cycle} levels={levels} />);
+  render(<Host />);
   await screen.findByText("Primaria");
 
   await user.click(screen.getByRole("button", { name: /Generar cargos del mes/ }));
@@ -599,7 +618,7 @@ describe("la captura del tabulador", () => {
     // de error explicando el formato aaaa-mm-dd. Con calendario, ese error deja
     // de poder ocurrir.
     const user = userEvent.setup();
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
     await screen.findByRole("row", { name: /Kínder/ });
     await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
 
@@ -608,7 +627,7 @@ describe("la captura del tabulador", () => {
 
   it("los montos se capturan en pesos y los conteos no", async () => {
     const user = userEvent.setup();
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
     await screen.findByRole("row", { name: /Kínder/ });
     await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
 
@@ -621,7 +640,7 @@ describe("la captura del tabulador", () => {
 
   it("el nombre de un concepto se captura en mayúsculas", async () => {
     const user = userEvent.setup();
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
     await screen.findByRole("row", { name: /Kínder/ });
     await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
 
@@ -659,7 +678,7 @@ describe("lo que la tabla dice que cuesta la inscripción", () => {
       },
     ]);
 
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
 
     const fila = await screen.findByRole("row", { name: /Kínder/ });
     expect(fila).toHaveTextContent("5000.00");

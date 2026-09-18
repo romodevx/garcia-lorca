@@ -32,6 +32,18 @@ export interface TuitionPanelProps {
    * funcionando: simplemente no aparece el atajo.
    */
   previousCycle?: Cycle | undefined;
+  /**
+   * El nivel cuyo tabulador se está capturando, y cómo avisar que cambió.
+   *
+   * Vive ARRIBA, en `Catalog`, y no aquí: mientras se capturan precios la página
+   * tiene que ocupar la pantalla. Cuando este estado era interno, la "página" se
+   * dibujaba entre la barra de ciclos y el calendario, con todo el catálogo
+   * alrededor — y con los chips de ciclo clicables, así que cambiar de año a
+   * media captura re-apuntaba el guardado sin limpiar lo escrito y los precios
+   * del año viejo se escribían encima del nuevo.
+   */
+  pricingLevelId?: string | undefined;
+  onPrice?: ((levelId: string | undefined) => void) | undefined;
 }
 
 const cell = { padding: "10px 8px" } as const;
@@ -46,12 +58,17 @@ const cell = { padding: "10px 8px" } as const;
  * $0.00 down a column cannot tell "free" from "nobody filled this in", and the
  * difference is a year of uncollected tuition.
  */
-export function TuitionPanel({ cycle, levels, previousCycle }: TuitionPanelProps): ReactElement {
+export function TuitionPanel({
+  cycle,
+  levels,
+  previousCycle,
+  pricingLevelId,
+  onPrice,
+}: TuitionPanelProps): ReactElement {
   const [plans, setPlans] = useState<TuitionPlan[]>([]);
   // Los del ciclo anterior existen sólo para ofrecer "copiar de". Se piden una
   // vez y sin bloquear: si fallan, el atajo no aparece y todo lo demás sigue.
   const [previousPlans, setPreviousPlans] = useState<TuitionPlan[]>([]);
-  const [editing, setEditing] = useState<Level | null>(null);
   const [run, setRun] = useState<BillingRun | null>(null);
   const [error, setError] = useState<string | undefined>(undefined);
   const [running, setRunning] = useState(false);
@@ -89,17 +106,18 @@ export function TuitionPanel({ cycle, levels, previousCycle }: TuitionPanelProps
     }
   };
 
-  if (editing !== null) {
+  const pricing = levels.find((l) => l.id === pricingLevelId);
+  if (pricing !== undefined) {
     return (
       <TuitionPage
         cycle={cycle}
-        level={editing}
-        plan={planFor(editing.id)}
-        previousPlan={previousPlans.find((p) => p.levelId === editing.id)}
+        level={pricing}
+        plan={planFor(pricing.id)}
+        previousPlan={previousPlans.find((p) => p.levelId === pricing.id)}
         previousCycleName={previousCycle?.name}
-        onClose={() => setEditing(null)}
+        onClose={() => onPrice?.(undefined)}
         onSaved={() => {
-          setEditing(null);
+          onPrice?.(undefined);
           reload();
         }}
       />
@@ -164,7 +182,7 @@ export function TuitionPanel({ cycle, levels, previousCycle }: TuitionPanelProps
                   )}
                   <td style={cell}>
                     <button
-                      onClick={() => setEditing(level)}
+                      onClick={() => onPrice?.(level.id)}
                       style={{ fontSize: 13.5, fontWeight: 600, color: "var(--forest)", textDecoration: "underline" }}
                     >
                       {plan === undefined ? "Definir" : "Editar"}
