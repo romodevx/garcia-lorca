@@ -212,3 +212,97 @@ describe("InlineCreateRow con valores propuestos", () => {
     expect(screen.getByLabelText("Orden")).toHaveValue(4);
   });
 });
+
+/**
+ * Lo que el renglón hace cuando algo sale mal, y cuando alguien va rápido.
+ *
+ * Los cinco casos de abajo los destapó una revisión, no una prueba: todos pasan
+ * por el camino feliz y ninguno se ve con el ratón.
+ */
+describe("InlineCreateRow bajo presión", () => {
+  it("conserva lo escrito cuando el alta falla", async () => {
+    const user = userEvent.setup();
+    const onCreate = vi.fn().mockRejectedValue(new Error("ya existe"));
+    setup({ onCreate });
+    await user.click(screen.getByRole("button", { name: "Agregar día cerrado" }));
+
+    await user.type(screen.getByLabelText("Nombre"), "INDEPENDENCIA");
+    await user.type(screen.getByLabelText("Del día"), "2026-09-16");
+    await user.keyboard("{Enter}");
+
+    // Vaciar el renglón tras un fallo obliga a reescribir todo, y el mensaje del
+    // panel queda hablando de un renglón que ya está en blanco.
+    expect(screen.getByLabelText("Nombre")).toHaveValue("INDEPENDENCIA");
+    expect(screen.getByLabelText("Del día")).toHaveValue("2026-09-16");
+  });
+
+  // Enter no hace `blur`, así que la celda que se está escribiendo nunca se
+  // revisaba: la regla de formato existía y el dato imposible salía igual.
+  it("revisa el formato también cuando se guarda con Enter", async () => {
+    const user = userEvent.setup();
+    const onCreate = vi.fn().mockResolvedValue(undefined);
+    setup({
+      onCreate,
+      rules: {
+        endsOn: (value, all) => {
+          const from = all.startsOn ?? "";
+          return from !== "" && value < from ? "El fin es antes que el inicio." : undefined;
+        },
+      },
+    });
+    await user.click(screen.getByRole("button", { name: "Agregar día cerrado" }));
+
+    await user.type(screen.getByLabelText("Nombre"), "PUENTE");
+    await user.type(screen.getByLabelText("Del día"), "2026-11-20");
+    // Se teclea el fin imposible y se envía SIN salir de la celda.
+    await user.type(screen.getByLabelText("Al día"), "2026-11-01{Enter}");
+
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(screen.getByText("El fin es antes que el inicio.")).toBeInTheDocument();
+  });
+
+  // El renglón está hecho para ir rápido ("doce feriados, doce Enter"), así que
+  // dos Enter seguidos en una conexión lenta son el caso normal, no el raro.
+  it("no da de alta dos veces si se aprieta Enter dos veces", async () => {
+    const user = userEvent.setup();
+    let resolver: (() => void) | undefined;
+    const onCreate = vi.fn().mockImplementation(
+      () => new Promise<void>((resolve) => { resolver = resolve; }),
+    );
+    setup({ onCreate });
+    await user.click(screen.getByRole("button", { name: "Agregar día cerrado" }));
+    await user.type(screen.getByLabelText("Nombre"), "INDEPENDENCIA");
+    await user.type(screen.getByLabelText("Del día"), "2026-09-16");
+
+    await user.keyboard("{Enter}");
+    await user.keyboard("{Enter}");
+
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    resolver?.();
+  });
+
+  /**
+   * Dos renglones abiertos en la misma pantalla comparten nombres de celda
+   * (`startsOn`, `endsOn` en días cerrados y en actividades). Buscar la celda en
+   * TODO el documento mandaba el foco al renglón de al lado.
+   */
+  it("manda el foco a SU propia celda, no a la del renglón vecino", async () => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <InlineCreateRow columns={COLUMNS} addLabel="Días" onCreate={vi.fn()} />
+        <InlineCreateRow columns={COLUMNS} addLabel="Actividades" onCreate={vi.fn()} />
+      </>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Días" }));
+    await user.click(screen.getByRole("button", { name: "Actividades" }));
+
+    const actividades = screen.getAllByLabelText("Nombre")[1];
+    const fechasActividades = screen.getAllByLabelText("Del día")[1];
+    await user.type(actividades as HTMLElement, "FESTIVAL");
+    await user.keyboard("{Enter}");
+
+    expect(fechasActividades).toHaveFocus();
+  });
+});

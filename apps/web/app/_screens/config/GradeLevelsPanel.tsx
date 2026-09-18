@@ -80,13 +80,20 @@ export function GradeLevelsPanel({
             if (!Number.isFinite(ordinal) || ordinal < 1) {
               // Number("") es 0, y un 0 que nadie escribió es un dato falso.
               setError("El orden del grado tiene que ser un número mayor que cero.");
-              return;
+              // También se relanza: para el renglón, "no pasó" es no pasó, sea
+              // por la red o por el dato.
+              throw new Error("El orden del grado tiene que ser un número mayor que cero.");
             }
             setError(undefined);
             try {
               await onCreate({ levelId: level.id, name: (values.name ?? "").trim(), ordinal });
-            } catch {
+            } catch (cause) {
               setError("No se pudo crear el grado. Revisa que no exista ya con ese orden.");
+              // Se RELANZA: el renglón necesita saber que no se guardó para
+              // conservar lo escrito. Tragarse el error aquí dejaba el mensaje
+              // hablando de un renglón que ya se había vaciado solo, y obligaba
+              // a reescribir todo.
+              throw cause;
             }
           }}
         />

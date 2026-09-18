@@ -79,7 +79,9 @@ export function GroupsPanel({ cycle, gradeLevel, groups, onCreate }: GroupsPanel
               // Number("") es 0, y un cupo 0 que nadie escribió no acepta
               // alumnos: la asignación automática se salta ese grupo en silencio.
               setError("El cupo del grupo tiene que ser un número mayor que cero.");
-              return;
+              // También se relanza: para el renglón, "no pasó" es no pasó, sea
+              // por la red o por el dato.
+              throw new Error("El cupo del grupo tiene que ser un número mayor que cero.");
             }
             setError(undefined);
             try {
@@ -89,8 +91,13 @@ export function GroupsPanel({ cycle, gradeLevel, groups, onCreate }: GroupsPanel
                 name: (values.name ?? "").trim(),
                 capacity,
               });
-            } catch {
+            } catch (cause) {
               setError("No se pudo crear el grupo. Revisa que no exista ya con ese nombre.");
+              // Se RELANZA: el renglón necesita saber que no se guardó para
+              // conservar lo escrito. Tragarse el error aquí dejaba el mensaje
+              // hablando de un renglón que ya se había vaciado solo, y obligaba
+              // a reescribir todo.
+              throw cause;
             }
           }}
         />

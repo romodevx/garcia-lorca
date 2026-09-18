@@ -117,6 +117,8 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
       reload();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo agregar.");
+      // Relanzado a propósito: el renglón conserva lo escrito sólo si se entera.
+      throw cause;
     }
   };
 
@@ -132,6 +134,7 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
       reload();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo agregar la actividad.");
+      throw cause;
     }
   };
 

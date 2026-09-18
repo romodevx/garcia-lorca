@@ -30,6 +30,15 @@ export interface FormatErrorState {
   onBlur: (key: string, value: string, all: Readonly<Record<string, string>>) => void;
   /** Al teclear: sólo perdona, nunca acusa. */
   onChange: (key: string, value: string, all: Readonly<Record<string, string>>) => void;
+  /**
+   * Al GUARDAR: revisa todas las reglas de una vez y dice si se puede seguir.
+   *
+   * Hace falta porque `blur` no cubre el envío: Enter guarda desde dentro de la
+   * celda que se está escribiendo, y esa celda nunca pierde el foco. Sin esto, la
+   * regla existía y el dato imposible salía igual — el caso exacto que el renglón
+   * de días cerrados pretendía impedir.
+   */
+  checkAll: (all: Readonly<Record<string, string>>) => boolean;
 }
 
 export function useFormatError(
@@ -65,8 +74,25 @@ export function useFormatError(
     [rules],
   );
 
+  const checkAll = useCallback(
+    (all: Readonly<Record<string, string>>): boolean => {
+      const found: Record<string, string> = {};
+      for (const [key, rule] of Object.entries(rules)) {
+        const value = all[key] ?? "";
+        // Un campo vacío nunca es "mal escrito": eso lo dice useRequired.
+        if (value.trim() === "") continue;
+        const problem = rule(value, all);
+        if (problem !== undefined) found[key] = problem;
+      }
+      setErrors(found);
+      return Object.keys(found).length === 0;
+    },
+    [rules],
+  );
+
   return {
     errors,
+    checkAll,
     onBlur: useCallback(
       (key, value, all) => evaluate(key, value, all, true),
       [evaluate],

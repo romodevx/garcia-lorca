@@ -47,8 +47,10 @@ export function SubjectsPanel({ gradeLevel, subjects, onCreate }: SubjectsPanelP
           setError(undefined);
           try {
             await onCreate({ gradeLevelId: gradeLevel.id, name });
-          } catch {
+          } catch (cause) {
             setError("No se pudo crear la materia. Revisa que no exista ya en este grado.");
+            // El chip conserva lo escrito sólo si se entera de que no se guardó.
+            throw cause;
           }
         }}
       />

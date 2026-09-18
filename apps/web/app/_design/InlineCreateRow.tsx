@@ -106,6 +106,10 @@ export function InlineCreateRow({
   const [missing, setMissing] = useState<Readonly<Record<string, true>>>({});
   const [saving, setSaving] = useState(false);
   const firstRef = useRef<HTMLInputElement | null>(null);
+  // El renglón mismo, para buscar SUS celdas y no las del vecino: dos renglones
+  // en la misma pantalla comparten nombres de celda (`startsOn` en días cerrados
+  // y en actividades), y un `document.querySelector` mandaba el foco al otro.
+  const rowRef = useRef<HTMLDivElement | null>(null);
   const format = useFormatError(rules);
 
   // El foco va en un efecto y no en el manejador del clic: cuando el clic
@@ -137,6 +141,9 @@ export function InlineCreateRow({
   };
 
   const save = async (): Promise<void> => {
+    // Dos Enter seguidos en una conexión lenta son el caso normal en un renglón
+    // hecho para ir rápido, no el raro: sin esto se dan de alta dos registros.
+    if (saving) return;
     const gaps = columns.filter(
       (c) => c.required === true && (values[c.key] ?? "").trim() === "",
     );
@@ -144,10 +151,13 @@ export function InlineCreateRow({
       setMissing(Object.fromEntries(gaps.map((c) => [c.key, true as const])));
       // El foco va al PRIMERO que falta en el orden de la pantalla, que es a
       // donde el ojo va a ir de todas formas.
-      document.querySelector<HTMLElement>(`[data-cell="${gaps[0]?.key ?? ""}"]`)?.focus();
+      rowRef.current?.querySelector<HTMLElement>(`[data-cell="${gaps[0]?.key ?? ""}"]`)?.focus();
       return;
     }
-    if (Object.keys(format.errors).length > 0) return;
+    // Se revisan las reglas AQUÍ y no sólo al salir de la celda: Enter guarda
+    // desde dentro del campo que se está escribiendo, y ese campo nunca pierde
+    // el foco. Sin esta línea la regla existe y el dato imposible sale igual.
+    if (!format.checkAll(values)) return;
 
     setSaving(true);
     try {
@@ -201,6 +211,7 @@ export function InlineCreateRow({
 
   return (
     <div
+      ref={rowRef}
       onKeyDown={onKeyDown}
       style={{
         borderTop: "1px solid var(--border)",

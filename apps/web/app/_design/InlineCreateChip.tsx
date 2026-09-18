@@ -45,6 +45,14 @@ export function InlineCreateChip({
   }, [open]);
 
   const save = async (): Promise<void> => {
+    // Se guarda con BANDERA, no deshabilitando el campo.
+    //
+    // `disabled` mientras vuela la petición parecía inofensivo y no lo es: un
+    // navegador de verdad mueve el foco fuera de un elemento que se deshabilita
+    // —jsdom no, por eso ninguna prueba lo veía— y el `focus()` de después caía
+    // sobre un campo todavía apagado. El chip existe para encadenar, y se
+    // rompía en el segundo registro.
+    if (saving) return;
     const name = value.trim();
     if (name === "") return;
     setSaving(true);
@@ -101,7 +109,6 @@ export function InlineCreateChip({
       aria-label={fieldLabel}
       value={value}
       placeholder={placeholder}
-      disabled={saving}
       onChange={(e) => setValue(e.target.value.toUpperCase())}
       onKeyDown={onKeyDown}
       // Sólo se cierra solo si está VACÍO. Irse a otro lado con algo escrito no
