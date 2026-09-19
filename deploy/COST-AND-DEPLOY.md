@@ -162,7 +162,7 @@ The Terraform is multi-env-ready: per-env `project_id`, `billing_account_id`, SA
 4. `make tf-plan ENV=dev` → review → `make tf-apply ENV=dev`.
 5. Write DB app password to Secret Manager; run `db/setup_app_role.sql` as superuser (NOBYPASSRLS).
 6. Apply migrations + owner seed.
-7. Build+deploy images (Cloud Build, `_DEPLOY=true`).
+7. Build images (Cloud Build), then roll them out (`.github/workflows/deploy-dev.yml`, or `make deploy-<svc> ENV=dev TAG=<sha>` by hand).
 8. Map one registrable domain fronting web + gateway same-site (required for cookie auth).
 
 ### Top 5 cost levers — checklist

@@ -14,7 +14,7 @@ go 1.25.0
 
 require (
 	cloud.google.com/go/pubsub v1.51.0
-	google.golang.org/grpc v1.82.1
+	google.golang.org/grpc v1.83.1
 	gorm.io/gorm v1.31.2
 )
 

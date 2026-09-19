@@ -36,6 +36,16 @@ export interface SlideOverProps {
   error?: string;
   onClose: () => void;
   onSubmit: () => void;
+  /**
+   * Cuando se da, aparece "Guardar y crear otro": guarda y NO cierra.
+   *
+   * Es el patrón Save & New. Le toca a las altas que se hacen en serie —una
+   * escuela captura maternal, kínder y primaria de corrido, no uno cada quince
+   * días— y no a las que se hacen una vez, donde ofrecer "y otro" invita a un
+   * error caro. Quien lo recibe conserva el contexto, limpia el resto y devuelve
+   * el foco al primer campo.
+   */
+  onSubmitAndNew?: () => void;
   size?: SlideOverSize;
   /** Ver DrawerShell: apaga el cierre por velo y por Esc, nunca el del botón. */
   dismissible?: boolean;
@@ -51,6 +61,7 @@ export function SlideOver({
   error,
   onClose,
   onSubmit,
+  onSubmitAndNew,
   size = "md",
   dismissible = true,
   children,
@@ -72,6 +83,18 @@ export function SlideOver({
             Cancelar
           </Btn>
           <div style={{ flex: 1 }} />
+          {onSubmitAndNew !== undefined && (
+            <Btn
+              kind="ghost"
+              type="button"
+              onClick={() => {
+                if (!pending) onSubmitAndNew();
+              }}
+              style={{ height: 52, fontSize: 15 }}
+            >
+              Guardar y crear otro
+            </Btn>
+          )}
           {/* Se apaga SÓLO mientras la petición va en camino. Una forma
               incompleta recibe una frase, nunca un control muerto que no
               dice nada. */}

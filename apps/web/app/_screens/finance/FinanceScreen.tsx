@@ -13,8 +13,6 @@ import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 import { listStudents, type Student } from "../../students/api";
 
 import { API_URL } from "../../api-url";
-import { CollectDrawer, type CollectStudent } from "./CollectDrawer";
-import { StudentPicker } from "./StudentPicker";
 import { CashUpPanel } from "./CashUpPanel";
 import { IncomePanel } from "./IncomePanel";
 import { csvName, downloadCsv, toCsv, type CsvColumn } from "../../_lib/csv";
@@ -203,8 +201,20 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
   const [pay, setPay] = useState<Row | null>(null);
   // The counter: pick a pupil, then take whatever the parent hands over. Kept
   // separate from `pay`, which is the older per-charge path.
-  const [picking, setPicking] = useState(false);
-  const [collecting, setCollecting] = useState<CollectStudent | null>(null);
+  /*
+   * Aquí vivían `picking` y `collecting`, con su buscador de alumno y su cajón
+   * de cobro. `setPicking(true)` NO SE LLAMABA EN NINGÚN LADO, así que las dos
+   * pantallas eran inalcanzables: el primer intento de poner la ventanilla en un
+   * rincón de Finanzas, abandonado cuando la ventanilla se mudó a su propia
+   * pantalla y nunca borrado.
+   *
+   * La decisión ya estaba tomada y escrita en `PaymentsScreen`: "deliberadamente
+   * NO es un rincón de Finanzas. Finanzas contesta la pregunta de la dirección
+   * —qué entró, qué se debe— y esto contesta la del mostrador: hay un papá ahí
+   * parado con dinero. Distinta gente, distintas horas, distinta pantalla."
+   *
+   * Cobrar un cargo suelto desde aquí sigue existiendo: es `PayDrawer`.
+   */
   const [cashUp, setCashUp] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(20);
@@ -397,13 +407,6 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
       </div>
 
       {pay !== null && <PayDrawer charge={pay.charge} name={pay.name} onClose={() => setPay(null)} onPaid={onPaid} />}
-      {picking && (
-        <StudentPicker
-          students={[...studentMap.values()].map((s) => ({ id: s.id, firstName: s.firstName, lastName: s.lastName, gradeGroup: s.gradeGroup }))}
-          onPick={(s) => { setPicking(false); setCollecting(s); }}
-          onClose={() => setPicking(false)}
-        />
-      )}
       {cashUp && (
         <DrawerShell
           title="Corte de caja"
@@ -413,13 +416,6 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
         >
           <CashUpPanel day="" />
         </DrawerShell>
-      )}
-      {collecting !== null && (
-        <CollectDrawer
-          student={collecting}
-          onClose={() => setCollecting(null)}
-          onCollected={() => { if (activeCycleId !== undefined) { load(activeCycleId); } say("Cobro registrado"); }}
-        />
       )}
       {toast !== null && (
         <div role="status" style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>

@@ -273,10 +273,10 @@ input { font-family: var(--font-ui); }
   max-width: var(--reading-max);
 }
 
-/* El modal centrado del buscador de alumnos. No es un cajón lateral, pero su
-   ancho vive aquí por la misma razón. */
-.modal-panel { width: min(560px, 92vw); }
-@media (min-width: 1600px) { .modal-panel { width: min(680px, 92vw); } }
+/* Aquí vivía `.modal-panel`, el ancho del buscador de alumnos, que era el único
+   diálogo del sistema con panel propio. Se fue con él: ahora monta la misma
+   cáscara que los demás y usa .drawer-md. Un segundo ancho para lo mismo es como
+   nacen dos opiniones sobre el mismo número. */
 
 /* ---- el cajón ---- */
 .drawer-sm { width: min(460px, 100%); }
@@ -302,20 +302,22 @@ input { font-family: var(--font-ui); }
    manda, sólo aloja. */
 .drawer-body-bare { gap: 0; }
 
-/* En un monitor ancho la forma grande deja de ser una tira vertical de cuarenta
-   campos. `break-inside` evita que una etiqueta quede en una columna y su campo
-   en la otra. */
-@media (min-width: 1280px) {
-  .drawer-lg .drawer-body:not(.drawer-body-bare) {
-    display: block;
-    column-count: 2;
-    column-gap: 26px;
-  }
-  .drawer-lg .drawer-body:not(.drawer-body-bare) > * {
-    break-inside: avoid;
-    margin-bottom: 18px;
-  }
-}
+/* Aquí vivía un flujo en dos columnas para el cajón grande, y de ahí salía casi
+   todo lo que el colegio llamaba "amontonado".
+
+   El corte entre columnas caía DONDE ALCANZARA LA ALTURA, no donde terminaba una
+   idea: bastaba agregar un concepto de inscripción para que "Cobranza" brincara
+   de columna entera, reacomodando la forma bajo las manos de quien capturaba. Y
+   el renglón de error acababa al pie de la segunda columna, hablando de una
+   sección que estaba arriba en la primera.
+
+   Baymard además lo midió en general: el layout multicolumna provoca campos
+   obligatorios omitidos y campos innecesarios llenados, porque las columnas
+   jalan la atención en varias direcciones. Dos columnas "nunca se recomienda".
+
+   Una columna, siempre. La forma que ya no cabe en una columna no necesita dos:
+   necesita ser una página. El ancho .drawer-lg SE QUEDA — lo usa el cobro, que
+   monta cuerpo desnudo y al que esta regla nunca le aplicó. */
 
 /* ============================================================
    COMMAND PALETTE (⌘K)
@@ -473,4 +475,55 @@ input { font-family: var(--font-ui); }
     width: calc(100vw - 16px);
   }
   [cmdk-list] { max-height: min(62vh, 340px); }
+}
+
+/* ============================================================
+   PÁGINA DE ALTA
+
+   Para la forma que ya no cabe en un cajón. Una columna de lectura acotada, el
+   resumen pegado a un lado y el guardar pegado abajo: las dos cosas que no
+   pueden irse de la vista mientras alguien captura.
+
+   Los números viven aquí y no en el JSX por la misma razón de siempre en este
+   repo: un estilo en línea le gana a cualquier @media, y mientras el `display`
+   del cuerpo del cajón estuvo en línea sus columnas nunca se activaron.
+   ============================================================ */
+.create-page { display: flex; flex-direction: column; min-height: 100%; }
+
+.create-page-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 22px;
+  padding: 0 26px 26px;
+  align-items: start;
+}
+
+/* UNA columna, con ancho de lectura. Una forma de 1800px hace que el ojo pierda
+   el renglón al regresar, y fue justo tratar de llenar un monitor ancho lo que
+   llevó al flujo en dos columnas que causó todo esto. */
+.create-page-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 680px;
+}
+
+.create-page-aside { position: sticky; top: 22px; }
+
+.create-page-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 26px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  z-index: 5;
+}
+
+/* El resumen se pone al lado sólo cuando de verdad cabe. Abajo de eso va
+   después del cuerpo, que es donde estorba menos. */
+@media (min-width: 1100px) {
+  .create-page-grid { grid-template-columns: minmax(0, 1fr) 280px; }
 }

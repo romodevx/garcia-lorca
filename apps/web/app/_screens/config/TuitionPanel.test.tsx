@@ -1,11 +1,31 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Cycle, Level } from "../../config/api";
 import type { EnrollmentConcept } from "../../finance/api";
 import * as financeApi from "../../finance/api";
-import { TuitionPanel, pesosToCents, centsToPesos, inscriptionTotals, ladderProblem } from "./TuitionPanel";
+import { TuitionPanel } from "./TuitionPanel";
+
+/**
+ * El panel ya no guarda a qué nivel se le están poniendo precios: eso vive en
+ * `Catalog`, porque capturar precios OCUPA la pantalla y el catálogo entero deja
+ * de dibujarse. Aquí se monta el anfitrión mínimo que hace ese trabajo.
+ */
+function Host(props: Partial<React.ComponentProps<typeof TuitionPanel>> = {}): React.ReactElement {
+  const [pricingLevelId, setPricingLevelId] = useState<string | undefined>(undefined);
+  return (
+    <TuitionPanel
+      cycle={cycle}
+      levels={levels}
+      pricingLevelId={pricingLevelId}
+      onPrice={setPricingLevelId}
+      {...props}
+    />
+  );
+}
+import { pesosToCents, centsToPesos, inscriptionTotals, ladderProblem } from "./tuition-math";
 
 vi.mock("../../finance/api", () => ({
   listTuitionPlans: vi.fn(),
@@ -75,7 +95,7 @@ describe("pesos and cents", () => {
 
 describe("the tuition table", () => {
   it("shows a row per level, priced or not", async () => {
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
 
     // Primaria is priced; Kínder is not, and must say so rather than show zeros
     // that read like a free school.
@@ -91,11 +111,13 @@ describe("the tuition table", () => {
       months: 11, firstBilledMonth: 8, dueDay: 5, lateFeeCents: 10000, active: true,
       policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 }, schedule: [], monthlyDiscountCents: 0, fees: [], enrollmentDueOn: "", enrollmentConcepts: [],
     });
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
     await screen.findByText("Primaria");
 
     await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
-    const form = await screen.findByRole("dialog", { name: /^Precios de / });
+    await screen.findByRole("heading", { name: /^Precios de / });
+    await expandCollapsedSections(user);
+    const form = document.body;
     await captureInscription(user, form);
     await user.type(within(form).getByLabelText("Colegiatura mensual"), "2500");
     await user.clear(within(form).getByLabelText("Mensualidades"));
@@ -121,11 +143,13 @@ describe("the tuition table", () => {
 
   it("will not send a due day the calendar cannot honour", async () => {
     const user = userEvent.setup();
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
     await screen.findByText("Primaria");
 
     await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
-    const form = await screen.findByRole("dialog", { name: /^Precios de / });
+    await screen.findByRole("heading", { name: /^Precios de / });
+    await expandCollapsedSections(user);
+    const form = document.body;
     await user.type(within(form).getByLabelText("Colegiatura mensual"), "2500");
     await user.clear(within(form).getByLabelText("Día límite"));
     await user.type(within(form).getByLabelText("Día límite"), "31");
@@ -144,7 +168,7 @@ describe("running the month", () => {
     finance.runBilling.mockResolvedValue({
       tuitionCreated: 30, enrollmentCreated: 10, lateFeesCreated: 4, feesCreated: 0, enrollmentMoved: 0, skipped: 6, levelsWithoutPlan: [],
     });
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
     await screen.findByText("Primaria");
 
     await user.click(screen.getByRole("button", { name: /Generar cargos/ }));
@@ -160,7 +184,7 @@ describe("running the month", () => {
       tuitionCreated: 0, enrollmentCreated: 0, lateFeesCreated: 0, feesCreated: 0, enrollmentMoved: 0, skipped: 0,
       levelsWithoutPlan: ["Kínder", "Preparatoria"],
     });
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
     await screen.findByText("Primaria");
 
     await user.click(screen.getByRole("button", { name: /Generar cargos/ }));
@@ -174,11 +198,12 @@ describe("TuitionPanel — cobranza", () => {
   // person could reach. This is that field.
   it("saves the daily surcharge and the early-payment reward", async () => {
     const user = userEvent.setup();
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
 
     await screen.findByRole("row", { name: /Kínder/ });
     await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
-    await captureInscription(user, screen.getByRole("dialog", { name: /^Precios de / }));
+    await expandCollapsedSections(user);
+    await captureInscription(user, document.body);
     await user.type(screen.getByLabelText("Colegiatura mensual"), "3200");
     await user.click(screen.getByLabelText("Cobrar recargo por día"));
     await user.type(screen.getByLabelText("Recargo por día"), "10");
@@ -199,10 +224,11 @@ describe("TuitionPanel — cobranza", () => {
   // form says so before the round trip.
   it("refuses a daily rule with no amount", async () => {
     const user = userEvent.setup();
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
 
     await screen.findByRole("row", { name: /Kínder/ });
     await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
+    await expandCollapsedSections(user);
     await user.type(screen.getByLabelText("Colegiatura mensual"), "3200");
     await user.click(screen.getByLabelText("Cobrar recargo por día"));
     await user.click(screen.getByRole("button", { name: /Guardar tabulador/ }));
@@ -216,12 +242,33 @@ describe("TuitionPanel — cobranza", () => {
 // request; splitting a payment is what a cuota does now. Their tests went with
 // them — what replaced them is pinned under "cuotas" below.
 
-/** Opens the price drawer of a level. */
+/**
+ * Abre el tabulador de un nivel.
+ *
+ * Ya NO es un cajón: catorce campos en cinco secciones son una página, y el
+ * encabezado de esa página es lo que se busca ahora. Las secciones plegables se
+ * abren aquí mismo, porque cada prueba de abajo mira campos que en la pantalla
+ * real están a un clic — no hay por qué repetir ese clic quince veces.
+ */
 async function openPrices(user: ReturnType<typeof userEvent.setup>, level: RegExp): Promise<HTMLElement> {
-  render(<TuitionPanel cycle={cycle} levels={levels} />);
+  render(<Host />);
   await screen.findByText("Primaria");
   await user.click(within(screen.getByRole("row", { name: level })).getByRole("button", { name: /Definir|Editar/ }));
-  return screen.findByRole("dialog", { name: /^Precios de / });
+  await screen.findByRole("heading", { name: /^Precios de / });
+  await expandCollapsedSections(user);
+  return document.body;
+}
+
+/** Cobranza y Cuotas nacen plegadas: divulgación progresiva, no un secreto. */
+async function expandCollapsedSections(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  // El nombre accesible del encabezado lleva su número y su resumen:
+  // "3 Cobranza recargo fijo". Se busca por el nombre de la sección, no anclado.
+  for (const section of [/Cobranza/, /Cuotas/]) {
+    const button = screen.queryByRole("button", { name: section });
+    if (button !== null && button.getAttribute("aria-expanded") === "false") {
+      await user.click(button);
+    }
+  }
 }
 
 describe("what the school asked to stop seeing", () => {
@@ -393,7 +440,7 @@ describe("what the run reports", () => {
       tuitionCreated: 10, enrollmentCreated: 1, lateFeesCreated: 0, feesCreated: 8,
       enrollmentMoved: 0, skipped: 2, levelsWithoutPlan: [],
     });
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
     await screen.findByText("Primaria");
 
     await user.click(screen.getByRole("button", { name: /Generar cargos del mes/ }));
@@ -411,7 +458,7 @@ it("says when it corrected inscription deadlines already issued", async () => {
     tuitionCreated: 0, enrollmentCreated: 0, lateFeesCreated: 0, feesCreated: 0,
     enrollmentMoved: 400, skipped: 4010, levelsWithoutPlan: [],
   });
-  render(<TuitionPanel cycle={cycle} levels={levels} />);
+  render(<Host />);
   await screen.findByText("Primaria");
 
   await user.click(screen.getByRole("button", { name: /Generar cargos del mes/ }));
@@ -426,7 +473,7 @@ it("says nothing about deadlines when it moved none", async () => {
     tuitionCreated: 10, enrollmentCreated: 1, lateFeesCreated: 0, feesCreated: 2,
     enrollmentMoved: 0, skipped: 0, levelsWithoutPlan: [],
   });
-  render(<TuitionPanel cycle={cycle} levels={levels} />);
+  render(<Host />);
   await screen.findByText("Primaria");
 
   await user.click(screen.getByRole("button", { name: /Generar cargos del mes/ }));
@@ -571,7 +618,7 @@ describe("la captura del tabulador", () => {
     // de error explicando el formato aaaa-mm-dd. Con calendario, ese error deja
     // de poder ocurrir.
     const user = userEvent.setup();
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
     await screen.findByRole("row", { name: /Kínder/ });
     await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
 
@@ -580,7 +627,7 @@ describe("la captura del tabulador", () => {
 
   it("los montos se capturan en pesos y los conteos no", async () => {
     const user = userEvent.setup();
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
     await screen.findByRole("row", { name: /Kínder/ });
     await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
 
@@ -593,12 +640,107 @@ describe("la captura del tabulador", () => {
 
   it("el nombre de un concepto se captura en mayúsculas", async () => {
     const user = userEvent.setup();
-    render(<TuitionPanel cycle={cycle} levels={levels} />);
+    render(<Host />);
     await screen.findByRole("row", { name: /Kínder/ });
     await user.click(within(screen.getByRole("row", { name: /Kínder/ })).getByRole("button", { name: /Definir|Editar/ }));
 
     const nombre = await screen.findByLabelText("Nuevo concepto");
     await user.type(nombre, "gastos adm");
     expect(nombre).toHaveValue("GASTOS ADM");
+  });
+});
+
+/**
+ * La columna de inscripción de la tabla.
+ *
+ * Desde que la inscripción se captura por conceptos (ADR 0011), `enrollmentCents`
+ * viaja SIEMPRE en cero: el monto vive en los tramos de cada concepto. La tabla
+ * seguía leyendo ese cero, así que un nivel con inscripción de $4,500 se anunciaba
+ * como $0.00 — y este archivo advierte contra exactamente eso: "una escuela
+ * leyendo $0.00 en una columna no distingue 'gratis' de 'nadie lo llenó', y la
+ * diferencia es un año de colegiaturas sin cobrar".
+ */
+describe("lo que la tabla dice que cuesta la inscripción", () => {
+  it("suma los conceptos en vez de leer el cero que ya no significa nada", async () => {
+    finance.listTuitionPlans.mockResolvedValue([
+      {
+        id: "p1", cycleId: "c1", levelId: "lv1",
+        // Cero a propósito: es lo que el servidor guarda desde ADR 0011.
+        enrollmentCents: 0,
+        monthlyCents: 280000, months: 10, firstBilledMonth: 9, dueDay: 10,
+        lateFeeCents: 0, active: true, monthlyDiscountCents: 0, schedule: [], fees: [],
+        enrollmentDueOn: "",
+        enrollmentConcepts: [
+          { name: "INSCRIPCIÓN", tiers: [{ effectiveFrom: "2026-08-01", effectiveTo: "", amountCents: 450000 }] },
+          { name: "SEGURO", tiers: [{ effectiveFrom: "2026-08-01", effectiveTo: "", amountCents: 50000 }] },
+        ],
+        policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 },
+      },
+    ]);
+
+    render(<Host />);
+
+    const fila = await screen.findByRole("row", { name: /Kínder/ });
+    expect(fila).toHaveTextContent("5000.00");
+    expect(fila, "sigue anunciando la inscripción como gratis").not.toHaveTextContent("$0.00");
+  });
+});
+
+/**
+ * ISSUE-002 — la inscripción de un plan VIEJO se anunciaba como $0.00.
+ *
+ * Al arreglar que la columna leyera los conceptos (ADR 0011) se rompió el otro
+ * lado: un plan escrito antes de los conceptos guarda UN `enrollmentCents` y la
+ * lista vacía, así que la columna pasó a decir cero. Los cuatro tabuladores del
+ * colegio sembrado son de ese tipo: la pantalla anunciaba las cuatro
+ * inscripciones como gratis.
+ */
+describe("la inscripción de un plan sin conceptos", () => {
+  it("cae al monto único en vez de decir cero", async () => {
+    finance.listTuitionPlans.mockResolvedValue([
+      {
+        id: "p1", cycleId: "c1", levelId: "lv1",
+        // Como lo guarda el seed y como lo guardaban todos los planes viejos.
+        enrollmentCents: 450000,
+        enrollmentConcepts: [],
+        monthlyCents: 280000, months: 10, firstBilledMonth: 9, dueDay: 10,
+        lateFeeCents: 0, active: true, monthlyDiscountCents: 0, schedule: [], fees: [],
+        enrollmentDueOn: "",
+        policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 },
+      },
+    ]);
+
+    render(<Host />);
+
+    const fila = await screen.findByRole("row", { name: /Kínder/ });
+    expect(fila).toHaveTextContent("4500.00");
+    expect(fila, "anuncia la inscripción como gratis").not.toHaveTextContent("$0.00");
+  });
+});
+
+/**
+ * ISSUE-001 — "Sin tabulador" dicho antes de saberlo.
+ *
+ * La tabla se dibuja de inmediato con la lista de planes vacía, así que durante
+ * la carga TODOS los niveles anuncian "Sin tabulador · este nivel no se cobra".
+ * Es la misma falla contra la que advierte el comentario de este archivo, en su
+ * otra forma: un colegio que lee eso no distingue "no se cobra" de "todavía no
+ * sabemos", y la frase está escrita como un hecho.
+ */
+describe("mientras los tabuladores cargan", () => {
+  it("no afirma que el nivel no se cobra", async () => {
+    let resolver: ((planes: never[]) => void) | undefined;
+    finance.listTuitionPlans.mockImplementation(
+      () => new Promise((resolve) => { resolver = resolve as (p: never[]) => void; }),
+    );
+
+    render(<Host />);
+
+    const fila = await screen.findByRole("row", { name: /Kínder/ });
+    expect(fila).not.toHaveTextContent("este nivel no se cobra");
+
+    resolver?.([]);
+    // Ya con la respuesta en mano, decirlo es correcto.
+    await waitFor(() => expect(screen.getByRole("row", { name: /Kínder/ })).toHaveTextContent("Sin tabulador"));
   });
 });

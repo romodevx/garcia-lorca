@@ -7,8 +7,16 @@
 #
 # This deploys IMAGES ONLY. Terraform owns the infrastructure and is applied
 # deliberately by a human, because an apply can destroy a database and a push
-# should never be able to. `gcloud run deploy` swaps the container on an existing
-# service, which is reversible in one command.
+# should never be able to. `gcloud run services update` swaps the container on an
+# existing service, which is reversible in one command.
+#
+# Shape of the job, and why (see .claude/docs/PLAN-minutos-ci.md):
+#   1. refuse the commit unless CI is green on that exact SHA  <- the only gate
+#   2. submit the Cloud Build async, poll it, cancel it if this runner dies
+#   3. migrations, THEN the rollout, THEN the smoke test
+# Cloud Build builds images and nothing else. It no longer re-runs the quality
+# gates on a commit CI already approved, which was 25.5 min of every build and
+# was billed a second time by this runner watching the stream.
 name: Deploy dev
 
 # Runs AFTER CI finishes on dev, not in parallel with it.
@@ -36,11 +44,15 @@ concurrency:
   cancel-in-progress: true
 
 # Declaring a permissions block opts OUT of the defaults, so every scope the job
-# needs must be listed. `checks: read` used to be here for the polling step; the
-# workflow_run trigger replaced it and needs no check access at all.
+# needs must be listed.
 permissions:
   contents: read
   id-token: write # mint the OIDC token for keyless auth to Google
+  # Back, for a different reason than last time. Cloud Build no longer re-runs
+  # the quality gates (T10), so the ONLY thing standing between an unverified
+  # commit and the school's demo is the check-run assertion below. Without this
+  # scope that assertion 403s and every deploy stops.
+  checks: read
 
 env:
   PROJECT_ID: garcia-lorca
@@ -53,9 +65,12 @@ jobs:
   deploy:
     name: build images and roll out
     runs-on: ubuntu-latest
-    # A red CI must never reach the demo. workflow_dispatch has no triggering
-    # run, so it is allowed through deliberately — a manual deploy is a human
-    # decision.
+    # A red CI must never reach the demo. workflow_dispatch still gets in here —
+    # a manual deploy is a human decision — but it no longer skips verification:
+    # the check-run guard below runs for EVERY path and fails a dispatch whose
+    # SHA has no green CI. That hole was survivable while Cloud Build re-ran the
+    # gates itself; now that it does not (T10), it would ship code that no
+    # source-map gate and no vulnerability scan has ever seen.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
@@ -69,6 +84,31 @@ jobs:
 
       - name: Resolve the commit being deployed
         run: echo "SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Refuse to deploy a commit CI has not passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The aggregate job in ci.yml is named `ci`; that is the check-run
+          # that means "every gate passed on this exact tree".
+          runs=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/check-runs?per_page=100" \
+                   --jq '[.check_runs[] | select(.name == "ci")]')
+          verdict=$(printf '%s' "$runs" \
+                    | jq -r 'sort_by(.completed_at // .started_at) | last | .conclusion // "pending"')
+          if [ "$verdict" = "success" ]; then
+            echo "CI is green on ${SHA}."
+            exit 0
+          fi
+          if [ "$(printf '%s' "$runs" | jq 'length')" = "0" ]; then
+            echo "::error::No CI check-run named 'ci' exists for ${SHA}."
+            echo "::error::Nothing has verified this commit. Push it to a branch and let CI run,"
+            echo "::error::or open a PR — do not deploy it."
+          else
+            echo "::error::The CI check-run for ${SHA} concluded '${verdict}', not 'success'."
+          fi
+          echo "::error::Cloud Build no longer re-runs the gates, so this is the only verification there is."
+          exit 1
 
       - id: auth
         name: Authenticate to Google Cloud (keyless)
@@ -99,11 +139,113 @@ jobs:
           FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
         run: |
           set -euo pipefail
-          gcloud builds submit \
+
+          # --async, then poll. NOT fire-and-forget.
+          #
+          # Submitting without waiting looks like it saves 58 billed minutes,
+          # and it does not — it hands back three things instead:
+          #   1. The red X. A failed build would leave this run GREEN, and the
+          #      fallback (a Cloud Build email) is known broken: this project's
+          #      outbound mail lands in spam and is blocked on an SMTP credential.
+          #   2. The concurrency lock. `cancel-in-progress` above only works
+          #      because the runner holds the build for its whole duration. Let
+          #      go, and two pushes in a row race to `gcloud run services update`
+          #      with the OLDER build free to land last. That is exactly how the
+          #      demo ran the wrong commit for two days.
+          #   3. The rollout. Migrations and the image swap happen in the steps
+          #      below, which cannot run if this step has already exited.
+          #
+          # The minutes come from making the BUILD shorter — the gates moved out
+          # of cloudbuild (T10) and the images now reuse their layers — not from
+          # refusing to watch it. What --async buys over the synchronous form is
+          # robustness: a 55-minute log stream that drops takes the old command
+          # down with it even when the build succeeds.
+          BUILD_ID=$(gcloud builds submit \
             --project="$PROJECT_ID" \
             --config=deploy/cloudbuild/cloudbuild.yaml \
-            --substitutions=_TAG="$SHA",_DEPLOY=false,_AUTH_PROVIDER="$AUTH_PROVIDER",_FIREBASE_API_KEY="$FIREBASE_API_KEY",_FIREBASE_AUTH_DOMAIN="$FIREBASE_AUTH_DOMAIN",_FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID" \
-            --service-account="projects/$PROJECT_ID/serviceAccounts/${{ vars.GCP_DEPLOY_SA }}"
+            --substitutions=_TAG="$SHA",_AUTH_PROVIDER="$AUTH_PROVIDER",_FIREBASE_API_KEY="$FIREBASE_API_KEY",_FIREBASE_AUTH_DOMAIN="$FIREBASE_AUTH_DOMAIN",_FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID" \
+            --service-account="projects/$PROJECT_ID/serviceAccounts/${{ vars.GCP_DEPLOY_SA }}" \
+            --async --format='value(id)')
+          # An empty id here would send the loop below into 45 minutes of
+          # `gcloud builds describe ""` before anybody learned the submit never
+          # landed. Fail on the line that actually broke.
+          if [ -z "${BUILD_ID:-}" ]; then
+            echo "::error::gcloud builds submit returned no build id — nothing was submitted"
+            exit 1
+          fi
+          echo "BUILD_ID=$BUILD_ID" >> "$GITHUB_ENV"
+          CONSOLE="https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=$PROJECT_ID"
+          echo "build:   $BUILD_ID"
+          echo "console: $CONSOLE"
+
+          # `cancel-in-progress` cancels the RUNNER. The build it submitted keeps
+          # going on Google's side, finishes, and its images sit in Artifact
+          # Registry ready for whatever rolls out next — an orphan with the
+          # authority to change what the school sees. Kill it with the runner.
+          #
+          # Best effort by nature: GitHub does not promise the shell gets a
+          # signal on cancellation. It usually does, and an orphan we tried to
+          # cancel beats one we never tried to.
+          BUILD_DONE=0
+          cleanup() {
+            rc=$?
+            if [ "$BUILD_DONE" != "1" ] && [ -n "${BUILD_ID:-}" ]; then
+              echo "::warning::runner is exiting (rc=$rc) while build $BUILD_ID is still in flight — cancelling it"
+              gcloud builds cancel "$BUILD_ID" --project="$PROJECT_ID" --quiet 2>/dev/null || true
+            fi
+          }
+          trap cleanup EXIT INT TERM
+
+          # Deadline slightly above cloudbuild.yaml's own 2400s timeout, so a
+          # build that hangs is reported by Cloud Build as TIMEOUT (with a
+          # failing step to name) rather than by this loop as a mystery.
+          DEADLINE=$(( SECONDS + 2700 ))
+          while :; do
+            STATUS=$(gcloud builds describe "$BUILD_ID" --project="$PROJECT_ID" --format='value(status)' 2>/dev/null || echo UNKNOWN)
+            case "$STATUS" in
+              SUCCESS)
+                BUILD_DONE=1
+                echo "build $BUILD_ID: SUCCESS"
+                break
+                ;;
+              FAILURE|INTERNAL_ERROR|TIMEOUT|CANCELLED|EXPIRED)
+                BUILD_DONE=1
+                echo "::error::build $BUILD_ID finished as $STATUS"
+                # Replacing a streamed log with a status string would be a
+                # diagnostics regression, and the email that used to cover for
+                # it does not arrive. Say what broke, here, in the run.
+                step=$(gcloud builds describe "$BUILD_ID" --project="$PROJECT_ID" --format=json 2>/dev/null \
+                       | jq -r '[.steps[]? | select(.status == "FAILURE")] | .[0].id // "unknown"')
+                echo "::error::failing step: $step"
+                echo "::error::console: $CONSOLE"
+                {
+                  echo "## El build falló"
+                  echo
+                  echo "- Estado: \`$STATUS\`"
+                  echo "- Paso que falló: \`$step\`"
+                  echo "- Build: [\`$BUILD_ID\`]($CONSOLE)"
+                  echo
+                  echo "<details><summary>Últimas 100 líneas del log</summary>"
+                  echo
+                  echo '```'
+                  gcloud builds log "$BUILD_ID" --project="$PROJECT_ID" 2>/dev/null | tail -100 || echo "(el log no se pudo leer; ver la consola)"
+                  echo '```'
+                  echo "</details>"
+                } >> "$GITHUB_STEP_SUMMARY"
+                exit 1
+                ;;
+              QUEUED|WORKING|PENDING|UNKNOWN)
+                : ;;
+              *)
+                echo "unexpected status: $STATUS" ;;
+            esac
+            if [ "$SECONDS" -ge "$DEADLINE" ]; then
+              echo "::error::gave up waiting on build $BUILD_ID after 45 min (last status: $STATUS)"
+              echo "::error::the build is STILL RUNNING — it is about to be cancelled: $CONSOLE"
+              exit 1
+            fi
+            sleep 20
+          done
 
       # SCHEMA FIRST, THEN THE CODE THAT NEEDS IT.
       #
@@ -165,11 +307,48 @@ jobs:
           DATABASE_URL="postgresql://migrator:$ENCODED@127.0.0.1:5432/garcia_lorca?sslmode=disable" \
             sh scripts/migrate-cloud.sh
 
+      # LAST thing that changes what the school sees, and the only rollout that
+      # exists. `gcloud run services update` (not `run deploy`) because that is
+      # what dev has always used; the never-executed `run deploy` copy that used
+      # to sit in cloudbuild.yaml is gone.
       - name: Roll out the new revisions
         run: |
           set -euo pipefail
-          for svc in gateway iam students config finance grades attendance comms uniforms web; do
+          SERVICES="gateway iam students config finance grades attendance comms uniforms web"
+
+          # Ten services, one at a time, and a cancel can land between any two of
+          # them — leaving dev running half the new commit and half the old one,
+          # silently. Whatever happens, say which services are on what.
+          report() {
+            rc=$?
+            [ "$rc" = "0" ] && return 0
+            echo "::error::the rollout did not finish — dev may be split across two commits"
+            {
+              echo "## Rollout interrumpido"
+              echo
+              echo "Commit objetivo: \`$SHA\`"
+              echo
+              echo "| servicio | imagen en ejecución |"
+              echo "| --- | --- |"
+              for svc in $SERVICES; do
+                img=$(gcloud run services describe "$svc" --project="$PROJECT_ID" --region="$REGION" \
+                        --format='value(spec.template.spec.containers[0].image)' 2>/dev/null | sed 's|.*:||')
+                mark=""; [ "$img" = "$SHA" ] && mark=" ← nuevo"
+                echo "| $svc | \`${img:-desconocida}\`$mark |"
+              done
+              echo
+              echo "Para terminarlo: vuelve a lanzar este workflow sobre el mismo commit."
+              echo "Para volver atrás: lánzalo sobre el commit anterior (ambas cosas son"
+              echo "la misma operación — el rollout es idempotente)."
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
+          trap report EXIT
+
+          for svc in $SERVICES; do
             echo "--- $svc"
+            # Idempotent: re-running this on a service already on $SHA is a
+            # no-op worth nothing, which is what makes "run it again" a valid
+            # answer to both a half-finished rollout and a rollback.
             gcloud run services update "$svc" \
               --project="$PROJECT_ID" --region="$REGION" --quiet \
               --image="$REGION-docker.pkg.dev/$PROJECT_ID/$AR_REPO/$svc:$SHA"

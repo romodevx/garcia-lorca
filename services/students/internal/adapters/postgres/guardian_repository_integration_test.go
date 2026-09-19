@@ -15,6 +15,7 @@ package postgres_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -307,11 +308,18 @@ func TestGrantingAccessKeepsOneRow(t *testing.T) {
 
 	// And she is now reachable from the family read path, which is the entire
 	// purpose of giving her the account.
+	//
+	// Se busca a ESTA hija, no se cuentan las filas. `guardianOne` es el mismo
+	// tutor en media docena de pruebas de este archivo, y todas comparten un
+	// Postgres: exigir `len(mine) == 1` sólo era cierto si esta prueba corría
+	// primero, y corre de las últimas. La falla estuvo latente desde siempre —
+	// las pruebas de integración sólo corren en PRs (ci.yml:190), así que los
+	// push a dev nunca la ejecutaron.
 	mine, err := repo.ListByGuardian(ctx, guardianOne)
 	if err != nil {
 		t.Fatalf("ListByGuardian: %v", err)
 	}
-	if len(mine) != 1 || mine[0].StudentID() != studentID {
+	if !slices.ContainsFunc(mine, func(l domain.GuardianLink) bool { return l.StudentID() == studentID }) {
 		t.Errorf("the guardian cannot see their child: %+v", mine)
 	}
 }

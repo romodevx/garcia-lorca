@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useState, type ReactElement } from "react";
-import { Btn } from "../../_design/Controls";
-import { SlideOver } from "../../_design/SlideOver";
+import { useMemo, useState, type ReactElement } from "react";
+
+import { InlineCreateRow } from "../../_design/InlineCreateRow";
 import type { CreateGroupInput, Cycle, GradeLevel, Group } from "../../config/api";
-import { NumberField, TextField } from "../../_design/form";
-import { EmptyHint, Section } from "./parts";
+import { EmptyHint, ErrorAlert, Section } from "./parts";
 
 export interface GroupsPanelProps {
   cycle: Cycle;
@@ -16,52 +15,31 @@ export interface GroupsPanelProps {
 
 const DEFAULT_CAPACITY = 30;
 
-/** Suggests the next group letter (A, B, C…) from the count of existing groups. */
+/** La letra que sigue: A, B, C… */
 function nextLetter(groups: readonly Group[]): string {
   return String.fromCharCode("A".charCodeAt(0) + Math.min(groups.length, 25));
 }
 
 /**
- * The classrooms of a grade in one cycle: A, B, C…
+ * Los salones de un grado en un ciclo: A, B, C…
  *
- * The next letter and the usual capacity come filled in, because opening a
- * second group is one of those things a school does twenty times in an
- * afternoon and then not again until next August.
+ * Es el alta más repetitiva de todo el catálogo —una escuela abre veinte grupos
+ * en una tarde y luego no vuelve hasta el agosto siguiente— y por eso es donde
+ * el cajón costaba más: veinte viajes para escribir veinte letras.
+ *
+ * Las dos celdas llegan propuestas, así que abrir el renglón y dar Enter crea el
+ * grupo. Pero siguen siendo campos: el CUPO decide a qué grupo entra un alumno
+ * nuevo, y un salón más chico que los demás tiene que poder capturarse.
  */
 export function GroupsPanel({ cycle, gradeLevel, groups, onCreate }: GroupsPanelProps): ReactElement {
-  const [creating, setCreating] = useState(false);
-  const [name, setName] = useState(nextLetter(groups));
-  const [capacity, setCapacity] = useState(String(DEFAULT_CAPACITY));
-  const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
-  // The suggested letter follows the list, so it is never stale after a save or
-  // after switching grade.
-  useEffect(() => { setName(nextLetter(groups)); }, [groups]);
-
-  const submit = async (): Promise<void> => {
-    if (name.trim() === "") {
-      setError("Escribe el nombre del grupo.");
-      return;
-    }
-    setPending(true);
-    setError(undefined);
-    try {
-      const capacityNumero = Number(capacity);
-      if (capacity.trim() === "" || !Number.isFinite(capacityNumero)) {
-        // Number("") es 0, y un 0 que nadie escribió es un dato falso: un grupo
-        // con cupo 0 no acepta alumnos y la asignación automática lo salta.
-        setError("El cupo del grupo es obligatorio.");
-        return;
-      }
-      await onCreate({ cycleId: cycle.id, gradeLevelId: gradeLevel.id, name: name.trim(), capacity: capacityNumero });
-      setCreating(false);
-    } catch {
-      setError("No se pudo crear el grupo. Revisa que no exista ya con ese nombre.");
-    } finally {
-      setPending(false);
-    }
-  };
+  // Identidad estable: el renglón la observa para poner al día la celda que
+  // nadie tocó, y un objeto nuevo en cada render la reescribiría siempre.
+  const defaults = useMemo(
+    () => ({ name: nextLetter(groups), capacity: String(DEFAULT_CAPACITY) }),
+    [groups],
+  );
 
   return (
     <Section title="Grupos" subtitle={`De ${gradeLevel.name} en ${cycle.name}.`}>
@@ -80,31 +58,57 @@ export function GroupsPanel({ cycle, gradeLevel, groups, onCreate }: GroupsPanel
         <EmptyHint>Aún no hay grupos para este grado en el ciclo.</EmptyHint>
       )}
 
-      <Btn icon="plus" onClick={() => { setError(undefined); setCreating(true); }}>Nuevo grupo</Btn>
+      <div style={{ border: "1px solid var(--border)", borderRadius: "var(--r-md)", overflow: "hidden" }}>
+        <InlineCreateRow
+          addLabel="Nuevo grupo"
+          defaults={defaults}
+          columns={[
+            {
+              key: "name",
+              label: "Nombre del grupo",
+              kind: "text",
+              uppercase: true,
+              required: true,
+              placeholder: "A",
+            },
+            { key: "capacity", label: "Cupo", kind: "number", required: true, width: 120 },
+          ]}
+          onCreate={async (values) => {
+            const capacity = Number(values.capacity);
+            if (!Number.isFinite(capacity) || capacity < 1) {
+              // Number("") es 0, y un cupo 0 que nadie escribió no acepta
+              // alumnos: la asignación automática se salta ese grupo en silencio.
+              setError("El cupo del grupo tiene que ser un número mayor que cero.");
+              // También se relanza: para el renglón, "no pasó" es no pasó, sea
+              // por la red o por el dato.
+              throw new Error("El cupo del grupo tiene que ser un número mayor que cero.");
+            }
+            setError(undefined);
+            try {
+              await onCreate({
+                cycleId: cycle.id,
+                gradeLevelId: gradeLevel.id,
+                name: (values.name ?? "").trim(),
+                capacity,
+              });
+            } catch (cause) {
+              setError("No se pudo crear el grupo. Revisa que no exista ya con ese nombre.");
+              // Se RELANZA: el renglón necesita saber que no se guardó para
+              // conservar lo escrito. Tragarse el error aquí dejaba el mensaje
+              // hablando de un renglón que ya se había vaciado solo, y obligaba
+              // a reescribir todo.
+              throw cause;
+            }
+          }}
+        />
+      </div>
 
-      {creating && (
-        <SlideOver
-          title={`Nuevo grupo de ${gradeLevel.name}`}
-          subtitle={`Ciclo ${cycle.name}`}
-          icon="students"
-          submitLabel="Crear grupo"
-          pending={pending}
-          error={error}
-          onClose={() => { setCreating(false); setError(undefined); }}
-          onSubmit={() => void submit()}
-        >
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <TextField label="Nombre del grupo" value={name} onChange={setName} uppercase required placeholder="A" />
-            <NumberField label="Cupo" value={capacity} onChange={setCapacity} required min={0} />
-          </div>
-          <div style={{ display: "flex", gap: 11, padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
-            <p style={{ fontSize: 13.5, color: "var(--text-muted)", lineHeight: 1.5, margin: 0 }}>
-              El <strong>cupo</strong> es lo que decide a qué grupo entra un alumno nuevo: se llena
-              A y el siguiente pasa a B, sin que nadie lo asigne a mano.
-            </p>
-          </div>
-        </SlideOver>
-      )}
+      <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 10, lineHeight: 1.5 }}>
+        El <strong>cupo</strong> decide a qué grupo entra un alumno nuevo: se llena A y el
+        siguiente pasa a B, sin que nadie lo asigne a mano.
+      </p>
+
+      {error !== undefined && <ErrorAlert message={error} />}
     </Section>
   );
 }

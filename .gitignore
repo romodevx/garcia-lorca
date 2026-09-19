@@ -62,3 +62,8 @@ crash.log
 # Playwright run output: traces, videos and screenshots of the last run.
 apps/web/test-results/
 apps/web/playwright-report/
+.superpowers/
+
+# Built in CI by the proto job and handed to the go matrix as an artifact
+# (govulncheck, built once instead of `go install`ed in all 14 legs).
+dist-tools/
