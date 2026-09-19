@@ -405,13 +405,30 @@ abaratan con T1 y T3; no se quitan.
 
 ## Ahorro proyectado
 
+Revisado el 2026-09-18 contra el desglose real del build `667ce1bd`. La versión
+anterior de esta tabla le daba 754 min a T7 asumiendo *enviar y salir*; sondear
+—que es lo que se aprobó— deja al runner vivo durante el build, así que el
+ahorro del deploy no sale de dejar de mirar, sale de que el build **dure menos**.
+
 | Cambio | De | A | Ahorro |
 | --- | ---: | ---: | ---: |
 | T1+T2 — caché + compilaciones duplicadas | 1,619 | ~500 | ~1,120 |
 | T5 — fundir openapi+actionlint en proto | 57 | 0 | ~57 |
-| T7 — enviar y sondear en vez de mirar | 789 | ~35 | ~754 |
-| **Etapa 1** | **2,739** | **~890** | **~1,930 (70%)** |
-| T3+T4+T6 (Etapa 2) | ~890 | ~700 | ~190 (7%) |
+| T10 — quitar del build las compuertas que CI ya corrió | — | — | ~255 (25.5 min × ~10 deploys) |
+| T13 — `--cache-from` en las 10 imágenes | — | — | ~225 (estimado; se confirma al medir) |
+| T7 — sondear con plazo, trap y diagnóstico | — | — | **0 min — es corrección, no ahorro** |
+| **Etapa 1** | **2,739** | **~1,080** | **~1,660 (61%)** |
+| T3+T4+T6 (Etapa 2) | ~1,080 | ~890 | ~190 (7%) |
+
+T7 aparece con ahorro **cero** a propósito. Lo que compra es la X roja cuando un
+build falla, el candado de concurrencia que impide que el commit viejo aterrice
+al final, el `trap` que no deja builds huérfanos con autoridad para cambiar lo
+que ve el colegio, y el paso que falló impreso en el run. El canal de alerta por
+correo que lo sustituiría **está roto y documentado que lo está**.
+
+El ahorro de T13 es el único número estimado de la tabla: se sabe que las
+imágenes son 27.9 min sin caché, no cuánto bajan con él. `make ci-minutes` lo
+confirma o lo desmiente después del primer par de deploys.
 
 `web` (150 min) y `proto` (58 min) se quedan como están: tras la Etapa 1 pasan a
 ser ~23% del presupuesto, y son baratos y útiles. Aceptado explícitamente.
@@ -423,15 +440,35 @@ de trabajo del mes, que va a subir en cuanto se pueda empujar sin miedo:
 
 1. **≤ 18 min facturados por run de CI** en la Etapa 1; **≤ 8 min** solo
    después de T3 (ver §Objetivo: 18 jobs × 1 min de piso).
-2. **≤ 2 min facturados por deploy** (hoy: 58).
-3. Meta escalonada del total: **≤ 900 min/ciclo éxito, ≤ 700 objetivo**.
+2. **≤ 12 min facturados por deploy** (hoy: 58). CORREGIDO el 2026-09-18, por
+   la misma aritmética que obligó a corregir el criterio 1: **≤ 2 min era
+   imposible por construcción**. Ese número asumía *enviar y salir*, y las tres
+   revisiones exigieron **sondear** el estado terminal del build para conservar
+   la X roja y el candado de concurrencia. Sondear deja al runner vivo mientras
+   el build corre, así que se factura igual: el piso de este criterio es la
+   duración del build, no la del envío.
+   Medido sobre el build `667ce1bd` (54.6 min de reloj): las compuertas eran
+   25.5 min de la ruta crítica —las quita T10— y las imágenes 27.9 min —las baja
+   T13 con `--cache-from`, porque Cloud Build entrega un daemon de Docker frío
+   en cada build y no había de dónde traer las capas. ≤ 12 min es el objetivo
+   con caché caliente; un build tras cambiar `go.sum` falla todos los
+   `--cache-from` y no cuenta.
+3. Meta escalonada del total: **≤ 1,100 min/ciclo éxito, ≤ 900 objetivo**.
+   También corregido: el ≤ 900/700 original se apoyaba en que T7 ahorrara 754
+   min. Sondeando ahorra ~480 con T10 y T13 incluidos. Sigue siendo una caída
+   del ~60% sobre los 2,739 medidos.
 3b. Un ensayo de **rollback**: después de un deploy por el camino nuevo, volver
    dev al SHA anterior y confirmar que responde. Nada en el plan lo probaba.
 4. `actionlint` verde sobre los dos workflows (job `proto`), versión pineada.
 4b. `make ci` verde en local en menos de 5 min **en caliente**, con la lista de
    compuertas que omite escrita en su cadena de ayuda `##`.
-4c. `scripts/ci-minutes.sh` corre a la primera con UN comando documentado, y
-   ante un 403 imprime el `gh auth refresh -s user` que lo arregla.
+4c. `scripts/ci-minutes.sh` corre a la primera con UN comando documentado
+   (`make ci-minutes`) y ante un 403/404 imprime el comando que lo arregla.
+   Ajustado: el remedio NO es `gh auth refresh -s user`. El script evita a
+   propósito los endpoints de facturación —que sí piden el scope `user`, y por
+   eso `gh api user/settings/billing/actions` da 404 en esta máquina— y deriva
+   el costo de los tiempos de job, que sólo necesitan `repo`. Aconsejar `-s user`
+   sería mandar al dueño a pedir un permiso que el script no usa.
 4d. Un deploy manual (`workflow_dispatch`) sobre un SHA sin CI verde **falla**
    nombrando el check que falta.
 4e. Un run cancelado a media carrera deja el build de Cloud Build cancelado
