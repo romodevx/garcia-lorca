@@ -36,25 +36,76 @@ a billing account, and a GCS bucket for Terraform remote state.
 
 ## Deploy flow
 
-1. **Contracts**: `buf lint` + `buf generate` (CI regenerates `gen/`; never committed).
-2. **Quality gates** (fail-fast): `go vet` → `go test -race` → `govulncheck` + `go mod verify`.
-3. **Frontend**: `pnpm install --frozen-lockfile` → `turbo run test lint build --filter=@garcia-lorca/web...`
-   (pnpm is the only permitted package manager here — see the repo CLAUDE.md;
-   the filter skips the Expo app, whose build needs native tooling).
+Each commit is verified **once**, in one place. Cloud Build used to re-run the
+quality gates on the very commit CI had just approved — 25.5 min of every build,
+billed a second time by the GitHub runner watching the stream. It no longer
+does. See `.claude/docs/PLAN-minutos-ci.md` for the measurements.
+
+**Stage 1 — the gate: `.github/workflows/ci.yml`.** The only one.
+
+1. **Contracts**: `buf lint` → `buf breaking` (advisory) → `buf generate`
+   (`gen/` is regenerated, never committed), plus the OpenAPI contract lint and
+   `actionlint`, folded into the same job because a job of its own costs a whole
+   billed minute for nine seconds of work.
+2. **Quality gates**: `go vet` **once** across the workspace, then per module
+   `go test -race` → `-tags=integration` → `govulncheck` → `go mod verify`.
+   The heavy three are pull-request-only; a push gets unit tests + mod verify.
+3. **Frontend**: `pnpm install --frozen-lockfile` → `turbo run test lint` →
+   `build --filter=@garcia-lorca/web...` (pnpm is the only permitted package
+   manager — see the repo CLAUDE.md; the filter skips the Expo app, whose build
+   needs native tooling).
 4. **Build-hardening gate**: fail if any `*.map` or `sourceMappingURL` exists in
-   web artifacts. Uses `apps/web/scripts/check-no-sourcemaps.sh` when present,
+   web artifacts. Uses `apps/web/scripts/check-no-sourcemaps.mjs` when present,
    otherwise `deploy/cloudbuild/check-no-sourcemaps.sh`.
-5. **Images**: build each `services/<name>/Dockerfile` from the repo root, tag
-   with `$SHORT_SHA`, push to Artifact Registry.
-6. **Infra**: `make tf-plan ENV=dev` → review → `make tf-apply ENV=dev`. CI writes
-   the built `$SHORT_SHA` into `image_tags` so infra and revisions agree.
-7. **Deploy**: `gcloud run deploy` (pipeline, `_DEPLOY=true` on main/release) or
-   `make deploy-gateway ENV=dev TAG=<sha>` locally.
+
+> A gate deleted from `ci.yml` is a gate that no longer exists **anywhere**.
+> There is no second copy in Cloud Build to catch it.
+
+**Stage 2 — images: `deploy/cloudbuild/cloudbuild.yaml`.** Builds and pushes,
+nothing else.
+
+5. **Images**: each `services/<name>/Dockerfile` (and `apps/web/Dockerfile`)
+   built from the repo root, tagged with the deployed SHA, pushed to Artifact
+   Registry. Every image also carries a moving `:cache` tag and is built with
+   `--cache-from` against it: Cloud Build hands out a cold Docker daemon on
+   every run, so without it each image re-downloads its modules and recompiles
+   the whole dependency graph.
+
+**Stage 3 — rollout: `.github/workflows/deploy-dev.yml`.** The only rollout
+implementation. The `_DEPLOY=true` step that used to live in `cloudbuild.yaml`
+is gone — it had never executed once, and it used `gcloud run deploy` where dev
+has always used `gcloud run services update`.
+
+6. **Refuse unverified commits**: assert a green `ci` check-run on that exact
+   SHA. Applies to `workflow_dispatch` too — a manual deploy is a human
+   decision, not an exemption from verification.
+7. **Submit and poll**: `gcloud builds submit --async`, then poll for the
+   terminal status with a deadline. Not fire-and-forget: the red X, the
+   `deploy-dev` concurrency lock and the rollout below all depend on this runner
+   staying alive until the build resolves. If the runner is cancelled, the build
+   is cancelled with it rather than left to roll out on its own.
+8. **Migrations, then code**: schema first, always. If they fail the job stops
+   and **nothing** rolls out — dev keeps serving the previous version.
+9. **Rollout**: `gcloud run services update` per service, idempotent. If it is
+   interrupted, the job summary says which service is on which image.
+10. **Smoke test**, then the "what is dev running" summary and the
+    min-instances cost guard.
+
+**Infra** stays out of the push path: `make tf-plan ENV=dev` → review →
+`make tf-apply ENV=dev`. An apply can destroy a database; a push must never be
+able to.
 
 Production uses blue/green or canary at the Cloud Run revision level (split
-traffic across revisions). **Rollback = redeploy a prior `$SHORT_SHA`** (or shift
-100% traffic back to the previous revision); document each rollback in the
-service runbook.
+traffic across revisions). **Rollback = re-run the deploy workflow on a prior
+SHA** (or shift 100% traffic back to the previous revision) — the rollout is
+idempotent, so rolling back and finishing an interrupted rollout are the same
+operation. Document each rollback in the service runbook.
+
+### What it costs
+
+`make ci-minutes` reports billed Actions minutes per CI run and per deploy.
+That is the acceptance criterion, as a **rate**: a total moves with how much
+work the month had and cannot tell "we got faster" from "we did less".
 
 ## Cost model
 

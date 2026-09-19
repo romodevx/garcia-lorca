@@ -216,7 +216,10 @@ resource "google_project_iam_member" "build_roles" {
     # NOTE: the storage OBJECT grants are deliberately NOT here. See
     # build_staging_bucket below — project-wide object access reached the
     # terraform state bucket, which is not something a CI build should hold.
-    "roles/run.admin",              # the _DEPLOY=true step updates services
+    # Still required, by a different caller than the comment used to name: the
+    # `_DEPLOY=true` build step is gone, but deploy-dev.yml impersonates THIS
+    # SA and runs `gcloud run services update` from the runner. Do not drop it.
+    "roles/run.admin",
     "roles/iam.serviceAccountUser", # deploy a revision that RUNS AS the runtime SA
     # Connect to Cloud SQL through the Auth Proxy, so the deploy can apply the
     # migrations before it rolls out the images that need them. Project-scoped
