@@ -96,10 +96,24 @@ has always used `gcloud run services update`.
 able to.
 
 Production uses blue/green or canary at the Cloud Run revision level (split
-traffic across revisions). **Rollback = re-run the deploy workflow on a prior
-SHA** (or shift 100% traffic back to the previous revision) — the rollout is
-idempotent, so rolling back and finishing an interrupted rollout are the same
-operation. Document each rollback in the service runbook.
+traffic across revisions).
+
+**Rollback on dev is `make rollback-dev TAG=<sha>`.** It is NOT "re-run the
+deploy workflow on an older commit": `workflow_dispatch` takes the workflow file
+from the ref it runs on and only accepts a branch or a tag, never a bare SHA, so
+an old ref would run the OLD workflow. The images for every previously deployed
+commit are already in Artifact Registry — rolling back is pointing the services
+back at them, and it rebuilds nothing.
+
+Rehearsed 2026-09-19 against the live dev environment: **146 s to roll back ten
+services, 157 s to roll forward, `/login` and `/readyz` answering 200 in both
+states, and zero billed Actions minutes.** The target refuses to start unless
+all ten images exist for that tag — half a rollback is worse than none — and it
+runs the same smoke checks the deploy workflow does.
+
+The rollout is idempotent, so rolling back, rolling forward and finishing a
+rollout that died halfway are all the same operation: run it again. Document
+each rollback in the service runbook.
 
 ### What it costs
 
