@@ -32,11 +32,18 @@ set -u
 
 : "${DAYS:=30}"
 : "${MAX_RUNS:=400}"
-# Targets from the plan's §Verificación. Etapa 1 is <=18 (18 jobs x a 1-minute
-# billing floor is the arithmetic floor); <=8 only becomes reachable after T3
-# collapses the 14-leg matrix into shards.
+# Targets from the plan's §Verificación, both corrected once measured.
+#
+# CI: <=18 because 18 jobs x a 1-minute billing floor IS the arithmetic floor.
+# Measured 2026-09-19: 21.9 min of real work billed as 31 — nine minutes of pure
+# rounding. No cache touches that; only T3 (collapsing the 14-leg matrix into
+# shards) does, which is why <=8 is not reachable before it.
 : "${TARGET_CI_MIN:=18}"
-: "${TARGET_DEPLOY_MIN:=2}"
+# Deploy: <=12, not the <=2 this file shipped with. <=2 assumed fire-and-forget;
+# the approved design POLLS the build to keep the red X and the concurrency
+# lock, so the runner stays alive for the build's duration and the floor here is
+# how long Cloud Build takes, not how long the submit takes.
+: "${TARGET_DEPLOY_MIN:=12}"
 
 FAIL=0
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
@@ -167,7 +174,7 @@ if [ "$DEPLOY_OK_RUNS" -gt 0 ]; then
     ok "Deploy dev (successful): ${DEPLOY_AVG} min/deploy (target <= ${TARGET_DEPLOY_MIN})"
   else
     bad "Deploy dev (successful): ${DEPLOY_AVG} min/deploy (target <= ${TARGET_DEPLOY_MIN})" \
-        "T7 — the runner is paid to watch a build that runs on Google's infrastructure"
+        "the build itself is too slow: check --cache-from is hitting (T13) and that no gate crept back into cloudbuild.yaml (T10)"
   fi
 else
   warn "no successful Deploy dev runs in the window" "a failed deploy dies early and understates the cost"

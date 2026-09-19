@@ -457,8 +457,16 @@ de trabajo del mes, que va a subir en cuanto se pueda empujar sin miedo:
    También corregido: el ≤ 900/700 original se apoyaba en que T7 ahorrara 754
    min. Sondeando ahorra ~480 con T10 y T13 incluidos. Sigue siendo una caída
    del ~60% sobre los 2,739 medidos.
-3b. Un ensayo de **rollback**: después de un deploy por el camino nuevo, volver
-   dev al SHA anterior y confirmar que responde. Nada en el plan lo probaba.
+3b. ✅ **CUMPLIDO 2026-09-19.** Ensayo de rollback contra el dev vivo: 146 s
+   para volver los diez servicios a `8534a22b`, `/login` y `/readyz` en 200,
+   157 s para volver a `f1fd6b34`, 200 otra vez. Cero minutos de Actions.
+   Radio cero: los dos commits tienen código de aplicación idéntico.
+   Destapó dos defectos y los dos quedaron corregidos: `make deploy-<svc>`
+   usaba `gcloud run deploy` donde el pipeline usa `services update` (el mismo
+   tema de E10, en un tercer sitio), y el README prometía un rollback
+   imposible — `workflow_dispatch` toma el archivo del ref y no acepta un SHA
+   suelto. El procedimiento quedó codificado en `make rollback-dev TAG=<sha>`,
+   que se niega a empezar si falta una sola de las diez imágenes.
 4. `actionlint` verde sobre los dos workflows (job `proto`), versión pineada.
 4b. `make ci` verde en local en menos de 5 min **en caliente**, con la lista de
    compuertas que omite escrita en su cadena de ayuda `##`.
