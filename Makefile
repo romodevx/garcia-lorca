@@ -21,10 +21,22 @@ help: ## List available targets
 		| awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 # ---- Codegen --------------------------------------------------------------
+# buf from the host when it is installed, otherwise the same PINNED image CI
+# uses. `make ci` has to work on the owner's laptop, where buf is not installed
+# — a local gate nobody can run is not a gate.
+#
+# BUF_VERSION is kept EQUAL to the one in .github/workflows/ci.yml. The `gen`
+# target below used to pull bufbuild/buf:latest, which is the exact shape of
+# dependency that broke the deploy on 2026-09-10 (govulncheck@latest) and that
+# security.md forbids.
+BUF_VERSION ?= 1.50.0
+BUF_DOCKER   = docker run --rm -v "$(CURDIR)":/work -w /work bufbuild/buf:$(BUF_VERSION)
+BUF         ?= $(shell command -v buf >/dev/null 2>&1 && echo buf || echo '$(BUF_DOCKER)')
+
 .PHONY: generate
-generate: ## Regenerate gen/ from proto/ (buf)
-	buf lint
-	buf generate
+generate: ## Regenerate gen/ from proto/ (buf; uses the pinned container if buf is not installed)
+	$(BUF) lint
+	$(BUF) generate
 
 # ---- Quality --------------------------------------------------------------
 # `./...` does NOT work in this repo. There is no root go.mod, so every Go
@@ -47,7 +59,7 @@ test: ## Run Go + frontend tests
 
 .PHONY: lint
 lint: ## Lint proto, Go, and frontend
-	buf lint
+	$(BUF) lint
 	go vet $(GO_PKGS)
 	pnpm turbo run lint
 
@@ -70,6 +82,21 @@ actionlint: ## Lint the GitHub Actions workflows (pinned, installed on demand)
 # on a WARM machine (a cold Go build cache compiles the world and will not).
 .PHONY: ci
 ci: ## Fast local gate before pushing — OMITS integration tests, govulncheck, the source-map gate, buf breaking and the web production build (all still run in CI)
+	@missing=""; \
+	 command -v go   >/dev/null 2>&1 || missing="$$missing go"; \
+	 command -v jq   >/dev/null 2>&1 || missing="$$missing jq"; \
+	 command -v pnpm >/dev/null 2>&1 || missing="$$missing pnpm"; \
+	 command -v buf  >/dev/null 2>&1 || docker info >/dev/null 2>&1 \
+	   || missing="$$missing buf-or-a-running-docker"; \
+	 if [ -n "$$missing" ]; then \
+	   echo "missing:$$missing"; \
+	   echo "  go   -> https://go.dev/dl/"; \
+	   echo "  jq   -> brew install jq"; \
+	   echo "  pnpm -> corepack enable pnpm"; \
+	   echo "  buf  -> brew install bufbuild/buf/buf, or just start Docker (the"; \
+	   echo "          pinned bufbuild/buf:$(BUF_VERSION) container is used instead)"; \
+	   exit 1; \
+	 fi
 	@echo "==> generate"; $(MAKE) --no-print-directory generate
 	@echo "==> actionlint"; $(MAKE) --no-print-directory actionlint
 	@echo "==> lint"; $(MAKE) --no-print-directory lint
@@ -141,7 +168,7 @@ logs: ## Logs de todo el stack (follow)
 
 .PHONY: gen
 gen: ## buf generate dentro de un contenedor (no requiere buf en el host)
-	docker run --rm -v "$(CURDIR)":/work -w /work bufbuild/buf:latest generate
+	$(BUF_DOCKER) generate
 
 .PHONY: psql
 psql: ## Abre psql en la base local (rol app)
