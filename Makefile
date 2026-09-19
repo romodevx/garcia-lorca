@@ -27,22 +27,59 @@ generate: ## Regenerate gen/ from proto/ (buf)
 	buf generate
 
 # ---- Quality --------------------------------------------------------------
+# `./...` does NOT work in this repo. There is no root go.mod, so every Go
+# command below used to die on its first line with:
+#   pattern ./...: directory prefix . does not contain modules listed in go.work
+# go.work is the single source of truth for which modules exist, so ask it
+# rather than keeping a second list that drifts. Lazy (=, not :=) so `make help`
+# does not shell out to go and jq.
+GO_PKGS = $(shell go work edit -json | jq -r '.Use[].DiskPath + "/..."')
+
+# Kept EQUAL to ACTIONLINT_VERSION in .github/workflows/ci.yml. Two linters at
+# two versions is how local goes green and CI goes red for no visible reason.
+ACTIONLINT_VERSION ?= v1.7.12
+
 .PHONY: test
 test: ## Run Go + frontend tests
 	go work sync
-	go test ./... -race -count=1
+	go test $(GO_PKGS) -race -count=1
 	pnpm turbo run test
 
 .PHONY: lint
 lint: ## Lint proto, Go, and frontend
 	buf lint
-	go vet ./...
+	go vet $(GO_PKGS)
 	pnpm turbo run lint
 
 .PHONY: build
 build: ## Build Go binaries and frontend artifacts
-	go build ./...
+	go build $(GO_PKGS)
 	pnpm turbo run build
+
+.PHONY: actionlint
+actionlint: ## Lint the GitHub Actions workflows (pinned, installed on demand)
+	@command -v actionlint >/dev/null 2>&1 \
+		|| test -x "$$(go env GOPATH)/bin/actionlint" \
+		|| go install github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)
+	@if command -v actionlint >/dev/null 2>&1; then actionlint -color; \
+	else "$$(go env GOPATH)/bin/actionlint" -color; fi
+
+# The feedback loop this exists to close: 21 PR runs at ~48 billed min each,
+# because the only way to find out CI is red was to push and wait. Runs the
+# gates that need no Docker daemon and no network, so it stays under 5 minutes
+# on a WARM machine (a cold Go build cache compiles the world and will not).
+.PHONY: ci
+ci: ## Fast local gate before pushing — OMITS integration tests, govulncheck, the source-map gate, buf breaking and the web production build (all still run in CI)
+	@echo "==> generate"; $(MAKE) --no-print-directory generate
+	@echo "==> actionlint"; $(MAKE) --no-print-directory actionlint
+	@echo "==> lint"; $(MAKE) --no-print-directory lint
+	@echo "==> test"; $(MAKE) --no-print-directory test
+	@echo
+	@echo "OK — the local gate passed. It did NOT run, and CI still will:"
+	@echo "  - go test -tags=integration   (needs Docker + testcontainers)"
+	@echo "  - govulncheck                 (needs the vuln database)"
+	@echo "  - buf breaking                (needs the PR base revision)"
+	@echo "  - turbo build + source-map gate (production artifacts)"
 
 # ---- Local Docker stack ---------------------------------------------------
 # Full backend + web on one network (11 Go services hot-reloaded with air,
@@ -157,6 +194,10 @@ deploy-%: ## Deploy a service to Cloud Run, e.g. make deploy-gateway
 .PHONY: deploy-preflight
 deploy-preflight: ## Check every prerequisite the deploy assumes (read-only)
 	PROJECT_ID=$(PROJECT_ID) REGION=$(REGION) sh scripts/deploy-preflight.sh
+
+.PHONY: ci-minutes
+ci-minutes: ## What CI and the deploy cost in billed Actions minutes (read-only)
+	sh scripts/ci-minutes.sh
 
 .PHONY: migrate-cloud
 migrate-cloud: ## Apply migrations to a deployed env (needs DATABASE_URL)
