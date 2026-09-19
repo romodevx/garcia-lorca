@@ -211,11 +211,57 @@ image-%: ## Build a service image, e.g. make image-gateway
 # ---- Deploy ---------------------------------------------------------------
 # Deploy one service's latest local image. Usage: make deploy-gateway ENV=dev
 .PHONY: deploy-%
-deploy-%: ## Deploy a service to Cloud Run, e.g. make deploy-gateway
-	gcloud run deploy $* \
+# The ten services the deploy rolls out, in the order deploy-dev.yml uses them.
+CLOUD_RUN_SERVICES = gateway iam students config finance grades attendance comms uniforms web
+
+# `services update`, NOT `run deploy`. They are not interchangeable: the pipeline
+# has always used `services update`, and every copy of this that drifted to
+# `run deploy` was a second rollout implementation waiting to behave differently
+# on the day somebody used it. One command, everywhere.
+deploy-%: ## Deploy a service to Cloud Run, e.g. make deploy-gateway TAG=<sha>
+	gcloud run services update $* \
 		--project=$(PROJECT_ID) \
-		--region=$(REGION) \
+		--region=$(REGION) --quiet \
 		--image=$(REGION)-docker.pkg.dev/$(PROJECT_ID)/$(AR_REPO)/$*:$(or $(TAG),local)
+
+# Rehearsed 2026-09-19: 146 s to roll back, 157 s to roll forward, ten services
+# each way, dev answering in both states, and ZERO billed Actions minutes.
+#
+# This is the rollback, not the deploy workflow. Re-running the workflow on an
+# older commit does NOT work: workflow_dispatch takes the workflow file from the
+# ref it runs on and only accepts a branch or a tag, never a bare SHA — so an
+# old ref would run the OLD workflow. The images for any previously deployed
+# commit are already in Artifact Registry; rolling back is pointing at them.
+#
+# Idempotent, which is why "run it again" is the answer to BOTH a rollback and a
+# rollout that died halfway.
+.PHONY: rollback-dev
+rollback-dev: ## EMERGENCY: point dev at a previously deployed SHA — make rollback-dev TAG=<sha>
+	@test -n "$(TAG)" || { echo "TAG is required, e.g. make rollback-dev TAG=8534a22b…"; \
+	  echo "  candidates: gcloud artifacts docker tags list $(REGION)-docker.pkg.dev/$(PROJECT_ID)/$(AR_REPO)/web --project=$(PROJECT_ID)"; exit 1; }
+	@echo "==> checking every image exists for $(TAG) before touching anything"
+	@for svc in $(CLOUD_RUN_SERVICES); do \
+	  gcloud artifacts docker images describe \
+	    "$(REGION)-docker.pkg.dev/$(PROJECT_ID)/$(AR_REPO)/$$svc:$(TAG)" \
+	    --project=$(PROJECT_ID) >/dev/null 2>&1 \
+	    || { echo "  MISSING: $$svc:$(TAG) — half a rollback is worse than none"; exit 1; }; \
+	done
+	@echo "==> rolling back"
+	@for svc in $(CLOUD_RUN_SERVICES); do \
+	  printf '  %-11s ' "$$svc"; \
+	  gcloud run services update "$$svc" --project=$(PROJECT_ID) --region=$(REGION) --quiet \
+	    --image="$(REGION)-docker.pkg.dev/$(PROJECT_ID)/$(AR_REPO)/$$svc:$(TAG)" >/dev/null && echo ok; \
+	done
+	@echo "==> smoke (the same two checks the deploy workflow runs)"
+	@WEB=$$(gcloud run services describe web --project=$(PROJECT_ID) --region=$(REGION) --format='value(status.url)'); \
+	 GW=$$(gcloud run services describe gateway --project=$(PROJECT_ID) --region=$(REGION) --format='value(status.url)'); \
+	 fail=0; \
+	 for u in "$$WEB/login" "$$GW/readyz"; do \
+	   code=$$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 "$$u" || echo 000); \
+	   printf '  %-52s -> %s\n' "$$u" "$$code"; \
+	   [ "$$code" = "200" ] || fail=1; \
+	 done; \
+	 [ "$$fail" = "0" ] && echo "dev responde en $(TAG)" || { echo "::SMOKE FAILED::"; exit 1; }
 
 # ---- Terraform ------------------------------------------------------------
 .PHONY: deploy-preflight
