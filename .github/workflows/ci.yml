@@ -259,7 +259,9 @@ jobs:
             exit 0
           fi
           changed="$(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")"
-          echo "changed files:"; echo "${changed}" | sed 's/^/  /'
+          echo "changed files:"
+          # shellcheck disable=SC2001 # per-LINE prefix; ${x//s/r} cannot anchor to ^
+          echo "${changed}" | sed 's/^/  /'
           if [ -z "${changed}" ]; then
             echo "Empty diff; running every Go leg."
             echo "go=true" >> "$GITHUB_OUTPUT"
