@@ -58,13 +58,13 @@ everything else.
 | # | Step | | If it fails |
 |---|------|---|---|
 | 2.1 | `terraform -chdir=deploy/terraform apply -var-file=environments/dev.tfvars -target=google_project_service.apis -target=google_artifact_registry_repository.images` | ♻️ | Permission denied → you are missing project-level rights; re-run `make deploy-preflight`. |
-| 2.2 | Build all 10 images (command below) | ♻️ | `gateway:` with an empty tag → you dropped `_TAG`. Timeout → the build is capped at 3600s; re-run, layers cache. |
+| 2.2 | Build all 10 images (command below) | ♻️ | `gateway:` with an empty tag → you dropped `_TAG`. Timeout → the build is capped at 2400s; re-run, layers cache (`--cache-from`). |
 
 ```sh
 gcloud builds submit \
   --project=garcia-lorca \
   --config=deploy/cloudbuild/cloudbuild.yaml \
-  --substitutions=_TAG=bootstrap,_DEPLOY=false
+  --substitutions=_TAG=bootstrap
 ```
 
 `$SHORT_SHA` is only populated for commit-triggered builds, so a manual build

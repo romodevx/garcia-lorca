@@ -1,41 +1,81 @@
 # García Lorca — CI (GitHub Actions).
 #
-# Mirrors the gates of deploy/cloudbuild/cloudbuild.yaml (the Cloud Build
-# pipeline) for pull requests and branch pushes. Cloud Build stays the
-# build-and-deploy path (images, Artifact Registry, Cloud Run); this workflow is
-# the pre-merge quality gate only — it never builds or pushes images.
+# THE quality gate. Not "a mirror of" one — the only one.
 #
-# Gate order (cheap first, same as cloudbuild):
-#   proto  : buf lint -> buf breaking (vs. PR base) -> buf generate
-#   go     : per workspace module — vet -> test -race -> integration -> govulncheck -> mod verify
+# Cloud Build used to re-run vet, test -race, govulncheck, the web build and the
+# source-map gate on the very commit this workflow had just approved. That copy
+# is gone (T10): deploy/cloudbuild/cloudbuild.yaml now builds images and nothing
+# else, and deploy-dev.yml refuses to submit a build unless THIS workflow is
+# green on that exact SHA. So a gate deleted here is a gate that no longer
+# exists anywhere — weigh removals accordingly.
+#
+# Gate order (cheap first):
+#   proto  : buf lint -> buf breaking -> buf generate -> openapi lint ->
+#            actionlint -> build govulncheck once -> derive the module matrix
+#   vet    : go vet ONCE across the whole workspace
+#   go     : per workspace module — test -race -> integration -> govulncheck -> mod verify
 #   web    : pnpm install -> turbo test/lint/build -> source-map hardening gate
 #
 # `gen/` is 100% generated and gitignored (except gen/go/go.mod + go.sum, which
 # are hand-maintained). The proto job generates it once and hands it to the go
 # and web jobs as an artifact instead of re-running buf in every job.
+#
+# COST DESIGN (see .claude/docs/PLAN-minutos-ci.md — this workflow was 1,942 of
+# the 2,739 billed min/cycle that took the repo to 90% of its allowance):
+#   - The Go cache is managed by hand, per module, and saved ONLY on push.
+#     actions/setup-go derives its key from hashFiles('**/go.sum'), which is
+#     IDENTICAL across all 14 matrix legs: the first leg to finish wrote a
+#     near-empty cache, Actions cache entries are immutable, and every run since
+#     restored a 7,599-byte tombstone while reporting "Cache hit". It could not
+#     self-repair, because the key already existed.
+#   - Nothing rotating (github.sha, github.run_id) may enter a cache key.
+#     GOMODCACHE is ~6 GB and GOCACHE ~1 GB against a 10 GB per-repo LRU budget;
+#     a key that rotates per run fills and evicts the budget within a day.
+#     Use CACHE_EPOCH below to invalidate on purpose.
+#   - Every job costs a WHOLE billed minute however short it is, so cheap checks
+#     are folded into an existing job rather than given one of their own.
 
 name: CI
 
 # Cost controls (private repo, billed Actions minutes):
-#  - push runs only on `dev` (master gets the same tree via the dev->master merge;
-#    re-testing it is redundant). PRs to dev OR master still run.
-#  - docs/markdown/.claude-only changes skip CI entirely (no code impact).
+#  - push runs only on `dev` (master gets the same tree via the dev->master merge).
+#    Note this is NOT redundant with the PR run: merges to dev are squash merges,
+#    so the SHA that gets deployed is one no PR run ever saw, and the heavy legs
+#    below are PR-only. The push gate is the only verification of the exact tree
+#    that reaches the school.
+#  - markdown and .claude-only changes skip CI entirely (no code impact).
 #  - the heavy legs (-race, integration/testcontainers, govulncheck) run on PRs
-#    only; pushes get a fast unit gate (vet + unit tests + mod verify). Open a PR
+#    only; pushes get a fast unit gate (unit tests + mod verify). Open a PR
 #    (e.g. dev -> master) to trigger the full gate before a release.
 on:
   pull_request:
     branches: [dev, master]
-    paths-ignore:
-      - '**/*.md'
-      - '.claude/**'
-      - 'docs/**'
+    # An inclusion list, not paths-ignore, because paths-ignore cannot express
+    # "ignore docs/ EXCEPT the contract". Order matters: a later pattern wins.
+    #
+    # DUPLICATED verbatim under `push:` on purpose. GitHub Actions does not
+    # resolve YAML anchors in workflow files, so a `&anchor`/`*alias` pair here
+    # would leave the push trigger silently unfiltered. Keep the two lists equal.
+    paths:
+      - '**'
+      - '!.claude/**'
+      - '!docs/**'
+      # The OpenAPI contract is not documentation. It is the source of truth the
+      # clients are generated from (api-standards canon), and while docs/** was
+      # ignored wholesale a contract-only change skipped CI entirely — so the
+      # one gate that exists for it never ran on the one change that needs it.
+      - 'docs/api/**'
+      # Last, so it wins: markdown never triggers CI, not even under docs/api.
+      - '!**/*.md'
   push:
     branches: [dev]
-    paths-ignore:
-      - '**/*.md'
-      - '.claude/**'
-      - 'docs/**'
+    # Keep EQUAL to the pull_request list above (anchors are not supported).
+    paths:
+      - '**'
+      - '!.claude/**'
+      - '!docs/**'
+      - 'docs/api/**'
+      - '!**/*.md'
 
 permissions:
   contents: read
@@ -52,37 +92,71 @@ env:
   BUF_VERSION: "1.50.0"
   GO_VERSION: "1.25.x"
   NODE_VERSION: "22"
-  # Kept EQUAL to _GOVULNCHECK_VERSION in deploy/cloudbuild/cloudbuild.yaml: two
-  # gates scanning with two versions is how one goes green and the other red for
-  # a reason nobody can see. v1.7.0 is the newest that runs on Go 1.25 — v1.8.0
-  # requires 1.26, which is what broke the deploy on 2026-09-10.
+  # THE ONLY vulnerability scan in the pipeline now. Cloud Build used to run a
+  # second one on the same commit; that copy is gone (T10), so there is no twin
+  # to keep this equal to any more — and no way for two versions to disagree.
+  # v1.7.0 is the newest that runs on Go 1.25: v1.8.0 requires 1.26, which is
+  # exactly what broke the deploy on 2026-09-10 when the pin was `@latest`.
   GOVULNCHECK_VERSION: "v1.7.0"
+  # Pinned for the same reason govulncheck is. `@latest` moving under us has
+  # already cost this repo one broken deploy; security.md says pin versions.
+  REDOCLY_VERSION: "2.53.3"
+  ACTIONLINT_VERSION: "v1.7.12"
+  # Bump this by hand to throw away every Go cache entry at once. It exists so
+  # that invalidating the cache never requires putting something rotating (a SHA,
+  # a run id) into the key, which is what destroys the 10 GB budget.
+  CACHE_EPOCH: "1"
+  # A restored Go cache below this is the 7,599-byte tombstone, not a cache.
+  # Deliberately far under the real sizes (GOMODCACHE ~6 GB, GOCACHE ~1 GB
+  # measured locally) so it catches the failure without flapping on a partial
+  # restore. The real sizes are printed on every run; tighten once Linux
+  # numbers have been observed for a few cycles.
+  CACHE_MIN_BYTES: "52428800" # 50 MiB
 
 jobs:
   # ---------------------------------------------------------------------------
-  # 1. Proto: lint, breaking-change detection, and codegen for downstream jobs.
+  # 1. Proto: lint, breaking-change detection, codegen, and every other check
+  #    that costs seconds. They live here because a job of its own would cost a
+  #    whole billed minute each: openapi lint was 57 min/cycle for 9s of work.
   # ---------------------------------------------------------------------------
   proto:
-    name: proto (lint / breaking / generate)
+    name: proto (lint / breaking / generate / contract / actionlint)
     runs-on: ubuntu-latest
     outputs:
       # JSON array of go.work `use` entries, consumed as the `go` job matrix.
       go-modules: ${{ steps.modules.outputs.list }}
+      # False only when EVERY changed file is under apps/mobile/, which cannot
+      # affect a line of Go. Deliberately conservative: this is not T4's
+      # per-service selection, it is the one case that is provably safe.
+      go-changed: ${{ steps.changes.outputs.go }}
     steps:
       - uses: actions/checkout@v5
         with:
-          # Full history so `buf breaking --against` can resolve the base branch.
+          # Full history so `buf breaking --against` can resolve the base branch,
+          # and so the changed-file diff below has something to compare against.
           fetch-depth: 0
 
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: "**/go.sum"
+          # Managed by hand below. Left on, this emits the shared key that every
+          # matrix leg also computes — the race that created the tombstone.
+          cache: false
 
       - uses: bufbuild/buf-setup-action@v1
         with:
           version: ${{ env.BUF_VERSION }}
           github_token: ${{ github.token }}
+
+      # Restore-only: this job never writes the module cache, so it cannot race
+      # the vet job that owns it. A miss here just means a slower govulncheck build.
+      - name: Restore Go module cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/go/pkg/mod
+          key: gomod-${{ runner.os }}-${{ env.CACHE_EPOCH }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            gomod-${{ runner.os }}-${{ env.CACHE_EPOCH }}-
 
       - name: buf lint
         run: buf lint
@@ -121,6 +195,39 @@ jobs:
           done
           echo "OK: gen/go and gen/ts present."
 
+      # The canon is spec-first: the REST contract is written and linted BEFORE
+      # the handlers exist. A contract nobody validates drifts from the code
+      # within a sprint, at which point the generated clients start lying.
+      # Folded in from a job of its own, which cost 57 billed min/cycle for 9
+      # seconds of linting plus 3 seconds re-downloading the CLI every run.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+
+      - name: Lint the REST contract
+        run: npx --yes "@redocly/cli@${REDOCLY_VERSION}" lint docs/api/openapi.yaml
+
+      # These workflows are the only thing standing between a typo and a day of
+      # burnt minutes, and nothing was checking them. go install rather than the
+      # upstream curl|bash: the module proxy verifies checksums, and this job
+      # already has Go. It is free in billed minutes — the job is under a minute
+      # either way and GitHub bills the whole minute regardless.
+      - name: actionlint
+        run: |
+          set -euo pipefail
+          go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
+          "$(go env GOPATH)/bin/actionlint" -color
+
+      # Built once here instead of `go install`ed inside all 14 matrix legs.
+      - name: Build govulncheck once
+        run: |
+          set -euo pipefail
+          go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
+          mkdir -p dist-tools
+          cp "$(go env GOPATH)/bin/govulncheck" dist-tools/govulncheck
+          dist-tools/govulncheck -version
+
       # The single source of truth for "which Go modules exist" is go.work.
       # Parsing it here keeps the matrix from drifting when a service is added.
       - name: Derive Go module matrix from go.work
@@ -130,6 +237,45 @@ jobs:
           list="$(go work edit -json | jq -c '[.Use[].DiskPath]')"
           echo "go.work modules: ${list}"
           echo "list=${list}" >> "$GITHUB_OUTPUT"
+
+      # A mobile-only change runs 14 Go legs today. This is NOT `paths-ignore`:
+      # that is an `on:` key, so it would skip the WHOLE workflow, and a workflow
+      # that does not run is a workflow that never reports — which deadlocks any
+      # required status check instead of satisfying it. Filtering here leaves the
+      # legs skipped and the workflow reporting.
+      - name: Decide whether the Go legs can be skipped
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # No usable base (first push to a branch, force push, shallow history):
+          # run everything. Guessing cheap is how a real regression gets skipped.
+          if [ -z "${BASE_SHA}" ] || [ "${BASE_SHA}" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            echo "No resolvable base commit; running every Go leg."
+            echo "go=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")"
+          echo "changed files:"
+          # shellcheck disable=SC2001 # per-LINE prefix; ${x//s/r} cannot anchor to ^
+          echo "${changed}" | sed 's/^/  /'
+          if [ -z "${changed}" ]; then
+            echo "Empty diff; running every Go leg."
+            echo "go=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # grep -qv would report "some line is not mobile". We need "EVERY line
+          # is mobile", so invert the question: is there any non-mobile file?
+          if echo "${changed}" | grep -qv '^apps/mobile/'; then
+            echo "go=true" >> "$GITHUB_OUTPUT"
+            echo "Non-mobile files changed; running every Go leg."
+          else
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            echo "Only apps/mobile/ changed; the Go legs cannot be affected."
+          fi
 
       # Stays on v4 deliberately. v5 is ALSO node20, so bumping it buys
       # nothing and only churns the file — the artifact actions have no
@@ -141,13 +287,133 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tools
+          path: dist-tools
+          retention-days: 1
+          if-no-files-found: error
+
   # ---------------------------------------------------------------------------
-  # 2. Go: one leg per go.work module. fail-fast is off so a single bad module
-  #    does not hide the state of the other twelve; any red leg still fails CI.
+  # 2. vet: ONCE for the whole workspace, not once per module.
+  #
+  #    `go vet ./...` does NOT work in this repo: there is no root go.mod, and
+  #    the command dies with "pattern ./...: directory prefix . does not contain
+  #    modules listed in go.work". go.work is the source of truth, so ask it.
+  #
+  #    Per-module vet cost 109s x 14 legs x 50 runs and found ZERO defects in 58
+  #    runs, because `go test` already runs vet's high-confidence subset. This
+  #    job also owns the shared module cache, so exactly one job writes it.
+  # ---------------------------------------------------------------------------
+  vet:
+    name: vet (workspace)
+    needs: proto
+    # Same guard as the matrix: a change confined to apps/mobile/ cannot affect
+    # a line of Go. Skipping this also skips the cache save for that run, which
+    # is harmless — the next push that touches Go writes it.
+    if: needs.proto.outputs.go-changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: gen
+          path: gen
+
+      - name: Restore Go module cache
+        id: gomod
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/go/pkg/mod
+          key: gomod-${{ runner.os }}-${{ env.CACHE_EPOCH }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            gomod-${{ runner.os }}-${{ env.CACHE_EPOCH }}-
+
+      - name: Restore workspace build cache
+        id: gobuild
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.cache/go-build
+          key: gocache-${{ runner.os }}-${{ env.CACHE_EPOCH }}-workspace-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            gocache-${{ runner.os }}-${{ env.CACHE_EPOCH }}-workspace-
+
+      # A cache that silently degrades is how the 7,599-byte tombstone survived
+      # for months: a miss and a hit look identical in the log. Print the real
+      # size every run (this is also the measurement T1 asked for), and go red
+      # on `dev` if something was restored and it is a tombstone.
+      - name: Report restored cache sizes
+        id: cachesize
+        env:
+          MOD_KEY: ${{ steps.gomod.outputs.cache-matched-key }}
+          BUILD_KEY: ${{ steps.gobuild.outputs.cache-matched-key }}
+        run: |
+          set -euo pipefail
+          mod_bytes=$(du -sb ~/go/pkg/mod 2>/dev/null | cut -f1 || echo 0)
+          build_bytes=$(du -sb ~/.cache/go-build 2>/dev/null | cut -f1 || echo 0)
+          printf 'GOMODCACHE  %12s bytes  (matched key: %s)\n' "${mod_bytes}" "${MOD_KEY:-<none>}"
+          printf 'GOCACHE     %12s bytes  (matched key: %s)\n' "${build_bytes}" "${BUILD_KEY:-<none>}"
+          {
+            echo "### Go cache"
+            echo "| cache | restored bytes | matched key |"
+            echo "| --- | ---: | --- |"
+            echo "| GOMODCACHE | ${mod_bytes} | \`${MOD_KEY:-<none>}\` |"
+            echo "| GOCACHE | ${build_bytes} | \`${BUILD_KEY:-<none>}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Only assert when something was actually restored. A guard that goes
+          # red on the bootstrap run is a guard somebody deletes in week two.
+          if [ -z "${MOD_KEY:-}" ]; then
+            echo "No module cache restored (cold start) — nothing to assert."
+            exit 0
+          fi
+          if [ "${mod_bytes}" -lt "${CACHE_MIN_BYTES}" ]; then
+            echo "::error::Restored GOMODCACHE is ${mod_bytes} B, under the ${CACHE_MIN_BYTES} B floor."
+            echo "::error::That is a tombstone, not a cache: every leg is recompiling from scratch."
+            echo "::error::Bump CACHE_EPOCH in .github/workflows/ci.yml to force a clean save."
+            exit 1
+          fi
+          echo "OK: restored cache is a real cache."
+
+      - name: go vet (whole workspace, once)
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2046 # word splitting is the point: one pattern per module
+          go vet $(go work edit -json | jq -r '.Use[].DiskPath + "/..."')
+
+      # Saved only on push. PRs restore and never write, so a branch cannot
+      # evict the 10 GB budget — and cannot poison the cache the base branch
+      # feeds to every other PR either.
+      - name: Save Go module cache
+        if: github.event_name == 'push' && steps.gomod.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ~/go/pkg/mod
+          key: gomod-${{ runner.os }}-${{ env.CACHE_EPOCH }}-${{ hashFiles('**/go.sum') }}
+
+      - name: Save workspace build cache
+        if: github.event_name == 'push' && steps.gobuild.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ~/.cache/go-build
+          key: gocache-${{ runner.os }}-${{ env.CACHE_EPOCH }}-workspace-${{ hashFiles('**/go.sum') }}
+
+  # ---------------------------------------------------------------------------
+  # 3. Go: one leg per go.work module. fail-fast is off so a single bad module
+  #    does not hide the state of the other thirteen; any red leg still fails CI.
+  #
+  #    govulncheck and the integration tests are the ONLY Go steps that have gone
+  #    red in 58 runs (runs 35394352750, 35395204982). They stay on the PR path.
   # ---------------------------------------------------------------------------
   go:
     name: go (${{ matrix.module }})
     needs: proto
+    if: needs.proto.outputs.go-changed == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -159,7 +425,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: "**/go.sum"
+          cache: false
 
       # gen/ is gitignored; restore the codegen the proto job produced.
       - uses: actions/download-artifact@v4
@@ -167,9 +433,34 @@ jobs:
           name: gen
           path: gen
 
-      - name: go vet
-        working-directory: ${{ matrix.module }}
-        run: go vet ./...
+      - uses: actions/download-artifact@v4
+        with:
+          name: tools
+          path: dist-tools
+
+      - name: Make tools executable
+        run: chmod +x dist-tools/govulncheck
+
+      # Restore-only. The vet job owns the write, so 14 legs do not race to save
+      # the same key (13 of which would fail as "already exists" anyway).
+      - name: Restore Go module cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/go/pkg/mod
+          key: gomod-${{ runner.os }}-${{ env.CACHE_EPOCH }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            gomod-${{ runner.os }}-${{ env.CACHE_EPOCH }}-
+
+      # Per module, which is the whole point: one shared key across 14 legs is
+      # what let the first finisher freeze a near-empty entry for everyone.
+      - name: Restore module build cache
+        id: gobuild
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.cache/go-build
+          key: gocache-${{ runner.os }}-${{ env.CACHE_EPOCH }}-${{ matrix.module }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            gocache-${{ runner.os }}-${{ env.CACHE_EPOCH }}-${{ matrix.module }}-
 
       # Push: fast unit tests only (no -race). PRs get the full -race pass below.
       - name: go test (unit)
@@ -199,22 +490,26 @@ jobs:
           fi
 
       # Security gate (cloudbuild step 3): reachable-vulnerability scan plus a
-      # dependency audit (checksums match go.sum). PR-only: installs + scans per
-      # module are expensive; a push doesn't need the full vuln sweep every time.
+      # dependency audit (checksums match go.sum). The binary comes from the
+      # proto job — built once, not installed 14 times.
       - name: govulncheck
         if: github.event_name == 'pull_request'
-        run: |
-          set -euo pipefail
-          go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
-          "$(go env GOPATH)/bin/govulncheck" ./...
         working-directory: ${{ matrix.module }}
+        run: "${{ github.workspace }}/dist-tools/govulncheck ./..."
 
       - name: go mod verify
         working-directory: ${{ matrix.module }}
         run: go mod verify
 
+      - name: Save module build cache
+        if: github.event_name == 'push' && steps.gobuild.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ~/.cache/go-build
+          key: gocache-${{ runner.os }}-${{ env.CACHE_EPOCH }}-${{ matrix.module }}-${{ hashFiles('**/go.sum') }}
+
   # ---------------------------------------------------------------------------
-  # 3. Web: pnpm is the ONLY package manager (repo CLAUDE.md §7). The job ends
+  # 4. Web: pnpm is the ONLY package manager (repo CLAUDE.md §7). The job ends
   #    on the build-hardening gate — source maps must never ship.
   # ---------------------------------------------------------------------------
   web:
@@ -258,11 +553,24 @@ jobs:
           key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-${{ runner.os }}-
 
-      - uses: actions/cache@v5
+      # The key used to be turbo-<os>-<github.sha>, which wrote a BRAND NEW
+      # entry on every single run and evicted the Go caches out of the same
+      # 10 GB per-repo budget. Keyed on the lockfile + turbo config now, and
+      # written only on push, like every other cache here.
+      #
+      # Honest trade-off: this entry is now written once per lockfile change, so
+      # turbo's hit rate decays between dependency bumps instead of tracking
+      # every commit. That is deliberate — entry CHURN, not entry size, is what
+      # evicted the Go caches, and the plan leaves `web` (150 min/cycle) as-is.
+      # Revisit with a remote turbo cache if web ever becomes the top cost.
+      - name: Restore turbo cache
+        id: turbo
+        uses: actions/cache/restore@v5
         with:
           path: .turbo
-          key: turbo-${{ runner.os }}-${{ github.sha }}
-          restore-keys: turbo-${{ runner.os }}-
+          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json') }}
+          restore-keys: |
+            turbo-${{ runner.os }}-
 
       - name: pnpm install
         run: pnpm install --frozen-lockfile
@@ -290,44 +598,51 @@ jobs:
             bash deploy/cloudbuild/check-no-sourcemaps.sh
           fi
 
-  # ---------------------------------------------------------------------------
-  # 4. Single required status check. Branch protection points at this job so the
-  #    matrix legs do not each need to be registered.
-  # ---------------------------------------------------------------------------
-  contract:
-    name: openapi (lint)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      # Same v5 default, same failure: it would shell out to pnpm before
-      # anything installs it. This job installs one linter and caches nothing.
-      - uses: actions/setup-node@v5
+      - name: Save turbo cache
+        if: github.event_name == 'push' && steps.turbo.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
         with:
-          node-version: "22"
-          package-manager-cache: false
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json') }}
 
-      # The canon is spec-first: the REST contract is written and linted BEFORE
-      # the handlers exist. A contract nobody validates drifts from the code
-      # within a sprint, at which point the generated clients start lying.
-      - name: Lint the REST contract
-        run: npx --yes @redocly/cli@latest lint docs/api/openapi.yaml
-
+  # ---------------------------------------------------------------------------
+  # 5. Single aggregated status check. `Deploy dev` keys off this workflow's
+  #    conclusion, so this job is what decides whether a commit is deployable.
+  # ---------------------------------------------------------------------------
   ci:
     name: ci
     if: always()
-    needs: [proto, go, web, contract]
+    needs: [proto, vet, go, web]
     runs-on: ubuntu-latest
     steps:
       - name: Assert all gates passed
+        env:
+          # Quoted into the environment rather than interpolated into the script:
+          # ${{ }} inside a run: block substitutes before the shell sees it.
+          PROTO: ${{ needs.proto.result }}
+          VET: ${{ needs.vet.result }}
+          GO: ${{ needs.go.result }}
+          WEB: ${{ needs.web.result }}
         run: |
           set -euo pipefail
-          results="${{ needs.proto.result }} ${{ needs.go.result }} ${{ needs.web.result }} ${{ needs.contract.result }}"
-          echo "gate results: ${results}"
-          for r in $results; do
-            if [ "$r" != "success" ]; then
-              echo "FAILED: at least one CI gate did not pass."
-              exit 1
-            fi
-          done
-          echo "OK: proto, go, web and contract gates passed."
+          failed=0
+          check() {
+            # $1 = gate name, $2 = its result.
+            case "$2" in
+              success) echo "  ok       $1" ;;
+              # vet and go are skipped by design when only apps/mobile/ changed.
+              # A skipped gate is not a passed gate, so say so out loud rather
+              # than letting it read as green in the log.
+              skipped) echo "  skipped  $1 (nothing for it to check)" ;;
+              *)       echo "  FAILED   $1 -> $2"; failed=1 ;;
+            esac
+          }
+          check proto "${PROTO}"
+          check vet   "${VET}"
+          check go    "${GO}"
+          check web   "${WEB}"
+          if [ "${failed}" -ne 0 ]; then
+            echo "FAILED: at least one CI gate did not pass."
+            exit 1
+          fi
+          echo "OK: proto, vet, go and web gates passed."
