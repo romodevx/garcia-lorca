@@ -1,12 +1,18 @@
 # García Lorca CI/CD — Cloud Build.
 #
-# Fail-fast order (cheap gates first): lint -> contracts -> vet -> tests ->
-# frontend -> security -> build-hardening gate -> images -> deploy.
+# This pipeline BUILDS IMAGES. It does not gate and it does not deploy.
+#
+# It used to re-run go vet, go test -race, govulncheck, the web build and the
+# source-map gate on the very commit CI had just approved — 25.5 min of the
+# critical path, paid twice, and paid a THIRD time by the GitHub runner sitting
+# there watching the stream. CI is the gate; deploy-dev.yml refuses to submit a
+# build unless CI is green on that exact SHA. The rollout lives on the runner.
+#
+# Step order: lint -> generate -> images (all 10 in parallel).
 #
 # Trigger substitutions (set on the trigger):
 #   _REGION       deployment region                (e.g. us-central1)
 #   _AR_REPO      Artifact Registry repo id         (e.g. garcia-lorca)
-#   _DEPLOY       "true" to run gcloud run deploy   (only on main / release)
 # Built-ins: $PROJECT_ID, ${_TAG}.
 #
 # Images are tagged with ${_TAG}. The same tag is what Terraform receives via
@@ -15,17 +21,12 @@
 substitutions:
   _REGION: us-central1
   _AR_REPO: garcia-lorca
-  _DEPLOY: "false"
   # Image tag. ${_TAG} is populated ONLY for commit-triggered builds; a manual
   # `gcloud builds submit` leaves it EMPTY, which used to produce refs like
   # "gateway:" and fail on the first docker push ~20 minutes into the build.
   # Default "latest" so a manual bootstrap build works out of the box; the commit
   # trigger overrides it with _TAG=${_TAG} so infra and revision agree.
   _TAG: latest
-
-  # The vulnerability scanner, pinned. See the govulncheck step for why, and keep
-  # this EQUAL to GOVULNCHECK_VERSION in .github/workflows/ci.yml.
-  _GOVULNCHECK_VERSION: v1.7.0
 
   # Identity Platform, for the web bundle. ALL EMPTY BY DEFAULT: an image built
   # without them has the provider sign-in off, because providerLoginEnabled()
@@ -61,123 +62,6 @@ steps:
     args: ["generate"]
     waitFor: ["buf-lint"]
 
-  # ---- 2. Go: vet + tests across the workspace ----------------------------
-  - id: go-vet
-    name: golang:1.25-bookworm
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        set -euo pipefail
-        . deploy/cloudbuild/retry.sh
-        retry go work sync
-        # There is NO root go.mod — only go.work — so `go vet ./...` from the
-        # repo root fails with "directory prefix . does not contain modules
-        # listed in go.work" and, under `set -e`, kills this step before a
-        # single image is built. Iterate the workspace members instead, the
-        # same way .github/workflows/ci.yml does with its per-module matrix.
-        for dir in $(go list -m -f '{{.Dir}}'); do
-          echo "--- go vet: $$dir"
-          # Download first, and retry only THAT: every step is a fresh container
-          # with an empty module cache, so a dropped connection here would kill
-          # the build for a reason that has nothing to do with the code. The vet
-          # itself runs once — a retried verdict is not a verdict.
-          (cd "$$dir" && retry go mod download && go vet ./...)
-        done
-    waitFor: ["buf-generate"]
-
-  - id: go-test
-    name: golang:1.25-bookworm
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        set -euo pipefail
-        . deploy/cloudbuild/retry.sh
-        # Per workspace module — see the go-vet step for why `./...` cannot be
-        # used from the repo root.
-        for dir in $(go list -m -f '{{.Dir}}'); do
-          echo "--- go test: $$dir"
-          # The download is retried; THE TESTS ARE NOT, deliberately. A retried
-          # test suite turns a flake into a green build, and this pipeline has
-          # already caught a real one (a web test reading a count before waiting
-          # for it, 2026-09-06). Only the fetch is idempotent.
-          (cd "$$dir" && retry go mod download && go test ./... -race -count=1)
-        done
-    waitFor: ["go-vet"]
-
-  # ---- 3. Security gate: govulncheck + module audit -----------------------
-  - id: govulncheck
-    name: golang:1.25-bookworm
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        set -euo pipefail
-        . deploy/cloudbuild/retry.sh
-        # PINNED, never @latest. On 2026-09-10 the deploy broke without a line of
-        # code changing: x/vuln v1.8.0 landed requiring Go >= 1.26, this image is
-        # 1.25 and fixes its toolchain, so the install failed on EVERY commit and
-        # the whole pipeline stopped — while CI stayed green, because CI already
-        # pins. `@latest` in a build step is a dependency somebody else can bump
-        # for you, which is what security.md means by "pin versions".
-        #
-        # Kept EQUAL to GOVULNCHECK_VERSION in .github/workflows/ci.yml. Two gates
-        # scanning with two versions is how one goes green and the other red for a
-        # reason nobody can see.
-        retry go install golang.org/x/vuln/cmd/govulncheck@${_GOVULNCHECK_VERSION}
-        # Per workspace module — see the go-vet step. `go mod verify` also needs
-        # a module directory; there is no root go.mod to verify.
-        for dir in $(go list -m -f '{{.Dir}}'); do
-          echo "--- govulncheck: $$dir"
-          # THIS is the step that broke on 2026-09-07: govulncheck loads the
-          # package graph, which pulled a module zip mid-analysis and hit a
-          # dropped stream. Fetching everything first, with retries, keeps the
-          # analysis itself off the network — and it still runs exactly once, so
-          # a real vulnerability finding is never retried away.
-          (cd "$$dir" && retry go mod download && "$$(go env GOPATH)/bin/govulncheck" ./... && go mod verify)
-        done
-    waitFor: ["buf-generate"]
-
-  # ---- 4. Frontend: install + turbo test/lint/build -----------------------
-  - id: web-build
-    name: node:22-bookworm
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        set -euo pipefail
-        . deploy/cloudbuild/retry.sh
-        retry corepack enable pnpm
-        retry pnpm install --frozen-lockfile
-        # Scoped to web + its workspace deps: apps/mobile is an Expo app whose
-        # build needs native tooling this image does not have. Mirrors
-        # .github/workflows/ci.yml.
-        pnpm turbo run test lint build --filter=@garcia-lorca/web...
-    waitFor: ["buf-generate"]
-
-  # ---- 5. Build-hardening gate: NO source maps in client artifacts --------
-  # Prefer the frontend-owned check script when present; otherwise use the
-  # grep-based fallback shipped alongside this pipeline. Either FAILS the build
-  # if *.map files or sourceMappingURL comments exist in production bundles.
-  - id: sourcemap-gate
-    name: node:22-bookworm
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        set -euo pipefail
-        . deploy/cloudbuild/retry.sh
-        retry corepack enable pnpm
-        if [ -f apps/web/scripts/check-no-sourcemaps.mjs ]; then
-          echo "Using frontend-owned source-map check (pnpm --filter web check:no-sourcemaps)."
-          pnpm --filter @garcia-lorca/web run check:no-sourcemaps
-        else
-          echo "Frontend check script absent; using pipeline fallback gate."
-          bash deploy/cloudbuild/check-no-sourcemaps.sh
-        fi
-    waitFor: ["web-build"]
-
   # ---- 6. Build + push images (parallel; only the wired services here) ----
   # Build context is the repo root; -f points at each service Dockerfile.
   - id: image-gateway
@@ -187,10 +71,28 @@ steps:
       - -c
       - |
         set -euo pipefail
-        IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/gateway:${_TAG}"
-        docker build -f services/gateway/Dockerfile -t "$$IMG" .
+        # Cloud Build hands every build a COLD Docker daemon, so without a cache
+        # source each image re-downloads its modules and recompiles the whole
+        # dependency graph from zero. Measured on build 667ce1bd: 27.9 min for
+        # one Go service, with the 10 images contending for an e2-medium's two
+        # vCPUs. The Dockerfiles are already layered for this (go.mod, then
+        # `go mod download`, then the source) — the layers just had nowhere to
+        # come from. BUILDKIT_INLINE_CACHE makes the pushed image carry its own
+        # cache metadata; --cache-from reads it back off Artifact Registry next
+        # time. A miss (first build, or a go.sum change) warns and builds cold.
+        export DOCKER_BUILDKIT=1
+        BASE="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/gateway"
+        IMG="$$BASE:${_TAG}"
+        CACHE="$$BASE:cache"
+        docker build -f services/gateway/Dockerfile \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          --cache-from "$$CACHE" \
+          -t "$$IMG" -t "$$CACHE" .
         docker push "$$IMG"
-    waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
+        # Moving the :cache tag is what makes the NEXT build fast. Pushed after
+        # the real tag so a failure here never loses the deployable image.
+        docker push "$$CACHE"
+    waitFor: ["buf-generate"]
 
   - id: image-iam
     name: gcr.io/cloud-builders/docker
@@ -199,10 +101,28 @@ steps:
       - -c
       - |
         set -euo pipefail
-        IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/iam:${_TAG}"
-        docker build -f services/iam/Dockerfile -t "$$IMG" .
+        # Cloud Build hands every build a COLD Docker daemon, so without a cache
+        # source each image re-downloads its modules and recompiles the whole
+        # dependency graph from zero. Measured on build 667ce1bd: 27.9 min for
+        # one Go service, with the 10 images contending for an e2-medium's two
+        # vCPUs. The Dockerfiles are already layered for this (go.mod, then
+        # `go mod download`, then the source) — the layers just had nowhere to
+        # come from. BUILDKIT_INLINE_CACHE makes the pushed image carry its own
+        # cache metadata; --cache-from reads it back off Artifact Registry next
+        # time. A miss (first build, or a go.sum change) warns and builds cold.
+        export DOCKER_BUILDKIT=1
+        BASE="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/iam"
+        IMG="$$BASE:${_TAG}"
+        CACHE="$$BASE:cache"
+        docker build -f services/iam/Dockerfile \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          --cache-from "$$CACHE" \
+          -t "$$IMG" -t "$$CACHE" .
         docker push "$$IMG"
-    waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
+        # Moving the :cache tag is what makes the NEXT build fast. Pushed after
+        # the real tag so a failure here never loses the deployable image.
+        docker push "$$CACHE"
+    waitFor: ["buf-generate"]
 
   - id: image-students
     name: gcr.io/cloud-builders/docker
@@ -211,10 +131,28 @@ steps:
       - -c
       - |
         set -euo pipefail
-        IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/students:${_TAG}"
-        docker build -f services/students/Dockerfile -t "$$IMG" .
+        # Cloud Build hands every build a COLD Docker daemon, so without a cache
+        # source each image re-downloads its modules and recompiles the whole
+        # dependency graph from zero. Measured on build 667ce1bd: 27.9 min for
+        # one Go service, with the 10 images contending for an e2-medium's two
+        # vCPUs. The Dockerfiles are already layered for this (go.mod, then
+        # `go mod download`, then the source) — the layers just had nowhere to
+        # come from. BUILDKIT_INLINE_CACHE makes the pushed image carry its own
+        # cache metadata; --cache-from reads it back off Artifact Registry next
+        # time. A miss (first build, or a go.sum change) warns and builds cold.
+        export DOCKER_BUILDKIT=1
+        BASE="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/students"
+        IMG="$$BASE:${_TAG}"
+        CACHE="$$BASE:cache"
+        docker build -f services/students/Dockerfile \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          --cache-from "$$CACHE" \
+          -t "$$IMG" -t "$$CACHE" .
         docker push "$$IMG"
-    waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
+        # Moving the :cache tag is what makes the NEXT build fast. Pushed after
+        # the real tag so a failure here never loses the deployable image.
+        docker push "$$CACHE"
+    waitFor: ["buf-generate"]
 
   - id: image-config
     name: gcr.io/cloud-builders/docker
@@ -223,10 +161,28 @@ steps:
       - -c
       - |
         set -euo pipefail
-        IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/config:${_TAG}"
-        docker build -f services/config/Dockerfile -t "$$IMG" .
+        # Cloud Build hands every build a COLD Docker daemon, so without a cache
+        # source each image re-downloads its modules and recompiles the whole
+        # dependency graph from zero. Measured on build 667ce1bd: 27.9 min for
+        # one Go service, with the 10 images contending for an e2-medium's two
+        # vCPUs. The Dockerfiles are already layered for this (go.mod, then
+        # `go mod download`, then the source) — the layers just had nowhere to
+        # come from. BUILDKIT_INLINE_CACHE makes the pushed image carry its own
+        # cache metadata; --cache-from reads it back off Artifact Registry next
+        # time. A miss (first build, or a go.sum change) warns and builds cold.
+        export DOCKER_BUILDKIT=1
+        BASE="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/config"
+        IMG="$$BASE:${_TAG}"
+        CACHE="$$BASE:cache"
+        docker build -f services/config/Dockerfile \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          --cache-from "$$CACHE" \
+          -t "$$IMG" -t "$$CACHE" .
         docker push "$$IMG"
-    waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
+        # Moving the :cache tag is what makes the NEXT build fast. Pushed after
+        # the real tag so a failure here never loses the deployable image.
+        docker push "$$CACHE"
+    waitFor: ["buf-generate"]
 
   - id: image-finance
     name: gcr.io/cloud-builders/docker
@@ -235,10 +191,28 @@ steps:
       - -c
       - |
         set -euo pipefail
-        IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/finance:${_TAG}"
-        docker build -f services/finance/Dockerfile -t "$$IMG" .
+        # Cloud Build hands every build a COLD Docker daemon, so without a cache
+        # source each image re-downloads its modules and recompiles the whole
+        # dependency graph from zero. Measured on build 667ce1bd: 27.9 min for
+        # one Go service, with the 10 images contending for an e2-medium's two
+        # vCPUs. The Dockerfiles are already layered for this (go.mod, then
+        # `go mod download`, then the source) — the layers just had nowhere to
+        # come from. BUILDKIT_INLINE_CACHE makes the pushed image carry its own
+        # cache metadata; --cache-from reads it back off Artifact Registry next
+        # time. A miss (first build, or a go.sum change) warns and builds cold.
+        export DOCKER_BUILDKIT=1
+        BASE="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/finance"
+        IMG="$$BASE:${_TAG}"
+        CACHE="$$BASE:cache"
+        docker build -f services/finance/Dockerfile \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          --cache-from "$$CACHE" \
+          -t "$$IMG" -t "$$CACHE" .
         docker push "$$IMG"
-    waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
+        # Moving the :cache tag is what makes the NEXT build fast. Pushed after
+        # the real tag so a failure here never loses the deployable image.
+        docker push "$$CACHE"
+    waitFor: ["buf-generate"]
 
   - id: image-grades
     name: gcr.io/cloud-builders/docker
@@ -247,10 +221,28 @@ steps:
       - -c
       - |
         set -euo pipefail
-        IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/grades:${_TAG}"
-        docker build -f services/grades/Dockerfile -t "$$IMG" .
+        # Cloud Build hands every build a COLD Docker daemon, so without a cache
+        # source each image re-downloads its modules and recompiles the whole
+        # dependency graph from zero. Measured on build 667ce1bd: 27.9 min for
+        # one Go service, with the 10 images contending for an e2-medium's two
+        # vCPUs. The Dockerfiles are already layered for this (go.mod, then
+        # `go mod download`, then the source) — the layers just had nowhere to
+        # come from. BUILDKIT_INLINE_CACHE makes the pushed image carry its own
+        # cache metadata; --cache-from reads it back off Artifact Registry next
+        # time. A miss (first build, or a go.sum change) warns and builds cold.
+        export DOCKER_BUILDKIT=1
+        BASE="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/grades"
+        IMG="$$BASE:${_TAG}"
+        CACHE="$$BASE:cache"
+        docker build -f services/grades/Dockerfile \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          --cache-from "$$CACHE" \
+          -t "$$IMG" -t "$$CACHE" .
         docker push "$$IMG"
-    waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
+        # Moving the :cache tag is what makes the NEXT build fast. Pushed after
+        # the real tag so a failure here never loses the deployable image.
+        docker push "$$CACHE"
+    waitFor: ["buf-generate"]
 
   - id: image-attendance
     name: gcr.io/cloud-builders/docker
@@ -259,10 +251,28 @@ steps:
       - -c
       - |
         set -euo pipefail
-        IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/attendance:${_TAG}"
-        docker build -f services/attendance/Dockerfile -t "$$IMG" .
+        # Cloud Build hands every build a COLD Docker daemon, so without a cache
+        # source each image re-downloads its modules and recompiles the whole
+        # dependency graph from zero. Measured on build 667ce1bd: 27.9 min for
+        # one Go service, with the 10 images contending for an e2-medium's two
+        # vCPUs. The Dockerfiles are already layered for this (go.mod, then
+        # `go mod download`, then the source) — the layers just had nowhere to
+        # come from. BUILDKIT_INLINE_CACHE makes the pushed image carry its own
+        # cache metadata; --cache-from reads it back off Artifact Registry next
+        # time. A miss (first build, or a go.sum change) warns and builds cold.
+        export DOCKER_BUILDKIT=1
+        BASE="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/attendance"
+        IMG="$$BASE:${_TAG}"
+        CACHE="$$BASE:cache"
+        docker build -f services/attendance/Dockerfile \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          --cache-from "$$CACHE" \
+          -t "$$IMG" -t "$$CACHE" .
         docker push "$$IMG"
-    waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
+        # Moving the :cache tag is what makes the NEXT build fast. Pushed after
+        # the real tag so a failure here never loses the deployable image.
+        docker push "$$CACHE"
+    waitFor: ["buf-generate"]
 
   - id: image-comms
     name: gcr.io/cloud-builders/docker
@@ -271,10 +281,28 @@ steps:
       - -c
       - |
         set -euo pipefail
-        IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/comms:${_TAG}"
-        docker build -f services/comms/Dockerfile -t "$$IMG" .
+        # Cloud Build hands every build a COLD Docker daemon, so without a cache
+        # source each image re-downloads its modules and recompiles the whole
+        # dependency graph from zero. Measured on build 667ce1bd: 27.9 min for
+        # one Go service, with the 10 images contending for an e2-medium's two
+        # vCPUs. The Dockerfiles are already layered for this (go.mod, then
+        # `go mod download`, then the source) — the layers just had nowhere to
+        # come from. BUILDKIT_INLINE_CACHE makes the pushed image carry its own
+        # cache metadata; --cache-from reads it back off Artifact Registry next
+        # time. A miss (first build, or a go.sum change) warns and builds cold.
+        export DOCKER_BUILDKIT=1
+        BASE="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/comms"
+        IMG="$$BASE:${_TAG}"
+        CACHE="$$BASE:cache"
+        docker build -f services/comms/Dockerfile \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          --cache-from "$$CACHE" \
+          -t "$$IMG" -t "$$CACHE" .
         docker push "$$IMG"
-    waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
+        # Moving the :cache tag is what makes the NEXT build fast. Pushed after
+        # the real tag so a failure here never loses the deployable image.
+        docker push "$$CACHE"
+    waitFor: ["buf-generate"]
 
   - id: image-uniforms
     name: gcr.io/cloud-builders/docker
@@ -283,10 +311,28 @@ steps:
       - -c
       - |
         set -euo pipefail
-        IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/uniforms:${_TAG}"
-        docker build -f services/uniforms/Dockerfile -t "$$IMG" .
+        # Cloud Build hands every build a COLD Docker daemon, so without a cache
+        # source each image re-downloads its modules and recompiles the whole
+        # dependency graph from zero. Measured on build 667ce1bd: 27.9 min for
+        # one Go service, with the 10 images contending for an e2-medium's two
+        # vCPUs. The Dockerfiles are already layered for this (go.mod, then
+        # `go mod download`, then the source) — the layers just had nowhere to
+        # come from. BUILDKIT_INLINE_CACHE makes the pushed image carry its own
+        # cache metadata; --cache-from reads it back off Artifact Registry next
+        # time. A miss (first build, or a go.sum change) warns and builds cold.
+        export DOCKER_BUILDKIT=1
+        BASE="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/uniforms"
+        IMG="$$BASE:${_TAG}"
+        CACHE="$$BASE:cache"
+        docker build -f services/uniforms/Dockerfile \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          --cache-from "$$CACHE" \
+          -t "$$IMG" -t "$$CACHE" .
         docker push "$$IMG"
-    waitFor: ["go-test", "govulncheck", "sourcemap-gate"]
+        # Moving the :cache tag is what makes the NEXT build fast. Pushed after
+        # the real tag so a failure here never loses the deployable image.
+        docker push "$$CACHE"
+    waitFor: ["buf-generate"]
 
   # The web image builds from the repo root like the Go services, but the root
   # .dockerignore excludes apps/ and packages/ for them — so this relies on
@@ -300,52 +346,39 @@ steps:
       - |
         set -euo pipefail
         export DOCKER_BUILDKIT=1
-        IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/web:${_TAG}"
+        BASE="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/web"
+        IMG="$$BASE:${_TAG}"
+        CACHE="$$BASE:cache"
         # NEXT_PUBLIC_* is inlined at BUILD time, so the provider cannot be
         # switched on by redeploying: it needs a rebuild. Empty substitutions
         # (the default) produce an image with the provider sign-in off.
-        docker build -f apps/web/Dockerfile -t "$$IMG" \
+        #
+        # The cache source is keyed only by layer content, and the NEXT_PUBLIC_*
+        # build args sit in a late layer — so flipping the auth provider still
+        # rebuilds from that layer down, exactly as it must.
+        docker build -f apps/web/Dockerfile \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          --cache-from "$$CACHE" \
           --build-arg NEXT_PUBLIC_AUTH_PROVIDER="${_AUTH_PROVIDER}" \
           --build-arg NEXT_PUBLIC_FIREBASE_API_KEY="${_FIREBASE_API_KEY}" \
           --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="${_FIREBASE_AUTH_DOMAIN}" \
           --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID="${_FIREBASE_PROJECT_ID}" \
-          .
+          -t "$$IMG" -t "$$CACHE" .
         docker push "$$IMG"
-    waitFor: ["web-build", "sourcemap-gate"]
+        docker push "$$CACHE"
+    waitFor: ["buf-generate"]
 
-  # ---- 7. Deploy (only when _DEPLOY=true; main/release triggers) ----------
-  # Cloud Run deploy preserves each service's scaling profile set by Terraform.
-  # Terraform owns the desired-state config; this updates the running image to
-  # the freshly built ${_TAG}. New images roll out; rollback = redeploy a
-  # prior SHA (see deploy/README.md).
-  - id: deploy
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        set -euo pipefail
-        if [ "${_DEPLOY}" != "true" ]; then
-          echo "Skipping deploy (_DEPLOY != true)."
-          exit 0
-        fi
-        for svc in gateway iam students config finance grades attendance comms uniforms web; do
-          gcloud run deploy "$$svc" \
-            --project="$PROJECT_ID" \
-            --region="${_REGION}" \
-            --image="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/$$svc:${_TAG}"
-        done
-    waitFor:
-      - image-gateway
-      - image-iam
-      - image-students
-      - image-config
-      - image-finance
-      - image-grades
-      - image-attendance
-      - image-comms
-      - image-uniforms
-      - image-web
+# The rollout is NOT here.
+#
+# The `_DEPLOY=true` path that used to live at this spot had never executed once
+# — deploy-dev.yml has always passed _DEPLOY=false and rolled out from the
+# runner afterwards — and it used `gcloud run deploy` where dev has always used
+# `gcloud run services update`. Two rollout implementations, one of them dead
+# and subtly different from the live one, is how a deploy behaves differently on
+# the day somebody finally flips the flag.
+#
+# There is one rollout, it lives in .github/workflows/deploy-dev.yml, and it is
+# the one that has actually run.
 
 # Record built images in the build metadata.
 images:
@@ -360,6 +393,10 @@ images:
   - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/uniforms:${_TAG}"
   - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/web:${_TAG}"
 
-# 10 images plus vet/test-race/govulncheck/turbo on the default machine.
-# 1800s was optimistic; a timeout on demo day is a hard stop.
-timeout: 3600s
+# 10 images on the default machine, with the gates gone and layer caching on.
+# A warm build should land far inside this; a cold one (go.sum changed, so every
+# cache-from misses) is what the headroom is for. Kept well above the expected
+# time because a timeout on demo day is a hard stop — but BELOW the old 3600s,
+# because the GitHub runner now polls this build and every minute it runs is a
+# billed Actions minute. See .claude/docs/PLAN-minutos-ci.md.
+timeout: 2400s

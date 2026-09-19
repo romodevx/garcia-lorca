@@ -1,11 +1,15 @@
 # García Lorca — CI (GitHub Actions).
 #
-# Mirrors the gates of deploy/cloudbuild/cloudbuild.yaml (the Cloud Build
-# pipeline) for pull requests and branch pushes. Cloud Build stays the
-# build-and-deploy path (images, Artifact Registry, Cloud Run); this workflow is
-# the pre-merge quality gate only — it never builds or pushes images.
+# THE quality gate. Not "a mirror of" one — the only one.
 #
-# Gate order (cheap first, same as cloudbuild):
+# Cloud Build used to re-run vet, test -race, govulncheck, the web build and the
+# source-map gate on the very commit this workflow had just approved. That copy
+# is gone (T10): deploy/cloudbuild/cloudbuild.yaml now builds images and nothing
+# else, and deploy-dev.yml refuses to submit a build unless THIS workflow is
+# green on that exact SHA. So a gate deleted here is a gate that no longer
+# exists anywhere — weigh removals accordingly.
+#
+# Gate order (cheap first):
 #   proto  : buf lint -> buf breaking -> buf generate -> openapi lint ->
 #            actionlint -> build govulncheck once -> derive the module matrix
 #   vet    : go vet ONCE across the whole workspace
@@ -88,10 +92,11 @@ env:
   BUF_VERSION: "1.50.0"
   GO_VERSION: "1.25.x"
   NODE_VERSION: "22"
-  # Kept EQUAL to _GOVULNCHECK_VERSION in deploy/cloudbuild/cloudbuild.yaml: two
-  # gates scanning with two versions is how one goes green and the other red for
-  # a reason nobody can see. v1.7.0 is the newest that runs on Go 1.25 — v1.8.0
-  # requires 1.26, which is what broke the deploy on 2026-09-10.
+  # THE ONLY vulnerability scan in the pipeline now. Cloud Build used to run a
+  # second one on the same commit; that copy is gone (T10), so there is no twin
+  # to keep this equal to any more — and no way for two versions to disagree.
+  # v1.7.0 is the newest that runs on Go 1.25: v1.8.0 requires 1.26, which is
+  # exactly what broke the deploy on 2026-09-10 when the pin was `@latest`.
   GOVULNCHECK_VERSION: "v1.7.0"
   # Pinned for the same reason govulncheck is. `@latest` moving under us has
   # already cost this repo one broken deploy; security.md says pin versions.
