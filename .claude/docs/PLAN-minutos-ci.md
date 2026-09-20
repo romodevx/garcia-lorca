@@ -382,8 +382,16 @@ Regla explícita, en un script con tests de tabla, no en YAML:
   patas. Sin ella, cuando la heurística se equivoca la gente empuja commits
   vacíos para vencer el filtro, que es peor que no tener filtro.
 
-#### T6 — Eliminar el job agregador `ci`
-Con T3 los nombres son fijos y se registran como required checks directamente.
+#### T6 — ~~Eliminar el job agregador `ci`~~ **CANCELADO**
+La premisa era que existía sólo porque la matriz tenía nombres dinámicos. T3 los
+fijó, así que "ya se puede borrar"… salvo que **T10b lo volvió portante por otro
+motivo en medio**: `deploy-dev.yml` se niega a desplegar un commit si no hay un
+check-run **llamado `ci`** en verde sobre ese SHA exacto. Borrarlo para ahorrar
+1 min/run dejaría el colegio sin deploys, con un error que apunta al deploy y no
+a `ci.yml`.
+
+Es el mismo patrón que el checklist de revisión repite: **antes de quitar algo,
+mirar quién lo lee**. Queda anotado en el propio job.
 
 ### RECHAZADO — T8 (no re-probar el push a `dev`)
 

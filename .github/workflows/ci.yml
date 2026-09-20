@@ -657,8 +657,15 @@ jobs:
           key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json') }}
 
   # ---------------------------------------------------------------------------
-  # 5. Single aggregated status check. `Deploy dev` keys off this workflow's
-  #    conclusion, so this job is what decides whether a commit is deployable.
+  # 5. Single aggregated status check.
+  #
+  #    DO NOT DELETE THIS JOB. The plan's T6 said to drop it "once shard names
+  #    are fixed", which sharding has now done — but T10b landed in between and
+  #    made it load-bearing for a different reason: deploy-dev.yml refuses to
+  #    deploy a commit unless a check-run NAMED `ci` concluded success on that
+  #    exact SHA. Delete this job and every deploy stops, with an error that
+  #    points at the deploy rather than at here. If it ever does go, the guard
+  #    in deploy-dev.yml has to change in the same commit.
   # ---------------------------------------------------------------------------
   ci:
     name: ci
