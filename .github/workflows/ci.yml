@@ -13,7 +13,8 @@
 #   proto  : buf lint -> buf breaking -> buf generate -> openapi lint ->
 #            actionlint -> build govulncheck once -> derive the module matrix
 #   vet    : go vet ONCE across the whole workspace
-#   go     : per workspace module — test -race -> integration -> govulncheck -> mod verify
+#   go     : 4 SHARDS of workspace modules — test -race -> integration ->
+#            govulncheck -> mod verify, every module, just fewer jobs
 #   web    : pnpm install -> turbo test/lint/build -> source-map hardening gate
 #
 # `gen/` is 100% generated and gitignored (except gen/go/go.mod + go.sum, which
@@ -33,7 +34,12 @@
 #     a key that rotates per run fills and evicts the budget within a day.
 #     Use CACHE_EPOCH below to invalidate on purpose.
 #   - Every job costs a WHOLE billed minute however short it is, so cheap checks
-#     are folded into an existing job rather than given one of their own.
+#     are folded into an existing job rather than given one of their own. This
+#     is the dominant cost once the cache works: measured on the warm run
+#     35462895886, the Go matrix did 1,558 s of real work across 14 legs and was
+#     billed 33 minutes. Across a cycle the job-count floor alone was ~1,044 min,
+#     the largest single line in the budget — larger than the whole deploy. Hence
+#     the shards: same gates, same modules, fewer billed minutes.
 
 name: CI
 
@@ -123,8 +129,9 @@ jobs:
     name: proto (lint / breaking / generate / contract / actionlint)
     runs-on: ubuntu-latest
     outputs:
-      # JSON array of go.work `use` entries, consumed as the `go` job matrix.
-      go-modules: ${{ steps.modules.outputs.list }}
+      # The `go` job matrix: one entry per SHARD, each carrying the modules it
+      # owns. Built from go.work, never from a list kept by hand here.
+      go-shards: ${{ steps.modules.outputs.shards }}
       # False only when EVERY changed file is under apps/mobile/, which cannot
       # affect a line of Go. Deliberately conservative: this is not T4's
       # per-service selection, it is the one case that is provably safe.
@@ -230,13 +237,22 @@ jobs:
 
       # The single source of truth for "which Go modules exist" is go.work.
       # Parsing it here keeps the matrix from drifting when a service is added.
-      - name: Derive Go module matrix from go.work
+      # The rule that makes sharding safe to adopt at all: every go.work module
+      # lands in exactly one shard. Collapsing the matrix trades a list Go
+      # maintains for one a human maintains, and the failure mode is SILENT —
+      # a service added later simply stops being tested and nothing goes red.
+      # Asserted before the matrix is built, not trusted.
+      - name: Test the shard assignment
+        run: sh scripts/ci-shards_test.sh
+
+      - name: Derive the Go shard matrix from go.work
         id: modules
         run: |
           set -euo pipefail
-          list="$(go work edit -json | jq -c '[.Use[].DiskPath]')"
-          echo "go.work modules: ${list}"
-          echo "list=${list}" >> "$GITHUB_OUTPUT"
+          shards="$(sh scripts/ci-shards.sh)"
+          echo "shards:"
+          printf '%s' "${shards}" | jq -r '.[] | "  shard \(.shard)  \(.weight)s  \(.modules)"'
+          echo "shards=${shards}" >> "$GITHUB_OUTPUT"
 
       # A mobile-only change runs 14 Go legs today. This is NOT `paths-ignore`:
       # that is an `on:` key, so it would skip the WHOLE workflow, and a workflow
@@ -404,21 +420,23 @@ jobs:
           key: gocache-${{ runner.os }}-${{ env.CACHE_EPOCH }}-workspace-${{ hashFiles('**/go.sum') }}
 
   # ---------------------------------------------------------------------------
-  # 3. Go: one leg per go.work module. fail-fast is off so a single bad module
-  #    does not hide the state of the other thirteen; any red leg still fails CI.
+  # 3. Go: one leg per SHARD, each running the gates for every module it owns.
+  #    fail-fast is off so one bad shard does not hide the state of the others.
+  #    Shard membership comes from scripts/ci-shards.sh, which reads go.work —
+  #    go.work stays the source of truth for WHICH modules exist.
   #
   #    govulncheck and the integration tests are the ONLY Go steps that have gone
   #    red in 58 runs (runs 35394352750, 35395204982). They stay on the PR path.
   # ---------------------------------------------------------------------------
   go:
-    name: go (${{ matrix.module }})
+    name: go (shard ${{ matrix.shard }})
     needs: proto
     if: needs.proto.outputs.go-changed == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        module: ${{ fromJSON(needs.proto.outputs.go-modules) }}
+        include: ${{ fromJSON(needs.proto.outputs.go-shards) }}
     steps:
       - uses: actions/checkout@v5
 
@@ -451,27 +469,45 @@ jobs:
           restore-keys: |
             gomod-${{ runner.os }}-${{ env.CACHE_EPOCH }}-
 
-      # Per module, which is the whole point: one shared key across 14 legs is
+      # Per SHARD, which is the whole point: one shared key across every leg is
       # what let the first finisher freeze a near-empty entry for everyone.
       - name: Restore module build cache
         id: gobuild
         uses: actions/cache/restore@v5
         with:
           path: ~/.cache/go-build
-          key: gocache-${{ runner.os }}-${{ env.CACHE_EPOCH }}-${{ matrix.module }}-${{ hashFiles('**/go.sum') }}
+          key: gocache-${{ runner.os }}-${{ env.CACHE_EPOCH }}-shard${{ matrix.shard }}-${{ hashFiles('**/go.sum') }}
           restore-keys: |
-            gocache-${{ runner.os }}-${{ env.CACHE_EPOCH }}-${{ matrix.module }}-
+            gocache-${{ runner.os }}-${{ env.CACHE_EPOCH }}-shard${{ matrix.shard }}-
 
       # Push: fast unit tests only (no -race). PRs get the full -race pass below.
+      # Each of these loops the shard's modules. The list arrives through env:,
+      # never interpolated into the script body — `${{ }}` substitutes before
+      # the shell ever sees it, and that is a habit worth keeping even when the
+      # value comes from go.work rather than from a pull request.
       - name: go test (unit)
         if: github.event_name != 'pull_request'
-        working-directory: ${{ matrix.module }}
-        run: go test ./... -count=1
+        env:
+          MODULES: ${{ matrix.modules }}
+        run: |
+          set -euo pipefail
+          for m in $MODULES; do
+            echo "::group::go test $m"
+            (cd "$m" && go test ./... -count=1)
+            echo "::endgroup::"
+          done
 
       - name: go test -race
         if: github.event_name == 'pull_request'
-        working-directory: ${{ matrix.module }}
-        run: go test ./... -race -count=1
+        env:
+          MODULES: ${{ matrix.modules }}
+        run: |
+          set -euo pipefail
+          for m in $MODULES; do
+            echo "::group::go test -race $m"
+            (cd "$m" && go test ./... -race -count=1)
+            echo "::endgroup::"
+          done
 
       # Integration tests are behind `//go:build integration` and need a real
       # Postgres via testcontainers-go. GitHub's ubuntu runners ship a working
@@ -479,34 +515,49 @@ jobs:
       # are the slowest leg and would dominate every push otherwise.
       - name: go test -tags=integration
         if: github.event_name == 'pull_request'
-        working-directory: ${{ matrix.module }}
+        env:
+          MODULES: ${{ matrix.modules }}
         run: |
           set -euo pipefail
-          if grep -rlq --include='*.go' '//go:build integration' .; then
-            echo "Integration-tagged files found; running with -tags=integration."
-            go test ./... -tags=integration -count=1
-          else
-            echo "No integration-tagged files in ${{ matrix.module }}; skipping."
-          fi
+          for m in $MODULES; do
+            if (cd "$m" && grep -rlq --include='*.go' '//go:build integration' .); then
+              echo "::group::go test -tags=integration $m"
+              (cd "$m" && go test ./... -tags=integration -count=1)
+              echo "::endgroup::"
+            else
+              echo "No integration-tagged files in $m; skipping."
+            fi
+          done
 
       # Security gate (cloudbuild step 3): reachable-vulnerability scan plus a
       # dependency audit (checksums match go.sum). The binary comes from the
       # proto job — built once, not installed 14 times.
       - name: govulncheck
         if: github.event_name == 'pull_request'
-        working-directory: ${{ matrix.module }}
-        run: "${{ github.workspace }}/dist-tools/govulncheck ./..."
+        env:
+          MODULES: ${{ matrix.modules }}
+          GOVULN: ${{ github.workspace }}/dist-tools/govulncheck
+        run: |
+          set -euo pipefail
+          for m in $MODULES; do
+            echo "::group::govulncheck $m"
+            (cd "$m" && "$GOVULN" ./...)
+            echo "::endgroup::"
+          done
 
       - name: go mod verify
-        working-directory: ${{ matrix.module }}
-        run: go mod verify
+        env:
+          MODULES: ${{ matrix.modules }}
+        run: |
+          set -euo pipefail
+          for m in $MODULES; do (cd "$m" && go mod verify); done
 
       - name: Save module build cache
         if: github.event_name == 'push' && steps.gobuild.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
         with:
           path: ~/.cache/go-build
-          key: gocache-${{ runner.os }}-${{ env.CACHE_EPOCH }}-${{ matrix.module }}-${{ hashFiles('**/go.sum') }}
+          key: gocache-${{ runner.os }}-${{ env.CACHE_EPOCH }}-shard${{ matrix.shard }}-${{ hashFiles('**/go.sum') }}
 
   # ---------------------------------------------------------------------------
   # 4. Web: pnpm is the ONLY package manager (repo CLAUDE.md §7). The job ends
@@ -606,8 +657,15 @@ jobs:
           key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json') }}
 
   # ---------------------------------------------------------------------------
-  # 5. Single aggregated status check. `Deploy dev` keys off this workflow's
-  #    conclusion, so this job is what decides whether a commit is deployable.
+  # 5. Single aggregated status check.
+  #
+  #    DO NOT DELETE THIS JOB. The plan's T6 said to drop it "once shard names
+  #    are fixed", which sharding has now done — but T10b landed in between and
+  #    made it load-bearing for a different reason: deploy-dev.yml refuses to
+  #    deploy a commit unless a check-run NAMED `ci` concluded success on that
+  #    exact SHA. Delete this job and every deploy stops, with an error that
+  #    points at the deploy rather than at here. If it ever does go, the guard
+  #    in deploy-dev.yml has to change in the same commit.
   # ---------------------------------------------------------------------------
   ci:
     name: ci
