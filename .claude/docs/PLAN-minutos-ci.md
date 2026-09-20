@@ -438,8 +438,17 @@ ser ~23% del presupuesto, y son baratos y útiles. Aceptado explícitamente.
 Criterio de aceptación **por tasa**, no por total — el total depende del volumen
 de trabajo del mes, que va a subir en cuanto se pueda empujar sin miedo:
 
-1. **≤ 18 min facturados por run de CI** en la Etapa 1; **≤ 8 min** solo
-   después de T3 (ver §Objetivo: 18 jobs × 1 min de piso).
+1. **CI, por tipo de run.** Tercera corrección de este criterio, y por el mismo
+   error que las dos anteriores: confundir el PISO con el COSTO.
+   - Etapa 1, medido: **38 min/run de PR**, **19 min/run de push** (base 48.3 y
+     25.3). El push ya está prácticamente en su piso de 18 jobs.
+   - Tras T3 (8 jobs), modelado sobre los tiempos calientes reales:
+     **~27 min/PR** y **~11 min/push**. El **≤ 8 min** que decía este criterio
+     nunca fue alcanzable: 8 jobs son el piso, no el costo — las patas siguen
+     haciendo el mismo trabajo, sólo que repartido en menos jobs.
+   - El número definitivo se fija **midiendo** el primer run con shards, no
+     estimándolo. Un objetivo inalcanzable por construcción es un objetivo que
+     la gente aprende a ignorar (la misma lección que E9).
 2. **≤ 12 min facturados por deploy** (hoy: 58). CORREGIDO el 2026-09-18, por
    la misma aritmética que obligó a corregir el criterio 1: **≤ 2 min era
    imposible por construcción**. Ese número asumía *enviar y salir*, y las tres
