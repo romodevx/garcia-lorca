@@ -214,8 +214,17 @@ jobs:
                 # Replacing a streamed log with a status string would be a
                 # diagnostics regression, and the email that used to cover for
                 # it does not arrive. Say what broke, here, in the run.
+                # A FAILURE names its own step. A CANCELLED or TIMEOUT build has
+                # no step in FAILURE at all — every step is CANCELLED — so asking
+                # only for FAILURE printed "failing step: unknown", which is
+                # honest and useless. Verified 2026-09-20 by cancelling a live
+                # build (74df1eaf). Fall back to the step that was still running,
+                # because on a timeout or a cancel THAT is the one you want.
                 step=$(gcloud builds describe "$BUILD_ID" --project="$PROJECT_ID" --format=json 2>/dev/null \
-                       | jq -r '[.steps[]? | select(.status == "FAILURE")] | .[0].id // "unknown"')
+                       | jq -r '(([.steps[]? | select(.status == "FAILURE")] | .[0].id)
+                                 // ([.steps[]? | select(.status == "WORKING")] | .[0].id)
+                                 // ([.steps[]? | select(.status == "CANCELLED")] | .[0].id)
+                                 // "unknown")')
                 echo "::error::failing step: $step"
                 echo "::error::console: $CONSOLE"
                 {
