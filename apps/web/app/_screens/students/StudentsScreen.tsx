@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
 import { DrawerShell } from "../../_design/DrawerShell";
-import { SelectField, TextField } from "../../_design/form";
+import { SelectField, TextField, useFocusFirstInvalid } from "../../_design/form";
 import { Icon, type IconName } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import type { ColorKey } from "../../_design/colors";
@@ -211,6 +211,7 @@ function QuickAdd({
   // cada campo ("llevas 17 caracteres"), así que no se usa useRequired: ese
   // hook da un mensaje genérico y aquí ya había uno mejor.
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const señalarPrimerError = useFocusFirstInvalid();
   const clearField = (key: string): void =>
     setFieldErrors((prev) => {
       if (prev[key] === undefined) return prev;
@@ -245,7 +246,13 @@ function QuickAdd({
     // faltantes a la vez, en sus propios campos.
     const missing = missingFields({ curp, firstName, lastName, guardianName, gradeLevelId });
     setFieldErrors(missing);
-    if (Object.keys(missing).length > 0) return;
+    if (Object.keys(missing).length > 0) {
+      // Marcarlos no basta: el último campo del cajón queda DEBAJO del pie
+      // pegajoso, así que su rojo no se ve y el foco, si se queda en el botón,
+      // tampoco lleva allí.
+      señalarPrimerError();
+      return;
+    }
     const chosenLevel = levels.find((l) => l.id === levelId);
     if (chosenLevel === undefined) {
       setError("Elige el nivel y el grado al que entra.");

@@ -2,6 +2,8 @@
 
 import { useCallback, useMemo, useState } from "react";
 
+import { useFocusFirstInvalid } from "./useFocusFirstInvalid";
+
 /** El mensaje que se pinta bajo un campo obligatorio vacío. */
 export const FALTA = "Falta este dato";
 
@@ -29,9 +31,15 @@ export interface RequiredState {
  * orden de las llaves del objeto: la vista debe saltar al primero que el ojo
  * encuentra bajando por la forma, y el orden de un objeto no es el de la
  * pantalla.
+ *
+ * Y saltar es literal: un `check` que falla manda el foco al primer campo en
+ * rojo y lo despeja del pie del cajón (ver `useFocusFirstInvalid`). Durante un
+ * tiempo esto sólo se calculó y nadie lo usó, y por eso el error de "Tutor" en
+ * el alta de alumno era invisible.
  */
 export function useRequired(required: readonly string[]): RequiredState {
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const señalarPrimerError = useFocusFirstInvalid();
 
   const check = useCallback(
     (values: Readonly<Record<string, string | undefined>>): boolean => {
@@ -42,9 +50,13 @@ export function useRequired(required: readonly string[]): RequiredState {
         }
       }
       setErrors(found);
-      return Object.keys(found).length === 0;
+      const ok = Object.keys(found).length === 0;
+      // Marcar en rojo no basta: lo que falta puede estar debajo del pie del
+      // cajón, donde no se ve y donde el teclado no llega solo.
+      if (!ok) señalarPrimerError();
+      return ok;
     },
-    [required],
+    [required, señalarPrimerError],
   );
 
   const clear = useCallback((key: string): void => {
