@@ -95,8 +95,8 @@ export function TeacherLinkPanel({ teachers, users, onLink }: TeacherLinkPanelPr
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 12, alignItems: "end" }}>
-        <SelectField label="Profesor" value={teacherId} options={teacherOptions} onChange={setTeacherId} placeholder="Selecciona un profesor…" />
-        <SelectField label="Usuario" value={userId} options={userOptions} onChange={setUserId} placeholder="Selecciona un usuario…" />
+        <SelectField label="Profesor" value={teacherId} options={teacherOptions} onChange={setTeacherId} help="El docente del expediente, el que da clases." />
+        <SelectField label="Usuario" value={userId} options={userOptions} onChange={setUserId} help="La cuenta con la que ese docente entra al sistema. Enlazarlos es lo que le deja capturar sus calificaciones." />
         <Btn type="button" icon="check" disabled={!canLink} onClick={() => void link()}>
           Vincular
         </Btn>

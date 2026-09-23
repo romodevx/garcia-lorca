@@ -4,6 +4,26 @@ import { describe, expect, it, vi } from "vitest";
 
 import { EmailField, NumberField, SelectField, TextArea, TextField } from "./fields";
 
+describe("la capa entera", () => {
+  it("NINGÚN campo pinta un placeholder", () => {
+    // Un valor de ejemplo en gris dentro del recuadro es indistinguible de un
+    // dato capturado: quien captura duda, y en el peor caso guarda sin
+    // escribir. La prop ya no existe; esto defiende que nadie la reviva.
+    render(
+      <>
+        <TextField label="Nombre" value="" onChange={vi.fn()} />
+        <EmailField label="Correo" value="" onChange={vi.fn()} />
+        <NumberField label="Cupo" value="" onChange={vi.fn()} />
+        <TextArea label="Mensaje" value="" onChange={vi.fn()} />
+      </>
+    );
+    for (const campo of screen.getAllByRole("textbox")) {
+      expect(campo).not.toHaveAttribute("placeholder");
+    }
+    expect(screen.getByLabelText("Cupo")).not.toHaveAttribute("placeholder");
+  });
+});
+
 describe("TextField", () => {
   it("con uppercase, lo capturado sube a mayúsculas", async () => {
     const onChange = vi.fn();
@@ -116,17 +136,47 @@ describe("NumberField", () => {
 });
 
 describe("SelectField", () => {
-  it("muestra el texto de reposo cuando no hay nada elegido", () => {
+  it("arranca en una opción vacía, y esa opción NO tiene letras", () => {
+    // La opción vacía es lo único que impide que el navegador deje
+    // preseleccionada la primera opción real y guarde un nivel que nadie
+    // eligió. Pero va SIN texto: "Selecciona un nivel…" dentro del recuadro se
+    // lee como un dato ya capturado, que es justo lo que este trabajo quita.
     render(
       <SelectField
         label="Nivel"
         value=""
         onChange={vi.fn()}
-        placeholder="Elige un nivel"
         options={[{ value: "k", label: "Kínder" }]}
       />
     );
-    expect(screen.getByRole("option", { name: "Elige un nivel" })).toBeInTheDocument();
+    const opciones = screen.getAllByRole("option");
+    expect(opciones[0]).toHaveValue("");
+    expect(opciones[0]).toHaveTextContent("");
+  });
+
+  it("con el select vacío, no queda elegida la primera opción real", () => {
+    render(
+      <SelectField
+        label="Nivel"
+        value=""
+        onChange={vi.fn()}
+        options={[{ value: "k", label: "Kínder" }, { value: "p", label: "Primaria" }]}
+      />
+    );
+    expect(screen.getByLabelText("Nivel")).toHaveValue("");
+  });
+
+  it("la ayuda del select entra por el (?), como en todos los demás", () => {
+    render(
+      <SelectField
+        label="Nivel"
+        value=""
+        onChange={vi.fn()}
+        help="El nivel educativo donde va a cursar."
+        options={[{ value: "k", label: "Kínder" }]}
+      />
+    );
+    expect(screen.getByRole("button", { name: "Ayuda sobre Nivel" })).toBeInTheDocument();
   });
 
   it("al elegir limpia su rojo", async () => {

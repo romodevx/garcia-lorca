@@ -171,16 +171,16 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
             onChange={setName}
             uppercase
             required
-            placeholder="NOMBRE"
+            help="El nombre completo de a quién se le marca en una urgencia."
             error={form.errors.name}
             onClearError={() => form.clear("name")}
           />
         </div>
         <div style={{ flex: "1 1 120px", minWidth: 0 }}>
-          <TextField label="Teléfono del contacto" value={phone} onChange={setPhone} placeholder="Teléfono" />
+          <TextField label="Teléfono del contacto" value={phone} onChange={setPhone} help="El número al que se marca, a diez dígitos." />
         </div>
         <div style={{ flex: "1 1 150px", minWidth: 0 }}>
-          <EmailField label="Correo del contacto" value={email} onChange={setEmail} placeholder="correo@ejemplo.mx" />
+          <EmailField label="Correo del contacto" value={email} onChange={setEmail} help="El correo de este contacto. Puede quedar vacío." />
         </div>
         <div style={{ flex: "1 1 110px", minWidth: 0 }}>
           <SelectField

@@ -143,7 +143,7 @@ export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActiva
             onChange={setName}
             uppercase
             required
-            placeholder="2026-2027"
+            help="Cómo se llama el ciclo escolar. Es lo que verás en cada filtro del sistema."
             error={form.errors.name}
             onClearError={() => form.clear("name")}
           />

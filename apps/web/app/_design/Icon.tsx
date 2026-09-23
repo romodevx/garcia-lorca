@@ -204,6 +204,13 @@ const ICON_PATHS = {
       <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />
       <circle cx="12" cy="12" r="3" />
     </g>
+  ),
+  help: (
+    <g>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M9.4 9.3a2.7 2.7 0 1 1 3.4 2.6c-.5.2-.8.7-.8 1.2v.6" />
+      <path d="M12 17v.01" />
+    </g>
   )
 } satisfies Record<string, ReactElement>;
 

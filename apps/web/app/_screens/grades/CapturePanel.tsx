@@ -101,14 +101,14 @@ export function CapturePanel({
             value={assignmentId}
             options={assignmentOptions}
             onChange={setAssignmentId}
-            placeholder="Selecciona una asignación…"
+            help="La materia y el grupo que vas a calificar. Sólo salen las que tienes asignadas."
           />
           <SelectField
             label="Periodo"
             value={termId}
             options={termOptions}
             onChange={setTermId}
-            placeholder="Selecciona un periodo…"
+            help="El periodo de evaluación que estás capturando."
             disabled={assignmentId === "" || terms.length === 0}
           />
         </div>

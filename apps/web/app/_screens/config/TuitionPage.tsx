@@ -281,15 +281,15 @@ export function TuitionPage({
 
       <FormSection n={1} title="Colegiatura" note="lo que se cobra cada mes">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
-          <MoneyField label="Colegiatura mensual" value={monthly} onChange={setMonthly} placeholder="3200.00" />
-          <NumberField label="Mensualidades" value={months} onChange={setMonths} placeholder="10" />
-          <NumberField label="Mes de inicio" value={firstMonth} onChange={setFirstMonth} placeholder="9" />
+          <MoneyField label="Colegiatura mensual" value={monthly} onChange={setMonthly} help="Lo que se cobra cada mes por alumno en este nivel, antes de descuentos y recargos." />
+          <NumberField label="Mensualidades" value={months} onChange={setMonths} help="Cuántos meses se cobran a lo largo del ciclo." />
+          <NumberField label="Mes de inicio" value={firstMonth} onChange={setFirstMonth} help="El mes en que arranca el cobro, con número: 1 es enero y 12 es diciembre." />
           {/*
             Sin min/max nativos a propósito: esta pantalla ya revisa el rango y
             explica por qué ("el 31 no existe en febrero"). El navegador, con
             `max`, bloquearía el envío con un globo suyo y esa frase se perdería.
           */}
-          <NumberField label="Día límite" value={dueDay} onChange={setDueDay} placeholder="10" />
+          <NumberField label="Día límite" value={dueDay} onChange={setDueDay} help="El día del mes hasta el que se puede pagar sin recargo." />
         </div>
       </FormSection>
 
@@ -328,9 +328,9 @@ export function TuitionPage({
           </span>
         </label>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
-          <MoneyField label="Recargo por día" value={dailyFee} onChange={setDailyFee} placeholder="10.00" />
-          <MoneyField label="Pronto pago (monto)" value={earlyAmount} onChange={setEarlyAmount} placeholder="100.00" />
-          <NumberField label="Pronto pago (días hábiles)" value={earlyDays} onChange={setEarlyDays} placeholder="5" />
+          <MoneyField label="Recargo por día" value={dailyFee} onChange={setDailyFee} help="Lo que se suma por cada día de atraso, pasado el día límite." />
+          <MoneyField label="Pronto pago (monto)" value={earlyAmount} onChange={setEarlyAmount} help="El descuento para quien paga dentro del plazo de abajo." />
+          <NumberField label="Pronto pago (días hábiles)" value={earlyDays} onChange={setEarlyDays} help="Cuántos días hábiles antes del día límite hay que pagar para ganarlo. Sábados y domingos no cuentan." />
         </div>
         <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
           <input

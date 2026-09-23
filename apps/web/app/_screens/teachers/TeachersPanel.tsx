@@ -63,11 +63,11 @@ export function TeachersPanel({ teachers, onCreate }: TeachersPanelProps): React
 
       <form aria-label="Agregar profesor" onSubmit={submit}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-          <TextField label="Nombre" value={firstName} onChange={setFirstName} uppercase required placeholder="ADA" />
-          <TextField label="Apellidos" value={lastName} onChange={setLastName} uppercase required placeholder="LOVELACE" />
+          <TextField label="Nombre" value={firstName} onChange={setFirstName} uppercase required help="Sólo los nombres de pila del docente, sin apellidos." />
+          <TextField label="Apellidos" value={lastName} onChange={setLastName} uppercase required help="Los dos apellidos: primero el paterno, luego el materno." />
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12, alignItems: "end" }}>
-          <EmailField label="Correo" value={email} onChange={setEmail} placeholder="ada@example.com" />
+          <EmailField label="Correo" value={email} onChange={setEmail} help="El correo donde el docente recibirá su acceso. Puede quedar vacío y agregarse después." />
           <Btn type="submit" icon="plus" disabled={!canSubmit}>
             Crear profesor
           </Btn>

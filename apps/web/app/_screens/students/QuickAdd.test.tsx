@@ -7,6 +7,12 @@ import * as configApi from "../../config/api";
 import { StudentsScreen, missingFieldMessage, createFailureMessage, isSepLevel } from "./StudentsScreen";
 import { StudentsError } from "../../students/api";
 
+/**
+ * Pide el CAMPO y no su ayuda: el (?) de junto es un botón que se llama
+ * "Ayuda sobre <campo>", así que una consulta laxa encuentra los dos.
+ */
+const CAMPO = { selector: "input, select, textarea" } as const;
+
 vi.mock("../../students/api", async (importOriginal) => ({
   ...(await importOriginal<typeof studentsApi>()),
   listStudents: vi.fn(),
@@ -99,9 +105,9 @@ describe("the quick-add drawer", () => {
     await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
 
     const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
-    await user.type(within(drawer).getByLabelText(/CURP/), FULL.curp);
-    await user.type(within(drawer).getByLabelText(/Nombre/), FULL.firstName);
-    await user.type(within(drawer).getByLabelText(/Apellidos/), FULL.lastName);
+    await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
+    await user.type(within(drawer).getByLabelText(/Nombre/, CAMPO), FULL.firstName);
+    await user.type(within(drawer).getByLabelText(/Apellidos/, CAMPO), FULL.lastName);
     // Tutor deliberately left blank.
 
     await user.click(within(drawer).getByRole("button", { name: "Crear alumno" }));
@@ -124,10 +130,10 @@ describe("the quick-add drawer", () => {
     await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
 
     const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
-    await user.type(within(drawer).getByLabelText(/CURP/), FULL.curp);
-    await user.type(within(drawer).getByLabelText(/Nombre/), FULL.firstName);
-    await user.type(within(drawer).getByLabelText(/Apellidos/), FULL.lastName);
-    await user.type(within(drawer).getByLabelText(/Tutor/), FULL.guardianName);
+    await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
+    await user.type(within(drawer).getByLabelText(/Nombre/, CAMPO), FULL.firstName);
+    await user.type(within(drawer).getByLabelText(/Apellidos/, CAMPO), FULL.lastName);
+    await user.type(within(drawer).getByLabelText(/Tutor/, CAMPO), FULL.guardianName);
     await user.selectOptions(within(drawer).getByLabelText("Nivel"), "lv-k");
     await user.selectOptions(await within(drawer).findByLabelText("Grado"), "gl-k1");
     await user.click(within(drawer).getByRole("button", { name: "Crear alumno" }));
@@ -143,10 +149,10 @@ describe("the quick-add drawer", () => {
     await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
 
     const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
-    await user.type(within(drawer).getByLabelText(/CURP/), FULL.curp);
-    await user.type(within(drawer).getByLabelText(/Nombre/), FULL.firstName);
-    await user.type(within(drawer).getByLabelText(/Apellidos/), FULL.lastName);
-    await user.type(within(drawer).getByLabelText(/Tutor/), FULL.guardianName);
+    await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
+    await user.type(within(drawer).getByLabelText(/Nombre/, CAMPO), FULL.firstName);
+    await user.type(within(drawer).getByLabelText(/Apellidos/, CAMPO), FULL.lastName);
+    await user.type(within(drawer).getByLabelText(/Tutor/, CAMPO), FULL.guardianName);
     await user.selectOptions(within(drawer).getByLabelText("Nivel"), "lv-k");
     await user.selectOptions(await within(drawer).findByLabelText("Grado"), "gl-k1");
     await user.click(within(drawer).getByRole("button", { name: "Crear alumno" }));
@@ -163,10 +169,10 @@ describe("choosing where the pupil goes", () => {
   };
 
   const fillIdentity = async (user: ReturnType<typeof userEvent.setup>, drawer: HTMLElement) => {
-    await user.type(within(drawer).getByLabelText(/CURP/), FULL.curp);
-    await user.type(within(drawer).getByLabelText(/Nombre/), FULL.firstName);
-    await user.type(within(drawer).getByLabelText(/Apellidos/), FULL.lastName);
-    await user.type(within(drawer).getByLabelText(/Tutor/), FULL.guardianName);
+    await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
+    await user.type(within(drawer).getByLabelText(/Nombre/, CAMPO), FULL.firstName);
+    await user.type(within(drawer).getByLabelText(/Apellidos/, CAMPO), FULL.lastName);
+    await user.type(within(drawer).getByLabelText(/Tutor/, CAMPO), FULL.guardianName);
   };
 
   // The grade list is not a fixed 1-2-3: it is whatever the school configured for
@@ -263,10 +269,10 @@ describe("a level that cannot hold a pupil", () => {
     await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
 
     const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
-    await user.type(within(drawer).getByLabelText(/CURP/), FULL.curp);
-    await user.type(within(drawer).getByLabelText(/Nombre/), FULL.firstName);
-    await user.type(within(drawer).getByLabelText(/Apellidos/), FULL.lastName);
-    await user.type(within(drawer).getByLabelText(/Tutor/), FULL.guardianName);
+    await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
+    await user.type(within(drawer).getByLabelText(/Nombre/, CAMPO), FULL.firstName);
+    await user.type(within(drawer).getByLabelText(/Apellidos/, CAMPO), FULL.lastName);
+    await user.type(within(drawer).getByLabelText(/Tutor/, CAMPO), FULL.guardianName);
     await user.selectOptions(within(drawer).getByLabelText("Nivel"), "lv-m");
     await user.selectOptions(await within(drawer).findByLabelText("Grado"), "gl-m1");
 

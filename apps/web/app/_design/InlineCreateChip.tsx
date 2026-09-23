@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
 
 import { Icon } from "./Icon";
+import { HelpTip } from "./form/HelpTip";
 
 /**
  * El alta de un solo dato, ahí donde vive la lista.
@@ -23,16 +24,24 @@ export interface InlineCreateChipProps {
   label: string;
   /** El nombre del campo, para quien no ve el chip. */
   fieldLabel: string;
-  placeholder?: string;
+  /**
+   * Qué va aquí. Sale en el `(?)` de al lado.
+   *
+   * Sustituye al `placeholder`, que en este chip era un valor de ejemplo en
+   * mayúsculas ("MATEMÁTICAS") dentro del recuadro: indistinguible de una
+   * materia ya capturada.
+   */
+  help?: string;
   onCreate: (name: string) => Promise<void> | void;
 }
 
 export function InlineCreateChip({
   label,
   fieldLabel,
-  placeholder,
+  help,
   onCreate,
 }: InlineCreateChipProps): ReactElement {
+  const helpId = useId();
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
@@ -114,11 +123,12 @@ export function InlineCreateChip({
   }
 
   return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 12 }}>
     <input
       ref={ref}
       aria-label={fieldLabel}
+      aria-describedby={help !== undefined ? helpId : undefined}
       value={value}
-      placeholder={placeholder}
       onChange={(e) => setValue(e.target.value.toUpperCase())}
       onKeyDown={onKeyDown}
       // Sólo se cierra solo si está VACÍO. Irse a otro lado con algo escrito no
@@ -141,5 +151,7 @@ export function InlineCreateChip({
         minWidth: 200,
       }}
     />
+      {help !== undefined && <HelpTip id={helpId} label={fieldLabel} text={help} />}
+    </span>
   );
 }

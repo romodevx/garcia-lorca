@@ -53,7 +53,7 @@ export function StudentDirectoryPanel({ students }: StudentDirectoryPanelProps):
   return (
     <Section title="Directorio de alumnos" subtitle={`${students.length} alumnos · busca por nombre, CURP, grupo o tutor`}>
       <div style={{ maxWidth: 420, marginBottom: 12 }}>
-        <TextField label="Buscar" value={query} onChange={setQuery} placeholder="Nombre, CURP, grupo o tutor…" />
+        <TextField label="Buscar" value={query} onChange={setQuery} help="Puedes escribir el nombre, la CURP, el grupo o el nombre del tutor." />
       </div>
       {rows.length === 0 ? (
         <EmptyHint>Sin resultados para “{query}”.</EmptyHint>

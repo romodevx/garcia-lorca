@@ -47,16 +47,37 @@ describe("Field", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("la ayuda se liga igual que el error", () => {
-    render(<Field label="Día" hint="Del 1 al 31">{child}</Field>);
+  it("la ayuda se liga al campo sin que nadie tenga que señalarla", () => {
+    render(<Field label="Día" help="Del 1 al 31">{child}</Field>);
     const input = screen.getByLabelText("Día");
-    expect(input.getAttribute("aria-describedby")).toBe(screen.getByText("Del 1 al 31").id);
+    const dicho = document.getElementById(input.getAttribute("aria-describedby") ?? "");
+    expect(dicho).toHaveTextContent("Del 1 al 31");
+  });
+
+  it("la ayuda va en un (?) y NO en un párrafo colgando del campo", () => {
+    // Un párrafo debajo de cada campo estira la forma y empuja el pie fuera de
+    // la vista. La explicación se guarda en el (?) y sale cuando se pide.
+    render(<Field label="Día" help="Del 1 al 31">{child}</Field>);
+    expect(screen.getByRole("button", { name: "Ayuda sobre Día" })).toBeInTheDocument();
+    expect(screen.queryByRole("paragraph")).toBeNull();
+  });
+
+  it("sin ayuda no hay (?) que estorbe", () => {
+    render(<Field label="Día">{child}</Field>);
+    expect(screen.queryByRole("button")).toBeNull();
   });
 
   it("cuando hay error, el error gana sobre la ayuda", () => {
-    render(<Field label="Día" hint="Del 1 al 31" error="Falta este dato">{child}</Field>);
-    expect(screen.queryByText("Del 1 al 31")).toBeNull();
-    expect(screen.getByRole("alert")).toBeInTheDocument();
+    // Cuando algo está mal, lo que hay que leer es QUÉ está mal, no cómo se
+    // llenaba el campo.
+    render(<Field label="Día" help="Del 1 al 31" error="Falta este dato">{child}</Field>);
+    const input = screen.getByLabelText("Día");
+    expect(input.getAttribute("aria-describedby")).toBe(screen.getByRole("alert").id);
+  });
+
+  it("aun con error, el (?) sigue ahí para consultarlo", () => {
+    render(<Field label="Día" help="Del 1 al 31" error="Falta este dato">{child}</Field>);
+    expect(screen.getByRole("button", { name: "Ayuda sobre Día" })).toBeInTheDocument();
   });
 
   it("dos campos con la misma etiqueta no se roban el id", () => {

@@ -164,14 +164,14 @@ export function AssignmentsPanel({
             // y el <select> se pinta en blanco con selectedIndex -1: parece
             // roto. El SelectField viejo siempre traía una opción vacía; el
             // nuevo la trae sólo si se le da un texto.
-            placeholder="Selecciona un ciclo…"
+            help="El ciclo escolar al que pertenece esta asignación."
           />
           <SelectField
             label="Grupo"
             value={groupId}
             options={groupOptions}
             onChange={setGroupId}
-            placeholder="Selecciona un grupo…"
+            help="El salón que le toca. Se enciende en cuanto eliges el ciclo."
             disabled={groups.length === 0}
           />
           <SelectField
@@ -179,7 +179,7 @@ export function AssignmentsPanel({
             value={subjectId}
             options={subjectOptions}
             onChange={setSubjectId}
-            placeholder="Selecciona una materia…"
+            help="La materia que va a impartir en ese grupo."
             disabled={groupId === ""}
           />
           <SelectField
@@ -187,7 +187,7 @@ export function AssignmentsPanel({
             value={teacherId}
             options={teacherOptions}
             onChange={setTeacherId}
-            placeholder="Selecciona un profesor…"
+            help="Quién la imparte. Sólo aparecen los docentes dados de alta."
             disabled={teachers.length === 0}
           />
         </div>

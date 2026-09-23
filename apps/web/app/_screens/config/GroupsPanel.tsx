@@ -69,9 +69,16 @@ export function GroupsPanel({ cycle, gradeLevel, groups, onCreate }: GroupsPanel
               kind: "text",
               uppercase: true,
               required: true,
-              placeholder: "A",
+              help: "La letra o el nombre que distingue este salón de los otros del mismo grado.",
             },
-            { key: "capacity", label: "Cupo", kind: "number", required: true, width: 120 },
+            {
+              key: "capacity",
+              label: "Cupo",
+              kind: "number",
+              required: true,
+              width: 140,
+              help: "Cuántos alumnos caben. La asignación automática no mete a nadie de más.",
+            },
           ]}
           onCreate={async (values) => {
             const capacity = Number(values.capacity);

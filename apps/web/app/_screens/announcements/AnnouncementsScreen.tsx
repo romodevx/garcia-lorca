@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
-import { TextField } from "../../_design/form";
+import { HelpTip, TextField } from "../../_design/form";
 import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import { announce, type AnnouncementScope } from "../../comms/api";
@@ -194,16 +194,23 @@ export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): React
           celular de los papás, así que es cuerpo del aviso, no dato de
           catálogo — y la propia capa de captura dice que un aviso no se grita.
         */}
-        <TextField label="Título" value={title} onChange={setTitle} required placeholder="Junta de padres" />
+        <TextField label="Título" value={title} onChange={setTitle} required help="Lo que las familias verán en la lista de avisos, antes de abrirlo." />
 
         <label style={{ display: "block" }}>
-          <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Mensaje</span>
+          <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6 }}>
+            <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Mensaje</span>
+            <HelpTip
+              id="aviso-cuerpo-help"
+              label="Mensaje"
+              text="El aviso completo. Llega tal cual a la app de los padres, así que se escribe como se quiere que se lea."
+            />
+          </span>
           <textarea
             aria-label="Mensaje"
+            aria-describedby="aviso-cuerpo-help"
             value={body}
             onChange={(e) => setBody(e.target.value)}
             rows={4}
-            placeholder="Jueves 8:00 en el auditorio."
             style={{ ...field, height: "auto", padding: "12px 16px", marginTop: 8, resize: "vertical", fontFamily: "inherit" }} />
         </label>
 

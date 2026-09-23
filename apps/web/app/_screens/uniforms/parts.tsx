@@ -2,6 +2,7 @@
 
 import type { CSSProperties, ReactElement, ReactNode } from "react";
 import { Icon, type IconName } from "../../_design/Icon";
+import { HelpTip } from "../../_design/form";
 import { COLOR, type ColorKey } from "../../_design/colors";
 
 /**
@@ -42,6 +43,35 @@ export const label: CSSProperties = {
   marginBottom: 6,
   fontFamily: "var(--font-display)",
 };
+
+/**
+ * La etiqueta de un campo de esta pantalla, con su `(?)` al lado.
+ *
+ * Los campos de aquí no pasan por la capa de captura (son inputs propios con
+ * `field`), así que sin esto cada uno repetiría el mismo envoltorio. El id de la
+ * ayuda se deriva del del campo: quien lo use pone
+ * `aria-describedby={`${id}-help`}` en su input.
+ */
+export function FieldLabel({
+  htmlFor,
+  help,
+  style,
+  children,
+}: {
+  htmlFor: string;
+  help?: string;
+  style?: CSSProperties;
+  children: string;
+}): ReactElement {
+  return (
+    <div style={{ display: "flex", alignItems: "baseline", gap: 6, ...style }}>
+      <label htmlFor={htmlFor} style={{ ...label, marginBottom: 0 }}>
+        {children}
+      </label>
+      {help !== undefined && <HelpTip id={`${htmlFor}-help`} label={children} text={help} />}
+    </div>
+  );
+}
 
 /**
  * A card that says what happened and what to do about it.

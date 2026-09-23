@@ -52,7 +52,6 @@
   "action.applyDiscount": "Apply discount",
   "action.cancelCharge": "Cancel charge",
   "action.confirmCancel": "Confirm cancellation",
-  "option.choose": "Select…",
   "option.includeInactive": "Include inactive",
   "hint.amountPesos": "Sent to the server in cents.",
   "hint.groupOptional": "With no group the whole cycle is charged.",
@@ -92,5 +91,14 @@
   "error.reasonRequired": "Enter the reason for the discount.",
   "account.balance": "Total balance",
   "account.charges": "Charges",
-  "account.payments": "Payments"
+  "account.payments": "Payments",
+  "help.cycle": "The school year you are working on.",
+  "help.student": "The student you are working on.",
+  "help.concept": "The charge to generate, as it is registered in the catalog.",
+  "help.group": "The classroom the charge will be generated for.",
+  "help.charge": "The charge being paid.",
+  "help.amount": "What the family is handing over now. It may be less than the balance: it is recorded as a partial payment.",
+  "help.amountOverride": "Leave it empty to charge the concept's amount. Enter a figure only if this charge differs.",
+  "help.conceptAmount": "What this concept charges.",
+  "help.discount": "What is taken off this charge. The balance becomes the amount minus this discount."
 }

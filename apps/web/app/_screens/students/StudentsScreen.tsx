@@ -309,7 +309,7 @@ function QuickAdd({
             onChange={setCurp}
             uppercase
             required
-            placeholder="XXXX000000XXXXXX00"
+            help="Los 18 caracteres de la CURP del alumno, tal como vienen en el acta. Es lo que impide que el mismo alumno se registre dos veces."
             error={fieldErrors.curp}
             onClearError={() => clearField("curp")}
           />
@@ -320,7 +320,7 @@ function QuickAdd({
               onChange={setFirst}
               uppercase
               required
-              placeholder="ANA SOFÍA"
+              help="Sólo los nombres de pila, sin apellidos."
               error={fieldErrors.firstName}
               onClearError={() => clearField("firstName")}
             />
@@ -330,7 +330,7 @@ function QuickAdd({
               onChange={setLast}
               uppercase
               required
-              placeholder="RUIZ MÁRQUEZ"
+              help="Los dos apellidos: primero el paterno, luego el materno."
               error={fieldErrors.lastName}
               onClearError={() => clearField("lastName")}
             />
@@ -341,7 +341,7 @@ function QuickAdd({
               value={levelId}
               onChange={setLevelId}
               required
-              placeholder="Selecciona…"
+              help="El nivel educativo donde va a cursar: preescolar, primaria o secundaria."
               options={levels.map((l) => ({ value: l.id, label: l.name }))}
             />
             <SelectField
@@ -350,7 +350,7 @@ function QuickAdd({
               onChange={setGradeLevelId}
               required
               disabled={grades.length === 0}
-              placeholder={levelId === "" ? "Elige un nivel primero" : "Selecciona…"}
+              help="El grado dentro del nivel. Se enciende en cuanto eliges el nivel."
               options={grades.map((g) => ({ value: g.id, label: g.name }))}
               error={fieldErrors.gradeLevelId}
               onClearError={() => clearField("gradeLevelId")}
@@ -362,7 +362,7 @@ function QuickAdd({
             onChange={setGuardian}
             uppercase
             required
-            placeholder="NOMBRE DEL TUTOR"
+            help="Quién responde por el alumno ante el colegio: nombre completo de la madre, el padre o el tutor legal."
             error={fieldErrors.guardianName}
             onClearError={() => clearField("guardianName")}
           />

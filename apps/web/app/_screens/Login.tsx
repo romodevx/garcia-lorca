@@ -154,7 +154,6 @@ export function Login({ theme, onToggle, onSubmit, error, pending }: LoginProps)
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
-                  placeholder="correo@colegio.mx"
                   value={email}
                   onChange={(e) => setEmail(e.target.value.toLowerCase())}
                   style={inp}
@@ -293,7 +292,6 @@ function ForgotPanel({ email, sent, onEmail, onSend, onClose }: { email: string;
             autoComplete="email"
             value={email}
             onChange={(e) => onEmail(e.target.value)}
-            placeholder="tucorreo@garcialorca.edu.mx"
             style={{ width: "100%", height: 48, padding: "0 14px", borderRadius: "var(--r-md)", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 15, outline: "none" }}
           />
           <div style={{ display: "flex", gap: 10, marginTop: 12 }}>

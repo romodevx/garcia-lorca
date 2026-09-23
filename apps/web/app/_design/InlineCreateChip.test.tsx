@@ -9,7 +9,7 @@ function setup(onCreate = vi.fn().mockResolvedValue(undefined)): typeof onCreate
     <InlineCreateChip
       label="Nueva materia"
       fieldLabel="Nombre de la materia"
-      placeholder="MATEMÁTICAS"
+      help="La materia como aparecerá en la boleta."
       onCreate={onCreate}
     />,
   );

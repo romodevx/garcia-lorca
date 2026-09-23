@@ -12,6 +12,15 @@ export interface ChangePasswordProps {
   pending?: boolean;
 }
 
+const etiqueta: CSSProperties = {
+  display: "block",
+  fontSize: 13,
+  fontWeight: 600,
+  color: "var(--text-muted)",
+  marginBottom: 6,
+  marginLeft: 4,
+};
+
 const inp: CSSProperties = {
   width: "100%",
   height: 52,
@@ -45,10 +54,25 @@ export function ChangePassword({ theme, onToggle, onSubmit, error, pending }: Ch
         <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 8 }}>
           Por seguridad, cambia la contraseña temporal antes de continuar.
         </p>
+        {/*
+          Las tres etiquetas se VEN. Antes el nombre de cada campo vivía en su
+          placeholder, así que desaparecía en cuanto alguien empezaba a teclear:
+          quien se distraía a mitad de la forma ya no sabía cuál de las tres
+          casillas era la nueva y cuál la confirmación.
+        */}
         <div style={{ marginTop: 22, display: "flex", flexDirection: "column", gap: 14 }}>
-          <input aria-label="Contraseña actual" type="password" autoComplete="current-password" placeholder="Contraseña temporal" value={current} onChange={(e) => setCurrent(e.target.value)} style={inp} />
-          <input aria-label="Nueva contraseña" type="password" autoComplete="new-password" placeholder="Nueva contraseña" value={next} onChange={(e) => setNext(e.target.value)} style={inp} />
-          <input aria-label="Confirmar contraseña" type="password" autoComplete="new-password" placeholder="Confirmar contraseña" value={confirm} onChange={(e) => setConfirm(e.target.value)} style={inp} />
+          <label style={{ display: "block" }}>
+            <span style={etiqueta}>Contraseña temporal</span>
+            <input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} style={inp} />
+          </label>
+          <label style={{ display: "block" }}>
+            <span style={etiqueta}>Nueva contraseña</span>
+            <input type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} style={inp} />
+          </label>
+          <label style={{ display: "block" }}>
+            <span style={etiqueta}>Confirmar contraseña</span>
+            <input type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} style={inp} />
+          </label>
         </div>
         {tooShort ? <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 10 }}>Mínimo {MIN_LEN} caracteres.</p> : null}
         {mismatch ? <p style={{ color: "var(--orange)", fontSize: 13, marginTop: 10 }}>Las contraseñas no coinciden.</p> : null}

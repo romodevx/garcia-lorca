@@ -7,6 +7,12 @@ import type { Student } from "../../students/api";
 import { Providers } from "../../test-utils";
 import { AccountPanel } from "./AccountPanel";
 
+/**
+ * Pide el CAMPO y no su ayuda: el (?) de junto es un botón que se llama
+ * "Ayuda sobre <campo>", así que una consulta laxa encuentra los dos.
+ */
+const CAMPO = { selector: "input, select, textarea" } as const;
+
 const students = [
   { id: "stu-1", firstName: "Ana", lastName: "Ruiz" } as unknown as Student,
 ];
@@ -31,7 +37,7 @@ async function open(account: AccountStatement): Promise<void> {
       <AccountPanel students={students} onLoad={async () => account} />
     </Providers>,
   );
-  await userEvent.selectOptions(screen.getByLabelText(/alumno/i), "stu-1");
+  await userEvent.selectOptions(screen.getByLabelText(/alumno/i, CAMPO), "stu-1");
   await userEvent.click(screen.getByRole("button", { name: /estado de cuenta|cargar|ver/i }));
   await waitFor(() => expect(screen.getByTestId("due-today")).toBeInTheDocument());
 }

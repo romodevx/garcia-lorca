@@ -90,7 +90,7 @@ export function ChargeActions({ charge, onDiscount, onCancel }: ChargeActionsPro
     >
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
         <div style={{ flex: "1 1 160px", minWidth: 0 }}>
-          <TextField label={t("field.discount")} value={discount} onChange={setDiscount} placeholder="0.00" />
+          <TextField label={t("field.discount")} value={discount} onChange={setDiscount} help={t("help.discount")} />
         </div>
         <div style={{ flex: "2 1 220px", minWidth: 0 }}>
           <TextField label={t("field.reason")} value={reason} onChange={setReason} />

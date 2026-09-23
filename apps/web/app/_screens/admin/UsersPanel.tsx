@@ -155,15 +155,15 @@ export function UsersPanel({ users, roles, onCreate, onSetStatus, onSetRoles }: 
 
       <form aria-label="Crear usuario" onSubmit={submit}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-          <TextField label="Correo" value={email} onChange={setEmail} placeholder="director@example.com" />
-          <TextField label="Nombre para mostrar" value={displayName} onChange={setDisplayName} placeholder="Directora" />
+          <TextField label="Correo" value={email} onChange={setEmail} help="El correo con el que esta persona entrará al sistema." />
+          <TextField label="Nombre para mostrar" value={displayName} onChange={setDisplayName} help="El nombre que verán los demás en el sistema." />
         </div>
         <div style={{ marginBottom: 12 }}>
           <TextField
             label="Contraseña temporal"
             value={tempPassword}
             onChange={setTempPassword}
-            placeholder="El usuario la cambia al primer ingreso"
+            help="Con esto entra la primera vez. El sistema le pedirá cambiarla en ese primer ingreso. Mínimo 8 caracteres."
           />
         </div>
         {roleOptions.length > 0 && (

@@ -142,7 +142,7 @@ export function InscriptionSection({ concepts, onChange, onError, draftRef }: In
 
       <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap", marginTop: 4 }}>
         <div style={{ flex: "1 1 240px" }}>
-          <TextField label="Nuevo concepto" value={name} onChange={setName} uppercase placeholder="GASTOS ADM Y SEGURO" />
+          <TextField label="Nuevo concepto" value={name} onChange={setName} uppercase help="Cómo se llamará este cobro en el estado de cuenta de la familia." />
         </div>
         <Btn kind="ghost" icon="plus" onClick={addConcept}>Agregar concepto</Btn>
       </div>
@@ -275,7 +275,7 @@ function ConceptCard({ concept, onChangeTiers, onRemove, onError, registerDraft 
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 10 }}>
-        <MoneyField label="Monto" value={amount} onChange={setAmount} placeholder="2200.00" />
+        <MoneyField label="Monto" value={amount} onChange={setAmount} help="Lo que se cobra por este concepto, por alumno." />
         <DateField label="Vigente desde" value={from} onChange={setFrom} />
         <DateField label="Vigente hasta (opcional)" value={to} onChange={setTo} />
       </div>
@@ -435,8 +435,8 @@ export function FeesSection({
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginBottom: 12 }}>
-        <TextField label="Nombre de la cuota" value={name} onChange={setName} uppercase placeholder="CUOTA DE JULIO" />
-        <MoneyField label="Monto total" value={amount} onChange={setAmount} placeholder="1600.00" />
+        <TextField label="Nombre de la cuota" value={name} onChange={setName} uppercase help="Cómo se llamará esta cuota en el estado de cuenta de la familia." />
+        <MoneyField label="Monto total" value={amount} onChange={setAmount} help="El total de la cuota. Abajo eliges en cuántas partes se parte." />
       </div>
       <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-muted)", marginBottom: 8 }}>
         ¿En qué meses se cobra?

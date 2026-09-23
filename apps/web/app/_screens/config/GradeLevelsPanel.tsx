@@ -71,7 +71,7 @@ export function GradeLevelsPanel({
               kind: "text",
               uppercase: true,
               required: true,
-              placeholder: "1° PRIMARIA",
+              help: "El grado dentro del nivel, como lo nombra el colegio.",
             },
             { key: "ordinal", label: "Orden", kind: "number", required: true, width: 110 },
           ]}

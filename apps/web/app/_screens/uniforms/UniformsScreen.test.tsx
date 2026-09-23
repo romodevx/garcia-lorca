@@ -6,6 +6,12 @@ import { parseSizes, sizesMessage } from "./CatalogPanel";
 import { toRows } from "./OrdersPanel";
 import type { UniformItem, UniformOrder } from "../../uniforms/api";
 
+/**
+ * Pide el CAMPO y no su ayuda: el (?) de junto es un botón que se llama
+ * "Ayuda sobre <campo>", así que una consulta laxa encuentra los dos.
+ */
+const CAMPO = { selector: "input, select, textarea" } as const;
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -412,9 +418,9 @@ describe("UniformsScreen — el inventario no es sólo ropa", () => {
     // Two buttons offer it: the header and the empty-state hint. Either does.
     await user.click((await screen.findAllByRole("button", { name: /Nuevo artículo/ }))[0] as HTMLElement);
     await user.click(screen.getByLabelText("Libro"));
-    await user.type(screen.getByLabelText(/Nombre/), "Libro de matemáticas 3°");
-    await user.type(screen.getByLabelText(/Clave/), "LIB-MAT-3");
-    await user.type(screen.getByLabelText(/Precio/), "450");
+    await user.type(screen.getByLabelText(/Nombre/, CAMPO), "Libro de matemáticas 3°");
+    await user.type(screen.getByLabelText(/Clave/, CAMPO), "LIB-MAT-3");
+    await user.type(screen.getByLabelText(/Precio/, CAMPO), "450");
     await user.click(screen.getByRole("button", { name: /Guardar|Crear/ }));
 
     await waitFor(() => {

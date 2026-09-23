@@ -100,13 +100,13 @@ export function RosterPanel({ students, cycles, loadGroups, loadEnrollments, onT
     <Section title="Roster del grupo" subtitle="Consulta a los alumnos inscritos, trasládalos o da de baja.">
       <form aria-label="Ver roster del grupo">
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
-          <SelectField label="Ciclo" value={cycleId} options={cycleOptions} onChange={setCycleId} placeholder="Selecciona un ciclo…" disabled={cycles.length === 0} />
+          <SelectField label="Ciclo" value={cycleId} options={cycleOptions} onChange={setCycleId} help="El ciclo escolar sobre el que trabajas." disabled={cycles.length === 0} />
           <SelectField
             label="Grupo"
             value={groupId}
             options={groupOptions}
             onChange={setGroupId}
-            placeholder="Selecciona un grupo…"
+            help="El salón. Sólo muestra los grupos del ciclo elegido."
             disabled={cycleId === "" || groups.length === 0}
           />
         </div>

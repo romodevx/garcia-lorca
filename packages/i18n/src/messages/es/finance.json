@@ -52,7 +52,6 @@
   "action.applyDiscount": "Aplicar descuento",
   "action.cancelCharge": "Cancelar cargo",
   "action.confirmCancel": "Confirmar cancelación",
-  "option.choose": "Selecciona…",
   "option.includeInactive": "Incluir inactivos",
   "hint.amountPesos": "Se envía al servidor en centavos.",
   "hint.groupOptional": "Sin grupo se cobra a todo el ciclo.",
@@ -92,5 +91,14 @@
   "error.reasonRequired": "Captura el motivo del descuento.",
   "account.balance": "Saldo total",
   "account.charges": "Cargos",
-  "account.payments": "Pagos"
+  "account.payments": "Pagos",
+  "help.cycle": "El ciclo escolar sobre el que trabajas.",
+  "help.student": "El alumno sobre el que estás trabajando.",
+  "help.concept": "El cobro que se va a generar, tal como está dado de alta en el catálogo.",
+  "help.group": "El salón al que se le generará el cobro.",
+  "help.charge": "El cargo que se está pagando.",
+  "help.amount": "Lo que la familia está entregando ahora. Puede ser menos que el adeudo: queda como abono.",
+  "help.amountOverride": "Déjalo vacío para cobrar el monto del concepto. Escribe una cantidad sólo si este cobro es distinto.",
+  "help.conceptAmount": "Lo que se cobra por este concepto.",
+  "help.discount": "Lo que se le rebaja a este cargo. El adeudo queda en el monto menos este descuento."
 }

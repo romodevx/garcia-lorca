@@ -95,4 +95,34 @@ describe("la capa de captura, en todo el sistema", () => {
       .map(([f]) => f);
     expect(offenders).toEqual([]);
   });
+
+  it("ninguna pantalla pinta un valor de ejemplo dentro de un campo", () => {
+    // El defecto que este trabajo vino a cerrar: "ADA", "3200.00",
+    // "XXXX000000XXXXXX00" en gris DENTRO del recuadro se leen como datos ya
+    // capturados. El director duda, y en el peor caso guarda sin escribir.
+    //
+    // La capa de captura ya no tiene la prop, así que el compilador defiende
+    // sus campos. Esto defiende los inputs a mano, donde TypeScript no llega.
+    //
+    // Los buscadores se quedan fuera a propósito: ahí el texto es una
+    // instrucción ("Buscar alumno, CURP o tutor…"), el campo no guarda nada y
+    // no hay registro con el que confundirlo.
+    const esBuscador = (linea: string): boolean =>
+      /type="search"/.test(linea) ||
+      /aria-label=\{?["'`]?Buscar/i.test(linea) ||
+      /placeholder="Buscar/i.test(linea) ||
+      // El autocompletado de alumno de uniformes: se teclea para buscar, no
+      // para capturar.
+      /Escribe el nombre del alumno/.test(linea);
+
+    const offenders = SCREENS.flatMap(([file, src]) =>
+      src
+        .split("\n")
+        .map((linea, i) => [linea, i + 1] as const)
+        .filter(([linea]) => /placeholder[=:]/.test(linea))
+        .filter(([linea]) => !esBuscador(linea))
+        .map(([, n]) => `${file}:${n}`),
+    );
+    expect(offenders).toEqual([]);
+  });
 });

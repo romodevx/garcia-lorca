@@ -8,7 +8,7 @@ import { Icon } from "../../_design/Icon";
 import { counterSale, UniformsError, type SaleLine, type UniformItem, type UniformOrder } from "../../uniforms/api";
 import type { Student } from "../../students/api";
 import { StudentPicker } from "./StudentPicker";
-import { EmptyState, ErrorNote, field, label, money } from "./parts";
+import { EmptyState, ErrorNote, field, FieldLabel, label, money } from "./parts";
 
 import { API_URL } from "../../api-url";
 
@@ -304,13 +304,30 @@ export function CounterSalePanel({
         >
           {anonymous ? "Es para un alumno" : "Venta sin alumno"}
         </button>
-        <input
-          style={field}
-          placeholder={anonymous ? "Quién compró (requerido)" : "Nota (opcional)"}
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          aria-label="Nota"
-        />
+        {/*
+          La etiqueta CAMBIA con el modo, y por eso tiene que verse: vivía en el
+          placeholder mientras el aria-label decía siempre "Nota", así que lo que
+          se veía y lo que oía un lector de pantalla eran cosas distintas.
+        */}
+        <div>
+          <FieldLabel
+            htmlFor="counter-note"
+            help={
+              anonymous
+                ? "Sin alumno, anota quién se llevó la mercancía: sin eso la venta no se puede reclamar después."
+                : "Lo que quieras recordar de esta venta."
+            }
+          >
+            {anonymous ? "Quién compró (requerido)" : "Nota (opcional)"}
+          </FieldLabel>
+          <input
+            id="counter-note"
+            style={field}
+            aria-describedby="counter-note-help"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </div>
       </section>
 
       <section style={{ display: "grid", gap: 12 }}>
@@ -337,13 +354,21 @@ export function CounterSalePanel({
           ))}
         </div>
         {method !== "cash" && (
+          <div>
+          <FieldLabel
+            htmlFor="counter-ref"
+            help="El folio del voucher o el número de la transferencia: lo que te permita reconocer este cobro después."
+          >
+            Referencia
+          </FieldLabel>
           <input
+            id="counter-ref"
             style={field}
-            placeholder="Referencia o folio del voucher"
+            aria-describedby="counter-ref-help"
             value={reference}
             onChange={(e) => setReference(e.target.value)}
-            aria-label="Referencia"
           />
+          </div>
         )}
         {method === "cash" && cart.length > 0 && (
           <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>

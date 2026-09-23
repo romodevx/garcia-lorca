@@ -3,6 +3,7 @@
 import { useId, type CSSProperties, type ReactElement } from "react";
 
 import { Icon } from "../Icon";
+import { HelpTip } from "./HelpTip";
 
 /**
  * La envoltura de todo campo del sistema: etiqueta, el asterisco de
@@ -20,14 +21,21 @@ export interface FieldProps {
   label: string;
   required?: boolean;
   error?: string;
-  hint?: string;
+  /**
+   * Qué hay que capturar aquí. Sale en el `(?)` de junto a la etiqueta.
+   *
+   * Sustituye a los VALORES DE EJEMPLO que vivían dentro del campo ("ADA",
+   * "3200.00"): en gris claro, dentro del recuadro, eran indistinguibles de un
+   * dato ya capturado.
+   */
+  help?: string;
   children: (id: string, describedBy: string | undefined) => ReactElement;
 }
 
 const labelRowStyle: CSSProperties = {
   display: "flex",
   alignItems: "baseline",
-  gap: 3,
+  gap: 6,
   marginBottom: 6,
 };
 
@@ -37,13 +45,13 @@ const labelStyle: CSSProperties = {
   color: "var(--text-muted)",
 };
 
-export function Field({ label, required, error, hint, children }: FieldProps): ReactElement {
+export function Field({ label, required, error, help, children }: FieldProps): ReactElement {
   const id = useId();
   const errorId = `${id}-error`;
-  const hintId = `${id}-hint`;
+  const helpId = `${id}-help`;
   // El error gana sobre la ayuda: cuando algo está mal, lo que hay que leer es
-  // qué está mal, no cómo se llenaba el campo.
-  const describedBy = error !== undefined ? errorId : hint !== undefined ? hintId : undefined;
+  // qué está mal, no cómo se llenaba el campo. El (?) sigue ahí para consultarlo.
+  const describedBy = error !== undefined ? errorId : help !== undefined ? helpId : undefined;
 
   return (
     <div style={{ display: "block", minWidth: 0 }}>
@@ -62,13 +70,9 @@ export function Field({ label, required, error, hint, children }: FieldProps): R
             *
           </span>
         )}
+        {help !== undefined && <HelpTip id={helpId} label={label} text={help} />}
       </div>
       {children(id, describedBy)}
-      {hint !== undefined && error === undefined && (
-        <p id={hintId} style={{ fontSize: 12.5, color: "var(--text-faint)", marginTop: 5 }}>
-          {hint}
-        </p>
-      )}
       {error !== undefined && (
         <p
           id={errorId}

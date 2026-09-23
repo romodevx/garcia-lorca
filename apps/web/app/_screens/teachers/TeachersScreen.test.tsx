@@ -6,6 +6,12 @@ import * as configApi from "../../config/api";
 import * as teachersApi from "../../teachers/api";
 import { TeachersScreen } from "./TeachersScreen";
 
+/**
+ * Pide el CAMPO y no su ayuda: el (?) de junto es un botón que se llama
+ * "Ayuda sobre <campo>", así que una consulta laxa encuentra los dos.
+ */
+const CAMPO = { selector: "input, select, textarea" } as const;
+
 vi.mock("../../teachers/api", async (importOriginal) => ({
   ...(await importOriginal<typeof teachersApi>()),
   listTeachers: vi.fn(),
@@ -55,9 +61,9 @@ describe("the Docentes module", () => {
     render(<TeachersScreen onBack={() => {}} />);
     const form = await screen.findByRole("form", { name: "Agregar profesor" });
 
-    await user.type(within(form).getByLabelText(/Nombre/), "Grace");
-    await user.type(within(form).getByLabelText(/Apellidos/), "Hopper");
-    await user.type(within(form).getByLabelText(/Correo/), "grace@escuela.mx");
+    await user.type(within(form).getByLabelText(/Nombre/, CAMPO), "Grace");
+    await user.type(within(form).getByLabelText(/Apellidos/, CAMPO), "Hopper");
+    await user.type(within(form).getByLabelText(/Correo/, CAMPO), "grace@escuela.mx");
     await user.click(within(form).getByRole("button", { name: "Crear profesor" }));
 
     await waitFor(() => expect(teachers.createTeacher).toHaveBeenCalled());

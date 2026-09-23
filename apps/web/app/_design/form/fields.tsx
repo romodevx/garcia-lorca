@@ -21,8 +21,16 @@ export interface BaseFieldProps {
   error?: string;
   /** Se llama al primer tecleo para que el rojo del campo desaparezca. */
   onClearError?: () => void;
-  placeholder?: string;
-  hint?: string;
+  /**
+   * Qué hay que capturar aquí. Sale en el `(?)` junto a la etiqueta.
+   *
+   * NO existe `placeholder`, y su ausencia es el contrato: un valor de ejemplo
+   * en gris dentro del recuadro ("ADA", "3200.00", "XXXX000000XXXXXX00") es
+   * indistinguible de un dato ya capturado. Quien captura duda, y en el peor
+   * caso guarda sin escribir. Al no existir la prop, ninguna pantalla puede
+   * revivirlo por descuido: el compilador lo impide.
+   */
+  help?: string;
   disabled?: boolean;
 }
 
@@ -37,7 +45,6 @@ function common(
   "aria-invalid": true | undefined;
   "aria-required": true | undefined;
   disabled: boolean | undefined;
-  placeholder: string | undefined;
 } {
   return {
     id,
@@ -45,7 +52,6 @@ function common(
     "aria-invalid": p.error !== undefined ? true : undefined,
     "aria-required": p.required === true ? true : undefined,
     disabled: p.disabled,
-    placeholder: p.placeholder,
   };
 }
 
@@ -58,9 +64,9 @@ export interface TextFieldProps extends BaseFieldProps {
 }
 
 export function TextField(props: TextFieldProps): ReactElement {
-  const { label, value, onChange, uppercase, error, onClearError, required, hint } = props;
+  const { label, value, onChange, uppercase, error, onClearError, required, help } = props;
   return (
-    <Field label={label} required={required} error={error} hint={hint}>
+    <Field label={label} required={required} error={error} help={help}>
       {(id, describedBy) => (
         <input
           {...common(id, describedBy, props)}
@@ -86,9 +92,9 @@ export function TextField(props: TextFieldProps): ReactElement {
  * día que dos personas lo escriban distinto habría dos cuentas.
  */
 export function EmailField(props: BaseFieldProps): ReactElement {
-  const { label, value, onChange, error, onClearError, required, hint } = props;
+  const { label, value, onChange, error, onClearError, required, help } = props;
   return (
-    <Field label={label} required={required} error={error} hint={hint}>
+    <Field label={label} required={required} error={error} help={help}>
       {(id, describedBy) => (
         <input
           {...common(id, describedBy, props)}
@@ -123,9 +129,9 @@ export interface NumberFieldProps extends BaseFieldProps {
  * en una calificación es un dato falso que nadie escribió.
  */
 export function NumberField(props: NumberFieldProps): ReactElement {
-  const { label, value, onChange, error, onClearError, required, hint, min, max, step } = props;
+  const { label, value, onChange, error, onClearError, required, help, min, max, step } = props;
   return (
-    <Field label={label} required={required} error={error} hint={hint}>
+    <Field label={label} required={required} error={error} help={help}>
       {(id, describedBy) => (
         <input
           {...common(id, describedBy, props)}
@@ -148,9 +154,9 @@ export function NumberField(props: NumberFieldProps): ReactElement {
 
 /** El cuerpo de un aviso, una nota, una observación. Nunca en mayúsculas. */
 export function TextArea(props: BaseFieldProps & { rows?: number }): ReactElement {
-  const { label, value, onChange, error, onClearError, required, hint, rows = 5 } = props;
+  const { label, value, onChange, error, onClearError, required, help, rows = 5 } = props;
   return (
-    <Field label={label} required={required} error={error} hint={hint}>
+    <Field label={label} required={required} error={error} help={help}>
       {(id, describedBy) => (
         <textarea
           {...common(id, describedBy, props)}
@@ -181,16 +187,12 @@ export interface SelectOption {
 export function SelectField(
   props: BaseFieldProps & { options: readonly SelectOption[] },
 ): ReactElement {
-  const { label, value, onChange, error, onClearError, required, hint, placeholder, options } = props;
+  const { label, value, onChange, error, onClearError, required, help, options } = props;
   return (
-    <Field label={label} required={required} error={error} hint={hint}>
-      {(id, describedBy) => {
-        // `placeholder` no existe en un <select>: aquí el texto de reposo es una
-        // <option> vacía, así que se descarta en vez de reenviarlo al elemento.
-        const { placeholder: _unused, ...rest } = common(id, describedBy, props);
-        return (
+    <Field label={label} required={required} error={error} help={help}>
+      {(id, describedBy) => (
         <select
-          {...rest}
+          {...common(id, describedBy, props)}
           value={value}
           onChange={(e: ChangeEvent<HTMLSelectElement>) => {
             onChange(e.target.value);
@@ -198,15 +200,21 @@ export function SelectField(
           }}
           style={inputStyle(error !== undefined)}
         >
-          {placeholder !== undefined && <option value="">{placeholder}</option>}
+          {/*
+            La opción vacía va SIEMPRE, y va sin texto.
+            Sin ella, el navegador deja preseleccionada la primera opción real y
+            el select guarda un nivel, un ciclo o un grupo que nadie eligió. Con
+            texto ("Selecciona un nivel…") volvería a parecer un dato capturado:
+            lo que hay que capturar lo dice el (?) de la etiqueta.
+          */}
+          <option value="" />
           {options.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>
           ))}
         </select>
-        );
-      }}
+      )}
     </Field>
   );
 }

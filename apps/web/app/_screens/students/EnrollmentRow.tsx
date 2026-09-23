@@ -77,10 +77,10 @@ export function EnrollmentRow({ enrollment, studentName, groups, onTransfer, onW
               value={toGroupId}
               options={targets}
               onChange={setToGroupId}
-              placeholder="Selecciona un grupo…"
+              help="El salón al que se cambia. Se enciende en cuanto hay grupos en el ciclo."
               disabled={targets.length === 0}
             />
-            <TextField label="Motivo del traslado" value={reason} onChange={setReason} placeholder="Motivo" />
+            <TextField label="Motivo del traslado" value={reason} onChange={setReason} help="Por qué cambia de grupo. Queda escrito en el historial del alumno." />
           </div>
           <div style={{ display: "flex", gap: 10 }}>
             <Btn type="submit" kind="outline" icon="chevron" disabled={!canTransfer}>
