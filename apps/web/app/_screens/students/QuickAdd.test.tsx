@@ -119,6 +119,44 @@ describe("the quick-add drawer", () => {
     expect(students.createStudent).not.toHaveBeenCalled();
   });
 
+  /**
+   * Regresión del 23-sep-2026, medida en el navegador antes de existir esta
+   * prueba: al guardar vacío salían CINCO errores y sólo se veían CUATRO. El de
+   * "Tutor" vivía en y=629 mientras el cuerpo del cajón terminaba en y=576, que
+   * es donde empieza el pie pegajoso; la forma no se desplazaba (scrollTop en 0)
+   * y el foco se quedaba en el BOTÓN. Se corregían los cuatro visibles, se
+   * volvía a guardar, y seguía fallando por una razón invisible.
+   */
+  it("manda el foco al primer campo que falta, no lo deja en el botón", async () => {
+    const user = userEvent.setup();
+    render(<StudentsScreen onBack={() => {}} />);
+    await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
+
+    const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
+    const guardar = within(drawer).getByRole("button", { name: "Crear alumno" });
+    await user.click(guardar);
+
+    expect(within(drawer).getByLabelText("CURP")).toHaveFocus();
+    expect(guardar).not.toHaveFocus();
+  });
+
+  it("desplaza ese campo hasta el centro, para que el pie no lo tape", async () => {
+    const user = userEvent.setup();
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      value: scrollIntoView,
+      writable: true,
+      configurable: true,
+    });
+    render(<StudentsScreen onBack={() => {}} />);
+    await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
+
+    const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
+    await user.click(within(drawer).getByRole("button", { name: "Crear alumno" }));
+
+    expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ block: "center" }));
+  });
+
   it("creates the pupil once every field is there", async () => {
     const user = userEvent.setup();
     students.createStudent.mockResolvedValue({
