@@ -83,14 +83,14 @@ export function EnrollPanel({ students, cycles, loadGroups, onEnroll }: EnrollPa
     <Section title="Inscribir alumno" subtitle="Elige alumno, ciclo y grupo. El ciclo se deriva del grupo en el servidor.">
       <form aria-label="Inscribir alumno" onSubmit={submit}>
         <div style={{ display: "grid", gap: 12, marginBottom: 12 }}>
-          <SelectField label="Alumno" value={studentId} options={studentOptions} onChange={setStudentId} placeholder="Selecciona un alumno…" />
-          <SelectField label="Ciclo" value={cycleId} options={cycleOptions} onChange={setCycleId} placeholder="Selecciona un ciclo…" disabled={cycles.length === 0} />
+          <SelectField label="Alumno" value={studentId} options={studentOptions} onChange={setStudentId} help="El alumno que vas a inscribir." />
+          <SelectField label="Ciclo" value={cycleId} options={cycleOptions} onChange={setCycleId} help="El ciclo escolar sobre el que trabajas." disabled={cycles.length === 0} />
           <SelectField
             label="Grupo"
             value={groupId}
             options={groupOptions}
             onChange={setGroupId}
-            placeholder="Selecciona un grupo…"
+            help="El salón. Sólo muestra los grupos del ciclo elegido."
             disabled={cycleId === "" || groups.length === 0}
           />
         </div>

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties, type Rea
 import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
 import { DrawerShell } from "../../_design/DrawerShell";
-import { EmailField, TextField } from "../../_design/form";
+import { EmailField, HelpTip, TextField } from "../../_design/form";
 import { Icon, type IconName } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import type { ColorKey } from "../../_design/colors";
@@ -74,10 +74,16 @@ function Drawer({ title, subtitle, icon, onClose, children, footer }: { title: s
   );
 }
 
-function labelField(label: string, node: ReactElement, req?: boolean): ReactElement {
+function labelField(label: string, node: ReactElement, req?: boolean, help?: string): ReactElement {
+  // Un id sin espacios: "Contraseña temporal" no es un id válido, y un
+  // aria-describedby que apunta a la nada no describe nada.
+  const helpId = `${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-help`;
   return (
     <label style={{ display: "block" }}>
-      <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>{label}{req === true && <b style={{ color: "var(--red)" }}> *</b>}</span>
+      <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, marginLeft: 3 }}>
+        <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>{label}{req === true && <b style={{ color: "var(--red)" }}> *</b>}</span>
+        {help !== undefined && <HelpTip id={helpId} label={label} text={help} />}
+      </span>
       <div style={{ marginTop: 8 }}>{node}</div>
     </label>
   );
@@ -303,11 +309,11 @@ function CreateUserDrawer({ roles, onClose, onSave }: { roles: readonly Role[]; 
     <Drawer title="Nuevo usuario" subtitle="Cuenta de acceso al sistema" icon="user" onClose={onClose}
       footer={<><Btn kind="ghost" onClick={onClose}>Cancelar</Btn><div style={{ flex: 1 }} /><Btn icon="check" onClick={() => void submit()} style={{ opacity: ready ? 1 : 0.45, pointerEvents: ready ? "auto" : "none", height: 52 }}>Crear usuario</Btn></>}>
       <>
-        <EmailField label="Correo" value={email} onChange={setEmail} required placeholder="nombre@garcialorca.edu.mx" />
-        <TextField label="Nombre para mostrar" value={displayName} onChange={setName} uppercase required placeholder="NOMBRE DEL USUARIO" />
+        <EmailField label="Correo" value={email} onChange={setEmail} required help="El correo con el que esta persona entrará al sistema." />
+        <TextField label="Nombre para mostrar" value={displayName} onChange={setName} uppercase required help="El nombre que verán los demás en el sistema." />
         {/* La contraseña NO pasa por la capa de captura: nada de mayúsculas ni
             de minúsculas debe tocarla, y su valor no se formatea nunca. */}
-        {labelField("Contraseña temporal", <input aria-label="Contraseña temporal" value={tempPassword} onChange={(e) => setPw(e.target.value)} type="password" placeholder="La cambiará en el primer ingreso" style={fi} />, true)}
+        {labelField("Contraseña temporal", <input aria-label="Contraseña temporal" aria-describedby="contrase-a-temporal-help" value={tempPassword} onChange={(e) => setPw(e.target.value)} type="password" style={fi} />, true, "Con esto entra la primera vez. El sistema le pedirá cambiarla en ese primer ingreso. Mínimo 8 caracteres.")}
         <div><span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Roles</span>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>{roles.map((r) => <button key={r.id} onClick={() => toggle(r.id)} style={chip(sel.includes(r.id), "lime")}>{r.name}</button>)}</div>
         </div>
@@ -343,8 +349,8 @@ function InviteUserDrawer({ roles, onClose, onSave }: { roles: readonly Role[]; 
     <Drawer title="Invitar usuario" subtitle="Recibirá un correo para elegir su contraseña" icon="user" onClose={onClose}
       footer={<><Btn kind="ghost" onClick={onClose}>Cancelar</Btn><div style={{ flex: 1 }} /><Btn icon="check" onClick={() => void submit()} style={{ opacity: ready ? 1 : 0.45, pointerEvents: ready ? "auto" : "none", height: 52 }}>{sending ? "Enviando…" : "Enviar invitación"}</Btn></>}>
       <>
-        <EmailField label="Correo" value={email} onChange={setEmail} required placeholder="nombre@garcialorca.edu.mx" />
-        <TextField label="Nombre para mostrar" value={displayName} onChange={setName} uppercase required placeholder="NOMBRE DEL USUARIO" />
+        <EmailField label="Correo" value={email} onChange={setEmail} required help="El correo con el que esta persona entrará al sistema." />
+        <TextField label="Nombre para mostrar" value={displayName} onChange={setName} uppercase required help="El nombre que verán los demás en el sistema." />
         <div><span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Roles</span>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>{roles.map((r) => <button key={r.id} onClick={() => toggle(r.id)} style={chip(sel.includes(r.id), "lime")}>{r.name}</button>)}</div>
         </div>
@@ -367,7 +373,7 @@ function CreateRoleDrawer({ onClose, onSave }: { onClose: () => void; onSave: (i
     <Drawer title="Nuevo rol" subtitle="Conjunto de permisos" icon="shield" onClose={onClose}
       footer={<><Btn kind="ghost" onClick={onClose}>Cancelar</Btn><div style={{ flex: 1 }} /><Btn icon="check" onClick={() => void submit()} style={{ opacity: name.trim().length > 1 ? 1 : 0.45, pointerEvents: name.trim().length > 1 ? "auto" : "none", height: 52 }}>Crear rol</Btn></>}>
       <>
-        <TextField label="Nombre del rol" value={name} onChange={setName} uppercase required placeholder="COORDINACIÓN, DOCENTE…" />
+        <TextField label="Nombre del rol" value={name} onChange={setName} uppercase required help="Cómo se llama el puesto dentro del colegio. Los permisos se eligen abajo." />
         <PermChecklist selected={sel} onToggle={toggle} />
         {err !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{err}</p>}
       </>

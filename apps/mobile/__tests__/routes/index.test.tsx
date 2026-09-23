@@ -46,7 +46,7 @@ describe("IndexRoute (login → notifications)", () => {
     expect(familyFetchCalls(fetchMock)).toHaveLength(0);
 
     await act(async () => {
-      fireEvent.changeText(screen.getByPlaceholderText("tu@correo.com"), "laura@correo.com");
+      fireEvent.changeText(screen.getByLabelText("Correo electrónico"), "laura@correo.com");
       fireEvent.changeText(screen.getByPlaceholderText("••••••••"), "secret123");
     });
     await act(async () => {

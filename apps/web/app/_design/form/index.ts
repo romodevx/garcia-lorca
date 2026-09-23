@@ -16,9 +16,13 @@
  *   - El cuerpo de un aviso NO se grita (TextArea, sin mayúsculas).
  *   - Lo obligatorio lleva asterisco, y al guardar se marca en rojo con halo
  *     (Field + useRequired).
+ *   - NINGÚN campo pinta un valor de ejemplo: `placeholder` no existe en esta
+ *     capa. Lo que hay que capturar se explica en el (?) de la etiqueta
+ *     (Field `help` + HelpTip).
  */
 
 export { Field, inputStyle, type FieldProps } from "./Field";
+export { HelpTip, type HelpTipProps } from "./HelpTip";
 export { useRequired, FALTA, type RequiredState } from "./useRequired";
 export { useFormatError, type FormatErrorState, type FormatRule } from "./useFormatError";
 export {

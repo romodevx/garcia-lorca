@@ -5,7 +5,7 @@ import type { ChangeEvent, ReactElement } from "react";
 import { Field, inputStyle } from "./Field";
 import type { BaseFieldProps } from "./fields";
 
-export interface DateFieldProps extends Omit<BaseFieldProps, "placeholder"> {
+export interface DateFieldProps extends BaseFieldProps {
   /** Límites del rango, en aaaa-mm-dd. */
   min?: string;
   max?: string;
@@ -25,9 +25,9 @@ export interface DateFieldProps extends Omit<BaseFieldProps, "placeholder"> {
  * ya no puede ocurrir.
  */
 export function DateField(props: DateFieldProps): ReactElement {
-  const { label, value, onChange, required, error, onClearError, hint, disabled, min, max } = props;
+  const { label, value, onChange, required, error, onClearError, help, disabled, min, max } = props;
   return (
-    <Field label={label} required={required} error={error} hint={hint}>
+    <Field label={label} required={required} error={error} help={help}>
       {(id, describedBy) => (
         <input
           id={id}

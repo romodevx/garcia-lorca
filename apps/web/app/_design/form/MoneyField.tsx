@@ -31,7 +31,7 @@ function withThousands(plain: string): string {
  * `pesosToCents` al guardar. Ningún flotante regresa.
  */
 export function MoneyField(props: BaseFieldProps): ReactElement {
-  const { label, value, onChange, required, error, onClearError, hint, disabled, placeholder } = props;
+  const { label, value, onChange, required, error, onClearError, help, disabled } = props;
 
   const format = (): void => {
     if (value.trim() === "") return;
@@ -42,7 +42,7 @@ export function MoneyField(props: BaseFieldProps): ReactElement {
   };
 
   return (
-    <Field label={label} required={required} error={error} hint={hint}>
+    <Field label={label} required={required} error={error} help={help}>
       {(id, describedBy) => (
         <div style={{ position: "relative", minWidth: 0 }}>
           <span
@@ -64,7 +64,6 @@ export function MoneyField(props: BaseFieldProps): ReactElement {
             type="text"
             inputMode="decimal"
             value={value}
-            placeholder={placeholder ?? "0.00"}
             disabled={disabled}
             aria-describedby={describedBy}
             aria-invalid={error !== undefined ? true : undefined}

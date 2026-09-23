@@ -79,7 +79,7 @@ export function ConceptsPanel({
       <div style={{ display: "grid", gap: 14 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
           <TextField label={t("field.name")} value={draft.name} onChange={(name) => patch({ name })} />
-          <TextField label={t("field.amount")} value={draft.amount} onChange={(amount) => patch({ amount })} placeholder="0.00" />
+          <TextField label={t("field.amount")} value={draft.amount} onChange={(amount) => patch({ amount })} help={t("help.conceptAmount")} />
         </div>
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
           <RadioGroup

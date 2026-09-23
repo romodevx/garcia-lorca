@@ -25,6 +25,74 @@ function setup(
   return onCreate as ReturnType<typeof vi.fn>;
 }
 
+describe("la celda no se queda muda", () => {
+  /**
+   * Este renglón NO tiene encabezado de tabla: sus celdas llevaban `aria-label`
+   * y un placeholder, y el placeholder era lo único que el ojo veía. Al quitar
+   * los valores de ejemplo del sistema, la celda se quedaba en blanco sin decir
+   * qué iba en ella. Por eso la etiqueta pasa a verse — que además es lo que la
+   * regla de formas pedía desde el principio.
+   */
+  it("con el renglón abierto, cada celda enseña su etiqueta", async () => {
+    const user = userEvent.setup();
+    setup();
+
+    await user.click(screen.getByRole("button", { name: "Agregar día cerrado" }));
+
+    for (const c of COLUMNS) {
+      expect(screen.getByText(c.label)).toBeVisible();
+    }
+  });
+
+  it("ninguna celda pinta un valor de ejemplo", async () => {
+    const user = userEvent.setup();
+    setup();
+
+    await user.click(screen.getByRole("button", { name: "Agregar día cerrado" }));
+
+    expect(screen.getByLabelText("Nombre")).not.toHaveAttribute("placeholder");
+  });
+
+  it("la columna con ayuda enseña su (?), y la que no, no", async () => {
+    const user = userEvent.setup();
+    render(
+      <InlineCreateRow
+        columns={[
+          { key: "name", label: "Nombre del grupo", kind: "text", required: true, help: "La letra que lo distingue." },
+          { key: "capacity", label: "Cupo", kind: "number", required: true },
+        ]}
+        addLabel="Nuevo grupo"
+        onCreate={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Nuevo grupo" }));
+
+    expect(screen.getByRole("button", { name: "Ayuda sobre Nombre del grupo" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ayuda sobre Cupo" })).toBeNull();
+  });
+
+  it("la etiqueta visible no le roba el nombre al campo", async () => {
+    // Si la etiqueta se ligara mal, `getByLabelText` dejaría de encontrar la
+    // celda y con ella se caerían las pruebas de las cinco pantallas que usan
+    // este renglón.
+    const user = userEvent.setup();
+    render(
+      <InlineCreateRow
+        columns={[
+          { key: "name", label: "Nombre del grupo", kind: "text", required: true, help: "La letra que lo distingue." },
+        ]}
+        addLabel="Nuevo grupo"
+        onCreate={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Nuevo grupo" }));
+
+    expect(screen.getByLabelText("Nombre del grupo")).toHaveFocus();
+  });
+});
+
 describe("InlineCreateRow", () => {
   it("empieza cerrado, como un renglón que invita", () => {
     setup();

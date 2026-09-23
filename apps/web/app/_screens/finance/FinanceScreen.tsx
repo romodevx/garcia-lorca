@@ -1,5 +1,9 @@
 "use client";
 
+/** Lo que el (?) de Referencia explica, en los dos lugares donde se cobra. */
+const REFERENCIA_AYUDA =
+  "El folio del voucher o el número de la transferencia: lo que te permita reconocer este pago después. En efectivo puede quedar vacío.";
+
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactElement } from "react";
 import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
@@ -7,6 +11,7 @@ import { DrawerShell } from "../../_design/DrawerShell";
 import { Icon, type IconName } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import type { ColorKey } from "../../_design/colors";
+import { HelpTip } from "../../_design/form";
 import { listCycles, type Cycle } from "../../config/api";
 import { getOverdue, listCharges, registerPayment, type Charge, type PaymentMethod } from "../../finance/api";
 import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
@@ -137,8 +142,11 @@ function PayDrawer({ charge, name, onClose, onPaid }: { charge: Charge; name: st
             </div>
           </div>
           <label style={{ display: "block" }}>
-            <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Referencia (opcional)</span>
-            <div style={{ marginTop: 8 }}><input value={reference} onChange={(e) => setReference(e.target.value)} aria-label="Referencia" placeholder="Folio, transferencia…" style={fi} /></div>
+            <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, marginLeft: 3 }}>
+              <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Referencia (opcional)</span>
+              <HelpTip id="pago-ref-help" label="Referencia" text={REFERENCIA_AYUDA} />
+            </span>
+            <div style={{ marginTop: 8 }}><input value={reference} onChange={(e) => setReference(e.target.value)} aria-label="Referencia" aria-describedby="pago-ref-help" style={fi} /></div>
           </label>
           {error !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{error}</p>}
       </>

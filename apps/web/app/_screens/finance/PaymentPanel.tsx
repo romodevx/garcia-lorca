@@ -104,10 +104,10 @@ export function PaymentPanel({ charges, selectedChargeId, onSelectCharge, studen
             label: `${studentName(charge.studentId)} · ${charge.description} · ${formatCents(charge.remainingCents)}`,
           }))}
           onChange={onSelectCharge}
-          placeholder={t("option.choose")}
+          help={t("help.charge")}
         />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
-          <TextField label={t("field.amount")} value={amount} onChange={setAmount} placeholder="0.00" />
+          <TextField label={t("field.amount")} value={amount} onChange={setAmount} help={t("help.amount")} />
           <TextField label={t("field.reference")} value={reference} onChange={setReference} />
         </div>
         <RadioGroup

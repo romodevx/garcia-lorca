@@ -104,8 +104,8 @@ export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate }: Lev
           onSubmit={() => void submit(false)}
           onSubmitAndNew={() => void submit(true)}
         >
-          <TextField label="Nombre del nivel" value={name} onChange={setName} uppercase required placeholder="PRIMARIA" />
-          <TextField label="Clave SEP" value={sepCode} onChange={setSepCode} uppercase placeholder="PRI" />
+          <TextField label="Nombre del nivel" value={name} onChange={setName} uppercase required help="El nivel educativo: preescolar, primaria, secundaria." />
+          <TextField label="Clave SEP" value={sepCode} onChange={setSepCode} uppercase help="La clave corta con la que la SEP identifica este nivel. Puede quedar vacía y ponerse después." />
           <RadioGroup legend="Inscripción" options={GRANULARITY_OPTIONS} value={granularity} onChange={setGranularity} />
           <div style={{ display: "flex", gap: 11, padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
             <p style={{ fontSize: 13.5, color: "var(--text-muted)", lineHeight: 1.5, margin: 0 }}>

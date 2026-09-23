@@ -59,7 +59,7 @@ export function AccountPanel({ students, onLoad }: AccountPanelProps): ReactElem
               value={studentId}
               options={students.map((student) => ({ value: student.id, label: `${student.firstName} ${student.lastName}` }))}
               onChange={setStudentId}
-              placeholder={t("option.choose")}
+              help={t("help.student")}
             />
           </div>
           <Btn kind="forest" icon="reports" onClick={() => void load()} disabled={pending || studentId === ""}>

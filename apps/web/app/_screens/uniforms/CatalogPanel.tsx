@@ -6,7 +6,7 @@ import { Btn } from "../../_design/Controls";
 import { MoneyField, TextField } from "../../_design/form";
 import { createItem, updateItem, UniformsError, upsertSizes, type ItemCategory, type Level, type SizeSpec, type UniformItem } from "../../uniforms/api";
 import { Drawer } from "./InventoryPanel";
-import { EmptyState, ErrorNote, field, label, money } from "./parts";
+import { EmptyState, ErrorNote, field, FieldLabel, label, money } from "./parts";
 
 import { API_URL } from "../../api-url";
 
@@ -241,11 +241,11 @@ function CreateDrawer({
         onChange={setName}
         uppercase
         required
-        placeholder={category === "book" ? "LIBRO DE MATEMÁTICAS 3°" : "SUÉTER VERDE"}
+        help="Cómo se llama la prenda o el libro. Es lo que verá la familia."
       />
 
       <div style={{ marginTop: 16 }}>
-        <TextField label="Clave" value={code} onChange={setCode} uppercase required placeholder="SUE-VER" />
+        <TextField label="Clave" value={code} onChange={setCode} uppercase required help="Un código corto y único para encontrarla rápido en el mostrador." />
       </div>
       <p style={{ fontSize: 12.5, color: "var(--text-faint)", marginTop: 6 }}>
         La clave no se puede cambiar después: es como se refieren al artículo los pedidos ya hechos.
@@ -275,7 +275,7 @@ function CreateDrawer({
       </div>
 
       <div style={{ marginTop: 16 }}>
-        <MoneyField label="Precio" value={pesos} onChange={setPesos} required placeholder="650.00" />
+        <MoneyField label="Precio" value={pesos} onChange={setPesos} required help="Lo que cuesta una pieza." />
       </div>
 
       <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
@@ -336,19 +336,19 @@ function SizesDrawer({
 
   return (
     <Drawer title={`Tallas de ${item.name}`} icon="plus" onClose={onClose}>
-      <label style={label} htmlFor="sizes-raw">
+      <FieldLabel
+        htmlFor="sizes-raw"
+        help="Escribe un rango como 4-16, una lista separada por comas, o letras: CH, M, G. El orden es el que escribas."
+      >
         Tallas
-      </label>
+      </FieldLabel>
       <input
         id="sizes-raw"
         style={field}
-        placeholder="4-16  ·  CH, M, G  ·  4, 6, 8"
+        aria-describedby="sizes-raw-help"
         value={raw}
         onChange={(e) => setRaw(e.target.value)}
       />
-      <p style={{ fontSize: 12.5, color: "var(--text-faint)", marginTop: 6 }}>
-        Escribe un rango como 4-16 o una lista separada por comas. El orden es el que escribas.
-      </p>
 
       {labels.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
@@ -369,20 +369,21 @@ function SizesDrawer({
         </div>
       )}
 
-      <label style={{ ...label, marginTop: 16 }} htmlFor="sizes-min">
+      <FieldLabel
+        htmlFor="sizes-min"
+        style={{ marginTop: 16 }}
+        help="Cuántas piezas quieres tener siempre. Cuando queden menos piezas libres que este número, la talla aparece en Bajo mínimo."
+      >
         Mínimo por talla
-      </label>
+      </FieldLabel>
       <input
         id="sizes-min"
         style={field}
         inputMode="numeric"
-        placeholder="0"
+        aria-describedby="sizes-min-help"
         value={minStock}
         onChange={(e) => setMinStock(e.target.value)}
       />
-      <p style={{ fontSize: 12.5, color: "var(--text-faint)", marginTop: 6 }}>
-        Cuando queden menos piezas libres que este número, la talla aparece en Bajo mínimo.
-      </p>
 
       <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
         <Btn kind="ghost" onClick={onClose}>

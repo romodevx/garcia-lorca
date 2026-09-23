@@ -71,7 +71,7 @@ export function TermsPanel({ cycle, level, terms, onCreate }: TermsPanelProps): 
               kind: "text",
               uppercase: true,
               required: true,
-              placeholder: "T1",
+              help: "Cómo se llama el periodo de evaluación. Es lo que verán los docentes al capturar.",
             },
             { key: "ordinal", label: "Orden", kind: "number", required: true, width: 100 },
             { key: "startsOn", label: "Inicio del periodo", kind: "date", required: true, width: 165 },

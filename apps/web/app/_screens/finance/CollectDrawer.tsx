@@ -1,9 +1,13 @@
 "use client";
 
+/** Lo que el (?) de Referencia explica, en los dos lugares donde se cobra. */
+const REFERENCIA_AYUDA =
+  "El folio del voucher o el número de la transferencia: lo que te permita reconocer este pago después. En efectivo puede quedar vacío.";
+
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { DrawerShell } from "../../_design/DrawerShell";
-import { MoneyField } from "../../_design/form";
+import { HelpTip, MoneyField } from "../../_design/form";
 import {
   getAccount,
   getExpected,
@@ -306,9 +310,12 @@ export function CollectDrawer({ student, onClose, onCollected }: CollectDrawerPr
                 )}
 
                 <label style={{ display: "block" }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Referencia (opcional)</span>
+                  <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, marginLeft: 3 }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Referencia (opcional)</span>
+                    <HelpTip id="cobro-ref-help" label="Referencia" text={REFERENCIA_AYUDA} />
+                  </span>
                   <div style={{ marginTop: 8 }}>
-                    <input value={reference} onChange={(e) => setReference(e.target.value)} aria-label="Referencia" placeholder="Folio, transferencia…" style={{ ...field, height: 50, fontSize: 15.5, fontWeight: 400 }} />
+                    <input value={reference} onChange={(e) => setReference(e.target.value)} aria-label="Referencia" aria-describedby="cobro-ref-help" style={{ ...field, height: 50, fontSize: 15.5, fontWeight: 400 }} />
                   </div>
                 </label>
 

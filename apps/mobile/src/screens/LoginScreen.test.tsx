@@ -33,7 +33,7 @@ describe("LoginScreen", () => {
     // into the next test. (A bare fireEvent + waitFor between the two steps leaves
     // a pending update that corrupts the following render under this stack.)
     await act(async () => {
-      fireEvent.changeText(screen.getByPlaceholderText("tu@correo.com"), "laura@correo.com");
+      fireEvent.changeText(screen.getByLabelText("Correo electrónico"), "laura@correo.com");
       fireEvent.changeText(screen.getByPlaceholderText("••••••••"), "secret123");
     });
     await act(async () => {

@@ -74,7 +74,7 @@ export function ChargesPanel({
             value={cycleId}
             options={cycles.map((c) => ({ value: c.id, label: c.name }))}
             onChange={onCycleChange}
-            placeholder={t("option.choose")}
+            help={t("help.cycle")}
           />
         </div>
         <div style={{ minWidth: 240 }}>
@@ -83,7 +83,7 @@ export function ChargesPanel({
             value={studentId}
             options={students.map((s) => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
             onChange={onStudentChange}
-            placeholder={t("option.choose")}
+            help={t("help.student")}
             disabled={filter === "overdue"}
           />
         </div>

@@ -63,25 +63,25 @@ export function GeneratePanel({ concepts, cycles, cycleId, onCycleChange, groups
             value={conceptId}
             options={concepts.map((concept) => ({ value: concept.id, label: concept.name }))}
             onChange={setConceptId}
-            placeholder={t("option.choose")}
+            help={t("help.concept")}
           />
           <SelectField
             label={t("field.cycle")}
             value={cycleId}
             options={cycles.map((cycle) => ({ value: cycle.id, label: cycle.name }))}
             onChange={onCycleChange}
-            placeholder={t("option.choose")}
+            help={t("help.cycle")}
           />
           <SelectField
             label={t("field.group")}
             value={groupId}
             options={groups.map((group) => ({ value: group.id, label: group.name }))}
             onChange={setGroupId}
-            placeholder={t("option.choose")}
+            help={t("help.group")}
             disabled={cycleId === ""}
           />
           <DateField label={t("field.dueDate")} value={dueDate} onChange={setDueDate} />
-          <TextField label={t("field.amountOverride")} value={amount} onChange={setAmount} placeholder="0.00" />
+          <TextField label={t("field.amountOverride")} value={amount} onChange={setAmount} help={t("help.amountOverride")} />
         </div>
         <div>
           <Btn icon="plus" onClick={() => void submit()} disabled={pending}>

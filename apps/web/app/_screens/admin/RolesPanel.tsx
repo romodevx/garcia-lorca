@@ -125,7 +125,7 @@ export function RolesPanel({ roles, onCreate, onSetPermissions }: RolesPanelProp
 
       <form aria-label="Crear rol" onSubmit={submit}>
         <div style={{ marginBottom: 12 }}>
-          <TextField label="Nombre del rol" value={name} onChange={setName} placeholder="Coordinación académica" />
+          <TextField label="Nombre del rol" value={name} onChange={setName} help="Cómo se llama el puesto dentro del colegio. Los permisos se eligen abajo." />
         </div>
         <div style={{ marginBottom: 12 }}>
           <CheckList

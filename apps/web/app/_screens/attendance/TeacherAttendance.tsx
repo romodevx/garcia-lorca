@@ -180,7 +180,7 @@ export function TeacherAttendance({ onBack, today }: TeacherAttendanceProps): Re
           <Section title="Pase de lista" subtitle="Elige el grupo y el día; todos empiezan presentes, marca solo las excepciones.">
             <form aria-label="Elegir grupo y fecha">
               <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12, marginBottom: 16 }}>
-                <SelectField label="Grupo" value={groupId} options={groupOptions} onChange={setGroupId} placeholder="Selecciona un grupo…" />
+                <SelectField label="Grupo" value={groupId} options={groupOptions} onChange={setGroupId} help="El salón cuya lista vas a pasar." />
                 <DateField label="Fecha" value={date} onChange={setDate} />
               </div>
             </form>

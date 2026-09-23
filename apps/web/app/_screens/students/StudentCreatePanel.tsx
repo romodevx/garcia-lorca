@@ -77,12 +77,12 @@ export function StudentCreatePanel({ onCreate }: StudentCreatePanelProps): React
     <Section title="Registrar alumno" subtitle="Alta de aspirante. La admisión inicia en «pendiente».">
       <form aria-label="Registrar alumno" onSubmit={submit}>
         <div style={{ display: "grid", gap: 12, marginBottom: 12 }}>
-          <TextField label="CURP" value={curp} onChange={setCurp} uppercase required placeholder="XXXX000000XXXXXX00" />
-          <TextField label="Nombre" value={firstName} onChange={setFirstName} uppercase required placeholder="ADA" />
-          <TextField label="Apellidos" value={lastName} onChange={setLastName} uppercase required placeholder="LOVELACE" />
-          <SelectField label="Nivel" value={level} options={LEVEL_OPTIONS} onChange={setLevel} required placeholder="Selecciona un nivel…" />
-          <TextField label="Grado y grupo" value={gradeGroup} onChange={setGradeGroup} uppercase placeholder="1° A" />
-          <TextField label="Tutor" value={guardianName} onChange={setGuardianName} uppercase placeholder="NOMBRE DEL TUTOR" />
+          <TextField label="CURP" value={curp} onChange={setCurp} uppercase required help="Los 18 caracteres de la CURP del alumno, tal como vienen en el acta. Es lo que impide que el mismo alumno se registre dos veces." />
+          <TextField label="Nombre" value={firstName} onChange={setFirstName} uppercase required help="Sólo los nombres de pila, sin apellidos." />
+          <TextField label="Apellidos" value={lastName} onChange={setLastName} uppercase required help="Los dos apellidos: primero el paterno, luego el materno." />
+          <SelectField label="Nivel" value={level} options={LEVEL_OPTIONS} onChange={setLevel} required help="El nivel educativo donde va a cursar: preescolar, primaria o secundaria." />
+          <TextField label="Grado y grupo" value={gradeGroup} onChange={setGradeGroup} uppercase help="El grado y la letra del salón, juntos." />
+          <TextField label="Tutor" value={guardianName} onChange={setGuardianName} uppercase help="Quién responde por el alumno ante el colegio: nombre completo de la madre, el padre o el tutor legal." />
         </div>
         <Btn type="submit" icon="plus" disabled={!canSubmit}>
           Registrar alumno

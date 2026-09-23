@@ -192,7 +192,7 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
           defaults={dayDefaults}
           rules={dayRules}
           columns={[
-            { key: "label", label: "Nombre", kind: "text", uppercase: true, required: true, placeholder: "INDEPENDENCIA" },
+            { key: "label", label: "Nombre", kind: "text", uppercase: true, required: true, help: "Por qué no hay clases ese día. Aparecerá en el calendario de las familias." },
             { key: "startsOn", label: "Del día", kind: "date", required: true, width: 160 },
             { key: "endsOn", label: "Al día (opcional)", kind: "date", width: 160 },
             { key: "kind", label: "Tipo", kind: "select", options: KIND_OPTIONS, width: 140 },
@@ -237,7 +237,7 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
             addLabel="Nueva actividad"
             rules={eventRules}
             columns={[
-              { key: "title", label: "Actividad", kind: "text", uppercase: true, required: true, placeholder: "FESTIVAL DE PRIMAVERA" },
+              { key: "title", label: "Actividad", kind: "text", uppercase: true, required: true, help: "Qué pasa ese día. Aparecerá en el calendario de las familias." },
               { key: "startsOn", label: "Fecha", kind: "date", required: true, width: 160 },
               { key: "endsOn", label: "Hasta (opcional)", kind: "date", width: 160 },
             ]}

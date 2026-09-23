@@ -141,7 +141,7 @@ describe("AppShell navigation flow", () => {
     // mustChangePassword=true → forced rotation screen.
     expect(await screen.findByRole("heading", { name: "Crea tu contraseña" })).toBeInTheDocument();
 
-    await user.type(screen.getByLabelText("Contraseña actual"), "test-owner-pw");
+    await user.type(screen.getByLabelText("Contraseña temporal"), "test-owner-pw");
     await user.type(screen.getByLabelText("Nueva contraseña"), "test-new-pw-123");
     await user.type(screen.getByLabelText("Confirmar contraseña"), "test-new-pw-123");
     // The gateway re-issues fresh cookies IN the change-password response, so the

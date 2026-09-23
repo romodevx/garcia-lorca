@@ -7,7 +7,6 @@
   "field.cycle": "School cycle",
   "field.group": "Group",
   "field.date": "Date",
-  "option.chooseGroup": "Select a group…",
   "list.label": "Attendance list",
   "list.title": "Pass list",
   "list.subtitle": "Every student starts present; mark only who is missing or late.",
@@ -30,5 +29,6 @@
   "toast.saved": "List saved · {absent, plural, one {# absence} other {# absences}}",
   "error.load": "Attendance could not be loaded.",
   "error.roster": "The list could not be loaded: {detail}",
-  "error.save": "The list could not be saved: {detail}"
+  "error.save": "The list could not be saved: {detail}",
+  "help.group": "The classroom whose roll you are taking."
 }

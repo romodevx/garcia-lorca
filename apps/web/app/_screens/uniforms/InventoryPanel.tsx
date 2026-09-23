@@ -5,7 +5,7 @@ import { Btn } from "../../_design/Controls";
 import { DrawerShell } from "../../_design/DrawerShell";
 import { Icon } from "../../_design/Icon";
 import { adjustStock, receiveStock, UniformsError, type UniformItem } from "../../uniforms/api";
-import { EmptyState, ErrorNote, field, label, StockPill } from "./parts";
+import { EmptyState, ErrorNote, field, FieldLabel, label, StockPill } from "./parts";
 
 import { API_URL } from "../../api-url";
 
@@ -314,7 +314,6 @@ function ReceiveDrawer({
               <input
                 style={{ ...field, maxWidth: 120 }}
                 inputMode="numeric"
-                placeholder="0"
                 aria-label={`Piezas talla ${size.sizeLabel}`}
                 value={quantities[size.id] ?? ""}
                 onChange={(e) => setQuantities((q) => ({ ...q, [size.id]: e.target.value }))}
@@ -324,13 +323,17 @@ function ReceiveDrawer({
           ))}
       </div>
 
-      <label style={{ ...label, marginTop: 16 }} htmlFor="receive-note">
+      <FieldLabel
+        htmlFor="receive-note"
+        style={{ marginTop: 16 }}
+        help="De dónde vino la mercancía: el proveedor, el número de factura. Queda en el historial."
+      >
         Nota
-      </label>
+      </FieldLabel>
       <input
         id="receive-note"
         style={field}
-        placeholder="Factura, proveedor…"
+        aria-describedby="receive-note-help"
         value={note}
         onChange={(e) => setNote(e.target.value)}
       />
@@ -386,24 +389,31 @@ function AdjustDrawer({
 
   return (
     <Drawer title={`Ajustar ${target.item.name} · ${target.sizeLabel}`} icon="settings" onClose={onClose}>
-      <label style={label} htmlFor="adjust-delta">
+      <FieldLabel
+        htmlFor="adjust-delta"
+        help="Cuánto cambia la existencia, con signo: un número negativo resta piezas y uno positivo las suma."
+      >
         Diferencia
-      </label>
+      </FieldLabel>
       <input
         id="adjust-delta"
         style={field}
         inputMode="numeric"
-        placeholder="-2 para restar, 3 para sumar"
+        aria-describedby="adjust-delta-help"
         value={delta}
         onChange={(e) => setDelta(e.target.value)}
       />
-      <label style={{ ...label, marginTop: 16 }} htmlFor="adjust-note">
+      <FieldLabel
+        htmlFor="adjust-note"
+        style={{ marginTop: 16 }}
+        help="Por qué se ajusta: merma, conteo físico, pieza dañada. Un ajuste sin explicación no se puede auditar después."
+      >
         Motivo (obligatorio)
-      </label>
+      </FieldLabel>
       <input
         id="adjust-note"
         style={field}
-        placeholder="Merma, conteo físico, pieza dañada…"
+        aria-describedby="adjust-note-help"
         value={note}
         onChange={(e) => setNote(e.target.value)}
       />

@@ -68,7 +68,7 @@ export function Attendance({ onBack, today }: AttendanceProps): ReactElement {
                   value={list.groupId}
                   options={groupOptions}
                   onChange={list.setGroupId}
-                  placeholder={t("option.chooseGroup")}
+                  help={t("help.group")}
                   disabled={list.groups.length === 0}
                 />
                 <DateField label={t("field.date")} value={list.date} onChange={list.setDate} />

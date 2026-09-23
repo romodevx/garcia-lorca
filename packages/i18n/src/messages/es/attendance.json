@@ -7,7 +7,6 @@
   "field.cycle": "Ciclo escolar",
   "field.group": "Grupo",
   "field.date": "Fecha",
-  "option.chooseGroup": "Selecciona un grupo…",
   "list.label": "Lista de asistencia",
   "list.title": "Pase de lista",
   "list.subtitle": "Todos los alumnos aparecen presentes; marca solo a quien falte o llegue tarde.",
@@ -30,5 +29,6 @@
   "toast.saved": "Lista guardada · {absent, plural, one {# ausente} other {# ausentes}}",
   "error.load": "No se pudo cargar la asistencia.",
   "error.roster": "No se pudo cargar la lista: {detail}",
-  "error.save": "No se pudo guardar la lista: {detail}"
+  "error.save": "No se pudo guardar la lista: {detail}",
+  "help.group": "El salón cuya lista vas a pasar."
 }

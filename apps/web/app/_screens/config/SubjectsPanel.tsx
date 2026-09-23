@@ -42,7 +42,7 @@ export function SubjectsPanel({ gradeLevel, subjects, onCreate }: SubjectsPanelP
       <InlineCreateChip
         label="Nueva materia"
         fieldLabel="Nombre de la materia"
-        placeholder="MATEMÁTICAS"
+        help="La materia como aparecerá en la boleta del alumno."
         onCreate={async (name) => {
           setError(undefined);
           try {

@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useId,
   useRef,
   useState,
   type CSSProperties,
@@ -10,6 +11,7 @@ import {
 } from "react";
 
 import { Icon } from "./Icon";
+import { HelpTip } from "./form/HelpTip";
 import { useFormatError, type FormatRule } from "./form/useFormatError";
 
 /**
@@ -36,7 +38,14 @@ export interface InlineColumn {
   /** El catálogo se captura en mayúsculas, como en el resto del sistema. */
   uppercase?: boolean;
   required?: boolean;
-  placeholder?: string;
+  /**
+   * Qué va en esta celda. Sale en el `(?)` junto a la etiqueta.
+   *
+   * Ocupa el lugar del antiguo `placeholder`, que aquí era especialmente
+   * dañino: sin encabezado de tabla, un "A" o un "T1" en gris DENTRO de la
+   * celda era lo único que se veía, y se leía como un dato ya capturado.
+   */
+  help?: string;
   /** Ancho fijo de la celda; sin él reparte el espacio disponible. */
   width?: number;
 }
@@ -59,6 +68,22 @@ export interface InlineCreateRowProps {
    */
   defaults?: Readonly<Record<string, string>>;
 }
+
+const etiquetaFilaStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "baseline",
+  gap: 6,
+  marginBottom: 4,
+};
+
+const etiquetaStyle: CSSProperties = {
+  fontSize: 12,
+  fontWeight: 600,
+  color: "var(--text-muted)",
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
 
 const NO_RULES: Readonly<Record<string, FormatRule>> = {};
 const NO_DEFAULTS: Readonly<Record<string, string>> = {};
@@ -95,6 +120,9 @@ export function InlineCreateRow({
   rules = NO_RULES,
   defaults = NO_DEFAULTS,
 }: InlineCreateRowProps): ReactElement {
+  // Un prefijo por renglón: dos tablas en la misma pantalla no se roban el id
+  // de su celda "Nombre", ni la etiqueta apunta a la celda del vecino.
+  const uid = useId();
   const [open, setOpen] = useState(false);
   const [values, setValues] = useState<Record<string, string>>(() => blank(columns, defaults));
   // Las celdas donde la persona ya escribió. Una propuesta puede ponerse al día
@@ -240,10 +268,25 @@ export function InlineCreateRow({
               key={c.key}
               style={{ flex: c.width === undefined ? 1 : `0 0 ${c.width}px`, minWidth: 0 }}
             >
+              {/*
+                La etiqueta se VE, y no es adorno: este renglón no tiene
+                encabezado de tabla, así que sin ella la celda no dice qué va en
+                ella. Antes ese trabajo lo hacía el placeholder, y por eso un
+                "A" gris parecía un grupo ya capturado.
+              */}
+              <div style={etiquetaFilaStyle}>
+                <label htmlFor={`${uid}-${c.key}`} style={etiquetaStyle}>
+                  {c.label}
+                </label>
+                {c.help !== undefined && (
+                  <HelpTip id={`${uid}-${c.key}-help`} label={c.label} text={c.help} />
+                )}
+              </div>
               {c.kind === "select" ? (
                 <select
+                  id={`${uid}-${c.key}`}
                   data-cell={c.key}
-                  aria-label={c.label}
+                  aria-describedby={c.help !== undefined ? `${uid}-${c.key}-help` : undefined}
                   aria-invalid={invalid ? "true" : undefined}
                   value={values[c.key] ?? ""}
                   onChange={(e) => {
@@ -264,11 +307,11 @@ export function InlineCreateRow({
               ) : (
               <input
                 ref={i === 0 ? firstRef : undefined}
+                id={`${uid}-${c.key}`}
                 data-cell={c.key}
-                aria-label={c.label}
+                aria-describedby={c.help !== undefined ? `${uid}-${c.key}-help` : undefined}
                 aria-invalid={invalid ? "true" : undefined}
                 type={c.kind === "text" ? "text" : c.kind}
-                placeholder={c.placeholder}
                 value={values[c.key] ?? ""}
                 onChange={(e) => {
                   const next =
