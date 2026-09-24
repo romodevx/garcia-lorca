@@ -106,6 +106,14 @@ func (r *Repository) UpdateItem(ctx context.Context, item domain.Item) (domain.I
 		if res.RowsAffected == 0 {
 			return glerrors.ErrNotFound
 		}
+		// Saving any level but "unresolved" is an explicit re-scope: it clears
+		// the old SEP key that marks an unresolved garment. The model maps that
+		// column read-only, so the write is its own statement.
+		if item.Level() != domain.LevelUnresolved {
+			if err := tx.Exec("UPDATE uniform_items SET level = NULL WHERE id = ?", item.ID()).Error; err != nil {
+				return glerrors.Wrap(glerrors.KindInternal, "clearing the garment's old level", err)
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -143,7 +151,9 @@ func (r *Repository) ListItems(ctx context.Context, f ports.ListItemsFilter) ([]
 			q = q.Where("active")
 		}
 		if f.Level != domain.LevelAny {
-			q = q.Where("level_id IS NULL OR level_id = ?", string(f.Level))
+			// "Every level" is level_id NULL with no old key; a NULL level_id
+			// beside an old key is an unresolved garment, offered to nobody.
+			q = q.Where("(level_id IS NULL AND level IS NULL) OR level_id = ?", string(f.Level))
 		}
 		var items []itemModel
 		if err := q.Find(&items).Error; err != nil {

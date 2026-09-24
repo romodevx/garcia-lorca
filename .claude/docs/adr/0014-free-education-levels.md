@@ -62,8 +62,11 @@ Which levels exist is the school's call, made in config. Every other service
 
 - A pupil with no `level_id` (a legacy row that matched nothing) keeps a name
   and reads as "level unknown": uniforms offers them only every-level garments.
-- A **scoped** garment whose old key matched nothing would read as "every
-  level". The migration NOTICEs any such garment; local and dev data have none.
+- A **scoped** garment whose old key never became a `level_id`, whether a row
+  migration 0007 could not match or one the previous revision wrote mid-deploy,
+  reads as **unresolved**, not as "every level". No pupil holds that level, the
+  catalogue offers the garment to nobody, and the panel shows it with no level
+  name until staff re-scope it. Saving any level clears the old key.
 - The family app shows the school's level name as is. Qualitative grades apply
   to kínder, matched folded, **and to "Preescolar"**, which is kínder's official
   name. This is a decision for the owner to confirm.

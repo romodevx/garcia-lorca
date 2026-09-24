@@ -9,6 +9,9 @@ import (
 	"testing"
 
 	"gorm.io/gorm"
+
+	"github.com/garcia-lorca/services/uniforms/internal/domain"
+	"github.com/garcia-lorca/services/uniforms/internal/ports"
 )
 
 // schoolTenant is the tenant a data migration binds with SET LOCAL: the one
@@ -138,5 +141,72 @@ func TestAnOrderWrittenByThePreviousRevisionReadsWithItsOldLevel(t *testing.T) {
 	}
 	if agg.Order.StudentLevelName() != "Secundaria" {
 		t.Errorf("student level name = %q, want Secundaria", agg.Order.StudentLevelName())
+	}
+}
+
+// A garment the previous revision scoped by an old key mid-deploy (level set,
+// level_id NULL) must not read as every level: it is unresolved, and a pupil's
+// catalogue does not offer it.
+func TestAGarmentScopedByThePreviousRevisionIsNotEveryLevel(t *testing.T) {
+	itemID := newUUID(t)
+	if err := superDB.Exec(`INSERT INTO uniform_items (id, tenant_id, code, name, price_cents, level)
+	    VALUES (?, ?, ?, 'Batita vieja', 100, 'kinder')`, itemID, tenantA, "OLD-"+itemID[:8]).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	repo := appRepo(t, tenantA)
+	forPupil, err := repo.ListItems(context.Background(), ports.ListItemsFilter{Level: domain.Level(newUUID(t))})
+	if err != nil {
+		t.Fatalf("ListItems: %v", err)
+	}
+	for _, iws := range forPupil {
+		if iws.Item.ID() == itemID {
+			t.Fatal("an unresolved garment was offered to a pupil")
+		}
+	}
+	all, err := repo.ListItems(context.Background(), ports.ListItemsFilter{IncludeInactive: true})
+	if err != nil {
+		t.Fatalf("ListItems all: %v", err)
+	}
+	for _, iws := range all {
+		if iws.Item.ID() == itemID && iws.Item.Level() != domain.LevelUnresolved {
+			t.Errorf("level = %q, want unresolved", iws.Item.Level())
+		}
+	}
+}
+
+// Re-scoping an unresolved garment is an explicit decision: saving it for every
+// level makes it every level, instead of leaving the old key to keep it hidden.
+func TestReScopingAnUnresolvedGarmentToEveryLevelSticks(t *testing.T) {
+	itemID := newUUID(t)
+	if err := superDB.Exec(`INSERT INTO uniform_items (id, tenant_id, code, name, price_cents, level)
+	    VALUES (?, ?, ?, 'Batita vieja', 100, 'kinder')`, itemID, tenantA, "RES-"+itemID[:8]).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	repo := appRepo(t, tenantA)
+	all, err := repo.ListItems(context.Background(), ports.ListItemsFilter{IncludeInactive: true})
+	if err != nil {
+		t.Fatalf("ListItems: %v", err)
+	}
+	var stored domain.Item
+	for _, iws := range all {
+		if iws.Item.ID() == itemID {
+			stored = iws.Item
+		}
+	}
+	everyLevel, err := stored.WithDetails(stored.Name(), "", domain.LevelAny, stored.PriceCents())
+	if err != nil {
+		t.Fatalf("WithDetails: %v", err)
+	}
+	if _, err := repo.UpdateItem(context.Background(), everyLevel); err != nil {
+		t.Fatalf("UpdateItem: %v", err)
+	}
+	reread, err := repo.ListItems(context.Background(), ports.ListItemsFilter{IncludeInactive: true})
+	if err != nil {
+		t.Fatalf("ListItems: %v", err)
+	}
+	for _, iws := range reread {
+		if iws.Item.ID() == itemID && iws.Item.Level() != domain.LevelAny {
+			t.Errorf("level after re-scope = %q, want every level", iws.Item.Level())
+		}
 	}
 }

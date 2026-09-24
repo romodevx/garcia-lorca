@@ -50,6 +50,9 @@ func toDomainItem(m itemModel) (domain.Item, error) {
 	if err != nil {
 		return domain.Item{}, err
 	}
+	if m.LevelID == nil && fromNullable(m.LegacyLevel) != "" {
+		item = item.WithUnresolvedLevel()
+	}
 	if m.Category != "" {
 		item, err = item.WithCategory(m.Category)
 		if err != nil {
@@ -65,7 +68,7 @@ func toDomainItem(m itemModel) (domain.Item, error) {
 func fromDomainItem(i domain.Item) itemModel {
 	return itemModel{
 		ID: i.ID(), TenantID: i.TenantID(), Code: i.Code(), Name: i.Name(),
-		Description: i.Description(), LevelID: nullable(string(i.Level())),
+		Description: i.Description(), LevelID: levelIDColumn(i.Level()),
 		PriceCents: i.PriceCents(), Active: i.Active(), Category: i.Category(),
 	}
 }
@@ -204,4 +207,13 @@ func studentLevelName(m orderModel) string {
 	}
 	key := *m.LegacyStudentLevel
 	return strings.ToUpper(key[:1]) + key[1:]
+}
+
+// levelIDColumn stores every-level and unresolved alike as NULL: an unresolved
+// garment keeps its old key in the legacy column, which is what marks it.
+func levelIDColumn(l domain.Level) *string {
+	if l == domain.LevelUnresolved {
+		return nil
+	}
+	return nullable(string(l))
 }

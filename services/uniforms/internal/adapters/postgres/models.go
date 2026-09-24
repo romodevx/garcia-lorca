@@ -16,6 +16,9 @@ type itemModel struct {
 	Name        string  `gorm:"column:name"`
 	Description string  `gorm:"column:description"`
 	LevelID     *string `gorm:"column:level_id"`
+	// LegacyLevel is the pre-0007 SEP key, read (never written): a scoped
+	// garment that never got a level_id must not read as every level.
+	LegacyLevel *string `gorm:"column:level;<-:false"`
 	PriceCents  int64   `gorm:"column:price_cents"`
 	Active      bool    `gorm:"column:active"`
 	// What kind of thing this is: uniform, book, supply or other. A row written

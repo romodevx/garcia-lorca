@@ -195,3 +195,25 @@ func TestLevelIsValidAcceptsEveryLevelAndUUIDsOnly(t *testing.T) {
 		}
 	}
 }
+
+// A garment the previous build scoped by an old SEP key, never linked to a
+// config level, must not widen to every level: it is unresolved, which no pupil
+// holds, and a new garment cannot be created that way.
+func TestAnUnresolvedGarmentAppliesToNoPupil(t *testing.T) {
+	item, err := domain.NewItem("it-1", "t-1", "BAT", "Batita", "", domain.LevelAny, 41000)
+	if err != nil {
+		t.Fatalf("NewItem: %v", err)
+	}
+	unresolved := item.WithUnresolvedLevel()
+	if unresolved.Level() != domain.LevelUnresolved {
+		t.Fatalf("level = %q", unresolved.Level())
+	}
+	for _, pupil := range []domain.Level{domain.LevelAny, domain.Level("c1000000-0000-0000-0000-000000000001")} {
+		if unresolved.AppliesTo(pupil) {
+			t.Errorf("an unresolved garment was offered to pupil level %q", pupil)
+		}
+	}
+	if _, err := domain.NewItem("it-2", "t-1", "BAT2", "Batita", "", domain.LevelUnresolved, 41000); err == nil {
+		t.Error("a new garment cannot be created with an unresolved level")
+	}
+}

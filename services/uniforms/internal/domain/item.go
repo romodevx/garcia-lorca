@@ -20,6 +20,12 @@ type Level string
 // "level unknown" — see AppliesTo.
 const LevelAny Level = ""
 
+// LevelUnresolved is a garment the previous build scoped by an old SEP key that
+// no config level was linked to (a row written mid-deploy, or one migration
+// 0007 could not match). It must NOT widen to every level, so it matches no
+// pupil; and it is not a value a client may send (IsValid rejects it).
+const LevelUnresolved Level = "unresolved"
+
 // IsValid reports whether l is every-level or shaped like a config level id (a
 // uuid). An old SEP key ("primaria") is not one, and is refused as bad input
 // rather than reaching the uuid column as a query error.
@@ -159,6 +165,13 @@ func (i Item) AppliesTo(level Level) bool {
 // It is the same rule the finance concept catalogue keeps.
 func (i Item) Retire() Item {
 	i.active = false
+	return i
+}
+
+// WithUnresolvedLevel marks a stored garment whose old level key never became a
+// config level. Only the repository calls it, when reading such a row.
+func (i Item) WithUnresolvedLevel() Item {
+	i.level = LevelUnresolved
 	return i
 }
 
