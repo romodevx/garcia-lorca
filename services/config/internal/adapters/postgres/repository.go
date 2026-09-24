@@ -20,6 +20,12 @@ var _ ports.CatalogRepository = (*Repository)(nil)
 const (
 	uniqueViolation     = "23505"
 	foreignKeyViolation = "23503"
+	checkViolation      = "23514"
+	// emailNormalizedCheck is the CHECK the email migration adds. It is the one
+	// CHECK an API client can trip (a raw email that bypassed the domain, e.g.
+	// against the previous revision mid-deploy), so it alone maps to KindInvalid;
+	// any other CHECK means the server is inconsistent and stays KindInternal.
+	emailNormalizedCheck = "teachers_email_normalized_ck"
 )
 
 // Repository is the GORM-backed config CatalogRepository. Every operation runs
@@ -567,7 +573,8 @@ func (r *Repository) ListTeachingAssignments(ctx context.Context, cycleID string
 
 // translateCreateErr maps a GORM insert error to the port's error contract: a
 // unique violation is KindConflict (conflictMsg), a foreign-key violation is
-// KindInvalid (the referenced parent is missing), anything else is KindInternal.
+// KindInvalid (the referenced parent is missing), the email-normalization CHECK
+// is KindInvalid, anything else is KindInternal.
 func translateCreateErr(err error, internalMsg, conflictMsg string) error {
 	if err == nil {
 		return nil
@@ -577,9 +584,20 @@ func translateCreateErr(err error, internalMsg, conflictMsg string) error {
 		return glerrors.Wrap(glerrors.KindConflict, conflictMsg, err)
 	case foreignKeyViolation:
 		return glerrors.Wrap(glerrors.KindInvalid, "referenced parent does not exist", err)
+	case checkViolation:
+		if isEmailCheck(err) {
+			return glerrors.Wrap(glerrors.KindInvalid, "email is not in its normalized form", err)
+		}
+		return glerrors.Wrap(glerrors.KindInternal, internalMsg, err)
 	default:
 		return glerrors.Wrap(glerrors.KindInternal, internalMsg, err)
 	}
+}
+
+// isEmailCheck reports whether err is the email-normalization CHECK violation.
+func isEmailCheck(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.ConstraintName == emailNormalizedCheck
 }
 
 // pgCode extracts the SQLSTATE code from a driver error, or "" if it is not one.

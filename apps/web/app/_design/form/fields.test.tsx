@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { type ReactElement, useState } from "react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -98,7 +99,67 @@ describe("EmailField", () => {
     const input = screen.getByLabelText("Correo");
     expect(input).toHaveAttribute("autocapitalize", "none");
     expect(input).toHaveAttribute("spellcheck", "false");
-    expect(input).toHaveAttribute("type", "email");
+    // type="text" + inputMode="email": el teclado de correo en el teléfono, y
+    // un cursor que el navegador deja leer. type="email" no expone la
+    // selección, así que al bajar a minúsculas el cursor saltaba al final.
+    expect(input).toHaveAttribute("type", "text");
+    expect(input).toHaveAttribute("inputmode", "email");
+    // Every EmailField captures SOMEBODY ELSE'S address (a teacher, a contact,
+    // a new user): the browser must not offer the director's own.
+    expect(input).toHaveAttribute("autocomplete", "off");
+  });
+
+  it("baja a minúsculas al terminar una composición del teclado", async () => {
+    const onChange = vi.fn();
+    render(<EmailField label="Correo" value="" onChange={onChange} />);
+    const input = screen.getByLabelText<HTMLInputElement>("Correo");
+    input.value = "Ana";
+    fireEvent.compositionEnd(input);
+    expect(onChange).toHaveBeenLastCalledWith("ana");
+  });
+
+  it("al salir del campo avisa, en español, si el correo no tiene forma de correo", async () => {
+    function Controlado(): ReactElement {
+      const [v, setV] = useState("");
+      return <EmailField label="Correo" value={v} onChange={setV} />;
+    }
+    render(<Controlado />);
+    const input = screen.getByLabelText("Correo");
+    await userEvent.type(input, "ana@gmail");
+    await userEvent.tab();
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText(/nombre@dominio/)).toBeInTheDocument();
+
+    await userEvent.type(input, ".com");
+    expect(input).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("vacío no es un error de forma: si es obligatorio lo dice quien lo usa", async () => {
+    render(<EmailField label="Correo" value="" onChange={vi.fn()} />);
+    const input = screen.getByLabelText("Correo");
+    await userEvent.click(input);
+    await userEvent.tab();
+    expect(input).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("al terminar una composición también se limpia el error del campo", () => {
+    const onClearError = vi.fn();
+    render(<EmailField label="Correo" value="" onChange={vi.fn()} error="Falta el correo" onClearError={onClearError} />);
+    const input = screen.getByLabelText<HTMLInputElement>("Correo");
+    input.value = "ana@colegio.mx";
+    fireEvent.compositionEnd(input);
+    expect(onClearError).toHaveBeenCalled();
+  });
+
+  it("corregir a media dirección no revuelve el correo: el cursor se queda donde estaba", async () => {
+    function Controlado(): ReactElement {
+      const [v, setV] = useState("ana.ruiz@colegio.mx");
+      return <EmailField label="Correo" value={v} onChange={setV} />;
+    }
+    render(<Controlado />);
+    const input = screen.getByLabelText("Correo");
+    await userEvent.type(input, "Maria", { initialSelectionStart: 4, initialSelectionEnd: 4 });
+    expect(input).toHaveValue("ana.mariaruiz@colegio.mx");
   });
 });
 

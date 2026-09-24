@@ -3,7 +3,7 @@
 import { useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import type { CreateTeacherInput, Teacher } from "../../teachers/api";
-import { EmailField, TextField } from "../../_design/form";
+import { EmailField, TextField, useEmailShapeOnSave } from "../../_design/form";
 import { EmptyHint, ErrorAlert, Section } from "../config/parts";
 
 export interface TeachersPanelProps {
@@ -22,11 +22,15 @@ export function TeachersPanel({ teachers, onCreate }: TeachersPanelProps): React
   const [email, setEmail] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  // Enter guarda sin salir del campo, así que la forma del correo también se
+  // revisa aquí, al guardar, y no sólo al salir de él.
+  const emailShape = useEmailShapeOnSave();
 
   const canSubmit = firstName.trim() !== "" && lastName.trim() !== "" && email.trim() !== "" && !pending;
 
   const submit = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
+    if (!emailShape.check(email)) return;
     setPending(true);
     setError(undefined);
     try {
@@ -67,7 +71,16 @@ export function TeachersPanel({ teachers, onCreate }: TeachersPanelProps): React
           <TextField label="Apellidos" value={lastName} onChange={setLastName} uppercase required help="Los dos apellidos: primero el paterno, luego el materno." />
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12, alignItems: "end" }}>
-          <EmailField label="Correo" value={email} onChange={setEmail} help="El correo donde el docente recibirá su acceso. Puede quedar vacío y agregarse después." />
+          <EmailField
+            label="Correo"
+            value={email}
+            onChange={(v) => {
+              setEmail(v);
+              emailShape.forgive(v);
+            }}
+            help="El correo donde el docente recibirá su acceso. Puede quedar vacío y agregarse después."
+            error={emailShape.error}
+          />
           <Btn type="submit" icon="plus" disabled={!canSubmit}>
             Crear profesor
           </Btn>

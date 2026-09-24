@@ -190,4 +190,23 @@ describe("ContactsPanel — dar acceso a la app", () => {
 
     expect(await screen.findByText(/ya tenía cuenta/i)).toBeInTheDocument();
   });
+
+  // Regression: ISSUE-001 — an EmailField is type="text" (to keep the caret), so
+  // the browser no longer blocks a malformed address; the server's refusal came
+  // back in English. The panel checks the shape itself, in Spanish, on the field.
+  // Found by /qa on 2026-09-24
+  it("marca un correo mal escrito en el campo y no lo manda", async () => {
+    const user = userEvent.setup();
+    render(<ContactsPanel studentId="st-1" />);
+    await screen.findByText("Ana Cruz");
+
+    await user.type(screen.getByLabelText("Nombre del contacto"), "Luis Cruz");
+    await user.type(screen.getByLabelText("Correo del contacto"), "luis@gmail");
+    await user.click(screen.getByRole("button", { name: /Agregar/ }));
+
+    const correo = screen.getByLabelText("Correo del contacto");
+    expect(correo).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText(/nombre@dominio/)).toBeInTheDocument();
+    expect(students.addContact).not.toHaveBeenCalled();
+  });
 });

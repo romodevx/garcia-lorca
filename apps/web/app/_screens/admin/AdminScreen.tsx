@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties, type Rea
 import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
 import { DrawerShell } from "../../_design/DrawerShell";
-import { EmailField, HelpTip, TextField } from "../../_design/form";
+import { emailShapeError, EmailField, HelpTip, TextField, useEmailShapeOnSave } from "../../_design/form";
 import { Icon, type IconName } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import type { ColorKey } from "../../_design/colors";
@@ -91,6 +91,11 @@ function labelField(label: string, node: ReactElement, req?: boolean, help?: str
 
 export interface AdminScreenProps {
   onBack: () => void;
+}
+
+/** Written and shaped like an address: what the drawers need to be ready. */
+function hasEmailShape(email: string): boolean {
+  return email.trim() !== "" && emailShapeError(email) === undefined;
 }
 
 export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
@@ -302,14 +307,23 @@ function CreateUserDrawer({ roles, onClose, onSave }: { roles: readonly Role[]; 
   const [tempPassword, setPw] = useState("");
   const [sel, setSel] = useState<string[]>([]);
   const [err, setErr] = useState<string | undefined>(undefined);
-  const ready = email.includes("@") && displayName.trim().length > 1 && tempPassword.length >= 6;
+  const ready = hasEmailShape(email) && displayName.trim().length > 1 && tempPassword.length >= 6;
   const toggle = (id: string): void => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
-  const submit = async (): Promise<void> => { try { await onSave({ email: email.trim(), displayName: displayName.trim(), tempPassword, roleIds: sel }); } catch { setErr("No se pudo crear el usuario (¿correo duplicado?)."); } };
+  // pointer-events on the button stops the mouse, not Tab + Enter: the drawer
+  // refuses a malformed address on its own.
+  const emailShape = useEmailShapeOnSave();
+  const submit = async (): Promise<void> => {
+    // The email check runs FIRST: `ready` already folds in the address shape,
+    // so behind it the check could never mark the field.
+    const shaped = emailShape.check(email);
+    if (!shaped || !ready) return;
+    try { await onSave({ email: email.trim(), displayName: displayName.trim(), tempPassword, roleIds: sel }); } catch { setErr("No se pudo crear el usuario (¿correo duplicado?)."); }
+  };
   return (
     <Drawer title="Nuevo usuario" subtitle="Cuenta de acceso al sistema" icon="user" onClose={onClose}
       footer={<><Btn kind="ghost" onClick={onClose}>Cancelar</Btn><div style={{ flex: 1 }} /><Btn icon="check" onClick={() => void submit()} style={{ opacity: ready ? 1 : 0.45, pointerEvents: ready ? "auto" : "none", height: 52 }}>Crear usuario</Btn></>}>
       <>
-        <EmailField label="Correo" value={email} onChange={setEmail} required help="El correo con el que esta persona entrará al sistema." />
+        <EmailField label="Correo" value={email} onChange={(v) => { setEmail(v); emailShape.forgive(v); }} error={emailShape.error} required help="El correo con el que esta persona entrará al sistema." />
         <TextField label="Nombre para mostrar" value={displayName} onChange={setName} uppercase required help="El nombre que verán los demás en el sistema." />
         {/* La contraseña NO pasa por la capa de captura: nada de mayúsculas ni
             de minúsculas debe tocarla, y su valor no se formatea nunca. */}
@@ -335,9 +349,16 @@ function InviteUserDrawer({ roles, onClose, onSave }: { roles: readonly Role[]; 
   const [sel, setSel] = useState<string[]>([]);
   const [err, setErr] = useState<string | undefined>(undefined);
   const [sending, setSending] = useState(false);
-  const ready = email.includes("@") && displayName.trim().length > 1 && !sending;
+  const ready = hasEmailShape(email) && displayName.trim().length > 1 && !sending;
   const toggle = (id: string): void => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  // pointer-events on the button stops the mouse, not Tab + Enter: the drawer
+  // refuses a malformed address on its own.
+  const emailShape = useEmailShapeOnSave();
   const submit = async (): Promise<void> => {
+    // The email check runs FIRST: `ready` already folds in the address shape,
+    // so behind it the check could never mark the field.
+    const shaped = emailShape.check(email);
+    if (!shaped || !ready) return;
     setSending(true);
     try { await onSave({ email: email.trim(), displayName: displayName.trim(), roleIds: sel }); }
     // The account may well exist and only the mail have failed, so the message
@@ -349,7 +370,7 @@ function InviteUserDrawer({ roles, onClose, onSave }: { roles: readonly Role[]; 
     <Drawer title="Invitar usuario" subtitle="Recibirá un correo para elegir su contraseña" icon="user" onClose={onClose}
       footer={<><Btn kind="ghost" onClick={onClose}>Cancelar</Btn><div style={{ flex: 1 }} /><Btn icon="check" onClick={() => void submit()} style={{ opacity: ready ? 1 : 0.45, pointerEvents: ready ? "auto" : "none", height: 52 }}>{sending ? "Enviando…" : "Enviar invitación"}</Btn></>}>
       <>
-        <EmailField label="Correo" value={email} onChange={setEmail} required help="El correo con el que esta persona entrará al sistema." />
+        <EmailField label="Correo" value={email} onChange={(v) => { setEmail(v); emailShape.forgive(v); }} error={emailShape.error} required help="El correo con el que esta persona entrará al sistema." />
         <TextField label="Nombre para mostrar" value={displayName} onChange={setName} uppercase required help="El nombre que verán los demás en el sistema." />
         <div><span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Roles</span>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>{roles.map((r) => <button key={r.id} onClick={() => toggle(r.id)} style={chip(sel.includes(r.id), "lime")}>{r.name}</button>)}</div>

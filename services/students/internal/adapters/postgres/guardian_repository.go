@@ -146,7 +146,7 @@ func (r *Repository) listGuardianLinks(ctx context.Context, where, value string)
 
 // translateGuardianWriteErr maps Postgres constraint failures on a link insert to
 // domain kinds: the (tenant, guardian, student) UNIQUE → KindConflict, a missing
-// student FK → KindInvalid.
+// student FK → KindInvalid, the email-normalization CHECK → KindInvalid.
 func translateGuardianWriteErr(err error) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
@@ -155,6 +155,12 @@ func translateGuardianWriteErr(err error) error {
 			return glerrors.Wrap(glerrors.KindConflict, "guardian is already linked to this student", err)
 		case foreignKeyViolation:
 			return glerrors.Wrap(glerrors.KindInvalid, "student does not exist", err)
+		case checkViolation:
+			// Only the email CHECK can be tripped by a client (a raw email that
+			// bypassed the domain); any other CHECK is a server inconsistency.
+			if pgErr.ConstraintName == contactEmailNormalizedCheck {
+				return glerrors.Wrap(glerrors.KindInvalid, "email is not in its normalized form", err)
+			}
 		}
 	}
 	return glerrors.Wrap(glerrors.KindInternal, "linking guardian", err)

@@ -3,6 +3,7 @@ package domain
 import (
 	"strings"
 
+	pkgemail "github.com/garcia-lorca/pkg/email"
 	glerrors "github.com/garcia-lorca/pkg/errors"
 )
 
@@ -18,9 +19,11 @@ type Teacher struct {
 }
 
 // NewTeacher constructs a teacher. `id`, `tenantID`, `firstName`, `lastName`, and
-// `email` are required; `email` must have a plausible shape. `userID` is
-// optional ("" = not yet linked to an IAM user).
+// `email` are required; `email` must have a plausible shape and is stored
+// normalized (trimmed, lowercase). `userID` is optional ("" = not yet linked to
+// an IAM user).
 func NewTeacher(id, tenantID, firstName, lastName, email, userID string) (Teacher, error) {
+	email = pkgemail.Normalize(email)
 	if strings.TrimSpace(id) == "" {
 		return Teacher{}, glerrors.New(glerrors.KindInvalid, "teacher id is required")
 	}
@@ -46,23 +49,34 @@ func NewTeacher(id, tenantID, firstName, lastName, email, userID string) (Teache
 	}, nil
 }
 
-// validateTeacherEmail is a minimal boundary shape check (a single '@' with a
-// dotted domain), not full RFC 5322 — the authoritative uniqueness constraint
-// lives at the database level (UNIQUE(tenant_id, email)).
-func validateTeacherEmail(email string) error {
-	if strings.TrimSpace(email) == "" {
+// RestoreTeacher rebuilds a teacher read back from storage. It checks only that
+// the row is whole — the email's SHAPE was judged when the teacher was created,
+// and a row stored under an older, looser rule must stay readable: one such row
+// would otherwise fail ListTeachers for the whole school.
+func RestoreTeacher(id, tenantID, firstName, lastName, email, userID string) (Teacher, error) {
+	for _, required := range []string{id, tenantID, firstName, lastName, email} {
+		if strings.TrimSpace(required) == "" {
+			return Teacher{}, glerrors.New(glerrors.KindInvalid, "stored teacher is missing a required field")
+		}
+	}
+	return Teacher{
+		id:        id,
+		tenantID:  tenantID,
+		firstName: firstName,
+		lastName:  lastName,
+		email:     email,
+		userID:    userID,
+	}, nil
+}
+
+// validateTeacherEmail requires an address and checks its shape with the one
+// rule every service shares (pkg/email); the authoritative uniqueness
+// constraint lives at the database level (UNIQUE(tenant_id, email)).
+func validateTeacherEmail(address string) error {
+	if address == "" {
 		return glerrors.New(glerrors.KindInvalid, "teacher email is required")
 	}
-	at := strings.IndexByte(email, '@')
-	if at <= 0 {
-		return glerrors.New(glerrors.KindInvalid, "teacher email must contain '@'")
-	}
-	domainPart := email[at+1:]
-	dot := strings.IndexByte(domainPart, '.')
-	if dot <= 0 || dot == len(domainPart)-1 {
-		return glerrors.New(glerrors.KindInvalid, "teacher email domain must contain a dot")
-	}
-	return nil
+	return pkgemail.Validate(address)
 }
 
 // WithUserID returns a copy of the teacher linked to userID, or unlinked when

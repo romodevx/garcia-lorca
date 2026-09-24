@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -183,7 +183,35 @@ describe("la captura de administración", () => {
     const correo = screen.getByLabelText("Correo");
     await user.type(correo, "Ana.Ruiz@CEGLORCA.COM");
     expect(correo).toHaveValue("ana.ruiz@ceglorca.com");
-    expect(correo).toHaveAttribute("type", "email");
+    expect(correo).toHaveAttribute("inputmode", "email");
+  });
+
+  it("un correo sin forma de correo no deja crear al usuario", async () => {
+    const user = userEvent.setup();
+    render(<AdminScreen onBack={() => {}} />);
+    await user.click(await screen.findByRole("button", { name: "Nuevo usuario" }));
+
+    // Everything else is valid, so only the email can hold the drawer back.
+    await user.type(screen.getByLabelText(/^Nombre para mostrar/), "Ana Ruiz");
+    const password = screen.queryByLabelText(/^Contraseña temporal/);
+    if (password !== null) await user.type(password, "init-pw-123");
+    // No Tab: the field never loses focus, so only the save-time check can
+    // mark it — exactly the keyboard path (Enter on the focused button).
+    await user.type(screen.getByLabelText("Correo"), "ana@colegio");
+    expect(screen.getByLabelText("Correo")).not.toHaveAttribute("aria-invalid");
+
+    // The drawer's primary action (create or invite, per configuration) stays
+    // unready: pointer-events none also hides it from the accessibility tree.
+    const primary = screen.getByRole("button", { name: /Crear usuario|Enviar invitación/, hidden: true });
+    expect(primary).toHaveStyle({ pointerEvents: "none" });
+
+    // pointer-events stops the mouse, not the keyboard: Tab + Enter still
+    // activates the button (a click event). The drawer must refuse on its own.
+    fireEvent.click(primary);
+    expect(admin.createUser).not.toHaveBeenCalled();
+    expect(admin.inviteUser).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Correo")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText(/nombre@dominio/)).toBeInTheDocument();
   });
 
   it("el nombre para mostrar se captura en mayúsculas", async () => {

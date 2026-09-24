@@ -32,6 +32,20 @@ const SCREENS = globSync("app/_screens/**/*.tsx", { cwd: process.cwd() })
 const AUTH = ["Login.tsx", "ChangePassword.tsx", "SetPassword.tsx"];
 const isAuth = (file: string): boolean => AUTH.some((a) => file.endsWith(a));
 
+/** Cada `<input … />` que captura un correo, como texto del elemento. */
+function camposDeCorreo(src: string): string[] {
+  return (src.match(/<input\b[\s\S]*?\/>/g) ?? []).filter((campo) =>
+    /type="email"|inputMode="email"/.test(campo),
+  );
+}
+
+/** Cada `<TextField … />` cuya etiqueta dice que es un correo. */
+function textFieldsDeCorreo(src: string): string[] {
+  return (src.match(/<TextField\b[\s\S]*?\/>/g) ?? []).filter((campo) =>
+    /label=\{?\s*["`'][^"`']*correo/i.test(campo),
+  );
+}
+
 describe("la capa de captura, en todo el sistema", () => {
   it("ninguna fecha se teclea a mano", () => {
     // El calendario es la única forma de capturar una fecha. Un type="date"
@@ -43,21 +57,38 @@ describe("la capa de captura, en todo el sistema", () => {
 
   it("ningún correo se captura fuera de EmailField", () => {
     // Login tiene su propio diseño (ícono dentro del campo) y no usa la
-    // primitiva, pero sí la regla: baja a minúsculas al teclear, y eso lo
-    // defiende Login.test.tsx.
+    // primitiva, pero sí la regla, que defiende la prueba siguiente.
     const offenders = SCREENS
       .filter(([f]) => !isAuth(f))
-      .filter(([, src]) => /<input[^>]*type="email"/.test(src))
-      .map(([f]) => f);
+      .flatMap(([f, src]) => [
+        ...camposDeCorreo(src).map(() => f),
+        ...textFieldsDeCorreo(src).map(() => f),
+      ]);
     expect(offenders).toEqual([]);
   });
 
-  it("todo campo de correo baja a minúsculas, use o no la primitiva", () => {
-    const offenders = SCREENS
-      .filter(([, src]) => /<input[^>]*type="email"/.test(src))
-      .filter(([, src]) => !/toLowerCase\(\)/.test(src))
-      .map(([f]) => f);
+  it("todo campo de correo a mano baja a minúsculas sin mover el cursor", () => {
+    // Se revisa CADA campo, no el archivo: un archivo con un campo correcto
+    // escondía a su vecino que no bajaba nada (así pasó con «¿Olvidaste tu
+    // contraseña?» en Login.tsx).
+    const offenders = SCREENS.flatMap(([f, src]) =>
+      camposDeCorreo(src)
+        .filter((campo) => !/lowercaseKeepingCaret\(/.test(campo) || /type="email"/.test(campo))
+        .map(() => f),
+    );
     expect(offenders).toEqual([]);
+  });
+
+  it("el escáner de correos ve lo que dice que ve", () => {
+    // Sin esto, una expresión rota deja pasar todo y las dos pruebas de arriba
+    // pasan en vacío.
+    const onChangeAntes = `<input onChange={(e) => set(e.target.value)} type="email" />`;
+    expect(camposDeCorreo(onChangeAntes)).toHaveLength(1);
+    expect(camposDeCorreo(`<input inputMode="email" value={v} />`)).toHaveLength(1);
+    expect(camposDeCorreo(`<input type="text" value={v} />`)).toHaveLength(0);
+    expect(textFieldsDeCorreo(`<TextField label="Correo del tutor" value={v} onChange={set} />`)).toHaveLength(1);
+    expect(textFieldsDeCorreo(`<TextField label={"Correo del tutor"} value={v} />`)).toHaveLength(1);
+    expect(textFieldsDeCorreo(`<TextField label="Nombre" value={v} onChange={set} />`)).toHaveLength(0);
   });
 
   it("nadie dibuja su propia etiqueta con asterisco", () => {

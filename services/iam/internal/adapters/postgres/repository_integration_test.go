@@ -42,8 +42,11 @@ const (
 )
 
 var (
-	superDB *gorm.DB // postgres superuser (bypasses RLS) — for seeding.
-	appDSN  string   // connection string for the non-owner app role.
+	// superDSNFor builds a superuser DSN for any database in the test container,
+	// so a migration test can build a throwaway database of its own.
+	superDSNFor func(db string) string
+	superDB     *gorm.DB // postgres superuser (bypasses RLS) — for seeding.
+	appDSN      string   // connection string for the non-owner app role.
 	// Ephemeral credentials for the throwaway test container, generated at
 	// runtime so no password literal is ever committed.
 	superPass = randToken()
@@ -77,7 +80,10 @@ func TestMain(m *testing.M) {
 
 	host, _ := container.Host(ctx)
 	port, _ := container.MappedPort(ctx, "5432")
-	superDSN := fmt.Sprintf("host=%s port=%s user=postgres password=%s dbname=%s sslmode=disable", host, port.Port(), superPass, dbName)
+	superDSNFor = func(db string) string {
+		return fmt.Sprintf("host=%s port=%s user=postgres password=%s dbname=%s sslmode=disable", host, port.Port(), superPass, db)
+	}
+	superDSN := superDSNFor(dbName)
 	appDSN = fmt.Sprintf("host=%s port=%s user=app password=%s dbname=%s sslmode=disable", host, port.Port(), appPass, dbName)
 
 	superDB, err = open(superDSN)
@@ -97,10 +103,13 @@ func open(dsn string) (*gorm.DB, error) {
 	return gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 }
 
-func migrate(db *gorm.DB) error {
+// sqlFiles lists the migration files in migrationsDir in lexical order (0001
+// before 0002). It is the one list both the suite schema and the
+// data-migration tests are built from.
+func sqlFiles() ([]string, error) {
 	entries, err := os.ReadDir(migrationsDir)
 	if err != nil {
-		return fmt.Errorf("read migrations dir: %w", err)
+		return nil, fmt.Errorf("read migrations dir: %w", err)
 	}
 	files := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -108,7 +117,15 @@ func migrate(db *gorm.DB) error {
 			files = append(files, e.Name())
 		}
 	}
-	sort.Strings(files) // lexical order: 0001 before 0002.
+	sort.Strings(files)
+	return files, nil
+}
+
+func migrate(db *gorm.DB) error {
+	files, err := sqlFiles()
+	if err != nil {
+		return err
+	}
 	for _, name := range files {
 		sql, err := os.ReadFile(filepath.Join(migrationsDir, name))
 		if err != nil {

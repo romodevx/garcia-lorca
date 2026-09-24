@@ -3,6 +3,7 @@ package domain
 import (
 	"strings"
 
+	"github.com/garcia-lorca/pkg/email"
 	glerrors "github.com/garcia-lorca/pkg/errors"
 )
 
@@ -85,6 +86,13 @@ func NewContact(id, tenantID, studentID string, relationship Relationship, perso
 	if strings.TrimSpace(person.FullName) == "" {
 		return GuardianLink{}, glerrors.New(glerrors.KindInvalid, "a contact without an account needs a name")
 	}
+	if address := email.Normalize(person.Email); address != "" {
+		// Checked here, when the office types it, rather than weeks later when
+		// the office grants app access and iam refuses the address.
+		if err := email.Validate(address); err != nil {
+			return GuardianLink{}, err
+		}
+	}
 	link, err := newLink(id, tenantID, studentID, relationship)
 	if err != nil {
 		return GuardianLink{}, err
@@ -92,14 +100,31 @@ func NewContact(id, tenantID, studentID string, relationship Relationship, perso
 	return link.WithPerson(person), nil
 }
 
-// WithPerson attaches (or replaces) the contact details. A guardian with an
+// RestoreContact rebuilds an account-less contact read back from storage. It
+// keeps the row's invariants (a name, the identity references) but does not
+// re-judge the email's shape: that was checked when the contact was typed, and
+// a row stored before the check existed must stay readable — one such row would
+// otherwise fail the whole contact list of the pupil.
+func RestoreContact(id, tenantID, studentID string, relationship Relationship, person ContactPerson) (GuardianLink, error) {
+	if strings.TrimSpace(person.FullName) == "" {
+		return GuardianLink{}, glerrors.New(glerrors.KindInvalid, "a contact without an account needs a name")
+	}
+	link, err := newLink(id, tenantID, studentID, relationship)
+	if err != nil {
+		return GuardianLink{}, err
+	}
+	return link.WithPerson(person), nil
+}
+
+// WithPerson attaches (or replaces) the contact details; the email is stored
+// trimmed and lowercase, the one spelling iam looks an address up by. A guardian with an
 // account may carry a phone too: the account says who can log in, the phone says
 // who answers, and they are not the same question.
 func (l GuardianLink) WithPerson(person ContactPerson) GuardianLink {
 	l.person = ContactPerson{
 		FullName: strings.TrimSpace(person.FullName),
 		Phone:    strings.TrimSpace(person.Phone),
-		Email:    strings.TrimSpace(person.Email),
+		Email:    email.Normalize(person.Email),
 	}
 	return l
 }

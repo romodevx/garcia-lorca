@@ -4,6 +4,7 @@ import { useState, type CSSProperties, type ReactElement } from "react";
 import { LogoBadge } from "../_design/Brand";
 import { Btn, ThemeToggle } from "../_design/Controls";
 import { Icon } from "../_design/Icon";
+import { isComposing, lowercaseKeepingCaret } from "../_design/form/lowercaseKeepingCaret";
 import { requestPasswordReset } from "../auth/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -149,13 +150,15 @@ export function Login({ theme, onToggle, onSubmit, error, pending }: LoginProps)
                 */}
                 <input
                   aria-label="Correo"
-                  type="email"
+                  type="text"
+                  inputMode="email"
                   autoComplete="username"
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
                   value={email}
-                  onChange={(e) => setEmail(e.target.value.toLowerCase())}
+                  onChange={(e) => setEmail(lowercaseKeepingCaret(e.target, isComposing(e)))}
+                  onCompositionEnd={(e) => setEmail(lowercaseKeepingCaret(e.currentTarget, false))}
                   style={inp}
                 />
               </div>
@@ -216,7 +219,7 @@ export function Login({ theme, onToggle, onSubmit, error, pending }: LoginProps)
             </button>
           </div>
 
-          <Btn full icon="logout" onClick={() => void onSubmit(email, pwd)} disabled={pending} style={{ height: 54, fontSize: 17 }}>
+          <Btn full icon="logout" onClick={() => void onSubmit(email.trim(), pwd)} disabled={pending} style={{ height: 54, fontSize: 17 }}>
             {pending ? "Entrando…" : "Entrar al sistema"}
           </Btn>
           {error ? (
@@ -235,7 +238,7 @@ export function Login({ theme, onToggle, onSubmit, error, pending }: LoginProps)
                 // comes back. Reporting whether the address has an account
                 // would turn this into a way to read the school's directory one
                 // guess at a time.
-                void requestPasswordReset(API_URL, forgotEmail);
+                void requestPasswordReset(API_URL, forgotEmail.trim());
                 setSent(true);
               }}
               onClose={() => setForgot(false)}
@@ -288,10 +291,14 @@ function ForgotPanel({ email, sent, onEmail, onSend, onClose }: { email: string;
           </p>
           <input
             id="forgot-email"
-            type="email"
+            type="text"
+            inputMode="email"
             autoComplete="email"
             value={email}
-            onChange={(e) => onEmail(e.target.value)}
+            autoCapitalize="none"
+            spellCheck={false}
+            onChange={(e) => onEmail(lowercaseKeepingCaret(e.target, isComposing(e)))}
+            onCompositionEnd={(e) => onEmail(lowercaseKeepingCaret(e.currentTarget, false))}
             style={{ width: "100%", height: 48, padding: "0 14px", borderRadius: "var(--r-md)", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 15, outline: "none" }}
           />
           <div style={{ display: "flex", gap: 10, marginTop: 12 }}>

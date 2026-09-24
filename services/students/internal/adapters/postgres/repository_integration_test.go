@@ -15,6 +15,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,27 +35,22 @@ import (
 )
 
 const (
+	// migrationsDir is the one list of students migrations.
+	migrationsDir = "../../../../../migrations/students"
+
 	dbName  = "garcia_lorca"
 	tenantA = "11111111-1111-1111-1111-111111111111"
 	tenantB = "22222222-2222-2222-2222-222222222222"
 )
 
-// migrationFiles are applied in order before the app role is granted, so the
-// non-owner role gets privileges on every table (students + enrollments +
-// guardian links).
-var migrationFiles = []string{
-	"../../../../../migrations/students/0001_init.sql",
-	"../../../../../migrations/students/0002_enrollments.sql",
-	"../../../../../migrations/students/0003_guardians.sql",
-	"../../../../../migrations/students/0004_maternal_level.sql",
-	"../../../../../migrations/students/0005_contacts.sql",
-}
-
 var (
-	superDB   *gorm.DB
-	appDSN    string
-	superPass = randToken()
-	appPass   = randToken()
+	// superDSNFor builds a superuser DSN for any database in the test container,
+	// so a migration test can build a throwaway database of its own.
+	superDSNFor func(db string) string
+	superDB     *gorm.DB
+	appDSN      string
+	superPass   = randToken()
+	appPass     = randToken()
 )
 
 func randToken() string {
@@ -81,7 +79,10 @@ func TestMain(m *testing.M) {
 
 	host, _ := container.Host(ctx)
 	port, _ := container.MappedPort(ctx, "5432")
-	superDSN := fmt.Sprintf("host=%s port=%s user=postgres password=%s dbname=%s sslmode=disable", host, port.Port(), superPass, dbName)
+	superDSNFor = func(db string) string {
+		return fmt.Sprintf("host=%s port=%s user=postgres password=%s dbname=%s sslmode=disable", host, port.Port(), superPass, db)
+	}
+	superDSN := superDSNFor(dbName)
 	appDSN = fmt.Sprintf("host=%s port=%s user=app password=%s dbname=%s sslmode=disable", host, port.Port(), appPass, dbName)
 
 	if superDB, err = open(superDSN); err != nil {
@@ -99,9 +100,35 @@ func open(dsn string) (*gorm.DB, error) {
 	return gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 }
 
+// migrate applies every file in migrationsDir in order — the directory is the
+// one list of migrations, so a new file can never be left out of the schema the
+// repository and RLS tests run against — and then grants the non-owner app role
+// privileges on every table.
+// sqlFiles lists the migration files in migrationsDir in lexical order (0001
+// before 0002). It is the one list both the suite schema and the
+// data-migration tests are built from.
+func sqlFiles() ([]string, error) {
+	entries, err := os.ReadDir(migrationsDir)
+	if err != nil {
+		return nil, fmt.Errorf("read migrations dir: %w", err)
+	}
+	files := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
+			files = append(files, e.Name())
+		}
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
 func migrate(db *gorm.DB) error {
-	for _, f := range migrationFiles {
-		sql, err := os.ReadFile(f)
+	files, err := sqlFiles()
+	if err != nil {
+		return err
+	}
+	for _, f := range files {
+		sql, err := os.ReadFile(filepath.Join(migrationsDir, f))
 		if err != nil {
 			return err
 		}

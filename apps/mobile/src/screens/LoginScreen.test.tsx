@@ -64,4 +64,41 @@ describe("LoginScreen", () => {
 
     expect(onSubmit).not.toHaveBeenCalled();
   });
+
+  // Not on every keystroke: rewriting a controlled TextInput mid-composition
+  // duplicates characters on Android keyboards that compose (Samsung, predictive
+  // text on). The field lowercases when the parent leaves it, and the submit
+  // sends the lowercase address whatever the field shows.
+  it("lowercases the email when the field is left", async () => {
+    await renderWithProviders(<LoginScreen onSubmit={async () => undefined} />);
+    await drainMount();
+
+    const field = screen.getByLabelText("Correo electrónico");
+    await act(async () => {
+      fireEvent.changeText(field, "Laura.Ruiz@Correo.COM");
+    });
+    // While typing, the field holds exactly what the keyboard sent.
+    expect(screen.getByLabelText("Correo electrónico").props.value).toBe("Laura.Ruiz@Correo.COM");
+    await act(async () => {
+      fireEvent(field, "blur");
+    });
+
+    expect(screen.getByLabelText("Correo electrónico").props.value).toBe("laura.ruiz@correo.com");
+  });
+
+  it("submits the email lowercase even if the field was never left", async () => {
+    const onSubmit = jest.fn().mockResolvedValue(undefined);
+    await renderWithProviders(<LoginScreen onSubmit={onSubmit} />);
+    await drainMount();
+
+    await act(async () => {
+      fireEvent.changeText(screen.getByLabelText("Correo electrónico"), " Laura@Correo.COM ");
+      fireEvent.changeText(screen.getByPlaceholderText("••••••••"), "secret123");
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByRole("button", { name: "Ingresar" }));
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith("laura@correo.com", "secret123");
+  });
 });

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
-import { EmailField, SelectField, TextField, useRequired } from "../../_design/form";
+import { EmailField, SelectField, TextField, useEmailShapeOnSave, useRequired } from "../../_design/form";
 import { Icon } from "../../_design/Icon";
 import { addContact, inviteContactToApp, listContacts, type Contact, type ContactAccessResult, type Relationship } from "../../students/api";
 import { API_URL } from "../../api-url";
@@ -41,6 +41,9 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
   const [relationship, setRelationship] = useState<Relationship>("other");
   const [error, setError] = useState<string | undefined>(undefined);
   const form = useRequired(CONTACT_REQUIRED);
+  // El correo puede quedar vacío, pero si se escribe tiene que tener forma de
+  // correo: se revisa aquí, al guardar, porque Enter guarda sin salir del campo.
+  const emailShape = useEmailShapeOnSave();
   const [saving, setSaving] = useState(false);
   // Which contact is being given access, and what came of it. Keyed by contact
   // so a second press elsewhere never shows the first one's outcome.
@@ -61,7 +64,10 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
     // Se marca EL CAMPO, no una frase al pie. El asterisco promete que el rojo
     // va a aparecer donde falta, y un mensaje abajo obliga a buscar cuál de los
     // cuatro campos era.
-    if (!form.check({ name })) return;
+    // Ambas revisiones corren siempre, para marcar a la vez todo lo que falla.
+    const complete = form.check({ name });
+    const shaped = emailShape.check(email);
+    if (!complete || !shaped) return;
     setSaving(true);
     setError(undefined);
     try {
@@ -180,7 +186,16 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
           <TextField label="Teléfono del contacto" value={phone} onChange={setPhone} help="El número al que se marca, a diez dígitos." />
         </div>
         <div style={{ flex: "1 1 150px", minWidth: 0 }}>
-          <EmailField label="Correo del contacto" value={email} onChange={setEmail} help="El correo de este contacto. Puede quedar vacío." />
+          <EmailField
+            label="Correo del contacto"
+            value={email}
+            onChange={(v) => {
+              setEmail(v);
+              emailShape.forgive(v);
+            }}
+            help="El correo de este contacto. Puede quedar vacío."
+            error={emailShape.error}
+          />
         </div>
         <div style={{ flex: "1 1 110px", minWidth: 0 }}>
           <SelectField
