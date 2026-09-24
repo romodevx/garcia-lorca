@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState, type ReactElement } from "react";
 import { pesosToCents } from "../../_lib/money";
 import { Btn } from "../../_design/Controls";
-import { MoneyField, TextField, useRequired } from "../../_design/form";
+import { MoneyField, TextField, useFocusFirstInvalid, useRequired } from "../../_design/form";
 import { createItem, updateItem, UniformsError, upsertSizes, type ItemCategory, type Level, type SizeSpec, type UniformItem } from "../../uniforms/api";
 import { Drawer } from "./InventoryPanel";
 import { EmptyState, ErrorNote, field, FieldLabel, label, LevelChips, money, type SchoolLevel } from "./parts";
@@ -191,6 +191,7 @@ function CreateDrawer({
   const inFlight = useRef(false);
   const form = useRequired(CREATE_REQUIRED);
   const [priceError, setPriceError] = useState<string | undefined>(undefined);
+  const focusFirstInvalid = useFocusFirstInvalid();
 
   // El lector ESTRICTO de _lib/money. El que vivía aquí hacía
   // `Number(pesos.replace(/[^0-9.]/g, "")) * 100`, que borra toda coma incluida
@@ -205,7 +206,10 @@ function CreateDrawer({
     const complete = form.check({ name, price: pesos });
     const unreadable = pesos.trim() !== "" && Number.isNaN(priceCents);
     setPriceError(unreadable ? "Escribe el precio en pesos, por ejemplo 450." : undefined);
-    if (!complete || unreadable) return;
+    if (!complete || unreadable) {
+      focusFirstInvalid();
+      return;
+    }
     inFlight.current = true;
     setPending(true);
     try {
@@ -218,7 +222,7 @@ function CreateDrawer({
       inFlight.current = false;
       setPending(false);
     }
-  }, [category, form, level, name, onClose, onDone, onError, pesos, priceCents]);
+  }, [category, focusFirstInvalid, form, level, name, onClose, onDone, onError, pesos, priceCents]);
 
   return (
     <Drawer title="Nuevo artículo" icon="plus" onClose={onClose}>

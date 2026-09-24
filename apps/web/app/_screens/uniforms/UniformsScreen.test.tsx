@@ -485,6 +485,22 @@ describe("UniformsScreen — Nuevo artículo al guardar", () => {
     expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit)?.method === "POST")).toBe(false);
   });
 
+  it("takes the focus to a price it cannot read", async () => {
+    const user = userEvent.setup();
+    stubCatalogue([]);
+    render(<UniformsScreen onBack={() => {}} />);
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Catálogo" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Catálogo" }));
+    await user.click((await screen.findAllByRole("button", { name: /Nuevo artículo/ }))[0] as HTMLElement);
+    await user.type(screen.getByLabelText(/Nombre/, CAMPO), "Playera polo");
+    await user.type(screen.getByLabelText(/Precio/, CAMPO), "abc");
+    await user.click(screen.getByRole("button", { name: /Crear y poner tallas/ }));
+
+    const price = screen.getByLabelText(/Precio/, CAMPO);
+    expect(price).toHaveAttribute("aria-invalid", "true");
+    await waitFor(() => expect(document.activeElement).toBe(price));
+  });
+
   // With no clave there is no unique code to refuse a second insert: a double
   // click must create one article, not two.
   it("creates one article on a double click", async () => {
