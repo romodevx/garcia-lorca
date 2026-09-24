@@ -50,3 +50,34 @@ func TestContactEditAndRemove(t *testing.T) {
 		t.Errorf("the contact is still there: %v", err)
 	}
 }
+
+// The service checks "no account" and then deletes; access granted in between
+// must not be deleted with the row. The DELETE carries the condition itself.
+func TestRemoveContactRefusesAContactThatGainedAnAccount(t *testing.T) {
+	ctx := context.Background()
+	repo := appRepo(t, tenantA)
+	studentID := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-0000000005c2", "CONB050312MDFRNN02")
+	c, err := domain.NewContact("c5000000-0000-0000-0000-000000000002", tenantA, studentID, domain.RelationshipMother,
+		domain.ContactPerson{FullName: "Lucía"})
+	if err != nil {
+		t.Fatalf("NewContact: %v", err)
+	}
+	if err := repo.Link(ctx, c); err != nil {
+		t.Fatalf("Link: %v", err)
+	}
+	// Its own guardian id: other tests count the links of guardianOne.
+	granted, err := c.WithAccount("60000000-0000-0000-0000-0000000005c2")
+	if err != nil {
+		t.Fatalf("WithAccount: %v", err)
+	}
+	if err := repo.AttachAccount(ctx, granted); err != nil {
+		t.Fatalf("AttachAccount: %v", err)
+	}
+
+	if err := repo.RemoveContact(ctx, c.ID()); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Errorf("removing a contact with an account: want KindConflict, got %v", err)
+	}
+	if _, err := repo.ByID(ctx, c.ID()); err != nil {
+		t.Errorf("the contact with an account was deleted: %v", err)
+	}
+}

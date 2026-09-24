@@ -8,9 +8,12 @@
 #   * public_access_prevention = "enforced": no allUsers/allAuthenticatedUsers
 #     binding can be added, by mistake or otherwise.
 #   * uniform bucket-level access: IAM only, no per-object ACLs.
-#   * versioning: a replaced or deleted photo can be recovered for 30 days
-#     (the lifecycle rule then removes the noncurrent version), which also
-#     sweeps objects a failed cleanup left behind.
+#   * versioning: a replaced or deleted photo can be recovered for 7 days,
+#     then the lifecycle rule removes the noncurrent version. Short on purpose:
+#     "Quitar foto" should mean gone, not kept for a month.
+#   * NOT swept by any rule: a LIVE object nothing references (a replace whose
+#     cleanup failed). The students service logs "photo object not deleted"
+#     with its key; that line is how such an object is found and removed.
 resource "google_storage_bucket" "student_photos" {
   project                     = var.project_id
   name                        = "${var.project_id}-student-photos-${var.env}"
@@ -26,7 +29,7 @@ resource "google_storage_bucket" "student_photos" {
 
   lifecycle_rule {
     condition {
-      days_since_noncurrent_time = 30
+      days_since_noncurrent_time = 7
     }
     action {
       type = "Delete"

@@ -45,6 +45,8 @@ export interface ContactsPanelProps {
  */
 /** Fuera del componente: useRequired lo toma como dependencia. */
 const CONTACT_REQUIRED = ["name"] as const;
+/** A contact with an account may go without a name (the server allows it). */
+const NOTHING_REQUIRED = [] as const;
 /** Fuera del componente: useFormatError lo toma como dependencia. */
 const PHONE_RULES = { phone: phoneError } as const;
 
@@ -162,7 +164,7 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
         <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "11px 0", borderBottom: "1px solid var(--border)" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 14.5, fontWeight: 600, color: "var(--text)" }}>
-              {c.fullName !== "" ? c.fullName : "Cuenta vinculada"}
+              {displayName(c)}
             </div>
             <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
               {RELATIONSHIP_LABEL[c.relationship] ?? c.relationship}
@@ -200,11 +202,11 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
               Falta el correo para invitarle
             </span>
           )}
-          <Btn kind="ghost" onClick={() => setEditing(c.id)} aria-label={`Editar a ${c.fullName}`} style={ROW_ACTION}>Editar</Btn>
+          <Btn kind="ghost" onClick={() => setEditing(c.id)} aria-label={`Editar a ${displayName(c)}`} style={ROW_ACTION}>Editar</Btn>
           {!c.hasAccount && (
             // A contact who can open the app is refused by the server (409):
             // its access is revoked first. So the button is not offered.
-            <Btn kind="ghost" onClick={() => remove(c)} aria-label={`Quitar a ${c.fullName}`} style={ROW_ACTION}>Quitar</Btn>
+            <Btn kind="ghost" onClick={() => remove(c)} aria-label={`Quitar a ${displayName(c)}`} style={ROW_ACTION}>Quitar</Btn>
           )}
         </div>
       ))}
@@ -286,6 +288,10 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
   );
 }
 
+function displayName(c: Contact): string {
+  return c.fullName !== "" ? c.fullName : "Cuenta vinculada";
+}
+
 const ROW_ACTION = { height: 36, padding: "0 12px", fontSize: 13.5 } as const;
 
 function EmergencyCheck({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }): ReactElement {
@@ -310,13 +316,13 @@ function ContactEditRow({
   onSave: (edit: ContactEdit) => Promise<void>;
   onCancel: () => void;
 }): ReactElement {
-  const who = contact.fullName;
+  const who = displayName(contact);
   const [name, setName] = useState(contact.fullName);
   const [phone, setPhone] = useState(contact.phone);
   const [email, setEmail] = useState(contact.email);
   const [relationship, setRelationship] = useState<Relationship>(contact.relationship);
   const [emergency, setEmergency] = useState(contact.isEmergency === true);
-  const form = useRequired(CONTACT_REQUIRED);
+  const form = useRequired(contact.hasAccount ? NOTHING_REQUIRED : CONTACT_REQUIRED);
   const emailShape = useEmailShapeOnSave();
   const phoneShape = useFormatError(PHONE_RULES);
   const [saving, setSaving] = useState(false);
@@ -353,7 +359,7 @@ function ContactEditRow({
       style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", padding: "11px 0", borderBottom: "1px solid var(--border)" }}
     >
       <div style={{ flex: "2 1 150px", minWidth: 0 }}>
-        <TextField label={`Nombre de ${who}`} value={name} onChange={setName} uppercase required error={form.errors.name} onClearError={() => form.clear("name")} />
+        <TextField label={`Nombre de ${who}`} value={name} onChange={setName} uppercase required={!contact.hasAccount} error={form.errors.name} onClearError={() => form.clear("name")} />
       </div>
       <div style={{ flex: "1 1 120px", minWidth: 0 }}>
         <TextField

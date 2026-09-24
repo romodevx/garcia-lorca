@@ -107,18 +107,29 @@ func (r *Repository) UpdateContact(ctx context.Context, l domain.GuardianLink) e
 	})
 }
 
-// RemoveContact deletes a contact by id. A row the bound tenant cannot see is
-// KindNotFound.
+// RemoveContact deletes a contact that has no account. A row the bound tenant
+// cannot see is KindNotFound.
+//
+// `guardian_user_id IS NULL` rides in the WHERE for the same reason as in
+// AttachAccount: the service checked "no account" in an earlier transaction,
+// and access granted since then must not disappear with the phone number.
 func (r *Repository) RemoveContact(ctx context.Context, id string) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		res := tx.Where("id = ?", id).Delete(&guardianStudentModel{})
+		res := tx.Where("id = ? AND guardian_user_id IS NULL", id).Delete(&guardianStudentModel{})
 		if res.Error != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "removing contact", res.Error)
 		}
-		if res.RowsAffected == 0 {
+		if res.RowsAffected == 1 {
+			return nil
+		}
+		var exists int64
+		if err := tx.Model(&guardianStudentModel{}).Where("id = ?", id).Count(&exists).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "reading contact", err)
+		}
+		if exists == 0 {
 			return glerrors.ErrNotFound
 		}
-		return nil
+		return glerrors.New(glerrors.KindConflict, "this contact can open the app: revoke its access first")
 	})
 }
 

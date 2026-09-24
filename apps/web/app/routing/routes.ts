@@ -91,9 +91,19 @@ export function pathToView(pathname: string): View {
   }
 
   const edit = STUDENT_EDIT.exec(clean);
-  if (edit?.[1] !== undefined) {
-    return { screen: "studentEdit", studentId: decodeURIComponent(edit[1]) };
+  const studentId = edit?.[1] === undefined ? undefined : safeDecode(edit[1]);
+  if (studentId !== undefined) {
+    return { screen: "studentEdit", studentId };
   }
 
   return { screen: "dashboard" };
+}
+
+/** A malformed escape (`%E0%A4%A`) is not an id: undefined, never a thrown URIError. */
+function safeDecode(segment: string): string | undefined {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return undefined;
+  }
 }

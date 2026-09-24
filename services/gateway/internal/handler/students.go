@@ -41,16 +41,17 @@ type createStudentRequest struct {
 }
 
 type studentResponse struct {
-	ID              string                `json:"id"`
-	CURP            string                `json:"curp"`
-	FirstName       string                `json:"firstName"`
-	LastName        string                `json:"lastName"`
-	Level           string                `json:"level"`   // the school's name for the level
-	LevelID         string                `json:"levelId"` // the config level id
-	GradeGroup      string                `json:"gradeGroup"`
-	GuardianName    string                `json:"guardianName"`
-	AdmissionStatus string                `json:"admissionStatus"`
-	Profile         client.StudentProfile `json:"profile"`
+	ID              string `json:"id"`
+	CURP            string `json:"curp"`
+	FirstName       string `json:"firstName"`
+	LastName        string `json:"lastName"`
+	Level           string `json:"level"`   // the school's name for the level
+	LevelID         string `json:"levelId"` // the config level id
+	GradeGroup      string `json:"gradeGroup"`
+	GuardianName    string `json:"guardianName"`
+	AdmissionStatus string `json:"admissionStatus"`
+	// Nil in lists: a picker needs names, not every pupil's address and phones.
+	Profile *client.StudentProfile `json:"profile,omitempty"`
 }
 
 func toStudentResponse(s client.StudentResult) studentResponse {
@@ -64,8 +65,15 @@ func toStudentResponse(s client.StudentResult) studentResponse {
 		GradeGroup:      s.GradeGroup,
 		GuardianName:    s.GuardianName,
 		AdmissionStatus: s.AdmissionStatus,
-		Profile:         s.Profile,
+		Profile:         &s.Profile,
 	}
+}
+
+// toStudentSummary is a pupil as a list shows it: without the profile.
+func toStudentSummary(s client.StudentResult) studentResponse {
+	out := toStudentResponse(s)
+	out.Profile = nil
+	return out
 }
 
 type updateStudentRequest struct {
@@ -127,7 +135,7 @@ func (h *StudentsHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]studentResponse, 0, len(res))
 	for _, s := range res {
-		out = append(out, toStudentResponse(s))
+		out = append(out, toStudentSummary(s))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"students": out})
 }

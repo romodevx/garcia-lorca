@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 
 	"cloud.google.com/go/storage"
 
@@ -65,6 +66,9 @@ func (s *Store) Put(ctx context.Context, key, contentType string, data []byte) e
 	w.ContentType = contentType
 	// Private and never cached by an intermediary: this is a child's photo.
 	w.CacheControl = "private, no-store"
+	// One request for the whole photo (at most 2 MB). The default chunk size
+	// would allocate a 16 MiB buffer per upload.
+	w.ChunkSize = 0
 	if _, err := w.Write(data); err != nil {
 		_ = w.Close() // the write already failed; its error is the one that matters
 		return glerrors.Wrap(glerrors.KindInternal, "writing the photo", err)
@@ -93,10 +97,14 @@ func (s *Store) Get(ctx context.Context, key string) ([]byte, error) {
 	return data, nil
 }
 
-// Delete removes the object at key. A missing object is not an error.
+// Delete removes the object at key. A missing object is not an error. A failed
+// delete is logged with its key (tenant and pupil ids, no personal data):
+// callers may treat it as best-effort, and an unreferenced object is only
+// found again by that line.
 func (s *Store) Delete(ctx context.Context, key string) error {
 	err := s.bucket.Object(key).Delete(ctx)
 	if err != nil && !errors.Is(err, storage.ErrObjectNotExist) {
+		slog.WarnContext(ctx, "photo object not deleted", "bucket", s.name, "key", key, "error", err)
 		return glerrors.Wrap(glerrors.KindInternal, "deleting the photo", err)
 	}
 	return nil

@@ -550,3 +550,19 @@ func TestAPhotoForAnUnknownPupilOrNotAnImageIsRefused(t *testing.T) {
 		t.Errorf("not an image: want KindInvalid, got %v", err)
 	}
 }
+
+// A deployment without a bucket has no photos: that is "there is none" (404),
+// not a server failure (500) on every edit-page load.
+func TestWithoutABucketThereIsNoPhoto(t *testing.T) {
+	svc, _, _ := newService(t)
+	created, _ := svc.CreateApplicant(context.Background(), validInput())
+	if _, err := svc.Photo(context.Background(), created.ID()); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("Photo: want KindNotFound, got %v", err)
+	}
+	if _, err := svc.UploadPhoto(context.Background(), created.ID(), jpegBytes); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("UploadPhoto: want KindNotFound, got %v", err)
+	}
+	if err := svc.DeletePhoto(context.Background(), created.ID()); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("DeletePhoto: want KindNotFound, got %v", err)
+	}
+}

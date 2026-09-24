@@ -188,6 +188,14 @@ describe("StudentEditScreen", () => {
       expect(api.getMedical).not.toHaveBeenCalled();
     });
 
+    // Typed into before it arrived, the record would overwrite what was typed.
+    it("offers no field until the record has arrived", async () => {
+      api.getMedical.mockReturnValue(new Promise(() => undefined));
+      renderScreen(["students:read", "students:update", "medical:read", "medical:write"]);
+      expect(await screen.findByText("Cargando datos médicos…")).toBeInTheDocument();
+      expect(screen.queryByLabelText("Alergias")).not.toBeInTheDocument();
+    });
+
     it("is read-only with medical:read alone", async () => {
       renderScreen(["students:read", "students:update", "medical:read"]);
       expect(await screen.findByLabelText("Alergias")).toHaveValue("nuez");

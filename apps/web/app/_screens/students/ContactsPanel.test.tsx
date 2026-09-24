@@ -304,4 +304,21 @@ describe("ContactsPanel · editing (T5)", () => {
     expect(screen.queryByRole("button", { name: "Quitar a Ana Cruz" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Editar a Ana Cruz" })).toBeInTheDocument();
   });
+
+  // LinkGuardian creates contacts that carry only an account; the server lets
+  // them go without a name. Editing one must not demand a name first.
+  it("edits a linked account that has no name", async () => {
+    const user = userEvent.setup();
+    const linked = { id: "gl-7", studentId: "st-1", guardianUserId: "usr-7", relationship: "father" as const, fullName: "", phone: "", email: "", hasAccount: true };
+    students.listContacts.mockResolvedValue([linked]);
+    students.updateContact.mockResolvedValue({ ...linked, isEmergency: true });
+    render(<ContactsPanel studentId="st-1" />);
+
+    await user.click(await screen.findByRole("button", { name: "Editar a Cuenta vinculada" }));
+    await user.click(screen.getByLabelText("Contacto de emergencia de Cuenta vinculada"));
+    await user.click(screen.getByRole("button", { name: "Guardar contacto" }));
+
+    await waitFor(() => expect(students.updateContact).toHaveBeenCalled());
+    expect(students.updateContact.mock.calls[0]?.[3]).toMatchObject({ fullName: "", isEmergency: true });
+  });
 });

@@ -35,6 +35,10 @@ describe("el mapa de rutas", () => {
     expect(pathToView("/alumnos/a/b/editar")).toEqual({ screen: "dashboard" });
   });
 
+  it("un id con un escape roto no tumba la app", () => {
+    expect(pathToView("/alumnos/%E0%A4%A/editar")).toEqual({ screen: "dashboard" });
+  });
+
   it("tolera la diagonal final", () => {
     expect(pathToView("/finanzas/")).toEqual({ screen: "finance" });
   });

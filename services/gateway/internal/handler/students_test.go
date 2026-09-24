@@ -146,6 +146,22 @@ func TestListStudentsForwardsStatusAndWrapsList(t *testing.T) {
 	}
 }
 
+// The list backs pickers that only need names: it never carries a pupil's
+// address, phones, email or birth date. Those come with GET /students/{id}.
+func TestListStudentsLeavesTheProfileOut(t *testing.T) {
+	svc := &fakeCreator{list: []client.StudentResult{{
+		ID: "stu-1", FirstName: "Ana",
+		Profile: client.StudentProfile{Email: "ana@correo.mx", Address: client.StudentAddress{Street: "Juárez"}},
+	}}}
+	h := handler.NewStudentsHandler(svc)
+	rec := httptest.NewRecorder()
+	h.List(rec, httptest.NewRequest(http.MethodGet, "/api/v1/students", nil))
+
+	if body := rec.Body.String(); strings.Contains(body, "profile") || strings.Contains(body, "ana@correo.mx") || strings.Contains(body, "Juárez") {
+		t.Errorf("list carries the profile: %s", body)
+	}
+}
+
 func TestListStudentsNoStatusForwardsEmpty(t *testing.T) {
 	svc := &fakeCreator{}
 	h := handler.NewStudentsHandler(svc)

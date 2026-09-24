@@ -601,6 +601,7 @@ paths:
                     nobody can use.
                 phone: { type: string }
                 email: { type: string }
+                isEmergency: { type: boolean }
       responses:
         '201':
           description: The stored contact. hasAccount is false unless they can open the family app.
@@ -691,6 +692,235 @@ paths:
         '404':
           description: >
             No such contact for that pupil — or the students module is disabled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/students/{id}:
+    put:
+      tags: [students]
+      summary: Correct a pupil's file
+      description: >
+        Names, CURP and the profile (birth date, sex, the pupil's own email and
+        phones, address). Every profile field is optional, but what is sent must
+        be well formed. Level and group are NOT editable here: a group changes by
+        transfer. The response carries the profile; GET /api/v1/students (the
+        list) never does.
+      operationId: updateStudent
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/StudentIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [firstName, lastName, curp, profile]
+              properties:
+                firstName: { type: string, minLength: 1, example: "ADA" }
+                lastName: { type: string, minLength: 1, example: "LOVELACE BYRON" }
+                curp: { type: string, minLength: 18, maxLength: 18, example: "LOAA190312MDFVDA01" }
+                profile: { $ref: '#/components/schemas/StudentProfile' }
+      responses:
+        '200':
+          description: The corrected pupil, profile included.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StudentWithProfile' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Another pupil already has that CURP.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/students/{id}/medical:
+    get:
+      tags: [students]
+      summary: A pupil's medical record
+      description: >
+        Under its own permission (medical:read), which only the owner holds:
+        reading the class list does not entitle anybody to its allergies. Served
+        with Cache-Control no-store.
+      operationId: getStudentMedical
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/StudentIdPath' }]
+      responses:
+        '200':
+          description: The record; empty fields when nothing was captured.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MedicalRecord' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [students]
+      summary: Write a pupil's medical record
+      operationId: updateStudentMedical
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/StudentIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MedicalRecord' }
+      responses:
+        '200':
+          description: The stored record.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MedicalRecord' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/students/{id}/photo:
+    get:
+      tags: [students]
+      summary: A pupil's photo
+      description: >
+        The image bytes, read from a private bucket and served only after the
+        permission check. No public or signed URL exists. Cache-Control
+        "private, no-store" and X-Content-Type-Options nosniff.
+      operationId: getStudentPhoto
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/StudentIdPath' }]
+      responses:
+        '200':
+          description: The photo.
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+            image/png:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: The pupil has no photo, or photos are not enabled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    put:
+      tags: [students]
+      summary: Upload or replace a pupil's photo
+      description: >
+        The raw image as the body. What it IS is decided from its bytes (JPEG or
+        PNG magic numbers), never from the Content-Type or a file name. At most
+        2 MB; the web shrinks it to 800 px before sending.
+      operationId: uploadStudentPhoto
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/StudentIdPath'
+      requestBody:
+        required: true
+        content:
+          image/jpeg:
+            schema: { type: string, format: binary }
+          image/png:
+            schema: { type: string, format: binary }
+      responses:
+        '200':
+          description: Stored.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [contentType, sizeBytes]
+                properties:
+                  contentType: { type: string, enum: [image/jpeg, image/png] }
+                  sizeBytes: { type: integer, example: 48213 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413':
+          description: Larger than 2 MB.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      tags: [students]
+      summary: Remove a pupil's photo
+      operationId: deleteStudentPhoto
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/StudentIdPath'
+      responses:
+        '204': { description: Removed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/students/{studentId}/contacts/{contactId}:
+    put:
+      tags: [students]
+      summary: Edit a contact
+      description: >
+        Relationship, name, phone (ten digits), email and the emergency mark.
+        The account column is never written here. A contact of another pupil is
+        404, which never confirms it exists. A contact with an account may go
+        without a name.
+      operationId: updateContact
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - { name: studentId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: contactId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [relationship, fullName]
+              properties:
+                relationship: { type: string, enum: [mother, father, guardian, other] }
+                fullName: { type: string, example: "ROSA MÉNDEZ" }
+                phone: { type: string, pattern: '^$|^[0-9]{10}$', example: "5512345678" }
+                email: { type: string, example: "rosa@correo.mx" }
+                isEmergency: { type: boolean, example: true }
+      responses:
+        '200':
+          description: The stored contact.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Contact' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [students]
+      summary: Remove a contact
+      description: >
+        Refused (409) while the contact can open the family app: its access is
+        revoked first, rather than disappearing with a phone number. The check
+        rides in the DELETE itself, so access granted a moment earlier is not
+        removed by a stale page.
+      operationId: removeContact
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - { name: studentId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: contactId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Removed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The contact can open the family app.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -1375,6 +1605,11 @@ components:
         The web panel's session. Secure, HttpOnly, SameSite=Strict. Because it is
         a cookie, every state-changing call also requires the CSRF header.
   parameters:
+    StudentIdPath:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     CsrfToken:
       name: X-CSRF-Token
       in: header
@@ -1514,6 +1749,63 @@ components:
         hasAccount:
           type: boolean
           description: Whether this contact can open the family app.
+        isEmergency:
+          type: boolean
+          description: Whom the school calls first when something happens.
+
+    StudentProfile:
+      type: object
+      description: >
+        The part of a pupil's file the office keeps by hand. Every field is
+        optional; what is filled must be well formed.
+      required: [birthDate, sex, email, phones, address]
+      properties:
+        birthDate: { type: string, pattern: '^$|^\d{4}-\d{2}-\d{2}$', example: "2019-03-12", description: Not in the future. Empty when not captured. }
+        sex: { type: string, enum: ['', F, M, X], example: F }
+        email: { type: string, example: "ada@correo.mx", description: Stored trimmed and lowercase. }
+        phones:
+          type: array
+          maxItems: 3
+          items:
+            type: object
+            required: [kind, number]
+            properties:
+              kind: { type: string, enum: [celular, casa, trabajo, otro] }
+              number: { type: string, pattern: '^[0-9]{10}$', example: "5512345678" }
+        address:
+          type: object
+          required: [street, extNumber, intNumber, neighborhood, postalCode, municipality, state]
+          properties:
+            street: { type: string, maxLength: 120, example: "Av. Juárez" }
+            extNumber: { type: string, maxLength: 120, example: "123" }
+            intNumber: { type: string, maxLength: 120, example: "4B" }
+            neighborhood: { type: string, maxLength: 120, example: "Centro" }
+            postalCode: { type: string, pattern: '^$|^[0-9]{5}$', example: "44100" }
+            municipality: { type: string, maxLength: 120, example: "Guadalajara" }
+            state: { type: string, example: "Jalisco", description: "One of the 32 federal entities, or empty." }
+
+    StudentWithProfile:
+      type: object
+      required: [id, curp, firstName, lastName, level, levelId, gradeGroup, guardianName, admissionStatus, profile]
+      properties:
+        id: { type: string, format: uuid }
+        curp: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        level: { type: string, example: "Primaria" }
+        levelId: { $ref: '#/components/schemas/LevelId' }
+        gradeGroup: { type: string, example: "4° A" }
+        guardianName: { type: string }
+        admissionStatus: { type: string, enum: [pending, accepted, enrolled, rejected, withdrawn] }
+        profile: { $ref: '#/components/schemas/StudentProfile' }
+
+    MedicalRecord:
+      type: object
+      required: [bloodType, allergies, conditions]
+      properties:
+        bloodType: { type: string, enum: ['', A+, A-, B+, B-, AB+, AB-, O+, O-], example: "O+" }
+        allergies: { type: string, maxLength: 2000, example: "Penicilina" }
+        conditions: { type: string, maxLength: 2000, example: "Asma leve" }
 
     Invitation:
       type: object

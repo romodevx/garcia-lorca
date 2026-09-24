@@ -3,6 +3,7 @@ package domain
 import (
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/garcia-lorca/pkg/email"
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -167,7 +168,7 @@ func normalizeAddress(a Address) (Address, error) {
 		State:        strings.TrimSpace(a.State),
 	}
 	for _, field := range []string{out.Street, out.ExtNumber, out.IntNumber, out.Neighborhood, out.Municipality} {
-		if len(field) > maxAddressField {
+		if utf8.RuneCountInString(field) > maxAddressField {
 			return Address{}, glerrors.New(glerrors.KindInvalid, "an address field is too long")
 		}
 	}

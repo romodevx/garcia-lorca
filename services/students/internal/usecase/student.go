@@ -71,15 +71,15 @@ func (s *StudentService) UpdateMedical(ctx context.Context, studentID, bloodType
 }
 
 // WithPhotos returns the service keeping photos in `store`. Without it, photo
-// calls answer KindUnavailable: a deployment with no bucket still serves the
-// rest of the file.
+// calls answer KindNotFound: a deployment with no bucket has no photos, and
+// still serves the rest of the file.
 func (s *StudentService) WithPhotos(store ports.PhotoStore) *StudentService {
 	cp := *s
 	cp.photos = store
 	return &cp
 }
 
-var errPhotosUnavailable = glerrors.New(glerrors.KindInternal, "photos are not configured")
+var errPhotosUnavailable = glerrors.New(glerrors.KindNotFound, "photos are not enabled")
 
 // UploadPhoto stores a pupil's photo (JPEG/PNG by its bytes, at most 2 MB) and
 // replaces any previous one, deleting its object. The object key names the
@@ -114,10 +114,10 @@ func (s *StudentService) UploadPhoto(ctx context.Context, studentID string, data
 	}
 	if previous.Key != "" && previous.Key != ref.Key {
 		// Best-effort cleanup, deliberately not an error: the new photo is
-		// already stored and referenced, so the upload HAS succeeded. A failed
-		// delete leaves only an unreachable object behind (the bucket's
-		// lifecycle rule can sweep it); reporting it as a failure would tell the
-		// office the photo was not saved when it was.
+		// already stored and referenced, so the upload HAS succeeded, and
+		// reporting a failure would tell the office it was not saved. A failed
+		// delete leaves an unreferenced object that nothing sweeps by itself;
+		// the store logs its key (no personal data) so it can be removed.
 		_ = s.photos.Delete(ctx, previous.Key)
 	}
 	return ref, nil

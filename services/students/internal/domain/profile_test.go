@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -59,6 +60,7 @@ func TestNewProfileRejectsMalformedFields(t *testing.T) {
 		},
 		"postal code shape": func(p *domain.ProfileInput) { p.Address.PostalCode = "4410" },
 		"unknown state":     func(p *domain.ProfileInput) { p.Address.State = "Texas" },
+		"street too long":   func(p *domain.ProfileInput) { p.Address.Street = strings.Repeat("a", 121) },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -86,5 +88,15 @@ func TestUpdateDetailsCorrectsNamesCURPAndProfile(t *testing.T) {
 	}
 	if err := s.UpdateDetails(" ", "X", curp, profile); glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("a blank first name must be refused, got %v", err)
+	}
+}
+
+// The limit counts letters, not bytes: an accented colonia is two bytes per
+// accent and must not be refused under 120 letters.
+func TestAddressLimitCountsCharacters(t *testing.T) {
+	in := validProfile()
+	in.Address.Neighborhood = strings.Repeat("ñ", 120)
+	if _, err := domain.NewProfile(in, today); err != nil {
+		t.Errorf("120 accented letters refused: %v", err)
 	}
 }

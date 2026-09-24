@@ -142,7 +142,9 @@ export function StudentEditScreen({ studentId, permissions, onBack, today }: Stu
 
   const [medical, setMedical] = useState<MedicalRecord>(EMPTY_MEDICAL);
   const [savedMedical, setSavedMedical] = useState<MedicalRecord>(EMPTY_MEDICAL);
-  const [medicalFailed, setMedicalFailed] = useState(false);
+  // No field is offered until the record arrives: typed into earlier, it would
+  // be overwritten by the response.
+  const [medicalState, setMedicalState] = useState<"loading" | "ready" | "failed">("loading");
 
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -189,8 +191,9 @@ export function StudentEditScreen({ studentId, permissions, onBack, today }: Stu
           if (!live) return;
           setMedical(record);
           setSavedMedical(record);
+          setMedicalState("ready");
         })
-        .catch(() => live && setMedicalFailed(true));
+        .catch(() => live && setMedicalState("failed"));
     }
     return () => {
       live = false;
@@ -380,11 +383,11 @@ export function StudentEditScreen({ studentId, permissions, onBack, today }: Stu
 
         {canReadMedical && (
           <Section id="ficha-medicos" title="Datos médicos">
-            {medicalFailed ? (
+            {medicalState === "failed" && (
               <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14 }}>No pudimos leer los datos médicos.</p>
-            ) : (
-              <MedicalFields record={medical} disabled={!canWriteMedical} onChange={setMedical} />
             )}
+            {medicalState === "loading" && <p style={{ fontSize: 14, color: "var(--text-muted)" }}>Cargando datos médicos…</p>}
+            {medicalState === "ready" && <MedicalFields record={medical} disabled={!canWriteMedical} onChange={setMedical} />}
           </Section>
         )}
       </form>
