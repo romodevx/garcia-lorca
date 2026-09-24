@@ -125,18 +125,18 @@ export async function anyLevelId(request: APIRequestContext): Promise<string> {
 /** Creates a garment with a size run and stock, straight through the API. */
 export async function seedGarment(
   request: APIRequestContext,
-  opts: { code: string; name: string; priceCents: number; sizes: string[]; onHand: number; levelId?: string },
+  opts: { name: string; priceCents: number; sizes: string[]; onHand: number; levelId?: string },
 ): Promise<{ itemId: string; stockIds: Record<string, string> }> {
   const created = await request.post(`${API_URL}/api/v1/uniforms/items`, {
-    data: { code: opts.code, name: opts.name, priceCents: opts.priceCents, levelId: opts.levelId ?? "" },
+    data: { name: opts.name, priceCents: opts.priceCents, levelId: opts.levelId ?? "" },
   });
-  expect(created.ok(), `seed garment ${opts.code}: ${created.status()}`).toBeTruthy();
+  expect(created.ok(), `seed garment ${opts.name}: ${created.status()}`).toBeTruthy();
   const item = (await created.json()) as { id: string };
 
   const sized = await request.post(`${API_URL}/api/v1/uniforms/items/${item.id}/sizes`, {
     data: { sizes: opts.sizes.map((sizeLabel, i) => ({ sizeLabel, sizeOrder: i + 1, minStock: 2 })) },
   });
-  expect(sized.ok(), `seed sizes for ${opts.code}: ${sized.status()}`).toBeTruthy();
+  expect(sized.ok(), `seed sizes for ${opts.name}: ${sized.status()}`).toBeTruthy();
   const sizes = (await sized.json()) as { sizes: { id: string; sizeLabel: string }[] };
 
   const stockIds: Record<string, string> = {};
@@ -149,7 +149,7 @@ export async function seedGarment(
         note: "seed e2e",
       },
     });
-    expect(received.ok(), `seed stock for ${opts.code}: ${received.status()}`).toBeTruthy();
+    expect(received.ok(), `seed stock for ${opts.name}: ${received.status()}`).toBeTruthy();
   }
   return { itemId: item.id, stockIds };
 }

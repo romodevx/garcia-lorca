@@ -43,7 +43,7 @@ func (f *fakeUniforms) CreateItem(context.Context, client.CreateItemInput) (clie
 	if f.err != nil {
 		return client.UniformItem{}, f.err
 	}
-	return client.UniformItem{ID: "it-1", Code: "PLA"}, nil
+	return client.UniformItem{ID: "it-1", Name: "Playera"}, nil
 }
 
 func (f *fakeUniforms) UpdateItem(context.Context, client.UpdateItemInput) (client.UniformItem, error) {
@@ -374,5 +374,27 @@ func TestUpsertSizesPassesTheWholeRun(t *testing.T) {
 	}
 	if len(fake.lastSizes) != 3 || fake.lastSizes[2].MinStock != 5 {
 		t.Errorf("sizes = %+v", fake.lastSizes)
+	}
+}
+
+// Task 3: an article has no clave. It is created without one, and neither the
+// created article nor the catalogue carries a "code".
+func TestCreateItemTakesNoCode(t *testing.T) {
+	f := &fakeUniforms{items: []client.UniformItem{{ID: "it-1", Name: "Playera"}}}
+	h := handler.NewUniformsHandler(f)
+
+	rec := httptest.NewRecorder()
+	h.CreateItem(rec, uniformsRequest(http.MethodPost, "/api/v1/uniforms/items", `{"name":"Playera","priceCents":32000}`, nil))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create without a code: status %d, body %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), `"code"`) {
+		t.Errorf("created article carries a code: %s", rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	h.ListItems(rec, uniformsRequest(http.MethodGet, "/api/v1/uniforms/items", "", nil))
+	if strings.Contains(rec.Body.String(), `"code"`) {
+		t.Errorf("catalogue carries a code: %s", rec.Body.String())
 	}
 }

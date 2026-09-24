@@ -69,14 +69,11 @@ func translateFindErr(err error) error {
 
 // --- catalogue ---------------------------------------------------------------
 
-// CreateItem stores a garment. A duplicate code within the school is a conflict.
+// CreateItem stores a garment.
 func (r *Repository) CreateItem(ctx context.Context, item domain.Item) (domain.Item, error) {
 	model := fromDomainItem(item)
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		if err := tx.Create(&model).Error; err != nil {
-			if isViolation(err, uniqueViolation) {
-				return glerrors.Wrap(glerrors.KindConflict, "a garment with that code already exists", err)
-			}
 			return glerrors.Wrap(glerrors.KindInternal, "creating garment", err)
 		}
 		return nil
@@ -87,8 +84,7 @@ func (r *Repository) CreateItem(ctx context.Context, item domain.Item) (domain.I
 	return toDomainItem(model)
 }
 
-// UpdateItem persists the editable half of a garment. The code is not among
-// them: it is how issued orders and any external stock list refer to it.
+// UpdateItem persists the editable fields of a garment.
 func (r *Repository) UpdateItem(ctx context.Context, item domain.Item) (domain.Item, error) {
 	model := fromDomainItem(item)
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
@@ -575,7 +571,7 @@ func (r *Repository) sellFromShelf(tx *gorm.DB, line domain.OrderLine, note, act
 	}
 	if res.RowsAffected == 0 {
 		// Carries the sentinel so the edge can say "that size just ran out"
-		// rather than the sentence it shows for a duplicate garment code.
+		// rather than the sentence it shows for any other conflict.
 		return glerrors.Wrap(glerrors.KindConflict,
 			"no quedan suficientes "+line.ItemName()+" en talla "+line.SizeLabel(),
 			domain.ErrInsufficientStock)

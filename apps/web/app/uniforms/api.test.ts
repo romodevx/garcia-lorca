@@ -74,7 +74,7 @@ describe("the catalogue", () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ id: "it-1" }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await createItem(BASE, { code: "SUE", name: "Suéter", priceCents: 65000 });
+    await createItem(BASE, { name: "Suéter", priceCents: 65000 });
 
     const [urlUsed, init] = lastCall(fetchMock);
     expect(urlUsed).toBe("http://gw/api/v1/uniforms/items");

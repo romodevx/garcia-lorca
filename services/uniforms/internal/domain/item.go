@@ -67,7 +67,6 @@ func isUUID(s string) bool {
 type Item struct {
 	id          string
 	tenantID    string
-	code        string
 	name        string
 	description string
 	level       Level
@@ -76,12 +75,8 @@ type Item struct {
 	category    string
 }
 
-const (
-	maxCodeLen        = 40
-	maxDescriptionLen = 500
-)
+const maxDescriptionLen = 500
 
-// NewItem builds a validated garment, on sale.
 // What kind of thing this is. The module sells whatever the school sells: the
 // stock rules, the ledger and the counter sale were never about clothing, only
 // the vocabulary was.
@@ -118,16 +113,14 @@ func (i Item) WithCategory(category string) (Item, error) {
 // Category is what kind of thing this is: uniform, book, supply or other.
 func (i Item) Category() string { return i.category }
 
-func NewItem(id, tenantID, code, name, description string, level Level, priceCents int64) (Item, error) {
+// NewItem builds a validated garment, on sale. It has no clave (task 3): it is
+// told apart by its id, and the office finds it by name.
+func NewItem(id, tenantID, name, description string, level Level, priceCents int64) (Item, error) {
 	if strings.TrimSpace(id) == "" {
 		return Item{}, glerrors.New(glerrors.KindInvalid, "item id is required")
 	}
 	if strings.TrimSpace(tenantID) == "" {
 		return Item{}, glerrors.New(glerrors.KindInvalid, "tenant id is required")
-	}
-	trimmedCode := strings.TrimSpace(code)
-	if trimmedCode == "" || len(trimmedCode) > maxCodeLen {
-		return Item{}, glerrors.New(glerrors.KindInvalid, "item code must be 1 to 40 characters")
 	}
 	trimmedName := strings.TrimSpace(name)
 	if trimmedName == "" || len(trimmedName) > maxItemNameLen {
@@ -144,7 +137,7 @@ func NewItem(id, tenantID, code, name, description string, level Level, priceCen
 		return Item{}, glerrors.New(glerrors.KindInvalid, "price cannot be negative")
 	}
 	return Item{
-		id: id, tenantID: tenantID, code: trimmedCode, name: trimmedName,
+		id: id, tenantID: tenantID, name: trimmedName,
 		description: trimmedDesc, level: level, priceCents: priceCents, active: true,
 		category: CategoryUniform,
 	}, nil
@@ -191,7 +184,7 @@ func (i Item) WithDetails(name, description string, level Level, priceCents int6
 	if keepUnresolved {
 		level = LevelAny
 	}
-	updated, err := NewItem(i.id, i.tenantID, i.code, name, description, level, priceCents)
+	updated, err := NewItem(i.id, i.tenantID, name, description, level, priceCents)
 	if err != nil {
 		return Item{}, err
 	}
@@ -218,7 +211,6 @@ func (i Item) LineFor(lineID, orderID, sizeLabel string, qty int, status LineSta
 // Accessors.
 func (i Item) ID() string          { return i.id }
 func (i Item) TenantID() string    { return i.tenantID }
-func (i Item) Code() string        { return i.code }
 func (i Item) Name() string        { return i.name }
 func (i Item) Description() string { return i.description }
 func (i Item) Level() Level        { return i.level }

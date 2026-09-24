@@ -180,7 +180,7 @@ func TestOrderTotalIsSummedFromTheLines(t *testing.T) {
 // should ever see, and two clients deriving it separately is two chances to get
 // it wrong.
 func TestStockCarriesAvailableAndBelowMinimum(t *testing.T) {
-	item, err := domain.NewItem("it-1", tenant, "PLA", "Playera", "", domain.LevelAny, 32000)
+	item, err := domain.NewItem("it-1", tenant, "Playera", "", domain.LevelAny, 32000)
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
 	}

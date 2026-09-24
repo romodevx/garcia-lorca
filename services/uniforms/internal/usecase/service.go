@@ -43,7 +43,6 @@ func NewService(
 
 // CreateItemInput is a new garment.
 type CreateItemInput struct {
-	Code        string
 	Name        string
 	Description string
 	Level       domain.Level
@@ -55,7 +54,7 @@ type CreateItemInput struct {
 
 // CreateItem puts a garment on sale.
 func (s *Service) CreateItem(ctx context.Context, in CreateItemInput) (domain.Item, error) {
-	item, err := domain.NewItem(s.newID(), s.tenantID, in.Code, in.Name, in.Description, in.Level, in.PriceCents)
+	item, err := domain.NewItem(s.newID(), s.tenantID, in.Name, in.Description, in.Level, in.PriceCents)
 	if err != nil {
 		return domain.Item{}, err
 	}
@@ -68,8 +67,7 @@ func (s *Service) CreateItem(ctx context.Context, in CreateItemInput) (domain.It
 	return s.repo.CreateItem(ctx, item)
 }
 
-// UpdateItemInput edits a garment. Code is not editable: it is how issued orders
-// and any external stock list refer to the garment.
+// UpdateItemInput edits a garment.
 type UpdateItemInput struct {
 	ID          string
 	Name        string

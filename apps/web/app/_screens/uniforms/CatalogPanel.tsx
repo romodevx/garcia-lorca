@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useState, type ReactElement } from "react";
+import { useCallback, useRef, useState, type ReactElement } from "react";
 import { pesosToCents } from "../../_lib/money";
 import { Btn } from "../../_design/Controls";
-import { MoneyField, TextField } from "../../_design/form";
+import { MoneyField, TextField, useFocusFirstInvalid, useRequired } from "../../_design/form";
 import { createItem, updateItem, UniformsError, upsertSizes, type ItemCategory, type Level, type SizeSpec, type UniformItem } from "../../uniforms/api";
 import { Drawer } from "./InventoryPanel";
 import { EmptyState, ErrorNote, field, FieldLabel, label, LevelChips, money, type SchoolLevel } from "./parts";
@@ -118,7 +118,7 @@ export function CatalogPanel({
                   {!item.active && <span style={{ fontSize: 12.5, color: "var(--text-faint)" }}> · retirada</span>}
                 </p>
                 <p style={{ fontSize: 13.5, color: "var(--text-muted)" }}>
-                  {CATEGORY_LABEL[item.category] ?? "Uniforme"} · {item.code} · {money(item.priceCents)} ·{" "}
+                  {CATEGORY_LABEL[item.category] ?? "Uniforme"} · {money(item.priceCents)} ·{" "}
                   {item.levelId === "" ? "todos los niveles" : (levels.find((l) => l.id === item.levelId)?.name ?? "nivel sin nombre")}
                 </p>
               </div>
@@ -167,6 +167,9 @@ export function CatalogPanel({
   );
 }
 
+/** Fuera del componente: useRequired lo toma como dependencia. */
+const CREATE_REQUIRED = ["name", "price"] as const;
+
 function CreateDrawer({
   levels,
   onClose,
@@ -178,12 +181,17 @@ function CreateDrawer({
   onDone: (created: UniformItem) => void;
   onError: (err: UniformsError) => void;
 }): ReactElement {
-  const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [level, setLevel] = useState<Level>("");
   const [category, setCategory] = useState<ItemCategory>("uniform");
   const [pesos, setPesos] = useState("");
   const [pending, setPending] = useState(false);
+  // Un ref y no el estado: dos clics llegan antes de que `pending` repinte, y
+  // sin clave única nada en el servidor frena un segundo artículo igual.
+  const inFlight = useRef(false);
+  const form = useRequired(CREATE_REQUIRED);
+  const [priceError, setPriceError] = useState<string | undefined>(undefined);
+  const focusFirstInvalid = useFocusFirstInvalid();
 
   // El lector ESTRICTO de _lib/money. El que vivía aquí hacía
   // `Number(pesos.replace(/[^0-9.]/g, "")) * 100`, que borra toda coma incluida
@@ -191,20 +199,30 @@ function CreateDrawer({
   // MoneyField no salva de esto — cuando el texto no es un monto reconocible
   // deliberadamente no lo corrige, para que la persona lo vea y lo arregle.
   const priceCents = pesosToCents(pesos);
-  const valid = code.trim() !== "" && name.trim() !== "" && !Number.isNaN(priceCents);
 
   const save = useCallback(async (): Promise<void> => {
+    if (inFlight.current) return;
+    // Nunca se apaga el botón: al guardar se marca en el campo lo que falta.
+    const complete = form.check({ name, price: pesos });
+    const unreadable = pesos.trim() !== "" && Number.isNaN(priceCents);
+    setPriceError(unreadable ? "Escribe el precio en pesos, por ejemplo 450." : undefined);
+    if (!complete || unreadable) {
+      focusFirstInvalid();
+      return;
+    }
+    inFlight.current = true;
     setPending(true);
     try {
-      const created = await createItem(API_URL, { code: code.trim(), name: name.trim(), levelId: level, priceCents, category });
+      const created = await createItem(API_URL, { name: name.trim(), levelId: level, priceCents, category });
       onDone(created);
     } catch (err) {
       onError(err instanceof UniformsError ? err : new UniformsError("internal", "Algo salió mal"));
       onClose();
     } finally {
+      inFlight.current = false;
       setPending(false);
     }
-  }, [category, code, level, name, onClose, onDone, onError, priceCents]);
+  }, [category, focusFirstInvalid, form, level, name, onClose, onDone, onError, pesos, priceCents]);
 
   return (
     <Drawer title="Nuevo artículo" icon="plus" onClose={onClose}>
@@ -238,28 +256,34 @@ function CreateDrawer({
         onChange={setName}
         uppercase
         required
+        error={form.errors.name}
+        onClearError={() => form.clear("name")}
         help="Cómo se llama la prenda o el libro. Es lo que verá la familia."
       />
-
-      <div style={{ marginTop: 16 }}>
-        <TextField label="Clave" value={code} onChange={setCode} uppercase required help="Un código corto y único para encontrarla rápido en el mostrador." />
-      </div>
-      <p style={{ fontSize: 12.5, color: "var(--text-faint)", marginTop: 6 }}>
-        La clave no se puede cambiar después: es como se refieren al artículo los pedidos ya hechos.
-      </p>
 
       <p style={{ ...label, marginTop: 16 }}>Nivel</p>
       <LevelChips levels={levels} value={level} onChange={setLevel} allLabel="Todos los niveles" />
 
       <div style={{ marginTop: 16 }}>
-        <MoneyField label="Precio" value={pesos} onChange={setPesos} required help="Lo que cuesta una pieza." />
+        <MoneyField
+          label="Precio"
+          value={pesos}
+          onChange={setPesos}
+          required
+          error={form.errors.price ?? priceError}
+          onClearError={() => {
+            form.clear("price");
+            setPriceError(undefined);
+          }}
+          help="Lo que cuesta una pieza."
+        />
       </div>
 
       <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
         <Btn kind="ghost" onClick={onClose}>
           Cancelar
         </Btn>
-        <Btn icon="check" onClick={() => void save()} disabled={!valid || pending}>
+        <Btn icon="check" onClick={() => void save()} style={{ opacity: pending ? 0.6 : 1 }}>
           {pending ? "Guardando…" : "Crear y poner tallas"}
         </Btn>
       </div>

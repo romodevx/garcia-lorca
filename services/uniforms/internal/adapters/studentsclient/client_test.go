@@ -185,7 +185,7 @@ func TestUnknownLevelIsNotTreatedAsEveryLevel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ByID: %v", err)
 	}
-	kinderSmock, err := domain.NewItem("it-1", "t-1", "BAT", "Batita", "", domain.Level("c1000000-0000-0000-0000-000000000001"), 41000)
+	kinderSmock, err := domain.NewItem("it-1", "t-1", "Batita", "", domain.Level("c1000000-0000-0000-0000-000000000001"), 41000)
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
 	}

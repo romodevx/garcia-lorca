@@ -48,7 +48,6 @@ type UniformSize struct {
 // garment is scoped to, empty when it applies to every level (the common case).
 type UniformItem struct {
 	ID          string        `json:"id"`
-	Code        string        `json:"code"`
 	Name        string        `json:"name"`
 	Description string        `json:"description"`
 	LevelID     string        `json:"levelId,omitempty"`
@@ -169,7 +168,6 @@ func (c *UniformsClient) ListItems(ctx context.Context, f ListItemsFilter) ([]Un
 
 // CreateItemInput is a new garment.
 type CreateItemInput struct {
-	Code        string
 	Name        string
 	Description string
 	LevelID     string // a config level id; empty means every level
@@ -181,7 +179,7 @@ type CreateItemInput struct {
 // CreateItem puts a garment on sale.
 func (c *UniformsClient) CreateItem(ctx context.Context, in CreateItemInput) (UniformItem, error) {
 	res, err := c.rpc.CreateItem(ctx, connect.NewRequest(&uniformsv1.CreateItemRequest{
-		Code: in.Code, Name: in.Name, Description: in.Description,
+		Name: in.Name, Description: in.Description,
 		LevelId: in.LevelID, PriceCents: in.PriceCents, Category: in.Category,
 	}))
 	if err != nil {
@@ -458,7 +456,7 @@ func toUniformSizes(sizes []*uniformsv1.StockLevel) []UniformSize {
 
 func toUniformItem(i *uniformsv1.Item) UniformItem {
 	return UniformItem{
-		ID: i.GetId(), Code: i.GetCode(), Name: i.GetName(), Description: i.GetDescription(),
+		ID: i.GetId(), Name: i.GetName(), Description: i.GetDescription(),
 		LevelID: i.GetLevelId(), PriceCents: i.GetPriceCents(),
 		Active: i.GetActive(), Sizes: toUniformSizes(i.GetSizes()),
 		Category: i.GetCategory(),

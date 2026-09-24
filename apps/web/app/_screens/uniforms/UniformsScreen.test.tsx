@@ -23,7 +23,6 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 const jumper: UniformItem = {
   id: "it-1",
-  code: "SUE-VER",
   name: "Suéter verde",
   description: "",
   levelId: "",
@@ -428,7 +427,6 @@ describe("UniformsScreen — el inventario no es sólo ropa", () => {
     await user.click((await screen.findAllByRole("button", { name: /Nuevo artículo/ }))[0] as HTMLElement);
     await user.click(screen.getByLabelText("Libro"));
     await user.type(screen.getByLabelText(/Nombre/, CAMPO), "Libro de matemáticas 3°");
-    await user.type(screen.getByLabelText(/Clave/, CAMPO), "LIB-MAT-3");
     await user.type(screen.getByLabelText(/Precio/, CAMPO), "450");
     await user.click(screen.getByRole("button", { name: /Guardar|Crear/ }));
 
@@ -438,6 +436,92 @@ describe("UniformsScreen — el inventario no es sólo ropa", () => {
       const body = JSON.parse((posted?.[1] as RequestInit).body as string) as Record<string, unknown>;
       expect(body.category).toBe("book");
     });
+  });
+});
+
+describe("UniformsScreen — un artículo no tiene clave (tarea 3)", () => {
+  // Nothing used it: orders point at the article's id. The office no longer
+  // invents a code before it can sell something.
+  it("creates an article with no clave and never sends one", async () => {
+    const user = userEvent.setup();
+    const fetchMock = stubCatalogue([]);
+    render(<UniformsScreen onBack={() => {}} />);
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Catálogo" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Catálogo" }));
+
+    await user.click((await screen.findAllByRole("button", { name: /Nuevo artículo/ }))[0] as HTMLElement);
+    expect(screen.queryByLabelText(/Clave/)).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText(/Nombre/, CAMPO), "Playera polo");
+    await user.type(screen.getByLabelText(/Precio/, CAMPO), "320");
+    await user.click(screen.getByRole("button", { name: /Guardar|Crear/ }));
+
+    await waitFor(() => {
+      const posted = fetchMock.mock.calls.find(([, init]) => (init as RequestInit)?.method === "POST");
+      expect(posted).toBeDefined();
+      const body = JSON.parse((posted?.[1] as RequestInit).body as string) as Record<string, unknown>;
+      expect(body).not.toHaveProperty("code");
+      expect(body.name).toBe("PLAYERA POLO");
+    });
+  });
+});
+
+describe("UniformsScreen — Nuevo artículo al guardar", () => {
+  // The forms rule: the primary button is never disabled. Saving says what is
+  // missing, on the field, and posts nothing.
+  it("marks what is missing instead of greying out the button", async () => {
+    const user = userEvent.setup();
+    const fetchMock = stubCatalogue([]);
+    render(<UniformsScreen onBack={() => {}} />);
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Catálogo" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Catálogo" }));
+    await user.click((await screen.findAllByRole("button", { name: /Nuevo artículo/ }))[0] as HTMLElement);
+
+    const create = screen.getByRole("button", { name: /Crear y poner tallas/ });
+    expect(create).toBeEnabled();
+    await user.click(create);
+
+    expect(screen.getByLabelText(/Nombre/, CAMPO)).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText(/Precio/, CAMPO)).toHaveAttribute("aria-invalid", "true");
+    expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit)?.method === "POST")).toBe(false);
+  });
+
+  it("takes the focus to a price it cannot read", async () => {
+    const user = userEvent.setup();
+    stubCatalogue([]);
+    render(<UniformsScreen onBack={() => {}} />);
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Catálogo" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Catálogo" }));
+    await user.click((await screen.findAllByRole("button", { name: /Nuevo artículo/ }))[0] as HTMLElement);
+    await user.type(screen.getByLabelText(/Nombre/, CAMPO), "Playera polo");
+    await user.type(screen.getByLabelText(/Precio/, CAMPO), "abc");
+    await user.click(screen.getByRole("button", { name: /Crear y poner tallas/ }));
+
+    const price = screen.getByLabelText(/Precio/, CAMPO);
+    expect(price).toHaveAttribute("aria-invalid", "true");
+    await waitFor(() => expect(document.activeElement).toBe(price));
+  });
+
+  // With no clave there is no unique code to refuse a second insert: a double
+  // click must create one article, not two.
+  it("creates one article on a double click", async () => {
+    const user = userEvent.setup();
+    const fetchMock = stubCatalogue([]);
+    render(<UniformsScreen onBack={() => {}} />);
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Catálogo" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Catálogo" }));
+    await user.click((await screen.findAllByRole("button", { name: /Nuevo artículo/ }))[0] as HTMLElement);
+    await user.type(screen.getByLabelText(/Nombre/, CAMPO), "Playera polo");
+    await user.type(screen.getByLabelText(/Precio/, CAMPO), "320");
+
+    await user.dblClick(screen.getByRole("button", { name: /Crear y poner tallas/ }));
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit)?.method === "POST").length).toBeGreaterThan(0),
+    );
+    const itemPosts = fetchMock.mock.calls.filter(
+      ([url, init]) => (init as RequestInit)?.method === "POST" && String(url).endsWith("/uniforms/items"),
+    );
+    expect(itemPosts).toHaveLength(1);
   });
 });
 
@@ -453,7 +537,6 @@ describe("UniformsScreen — los niveles son los del colegio", () => {
 
     await user.click((await screen.findAllByRole("button", { name: /Nuevo artículo/ }))[0] as HTMLElement);
     await user.type(screen.getByLabelText(/Nombre/, CAMPO), "Batita");
-    await user.type(screen.getByLabelText(/Clave/, CAMPO), "BAT");
     await user.type(screen.getByLabelText(/Precio/, CAMPO), "410");
     await user.click(await screen.findByRole("button", { name: "Preescolar" }));
     expect(screen.queryByRole("button", { name: "Prepa" })).not.toBeInTheDocument();
