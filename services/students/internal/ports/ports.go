@@ -81,6 +81,10 @@ type CatalogValidator interface {
 	// The cycle is resolved by config, not passed in: a caller choosing the year
 	// a child joins is a caller who can put them in the wrong one.
 	GroupsOfGrade(ctx context.Context, gradeLevelID string) ([]GroupSeats, error)
+	// LevelOfGrade returns the config level a grade belongs to, so a pupil is
+	// never placed in another level's group. A missing grade is
+	// glerrors.ErrNotFound.
+	LevelOfGrade(ctx context.Context, gradeLevelID string) (string, error)
 }
 
 // GroupSeats is a group and how many pupils it may hold. Occupancy is NOT here:

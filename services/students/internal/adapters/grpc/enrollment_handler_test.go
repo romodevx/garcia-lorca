@@ -324,6 +324,11 @@ func (f *fakeEnrollmentRepo) CreateEnrollmentInFirstFreeGroup(
 	return groups[0], nil
 }
 
+// LevelOfGrade places every grade in the level the handler tests' pupils are in.
+func (f *fakeCatalogValidator) LevelOfGrade(_ context.Context, _ string) (string, error) {
+	return "e1000000-0000-0000-0000-000000000001", nil
+}
+
 func (f *fakeCatalogValidator) GroupsOfGrade(_ context.Context, _ string) ([]ports.GroupSeats, error) {
 	return f.gradeGroups, nil
 }

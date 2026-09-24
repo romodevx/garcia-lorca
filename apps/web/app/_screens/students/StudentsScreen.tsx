@@ -11,9 +11,12 @@ import type { ColorKey } from "../../_design/colors";
 import {
   createStudent,
   enroll,
+  listEnrollments,
   listStudents,
+  transfer,
   type AdmissionStatus,
   type CreateStudentInput,
+  type Enrollment,
   type Student,
 } from "../../students/api";
 import { listCycles, listGradeLevels, listGroups, listLevels, type Cycle, type GradeLevel, type Group, type Level } from "../../config/api";
@@ -353,14 +356,98 @@ function QuickAdd({
 }
 
 // ── detail sheet ──
-function StudentSheet({ st, groups, onClose, onEnroll }: { st: Student; groups: readonly Group[]; onClose: () => void; onEnroll: (groupId: string) => Promise<void> }): ReactElement {
+/**
+ * Why a placement did not go through, in words the office can act on.
+ *
+ * "No se pudo inscribir" alone sent people back to press the same button: the
+ * commonest cause was a pupil the quick-add had ALREADY placed (409), and the
+ * next was a group of another level, which the server explains itself.
+ */
+export function placementRefusal(err: unknown): string {
+  if (err instanceof StudentsError) {
+    if (err.status === 409) return "Ya está inscrito en un grupo este ciclo. Usa «Cambiar de grupo».";
+    if (err.detail === "already in that group") return "Ya está en ese grupo.";
+    if (err.status === 400 && err.detail !== "") return err.detail.charAt(0).toUpperCase() + err.detail.slice(1) + ".";
+  }
+  return "No se pudo guardar el cambio de grupo. Intenta de nuevo.";
+}
+
+/**
+ * The pupil's sheet.
+ *
+ * A pupil already placed this cycle (the quick-add places them) is shown the
+ * group they are in and offered a TRANSFER, with a reason, within their level —
+ * never a second enrolment, which the server refuses. A pupil with no group is
+ * offered an enrolment. Either way only groups of the pupil's own level appear:
+ * four groups can all be called "1° A", one per level.
+ */
+function StudentSheet({
+  st,
+  groups,
+  gradeLevels,
+  onClose,
+  onPlaced,
+}: {
+  st: Student;
+  groups: readonly Group[];
+  gradeLevels: readonly GradeLevel[];
+  onClose: () => void;
+  onPlaced: (message: string) => void;
+}): ReactElement {
   const rows: [string, string][] = [
     ["CURP", st.curp],
     ["Nivel", `${st.level} · ${st.gradeGroup}`],
     ["Tutor", st.guardianName],
     ["Admisión", statusOf(st.admissionStatus).label],
   ];
+  const [current, setCurrent] = useState<Enrollment | null | undefined>(undefined);
   const [gid, setGid] = useState("");
+  const [reason, setReason] = useState("");
+  const [reasonError, setReasonError] = useState<string | undefined>(undefined);
+  const [refusal, setRefusal] = useState<string | undefined>(undefined);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    listEnrollments(API_URL, { studentId: st.id })
+      .then((all) => { if (alive) setCurrent(all.find((e) => e.status === "active") ?? null); })
+      .catch(() => { if (alive) setCurrent(null); });
+    return () => { alive = false; };
+  }, [st.id]);
+
+  const levelOfGrade = useMemo(() => new Map(gradeLevels.map((g) => [g.id, g.levelId])), [gradeLevels]);
+  // A legacy pupil with no level id has nothing to filter by: every group shows.
+  const ownLevel = groups.filter((g) => st.levelId === "" || levelOfGrade.get(g.gradeLevelId) === st.levelId);
+  const currentGroup = current === null || current === undefined ? undefined : groups.find((g) => g.id === current.groupId);
+  const choices = current ? ownLevel.filter((g) => g.id !== current.groupId) : ownLevel;
+  const transferring = current !== null && current !== undefined;
+
+  const save = async (): Promise<void> => {
+    setRefusal(undefined);
+    if (gid === "") {
+      setRefusal("Elige un grupo.");
+      return;
+    }
+    if (transferring && reason.trim() === "") {
+      setReasonError("Escribe por qué cambia de grupo.");
+      return;
+    }
+    setSaving(true);
+    try {
+      if (transferring) {
+        await transfer(API_URL, { enrollmentId: current.id, toGroupId: gid, reason: reason.trim() });
+        onPlaced("Alumno cambiado de grupo");
+      } else {
+        await enroll(API_URL, { studentId: st.id, groupId: gid });
+        onPlaced("Alumno inscrito en el grupo");
+      }
+    } catch (err) {
+      setRefusal(placementRefusal(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <DrawerShell
       title="Ficha del alumno"
@@ -380,7 +467,11 @@ function StudentSheet({ st, groups, onClose, onEnroll }: { st: Student; groups: 
       footer={
         <>
           <Btn kind="ghost" icon="documents" style={{ flex: 1 }}>Documentos</Btn>
-          <Btn icon="check" onClick={() => gid !== "" && void onEnroll(gid)} style={{ flex: 1, opacity: gid === "" ? 0.5 : 1, pointerEvents: gid === "" ? "none" : "auto" }}>Inscribir</Btn>
+          {current !== undefined && (
+            <Btn icon="check" onClick={() => void save()} style={{ flex: 1, opacity: saving ? 0.6 : 1 }}>
+              {transferring ? "Cambiar de grupo" : "Inscribir"}
+            </Btn>
+          )}
         </>
       }
     >
@@ -392,15 +483,43 @@ function StudentSheet({ st, groups, onClose, onEnroll }: { st: Student; groups: 
             </div>
           ))}
           <ContactsPanel studentId={st.id} />
-          {groups.length > 0 && (
-            <div style={{ padding: "18px 0" }}>
-              <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Inscribir en grupo</span>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-                {groups.map((g) => {
-                  const on = gid === g.id;
-                  return <button key={g.id} onClick={() => setGid(g.id)} style={{ height: 40, padding: "0 15px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>{g.name}</button>;
-                })}
-              </div>
+          {current !== undefined && (
+            <div style={{ padding: "18px 0", display: "grid", gap: 10 }}>
+              {transferring && (
+                <p style={{ fontSize: 14, color: "var(--text)" }}>
+                  <span style={{ color: "var(--text-muted)" }}>Grupo actual: </span>
+                  <strong>{currentGroup?.name ?? st.gradeGroup}</strong>
+                </p>
+              )}
+              <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>
+                {transferring ? "Cambiar a" : "Inscribir en grupo"}
+              </span>
+              {choices.length === 0 ? (
+                <p style={{ fontSize: 13.5, color: "var(--text-faint)" }}>
+                  {transferring ? "No hay otro grupo de su nivel en este ciclo." : "No hay grupos de su nivel en este ciclo: créalos en Configuración."}
+                </p>
+              ) : (
+                <div role="group" aria-label={transferring ? "Cambiar a" : "Inscribir en"} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {choices.map((g) => {
+                    const on = gid === g.id;
+                    return <button key={g.id} type="button" aria-pressed={on} onClick={() => { setGid(g.id); setRefusal(undefined); }} style={{ height: 44, padding: "0 15px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>{g.name}</button>;
+                  })}
+                </div>
+              )}
+              {transferring && (
+                <TextField
+                  label="Motivo del cambio"
+                  value={reason}
+                  onChange={setReason}
+                  required
+                  help="Por qué cambia de grupo: queda en su historial."
+                  error={reasonError}
+                  onClearError={() => setReasonError(undefined)}
+                />
+              )}
+              {refusal !== undefined && (
+                <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 13.5, margin: 0 }}>{refusal}</p>
+              )}
             </div>
           )}
       </>
@@ -428,6 +547,8 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
+  // Every level's grades, so the sheet can tell which level a group belongs to.
+  const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [tab, setTab] = useState<"all" | "active" | "pending" | "inactive">("all");
@@ -462,6 +583,7 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
   useEffect(() => {
     reload();
     listLevels(API_URL).then(setLevels).catch(() => setLevels([]));
+    listGradeLevels(API_URL, "").then(setGradeLevels).catch(() => setGradeLevels([]));
     listCycles(API_URL).then((cs) => {
       setCycles(cs);
       const active = cs.find((c) => c.status === "active") ?? cs[0];
@@ -534,16 +656,10 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
     reload();
     say(`Alumno creado · ${input.firstName} quedó en ${placement.groupName}`);
   };
-  const onEnroll = async (groupId: string): Promise<void> => {
-    if (sheet === null) return;
-    try {
-      await enroll(API_URL, { studentId: sheet.id, groupId });
-      setSheet(null);
-      reload();
-      say("Alumno inscrito en el grupo");
-    } catch {
-      say("No se pudo inscribir");
-    }
+  const onPlaced = (message: string): void => {
+    setSheet(null);
+    reload();
+    say(message);
   };
 
   const tabs: [typeof tab, string][] = [["all", "Todos"], ["active", "Inscritos"], ["pending", "Trámite"], ["inactive", "Bajas"]];
@@ -682,7 +798,7 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
       <button onClick={() => setAdd(true)} title="Nuevo alumno" style={{ position: "fixed", right: 32, bottom: 32, zIndex: 50, height: 60, padding: "0 26px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 10, background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16.5, cursor: "pointer", boxShadow: "0 10px 30px color-mix(in oklab, var(--lime) 45%, transparent)" }}><Icon name="plus" size={22} stroke={2.6} />Nuevo alumno</button>
 
       {add && <QuickAdd onClose={() => setAdd(false)} onSave={onSave} levels={levels} />}
-      {sheet !== null && <StudentSheet st={sheet} groups={groups} onClose={() => setSheet(null)} onEnroll={onEnroll} />}
+      {sheet !== null && <StudentSheet st={sheet} groups={groups} gradeLevels={gradeLevels} onClose={() => setSheet(null)} onPlaced={onPlaced} />}
       {toast !== null && (
         <div style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>
           <Icon name="check" size={20} stroke={2.6} />{toast}

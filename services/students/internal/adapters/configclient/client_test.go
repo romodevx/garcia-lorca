@@ -23,7 +23,15 @@ type stubConfigService struct {
 	group    *configv1.Group
 	term     *configv1.Term
 	level    *configv1.Level
+	grade    *configv1.GradeLevel
 	notFound bool
+}
+
+func (s *stubConfigService) GetGradeLevel(_ context.Context, _ *connect.Request[configv1.GetGradeLevelRequest]) (*connect.Response[configv1.GetGradeLevelResponse], error) {
+	if s.notFound {
+		return nil, connect.NewError(connect.CodeNotFound, glerrors.New(glerrors.KindNotFound, "grade level not found"))
+	}
+	return connect.NewResponse(&configv1.GetGradeLevelResponse{GradeLevel: s.grade}), nil
 }
 
 func (s *stubConfigService) GetLevel(_ context.Context, _ *connect.Request[configv1.GetLevelRequest]) (*connect.Response[configv1.GetLevelResponse], error) {
@@ -131,6 +139,25 @@ func TestLevelByID_MapsFieldsAndNotFound(t *testing.T) {
 		_, err := c.LevelByID(context.Background(), levelID)
 		if glerrors.KindOf(err) != glerrors.KindNotFound {
 			t.Errorf("want KindNotFound, got %v (kind %v)", err, glerrors.KindOf(err))
+		}
+	})
+}
+
+func TestLevelOfGrade_MapsFieldsAndNotFound(t *testing.T) {
+	const gradeID, levelID = "90000000-0000-0000-0000-000000000001", "10000000-0000-0000-0000-000000000001"
+
+	t.Run("found returns the grade's level", func(t *testing.T) {
+		c := newClient(t, &stubConfigService{grade: &configv1.GradeLevel{Id: gradeID, LevelId: levelID}})
+		got, err := c.LevelOfGrade(context.Background(), gradeID)
+		if err != nil || got != levelID {
+			t.Fatalf("LevelOfGrade = (%q, %v)", got, err)
+		}
+	})
+
+	t.Run("config NotFound maps to ErrNotFound", func(t *testing.T) {
+		c := newClient(t, &stubConfigService{notFound: true})
+		if _, err := c.LevelOfGrade(context.Background(), gradeID); glerrors.KindOf(err) != glerrors.KindNotFound {
+			t.Errorf("want KindNotFound, got %v", err)
 		}
 	})
 }

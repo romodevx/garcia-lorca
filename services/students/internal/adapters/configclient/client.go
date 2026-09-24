@@ -58,6 +58,16 @@ func (c *Client) LevelByID(ctx context.Context, id string) (domain.Level, error)
 	return domain.NewLevel(l.GetId(), l.GetName())
 }
 
+// LevelOfGrade returns the config level a grade belongs to. A missing grade is
+// glerrors.ErrNotFound.
+func (c *Client) LevelOfGrade(ctx context.Context, gradeLevelID string) (string, error) {
+	res, err := c.rpc.GetGradeLevel(ctx, connect.NewRequest(&configv1.GetGradeLevelRequest{Id: gradeLevelID}))
+	if err != nil {
+		return "", mapCatalogErr(err, "grade level")
+	}
+	return res.Msg.GetGradeLevel().GetLevelId(), nil
+}
+
 // GroupByID fetches a group by id and projects it to the students-owned view
 // (its identity, the cycle it derives from, and its grade level). A missing
 // group is glerrors.ErrNotFound.
