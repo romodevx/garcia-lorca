@@ -118,6 +118,30 @@ describe("EmailField", () => {
     expect(onChange).toHaveBeenLastCalledWith("ana");
   });
 
+  it("al salir del campo avisa, en español, si el correo no tiene forma de correo", async () => {
+    function Controlado(): ReactElement {
+      const [v, setV] = useState("");
+      return <EmailField label="Correo" value={v} onChange={setV} />;
+    }
+    render(<Controlado />);
+    const input = screen.getByLabelText("Correo");
+    await userEvent.type(input, "ana@gmail");
+    await userEvent.tab();
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText(/nombre@dominio/)).toBeInTheDocument();
+
+    await userEvent.type(input, ".com");
+    expect(input).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("vacío no es un error de forma: si es obligatorio lo dice quien lo usa", async () => {
+    render(<EmailField label="Correo" value="" onChange={vi.fn()} />);
+    const input = screen.getByLabelText("Correo");
+    await userEvent.click(input);
+    await userEvent.tab();
+    expect(input).not.toHaveAttribute("aria-invalid");
+  });
+
   it("al terminar una composición también se limpia el error del campo", () => {
     const onClearError = vi.fn();
     render(<EmailField label="Correo" value="" onChange={vi.fn()} error="Falta el correo" onClearError={onClearError} />);

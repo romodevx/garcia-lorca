@@ -3,7 +3,9 @@
 import type { ChangeEvent, CompositionEvent, ReactElement } from "react";
 
 import { Field, inputStyle } from "./Field";
+import { emailShapeError } from "./emailShape";
 import { isComposing, lowercaseKeepingCaret } from "./lowercaseKeepingCaret";
+import { useFormatError } from "./useFormatError";
 
 /**
  * Los campos de captura del sistema. Todos comparten la misma envoltura
@@ -94,11 +96,20 @@ export function TextField(props: TextFieldProps): ReactElement {
  */
 export function EmailField(props: BaseFieldProps): ReactElement {
   const { label, value, onChange, error, onClearError, required, help } = props;
+  // La forma del correo se acusa al salir del campo y se perdona al teclear
+  // (useFormatError). El error de quien usa el campo manda sobre éste.
+  const shape = useFormatError(EMAIL_SHAPE);
+  const shown = error ?? shape.errors.email;
+  const change = (next: string): void => {
+    onChange(next);
+    shape.onChange("email", next, {});
+    onClearError?.();
+  };
   return (
-    <Field label={label} required={required} error={error} help={help}>
+    <Field label={label} required={required} error={shown} help={help}>
       {(id, describedBy) => (
         <input
-          {...common(id, describedBy, props)}
+          {...common(id, describedBy, { ...props, error: shown })}
           type="text"
           inputMode="email"
           autoComplete="off"
@@ -106,20 +117,18 @@ export function EmailField(props: BaseFieldProps): ReactElement {
           autoCorrect="off"
           spellCheck={false}
           value={value}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => {
-            onChange(lowercaseKeepingCaret(e.target, isComposing(e)));
-            onClearError?.();
-          }}
-          onCompositionEnd={(e: CompositionEvent<HTMLInputElement>) => {
-            onChange(lowercaseKeepingCaret(e.currentTarget, false));
-            onClearError?.();
-          }}
-          style={inputStyle(error !== undefined)}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => change(lowercaseKeepingCaret(e.target, isComposing(e)))}
+          onCompositionEnd={(e: CompositionEvent<HTMLInputElement>) => change(lowercaseKeepingCaret(e.currentTarget, false))}
+          onBlur={() => shape.onBlur("email", value, {})}
+          style={inputStyle(shown !== undefined)}
         />
       )}
     </Field>
   );
 }
+
+/** Fuera del componente: useFormatError lo toma como dependencia. */
+const EMAIL_SHAPE = { email: emailShapeError } as const;
 
 export interface NumberFieldProps extends BaseFieldProps {
   min?: number;
