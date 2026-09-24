@@ -157,6 +157,8 @@ export interface RegisterDepositInput {
   grantEarlyPayment?: boolean;
   /** debit or credit. Only meaningful when the method is card. */
   cardType?: CardType;
+  /** The charges the money may pay, chosen at the counter (task 8); absent means all. */
+  chargeIds?: string[];
 }
 
 /** What a family must hand over today to be current. */
@@ -166,12 +168,32 @@ export interface Expected {
   discountCents: number;
   /** The whole year still owed — not the same question as what is due today. */
   annualBalanceCents: number;
+  /** The debt concept by concept, oldest due date first (task 8). */
+  lines: ExpectedLine[];
+}
+
+/** One charge still owed, as of the day asked about. */
+export interface ExpectedLine {
+  chargeId: string;
+  description: string;
+  /** "2026-09-10" */
+  dueDate: string;
+  owedCents: number;
+  /** What being late has cost it that day. */
+  surchargeCents: number;
+  /** The early-payment reward settling it that day earns. */
+  discountCents: number;
+  totalCents: number;
+  /** Asked for that day: due, or falling due later that month. */
+  due: boolean;
 }
 
 export interface PreviewDepositInput {
   studentId: string;
   amountCents: number;
   paidAt?: string;
+  /** The charges the money may pay; absent means all, oldest first. */
+  chargeIds?: string[];
 }
 
 /** The payment plus the charge with its recomputed paid/remaining/status. */
@@ -548,6 +570,7 @@ export async function previewDeposit(baseURL: string, input: PreviewDepositInput
     studentId: input.studentId,
     amountCents: input.amountCents,
     ...(input.paidAt !== undefined && input.paidAt !== "" ? { paidAt: input.paidAt } : {}),
+    ...(input.chargeIds !== undefined && input.chargeIds.length > 0 ? { chargeIds: input.chargeIds } : {}),
   });
   return {
     allocations: (res.allocations ?? []).map(toPayment),
@@ -569,6 +592,7 @@ export async function getExpected(baseURL: string, studentId: string, on = ""): 
     surchargeCents: res.surchargeCents ?? 0,
     discountCents: res.discountCents ?? 0,
     annualBalanceCents: res.annualBalanceCents ?? 0,
+    lines: res.lines ?? [],
   };
 }
 
@@ -671,6 +695,8 @@ function depositBody(input: RegisterDepositInput): Record<string, unknown> {
     ...(input.grantEarlyPayment === true ? { grantEarlyPayment: true } : {}),
     // Sent only on a card: the server refuses a card type on cash, and rightly.
     ...(input.method === "card" && input.cardType !== undefined ? { cardType: input.cardType } : {}),
+    // Sent only when the cashier chose: absent keeps "oldest debt first".
+    ...(input.chargeIds !== undefined && input.chargeIds.length > 0 ? { chargeIds: input.chargeIds } : {}),
   };
 }
 

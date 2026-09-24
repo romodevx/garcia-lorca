@@ -34,7 +34,7 @@ beforeEach(() => {
     unallocatedCents: 0, dueTodayCents: 0, surchargeCents: 0, earlyDiscountCents: 0, asOf: "",
   });
   finance.getExpected.mockResolvedValue({
-    amountCents: 670000, surchargeCents: 30000, discountCents: 0, annualBalanceCents: 640000,
+    amountCents: 670000, surchargeCents: 30000, discountCents: 0, annualBalanceCents: 640000, lines: [],
   });
   finance.previewDeposit.mockResolvedValue({
     allocations: [payment("p1", "ch-sep", 320000)],
@@ -286,7 +286,7 @@ describe("CollectDrawer · fecha de pago (tarea 7)", () => {
   // choosing another amount: a new date still brings its own quote.
   it("follows the quote of a new date when the amount was only reformatted", async () => {
     finance.getExpected.mockImplementation(async (_b, _s, on) => ({
-      amountCents: on === "2026-10-03" ? 640000 : 670000, surchargeCents: 0, discountCents: 0, annualBalanceCents: 640000,
+      amountCents: on === "2026-10-03" ? 640000 : 670000, surchargeCents: 0, discountCents: 0, annualBalanceCents: 640000, lines: [],
     }));
     open();
     await screen.findByTestId("amount-expected");

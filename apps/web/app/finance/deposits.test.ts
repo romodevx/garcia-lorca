@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getCashUp, listDeposits, previewDeposit, registerDeposit, voidDeposit } from "./api";
+import { getCashUp, getExpected, listDeposits, previewDeposit, registerDeposit, voidDeposit } from "./api";
 
 const BASE = "http://gw";
 
@@ -133,5 +133,29 @@ describe("getCashUp · who took the money (tarea 7)", () => {
     const cut = await getCashUp(BASE, "2026-09-01");
 
     expect(cut.deposits[0]).toMatchObject({ receivedByName: "Director", capturedAt: "2026-09-24T21:57:13Z" });
+  });
+});
+
+// Task 8: the debt by concept survives the client's mapping, and the chosen
+// charges reach the server.
+describe("the counter's choice of charges (tarea 8)", () => {
+  it("keeps the expected lines", async () => {
+    const line = {
+      chargeId: "ch-sep", description: "Colegiatura septiembre", dueDate: "2026-09-10",
+      owedCents: 320000, surchargeCents: 30000, discountCents: 0, totalCents: 350000, due: true,
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ amountCents: 350000, lines: [line] })));
+    const expected = await getExpected(BASE, "s1");
+    expect(expected.lines).toEqual([line]);
+  });
+
+  it("sends the chosen charges on the deposit and on its preview", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({ deposit, allocations: [], surcharges: [], unallocatedCents: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await registerDeposit(BASE, { studentId: "s1", amountCents: 100, method: "cash", reference: "", chargeIds: ["ch-oct"] });
+    await previewDeposit(BASE, { studentId: "s1", amountCents: 100, chargeIds: ["ch-oct"] });
+    for (const call of fetchMock.mock.calls) {
+      expect(JSON.parse((call[1] as RequestInit).body as string).chargeIds).toEqual(["ch-oct"]);
+    }
   });
 });
