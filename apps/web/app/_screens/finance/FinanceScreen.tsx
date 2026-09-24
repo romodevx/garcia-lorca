@@ -224,6 +224,8 @@ export interface FinanceScreenProps {
 }
 
 export function FinanceScreen({ onBack, today: officeDay }: FinanceScreenProps): ReactElement {
+  const cutToday = officeDay ?? localISODate();
+  const [cutDay, setCutDay] = useState(cutToday);
   const [charges, setCharges] = useState<Charge[]>([]);
   const [overdueIds, setOverdueIds] = useState<Set<string>>(new Set());
   const [studentMap, setStudentMap] = useState<Map<string, Student>>(new Map());
@@ -447,11 +449,15 @@ export function FinanceScreen({ onBack, today: officeDay }: FinanceScreenProps):
       {cashUp && (
         <DrawerShell
           title="Corte de caja"
-          subtitle="Lo recibido hoy, por forma de pago"
+          subtitle={cutDay === cutToday ? "Lo recibido hoy, por forma de pago" : "Lo recibido ese día, por forma de pago"}
           icon="finance"
           onClose={() => setCashUp(false)}
         >
-          <CashUpPanel day="" />
+          {/* A payment captured late is dated the day the family paid and
+              lands on that day's cut (task 7): the office opens it here. */}
+          <DateField label="Día del corte" value={cutDay} max={cutToday} onChange={(v) => v !== "" && setCutDay(v)} />
+          {/* Today is asked as "" so the server keeps its own day, as before. */}
+          <CashUpPanel day={cutDay === cutToday ? "" : cutDay} />
         </DrawerShell>
       )}
       {toast !== null && (

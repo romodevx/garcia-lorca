@@ -199,6 +199,29 @@ describe("FinanceScreen — corte de caja", () => {
   });
 });
 
+describe("FinanceScreen — el corte de otro día (tarea 7)", () => {
+  // A payment captured late is dated the day the family paid, so it lands on
+  // that day's cut. The office has to be able to open that cut to see it —
+  // with who keyed it and the "capturado el …" mark.
+  it("opens the cut of a day the office chooses", async () => {
+    const user = userEvent.setup();
+    finance.getCashUp.mockResolvedValue({
+      deposits: [], cancelled: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0,
+    });
+    render(<FinanceScreen onBack={() => {}} today="2026-10-12" />);
+    await screen.findByText("Valentina Cruz");
+    await user.click(screen.getByRole("button", { name: /Corte de caja/ }));
+    await screen.findByTestId("cash-up-total");
+    expect(finance.getCashUp).toHaveBeenLastCalledWith(expect.any(String), "");
+
+    const day = screen.getByLabelText("Día del corte");
+    expect(day).toHaveValue("2026-10-12");
+    expect(day).toHaveAttribute("max", "2026-10-12");
+    fireEvent.change(day, { target: { value: "2026-10-03" } });
+    await waitFor(() => expect(finance.getCashUp).toHaveBeenLastCalledWith(expect.any(String), "2026-10-03"));
+  });
+});
+
 describe("FinanceScreen — exportar", () => {
   // "Exportar esta vista" has to mean the view: the tab picked and the search
   // typed. A file that quietly holds everything is worse than no file, because
