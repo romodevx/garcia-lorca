@@ -35,6 +35,8 @@ export interface BaseFieldProps {
    */
   help?: string;
   disabled?: boolean;
+  /** Al salir del campo: donde la pantalla acusa un dato mal escrito. */
+  onBlur?: () => void;
 }
 
 /** Lo que todo campo comparte: id, validez, obligatoriedad y limpiar su rojo. */
@@ -80,6 +82,7 @@ export function TextField(props: TextFieldProps): ReactElement {
             onChange(uppercase === true ? e.target.value.toLocaleUpperCase("es-MX") : e.target.value);
             onClearError?.();
           }}
+          onBlur={props.onBlur}
           style={inputStyle(error !== undefined)}
         />
       )}
@@ -119,7 +122,10 @@ export function EmailField(props: BaseFieldProps): ReactElement {
           value={value}
           onChange={(e: ChangeEvent<HTMLInputElement>) => change(lowercaseKeepingCaret(e.target, isComposing(e)))}
           onCompositionEnd={(e: CompositionEvent<HTMLInputElement>) => change(lowercaseKeepingCaret(e.currentTarget, false))}
-          onBlur={() => shape.onBlur("email", value, {})}
+          onBlur={() => {
+            shape.onBlur("email", value, {});
+            props.onBlur?.();
+          }}
           style={inputStyle(shown !== undefined)}
         />
       )}

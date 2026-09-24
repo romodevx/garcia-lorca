@@ -48,6 +48,8 @@ export interface BtnProps {
   disabled?: boolean;
   type?: "button" | "submit";
   style?: CSSProperties;
+  /** Only when the visible text alone is ambiguous ("Editar" on every row). */
+  "aria-label"?: string;
 }
 
 export function Btn({
@@ -59,7 +61,8 @@ export function Btn({
   danger,
   disabled,
   type = "button",
-  style = {}
+  style = {},
+  "aria-label": ariaLabel
 }: BtnProps): ReactElement {
   const base: CSSProperties = {
     display: "inline-flex",
@@ -95,6 +98,7 @@ export function Btn({
       type={type}
       onClick={onClick}
       disabled={disabled}
+      aria-label={ariaLabel}
       style={{ ...base, ...k }}
       onMouseEnter={(e) => {
         if (disabled) return;

@@ -5,7 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as studentsApi from "../../students/api";
 import { ContactsPanel } from "./ContactsPanel";
 
-vi.mock("../../students/api", () => ({ listContacts: vi.fn(), addContact: vi.fn(), inviteContactToApp: vi.fn() }));
+vi.mock("../../students/api", () => ({
+  listContacts: vi.fn(),
+  addContact: vi.fn(),
+  inviteContactToApp: vi.fn(),
+  updateContact: vi.fn(),
+  removeContact: vi.fn(),
+}));
 const students = vi.mocked(studentsApi);
 
 beforeEach(() => {
@@ -208,5 +214,94 @@ describe("ContactsPanel — dar acceso a la app", () => {
     expect(correo).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByText(/nombre@dominio/)).toBeInTheDocument();
     expect(students.addContact).not.toHaveBeenCalled();
+  });
+});
+
+describe("ContactsPanel · editing (T5)", () => {
+  const rosa = { id: "gl-2", studentId: "st-1", guardianUserId: "", relationship: "other" as const, fullName: "Rosa Méndez", phone: "5551234567", email: "", hasAccount: false };
+
+  it("marks whom to call first", async () => {
+    students.listContacts.mockResolvedValue([{ ...rosa, isEmergency: true }]);
+    render(<ContactsPanel studentId="st-1" />);
+    await screen.findByText("Rosa Méndez");
+
+    expect(screen.getByText("Emergencias")).toBeInTheDocument();
+  });
+
+  it("edits a contact in its own row and marks it for emergencies", async () => {
+    const user = userEvent.setup();
+    students.updateContact.mockResolvedValue({ ...rosa, phone: "5550001111", isEmergency: true });
+    render(<ContactsPanel studentId="st-1" />);
+    await screen.findByText("Rosa Méndez");
+
+    await user.click(screen.getByRole("button", { name: "Editar a Rosa Méndez" }));
+    const phone = screen.getByLabelText("Teléfono de Rosa Méndez");
+    await user.clear(phone);
+    await user.type(phone, "5550001111");
+    await user.click(screen.getByLabelText("Contacto de emergencia de Rosa Méndez"));
+    await user.click(screen.getByRole("button", { name: "Guardar contacto" }));
+
+    await waitFor(() => expect(students.updateContact).toHaveBeenCalled());
+    expect(students.updateContact.mock.calls[0]?.slice(1)).toEqual([
+      "st-1",
+      "gl-2",
+      { relationship: "other", fullName: "Rosa Méndez", phone: "5550001111", email: "", isEmergency: true },
+    ]);
+  });
+
+  it("refuses a phone that is not ten digits, on the field", async () => {
+    const user = userEvent.setup();
+    render(<ContactsPanel studentId="st-1" />);
+    await screen.findByText("Ana Cruz");
+
+    await user.type(screen.getByLabelText("Nombre del contacto"), "Luis Cruz");
+    await user.type(screen.getByLabelText("Teléfono del contacto"), "555123");
+    await user.click(screen.getByRole("button", { name: /Agregar/ }));
+
+    expect(students.addContact).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Teléfono del contacto")).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("sends the emergency mark when adding", async () => {
+    const user = userEvent.setup();
+    students.addContact.mockResolvedValue({ ...rosa, id: "gl-9", isEmergency: true });
+    render(<ContactsPanel studentId="st-1" />);
+    await screen.findByText("Ana Cruz");
+
+    await user.type(screen.getByLabelText("Nombre del contacto"), "Luis Cruz");
+    await user.click(screen.getByLabelText("Contacto de emergencia"));
+    await user.click(screen.getByRole("button", { name: /Agregar/ }));
+
+    await waitFor(() => expect(students.addContact).toHaveBeenCalled());
+    expect(students.addContact.mock.calls[0]?.[1]?.isEmergency).toBe(true);
+  });
+
+  // Reversible: the row goes at once, the server hears about it only when the
+  // eight seconds run out (or the page is left).
+  it("removes with an undo, and only then tells the server", async () => {
+    const user = userEvent.setup();
+    students.removeContact.mockResolvedValue(undefined);
+    const { unmount } = render(<ContactsPanel studentId="st-1" />);
+    await screen.findByText("Rosa Méndez");
+
+    await user.click(screen.getByRole("button", { name: "Quitar a Rosa Méndez" }));
+    expect(screen.queryByText("Rosa Méndez")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Deshacer/ }));
+    expect(screen.getByText("Rosa Méndez")).toBeInTheDocument();
+    expect(students.removeContact).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Quitar a Rosa Méndez" }));
+    unmount();
+    expect(students.removeContact).toHaveBeenCalledWith(expect.any(String), "st-1", "gl-2");
+  });
+
+  // The server refuses it (409): revoke the access first. A button that
+  // cannot succeed is not offered.
+  it("does not offer to remove a contact who can open the app", async () => {
+    render(<ContactsPanel studentId="st-1" />);
+    await screen.findByText("Ana Cruz");
+
+    expect(screen.queryByRole("button", { name: "Quitar a Ana Cruz" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Editar a Ana Cruz" })).toBeInTheDocument();
   });
 });

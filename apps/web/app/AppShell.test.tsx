@@ -47,10 +47,18 @@ vi.mock("./finance/api", () => ({
 vi.mock("./config/api", () => ({
   listCycles: vi.fn().mockResolvedValue([]),
   listGroups: vi.fn().mockResolvedValue([]),
+  listLevels: vi.fn().mockResolvedValue([]),
+  listGradeLevels: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("./students/api", () => ({
   listStudents: vi.fn().mockResolvedValue([]),
+  listContacts: vi.fn().mockResolvedValue([]),
+  getPhotoBlob: vi.fn().mockResolvedValue(null),
+  getStudent: vi.fn().mockResolvedValue({
+    id: "st1", curp: "CURP1", firstName: "ADA", lastName: "LOVELACE", level: "Primaria", levelId: "lv1",
+    gradeGroup: "4° A", guardianName: "", admissionStatus: "enrolled",
+  }),
 }));
 
 // The signed-in principal for the navigation flows: READ on the modules these
@@ -470,6 +478,32 @@ describe("la dirección manda sobre la pantalla", () => {
 
     await screen.findByRole("heading", { name: "Finanzas" });
     expect(fakePath()).toBe("/finanzas");
+  });
+
+  it("una ficha tiene su propia dirección de edición", async () => {
+    resetFakeRouter("/alumnos/st1/editar");
+    mockMe.mockResolvedValue({ ...OWNER_ME, permissions: [...OWNER_ME.permissions, "students:update"] });
+    render(
+      <Providers flags={{ module_students: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    expect(await screen.findByRole("heading", { name: "Editar ficha" })).toBeInTheDocument();
+    expect(await screen.findByLabelText("Nombre(s)")).toHaveValue("ADA");
+  });
+
+  it("sin students:update, la dirección de edición no pinta la forma", async () => {
+    resetFakeRouter("/alumnos/st1/editar");
+    mockMe.mockResolvedValue(OWNER_ME);
+    render(
+      <Providers flags={{ module_students: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    expect(await screen.findByRole("heading", { name: "Estudiantes" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Editar ficha" })).not.toBeInTheDocument();
   });
 
   it("pinta la pantalla que dice la dirección, no la última visitada", async () => {

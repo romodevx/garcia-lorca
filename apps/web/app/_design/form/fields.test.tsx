@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import { DateField } from "./DateField";
 import { EmailField, NumberField, SelectField, TextArea, TextField } from "./fields";
 
 describe("la capa entera", () => {
@@ -254,5 +255,28 @@ describe("SelectField", () => {
     );
     await userEvent.selectOptions(screen.getByLabelText("Nivel"), "k");
     expect(onClearError).toHaveBeenCalled();
+  });
+});
+
+describe("onBlur", () => {
+  // Validar al salir del campo es la regla de formas; la pantalla necesita
+  // enterarse de cuándo se sale para acusar un dato mal escrito.
+  it("avisa al salir del campo de texto, de correo y de fecha", () => {
+    const text = vi.fn();
+    const email = vi.fn();
+    const date = vi.fn();
+    render(
+      <>
+        <TextField label="CP" value="" onChange={vi.fn()} onBlur={text} />
+        <EmailField label="Correo" value="" onChange={vi.fn()} onBlur={email} />
+        <DateField label="Nacimiento" value="" onChange={vi.fn()} onBlur={date} />
+      </>
+    );
+    fireEvent.blur(screen.getByLabelText("CP"));
+    fireEvent.blur(screen.getByLabelText("Correo"));
+    fireEvent.blur(screen.getByLabelText("Nacimiento"));
+    expect(text).toHaveBeenCalledTimes(1);
+    expect(email).toHaveBeenCalledTimes(1);
+    expect(date).toHaveBeenCalledTimes(1);
   });
 });
