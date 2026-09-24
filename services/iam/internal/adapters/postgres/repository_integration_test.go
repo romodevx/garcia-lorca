@@ -623,7 +623,12 @@ func TestSeededRolesHoldTheirPermissions(t *testing.T) {
 			// writes notes); notes_void — voiding anyone's note, at any time —
 			// is the owner's alone.
 			"students:notes_write", "students:notes_void",
+			// Task 9: the owner holds the counter's two permissions so it can
+			// delegate them (the caller-subset guard).
+			"collections:read", "payments:write",
 		}},
+		// Task 9: the cashier. Reads the counter, takes money, finds pupils.
+		{"cobranza", []string{"students:read", "students:list", "collections:read", "payments:write"}},
 		{"guardian", []string{
 			"family:read",
 			"uniforms_own:read", "uniforms_own:write",
@@ -653,6 +658,25 @@ func TestSeededRolesHoldTheirPermissions(t *testing.T) {
 			}
 		})
 	}
+
+	// Cobranza holds exactly the counter: nothing more, and nothing owner-only
+	// (finance:* stays the owner's).
+	t.Run("cobranza holds exactly the counter", func(t *testing.T) {
+		var got []string
+		if err := superDB.Raw(
+			`SELECT unnest(permissions) FROM roles WHERE tenant_id = ? AND name = 'cobranza'`,
+			seedTenant).Scan(&got).Error; err != nil {
+			t.Fatalf("read cobranza permissions: %v", err)
+		}
+		if len(got) != 4 {
+			t.Errorf("cobranza holds %v, want exactly its four permissions", got)
+		}
+		for _, p := range got {
+			if domain.IsOwnerOnly(p) {
+				t.Errorf("cobranza holds the owner-only permission %q", p)
+			}
+		}
+	})
 
 	// The guardian must NOT have picked up anything tenant-wide along the way.
 	t.Run("guardian holds nothing owner-only", func(t *testing.T) {

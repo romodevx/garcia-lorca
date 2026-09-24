@@ -94,6 +94,9 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"medical-reader": {"medical:read", "students:read"},
 		// Task 6: writing a note is its own permission, beside reading the pupil.
 		"notes-writer": {"students:read", "students:notes_write"},
+		// Task 9: the cashier. Reads collections and takes money; nothing else
+		// in finance.
+		"cobranza": {"students:read", "students:list", "collections:read", "payments:write"},
 	}
 	granted, ok := perms[req.Msg.GetAccessToken()]
 	if !ok {
@@ -2797,6 +2800,50 @@ func TestStudentNotesAnswerToTheirPermissions(t *testing.T) {
 	for _, tc := range cases {
 		if res := doGateway(t, gw, tc.method, tc.path, tc.token, tc.body); res.StatusCode != tc.want {
 			t.Errorf("%s %s as %s: status = %d, want %d", tc.method, tc.path, tc.token, res.StatusCode, tc.want)
+		}
+	}
+}
+
+// Task 9: the Cobranza role reaches exactly the counter — balances, what is
+// due, what is late, the day's cut, and taking money — and nothing that
+// prices, bills, discounts, cancels, voids or reports income.
+func TestCobranzaReachesTheCounterAndNothingElse(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_finance": true, "module_students": true, "module_iam": true})
+	allowed := []struct{ method, path, body string }{
+		{http.MethodGet, "/api/v1/finance/accounts/stu-1", ""},
+		{http.MethodGet, "/api/v1/finance/expected?studentId=stu-1", ""},
+		{http.MethodGet, "/api/v1/finance/overdue?cycleId=cyc-1", ""},
+		{http.MethodGet, "/api/v1/finance/charges?studentId=stu-1", ""},
+		{http.MethodGet, "/api/v1/finance/cash-up", ""},
+		{http.MethodGet, "/api/v1/finance/deposits?studentId=stu-1", ""},
+		{http.MethodPost, "/api/v1/finance/deposits/preview", `{"studentId":"stu-1","amountCents":100}`},
+		{http.MethodPost, "/api/v1/finance/deposits", `{"studentId":"stu-1","amountCents":100,"method":"cash"}`},
+		{http.MethodPost, "/api/v1/finance/payments", `{"chargeId":"ch-1","amountCents":100,"method":"cash"}`},
+		{http.MethodGet, "/api/v1/students", ""},
+	}
+	for _, c := range allowed {
+		res := doGateway(t, gw, c.method, c.path, "cobranza", c.body)
+		if res.StatusCode == http.StatusForbidden || res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusNotFound {
+			t.Errorf("cobranza %s %s: status %d, want it reachable", c.method, c.path, res.StatusCode)
+		}
+	}
+	denied := []struct{ method, path, body string }{
+		{http.MethodPut, "/api/v1/finance/tuition-plans", `{}`},
+		{http.MethodGet, "/api/v1/finance/tuition-plans?cycleId=cyc-1", ""},
+		{http.MethodPost, "/api/v1/finance/billing-runs", `{}`},
+		{http.MethodPost, "/api/v1/finance/concepts", `{}`},
+		{http.MethodPost, "/api/v1/finance/charges", `{}`},
+		{http.MethodPost, "/api/v1/finance/charges/ch-1/discount", `{}`},
+		{http.MethodPost, "/api/v1/finance/charges/ch-1/cancel", ""},
+		{http.MethodPost, "/api/v1/finance/deposits/dep-1/void", `{"reason":"x"}`},
+		{http.MethodGet, "/api/v1/finance/income?from=2026-09-01&to=2026-09-30", ""},
+		// The whole cycle's ledger is not the counter's: one pupil at a time.
+		{http.MethodGet, "/api/v1/finance/charges?cycleId=cyc-1", ""},
+		{http.MethodGet, "/api/v1/users", ""},
+	}
+	for _, c := range denied {
+		if res := doGateway(t, gw, c.method, c.path, "cobranza", c.body); res.StatusCode != http.StatusForbidden {
+			t.Errorf("cobranza %s %s: status %d, want 403", c.method, c.path, res.StatusCode)
 		}
 	}
 }

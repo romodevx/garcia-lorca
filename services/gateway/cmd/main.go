@@ -488,6 +488,17 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	financeRead := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("finance", requireAuthChanged(middleware.RequirePermission("finance:read")(http.HandlerFunc(h))))
 	}
+	// Task 9 (ADR 0015): the counter answers to finance:read OR collections:read
+	// — balances, what is due, what is late, the day's cut — and taking money to
+	// finance:write OR payments:write. The Cobranza role holds only the second of
+	// each; everything that prices, bills, discounts, cancels, voids or reports
+	// income stays finance:* (owner).
+	collectionsRead := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("finance", requireAuthChanged(middleware.RequireAnyPermission("finance:read", "collections:read")(http.HandlerFunc(h))))
+	}
+	paymentsWrite := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("finance", requireAuthChanged(middleware.RequireAnyPermission("finance:write", "payments:write")(http.HandlerFunc(h))))
+	}
 	// M15 tuition: pricing a level and running the month are WRITES on the
 	// ledger, so they answer to finance:write; reading the table is finance:read.
 	// The screen lives in Configuración because that is where a director looks
@@ -502,17 +513,18 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/finance/charges/generate", financeWrite(financeH.GenerateCharges))
 	mux.Handle("POST /api/v1/finance/charges/{id}/discount", financeWrite(financeH.ApplyDiscount))
 	mux.Handle("POST /api/v1/finance/charges/{id}/cancel", financeWrite(financeH.CancelCharge))
-	mux.Handle("GET /api/v1/finance/charges", financeRead(financeH.ListCharges))
-	mux.Handle("POST /api/v1/finance/payments", financeWrite(financeH.RegisterPayment))
-	mux.Handle("POST /api/v1/finance/deposits", financeWrite(financeH.RegisterDeposit))
-	mux.Handle("POST /api/v1/finance/deposits/preview", financeRead(financeH.PreviewDeposit))
-	mux.Handle("GET /api/v1/finance/deposits", financeRead(financeH.ListDeposits))
-	mux.Handle("GET /api/v1/finance/expected", financeRead(financeH.ExpectedToday))
-	mux.Handle("GET /api/v1/finance/cash-up", financeRead(financeH.DailyCashUp))
+	// One pupil's charges are the counter's; a whole cycle's ledger is finance.
+	mux.Handle("GET /api/v1/finance/charges", collectionsRead(middleware.RequireStudentScopeUnless("finance:read")(http.HandlerFunc(financeH.ListCharges)).ServeHTTP))
+	mux.Handle("POST /api/v1/finance/payments", paymentsWrite(financeH.RegisterPayment))
+	mux.Handle("POST /api/v1/finance/deposits", paymentsWrite(financeH.RegisterDeposit))
+	mux.Handle("POST /api/v1/finance/deposits/preview", collectionsRead(financeH.PreviewDeposit))
+	mux.Handle("GET /api/v1/finance/deposits", collectionsRead(financeH.ListDeposits))
+	mux.Handle("GET /api/v1/finance/expected", collectionsRead(financeH.ExpectedToday))
+	mux.Handle("GET /api/v1/finance/cash-up", collectionsRead(financeH.DailyCashUp))
 	mux.Handle("GET /api/v1/finance/income", financeRead(financeH.IncomeByConcept))
 	mux.Handle("POST /api/v1/finance/deposits/{id}/void", financeWrite(financeH.VoidDeposit))
-	mux.Handle("GET /api/v1/finance/accounts/{studentId}", financeRead(financeH.GetAccount))
-	mux.Handle("GET /api/v1/finance/overdue", financeRead(financeH.ListOverdue))
+	mux.Handle("GET /api/v1/finance/accounts/{studentId}", collectionsRead(financeH.GetAccount))
+	mux.Handle("GET /api/v1/finance/overdue", collectionsRead(financeH.ListOverdue))
 
 	// M06 attendance (daily pass list): flag-guarded, authenticated + rotation-
 	// enforced, permission-gated. Saving a group·day is the only write

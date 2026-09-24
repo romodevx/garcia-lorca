@@ -120,6 +120,10 @@ func TestIsOwnerOnly(t *testing.T) {
 		// one is delegable.
 		{"students:notes_void", true},
 		{"students:notes_write", false},
+		// Task 9: the counter's permissions are the Cobranza role's, so they
+		// must be grantable; finance:read stays owner-only.
+		{"collections:read", false},
+		{"payments:write", false},
 		{"uniforms:stock", false},
 		{"uniforms:write", false},
 		{"uniforms_own:read", false},
