@@ -271,6 +271,9 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/students", guard.Protect("students", studentsCreate))
 	mux.Handle("GET /api/v1/students", studentsRead(studentsH.List))
 	mux.Handle("GET /api/v1/students/{id}", studentsRead(studentsH.Get))
+	// Correcting the file (task 5) needs students:update.
+	mux.Handle("PUT /api/v1/students/{id}", guard.Protect("students", requireAuthChanged(
+		middleware.RequirePermission("students:update")(http.HandlerFunc(studentsH.Update)))))
 
 	// M03 enrollments (Phase 4): place a student into a group of a cycle and
 	// transfer/withdraw them. Flag-guarded (module_students), authenticated +

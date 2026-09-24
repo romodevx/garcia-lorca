@@ -26,6 +26,9 @@ type StudentRepository interface {
 	Create(ctx context.Context, s *domain.Student) error
 	// Update persists a status transition (and any mutable fields).
 	Update(ctx context.Context, s *domain.Student) error
+	// UpdateDetails persists a correction of the file: names, CURP and the
+	// profile. A CURP another pupil holds is KindConflict.
+	UpdateDetails(ctx context.Context, s *domain.Student) error
 	// FindByID returns a student or KindNotFound.
 	FindByID(ctx context.Context, id string) (*domain.Student, error)
 	// List returns students matching the filter plus the next page token ("" = last page).

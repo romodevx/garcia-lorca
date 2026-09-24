@@ -14,6 +14,7 @@ type StudentsService interface {
 	CreateApplicant(ctx context.Context, in client.CreateApplicantInput) (client.StudentResult, error)
 	ListStudents(ctx context.Context, status string) ([]client.StudentResult, error)
 	GetStudent(ctx context.Context, id string) (client.StudentResult, error)
+	UpdateStudent(ctx context.Context, in client.UpdateStudentInput) (client.StudentResult, error)
 }
 
 // StudentsHandler exposes the front-facing (HTTP/JSON) students endpoints,
@@ -40,15 +41,16 @@ type createStudentRequest struct {
 }
 
 type studentResponse struct {
-	ID              string `json:"id"`
-	CURP            string `json:"curp"`
-	FirstName       string `json:"firstName"`
-	LastName        string `json:"lastName"`
-	Level           string `json:"level"`   // the school's name for the level
-	LevelID         string `json:"levelId"` // the config level id
-	GradeGroup      string `json:"gradeGroup"`
-	GuardianName    string `json:"guardianName"`
-	AdmissionStatus string `json:"admissionStatus"`
+	ID              string                `json:"id"`
+	CURP            string                `json:"curp"`
+	FirstName       string                `json:"firstName"`
+	LastName        string                `json:"lastName"`
+	Level           string                `json:"level"`   // the school's name for the level
+	LevelID         string                `json:"levelId"` // the config level id
+	GradeGroup      string                `json:"gradeGroup"`
+	GuardianName    string                `json:"guardianName"`
+	AdmissionStatus string                `json:"admissionStatus"`
+	Profile         client.StudentProfile `json:"profile"`
 }
 
 func toStudentResponse(s client.StudentResult) studentResponse {
@@ -62,7 +64,35 @@ func toStudentResponse(s client.StudentResult) studentResponse {
 		GradeGroup:      s.GradeGroup,
 		GuardianName:    s.GuardianName,
 		AdmissionStatus: s.AdmissionStatus,
+		Profile:         s.Profile,
 	}
+}
+
+type updateStudentRequest struct {
+	FirstName string                `json:"firstName"`
+	LastName  string                `json:"lastName"`
+	CURP      string                `json:"curp"`
+	Profile   client.StudentProfile `json:"profile"`
+}
+
+// Update handles PUT /api/v1/students/{id}: corrects the pupil's file (names,
+// CURP, profile). Level and group are not editable here — a group changes by
+// transfer.
+func (h *StudentsHandler) Update(w http.ResponseWriter, r *http.Request) {
+	var req updateStudentRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	res, err := h.svc.UpdateStudent(r.Context(), client.UpdateStudentInput{
+		ID: r.PathValue("id"), FirstName: req.FirstName, LastName: req.LastName,
+		CURP: req.CURP, Profile: req.Profile,
+	})
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toStudentResponse(res))
 }
 
 // Create handles POST /api/v1/students: registers a new applicant (pending).

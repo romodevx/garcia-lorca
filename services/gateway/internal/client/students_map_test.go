@@ -15,6 +15,18 @@ func TestStudentResultCarriesTheCatalogLevel(t *testing.T) {
 	}
 }
 
+func TestStudentResultCarriesTheProfile(t *testing.T) {
+	got := toStudentResult(&studentsv1.Student{Id: "stu-1", Profile: &studentsv1.StudentProfile{
+		BirthDate: "2019-03-12", Sex: "F", Email: "ana@correo.mx",
+		Phones:  []*studentsv1.StudentPhone{{Kind: "casa", Number: "3312345678"}},
+		Address: &studentsv1.StudentAddress{PostalCode: "44100"},
+	}})
+	p := got.Profile
+	if p.BirthDate != "2019-03-12" || p.Sex != "F" || len(p.Phones) != 1 || p.Phones[0].Kind != "casa" || p.Address.PostalCode != "44100" {
+		t.Errorf("profile = %+v", p)
+	}
+}
+
 func TestEnrollmentStatusNames(t *testing.T) {
 	cases := []struct {
 		wire studentsv1.EnrollmentStatus

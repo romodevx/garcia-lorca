@@ -61,6 +61,11 @@ func (r *fakeRepo) Update(_ context.Context, s *domain.Student) error {
 	return nil
 }
 
+func (r *fakeRepo) UpdateDetails(_ context.Context, s *domain.Student) error {
+	r.byID[s.ID()] = s
+	return nil
+}
+
 func (r *fakeRepo) FindByID(_ context.Context, id string) (*domain.Student, error) {
 	if s, ok := r.byID[id]; ok {
 		return s, nil
@@ -313,4 +318,38 @@ func assertCode(t *testing.T, err error, want connect.Code) {
 	if got := connect.CodeOf(err); got != want {
 		t.Errorf("code = %v, want %v (err=%v)", got, want, err)
 	}
+}
+
+// UpdateStudent carries the whole editable file in and out.
+func TestUpdateStudentRoundTripsTheProfile(t *testing.T) {
+	h, _ := newHandler(t)
+	createValid(t, h)
+	res, err := h.UpdateStudent(context.Background(), connect.NewRequest(&studentsv1.UpdateStudentRequest{
+		Id: "stu-1", FirstName: "Ana María", LastName: "Herrera", Curp: validCURP,
+		Profile: &studentsv1.StudentProfile{
+			BirthDate: "2019-03-12", Sex: "F", Email: "Ana@Correo.mx",
+			Phones:  []*studentsv1.StudentPhone{{Kind: "celular", Number: "55-1234-5678"}},
+			Address: &studentsv1.StudentAddress{Street: "Av. Juárez", PostalCode: "44100", State: "Jalisco"},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("UpdateStudent: %v", err)
+	}
+	p := res.Msg.GetStudent().GetProfile()
+	if res.Msg.GetStudent().GetFirstName() != "Ana María" || p.GetEmail() != "ana@correo.mx" || p.GetBirthDate() != "2019-03-12" {
+		t.Errorf("student = %+v", res.Msg.GetStudent())
+	}
+	if len(p.GetPhones()) != 1 || p.GetPhones()[0].GetNumber() != "5512345678" || p.GetAddress().GetState() != "Jalisco" {
+		t.Errorf("profile = %+v", p)
+	}
+}
+
+func TestUpdateStudentMalformedProfileIsInvalidArgument(t *testing.T) {
+	h, _ := newHandler(t)
+	createValid(t, h)
+	_, err := h.UpdateStudent(context.Background(), connect.NewRequest(&studentsv1.UpdateStudentRequest{
+		Id: "stu-1", FirstName: "Ana", LastName: "Herrera", Curp: validCURP,
+		Profile: &studentsv1.StudentProfile{Address: &studentsv1.StudentAddress{PostalCode: "4410"}},
+	}))
+	assertCode(t, err, connect.CodeInvalidArgument)
 }

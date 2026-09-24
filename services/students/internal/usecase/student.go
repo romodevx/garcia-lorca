@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -25,13 +26,56 @@ type StudentService struct {
 	levels ports.LevelCatalog
 	tenant string
 	newID  func() string
+	now    func() time.Time
 }
 
 // NewStudentService wires the use case. `levels` is config's level catalog;
 // `tenant` is the single-tenant scope for M03; `newID` mints student ids
 // (injectable for deterministic tests).
 func NewStudentService(repo ports.StudentRepository, pub ports.EventPublisher, levels ports.LevelCatalog, tenant string, newID func() string) *StudentService {
-	return &StudentService{repo: repo, pub: pub, levels: levels, tenant: tenant, newID: newID}
+	return &StudentService{repo: repo, pub: pub, levels: levels, tenant: tenant, newID: newID, now: time.Now}
+}
+
+// WithClock returns the service reading the school's date from `now`
+// (deterministic tests; the default is time.Now).
+func (s *StudentService) WithClock(now func() time.Time) *StudentService {
+	cp := *s
+	cp.now = now
+	return &cp
+}
+
+// UpdateDetailsInput is a correction of a pupil's file as captured: names, CURP
+// and the profile. Level and group are not here: a group changes by transfer.
+type UpdateDetailsInput struct {
+	ID        string
+	FirstName string
+	LastName  string
+	CURP      string
+	Profile   domain.ProfileInput
+}
+
+// UpdateDetails validates and persists a correction of the pupil's file. A CURP
+// another pupil already holds is KindConflict.
+func (s *StudentService) UpdateDetails(ctx context.Context, in UpdateDetailsInput) (*domain.Student, error) {
+	student, err := s.repo.FindByID(ctx, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	curp, err := domain.NewCURP(in.CURP)
+	if err != nil {
+		return nil, err
+	}
+	profile, err := domain.NewProfile(in.Profile, s.now())
+	if err != nil {
+		return nil, err
+	}
+	if err := student.UpdateDetails(in.FirstName, in.LastName, curp, profile); err != nil {
+		return nil, err
+	}
+	if err := s.repo.UpdateDetails(ctx, student); err != nil {
+		return nil, err
+	}
+	return student, nil
 }
 
 // CreateApplicantInput is the raw input for a new applicant. CURP is validated

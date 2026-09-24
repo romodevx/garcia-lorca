@@ -20,6 +20,7 @@ type Student struct {
 	gradeGroup   string
 	guardianName string
 	status       AdmissionStatus
+	profile      Profile
 }
 
 // NewApplicantParams carries the fields to create an applicant.
@@ -32,6 +33,9 @@ type NewApplicantParams struct {
 	Level        Level
 	GradeGroup   string
 	GuardianName string
+	// Profile is the file's editable half (birth date, contact, address). A new
+	// applicant starts with an empty one.
+	Profile Profile
 }
 
 // AdmissionChangedEvent is emitted on every admission transition (maps to the
@@ -87,6 +91,7 @@ func Rehydrate(p NewApplicantParams, status AdmissionStatus) *Student {
 		id: p.ID, tenantID: p.TenantID, curp: p.CURP,
 		firstName: p.FirstName, lastName: p.LastName, level: p.Level,
 		gradeGroup: p.GradeGroup, guardianName: p.GuardianName, status: status,
+		profile: p.Profile,
 	}
 }
 
@@ -149,6 +154,19 @@ func (s *Student) Level() Level            { return s.level }
 func (s *Student) GradeGroup() string      { return s.gradeGroup }
 func (s *Student) GuardianName() string    { return s.guardianName }
 func (s *Student) Status() AdmissionStatus { return s.status }
+func (s *Student) Profile() Profile        { return s.profile }
+
+// UpdateDetails corrects the file: names, CURP and the profile. The level and
+// the group are NOT here — a group changes by transfer, which keeps its history
+// and its seat count. Names stay required, as when the pupil was created.
+func (s *Student) UpdateDetails(firstName, lastName string, curp CURP, profile Profile) error {
+	first, last := strings.TrimSpace(firstName), strings.TrimSpace(lastName)
+	if first == "" || last == "" {
+		return glerrors.New(glerrors.KindInvalid, "first and last name are required")
+	}
+	s.firstName, s.lastName, s.curp, s.profile = first, last, curp, profile
+	return nil
+}
 
 // PlaceIn records the group the pupil ended up in.
 //

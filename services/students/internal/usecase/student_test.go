@@ -3,6 +3,7 @@ package usecase_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/students/internal/domain"
@@ -42,6 +43,15 @@ func (r *fakeRepo) Create(_ context.Context, s *domain.Student) error {
 }
 
 func (r *fakeRepo) Update(_ context.Context, s *domain.Student) error {
+	if r.updateErr != nil {
+		return r.updateErr
+	}
+	r.byID[s.ID()] = s
+	r.updated = append(r.updated, s)
+	return nil
+}
+
+func (r *fakeRepo) UpdateDetails(_ context.Context, s *domain.Student) error {
 	if r.updateErr != nil {
 		return r.updateErr
 	}
@@ -332,5 +342,58 @@ func TestListStudentsMalformedLevelFilterIsInvalid(t *testing.T) {
 	svc, _, _ := newService(t)
 	if _, _, err := svc.ListStudents(context.Background(), ports.ListFilter{LevelID: "kinder"}); glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("want KindInvalid, got %v", err)
+	}
+}
+
+// --- UpdateDetails -----------------------------------------------------------
+
+var schoolToday = time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC)
+
+func TestUpdateDetailsCorrectsTheFile(t *testing.T) {
+	svc, repo, _ := newService(t)
+	svc = svc.WithClock(func() time.Time { return schoolToday })
+	created, err := svc.CreateApplicant(context.Background(), validInput())
+	if err != nil {
+		t.Fatalf("CreateApplicant: %v", err)
+	}
+
+	updated, err := svc.UpdateDetails(context.Background(), usecase.UpdateDetailsInput{
+		ID: created.ID(), FirstName: "Ana María", LastName: "Hernández", CURP: "HEGA050312MDFRNN09",
+		Profile: domain.ProfileInput{BirthDate: "2019-03-12", Sex: "F", Email: "Ana@Correo.mx",
+			Phones: []domain.Phone{{Kind: "celular", Number: "5512345678"}}},
+	})
+	if err != nil {
+		t.Fatalf("UpdateDetails: %v", err)
+	}
+	if updated.FirstName() != "Ana María" || updated.CURP().String() != "HEGA050312MDFRNN09" || updated.Profile().Email() != "ana@correo.mx" {
+		t.Errorf("updated = %q %q %q", updated.FirstName(), updated.CURP(), updated.Profile().Email())
+	}
+	if len(repo.updated) != 1 {
+		t.Errorf("want one persisted update, got %d", len(repo.updated))
+	}
+}
+
+func TestUpdateDetailsRefusesABirthDateInTheFuture(t *testing.T) {
+	svc, repo, _ := newService(t)
+	svc = svc.WithClock(func() time.Time { return schoolToday })
+	created, _ := svc.CreateApplicant(context.Background(), validInput())
+
+	_, err := svc.UpdateDetails(context.Background(), usecase.UpdateDetailsInput{
+		ID: created.ID(), FirstName: "Ana", LastName: "H", CURP: "HEGA050312MDFRNN08",
+		Profile: domain.ProfileInput{BirthDate: "2026-09-25"},
+	})
+	if glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Fatalf("want KindInvalid, got %v", err)
+	}
+	if len(repo.updated) != 0 {
+		t.Error("nothing may be stored")
+	}
+}
+
+func TestUpdateDetailsOfAnUnknownPupilIsNotFound(t *testing.T) {
+	svc, _, _ := newService(t)
+	_, err := svc.UpdateDetails(context.Background(), usecase.UpdateDetailsInput{ID: "nope", FirstName: "A", LastName: "B", CURP: "HEGA050312MDFRNN08"})
+	if glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Fatalf("want KindNotFound, got %v", err)
 	}
 }

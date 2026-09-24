@@ -18,6 +18,7 @@ type fakeCreator struct {
 	got         client.CreateApplicantInput
 	gotListStat string
 	gotGetID    string
+	gotUpdate   client.UpdateStudentInput
 	res         client.StudentResult
 	list        []client.StudentResult
 	err         error
@@ -31,6 +32,11 @@ func (f *fakeCreator) CreateApplicant(_ context.Context, in client.CreateApplica
 func (f *fakeCreator) ListStudents(_ context.Context, status string) ([]client.StudentResult, error) {
 	f.gotListStat = status
 	return f.list, f.err
+}
+
+func (f *fakeCreator) UpdateStudent(_ context.Context, in client.UpdateStudentInput) (client.StudentResult, error) {
+	f.gotUpdate = in
+	return f.res, f.err
 }
 
 func (f *fakeCreator) GetStudent(_ context.Context, id string) (client.StudentResult, error) {
@@ -459,5 +465,52 @@ func TestPlacementAnswersInTheSameShapeAsEveryOtherEndpoint(t *testing.T) {
 	}
 	if _, ok := out.Enrollment["id"]; !ok {
 		t.Errorf("enrollment keys = %v; want camelCase like the rest of the API", out.Enrollment)
+	}
+}
+
+// PUT /api/v1/students/{id} forwards the whole editable file and answers it back.
+func TestUpdateStudentForwardsTheFileAndAnswersIt(t *testing.T) {
+	svc := &fakeCreator{res: client.StudentResult{
+		ID: "stu-1", FirstName: "Ana María",
+		Profile: client.StudentProfile{BirthDate: "2019-03-12", Email: "ana@correo.mx",
+			Phones: []client.StudentPhone{{Kind: "celular", Number: "5512345678"}},
+			Address: client.StudentAddress{State: "Jalisco"}},
+	}}
+	h := handler.NewStudentsHandler(svc)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/students/stu-1", strings.NewReader(
+		`{"firstName":"Ana María","lastName":"Herrera","curp":"HEGA050312MDFRNN08",`+
+			`"profile":{"birthDate":"2019-03-12","sex":"F","email":"ana@correo.mx",`+
+			`"phones":[{"kind":"celular","number":"5512345678"}],"address":{"street":"Av. Juárez","state":"Jalisco"}}}`))
+	req.SetPathValue("id", "stu-1")
+	rec := httptest.NewRecorder()
+	h.Update(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	got := svc.gotUpdate
+	if got.ID != "stu-1" || got.FirstName != "Ana María" || got.Profile.Sex != "F" ||
+		len(got.Profile.Phones) != 1 || got.Profile.Address.Street != "Av. Juárez" {
+		t.Errorf("forwarded = %+v", got)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	profile, _ := out["profile"].(map[string]any)
+	if profile == nil || profile["email"] != "ana@correo.mx" || profile["birthDate"] != "2019-03-12" {
+		t.Errorf("profile in body = %v", out["profile"])
+	}
+}
+
+func TestUpdateStudentInvalidIs400(t *testing.T) {
+	svc := &fakeCreator{err: connect.NewError(connect.CodeInvalidArgument, nil)}
+	h := handler.NewStudentsHandler(svc)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/students/stu-1", strings.NewReader(`{"firstName":"A","lastName":"B","curp":"x"}`))
+	req.SetPathValue("id", "stu-1")
+	rec := httptest.NewRecorder()
+	h.Update(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
 	}
 }

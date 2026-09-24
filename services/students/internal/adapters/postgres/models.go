@@ -21,8 +21,20 @@ type studentModel struct {
 	GradeGroup      string  `gorm:"column:grade_group"`
 	GuardianName    string  `gorm:"column:guardian_name"`
 	AdmissionStatus string  `gorm:"column:admission_status"`
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// The editable half of the file (migration 0008).
+	BirthDate           *time.Time `gorm:"column:birth_date"`
+	Sex                 string     `gorm:"column:sex"`
+	Email               string     `gorm:"column:email"`
+	Phones              string     `gorm:"column:phones"` // JSON array of {kind, number}
+	AddressStreet       string     `gorm:"column:address_street"`
+	AddressExtNumber    string     `gorm:"column:address_ext_number"`
+	AddressIntNumber    string     `gorm:"column:address_int_number"`
+	AddressNeighborhood string     `gorm:"column:address_neighborhood"`
+	AddressPostalCode   string     `gorm:"column:address_postal_code"`
+	AddressMunicipality string     `gorm:"column:address_municipality"`
+	AddressState        string     `gorm:"column:address_state"`
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 func (studentModel) TableName() string { return "students" }

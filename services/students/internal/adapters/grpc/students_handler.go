@@ -65,6 +65,22 @@ func (h *StudentsHandler) CreateApplicant(ctx context.Context, req *connect.Requ
 	return connect.NewResponse(&studentsv1.CreateApplicantResponse{Student: toProtoStudent(student)}), nil
 }
 
+// UpdateStudent corrects a pupil's file (names, CURP, profile).
+func (h *StudentsHandler) UpdateStudent(ctx context.Context, req *connect.Request[studentsv1.UpdateStudentRequest]) (*connect.Response[studentsv1.UpdateStudentResponse], error) {
+	m := req.Msg
+	student, err := h.svc.UpdateDetails(ctx, usecase.UpdateDetailsInput{
+		ID:        m.GetId(),
+		FirstName: m.GetFirstName(),
+		LastName:  m.GetLastName(),
+		CURP:      m.GetCurp(),
+		Profile:   toDomainProfileInput(m.GetProfile()),
+	})
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.UpdateStudentResponse{Student: toProtoStudent(student)}), nil
+}
+
 func (h *StudentsHandler) GetStudent(ctx context.Context, req *connect.Request[studentsv1.GetStudentRequest]) (*connect.Response[studentsv1.GetStudentResponse], error) {
 	student, err := h.svc.GetStudent(ctx, req.Msg.GetId())
 	if err != nil {
@@ -268,6 +284,49 @@ func toProtoStudent(s *domain.Student) *studentsv1.Student {
 		GradeGroup:      s.GradeGroup(),
 		GuardianName:    s.GuardianName(),
 		AdmissionStatus: protoconv.ToProtoStatus(s.Status()),
+		Profile:         toProtoProfile(s.Profile()),
+	}
+}
+
+func toDomainProfileInput(p *studentsv1.StudentProfile) domain.ProfileInput {
+	phones := make([]domain.Phone, 0, len(p.GetPhones()))
+	for _, ph := range p.GetPhones() {
+		phones = append(phones, domain.Phone{Kind: domain.PhoneKind(ph.GetKind()), Number: ph.GetNumber()})
+	}
+	a := p.GetAddress()
+	return domain.ProfileInput{
+		BirthDate: p.GetBirthDate(),
+		Sex:       p.GetSex(),
+		Email:     p.GetEmail(),
+		Phones:    phones,
+		Address: domain.Address{
+			Street: a.GetStreet(), ExtNumber: a.GetExtNumber(), IntNumber: a.GetIntNumber(),
+			Neighborhood: a.GetNeighborhood(), PostalCode: a.GetPostalCode(),
+			Municipality: a.GetMunicipality(), State: a.GetState(),
+		},
+	}
+}
+
+func toProtoProfile(p domain.Profile) *studentsv1.StudentProfile {
+	phones := make([]*studentsv1.StudentPhone, 0, len(p.Phones()))
+	for _, ph := range p.Phones() {
+		phones = append(phones, &studentsv1.StudentPhone{Kind: string(ph.Kind), Number: ph.Number})
+	}
+	born := ""
+	if !p.BirthDate().IsZero() {
+		born = p.BirthDate().Format("2006-01-02")
+	}
+	a := p.Address()
+	return &studentsv1.StudentProfile{
+		BirthDate: born,
+		Sex:       string(p.Sex()),
+		Email:     p.Email(),
+		Phones:    phones,
+		Address: &studentsv1.StudentAddress{
+			Street: a.Street, ExtNumber: a.ExtNumber, IntNumber: a.IntNumber,
+			Neighborhood: a.Neighborhood, PostalCode: a.PostalCode,
+			Municipality: a.Municipality, State: a.State,
+		},
 	}
 }
 

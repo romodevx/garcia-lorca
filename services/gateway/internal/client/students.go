@@ -43,6 +43,42 @@ type StudentResult struct {
 	GradeGroup      string
 	GuardianName    string
 	AdmissionStatus string
+	Profile         StudentProfile
+}
+
+// StudentProfile is the editable half of a pupil's file, as the edge speaks it.
+type StudentProfile struct {
+	BirthDate string         `json:"birthDate"`
+	Sex       string         `json:"sex"`
+	Email     string         `json:"email"`
+	Phones    []StudentPhone `json:"phones"`
+	Address   StudentAddress `json:"address"`
+}
+
+// StudentPhone is one of the pupil's numbers.
+type StudentPhone struct {
+	Kind   string `json:"kind"`
+	Number string `json:"number"`
+}
+
+// StudentAddress is where the pupil lives.
+type StudentAddress struct {
+	Street       string `json:"street"`
+	ExtNumber    string `json:"extNumber"`
+	IntNumber    string `json:"intNumber"`
+	Neighborhood string `json:"neighborhood"`
+	PostalCode   string `json:"postalCode"`
+	Municipality string `json:"municipality"`
+	State        string `json:"state"`
+}
+
+// UpdateStudentInput is a correction of a pupil's file.
+type UpdateStudentInput struct {
+	ID        string
+	FirstName string
+	LastName  string
+	CURP      string
+	Profile   StudentProfile
 }
 
 // Enrollment is the edge's view of a student's placement in a group of a cycle,
@@ -376,7 +412,53 @@ func toStudentResult(s *studentsv1.Student) StudentResult {
 		GradeGroup:      s.GetGradeGroup(),
 		GuardianName:    s.GetGuardianName(),
 		AdmissionStatus: admissionName(s.GetAdmissionStatus()),
+		Profile:         fromProtoProfile(s.GetProfile()),
 	}
+}
+
+func fromProtoProfile(p *studentsv1.StudentProfile) StudentProfile {
+	phones := make([]StudentPhone, 0, len(p.GetPhones()))
+	for _, ph := range p.GetPhones() {
+		phones = append(phones, StudentPhone{Kind: ph.GetKind(), Number: ph.GetNumber()})
+	}
+	a := p.GetAddress()
+	return StudentProfile{
+		BirthDate: p.GetBirthDate(), Sex: p.GetSex(), Email: p.GetEmail(), Phones: phones,
+		Address: StudentAddress{
+			Street: a.GetStreet(), ExtNumber: a.GetExtNumber(), IntNumber: a.GetIntNumber(),
+			Neighborhood: a.GetNeighborhood(), PostalCode: a.GetPostalCode(),
+			Municipality: a.GetMunicipality(), State: a.GetState(),
+		},
+	}
+}
+
+func toProtoProfile(p StudentProfile) *studentsv1.StudentProfile {
+	phones := make([]*studentsv1.StudentPhone, 0, len(p.Phones))
+	for _, ph := range p.Phones {
+		phones = append(phones, &studentsv1.StudentPhone{Kind: ph.Kind, Number: ph.Number})
+	}
+	a := p.Address
+	return &studentsv1.StudentProfile{
+		BirthDate: p.BirthDate, Sex: p.Sex, Email: p.Email, Phones: phones,
+		Address: &studentsv1.StudentAddress{
+			Street: a.Street, ExtNumber: a.ExtNumber, IntNumber: a.IntNumber,
+			Neighborhood: a.Neighborhood, PostalCode: a.PostalCode,
+			Municipality: a.Municipality, State: a.State,
+		},
+	}
+}
+
+// UpdateStudent corrects a pupil's file. InvalidArgument (a malformed field)
+// and AlreadyExists (a CURP another pupil holds) propagate for the handler.
+func (c *StudentsClient) UpdateStudent(ctx context.Context, in UpdateStudentInput) (StudentResult, error) {
+	res, err := c.rpc.UpdateStudent(ctx, connect.NewRequest(&studentsv1.UpdateStudentRequest{
+		Id: in.ID, FirstName: in.FirstName, LastName: in.LastName, Curp: in.CURP,
+		Profile: toProtoProfile(in.Profile),
+	}))
+	if err != nil {
+		return StudentResult{}, err
+	}
+	return toStudentResult(res.Msg.GetStudent()), nil
 }
 
 var admissionNames = map[studentsv1.AdmissionStatus]string{

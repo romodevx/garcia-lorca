@@ -22,6 +22,11 @@ service StudentsService {
   // GetStudent fetches a student by id.
   rpc GetStudent(GetStudentRequest) returns (GetStudentResponse);
 
+  // UpdateStudent corrects a pupil's file: names, CURP and the profile (birth
+  // date, sex, the pupil's email and phones, address). Level and group are not
+  // here — a group changes by TransferStudent, which keeps history and seats.
+  rpc UpdateStudent(UpdateStudentRequest) returns (UpdateStudentResponse);
+
   // ListStudents lists students, optionally filtered by level/group/status.
   rpc ListStudents(ListStudentsRequest) returns (ListStudentsResponse);
 
@@ -147,6 +152,44 @@ message Student {
   // level when the catalog went free.
   string level_id = 12;
   string level_name = 13;
+  // The editable half of the file. Every field is optional.
+  StudentProfile profile = 14;
+}
+
+// StudentProfile is what the office keeps up to date by hand.
+message StudentProfile {
+  string birth_date = 1;  // ISO date "2019-03-12", or empty
+  string sex = 2;         // "" | "F" | "M" | "X"
+  string email = 3;       // the pupil's own address, trimmed and lowercase
+  repeated StudentPhone phones = 4;  // at most three
+  StudentAddress address = 5;
+}
+
+message StudentPhone {
+  string kind = 1;    // celular | casa | trabajo | otro
+  string number = 2;  // ten digits
+}
+
+message StudentAddress {
+  string street = 1;
+  string ext_number = 2;
+  string int_number = 3;
+  string neighborhood = 4;
+  string postal_code = 5;  // five digits, or empty
+  string municipality = 6;
+  string state = 7;        // one of the 32 federal entities, or empty
+}
+
+message UpdateStudentRequest {
+  string id = 1;
+  string first_name = 2;
+  string last_name = 3;
+  string curp = 4;
+  StudentProfile profile = 5;
+}
+
+message UpdateStudentResponse {
+  Student student = 1;
 }
 
 // --- RPC messages ---------------------------------------------------------
