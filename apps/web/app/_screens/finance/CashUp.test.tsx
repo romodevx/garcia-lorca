@@ -65,7 +65,10 @@ describe("CashUpPanel", () => {
   it("says who took each payment, and flags one captured late", async () => {
     finance.getCashUp.mockResolvedValue({
       deposits: [
-        { ...deposit("d1", 320000, "cash"), receivedByName: "Laura Caja", capturedAt: "2026-10-10T17:00:00" },
+        // A back-dated or same-day payment keyed on its own day: the date of
+        // the payment is a calendar date (midnight UTC), never 18:00 the day
+        // before.
+        { ...deposit("d1", 320000, "cash"), paidAt: "2026-10-10T00:00:00Z", receivedByName: "Laura Caja", capturedAt: "2026-10-10T17:00:00" },
         { ...deposit("d2", 150000, "cash"), receivedByName: "Pedro Caja", capturedAt: "2026-10-13T10:00:00" },
       ],
       cancelled: [],

@@ -135,6 +135,8 @@ func (s *spyPublisher) PublishPaymentRegistered(_ context.Context, e ports.Payme
 // --- repository --------------------------------------------------------------
 
 type fakeRepo struct {
+	// now stamps a charge's issue date, as the database's DEFAULT now() does.
+	now      func() time.Time
 	concepts map[string]domain.ChargeConcept
 	charges  map[string]domain.Charge
 	payments map[string][]domain.Payment // keyed by charge id
@@ -237,6 +239,7 @@ func (f *fakeRepo) CreateCharge(_ context.Context, c domain.Charge) (domain.Char
 	if f.hasChargeKey(chargeKey(c)) {
 		return domain.Charge{}, glerrors.New(glerrors.KindConflict, "student already has this charge")
 	}
+	c = f.issued(c)
 	f.charges[c.ID()] = c
 	return c, nil
 }
@@ -261,12 +264,21 @@ func (f *fakeRepo) CancelChargeIfUnpaid(_ context.Context, id string) (ports.Cha
 
 // CreateChargesBulk mirrors the adapter's ON CONFLICT DO NOTHING: rows whose
 // (student, cycle, concept) key already exists are skipped, not rejected.
+// issued stamps the issue date the database would give the row.
+func (f *fakeRepo) issued(c domain.Charge) domain.Charge {
+	if f.now == nil {
+		return c
+	}
+	return c.WithIssuedAt(f.now())
+}
+
 func (f *fakeRepo) CreateChargesBulk(_ context.Context, cs []domain.Charge) (int, error) {
 	created := 0
 	for _, c := range cs {
 		if f.hasChargeKey(chargeKey(c)) {
 			continue
 		}
+		c = f.issued(c)
 		f.charges[c.ID()] = c
 		created++
 	}
@@ -748,6 +760,7 @@ func newFixture(t *testing.T) *fixture {
 		publisher:   &spyPublisher{},
 	}
 	f.clock = fixedNow
+	f.repo.now = func() time.Time { return f.clock }
 	f.svc = usecase.NewFinanceService(f.repo, f.students, f.cycles, f.enrollments, f.catalog, f.calendar, f.publisher,
 		testTenant, seqID("id"), func() time.Time { return f.clock })
 	return f

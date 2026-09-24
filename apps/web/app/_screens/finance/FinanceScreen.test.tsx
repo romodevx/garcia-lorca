@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as financeApi from "../../finance/api";
 import * as configApi from "../../config/api";
 import * as studentsApi from "../../students/api";
-import { localISODate } from "../../_lib/localDate";
 import { FinanceScreen } from "./FinanceScreen";
 
 vi.mock("../../finance/api", () => ({
@@ -144,14 +143,14 @@ describe("PayDrawer — money safety", () => {
   it("registers a payment with the day the family paid", async () => {
     const user = userEvent.setup();
     finance.registerPayment.mockResolvedValue({} as financeApi.PaymentResult);
-    render(<FinanceScreen onBack={() => {}} />);
+    render(<FinanceScreen onBack={() => {}} today="2026-10-12" />);
     await screen.findByText("Valentina Cruz");
     await user.click(screen.getAllByRole("button", { name: /Registrar pago/ })[0] as HTMLElement);
     const dialog = await screen.findByRole("dialog", { name: "Registrar pago" });
 
     const date = within(dialog).getByLabelText("Fecha de pago");
-    expect(date).toHaveValue(localISODate());
-    expect(date).toHaveAttribute("max", localISODate());
+    expect(date).toHaveValue("2026-10-12");
+    expect(date).toHaveAttribute("max", "2026-10-12");
     fireEvent.change(date, { target: { value: "2026-01-05" } });
     await user.click(within(dialog).getByRole("button", { name: /Registrar pago/ }));
 

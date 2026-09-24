@@ -54,6 +54,8 @@ type Charge struct {
 	// tuition and the like — which is what keeps the "one concept per cycle"
 	// rule applying to them and only to them. See migrations/finance/0003.
 	externalRef string
+	// issuedAt is when the charge was written; zero until it is stored.
+	issuedAt time.Time
 }
 
 // NewCharge builds a validated Charge in the pending status. Every identity
@@ -308,6 +310,17 @@ func (c Charge) CycleID() string     { return c.cycleID }
 func (c Charge) ConceptID() string   { return c.conceptID }
 func (c Charge) Description() string { return c.description }
 func (c Charge) Amount() Cents       { return c.amount }
+
+// WithIssuedAt returns the charge with the moment it was written, read back from
+// storage. A payment date before it priced nothing: the charge did not exist.
+func (c Charge) WithIssuedAt(at time.Time) Charge {
+	c.issuedAt = at
+	return c
+}
+
+// IssuedAt is when the charge was written; zero when not known.
+func (c Charge) IssuedAt() time.Time { return c.issuedAt }
+
 func (c Charge) Discount() Cents     { return c.discount }
 func (c Charge) DueDate() time.Time  { return c.dueDate }
 func (c Charge) Status() string      { return c.status }

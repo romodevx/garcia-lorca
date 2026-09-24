@@ -110,21 +110,25 @@ export function CashUpPanel({ day }: CashUpPanelProps): ReactElement {
   );
 }
 
-/** The hour a deposit was taken, for a person scanning the day. */
-/** Keyed on a later local day than the one it is dated. */
+/**
+ * Keyed on a later day than the one it is dated. A back-dated payment carries
+ * a calendar date, stored as midnight UTC, so its day is read as written
+ * (UTC); the moment it was keyed is read on the office's clock.
+ */
 function capturedLate(d: Deposit): boolean {
   if (d.capturedAt === undefined || d.capturedAt === "") return false;
-  const paid = new Date(d.paidAt);
   const keyed = new Date(d.capturedAt);
-  if (Number.isNaN(paid.getTime()) || Number.isNaN(keyed.getTime())) return false;
-  return localISODate(keyed) > localISODate(paid);
+  if (Number.isNaN(keyed.getTime()) || d.paidAt.length < 10) return false;
+  return localISODate(keyed) > d.paidAt.slice(0, 10);
 }
 
+/** "13 oct": the day a late capture was keyed. */
 function dayLabel(iso: string): string {
   const at = new Date(iso);
   return Number.isNaN(at.getTime()) ? "—" : at.toLocaleDateString("es-MX", { day: "numeric", month: "short" });
 }
 
+/** The hour a deposit was taken, for a person scanning the day. */
 function hourOf(iso: string): string {
   const at = new Date(iso);
   return Number.isNaN(at.getTime()) ? "—" : at.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });

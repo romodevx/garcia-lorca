@@ -465,12 +465,14 @@ func (p *depositPlanner) repriceInscription(c ports.ChargeWithPaid) (domain.Char
 // ladderPrice is what one charge is worth on a day, and whether the ladder
 // applies to it at all.
 //
-// It is a package function and not a method on the planner because the QUOTE and
-// the COLLECTION must answer identically. When only the payment path knew this
-// rule, the counter showed the amount last written down while the same
-// transaction took the money at today's rung: the family left with a receipt for
-// one number owing another, and the freeze rule fixed the price at the higher
-// one. That is the outcome ADR 0011 says the rule exists to prevent.
+// It is a package function and not a method on the planner because the pricing
+// must not live in one path only. When only the payment path knew this rule, the
+// counter showed the amount last written down while the same transaction took
+// the money at today's rung: the family left with a receipt for one number
+// owing another, and the freeze rule fixed the price at the higher one. That is
+// the outcome ADR 0011 says the rule exists to prevent. (The quote now prices
+// through inscriptionPaidOn; the deposit uses this when a payment does not
+// settle the line at the price of its date.)
 //
 // Reports ok=false when nothing should move, which is most charges: anything
 // that is not an inscription line, anything with money on it (the first peso
@@ -551,6 +553,12 @@ const (
 func inscriptionPaidOn(
 	c ports.ChargeWithPaid, plan domain.TuitionPlan, enrolmentConceptID string, paidOn, now time.Time,
 ) (domain.Charge, priceChange, error) {
+	// Never before the charge existed: nobody paid an inscription that had not
+	// been issued, and without this floor any date typed (2020) would settle at
+	// the cheapest rung the school ever had.
+	if issued := c.Charge.IssuedAt(); !issued.IsZero() && paidOn.Before(issued) {
+		paidOn = issued
+	}
 	paidRung, ok := rungOn(c, plan, enrolmentConceptID, paidOn)
 	if !ok {
 		return domain.Charge{}, priceUnchanged, nil
@@ -596,15 +604,16 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 	// payment would leave the month open at a price the school never set.
 	budget := p.deposit.Amount().Int64()
 	for i, c := range base {
-		// The ladder, priced now. There is NO nightly run: RunBilling fires only
-		// when somebody presses "generar", so between one press and the next this
-		// path and the quote (ExpectedToday) are the only two things that know
-		// today's rung — and they share ladderPrice precisely so they cannot
-		// disagree about it.
-		// Priced at TODAY — unless this payment settles the line at the price
-		// of its own date (inscriptionPaidOn, task 7). A back-dated part payment
-		// is still priced today, which keeps a back-dated peso from freezing the
-		// earliest rung (SEC-2).
+		// The ladder. There is NO nightly run: RunBilling fires only when
+		// somebody presses "generar", so between one press and the next this path
+		// and the quote (ExpectedToday) are the only two things that price it.
+		//
+		// A payment that settles the line pays the price of its own date
+		// (inscriptionPaidOn, task 7) — which is what the quote for that date
+		// shows, since the quote is the amount that settles it. A part payment is
+		// priced at TODAY, which keeps a back-dated peso from freezing the
+		// earliest rung (SEC-2); for it the quote (a full settlement) and the
+		// collection differ by design, and the preview shows the collection.
 		settled, change, err := inscriptionPaidOn(c, p.tuition, p.enrolmentID, p.paidOn, p.svc.now())
 		if err != nil {
 			return ports.DepositWrite{}, err

@@ -11,7 +11,8 @@ import { DrawerShell } from "../../_design/DrawerShell";
 import { Icon, type IconName } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import type { ColorKey } from "../../_design/colors";
-import { DateField, HelpTip } from "../../_design/form";
+import { DateField, HelpTip, useFocusFirstInvalid } from "../../_design/form";
+import { paymentDateError } from "./CollectDrawer";
 import { listCycles, type Cycle } from "../../config/api";
 import { getOverdue, listCharges, registerPayment, type Charge, type PaymentMethod } from "../../finance/api";
 import { localISODate } from "../../_lib/localDate";
@@ -67,13 +68,16 @@ function StatusPill({ status }: { status: VisualStatus }): ReactElement {
 }
 
 // ── payment slide-over: pay a charge in one panel ──
-function PayDrawer({ charge, name, onClose, onPaid }: { charge: Charge; name: string; onClose: () => void; onPaid: () => void }): ReactElement {
+function PayDrawer({ charge, name, today, onClose, onPaid }: { charge: Charge; name: string; today?: string; onClose: () => void; onPaid: () => void }): ReactElement {
   const [amount, setAmount] = useState(centsToPesosInput(charge.remainingCents));
   const [method, setMethod] = useState<PaymentMethod>("cash");
   const [reference, setReference] = useState("");
   // The day the family paid (task 7): not always the day it is keyed.
-  const day = localISODate();
+  const day = today ?? localISODate();
   const [paidOn, setPaidOn] = useState(day);
+  // Only a payment dated earlier travels with its date (see CollectDrawer).
+  const sentDate = paidOn === day ? "" : paidOn;
+  const focusFirstInvalid = useFocusFirstInvalid();
   const [dateError, setDateError] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -94,14 +98,16 @@ function PayDrawer({ charge, name, onClose, onPaid }: { charge: Charge; name: st
   const ready = Number.isFinite(cents) && cents > 0 && !saving;
 
   const submit = async (): Promise<void> => {
-    if (paidOn === "" || paidOn > day) {
-      setDateError("La fecha de pago no puede ser futura.");
+    const wrong = paymentDateError(paidOn, day);
+    if (wrong !== undefined) {
+      setDateError(wrong);
+      focusFirstInvalid();
       return;
     }
     setSaving(true);
     setError(undefined);
     try {
-      await registerPayment(API_URL, { chargeId: charge.id, amountCents: cents, method, reference: reference.trim(), idempotencyKey: attemptKey, paidAt: paidOn });
+      await registerPayment(API_URL, { chargeId: charge.id, amountCents: cents, method, reference: reference.trim(), idempotencyKey: attemptKey, ...(sentDate !== "" ? { paidAt: sentDate } : {}) });
       onPaid();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo registrar el pago.");
@@ -156,9 +162,9 @@ function PayDrawer({ charge, name, onClose, onPaid }: { charge: Charge; name: st
             max={day}
             onChange={(v) => {
               setPaidOn(v);
-              if (v !== "" && v <= day) setDateError(undefined);
+              if (paymentDateError(v, day) === undefined) setDateError(undefined);
             }}
-            onBlur={() => setDateError(paidOn > day ? "La fecha de pago no puede ser futura." : undefined)}
+            onBlur={() => setDateError(paymentDateError(paidOn, day))}
             error={dateError}
             help="El día en que la familia pagó. Si capturas tarde, pon ese día: el recargo y el pronto pago se calculan con él."
           />
@@ -213,9 +219,11 @@ const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
 
 export interface FinanceScreenProps {
   onBack: () => void;
+  /** The office's day (aaaa-mm-dd); injected by tests. Defaults to today, locally. */
+  today?: string;
 }
 
-export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
+export function FinanceScreen({ onBack, today: officeDay }: FinanceScreenProps): ReactElement {
   const [charges, setCharges] = useState<Charge[]>([]);
   const [overdueIds, setOverdueIds] = useState<Set<string>>(new Set());
   const [studentMap, setStudentMap] = useState<Map<string, Student>>(new Map());
@@ -435,7 +443,7 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
         )}
       </div>
 
-      {pay !== null && <PayDrawer charge={pay.charge} name={pay.name} onClose={() => setPay(null)} onPaid={onPaid} />}
+      {pay !== null && <PayDrawer charge={pay.charge} name={pay.name} today={officeDay} onClose={() => setPay(null)} onPaid={onPaid} />}
       {cashUp && (
         <DrawerShell
           title="Corte de caja"

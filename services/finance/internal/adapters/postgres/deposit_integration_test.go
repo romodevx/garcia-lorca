@@ -523,3 +523,44 @@ func TestADepositKeepsWhoReceivedIt(t *testing.T) {
 		t.Errorf("payment received_by = %q, want %q", receivedBy, cashier)
 	}
 }
+
+// Task 7: the price-at-payment-date discount exists only because this deposit
+// settled the line. Voiding the deposit takes the discount back with it —
+// otherwise a voided deposit leaves the inscription permanently cheaper.
+func TestVoidingADepositTakesBackItsPriceAtPaymentDateDiscount(t *testing.T) {
+	tenant, student := tenantA, "80000000-0000-0000-0000-0000000000b7"
+	charge := seedConceptAndCharge(t, tenant, "60000000-0000-0000-0000-0000000000b7", "inscripcion precio fecha",
+		"61000000-0000-0000-0000-0000000000b7", student, "70000000-0000-0000-0000-0000000000b7", 330000, 0,
+		time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC))
+	discounted, err := charge.WithDiscount(110000, 0, domain.ReasonPriceAtPaymentDate)
+	if err != nil {
+		t.Fatalf("WithDiscount: %v", err)
+	}
+	paidOn := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
+	deposit := newDeposit(t, "62000000-0000-0000-0000-0000000000b7", tenant, student, 220000, paidOn, "")
+	payment := newPayment(t, "90000000-0000-0000-0000-0000000000b7", tenant, charge.ID(), 220000, paidOn)
+
+	repo := appRepo(t, tenant)
+	if _, _, err := repo.RegisterDeposit(context.Background(), deposit,
+		func([]ports.ChargeWithPaid) (ports.DepositWrite, error) {
+			return ports.DepositWrite{Discounted: []domain.Charge{discounted}, Allocations: []domain.Payment{payment}}, nil
+		}, nil); err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+	voided, err := deposit.Void("capturado mal", paidOn.AddDate(0, 0, 1))
+	if err != nil {
+		t.Fatalf("Void: %v", err)
+	}
+	if err := repo.VoidDeposit(context.Background(), voided); err != nil {
+		t.Fatalf("VoidDeposit: %v", err)
+	}
+
+	after, err := repo.GetCharge(context.Background(), charge.ID())
+	if err != nil {
+		t.Fatalf("GetCharge: %v", err)
+	}
+	if after.Charge.Discount().Int64() != 0 || after.Charge.DiscountReason() != "" || after.Charge.Status() != domain.StatusPending {
+		t.Errorf("after the void: discount %d (%q), %s; want no discount, pending",
+			after.Charge.Discount().Int64(), after.Charge.DiscountReason(), after.Charge.Status())
+	}
+}

@@ -898,9 +898,20 @@ func TestFinanceRecordsWhoTookTheMoney(t *testing.T) {
 		t.Errorf("deposit receiver = %+v, want %+v", svc.depositReceiver, want)
 	}
 
+	// A single-charge payment stores the account alone: no name is kept for
+	// it, so iam is not asked (a round trip on the collection path for nothing).
+	names := &countingNamer{}
+	h = handler.NewFinanceHandler(svc, handler.WithNames(names))
 	h.RegisterPayment(httptest.NewRecorder(), notesRequest(http.MethodPost, "/api/v1/finance/payments",
 		`{"chargeId":"ch-1","amountCents":1000,"method":"cash"}`, "finance:write"))
-	if svc.payReceiver != want {
-		t.Errorf("payment receiver = %+v, want %+v", svc.payReceiver, want)
+	if svc.payReceiver != (client.Receiver{UserID: "u-me"}) || names.calls != 0 {
+		t.Errorf("payment receiver = %+v after %d name lookups, want the account alone and none", svc.payReceiver, names.calls)
 	}
+}
+
+type countingNamer struct{ calls int }
+
+func (c *countingNamer) GetUser(context.Context, string) (client.User, error) {
+	c.calls++
+	return client.User{}, nil
 }

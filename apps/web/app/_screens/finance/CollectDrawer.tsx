@@ -7,7 +7,7 @@ const REFERENCIA_AYUDA =
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { DrawerShell } from "../../_design/DrawerShell";
-import { DateField, HelpTip, MoneyField } from "../../_design/form";
+import { DateField, HelpTip, MoneyField, useFocusFirstInvalid } from "../../_design/form";
 import {
   getAccount,
   getExpected,
@@ -72,6 +72,13 @@ export interface CollectDrawerProps {
 }
 
 const FUTURE_PAYMENT = "La fecha de pago no puede ser futura.";
+const MISSING_PAYMENT_DATE = "Falta la fecha de pago.";
+
+/** What is wrong with a payment date, if anything. */
+export function paymentDateError(paidOn: string, day: string): string | undefined {
+  if (paidOn === "") return MISSING_PAYMENT_DATE;
+  return paidOn > day ? FUTURE_PAYMENT : undefined;
+}
 
 /**
  * The counter, as the school actually works it: ONE number (what the family
@@ -89,10 +96,16 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
   // surcharge, the early-payment window, the inscription's price (task 7).
   const [paidOn, setPaidOn] = useState(day);
   const [dateError, setDateError] = useState<string | undefined>(undefined);
-  const dateOk = paidOn !== "" && paidOn <= day;
-  // Once the cashier types an amount, a new quote (a new date) does not
-  // overwrite it.
+  const dateOk = paymentDateError(paidOn, day) === undefined;
+  // Today is not sent: the server stamps its own clock and keeps the hour of
+  // the payment. A date alone reaches it as midnight UTC — 18:00 the day before
+  // in Mexico City — so only a payment dated earlier travels with its date.
+  const sentDate = paidOn === day ? "" : paidOn;
+  const focusFirstInvalid = useFocusFirstInvalid();
+  // Once the cashier types another amount, a new quote (a new date) does not
+  // overwrite it. Reformatting the prefilled amount on blur is not that.
   const amountEdited = useRef(false);
+  const prefilledCents = useRef<number | undefined>(undefined);
   const [owed, setOwed] = useState<number | null>(null);
   const [credit, setCredit] = useState(0);
   const [expected, setExpected] = useState<Expected | null>(null);
@@ -139,7 +152,7 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
       return;
     }
     let live = true;
-    getExpected(API_URL, student.id, paidOn)
+    getExpected(API_URL, student.id, sentDate)
       .then((e) => {
         if (!live) {
           return;
@@ -148,12 +161,13 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
         // Pre-filled with what should be paid: the common case is a family
         // paying exactly that, and retyping it is a chance to mistype it.
         if (e.amountCents > 0 && !amountEdited.current) {
+          prefilledCents.current = e.amountCents;
           setAmount(centsToPesosInput(e.amountCents));
         }
       })
       .catch(() => {});
     return () => { live = false; };
-  }, [student.id, paidOn, dateOk]);
+  }, [student.id, sentDate, dateOk]);
 
   // Ask the server what the typed amount covers, once the typing settles. The
   // rule lives in one place — the same planner that takes the money — so the
@@ -165,12 +179,12 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
     }
     let live = true;
     const timer = setTimeout(() => {
-      previewDeposit(API_URL, { studentId: student.id, amountCents: cents, paidAt: paidOn })
+      previewDeposit(API_URL, { studentId: student.id, amountCents: cents, ...(sentDate !== "" ? { paidAt: sentDate } : {}) })
         .then((p) => { if (live) { setPreview(p); } })
         .catch(() => { if (live) { setPreview(null); } });
     }, PREVIEW_DEBOUNCE_MS);
     return () => { live = false; clearTimeout(timer); };
-  }, [cents, student.id, receipt, paidOn, dateOk]);
+  }, [cents, student.id, receipt, sentDate, dateOk]);
 
   // Escape closes. Nothing is at risk: the money has not been taken, and the
   // amount is one field to retype.
@@ -182,7 +196,8 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
 
   const submit = useCallback(async (): Promise<void> => {
     if (!dateOk) {
-      setDateError(FUTURE_PAYMENT);
+      setDateError(paymentDateError(paidOn, day));
+      focusFirstInvalid();
       return;
     }
     if (!ready) {
@@ -197,7 +212,7 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
         method,
         reference: reference.trim(),
         idempotencyKey: attemptKey,
-        paidAt: paidOn,
+        ...(sentDate !== "" ? { paidAt: sentDate } : {}),
         ...(grantEarly ? { grantEarlyPayment: true } : {}),
         ...(method === "card" ? { cardType } : {}),
       });
@@ -208,7 +223,7 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
     } finally {
       setSaving(false);
     }
-  }, [dateOk, ready, student.id, cents, method, cardType, reference, attemptKey, grantEarly, paidOn, onCollected]);
+  }, [dateOk, ready, student.id, cents, method, cardType, reference, attemptKey, grantEarly, sentDate, paidOn, day, focusFirstInvalid, onCollected]);
 
   return (
     <DrawerShell
@@ -253,7 +268,7 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
                   label="Monto recibido"
                   value={amount}
                   onChange={(v) => {
-                    amountEdited.current = true;
+                    if (pesosToCents(v) !== prefilledCents.current) amountEdited.current = true;
                     setAmount(v);
                   }}
                   required
@@ -351,9 +366,9 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
                   max={day}
                   onChange={(v) => {
                     setPaidOn(v);
-                    if (v !== "" && v <= day) setDateError(undefined);
+                    if (paymentDateError(v, day) === undefined) setDateError(undefined);
                   }}
-                  onBlur={() => setDateError(paidOn > day ? FUTURE_PAYMENT : undefined)}
+                  onBlur={() => setDateError(paymentDateError(paidOn, day))}
                   error={dateError}
                   help="El día en que la familia pagó. Si capturas tarde, pon ese día: los recargos, el pronto pago y el precio de la inscripción se calculan con él."
                 />

@@ -68,8 +68,15 @@ func NewFinanceHandler(svc FinanceService, opts ...FinanceOption) *FinanceHandle
 	return h
 }
 
+// accountOf is the authenticated caller's account alone: a single-charge payment
+// keeps no name, so iam is not asked for one.
+func accountOf(r *http.Request) client.Receiver {
+	p, _ := middleware.PrincipalFrom(r.Context())
+	return client.Receiver{UserID: p.UserID}
+}
+
 // receiverOf is who takes the money: the authenticated caller, never a field
-// of the request body (task 7).
+// of the request body (task 7), with their name for the cash-up.
 func (h *FinanceHandler) receiverOf(r *http.Request) client.Receiver {
 	p, _ := middleware.PrincipalFrom(r.Context())
 	return client.Receiver{UserID: p.UserID, Name: callerName(r.Context(), h.names, p)}
@@ -356,7 +363,7 @@ func (h *FinanceHandler) RegisterPayment(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "paidAt must be a date like 2026-09-04", http.StatusBadRequest)
 		return
 	}
-	payment, charge, err := h.svc.RegisterPaymentAt(r.Context(), req.ChargeID, req.AmountCents, req.Method, req.Reference, req.IdempotencyKey, paidAt, h.receiverOf(r))
+	payment, charge, err := h.svc.RegisterPaymentAt(r.Context(), req.ChargeID, req.AmountCents, req.Method, req.Reference, req.IdempotencyKey, paidAt, accountOf(r))
 	if err != nil {
 		writeConnectError(w, err)
 		return

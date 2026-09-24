@@ -861,6 +861,28 @@ func TestTheQuoteForAPaymentDateAgreesWithTheCollection(t *testing.T) {
 	}
 }
 
+// A payment date cannot reach further back than the charge itself: nobody
+// paid an inscription that did not exist yet. Without this floor any cashier
+// could type 2020 and settle at the cheapest rung the school ever had.
+func TestAPaymentDatedBeforeTheChargeExistedGetsNoEarlierPrice(t *testing.T) {
+	f := ladderFixture(t)
+	f.clock = aug(2026, time.November, 20)
+	runOn(t, f, "2026-11-20") // issued now, at the second rung
+
+	if _, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 220000, Method: domain.MethodCash,
+		PaidAt: aug(2026, time.October, 15),
+	}); err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+
+	c := chargeNamed(t, f, testStudent, "Inscripción").Charge
+	if c.Amount().Int64() != 330000 || c.Discount().Int64() != 0 {
+		t.Errorf("Inscripción = %d − %d, want 330000 with no discount: it was issued after the date typed",
+			c.Amount().Int64(), c.Discount().Int64())
+	}
+}
+
 func chargeNamed(t *testing.T, f *fixture, student, name string) ports.ChargeWithPaid {
 	t.Helper()
 	list, err := f.svc.ListCharges(context.Background(), student, testCycle)
