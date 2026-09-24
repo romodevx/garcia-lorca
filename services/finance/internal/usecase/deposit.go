@@ -553,12 +553,11 @@ const (
 func inscriptionPaidOn(
 	c ports.ChargeWithPaid, plan domain.TuitionPlan, enrolmentConceptID string, paidOn, now time.Time,
 ) (domain.Charge, priceChange, error) {
-	// Never before the charge existed: nobody paid an inscription that had not
-	// been issued, and without this floor any date typed (2020) would settle at
-	// the cheapest rung the school ever had.
-	if issued := c.Charge.IssuedAt(); !issued.IsZero() && paidOn.Before(issued) {
-		paidOn = issued
-	}
+	// No floor beyond the table itself (the owner's decision): a date before
+	// its first tier prices at that first tier — a price the school set for
+	// this cycle — so a date typed years back reaches nothing cheaper. A cycle
+	// or issue-date floor would charge the later price to a family that paid
+	// the inscription early and was captured late.
 	paidRung, ok := rungOn(c, plan, enrolmentConceptID, paidOn)
 	if !ok {
 		return domain.Charge{}, priceUnchanged, nil

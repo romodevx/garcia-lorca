@@ -300,7 +300,6 @@ func toDomainCharge(m chargeModel, paidCents int64) (domain.Charge, error) {
 			return domain.Charge{}, err
 		}
 	}
-	c = c.WithIssuedAt(m.CreatedAt)
 	if m.Status == domain.StatusCancelled {
 		return c.Cancel()
 	}
