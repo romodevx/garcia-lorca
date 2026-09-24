@@ -174,4 +174,22 @@ describe("NotesPanel", () => {
       vi.useRealTimers();
     }
   });
+
+  // Timers stop while a laptop sleeps: the button can outlive the window on a
+  // page that just woke up. The click itself re-checks, so it never starts a
+  // void the server would refuse.
+  it("refuses a click that comes after the cutoff, whatever the screen still shows", async () => {
+    const user = userEvent.setup();
+    let clock = WRITTEN + 60_000;
+    renderPanel({ now: () => clock });
+    await screen.findByText("Llegó con fiebre");
+    const button = screen.getByRole("button", { name: "Anular nota" });
+    clock = WRITTEN + 20 * 60_000; // no timer ran: the machine was asleep
+    await user.click(button);
+
+    expect(screen.getByText("Llegó con fiebre")).toBeInTheDocument();
+    expect(screen.queryByText("Se anuló la nota")).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(/15 minutos/);
+    expect(api.voidNote).not.toHaveBeenCalled();
+  });
 });

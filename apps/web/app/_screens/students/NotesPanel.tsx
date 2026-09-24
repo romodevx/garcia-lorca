@@ -119,6 +119,13 @@ export function NotesPanel({ studentId, userId, canWrite, canVoidAny, now = Date
   };
 
   const withdraw = (note: StudentNote): void => {
+    // Re-checked on the click, not trusted from the last render: timers stop
+    // while a laptop sleeps, so the button can outlive the author's window.
+    if (!mayVoid(note)) {
+      setTick((n) => n + 1);
+      setProblem("Ya pasaron los 15 minutos: solo la dirección puede anular esta nota.");
+      return;
+    }
     setNotes((prev) => prev.filter((n) => n.id !== note.id));
     removal.remove(note, () => {
       voidNote(API_URL, studentId, note.id)
