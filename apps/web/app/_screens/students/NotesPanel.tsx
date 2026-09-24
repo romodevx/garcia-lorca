@@ -17,9 +17,20 @@ const AUTHOR_VOID_WINDOW_MS = 15 * 60_000;
  * margin for the request itself.
  */
 const VOID_LEAD_MS = 10_000;
-/** How often an open page re-checks whether the author's window has closed. */
-const WINDOW_TICK_MS = 15_000;
+/** How long after writing it the author is offered "Anular". */
+const OWN_VOID_SPAN_MS = AUTHOR_VOID_WINDOW_MS - VOID_LEAD_MS;
 const MAX_NOTE_CHARS = 2000;
+
+/** The soonest moment, after `at`, at which one of `userId`'s notes stops being voidable. */
+function earliestCutoff(notes: readonly StudentNote[], userId: string, at: number): number | undefined {
+  let soonest: number | undefined;
+  for (const note of notes) {
+    if (note.voided || note.authorUserId !== userId) continue;
+    const cutoff = Date.parse(note.createdAt) + OWN_VOID_SPAN_MS;
+    if (cutoff >= at && (soonest === undefined || cutoff < soonest)) soonest = cutoff;
+  }
+  return soonest;
+}
 const NOTE_REQUIRED = ["body"] as const;
 
 const WHEN = new Intl.DateTimeFormat("es-MX", { dateStyle: "medium", timeStyle: "short" });
@@ -50,14 +61,16 @@ export function NotesPanel({ studentId, userId, canWrite, canVoidAny, now = Date
   const [problem, setProblem] = useState<string | undefined>(undefined);
   const form = useRequired(NOTE_REQUIRED);
   const [tooLong, setTooLong] = useState<string | undefined>(undefined);
-  // Re-renders an open page so a void the server would now refuse is no longer
-  // offered. Only the author's window moves with the clock.
+  // Re-renders an open page at the exact moment the next of the author's own
+  // voids stops being offered — not at a periodic re-check, which would leave
+  // a gap in which a click is voided after the server's window.
   const [, setTick] = useState(0);
+  const nextCutoff = canWrite && !canVoidAny ? earliestCutoff(notes, userId, now()) : undefined;
   useEffect(() => {
-    if (!canWrite || canVoidAny) return;
-    const timer = setInterval(() => setTick((n) => n + 1), WINDOW_TICK_MS);
-    return () => clearInterval(timer);
-  }, [canWrite, canVoidAny]);
+    if (nextCutoff === undefined) return;
+    const timer = setTimeout(() => setTick((n) => n + 1), Math.max(0, nextCutoff - now()) + 1);
+    return () => clearTimeout(timer);
+  }, [nextCutoff, now]);
   const removal = useUndoableRemoval<StudentNote>();
   const focusFirstInvalid = useFocusFirstInvalid();
   // A reload inside the grace period must not bring a voided note back.
@@ -102,8 +115,7 @@ export function NotesPanel({ studentId, userId, canWrite, canVoidAny, now = Date
   const mayVoid = (note: StudentNote): boolean => {
     if (note.voided) return false;
     if (canVoidAny) return true;
-    const written = Date.parse(note.createdAt);
-    return canWrite && note.authorUserId === userId && now() - written <= AUTHOR_VOID_WINDOW_MS - VOID_LEAD_MS;
+    return canWrite && note.authorUserId === userId && now() <= Date.parse(note.createdAt) + OWN_VOID_SPAN_MS;
   };
 
   const withdraw = (note: StudentNote): void => {

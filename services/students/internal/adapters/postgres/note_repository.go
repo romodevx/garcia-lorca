@@ -59,13 +59,16 @@ func (r *Repository) NotesOf(ctx context.Context, studentID string) ([]domain.No
 // NoteByID returns one note, or KindNotFound — also for an id that is not a
 // uuid, which could not name a note and would otherwise fail the query.
 func (r *Repository) NoteByID(ctx context.Context, id string) (domain.Note, error) {
-	if _, err := uuid.Parse(id); err != nil {
+	parsed, parseErr := uuid.Parse(id)
+	if parseErr != nil {
 		return domain.Note{}, glerrors.ErrNotFound
 	}
 	var out domain.Note
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var m noteModel
-		err := tx.Where("id = ?", id).First(&m).Error
+		// The canonical form: uuid.Parse also takes "urn:uuid:…", which
+		// Postgres does not.
+		err := tx.Where("id = ?", parsed.String()).First(&m).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return glerrors.ErrNotFound
 		}

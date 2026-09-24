@@ -126,7 +126,7 @@ describe("NotesPanel", () => {
       expect(screen.getByRole("button", { name: "Anular nota" })).toBeInTheDocument();
       clock = WRITTEN + 16 * 60_000;
       await act(async () => {
-        vi.advanceTimersByTime(30_000);
+        vi.advanceTimersByTime(60_000);
       });
       expect(screen.queryByRole("button", { name: "Anular nota" })).not.toBeInTheDocument();
     } finally {
@@ -153,5 +153,25 @@ describe("NotesPanel", () => {
     await user.type(screen.getByLabelText("Nueva nota"), "x");
     await user.click(screen.getByRole("button", { name: "Agregar nota" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/de 1 a 2000 caracteres/);
+  });
+
+  // The button leaves at the exact cutoff, not at the next periodic re-check:
+  // a click just after it would be voided after the server's window.
+  it("takes the button away at the cutoff itself", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const cutoff = WRITTEN + 15 * 60_000 - 10_000;
+      let clock = cutoff - 100;
+      renderPanel({ now: () => clock });
+      await screen.findByText("Llegó con fiebre");
+      expect(screen.getByRole("button", { name: "Anular nota" })).toBeInTheDocument();
+      clock = cutoff + 1;
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+      expect(screen.queryByRole("button", { name: "Anular nota" })).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
