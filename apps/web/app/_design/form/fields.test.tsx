@@ -1,5 +1,5 @@
 import { type ReactElement, useState } from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -104,6 +104,18 @@ describe("EmailField", () => {
     // selección, así que al bajar a minúsculas el cursor saltaba al final.
     expect(input).toHaveAttribute("type", "text");
     expect(input).toHaveAttribute("inputmode", "email");
+    // Every EmailField captures SOMEBODY ELSE'S address (a teacher, a contact,
+    // a new user): the browser must not offer the director's own.
+    expect(input).toHaveAttribute("autocomplete", "off");
+  });
+
+  it("baja a minúsculas al terminar una composición del teclado", async () => {
+    const onChange = vi.fn();
+    render(<EmailField label="Correo" value="" onChange={onChange} />);
+    const input = screen.getByLabelText<HTMLInputElement>("Correo");
+    input.value = "Ana";
+    fireEvent.compositionEnd(input);
+    expect(onChange).toHaveBeenLastCalledWith("ana");
   });
 
   it("corregir a media dirección no revuelve el correo: el cursor se queda donde estaba", async () => {

@@ -25,7 +25,9 @@ func migrateUpTo(t *testing.T, name, target string) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open admin connection: %v", err)
 	}
-	if err := admin.Exec("CREATE DATABASE " + name).Error; err != nil {
+	// C ctype on purpose: there lower() folds ASCII only, so a migration that
+	// relied on the database's locale would pass on en_US and fail in the field.
+	if err := admin.Exec("CREATE DATABASE " + name + " TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C'").Error; err != nil {
 		t.Fatalf("create database %s: %v", name, err)
 	}
 	db, err := open(superDSNFor(name))
@@ -115,6 +117,7 @@ func TestMigration0018NormalizesUserEmails(t *testing.T) {
 	seedUser0018(t, db, "aaaaaaaa-0000-0000-0000-000000000001", "  Ana.Cruz@Colegio.MX ")
 	seedUser0018(t, db, "aaaaaaaa-0000-0000-0000-000000000002", padded("Beto@Colegio.mx"))
 	seedUser0018(t, db, "aaaaaaaa-0000-0000-0000-000000000003", "carla@colegio.mx")
+	seedUser0018(t, db, "aaaaaaaa-0000-0000-0000-000000000004", "JOSÉ@Colegio.mx")
 
 	applyMigration(t, db, "0018_email_lowercase.sql")
 
@@ -122,6 +125,8 @@ func TestMigration0018NormalizesUserEmails(t *testing.T) {
 		"aaaaaaaa-0000-0000-0000-000000000001": "ana.cruz@colegio.mx",
 		"aaaaaaaa-0000-0000-0000-000000000002": "beto@colegio.mx",
 		"aaaaaaaa-0000-0000-0000-000000000003": "carla@colegio.mx",
+		// Go's strings.ToLower folds É; lower() under a C ctype would not.
+		"aaaaaaaa-0000-0000-0000-000000000004": "josé@colegio.mx",
 	} {
 		if got := scalar[string](t, db, "SELECT email FROM users WHERE id = ?", id); got != want {
 			t.Errorf("user %s email = %q, want %q", id, got, want)

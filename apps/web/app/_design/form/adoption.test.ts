@@ -42,7 +42,7 @@ function camposDeCorreo(src: string): string[] {
 /** Cada `<TextField … />` cuya etiqueta dice que es un correo. */
 function textFieldsDeCorreo(src: string): string[] {
   return (src.match(/<TextField\b[\s\S]*?\/>/g) ?? []).filter((campo) =>
-    /label=["{`'][^"`']*correo/i.test(campo),
+    /label=\{?\s*["`'][^"`']*correo/i.test(campo),
   );
 }
 
@@ -87,6 +87,7 @@ describe("la capa de captura, en todo el sistema", () => {
     expect(camposDeCorreo(`<input inputMode="email" value={v} />`)).toHaveLength(1);
     expect(camposDeCorreo(`<input type="text" value={v} />`)).toHaveLength(0);
     expect(textFieldsDeCorreo(`<TextField label="Correo del tutor" value={v} onChange={set} />`)).toHaveLength(1);
+    expect(textFieldsDeCorreo(`<TextField label={"Correo del tutor"} value={v} />`)).toHaveLength(1);
     expect(textFieldsDeCorreo(`<TextField label="Nombre" value={v} onChange={set} />`)).toHaveLength(0);
   });
 

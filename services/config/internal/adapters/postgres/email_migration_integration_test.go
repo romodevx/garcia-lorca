@@ -25,7 +25,9 @@ func migrateUpTo(t *testing.T, name, target string) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open admin connection: %v", err)
 	}
-	if err := admin.Exec("CREATE DATABASE " + name).Error; err != nil {
+	// C ctype on purpose: there lower() folds ASCII only, so a migration that
+	// relied on the database's locale would pass on en_US and fail in the field.
+	if err := admin.Exec("CREATE DATABASE " + name + " TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C'").Error; err != nil {
 		t.Fatalf("create database %s: %v", name, err)
 	}
 	db, err := open(superDSNFor(name))

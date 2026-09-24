@@ -1,9 +1,9 @@
 "use client";
 
-import type { ChangeEvent, ReactElement } from "react";
+import type { ChangeEvent, CompositionEvent, ReactElement } from "react";
 
 import { Field, inputStyle } from "./Field";
-import { lowercaseKeepingCaret } from "./lowercaseKeepingCaret";
+import { isComposing, lowercaseKeepingCaret } from "./lowercaseKeepingCaret";
 
 /**
  * Los campos de captura del sistema. Todos comparten la misma envoltura
@@ -101,14 +101,17 @@ export function EmailField(props: BaseFieldProps): ReactElement {
           {...common(id, describedBy, props)}
           type="text"
           inputMode="email"
-          autoComplete="email"
+          autoComplete="off"
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}
           value={value}
           onChange={(e: ChangeEvent<HTMLInputElement>) => {
-            onChange(lowercaseKeepingCaret(e.target));
+            onChange(lowercaseKeepingCaret(e.target, isComposing(e)));
             onClearError?.();
+          }}
+          onCompositionEnd={(e: CompositionEvent<HTMLInputElement>) => {
+            onChange(lowercaseKeepingCaret(e.currentTarget, false));
           }}
           style={inputStyle(error !== undefined)}
         />

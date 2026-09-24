@@ -21,6 +21,7 @@ import (
 const (
 	uniqueViolation     = "23505"
 	foreignKeyViolation = "23503"
+	checkViolation      = "23514"
 )
 
 // Compile-time proof the adapters satisfy their ports. UserRepository and
@@ -427,6 +428,8 @@ func translateCreateErr(err error, internalMsg, conflictMsg string) error {
 		return glerrors.Wrap(glerrors.KindConflict, conflictMsg, err)
 	case foreignKeyViolation:
 		return glerrors.Wrap(glerrors.KindInvalid, "referenced row does not exist", err)
+	case checkViolation:
+		return glerrors.Wrap(glerrors.KindInvalid, "a value is not allowed", err)
 	default:
 		return glerrors.Wrap(glerrors.KindInternal, internalMsg, err)
 	}

@@ -36,10 +36,12 @@ SET LOCAL lock_timeout = '5s';
 -- whitespace removed and lowercase. It mirrors Go's strings.ToLower(
 -- strings.TrimSpace(x)): TrimSpace strips every Unicode White_Space rune, and
 -- btrim() strips only U+0020, so a tab, CR/LF or no-break space would survive a
--- btrim and pass the CHECK while Go never finds the row again.
+-- btrim and pass the CHECK while Go never finds the row again. The ICU
+-- collation pins lower() to full Unicode case folding: under a C ctype the
+-- database's own lower() folds ASCII only, and "JOSÉ" would become "josÉ".
 CREATE FUNCTION iam_normalized_email(email text) RETURNS text
     LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
-    RETURN lower(regexp_replace(email, '^[\s\u0085   -     　]+|[\s\u0085   -     　]+$', '', 'g'));
+    RETURN lower(regexp_replace(email COLLATE "und-x-icu", '^[\s\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\s\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$', '', 'g'));
 
 DO $$
 DECLARE

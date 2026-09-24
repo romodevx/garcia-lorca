@@ -39,6 +39,20 @@ describe("Login", () => {
 });
 
 describe("el correo de la entrada", () => {
+  it("se envía sin los espacios que trae un correo pegado", async () => {
+    // type="text" (para no perder el cursor) no recorta como type="email".
+    const user = userEvent.setup();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<Login theme="light" onToggle={() => {}} onSubmit={onSubmit} pending={false} />);
+
+    await user.click(screen.getByLabelText("Correo"));
+    await user.paste(" ana@colegio.mx ");
+    await user.type(screen.getByLabelText("Contraseña"), "pw-123");
+    await user.click(screen.getByRole("button", { name: "Entrar al sistema" }));
+
+    expect(onSubmit).toHaveBeenCalledWith("ana@colegio.mx", "pw-123");
+  });
+
   it("baja a minúsculas mientras se teclea", async () => {
     // La regla es del sistema entero, y la puerta es la primera pantalla donde
     // se escribe un correo. Además evita el caso clásico del teclado que pone
