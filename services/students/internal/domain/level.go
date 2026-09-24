@@ -43,6 +43,3 @@ func (l Level) ID() string { return l.id }
 
 // Name is the level as the school wrote it ("Preescolar").
 func (l Level) Name() string { return l.name }
-
-// IsZero reports whether no level was given at all.
-func (l Level) IsZero() bool { return l.id == "" && l.name == "" }

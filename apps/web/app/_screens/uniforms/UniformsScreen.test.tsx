@@ -66,7 +66,7 @@ function stubCatalogue(items: UniformItem[]): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     if (url.includes("/students")) return Promise.resolve(jsonResponse({ students: [zoe] }));
-    if (url.includes("/config/levels")) return Promise.resolve(jsonResponse({ levels: LEVELS }));
+    if (url.includes("/uniforms/levels")) return Promise.resolve(jsonResponse({ levels: LEVELS }));
     return Promise.resolve(jsonResponse({ items }));
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -97,7 +97,7 @@ function stubTill(items: UniformItem[], sale: Response): ReturnType<typeof vi.fn
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     if (url.includes("/counter-sale")) return Promise.resolve(sale);
     if (url.includes("/students")) return Promise.resolve(jsonResponse({ students: [zoe] }));
-    if (url.includes("/config/levels")) return Promise.resolve(jsonResponse({ levels: LEVELS }));
+    if (url.includes("/uniforms/levels")) return Promise.resolve(jsonResponse({ levels: LEVELS }));
     return Promise.resolve(jsonResponse({ items }));
   });
   vi.stubGlobal("fetch", fetchMock);

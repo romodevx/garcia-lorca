@@ -91,7 +91,16 @@ func (f fakeLevels) LevelByID(_ context.Context, id string) (domain.Level, error
 	return domain.NewLevel(id, name)
 }
 
-var catalogLevels = fakeLevels{"lvl-primaria": "Primaria", "lvl-preescolar": "Preescolar"}
+// levelsMustNotBeAsked fails the test if config is consulted: a malformed id
+// must be refused before it reaches config, where it would be a query error.
+type levelsMustNotBeAsked struct{ t *testing.T }
+
+func (l levelsMustNotBeAsked) LevelByID(_ context.Context, id string) (domain.Level, error) {
+	l.t.Errorf("config was asked about %q", id)
+	return domain.Level{}, glerrors.ErrNotFound
+}
+
+var catalogLevels = fakeLevels{"e1000000-0000-0000-0000-000000000001": "Primaria", "e1000000-0000-0000-0000-000000000002": "Preescolar"}
 
 func newService(t *testing.T) (*usecase.StudentService, *fakeRepo, *fakePub) {
 	t.Helper()
@@ -105,7 +114,7 @@ func newService(t *testing.T) (*usecase.StudentService, *fakeRepo, *fakePub) {
 func validInput() usecase.CreateApplicantInput {
 	return usecase.CreateApplicantInput{
 		CURP: "HEGA050312MDFRNN08", FirstName: "Ana", LastName: "Hernández",
-		LevelID: "lvl-primaria", GradeGroup: "4° A", GuardianName: "Marisol",
+		LevelID: "e1000000-0000-0000-0000-000000000001", GradeGroup: "4° A", GuardianName: "Marisol",
 	}
 }
 
@@ -130,13 +139,24 @@ func TestCreateApplicant(t *testing.T) {
 func TestCreateApplicantOnAnyCatalogLevel(t *testing.T) {
 	svc, _, _ := newService(t)
 	in := validInput()
-	in.LevelID = "lvl-preescolar"
+	in.LevelID = "e1000000-0000-0000-0000-000000000002"
 	s, err := svc.CreateApplicant(context.Background(), in)
 	if err != nil {
 		t.Fatalf("CreateApplicant: %v", err)
 	}
-	if s.Level().ID() != "lvl-preescolar" || s.Level().Name() != "Preescolar" {
+	if s.Level().ID() != "e1000000-0000-0000-0000-000000000002" || s.Level().Name() != "Preescolar" {
 		t.Errorf("level = (%q, %q)", s.Level().ID(), s.Level().Name())
+	}
+}
+
+// A level id that is not even shaped like one is bad input, answered here —
+// not a query error in config that would surface as a 500.
+func TestCreateApplicantMalformedLevelIDIsInvalid(t *testing.T) {
+	svc := usecase.NewStudentService(newRepo(), &fakePub{}, levelsMustNotBeAsked{t}, tenant, func() string { return "id-1" })
+	in := validInput()
+	in.LevelID = "kinder"
+	if _, err := svc.CreateApplicant(context.Background(), in); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("want KindInvalid, got %v", err)
 	}
 }
 
@@ -144,7 +164,7 @@ func TestCreateApplicantOnAnyCatalogLevel(t *testing.T) {
 func TestCreateApplicantUnknownLevelIsInvalid(t *testing.T) {
 	svc, repo, _ := newService(t)
 	in := validInput()
-	in.LevelID = "lvl-nope"
+	in.LevelID = "e1000000-0000-0000-0000-0000000000ff"
 	if _, err := svc.CreateApplicant(context.Background(), in); glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("want KindInvalid, got %v", err)
 	}

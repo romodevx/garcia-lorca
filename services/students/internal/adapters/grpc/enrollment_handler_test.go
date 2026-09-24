@@ -152,7 +152,7 @@ func seedApplicant(t *testing.T, repo *fakeRepo) *domain.Student {
 	}
 	s, err := domain.NewApplicant(domain.NewApplicantParams{
 		ID: "stu-enroll", TenantID: testTenant, CURP: c, FirstName: "Ana", LastName: "H",
-		Level: domain.RestoreLevel("lvl-primaria", "Primaria"), GradeGroup: "1° A",
+		Level: domain.RestoreLevel("e1000000-0000-0000-0000-000000000001", "Primaria"), GradeGroup: "1° A",
 	})
 	if err != nil {
 		t.Fatalf("applicant: %v", err)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 
+	"github.com/google/uuid"
+
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/students/internal/domain"
 	"github.com/garcia-lorca/services/students/internal/ports"
@@ -79,6 +81,11 @@ func (s *StudentService) CreateApplicant(ctx context.Context, in CreateApplicant
 func (s *StudentService) levelOf(ctx context.Context, id string) (domain.Level, error) {
 	if strings.TrimSpace(id) == "" {
 		return domain.Level{}, glerrors.New(glerrors.KindInvalid, "a level is required")
+	}
+	// Config ids are uuids. Anything else (an old SEP key like "kinder") is
+	// refused here, where it is a 400 — in config it would be a query error.
+	if _, err := uuid.Parse(id); err != nil {
+		return domain.Level{}, glerrors.New(glerrors.KindInvalid, "level id is not a level id")
 	}
 	level, err := s.levels.LevelByID(ctx, id)
 	if glerrors.KindOf(err) == glerrors.KindNotFound {

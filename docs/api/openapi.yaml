@@ -83,7 +83,7 @@ paths:
                     items: { $ref: '#/components/schemas/Item' }
               examples:
                 mixed:
-                  summary: One garment for every level, one only for kinder
+                  summary: A garment for every level (no levelId)
                   value:
                     items:
                       - id: 6f1c9a2e-1111-4e2b-9a11-000000000001
@@ -1853,11 +1853,11 @@ components:
 
     LevelId:
       type: string
-      format: uuid
+      pattern: '^$|^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
       description: >
         A level the school defined in Configuración (config `levels`), not a
         fixed SEP list (ADR 0014). Omitted or empty on a garment means it applies
-        to EVERY level.
+        to EVERY level. A uuid, or the empty string.
 
     Item:
       type: object

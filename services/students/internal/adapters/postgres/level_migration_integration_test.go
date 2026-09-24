@@ -3,6 +3,7 @@
 package postgres_test
 
 import (
+	"context"
 	"testing"
 
 	"gorm.io/gorm"
@@ -97,5 +98,24 @@ func TestMigration0007WithoutConfigLevels(t *testing.T) {
 
 	if got := scalar[string](t, db, "SELECT level_name FROM students"); got != "Secundaria" {
 		t.Errorf("level_name = %q", got)
+	}
+}
+
+// During a deploy the previous revision keeps writing for a few minutes: its
+// rows carry only the old `level` key, and migration 0007 has already run. They
+// are read with that key as the name rather than as a blank level.
+func TestAPupilWrittenByThePreviousRevisionReadsWithItsOldLevel(t *testing.T) {
+	const id = "b0000000-0000-0000-0000-0000000000a1"
+	if err := superDB.Exec(
+		"INSERT INTO students (id, tenant_id, curp, first_name, last_name, level) VALUES (?, ?, 'HEGA050312MDFRNN03', 'Old', 'Revision', 'primaria')",
+		id, tenantA).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	got, err := appRepo(t, tenantA).FindByID(context.Background(), id)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if got.Level().Name() != "Primaria" || got.Level().ID() != "" {
+		t.Errorf("level = (%q, %q), want (\"\", \"Primaria\")", got.Level().ID(), got.Level().Name())
 	}
 }

@@ -10,7 +10,12 @@
 --   * uniform_orders.student_level_id / student_level_name — the pupil's level
 --     at order time (a snapshot, as student_name already is).
 --   * Both SEP CHECKs are dropped. The old text columns are kept, untouched,
---     for rollback and removed by a later cleanup.
+--     for reference and removed by a later cleanup.
+--     It is NOT a rollback path: once a pupil sits in a level outside the old
+--     SEP list, the previous build cannot read that row (its column is NULL),
+--     so this change rolls forward only. The new code reads the old column as
+--     a fallback name, which covers rows the previous revision writes during
+--     the deploy window.
 --
 -- BACKFILL. As in migrations/students/0007: a row is linked only when EXACTLY
 -- ONE config level of its tenant folds (lowercase, no accents) to its old key.

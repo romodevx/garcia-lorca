@@ -67,8 +67,7 @@ func (c *Client) ByID(ctx context.Context, id string) (ports.StudentRef, error) 
 		ID:       s.GetId(),
 		FullName: fullName(s.GetFirstName(), s.GetLastName()),
 		// A pupil with no level id (a legacy row the level migration could not
-		// link) is LevelAny, which for a PUPIL means "unknown" rather than "all" —
-		// and Item.AppliesTo already refuses to dress a pupil nobody can place.
+		// link) is LevelAny, which for a PUPIL means "unknown" rather than "all".
 		Level:      domain.Level(s.GetLevelId()),
 		LevelName:  s.GetLevelName(),
 		GradeGroup: s.GetGradeGroup(),

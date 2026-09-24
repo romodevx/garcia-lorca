@@ -19,9 +19,9 @@ type StudentsClient struct {
 	rpc studentsv1connect.StudentsServiceClient
 }
 
-// CreateApplicantInput is the edge's view of a new-applicant request. Level is a
-// canonical lowercase name ("kinder", "primaria", …); an unknown value maps to
-// the unspecified wire enum, which the students service rejects as invalid.
+// CreateApplicantInput is the edge's view of a new-applicant request. LevelID is
+// a config level id; the students service resolves it against config and
+// supplies the level's name (ADR 0014).
 type CreateApplicantInput struct {
 	CURP         string
 	FirstName    string

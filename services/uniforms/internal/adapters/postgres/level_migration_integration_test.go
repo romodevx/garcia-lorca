@@ -3,6 +3,7 @@
 package postgres_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -118,5 +119,24 @@ func TestMigration0007LinksGarmentsAndOrdersToConfigLevels(t *testing.T) {
 	}
 	if hasConstraint(t, db, "uniform_items_level_check") || hasConstraint(t, db, "uniform_orders_student_level_check") {
 		t.Error("the fixed SEP lists must be gone")
+	}
+}
+
+// An order the previous revision wrote mid-deploy carries only the old
+// student_level key; it is read with that key as the level name, not blank.
+func TestAnOrderWrittenByThePreviousRevisionReadsWithItsOldLevel(t *testing.T) {
+	orderID := newUUID(t)
+	if err := superDB.Exec(`INSERT INTO uniform_orders
+	    (id, tenant_id, folio, student_id, student_name, student_level, cycle_id, source)
+	    VALUES (?, ?, ?, ?, 'Old Revision', 'secundaria', ?, 'counter')`,
+		orderID, tenantA, folioFor(t), newUUID(t), newUUID(t)).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	agg, err := appRepo(t, tenantA).GetOrder(context.Background(), orderID, nil)
+	if err != nil {
+		t.Fatalf("GetOrder: %v", err)
+	}
+	if agg.Order.StudentLevelName() != "Secundaria" {
+		t.Errorf("student level name = %q, want Secundaria", agg.Order.StudentLevelName())
 	}
 }

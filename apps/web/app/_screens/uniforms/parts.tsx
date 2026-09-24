@@ -4,6 +4,9 @@ import type { CSSProperties, ReactElement, ReactNode } from "react";
 import { Icon, type IconName } from "../../_design/Icon";
 import { HelpTip } from "../../_design/form";
 import { COLOR, type ColorKey } from "../../_design/colors";
+import type { SchoolLevel } from "../../uniforms/api";
+
+export type { SchoolLevel };
 
 /**
  * Shared pieces of the uniform shop's surface.
@@ -289,12 +292,6 @@ export function StatCards({ cards }: { cards: readonly StatCardDef[] }): ReactEl
       })}
     </div>
   );
-}
-
-/** A level as the school defined it in Configuración. */
-export interface SchoolLevel {
-  id: string;
-  name: string;
 }
 
 /**

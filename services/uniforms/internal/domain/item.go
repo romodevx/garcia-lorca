@@ -20,6 +20,39 @@ type Level string
 // "level unknown" — see AppliesTo.
 const LevelAny Level = ""
 
+// IsValid reports whether l is every-level or shaped like a config level id (a
+// uuid). An old SEP key ("primaria") is not one, and is refused as bad input
+// rather than reaching the uuid column as a query error.
+func (l Level) IsValid() bool {
+	if l == LevelAny {
+		return true
+	}
+	return isUUID(string(l))
+}
+
+// isUUID reports the canonical 8-4-4-4-12 hex shape, which is all this service
+// needs to know about an id config minted.
+func isUUID(s string) bool {
+	const canonicalLen = 36
+	if len(s) != canonicalLen {
+		return false
+	}
+	for i := 0; i < canonicalLen; i++ {
+		c := s[i]
+		switch i {
+		case 8, 13, 18, 23:
+			if c != '-' {
+				return false
+			}
+		default:
+			if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // Item is one garment in the catalogue.
 //
 // Price lives here and only here. Whatever a client sends in a request body, the
@@ -97,6 +130,9 @@ func NewItem(id, tenantID, code, name, description string, level Level, priceCen
 	trimmedDesc := strings.TrimSpace(description)
 	if len(trimmedDesc) > maxDescriptionLen {
 		return Item{}, glerrors.New(glerrors.KindInvalid, "item description is too long")
+	}
+	if !level.IsValid() {
+		return Item{}, glerrors.New(glerrors.KindInvalid, "unknown school level")
 	}
 	if priceCents < 0 {
 		return Item{}, glerrors.New(glerrors.KindInvalid, "price cannot be negative")

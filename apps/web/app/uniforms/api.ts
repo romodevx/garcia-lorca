@@ -302,6 +302,23 @@ async function send<T>(
   return (await res.json()) as T;
 }
 
+// --- levels ----------------------------------------------------------------
+
+/** A level as the school defined it in Configuración. */
+export interface SchoolLevel {
+  id: string;
+  name: string;
+}
+
+/**
+ * The school's levels, for the level chips. Served by the uniforms module
+ * itself, so a storeroom role needs no access to Configuración (ADR 0014).
+ */
+export async function listUniformLevels(baseURL: string): Promise<SchoolLevel[]> {
+  const body = await get<{ levels: SchoolLevel[] }>(baseURL, "/levels");
+  return body.levels ?? [];
+}
+
 // --- catalogue -------------------------------------------------------------
 
 /**

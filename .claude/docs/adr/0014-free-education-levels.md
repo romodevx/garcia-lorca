@@ -67,5 +67,21 @@ Which levels exist is the school's call, made in config. Every other service
 - The family app shows the school's level name as is. Qualitative grades apply
   to kínder, matched folded, **and to "Preescolar"**, which is kínder's official
   name. This is a decision for the owner to confirm.
+- **Roll forward only.** Once a pupil sits in a level outside the old list,
+  the previous build cannot read that row. The old columns are kept for
+  reference, not as a rollback path. The new code reads them as a fallback
+  name, which covers rows the previous revision writes during the deploy window.
+- **No `/api/v1` version bump.** The JSON rename (`level` to `levelId` on writes)
+  is a breaking change for an outside client. This gateway is a BFF consumed only
+  by this repo's web and mobile apps, deployed in lockstep with it; the demo seed
+  and the e2e specs moved in the same change. A public consumer would change
+  that answer.
+- Level ids are checked for uuid shape at the edge of each service (400 on
+  "kinder"), but a garment's `levelId` is not checked against config: only
+  staff with `uniforms:write` can set it, and a wrong id only hides the
+  garment from every pupil.
+- The inventory reads the school's levels from `GET /api/v1/uniforms/levels`
+  (id + name, behind the uniforms guards), so a storeroom role needs no
+  `config:read`.
 - The old `level` columns and the deprecated enum fields are dead weight, to be
-  removed by a scheduled cleanup once no rollback to the SEP build is possible.
+  removed by a scheduled cleanup.

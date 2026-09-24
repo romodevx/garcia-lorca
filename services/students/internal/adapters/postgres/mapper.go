@@ -1,6 +1,8 @@
 package postgres
 
 import (
+	"strings"
+
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/students/internal/domain"
 )
@@ -20,7 +22,7 @@ func toDomain(m studentModel) (*domain.Student, error) {
 	if m.LevelID != nil {
 		levelID = *m.LevelID
 	}
-	level := domain.RestoreLevel(levelID, m.LevelName)
+	level := domain.RestoreLevel(levelID, levelName(m))
 	status, err := domain.ParseAdmissionStatus(m.AdmissionStatus)
 	if err != nil {
 		return nil, glerrors.Wrap(glerrors.KindInternal, "unknown admission status in db", err)
@@ -144,4 +146,15 @@ func nullableID(id string) *string {
 		return nil
 	}
 	return &id
+}
+
+// levelName is the stored name, or — for a row the previous revision wrote
+// after migration 0007 ran, which carries only the old SEP key — that key,
+// capitalized ("primaria" → "Primaria"), so the pupil never reads as levelless.
+func levelName(m studentModel) string {
+	if m.LevelName != "" || m.LegacyLevel == nil || *m.LegacyLevel == "" {
+		return m.LevelName
+	}
+	key := *m.LegacyLevel
+	return strings.ToUpper(key[:1]) + key[1:]
 }

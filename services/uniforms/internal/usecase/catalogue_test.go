@@ -130,6 +130,20 @@ func TestListItemsHidesRetiredUnlessAsked(t *testing.T) {
 	}
 }
 
+// A level filter that is not a level id is bad input (400), not a query error.
+func TestListItemsRejectsALevelThatIsNotAnID(t *testing.T) {
+	f := newFixture(t)
+	_, err := f.svc.ListItems(context.Background(), ports.ListItemsFilter{Level: domain.Level("primaria")})
+	requireKind(t, err, glerrors.KindInvalid)
+}
+
+// The order list's level filter is refused the same way when it is not an id.
+func TestListOrdersRejectsALevelThatIsNotAnID(t *testing.T) {
+	f := newFixture(t)
+	_, _, _, err := f.svc.ListOrders(context.Background(), ports.ListOrdersFilter{Level: domain.Level("primaria")})
+	requireKind(t, err, glerrors.KindInvalid)
+}
+
 // TestUpsertSizesReportsCreatedAndUpdatedSeparately is what lets the panel say
 // "8 sizes created, 2 already existed" instead of upserting in silence and
 // leaving the user guessing what just happened.

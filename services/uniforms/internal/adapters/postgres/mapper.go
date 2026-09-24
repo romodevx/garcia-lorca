@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"strings"
 	"time"
 
 	"github.com/garcia-lorca/services/uniforms/internal/domain"
@@ -95,7 +96,7 @@ func toDomainOrder(m orderModel) (domain.Order, error) {
 		ID:         fromNullable(m.StudentID),
 		FullName:   m.StudentName,
 		Level:      domain.Level(fromNullable(m.StudentLevelID)),
-		LevelName:  m.StudentLevelName,
+		LevelName:  studentLevelName(m),
 		GradeGroup: m.StudentGradeGroup,
 		CycleID:    fromNullable(m.CycleID),
 	}, domain.OrderSource(m.Source), fromNullable(m.CreatedByUserID), m.CreatedAt)
@@ -192,4 +193,15 @@ func fromDomainSettings(s domain.Settings) settingsModel {
 		MaxOpenOrdersPerStudent: s.MaxOpenOrdersPerStudent(), MaxLinesPerOrder: s.MaxLinesPerOrder(),
 		MaxUnitsPerLine: s.MaxUnitsPerLine(), MaxLineExpiries: s.MaxLineExpiries(),
 	}
+}
+
+// studentLevelName is the stored snapshot, or — for an order the previous
+// revision wrote after migration 0007 ran, which carries only the old SEP key —
+// that key capitalized ("secundaria" → "Secundaria").
+func studentLevelName(m orderModel) string {
+	if m.StudentLevelName != "" || m.LegacyStudentLevel == nil || *m.LegacyStudentLevel == "" {
+		return m.StudentLevelName
+	}
+	key := *m.LegacyStudentLevel
+	return strings.ToUpper(key[:1]) + key[1:]
 }

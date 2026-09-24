@@ -108,6 +108,9 @@ func (s *Service) UpdateItem(ctx context.Context, in UpdateItemInput) (domain.It
 
 // ListItems returns the catalogue, each garment with its size run.
 func (s *Service) ListItems(ctx context.Context, f ports.ListItemsFilter) ([]ports.ItemWithSizes, error) {
+	if !f.Level.IsValid() {
+		return nil, glerrors.New(glerrors.KindInvalid, "unknown school level")
+	}
 	return s.repo.ListItems(ctx, f)
 }
 
@@ -401,6 +404,9 @@ func checkShape(settings domain.Settings, lines []SaleLineInput) error {
 
 // ListOrders returns the panel's page.
 func (s *Service) ListOrders(ctx context.Context, f ports.ListOrdersFilter) ([]ports.OrderAggregate, string, int, error) {
+	if !f.Level.IsValid() {
+		return nil, "", 0, glerrors.New(glerrors.KindInvalid, "unknown school level")
+	}
 	return s.repo.ListOrders(ctx, f)
 }
 

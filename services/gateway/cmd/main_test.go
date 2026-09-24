@@ -311,6 +311,10 @@ func (stubConfig) ListTeachingAssignments(_ context.Context, req *connect.Reques
 	}}), nil
 }
 
+func (stubConfig) ListLevels(_ context.Context, _ *connect.Request[configv1.ListLevelsRequest]) (*connect.Response[configv1.ListLevelsResponse], error) {
+	return connect.NewResponse(&configv1.ListLevelsResponse{Levels: []*configv1.Level{{Id: "lvl-pre", Name: "Preescolar"}}}), nil
+}
+
 func (stubConfig) ListGroups(_ context.Context, _ *connect.Request[configv1.ListGroupsRequest]) (*connect.Response[configv1.ListGroupsResponse], error) {
 	return connect.NewResponse(&configv1.ListGroupsResponse{Groups: []*configv1.Group{
 		{Id: "grp-1", CycleId: "cyc-1", Name: "3° A"},
@@ -2609,6 +2613,7 @@ func TestUniformsDisabledModuleIs404(t *testing.T) {
 		"/api/v1/uniforms/stock",
 		"/api/v1/uniforms/orders",
 		"/api/v1/uniforms/settings",
+		"/api/v1/uniforms/levels",
 	} {
 		res := doGateway(t, gw, http.MethodGet, path, "uni-director", "")
 		if res.StatusCode != http.StatusNotFound {
@@ -2630,7 +2635,9 @@ func TestUniformsNoTokenIs401(t *testing.T) {
 // of its job.
 func TestUniformsStoreroomCanRunTheStoreroom(t *testing.T) {
 	gw := newTestGateway(t, map[string]bool{"module_uniforms": true})
-	for _, path := range []string{"/api/v1/uniforms/items", "/api/v1/uniforms/stock", "/api/v1/uniforms/settings"} {
+	// levels included: the storeroom sees the school's levels for its chips
+	// without holding config:read (ADR 0014).
+	for _, path := range []string{"/api/v1/uniforms/items", "/api/v1/uniforms/stock", "/api/v1/uniforms/settings", "/api/v1/uniforms/levels"} {
 		res := doGateway(t, gw, http.MethodGet, path, "uni-storeroom", "")
 		if res.StatusCode != http.StatusOK {
 			t.Errorf("%s: status = %d, want 200", path, res.StatusCode)

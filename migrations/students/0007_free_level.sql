@@ -14,7 +14,12 @@
 --                  pupil was placed: lists and filters read it without a call to
 --                  config for every row.
 --   * The SEP CHECK is dropped and the old `level` column becomes nullable. It
---     is kept, untouched, for rollback and removed by a later cleanup.
+--     is kept, untouched, for reference and removed by a later cleanup.
+--     It is NOT a rollback path: once a pupil sits in a level outside the old
+--     SEP list, the previous build cannot read that row (its column is NULL),
+--     so this change rolls forward only. The new code reads the old column as
+--     a fallback name, which covers rows the previous revision writes during
+--     the deploy window.
 --
 -- BACKFILL. Every service shares one database and config's migrations run
 -- before students' (lexical order), so `levels` is joined directly. A pupil is

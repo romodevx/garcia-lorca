@@ -176,7 +176,7 @@ func seedStudent(t *testing.T, repo *fakeRepo, id string) {
 	t.Helper()
 	s := domain.Rehydrate(domain.NewApplicantParams{
 		ID: id, TenantID: tenant, FirstName: "Ana", LastName: "Hernández",
-		Level: domain.RestoreLevel("lvl-primaria", "Primaria"),
+		Level: domain.RestoreLevel("e1000000-0000-0000-0000-000000000001", "Primaria"),
 	}, domain.AdmissionAccepted)
 	repo.byID[id] = s
 }
@@ -417,7 +417,7 @@ func seedPendingApplicant(t *testing.T, repo *fakeRepo, id string) {
 	t.Helper()
 	s := domain.Rehydrate(domain.NewApplicantParams{
 		ID: id, TenantID: tenant, FirstName: "Ana", LastName: "Hernández",
-		Level: domain.RestoreLevel("lvl-primaria", "Primaria"),
+		Level: domain.RestoreLevel("e1000000-0000-0000-0000-000000000001", "Primaria"),
 	}, domain.AdmissionPending)
 	repo.byID[id] = s
 }
@@ -491,7 +491,7 @@ func TestEnrollRefusesAStudentWhoseFileIsTerminal(t *testing.T) {
 	svc, students, enrolls, catalog, _ := newEnrollService(t)
 	s := domain.Rehydrate(domain.NewApplicantParams{
 		ID: "stu-3", TenantID: tenant, FirstName: "Ana", LastName: "Hernández",
-		Level: domain.RestoreLevel("lvl-primaria", "Primaria"),
+		Level: domain.RestoreLevel("e1000000-0000-0000-0000-000000000001", "Primaria"),
 	}, domain.AdmissionWithdrawn)
 	students.byID["stu-3"] = s
 	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", GradeLevelID: "gl-1"}

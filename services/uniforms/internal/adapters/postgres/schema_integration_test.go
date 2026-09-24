@@ -54,10 +54,10 @@ var (
 	// superDSNFor builds an owner DSN for any database in the container, so a
 	// migration test can build a throwaway database of its own.
 	superDSNFor func(db string) string
-	superDB   *gorm.DB
-	appDSN    string
-	superPass = randToken()
-	appPass   = randToken()
+	superDB     *gorm.DB
+	appDSN      string
+	superPass   = randToken()
+	appPass     = randToken()
 )
 
 func randToken() string {

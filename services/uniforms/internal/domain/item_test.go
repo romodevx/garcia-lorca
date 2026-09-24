@@ -88,6 +88,8 @@ func TestNewItemValidation(t *testing.T) {
 		{"blank code", "it-1", "  ", "Playera", domain.LevelAny, 100},
 		{"blank name", "it-1", "PLA", "  ", domain.LevelAny, 100},
 		{"negative price", "it-1", "PLA", "Playera", domain.LevelAny, -1},
+		// A level is a config level id; an old SEP key is not one.
+		{"level not an id", "it-1", "PLA", "Playera", domain.Level("primaria"), 100},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -175,5 +177,21 @@ func TestAnItemMayBeScopedToAnyCatalogLevel(t *testing.T) {
 	}
 	if !item.AppliesTo(preescolar) || item.AppliesTo(domain.Level("c1000000-0000-0000-0000-000000000002")) {
 		t.Error("a scoped garment applies to its level alone")
+	}
+}
+
+func TestLevelIsValidAcceptsEveryLevelAndUUIDsOnly(t *testing.T) {
+	for l, want := range map[domain.Level]bool{
+		domain.LevelAny: true,
+		domain.Level("c1000000-0000-0000-0000-000000000002"): true,
+		domain.Level("C1000000-0000-0000-0000-00000000000A"): true,
+		domain.Level("primaria"):                             false,
+		domain.Level("c1000000-0000-0000-0000-00000000000"):  false,
+		domain.Level("c1000000x0000-0000-0000-000000000002"): false,
+		domain.Level("g1000000-0000-0000-0000-000000000002"): false,
+	} {
+		if got := l.IsValid(); got != want {
+			t.Errorf("Level(%q).IsValid() = %v, want %v", l, got, want)
+		}
 	}
 }

@@ -3,13 +3,12 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
-import { listLevels } from "../../config/api";
-import { listItems, UniformsError, type UniformItem } from "../../uniforms/api";
+import { listItems, listUniformLevels, UniformsError, type SchoolLevel, type UniformItem } from "../../uniforms/api";
 import { CatalogPanel } from "./CatalogPanel";
 import { CounterSalePanel } from "./CounterSalePanel";
 import { InventoryPanel } from "./InventoryPanel";
 import { OrdersPanel } from "./OrdersPanel";
-import { ErrorNote, money, NARROW, SkeletonRows, StatCards, type SchoolLevel } from "./parts";
+import { ErrorNote, money, NARROW, SkeletonRows, StatCards } from "./parts";
 
 import { API_URL } from "../../api-url";
 
@@ -63,11 +62,12 @@ export function UniformsScreen({
     return () => query.removeEventListener("change", sync);
   }, []);
 
-  // The school's own levels, from Configuración. A failure here leaves the
-  // chips at "Todos" alone rather than blocking the till: levels only narrow.
+  // The school's own levels, served by the uniforms module (no config:read
+  // needed). A failure leaves the chips at "Todos" alone rather than blocking
+  // the till: levels only narrow.
   const [levels, setLevels] = useState<SchoolLevel[]>([]);
   useEffect(() => {
-    listLevels(API_URL)
+    listUniformLevels(API_URL)
       .then(setLevels)
       .catch(() => setLevels([]));
   }, []);

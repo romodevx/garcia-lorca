@@ -34,7 +34,7 @@ func (f fakeLevels) LevelByID(_ context.Context, id string) (domain.Level, error
 	return domain.NewLevel(id, name)
 }
 
-var testLevels = fakeLevels{"lvl-primaria": "Primaria", "lvl-secundaria": "Secundaria"}
+var testLevels = fakeLevels{"e1000000-0000-0000-0000-000000000001": "Primaria", "e1000000-0000-0000-0000-000000000003": "Secundaria"}
 
 type fakeRepo struct {
 	byID       map[string]*domain.Student
@@ -107,7 +107,7 @@ func createValid(t *testing.T, h *grpcadapter.StudentsHandler) *studentsv1.Stude
 		Curp:         validCURP,
 		FirstName:    "Ana",
 		LastName:     "Herrera",
-		LevelId:      "lvl-primaria",
+		LevelId:      "e1000000-0000-0000-0000-000000000001",
 		GradeGroup:   "4° A",
 		GuardianName: "Rosa Herrera",
 	}))
@@ -140,7 +140,7 @@ func TestCreateApplicantThenGet(t *testing.T) {
 	if created.GetCurp() != validCURP {
 		t.Errorf("curp = %q", created.GetCurp())
 	}
-	if created.GetLevelId() != "lvl-primaria" || created.GetLevelName() != "Primaria" {
+	if created.GetLevelId() != "e1000000-0000-0000-0000-000000000001" || created.GetLevelName() != "Primaria" {
 		t.Errorf("level = (%q, %q)", created.GetLevelId(), created.GetLevelName())
 	}
 	if created.GetAdmissionStatus() != studentsv1.AdmissionStatus_ADMISSION_STATUS_PENDING {
@@ -162,7 +162,7 @@ func TestCreateApplicantInvalidCURPIsInvalidArgument(t *testing.T) {
 		Curp:      "not-a-curp",
 		FirstName: "Ana",
 		LastName:  "Herrera",
-		LevelId:   "lvl-primaria",
+		LevelId:   "e1000000-0000-0000-0000-000000000001",
 	}))
 	assertCode(t, err, connect.CodeInvalidArgument)
 }
@@ -174,7 +174,7 @@ func TestCreateApplicantDuplicateCURPIsAlreadyExists(t *testing.T) {
 		Curp:      validCURP,
 		FirstName: "Otro",
 		LastName:  "Nombre",
-		LevelId:   "lvl-primaria",
+		LevelId:   "e1000000-0000-0000-0000-000000000001",
 	}))
 	assertCode(t, err, connect.CodeAlreadyExists)
 }
@@ -255,7 +255,7 @@ func TestListStudentsMapsFilterAndToken(t *testing.T) {
 	h := grpcadapter.NewStudentsHandler(svc, nil, nil, usecase.NewHealthService("students"))
 
 	res, err := h.ListStudents(context.Background(), connect.NewRequest(&studentsv1.ListStudentsRequest{
-		LevelId:    "lvl-secundaria",
+		LevelId:    "e1000000-0000-0000-0000-000000000003",
 		Status:     studentsv1.AdmissionStatus_ADMISSION_STATUS_ACCEPTED,
 		GradeGroup: "3° B",
 		PageSize:   25,
@@ -265,7 +265,7 @@ func TestListStudentsMapsFilterAndToken(t *testing.T) {
 		t.Fatalf("ListStudents: %v", err)
 	}
 	got := repo.lastFilter
-	if got.LevelID != "lvl-secundaria" || got.Status != domain.AdmissionAccepted ||
+	if got.LevelID != "e1000000-0000-0000-0000-000000000003" || got.Status != domain.AdmissionAccepted ||
 		got.GradeGroup != "3° B" || got.PageSize != 25 || got.PageToken != "tok-1" {
 		t.Errorf("filter not mapped 1:1 from the wire: %+v", got)
 	}
