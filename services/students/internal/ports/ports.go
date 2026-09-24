@@ -29,6 +29,11 @@ type StudentRepository interface {
 	// UpdateDetails persists a correction of the file: names, CURP and the
 	// profile. A CURP another pupil holds is KindConflict.
 	UpdateDetails(ctx context.Context, s *domain.Student) error
+	// GetMedical returns the pupil's medical record (empty when none was
+	// captured); SaveMedical upserts it. A pupil the tenant cannot see is
+	// KindNotFound on save.
+	GetMedical(ctx context.Context, studentID string) (domain.MedicalRecord, error)
+	SaveMedical(ctx context.Context, studentID string, rec domain.MedicalRecord) error
 	// FindByID returns a student or KindNotFound.
 	FindByID(ctx context.Context, id string) (*domain.Student, error)
 	// List returns students matching the filter plus the next page token ("" = last page).

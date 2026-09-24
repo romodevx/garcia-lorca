@@ -616,6 +616,9 @@ func TestSeededRolesHoldTheirPermissions(t *testing.T) {
 			// grades←grades:read, attendance←attendance:read,
 			// notifications←comms:read. See ADR 0012.
 			"family:read",
+			// Task 5: a pupil's medical record has its own permissions — who
+			// reads the class list is not thereby entitled to its allergies.
+			"medical:read", "medical:write",
 		}},
 		{"guardian", []string{
 			"family:read",

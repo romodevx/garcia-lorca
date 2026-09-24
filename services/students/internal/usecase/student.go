@@ -44,6 +44,30 @@ func (s *StudentService) WithClock(now func() time.Time) *StudentService {
 	return &cp
 }
 
+// GetMedical returns a pupil's medical record. Callers reach it under
+// medical:read (the gateway), not students:read.
+func (s *StudentService) GetMedical(ctx context.Context, studentID string) (domain.MedicalRecord, error) {
+	if _, err := s.repo.FindByID(ctx, studentID); err != nil {
+		return domain.MedicalRecord{}, err
+	}
+	return s.repo.GetMedical(ctx, studentID)
+}
+
+// UpdateMedical validates and saves a pupil's medical record.
+func (s *StudentService) UpdateMedical(ctx context.Context, studentID, bloodType, allergies, conditions string) (domain.MedicalRecord, error) {
+	if _, err := s.repo.FindByID(ctx, studentID); err != nil {
+		return domain.MedicalRecord{}, err
+	}
+	rec, err := domain.NewMedicalRecord(bloodType, allergies, conditions)
+	if err != nil {
+		return domain.MedicalRecord{}, err
+	}
+	if err := s.repo.SaveMedical(ctx, studentID, rec); err != nil {
+		return domain.MedicalRecord{}, err
+	}
+	return rec, nil
+}
+
 // UpdateDetailsInput is a correction of a pupil's file as captured: names, CURP
 // and the profile. Level and group are not here: a group changes by transfer.
 type UpdateDetailsInput struct {

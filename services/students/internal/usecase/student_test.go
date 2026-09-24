@@ -16,6 +16,7 @@ const tenant = "t1"
 // --- fakes -----------------------------------------------------------------
 
 type fakeRepo struct {
+	medical   map[string]domain.MedicalRecord
 	byID      map[string]*domain.Student
 	curps     map[string]bool // tenant+curp seen (for dup detection)
 	created   []*domain.Student
@@ -25,7 +26,7 @@ type fakeRepo struct {
 }
 
 func newRepo() *fakeRepo {
-	return &fakeRepo{byID: map[string]*domain.Student{}, curps: map[string]bool{}}
+	return &fakeRepo{byID: map[string]*domain.Student{}, curps: map[string]bool{}, medical: map[string]domain.MedicalRecord{}}
 }
 
 func (r *fakeRepo) Create(_ context.Context, s *domain.Student) error {
@@ -57,6 +58,15 @@ func (r *fakeRepo) UpdateDetails(_ context.Context, s *domain.Student) error {
 	}
 	r.byID[s.ID()] = s
 	r.updated = append(r.updated, s)
+	return nil
+}
+
+func (r *fakeRepo) GetMedical(_ context.Context, id string) (domain.MedicalRecord, error) {
+	return r.medical[id], nil
+}
+
+func (r *fakeRepo) SaveMedical(_ context.Context, id string, rec domain.MedicalRecord) error {
+	r.medical[id] = rec
 	return nil
 }
 
@@ -395,5 +405,38 @@ func TestUpdateDetailsOfAnUnknownPupilIsNotFound(t *testing.T) {
 	_, err := svc.UpdateDetails(context.Background(), usecase.UpdateDetailsInput{ID: "nope", FirstName: "A", LastName: "B", CURP: "HEGA050312MDFRNN08"})
 	if glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Fatalf("want KindNotFound, got %v", err)
+	}
+}
+
+// --- medical record ----------------------------------------------------------
+
+func TestMedicalRecordIsSavedAndReadBack(t *testing.T) {
+	svc, _, _ := newService(t)
+	created, _ := svc.CreateApplicant(context.Background(), validInput())
+
+	if _, err := svc.UpdateMedical(context.Background(), created.ID(), "O+", "Penicilina", "Asma"); err != nil {
+		t.Fatalf("UpdateMedical: %v", err)
+	}
+	got, err := svc.GetMedical(context.Background(), created.ID())
+	if err != nil || got.BloodType() != "O+" || got.Allergies() != "Penicilina" {
+		t.Fatalf("GetMedical = (%+v, %v)", got, err)
+	}
+}
+
+func TestMedicalRecordOfAnUnknownPupilIsNotFound(t *testing.T) {
+	svc, _, _ := newService(t)
+	if _, err := svc.GetMedical(context.Background(), "nope"); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("GetMedical: want KindNotFound, got %v", err)
+	}
+	if _, err := svc.UpdateMedical(context.Background(), "nope", "O+", "", ""); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("UpdateMedical: want KindNotFound, got %v", err)
+	}
+}
+
+func TestMedicalRecordRejectsABloodTypeOffTheList(t *testing.T) {
+	svc, _, _ := newService(t)
+	created, _ := svc.CreateApplicant(context.Background(), validInput())
+	if _, err := svc.UpdateMedical(context.Background(), created.ID(), "Z+", "", ""); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("want KindInvalid, got %v", err)
 	}
 }

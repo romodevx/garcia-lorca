@@ -94,3 +94,15 @@ type guardianStudentModel struct {
 }
 
 func (guardianStudentModel) TableName() string { return "guardian_students" }
+
+// medicalModel is the GORM row for `student_medical`.
+type medicalModel struct {
+	TenantID   string    `gorm:"column:tenant_id;primaryKey"`
+	StudentID  string    `gorm:"column:student_id;primaryKey"`
+	BloodType  string    `gorm:"column:blood_type"`
+	Allergies  string    `gorm:"column:allergies"`
+	Conditions string    `gorm:"column:conditions"`
+	UpdatedAt  time.Time `gorm:"column:updated_at"`
+}
+
+func (medicalModel) TableName() string { return "student_medical" }

@@ -473,7 +473,7 @@ func TestUpdateStudentForwardsTheFileAndAnswersIt(t *testing.T) {
 	svc := &fakeCreator{res: client.StudentResult{
 		ID: "stu-1", FirstName: "Ana María",
 		Profile: client.StudentProfile{BirthDate: "2019-03-12", Email: "ana@correo.mx",
-			Phones: []client.StudentPhone{{Kind: "celular", Number: "5512345678"}},
+			Phones:  []client.StudentPhone{{Kind: "celular", Number: "5512345678"}},
 			Address: client.StudentAddress{State: "Jalisco"}},
 	}}
 	h := handler.NewStudentsHandler(svc)

@@ -27,6 +27,11 @@ service StudentsService {
   // here — a group changes by TransferStudent, which keeps history and seats.
   rpc UpdateStudent(UpdateStudentRequest) returns (UpdateStudentResponse);
 
+  // A pupil's medical record: blood type, allergies, relevant conditions.
+  // Served at the edge under medical:read / medical:write, not students:*.
+  rpc GetStudentMedical(GetStudentMedicalRequest) returns (GetStudentMedicalResponse);
+  rpc UpdateStudentMedical(UpdateStudentMedicalRequest) returns (UpdateStudentMedicalResponse);
+
   // ListStudents lists students, optionally filtered by level/group/status.
   rpc ListStudents(ListStudentsRequest) returns (ListStudentsResponse);
 
@@ -190,6 +195,29 @@ message UpdateStudentRequest {
 
 message UpdateStudentResponse {
   Student student = 1;
+}
+
+message StudentMedical {
+  string blood_type = 1;  // A+ A- B+ B- AB+ AB- O+ O-, or empty
+  string allergies = 2;
+  string conditions = 3;
+}
+
+message GetStudentMedicalRequest {
+  string student_id = 1;
+}
+
+message GetStudentMedicalResponse {
+  StudentMedical medical = 1;
+}
+
+message UpdateStudentMedicalRequest {
+  string student_id = 1;
+  StudentMedical medical = 2;
+}
+
+message UpdateStudentMedicalResponse {
+  StudentMedical medical = 1;
 }
 
 // --- RPC messages ---------------------------------------------------------

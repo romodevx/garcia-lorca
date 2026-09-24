@@ -271,6 +271,12 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/students", guard.Protect("students", studentsCreate))
 	mux.Handle("GET /api/v1/students", studentsRead(studentsH.List))
 	mux.Handle("GET /api/v1/students/{id}", studentsRead(studentsH.Get))
+	// A pupil's medical record answers to its own permissions (task 5).
+	medicalH := handler.NewMedicalHandler(studentsClient)
+	mux.Handle("GET /api/v1/students/{id}/medical", guard.Protect("students", requireAuthChanged(
+		middleware.RequirePermission("medical:read")(http.HandlerFunc(medicalH.Get)))))
+	mux.Handle("PUT /api/v1/students/{id}/medical", guard.Protect("students", requireAuthChanged(
+		middleware.RequirePermission("medical:write")(http.HandlerFunc(medicalH.Put)))))
 	// Correcting the file (task 5) needs students:update.
 	mux.Handle("PUT /api/v1/students/{id}", guard.Protect("students", requireAuthChanged(
 		middleware.RequirePermission("students:update")(http.HandlerFunc(studentsH.Update)))))

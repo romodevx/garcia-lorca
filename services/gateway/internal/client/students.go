@@ -448,6 +448,38 @@ func toProtoProfile(p StudentProfile) *studentsv1.StudentProfile {
 	}
 }
 
+// StudentMedical is a pupil's medical record, as the edge speaks it.
+type StudentMedical struct {
+	BloodType  string `json:"bloodType"`
+	Allergies  string `json:"allergies"`
+	Conditions string `json:"conditions"`
+}
+
+// GetStudentMedical reads a pupil's medical record.
+func (c *StudentsClient) GetStudentMedical(ctx context.Context, studentID string) (StudentMedical, error) {
+	res, err := c.rpc.GetStudentMedical(ctx, connect.NewRequest(&studentsv1.GetStudentMedicalRequest{StudentId: studentID}))
+	if err != nil {
+		return StudentMedical{}, err
+	}
+	return fromProtoMedical(res.Msg.GetMedical()), nil
+}
+
+// UpdateStudentMedical saves a pupil's medical record.
+func (c *StudentsClient) UpdateStudentMedical(ctx context.Context, studentID string, rec StudentMedical) (StudentMedical, error) {
+	res, err := c.rpc.UpdateStudentMedical(ctx, connect.NewRequest(&studentsv1.UpdateStudentMedicalRequest{
+		StudentId: studentID,
+		Medical:   &studentsv1.StudentMedical{BloodType: rec.BloodType, Allergies: rec.Allergies, Conditions: rec.Conditions},
+	}))
+	if err != nil {
+		return StudentMedical{}, err
+	}
+	return fromProtoMedical(res.Msg.GetMedical()), nil
+}
+
+func fromProtoMedical(m *studentsv1.StudentMedical) StudentMedical {
+	return StudentMedical{BloodType: m.GetBloodType(), Allergies: m.GetAllergies(), Conditions: m.GetConditions()}
+}
+
 // UpdateStudent corrects a pupil's file. InvalidArgument (a malformed field)
 // and AlreadyExists (a CURP another pupil holds) propagate for the handler.
 func (c *StudentsClient) UpdateStudent(ctx context.Context, in UpdateStudentInput) (StudentResult, error) {

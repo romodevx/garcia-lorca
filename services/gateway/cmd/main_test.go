@@ -90,6 +90,8 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"guardian-writer": {"guardians:write", "guardians:read"},
 		"guardian-reader": {"guardians:read"},
 		"family-reader":   {"family:read"},
+		// Task 5: health data answers to its own permission, not students:read.
+		"medical-reader": {"medical:read", "students:read"},
 	}
 	granted, ok := perms[req.Msg.GetAccessToken()]
 	if !ok {
@@ -178,6 +180,10 @@ func (stubStudents) ListStudents(_ context.Context, req *connect.Request[student
 	return connect.NewResponse(&studentsv1.ListStudentsResponse{Students: []*studentsv1.Student{
 		{Id: "stu-1", FirstName: "Ana", AdmissionStatus: studentsv1.AdmissionStatus_ADMISSION_STATUS_PENDING},
 	}}), nil
+}
+
+func (stubStudents) GetStudentMedical(_ context.Context, _ *connect.Request[studentsv1.GetStudentMedicalRequest]) (*connect.Response[studentsv1.GetStudentMedicalResponse], error) {
+	return connect.NewResponse(&studentsv1.GetStudentMedicalResponse{Medical: &studentsv1.StudentMedical{BloodType: "O+"}}), nil
 }
 
 func (stubStudents) GetStudent(_ context.Context, req *connect.Request[studentsv1.GetStudentRequest]) (*connect.Response[studentsv1.GetStudentResponse], error) {
@@ -2745,5 +2751,17 @@ func TestActivateCycleWithPermission200(t *testing.T) {
 	res := doGateway(t, gw, http.MethodPost, "/api/v1/config/cycles/cyc-1/activate", "config-writer", "")
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200", res.StatusCode)
+	}
+}
+
+// A pupil's medical record is not part of "reading the pupil": students:read
+// alone is refused, medical:read is served.
+func TestMedicalRecordAnswersToItsOwnPermission(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	if res := doGateway(t, gw, http.MethodGet, "/api/v1/students/stu-1/medical", "student-reader", ""); res.StatusCode != http.StatusForbidden {
+		t.Errorf("students:read alone: status = %d, want 403", res.StatusCode)
+	}
+	if res := doGateway(t, gw, http.MethodGet, "/api/v1/students/stu-1/medical", "medical-reader", ""); res.StatusCode != http.StatusOK {
+		t.Errorf("medical:read: status = %d, want 200", res.StatusCode)
 	}
 }

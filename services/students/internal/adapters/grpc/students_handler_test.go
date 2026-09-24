@@ -37,6 +37,7 @@ func (f fakeLevels) LevelByID(_ context.Context, id string) (domain.Level, error
 var testLevels = fakeLevels{"e1000000-0000-0000-0000-000000000001": "Primaria", "e1000000-0000-0000-0000-000000000003": "Secundaria"}
 
 type fakeRepo struct {
+	medical    domain.MedicalRecord
 	byID       map[string]*domain.Student
 	byCURP     map[string]bool
 	lastFilter ports.ListFilter
@@ -58,6 +59,15 @@ func (r *fakeRepo) Create(_ context.Context, s *domain.Student) error {
 
 func (r *fakeRepo) Update(_ context.Context, s *domain.Student) error {
 	r.byID[s.ID()] = s
+	return nil
+}
+
+func (r *fakeRepo) GetMedical(_ context.Context, _ string) (domain.MedicalRecord, error) {
+	return r.medical, nil
+}
+
+func (r *fakeRepo) SaveMedical(_ context.Context, _ string, rec domain.MedicalRecord) error {
+	r.medical = rec
 	return nil
 }
 
@@ -350,6 +360,32 @@ func TestUpdateStudentMalformedProfileIsInvalidArgument(t *testing.T) {
 	_, err := h.UpdateStudent(context.Background(), connect.NewRequest(&studentsv1.UpdateStudentRequest{
 		Id: "stu-1", FirstName: "Ana", LastName: "Herrera", Curp: validCURP,
 		Profile: &studentsv1.StudentProfile{Address: &studentsv1.StudentAddress{PostalCode: "4410"}},
+	}))
+	assertCode(t, err, connect.CodeInvalidArgument)
+}
+
+func TestStudentMedicalRoundTrips(t *testing.T) {
+	h, _ := newHandler(t)
+	createValid(t, h)
+	if _, err := h.UpdateStudentMedical(context.Background(), connect.NewRequest(&studentsv1.UpdateStudentMedicalRequest{
+		StudentId: "stu-1", Medical: &studentsv1.StudentMedical{BloodType: "O+", Allergies: "Penicilina"},
+	})); err != nil {
+		t.Fatalf("UpdateStudentMedical: %v", err)
+	}
+	res, err := h.GetStudentMedical(context.Background(), connect.NewRequest(&studentsv1.GetStudentMedicalRequest{StudentId: "stu-1"}))
+	if err != nil {
+		t.Fatalf("GetStudentMedical: %v", err)
+	}
+	if m := res.Msg.GetMedical(); m.GetBloodType() != "O+" || m.GetAllergies() != "Penicilina" {
+		t.Errorf("medical = %+v", m)
+	}
+}
+
+func TestStudentMedicalOffTheListIsInvalidArgument(t *testing.T) {
+	h, _ := newHandler(t)
+	createValid(t, h)
+	_, err := h.UpdateStudentMedical(context.Background(), connect.NewRequest(&studentsv1.UpdateStudentMedicalRequest{
+		StudentId: "stu-1", Medical: &studentsv1.StudentMedical{BloodType: "Z+"},
 	}))
 	assertCode(t, err, connect.CodeInvalidArgument)
 }

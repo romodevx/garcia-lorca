@@ -81,6 +81,29 @@ func (h *StudentsHandler) UpdateStudent(ctx context.Context, req *connect.Reques
 	return connect.NewResponse(&studentsv1.UpdateStudentResponse{Student: toProtoStudent(student)}), nil
 }
 
+// GetStudentMedical returns a pupil's medical record.
+func (h *StudentsHandler) GetStudentMedical(ctx context.Context, req *connect.Request[studentsv1.GetStudentMedicalRequest]) (*connect.Response[studentsv1.GetStudentMedicalResponse], error) {
+	rec, err := h.svc.GetMedical(ctx, req.Msg.GetStudentId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.GetStudentMedicalResponse{Medical: toProtoMedical(rec)}), nil
+}
+
+// UpdateStudentMedical saves a pupil's medical record.
+func (h *StudentsHandler) UpdateStudentMedical(ctx context.Context, req *connect.Request[studentsv1.UpdateStudentMedicalRequest]) (*connect.Response[studentsv1.UpdateStudentMedicalResponse], error) {
+	m := req.Msg.GetMedical()
+	rec, err := h.svc.UpdateMedical(ctx, req.Msg.GetStudentId(), m.GetBloodType(), m.GetAllergies(), m.GetConditions())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.UpdateStudentMedicalResponse{Medical: toProtoMedical(rec)}), nil
+}
+
+func toProtoMedical(r domain.MedicalRecord) *studentsv1.StudentMedical {
+	return &studentsv1.StudentMedical{BloodType: string(r.BloodType()), Allergies: r.Allergies(), Conditions: r.Conditions()}
+}
+
 func (h *StudentsHandler) GetStudent(ctx context.Context, req *connect.Request[studentsv1.GetStudentRequest]) (*connect.Response[studentsv1.GetStudentResponse], error) {
 	student, err := h.svc.GetStudent(ctx, req.Msg.GetId())
 	if err != nil {
