@@ -60,15 +60,20 @@ func (s *Store) EnsureBucket(ctx context.Context, project string) error {
 // Close releases the client.
 func (s *Store) Close() error { return s.client.Close() }
 
+// uploadChunkBytes is the largest photo rounded up to the next 256 KiB, the
+// granularity GCS requires of a chunk.
+const uploadChunkBytes = domain.MaxPhotoBytes + 256<<10
+
 // Put writes (or replaces) the object at key.
 func (s *Store) Put(ctx context.Context, key, contentType string, data []byte) error {
 	w := s.bucket.Object(key).NewWriter(ctx)
 	w.ContentType = contentType
 	// Private and never cached by an intermediary: this is a child's photo.
 	w.CacheControl = "private, no-store"
-	// One request for the whole photo (at most 2 MB). The default chunk size
-	// would allocate a 16 MiB buffer per upload.
-	w.ChunkSize = 0
+	// One chunk that holds the whole photo: the default would allocate a
+	// 16 MiB buffer per upload, and 0 (no buffer) would also turn off the
+	// library's retry of a transient 503/429.
+	w.ChunkSize = uploadChunkBytes
 	if _, err := w.Write(data); err != nil {
 		_ = w.Close() // the write already failed; its error is the one that matters
 		return glerrors.Wrap(glerrors.KindInternal, "writing the photo", err)
