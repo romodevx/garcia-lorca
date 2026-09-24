@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
 import { DrawerShell } from "../../_design/DrawerShell";
-import { SelectField, TextField, useFocusFirstInvalid } from "../../_design/form";
+import { SelectField, TextArea, TextField, useFocusFirstInvalid } from "../../_design/form";
 import { Icon, type IconName } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import type { ColorKey } from "../../_design/colors";
@@ -20,7 +20,7 @@ import {
   type Student,
 } from "../../students/api";
 import { listCycles, listGradeLevels, listGroups, listLevels, type Cycle, type GradeLevel, type Group, type Level } from "../../config/api";
-import { enrollIntoGrade, StudentsError, type Placement } from "../../students/api";
+import { addNote, enrollIntoGrade, StudentsError, type Placement } from "../../students/api";
 
 import { API_URL } from "../../api-url";
 import { csvName, downloadCsv, toCsv, type CsvColumn } from "../../_lib/csv";
@@ -74,13 +74,18 @@ const pager = (disabled: boolean): CSSProperties => ({
  */
 export class PlacementFailed extends Error {
   override readonly cause: unknown;
+  /** The first note failed too: a retry cannot write it (the CURP is taken). */
+  readonly noteFailed: boolean;
 
-  constructor(cause: unknown) {
+  constructor(cause: unknown, noteFailed = false) {
     super("placement failed");
     this.name = "PlacementFailed";
     this.cause = cause;
+    this.noteFailed = noteFailed;
   }
 }
+
+const NOTE_LOST = "La nota no se guardó: agrégala en su ficha.";
 
 /** The shape the quick-add drawer validates before it asks the server. */
 export interface QuickAddDraft {
@@ -175,11 +180,15 @@ function QuickAdd({
   onClose,
   onSave,
   levels,
+  withNote,
 }: {
   onClose: () => void;
-  onSave: (input: CreateStudentInput, gradeLevelId: string) => Promise<void>;
+  onSave: (input: CreateStudentInput, gradeLevelId: string, note: string) => Promise<void>;
   levels: readonly Level[];
+  /** students:notes_write: offer an optional first note (task 6). */
+  withNote: boolean;
 }): ReactElement {
+  const [note, setNote] = useState("");
   const [curp, setCurp] = useState("");
   const [firstName, setFirst] = useState("");
   const [lastName, setLast] = useState("");
@@ -255,9 +264,14 @@ function QuickAdd({
           guardianName: guardianName.trim(),
         },
         gradeLevelId,
+        withNote ? note.trim() : "",
       );
     } catch (err) {
-      setError(err instanceof PlacementFailed ? placementFailureMessage(err.cause) : createFailureMessage(err));
+      setError(
+        err instanceof PlacementFailed
+          ? [placementFailureMessage(err.cause), err.noteFailed ? NOTE_LOST : ""].filter((m) => m !== "").join(" ")
+          : createFailureMessage(err),
+      );
       setSaving(false);
     }
   };
@@ -345,6 +359,15 @@ function QuickAdd({
             error={fieldErrors.guardianName}
             onClearError={() => clearField("guardianName")}
           />
+          {withNote && (
+            <TextArea
+              label="Nota"
+              value={note}
+              onChange={setNote}
+              rows={2}
+              help="Opcional. Algo que el colegio deba recordar de este alumno; queda en su ficha, con tu nombre."
+            />
+          )}
           <div style={{ display: "flex", gap: 11, padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
             <span style={{ color: "var(--forest)", flexShrink: 0, marginTop: 1 }}><Icon name="check" size={19} stroke={2.6} /></span>
             <p style={{ fontSize: 13.5, color: "var(--text-muted)", lineHeight: 1.5, margin: 0 }}>El grupo <strong>se asigna solo</strong>, según el cupo de cada salón: se llena A y el siguiente alumno pasa a B. Los documentos se cargan después.</p>
@@ -577,6 +600,8 @@ export interface StudentsScreenProps {
   onBack: () => void;
   /** Opens a pupil's edit page. Absent when the caller cannot edit files. */
   onEdit?: (studentId: string) => void;
+  /** students:notes_write: the quick-add offers a first note. */
+  canWriteNotes?: boolean;
 }
 
 /** What the school reads in Excel, in the order the table shows it. */
@@ -590,7 +615,7 @@ const EXPORT_COLUMNS: readonly CsvColumn<Student>[] = [
   { label: "Estado", value: (s) => statusOf(s.admissionStatus).label },
 ];
 
-export function StudentsScreen({ onBack, onEdit }: StudentsScreenProps): ReactElement {
+export function StudentsScreen({ onBack, onEdit, canWriteNotes = false }: StudentsScreenProps): ReactElement {
   const [students, setStudents] = useState<Student[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
@@ -696,8 +721,12 @@ export function StudentsScreen({ onBack, onEdit }: StudentsScreenProps): ReactEl
   const anyFilter = tab !== "all" || level !== "Todos" || q !== "";
   const clear = (): void => { setTab("all"); setLevel("Todos"); setQ(""); };
 
-  const onSave = async (input: CreateStudentInput, gradeLevelId: string): Promise<void> => {
+  const onSave = async (input: CreateStudentInput, gradeLevelId: string, note: string): Promise<void> => {
     const created = await createStudent(API_URL, input);
+    // The note goes right after the pupil exists and BEFORE placement: a full
+    // grade keeps the drawer open, and a retry must not write the note twice.
+    // A failed note does not undo the pupil; the message says so.
+    const noteFailed = note !== "" && !(await addNote(API_URL, created.id, note).then(() => true, () => false));
     // Two calls, and the SECOND one is the one that can fail on a full grade —
     // by then the pupil exists. PlacementFailed carries that distinction to the
     // drawer, so the message can say "el alumno sí se creó" instead of sending
@@ -706,11 +735,15 @@ export function StudentsScreen({ onBack, onEdit }: StudentsScreenProps): ReactEl
     try {
       placement = await enrollIntoGrade(API_URL, created.id, gradeLevelId);
     } catch (err) {
-      throw new PlacementFailed(err);
+      throw new PlacementFailed(err, noteFailed);
     }
     setAdd(false);
     reload();
-    say(`Alumno creado · ${input.firstName} quedó en ${placement.groupName}`);
+    say(
+      noteFailed
+        ? `Alumno creado · ${input.firstName} quedó en ${placement.groupName}, pero la nota no se guardó: agrégala en su ficha`
+        : `Alumno creado · ${input.firstName} quedó en ${placement.groupName}`,
+    );
   };
   const onPlaced = (message: string): void => {
     setSheet(null);
@@ -853,7 +886,7 @@ export function StudentsScreen({ onBack, onEdit }: StudentsScreenProps): ReactEl
 
       <button onClick={() => setAdd(true)} title="Nuevo alumno" style={{ position: "fixed", right: 32, bottom: 32, zIndex: 50, height: 60, padding: "0 26px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 10, background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16.5, cursor: "pointer", boxShadow: "0 10px 30px color-mix(in oklab, var(--lime) 45%, transparent)" }}><Icon name="plus" size={22} stroke={2.6} />Nuevo alumno</button>
 
-      {add && <QuickAdd onClose={() => setAdd(false)} onSave={onSave} levels={levels} />}
+      {add && <QuickAdd onClose={() => setAdd(false)} onSave={onSave} levels={levels} withNote={canWriteNotes} />}
       {sheet !== null && <StudentSheet st={sheet} groups={groups} cycleId={groupsCycleId} gradeLevels={gradeLevels} gradeLevelsFailed={gradeLevelsFailed} onClose={() => setSheet(null)} onPlaced={onPlaced} onEdit={onEdit === undefined ? undefined : () => onEdit(sheet.id)} />}
       {toast !== null && (
         <div style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>

@@ -119,3 +119,19 @@ type photoModel struct {
 }
 
 func (photoModel) TableName() string { return "student_photos" }
+
+// noteModel is the GORM row for `student_notes`. The void columns are NULL
+// until the note is voided.
+type noteModel struct {
+	ID           string     `gorm:"column:id;primaryKey"`
+	TenantID     string     `gorm:"column:tenant_id"`
+	StudentID    string     `gorm:"column:student_id"`
+	Body         string     `gorm:"column:body"`
+	AuthorUserID string     `gorm:"column:author_user_id"`
+	AuthorName   string     `gorm:"column:author_name"`
+	CreatedAt    time.Time  `gorm:"column:created_at"`
+	VoidedAt     *time.Time `gorm:"column:voided_at"`
+	VoidedBy     *string    `gorm:"column:voided_by"`
+}
+
+func (noteModel) TableName() string { return "student_notes" }

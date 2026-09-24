@@ -222,3 +222,14 @@ type UserRef struct {
 type UserReader interface {
 	ByID(ctx context.Context, userID string) (UserRef, error)
 }
+
+// NoteRepository keeps the notes staff write about a pupil. All access is
+// tenant-scoped. AddNote refuses a pupil the tenant cannot see (KindNotFound);
+// NotesOf returns voided notes too, newest first; VoidNote records a void once
+// and answers KindConflict to a second one.
+type NoteRepository interface {
+	AddNote(ctx context.Context, n domain.Note) error
+	NotesOf(ctx context.Context, studentID string) ([]domain.Note, error)
+	NoteByID(ctx context.Context, id string) (domain.Note, error)
+	VoidNote(ctx context.Context, n domain.Note) error
+}

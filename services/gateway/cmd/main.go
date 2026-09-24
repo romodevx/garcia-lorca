@@ -286,6 +286,17 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 		middleware.RequirePermission("students:update")(http.HandlerFunc(photoH.Put)))))
 	mux.Handle("DELETE /api/v1/students/{id}/photo", guard.Protect("students", requireAuthChanged(
 		middleware.RequirePermission("students:update")(http.HandlerFunc(photoH.Delete)))))
+	// Notes on a pupil (task 6). Reading them is reading the pupil; writing
+	// needs students:notes_write. Voiding needs either permission: the author
+	// voids their own within 15 minutes, a holder of students:notes_void any
+	// note at any time — the students service applies those rules. The author
+	// is the authenticated caller, named from iam's directory.
+	notesH := handler.NewNotesHandler(studentsClient, authClient)
+	mux.Handle("GET /api/v1/students/{id}/notes", studentsRead(notesH.List))
+	mux.Handle("POST /api/v1/students/{id}/notes", guard.Protect("students", requireAuthChanged(
+		middleware.RequirePermission("students:notes_write")(http.HandlerFunc(notesH.Add)))))
+	mux.Handle("POST /api/v1/students/{id}/notes/{noteId}/void", guard.Protect("students", requireAuthChanged(
+		middleware.RequireAnyPermission("students:notes_write", "students:notes_void")(http.HandlerFunc(notesH.Void)))))
 	// Correcting the file (task 5) needs students:update.
 	mux.Handle("PUT /api/v1/students/{id}", guard.Protect("students", requireAuthChanged(
 		middleware.RequirePermission("students:update")(http.HandlerFunc(studentsH.Update)))))

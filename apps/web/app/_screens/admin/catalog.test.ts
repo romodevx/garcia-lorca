@@ -16,3 +16,13 @@ describe("PERMISSION_CATALOG — teaching (Maestro role)", () => {
     expect(write?.label).toMatch(/mis grupos/i);
   });
 });
+
+describe("PERMISSION_CATALOG — notas del alumno (tarea 6)", () => {
+  // Writing notes is delegable (a teacher writes them), so the role editor
+  // must offer it. Voiding anyone's note is the owner's alone: iam refuses to
+  // grant it, so offering it would only produce an error.
+  it("offers writing notes, and not voiding anyone's", () => {
+    expect(ALL_PERMISSIONS).toContain("students:notes_write");
+    expect(ALL_PERMISSIONS).not.toContain("students:notes_void");
+  });
+});

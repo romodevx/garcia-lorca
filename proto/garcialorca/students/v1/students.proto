@@ -38,6 +38,12 @@ service StudentsService {
   rpc GetStudentPhoto(GetStudentPhotoRequest) returns (GetStudentPhotoResponse);
   rpc DeleteStudentPhoto(DeleteStudentPhotoRequest) returns (DeleteStudentPhotoResponse);
 
+  // Notes staff keep about a pupil. Never edited: a wrong one is voided (kept
+  // and marked). The author comes from the authenticated caller at the edge.
+  rpc AddStudentNote(AddStudentNoteRequest) returns (AddStudentNoteResponse);
+  rpc ListStudentNotes(ListStudentNotesRequest) returns (ListStudentNotesResponse);
+  rpc VoidStudentNote(VoidStudentNoteRequest) returns (VoidStudentNoteResponse);
+
   // ListStudents lists students, optionally filtered by level/group/status.
   rpc ListStudents(ListStudentsRequest) returns (ListStudentsResponse);
 
@@ -256,6 +262,55 @@ message DeleteStudentPhotoRequest {
 }
 
 message DeleteStudentPhotoResponse {}
+
+// StudentNote is one entry in a pupil's history.
+message StudentNote {
+  string id = 1;
+  string student_id = 2;
+  string body = 3;
+  string author_user_id = 4;
+  // The author's name as it read when the note was written.
+  string author_name = 5;
+  google.protobuf.Timestamp created_at = 6;
+  // Unset while the note stands.
+  google.protobuf.Timestamp voided_at = 7;
+  string voided_by = 8;
+}
+
+message AddStudentNoteRequest {
+  string student_id = 1;
+  string body = 2;
+  // The authenticated caller, set by the gateway — never by a client.
+  string author_user_id = 3;
+  string author_name = 4;
+}
+
+message AddStudentNoteResponse {
+  StudentNote note = 1;
+}
+
+message ListStudentNotesRequest {
+  string student_id = 1;
+  // Include voided notes (only for callers who may void any note).
+  bool include_voided = 2;
+}
+
+message ListStudentNotesResponse {
+  repeated StudentNote notes = 1;
+}
+
+message VoidStudentNoteRequest {
+  string student_id = 1;
+  string note_id = 2;
+  // The authenticated caller, set by the gateway.
+  string voided_by = 3;
+  // Whether the caller may void any note (students:notes_void), set by the gateway.
+  bool voids_any = 4;
+}
+
+message VoidStudentNoteResponse {
+  StudentNote note = 1;
+}
 
 // --- RPC messages ---------------------------------------------------------
 

@@ -565,13 +565,18 @@ export function AppShell(): ReactElement {
         <StudentEditScreen
           key={view.studentId}
           studentId={view.studentId}
+          userId={principal?.userId ?? ""}
           permissions={principal?.permissions}
           onBack={() => go({ screen: "students" })}
         />
       )}
       {(view.screen === "students" || (view.screen === "studentEdit" && !(studentsEnabled && canEditStudents))) &&
         (studentsEnabled ? (
-          <StudentsScreen onBack={home} onEdit={canEditStudents ? editStudent : undefined} />
+          <StudentsScreen
+            onBack={home}
+            onEdit={canEditStudents ? editStudent : undefined}
+            canWriteNotes={principal?.permissions?.includes("students:notes_write") === true}
+          />
         ) : (
           // Flag OFF: never render the enrollment surface; show the friendly stub
           // so navigation never dead-ends. (Backend 404 is authoritative.)

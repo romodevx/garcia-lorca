@@ -491,3 +491,38 @@ export function updateContact(
 export function removeContact(baseURL: string, studentId: string, contactId: string): Promise<void> {
   return sendEmpty(studentPath(baseURL, studentId, `/contacts/${encodeURIComponent(contactId)}`), "DELETE");
 }
+
+// --- notes (T6) -------------------------------------------------------------
+
+/** One entry in a pupil's history. Never edited: a wrong one is voided. */
+export interface StudentNote {
+  id: string;
+  studentId: string;
+  body: string;
+  authorUserId: string;
+  /** The author's name as it read when the note was written. */
+  authorName: string;
+  /** ISO timestamp. */
+  createdAt: string;
+  /** Voided notes reach only whoever may void any note (the owner). */
+  voided: boolean;
+  voidedAt?: string;
+}
+
+export function listNotes(baseURL: string, studentId: string): Promise<StudentNote[]> {
+  return getList<StudentNote>(baseURL, `/students/${encodeURIComponent(studentId)}/notes`, "notes");
+}
+
+/** The author is whoever is signed in: the server takes it from the session. */
+export function addNote(baseURL: string, studentId: string, body: string): Promise<StudentNote> {
+  return postJSON<StudentNote>(baseURL, `/students/${encodeURIComponent(studentId)}/notes`, { body });
+}
+
+/** 403 after the author's 15 minutes (unless the caller may void any); 409 if already voided. */
+export function voidNote(baseURL: string, studentId: string, noteId: string): Promise<StudentNote> {
+  return postJSON<StudentNote>(
+    baseURL,
+    `/students/${encodeURIComponent(studentId)}/notes/${encodeURIComponent(noteId)}/void`,
+    {},
+  );
+}

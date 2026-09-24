@@ -248,7 +248,8 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	consumer := pubsubadapter.NewConsumer(enroll, log)
 
 	health := usecase.NewHealthService(serviceName)
-	handler := grpcadapter.NewStudentsHandler(svc, enroll, guardians, health)
+	notes := usecase.NewNoteService(repo, repo, tenantID, newID, time.Now)
+	handler := grpcadapter.NewStudentsHandler(svc, enroll, guardians, health).WithNotes(notes)
 
 	mux := http.NewServeMux()
 	path, h := studentsv1connect.NewStudentsServiceHandler(handler, connect.WithRecover(recoverFn))
