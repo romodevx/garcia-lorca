@@ -50,7 +50,7 @@ type StudentEnrolledEvent struct {
 	StudentID string
 	TenantID  string
 	CycleID   string
-	Level     Level
+	LevelID   string
 }
 
 // NewApplicant creates a student in the pending admission state.
@@ -64,8 +64,8 @@ func NewApplicant(p NewApplicantParams) (*Student, error) {
 	if strings.TrimSpace(p.FirstName) == "" || strings.TrimSpace(p.LastName) == "" {
 		return nil, glerrors.New(glerrors.KindInvalid, "first and last name are required")
 	}
-	if !p.Level.Valid() {
-		return nil, glerrors.New(glerrors.KindInvalid, "a valid SEP level is required")
+	if p.Level.ID() == "" {
+		return nil, glerrors.New(glerrors.KindInvalid, "a level is required")
 	}
 	return &Student{
 		id:           p.ID,
@@ -116,7 +116,7 @@ func (s *Student) Enroll(cycleID string) (StudentEnrolledEvent, AdmissionChanged
 		StudentID: s.id,
 		TenantID:  s.tenantID,
 		CycleID:   cycleID,
-		Level:     s.level,
+		LevelID:   s.level.ID(),
 	}
 	return enrolled, changed, nil
 }

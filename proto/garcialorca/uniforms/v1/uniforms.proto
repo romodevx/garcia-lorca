@@ -109,9 +109,9 @@ message HealthResponse {
 
 // --- Core types --------------------------------------------------------------
 
-// Level mirrors the students service's levels. LEVEL_UNSPECIFIED on an item
-// means the garment applies to EVERY level — the common case for a school whose
-// jumper does not change from kinder to prepa.
+// Level is the former fixed SEP level. DEPRECATED: an item is now scoped by a
+// config.v1.Level id (`level_id`), so it follows whatever levels the school
+// defines (ADR 0014). Kept, never renumbered, for wire compatibility.
 enum Level {
   LEVEL_UNSPECIFIED = 0;
   LEVEL_KINDER = 1;
@@ -132,7 +132,7 @@ message Item {
   string code = 3;
   string name = 4;
   string description = 5;
-  Level level = 6;
+  Level level = 6 [deprecated = true];  // superseded by level_id
   int64 price_cents = 7;
   bool active = 8;
   repeated StockLevel sizes = 9;
@@ -141,6 +141,10 @@ message Item {
   // counter sale were never about clothing, only the vocabulary was. Empty on
   // an older client means uniform, which is what everything already stored is.
   string category = 10;
+  // level_id scopes the item to one config.v1.Level. Empty means the item
+  // applies to EVERY level — the common case for a school whose jumper does not
+  // change from kinder to prepa.
+  string level_id = 11;
 }
 
 // StockLevel is one garment in one size. available is DERIVED (on_hand minus
@@ -249,7 +253,7 @@ message Order {
   // Snapshots taken when the order was placed, so the panel can filter and
   // search without calling the students service for every row.
   string student_name = 5;
-  Level student_level = 6;
+  Level student_level = 6 [deprecated = true];  // superseded by student_level_id/_name
   string student_grade_group = 7;
   string cycle_id = 8;
   // source is family | counter | staff.
@@ -260,6 +264,9 @@ message Order {
   repeated Fulfillment fulfillments = 13;
   google.protobuf.Timestamp created_at = 14;
   google.protobuf.Timestamp closed_at = 15;
+  // The student's level when the order was placed (config.v1.Level id + name).
+  string student_level_id = 16;
+  string student_level_name = 17;
 }
 
 // --- Catalogue ---------------------------------------------------------------
@@ -268,11 +275,12 @@ message CreateItemRequest {
   string code = 1;
   string name = 2;
   string description = 3;
-  // LEVEL_UNSPECIFIED means every level.
-  Level level = 4;
+  Level level = 4 [deprecated = true];  // superseded by level_id
   int64 price_cents = 5;
   // uniform | book | supply | other. Empty means uniform.
   string category = 6;
+  // A config.v1.Level id; empty means every level.
+  string level_id = 7;
 }
 
 message CreateItemResponse {
@@ -283,11 +291,13 @@ message UpdateItemRequest {
   string id = 1;
   string name = 2;
   string description = 3;
-  Level level = 4;
+  Level level = 4 [deprecated = true];  // superseded by level_id
   int64 price_cents = 5;
   bool active = 6;
   // uniform | book | supply | other. Empty leaves the category as it was.
   string category = 7;
+  // A config.v1.Level id; empty means every level.
+  string level_id = 8;
 }
 
 message UpdateItemResponse {
@@ -296,9 +306,10 @@ message UpdateItemResponse {
 
 message ListItemsRequest {
   bool include_inactive = 1;
-  // level narrows to the garments a student of that level may buy: the ones
-  // scoped to it, plus the ones scoped to none. LEVEL_UNSPECIFIED returns all.
-  Level level = 2;
+  Level level = 2 [deprecated = true];  // superseded by level_id
+  // level_id narrows to the items a student of that level may buy: the ones
+  // scoped to it, plus the ones scoped to none. Empty returns all.
+  string level_id = 3;
 }
 
 message ListItemsResponse {
@@ -425,7 +436,7 @@ message ListOrdersRequest {
   // student_ids scopes the read. The family surface ALWAYS sets it, and the
   // service enforces it rather than trusting the caller to have filtered.
   repeated string student_ids = 1;
-  Level level = 2;
+  Level level = 2 [deprecated = true];  // superseded by student_level_id
   // query matches a folio by shape, otherwise a student name.
   string query = 3;
   repeated FulfillmentStatus statuses = 4;
@@ -438,6 +449,8 @@ message ListOrdersRequest {
   bool descending = 9;
   int32 page_size = 10;
   string page_token = 11;
+  // Optional filter on the student's level at order time (config.v1.Level id).
+  string student_level_id = 12;
 }
 
 message ListOrdersResponse {

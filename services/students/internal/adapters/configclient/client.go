@@ -20,11 +20,15 @@ import (
 	configv1 "github.com/garcia-lorca/gen/go/garcialorca/config/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/config/v1/configv1connect"
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/services/students/internal/domain"
 	"github.com/garcia-lorca/services/students/internal/ports"
 )
 
-// Compile-time proof the adapter satisfies the consumer-defined port.
-var _ ports.CatalogValidator = (*Client)(nil)
+// Compile-time proof the adapter satisfies the consumer-defined ports.
+var (
+	_ ports.CatalogValidator = (*Client)(nil)
+	_ ports.LevelCatalog     = (*Client)(nil)
+)
 
 // Client validates cross-service catalog references against config by RPC. It
 // depends only on the generated Connect client and translates to the small,
@@ -41,6 +45,17 @@ func New(baseURL string, httpClient connect.HTTPClient) *Client {
 		httpClient = http.DefaultClient
 	}
 	return &Client{rpc: configv1connect.NewConfigServiceClient(httpClient, baseURL)}
+}
+
+// LevelByID fetches a level from the school's catalog. A missing level is
+// glerrors.ErrNotFound.
+func (c *Client) LevelByID(ctx context.Context, id string) (domain.Level, error) {
+	res, err := c.rpc.GetLevel(ctx, connect.NewRequest(&configv1.GetLevelRequest{Id: id}))
+	if err != nil {
+		return domain.Level{}, mapCatalogErr(err, "level")
+	}
+	l := res.Msg.GetLevel()
+	return domain.NewLevel(l.GetId(), l.GetName())
 }
 
 // GroupByID fetches a group by id and projects it to the students-owned view

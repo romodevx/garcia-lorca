@@ -48,7 +48,7 @@ func (p *EventPublisher) PublishStudentEnrolled(ctx context.Context, ev domain.S
 		StudentId: ev.StudentID,
 		TenantId:  ev.TenantID,
 		CycleId:   ev.CycleID,
-		Level:     protoconv.ToProtoLevel(ev.Level),
+		LevelId:   ev.LevelID,
 	})
 }
 

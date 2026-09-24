@@ -157,6 +157,12 @@ func appRepo(t *testing.T, tenant string) *pgadapter.Repository {
 	return pgadapter.NewRepository(db, tenant)
 }
 
+// Config level ids, as uuids: the column is a uuid.
+const (
+	primariaLevelID   = "e0000000-0000-0000-0000-000000000001"
+	secundariaLevelID = "e0000000-0000-0000-0000-000000000002"
+)
+
 func applicant(t *testing.T, id, tenant, curp, group string) *domain.Student {
 	t.Helper()
 	c, err := domain.NewCURP(curp)
@@ -165,7 +171,7 @@ func applicant(t *testing.T, id, tenant, curp, group string) *domain.Student {
 	}
 	s, err := domain.NewApplicant(domain.NewApplicantParams{
 		ID: id, TenantID: tenant, CURP: c, FirstName: "Ana", LastName: "H",
-		Level: domain.LevelPrimaria, GradeGroup: group,
+		Level: domain.RestoreLevel(primariaLevelID, "Primaria"), GradeGroup: group,
 	})
 	if err != nil {
 		t.Fatalf("applicant: %v", err)
@@ -189,6 +195,9 @@ func TestCreateFindAndTransition(t *testing.T) {
 	}
 	if got.Status() != domain.AdmissionPending || got.GradeGroup() != "4° A" {
 		t.Errorf("round-trip mismatch: %+v", got)
+	}
+	if got.Level().ID() != primariaLevelID || got.Level().Name() != "Primaria" {
+		t.Errorf("level round-trip = (%q, %q)", got.Level().ID(), got.Level().Name())
 	}
 
 	// Persist a transition (accept → enrolled) and re-read.
@@ -241,7 +250,7 @@ func TestListFilterAndPaginate(t *testing.T) {
 		id := fmt.Sprintf("bbbbbbbb-1111-0000-0000-00000000000%d", i+1)
 		s, _ := domain.NewApplicant(domain.NewApplicantParams{
 			ID: id, TenantID: tenantB, CURP: mustCURP(t, c), FirstName: "X", LastName: "Y",
-			Level: domain.LevelSecundaria, GradeGroup: "1° A",
+			Level: domain.RestoreLevel(secundariaLevelID, "Secundaria"), GradeGroup: "1° A",
 		})
 		if err := repo.Create(ctx, s); err != nil {
 			t.Fatalf("seed list %d: %v", i, err)
@@ -249,14 +258,14 @@ func TestListFilterAndPaginate(t *testing.T) {
 	}
 
 	// Filter by level=secundaria, page size 2 → 2 rows + a next token.
-	page1, next, err := repo.List(ctx, ports.ListFilter{Level: domain.LevelSecundaria, PageSize: 2})
+	page1, next, err := repo.List(ctx, ports.ListFilter{LevelID: secundariaLevelID, PageSize: 2})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
 	if len(page1) != 2 || next == "" {
 		t.Fatalf("page1 = %d rows, next=%q; want 2 + a token", len(page1), next)
 	}
-	page2, next2, _ := repo.List(ctx, ports.ListFilter{Level: domain.LevelSecundaria, PageSize: 2, PageToken: next})
+	page2, next2, _ := repo.List(ctx, ports.ListFilter{LevelID: secundariaLevelID, PageSize: 2, PageToken: next})
 	if len(page2) != 1 || next2 != "" {
 		t.Errorf("page2 = %d rows, next=%q; want 1 + empty (last page)", len(page2), next2)
 	}

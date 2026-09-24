@@ -79,19 +79,33 @@ func (p *fakePub) PublishAdmissionChanged(_ context.Context, ev domain.Admission
 	return nil
 }
 
+// fakeLevels is config's level catalog: an unknown id is KindNotFound, exactly
+// like the Connect client reports it.
+type fakeLevels map[string]string
+
+func (f fakeLevels) LevelByID(_ context.Context, id string) (domain.Level, error) {
+	name, ok := f[id]
+	if !ok {
+		return domain.Level{}, glerrors.ErrNotFound
+	}
+	return domain.NewLevel(id, name)
+}
+
+var catalogLevels = fakeLevels{"lvl-primaria": "Primaria", "lvl-preescolar": "Preescolar"}
+
 func newService(t *testing.T) (*usecase.StudentService, *fakeRepo, *fakePub) {
 	t.Helper()
 	repo := newRepo()
 	pub := &fakePub{}
 	ids := 0
-	svc := usecase.NewStudentService(repo, pub, tenant, func() string { ids++; return "id-" + string(rune('0'+ids)) })
+	svc := usecase.NewStudentService(repo, pub, catalogLevels, tenant, func() string { ids++; return "id-" + string(rune('0'+ids)) })
 	return svc, repo, pub
 }
 
 func validInput() usecase.CreateApplicantInput {
 	return usecase.CreateApplicantInput{
 		CURP: "HEGA050312MDFRNN08", FirstName: "Ana", LastName: "Hernández",
-		Level: domain.LevelPrimaria, GradeGroup: "4° A", GuardianName: "Marisol",
+		LevelID: "lvl-primaria", GradeGroup: "4° A", GuardianName: "Marisol",
 	}
 }
 
@@ -108,6 +122,34 @@ func TestCreateApplicant(t *testing.T) {
 	}
 	if len(repo.created) != 1 {
 		t.Errorf("expected 1 created, got %d", len(repo.created))
+	}
+}
+
+// Any level the school defined in config takes pupils — Preescolar included —
+// and the name stored is the catalog's, not whatever the caller sent.
+func TestCreateApplicantOnAnyCatalogLevel(t *testing.T) {
+	svc, _, _ := newService(t)
+	in := validInput()
+	in.LevelID = "lvl-preescolar"
+	s, err := svc.CreateApplicant(context.Background(), in)
+	if err != nil {
+		t.Fatalf("CreateApplicant: %v", err)
+	}
+	if s.Level().ID() != "lvl-preescolar" || s.Level().Name() != "Preescolar" {
+		t.Errorf("level = (%q, %q)", s.Level().ID(), s.Level().Name())
+	}
+}
+
+// A level config does not know is bad input, not a missing student.
+func TestCreateApplicantUnknownLevelIsInvalid(t *testing.T) {
+	svc, repo, _ := newService(t)
+	in := validInput()
+	in.LevelID = "lvl-nope"
+	if _, err := svc.CreateApplicant(context.Background(), in); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("want KindInvalid, got %v", err)
+	}
+	if len(repo.created) != 0 {
+		t.Error("nothing may be stored for an unknown level")
 	}
 }
 

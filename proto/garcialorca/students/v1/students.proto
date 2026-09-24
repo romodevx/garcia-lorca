@@ -100,7 +100,10 @@ message HealthResponse {
 
 // --- Core types -----------------------------------------------------------
 
-// Level is the SEP education level.
+// Level is the former fixed SEP education level. DEPRECATED: a pupil's level is
+// now a free reference to the config service's catalog (`level_id` +
+// `level_name` on Student), so a school can have Preescolar, Maternal or any
+// level it names (ADR 0014). Kept, never renumbered, for wire compatibility.
 enum Level {
   LEVEL_UNSPECIFIED = 0;
   LEVEL_KINDER = 1;
@@ -132,12 +135,18 @@ message Student {
   string curp = 3;
   string first_name = 4;
   string last_name = 5;
-  Level level = 6;
+  Level level = 6 [deprecated = true];  // superseded by level_id/level_name
   string grade_group = 7;   // e.g. "4° A"
   string guardian_name = 8;
   AdmissionStatus admission_status = 9;
   google.protobuf.Timestamp created_at = 10;
   google.protobuf.Timestamp updated_at = 11;
+  // The pupil's level: a config.v1.Level id, and its name as the school wrote
+  // it, captured when the pupil was placed ("Preescolar", "Primaria").
+  // level_id is empty only for a legacy row whose old level matched no config
+  // level when the catalog went free.
+  string level_id = 12;
+  string level_name = 13;
 }
 
 // --- RPC messages ---------------------------------------------------------
@@ -146,9 +155,10 @@ message CreateApplicantRequest {
   string curp = 1;
   string first_name = 2;
   string last_name = 3;
-  Level level = 4;
+  Level level = 4 [deprecated = true];  // superseded by level_id
   string grade_group = 5;
   string guardian_name = 6;
+  string level_id = 7;  // a config.v1.Level id; required
 }
 
 message CreateApplicantResponse {
@@ -164,11 +174,12 @@ message GetStudentResponse {
 }
 
 message ListStudentsRequest {
-  Level level = 1;             // optional filter (UNSPECIFIED = any)
+  Level level = 1 [deprecated = true];  // superseded by level_id
   AdmissionStatus status = 2;  // optional filter (UNSPECIFIED = any)
   string grade_group = 3;      // optional filter (empty = any)
   int32 page_size = 4;
   string page_token = 5;
+  string level_id = 6;         // optional filter (empty = any)
 }
 
 message ListStudentsResponse {
@@ -206,8 +217,9 @@ message StudentEnrolled {
   string student_id = 1;
   string tenant_id = 2;
   string cycle_id = 3;
-  Level level = 4;
+  Level level = 4 [deprecated = true];  // superseded by level_id
   google.protobuf.Timestamp enrolled_at = 5;
+  string level_id = 6;
 }
 
 // AdmissionStatusChanged fires on every admission state transition.

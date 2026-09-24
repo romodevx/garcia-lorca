@@ -123,7 +123,7 @@ func guardianHandler(t *testing.T) (*grpcadapter.StudentsHandler, string) {
 	ids := 0
 	guardians := usecase.NewGuardianService(studentRepo, newFakeGuardianStore(), users, testTenant,
 		func() string { ids++; return "gl-1" })
-	stu := usecase.NewStudentService(studentRepo, &fakePublisher{}, testTenant, func() string { return "stu-x" })
+	stu := usecase.NewStudentService(studentRepo, &fakePublisher{}, testLevels, testTenant, func() string { return "stu-x" })
 	h := grpcadapter.NewStudentsHandler(stu, nil, guardians, usecase.NewHealthService("students"))
 	return h, student.ID()
 }

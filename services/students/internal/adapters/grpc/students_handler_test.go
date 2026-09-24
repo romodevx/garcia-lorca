@@ -23,6 +23,19 @@ const (
 
 // --- fakes (only what the handler exercises) -------------------------------
 
+// fakeLevels stands in for config's level catalog.
+type fakeLevels map[string]string
+
+func (f fakeLevels) LevelByID(_ context.Context, id string) (domain.Level, error) {
+	name, ok := f[id]
+	if !ok {
+		return domain.Level{}, glerrors.ErrNotFound
+	}
+	return domain.NewLevel(id, name)
+}
+
+var testLevels = fakeLevels{"lvl-primaria": "Primaria", "lvl-secundaria": "Secundaria"}
+
 type fakeRepo struct {
 	byID       map[string]*domain.Student
 	byCURP     map[string]bool
@@ -84,7 +97,7 @@ func newHandler(t *testing.T) (*grpcadapter.StudentsHandler, *fakePublisher) {
 	pub := &fakePublisher{}
 	ids := 0
 	newID := func() string { ids++; return "stu-1" }
-	svc := usecase.NewStudentService(newFakeRepo(), pub, testTenant, newID)
+	svc := usecase.NewStudentService(newFakeRepo(), pub, testLevels, testTenant, newID)
 	return grpcadapter.NewStudentsHandler(svc, nil, nil, usecase.NewHealthService("students")), pub
 }
 
@@ -94,7 +107,7 @@ func createValid(t *testing.T, h *grpcadapter.StudentsHandler) *studentsv1.Stude
 		Curp:         validCURP,
 		FirstName:    "Ana",
 		LastName:     "Herrera",
-		Level:        studentsv1.Level_LEVEL_PRIMARIA,
+		LevelId:      "lvl-primaria",
 		GradeGroup:   "4° A",
 		GuardianName: "Rosa Herrera",
 	}))
@@ -127,8 +140,8 @@ func TestCreateApplicantThenGet(t *testing.T) {
 	if created.GetCurp() != validCURP {
 		t.Errorf("curp = %q", created.GetCurp())
 	}
-	if created.GetLevel() != studentsv1.Level_LEVEL_PRIMARIA {
-		t.Errorf("level = %v", created.GetLevel())
+	if created.GetLevelId() != "lvl-primaria" || created.GetLevelName() != "Primaria" {
+		t.Errorf("level = (%q, %q)", created.GetLevelId(), created.GetLevelName())
 	}
 	if created.GetAdmissionStatus() != studentsv1.AdmissionStatus_ADMISSION_STATUS_PENDING {
 		t.Errorf("status = %v, want PENDING", created.GetAdmissionStatus())
@@ -149,7 +162,7 @@ func TestCreateApplicantInvalidCURPIsInvalidArgument(t *testing.T) {
 		Curp:      "not-a-curp",
 		FirstName: "Ana",
 		LastName:  "Herrera",
-		Level:     studentsv1.Level_LEVEL_PRIMARIA,
+		LevelId:   "lvl-primaria",
 	}))
 	assertCode(t, err, connect.CodeInvalidArgument)
 }
@@ -161,7 +174,7 @@ func TestCreateApplicantDuplicateCURPIsAlreadyExists(t *testing.T) {
 		Curp:      validCURP,
 		FirstName: "Otro",
 		LastName:  "Nombre",
-		Level:     studentsv1.Level_LEVEL_PRIMARIA,
+		LevelId:   "lvl-primaria",
 	}))
 	assertCode(t, err, connect.CodeAlreadyExists)
 }
@@ -238,11 +251,11 @@ func TestListStudents(t *testing.T) {
 func TestListStudentsMapsFilterAndToken(t *testing.T) {
 	repo := newFakeRepo()
 	repo.nextToken = "next-42"
-	svc := usecase.NewStudentService(repo, &fakePublisher{}, testTenant, func() string { return "stu-1" })
+	svc := usecase.NewStudentService(repo, &fakePublisher{}, testLevels, testTenant, func() string { return "stu-1" })
 	h := grpcadapter.NewStudentsHandler(svc, nil, nil, usecase.NewHealthService("students"))
 
 	res, err := h.ListStudents(context.Background(), connect.NewRequest(&studentsv1.ListStudentsRequest{
-		Level:      studentsv1.Level_LEVEL_SECUNDARIA,
+		LevelId:    "lvl-secundaria",
 		Status:     studentsv1.AdmissionStatus_ADMISSION_STATUS_ACCEPTED,
 		GradeGroup: "3° B",
 		PageSize:   25,
@@ -252,7 +265,7 @@ func TestListStudentsMapsFilterAndToken(t *testing.T) {
 		t.Fatalf("ListStudents: %v", err)
 	}
 	got := repo.lastFilter
-	if got.Level != domain.LevelSecundaria || got.Status != domain.AdmissionAccepted ||
+	if got.LevelID != "lvl-secundaria" || got.Status != domain.AdmissionAccepted ||
 		got.GradeGroup != "3° B" || got.PageSize != 25 || got.PageToken != "tok-1" {
 		t.Errorf("filter not mapped 1:1 from the wire: %+v", got)
 	}
@@ -279,7 +292,7 @@ func (explodingRepo) FindByID(context.Context, string) (*domain.Student, error) 
 }
 
 func TestInternalErrorIsGenericAndDoesNotLeak(t *testing.T) {
-	svc := usecase.NewStudentService(explodingRepo{newFakeRepo()}, &fakePublisher{}, testTenant, func() string { return "stu-1" })
+	svc := usecase.NewStudentService(explodingRepo{newFakeRepo()}, &fakePublisher{}, testLevels, testTenant, func() string { return "stu-1" })
 	h := grpcadapter.NewStudentsHandler(svc, nil, nil, usecase.NewHealthService("students"))
 
 	_, err := h.GetStudent(context.Background(), connect.NewRequest(&studentsv1.GetStudentRequest{Id: "stu-1"}))

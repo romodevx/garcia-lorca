@@ -14,10 +14,13 @@ func toDomain(m studentModel) (*domain.Student, error) {
 	if err != nil {
 		return nil, err
 	}
-	level, err := domain.ParseLevel(m.Level)
-	if err != nil {
-		return nil, err
+	// Restored, not re-judged: a legacy pupil whose old level matched no config
+	// level has a name and no id, and must stay readable (migration 0007).
+	levelID := ""
+	if m.LevelID != nil {
+		levelID = *m.LevelID
 	}
+	level := domain.RestoreLevel(levelID, m.LevelName)
 	status, err := domain.ParseAdmissionStatus(m.AdmissionStatus)
 	if err != nil {
 		return nil, glerrors.Wrap(glerrors.KindInternal, "unknown admission status in db", err)
@@ -42,7 +45,8 @@ func fromDomain(s *domain.Student) studentModel {
 		CURP:            s.CURP().String(),
 		FirstName:       s.FirstName(),
 		LastName:        s.LastName(),
-		Level:           s.Level().String(),
+		LevelID:         nullableID(s.Level().ID()),
+		LevelName:       s.Level().Name(),
 		GradeGroup:      s.GradeGroup(),
 		GuardianName:    s.GuardianName(),
 		AdmissionStatus: s.Status().String(),
@@ -132,4 +136,12 @@ func transferFromDomain(t domain.EnrollmentTransfer) enrollmentTransferModel {
 		Reason:       t.Reason(),
 		MovedAt:      t.MovedAt(),
 	}
+}
+
+// nullableID maps the domain's "" (no config level) to SQL NULL.
+func nullableID(id string) *string {
+	if id == "" {
+		return nil
+	}
+	return &id
 }
