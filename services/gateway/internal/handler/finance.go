@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
+	"github.com/garcia-lorca/services/gateway/internal/middleware"
 )
 
 // FinanceService is the finance/debt surface the edge needs (consumer-defined,
@@ -24,9 +25,9 @@ type FinanceService interface {
 	ListCharges(ctx context.Context, studentID, cycleID string) ([]client.Charge, error)
 	ApplyDiscount(ctx context.Context, chargeID string, discountCents int64, reason string) (client.Charge, error)
 	CancelCharge(ctx context.Context, chargeID string) (client.Charge, error)
-	RegisterPaymentAt(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time) (client.Payment, client.Charge, error)
+	RegisterPaymentAt(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, receiver client.Receiver) (client.Payment, client.Charge, error)
 	GetAccount(ctx context.Context, studentID string) (client.AccountStatement, error)
-	RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string) (client.DepositResult, error)
+	RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string, receiver client.Receiver) (client.DepositResult, error)
 	ExpectedToday(ctx context.Context, studentID, on string) (client.Expected, error)
 	PreviewDeposit(ctx context.Context, studentID string, amountCents int64, paidAt time.Time) (client.DepositResult, error)
 	ListDeposits(ctx context.Context, studentID string) ([]client.Deposit, error)
@@ -45,12 +46,40 @@ type FinanceService interface {
 // MONEY IS ALWAYS INTEGER CENTS (int64) on the wire: every amount field is
 // named …Cents and is a JSON integer, never a float currency value.
 type FinanceHandler struct {
-	svc FinanceService
+	svc   FinanceService
+	names UserNamer
+}
+
+// FinanceOption configures a FinanceHandler.
+type FinanceOption func(*FinanceHandler)
+
+// WithNames names the cashier who takes money from iam's directory (task 7).
+// Without it the name falls back to the token's email.
+func WithNames(names UserNamer) FinanceOption {
+	return func(h *FinanceHandler) { h.names = names }
 }
 
 // NewFinanceHandler wires the handler to a finance service.
-func NewFinanceHandler(svc FinanceService) *FinanceHandler {
-	return &FinanceHandler{svc: svc}
+func NewFinanceHandler(svc FinanceService, opts ...FinanceOption) *FinanceHandler {
+	h := &FinanceHandler{svc: svc}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
+}
+
+// accountOf is the authenticated caller's account alone: a single-charge payment
+// keeps no name, so iam is not asked for one.
+func accountOf(r *http.Request) client.Receiver {
+	p, _ := middleware.PrincipalFrom(r.Context())
+	return client.Receiver{UserID: p.UserID}
+}
+
+// receiverOf is who takes the money: the authenticated caller, never a field
+// of the request body (task 7), with their name for the cash-up.
+func (h *FinanceHandler) receiverOf(r *http.Request) client.Receiver {
+	p, _ := middleware.PrincipalFrom(r.Context())
+	return client.Receiver{UserID: p.UserID, Name: callerName(r.Context(), h.names, p)}
 }
 
 // --- request bodies --------------------------------------------------------
@@ -334,7 +363,7 @@ func (h *FinanceHandler) RegisterPayment(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "paidAt must be a date like 2026-09-04", http.StatusBadRequest)
 		return
 	}
-	payment, charge, err := h.svc.RegisterPaymentAt(r.Context(), req.ChargeID, req.AmountCents, req.Method, req.Reference, req.IdempotencyKey, paidAt)
+	payment, charge, err := h.svc.RegisterPaymentAt(r.Context(), req.ChargeID, req.AmountCents, req.Method, req.Reference, req.IdempotencyKey, paidAt, accountOf(r))
 	if err != nil {
 		writeConnectError(w, err)
 		return
@@ -383,7 +412,7 @@ func (h *FinanceHandler) RegisterDeposit(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	got, derr := h.svc.RegisterDeposit(r.Context(), req.StudentID, req.AmountCents,
-		req.Method, req.Reference, req.IdempotencyKey, paidAt, req.GrantEarlyPayment, req.CardType)
+		req.Method, req.Reference, req.IdempotencyKey, paidAt, req.GrantEarlyPayment, req.CardType, h.receiverOf(r))
 	if derr != nil {
 		writeConnectError(w, derr)
 		return

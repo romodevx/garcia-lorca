@@ -767,6 +767,137 @@ func TestABackDatedPaymentCannotLowerTheInscription(t *testing.T) {
 	}
 }
 
+// Task 7 (owner's decision). A family that paid before the price rose, and was
+// captured after it, pays the price of the day they paid — but only when THAT
+// payment settles the inscription at that price. Otherwise the price is
+// today's, which is what keeps the $1 trick above closed.
+func TestAPaymentThatSettlesTheInscriptionPaysThePriceOfItsDate(t *testing.T) {
+	f := ladderFixture(t)
+	runOn(t, f, "2026-09-15")
+	f.clock = aug(2026, time.November, 20) // nobody has pressed "generar" since
+
+	if _, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 220000, Method: domain.MethodCash,
+		PaidAt: aug(2026, time.October, 15),
+	}); err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+
+	inscription := chargeNamed(t, f, testStudent, "Inscripción")
+	if inscription.Charge.Amount().Int64() != 220000 || inscription.PaidCents != 220000 {
+		t.Errorf("Inscripción = %d, paid %d; want 220000 settled at October's price",
+			inscription.Charge.Amount().Int64(), inscription.PaidCents)
+	}
+}
+
+// The inscription was already raised (a run after the price change). Settling
+// it at the price of the payment date lowers it — and a lowering is never
+// silent: it is a discount with its own reason.
+func TestSettlingAtAnEarlierPriceLeavesAReasonedDiscount(t *testing.T) {
+	f := ladderFixture(t)
+	runOn(t, f, "2026-09-15")
+	f.clock = aug(2026, time.November, 20)
+	runOn(t, f, "2026-11-20")
+
+	if _, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 220000, Method: domain.MethodCash,
+		PaidAt: aug(2026, time.October, 15),
+	}); err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+
+	inscription := chargeNamed(t, f, testStudent, "Inscripción")
+	c := inscription.Charge
+	if c.Amount().Int64() != 330000 || c.Discount().Int64() != 110000 || c.DiscountReason() != domain.ReasonPriceAtPaymentDate {
+		t.Errorf("Inscripción = %d − %d (%q); want 330000 − 110000 (%q)",
+			c.Amount().Int64(), c.Discount().Int64(), c.DiscountReason(), domain.ReasonPriceAtPaymentDate)
+	}
+	if inscription.PaidCents != 220000 {
+		t.Errorf("paid = %d, want 220000", inscription.PaidCents)
+	}
+}
+
+// A back-dated payment that does NOT settle the inscription pays today's
+// price: only a full settlement earns the price of its date.
+func TestABackDatedPartPaymentPaysTodaysPrice(t *testing.T) {
+	f := ladderFixture(t)
+	runOn(t, f, "2026-09-15")
+	f.clock = aug(2026, time.November, 20)
+
+	if _, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 100000, Method: domain.MethodCash,
+		PaidAt: aug(2026, time.October, 15),
+	}); err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+
+	if got := chargeNamed(t, f, testStudent, "Inscripción").Charge.Amount().Int64(); got != 330000 {
+		t.Errorf("Inscripción = %d, want today's 330000", got)
+	}
+}
+
+// The quote for a payment date agrees with what that payment would be charged.
+func TestTheQuoteForAPaymentDateAgreesWithTheCollection(t *testing.T) {
+	f := ladderFixture(t)
+	runOn(t, f, "2026-09-15")
+	f.clock = aug(2026, time.November, 20)
+	runOn(t, f, "2026-11-20")
+
+	quote, err := f.svc.PreviewDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 220000, Method: domain.MethodCash,
+		PaidAt: aug(2026, time.October, 15),
+	})
+	if err != nil {
+		t.Fatalf("PreviewDeposit: %v", err)
+	}
+	var toInscription int64
+	for _, a := range quote.Allocations {
+		if a.ChargeID() == chargeNamed(t, f, testStudent, "Inscripción").Charge.ID() {
+			toInscription += a.Amount().Int64()
+		}
+	}
+	if toInscription != 220000 {
+		t.Errorf("the preview puts %d on the inscription, want all 220000 settling it", toInscription)
+	}
+}
+
+// Owner's decision: no floor beyond the table itself. A date typed years back
+// prices at the cycle's FIRST tier — a price the school set — and never below
+// it; the discount is also capped by the climb the table shows.
+func TestAPaymentDatedYearsBackReachesNothingBelowTheFirstTier(t *testing.T) {
+	f := ladderFixture(t)
+	runOn(t, f, "2026-09-15")
+	f.clock = aug(2026, time.November, 20)
+	runOn(t, f, "2026-11-20")
+
+	if _, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 220000, Method: domain.MethodCash,
+		PaidAt: aug(2020, time.January, 1),
+	}); err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+
+	c := chargeNamed(t, f, testStudent, "Inscripción").Charge
+	if c.Effective().Int64() != 220000 {
+		t.Errorf("Inscripción settles at %d, want the first tier 220000 and nothing lower", c.Effective().Int64())
+	}
+}
+
+func chargeNamed(t *testing.T, f *fixture, student, name string) ports.ChargeWithPaid {
+	t.Helper()
+	list, err := f.svc.ListCharges(context.Background(), student, testCycle)
+	if err != nil {
+		t.Fatalf("ListCharges: %v", err)
+	}
+	for _, c := range list {
+		if c.Charge.Description() == name {
+			return c
+		}
+	}
+	t.Fatalf("no charge named %q", name)
+	return ports.ChargeWithPaid{}
+}
+
 // SEC-2. The ratchet has to hold ACROSS saves, not only inside one list.
 //
 // validate() refuses a step cheaper than its predecessor within one concept.

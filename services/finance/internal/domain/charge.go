@@ -182,6 +182,12 @@ const (
 	// level — maternal, most often. Set once on the tuition table and applied by
 	// the billing run, never typed per pupil.
 	ReasonLevelDiscount = "descuento_nivel"
+	// ReasonPriceAtPaymentDate is an inscription settled at the price of the
+	// day the family paid, lower than the one it was raised to afterwards
+	// (task 7): the cashier captured late a payment made in time. Only a payment
+	// that settles the inscription outright earns it, and only for the climb
+	// the ladder shows between that day and today.
+	ReasonPriceAtPaymentDate = "precio_fecha_de_pago"
 )
 
 // DiscountReason is why the charge carries the discount it does. Empty on the
@@ -302,6 +308,7 @@ func (c Charge) CycleID() string     { return c.cycleID }
 func (c Charge) ConceptID() string   { return c.conceptID }
 func (c Charge) Description() string { return c.description }
 func (c Charge) Amount() Cents       { return c.amount }
+
 func (c Charge) Discount() Cents     { return c.discount }
 func (c Charge) DueDate() time.Time  { return c.dueDate }
 func (c Charge) Status() string      { return c.status }

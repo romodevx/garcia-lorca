@@ -31,6 +31,10 @@ type DepositInput struct {
 	// who is always punctual and slipped once — a decision, never a default,
 	// and it is recorded as one.
 	GrantEarlyPayment bool
+	// Receiver is who took the money: the authenticated caller, set by the
+	// gateway (task 7). Recorded on the deposit and on every payment it splits
+	// into.
+	Receiver domain.Receiver
 }
 
 // DepositResult is what the money did, in the shape a receipt needs.
@@ -163,6 +167,7 @@ func (s *FinanceService) prepareDeposit(ctx context.Context, in DepositInput) (d
 	if err != nil {
 		return domain.Deposit{}, nil, err
 	}
+	deposit = deposit.WithReceiver(in.Receiver)
 	return deposit, &depositPlanner{
 		svc:         s,
 		deposit:     deposit,
@@ -271,7 +276,7 @@ func (s *FinanceService) ExpectedToday(ctx context.Context, studentID string, on
 	if err != nil {
 		return Expected{}, err
 	}
-	return expectedFrom(charges, plan, calendar, lateFee.ID(), tuition.ID(), enrolment.ID(), when)
+	return expectedFrom(charges, plan, calendar, lateFee.ID(), tuition.ID(), enrolment.ID(), when, s.now())
 }
 
 // expectedFrom is the arithmetic of "what is due today", with NO I/O.
@@ -285,7 +290,7 @@ func expectedFrom(
 	plan domain.TuitionPlan,
 	calendar *schoolcal.Calendar,
 	lateFeeID, tuitionID, enrolmentID string,
-	when time.Time,
+	when, now time.Time,
 ) (Expected, error) {
 	policy := plan.Policy()
 
@@ -307,12 +312,14 @@ func expectedFrom(
 		// The ladder, at the day being asked about. Quoting the stored amount
 		// instead would show one number and collect another in the same
 		// transaction — see ladderPrice.
-		if amount, moves := ladderPrice(c, plan, enrolmentID, when); moves {
-			repriced, err := c.Charge.WithAmount(amount)
-			if err != nil {
-				return Expected{}, err
-			}
-			c.Charge = repriced
+		// Quoted as paying it in full on `when` would price it — the same rule
+		// the deposit applies when the money settles the line (task 7).
+		settled, change, err := inscriptionPaidOn(c, plan, enrolmentID, when, now)
+		if err != nil {
+			return Expected{}, err
+		}
+		if change != priceUnchanged {
+			c.Charge = settled
 		}
 		out.AnnualBalanceCents += owed(c)
 		if !expectedBy(c.Charge.DueDate(), when) {
@@ -458,12 +465,14 @@ func (p *depositPlanner) repriceInscription(c ports.ChargeWithPaid) (domain.Char
 // ladderPrice is what one charge is worth on a day, and whether the ladder
 // applies to it at all.
 //
-// It is a package function and not a method on the planner because the QUOTE and
-// the COLLECTION must answer identically. When only the payment path knew this
-// rule, the counter showed the amount last written down while the same
-// transaction took the money at today's rung: the family left with a receipt for
-// one number owing another, and the freeze rule fixed the price at the higher
-// one. That is the outcome ADR 0011 says the rule exists to prevent.
+// It is a package function and not a method on the planner because the pricing
+// must not live in one path only. When only the payment path knew this rule, the
+// counter showed the amount last written down while the same transaction took
+// the money at today's rung: the family left with a receipt for one number
+// owing another, and the freeze rule fixed the price at the higher one. That is
+// the outcome ADR 0011 says the rule exists to prevent. (The quote now prices
+// through inscriptionPaidOn; the deposit uses this when a payment does not
+// settle the line at the price of its date.)
 //
 // Reports ok=false when nothing should move, which is most charges: anything
 // that is not an inscription line, anything with money on it (the first peso
@@ -472,6 +481,34 @@ func (p *depositPlanner) repriceInscription(c ports.ChargeWithPaid) (domain.Char
 func ladderPrice(
 	c ports.ChargeWithPaid, plan domain.TuitionPlan, enrolmentConceptID string, on time.Time,
 ) (int64, bool) {
+	rung, ok := rungOn(c, plan, enrolmentConceptID, on)
+	// The ladder ONLY EVER CLIMBS, and the guard lives here rather than only
+	// in the plan's validation, because the plan is not the only thing that
+	// can point downward:
+	//
+	//   - paidAt comes from the client and is bounded only in the future, so
+	//     a peso dated before the first rung would price the inscription at
+	//     the earliest one, freeze it there, and leave the difference with no
+	//     discount row, no reason and no event.
+	//   - a school that edits the table cheaper would walk every unpaid
+	//     inscription down with it, below what the families were quoted.
+	//
+	// A charge already issued is a number a family has been told. It may rise
+	// while it goes unpaid; it may never fall by itself. Lowering one is a
+	// decision somebody makes by hand, and that is what a discount is for.
+	// (Settling at the price of the payment date is the one lowering the
+	// system makes, as a reasoned discount: inscriptionPaidOn.)
+	if !ok || rung <= c.Charge.Amount().Int64() {
+		return 0, false
+	}
+	return rung, true
+}
+
+// rungOn is the price the ladder gives an inscription line on a day, with no
+// ratchet, and whether the line is one the ladder may touch at all: an
+// inscription line with nothing paid, no discount a person decided, not
+// cancelled.
+func rungOn(c ports.ChargeWithPaid, plan domain.TuitionPlan, enrolmentConceptID string, on time.Time) (int64, bool) {
 	if c.Charge.ConceptID() != enrolmentConceptID || c.PaidCents > 0 || c.Charge.Discount().Int64() > 0 {
 		return 0, false
 	}
@@ -483,29 +520,63 @@ func ladderPrice(
 		// what the family reads. A plan with no concepts yields one unnamed line
 		// and matches nothing here, so a school that never adopted the ladder is
 		// untouched.
-		if line.Name == "" || line.Name != c.Charge.Description() {
-			continue
+		if line.Name != "" && line.Name == c.Charge.Description() {
+			return line.AmountCents, true
 		}
-		// The ladder ONLY EVER CLIMBS, and the guard lives here rather than only
-		// in the plan's validation, because the plan is not the only thing that
-		// can point downward:
-		//
-		//   - paidAt comes from the client and is bounded only in the future, so
-		//     a peso dated before the first rung would price the inscription at
-		//     the earliest one, freeze it there, and leave the difference with no
-		//     discount row, no reason and no event.
-		//   - a school that edits the table cheaper would walk every unpaid
-		//     inscription down with it, below what the families were quoted.
-		//
-		// A charge already issued is a number a family has been told. It may rise
-		// while it goes unpaid; it may never fall by itself. Lowering one is a
-		// decision somebody makes by hand, and that is what a discount is for.
-		if line.AmountCents <= c.Charge.Amount().Int64() {
-			return 0, false
-		}
-		return line.AmountCents, true
 	}
 	return 0, false
+}
+
+// priceChange is what settling an inscription at its payment date does to it.
+type priceChange int
+
+const (
+	// priceUnchanged: the payment date says nothing about this line.
+	priceUnchanged priceChange = iota
+	// priceHeld: it already stands at the price of the payment date, so a
+	// payment that settles it keeps it there (today's rung does not apply).
+	priceHeld
+	priceRaised
+	priceLowered
+)
+
+// inscriptionPaidOn is the inscription as a payment dated paidOn that SETTLES it
+// would find it (task 7, the owner's decision): the price of the day the family
+// paid, not of the day a cashier captured it.
+//
+// Two guards keep this from reopening SEC-2 (see ladderPrice):
+//   - the caller applies it only when the money in hand settles the line at
+//     that price, so a back-dated peso freezes nothing;
+//   - a LOWERING is a discount with its own reason, never a silent change, and
+//     it is capped by the climb the ladder shows between paidOn and today — so
+//     a table edited cheaper does not walk the charge down through this door.
+func inscriptionPaidOn(
+	c ports.ChargeWithPaid, plan domain.TuitionPlan, enrolmentConceptID string, paidOn, now time.Time,
+) (domain.Charge, priceChange, error) {
+	// No floor beyond the table itself (the owner's decision): a date before
+	// its first tier prices at that first tier — a price the school set for
+	// this cycle — so a date typed years back reaches nothing cheaper. A cycle
+	// or issue-date floor would charge the later price to a family that paid
+	// the inscription early and was captured late.
+	paidRung, ok := rungOn(c, plan, enrolmentConceptID, paidOn)
+	if !ok {
+		return domain.Charge{}, priceUnchanged, nil
+	}
+	current := c.Charge.Amount().Int64()
+	if paidRung > current {
+		raised, err := c.Charge.WithAmount(paidRung)
+		return raised, priceRaised, err
+	}
+	if paidRung == current {
+		return c.Charge, priceHeld, nil
+	}
+	nowRung, _ := rungOn(c, plan, enrolmentConceptID, now)
+	climb := nowRung - paidRung
+	if climb <= 0 {
+		return domain.Charge{}, priceUnchanged, nil
+	}
+	lowered, err := c.Charge.WithDiscount(min(current-paidRung, climb), 0, domain.ReasonPriceAtPaymentDate)
+	return lowered, priceLowered, err
 }
 
 // plan turns the student's locked charges into the writes this deposit makes.
@@ -532,21 +603,39 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 	// payment would leave the month open at a price the school never set.
 	budget := p.deposit.Amount().Int64()
 	for i, c := range base {
-		// The ladder, priced now. There is NO nightly run: RunBilling fires only
-		// when somebody presses "generar", so between one press and the next this
-		// path and the quote (ExpectedToday) are the only two things that know
-		// today's rung — and they share ladderPrice precisely so they cannot
-		// disagree about it.
-		// Priced at TODAY, never at paidOn. A back-dated payment still earns its
-		// own surcharge and its own early-payment window — that is what paidAt is
-		// for — but the school's list price is not a function of when a cashier
-		// says the money arrived.
-		if moved, ok, err := p.repriceInscription(c); err != nil {
+		// The ladder. There is NO nightly run: RunBilling fires only when
+		// somebody presses "generar", so between one press and the next this path
+		// and the quote (ExpectedToday) are the only two things that price it.
+		//
+		// A payment that settles the line pays the price of its own date
+		// (inscriptionPaidOn, task 7) — which is what the quote for that date
+		// shows, since the quote is the amount that settles it. A part payment is
+		// priced at TODAY, which keeps a back-dated peso from freezing the
+		// earliest rung (SEC-2); for it the quote (a full settlement) and the
+		// collection differ by design, and the preview shows the collection.
+		settled, change, err := inscriptionPaidOn(c, p.tuition, p.enrolmentID, p.paidOn, p.svc.now())
+		if err != nil {
 			return ports.DepositWrite{}, err
-		} else if ok {
-			repriced = append(repriced, moved)
-			c.Charge = moved
+		}
+		switch {
+		case change != priceUnchanged && budget >= settled.Effective().Int64():
+			// This payment settles the line at the price of its date.
+			switch change {
+			case priceRaised:
+				repriced = append(repriced, settled)
+			case priceLowered:
+				discounted = append(discounted, settled)
+			}
+			c.Charge = settled
 			base[i] = c
+		default:
+			if moved, ok, err := p.repriceInscription(c); err != nil {
+				return ports.DepositWrite{}, err
+			} else if ok {
+				repriced = append(repriced, moved)
+				c.Charge = moved
+				base[i] = c
+			}
 		}
 
 		charge, due := c.Charge, owed(c)
@@ -606,7 +695,7 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 		if err != nil {
 			return ports.DepositWrite{}, err
 		}
-		payments = append(payments, payment)
+		payments = append(payments, payment.WithReceivedBy(p.deposit.ReceivedBy().UserID))
 	}
 	return ports.DepositWrite{
 		Repriced:         repriced,

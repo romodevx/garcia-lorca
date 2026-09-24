@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -138,6 +138,27 @@ describe("PayDrawer — money safety", () => {
     expect(second).toBe(first);
   });
 
+  // Task 7: a payment captured late carries the day the family paid; it starts
+  // on today and cannot be moved into the future.
+  it("registers a payment with the day the family paid", async () => {
+    const user = userEvent.setup();
+    finance.registerPayment.mockResolvedValue({} as financeApi.PaymentResult);
+    render(<FinanceScreen onBack={() => {}} today="2026-10-12" />);
+    await screen.findByText("Valentina Cruz");
+    await user.click(screen.getAllByRole("button", { name: /Registrar pago/ })[0] as HTMLElement);
+    const dialog = await screen.findByRole("dialog", { name: "Registrar pago" });
+
+    const date = within(dialog).getByLabelText("Fecha de pago");
+    expect(date).toHaveValue("2026-10-12");
+    expect(date).toHaveAttribute("max", "2026-10-12");
+    fireEvent.change(date, { target: { value: "2026-01-05" } });
+    await user.click(within(dialog).getByRole("button", { name: /Registrar pago/ }));
+
+    await waitFor(() =>
+      expect(finance.registerPayment).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ paidAt: "2026-01-05" })),
+    );
+  });
+
   it("does not discard a half-captured payment when the backdrop is clicked", async () => {
     // At counter speed, with a parent waiting, a stray click outside the panel
     // silently threw away a typed amount.
@@ -175,6 +196,35 @@ describe("FinanceScreen — corte de caja", () => {
     await user.click(screen.getByRole("button", { name: /Corte de caja/ }));
 
     expect(await screen.findByTestId("cash-up-total")).toHaveTextContent("4,700");
+  });
+});
+
+describe("FinanceScreen — el corte de otro día (tarea 7)", () => {
+  // A payment captured late is dated the day the family paid, so it lands on
+  // that day's cut. The office has to be able to open that cut to see it —
+  // with who keyed it and the "capturado el …" mark.
+  it("opens the cut of a day the office chooses", async () => {
+    const user = userEvent.setup();
+    finance.getCashUp.mockResolvedValue({
+      deposits: [], cancelled: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0,
+    });
+    render(<FinanceScreen onBack={() => {}} today="2026-10-12" />);
+    await screen.findByText("Valentina Cruz");
+    await user.click(screen.getByRole("button", { name: /Corte de caja/ }));
+    await screen.findByTestId("cash-up-total");
+    expect(finance.getCashUp).toHaveBeenLastCalledWith(expect.any(String), "");
+
+    const day = screen.getByLabelText("Día del corte");
+    expect(day).toHaveValue("2026-10-12");
+    expect(day).toHaveAttribute("max", "2026-10-12");
+    fireEvent.change(day, { target: { value: "2026-10-03" } });
+    await waitFor(() => expect(finance.getCashUp).toHaveBeenLastCalledWith(expect.any(String), "2026-10-03"));
+ 
+    // Closing and reopening is closing the day again: today, not the day last
+    // looked at.
+    await user.click(screen.getByRole("button", { name: "Cerrar" }));
+    await user.click(screen.getByRole("button", { name: /Corte de caja/ }));
+    expect(await screen.findByLabelText("Día del corte")).toHaveValue("2026-10-12");
   });
 });
 

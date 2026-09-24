@@ -146,7 +146,10 @@ type depositModel struct {
 	CardType        string     `gorm:"column:card_type"`
 	VoidedAt        *time.Time `gorm:"column:voided_at"`
 	VoidReason      string     `gorm:"column:void_reason"`
-	CreatedAt       time.Time  `gorm:"column:created_at"`
+	// Who took the money (task 7); NULL / '' on deposits from before it was kept.
+	ReceivedBy     *string   `gorm:"column:received_by"`
+	ReceivedByName string    `gorm:"column:received_by_name"`
+	CreatedAt      time.Time `gorm:"column:created_at"`
 }
 
 func (depositModel) TableName() string { return "deposits" }

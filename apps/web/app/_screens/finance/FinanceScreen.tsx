@@ -11,9 +11,11 @@ import { DrawerShell } from "../../_design/DrawerShell";
 import { Icon, type IconName } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import type { ColorKey } from "../../_design/colors";
-import { HelpTip } from "../../_design/form";
+import { DateField, HelpTip, useFocusFirstInvalid } from "../../_design/form";
+import { paymentDateError } from "./CollectDrawer";
 import { listCycles, type Cycle } from "../../config/api";
 import { getOverdue, listCharges, registerPayment, type Charge, type PaymentMethod } from "../../finance/api";
+import { localISODate } from "../../_lib/localDate";
 import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 import { listStudents, type Student } from "../../students/api";
 
@@ -66,10 +68,17 @@ function StatusPill({ status }: { status: VisualStatus }): ReactElement {
 }
 
 // ── payment slide-over: pay a charge in one panel ──
-function PayDrawer({ charge, name, onClose, onPaid }: { charge: Charge; name: string; onClose: () => void; onPaid: () => void }): ReactElement {
+function PayDrawer({ charge, name, today, onClose, onPaid }: { charge: Charge; name: string; today?: string; onClose: () => void; onPaid: () => void }): ReactElement {
   const [amount, setAmount] = useState(centsToPesosInput(charge.remainingCents));
   const [method, setMethod] = useState<PaymentMethod>("cash");
   const [reference, setReference] = useState("");
+  // The day the family paid (task 7): not always the day it is keyed.
+  const day = today ?? localISODate();
+  const [paidOn, setPaidOn] = useState(day);
+  // Only a payment dated earlier travels with its date (see CollectDrawer).
+  const sentDate = paidOn === day ? "" : paidOn;
+  const focusFirstInvalid = useFocusFirstInvalid();
+  const [dateError, setDateError] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   // One key per ATTEMPT, minted when the drawer opens and kept across retries.
@@ -89,10 +98,16 @@ function PayDrawer({ charge, name, onClose, onPaid }: { charge: Charge; name: st
   const ready = Number.isFinite(cents) && cents > 0 && !saving;
 
   const submit = async (): Promise<void> => {
+    const wrong = paymentDateError(paidOn, day);
+    if (wrong !== undefined) {
+      setDateError(wrong);
+      focusFirstInvalid();
+      return;
+    }
     setSaving(true);
     setError(undefined);
     try {
-      await registerPayment(API_URL, { chargeId: charge.id, amountCents: cents, method, reference: reference.trim(), idempotencyKey: attemptKey });
+      await registerPayment(API_URL, { chargeId: charge.id, amountCents: cents, method, reference: reference.trim(), idempotencyKey: attemptKey, ...(sentDate !== "" ? { paidAt: sentDate } : {}) });
       onPaid();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo registrar el pago.");
@@ -141,6 +156,18 @@ function PayDrawer({ charge, name, onClose, onPaid }: { charge: Charge; name: st
               })}
             </div>
           </div>
+          <DateField
+            label="Fecha de pago"
+            value={paidOn}
+            max={day}
+            onChange={(v) => {
+              setPaidOn(v);
+              if (paymentDateError(v, day) === undefined) setDateError(undefined);
+            }}
+            onBlur={() => setDateError(paymentDateError(paidOn, day))}
+            error={dateError}
+            help="El día en que la familia pagó. Si capturas tarde, pon ese día: el recargo y el pronto pago se calculan con él."
+          />
           <label style={{ display: "block" }}>
             <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, marginLeft: 3 }}>
               <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Referencia (opcional)</span>
@@ -192,9 +219,13 @@ const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
 
 export interface FinanceScreenProps {
   onBack: () => void;
+  /** The office's day (aaaa-mm-dd); injected by tests. Defaults to today, locally. */
+  today?: string;
 }
 
-export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
+export function FinanceScreen({ onBack, today: officeDay }: FinanceScreenProps): ReactElement {
+  const cutToday = officeDay ?? localISODate();
+  const [cutDay, setCutDay] = useState(cutToday);
   const [charges, setCharges] = useState<Charge[]>([]);
   const [overdueIds, setOverdueIds] = useState<Set<string>>(new Set());
   const [studentMap, setStudentMap] = useState<Map<string, Student>>(new Map());
@@ -326,7 +357,18 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
         </div>
         <div style={{ display: "flex", gap: 12 }}>
           <Btn kind="ghost" icon="download" onClick={() => exportView()}>Exportar</Btn>
-          <Btn kind="ghost" icon="finance" onClick={() => setCashUp(true)}>Corte de caja</Btn>
+          <Btn
+            kind="ghost"
+            icon="finance"
+            onClick={() => {
+              // Opening the cut is closing the day: today, not the day last
+              // looked at (and a fresh today after midnight).
+              setCutDay(officeDay ?? localISODate());
+              setCashUp(true);
+            }}
+          >
+            Corte de caja
+          </Btn>
         </div>
       </div>
 
@@ -414,15 +456,19 @@ export function FinanceScreen({ onBack }: FinanceScreenProps): ReactElement {
         )}
       </div>
 
-      {pay !== null && <PayDrawer charge={pay.charge} name={pay.name} onClose={() => setPay(null)} onPaid={onPaid} />}
+      {pay !== null && <PayDrawer charge={pay.charge} name={pay.name} today={officeDay} onClose={() => setPay(null)} onPaid={onPaid} />}
       {cashUp && (
         <DrawerShell
           title="Corte de caja"
-          subtitle="Lo recibido hoy, por forma de pago"
+          subtitle={cutDay === cutToday ? "Lo recibido hoy, por forma de pago" : "Lo recibido ese día, por forma de pago"}
           icon="finance"
           onClose={() => setCashUp(false)}
         >
-          <CashUpPanel day="" />
+          {/* A payment captured late is dated the day the family paid and
+              lands on that day's cut (task 7): the office opens it here. */}
+          <DateField label="Día del corte" value={cutDay} max={cutToday} onChange={(v) => v !== "" && setCutDay(v)} />
+          {/* Today is asked as "" so the server keeps its own day, as before. */}
+          <CashUpPanel day={cutDay === cutToday ? "" : cutDay} />
         </DrawerShell>
       )}
       {toast !== null && (

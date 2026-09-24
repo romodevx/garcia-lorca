@@ -325,14 +325,18 @@ func fromDomainCharge(c domain.Charge) chargeModel {
 	}
 }
 
-// toDomainPayment rebuilds a domain Payment from its row. ReceivedBy is not part
-// of the domain yet (reserved for cashier attribution).
+// toDomainPayment rebuilds a domain Payment from its row, with the account that
+// took the money when it was recorded.
 func toDomainPayment(m paymentModel) (domain.Payment, error) {
-	return domain.NewPayment(m.ID, m.TenantID, m.ChargeID, m.AmountCents, m.Method, m.Reference, m.PaidAt, m.IdempotencyKey)
+	p, err := domain.NewPayment(m.ID, m.TenantID, m.ChargeID, m.AmountCents, m.Method, m.Reference, m.PaidAt, m.IdempotencyKey)
+	if err != nil || m.ReceivedBy == nil {
+		return p, err
+	}
+	return p.WithReceivedBy(*m.ReceivedBy), nil
 }
 
 // fromDomainPayment projects a domain Payment into its GORM row for insert.
-// ReceivedBy is deliberately left nil and CreatedAt zero (DEFAULT now()).
+// CreatedAt is left zero (DEFAULT now()).
 func fromDomainPayment(p domain.Payment) paymentModel {
 	return paymentModel{
 		ID:             p.ID(),
@@ -343,7 +347,17 @@ func fromDomainPayment(p domain.Payment) paymentModel {
 		Reference:      p.Reference(),
 		IdempotencyKey: p.IdempotencyKey(),
 		PaidAt:         p.PaidAt(),
+		ReceivedBy:     nullableUUID(p.ReceivedBy()),
 	}
+}
+
+// nullableUUID stores an empty account id as NULL, which is what the uuid
+// column means by "not recorded".
+func nullableUUID(id string) *string {
+	if id == "" {
+		return nil
+	}
+	return &id
 }
 
 // --- deposits (M16) --------------------------------------------------------
@@ -361,6 +375,8 @@ func fromDomainDeposit(d domain.Deposit) depositModel {
 		CalendarVersion: d.CalendarVersion(),
 		CardType:        d.CardType(),
 		VoidReason:      d.VoidReason(),
+		ReceivedBy:      nullableUUID(d.ReceivedBy().UserID),
+		ReceivedByName:  d.ReceivedBy().Name,
 	}
 	if d.Voided() {
 		at := d.VoidedAt()
@@ -381,6 +397,11 @@ func toDomainDeposit(m depositModel) (domain.Deposit, error) {
 			return domain.Deposit{}, err
 		}
 	}
+	receiver := domain.Receiver{Name: m.ReceivedByName}
+	if m.ReceivedBy != nil {
+		receiver.UserID = *m.ReceivedBy
+	}
+	d = d.WithReceiver(receiver).WithCapturedAt(m.CreatedAt)
 	if m.VoidedAt == nil {
 		return d, nil
 	}

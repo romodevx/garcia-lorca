@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { listDeposits, previewDeposit, registerDeposit, voidDeposit } from "./api";
+import { getCashUp, listDeposits, previewDeposit, registerDeposit, voidDeposit } from "./api";
 
 const BASE = "http://gw";
 
@@ -113,5 +113,25 @@ describe("voidDeposit", () => {
     const [url, init] = lastCall(fetchMock);
     expect(url).toBe("http://gw/api/v1/finance/deposits/dep-1/void");
     expect(JSON.parse(init.body as string)).toEqual({ reason: "importe capturado mal" });
+  });
+});
+
+// Regression: ISSUE-003 — the cash-up dropped who took the money and when it
+// was keyed, so the "capturado el …" mark never reached the screen.
+// Found by /qa on 2026-09-24
+describe("getCashUp · who took the money (tarea 7)", () => {
+  it("keeps the receiver and the moment of capture", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      deposits: [{
+        id: "d1", studentId: "s1", amountCents: 280000, method: "cash", reference: "",
+        paidAt: "2026-09-01T00:00:00Z", calendarVersion: "", receivedByName: "Director", capturedAt: "2026-09-24T21:57:13Z",
+      }],
+      cancelled: [], cashCents: 280000, cardCents: 0, transferCents: 0, totalCents: 280000,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const cut = await getCashUp(BASE, "2026-09-01");
+
+    expect(cut.deposits[0]).toMatchObject({ receivedByName: "Director", capturedAt: "2026-09-24T21:57:13Z" });
   });
 });

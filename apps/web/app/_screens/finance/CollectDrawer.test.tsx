@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -224,4 +224,118 @@ describe("CollectDrawer", () => {
     await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
     expect(finance.registerDeposit.mock.calls[0]?.[1]?.cardType).toBe("credit");
   });
+
+describe("CollectDrawer · fecha de pago (tarea 7)", () => {
+  const TODAY = "2026-10-12";
+  const open = () => render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} today={TODAY} />);
+
+  it("dates the payment today unless told otherwise, and never in the future", async () => {
+    open();
+    const date = await screen.findByLabelText("Fecha de pago");
+    expect(date).toHaveValue(TODAY);
+    expect(date).toHaveAttribute("max", TODAY);
+  });
+
+  // Every rule is a function of the day the family paid: the quote and the
+  // preview are asked again for that day.
+  it("asks for the quote and the preview of the day the family paid", async () => {
+    open();
+    const date = await screen.findByLabelText("Fecha de pago");
+    fireEvent.change(date, { target: { value: "2026-10-03" } });
+
+    await waitFor(() => expect(finance.getExpected).toHaveBeenLastCalledWith(expect.any(String), "s1", "2026-10-03"));
+    await waitFor(() =>
+      expect(finance.previewDeposit).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({ paidAt: "2026-10-03" })),
+    );
+  });
+
+  it("takes the money with the day the family paid", async () => {
+    const user = userEvent.setup();
+    finance.registerDeposit.mockResolvedValue({
+      deposit: { id: "d1", studentId: "s1", amountCents: 670000, method: "cash", reference: "", paidAt: "2026-10-03T00:00:00Z", calendarVersion: "" },
+      allocations: [], surcharges: [], unallocatedCents: 0, replayed: false,
+    } as unknown as financeApi.DepositResult);
+    open();
+    fireEvent.change(await screen.findByLabelText("Fecha de pago"), { target: { value: "2026-10-03" } });
+    await screen.findByTestId("amount-expected");
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
+    expect(finance.registerDeposit.mock.calls[0]?.[1]).toMatchObject({ paidAt: "2026-10-03" });
+  });
+
+  // Today is not sent: the server stamps its own clock, which keeps the hour
+  // of the payment (a date alone is read as midnight UTC — 18:00 the day
+  // before in Mexico City).
+  it("sends no date for a payment made today", async () => {
+    const user = userEvent.setup();
+    finance.registerDeposit.mockResolvedValue({
+      deposit: { id: "d1", studentId: "s1", amountCents: 670000, method: "cash", reference: "", paidAt: "", calendarVersion: "" },
+      allocations: [], surcharges: [], unallocatedCents: 0, replayed: false,
+    } as unknown as financeApi.DepositResult);
+    open();
+    await screen.findByTestId("amount-expected");
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
+    expect(finance.registerDeposit.mock.calls[0]?.[1]).not.toHaveProperty("paidAt");
+    expect(finance.getExpected).toHaveBeenCalledWith(expect.any(String), "s1", "");
+  });
+
+  // Formatting the amount on the way out of the field is not the cashier
+  // choosing another amount: a new date still brings its own quote.
+  it("follows the quote of a new date when the amount was only reformatted", async () => {
+    finance.getExpected.mockImplementation(async (_b, _s, on) => ({
+      amountCents: on === "2026-10-03" ? 640000 : 670000, surchargeCents: 0, discountCents: 0, annualBalanceCents: 640000,
+    }));
+    open();
+    await screen.findByTestId("amount-expected");
+    const amount = screen.getByLabelText(/Monto recibido/, { selector: "input" });
+    fireEvent.blur(amount);
+    fireEvent.change(screen.getByLabelText("Fecha de pago"), { target: { value: "2026-10-03" } });
+    await waitFor(() => expect(amount).toHaveValue("6400.00"));
+  });
+
+  it("takes the focus to a date it cannot use, and says what is wrong", async () => {
+    const user = userEvent.setup();
+    open();
+    const date = await screen.findByLabelText("Fecha de pago");
+    fireEvent.change(date, { target: { value: "" } });
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+    expect(await screen.findByText("Falta la fecha de pago.")).toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement).toBe(date));
+    expect(finance.registerDeposit).not.toHaveBeenCalled();
+  });
+
+  it("says which day the expected amount is for", async () => {
+    open();
+    expect(await screen.findByText("Monto esperado hoy")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Fecha de pago"), { target: { value: "2026-10-03" } });
+    expect(await screen.findByText("Monto esperado al 3 oct")).toBeInTheDocument();
+  });
+
+  // The label names the day of the quote ON SCREEN: a date typed that brought
+  // no quote (invalid, or the request failed) does not relabel the old one.
+  it("keeps the label on the day of the quote it shows", async () => {
+    open();
+    await screen.findByText("Monto esperado hoy");
+    finance.getExpected.mockRejectedValueOnce(new Error("down"));
+    fireEvent.change(screen.getByLabelText("Fecha de pago"), { target: { value: "2026-10-03" } });
+    await waitFor(() => expect(finance.getExpected).toHaveBeenLastCalledWith(expect.any(String), "s1", "2026-10-03"));
+    expect(screen.getByText("Monto esperado hoy")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Fecha de pago"), { target: { value: "2026-10-20" } });
+    expect(screen.getByText("Monto esperado hoy")).toBeInTheDocument();
+  });
+
+  it("refuses a future date on the field, and takes nothing", async () => {
+    const user = userEvent.setup();
+    open();
+    const date = await screen.findByLabelText("Fecha de pago");
+    fireEvent.change(date, { target: { value: "2026-10-20" } });
+    fireEvent.blur(date);
+    expect(await screen.findByText("La fecha de pago no puede ser futura.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+    expect(finance.registerDeposit).not.toHaveBeenCalled();
+  });
+});
 });

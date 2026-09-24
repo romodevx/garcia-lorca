@@ -115,6 +115,10 @@ export interface Deposit {
   cardType?: CardType;
   voidedAt?: string;
   voidReason?: string;
+  /** Who took the money, as the name read then (task 7). Absent on older deposits. */
+  receivedByName?: string;
+  /** When it was keyed; a later day than paidAt means it was captured late. */
+  capturedAt?: string;
 }
 
 /** What a deposit did: where the money landed and what is left over. */
@@ -683,6 +687,10 @@ function toDeposit(d: Wire<Deposit, "method">): Deposit {
     ...(d.cardType !== undefined && String(d.cardType) !== "" ? { cardType: d.cardType } : {}),
     ...(d.voidedAt !== undefined ? { voidedAt: d.voidedAt } : {}),
     ...(d.voidReason !== undefined ? { voidReason: d.voidReason } : {}),
+    // Who took the money and when it was keyed (task 7): the cash-up's
+    // "capturado el …" mark reads these.
+    ...(d.receivedByName !== undefined && d.receivedByName !== "" ? { receivedByName: d.receivedByName } : {}),
+    ...(d.capturedAt !== undefined && d.capturedAt !== "" ? { capturedAt: d.capturedAt } : {}),
   };
 }
 

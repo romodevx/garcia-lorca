@@ -2097,6 +2097,19 @@ components:
             without the school's holidays.
         voidedAt: { type: [string, 'null'], format: date-time }
         voidReason: { type: string }
+        receivedByName:
+          type: string
+          example: "Laura Caja"
+          description: >
+            Who took the money: the signed-in cashier (never a field of the
+            request), with their name as it read then. Absent on deposits from
+            before it was recorded (task 7).
+        capturedAt:
+          type: string
+          format: date-time
+          description: >
+            When the deposit was keyed. It differs from paidAt when a payment is
+            captured late with the day the family paid.
 
     DepositResult:
       type: object

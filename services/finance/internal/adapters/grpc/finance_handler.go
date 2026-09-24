@@ -167,7 +167,7 @@ func (h *FinanceHandler) RegisterPayment(ctx context.Context, req *connect.Reque
 	if ts := m.GetPaidAt(); ts != nil {
 		paidAt = ts.AsTime()
 	}
-	payment, charge, err := h.finance.RegisterPaymentAt(ctx, m.GetChargeId(), m.GetAmountCents(), m.GetMethod(), m.GetReference(), m.GetIdempotencyKey(), paidAt)
+	payment, charge, err := h.finance.RegisterPaymentAt(ctx, m.GetChargeId(), m.GetAmountCents(), m.GetMethod(), m.GetReference(), m.GetIdempotencyKey(), paidAt, m.GetReceivedBy())
 	if err != nil {
 		return nil, connectErr(err)
 	}
@@ -229,6 +229,7 @@ func (h *FinanceHandler) RegisterDeposit(ctx context.Context, req *connect.Reque
 		// counter; the use case records it as one.
 		GrantEarlyPayment: m.GetGrantEarlyPayment(),
 		CardType:          m.GetCardType(),
+		Receiver:          domain.Receiver{UserID: m.GetReceivedBy(), Name: m.GetReceivedByName()},
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -410,9 +411,14 @@ func toProtoDeposit(d domain.Deposit) *financev1.Deposit {
 		CalendarVersion: d.CalendarVersion(),
 		CardType:        d.CardType(),
 		VoidReason:      d.VoidReason(),
+		ReceivedBy:      d.ReceivedBy().UserID,
+		ReceivedByName:  d.ReceivedBy().Name,
 	}
 	if d.Voided() {
 		out.VoidedAt = timestamppb.New(d.VoidedAt())
+	}
+	if !d.CapturedAt().IsZero() {
+		out.CapturedAt = timestamppb.New(d.CapturedAt())
 	}
 	return out
 }

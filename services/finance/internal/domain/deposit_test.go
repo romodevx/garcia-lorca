@@ -135,3 +135,30 @@ func TestAnUnknownCardTypeIsRefused(t *testing.T) {
 		t.Errorf("unknown card type: want KindInvalid, got %v", err)
 	}
 }
+
+// Task 7: who took the money is recorded with it, as the account and its name
+// as it read then. A payment captured late is visible for what it is.
+func TestADepositRecordsWhoReceivedIt(t *testing.T) {
+	d, err := domain.NewDeposit("dep-1", "t1", "st-1", 670000, domain.MethodCash, "", day(2026, time.October, 10), "", "")
+	if err != nil {
+		t.Fatalf("NewDeposit: %v", err)
+	}
+	if d.ReceivedBy() != (domain.Receiver{}) {
+		t.Errorf("a new deposit names nobody until told: %+v", d.ReceivedBy())
+	}
+	who := domain.Receiver{UserID: "u-caja", Name: "Laura Caja"}
+	d = d.WithReceiver(who).WithCapturedAt(day(2026, time.October, 13))
+	if d.ReceivedBy() != who || !d.CapturedAt().Equal(day(2026, time.October, 13)) {
+		t.Errorf("deposit = %+v / %v", d.ReceivedBy(), d.CapturedAt())
+	}
+}
+
+func TestAPaymentRecordsWhoReceivedIt(t *testing.T) {
+	p, err := domain.NewPayment("p-1", "t1", "ch-1", 1000, domain.MethodCash, "", day(2026, time.October, 10), "")
+	if err != nil {
+		t.Fatalf("NewPayment: %v", err)
+	}
+	if got := p.WithReceivedBy("u-caja").ReceivedBy(); got != "u-caja" {
+		t.Errorf("ReceivedBy = %q", got)
+	}
+}

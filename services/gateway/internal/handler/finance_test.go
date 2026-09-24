@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -17,6 +18,8 @@ import (
 // needs. It records the last input and returns canned results/errors so each
 // handler is exercised in isolation (no Connect round-trip).
 type fakeFinance struct {
+	depositReceiver client.Receiver
+	payReceiver     client.Receiver
 	planIn     client.TuitionPlanInput
 	plans      []client.TuitionPlan
 	plansCycle string
@@ -96,8 +99,9 @@ func (f *fakeFinance) ExpectedToday(_ context.Context, studentID, on string) (cl
 	return f.expected, f.err
 }
 
-func (f *fakeFinance) RegisterDeposit(_ context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string) (client.DepositResult, error) {
+func (f *fakeFinance) RegisterDeposit(_ context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string, receiver client.Receiver) (client.DepositResult, error) {
 	f.depositCardType = cardType
+	f.depositReceiver = receiver
 	f.depositStudent, f.depositAmount, f.depositMethod = studentID, amountCents, method
 	f.depositKey, f.depositPaidAt = idempotencyKey, paidAt
 	f.depositGranted = grantEarlyPayment
@@ -192,8 +196,9 @@ func (f *fakeFinance) CancelCharge(_ context.Context, chargeID string) (client.C
 	return f.charge, nil
 }
 
-func (f *fakeFinance) RegisterPaymentAt(_ context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time) (client.Payment, client.Charge, error) {
+func (f *fakeFinance) RegisterPaymentAt(_ context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, receiver client.Receiver) (client.Payment, client.Charge, error) {
 	f.payChargeID, f.payAmount, f.payMethod, f.payRef = chargeID, amountCents, method, reference
+	f.payReceiver = receiver
 	f.payKey, f.payPaidAt = idempotencyKey, paidAt
 	if f.err != nil {
 		return client.Payment{}, client.Charge{}, f.err
@@ -878,4 +883,35 @@ func TestFinancePreviewUsesTheSameKeys(t *testing.T) {
 	if len(body.Allocations) != 1 || body.Allocations[0]["chargeId"] != "ch1" {
 		t.Errorf("preview allocation keys are wrong: %v", body.Allocations)
 	}
+}
+
+// Task 7: who took the money is the signed-in caller, named from iam — never a
+// field of the request body.
+func TestFinanceRecordsWhoTookTheMoney(t *testing.T) {
+	svc := &fakeFinance{depositResult: client.DepositResult{Deposit: client.Deposit{ID: "dep-1"}}}
+	h := handler.NewFinanceHandler(svc, handler.WithNames(fakeNamer{user: client.User{DisplayName: "Laura Caja"}}))
+	want := client.Receiver{UserID: "u-me", Name: "Laura Caja"}
+
+	h.RegisterDeposit(httptest.NewRecorder(), notesRequest(http.MethodPost, "/api/v1/finance/deposits",
+		`{"studentId":"stu-1","amountCents":1000,"method":"cash","receivedBy":"u-other","receivedByName":"Otra"}`, "payments:write"))
+	if svc.depositReceiver != want {
+		t.Errorf("deposit receiver = %+v, want %+v", svc.depositReceiver, want)
+	}
+
+	// A single-charge payment stores the account alone: no name is kept for
+	// it, so iam is not asked (a round trip on the collection path for nothing).
+	names := &countingNamer{}
+	h = handler.NewFinanceHandler(svc, handler.WithNames(names))
+	h.RegisterPayment(httptest.NewRecorder(), notesRequest(http.MethodPost, "/api/v1/finance/payments",
+		`{"chargeId":"ch-1","amountCents":1000,"method":"cash"}`, "finance:write"))
+	if svc.payReceiver != (client.Receiver{UserID: "u-me"}) || names.calls != 0 {
+		t.Errorf("payment receiver = %+v after %d name lookups, want the account alone and none", svc.payReceiver, names.calls)
+	}
+}
+
+type countingNamer struct{ calls int }
+
+func (c *countingNamer) GetUser(context.Context, string) (client.User, error) {
+	c.calls++
+	return client.User{}, nil
 }

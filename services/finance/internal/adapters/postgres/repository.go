@@ -1464,6 +1464,14 @@ func (r *Repository) VoidDeposit(ctx context.Context, d domain.Deposit) error {
 			if err != nil {
 				return err
 			}
+			updates := map[string]any{"updated_at": gorm.Expr("now()")}
+			// A price-at-payment-date discount exists only because this deposit
+			// settled the line (task 7): it goes with the deposit, or a voided
+			// deposit would leave the inscription permanently cheaper.
+			if row.DiscountReason == domain.ReasonPriceAtPaymentDate {
+				row.DiscountCents, row.DiscountReason = 0, ""
+				updates["discount_cents"], updates["discount_reason"] = int64(0), ""
+			}
 			charge, err := toDomainCharge(row, remaining)
 			if err != nil {
 				return err
@@ -1471,10 +1479,8 @@ func (r *Repository) VoidDeposit(ctx context.Context, d domain.Deposit) error {
 			if charge.Status() == domain.StatusCancelled {
 				continue
 			}
-			if err := tx.Model(&chargeModel{}).Where("id = ?", chargeID).Updates(map[string]any{
-				"status":     charge.DeriveStatus(remaining),
-				"updated_at": gorm.Expr("now()"),
-			}).Error; err != nil {
+			updates["status"] = charge.DeriveStatus(remaining)
+			if err := tx.Model(&chargeModel{}).Where("id = ?", chargeID).Updates(updates).Error; err != nil {
 				return glerrors.Wrap(glerrors.KindInternal, "restoring charge status", err)
 			}
 		}
