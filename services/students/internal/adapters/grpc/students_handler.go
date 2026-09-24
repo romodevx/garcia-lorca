@@ -28,6 +28,7 @@ type StudentsHandler struct {
 	enroll   *usecase.EnrollmentService
 	guardian *usecase.GuardianService
 	health   *usecase.HealthService
+	notes    *usecase.NoteService
 }
 
 // NewStudentsHandler wires the handler to the student, enrollment, guardian, and
@@ -39,6 +40,14 @@ func NewStudentsHandler(
 	health *usecase.HealthService,
 ) *StudentsHandler {
 	return &StudentsHandler{svc: svc, enroll: enroll, guardian: guardian, health: health}
+}
+
+// WithNotes returns the handler serving pupils' notes through `notes`. Without
+// it the note RPCs answer Unimplemented.
+func (h *StudentsHandler) WithNotes(notes *usecase.NoteService) *StudentsHandler {
+	cp := *h
+	cp.notes = notes
+	return &cp
 }
 
 func (h *StudentsHandler) Health(ctx context.Context, _ *connect.Request[studentsv1.HealthRequest]) (*connect.Response[studentsv1.HealthResponse], error) {
