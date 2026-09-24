@@ -465,6 +465,50 @@ describe("UniformsScreen — un artículo no tiene clave (tarea 3)", () => {
   });
 });
 
+describe("UniformsScreen — Nuevo artículo al guardar", () => {
+  // The forms rule: the primary button is never disabled. Saving says what is
+  // missing, on the field, and posts nothing.
+  it("marks what is missing instead of greying out the button", async () => {
+    const user = userEvent.setup();
+    const fetchMock = stubCatalogue([]);
+    render(<UniformsScreen onBack={() => {}} />);
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Catálogo" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Catálogo" }));
+    await user.click((await screen.findAllByRole("button", { name: /Nuevo artículo/ }))[0] as HTMLElement);
+
+    const create = screen.getByRole("button", { name: /Crear y poner tallas/ });
+    expect(create).toBeEnabled();
+    await user.click(create);
+
+    expect(screen.getByLabelText(/Nombre/, CAMPO)).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText(/Precio/, CAMPO)).toHaveAttribute("aria-invalid", "true");
+    expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit)?.method === "POST")).toBe(false);
+  });
+
+  // With no clave there is no unique code to refuse a second insert: a double
+  // click must create one article, not two.
+  it("creates one article on a double click", async () => {
+    const user = userEvent.setup();
+    const fetchMock = stubCatalogue([]);
+    render(<UniformsScreen onBack={() => {}} />);
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Catálogo" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Catálogo" }));
+    await user.click((await screen.findAllByRole("button", { name: /Nuevo artículo/ }))[0] as HTMLElement);
+    await user.type(screen.getByLabelText(/Nombre/, CAMPO), "Playera polo");
+    await user.type(screen.getByLabelText(/Precio/, CAMPO), "320");
+
+    await user.dblClick(screen.getByRole("button", { name: /Crear y poner tallas/ }));
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit)?.method === "POST").length).toBeGreaterThan(0),
+    );
+    const itemPosts = fetchMock.mock.calls.filter(
+      ([url, init]) => (init as RequestInit)?.method === "POST" && String(url).endsWith("/uniforms/items"),
+    );
+    expect(itemPosts).toHaveLength(1);
+  });
+});
+
 describe("UniformsScreen — los niveles son los del colegio", () => {
   // The level chips come from Configuración, not from a fixed SEP list (task 2):
   // a garment can be scoped to Preescolar, and it travels by level id.

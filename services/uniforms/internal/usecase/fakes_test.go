@@ -355,13 +355,13 @@ func newFixture(t *testing.T) *fixture {
 }
 
 // seedItem puts a garment on sale with one size in stock.
-func (f *fixture) seedItem(t *testing.T, code, size string, price int64, onHand int) domain.Item {
+func (f *fixture) seedItem(t *testing.T, name, size string, price int64, onHand int) domain.Item {
 	t.Helper()
 	item, err := f.svc.CreateItem(context.Background(), usecase.CreateItemInput{
-		Name: code, PriceCents: price,
+		Name: name, PriceCents: price,
 	})
 	if err != nil {
-		t.Fatalf("seed item %q: %v", code, err)
+		t.Fatalf("seed item %q: %v", name, err)
 	}
 	if _, _, _, err := f.svc.UpsertSizes(context.Background(), item.ID(),
 		[]ports.SizeSpec{{SizeLabel: size, SizeOrder: 1}}); err != nil {

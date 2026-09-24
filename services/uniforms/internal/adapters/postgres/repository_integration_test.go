@@ -41,12 +41,12 @@ func appRepo(t *testing.T, tenant string) *pgadapter.Repository {
 }
 
 // seedGarment puts a garment on sale with one size and a starting count.
-func seedGarment(t *testing.T, repo *pgadapter.Repository, code, size string, price int64, onHand int) (domain.Item, domain.StockLevel) {
+func seedGarment(t *testing.T, repo *pgadapter.Repository, name, size string, price int64, onHand int) (domain.Item, domain.StockLevel) {
 	t.Helper()
 	ctx := context.Background()
-	created, err := repo.CreateItem(ctx, mustItem(t, code, price))
+	created, err := repo.CreateItem(ctx, mustItem(t, name, price))
 	if err != nil {
-		t.Fatalf("seed garment %q: %v", code, err)
+		t.Fatalf("seed garment %q: %v", name, err)
 	}
 	if _, _, _, err := repo.UpsertSizes(ctx, created.ID(), []ports.SizeSpec{{SizeLabel: size, SizeOrder: 1}}); err != nil {
 		t.Fatalf("seed size: %v", err)
@@ -67,9 +67,9 @@ func seedGarment(t *testing.T, repo *pgadapter.Repository, code, size string, pr
 	return created, stock
 }
 
-func mustItem(t *testing.T, code string, price int64) domain.Item {
+func mustItem(t *testing.T, name string, price int64) domain.Item {
 	t.Helper()
-	item, err := domain.NewItem(newUUID(t), tenantA, code, "", domain.LevelAny, price)
+	item, err := domain.NewItem(newUUID(t), tenantA, name, "", domain.LevelAny, price)
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
 	}

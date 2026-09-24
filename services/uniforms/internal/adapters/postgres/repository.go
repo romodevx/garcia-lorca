@@ -571,7 +571,7 @@ func (r *Repository) sellFromShelf(tx *gorm.DB, line domain.OrderLine, note, act
 	}
 	if res.RowsAffected == 0 {
 		// Carries the sentinel so the edge can say "that size just ran out"
-		// rather than the sentence it shows for a duplicate garment code.
+		// rather than the sentence it shows for any other conflict.
 		return glerrors.Wrap(glerrors.KindConflict,
 			"no quedan suficientes "+line.ItemName()+" en talla "+line.SizeLabel(),
 			domain.ErrInsufficientStock)

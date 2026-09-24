@@ -469,8 +469,8 @@ func toProtoSettings(s domain.Settings) *uniformsv1.Settings {
 func connectErr(err error) *connect.Error {
 	safe := errors.New(glerrors.SafeMessage(err))
 
-	// Running out of stock is a conflict, but not the same conflict as a
-	// duplicate code, and the edge has to show a different sentence for each.
+	// Running out of stock is a conflict, but not the same conflict as a sale
+	// already registered, and the edge has to show a different sentence for each.
 	// FailedPrecondition says "the world is not in the state this needs", which
 	// is exactly right and stays a distinct code all the way to the panel.
 	if errors.Is(err, domain.ErrInsufficientStock) {
