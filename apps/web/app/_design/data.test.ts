@@ -149,6 +149,8 @@ describe("every live module's permission is one somebody can hold", () => {
     "uniforms:stock", "uniforms:orders", "uniforms:write",
     "uniforms_own:read", "uniforms_own:write",
     "teachers:read", "teachers:write",
+    // Task 9: the counter's own permissions (iam 0021).
+    "collections:read", "payments:write",
   ]);
   // These carry a permission nobody is granted ON PURPOSE, so the tile hides
   // itself until the module exists.
@@ -162,4 +164,18 @@ describe("every live module's permission is one somebody can hold", () => {
       expect(reachable.length).toBeGreaterThan(0);
     });
   }
+});
+
+describe("Registro de pagos is the counter (tarea 9)", () => {
+  const byId = (id: string): ModuleDef => MODULES.find((m) => m.id === id) as ModuleDef;
+  const cobranza = ["students:read", "students:list", "collections:read", "payments:write"];
+
+  it("shows the counter to the Cobranza role, and not Finanzas", () => {
+    expect(isModuleVisible(byId("payments"), cobranza)).toBe(true);
+    expect(isModuleVisible(byId("finance"), cobranza)).toBe(false);
+  });
+
+  it("still shows the counter to whoever holds finance:write", () => {
+    expect(isModuleVisible(byId("payments"), ["finance:write"])).toBe(true);
+  });
 });

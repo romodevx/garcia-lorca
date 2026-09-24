@@ -11,6 +11,7 @@ vi.mock("../../finance/api", () => ({
   getAccount: vi.fn(),
   previewDeposit: vi.fn(),
   registerDeposit: vi.fn(),
+  getCashUp: vi.fn(),
 }));
 vi.mock("../../students/api", () => ({ listStudents: vi.fn() }));
 
@@ -116,5 +117,20 @@ describe("PaymentsScreen", () => {
     await waitFor(() => expect(finance.getExpected).toHaveBeenCalledTimes(3));
 
     expect(finance.getExpected).toHaveBeenCalledTimes(3);
+  });
+});
+
+// Task 9: the cashier closes the day from the counter. The cut lived only in
+// Finanzas, which the Cobranza role does not open.
+describe("PaymentsScreen · corte de caja", () => {
+  it("opens the day's cut from the counter", async () => {
+    const user = userEvent.setup();
+    finance.getCashUp.mockResolvedValue({
+      deposits: [], cancelled: [], cashCents: 320000, cardCents: 0, transferCents: 0, totalCents: 320000,
+    });
+    render(<PaymentsScreen onBack={() => {}} />);
+    await user.click(await screen.findByRole("button", { name: /Corte de caja/ }));
+    expect(await screen.findByTestId("cash-up-total")).toHaveTextContent("3,200");
+    expect(screen.getByLabelText("Día del corte")).toBeInTheDocument();
   });
 });

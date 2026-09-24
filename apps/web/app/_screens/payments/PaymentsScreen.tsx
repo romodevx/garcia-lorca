@@ -9,6 +9,7 @@ import { listStudents, type Student } from "../../students/api";
 import { getExpected } from "../../finance/api";
 import { API_URL } from "../../api-url";
 import { formatCents } from "../../_lib/money";
+import { CashUpDrawer } from "../finance/CashUpDrawer";
 import { CollectDrawer, type CollectStudent } from "../finance/CollectDrawer";
 
 const search: CSSProperties = {
@@ -45,6 +46,7 @@ export function PaymentsScreen({ onBack }: PaymentsScreenProps): ReactElement {
   const [roll, setRoll] = useState<"loading" | "ready" | "failed">("loading");
   const [q, setQ] = useState("");
   const [collecting, setCollecting] = useState<CollectStudent | null>(null);
+  const [cashUp, setCashUp] = useState(false);
   const [owed, setOwed] = useState<Map<string, number>>(new Map());
   const [toast, setToast] = useState<string | null>(null);
 
@@ -106,10 +108,13 @@ export function PaymentsScreen({ onBack }: PaymentsScreenProps): ReactElement {
         <div style={{ width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--forest)", color: "#fff", boxShadow: "0 6px 16px color-mix(in oklab, var(--forest) 38%, transparent)" }}>
           <Icon name="card" size={30} />
         </div>
-        <div>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Registro de pagos</h1>
           <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Busca al alumno y captura lo que entregó</p>
         </div>
+        {/* The cashier closes the day here: the Cobranza role (task 9) does
+            not open Finanzas, where the cut also lives. */}
+        <Btn kind="ghost" icon="finance" onClick={() => setCashUp(true)}>Corte de caja</Btn>
       </div>
 
       <div className="fade-up" style={{ position: "relative", marginBottom: 18 }}>
@@ -183,6 +188,7 @@ export function PaymentsScreen({ onBack }: PaymentsScreenProps): ReactElement {
           <Icon name="check" size={20} stroke={2.6} />{toast}
         </div>
       )}
+      {cashUp && <CashUpDrawer onClose={() => setCashUp(false)} />}
     </Page>
   );
 }

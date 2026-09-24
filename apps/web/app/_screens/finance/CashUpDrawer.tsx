@@ -1,0 +1,37 @@
+"use client";
+
+import { useState, type ReactElement } from "react";
+
+import { DrawerShell } from "../../_design/DrawerShell";
+import { DateField } from "../../_design/form";
+import { localISODate } from "../../_lib/localDate";
+import { CashUpPanel } from "./CashUpPanel";
+
+export interface CashUpDrawerProps {
+  /** The office's day (aaaa-mm-dd); injected by tests. Defaults to today, locally. */
+  today?: string;
+  onClose: () => void;
+}
+
+/**
+ * The day's cut, in a drawer: Finanzas and the counter (Registro de pagos)
+ * open the same one. Each opening starts on today — opening the cut is
+ * closing the day — and any past day can be chosen, since a payment captured
+ * late is dated the day the family paid and lands on that day's cut (task 7).
+ */
+export function CashUpDrawer({ today, onClose }: CashUpDrawerProps): ReactElement {
+  const cutToday = today ?? localISODate();
+  const [cutDay, setCutDay] = useState(cutToday);
+  return (
+    <DrawerShell
+      title="Corte de caja"
+      subtitle={cutDay === cutToday ? "Lo recibido hoy, por forma de pago" : "Lo recibido ese día, por forma de pago"}
+      icon="finance"
+      onClose={onClose}
+    >
+      <DateField label="Día del corte" value={cutDay} max={cutToday} onChange={(v) => v !== "" && setCutDay(v)} />
+      {/* Today is asked as "" so the server keeps its own day, as before. */}
+      <CashUpPanel day={cutDay === cutToday ? "" : cutDay} />
+    </DrawerShell>
+  );
+}

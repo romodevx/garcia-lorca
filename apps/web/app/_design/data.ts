@@ -49,7 +49,7 @@ export const MODULES: readonly ModuleDef[] = [
   // Sentence case, like every other label and description in this list — and
   // like Spanish orthography, which capitalises only the first word. It read
   // "Registro de Pagos" until the palette's own copy disagreed with it.
-  { id: "payments", label: "Registro de pagos", icon: "card", color: "forest", desc: "Cobrar en ventanilla", badge: null, flag: "module_finance", perm: "finance:write" },
+  { id: "payments", label: "Registro de pagos", icon: "card", color: "forest", desc: "Cobrar en ventanilla", badge: null, flag: "module_finance", perm: ["payments:write", "finance:write"] },
   { id: "finance", label: "Finanzas", icon: "finance", color: "orange", desc: "Ingresos y adeudos", badge: null, flag: "module_finance", perm: "finance:read" },
   // QR capture is deferred; the module ships as the daily pass list.
   // Any-of: directors/admins pass lists via attendance:read; teachers use their
