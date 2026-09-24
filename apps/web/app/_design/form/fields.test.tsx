@@ -1,3 +1,4 @@
+import { type ReactElement, useState } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -98,7 +99,22 @@ describe("EmailField", () => {
     const input = screen.getByLabelText("Correo");
     expect(input).toHaveAttribute("autocapitalize", "none");
     expect(input).toHaveAttribute("spellcheck", "false");
-    expect(input).toHaveAttribute("type", "email");
+    // type="text" + inputMode="email": el teclado de correo en el teléfono, y
+    // un cursor que el navegador deja leer. type="email" no expone la
+    // selección, así que al bajar a minúsculas el cursor saltaba al final.
+    expect(input).toHaveAttribute("type", "text");
+    expect(input).toHaveAttribute("inputmode", "email");
+  });
+
+  it("corregir a media dirección no revuelve el correo: el cursor se queda donde estaba", async () => {
+    function Controlado(): ReactElement {
+      const [v, setV] = useState("ana.ruiz@colegio.mx");
+      return <EmailField label="Correo" value={v} onChange={setV} />;
+    }
+    render(<Controlado />);
+    const input = screen.getByLabelText("Correo");
+    await userEvent.type(input, "Maria", { initialSelectionStart: 4, initialSelectionEnd: 4 });
+    expect(input).toHaveValue("ana.mariaruiz@colegio.mx");
   });
 });
 

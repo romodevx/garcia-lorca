@@ -52,6 +52,17 @@ describe("el correo de la entrada", () => {
     expect(correo).toHaveValue("director@garcialorca.edu.mx");
   });
 
+  it("corregir a media dirección deja el cursor donde estaba", async () => {
+    const user = userEvent.setup();
+    render(<Login theme="light" onToggle={() => {}} onSubmit={vi.fn()} pending={false} />);
+
+    const correo = screen.getByLabelText("Correo");
+    await user.type(correo, "ana.ruiz@colegio.mx");
+    await user.type(correo, "Maria", { initialSelectionStart: 4, initialSelectionEnd: 4 });
+
+    expect(correo).toHaveValue("ana.mariaruiz@colegio.mx");
+  });
+
   it("no deja que el teclado del sistema ponga la mayúscula inicial", () => {
     render(<Login theme="light" onToggle={() => {}} onSubmit={vi.fn()} pending={false} />);
     const correo = screen.getByLabelText("Correo");
@@ -70,5 +81,17 @@ describe("el correo de «¿Olvidaste tu contraseña?»", () => {
     await user.type(correo, "Ana.Ruiz@Colegio.MX");
 
     expect(correo).toHaveValue("ana.ruiz@colegio.mx");
+  });
+
+  it("corregir a media dirección no revuelve el correo al que se manda el enlace", async () => {
+    const user = userEvent.setup();
+    render(<Login theme="light" onToggle={() => {}} onSubmit={vi.fn()} pending={false} />);
+
+    await user.click(screen.getByRole("button", { name: "¿Olvidaste tu contraseña?" }));
+    const correo = screen.getByLabelText("¿Cuál es tu correo?");
+    await user.type(correo, "ana.ruiz@colegio.mx");
+    await user.type(correo, "Maria", { initialSelectionStart: 4, initialSelectionEnd: 4 });
+
+    expect(correo).toHaveValue("ana.mariaruiz@colegio.mx");
   });
 });

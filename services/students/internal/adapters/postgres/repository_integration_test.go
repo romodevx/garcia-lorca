@@ -15,6 +15,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,18 +39,6 @@ const (
 	tenantA = "11111111-1111-1111-1111-111111111111"
 	tenantB = "22222222-2222-2222-2222-222222222222"
 )
-
-// migrationFiles are applied in order before the app role is granted, so the
-// non-owner role gets privileges on every table (students + enrollments +
-// guardian links).
-var migrationFiles = []string{
-	"../../../../../migrations/students/0001_init.sql",
-	"../../../../../migrations/students/0002_enrollments.sql",
-	"../../../../../migrations/students/0003_guardians.sql",
-	"../../../../../migrations/students/0004_maternal_level.sql",
-	"../../../../../migrations/students/0005_contacts.sql",
-	"../../../../../migrations/students/0006_email_lowercase.sql",
-}
 
 var (
 	// superDSNFor builds a superuser DSN for any database in the test container,
@@ -106,9 +97,24 @@ func open(dsn string) (*gorm.DB, error) {
 	return gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 }
 
+// migrate applies every file in migrationsDir in order — the directory is the
+// one list of migrations, so a new file can never be left out of the schema the
+// repository and RLS tests run against — and then grants the non-owner app role
+// privileges on every table.
 func migrate(db *gorm.DB) error {
-	for _, f := range migrationFiles {
-		sql, err := os.ReadFile(f)
+	entries, err := os.ReadDir(migrationsDir)
+	if err != nil {
+		return fmt.Errorf("read migrations dir: %w", err)
+	}
+	files := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
+			files = append(files, e.Name())
+		}
+	}
+	sort.Strings(files)
+	for _, f := range files {
+		sql, err := os.ReadFile(filepath.Join(migrationsDir, f))
 		if err != nil {
 			return err
 		}

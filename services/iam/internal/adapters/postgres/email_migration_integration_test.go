@@ -59,94 +59,113 @@ func orderedMigrations(t *testing.T) []string {
 
 func applyMigration(t *testing.T, db *gorm.DB, file string) {
 	t.Helper()
-	sql, err := os.ReadFile(filepath.Join(migrationsDir, file))
-	if err != nil {
-		t.Fatalf("read migration %s: %v", file, err)
-	}
-	if err := db.Exec(string(sql)).Error; err != nil {
+	if err := tryMigration(t, db, file); err != nil {
 		t.Fatalf("apply migration %s: %v", file, err)
 	}
 }
 
+// tryMigration applies one file on a dedicated connection, so a migration that
+// aborts leaves no half-open transaction behind for the test's next query.
+func tryMigration(t *testing.T, db *gorm.DB, file string) error {
+	t.Helper()
+	sql, err := os.ReadFile(filepath.Join(migrationsDir, file))
+	if err != nil {
+		t.Fatalf("read migration %s: %v", file, err)
+	}
+	return db.Connection(func(conn *gorm.DB) error {
+		return conn.Exec(string(sql)).Error
+	})
+}
+
 func hasConstraint(t *testing.T, db *gorm.DB, name string) bool {
 	t.Helper()
-	var n int64
-	if err := db.Raw("SELECT count(*) FROM pg_constraint WHERE conname = ?", name).Scan(&n).Error; err != nil {
-		t.Fatalf("look up constraint %s: %v", name, err)
-	}
-	return n > 0
+	return scalar[int64](t, db, "SELECT count(*) FROM pg_constraint WHERE conname = ?", name) > 0
 }
 
-// Migration 0018 stores every login email trimmed and lowercase. Emails that
-// would collide once lowercased are NOT touched and NOT deleted: they are
-// recorded in user_email_conflicts for a person to resolve, and the CHECK that
-// forbids unnormalized emails is only added when there is nothing to resolve.
+// scalar runs a single-value query and fails the test on any error, so a broken
+// query never reads as a misleading zero value.
+func scalar[T any](t *testing.T, db *gorm.DB, query string, args ...any) T {
+	t.Helper()
+	var v T
+	if err := db.Raw(query, args...).Scan(&v).Error; err != nil {
+		t.Fatalf("%s: %v", query, err)
+	}
+	return v
+}
+
+// padded wraps an address in the whitespace Go's TrimSpace removes and SQL's
+// btrim does not: a tab, a no-break space and an ideographic space.
+func padded(email string) string {
+	return "\t\u00a0" + email + "\u3000"
+}
+
+func seedUser0018(t *testing.T, db *gorm.DB, id, email string) {
+	t.Helper()
+	if err := db.Exec(
+		"INSERT INTO users (id, tenant_id, email, display_name, password_hash, status) VALUES (?, ?, ?, 'x', 'x', 'active')",
+		id, schoolTenant, email).Error; err != nil {
+		t.Fatalf("seed %q: %v", email, err)
+	}
+}
+
+// Migration 0018 stores every login email trimmed and lowercase — trimmed of
+// every whitespace Go trims, not only U+0020 — and then forbids anything else.
 func TestMigration0018NormalizesUserEmails(t *testing.T) {
 	db := migrateUpTo(t, "mig_iam_email_clean", "0018")
-	seed := func(id, email string) {
-		t.Helper()
-		if err := db.Exec(
-			"INSERT INTO users (id, tenant_id, email, display_name, password_hash, status) VALUES (?, ?, ?, 'x', 'x', 'active')",
-			id, schoolTenant, email).Error; err != nil {
-			t.Fatalf("seed %s: %v", email, err)
-		}
-	}
-	seed("aaaaaaaa-0000-0000-0000-000000000001", "  Ana.Cruz@Colegio.MX ")
-	seed("aaaaaaaa-0000-0000-0000-000000000002", "beto@colegio.mx")
+	seedUser0018(t, db, "aaaaaaaa-0000-0000-0000-000000000001", "  Ana.Cruz@Colegio.MX ")
+	seedUser0018(t, db, "aaaaaaaa-0000-0000-0000-000000000002", padded("Beto@Colegio.mx"))
+	seedUser0018(t, db, "aaaaaaaa-0000-0000-0000-000000000003", "carla@colegio.mx")
 
 	applyMigration(t, db, "0018_email_lowercase.sql")
 
-	var emails []string
-	db.Raw("SELECT email FROM users ORDER BY id").Scan(&emails)
-	if len(emails) != 2 || emails[0] != "ana.cruz@colegio.mx" || emails[1] != "beto@colegio.mx" {
-		t.Fatalf("emails after migration = %q", emails)
+	for id, want := range map[string]string{
+		"aaaaaaaa-0000-0000-0000-000000000001": "ana.cruz@colegio.mx",
+		"aaaaaaaa-0000-0000-0000-000000000002": "beto@colegio.mx",
+		"aaaaaaaa-0000-0000-0000-000000000003": "carla@colegio.mx",
+	} {
+		if got := scalar[string](t, db, "SELECT email FROM users WHERE id = ?", id); got != want {
+			t.Errorf("user %s email = %q, want %q", id, got, want)
+		}
 	}
 	if !hasConstraint(t, db, "users_email_normalized_ck") {
-		t.Fatal("with no conflicts the normalization CHECK must be in place")
+		t.Fatal("the normalization CHECK must be in place")
 	}
-	err := db.Exec("INSERT INTO users (id, tenant_id, email, display_name, password_hash, status) VALUES ('aaaaaaaa-0000-0000-0000-000000000003', ?, 'Mixed@Case.mx', 'x', 'x', 'active')", schoolTenant).Error
-	if err == nil {
-		t.Fatal("an unnormalized email must be refused once the CHECK is in place")
+	for _, email := range []string{"Mixed@Case.mx", padded("pad@colegio.mx")} {
+		err := db.Exec("INSERT INTO users (tenant_id, email, display_name, password_hash, status) VALUES (?, ?, 'x', 'x', 'active')", schoolTenant, email).Error
+		if err == nil || !strings.Contains(err.Error(), "users_email_normalized_ck") {
+			t.Errorf("insert %q: want a users_email_normalized_ck violation, got %v", email, err)
+		}
 	}
 }
 
-func TestMigration0018RecordsCollisionsInsteadOfDeleting(t *testing.T) {
+// Two spellings of one address are two rows that would become one. The
+// migration refuses to guess which is the real person: it stops, names the
+// rows by id, and changes NOTHING — no row deleted, none rewritten.
+func TestMigration0018StopsOnCollisionsAndChangesNothing(t *testing.T) {
 	db := migrateUpTo(t, "mig_iam_email_dup", "0018")
-	for id, email := range map[string]string{
-		"bbbbbbbb-0000-0000-0000-000000000001": "Ana@Colegio.mx",
-		"bbbbbbbb-0000-0000-0000-000000000002": "ana@colegio.mx",
-		"bbbbbbbb-0000-0000-0000-000000000003": "Luis@Colegio.mx",
-	} {
-		if err := db.Exec(
-			"INSERT INTO users (id, tenant_id, email, display_name, password_hash, status) VALUES (?, ?, ?, 'x', 'x', 'active')",
-			id, schoolTenant, email).Error; err != nil {
-			t.Fatalf("seed %s: %v", email, err)
+	seedUser0018(t, db, "bbbbbbbb-0000-0000-0000-000000000001", "Ana@Colegio.mx")
+	seedUser0018(t, db, "bbbbbbbb-0000-0000-0000-000000000002", "ana@colegio.mx")
+	seedUser0018(t, db, "bbbbbbbb-0000-0000-0000-000000000003", "Luis@Colegio.mx")
+
+	err := tryMigration(t, db, "0018_email_lowercase.sql")
+	if err == nil {
+		t.Fatal("colliding emails must stop the migration")
+	}
+	for _, id := range []string{"bbbbbbbb-0000-0000-0000-000000000001", "bbbbbbbb-0000-0000-0000-000000000002"} {
+		if !strings.Contains(err.Error(), id) {
+			t.Errorf("the error must name colliding row %s: %v", id, err)
 		}
 	}
-
-	applyMigration(t, db, "0018_email_lowercase.sql")
-
-	var users int64
-	db.Raw("SELECT count(*) FROM users").Scan(&users)
-	if users != 3 {
-		t.Fatalf("no user may be deleted, have %d", users)
+	if strings.Contains(err.Error(), "colegio.mx") {
+		t.Errorf("the error must not carry the addresses themselves: %v", err)
 	}
-	var conflicts []string
-	db.Raw("SELECT original_email FROM user_email_conflicts ORDER BY original_email COLLATE \"C\"").Scan(&conflicts)
-	if len(conflicts) != 2 || conflicts[0] != "Ana@Colegio.mx" || conflicts[1] != "ana@colegio.mx" {
-		t.Fatalf("conflicts = %q, want both spellings of ana", conflicts)
+	if n := scalar[int64](t, db, "SELECT count(*) FROM users"); n != 3 {
+		t.Errorf("no user may be deleted, have %d", n)
 	}
-	var luis string
-	db.Raw("SELECT email FROM users WHERE id = 'bbbbbbbb-0000-0000-0000-000000000003'").Scan(&luis)
-	if luis != "luis@colegio.mx" {
-		t.Errorf("a non-colliding email is still normalized, got %q", luis)
-	}
-	var ana string
-	db.Raw("SELECT email FROM users WHERE id = 'bbbbbbbb-0000-0000-0000-000000000001'").Scan(&ana)
-	if ana != "Ana@Colegio.mx" {
-		t.Errorf("a colliding email is left as it was, got %q", ana)
+	if got := scalar[string](t, db, "SELECT email FROM users WHERE id = 'bbbbbbbb-0000-0000-0000-000000000003'"); got != "Luis@Colegio.mx" {
+		t.Errorf("a stopped migration rewrites nothing, got %q", got)
 	}
 	if hasConstraint(t, db, "users_email_normalized_ck") {
-		t.Error("the CHECK must wait until the collisions are resolved")
+		t.Error("a stopped migration adds no CHECK")
 	}
 }

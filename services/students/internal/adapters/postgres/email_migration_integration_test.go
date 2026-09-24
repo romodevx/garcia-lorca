@@ -12,11 +12,11 @@ import (
 	"gorm.io/gorm"
 )
 
-// schoolTenant is the tenant a data migration binds with SET LOCAL: the one
-// school this deployment serves (see migrations/iam/0017).
-// migrationsDir is where migrateUpTo reads the students migrations from.
+// migrationsDir is where the students migrations live.
 const migrationsDir = "../../../../../migrations/students"
 
+// schoolTenant is the tenant a data migration binds with SET LOCAL: the one
+// school this deployment serves (see migrations/iam/0017).
 const schoolTenant = "00000000-0000-0000-0000-000000000001"
 
 // migrateUpTo builds a throwaway database with every migration applied BEFORE
@@ -62,22 +62,44 @@ func orderedMigrations(t *testing.T) []string {
 
 func applyMigration(t *testing.T, db *gorm.DB, file string) {
 	t.Helper()
-	sql, err := os.ReadFile(filepath.Join(migrationsDir, file))
-	if err != nil {
-		t.Fatalf("read migration %s: %v", file, err)
-	}
-	if err := db.Exec(string(sql)).Error; err != nil {
+	if err := tryMigration(t, db, file); err != nil {
 		t.Fatalf("apply migration %s: %v", file, err)
 	}
 }
 
+// tryMigration applies one file on a dedicated connection, so a migration that
+// aborts leaves no half-open transaction behind for the test's next query.
+func tryMigration(t *testing.T, db *gorm.DB, file string) error {
+	t.Helper()
+	sql, err := os.ReadFile(filepath.Join(migrationsDir, file))
+	if err != nil {
+		t.Fatalf("read migration %s: %v", file, err)
+	}
+	return db.Connection(func(conn *gorm.DB) error {
+		return conn.Exec(string(sql)).Error
+	})
+}
+
 func hasConstraint(t *testing.T, db *gorm.DB, name string) bool {
 	t.Helper()
-	var n int64
-	if err := db.Raw("SELECT count(*) FROM pg_constraint WHERE conname = ?", name).Scan(&n).Error; err != nil {
-		t.Fatalf("look up constraint %s: %v", name, err)
+	return scalar[int64](t, db, "SELECT count(*) FROM pg_constraint WHERE conname = ?", name) > 0
+}
+
+// scalar runs a single-value query and fails the test on any error, so a broken
+// query never reads as a misleading zero value.
+func scalar[T any](t *testing.T, db *gorm.DB, query string, args ...any) T {
+	t.Helper()
+	var v T
+	if err := db.Raw(query, args...).Scan(&v).Error; err != nil {
+		t.Fatalf("%s: %v", query, err)
 	}
-	return n > 0
+	return v
+}
+
+// padded wraps an address in the whitespace Go's TrimSpace removes and SQL's
+// btrim does not: a tab, a no-break space and an ideographic space.
+func padded(email string) string {
+	return "\t\u00a0" + email + "\u3000"
 }
 
 // Migration 0006 lowercases contact emails. Contacts carry no uniqueness on
@@ -89,18 +111,19 @@ func TestMigration0006NormalizesContactEmails(t *testing.T) {
 		schoolTenant).Error; err != nil {
 		t.Fatalf("seed student: %v", err)
 	}
-	if err := db.Exec(
-		"INSERT INTO guardian_students (tenant_id, student_id, full_name, email) VALUES (?, 'dddddddd-0000-0000-0000-000000000001', 'Ana', ' Ana@Correo.COM ')",
-		schoolTenant).Error; err != nil {
-		t.Fatalf("seed contact: %v", err)
+	for _, email := range []string{" Ana@Correo.COM ", padded("Luis@Correo.com")} {
+		if err := db.Exec(
+			"INSERT INTO guardian_students (tenant_id, student_id, full_name, email) VALUES (?, 'dddddddd-0000-0000-0000-000000000001', 'x', ?)",
+			schoolTenant, email).Error; err != nil {
+			t.Fatalf("seed contact %q: %v", email, err)
+		}
 	}
 
 	applyMigration(t, db, "0006_email_lowercase.sql")
 
-	var email string
-	db.Raw("SELECT email FROM guardian_students").Scan(&email)
-	if email != "ana@correo.com" {
-		t.Errorf("email = %q", email)
+	got := scalar[string](t, db, "SELECT string_agg(email, ',' ORDER BY email) FROM guardian_students")
+	if got != "ana@correo.com,luis@correo.com" {
+		t.Errorf("emails = %q", got)
 	}
 	if !hasConstraint(t, db, "guardian_students_email_normalized_ck") {
 		t.Fatal("the normalization CHECK must be in place")

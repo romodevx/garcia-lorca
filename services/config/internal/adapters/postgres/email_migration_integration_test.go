@@ -59,65 +59,104 @@ func orderedMigrations(t *testing.T) []string {
 
 func applyMigration(t *testing.T, db *gorm.DB, file string) {
 	t.Helper()
-	sql, err := os.ReadFile(filepath.Join(migrationsDir, file))
-	if err != nil {
-		t.Fatalf("read migration %s: %v", file, err)
-	}
-	if err := db.Exec(string(sql)).Error; err != nil {
+	if err := tryMigration(t, db, file); err != nil {
 		t.Fatalf("apply migration %s: %v", file, err)
 	}
 }
 
+// tryMigration applies one file on a dedicated connection, so a migration that
+// aborts leaves no half-open transaction behind for the test's next query.
+func tryMigration(t *testing.T, db *gorm.DB, file string) error {
+	t.Helper()
+	sql, err := os.ReadFile(filepath.Join(migrationsDir, file))
+	if err != nil {
+		t.Fatalf("read migration %s: %v", file, err)
+	}
+	return db.Connection(func(conn *gorm.DB) error {
+		return conn.Exec(string(sql)).Error
+	})
+}
+
 func hasConstraint(t *testing.T, db *gorm.DB, name string) bool {
 	t.Helper()
-	var n int64
-	if err := db.Raw("SELECT count(*) FROM pg_constraint WHERE conname = ?", name).Scan(&n).Error; err != nil {
-		t.Fatalf("look up constraint %s: %v", name, err)
-	}
-	return n > 0
+	return scalar[int64](t, db, "SELECT count(*) FROM pg_constraint WHERE conname = ?", name) > 0
 }
 
-// Migration 0005 stores teacher emails trimmed and lowercase; collisions are
-// recorded in teacher_email_conflicts, never deleted.
+// scalar runs a single-value query and fails the test on any error, so a broken
+// query never reads as a misleading zero value.
+func scalar[T any](t *testing.T, db *gorm.DB, query string, args ...any) T {
+	t.Helper()
+	var v T
+	if err := db.Raw(query, args...).Scan(&v).Error; err != nil {
+		t.Fatalf("%s: %v", query, err)
+	}
+	return v
+}
+
+// padded wraps an address in the whitespace Go's TrimSpace removes and SQL's
+// btrim does not: a tab, a no-break space and an ideographic space.
+func padded(email string) string {
+	return "\t\u00a0" + email + "\u3000"
+}
+
+func seedTeacher0005(t *testing.T, db *gorm.DB, id, email string) {
+	t.Helper()
+	if err := db.Exec(
+		"INSERT INTO teachers (id, tenant_id, first_name, last_name, email) VALUES (?, ?, 'x', 'y', ?)",
+		id, schoolTenant, email).Error; err != nil {
+		t.Fatalf("seed %q: %v", email, err)
+	}
+}
+
+// Migration 0005 stores teacher emails trimmed and lowercase, then forbids
+// anything else.
 func TestMigration0005NormalizesTeacherEmails(t *testing.T) {
-	db := migrateUpTo(t, "mig_cfg_email", "0005")
-	for id, email := range map[string]string{
-		"cccccccc-0000-0000-0000-000000000001": " Rosa@Colegio.MX",
-		"cccccccc-0000-0000-0000-000000000002": "Pepe@Colegio.mx",
-		"cccccccc-0000-0000-0000-000000000003": "pepe@colegio.mx",
+	db := migrateUpTo(t, "mig_cfg_email_clean", "0005")
+	seedTeacher0005(t, db, "cccccccc-0000-0000-0000-000000000001", " Rosa@Colegio.MX")
+	seedTeacher0005(t, db, "cccccccc-0000-0000-0000-000000000002", padded("Pepe@Colegio.mx"))
+
+	applyMigration(t, db, "0005_email_lowercase.sql")
+
+	for id, want := range map[string]string{
+		"cccccccc-0000-0000-0000-000000000001": "rosa@colegio.mx",
+		"cccccccc-0000-0000-0000-000000000002": "pepe@colegio.mx",
 	} {
-		if err := db.Exec(
-			"INSERT INTO teachers (id, tenant_id, first_name, last_name, email) VALUES (?, ?, 'x', 'y', ?)",
-			id, schoolTenant, email).Error; err != nil {
-			t.Fatalf("seed %s: %v", email, err)
+		if got := scalar[string](t, db, "SELECT email FROM teachers WHERE id = ?", id); got != want {
+			t.Errorf("teacher %s email = %q, want %q", id, got, want)
 		}
 	}
-
-	applyMigration(t, db, "0005_email_lowercase.sql")
-
-	var rosa string
-	db.Raw("SELECT email FROM teachers WHERE id = 'cccccccc-0000-0000-0000-000000000001'").Scan(&rosa)
-	if rosa != "rosa@colegio.mx" {
-		t.Errorf("rosa = %q", rosa)
-	}
-	var teachers, conflicts int64
-	db.Raw("SELECT count(*) FROM teachers").Scan(&teachers)
-	db.Raw("SELECT count(*) FROM teacher_email_conflicts").Scan(&conflicts)
-	if teachers != 3 || conflicts != 2 {
-		t.Fatalf("teachers=%d conflicts=%d, want 3 and 2", teachers, conflicts)
-	}
-	if hasConstraint(t, db, "teachers_email_normalized_ck") {
-		t.Error("the CHECK must wait until the collisions are resolved")
+	if !hasConstraint(t, db, "teachers_email_normalized_ck") {
+		t.Fatal("the normalization CHECK must be in place")
 	}
 }
 
-func TestMigration0005AddsTheCheckWhenClean(t *testing.T) {
-	db := migrateUpTo(t, "mig_cfg_email_clean", "0005")
-	if err := db.Exec("INSERT INTO teachers (tenant_id, first_name, last_name, email) VALUES (?, 'x', 'y', 'Ok@Colegio.mx')", schoolTenant).Error; err != nil {
-		t.Fatalf("seed: %v", err)
+// Two spellings of one teacher's address stop the migration, named by id, with
+// nothing deleted or rewritten.
+func TestMigration0005StopsOnCollisionsAndChangesNothing(t *testing.T) {
+	db := migrateUpTo(t, "mig_cfg_email_dup", "0005")
+	seedTeacher0005(t, db, "dddddddd-0000-0000-0000-000000000001", "Pepe@Colegio.mx")
+	seedTeacher0005(t, db, "dddddddd-0000-0000-0000-000000000002", "pepe@colegio.mx")
+	seedTeacher0005(t, db, "dddddddd-0000-0000-0000-000000000003", "Rosa@Colegio.mx")
+
+	err := tryMigration(t, db, "0005_email_lowercase.sql")
+	if err == nil {
+		t.Fatal("colliding emails must stop the migration")
 	}
-	applyMigration(t, db, "0005_email_lowercase.sql")
-	if !hasConstraint(t, db, "teachers_email_normalized_ck") {
-		t.Fatal("with no conflicts the normalization CHECK must be in place")
+	for _, id := range []string{"dddddddd-0000-0000-0000-000000000001", "dddddddd-0000-0000-0000-000000000002"} {
+		if !strings.Contains(err.Error(), id) {
+			t.Errorf("the error must name colliding row %s: %v", id, err)
+		}
+	}
+	if strings.Contains(err.Error(), "dddddddd-0000-0000-0000-000000000003") {
+		t.Errorf("a row that does not collide is not named: %v", err)
+	}
+	if n := scalar[int64](t, db, "SELECT count(*) FROM teachers"); n != 3 {
+		t.Errorf("no teacher may be deleted, have %d", n)
+	}
+	if got := scalar[string](t, db, "SELECT email FROM teachers WHERE id = 'dddddddd-0000-0000-0000-000000000001'"); got != "Pepe@Colegio.mx" {
+		t.Errorf("a stopped migration rewrites nothing, got %q", got)
+	}
+	if hasConstraint(t, db, "teachers_email_normalized_ck") {
+		t.Error("a stopped migration adds no CHECK")
 	}
 }

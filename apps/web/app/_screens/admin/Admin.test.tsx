@@ -107,19 +107,6 @@ describe("Admin — users", () => {
     );
   });
 
-  it("baja a minúsculas el correo del usuario nuevo mientras se teclea", async () => {
-    const user = userEvent.setup();
-    admin.listUsers.mockResolvedValue([]);
-    admin.listRoles.mockResolvedValue([]);
-
-    render(<Admin onBack={() => {}} />);
-
-    const correo = await screen.findByLabelText("Correo");
-    await user.type(correo, "Maestra.Ruiz@Colegio.MX");
-
-    expect(correo).toHaveValue("maestra.ruiz@colegio.mx");
-  });
-
   it("renders a user whose roleIds come back null without crashing the panel", async () => {
     // Regression: a user created with no roles used to serialize roleIds as null;
     // the panel did user.roleIds.length / new Set(user.roleIds) and took the whole

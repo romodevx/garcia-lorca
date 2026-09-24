@@ -4,6 +4,7 @@ import { useState, type CSSProperties, type ReactElement } from "react";
 import { LogoBadge } from "../_design/Brand";
 import { Btn, ThemeToggle } from "../_design/Controls";
 import { Icon } from "../_design/Icon";
+import { lowercaseKeepingCaret } from "../_design/form/lowercaseKeepingCaret";
 import { requestPasswordReset } from "../auth/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -149,13 +150,14 @@ export function Login({ theme, onToggle, onSubmit, error, pending }: LoginProps)
                 */}
                 <input
                   aria-label="Correo"
-                  type="email"
+                  type="text"
+                  inputMode="email"
                   autoComplete="username"
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
                   value={email}
-                  onChange={(e) => setEmail(e.target.value.toLowerCase())}
+                  onChange={(e) => setEmail(lowercaseKeepingCaret(e.target))}
                   style={inp}
                 />
               </div>
@@ -288,12 +290,13 @@ function ForgotPanel({ email, sent, onEmail, onSend, onClose }: { email: string;
           </p>
           <input
             id="forgot-email"
-            type="email"
+            type="text"
+            inputMode="email"
             autoComplete="email"
             value={email}
             autoCapitalize="none"
             spellCheck={false}
-            onChange={(e) => onEmail(e.target.value.toLowerCase())}
+            onChange={(e) => onEmail(lowercaseKeepingCaret(e.target))}
             style={{ width: "100%", height: 48, padding: "0 14px", borderRadius: "var(--r-md)", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 15, outline: "none" }}
           />
           <div style={{ display: "flex", gap: 10, marginTop: 12 }}>

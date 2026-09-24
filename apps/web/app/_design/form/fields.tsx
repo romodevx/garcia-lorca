@@ -3,6 +3,7 @@
 import type { ChangeEvent, ReactElement } from "react";
 
 import { Field, inputStyle } from "./Field";
+import { lowercaseKeepingCaret } from "./lowercaseKeepingCaret";
 
 /**
  * Los campos de captura del sistema. Todos comparten la misma envoltura
@@ -98,14 +99,15 @@ export function EmailField(props: BaseFieldProps): ReactElement {
       {(id, describedBy) => (
         <input
           {...common(id, describedBy, props)}
-          type="email"
+          type="text"
           inputMode="email"
+          autoComplete="email"
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}
           value={value}
           onChange={(e: ChangeEvent<HTMLInputElement>) => {
-            onChange(e.target.value.toLowerCase());
+            onChange(lowercaseKeepingCaret(e.target));
             onClearError?.();
           }}
           style={inputStyle(error !== undefined)}

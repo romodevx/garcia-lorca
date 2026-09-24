@@ -20,6 +20,7 @@ var _ ports.CatalogRepository = (*Repository)(nil)
 const (
 	uniqueViolation     = "23505"
 	foreignKeyViolation = "23503"
+	checkViolation      = "23514"
 )
 
 // Repository is the GORM-backed config CatalogRepository. Every operation runs
@@ -567,7 +568,8 @@ func (r *Repository) ListTeachingAssignments(ctx context.Context, cycleID string
 
 // translateCreateErr maps a GORM insert error to the port's error contract: a
 // unique violation is KindConflict (conflictMsg), a foreign-key violation is
-// KindInvalid (the referenced parent is missing), anything else is KindInternal.
+// KindInvalid (the referenced parent is missing), a CHECK violation is
+// KindInvalid (a value the schema forbids), anything else is KindInternal.
 func translateCreateErr(err error, internalMsg, conflictMsg string) error {
 	if err == nil {
 		return nil
@@ -577,6 +579,8 @@ func translateCreateErr(err error, internalMsg, conflictMsg string) error {
 		return glerrors.Wrap(glerrors.KindConflict, conflictMsg, err)
 	case foreignKeyViolation:
 		return glerrors.Wrap(glerrors.KindInvalid, "referenced parent does not exist", err)
+	case checkViolation:
+		return glerrors.Wrap(glerrors.KindInvalid, "a value is not allowed", err)
 	default:
 		return glerrors.Wrap(glerrors.KindInternal, internalMsg, err)
 	}

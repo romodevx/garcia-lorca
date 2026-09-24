@@ -45,6 +45,16 @@ const SIGN_IN_ERROR = "No pudimos iniciar sesión. Verifica tu correo y contrase
 // expo-local-authentication + a stored refresh token.
 const FACE_ID_PENDING = "El acceso con Face ID estará disponible pronto.";
 
+/**
+ * The one spelling an address is sent under: trimmed and lowercase. Applied
+ * when the parent leaves the field and at submit — never per keystroke, because
+ * rewriting a controlled TextInput mid-composition duplicates characters on
+ * Android keyboards that compose (react-native#27449).
+ */
+function normalizeEmail(typed: string): string {
+  return typed.trim().toLowerCase();
+}
+
 /** Login screen — consistent with the web portal (logo, lime primary, fields). */
 export function LoginScreen({ onSubmit }: LoginScreenProps): ReactElement {
   const theme = useTheme();
@@ -61,7 +71,7 @@ export function LoginScreen({ onSubmit }: LoginScreenProps): ReactElement {
     setError(null);
     setSubmitting(true);
     try {
-      await onSubmit(email.trim(), password);
+      await onSubmit(normalizeEmail(email), password);
     } catch {
       setError(SIGN_IN_ERROR);
     } finally {
@@ -88,7 +98,8 @@ export function LoginScreen({ onSubmit }: LoginScreenProps): ReactElement {
         <TextInput
           accessibilityLabel="Correo electrónico"
           value={email}
-          onChangeText={(typed) => setEmail(typed.toLowerCase())}
+          onChangeText={setEmail}
+          onBlur={() => setEmail(normalizeEmail)}
           placeholderTextColor={theme.colors.text3}
           autoCapitalize="none"
           keyboardType="email-address"

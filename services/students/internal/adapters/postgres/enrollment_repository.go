@@ -17,7 +17,10 @@ import (
 // binding lives in exactly one place (withTenant / pkg/authctx).
 var _ ports.EnrollmentRepository = (*Repository)(nil)
 
-const foreignKeyViolation = "23503"
+const (
+	foreignKeyViolation = "23503"
+	checkViolation      = "23514"
+)
 
 // CreateEnrollment inserts a new enrollment. A duplicate (student, cycle) per
 // tenant is KindConflict; a dangling student_id is KindInvalid.

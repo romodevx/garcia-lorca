@@ -183,7 +183,7 @@ describe("la captura de administración", () => {
     const correo = screen.getByLabelText("Correo");
     await user.type(correo, "Ana.Ruiz@CEGLORCA.COM");
     expect(correo).toHaveValue("ana.ruiz@ceglorca.com");
-    expect(correo).toHaveAttribute("type", "email");
+    expect(correo).toHaveAttribute("inputmode", "email");
   });
 
   it("el nombre para mostrar se captura en mayúsculas", async () => {
