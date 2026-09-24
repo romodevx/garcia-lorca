@@ -11,9 +11,10 @@ import { DrawerShell } from "../../_design/DrawerShell";
 import { Icon, type IconName } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import type { ColorKey } from "../../_design/colors";
-import { HelpTip } from "../../_design/form";
+import { DateField, HelpTip } from "../../_design/form";
 import { listCycles, type Cycle } from "../../config/api";
 import { getOverdue, listCharges, registerPayment, type Charge, type PaymentMethod } from "../../finance/api";
+import { localISODate } from "../../_lib/localDate";
 import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 import { listStudents, type Student } from "../../students/api";
 
@@ -70,6 +71,10 @@ function PayDrawer({ charge, name, onClose, onPaid }: { charge: Charge; name: st
   const [amount, setAmount] = useState(centsToPesosInput(charge.remainingCents));
   const [method, setMethod] = useState<PaymentMethod>("cash");
   const [reference, setReference] = useState("");
+  // The day the family paid (task 7): not always the day it is keyed.
+  const day = localISODate();
+  const [paidOn, setPaidOn] = useState(day);
+  const [dateError, setDateError] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   // One key per ATTEMPT, minted when the drawer opens and kept across retries.
@@ -89,10 +94,14 @@ function PayDrawer({ charge, name, onClose, onPaid }: { charge: Charge; name: st
   const ready = Number.isFinite(cents) && cents > 0 && !saving;
 
   const submit = async (): Promise<void> => {
+    if (paidOn === "" || paidOn > day) {
+      setDateError("La fecha de pago no puede ser futura.");
+      return;
+    }
     setSaving(true);
     setError(undefined);
     try {
-      await registerPayment(API_URL, { chargeId: charge.id, amountCents: cents, method, reference: reference.trim(), idempotencyKey: attemptKey });
+      await registerPayment(API_URL, { chargeId: charge.id, amountCents: cents, method, reference: reference.trim(), idempotencyKey: attemptKey, paidAt: paidOn });
       onPaid();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo registrar el pago.");
@@ -141,6 +150,18 @@ function PayDrawer({ charge, name, onClose, onPaid }: { charge: Charge; name: st
               })}
             </div>
           </div>
+          <DateField
+            label="Fecha de pago"
+            value={paidOn}
+            max={day}
+            onChange={(v) => {
+              setPaidOn(v);
+              if (v !== "" && v <= day) setDateError(undefined);
+            }}
+            onBlur={() => setDateError(paidOn > day ? "La fecha de pago no puede ser futura." : undefined)}
+            error={dateError}
+            help="El día en que la familia pagó. Si capturas tarde, pon ese día: el recargo y el pronto pago se calculan con él."
+          />
           <label style={{ display: "block" }}>
             <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, marginLeft: 3 }}>
               <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Referencia (opcional)</span>

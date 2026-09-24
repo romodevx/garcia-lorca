@@ -115,6 +115,10 @@ export interface Deposit {
   cardType?: CardType;
   voidedAt?: string;
   voidReason?: string;
+  /** Who took the money, as the name read then (task 7). Absent on older deposits. */
+  receivedByName?: string;
+  /** When it was keyed; a later day than paidAt means it was captured late. */
+  capturedAt?: string;
 }
 
 /** What a deposit did: where the money landed and what is left over. */

@@ -1,10 +1,11 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as financeApi from "../../finance/api";
 import * as configApi from "../../config/api";
 import * as studentsApi from "../../students/api";
+import { localISODate } from "../../_lib/localDate";
 import { FinanceScreen } from "./FinanceScreen";
 
 vi.mock("../../finance/api", () => ({
@@ -136,6 +137,27 @@ describe("PayDrawer — money safety", () => {
     const first = finance.registerPayment.mock.calls[0]?.[1]?.idempotencyKey;
     const second = finance.registerPayment.mock.calls[1]?.[1]?.idempotencyKey;
     expect(second).toBe(first);
+  });
+
+  // Task 7: a payment captured late carries the day the family paid; it starts
+  // on today and cannot be moved into the future.
+  it("registers a payment with the day the family paid", async () => {
+    const user = userEvent.setup();
+    finance.registerPayment.mockResolvedValue({} as financeApi.PaymentResult);
+    render(<FinanceScreen onBack={() => {}} />);
+    await screen.findByText("Valentina Cruz");
+    await user.click(screen.getAllByRole("button", { name: /Registrar pago/ })[0] as HTMLElement);
+    const dialog = await screen.findByRole("dialog", { name: "Registrar pago" });
+
+    const date = within(dialog).getByLabelText("Fecha de pago");
+    expect(date).toHaveValue(localISODate());
+    expect(date).toHaveAttribute("max", localISODate());
+    fireEvent.change(date, { target: { value: "2026-01-05" } });
+    await user.click(within(dialog).getByRole("button", { name: /Registrar pago/ }));
+
+    await waitFor(() =>
+      expect(finance.registerPayment).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ paidAt: "2026-01-05" })),
+    );
   });
 
   it("does not discard a half-captured payment when the backdrop is clicked", async () => {

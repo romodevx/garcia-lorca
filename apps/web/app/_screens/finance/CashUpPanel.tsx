@@ -2,8 +2,9 @@
 
 import { useEffect, useState, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
-import { getCashUp, type CashUp } from "../../finance/api";
+import { getCashUp, type CashUp, type Deposit } from "../../finance/api";
 import { API_URL } from "../../api-url";
+import { localISODate } from "../../_lib/localDate";
 import { formatCents } from "../../_lib/money";
 
 export interface CashUpPanelProps {
@@ -72,8 +73,18 @@ export function CashUpPanel({ day }: CashUpPanelProps): ReactElement {
       {cut.deposits.length > 0 && (
         <div style={{ borderRadius: "var(--r-lg)", border: "1px solid var(--border)", background: "var(--surface)", overflow: "hidden" }}>
           {cut.deposits.map((d) => (
-            <div key={d.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "13px 20px", borderTop: "1px solid var(--border)" }}>
-              <span style={{ fontSize: 14, color: "var(--text-muted)" }}>{hourOf(d.paidAt)} · {d.method === "cash" ? "Efectivo" : d.method === "card" ? "Tarjeta" : "Transferencia"}</span>
+            <div key={d.id} data-testid="cash-up-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "13px 20px", borderTop: "1px solid var(--border)" }}>
+              <span style={{ fontSize: 14, color: "var(--text-muted)" }}>
+                {hourOf(d.paidAt)} · {d.method === "cash" ? "Efectivo" : d.method === "card" ? "Tarjeta" : "Transferencia"}
+                {d.receivedByName !== undefined && d.receivedByName !== "" && ` · ${d.receivedByName}`}
+                {capturedLate(d) && (
+                  // A payment dated the day the family paid but keyed later:
+                  // the counterweight to back-dating (task 7).
+                  <span style={{ marginLeft: 8, padding: "2px 8px", borderRadius: 99, background: "var(--warn-bg)", color: "var(--warn-fg)", fontSize: 12, fontWeight: 700 }}>
+                    capturado el {dayLabel(d.capturedAt ?? "")}
+                  </span>
+                )}
+              </span>
               <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15.5, color: "var(--text)" }}>{formatCents(d.amountCents)}</span>
             </div>
           ))}
@@ -100,6 +111,20 @@ export function CashUpPanel({ day }: CashUpPanelProps): ReactElement {
 }
 
 /** The hour a deposit was taken, for a person scanning the day. */
+/** Keyed on a later local day than the one it is dated. */
+function capturedLate(d: Deposit): boolean {
+  if (d.capturedAt === undefined || d.capturedAt === "") return false;
+  const paid = new Date(d.paidAt);
+  const keyed = new Date(d.capturedAt);
+  if (Number.isNaN(paid.getTime()) || Number.isNaN(keyed.getTime())) return false;
+  return localISODate(keyed) > localISODate(paid);
+}
+
+function dayLabel(iso: string): string {
+  const at = new Date(iso);
+  return Number.isNaN(at.getTime()) ? "—" : at.toLocaleDateString("es-MX", { day: "numeric", month: "short" });
+}
+
 function hourOf(iso: string): string {
   const at = new Date(iso);
   return Number.isNaN(at.getTime()) ? "—" : at.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });

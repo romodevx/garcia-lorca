@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -224,4 +224,55 @@ describe("CollectDrawer", () => {
     await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
     expect(finance.registerDeposit.mock.calls[0]?.[1]?.cardType).toBe("credit");
   });
+
+describe("CollectDrawer · fecha de pago (tarea 7)", () => {
+  const TODAY = "2026-10-12";
+  const open = () => render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} today={TODAY} />);
+
+  it("dates the payment today unless told otherwise, and never in the future", async () => {
+    open();
+    const date = await screen.findByLabelText("Fecha de pago");
+    expect(date).toHaveValue(TODAY);
+    expect(date).toHaveAttribute("max", TODAY);
+  });
+
+  // Every rule is a function of the day the family paid: the quote and the
+  // preview are asked again for that day.
+  it("asks for the quote and the preview of the day the family paid", async () => {
+    open();
+    const date = await screen.findByLabelText("Fecha de pago");
+    fireEvent.change(date, { target: { value: "2026-10-03" } });
+
+    await waitFor(() => expect(finance.getExpected).toHaveBeenLastCalledWith(expect.any(String), "s1", "2026-10-03"));
+    await waitFor(() =>
+      expect(finance.previewDeposit).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({ paidAt: "2026-10-03" })),
+    );
+  });
+
+  it("takes the money with the day the family paid", async () => {
+    const user = userEvent.setup();
+    finance.registerDeposit.mockResolvedValue({
+      deposit: { id: "d1", studentId: "s1", amountCents: 670000, method: "cash", reference: "", paidAt: "2026-10-03T00:00:00Z", calendarVersion: "" },
+      allocations: [], surcharges: [], unallocatedCents: 0, replayed: false,
+    } as unknown as financeApi.DepositResult);
+    open();
+    fireEvent.change(await screen.findByLabelText("Fecha de pago"), { target: { value: "2026-10-03" } });
+    await screen.findByTestId("amount-expected");
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
+    expect(finance.registerDeposit.mock.calls[0]?.[1]).toMatchObject({ paidAt: "2026-10-03" });
+  });
+
+  it("refuses a future date on the field, and takes nothing", async () => {
+    const user = userEvent.setup();
+    open();
+    const date = await screen.findByLabelText("Fecha de pago");
+    fireEvent.change(date, { target: { value: "2026-10-20" } });
+    fireEvent.blur(date);
+    expect(await screen.findByText("La fecha de pago no puede ser futura.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+    expect(finance.registerDeposit).not.toHaveBeenCalled();
+  });
+});
 });
