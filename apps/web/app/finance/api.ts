@@ -5,7 +5,8 @@
  * uses `credentials:"include"`; nothing secret ever travels in the body.
  *
  * Reads require `finance:read`, writes `finance:write` (the owner role holds
- * both). These helpers mirror `app/grades/api.ts`: a `url()` trailing-slash
+ * both); the counter's routes also answer to `collections:read` and
+ * `payments:write`, the Cobranza role (task 9, ADR 0015). These helpers mirror `app/grades/api.ts`: a `url()` trailing-slash
  * guard, throw on any non-2xx, and parse the gateway's single-key envelopes
  * (`{concepts:[…]}`, `{charges:[…]}`, `{overdue:[…]}`). Shapes match the gateway
  * REST contract exactly.

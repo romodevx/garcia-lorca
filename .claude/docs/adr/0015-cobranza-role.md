@@ -22,7 +22,7 @@ finance permission or the counter's on the counter's routes only:
 
 | Permission | Routes (gateway) |
 |---|---|
-| `collections:read` | `GET /finance/accounts/{id}`, `GET /finance/expected`, `GET /finance/overdue`, `GET /finance/charges?studentId=` (one pupil only — a whole cycle's ledger stays `finance:read`), `GET /finance/cash-up`, `GET /finance/deposits`, `POST /finance/deposits/preview` |
+| `collections:read` | `GET /finance/accounts/{id}`, `GET /finance/expected`, `GET /finance/overdue` (school-wide on purpose: it is the collections list), `GET /finance/charges?studentId=` and `GET /finance/deposits?studentId=` (one pupil only — a whole cycle's ledger or the day's deposits stay `finance:read`), `GET /finance/cash-up`, `POST /finance/deposits/preview` |
 | `payments:write` | `POST /finance/payments`, `POST /finance/deposits` |
 
 Everything else in finance — tuition tables, concepts, billing runs, charges
@@ -40,8 +40,11 @@ the school's income and the tables that set prices.
 
 ## Consequences
 
-- The counter (web "Registro de pagos") gates on `payments:write`; Finanzas
-  keeps gating on `finance:read`.
+- The counter (web "Registro de pagos") shows to whoever holds BOTH
+  `collections:read` and `payments:write` (or the finance pair): keying money
+  without reading what is owed is not a usable counter. Finanzas keeps gating
+  on `finance:read`. The role editor offers the two new permissions under
+  "Cobranza".
 - A cashier keys money under their own name (task 7's `received_by`), and the
   owner sees it, flagged when captured late, in the cash-up.
 - Out of scope, by the owner's decision: voiding one's own deposit, and selling

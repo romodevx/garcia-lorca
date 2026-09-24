@@ -13,23 +13,25 @@
 -- admin grants only what it holds). Neither is owner-only: reading every
 -- family's balance is exactly this role's job.
 --
--- The role gets a fixed id, like guardian (0010). Idempotent. RLS: roles is
+-- The role gets a fixed id, like guardian (0010), when it is new. Idempotent. RLS: roles is
 -- FORCE ROW LEVEL SECURITY, so SET LOCAL binds the tenant.
 
 BEGIN;
 
 SET LOCAL app.current_tenant = '00000000-0000-0000-0000-000000000001';
 
+-- The owner by its fixed id (domain.OwnerRoleID), as the owner guard finds it:
+-- a renamed owner role must still receive what it has to delegate.
 UPDATE roles
    SET permissions = permissions || ARRAY['collections:read']
  WHERE tenant_id = '00000000-0000-0000-0000-000000000001'
-   AND name = 'owner'
+   AND id = '00000000-0000-0000-0000-0000000000a1'
    AND NOT ('collections:read' = ANY (permissions));
 
 UPDATE roles
    SET permissions = permissions || ARRAY['payments:write']
  WHERE tenant_id = '00000000-0000-0000-0000-000000000001'
-   AND name = 'owner'
+   AND id = '00000000-0000-0000-0000-0000000000a1'
    AND NOT ('payments:write' = ANY (permissions));
 
 INSERT INTO roles (id, tenant_id, name, permissions)
@@ -39,6 +41,9 @@ VALUES (
     'cobranza',
     ARRAY['students:read', 'students:list', 'collections:read', 'payments:write']
 )
-ON CONFLICT (tenant_id, name) DO NOTHING;
+-- A role the school already named "cobranza" is brought to exactly these four
+-- permissions rather than skipped: left as it was, it could keep broader access
+-- (finance:write) or none, and nothing would say so. It keeps its own id.
+ON CONFLICT (tenant_id, name) DO UPDATE SET permissions = EXCLUDED.permissions;
 
 COMMIT;

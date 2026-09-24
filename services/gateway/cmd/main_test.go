@@ -2839,11 +2839,23 @@ func TestCobranzaReachesTheCounterAndNothingElse(t *testing.T) {
 		{http.MethodGet, "/api/v1/finance/income?from=2026-09-01&to=2026-09-30", ""},
 		// The whole cycle's ledger is not the counter's: one pupil at a time.
 		{http.MethodGet, "/api/v1/finance/charges?cycleId=cyc-1", ""},
+		{http.MethodGet, "/api/v1/finance/deposits", ""},
 		{http.MethodGet, "/api/v1/users", ""},
 	}
 	for _, c := range denied {
 		if res := doGateway(t, gw, c.method, c.path, "cobranza", c.body); res.StatusCode != http.StatusForbidden {
 			t.Errorf("cobranza %s %s: status %d, want 403", c.method, c.path, res.StatusCode)
+		}
+	}
+}
+
+// Whoever holds finance:read still reads the whole ledger: the owner's
+// Finanzas lists a cycle's charges and every deposit.
+func TestFinanceReadStillReadsTheWholeLedger(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_finance": true})
+	for _, path := range []string{"/api/v1/finance/charges?cycleId=cyc-1", "/api/v1/finance/deposits"} {
+		if res := doGateway(t, gw, http.MethodGet, path, "finance-reader", ""); res.StatusCode == http.StatusForbidden {
+			t.Errorf("finance:read %s: 403", path)
 		}
 	}
 }

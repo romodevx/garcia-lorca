@@ -42,7 +42,9 @@ type FinanceService interface {
 // proxying to the finance service. It translates JSON ↔ the FinanceClient and
 // Connect error codes ↔ HTTP status. Every route must run behind the module
 // guard (module_finance) plus RequireAuth + rotation-enforcement, with mutations
-// gated on finance:write and reads on finance:read.
+// gated on finance:write and reads on finance:read. The counter's routes also
+// answer to collections:read and payments:write (the Cobranza role, ADR 0015);
+// cmd/main.go is where each route's permission is set.
 //
 // MONEY IS ALWAYS INTEGER CENTS (int64) on the wire: every amount field is
 // named …Cents and is a JSON integer, never a float currency value.

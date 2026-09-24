@@ -62,6 +62,15 @@ export const PERMISSION_CATALOG: readonly PermissionGroup[] = [
     ],
   },
   {
+    // The counter (task 9, the Cobranza role). finance:read/write are owner-only
+    // in iam, so they are not offered here.
+    resource: "Cobranza",
+    permissions: [
+      { value: "collections:read", label: "Consultar adeudos y corte (ventanilla)" },
+      { value: "payments:write", label: "Registrar cobros" },
+    ],
+  },
+  {
     // The Maestro (teacher) role: self-scoped capture over ONLY the teacher's own
     // assigned groups, distinct from the school-wide grades:* above.
     resource: "Docencia",

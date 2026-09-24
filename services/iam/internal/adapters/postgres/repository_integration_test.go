@@ -659,6 +659,28 @@ func TestSeededRolesHoldTheirPermissions(t *testing.T) {
 		})
 	}
 
+	// A role the school had already named "cobranza" is corrected, not skipped:
+	// re-running the migration after it was widened brings it back to four.
+	t.Run("an existing cobranza role is brought to the counter", func(t *testing.T) {
+		if err := superDB.Exec(`UPDATE roles SET permissions = ARRAY['finance:write'] WHERE tenant_id = ? AND name = 'cobranza'`, seedTenant).Error; err != nil {
+			t.Fatalf("widen: %v", err)
+		}
+		sql, err := os.ReadFile(filepath.Join(migrationsDir, "0021_cobranza_role.sql"))
+		if err != nil {
+			t.Fatalf("read migration: %v", err)
+		}
+		if err := superDB.Exec(string(sql)).Error; err != nil {
+			t.Fatalf("re-run 0021: %v", err)
+		}
+		var got []string
+		if err := superDB.Raw(`SELECT unnest(permissions) FROM roles WHERE tenant_id = ? AND name = 'cobranza'`, seedTenant).Scan(&got).Error; err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		if strings.Join(got, ",") != "students:read,students:list,collections:read,payments:write" {
+			t.Errorf("cobranza = %v, want exactly the counter", got)
+		}
+	})
+
 	// Cobranza holds exactly the counter: nothing more, and nothing owner-only
 	// (finance:* stays the owner's).
 	t.Run("cobranza holds exactly the counter", func(t *testing.T) {

@@ -97,7 +97,7 @@ describe("Inventario module", () => {
     // uniforms:read was retired by the split. A tile gated on a retired
     // permission is a tile nobody ever sees.
     const required = uniformsModule().perm;
-    const names = typeof required === "string" ? [required] : required;
+    const names = (typeof required === "string" ? [required] : required).flat();
     expect(names).not.toContain("uniforms:read");
   });
 });
@@ -114,7 +114,8 @@ describe("Docentes is a module, not a panel inside Configuración", () => {
     // a school can hand somebody the staff roster without handing them the
     // cycles, levels, grades and groups as well.
     expect(teachers().flag).toBe("module_teachers");
-    const names = typeof teachers().perm === "string" ? [teachers().perm] : teachers().perm;
+    const perm = teachers().perm;
+    const names = (typeof perm === "string" ? [perm] : perm).flat();
     expect(names).toContain("teachers:read");
     expect(names).not.toContain("config:read");
   });
@@ -159,7 +160,7 @@ describe("every live module's permission is one somebody can hold", () => {
   for (const m of MODULES) {
     if (NOT_BUILT_YET.has(m.id)) continue;
     it(`${m.id}`, () => {
-      const names = typeof m.perm === "string" ? [m.perm] : m.perm;
+      const names = (typeof m.perm === "string" ? [m.perm] : m.perm).flat();
       const reachable = names.filter((p) => GRANTABLE.has(p));
       expect(reachable.length).toBeGreaterThan(0);
     });
@@ -175,7 +176,13 @@ describe("Registro de pagos is the counter (tarea 9)", () => {
     expect(isModuleVisible(byId("finance"), cobranza)).toBe(false);
   });
 
-  it("still shows the counter to whoever holds finance:write", () => {
-    expect(isModuleVisible(byId("payments"), ["finance:write"])).toBe(true);
+  it("still shows the counter to whoever holds the finance pair", () => {
+    expect(isModuleVisible(byId("payments"), ["finance:read", "finance:write"])).toBe(true);
+  });
+
+  it("hides the counter from a role that can key money but not read what is owed", () => {
+    expect(isModuleVisible(byId("payments"), ["payments:write"])).toBe(false);
+    expect(isModuleVisible(byId("payments"), ["collections:read"])).toBe(false);
+    expect(isModuleVisible(byId("payments"), ["finance:write"])).toBe(false);
   });
 });
