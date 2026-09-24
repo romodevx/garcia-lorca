@@ -376,10 +376,12 @@ func expectedFrom(
 		}
 		out.AnnualBalanceCents += owed(c)
 		isFee := c.Charge.ConceptID() == lateFeeID
-		// A written-down surcharge rides on its month's line; anything else is
-		// a line of its own.
+		// A written-down surcharge rides on its month's line and is never a line
+		// of its own: a deposit cannot pay a surcharge apart from its month, so
+		// offering one to choose would only be refused. (One whose month cannot
+		// be read — no such ref is written today — counts in the amount only.)
 		var line *ExpectedLine
-		if _, ridesOnMonth := feeParent(c.Charge.ExternalRef()); !isFee || !ridesOnMonth {
+		if !isFee {
 			line = &ExpectedLine{ChargeID: c.Charge.ID(), Description: c.Charge.Description(), DueDate: c.Charge.DueDate(), OwedCents: owed(c)}
 			if lines != nil {
 				lines[c.Charge.ID()] = line
@@ -878,7 +880,12 @@ func (p *depositPlanner) deriveSurcharge(c ports.ChargeWithPaid, existing []port
 	}
 	total := domain.Surcharge(p.policy, p.calendar, c.Charge.DueDate(), p.paidOn)
 	for _, fee := range existing {
-		total -= fee.Charge.Effective().Int64()
+		// Only what the DAILY rule already wrote down: a monthly surcharge on
+		// the same month (a school that switched policy) is a debt of its own,
+		// as the quote counts it (expectedFrom's materialised).
+		if _, daily := surchargeParent(fee.Charge.ExternalRef()); daily {
+			total -= fee.Charge.Effective().Int64()
+		}
 	}
 	if total <= 0 {
 		return domain.Charge{}, false, nil
