@@ -63,9 +63,9 @@ paths:
           in: query
           schema: { type: boolean, default: false }
           description: Retired garments are hidden by default; issued orders still point at them.
-        - name: level
+        - name: levelId
           in: query
-          schema: { $ref: '#/components/schemas/Level' }
+          schema: { $ref: '#/components/schemas/LevelId' }
           description: |
             Narrows to what a student of that level may buy: garments scoped to
             it PLUS garments scoped to no level at all. Omitted returns everything.
@@ -89,7 +89,6 @@ paths:
                       - id: 6f1c9a2e-1111-4e2b-9a11-000000000001
                         code: PLA-BLA
                         name: Playera blanca
-                        level: null
                         priceCents: 32000
                         active: true
                         sizes:
@@ -453,9 +452,10 @@ paths:
       operationId: listUniformOrders
       security: [{ sessionCookie: [] }]
       parameters:
-        - name: level
+        - name: levelId
           in: query
-          schema: { $ref: '#/components/schemas/Level' }
+          schema: { $ref: '#/components/schemas/LevelId' }
+          description: The student's level at order time.
         - name: q
           in: query
           schema: { type: string, maxLength: 100 }
@@ -1851,10 +1851,13 @@ components:
             message: Esa talla ya no está disponible, actualizamos la lista
             details: { itemId: 6f1c9a2e-1111-4e2b-9a11-000000000001, sizeLabel: "8", available: 0 }
 
-    Level:
-      type: [string, 'null']
-      enum: [kinder, primaria, secundaria, preparatoria, null]
-      description: null on a garment means it applies to EVERY level.
+    LevelId:
+      type: string
+      format: uuid
+      description: >
+        A level the school defined in Configuración (config `levels`), not a
+        fixed SEP list (ADR 0014). Omitted or empty on a garment means it applies
+        to EVERY level.
 
     Item:
       type: object
@@ -1864,7 +1867,7 @@ components:
         code: { type: string, maxLength: 40 }
         name: { type: string, maxLength: 120 }
         description: { type: string, maxLength: 500 }
-        level: { $ref: '#/components/schemas/Level' }
+        levelId: { $ref: '#/components/schemas/LevelId' }
         priceCents:
           type: integer
           minimum: 0
@@ -1893,7 +1896,7 @@ components:
         name: { type: string, minLength: 1, maxLength: 120 }
         description: { type: string, maxLength: 500 }
         category: { $ref: '#/components/schemas/ItemCategory' }
-        level: { $ref: '#/components/schemas/Level' }
+        levelId: { $ref: '#/components/schemas/LevelId' }
         priceCents: { type: integer, minimum: 0 }
 
     StockLevel:
@@ -2019,7 +2022,10 @@ components:
         studentName:
           type: string
           description: Snapshot, so the panel filters and searches without calling the students service per row.
-        studentLevel: { $ref: '#/components/schemas/Level' }
+        studentLevel:
+          type: string
+          description: Snapshot of the student's level name at order time ("Preescolar").
+        studentLevelId: { $ref: '#/components/schemas/LevelId' }
         studentGradeGroup: { type: string, example: 3° B }
         cycleId: { type: [string, 'null'], format: uuid }
         source: { type: string, enum: [family, counter, staff] }
