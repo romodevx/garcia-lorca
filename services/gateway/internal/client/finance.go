@@ -219,19 +219,20 @@ func (c *FinanceClient) CancelCharge(ctx context.Context, chargeID string) (Char
 // optional: a repeat under the same key returns the original payment instead of
 // collecting again, which is what makes a retried request safe.
 func (c *FinanceClient) RegisterPayment(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string) (Payment, Charge, error) {
-	return c.RegisterPaymentAt(ctx, chargeID, amountCents, method, reference, idempotencyKey, time.Time{})
+	return c.RegisterPaymentAt(ctx, chargeID, amountCents, method, reference, idempotencyKey, time.Time{}, Receiver{})
 }
 
 // RegisterPaymentAt carries the date the money changed hands. A zero paidAt is
 // omitted from the request, so the service stamps its own clock exactly as
 // before.
-func (c *FinanceClient) RegisterPaymentAt(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time) (Payment, Charge, error) {
+func (c *FinanceClient) RegisterPaymentAt(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, receiver Receiver) (Payment, Charge, error) {
 	req := &financev1.RegisterPaymentRequest{
 		ChargeId:       chargeID,
 		AmountCents:    amountCents,
 		Method:         method,
 		Reference:      reference,
 		IdempotencyKey: idempotencyKey,
+		ReceivedBy:     receiver.UserID,
 	}
 	if !paidAt.IsZero() {
 		req.PaidAt = timestamppb.New(paidAt)
@@ -283,6 +284,13 @@ func (c *FinanceClient) ListOverdue(ctx context.Context, cycleID string) ([]Char
 // --- deposits (M16) --------------------------------------------------------
 
 // Deposit is money as it arrived, before it was decided what it pays.
+// Receiver is who took the money: the authenticated caller and their name
+// (task 7).
+type Receiver struct {
+	UserID string
+	Name   string
+}
+
 type Deposit struct {
 	ID              string `json:"id"`
 	StudentID       string `json:"studentId"`
@@ -295,6 +303,10 @@ type Deposit struct {
 	CardType   string `json:"cardType,omitempty"`
 	VoidedAt   string `json:"voidedAt,omitempty"`
 	VoidReason string `json:"voidReason,omitempty"`
+	// Who took the money and when it was keyed (task 7). Empty on deposits
+	// from before it was recorded.
+	ReceivedByName string `json:"receivedByName,omitempty"`
+	CapturedAt     string `json:"capturedAt,omitempty"`
 }
 
 // DepositResult is what the money did, in the shape a receipt needs.
@@ -308,7 +320,7 @@ type DepositResult struct {
 
 // RegisterDeposit takes money without being told what it pays for and splits it
 // across what the family owes, oldest first.
-func (c *FinanceClient) RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string) (DepositResult, error) {
+func (c *FinanceClient) RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string, receiver Receiver) (DepositResult, error) {
 	req := &financev1.RegisterDepositRequest{
 		StudentId:         studentID,
 		AmountCents:       amountCents,
@@ -317,6 +329,8 @@ func (c *FinanceClient) RegisterDeposit(ctx context.Context, studentID string, a
 		IdempotencyKey:    idempotencyKey,
 		GrantEarlyPayment: grantEarlyPayment,
 		CardType:          cardType,
+		ReceivedBy:        receiver.UserID,
+		ReceivedByName:    receiver.Name,
 	}
 	if !paidAt.IsZero() {
 		req.PaidAt = timestamppb.New(paidAt)
@@ -481,6 +495,10 @@ func toDeposit(d *financev1.Deposit) Deposit {
 		CalendarVersion: d.GetCalendarVersion(),
 		CardType:        d.GetCardType(),
 		VoidReason:      d.GetVoidReason(),
+		ReceivedByName:  d.GetReceivedByName(),
+	}
+	if d.GetCapturedAt() != nil {
+		out.CapturedAt = d.GetCapturedAt().AsTime().Format(time.RFC3339)
 	}
 	if ts := d.GetPaidAt(); ts != nil {
 		out.PaidAt = ts.AsTime().Format(time.RFC3339)

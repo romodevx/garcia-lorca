@@ -480,7 +480,8 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// invisible before auth even runs). The more specific patterns
 	// (/charges/generate, /charges/{id}/discount, /charges/{id}/cancel) win over
 	// /charges under ServeMux's specificity rule.
-	financeH := handler.NewFinanceHandler(financeClient)
+	// Who takes the money is named from iam's directory (task 7).
+	financeH := handler.NewFinanceHandler(financeClient, handler.WithNames(authClient))
 	financeWrite := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("finance", requireAuthChanged(middleware.RequirePermission("finance:write")(http.HandlerFunc(h))))
 	}

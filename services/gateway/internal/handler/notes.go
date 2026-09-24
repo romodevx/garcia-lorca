@@ -49,7 +49,7 @@ func (h *NotesHandler) Add(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, _ := middleware.PrincipalFrom(r.Context())
-	author := client.NoteAuthor{UserID: p.UserID, Name: h.nameOf(r.Context(), p)}
+	author := client.NoteAuthor{UserID: p.UserID, Name: callerName(r.Context(), h.names, p)}
 	note, err := h.svc.AddStudentNote(r.Context(), r.PathValue("id"), req.Body, author)
 	if err != nil {
 		writeConnectError(w, err)
@@ -83,13 +83,16 @@ func (h *NotesHandler) Void(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, note)
 }
 
-// nameOf is the caller's display name, else their email: a byline is never
-// blank. A failed lookup is logged (user id only) and falls back to the
-// token's email, so naming cannot block a note.
-func (h *NotesHandler) nameOf(ctx context.Context, p middleware.Principal) string {
-	u, err := h.names.GetUser(ctx, p.UserID)
+// callerName is the caller's display name, else their email: a byline is
+// never blank. A failed lookup is logged (user id only) and falls back to the
+// token's email, so naming cannot block a note or a payment.
+func callerName(ctx context.Context, names UserNamer, p middleware.Principal) string {
+	if names == nil {
+		return p.Email
+	}
+	u, err := names.GetUser(ctx, p.UserID)
 	if err != nil {
-		slog.WarnContext(ctx, "note author name lookup failed; using the token email", "user_id", p.UserID, "error", err)
+		slog.WarnContext(ctx, "caller name lookup failed; using the token email", "user_id", p.UserID, "error", err)
 		return p.Email
 	}
 	if u.DisplayName != "" {
