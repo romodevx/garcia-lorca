@@ -116,8 +116,8 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]*domain.St
 	)
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		q := tx.Model(&studentModel{}).Order("id ASC").Limit(size + 1)
-		if f.Level.Valid() {
-			q = q.Where("level = ?", f.Level.String())
+		if f.LevelID != "" {
+			q = q.Where("level_id = ?", f.LevelID)
 		}
 		if f.Status != domain.AdmissionUnspecified {
 			q = q.Where("admission_status = ?", f.Status.String())

@@ -247,7 +247,7 @@ func (s *Service) CounterSale(ctx context.Context, in CounterSaleInput) (ports.O
 
 	saved, replayed, err := s.repo.CounterSale(ctx, ports.CounterSaleCommand{
 		OrderID: orderID, FulfillmentID: fulfillmentID, TenantID: s.tenantID,
-		StudentID: student.ID, StudentName: student.FullName, StudentLevel: student.Level,
+		StudentID: student.ID, StudentName: student.FullName, StudentLevel: student.Level, StudentLevelName: student.LevelName,
 		StudentGradeGroup: student.GradeGroup, CycleID: student.CycleID,
 		Lines: lines, TotalCents: total, Note: strings.TrimSpace(in.Note),
 		ActorUserID: in.ActorUserID, IdempotencyKey: in.IdempotencyKey, SoldAt: s.now(),
@@ -404,6 +404,9 @@ func checkShape(settings domain.Settings, lines []SaleLineInput) error {
 
 // ListOrders returns the panel's page.
 func (s *Service) ListOrders(ctx context.Context, f ports.ListOrdersFilter) ([]ports.OrderAggregate, string, int, error) {
+	if !f.Level.IsValid() {
+		return nil, "", 0, glerrors.New(glerrors.KindInvalid, "unknown school level")
+	}
 	return s.repo.ListOrders(ctx, f)
 }
 

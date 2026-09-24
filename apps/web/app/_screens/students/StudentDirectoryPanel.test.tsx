@@ -10,6 +10,7 @@ const mk = (id: string, first: string, last: string, group: string, curp: string
   firstName: first,
   lastName: last,
   level: "primaria",
+  levelId: "",
   gradeGroup: group,
   curp,
   guardianName: guardian,

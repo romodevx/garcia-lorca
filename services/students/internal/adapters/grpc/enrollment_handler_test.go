@@ -138,7 +138,7 @@ func enrollmentHandler(t *testing.T) (*grpcadapter.StudentsHandler, string) {
 	newID := func() string { ids++; return "enr-1" }
 	now := func() time.Time { return time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC) }
 	enroll := usecase.NewEnrollmentService(studentRepo, newFakeEnrollmentRepo(), catalog, nil, testTenant, newID, now)
-	stu := usecase.NewStudentService(studentRepo, &fakePublisher{}, testTenant, func() string { return "stu-x" })
+	stu := usecase.NewStudentService(studentRepo, &fakePublisher{}, testLevels, testTenant, func() string { return "stu-x" })
 	return grpcadapter.NewStudentsHandler(stu, enroll, nil, usecase.NewHealthService("students")), student.ID()
 }
 
@@ -152,7 +152,7 @@ func seedApplicant(t *testing.T, repo *fakeRepo) *domain.Student {
 	}
 	s, err := domain.NewApplicant(domain.NewApplicantParams{
 		ID: "stu-enroll", TenantID: testTenant, CURP: c, FirstName: "Ana", LastName: "H",
-		Level: domain.LevelPrimaria, GradeGroup: "1° A",
+		Level: domain.RestoreLevel("e1000000-0000-0000-0000-000000000001", "Primaria"), GradeGroup: "1° A",
 	})
 	if err != nil {
 		t.Fatalf("applicant: %v", err)

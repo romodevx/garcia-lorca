@@ -27,7 +27,10 @@ export interface Student {
   curp: string;
   firstName: string;
   lastName: string;
+  /** The level's name as the school wrote it ("Preescolar"). */
   level: string;
+  /** The config level id ("" only for a legacy pupil no level matched). */
+  levelId: string;
   gradeGroup: string;
   guardianName: string;
   admissionStatus: AdmissionStatus;
@@ -173,7 +176,8 @@ export interface CreateStudentInput {
   curp: string;
   firstName: string;
   lastName: string;
-  level: string;
+  /** A config level id: the school's own levels, not a fixed SEP list. */
+  levelId: string;
   gradeGroup: string;
   guardianName: string;
 }

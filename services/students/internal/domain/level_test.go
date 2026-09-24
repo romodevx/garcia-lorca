@@ -7,42 +7,33 @@ import (
 	"github.com/garcia-lorca/services/students/internal/domain"
 )
 
-func TestParseLevel(t *testing.T) {
-	tests := map[string]domain.Level{
-		"kinder":       domain.LevelKinder,
-		"Kínder":       domain.LevelKinder,
-		"PRIMARIA":     domain.LevelPrimaria,
-		"secundaria":   domain.LevelSecundaria,
-		"preparatoria": domain.LevelPreparatoria,
-	}
-	for in, want := range tests {
-		got, err := domain.ParseLevel(in)
+// A level is whatever the school defined in its catalog — Preescolar, Maternal,
+// a level no fixed list ever had — as long as it points at one.
+func TestNewLevelAcceptsAnyNamedCatalogLevel(t *testing.T) {
+	for _, name := range []string{"Preescolar", "Maternal", "Primaria", "Bachillerato técnico"} {
+		l, err := domain.NewLevel("lvl-1", "  "+name+" ")
 		if err != nil {
-			t.Errorf("ParseLevel(%q): %v", in, err)
-			continue
+			t.Fatalf("NewLevel(%q): %v", name, err)
 		}
-		if got != want {
-			t.Errorf("ParseLevel(%q) = %v, want %v", in, got, want)
-		}
-	}
-}
-
-func TestParseLevelRejectsUnknown(t *testing.T) {
-	for _, in := range []string{"", "universidad", "primary"} {
-		if _, err := domain.ParseLevel(in); err == nil || glerrors.KindOf(err) != glerrors.KindInvalid {
-			t.Errorf("ParseLevel(%q): want KindInvalid, got %v", in, err)
+		if l.ID() != "lvl-1" || l.Name() != name {
+			t.Errorf("NewLevel(%q) = (%q, %q)", name, l.ID(), l.Name())
 		}
 	}
 }
 
-func TestLevelValidAndString(t *testing.T) {
-	if domain.LevelUnspecified.Valid() {
-		t.Error("unspecified level must be invalid")
+func TestNewLevelRequiresAnIDAndAName(t *testing.T) {
+	for _, c := range [][2]string{{"", "Primaria"}, {"lvl-1", " "}} {
+		if _, err := domain.NewLevel(c[0], c[1]); glerrors.KindOf(err) != glerrors.KindInvalid {
+			t.Errorf("NewLevel(%q, %q): want KindInvalid, got %v", c[0], c[1], err)
+		}
 	}
-	if !domain.LevelPrimaria.Valid() {
-		t.Error("primaria must be valid")
-	}
-	if domain.LevelPreparatoria.String() != "preparatoria" {
-		t.Errorf("String() = %q", domain.LevelPreparatoria.String())
+}
+
+// A pupil stored before the catalog went free may have a name and no id (its
+// old key matched no config level). It is restored as it is, never re-judged.
+func TestRestoreLevelKeepsALegacyUnlinkedLevel(t *testing.T) {
+	l := domain.RestoreLevel("", "Maternal")
+	if l.ID() != "" || l.Name() != "Maternal" {
+		t.Errorf("RestoreLevel = (%q, %q)", l.ID(), l.Name())
 	}
 }

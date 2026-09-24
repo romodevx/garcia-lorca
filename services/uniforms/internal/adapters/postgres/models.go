@@ -15,7 +15,10 @@ type itemModel struct {
 	Code        string  `gorm:"column:code"`
 	Name        string  `gorm:"column:name"`
 	Description string  `gorm:"column:description"`
-	Level       *string `gorm:"column:level"`
+	LevelID     *string `gorm:"column:level_id"`
+	// LegacyLevel is the pre-0007 SEP key, read (never written): a scoped
+	// garment that never got a level_id must not read as every level.
+	LegacyLevel *string `gorm:"column:level;<-:false"`
 	PriceCents  int64   `gorm:"column:price_cents"`
 	Active      bool    `gorm:"column:active"`
 	// What kind of thing this is: uniform, book, supply or other. A row written
@@ -65,19 +68,23 @@ func (stockMoveModel) TableName() string { return "uniform_stock_moves" }
 // orderModel is the `uniform_orders` row. StudentID, Level and CycleID are
 // pointers because an anonymous counter sale legitimately has none of them.
 type orderModel struct {
-	ID                string     `gorm:"column:id;primaryKey"`
-	TenantID          string     `gorm:"column:tenant_id"`
-	Folio             string     `gorm:"column:folio"`
-	StudentID         *string    `gorm:"column:student_id"`
-	StudentName       string     `gorm:"column:student_name"`
-	StudentLevel      *string    `gorm:"column:student_level"`
-	StudentGradeGroup string     `gorm:"column:student_grade_group"`
-	CycleID           *string    `gorm:"column:cycle_id"`
-	CreatedByUserID   *string    `gorm:"column:created_by_user_id"`
-	Source            string     `gorm:"column:source"`
-	CreatedAt         time.Time  `gorm:"column:created_at"`
-	UpdatedAt         time.Time  `gorm:"column:updated_at"`
-	ClosedAt          *time.Time `gorm:"column:closed_at"`
+	ID               string  `gorm:"column:id;primaryKey"`
+	TenantID         string  `gorm:"column:tenant_id"`
+	Folio            string  `gorm:"column:folio"`
+	StudentID        *string `gorm:"column:student_id"`
+	StudentName      string  `gorm:"column:student_name"`
+	StudentLevelID   *string `gorm:"column:student_level_id"`
+	StudentLevelName string  `gorm:"column:student_level_name"`
+	// LegacyStudentLevel is the pre-0007 SEP key, read (never written) so an
+	// order the previous revision wrote mid-deploy still shows a level.
+	LegacyStudentLevel *string    `gorm:"column:student_level;<-:false"`
+	StudentGradeGroup  string     `gorm:"column:student_grade_group"`
+	CycleID            *string    `gorm:"column:cycle_id"`
+	CreatedByUserID    *string    `gorm:"column:created_by_user_id"`
+	Source             string     `gorm:"column:source"`
+	CreatedAt          time.Time  `gorm:"column:created_at"`
+	UpdatedAt          time.Time  `gorm:"column:updated_at"`
+	ClosedAt           *time.Time `gorm:"column:closed_at"`
 }
 
 func (orderModel) TableName() string { return "uniform_orders" }

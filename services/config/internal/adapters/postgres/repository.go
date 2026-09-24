@@ -26,6 +26,9 @@ const (
 	// against the previous revision mid-deploy), so it alone maps to KindInvalid;
 	// any other CHECK means the server is inconsistent and stays KindInternal.
 	emailNormalizedCheck = "teachers_email_normalized_ck"
+	// gradeNamePerLevelKey is the unique index migration 0006 adds: one grade
+	// name per level, case-insensitively.
+	gradeNamePerLevelKey = "grade_levels_name_per_level_key"
 )
 
 // Repository is the GORM-backed config CatalogRepository. Every operation runs
@@ -193,7 +196,11 @@ func (r *Repository) ListLevels(ctx context.Context) ([]domain.Level, error) {
 func (r *Repository) CreateGradeLevel(ctx context.Context, g domain.GradeLevel) error {
 	model := fromDomainGradeLevel(g)
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		return translateCreateErr(tx.Create(&model).Error, "creating grade level", "a grade level with this ordinal already exists in the level")
+		err := tx.Create(&model).Error
+		if isConstraint(err, gradeNamePerLevelKey) {
+			return glerrors.Wrap(glerrors.KindConflict, "a grade level with this name already exists in the level", err)
+		}
+		return translateCreateErr(err, "creating grade level", "a grade level with this ordinal already exists in the level")
 	})
 }
 
@@ -595,9 +602,13 @@ func translateCreateErr(err error, internalMsg, conflictMsg string) error {
 }
 
 // isEmailCheck reports whether err is the email-normalization CHECK violation.
-func isEmailCheck(err error) bool {
+func isEmailCheck(err error) bool { return isConstraint(err, emailNormalizedCheck) }
+
+// isConstraint reports whether err is a Postgres violation of the named
+// constraint (or unique index).
+func isConstraint(err error, name string) bool {
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.ConstraintName == emailNormalizedCheck
+	return errors.As(err, &pgErr) && pgErr.ConstraintName == name
 }
 
 // pgCode extracts the SQLSTATE code from a driver error, or "" if it is not one.

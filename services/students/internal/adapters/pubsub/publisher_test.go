@@ -28,7 +28,7 @@ func TestPublishStudentEnrolledMarshalsProtoToStudentEventsTopic(t *testing.T) {
 		StudentID: "stu-1",
 		TenantID:  "t1",
 		CycleID:   "2026-2027",
-		Level:     domain.LevelPrimaria,
+		LevelID:   "lvl-primaria",
 	})
 	if err != nil {
 		t.Fatalf("PublishStudentEnrolled: %v", err)
@@ -55,8 +55,8 @@ func TestPublishStudentEnrolledMarshalsProtoToStudentEventsTopic(t *testing.T) {
 	if got.GetStudentId() != "stu-1" || got.GetCycleId() != "2026-2027" {
 		t.Errorf("payload = %+v", &got)
 	}
-	if got.GetLevel() != studentsv1.Level_LEVEL_PRIMARIA {
-		t.Errorf("level = %v", got.GetLevel())
+	if got.GetLevelId() != "lvl-primaria" {
+		t.Errorf("level_id = %q", got.GetLevelId())
 	}
 }
 

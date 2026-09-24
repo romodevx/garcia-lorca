@@ -79,19 +79,42 @@ func (p *fakePub) PublishAdmissionChanged(_ context.Context, ev domain.Admission
 	return nil
 }
 
+// fakeLevels is config's level catalog: an unknown id is KindNotFound, exactly
+// like the Connect client reports it.
+type fakeLevels map[string]string
+
+func (f fakeLevels) LevelByID(_ context.Context, id string) (domain.Level, error) {
+	name, ok := f[id]
+	if !ok {
+		return domain.Level{}, glerrors.ErrNotFound
+	}
+	return domain.NewLevel(id, name)
+}
+
+// levelsMustNotBeAsked fails the test if config is consulted: a malformed id
+// must be refused before it reaches config, where it would be a query error.
+type levelsMustNotBeAsked struct{ t *testing.T }
+
+func (l levelsMustNotBeAsked) LevelByID(_ context.Context, id string) (domain.Level, error) {
+	l.t.Errorf("config was asked about %q", id)
+	return domain.Level{}, glerrors.ErrNotFound
+}
+
+var catalogLevels = fakeLevels{"e1000000-0000-0000-0000-000000000001": "Primaria", "e1000000-0000-0000-0000-000000000002": "Preescolar"}
+
 func newService(t *testing.T) (*usecase.StudentService, *fakeRepo, *fakePub) {
 	t.Helper()
 	repo := newRepo()
 	pub := &fakePub{}
 	ids := 0
-	svc := usecase.NewStudentService(repo, pub, tenant, func() string { ids++; return "id-" + string(rune('0'+ids)) })
+	svc := usecase.NewStudentService(repo, pub, catalogLevels, tenant, func() string { ids++; return "id-" + string(rune('0'+ids)) })
 	return svc, repo, pub
 }
 
 func validInput() usecase.CreateApplicantInput {
 	return usecase.CreateApplicantInput{
 		CURP: "HEGA050312MDFRNN08", FirstName: "Ana", LastName: "Hernández",
-		Level: domain.LevelPrimaria, GradeGroup: "4° A", GuardianName: "Marisol",
+		LevelID: "e1000000-0000-0000-0000-000000000001", GradeGroup: "4° A", GuardianName: "Marisol",
 	}
 }
 
@@ -108,6 +131,45 @@ func TestCreateApplicant(t *testing.T) {
 	}
 	if len(repo.created) != 1 {
 		t.Errorf("expected 1 created, got %d", len(repo.created))
+	}
+}
+
+// Any level the school defined in config takes pupils — Preescolar included —
+// and the name stored is the catalog's, not whatever the caller sent.
+func TestCreateApplicantOnAnyCatalogLevel(t *testing.T) {
+	svc, _, _ := newService(t)
+	in := validInput()
+	in.LevelID = "e1000000-0000-0000-0000-000000000002"
+	s, err := svc.CreateApplicant(context.Background(), in)
+	if err != nil {
+		t.Fatalf("CreateApplicant: %v", err)
+	}
+	if s.Level().ID() != "e1000000-0000-0000-0000-000000000002" || s.Level().Name() != "Preescolar" {
+		t.Errorf("level = (%q, %q)", s.Level().ID(), s.Level().Name())
+	}
+}
+
+// A level id that is not even shaped like one is bad input, answered here —
+// not a query error in config that would surface as a 500.
+func TestCreateApplicantMalformedLevelIDIsInvalid(t *testing.T) {
+	svc := usecase.NewStudentService(newRepo(), &fakePub{}, levelsMustNotBeAsked{t}, tenant, func() string { return "id-1" })
+	in := validInput()
+	in.LevelID = "kinder"
+	if _, err := svc.CreateApplicant(context.Background(), in); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("want KindInvalid, got %v", err)
+	}
+}
+
+// A level config does not know is bad input, not a missing student.
+func TestCreateApplicantUnknownLevelIsInvalid(t *testing.T) {
+	svc, repo, _ := newService(t)
+	in := validInput()
+	in.LevelID = "e1000000-0000-0000-0000-0000000000ff"
+	if _, err := svc.CreateApplicant(context.Background(), in); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("want KindInvalid, got %v", err)
+	}
+	if len(repo.created) != 0 {
+		t.Error("nothing may be stored for an unknown level")
 	}
 }
 
@@ -262,5 +324,13 @@ func TestListStudents(t *testing.T) {
 	got, _, err := svc.ListStudents(context.Background(), ports.ListFilter{})
 	if err != nil || len(got) != 1 {
 		t.Errorf("ListStudents: %d %v", len(got), err)
+	}
+}
+
+// A list filter that is not a level id is bad input, answered before the query.
+func TestListStudentsMalformedLevelFilterIsInvalid(t *testing.T) {
+	svc, _, _ := newService(t)
+	if _, _, err := svc.ListStudents(context.Background(), ports.ListFilter{LevelID: "kinder"}); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("want KindInvalid, got %v", err)
 	}
 }

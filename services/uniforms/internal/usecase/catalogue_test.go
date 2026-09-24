@@ -81,12 +81,12 @@ func TestListItemsForALevelIncludesTheAnyLevelGarments(t *testing.T) {
 		t.Fatalf("seed any-level: %v", err)
 	}
 	if _, err := f.svc.CreateItem(ctx, usecase.CreateItemInput{
-		Code: "BAT", Name: "Batita", Level: domain.LevelKinder, PriceCents: 41000,
+		Code: "BAT", Name: "Batita", Level: domain.Level("c1000000-0000-0000-0000-000000000001"), PriceCents: 41000,
 	}); err != nil {
 		t.Fatalf("seed kinder: %v", err)
 	}
 
-	kinder, err := f.svc.ListItems(ctx, ports.ListItemsFilter{Level: domain.LevelKinder})
+	kinder, err := f.svc.ListItems(ctx, ports.ListItemsFilter{Level: domain.Level("c1000000-0000-0000-0000-000000000001")})
 	if err != nil {
 		t.Fatalf("ListItems: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestListItemsForALevelIncludesTheAnyLevelGarments(t *testing.T) {
 		t.Errorf("a kinder pupil sees %d garments, want 2 (its own plus the universal one)", len(kinder))
 	}
 
-	primaria, err := f.svc.ListItems(ctx, ports.ListItemsFilter{Level: domain.LevelPrimaria})
+	primaria, err := f.svc.ListItems(ctx, ports.ListItemsFilter{Level: domain.Level("c1000000-0000-0000-0000-000000000002")})
 	if err != nil {
 		t.Fatalf("ListItems: %v", err)
 	}
@@ -130,9 +130,17 @@ func TestListItemsHidesRetiredUnlessAsked(t *testing.T) {
 	}
 }
 
-func TestListItemsRejectsAnUnknownLevel(t *testing.T) {
+// A level filter that is not a level id is bad input (400), not a query error.
+func TestListItemsRejectsALevelThatIsNotAnID(t *testing.T) {
 	f := newFixture(t)
-	_, err := f.svc.ListItems(context.Background(), ports.ListItemsFilter{Level: domain.Level("universidad")})
+	_, err := f.svc.ListItems(context.Background(), ports.ListItemsFilter{Level: domain.Level("primaria")})
+	requireKind(t, err, glerrors.KindInvalid)
+}
+
+// The order list's level filter is refused the same way when it is not an id.
+func TestListOrdersRejectsALevelThatIsNotAnID(t *testing.T) {
+	f := newFixture(t)
+	_, _, _, err := f.svc.ListOrders(context.Background(), ports.ListOrdersFilter{Level: domain.Level("primaria")})
 	requireKind(t, err, glerrors.KindInvalid)
 }
 

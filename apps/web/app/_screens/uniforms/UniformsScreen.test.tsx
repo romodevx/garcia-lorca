@@ -26,7 +26,7 @@ const jumper: UniformItem = {
   code: "SUE-VER",
   name: "Suéter verde",
   description: "",
-  level: "",
+  levelId: "",
   priceCents: 65000,
   active: true,
   category: "uniform",
@@ -36,6 +36,12 @@ const jumper: UniformItem = {
   ],
 };
 
+/** The school's own levels, from Configuración — Preescolar included. */
+const LEVELS = [
+  { id: "lvl-pre", name: "Preescolar", sepCode: "", enrollmentGranularity: "cycle" },
+  { id: "lvl-pri", name: "Primaria", sepCode: "PRI", enrollmentGranularity: "cycle" },
+];
+
 /** The pupil the till sells to. The picker resolves a name to THIS id. */
 const zoe = {
   id: "stu-1",
@@ -43,6 +49,7 @@ const zoe = {
   firstName: "Zoe",
   lastName: "Villalobos",
   level: "primaria",
+  levelId: "",
   gradeGroup: "1° A",
   guardianName: "Marisol Villalobos",
   admissionStatus: "enrolled",
@@ -59,6 +66,7 @@ function stubCatalogue(items: UniformItem[]): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     if (url.includes("/students")) return Promise.resolve(jsonResponse({ students: [zoe] }));
+    if (url.includes("/uniforms/levels")) return Promise.resolve(jsonResponse({ levels: LEVELS }));
     return Promise.resolve(jsonResponse({ items }));
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -89,6 +97,7 @@ function stubTill(items: UniformItem[], sale: Response): ReturnType<typeof vi.fn
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     if (url.includes("/counter-sale")) return Promise.resolve(sale);
     if (url.includes("/students")) return Promise.resolve(jsonResponse({ students: [zoe] }));
+    if (url.includes("/uniforms/levels")) return Promise.resolve(jsonResponse({ levels: LEVELS }));
     return Promise.resolve(jsonResponse({ items }));
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -429,5 +438,48 @@ describe("UniformsScreen — el inventario no es sólo ropa", () => {
       const body = JSON.parse((posted?.[1] as RequestInit).body as string) as Record<string, unknown>;
       expect(body.category).toBe("book");
     });
+  });
+});
+
+describe("UniformsScreen — los niveles son los del colegio", () => {
+  // The level chips come from Configuración, not from a fixed SEP list (task 2):
+  // a garment can be scoped to Preescolar, and it travels by level id.
+  it("scopes a new garment to a level the school defined", async () => {
+    const user = userEvent.setup();
+    const fetchMock = stubCatalogue([]);
+    render(<UniformsScreen onBack={() => {}} />);
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Catálogo" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Catálogo" }));
+
+    await user.click((await screen.findAllByRole("button", { name: /Nuevo artículo/ }))[0] as HTMLElement);
+    await user.type(screen.getByLabelText(/Nombre/, CAMPO), "Batita");
+    await user.type(screen.getByLabelText(/Clave/, CAMPO), "BAT");
+    await user.type(screen.getByLabelText(/Precio/, CAMPO), "410");
+    await user.click(await screen.findByRole("button", { name: "Preescolar" }));
+    expect(screen.queryByRole("button", { name: "Prepa" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Guardar|Crear/ }));
+
+    await waitFor(() => {
+      const posted = fetchMock.mock.calls.find(([, init]) => (init as RequestInit)?.method === "POST");
+      expect(posted).toBeDefined();
+      const body = JSON.parse((posted?.[1] as RequestInit).body as string) as Record<string, unknown>;
+      expect(body.levelId).toBe("lvl-pre");
+    });
+  });
+});
+
+describe("UniformsScreen — una prenda para todos", () => {
+  // The gateway omits levelId for a garment of every level (omitempty), so it
+  // arrives undefined, not "". The catalogue must still read "todos los niveles".
+  it("labels a garment with no level as for every level", async () => {
+    const user = userEvent.setup();
+    const { levelId: _omitted, ...unscoped } = jumper;
+    stubCatalogue([unscoped as UniformItem]);
+    render(<UniformsScreen onBack={() => {}} />);
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Catálogo" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Catálogo" }));
+
+    expect(await screen.findByText(/todos los niveles/)).toBeInTheDocument();
+    expect(screen.queryByText(/nivel sin nombre/)).not.toBeInTheDocument();
   });
 });

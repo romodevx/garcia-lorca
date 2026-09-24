@@ -31,7 +31,7 @@ func TestItemLevelAnyAppliesEverywhere(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
 	}
-	kinderOnly, err := domain.NewItem("it-2", "t-1", "BAT", "Batita", "", domain.LevelKinder, 41000)
+	kinderOnly, err := domain.NewItem("it-2", "t-1", "BAT", "Batita", "", domain.Level("c1000000-0000-0000-0000-000000000001"), 41000)
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
 	}
@@ -42,10 +42,10 @@ func TestItemLevelAnyAppliesEverywhere(t *testing.T) {
 		level domain.Level
 		want  bool
 	}{
-		{"any-level garment, kinder pupil", anyLevel, domain.LevelKinder, true},
-		{"any-level garment, prepa pupil", anyLevel, domain.LevelPreparatoria, true},
-		{"kinder garment, kinder pupil", kinderOnly, domain.LevelKinder, true},
-		{"kinder garment, primaria pupil", kinderOnly, domain.LevelPrimaria, false},
+		{"any-level garment, kinder pupil", anyLevel, domain.Level("c1000000-0000-0000-0000-000000000001"), true},
+		{"any-level garment, prepa pupil", anyLevel, domain.Level("c1000000-0000-0000-0000-000000000004"), true},
+		{"kinder garment, kinder pupil", kinderOnly, domain.Level("c1000000-0000-0000-0000-000000000001"), true},
+		{"kinder garment, primaria pupil", kinderOnly, domain.Level("c1000000-0000-0000-0000-000000000002"), false},
 		{"kinder garment, unknown level", kinderOnly, domain.LevelAny, false},
 	}
 	for _, tc := range cases {
@@ -88,7 +88,8 @@ func TestNewItemValidation(t *testing.T) {
 		{"blank code", "it-1", "  ", "Playera", domain.LevelAny, 100},
 		{"blank name", "it-1", "PLA", "  ", domain.LevelAny, 100},
 		{"negative price", "it-1", "PLA", "Playera", domain.LevelAny, -1},
-		{"unknown level", "it-1", "PLA", "Playera", domain.Level("universidad"), 100},
+		// A level is a config level id; an old SEP key is not one.
+		{"level not an id", "it-1", "PLA", "Playera", domain.Level("primaria"), 100},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -138,7 +139,7 @@ func TestRetiredItemCannotStartNewOrders(t *testing.T) {
 // clothing.
 func TestAnItemCarriesItsCategory(t *testing.T) {
 	item, err := domain.NewItem("it-1", "t1", "LIB-1", "Libro de matemáticas", "",
-		domain.LevelPrimaria, 45000)
+		domain.Level("c1000000-0000-0000-0000-000000000002"), 45000)
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
 	}
@@ -157,11 +158,81 @@ func TestAnItemCarriesItsCategory(t *testing.T) {
 }
 
 func TestAnUnknownCategoryIsRefused(t *testing.T) {
-	item, err := domain.NewItem("it-1", "t1", "LIB-1", "Libro", "", domain.LevelPrimaria, 45000)
+	item, err := domain.NewItem("it-1", "t1", "LIB-1", "Libro", "", domain.Level("c1000000-0000-0000-0000-000000000002"), 45000)
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
 	}
 	if _, err := item.WithCategory("mascota"); glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("unknown category: want KindInvalid, got %v", err)
+	}
+}
+
+// A garment follows whatever levels the school defined in config: any level id
+// scopes it, the level list is not this service's to judge (ADR 0014).
+func TestAnItemMayBeScopedToAnyCatalogLevel(t *testing.T) {
+	preescolar := domain.Level("c1000000-0000-0000-0000-0000000000aa")
+	item, err := domain.NewItem("it-1", "t-1", "BAT", "Batita", "", preescolar, 41000)
+	if err != nil {
+		t.Fatalf("NewItem: %v", err)
+	}
+	if !item.AppliesTo(preescolar) || item.AppliesTo(domain.Level("c1000000-0000-0000-0000-000000000002")) {
+		t.Error("a scoped garment applies to its level alone")
+	}
+}
+
+func TestLevelIsValidAcceptsEveryLevelAndUUIDsOnly(t *testing.T) {
+	for l, want := range map[domain.Level]bool{
+		domain.LevelAny: true,
+		domain.Level("c1000000-0000-0000-0000-000000000002"): true,
+		domain.Level("C1000000-0000-0000-0000-00000000000A"): true,
+		domain.Level("primaria"):                             false,
+		domain.Level("c1000000-0000-0000-0000-00000000000"):  false,
+		domain.Level("c1000000x0000-0000-0000-000000000002"): false,
+		domain.Level("g1000000-0000-0000-0000-000000000002"): false,
+	} {
+		if got := l.IsValid(); got != want {
+			t.Errorf("Level(%q).IsValid() = %v, want %v", l, got, want)
+		}
+	}
+}
+
+// A garment the previous build scoped by an old SEP key, never linked to a
+// config level, must not widen to every level: it is unresolved, which no pupil
+// holds, and a new garment cannot be created that way.
+func TestAnUnresolvedGarmentAppliesToNoPupil(t *testing.T) {
+	item, err := domain.NewItem("it-1", "t-1", "BAT", "Batita", "", domain.LevelAny, 41000)
+	if err != nil {
+		t.Fatalf("NewItem: %v", err)
+	}
+	unresolved := item.WithUnresolvedLevel()
+	if unresolved.Level() != domain.LevelUnresolved {
+		t.Fatalf("level = %q", unresolved.Level())
+	}
+	for _, pupil := range []domain.Level{domain.LevelAny, domain.Level("c1000000-0000-0000-0000-000000000001")} {
+		if unresolved.AppliesTo(pupil) {
+			t.Errorf("an unresolved garment was offered to pupil level %q", pupil)
+		}
+	}
+	if _, err := domain.NewItem("it-2", "t-1", "BAT2", "Batita", "", domain.LevelUnresolved, 41000); err == nil {
+		t.Error("a new garment cannot be created with an unresolved level")
+	}
+}
+
+// Retiring or renaming an unresolved garment sends its level back unchanged;
+// that keeps it unresolved. Only a garment that already is unresolved may keep
+// the value — a client cannot put a resolved garment into that state.
+func TestAnUnresolvedGarmentCanBeEditedWithoutLosingItsState(t *testing.T) {
+	item, _ := domain.NewItem("it-1", "t-1", "BAT", "Batita", "", domain.LevelAny, 41000)
+	unresolved := item.WithUnresolvedLevel()
+
+	edited, err := unresolved.WithDetails("Batita vieja", "", domain.LevelUnresolved, 41000)
+	if err != nil {
+		t.Fatalf("WithDetails keeping the unresolved level: %v", err)
+	}
+	if edited.Level() != domain.LevelUnresolved || edited.Name() != "Batita vieja" {
+		t.Errorf("edited = (%q, %q)", edited.Level(), edited.Name())
+	}
+	if _, err := item.WithDetails("Batita", "", domain.LevelUnresolved, 41000); err == nil {
+		t.Error("a resolved garment must not be made unresolved by a client")
 	}
 }

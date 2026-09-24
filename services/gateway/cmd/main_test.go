@@ -169,7 +169,7 @@ func (stubStudents) CreateApplicant(_ context.Context, req *connect.Request[stud
 		Id:              "stu-1",
 		Curp:            req.Msg.GetCurp(),
 		FirstName:       req.Msg.GetFirstName(),
-		Level:           req.Msg.GetLevel(),
+		LevelId:         req.Msg.GetLevelId(),
 		AdmissionStatus: studentsv1.AdmissionStatus_ADMISSION_STATUS_PENDING,
 	}}), nil
 }
@@ -309,6 +309,10 @@ func (stubConfig) ListTeachingAssignments(_ context.Context, req *connect.Reques
 	return connect.NewResponse(&configv1.ListTeachingAssignmentsResponse{TeachingAssignments: []*configv1.TeachingAssignment{
 		{Id: "asg-1", CycleId: "cyc-1", GroupId: "grp-1", SubjectId: "sub-1", TeacherId: "tch-1"},
 	}}), nil
+}
+
+func (stubConfig) ListLevels(_ context.Context, _ *connect.Request[configv1.ListLevelsRequest]) (*connect.Response[configv1.ListLevelsResponse], error) {
+	return connect.NewResponse(&configv1.ListLevelsResponse{Levels: []*configv1.Level{{Id: "lvl-pre", Name: "Preescolar"}}}), nil
 }
 
 func (stubConfig) ListGroups(_ context.Context, _ *connect.Request[configv1.ListGroupsRequest]) (*connect.Response[configv1.ListGroupsResponse], error) {
@@ -573,7 +577,7 @@ func newTestGateway(t *testing.T, flags map[string]bool) *httptest.Server {
 	return gw
 }
 
-const validBody = `{"curp":"HEGA050312MDFRNN08","firstName":"Ana","lastName":"Herrera","level":"primaria"}`
+const validBody = `{"curp":"HEGA050312MDFRNN08","firstName":"Ana","lastName":"Herrera","levelId":"lvl-primaria"}`
 
 func postStudent(t *testing.T, gw *httptest.Server, token, body string) *http.Response {
 	t.Helper()
@@ -2609,6 +2613,7 @@ func TestUniformsDisabledModuleIs404(t *testing.T) {
 		"/api/v1/uniforms/stock",
 		"/api/v1/uniforms/orders",
 		"/api/v1/uniforms/settings",
+		"/api/v1/uniforms/levels",
 	} {
 		res := doGateway(t, gw, http.MethodGet, path, "uni-director", "")
 		if res.StatusCode != http.StatusNotFound {
@@ -2630,7 +2635,9 @@ func TestUniformsNoTokenIs401(t *testing.T) {
 // of its job.
 func TestUniformsStoreroomCanRunTheStoreroom(t *testing.T) {
 	gw := newTestGateway(t, map[string]bool{"module_uniforms": true})
-	for _, path := range []string{"/api/v1/uniforms/items", "/api/v1/uniforms/stock", "/api/v1/uniforms/settings"} {
+	// levels included: the storeroom sees the school's levels for its chips
+	// without holding config:read (ADR 0014).
+	for _, path := range []string{"/api/v1/uniforms/items", "/api/v1/uniforms/stock", "/api/v1/uniforms/settings", "/api/v1/uniforms/levels"} {
 		res := doGateway(t, gw, http.MethodGet, path, "uni-storeroom", "")
 		if res.StatusCode != http.StatusOK {
 			t.Errorf("%s: status = %d, want 200", path, res.StatusCode)

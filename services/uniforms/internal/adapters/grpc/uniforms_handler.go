@@ -52,7 +52,7 @@ func (h *UniformsHandler) CreateItem(ctx context.Context, req *connect.Request[u
 	m := req.Msg
 	item, err := h.shop.CreateItem(ctx, usecase.CreateItemInput{
 		Code: m.GetCode(), Name: m.GetName(), Description: m.GetDescription(),
-		Level: fromProtoLevel(m.GetLevel()), PriceCents: m.GetPriceCents(),
+		Level: domain.Level(m.GetLevelId()), PriceCents: m.GetPriceCents(),
 		Category: m.GetCategory(),
 	})
 	if err != nil {
@@ -66,7 +66,7 @@ func (h *UniformsHandler) UpdateItem(ctx context.Context, req *connect.Request[u
 	m := req.Msg
 	item, err := h.shop.UpdateItem(ctx, usecase.UpdateItemInput{
 		ID: m.GetId(), Name: m.GetName(), Description: m.GetDescription(),
-		Level: fromProtoLevel(m.GetLevel()), PriceCents: m.GetPriceCents(), Active: m.GetActive(),
+		Level: domain.Level(m.GetLevelId()), PriceCents: m.GetPriceCents(), Active: m.GetActive(),
 		Category: m.GetCategory(),
 	})
 	if err != nil {
@@ -80,7 +80,7 @@ func (h *UniformsHandler) ListItems(ctx context.Context, req *connect.Request[un
 	m := req.Msg
 	items, err := h.shop.ListItems(ctx, ports.ListItemsFilter{
 		IncludeInactive: m.GetIncludeInactive(),
-		Level:           fromProtoLevel(m.GetLevel()),
+		Level:           domain.Level(m.GetLevelId()),
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -186,7 +186,7 @@ func (h *UniformsHandler) ListOrders(ctx context.Context, req *connect.Request[u
 		statuses = append(statuses, fromProtoFulfillmentStatus(s))
 	}
 	orders, next, total, err := h.shop.ListOrders(ctx, ports.ListOrdersFilter{
-		StudentIDs: m.GetStudentIds(), Level: fromProtoLevel(m.GetLevel()), Query: m.GetQuery(),
+		StudentIDs: m.GetStudentIds(), Level: domain.Level(m.GetStudentLevelId()), Query: m.GetQuery(),
 		Statuses: statuses, OnlyRequiresAttention: m.GetOnlyRequiresAttention(),
 		From: from, To: to, Sort: m.GetSort(), Descending: m.GetDescending(),
 		PageSize: int(m.GetPageSize()), PageToken: m.GetPageToken(),
@@ -322,26 +322,6 @@ func toProtoTime(t time.Time) *timestamppb.Timestamp {
 	return timestamppb.New(t)
 }
 
-var levelToProto = map[domain.Level]uniformsv1.Level{
-	domain.LevelAny:          uniformsv1.Level_LEVEL_UNSPECIFIED,
-	domain.LevelKinder:       uniformsv1.Level_LEVEL_KINDER,
-	domain.LevelPrimaria:     uniformsv1.Level_LEVEL_PRIMARIA,
-	domain.LevelSecundaria:   uniformsv1.Level_LEVEL_SECUNDARIA,
-	domain.LevelPreparatoria: uniformsv1.Level_LEVEL_PREPARATORIA,
-}
-
-var levelFromProto = map[uniformsv1.Level]domain.Level{
-	uniformsv1.Level_LEVEL_UNSPECIFIED:  domain.LevelAny,
-	uniformsv1.Level_LEVEL_KINDER:       domain.LevelKinder,
-	uniformsv1.Level_LEVEL_PRIMARIA:     domain.LevelPrimaria,
-	uniformsv1.Level_LEVEL_SECUNDARIA:   domain.LevelSecundaria,
-	uniformsv1.Level_LEVEL_PREPARATORIA: domain.LevelPreparatoria,
-}
-
-func toProtoLevel(l domain.Level) uniformsv1.Level { return levelToProto[l] }
-
-func fromProtoLevel(l uniformsv1.Level) domain.Level { return levelFromProto[l] }
-
 var statusToProto = map[domain.FulfillmentStatus]uniformsv1.FulfillmentStatus{
 	domain.StatusPicking:        uniformsv1.FulfillmentStatus_FULFILLMENT_STATUS_PICKING,
 	domain.StatusReadyForPickup: uniformsv1.FulfillmentStatus_FULFILLMENT_STATUS_READY_FOR_PICKUP,
@@ -385,7 +365,7 @@ var labelToProto = map[domain.OrderLabel]uniformsv1.OrderLabel{
 func toProtoItem(i domain.Item, sizes []domain.StockLevel) *uniformsv1.Item {
 	return &uniformsv1.Item{
 		Id: i.ID(), TenantId: i.TenantID(), Code: i.Code(), Name: i.Name(),
-		Description: i.Description(), Level: toProtoLevel(i.Level()),
+		Description: i.Description(), LevelId: string(i.Level()),
 		PriceCents: i.PriceCents(), Active: i.Active(), Sizes: toProtoStockAll(sizes),
 		Category: i.Category(),
 	}
@@ -455,7 +435,8 @@ func toProtoOrder(agg ports.OrderAggregate) *uniformsv1.Order {
 	return &uniformsv1.Order{
 		Id: agg.Order.ID(), TenantId: agg.Order.TenantID(), Folio: agg.Order.Folio(),
 		StudentId: agg.Order.StudentID(), StudentName: agg.Order.StudentName(),
-		StudentLevel:      toProtoLevel(agg.Order.StudentLevel()),
+		StudentLevelId:    string(agg.Order.StudentLevel()),
+		StudentLevelName:  agg.Order.StudentLevelName(),
 		StudentGradeGroup: agg.Order.StudentGradeGroup(), CycleId: agg.Order.CycleID(),
 		Source:     string(agg.Order.Source()),
 		Label:      labelToProto[domain.DeriveOrderLabel(statuses, live)],

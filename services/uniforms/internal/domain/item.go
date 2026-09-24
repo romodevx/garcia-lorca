@@ -6,7 +6,9 @@ import (
 	glerrors "github.com/garcia-lorca/pkg/errors"
 )
 
-// Level is a school level, mirroring the students service's own.
+// Level is a school level: the id of a level the school defined in its config
+// catalog (ADR 0014). It used to be a fixed SEP list, which meant a garment
+// could never be scoped to a level the list lacked — Preescolar, Maternal.
 //
 // LevelAny is the important one. The requirement is that a school MAY dress
 // kinder differently from prepa — not that it must. Most garments are the same
@@ -14,21 +16,47 @@ import (
 // garment with no level applies to every level.
 type Level string
 
-const (
-	LevelAny          Level = ""
-	LevelKinder       Level = "kinder"
-	LevelPrimaria     Level = "primaria"
-	LevelSecundaria   Level = "secundaria"
-	LevelPreparatoria Level = "preparatoria"
-)
+// LevelAny scopes a garment to every level. On a PUPIL the same zero value means
+// "level unknown" — see AppliesTo.
+const LevelAny Level = ""
 
-// IsValid reports whether l is a level this system knows.
+// LevelUnresolved is a garment the previous build scoped by an old SEP key that
+// no config level was linked to (a row written mid-deploy, or one migration
+// 0007 could not match). It must NOT widen to every level, so it matches no
+// pupil; and it is not a value a client may send (IsValid rejects it).
+const LevelUnresolved Level = "unresolved"
+
+// IsValid reports whether l is every-level or shaped like a config level id (a
+// uuid). An old SEP key ("primaria") is not one, and is refused as bad input
+// rather than reaching the uuid column as a query error.
 func (l Level) IsValid() bool {
-	switch l {
-	case LevelAny, LevelKinder, LevelPrimaria, LevelSecundaria, LevelPreparatoria:
+	if l == LevelAny {
 		return true
 	}
-	return false
+	return isUUID(string(l))
+}
+
+// isUUID reports the canonical 8-4-4-4-12 hex shape, which is all this service
+// needs to know about an id config minted.
+func isUUID(s string) bool {
+	const canonicalLen = 36
+	if len(s) != canonicalLen {
+		return false
+	}
+	for i := 0; i < canonicalLen; i++ {
+		c := s[i]
+		switch i {
+		case 8, 13, 18, 23:
+			if c != '-' {
+				return false
+			}
+		default:
+			if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // Item is one garment in the catalogue.
@@ -140,6 +168,13 @@ func (i Item) Retire() Item {
 	return i
 }
 
+// WithUnresolvedLevel marks a stored garment whose old level key never became a
+// config level. Only the repository calls it, when reading such a row.
+func (i Item) WithUnresolvedLevel() Item {
+	i.level = LevelUnresolved
+	return i
+}
+
 // Restore puts a garment back on sale.
 func (i Item) Restore() Item {
 	i.active = true
@@ -147,10 +182,21 @@ func (i Item) Restore() Item {
 }
 
 // WithDetails returns a copy with the editable fields replaced, re-validated.
+//
+// An unresolved garment edited without choosing a level (retired, renamed)
+// stays unresolved; choosing any real level re-scopes it. Only a garment that
+// already is unresolved may keep that value.
 func (i Item) WithDetails(name, description string, level Level, priceCents int64) (Item, error) {
+	keepUnresolved := level == LevelUnresolved && i.level == LevelUnresolved
+	if keepUnresolved {
+		level = LevelAny
+	}
 	updated, err := NewItem(i.id, i.tenantID, i.code, name, description, level, priceCents)
 	if err != nil {
 		return Item{}, err
+	}
+	if keepUnresolved {
+		updated.level = LevelUnresolved
 	}
 	updated.active = i.active
 	return updated, nil

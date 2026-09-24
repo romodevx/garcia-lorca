@@ -104,13 +104,31 @@ export async function apiAsOwner(request: APIRequestContext): Promise<APIRequest
   return request;
 }
 
+/**
+ * A config level to place a pupil in. A pupil's level is a reference to the
+ * school's catalog (ADR 0014), so a spec that creates pupils needs one: the
+ * first existing level, or a fresh one on an empty database.
+ */
+export async function anyLevelId(request: APIRequestContext): Promise<string> {
+  const listed = await request.get(`${API_URL}/api/v1/config/levels`);
+  expect(listed.ok(), `list levels: ${listed.status()}`).toBeTruthy();
+  const { levels } = (await listed.json()) as { levels?: { id: string }[] };
+  const first = levels?.[0];
+  if (first !== undefined) return first.id;
+  const created = await request.post(`${API_URL}/api/v1/config/levels`, {
+    data: { name: `Primaria ${uniqueSuffix()}`, sepCode: "", enrollmentGranularity: "cycle" },
+  });
+  expect(created.ok(), `create level: ${await created.text()}`).toBeTruthy();
+  return ((await created.json()) as { id: string }).id;
+}
+
 /** Creates a garment with a size run and stock, straight through the API. */
 export async function seedGarment(
   request: APIRequestContext,
-  opts: { code: string; name: string; priceCents: number; sizes: string[]; onHand: number; level?: string },
+  opts: { code: string; name: string; priceCents: number; sizes: string[]; onHand: number; levelId?: string },
 ): Promise<{ itemId: string; stockIds: Record<string, string> }> {
   const created = await request.post(`${API_URL}/api/v1/uniforms/items`, {
-    data: { code: opts.code, name: opts.name, priceCents: opts.priceCents, level: opts.level ?? "" },
+    data: { code: opts.code, name: opts.name, priceCents: opts.priceCents, levelId: opts.levelId ?? "" },
   });
   expect(created.ok(), `seed garment ${opts.code}: ${created.status()}`).toBeTruthy();
   const item = (await created.json()) as { id: string };

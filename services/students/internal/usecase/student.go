@@ -2,6 +2,9 @@ package usecase
 
 import (
 	"context"
+	"strings"
+
+	"github.com/google/uuid"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/students/internal/domain"
@@ -19,23 +22,26 @@ import (
 type StudentService struct {
 	repo   ports.StudentRepository
 	pub    ports.EventPublisher
+	levels ports.LevelCatalog
 	tenant string
 	newID  func() string
 }
 
-// NewStudentService wires the use case. `tenant` is the single-tenant scope for
-// M03; `newID` mints student ids (injectable for deterministic tests).
-func NewStudentService(repo ports.StudentRepository, pub ports.EventPublisher, tenant string, newID func() string) *StudentService {
-	return &StudentService{repo: repo, pub: pub, tenant: tenant, newID: newID}
+// NewStudentService wires the use case. `levels` is config's level catalog;
+// `tenant` is the single-tenant scope for M03; `newID` mints student ids
+// (injectable for deterministic tests).
+func NewStudentService(repo ports.StudentRepository, pub ports.EventPublisher, levels ports.LevelCatalog, tenant string, newID func() string) *StudentService {
+	return &StudentService{repo: repo, pub: pub, levels: levels, tenant: tenant, newID: newID}
 }
 
-// CreateApplicantInput is the raw input for a new applicant (CURP is validated
-// here; Level is already the domain type, mapped from the wire by the handler).
+// CreateApplicantInput is the raw input for a new applicant. CURP is validated
+// here; LevelID is resolved against config's catalog, which also supplies the
+// level's name — the caller never names the level itself.
 type CreateApplicantInput struct {
 	CURP         string
 	FirstName    string
 	LastName     string
-	Level        domain.Level
+	LevelID      string
 	GradeGroup   string
 	GuardianName string
 }
@@ -47,13 +53,17 @@ func (s *StudentService) CreateApplicant(ctx context.Context, in CreateApplicant
 	if err != nil {
 		return nil, err
 	}
+	level, err := s.levelOf(ctx, in.LevelID)
+	if err != nil {
+		return nil, err
+	}
 	student, err := domain.NewApplicant(domain.NewApplicantParams{
 		ID:           s.newID(),
 		TenantID:     s.tenant,
 		CURP:         curp,
 		FirstName:    in.FirstName,
 		LastName:     in.LastName,
-		Level:        in.Level,
+		Level:        level,
 		GradeGroup:   in.GradeGroup,
 		GuardianName: in.GuardianName,
 	})
@@ -64,6 +74,24 @@ func (s *StudentService) CreateApplicant(ctx context.Context, in CreateApplicant
 		return nil, err
 	}
 	return student, nil
+}
+
+// levelOf resolves a level id against config's catalog. A level config does not
+// know is the caller's mistake (KindInvalid), not a missing student.
+func (s *StudentService) levelOf(ctx context.Context, id string) (domain.Level, error) {
+	if strings.TrimSpace(id) == "" {
+		return domain.Level{}, glerrors.New(glerrors.KindInvalid, "a level is required")
+	}
+	// Config ids are uuids. Anything else (an old SEP key like "kinder") is
+	// refused here, where it is a 400 — in config it would be a query error.
+	if _, err := uuid.Parse(id); err != nil {
+		return domain.Level{}, glerrors.New(glerrors.KindInvalid, "level id is not a level id")
+	}
+	level, err := s.levels.LevelByID(ctx, id)
+	if glerrors.KindOf(err) == glerrors.KindNotFound {
+		return domain.Level{}, glerrors.Wrap(glerrors.KindInvalid, "level not found", err)
+	}
+	return level, err
 }
 
 // ChangeStatusInput drives one admission transition.
@@ -134,5 +162,10 @@ func (s *StudentService) GetStudent(ctx context.Context, id string) (*domain.Stu
 
 // ListStudents returns students matching the filter plus the next page token.
 func (s *StudentService) ListStudents(ctx context.Context, f ports.ListFilter) ([]*domain.Student, string, error) {
+	if f.LevelID != "" {
+		if _, err := uuid.Parse(f.LevelID); err != nil {
+			return nil, "", glerrors.New(glerrors.KindInvalid, "level id is not a level id")
+		}
+	}
 	return s.repo.List(ctx, f)
 }

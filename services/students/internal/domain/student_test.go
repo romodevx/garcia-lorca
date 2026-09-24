@@ -7,6 +7,16 @@ import (
 	"github.com/garcia-lorca/services/students/internal/domain"
 )
 
+// primaria is a catalog level as config would hand it over.
+func primaria(t *testing.T) domain.Level {
+	t.Helper()
+	l, err := domain.NewLevel("lvl-primaria", "Primaria")
+	if err != nil {
+		t.Fatalf("NewLevel: %v", err)
+	}
+	return l
+}
+
 func newApplicant(t *testing.T) *domain.Student {
 	t.Helper()
 	curp, _ := domain.NewCURP("HEGA050312MDFRNN08")
@@ -16,7 +26,7 @@ func newApplicant(t *testing.T) *domain.Student {
 		CURP:         curp,
 		FirstName:    "Ana",
 		LastName:     "Hernández",
-		Level:        domain.LevelPrimaria,
+		Level:        primaria(t),
 		GradeGroup:   "4° A",
 		GuardianName: "Marisol Ríos",
 	})
@@ -31,21 +41,21 @@ func TestNewApplicantStartsPending(t *testing.T) {
 	if s.Status() != domain.AdmissionPending {
 		t.Errorf("status = %v, want pending", s.Status())
 	}
-	if s.ID() != "s1" || s.CURP().String() != "HEGA050312MDFRNN08" || s.Level() != domain.LevelPrimaria {
+	if s.ID() != "s1" || s.CURP().String() != "HEGA050312MDFRNN08" || s.Level() != primaria(t) {
 		t.Errorf("accessors mismatch: %+v", s)
 	}
 }
 
 func TestNewApplicantValidates(t *testing.T) {
 	curp, _ := domain.NewCURP("HEGA050312MDFRNN08")
-	base := domain.NewApplicantParams{ID: "s1", TenantID: "t1", CURP: curp, FirstName: "Ana", LastName: "H", Level: domain.LevelPrimaria}
+	base := domain.NewApplicantParams{ID: "s1", TenantID: "t1", CURP: curp, FirstName: "Ana", LastName: "H", Level: primaria(t)}
 
 	bad := map[string]func(p *domain.NewApplicantParams){
-		"blank id":      func(p *domain.NewApplicantParams) { p.ID = "" },
-		"blank tenant":  func(p *domain.NewApplicantParams) { p.TenantID = "" },
-		"blank first":   func(p *domain.NewApplicantParams) { p.FirstName = "  " },
-		"blank last":    func(p *domain.NewApplicantParams) { p.LastName = "" },
-		"invalid level": func(p *domain.NewApplicantParams) { p.Level = domain.LevelUnspecified },
+		"blank id":     func(p *domain.NewApplicantParams) { p.ID = "" },
+		"blank tenant": func(p *domain.NewApplicantParams) { p.TenantID = "" },
+		"blank first":  func(p *domain.NewApplicantParams) { p.FirstName = "  " },
+		"blank last":   func(p *domain.NewApplicantParams) { p.LastName = "" },
+		"no level":     func(p *domain.NewApplicantParams) { p.Level = domain.Level{} },
 	}
 	for name, mutate := range bad {
 		t.Run(name, func(t *testing.T) {
@@ -79,7 +89,7 @@ func TestHappyPathAcceptThenEnroll(t *testing.T) {
 	if s.Status() != domain.AdmissionEnrolled {
 		t.Errorf("status = %v, want enrolled", s.Status())
 	}
-	if enrolled.StudentID != "s1" || enrolled.CycleID != "cycle-2026" || enrolled.Level != domain.LevelPrimaria {
+	if enrolled.StudentID != "s1" || enrolled.CycleID != "cycle-2026" || enrolled.LevelID != "lvl-primaria" {
 		t.Errorf("StudentEnrolled event = %+v", enrolled)
 	}
 	if changed.New != domain.AdmissionEnrolled {

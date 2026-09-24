@@ -6,52 +6,40 @@ import (
 	glerrors "github.com/garcia-lorca/pkg/errors"
 )
 
-// Level is the SEP education level. It is a domain type (no proto import); the
-// adapter maps it to/from the wire enum.
-type Level uint8
-
-const (
-	// LevelUnspecified is the zero value; not a valid level.
-	LevelUnspecified Level = iota
-	LevelKinder
-	LevelPrimaria
-	LevelSecundaria
-	LevelPreparatoria
-	// LevelMaternal is nursery, the level below kinder. Appended rather than
-	// placed first because the wire enum's numbers are its format; pedagogical
-	// order is a display concern.
-	LevelMaternal
-)
-
-var levelNames = map[Level]string{
-	LevelKinder:       "kinder",
-	LevelPrimaria:     "primaria",
-	LevelSecundaria:   "secundaria",
-	LevelPreparatoria: "preparatoria",
-	LevelMaternal:     "maternal",
+// Level is the education level a pupil is placed in: a reference to a level
+// the school defined in its catalog (config), with the name the school gave it.
+//
+// It used to be a fixed SEP list (maternal … preparatoria), and a school that
+// named its level "Preescolar", or had one the list never did, could create it
+// in Configuración and then not place a single pupil in it. Which levels exist
+// is the school's call, made in config; students only records which one a
+// pupil is in (ADR 0014).
+type Level struct {
+	id   string
+	name string
 }
 
-// parseAliases maps normalized (folded) input to a Level, tolerating accents.
-var parseAliases = map[string]Level{
-	"kinder":       LevelKinder,
-	"primaria":     LevelPrimaria,
-	"secundaria":   LevelSecundaria,
-	"preparatoria": LevelPreparatoria,
-	"maternal":     LevelMaternal,
-}
-
-// ParseLevel resolves a level name (case/accent-insensitive) to a Level.
-func ParseLevel(raw string) (Level, error) {
-	key := strings.ToLower(strings.TrimSpace(raw))
-	key = strings.ReplaceAll(key, "í", "i") // "kínder" → "kinder"
-	if level, ok := parseAliases[key]; ok {
-		return level, nil
+// NewLevel builds a level from a catalog entry. Both the config id and the
+// name are required: the id is what the pupil points at, the name is what
+// every list shows without calling config for each row.
+func NewLevel(id, name string) (Level, error) {
+	id, name = strings.TrimSpace(id), strings.TrimSpace(name)
+	if id == "" {
+		return Level{}, glerrors.New(glerrors.KindInvalid, "a level is required")
 	}
-	return LevelUnspecified, glerrors.New(glerrors.KindInvalid, "unknown level: "+raw)
+	if name == "" {
+		return Level{}, glerrors.New(glerrors.KindInvalid, "a level needs a name")
+	}
+	return Level{id: id, name: name}, nil
 }
 
-// Valid reports whether the level is a real SEP level (not unspecified).
-func (l Level) Valid() bool { return l >= LevelKinder && l <= LevelPreparatoria }
+// RestoreLevel rebuilds a stored level without judging it. A pupil placed
+// before the catalog went free may carry a name and no id (its old key matched
+// no config level); it stays readable as it is.
+func RestoreLevel(id, name string) Level { return Level{id: id, name: name} }
 
-// String returns the canonical level name ("" for unspecified).
-func (l Level) String() string { return levelNames[l] }
+// ID is the config level's id ("" only for an unlinked legacy pupil).
+func (l Level) ID() string { return l.id }
+
+// Name is the level as the school wrote it ("Preescolar").
+func (l Level) Name() string { return l.name }

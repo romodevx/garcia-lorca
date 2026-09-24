@@ -365,7 +365,7 @@ func TestListOrdersEscapesWildcards(t *testing.T) {
 	cmd := saleCmd(t, item, "8", 1, "key-escape")
 	cmd.StudentID = newUUID(t)
 	cmd.StudentName = "Ana Ruiz"
-	cmd.StudentLevel = domain.LevelPrimaria
+	cmd.StudentLevel = domain.Level("c1000000-0000-0000-0000-000000000002")
 	cmd.CycleID = newUUID(t)
 	if _, _, err := repo.CounterSale(ctx, cmd); err != nil {
 		t.Fatalf("CounterSale: %v", err)
@@ -392,7 +392,7 @@ func TestGetOrderScopedToAFamilyReportsNotFound(t *testing.T) {
 	cmd := saleCmd(t, item, "8", 1, "key-scope")
 	cmd.StudentID = newUUID(t)
 	cmd.StudentName = "Ana Ruiz"
-	cmd.StudentLevel = domain.LevelPrimaria
+	cmd.StudentLevel = domain.Level("c1000000-0000-0000-0000-000000000002")
 	cmd.CycleID = newUUID(t)
 	sale, _, err := repo.CounterSale(ctx, cmd)
 	if err != nil {

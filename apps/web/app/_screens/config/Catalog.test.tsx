@@ -108,6 +108,45 @@ describe("Catalog — cycles", () => {
 });
 
 describe("Catalog — nested level → grade level", () => {
+  // A grade is unique by name as well as by order within its level (task 2).
+  // The refusal must not blame the order when it is the name that repeats.
+  it("a refused grade names both reasons, not only the order", async () => {
+    const user = userEvent.setup();
+    mocked.listCycles.mockResolvedValue([]);
+    mocked.listLevels.mockResolvedValue([{ id: "l1", name: "PREESCOLAR", sepCode: "", enrollmentGranularity: "cycle" }]);
+    mocked.listGradeLevels.mockResolvedValue([]);
+    mocked.createGradeLevel.mockRejectedValue(new Error("conflict"));
+    render(<Catalog onBack={() => {}} />);
+
+    await user.click(await screen.findByRole("button", { name: /PREESCOLAR/ }));
+    await user.click(await screen.findByRole("button", { name: "Nuevo grado" }));
+    await user.type(screen.getByLabelText("Nombre del grado"), "1° preescolar{Enter}");
+
+    expect(await screen.findByText(/nombre/)).toHaveTextContent(/nombre o ese orden/);
+  });
+
+  // The SEP key is optional, as its own help says and as the server always
+  // allowed: Preescolar is created with a name alone (task 2).
+  it("creates a level with no SEP key, Preescolar included", async () => {
+    const user = userEvent.setup();
+    mocked.listCycles.mockResolvedValue([]);
+    mocked.createLevel.mockResolvedValue({ id: "l9", name: "PREESCOLAR", sepCode: "", enrollmentGranularity: "cycle" });
+    render(<Catalog onBack={() => {}} />);
+
+    await user.click(await screen.findByRole("button", { name: "Nuevo nivel" }));
+    const levelDrawer = await screen.findByRole("dialog", { name: "Nuevo nivel educativo" });
+    await user.type(within(levelDrawer).getByLabelText(/^Nombre del nivel$/), "Preescolar");
+    await user.click(within(levelDrawer).getByRole("button", { name: "Crear nivel" }));
+
+    await waitFor(() =>
+      expect(mocked.createLevel).toHaveBeenCalledWith(expect.any(String), {
+        name: "PREESCOLAR",
+        sepCode: "",
+        enrollmentGranularity: "cycle",
+      }),
+    );
+  });
+
   it("adds a level, then a grade level under it with an auto-suggested ordinal", async () => {
     const user = userEvent.setup();
     mocked.listCycles.mockResolvedValue([

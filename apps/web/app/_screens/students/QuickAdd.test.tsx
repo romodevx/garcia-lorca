@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as studentsApi from "../../students/api";
 import * as configApi from "../../config/api";
-import { StudentsScreen, missingFieldMessage, createFailureMessage, isSepLevel } from "./StudentsScreen";
+import { StudentsScreen, missingFieldMessage, createFailureMessage } from "./StudentsScreen";
 import { StudentsError } from "../../students/api";
 
 /**
@@ -27,6 +27,8 @@ const config = vi.mocked(configApi);
 
 const LEVELS = [
   { id: "lv-k", name: "Kínder", sepCode: "KIN", enrollmentGranularity: "cycle" as const },
+  // A level no fixed SEP list ever had, with no SEP key at all.
+  { id: "lv-pre", name: "Preescolar", sepCode: "", enrollmentGranularity: "cycle" as const },
   { id: "lv-p", name: "Primaria", sepCode: "PRI", enrollmentGranularity: "cycle" as const },
 ];
 const KINDER_GRADES = [
@@ -67,25 +69,6 @@ describe("what the form is still waiting for", () => {
     // The one nobody guesses: a tutor of two letters silently failed the check.
     expect(missingFieldMessage({ ...FULL, guardianName: "Jo" })).toMatch(/tutor/i);
     expect(missingFieldMessage(FULL)).toBeUndefined();
-  });
-});
-
-// A school names its own levels; a pupil's record carries a SEP level. A level
-// outside the supported set has nowhere to put one, and being told that beats a 400 that
-// blames the CURP — which is what the panel used to show for it.
-describe("which levels can actually hold a pupil", () => {
-  it("folds case and accents the way the services do", () => {
-    expect(isSepLevel("Kínder")).toBe(true);
-    expect(isSepLevel("KINDER")).toBe(true);
-    expect(isSepLevel("  primaria ")).toBe(true);
-    expect(isSepLevel("Preparatoria")).toBe(true);
-    // Maternal became a real level in M16 — the school teaches it and could not
-    // enrol those pupils while this returned false.
-    expect(isSepLevel("Maternal")).toBe(true);
-    expect(isSepLevel("maternal")).toBe(true);
-    // A level the system genuinely cannot hold still has to be caught here.
-    expect(isSepLevel("Universidad")).toBe(false);
-    expect(isSepLevel("Primaria B")).toBe(false);
   });
 });
 
@@ -161,7 +144,7 @@ describe("the quick-add drawer", () => {
     const user = userEvent.setup();
     students.createStudent.mockResolvedValue({
       id: "s1", curp: FULL.curp, firstName: FULL.firstName, lastName: FULL.lastName,
-      level: "primaria", gradeGroup: "1° A", guardianName: FULL.guardianName,
+      level: "primaria", levelId: "", gradeGroup: "1° A", guardianName: FULL.guardianName,
       admissionStatus: "pending",
     });
     render(<StudentsScreen onBack={() => {}} />);
@@ -178,6 +161,32 @@ describe("the quick-add drawer", () => {
 
     await waitFor(() => expect(students.createStudent).toHaveBeenCalled());
     expect(students.createStudent.mock.calls[0]?.[1]).toMatchObject({ curp: FULL.curp });
+  });
+
+  // The fixed SEP list is gone (task 2): any level the school created in
+  // Configuración takes pupils, and it travels by id, not by name.
+  it("places a pupil in any level the school defined, Preescolar included", async () => {
+    const user = userEvent.setup();
+    students.createStudent.mockResolvedValue({
+      id: "s1", curp: FULL.curp, firstName: FULL.firstName, lastName: FULL.lastName,
+      level: "Preescolar", levelId: "lv-pre", gradeGroup: "", guardianName: FULL.guardianName,
+      admissionStatus: "pending",
+    });
+    render(<StudentsScreen onBack={() => {}} />);
+    await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
+
+    const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
+    await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
+    await user.type(within(drawer).getByLabelText(/Nombre/, CAMPO), FULL.firstName);
+    await user.type(within(drawer).getByLabelText(/Apellidos/, CAMPO), FULL.lastName);
+    await user.type(within(drawer).getByLabelText(/Tutor/, CAMPO), FULL.guardianName);
+    await user.selectOptions(within(drawer).getByLabelText("Nivel"), "lv-pre");
+    await user.selectOptions(await within(drawer).findByLabelText("Grado"), "gl-k1");
+    await user.click(within(drawer).getByRole("button", { name: "Crear alumno" }));
+
+    await waitFor(() => expect(students.createStudent).toHaveBeenCalled());
+    expect(students.createStudent.mock.calls[0]?.[1]).toMatchObject({ levelId: "lv-pre" });
+    expect(within(drawer).queryByText(/SEP/)).not.toBeInTheDocument();
   });
 
   it("says a CURP is taken when the server says so", async () => {
@@ -242,7 +251,7 @@ describe("choosing where the pupil goes", () => {
     const user = userEvent.setup();
     students.createStudent.mockResolvedValue({
       id: "s1", curp: FULL.curp, firstName: FULL.firstName, lastName: FULL.lastName,
-      level: "kinder", gradeGroup: "", guardianName: FULL.guardianName, admissionStatus: "pending",
+      level: "kinder", levelId: "", gradeGroup: "", guardianName: FULL.guardianName, admissionStatus: "pending",
     });
     const drawer = await openDrawer(user);
     await fillIdentity(user, drawer);
@@ -252,9 +261,8 @@ describe("choosing where the pupil goes", () => {
     await user.click(within(drawer).getByRole("button", { name: "Crear alumno" }));
 
     await waitFor(() => expect(students.enrollIntoGrade).toHaveBeenCalledWith(expect.any(String), "s1", "gl-k2"));
-    // The level travels as the config level's NAME; the server folds accents, so
-    // "Kínder" resolves to the SEP level without a mapping table on this side.
-    expect(students.createStudent.mock.calls[0]?.[1]).toMatchObject({ level: "Kínder" });
+    // The level travels as the config level's ID; the server supplies its name.
+    expect(students.createStudent.mock.calls[0]?.[1]).toMatchObject({ levelId: "lv-k" });
     expect(await screen.findByText(/1° B/)).toBeInTheDocument();
   });
 
@@ -278,7 +286,7 @@ describe("choosing where the pupil goes", () => {
     const user = userEvent.setup();
     students.createStudent.mockResolvedValue({
       id: "s1", curp: FULL.curp, firstName: FULL.firstName, lastName: FULL.lastName,
-      level: "kinder", gradeGroup: "", guardianName: FULL.guardianName, admissionStatus: "pending",
+      level: "kinder", levelId: "", gradeGroup: "", guardianName: FULL.guardianName, admissionStatus: "pending",
     });
     students.enrollIntoGrade.mockRejectedValue(new StudentsError(409, "no quedan lugares"));
     const drawer = await openDrawer(user);
@@ -294,13 +302,18 @@ describe("choosing where the pupil goes", () => {
   });
 });
 
-describe("a level that cannot hold a pupil", () => {
-  it("says so before sending, and names the levels that can", async () => {
+describe("any level the school defined", () => {
+  // The fixed SEP list is gone (task 2): a level only this school has —
+  // "Universidad" stood in for "a level the system cannot hold" — now takes
+  // pupils like any other, and nothing tells the user to rename it.
+  it("sends a pupil to a level no fixed list ever had", async () => {
     const user = userEvent.setup();
-    // Deliberately a level the system does not carry. Maternal used to stand in
-    // for this and no longer can: it is a supported level as of M16.
+    students.createStudent.mockResolvedValue({
+      id: "s1", curp: FULL.curp, firstName: FULL.firstName, lastName: FULL.lastName,
+      level: "Universidad", levelId: "lv-m", gradeGroup: "", guardianName: FULL.guardianName, admissionStatus: "pending",
+    });
     config.listLevels.mockResolvedValue([
-      { id: "lv-m", name: "Universidad", sepCode: "UNI", enrollmentGranularity: "cycle" as const },
+      { id: "lv-m", name: "Universidad", sepCode: "", enrollmentGranularity: "cycle" as const },
     ]);
     config.listGradeLevels.mockResolvedValue([{ id: "gl-m1", levelId: "lv-m", name: "Primer semestre", ordinal: 1 }]);
     render(<StudentsScreen onBack={() => {}} />);
@@ -316,10 +329,8 @@ describe("a level that cannot hold a pupil", () => {
 
     await user.click(within(drawer).getByRole("button", { name: "Crear alumno" }));
 
-    const alert = await within(drawer).findByRole("alert");
-    expect(alert).toHaveTextContent(/Universidad/);
-    expect(alert).toHaveTextContent(/Maternal/);
-    expect(students.createStudent).not.toHaveBeenCalled();
+    await waitFor(() => expect(students.createStudent).toHaveBeenCalled());
+    expect(students.createStudent.mock.calls[0]?.[1]).toMatchObject({ levelId: "lv-m" });
   });
 });
 

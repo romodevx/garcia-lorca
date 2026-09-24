@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"strings"
 	"time"
 
 	"github.com/garcia-lorca/services/uniforms/internal/domain"
@@ -45,9 +46,12 @@ func fromNullableTime(t *time.Time) time.Time {
 
 func toDomainItem(m itemModel) (domain.Item, error) {
 	item, err := domain.NewItem(m.ID, m.TenantID, m.Code, m.Name, m.Description,
-		domain.Level(fromNullable(m.Level)), m.PriceCents)
+		domain.Level(fromNullable(m.LevelID)), m.PriceCents)
 	if err != nil {
 		return domain.Item{}, err
+	}
+	if m.LevelID == nil && fromNullable(m.LegacyLevel) != "" {
+		item = item.WithUnresolvedLevel()
 	}
 	if m.Category != "" {
 		item, err = item.WithCategory(m.Category)
@@ -64,7 +68,7 @@ func toDomainItem(m itemModel) (domain.Item, error) {
 func fromDomainItem(i domain.Item) itemModel {
 	return itemModel{
 		ID: i.ID(), TenantID: i.TenantID(), Code: i.Code(), Name: i.Name(),
-		Description: i.Description(), Level: nullable(string(i.Level())),
+		Description: i.Description(), LevelID: levelIDColumn(i.Level()),
 		PriceCents: i.PriceCents(), Active: i.Active(), Category: i.Category(),
 	}
 }
@@ -94,7 +98,8 @@ func toDomainOrder(m orderModel) (domain.Order, error) {
 	order, err := domain.NewOrder(m.ID, m.TenantID, m.Folio, domain.OrderStudent{
 		ID:         fromNullable(m.StudentID),
 		FullName:   m.StudentName,
-		Level:      domain.Level(fromNullable(m.StudentLevel)),
+		Level:      domain.Level(fromNullable(m.StudentLevelID)),
+		LevelName:  studentLevelName(m),
 		GradeGroup: m.StudentGradeGroup,
 		CycleID:    fromNullable(m.CycleID),
 	}, domain.OrderSource(m.Source), fromNullable(m.CreatedByUserID), m.CreatedAt)
@@ -111,8 +116,9 @@ func fromDomainOrder(o domain.Order) orderModel {
 	return orderModel{
 		ID: o.ID(), TenantID: o.TenantID(), Folio: o.Folio(),
 		StudentID: nullable(o.StudentID()), StudentName: o.StudentName(),
-		StudentLevel: nullable(string(o.StudentLevel())), StudentGradeGroup: o.StudentGradeGroup(),
-		CycleID: nullable(o.CycleID()), CreatedByUserID: nullable(o.CreatedByUserID()),
+		StudentLevelID: nullable(string(o.StudentLevel())), StudentLevelName: o.StudentLevelName(),
+		StudentGradeGroup: o.StudentGradeGroup(),
+		CycleID:           nullable(o.CycleID()), CreatedByUserID: nullable(o.CreatedByUserID()),
 		Source: string(o.Source()), CreatedAt: o.CreatedAt(), ClosedAt: nullableTime(o.ClosedAt()),
 	}
 }
@@ -190,4 +196,24 @@ func fromDomainSettings(s domain.Settings) settingsModel {
 		MaxOpenOrdersPerStudent: s.MaxOpenOrdersPerStudent(), MaxLinesPerOrder: s.MaxLinesPerOrder(),
 		MaxUnitsPerLine: s.MaxUnitsPerLine(), MaxLineExpiries: s.MaxLineExpiries(),
 	}
+}
+
+// studentLevelName is the stored snapshot, or — for an order the previous
+// revision wrote after migration 0007 ran, which carries only the old SEP key —
+// that key capitalized ("secundaria" → "Secundaria").
+func studentLevelName(m orderModel) string {
+	if m.StudentLevelName != "" || m.LegacyStudentLevel == nil || *m.LegacyStudentLevel == "" {
+		return m.StudentLevelName
+	}
+	key := *m.LegacyStudentLevel
+	return strings.ToUpper(key[:1]) + key[1:]
+}
+
+// levelIDColumn stores every-level and unresolved alike as NULL: an unresolved
+// garment keeps its old key in the legacy column, which is what marks it.
+func levelIDColumn(l domain.Level) *string {
+	if l == domain.LevelUnresolved {
+		return nil
+	}
+	return nullable(string(l))
 }

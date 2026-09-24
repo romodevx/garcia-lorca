@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
-import { listItems, UniformsError, type UniformItem } from "../../uniforms/api";
+import { listItems, listUniformLevels, UniformsError, type SchoolLevel, type UniformItem } from "../../uniforms/api";
 import { CatalogPanel } from "./CatalogPanel";
 import { CounterSalePanel } from "./CounterSalePanel";
 import { InventoryPanel } from "./InventoryPanel";
@@ -60,6 +60,16 @@ export function UniformsScreen({
     sync();
     query.addEventListener("change", sync);
     return () => query.removeEventListener("change", sync);
+  }, []);
+
+  // The school's own levels, served by the uniforms module (no config:read
+  // needed). A failure leaves the chips at "Todos" alone rather than blocking
+  // the till: levels only narrow.
+  const [levels, setLevels] = useState<SchoolLevel[]>([]);
+  useEffect(() => {
+    listUniformLevels(API_URL)
+      .then(setLevels)
+      .catch(() => setLevels([]));
   }, []);
 
   const load = useCallback(async (): Promise<void> => {
@@ -216,11 +226,11 @@ export function UniformsScreen({
         ) : tab === "counter" ? (
           <CounterSalePanel items={items} canSell={canSell} onSold={() => void load()} />
         ) : tab === "orders" ? (
-          <OrdersPanel narrow={narrow} />
+          <OrdersPanel narrow={narrow} levels={levels} />
         ) : tab === "inventory" ? (
           <InventoryPanel items={items} narrow={narrow} onChanged={() => void load()} />
         ) : (
-          <CatalogPanel items={items} onChanged={() => void load()} />
+          <CatalogPanel items={items} levels={levels} onChanged={() => void load()} />
         )}
       </div>
     </Page>

@@ -55,7 +55,7 @@ func (h *StudentsHandler) CreateApplicant(ctx context.Context, req *connect.Requ
 		CURP:         m.GetCurp(),
 		FirstName:    m.GetFirstName(),
 		LastName:     m.GetLastName(),
-		Level:        protoconv.ToDomainLevel(m.GetLevel()),
+		LevelID:      m.GetLevelId(),
 		GradeGroup:   m.GetGradeGroup(),
 		GuardianName: m.GetGuardianName(),
 	})
@@ -76,7 +76,7 @@ func (h *StudentsHandler) GetStudent(ctx context.Context, req *connect.Request[s
 func (h *StudentsHandler) ListStudents(ctx context.Context, req *connect.Request[studentsv1.ListStudentsRequest]) (*connect.Response[studentsv1.ListStudentsResponse], error) {
 	m := req.Msg
 	students, next, err := h.svc.ListStudents(ctx, ports.ListFilter{
-		Level:      protoconv.ToDomainLevel(m.GetLevel()),
+		LevelID:    m.GetLevelId(),
 		Status:     protoconv.ToDomainStatus(m.GetStatus()),
 		GradeGroup: m.GetGradeGroup(),
 		PageSize:   int(m.GetPageSize()),
@@ -263,7 +263,8 @@ func toProtoStudent(s *domain.Student) *studentsv1.Student {
 		Curp:            s.CURP().String(),
 		FirstName:       s.FirstName(),
 		LastName:        s.LastName(),
-		Level:           protoconv.ToProtoLevel(s.Level()),
+		LevelId:         s.Level().ID(),
+		LevelName:       s.Level().Name(),
 		GradeGroup:      s.GradeGroup(),
 		GuardianName:    s.GuardianName(),
 		AdmissionStatus: protoconv.ToProtoStatus(s.Status()),

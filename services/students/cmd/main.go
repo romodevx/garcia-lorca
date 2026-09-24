@@ -218,15 +218,16 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	}
 	events := pubsubadapter.NewEventPublisher(publisher)
 	newID := func() string { return uuid.NewString() }
-	svc := usecase.NewStudentService(repo, events, tenantID, newID)
 
 	// The enroll knot validates group/term references against the config bounded
 	// context by RPC (the app's first service-to-service call). The catalog
 	// validator is a Connect client to config; the use case stays testable behind
 	// the CatalogValidator port. http.DefaultClient speaks Connect over HTTP/1.1,
-	// which is sufficient for these unary calls.
+	// which is sufficient for these unary calls. The same client resolves a
+	// pupil's level against the school's own catalog (ADR 0014).
 	configBaseURL := envOr("CONFIG_BASE_URL", defaultConfigBaseURL)
 	catalog := configclient.New(configBaseURL, gcpauth.HTTPClient(ctx, configBaseURL))
+	svc := usecase.NewStudentService(repo, events, catalog, tenantID, newID)
 	enroll := usecase.NewEnrollmentService(repo, repo, catalog, events, tenantID, newID, time.Now)
 
 	// Guardian links reference iam users, so the use case validates them against

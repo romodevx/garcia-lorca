@@ -22,7 +22,15 @@ type stubConfigService struct {
 	configv1connect.UnimplementedConfigServiceHandler
 	group    *configv1.Group
 	term     *configv1.Term
+	level    *configv1.Level
 	notFound bool
+}
+
+func (s *stubConfigService) GetLevel(_ context.Context, _ *connect.Request[configv1.GetLevelRequest]) (*connect.Response[configv1.GetLevelResponse], error) {
+	if s.notFound {
+		return nil, connect.NewError(connect.CodeNotFound, glerrors.New(glerrors.KindNotFound, "level not found"))
+	}
+	return connect.NewResponse(&configv1.GetLevelResponse{Level: s.level}), nil
 }
 
 func (s *stubConfigService) GetGroup(_ context.Context, _ *connect.Request[configv1.GetGroupRequest]) (*connect.Response[configv1.GetGroupResponse], error) {
@@ -98,6 +106,29 @@ func TestTermByID_MapsFieldsAndNotFound(t *testing.T) {
 	t.Run("config NotFound maps to ErrNotFound", func(t *testing.T) {
 		c := newClient(t, &stubConfigService{notFound: true})
 		_, err := c.TermByID(context.Background(), termID)
+		if glerrors.KindOf(err) != glerrors.KindNotFound {
+			t.Errorf("want KindNotFound, got %v (kind %v)", err, glerrors.KindOf(err))
+		}
+	})
+}
+
+func TestLevelByID_MapsFieldsAndNotFound(t *testing.T) {
+	const levelID = "10000000-0000-0000-0000-000000000001"
+
+	t.Run("found carries the id and the school's own name", func(t *testing.T) {
+		c := newClient(t, &stubConfigService{level: &configv1.Level{Id: levelID, Name: "Preescolar"}})
+		got, err := c.LevelByID(context.Background(), levelID)
+		if err != nil {
+			t.Fatalf("LevelByID: %v", err)
+		}
+		if got.ID() != levelID || got.Name() != "Preescolar" {
+			t.Errorf("mapping mismatch: (%q, %q)", got.ID(), got.Name())
+		}
+	})
+
+	t.Run("config NotFound maps to ErrNotFound", func(t *testing.T) {
+		c := newClient(t, &stubConfigService{notFound: true})
+		_, err := c.LevelByID(context.Background(), levelID)
 		if glerrors.KindOf(err) != glerrors.KindNotFound {
 			t.Errorf("want KindNotFound, got %v (kind %v)", err, glerrors.KindOf(err))
 		}

@@ -46,6 +46,7 @@ const student = {
   firstName: "Ada",
   lastName: "Lovelace",
   level: "Primaria",
+  levelId: "",
   gradeGroup: "4° A",
   guardianName: "Anne Byron",
   admissionStatus: "enrolled" as const,

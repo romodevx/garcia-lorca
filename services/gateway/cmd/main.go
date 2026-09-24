@@ -567,6 +567,13 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 		return guard.Protect("uniforms", requireAuthChanged(
 			middleware.RequireAllPermissions("uniforms:write", "finance:write")(http.HandlerFunc(h))))
 	}
+	// The school's levels, for the inventory's level chips: any uniforms reader
+	// may see them, without config:read (ADR 0014).
+	uniformsRead := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("uniforms", requireAuthChanged(
+			middleware.RequireAnyPermission("uniforms:stock", "uniforms:orders")(http.HandlerFunc(h))))
+	}
+	mux.Handle("GET /api/v1/uniforms/levels", uniformsRead(handler.NewUniformLevelsHandler(configClient).List))
 	mux.Handle("GET /api/v1/uniforms/items", uniformsStock(uniformsH.ListItems))
 	mux.Handle("POST /api/v1/uniforms/items", uniformsWrite(uniformsH.CreateItem))
 	mux.Handle("PUT /api/v1/uniforms/items/{id}", uniformsWrite(uniformsH.UpdateItem))

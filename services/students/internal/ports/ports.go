@@ -12,7 +12,7 @@ import (
 
 // ListFilter narrows a ListStudents query. Zero values mean "no filter".
 type ListFilter struct {
-	Level      domain.Level
+	LevelID    string
 	Status     domain.AdmissionStatus
 	GradeGroup string
 	PageSize   int
@@ -38,6 +38,13 @@ type StudentRepository interface {
 type EventPublisher interface {
 	PublishStudentEnrolled(ctx context.Context, ev domain.StudentEnrolledEvent) error
 	PublishAdmissionChanged(ctx context.Context, ev domain.AdmissionChangedEvent) error
+}
+
+// LevelCatalog resolves a level id against config's catalog of levels — the
+// school's own list, not a fixed SEP one (ADR 0014). An unknown id is reported
+// as glerrors.ErrNotFound (KindNotFound).
+type LevelCatalog interface {
+	LevelByID(ctx context.Context, id string) (domain.Level, error)
 }
 
 // GroupRef is the students-owned view of a config group. It is the minimum the

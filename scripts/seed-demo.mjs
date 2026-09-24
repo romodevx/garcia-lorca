@@ -104,12 +104,12 @@ const TERMS = [
 ];
 
 const UNIFORMS = [
-  { code: "SUE-INS", name: "Suéter institucional", priceCents: 65000, level: "" },
-  { code: "PLY-BLA", name: "Playera polo blanca", priceCents: 32000, level: "" },
-  { code: "PAN-GRI", name: "Pantalón gris escolar", priceCents: 48000, level: "" },
-  { code: "FAL-CUA", name: "Falda de cuadros", priceCents: 52000, level: "" },
-  { code: "SUD-DEP", name: "Sudadera deportiva", priceCents: 58000, level: "" },
-  { code: "SHO-DEP", name: "Short deportivo", priceCents: 29000, level: "" },
+  { code: "SUE-INS", name: "Suéter institucional", priceCents: 65000, levelId: "" },
+  { code: "PLY-BLA", name: "Playera polo blanca", priceCents: 32000, levelId: "" },
+  { code: "PAN-GRI", name: "Pantalón gris escolar", priceCents: 48000, levelId: "" },
+  { code: "FAL-CUA", name: "Falda de cuadros", priceCents: 52000, levelId: "" },
+  { code: "SUD-DEP", name: "Sudadera deportiva", priceCents: 58000, levelId: "" },
+  { code: "SHO-DEP", name: "Short deportivo", priceCents: 29000, levelId: "" },
 ];
 
 const SIZES = ["4", "6", "8", "10", "12", "CH", "M", "G", "XG"];
@@ -335,7 +335,7 @@ async function seedTeachers(levels) {
 async function seedStudents(levels) {
   const planned = [];
   let serial = 0;
-  for (const { spec, grades } of levels) {
+  for (const { spec, level, grades } of levels) {
     const groups = grades.flatMap((g) => g.groups.map((group) => ({ group, gradeIndex: g.gradeIndex })));
     for (let i = 0; i < STUDENTS_PER_LEVEL; i++) {
       const { group, gradeIndex } = groups[i % groups.length];
@@ -348,7 +348,8 @@ async function seedStudents(levels) {
         curp: curpFor(serial, birth, female ? "M" : "H"),
         firstName: first,
         lastName: `${paternal} ${maternal}`,
-        level: spec.key,
+        // A pupil points at the config level itself (ADR 0014).
+        levelId: level.id,
         gradeGroup: group.name,
         guardianName: `${pick(female ? GIVEN_M : GIVEN_F, serial + 5)} ${paternal}`,
         groupId: group.id,
@@ -367,7 +368,7 @@ async function seedStudents(levels) {
       curp: p.curp,
       firstName: p.firstName,
       lastName: p.lastName,
-      level: p.level,
+      levelId: p.levelId,
       gradeGroup: p.gradeGroup,
       guardianName: p.guardianName,
     });
@@ -435,7 +436,7 @@ async function seedUniforms(students) {
       code: spec.code,
       name: spec.name,
       description: "",
-      level: spec.level,
+      levelId: spec.levelId,
       priceCents: spec.priceCents,
     });
     const sizes = SIZES.map((label, i) => ({ sizeLabel: label, sizeOrder: i + 1, minStock: 3 }));

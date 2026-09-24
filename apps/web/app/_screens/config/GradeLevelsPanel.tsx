@@ -88,7 +88,7 @@ export function GradeLevelsPanel({
             try {
               await onCreate({ levelId: level.id, name: (values.name ?? "").trim(), ordinal });
             } catch (cause) {
-              setError("No se pudo crear el grado. Revisa que no exista ya con ese orden.");
+              setError("No se pudo crear el grado. Revisa que no exista ya en este nivel con ese nombre o ese orden.");
               // Se RELANZA: el renglón necesita saber que no se guardó para
               // conservar lo escrito. Tragarse el error aquí dejaba el mensaje
               // hablando de un renglón que ya se había vaciado solo, y obligaba

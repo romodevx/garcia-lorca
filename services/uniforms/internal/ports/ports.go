@@ -120,6 +120,7 @@ type CounterSaleCommand struct {
 	StudentID         string
 	StudentName       string
 	StudentLevel      domain.Level
+	StudentLevelName  string
 	StudentGradeGroup string
 	CycleID           string
 	Lines             []domain.OrderLine
@@ -137,6 +138,7 @@ type StudentRef struct {
 	ID         string
 	FullName   string
 	Level      domain.Level
+	LevelName  string
 	GradeGroup string
 	CycleID    string
 	Status     string

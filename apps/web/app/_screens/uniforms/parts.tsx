@@ -4,6 +4,9 @@ import type { CSSProperties, ReactElement, ReactNode } from "react";
 import { Icon, type IconName } from "../../_design/Icon";
 import { HelpTip } from "../../_design/form";
 import { COLOR, type ColorKey } from "../../_design/colors";
+import type { SchoolLevel } from "../../uniforms/api";
+
+export type { SchoolLevel };
 
 /**
  * Shared pieces of the uniform shop's surface.
@@ -291,22 +294,25 @@ export function StatCards({ cards }: { cards: readonly StatCardDef[] }): ReactEl
   );
 }
 
-/** Level chips. Tabs are for STATUS in this system; chips are for level. */
+/**
+ * Level chips. Tabs are for STATUS in this system; chips are for level.
+ *
+ * The levels are the school's own, from Configuración — never a fixed SEP list:
+ * a school with Preescolar sees Preescolar. The first chip is `allLabel` (value
+ * "") — "Todos" on a filter, "Todos los niveles" when scoping a garment.
+ */
 export function LevelChips({
+  levels: schoolLevels,
   value,
   onChange,
+  allLabel = "Todos",
 }: {
+  levels: readonly SchoolLevel[];
   value: string;
-  onChange: (level: string) => void;
+  onChange: (levelId: string) => void;
+  allLabel?: string;
 }): ReactElement {
-  const levels = [
-    { id: "", label: "Todos" },
-    { id: "maternal", label: "Maternal" },
-    { id: "kinder", label: "Kínder" },
-    { id: "primaria", label: "Primaria" },
-    { id: "secundaria", label: "Secundaria" },
-    { id: "preparatoria", label: "Prepa" },
-  ];
+  const levels = [{ id: "", label: allLabel }, ...schoolLevels.map((l) => ({ id: l.id, label: l.name }))];
   return (
     <div role="group" aria-label="Nivel" style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
       {levels.map((level) => {

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { API_URL, apiAsOwner, openModule, signIn, uniqueSuffix } from "./helpers";
+import { API_URL, apiAsOwner, openModule, signIn, uniqueSuffix, anyLevelId } from "./helpers";
 
 /**
  * El colegio le da la app a una familia, de punta a punta.
@@ -64,7 +64,7 @@ test.describe("dar acceso a la app", () => {
         curp: shapedCurp(),
         firstName: `Ana Paula ${stamp}`,
         lastName: "Contreras Rojas",
-        level: "primaria",
+        levelId: await anyLevelId(api),
         gradeGroup: `5A${stamp}`,
         guardianName: motherName,
       },
@@ -121,7 +121,7 @@ test.describe("dar acceso a la app", () => {
         curp: shapedCurp(),
         firstName: `Diego ${stamp}`,
         lastName: "Salazar Martínez",
-        level: "kinder",
+        levelId: await anyLevelId(api),
         gradeGroup: `1A${stamp}`,
         guardianName: grandmother,
       },

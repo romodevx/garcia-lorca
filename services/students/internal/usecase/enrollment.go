@@ -196,7 +196,7 @@ func (s *EnrollmentService) publishEnrolled(ctx context.Context, student *domain
 		StudentID: student.ID(),
 		TenantID:  s.tenant,
 		CycleID:   cycleID,
-		Level:     student.Level(),
+		LevelID:   student.Level().ID(),
 	})
 }
 

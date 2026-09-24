@@ -36,6 +36,7 @@ type OrderStudent struct {
 	ID         string
 	FullName   string
 	Level      Level
+	LevelName  string // the level's name as the school wrote it, at order time
 	GradeGroup string
 	CycleID    string
 }
@@ -98,14 +99,12 @@ func NewOrder(id, tenantID, folio string, student OrderStudent, source OrderSour
 		if name == "" || len(name) > 200 {
 			return Order{}, glerrors.New(glerrors.KindInvalid, "the student's name is required")
 		}
-		if !student.Level.IsValid() {
-			return Order{}, glerrors.New(glerrors.KindInvalid, "unknown school level")
-		}
 		group := strings.TrimSpace(student.GradeGroup)
 		if len(group) > maxGradeGroupLen {
 			return Order{}, glerrors.New(glerrors.KindInvalid, "grade and group is too long")
 		}
 		student.FullName = name
+		student.LevelName = strings.TrimSpace(student.LevelName)
 		student.GradeGroup = group
 	}
 
@@ -133,6 +132,7 @@ func (o Order) Folio() string             { return o.folio }
 func (o Order) StudentID() string         { return o.student.ID }
 func (o Order) StudentName() string       { return o.student.FullName }
 func (o Order) StudentLevel() Level       { return o.student.Level }
+func (o Order) StudentLevelName() string  { return o.student.LevelName }
 func (o Order) StudentGradeGroup() string { return o.student.GradeGroup }
 func (o Order) CycleID() string           { return o.student.CycleID }
 func (o Order) Source() OrderSource       { return o.source }

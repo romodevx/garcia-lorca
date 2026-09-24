@@ -146,9 +146,9 @@ async function school(api: APIRequestContext): Promise<School> {
     curp: shapedCurp(),
     firstName: "Ana",
     lastName: `Tramos ${tag}`,
-    // The SEP vocabulary the students boundary validates; the config level may
-    // still be NAMED "Preescolar", which is what the school prints.
-    level: "kinder",
+    // The pupil goes in the config level itself — named "Preescolar", exactly
+    // what the school prints (the fixed SEP list is gone, ADR 0014).
+    levelId: level.id,
     gradeGroup: `1A${tag}`,
     guardianName: "Tutor de prueba",
   });

@@ -359,7 +359,8 @@ type familyStudentResponse struct {
 	ID         string `json:"id"`
 	FirstName  string `json:"firstName"`
 	LastName   string `json:"lastName"`
-	Level      string `json:"level"`
+	Level      string `json:"level"`   // the school's name for the level
+	LevelID    string `json:"levelId"` // the config level id
 	GradeGroup string `json:"gradeGroup"`
 }
 
@@ -369,6 +370,7 @@ func toFamilyStudentResponse(s client.StudentResult) familyStudentResponse {
 		FirstName:  s.FirstName,
 		LastName:   s.LastName,
 		Level:      s.Level,
+		LevelID:    s.LevelID,
 		GradeGroup: s.GradeGroup,
 	}
 }

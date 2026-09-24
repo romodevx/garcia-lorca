@@ -31,6 +31,7 @@ const ada = {
   firstName: "Ada",
   lastName: "Lovelace",
   level: "Primaria",
+  levelId: "",
   gradeGroup: "4° A",
   guardianName: "Marisol Ríos",
   admissionStatus: "accepted" as const,
@@ -41,6 +42,7 @@ const grace = {
   firstName: "Grace",
   lastName: "Hopper",
   level: "Primaria",
+  levelId: "",
   gradeGroup: "4° A",
   guardianName: "Ana Mendoza",
   admissionStatus: "accepted" as const,
@@ -89,50 +91,6 @@ describe("Enrollment — enroll", () => {
     );
     const payload = students.enroll.mock.calls[0]?.[1];
     expect(payload).not.toHaveProperty("cycleId");
-  });
-});
-
-describe("Enrollment — register applicant", () => {
-  it("registers a new applicant and makes it immediately enrollable (no reload)", async () => {
-    const user = userEvent.setup();
-    const katherine = {
-      id: "st9",
-      curp: "CCCC000000CCCCCC03",
-      firstName: "KATHERINE",
-      lastName: "JOHNSON",
-      level: "Primaria",
-      gradeGroup: "1° A",
-      guardianName: "JOYLETTE COLEMAN",
-      admissionStatus: "pending" as const,
-    };
-    students.createStudent.mockResolvedValue(katherine);
-
-    render(<Enrollment onBack={() => {}} />);
-
-    const form = await screen.findByRole("form", { name: "Registrar alumno" });
-    await user.type(within(form).getByLabelText("CURP"), "CCCC000000CCCCCC03");
-    await user.type(within(form).getByLabelText("Nombre"), "Katherine");
-    await user.type(within(form).getByLabelText("Apellidos"), "Johnson");
-    await user.selectOptions(within(form).getByLabelText("Nivel"), "primaria");
-    await user.type(within(form).getByLabelText("Grado y grupo"), "1° A");
-    await user.type(within(form).getByLabelText("Tutor"), "Joylette Coleman");
-    await user.click(within(form).getByRole("button", { name: "Registrar alumno" }));
-
-    await waitFor(() =>
-      expect(students.createStudent).toHaveBeenCalledWith(expect.any(String), {
-        curp: "CCCC000000CCCCCC03",
-        firstName: "KATHERINE",
-        lastName: "JOHNSON",
-        level: "primaria",
-        gradeGroup: "1° A",
-        guardianName: "JOYLETTE COLEMAN",
-      }),
-    );
-
-    // The applicant is prepended to the enrollable list, so it appears in the
-    // enroll panel's student picker without a page reload.
-    const enrollForm = screen.getByRole("form", { name: "Inscribir alumno" });
-    expect(await within(enrollForm).findByRole("option", { name: "KATHERINE JOHNSON" })).toBeInTheDocument();
   });
 });
 

@@ -44,14 +44,14 @@ type UniformSize struct {
 	BelowMinimum bool   `json:"belowMinimum"`
 }
 
-// UniformItem is one garment plus its size run. Level is empty when the garment
-// applies to every level, which is the common case.
+// UniformItem is one garment plus its size run. LevelID is the config level the
+// garment is scoped to, empty when it applies to every level (the common case).
 type UniformItem struct {
 	ID          string        `json:"id"`
 	Code        string        `json:"code"`
 	Name        string        `json:"name"`
 	Description string        `json:"description"`
-	Level       string        `json:"level,omitempty"`
+	LevelID     string        `json:"levelId,omitempty"`
 	PriceCents  int64         `json:"priceCents"`
 	Active      bool          `json:"active"`
 	Sizes       []UniformSize `json:"sizes"`
@@ -95,7 +95,8 @@ type UniformOrder struct {
 	Folio             string               `json:"folio"`
 	StudentID         string               `json:"studentId,omitempty"`
 	StudentName       string               `json:"studentName"`
-	StudentLevel      string               `json:"studentLevel,omitempty"`
+	StudentLevel      string               `json:"studentLevel,omitempty"`   // the level's name at order time
+	StudentLevelID    string               `json:"studentLevelId,omitempty"` // the config level id
 	StudentGradeGroup string               `json:"studentGradeGroup,omitempty"`
 	Source            string               `json:"source"`
 	Label             string               `json:"label"`
@@ -147,14 +148,14 @@ type UniformOrdersPage struct {
 // ListItemsFilter narrows the catalogue read.
 type ListItemsFilter struct {
 	IncludeInactive bool
-	Level           string
+	LevelID         string
 }
 
 // ListItems returns the catalogue with each garment's sizes.
 func (c *UniformsClient) ListItems(ctx context.Context, f ListItemsFilter) ([]UniformItem, error) {
 	res, err := c.rpc.ListItems(ctx, connect.NewRequest(&uniformsv1.ListItemsRequest{
 		IncludeInactive: f.IncludeInactive,
-		Level:           uniformLevel(f.Level),
+		LevelId:         f.LevelID,
 	}))
 	if err != nil {
 		return nil, err
@@ -171,7 +172,7 @@ type CreateItemInput struct {
 	Code        string
 	Name        string
 	Description string
-	Level       string
+	LevelID     string // a config level id; empty means every level
 	PriceCents  int64
 	// Category is uniform, book, supply or other. Empty means uniform.
 	Category string
@@ -181,7 +182,7 @@ type CreateItemInput struct {
 func (c *UniformsClient) CreateItem(ctx context.Context, in CreateItemInput) (UniformItem, error) {
 	res, err := c.rpc.CreateItem(ctx, connect.NewRequest(&uniformsv1.CreateItemRequest{
 		Code: in.Code, Name: in.Name, Description: in.Description,
-		Level: uniformLevel(in.Level), PriceCents: in.PriceCents, Category: in.Category,
+		LevelId: in.LevelID, PriceCents: in.PriceCents, Category: in.Category,
 	}))
 	if err != nil {
 		return UniformItem{}, err
@@ -195,7 +196,7 @@ type UpdateItemInput struct {
 	ID          string
 	Name        string
 	Description string
-	Level       string
+	LevelID     string // a config level id; empty means every level
 	PriceCents  int64
 	Active      bool
 	Category    string
@@ -205,7 +206,7 @@ type UpdateItemInput struct {
 func (c *UniformsClient) UpdateItem(ctx context.Context, in UpdateItemInput) (UniformItem, error) {
 	res, err := c.rpc.UpdateItem(ctx, connect.NewRequest(&uniformsv1.UpdateItemRequest{
 		Id: in.ID, Name: in.Name, Description: in.Description,
-		Level: uniformLevel(in.Level), PriceCents: in.PriceCents, Active: in.Active,
+		LevelId: in.LevelID, PriceCents: in.PriceCents, Active: in.Active,
 		Category: in.Category,
 	}))
 	if err != nil {
@@ -322,7 +323,7 @@ func (c *UniformsClient) CounterSale(ctx context.Context, in CounterSaleInput) (
 // another family's order by id.
 type ListOrdersFilter struct {
 	StudentIDs            []string
-	Level                 string
+	LevelID               string
 	Query                 string
 	Statuses              []string
 	OnlyRequiresAttention bool
@@ -340,7 +341,7 @@ func (c *UniformsClient) ListOrders(ctx context.Context, f ListOrdersFilter) (Un
 		statuses = append(statuses, fulfillmentStatusFromString(s))
 	}
 	res, err := c.rpc.ListOrders(ctx, connect.NewRequest(&uniformsv1.ListOrdersRequest{
-		StudentIds: f.StudentIDs, Level: uniformLevel(f.Level), Query: f.Query,
+		StudentIds: f.StudentIDs, StudentLevelId: f.LevelID, Query: f.Query,
 		Statuses: statuses, OnlyRequiresAttention: f.OnlyRequiresAttention,
 		From: f.From, To: f.To, Sort: f.Sort, Descending: f.Descending,
 		PageSize: f.PageSize, PageToken: f.PageToken,
@@ -398,28 +399,6 @@ func (c *UniformsClient) UpdateSettings(ctx context.Context, in UniformSettings)
 }
 
 // --- translation -------------------------------------------------------------
-
-var uniformLevels = map[string]uniformsv1.Level{
-	"":             uniformsv1.Level_LEVEL_UNSPECIFIED,
-	"kinder":       uniformsv1.Level_LEVEL_KINDER,
-	"primaria":     uniformsv1.Level_LEVEL_PRIMARIA,
-	"secundaria":   uniformsv1.Level_LEVEL_SECUNDARIA,
-	"preparatoria": uniformsv1.Level_LEVEL_PREPARATORIA,
-}
-
-var uniformLevelNames = map[uniformsv1.Level]string{
-	uniformsv1.Level_LEVEL_UNSPECIFIED:  "",
-	uniformsv1.Level_LEVEL_KINDER:       "kinder",
-	uniformsv1.Level_LEVEL_PRIMARIA:     "primaria",
-	uniformsv1.Level_LEVEL_SECUNDARIA:   "secundaria",
-	uniformsv1.Level_LEVEL_PREPARATORIA: "preparatoria",
-	uniformsv1.Level_LEVEL_MATERNAL:     "maternal",
-}
-
-// uniformLevel maps the edge's lowercase name onto the enum. An unknown name
-// becomes UNSPECIFIED, which on a FILTER means "every level" — the widest
-// possible answer, and safe, because narrowing is what a filter is for.
-func uniformLevel(name string) uniformsv1.Level { return uniformLevels[name] }
 
 var fulfillmentStatuses = map[string]uniformsv1.FulfillmentStatus{
 	"picking":          uniformsv1.FulfillmentStatus_FULFILLMENT_STATUS_PICKING,
@@ -480,7 +459,7 @@ func toUniformSizes(sizes []*uniformsv1.StockLevel) []UniformSize {
 func toUniformItem(i *uniformsv1.Item) UniformItem {
 	return UniformItem{
 		ID: i.GetId(), Code: i.GetCode(), Name: i.GetName(), Description: i.GetDescription(),
-		Level: uniformLevelNames[i.GetLevel()], PriceCents: i.GetPriceCents(),
+		LevelID: i.GetLevelId(), PriceCents: i.GetPriceCents(),
 		Active: i.GetActive(), Sizes: toUniformSizes(i.GetSizes()),
 		Category: i.GetCategory(),
 	}
@@ -511,7 +490,8 @@ func toUniformOrder(o *uniformsv1.Order) UniformOrder {
 	}
 	return UniformOrder{
 		ID: o.GetId(), Folio: o.GetFolio(), StudentID: o.GetStudentId(),
-		StudentName: o.GetStudentName(), StudentLevel: uniformLevelNames[o.GetStudentLevel()],
+		StudentName: o.GetStudentName(), StudentLevel: o.GetStudentLevelName(),
+		StudentLevelID:    o.GetStudentLevelId(),
 		StudentGradeGroup: o.GetStudentGradeGroup(), Source: o.GetSource(),
 		Label: orderLabelNames[o.GetLabel()], TotalCents: o.GetTotalCents(),
 		Lines: lines, Fulfillments: fulfillments, CreatedAt: created,

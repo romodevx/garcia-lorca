@@ -38,7 +38,7 @@ const charge = (id: string, studentId: string, remaining: number): financeApi.Ch
   remainingCents: remaining,
 });
 const student = (id: string, first: string, last: string): studentsApi.Student => ({
-  id, curp: `C${id}`, firstName: first, lastName: last, level: "primaria", gradeGroup: "1° A", guardianName: "Tutor", admissionStatus: "enrolled",
+  id, curp: `C${id}`, firstName: first, lastName: last, level: "primaria", levelId: "", gradeGroup: "1° A", guardianName: "Tutor", admissionStatus: "enrolled",
 });
 
 beforeEach(() => {

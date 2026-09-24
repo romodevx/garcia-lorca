@@ -47,8 +47,11 @@ export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate }: Lev
    * necesita el párrafo que la explica.
    */
   const submit = async (andNew: boolean): Promise<void> => {
-    if (name.trim() === "" || sepCode.trim() === "") {
-      setError("Un nivel necesita nombre y clave SEP.");
+    // Sólo el nombre es obligatorio. La clave SEP es opcional, como dice su
+    // ayuda y como siempre lo permitió el servidor: exigirla dejaba fuera a
+    // preescolar y a cualquier nivel que la escuela nombre a su manera.
+    if (name.trim() === "") {
+      setError("Un nivel necesita nombre.");
       return;
     }
     setPending(true);
