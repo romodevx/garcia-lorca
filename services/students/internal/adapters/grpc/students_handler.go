@@ -65,6 +65,71 @@ func (h *StudentsHandler) CreateApplicant(ctx context.Context, req *connect.Requ
 	return connect.NewResponse(&studentsv1.CreateApplicantResponse{Student: toProtoStudent(student)}), nil
 }
 
+// UpdateStudent corrects a pupil's file (names, CURP, profile).
+func (h *StudentsHandler) UpdateStudent(ctx context.Context, req *connect.Request[studentsv1.UpdateStudentRequest]) (*connect.Response[studentsv1.UpdateStudentResponse], error) {
+	m := req.Msg
+	student, err := h.svc.UpdateDetails(ctx, usecase.UpdateDetailsInput{
+		ID:        m.GetId(),
+		FirstName: m.GetFirstName(),
+		LastName:  m.GetLastName(),
+		CURP:      m.GetCurp(),
+		Profile:   toDomainProfileInput(m.GetProfile()),
+	})
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.UpdateStudentResponse{Student: toProtoStudent(student)}), nil
+}
+
+// GetStudentMedical returns a pupil's medical record.
+func (h *StudentsHandler) GetStudentMedical(ctx context.Context, req *connect.Request[studentsv1.GetStudentMedicalRequest]) (*connect.Response[studentsv1.GetStudentMedicalResponse], error) {
+	rec, err := h.svc.GetMedical(ctx, req.Msg.GetStudentId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.GetStudentMedicalResponse{Medical: toProtoMedical(rec)}), nil
+}
+
+// UpdateStudentMedical saves a pupil's medical record.
+func (h *StudentsHandler) UpdateStudentMedical(ctx context.Context, req *connect.Request[studentsv1.UpdateStudentMedicalRequest]) (*connect.Response[studentsv1.UpdateStudentMedicalResponse], error) {
+	m := req.Msg.GetMedical()
+	rec, err := h.svc.UpdateMedical(ctx, req.Msg.GetStudentId(), m.GetBloodType(), m.GetAllergies(), m.GetConditions())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.UpdateStudentMedicalResponse{Medical: toProtoMedical(rec)}), nil
+}
+
+func toProtoMedical(r domain.MedicalRecord) *studentsv1.StudentMedical {
+	return &studentsv1.StudentMedical{BloodType: string(r.BloodType()), Allergies: r.Allergies(), Conditions: r.Conditions()}
+}
+
+// UploadStudentPhoto stores (or replaces) a pupil's photo.
+func (h *StudentsHandler) UploadStudentPhoto(ctx context.Context, req *connect.Request[studentsv1.UploadStudentPhotoRequest]) (*connect.Response[studentsv1.UploadStudentPhotoResponse], error) {
+	ref, err := h.svc.UploadPhoto(ctx, req.Msg.GetStudentId(), req.Msg.GetData())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.UploadStudentPhotoResponse{ContentType: ref.ContentType, SizeBytes: int32(ref.Size)}), nil
+}
+
+// GetStudentPhoto returns a pupil's photo, or NotFound when there is none.
+func (h *StudentsHandler) GetStudentPhoto(ctx context.Context, req *connect.Request[studentsv1.GetStudentPhotoRequest]) (*connect.Response[studentsv1.GetStudentPhotoResponse], error) {
+	photo, err := h.svc.Photo(ctx, req.Msg.GetStudentId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.GetStudentPhotoResponse{Data: photo.Data(), ContentType: photo.ContentType()}), nil
+}
+
+// DeleteStudentPhoto removes a pupil's photo.
+func (h *StudentsHandler) DeleteStudentPhoto(ctx context.Context, req *connect.Request[studentsv1.DeleteStudentPhotoRequest]) (*connect.Response[studentsv1.DeleteStudentPhotoResponse], error) {
+	if err := h.svc.DeletePhoto(ctx, req.Msg.GetStudentId()); err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.DeleteStudentPhotoResponse{}), nil
+}
+
 func (h *StudentsHandler) GetStudent(ctx context.Context, req *connect.Request[studentsv1.GetStudentRequest]) (*connect.Response[studentsv1.GetStudentResponse], error) {
 	student, err := h.svc.GetStudent(ctx, req.Msg.GetId())
 	if err != nil {
@@ -205,11 +270,36 @@ func (h *StudentsHandler) AddContact(ctx context.Context, req *connect.Request[s
 		FullName:     m.GetFullName(),
 		Phone:        m.GetPhone(),
 		Email:        m.GetEmail(),
+		IsEmergency:  m.GetIsEmergency(),
 	})
 	if err != nil {
 		return nil, connectErr(err)
 	}
 	return connect.NewResponse(&studentsv1.AddContactResponse{Contact: toProtoGuardianLink(contact)}), nil
+}
+
+// UpdateContact corrects a contact of a pupil.
+func (h *StudentsHandler) UpdateContact(ctx context.Context, req *connect.Request[studentsv1.UpdateContactRequest]) (*connect.Response[studentsv1.UpdateContactResponse], error) {
+	m := req.Msg
+	contact, err := h.guardian.UpdateContact(ctx, m.GetContactId(), m.GetStudentId(), usecase.ContactInput{
+		Relationship: m.GetRelationship(),
+		FullName:     m.GetFullName(),
+		Phone:        m.GetPhone(),
+		Email:        m.GetEmail(),
+		IsEmergency:  m.GetIsEmergency(),
+	})
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.UpdateContactResponse{Contact: toProtoGuardianLink(contact)}), nil
+}
+
+// RemoveContact deletes a contact of a pupil that has no app access.
+func (h *StudentsHandler) RemoveContact(ctx context.Context, req *connect.Request[studentsv1.RemoveContactRequest]) (*connect.Response[studentsv1.RemoveContactResponse], error) {
+	if err := h.guardian.RemoveContact(ctx, req.Msg.GetContactId(), req.Msg.GetStudentId()); err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.RemoveContactResponse{}), nil
 }
 
 // GrantContactAccess attaches an iam account to a contact the school already
@@ -268,6 +358,49 @@ func toProtoStudent(s *domain.Student) *studentsv1.Student {
 		GradeGroup:      s.GradeGroup(),
 		GuardianName:    s.GuardianName(),
 		AdmissionStatus: protoconv.ToProtoStatus(s.Status()),
+		Profile:         toProtoProfile(s.Profile()),
+	}
+}
+
+func toDomainProfileInput(p *studentsv1.StudentProfile) domain.ProfileInput {
+	phones := make([]domain.Phone, 0, len(p.GetPhones()))
+	for _, ph := range p.GetPhones() {
+		phones = append(phones, domain.Phone{Kind: domain.PhoneKind(ph.GetKind()), Number: ph.GetNumber()})
+	}
+	a := p.GetAddress()
+	return domain.ProfileInput{
+		BirthDate: p.GetBirthDate(),
+		Sex:       p.GetSex(),
+		Email:     p.GetEmail(),
+		Phones:    phones,
+		Address: domain.Address{
+			Street: a.GetStreet(), ExtNumber: a.GetExtNumber(), IntNumber: a.GetIntNumber(),
+			Neighborhood: a.GetNeighborhood(), PostalCode: a.GetPostalCode(),
+			Municipality: a.GetMunicipality(), State: a.GetState(),
+		},
+	}
+}
+
+func toProtoProfile(p domain.Profile) *studentsv1.StudentProfile {
+	phones := make([]*studentsv1.StudentPhone, 0, len(p.Phones()))
+	for _, ph := range p.Phones() {
+		phones = append(phones, &studentsv1.StudentPhone{Kind: string(ph.Kind), Number: ph.Number})
+	}
+	born := ""
+	if !p.BirthDate().IsZero() {
+		born = p.BirthDate().Format("2006-01-02")
+	}
+	a := p.Address()
+	return &studentsv1.StudentProfile{
+		BirthDate: born,
+		Sex:       string(p.Sex()),
+		Email:     p.Email(),
+		Phones:    phones,
+		Address: &studentsv1.StudentAddress{
+			Street: a.Street, ExtNumber: a.ExtNumber, IntNumber: a.IntNumber,
+			Neighborhood: a.Neighborhood, PostalCode: a.PostalCode,
+			Municipality: a.Municipality, State: a.State,
+		},
 	}
 }
 
@@ -296,6 +429,7 @@ func toProtoGuardianLink(l domain.GuardianLink) *studentsv1.GuardianLink {
 		FullName:       l.FullName(),
 		Phone:          l.Phone(),
 		Email:          l.Email(),
+		IsEmergency:    l.IsEmergency(),
 	}
 }
 

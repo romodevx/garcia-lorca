@@ -85,6 +85,54 @@ func (r *Repository) ByID(ctx context.Context, id string) (domain.GuardianLink, 
 	return out, nil
 }
 
+// UpdateContact writes an edited contact: relationship, the person and the
+// emergency mark. The account column is never written here. A row the bound
+// tenant cannot see is KindNotFound.
+func (r *Repository) UpdateContact(ctx context.Context, l domain.GuardianLink) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Model(&guardianStudentModel{}).Where("id = ?", l.ID()).Updates(map[string]any{
+			"relationship": l.Relationship().String(),
+			"full_name":    l.FullName(),
+			"phone":        l.Phone(),
+			"email":        l.Email(),
+			"is_emergency": l.IsEmergency(),
+		})
+		if res.Error != nil {
+			return translateGuardianWriteErr(res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return glerrors.ErrNotFound
+		}
+		return nil
+	})
+}
+
+// RemoveContact deletes a contact that has no account. A row the bound tenant
+// cannot see is KindNotFound.
+//
+// `guardian_user_id IS NULL` rides in the WHERE for the same reason as in
+// AttachAccount: the service checked "no account" in an earlier transaction,
+// and access granted since then must not disappear with the phone number.
+func (r *Repository) RemoveContact(ctx context.Context, id string) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Where("id = ? AND guardian_user_id IS NULL", id).Delete(&guardianStudentModel{})
+		if res.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "removing contact", res.Error)
+		}
+		if res.RowsAffected == 1 {
+			return nil
+		}
+		var exists int64
+		if err := tx.Model(&guardianStudentModel{}).Where("id = ?", id).Count(&exists).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "reading contact", err)
+		}
+		if exists == 0 {
+			return glerrors.ErrNotFound
+		}
+		return glerrors.New(glerrors.KindConflict, "this contact can open the app: revoke its access first")
+	})
+}
+
 // AttachAccount sets the iam account on a contact that has none.
 //
 // The UPDATE is CONDITIONAL — `guardian_user_id IS NULL` rides in the WHERE, not

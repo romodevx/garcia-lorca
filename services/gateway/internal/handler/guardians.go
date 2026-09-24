@@ -12,7 +12,9 @@ import (
 // StudentsClient implements it.
 type GuardiansService interface {
 	LinkGuardian(ctx context.Context, guardianUserID, studentID, relationship string) (client.GuardianLink, error)
-	AddContact(ctx context.Context, studentID, relationship, fullName, phone, email string) (client.GuardianLink, error)
+	AddContact(ctx context.Context, in client.ContactInput) (client.GuardianLink, error)
+	UpdateContact(ctx context.Context, contactID string, in client.ContactInput) (client.GuardianLink, error)
+	RemoveContact(ctx context.Context, contactID, studentID string) error
 	UnlinkGuardian(ctx context.Context, guardianUserID, studentID string) error
 	ListGuardiansForStudent(ctx context.Context, studentID string) ([]client.GuardianLink, error)
 }
@@ -66,6 +68,8 @@ type guardianLinkResponse struct {
 	// HasAccount is what the screen actually asks: can this contact open the
 	// family app, or is it a phone number the office calls?
 	HasAccount bool `json:"hasAccount"`
+	// IsEmergency marks whom the office calls first.
+	IsEmergency bool `json:"isEmergency"`
 }
 
 func toGuardianLinkResponse(l client.GuardianLink) guardianLinkResponse {
@@ -79,6 +83,7 @@ func toGuardianLinkResponse(l client.GuardianLink) guardianLinkResponse {
 		Phone:          l.Phone,
 		Email:          l.Email,
 		HasAccount:     l.GuardianUserID != "",
+		IsEmergency:    l.IsEmergency,
 	}
 }
 
@@ -128,6 +133,7 @@ type contactRequest struct {
 	FullName     string `json:"fullName"`
 	Phone        string `json:"phone"`
 	Email        string `json:"email"`
+	IsEmergency  bool   `json:"isEmergency"`
 }
 
 // AddContact handles POST /api/v1/contacts — record somebody the school can
@@ -142,12 +148,45 @@ func (h *GuardiansHandler) AddContact(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	contact, err := h.svc.AddContact(r.Context(), req.StudentID, req.Relationship, req.FullName, req.Phone, req.Email)
+	contact, err := h.svc.AddContact(r.Context(), client.ContactInput{
+		StudentID: req.StudentID, Relationship: req.Relationship, FullName: req.FullName,
+		Phone: req.Phone, Email: req.Email, IsEmergency: req.IsEmergency,
+	})
 	if err != nil {
 		writeConnectError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, toGuardianLinkResponse(contact))
+}
+
+// UpdateContact handles PUT /api/v1/students/{studentId}/contacts/{contactId}.
+// The pupil is in the path and the service checks the contact belongs to it: a
+// contact of another pupil is 404, which never confirms it exists.
+func (h *GuardiansHandler) UpdateContact(w http.ResponseWriter, r *http.Request) {
+	var req contactRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	contact, err := h.svc.UpdateContact(r.Context(), r.PathValue("contactId"), client.ContactInput{
+		StudentID: r.PathValue("studentId"), Relationship: req.Relationship, FullName: req.FullName,
+		Phone: req.Phone, Email: req.Email, IsEmergency: req.IsEmergency,
+	})
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toGuardianLinkResponse(contact))
+}
+
+// RemoveContact handles DELETE /api/v1/students/{studentId}/contacts/{contactId}.
+// A contact that can open the app is refused (409): revoke its access first.
+func (h *GuardiansHandler) RemoveContact(w http.ResponseWriter, r *http.Request) {
+	if err := h.svc.RemoveContact(r.Context(), r.PathValue("contactId"), r.PathValue("studentId")); err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ListGuardiansForStudent handles GET /api/v1/students/{studentId}/guardians —

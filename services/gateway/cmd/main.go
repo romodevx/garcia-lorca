@@ -271,6 +271,24 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/students", guard.Protect("students", studentsCreate))
 	mux.Handle("GET /api/v1/students", studentsRead(studentsH.List))
 	mux.Handle("GET /api/v1/students/{id}", studentsRead(studentsH.Get))
+	// A pupil's medical record answers to its own permissions (task 5).
+	medicalH := handler.NewMedicalHandler(studentsClient)
+	mux.Handle("GET /api/v1/students/{id}/medical", guard.Protect("students", requireAuthChanged(
+		middleware.RequirePermission("medical:read")(http.HandlerFunc(medicalH.Get)))))
+	mux.Handle("PUT /api/v1/students/{id}/medical", guard.Protect("students", requireAuthChanged(
+		middleware.RequirePermission("medical:write")(http.HandlerFunc(medicalH.Put)))))
+	// A pupil's photo (task 5): the bucket is private, so these routes are the
+	// only way to the bytes. Reading needs students:read; changing it needs
+	// students:update.
+	photoH := handler.NewPhotoHandler(studentsClient)
+	mux.Handle("GET /api/v1/students/{id}/photo", studentsRead(photoH.Get))
+	mux.Handle("PUT /api/v1/students/{id}/photo", guard.Protect("students", requireAuthChanged(
+		middleware.RequirePermission("students:update")(http.HandlerFunc(photoH.Put)))))
+	mux.Handle("DELETE /api/v1/students/{id}/photo", guard.Protect("students", requireAuthChanged(
+		middleware.RequirePermission("students:update")(http.HandlerFunc(photoH.Delete)))))
+	// Correcting the file (task 5) needs students:update.
+	mux.Handle("PUT /api/v1/students/{id}", guard.Protect("students", requireAuthChanged(
+		middleware.RequirePermission("students:update")(http.HandlerFunc(studentsH.Update)))))
 
 	// M03 enrollments (Phase 4): place a student into a group of a cycle and
 	// transfer/withdraw them. Flag-guarded (module_students), authenticated +
@@ -303,6 +321,8 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	}
 	mux.Handle("POST /api/v1/guardians", guardiansWrite(guardiansH.LinkGuardian))
 	mux.Handle("POST /api/v1/contacts", guardiansWrite(guardiansH.AddContact))
+	mux.Handle("PUT /api/v1/students/{studentId}/contacts/{contactId}", guardiansWrite(guardiansH.UpdateContact))
+	mux.Handle("DELETE /api/v1/students/{studentId}/contacts/{contactId}", guardiansWrite(guardiansH.RemoveContact))
 	mux.Handle("POST /api/v1/guardians/unlink", guardiansWrite(guardiansH.UnlinkGuardian))
 	mux.Handle("GET /api/v1/students/{studentId}/guardians", guardiansRead(guardiansH.ListGuardiansForStudent))
 

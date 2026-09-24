@@ -140,6 +140,8 @@ locals {
     PUBSUB_PUSH_SA_EMAIL = google_service_account.pubsub_push.email
     CONFIG_BASE_URL      = module.config.uri
     IAM_BASE_URL         = module.iam.uri
+    # Pupils' photos (task 5): the private bucket in storage.tf.
+    PHOTOS_BUCKET = google_storage_bucket.student_photos.name
   })
 
   # finance became a CONSUMER as well as a publisher in M15: StudentEnrolled is

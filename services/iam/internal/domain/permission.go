@@ -49,6 +49,12 @@ var ownerOnlyPermissions = map[string]struct{}{
 	// is for. Its sibling uniforms:stock is deliberately absent and grantable:
 	// the storeroom works in garments, sizes and counts, and never needs a name.
 	"uniforms:orders": {},
+	// medical:read is every pupil's allergies and conditions, with no per-pupil
+	// scoping: health data, the most sensitive read the school holds. The owner
+	// decided teachers do not see it. medical:write rides along: writing the
+	// record is done from the page that shows it.
+	"medical:read":  {},
+	"medical:write": {},
 }
 
 // IsOwnerOnly reports whether raw is a tenant-wide sensitive read that only the

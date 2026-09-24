@@ -37,6 +37,8 @@ func (f fakeLevels) LevelByID(_ context.Context, id string) (domain.Level, error
 var testLevels = fakeLevels{"e1000000-0000-0000-0000-000000000001": "Primaria", "e1000000-0000-0000-0000-000000000003": "Secundaria"}
 
 type fakeRepo struct {
+	medical    domain.MedicalRecord
+	photo      *ports.PhotoRef
 	byID       map[string]*domain.Student
 	byCURP     map[string]bool
 	lastFilter ports.ListFilter
@@ -57,6 +59,37 @@ func (r *fakeRepo) Create(_ context.Context, s *domain.Student) error {
 }
 
 func (r *fakeRepo) Update(_ context.Context, s *domain.Student) error {
+	r.byID[s.ID()] = s
+	return nil
+}
+
+func (r *fakeRepo) PhotoRef(_ context.Context, _ string) (ports.PhotoRef, error) {
+	if r.photo == nil {
+		return ports.PhotoRef{}, glerrors.ErrNotFound
+	}
+	return *r.photo, nil
+}
+
+func (r *fakeRepo) SavePhotoRef(_ context.Context, _ string, ref ports.PhotoRef) error {
+	r.photo = &ref
+	return nil
+}
+
+func (r *fakeRepo) DeletePhotoRef(_ context.Context, _ string) error {
+	r.photo = nil
+	return nil
+}
+
+func (r *fakeRepo) GetMedical(_ context.Context, _ string) (domain.MedicalRecord, error) {
+	return r.medical, nil
+}
+
+func (r *fakeRepo) SaveMedical(_ context.Context, _ string, rec domain.MedicalRecord) error {
+	r.medical = rec
+	return nil
+}
+
+func (r *fakeRepo) UpdateDetails(_ context.Context, s *domain.Student) error {
 	r.byID[s.ID()] = s
 	return nil
 }
@@ -313,4 +346,106 @@ func assertCode(t *testing.T, err error, want connect.Code) {
 	if got := connect.CodeOf(err); got != want {
 		t.Errorf("code = %v, want %v (err=%v)", got, want, err)
 	}
+}
+
+// UpdateStudent carries the whole editable file in and out.
+func TestUpdateStudentRoundTripsTheProfile(t *testing.T) {
+	h, _ := newHandler(t)
+	createValid(t, h)
+	res, err := h.UpdateStudent(context.Background(), connect.NewRequest(&studentsv1.UpdateStudentRequest{
+		Id: "stu-1", FirstName: "Ana María", LastName: "Herrera", Curp: validCURP,
+		Profile: &studentsv1.StudentProfile{
+			BirthDate: "2019-03-12", Sex: "F", Email: "Ana@Correo.mx",
+			Phones:  []*studentsv1.StudentPhone{{Kind: "celular", Number: "55-1234-5678"}},
+			Address: &studentsv1.StudentAddress{Street: "Av. Juárez", PostalCode: "44100", State: "Jalisco"},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("UpdateStudent: %v", err)
+	}
+	p := res.Msg.GetStudent().GetProfile()
+	if res.Msg.GetStudent().GetFirstName() != "Ana María" || p.GetEmail() != "ana@correo.mx" || p.GetBirthDate() != "2019-03-12" {
+		t.Errorf("student = %+v", res.Msg.GetStudent())
+	}
+	if len(p.GetPhones()) != 1 || p.GetPhones()[0].GetNumber() != "5512345678" || p.GetAddress().GetState() != "Jalisco" {
+		t.Errorf("profile = %+v", p)
+	}
+}
+
+func TestUpdateStudentMalformedProfileIsInvalidArgument(t *testing.T) {
+	h, _ := newHandler(t)
+	createValid(t, h)
+	_, err := h.UpdateStudent(context.Background(), connect.NewRequest(&studentsv1.UpdateStudentRequest{
+		Id: "stu-1", FirstName: "Ana", LastName: "Herrera", Curp: validCURP,
+		Profile: &studentsv1.StudentProfile{Address: &studentsv1.StudentAddress{PostalCode: "4410"}},
+	}))
+	assertCode(t, err, connect.CodeInvalidArgument)
+}
+
+func TestStudentMedicalRoundTrips(t *testing.T) {
+	h, _ := newHandler(t)
+	createValid(t, h)
+	if _, err := h.UpdateStudentMedical(context.Background(), connect.NewRequest(&studentsv1.UpdateStudentMedicalRequest{
+		StudentId: "stu-1", Medical: &studentsv1.StudentMedical{BloodType: "O+", Allergies: "Penicilina"},
+	})); err != nil {
+		t.Fatalf("UpdateStudentMedical: %v", err)
+	}
+	res, err := h.GetStudentMedical(context.Background(), connect.NewRequest(&studentsv1.GetStudentMedicalRequest{StudentId: "stu-1"}))
+	if err != nil {
+		t.Fatalf("GetStudentMedical: %v", err)
+	}
+	if m := res.Msg.GetMedical(); m.GetBloodType() != "O+" || m.GetAllergies() != "Penicilina" {
+		t.Errorf("medical = %+v", m)
+	}
+}
+
+func TestStudentMedicalOffTheListIsInvalidArgument(t *testing.T) {
+	h, _ := newHandler(t)
+	createValid(t, h)
+	_, err := h.UpdateStudentMedical(context.Background(), connect.NewRequest(&studentsv1.UpdateStudentMedicalRequest{
+		StudentId: "stu-1", Medical: &studentsv1.StudentMedical{BloodType: "Z+"},
+	}))
+	assertCode(t, err, connect.CodeInvalidArgument)
+}
+
+// memPhotoStore is an in-memory object store.
+type memPhotoStore map[string][]byte
+
+func (m memPhotoStore) Put(_ context.Context, key, _ string, data []byte) error {
+	m[key] = data
+	return nil
+}
+func (m memPhotoStore) Get(_ context.Context, key string) ([]byte, error) {
+	d, ok := m[key]
+	if !ok {
+		return nil, glerrors.ErrNotFound
+	}
+	return d, nil
+}
+func (m memPhotoStore) Delete(_ context.Context, key string) error { delete(m, key); return nil }
+
+func TestStudentPhotoRoundTrips(t *testing.T) {
+	repo := newFakeRepo()
+	svc := usecase.NewStudentService(repo, &fakePublisher{}, testLevels, testTenant, func() string { return "stu-1" }).
+		WithPhotos(memPhotoStore{})
+	h := grpcadapter.NewStudentsHandler(svc, nil, nil, usecase.NewHealthService("students"))
+	createValid(t, h)
+
+	png := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n', 1}
+	up, err := h.UploadStudentPhoto(context.Background(), connect.NewRequest(&studentsv1.UploadStudentPhotoRequest{StudentId: "stu-1", Data: png}))
+	if err != nil || up.Msg.GetContentType() != "image/png" {
+		t.Fatalf("Upload = (%v, %v)", up, err)
+	}
+	got, err := h.GetStudentPhoto(context.Background(), connect.NewRequest(&studentsv1.GetStudentPhotoRequest{StudentId: "stu-1"}))
+	if err != nil || got.Msg.GetContentType() != "image/png" || len(got.Msg.GetData()) != len(png) {
+		t.Fatalf("Get = (%v, %v)", got, err)
+	}
+	if _, err := h.DeleteStudentPhoto(context.Background(), connect.NewRequest(&studentsv1.DeleteStudentPhotoRequest{StudentId: "stu-1"})); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	_, err = h.GetStudentPhoto(context.Background(), connect.NewRequest(&studentsv1.GetStudentPhotoRequest{StudentId: "stu-1"}))
+	assertCode(t, err, connect.CodeNotFound)
+
+	_, err = h.UploadStudentPhoto(context.Background(), connect.NewRequest(&studentsv1.UploadStudentPhotoRequest{StudentId: "stu-1", Data: []byte("%PDF")}))
+	assertCode(t, err, connect.CodeInvalidArgument)
 }

@@ -14,6 +14,7 @@ import { UniformsScreen } from "./_screens/uniforms/UniformsScreen";
 import { FinanceScreen } from "./_screens/finance/FinanceScreen";
 import { Catalog } from "./_screens/config/Catalog";
 import { AdminScreen } from "./_screens/admin/AdminScreen";
+import { StudentEditScreen } from "./_screens/students/StudentEditScreen";
 import { StudentsScreen } from "./_screens/students/StudentsScreen";
 import { GradesScreen } from "./_screens/grades/GradesScreen";
 import { Login } from "./_screens/Login";
@@ -403,6 +404,9 @@ export function AppShell(): ReactElement {
     onKeepAlive: () => { void apiRefresh(API_URL).catch(() => {}); },
   });
   const home = (): void => go({ screen: "dashboard" });
+  // UX only: the gateway refuses PUT /students/{id} without students:update.
+  const canEditStudents = principal?.permissions?.includes("students:update") === true;
+  const editStudent = (studentId: string): void => go({ screen: "studentEdit", studentId });
   const open = useCallback((id: string, _intent?: string): void => {
     if (id === "finance") {
       go({ screen: "finance" });
@@ -557,9 +561,17 @@ export function AppShell(): ReactElement {
           // navigation never dead-ends. (Backend 404 is authoritative.)
           <ModulePlaceholder m={MODULES.find((m) => m.id === "settings") as ModuleDef} onBack={home} />
         ))}
-      {view.screen === "students" &&
+      {view.screen === "studentEdit" && studentsEnabled && canEditStudents && (
+        <StudentEditScreen
+          key={view.studentId}
+          studentId={view.studentId}
+          permissions={principal?.permissions}
+          onBack={() => go({ screen: "students" })}
+        />
+      )}
+      {(view.screen === "students" || (view.screen === "studentEdit" && !(studentsEnabled && canEditStudents))) &&
         (studentsEnabled ? (
-          <StudentsScreen onBack={home} />
+          <StudentsScreen onBack={home} onEdit={canEditStudents ? editStudent : undefined} />
         ) : (
           // Flag OFF: never render the enrollment surface; show the friendly stub
           // so navigation never dead-ends. (Backend 404 is authoritative.)

@@ -1,10 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent, type ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
-import { EmailField, SelectField, TextField, useEmailShapeOnSave, useRequired } from "../../_design/form";
+import { EmailField, SelectField, TextField, useEmailShapeOnSave, useFormatError, useRequired } from "../../_design/form";
 import { Icon } from "../../_design/Icon";
-import { addContact, inviteContactToApp, listContacts, type Contact, type ContactAccessResult, type Relationship } from "../../students/api";
+import { UndoToast } from "../../_design/UndoToast";
+import { useUndoableRemoval } from "../../_design/useUndoableRemoval";
+import {
+  addContact,
+  inviteContactToApp,
+  listContacts,
+  removeContact,
+  updateContact,
+  type Contact,
+  type ContactAccessResult,
+  type ContactEdit,
+  type Relationship,
+} from "../../students/api";
+import { phoneDigits, phoneError } from "../../students/profileRules";
 import { API_URL } from "../../api-url";
 
 const RELATIONSHIPS: { value: Relationship; label: string }[] = [
@@ -32,6 +45,10 @@ export interface ContactsPanelProps {
  */
 /** Fuera del componente: useRequired lo toma como dependencia. */
 const CONTACT_REQUIRED = ["name"] as const;
+/** A contact with an account may go without a name (the server allows it). */
+const NOTHING_REQUIRED = [] as const;
+/** Fuera del componente: useFormatError lo toma como dependencia. */
+const PHONE_RULES = { phone: phoneError } as const;
 
 export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -39,6 +56,13 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [relationship, setRelationship] = useState<Relationship>("other");
+  const [emergency, setEmergency] = useState(false);
+  const phoneShape = useFormatError(PHONE_RULES);
+  const [editing, setEditing] = useState<string | undefined>(undefined);
+  const removal = useUndoableRemoval<Contact>();
+  // A reload inside the grace period must not bring a removed row back.
+  const pendingRemoval = useRef<readonly Contact[]>([]);
+  pendingRemoval.current = removal.pending;
   const [error, setError] = useState<string | undefined>(undefined);
   const form = useRequired(CONTACT_REQUIRED);
   // El correo puede quedar vacío, pero si se escribe tiene que tener forma de
@@ -53,7 +77,7 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
 
   const reload = useCallback(() => {
     listContacts(API_URL, studentId)
-      .then(setContacts)
+      .then((rows) => setContacts(rows.filter((r) => !pendingRemoval.current.some((p) => p.id === r.id))))
       .catch(() => setError("No pudimos leer los contactos."));
   }, [studentId]);
 
@@ -67,7 +91,8 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
     // Ambas revisiones corren siempre, para marcar a la vez todo lo que falla.
     const complete = form.check({ name });
     const shaped = emailShape.check(email);
-    if (!complete || !shaped) return;
+    const phoned = phoneShape.checkAll({ phone });
+    if (!complete || !shaped || !phoned) return;
     setSaving(true);
     setError(undefined);
     try {
@@ -75,18 +100,36 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
         studentId,
         relationship,
         fullName: name.trim(),
-        ...(phone.trim() !== "" ? { phone: phone.trim() } : {}),
+        ...(phone.trim() !== "" ? { phone: phoneDigits(phone) } : {}),
         ...(email.trim() !== "" ? { email: email.trim() } : {}),
+        ...(emergency ? { isEmergency: true } : {}),
       });
       setName("");
       setPhone("");
       setEmail("");
+      setEmergency(false);
       reload();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo agregar el contacto.");
     } finally {
       setSaving(false);
     }
+  };
+
+  const saveEdit = async (contact: Contact, edit: ContactEdit): Promise<void> => {
+    const saved = await updateContact(API_URL, studentId, contact.id, edit);
+    setContacts((prev) => prev.map((c) => (c.id === saved.id ? saved : c)));
+    setEditing(undefined);
+  };
+
+  const remove = (contact: Contact): void => {
+    setContacts((prev) => prev.filter((c) => c.id !== contact.id));
+    removal.remove(contact, () => {
+      removeContact(API_URL, studentId, contact.id).catch(() => {
+        setError(`No se pudo quitar a ${contact.fullName}. Vuelve a cargar la página.`);
+        reload();
+      });
+    });
   };
 
   const giveAccess = async (contact: Contact): Promise<void> => {
@@ -115,11 +158,13 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
           Todavía no hay contactos registrados.
         </p>
       )}
-      {contacts.map((c) => (
-        <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 0", borderBottom: "1px solid var(--border)" }}>
+      {contacts.map((c) => editing === c.id ? (
+        <ContactEditRow key={c.id} contact={c} onSave={(edit) => saveEdit(c, edit)} onCancel={() => setEditing(undefined)} />
+      ) : (
+        <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "11px 0", borderBottom: "1px solid var(--border)" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 14.5, fontWeight: 600, color: "var(--text)" }}>
-              {c.fullName !== "" ? c.fullName : "Cuenta vinculada"}
+              {displayName(c)}
             </div>
             <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
               {RELATIONSHIP_LABEL[c.relationship] ?? c.relationship}
@@ -127,6 +172,11 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
               {c.email !== "" && ` · ${c.email}`}
             </div>
           </div>
+          {c.isEmergency === true && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 99, background: "var(--warn-bg)", color: "var(--warn-fg)", fontSize: 12, fontWeight: 700 }}>
+              <Icon name="phone" size={13} stroke={2.6} />Emergencias
+            </span>
+          )}
           {c.hasAccount && (
             // The one thing the office needs to tell apart: who can see the app,
             // and who is only a number to call.
@@ -151,6 +201,12 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
             <span style={{ fontSize: 12.5, color: "var(--text-faint)" }}>
               Falta el correo para invitarle
             </span>
+          )}
+          <Btn kind="ghost" onClick={() => setEditing(c.id)} aria-label={`Editar a ${displayName(c)}`} style={ROW_ACTION}>Editar</Btn>
+          {!c.hasAccount && (
+            // A contact who can open the app is refused by the server (409):
+            // its access is revoked first. So the button is not offered.
+            <Btn kind="ghost" onClick={() => remove(c)} aria-label={`Quitar a ${displayName(c)}`} style={ROW_ACTION}>Quitar</Btn>
           )}
         </div>
       ))}
@@ -183,7 +239,17 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
           />
         </div>
         <div style={{ flex: "1 1 120px", minWidth: 0 }}>
-          <TextField label="Teléfono del contacto" value={phone} onChange={setPhone} help="El número al que se marca, a diez dígitos." />
+          <TextField
+            label="Teléfono del contacto"
+            value={phone}
+            onChange={(v) => {
+              setPhone(v);
+              phoneShape.onChange("phone", v, {});
+            }}
+            onBlur={() => phoneShape.onBlur("phone", phone, {})}
+            error={phoneShape.errors.phone}
+            help="El número al que se marca, a diez dígitos."
+          />
         </div>
         <div style={{ flex: "1 1 150px", minWidth: 0 }}>
           <EmailField
@@ -205,10 +271,132 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
             options={RELATIONSHIPS.map((r) => ({ value: r.value, label: r.label }))}
           />
         </div>
+        <EmergencyCheck label="Contacto de emergencia" checked={emergency} onChange={setEmergency} />
         <Btn type="submit" icon="plus" style={{ opacity: saving ? 0.5 : 1 }}>Agregar</Btn>
       </form>
       {error !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 13.5, margin: "10px 0 0" }}>{error}</p>}
+      {removal.latest !== undefined && (
+        <UndoToast
+          message={`Se quitó a ${removal.latest.fullName}`}
+          onUndo={() => {
+            const back = removal.undo() ?? [];
+            setContacts((prev) => [...prev, ...back]);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function displayName(c: Contact): string {
+  return c.fullName !== "" ? c.fullName : "Cuenta vinculada";
+}
+
+const ROW_ACTION = { height: 36, padding: "0 12px", fontSize: 13.5 } as const;
+
+function EmergencyCheck({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }): ReactElement {
+  return (
+    <label style={{ display: "inline-flex", alignItems: "center", gap: 8, minHeight: 44, fontSize: 14, color: "var(--text)", cursor: "pointer" }}>
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} aria-label={label} style={{ width: 20, height: 20, accentColor: "var(--forest)" }} />
+      De emergencia
+    </label>
+  );
+}
+
+/**
+ * One contact, corrected where it sits: four fields and a mark do not earn a
+ * dialog. Nothing is sent until "Guardar contacto".
+ */
+function ContactEditRow({
+  contact,
+  onSave,
+  onCancel,
+}: {
+  contact: Contact;
+  onSave: (edit: ContactEdit) => Promise<void>;
+  onCancel: () => void;
+}): ReactElement {
+  const who = displayName(contact);
+  const [name, setName] = useState(contact.fullName);
+  const [phone, setPhone] = useState(contact.phone);
+  const [email, setEmail] = useState(contact.email);
+  const [relationship, setRelationship] = useState<Relationship>(contact.relationship);
+  const [emergency, setEmergency] = useState(contact.isEmergency === true);
+  const form = useRequired(contact.hasAccount ? NOTHING_REQUIRED : CONTACT_REQUIRED);
+  const emailShape = useEmailShapeOnSave();
+  const phoneShape = useFormatError(PHONE_RULES);
+  const [saving, setSaving] = useState(false);
+  const [failure, setFailure] = useState<string | undefined>(undefined);
+
+  const save = async (e: FormEvent): Promise<void> => {
+    e.preventDefault();
+    const complete = form.check({ name });
+    const shaped = emailShape.check(email);
+    const phoned = phoneShape.checkAll({ phone });
+    if (!complete || !shaped || !phoned || saving) return;
+    setSaving(true);
+    setFailure(undefined);
+    try {
+      await onSave({
+        relationship,
+        fullName: name.trim(),
+        phone: phone.trim() === "" ? "" : phoneDigits(phone),
+        email: email.trim(),
+        isEmergency: emergency,
+      });
+    } catch (cause) {
+      setFailure(cause instanceof Error ? cause.message : "No se pudo guardar el contacto.");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form
+      onSubmit={(e) => void save(e)}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onCancel();
+      }}
+      style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", padding: "11px 0", borderBottom: "1px solid var(--border)" }}
+    >
+      <div style={{ flex: "2 1 150px", minWidth: 0 }}>
+        <TextField label={`Nombre de ${who}`} value={name} onChange={setName} uppercase required={!contact.hasAccount} error={form.errors.name} onClearError={() => form.clear("name")} />
+      </div>
+      <div style={{ flex: "1 1 120px", minWidth: 0 }}>
+        <TextField
+          label={`Teléfono de ${who}`}
+          value={phone}
+          onChange={(v) => {
+            setPhone(v);
+            phoneShape.onChange("phone", v, {});
+          }}
+          onBlur={() => phoneShape.onBlur("phone", phone, {})}
+          error={phoneShape.errors.phone}
+        />
+      </div>
+      <div style={{ flex: "1 1 150px", minWidth: 0 }}>
+        <EmailField
+          label={`Correo de ${who}`}
+          value={email}
+          onChange={(v) => {
+            setEmail(v);
+            emailShape.forgive(v);
+          }}
+          error={emailShape.error}
+        />
+      </div>
+      <div style={{ flex: "1 1 110px", minWidth: 0 }}>
+        <SelectField
+          label={`Parentesco de ${who}`}
+          value={relationship}
+          onChange={(v) => setRelationship(v as Relationship)}
+          options={RELATIONSHIPS.map((r) => ({ value: r.value, label: r.label }))}
+        />
+      </div>
+      <EmergencyCheck label={`Contacto de emergencia de ${who}`} checked={emergency} onChange={setEmergency} />
+      <Btn type="submit" icon="check" style={{ opacity: saving ? 0.5 : 1 }}>Guardar contacto</Btn>
+      <Btn kind="ghost" onClick={onCancel}>Cancelar</Btn>
+      {failure !== undefined && <p role="alert" style={{ flexBasis: "100%", color: "var(--bad-fg)", fontSize: 13.5, margin: 0 }}>{failure}</p>}
+    </form>
   );
 }
 

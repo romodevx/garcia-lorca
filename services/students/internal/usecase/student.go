@@ -2,7 +2,9 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -25,13 +27,166 @@ type StudentService struct {
 	levels ports.LevelCatalog
 	tenant string
 	newID  func() string
+	now    func() time.Time
+	photos ports.PhotoStore
 }
 
 // NewStudentService wires the use case. `levels` is config's level catalog;
 // `tenant` is the single-tenant scope for M03; `newID` mints student ids
 // (injectable for deterministic tests).
 func NewStudentService(repo ports.StudentRepository, pub ports.EventPublisher, levels ports.LevelCatalog, tenant string, newID func() string) *StudentService {
-	return &StudentService{repo: repo, pub: pub, levels: levels, tenant: tenant, newID: newID}
+	return &StudentService{repo: repo, pub: pub, levels: levels, tenant: tenant, newID: newID, now: time.Now}
+}
+
+// WithClock returns the service reading the school's date from `now`
+// (deterministic tests; the default is time.Now).
+func (s *StudentService) WithClock(now func() time.Time) *StudentService {
+	cp := *s
+	cp.now = now
+	return &cp
+}
+
+// GetMedical returns a pupil's medical record. Callers reach it under
+// medical:read (the gateway), not students:read.
+func (s *StudentService) GetMedical(ctx context.Context, studentID string) (domain.MedicalRecord, error) {
+	if _, err := s.repo.FindByID(ctx, studentID); err != nil {
+		return domain.MedicalRecord{}, err
+	}
+	return s.repo.GetMedical(ctx, studentID)
+}
+
+// UpdateMedical validates and saves a pupil's medical record.
+func (s *StudentService) UpdateMedical(ctx context.Context, studentID, bloodType, allergies, conditions string) (domain.MedicalRecord, error) {
+	if _, err := s.repo.FindByID(ctx, studentID); err != nil {
+		return domain.MedicalRecord{}, err
+	}
+	rec, err := domain.NewMedicalRecord(bloodType, allergies, conditions)
+	if err != nil {
+		return domain.MedicalRecord{}, err
+	}
+	if err := s.repo.SaveMedical(ctx, studentID, rec); err != nil {
+		return domain.MedicalRecord{}, err
+	}
+	return rec, nil
+}
+
+// WithPhotos returns the service keeping photos in `store`. Without it, photo
+// calls answer KindNotFound: a deployment with no bucket has no photos, and
+// still serves the rest of the file.
+func (s *StudentService) WithPhotos(store ports.PhotoStore) *StudentService {
+	cp := *s
+	cp.photos = store
+	return &cp
+}
+
+var errPhotosUnavailable = glerrors.New(glerrors.KindNotFound, "photos are not enabled")
+
+// UploadPhoto stores a pupil's photo (JPEG/PNG by its bytes, at most 2 MB) and
+// replaces any previous one, deleting its object. The object key names the
+// tenant and the pupil's id and a random suffix — no personal data.
+func (s *StudentService) UploadPhoto(ctx context.Context, studentID string, data []byte) (ports.PhotoRef, error) {
+	if s.photos == nil {
+		return ports.PhotoRef{}, errPhotosUnavailable
+	}
+	if _, err := s.repo.FindByID(ctx, studentID); err != nil {
+		return ports.PhotoRef{}, err
+	}
+	photo, err := domain.NewPhoto(data)
+	if err != nil {
+		return ports.PhotoRef{}, err
+	}
+	previous, err := s.repo.PhotoRef(ctx, studentID)
+	if err != nil && glerrors.KindOf(err) != glerrors.KindNotFound {
+		return ports.PhotoRef{}, err
+	}
+	ref := ports.PhotoRef{
+		Key:         s.tenant + "/students/" + studentID + "/" + s.newID(),
+		ContentType: photo.ContentType(),
+		Size:        len(photo.Data()),
+	}
+	if err := s.photos.Put(ctx, ref.Key, ref.ContentType, photo.Data()); err != nil {
+		return ports.PhotoRef{}, err
+	}
+	if err := s.repo.SavePhotoRef(ctx, studentID, ref); err != nil {
+		// Nothing points at the new object: remove it rather than let it
+		// accumulate, and report both failures.
+		return ports.PhotoRef{}, errors.Join(err, s.photos.Delete(ctx, ref.Key))
+	}
+	if previous.Key != "" && previous.Key != ref.Key {
+		// Best-effort cleanup, deliberately not an error: the new photo is
+		// already stored and referenced, so the upload HAS succeeded, and
+		// reporting a failure would tell the office it was not saved. A failed
+		// delete leaves an unreferenced object that nothing sweeps by itself;
+		// the store logs its key (no personal data) so it can be removed.
+		_ = s.photos.Delete(ctx, previous.Key)
+	}
+	return ref, nil
+}
+
+// Photo returns a pupil's photo, or KindNotFound when there is none.
+func (s *StudentService) Photo(ctx context.Context, studentID string) (domain.Photo, error) {
+	if s.photos == nil {
+		return domain.Photo{}, errPhotosUnavailable
+	}
+	ref, err := s.repo.PhotoRef(ctx, studentID)
+	if err != nil {
+		return domain.Photo{}, err
+	}
+	data, err := s.photos.Get(ctx, ref.Key)
+	if err != nil {
+		return domain.Photo{}, err
+	}
+	return domain.NewPhoto(data)
+}
+
+// DeletePhoto removes a pupil's photo: the reference first, so the file never
+// points at a missing object, then the object.
+func (s *StudentService) DeletePhoto(ctx context.Context, studentID string) error {
+	if s.photos == nil {
+		return errPhotosUnavailable
+	}
+	ref, err := s.repo.PhotoRef(ctx, studentID)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.DeletePhotoRef(ctx, studentID); err != nil {
+		return err
+	}
+	return s.photos.Delete(ctx, ref.Key)
+}
+
+// UpdateDetailsInput is a correction of a pupil's file as captured: names, CURP
+// and the profile. Level and group are not here: a group changes by transfer.
+type UpdateDetailsInput struct {
+	ID        string
+	FirstName string
+	LastName  string
+	CURP      string
+	Profile   domain.ProfileInput
+}
+
+// UpdateDetails validates and persists a correction of the pupil's file. A CURP
+// another pupil already holds is KindConflict.
+func (s *StudentService) UpdateDetails(ctx context.Context, in UpdateDetailsInput) (*domain.Student, error) {
+	student, err := s.repo.FindByID(ctx, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	curp, err := domain.NewCURP(in.CURP)
+	if err != nil {
+		return nil, err
+	}
+	profile, err := domain.NewProfile(in.Profile, s.now())
+	if err != nil {
+		return nil, err
+	}
+	if err := student.UpdateDetails(in.FirstName, in.LastName, curp, profile); err != nil {
+		return nil, err
+	}
+	if err := s.repo.UpdateDetails(ctx, student); err != nil {
+		return nil, err
+	}
+	return student, nil
 }
 
 // CreateApplicantInput is the raw input for a new applicant. CURP is validated

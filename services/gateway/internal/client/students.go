@@ -43,6 +43,42 @@ type StudentResult struct {
 	GradeGroup      string
 	GuardianName    string
 	AdmissionStatus string
+	Profile         StudentProfile
+}
+
+// StudentProfile is the editable half of a pupil's file, as the edge speaks it.
+type StudentProfile struct {
+	BirthDate string         `json:"birthDate"`
+	Sex       string         `json:"sex"`
+	Email     string         `json:"email"`
+	Phones    []StudentPhone `json:"phones"`
+	Address   StudentAddress `json:"address"`
+}
+
+// StudentPhone is one of the pupil's numbers.
+type StudentPhone struct {
+	Kind   string `json:"kind"`
+	Number string `json:"number"`
+}
+
+// StudentAddress is where the pupil lives.
+type StudentAddress struct {
+	Street       string `json:"street"`
+	ExtNumber    string `json:"extNumber"`
+	IntNumber    string `json:"intNumber"`
+	Neighborhood string `json:"neighborhood"`
+	PostalCode   string `json:"postalCode"`
+	Municipality string `json:"municipality"`
+	State        string `json:"state"`
+}
+
+// UpdateStudentInput is a correction of a pupil's file.
+type UpdateStudentInput struct {
+	ID        string
+	FirstName string
+	LastName  string
+	CURP      string
+	Profile   StudentProfile
 }
 
 // Enrollment is the edge's view of a student's placement in a group of a cycle,
@@ -244,6 +280,17 @@ type GuardianLink struct {
 	FullName       string
 	Phone          string
 	Email          string
+	IsEmergency    bool
+}
+
+// ContactInput is a contact as the office typed it.
+type ContactInput struct {
+	StudentID    string
+	Relationship string
+	FullName     string
+	Phone        string
+	Email        string
+	IsEmergency  bool
 }
 
 // LinkGuardian links a guardian (an iam user) to a student. Connect error codes
@@ -266,18 +313,44 @@ func (c *StudentsClient) LinkGuardian(ctx context.Context, guardianUserID, stude
 
 // AddContact records somebody the school can reach about a pupil, with no
 // account and no login.
-func (c *StudentsClient) AddContact(ctx context.Context, studentID, relationship, fullName, phone, email string) (GuardianLink, error) {
+func (c *StudentsClient) AddContact(ctx context.Context, in ContactInput) (GuardianLink, error) {
 	res, err := c.rpc.AddContact(ctx, connect.NewRequest(&studentsv1.AddContactRequest{
-		StudentId:    studentID,
-		Relationship: relationship,
-		FullName:     fullName,
-		Phone:        phone,
-		Email:        email,
+		StudentId:    in.StudentID,
+		Relationship: in.Relationship,
+		FullName:     in.FullName,
+		Phone:        in.Phone,
+		Email:        in.Email,
+		IsEmergency:  in.IsEmergency,
 	}))
 	if err != nil {
 		return GuardianLink{}, err
 	}
 	return toGuardianLink(res.Msg.GetContact()), nil
+}
+
+// UpdateContact corrects a contact of a pupil (in.StudentID scopes it).
+func (c *StudentsClient) UpdateContact(ctx context.Context, contactID string, in ContactInput) (GuardianLink, error) {
+	res, err := c.rpc.UpdateContact(ctx, connect.NewRequest(&studentsv1.UpdateContactRequest{
+		ContactId:    contactID,
+		StudentId:    in.StudentID,
+		Relationship: in.Relationship,
+		FullName:     in.FullName,
+		Phone:        in.Phone,
+		Email:        in.Email,
+		IsEmergency:  in.IsEmergency,
+	}))
+	if err != nil {
+		return GuardianLink{}, err
+	}
+	return toGuardianLink(res.Msg.GetContact()), nil
+}
+
+// RemoveContact deletes a contact of a pupil that has no app access.
+func (c *StudentsClient) RemoveContact(ctx context.Context, contactID, studentID string) error {
+	_, err := c.rpc.RemoveContact(ctx, connect.NewRequest(&studentsv1.RemoveContactRequest{
+		ContactId: contactID, StudentId: studentID,
+	}))
+	return err
 }
 
 // GrantContactAccess attaches an iam account to a contact the pupil already has,
@@ -350,6 +423,7 @@ func toGuardianLink(l *studentsv1.GuardianLink) GuardianLink {
 		FullName:       l.GetFullName(),
 		Phone:          l.GetPhone(),
 		Email:          l.GetEmail(),
+		IsEmergency:    l.GetIsEmergency(),
 	}
 }
 
@@ -376,7 +450,110 @@ func toStudentResult(s *studentsv1.Student) StudentResult {
 		GradeGroup:      s.GetGradeGroup(),
 		GuardianName:    s.GetGuardianName(),
 		AdmissionStatus: admissionName(s.GetAdmissionStatus()),
+		Profile:         fromProtoProfile(s.GetProfile()),
 	}
+}
+
+func fromProtoProfile(p *studentsv1.StudentProfile) StudentProfile {
+	phones := make([]StudentPhone, 0, len(p.GetPhones()))
+	for _, ph := range p.GetPhones() {
+		phones = append(phones, StudentPhone{Kind: ph.GetKind(), Number: ph.GetNumber()})
+	}
+	a := p.GetAddress()
+	return StudentProfile{
+		BirthDate: p.GetBirthDate(), Sex: p.GetSex(), Email: p.GetEmail(), Phones: phones,
+		Address: StudentAddress{
+			Street: a.GetStreet(), ExtNumber: a.GetExtNumber(), IntNumber: a.GetIntNumber(),
+			Neighborhood: a.GetNeighborhood(), PostalCode: a.GetPostalCode(),
+			Municipality: a.GetMunicipality(), State: a.GetState(),
+		},
+	}
+}
+
+func toProtoProfile(p StudentProfile) *studentsv1.StudentProfile {
+	phones := make([]*studentsv1.StudentPhone, 0, len(p.Phones))
+	for _, ph := range p.Phones {
+		phones = append(phones, &studentsv1.StudentPhone{Kind: ph.Kind, Number: ph.Number})
+	}
+	a := p.Address
+	return &studentsv1.StudentProfile{
+		BirthDate: p.BirthDate, Sex: p.Sex, Email: p.Email, Phones: phones,
+		Address: &studentsv1.StudentAddress{
+			Street: a.Street, ExtNumber: a.ExtNumber, IntNumber: a.IntNumber,
+			Neighborhood: a.Neighborhood, PostalCode: a.PostalCode,
+			Municipality: a.Municipality, State: a.State,
+		},
+	}
+}
+
+// StudentMedical is a pupil's medical record, as the edge speaks it.
+type StudentMedical struct {
+	BloodType  string `json:"bloodType"`
+	Allergies  string `json:"allergies"`
+	Conditions string `json:"conditions"`
+}
+
+// GetStudentMedical reads a pupil's medical record.
+func (c *StudentsClient) GetStudentMedical(ctx context.Context, studentID string) (StudentMedical, error) {
+	res, err := c.rpc.GetStudentMedical(ctx, connect.NewRequest(&studentsv1.GetStudentMedicalRequest{StudentId: studentID}))
+	if err != nil {
+		return StudentMedical{}, err
+	}
+	return fromProtoMedical(res.Msg.GetMedical()), nil
+}
+
+// UpdateStudentMedical saves a pupil's medical record.
+func (c *StudentsClient) UpdateStudentMedical(ctx context.Context, studentID string, rec StudentMedical) (StudentMedical, error) {
+	res, err := c.rpc.UpdateStudentMedical(ctx, connect.NewRequest(&studentsv1.UpdateStudentMedicalRequest{
+		StudentId: studentID,
+		Medical:   &studentsv1.StudentMedical{BloodType: rec.BloodType, Allergies: rec.Allergies, Conditions: rec.Conditions},
+	}))
+	if err != nil {
+		return StudentMedical{}, err
+	}
+	return fromProtoMedical(res.Msg.GetMedical()), nil
+}
+
+func fromProtoMedical(m *studentsv1.StudentMedical) StudentMedical {
+	return StudentMedical{BloodType: m.GetBloodType(), Allergies: m.GetAllergies(), Conditions: m.GetConditions()}
+}
+
+// UploadStudentPhoto stores (or replaces) a pupil's photo; the service decides
+// its type from its bytes.
+func (c *StudentsClient) UploadStudentPhoto(ctx context.Context, studentID string, data []byte) (string, error) {
+	res, err := c.rpc.UploadStudentPhoto(ctx, connect.NewRequest(&studentsv1.UploadStudentPhotoRequest{StudentId: studentID, Data: data}))
+	if err != nil {
+		return "", err
+	}
+	return res.Msg.GetContentType(), nil
+}
+
+// GetStudentPhoto returns a pupil's photo and its content type.
+func (c *StudentsClient) GetStudentPhoto(ctx context.Context, studentID string) ([]byte, string, error) {
+	res, err := c.rpc.GetStudentPhoto(ctx, connect.NewRequest(&studentsv1.GetStudentPhotoRequest{StudentId: studentID}))
+	if err != nil {
+		return nil, "", err
+	}
+	return res.Msg.GetData(), res.Msg.GetContentType(), nil
+}
+
+// DeleteStudentPhoto removes a pupil's photo.
+func (c *StudentsClient) DeleteStudentPhoto(ctx context.Context, studentID string) error {
+	_, err := c.rpc.DeleteStudentPhoto(ctx, connect.NewRequest(&studentsv1.DeleteStudentPhotoRequest{StudentId: studentID}))
+	return err
+}
+
+// UpdateStudent corrects a pupil's file. InvalidArgument (a malformed field)
+// and AlreadyExists (a CURP another pupil holds) propagate for the handler.
+func (c *StudentsClient) UpdateStudent(ctx context.Context, in UpdateStudentInput) (StudentResult, error) {
+	res, err := c.rpc.UpdateStudent(ctx, connect.NewRequest(&studentsv1.UpdateStudentRequest{
+		Id: in.ID, FirstName: in.FirstName, LastName: in.LastName, Curp: in.CURP,
+		Profile: toProtoProfile(in.Profile),
+	}))
+	if err != nil {
+		return StudentResult{}, err
+	}
+	return toStudentResult(res.Msg.GetStudent()), nil
 }
 
 var admissionNames = map[studentsv1.AdmissionStatus]string{

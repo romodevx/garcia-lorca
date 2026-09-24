@@ -1,7 +1,9 @@
 package postgres
 
 import (
+	"encoding/json"
 	"strings"
+	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/students/internal/domain"
@@ -27,6 +29,10 @@ func toDomain(m studentModel) (*domain.Student, error) {
 	if err != nil {
 		return nil, glerrors.Wrap(glerrors.KindInternal, "unknown admission status in db", err)
 	}
+	profile, err := profileFromRow(m)
+	if err != nil {
+		return nil, err
+	}
 	return domain.Rehydrate(domain.NewApplicantParams{
 		ID:           m.ID,
 		TenantID:     m.TenantID,
@@ -36,7 +42,61 @@ func toDomain(m studentModel) (*domain.Student, error) {
 		Level:        level,
 		GradeGroup:   m.GradeGroup,
 		GuardianName: m.GuardianName,
+		Profile:      profile,
 	}, status), nil
+}
+
+// phoneRow is one element of the `phones` JSON array.
+type phoneRow struct {
+	Kind   string `json:"kind"`
+	Number string `json:"number"`
+}
+
+// profileFromRow restores the file's editable half without re-judging it.
+func profileFromRow(m studentModel) (domain.Profile, error) {
+	var rows []phoneRow
+	if m.Phones != "" {
+		if err := json.Unmarshal([]byte(m.Phones), &rows); err != nil {
+			return domain.Profile{}, glerrors.Wrap(glerrors.KindInternal, "unreadable phones in db", err)
+		}
+	}
+	phones := make([]domain.Phone, 0, len(rows))
+	for _, r := range rows {
+		phones = append(phones, domain.Phone{Kind: domain.PhoneKind(r.Kind), Number: r.Number})
+	}
+	var born time.Time
+	if m.BirthDate != nil {
+		born = *m.BirthDate
+	}
+	return domain.RestoreProfile(born, domain.Sex(m.Sex), m.Email, phones, domain.Address{
+		Street: m.AddressStreet, ExtNumber: m.AddressExtNumber, IntNumber: m.AddressIntNumber,
+		Neighborhood: m.AddressNeighborhood, PostalCode: m.AddressPostalCode,
+		Municipality: m.AddressMunicipality, State: m.AddressState,
+	}), nil
+}
+
+// profileColumns projects a profile onto its columns, for insert and update.
+func profileColumns(p domain.Profile) (map[string]any, error) {
+	rows := make([]phoneRow, 0, len(p.Phones()))
+	for _, ph := range p.Phones() {
+		rows = append(rows, phoneRow{Kind: string(ph.Kind), Number: ph.Number})
+	}
+	phones, err := json.Marshal(rows)
+	if err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "encoding phones", err)
+	}
+	var born *time.Time
+	if !p.BirthDate().IsZero() {
+		b := p.BirthDate()
+		born = &b
+	}
+	a := p.Address()
+	return map[string]any{
+		"birth_date": born, "sex": string(p.Sex()), "email": p.Email(), "phones": string(phones),
+		"address_street": a.Street, "address_ext_number": a.ExtNumber, "address_int_number": a.IntNumber,
+		"address_neighborhood": a.Neighborhood, "address_postal_code": a.PostalCode,
+		"address_municipality": a.Municipality, "address_state": a.State,
+	}, nil
 }
 
 // fromDomain projects a domain Student into its GORM row (for insert/update).
@@ -52,6 +112,7 @@ func fromDomain(s *domain.Student) studentModel {
 		GradeGroup:      s.GradeGroup(),
 		GuardianName:    s.GuardianName(),
 		AdmissionStatus: s.Status().String(),
+		Phones:          "[]",
 	}
 }
 
@@ -98,7 +159,7 @@ func guardianLinkToDomain(m guardianStudentModel) (domain.GuardianLink, error) {
 	if err != nil {
 		return domain.GuardianLink{}, glerrors.Wrap(glerrors.KindInternal, "unknown relationship in db", err)
 	}
-	person := domain.ContactPerson{FullName: m.FullName, Phone: m.Phone, Email: m.Email}
+	person := domain.ContactPerson{FullName: m.FullName, Phone: m.Phone, Email: m.Email, Emergency: m.IsEmergency}
 	if m.GuardianUserID == nil || *m.GuardianUserID == "" {
 		return domain.RestoreContact(m.ID, m.TenantID, m.StudentID, rel, person)
 	}
@@ -119,6 +180,7 @@ func guardianLinkFromDomain(l domain.GuardianLink) guardianStudentModel {
 		FullName:     l.FullName(),
 		Phone:        l.Phone(),
 		Email:        l.Email(),
+		IsEmergency:  l.IsEmergency(),
 	}
 	if l.HasAccount() {
 		userID := l.GuardianUserID()

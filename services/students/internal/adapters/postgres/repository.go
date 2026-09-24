@@ -78,6 +78,36 @@ func (r *Repository) Update(ctx context.Context, s *domain.Student) error {
 	})
 }
 
+// UpdateDetails persists a correction of the file: names, CURP and profile. A
+// CURP another pupil holds is KindConflict (the (tenant, curp) UNIQUE).
+func (r *Repository) UpdateDetails(ctx context.Context, s *domain.Student) error {
+	cols, err := profileColumns(s.Profile())
+	if err != nil {
+		return err
+	}
+	cols["first_name"] = s.FirstName()
+	cols["last_name"] = s.LastName()
+	cols["curp"] = s.CURP().String()
+	cols["updated_at"] = gorm.Expr("now()")
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Model(&studentModel{}).Where("id = ?", s.ID()).Updates(cols)
+		if res.Error != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(res.Error, &pgErr) && pgErr.Code == uniqueViolation {
+				return glerrors.Wrap(glerrors.KindConflict, "a student with this CURP already exists", res.Error)
+			}
+			if errors.As(res.Error, &pgErr) && pgErr.Code == checkViolation {
+				return glerrors.Wrap(glerrors.KindInvalid, "a value is not allowed", res.Error)
+			}
+			return glerrors.Wrap(glerrors.KindInternal, "updating student details", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return glerrors.ErrNotFound
+		}
+		return nil
+	})
+}
+
 // FindByID returns a student or KindNotFound.
 func (r *Repository) FindByID(ctx context.Context, id string) (*domain.Student, error) {
 	var out *domain.Student

@@ -65,6 +65,15 @@ services:
     networks: [gl]
     restart: unless-stopped
 
+  # Pupils' photos (task 5): the GCS emulator, so the students service talks to
+  # the same client API it uses against the real private bucket. In-memory: a
+  # restart empties it, which is fine for local work.
+  fake-gcs:
+    image: fsouza/fake-gcs-server:1.52.2
+    command: ["-scheme", "http", "-port", "4443"]
+    networks: [gl]
+    restart: unless-stopped
+
   pubsub:
     image: google/cloud-sdk:emulators
     command: >
@@ -187,6 +196,9 @@ services:
       # Guardian links validate the guardian user (existence + role) against iam
       # by RPC — server-to-server, network-private.
       IAM_BASE_URL: "http://iam:8080"
+      # Pupils' photos: a private bucket, the emulator locally.
+      PHOTOS_BUCKET: "garcia-lorca-student-photos-local"
+      STORAGE_EMULATOR_HOST: "http://fake-gcs:4443"
     ports: ["8092:8080"]
     depends_on:
       postgres:
@@ -199,6 +211,8 @@ services:
         condition: service_started
       # student-events publishing needs the emulator reachable.
       pubsub:
+        condition: service_started
+      fake-gcs:
         condition: service_started
 
   config:

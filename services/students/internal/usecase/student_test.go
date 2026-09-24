@@ -2,7 +2,9 @@ package usecase_test
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/students/internal/domain"
@@ -15,6 +17,8 @@ const tenant = "t1"
 // --- fakes -----------------------------------------------------------------
 
 type fakeRepo struct {
+	medical   map[string]domain.MedicalRecord
+	photos    map[string]ports.PhotoRef
 	byID      map[string]*domain.Student
 	curps     map[string]bool // tenant+curp seen (for dup detection)
 	created   []*domain.Student
@@ -24,7 +28,7 @@ type fakeRepo struct {
 }
 
 func newRepo() *fakeRepo {
-	return &fakeRepo{byID: map[string]*domain.Student{}, curps: map[string]bool{}}
+	return &fakeRepo{byID: map[string]*domain.Student{}, curps: map[string]bool{}, medical: map[string]domain.MedicalRecord{}, photos: map[string]ports.PhotoRef{}}
 }
 
 func (r *fakeRepo) Create(_ context.Context, s *domain.Student) error {
@@ -47,6 +51,42 @@ func (r *fakeRepo) Update(_ context.Context, s *domain.Student) error {
 	}
 	r.byID[s.ID()] = s
 	r.updated = append(r.updated, s)
+	return nil
+}
+
+func (r *fakeRepo) UpdateDetails(_ context.Context, s *domain.Student) error {
+	if r.updateErr != nil {
+		return r.updateErr
+	}
+	r.byID[s.ID()] = s
+	r.updated = append(r.updated, s)
+	return nil
+}
+
+func (r *fakeRepo) PhotoRef(_ context.Context, id string) (ports.PhotoRef, error) {
+	ref, ok := r.photos[id]
+	if !ok {
+		return ports.PhotoRef{}, glerrors.ErrNotFound
+	}
+	return ref, nil
+}
+
+func (r *fakeRepo) SavePhotoRef(_ context.Context, id string, ref ports.PhotoRef) error {
+	r.photos[id] = ref
+	return nil
+}
+
+func (r *fakeRepo) DeletePhotoRef(_ context.Context, id string) error {
+	delete(r.photos, id)
+	return nil
+}
+
+func (r *fakeRepo) GetMedical(_ context.Context, id string) (domain.MedicalRecord, error) {
+	return r.medical[id], nil
+}
+
+func (r *fakeRepo) SaveMedical(_ context.Context, id string, rec domain.MedicalRecord) error {
+	r.medical[id] = rec
 	return nil
 }
 
@@ -332,5 +372,197 @@ func TestListStudentsMalformedLevelFilterIsInvalid(t *testing.T) {
 	svc, _, _ := newService(t)
 	if _, _, err := svc.ListStudents(context.Background(), ports.ListFilter{LevelID: "kinder"}); glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("want KindInvalid, got %v", err)
+	}
+}
+
+// --- UpdateDetails -----------------------------------------------------------
+
+var schoolToday = time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC)
+
+func TestUpdateDetailsCorrectsTheFile(t *testing.T) {
+	svc, repo, _ := newService(t)
+	svc = svc.WithClock(func() time.Time { return schoolToday })
+	created, err := svc.CreateApplicant(context.Background(), validInput())
+	if err != nil {
+		t.Fatalf("CreateApplicant: %v", err)
+	}
+
+	updated, err := svc.UpdateDetails(context.Background(), usecase.UpdateDetailsInput{
+		ID: created.ID(), FirstName: "Ana María", LastName: "Hernández", CURP: "HEGA050312MDFRNN09",
+		Profile: domain.ProfileInput{BirthDate: "2019-03-12", Sex: "F", Email: "Ana@Correo.mx",
+			Phones: []domain.Phone{{Kind: "celular", Number: "5512345678"}}},
+	})
+	if err != nil {
+		t.Fatalf("UpdateDetails: %v", err)
+	}
+	if updated.FirstName() != "Ana María" || updated.CURP().String() != "HEGA050312MDFRNN09" || updated.Profile().Email() != "ana@correo.mx" {
+		t.Errorf("updated = %q %q %q", updated.FirstName(), updated.CURP(), updated.Profile().Email())
+	}
+	if len(repo.updated) != 1 {
+		t.Errorf("want one persisted update, got %d", len(repo.updated))
+	}
+}
+
+func TestUpdateDetailsRefusesABirthDateInTheFuture(t *testing.T) {
+	svc, repo, _ := newService(t)
+	svc = svc.WithClock(func() time.Time { return schoolToday })
+	created, _ := svc.CreateApplicant(context.Background(), validInput())
+
+	_, err := svc.UpdateDetails(context.Background(), usecase.UpdateDetailsInput{
+		ID: created.ID(), FirstName: "Ana", LastName: "H", CURP: "HEGA050312MDFRNN08",
+		Profile: domain.ProfileInput{BirthDate: "2026-09-25"},
+	})
+	if glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Fatalf("want KindInvalid, got %v", err)
+	}
+	if len(repo.updated) != 0 {
+		t.Error("nothing may be stored")
+	}
+}
+
+func TestUpdateDetailsOfAnUnknownPupilIsNotFound(t *testing.T) {
+	svc, _, _ := newService(t)
+	_, err := svc.UpdateDetails(context.Background(), usecase.UpdateDetailsInput{ID: "nope", FirstName: "A", LastName: "B", CURP: "HEGA050312MDFRNN08"})
+	if glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Fatalf("want KindNotFound, got %v", err)
+	}
+}
+
+// --- medical record ----------------------------------------------------------
+
+func TestMedicalRecordIsSavedAndReadBack(t *testing.T) {
+	svc, _, _ := newService(t)
+	created, _ := svc.CreateApplicant(context.Background(), validInput())
+
+	if _, err := svc.UpdateMedical(context.Background(), created.ID(), "O+", "Penicilina", "Asma"); err != nil {
+		t.Fatalf("UpdateMedical: %v", err)
+	}
+	got, err := svc.GetMedical(context.Background(), created.ID())
+	if err != nil || got.BloodType() != "O+" || got.Allergies() != "Penicilina" {
+		t.Fatalf("GetMedical = (%+v, %v)", got, err)
+	}
+}
+
+func TestMedicalRecordOfAnUnknownPupilIsNotFound(t *testing.T) {
+	svc, _, _ := newService(t)
+	if _, err := svc.GetMedical(context.Background(), "nope"); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("GetMedical: want KindNotFound, got %v", err)
+	}
+	if _, err := svc.UpdateMedical(context.Background(), "nope", "O+", "", ""); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("UpdateMedical: want KindNotFound, got %v", err)
+	}
+}
+
+func TestMedicalRecordRejectsABloodTypeOffTheList(t *testing.T) {
+	svc, _, _ := newService(t)
+	created, _ := svc.CreateApplicant(context.Background(), validInput())
+	if _, err := svc.UpdateMedical(context.Background(), created.ID(), "Z+", "", ""); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("want KindInvalid, got %v", err)
+	}
+}
+
+// --- photo ---------------------------------------------------------------------
+
+// memPhotos is an in-memory object store.
+type memPhotos map[string][]byte
+
+func (m memPhotos) Put(_ context.Context, key, _ string, data []byte) error {
+	m[key] = data
+	return nil
+}
+
+func (m memPhotos) Get(_ context.Context, key string) ([]byte, error) {
+	data, ok := m[key]
+	if !ok {
+		return nil, glerrors.ErrNotFound
+	}
+	return data, nil
+}
+
+func (m memPhotos) Delete(_ context.Context, key string) error {
+	delete(m, key)
+	return nil
+}
+
+var jpegBytes = []byte{0xFF, 0xD8, 0xFF, 0xE0, 'x'}
+
+func TestAPhotoIsStoredReadAndReplaced(t *testing.T) {
+	svc, repo, _ := newService(t)
+	store := memPhotos{}
+	svc = svc.WithPhotos(store)
+	created, _ := svc.CreateApplicant(context.Background(), validInput())
+
+	if _, err := svc.UploadPhoto(context.Background(), created.ID(), jpegBytes); err != nil {
+		t.Fatalf("UploadPhoto: %v", err)
+	}
+	first := repo.photos[created.ID()].Key
+	if !strings.HasPrefix(first, tenant+"/students/"+created.ID()+"/") {
+		t.Errorf("object key = %q: tenant/students/<id>/<random>, no personal data", first)
+	}
+	photo, err := svc.Photo(context.Background(), created.ID())
+	if err != nil || photo.ContentType() != "image/jpeg" || len(photo.Data()) != len(jpegBytes) {
+		t.Fatalf("Photo = (%q, %v)", photo.ContentType(), err)
+	}
+
+	if _, err := svc.UploadPhoto(context.Background(), created.ID(), jpegBytes); err != nil {
+		t.Fatalf("second UploadPhoto: %v", err)
+	}
+	if _, stillThere := store[first]; stillThere {
+		t.Error("the replaced photo's object must be deleted")
+	}
+	if len(store) != 1 {
+		t.Errorf("store holds %d objects, want 1", len(store))
+	}
+}
+
+func TestPhotoOfAPupilWithoutOneIsNotFound(t *testing.T) {
+	svc, _, _ := newService(t)
+	svc = svc.WithPhotos(memPhotos{})
+	created, _ := svc.CreateApplicant(context.Background(), validInput())
+	if _, err := svc.Photo(context.Background(), created.ID()); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("want KindNotFound, got %v", err)
+	}
+}
+
+func TestDeletingAPhotoRemovesTheObjectAndTheReference(t *testing.T) {
+	svc, repo, _ := newService(t)
+	store := memPhotos{}
+	svc = svc.WithPhotos(store)
+	created, _ := svc.CreateApplicant(context.Background(), validInput())
+	_, _ = svc.UploadPhoto(context.Background(), created.ID(), jpegBytes)
+
+	if err := svc.DeletePhoto(context.Background(), created.ID()); err != nil {
+		t.Fatalf("DeletePhoto: %v", err)
+	}
+	if len(store) != 0 || len(repo.photos) != 0 {
+		t.Errorf("left %d objects and %d references", len(store), len(repo.photos))
+	}
+}
+
+func TestAPhotoForAnUnknownPupilOrNotAnImageIsRefused(t *testing.T) {
+	svc, _, _ := newService(t)
+	svc = svc.WithPhotos(memPhotos{})
+	if _, err := svc.UploadPhoto(context.Background(), "nope", jpegBytes); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("unknown pupil: want KindNotFound, got %v", err)
+	}
+	created, _ := svc.CreateApplicant(context.Background(), validInput())
+	if _, err := svc.UploadPhoto(context.Background(), created.ID(), []byte("%PDF")); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("not an image: want KindInvalid, got %v", err)
+	}
+}
+
+// A deployment without a bucket has no photos: that is "there is none" (404),
+// not a server failure (500) on every edit-page load.
+func TestWithoutABucketThereIsNoPhoto(t *testing.T) {
+	svc, _, _ := newService(t)
+	created, _ := svc.CreateApplicant(context.Background(), validInput())
+	if _, err := svc.Photo(context.Background(), created.ID()); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("Photo: want KindNotFound, got %v", err)
+	}
+	if _, err := svc.UploadPhoto(context.Background(), created.ID(), jpegBytes); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("UploadPhoto: want KindNotFound, got %v", err)
+	}
+	if err := svc.DeletePhoto(context.Background(), created.ID()); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("DeletePhoto: want KindNotFound, got %v", err)
 	}
 }

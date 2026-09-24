@@ -22,6 +22,22 @@ service StudentsService {
   // GetStudent fetches a student by id.
   rpc GetStudent(GetStudentRequest) returns (GetStudentResponse);
 
+  // UpdateStudent corrects a pupil's file: names, CURP and the profile (birth
+  // date, sex, the pupil's email and phones, address). Level and group are not
+  // here — a group changes by TransferStudent, which keeps history and seats.
+  rpc UpdateStudent(UpdateStudentRequest) returns (UpdateStudentResponse);
+
+  // A pupil's medical record: blood type, allergies, relevant conditions.
+  // Served at the edge under medical:read / medical:write, not students:*.
+  rpc GetStudentMedical(GetStudentMedicalRequest) returns (GetStudentMedicalResponse);
+  rpc UpdateStudentMedical(UpdateStudentMedicalRequest) returns (UpdateStudentMedicalResponse);
+
+  // A pupil's photo: JPEG or PNG (judged by its bytes), at most 2 MB, kept in a
+  // private bucket and served only through the gateway.
+  rpc UploadStudentPhoto(UploadStudentPhotoRequest) returns (UploadStudentPhotoResponse);
+  rpc GetStudentPhoto(GetStudentPhotoRequest) returns (GetStudentPhotoResponse);
+  rpc DeleteStudentPhoto(DeleteStudentPhotoRequest) returns (DeleteStudentPhotoResponse);
+
   // ListStudents lists students, optionally filtered by level/group/status.
   rpc ListStudents(ListStudentsRequest) returns (ListStudentsResponse);
 
@@ -76,6 +92,12 @@ service StudentsService {
   // of its choosing. A contact of another pupil is NotFound, never
   // PermissionDenied, so the answer does not confirm it exists.
   rpc GrantContactAccess(GrantContactAccessRequest) returns (GrantContactAccessResponse);
+
+  // UpdateContact corrects a contact of a pupil; RemoveContact deletes one that
+  // has no app access. Both are scoped by student_id: a contact of another
+  // pupil is NotFound, so the answer never confirms it exists.
+  rpc UpdateContact(UpdateContactRequest) returns (UpdateContactResponse);
+  rpc RemoveContact(RemoveContactRequest) returns (RemoveContactResponse);
 
   // UnlinkGuardian removes a guardian↔student link. An unknown link is a
   // NotFound error.
@@ -147,7 +169,93 @@ message Student {
   // level when the catalog went free.
   string level_id = 12;
   string level_name = 13;
+  // The editable half of the file. Every field is optional.
+  StudentProfile profile = 14;
 }
+
+// StudentProfile is what the office keeps up to date by hand.
+message StudentProfile {
+  string birth_date = 1;  // ISO date "2019-03-12", or empty
+  string sex = 2;         // "" | "F" | "M" | "X"
+  string email = 3;       // the pupil's own address, trimmed and lowercase
+  repeated StudentPhone phones = 4;  // at most three
+  StudentAddress address = 5;
+}
+
+message StudentPhone {
+  string kind = 1;    // celular | casa | trabajo | otro
+  string number = 2;  // ten digits
+}
+
+message StudentAddress {
+  string street = 1;
+  string ext_number = 2;
+  string int_number = 3;
+  string neighborhood = 4;
+  string postal_code = 5;  // five digits, or empty
+  string municipality = 6;
+  string state = 7;        // one of the 32 federal entities, or empty
+}
+
+message UpdateStudentRequest {
+  string id = 1;
+  string first_name = 2;
+  string last_name = 3;
+  string curp = 4;
+  StudentProfile profile = 5;
+}
+
+message UpdateStudentResponse {
+  Student student = 1;
+}
+
+message StudentMedical {
+  string blood_type = 1;  // A+ A- B+ B- AB+ AB- O+ O-, or empty
+  string allergies = 2;
+  string conditions = 3;
+}
+
+message GetStudentMedicalRequest {
+  string student_id = 1;
+}
+
+message GetStudentMedicalResponse {
+  StudentMedical medical = 1;
+}
+
+message UpdateStudentMedicalRequest {
+  string student_id = 1;
+  StudentMedical medical = 2;
+}
+
+message UpdateStudentMedicalResponse {
+  StudentMedical medical = 1;
+}
+
+message UploadStudentPhotoRequest {
+  string student_id = 1;
+  bytes data = 2;
+}
+
+message UploadStudentPhotoResponse {
+  string content_type = 1;
+  int32 size_bytes = 2;
+}
+
+message GetStudentPhotoRequest {
+  string student_id = 1;
+}
+
+message GetStudentPhotoResponse {
+  bytes data = 1;
+  string content_type = 2;
+}
+
+message DeleteStudentPhotoRequest {
+  string student_id = 1;
+}
+
+message DeleteStudentPhotoResponse {}
 
 // --- RPC messages ---------------------------------------------------------
 
@@ -332,6 +440,8 @@ message GuardianLink {
   string full_name = 6;
   string phone = 7;
   string email = 8;
+  // Whom the office calls first when something happens.
+  bool is_emergency = 9;
 }
 
 message LinkGuardianRequest {
@@ -389,8 +499,30 @@ message AddContactRequest {
   string full_name = 3;
   string phone = 4;
   string email = 5;
+  bool is_emergency = 6;
 }
 
 message AddContactResponse {
   GuardianLink contact = 1;
 }
+
+message UpdateContactRequest {
+  string contact_id = 1;
+  string student_id = 2;
+  string relationship = 3;  // mother | father | guardian | other
+  string full_name = 4;
+  string phone = 5;
+  string email = 6;
+  bool is_emergency = 7;
+}
+
+message UpdateContactResponse {
+  GuardianLink contact = 1;
+}
+
+message RemoveContactRequest {
+  string contact_id = 1;
+  string student_id = 2;
+}
+
+message RemoveContactResponse {}

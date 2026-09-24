@@ -113,6 +113,9 @@ func TestIsOwnerOnly(t *testing.T) {
 		// criterion. Its sibling deliberately is NOT owner-only: the storeroom
 		// needs garments and counts, never names.
 		{"uniforms:orders", true},
+		// A pupil's allergies and conditions, for every pupil in the school.
+		{"medical:read", true},
+		{"medical:write", true},
 		{"uniforms:stock", false},
 		{"uniforms:write", false},
 		{"uniforms_own:read", false},

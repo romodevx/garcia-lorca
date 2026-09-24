@@ -132,6 +132,7 @@ type ContactInput struct {
 	FullName     string
 	Phone        string
 	Email        string
+	IsEmergency  bool
 }
 
 // AddContact records somebody the school can call about a pupil, with no
@@ -158,15 +159,67 @@ func (s *GuardianService) AddContact(ctx context.Context, in ContactInput) (doma
 	}
 
 	contact, err := domain.NewContact(s.newID(), s.tenant, student.ID(), rel, domain.ContactPerson{
-		FullName: in.FullName,
-		Phone:    in.Phone,
-		Email:    in.Email,
+		FullName:  in.FullName,
+		Phone:     in.Phone,
+		Email:     in.Email,
+		Emergency: in.IsEmergency,
 	})
 	if err != nil {
 		return domain.GuardianLink{}, err
 	}
 	if err := s.guardians.Link(ctx, contact); err != nil {
 		return domain.GuardianLink{}, err
+	}
+	return contact, nil
+}
+
+// UpdateContact corrects a contact of a pupil: relationship, name, phone, email
+// and the emergency mark. studentID is required and checked, as in
+// GrantContactAccess: a contact of another pupil answers KindNotFound, so the
+// answer never confirms that it exists.
+func (s *GuardianService) UpdateContact(ctx context.Context, contactID, studentID string, in ContactInput) (domain.GuardianLink, error) {
+	contact, err := s.contactOf(ctx, contactID, studentID)
+	if err != nil {
+		return domain.GuardianLink{}, err
+	}
+	rel, err := domain.ParseRelationship(in.Relationship)
+	if err != nil {
+		return domain.GuardianLink{}, err
+	}
+	edited, err := contact.Edit(rel, domain.ContactPerson{
+		FullName: in.FullName, Phone: in.Phone, Email: in.Email, Emergency: in.IsEmergency,
+	})
+	if err != nil {
+		return domain.GuardianLink{}, err
+	}
+	if err := s.guardians.UpdateContact(ctx, edited); err != nil {
+		return domain.GuardianLink{}, err
+	}
+	return edited, nil
+}
+
+// RemoveContact deletes a contact of a pupil. A contact that can open the app
+// is refused (KindConflict): its access is revoked first, deliberately, rather
+// than disappearing with a phone number.
+func (s *GuardianService) RemoveContact(ctx context.Context, contactID, studentID string) error {
+	contact, err := s.contactOf(ctx, contactID, studentID)
+	if err != nil {
+		return err
+	}
+	if contact.HasAccount() {
+		return glerrors.New(glerrors.KindConflict, "este contacto puede abrir la app: quítale el acceso antes de borrarlo")
+	}
+	return s.guardians.RemoveContact(ctx, contactID)
+}
+
+// contactOf loads a contact that belongs to studentID, or KindNotFound.
+func (s *GuardianService) contactOf(ctx context.Context, contactID, studentID string) (domain.GuardianLink, error) {
+	contact, err := s.guardians.ByID(ctx, contactID)
+	if err != nil {
+		return domain.GuardianLink{}, err
+	}
+	if contact.StudentID() != studentID {
+		return domain.GuardianLink{}, glerrors.ErrNotFound
 	}
 	return contact, nil
 }

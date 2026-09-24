@@ -34,6 +34,39 @@ export interface Student {
   gradeGroup: string;
   guardianName: string;
   admissionStatus: AdmissionStatus;
+  /** The editable half of the file. Absent from gateways older than T5. */
+  profile?: StudentProfile;
+}
+
+/** "" means not captured. */
+export type Sex = "" | "F" | "M" | "X";
+
+export type PhoneKind = "celular" | "casa" | "trabajo" | "otro";
+
+export interface StudentPhone {
+  kind: PhoneKind;
+  /** Ten digits. */
+  number: string;
+}
+
+export interface StudentAddress {
+  street: string;
+  extNumber: string;
+  intNumber: string;
+  neighborhood: string;
+  postalCode: string;
+  municipality: string;
+  state: string;
+}
+
+/** What the office keeps up to date by hand. Every field is optional. */
+export interface StudentProfile {
+  /** ISO date ("2019-03-12") or "". */
+  birthDate: string;
+  sex: Sex;
+  email: string;
+  phones: StudentPhone[];
+  address: StudentAddress;
 }
 
 export type EnrollmentStatus = "active" | "transferred" | "withdrawn";
@@ -259,6 +292,8 @@ export interface Contact {
   email: string;
   /** Whether this contact can open the family app. */
   hasAccount: boolean;
+  /** Whom the school calls first when something happens. */
+  isEmergency?: boolean;
 }
 
 export interface AddContactInput {
@@ -267,6 +302,7 @@ export interface AddContactInput {
   fullName: string;
   phone?: string;
   email?: string;
+  isEmergency?: boolean;
 }
 
 /** The people the school can call about one pupil. */
@@ -338,10 +374,120 @@ export async function addContact(baseURL: string, input: AddContactInput): Promi
       fullName: input.fullName,
       ...(input.phone !== undefined && input.phone !== "" ? { phone: input.phone } : {}),
       ...(input.email !== undefined && input.email !== "" ? { email: input.email } : {}),
+      ...(input.isEmergency === true ? { isEmergency: true } : {}),
     }),
   });
   if (!res.ok) {
     throw await studentsFailure(res);
   }
   return (await res.json()) as Contact;
+}
+
+// --- the pupil's file (T5) --------------------------------------------------
+
+export interface UpdateStudentInput {
+  firstName: string;
+  lastName: string;
+  curp: string;
+  profile: StudentProfile;
+}
+
+function studentPath(baseURL: string, studentId: string, rest = ""): string {
+  return url(baseURL, `${BASE_PATH}/students/${encodeURIComponent(studentId)}${rest}`);
+}
+
+async function sendJSON<T>(target: string, method: "PUT", body: unknown): Promise<T> {
+  const res = await authFetch(target, {
+    method,
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw await studentsFailure(res);
+  }
+  return (await res.json()) as T;
+}
+
+async function sendEmpty(target: string, method: "DELETE"): Promise<void> {
+  const res = await authFetch(target, { method, credentials: "include" });
+  if (!res.ok) {
+    throw await studentsFailure(res);
+  }
+}
+
+/** Corrects names, CURP and profile. Level and group change by transfer, never here. */
+export function updateStudent(baseURL: string, studentId: string, input: UpdateStudentInput): Promise<Student> {
+  return sendJSON<Student>(studentPath(baseURL, studentId), "PUT", input);
+}
+
+/** A pupil's medical record: readable only with medical:read. */
+export interface MedicalRecord {
+  /** "" or one of A+ A- B+ B- AB+ AB- O+ O-. */
+  bloodType: string;
+  allergies: string;
+  conditions: string;
+}
+
+export async function getMedical(baseURL: string, studentId: string): Promise<MedicalRecord> {
+  const res = await authFetch(studentPath(baseURL, studentId, "/medical"), { credentials: "include" });
+  if (!res.ok) {
+    throw await studentsFailure(res);
+  }
+  return (await res.json()) as MedicalRecord;
+}
+
+export function updateMedical(baseURL: string, studentId: string, record: MedicalRecord): Promise<MedicalRecord> {
+  return sendJSON<MedicalRecord>(studentPath(baseURL, studentId, "/medical"), "PUT", record);
+}
+
+/** The pupil's photo, or null when there is none. Fetched with the session, never from a public URL. */
+export async function getPhotoBlob(baseURL: string, studentId: string): Promise<Blob | null> {
+  const res = await authFetch(studentPath(baseURL, studentId, "/photo"), { credentials: "include" });
+  if (res.status === 404) {
+    return null;
+  }
+  if (!res.ok) {
+    throw await studentsFailure(res);
+  }
+  return res.blob();
+}
+
+/** Uploads a JPEG or PNG (at most 2 MB); the server decides the type from the bytes. */
+export async function uploadPhoto(baseURL: string, studentId: string, image: Blob): Promise<void> {
+  const res = await authFetch(studentPath(baseURL, studentId, "/photo"), {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": image.type === "" ? "application/octet-stream" : image.type },
+    body: image,
+  });
+  if (!res.ok) {
+    throw await studentsFailure(res);
+  }
+}
+
+export function deletePhoto(baseURL: string, studentId: string): Promise<void> {
+  return sendEmpty(studentPath(baseURL, studentId, "/photo"), "DELETE");
+}
+
+export interface ContactEdit {
+  relationship: Relationship;
+  fullName: string;
+  phone: string;
+  email: string;
+  isEmergency: boolean;
+}
+
+export function updateContact(
+  baseURL: string,
+  studentId: string,
+  contactId: string,
+  edit: ContactEdit,
+): Promise<Contact> {
+  return sendJSON<Contact>(studentPath(baseURL, studentId, `/contacts/${encodeURIComponent(contactId)}`), "PUT", edit);
+}
+
+/** Refused with 409 while the contact can open the family app. */
+export function removeContact(baseURL: string, studentId: string, contactId: string): Promise<void> {
+  return sendEmpty(studentPath(baseURL, studentId, `/contacts/${encodeURIComponent(contactId)}`), "DELETE");
 }

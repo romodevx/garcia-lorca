@@ -141,6 +141,32 @@ describe("StudentsScreen", () => {
   });
 });
 
+describe("StudentsScreen — editar la ficha (T5)", () => {
+  it("opens the edit page from the row", async () => {
+    const user = userEvent.setup();
+    const onEdit = vi.fn();
+    render(<StudentsScreen onBack={() => {}} onEdit={onEdit} />);
+    await user.click(await screen.findByRole("button", { name: "Editar ficha de Mateo Sánchez" }));
+    expect(onEdit).toHaveBeenCalledWith("2");
+  });
+
+  it("opens the edit page from the sheet", async () => {
+    const user = userEvent.setup();
+    const onEdit = vi.fn();
+    render(<StudentsScreen onBack={() => {}} onEdit={onEdit} />);
+    await user.click(await screen.findByRole("button", { name: "Ver ficha de Valentina Cruz" }));
+    const card = await screen.findByRole("dialog", { name: "Ficha del alumno" });
+    await user.click(within(card).getByRole("button", { name: "Editar ficha" }));
+    expect(onEdit).toHaveBeenCalledWith("1");
+  });
+
+  it("offers no edit button when nobody can edit", async () => {
+    render(<StudentsScreen onBack={() => {}} />);
+    await screen.findByText("Valentina Cruz");
+    expect(screen.queryByRole("button", { name: "Editar ficha de Valentina Cruz" })).not.toBeInTheDocument();
+  });
+});
+
 describe("StudentsScreen — por salón", () => {
   // The director counts heads per classroom before deciding to open another
   // group. It follows the filters, because that is the count they mean.

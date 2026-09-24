@@ -18,6 +18,7 @@ describe("el mapa de rutas", () => {
     ["/configuracion", { screen: "config" }],
     ["/administracion", { screen: "admin" }],
     ["/modulo/reportes", { screen: "module", moduleId: "reportes" }],
+    ["/alumnos/stu-1/editar", { screen: "studentEdit", studentId: "stu-1" }],
   ];
 
   it.each(pares)("%s ida y vuelta", (path, view) => {
@@ -27,6 +28,15 @@ describe("el mapa de rutas", () => {
 
   it("una ruta desconocida aterriza en el tablero, no en blanco", () => {
     expect(pathToView("/no-existe")).toEqual({ screen: "dashboard" });
+  });
+
+  it("un id de alumno con diagonal o vacío no se cuela", () => {
+    expect(pathToView("/alumnos//editar")).toEqual({ screen: "dashboard" });
+    expect(pathToView("/alumnos/a/b/editar")).toEqual({ screen: "dashboard" });
+  });
+
+  it("un id con un escape roto no tumba la app", () => {
+    expect(pathToView("/alumnos/%E0%A4%A/editar")).toEqual({ screen: "dashboard" });
   });
 
   it("tolera la diagonal final", () => {

@@ -22,10 +22,13 @@ export type View =
   | { screen: "teachers" }
   | { screen: "uniforms" }
   | { screen: "admin" }
-  | { screen: "module"; moduleId: string };
+  | { screen: "module"; moduleId: string }
+  | { screen: "studentEdit"; studentId: string };
 
 /** El prefijo de un módulo que aún no tiene pantalla propia. */
 const MODULE_PREFIX = "/modulo/";
+/** /alumnos/{id}/editar — the full edit page of one pupil's file. */
+const STUDENT_EDIT = /^\/alumnos\/([^/]+)\/editar$/;
 
 /**
  * Las pantallas de una sola pieza. Los módulos sin backend van por
@@ -45,7 +48,7 @@ const BY_SCREEN = {
   teachers: "/docentes",
   uniforms: "/uniformes",
   admin: "/administracion",
-} as const satisfies Record<Exclude<View["screen"], "module">, string>;
+} as const satisfies Record<Exclude<View["screen"], "module" | "studentEdit">, string>;
 
 const BY_PATH: ReadonlyMap<string, View> = new Map(
   Object.entries(BY_SCREEN).map(([screen, path]) => [path, { screen } as View]),
@@ -55,6 +58,9 @@ const BY_PATH: ReadonlyMap<string, View> = new Map(
 export function viewToPath(view: View): string {
   if (view.screen === "module") {
     return `${MODULE_PREFIX}${view.moduleId}`;
+  }
+  if (view.screen === "studentEdit") {
+    return `/alumnos/${encodeURIComponent(view.studentId)}/editar`;
   }
   return BY_SCREEN[view.screen];
 }
@@ -84,5 +90,20 @@ export function pathToView(pathname: string): View {
     }
   }
 
+  const edit = STUDENT_EDIT.exec(clean);
+  const studentId = edit?.[1] === undefined ? undefined : safeDecode(edit[1]);
+  if (studentId !== undefined) {
+    return { screen: "studentEdit", studentId };
+  }
+
   return { screen: "dashboard" };
+}
+
+/** A malformed escape (`%E0%A4%A`) is not an id: undefined, never a thrown URIError. */
+function safeDecode(segment: string): string | undefined {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return undefined;
+  }
 }

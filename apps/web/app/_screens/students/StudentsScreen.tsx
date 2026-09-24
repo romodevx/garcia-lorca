@@ -403,6 +403,7 @@ function StudentSheet({
   gradeLevelsFailed,
   onClose,
   onPlaced,
+  onEdit,
 }: {
   st: Student;
   groups: readonly Group[];
@@ -412,6 +413,8 @@ function StudentSheet({
   gradeLevelsFailed: boolean;
   onClose: () => void;
   onPlaced: (message: string) => void;
+  /** Absent when the caller cannot edit a pupil's file. */
+  onEdit?: () => void;
 }): ReactElement {
   const rows: [string, string][] = [
     ["CURP", st.curp],
@@ -499,6 +502,7 @@ function StudentSheet({
       footer={
         <>
           <Btn kind="ghost" icon="documents" style={{ flex: 1 }}>Documentos</Btn>
+          {onEdit !== undefined && <Btn kind="ghost" onClick={onEdit} style={{ flex: 1 }}>Editar ficha</Btn>}
           {ready && (
             <Btn icon="check" onClick={() => void save()} style={{ flex: 1, opacity: saving ? 0.6 : 1 }}>
               {transferring ? "Cambiar de grupo" : "Inscribir"}
@@ -571,6 +575,8 @@ function StudentSheet({
 
 export interface StudentsScreenProps {
   onBack: () => void;
+  /** Opens a pupil's edit page. Absent when the caller cannot edit files. */
+  onEdit?: (studentId: string) => void;
 }
 
 /** What the school reads in Excel, in the order the table shows it. */
@@ -584,7 +590,7 @@ const EXPORT_COLUMNS: readonly CsvColumn<Student>[] = [
   { label: "Estado", value: (s) => statusOf(s.admissionStatus).label },
 ];
 
-export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
+export function StudentsScreen({ onBack, onEdit }: StudentsScreenProps): ReactElement {
   const [students, setStudents] = useState<Student[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
@@ -820,7 +826,7 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
               </div>
             </div>
           ) : (
-            paged.map((st, i) => <StuRow key={st.id} st={st} i={i} onOpen={() => setSheet(st)} />)
+            paged.map((st, i) => <StuRow key={st.id} st={st} i={i} onOpen={() => setSheet(st)} onEdit={onEdit === undefined ? undefined : () => onEdit(st.id)} />)
           )}
         </div>
         {!loading && total > 0 && (
@@ -848,7 +854,7 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
       <button onClick={() => setAdd(true)} title="Nuevo alumno" style={{ position: "fixed", right: 32, bottom: 32, zIndex: 50, height: 60, padding: "0 26px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 10, background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16.5, cursor: "pointer", boxShadow: "0 10px 30px color-mix(in oklab, var(--lime) 45%, transparent)" }}><Icon name="plus" size={22} stroke={2.6} />Nuevo alumno</button>
 
       {add && <QuickAdd onClose={() => setAdd(false)} onSave={onSave} levels={levels} />}
-      {sheet !== null && <StudentSheet st={sheet} groups={groups} cycleId={groupsCycleId} gradeLevels={gradeLevels} gradeLevelsFailed={gradeLevelsFailed} onClose={() => setSheet(null)} onPlaced={onPlaced} />}
+      {sheet !== null && <StudentSheet st={sheet} groups={groups} cycleId={groupsCycleId} gradeLevels={gradeLevels} gradeLevelsFailed={gradeLevelsFailed} onClose={() => setSheet(null)} onPlaced={onPlaced} onEdit={onEdit === undefined ? undefined : () => onEdit(sheet.id)} />}
       {toast !== null && (
         <div style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>
           <Icon name="check" size={20} stroke={2.6} />{toast}
@@ -858,7 +864,7 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
   );
 }
 
-function StuRow({ st, i, onOpen }: { st: Student; i: number; onOpen: () => void }): ReactElement {
+function StuRow({ st, i, onOpen, onEdit }: { st: Student; i: number; onOpen: () => void; onEdit?: () => void }): ReactElement {
   const [hov, setHov] = useState(false);
   const s = statusOf(st.admissionStatus);
   return (
@@ -875,6 +881,9 @@ function StuRow({ st, i, onOpen }: { st: Student; i: number; onOpen: () => void 
       <div style={{ minWidth: 0, fontSize: 14, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{st.guardianName}</div>
       <div><StatusPill status={st.admissionStatus} /></div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, width: 84 }}>
+        {onEdit !== undefined && (
+          <button onClick={(ev) => { ev.stopPropagation(); onEdit(); }} title="Editar ficha" aria-label={`Editar ficha de ${st.firstName} ${st.lastName}`} style={qb}><Icon name="user" size={18} /></button>
+        )}
         <button onClick={(ev) => { ev.stopPropagation(); onOpen(); }} title="Ver ficha" aria-label={`Ver ficha de ${st.firstName} ${st.lastName}`} style={qb}><Icon name="chevron" size={18} /></button>
       </div>
     </div>
