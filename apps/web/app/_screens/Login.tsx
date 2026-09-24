@@ -291,7 +291,9 @@ function ForgotPanel({ email, sent, onEmail, onSend, onClose }: { email: string;
             type="email"
             autoComplete="email"
             value={email}
-            onChange={(e) => onEmail(e.target.value)}
+            autoCapitalize="none"
+            spellCheck={false}
+            onChange={(e) => onEmail(e.target.value.toLowerCase())}
             style={{ width: "100%", height: 48, padding: "0 14px", borderRadius: "var(--r-md)", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 15, outline: "none" }}
           />
           <div style={{ display: "flex", gap: 10, marginTop: 12 }}>

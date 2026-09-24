@@ -42,8 +42,11 @@ const (
 )
 
 var (
-	superDB *gorm.DB // postgres superuser (bypasses RLS) — for seeding.
-	appDSN  string   // connection string for the non-owner app role.
+	// superDSNFor builds a superuser DSN for any database in the test container,
+	// so a migration test can build a throwaway database of its own.
+	superDSNFor func(db string) string
+	superDB     *gorm.DB // postgres superuser (bypasses RLS) — for seeding.
+	appDSN      string   // connection string for the non-owner app role.
 	// Ephemeral credentials for the throwaway test container, generated at
 	// runtime so no password literal is ever committed.
 	superPass = randToken()
@@ -77,7 +80,10 @@ func TestMain(m *testing.M) {
 
 	host, _ := container.Host(ctx)
 	port, _ := container.MappedPort(ctx, "5432")
-	superDSN := fmt.Sprintf("host=%s port=%s user=postgres password=%s dbname=%s sslmode=disable", host, port.Port(), superPass, dbName)
+	superDSNFor = func(db string) string {
+		return fmt.Sprintf("host=%s port=%s user=postgres password=%s dbname=%s sslmode=disable", host, port.Port(), superPass, db)
+	}
+	superDSN := superDSNFor(dbName)
 	appDSN = fmt.Sprintf("host=%s port=%s user=app password=%s dbname=%s sslmode=disable", host, port.Port(), appPass, dbName)
 
 	superDB, err = open(superDSN)

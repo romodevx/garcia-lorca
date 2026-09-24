@@ -18,9 +18,11 @@ type Teacher struct {
 }
 
 // NewTeacher constructs a teacher. `id`, `tenantID`, `firstName`, `lastName`, and
-// `email` are required; `email` must have a plausible shape. `userID` is
-// optional ("" = not yet linked to an IAM user).
+// `email` are required; `email` must have a plausible shape and is stored
+// normalized (trimmed, lowercase). `userID` is optional ("" = not yet linked to
+// an IAM user).
 func NewTeacher(id, tenantID, firstName, lastName, email, userID string) (Teacher, error) {
+	email = normalizeEmail(email)
 	if strings.TrimSpace(id) == "" {
 		return Teacher{}, glerrors.New(glerrors.KindInvalid, "teacher id is required")
 	}
@@ -44,6 +46,12 @@ func NewTeacher(id, tenantID, firstName, lastName, email, userID string) (Teache
 		email:     email,
 		userID:    userID,
 	}, nil
+}
+
+// normalizeEmail returns the one spelling an address is stored under: an
+// address differs by neither case nor surrounding spaces.
+func normalizeEmail(raw string) string {
+	return strings.ToLower(strings.TrimSpace(raw))
 }
 
 // validateTeacherEmail is a minimal boundary shape check (a single '@' with a

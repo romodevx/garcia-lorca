@@ -83,3 +83,15 @@ func TestTeacherWithUserIDLinksAndUnlinks(t *testing.T) {
 		t.Errorf("WithUserID(unlink): UserID=%q HasUser=%v, want \"\"/false", unlinked.UserID(), unlinked.HasUser())
 	}
 }
+
+// An address typed with capitals or stray spaces is the same address: the
+// catalog stores the one spelling, so two teachers cannot hide behind case.
+func TestNewTeacherNormalizesEmail(t *testing.T) {
+	te, err := domain.NewTeacher("te1", "t1", "Ada", "Lovelace", "  Ada.Lovelace@Colegio.MX ", "")
+	if err != nil {
+		t.Fatalf("NewTeacher: %v", err)
+	}
+	if te.Email() != "ada.lovelace@colegio.mx" {
+		t.Errorf("email = %q, want %q", te.Email(), "ada.lovelace@colegio.mx")
+	}
+}

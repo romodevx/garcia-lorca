@@ -59,3 +59,16 @@ describe("el correo de la entrada", () => {
     expect(correo).toHaveAttribute("spellcheck", "false");
   });
 });
+
+describe("el correo de «¿Olvidaste tu contraseña?»", () => {
+  it("también baja a minúsculas mientras se teclea", async () => {
+    const user = userEvent.setup();
+    render(<Login theme="light" onToggle={() => {}} onSubmit={vi.fn()} pending={false} />);
+
+    await user.click(screen.getByRole("button", { name: "¿Olvidaste tu contraseña?" }));
+    const correo = screen.getByLabelText("¿Cuál es tu correo?");
+    await user.type(correo, "Ana.Ruiz@Colegio.MX");
+
+    expect(correo).toHaveValue("ana.ruiz@colegio.mx");
+  });
+});

@@ -177,3 +177,16 @@ func TestAContactKeepsTheAccountItAlreadyHas(t *testing.T) {
 		t.Errorf("re-granting an account: want KindConflict, got %v", err)
 	}
 }
+
+// A contact's email is stored as one spelling — trimmed and lowercase — so the
+// invitation that later looks it up in iam finds the same address.
+func TestAContactEmailIsNormalized(t *testing.T) {
+	contact, err := domain.NewContact("gl-1", "t1", "st-1", domain.RelationshipMother,
+		domain.ContactPerson{FullName: "Ana Cruz", Email: "  Ana.Cruz@Correo.COM "})
+	if err != nil {
+		t.Fatalf("NewContact: %v", err)
+	}
+	if contact.Email() != "ana.cruz@correo.com" {
+		t.Errorf("email = %q, want %q", contact.Email(), "ana.cruz@correo.com")
+	}
+}

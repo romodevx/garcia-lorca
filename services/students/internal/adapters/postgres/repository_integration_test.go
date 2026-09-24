@@ -46,13 +46,17 @@ var migrationFiles = []string{
 	"../../../../../migrations/students/0003_guardians.sql",
 	"../../../../../migrations/students/0004_maternal_level.sql",
 	"../../../../../migrations/students/0005_contacts.sql",
+	"../../../../../migrations/students/0006_email_lowercase.sql",
 }
 
 var (
-	superDB   *gorm.DB
-	appDSN    string
-	superPass = randToken()
-	appPass   = randToken()
+	// superDSNFor builds a superuser DSN for any database in the test container,
+	// so a migration test can build a throwaway database of its own.
+	superDSNFor func(db string) string
+	superDB     *gorm.DB
+	appDSN      string
+	superPass   = randToken()
+	appPass     = randToken()
 )
 
 func randToken() string {
@@ -81,7 +85,10 @@ func TestMain(m *testing.M) {
 
 	host, _ := container.Host(ctx)
 	port, _ := container.MappedPort(ctx, "5432")
-	superDSN := fmt.Sprintf("host=%s port=%s user=postgres password=%s dbname=%s sslmode=disable", host, port.Port(), superPass, dbName)
+	superDSNFor = func(db string) string {
+		return fmt.Sprintf("host=%s port=%s user=postgres password=%s dbname=%s sslmode=disable", host, port.Port(), superPass, db)
+	}
+	superDSN := superDSNFor(dbName)
 	appDSN = fmt.Sprintf("host=%s port=%s user=app password=%s dbname=%s sslmode=disable", host, port.Port(), appPass, dbName)
 
 	if superDB, err = open(superDSN); err != nil {

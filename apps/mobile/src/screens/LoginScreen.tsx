@@ -88,7 +88,7 @@ export function LoginScreen({ onSubmit }: LoginScreenProps): ReactElement {
         <TextInput
           accessibilityLabel="Correo electrónico"
           value={email}
-          onChangeText={setEmail}
+          onChangeText={(typed) => setEmail(typed.toLowerCase())}
           placeholderTextColor={theme.colors.text3}
           autoCapitalize="none"
           keyboardType="email-address"

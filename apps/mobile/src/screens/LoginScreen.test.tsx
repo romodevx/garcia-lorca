@@ -64,4 +64,14 @@ describe("LoginScreen", () => {
 
     expect(onSubmit).not.toHaveBeenCalled();
   });
+  it("lowercases the email while it is typed", async () => {
+    await renderWithProviders(<LoginScreen onSubmit={async () => undefined} />);
+    await drainMount();
+
+    await act(async () => {
+      fireEvent.changeText(screen.getByLabelText("Correo electrónico"), "Laura.Ruiz@Correo.COM");
+    });
+
+    expect(screen.getByLabelText("Correo electrónico").props.value).toBe("laura.ruiz@correo.com");
+  });
 });

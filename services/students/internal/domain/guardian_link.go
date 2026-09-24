@@ -92,14 +92,15 @@ func NewContact(id, tenantID, studentID string, relationship Relationship, perso
 	return link.WithPerson(person), nil
 }
 
-// WithPerson attaches (or replaces) the contact details. A guardian with an
+// WithPerson attaches (or replaces) the contact details; the email is stored
+// trimmed and lowercase, the one spelling iam looks an address up by. A guardian with an
 // account may carry a phone too: the account says who can log in, the phone says
 // who answers, and they are not the same question.
 func (l GuardianLink) WithPerson(person ContactPerson) GuardianLink {
 	l.person = ContactPerson{
 		FullName: strings.TrimSpace(person.FullName),
 		Phone:    strings.TrimSpace(person.Phone),
-		Email:    strings.TrimSpace(person.Email),
+		Email:    strings.ToLower(strings.TrimSpace(person.Email)),
 	}
 	return l
 }

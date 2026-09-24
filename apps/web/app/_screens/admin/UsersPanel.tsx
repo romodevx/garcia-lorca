@@ -3,7 +3,7 @@
 import { useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import type { AdminUser, CreateUserInput, Role } from "../../admin/api";
-import { TextField } from "../../_design/form";
+import { EmailField, TextField } from "../../_design/form";
 import { CheckList, EmptyHint, ErrorAlert, Section, StatusPill } from "./parts";
 
 export interface UsersPanelProps {
@@ -155,7 +155,7 @@ export function UsersPanel({ users, roles, onCreate, onSetStatus, onSetRoles }: 
 
       <form aria-label="Crear usuario" onSubmit={submit}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-          <TextField label="Correo" value={email} onChange={setEmail} help="El correo con el que esta persona entrará al sistema." />
+          <EmailField label="Correo" value={email} onChange={setEmail} help="El correo con el que esta persona entrará al sistema." />
           <TextField label="Nombre para mostrar" value={displayName} onChange={setDisplayName} help="El nombre que verán los demás en el sistema." />
         </div>
         <div style={{ marginBottom: 12 }}>
