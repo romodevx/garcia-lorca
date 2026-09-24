@@ -300,16 +300,18 @@ export function StudentEditScreen({ studentId, permissions, onBack, today }: Stu
       title="Editar ficha"
       aside={<SectionIndex showMedical={canReadMedical} />}
       footer={
-        <>
+        // Wraps on a phone: at 360 px the three do not fit on one line, and
+        // "Guardar ficha" was pushed off the screen.
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, width: "100%" }}>
           <Btn kind="ghost" onClick={onBack}>Volver a alumnos</Btn>
-          <div style={{ flex: 1 }} role="status">
+          <div style={{ flex: "1 1 0", minWidth: 0 }} role="status">
             {saved && <span style={{ fontSize: 14, color: "var(--ok-fg)", fontWeight: 600 }}>Cambios guardados.</span>}
           </div>
           {/* Never disabled for an incomplete form: saving explains what is missing. */}
-          <Btn icon="check" onClick={() => void submit()} style={{ opacity: saving ? 0.6 : 1 }}>
+          <Btn icon="check" onClick={() => void submit()} style={{ marginLeft: "auto", opacity: saving ? 0.6 : 1 }}>
             {saving ? "Guardando…" : "Guardar ficha"}
           </Btn>
-        </>
+        </div>
       }
     >
       <form
