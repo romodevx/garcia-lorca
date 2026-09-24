@@ -139,3 +139,39 @@ func TestWithoutTheGrantALatePaymentStillGetsNothing(t *testing.T) {
 		}
 	}
 }
+
+// Task 8: the counter lists what is owed, concept by concept — its amount, the
+// surcharge it carries on the day being asked about, the early-payment reward
+// and the total — so the cashier can choose what the money pays.
+func TestExpectedBreaksTheDebtDownByConcept(t *testing.T) {
+	f := depositFixture(t)
+
+	expected, err := f.svc.ExpectedToday(context.Background(), testStudent,
+		time.Date(2026, time.October, 10, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("ExpectedToday: %v", err)
+	}
+
+	if len(expected.Lines) != 10 {
+		t.Fatalf("lines = %d, want the ten months still owed", len(expected.Lines))
+	}
+	sep, oct := expected.Lines[0], expected.Lines[1]
+	if sep.OwedCents != 320000 || sep.SurchargeCents != 30000 || sep.TotalCents != 350000 || !sep.Due {
+		t.Errorf("september = %+v, want 3,200 + 300 surcharge = 3,500, due", sep)
+	}
+	if oct.TotalCents != 320000 || !oct.Due {
+		t.Errorf("october = %+v, want 3,200, due", oct)
+	}
+	if later := expected.Lines[2]; later.Due || later.SurchargeCents != 0 {
+		t.Errorf("november = %+v, want not yet due, no surcharge", later)
+	}
+	var due int64
+	for _, l := range expected.Lines {
+		if l.Due {
+			due += l.TotalCents
+		}
+	}
+	if due != expected.AmountCents {
+		t.Errorf("due lines add up to %d, the expected amount is %d: they must agree", due, expected.AmountCents)
+	}
+}

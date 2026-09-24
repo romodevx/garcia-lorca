@@ -465,3 +465,61 @@ func TestADepositNamesWhoReceivedIt(t *testing.T) {
 		}
 	}
 }
+
+// Task 8: the cashier chooses what the money pays. Only the chosen charges are
+// paid, oldest first; a month's surcharge still goes with it; what is left is
+// the family's credit, not spread onto what was not chosen.
+func TestADepositPaysOnlyTheChosenCharges(t *testing.T) {
+	f := depositFixture(t)
+	expected, err := f.svc.ExpectedToday(context.Background(), testStudent, time.Date(2026, time.October, 10, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("ExpectedToday: %v", err)
+	}
+	october := expected.Lines[1].ChargeID
+
+	got, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 400000, Method: domain.MethodCash,
+		PaidAt: time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), ChargeIDs: []string{october},
+	})
+	if err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+	if len(got.Allocations) != 1 || got.Allocations[0].ChargeID() != october || got.Allocations[0].Amount().Int64() != 320000 {
+		t.Errorf("allocations = %+v, want October alone, 3,200", got.Allocations)
+	}
+	if got.UnallocatedCents != 80000 {
+		t.Errorf("credit = %d, want the 800 left over", got.UnallocatedCents)
+	}
+	if len(got.Surcharges) != 0 {
+		t.Errorf("materialised %d surcharges; September was not chosen", len(got.Surcharges))
+	}
+}
+
+// A chosen late month carries its surcharge: the fee is never left behind.
+func TestAChosenLateMonthCarriesItsSurcharge(t *testing.T) {
+	f := depositFixture(t)
+	expected, _ := f.svc.ExpectedToday(context.Background(), testStudent, time.Date(2026, time.October, 10, 0, 0, 0, 0, time.UTC))
+	september := expected.Lines[0].ChargeID
+
+	got, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 350000, Method: domain.MethodCash,
+		PaidAt: time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), ChargeIDs: []string{september},
+	})
+	if err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+	if len(got.Surcharges) != 1 || got.UnallocatedCents != 0 {
+		t.Errorf("surcharges %d, credit %d; want September's surcharge paid and nothing left", len(got.Surcharges), got.UnallocatedCents)
+	}
+}
+
+func TestAChargeOfAnotherStudentCannotBeChosen(t *testing.T) {
+	f := depositFixture(t)
+	_, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 1000, Method: domain.MethodCash,
+		PaidAt: time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), ChargeIDs: []string{"not-theirs"},
+	})
+	if glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("want KindInvalid, got %v", err)
+	}
+}

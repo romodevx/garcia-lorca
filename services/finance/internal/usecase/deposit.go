@@ -31,6 +31,11 @@ type DepositInput struct {
 	// who is always punctual and slipped once — a decision, never a default,
 	// and it is recorded as one.
 	GrantEarlyPayment bool
+	// ChargeIDs, when given, are the only charges the money may pay (task 8):
+	// the cashier's choice at the counter, paid oldest first, each month with
+	// its surcharge. What is left is the family's credit. Empty keeps the rule
+	// as it was: the oldest debt first, across everything owed.
+	ChargeIDs []string
 	// Receiver is who took the money: the authenticated caller, set by the
 	// gateway (task 7). Recorded on the deposit and on every payment it splits
 	// into.
@@ -180,6 +185,7 @@ func (s *FinanceService) prepareDeposit(ctx context.Context, in DepositInput) (d
 		paidOn:      when,
 		description: lateFeeConceptName,
 		grantEarly:  in.GrantEarlyPayment,
+		chosen:      chosenSet(in.ChargeIDs),
 	}, nil
 }
 
@@ -242,6 +248,28 @@ type Expected struct {
 	// AnnualBalanceCents is the whole year still owed. Shown beside the expected
 	// figure so nobody confuses "what is due today" with "what is left".
 	AnnualBalanceCents int64
+	// Lines are the same figures concept by concept (task 8), oldest due date
+	// first: the counter lists them so the cashier can choose what the money
+	// pays. The Due lines add up to AmountCents.
+	Lines []ExpectedLine
+}
+
+// ExpectedLine is one charge still owed, as of the day being asked about.
+type ExpectedLine struct {
+	ChargeID    string
+	Description string
+	DueDate     time.Time
+	// OwedCents is what is left of the charge itself, at the price that day.
+	OwedCents int64
+	// SurchargeCents is what being late has cost this charge: surcharges
+	// already written down and still unpaid, plus what the daily rule has
+	// earned since.
+	SurchargeCents int64
+	// DiscountCents is the early-payment reward settling it that day earns.
+	DiscountCents int64
+	TotalCents    int64
+	// Due is whether the charge is asked for that day (see expectedBy).
+	Due bool
 }
 
 // ExpectedToday works out what is due as of a date.
@@ -296,14 +324,21 @@ func expectedFrom(
 
 	var out Expected
 	materialised := map[string]int64{}
+	// unpaidFees is the part of a charge's written-down surcharges still owed,
+	// so its line can carry it (task 8).
+	unpaidFees := map[string]int64{}
 	for _, c := range charges {
 		if c.Charge.Status() == domain.StatusCancelled || c.Charge.ConceptID() != lateFeeID {
 			continue
 		}
 		if parent, ok := surchargeParent(c.Charge.ExternalRef()); ok {
 			materialised[parent] += c.Charge.Effective().Int64()
+			if owed(c) > 0 && expectedBy(c.Charge.DueDate(), when) {
+				unpaidFees[parent] += owed(c)
+			}
 		}
 	}
+	lines := map[string]*ExpectedLine{}
 
 	for _, c := range charges {
 		if c.Charge.Status() == domain.StatusCancelled || owed(c) <= 0 {
@@ -322,22 +357,38 @@ func expectedFrom(
 			c.Charge = settled
 		}
 		out.AnnualBalanceCents += owed(c)
+		isFee := c.Charge.ConceptID() == lateFeeID
+		// A written-down surcharge rides on its month's line; anything else is
+		// a line of its own.
+		var line *ExpectedLine
+		if _, ridesOnMonth := surchargeParent(c.Charge.ExternalRef()); !isFee || !ridesOnMonth {
+			line = &ExpectedLine{ChargeID: c.Charge.ID(), Description: c.Charge.Description(), DueDate: c.Charge.DueDate(), OwedCents: owed(c)}
+			lines[c.Charge.ID()] = line
+		}
 		if !expectedBy(c.Charge.DueDate(), when) {
 			// Billed, but not yet asked for.
 			continue
 		}
 		out.AmountCents += owed(c)
 
-		if c.Charge.ConceptID() == lateFeeID {
+		if isFee {
 			out.SurchargeCents += owed(c)
+			if line != nil {
+				// A surcharge with no month to ride on is its own line.
+				line.SurchargeCents, line.OwedCents = owed(c), 0
+				line.Due = true
+			}
 			continue
 		}
+		line.Due = true
+		line.SurchargeCents += unpaidFees[c.Charge.ID()]
 		// What the daily rule has earned and nobody has written down yet.
 		if p := policy; p.DailyMode {
 			pending := domain.Surcharge(p, calendar, c.Charge.DueDate(), when) - materialised[c.Charge.ID()]
 			if pending > 0 {
 				out.AmountCents += pending
 				out.SurchargeCents += pending
+				line.SurchargeCents += pending
 			}
 		}
 		if c.Charge.ConceptID() == tuitionID && c.Charge.Discount().Int64() == 0 {
@@ -346,13 +397,32 @@ func expectedFrom(
 			if d := domain.EarlyPaymentDiscount(policy, calendar, monthStart, when); d > 0 {
 				out.DiscountCents += d
 				out.AmountCents -= d
+				line.DiscountCents = d
 			}
 		}
 	}
 	if out.AmountCents < 0 {
 		out.AmountCents = 0
 	}
+	out.Lines = sortedLines(lines)
 	return out, nil
+}
+
+// sortedLines is the counter's list: oldest due date first, then by id so the
+// order is the same on every read.
+func sortedLines(byID map[string]*ExpectedLine) []ExpectedLine {
+	out := make([]ExpectedLine, 0, len(byID))
+	for _, l := range byID {
+		l.TotalCents = l.OwedCents + l.SurchargeCents - l.DiscountCents
+		out = append(out, *l)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].DueDate.Equal(out[j].DueDate) {
+			return out[i].DueDate.Before(out[j].DueDate)
+		}
+		return out[i].ChargeID < out[j].ChargeID
+	})
+	return out
 }
 
 // expectedBy decides whether a charge is being asked for as of a date: it has
@@ -435,6 +505,8 @@ type depositPlanner struct {
 	description string
 	// grantEarly carries the school's decision to honour the reward late.
 	grantEarly bool
+	// chosen restricts the split to these charges; nil means every charge.
+	chosen map[string]bool
 }
 
 // repriceInscription is the ladder applied at the counter: what this line of the
@@ -584,6 +656,10 @@ func inscriptionPaidOn(
 // reading them.
 func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, error) {
 	base, feesByCharge := p.partition(open)
+	base, err := p.onlyChosen(base)
+	if err != nil {
+		return ports.DepositWrite{}, err
+	}
 	sort.Slice(base, func(i, j int) bool {
 		if !base[i].Charge.DueDate().Equal(base[j].Charge.DueDate()) {
 			return base[i].Charge.DueDate().Before(base[j].Charge.DueDate())
@@ -708,6 +784,37 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 
 // partition splits the student's charges into the debts themselves and the
 // surcharges already raised against each of them.
+// chosenSet is the cashier's selection as a set; nil when nothing was chosen.
+func chosenSet(ids []string) map[string]bool {
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		out[id] = true
+	}
+	return out
+}
+
+// onlyChosen keeps the charges the cashier chose (task 8). A chosen id that is
+// not one of this student's charges is refused rather than ignored: money must
+// never be taken against a list the office did not mean.
+func (p *depositPlanner) onlyChosen(base []ports.ChargeWithPaid) ([]ports.ChargeWithPaid, error) {
+	if p.chosen == nil {
+		return base, nil
+	}
+	kept := make([]ports.ChargeWithPaid, 0, len(p.chosen))
+	for _, c := range base {
+		if p.chosen[c.Charge.ID()] {
+			kept = append(kept, c)
+		}
+	}
+	if len(kept) != len(p.chosen) {
+		return nil, glerrors.New(glerrors.KindInvalid, "a chosen charge is not one of this student's open charges")
+	}
+	return kept, nil
+}
+
 func (p *depositPlanner) partition(open []ports.ChargeWithPaid) ([]ports.ChargeWithPaid, map[string][]ports.ChargeWithPaid) {
 	var base []ports.ChargeWithPaid
 	fees := map[string][]ports.ChargeWithPaid{}
