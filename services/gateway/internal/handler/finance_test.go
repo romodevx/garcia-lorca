@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 // needs. It records the last input and returns canned results/errors so each
 // handler is exercised in isolation (no Connect round-trip).
 type fakeFinance struct {
+	depositChargeIDs []string
 	depositReceiver client.Receiver
 	payReceiver     client.Receiver
 	planIn     client.TuitionPlanInput
@@ -99,8 +101,9 @@ func (f *fakeFinance) ExpectedToday(_ context.Context, studentID, on string) (cl
 	return f.expected, f.err
 }
 
-func (f *fakeFinance) RegisterDeposit(_ context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string, receiver client.Receiver) (client.DepositResult, error) {
+func (f *fakeFinance) RegisterDeposit(_ context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string, receiver client.Receiver, chargeIDs []string) (client.DepositResult, error) {
 	f.depositCardType = cardType
+	f.depositChargeIDs = chargeIDs
 	f.depositReceiver = receiver
 	f.depositStudent, f.depositAmount, f.depositMethod = studentID, amountCents, method
 	f.depositKey, f.depositPaidAt = idempotencyKey, paidAt
@@ -111,8 +114,9 @@ func (f *fakeFinance) RegisterDeposit(_ context.Context, studentID string, amoun
 	return f.depositResult, nil
 }
 
-func (f *fakeFinance) PreviewDeposit(_ context.Context, studentID string, amountCents int64, paidAt time.Time) (client.DepositResult, error) {
+func (f *fakeFinance) PreviewDeposit(_ context.Context, studentID string, amountCents int64, paidAt time.Time, chargeIDs []string) (client.DepositResult, error) {
 	f.depositStudent, f.depositAmount, f.depositPaidAt = studentID, amountCents, paidAt
+	f.depositChargeIDs = chargeIDs
 	return f.depositResult, f.err
 }
 
@@ -914,4 +918,38 @@ type countingNamer struct{ calls int }
 func (c *countingNamer) GetUser(context.Context, string) (client.User, error) {
 	c.calls++
 	return client.User{}, nil
+}
+
+// Task 8: the cashier's choice of charges reaches finance, on the deposit and
+// on its preview; the quote answers the debt concept by concept.
+func TestFinanceForwardsTheChosenCharges(t *testing.T) {
+	svc := &fakeFinance{depositResult: client.DepositResult{Deposit: client.Deposit{ID: "dep-1"}}}
+	h := handler.NewFinanceHandler(svc)
+
+	doReq(t, h.RegisterDeposit, http.MethodPost, "/api/v1/finance/deposits",
+		`{"studentId":"stu-1","amountCents":1000,"method":"cash","chargeIds":["ch-oct","ch-nov"]}`)
+	if strings.Join(svc.depositChargeIDs, ",") != "ch-oct,ch-nov" {
+		t.Errorf("deposit chargeIds = %v", svc.depositChargeIDs)
+	}
+	svc.depositChargeIDs = nil
+	doReq(t, h.PreviewDeposit, http.MethodPost, "/api/v1/finance/deposits/preview",
+		`{"studentId":"stu-1","amountCents":1000,"chargeIds":["ch-oct"]}`)
+	if strings.Join(svc.depositChargeIDs, ",") != "ch-oct" {
+		t.Errorf("preview chargeIds = %v", svc.depositChargeIDs)
+	}
+}
+
+func TestFinanceExpectedAnswersItsLines(t *testing.T) {
+	svc := &fakeFinance{expected: client.Expected{AmountCents: 350000, Lines: []client.ExpectedLine{{
+		ChargeID: "ch-sep", Description: "Colegiatura septiembre", DueDate: "2026-09-10",
+		OwedCents: 320000, SurchargeCents: 30000, TotalCents: 350000, Due: true,
+	}}}}
+	h := handler.NewFinanceHandler(svc)
+	rec := doReq(t, h.ExpectedToday, http.MethodGet, "/api/v1/finance/expected?studentId=stu-1", "")
+	body := rec.Body.String()
+	for _, want := range []string{`"lines"`, `"chargeId":"ch-sep"`, `"surchargeCents":30000`, `"totalCents":350000`, `"due":true`, `"dueDate":"2026-09-10"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected body lacks %s: %s", want, body)
+		}
+	}
 }

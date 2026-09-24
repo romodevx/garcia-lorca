@@ -1370,6 +1370,14 @@ paths:
                     because the school decided to — the parent who is always
                     punctual and slipped once. Recorded under its own discount
                     reason so a report can tell a decision from the rule firing.
+                chargeIds:
+                  type: array
+                  items: { type: string, format: uuid }
+                  description: >
+                    The charges the money may pay, chosen at the counter: paid
+                    oldest first, each month with its surcharge; what is left is
+                    the family's credit. Empty or absent means every charge,
+                    oldest first. A charge that is not the student's is refused.
       responses:
         '201':
           description: The deposit and what it covered.
@@ -1445,6 +1453,23 @@ paths:
                   surchargeCents: { type: integer, format: int64, minimum: 0 }
                   discountCents: { type: integer, format: int64, minimum: 0 }
                   annualBalanceCents: { type: integer, format: int64, minimum: 0 }
+                  lines:
+                    type: array
+                    description: >
+                      The debt concept by concept, oldest due date first. The
+                      lines marked due add up to amountCents.
+                    items:
+                      type: object
+                      required: [chargeId, description, dueDate, owedCents, surchargeCents, discountCents, totalCents, due]
+                      properties:
+                        chargeId: { type: string, format: uuid }
+                        description: { type: string, example: "Colegiatura septiembre" }
+                        dueDate: { type: string, format: date }
+                        owedCents: { type: integer, format: int64, example: 320000 }
+                        surchargeCents: { type: integer, format: int64, example: 30000 }
+                        discountCents: { type: integer, format: int64, example: 0 }
+                        totalCents: { type: integer, format: int64, example: 350000 }
+                        due: { type: boolean, description: "Asked for that day: due, or falling due later that month." }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -1476,6 +1501,14 @@ paths:
                 studentId: { type: string, format: uuid }
                 amountCents: { type: integer, format: int64, minimum: 1 }
                 paidAt: { type: string, format: date }
+                chargeIds:
+                  type: array
+                  items: { type: string, format: uuid }
+                  description: >
+                    The charges the money may pay, chosen at the counter: paid
+                    oldest first, each month with its surcharge; what is left is
+                    the family's credit. Empty or absent means every charge,
+                    oldest first. A charge that is not the student's is refused.
       responses:
         '200':
           description: The projected split.

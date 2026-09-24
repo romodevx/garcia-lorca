@@ -320,7 +320,7 @@ type DepositResult struct {
 
 // RegisterDeposit takes money without being told what it pays for and splits it
 // across what the family owes, oldest first.
-func (c *FinanceClient) RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string, receiver Receiver) (DepositResult, error) {
+func (c *FinanceClient) RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string, receiver Receiver, chargeIDs []string) (DepositResult, error) {
 	req := &financev1.RegisterDepositRequest{
 		StudentId:         studentID,
 		AmountCents:       amountCents,
@@ -331,6 +331,7 @@ func (c *FinanceClient) RegisterDeposit(ctx context.Context, studentID string, a
 		CardType:          cardType,
 		ReceivedBy:        receiver.UserID,
 		ReceivedByName:    receiver.Name,
+		ChargeIds:         chargeIDs,
 	}
 	if !paidAt.IsZero() {
 		req.PaidAt = timestamppb.New(paidAt)
@@ -353,8 +354,8 @@ func (c *FinanceClient) RegisterDeposit(ctx context.Context, studentID string, a
 }
 
 // PreviewDeposit says what an amount would cover, without taking it.
-func (c *FinanceClient) PreviewDeposit(ctx context.Context, studentID string, amountCents int64, paidAt time.Time) (DepositResult, error) {
-	req := &financev1.PreviewDepositRequest{StudentId: studentID, AmountCents: amountCents}
+func (c *FinanceClient) PreviewDeposit(ctx context.Context, studentID string, amountCents int64, paidAt time.Time, chargeIDs []string) (DepositResult, error) {
+	req := &financev1.PreviewDepositRequest{StudentId: studentID, AmountCents: amountCents, ChargeIds: chargeIDs}
 	if !paidAt.IsZero() {
 		req.PaidAt = timestamppb.New(paidAt)
 	}
@@ -379,6 +380,20 @@ type Expected struct {
 	SurchargeCents     int64 `json:"surchargeCents"`
 	DiscountCents      int64 `json:"discountCents"`
 	AnnualBalanceCents int64 `json:"annualBalanceCents"`
+	// Lines is the debt concept by concept, oldest due date first (task 8).
+	Lines []ExpectedLine `json:"lines"`
+}
+
+// ExpectedLine is one charge still owed, as of the day asked about.
+type ExpectedLine struct {
+	ChargeID       string `json:"chargeId"`
+	Description    string `json:"description"`
+	DueDate        string `json:"dueDate"`
+	OwedCents      int64  `json:"owedCents"`
+	SurchargeCents int64  `json:"surchargeCents"`
+	DiscountCents  int64  `json:"discountCents"`
+	TotalCents     int64  `json:"totalCents"`
+	Due            bool   `json:"due"`
 }
 
 // ExpectedToday asks what is due as of a date ("" = today).
@@ -394,7 +409,20 @@ func (c *FinanceClient) ExpectedToday(ctx context.Context, studentID, on string)
 		SurchargeCents:     res.Msg.GetSurchargeCents(),
 		DiscountCents:      res.Msg.GetDiscountCents(),
 		AnnualBalanceCents: res.Msg.GetAnnualBalanceCents(),
+		Lines:              toExpectedLines(res.Msg.GetLines()),
 	}, nil
+}
+
+func toExpectedLines(lines []*financev1.ExpectedLine) []ExpectedLine {
+	out := make([]ExpectedLine, 0, len(lines))
+	for _, l := range lines {
+		out = append(out, ExpectedLine{
+			ChargeID: l.GetChargeId(), Description: l.GetDescription(), DueDate: l.GetDueDate(),
+			OwedCents: l.GetOwedCents(), SurchargeCents: l.GetSurchargeCents(), DiscountCents: l.GetDiscountCents(),
+			TotalCents: l.GetTotalCents(), Due: l.GetDue(),
+		})
+	}
+	return out
 }
 
 // ListDeposits returns a student's deposits, newest first.

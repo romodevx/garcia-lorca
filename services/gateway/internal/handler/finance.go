@@ -27,9 +27,9 @@ type FinanceService interface {
 	CancelCharge(ctx context.Context, chargeID string) (client.Charge, error)
 	RegisterPaymentAt(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, receiver client.Receiver) (client.Payment, client.Charge, error)
 	GetAccount(ctx context.Context, studentID string) (client.AccountStatement, error)
-	RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string, receiver client.Receiver) (client.DepositResult, error)
+	RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string, receiver client.Receiver, chargeIDs []string) (client.DepositResult, error)
 	ExpectedToday(ctx context.Context, studentID, on string) (client.Expected, error)
-	PreviewDeposit(ctx context.Context, studentID string, amountCents int64, paidAt time.Time) (client.DepositResult, error)
+	PreviewDeposit(ctx context.Context, studentID string, amountCents int64, paidAt time.Time, chargeIDs []string) (client.DepositResult, error)
 	ListDeposits(ctx context.Context, studentID string) ([]client.Deposit, error)
 	DailyCashUp(ctx context.Context, day string) (client.CashUp, error)
 	IncomeByConcept(ctx context.Context, from, to string) (client.Income, error)
@@ -390,6 +390,9 @@ type registerDepositRequest struct {
 	GrantEarlyPayment bool `json:"grantEarlyPayment"`
 	// CardType is debit or credit, only meaningful when method is card.
 	CardType string `json:"cardType"`
+	// ChargeIDs are the charges the money may pay, chosen at the counter
+	// (task 8). Empty means every charge, oldest first.
+	ChargeIDs []string `json:"chargeIds"`
 }
 
 type voidDepositRequest struct {
@@ -412,7 +415,7 @@ func (h *FinanceHandler) RegisterDeposit(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	got, derr := h.svc.RegisterDeposit(r.Context(), req.StudentID, req.AmountCents,
-		req.Method, req.Reference, req.IdempotencyKey, paidAt, req.GrantEarlyPayment, req.CardType, h.receiverOf(r))
+		req.Method, req.Reference, req.IdempotencyKey, paidAt, req.GrantEarlyPayment, req.CardType, h.receiverOf(r), req.ChargeIDs)
 	if derr != nil {
 		writeConnectError(w, derr)
 		return
@@ -444,7 +447,7 @@ func (h *FinanceHandler) PreviewDeposit(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "paidAt must be a date like 2026-09-04", http.StatusBadRequest)
 		return
 	}
-	got, perr := h.svc.PreviewDeposit(r.Context(), req.StudentID, req.AmountCents, paidAt)
+	got, perr := h.svc.PreviewDeposit(r.Context(), req.StudentID, req.AmountCents, paidAt, req.ChargeIDs)
 	if perr != nil {
 		writeConnectError(w, perr)
 		return
