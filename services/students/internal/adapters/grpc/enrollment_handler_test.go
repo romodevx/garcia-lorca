@@ -71,7 +71,8 @@ func (r *fakeEnrollmentRepo) ListEnrollments(_ context.Context, studentID, cycle
 	return out, nil
 }
 
-func (r *fakeEnrollmentRepo) TransferEnrollment(_ context.Context, enrollmentID, toGroupID string, _ domain.EnrollmentTransfer) error {
+func (r *fakeEnrollmentRepo) TransferEnrollment(_ context.Context, cmd ports.TransferCommand) error {
+	enrollmentID, toGroupID := cmd.EnrollmentID, cmd.To.ID
 	cur, ok := r.byID[enrollmentID]
 	if !ok {
 		return glerrors.ErrNotFound

@@ -82,6 +82,7 @@ func (c *Client) GroupByID(ctx context.Context, id string) (ports.GroupRef, erro
 		CycleID:      g.GetCycleId(),
 		Name:         g.GetName(),
 		GradeLevelID: g.GetGradeLevelId(),
+		Capacity:     int(g.GetCapacity()),
 	}, nil
 }
 

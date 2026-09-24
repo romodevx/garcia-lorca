@@ -364,13 +364,27 @@ function QuickAdd({
  * next was a group of another level, which the server explains itself.
  */
 export function placementRefusal(err: unknown): string {
-  if (err instanceof StudentsError) {
-    if (err.status === 409) return "Ya está inscrito en un grupo este ciclo. Usa «Cambiar de grupo».";
-    if (err.detail === "already in that group") return "Ya está en ese grupo.";
-    if (err.status === 400 && err.detail !== "") return err.detail.charAt(0).toUpperCase() + err.detail.slice(1) + ".";
+  if (!(err instanceof StudentsError)) return PLACEMENT_FALLBACK;
+  const said = SERVER_REFUSALS[err.detail];
+  if (said !== undefined) return said;
+  // What the server wrote in Spanish (the level check, a withdrawn file, a
+  // full group) is already addressed to the office; English never is.
+  if (err.detail !== "" && /[áéíóúñ]|\b(el|la|ese|no|ya)\b/i.test(err.detail)) {
+    return err.detail.charAt(0).toUpperCase() + err.detail.slice(1) + ".";
   }
-  return "No se pudo guardar el cambio de grupo. Intenta de nuevo.";
+  return PLACEMENT_FALLBACK;
 }
+
+const PLACEMENT_FALLBACK = "No se pudo guardar el cambio de grupo. Intenta de nuevo.";
+
+/** The server's English refusals, in words the office can act on. */
+const SERVER_REFUSALS: Record<string, string> = {
+  "student is already enrolled this cycle": "Ya está inscrito en un grupo este ciclo. Usa «Cambiar de grupo».",
+  "cannot transfer across cycles": "Ese grupo es de otro ciclo.",
+  "enrollment is not active": "Su inscripción ya no está activa.",
+  "group not found": "Ese grupo ya no existe. Cierra la ficha y vuelve a abrirla.",
+  "already in that group": "Ya está en ese grupo.",
+};
 
 /**
  * The pupil's sheet.
@@ -384,13 +398,18 @@ export function placementRefusal(err: unknown): string {
 function StudentSheet({
   st,
   groups,
+  cycleId,
   gradeLevels,
+  gradeLevelsFailed,
   onClose,
   onPlaced,
 }: {
   st: Student;
   groups: readonly Group[];
+  /** The cycle whose groups are shown: the pupil's enrolment in THIS cycle. */
+  cycleId: string;
   gradeLevels: readonly GradeLevel[];
+  gradeLevelsFailed: boolean;
   onClose: () => void;
   onPlaced: (message: string) => void;
 }): ReactElement {
@@ -400,7 +419,8 @@ function StudentSheet({
     ["Tutor", st.guardianName],
     ["Admisión", statusOf(st.admissionStatus).label],
   ];
-  const [current, setCurrent] = useState<Enrollment | null | undefined>(undefined);
+  // undefined = still reading, null = no group this cycle, "failed" = unknown.
+  const [current, setCurrent] = useState<Enrollment | null | undefined | "failed">(undefined);
   const [gid, setGid] = useState("");
   const [reason, setReason] = useState("");
   const [reasonError, setReasonError] = useState<string | undefined>(undefined);
@@ -409,18 +429,24 @@ function StudentSheet({
 
   useEffect(() => {
     let alive = true;
-    listEnrollments(API_URL, { studentId: st.id })
+    // An enrolment from last year stays "active" (a cycle's end closes nothing),
+    // so only this cycle's counts.
+    listEnrollments(API_URL, { studentId: st.id, cycleId })
       .then((all) => { if (alive) setCurrent(all.find((e) => e.status === "active") ?? null); })
-      .catch(() => { if (alive) setCurrent(null); });
+      // Not knowing is not "no group": offering "Inscribir" then would bring
+      // back the second-enrolment 409 this sheet was fixed for.
+      .catch(() => { if (alive) setCurrent("failed"); });
     return () => { alive = false; };
-  }, [st.id]);
+  }, [st.id, cycleId]);
 
   const levelOfGrade = useMemo(() => new Map(gradeLevels.map((g) => [g.id, g.levelId])), [gradeLevels]);
   // A legacy pupil with no level id has nothing to filter by: every group shows.
   const ownLevel = groups.filter((g) => st.levelId === "" || levelOfGrade.get(g.gradeLevelId) === st.levelId);
-  const currentGroup = current === null || current === undefined ? undefined : groups.find((g) => g.id === current.groupId);
-  const choices = current ? ownLevel.filter((g) => g.id !== current.groupId) : ownLevel;
-  const transferring = current !== null && current !== undefined;
+  const placed = current !== null && current !== undefined && current !== "failed" ? current : undefined;
+  const currentGroup = placed === undefined ? undefined : groups.find((g) => g.id === placed.groupId);
+  const choices = placed !== undefined ? ownLevel.filter((g) => g.id !== placed.groupId) : ownLevel;
+  const transferring = placed !== undefined;
+  const ready = current !== undefined && current !== "failed" && !gradeLevelsFailed;
 
   const save = async (): Promise<void> => {
     setRefusal(undefined);
@@ -434,8 +460,8 @@ function StudentSheet({
     }
     setSaving(true);
     try {
-      if (transferring) {
-        await transfer(API_URL, { enrollmentId: current.id, toGroupId: gid, reason: reason.trim() });
+      if (placed !== undefined) {
+        await transfer(API_URL, { enrollmentId: placed.id, toGroupId: gid, reason: reason.trim() });
         onPlaced("Alumno cambiado de grupo");
       } else {
         await enroll(API_URL, { studentId: st.id, groupId: gid });
@@ -467,7 +493,7 @@ function StudentSheet({
       footer={
         <>
           <Btn kind="ghost" icon="documents" style={{ flex: 1 }}>Documentos</Btn>
-          {current !== undefined && (
+          {ready && (
             <Btn icon="check" onClick={() => void save()} style={{ flex: 1, opacity: saving ? 0.6 : 1 }}>
               {transferring ? "Cambiar de grupo" : "Inscribir"}
             </Btn>
@@ -483,7 +509,17 @@ function StudentSheet({
             </div>
           ))}
           <ContactsPanel studentId={st.id} />
-          {current !== undefined && (
+          {current === "failed" && (
+            <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 13.5, padding: "18px 0 0" }}>
+              No pudimos leer su inscripción de este ciclo. Cierra la ficha y vuelve a abrirla.
+            </p>
+          )}
+          {current !== "failed" && gradeLevelsFailed && (
+            <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 13.5, padding: "18px 0 0" }}>
+              No pudimos leer los grados de la escuela, así que no sabemos qué grupos son de su nivel. Recarga la página.
+            </p>
+          )}
+          {ready && (
             <div style={{ padding: "18px 0", display: "grid", gap: 10 }}>
               {transferring && (
                 <p style={{ fontSize: 14, color: "var(--text)" }}>
@@ -549,6 +585,9 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
   const [groups, setGroups] = useState<Group[]>([]);
   // Every level's grades, so the sheet can tell which level a group belongs to.
   const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
+  const [gradeLevelsFailed, setGradeLevelsFailed] = useState(false);
+  // The cycle whose groups the sheet offers (the active one, or the first).
+  const [groupsCycleId, setGroupsCycleId] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [tab, setTab] = useState<"all" | "active" | "pending" | "inactive">("all");
@@ -583,11 +622,16 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
   useEffect(() => {
     reload();
     listLevels(API_URL).then(setLevels).catch(() => setLevels([]));
-    listGradeLevels(API_URL, "").then(setGradeLevels).catch(() => setGradeLevels([]));
+    listGradeLevels(API_URL, "")
+      .then((all) => { setGradeLevels(all); setGradeLevelsFailed(false); })
+      .catch(() => setGradeLevelsFailed(true));
     listCycles(API_URL).then((cs) => {
       setCycles(cs);
       const active = cs.find((c) => c.status === "active") ?? cs[0];
-      if (active !== undefined) listGroups(API_URL, active.id).then(setGroups).catch(() => {});
+      if (active !== undefined) {
+        setGroupsCycleId(active.id);
+        listGroups(API_URL, active.id).then(setGroups).catch(() => {});
+      }
     }).catch(() => {});
   }, [reload]);
 
@@ -798,7 +842,7 @@ export function StudentsScreen({ onBack }: StudentsScreenProps): ReactElement {
       <button onClick={() => setAdd(true)} title="Nuevo alumno" style={{ position: "fixed", right: 32, bottom: 32, zIndex: 50, height: 60, padding: "0 26px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 10, background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16.5, cursor: "pointer", boxShadow: "0 10px 30px color-mix(in oklab, var(--lime) 45%, transparent)" }}><Icon name="plus" size={22} stroke={2.6} />Nuevo alumno</button>
 
       {add && <QuickAdd onClose={() => setAdd(false)} onSave={onSave} levels={levels} />}
-      {sheet !== null && <StudentSheet st={sheet} groups={groups} gradeLevels={gradeLevels} onClose={() => setSheet(null)} onPlaced={onPlaced} />}
+      {sheet !== null && <StudentSheet st={sheet} groups={groups} cycleId={groupsCycleId} gradeLevels={gradeLevels} gradeLevelsFailed={gradeLevelsFailed} onClose={() => setSheet(null)} onPlaced={onPlaced} />}
       {toast !== null && (
         <div style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>
           <Icon name="check" size={20} stroke={2.6} />{toast}

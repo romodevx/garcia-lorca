@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as studentsApi from "../../students/api";
 import * as configApi from "../../config/api";
 import { StudentsError } from "../../students/api";
-import { StudentsScreen } from "./StudentsScreen";
+import { StudentsScreen, placementRefusal } from "./StudentsScreen";
 
 vi.mock("../../students/api", async (importOriginal) => ({
   ...(await importOriginal<typeof studentsApi>()),
@@ -133,5 +133,55 @@ describe("la ficha de un alumno sin grupo", () => {
     await user.click(within(sheet).getByRole("button", { name: "Inscribir" }));
 
     expect(await within(sheet).findByRole("alert")).toHaveTextContent(/ya está inscrito/i);
+  });
+});
+
+describe("lo que la ficha lee", () => {
+  beforeEach(() => {
+    students.listStudents.mockResolvedValue([pupil("lv-pri")]);
+  });
+
+  // An enrolment from last year is still "active" (a cycle's end closes
+  // nothing), so the sheet asks for the pupil's enrolment in THIS cycle only.
+  it("busca la inscripción del ciclo cuyos grupos muestra", async () => {
+    students.listEnrollments.mockResolvedValue([]);
+    const user = userEvent.setup();
+    await openSheet(user);
+    await waitFor(() => expect(students.listEnrollments).toHaveBeenCalledWith(expect.any(String), { studentId: "stu-1", cycleId: "c1" }));
+  });
+
+  // Not reading the enrolment is not "no group": offering "Inscribir" then
+  // brings back the very 409 this sheet was fixed for.
+  it("si no pudo leer su inscripción, lo dice y no ofrece inscribir", async () => {
+    students.listEnrollments.mockRejectedValue(new Error("network"));
+    const user = userEvent.setup();
+    const sheet = await openSheet(user);
+
+    expect(await within(sheet).findByRole("alert")).toHaveTextContent(/No pudimos leer/);
+    expect(within(sheet).queryByRole("button", { name: "Inscribir" })).not.toBeInTheDocument();
+  });
+
+  it("si no pudo leer los grados, no manda a crear grupos que ya existen", async () => {
+    students.listEnrollments.mockResolvedValue([]);
+    config.listGradeLevels.mockRejectedValue(new Error("config down"));
+    const user = userEvent.setup();
+    const sheet = await openSheet(user);
+
+    expect(await within(sheet).findByRole("alert")).toHaveTextContent(/No pudimos leer los grados/);
+    expect(within(sheet).queryByText(/créalos en Configuración/)).not.toBeInTheDocument();
+  });
+});
+
+describe("placementRefusal", () => {
+  it("dice «ya inscrito» solo cuando eso fue lo que pasó", () => {
+    expect(placementRefusal(new StudentsError(409, "student is already enrolled this cycle"))).toMatch(/Ya está inscrito/);
+    expect(placementRefusal(new StudentsError(409, "ese alumno está dado de baja; reactívalo antes"))).toMatch(/dado de baja/);
+  });
+
+  it("no enseña inglés del servidor", () => {
+    expect(placementRefusal(new StudentsError(400, "cannot transfer across cycles"))).toMatch(/otro ciclo/);
+    expect(placementRefusal(new StudentsError(400, "enrollment is not active"))).toMatch(/ya no está activa/);
+    expect(placementRefusal(new StudentsError(400, "group not found"))).toMatch(/ya no existe/);
+    expect(placementRefusal(new StudentsError(400, "ese grupo es de otro nivel: el alumno está en Primaria"))).toMatch(/otro nivel/);
   });
 });

@@ -231,6 +231,11 @@ func (s *EnrollmentService) Transfer(ctx context.Context, enrollmentID, toGroupI
 	if err != nil {
 		return domain.Enrollment{}, err
 	}
+	// A withdrawn or rejected file is not moved around: neither enrol path
+	// places one, and a transfer is a placement.
+	if err := refusePlacementIfTerminal(student); err != nil {
+		return domain.Enrollment{}, err
+	}
 	if err := s.requireSameLevel(ctx, student, toGrp.GradeLevelID); err != nil {
 		return domain.Enrollment{}, err
 	}
@@ -240,13 +245,13 @@ func (s *EnrollmentService) Transfer(ctx context.Context, enrollmentID, toGroupI
 	if err != nil {
 		return domain.Enrollment{}, err
 	}
-	if err := s.enrollments.TransferEnrollment(ctx, enrollmentID, toGroupID, transfer); err != nil {
-		return domain.Enrollment{}, err
-	}
-	// The record follows the placement, as on both enrolment paths: after a
-	// transfer the pupil's file names the group they are now in.
-	student.PlaceIn(toGrp.Name)
-	if err := s.students.Update(ctx, student); err != nil {
+	// One transaction: seats, history, the move and the pupil's file together,
+	// so a failure can never leave the file naming the group they left.
+	if err := s.enrollments.TransferEnrollment(ctx, ports.TransferCommand{
+		EnrollmentID: enrollmentID,
+		To:           ports.GroupSeats{ID: toGrp.ID, Name: toGrp.Name, CycleID: toGrp.CycleID, Capacity: toGrp.Capacity},
+		Transfer:     transfer,
+	}); err != nil {
 		return domain.Enrollment{}, err
 	}
 	return s.enrollments.GetEnrollment(ctx, enrollmentID)
@@ -270,7 +275,7 @@ func (s *EnrollmentService) requireSameLevel(ctx context.Context, student *domai
 	}
 	if got != want {
 		return glerrors.New(glerrors.KindInvalid,
-			"ese grupo es de otro nivel: "+student.FirstName()+" está en "+student.Level().Name())
+			"ese grupo es de otro nivel: el alumno está en "+student.Level().Name())
 	}
 	return nil
 }
