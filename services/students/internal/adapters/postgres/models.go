@@ -107,3 +107,15 @@ type medicalModel struct {
 }
 
 func (medicalModel) TableName() string { return "student_medical" }
+
+// photoModel is the GORM row for `student_photos`.
+type photoModel struct {
+	TenantID    string    `gorm:"column:tenant_id;primaryKey"`
+	StudentID   string    `gorm:"column:student_id;primaryKey"`
+	ObjectKey   string    `gorm:"column:object_key"`
+	ContentType string    `gorm:"column:content_type"`
+	SizeBytes   int       `gorm:"column:size_bytes"`
+	UpdatedAt   time.Time `gorm:"column:updated_at"`
+}
+
+func (photoModel) TableName() string { return "student_photos" }

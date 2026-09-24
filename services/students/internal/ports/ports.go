@@ -33,6 +33,11 @@ type StudentRepository interface {
 	// captured); SaveMedical upserts it. A pupil the tenant cannot see is
 	// KindNotFound on save.
 	GetMedical(ctx context.Context, studentID string) (domain.MedicalRecord, error)
+	// PhotoRef returns where a pupil's photo is stored (KindNotFound when the
+	// pupil has none); SavePhotoRef replaces it; DeletePhotoRef removes it.
+	PhotoRef(ctx context.Context, studentID string) (PhotoRef, error)
+	SavePhotoRef(ctx context.Context, studentID string, ref PhotoRef) error
+	DeletePhotoRef(ctx context.Context, studentID string) error
 	SaveMedical(ctx context.Context, studentID string, rec domain.MedicalRecord) error
 	// FindByID returns a student or KindNotFound.
 	FindByID(ctx context.Context, id string) (*domain.Student, error)
@@ -46,6 +51,22 @@ type StudentRepository interface {
 type EventPublisher interface {
 	PublishStudentEnrolled(ctx context.Context, ev domain.StudentEnrolledEvent) error
 	PublishAdmissionChanged(ctx context.Context, ev domain.AdmissionChangedEvent) error
+}
+
+// PhotoRef is where a pupil's photo lives in the object store.
+type PhotoRef struct {
+	Key         string
+	ContentType string
+	Size        int
+}
+
+// PhotoStore keeps photo bytes in a private object store (a GCS bucket; the
+// fake-gcs emulator locally). Objects are never exposed: the gateway serves
+// them after its own permission check. A missing object is glerrors.ErrNotFound.
+type PhotoStore interface {
+	Put(ctx context.Context, key, contentType string, data []byte) error
+	Get(ctx context.Context, key string) ([]byte, error)
+	Delete(ctx context.Context, key string) error
 }
 
 // LevelCatalog resolves a level id against config's catalog of levels — the

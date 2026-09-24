@@ -42,6 +42,8 @@ resource "google_project_service" "apis" {
     "cloudbilling.googleapis.com",
     # Minting OIDC tokens for service-to-service calls (pkg/gcpauth).
     "iamcredentials.googleapis.com",
+    # Pupils' photos: the private bucket in storage.tf.
+    "storage.googleapis.com",
   ])
   project            = var.project_id
   service            = each.value

@@ -104,6 +104,32 @@ func toProtoMedical(r domain.MedicalRecord) *studentsv1.StudentMedical {
 	return &studentsv1.StudentMedical{BloodType: string(r.BloodType()), Allergies: r.Allergies(), Conditions: r.Conditions()}
 }
 
+// UploadStudentPhoto stores (or replaces) a pupil's photo.
+func (h *StudentsHandler) UploadStudentPhoto(ctx context.Context, req *connect.Request[studentsv1.UploadStudentPhotoRequest]) (*connect.Response[studentsv1.UploadStudentPhotoResponse], error) {
+	ref, err := h.svc.UploadPhoto(ctx, req.Msg.GetStudentId(), req.Msg.GetData())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.UploadStudentPhotoResponse{ContentType: ref.ContentType, SizeBytes: int32(ref.Size)}), nil
+}
+
+// GetStudentPhoto returns a pupil's photo, or NotFound when there is none.
+func (h *StudentsHandler) GetStudentPhoto(ctx context.Context, req *connect.Request[studentsv1.GetStudentPhotoRequest]) (*connect.Response[studentsv1.GetStudentPhotoResponse], error) {
+	photo, err := h.svc.Photo(ctx, req.Msg.GetStudentId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.GetStudentPhotoResponse{Data: photo.Data(), ContentType: photo.ContentType()}), nil
+}
+
+// DeleteStudentPhoto removes a pupil's photo.
+func (h *StudentsHandler) DeleteStudentPhoto(ctx context.Context, req *connect.Request[studentsv1.DeleteStudentPhotoRequest]) (*connect.Response[studentsv1.DeleteStudentPhotoResponse], error) {
+	if err := h.svc.DeletePhoto(ctx, req.Msg.GetStudentId()); err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.DeleteStudentPhotoResponse{}), nil
+}
+
 func (h *StudentsHandler) GetStudent(ctx context.Context, req *connect.Request[studentsv1.GetStudentRequest]) (*connect.Response[studentsv1.GetStudentResponse], error) {
 	student, err := h.svc.GetStudent(ctx, req.Msg.GetId())
 	if err != nil {

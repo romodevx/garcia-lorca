@@ -518,6 +518,31 @@ func fromProtoMedical(m *studentsv1.StudentMedical) StudentMedical {
 	return StudentMedical{BloodType: m.GetBloodType(), Allergies: m.GetAllergies(), Conditions: m.GetConditions()}
 }
 
+// UploadStudentPhoto stores (or replaces) a pupil's photo; the service decides
+// its type from its bytes.
+func (c *StudentsClient) UploadStudentPhoto(ctx context.Context, studentID string, data []byte) (string, error) {
+	res, err := c.rpc.UploadStudentPhoto(ctx, connect.NewRequest(&studentsv1.UploadStudentPhotoRequest{StudentId: studentID, Data: data}))
+	if err != nil {
+		return "", err
+	}
+	return res.Msg.GetContentType(), nil
+}
+
+// GetStudentPhoto returns a pupil's photo and its content type.
+func (c *StudentsClient) GetStudentPhoto(ctx context.Context, studentID string) ([]byte, string, error) {
+	res, err := c.rpc.GetStudentPhoto(ctx, connect.NewRequest(&studentsv1.GetStudentPhotoRequest{StudentId: studentID}))
+	if err != nil {
+		return nil, "", err
+	}
+	return res.Msg.GetData(), res.Msg.GetContentType(), nil
+}
+
+// DeleteStudentPhoto removes a pupil's photo.
+func (c *StudentsClient) DeleteStudentPhoto(ctx context.Context, studentID string) error {
+	_, err := c.rpc.DeleteStudentPhoto(ctx, connect.NewRequest(&studentsv1.DeleteStudentPhotoRequest{StudentId: studentID}))
+	return err
+}
+
 // UpdateStudent corrects a pupil's file. InvalidArgument (a malformed field)
 // and AlreadyExists (a CURP another pupil holds) propagate for the handler.
 func (c *StudentsClient) UpdateStudent(ctx context.Context, in UpdateStudentInput) (StudentResult, error) {

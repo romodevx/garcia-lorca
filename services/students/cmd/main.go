@@ -39,6 +39,7 @@ import (
 	"github.com/garcia-lorca/pkg/pubsub"
 	"github.com/garcia-lorca/pkg/pubsub/gcp"
 	"github.com/garcia-lorca/services/students/internal/adapters/configclient"
+	"github.com/garcia-lorca/services/students/internal/adapters/gcsphotos"
 	grpcadapter "github.com/garcia-lorca/services/students/internal/adapters/grpc"
 	"github.com/garcia-lorca/services/students/internal/adapters/iamclient"
 	pgadapter "github.com/garcia-lorca/services/students/internal/adapters/postgres"
@@ -228,6 +229,11 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	configBaseURL := envOr("CONFIG_BASE_URL", defaultConfigBaseURL)
 	catalog := configclient.New(configBaseURL, gcpauth.HTTPClient(ctx, configBaseURL))
 	svc := usecase.NewStudentService(repo, events, catalog, tenantID, newID)
+	if photos, err := openPhotoStore(ctx, log); err != nil {
+		return nil, nil, nil, err
+	} else if photos != nil {
+		svc = svc.WithPhotos(photos)
+	}
 	enroll := usecase.NewEnrollmentService(repo, repo, catalog, events, tenantID, newID, time.Now)
 
 	// Guardian links reference iam users, so the use case validates them against
@@ -282,6 +288,30 @@ func openDB() (*gorm.DB, error) {
 
 func recoverFn(_ context.Context, _ connect.Spec, _ http.Header, _ any) error {
 	return connect.NewError(connect.CodeInternal, errors.New("internal error"))
+}
+
+// openPhotoStore opens the private bucket that keeps pupils' photos (task 5).
+// PHOTOS_BUCKET unset means photos are off: the rest of the file still works
+// and photo calls answer that they are not configured. Against the local
+// emulator (STORAGE_EMULATOR_HOST) the bucket is created on start; in the cloud
+// it is Terraform's, and the service account cannot create buckets.
+func openPhotoStore(ctx context.Context, log *slog.Logger) (*gcsphotos.Store, error) {
+	bucket := os.Getenv("PHOTOS_BUCKET")
+	if bucket == "" {
+		log.Warn("PHOTOS_BUCKET not set; pupils' photos are disabled")
+		return nil, nil
+	}
+	store, err := gcsphotos.New(ctx, bucket)
+	if err != nil {
+		return nil, err
+	}
+	if os.Getenv("STORAGE_EMULATOR_HOST") != "" {
+		if err := store.EnsureBucket(ctx, envOr("GOOGLE_CLOUD_PROJECT", "local")); err != nil {
+			return nil, err
+		}
+	}
+	log.Info("students photo store ready", slog.String("bucket", bucket))
+	return store, nil
 }
 
 func envOr(key, fallback string) string {

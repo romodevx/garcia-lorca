@@ -277,6 +277,15 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 		middleware.RequirePermission("medical:read")(http.HandlerFunc(medicalH.Get)))))
 	mux.Handle("PUT /api/v1/students/{id}/medical", guard.Protect("students", requireAuthChanged(
 		middleware.RequirePermission("medical:write")(http.HandlerFunc(medicalH.Put)))))
+	// A pupil's photo (task 5): the bucket is private, so these routes are the
+	// only way to the bytes. Reading needs students:read; changing it needs
+	// students:update.
+	photoH := handler.NewPhotoHandler(studentsClient)
+	mux.Handle("GET /api/v1/students/{id}/photo", studentsRead(photoH.Get))
+	mux.Handle("PUT /api/v1/students/{id}/photo", guard.Protect("students", requireAuthChanged(
+		middleware.RequirePermission("students:update")(http.HandlerFunc(photoH.Put)))))
+	mux.Handle("DELETE /api/v1/students/{id}/photo", guard.Protect("students", requireAuthChanged(
+		middleware.RequirePermission("students:update")(http.HandlerFunc(photoH.Delete)))))
 	// Correcting the file (task 5) needs students:update.
 	mux.Handle("PUT /api/v1/students/{id}", guard.Protect("students", requireAuthChanged(
 		middleware.RequirePermission("students:update")(http.HandlerFunc(studentsH.Update)))))

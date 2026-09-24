@@ -32,6 +32,12 @@ service StudentsService {
   rpc GetStudentMedical(GetStudentMedicalRequest) returns (GetStudentMedicalResponse);
   rpc UpdateStudentMedical(UpdateStudentMedicalRequest) returns (UpdateStudentMedicalResponse);
 
+  // A pupil's photo: JPEG or PNG (judged by its bytes), at most 2 MB, kept in a
+  // private bucket and served only through the gateway.
+  rpc UploadStudentPhoto(UploadStudentPhotoRequest) returns (UploadStudentPhotoResponse);
+  rpc GetStudentPhoto(GetStudentPhotoRequest) returns (GetStudentPhotoResponse);
+  rpc DeleteStudentPhoto(DeleteStudentPhotoRequest) returns (DeleteStudentPhotoResponse);
+
   // ListStudents lists students, optionally filtered by level/group/status.
   rpc ListStudents(ListStudentsRequest) returns (ListStudentsResponse);
 
@@ -225,6 +231,31 @@ message UpdateStudentMedicalRequest {
 message UpdateStudentMedicalResponse {
   StudentMedical medical = 1;
 }
+
+message UploadStudentPhotoRequest {
+  string student_id = 1;
+  bytes data = 2;
+}
+
+message UploadStudentPhotoResponse {
+  string content_type = 1;
+  int32 size_bytes = 2;
+}
+
+message GetStudentPhotoRequest {
+  string student_id = 1;
+}
+
+message GetStudentPhotoResponse {
+  bytes data = 1;
+  string content_type = 2;
+}
+
+message DeleteStudentPhotoRequest {
+  string student_id = 1;
+}
+
+message DeleteStudentPhotoResponse {}
 
 // --- RPC messages ---------------------------------------------------------
 

@@ -38,6 +38,7 @@ var testLevels = fakeLevels{"e1000000-0000-0000-0000-000000000001": "Primaria", 
 
 type fakeRepo struct {
 	medical    domain.MedicalRecord
+	photo      *ports.PhotoRef
 	byID       map[string]*domain.Student
 	byCURP     map[string]bool
 	lastFilter ports.ListFilter
@@ -59,6 +60,23 @@ func (r *fakeRepo) Create(_ context.Context, s *domain.Student) error {
 
 func (r *fakeRepo) Update(_ context.Context, s *domain.Student) error {
 	r.byID[s.ID()] = s
+	return nil
+}
+
+func (r *fakeRepo) PhotoRef(_ context.Context, _ string) (ports.PhotoRef, error) {
+	if r.photo == nil {
+		return ports.PhotoRef{}, glerrors.ErrNotFound
+	}
+	return *r.photo, nil
+}
+
+func (r *fakeRepo) SavePhotoRef(_ context.Context, _ string, ref ports.PhotoRef) error {
+	r.photo = &ref
+	return nil
+}
+
+func (r *fakeRepo) DeletePhotoRef(_ context.Context, _ string) error {
+	r.photo = nil
 	return nil
 }
 
@@ -387,5 +405,47 @@ func TestStudentMedicalOffTheListIsInvalidArgument(t *testing.T) {
 	_, err := h.UpdateStudentMedical(context.Background(), connect.NewRequest(&studentsv1.UpdateStudentMedicalRequest{
 		StudentId: "stu-1", Medical: &studentsv1.StudentMedical{BloodType: "Z+"},
 	}))
+	assertCode(t, err, connect.CodeInvalidArgument)
+}
+
+// memPhotoStore is an in-memory object store.
+type memPhotoStore map[string][]byte
+
+func (m memPhotoStore) Put(_ context.Context, key, _ string, data []byte) error {
+	m[key] = data
+	return nil
+}
+func (m memPhotoStore) Get(_ context.Context, key string) ([]byte, error) {
+	d, ok := m[key]
+	if !ok {
+		return nil, glerrors.ErrNotFound
+	}
+	return d, nil
+}
+func (m memPhotoStore) Delete(_ context.Context, key string) error { delete(m, key); return nil }
+
+func TestStudentPhotoRoundTrips(t *testing.T) {
+	repo := newFakeRepo()
+	svc := usecase.NewStudentService(repo, &fakePublisher{}, testLevels, testTenant, func() string { return "stu-1" }).
+		WithPhotos(memPhotoStore{})
+	h := grpcadapter.NewStudentsHandler(svc, nil, nil, usecase.NewHealthService("students"))
+	createValid(t, h)
+
+	png := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n', 1}
+	up, err := h.UploadStudentPhoto(context.Background(), connect.NewRequest(&studentsv1.UploadStudentPhotoRequest{StudentId: "stu-1", Data: png}))
+	if err != nil || up.Msg.GetContentType() != "image/png" {
+		t.Fatalf("Upload = (%v, %v)", up, err)
+	}
+	got, err := h.GetStudentPhoto(context.Background(), connect.NewRequest(&studentsv1.GetStudentPhotoRequest{StudentId: "stu-1"}))
+	if err != nil || got.Msg.GetContentType() != "image/png" || len(got.Msg.GetData()) != len(png) {
+		t.Fatalf("Get = (%v, %v)", got, err)
+	}
+	if _, err := h.DeleteStudentPhoto(context.Background(), connect.NewRequest(&studentsv1.DeleteStudentPhotoRequest{StudentId: "stu-1"})); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	_, err = h.GetStudentPhoto(context.Background(), connect.NewRequest(&studentsv1.GetStudentPhotoRequest{StudentId: "stu-1"}))
+	assertCode(t, err, connect.CodeNotFound)
+
+	_, err = h.UploadStudentPhoto(context.Background(), connect.NewRequest(&studentsv1.UploadStudentPhotoRequest{StudentId: "stu-1", Data: []byte("%PDF")}))
 	assertCode(t, err, connect.CodeInvalidArgument)
 }

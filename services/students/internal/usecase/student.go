@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -27,6 +28,7 @@ type StudentService struct {
 	tenant string
 	newID  func() string
 	now    func() time.Time
+	photos ports.PhotoStore
 }
 
 // NewStudentService wires the use case. `levels` is config's level catalog;
@@ -66,6 +68,91 @@ func (s *StudentService) UpdateMedical(ctx context.Context, studentID, bloodType
 		return domain.MedicalRecord{}, err
 	}
 	return rec, nil
+}
+
+// WithPhotos returns the service keeping photos in `store`. Without it, photo
+// calls answer KindUnavailable: a deployment with no bucket still serves the
+// rest of the file.
+func (s *StudentService) WithPhotos(store ports.PhotoStore) *StudentService {
+	cp := *s
+	cp.photos = store
+	return &cp
+}
+
+var errPhotosUnavailable = glerrors.New(glerrors.KindInternal, "photos are not configured")
+
+// UploadPhoto stores a pupil's photo (JPEG/PNG by its bytes, at most 2 MB) and
+// replaces any previous one, deleting its object. The object key names the
+// tenant and the pupil's id and a random suffix — no personal data.
+func (s *StudentService) UploadPhoto(ctx context.Context, studentID string, data []byte) (ports.PhotoRef, error) {
+	if s.photos == nil {
+		return ports.PhotoRef{}, errPhotosUnavailable
+	}
+	if _, err := s.repo.FindByID(ctx, studentID); err != nil {
+		return ports.PhotoRef{}, err
+	}
+	photo, err := domain.NewPhoto(data)
+	if err != nil {
+		return ports.PhotoRef{}, err
+	}
+	previous, err := s.repo.PhotoRef(ctx, studentID)
+	if err != nil && glerrors.KindOf(err) != glerrors.KindNotFound {
+		return ports.PhotoRef{}, err
+	}
+	ref := ports.PhotoRef{
+		Key:         s.tenant + "/students/" + studentID + "/" + s.newID(),
+		ContentType: photo.ContentType(),
+		Size:        len(photo.Data()),
+	}
+	if err := s.photos.Put(ctx, ref.Key, ref.ContentType, photo.Data()); err != nil {
+		return ports.PhotoRef{}, err
+	}
+	if err := s.repo.SavePhotoRef(ctx, studentID, ref); err != nil {
+		// Nothing points at the new object: remove it rather than let it
+		// accumulate, and report both failures.
+		return ports.PhotoRef{}, errors.Join(err, s.photos.Delete(ctx, ref.Key))
+	}
+	if previous.Key != "" && previous.Key != ref.Key {
+		// Best-effort cleanup, deliberately not an error: the new photo is
+		// already stored and referenced, so the upload HAS succeeded. A failed
+		// delete leaves only an unreachable object behind (the bucket's
+		// lifecycle rule can sweep it); reporting it as a failure would tell the
+		// office the photo was not saved when it was.
+		_ = s.photos.Delete(ctx, previous.Key)
+	}
+	return ref, nil
+}
+
+// Photo returns a pupil's photo, or KindNotFound when there is none.
+func (s *StudentService) Photo(ctx context.Context, studentID string) (domain.Photo, error) {
+	if s.photos == nil {
+		return domain.Photo{}, errPhotosUnavailable
+	}
+	ref, err := s.repo.PhotoRef(ctx, studentID)
+	if err != nil {
+		return domain.Photo{}, err
+	}
+	data, err := s.photos.Get(ctx, ref.Key)
+	if err != nil {
+		return domain.Photo{}, err
+	}
+	return domain.NewPhoto(data)
+}
+
+// DeletePhoto removes a pupil's photo: the reference first, so the file never
+// points at a missing object, then the object.
+func (s *StudentService) DeletePhoto(ctx context.Context, studentID string) error {
+	if s.photos == nil {
+		return errPhotosUnavailable
+	}
+	ref, err := s.repo.PhotoRef(ctx, studentID)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.DeletePhotoRef(ctx, studentID); err != nil {
+		return err
+	}
+	return s.photos.Delete(ctx, ref.Key)
 }
 
 // UpdateDetailsInput is a correction of a pupil's file as captured: names, CURP
