@@ -81,5 +81,7 @@ describe("CashUpPanel", () => {
     expect(rows[0]).not.toHaveTextContent("capturado");
     expect(rows[1]).toHaveTextContent("Pedro Caja");
     expect(rows[1]).toHaveTextContent(/capturado el 13 oct/i);
+    // A back-dated payment carries a day, not an hour: none is invented.
+    expect(rows[1]).not.toHaveTextContent(/p\. ?m\.|a\. ?m\./i);
   });
 });

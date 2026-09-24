@@ -75,7 +75,9 @@ export function CashUpPanel({ day }: CashUpPanelProps): ReactElement {
           {cut.deposits.map((d) => (
             <div key={d.id} data-testid="cash-up-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "13px 20px", borderTop: "1px solid var(--border)" }}>
               <span style={{ fontSize: 14, color: "var(--text-muted)" }}>
-                {hourOf(d.paidAt)} · {d.method === "cash" ? "Efectivo" : d.method === "card" ? "Tarjeta" : "Transferencia"}
+                {/* A back-dated payment carries a day, not an hour: none is shown. */}
+                {capturedLate(d) ? "" : `${hourOf(d.paidAt)} · `}
+                {d.method === "cash" ? "Efectivo" : d.method === "card" ? "Tarjeta" : "Transferencia"}
                 {d.receivedByName !== undefined && d.receivedByName !== "" && ` · ${d.receivedByName}`}
                 {capturedLate(d) && (
                   // A payment dated the day the family paid but keyed later:
