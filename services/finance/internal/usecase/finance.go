@@ -587,7 +587,7 @@ func (s *FinanceService) expectedForStatement(
 			enrolmentID = c.ID()
 		}
 	}
-	return expectedFrom(charges, plan, calendar, lateFeeID, tuitionID, enrolmentID, when)
+	return expectedFrom(charges, plan, calendar, lateFeeID, tuitionID, enrolmentID, when, when)
 }
 
 // ListOverdue returns the charges past due that still owe money, as of the
