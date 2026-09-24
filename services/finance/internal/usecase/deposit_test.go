@@ -601,3 +601,35 @@ func TestAPaidMonthWithAnOpenSurchargeIsStillOnTheList(t *testing.T) {
 		t.Errorf("allocations %+v, credit %d; want the open surcharge paid", got.Allocations, got.UnallocatedCents)
 	}
 }
+
+// Paying a month ahead earns its early-payment reward at the counter; the list
+// shows it, so the amount it fills in is what the deposit takes — no reward
+// left over as credit.
+func TestAMonthPaidAheadIsListedWithItsReward(t *testing.T) {
+	f := prontoPagoFixture(t)
+	day := time.Date(2026, 9, 3, 0, 0, 0, 0, time.UTC)
+	expected, err := f.svc.ExpectedToday(context.Background(), testStudent, day)
+	if err != nil {
+		t.Fatalf("ExpectedToday: %v", err)
+	}
+	var october usecase.ExpectedLine
+	for _, l := range expected.Lines {
+		if strings.HasPrefix(l.Description, "Colegiatura octubre") {
+			october = l
+		}
+	}
+	if october.Due || october.DiscountCents != 10000 || october.TotalCents != 310000 {
+		t.Fatalf("october = %+v, want not due, $100 reward, $3,100", october)
+	}
+
+	got, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: october.TotalCents, Method: domain.MethodCash,
+		PaidAt: day, ChargeIDs: []string{october.ChargeID},
+	})
+	if err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+	if got.UnallocatedCents != 0 {
+		t.Errorf("left %d as credit; the listed total should settle October", got.UnallocatedCents)
+	}
+}

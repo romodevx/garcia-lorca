@@ -324,6 +324,14 @@ func expectedFrom(
 	policy := plan.Policy()
 
 	var out Expected
+	// A surcharge whose month was cancelled is owed by nobody: a deposit never
+	// pays it (its month is not collected), so the quote does not ask for it.
+	cancelled := map[string]bool{}
+	for _, c := range charges {
+		if c.Charge.Status() == domain.StatusCancelled {
+			cancelled[c.Charge.ID()] = true
+		}
+	}
 	materialised := map[string]int64{}
 	// unpaidFees is the part of a charge's written-down surcharges still owed,
 	// so its line can carry it (task 8).
@@ -337,7 +345,7 @@ func expectedFrom(
 			materialised[parent] += c.Charge.Effective().Int64()
 		}
 		// Any written-down surcharge, daily or monthly, rides on its month.
-		if parent, ok := feeParent(c.Charge.ExternalRef()); ok && owed(c) > 0 && expectedBy(c.Charge.DueDate(), when) {
+		if parent, ok := feeParent(c.Charge.ExternalRef()); ok && !cancelled[parent] && owed(c) > 0 && expectedBy(c.Charge.DueDate(), when) {
 			unpaidFees[parent] += owed(c)
 		}
 	}
@@ -374,8 +382,11 @@ func expectedFrom(
 		if change != priceUnchanged {
 			c.Charge = settled
 		}
-		out.AnnualBalanceCents += owed(c)
 		isFee := c.Charge.ConceptID() == lateFeeID
+		if parent, ok := feeParent(c.Charge.ExternalRef()); isFee && ok && cancelled[parent] {
+			continue
+		}
+		out.AnnualBalanceCents += owed(c)
 		// A written-down surcharge rides on its month's line and is never a line
 		// of its own: a deposit cannot pay a surcharge apart from its month, so
 		// offering one to choose would only be refused. (One whose month cannot
@@ -388,7 +399,12 @@ func expectedFrom(
 			}
 		}
 		if !expectedBy(c.Charge.DueDate(), when) {
-			// Billed, but not yet asked for.
+			// Billed, but not yet asked for. Its line still shows the reward
+			// paying it ahead would earn — the deposit grants it (earlyPayment),
+			// so the total the counter fills in is the total it takes.
+			if line != nil && c.Charge.ConceptID() == tuitionID && c.Charge.Discount().Int64() == 0 {
+				line.DiscountCents = min(earlyReward(policy, calendar, c.Charge.DueDate(), when), owed(c))
+			}
 			continue
 		}
 		out.AmountCents += owed(c)
@@ -414,9 +430,7 @@ func expectedFrom(
 			}
 		}
 		if c.Charge.ConceptID() == tuitionID && c.Charge.Discount().Int64() == 0 {
-			due := c.Charge.DueDate()
-			monthStart := time.Date(due.Year(), due.Month(), 1, 0, 0, 0, 0, due.Location())
-			if d := domain.EarlyPaymentDiscount(policy, calendar, monthStart, when); d > 0 {
+			if d := earlyReward(policy, calendar, c.Charge.DueDate(), when); d > 0 {
 				// Never more than is left of the month: a part payment can leave
 				// less owed than the reward, and a line must not go negative.
 				d = min(d, owed(c))
@@ -433,6 +447,13 @@ func expectedFrom(
 		out.Lines = sortedLines(lines)
 	}
 	return out, nil
+}
+
+// earlyReward is the early-payment discount a month due on `due` earns when paid
+// on `when` — the same rule earlyPayment applies to the deposit.
+func earlyReward(policy domain.CollectionPolicy, calendar *schoolcal.Calendar, due, when time.Time) int64 {
+	monthStart := time.Date(due.Year(), due.Month(), 1, 0, 0, 0, 0, due.Location())
+	return domain.EarlyPaymentDiscount(policy, calendar, monthStart, when)
 }
 
 // sortedLines is the counter's list: oldest due date first, then by id so the
@@ -759,6 +780,11 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 		// Whatever surcharge this charge has already been given, in the order it
 		// was given, comes before any new one: the older debt is the older debt.
 		for _, fee := range feesByCharge[c.Charge.ID()] {
+			// A surcharge not yet accrued on the day the family paid was not
+			// theirs to pay then — the quote for that day leaves it out too.
+			if !expectedBy(fee.Charge.DueDate(), p.paidOn) {
+				continue
+			}
 			items = append(items, domain.Payable{
 				ChargeID:  fee.Charge.ID(),
 				DueOn:     c.Charge.DueDate(),
@@ -860,7 +886,13 @@ func (p *depositPlanner) partition(open []ports.ChargeWithPaid) ([]ports.ChargeW
 	}
 	for parent := range fees {
 		rows := fees[parent]
-		sort.Slice(rows, func(i, j int) bool { return rows[i].Charge.ID() < rows[j].Charge.ID() })
+		// Oldest first, as every debt is paid; the id only breaks ties.
+		sort.Slice(rows, func(i, j int) bool {
+			if !rows[i].Charge.DueDate().Equal(rows[j].Charge.DueDate()) {
+				return rows[i].Charge.DueDate().Before(rows[j].Charge.DueDate())
+			}
+			return rows[i].Charge.ID() < rows[j].Charge.ID()
+		})
 		fees[parent] = rows
 	}
 	return base, fees
