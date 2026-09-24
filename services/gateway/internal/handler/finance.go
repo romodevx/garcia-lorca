@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -66,6 +67,26 @@ func NewFinanceHandler(svc FinanceService, opts ...FinanceOption) *FinanceHandle
 		opt(h)
 	}
 	return h
+}
+
+// maxChosenCharges bounds the counter's choice: a family has at most a year of
+// charges, far fewer than this.
+const maxChosenCharges = 500
+
+var uuidShape = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// invalidChoice checks chargeIds against the contract at the edge (task 8):
+// uuids, a bounded list. "" means it is fine.
+func invalidChoice(ids []string) string {
+	if len(ids) > maxChosenCharges {
+		return "chargeIds: too many charges"
+	}
+	for _, id := range ids {
+		if !uuidShape.MatchString(id) {
+			return "chargeIds must be charge ids"
+		}
+	}
+	return ""
 }
 
 // accountOf is the authenticated caller's account alone: a single-charge payment
@@ -414,6 +435,10 @@ func (h *FinanceHandler) RegisterDeposit(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "paidAt must be a date like 2026-09-04", http.StatusBadRequest)
 		return
 	}
+	if msg := invalidChoice(req.ChargeIDs); msg != "" {
+		http.Error(w, msg, http.StatusBadRequest)
+		return
+	}
 	got, derr := h.svc.RegisterDeposit(r.Context(), req.StudentID, req.AmountCents,
 		req.Method, req.Reference, req.IdempotencyKey, paidAt, req.GrantEarlyPayment, req.CardType, h.receiverOf(r), req.ChargeIDs)
 	if derr != nil {
@@ -445,6 +470,10 @@ func (h *FinanceHandler) PreviewDeposit(w http.ResponseWriter, r *http.Request) 
 	paidAt, err := parseCounterDate(req.PaidAt)
 	if err != nil {
 		http.Error(w, "paidAt must be a date like 2026-09-04", http.StatusBadRequest)
+		return
+	}
+	if msg := invalidChoice(req.ChargeIDs); msg != "" {
+		http.Error(w, msg, http.StatusBadRequest)
 		return
 	}
 	got, perr := h.svc.PreviewDeposit(r.Context(), req.StudentID, req.AmountCents, paidAt, req.ChargeIDs)

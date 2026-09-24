@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -521,5 +522,82 @@ func TestAChargeOfAnotherStudentCannotBeChosen(t *testing.T) {
 	})
 	if glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("want KindInvalid, got %v", err)
+	}
+}
+
+// Under the monthly rule the billing run writes each surcharge as its own
+// charge ("latefee:<month>:…"). It rides on its month — on the counter's list
+// and in the money — and is never a line of its own the cashier could choose
+// apart from it (a choice holding it used to be refused outright).
+func TestAMonthlySurchargeRidesOnItsMonth(t *testing.T) {
+	f := billingFixture(t)
+	runOn(t, f, "2026-11-12")
+	f.clock = time.Date(2026, time.November, 12, 12, 0, 0, 0, time.UTC)
+	lateFee := f.repo.conceptIDOfKind(domain.KindLateFee)
+
+	expected, err := f.svc.ExpectedToday(context.Background(), testStudent, f.clock)
+	if err != nil {
+		t.Fatalf("ExpectedToday: %v", err)
+	}
+	var september usecase.ExpectedLine
+	for _, l := range expected.Lines {
+		if c := f.repo.charges[l.ChargeID]; c.ConceptID() == lateFee {
+			t.Fatalf("a surcharge is a line of its own: %+v", l)
+		}
+		if strings.HasPrefix(l.Description, "Colegiatura septiembre") {
+			september = l
+		}
+	}
+	if september.SurchargeCents <= 0 {
+		t.Fatalf("september carries no surcharge: %+v", september)
+	}
+
+	got, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: september.TotalCents, Method: domain.MethodCash,
+		PaidAt: f.clock, ChargeIDs: []string{september.ChargeID},
+	})
+	if err != nil {
+		t.Fatalf("RegisterDeposit(september): %v", err)
+	}
+	if got.UnallocatedCents != 0 {
+		t.Errorf("left %d unallocated; the month and its surcharge should take it all", got.UnallocatedCents)
+	}
+}
+
+// A month already paid whose surcharge is still open is still owed: it has a
+// line (its surcharge) and can be chosen, and the due lines still add up.
+func TestAPaidMonthWithAnOpenSurchargeIsStillOnTheList(t *testing.T) {
+	f := depositFixture(t)
+	day := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
+	// September in full and $100 of its $300 surcharge.
+	deposit(t, f, 330000, "2026-10-10")
+
+	expected, err := f.svc.ExpectedToday(context.Background(), testStudent, day)
+	if err != nil {
+		t.Fatalf("ExpectedToday: %v", err)
+	}
+	sep := expected.Lines[0]
+	if sep.OwedCents != 0 || sep.SurchargeCents != 20000 || sep.TotalCents != 20000 || !sep.Due {
+		t.Fatalf("september = %+v, want 0 owed + 200 surcharge still open", sep)
+	}
+	var due int64
+	for _, l := range expected.Lines {
+		if l.Due {
+			due += l.TotalCents
+		}
+	}
+	if due != expected.AmountCents {
+		t.Errorf("due lines add up to %d, expected amount is %d", due, expected.AmountCents)
+	}
+
+	got, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 20000, Method: domain.MethodCash,
+		PaidAt: day, ChargeIDs: []string{sep.ChargeID}, IdempotencyKey: "surcharge-only",
+	})
+	if err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+	if got.UnallocatedCents != 0 || len(got.Allocations) != 1 {
+		t.Errorf("allocations %+v, credit %d; want the open surcharge paid", got.Allocations, got.UnallocatedCents)
 	}
 }

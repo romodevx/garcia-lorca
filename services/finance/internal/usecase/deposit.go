@@ -304,7 +304,7 @@ func (s *FinanceService) ExpectedToday(ctx context.Context, studentID string, on
 	if err != nil {
 		return Expected{}, err
 	}
-	return expectedFrom(charges, plan, calendar, lateFee.ID(), tuition.ID(), enrolment.ID(), when, s.now())
+	return expectedFrom(charges, plan, calendar, lateFee.ID(), tuition.ID(), enrolment.ID(), when, s.now(), true)
 }
 
 // expectedFrom is the arithmetic of "what is due today", with NO I/O.
@@ -319,6 +319,7 @@ func expectedFrom(
 	calendar *schoolcal.Calendar,
 	lateFeeID, tuitionID, enrolmentID string,
 	when, now time.Time,
+	withLines bool,
 ) (Expected, error) {
 	policy := plan.Policy()
 
@@ -331,17 +332,34 @@ func expectedFrom(
 		if c.Charge.Status() == domain.StatusCancelled || c.Charge.ConceptID() != lateFeeID {
 			continue
 		}
+		// Only daily surcharges are subtracted from what the daily rule earns.
 		if parent, ok := surchargeParent(c.Charge.ExternalRef()); ok {
 			materialised[parent] += c.Charge.Effective().Int64()
-			if owed(c) > 0 && expectedBy(c.Charge.DueDate(), when) {
-				unpaidFees[parent] += owed(c)
-			}
+		}
+		// Any written-down surcharge, daily or monthly, rides on its month.
+		if parent, ok := feeParent(c.Charge.ExternalRef()); ok && owed(c) > 0 && expectedBy(c.Charge.DueDate(), when) {
+			unpaidFees[parent] += owed(c)
 		}
 	}
-	lines := map[string]*ExpectedLine{}
+	var lines map[string]*ExpectedLine
+	if withLines {
+		lines = map[string]*ExpectedLine{}
+	}
 
 	for _, c := range charges {
-		if c.Charge.Status() == domain.StatusCancelled || owed(c) <= 0 {
+		if c.Charge.Status() == domain.StatusCancelled {
+			continue
+		}
+		if owed(c) <= 0 {
+			// A month already paid whose surcharge is still open is still owed:
+			// its line carries the surcharge, so it can be chosen and the due
+			// lines add up to the amount.
+			if fees := unpaidFees[c.Charge.ID()]; fees > 0 && lines != nil && c.Charge.ConceptID() != lateFeeID {
+				lines[c.Charge.ID()] = &ExpectedLine{
+					ChargeID: c.Charge.ID(), Description: c.Charge.Description(), DueDate: c.Charge.DueDate(),
+					SurchargeCents: fees, Due: true,
+				}
+			}
 			continue
 		}
 		// The ladder, at the day being asked about. Quoting the stored amount
@@ -361,9 +379,11 @@ func expectedFrom(
 		// A written-down surcharge rides on its month's line; anything else is
 		// a line of its own.
 		var line *ExpectedLine
-		if _, ridesOnMonth := surchargeParent(c.Charge.ExternalRef()); !isFee || !ridesOnMonth {
+		if _, ridesOnMonth := feeParent(c.Charge.ExternalRef()); !isFee || !ridesOnMonth {
 			line = &ExpectedLine{ChargeID: c.Charge.ID(), Description: c.Charge.Description(), DueDate: c.Charge.DueDate(), OwedCents: owed(c)}
-			lines[c.Charge.ID()] = line
+			if lines != nil {
+				lines[c.Charge.ID()] = line
+			}
 		}
 		if !expectedBy(c.Charge.DueDate(), when) {
 			// Billed, but not yet asked for.
@@ -395,6 +415,9 @@ func expectedFrom(
 			due := c.Charge.DueDate()
 			monthStart := time.Date(due.Year(), due.Month(), 1, 0, 0, 0, 0, due.Location())
 			if d := domain.EarlyPaymentDiscount(policy, calendar, monthStart, when); d > 0 {
+				// Never more than is left of the month: a part payment can leave
+				// less owed than the reward, and a line must not go negative.
+				d = min(d, owed(c))
 				out.DiscountCents += d
 				out.AmountCents -= d
 				line.DiscountCents = d
@@ -404,7 +427,9 @@ func expectedFrom(
 	if out.AmountCents < 0 {
 		out.AmountCents = 0
 	}
-	out.Lines = sortedLines(lines)
+	if lines != nil {
+		out.Lines = sortedLines(lines)
+	}
 	return out, nil
 }
 
@@ -782,8 +807,6 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 	}, nil
 }
 
-// partition splits the student's charges into the debts themselves and the
-// surcharges already raised against each of them.
 // chosenSet is the cashier's selection as a set; nil when nothing was chosen.
 func chosenSet(ids []string) map[string]bool {
 	if len(ids) == 0 {
@@ -815,6 +838,9 @@ func (p *depositPlanner) onlyChosen(base []ports.ChargeWithPaid) ([]ports.Charge
 	return kept, nil
 }
 
+// partition splits the student's charges into the debts themselves and the
+// surcharges already raised against each of them — daily or monthly, each
+// riding on its month.
 func (p *depositPlanner) partition(open []ports.ChargeWithPaid) ([]ports.ChargeWithPaid, map[string][]ports.ChargeWithPaid) {
 	var base []ports.ChargeWithPaid
 	fees := map[string][]ports.ChargeWithPaid{}
@@ -826,7 +852,7 @@ func (p *depositPlanner) partition(open []ports.ChargeWithPaid) ([]ports.ChargeW
 			base = append(base, c)
 			continue
 		}
-		if parent, ok := surchargeParent(c.Charge.ExternalRef()); ok {
+		if parent, ok := feeParent(c.Charge.ExternalRef()); ok {
 			fees[parent] = append(fees[parent], c)
 		}
 	}
@@ -916,7 +942,24 @@ func surchargeRef(chargeID, depositID string) string {
 	return surchargeRefPrefix + chargeID + ":" + depositID
 }
 
-// surchargeParent reads back the charge a materialised surcharge belongs to.
+// lateFeeRefPrefix is how the billing run names a monthly surcharge:
+// "latefee:<chargeID>:<YYYY-MM>".
+const lateFeeRefPrefix = "latefee:"
+
+// feeParent is the month a written-down surcharge belongs to, daily or monthly.
+func feeParent(ref string) (string, bool) {
+	if id, ok := surchargeParent(ref); ok {
+		return id, true
+	}
+	if !strings.HasPrefix(ref, lateFeeRefPrefix) {
+		return "", false
+	}
+	id, _, found := strings.Cut(strings.TrimPrefix(ref, lateFeeRefPrefix), ":")
+	return id, found && id != ""
+}
+
+// surchargeParent reads back the charge a materialised DAILY surcharge belongs
+// to.
 func surchargeParent(ref string) (string, bool) {
 	if !strings.HasPrefix(ref, surchargeRefPrefix) {
 		return "", false

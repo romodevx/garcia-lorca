@@ -3,6 +3,7 @@ package handler_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,14 +21,14 @@ import (
 // handler is exercised in isolation (no Connect round-trip).
 type fakeFinance struct {
 	depositChargeIDs []string
-	depositReceiver client.Receiver
-	payReceiver     client.Receiver
-	planIn     client.TuitionPlanInput
-	plans      []client.TuitionPlan
-	plansCycle string
-	run        client.BillingRun
-	runCycle   string
-	runAsOf    string
+	depositReceiver  client.Receiver
+	payReceiver      client.Receiver
+	planIn           client.TuitionPlanInput
+	plans            []client.TuitionPlan
+	plansCycle       string
+	run              client.BillingRun
+	runCycle         string
+	runAsOf          string
 
 	conceptName       string
 	conceptAmount     int64
@@ -927,14 +928,14 @@ func TestFinanceForwardsTheChosenCharges(t *testing.T) {
 	h := handler.NewFinanceHandler(svc)
 
 	doReq(t, h.RegisterDeposit, http.MethodPost, "/api/v1/finance/deposits",
-		`{"studentId":"stu-1","amountCents":1000,"method":"cash","chargeIds":["ch-oct","ch-nov"]}`)
-	if strings.Join(svc.depositChargeIDs, ",") != "ch-oct,ch-nov" {
+		`{"studentId":"stu-1","amountCents":1000,"method":"cash","chargeIds":["61000000-0000-0000-0000-00000000000a","61000000-0000-0000-0000-00000000000b"]}`)
+	if strings.Join(svc.depositChargeIDs, ",") != "61000000-0000-0000-0000-00000000000a,61000000-0000-0000-0000-00000000000b" {
 		t.Errorf("deposit chargeIds = %v", svc.depositChargeIDs)
 	}
 	svc.depositChargeIDs = nil
 	doReq(t, h.PreviewDeposit, http.MethodPost, "/api/v1/finance/deposits/preview",
-		`{"studentId":"stu-1","amountCents":1000,"chargeIds":["ch-oct"]}`)
-	if strings.Join(svc.depositChargeIDs, ",") != "ch-oct" {
+		`{"studentId":"stu-1","amountCents":1000,"chargeIds":["61000000-0000-0000-0000-00000000000a"]}`)
+	if strings.Join(svc.depositChargeIDs, ",") != "61000000-0000-0000-0000-00000000000a" {
 		t.Errorf("preview chargeIds = %v", svc.depositChargeIDs)
 	}
 }
@@ -951,5 +952,34 @@ func TestFinanceExpectedAnswersItsLines(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected body lacks %s: %s", want, body)
 		}
+	}
+}
+
+// chargeIds is validated at the edge, against the contract: uuids, and a
+// bounded list — never forwarded as whatever a client sends.
+func TestFinanceRefusesChosenChargesThatAreNotCharges(t *testing.T) {
+	svc := &fakeFinance{}
+	h := handler.NewFinanceHandler(svc)
+	many := make([]string, 501)
+	for i := range many {
+		many[i] = fmt.Sprintf(`"00000000-0000-0000-0000-%012d"`, i)
+	}
+	cases := map[string]string{
+		"not a uuid": `{"studentId":"stu-1","amountCents":1000,"method":"cash","chargeIds":["abc"]}`,
+		"too many":   `{"studentId":"stu-1","amountCents":1000,"method":"cash","chargeIds":[` + strings.Join(many, ",") + `]}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			svc.depositChargeIDs = nil
+			if rec := doReq(t, h.RegisterDeposit, http.MethodPost, "/api/v1/finance/deposits", body); rec.Code != http.StatusBadRequest {
+				t.Errorf("deposit: status %d, want 400", rec.Code)
+			}
+			if rec := doReq(t, h.PreviewDeposit, http.MethodPost, "/api/v1/finance/deposits/preview", body); rec.Code != http.StatusBadRequest {
+				t.Errorf("preview: status %d, want 400", rec.Code)
+			}
+			if svc.depositChargeIDs != nil {
+				t.Error("an invalid choice reached finance")
+			}
+		})
 	}
 }
