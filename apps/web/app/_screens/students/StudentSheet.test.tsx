@@ -100,6 +100,23 @@ describe("la ficha de un alumno que ya tiene grupo", () => {
     );
   });
 
+  it("un doble clic no manda dos cambios de grupo", async () => {
+    const user = userEvent.setup();
+    let release: () => void = () => {};
+    students.transfer.mockImplementation(() => new Promise((resolve) => {
+      release = () => resolve({ id: "enr-1", studentId: "stu-1", cycleId: "c1", groupId: "g-pri-a", termId: "", status: "active", enrolledAt: "2026-08-31" });
+    }));
+    const sheet = await openSheet(user);
+    await user.click(within(await within(sheet).findByRole("group", { name: "Cambiar a" })).getByRole("button", { name: "1° A" }));
+    await user.type(within(sheet).getByLabelText(/^Motivo/), "Cambio de turno");
+    const go = within(sheet).getByRole("button", { name: "Cambiar de grupo" });
+    await user.click(go);
+    await user.click(go);
+    release();
+
+    await waitFor(() => expect(students.transfer).toHaveBeenCalledTimes(1));
+  });
+
   it("sin motivo marca el campo en lugar de mandar", async () => {
     const user = userEvent.setup();
     const sheet = await openSheet(user);

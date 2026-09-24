@@ -448,7 +448,11 @@ function StudentSheet({
   const transferring = placed !== undefined;
   const ready = current !== undefined && current !== "failed" && !gradeLevelsFailed;
 
+  // A ref, not the `saving` state: a double-click fires twice before React
+  // re-renders, and the second click must already see the first in flight.
+  const inFlight = useRef(false);
   const save = async (): Promise<void> => {
+    if (inFlight.current) return;
     setRefusal(undefined);
     if (gid === "") {
       setRefusal("Elige un grupo.");
@@ -458,6 +462,7 @@ function StudentSheet({
       setReasonError("Escribe por qué cambia de grupo.");
       return;
     }
+    inFlight.current = true;
     setSaving(true);
     try {
       if (placed !== undefined) {
@@ -470,6 +475,7 @@ function StudentSheet({
     } catch (err) {
       setRefusal(placementRefusal(err));
     } finally {
+      inFlight.current = false;
       setSaving(false);
     }
   };

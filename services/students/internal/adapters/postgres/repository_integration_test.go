@@ -551,3 +551,21 @@ func TestTransferNamesTheGroupOnTheFileAndRespectsSeats(t *testing.T) {
 		t.Errorf("the file says %q after the transfer, want 2° B", got.GradeGroup())
 	}
 }
+
+// A group whose size was never set is not "full": it says so, and where.
+func TestTransferIntoAnUnsizedGroupSaysSo(t *testing.T) {
+	ctx := context.Background()
+	repo := appRepo(t, tenantA)
+	studentID := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-0000000007d1", "HEGE050312MDFRNN13")
+	const enrID = "e0000000-0000-0000-0000-0000000007d1"
+	if err := repo.CreateEnrollment(ctx, enrollment(t, enrID, tenantA, studentID, groupOne)); err != nil {
+		t.Fatalf("seed enrollment: %v", err)
+	}
+	tr, _ := domain.NewEnrollmentTransfer("70000000-0000-0000-0000-0000000007d1", tenantA, enrID, groupOne, groupTwo, "x", enrollClock)
+	err := repo.TransferEnrollment(ctx, ports.TransferCommand{
+		EnrollmentID: enrID, To: ports.GroupSeats{ID: groupTwo, Name: "2° B", Capacity: 0}, Transfer: tr,
+	})
+	if glerrors.KindOf(err) != glerrors.KindConflict || !strings.Contains(glerrors.SafeMessage(err), "cupo definido") {
+		t.Fatalf("want a KindConflict naming the unset size, got %v", err)
+	}
+}

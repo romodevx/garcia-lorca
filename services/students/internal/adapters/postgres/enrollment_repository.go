@@ -110,7 +110,13 @@ func (r *Repository) TransferEnrollment(ctx context.Context, cmd ports.TransferC
 			Count(&taken).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "counting the group", err)
 		}
-		if cmd.To.Capacity <= 0 || taken >= int64(cmd.To.Capacity) {
+		// A group nobody sized is refused as the by-grade path refuses it —
+		// but saying so, so the director fixes the size instead of hunting
+		// for seats that were never counted.
+		if cmd.To.Capacity <= 0 {
+			return glerrors.New(glerrors.KindConflict, "ese grupo no tiene cupo definido: fíjalo en Configuración")
+		}
+		if taken >= int64(cmd.To.Capacity) {
 			return glerrors.New(glerrors.KindConflict, "ese grupo ya no tiene lugares")
 		}
 
