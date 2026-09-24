@@ -219,6 +219,12 @@ describe("FinanceScreen — el corte de otro día (tarea 7)", () => {
     expect(day).toHaveAttribute("max", "2026-10-12");
     fireEvent.change(day, { target: { value: "2026-10-03" } });
     await waitFor(() => expect(finance.getCashUp).toHaveBeenLastCalledWith(expect.any(String), "2026-10-03"));
+ 
+    // Closing and reopening is closing the day again: today, not the day last
+    // looked at.
+    await user.click(screen.getByRole("button", { name: "Cerrar" }));
+    await user.click(screen.getByRole("button", { name: /Corte de caja/ }));
+    expect(await screen.findByLabelText("Día del corte")).toHaveValue("2026-10-12");
   });
 });
 

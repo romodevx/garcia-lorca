@@ -84,4 +84,17 @@ describe("CashUpPanel", () => {
     // A back-dated payment carries a day, not an hour: none is invented.
     expect(rows[1]).not.toHaveTextContent(/p\. ?m\.|a\. ?m\./i);
   });
+
+  it("names the day of a past cut, and invents no hour for a cancelled back-dated payment", async () => {
+    finance.getCashUp.mockResolvedValue({
+      deposits: [],
+      cancelled: [{ ...deposit("d9", 100000, "cash"), paidAt: "2026-10-03T00:00:00Z", capturedAt: "2026-10-12T10:00:00", voidedAt: "2026-10-12T11:00:00Z", voidReason: "doble" }],
+      cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0,
+    } as unknown as financeApi.CashUp);
+    render(<CashUpPanel day="2026-10-03" />);
+
+    expect(await screen.findByText("Recibido el 3 oct")).toBeInTheDocument();
+    expect(screen.queryByText("Recibido hoy")).not.toBeInTheDocument();
+    expect(screen.getByText(/doble/)).not.toHaveTextContent(/p\. ?m\.|a\. ?m\./i);
+  });
 });

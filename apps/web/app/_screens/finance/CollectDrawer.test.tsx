@@ -314,6 +314,19 @@ describe("CollectDrawer · fecha de pago (tarea 7)", () => {
     expect(await screen.findByText("Monto esperado al 3 oct")).toBeInTheDocument();
   });
 
+  // The label names the day of the quote ON SCREEN: a date typed that brought
+  // no quote (invalid, or the request failed) does not relabel the old one.
+  it("keeps the label on the day of the quote it shows", async () => {
+    open();
+    await screen.findByText("Monto esperado hoy");
+    finance.getExpected.mockRejectedValueOnce(new Error("down"));
+    fireEvent.change(screen.getByLabelText("Fecha de pago"), { target: { value: "2026-10-03" } });
+    await waitFor(() => expect(finance.getExpected).toHaveBeenLastCalledWith(expect.any(String), "s1", "2026-10-03"));
+    expect(screen.getByText("Monto esperado hoy")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Fecha de pago"), { target: { value: "2026-10-20" } });
+    expect(screen.getByText("Monto esperado hoy")).toBeInTheDocument();
+  });
+
   it("refuses a future date on the field, and takes nothing", async () => {
     const user = userEvent.setup();
     open();

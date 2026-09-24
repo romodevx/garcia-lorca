@@ -357,7 +357,18 @@ export function FinanceScreen({ onBack, today: officeDay }: FinanceScreenProps):
         </div>
         <div style={{ display: "flex", gap: 12 }}>
           <Btn kind="ghost" icon="download" onClick={() => exportView()}>Exportar</Btn>
-          <Btn kind="ghost" icon="finance" onClick={() => setCashUp(true)}>Corte de caja</Btn>
+          <Btn
+            kind="ghost"
+            icon="finance"
+            onClick={() => {
+              // Opening the cut is closing the day: today, not the day last
+              // looked at (and a fresh today after midnight).
+              setCutDay(officeDay ?? localISODate());
+              setCashUp(true);
+            }}
+          >
+            Corte de caja
+          </Btn>
         </div>
       </div>
 

@@ -21,7 +21,7 @@ import {
   type PaymentMethod,
 } from "../../finance/api";
 import { API_URL } from "../../api-url";
-import { localISODate } from "../../_lib/localDate";
+import { localISODate, shortDayLabel } from "../../_lib/localDate";
 import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 
 /**
@@ -74,12 +74,6 @@ export interface CollectDrawerProps {
 const FUTURE_PAYMENT = "La fecha de pago no puede ser futura.";
 const MISSING_PAYMENT_DATE = "Falta la fecha de pago.";
 
-/** "3 oct" for an aaaa-mm-dd date, read as the calendar day it names. */
-function shortDay(isoDate: string): string {
-  const [y, m, d] = isoDate.split("-").map(Number);
-  return new Date(y ?? 0, (m ?? 1) - 1, d ?? 1).toLocaleDateString("es-MX", { day: "numeric", month: "short" }).replace(".", "");
-}
-
 /** What is wrong with a payment date, if anything. */
 export function paymentDateError(paidOn: string, day: string): string | undefined {
   if (paidOn === "") return MISSING_PAYMENT_DATE;
@@ -112,6 +106,9 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
   // overwrite it. Reformatting the prefilled amount on blur is not that.
   const amountEdited = useRef(false);
   const prefilledCents = useRef<number | undefined>(undefined);
+  // The day the quote ON SCREEN is for ("" = today). The label follows the
+  // quote, not the field: a date that brought no quote does not relabel it.
+  const [expectedFor, setExpectedFor] = useState("");
   const [owed, setOwed] = useState<number | null>(null);
   const [credit, setCredit] = useState(0);
   const [expected, setExpected] = useState<Expected | null>(null);
@@ -158,12 +155,14 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
       return;
     }
     let live = true;
-    getExpected(API_URL, student.id, sentDate)
+    const askedFor = sentDate;
+    getExpected(API_URL, student.id, askedFor)
       .then((e) => {
         if (!live) {
           return;
         }
         setExpected(e);
+        setExpectedFor(askedFor);
         // Pre-filled with what should be paid: the common case is a family
         // paying exactly that, and retyping it is a chance to mistype it.
         if (e.amountCents > 0 && !amountEdited.current) {
@@ -254,7 +253,7 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
               style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
               <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px", display: "flex", flexDirection: "column", gap: 20 }}>
                 <div style={{ padding: "18px 20px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
-                  <span style={{ fontSize: 14, color: "var(--text-muted)" }}>{sentDate === "" ? "Monto esperado hoy" : `Monto esperado al ${shortDay(sentDate)}`}</span>
+                  <span style={{ fontSize: 14, color: "var(--text-muted)" }}>{expectedFor === "" ? "Monto esperado hoy" : `Monto esperado al ${shortDayLabel(expectedFor)}`}</span>
                   <div data-testid="amount-expected" style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 38, color: "var(--text)", marginTop: 4 }}>
                     {expected === null ? "…" : formatCents(expected.amountCents)}
                   </div>

@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
 import { getCashUp, type CashUp, type Deposit } from "../../finance/api";
 import { API_URL } from "../../api-url";
-import { localISODate } from "../../_lib/localDate";
+import { localISODate, shortDayLabel } from "../../_lib/localDate";
 import { formatCents } from "../../_lib/money";
 
 export interface CashUpPanelProps {
@@ -50,7 +50,7 @@ export function CashUpPanel({ day }: CashUpPanelProps): ReactElement {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       <div style={{ padding: "20px 24px", borderRadius: "var(--r-lg)", background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "var(--shadow-card)" }}>
-        <span style={{ fontSize: 14, color: "var(--text-muted)" }}>Recibido hoy</span>
+        <span style={{ fontSize: 14, color: "var(--text-muted)" }}>{day === "" ? "Recibido hoy" : `Recibido el ${shortDayLabel(day)}`}</span>
         <div data-testid="cash-up-total" style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 40, color: "var(--text)", marginTop: 4 }}>
           {formatCents(cut.totalCents)}
         </div>
@@ -100,7 +100,7 @@ export function CashUpPanel({ day }: CashUpPanelProps): ReactElement {
           </div>
           {cut.cancelled.map((d) => (
             <div key={d.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "13px 20px", borderTop: "1px solid var(--border)" }}>
-              <span style={{ fontSize: 14, color: "var(--text-muted)" }}>{hourOf(d.paidAt)} · {d.voidReason ?? "sin motivo"}</span>
+              <span style={{ fontSize: 14, color: "var(--text-muted)" }}>{capturedLate(d) ? "" : `${hourOf(d.paidAt)} · `}{d.voidReason ?? "sin motivo"}</span>
               <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15.5, color: "var(--text-faint)", textDecoration: "line-through" }}>
                 {formatCents(d.amountCents)}
               </span>
