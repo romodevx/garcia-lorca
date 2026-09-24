@@ -49,6 +49,26 @@ func NewTeacher(id, tenantID, firstName, lastName, email, userID string) (Teache
 	}, nil
 }
 
+// RestoreTeacher rebuilds a teacher read back from storage. It checks only that
+// the row is whole — the email's SHAPE was judged when the teacher was created,
+// and a row stored under an older, looser rule must stay readable: one such row
+// would otherwise fail ListTeachers for the whole school.
+func RestoreTeacher(id, tenantID, firstName, lastName, email, userID string) (Teacher, error) {
+	for _, required := range []string{id, tenantID, firstName, lastName, email} {
+		if strings.TrimSpace(required) == "" {
+			return Teacher{}, glerrors.New(glerrors.KindInvalid, "stored teacher is missing a required field")
+		}
+	}
+	return Teacher{
+		id:        id,
+		tenantID:  tenantID,
+		firstName: firstName,
+		lastName:  lastName,
+		email:     email,
+		userID:    userID,
+	}, nil
+}
+
 // validateTeacherEmail requires an address and checks its shape with the one
 // rule every service shares (pkg/email); the authoritative uniqueness
 // constraint lives at the database level (UNIQUE(tenant_id, email)).

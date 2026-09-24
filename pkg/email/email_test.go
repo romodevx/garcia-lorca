@@ -51,3 +51,11 @@ func TestValidateRejectsImplausibleShapes(t *testing.T) {
 		})
 	}
 }
+
+// Validate is exactly the rule iam enforced before it moved here: users already
+// stored under it must stay readable, so it may not become stricter.
+func TestValidateKeepsIamsPreviousRule(t *testing.T) {
+	if err := email.Validate("x@colegio.mx."); err != nil {
+		t.Fatalf("a stored iam address that passed before must still pass: %v", err)
+	}
+}

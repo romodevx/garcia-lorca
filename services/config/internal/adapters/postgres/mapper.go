@@ -153,7 +153,7 @@ func toDomainTeacher(m teacherModel) (domain.Teacher, error) {
 	if m.UserID != nil {
 		userID = *m.UserID
 	}
-	return domain.NewTeacher(m.ID, m.TenantID, m.FirstName, m.LastName, m.Email, userID)
+	return domain.RestoreTeacher(m.ID, m.TenantID, m.FirstName, m.LastName, m.Email, userID)
 }
 
 // --- teaching assignments -------------------------------------------------

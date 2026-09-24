@@ -27,6 +27,10 @@ func Normalize(raw string) string {
 // plausible shape: no whitespace, exactly one '@' with a non-empty local part,
 // and a dotted domain. It is a boundary sanity check, not RFC 5322 — the
 // authoritative uniqueness lives in the database.
+//
+// It is byte-for-byte the rule iam enforced before it moved here, and iam
+// re-validates every user it reads: making it stricter would make stored users
+// unreadable. Tighten it only together with a migration that fixes the rows.
 func Validate(normalized string) error {
 	if normalized == "" {
 		return glerrors.New(glerrors.KindInvalid, "email is empty")
@@ -40,7 +44,7 @@ func Validate(normalized string) error {
 	}
 	domainPart := normalized[at+1:]
 	dot := strings.IndexByte(domainPart, '.')
-	if dot <= 0 || strings.HasSuffix(domainPart, ".") {
+	if dot <= 0 || dot == len(domainPart)-1 {
 		return glerrors.New(glerrors.KindInvalid, "email domain must contain a dot")
 	}
 	return nil
