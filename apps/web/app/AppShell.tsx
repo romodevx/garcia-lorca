@@ -541,7 +541,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "payments" &&
         (financeEnabled ? (
-          <PaymentsScreen onBack={home} />
+          <PaymentsScreen onBack={home} canGrantDiscounts={principal?.permissions?.includes("finance:write") === true} />
         ) : (
           <ModulePlaceholder m={MODULES.find((m) => m.id === "payments") as ModuleDef} onBack={home} />
         ))}

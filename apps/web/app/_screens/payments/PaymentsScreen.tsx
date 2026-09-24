@@ -23,6 +23,8 @@ const MAX_RESULTS = 12;
 
 export interface PaymentsScreenProps {
   onBack: () => void;
+  /** finance:write: the counter may grant the late early-payment reward. */
+  canGrantDiscounts?: boolean;
 }
 
 /**
@@ -36,7 +38,7 @@ export interface PaymentsScreenProps {
  * The whole flow is one question: which pupil? Everything else happens in the
  * drawer.
  */
-export function PaymentsScreen({ onBack }: PaymentsScreenProps): ReactElement {
+export function PaymentsScreen({ onBack, canGrantDiscounts = false }: PaymentsScreenProps): ReactElement {
   const [students, setStudents] = useState<Student[]>([]);
   // Three states, not two. "Empty" and "we could not ask" look the same on
   // screen and mean opposite things: one says the pupil is not registered, the
@@ -175,6 +177,7 @@ export function PaymentsScreen({ onBack }: PaymentsScreenProps): ReactElement {
       {collecting !== null && (
         <CollectDrawer
           student={collecting}
+          canGrantDiscounts={canGrantDiscounts}
           onClose={() => setCollecting(null)}
           onCollected={() => {
             // The figure this screen shows is now stale for that pupil.
