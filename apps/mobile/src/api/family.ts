@@ -17,8 +17,10 @@ export interface FamilyStudent {
   id: string;
   firstName: string;
   lastName: string;
-  /** Canonical level name: "kinder" | "primaria" | "secundaria" | "preparatoria" | "". */
+  /** The level's name as the school wrote it in Configuración ("Preescolar"). */
   level: string;
+  /** The config level id. */
+  levelId: string;
   gradeGroup: string;
 }
 

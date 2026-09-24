@@ -18,18 +18,11 @@ export interface ChildView {
   initials: string;
   /** Grade + group label, e.g. "3° A". */
   group: string;
-  /** Spanish level label, e.g. "Primaria". */
+  /** The level as the school named it, e.g. "Primaria". */
   levelLabel: string;
   /** True for levels the SEP evaluates qualitatively (kínder). */
   qualitative: boolean;
 }
-
-const LEVEL_LABEL: Record<string, string> = {
-  kinder: "Kínder",
-  primaria: "Primaria",
-  secundaria: "Secundaria",
-  preparatoria: "Preparatoria",
-};
 
 const EMPTY_VIEW: ChildView = {
   present: false,
@@ -41,9 +34,17 @@ const EMPTY_VIEW: ChildView = {
   qualitative: false,
 };
 
-/** True for levels graded qualitatively (logrado/proceso) rather than numerically. */
+/** Levels graded qualitatively, folded: kínder, and preescolar — its official name. */
+const QUALITATIVE_LEVELS = new Set(["kinder", "preescolar"]);
+
+/**
+ * True for levels graded qualitatively (logrado/proceso) rather than
+ * numerically. The level is the school's own name for it now (not a fixed SEP
+ * key), so it is folded — case and accents — before it is compared.
+ */
 export function isQualitativeLevel(level: string): boolean {
-  return level === "kinder";
+  const folded = level.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return QUALITATIVE_LEVELS.has(folded);
 }
 
 function initialsOf(firstName: string, lastName: string): string {
@@ -63,7 +64,7 @@ export function toChildView(student: FamilyStudent | null): ChildView {
     short: student.firstName,
     initials: initialsOf(student.firstName, student.lastName),
     group: student.gradeGroup,
-    levelLabel: LEVEL_LABEL[student.level] ?? "",
+    levelLabel: student.level,
     qualitative: isQualitativeLevel(student.level),
   };
 }
