@@ -186,6 +186,25 @@ describe("la captura de administración", () => {
     expect(correo).toHaveAttribute("inputmode", "email");
   });
 
+  it("un correo sin forma de correo no deja crear al usuario", async () => {
+    const user = userEvent.setup();
+    render(<AdminScreen onBack={() => {}} />);
+    await user.click(await screen.findByRole("button", { name: "Nuevo usuario" }));
+
+    // Everything else is valid, so only the email can hold the drawer back.
+    await user.type(screen.getByLabelText(/^Nombre para mostrar/), "Ana Ruiz");
+    const password = screen.queryByLabelText(/^Contraseña temporal/);
+    if (password !== null) await user.type(password, "init-pw-123");
+    await user.type(screen.getByLabelText("Correo"), "ana@colegio");
+    await user.tab();
+
+    expect(screen.getByText(/nombre@dominio/)).toBeInTheDocument();
+    // The drawer's primary action (create or invite, per configuration) stays
+    // unready: pointer-events none also hides it from the accessibility tree.
+    const primary = screen.getByRole("button", { name: /Crear usuario|Enviar invitación/, hidden: true });
+    expect(primary).toHaveStyle({ pointerEvents: "none" });
+  });
+
   it("el nombre para mostrar se captura en mayúsculas", async () => {
     const user = userEvent.setup();
     render(<AdminScreen onBack={() => {}} />);

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties, type Rea
 import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
 import { DrawerShell } from "../../_design/DrawerShell";
-import { EmailField, HelpTip, TextField } from "../../_design/form";
+import { emailShapeError, EmailField, HelpTip, TextField } from "../../_design/form";
 import { Icon, type IconName } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import type { ColorKey } from "../../_design/colors";
@@ -91,6 +91,11 @@ function labelField(label: string, node: ReactElement, req?: boolean, help?: str
 
 export interface AdminScreenProps {
   onBack: () => void;
+}
+
+/** Written and shaped like an address: what the drawers need to be ready. */
+function hasEmailShape(email: string): boolean {
+  return email.trim() !== "" && emailShapeError(email) === undefined;
 }
 
 export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
@@ -302,7 +307,7 @@ function CreateUserDrawer({ roles, onClose, onSave }: { roles: readonly Role[]; 
   const [tempPassword, setPw] = useState("");
   const [sel, setSel] = useState<string[]>([]);
   const [err, setErr] = useState<string | undefined>(undefined);
-  const ready = email.includes("@") && displayName.trim().length > 1 && tempPassword.length >= 6;
+  const ready = hasEmailShape(email) && displayName.trim().length > 1 && tempPassword.length >= 6;
   const toggle = (id: string): void => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
   const submit = async (): Promise<void> => { try { await onSave({ email: email.trim(), displayName: displayName.trim(), tempPassword, roleIds: sel }); } catch { setErr("No se pudo crear el usuario (¿correo duplicado?)."); } };
   return (
@@ -335,7 +340,7 @@ function InviteUserDrawer({ roles, onClose, onSave }: { roles: readonly Role[]; 
   const [sel, setSel] = useState<string[]>([]);
   const [err, setErr] = useState<string | undefined>(undefined);
   const [sending, setSending] = useState(false);
-  const ready = email.includes("@") && displayName.trim().length > 1 && !sending;
+  const ready = hasEmailShape(email) && displayName.trim().length > 1 && !sending;
   const toggle = (id: string): void => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
   const submit = async (): Promise<void> => {
     setSending(true);
