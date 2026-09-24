@@ -210,3 +210,38 @@ func TestReScopingAnUnresolvedGarmentToEveryLevelSticks(t *testing.T) {
 		}
 	}
 }
+
+// Retiring an unresolved garment keeps it unresolved in storage: its old key
+// is only cleared by choosing a real level.
+func TestRetiringAnUnresolvedGarmentKeepsItUnresolved(t *testing.T) {
+	itemID := newUUID(t)
+	if err := superDB.Exec(`INSERT INTO uniform_items (id, tenant_id, code, name, price_cents, level)
+	    VALUES (?, ?, ?, 'Batita vieja', 100, 'kinder')`, itemID, tenantA, "RET-"+itemID[:8]).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	repo := appRepo(t, tenantA)
+	find := func() domain.Item {
+		t.Helper()
+		all, err := repo.ListItems(context.Background(), ports.ListItemsFilter{IncludeInactive: true})
+		if err != nil {
+			t.Fatalf("ListItems: %v", err)
+		}
+		for _, iws := range all {
+			if iws.Item.ID() == itemID {
+				return iws.Item
+			}
+		}
+		t.Fatal("garment not found")
+		return domain.Item{}
+	}
+	edited, err := find().WithDetails("Batita vieja", "", domain.LevelUnresolved, 100)
+	if err != nil {
+		t.Fatalf("WithDetails: %v", err)
+	}
+	if _, err := repo.UpdateItem(context.Background(), edited.Retire()); err != nil {
+		t.Fatalf("UpdateItem: %v", err)
+	}
+	if got := find(); got.Level() != domain.LevelUnresolved || got.Active() {
+		t.Errorf("after retiring: level %q active %v", got.Level(), got.Active())
+	}
+}

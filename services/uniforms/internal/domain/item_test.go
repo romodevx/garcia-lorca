@@ -217,3 +217,22 @@ func TestAnUnresolvedGarmentAppliesToNoPupil(t *testing.T) {
 		t.Error("a new garment cannot be created with an unresolved level")
 	}
 }
+
+// Retiring or renaming an unresolved garment sends its level back unchanged;
+// that keeps it unresolved. Only a garment that already is unresolved may keep
+// the value — a client cannot put a resolved garment into that state.
+func TestAnUnresolvedGarmentCanBeEditedWithoutLosingItsState(t *testing.T) {
+	item, _ := domain.NewItem("it-1", "t-1", "BAT", "Batita", "", domain.LevelAny, 41000)
+	unresolved := item.WithUnresolvedLevel()
+
+	edited, err := unresolved.WithDetails("Batita vieja", "", domain.LevelUnresolved, 41000)
+	if err != nil {
+		t.Fatalf("WithDetails keeping the unresolved level: %v", err)
+	}
+	if edited.Level() != domain.LevelUnresolved || edited.Name() != "Batita vieja" {
+		t.Errorf("edited = (%q, %q)", edited.Level(), edited.Name())
+	}
+	if _, err := item.WithDetails("Batita", "", domain.LevelUnresolved, 41000); err == nil {
+		t.Error("a resolved garment must not be made unresolved by a client")
+	}
+}

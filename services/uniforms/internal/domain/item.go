@@ -182,10 +182,21 @@ func (i Item) Restore() Item {
 }
 
 // WithDetails returns a copy with the editable fields replaced, re-validated.
+//
+// An unresolved garment edited without choosing a level (retired, renamed)
+// stays unresolved; choosing any real level re-scopes it. Only a garment that
+// already is unresolved may keep that value.
 func (i Item) WithDetails(name, description string, level Level, priceCents int64) (Item, error) {
+	keepUnresolved := level == LevelUnresolved && i.level == LevelUnresolved
+	if keepUnresolved {
+		level = LevelAny
+	}
 	updated, err := NewItem(i.id, i.tenantID, i.code, name, description, level, priceCents)
 	if err != nil {
 		return Item{}, err
+	}
+	if keepUnresolved {
+		updated.level = LevelUnresolved
 	}
 	updated.active = i.active
 	return updated, nil
