@@ -307,6 +307,13 @@ describe("CollectDrawer · fecha de pago (tarea 7)", () => {
     expect(finance.registerDeposit).not.toHaveBeenCalled();
   });
 
+  it("says which day the expected amount is for", async () => {
+    open();
+    expect(await screen.findByText("Monto esperado hoy")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Fecha de pago"), { target: { value: "2026-10-03" } });
+    expect(await screen.findByText("Monto esperado al 3 oct")).toBeInTheDocument();
+  });
+
   it("refuses a future date on the field, and takes nothing", async () => {
     const user = userEvent.setup();
     open();

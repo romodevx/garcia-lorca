@@ -74,6 +74,12 @@ export interface CollectDrawerProps {
 const FUTURE_PAYMENT = "La fecha de pago no puede ser futura.";
 const MISSING_PAYMENT_DATE = "Falta la fecha de pago.";
 
+/** "3 oct" for an aaaa-mm-dd date, read as the calendar day it names. */
+function shortDay(isoDate: string): string {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  return new Date(y ?? 0, (m ?? 1) - 1, d ?? 1).toLocaleDateString("es-MX", { day: "numeric", month: "short" }).replace(".", "");
+}
+
 /** What is wrong with a payment date, if anything. */
 export function paymentDateError(paidOn: string, day: string): string | undefined {
   if (paidOn === "") return MISSING_PAYMENT_DATE;
@@ -248,7 +254,7 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
               style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
               <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px", display: "flex", flexDirection: "column", gap: 20 }}>
                 <div style={{ padding: "18px 20px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
-                  <span style={{ fontSize: 14, color: "var(--text-muted)" }}>Monto esperado hoy</span>
+                  <span style={{ fontSize: 14, color: "var(--text-muted)" }}>{sentDate === "" ? "Monto esperado hoy" : `Monto esperado al ${shortDay(sentDate)}`}</span>
                   <div data-testid="amount-expected" style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 38, color: "var(--text)", marginTop: 4 }}>
                     {expected === null ? "…" : formatCents(expected.amountCents)}
                   </div>
