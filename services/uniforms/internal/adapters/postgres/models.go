@@ -15,7 +15,7 @@ type itemModel struct {
 	Code        string  `gorm:"column:code"`
 	Name        string  `gorm:"column:name"`
 	Description string  `gorm:"column:description"`
-	Level       *string `gorm:"column:level"`
+	LevelID     *string `gorm:"column:level_id"`
 	PriceCents  int64   `gorm:"column:price_cents"`
 	Active      bool    `gorm:"column:active"`
 	// What kind of thing this is: uniform, book, supply or other. A row written
@@ -70,7 +70,8 @@ type orderModel struct {
 	Folio             string     `gorm:"column:folio"`
 	StudentID         *string    `gorm:"column:student_id"`
 	StudentName       string     `gorm:"column:student_name"`
-	StudentLevel      *string    `gorm:"column:student_level"`
+	StudentLevelID    *string    `gorm:"column:student_level_id"`
+	StudentLevelName  string     `gorm:"column:student_level_name"`
 	StudentGradeGroup string     `gorm:"column:student_grade_group"`
 	CycleID           *string    `gorm:"column:cycle_id"`
 	CreatedByUserID   *string    `gorm:"column:created_by_user_id"`

@@ -95,7 +95,7 @@ func (r *Repository) UpdateItem(ctx context.Context, item domain.Item) (domain.I
 		res := tx.Model(&itemModel{}).Where("id = ?", item.ID()).Updates(map[string]any{
 			"name":        model.Name,
 			"description": model.Description,
-			"level":       model.Level,
+			"level_id":    model.LevelID,
 			"price_cents": model.PriceCents,
 			"active":      model.Active,
 			"updated_at":  gorm.Expr("now()"),
@@ -143,7 +143,7 @@ func (r *Repository) ListItems(ctx context.Context, f ports.ListItemsFilter) ([]
 			q = q.Where("active")
 		}
 		if f.Level != domain.LevelAny {
-			q = q.Where("level IS NULL OR level = ?", string(f.Level))
+			q = q.Where("level_id IS NULL OR level_id = ?", string(f.Level))
 		}
 		var items []itemModel
 		if err := q.Find(&items).Error; err != nil {
@@ -482,7 +482,7 @@ func (r *Repository) CounterSale(ctx context.Context, cmd ports.CounterSaleComma
 			return err
 		}
 		order, err := domain.NewOrder(cmd.OrderID, cmd.TenantID, folio, domain.OrderStudent{
-			ID: cmd.StudentID, FullName: cmd.StudentName, Level: cmd.StudentLevel,
+			ID: cmd.StudentID, FullName: cmd.StudentName, Level: cmd.StudentLevel, LevelName: cmd.StudentLevelName,
 			GradeGroup: cmd.StudentGradeGroup, CycleID: cmd.CycleID,
 		}, domain.SourceCounter, cmd.ActorUserID, cmd.SoldAt)
 		if err != nil {
@@ -674,7 +674,7 @@ func (r *Repository) ListOrders(ctx context.Context, f ports.ListOrdersFilter) (
 			q = q.Where("student_id IN ?", f.StudentIDs)
 		}
 		if f.Level != domain.LevelAny {
-			q = q.Where("student_level = ?", string(f.Level))
+			q = q.Where("student_level_id = ?", string(f.Level))
 		}
 		if term := strings.TrimSpace(f.Query); term != "" {
 			if domain.LooksLikeFolio(term) {

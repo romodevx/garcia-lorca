@@ -129,7 +129,7 @@ func indexOf(haystack, needle string) int {
 // with the lines and deliveries it describes.
 func TestOrderLabelIsDerivedOnEveryRead(t *testing.T) {
 	order, err := domain.NewOrder("ord-1", tenant, "U-2026-000123", domain.OrderStudent{
-		ID: "stu-1", FullName: "Zoe Villalobos", Level: domain.LevelPrimaria, CycleID: "cyc-1",
+		ID: "stu-1", FullName: "Zoe Villalobos", Level: domain.Level("c1000000-0000-0000-0000-000000000002"), LevelName: "Primaria", CycleID: "cyc-1",
 	}, domain.SourceFamily, "usr-1", now)
 	if err != nil {
 		t.Fatalf("NewOrder: %v", err)
@@ -147,6 +147,11 @@ func TestOrderLabelIsDerivedOnEveryRead(t *testing.T) {
 	// One garment delivered, one lost: the honest ending, and NOT plain closed.
 	if got.Msg.GetOrder().GetLabel() != uniformsv1.OrderLabel_ORDER_LABEL_CLOSED_PARTIAL {
 		t.Errorf("label = %v, want CLOSED_PARTIAL", got.Msg.GetOrder().GetLabel())
+	}
+	// The student's level travels as the config level it was at order time.
+	o := got.Msg.GetOrder()
+	if o.GetStudentLevelId() != "c1000000-0000-0000-0000-000000000002" || o.GetStudentLevelName() != "Primaria" {
+		t.Errorf("student level = (%q, %q)", o.GetStudentLevelId(), o.GetStudentLevelName())
 	}
 }
 

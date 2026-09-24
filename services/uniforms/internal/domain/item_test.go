@@ -31,7 +31,7 @@ func TestItemLevelAnyAppliesEverywhere(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
 	}
-	kinderOnly, err := domain.NewItem("it-2", "t-1", "BAT", "Batita", "", domain.LevelKinder, 41000)
+	kinderOnly, err := domain.NewItem("it-2", "t-1", "BAT", "Batita", "", domain.Level("c1000000-0000-0000-0000-000000000001"), 41000)
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
 	}
@@ -42,10 +42,10 @@ func TestItemLevelAnyAppliesEverywhere(t *testing.T) {
 		level domain.Level
 		want  bool
 	}{
-		{"any-level garment, kinder pupil", anyLevel, domain.LevelKinder, true},
-		{"any-level garment, prepa pupil", anyLevel, domain.LevelPreparatoria, true},
-		{"kinder garment, kinder pupil", kinderOnly, domain.LevelKinder, true},
-		{"kinder garment, primaria pupil", kinderOnly, domain.LevelPrimaria, false},
+		{"any-level garment, kinder pupil", anyLevel, domain.Level("c1000000-0000-0000-0000-000000000001"), true},
+		{"any-level garment, prepa pupil", anyLevel, domain.Level("c1000000-0000-0000-0000-000000000004"), true},
+		{"kinder garment, kinder pupil", kinderOnly, domain.Level("c1000000-0000-0000-0000-000000000001"), true},
+		{"kinder garment, primaria pupil", kinderOnly, domain.Level("c1000000-0000-0000-0000-000000000002"), false},
 		{"kinder garment, unknown level", kinderOnly, domain.LevelAny, false},
 	}
 	for _, tc := range cases {
@@ -88,7 +88,6 @@ func TestNewItemValidation(t *testing.T) {
 		{"blank code", "it-1", "  ", "Playera", domain.LevelAny, 100},
 		{"blank name", "it-1", "PLA", "  ", domain.LevelAny, 100},
 		{"negative price", "it-1", "PLA", "Playera", domain.LevelAny, -1},
-		{"unknown level", "it-1", "PLA", "Playera", domain.Level("universidad"), 100},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -138,7 +137,7 @@ func TestRetiredItemCannotStartNewOrders(t *testing.T) {
 // clothing.
 func TestAnItemCarriesItsCategory(t *testing.T) {
 	item, err := domain.NewItem("it-1", "t1", "LIB-1", "Libro de matemáticas", "",
-		domain.LevelPrimaria, 45000)
+		domain.Level("c1000000-0000-0000-0000-000000000002"), 45000)
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
 	}
@@ -157,11 +156,24 @@ func TestAnItemCarriesItsCategory(t *testing.T) {
 }
 
 func TestAnUnknownCategoryIsRefused(t *testing.T) {
-	item, err := domain.NewItem("it-1", "t1", "LIB-1", "Libro", "", domain.LevelPrimaria, 45000)
+	item, err := domain.NewItem("it-1", "t1", "LIB-1", "Libro", "", domain.Level("c1000000-0000-0000-0000-000000000002"), 45000)
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
 	}
 	if _, err := item.WithCategory("mascota"); glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("unknown category: want KindInvalid, got %v", err)
+	}
+}
+
+// A garment follows whatever levels the school defined in config: any level id
+// scopes it, the level list is not this service's to judge (ADR 0014).
+func TestAnItemMayBeScopedToAnyCatalogLevel(t *testing.T) {
+	preescolar := domain.Level("c1000000-0000-0000-0000-0000000000aa")
+	item, err := domain.NewItem("it-1", "t-1", "BAT", "Batita", "", preescolar, 41000)
+	if err != nil {
+		t.Fatalf("NewItem: %v", err)
+	}
+	if !item.AppliesTo(preescolar) || item.AppliesTo(domain.Level("c1000000-0000-0000-0000-000000000002")) {
+		t.Error("a scoped garment applies to its level alone")
 	}
 }

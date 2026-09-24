@@ -64,9 +64,13 @@ func (c *Client) ByID(ctx context.Context, id string) (ports.StudentRef, error) 
 		return ports.StudentRef{}, err
 	}
 	return ports.StudentRef{
-		ID:         s.GetId(),
-		FullName:   fullName(s.GetFirstName(), s.GetLastName()),
-		Level:      levelOf(s.GetLevel()),
+		ID:       s.GetId(),
+		FullName: fullName(s.GetFirstName(), s.GetLastName()),
+		// A pupil with no level id (a legacy row the level migration could not
+		// link) is LevelAny, which for a PUPIL means "unknown" rather than "all" —
+		// and Item.AppliesTo already refuses to dress a pupil nobody can place.
+		Level:      domain.Level(s.GetLevelId()),
+		LevelName:  s.GetLevelName(),
 		GradeGroup: s.GetGradeGroup(),
 		CycleID:    cycleID,
 		Status:     admissionStatus(s.GetAdmissionStatus()),
@@ -97,18 +101,6 @@ func (c *Client) liveCycle(ctx context.Context, studentID string) (string, error
 func fullName(first, last string) string {
 	return strings.TrimSpace(strings.TrimSpace(first) + " " + strings.TrimSpace(last))
 }
-
-var levels = map[studentsv1.Level]domain.Level{
-	studentsv1.Level_LEVEL_KINDER:       domain.LevelKinder,
-	studentsv1.Level_LEVEL_PRIMARIA:     domain.LevelPrimaria,
-	studentsv1.Level_LEVEL_SECUNDARIA:   domain.LevelSecundaria,
-	studentsv1.Level_LEVEL_PREPARATORIA: domain.LevelPreparatoria,
-}
-
-// levelOf maps the students level onto the shop's own. An unspecified level
-// becomes LevelAny, which for a PUPIL means "unknown" rather than "all" — and
-// Item.AppliesTo already refuses to dress a pupil whose level nobody knows.
-func levelOf(l studentsv1.Level) domain.Level { return levels[l] }
 
 var admissionStatuses = map[studentsv1.AdmissionStatus]string{
 	studentsv1.AdmissionStatus_ADMISSION_STATUS_PENDING:  "pending",

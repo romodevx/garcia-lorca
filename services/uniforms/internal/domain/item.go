@@ -6,7 +6,9 @@ import (
 	glerrors "github.com/garcia-lorca/pkg/errors"
 )
 
-// Level is a school level, mirroring the students service's own.
+// Level is a school level: the id of a level the school defined in its config
+// catalog (ADR 0014). It used to be a fixed SEP list, which meant a garment
+// could never be scoped to a level the list lacked — Preescolar, Maternal.
 //
 // LevelAny is the important one. The requirement is that a school MAY dress
 // kinder differently from prepa — not that it must. Most garments are the same
@@ -14,22 +16,9 @@ import (
 // garment with no level applies to every level.
 type Level string
 
-const (
-	LevelAny          Level = ""
-	LevelKinder       Level = "kinder"
-	LevelPrimaria     Level = "primaria"
-	LevelSecundaria   Level = "secundaria"
-	LevelPreparatoria Level = "preparatoria"
-)
-
-// IsValid reports whether l is a level this system knows.
-func (l Level) IsValid() bool {
-	switch l {
-	case LevelAny, LevelKinder, LevelPrimaria, LevelSecundaria, LevelPreparatoria:
-		return true
-	}
-	return false
-}
+// LevelAny scopes a garment to every level. On a PUPIL the same zero value means
+// "level unknown" — see AppliesTo.
+const LevelAny Level = ""
 
 // Item is one garment in the catalogue.
 //
@@ -108,9 +97,6 @@ func NewItem(id, tenantID, code, name, description string, level Level, priceCen
 	trimmedDesc := strings.TrimSpace(description)
 	if len(trimmedDesc) > maxDescriptionLen {
 		return Item{}, glerrors.New(glerrors.KindInvalid, "item description is too long")
-	}
-	if !level.IsValid() {
-		return Item{}, glerrors.New(glerrors.KindInvalid, "unknown school level")
 	}
 	if priceCents < 0 {
 		return Item{}, glerrors.New(glerrors.KindInvalid, "price cannot be negative")

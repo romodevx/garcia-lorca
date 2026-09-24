@@ -35,7 +35,7 @@ func TestCounterSaleHappyPath(t *testing.T) {
 	if len(got.Fulfillments) != 1 || got.Fulfillments[0].Status() != domain.StatusSoldAtCounter {
 		t.Fatalf("a counter sale must produce one terminal delivery: %+v", got.Fulfillments)
 	}
-	if got.Order.StudentName() != "Zoe Villalobos" || got.Order.StudentLevel() != domain.LevelPrimaria {
+	if got.Order.StudentName() != "Zoe Villalobos" || got.Order.StudentLevel() != domain.Level("c1000000-0000-0000-0000-000000000002") {
 		t.Errorf("the student was not snapshotted onto the order: %+v", got.Order)
 	}
 	// Two pieces left the shelf and nothing is being held.
@@ -352,7 +352,7 @@ func TestCounterSaleToAnUnenrolledPupilIsRefusedInPlainSpanish(t *testing.T) {
 
 	const newcomer = "9f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
 	f.students.byID[newcomer] = ports.StudentRef{
-		ID: newcomer, FullName: "Zoe Villalobos", Level: domain.LevelPrimaria,
+		ID: newcomer, FullName: "Zoe Villalobos", Level: domain.Level("c1000000-0000-0000-0000-000000000002"),
 		GradeGroup: "1 A", CycleID: "", Status: "in_process",
 	}
 

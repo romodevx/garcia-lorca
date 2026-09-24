@@ -22,6 +22,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -44,16 +46,14 @@ const (
 	tenantOutsider = "33333333-3333-3333-3333-333333333333"
 )
 
-var migrationFiles = []string{
-	"../../../../../migrations/uniforms/0001_init.sql",
-	"../../../../../migrations/uniforms/0002_orders.sql",
-	"../../../../../migrations/uniforms/0003_settings.sql",
-	"../../../../../migrations/uniforms/0004_sale_keys.sql",
-	"../../../../../migrations/uniforms/0005_maternal_level.sql",
-	"../../../../../migrations/uniforms/0006_item_category.sql",
-}
+// migrationsDir is the one list of uniforms migrations: every file in it is
+// applied, in order, so a new one can never be left out of the suite's schema.
+const migrationsDir = "../../../../../migrations/uniforms"
 
 var (
+	// superDSNFor builds an owner DSN for any database in the container, so a
+	// migration test can build a throwaway database of its own.
+	superDSNFor func(db string) string
 	superDB   *gorm.DB
 	appDSN    string
 	superPass = randToken()
@@ -88,6 +88,9 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "connection string: %v\n", err)
 		os.Exit(1)
 	}
+	superDSNFor = func(db string) string {
+		return strings.Replace(ownerDSN, "/"+dbName+"?", "/"+db+"?", 1)
+	}
 	superDB, err = open(ownerDSN)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "open owner: %v\n", err)
@@ -98,6 +101,22 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	os.Exit(m.Run())
+}
+
+// sqlFiles lists the migration files in migrationsDir in lexical order.
+func sqlFiles() ([]string, error) {
+	entries, err := os.ReadDir(migrationsDir)
+	if err != nil {
+		return nil, fmt.Errorf("read migrations dir: %w", err)
+	}
+	files := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
+			files = append(files, e.Name())
+		}
+	}
+	sort.Strings(files)
+	return files, nil
 }
 
 func open(dsn string) (*gorm.DB, error) {
@@ -120,8 +139,12 @@ func setUp(ownerDSN string) error {
 			return fmt.Errorf("%q: %w", stmt, err)
 		}
 	}
-	for _, f := range migrationFiles {
-		sqlBytes, err := os.ReadFile(f)
+	files, err := sqlFiles()
+	if err != nil {
+		return err
+	}
+	for _, f := range files {
+		sqlBytes, err := os.ReadFile(filepath.Join(migrationsDir, f))
 		if err != nil {
 			return fmt.Errorf("read %s: %w", f, err)
 		}

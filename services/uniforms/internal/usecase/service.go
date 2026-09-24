@@ -108,9 +108,6 @@ func (s *Service) UpdateItem(ctx context.Context, in UpdateItemInput) (domain.It
 
 // ListItems returns the catalogue, each garment with its size run.
 func (s *Service) ListItems(ctx context.Context, f ports.ListItemsFilter) ([]ports.ItemWithSizes, error) {
-	if !f.Level.IsValid() {
-		return nil, glerrors.New(glerrors.KindInvalid, "unknown school level")
-	}
 	return s.repo.ListItems(ctx, f)
 }
 
@@ -247,7 +244,7 @@ func (s *Service) CounterSale(ctx context.Context, in CounterSaleInput) (ports.O
 
 	saved, replayed, err := s.repo.CounterSale(ctx, ports.CounterSaleCommand{
 		OrderID: orderID, FulfillmentID: fulfillmentID, TenantID: s.tenantID,
-		StudentID: student.ID, StudentName: student.FullName, StudentLevel: student.Level,
+		StudentID: student.ID, StudentName: student.FullName, StudentLevel: student.Level, StudentLevelName: student.LevelName,
 		StudentGradeGroup: student.GradeGroup, CycleID: student.CycleID,
 		Lines: lines, TotalCents: total, Note: strings.TrimSpace(in.Note),
 		ActorUserID: in.ActorUserID, IdempotencyKey: in.IdempotencyKey, SoldAt: s.now(),

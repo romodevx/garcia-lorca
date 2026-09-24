@@ -347,7 +347,7 @@ func newFixture(t *testing.T) *fixture {
 		repo: newFakeRepo(),
 		students: &fakeStudents{byID: map[string]ports.StudentRef{
 			testStudent: {
-				ID: testStudent, FullName: "Zoe Villalobos", Level: domain.LevelPrimaria,
+				ID: testStudent, FullName: "Zoe Villalobos", Level: domain.Level("c1000000-0000-0000-0000-000000000002"),
 				GradeGroup: "3 B", CycleID: testCycle, Status: "active",
 			},
 		}},

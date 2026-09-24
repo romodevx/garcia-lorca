@@ -12,13 +12,13 @@ var placedAt = time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC)
 
 func TestNewOrderSnapshotsTheStudent(t *testing.T) {
 	o, err := domain.NewOrder("ord-1", "t-1", "U-2026-000123", domain.OrderStudent{
-		ID: "stu-1", FullName: "Zoe Villalobos", Level: domain.LevelPrimaria,
+		ID: "stu-1", FullName: "Zoe Villalobos", Level: domain.Level("c1000000-0000-0000-0000-000000000002"), LevelName: "Primaria",
 		GradeGroup: "3 B", CycleID: "cyc-1",
 	}, domain.SourceFamily, "usr-1", placedAt)
 	if err != nil {
 		t.Fatalf("NewOrder: %v", err)
 	}
-	if o.StudentName() != "Zoe Villalobos" || o.StudentLevel() != domain.LevelPrimaria || o.StudentGradeGroup() != "3 B" {
+	if o.StudentName() != "Zoe Villalobos" || o.StudentLevel() != domain.Level("c1000000-0000-0000-0000-000000000002") || o.StudentLevelName() != "Primaria" || o.StudentGradeGroup() != "3 B" {
 		t.Errorf("the student's details were not snapshotted: %+v", o)
 	}
 }
@@ -54,7 +54,7 @@ func TestAnonymousOrdersAreOnlyForTheCounter(t *testing.T) {
 // belong to a school year, so a named student always brings one.
 func TestOrderWithAStudentNeedsACycle(t *testing.T) {
 	_, err := domain.NewOrder("ord-1", "t-1", "U-2026-000123", domain.OrderStudent{
-		ID: "stu-1", FullName: "Zoe", Level: domain.LevelPrimaria,
+		ID: "stu-1", FullName: "Zoe", Level: domain.Level("c1000000-0000-0000-0000-000000000002"),
 	}, domain.SourceFamily, "usr-1", placedAt)
 	if glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("want KindInvalid without a cycle, got %v", err)
@@ -62,7 +62,7 @@ func TestOrderWithAStudentNeedsACycle(t *testing.T) {
 }
 
 func TestNewOrderValidation(t *testing.T) {
-	student := domain.OrderStudent{ID: "stu-1", FullName: "Zoe", Level: domain.LevelPrimaria, CycleID: "cyc-1"}
+	student := domain.OrderStudent{ID: "stu-1", FullName: "Zoe", Level: domain.Level("c1000000-0000-0000-0000-000000000002"), CycleID: "cyc-1"}
 	cases := []struct {
 		name              string
 		id, tenant, folio string

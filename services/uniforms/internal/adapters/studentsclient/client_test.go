@@ -53,7 +53,7 @@ func clientFor(t *testing.T, stub *stubStudents) *studentsclient.Client {
 func aStudent() *studentsv1.Student {
 	return &studentsv1.Student{
 		Id: "stu-1", FirstName: " Zoe ", LastName: " Villalobos ",
-		Level: studentsv1.Level_LEVEL_PRIMARIA, GradeGroup: "3 B",
+		LevelId: "c1000000-0000-0000-0000-000000000002", LevelName: "Primaria", GradeGroup: "3 B",
 		AdmissionStatus: studentsv1.AdmissionStatus_ADMISSION_STATUS_ENROLLED,
 	}
 }
@@ -76,7 +76,7 @@ func TestByIDProjectsWhatTheOrderSnapshots(t *testing.T) {
 	if got.FullName != "Zoe Villalobos" {
 		t.Errorf("name = %q; the two halves are joined once, here", got.FullName)
 	}
-	if got.Level != domain.LevelPrimaria || got.GradeGroup != "3 B" {
+	if got.Level != domain.Level("c1000000-0000-0000-0000-000000000002") || got.LevelName != "Primaria" || got.GradeGroup != "3 B" {
 		t.Errorf("level %q, group %q", got.Level, got.GradeGroup)
 	}
 	if got.CycleID != "cyc-2026" {
@@ -173,7 +173,7 @@ func TestByIDFailsWhenTheEnrolmentLookupFails(t *testing.T) {
 // kinder smock to a prepa student.
 func TestUnknownLevelIsNotTreatedAsEveryLevel(t *testing.T) {
 	student := aStudent()
-	student.Level = studentsv1.Level_LEVEL_UNSPECIFIED
+	student.LevelId = ""
 	c := clientFor(t, &stubStudents{
 		student: student,
 		enrollments: []*studentsv1.Enrollment{
@@ -185,7 +185,7 @@ func TestUnknownLevelIsNotTreatedAsEveryLevel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ByID: %v", err)
 	}
-	kinderSmock, err := domain.NewItem("it-1", "t-1", "BAT", "Batita", "", domain.LevelKinder, 41000)
+	kinderSmock, err := domain.NewItem("it-1", "t-1", "BAT", "Batita", "", domain.Level("c1000000-0000-0000-0000-000000000001"), 41000)
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
 	}
