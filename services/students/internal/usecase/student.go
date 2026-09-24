@@ -162,5 +162,10 @@ func (s *StudentService) GetStudent(ctx context.Context, id string) (*domain.Stu
 
 // ListStudents returns students matching the filter plus the next page token.
 func (s *StudentService) ListStudents(ctx context.Context, f ports.ListFilter) ([]*domain.Student, string, error) {
+	if f.LevelID != "" {
+		if _, err := uuid.Parse(f.LevelID); err != nil {
+			return nil, "", glerrors.New(glerrors.KindInvalid, "level id is not a level id")
+		}
+	}
 	return s.repo.List(ctx, f)
 }

@@ -326,3 +326,11 @@ func TestListStudents(t *testing.T) {
 		t.Errorf("ListStudents: %d %v", len(got), err)
 	}
 }
+
+// A list filter that is not a level id is bad input, answered before the query.
+func TestListStudentsMalformedLevelFilterIsInvalid(t *testing.T) {
+	svc, _, _ := newService(t)
+	if _, _, err := svc.ListStudents(context.Background(), ports.ListFilter{LevelID: "kinder"}); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("want KindInvalid, got %v", err)
+	}
+}

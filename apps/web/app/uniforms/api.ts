@@ -334,7 +334,7 @@ export async function listItems(
   if (opts.includeInactive === true) params.set("includeInactive", "true");
   const query = params.toString();
   const body = await get<{ items: UniformItem[] }>(baseURL, query === "" ? "/items" : `/items?${query}`);
-  return body.items ?? [];
+  return (body.items ?? []).map(normalizeItem);
 }
 
 export interface NewItem {
@@ -348,17 +348,19 @@ export interface NewItem {
 }
 
 export async function createItem(baseURL: string, item: NewItem): Promise<UniformItem> {
-  return withSizes(await send<UniformItem>(baseURL, "/items", "POST", item));
+  return normalizeItem(await send<UniformItem>(baseURL, "/items", "POST", item));
 }
 
 /**
- * A freshly created item has no size run yet. The gateway sends an empty list,
- * but the screen that opens straight afterwards does `item.sizes.map(...)` and
- * a missing field crashes it outright rather than showing nothing — so the one
- * place that can be sure fills it in.
+ * Fills the fields the gateway may leave out, in the one place that can be sure.
+ *
+ * - `sizes`: a freshly created item has no size run yet, and a screen that does
+ *   `item.sizes.map(...)` crashes on a missing field rather than showing nothing.
+ * - `levelId`: a garment for every level has none, and the gateway omits it
+ *   (omitempty). Undefined is not "", so it read as "nivel sin nombre".
  */
-function withSizes(item: UniformItem): UniformItem {
-  return { ...item, sizes: item.sizes ?? [] };
+function normalizeItem(item: UniformItem): UniformItem {
+  return { ...item, sizes: item.sizes ?? [], levelId: item.levelId ?? "" };
 }
 
 export interface ItemEdit {
@@ -371,7 +373,7 @@ export interface ItemEdit {
 }
 
 export async function updateItem(baseURL: string, id: string, edit: ItemEdit): Promise<UniformItem> {
-  return withSizes(await send<UniformItem>(baseURL, `/items/${encodeURIComponent(id)}`, "PUT", edit));
+  return normalizeItem(await send<UniformItem>(baseURL, `/items/${encodeURIComponent(id)}`, "PUT", edit));
 }
 
 /** Writes a garment's whole size run in one call. */

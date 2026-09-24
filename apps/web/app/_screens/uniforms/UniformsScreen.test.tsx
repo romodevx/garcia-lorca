@@ -467,3 +467,19 @@ describe("UniformsScreen — los niveles son los del colegio", () => {
     });
   });
 });
+
+describe("UniformsScreen — una prenda para todos", () => {
+  // The gateway omits levelId for a garment of every level (omitempty), so it
+  // arrives undefined, not "". The catalogue must still read "todos los niveles".
+  it("labels a garment with no level as for every level", async () => {
+    const user = userEvent.setup();
+    const { levelId: _omitted, ...unscoped } = jumper;
+    stubCatalogue([unscoped as UniformItem]);
+    render(<UniformsScreen onBack={() => {}} />);
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Catálogo" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Catálogo" }));
+
+    expect(await screen.findByText(/todos los niveles/)).toBeInTheDocument();
+    expect(screen.queryByText(/nivel sin nombre/)).not.toBeInTheDocument();
+  });
+});
