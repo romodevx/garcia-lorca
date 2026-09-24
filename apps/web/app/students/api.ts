@@ -509,38 +509,20 @@ export interface StudentNote {
   voidedAt?: string;
 }
 
-async function sendNoBody<T>(target: string): Promise<T> {
-  const res = await authFetch(target, { method: "POST", credentials: "include" });
-  if (!res.ok) {
-    throw await studentsFailure(res);
-  }
-  return (await res.json()) as T;
-}
-
-export async function listNotes(baseURL: string, studentId: string): Promise<StudentNote[]> {
-  const res = await authFetch(studentPath(baseURL, studentId, "/notes"), { credentials: "include" });
-  if (!res.ok) {
-    throw await studentsFailure(res);
-  }
-  const data = (await res.json()) as { notes?: StudentNote[] };
-  return data.notes ?? [];
+export function listNotes(baseURL: string, studentId: string): Promise<StudentNote[]> {
+  return getList<StudentNote>(baseURL, `/students/${encodeURIComponent(studentId)}/notes`, "notes");
 }
 
 /** The author is whoever is signed in: the server takes it from the session. */
-export async function addNote(baseURL: string, studentId: string, body: string): Promise<StudentNote> {
-  const res = await authFetch(studentPath(baseURL, studentId, "/notes"), {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ body }),
-  });
-  if (!res.ok) {
-    throw await studentsFailure(res);
-  }
-  return (await res.json()) as StudentNote;
+export function addNote(baseURL: string, studentId: string, body: string): Promise<StudentNote> {
+  return postJSON<StudentNote>(baseURL, `/students/${encodeURIComponent(studentId)}/notes`, { body });
 }
 
 /** 403 after the author's 15 minutes (unless the caller may void any); 409 if already voided. */
 export function voidNote(baseURL: string, studentId: string, noteId: string): Promise<StudentNote> {
-  return sendNoBody<StudentNote>(studentPath(baseURL, studentId, `/notes/${encodeURIComponent(noteId)}/void`));
+  return postJSON<StudentNote>(
+    baseURL,
+    `/students/${encodeURIComponent(studentId)}/notes/${encodeURIComponent(noteId)}/void`,
+    {},
+  );
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -55,8 +56,12 @@ func (r *Repository) NotesOf(ctx context.Context, studentID string) ([]domain.No
 	return out, err
 }
 
-// NoteByID returns one note, or KindNotFound.
+// NoteByID returns one note, or KindNotFound — also for an id that is not a
+// uuid, which could not name a note and would otherwise fail the query.
 func (r *Repository) NoteByID(ctx context.Context, id string) (domain.Note, error) {
+	if _, err := uuid.Parse(id); err != nil {
+		return domain.Note{}, glerrors.ErrNotFound
+	}
 	var out domain.Note
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var m noteModel

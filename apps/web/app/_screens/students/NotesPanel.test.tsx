@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -106,5 +106,52 @@ describe("NotesPanel", () => {
     await user.click(screen.getByRole("button", { name: "Anular nota" }));
     unmount();
     expect(api.voidNote).toHaveBeenCalledWith(expect.any(String), "st1", "n-2");
+  });
+
+  // The void reaches the server only after the 8 s undo: with less than that
+  // left, the server would refuse it. The button goes before the window does.
+  it("stops offering the author a void when the undo would outlast the window", async () => {
+    renderPanel({ now: () => WRITTEN + 15 * 60_000 - 5_000 });
+    await screen.findByText("Llegó con fiebre");
+    expect(screen.queryByRole("button", { name: "Anular nota" })).not.toBeInTheDocument();
+  });
+
+  // A page left open does not keep offering a void the server will refuse.
+  it("takes the button away when the window closes on an open page", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let clock = WRITTEN + 14 * 60_000;
+      renderPanel({ now: () => clock });
+      await screen.findByText("Llegó con fiebre");
+      expect(screen.getByRole("button", { name: "Anular nota" })).toBeInTheDocument();
+      clock = WRITTEN + 16 * 60_000;
+      await act(async () => {
+        vi.advanceTimersByTime(30_000);
+      });
+      expect(screen.queryByRole("button", { name: "Anular nota" })).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refuses a note longer than 2000 characters on the field", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await screen.findByText("Llegó con fiebre");
+    fireEvent.change(screen.getByLabelText("Nueva nota"), { target: { value: "a".repeat(2001) } });
+    await user.click(screen.getByRole("button", { name: "Agregar nota" }));
+    expect(api.addNote).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Nueva nota")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText(/2000 caracteres/)).toBeInTheDocument();
+  });
+
+  it("says why the server refused a note, instead of 'try again'", async () => {
+    const user = userEvent.setup();
+    api.addNote.mockRejectedValue(new studentsApi.StudentsError(400, "a note has 1 to 2000 characters"));
+    renderPanel();
+    await screen.findByText("Llegó con fiebre");
+    await user.type(screen.getByLabelText("Nueva nota"), "x");
+    await user.click(screen.getByRole("button", { name: "Agregar nota" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/de 1 a 2000 caracteres/);
   });
 });

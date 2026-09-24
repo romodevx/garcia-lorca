@@ -4,13 +4,22 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactEle
 
 import { API_URL } from "../../api-url";
 import { Btn } from "../../_design/Controls";
-import { TextArea, useRequired } from "../../_design/form";
+import { TextArea, useFocusFirstInvalid, useRequired } from "../../_design/form";
 import { UndoToast } from "../../_design/UndoToast";
 import { useUndoableRemoval } from "../../_design/useUndoableRemoval";
-import { addNote, listNotes, voidNote, type StudentNote } from "../../students/api";
+import { addNote, listNotes, StudentsError, voidNote, type StudentNote } from "../../students/api";
 
-/** How long the author may take a note back (the server enforces it too). */
+/** How long the author may take a note back (the server enforces it). */
 const AUTHOR_VOID_WINDOW_MS = 15 * 60_000;
+/**
+ * The void reaches the server only when the 8-second undo runs out, so the
+ * button leaves early enough for it to still land inside the window, with a
+ * margin for the request itself.
+ */
+const VOID_LEAD_MS = 10_000;
+/** How often an open page re-checks whether the author's window has closed. */
+const WINDOW_TICK_MS = 15_000;
+const MAX_NOTE_CHARS = 2000;
 const NOTE_REQUIRED = ["body"] as const;
 
 const WHEN = new Intl.DateTimeFormat("es-MX", { dateStyle: "medium", timeStyle: "short" });
@@ -40,7 +49,17 @@ export function NotesPanel({ studentId, userId, canWrite, canVoidAny, now = Date
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<string | undefined>(undefined);
   const form = useRequired(NOTE_REQUIRED);
+  const [tooLong, setTooLong] = useState<string | undefined>(undefined);
+  // Re-renders an open page so a void the server would now refuse is no longer
+  // offered. Only the author's window moves with the clock.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!canWrite || canVoidAny) return;
+    const timer = setInterval(() => setTick((n) => n + 1), WINDOW_TICK_MS);
+    return () => clearInterval(timer);
+  }, [canWrite, canVoidAny]);
   const removal = useUndoableRemoval<StudentNote>();
+  const focusFirstInvalid = useFocusFirstInvalid();
   // A reload inside the grace period must not bring a voided note back.
   const pending = useRef<readonly StudentNote[]>([]);
   pending.current = removal.pending;
@@ -55,15 +74,26 @@ export function NotesPanel({ studentId, userId, canWrite, canVoidAny, now = Date
 
   const add = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
-    if (saving || !form.check({ body: draft })) return;
+    if (saving) return;
+    const complete = form.check({ body: draft });
+    const long = [...draft.trim()].length > MAX_NOTE_CHARS;
+    setTooLong(long ? `Una nota tiene como máximo ${MAX_NOTE_CHARS} caracteres; llevas ${[...draft.trim()].length}.` : undefined);
+    if (!complete || long) {
+      focusFirstInvalid();
+      return;
+    }
     setSaving(true);
     setProblem(undefined);
     try {
       const note = await addNote(API_URL, studentId, draft.trim());
       setNotes((prev) => [note, ...prev]);
       setDraft("");
-    } catch {
-      setProblem("No se pudo guardar la nota. Intenta de nuevo.");
+    } catch (cause) {
+      setProblem(
+        cause instanceof StudentsError && cause.isInvalid
+          ? "La nota no es válida: escribe de 1 a 2000 caracteres."
+          : "No se pudo guardar la nota. Intenta de nuevo.",
+      );
     } finally {
       setSaving(false);
     }
@@ -73,7 +103,7 @@ export function NotesPanel({ studentId, userId, canWrite, canVoidAny, now = Date
     if (note.voided) return false;
     if (canVoidAny) return true;
     const written = Date.parse(note.createdAt);
-    return canWrite && note.authorUserId === userId && now() - written <= AUTHOR_VOID_WINDOW_MS;
+    return canWrite && note.authorUserId === userId && now() - written <= AUTHOR_VOID_WINDOW_MS - VOID_LEAD_MS;
   };
 
   const withdraw = (note: StudentNote): void => {
@@ -96,8 +126,11 @@ export function NotesPanel({ studentId, userId, canWrite, canVoidAny, now = Date
             label="Nueva nota"
             value={draft}
             onChange={setDraft}
-            error={form.errors.body}
-            onClearError={() => form.clear("body")}
+            error={form.errors.body ?? tooLong}
+            onClearError={() => {
+              form.clear("body");
+              setTooLong(undefined);
+            }}
             help="Lo que el colegio debe recordar de este alumno. No se puede editar después; se puede anular en los primeros 15 minutos."
           />
           <div>
@@ -140,7 +173,9 @@ export function NotesPanel({ studentId, userId, canWrite, canVoidAny, now = Date
           message="Se anuló la nota"
           onUndo={() => {
             const back = removal.undo() ?? [];
-            setNotes((prev) => [...prev, ...back].sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+            // By time, not by string: the server's timestamps vary in their
+            // fraction digits, so "…:00Z" would sort after "…:00.5Z".
+            setNotes((prev) => [...prev, ...back].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)));
           }}
         />
       )}

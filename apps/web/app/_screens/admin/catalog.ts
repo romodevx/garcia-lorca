@@ -51,6 +51,7 @@ export const PERMISSION_CATALOG: readonly PermissionGroup[] = [
       { value: "students:create", label: "Alta de alumnos" },
       { value: "students:update", label: "Editar alumnos" },
       { value: "students:enroll", label: "Inscribir alumnos" },
+      { value: "students:notes_write", label: "Escribir notas del alumno" },
     ],
   },
   {

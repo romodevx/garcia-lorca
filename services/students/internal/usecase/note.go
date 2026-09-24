@@ -30,11 +30,10 @@ func NewNoteService(students studentFinder, notes ports.NoteRepository, tenant s
 	return &NoteService{students: students, notes: notes, tenant: tenant, newID: newID, now: now}
 }
 
-// AddNote writes a note about a pupil, by `author`, now.
+// AddNote writes a note about a pupil, by `author`, now. A pupil the tenant
+// cannot see is KindNotFound: the repository checks it in the same transaction
+// as the write, which it must anyway (an FK check does not pass through RLS).
 func (s *NoteService) AddNote(ctx context.Context, studentID, body string, author domain.NoteAuthor) (domain.Note, error) {
-	if _, err := s.students.FindByID(ctx, studentID); err != nil {
-		return domain.Note{}, err
-	}
 	note, err := domain.NewNote(s.newID(), s.tenant, studentID, body, author, s.now())
 	if err != nil {
 		return domain.Note{}, err

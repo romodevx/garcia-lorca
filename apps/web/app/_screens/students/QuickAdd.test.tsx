@@ -453,4 +453,18 @@ describe("QuickAdd · una nota al dar de alta (tarea 6)", () => {
     expect(await screen.findByText(/la nota no se guardó/i)).toBeInTheDocument();
     expect(students.enrollIntoGrade).toHaveBeenCalled();
   });
+
+  // Both failed: the drawer stays open on the placement, and a retry cannot
+  // write the note (the CURP is taken). The note must be named there too.
+  it("names the lost note when the placement also failed", async () => {
+    const user = userEvent.setup();
+    students.createStudent.mockResolvedValue(created);
+    students.addNote.mockRejectedValue(new StudentsError(500, "boom"));
+    students.enrollIntoGrade.mockRejectedValue(new StudentsError(409, "the grade is full"));
+    const drawer = await openWith(user, true);
+    await user.type(within(drawer).getByLabelText(/Nota/, CAMPO), "Alergia al polvo");
+    await user.click(within(drawer).getByRole("button", { name: "Crear alumno" }));
+
+    expect(await within(drawer).findByRole("alert")).toHaveTextContent(/la nota no se guardó/i);
+  });
 });

@@ -65,3 +65,11 @@ func TestNotesRoundTripNewestFirstAndAreTenantIsolated(t *testing.T) {
 		t.Errorf("tenant B wrote a note on tenant A's pupil (RLS write breach): %v", err)
 	}
 }
+
+// A path value that is not a uuid is a note that does not exist, not a query
+// error (22P02) answered as 500.
+func TestANoteIdThatIsNotAUUIDIsNotFound(t *testing.T) {
+	if _, err := appRepo(t, tenantA).NoteByID(context.Background(), "abc"); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("NoteByID(abc): want KindNotFound, got %v", err)
+	}
+}

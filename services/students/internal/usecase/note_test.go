@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"testing"
 	"time"
@@ -11,9 +12,17 @@ import (
 	"github.com/garcia-lorca/services/students/internal/usecase"
 )
 
-type memNotes struct{ byID map[string]domain.Note }
+// memNotes behaves as the repository does: a note on a pupil it does not know
+// is KindNotFound (that check is the repository's, not the use case's).
+type memNotes struct {
+	byID     map[string]domain.Note
+	students map[string]bool
+}
 
 func (m *memNotes) AddNote(_ context.Context, n domain.Note) error {
+	if !m.students[n.StudentID()] {
+		return glerrors.ErrNotFound
+	}
 	m.byID[n.ID()] = n
 	return nil
 }
@@ -56,10 +65,10 @@ func newNoteFixture(t *testing.T) *noteFixture {
 	if err != nil {
 		t.Fatalf("CreateApplicant: %v", err)
 	}
-	f := &noteFixture{notes: &memNotes{byID: map[string]domain.Note{}}, clock: time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC), student: created.ID()}
+	f := &noteFixture{notes: &memNotes{byID: map[string]domain.Note{}, students: map[string]bool{created.ID(): true}}, clock: time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC), student: created.ID()}
 	ids := 0
 	f.svc = usecase.NewNoteService(repo, f.notes, tenant,
-		func() string { ids++; return "note-" + string(rune('0'+ids)) },
+		func() string { ids++; return fmt.Sprintf("b6000000-0000-0000-0000-%012d", ids) },
 		func() time.Time { return f.clock })
 	return f
 }
@@ -130,5 +139,15 @@ func TestANoteOfAnotherPupilIsNotFound(t *testing.T) {
 	n, _ := f.svc.AddNote(ctx, f.student, "x", gabriela)
 	if _, err := f.svc.VoidNote(ctx, "another-pupil", n.ID(), gabriela.UserID, true); glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Errorf("want KindNotFound, got %v", err)
+	}
+}
+
+// A note id is a uuid. Anything else is a note that does not exist (404),
+// never a query error surfacing as 500.
+func TestANoteIdThatIsNotAnIdIsNotFound(t *testing.T) {
+	f := newNoteFixture(t)
+	ctx := context.Background()
+	if _, err := f.svc.VoidNote(ctx, f.student, "abc", gabriela.UserID, true); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("VoidNote(abc): want KindNotFound, got %v", err)
 	}
 }

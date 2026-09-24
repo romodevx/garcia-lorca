@@ -74,13 +74,18 @@ const pager = (disabled: boolean): CSSProperties => ({
  */
 export class PlacementFailed extends Error {
   override readonly cause: unknown;
+  /** The first note failed too: a retry cannot write it (the CURP is taken). */
+  readonly noteFailed: boolean;
 
-  constructor(cause: unknown) {
+  constructor(cause: unknown, noteFailed = false) {
     super("placement failed");
     this.name = "PlacementFailed";
     this.cause = cause;
+    this.noteFailed = noteFailed;
   }
 }
+
+const NOTE_LOST = "La nota no se guardó: agrégala en su ficha.";
 
 /** The shape the quick-add drawer validates before it asks the server. */
 export interface QuickAddDraft {
@@ -262,7 +267,11 @@ function QuickAdd({
         withNote ? note.trim() : "",
       );
     } catch (err) {
-      setError(err instanceof PlacementFailed ? placementFailureMessage(err.cause) : createFailureMessage(err));
+      setError(
+        err instanceof PlacementFailed
+          ? [placementFailureMessage(err.cause), err.noteFailed ? NOTE_LOST : ""].filter((m) => m !== "").join(" ")
+          : createFailureMessage(err),
+      );
       setSaving(false);
     }
   };
@@ -726,7 +735,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false }: Studen
     try {
       placement = await enrollIntoGrade(API_URL, created.id, gradeLevelId);
     } catch (err) {
-      throw new PlacementFailed(err);
+      throw new PlacementFailed(err, noteFailed);
     }
     setAdd(false);
     reload();

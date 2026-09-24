@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"slices"
 
@@ -83,13 +84,18 @@ func (h *NotesHandler) Void(w http.ResponseWriter, r *http.Request) {
 }
 
 // nameOf is the caller's display name, else their email: a byline is never
-// blank. A failed lookup falls back too, so naming cannot block a note.
+// blank. A failed lookup is logged (user id only) and falls back to the
+// token's email, so naming cannot block a note.
 func (h *NotesHandler) nameOf(ctx context.Context, p middleware.Principal) string {
 	u, err := h.names.GetUser(ctx, p.UserID)
-	if err == nil && u.DisplayName != "" {
+	if err != nil {
+		slog.WarnContext(ctx, "note author name lookup failed; using the token email", "user_id", p.UserID, "error", err)
+		return p.Email
+	}
+	if u.DisplayName != "" {
 		return u.DisplayName
 	}
-	if err == nil && u.Email != "" {
+	if u.Email != "" {
 		return u.Email
 	}
 	return p.Email
