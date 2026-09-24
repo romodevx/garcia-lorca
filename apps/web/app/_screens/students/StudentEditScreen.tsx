@@ -46,6 +46,7 @@ import {
 import { resizeToJpeg } from "../../students/photoResize";
 import { birthDateError, MEXICAN_STATES, phoneDigits, phoneError, postalCodeError } from "../../students/profileRules";
 import { ContactsPanel } from "./ContactsPanel";
+import { NotesPanel } from "./NotesPanel";
 
 /**
  * The whole file of one pupil, corrected on its own page (`/alumnos/{id}/editar`).
@@ -57,6 +58,8 @@ import { ContactsPanel } from "./ContactsPanel";
  */
 export interface StudentEditScreenProps {
   studentId: string;
+  /** The signed-in account: it may void its own notes for 15 minutes. */
+  userId: string;
   permissions?: readonly string[];
   onBack: () => void;
   /** The school's date (aaaa-mm-dd); injected by tests. Defaults to the local day. */
@@ -99,6 +102,7 @@ const SECTIONS = [
   { id: "ficha-contacto", title: "Contacto y domicilio" },
   { id: "ficha-medicos", title: "Datos médicos" },
   { id: "ficha-contactos", title: "Tutores y emergencias" },
+  { id: "ficha-notas", title: "Notas" },
 ] as const;
 
 /** What happens to the photo when the file is saved. */
@@ -120,7 +124,7 @@ function failureMessage(cause: unknown): string {
   return "No se pudo guardar la ficha. Intenta de nuevo.";
 }
 
-export function StudentEditScreen({ studentId, permissions, onBack, today }: StudentEditScreenProps): ReactElement {
+export function StudentEditScreen({ studentId, userId, permissions, onBack, today }: StudentEditScreenProps): ReactElement {
   const day = today ?? localToday();
   const canReadMedical = permissions?.includes("medical:read") === true;
   const canWriteMedical = canReadMedical && permissions?.includes("medical:write") === true;
@@ -397,6 +401,16 @@ export function StudentEditScreen({ studentId, permissions, onBack, today }: Stu
       {/* Outside the form: each contact is its own record with its own save. */}
       <Section id="ficha-contactos" title="Tutores y emergencias">
         <ContactsPanel studentId={studentId} />
+      </Section>
+
+      {/* Each note is its own record with its own save, like the contacts. */}
+      <Section id="ficha-notas" title="Notas">
+        <NotesPanel
+          studentId={studentId}
+          userId={userId}
+          canWrite={permissions?.includes("students:notes_write") === true}
+          canVoidAny={permissions?.includes("students:notes_void") === true}
+        />
       </Section>
 
       {failure !== undefined && (

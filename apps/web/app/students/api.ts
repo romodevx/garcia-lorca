@@ -491,3 +491,56 @@ export function updateContact(
 export function removeContact(baseURL: string, studentId: string, contactId: string): Promise<void> {
   return sendEmpty(studentPath(baseURL, studentId, `/contacts/${encodeURIComponent(contactId)}`), "DELETE");
 }
+
+// --- notes (T6) -------------------------------------------------------------
+
+/** One entry in a pupil's history. Never edited: a wrong one is voided. */
+export interface StudentNote {
+  id: string;
+  studentId: string;
+  body: string;
+  authorUserId: string;
+  /** The author's name as it read when the note was written. */
+  authorName: string;
+  /** ISO timestamp. */
+  createdAt: string;
+  /** Voided notes reach only whoever may void any note (the owner). */
+  voided: boolean;
+  voidedAt?: string;
+}
+
+async function sendNoBody<T>(target: string): Promise<T> {
+  const res = await authFetch(target, { method: "POST", credentials: "include" });
+  if (!res.ok) {
+    throw await studentsFailure(res);
+  }
+  return (await res.json()) as T;
+}
+
+export async function listNotes(baseURL: string, studentId: string): Promise<StudentNote[]> {
+  const res = await authFetch(studentPath(baseURL, studentId, "/notes"), { credentials: "include" });
+  if (!res.ok) {
+    throw await studentsFailure(res);
+  }
+  const data = (await res.json()) as { notes?: StudentNote[] };
+  return data.notes ?? [];
+}
+
+/** The author is whoever is signed in: the server takes it from the session. */
+export async function addNote(baseURL: string, studentId: string, body: string): Promise<StudentNote> {
+  const res = await authFetch(studentPath(baseURL, studentId, "/notes"), {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ body }),
+  });
+  if (!res.ok) {
+    throw await studentsFailure(res);
+  }
+  return (await res.json()) as StudentNote;
+}
+
+/** 403 after the author's 15 minutes (unless the caller may void any); 409 if already voided. */
+export function voidNote(baseURL: string, studentId: string, noteId: string): Promise<StudentNote> {
+  return sendNoBody<StudentNote>(studentPath(baseURL, studentId, `/notes/${encodeURIComponent(noteId)}/void`));
+}

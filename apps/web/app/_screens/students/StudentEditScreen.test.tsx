@@ -21,6 +21,11 @@ vi.mock("../../students/api", async (importOriginal) => {
 });
 vi.mock("../../students/photoResize", () => ({ resizeToJpeg: vi.fn() }));
 vi.mock("./ContactsPanel", () => ({ ContactsPanel: () => <div>contactos</div> }));
+vi.mock("./NotesPanel", () => ({
+  NotesPanel: (p: { userId: string; canWrite: boolean; canVoidAny: boolean }) => (
+    <div>{`notas de ${p.userId} write=${String(p.canWrite)} voidAny=${String(p.canVoidAny)}`}</div>
+  ),
+}));
 
 const api = vi.mocked(studentsApi);
 const shrink = vi.mocked(resize);
@@ -56,7 +61,7 @@ const student: studentsApi.Student = {
 
 function renderScreen(permissions: readonly string[] = ["students:read", "students:update"]) {
   const onBack = vi.fn();
-  render(<StudentEditScreen studentId="st1" permissions={permissions} onBack={onBack} today={TODAY} />);
+  render(<StudentEditScreen studentId="st1" userId="u-me" permissions={permissions} onBack={onBack} today={TODAY} />);
   return { onBack };
 }
 
@@ -258,6 +263,13 @@ describe("StudentEditScreen", () => {
       await user.click(screen.getByRole("button", { name: "Guardar ficha" }));
       await waitFor(() => expect(api.deletePhoto).toHaveBeenCalledWith(expect.any(String), "st1"));
     });
+  });
+
+  // Task 6: the file carries its notes, under their own permissions.
+  it("shows the pupil's notes with what the caller may do", async () => {
+    renderScreen(["students:read", "students:update", "students:notes_write"]);
+    expect(await screen.findByRole("heading", { name: "Notas" })).toBeInTheDocument();
+    expect(screen.getByText("notas de u-me write=true voidAny=false")).toBeInTheDocument();
   });
 
   it("goes back to the list", async () => {

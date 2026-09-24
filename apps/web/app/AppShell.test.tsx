@@ -54,6 +54,7 @@ vi.mock("./config/api", () => ({
 vi.mock("./students/api", () => ({
   listStudents: vi.fn().mockResolvedValue([]),
   listContacts: vi.fn().mockResolvedValue([]),
+  listNotes: vi.fn().mockResolvedValue([]),
   getPhotoBlob: vi.fn().mockResolvedValue(null),
   getStudent: vi.fn().mockResolvedValue({
     id: "st1", curp: "CURP1", firstName: "ADA", lastName: "LOVELACE", level: "Primaria", levelId: "lv1",

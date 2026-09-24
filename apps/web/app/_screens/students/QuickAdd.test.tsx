@@ -19,6 +19,7 @@ vi.mock("../../students/api", async (importOriginal) => ({
   createStudent: vi.fn(),
   enroll: vi.fn(),
   enrollIntoGrade: vi.fn(),
+  addNote: vi.fn(),
 }));
 vi.mock("../../config/api", () => ({ listCycles: vi.fn(), listGroups: vi.fn(), listLevels: vi.fn(), listGradeLevels: vi.fn() }));
 
@@ -391,5 +392,65 @@ describe("la captura del alta de alumno", () => {
     await user.click(within(alta).getByRole("button", { name: "Crear alumno" }));
 
     expect(within(alta).getByText(/18 caracteres.*17/)).toBeInTheDocument();
+  });
+});
+
+describe("QuickAdd · una nota al dar de alta (tarea 6)", () => {
+  const created = {
+    id: "s1", curp: FULL.curp, firstName: FULL.firstName, lastName: FULL.lastName,
+    level: "kinder", levelId: "", gradeGroup: "", guardianName: FULL.guardianName, admissionStatus: "pending" as const,
+  };
+
+  const openWith = async (user: ReturnType<typeof userEvent.setup>, canWriteNotes: boolean) => {
+    render(<StudentsScreen onBack={() => {}} canWriteNotes={canWriteNotes} />);
+    await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
+    const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
+    await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
+    await user.type(within(drawer).getByLabelText(/Nombre/, CAMPO), FULL.firstName);
+    await user.type(within(drawer).getByLabelText(/Apellidos/, CAMPO), FULL.lastName);
+    await user.type(within(drawer).getByLabelText(/Tutor/, CAMPO), FULL.guardianName);
+    await user.selectOptions(within(drawer).getByLabelText("Nivel"), "lv-k");
+    await user.selectOptions(await within(drawer).findByLabelText("Grado"), "gl-k2");
+    return drawer;
+  };
+
+  it("saves the note on the new pupil", async () => {
+    const user = userEvent.setup();
+    students.createStudent.mockResolvedValue(created);
+    students.addNote.mockResolvedValue({ id: "n-1", studentId: "s1", body: "Alergia al polvo", authorUserId: "u", authorName: "", createdAt: "", voided: false });
+    const drawer = await openWith(user, true);
+    await user.type(within(drawer).getByLabelText(/Nota/, CAMPO), "Alergia al polvo");
+    await user.click(within(drawer).getByRole("button", { name: "Crear alumno" }));
+
+    await waitFor(() => expect(students.addNote).toHaveBeenCalledWith(expect.any(String), "s1", "Alergia al polvo"));
+    await waitFor(() => expect(students.enrollIntoGrade).toHaveBeenCalled());
+  });
+
+  it("sends no note when the field was left empty", async () => {
+    const user = userEvent.setup();
+    students.createStudent.mockResolvedValue(created);
+    const drawer = await openWith(user, true);
+    await user.click(within(drawer).getByRole("button", { name: "Crear alumno" }));
+    await waitFor(() => expect(students.enrollIntoGrade).toHaveBeenCalled());
+    expect(students.addNote).not.toHaveBeenCalled();
+  });
+
+  it("offers no note to whoever may not write one", async () => {
+    const user = userEvent.setup();
+    const drawer = await openWith(user, false);
+    expect(within(drawer).queryByLabelText(/Nota/, CAMPO)).not.toBeInTheDocument();
+  });
+
+  // The pupil exists by then: a note that failed must not read as "nothing saved".
+  it("says the pupil was created when only the note failed", async () => {
+    const user = userEvent.setup();
+    students.createStudent.mockResolvedValue(created);
+    students.addNote.mockRejectedValue(new StudentsError(500, "boom"));
+    const drawer = await openWith(user, true);
+    await user.type(within(drawer).getByLabelText(/Nota/, CAMPO), "Alergia al polvo");
+    await user.click(within(drawer).getByRole("button", { name: "Crear alumno" }));
+
+    expect(await screen.findByText(/la nota no se guardó/i)).toBeInTheDocument();
+    expect(students.enrollIntoGrade).toHaveBeenCalled();
   });
 });
