@@ -7,7 +7,6 @@ describe("useRequired", () => {
   it("no reclama nada antes de guardar", () => {
     const { result } = renderHook(() => useRequired(["nombre"]));
     expect(result.current.errors).toEqual({});
-    expect(result.current.missingCount).toBe(0);
   });
 
   it("al guardar marca TODOS los faltantes a la vez", () => {
@@ -58,25 +57,11 @@ describe("useRequired", () => {
     expect(result.current.errors).toBe(antes);
   });
 
-  it("nombra el primer faltante en el orden DECLARADO, no el del objeto", () => {
-    // La vista salta al primero que el ojo encuentra bajando por la forma, y el
-    // orden de las llaves de un objeto no es el de la pantalla.
-    const { result } = renderHook(() => useRequired(["nombre", "fecha"]));
-    act(() => { result.current.check({ fecha: "", nombre: "" }); });
-    expect(result.current.firstMissing).toBe("nombre");
-  });
-
-  it("cuenta cuántos faltan, para el resumen de arriba", () => {
-    const { result } = renderHook(() => useRequired(["nombre", "fecha"]));
-    act(() => { result.current.check({ nombre: "", fecha: "" }); });
-    expect(result.current.missingCount).toBe(2);
-  });
-
   it("un segundo intento no arrastra los rojos ya resueltos", () => {
     const { result } = renderHook(() => useRequired(["nombre", "fecha"]));
     act(() => { result.current.check({ nombre: "", fecha: "" }); });
     act(() => { result.current.check({ nombre: "Ana", fecha: "" }); });
     expect(result.current.errors.nombre).toBeUndefined();
-    expect(result.current.missingCount).toBe(1);
+    expect(result.current.errors.fecha).toBeDefined();
   });
 });

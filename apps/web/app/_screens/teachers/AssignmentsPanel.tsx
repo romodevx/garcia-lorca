@@ -21,12 +21,6 @@ export interface AssignmentsPanelProps {
   /** Current assignments of a group (teacher per subject). */
   loadAssignments: (groupId: string) => Promise<TeachingAssignment[]>;
   onCreate: (input: CreateTeachingAssignmentInput) => Promise<void>;
-  /**
-   * Bumped by the parent whenever the catalog's groups/subjects change (e.g. a
-   * group was just created in the GroupsPanel). Forces this panel to re-fetch so
-   * a freshly created group appears without a full page reload.
-   */
-  refreshKey?: number;
 }
 
 /**
@@ -43,7 +37,6 @@ export function AssignmentsPanel({
   loadSubjects,
   loadAssignments,
   onCreate,
-  refreshKey,
 }: AssignmentsPanelProps): ReactElement {
   const [cycleId, setCycleId] = useState("");
   const [groups, setGroups] = useState<Group[]>([]);
@@ -76,7 +69,7 @@ export function AssignmentsPanel({
     return () => {
       active = false;
     };
-  }, [cycleId, loadGroups, refreshKey]);
+  }, [cycleId, loadGroups]);
 
   // Group → subjects SCOPED to the group's grade level + the group's assignments.
   useEffect(() => {

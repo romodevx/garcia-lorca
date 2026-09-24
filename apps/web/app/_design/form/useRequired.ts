@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 
 import { useFocusFirstInvalid } from "./useFocusFirstInvalid";
 
@@ -10,10 +10,6 @@ export const FALTA = "Falta este dato";
 export interface RequiredState {
   /** Los campos marcados en rojo ahora mismo, por clave. */
   readonly errors: Readonly<Record<string, string>>;
-  /** El primero que falta EN EL ORDEN DECLARADO — a donde salta la vista. */
-  readonly firstMissing: string | undefined;
-  /** Cuántos faltan, para el resumen de arriba. */
-  readonly missingCount: number;
   /** Revisa y marca. Devuelve true si se puede guardar. */
   check: (values: Readonly<Record<string, string | undefined>>) => boolean;
   /** Limpia el rojo de un campo — se llama desde su onChange. */
@@ -27,15 +23,15 @@ export interface RequiredState {
  * entonces marca todos los faltantes a la vez. Reclamar campo por campo al
  * salir de cada uno persigue con rojos a quien apenas va llegando al siguiente.
  *
- * `firstMissing` respeta el orden en que se DECLARARON los obligatorios, no el
- * orden de las llaves del objeto: la vista debe saltar al primero que el ojo
- * encuentra bajando por la forma, y el orden de un objeto no es el de la
- * pantalla.
+ * Un `check` que falla manda además el foco al primer campo en rojo y lo despeja
+ * del pie del cajón (ver `useFocusFirstInvalid`). Ese salto lo resuelve el DOM y
+ * no este hook, a propósito: en el sistema conviven dos validadores y los dos
+ * acaban marcando `aria-invalid`, así que el DOM es donde se encuentran — y su
+ * orden es el que el ojo sigue bajando por la forma.
  *
- * Y saltar es literal: un `check` que falla manda el foco al primer campo en
- * rojo y lo despeja del pie del cajón (ver `useFocusFirstInvalid`). Durante un
- * tiempo esto sólo se calculó y nadie lo usó, y por eso el error de "Tutor" en
- * el alta de alumno era invisible.
+ * Aquí vivieron `firstMissing` y `missingCount`: calculados, probados y jamás
+ * consumidos. El primero decía en su comentario "a donde salta la vista" y la
+ * vista no saltaba. Se fueron con el arreglo; lo vigila `contratos.test.ts`.
  */
 export function useRequired(required: readonly string[]): RequiredState {
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -70,16 +66,5 @@ export function useRequired(required: readonly string[]): RequiredState {
     });
   }, []);
 
-  const firstMissing = useMemo(
-    () => required.find((key) => errors[key] !== undefined),
-    [required, errors],
-  );
-
-  return {
-    errors,
-    firstMissing,
-    missingCount: Object.keys(errors).length,
-    check,
-    clear,
-  };
+  return { errors, check, clear };
 }
