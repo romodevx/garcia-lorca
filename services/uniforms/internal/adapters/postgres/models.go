@@ -10,9 +10,10 @@ import "time"
 // meaningful — it means the garment applies to every level — and an empty string
 // would be a different, wrong answer.
 type itemModel struct {
-	ID          string  `gorm:"column:id;primaryKey"`
-	TenantID    string  `gorm:"column:tenant_id"`
-	Code        string  `gorm:"column:code"`
+	ID       string `gorm:"column:id;primaryKey"`
+	TenantID string `gorm:"column:tenant_id"`
+	// No Code: the clave is gone (task 3). The column stays until a cleanup
+	// migration, filled by its default, and nothing reads it.
 	Name        string  `gorm:"column:name"`
 	Description string  `gorm:"column:description"`
 	LevelID     *string `gorm:"column:level_id"`

@@ -104,12 +104,12 @@ const TERMS = [
 ];
 
 const UNIFORMS = [
-  { code: "SUE-INS", name: "Suéter institucional", priceCents: 65000, levelId: "" },
-  { code: "PLY-BLA", name: "Playera polo blanca", priceCents: 32000, levelId: "" },
-  { code: "PAN-GRI", name: "Pantalón gris escolar", priceCents: 48000, levelId: "" },
-  { code: "FAL-CUA", name: "Falda de cuadros", priceCents: 52000, levelId: "" },
-  { code: "SUD-DEP", name: "Sudadera deportiva", priceCents: 58000, levelId: "" },
-  { code: "SHO-DEP", name: "Short deportivo", priceCents: 29000, levelId: "" },
+  { name: "Suéter institucional", priceCents: 65000, levelId: "" },
+  { name: "Playera polo blanca", priceCents: 32000, levelId: "" },
+  { name: "Pantalón gris escolar", priceCents: 48000, levelId: "" },
+  { name: "Falda de cuadros", priceCents: 52000, levelId: "" },
+  { name: "Sudadera deportiva", priceCents: 58000, levelId: "" },
+  { name: "Short deportivo", priceCents: 29000, levelId: "" },
 ];
 
 const SIZES = ["4", "6", "8", "10", "12", "CH", "M", "G", "XG"];
@@ -433,7 +433,6 @@ async function seedUniforms(students) {
   const items = [];
   for (const spec of UNIFORMS) {
     const item = await post("/api/v1/uniforms/items", {
-      code: spec.code,
       name: spec.name,
       description: "",
       levelId: spec.levelId,

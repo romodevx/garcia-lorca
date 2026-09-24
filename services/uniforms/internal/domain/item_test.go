@@ -8,12 +8,12 @@ import (
 )
 
 func TestNewItem(t *testing.T) {
-	it, err := domain.NewItem("it-1", "t-1", " SUE-VER ", " Suéter verde ", "", domain.LevelAny, 65000)
+	it, err := domain.NewItem("it-1", "t-1", " Suéter verde ", "", domain.LevelAny, 65000)
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
 	}
-	if it.Code() != "SUE-VER" || it.Name() != "Suéter verde" {
-		t.Errorf("code/name not trimmed: %q / %q", it.Code(), it.Name())
+	if it.Name() != "Suéter verde" {
+		t.Errorf("name not trimmed: %q", it.Name())
 	}
 	if !it.Active() {
 		t.Error("a new garment starts on sale")
@@ -27,11 +27,11 @@ func TestNewItem(t *testing.T) {
 // MAY have a different uniform per level, but most garments are the same from
 // kinder to prepa and saying so four times would be busywork.
 func TestItemLevelAnyAppliesEverywhere(t *testing.T) {
-	anyLevel, err := domain.NewItem("it-1", "t-1", "PLA", "Playera", "", domain.LevelAny, 32000)
+	anyLevel, err := domain.NewItem("it-1", "t-1", "Playera", "", domain.LevelAny, 32000)
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
 	}
-	kinderOnly, err := domain.NewItem("it-2", "t-1", "BAT", "Batita", "", domain.Level("c1000000-0000-0000-0000-000000000001"), 41000)
+	kinderOnly, err := domain.NewItem("it-2", "t-1", "Batita", "", domain.Level("c1000000-0000-0000-0000-000000000001"), 41000)
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestItemLevelAnyAppliesEverywhere(t *testing.T) {
 // a parent can order from, but orders already placed still point at it and must
 // still be deliverable. Deleting it would orphan them.
 func TestItemRetireKeepsIssuedOrdersWorking(t *testing.T) {
-	it, err := domain.NewItem("it-1", "t-1", "PLA", "Playera", "", domain.LevelAny, 32000)
+	it, err := domain.NewItem("it-1", "t-1", "Playera", "", domain.LevelAny, 32000)
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
 	}
@@ -79,21 +79,20 @@ func TestItemRetireKeepsIssuedOrdersWorking(t *testing.T) {
 
 func TestNewItemValidation(t *testing.T) {
 	cases := []struct {
-		name              string
-		id, code, garment string
-		level             domain.Level
-		price             int64
+		name        string
+		id, garment string
+		level       domain.Level
+		price       int64
 	}{
-		{"blank id", "", "PLA", "Playera", domain.LevelAny, 100},
-		{"blank code", "it-1", "  ", "Playera", domain.LevelAny, 100},
-		{"blank name", "it-1", "PLA", "  ", domain.LevelAny, 100},
-		{"negative price", "it-1", "PLA", "Playera", domain.LevelAny, -1},
+		{"blank id", "", "Playera", domain.LevelAny, 100},
+		{"blank name", "it-1", "  ", domain.LevelAny, 100},
+		{"negative price", "it-1", "Playera", domain.LevelAny, -1},
 		// A level is a config level id; an old SEP key is not one.
-		{"level not an id", "it-1", "PLA", "Playera", domain.Level("primaria"), 100},
+		{"level not an id", "it-1", "Playera", domain.Level("primaria"), 100},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := domain.NewItem(tc.id, "t-1", tc.code, tc.garment, "", tc.level, tc.price)
+			_, err := domain.NewItem(tc.id, "t-1", tc.garment, "", tc.level, tc.price)
 			if glerrors.KindOf(err) != glerrors.KindInvalid {
 				t.Errorf("want KindInvalid, got %v", err)
 			}
@@ -104,7 +103,7 @@ func TestNewItemValidation(t *testing.T) {
 // TestItemPriceIsAlwaysTheServersGuards the rule the security review made
 // explicit: whatever the client sends, the amount charged comes from here.
 func TestItemPriceIsAlwaysTheServers(t *testing.T) {
-	it, err := domain.NewItem("it-1", "t-1", "SUE", "Suéter", "", domain.LevelAny, 65000)
+	it, err := domain.NewItem("it-1", "t-1", "Suéter", "", domain.LevelAny, 65000)
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
 	}
@@ -124,7 +123,7 @@ func TestItemPriceIsAlwaysTheServers(t *testing.T) {
 // TestRetiredItemCannotStartNewOrders: retired means retired from NEW billing,
 // which is the same rule the finance concept catalogue already enforces.
 func TestRetiredItemCannotStartNewOrders(t *testing.T) {
-	it, err := domain.NewItem("it-1", "t-1", "EXC", "Excursión 2024", "", domain.LevelAny, 50000)
+	it, err := domain.NewItem("it-1", "t-1", "Excursión 2024", "", domain.LevelAny, 50000)
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
 	}
@@ -138,7 +137,7 @@ func TestRetiredItemCannotStartNewOrders(t *testing.T) {
 // ledger, a counter sale that bills finance — and none of that is about
 // clothing.
 func TestAnItemCarriesItsCategory(t *testing.T) {
-	item, err := domain.NewItem("it-1", "t1", "LIB-1", "Libro de matemáticas", "",
+	item, err := domain.NewItem("it-1", "t1", "Libro de matemáticas", "",
 		domain.Level("c1000000-0000-0000-0000-000000000002"), 45000)
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
@@ -158,7 +157,7 @@ func TestAnItemCarriesItsCategory(t *testing.T) {
 }
 
 func TestAnUnknownCategoryIsRefused(t *testing.T) {
-	item, err := domain.NewItem("it-1", "t1", "LIB-1", "Libro", "", domain.Level("c1000000-0000-0000-0000-000000000002"), 45000)
+	item, err := domain.NewItem("it-1", "t1", "Libro", "", domain.Level("c1000000-0000-0000-0000-000000000002"), 45000)
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
 	}
@@ -171,7 +170,7 @@ func TestAnUnknownCategoryIsRefused(t *testing.T) {
 // scopes it, the level list is not this service's to judge (ADR 0014).
 func TestAnItemMayBeScopedToAnyCatalogLevel(t *testing.T) {
 	preescolar := domain.Level("c1000000-0000-0000-0000-0000000000aa")
-	item, err := domain.NewItem("it-1", "t-1", "BAT", "Batita", "", preescolar, 41000)
+	item, err := domain.NewItem("it-1", "t-1", "Batita", "", preescolar, 41000)
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
 	}
@@ -200,7 +199,7 @@ func TestLevelIsValidAcceptsEveryLevelAndUUIDsOnly(t *testing.T) {
 // config level, must not widen to every level: it is unresolved, which no pupil
 // holds, and a new garment cannot be created that way.
 func TestAnUnresolvedGarmentAppliesToNoPupil(t *testing.T) {
-	item, err := domain.NewItem("it-1", "t-1", "BAT", "Batita", "", domain.LevelAny, 41000)
+	item, err := domain.NewItem("it-1", "t-1", "Batita", "", domain.LevelAny, 41000)
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
 	}
@@ -213,7 +212,7 @@ func TestAnUnresolvedGarmentAppliesToNoPupil(t *testing.T) {
 			t.Errorf("an unresolved garment was offered to pupil level %q", pupil)
 		}
 	}
-	if _, err := domain.NewItem("it-2", "t-1", "BAT2", "Batita", "", domain.LevelUnresolved, 41000); err == nil {
+	if _, err := domain.NewItem("it-2", "t-1", "Batita", "", domain.LevelUnresolved, 41000); err == nil {
 		t.Error("a new garment cannot be created with an unresolved level")
 	}
 }
@@ -222,7 +221,7 @@ func TestAnUnresolvedGarmentAppliesToNoPupil(t *testing.T) {
 // that keeps it unresolved. Only a garment that already is unresolved may keep
 // the value — a client cannot put a resolved garment into that state.
 func TestAnUnresolvedGarmentCanBeEditedWithoutLosingItsState(t *testing.T) {
-	item, _ := domain.NewItem("it-1", "t-1", "BAT", "Batita", "", domain.LevelAny, 41000)
+	item, _ := domain.NewItem("it-1", "t-1", "Batita", "", domain.LevelAny, 41000)
 	unresolved := item.WithUnresolvedLevel()
 
 	edited, err := unresolved.WithDetails("Batita vieja", "", domain.LevelUnresolved, 41000)

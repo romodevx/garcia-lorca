@@ -45,7 +45,7 @@ func fromNullableTime(t *time.Time) time.Time {
 // --- catalogue ---------------------------------------------------------------
 
 func toDomainItem(m itemModel) (domain.Item, error) {
-	item, err := domain.NewItem(m.ID, m.TenantID, m.Code, m.Name, m.Description,
+	item, err := domain.NewItem(m.ID, m.TenantID, m.Name, m.Description,
 		domain.Level(fromNullable(m.LevelID)), m.PriceCents)
 	if err != nil {
 		return domain.Item{}, err
@@ -67,7 +67,7 @@ func toDomainItem(m itemModel) (domain.Item, error) {
 
 func fromDomainItem(i domain.Item) itemModel {
 	return itemModel{
-		ID: i.ID(), TenantID: i.TenantID(), Code: i.Code(), Name: i.Name(),
+		ID: i.ID(), TenantID: i.TenantID(), Name: i.Name(),
 		Description: i.Description(), LevelID: levelIDColumn(i.Level()),
 		PriceCents: i.PriceCents(), Active: i.Active(), Category: i.Category(),
 	}

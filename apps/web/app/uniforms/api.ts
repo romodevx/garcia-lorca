@@ -50,7 +50,6 @@ export interface UniformSize {
 /** One garment in the catalogue, with its size run. */
 export interface UniformItem {
   id: string;
-  code: string;
   name: string;
   description: string;
   /** A config level id; empty means the garment applies to every level. */
@@ -337,8 +336,8 @@ export async function listItems(
   return (body.items ?? []).map(normalizeItem);
 }
 
+/** No clave (task 3): an article is told apart by its id and found by name. */
 export interface NewItem {
-  code: string;
   name: string;
   description?: string;
   levelId?: Level;

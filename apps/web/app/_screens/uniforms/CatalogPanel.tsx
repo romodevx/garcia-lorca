@@ -118,7 +118,7 @@ export function CatalogPanel({
                   {!item.active && <span style={{ fontSize: 12.5, color: "var(--text-faint)" }}> · retirada</span>}
                 </p>
                 <p style={{ fontSize: 13.5, color: "var(--text-muted)" }}>
-                  {CATEGORY_LABEL[item.category] ?? "Uniforme"} · {item.code} · {money(item.priceCents)} ·{" "}
+                  {CATEGORY_LABEL[item.category] ?? "Uniforme"} · {money(item.priceCents)} ·{" "}
                   {item.levelId === "" ? "todos los niveles" : (levels.find((l) => l.id === item.levelId)?.name ?? "nivel sin nombre")}
                 </p>
               </div>
@@ -178,7 +178,6 @@ function CreateDrawer({
   onDone: (created: UniformItem) => void;
   onError: (err: UniformsError) => void;
 }): ReactElement {
-  const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [level, setLevel] = useState<Level>("");
   const [category, setCategory] = useState<ItemCategory>("uniform");
@@ -191,12 +190,12 @@ function CreateDrawer({
   // MoneyField no salva de esto — cuando el texto no es un monto reconocible
   // deliberadamente no lo corrige, para que la persona lo vea y lo arregle.
   const priceCents = pesosToCents(pesos);
-  const valid = code.trim() !== "" && name.trim() !== "" && !Number.isNaN(priceCents);
+  const valid = name.trim() !== "" && !Number.isNaN(priceCents);
 
   const save = useCallback(async (): Promise<void> => {
     setPending(true);
     try {
-      const created = await createItem(API_URL, { code: code.trim(), name: name.trim(), levelId: level, priceCents, category });
+      const created = await createItem(API_URL, { name: name.trim(), levelId: level, priceCents, category });
       onDone(created);
     } catch (err) {
       onError(err instanceof UniformsError ? err : new UniformsError("internal", "Algo salió mal"));
@@ -204,7 +203,7 @@ function CreateDrawer({
     } finally {
       setPending(false);
     }
-  }, [category, code, level, name, onClose, onDone, onError, priceCents]);
+  }, [category, level, name, onClose, onDone, onError, priceCents]);
 
   return (
     <Drawer title="Nuevo artículo" icon="plus" onClose={onClose}>
@@ -240,13 +239,6 @@ function CreateDrawer({
         required
         help="Cómo se llama la prenda o el libro. Es lo que verá la familia."
       />
-
-      <div style={{ marginTop: 16 }}>
-        <TextField label="Clave" value={code} onChange={setCode} uppercase required help="Un código corto y único para encontrarla rápido en el mostrador." />
-      </div>
-      <p style={{ fontSize: 12.5, color: "var(--text-faint)", marginTop: 6 }}>
-        La clave no se puede cambiar después: es como se refieren al artículo los pedidos ya hechos.
-      </p>
 
       <p style={{ ...label, marginTop: 16 }}>Nivel</p>
       <LevelChips levels={levels} value={level} onChange={setLevel} allLabel="Todos los niveles" />

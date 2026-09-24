@@ -48,11 +48,6 @@ func newFakeRepo() *fakeRepo {
 }
 
 func (r *fakeRepo) CreateItem(_ context.Context, item domain.Item) (domain.Item, error) {
-	for _, existing := range r.items {
-		if existing.Code() == item.Code() {
-			return domain.Item{}, glerrors.New(glerrors.KindConflict, "code already exists")
-		}
-	}
 	r.items[item.ID()] = item
 	return item, nil
 }
@@ -363,7 +358,7 @@ func newFixture(t *testing.T) *fixture {
 func (f *fixture) seedItem(t *testing.T, code, size string, price int64, onHand int) domain.Item {
 	t.Helper()
 	item, err := f.svc.CreateItem(context.Background(), usecase.CreateItemInput{
-		Code: code, Name: code, PriceCents: price,
+		Name: code, PriceCents: price,
 	})
 	if err != nil {
 		t.Fatalf("seed item %q: %v", code, err)

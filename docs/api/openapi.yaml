@@ -87,7 +87,6 @@ paths:
                   value:
                     items:
                       - id: 6f1c9a2e-1111-4e2b-9a11-000000000001
-                        code: PLA-BLA
                         name: Playera blanca
                         priceCents: 32000
                         active: true
@@ -118,7 +117,7 @@ paths:
             examples:
               everyLevel:
                 summary: A garment the whole school wears
-                value: { code: SUE-VER, name: Suéter verde, priceCents: 65000 }
+                value: { name: Suéter verde, priceCents: 65000 }
       responses:
         '201':
           description: Created.
@@ -129,11 +128,6 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
-        '409':
-          description: A garment with that code already exists.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/uniforms/items/{id}/sizes:
     post:
@@ -2153,10 +2147,9 @@ components:
 
     Item:
       type: object
-      required: [id, code, name, priceCents, active, sizes]
+      required: [id, name, priceCents, active, sizes]
       properties:
         id: { type: string, format: uuid }
-        code: { type: string, maxLength: 40 }
         name: { type: string, maxLength: 120 }
         description: { type: string, maxLength: 500 }
         levelId: { $ref: '#/components/schemas/LevelId' }
@@ -2182,9 +2175,11 @@ components:
 
     CreateItemRequest:
       type: object
-      required: [code, name, priceCents]
+      description: >
+        An article has no clave (task 3): it is told apart by its id and found
+        by name. A `code` sent by an older client is ignored.
+      required: [name, priceCents]
       properties:
-        code: { type: string, minLength: 1, maxLength: 40 }
         name: { type: string, minLength: 1, maxLength: 120 }
         description: { type: string, maxLength: 500 }
         category: { $ref: '#/components/schemas/ItemCategory' }

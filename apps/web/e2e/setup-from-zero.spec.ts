@@ -36,7 +36,6 @@ test.describe.serial("setting up a school from zero", () => {
    * grupos ya pasaban por `comoSeGuarda`.
    */
   const garment = `SUÉTER ${tag.toUpperCase()}`;
-  const garmentCode = `SUE-${tag.toUpperCase()}`;
 
   test("the director signs in", async ({ page }) => {
     await signIn(page, true);
@@ -261,7 +260,6 @@ test.describe.serial("setting up a school from zero", () => {
     await page.getByRole("button", { name: "Nuevo artículo" }).first().click();
 
     await page.getByLabel("Nombre").fill(garment);
-    await page.getByLabel("Clave").fill(garmentCode);
     await page.getByLabel("Precio").fill("650");
     await page.getByRole("button", { name: "Crear y poner tallas" }).click();
 
@@ -332,7 +330,7 @@ test.describe.serial("setting up a school from zero", () => {
     // banner is the one that carries text.
     const alert = page.getByRole("alert").filter({ hasText: /./ });
     await expect(alert).toBeVisible();
-    // Its own sentence, not the one shown for a duplicate code: an empty shelf
+    // Its own sentence, not the one shown for a conflict: an empty shelf
     // is not the cashier's fault and must not read like it.
     await expect(alert).toContainText(/ya no está disponible/i);
     // And the detail line names the garment and the size, in the language the

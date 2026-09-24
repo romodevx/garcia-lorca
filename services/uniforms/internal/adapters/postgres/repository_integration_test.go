@@ -69,7 +69,7 @@ func seedGarment(t *testing.T, repo *pgadapter.Repository, code, size string, pr
 
 func mustItem(t *testing.T, code string, price int64) domain.Item {
 	t.Helper()
-	item, err := domain.NewItem(newUUID(t), tenantA, code, code, "", domain.LevelAny, price)
+	item, err := domain.NewItem(newUUID(t), tenantA, code, "", domain.LevelAny, price)
 	if err != nil {
 		t.Fatalf("NewItem: %v", err)
 	}
@@ -87,15 +87,16 @@ func newUUID(t *testing.T) string {
 
 // --- catalogue ---------------------------------------------------------------
 
-func TestCreateItemRejectsADuplicateCode(t *testing.T) {
+// Task 3: an article has no clave. Two with the same name are two articles,
+// told apart by id; nothing in the school's schema asks for a code any more.
+func TestCreateItemNeedsNoCode(t *testing.T) {
 	repo := appRepo(t, tenantA)
 	ctx := context.Background()
-	if _, err := repo.CreateItem(ctx, mustItem(t, "DUP-1", 32000)); err != nil {
+	if _, err := repo.CreateItem(ctx, mustItem(t, "Playera sin clave", 32000)); err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	_, err := repo.CreateItem(ctx, mustItem(t, "DUP-1", 32000))
-	if glerrors.KindOf(err) != glerrors.KindConflict {
-		t.Errorf("want KindConflict, got %v", err)
+	if _, err := repo.CreateItem(ctx, mustItem(t, "Playera sin clave", 32000)); err != nil {
+		t.Errorf("a second article without a clave: %v", err)
 	}
 }
 

@@ -11,8 +11,9 @@ import (
 // rather than wrong: the size ran out.
 //
 // It is a sentinel rather than a message because the edge has to tell it apart
-// from every other conflict — a duplicate garment code is also a conflict, and
-// showing a cashier the same sentence for both blames them for an empty shelf.
+// from every other conflict — a sale already registered is also a
+// conflict, and showing a cashier the same sentence for both blames them for an
+// empty shelf.
 // Matching on the text would work until somebody reworded it.
 //
 // Errors that carry it are still KindConflict, so callers that only branch on

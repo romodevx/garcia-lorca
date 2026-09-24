@@ -70,8 +70,9 @@ func (h *UniformsHandler) ListItems(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
+// createItemRequest has no clave (task 3); a "code" sent by an older client is
+// ignored like any unknown field.
 type createItemRequest struct {
-	Code        string `json:"code"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	LevelID     string `json:"levelId"` // a config level id; empty means every level
@@ -88,7 +89,7 @@ func (h *UniformsHandler) CreateItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	item, err := h.svc.CreateItem(r.Context(), client.CreateItemInput{
-		Code: body.Code, Name: body.Name, Description: body.Description,
+		Name: body.Name, Description: body.Description,
 		LevelID: body.LevelID, PriceCents: body.PriceCents, Category: body.Category,
 	})
 	if err != nil {

@@ -13,7 +13,7 @@ import (
 func TestCreateItem(t *testing.T) {
 	f := newFixture(t)
 	got, err := f.svc.CreateItem(context.Background(), usecase.CreateItemInput{
-		Code: "SUE-VER", Name: "Suéter verde", PriceCents: 65000,
+		Name: "Suéter verde", PriceCents: 65000,
 	})
 	if err != nil {
 		t.Fatalf("CreateItem: %v", err)
@@ -23,19 +23,27 @@ func TestCreateItem(t *testing.T) {
 	}
 }
 
-func TestCreateItemRejectsADuplicateCode(t *testing.T) {
+// Task 3: an article has no clave. Two of them are told apart by their id,
+// never by a code the office had to invent.
+func TestCreateItemNeedsNoCode(t *testing.T) {
 	f := newFixture(t)
-	in := usecase.CreateItemInput{Code: "PLA", Name: "Playera", PriceCents: 32000}
-	if _, err := f.svc.CreateItem(context.Background(), in); err != nil {
+	in := usecase.CreateItemInput{Name: "Playera", PriceCents: 32000}
+	first, err := f.svc.CreateItem(context.Background(), in)
+	if err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	_, err := f.svc.CreateItem(context.Background(), in)
-	requireKind(t, err, glerrors.KindConflict)
+	second, err := f.svc.CreateItem(context.Background(), in)
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if first.ID() == second.ID() {
+		t.Error("two articles share an id")
+	}
 }
 
 func TestCreateItemValidation(t *testing.T) {
 	f := newFixture(t)
-	_, err := f.svc.CreateItem(context.Background(), usecase.CreateItemInput{Code: "", Name: "x", PriceCents: 1})
+	_, err := f.svc.CreateItem(context.Background(), usecase.CreateItemInput{Name: "", PriceCents: 1})
 	requireKind(t, err, glerrors.KindInvalid)
 }
 
@@ -77,11 +85,11 @@ func TestUpdateItemOnAMissingGarment(t *testing.T) {
 func TestListItemsForALevelIncludesTheAnyLevelGarments(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
-	if _, err := f.svc.CreateItem(ctx, usecase.CreateItemInput{Code: "PLA", Name: "Playera", PriceCents: 32000}); err != nil {
+	if _, err := f.svc.CreateItem(ctx, usecase.CreateItemInput{Name: "Playera", PriceCents: 32000}); err != nil {
 		t.Fatalf("seed any-level: %v", err)
 	}
 	if _, err := f.svc.CreateItem(ctx, usecase.CreateItemInput{
-		Code: "BAT", Name: "Batita", Level: domain.Level("c1000000-0000-0000-0000-000000000001"), PriceCents: 41000,
+		Name: "Batita", Level: domain.Level("c1000000-0000-0000-0000-000000000001"), PriceCents: 41000,
 	}); err != nil {
 		t.Fatalf("seed kinder: %v", err)
 	}
@@ -150,7 +158,7 @@ func TestListOrdersRejectsALevelThatIsNotAnID(t *testing.T) {
 func TestUpsertSizesReportsCreatedAndUpdatedSeparately(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
-	item, err := f.svc.CreateItem(ctx, usecase.CreateItemInput{Code: "PAN", Name: "Pantalón", PriceCents: 48000})
+	item, err := f.svc.CreateItem(ctx, usecase.CreateItemInput{Name: "Pantalón", PriceCents: 48000})
 	if err != nil {
 		t.Fatalf("CreateItem: %v", err)
 	}

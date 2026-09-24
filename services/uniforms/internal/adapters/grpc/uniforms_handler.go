@@ -51,7 +51,7 @@ func (h *UniformsHandler) Health(ctx context.Context, _ *connect.Request[uniform
 func (h *UniformsHandler) CreateItem(ctx context.Context, req *connect.Request[uniformsv1.CreateItemRequest]) (*connect.Response[uniformsv1.CreateItemResponse], error) {
 	m := req.Msg
 	item, err := h.shop.CreateItem(ctx, usecase.CreateItemInput{
-		Code: m.GetCode(), Name: m.GetName(), Description: m.GetDescription(),
+		Name: m.GetName(), Description: m.GetDescription(),
 		Level: domain.Level(m.GetLevelId()), PriceCents: m.GetPriceCents(),
 		Category: m.GetCategory(),
 	})
@@ -364,7 +364,7 @@ var labelToProto = map[domain.OrderLabel]uniformsv1.OrderLabel{
 
 func toProtoItem(i domain.Item, sizes []domain.StockLevel) *uniformsv1.Item {
 	return &uniformsv1.Item{
-		Id: i.ID(), TenantId: i.TenantID(), Code: i.Code(), Name: i.Name(),
+		Id: i.ID(), TenantId: i.TenantID(), Name: i.Name(),
 		Description: i.Description(), LevelId: string(i.Level()),
 		PriceCents: i.PriceCents(), Active: i.Active(), Sizes: toProtoStockAll(sizes),
 		Category: i.Category(),
