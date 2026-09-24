@@ -50,7 +50,18 @@ type Payment struct {
 	reference      string
 	paidAt         time.Time
 	idempotencyKey string
+	receivedBy     string
 }
+
+// WithReceivedBy returns the payment attributed to the account that took the
+// money (task 7).
+func (p Payment) WithReceivedBy(userID string) Payment {
+	p.receivedBy = userID
+	return p
+}
+
+// ReceivedBy is the account that took the money; empty when it was not kept.
+func (p Payment) ReceivedBy() string { return p.receivedBy }
 
 // NewPayment builds a validated Payment. Identity, tenant and charge are
 // required, the amount must be strictly positive (a zero-money movement is not

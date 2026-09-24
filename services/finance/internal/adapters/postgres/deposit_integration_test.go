@@ -479,3 +479,47 @@ func TestAnAbortedPaymentQueuesNoEvent(t *testing.T) {
 		t.Errorf("%d events queued for a payment that never happened", published)
 	}
 }
+
+// Task 7: who took the money is stored with the deposit (account and name) and
+// with each payment it split into; the cash-up reads it back with the moment
+// the deposit was keyed.
+func TestADepositKeepsWhoReceivedIt(t *testing.T) {
+	tenant, student := tenantA, "80000000-0000-0000-0000-0000000000a7"
+	charge := seedConceptAndCharge(t, tenant, "60000000-0000-0000-0000-0000000000a7", "colegiatura recibe",
+		"61000000-0000-0000-0000-0000000000a7", student, "70000000-0000-0000-0000-0000000000a7", 320000, 0,
+		time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC))
+	const cashier = "c0000000-0000-0000-0000-0000000000a7"
+	paidOn := time.Date(2026, 9, 3, 0, 0, 0, 0, time.UTC)
+	deposit := newDeposit(t, "62000000-0000-0000-0000-0000000000a7", tenant, student, 320000, paidOn, "").
+		WithReceiver(domain.Receiver{UserID: cashier, Name: "Laura Caja"})
+	payment := newPayment(t, "90000000-0000-0000-0000-0000000000a7", tenant, charge.ID(), 320000, paidOn).WithReceivedBy(cashier)
+
+	repo := appRepo(t, tenant)
+	if _, _, err := repo.RegisterDeposit(context.Background(), deposit,
+		func([]ports.ChargeWithPaid) (ports.DepositWrite, error) {
+			return ports.DepositWrite{Allocations: []domain.Payment{payment}}, nil
+		}, nil); err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+
+	day, err := repo.ListDepositsOn(context.Background(), paidOn)
+	if err != nil {
+		t.Fatalf("ListDepositsOn: %v", err)
+	}
+	var got domain.Deposit
+	for _, d := range day {
+		if d.ID() == deposit.ID() {
+			got = d
+		}
+	}
+	if got.ReceivedBy() != (domain.Receiver{UserID: cashier, Name: "Laura Caja"}) || got.CapturedAt().IsZero() {
+		t.Errorf("stored deposit = %+v captured %v", got.ReceivedBy(), got.CapturedAt())
+	}
+	var receivedBy string
+	if err := superDB.Raw(`SELECT coalesce(received_by::text, '') FROM payments WHERE id = ?`, payment.ID()).Scan(&receivedBy).Error; err != nil {
+		t.Fatalf("read payment: %v", err)
+	}
+	if receivedBy != cashier {
+		t.Errorf("payment received_by = %q, want %q", receivedBy, cashier)
+	}
+}

@@ -31,6 +31,10 @@ type DepositInput struct {
 	// who is always punctual and slipped once — a decision, never a default,
 	// and it is recorded as one.
 	GrantEarlyPayment bool
+	// Receiver is who took the money: the authenticated caller, set by the
+	// gateway (task 7). Recorded on the deposit and on every payment it splits
+	// into.
+	Receiver domain.Receiver
 }
 
 // DepositResult is what the money did, in the shape a receipt needs.
@@ -163,6 +167,7 @@ func (s *FinanceService) prepareDeposit(ctx context.Context, in DepositInput) (d
 	if err != nil {
 		return domain.Deposit{}, nil, err
 	}
+	deposit = deposit.WithReceiver(in.Receiver)
 	return deposit, &depositPlanner{
 		svc:         s,
 		deposit:     deposit,
@@ -682,7 +687,7 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 		if err != nil {
 			return ports.DepositWrite{}, err
 		}
-		payments = append(payments, payment)
+		payments = append(payments, payment.WithReceivedBy(p.deposit.ReceivedBy().UserID))
 	}
 	return ports.DepositWrite{
 		Repriced:         repriced,

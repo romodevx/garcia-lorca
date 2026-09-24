@@ -988,12 +988,16 @@ func TestRegisterPaymentHonoursTheCapturedDate(t *testing.T) {
 	charge := f.seedCharge(t, f.seedConcept(t, "Colegiatura", 100000).ID(), 100000)
 	friday := time.Date(2026, 9, 4, 0, 0, 0, 0, time.UTC)
 
-	got, _, err := f.svc.RegisterPaymentAt(context.Background(), charge.ID(), 100000, "cash", "", "k1", friday)
+	got, _, err := f.svc.RegisterPaymentAt(context.Background(), charge.ID(), 100000, "cash", "", "k1", friday, "c-caja")
 	if err != nil {
 		t.Fatalf("RegisterPaymentAt: %v", err)
 	}
 	if !got.PaidAt().Equal(friday) {
 		t.Errorf("paidAt = %s, want %s — the captured date must survive to the ledger", got.PaidAt(), friday)
+	}
+	// Task 7: who took the money travels with it.
+	if got.ReceivedBy() != "c-caja" {
+		t.Errorf("received by %q, want c-caja", got.ReceivedBy())
 	}
 }
 
@@ -1004,7 +1008,7 @@ func TestRegisterPaymentRejectsAFutureDate(t *testing.T) {
 	charge := f.seedCharge(t, f.seedConcept(t, "Colegiatura", 100000).ID(), 100000)
 	tomorrow := fixedNow.Add(48 * time.Hour)
 
-	_, _, err := f.svc.RegisterPaymentAt(context.Background(), charge.ID(), 100000, "cash", "", "k1", tomorrow)
+	_, _, err := f.svc.RegisterPaymentAt(context.Background(), charge.ID(), 100000, "cash", "", "k1", tomorrow, "")
 	if err == nil {
 		t.Fatal("a payment dated in the future was accepted")
 	}

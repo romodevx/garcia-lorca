@@ -597,6 +597,21 @@ func TestRegisterPaymentReturnsPaymentAndRecomputedCharge(t *testing.T) {
 	}
 }
 
+// Task 7: who took the money crosses the wire and reaches the ledger.
+func TestRegisterPaymentRecordsWhoReceivedIt(t *testing.T) {
+	f := newFixture(t)
+	charge := f.seedCharge(t, f.seedConcept(t, "Colegiatura", 250000).GetId(), 100000)
+	if _, err := f.h.RegisterPayment(context.Background(), connect.NewRequest(&financev1.RegisterPaymentRequest{
+		ChargeId: charge.GetId(), AmountCents: 40000, Method: domain.MethodCash, ReceivedBy: "c-caja",
+	})); err != nil {
+		t.Fatalf("RegisterPayment: %v", err)
+	}
+	stored := f.repo.payments[charge.GetId()]
+	if len(stored) != 1 || stored[0].ReceivedBy() != "c-caja" {
+		t.Errorf("stored payments = %+v, want one received by c-caja", stored)
+	}
+}
+
 // The idempotency key has to survive the whole wire path: the proto field is
 // only useful if the handler threads it into the use case. Sending the same
 // request twice must yield the same payment and leave the charge where it was.

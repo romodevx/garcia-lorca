@@ -332,7 +332,7 @@ func (s *FinanceService) CancelChargeIfUnpaid(ctx context.Context, chargeID stri
 // publishes nothing either: the event fired the first time round, and a second
 // one would bill a second receipt for one payment. An empty key opts out.
 func (s *FinanceService) RegisterPayment(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string) (domain.Payment, ports.ChargeWithPaid, error) {
-	return s.RegisterPaymentAt(ctx, chargeID, amountCents, method, reference, idempotencyKey, time.Time{})
+	return s.RegisterPaymentAt(ctx, chargeID, amountCents, method, reference, idempotencyKey, time.Time{}, "")
 }
 
 // RegisterPaymentAt is RegisterPayment with the date the money actually changed
@@ -347,7 +347,10 @@ func (s *FinanceService) RegisterPayment(ctx context.Context, chargeID string, a
 // A future date is refused. It is the classic counter typo (2027 for 2026) and
 // it silently lifts a payment out of every overdue calculation, which is a
 // mistake nobody notices until a parent is wrongly told they are current.
-func (s *FinanceService) RegisterPaymentAt(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time) (domain.Payment, ports.ChargeWithPaid, error) {
+//
+// receivedBy is the account that took the money (task 7), set by the gateway
+// from the authenticated caller; empty when unknown.
+func (s *FinanceService) RegisterPaymentAt(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, receivedBy string) (domain.Payment, ports.ChargeWithPaid, error) {
 	when := paidAt
 	if when.IsZero() {
 		when = s.now()
@@ -360,6 +363,7 @@ func (s *FinanceService) RegisterPaymentAt(ctx context.Context, chargeID string,
 	if err != nil {
 		return domain.Payment{}, ports.ChargeWithPaid{}, err
 	}
+	payment = payment.WithReceivedBy(receivedBy)
 
 	stored, charge, replayed, err := s.repo.RegisterPayment(ctx, payment, derivePaidStatus,
 		func(charge ports.ChargeWithPaid) []ports.OutboxEvent {

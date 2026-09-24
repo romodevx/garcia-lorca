@@ -36,7 +36,35 @@ type Deposit struct {
 	voidedAt        time.Time
 	voidReason      string
 	cardType        string
+	receivedBy      Receiver
+	capturedAt      time.Time
 }
+
+// Receiver is who took the money at the counter: the account, and its name as
+// it read then (task 7). Empty on deposits captured before it was recorded.
+type Receiver struct {
+	UserID string
+	Name   string
+}
+
+// WithReceiver returns the deposit attributed to whoever received it.
+func (d Deposit) WithReceiver(r Receiver) Deposit {
+	d.receivedBy = r
+	return d
+}
+
+// ReceivedBy is who took the money; empty on deposits from before it was kept.
+func (d Deposit) ReceivedBy() Receiver { return d.receivedBy }
+
+// WithCapturedAt returns the deposit with the moment it was keyed, which is
+// not the moment the family paid when a cashier captures a payment late.
+func (d Deposit) WithCapturedAt(at time.Time) Deposit {
+	d.capturedAt = at
+	return d
+}
+
+// CapturedAt is when the deposit was keyed; zero before it is stored.
+func (d Deposit) CapturedAt() time.Time { return d.capturedAt }
 
 // Which kind of card the money came in on. Not a payment method — the money
 // still arrives by card and the ledger treats it as one — but the terminal the

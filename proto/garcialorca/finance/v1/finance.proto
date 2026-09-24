@@ -350,6 +350,8 @@ message RegisterPaymentRequest {
   // server clock instead quietly applied the wrong day's rules.
   // Optional: unset ⇒ now. A future date is refused.
   google.protobuf.Timestamp paid_at = 6;
+  // The authenticated caller, set by the gateway — never by a client (task 7).
+  string received_by = 7;
 }
 
 message RegisterPaymentResponse {
@@ -674,6 +676,13 @@ message Deposit {
   // the money still arrives by card — but the terminal the office reconciles
   // against at month end knows the difference.
   string card_type = 10;
+  // Who took the money (task 7): the account and its name as it read then.
+  // Empty on deposits from before it was recorded.
+  string received_by = 11;
+  string received_by_name = 12;
+  // When the deposit was keyed, which is not paid_at when a payment is
+  // captured late.
+  google.protobuf.Timestamp captured_at = 13;
 }
 
 message RegisterDepositRequest {
@@ -696,6 +705,9 @@ message RegisterDepositRequest {
   bool grant_early_payment = 7;
   // debit | credit, only when method is card.
   string card_type = 8;
+  // The authenticated caller, set by the gateway — never by a client.
+  string received_by = 9;
+  string received_by_name = 10;
 }
 
 message RegisterDepositResponse {

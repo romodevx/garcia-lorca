@@ -42,7 +42,7 @@ func settleInscription(t *testing.T, f *fixture) {
 			continue
 		}
 		if _, _, err := f.svc.RegisterPaymentAt(context.Background(), c.Charge.ID(),
-			c.Charge.Effective().Int64(), domain.MethodCash, "", "", c.Charge.DueDate()); err != nil {
+			c.Charge.Effective().Int64(), domain.MethodCash, "", "", c.Charge.DueDate(), ""); err != nil {
 			t.Fatalf("settling the inscription: %v", err)
 		}
 		return
@@ -438,5 +438,30 @@ func TestFifteenHundredPaysOneMonthAndPartOfTheNext(t *testing.T) {
 	}
 	if got.UnallocatedCents != 0 {
 		t.Errorf("unallocated = %d, want 0 — the $500 sits on October", got.UnallocatedCents)
+	}
+}
+
+// Task 7: the deposit, and every payment it splits into, names who took the
+// money — the counterweight to a payment captured with an earlier date.
+func TestADepositNamesWhoReceivedIt(t *testing.T) {
+	f := depositFixture(t)
+	who := domain.Receiver{UserID: "c0000000-0000-0000-0000-000000000001", Name: "Laura Caja"}
+	got, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 670000, Method: domain.MethodCash,
+		PaidAt: time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), Receiver: who,
+	})
+	if err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+	if got.Deposit.ReceivedBy() != who {
+		t.Errorf("deposit received by %+v, want %+v", got.Deposit.ReceivedBy(), who)
+	}
+	if len(got.Allocations) == 0 {
+		t.Fatal("no allocations")
+	}
+	for _, a := range got.Allocations {
+		if a.ReceivedBy() != who.UserID {
+			t.Errorf("allocation %s received by %q, want %q", a.ID(), a.ReceivedBy(), who.UserID)
+		}
 	}
 }
