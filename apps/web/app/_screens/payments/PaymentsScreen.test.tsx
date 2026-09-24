@@ -18,7 +18,7 @@ const finance = vi.mocked(financeApi);
 const students = vi.mocked(studentsApi);
 
 const student = (id: string, first: string, last: string): studentsApi.Student => ({
-  id, curp: `C${id}`, firstName: first, lastName: last, level: "primaria",
+  id, curp: `C${id}`, firstName: first, lastName: last, level: "primaria", levelId: "",
   gradeGroup: "1° A", guardianName: "Tutor", admissionStatus: "enrolled",
 });
 

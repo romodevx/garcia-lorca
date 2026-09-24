@@ -108,6 +108,28 @@ describe("Catalog — cycles", () => {
 });
 
 describe("Catalog — nested level → grade level", () => {
+  // The SEP key is optional, as its own help says and as the server always
+  // allowed: Preescolar is created with a name alone (task 2).
+  it("creates a level with no SEP key, Preescolar included", async () => {
+    const user = userEvent.setup();
+    mocked.listCycles.mockResolvedValue([]);
+    mocked.createLevel.mockResolvedValue({ id: "l9", name: "PREESCOLAR", sepCode: "", enrollmentGranularity: "cycle" });
+    render(<Catalog onBack={() => {}} />);
+
+    await user.click(await screen.findByRole("button", { name: "Nuevo nivel" }));
+    const levelDrawer = await screen.findByRole("dialog", { name: "Nuevo nivel educativo" });
+    await user.type(within(levelDrawer).getByLabelText(/^Nombre del nivel$/), "Preescolar");
+    await user.click(within(levelDrawer).getByRole("button", { name: "Crear nivel" }));
+
+    await waitFor(() =>
+      expect(mocked.createLevel).toHaveBeenCalledWith(expect.any(String), {
+        name: "PREESCOLAR",
+        sepCode: "",
+        enrollmentGranularity: "cycle",
+      }),
+    );
+  });
+
   it("adds a level, then a grade level under it with an auto-suggested ordinal", async () => {
     const user = userEvent.setup();
     mocked.listCycles.mockResolvedValue([

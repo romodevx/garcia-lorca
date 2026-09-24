@@ -46,17 +46,17 @@ describe("the catalogue", () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ items: [] }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await listItems(BASE, { level: "kinder" });
+    await listItems(BASE, { levelId: "lvl-kinder" });
 
     const [urlUsed] = lastCall(fetchMock);
-    expect(urlUsed).toBe("http://gw/api/v1/uniforms/items?level=kinder");
+    expect(urlUsed).toBe("http://gw/api/v1/uniforms/items?levelId=lvl-kinder");
   });
 
   it("omits an empty level rather than sending a blank filter", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ items: [] }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await listItems(BASE, { level: "" });
+    await listItems(BASE, { levelId: "" });
 
     expect(lastCall(fetchMock)[0]).toBe("http://gw/api/v1/uniforms/items");
   });
@@ -181,7 +181,7 @@ describe("the order list", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await listOrders(BASE, {
-      level: "primaria",
+      levelId: "lvl-primaria",
       q: "Zoe",
       statuses: ["ready_for_pickup", "paid"],
       requiresAttention: true,
@@ -192,7 +192,7 @@ describe("the order list", () => {
     });
 
     const [urlUsed] = lastCall(fetchMock);
-    expect(urlUsed).toContain("level=primaria");
+    expect(urlUsed).toContain("levelId=lvl-primaria");
     expect(urlUsed).toContain("q=Zoe");
     expect(urlUsed).toContain("status=ready_for_pickup");
     expect(urlUsed).toContain("status=paid");

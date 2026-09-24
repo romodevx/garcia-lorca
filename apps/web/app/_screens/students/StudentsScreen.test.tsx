@@ -29,6 +29,7 @@ const mk = (id: string, first: string, last: string, status: studentsApi.Admissi
   firstName: first,
   lastName: last,
   level: "primaria",
+  levelId: "",
   gradeGroup: "1° A",
   guardianName: "Ana Tutor",
   admissionStatus: status,
@@ -125,14 +126,14 @@ describe("StudentsScreen", () => {
     await user.click(within(dialog).getByRole("button", { name: "Crear alumno" }));
 
     await waitFor(() =>
-      // The level travels as the config level's NAME, and gradeGroup is empty:
+      // The level travels as the config level's ID, and gradeGroup is empty:
       // the server writes it when capacity chooses the group, so the record can
       // never claim a group the pupil is not in.
       expect(students.createStudent).toHaveBeenCalledWith(expect.any(String), {
         curp: "HEGA050312MDFRNN08",
         firstName: "NUEVO",
         lastName: "ALUMNO",
-        level: "Primaria",
+        levelId: "lv-p",
         gradeGroup: "",
         guardianName: "TUTOR NUEVO",
       }),

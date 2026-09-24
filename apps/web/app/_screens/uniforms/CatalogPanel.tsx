@@ -6,7 +6,7 @@ import { Btn } from "../../_design/Controls";
 import { MoneyField, TextField } from "../../_design/form";
 import { createItem, updateItem, UniformsError, upsertSizes, type ItemCategory, type Level, type SizeSpec, type UniformItem } from "../../uniforms/api";
 import { Drawer } from "./InventoryPanel";
-import { EmptyState, ErrorNote, field, FieldLabel, label, money } from "./parts";
+import { EmptyState, ErrorNote, field, FieldLabel, label, LevelChips, money, type SchoolLevel } from "./parts";
 
 import { API_URL } from "../../api-url";
 
@@ -24,15 +24,6 @@ const CATEGORY_LABEL: Record<string, string> = {
   uniform: "Uniforme", book: "Libro", supply: "Papelería", other: "Otro",
 };
 
-const LEVELS: { id: Level; label: string }[] = [
-  { id: "", label: "Todos los niveles" },
-  { id: "maternal", label: "Maternal" },
-  { id: "kinder", label: "Kínder" },
-  { id: "primaria", label: "Primaria" },
-  { id: "secundaria", label: "Secundaria" },
-  { id: "preparatoria", label: "Prepa" },
-];
-
 /**
  * The catalogue.
  *
@@ -47,9 +38,12 @@ const LEVELS: { id: Level; label: string }[] = [
  */
 export function CatalogPanel({
   items,
+  levels,
   onChanged,
 }: {
   items: UniformItem[];
+  /** The school's own levels, from Configuración. */
+  levels: readonly SchoolLevel[];
   onChanged: () => void;
 }): ReactElement {
   const [creating, setCreating] = useState(false);
@@ -63,7 +57,7 @@ export function CatalogPanel({
         await updateItem(API_URL, item.id, {
           name: item.name,
           description: item.description,
-          level: item.level,
+          levelId: item.levelId,
           priceCents: item.priceCents,
           active: !item.active,
         });
@@ -125,7 +119,7 @@ export function CatalogPanel({
                 </p>
                 <p style={{ fontSize: 13.5, color: "var(--text-muted)" }}>
                   {CATEGORY_LABEL[item.category] ?? "Uniforme"} · {item.code} · {money(item.priceCents)} ·{" "}
-                  {item.level === "" ? "todos los niveles" : LEVELS.find((l) => l.id === item.level)?.label}
+                  {item.levelId === "" ? "todos los niveles" : (levels.find((l) => l.id === item.levelId)?.name ?? "nivel sin nombre")}
                 </p>
               </div>
               <span style={{ fontSize: 13.5, color: item.sizes.length === 0 ? "var(--warn-fg)" : "var(--text-muted)" }}>
@@ -144,6 +138,7 @@ export function CatalogPanel({
 
       {creating && (
         <CreateDrawer
+          levels={levels}
           onClose={() => setCreating(false)}
           onDone={(created) => {
             setCreating(false);
@@ -173,10 +168,12 @@ export function CatalogPanel({
 }
 
 function CreateDrawer({
+  levels,
   onClose,
   onDone,
   onError,
 }: {
+  levels: readonly SchoolLevel[];
   onClose: () => void;
   onDone: (created: UniformItem) => void;
   onError: (err: UniformsError) => void;
@@ -199,7 +196,7 @@ function CreateDrawer({
   const save = useCallback(async (): Promise<void> => {
     setPending(true);
     try {
-      const created = await createItem(API_URL, { code: code.trim(), name: name.trim(), level, priceCents, category });
+      const created = await createItem(API_URL, { code: code.trim(), name: name.trim(), levelId: level, priceCents, category });
       onDone(created);
     } catch (err) {
       onError(err instanceof UniformsError ? err : new UniformsError("internal", "Algo salió mal"));
@@ -252,27 +249,7 @@ function CreateDrawer({
       </p>
 
       <p style={{ ...label, marginTop: 16 }}>Nivel</p>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-        {LEVELS.map((option) => (
-          <button
-            key={option.id}
-            aria-pressed={level === option.id}
-            onClick={() => setLevel(option.id)}
-            style={{
-              height: 38,
-              padding: "0 14px",
-              borderRadius: 99,
-              fontSize: 13.5,
-              fontWeight: 600,
-              border: level === option.id ? "1.5px solid var(--forest)" : "1px solid var(--border)",
-              background: level === option.id ? "color-mix(in oklab, var(--forest) 12%, var(--surface))" : "var(--surface)",
-              color: level === option.id ? "var(--forest)" : "var(--text-muted)",
-            }}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
+      <LevelChips levels={levels} value={level} onChange={setLevel} allLabel="Todos los niveles" />
 
       <div style={{ marginTop: 16 }}>
         <MoneyField label="Precio" value={pesos} onChange={setPesos} required help="Lo que cuesta una pieza." />

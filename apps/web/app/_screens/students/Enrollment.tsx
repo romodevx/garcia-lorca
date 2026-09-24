@@ -5,13 +5,11 @@ import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import { listGroups, listCycles, type Cycle, type Group } from "../../config/api";
 import {
-  createStudent,
   enroll,
   listEnrollments,
   listStudents,
   transfer,
   withdraw,
-  type CreateStudentInput,
   type EnrollInput,
   type Enrollment as EnrollmentRecord,
   type Student,
@@ -19,7 +17,6 @@ import {
 } from "../../students/api";
 import { EnrollPanel } from "./EnrollPanel";
 import { RosterPanel } from "./RosterPanel";
-import { StudentCreatePanel } from "./StudentCreatePanel";
 import { StudentDirectoryPanel } from "./StudentDirectoryPanel";
 
 import { API_URL } from "../../api-url";
@@ -69,13 +66,6 @@ export function Enrollment({ onBack }: EnrollmentProps): ReactElement {
     [],
   );
 
-  const handleCreateStudent = useCallback(async (input: CreateStudentInput): Promise<void> => {
-    const created = await createStudent(API_URL, input);
-    // Prepend so the freshly registered applicant is immediately enrollable in
-    // the panel beside this one — no page reload needed.
-    setStudents((prev) => [created, ...prev]);
-  }, []);
-
   const handleEnroll = useCallback(async (input: EnrollInput): Promise<void> => {
     await enroll(API_URL, input);
   }, []);
@@ -115,7 +105,6 @@ export function Enrollment({ onBack }: EnrollmentProps): ReactElement {
         <div className="fade-up" style={{ display: "grid", gap: 18 }}>
           <StudentDirectoryPanel students={students} />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 18 }}>
-            <StudentCreatePanel onCreate={handleCreateStudent} />
             <EnrollPanel students={students} cycles={cycles} loadGroups={loadGroups} onEnroll={handleEnroll} />
           <RosterPanel
             students={students}

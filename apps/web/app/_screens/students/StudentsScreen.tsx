@@ -93,29 +93,6 @@ export interface QuickAddDraft {
 const CURP_LENGTH = 18;
 
 /**
- * The four levels the SEP recognises, folded the way the services fold them.
- *
- * A school may name its levels anything — the catalogue is theirs — but a pupil's
- * record carries a level the whole system understands, so a name outside this
- * list has nowhere to go. Checking here means the person is told which levels
- * work instead of meeting a 400 that blames their CURP.
- *
- * "maternal" was missing until M16, which meant this school could not enrol its
- * youngest pupils at all — the guard below was reporting a real gap as if it
- * were the user's mistake.
- */
-const SEP_LEVELS = ["maternal", "kinder", "primaria", "secundaria", "preparatoria"];
-
-function foldLevel(name: string): string {
-  return name.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-}
-
-/** Whether a school's level name corresponds to a SEP level. */
-export function isSepLevel(name: string): boolean {
-  return SEP_LEVELS.includes(foldLevel(name));
-}
-
-/**
  * What the form is still waiting for, or undefined when it is ready.
  *
  * This exists because the button used to be greyed out and silent: four separate
@@ -258,25 +235,17 @@ function QuickAdd({
       setError("Elige el nivel y el grado al que entra.");
       return;
     }
-    if (!isSepLevel(chosenLevel.name)) {
-      setError(
-        `«${chosenLevel.name}» no es un nivel de la SEP, así que no puede recibir alumnos. ` +
-          "Renómbralo en Configuración a Maternal, Kínder, Primaria, Secundaria o Preparatoria.",
-      );
-      return;
-    }
     setSaving(true);
     setError(undefined);
     try {
-      // The level travels as the config level's NAME. The students service folds
-      // accents ("Kínder" → kinder), so there is no mapping table on this side to
-      // drift out of step with the one that decides.
+      // The level travels as the config level's ID: whichever levels the school
+      // defined take pupils (ADR 0014), and the server supplies the name.
       await onSave(
         {
           curp: curp.trim().toUpperCase(),
           firstName: firstName.trim(),
           lastName: lastName.trim(),
-          level: chosenLevel.name,
+          levelId: chosenLevel.id,
           // Left empty on purpose: the server writes it when capacity picks the
           // group, so the record cannot claim a group the pupil is not in.
           gradeGroup: "",

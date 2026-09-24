@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { listOrders, UniformsError, type Level, type UniformFulfillment, type UniformOrder } from "../../uniforms/api";
-import { EmptyState, ErrorNote, LevelChips, money, SkeletonRows } from "./parts";
+import { EmptyState, ErrorNote, LevelChips, money, SkeletonRows, type SchoolLevel } from "./parts";
 
 import { API_URL } from "../../api-url";
 
@@ -23,7 +23,7 @@ const PAGE_SIZE = 20;
  * list reads as a sales log. The deadline column and the pick actions arrive with
  * the family ordering slice, when there is something to wait for.
  */
-export function OrdersPanel({ narrow }: { narrow: boolean }): ReactElement {
+export function OrdersPanel({ narrow, levels }: { narrow: boolean; levels: readonly SchoolLevel[] }): ReactElement {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [total, setTotal] = useState(0);
   const [failure, setFailure] = useState<UniformsError | null>(null);
@@ -36,7 +36,7 @@ export function OrdersPanel({ narrow }: { narrow: boolean }): ReactElement {
     setFailure(null);
     try {
       const res = await listOrders(API_URL, {
-        level: level === "" ? undefined : level,
+        levelId: level === "" ? undefined : level,
         q: query.trim() === "" ? undefined : query.trim(),
         pageSize: PAGE_SIZE,
         pageToken: page === 0 ? undefined : String(page * PAGE_SIZE),
@@ -82,6 +82,7 @@ export function OrdersPanel({ narrow }: { narrow: boolean }): ReactElement {
           }}
         />
         <LevelChips
+          levels={levels}
           value={level}
           onChange={(next) => {
             setLevel(next as Level);
@@ -230,15 +231,6 @@ export interface Row {
   accent: string;
 }
 
-const LEVEL_LABELS: Record<string, string> = {
-  "": "—",
-  maternal: "Maternal",
-  kinder: "Kínder",
-  primaria: "Primaria",
-  secundaria: "Secundaria",
-  preparatoria: "Prepa",
-};
-
 const STATUS_LABELS: Record<string, string> = {
   picking: "Procesando…",
   ready_for_pickup: "Lista para recoger",
@@ -262,7 +254,8 @@ export function toRows(orders: UniformOrder[]): Row[] {
   return orders.flatMap((order, index) => {
     const accent = ACCENTS[index % ACCENTS.length] as string;
     const who = order.studentName !== "" ? order.studentName : "Venta sin alumno";
-    const levelLabel = LEVEL_LABELS[order.studentLevel] ?? "—";
+    // The level's name as it was when the order was placed.
+    const levelLabel = order.studentLevel !== undefined && order.studentLevel !== "" ? order.studentLevel : "—";
 
     const rows: Row[] = order.fulfillments.map((f) => ({
       key: f.id,

@@ -24,8 +24,11 @@ const BASE_PATH = "/api/v1/uniforms";
 
 // --- entity types (match the gateway JSON contract) ------------------------
 
-/** A school level. Empty on a GARMENT means it applies to every level. */
-export type Level = "" | "maternal" | "kinder" | "primaria" | "secundaria" | "preparatoria";
+/**
+ * A school level: the id of a level the school defined in Configuración (not a
+ * fixed SEP list). Empty on a GARMENT means it applies to every level.
+ */
+export type Level = string;
 
 /** One garment in one size. */
 export interface UniformSize {
@@ -50,8 +53,8 @@ export interface UniformItem {
   code: string;
   name: string;
   description: string;
-  /** Empty means the garment applies to every level. */
-  level: Level;
+  /** A config level id; empty means the garment applies to every level. */
+  levelId: Level;
   priceCents: number;
   active: boolean;
   sizes: UniformSize[];
@@ -128,7 +131,10 @@ export interface UniformOrder {
   folio: string;
   studentId?: string;
   studentName: string;
-  studentLevel: Level;
+  /** The pupil's level name at order time ("Preescolar"). */
+  studentLevel?: string;
+  /** The pupil's config level id at order time. */
+  studentLevelId?: Level;
   studentGradeGroup?: string;
   /** family | counter | staff. */
   source: string;
@@ -199,7 +205,7 @@ export interface SaleLine {
 
 /** The panel's query. */
 export interface OrdersQuery {
-  level?: Level;
+  levelId?: Level;
   /** A folio if it looks like one, otherwise a pupil's name. */
   q?: string;
   statuses?: FulfillmentStatus[];
@@ -299,15 +305,15 @@ async function send<T>(
 // --- catalogue -------------------------------------------------------------
 
 /**
- * Lists the catalogue. `level` narrows to what a pupil of that level wears: the
- * garments scoped to it PLUS the ones scoped to none.
+ * Lists the catalogue. `levelId` narrows to what a pupil of that level wears:
+ * the garments scoped to it PLUS the ones scoped to none.
  */
 export async function listItems(
   baseURL: string,
-  opts: { level?: Level; includeInactive?: boolean } = {},
+  opts: { levelId?: Level; includeInactive?: boolean } = {},
 ): Promise<UniformItem[]> {
   const params = new URLSearchParams();
-  if (opts.level !== undefined && opts.level !== "") params.set("level", opts.level);
+  if (opts.levelId !== undefined && opts.levelId !== "") params.set("levelId", opts.levelId);
   if (opts.includeInactive === true) params.set("includeInactive", "true");
   const query = params.toString();
   const body = await get<{ items: UniformItem[] }>(baseURL, query === "" ? "/items" : `/items?${query}`);
@@ -318,7 +324,7 @@ export interface NewItem {
   code: string;
   name: string;
   description?: string;
-  level?: Level;
+  levelId?: Level;
   priceCents: number;
   /** Omitted means uniform. */
   category?: ItemCategory;
@@ -341,7 +347,7 @@ function withSizes(item: UniformItem): UniformItem {
 export interface ItemEdit {
   name: string;
   description?: string;
-  level?: Level;
+  levelId?: Level;
   priceCents: number;
   active: boolean;
   category?: ItemCategory;
@@ -415,7 +421,7 @@ export async function counterSale(
 
 export async function listOrders(baseURL: string, query: OrdersQuery = {}): Promise<UniformOrdersPage> {
   const params = new URLSearchParams();
-  if (query.level !== undefined && query.level !== "") params.set("level", query.level);
+  if (query.levelId !== undefined && query.levelId !== "") params.set("levelId", query.levelId);
   if (query.q !== undefined && query.q !== "") params.set("q", query.q);
   for (const status of query.statuses ?? []) params.append("status", status);
   if (query.requiresAttention === true) params.set("requiresAttention", "true");

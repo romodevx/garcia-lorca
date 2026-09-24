@@ -20,7 +20,7 @@ beforeEach(() => {
   config.listLevels.mockResolvedValue([{ id: "lv1", name: "Primaria", sepCode: "PRIM", enrollmentGranularity: "cycle" }]);
   config.listGroups.mockResolvedValue([{ id: "g1", cycleId: "c1", gradeLevelId: "gl1", name: "1° A", capacity: 30 }]);
   students.listStudents.mockResolvedValue([
-    { id: "s1", curp: "C1", firstName: "Valentina", lastName: "Cruz", level: "primaria", gradeGroup: "1° A", guardianName: "Tutor", admissionStatus: "enrolled" },
+    { id: "s1", curp: "C1", firstName: "Valentina", lastName: "Cruz", level: "primaria", levelId: "", gradeGroup: "1° A", guardianName: "Tutor", admissionStatus: "enrolled" },
   ]);
   comms.announce.mockResolvedValue({ created: 28, audience: 28 });
 });
