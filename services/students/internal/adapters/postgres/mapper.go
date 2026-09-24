@@ -94,7 +94,7 @@ func guardianLinkToDomain(m guardianStudentModel) (domain.GuardianLink, error) {
 	}
 	person := domain.ContactPerson{FullName: m.FullName, Phone: m.Phone, Email: m.Email}
 	if m.GuardianUserID == nil || *m.GuardianUserID == "" {
-		return domain.NewContact(m.ID, m.TenantID, m.StudentID, rel, person)
+		return domain.RestoreContact(m.ID, m.TenantID, m.StudentID, rel, person)
 	}
 	link, err := domain.NewGuardianLink(m.ID, m.TenantID, *m.GuardianUserID, m.StudentID, rel)
 	if err != nil {

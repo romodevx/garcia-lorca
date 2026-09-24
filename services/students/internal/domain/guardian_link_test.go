@@ -209,3 +209,17 @@ func TestAContactMayHaveNoEmail(t *testing.T) {
 		t.Fatalf("a contact without an email is fine: %v", err)
 	}
 }
+
+// A contact read back from storage is restored, not re-validated: a row stored
+// before contact emails were shape-checked must not take the pupil's whole
+// contact list down.
+func TestRestoreContactToleratesALegacyEmail(t *testing.T) {
+	contact, err := domain.RestoreContact("gl-1", "t1", "st-1", domain.RelationshipMother,
+		domain.ContactPerson{FullName: "Ana Cruz", Email: "maria@gmail"})
+	if err != nil {
+		t.Fatalf("RestoreContact: %v", err)
+	}
+	if contact.Email() != "maria@gmail" {
+		t.Errorf("email = %q", contact.Email())
+	}
+}

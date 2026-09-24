@@ -100,6 +100,22 @@ func NewContact(id, tenantID, studentID string, relationship Relationship, perso
 	return link.WithPerson(person), nil
 }
 
+// RestoreContact rebuilds an account-less contact read back from storage. It
+// keeps the row's invariants (a name, the identity references) but does not
+// re-judge the email's shape: that was checked when the contact was typed, and
+// a row stored before the check existed must stay readable — one such row would
+// otherwise fail the whole contact list of the pupil.
+func RestoreContact(id, tenantID, studentID string, relationship Relationship, person ContactPerson) (GuardianLink, error) {
+	if strings.TrimSpace(person.FullName) == "" {
+		return GuardianLink{}, glerrors.New(glerrors.KindInvalid, "a contact without an account needs a name")
+	}
+	link, err := newLink(id, tenantID, studentID, relationship)
+	if err != nil {
+		return GuardianLink{}, err
+	}
+	return link.WithPerson(person), nil
+}
+
 // WithPerson attaches (or replaces) the contact details; the email is stored
 // trimmed and lowercase, the one spelling iam looks an address up by. A guardian with an
 // account may carry a phone too: the account says who can log in, the phone says
