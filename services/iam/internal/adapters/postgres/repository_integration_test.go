@@ -619,6 +619,10 @@ func TestSeededRolesHoldTheirPermissions(t *testing.T) {
 			// Task 5: a pupil's medical record has its own permissions — who
 			// reads the class list is not thereby entitled to its allergies.
 			"medical:read", "medical:write",
+			// Task 6: notes on a pupil. notes_write can be delegated (a teacher
+			// writes notes); notes_void — voiding anyone's note, at any time —
+			// is the owner's alone.
+			"students:notes_write", "students:notes_void",
 		}},
 		{"guardian", []string{
 			"family:read",

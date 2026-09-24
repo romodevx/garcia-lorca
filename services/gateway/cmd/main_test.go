@@ -92,6 +92,8 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"family-reader":   {"family:read"},
 		// Task 5: health data answers to its own permission, not students:read.
 		"medical-reader": {"medical:read", "students:read"},
+		// Task 6: writing a note is its own permission, beside reading the pupil.
+		"notes-writer": {"students:read", "students:notes_write"},
 	}
 	granted, ok := perms[req.Msg.GetAccessToken()]
 	if !ok {
@@ -180,6 +182,18 @@ func (stubStudents) ListStudents(_ context.Context, req *connect.Request[student
 	return connect.NewResponse(&studentsv1.ListStudentsResponse{Students: []*studentsv1.Student{
 		{Id: "stu-1", FirstName: "Ana", AdmissionStatus: studentsv1.AdmissionStatus_ADMISSION_STATUS_PENDING},
 	}}), nil
+}
+
+func (stubStudents) AddStudentNote(_ context.Context, req *connect.Request[studentsv1.AddStudentNoteRequest]) (*connect.Response[studentsv1.AddStudentNoteResponse], error) {
+	return connect.NewResponse(&studentsv1.AddStudentNoteResponse{Note: &studentsv1.StudentNote{Id: "n-1", Body: req.Msg.GetBody()}}), nil
+}
+
+func (stubStudents) ListStudentNotes(_ context.Context, _ *connect.Request[studentsv1.ListStudentNotesRequest]) (*connect.Response[studentsv1.ListStudentNotesResponse], error) {
+	return connect.NewResponse(&studentsv1.ListStudentNotesResponse{}), nil
+}
+
+func (stubStudents) VoidStudentNote(_ context.Context, _ *connect.Request[studentsv1.VoidStudentNoteRequest]) (*connect.Response[studentsv1.VoidStudentNoteResponse], error) {
+	return connect.NewResponse(&studentsv1.VoidStudentNoteResponse{Note: &studentsv1.StudentNote{Id: "n-1"}}), nil
 }
 
 func (stubStudents) GetStudentMedical(_ context.Context, _ *connect.Request[studentsv1.GetStudentMedicalRequest]) (*connect.Response[studentsv1.GetStudentMedicalResponse], error) {
@@ -2763,5 +2777,26 @@ func TestMedicalRecordAnswersToItsOwnPermission(t *testing.T) {
 	}
 	if res := doGateway(t, gw, http.MethodGet, "/api/v1/students/stu-1/medical", "medical-reader", ""); res.StatusCode != http.StatusOK {
 		t.Errorf("medical:read: status = %d, want 200", res.StatusCode)
+	}
+}
+
+// Notes on a pupil (task 6): reading them is reading the pupil; writing and
+// voiding need students:notes_write.
+func TestStudentNotesAnswerToTheirPermissions(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	cases := []struct {
+		method, path, token, body string
+		want                      int
+	}{
+		{http.MethodGet, "/api/v1/students/stu-1/notes", "student-reader", "", http.StatusOK},
+		{http.MethodPost, "/api/v1/students/stu-1/notes", "student-reader", `{"body":"x"}`, http.StatusForbidden},
+		{http.MethodPost, "/api/v1/students/stu-1/notes", "notes-writer", `{"body":"x"}`, http.StatusCreated},
+		{http.MethodPost, "/api/v1/students/stu-1/notes/n-1/void", "student-reader", "", http.StatusForbidden},
+		{http.MethodPost, "/api/v1/students/stu-1/notes/n-1/void", "notes-writer", "", http.StatusOK},
+	}
+	for _, tc := range cases {
+		if res := doGateway(t, gw, tc.method, tc.path, tc.token, tc.body); res.StatusCode != tc.want {
+			t.Errorf("%s %s as %s: status = %d, want %d", tc.method, tc.path, tc.token, res.StatusCode, tc.want)
+		}
 	}
 }

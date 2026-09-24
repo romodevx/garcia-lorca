@@ -116,6 +116,10 @@ func TestIsOwnerOnly(t *testing.T) {
 		// A pupil's allergies and conditions, for every pupil in the school.
 		{"medical:read", true},
 		{"medical:write", true},
+		// Voiding anyone's note at any time: only the owner (task 6). Writing
+		// one is delegable.
+		{"students:notes_void", true},
+		{"students:notes_write", false},
 		{"uniforms:stock", false},
 		{"uniforms:write", false},
 		{"uniforms_own:read", false},

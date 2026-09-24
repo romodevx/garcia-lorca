@@ -55,6 +55,10 @@ var ownerOnlyPermissions = map[string]struct{}{
 	// record is done from the page that shows it.
 	"medical:read":  {},
 	"medical:write": {},
+	// Voiding ANY note about a pupil, at any time (task 6): after the author's
+	// 15 minutes, taking back what the school wrote about a child is the
+	// owner's call alone. students:notes_write is delegable and stays out.
+	"students:notes_void": {},
 }
 
 // IsOwnerOnly reports whether raw is a tenant-wide sensitive read that only the

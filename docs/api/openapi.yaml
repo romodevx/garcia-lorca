@@ -919,6 +919,97 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/students/{id}/notes:
+    get:
+      tags: [students]
+      summary: A pupil's notes, newest first
+      description: >
+        Reading them is reading the pupil (students:read). Voided notes are
+        listed, marked `voided`, only for a caller holding students:notes_void
+        (the owner); everyone else sees the ordinary history. Sent no-store.
+      operationId: listStudentNotes
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/StudentIdPath' }]
+      responses:
+        '200':
+          description: The history.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [notes]
+                properties:
+                  notes:
+                    type: array
+                    items: { $ref: '#/components/schemas/StudentNote' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [students]
+      summary: Write a note about a pupil
+      description: >
+        Needs students:notes_write. The author is the signed-in caller (named
+        from iam, or by email when the account has no name); any author field
+        in the body is ignored. A note is never edited.
+      operationId: addStudentNote
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/StudentIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, minLength: 1, maxLength: 2000, example: "Llegó con fiebre; se avisó a la mamá." }
+      responses:
+        '201':
+          description: The stored note.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StudentNote' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/students/{id}/notes/{noteId}/void:
+    post:
+      tags: [students]
+      summary: Void a note
+      description: >
+        A voided note is kept and marked, never deleted. Its author may void it
+        within 15 minutes of writing it (students:notes_write); after that, or
+        for anyone else's note, only a holder of students:notes_void.
+      operationId: voidStudentNote
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/StudentIdPath'
+        - { name: noteId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The voided note.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StudentNote' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Not the author within 15 minutes, and no students:notes_void.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The note was already voided.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/comms/announcements:
     post:
       tags: [comms]
@@ -1800,6 +1891,19 @@ components:
         bloodType: { type: string, enum: ['', A+, A-, B+, B-, AB+, AB-, O+, O-], example: "O+" }
         allergies: { type: string, maxLength: 2000, example: "Penicilina" }
         conditions: { type: string, maxLength: 2000, example: "Asma leve" }
+
+    StudentNote:
+      type: object
+      required: [id, studentId, body, authorUserId, authorName, createdAt, voided]
+      properties:
+        id: { type: string, format: uuid }
+        studentId: { type: string, format: uuid }
+        body: { type: string, example: "Llegó con fiebre; se avisó a la mamá." }
+        authorUserId: { type: string, format: uuid }
+        authorName: { type: string, example: "Gabriela Rojas", description: "The author's name as it read when the note was written." }
+        createdAt: { type: string, format: date-time }
+        voided: { type: boolean }
+        voidedAt: { type: string, format: date-time, description: "Present only on a voided note." }
 
     Invitation:
       type: object
