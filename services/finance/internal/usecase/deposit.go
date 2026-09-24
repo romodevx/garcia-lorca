@@ -387,12 +387,11 @@ func expectedFrom(
 			continue
 		}
 		out.AnnualBalanceCents += owed(c)
-		// A written-down surcharge rides on its month's line and is never a line
-		// of its own: a deposit cannot pay a surcharge apart from its month, so
-		// offering one to choose would only be refused. (One whose month cannot
-		// be read — no such ref is written today — counts in the amount only.)
+		// A written-down surcharge rides on its month's line. One with no month
+		// — a surcharge the office typed by hand — is a debt of its own: its
+		// own line, chosen and paid like any other (partition makes it one).
 		var line *ExpectedLine
-		if !isFee {
+		if _, ridesOnMonth := feeParent(c.Charge.ExternalRef()); !isFee || !ridesOnMonth {
 			line = &ExpectedLine{ChargeID: c.Charge.ID(), Description: c.Charge.Description(), DueDate: c.Charge.DueDate(), OwedCents: owed(c)}
 			if lines != nil {
 				lines[c.Charge.ID()] = line
@@ -882,7 +881,11 @@ func (p *depositPlanner) partition(open []ports.ChargeWithPaid) ([]ports.ChargeW
 		}
 		if parent, ok := feeParent(c.Charge.ExternalRef()); ok {
 			fees[parent] = append(fees[parent], c)
+			continue
 		}
+		// A surcharge with no month to ride on (typed by hand) is a debt of
+		// its own; left out, no deposit could ever pay it.
+		base = append(base, c)
 	}
 	for parent := range fees {
 		rows := fees[parent]
@@ -907,7 +910,9 @@ func (p *depositPlanner) partition(open []ports.ChargeWithPaid) ([]ports.ChargeW
 // monthly rule the billing run has already issued the fees, and they arrive as
 // ordinary charges.
 func (p *depositPlanner) deriveSurcharge(c ports.ChargeWithPaid, existing []ports.ChargeWithPaid) (domain.Charge, bool, error) {
-	if !p.policy.DailyMode || owed(c) <= 0 {
+	// A surcharge never earns one of its own (a hand-typed one is a debt in
+	// the list): that is how a fixed fee turns into compound interest.
+	if !p.policy.DailyMode || owed(c) <= 0 || c.Charge.ConceptID() == p.lateFeeID {
 		return domain.Charge{}, false, nil
 	}
 	total := domain.Surcharge(p.policy, p.calendar, c.Charge.DueDate(), p.paidOn)

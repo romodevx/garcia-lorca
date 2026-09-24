@@ -633,3 +633,79 @@ func TestAMonthPaidAheadIsListedWithItsReward(t *testing.T) {
 		t.Errorf("left %d as credit; the listed total should settle October", got.UnallocatedCents)
 	}
 }
+
+// A surcharge the office typed by hand (the "Recargo" concept, no month it
+// rides on) is a debt of its own: it has a line, it can be chosen, and a
+// deposit pays it — before, no deposit ever did, so a family paying the full
+// quote was left with it open and the money as credit.
+func TestAHandTypedSurchargeIsADebtOfItsOwn(t *testing.T) {
+	f := depositFixture(t)
+	day := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
+	lateFee := f.repo.conceptIDOfKind(domain.KindLateFee)
+	manual, err := f.svc.CreateCharge(context.Background(), usecase.CreateChargeInput{
+		StudentID: testStudent, CycleID: testCycle, ConceptID: lateFee,
+		DueDate: "2026-10-01", AmountCentsOverride: 5000, DescriptionOverride: "Recargo por cheque devuelto",
+	})
+	if err != nil {
+		t.Fatalf("CreateCharge: %v", err)
+	}
+
+	expected, err := f.svc.ExpectedToday(context.Background(), testStudent, day)
+	if err != nil {
+		t.Fatalf("ExpectedToday: %v", err)
+	}
+	var line usecase.ExpectedLine
+	var due int64
+	for _, l := range expected.Lines {
+		if l.ChargeID == manual.Charge.ID() {
+			line = l
+		}
+		if l.Due {
+			due += l.TotalCents
+		}
+	}
+	if line.TotalCents != 5000 || !line.Due {
+		t.Fatalf("the hand-typed surcharge's line = %+v, want 50 due", line)
+	}
+	if due != expected.AmountCents {
+		t.Errorf("due lines add up to %d, expected amount is %d", due, expected.AmountCents)
+	}
+
+	got, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 5000, Method: domain.MethodCash,
+		PaidAt: day, ChargeIDs: []string{manual.Charge.ID()},
+	})
+	if err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+	if got.UnallocatedCents != 0 || len(got.Allocations) != 1 {
+		t.Errorf("allocations %+v, credit %d; want the surcharge paid", got.Allocations, got.UnallocatedCents)
+	}
+}
+
+// A surcharge never earns a surcharge of its own — not even one typed by hand
+// that is paid late: that is how a fixed fee turns into compound interest.
+func TestAHandTypedSurchargeEarnsNoSurcharge(t *testing.T) {
+	f := depositFixture(t)
+	lateFee := f.repo.conceptIDOfKind(domain.KindLateFee)
+	manual, err := f.svc.CreateCharge(context.Background(), usecase.CreateChargeInput{
+		StudentID: testStudent, CycleID: testCycle, ConceptID: lateFee,
+		DueDate: "2026-09-01", AmountCentsOverride: 5000, DescriptionOverride: "Recargo por cheque devuelto",
+	})
+	if err != nil {
+		t.Fatalf("CreateCharge: %v", err)
+	}
+	got, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 100000, Method: domain.MethodCash,
+		PaidAt: time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), ChargeIDs: []string{manual.Charge.ID()},
+	})
+	if err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+	if len(got.Surcharges) != 0 {
+		t.Errorf("materialised %d surcharges on a surcharge", len(got.Surcharges))
+	}
+	if got.UnallocatedCents != 95000 {
+		t.Errorf("credit = %d, want 950 left after the 50 surcharge", got.UnallocatedCents)
+	}
+}
