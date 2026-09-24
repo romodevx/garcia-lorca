@@ -59,6 +59,9 @@ type GroupRef struct {
 	// something else.
 	Name         string
 	GradeLevelID string
+	// Capacity is the seats the group holds; a transfer into it is refused
+	// when they are taken.
+	Capacity int
 }
 
 // TermRef is the students-owned view of a config term (its identity and cycle).
@@ -81,6 +84,18 @@ type CatalogValidator interface {
 	// The cycle is resolved by config, not passed in: a caller choosing the year
 	// a child joins is a caller who can put them in the wrong one.
 	GroupsOfGrade(ctx context.Context, gradeLevelID string) ([]GroupSeats, error)
+	// LevelOfGrade returns the config level a grade belongs to, so a pupil is
+	// never placed in another level's group. A missing grade is
+	// glerrors.ErrNotFound.
+	LevelOfGrade(ctx context.Context, gradeLevelID string) (string, error)
+}
+
+// TransferCommand is one transfer: which enrollment, the group it moves to
+// (with its name and seats), and the history row that records why.
+type TransferCommand struct {
+	EnrollmentID string
+	To           GroupSeats
+	Transfer     domain.EnrollmentTransfer
 }
 
 // GroupSeats is a group and how many pupils it may hold. Occupancy is NOT here:
@@ -120,9 +135,11 @@ type EnrollmentRepository interface {
 	// ListEnrollments returns enrollments matching the given filters; an empty
 	// string skips that filter.
 	ListEnrollments(ctx context.Context, studentID, cycleID, groupID string) ([]domain.Enrollment, error)
-	// TransferEnrollment writes the transfer history row and updates the
-	// enrollment's group in ONE transaction.
-	TransferEnrollment(ctx context.Context, enrollmentID, toGroupID string, transfer domain.EnrollmentTransfer) error
+	// TransferEnrollment moves an enrollment in ONE transaction: it reserves the
+	// target group and refuses it at capacity (KindConflict), writes the
+	// transfer history row, updates the enrollment's group, and names the new
+	// group on the pupil's file.
+	TransferEnrollment(ctx context.Context, cmd TransferCommand) error
 	// SetEnrollmentStatus updates an enrollment's status (e.g. to withdrawn).
 	SetEnrollmentStatus(ctx context.Context, id string, status domain.EnrollmentStatus) error
 }

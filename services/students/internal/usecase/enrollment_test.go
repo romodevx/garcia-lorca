@@ -24,11 +24,12 @@ type (
 // (student, cycle) uniqueness the real table's UNIQUE constraint owns, and
 // records transfers so tests can assert the tx contract (history + group update).
 type fakeEnrollRepo struct {
-	byID       map[string]domain.Enrollment
-	uniq       map[string]bool // tenant|student|cycle
-	transfers  []domain.EnrollmentTransfer
-	createErr  error
-	createSeen []domain.Enrollment
+	byID         map[string]domain.Enrollment
+	uniq         map[string]bool // tenant|student|cycle
+	transfers    []domain.EnrollmentTransfer
+	lastTransfer ports.TransferCommand
+	createErr    error
+	createSeen   []domain.Enrollment
 }
 
 // CreateEnrollmentInFirstFreeGroup models what the transaction does: it counts
@@ -105,13 +106,25 @@ func (r *fakeEnrollRepo) ListEnrollments(_ context.Context, studentID, cycleID, 
 	return out, nil
 }
 
-func (r *fakeEnrollRepo) TransferEnrollment(_ context.Context, enrollmentID, toGroupID string, transfer domain.EnrollmentTransfer) error {
-	cur, ok := r.byID[enrollmentID]
+func (r *fakeEnrollRepo) TransferEnrollment(_ context.Context, cmd ports.TransferCommand) error {
+	cur, ok := r.byID[cmd.EnrollmentID]
 	if !ok {
 		return glerrors.ErrNotFound
 	}
-	// Mirror the single-tx contract: record history AND move the group.
-	r.transfers = append(r.transfers, transfer)
+	// Mirror the transaction: a group at capacity refuses the move.
+	taken := 0
+	for _, e := range r.byID {
+		if e.GroupID() == cmd.To.ID && e.Status() == domain.EnrollmentStatusActive {
+			taken++
+		}
+	}
+	if cmd.To.Capacity <= 0 || taken >= cmd.To.Capacity {
+		return glerrors.New(glerrors.KindConflict, "full")
+	}
+	// Record history, move the group AND name it on the file — one tx.
+	r.transfers = append(r.transfers, cmd.Transfer)
+	r.lastTransfer = cmd
+	enrollmentID, toGroupID := cmd.EnrollmentID, cmd.To.ID
 	moved, err := domain.NewEnrollment(cur.ID(), cur.TenantID(), cur.StudentID(), cur.CycleID(),
 		toGroupID, cur.TermID(), cur.Status(), cur.EnrolledAt())
 	if err != nil {
@@ -141,14 +154,30 @@ type fakeCatalog struct {
 	groups      map[string]groupRef
 	terms       map[string]termRef
 	gradeGroups map[string][]ports.GroupSeats
+	// gradeLevels maps a grade to the config level it belongs to.
+	gradeLevels map[string]string
 }
+
+// Config level ids the fixtures use: seedStudent places pupils in primaria.
+const (
+	primariaLevel = "e1000000-0000-0000-0000-000000000001"
+	kinderLevel   = "e1000000-0000-0000-0000-000000000009"
+)
 
 func newCatalog() *fakeCatalog {
 	return &fakeCatalog{
 		groups:      map[string]groupRef{},
 		terms:       map[string]termRef{},
 		gradeGroups: map[string][]ports.GroupSeats{},
+		gradeLevels: map[string]string{"gl-1": primariaLevel, "": primariaLevel, "gl-k": kinderLevel},
 	}
+}
+
+func (c *fakeCatalog) LevelOfGrade(_ context.Context, gradeLevelID string) (string, error) {
+	if l, ok := c.gradeLevels[gradeLevelID]; ok {
+		return l, nil
+	}
+	return "", glerrors.ErrNotFound
 }
 
 func (c *fakeCatalog) GroupByID(_ context.Context, id string) (groupRef, error) {
@@ -306,7 +335,7 @@ func enrolledStudent(t *testing.T, svc *usecase.EnrollmentService, students *fak
 func TestTransferHappyWritesHistoryAndMovesGroup(t *testing.T) {
 	svc, students, enrolls, catalog, _ := newEnrollService(t)
 	e := enrolledStudent(t, svc, students, catalog)
-	catalog.groups["grp-2"] = groupRef{ID: "grp-2", CycleID: "cyc-99"}
+	catalog.groups["grp-2"] = groupRef{ID: "grp-2", CycleID: "cyc-99", Capacity: 30}
 
 	updated, err := svc.Transfer(context.Background(), e.ID(), "grp-2", "seat rebalancing")
 	if err != nil {
@@ -327,10 +356,91 @@ func TestTransferHappyWritesHistoryAndMovesGroup(t *testing.T) {
 	}
 }
 
+// The pupil's file follows a transfer: after moving to 1° B it says 1° B, the
+// same guarantee both enrolment paths already give.
+func TestTransferRecordsTheNewGroupOnTheFile(t *testing.T) {
+	svc, students, enrolls, catalog, _ := newEnrollService(t)
+	e := enrolledStudent(t, svc, students, catalog)
+	catalog.groups["grp-2"] = groupRef{ID: "grp-2", CycleID: "cyc-99", Name: "1° B", GradeLevelID: "gl-1", Capacity: 30}
+
+	if _, err := svc.Transfer(context.Background(), e.ID(), "grp-2", "cambio de turno"); err != nil {
+		t.Fatalf("Transfer: %v", err)
+	}
+	// The repository writes the file in the SAME transaction as the move.
+	if cmd := enrolls.lastTransfer; cmd.EnrollmentID != e.ID() || cmd.To.Name != "1° B" {
+		t.Errorf("transfer command = enrollment %q group name %q", cmd.EnrollmentID, cmd.To.Name)
+	}
+}
+
+// A transfer is a placement: a full group refuses it, as the by-grade path does.
+func TestTransferIntoAFullGroupIsConflict(t *testing.T) {
+	svc, students, enrolls, catalog, _ := newEnrollService(t)
+	e := enrolledStudent(t, svc, students, catalog)
+	catalog.groups["grp-2"] = groupRef{ID: "grp-2", CycleID: "cyc-99", GradeLevelID: "gl-1", Capacity: 1}
+	occupant, _ := domain.NewEnrollment("enr-x", tenant, "stu-x", "cyc-99", "grp-2", "", domain.EnrollmentStatusActive, time.Now())
+	enrolls.byID["enr-x"] = occupant
+
+	if _, err := svc.Transfer(context.Background(), e.ID(), "grp-2", "x"); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Fatalf("want KindConflict, got %v", err)
+	}
+}
+
+// A withdrawn or rejected file is not moved around, as neither enrol path does.
+func TestTransferRefusesATerminalFile(t *testing.T) {
+	svc, students, _, catalog, _ := newEnrollService(t)
+	e := enrolledStudent(t, svc, students, catalog)
+	catalog.groups["grp-2"] = groupRef{ID: "grp-2", CycleID: "cyc-99", GradeLevelID: "gl-1", Capacity: 30}
+	withdrawn := students.byID[e.StudentID()]
+	if _, err := withdrawn.Withdraw("se fue"); err != nil {
+		t.Fatalf("Withdraw: %v", err)
+	}
+
+	if _, err := svc.Transfer(context.Background(), e.ID(), "grp-2", "x"); err == nil {
+		t.Fatal("a withdrawn pupil must not be transferred")
+	}
+}
+
+// A group belongs to one level. Placing a primaria pupil in a kínder group —
+// easy when four groups are all called "1° A" — is refused, by both paths and
+// by a transfer.
+func TestEnrollIntoAGroupOfAnotherLevelIsInvalid(t *testing.T) {
+	svc, students, enrolls, catalog, _ := newEnrollService(t)
+	seedStudent(t, students, "stu-1")
+	catalog.groups["grp-k"] = groupRef{ID: "grp-k", CycleID: "cyc-99", Name: "1° A", GradeLevelID: "gl-k"}
+
+	_, err := svc.Enroll(context.Background(), "stu-1", "grp-k", "")
+	if glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Fatalf("want KindInvalid, got %v", err)
+	}
+	if len(enrolls.createSeen) != 0 {
+		t.Error("nothing may be enrolled in another level's group")
+	}
+}
+
+func TestEnrollIntoAGradeOfAnotherLevelIsInvalid(t *testing.T) {
+	svc, students, _, catalog, _ := newEnrollService(t)
+	seedStudent(t, students, "stu-1")
+	catalog.gradeGroups["gl-k"] = []ports.GroupSeats{{ID: "grp-k", Name: "1° A", CycleID: "cyc-99", Capacity: 30}}
+
+	if _, err := svc.EnrollIntoGrade(context.Background(), "stu-1", "gl-k"); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Fatalf("want KindInvalid, got %v", err)
+	}
+}
+
+func TestTransferToAGroupOfAnotherLevelIsInvalid(t *testing.T) {
+	svc, students, _, catalog, _ := newEnrollService(t)
+	e := enrolledStudent(t, svc, students, catalog)
+	catalog.groups["grp-k"] = groupRef{ID: "grp-k", CycleID: "cyc-99", Name: "1° A", GradeLevelID: "gl-k", Capacity: 30}
+
+	if _, err := svc.Transfer(context.Background(), e.ID(), "grp-k", "x"); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Fatalf("want KindInvalid, got %v", err)
+	}
+}
+
 func TestTransferNonActiveIsInvalid(t *testing.T) {
 	svc, students, _, catalog, _ := newEnrollService(t)
 	e := enrolledStudent(t, svc, students, catalog)
-	catalog.groups["grp-2"] = groupRef{ID: "grp-2", CycleID: "cyc-99"}
+	catalog.groups["grp-2"] = groupRef{ID: "grp-2", CycleID: "cyc-99", Capacity: 30}
 	if _, err := svc.Withdraw(context.Background(), e.ID()); err != nil {
 		t.Fatalf("withdraw: %v", err)
 	}

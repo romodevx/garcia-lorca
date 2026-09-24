@@ -71,7 +71,8 @@ func (r *fakeEnrollmentRepo) ListEnrollments(_ context.Context, studentID, cycle
 	return out, nil
 }
 
-func (r *fakeEnrollmentRepo) TransferEnrollment(_ context.Context, enrollmentID, toGroupID string, _ domain.EnrollmentTransfer) error {
+func (r *fakeEnrollmentRepo) TransferEnrollment(_ context.Context, cmd ports.TransferCommand) error {
+	enrollmentID, toGroupID := cmd.EnrollmentID, cmd.To.ID
 	cur, ok := r.byID[enrollmentID]
 	if !ok {
 		return glerrors.ErrNotFound
@@ -322,6 +323,11 @@ func (f *fakeEnrollmentRepo) CreateEnrollmentInFirstFreeGroup(
 		return ports.GroupSeats{}, err
 	}
 	return groups[0], nil
+}
+
+// LevelOfGrade places every grade in the level the handler tests' pupils are in.
+func (f *fakeCatalogValidator) LevelOfGrade(_ context.Context, _ string) (string, error) {
+	return "e1000000-0000-0000-0000-000000000001", nil
 }
 
 func (f *fakeCatalogValidator) GroupsOfGrade(_ context.Context, _ string) ([]ports.GroupSeats, error) {

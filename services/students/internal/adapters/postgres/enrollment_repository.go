@@ -96,14 +96,35 @@ func (r *Repository) ListEnrollments(ctx context.Context, studentID, cycleID, gr
 // history and the group change persist, or neither does. RLS binds the tenant for
 // the whole transaction, so a caller cannot transfer another tenant's enrollment
 // (the UPDATE matches zero rows → KindNotFound → rollback).
-func (r *Repository) TransferEnrollment(ctx context.Context, enrollmentID, toGroupID string, transfer domain.EnrollmentTransfer) error {
-	model := transferFromDomain(transfer)
+func (r *Repository) TransferEnrollment(ctx context.Context, cmd ports.TransferCommand) error {
+	model := transferFromDomain(cmd.Transfer)
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		// Seats first, under the same per-group lock the by-grade path takes, so
+		// two moves into the last seat cannot both win.
+		if err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext(?))`, cmd.To.ID).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "reserving the group", err)
+		}
+		var taken int64
+		if err := tx.Model(&enrollmentModel{}).
+			Where("group_id = ? AND status = ?", cmd.To.ID, domain.EnrollmentStatusActive.String()).
+			Count(&taken).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "counting the group", err)
+		}
+		// A group nobody sized is refused as the by-grade path refuses it —
+		// but saying so, so the director fixes the size instead of hunting
+		// for seats that were never counted.
+		if cmd.To.Capacity <= 0 {
+			return glerrors.New(glerrors.KindConflict, "ese grupo no tiene cupo definido: fíjalo en Configuración")
+		}
+		if taken >= int64(cmd.To.Capacity) {
+			return glerrors.New(glerrors.KindConflict, "ese grupo ya no tiene lugares")
+		}
+
 		if err := tx.Create(&model).Error; err != nil {
 			return translateTransferWriteErr(err)
 		}
-		res := tx.Model(&enrollmentModel{}).Where("id = ?", enrollmentID).Updates(map[string]any{
-			"group_id":   toGroupID,
+		res := tx.Model(&enrollmentModel{}).Where("id = ?", cmd.EnrollmentID).Updates(map[string]any{
+			"group_id":   cmd.To.ID,
 			"updated_at": gorm.Expr("now()"),
 		})
 		if res.Error != nil {
@@ -113,6 +134,14 @@ func (r *Repository) TransferEnrollment(ctx context.Context, enrollmentID, toGro
 			// No visible enrollment with this id in the bound tenant — treat as
 			// not found and roll the transfer insert back.
 			return glerrors.ErrNotFound
+		}
+		// The pupil's file names the group they are now in, in this same
+		// transaction: a move can never leave it naming the one they left.
+		file := tx.Exec(`UPDATE students SET grade_group = ?, updated_at = now()
+		                  WHERE id = (SELECT student_id FROM enrollments WHERE id = ?)`,
+			cmd.To.Name, cmd.EnrollmentID)
+		if file.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "recording the new group on the file", file.Error)
 		}
 		return nil
 	})

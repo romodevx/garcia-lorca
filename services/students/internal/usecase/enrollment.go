@@ -70,6 +70,9 @@ func (s *EnrollmentService) Enroll(ctx context.Context, studentID, groupID, term
 		return domain.Enrollment{}, err
 	}
 	cycleID := grp.CycleID // DERIVED from the group — never a client argument.
+	if err := s.requireSameLevel(ctx, student, grp.GradeLevelID); err != nil {
+		return domain.Enrollment{}, err
+	}
 
 	if termID != "" {
 		term, err := s.catalog.TermByID(ctx, termID)
@@ -224,16 +227,57 @@ func (s *EnrollmentService) Transfer(ctx context.Context, enrollmentID, toGroupI
 	if toGroupID == enr.GroupID() {
 		return domain.Enrollment{}, glerrors.New(glerrors.KindInvalid, "already in that group")
 	}
+	student, err := s.students.FindByID(ctx, enr.StudentID())
+	if err != nil {
+		return domain.Enrollment{}, err
+	}
+	// A withdrawn or rejected file is not moved around: neither enrol path
+	// places one, and a transfer is a placement.
+	if err := refusePlacementIfTerminal(student); err != nil {
+		return domain.Enrollment{}, err
+	}
+	if err := s.requireSameLevel(ctx, student, toGrp.GradeLevelID); err != nil {
+		return domain.Enrollment{}, err
+	}
 
 	transfer, err := domain.NewEnrollmentTransfer(s.newID(), s.tenant, enrollmentID,
 		enr.GroupID(), toGroupID, reason, s.now())
 	if err != nil {
 		return domain.Enrollment{}, err
 	}
-	if err := s.enrollments.TransferEnrollment(ctx, enrollmentID, toGroupID, transfer); err != nil {
+	// One transaction: seats, history, the move and the pupil's file together,
+	// so a failure can never leave the file naming the group they left.
+	if err := s.enrollments.TransferEnrollment(ctx, ports.TransferCommand{
+		EnrollmentID: enrollmentID,
+		To:           ports.GroupSeats{ID: toGrp.ID, Name: toGrp.Name, CycleID: toGrp.CycleID, Capacity: toGrp.Capacity},
+		Transfer:     transfer,
+	}); err != nil {
 		return domain.Enrollment{}, err
 	}
 	return s.enrollments.GetEnrollment(ctx, enrollmentID)
+}
+
+// requireSameLevel refuses a grade outside the pupil's level. Four groups can
+// all be called "1° A" — one per level — and a pupil placed in the wrong one is
+// billed, graded and listed as another level's. A legacy pupil with no level id
+// (migration 0007 could not link it) has nothing to compare against and passes.
+func (s *EnrollmentService) requireSameLevel(ctx context.Context, student *domain.Student, gradeLevelID string) error {
+	want := student.Level().ID()
+	if want == "" {
+		return nil
+	}
+	got, err := s.catalog.LevelOfGrade(ctx, gradeLevelID)
+	if err != nil {
+		if glerrors.KindOf(err) == glerrors.KindNotFound {
+			return glerrors.New(glerrors.KindInvalid, "ese grado no existe")
+		}
+		return err
+	}
+	if got != want {
+		return glerrors.New(glerrors.KindInvalid,
+			"ese grupo es de otro nivel: el alumno está en "+student.Level().Name())
+	}
+	return nil
 }
 
 // Withdraw terminates an active enrollment. Withdrawing a non-active enrollment
@@ -292,6 +336,9 @@ func (s *EnrollmentService) EnrollIntoGrade(ctx context.Context, studentID, grad
 		return Placement{}, err
 	}
 
+	if err := s.requireSameLevel(ctx, student, gradeLevelID); err != nil {
+		return Placement{}, err
+	}
 	groups, err := s.catalog.GroupsOfGrade(ctx, gradeLevelID)
 	if err != nil {
 		return Placement{}, err

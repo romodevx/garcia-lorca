@@ -363,7 +363,7 @@ func TestEnrollmentRoundTripAndTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new transfer: %v", err)
 	}
-	if err := repo.TransferEnrollment(ctx, enrID, groupTwo, transfer); err != nil {
+	if err := repo.TransferEnrollment(ctx, transferInto(enrID, groupTwo, transfer)); err != nil {
 		t.Fatalf("TransferEnrollment: %v", err)
 	}
 
@@ -402,7 +402,7 @@ func TestTransferAtomicRollsBackOnMissingEnrollment(t *testing.T) {
 		t.Fatalf("new transfer: %v", err)
 	}
 	// The enrollment FK does not exist → the insert itself is rejected as Invalid.
-	if err := repo.TransferEnrollment(ctx, ghostEnrollment, groupTwo, transfer); glerrors.KindOf(err) != glerrors.KindInvalid {
+	if err := repo.TransferEnrollment(ctx, transferInto(ghostEnrollment, groupTwo, transfer)); glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Fatalf("transfer of missing enrollment: want KindInvalid, got %v", err)
 	}
 	if n := countTransfers(t, tenantA, ghostEnrollment); n != 0 {
@@ -474,7 +474,7 @@ func TestRLSIsolatesTransfers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new transfer: %v", err)
 	}
-	if err := appRepo(t, tenantA).TransferEnrollment(ctx, enrA, groupTwo, transfer); err != nil {
+	if err := appRepo(t, tenantA).TransferEnrollment(ctx, transferInto(enrA, groupTwo, transfer)); err != nil {
 		t.Fatalf("seed transfer A: %v", err)
 	}
 
@@ -493,10 +493,79 @@ func TestRLSIsolatesTransfers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new ghost transfer: %v", err)
 	}
-	if err := appRepo(t, tenantB).TransferEnrollment(ctx, enrA, groupThree, ghost); err == nil {
+	if err := appRepo(t, tenantB).TransferEnrollment(ctx, transferInto(enrA, groupThree, ghost)); err == nil {
 		t.Error("tenant B transferred tenant A's enrollment (RLS write breach)")
 	}
 	if n := countTransfers(t, tenantA, enrA); n != 1 {
 		t.Errorf("tenant B's write leaked a transfer row into tenant A: now %d (want 1)", n)
+	}
+}
+
+// transferInto is a transfer command into a roomy group, for the tests whose
+// point is history, isolation or rollback rather than seats.
+func transferInto(enrollmentID, groupID string, transfer domain.EnrollmentTransfer) ports.TransferCommand {
+	return ports.TransferCommand{
+		EnrollmentID: enrollmentID,
+		To:           ports.GroupSeats{ID: groupID, Name: "2° B", Capacity: 30},
+		Transfer:     transfer,
+	}
+}
+
+// A transfer writes the new group on the pupil's file in the same transaction,
+// and a group at capacity refuses it with nothing written.
+func TestTransferNamesTheGroupOnTheFileAndRespectsSeats(t *testing.T) {
+	ctx := context.Background()
+	repo := appRepo(t, tenantA)
+	studentID := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-0000000007c1", "HEGC050312MDFRNN11")
+	occupantID := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-0000000007c2", "HEGD050312MDFRNN12")
+	const enrID, occupantEnr = "e0000000-0000-0000-0000-0000000007c1", "e0000000-0000-0000-0000-0000000007c2"
+	if err := repo.CreateEnrollment(ctx, enrollment(t, enrID, tenantA, studentID, groupOne)); err != nil {
+		t.Fatalf("seed enrollment: %v", err)
+	}
+	if err := repo.CreateEnrollment(ctx, enrollment(t, occupantEnr, tenantA, occupantID, groupThree)); err != nil {
+		t.Fatalf("seed occupant: %v", err)
+	}
+
+	full, _ := domain.NewEnrollmentTransfer("70000000-0000-0000-0000-0000000000c1", tenantA, enrID, groupOne, groupThree, "sin lugar", enrollClock)
+	err := repo.TransferEnrollment(ctx, ports.TransferCommand{
+		EnrollmentID: enrID, To: ports.GroupSeats{ID: groupThree, Name: "3° C", Capacity: 1}, Transfer: full,
+	})
+	if glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Fatalf("a full group: want KindConflict, got %v", err)
+	}
+	if n := countTransfers(t, tenantA, enrID); n != 0 {
+		t.Errorf("a refused transfer left %d history rows", n)
+	}
+
+	ok, _ := domain.NewEnrollmentTransfer("70000000-0000-0000-0000-0000000000c2", tenantA, enrID, groupOne, groupTwo, "cambio de turno", enrollClock)
+	if err := repo.TransferEnrollment(ctx, ports.TransferCommand{
+		EnrollmentID: enrID, To: ports.GroupSeats{ID: groupTwo, Name: "2° B", Capacity: 30}, Transfer: ok,
+	}); err != nil {
+		t.Fatalf("TransferEnrollment: %v", err)
+	}
+	got, err := repo.FindByID(ctx, studentID)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if got.GradeGroup() != "2° B" {
+		t.Errorf("the file says %q after the transfer, want 2° B", got.GradeGroup())
+	}
+}
+
+// A group whose size was never set is not "full": it says so, and where.
+func TestTransferIntoAnUnsizedGroupSaysSo(t *testing.T) {
+	ctx := context.Background()
+	repo := appRepo(t, tenantA)
+	studentID := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-0000000007d1", "HEGE050312MDFRNN13")
+	const enrID = "e0000000-0000-0000-0000-0000000007d1"
+	if err := repo.CreateEnrollment(ctx, enrollment(t, enrID, tenantA, studentID, groupOne)); err != nil {
+		t.Fatalf("seed enrollment: %v", err)
+	}
+	tr, _ := domain.NewEnrollmentTransfer("70000000-0000-0000-0000-0000000007d1", tenantA, enrID, groupOne, groupTwo, "x", enrollClock)
+	err := repo.TransferEnrollment(ctx, ports.TransferCommand{
+		EnrollmentID: enrID, To: ports.GroupSeats{ID: groupTwo, Name: "2° B", Capacity: 0}, Transfer: tr,
+	})
+	if glerrors.KindOf(err) != glerrors.KindConflict || !strings.Contains(glerrors.SafeMessage(err), "cupo definido") {
+		t.Fatalf("want a KindConflict naming the unset size, got %v", err)
 	}
 }
