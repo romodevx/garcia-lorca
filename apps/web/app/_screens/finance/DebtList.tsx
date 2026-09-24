@@ -26,7 +26,9 @@ export function DebtList({ lines, chosen, selectedCents, onToggle }: DebtListPro
   }
   const total = lines.reduce((sum, l) => sum + l.totalCents, 0);
   return (
-    <div style={{ borderRadius: "var(--r-md)", border: "1px solid var(--border)", overflow: "hidden" }}>
+    // flexShrink 0: the drawer's body is a column of fixed height, and a box
+    // with overflow hidden shrinks in it to nothing (it measured 2 px).
+    <div style={{ borderRadius: "var(--r-md)", border: "1px solid var(--border)", overflow: "hidden", flexShrink: 0 }}>
       <div style={{ padding: "10px 16px", background: "var(--surface-2)", fontSize: 13.5, fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--font-display)" }}>
         Adeudo
       </div>
