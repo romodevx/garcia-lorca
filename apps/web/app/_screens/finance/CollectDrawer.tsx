@@ -16,6 +16,7 @@ import {
   type Charge,
   type DepositResult,
   type Expected,
+  type ExpectedLine,
   type CardType,
   type Payment,
   type PaymentMethod,
@@ -75,6 +76,23 @@ export interface CollectDrawerProps {
 const FUTURE_PAYMENT = "La fecha de pago no puede ser futura.";
 const MISSING_PAYMENT_DATE = "Falta la fecha de pago.";
 
+/** The concepts a quote asks for: those due that day. */
+function dueOf(lines: readonly ExpectedLine[]): ReadonlySet<string> {
+  return new Set(lines.filter((l) => l.due).map((l) => l.chargeId));
+}
+
+/** What the chosen concepts add up to — the one sum the list, the amount and the difference share. */
+export function selectedTotal(lines: readonly ExpectedLine[], chosen: ReadonlySet<string>): number {
+  return lines.reduce((sum, l) => sum + (chosen.has(l.chargeId) ? l.totalCents : 0), 0);
+}
+
+/** The ids to send, oldest first, or undefined when the choice is what is due. */
+function choiceOf(lines: readonly ExpectedLine[], chosen: ReadonlySet<string>): string[] | undefined {
+  const due = dueOf(lines);
+  const same = due.size === chosen.size && [...chosen].every((id) => due.has(id));
+  return same ? undefined : lines.filter((l) => chosen.has(l.chargeId)).map((l) => l.chargeId);
+}
+
 /** What is wrong with a payment date, if anything. */
 export function paymentDateError(paidOn: string, day: string): string | undefined {
   if (paidOn === "") return MISSING_PAYMENT_DATE;
@@ -110,10 +128,11 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
   // The day the quote ON SCREEN is for ("" = today). The label follows the
   // quote, not the field: a date that brought no quote does not relabel it.
   const [expectedFor, setExpectedFor] = useState("");
-  // Concepts the cashier took off the debt list (task 8). Everything starts
-  // chosen — the rule as it always was, the oldest debt first — and a choice
-  // is sent only when something was left out.
-  const [unchosen, setUnchosen] = useState<ReadonlySet<string>>(new Set());
+  // The concepts the money pays (task 8). Each new quote starts with what is
+  // due — what the counter asks for today, the rule as it always was — and a
+  // choice is sent only when it differs from that. A month not yet due can be
+  // chosen: that is paying ahead.
+  const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set());
   const [owed, setOwed] = useState<number | null>(null);
   const [credit, setCredit] = useState(0);
   const [expected, setExpected] = useState<Expected | null>(null);
@@ -136,20 +155,20 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
   const name = `${student.firstName} ${student.lastName}`;
   const cents = pesosToCents(amount);
   const lines = expected?.lines ?? [];
-  const chosenLines = lines.filter((l) => !unchosen.has(l.chargeId));
-  const choice = lines.length > 0 && chosenLines.length < lines.length ? chosenLines.map((l) => l.chargeId) : undefined;
+  const choice = choiceOf(lines, chosen);
   const choiceKey = choice?.join(",") ?? "";
-  const selectedCents = chosenLines.reduce((sum, l) => sum + l.totalCents, 0);
-  // With a choice, the difference is measured against what was chosen.
-  const target = choice !== undefined ? selectedCents : (expected?.amountCents ?? 0);
+  const selectedCents = selectedTotal(lines, chosen);
+  // The difference is measured against what was chosen — which, by default, is
+  // exactly what is due.
+  const target = lines.length > 0 ? selectedCents : (expected?.amountCents ?? 0);
   const toggle = (chargeId: string): void => {
-    const next = new Set(unchosen);
+    const next = new Set(chosen);
     if (next.has(chargeId)) next.delete(chargeId);
     else next.add(chargeId);
-    setUnchosen(next);
+    setChosen(next);
     // The amount follows the choice until the cashier types another one.
     if (!amountEdited.current) {
-      const cents = lines.filter((l) => !next.has(l.chargeId)).reduce((sum, l) => sum + l.totalCents, 0);
+      const cents = selectedTotal(lines, next);
       prefilledCents.current = cents;
       setAmount(centsToPesosInput(cents));
     }
@@ -187,6 +206,8 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
         }
         setExpected(e);
         setExpectedFor(askedFor);
+        // A new quote is a new list: the choice starts over at what is due.
+        setChosen(dueOf(e.lines));
         // Pre-filled with what should be paid: the common case is a family
         // paying exactly that, and retyping it is a chance to mistype it.
         if (e.amountCents > 0 && !amountEdited.current) {
@@ -299,7 +320,7 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
                   )}
                 </div>
 
-                <DebtList lines={lines} unchosen={unchosen} onToggle={toggle} />
+                <DebtList lines={lines} chosen={chosen} selectedCents={selectedCents} onToggle={toggle} />
 
                 <MoneyField
                   label="Monto recibido"

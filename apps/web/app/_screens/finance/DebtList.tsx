@@ -8,22 +8,23 @@ import type { ExpectedLine } from "../../finance/api";
 
 export interface DebtListProps {
   lines: readonly ExpectedLine[];
-  /** Charges the cashier took off the list; everything else is chosen. */
-  unchosen: ReadonlySet<string>;
+  /** The charges the money pays. */
+  chosen: ReadonlySet<string>;
+  /** Their total, computed once by the drawer (selectedTotal). */
+  selectedCents: number;
   onToggle: (chargeId: string) => void;
 }
 
 /**
  * What the family owes, concept by concept (task 8): the cashier sees what the
- * money is paying and can leave a concept out. Everything starts chosen, which
- * is the rule as it always was — the oldest debt first.
+ * money is paying, can leave a concept out, or choose a month not yet due to
+ * pay ahead.
  */
-export function DebtList({ lines, unchosen, onToggle }: DebtListProps): ReactElement | null {
+export function DebtList({ lines, chosen, selectedCents, onToggle }: DebtListProps): ReactElement | null {
   if (lines.length === 0) {
     return null;
   }
   const total = lines.reduce((sum, l) => sum + l.totalCents, 0);
-  const selected = lines.reduce((sum, l) => sum + (unchosen.has(l.chargeId) ? 0 : l.totalCents), 0);
   return (
     <div style={{ borderRadius: "var(--r-md)", border: "1px solid var(--border)", overflow: "hidden" }}>
       <div style={{ padding: "10px 16px", background: "var(--surface-2)", fontSize: 13.5, fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--font-display)" }}>
@@ -37,7 +38,7 @@ export function DebtList({ lines, unchosen, onToggle }: DebtListProps): ReactEle
         >
           <input
             type="checkbox"
-            checked={!unchosen.has(l.chargeId)}
+            checked={chosen.has(l.chargeId)}
             onChange={() => onToggle(l.chargeId)}
             aria-label={l.description}
             style={{ width: 20, height: 20, accentColor: "var(--forest)", flexShrink: 0 }}
@@ -60,7 +61,7 @@ export function DebtList({ lines, unchosen, onToggle }: DebtListProps): ReactEle
         </span>
         <span style={{ display: "flex", justifyContent: "space-between" }}>
           <span style={{ color: "var(--text-muted)" }}>Total seleccionado</span>
-          <b data-testid="debt-selected">{formatCents(selected)}</b>
+          <b data-testid="debt-selected">{formatCents(selectedCents)}</b>
         </span>
       </div>
     </div>
