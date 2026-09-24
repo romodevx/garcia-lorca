@@ -3,6 +3,7 @@ package domain
 import (
 	"strings"
 
+	"github.com/garcia-lorca/pkg/email"
 	glerrors "github.com/garcia-lorca/pkg/errors"
 )
 
@@ -85,6 +86,13 @@ func NewContact(id, tenantID, studentID string, relationship Relationship, perso
 	if strings.TrimSpace(person.FullName) == "" {
 		return GuardianLink{}, glerrors.New(glerrors.KindInvalid, "a contact without an account needs a name")
 	}
+	if address := email.Normalize(person.Email); address != "" {
+		// Checked here, when the office types it, rather than weeks later when
+		// the office grants app access and iam refuses the address.
+		if err := email.Validate(address); err != nil {
+			return GuardianLink{}, err
+		}
+	}
 	link, err := newLink(id, tenantID, studentID, relationship)
 	if err != nil {
 		return GuardianLink{}, err
@@ -100,7 +108,7 @@ func (l GuardianLink) WithPerson(person ContactPerson) GuardianLink {
 	l.person = ContactPerson{
 		FullName: strings.TrimSpace(person.FullName),
 		Phone:    strings.TrimSpace(person.Phone),
-		Email:    strings.ToLower(strings.TrimSpace(person.Email)),
+		Email:    email.Normalize(person.Email),
 	}
 	return l
 }

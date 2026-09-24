@@ -20,6 +20,8 @@ var _ ports.EnrollmentRepository = (*Repository)(nil)
 const (
 	foreignKeyViolation = "23503"
 	checkViolation      = "23514"
+	// contactEmailNormalizedCheck is the CHECK migrations/students/0006 adds.
+	contactEmailNormalizedCheck = "guardian_students_email_normalized_ck"
 )
 
 // CreateEnrollment inserts a new enrollment. A duplicate (student, cycle) per

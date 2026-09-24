@@ -22,6 +22,11 @@ const (
 	uniqueViolation     = "23505"
 	foreignKeyViolation = "23503"
 	checkViolation      = "23514"
+	// emailNormalizedCheck is the CHECK the email migration adds. It is the one
+	// CHECK an API client can trip (a raw email that bypassed the domain, e.g.
+	// against the previous revision mid-deploy), so it alone maps to KindInvalid;
+	// any other CHECK means the server is inconsistent and stays KindInternal.
+	emailNormalizedCheck = "users_email_normalized_ck"
 )
 
 // Compile-time proof the adapters satisfy their ports. UserRepository and
@@ -429,10 +434,19 @@ func translateCreateErr(err error, internalMsg, conflictMsg string) error {
 	case foreignKeyViolation:
 		return glerrors.Wrap(glerrors.KindInvalid, "referenced row does not exist", err)
 	case checkViolation:
-		return glerrors.Wrap(glerrors.KindInvalid, "a value is not allowed", err)
+		if isEmailCheck(err) {
+			return glerrors.Wrap(glerrors.KindInvalid, "email is not in its normalized form", err)
+		}
+		return glerrors.Wrap(glerrors.KindInternal, internalMsg, err)
 	default:
 		return glerrors.Wrap(glerrors.KindInternal, internalMsg, err)
 	}
+}
+
+// isEmailCheck reports whether err is the email-normalization CHECK violation.
+func isEmailCheck(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.ConstraintName == emailNormalizedCheck
 }
 
 // pgCode extracts the SQLSTATE code from a driver error, or "" if it is not one.

@@ -112,6 +112,7 @@ export function EmailField(props: BaseFieldProps): ReactElement {
           }}
           onCompositionEnd={(e: CompositionEvent<HTMLInputElement>) => {
             onChange(lowercaseKeepingCaret(e.currentTarget, false));
+            onClearError?.();
           }}
           style={inputStyle(error !== undefined)}
         />

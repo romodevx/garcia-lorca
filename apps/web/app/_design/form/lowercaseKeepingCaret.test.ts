@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { lowercaseKeepingCaret } from "./lowercaseKeepingCaret";
 
@@ -7,6 +7,7 @@ function inputWith(value: string, caret: number): HTMLInputElement {
   input.type = "text";
   document.body.append(input);
   input.value = value;
+  input.focus();
   input.setSelectionRange(caret, caret);
   return input;
 }
@@ -33,5 +34,18 @@ describe("lowercaseKeepingCaret", () => {
     const input = inputWith("Ana", 3);
     expect(lowercaseKeepingCaret(input, true)).toBe("Ana");
     expect(input.value).toBe("Ana");
+  });
+
+  it("does not touch the selection of a field that is not focused", () => {
+    // A password manager autofills the email while focus is on the password:
+    // setting a selection there can pull the caret (or focus) back to it.
+    const input = inputWith("Director@X.mx", 0);
+    const other = document.createElement("input");
+    document.body.append(other);
+    other.focus();
+    const spy = vi.spyOn(input, "setSelectionRange");
+    expect(lowercaseKeepingCaret(input, false)).toBe("director@x.mx");
+    expect(spy).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(other);
   });
 });

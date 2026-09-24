@@ -118,6 +118,15 @@ describe("EmailField", () => {
     expect(onChange).toHaveBeenLastCalledWith("ana");
   });
 
+  it("al terminar una composición también se limpia el error del campo", () => {
+    const onClearError = vi.fn();
+    render(<EmailField label="Correo" value="" onChange={vi.fn()} error="Falta el correo" onClearError={onClearError} />);
+    const input = screen.getByLabelText<HTMLInputElement>("Correo");
+    input.value = "ana@colegio.mx";
+    fireEvent.compositionEnd(input);
+    expect(onClearError).toHaveBeenCalled();
+  });
+
   it("corregir a media dirección no revuelve el correo: el cursor se queda donde estaba", async () => {
     function Controlado(): ReactElement {
       const [v, setV] = useState("ana.ruiz@colegio.mx");

@@ -5,7 +5,6 @@ package postgres_test
 import (
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 
@@ -34,6 +33,7 @@ func migrateUpTo(t *testing.T, name, target string) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open %s: %v", name, err)
 	}
+	t.Cleanup(func() { dropDatabase(t, admin, db, name) })
 	for _, file := range orderedMigrations(t) {
 		if file >= target {
 			break
@@ -43,19 +43,34 @@ func migrateUpTo(t *testing.T, name, target string) *gorm.DB {
 	return db
 }
 
+// dropDatabase closes the throwaway database's pool and drops it, so a run
+// leaves nothing behind in the container and can be repeated (-count=N).
+func dropDatabase(t *testing.T, admin, db *gorm.DB, name string) {
+	t.Helper()
+	closePool(t, db)
+	if err := admin.Exec("DROP DATABASE IF EXISTS " + name + " WITH (FORCE)").Error; err != nil {
+		t.Errorf("drop database %s: %v", name, err)
+	}
+	closePool(t, admin)
+}
+
+func closePool(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	sqlDB, err := db.DB()
+	if err == nil {
+		err = sqlDB.Close()
+	}
+	if err != nil {
+		t.Logf("close pool: %v", err)
+	}
+}
+
 func orderedMigrations(t *testing.T) []string {
 	t.Helper()
-	entries, err := os.ReadDir(migrationsDir)
+	files, err := sqlFiles()
 	if err != nil {
-		t.Fatalf("read migrations dir: %v", err)
+		t.Fatal(err)
 	}
-	files := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
-			files = append(files, e.Name())
-		}
-	}
-	sort.Strings(files)
 	return files
 }
 
@@ -118,6 +133,9 @@ func TestMigration0018NormalizesUserEmails(t *testing.T) {
 	seedUser0018(t, db, "aaaaaaaa-0000-0000-0000-000000000002", padded("Beto@Colegio.mx"))
 	seedUser0018(t, db, "aaaaaaaa-0000-0000-0000-000000000003", "carla@colegio.mx")
 	seedUser0018(t, db, "aaaaaaaa-0000-0000-0000-000000000004", "JOSÉ@Colegio.mx")
+	// U+001F is not whitespace to Go's TrimSpace, so SQL must not strip it
+	// either: the two spellings of "normalized" must agree byte for byte.
+	seedUser0018(t, db, "aaaaaaaa-0000-0000-0000-000000000005", "Dora@Colegio.mx\x1f")
 
 	applyMigration(t, db, "0018_email_lowercase.sql")
 
@@ -127,6 +145,7 @@ func TestMigration0018NormalizesUserEmails(t *testing.T) {
 		"aaaaaaaa-0000-0000-0000-000000000003": "carla@colegio.mx",
 		// Go's strings.ToLower folds É; lower() under a C ctype would not.
 		"aaaaaaaa-0000-0000-0000-000000000004": "josé@colegio.mx",
+		"aaaaaaaa-0000-0000-0000-000000000005": "dora@colegio.mx\x1f",
 	} {
 		if got := scalar[string](t, db, "SELECT email FROM users WHERE id = ?", id); got != want {
 			t.Errorf("user %s email = %q, want %q", id, got, want)

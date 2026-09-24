@@ -5,15 +5,10 @@ package postgres_test
 import (
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 	"testing"
 
 	"gorm.io/gorm"
 )
-
-// migrationsDir is where the students migrations live.
-const migrationsDir = "../../../../../migrations/students"
 
 // schoolTenant is the tenant a data migration binds with SET LOCAL: the one
 // school this deployment serves (see migrations/iam/0017).
@@ -37,6 +32,7 @@ func migrateUpTo(t *testing.T, name, target string) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open %s: %v", name, err)
 	}
+	t.Cleanup(func() { dropDatabase(t, admin, db, name) })
 	for _, file := range orderedMigrations(t) {
 		if file >= target {
 			break
@@ -46,19 +42,34 @@ func migrateUpTo(t *testing.T, name, target string) *gorm.DB {
 	return db
 }
 
+// dropDatabase closes the throwaway database's pool and drops it, so a run
+// leaves nothing behind in the container and can be repeated (-count=N).
+func dropDatabase(t *testing.T, admin, db *gorm.DB, name string) {
+	t.Helper()
+	closePool(t, db)
+	if err := admin.Exec("DROP DATABASE IF EXISTS " + name + " WITH (FORCE)").Error; err != nil {
+		t.Errorf("drop database %s: %v", name, err)
+	}
+	closePool(t, admin)
+}
+
+func closePool(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	sqlDB, err := db.DB()
+	if err == nil {
+		err = sqlDB.Close()
+	}
+	if err != nil {
+		t.Logf("close pool: %v", err)
+	}
+}
+
 func orderedMigrations(t *testing.T) []string {
 	t.Helper()
-	entries, err := os.ReadDir(migrationsDir)
+	files, err := sqlFiles()
 	if err != nil {
-		t.Fatalf("read migrations dir: %v", err)
+		t.Fatal(err)
 	}
-	files := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
-			files = append(files, e.Name())
-		}
-	}
-	sort.Strings(files)
 	return files
 }
 

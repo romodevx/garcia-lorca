@@ -105,10 +105,13 @@ func open(dsn string) (*gorm.DB, error) {
 	return gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 }
 
-func migrate(db *gorm.DB) error {
+// sqlFiles lists the migration files in migrationsDir in lexical order (0001
+// before 0002). It is the one list both the suite schema and the
+// data-migration tests are built from.
+func sqlFiles() ([]string, error) {
 	entries, err := os.ReadDir(migrationsDir)
 	if err != nil {
-		return fmt.Errorf("read migrations dir: %w", err)
+		return nil, fmt.Errorf("read migrations dir: %w", err)
 	}
 	files := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -116,7 +119,15 @@ func migrate(db *gorm.DB) error {
 			files = append(files, e.Name())
 		}
 	}
-	sort.Strings(files) // lexical order: 0001 before 0002.
+	sort.Strings(files)
+	return files, nil
+}
+
+func migrate(db *gorm.DB) error {
+	files, err := sqlFiles()
+	if err != nil {
+		return err
+	}
 	for _, name := range files {
 		sql, err := os.ReadFile(filepath.Join(migrationsDir, name))
 		if err != nil {

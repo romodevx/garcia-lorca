@@ -35,6 +35,9 @@ import (
 )
 
 const (
+	// migrationsDir is the one list of students migrations.
+	migrationsDir = "../../../../../migrations/students"
+
 	dbName  = "garcia_lorca"
 	tenantA = "11111111-1111-1111-1111-111111111111"
 	tenantB = "22222222-2222-2222-2222-222222222222"
@@ -101,10 +104,13 @@ func open(dsn string) (*gorm.DB, error) {
 // one list of migrations, so a new file can never be left out of the schema the
 // repository and RLS tests run against — and then grants the non-owner app role
 // privileges on every table.
-func migrate(db *gorm.DB) error {
+// sqlFiles lists the migration files in migrationsDir in lexical order (0001
+// before 0002). It is the one list both the suite schema and the
+// data-migration tests are built from.
+func sqlFiles() ([]string, error) {
 	entries, err := os.ReadDir(migrationsDir)
 	if err != nil {
-		return fmt.Errorf("read migrations dir: %w", err)
+		return nil, fmt.Errorf("read migrations dir: %w", err)
 	}
 	files := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -113,6 +119,14 @@ func migrate(db *gorm.DB) error {
 		}
 	}
 	sort.Strings(files)
+	return files, nil
+}
+
+func migrate(db *gorm.DB) error {
+	files, err := sqlFiles()
+	if err != nil {
+		return err
+	}
 	for _, f := range files {
 		sql, err := os.ReadFile(filepath.Join(migrationsDir, f))
 		if err != nil {

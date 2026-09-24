@@ -36,12 +36,16 @@ SET LOCAL lock_timeout = '5s';
 -- whitespace removed and lowercase. It mirrors Go's strings.ToLower(
 -- strings.TrimSpace(x)): TrimSpace strips every Unicode White_Space rune, and
 -- btrim() strips only U+0020, so a tab, CR/LF or no-break space would survive a
--- btrim and pass the CHECK while Go never finds the row again. The ICU
--- collation pins lower() to full Unicode case folding: under a C ctype the
--- database's own lower() folds ASCII only, and "JOSÉ" would become "josÉ".
+-- btrim and pass the CHECK while Go never finds the row again. The class is
+-- spelled out rune by rune (Go's unicode.IsSpace) rather than \s, which under
+-- ICU also matches U+001C–U+001F — runes Go does NOT trim. The ICU collation
+-- pins lower() to Unicode case mapping: under a C ctype the database's own
+-- lower() folds ASCII only, and "JOSÉ" would become "josÉ". (ICU applies the
+-- Greek final-sigma rule and Go does not; no address this school stores ends
+-- a word in a capital sigma.)
 CREATE FUNCTION config_normalized_email(email text) RETURNS text
     LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
-    RETURN lower(regexp_replace(email COLLATE "und-x-icu", '^[\s\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\s\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$', '', 'g'));
+    RETURN lower(regexp_replace(email COLLATE "und-x-icu", '^[ \t\n\v\f\r\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[ \t\n\v\f\r\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$', '', 'g'));
 
 DO $$
 DECLARE

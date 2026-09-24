@@ -190,3 +190,22 @@ func TestAContactEmailIsNormalized(t *testing.T) {
 		t.Errorf("email = %q, want %q", contact.Email(), "ana.cruz@correo.com")
 	}
 }
+
+// A contact's email, when given, must be an address iam will accept: otherwise
+// it is stored today and fails weeks later, when the office grants app access.
+func TestAContactEmailMustBePlausible(t *testing.T) {
+	for _, bad := range []string{"ana.ruiz.gmail.com", "ana ruiz@x.mx", "ana@gmail"} {
+		_, err := domain.NewContact("gl-1", "t1", "st-1", domain.RelationshipMother,
+			domain.ContactPerson{FullName: "Ana Cruz", Email: bad})
+		if glerrors.KindOf(err) != glerrors.KindInvalid {
+			t.Errorf("NewContact with email %q: want KindInvalid, got %v", bad, err)
+		}
+	}
+}
+
+func TestAContactMayHaveNoEmail(t *testing.T) {
+	if _, err := domain.NewContact("gl-1", "t1", "st-1", domain.RelationshipMother,
+		domain.ContactPerson{FullName: "Ana Cruz", Phone: "5551234567"}); err != nil {
+		t.Fatalf("a contact without an email is fine: %v", err)
+	}
+}

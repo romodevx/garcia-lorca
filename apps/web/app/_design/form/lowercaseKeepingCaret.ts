@@ -31,7 +31,9 @@ export function lowercaseKeepingCaret(input: HTMLInputElement, composing: boolea
   const start = input.selectionStart;
   const end = input.selectionEnd;
   input.value = lowered;
-  if (start !== null && end !== null) {
+  // Only the focused field has a caret worth keeping; setting a selection on an
+  // unfocused one (autofill) can pull the caret or focus back to it.
+  if (start !== null && end !== null && input.ownerDocument.activeElement === input) {
     input.setSelectionRange(loweredOffset(typed, start), loweredOffset(typed, end));
   }
   return lowered;

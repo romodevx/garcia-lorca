@@ -3,6 +3,7 @@ package domain
 import (
 	"strings"
 
+	pkgemail "github.com/garcia-lorca/pkg/email"
 	glerrors "github.com/garcia-lorca/pkg/errors"
 )
 
@@ -22,7 +23,7 @@ type Teacher struct {
 // normalized (trimmed, lowercase). `userID` is optional ("" = not yet linked to
 // an IAM user).
 func NewTeacher(id, tenantID, firstName, lastName, email, userID string) (Teacher, error) {
-	email = normalizeEmail(email)
+	email = pkgemail.Normalize(email)
 	if strings.TrimSpace(id) == "" {
 		return Teacher{}, glerrors.New(glerrors.KindInvalid, "teacher id is required")
 	}
@@ -48,29 +49,14 @@ func NewTeacher(id, tenantID, firstName, lastName, email, userID string) (Teache
 	}, nil
 }
 
-// normalizeEmail returns the one spelling an address is stored under: an
-// address differs by neither case nor surrounding spaces.
-func normalizeEmail(raw string) string {
-	return strings.ToLower(strings.TrimSpace(raw))
-}
-
-// validateTeacherEmail is a minimal boundary shape check (a single '@' with a
-// dotted domain), not full RFC 5322 — the authoritative uniqueness constraint
-// lives at the database level (UNIQUE(tenant_id, email)).
-func validateTeacherEmail(email string) error {
-	if strings.TrimSpace(email) == "" {
+// validateTeacherEmail requires an address and checks its shape with the one
+// rule every service shares (pkg/email); the authoritative uniqueness
+// constraint lives at the database level (UNIQUE(tenant_id, email)).
+func validateTeacherEmail(address string) error {
+	if address == "" {
 		return glerrors.New(glerrors.KindInvalid, "teacher email is required")
 	}
-	at := strings.IndexByte(email, '@')
-	if at <= 0 {
-		return glerrors.New(glerrors.KindInvalid, "teacher email must contain '@'")
-	}
-	domainPart := email[at+1:]
-	dot := strings.IndexByte(domainPart, '.')
-	if dot <= 0 || dot == len(domainPart)-1 {
-		return glerrors.New(glerrors.KindInvalid, "teacher email domain must contain a dot")
-	}
-	return nil
+	return pkgemail.Validate(address)
 }
 
 // WithUserID returns a copy of the teacher linked to userID, or unlinked when
