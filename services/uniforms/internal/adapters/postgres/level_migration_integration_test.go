@@ -238,8 +238,14 @@ func TestRetiringAnUnresolvedGarmentKeepsItUnresolved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WithDetails: %v", err)
 	}
-	if _, err := repo.UpdateItem(context.Background(), edited.Retire()); err != nil {
+	saved, err := repo.UpdateItem(context.Background(), edited.Retire())
+	if err != nil {
 		t.Fatalf("UpdateItem: %v", err)
+	}
+	// The reply is the state a client may send back; it must say unresolved,
+	// or the next save would widen the garment to every level.
+	if saved.Level() != domain.LevelUnresolved {
+		t.Errorf("UpdateItem answered level %q, want unresolved", saved.Level())
 	}
 	if got := find(); got.Level() != domain.LevelUnresolved || got.Active() {
 		t.Errorf("after retiring: level %q active %v", got.Level(), got.Active())

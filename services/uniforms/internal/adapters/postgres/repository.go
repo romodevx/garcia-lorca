@@ -119,7 +119,16 @@ func (r *Repository) UpdateItem(ctx context.Context, item domain.Item) (domain.I
 	if err != nil {
 		return domain.Item{}, err
 	}
-	return toDomainItem(model)
+	saved, err := toDomainItem(model)
+	if err != nil {
+		return domain.Item{}, err
+	}
+	// The row model carries no old key, so an unresolved garment would come
+	// back as every level — the state a client might send back next time.
+	if item.Level() == domain.LevelUnresolved {
+		saved = saved.WithUnresolvedLevel()
+	}
+	return saved, nil
 }
 
 // GetItem loads one garment.
