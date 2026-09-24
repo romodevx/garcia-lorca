@@ -195,10 +195,11 @@ describe("la captura de administración", () => {
     await user.type(screen.getByLabelText(/^Nombre para mostrar/), "Ana Ruiz");
     const password = screen.queryByLabelText(/^Contraseña temporal/);
     if (password !== null) await user.type(password, "init-pw-123");
+    // No Tab: the field never loses focus, so only the save-time check can
+    // mark it — exactly the keyboard path (Enter on the focused button).
     await user.type(screen.getByLabelText("Correo"), "ana@colegio");
-    await user.tab();
+    expect(screen.getByLabelText("Correo")).not.toHaveAttribute("aria-invalid");
 
-    expect(screen.getByText(/nombre@dominio/)).toBeInTheDocument();
     // The drawer's primary action (create or invite, per configuration) stays
     // unready: pointer-events none also hides it from the accessibility tree.
     const primary = screen.getByRole("button", { name: /Crear usuario|Enviar invitación/, hidden: true });
@@ -210,6 +211,7 @@ describe("la captura de administración", () => {
     expect(admin.createUser).not.toHaveBeenCalled();
     expect(admin.inviteUser).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Correo")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText(/nombre@dominio/)).toBeInTheDocument();
   });
 
   it("el nombre para mostrar se captura en mayúsculas", async () => {

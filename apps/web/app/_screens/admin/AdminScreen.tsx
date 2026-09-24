@@ -313,7 +313,10 @@ function CreateUserDrawer({ roles, onClose, onSave }: { roles: readonly Role[]; 
   // refuses a malformed address on its own.
   const emailShape = useEmailShapeOnSave();
   const submit = async (): Promise<void> => {
-    if (!ready || !emailShape.check(email)) return;
+    // The email check runs FIRST: `ready` already folds in the address shape,
+    // so behind it the check could never mark the field.
+    const shaped = emailShape.check(email);
+    if (!shaped || !ready) return;
     try { await onSave({ email: email.trim(), displayName: displayName.trim(), tempPassword, roleIds: sel }); } catch { setErr("No se pudo crear el usuario (¿correo duplicado?)."); }
   };
   return (
@@ -352,7 +355,10 @@ function InviteUserDrawer({ roles, onClose, onSave }: { roles: readonly Role[]; 
   // refuses a malformed address on its own.
   const emailShape = useEmailShapeOnSave();
   const submit = async (): Promise<void> => {
-    if (!ready || !emailShape.check(email)) return;
+    // The email check runs FIRST: `ready` already folds in the address shape,
+    // so behind it the check could never mark the field.
+    const shaped = emailShape.check(email);
+    if (!shaped || !ready) return;
     setSending(true);
     try { await onSave({ email: email.trim(), displayName: displayName.trim(), roleIds: sel }); }
     // The account may well exist and only the mail have failed, so the message
