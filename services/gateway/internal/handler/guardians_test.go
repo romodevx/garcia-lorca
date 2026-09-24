@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	connect "connectrpc.com/connect"
@@ -31,21 +32,38 @@ type fakeGuardians struct {
 	contactStudentID string
 	contactName      string
 	contactPhone     string
+	contactIn        client.ContactInput
 	contact          client.GuardianLink
+	updatedContactID string
+	removedContactID string
+	removedStudentID string
 
 	err error
 }
 
-func (f *fakeGuardians) AddContact(_ context.Context, studentID, relationship, fullName, phone, email string) (client.GuardianLink, error) {
-	f.contactStudentID, f.contactName, f.contactPhone = studentID, fullName, phone
+func (f *fakeGuardians) AddContact(_ context.Context, in client.ContactInput) (client.GuardianLink, error) {
+	f.contactStudentID, f.contactName, f.contactPhone, f.contactIn = in.StudentID, in.FullName, in.Phone, in
 	if f.err != nil {
 		return client.GuardianLink{}, f.err
 	}
 	f.contact = client.GuardianLink{
-		ID: "gl-9", StudentID: studentID, Relationship: relationship,
-		FullName: fullName, Phone: phone, Email: email,
+		ID: "gl-9", StudentID: in.StudentID, Relationship: in.Relationship,
+		FullName: in.FullName, Phone: in.Phone, Email: in.Email, IsEmergency: in.IsEmergency,
 	}
 	return f.contact, nil
+}
+
+func (f *fakeGuardians) UpdateContact(_ context.Context, contactID string, in client.ContactInput) (client.GuardianLink, error) {
+	f.updatedContactID, f.contactIn = contactID, in
+	if f.err != nil {
+		return client.GuardianLink{}, f.err
+	}
+	return client.GuardianLink{ID: contactID, StudentID: in.StudentID, FullName: in.FullName, IsEmergency: in.IsEmergency}, nil
+}
+
+func (f *fakeGuardians) RemoveContact(_ context.Context, contactID, studentID string) error {
+	f.removedContactID, f.removedStudentID = contactID, studentID
+	return f.err
 }
 
 func (f *fakeGuardians) LinkGuardian(_ context.Context, guardianUserID, studentID, relationship string) (client.GuardianLink, error) {
@@ -268,5 +286,45 @@ func TestAddContactReturnsSomebodyWithoutAnAccount(t *testing.T) {
 	}
 	if body["phone"] != "5551234567" {
 		t.Errorf("phone = %v", body["phone"])
+	}
+}
+
+// A contact is edited and removed under its pupil: the path names both, so a
+// contact id alone never reaches another family's child.
+func TestContactIsEditedAndRemovedUnderItsPupil(t *testing.T) {
+	svc := &fakeGuardians{}
+	h := handler.NewGuardiansHandler(svc)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/students/stu-1/contacts/gl-9",
+		strings.NewReader(`{"relationship":"guardian","fullName":"Rosa Méndez","phone":"3312345678","isEmergency":true}`))
+	req.SetPathValue("studentId", "stu-1")
+	req.SetPathValue("contactId", "gl-9")
+	rec := httptest.NewRecorder()
+	h.UpdateContact(rec, req)
+	if rec.Code != http.StatusOK || svc.updatedContactID != "gl-9" || svc.contactIn.StudentID != "stu-1" || !svc.contactIn.IsEmergency {
+		t.Fatalf("update: status %d forwarded %q %+v", rec.Code, svc.updatedContactID, svc.contactIn)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body["isEmergency"] != true {
+		t.Errorf("isEmergency in body = %v (%v)", body["isEmergency"], err)
+	}
+
+	del := httptest.NewRequest(http.MethodDelete, "/api/v1/students/stu-1/contacts/gl-9", nil)
+	del.SetPathValue("studentId", "stu-1")
+	del.SetPathValue("contactId", "gl-9")
+	rec = httptest.NewRecorder()
+	h.RemoveContact(rec, del)
+	if rec.Code != http.StatusNoContent || svc.removedContactID != "gl-9" || svc.removedStudentID != "stu-1" {
+		t.Errorf("remove: status %d forwarded %q %q", rec.Code, svc.removedContactID, svc.removedStudentID)
+	}
+}
+
+func TestAddContactForwardsTheEmergencyMark(t *testing.T) {
+	svc := &fakeGuardians{}
+	h := handler.NewGuardiansHandler(svc)
+	rec := doReq(t, h.AddContact, http.MethodPost, "/api/v1/contacts",
+		`{"studentId":"stu-1","relationship":"other","fullName":"Rosa","isEmergency":true}`)
+	if rec.Code != http.StatusCreated || !svc.contactIn.IsEmergency {
+		t.Errorf("status %d emergency %v", rec.Code, svc.contactIn.IsEmergency)
 	}
 }

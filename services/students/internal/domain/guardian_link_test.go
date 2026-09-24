@@ -223,3 +223,38 @@ func TestRestoreContactToleratesALegacyEmail(t *testing.T) {
 		t.Errorf("email = %q", contact.Email())
 	}
 }
+
+// A contact's phone, when given, is the ten digits the office can dial.
+func TestAContactPhoneIsTenDigits(t *testing.T) {
+	c, err := domain.NewContact("gl-1", "t1", "st-1", domain.RelationshipMother,
+		domain.ContactPerson{FullName: "Ana Cruz", Phone: "55 1234-5678", Emergency: true})
+	if err != nil {
+		t.Fatalf("NewContact: %v", err)
+	}
+	if c.Phone() != "5512345678" || !c.IsEmergency() {
+		t.Errorf("contact = %q emergency %v", c.Phone(), c.IsEmergency())
+	}
+	if _, err := domain.NewContact("gl-2", "t1", "st-1", domain.RelationshipMother,
+		domain.ContactPerson{FullName: "Ana Cruz", Phone: "12345"}); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("a short phone must be refused, got %v", err)
+	}
+}
+
+// Editing a contact re-judges what the office typed, and keeps the account.
+func TestEditingAContact(t *testing.T) {
+	c, _ := domain.NewContact("gl-1", "t1", "st-1", domain.RelationshipOther, domain.ContactPerson{FullName: "Rosa"})
+	edited, err := c.Edit(domain.RelationshipGuardian, domain.ContactPerson{FullName: " Rosa Méndez ", Phone: "3312345678", Email: "Rosa@Correo.mx", Emergency: true})
+	if err != nil {
+		t.Fatalf("Edit: %v", err)
+	}
+	if edited.FullName() != "Rosa Méndez" || edited.Relationship() != domain.RelationshipGuardian ||
+		edited.Email() != "rosa@correo.mx" || !edited.IsEmergency() || edited.ID() != "gl-1" {
+		t.Errorf("edited = %+v", edited)
+	}
+	if _, err := c.Edit(domain.RelationshipOther, domain.ContactPerson{FullName: " "}); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("a contact without an account needs a name, got %v", err)
+	}
+	if _, err := c.Edit(domain.RelationshipOther, domain.ContactPerson{FullName: "Rosa", Phone: "1"}); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("a malformed phone must be refused, got %v", err)
+	}
+}

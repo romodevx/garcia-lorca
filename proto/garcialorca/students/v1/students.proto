@@ -87,6 +87,12 @@ service StudentsService {
   // PermissionDenied, so the answer does not confirm it exists.
   rpc GrantContactAccess(GrantContactAccessRequest) returns (GrantContactAccessResponse);
 
+  // UpdateContact corrects a contact of a pupil; RemoveContact deletes one that
+  // has no app access. Both are scoped by student_id: a contact of another
+  // pupil is NotFound, so the answer never confirms it exists.
+  rpc UpdateContact(UpdateContactRequest) returns (UpdateContactResponse);
+  rpc RemoveContact(RemoveContactRequest) returns (RemoveContactResponse);
+
   // UnlinkGuardian removes a guardian↔student link. An unknown link is a
   // NotFound error.
   rpc UnlinkGuardian(UnlinkGuardianRequest) returns (UnlinkGuardianResponse);
@@ -403,6 +409,8 @@ message GuardianLink {
   string full_name = 6;
   string phone = 7;
   string email = 8;
+  // Whom the office calls first when something happens.
+  bool is_emergency = 9;
 }
 
 message LinkGuardianRequest {
@@ -460,8 +468,30 @@ message AddContactRequest {
   string full_name = 3;
   string phone = 4;
   string email = 5;
+  bool is_emergency = 6;
 }
 
 message AddContactResponse {
   GuardianLink contact = 1;
 }
+
+message UpdateContactRequest {
+  string contact_id = 1;
+  string student_id = 2;
+  string relationship = 3;  // mother | father | guardian | other
+  string full_name = 4;
+  string phone = 5;
+  string email = 6;
+  bool is_emergency = 7;
+}
+
+message UpdateContactResponse {
+  GuardianLink contact = 1;
+}
+
+message RemoveContactRequest {
+  string contact_id = 1;
+  string student_id = 2;
+}
+
+message RemoveContactResponse {}

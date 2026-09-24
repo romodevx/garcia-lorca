@@ -77,27 +77,65 @@ type ContactPerson struct {
 	FullName string
 	Phone    string
 	Email    string
+	// Emergency marks whom the office calls first when something happens.
+	Emergency bool
 }
 
 // NewContact builds a contact who may have no account at all: a name and,
 // usually, a phone. A contact with neither an account nor a name is nobody, and
 // a row for nobody is a number the office cannot use.
 func NewContact(id, tenantID, studentID string, relationship Relationship, person ContactPerson) (GuardianLink, error) {
-	if strings.TrimSpace(person.FullName) == "" {
-		return GuardianLink{}, glerrors.New(glerrors.KindInvalid, "a contact without an account needs a name")
-	}
-	if address := email.Normalize(person.Email); address != "" {
-		// Checked here, when the office types it, rather than weeks later when
-		// the office grants app access and iam refuses the address.
-		if err := email.Validate(address); err != nil {
-			return GuardianLink{}, err
-		}
+	checked, err := checkPerson(person, false)
+	if err != nil {
+		return GuardianLink{}, err
 	}
 	link, err := newLink(id, tenantID, studentID, relationship)
 	if err != nil {
 		return GuardianLink{}, err
 	}
-	return link.WithPerson(person), nil
+	return link.WithPerson(checked), nil
+}
+
+// Edit returns the contact with the office's corrections: relationship, name,
+// phone, email and the emergency mark. What was typed is judged as on creation;
+// an account already attached stays attached (only GrantContactAccess and
+// UnlinkGuardian touch it).
+func (l GuardianLink) Edit(relationship Relationship, person ContactPerson) (GuardianLink, error) {
+	if !relationship.Valid() {
+		return GuardianLink{}, glerrors.New(glerrors.KindInvalid, "a valid relationship is required")
+	}
+	checked, err := checkPerson(person, l.HasAccount())
+	if err != nil {
+		return GuardianLink{}, err
+	}
+	l.relationship = relationship
+	return l.WithPerson(checked), nil
+}
+
+// contactPhoneDigits is a Mexican phone number without country code.
+const contactPhoneDigits = 10
+
+// checkPerson judges a contact as the office typed it: a name unless there is
+// an account to identify them, a phone of ten digits (kept as digits alone) and
+// an email of plausible shape — both optional. Checked here, when typed, rather
+// than weeks later when the office grants app access and iam refuses it.
+func checkPerson(person ContactPerson, hasAccount bool) (ContactPerson, error) {
+	if !hasAccount && strings.TrimSpace(person.FullName) == "" {
+		return ContactPerson{}, glerrors.New(glerrors.KindInvalid, "a contact without an account needs a name")
+	}
+	if address := email.Normalize(person.Email); address != "" {
+		if err := email.Validate(address); err != nil {
+			return ContactPerson{}, err
+		}
+	}
+	if strings.TrimSpace(person.Phone) != "" {
+		digits := onlyDigits(person.Phone)
+		if len(digits) != contactPhoneDigits {
+			return ContactPerson{}, glerrors.New(glerrors.KindInvalid, "a phone has ten digits")
+		}
+		person.Phone = digits
+	}
+	return person, nil
 }
 
 // RestoreContact rebuilds an account-less contact read back from storage. It
@@ -122,9 +160,10 @@ func RestoreContact(id, tenantID, studentID string, relationship Relationship, p
 // who answers, and they are not the same question.
 func (l GuardianLink) WithPerson(person ContactPerson) GuardianLink {
 	l.person = ContactPerson{
-		FullName: strings.TrimSpace(person.FullName),
-		Phone:    strings.TrimSpace(person.Phone),
-		Email:    email.Normalize(person.Email),
+		FullName:  strings.TrimSpace(person.FullName),
+		Phone:     strings.TrimSpace(person.Phone),
+		Email:     email.Normalize(person.Email),
+		Emergency: person.Emergency,
 	}
 	return l
 }
@@ -159,6 +198,9 @@ func (l GuardianLink) Phone() string { return l.person.Phone }
 
 // Email is the contact's address, if the school has one.
 func (l GuardianLink) Email() string { return l.person.Email }
+
+// IsEmergency reports whether the office calls this contact first.
+func (l GuardianLink) IsEmergency() bool { return l.person.Emergency }
 
 // HasAccount reports whether this contact can open the family app.
 func (l GuardianLink) HasAccount() bool { return l.guardianUserID != "" }

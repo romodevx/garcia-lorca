@@ -244,11 +244,36 @@ func (h *StudentsHandler) AddContact(ctx context.Context, req *connect.Request[s
 		FullName:     m.GetFullName(),
 		Phone:        m.GetPhone(),
 		Email:        m.GetEmail(),
+		IsEmergency:  m.GetIsEmergency(),
 	})
 	if err != nil {
 		return nil, connectErr(err)
 	}
 	return connect.NewResponse(&studentsv1.AddContactResponse{Contact: toProtoGuardianLink(contact)}), nil
+}
+
+// UpdateContact corrects a contact of a pupil.
+func (h *StudentsHandler) UpdateContact(ctx context.Context, req *connect.Request[studentsv1.UpdateContactRequest]) (*connect.Response[studentsv1.UpdateContactResponse], error) {
+	m := req.Msg
+	contact, err := h.guardian.UpdateContact(ctx, m.GetContactId(), m.GetStudentId(), usecase.ContactInput{
+		Relationship: m.GetRelationship(),
+		FullName:     m.GetFullName(),
+		Phone:        m.GetPhone(),
+		Email:        m.GetEmail(),
+		IsEmergency:  m.GetIsEmergency(),
+	})
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.UpdateContactResponse{Contact: toProtoGuardianLink(contact)}), nil
+}
+
+// RemoveContact deletes a contact of a pupil that has no app access.
+func (h *StudentsHandler) RemoveContact(ctx context.Context, req *connect.Request[studentsv1.RemoveContactRequest]) (*connect.Response[studentsv1.RemoveContactResponse], error) {
+	if err := h.guardian.RemoveContact(ctx, req.Msg.GetContactId(), req.Msg.GetStudentId()); err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.RemoveContactResponse{}), nil
 }
 
 // GrantContactAccess attaches an iam account to a contact the school already
@@ -378,6 +403,7 @@ func toProtoGuardianLink(l domain.GuardianLink) *studentsv1.GuardianLink {
 		FullName:       l.FullName(),
 		Phone:          l.Phone(),
 		Email:          l.Email(),
+		IsEmergency:    l.IsEmergency(),
 	}
 }
 

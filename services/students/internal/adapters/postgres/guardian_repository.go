@@ -85,6 +85,43 @@ func (r *Repository) ByID(ctx context.Context, id string) (domain.GuardianLink, 
 	return out, nil
 }
 
+// UpdateContact writes an edited contact: relationship, the person and the
+// emergency mark. The account column is never written here. A row the bound
+// tenant cannot see is KindNotFound.
+func (r *Repository) UpdateContact(ctx context.Context, l domain.GuardianLink) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Model(&guardianStudentModel{}).Where("id = ?", l.ID()).Updates(map[string]any{
+			"relationship": l.Relationship().String(),
+			"full_name":    l.FullName(),
+			"phone":        l.Phone(),
+			"email":        l.Email(),
+			"is_emergency": l.IsEmergency(),
+		})
+		if res.Error != nil {
+			return translateGuardianWriteErr(res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return glerrors.ErrNotFound
+		}
+		return nil
+	})
+}
+
+// RemoveContact deletes a contact by id. A row the bound tenant cannot see is
+// KindNotFound.
+func (r *Repository) RemoveContact(ctx context.Context, id string) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Where("id = ?", id).Delete(&guardianStudentModel{})
+		if res.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "removing contact", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return glerrors.ErrNotFound
+		}
+		return nil
+	})
+}
+
 // AttachAccount sets the iam account on a contact that has none.
 //
 // The UPDATE is CONDITIONAL — `guardian_user_id IS NULL` rides in the WHERE, not

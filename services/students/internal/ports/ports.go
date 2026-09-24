@@ -165,6 +165,11 @@ type GuardianRepository interface {
 	// see is KindNotFound, so RLS makes a cross-tenant read indistinguishable
 	// from a missing contact.
 	ByID(ctx context.Context, id string) (domain.GuardianLink, error)
+	// UpdateContact persists an edited contact (relationship, person, the
+	// emergency mark). The account is NOT written here. Unknown is KindNotFound.
+	UpdateContact(ctx context.Context, l domain.GuardianLink) error
+	// RemoveContact deletes a contact by id. Unknown is KindNotFound.
+	RemoveContact(ctx context.Context, id string) error
 	// AttachAccount sets the iam account on a contact that has none, keeping the
 	// row (and the person on it) as it is. The write is conditional on the
 	// contact STILL having no account: two grants racing must not let the second

@@ -43,6 +43,26 @@ func (s *fakeGuardianStore) Link(_ context.Context, l domain.GuardianLink) error
 	return nil
 }
 
+func (s *fakeGuardianStore) UpdateContact(_ context.Context, l domain.GuardianLink) error {
+	for key, stored := range s.links {
+		if stored.ID() == l.ID() {
+			s.links[key] = l
+			return nil
+		}
+	}
+	return glerrors.ErrNotFound
+}
+
+func (s *fakeGuardianStore) RemoveContact(_ context.Context, id string) error {
+	for key, stored := range s.links {
+		if stored.ID() == id {
+			delete(s.links, key)
+			return nil
+		}
+	}
+	return glerrors.ErrNotFound
+}
+
 func (s *fakeGuardianStore) ByID(_ context.Context, id string) (domain.GuardianLink, error) {
 	for _, l := range s.links {
 		if l.ID() == id {
@@ -326,5 +346,37 @@ func TestGrantContactAccessWrongPupilIsNotFound(t *testing.T) {
 	}))
 	if connect.CodeOf(err) != connect.CodeNotFound {
 		t.Errorf("code = %v, want NotFound (err=%v)", connect.CodeOf(err), err)
+	}
+}
+
+// A contact is edited (with its emergency mark) and removed through the RPCs,
+// scoped by the pupil.
+func TestContactIsEditedAndRemoved(t *testing.T) {
+	h, studentID := guardianHandler(t)
+	added, err := h.AddContact(context.Background(), connect.NewRequest(&studentsv1.AddContactRequest{
+		StudentId: studentID, Relationship: "other", FullName: "Rosa", IsEmergency: true,
+	}))
+	if err != nil {
+		t.Fatalf("AddContact: %v", err)
+	}
+	if !added.Msg.GetContact().GetIsEmergency() {
+		t.Error("the emergency mark was not kept on creation")
+	}
+	id := added.Msg.GetContact().GetId()
+
+	upd, err := h.UpdateContact(context.Background(), connect.NewRequest(&studentsv1.UpdateContactRequest{
+		ContactId: id, StudentId: studentID, Relationship: "guardian", FullName: "Rosa Méndez", Phone: "3312345678",
+	}))
+	if err != nil {
+		t.Fatalf("UpdateContact: %v", err)
+	}
+	if c := upd.Msg.GetContact(); c.GetFullName() != "Rosa Méndez" || c.GetIsEmergency() || c.GetPhone() != "3312345678" {
+		t.Errorf("contact = %+v", c)
+	}
+
+	_, err = h.RemoveContact(context.Background(), connect.NewRequest(&studentsv1.RemoveContactRequest{ContactId: id, StudentId: "another-pupil"}))
+	assertCode(t, err, connect.CodeNotFound)
+	if _, err := h.RemoveContact(context.Background(), connect.NewRequest(&studentsv1.RemoveContactRequest{ContactId: id, StudentId: studentID})); err != nil {
+		t.Fatalf("RemoveContact: %v", err)
 	}
 }

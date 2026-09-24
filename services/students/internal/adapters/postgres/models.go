@@ -90,6 +90,7 @@ type guardianStudentModel struct {
 	FullName       string  `gorm:"column:full_name"`
 	Phone          string  `gorm:"column:phone"`
 	Email          string  `gorm:"column:email"`
+	IsEmergency    bool    `gorm:"column:is_emergency"`
 	CreatedAt      time.Time
 }
 

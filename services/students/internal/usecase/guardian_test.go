@@ -49,6 +49,26 @@ func (r *fakeGuardianRepo) Link(_ context.Context, l domain.GuardianLink) error 
 	return nil
 }
 
+func (r *fakeGuardianRepo) UpdateContact(_ context.Context, l domain.GuardianLink) error {
+	for key, cur := range r.links {
+		if cur.ID() == l.ID() {
+			r.links[key] = l
+			return nil
+		}
+	}
+	return glerrors.ErrNotFound
+}
+
+func (r *fakeGuardianRepo) RemoveContact(_ context.Context, id string) error {
+	for key, cur := range r.links {
+		if cur.ID() == id {
+			delete(r.links, key)
+			return nil
+		}
+	}
+	return glerrors.ErrNotFound
+}
+
 func (r *fakeGuardianRepo) ByID(_ context.Context, id string) (domain.GuardianLink, error) {
 	for _, l := range r.links {
 		if l.ID() == id {
@@ -531,5 +551,70 @@ func TestGrantContactAccessRefusesAnUnknownStatus(t *testing.T) {
 	_, err := svc.GrantContactAccess(context.Background(), contact.ID(), "stu-1", "user-1")
 	if glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("unspecified status: want KindInvalid, got %v", err)
+	}
+}
+
+// --- editing and removing contacts --------------------------------------------
+
+func addRosa(t *testing.T, svc *usecase.GuardianService, students *fakeRepo) domain.GuardianLink {
+	t.Helper()
+	seedStudent(t, students, "stu-1")
+	c, err := svc.AddContact(context.Background(), usecase.ContactInput{StudentID: "stu-1", Relationship: "other", FullName: "Rosa"})
+	if err != nil {
+		t.Fatalf("AddContact: %v", err)
+	}
+	return c
+}
+
+func TestUpdateContactCorrectsWhatTheOfficeTyped(t *testing.T) {
+	svc, students, _, _ := newGuardianService(t)
+	c := addRosa(t, svc, students)
+
+	got, err := svc.UpdateContact(context.Background(), c.ID(), "stu-1", usecase.ContactInput{
+		Relationship: "guardian", FullName: "Rosa Méndez", Phone: "33 1234 5678", IsEmergency: true,
+	})
+	if err != nil {
+		t.Fatalf("UpdateContact: %v", err)
+	}
+	if got.FullName() != "Rosa Méndez" || got.Phone() != "3312345678" || !got.IsEmergency() {
+		t.Errorf("contact = %q %q %v", got.FullName(), got.Phone(), got.IsEmergency())
+	}
+}
+
+// A contact of another pupil answers not-found: the answer must not confirm it
+// exists (the posture GrantContactAccess keeps).
+func TestAContactOfAnotherPupilIsNotFound(t *testing.T) {
+	svc, students, _, _ := newGuardianService(t)
+	c := addRosa(t, svc, students)
+	if _, err := svc.UpdateContact(context.Background(), c.ID(), "stu-2", usecase.ContactInput{Relationship: "other", FullName: "X"}); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("UpdateContact: want KindNotFound, got %v", err)
+	}
+	if err := svc.RemoveContact(context.Background(), c.ID(), "stu-2"); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("RemoveContact: want KindNotFound, got %v", err)
+	}
+}
+
+func TestRemoveContactDeletesAPhoneNumber(t *testing.T) {
+	svc, students, guardians, _ := newGuardianService(t)
+	c := addRosa(t, svc, students)
+	if err := svc.RemoveContact(context.Background(), c.ID(), "stu-1"); err != nil {
+		t.Fatalf("RemoveContact: %v", err)
+	}
+	if _, err := guardians.ByID(context.Background(), c.ID()); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Error("the contact is still there")
+	}
+}
+
+// A contact that can open the app is not deleted as a phone number: its access
+// is revoked first, deliberately, through the path that exists for it.
+func TestRemovingAContactWithAppAccessIsRefused(t *testing.T) {
+	svc, students, guardians, users := newGuardianService(t)
+	c := addRosa(t, svc, students)
+	seedGuardianUser(users, "usr-9", "guardian")
+	withAccount, _ := c.WithAccount("usr-9")
+	_ = guardians.UpdateContact(context.Background(), withAccount)
+
+	if err := svc.RemoveContact(context.Background(), c.ID(), "stu-1"); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Errorf("want KindConflict, got %v", err)
 	}
 }

@@ -280,6 +280,17 @@ type GuardianLink struct {
 	FullName       string
 	Phone          string
 	Email          string
+	IsEmergency    bool
+}
+
+// ContactInput is a contact as the office typed it.
+type ContactInput struct {
+	StudentID    string
+	Relationship string
+	FullName     string
+	Phone        string
+	Email        string
+	IsEmergency  bool
 }
 
 // LinkGuardian links a guardian (an iam user) to a student. Connect error codes
@@ -302,18 +313,44 @@ func (c *StudentsClient) LinkGuardian(ctx context.Context, guardianUserID, stude
 
 // AddContact records somebody the school can reach about a pupil, with no
 // account and no login.
-func (c *StudentsClient) AddContact(ctx context.Context, studentID, relationship, fullName, phone, email string) (GuardianLink, error) {
+func (c *StudentsClient) AddContact(ctx context.Context, in ContactInput) (GuardianLink, error) {
 	res, err := c.rpc.AddContact(ctx, connect.NewRequest(&studentsv1.AddContactRequest{
-		StudentId:    studentID,
-		Relationship: relationship,
-		FullName:     fullName,
-		Phone:        phone,
-		Email:        email,
+		StudentId:    in.StudentID,
+		Relationship: in.Relationship,
+		FullName:     in.FullName,
+		Phone:        in.Phone,
+		Email:        in.Email,
+		IsEmergency:  in.IsEmergency,
 	}))
 	if err != nil {
 		return GuardianLink{}, err
 	}
 	return toGuardianLink(res.Msg.GetContact()), nil
+}
+
+// UpdateContact corrects a contact of a pupil (in.StudentID scopes it).
+func (c *StudentsClient) UpdateContact(ctx context.Context, contactID string, in ContactInput) (GuardianLink, error) {
+	res, err := c.rpc.UpdateContact(ctx, connect.NewRequest(&studentsv1.UpdateContactRequest{
+		ContactId:    contactID,
+		StudentId:    in.StudentID,
+		Relationship: in.Relationship,
+		FullName:     in.FullName,
+		Phone:        in.Phone,
+		Email:        in.Email,
+		IsEmergency:  in.IsEmergency,
+	}))
+	if err != nil {
+		return GuardianLink{}, err
+	}
+	return toGuardianLink(res.Msg.GetContact()), nil
+}
+
+// RemoveContact deletes a contact of a pupil that has no app access.
+func (c *StudentsClient) RemoveContact(ctx context.Context, contactID, studentID string) error {
+	_, err := c.rpc.RemoveContact(ctx, connect.NewRequest(&studentsv1.RemoveContactRequest{
+		ContactId: contactID, StudentId: studentID,
+	}))
+	return err
 }
 
 // GrantContactAccess attaches an iam account to a contact the pupil already has,
@@ -386,6 +423,7 @@ func toGuardianLink(l *studentsv1.GuardianLink) GuardianLink {
 		FullName:       l.GetFullName(),
 		Phone:          l.GetPhone(),
 		Email:          l.GetEmail(),
+		IsEmergency:    l.GetIsEmergency(),
 	}
 }
 

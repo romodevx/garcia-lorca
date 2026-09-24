@@ -312,6 +312,8 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	}
 	mux.Handle("POST /api/v1/guardians", guardiansWrite(guardiansH.LinkGuardian))
 	mux.Handle("POST /api/v1/contacts", guardiansWrite(guardiansH.AddContact))
+	mux.Handle("PUT /api/v1/students/{studentId}/contacts/{contactId}", guardiansWrite(guardiansH.UpdateContact))
+	mux.Handle("DELETE /api/v1/students/{studentId}/contacts/{contactId}", guardiansWrite(guardiansH.RemoveContact))
 	mux.Handle("POST /api/v1/guardians/unlink", guardiansWrite(guardiansH.UnlinkGuardian))
 	mux.Handle("GET /api/v1/students/{studentId}/guardians", guardiansRead(guardiansH.ListGuardiansForStudent))
 

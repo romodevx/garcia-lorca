@@ -159,7 +159,7 @@ func guardianLinkToDomain(m guardianStudentModel) (domain.GuardianLink, error) {
 	if err != nil {
 		return domain.GuardianLink{}, glerrors.Wrap(glerrors.KindInternal, "unknown relationship in db", err)
 	}
-	person := domain.ContactPerson{FullName: m.FullName, Phone: m.Phone, Email: m.Email}
+	person := domain.ContactPerson{FullName: m.FullName, Phone: m.Phone, Email: m.Email, Emergency: m.IsEmergency}
 	if m.GuardianUserID == nil || *m.GuardianUserID == "" {
 		return domain.RestoreContact(m.ID, m.TenantID, m.StudentID, rel, person)
 	}
@@ -180,6 +180,7 @@ func guardianLinkFromDomain(l domain.GuardianLink) guardianStudentModel {
 		FullName:     l.FullName(),
 		Phone:        l.Phone(),
 		Email:        l.Email(),
+		IsEmergency:  l.IsEmergency(),
 	}
 	if l.HasAccount() {
 		userID := l.GuardianUserID()
