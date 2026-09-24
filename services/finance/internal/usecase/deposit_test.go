@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -463,5 +464,248 @@ func TestADepositNamesWhoReceivedIt(t *testing.T) {
 		if a.ReceivedBy() != who.UserID {
 			t.Errorf("allocation %s received by %q, want %q", a.ID(), a.ReceivedBy(), who.UserID)
 		}
+	}
+}
+
+// Task 8: the cashier chooses what the money pays. Only the chosen charges are
+// paid, oldest first; a month's surcharge still goes with it; what is left is
+// the family's credit, not spread onto what was not chosen.
+func TestADepositPaysOnlyTheChosenCharges(t *testing.T) {
+	f := depositFixture(t)
+	expected, err := f.svc.ExpectedToday(context.Background(), testStudent, time.Date(2026, time.October, 10, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("ExpectedToday: %v", err)
+	}
+	october := expected.Lines[1].ChargeID
+
+	got, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 400000, Method: domain.MethodCash,
+		PaidAt: time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), ChargeIDs: []string{october},
+	})
+	if err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+	if len(got.Allocations) != 1 || got.Allocations[0].ChargeID() != october || got.Allocations[0].Amount().Int64() != 320000 {
+		t.Errorf("allocations = %+v, want October alone, 3,200", got.Allocations)
+	}
+	if got.UnallocatedCents != 80000 {
+		t.Errorf("credit = %d, want the 800 left over", got.UnallocatedCents)
+	}
+	if len(got.Surcharges) != 0 {
+		t.Errorf("materialised %d surcharges; September was not chosen", len(got.Surcharges))
+	}
+}
+
+// A chosen late month carries its surcharge: the fee is never left behind.
+func TestAChosenLateMonthCarriesItsSurcharge(t *testing.T) {
+	f := depositFixture(t)
+	expected, _ := f.svc.ExpectedToday(context.Background(), testStudent, time.Date(2026, time.October, 10, 0, 0, 0, 0, time.UTC))
+	september := expected.Lines[0].ChargeID
+
+	got, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 350000, Method: domain.MethodCash,
+		PaidAt: time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), ChargeIDs: []string{september},
+	})
+	if err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+	if len(got.Surcharges) != 1 || got.UnallocatedCents != 0 {
+		t.Errorf("surcharges %d, credit %d; want September's surcharge paid and nothing left", len(got.Surcharges), got.UnallocatedCents)
+	}
+}
+
+func TestAChargeOfAnotherStudentCannotBeChosen(t *testing.T) {
+	f := depositFixture(t)
+	_, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 1000, Method: domain.MethodCash,
+		PaidAt: time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), ChargeIDs: []string{"not-theirs"},
+	})
+	if glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("want KindInvalid, got %v", err)
+	}
+}
+
+// Under the monthly rule the billing run writes each surcharge as its own
+// charge ("latefee:<month>:…"). It rides on its month — on the counter's list
+// and in the money — and is never a line of its own the cashier could choose
+// apart from it (a choice holding it used to be refused outright).
+func TestAMonthlySurchargeRidesOnItsMonth(t *testing.T) {
+	f := billingFixture(t)
+	runOn(t, f, "2026-11-12")
+	f.clock = time.Date(2026, time.November, 12, 12, 0, 0, 0, time.UTC)
+	lateFee := f.repo.conceptIDOfKind(domain.KindLateFee)
+
+	expected, err := f.svc.ExpectedToday(context.Background(), testStudent, f.clock)
+	if err != nil {
+		t.Fatalf("ExpectedToday: %v", err)
+	}
+	var september usecase.ExpectedLine
+	for _, l := range expected.Lines {
+		if c := f.repo.charges[l.ChargeID]; c.ConceptID() == lateFee {
+			t.Fatalf("a surcharge is a line of its own: %+v", l)
+		}
+		if strings.HasPrefix(l.Description, "Colegiatura septiembre") {
+			september = l
+		}
+	}
+	if september.SurchargeCents <= 0 {
+		t.Fatalf("september carries no surcharge: %+v", september)
+	}
+
+	got, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: september.TotalCents, Method: domain.MethodCash,
+		PaidAt: f.clock, ChargeIDs: []string{september.ChargeID},
+	})
+	if err != nil {
+		t.Fatalf("RegisterDeposit(september): %v", err)
+	}
+	if got.UnallocatedCents != 0 {
+		t.Errorf("left %d unallocated; the month and its surcharge should take it all", got.UnallocatedCents)
+	}
+}
+
+// A month already paid whose surcharge is still open is still owed: it has a
+// line (its surcharge) and can be chosen, and the due lines still add up.
+func TestAPaidMonthWithAnOpenSurchargeIsStillOnTheList(t *testing.T) {
+	f := depositFixture(t)
+	day := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
+	// September in full and $100 of its $300 surcharge.
+	deposit(t, f, 330000, "2026-10-10")
+
+	expected, err := f.svc.ExpectedToday(context.Background(), testStudent, day)
+	if err != nil {
+		t.Fatalf("ExpectedToday: %v", err)
+	}
+	sep := expected.Lines[0]
+	if sep.OwedCents != 0 || sep.SurchargeCents != 20000 || sep.TotalCents != 20000 || !sep.Due {
+		t.Fatalf("september = %+v, want 0 owed + 200 surcharge still open", sep)
+	}
+	var due int64
+	for _, l := range expected.Lines {
+		if l.Due {
+			due += l.TotalCents
+		}
+	}
+	if due != expected.AmountCents {
+		t.Errorf("due lines add up to %d, expected amount is %d", due, expected.AmountCents)
+	}
+
+	got, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 20000, Method: domain.MethodCash,
+		PaidAt: day, ChargeIDs: []string{sep.ChargeID}, IdempotencyKey: "surcharge-only",
+	})
+	if err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+	if got.UnallocatedCents != 0 || len(got.Allocations) != 1 {
+		t.Errorf("allocations %+v, credit %d; want the open surcharge paid", got.Allocations, got.UnallocatedCents)
+	}
+}
+
+// Paying a month ahead earns its early-payment reward at the counter; the list
+// shows it, so the amount it fills in is what the deposit takes — no reward
+// left over as credit.
+func TestAMonthPaidAheadIsListedWithItsReward(t *testing.T) {
+	f := prontoPagoFixture(t)
+	day := time.Date(2026, 9, 3, 0, 0, 0, 0, time.UTC)
+	expected, err := f.svc.ExpectedToday(context.Background(), testStudent, day)
+	if err != nil {
+		t.Fatalf("ExpectedToday: %v", err)
+	}
+	var october usecase.ExpectedLine
+	for _, l := range expected.Lines {
+		if strings.HasPrefix(l.Description, "Colegiatura octubre") {
+			october = l
+		}
+	}
+	if october.Due || october.DiscountCents != 10000 || october.TotalCents != 310000 {
+		t.Fatalf("october = %+v, want not due, $100 reward, $3,100", october)
+	}
+
+	got, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: october.TotalCents, Method: domain.MethodCash,
+		PaidAt: day, ChargeIDs: []string{october.ChargeID},
+	})
+	if err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+	if got.UnallocatedCents != 0 {
+		t.Errorf("left %d as credit; the listed total should settle October", got.UnallocatedCents)
+	}
+}
+
+// A surcharge the office typed by hand (the "Recargo" concept, no month it
+// rides on) is a debt of its own: it has a line, it can be chosen, and a
+// deposit pays it — before, no deposit ever did, so a family paying the full
+// quote was left with it open and the money as credit.
+func TestAHandTypedSurchargeIsADebtOfItsOwn(t *testing.T) {
+	f := depositFixture(t)
+	day := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
+	lateFee := f.repo.conceptIDOfKind(domain.KindLateFee)
+	manual, err := f.svc.CreateCharge(context.Background(), usecase.CreateChargeInput{
+		StudentID: testStudent, CycleID: testCycle, ConceptID: lateFee,
+		DueDate: "2026-10-01", AmountCentsOverride: 5000, DescriptionOverride: "Recargo por cheque devuelto",
+	})
+	if err != nil {
+		t.Fatalf("CreateCharge: %v", err)
+	}
+
+	expected, err := f.svc.ExpectedToday(context.Background(), testStudent, day)
+	if err != nil {
+		t.Fatalf("ExpectedToday: %v", err)
+	}
+	var line usecase.ExpectedLine
+	var due int64
+	for _, l := range expected.Lines {
+		if l.ChargeID == manual.Charge.ID() {
+			line = l
+		}
+		if l.Due {
+			due += l.TotalCents
+		}
+	}
+	if line.TotalCents != 5000 || !line.Due {
+		t.Fatalf("the hand-typed surcharge's line = %+v, want 50 due", line)
+	}
+	if due != expected.AmountCents {
+		t.Errorf("due lines add up to %d, expected amount is %d", due, expected.AmountCents)
+	}
+
+	got, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 5000, Method: domain.MethodCash,
+		PaidAt: day, ChargeIDs: []string{manual.Charge.ID()},
+	})
+	if err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+	if got.UnallocatedCents != 0 || len(got.Allocations) != 1 {
+		t.Errorf("allocations %+v, credit %d; want the surcharge paid", got.Allocations, got.UnallocatedCents)
+	}
+}
+
+// A surcharge never earns a surcharge of its own — not even one typed by hand
+// that is paid late: that is how a fixed fee turns into compound interest.
+func TestAHandTypedSurchargeEarnsNoSurcharge(t *testing.T) {
+	f := depositFixture(t)
+	lateFee := f.repo.conceptIDOfKind(domain.KindLateFee)
+	manual, err := f.svc.CreateCharge(context.Background(), usecase.CreateChargeInput{
+		StudentID: testStudent, CycleID: testCycle, ConceptID: lateFee,
+		DueDate: "2026-09-01", AmountCentsOverride: 5000, DescriptionOverride: "Recargo por cheque devuelto",
+	})
+	if err != nil {
+		t.Fatalf("CreateCharge: %v", err)
+	}
+	got, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 100000, Method: domain.MethodCash,
+		PaidAt: time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), ChargeIDs: []string{manual.Charge.ID()},
+	})
+	if err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+	if len(got.Surcharges) != 0 {
+		t.Errorf("materialised %d surcharges on a surcharge", len(got.Surcharges))
+	}
+	if got.UnallocatedCents != 95000 {
+		t.Errorf("credit = %d, want 950 left after the 50 surcharge", got.UnallocatedCents)
 	}
 }

@@ -34,7 +34,7 @@ beforeEach(() => {
     unallocatedCents: 0, dueTodayCents: 0, surchargeCents: 0, earlyDiscountCents: 0, asOf: "",
   });
   finance.getExpected.mockResolvedValue({
-    amountCents: 670000, surchargeCents: 30000, discountCents: 0, annualBalanceCents: 640000,
+    amountCents: 670000, surchargeCents: 30000, discountCents: 0, annualBalanceCents: 640000, lines: [],
   });
   finance.previewDeposit.mockResolvedValue({
     allocations: [payment("p1", "ch-sep", 320000)],
@@ -286,7 +286,7 @@ describe("CollectDrawer · fecha de pago (tarea 7)", () => {
   // choosing another amount: a new date still brings its own quote.
   it("follows the quote of a new date when the amount was only reformatted", async () => {
     finance.getExpected.mockImplementation(async (_b, _s, on) => ({
-      amountCents: on === "2026-10-03" ? 640000 : 670000, surchargeCents: 0, discountCents: 0, annualBalanceCents: 640000,
+      amountCents: on === "2026-10-03" ? 640000 : 670000, surchargeCents: 0, discountCents: 0, annualBalanceCents: 640000, lines: [],
     }));
     open();
     await screen.findByTestId("amount-expected");
@@ -338,4 +338,90 @@ describe("CollectDrawer · fecha de pago (tarea 7)", () => {
     expect(finance.registerDeposit).not.toHaveBeenCalled();
   });
 });
+});
+
+describe("CollectDrawer · el adeudo, concepto por concepto (tarea 8)", () => {
+  const lines: financeApi.ExpectedLine[] = [
+    { chargeId: "ch-sep", description: "Colegiatura septiembre", dueDate: "2026-09-10", owedCents: 320000, surchargeCents: 30000, discountCents: 0, totalCents: 350000, due: true },
+    { chargeId: "ch-oct", description: "Colegiatura octubre", dueDate: "2026-10-10", owedCents: 320000, surchargeCents: 0, discountCents: 0, totalCents: 320000, due: true },
+    { chargeId: "ch-nov", description: "Colegiatura noviembre", dueDate: "2026-11-10", owedCents: 320000, surchargeCents: 0, discountCents: 0, totalCents: 320000, due: false },
+  ];
+  beforeEach(() => {
+    finance.getExpected.mockResolvedValue({
+      amountCents: 670000, surchargeCents: 30000, discountCents: 0, annualBalanceCents: 960000, lines,
+    });
+  });
+  const open = () => render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} today="2026-10-12" />);
+
+  // What is due is chosen by default — what the counter asks for today, the
+  // rule as it always was. A month not yet due is offered, unchosen: choosing
+  // it is paying ahead.
+  it("lists what is owed, the due concepts chosen, with its surcharge and the two totals", async () => {
+    open();
+    const sep = await screen.findByRole("checkbox", { name: "Colegiatura septiembre" });
+    expect(sep).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Colegiatura octubre" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Colegiatura noviembre" })).not.toBeChecked();
+    expect(screen.getByTestId("debt-row-ch-sep")).toHaveTextContent("3,500");
+    expect(screen.getByTestId("debt-row-ch-sep")).toHaveTextContent(/recargo \$300/i);
+    expect(screen.getByTestId("debt-total")).toHaveTextContent("9,900");
+    expect(screen.getByTestId("debt-selected")).toHaveTextContent("6,700");
+  });
+
+  it("follows the choice: paying ahead, and back", async () => {
+    const user = userEvent.setup();
+    open();
+    const amount = () => screen.getByLabelText(/Monto recibido/, { selector: "input" });
+    await user.click(await screen.findByRole("checkbox", { name: "Colegiatura noviembre" }));
+
+    expect(screen.getByTestId("debt-selected")).toHaveTextContent("9,900");
+    expect(amount()).toHaveValue("9900.00");
+    await waitFor(() =>
+      expect(finance.previewDeposit).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({ chargeIds: ["ch-sep", "ch-oct", "ch-nov"] })),
+    );
+
+    // Back to what is due: the amount returns to it, and no choice is sent.
+    await user.click(screen.getByRole("checkbox", { name: "Colegiatura noviembre" }));
+    expect(amount()).toHaveValue("6700.00");
+    expect(screen.getByTestId("difference")).toHaveTextContent("$0.00");
+    await waitFor(() => expect(finance.previewDeposit).toHaveBeenLastCalledWith(expect.any(String), expect.not.objectContaining({ chargeIds: expect.anything() })));
+  });
+
+  it("takes the money against the chosen charges only", async () => {
+    const user = userEvent.setup();
+    finance.registerDeposit.mockResolvedValue({
+      deposit: { id: "d1", studentId: "s1", amountCents: 320000, method: "cash", reference: "", paidAt: "", calendarVersion: "" },
+      allocations: [], surcharges: [], unallocatedCents: 0, replayed: false,
+    } as unknown as financeApi.DepositResult);
+    open();
+    await user.click(await screen.findByRole("checkbox", { name: "Colegiatura septiembre" }));
+    expect(screen.getByLabelText(/Monto recibido/, { selector: "input" })).toHaveValue("3200.00");
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
+    expect(finance.registerDeposit.mock.calls[0]?.[1]).toMatchObject({ chargeIds: ["ch-oct"], amountCents: 320000 });
+  });
+
+  // A new quote (another date) is a new list: the choice starts over.
+  it("starts the choice over with a new quote", async () => {
+    const user = userEvent.setup();
+    open();
+    await user.click(await screen.findByRole("checkbox", { name: "Colegiatura noviembre" }));
+    fireEvent.change(screen.getByLabelText("Fecha de pago"), { target: { value: "2026-10-03" } });
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: "Colegiatura noviembre" })).not.toBeChecked());
+    expect(screen.getByTestId("debt-selected")).toHaveTextContent("6,700");
+  });
+
+  it("sends no choice when what is due is what is chosen: the oldest debt first, as always", async () => {
+    const user = userEvent.setup();
+    finance.registerDeposit.mockResolvedValue({
+      deposit: { id: "d1", studentId: "s1", amountCents: 670000, method: "cash", reference: "", paidAt: "", calendarVersion: "" },
+      allocations: [], surcharges: [], unallocatedCents: 0, replayed: false,
+    } as unknown as financeApi.DepositResult);
+    open();
+    await screen.findByRole("checkbox", { name: "Colegiatura septiembre" });
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
+    expect(finance.registerDeposit.mock.calls[0]?.[1]).not.toHaveProperty("chargeIds");
+  });
 });

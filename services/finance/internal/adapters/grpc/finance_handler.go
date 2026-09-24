@@ -230,6 +230,7 @@ func (h *FinanceHandler) RegisterDeposit(ctx context.Context, req *connect.Reque
 		GrantEarlyPayment: m.GetGrantEarlyPayment(),
 		CardType:          m.GetCardType(),
 		Receiver:          domain.Receiver{UserID: m.GetReceivedBy(), Name: m.GetReceivedByName()},
+		ChargeIDs:         m.GetChargeIds(),
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -265,8 +266,9 @@ func (h *FinanceHandler) PreviewDeposit(ctx context.Context, req *connect.Reques
 		AmountCents: m.GetAmountCents(),
 		// A preview needs no method: nothing is stored, and cash and a transfer
 		// cover the same months. Cash keeps the domain constructor satisfied.
-		Method: domain.MethodCash,
-		PaidAt: paidAt,
+		Method:    domain.MethodCash,
+		PaidAt:    paidAt,
+		ChargeIDs: m.GetChargeIds(),
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -305,7 +307,20 @@ func (h *FinanceHandler) ExpectedToday(ctx context.Context, req *connect.Request
 		SurchargeCents:     expected.SurchargeCents,
 		DiscountCents:      expected.DiscountCents,
 		AnnualBalanceCents: expected.AnnualBalanceCents,
+		Lines:              toProtoExpectedLines(expected.Lines),
 	}), nil
+}
+
+func toProtoExpectedLines(lines []usecase.ExpectedLine) []*financev1.ExpectedLine {
+	out := make([]*financev1.ExpectedLine, 0, len(lines))
+	for _, l := range lines {
+		out = append(out, &financev1.ExpectedLine{
+			ChargeId: l.ChargeID, Description: l.Description, DueDate: l.DueDate.Format(time.DateOnly),
+			OwedCents: l.OwedCents, SurchargeCents: l.SurchargeCents, DiscountCents: l.DiscountCents,
+			TotalCents: l.TotalCents, Due: l.Due,
+		})
+	}
+	return out
 }
 
 // ListDeposits returns a student's deposits, newest first.

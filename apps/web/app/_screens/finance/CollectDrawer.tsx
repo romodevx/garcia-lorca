@@ -16,12 +16,14 @@ import {
   type Charge,
   type DepositResult,
   type Expected,
+  type ExpectedLine,
   type CardType,
   type Payment,
   type PaymentMethod,
 } from "../../finance/api";
 import { API_URL } from "../../api-url";
 import { localISODate, shortDayLabel } from "../../_lib/localDate";
+import { DebtList } from "./DebtList";
 import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 
 /**
@@ -74,6 +76,23 @@ export interface CollectDrawerProps {
 const FUTURE_PAYMENT = "La fecha de pago no puede ser futura.";
 const MISSING_PAYMENT_DATE = "Falta la fecha de pago.";
 
+/** The concepts a quote asks for: those due that day. */
+function dueOf(lines: readonly ExpectedLine[]): ReadonlySet<string> {
+  return new Set(lines.filter((l) => l.due).map((l) => l.chargeId));
+}
+
+/** What the chosen concepts add up to — the one sum the list, the amount and the difference share. */
+export function selectedTotal(lines: readonly ExpectedLine[], chosen: ReadonlySet<string>): number {
+  return lines.reduce((sum, l) => sum + (chosen.has(l.chargeId) ? l.totalCents : 0), 0);
+}
+
+/** The ids to send, oldest first, or undefined when the choice is what is due. */
+function choiceOf(lines: readonly ExpectedLine[], chosen: ReadonlySet<string>): string[] | undefined {
+  const due = dueOf(lines);
+  const same = due.size === chosen.size && [...chosen].every((id) => due.has(id));
+  return same ? undefined : lines.filter((l) => chosen.has(l.chargeId)).map((l) => l.chargeId);
+}
+
 /** What is wrong with a payment date, if anything. */
 export function paymentDateError(paidOn: string, day: string): string | undefined {
   if (paidOn === "") return MISSING_PAYMENT_DATE;
@@ -109,6 +128,11 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
   // The day the quote ON SCREEN is for ("" = today). The label follows the
   // quote, not the field: a date that brought no quote does not relabel it.
   const [expectedFor, setExpectedFor] = useState("");
+  // The concepts the money pays (task 8). Each new quote starts with what is
+  // due — what the counter asks for today, the rule as it always was — and a
+  // choice is sent only when it differs from that. A month not yet due can be
+  // chosen: that is paying ahead.
+  const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set());
   const [owed, setOwed] = useState<number | null>(null);
   const [credit, setCredit] = useState(0);
   const [expected, setExpected] = useState<Expected | null>(null);
@@ -130,6 +154,25 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
 
   const name = `${student.firstName} ${student.lastName}`;
   const cents = pesosToCents(amount);
+  const lines = expected?.lines ?? [];
+  const choice = choiceOf(lines, chosen);
+  const choiceKey = choice?.join(",") ?? "";
+  const selectedCents = selectedTotal(lines, chosen);
+  // The difference is measured against what was chosen — which, by default, is
+  // exactly what is due.
+  const target = lines.length > 0 ? selectedCents : (expected?.amountCents ?? 0);
+  const toggle = (chargeId: string): void => {
+    const next = new Set(chosen);
+    if (next.has(chargeId)) next.delete(chargeId);
+    else next.add(chargeId);
+    setChosen(next);
+    // The amount follows the choice until the cashier types another one.
+    if (!amountEdited.current) {
+      const cents = selectedTotal(lines, next);
+      prefilledCents.current = cents;
+      setAmount(centsToPesosInput(cents));
+    }
+  };
   const ready = Number.isFinite(cents) && cents > 0 && !saving;
 
   useEffect(() => {
@@ -163,6 +206,8 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
         }
         setExpected(e);
         setExpectedFor(askedFor);
+        // A new quote is a new list: the choice starts over at what is due.
+        setChosen(dueOf(e.lines));
         // Pre-filled with what should be paid: the common case is a family
         // paying exactly that, and retyping it is a chance to mistype it.
         if (e.amountCents > 0 && !amountEdited.current) {
@@ -184,12 +229,17 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
     }
     let live = true;
     const timer = setTimeout(() => {
-      previewDeposit(API_URL, { studentId: student.id, amountCents: cents, ...(sentDate !== "" ? { paidAt: sentDate } : {}) })
+      previewDeposit(API_URL, {
+        studentId: student.id,
+        amountCents: cents,
+        ...(sentDate !== "" ? { paidAt: sentDate } : {}),
+        ...(choiceKey !== "" ? { chargeIds: choiceKey.split(",") } : {}),
+      })
         .then((p) => { if (live) { setPreview(p); } })
         .catch(() => { if (live) { setPreview(null); } });
     }, PREVIEW_DEBOUNCE_MS);
     return () => { live = false; clearTimeout(timer); };
-  }, [cents, student.id, receipt, sentDate, dateOk]);
+  }, [cents, student.id, receipt, sentDate, dateOk, choiceKey]);
 
   // Escape closes. Nothing is at risk: the money has not been taken, and the
   // amount is one field to retype.
@@ -218,6 +268,7 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
         reference: reference.trim(),
         idempotencyKey: attemptKey,
         ...(sentDate !== "" ? { paidAt: sentDate } : {}),
+        ...(choice !== undefined ? { chargeIds: choice } : {}),
         ...(grantEarly ? { grantEarlyPayment: true } : {}),
         ...(method === "card" ? { cardType } : {}),
       });
@@ -228,7 +279,7 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
     } finally {
       setSaving(false);
     }
-  }, [dateOk, ready, student.id, cents, method, cardType, reference, attemptKey, grantEarly, sentDate, paidOn, day, focusFirstInvalid, onCollected]);
+  }, [dateOk, ready, student.id, cents, method, cardType, reference, attemptKey, grantEarly, sentDate, paidOn, day, choice, focusFirstInvalid, onCollected]);
 
   return (
     <DrawerShell
@@ -269,6 +320,8 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
                   )}
                 </div>
 
+                <DebtList lines={lines} chosen={chosen} selectedCents={selectedCents} onToggle={toggle} />
+
                 <MoneyField
                   label="Monto recibido"
                   value={amount}
@@ -282,10 +335,10 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
                 {expected !== null && (
                   <div
                     data-testid="difference"
-                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderRadius: "var(--r-md)", background: difference(cents, expected.amountCents) === 0 ? "var(--ok-bg)" : "var(--warn-bg)" }}>
+                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderRadius: "var(--r-md)", background: difference(cents, target) === 0 ? "var(--ok-bg)" : "var(--warn-bg)" }}>
                     <span style={{ fontSize: 14, color: "var(--text-muted)" }}>Diferencia</span>
-                    <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 17, color: difference(cents, expected.amountCents) === 0 ? "var(--ok-fg)" : "var(--warn-fg)" }}>
-                      {formatCents(difference(cents, expected.amountCents))}
+                    <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 17, color: difference(cents, target) === 0 ? "var(--ok-fg)" : "var(--warn-fg)" }}>
+                      {formatCents(difference(cents, target))}
                     </span>
                   </div>
                 )}
