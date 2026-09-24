@@ -56,12 +56,12 @@ func NewUniformsHandler(svc UniformsService) *UniformsHandler {
 
 // --- catalogue ---------------------------------------------------------------
 
-// ListItems: GET /api/v1/uniforms/items?includeInactive&level
+// ListItems: GET /api/v1/uniforms/items?includeInactive&levelId
 func (h *UniformsHandler) ListItems(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	items, err := h.svc.ListItems(r.Context(), client.ListItemsFilter{
 		IncludeInactive: q.Get("includeInactive") == "true",
-		Level:           q.Get("level"),
+		LevelID:         q.Get("levelId"),
 	})
 	if err != nil {
 		writeUniformsError(w, err)
@@ -74,7 +74,7 @@ type createItemRequest struct {
 	Code        string `json:"code"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Level       string `json:"level"`
+	LevelID     string `json:"levelId"` // a config level id; empty means every level
 	PriceCents  int64  `json:"priceCents"`
 	// Category is uniform, book, supply or other. Empty means uniform, which is
 	// what everything in this module was before the school sold anything else.
@@ -89,7 +89,7 @@ func (h *UniformsHandler) CreateItem(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := h.svc.CreateItem(r.Context(), client.CreateItemInput{
 		Code: body.Code, Name: body.Name, Description: body.Description,
-		Level: body.Level, PriceCents: body.PriceCents, Category: body.Category,
+		LevelID: body.LevelID, PriceCents: body.PriceCents, Category: body.Category,
 	})
 	if err != nil {
 		writeUniformsError(w, err)
@@ -101,7 +101,7 @@ func (h *UniformsHandler) CreateItem(w http.ResponseWriter, r *http.Request) {
 type updateItemRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Level       string `json:"level"`
+	LevelID     string `json:"levelId"` // a config level id; empty means every level
 	PriceCents  int64  `json:"priceCents"`
 	Active      bool   `json:"active"`
 	Category    string `json:"category"`
@@ -115,7 +115,7 @@ func (h *UniformsHandler) UpdateItem(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := h.svc.UpdateItem(r.Context(), client.UpdateItemInput{
 		ID: r.PathValue("id"), Name: body.Name, Description: body.Description,
-		Level: body.Level, PriceCents: body.PriceCents, Active: body.Active,
+		LevelID: body.LevelID, PriceCents: body.PriceCents, Active: body.Active,
 		Category: body.Category,
 	})
 	if err != nil {
@@ -237,11 +237,11 @@ func (h *UniformsHandler) CounterSale(w http.ResponseWriter, r *http.Request) {
 
 // --- orders ------------------------------------------------------------------
 
-// ListOrders: GET /api/v1/uniforms/orders?level&q&status&from&to&sort&desc&pageSize&pageToken
+// ListOrders: GET /api/v1/uniforms/orders?levelId&q&status&from&to&sort&desc&pageSize&pageToken
 func (h *UniformsHandler) ListOrders(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	page, err := h.svc.ListOrders(r.Context(), client.ListOrdersFilter{
-		Level:                 q.Get("level"),
+		LevelID:               q.Get("levelId"),
 		Query:                 q.Get("q"),
 		Statuses:              q["status"],
 		OnlyRequiresAttention: q.Get("requiresAttention") == "true",

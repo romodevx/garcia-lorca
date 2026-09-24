@@ -309,12 +309,12 @@ func TestListOrdersPassesEveryFilter(t *testing.T) {
 	h := handler.NewUniformsHandler(fake)
 	rec := httptest.NewRecorder()
 	h.ListOrders(rec, uniformsRequest(http.MethodGet,
-		"/api/v1/uniforms/orders?level=primaria&q=Zoe&status=ready_for_pickup&status=paid"+
+		"/api/v1/uniforms/orders?levelId=lvl-primaria&q=Zoe&status=ready_for_pickup&status=paid"+
 			"&requiresAttention=true&from=2026-09-01&to=2026-09-30&sort=deadline&pageSize=50&pageToken=20",
 		"", nil))
 
 	got := fake.lastOrdersFilter
-	if got.Level != "primaria" || got.Query != "Zoe" || got.Sort != "deadline" {
+	if got.LevelID != "lvl-primaria" || got.Query != "Zoe" || got.Sort != "deadline" {
 		t.Errorf("filter = %+v", got)
 	}
 	if len(got.Statuses) != 2 {
@@ -338,9 +338,9 @@ func TestListItemsLevelFilterReachesTheService(t *testing.T) {
 	h := handler.NewUniformsHandler(fake)
 	rec := httptest.NewRecorder()
 	h.ListItems(rec, uniformsRequest(http.MethodGet,
-		"/api/v1/uniforms/items?level=kinder&includeInactive=true", "", nil))
+		"/api/v1/uniforms/items?levelId=lvl-kinder&includeInactive=true", "", nil))
 
-	if fake.lastItemsFilter.Level != "kinder" || !fake.lastItemsFilter.IncludeInactive {
+	if fake.lastItemsFilter.LevelID != "lvl-kinder" || !fake.lastItemsFilter.IncludeInactive {
 		t.Errorf("filter = %+v", fake.lastItemsFilter)
 	}
 }
