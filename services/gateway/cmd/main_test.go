@@ -169,7 +169,7 @@ func (stubStudents) CreateApplicant(_ context.Context, req *connect.Request[stud
 		Id:              "stu-1",
 		Curp:            req.Msg.GetCurp(),
 		FirstName:       req.Msg.GetFirstName(),
-		Level:           req.Msg.GetLevel(),
+		LevelId:         req.Msg.GetLevelId(),
 		AdmissionStatus: studentsv1.AdmissionStatus_ADMISSION_STATUS_PENDING,
 	}}), nil
 }
@@ -573,7 +573,7 @@ func newTestGateway(t *testing.T, flags map[string]bool) *httptest.Server {
 	return gw
 }
 
-const validBody = `{"curp":"HEGA050312MDFRNN08","firstName":"Ana","lastName":"Herrera","level":"primaria"}`
+const validBody = `{"curp":"HEGA050312MDFRNN08","firstName":"Ana","lastName":"Herrera","levelId":"lvl-primaria"}`
 
 func postStudent(t *testing.T, gw *httptest.Server, token, body string) *http.Response {
 	t.Helper()

@@ -6,32 +6,12 @@ import (
 	studentsv1 "github.com/garcia-lorca/gen/go/garcialorca/students/v1"
 )
 
-func TestLevelNameRoundTrip(t *testing.T) {
-	cases := []struct {
-		wire studentsv1.Level
-		name string
-	}{
-		{studentsv1.Level_LEVEL_KINDER, "kinder"},
-		{studentsv1.Level_LEVEL_PRIMARIA, "primaria"},
-		{studentsv1.Level_LEVEL_SECUNDARIA, "secundaria"},
-		{studentsv1.Level_LEVEL_PREPARATORIA, "preparatoria"},
-	}
-	for _, c := range cases {
-		if got := levelName(c.wire); got != c.name {
-			t.Errorf("levelName(%v) = %q, want %q", c.wire, got, c.name)
-		}
-		if got := LevelFromName(c.name); got != c.wire {
-			t.Errorf("LevelFromName(%q) = %v, want %v", c.name, got, c.wire)
-		}
-	}
-}
-
-func TestUnknownLevelNameIsUnspecified(t *testing.T) {
-	if got := LevelFromName("licenciatura"); got != studentsv1.Level_LEVEL_UNSPECIFIED {
-		t.Errorf("LevelFromName(unknown) = %v, want UNSPECIFIED", got)
-	}
-	if got := levelName(studentsv1.Level_LEVEL_UNSPECIFIED); got != "" {
-		t.Errorf("levelName(UNSPECIFIED) = %q, want empty", got)
+// A student's level travels as the school's own catalog entry — the config id
+// and the name the school gave it — never folded to a fixed SEP key.
+func TestStudentResultCarriesTheCatalogLevel(t *testing.T) {
+	got := toStudentResult(&studentsv1.Student{Id: "stu-1", LevelId: "lvl-9", LevelName: "Preescolar"})
+	if got.LevelID != "lvl-9" || got.Level != "Preescolar" {
+		t.Errorf("level = (%q, %q)", got.LevelID, got.Level)
 	}
 }
 

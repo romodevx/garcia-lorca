@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	connect "connectrpc.com/connect"
@@ -27,7 +26,7 @@ type CreateApplicantInput struct {
 	CURP         string
 	FirstName    string
 	LastName     string
-	Level        string
+	LevelID      string // a config level id; the service resolves its name
 	GradeGroup   string
 	GuardianName string
 }
@@ -39,7 +38,8 @@ type StudentResult struct {
 	CURP            string
 	FirstName       string
 	LastName        string
-	Level           string
+	Level           string // the level's name as the school wrote it
+	LevelID         string // the config level id
 	GradeGroup      string
 	GuardianName    string
 	AdmissionStatus string
@@ -77,7 +77,7 @@ func (c *StudentsClient) CreateApplicant(ctx context.Context, in CreateApplicant
 		Curp:         in.CURP,
 		FirstName:    in.FirstName,
 		LastName:     in.LastName,
-		Level:        LevelFromName(in.Level),
+		LevelId:      in.LevelID,
 		GradeGroup:   in.GradeGroup,
 		GuardianName: in.GuardianName,
 	}))
@@ -371,41 +371,12 @@ func toStudentResult(s *studentsv1.Student) StudentResult {
 		CURP:            s.GetCurp(),
 		FirstName:       s.GetFirstName(),
 		LastName:        s.GetLastName(),
-		Level:           levelName(s.GetLevel()),
+		Level:           s.GetLevelName(),
+		LevelID:         s.GetLevelId(),
 		GradeGroup:      s.GetGradeGroup(),
 		GuardianName:    s.GetGuardianName(),
 		AdmissionStatus: admissionName(s.GetAdmissionStatus()),
 	}
-}
-
-var levelNames = map[studentsv1.Level]string{
-	studentsv1.Level_LEVEL_KINDER:       "kinder",
-	studentsv1.Level_LEVEL_PRIMARIA:     "primaria",
-	studentsv1.Level_LEVEL_SECUNDARIA:   "secundaria",
-	studentsv1.Level_LEVEL_PREPARATORIA: "preparatoria",
-	studentsv1.Level_LEVEL_MATERNAL:     "maternal",
-}
-
-func levelName(l studentsv1.Level) string { return levelNames[l] }
-
-// LevelFromName resolves a level name to the SEP enum, as tolerantly as the
-// students domain does.
-//
-// Exported and tested because it is the second place in the system that parses
-// this, and the two used to disagree: the domain folds case and accents so
-// "Kínder" resolves, while the edge matched exact lowercase and turned the
-// school's own level name into UNSPECIFIED — a 400 for a value the service two
-// hops away would have accepted, with nothing in between to say why.
-func LevelFromName(name string) studentsv1.Level {
-	key := strings.ToLower(strings.TrimSpace(name))
-	// The same fold the domain applies (services/students/internal/domain/level.go).
-	key = strings.ReplaceAll(key, "í", "i")
-	for level, n := range levelNames {
-		if n == key {
-			return level
-		}
-	}
-	return studentsv1.Level_LEVEL_UNSPECIFIED
 }
 
 var admissionNames = map[studentsv1.AdmissionStatus]string{

@@ -34,7 +34,7 @@ type createStudentRequest struct {
 	CURP         string `json:"curp"`
 	FirstName    string `json:"firstName"`
 	LastName     string `json:"lastName"`
-	Level        string `json:"level"`
+	LevelID      string `json:"levelId"`
 	GradeGroup   string `json:"gradeGroup"`
 	GuardianName string `json:"guardianName"`
 }
@@ -44,7 +44,8 @@ type studentResponse struct {
 	CURP            string `json:"curp"`
 	FirstName       string `json:"firstName"`
 	LastName        string `json:"lastName"`
-	Level           string `json:"level"`
+	Level           string `json:"level"`   // the school's name for the level
+	LevelID         string `json:"levelId"` // the config level id
 	GradeGroup      string `json:"gradeGroup"`
 	GuardianName    string `json:"guardianName"`
 	AdmissionStatus string `json:"admissionStatus"`
@@ -57,6 +58,7 @@ func toStudentResponse(s client.StudentResult) studentResponse {
 		FirstName:       s.FirstName,
 		LastName:        s.LastName,
 		Level:           s.Level,
+		LevelID:         s.LevelID,
 		GradeGroup:      s.GradeGroup,
 		GuardianName:    s.GuardianName,
 		AdmissionStatus: s.AdmissionStatus,
@@ -74,7 +76,7 @@ func (h *StudentsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		CURP:         req.CURP,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
-		Level:        req.Level,
+		LevelID:      req.LevelID,
 		GradeGroup:   req.GradeGroup,
 		GuardianName: req.GuardianName,
 	})

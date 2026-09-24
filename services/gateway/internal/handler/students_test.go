@@ -51,17 +51,18 @@ func TestCreateStudentReturns201AndBody(t *testing.T) {
 		ID:              "stu-1",
 		CURP:            "HEGA050312MDFRNN08",
 		FirstName:       "Ana",
-		Level:           "primaria",
+		Level:           "Preescolar",
+		LevelID:         "lvl-9",
 		AdmissionStatus: "pending",
 	}}
 	h := handler.NewStudentsHandler(svc)
 
-	rec := postStudents(t, h, `{"curp":"HEGA050312MDFRNN08","firstName":"Ana","lastName":"Herrera","level":"primaria","gradeGroup":"4° A","guardianName":"Rosa"}`)
+	rec := postStudents(t, h, `{"curp":"HEGA050312MDFRNN08","firstName":"Ana","lastName":"Herrera","levelId":"lvl-9","gradeGroup":"4° A","guardianName":"Rosa"}`)
 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201", rec.Code)
 	}
-	if svc.got.CURP != "HEGA050312MDFRNN08" || svc.got.Level != "primaria" {
+	if svc.got.CURP != "HEGA050312MDFRNN08" || svc.got.LevelID != "lvl-9" {
 		t.Errorf("forwarded input = %+v", svc.got)
 	}
 	var out map[string]any
@@ -70,6 +71,10 @@ func TestCreateStudentReturns201AndBody(t *testing.T) {
 	}
 	if out["id"] != "stu-1" || out["admissionStatus"] != "pending" {
 		t.Errorf("body = %v", out)
+	}
+	// "level" is the school's own name for it; "levelId" is what to send back.
+	if out["level"] != "Preescolar" || out["levelId"] != "lvl-9" {
+		t.Errorf("level in body = (%v, %v)", out["level"], out["levelId"])
 	}
 }
 
@@ -84,7 +89,7 @@ func TestCreateStudentInvalidBodyIs400(t *testing.T) {
 func TestCreateStudentDuplicateIs409(t *testing.T) {
 	svc := &fakeCreator{err: connect.NewError(connect.CodeAlreadyExists, nil)}
 	h := handler.NewStudentsHandler(svc)
-	rec := postStudents(t, h, `{"curp":"HEGA050312MDFRNN08","firstName":"Ana","lastName":"Herrera","level":"primaria"}`)
+	rec := postStudents(t, h, `{"curp":"HEGA050312MDFRNN08","firstName":"Ana","lastName":"Herrera","levelId":"lvl-9"}`)
 	if rec.Code != http.StatusConflict {
 		t.Errorf("status = %d, want 409", rec.Code)
 	}
@@ -93,7 +98,7 @@ func TestCreateStudentDuplicateIs409(t *testing.T) {
 func TestCreateStudentInvalidArgumentIs400(t *testing.T) {
 	svc := &fakeCreator{err: connect.NewError(connect.CodeInvalidArgument, nil)}
 	h := handler.NewStudentsHandler(svc)
-	rec := postStudents(t, h, `{"curp":"bad","firstName":"Ana","lastName":"Herrera","level":"primaria"}`)
+	rec := postStudents(t, h, `{"curp":"bad","firstName":"Ana","lastName":"Herrera","levelId":"lvl-9"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)
 	}
@@ -102,7 +107,7 @@ func TestCreateStudentInvalidArgumentIs400(t *testing.T) {
 func TestCreateStudentInternalErrorIs500(t *testing.T) {
 	svc := &fakeCreator{err: connect.NewError(connect.CodeUnavailable, nil)}
 	h := handler.NewStudentsHandler(svc)
-	rec := postStudents(t, h, `{"curp":"HEGA050312MDFRNN08","firstName":"Ana","lastName":"Herrera","level":"primaria"}`)
+	rec := postStudents(t, h, `{"curp":"HEGA050312MDFRNN08","firstName":"Ana","lastName":"Herrera","levelId":"lvl-9"}`)
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", rec.Code)
 	}
