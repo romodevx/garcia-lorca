@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -203,6 +203,13 @@ describe("la captura de administración", () => {
     // unready: pointer-events none also hides it from the accessibility tree.
     const primary = screen.getByRole("button", { name: /Crear usuario|Enviar invitación/, hidden: true });
     expect(primary).toHaveStyle({ pointerEvents: "none" });
+
+    // pointer-events stops the mouse, not the keyboard: Tab + Enter still
+    // activates the button (a click event). The drawer must refuse on its own.
+    fireEvent.click(primary);
+    expect(admin.createUser).not.toHaveBeenCalled();
+    expect(admin.inviteUser).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Correo")).toHaveAttribute("aria-invalid", "true");
   });
 
   it("el nombre para mostrar se captura en mayúsculas", async () => {

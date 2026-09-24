@@ -26,6 +26,7 @@ export { HelpTip, type HelpTipProps } from "./HelpTip";
 export { useRequired, FALTA, type RequiredState } from "./useRequired";
 export { useFocusFirstInvalid } from "./useFocusFirstInvalid";
 export { emailShapeError } from "./emailShape";
+export { useEmailShapeOnSave, type EmailShapeOnSave } from "./useEmailShapeOnSave";
 export { useFormatError, type FormatErrorState, type FormatRule } from "./useFormatError";
 export {
   EmailField,

@@ -3,7 +3,7 @@
 import { useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import type { CreateTeacherInput, Teacher } from "../../teachers/api";
-import { EmailField, TextField, emailShapeError, useFocusFirstInvalid } from "../../_design/form";
+import { EmailField, TextField, useEmailShapeOnSave } from "../../_design/form";
 import { EmptyHint, ErrorAlert, Section } from "../config/parts";
 
 export interface TeachersPanelProps {
@@ -24,19 +24,13 @@ export function TeachersPanel({ teachers, onCreate }: TeachersPanelProps): React
   const [error, setError] = useState<string | undefined>(undefined);
   // Enter guarda sin salir del campo, así que la forma del correo también se
   // revisa aquí, al guardar, y no sólo al salir de él.
-  const [emailError, setEmailError] = useState<string | undefined>(undefined);
-  const focusFirstInvalid = useFocusFirstInvalid();
+  const emailShape = useEmailShapeOnSave();
 
   const canSubmit = firstName.trim() !== "" && lastName.trim() !== "" && email.trim() !== "" && !pending;
 
   const submit = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
-    const badEmail = emailShapeError(email);
-    setEmailError(badEmail);
-    if (badEmail !== undefined) {
-      focusFirstInvalid();
-      return;
-    }
+    if (!emailShape.check(email)) return;
     setPending(true);
     setError(undefined);
     try {
@@ -80,10 +74,12 @@ export function TeachersPanel({ teachers, onCreate }: TeachersPanelProps): React
           <EmailField
             label="Correo"
             value={email}
-            onChange={setEmail}
+            onChange={(v) => {
+              setEmail(v);
+              emailShape.forgive(v);
+            }}
             help="El correo donde el docente recibirá su acceso. Puede quedar vacío y agregarse después."
-            error={emailError}
-            onClearError={() => setEmailError(undefined)}
+            error={emailShape.error}
           />
           <Btn type="submit" icon="plus" disabled={!canSubmit}>
             Crear profesor

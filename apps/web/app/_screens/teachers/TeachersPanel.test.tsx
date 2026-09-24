@@ -21,6 +21,13 @@ describe("TeachersPanel", () => {
     expect(screen.getByLabelText(/^Correo/)).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByText(/nombre@dominio/)).toBeInTheDocument();
     expect(onCreate).not.toHaveBeenCalled();
+
+    // The red stays while the address is still wrong, and goes the moment it
+    // is right — not on the first key.
+    await user.type(screen.getByLabelText(/^Correo/), "x");
+    expect(screen.getByLabelText(/^Correo/)).toHaveAttribute("aria-invalid", "true");
+    await user.type(screen.getByLabelText(/^Correo/), ".mx");
+    expect(screen.getByLabelText(/^Correo/)).not.toHaveAttribute("aria-invalid");
   });
 
   it("con un correo bien escrito sí lo crea", async () => {
