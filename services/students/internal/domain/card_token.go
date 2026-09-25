@@ -18,8 +18,9 @@ const CardCodePrefix = "GLCARD:"
 var cardTokenShape = regexp.MustCompile(`^[A-Za-z0-9_-]{22}$`)
 
 // CardToken is what a pupil's virtual card shows as a QR. One is active per
-// pupil; revoking it (a lost phone, a card shown by somebody else) means the
-// next card shows a new one, and the old code verifies as no longer valid.
+// pupil. Revoking it (a lost phone, a card shown by somebody else) makes the old
+// code verify as no longer valid and suspends the card until the office
+// reissues it.
 type CardToken struct {
 	id        string
 	tenantID  string

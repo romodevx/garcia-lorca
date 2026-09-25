@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { StudentsError, revokeCard, verifyCard } from "./api";
+import { StudentsError, reissueCard, revokeCard, verifyCard } from "./api";
 
 const BASE = "http://gw";
 
@@ -34,5 +34,13 @@ describe("student card (tarea 13)", () => {
   it("surfaces a refused revoke", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("forbidden", { status: 403 }));
     await expect(revokeCard(BASE, "st1")).rejects.toBeInstanceOf(StudentsError);
+  });
+
+  it("reissues a suspended pupil's card", async () => {
+    const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
+    await reissueCard(BASE, "st1");
+    const [u, init] = mock.mock.calls[0] as [string, RequestInit];
+    expect(u).toBe("http://gw/api/v1/students/st1/card/reissue");
+    expect(init.method).toBe("POST");
   });
 });

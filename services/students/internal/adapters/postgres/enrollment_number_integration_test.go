@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -91,5 +92,23 @@ func TestAMatriculaClashIsNotADuplicateCURP(t *testing.T) {
 	err := repo.Create(ctx, applicant(t, "aaaaaaaa-0000-0000-0000-0000000013d2", tenant, "MATF050312MDFRNN06", ""))
 	if kind := glerrors.KindOf(err); kind != glerrors.KindInternal {
 		t.Errorf("a matrícula clash answered %v (%v); want an internal fault", kind, err)
+	}
+}
+
+// Review of task 13: past 99999 pupils in a year the matrícula has no digits
+// left; the refusal says so instead of "creating student".
+func TestAYearWithoutMatriculasLeftSaysSo(t *testing.T) {
+	const tenant = "44444444-4444-4444-4444-444444444444"
+	ctx := context.Background()
+	repo := appRepo(t, tenant)
+	if err := repo.Create(ctx, applicant(t, "aaaaaaaa-0000-0000-0000-0000000013f1", tenant, "MATG050312MDFRNN08", "")); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	if err := superDB.Exec(`UPDATE student_number_counters SET next_seq = 100000 WHERE tenant_id = ?`, tenant).Error; err != nil {
+		t.Fatalf("exhausting the counter: %v", err)
+	}
+	err := repo.Create(ctx, applicant(t, "aaaaaaaa-0000-0000-0000-0000000013f2", tenant, "MATH050312MDFRNN09", ""))
+	if err == nil || !strings.Contains(err.Error(), "matrícula") {
+		t.Errorf("an exhausted year: %v, want the matrícula named in the refusal", err)
 	}
 }

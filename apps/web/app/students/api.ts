@@ -551,9 +551,18 @@ export function verifyCard(baseURL: string, code: string): Promise<VerifiedCard>
   return postJSON<VerifiedCard>(baseURL, "/students/card/verify", { code: code.trim() });
 }
 
-/** Retires a pupil's card code; the parents' app shows a new one next. */
-export async function revokeCard(baseURL: string, studentID: string): Promise<void> {
-  const res = await authFetch(url(baseURL, `${BASE_PATH}/students/${encodeURIComponent(studentID)}/card/revoke`), {
+/** Retires a pupil's card code and suspends the card until it is reissued. */
+export function revokeCard(baseURL: string, studentID: string): Promise<void> {
+  return cardAction(baseURL, studentID, "revoke");
+}
+
+/** Gives a suspended pupil a new card. 409: the card is valid already. */
+export function reissueCard(baseURL: string, studentID: string): Promise<void> {
+  return cardAction(baseURL, studentID, "reissue");
+}
+
+async function cardAction(baseURL: string, studentID: string, action: "revoke" | "reissue"): Promise<void> {
+  const res = await authFetch(url(baseURL, `${BASE_PATH}/students/${encodeURIComponent(studentID)}/card/${action}`), {
     method: "POST",
     credentials: "include",
   });

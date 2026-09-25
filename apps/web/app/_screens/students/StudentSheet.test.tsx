@@ -14,6 +14,7 @@ vi.mock("../../students/api", async (importOriginal) => ({
   enroll: vi.fn(),
   transfer: vi.fn(),
   revokeCard: vi.fn(),
+  reissueCard: vi.fn(),
 }));
 vi.mock("../../config/api", () => ({
   listCycles: vi.fn(),
@@ -214,6 +215,7 @@ describe("la credencial en la ficha", () => {
     students.listStudents.mockResolvedValue([pupil("lv-pri")]);
     students.listEnrollments.mockResolvedValue([]);
     students.revokeCard.mockResolvedValue(undefined);
+    students.reissueCard.mockResolvedValue(undefined);
   });
 
   it("revoca la credencial tras confirmar en el mismo botón", async () => {
@@ -225,7 +227,27 @@ describe("la credencial en la ficha", () => {
     await user.click(within(sheet).getByRole("button", { name: /Confirmar: revocar/ }));
 
     await waitFor(() => expect(students.revokeCard).toHaveBeenCalledWith(expect.any(String), "stu-1"));
-    expect(await within(sheet).findByText(/La credencial anterior ya no es válida/)).toBeInTheDocument();
+    expect(await within(sheet).findByText(/queda suspendida/)).toBeInTheDocument();
+  });
+
+  // Owner's decision: a revoked card stays suspended until the office issues a
+  // new one on purpose (a stolen phone would otherwise get a valid code).
+  it("emite una credencial nueva a propósito", async () => {
+    const user = userEvent.setup();
+    const sheet = await openSheet(user, { canRevokeCard: true });
+
+    await user.click(within(sheet).getByRole("button", { name: "Emitir nueva credencial" }));
+    await waitFor(() => expect(students.reissueCard).toHaveBeenCalledWith(expect.any(String), "stu-1"));
+    expect(await within(sheet).findByText(/nueva credencial/i, { selector: "p" })).toBeInTheDocument();
+  });
+
+  it("dice que la credencial sigue vigente si no hay nada que reemitir", async () => {
+    students.reissueCard.mockRejectedValue(new studentsApi.StudentsError(409, "the pupil's card is valid; revoke it first"));
+    const user = userEvent.setup();
+    const sheet = await openSheet(user, { canRevokeCard: true });
+
+    await user.click(within(sheet).getByRole("button", { name: "Emitir nueva credencial" }));
+    expect(await within(sheet).findByRole("alert")).toHaveTextContent("La credencial sigue vigente");
   });
 
   it("no la ofrece sin el permiso", async () => {

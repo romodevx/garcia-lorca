@@ -46,6 +46,9 @@ func TestCardTokensRoundTripAndIsolation(t *testing.T) {
 	if _, found, _ := repo.ActiveCard(ctx, pupil.ID()); found {
 		t.Error("a revoked card is still active")
 	}
+	if ever, err := repo.EverIssued(ctx, pupil.ID()); err != nil || !ever {
+		t.Errorf("EverIssued after a revoke = %v (%v), want true", ever, err)
+	}
 	kept, err := repo.FindCard(ctx, card.Token())
 	if err != nil || kept.Active() {
 		t.Errorf("the revoked card = active %v (%v); want kept and inactive", kept.Active(), err)

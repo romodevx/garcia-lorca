@@ -37,18 +37,60 @@ type CardVerification struct {
 	Valid   bool
 }
 
+// CardCodeResult is what the family's card shows: its code, or that the office
+// suspended it.
+type CardCodeResult struct {
+	Code      string
+	Suspended bool
+}
+
 // CardCode returns the code a pupil's card shows, issuing one the first time.
-func (s *CardService) CardCode(ctx context.Context, studentID string) (string, error) {
+// A revoked card is suspended (the owner's decision): no new code is issued to
+// whoever holds the family's session — a stolen phone would get a valid one —
+// until the office reissues it (ReissueCard).
+func (s *CardService) CardCode(ctx context.Context, studentID string) (CardCodeResult, error) {
 	if _, err := s.pupils.FindByID(ctx, studentID); err != nil {
-		return "", err
+		return CardCodeResult{}, err
 	}
 	active, found, err := s.cards.ActiveCard(ctx, studentID)
 	if err != nil {
-		return "", err
+		return CardCodeResult{}, err
 	}
 	if found {
-		return active.Code(), nil
+		return CardCodeResult{Code: active.Code()}, nil
 	}
+	issuedBefore, err := s.cards.EverIssued(ctx, studentID)
+	if err != nil {
+		return CardCodeResult{}, err
+	}
+	if issuedBefore {
+		return CardCodeResult{Suspended: true}, nil
+	}
+	code, err := s.issue(ctx, studentID)
+	if err != nil {
+		return CardCodeResult{}, err
+	}
+	return CardCodeResult{Code: code}, nil
+}
+
+// ReissueCard gives a suspended pupil a new card, on purpose, once the office
+// trusts the phone again. A pupil whose card is valid already is KindConflict.
+func (s *CardService) ReissueCard(ctx context.Context, studentID string) error {
+	if _, err := s.pupils.FindByID(ctx, studentID); err != nil {
+		return err
+	}
+	if _, found, err := s.cards.ActiveCard(ctx, studentID); err != nil {
+		return err
+	} else if found {
+		return glerrors.New(glerrors.KindConflict, "the pupil's card is valid; revoke it first")
+	}
+	_, err := s.issue(ctx, studentID)
+	return err
+}
+
+// issue mints and stores a new active code. Two first views at once: the
+// loser shows the winner's code.
+func (s *CardService) issue(ctx context.Context, studentID string) (string, error) {
 	random, err := s.random()
 	if err != nil {
 		return "", glerrors.Wrap(glerrors.KindInternal, "minting a card code", err)
@@ -61,7 +103,6 @@ func (s *CardService) CardCode(ctx context.Context, studentID string) (string, e
 		if glerrors.KindOf(err) != glerrors.KindConflict {
 			return "", err
 		}
-		// Another first view issued it a moment ago: show that one.
 		winner, found, rerr := s.cards.ActiveCard(ctx, studentID)
 		if rerr != nil {
 			return "", rerr
@@ -74,7 +115,8 @@ func (s *CardService) CardCode(ctx context.Context, studentID string) (string, e
 	return card.Code(), nil
 }
 
-// RevokeCard retires a pupil's current code; the card shows a new one next.
+// RevokeCard retires a pupil's current code and suspends the card until the
+// office reissues it.
 func (s *CardService) RevokeCard(ctx context.Context, studentID string) error {
 	if _, err := s.pupils.FindByID(ctx, studentID); err != nil {
 		return err

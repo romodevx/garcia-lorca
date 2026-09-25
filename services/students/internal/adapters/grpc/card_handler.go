@@ -16,11 +16,22 @@ func (h *StudentsHandler) GetCardCode(ctx context.Context, req *connect.Request[
 	if h.cards == nil {
 		return nil, errCardsNotServed
 	}
-	code, err := h.cards.CardCode(ctx, req.Msg.GetStudentId())
+	got, err := h.cards.CardCode(ctx, req.Msg.GetStudentId())
 	if err != nil {
 		return nil, connectErr(err)
 	}
-	return connect.NewResponse(&studentsv1.GetCardCodeResponse{Code: code}), nil
+	return connect.NewResponse(&studentsv1.GetCardCodeResponse{Code: got.Code, Suspended: got.Suspended}), nil
+}
+
+// ReissueCard gives a suspended pupil a new card.
+func (h *StudentsHandler) ReissueCard(ctx context.Context, req *connect.Request[studentsv1.ReissueCardRequest]) (*connect.Response[studentsv1.ReissueCardResponse], error) {
+	if h.cards == nil {
+		return nil, errCardsNotServed
+	}
+	if err := h.cards.ReissueCard(ctx, req.Msg.GetStudentId()); err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.ReissueCardResponse{}), nil
 }
 
 // RevokeCard retires a pupil's current code.

@@ -243,6 +243,8 @@ type CardRepository interface {
 	SaveCard(ctx context.Context, c domain.CardToken) error
 	// RevokeCards retires every active code of a pupil.
 	RevokeCards(ctx context.Context, studentID string, at time.Time) error
+	// EverIssued reports whether the pupil ever had a card (a revoked one counts).
+	EverIssued(ctx context.Context, studentID string) (bool, error)
 	// FindCard returns the card carrying a token, active or not, or KindNotFound.
 	FindCard(ctx context.Context, token string) (domain.CardToken, error)
 }

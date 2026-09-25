@@ -2,9 +2,11 @@
 --
 -- The card's QR carries GLCARD:<token> and nothing else: 128 random bits,
 -- meaningless to anybody without a session. Staff verify it (students:read) to
--- see whose card it is and whether it still counts. One active code per pupil;
--- revoking one (a lost phone) keeps its row, so the old code verifies as "no
--- longer valid" rather than as unknown.
+-- see whose card it is and whether it still counts. One active code per pupil.
+-- Revoking one keeps its row, so the old code verifies as "no longer valid"
+-- rather than as unknown, and SUSPENDS the card (the owner's decision): no new
+-- code is issued to the family's session — a stolen phone keeps its session —
+-- until the office reissues it.
 BEGIN;
 
 CREATE TABLE student_card_tokens (

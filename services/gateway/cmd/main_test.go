@@ -2902,6 +2902,7 @@ func TestTheCardSitsBehindItsFlag(t *testing.T) {
 		{http.MethodGet, "/api/v1/family/students/stu-1/photo", "", "family-reader"},
 		{http.MethodPost, "/api/v1/students/card/verify", `{"code":"GLCARD:AQAAAAAAAAAAAAAAAAAAAA"}`, "student-reader"},
 		{http.MethodPost, "/api/v1/students/stu-1/card/revoke", "", "roles-writer"},
+		{http.MethodPost, "/api/v1/students/stu-1/card/reissue", "", "roles-writer"},
 	}
 	off := newTestGateway(t, map[string]bool{"module_students": true})
 	for _, r := range routes {
@@ -2914,8 +2915,10 @@ func TestTheCardSitsBehindItsFlag(t *testing.T) {
 	if res := doGateway(t, on, http.MethodPost, "/api/v1/students/card/verify", "family-reader", `{"code":"x"}`); res.StatusCode != http.StatusForbidden {
 		t.Errorf("a family verifying a card: %d, want 403", res.StatusCode)
 	}
-	if res := doGateway(t, on, http.MethodPost, "/api/v1/students/stu-1/card/revoke", "student-reader", ""); res.StatusCode != http.StatusForbidden {
-		t.Errorf("revoking with students:read only: %d, want 403", res.StatusCode)
+	for _, action := range []string{"revoke", "reissue"} {
+		if res := doGateway(t, on, http.MethodPost, "/api/v1/students/stu-1/card/"+action, "student-reader", ""); res.StatusCode != http.StatusForbidden {
+			t.Errorf("%s with students:read only: %d, want 403", action, res.StatusCode)
+		}
 	}
 	if res := doGateway(t, on, http.MethodPost, "/api/v1/students/card/verify", "student-reader", `{"code":"x"}`); res.StatusCode == http.StatusForbidden || res.StatusCode == http.StatusUnauthorized {
 		t.Errorf("staff verifying a card: %d, want it reachable", res.StatusCode)

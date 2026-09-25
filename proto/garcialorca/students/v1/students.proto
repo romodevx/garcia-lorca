@@ -48,8 +48,12 @@ service StudentsService {
   // GetCardCode returns the code a pupil's card shows as a QR (GLCARD:<token>),
   // issuing one the first time.
   rpc GetCardCode(GetCardCodeRequest) returns (GetCardCodeResponse);
-  // RevokeCard retires a pupil's current code; the card shows a new one next.
+  // RevokeCard retires a pupil's current code and SUSPENDS the card: no new
+  // code is issued to the family's session until the office reissues it.
   rpc RevokeCard(RevokeCardRequest) returns (RevokeCardResponse);
+  // ReissueCard gives a suspended pupil a new card, on purpose. ALREADY_EXISTS
+  // when the pupil's card is valid.
+  rpc ReissueCard(ReissueCardRequest) returns (ReissueCardResponse);
   // VerifyCard reads a scanned code: whose card it is, and whether it still
   // counts (an active code of an enrolled pupil). An unknown code is NOT_FOUND;
   // something that is not a card code, INVALID_ARGUMENT.
@@ -600,7 +604,10 @@ message GetCardCodeRequest {
 }
 
 message GetCardCodeResponse {
+  // code is empty when the card is suspended.
   string code = 1;
+  // suspended: the office revoked the card and has not reissued it.
+  bool suspended = 2;
 }
 
 message RevokeCardRequest {
@@ -608,6 +615,12 @@ message RevokeCardRequest {
 }
 
 message RevokeCardResponse {}
+
+message ReissueCardRequest {
+  string student_id = 1;
+}
+
+message ReissueCardResponse {}
 
 message VerifyCardRequest {
   string code = 1;

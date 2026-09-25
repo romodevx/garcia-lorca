@@ -48,16 +48,23 @@ function StudentCard({ card }: { card: FamilyCard }): ReactElement {
       {card.school.name !== "" && (
         <Text style={[styles.school, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{card.school.name}</Text>
       )}
-      <Photo studentId={card.studentId} name={card.name} />
+      <Photo key={card.studentId} studentId={card.studentId} name={card.name} />
       <Text style={[styles.name, { color: theme.colors.text, fontFamily: theme.fonts.display }]}>{card.name}</Text>
       <Text style={[styles.line, muted]}>{[card.level, card.gradeGroup].filter((x) => x !== "").join(" · ")}</Text>
       {card.cycle !== "" && <Text style={[styles.line, muted]}>Ciclo {card.cycle}</Text>}
       <Text style={[styles.label, muted]}>Matrícula</Text>
       <Text style={[styles.number, { color: theme.colors.text, fontFamily: theme.fonts.display }]}>{card.enrollmentNumber}</Text>
-      {/* Dark modules on white whatever the theme: a scanner needs the contrast. */}
-      <View style={styles.qrPlate} accessibilityLabel="Código QR de la credencial">
-        <QRCode value={card.qr} size={QR_SIZE} color="#000000" backgroundColor="#FFFFFF" />
-      </View>
+      {card.suspended === true || card.qr === "" ? (
+        // Revoked and not yet reissued (the owner's decision): no code at all.
+        <Text style={[styles.suspended, { color: theme.colors.bad, fontFamily: theme.fonts.uiExtra }]}>
+          Credencial suspendida. Acude a la dirección de la escuela para emitir una nueva.
+        </Text>
+      ) : (
+        // Dark modules on white whatever the theme: a scanner needs the contrast.
+        <View style={styles.qrPlate} accessibilityLabel="Código QR de la credencial">
+          <QRCode value={card.qr} size={QR_SIZE} color="#000000" backgroundColor="#FFFFFF" />
+        </View>
+      )}
     </Card>
   );
 }
@@ -106,4 +113,5 @@ const styles = StyleSheet.create({
   label: { fontSize: 13, marginTop: 10 },
   number: { fontSize: 20, letterSpacing: 1 },
   qrPlate: { marginTop: 14, padding: 12, borderRadius: 12, backgroundColor: "#FFFFFF" },
+  suspended: { marginTop: 14, fontSize: 15, textAlign: "center" },
 });

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -13,8 +14,9 @@ import (
 type (
 	CardStudents interface {
 		GetStudent(ctx context.Context, id string) (client.StudentResult, error)
-		CardCode(ctx context.Context, studentID string) (string, error)
+		CardCode(ctx context.Context, studentID string) (code string, suspended bool, err error)
 		RevokeCard(ctx context.Context, studentID string) error
+		ReissueCard(ctx context.Context, studentID string) error
 		VerifyCard(ctx context.Context, code string) (client.StudentResult, bool, error)
 	}
 	StudentPhotoReader interface {
@@ -54,7 +56,9 @@ type cardResponse struct {
 	Cycle            string               `json:"cycle"`
 	EnrollmentNumber string               `json:"enrollmentNumber"`
 	School           client.SchoolProfile `json:"school"`
-	QR               string               `json:"qr"`
+	// QR is empty while the office has the card suspended.
+	QR        string `json:"qr"`
+	Suspended bool   `json:"suspended"`
 }
 
 // FamilyCard handles GET /api/v1/family/students/{studentId}/card. Another
@@ -70,7 +74,7 @@ func (h *CardHandler) FamilyCard(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, err)
 		return
 	}
-	code, err := h.students.CardCode(ctx, studentID)
+	code, suspended, err := h.students.CardCode(ctx, studentID)
 	if err != nil {
 		writeConnectError(w, err)
 		return
@@ -89,7 +93,7 @@ func (h *CardHandler) FamilyCard(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, cardResponse{
 		StudentID: pupil.ID, Name: fullName(pupil), Level: pupil.Level, GradeGroup: pupil.GradeGroup,
-		Cycle: cycle, EnrollmentNumber: pupil.EnrollmentNumber, School: school, QR: code,
+		Cycle: cycle, EnrollmentNumber: pupil.EnrollmentNumber, School: school, QR: code, Suspended: suspended,
 	})
 }
 
@@ -145,12 +149,32 @@ func (h *CardHandler) Verify(w http.ResponseWriter, r *http.Request) {
 }
 
 // Revoke handles POST /api/v1/students/{id}/card/revoke (students:update): the
-// old code stops counting and the card shows a new one.
+// old code stops counting and the card is suspended until reissued (the
+// owner's decision: a stolen phone keeps its session, and would otherwise get a
+// valid new code).
 func (h *CardHandler) Revoke(w http.ResponseWriter, r *http.Request) {
-	if err := h.students.RevokeCard(r.Context(), r.PathValue("id")); err != nil {
+	h.change(w, r, "student card revoked", h.students.RevokeCard)
+}
+
+// Reissue handles POST /api/v1/students/{id}/card/reissue (students:update):
+// the office gives a suspended pupil a new card once it trusts the phone.
+func (h *CardHandler) Reissue(w http.ResponseWriter, r *http.Request) {
+	h.change(w, r, "student card reissued", h.students.ReissueCard)
+}
+
+// change runs a card change and leaves a record of who made it: a revoked or
+// reissued card is a security decision somebody may need to trace.
+func (h *CardHandler) change(w http.ResponseWriter, r *http.Request, event string, apply func(context.Context, string) error) {
+	studentID := r.PathValue("id")
+	if err := apply(r.Context(), studentID); err != nil {
 		writeConnectError(w, err)
 		return
 	}
+	actor := ""
+	if p, ok := middleware.PrincipalFrom(r.Context()); ok {
+		actor = p.UserID
+	}
+	slog.InfoContext(r.Context(), event, "student_id", studentID, "by_user_id", actor)
 	w.WriteHeader(http.StatusNoContent)
 }
 

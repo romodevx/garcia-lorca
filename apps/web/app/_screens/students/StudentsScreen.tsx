@@ -20,7 +20,7 @@ import {
   type Student,
 } from "../../students/api";
 import { listCycles, listGradeLevels, listGroups, listLevels, type Cycle, type GradeLevel, type Group, type Level } from "../../config/api";
-import { addNote, enrollIntoGrade, revokeCard, StudentsError, type Placement } from "../../students/api";
+import { addNote, enrollIntoGrade, reissueCard, revokeCard, StudentsError, type Placement } from "../../students/api";
 import { VerifyCardDrawer } from "./VerifyCardDrawer";
 
 import { API_URL } from "../../api-url";
@@ -910,42 +910,71 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
   );
 }
 
+/** How long the armed "Confirmar: revocar" waits before it disarms itself. */
+const CONFIRM_WINDOW_MS = 5000;
+
 /**
- * Revocar credencial (task 13): a lost phone, a card shown by somebody else. The
- * old code stops counting and the parents' app shows a new one. Irreversible,
- * so the same button asks once more before doing it.
+ * The pupil's card, from the office (task 13). Revoking suspends it (the
+ * owner's decision: a stolen phone keeps its session and would otherwise get a
+ * valid new code) and asks once more on the same button, disarming after a few
+ * seconds. "Emitir nueva credencial" gives it back, on purpose, once the
+ * office trusts the phone again.
  */
 function RevokeCard({ studentId }: { studentId: string }): ReactElement {
   const [confirming, setConfirming] = useState(false);
-  const [state, setState] = useState<"idle" | "done" | "failed">("idle");
+  const [message, setMessage] = useState<{ tone: "status" | "alert"; text: string } | undefined>(undefined);
   const [pending, setPending] = useState(false);
-  const revoke = async (): Promise<void> => {
-    if (!confirming) {
-      setConfirming(true);
-      return;
-    }
+
+  useEffect(() => {
+    if (!confirming) return;
+    const disarm = setTimeout(() => setConfirming(false), CONFIRM_WINDOW_MS);
+    return () => clearTimeout(disarm);
+  }, [confirming]);
+
+  const run = async (action: () => Promise<void>, done: string, refused: (err: unknown) => string): Promise<void> => {
     if (pending) return;
     setPending(true);
     try {
-      await revokeCard(API_URL, studentId);
-      setState("done");
-    } catch {
-      setState("failed");
+      await action();
+      setMessage({ tone: "status", text: done });
+    } catch (err) {
+      setMessage({ tone: "alert", text: refused(err) });
     } finally {
       setPending(false);
       setConfirming(false);
     }
   };
+
+  const revoke = (): void => {
+    if (!confirming) {
+      setConfirming(true);
+      return;
+    }
+    void run(() => revokeCard(API_URL, studentId),
+      "La credencial queda suspendida hasta que emitas una nueva.",
+      () => "No se pudo revocar la credencial.");
+  };
+
+  const reissue = (): void => {
+    void run(() => reissueCard(API_URL, studentId),
+      "Listo: la app de la familia ya muestra la nueva credencial.",
+      (err) => (err instanceof StudentsError && err.status === 409
+        ? "La credencial sigue vigente: revócala primero si hay que cambiarla."
+        : "No se pudo emitir la credencial."));
+  };
+
   return (
     <div style={{ display: "grid", gap: 8, padding: "18px 0 0" }}>
-      <Btn kind="ghost" icon={confirming ? "warning" : "qr"} danger={confirming} onClick={() => void revoke()}>
-        {confirming ? "Confirmar: revocar credencial" : "Revocar credencial"}
-      </Btn>
-      {state === "done" && (
-        <p role="status" style={{ fontSize: 13.5, color: "var(--text-muted)" }}>La credencial anterior ya no es válida; la app muestra una nueva.</p>
-      )}
-      {state === "failed" && (
-        <p role="alert" style={{ fontSize: 13.5, color: "var(--bad-fg)" }}>No se pudo revocar la credencial.</p>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <Btn kind="ghost" icon={confirming ? "warning" : "qr"} danger={confirming} onClick={revoke}>
+          {confirming ? "Confirmar: revocar credencial" : "Revocar credencial"}
+        </Btn>
+        <Btn kind="ghost" onClick={reissue}>Emitir nueva credencial</Btn>
+      </div>
+      {message !== undefined && (
+        <p role={message.tone} style={{ fontSize: 13.5, color: message.tone === "alert" ? "var(--bad-fg)" : "var(--text-muted)" }}>
+          {message.text}
+        </p>
       )}
     </div>
   );

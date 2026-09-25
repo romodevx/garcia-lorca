@@ -79,6 +79,18 @@ func (r *Repository) RevokeCards(ctx context.Context, studentID string, at time.
 	})
 }
 
+// EverIssued reports whether the pupil ever had a card, revoked ones included.
+func (r *Repository) EverIssued(ctx context.Context, studentID string) (bool, error) {
+	var count int64
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := tx.Model(&cardTokenModel{}).Where("student_id = ?", studentID).Limit(1).Count(&count).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "reading the pupil's cards", err)
+		}
+		return nil
+	})
+	return count > 0, err
+}
+
 // FindCard returns the card carrying a token, active or not.
 func (r *Repository) FindCard(ctx context.Context, token string) (domain.CardToken, error) {
 	var out domain.CardToken

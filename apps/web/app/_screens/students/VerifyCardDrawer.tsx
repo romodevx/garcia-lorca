@@ -87,7 +87,8 @@ export function VerifyCardDrawer({ onClose }: { onClose: () => void }): ReactEle
             {problem}
           </p>
         )}
-        {result !== undefined && <Verified card={result} />}
+        {/* Keyed by pupil: one pupil's photo never stays under the next one's name. */}
+        {result !== undefined && <Verified key={result.studentId} card={result} />}
       </div>
     </DrawerShell>
   );

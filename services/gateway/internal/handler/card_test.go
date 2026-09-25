@@ -16,16 +16,18 @@ import (
 )
 
 type fakeCards struct {
-	links    []client.GuardianLink
-	student  client.StudentResult
-	code     string
-	photo    []byte
-	profile  client.SchoolProfile
-	cycles   []client.CycleResult
-	verified client.StudentResult
-	valid    bool
-	err      error
-	revoked  string
+	links     []client.GuardianLink
+	student   client.StudentResult
+	code      string
+	suspended bool
+	reissued  string
+	photo     []byte
+	profile   client.SchoolProfile
+	cycles    []client.CycleResult
+	verified  client.StudentResult
+	valid     bool
+	err       error
+	revoked   string
 }
 
 func (f *fakeCards) ListStudentsForGuardian(_ context.Context, _ string) ([]client.GuardianLink, error) {
@@ -34,7 +36,13 @@ func (f *fakeCards) ListStudentsForGuardian(_ context.Context, _ string) ([]clie
 func (f *fakeCards) GetStudent(_ context.Context, _ string) (client.StudentResult, error) {
 	return f.student, nil
 }
-func (f *fakeCards) CardCode(_ context.Context, _ string) (string, error) { return f.code, nil }
+func (f *fakeCards) CardCode(_ context.Context, _ string) (string, bool, error) {
+	return f.code, f.suspended, nil
+}
+func (f *fakeCards) ReissueCard(_ context.Context, id string) error {
+	f.reissued = id
+	return nil
+}
 func (f *fakeCards) RevokeCard(_ context.Context, id string) error {
 	f.revoked = id
 	return nil
@@ -146,5 +154,31 @@ func TestStaffRevokeACard(t *testing.T) {
 	cardHandler(f).Revoke(rec, req)
 	if rec.Code != http.StatusNoContent || f.revoked != "stu-1" {
 		t.Errorf("revoke: %d, revoked %q", rec.Code, f.revoked)
+	}
+}
+
+// Task 13 (owner's decision): a revoked card is suspended until the office
+// reissues it; the family's card says so and carries no code.
+func TestASuspendedCardCarriesNoCode(t *testing.T) {
+	f := &fakeCards{
+		links: []client.GuardianLink{{StudentID: "stu-1"}}, suspended: true,
+		student: client.StudentResult{ID: "stu-1", FirstName: "Zoe", LastName: "Villalobos"},
+	}
+	rec := httptest.NewRecorder()
+	cardHandler(f).FamilyCard(rec, asGuardian(httptest.NewRequest(http.MethodGet, "/api/v1/family/students/stu-1/card", nil), "stu-1"))
+
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"suspended":true`) || !strings.Contains(rec.Body.String(), `"qr":""`) {
+		t.Errorf("suspended card: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestStaffReissueACard(t *testing.T) {
+	f := &fakeCards{}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/students/stu-1/card/reissue", nil)
+	req.SetPathValue("id", "stu-1")
+	rec := httptest.NewRecorder()
+	cardHandler(f).Reissue(rec, req)
+	if rec.Code != http.StatusNoContent || f.reissued != "stu-1" {
+		t.Errorf("reissue: %d, reissued %q", rec.Code, f.reissued)
 	}
 }

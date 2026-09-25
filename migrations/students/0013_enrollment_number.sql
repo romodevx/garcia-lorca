@@ -12,6 +12,9 @@
 -- by tenant all the same, for a role that bypasses RLS.
 BEGIN;
 
+-- The backfill and the constraints lock students; never wait long behind a
+-- read the previous revision is running (as 0006 does).
+SET LOCAL lock_timeout = '5s';
 SET LOCAL app.current_tenant = '00000000-0000-0000-0000-000000000001';
 
 CREATE TABLE student_number_counters (
@@ -52,7 +55,9 @@ SELECT tenant_id, EXTRACT(YEAR FROM created_at AT TIME ZONE 'UTC')::int, count(*
 -- The application gives it itself (the same counter), so this only ever fills
 -- the gap.
 CREATE FUNCTION students_assign_enrollment_number() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $$
 DECLARE
     y   integer;
     seq integer;

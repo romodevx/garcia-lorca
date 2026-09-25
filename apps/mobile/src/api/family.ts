@@ -221,7 +221,10 @@ export interface FamilyCard {
   cycle: string;
   enrollmentNumber: string;
   school: CardSchool;
+  /** Empty while the school has the card suspended. */
   qr: string;
+  /** The school revoked the card and has not issued a new one yet. */
+  suspended?: boolean;
 }
 
 /** Reads one child's virtual card. */

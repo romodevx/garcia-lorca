@@ -70,6 +70,9 @@ func (r *Repository) Create(ctx context.Context, s *domain.Student) error {
 	})
 }
 
+// maxEnrollmentSeq is the last number a matrícula's five digits can carry.
+const maxEnrollmentSeq = 99999
+
 // nextEnrollmentNumber allocates the school's next matrícula for the year of
 // this transaction (task 13, migration 0013), under the counter row's own lock.
 // Per school: a SEQUENCE is per database and ignores RLS, so two schools would
@@ -86,6 +89,11 @@ func (r *Repository) nextEnrollmentNumber(tx *gorm.DB) (string, error) {
 	               RETURNING year, next_seq - 1 AS seq`, r.tenantID).Scan(&got).Error
 	if err != nil {
 		return "", glerrors.Wrap(glerrors.KindInternal, "allocating a matrícula", err)
+	}
+	if got.Seq > maxEnrollmentSeq {
+		// Five digits: the year has no matrículas left. Said as such, not as a
+		// CHECK violation reported as "creating student".
+		return "", glerrors.New(glerrors.KindInternal, "no matrícula numbers left for this year")
 	}
 	return domain.FormatEnrollmentNumber(got.Year, got.Seq), nil
 }

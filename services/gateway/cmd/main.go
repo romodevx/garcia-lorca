@@ -721,6 +721,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	}
 	mux.Handle("POST /api/v1/students/card/verify", cardStaff("students:read", cardH.Verify))
 	mux.Handle("POST /api/v1/students/{id}/card/revoke", cardStaff("students:update", cardH.Revoke))
+	mux.Handle("POST /api/v1/students/{id}/card/reissue", cardStaff("students:update", cardH.Reissue))
 
 	// Phase 6 iam admin (user/role CRUD): flag-guarded (module_iam), authenticated
 	// + rotation-enforced, permission-gated. User routes need users:read (GET) /

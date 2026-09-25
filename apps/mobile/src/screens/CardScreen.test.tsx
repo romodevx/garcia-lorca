@@ -67,4 +67,14 @@ describe("CardScreen (tarea 13)", () => {
 
     expect(await screen.findByText("Reintentar")).toBeTruthy();
   });
+
+  // Owner's decision: a revoked card stays suspended until the office issues a
+  // new one; the app shows no code meanwhile.
+  it("says the card is suspended, and shows no QR", async () => {
+    mockFetch({ ...card, qr: "", suspended: true });
+    await renderWithProviders(<CardScreen />);
+
+    expect(await screen.findByText(/Credencial suspendida/)).toBeTruthy();
+    expect(screen.queryByTestId("card-qr")).toBeNull();
+  });
 });

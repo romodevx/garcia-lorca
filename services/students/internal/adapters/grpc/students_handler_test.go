@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"time"
 	"testing"
+	"time"
 
 	connect "connectrpc.com/connect"
 
@@ -487,6 +487,15 @@ func (m *memCards) RevokeCards(_ context.Context, studentID string, at time.Time
 	return nil
 }
 
+func (m *memCards) EverIssued(_ context.Context, studentID string) (bool, error) {
+	for _, c := range m.byToken {
+		if c.StudentID() == studentID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (m *memCards) FindCard(_ context.Context, token string) (domain.CardToken, error) {
 	c, ok := m.byToken[token]
 	if !ok {
@@ -522,6 +531,17 @@ func TestCardRPCs(t *testing.T) {
 	}
 	if _, err := h.RevokeCard(ctx, connect.NewRequest(&studentsv1.RevokeCardRequest{StudentId: pupil.GetId()})); err != nil {
 		t.Fatalf("RevokeCard: %v", err)
+	}
+	// Revoked: suspended, no code, until the office reissues it.
+	suspended, err := h.GetCardCode(ctx, connect.NewRequest(&studentsv1.GetCardCodeRequest{StudentId: pupil.GetId()}))
+	if err != nil || !suspended.Msg.GetSuspended() || suspended.Msg.GetCode() != "" {
+		t.Fatalf("after revoking = %+v (%v), want suspended", suspended.Msg, err)
+	}
+	if _, err := h.ReissueCard(ctx, connect.NewRequest(&studentsv1.ReissueCardRequest{StudentId: pupil.GetId()})); err != nil {
+		t.Fatalf("ReissueCard: %v", err)
+	}
+	if _, err := h.ReissueCard(ctx, connect.NewRequest(&studentsv1.ReissueCardRequest{StudentId: pupil.GetId()})); connect.CodeOf(err) != connect.CodeAlreadyExists {
+		t.Errorf("reissuing a valid card: %v, want AlreadyExists", connect.CodeOf(err))
 	}
 	if _, err := h.VerifyCard(ctx, connect.NewRequest(&studentsv1.VerifyCardRequest{Code: "GLCARD:ZZZZZZZZZZZZZZZZZZZZZZ"})); connect.CodeOf(err) != connect.CodeNotFound {
 		t.Errorf("unknown code: %v (%v), want NotFound", connect.CodeOf(err), err)

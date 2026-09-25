@@ -177,13 +177,20 @@ func (c *StudentsClient) GetStudent(ctx context.Context, id string) (StudentResu
 
 // --- the virtual card (task 13) ---------------------------------------------
 
-// CardCode returns the code a pupil's card shows (GLCARD:<token>).
-func (c *StudentsClient) CardCode(ctx context.Context, studentID string) (string, error) {
+// CardCode returns the code a pupil's card shows (GLCARD:<token>), or that the
+// office has it suspended.
+func (c *StudentsClient) CardCode(ctx context.Context, studentID string) (string, bool, error) {
 	res, err := c.rpc.GetCardCode(ctx, connect.NewRequest(&studentsv1.GetCardCodeRequest{StudentId: studentID}))
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	return res.Msg.GetCode(), nil
+	return res.Msg.GetCode(), res.Msg.GetSuspended(), nil
+}
+
+// ReissueCard gives a suspended pupil a new card.
+func (c *StudentsClient) ReissueCard(ctx context.Context, studentID string) error {
+	_, err := c.rpc.ReissueCard(ctx, connect.NewRequest(&studentsv1.ReissueCardRequest{StudentId: studentID}))
+	return err
 }
 
 // RevokeCard retires a pupil's current card code.

@@ -69,4 +69,24 @@ describe("VerifyCardDrawer (tarea 13)", () => {
     expect(api.verifyCard).not.toHaveBeenCalled();
     expect(screen.getByLabelText(/Código de la credencial/)).toHaveFocus();
   });
+
+  // Review of task 13: the staff compare the photo with the face in front of
+  // them, so one pupil's photo must never stay under the next pupil's name.
+  it("never shows the previous pupil's photo under the next one's name", async () => {
+    const createObjectURL = vi.fn(() => "blob:photo-of-zoe");
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() }));
+    api.verifyCard.mockResolvedValueOnce(zoe).mockResolvedValueOnce({ ...zoe, studentId: "st2", name: "Iker Reyes" });
+    api.getPhotoBlob.mockResolvedValueOnce(new Blob(["jpg"])).mockResolvedValueOnce(null);
+    const user = userEvent.setup();
+    render(<VerifyCardDrawer onClose={() => {}} />);
+    const field = screen.getByLabelText(/Código de la credencial/);
+
+    await user.type(field, "GLCARD:AQAAAAAAAAAAAAAAAAAAAA{Enter}");
+    expect(await screen.findByAltText("Foto de Zoe Villalobos")).toBeInTheDocument();
+
+    await user.type(field, "GLCARD:AgAAAAAAAAAAAAAAAAAAAA{Enter}");
+    expect(await screen.findByText("Iker Reyes")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("img")).toBeNull());
+    expect(screen.getByText("IR")).toBeInTheDocument();
+  });
 });
