@@ -1257,10 +1257,11 @@ func lockedChargesOf(tx *gorm.DB, studentID string) ([]ports.ChargeWithPaid, err
 // because the deposit settled their month (task 9); left standing, a void and a
 // re-key dated earlier would keep the days of the wrong date, since a row
 // already written is subtracted from what the month earns, never shrunk.
-func cancelUnpaidSurchargesOf(tx *gorm.DB, depositID string) error {
+func cancelUnpaidSurchargesOf(tx *gorm.DB, studentID, depositID string) error {
 	var rows []chargeModel
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("external_ref LIKE ? AND status <> ?", "dailyfee:%:"+depositID, domain.StatusCancelled).
+		// The student narrows it to an index: the ref's leading wildcard cannot.
+		Where("student_id = ? AND external_ref LIKE ? AND status <> ?", studentID, "dailyfee:%:"+depositID, domain.StatusCancelled).
 		Find(&rows).Error; err != nil {
 		return glerrors.Wrap(glerrors.KindInternal, "listing the deposit's surcharges", err)
 	}
@@ -1524,7 +1525,7 @@ func (r *Repository) VoidDeposit(ctx context.Context, d domain.Deposit) error {
 			}
 		}
 
-		if err := cancelUnpaidSurchargesOf(tx, d.ID()); err != nil {
+		if err := cancelUnpaidSurchargesOf(tx, d.StudentID(), d.ID()); err != nil {
 			return err
 		}
 

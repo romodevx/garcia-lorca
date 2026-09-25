@@ -618,7 +618,7 @@ func (f *fakeRepo) VoidDeposit(_ context.Context, d domain.Deposit) error {
 				c.Status() == domain.StatusCancelled || f.paidFor(id) > 0 {
 				continue
 			}
-			cancelled, err := c.Cancel()
+			cancelled, err := c.CancelIfUnpaid(f.paidFor(id))
 			if err != nil {
 				return err
 			}
