@@ -528,3 +528,36 @@ export function voidNote(baseURL: string, studentId: string, noteId: string): Pr
     {},
   );
 }
+
+// --- the virtual card (task 13) ---------------------------------------------
+
+/** What a scanned card says: whose it is, and whether it still counts. */
+export interface VerifiedCard {
+  valid: boolean;
+  studentId: string;
+  name: string;
+  level: string;
+  gradeGroup: string;
+  enrollmentNumber: string;
+  admissionStatus: string;
+}
+
+/**
+ * Verifies a scanned code (a USB reader types it and presses Enter). The code
+ * travels in the body, never the URL, so no log keeps it. 404: no card ever
+ * carried it; 400: it is not a card code.
+ */
+export function verifyCard(baseURL: string, code: string): Promise<VerifiedCard> {
+  return postJSON<VerifiedCard>(baseURL, "/students/card/verify", { code: code.trim() });
+}
+
+/** Retires a pupil's card code; the parents' app shows a new one next. */
+export async function revokeCard(baseURL: string, studentID: string): Promise<void> {
+  const res = await authFetch(url(baseURL, `${BASE_PATH}/students/${encodeURIComponent(studentID)}/card/revoke`), {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw await studentsFailure(res);
+  }
+}

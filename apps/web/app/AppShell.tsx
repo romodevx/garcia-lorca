@@ -184,6 +184,8 @@ export function AppShell(): ReactElement {
   // The enrollment surface is gated by module_students (UX-only; the gateway is
   // the boundary). The "students" module (Estudiantes) opens this surface.
   const studentsEnabled = useFlag("module_students");
+  // The virtual card (task 13): verified and revoked from Alumnos.
+  const cardEnabled = useFlag("module_student_card");
   // The grade-capture surface is gated by module_grades (UX-only; the gateway is
   // the boundary). The "grades" module (Calificaciones) opens this surface.
   const gradesEnabled = useFlag("module_grades");
@@ -576,6 +578,8 @@ export function AppShell(): ReactElement {
             onBack={home}
             onEdit={canEditStudents ? editStudent : undefined}
             canWriteNotes={principal?.permissions?.includes("students:notes_write") === true}
+            canVerifyCard={cardEnabled}
+            canRevokeCard={cardEnabled && canEditStudents}
           />
         ) : (
           // Flag OFF: never render the enrollment surface; show the friendly stub

@@ -20,7 +20,8 @@ import {
   type Student,
 } from "../../students/api";
 import { listCycles, listGradeLevels, listGroups, listLevels, type Cycle, type GradeLevel, type Group, type Level } from "../../config/api";
-import { addNote, enrollIntoGrade, StudentsError, type Placement } from "../../students/api";
+import { addNote, enrollIntoGrade, revokeCard, StudentsError, type Placement } from "../../students/api";
+import { VerifyCardDrawer } from "./VerifyCardDrawer";
 
 import { API_URL } from "../../api-url";
 import { csvName, downloadCsv, toCsv, type CsvColumn } from "../../_lib/csv";
@@ -427,6 +428,7 @@ function StudentSheet({
   onClose,
   onPlaced,
   onEdit,
+  canRevokeCard = false,
 }: {
   st: Student;
   groups: readonly Group[];
@@ -438,6 +440,8 @@ function StudentSheet({
   onPlaced: (message: string) => void;
   /** Absent when the caller cannot edit a pupil's file. */
   onEdit?: () => void;
+  /** module_student_card and students:update: the card can be revoked here. */
+  canRevokeCard?: boolean;
 }): ReactElement {
   const rows: [string, string][] = [
     ["Matrícula", st.enrollmentNumber ?? ""],
@@ -543,6 +547,7 @@ function StudentSheet({
             </div>
           ))}
           <ContactsPanel studentId={st.id} />
+          {canRevokeCard && <RevokeCard studentId={st.id} />}
           {current === "failed" && (
             <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 13.5, padding: "18px 0 0" }}>
               No pudimos leer su inscripción de este ciclo. Cierra la ficha y vuelve a abrirla.
@@ -603,6 +608,10 @@ export interface StudentsScreenProps {
   onEdit?: (studentId: string) => void;
   /** students:notes_write: the quick-add offers a first note. */
   canWriteNotes?: boolean;
+  /** module_student_card: the staff verify a scanned card (task 13). */
+  canVerifyCard?: boolean;
+  /** module_student_card and students:update: a card can be revoked. */
+  canRevokeCard?: boolean;
 }
 
 /** What the school reads in Excel, in the order the table shows it. */
@@ -616,7 +625,8 @@ const EXPORT_COLUMNS: readonly CsvColumn<Student>[] = [
   { label: "Estado", value: (s) => statusOf(s.admissionStatus).label },
 ];
 
-export function StudentsScreen({ onBack, onEdit, canWriteNotes = false }: StudentsScreenProps): ReactElement {
+export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerifyCard = false, canRevokeCard = false }: StudentsScreenProps): ReactElement {
+  const [verifying, setVerifying] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
@@ -775,6 +785,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false }: Studen
           </div>
         </div>
         <div style={{ display: "flex", gap: 12 }}>
+          {canVerifyCard && <Btn kind="ghost" icon="qr" onClick={() => setVerifying(true)}>Verificar credencial</Btn>}
           <Btn kind="ghost" icon="download" onClick={() => exportView()}>Exportar</Btn>
           <Btn icon="plus" onClick={() => setAdd(true)} style={{ height: 52, fontSize: 16.5 }}>Nuevo alumno</Btn>
         </div>
@@ -888,13 +899,55 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false }: Studen
       <button onClick={() => setAdd(true)} title="Nuevo alumno" style={{ position: "fixed", right: 32, bottom: 32, zIndex: 50, height: 60, padding: "0 26px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 10, background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16.5, cursor: "pointer", boxShadow: "0 10px 30px color-mix(in oklab, var(--lime) 45%, transparent)" }}><Icon name="plus" size={22} stroke={2.6} />Nuevo alumno</button>
 
       {add && <QuickAdd onClose={() => setAdd(false)} onSave={onSave} levels={levels} withNote={canWriteNotes} />}
-      {sheet !== null && <StudentSheet st={sheet} groups={groups} cycleId={groupsCycleId} gradeLevels={gradeLevels} gradeLevelsFailed={gradeLevelsFailed} onClose={() => setSheet(null)} onPlaced={onPlaced} onEdit={onEdit === undefined ? undefined : () => onEdit(sheet.id)} />}
+      {sheet !== null && <StudentSheet st={sheet} groups={groups} cycleId={groupsCycleId} gradeLevels={gradeLevels} gradeLevelsFailed={gradeLevelsFailed} onClose={() => setSheet(null)} onPlaced={onPlaced} onEdit={onEdit === undefined ? undefined : () => onEdit(sheet.id)} canRevokeCard={canRevokeCard} />}
+      {verifying && <VerifyCardDrawer onClose={() => setVerifying(false)} />}
       {toast !== null && (
         <div style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>
           <Icon name="check" size={20} stroke={2.6} />{toast}
         </div>
       )}
     </Page>
+  );
+}
+
+/**
+ * Revocar credencial (task 13): a lost phone, a card shown by somebody else. The
+ * old code stops counting and the parents' app shows a new one. Irreversible,
+ * so the same button asks once more before doing it.
+ */
+function RevokeCard({ studentId }: { studentId: string }): ReactElement {
+  const [confirming, setConfirming] = useState(false);
+  const [state, setState] = useState<"idle" | "done" | "failed">("idle");
+  const [pending, setPending] = useState(false);
+  const revoke = async (): Promise<void> => {
+    if (!confirming) {
+      setConfirming(true);
+      return;
+    }
+    if (pending) return;
+    setPending(true);
+    try {
+      await revokeCard(API_URL, studentId);
+      setState("done");
+    } catch {
+      setState("failed");
+    } finally {
+      setPending(false);
+      setConfirming(false);
+    }
+  };
+  return (
+    <div style={{ display: "grid", gap: 8, padding: "18px 0 0" }}>
+      <Btn kind="ghost" icon={confirming ? "warning" : "qr"} danger={confirming} onClick={() => void revoke()}>
+        {confirming ? "Confirmar: revocar credencial" : "Revocar credencial"}
+      </Btn>
+      {state === "done" && (
+        <p role="status" style={{ fontSize: 13.5, color: "var(--text-muted)" }}>La credencial anterior ya no es válida; la app muestra una nueva.</p>
+      )}
+      {state === "failed" && (
+        <p role="alert" style={{ fontSize: 13.5, color: "var(--bad-fg)" }}>No se pudo revocar la credencial.</p>
+      )}
+    </div>
   );
 }
 
