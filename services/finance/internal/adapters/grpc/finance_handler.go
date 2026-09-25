@@ -407,7 +407,6 @@ func parseIncomeDate(raw string) (time.Time, error) {
 	return d, nil
 }
 
-// VoidDeposit cancels a deposit and releases what it settled.
 // GetDepositReceipt returns a deposit and what it paid, concept by concept.
 func (h *FinanceHandler) GetDepositReceipt(ctx context.Context, req *connect.Request[financev1.GetDepositReceiptRequest]) (*connect.Response[financev1.GetDepositReceiptResponse], error) {
 	got, err := h.finance.DepositReceipt(ctx, req.Msg.GetDepositId())
@@ -426,6 +425,7 @@ func (h *FinanceHandler) GetDepositReceipt(ctx context.Context, req *connect.Req
 	}), nil
 }
 
+// VoidDeposit cancels a deposit and releases what it settled.
 func (h *FinanceHandler) VoidDeposit(ctx context.Context, req *connect.Request[financev1.VoidDepositRequest]) (*connect.Response[financev1.VoidDepositResponse], error) {
 	if err := h.finance.VoidDeposit(ctx, req.Msg.GetId(), req.Msg.GetReason()); err != nil {
 		return nil, connectErr(err)

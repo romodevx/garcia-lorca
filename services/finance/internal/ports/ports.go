@@ -205,7 +205,6 @@ type IncomeLine struct {
 	AmountCents int64
 }
 
-// DepositRecord is a stored deposit with what it did.
 // ReceiptLine is one concept a deposit paid, as its receipt prints it (task 12).
 type ReceiptLine struct {
 	ChargeID    string
@@ -225,6 +224,7 @@ type DepositReceipt struct {
 	UnallocatedCents int64
 }
 
+// DepositRecord is a stored deposit with what it did.
 type DepositRecord struct {
 	Deposit          domain.Deposit
 	Surcharges       []domain.Charge

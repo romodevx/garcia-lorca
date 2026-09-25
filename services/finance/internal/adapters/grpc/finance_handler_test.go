@@ -871,7 +871,7 @@ func TestGetDepositReceipt(t *testing.T) {
 		},
 		UnallocatedCents: 10000,
 	}
-	res, err := f.h.GetDepositReceipt(context.Background(), connect.NewRequest(&financev1.GetDepositReceiptRequest{DepositId: "dep-1"}))
+	res, err := f.h.GetDepositReceipt(context.Background(), connect.NewRequest(&financev1.GetDepositReceiptRequest{DepositId: "62000000-0000-0000-0000-000000000001"}))
 	if err != nil {
 		t.Fatalf("GetDepositReceipt: %v", err)
 	}

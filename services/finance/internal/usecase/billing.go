@@ -491,7 +491,7 @@ func (s *FinanceService) accrueLateFees(
 				description: fmt.Sprintf("%s · %s", lateFeeConceptName, c.Charge.Description()),
 				amount:      plan.LateFeeCents(),
 				due:         accruedAt,
-				ref:         fmt.Sprintf("latefee:%s:%s", c.Charge.ID(), accruedAt.Format("2006-01")),
+				ref:         fmt.Sprintf("%s%s:%s", domain.LateFeeRefPrefix, c.Charge.ID(), accruedAt.Format("2006-01")),
 			})
 			if err != nil {
 				return nil, err

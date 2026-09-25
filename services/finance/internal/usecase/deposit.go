@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -526,15 +527,20 @@ func (s *FinanceService) DailyCashUp(ctx context.Context, day time.Time) (CashUp
 	return cut, nil
 }
 
-// ListDeposits returns a student's deposits, newest first.
 // DepositReceipt returns a deposit and what it paid, for its receipt (task 12).
+// An id that cannot be a deposit's is "no such receipt" — never a query the
+// database refuses (22P02) and reports as an internal error.
 func (s *FinanceService) DepositReceipt(ctx context.Context, id string) (ports.DepositReceipt, error) {
-	if strings.TrimSpace(id) == "" {
-		return ports.DepositReceipt{}, glerrors.New(glerrors.KindInvalid, "deposit id is required")
+	if !uuidShape.MatchString(id) {
+		return ports.DepositReceipt{}, glerrors.ErrNotFound
 	}
 	return s.repo.DepositReceipt(ctx, id)
 }
 
+// uuidShape is the canonical 8-4-4-4-12 form: a shape check, not a parse.
+var uuidShape = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// ListDeposits returns a student's deposits, newest first.
 func (s *FinanceService) ListDeposits(ctx context.Context, studentID string) ([]domain.Deposit, error) {
 	return s.repo.ListDeposits(ctx, studentID)
 }
@@ -1041,16 +1047,16 @@ func (p *depositPlanner) earlyPayment(c ports.ChargeWithPaid, budget int64) (dom
 }
 
 // surchargeRefPrefix is how a materialised daily surcharge names the charge it
-// belongs to: "dailyfee:<chargeID>:<depositID>".
-const surchargeRefPrefix = "dailyfee:"
+// belongs to (domain.DailyFeeRefPrefix).
+const surchargeRefPrefix = domain.DailyFeeRefPrefix
 
 func surchargeRef(chargeID, depositID string) string {
 	return surchargeRefPrefix + chargeID + ":" + depositID
 }
 
-// lateFeeRefPrefix is how the billing run names a monthly surcharge:
-// "latefee:<chargeID>:<YYYY-MM>".
-const lateFeeRefPrefix = "latefee:"
+// lateFeeRefPrefix is how the billing run names a monthly surcharge
+// (domain.LateFeeRefPrefix).
+const lateFeeRefPrefix = domain.LateFeeRefPrefix
 
 // feeParent is the month a written-down surcharge belongs to, daily or monthly.
 func feeParent(ref string) (string, bool) {
