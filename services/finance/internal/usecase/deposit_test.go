@@ -143,6 +143,86 @@ func TestSettlingTheMonthLeavesItsSurchargeOwed(t *testing.T) {
 	}
 }
 
+// Money that reaches part of the surcharge writes it once: the settled month
+// and the allocation must not each add their own row.
+func TestAPartlyPaidSurchargeIsWrittenOnce(t *testing.T) {
+	f := depositFixture(t)
+
+	got := deposit(t, f, 330000, "2026-10-10")
+
+	if len(got.Surcharges) != 1 || got.Surcharges[0].Amount().Int64() != 30000 {
+		t.Fatalf("surcharges = %d rows, want one row of 30000", len(got.Surcharges))
+	}
+	if len(got.Allocations) != 2 || got.Allocations[1].Amount().Int64() != 10000 {
+		t.Errorf("allocations = %d, want September and $100 on its surcharge", len(got.Allocations))
+	}
+}
+
+// Task 9: a deposit keyed on the wrong date and voided takes its surcharge
+// with it. Re-keyed on the right, earlier date, the family owes that date's
+// days — not the wrong date's, which a row left standing would keep.
+func TestVoidAndReKeyEarlierOwesTheEarlierDays(t *testing.T) {
+	f := depositFixture(t)
+	f.clock = time.Date(2026, time.October, 20, 12, 0, 0, 0, time.UTC)
+
+	wrong := deposit(t, f, 320000, "2026-10-20")
+	if len(wrong.Surcharges) != 1 {
+		t.Fatalf("wrong-date deposit wrote %d surcharges, want 1", len(wrong.Surcharges))
+	}
+	if err := f.svc.VoidDeposit(context.Background(), wrong.Deposit.ID(), "fecha equivocada"); err != nil {
+		t.Fatalf("VoidDeposit: %v", err)
+	}
+
+	right := deposit(t, f, 320000, "2026-10-10")
+	if len(right.Surcharges) != 1 || right.Surcharges[0].Amount().Int64() != 30000 {
+		t.Fatalf("re-keyed surcharges = %+v, want the $300 of 10 October", right.Surcharges)
+	}
+}
+
+// Task 9: a month the reward alone closes — a part payment left less than the
+// reward — still keeps the surcharge it earned. The reward is capped at what the
+// month owes, and a month closed without money is settled all the same.
+func TestAMonthClosedByTheRewardKeepsItsSurcharge(t *testing.T) {
+	f := prontoPagoFixture(t)
+	f.clock = time.Date(2026, time.October, 20, 12, 0, 0, 0, time.UTC)
+	runOn(t, f, "2026-10-20")
+	charges, err := f.svc.ListCharges(context.Background(), testStudent, "")
+	if err != nil {
+		t.Fatalf("ListCharges: %v", err)
+	}
+	var october domain.Charge
+	for _, c := range charges {
+		if c.Charge.ExternalRef() == "tuition:"+testCycle+":"+testStudent+":2026-10" {
+			october = c.Charge
+		}
+	}
+	// $50 of October left, less than the $100 reward.
+	if _, _, err := f.svc.RegisterPaymentAt(context.Background(), october.ID(), 315000, domain.MethodCash, "", "",
+		time.Date(2026, time.October, 1, 0, 0, 0, 0, time.UTC), ""); err != nil {
+		t.Fatalf("part payment: %v", err)
+	}
+
+	// September granted ($3,100) and its forty days ($400): nothing reaches
+	// October (due Monday the 12th), which the reward closes, nor its eight days.
+	got, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 350000, Method: domain.MethodCash,
+		PaidAt: time.Date(2026, time.October, 20, 0, 0, 0, 0, time.UTC), IdempotencyKey: "dep-granted",
+		GrantEarlyPayment: true,
+	})
+	if err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+	var octoberFee int64
+	for _, fee := range got.Surcharges {
+		if strings.Contains(fee.ExternalRef(), october.ID()) {
+			octoberFee = fee.Amount().Int64()
+		}
+	}
+	if octoberFee != 8000 {
+		t.Errorf("October's surcharge written = %d, want 8000 — eight days, kept though the reward closed the month", octoberFee)
+	}
+}
+
 // Money beyond the debt is the family's credit, not an error. Refusing it sends
 // a parent away from the counter with cash in hand.
 //

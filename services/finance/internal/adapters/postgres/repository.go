@@ -1252,6 +1252,45 @@ func lockedChargesOf(tx *gorm.DB, studentID string) ([]ports.ChargeWithPaid, err
 	return withPaidTotals(tx, rows)
 }
 
+// cancelUnpaidSurchargesOf cancels the daily surcharges a voided deposit wrote
+// ("dailyfee:<month>:<deposit>") that nothing else has paid. They exist only
+// because the deposit settled their month (task 9); left standing, a void and a
+// re-key dated earlier would keep the days of the wrong date, since a row
+// already written is subtracted from what the month earns, never shrunk.
+func cancelUnpaidSurchargesOf(tx *gorm.DB, depositID string) error {
+	var rows []chargeModel
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("external_ref LIKE ? AND status <> ?", "dailyfee:%:"+depositID, domain.StatusCancelled).
+		Find(&rows).Error; err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "listing the deposit's surcharges", err)
+	}
+	for _, row := range rows {
+		paid, err := paidFor(tx, row.ID)
+		if err != nil {
+			return err
+		}
+		if paid > 0 {
+			// Another deposit paid it: it is that deposit's debt now.
+			continue
+		}
+		charge, err := toDomainCharge(row, paid)
+		if err != nil {
+			return err
+		}
+		cancelled, err := charge.CancelIfUnpaid(paid)
+		if err != nil {
+			return err
+		}
+		if err := tx.Model(&chargeModel{}).Where("id = ?", row.ID).Updates(map[string]any{
+			"status":     cancelled.Status(),
+			"updated_at": gorm.Expr("now()"),
+		}).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "cancelling the deposit's surcharge", err)
+		}
+	}
+	return nil
+}
+
 // depositByIdempotencyKey finds a deposit already stored under key. An empty key
 // never matches: it means the caller opted out of deduplication.
 func depositByIdempotencyKey(tx *gorm.DB, key string) (domain.Deposit, bool, error) {
@@ -1483,6 +1522,10 @@ func (r *Repository) VoidDeposit(ctx context.Context, d domain.Deposit) error {
 			if err := tx.Model(&chargeModel{}).Where("id = ?", chargeID).Updates(updates).Error; err != nil {
 				return glerrors.Wrap(glerrors.KindInternal, "restoring charge status", err)
 			}
+		}
+
+		if err := cancelUnpaidSurchargesOf(tx, d.ID()); err != nil {
+			return err
 		}
 
 		res := tx.Model(&depositModel{}).Where("id = ? AND voided_at IS NULL", d.ID()).Updates(map[string]any{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -609,6 +610,19 @@ func (f *fakeRepo) VoidDeposit(_ context.Context, d domain.Deposit) error {
 		for chargeID := range touched {
 			c := f.charges[chargeID]
 			f.charges[chargeID] = c.WithStatus(f.paidFor(chargeID))
+		}
+		// As the repository does: the daily surcharges this deposit wrote go
+		// with it, unless something else paid them.
+		for id, c := range f.charges {
+			if !strings.HasPrefix(c.ExternalRef(), "dailyfee:") || !strings.HasSuffix(c.ExternalRef(), ":"+d.ID()) ||
+				c.Status() == domain.StatusCancelled || f.paidFor(id) > 0 {
+				continue
+			}
+			cancelled, err := c.Cancel()
+			if err != nil {
+				return err
+			}
+			f.charges[id] = cancelled
 		}
 		return nil
 	}

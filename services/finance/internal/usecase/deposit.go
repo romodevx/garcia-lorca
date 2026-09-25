@@ -859,7 +859,8 @@ func settledWithoutFee(derived []derivedFee, allocations []domain.Allocation) []
 	}
 	var out []domain.Charge
 	for _, d := range derived {
-		if d.parentDue > 0 && paid[d.parentID] >= d.parentDue {
+		// parentDue <= 0: the reward alone closed the month, no money needed.
+		if paid[d.parentID] >= d.parentDue {
 			out = append(out, d.fee)
 		}
 	}
@@ -1010,6 +1011,9 @@ func (p *depositPlanner) earlyPayment(c ports.ChargeWithPaid, budget int64) (dom
 		// reason, so a report can always tell the rule from the decision.
 		discount, reason = p.policy.EarlyPaymentCents, domain.ReasonEarlyPaymentGranted
 	}
+	// Never more than the month still owes, as the quote caps it: a reward
+	// larger than the balance would push the charge below what was paid.
+	discount = min(discount, owed(c))
 	if discount <= 0 || budget < owed(c)-discount {
 		return domain.Charge{}, false, nil
 	}
