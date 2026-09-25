@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"strings"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -21,7 +22,19 @@ type Student struct {
 	guardianName string
 	status       AdmissionStatus
 	profile      Profile
+	// enrollmentNumber is the matrícula (task 13): <year>-<five digits>, one
+	// run per school and year, given when the pupil is first stored.
+	enrollmentNumber string
 }
+
+// AssignEnrollmentNumber records the matrícula the store gave the pupil.
+func (s *Student) AssignEnrollmentNumber(number string) { s.enrollmentNumber = number }
+
+// EnrollmentNumber is the matrícula; empty until the pupil is stored.
+func (s *Student) EnrollmentNumber() string { return s.enrollmentNumber }
+
+// FormatEnrollmentNumber renders a matrícula: 2026-00042.
+func FormatEnrollmentNumber(year, seq int) string { return fmt.Sprintf("%04d-%05d", year, seq) }
 
 // NewApplicantParams carries the fields to create an applicant.
 type NewApplicantParams struct {

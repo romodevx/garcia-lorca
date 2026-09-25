@@ -177,6 +177,8 @@ message Student {
   string level_name = 13;
   // The editable half of the file. Every field is optional.
   StudentProfile profile = 14;
+  // enrollment_number is the matrícula, <year>-<five digits> (task 13).
+  string enrollment_number = 15;
 }
 
 // StudentProfile is what the office keeps up to date by hand.

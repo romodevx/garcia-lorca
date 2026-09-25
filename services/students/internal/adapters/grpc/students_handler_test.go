@@ -54,6 +54,8 @@ func (r *fakeRepo) Create(_ context.Context, s *domain.Student) error {
 		return glerrors.New(glerrors.KindConflict, "duplicate curp")
 	}
 	r.byCURP[s.CURP().String()] = true
+	// As the store does: the pupil leaves with its matrícula.
+	s.AssignEnrollmentNumber("2026-00001")
 	r.byID[s.ID()] = s
 	return nil
 }
@@ -448,4 +450,12 @@ func TestStudentPhotoRoundTrips(t *testing.T) {
 
 	_, err = h.UploadStudentPhoto(context.Background(), connect.NewRequest(&studentsv1.UploadStudentPhotoRequest{StudentId: "stu-1", Data: []byte("%PDF")}))
 	assertCode(t, err, connect.CodeInvalidArgument)
+}
+
+// Task 13: the student on the wire carries its matrícula.
+func TestAStudentCarriesItsMatricula(t *testing.T) {
+	h, _ := newHandler(t)
+	if got := createValid(t, h).GetEnrollmentNumber(); got != "2026-00001" {
+		t.Errorf("enrollment number = %q, want the one the store gave", got)
+	}
 }

@@ -440,6 +440,7 @@ function StudentSheet({
   onEdit?: () => void;
 }): ReactElement {
   const rows: [string, string][] = [
+    ["Matrícula", st.enrollmentNumber ?? ""],
     ["CURP", st.curp],
     ["Nivel", `${st.level} · ${st.gradeGroup}`],
     ["Tutor", st.guardianName],

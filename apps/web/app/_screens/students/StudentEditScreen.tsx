@@ -343,6 +343,12 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, toda
             error={format.errors.birthDate}
           />
           <SelectField label="Sexo" value={sex} onChange={(v) => setSex(v as Sex)} options={SEX_OPTIONS} />
+          {student.enrollmentNumber !== undefined && student.enrollmentNumber !== "" && (
+            <div>
+              <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Matrícula</span>
+              <p style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", margin: "4px 0 0" }}>{student.enrollmentNumber}</p>
+            </div>
+          )}
           <div>
             <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Nivel y grupo</span>
             <p style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", margin: "4px 0 0" }}>{`${student.level} · ${student.gradeGroup}`}</p>

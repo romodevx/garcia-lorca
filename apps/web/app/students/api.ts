@@ -36,6 +36,8 @@ export interface Student {
   admissionStatus: AdmissionStatus;
   /** The editable half of the file. Absent from gateways older than T5. */
   profile?: StudentProfile;
+  /** The matrícula, <year>-<five digits> (task 13). Absent from older gateways. */
+  enrollmentNumber?: string;
 }
 
 /** "" means not captured. */

@@ -50,22 +50,25 @@ type studentResponse struct {
 	GradeGroup      string `json:"gradeGroup"`
 	GuardianName    string `json:"guardianName"`
 	AdmissionStatus string `json:"admissionStatus"`
+	// EnrollmentNumber is the matrícula (task 13).
+	EnrollmentNumber string `json:"enrollmentNumber,omitempty"`
 	// Nil in lists: a picker needs names, not every pupil's address and phones.
 	Profile *client.StudentProfile `json:"profile,omitempty"`
 }
 
 func toStudentResponse(s client.StudentResult) studentResponse {
 	return studentResponse{
-		ID:              s.ID,
-		CURP:            s.CURP,
-		FirstName:       s.FirstName,
-		LastName:        s.LastName,
-		Level:           s.Level,
-		LevelID:         s.LevelID,
-		GradeGroup:      s.GradeGroup,
-		GuardianName:    s.GuardianName,
-		AdmissionStatus: s.AdmissionStatus,
-		Profile:         &s.Profile,
+		ID:               s.ID,
+		CURP:             s.CURP,
+		FirstName:        s.FirstName,
+		LastName:         s.LastName,
+		Level:            s.Level,
+		LevelID:          s.LevelID,
+		GradeGroup:       s.GradeGroup,
+		GuardianName:     s.GuardianName,
+		AdmissionStatus:  s.AdmissionStatus,
+		EnrollmentNumber: s.EnrollmentNumber,
+		Profile:          &s.Profile,
 	}
 }
 

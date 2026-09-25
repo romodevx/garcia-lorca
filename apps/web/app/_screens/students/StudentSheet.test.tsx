@@ -27,7 +27,7 @@ const config = vi.mocked(configApi);
 
 const pupil = (levelId: string): studentsApi.Student => ({
   id: "stu-1", curp: "HEGA050312MDFRNN08", firstName: "Ana", lastName: "Cruz",
-  level: "Primaria", levelId, gradeGroup: "1° B", guardianName: "Rosa Cruz", admissionStatus: "pending",
+  level: "Primaria", levelId, gradeGroup: "1° B", guardianName: "Rosa Cruz", admissionStatus: "pending", enrollmentNumber: "2026-00042",
 });
 
 // Four groups share the name "1° A", one per level: the ambiguity the sheet
@@ -72,6 +72,9 @@ describe("la ficha de un alumno que ya tiene grupo", () => {
     const sheet = await openSheet(user);
 
     expect(await within(sheet).findByText(/Grupo actual/)).toBeInTheDocument();
+    // Task 13: the matrícula, as the card shows it.
+    expect(within(sheet).getByText("Matrícula")).toBeInTheDocument();
+    expect(within(sheet).getByText("2026-00042")).toBeInTheDocument();
     expect(within(sheet).queryByRole("button", { name: "Inscribir" })).not.toBeInTheDocument();
     expect(within(sheet).getByRole("button", { name: "Cambiar de grupo" })).toBeInTheDocument();
   });

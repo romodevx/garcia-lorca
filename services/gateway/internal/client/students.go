@@ -44,6 +44,8 @@ type StudentResult struct {
 	GuardianName    string
 	AdmissionStatus string
 	Profile         StudentProfile
+	// EnrollmentNumber is the matrícula, <year>-<five digits> (task 13).
+	EnrollmentNumber string
 }
 
 // StudentProfile is the editable half of a pupil's file, as the edge speaks it.
@@ -441,16 +443,17 @@ func toEnrollment(e *studentsv1.Enrollment) Enrollment {
 
 func toStudentResult(s *studentsv1.Student) StudentResult {
 	return StudentResult{
-		ID:              s.GetId(),
-		CURP:            s.GetCurp(),
-		FirstName:       s.GetFirstName(),
-		LastName:        s.GetLastName(),
-		Level:           s.GetLevelName(),
-		LevelID:         s.GetLevelId(),
-		GradeGroup:      s.GetGradeGroup(),
-		GuardianName:    s.GetGuardianName(),
-		AdmissionStatus: admissionName(s.GetAdmissionStatus()),
-		Profile:         fromProtoProfile(s.GetProfile()),
+		ID:               s.GetId(),
+		CURP:             s.GetCurp(),
+		FirstName:        s.GetFirstName(),
+		LastName:         s.GetLastName(),
+		Level:            s.GetLevelName(),
+		LevelID:          s.GetLevelId(),
+		GradeGroup:       s.GetGradeGroup(),
+		GuardianName:     s.GetGuardianName(),
+		AdmissionStatus:  admissionName(s.GetAdmissionStatus()),
+		EnrollmentNumber: s.GetEnrollmentNumber(),
+		Profile:          fromProtoProfile(s.GetProfile()),
 	}
 }
 

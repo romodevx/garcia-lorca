@@ -357,17 +357,18 @@ func (h *StudentsHandler) ListStudentsForGuardian(ctx context.Context, req *conn
 
 func toProtoStudent(s *domain.Student) *studentsv1.Student {
 	return &studentsv1.Student{
-		Id:              s.ID(),
-		TenantId:        s.TenantID(),
-		Curp:            s.CURP().String(),
-		FirstName:       s.FirstName(),
-		LastName:        s.LastName(),
-		LevelId:         s.Level().ID(),
-		LevelName:       s.Level().Name(),
-		GradeGroup:      s.GradeGroup(),
-		GuardianName:    s.GuardianName(),
-		AdmissionStatus: protoconv.ToProtoStatus(s.Status()),
-		Profile:         toProtoProfile(s.Profile()),
+		Id:               s.ID(),
+		TenantId:         s.TenantID(),
+		Curp:             s.CURP().String(),
+		FirstName:        s.FirstName(),
+		LastName:         s.LastName(),
+		LevelId:          s.Level().ID(),
+		LevelName:        s.Level().Name(),
+		GradeGroup:       s.GradeGroup(),
+		GuardianName:     s.GuardianName(),
+		AdmissionStatus:  protoconv.ToProtoStatus(s.Status()),
+		Profile:          toProtoProfile(s.Profile()),
+		EnrollmentNumber: s.EnrollmentNumber(),
 	}
 }
 
