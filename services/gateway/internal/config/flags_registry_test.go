@@ -18,7 +18,7 @@ import (
 func TestEveryGuardedModuleIsReportedByFeatures(t *testing.T) {
 	guarded := []string{
 		"iam", "gateway", "students", "config", "teachers", "finance",
-		"attendance", "grades", "comms", "uniforms",
+		"attendance", "grades", "comms", "uniforms", "student_card",
 	}
 
 	reported := make(map[string]bool, len(config.AllModuleFlags))
