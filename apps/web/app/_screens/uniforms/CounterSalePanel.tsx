@@ -5,6 +5,7 @@ import { pesosToCents } from "../../_lib/money";
 import { Btn } from "../../_design/Controls";
 import { MoneyField } from "../../_design/form";
 import { Icon } from "../../_design/Icon";
+import { SizeQuantityPicker, type SizePick } from "../../_design/SizeQuantityPicker";
 import { counterSale, UniformsError, type SaleLine, type UniformItem, type UniformOrder } from "../../uniforms/api";
 import type { Student } from "../../students/api";
 import { StudentPicker } from "./StudentPicker";
@@ -78,18 +79,18 @@ export function CounterSalePanel({
     setSaleKey(newSaleKey());
   }, []);
 
-  const addToCart = useCallback((item: UniformItem, sizeLabel: string): void => {
+  // Every size chosen for the garment, in one go (task 11): a size already in
+  // the cart grows, a new one joins it.
+  const addToCart = useCallback((item: UniformItem, picks: SizePick[]): void => {
     setCart((current) => {
-      const existing = current.find((line) => line.itemId === item.id && line.sizeLabel === sizeLabel);
-      if (existing !== undefined) {
-        return current.map((line) =>
-          line === existing ? { ...line, qty: line.qty + 1 } : line,
-        );
+      let next = current;
+      for (const pick of picks) {
+        const existing = next.find((line) => line.itemId === item.id && line.sizeLabel === pick.sizeLabel);
+        next = existing !== undefined
+          ? next.map((line) => (line === existing ? { ...line, qty: line.qty + pick.qty } : line))
+          : [...next, { itemId: item.id, itemName: item.name, sizeLabel: pick.sizeLabel, qty: pick.qty, unitPriceCents: item.priceCents }];
       }
-      return [
-        ...current,
-        { itemId: item.id, itemName: item.name, sizeLabel, qty: 1, unitPriceCents: item.priceCents },
-      ];
+      return next;
     });
     setSelectedItem(null);
   }, []);
@@ -208,39 +209,15 @@ export function CounterSalePanel({
       {selectedItem !== null && (
         <section>
           <p style={label}>2. Talla</p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {[...selectedItem.sizes]
+          <SizeQuantityPicker
+            key={selectedItem.id}
+            sizes={[...selectedItem.sizes]
               .sort((a, b) => a.sizeOrder - b.sizeOrder)
-              .map((size) => {
-                const empty = size.available <= 0;
-                return (
-                  <button
-                    key={size.id}
-                    onClick={() => addToCart(selectedItem, size.sizeLabel)}
-                    disabled={empty}
-                    title={empty ? "Sin existencia" : undefined}
-                    style={{
-                      minWidth: 64,
-                      height: 56,
-                      padding: "0 12px",
-                      borderRadius: "var(--r-md)",
-                      border: "1px solid var(--border)",
-                      background: "var(--surface)",
-                      opacity: empty ? 0.45 : 1,
-                      cursor: empty ? "not-allowed" : "pointer",
-                      display: "grid",
-                      placeItems: "center",
-                      gap: 2,
-                    }}
-                  >
-                    <span style={{ fontWeight: 700, fontSize: 15 }}>{size.sizeLabel}</span>
-                    <span style={{ fontSize: 11.5, color: "var(--text-faint)" }}>
-                      {empty ? "agotada" : `${size.available} libres`}
-                    </span>
-                  </button>
-                );
-              })}
-          </div>
+              .map((size) => ({ label: size.sizeLabel, available: size.available }))}
+            unitPriceCents={selectedItem.priceCents}
+            inCart={inCartOf(cart, selectedItem.id)}
+            onAdd={(picks) => addToCart(selectedItem, picks)}
+          />
         </section>
       )}
 
@@ -464,7 +441,18 @@ function SaleReceipt({
  * is a fallback — a sale that cannot mint a key is a sale that cannot be
  * protected from a double click, which is worse than an ugly string.
  */
-export function newSaleKey(): string {
+export /** Units of each size of one garment already in the cart. */
+function inCartOf(cart: CartLine[], itemId: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const line of cart) {
+    if (line.itemId === itemId) {
+      out[line.sizeLabel] = (out[line.sizeLabel] ?? 0) + line.qty;
+    }
+  }
+  return out;
+}
+
+function newSaleKey(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
