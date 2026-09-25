@@ -887,8 +887,6 @@ func withPaidTotals(tx *gorm.DB, rows []chargeModel) ([]ports.ChargeWithPaid, er
 	return out, nil
 }
 
-// isUniqueViolation reports whether err is a Postgres unique-constraint
-// violation, which the ledger surfaces as KindConflict.
 // folioUniqueConstraint is deposits' UNIQUE (tenant_id, folio) (migration 0018).
 const folioUniqueConstraint = "deposits_folio_unique"
 
@@ -898,6 +896,8 @@ func violates(err error, constraint string) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == constraint
 }
 
+// isUniqueViolation reports whether err is a Postgres unique-constraint
+// violation, which the ledger surfaces as KindConflict.
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation
@@ -1407,7 +1407,7 @@ func (r *Repository) DepositReceipt(ctx context.Context, id string) (ports.Depos
 		// the last payment captured on a paid charge shows it, so a charge paid
 		// in two deposits does not read its discount twice.
 		if err := tx.Raw(`SELECT p.charge_id, c.description, p.amount_cents, c.external_ref, cc.kind,
-		                         CASE WHEN c.status = 'paid' AND p.id = (
+		                         CASE WHEN c.status = ? AND p.id = (
 		                                  SELECT p2.id FROM payments p2
 		                                   WHERE p2.charge_id = c.id
 		                                   ORDER BY p2.created_at DESC, p2.id DESC LIMIT 1)
@@ -1416,7 +1416,7 @@ func (r *Repository) DepositReceipt(ctx context.Context, id string) (ports.Depos
 		                    JOIN charges c ON c.id = p.charge_id
 		                    JOIN charge_concepts cc ON cc.id = c.concept_id
 		                   WHERE p.deposit_id = ?
-		                   ORDER BY c.due_date, p.id`, id).Scan(&rows).Error; err != nil {
+		                   ORDER BY c.due_date, p.id`, domain.StatusPaid, id).Scan(&rows).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "reading the deposit's receipt", err)
 		}
 		out = ports.DepositReceipt{Deposit: d, Lines: make([]ports.ReceiptLine, 0, len(rows))}

@@ -820,6 +820,11 @@ func TestConcurrentDepositsGetDistinctConsecutiveFolios(t *testing.T) {
 	empty := func([]ports.ChargeWithPaid) (ports.DepositWrite, error) { return ports.DepositWrite{}, nil }
 	paidOn := time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)
 	const n = 8
+	// Built here, on the test's goroutine: t.Fatalf is not for the workers.
+	deposits := make([]domain.Deposit, n)
+	for i := range deposits {
+		deposits[i] = newDeposit(t, fmt.Sprintf("62000000-0000-0000-0000-0000000001%02d", i), tenantB, "80000000-0000-0000-0000-0000000000f1", 100, paidOn, "")
+	}
 	folios := make(chan string, n)
 	errs := make(chan error, n)
 	var wg sync.WaitGroup
@@ -827,8 +832,7 @@ func TestConcurrentDepositsGetDistinctConsecutiveFolios(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			id := fmt.Sprintf("62000000-0000-0000-0000-0000000001%02d", i)
-			got, _, err := repo.RegisterDeposit(ctx, newDeposit(t, id, tenantB, "80000000-0000-0000-0000-0000000000f1", 100, paidOn, ""), empty, nil)
+			got, _, err := repo.RegisterDeposit(ctx, deposits[i], empty, nil)
 			if err != nil {
 				errs <- err
 				return
