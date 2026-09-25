@@ -80,6 +80,7 @@ export function CashUpPanel({ day }: CashUpPanelProps): ReactElement {
                 {capturedLate(d) ? "" : `${hourOf(d.paidAt)} · `}
                 {d.method === "cash" ? "Efectivo" : d.method === "card" ? "Tarjeta" : "Transferencia"}
                 {d.receivedByName !== undefined && d.receivedByName !== "" && ` · ${d.receivedByName}`}
+                {d.folio !== undefined && d.folio !== "" && ` · ${d.folio}`}
                 {capturedLate(d) && (
                   // A payment dated the day the family paid but keyed later:
                   // the counterweight to back-dating (task 7).

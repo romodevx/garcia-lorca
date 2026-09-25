@@ -7,13 +7,18 @@ import { API_URL } from "../../api-url";
 import { downloadReceiptPdf, getReceipt, type Receipt, type ReceiptKind } from "../../receipts/api";
 import { ReceiptTicket } from "./ReceiptTicket";
 
-// The roll is 80 mm wide and as long as the ticket; nothing but the ticket
-// prints. Kept here, in the page that prints, so no other screen inherits it.
+// No margin, no toolbar, no padding: the ticket (72 mm, the printable part of
+// an 80 mm roll) is what goes to the printer. The page's size is left to the
+// printer's driver — "80mm auto" is not a CSS page size, and a browser drops the
+// whole rule over it. Kept here, in the page that prints, so no other screen
+// inherits it. The demo environment's banner still prints, on purpose: a
+// ticket from the demo must say so.
 const PRINT_CSS = `
-@page { size: 80mm auto; margin: 0; }
+@page { margin: 0; }
 @media print {
   body { background: #fff !important; }
   .receipt-toolbar { display: none !important; }
+  .receipt-page { padding: 0 !important; min-height: 0 !important; background: #fff !important; }
 }
 `;
 
@@ -46,7 +51,7 @@ export function ReceiptPage({ kind, id, autoPrint = false }: { kind: ReceiptKind
   };
 
   return (
-    <main style={{ minHeight: "100vh", background: "var(--surface-2)", padding: "16px" }}>
+    <main className="receipt-page" style={{ minHeight: "100vh", background: "var(--surface-2)", padding: "16px" }}>
       <style>{PRINT_CSS}</style>
       <div className="receipt-toolbar" style={{ display: "flex", gap: 10, justifyContent: "center", marginBottom: 16 }}>
         <Btn kind="primary" onClick={() => window.print()}>Imprimir</Btn>

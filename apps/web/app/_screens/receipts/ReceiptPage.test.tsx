@@ -52,4 +52,16 @@ describe("ReceiptPage (tarea 12)", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Ese comprobante no existe.");
     expect(window.print).not.toHaveBeenCalled();
   });
+
+  // Review of task 12: "80mm auto" is not a page size (Chrome drops the whole
+  // rule). The page prints with no margin; the roll's width is the driver's.
+  it("declares print CSS the browser keeps", async () => {
+    api.getReceipt.mockResolvedValue(receipt);
+    const { container } = render(<ReceiptPage kind="payment" id="dep-1" />);
+    await screen.findByText("P-2026-000042");
+
+    const css = container.querySelector("style")?.textContent ?? "";
+    expect(css).toContain("@page { margin: 0; }");
+    expect(css).not.toMatch(/size:\s*80mm auto/);
+  });
 });

@@ -97,6 +97,8 @@ describe("CashUpPanel", () => {
     const user = userEvent.setup();
     render(<CashUpPanel day="2026-10-10" />);
 
+    // The folio is on the row, so a paper ticket matches its line in the cut.
+    expect(await screen.findByTestId("cash-up-row")).toHaveTextContent("P-2026-000042");
     await user.click(await screen.findByRole("button", { name: "Reimprimir P-2026-000042" }));
     expect(open).toHaveBeenCalledWith("/comprobantes/payment/d1?print=1", "_blank", "noopener");
   });

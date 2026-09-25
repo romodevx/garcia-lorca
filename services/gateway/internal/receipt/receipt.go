@@ -5,8 +5,11 @@ package receipt
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+
+	"connectrpc.com/connect"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 )
@@ -69,6 +72,11 @@ type (
 	}
 )
 
+// counterSource is the order source of a counter sale.
+const counterSource = "counter"
+
+var errNotACounterSale = errors.New("only a counter sale has a sale receipt")
+
 // Builder assembles receipts from the services that own their parts.
 type Builder struct {
 	deposits DepositReader
@@ -109,10 +117,10 @@ func (b *Builder) Payment(ctx context.Context, depositID string) (Receipt, error
 	}
 	for _, l := range got.Lines {
 		r.Lines = append(r.Lines, Line{Description: l.Description, AmountCents: l.AmountCents, Surcharge: l.Surcharge, DiscountCents: l.DiscountCents})
+		// Every line's discount counts, so the lines and the totals agree.
+		r.DiscountCents += l.DiscountCents
 		if l.Surcharge {
 			r.SurchargeCents += l.AmountCents
-		} else {
-			r.DiscountCents += l.DiscountCents
 		}
 	}
 	return r, nil
@@ -124,6 +132,11 @@ func (b *Builder) Sale(ctx context.Context, orderID string) (Receipt, error) {
 	order, err := b.orders.GetOrder(ctx, orderID, nil)
 	if err != nil {
 		return Receipt{}, err
+	}
+	// A sale receipt proves a counter sale: goods handed over and paid at once.
+	// A family order (unpaid, waiting, cancelled) is not one.
+	if order.Source != counterSource {
+		return Receipt{}, connect.NewError(connect.CodeNotFound, errNotACounterSale)
 	}
 	school, err := b.school(ctx)
 	if err != nil {

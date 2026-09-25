@@ -68,3 +68,21 @@ func TestAVoidedPDFSaysCancelled(t *testing.T) {
 		t.Errorf("a voided receipt does not say CANCELADO; it reads:\n%s", text)
 	}
 }
+
+// Review of task 12: a long address and legend wrap on the page instead of
+// running off it; every word is still there.
+func TestLongTextWrapsOnThePage(t *testing.T) {
+	legend := strings.Repeat("Conserve este comprobante para cualquier aclaración. ", 9) + "FIN."
+	doc, err := receipt.PDF(receipt.Receipt{
+		Kind: receipt.KindPayment, Folio: "P-2026-000050", PaidOn: "2026-10-10", TotalCents: 100,
+		School: client.SchoolProfile{Name: "COLEGIO", Address: strings.Repeat("AV. SIEMPRE VIVA 742 ", 12), Legend: legend},
+		Lines:  []receipt.Line{{Description: strings.Repeat("Colegiatura con descripción larga ", 6), AmountCents: 100}},
+	})
+	if err != nil {
+		t.Fatalf("PDF: %v", err)
+	}
+	text := textOf(t, doc)
+	if !strings.Contains(text, "FIN.") {
+		t.Errorf("the legend's last word is missing; it reads:\n%s", text)
+	}
+}

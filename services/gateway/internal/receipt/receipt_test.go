@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"connectrpc.com/connect"
+
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/receipt"
 )
@@ -97,6 +99,9 @@ func TestAVoidedPaymentSaysSo(t *testing.T) {
 	if !got.Voided || got.VoidReason != "capturado mal" {
 		t.Errorf("voided = %v %q", got.Voided, got.VoidReason)
 	}
+	if got.CreditCents != 0 || len(got.Lines) != 0 {
+		t.Errorf("a voided receipt = credit %d, %d lines; want none", got.CreditCents, len(got.Lines))
+	}
 }
 
 // A uniforms sale's receipt: the order's folio and lines (garment, size,
@@ -106,7 +111,7 @@ func TestASaleReceipt(t *testing.T) {
 	f := fakeSources{
 		profile: school, found: true,
 		order: client.UniformOrder{
-			ID: "ord-1", Folio: "U-2026-000007", StudentID: "stu-1", StudentName: "Zoe Villalobos",
+			ID: "ord-1", Folio: "U-2026-000007", Source: "counter", StudentID: "stu-1", StudentName: "Zoe Villalobos",
 			TotalCents: 96000, CreatedAt: "2026-09-25T06:36:26Z",
 			Lines: []client.UniformOrderLine{
 				{ItemName: "Playera polo blanca", SizeLabel: "8", Qty: 2, UnitPriceCents: 32000},
@@ -150,5 +155,31 @@ func TestASaleThatCannotBeReadIsAnError(t *testing.T) {
 	f := fakeSources{orderErr: errors.New("boom")}
 	if _, err := builder(f).Sale(context.Background(), "ord-x"); err == nil {
 		t.Error("want the order's error")
+	}
+}
+
+// Review of task 12: a "Comprobante de venta" proves a counter sale. A family
+// order — unpaid, waiting, cancelled — is not one, and gets no such receipt.
+func TestOnlyACounterSaleHasASaleReceipt(t *testing.T) {
+	f := fakeSources{order: client.UniformOrder{ID: "ord-3", Folio: "U-2026-000010", Source: "family", TotalCents: 32000}}
+	_, err := builder(f).Sale(context.Background(), "ord-3")
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Errorf("a family order's sale receipt: %v, want NotFound", err)
+	}
+}
+
+// Review of task 12: a discount on a surcharge line counts in the total of
+// discounts too — the line and the totals say the same.
+func TestEveryLinesDiscountCounts(t *testing.T) {
+	f := fakeSources{deposit: client.DepositReceipt{
+		Deposit: client.Deposit{ID: "dep-4", StudentID: "stu-1", AmountCents: 20000, Method: "cash", PaidAt: "2026-10-10T00:00:00Z", Folio: "P-2026-000045"},
+		Lines:   []client.ReceiptLine{{Description: "Recargo", AmountCents: 20000, Surcharge: true, DiscountCents: 5000}},
+	}}
+	got, err := builder(f).Payment(context.Background(), "dep-4")
+	if err != nil {
+		t.Fatalf("Payment: %v", err)
+	}
+	if got.DiscountCents != 5000 {
+		t.Errorf("discounts = %d, want the surcharge line's 5000", got.DiscountCents)
 	}
 }

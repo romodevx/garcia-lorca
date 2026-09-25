@@ -71,10 +71,35 @@ func newWriter() (*writer, error) {
 	return &writer{pdf: pdf, y: pageMargin}, nil
 }
 
-// text writes one line at the left margin and moves down.
+// text writes s at the left margin, wrapped to the page, and moves down.
 func (w *writer) text(family string, size float64, s string) {
-	w.textAt(family, size, s, pageMargin, contentWidth, gopdf.Left)
-	w.y += size + 6
+	w.y += w.wrapped(family, size, s, pageMargin, contentWidth) * (size + 6)
+}
+
+// wrapped writes s word-wrapped in a box of the given width, starting at the
+// current height, and returns how many lines it took (0 for nothing). An
+// address or a legend runs to hundreds of characters; one line would leave the
+// page.
+func (w *writer) wrapped(family string, size float64, s string, x, width float64) float64 {
+	if w.err != nil || s == "" {
+		return 0
+	}
+	if err := w.pdf.SetFont(family, "", size); err != nil {
+		w.err = err
+		return 0
+	}
+	lines, err := w.pdf.SplitTextWithWordWrap(s, width)
+	if err != nil {
+		w.err = err
+		return 0
+	}
+	top := w.y
+	for i, line := range lines {
+		w.y = top + float64(i)*(size+6)
+		w.textAt(family, size, line, x, width, gopdf.Left)
+	}
+	w.y = top
+	return float64(len(lines))
 }
 
 // textAt writes s in a box of the given width, aligned, at the current height.
@@ -134,9 +159,10 @@ func (w *writer) lines(r Receipt) {
 		if l.DiscountCents > 0 {
 			description += " (descuento " + Money(l.DiscountCents) + ")"
 		}
-		w.textAt(familyRegular, 10, description, pageMargin, contentWidth-amountWidth, gopdf.Left)
 		w.textAt(familyRegular, 10, Money(l.AmountCents), pageMargin+contentWidth-amountWidth, amountWidth, gopdf.Right)
-		w.y += lineHeight
+		// The description wraps inside its column, never into the amount's.
+		taken := w.wrapped(familyRegular, 10, description, pageMargin, contentWidth-amountWidth-12)
+		w.y += max(1, taken) * lineHeight
 	}
 	w.rule()
 }
