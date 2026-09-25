@@ -350,7 +350,7 @@ func TestCounterSaleToAPupilWithNoGroupYet(t *testing.T) {
 	const newcomer = "9f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
 	f.students.byID[newcomer] = ports.StudentRef{
 		ID: newcomer, FullName: "Zoe Villalobos", Level: domain.Level("c1000000-0000-0000-0000-000000000002"),
-		CycleID: "", Status: "in_process",
+		CycleID: "", Status: "pending",
 	}
 
 	in := saleFor(item, "8", 1)
@@ -377,5 +377,39 @@ func TestCounterSaleToAPupilWithNoGroupYet(t *testing.T) {
 	}
 	if stock.OnHand() != 4 {
 		t.Errorf("on hand = %d; want 4 — the garment left with the pupil", stock.OnHand())
+	}
+}
+
+// Task 10: the counter sells to pupils — enrolled, or registered and not yet
+// placed (pending, accepted). A rejected applicant or a withdrawn pupil is not
+// one, and neither is a status the students service did not name: the rule is an
+// allowlist. Nothing leaves the shelf and nothing is charged.
+func TestCounterSaleRefusesSomeoneWhoIsNotAPupil(t *testing.T) {
+	for _, status := range []string{"rejected", "withdrawn", ""} {
+		t.Run("status "+status, func(t *testing.T) {
+			ctx := context.Background()
+			f := newFixture(t)
+			item := f.seedItem(t, "NOP", "8", 32000, 5)
+			const former = "9f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f9"
+			f.students.byID[former] = ports.StudentRef{
+				ID: former, FullName: "Ex Alumno", Level: domain.Level("c1000000-0000-0000-0000-000000000002"), Status: status,
+			}
+
+			in := saleFor(item, "8", 1)
+			in.StudentID = former
+			_, err := f.svc.CounterSale(ctx, in)
+
+			requireKind(t, err, glerrors.KindInvalid)
+			if len(f.finance.charges) != 0 {
+				t.Errorf("charged %d times; a refused sale charges nothing", len(f.finance.charges))
+			}
+			stock, err := f.repo.GetStockBySize(ctx, item.ID(), "8")
+			if err != nil {
+				t.Fatalf("read stock: %v", err)
+			}
+			if stock.OnHand() != 5 {
+				t.Errorf("on hand = %d; want 5", stock.OnHand())
+			}
+		})
 	}
 }

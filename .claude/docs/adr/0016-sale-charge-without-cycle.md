@@ -40,6 +40,15 @@ the fix stay flagged for a person to reconcile.
 
 ## Consequences
 
+- The counter sells to pupils only: admission status pending, accepted or
+  enrolled (an allowlist). A rejected applicant or a withdrawn pupil is refused.
+- A cycle-free sale left unpaid (its payment step failed) is an open debt like
+  any uniform charge: under the daily rule it earns a surcharge, written with no
+  cycle and the `dailyfee:` ref. The monthly billing run pages by cycle and does
+  not see it, as it never saw uniform charges outside a cycle's run.
+- Finanzas's cycle-filtered list does not show these charges; the pupil's
+  account and the overdue list without a cycle filter do.
+
 - An anonymous counter sale ("Venta sin alumno", with a note) still cannot be
   charged in finance — it names no student — and stays flagged. Out of scope by
   the owner's answer (no customers who are not pupils).

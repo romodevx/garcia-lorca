@@ -223,6 +223,39 @@ func TestAMonthClosedByTheRewardKeepsItsSurcharge(t *testing.T) {
 	}
 }
 
+// Task 10: a uniform sold to a pupil with no group yet is charged with no
+// cycle. If its payment never landed, it is an open debt like any other: a
+// deposit must still go through, and the surcharge it earned rides it with no
+// cycle either — as a uniform charge with a cycle already earns one.
+func TestADepositPaysAnOverdueSaleWithNoCycle(t *testing.T) {
+	f := depositFixture(t)
+	concept := f.seedConcept(t, "Uniformes", 0)
+	sale, err := f.svc.CreateCharge(context.Background(), usecase.CreateChargeInput{
+		StudentID: testStudent, ConceptID: concept.ID(), DueDate: "2026-09-10",
+		AmountCentsOverride: 32000, DescriptionOverride: "Uniformes · U-2026-000009",
+		ExternalRef: "uniforms:ful-unpaid",
+	})
+	if err != nil {
+		t.Fatalf("CreateCharge (sale, no cycle): %v", err)
+	}
+
+	// September ($3,200 + $300), the sale ($320 + $300), October ($3,200).
+	got := deposit(t, f, 730000, "2026-10-10")
+
+	var saleFee *domain.Charge
+	for i, fee := range got.Surcharges {
+		if strings.Contains(fee.ExternalRef(), sale.Charge.ID()) {
+			saleFee = &got.Surcharges[i]
+		}
+	}
+	if saleFee == nil {
+		t.Fatalf("no surcharge written for the overdue sale; surcharges = %d", len(got.Surcharges))
+	}
+	if saleFee.CycleID() != "" || saleFee.Amount().Int64() != 30000 {
+		t.Errorf("sale surcharge = cycle %q, %d; want no cycle and 30000", saleFee.CycleID(), saleFee.Amount().Int64())
+	}
+}
+
 // Money beyond the debt is the family's credit, not an error. Refusing it sends
 // a parent away from the counter with cash in hand.
 //

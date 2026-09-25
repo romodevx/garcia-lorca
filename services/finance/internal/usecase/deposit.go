@@ -970,15 +970,23 @@ func (p *depositPlanner) deriveSurcharge(c ports.ChargeWithPaid, existing []port
 	if total <= 0 {
 		return domain.Charge{}, false, nil
 	}
+	// The ref ties the fee to the debt that earned it, which is how the next
+	// deposit knows what has already been charged.
+	ref := surchargeRef(c.Charge.ID(), p.deposit.ID())
+	description := fmt.Sprintf("%s · %s", p.description, c.Charge.Description())
+	if c.Charge.CycleID() == "" {
+		// A sale to a pupil with no group yet (task 10) has no cycle, and
+		// neither has the fee it earns; the ref is what it answers to.
+		fee, err := domain.NewSaleCharge(p.svc.newID(), p.svc.tenantID, c.Charge.StudentID(),
+			p.lateFeeID, description, total, c.Charge.DueDate(), ref)
+		return fee, err == nil, err
+	}
 	fee, err := domain.NewCharge(p.svc.newID(), p.svc.tenantID, c.Charge.StudentID(), c.Charge.CycleID(),
-		p.lateFeeID, fmt.Sprintf("%s · %s", p.description, c.Charge.Description()),
-		total, 0, c.Charge.DueDate())
+		p.lateFeeID, description, total, 0, c.Charge.DueDate())
 	if err != nil {
 		return domain.Charge{}, false, err
 	}
-	// The ref ties the fee to the debt that earned it, which is how the next
-	// deposit knows what has already been charged.
-	fee, err = fee.WithExternalRef(surchargeRef(c.Charge.ID(), p.deposit.ID()))
+	fee, err = fee.WithExternalRef(ref)
 	if err != nil {
 		return domain.Charge{}, false, err
 	}

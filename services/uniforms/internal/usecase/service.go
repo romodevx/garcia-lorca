@@ -282,11 +282,23 @@ func (s *Service) resolveBuyer(ctx context.Context, in CounterSaleInput) (ports.
 		return ports.StudentRef{}, glerrors.New(glerrors.KindInvalid,
 			"student id must be an identifier, not a name")
 	}
-	// A pupil registered but not yet placed in a group has no cycle and buys all
-	// the same (task 10): finance charges the pupil with no cycle, answering to
-	// the delivery's ref.
-	return s.students.ByID(ctx, in.StudentID)
+	student, err := s.students.ByID(ctx, in.StudentID)
+	if err != nil {
+		return ports.StudentRef{}, err
+	}
+	// The counter sells to pupils: enrolled, or registered and not yet placed
+	// in a group (task 10) — the latter have no cycle, and finance charges them
+	// with none. A rejected applicant or a withdrawn pupil is not a pupil; an
+	// allowlist, so a status nobody named is refused too.
+	if !buyerStatuses[student.Status] {
+		return ports.StudentRef{}, glerrors.New(glerrors.KindInvalid,
+			"esa persona ya no es alumno del colegio (baja o solicitud rechazada): no se le puede vender")
+	}
+	return student, nil
 }
+
+// buyerStatuses are the admission statuses the counter sells to.
+var buyerStatuses = map[string]bool{"pending": true, "accepted": true, "enrolled": true}
 
 // uuidPattern is the canonical 8-4-4-4-12 form. It is deliberately a shape check
 // and not a parse: this service does not care which UUID version it is, only
