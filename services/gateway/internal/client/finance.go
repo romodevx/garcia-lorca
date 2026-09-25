@@ -311,6 +311,38 @@ type Deposit struct {
 	Folio string `json:"folio,omitempty"`
 }
 
+// ReceiptLine is one concept a deposit paid (task 12).
+type ReceiptLine struct {
+	ChargeID      string
+	Description   string
+	AmountCents   int64
+	Surcharge     bool
+	DiscountCents int64
+}
+
+// DepositReceipt is a deposit and what it paid, concept by concept.
+type DepositReceipt struct {
+	Deposit          Deposit
+	Lines            []ReceiptLine
+	UnallocatedCents int64
+}
+
+// DepositReceipt reads a deposit back for its receipt.
+func (c *FinanceClient) DepositReceipt(ctx context.Context, depositID string) (DepositReceipt, error) {
+	res, err := c.rpc.GetDepositReceipt(ctx, connect.NewRequest(&financev1.GetDepositReceiptRequest{DepositId: depositID}))
+	if err != nil {
+		return DepositReceipt{}, err
+	}
+	lines := make([]ReceiptLine, 0, len(res.Msg.GetLines()))
+	for _, l := range res.Msg.GetLines() {
+		lines = append(lines, ReceiptLine{
+			ChargeID: l.GetChargeId(), Description: l.GetDescription(), AmountCents: l.GetAmountCents(),
+			Surcharge: l.GetSurcharge(), DiscountCents: l.GetDiscountCents(),
+		})
+	}
+	return DepositReceipt{Deposit: toDeposit(res.Msg.GetDeposit()), Lines: lines, UnallocatedCents: res.Msg.GetUnallocatedCents()}, nil
+}
+
 // DepositResult is what the money did, in the shape a receipt needs.
 type DepositResult struct {
 	Deposit          Deposit   `json:"deposit"`

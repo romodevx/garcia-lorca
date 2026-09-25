@@ -1,0 +1,154 @@
+package receipt_test
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/garcia-lorca/services/gateway/internal/client"
+	"github.com/garcia-lorca/services/gateway/internal/receipt"
+)
+
+type fakeSources struct {
+	deposit  client.DepositReceipt
+	order    client.UniformOrder
+	student  client.StudentResult
+	account  client.AccountStatement
+	profile  client.SchoolProfile
+	found    bool
+	orderErr error
+}
+
+func (f fakeSources) DepositReceipt(_ context.Context, _ string) (client.DepositReceipt, error) {
+	return f.deposit, nil
+}
+
+func (f fakeSources) GetOrder(_ context.Context, _ string, _ []string) (client.UniformOrder, error) {
+	return f.order, f.orderErr
+}
+
+func (f fakeSources) GetStudent(_ context.Context, _ string) (client.StudentResult, error) {
+	return f.student, nil
+}
+
+func (f fakeSources) GetAccount(_ context.Context, _ string) (client.AccountStatement, error) {
+	return f.account, nil
+}
+
+func (f fakeSources) GetSchoolProfile(_ context.Context) (client.SchoolProfile, bool, error) {
+	return f.profile, f.found, nil
+}
+
+func builder(f fakeSources) *receipt.Builder {
+	return receipt.NewBuilder(f, f, f, f, f)
+}
+
+var school = client.SchoolProfile{Name: "COLEGIO GARCÍA LORCA", RFC: "EGL150101AB1", Legend: "Gracias por su pago."}
+
+// A payment's receipt: the school, the folio, the pupil, what each concept got,
+// the late fee and discount apart, the credit, the total handed over, how and
+// who took it.
+func TestAPaymentReceipt(t *testing.T) {
+	f := fakeSources{
+		profile: school, found: true,
+		student: client.StudentResult{FirstName: "Camila", LastName: "Zamora Sánchez", GradeGroup: "1° A"},
+		deposit: client.DepositReceipt{
+			Deposit: client.Deposit{
+				ID: "dep-1", StudentID: "stu-1", AmountCents: 350000, Method: "card", CardType: "debit",
+				Reference: "1234", PaidAt: "2026-10-10T00:00:00Z", Folio: "P-2026-000042", ReceivedByName: "Laura Caja",
+			},
+			Lines: []client.ReceiptLine{
+				{Description: "Colegiatura septiembre 2026", AmountCents: 310000, DiscountCents: 10000},
+				{Description: "Recargo · Colegiatura septiembre 2026", AmountCents: 30000, Surcharge: true},
+			},
+			UnallocatedCents: 10000,
+		},
+	}
+
+	got, err := builder(f).Payment(context.Background(), "dep-1")
+	if err != nil {
+		t.Fatalf("Payment: %v", err)
+	}
+	if got.Folio != "P-2026-000042" || got.School.Name != "COLEGIO GARCÍA LORCA" || got.Kind != receipt.KindPayment {
+		t.Errorf("head = %q %q %q", got.Folio, got.School.Name, got.Kind)
+	}
+	if got.Buyer != "Camila Zamora Sánchez" || got.BuyerDetail != "1° A" {
+		t.Errorf("buyer = %q (%q)", got.Buyer, got.BuyerDetail)
+	}
+	if got.PaidOn != "2026-10-10" || got.Method != "Tarjeta de débito" || got.Reference != "1234" || got.ReceivedBy != "Laura Caja" {
+		t.Errorf("payment = %q %q %q %q", got.PaidOn, got.Method, got.Reference, got.ReceivedBy)
+	}
+	if len(got.Lines) != 2 || got.SurchargeCents != 30000 || got.DiscountCents != 10000 || got.CreditCents != 10000 || got.TotalCents != 350000 {
+		t.Errorf("amounts = %d lines, surcharge %d, discount %d, credit %d, total %d",
+			len(got.Lines), got.SurchargeCents, got.DiscountCents, got.CreditCents, got.TotalCents)
+	}
+}
+
+// A voided deposit still prints, and says so.
+func TestAVoidedPaymentSaysSo(t *testing.T) {
+	f := fakeSources{deposit: client.DepositReceipt{Deposit: client.Deposit{
+		ID: "dep-2", StudentID: "stu-1", AmountCents: 100, Method: "cash", PaidAt: "2026-10-10T00:00:00Z",
+		Folio: "P-2026-000043", VoidedAt: "2026-10-11T00:00:00Z", VoidReason: "capturado mal",
+	}}}
+	got, err := builder(f).Payment(context.Background(), "dep-2")
+	if err != nil {
+		t.Fatalf("Payment: %v", err)
+	}
+	if !got.Voided || got.VoidReason != "capturado mal" {
+		t.Errorf("voided = %v %q", got.Voided, got.VoidReason)
+	}
+}
+
+// A uniforms sale's receipt: the order's folio and lines (garment, size,
+// quantity), its total, and how it was paid, read from finance by the delivery's
+// charge.
+func TestASaleReceipt(t *testing.T) {
+	f := fakeSources{
+		profile: school, found: true,
+		order: client.UniformOrder{
+			ID: "ord-1", Folio: "U-2026-000007", StudentID: "stu-1", StudentName: "Zoe Villalobos",
+			TotalCents: 96000, CreatedAt: "2026-09-25T06:36:26Z",
+			Lines: []client.UniformOrderLine{
+				{ItemName: "Playera polo blanca", SizeLabel: "8", Qty: 2, UnitPriceCents: 32000},
+				{ItemName: "Playera polo blanca", SizeLabel: "10", Qty: 1, UnitPriceCents: 32000},
+			},
+			Fulfillments: []client.UniformFulfillment{{FinanceChargeID: "ch-9"}},
+		},
+		account: client.AccountStatement{Payments: []client.Payment{{ChargeID: "ch-9", Method: "transfer", Reference: "SPEI 55"}}},
+	}
+
+	got, err := builder(f).Sale(context.Background(), "ord-1")
+	if err != nil {
+		t.Fatalf("Sale: %v", err)
+	}
+	if got.Kind != receipt.KindSale || got.Folio != "U-2026-000007" || got.Buyer != "Zoe Villalobos" || got.PaidOn != "2026-09-25" {
+		t.Errorf("head = %q %q %q %q", got.Kind, got.Folio, got.Buyer, got.PaidOn)
+	}
+	if len(got.Lines) != 2 || got.Lines[0].Description != "Playera polo blanca · talla 8 × 2" || got.Lines[0].AmountCents != 64000 {
+		t.Errorf("lines = %+v", got.Lines)
+	}
+	if got.TotalCents != 96000 || got.Method != "Transferencia" || got.Reference != "SPEI 55" {
+		t.Errorf("total %d, method %q, reference %q", got.TotalCents, got.Method, got.Reference)
+	}
+}
+
+// A school that has not filled its details still gets a receipt.
+func TestAReceiptWithoutTheSchoolsDetails(t *testing.T) {
+	f := fakeSources{deposit: client.DepositReceipt{Deposit: client.Deposit{
+		ID: "dep-3", StudentID: "stu-1", AmountCents: 100, Method: "cash", PaidAt: "2026-10-10T00:00:00Z", Folio: "P-2026-000044",
+	}}}
+	got, err := builder(f).Payment(context.Background(), "dep-3")
+	if err != nil {
+		t.Fatalf("Payment: %v", err)
+	}
+	if got.School.Name != "" || got.Method != "Efectivo" {
+		t.Errorf("school %q, method %q", got.School.Name, got.Method)
+	}
+}
+
+func TestASaleThatCannotBeReadIsAnError(t *testing.T) {
+	f := fakeSources{orderErr: errors.New("boom")}
+	if _, err := builder(f).Sale(context.Background(), "ord-x"); err == nil {
+		t.Error("want the order's error")
+	}
+}
