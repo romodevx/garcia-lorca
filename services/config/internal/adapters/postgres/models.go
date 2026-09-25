@@ -158,3 +158,20 @@ type schoolEventModel struct {
 }
 
 func (schoolEventModel) TableName() string { return "school_events" }
+
+// schoolProfileModel is the `school_profile` row: the school's one set of
+// details (task 12).
+type schoolProfileModel struct {
+	TenantID  string    `gorm:"column:tenant_id;primaryKey"`
+	Name      string    `gorm:"column:name"`
+	LegalName string    `gorm:"column:legal_name"`
+	RFC       string    `gorm:"column:rfc"`
+	CCT       string    `gorm:"column:cct"`
+	Address   string    `gorm:"column:address"`
+	Phone     string    `gorm:"column:phone"`
+	Legend    string    `gorm:"column:legend"`
+	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime"`
+}
+
+// TableName pins the row to its table.
+func (schoolProfileModel) TableName() string { return "school_profile" }

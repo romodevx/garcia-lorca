@@ -93,6 +93,13 @@ service ConfigService {
   // DeleteSchoolEvent removes one event.
   rpc DeleteSchoolEvent(DeleteSchoolEventRequest) returns (DeleteSchoolEventResponse);
 
+  // --- the school's details (task 12) ---
+  // GetSchoolProfile returns what a receipt prints about the school; found is
+  // false until somebody fills it in.
+  rpc GetSchoolProfile(GetSchoolProfileRequest) returns (GetSchoolProfileResponse);
+  // SetSchoolProfile replaces the school's details (every field).
+  rpc SetSchoolProfile(SetSchoolProfileRequest) returns (SetSchoolProfileResponse);
+
   // --- teachers (catalog person records; NOT login accounts) ---
   // CreateTeacher adds a teacher catalog record (user_id reserved, may be empty).
   rpc CreateTeacher(CreateTeacherRequest) returns (CreateTeacherResponse);
@@ -638,3 +645,31 @@ message DeleteSchoolEventRequest {
 }
 
 message DeleteSchoolEventResponse {}
+
+// SchoolProfile is the school's details as a receipt prints them (task 12). The
+// name is required; RFC and CCT come upper-cased, the phone as ten digits.
+message SchoolProfile {
+  string name = 1;
+  string legal_name = 2;
+  string rfc = 3;
+  string cct = 4;
+  string address = 5;
+  string phone = 6;
+  string legend = 7;
+}
+
+message GetSchoolProfileRequest {}
+
+message GetSchoolProfileResponse {
+  SchoolProfile profile = 1;
+  // found is false when the school has not filled its details yet.
+  bool found = 2;
+}
+
+message SetSchoolProfileRequest {
+  SchoolProfile profile = 1;
+}
+
+message SetSchoolProfileResponse {
+  SchoolProfile profile = 1;
+}

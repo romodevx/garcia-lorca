@@ -285,6 +285,12 @@ describe("the till", () => {
     await user.click(screen.getByRole("button", { name: /Cobrar y entregar/ }));
 
     await waitFor(() => expect(screen.getByText("U-2026-000007")).toBeInTheDocument());
+    // Task 12: the sale's receipt prints on its 80 mm page, or downloads.
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    await user.click(screen.getByRole("button", { name: "Imprimir ticket" }));
+    expect(open.mock.calls[0]?.[0]).toMatch(/^\/comprobantes\/sale\/.+\?print=1$/);
+    expect(screen.getByRole("button", { name: "Descargar PDF" })).toBeInTheDocument();
+    expect(screen.queryByText(/No se imprime comprobante/)).toBeNull();
     const saleCall = fetchMock.mock.calls.find((call) =>
       String(call[0]).includes("/counter-sale"),
     ) as [string, RequestInit];
@@ -418,6 +424,18 @@ describe("toRows", () => {
     const pending = rows[1];
     expect(pending?.statusLabel).toBe("Por surtir");
     expect(pending?.folioSuffix).toBe("");
+  });
+
+  // Task 12: a counter sale can be reprinted; a family order's delivery is not
+  // a sale receipt.
+  it("offers the sale's receipt on a counter sale only", () => {
+    const sold: UniformOrder = {
+      ...order, id: "ord-2", source: "counter",
+      lines: [order.lines[0] as UniformOrder["lines"][number]],
+      fulfillments: [{ id: "f2", seq: 1, folio: "U-2026-000124-A", status: "sold_at_counter", amountCents: 32000, deadlineEstimated: false, requiresAttention: false }],
+    };
+    expect(toRows([sold])[0]?.receiptOrderId).toBe("ord-2");
+    expect(toRows([order])[0]?.receiptOrderId).toBeUndefined();
   });
 
   it("ties an order's rows together with one accent", () => {

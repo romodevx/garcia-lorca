@@ -7,12 +7,14 @@ import {
   createLevel,
   createSubject,
   createTerm,
+  getSchoolProfile,
   listCycles,
   listGradeLevels,
   listGroups,
   listLevels,
   listSubjects,
   listTerms,
+  saveSchoolProfile,
 } from "./api";
 
 const BASE = "http://gw";
@@ -260,5 +262,42 @@ describe("what a failure tells the user", () => {
     }).catch((e: unknown) => e)) as ConfigError;
 
     expect(err.detail).toBe("cycle name already used");
+  });
+});
+
+// Task 12: the school's details, for the receipts.
+describe("school profile", () => {
+  const profile = {
+    name: "Colegio García Lorca", legalName: "", rfc: "EGL150101AB1", cct: "",
+    address: "", phone: "5512345678", legend: "",
+  };
+
+  it("reads the details and whether the school has filled them", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ profile, found: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const got = await getSchoolProfile(BASE);
+
+    expect(got).toEqual({ profile, found: true });
+    expect(lastCall(fetchMock)[0]).toBe("http://gw/api/v1/config/school-profile");
+  });
+
+  it("PUTs every field and returns the saved (normalised) details", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ profile }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const saved = await saveSchoolProfile(BASE, { ...profile, rfc: "egl150101ab1" });
+
+    const [u, init] = lastCall(fetchMock);
+    expect(u).toBe("http://gw/api/v1/config/school-profile");
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(String(init.body))).toEqual({ ...profile, rfc: "egl150101ab1" });
+    expect(saved.rfc).toBe("EGL150101AB1");
+  });
+
+  it("carries the server's words when the details are refused", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("the RFC does not have the SAT's shape", { status: 400 })));
+
+    await expect(saveSchoolProfile(BASE, profile)).rejects.toMatchObject({ status: 400, isInvalid: true });
   });
 });

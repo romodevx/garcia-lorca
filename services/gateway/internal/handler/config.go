@@ -32,6 +32,8 @@ type ConfigService interface {
 	DeleteNonWorkingPeriod(ctx context.Context, id string) error
 	CreateSchoolEvent(ctx context.Context, in client.SchoolEvent) (client.SchoolEvent, error)
 	ListSchoolEvents(ctx context.Context, cycleID string) ([]client.SchoolEvent, error)
+	GetSchoolProfile(ctx context.Context) (client.SchoolProfile, bool, error)
+	SetSchoolProfile(ctx context.Context, in client.SchoolProfile) (client.SchoolProfile, error)
 	DeleteSchoolEvent(ctx context.Context, id string) error
 	CreateTeachingAssignment(ctx context.Context, groupID, subjectID, teacherID string) (client.TeachingAssignment, error)
 	ListTeachingAssignments(ctx context.Context, cycleID, groupID, teacherID string) ([]client.TeachingAssignment, error)
@@ -675,6 +677,34 @@ func (h *ConfigHandler) CreateSchoolEvent(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusCreated, event)
+}
+
+// GetSchoolProfile handles GET /api/v1/config/school-profile. A school that has
+// not filled its details answers 200 with found=false: the screen shows an
+// empty form, and a receipt falls back.
+func (h *ConfigHandler) GetSchoolProfile(w http.ResponseWriter, r *http.Request) {
+	p, found, err := h.svc.GetSchoolProfile(r.Context())
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"profile": p, "found": found})
+}
+
+// PutSchoolProfile handles PUT /api/v1/config/school-profile: every field is
+// replaced (task 12).
+func (h *ConfigHandler) PutSchoolProfile(w http.ResponseWriter, r *http.Request) {
+	var req client.SchoolProfile
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	saved, err := h.svc.SetSchoolProfile(r.Context(), req)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"profile": saved})
 }
 
 // ListSchoolEvents handles GET /api/v1/config/events?cycleId=…

@@ -205,6 +205,25 @@ type IncomeLine struct {
 	AmountCents int64
 }
 
+// ReceiptLine is one concept a deposit paid, as its receipt prints it (task 12).
+type ReceiptLine struct {
+	ChargeID    string
+	Description string
+	// AmountCents is what THIS deposit put on the charge.
+	AmountCents int64
+	// Surcharge marks a late fee (daily, monthly or typed by hand).
+	Surcharge bool
+	// DiscountCents is the charge's discount, printed beside it.
+	DiscountCents int64
+}
+
+// DepositReceipt is a deposit and what it paid, for its receipt.
+type DepositReceipt struct {
+	Deposit          domain.Deposit
+	Lines            []ReceiptLine
+	UnallocatedCents int64
+}
+
 // DepositRecord is a stored deposit with what it did.
 type DepositRecord struct {
 	Deposit          domain.Deposit
@@ -344,6 +363,9 @@ type FinanceRepository interface {
 
 	// GetDeposit returns one deposit by id, or KindNotFound.
 	GetDeposit(ctx context.Context, id string) (domain.Deposit, error)
+	// DepositReceipt reads a deposit and what it paid, for its receipt (task
+	// 12), or KindNotFound.
+	DepositReceipt(ctx context.Context, id string) (DepositReceipt, error)
 
 	// ListDeposits returns a student's deposits, newest first.
 	ListDeposits(ctx context.Context, studentID string) ([]domain.Deposit, error)

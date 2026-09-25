@@ -8,6 +8,7 @@ import { Icon } from "../../_design/Icon";
 import { SizeQuantityPicker, type SizePick } from "../../_design/SizeQuantityPicker";
 import { counterSale, UniformsError, type SaleLine, type UniformItem, type UniformOrder } from "../../uniforms/api";
 import type { Student } from "../../students/api";
+import { ReceiptActions } from "../receipts/ReceiptActions";
 import { StudentPicker } from "./StudentPicker";
 import { EmptyState, ErrorNote, field, FieldLabel, label, money } from "./parts";
 
@@ -438,9 +439,9 @@ function SaleReceipt({
       {change > 0 && (
         <p style={{ fontSize: 17, fontWeight: 700, color: "var(--forest)" }}>Cambio: {money(change)}</p>
       )}
-      <p style={{ fontSize: 13.5, color: "var(--text-faint)", maxWidth: 380 }}>
-        Anota el folio si el padre lo pide. No se imprime comprobante en esta versión.
-      </p>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+        <ReceiptActions kind="sale" id={order.id} />
+      </div>
       <Btn icon="plus" onClick={onNext}>
         Siguiente venta
       </Btn>

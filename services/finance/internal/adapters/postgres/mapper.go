@@ -380,6 +380,7 @@ func nullableUUID(id string) *string {
 
 func fromDomainDeposit(d domain.Deposit) depositModel {
 	m := depositModel{
+		Folio:           d.Folio(),
 		ID:              d.ID(),
 		TenantID:        d.TenantID(),
 		StudentID:       d.StudentID(),
@@ -417,7 +418,7 @@ func toDomainDeposit(m depositModel) (domain.Deposit, error) {
 	if m.ReceivedBy != nil {
 		receiver.UserID = *m.ReceivedBy
 	}
-	d = d.WithReceiver(receiver).WithCapturedAt(m.CreatedAt)
+	d = d.WithReceiver(receiver).WithCapturedAt(m.CreatedAt).WithFolio(m.Folio)
 	if m.VoidedAt == nil {
 		return d, nil
 	}

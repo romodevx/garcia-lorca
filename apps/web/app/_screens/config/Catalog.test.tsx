@@ -28,6 +28,9 @@ vi.mock("../../config/api", () => ({
   listSchoolEvents: vi.fn(),
   createSchoolEvent: vi.fn(),
   deleteSchoolEvent: vi.fn(),
+  getSchoolProfile: vi.fn(),
+  saveSchoolProfile: vi.fn(),
+  ConfigError: class ConfigError extends Error {},
 }));
 
 /*
@@ -60,6 +63,10 @@ beforeEach(() => {
   mocked.listGradeLevels.mockResolvedValue([]);
   mocked.listNonWorkingPeriods.mockResolvedValue([]);
   mocked.listSchoolEvents.mockResolvedValue([]);
+  mocked.getSchoolProfile.mockResolvedValue({
+    profile: { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "" },
+    found: false,
+  });
   mocked.listSubjects.mockResolvedValue([]);
   mocked.listGroups.mockResolvedValue([]);
   mocked.listTerms.mockResolvedValue([]);
@@ -122,7 +129,7 @@ describe("Catalog — nested level → grade level", () => {
     await user.click(await screen.findByRole("button", { name: "Nuevo grado" }));
     await user.type(screen.getByLabelText("Nombre del grado"), "1° preescolar{Enter}");
 
-    expect(await screen.findByText(/nombre/)).toHaveTextContent(/nombre o ese orden/);
+    expect(await screen.findByText(/nombre o ese orden/)).toBeInTheDocument();
   });
 
   // The SEP key is optional, as its own help says and as the server always

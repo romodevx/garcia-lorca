@@ -36,6 +36,7 @@ import { GroupsPanel } from "./GroupsPanel";
 import { LevelsPanel } from "./LevelsPanel";
 import { TuitionPanel } from "./TuitionPanel";
 import { CalendarPanel } from "./CalendarPanel";
+import { SchoolProfilePanel } from "./SchoolProfilePanel";
 import { SubjectsPanel } from "./SubjectsPanel";
 import { TermsPanel } from "./TermsPanel";
 
@@ -263,6 +264,7 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
         <p role="alert" className="fade-up" style={{ color: "var(--bad-fg)", fontSize: 15 }}>{loadError}</p>
       ) : (
         <div className="fade-up" style={{ display: "grid", gap: 18 }}>
+          {!pricing && <SchoolProfilePanel />}
           {!pricing && (
             <CycleBar cycles={cycles} selectedCycleId={selectedCycleId} onSelect={setSelectedCycleId} onCreate={handleCreateCycle} onActivate={handleActivateCycle} />
           )}

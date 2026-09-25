@@ -19,6 +19,7 @@ import (
 	"github.com/garcia-lorca/services/gateway/internal/config"
 	"github.com/garcia-lorca/services/gateway/internal/handler"
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
+	"github.com/garcia-lorca/services/gateway/internal/receipt"
 
 	"github.com/garcia-lorca/pkg/featureflag"
 	"github.com/garcia-lorca/pkg/gcpauth"
@@ -373,6 +374,8 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/config/terms", configRead(configH.ListTerms))
 	mux.Handle("POST /api/v1/config/events", configWrite(configH.CreateSchoolEvent))
 	mux.Handle("GET /api/v1/config/events", configRead(configH.ListSchoolEvents))
+	mux.Handle("GET /api/v1/config/school-profile", configRead(configH.GetSchoolProfile))
+	mux.Handle("PUT /api/v1/config/school-profile", configWrite(configH.PutSchoolProfile))
 	mux.Handle("DELETE /api/v1/config/events/{id}", configWrite(configH.DeleteSchoolEvent))
 	mux.Handle("POST /api/v1/config/calendar", configWrite(configH.CreateNonWorkingPeriod))
 	mux.Handle("GET /api/v1/config/calendar", configRead(configH.ListNonWorkingPeriods))
@@ -636,6 +639,18 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/uniforms/counter-sale", uniformsSell(uniformsH.CounterSale))
 	mux.Handle("GET /api/v1/uniforms/orders", uniformsOrders(uniformsH.ListOrders))
 	mux.Handle("GET /api/v1/uniforms/orders/{id}", uniformsOrders(uniformsH.GetOrder))
+
+	// Receipts (task 12): proof of what a deposit or a sale took, as JSON for the
+	// 80 mm ticket the browser prints and as a PDF. A payment's answers to whoever
+	// sees the money (the counter or finance); a sale's to whoever reads orders.
+	receiptsH := handler.NewReceiptsHandler(receipt.NewBuilder(financeClient, uniformsClient, studentsClient, financeClient, configClient))
+	paymentReceipt := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("finance", requireAuthChanged(middleware.RequireAnyPermission("finance:read", "collections:read")(h)))
+	}
+	mux.Handle("GET /api/v1/receipts/payment/{id}", paymentReceipt(receiptsH.PaymentJSON))
+	mux.Handle("GET /api/v1/receipts/payment/{id}/pdf", paymentReceipt(receiptsH.PaymentPDF))
+	mux.Handle("GET /api/v1/receipts/sale/{id}", uniformsOrders(receiptsH.SaleJSON))
+	mux.Handle("GET /api/v1/receipts/sale/{id}/pdf", uniformsOrders(receiptsH.SalePDF))
 	mux.Handle("GET /api/v1/uniforms/settings", uniformsStock(uniformsH.GetSettings))
 	mux.Handle("PUT /api/v1/uniforms/settings", uniformsWrite(uniformsH.UpdateSettings))
 

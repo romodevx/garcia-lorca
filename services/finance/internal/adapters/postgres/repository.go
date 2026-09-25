@@ -887,6 +887,15 @@ func withPaidTotals(tx *gorm.DB, rows []chargeModel) ([]ports.ChargeWithPaid, er
 	return out, nil
 }
 
+// folioUniqueConstraint is deposits' UNIQUE (tenant_id, folio) (migration 0018).
+const folioUniqueConstraint = "deposits_folio_unique"
+
+// violates reports whether err is a unique violation of the named constraint.
+func violates(err error, constraint string) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == constraint
+}
+
 // isUniqueViolation reports whether err is a Postgres unique-constraint
 // violation, which the ledger surfaces as KindConflict.
 func isUniqueViolation(err error) bool {
@@ -1084,8 +1093,20 @@ func (r *Repository) RegisterDeposit(
 			return err
 		}
 
+		folio, capturedAt, err := r.nextDepositFolio(tx)
+		if err != nil {
+			return err
+		}
+		d = d.WithFolio(folio)
 		row := fromDomainDeposit(d)
+		// One clock for the folio's year and the capture it names.
+		row.CreatedAt = capturedAt
 		if err := tx.Create(&row).Error; err != nil {
+			if violates(err, folioUniqueConstraint) {
+				// The counter is behind the stored folios (a restore, a hand
+				// edit): a fault to fix, never "this payment already exists".
+				return glerrors.Wrap(glerrors.KindInternal, "the deposit folio counter is behind its folios", err)
+			}
 			if isUniqueViolation(err) {
 				// A concurrent request carrying the same key got there first.
 				// It is a retry, not a second collection.
@@ -1261,7 +1282,7 @@ func cancelUnpaidSurchargesOf(tx *gorm.DB, studentID, depositID string) error {
 	var rows []chargeModel
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 		// The student narrows it to an index: the ref's leading wildcard cannot.
-		Where("student_id = ? AND external_ref LIKE ? AND status <> ?", studentID, "dailyfee:%:"+depositID, domain.StatusCancelled).
+		Where("student_id = ? AND external_ref LIKE ? AND status <> ?", studentID, domain.DailyFeeRefPrefix+"%:"+depositID, domain.StatusCancelled).
 		Find(&rows).Error; err != nil {
 		return glerrors.Wrap(glerrors.KindInternal, "listing the deposit's surcharges", err)
 	}
@@ -1290,6 +1311,28 @@ func cancelUnpaidSurchargesOf(tx *gorm.DB, studentID, depositID string) error {
 		}
 	}
 	return nil
+}
+
+// nextDepositFolio allocates the school's next receipt number for the year of
+// this transaction's instant, under the counter row's own lock (migration
+// 0018), and returns that instant for created_at: the folio's year and the
+// capture it names come from one clock. Per school: a SEQUENCE would share one
+// run.
+func (r *Repository) nextDepositFolio(tx *gorm.DB) (string, time.Time, error) {
+	var got struct {
+		Year int
+		Seq  int
+		At   time.Time
+	}
+	err := tx.Raw(`INSERT INTO deposit_folio_counters (tenant_id, year, next_seq)
+	               VALUES (?, EXTRACT(YEAR FROM now() AT TIME ZONE 'UTC')::int, 2)
+	               ON CONFLICT (tenant_id, year)
+	               DO UPDATE SET next_seq = deposit_folio_counters.next_seq + 1
+	               RETURNING year, next_seq - 1 AS seq, now() AS at`, r.tenantID).Scan(&got).Error
+	if err != nil {
+		return "", time.Time{}, glerrors.Wrap(glerrors.KindInternal, "allocating a deposit folio", err)
+	}
+	return domain.FormatDepositFolio(got.Year, got.Seq), got.At, nil
 }
 
 // depositByIdempotencyKey finds a deposit already stored under key. An empty key
@@ -1335,6 +1378,66 @@ func rebuildDepositRecord(tx *gorm.DB, d domain.Deposit) (ports.DepositRecord, e
 		Allocations:      allocations,
 		UnallocatedCents: d.Amount().Int64() - allocated,
 	}, nil
+}
+
+// DepositReceipt reads a deposit and what it paid, concept by concept (task
+// 12). One join: each payment of the deposit with its charge and the charge's
+// concept, whose kind says a hand-typed late fee; the ref says the daily and
+// monthly ones. A voided deposit has no payments left, so no lines.
+func (r *Repository) DepositReceipt(ctx context.Context, id string) (ports.DepositReceipt, error) {
+	var out ports.DepositReceipt
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var m depositModel
+		if err := tx.Where("id = ?", id).First(&m).Error; err != nil {
+			return translateFindErr(err)
+		}
+		d, err := toDomainDeposit(m)
+		if err != nil {
+			return err
+		}
+		var rows []struct {
+			ChargeID      string
+			Description   string
+			AmountCents   int64
+			ExternalRef   string
+			Kind          string
+			DiscountCents int64
+		}
+		// A charge's discount is realized by the payment that settles it: only
+		// the last payment captured on a paid charge shows it, so a charge paid
+		// in two deposits does not read its discount twice.
+		if err := tx.Raw(`SELECT p.charge_id, c.description, p.amount_cents, c.external_ref, cc.kind,
+		                         CASE WHEN c.status = ? AND p.id = (
+		                                  SELECT p2.id FROM payments p2
+		                                   WHERE p2.charge_id = c.id
+		                                   ORDER BY p2.created_at DESC, p2.id DESC LIMIT 1)
+		                              THEN c.discount_cents ELSE 0 END AS discount_cents
+		                    FROM payments p
+		                    JOIN charges c ON c.id = p.charge_id
+		                    JOIN charge_concepts cc ON cc.id = c.concept_id
+		                   WHERE p.deposit_id = ?
+		                   ORDER BY c.due_date, p.id`, domain.StatusPaid, id).Scan(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "reading the deposit's receipt", err)
+		}
+		out = ports.DepositReceipt{Deposit: d, Lines: make([]ports.ReceiptLine, 0, len(rows))}
+		var allocated int64
+		for _, row := range rows {
+			out.Lines = append(out.Lines, ports.ReceiptLine{
+				ChargeID: row.ChargeID, Description: row.Description, AmountCents: row.AmountCents,
+				Surcharge:     row.Kind == domain.KindLateFee || domain.IsFeeRef(row.ExternalRef),
+				DiscountCents: row.DiscountCents,
+			})
+			allocated += row.AmountCents
+		}
+		if !d.Voided() {
+			out.UnallocatedCents = d.Amount().Int64() - allocated
+		}
+		return nil
+	})
+	if err != nil {
+		return ports.DepositReceipt{}, err
+	}
+	return out, nil
 }
 
 // UnallocatedCents is what a family has paid that no charge has claimed.

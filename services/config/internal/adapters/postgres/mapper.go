@@ -223,3 +223,19 @@ func toDomainSchoolEvent(m schoolEventModel) (domain.SchoolEvent, error) {
 	return domain.NewSchoolEvent(m.ID, m.TenantID, m.CycleID, m.Title, m.Description,
 		m.StartsOn, m.EndsOn, audience)
 }
+
+// toDomainSchoolProfile rebuilds the school's details through the domain, so a
+// stored row answers to the same rules as a typed one.
+func toDomainSchoolProfile(m schoolProfileModel) (domain.SchoolProfile, error) {
+	return domain.NewSchoolProfile(m.TenantID, domain.SchoolProfileInput{
+		Name: m.Name, LegalName: m.LegalName, RFC: m.RFC, CCT: m.CCT,
+		Address: m.Address, Phone: m.Phone, Legend: m.Legend,
+	})
+}
+
+func fromDomainSchoolProfile(p domain.SchoolProfile) schoolProfileModel {
+	return schoolProfileModel{
+		TenantID: p.TenantID(), Name: p.Name(), LegalName: p.LegalName(), RFC: p.RFC(), CCT: p.CCT(),
+		Address: p.Address(), Phone: p.Phone(), Legend: p.Legend(),
+	}
+}

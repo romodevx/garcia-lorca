@@ -2861,3 +2861,28 @@ func TestFinanceReadStillReadsTheWholeLedger(t *testing.T) {
 		}
 	}
 }
+
+// Task 12: a payment's receipt answers to whoever can see the money (the
+// counter or finance); a sale's to whoever reads orders. A teacher reaches
+// neither.
+func TestReceiptsAnswerToWhoCanSeeTheMoney(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_finance": true, "module_uniforms": true})
+	cases := []struct {
+		path, token string
+		reachable   bool
+	}{
+		{"/api/v1/receipts/payment/dep-1", "cobranza", true},
+		{"/api/v1/receipts/payment/dep-1/pdf", "finance-reader", true},
+		{"/api/v1/receipts/payment/dep-1", "teaching-writer", false},
+		{"/api/v1/receipts/sale/ord-1", "uni-director", true},
+		{"/api/v1/receipts/sale/ord-1/pdf", "cobranza", false},
+		{"/api/v1/receipts/sale/ord-1", "teaching-writer", false},
+	}
+	for _, c := range cases {
+		res := doGateway(t, gw, http.MethodGet, c.path, c.token, "")
+		denied := res.StatusCode == http.StatusForbidden || res.StatusCode == http.StatusUnauthorized
+		if c.reachable == denied || res.StatusCode == http.StatusNotFound && c.reachable {
+			t.Errorf("%s as %s: status %d, reachable want %v", c.path, c.token, res.StatusCode, c.reachable)
+		}
+	}
+}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { ticketPath } from "../../receipts/api";
 import { Btn } from "../../_design/Controls";
 import { listOrders, UniformsError, type Level, type UniformFulfillment, type UniformOrder } from "../../uniforms/api";
 import { EmptyState, ErrorNote, LevelChips, money, SkeletonRows, type SchoolLevel } from "./parts";
@@ -142,6 +143,7 @@ export function OrdersPanel({ narrow, levels }: { narrow: boolean; levels: reado
               <p style={{ fontSize: 13, color: "var(--text-faint)" }}>
                 {row.itemsLabel} · {row.statusLabel}
               </p>
+              {row.receiptOrderId !== undefined && <ReprintButton orderId={row.receiptOrderId} folio={row.folioStem} />}
             </div>
           ))}
         </div>
@@ -150,7 +152,7 @@ export function OrdersPanel({ narrow, levels }: { narrow: boolean; levels: reado
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
-                {["Folio", "Alumno", "Nivel", "Prendas", "Total", "Estado"].map((head) => (
+                {["Folio", "Alumno", "Nivel", "Prendas", "Total", "Estado", "Comprobante"].map((head) => (
                   <th
                     key={head}
                     style={{
@@ -180,6 +182,7 @@ export function OrdersPanel({ narrow, levels }: { narrow: boolean; levels: reado
                   <td style={cell}>{row.itemsLabel}</td>
                   <td style={{ ...cell, fontWeight: 700 }}>{money(row.amountCents)}</td>
                   <td style={cell}>{row.statusLabel}</td>
+                  <td style={cell}>{row.receiptOrderId !== undefined && <ReprintButton orderId={row.receiptOrderId} folio={row.folioStem} />}</td>
                 </tr>
               ))}
             </tbody>
@@ -219,6 +222,15 @@ function FolioText({ stem, suffix }: { stem: string; suffix: string }): ReactEle
   );
 }
 
+/** Prints a counter sale's receipt again, on its own 80 mm page (task 12). */
+function ReprintButton({ orderId, folio }: { orderId: string; folio: string }): ReactElement {
+  return (
+    <Btn kind="ghost" type="button" aria-label={`Reimprimir ${folio}`} onClick={() => window.open(ticketPath("sale", orderId), "_blank", "noopener")}>
+      Reimprimir
+    </Btn>
+  );
+}
+
 export interface Row {
   key: string;
   folioStem: string;
@@ -229,6 +241,8 @@ export interface Row {
   amountCents: number;
   statusLabel: string;
   accent: string;
+  /** Set on a counter sale: its receipt can be printed again (task 12). */
+  receiptOrderId?: string;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -267,6 +281,7 @@ export function toRows(orders: UniformOrder[]): Row[] {
       amountCents: f.amountCents,
       statusLabel: f.requiresAttention ? "Requiere atención" : (STATUS_LABELS[f.status] ?? f.status),
       accent,
+      ...(f.status === "sold_at_counter" ? { receiptOrderId: order.id } : {}),
     }));
 
     const pending = order.lines.filter((line) => line.status === "awaiting_stock");

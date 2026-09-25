@@ -468,6 +468,48 @@ func (c *ConfigClient) CreateSchoolEvent(ctx context.Context, in SchoolEvent) (S
 	return toSchoolEvent(res.Msg.GetEvent()), nil
 }
 
+// SchoolProfile is the school's details as a receipt prints them (task 12).
+type SchoolProfile struct {
+	Name      string `json:"name"`
+	LegalName string `json:"legalName"`
+	RFC       string `json:"rfc"`
+	CCT       string `json:"cct"`
+	Address   string `json:"address"`
+	Phone     string `json:"phone"`
+	Legend    string `json:"legend"`
+}
+
+// GetSchoolProfile returns the school's details; found is false until somebody
+// fills them in.
+func (c *ConfigClient) GetSchoolProfile(ctx context.Context) (SchoolProfile, bool, error) {
+	res, err := c.rpc.GetSchoolProfile(ctx, connect.NewRequest(&configv1.GetSchoolProfileRequest{}))
+	if err != nil {
+		return SchoolProfile{}, false, err
+	}
+	return toSchoolProfile(res.Msg.GetProfile()), res.Msg.GetFound(), nil
+}
+
+// SetSchoolProfile replaces the school's details and returns them normalised.
+func (c *ConfigClient) SetSchoolProfile(ctx context.Context, in SchoolProfile) (SchoolProfile, error) {
+	res, err := c.rpc.SetSchoolProfile(ctx, connect.NewRequest(&configv1.SetSchoolProfileRequest{
+		Profile: &configv1.SchoolProfile{
+			Name: in.Name, LegalName: in.LegalName, Rfc: in.RFC, Cct: in.CCT,
+			Address: in.Address, Phone: in.Phone, Legend: in.Legend,
+		},
+	}))
+	if err != nil {
+		return SchoolProfile{}, err
+	}
+	return toSchoolProfile(res.Msg.GetProfile()), nil
+}
+
+func toSchoolProfile(p *configv1.SchoolProfile) SchoolProfile {
+	return SchoolProfile{
+		Name: p.GetName(), LegalName: p.GetLegalName(), RFC: p.GetRfc(), CCT: p.GetCct(),
+		Address: p.GetAddress(), Phone: p.GetPhone(), Legend: p.GetLegend(),
+	}
+}
+
 // ListSchoolEvents returns a cycle's agenda, earliest first.
 func (c *ConfigClient) ListSchoolEvents(ctx context.Context, cycleID string) ([]SchoolEvent, error) {
 	res, err := c.rpc.ListSchoolEvents(ctx, connect.NewRequest(&configv1.ListSchoolEventsRequest{

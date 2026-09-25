@@ -112,6 +112,14 @@ type CatalogRepository interface {
 	// DeleteNonWorkingPeriod removes one period, or KindNotFound.
 	DeleteNonWorkingPeriod(ctx context.Context, id string) error
 
+	// --- the school's details (task 12) ---
+
+	// GetSchoolProfile returns the school's details; found is false when the
+	// school has not filled them yet.
+	GetSchoolProfile(ctx context.Context) (p domain.SchoolProfile, found bool, err error)
+	// UpsertSchoolProfile writes the school's one set of details.
+	UpsertSchoolProfile(ctx context.Context, p domain.SchoolProfile) error
+
 	// --- school events (M16; the agenda, NOT the closed days) ---
 
 	// CreateSchoolEvent persists something the school does. Deliberately a

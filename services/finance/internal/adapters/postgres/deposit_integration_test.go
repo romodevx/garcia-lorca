@@ -5,6 +5,11 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"regexp"
+	"sort"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -612,5 +617,266 @@ func TestVoidingADepositCancelsTheSurchargeItWrote(t *testing.T) {
 	}
 	if reopened.Charge.Status() != domain.StatusPending {
 		t.Errorf("month after the void is %s, want pending", reopened.Charge.Status())
+	}
+}
+
+// Task 12: every deposit gets a folio the receipt prints — P-<year>-<six
+// digits>, one run per school and year, allocated in the deposit's own
+// transaction. The year is the capture's, as created_at records it.
+func TestDepositsGetAFolioPerSchool(t *testing.T) {
+	ctx := context.Background()
+	empty := func([]ports.ChargeWithPaid) (ports.DepositWrite, error) { return ports.DepositWrite{}, nil }
+	paidOn := time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)
+
+	repoA := appRepo(t, tenantA)
+	first, _, err := repoA.RegisterDeposit(ctx, newDeposit(t, "62000000-0000-0000-0000-0000000000c1", tenantA,
+		"80000000-0000-0000-0000-0000000000c1", 100, paidOn, ""), empty, nil)
+	if err != nil {
+		t.Fatalf("first deposit: %v", err)
+	}
+	second, _, err := repoA.RegisterDeposit(ctx, newDeposit(t, "62000000-0000-0000-0000-0000000000c2", tenantA,
+		"80000000-0000-0000-0000-0000000000c1", 100, paidOn, ""), empty, nil)
+	if err != nil {
+		t.Fatalf("second deposit: %v", err)
+	}
+	f1, f2 := first.Deposit.Folio(), second.Deposit.Folio()
+	if !regexp.MustCompile(`^P-[0-9]{4}-[0-9]{6}$`).MatchString(f1) {
+		t.Fatalf("folio %q is not P-YYYY-NNNNNN", f1)
+	}
+	if seqOf(t, f2) != seqOf(t, f1)+1 || f1[:6] != f2[:6] {
+		t.Errorf("folios %q then %q; want the next number of the same year", f1, f2)
+	}
+	stored, err := repoA.GetDeposit(ctx, first.Deposit.ID())
+	if err != nil {
+		t.Fatalf("GetDeposit: %v", err)
+	}
+	if stored.Folio() != f1 {
+		t.Errorf("read back %q, want %q", stored.Folio(), f1)
+	}
+	if year := fmt.Sprintf("P-%04d-", stored.CapturedAt().UTC().Year()); f1[:7] != year {
+		t.Errorf("folio %q names another year than its capture (%s)", f1, stored.CapturedAt())
+	}
+
+	// Another school keeps its own run: its first deposit is number 1.
+	other, _, err := appRepo(t, tenantB).RegisterDeposit(ctx, newDeposit(t, "62000000-0000-0000-0000-0000000000c3", tenantB,
+		"80000000-0000-0000-0000-0000000000c3", 100, paidOn, ""), empty, nil)
+	if err != nil {
+		t.Fatalf("tenant B deposit: %v", err)
+	}
+	if seqOf(t, other.Deposit.Folio()) != 1 {
+		t.Errorf("tenant B's first folio = %q, want number 1 of its own run", other.Deposit.Folio())
+	}
+}
+
+func seqOf(t *testing.T, folio string) int {
+	t.Helper()
+	n, err := strconv.Atoi(folio[len(folio)-6:])
+	if err != nil {
+		t.Fatalf("folio %q: %v", folio, err)
+	}
+	return n
+}
+
+// Task 12: a deposit read back for its receipt — what it put on each charge, the
+// late fee marked as such, the discount beside its month, and the credit left.
+func TestDepositReceiptReadsWhatTheMoneyPaid(t *testing.T) {
+	ctx := context.Background()
+	tenant, student := tenantA, "80000000-0000-0000-0000-0000000000d1"
+	due := time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)
+	month := seedConceptAndCharge(t, tenant, "60000000-0000-0000-0000-0000000000d1", "colegiatura recibo",
+		"61000000-0000-0000-0000-0000000000d1", student, "70000000-0000-0000-0000-0000000000d1", 320000, 10000, due)
+	fee := newCharge(t, "63000000-0000-0000-0000-0000000000d1", tenant, student,
+		"70000000-0000-0000-0000-0000000000d1", "60000000-0000-0000-0000-0000000000d1", 30000, 0, due)
+	paidOn := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
+	deposit := newDeposit(t, "62000000-0000-0000-0000-0000000000d1", tenant, student, 350000, paidOn, "")
+	fee, err := fee.WithExternalRef("dailyfee:" + month.ID() + ":" + deposit.ID())
+	if err != nil {
+		t.Fatalf("WithExternalRef: %v", err)
+	}
+	repo := appRepo(t, tenant)
+	if _, _, err := repo.RegisterDeposit(ctx, deposit, func([]ports.ChargeWithPaid) (ports.DepositWrite, error) {
+		return ports.DepositWrite{
+			Surcharges: []domain.Charge{fee},
+			Allocations: []domain.Payment{
+				newPayment(t, "90000000-0000-0000-0000-0000000000d1", tenant, month.ID(), 310000, paidOn),
+				newPayment(t, "90000000-0000-0000-0000-0000000000d2", tenant, fee.ID(), 30000, paidOn),
+			},
+			UnallocatedCents: 10000,
+		}, nil
+	}, nil); err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+
+	got, err := repo.DepositReceipt(ctx, deposit.ID())
+	if err != nil {
+		t.Fatalf("DepositReceipt: %v", err)
+	}
+	if got.Deposit.Folio() == "" || len(got.Lines) != 2 || got.UnallocatedCents != 10000 {
+		t.Fatalf("receipt = folio %q, %d lines, credit %d; want a folio, 2 lines, 10000", got.Deposit.Folio(), len(got.Lines), got.UnallocatedCents)
+	}
+	byCharge := map[string]ports.ReceiptLine{}
+	for _, l := range got.Lines {
+		byCharge[l.ChargeID] = l
+	}
+	if l := byCharge[month.ID()]; l.AmountCents != 310000 || l.Surcharge || l.DiscountCents != 10000 || l.Description == "" {
+		t.Errorf("month line = %+v; want 310000, not a surcharge, 10000 discount, its description", l)
+	}
+	if l := byCharge[fee.ID()]; l.AmountCents != 30000 || !l.Surcharge {
+		t.Errorf("fee line = %+v; want 30000 marked as a surcharge", l)
+	}
+}
+
+// Review of task 12: a charge's discount is realized by the payment that
+// settles it, so only that deposit's receipt shows it. Paid in two deposits, the
+// family must not read the discount twice. A voided deposit has no lines and no
+// credit.
+func TestDepositReceiptShowsTheDiscountOnTheSettlingDepositOnly(t *testing.T) {
+	ctx := context.Background()
+	tenant, student := tenantA, "80000000-0000-0000-0000-0000000000e1"
+	due := time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)
+	charge := seedConceptAndCharge(t, tenant, "60000000-0000-0000-0000-0000000000e1", "colegiatura en dos",
+		"61000000-0000-0000-0000-0000000000e1", student, "70000000-0000-0000-0000-0000000000e1", 320000, 10000, due)
+	paidOn := time.Date(2026, 9, 5, 0, 0, 0, 0, time.UTC)
+	repo := appRepo(t, tenant)
+	pay := func(depositID, paymentID string, amount int64) domain.Deposit {
+		d := newDeposit(t, depositID, tenant, student, amount, paidOn, "")
+		if _, _, err := repo.RegisterDeposit(ctx, d, func([]ports.ChargeWithPaid) (ports.DepositWrite, error) {
+			return ports.DepositWrite{Allocations: []domain.Payment{newPayment(t, paymentID, tenant, charge.ID(), amount, paidOn)}}, nil
+		}, nil); err != nil {
+			t.Fatalf("RegisterDeposit %s: %v", depositID, err)
+		}
+		return d
+	}
+	first := pay("62000000-0000-0000-0000-0000000000e1", "90000000-0000-0000-0000-0000000000e1", 200000)
+	second := pay("62000000-0000-0000-0000-0000000000e2", "90000000-0000-0000-0000-0000000000e2", 110000)
+
+	a, err := repo.DepositReceipt(ctx, first.ID())
+	if err != nil {
+		t.Fatalf("receipt A: %v", err)
+	}
+	b, err := repo.DepositReceipt(ctx, second.ID())
+	if err != nil {
+		t.Fatalf("receipt B: %v", err)
+	}
+	if len(a.Lines) != 1 || a.Lines[0].DiscountCents != 0 {
+		t.Errorf("the part payment's line = %+v, want no discount", a.Lines)
+	}
+	if len(b.Lines) != 1 || b.Lines[0].DiscountCents != 10000 {
+		t.Errorf("the settling payment's line = %+v, want the 10000 discount", b.Lines)
+	}
+
+	voided, err := first.Void("capturado mal", paidOn)
+	if err != nil {
+		t.Fatalf("Void: %v", err)
+	}
+	if err := repo.VoidDeposit(ctx, voided); err != nil {
+		t.Fatalf("VoidDeposit: %v", err)
+	}
+	gone, err := repo.DepositReceipt(ctx, first.ID())
+	if err != nil {
+		t.Fatalf("voided receipt: %v", err)
+	}
+	if !gone.Deposit.Voided() || len(gone.Lines) != 0 || gone.UnallocatedCents != 0 {
+		t.Errorf("voided receipt = voided %v, %d lines, credit %d; want voided, none, 0", gone.Deposit.Voided(), len(gone.Lines), gone.UnallocatedCents)
+	}
+}
+
+// Review of task 12: a retried deposit returns the folio it was given, and the
+// counter does not move.
+func TestAReplayedDepositKeepsItsFolio(t *testing.T) {
+	ctx := context.Background()
+	repo := appRepo(t, tenantA)
+	empty := func([]ports.ChargeWithPaid) (ports.DepositWrite, error) { return ports.DepositWrite{}, nil }
+	paidOn := time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)
+	d := newDeposit(t, "62000000-0000-0000-0000-0000000000e3", tenantA, "80000000-0000-0000-0000-0000000000e3", 100, paidOn, "replay-folio-key")
+
+	first, _, err := repo.RegisterDeposit(ctx, d, empty, nil)
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	retry := newDeposit(t, "62000000-0000-0000-0000-0000000000e4", tenantA, "80000000-0000-0000-0000-0000000000e3", 100, paidOn, "replay-folio-key")
+	again, replayed, err := repo.RegisterDeposit(ctx, retry, empty, nil)
+	if err != nil || !replayed {
+		t.Fatalf("retry: replayed %v, err %v", replayed, err)
+	}
+	if again.Deposit.Folio() != first.Deposit.Folio() {
+		t.Errorf("retry folio %q, want the original %q", again.Deposit.Folio(), first.Deposit.Folio())
+	}
+	next, _, err := repo.RegisterDeposit(ctx, newDeposit(t, "62000000-0000-0000-0000-0000000000e5", tenantA,
+		"80000000-0000-0000-0000-0000000000e3", 100, paidOn, ""), empty, nil)
+	if err != nil {
+		t.Fatalf("next: %v", err)
+	}
+	if seqOf(t, next.Deposit.Folio()) != seqOf(t, first.Deposit.Folio())+1 {
+		t.Errorf("after a replay the next folio is %q; want the number right after %q", next.Deposit.Folio(), first.Deposit.Folio())
+	}
+}
+
+// Review of task 12: deposits taken at the same time get distinct numbers with
+// no gap.
+func TestConcurrentDepositsGetDistinctConsecutiveFolios(t *testing.T) {
+	ctx := context.Background()
+	repo := appRepo(t, tenantB)
+	empty := func([]ports.ChargeWithPaid) (ports.DepositWrite, error) { return ports.DepositWrite{}, nil }
+	paidOn := time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)
+	const n = 8
+	// Built here, on the test's goroutine: t.Fatalf is not for the workers.
+	deposits := make([]domain.Deposit, n)
+	for i := range deposits {
+		deposits[i] = newDeposit(t, fmt.Sprintf("62000000-0000-0000-0000-0000000001%02d", i), tenantB, "80000000-0000-0000-0000-0000000000f1", 100, paidOn, "")
+	}
+	folios := make(chan string, n)
+	errs := make(chan error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			got, _, err := repo.RegisterDeposit(ctx, deposits[i], empty, nil)
+			if err != nil {
+				errs <- err
+				return
+			}
+			folios <- got.Deposit.Folio()
+		}(i)
+	}
+	wg.Wait()
+	close(folios)
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent deposit: %v", err)
+	}
+	seqs := []int{}
+	for f := range folios {
+		seqs = append(seqs, seqOf(t, f))
+	}
+	sort.Ints(seqs)
+	for i := 1; i < len(seqs); i++ {
+		if seqs[i] != seqs[i-1]+1 {
+			t.Fatalf("folio numbers %v are not distinct and consecutive", seqs)
+		}
+	}
+}
+
+// Review of task 12: a counter behind its folios is a fault, not "this payment
+// already exists" — that answer would send the cashier away with money taken.
+func TestAFolioClashIsNotADuplicatePayment(t *testing.T) {
+	ctx := context.Background()
+	const tenant = "33333333-3333-3333-3333-333333333333"
+	repo := appRepo(t, tenant)
+	empty := func([]ports.ChargeWithPaid) (ports.DepositWrite, error) { return ports.DepositWrite{}, nil }
+	paidOn := time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)
+	if _, _, err := repo.RegisterDeposit(ctx, newDeposit(t, "62000000-0000-0000-0000-0000000002a1", tenant,
+		"80000000-0000-0000-0000-0000000002a1", 100, paidOn, ""), empty, nil); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	if err := superDB.Exec(`UPDATE deposit_folio_counters SET next_seq = 1 WHERE tenant_id = ?`, tenant).Error; err != nil {
+		t.Fatalf("rolling the counter back: %v", err)
+	}
+
+	_, _, err := repo.RegisterDeposit(ctx, newDeposit(t, "62000000-0000-0000-0000-0000000002a2", tenant,
+		"80000000-0000-0000-0000-0000000002a1", 100, paidOn, ""), empty, nil)
+	if kind := glerrors.KindOf(err); kind != glerrors.KindInternal {
+		t.Errorf("a folio clash answered %v (%v); want an internal fault, not a conflict", kind, err)
 	}
 }

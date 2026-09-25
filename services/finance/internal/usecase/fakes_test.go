@@ -556,6 +556,14 @@ func (f *fakeRepo) IncomeLines(_ context.Context, from, to time.Time) ([]ports.I
 	return out, nil
 }
 
+func (f *fakeRepo) DepositReceipt(ctx context.Context, id string) (ports.DepositReceipt, error) {
+	d, err := f.GetDeposit(ctx, id)
+	if err != nil {
+		return ports.DepositReceipt{}, err
+	}
+	return ports.DepositReceipt{Deposit: d}, nil
+}
+
 func (f *fakeRepo) GetDeposit(_ context.Context, id string) (domain.Deposit, error) {
 	for _, d := range f.deposits {
 		if d.ID() == id {

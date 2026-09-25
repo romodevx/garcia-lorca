@@ -857,3 +857,14 @@ func TestAHandTypedSurchargeEarnsNoSurcharge(t *testing.T) {
 		t.Errorf("credit = %d, want 950 left after the 50 surcharge", got.UnallocatedCents)
 	}
 }
+
+// Review of task 12: an id that cannot be a deposit's is "no such receipt", not
+// a database error.
+func TestADepositReceiptForAMalformedIdIsNotFound(t *testing.T) {
+	f := depositFixture(t)
+	for _, id := range []string{"", "dep-1", "../x"} {
+		if _, err := f.svc.DepositReceipt(context.Background(), id); glerrors.KindOf(err) != glerrors.KindNotFound {
+			t.Errorf("DepositReceipt(%q) = %v, want KindNotFound", id, err)
+		}
+	}
+}

@@ -31,6 +31,10 @@ type fakeConfig struct {
 	periodsCycle  string
 	deletedPeriod string
 
+	profile      client.SchoolProfile
+	profileFound bool
+	profileIn    client.SchoolProfile
+
 	eventIn      client.SchoolEvent
 	events       []client.SchoolEvent
 	eventsCycle  string
@@ -78,6 +82,15 @@ func (f *fakeConfig) CreateSchoolEvent(_ context.Context, in client.SchoolEvent)
 	out := in
 	out.ID = "ev-1"
 	return out, nil
+}
+
+func (f *fakeConfig) GetSchoolProfile(_ context.Context) (client.SchoolProfile, bool, error) {
+	return f.profile, f.profileFound, f.err
+}
+
+func (f *fakeConfig) SetSchoolProfile(_ context.Context, in client.SchoolProfile) (client.SchoolProfile, error) {
+	f.profileIn = in
+	return in, f.err
 }
 
 func (f *fakeConfig) ListSchoolEvents(_ context.Context, cycleID string) ([]client.SchoolEvent, error) {
@@ -574,5 +587,32 @@ func TestConfigSingleDayEventNeedsOnlyOneDate(t *testing.T) {
 	}
 	if svc.eventIn.EndsOn != "2026-09-20" {
 		t.Errorf("endsOn forwarded as %q, want the start date filled in", svc.eventIn.EndsOn)
+	}
+}
+
+// Task 12: the school's details. "Not set" is 200 with found=false (the screen
+// shows an empty form, not an error), and a save forwards every field.
+func TestConfigSchoolProfile(t *testing.T) {
+	svc := &fakeConfig{}
+	h := handler.NewConfigHandler(svc)
+
+	rec := doReq(t, h.GetSchoolProfile, http.MethodGet, "/api/v1/config/school-profile", "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"found":false`) {
+		t.Fatalf("not set: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = doReq(t, h.PutSchoolProfile, http.MethodPut, "/api/v1/config/school-profile",
+		`{"name":"Colegio García Lorca","legalName":"EGL S.C.","rfc":"EGL150101AB1","cct":"09PPR1234X","address":"Centro","phone":"5512345678","legend":"Gracias"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save: %d %s", rec.Code, rec.Body.String())
+	}
+	want := client.SchoolProfile{Name: "Colegio García Lorca", LegalName: "EGL S.C.", RFC: "EGL150101AB1", CCT: "09PPR1234X", Address: "Centro", Phone: "5512345678", Legend: "Gracias"}
+	if svc.profileIn != want {
+		t.Errorf("forwarded %+v, want %+v", svc.profileIn, want)
+	}
+
+	rec = doReq(t, h.PutSchoolProfile, http.MethodPut, "/api/v1/config/school-profile", `{not json`)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("bad body: %d, want 400", rec.Code)
 	}
 }
