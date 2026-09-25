@@ -143,7 +143,12 @@ func (s *CardService) suspendUnissued(ctx context.Context, studentID string) err
 	if err != nil {
 		return err
 	}
-	return s.cards.SaveCard(ctx, card.Revoke(s.now()))
+	if err := s.cards.SaveCard(ctx, card.Revoke(s.now())); err != nil {
+		return err
+	}
+	// A first view racing this revoke may have issued an active card in the
+	// meantime: retire it, so the suspension the office was told about holds.
+	return s.cards.RevokeCards(ctx, studentID, s.now())
 }
 
 // VerifyCard reads a scanned code: KindInvalid when it is not a card code,
