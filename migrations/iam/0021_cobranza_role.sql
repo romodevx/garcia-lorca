@@ -7,7 +7,8 @@
 -- the owner's.
 --
 --   * collections:read — the counter's reads (gateway: finance:read OR it).
---   * payments:write   — taking money: payments and deposits (finance:write OR it).
+--   * payments:write   — taking money through deposits, priced (finance:write OR it).
+--     Not POST /finance/payments: one charge at its stored amount, no late fee.
 --
 -- The owner holds both, so it can delegate them (the caller-subset guard: an
 -- admin grants only what it holds). Neither is owner-only: reading every

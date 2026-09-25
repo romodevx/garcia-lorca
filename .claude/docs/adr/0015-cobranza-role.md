@@ -23,7 +23,7 @@ finance permission or the counter's on the counter's routes only:
 | Permission | Routes (gateway) |
 |---|---|
 | `collections:read` | `GET /finance/accounts/{id}`, `GET /finance/expected`, `GET /finance/overdue` (school-wide on purpose: it is the collections list), `GET /finance/charges?studentId=` and `GET /finance/deposits?studentId=` (one pupil only — a whole cycle's ledger or the deposits list across pupils stays `finance:read`), `GET /finance/cash-up` (the day's cut, every deposit of that day: closing the till is the role's job), `POST /finance/deposits/preview` |
-| `payments:write` | `POST /finance/payments`, `POST /finance/deposits` — at the listed price: `grantEarlyPayment` (the early-payment reward after its window) is a discount and answers 403 without `finance:write` |
+| `payments:write` | `POST /finance/deposits` — at the listed price. Not `POST /finance/payments`: paying one charge by id takes its stored amount, without the daily late fee or the inscription climb a deposit prices in, so it stays `finance:write`. And `grantEarlyPayment` (the early-payment reward after its window) is a discount and answers 403 without `finance:write` |
 
 Everything else in finance — tuition tables, concepts, billing runs, charges
 created by hand, discounts, cancellations, voiding a deposit, the income report —

@@ -518,7 +518,10 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/finance/charges/{id}/cancel", financeWrite(financeH.CancelCharge))
 	// One pupil's charges are the counter's; a whole cycle's ledger is finance.
 	mux.Handle("GET /api/v1/finance/charges", collectionsRead(onePupil(http.HandlerFunc(financeH.ListCharges))))
-	mux.Handle("POST /api/v1/finance/payments", paymentsWrite(http.HandlerFunc(financeH.RegisterPayment)))
+	// Paying one charge by id takes its stored amount, skipping the daily late
+	// fee and the inscription climb a deposit prices in: finance:write only. The
+	// counter (payments:write) collects through deposits.
+	mux.Handle("POST /api/v1/finance/payments", financeWrite(financeH.RegisterPayment))
 	mux.Handle("POST /api/v1/finance/deposits", paymentsWrite(http.HandlerFunc(financeH.RegisterDeposit)))
 	mux.Handle("POST /api/v1/finance/deposits/preview", collectionsRead(http.HandlerFunc(financeH.PreviewDeposit)))
 	mux.Handle("GET /api/v1/finance/deposits", collectionsRead(onePupil(http.HandlerFunc(financeH.ListDeposits))))

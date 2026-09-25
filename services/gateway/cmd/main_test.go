@@ -2818,7 +2818,6 @@ func TestCobranzaReachesTheCounterAndNothingElse(t *testing.T) {
 		{http.MethodGet, "/api/v1/finance/deposits?studentId=stu-1", ""},
 		{http.MethodPost, "/api/v1/finance/deposits/preview", `{"studentId":"stu-1","amountCents":100}`},
 		{http.MethodPost, "/api/v1/finance/deposits", `{"studentId":"stu-1","amountCents":100,"method":"cash"}`},
-		{http.MethodPost, "/api/v1/finance/payments", `{"chargeId":"ch-1","amountCents":100,"method":"cash"}`},
 		{http.MethodGet, "/api/v1/students", ""},
 	}
 	for _, c := range allowed {
@@ -2836,6 +2835,9 @@ func TestCobranzaReachesTheCounterAndNothingElse(t *testing.T) {
 		{http.MethodPost, "/api/v1/finance/charges/ch-1/discount", `{}`},
 		{http.MethodPost, "/api/v1/finance/charges/ch-1/cancel", ""},
 		{http.MethodPost, "/api/v1/finance/deposits/dep-1/void", `{"reason":"x"}`},
+		// Paying one charge by id takes its stored amount: no daily late fee, no
+		// inscription climb. The counter collects through deposits, priced.
+		{http.MethodPost, "/api/v1/finance/payments", `{"chargeId":"ch-1","amountCents":100,"method":"cash"}`},
 		{http.MethodGet, "/api/v1/finance/income?from=2026-09-01&to=2026-09-30", ""},
 		// The whole cycle's ledger is not the counter's: one pupil at a time.
 		{http.MethodGet, "/api/v1/finance/charges?cycleId=cyc-1", ""},
