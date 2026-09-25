@@ -197,3 +197,42 @@ export async function markNotificationRead(notificationId: string): Promise<void
     throw new ApiError(res.status, "failed to mark notification read");
   }
 }
+
+/** The school's details as the card prints them (task 12's profile). */
+export interface CardSchool {
+  name: string;
+  legalName: string;
+  rfc: string;
+  cct: string;
+  address: string;
+  phone: string;
+  legend: string;
+}
+
+/**
+ * A child's virtual card (task 13). `qr` is an opaque code (GLCARD:<token>):
+ * it names nobody, and only the school's staff can read it back.
+ */
+export interface FamilyCard {
+  studentId: string;
+  name: string;
+  level: string;
+  gradeGroup: string;
+  cycle: string;
+  enrollmentNumber: string;
+  school: CardSchool;
+  /** Empty while the school has the card suspended. */
+  qr: string;
+  /** The school revoked the card and has not issued a new one yet. */
+  suspended?: boolean;
+}
+
+/** Reads one child's virtual card. */
+export async function getCard(studentId: string): Promise<FamilyCard> {
+  return unwrap<FamilyCard>(await apiFetch(`/api/v1/family/students/${encodeURIComponent(studentId)}/card`), "card");
+}
+
+/** Where the child's photo is served; it needs the Bearer token like any read. */
+export function cardPhotoPath(studentId: string): string {
+  return `/api/v1/family/students/${encodeURIComponent(studentId)}/photo`;
+}

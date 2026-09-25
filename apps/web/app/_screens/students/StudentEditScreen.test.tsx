@@ -42,6 +42,7 @@ const student: studentsApi.Student = {
   gradeGroup: "4° A",
   guardianName: "Marisol Ríos",
   admissionStatus: "enrolled",
+  enrollmentNumber: "2026-00042",
   profile: {
     birthDate: "2019-03-12",
     sex: "F",
@@ -85,6 +86,8 @@ describe("StudentEditScreen", () => {
     expect(await screen.findByLabelText("Nombre(s)")).toHaveValue("ADA");
     expect(screen.getByLabelText("Apellidos")).toHaveValue("LOVELACE BYRON");
     expect(screen.getByLabelText("CURP")).toHaveValue("LOAA190312MDFVDA01");
+    // Task 13: the matrícula is shown, never edited.
+    expect(screen.getByText("2026-00042")).toBeInTheDocument();
     expect(screen.getByLabelText("Fecha de nacimiento")).toHaveValue("2019-03-12");
     expect(screen.getByLabelText("Sexo")).toHaveValue("F");
     expect(screen.getByLabelText("Correo del alumno")).toHaveValue("ada@correo.com");

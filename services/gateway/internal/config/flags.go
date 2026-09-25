@@ -27,6 +27,7 @@ var AllModuleFlags = []string{
 	featureflag.Key("billing"),
 	featureflag.Key("uniforms"),
 	featureflag.Key("reports"),
+	featureflag.Key("student_card"),
 }
 
 // ParseEnabledModules turns a comma-separated list of module names (or full

@@ -2,8 +2,10 @@ import { useMemo } from "react";
 import {
   getAccount,
   getAttendance,
+  getCard,
   getGrades,
   type FamilyAccount,
+  type FamilyCard,
   type FamilyAttendanceRecord,
   type FamilyGradeEntry,
 } from "../api";
@@ -31,5 +33,11 @@ export function useChildAttendance(childId: string | null): AsyncResource<Family
 /** The selected child's numeric grade entries. */
 export function useChildGrades(childId: string | null): AsyncResource<FamilyGradeEntry[]> {
   const load = useMemo(() => (childId ? () => getGrades(childId) : null), [childId]);
+  return useAsyncResource(load);
+}
+
+/** The selected child's virtual card (task 13). */
+export function useChildCard(childId: string | null): AsyncResource<FamilyCard> {
+  const load = useMemo(() => (childId ? () => getCard(childId) : null), [childId]);
   return useAsyncResource(load);
 }

@@ -33,7 +33,7 @@ func toDomain(m studentModel) (*domain.Student, error) {
 	if err != nil {
 		return nil, err
 	}
-	return domain.Rehydrate(domain.NewApplicantParams{
+	s := domain.Rehydrate(domain.NewApplicantParams{
 		ID:           m.ID,
 		TenantID:     m.TenantID,
 		CURP:         curp,
@@ -43,7 +43,9 @@ func toDomain(m studentModel) (*domain.Student, error) {
 		GradeGroup:   m.GradeGroup,
 		GuardianName: m.GuardianName,
 		Profile:      profile,
-	}, status), nil
+	}, status)
+	s.AssignEnrollmentNumber(m.EnrollmentNumber)
+	return s, nil
 }
 
 // phoneRow is one element of the `phones` JSON array.

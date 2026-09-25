@@ -129,11 +129,17 @@ func NewFamilyHandler(students FamilyStudentsReader, comms FamilyCommsReader, fi
 // it. Callers treat a false result as NOT FOUND — the same answer a non-existent
 // id gets — so a guardian can never probe whether another family's child exists.
 func (h *FamilyHandler) assertLinkedChild(ctx context.Context, guardianUserID, studentID string) (bool, error) {
-	links, err := h.students.ListStudentsForGuardian(ctx, guardianUserID)
+	return ownsChild(ctx, h.students, guardianUserID, studentID)
+}
+
+// ownsChild reports whether a guardian is linked to a pupil: the one question
+// every by-child family route asks before answering (the card's too).
+func ownsChild(ctx context.Context, links GuardianLinkReader, guardianUserID, studentID string) (bool, error) {
+	linked, err := links.ListStudentsForGuardian(ctx, guardianUserID)
 	if err != nil {
 		return false, err
 	}
-	for _, l := range links {
+	for _, l := range linked {
 		if l.StudentID == studentID {
 			return true, nil
 		}

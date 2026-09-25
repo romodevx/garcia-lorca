@@ -21,6 +21,8 @@ type studentModel struct {
 	GradeGroup      string  `gorm:"column:grade_group"`
 	GuardianName    string  `gorm:"column:guardian_name"`
 	AdmissionStatus string  `gorm:"column:admission_status"`
+	// EnrollmentNumber is the matrícula (task 13, migration 0013).
+	EnrollmentNumber string `gorm:"column:enrollment_number"`
 	// The editable half of the file (migration 0008).
 	BirthDate           *time.Time `gorm:"column:birth_date"`
 	Sex                 string     `gorm:"column:sex"`

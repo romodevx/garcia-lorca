@@ -29,6 +29,7 @@ type StudentsHandler struct {
 	guardian *usecase.GuardianService
 	health   *usecase.HealthService
 	notes    *usecase.NoteService
+	cards    *usecase.CardService
 }
 
 // NewStudentsHandler wires the handler to the student, enrollment, guardian, and
@@ -47,6 +48,14 @@ func NewStudentsHandler(
 func (h *StudentsHandler) WithNotes(notes *usecase.NoteService) *StudentsHandler {
 	cp := *h
 	cp.notes = notes
+	return &cp
+}
+
+// WithCards returns the handler serving the pupils' card codes through `cards`
+// (task 13). Without it the card RPCs answer Unimplemented.
+func (h *StudentsHandler) WithCards(cards *usecase.CardService) *StudentsHandler {
+	cp := *h
+	cp.cards = cards
 	return &cp
 }
 
@@ -357,17 +366,18 @@ func (h *StudentsHandler) ListStudentsForGuardian(ctx context.Context, req *conn
 
 func toProtoStudent(s *domain.Student) *studentsv1.Student {
 	return &studentsv1.Student{
-		Id:              s.ID(),
-		TenantId:        s.TenantID(),
-		Curp:            s.CURP().String(),
-		FirstName:       s.FirstName(),
-		LastName:        s.LastName(),
-		LevelId:         s.Level().ID(),
-		LevelName:       s.Level().Name(),
-		GradeGroup:      s.GradeGroup(),
-		GuardianName:    s.GuardianName(),
-		AdmissionStatus: protoconv.ToProtoStatus(s.Status()),
-		Profile:         toProtoProfile(s.Profile()),
+		Id:               s.ID(),
+		TenantId:         s.TenantID(),
+		Curp:             s.CURP().String(),
+		FirstName:        s.FirstName(),
+		LastName:         s.LastName(),
+		LevelId:          s.Level().ID(),
+		LevelName:        s.Level().Name(),
+		GradeGroup:       s.GradeGroup(),
+		GuardianName:     s.GuardianName(),
+		AdmissionStatus:  protoconv.ToProtoStatus(s.Status()),
+		Profile:          toProtoProfile(s.Profile()),
+		EnrollmentNumber: s.EnrollmentNumber(),
 	}
 }
 

@@ -44,6 +44,8 @@ type StudentResult struct {
 	GuardianName    string
 	AdmissionStatus string
 	Profile         StudentProfile
+	// EnrollmentNumber is the matrícula, <year>-<five digits> (task 13).
+	EnrollmentNumber string
 }
 
 // StudentProfile is the editable half of a pupil's file, as the edge speaks it.
@@ -171,6 +173,39 @@ func (c *StudentsClient) GetStudent(ctx context.Context, id string) (StudentResu
 		return StudentResult{}, err
 	}
 	return toStudentResult(res.Msg.GetStudent()), nil
+}
+
+// --- the virtual card (task 13) ---------------------------------------------
+
+// CardCode returns the code a pupil's card shows (GLCARD:<token>), or that the
+// office has it suspended.
+func (c *StudentsClient) CardCode(ctx context.Context, studentID string) (string, bool, error) {
+	res, err := c.rpc.GetCardCode(ctx, connect.NewRequest(&studentsv1.GetCardCodeRequest{StudentId: studentID}))
+	if err != nil {
+		return "", false, err
+	}
+	return res.Msg.GetCode(), res.Msg.GetSuspended(), nil
+}
+
+// ReissueCard gives a suspended pupil a new card.
+func (c *StudentsClient) ReissueCard(ctx context.Context, studentID string) error {
+	_, err := c.rpc.ReissueCard(ctx, connect.NewRequest(&studentsv1.ReissueCardRequest{StudentId: studentID}))
+	return err
+}
+
+// RevokeCard retires a pupil's current card code.
+func (c *StudentsClient) RevokeCard(ctx context.Context, studentID string) error {
+	_, err := c.rpc.RevokeCard(ctx, connect.NewRequest(&studentsv1.RevokeCardRequest{StudentId: studentID}))
+	return err
+}
+
+// VerifyCard reads a scanned code: whose card, and whether it still counts.
+func (c *StudentsClient) VerifyCard(ctx context.Context, code string) (StudentResult, bool, error) {
+	res, err := c.rpc.VerifyCard(ctx, connect.NewRequest(&studentsv1.VerifyCardRequest{Code: code}))
+	if err != nil {
+		return StudentResult{}, false, err
+	}
+	return toStudentResult(res.Msg.GetStudent()), res.Msg.GetValid(), nil
 }
 
 // --- enrollments ----------------------------------------------------------
@@ -441,16 +476,17 @@ func toEnrollment(e *studentsv1.Enrollment) Enrollment {
 
 func toStudentResult(s *studentsv1.Student) StudentResult {
 	return StudentResult{
-		ID:              s.GetId(),
-		CURP:            s.GetCurp(),
-		FirstName:       s.GetFirstName(),
-		LastName:        s.GetLastName(),
-		Level:           s.GetLevelName(),
-		LevelID:         s.GetLevelId(),
-		GradeGroup:      s.GetGradeGroup(),
-		GuardianName:    s.GetGuardianName(),
-		AdmissionStatus: admissionName(s.GetAdmissionStatus()),
-		Profile:         fromProtoProfile(s.GetProfile()),
+		ID:               s.GetId(),
+		CURP:             s.GetCurp(),
+		FirstName:        s.GetFirstName(),
+		LastName:         s.GetLastName(),
+		Level:            s.GetLevelName(),
+		LevelID:          s.GetLevelId(),
+		GradeGroup:       s.GetGradeGroup(),
+		GuardianName:     s.GetGuardianName(),
+		AdmissionStatus:  admissionName(s.GetAdmissionStatus()),
+		EnrollmentNumber: s.GetEnrollmentNumber(),
+		Profile:          fromProtoProfile(s.GetProfile()),
 	}
 }
 

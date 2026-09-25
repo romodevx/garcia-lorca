@@ -13,6 +13,8 @@ vi.mock("../../students/api", async (importOriginal) => ({
   listEnrollments: vi.fn(),
   enroll: vi.fn(),
   transfer: vi.fn(),
+  revokeCard: vi.fn(),
+  reissueCard: vi.fn(),
 }));
 vi.mock("../../config/api", () => ({
   listCycles: vi.fn(),
@@ -27,7 +29,7 @@ const config = vi.mocked(configApi);
 
 const pupil = (levelId: string): studentsApi.Student => ({
   id: "stu-1", curp: "HEGA050312MDFRNN08", firstName: "Ana", lastName: "Cruz",
-  level: "Primaria", levelId, gradeGroup: "1° B", guardianName: "Rosa Cruz", admissionStatus: "pending",
+  level: "Primaria", levelId, gradeGroup: "1° B", guardianName: "Rosa Cruz", admissionStatus: "pending", enrollmentNumber: "2026-00042",
 });
 
 // Four groups share the name "1° A", one per level: the ambiguity the sheet
@@ -50,8 +52,8 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
-async function openSheet(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> {
-  render(<StudentsScreen onBack={() => {}} />);
+async function openSheet(user: ReturnType<typeof userEvent.setup>, props: { canRevokeCard?: boolean } = {}): Promise<HTMLElement> {
+  render(<StudentsScreen onBack={() => {}} {...props} />);
   await user.click(await screen.findByRole("button", { name: "Ver ficha de Ana Cruz" }));
   return screen.getByRole("dialog", { name: "Ficha del alumno" });
 }
@@ -72,6 +74,9 @@ describe("la ficha de un alumno que ya tiene grupo", () => {
     const sheet = await openSheet(user);
 
     expect(await within(sheet).findByText(/Grupo actual/)).toBeInTheDocument();
+    // Task 13: the matrícula, as the card shows it.
+    expect(within(sheet).getByText("Matrícula")).toBeInTheDocument();
+    expect(within(sheet).getByText("2026-00042")).toBeInTheDocument();
     expect(within(sheet).queryByRole("button", { name: "Inscribir" })).not.toBeInTheDocument();
     expect(within(sheet).getByRole("button", { name: "Cambiar de grupo" })).toBeInTheDocument();
   });
@@ -200,5 +205,73 @@ describe("placementRefusal", () => {
     expect(placementRefusal(new StudentsError(400, "enrollment is not active"))).toMatch(/ya no está activa/);
     expect(placementRefusal(new StudentsError(400, "group not found"))).toMatch(/ya no existe/);
     expect(placementRefusal(new StudentsError(400, "ese grupo es de otro nivel: el alumno está en Primaria"))).toMatch(/otro nivel/);
+  });
+});
+
+// Task 13: revoking a card is irreversible (the old code dies), so it asks
+// once more on the same button before doing it.
+describe("la credencial en la ficha", () => {
+  beforeEach(() => {
+    students.listStudents.mockResolvedValue([pupil("lv-pri")]);
+    students.listEnrollments.mockResolvedValue([]);
+    students.revokeCard.mockResolvedValue(undefined);
+    students.reissueCard.mockResolvedValue(undefined);
+  });
+
+  it("revoca la credencial tras confirmar en el mismo botón", async () => {
+    const user = userEvent.setup();
+    const sheet = await openSheet(user, { canRevokeCard: true });
+
+    await user.click(within(sheet).getByRole("button", { name: "Revocar credencial" }));
+    expect(students.revokeCard).not.toHaveBeenCalled();
+    await user.click(within(sheet).getByRole("button", { name: /Confirmar: revocar/ }));
+
+    await waitFor(() => expect(students.revokeCard).toHaveBeenCalledWith(expect.any(String), "stu-1"));
+    expect(await within(sheet).findByText(/queda suspendida/)).toBeInTheDocument();
+  });
+
+  // Owner's decision: a revoked card stays suspended until the office issues a
+  // new one on purpose (a stolen phone would otherwise get a valid code).
+  it("emite una credencial nueva a propósito", async () => {
+    const user = userEvent.setup();
+    const sheet = await openSheet(user, { canRevokeCard: true });
+
+    await user.click(within(sheet).getByRole("button", { name: "Emitir nueva credencial" }));
+    await waitFor(() => expect(students.reissueCard).toHaveBeenCalledWith(expect.any(String), "stu-1"));
+    expect(await within(sheet).findByText(/nueva credencial/i, { selector: "p" })).toBeInTheDocument();
+  });
+
+  it("dice que la credencial sigue vigente si no hay nada que reemitir", async () => {
+    students.reissueCard.mockRejectedValue(new studentsApi.StudentsError(409, "the pupil's card is valid; revoke it first"));
+    const user = userEvent.setup();
+    const sheet = await openSheet(user, { canRevokeCard: true });
+
+    await user.click(within(sheet).getByRole("button", { name: "Emitir nueva credencial" }));
+    expect(await within(sheet).findByRole("alert")).toHaveTextContent("La credencial sigue vigente");
+  });
+
+  it("no la ofrece sin el permiso", async () => {
+    const user = userEvent.setup();
+    const sheet = await openSheet(user);
+    expect(within(sheet).queryByRole("button", { name: "Revocar credencial" })).toBeNull();
+  });
+});
+
+describe("verificar credencial (tarea 13)", () => {
+  beforeEach(() => {
+    students.listStudents.mockResolvedValue([pupil("lv-pri")]);
+    students.listEnrollments.mockResolvedValue([]);
+  });
+
+  it("abre la verificación desde Alumnos, sólo con el módulo encendido", async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<StudentsScreen onBack={() => {}} />);
+    await screen.findByRole("button", { name: "Ver ficha de Ana Cruz" });
+    expect(screen.queryByRole("button", { name: "Verificar credencial" })).toBeNull();
+    unmount();
+
+    render(<StudentsScreen onBack={() => {}} canVerifyCard />);
+    await user.click(await screen.findByRole("button", { name: "Verificar credencial" }));
+    expect(screen.getByRole("dialog", { name: "Verificar credencial" })).toBeInTheDocument();
   });
 });

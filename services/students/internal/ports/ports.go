@@ -2,6 +2,7 @@ package ports
 
 import (
 	"context"
+	"time"
 
 	"github.com/garcia-lorca/services/students/internal/domain"
 )
@@ -232,4 +233,18 @@ type NoteRepository interface {
 	NotesOf(ctx context.Context, studentID string) ([]domain.Note, error)
 	NoteByID(ctx context.Context, id string) (domain.Note, error)
 	VoidNote(ctx context.Context, n domain.Note) error
+}
+
+// CardRepository keeps the codes of the pupils' virtual cards (task 13).
+type CardRepository interface {
+	// ActiveCard returns a pupil's active code, if any.
+	ActiveCard(ctx context.Context, studentID string) (domain.CardToken, bool, error)
+	// SaveCard stores a newly issued code.
+	SaveCard(ctx context.Context, c domain.CardToken) error
+	// RevokeCards retires every active code of a pupil.
+	RevokeCards(ctx context.Context, studentID string, at time.Time) error
+	// EverIssued reports whether the pupil ever had a card (a revoked one counts).
+	EverIssued(ctx context.Context, studentID string) (bool, error)
+	// FindCard returns the card carrying a token, active or not, or KindNotFound.
+	FindCard(ctx context.Context, token string) (domain.CardToken, error)
 }

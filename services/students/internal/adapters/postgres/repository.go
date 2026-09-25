@@ -49,14 +49,53 @@ func (r *Repository) withTenant(ctx context.Context, fn func(tx *gorm.DB) error)
 func (r *Repository) Create(ctx context.Context, s *domain.Student) error {
 	model := fromDomain(s)
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		number, err := r.nextEnrollmentNumber(tx)
+		if err != nil {
+			return err
+		}
+		model.EnrollmentNumber = number
 		if err := tx.Create(&model).Error; err != nil {
+			if violates(err, enrollmentNumberUniqueConstraint) {
+				// The counter is behind the stored numbers: a fault to fix,
+				// never "that CURP already exists".
+				return glerrors.Wrap(glerrors.KindInternal, "the matrícula counter is behind its numbers", err)
+			}
 			if isUniqueViolation(err) {
 				return glerrors.Wrap(glerrors.KindConflict, "a student with this CURP already exists", err)
 			}
 			return glerrors.Wrap(glerrors.KindInternal, "creating student", err)
 		}
+		s.AssignEnrollmentNumber(number)
 		return nil
 	})
+}
+
+// maxEnrollmentSeq is the last number a matrícula's five digits can carry.
+const maxEnrollmentSeq = 99999
+
+// nextEnrollmentNumber allocates the school's next matrícula for the year of
+// this transaction (task 13, migration 0013), under the counter row's own lock.
+// Per school: a SEQUENCE is per database and ignores RLS, so two schools would
+// share one run and read each other's size in the gaps.
+func (r *Repository) nextEnrollmentNumber(tx *gorm.DB) (string, error) {
+	var got struct {
+		Year int
+		Seq  int
+	}
+	err := tx.Raw(`INSERT INTO student_number_counters (tenant_id, year, next_seq)
+	               VALUES (?, EXTRACT(YEAR FROM now() AT TIME ZONE 'UTC')::int, 2)
+	               ON CONFLICT (tenant_id, year)
+	               DO UPDATE SET next_seq = student_number_counters.next_seq + 1
+	               RETURNING year, next_seq - 1 AS seq`, r.tenantID).Scan(&got).Error
+	if err != nil {
+		return "", glerrors.Wrap(glerrors.KindInternal, "allocating a matrícula", err)
+	}
+	if got.Seq > maxEnrollmentSeq {
+		// Five digits: the year has no matrículas left. Said as such, not as a
+		// CHECK violation reported as "creating student".
+		return "", glerrors.New(glerrors.KindInternal, "no matrícula numbers left for this year")
+	}
+	return domain.FormatEnrollmentNumber(got.Year, got.Seq), nil
 }
 
 // Update persists a student's mutable fields (status + editable attributes).
@@ -182,6 +221,16 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]*domain.St
 		return nil, "", err
 	}
 	return students, next, nil
+}
+
+// enrollmentNumberUniqueConstraint is students' UNIQUE (tenant_id,
+// enrollment_number) (migration 0013).
+const enrollmentNumberUniqueConstraint = "students_enrollment_number_unique"
+
+// violates reports whether err is a unique violation of the named constraint.
+func violates(err error, constraint string) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == constraint
 }
 
 func isUniqueViolation(err error) bool {

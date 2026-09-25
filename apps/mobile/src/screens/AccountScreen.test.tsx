@@ -1,4 +1,6 @@
-import { screen, waitFor } from "@testing-library/react-native";
+import { fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { router } from "expo-router";
+import { demoFlags } from "../flags/bootstrap";
 import { clearTokens, saveTokens } from "../api";
 import { AccountScreen } from "./AccountScreen";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -54,6 +56,24 @@ describe("AccountScreen (real family account)", () => {
     await waitFor(() => expect(screen.getByText("Colegiatura junio")).toBeTruthy());
     expect(screen.getByLabelText("Saldo").props.children).toBe("$2,400.00");
     expect(screen.getByText("Pago recibido")).toBeTruthy();
+  });
+
+  // Task 13: with the card's flag on, Cuenta leads to the child's card; off,
+  // nothing hints that it exists.
+  it("offers the card only with its flag on", async () => {
+    mockFetch({ charges: [], payments: [], totalBalanceCents: 0 });
+    await renderWithProviders(<AccountScreen />, { flags: { ...demoFlags, module_student_card: true } });
+
+    fireEvent.press(await screen.findByLabelText("Credencial"));
+    expect(router.push).toHaveBeenCalledWith("/credencial");
+  });
+
+  it("hides the card while its flag is off", async () => {
+    mockFetch({ charges: [], payments: [], totalBalanceCents: 0 });
+    await renderWithProviders(<AccountScreen />);
+
+    await waitFor(() => expect(screen.getByText("Al corriente")).toBeTruthy());
+    expect(screen.queryByLabelText("Credencial")).toBeNull();
   });
 
   it("shows the settled state when the balance is zero", async () => {

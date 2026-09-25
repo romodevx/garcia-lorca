@@ -14,6 +14,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -249,7 +250,9 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 
 	health := usecase.NewHealthService(serviceName)
 	notes := usecase.NewNoteService(repo, repo, tenantID, newID, time.Now)
-	handler := grpcadapter.NewStudentsHandler(svc, enroll, guardians, health).WithNotes(notes)
+	// The virtual card's codes: 128 bits from the operating system's source.
+	cards := usecase.NewCardService(repo, repo, tenantID, newID, cardRandom, time.Now)
+	handler := grpcadapter.NewStudentsHandler(svc, enroll, guardians, health).WithNotes(notes).WithCards(cards)
 
 	mux := http.NewServeMux()
 	path, h := studentsv1connect.NewStudentsServiceHandler(handler, connect.WithRecover(recoverFn))
@@ -320,4 +323,11 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// cardRandom mints the 128 random bits of a card code (task 13).
+func cardRandom() ([16]byte, error) {
+	var b [16]byte
+	_, err := rand.Read(b[:])
+	return b, err
 }

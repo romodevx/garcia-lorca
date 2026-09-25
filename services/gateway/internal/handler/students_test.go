@@ -189,7 +189,7 @@ func TestListStudentsUpstreamErrorIs500(t *testing.T) {
 }
 
 func TestGetStudentByPathValue(t *testing.T) {
-	svc := &fakeCreator{res: client.StudentResult{ID: "stu-9", FirstName: "Ana", AdmissionStatus: "accepted"}}
+	svc := &fakeCreator{res: client.StudentResult{ID: "stu-9", FirstName: "Ana", AdmissionStatus: "accepted", EnrollmentNumber: "2026-00042"}}
 	h := handler.NewStudentsHandler(svc)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/students/stu-9", nil)
 	req.SetPathValue("id", "stu-9")
@@ -206,7 +206,7 @@ func TestGetStudentByPathValue(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if out["id"] != "stu-9" || out["admissionStatus"] != "accepted" {
+	if out["id"] != "stu-9" || out["admissionStatus"] != "accepted" || out["enrollmentNumber"] != "2026-00042" {
 		t.Errorf("body = %v", out)
 	}
 }

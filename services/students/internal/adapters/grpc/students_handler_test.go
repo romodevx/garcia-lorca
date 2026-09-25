@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	connect "connectrpc.com/connect"
 
@@ -54,6 +55,8 @@ func (r *fakeRepo) Create(_ context.Context, s *domain.Student) error {
 		return glerrors.New(glerrors.KindConflict, "duplicate curp")
 	}
 	r.byCURP[s.CURP().String()] = true
+	// As the store does: the pupil leaves with its matrícula.
+	s.AssignEnrollmentNumber("2026-00001")
 	r.byID[s.ID()] = s
 	return nil
 }
@@ -448,4 +451,102 @@ func TestStudentPhotoRoundTrips(t *testing.T) {
 
 	_, err = h.UploadStudentPhoto(context.Background(), connect.NewRequest(&studentsv1.UploadStudentPhotoRequest{StudentId: "stu-1", Data: []byte("%PDF")}))
 	assertCode(t, err, connect.CodeInvalidArgument)
+}
+
+// Task 13: the student on the wire carries its matrícula.
+func TestAStudentCarriesItsMatricula(t *testing.T) {
+	h, _ := newHandler(t)
+	if got := createValid(t, h).GetEnrollmentNumber(); got != "2026-00001" {
+		t.Errorf("enrollment number = %q, want the one the store gave", got)
+	}
+}
+
+// memCards is an in-memory card store for the handler tests.
+type memCards struct{ byToken map[string]domain.CardToken }
+
+func (m *memCards) ActiveCard(_ context.Context, studentID string) (domain.CardToken, bool, error) {
+	for _, c := range m.byToken {
+		if c.StudentID() == studentID && c.Active() {
+			return c, true, nil
+		}
+	}
+	return domain.CardToken{}, false, nil
+}
+
+func (m *memCards) SaveCard(_ context.Context, c domain.CardToken) error {
+	m.byToken[c.Token()] = c
+	return nil
+}
+
+func (m *memCards) RevokeCards(_ context.Context, studentID string, at time.Time) error {
+	for k, c := range m.byToken {
+		if c.StudentID() == studentID && c.Active() {
+			m.byToken[k] = c.Revoke(at)
+		}
+	}
+	return nil
+}
+
+func (m *memCards) EverIssued(_ context.Context, studentID string) (bool, error) {
+	for _, c := range m.byToken {
+		if c.StudentID() == studentID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (m *memCards) FindCard(_ context.Context, token string) (domain.CardToken, error) {
+	c, ok := m.byToken[token]
+	if !ok {
+		return domain.CardToken{}, glerrors.ErrNotFound
+	}
+	return c, nil
+}
+
+// Task 13: the card's code over the wire — issued once, verified with whose it
+// is, revoked; an unknown code is NotFound, a non-code InvalidArgument.
+func TestCardRPCs(t *testing.T) {
+	repo := newFakeRepo()
+	svc := usecase.NewStudentService(repo, &fakePublisher{}, testLevels, testTenant, func() string { return "stu-1" })
+	n := byte(0)
+	cards := usecase.NewCardService(&memCards{byToken: map[string]domain.CardToken{}}, repo, testTenant,
+		func() string { n++; return "ct-" + string(rune('0'+n)) },
+		func() ([16]byte, error) { return [16]byte{n}, nil },
+		func() time.Time { return time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC) })
+	h := grpcadapter.NewStudentsHandler(svc, nil, nil, usecase.NewHealthService("students")).WithCards(cards)
+	pupil := createValid(t, h)
+	ctx := context.Background()
+
+	code, err := h.GetCardCode(ctx, connect.NewRequest(&studentsv1.GetCardCodeRequest{StudentId: pupil.GetId()}))
+	if err != nil || !strings.HasPrefix(code.Msg.GetCode(), "GLCARD:") {
+		t.Fatalf("GetCardCode = %q (%v)", code.Msg.GetCode(), err)
+	}
+	got, err := h.VerifyCard(ctx, connect.NewRequest(&studentsv1.VerifyCardRequest{Code: code.Msg.GetCode()}))
+	if err != nil || got.Msg.GetStudent().GetId() != pupil.GetId() {
+		t.Fatalf("VerifyCard = %+v (%v)", got.Msg, err)
+	}
+	if got.Msg.GetValid() {
+		t.Error("a pupil not yet enrolled verifies as valid")
+	}
+	if _, err := h.RevokeCard(ctx, connect.NewRequest(&studentsv1.RevokeCardRequest{StudentId: pupil.GetId()})); err != nil {
+		t.Fatalf("RevokeCard: %v", err)
+	}
+	// Revoked: suspended, no code, until the office reissues it.
+	suspended, err := h.GetCardCode(ctx, connect.NewRequest(&studentsv1.GetCardCodeRequest{StudentId: pupil.GetId()}))
+	if err != nil || !suspended.Msg.GetSuspended() || suspended.Msg.GetCode() != "" {
+		t.Fatalf("after revoking = %+v (%v), want suspended", suspended.Msg, err)
+	}
+	if _, err := h.ReissueCard(ctx, connect.NewRequest(&studentsv1.ReissueCardRequest{StudentId: pupil.GetId()})); err != nil {
+		t.Fatalf("ReissueCard: %v", err)
+	}
+	if _, err := h.ReissueCard(ctx, connect.NewRequest(&studentsv1.ReissueCardRequest{StudentId: pupil.GetId()})); connect.CodeOf(err) != connect.CodeAlreadyExists {
+		t.Errorf("reissuing a valid card: %v, want AlreadyExists", connect.CodeOf(err))
+	}
+	if _, err := h.VerifyCard(ctx, connect.NewRequest(&studentsv1.VerifyCardRequest{Code: "GLCARD:ZZZZZZZZZZZZZZZZZZZZZZ"})); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Errorf("unknown code: %v (%v), want NotFound", connect.CodeOf(err), err)
+	}
+	if _, err := h.VerifyCard(ctx, connect.NewRequest(&studentsv1.VerifyCardRequest{Code: "hola"})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("not a code: %v, want InvalidArgument", connect.CodeOf(err))
+	}
 }

@@ -24,5 +24,8 @@ export const demoFlags: FlagSet = {
   module_docs: false, // school doesn't offer Documents; kept future-ready.
   module_uniforms: false, // uniforms service is a shell — hide until backend lands.
   module_scholarships: false, // scholarships service pending — hide until backend lands.
+  // The virtual card (task 13): OFF like the gateway's flag, until its gates
+  // pass. With it ON, Cuenta offers "Credencial".
+  module_student_card: false,
   // module_billing stays OFF (out of MVP) → "Facturas" tile hidden.
 };

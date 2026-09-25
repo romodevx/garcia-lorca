@@ -1,3 +1,5 @@
+import { useFlag } from "@garcia-lorca/ui/flags";
+import { router } from "expo-router";
 import { type ReactElement } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import type { FamilyAccount, FamilyCharge, FamilyPayment } from "../api";
@@ -71,6 +73,7 @@ function toLedger(account: FamilyAccount): Movement[] {
 export function AccountScreen(): ReactElement {
   const { selectedChildId, childLoading, childError, refreshChildren } = useAppState();
   const { data, loading, error, reload } = useChildAccount(selectedChildId);
+  const cardEnabled = useFlag("module_student_card");
   const theme = useTheme();
 
   // The child bootstrap failed, so there is no child to read against. Surface that
@@ -167,6 +170,16 @@ export function AccountScreen(): ReactElement {
         </View>
       </Card>
 
+      {cardEnabled && (
+        // The child's virtual card (task 13), behind module_student_card.
+        <Card onPress={() => router.push("/credencial")} accessibilityLabel="Credencial" style={{ marginTop: 12 }}>
+          <ListRow>
+            <TintIcon name="user" tint="forest" />
+            <Text style={[styles.cardLink, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>Credencial</Text>
+          </ListRow>
+        </Card>
+      )}
+
       <SectionLabel>Movimientos recientes</SectionLabel>
       {movements.length === 0 ? (
         <EmptyState icon="receipt" title="Sin movimientos" subtitle="Aquí verás los cargos y pagos de tu cuenta." />
@@ -203,6 +216,7 @@ function MovementRow({ movement, divider }: { movement: Movement; divider: boole
 
 const styles = StyleSheet.create({
   balanceHero: { padding: 22, alignItems: "center" },
+  cardLink: { fontSize: 16, marginLeft: 12 },
   year: { fontSize: 13, marginTop: 2 },
   detail: { fontSize: 12, marginTop: 6, textAlign: "center" },
   cap: { fontSize: 13, fontWeight: "700", marginBottom: 4 },

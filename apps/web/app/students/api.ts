@@ -36,6 +36,8 @@ export interface Student {
   admissionStatus: AdmissionStatus;
   /** The editable half of the file. Absent from gateways older than T5. */
   profile?: StudentProfile;
+  /** The matrícula, <year>-<five digits> (task 13). Absent from older gateways. */
+  enrollmentNumber?: string;
 }
 
 /** "" means not captured. */
@@ -525,4 +527,46 @@ export function voidNote(baseURL: string, studentId: string, noteId: string): Pr
     `/students/${encodeURIComponent(studentId)}/notes/${encodeURIComponent(noteId)}/void`,
     {},
   );
+}
+
+// --- the virtual card (task 13) ---------------------------------------------
+
+/** What a scanned card says: whose it is, and whether it still counts. */
+export interface VerifiedCard {
+  valid: boolean;
+  studentId: string;
+  name: string;
+  level: string;
+  gradeGroup: string;
+  enrollmentNumber: string;
+  admissionStatus: string;
+}
+
+/**
+ * Verifies a scanned code (a USB reader types it and presses Enter). The code
+ * travels in the body, never the URL, so no log keeps it. 404: no card ever
+ * carried it; 400: it is not a card code.
+ */
+export function verifyCard(baseURL: string, code: string): Promise<VerifiedCard> {
+  return postJSON<VerifiedCard>(baseURL, "/students/card/verify", { code: code.trim() });
+}
+
+/** Retires a pupil's card code and suspends the card until it is reissued. */
+export function revokeCard(baseURL: string, studentID: string): Promise<void> {
+  return cardAction(baseURL, studentID, "revoke");
+}
+
+/** Gives a suspended pupil a new card. 409: the card is valid already. */
+export function reissueCard(baseURL: string, studentID: string): Promise<void> {
+  return cardAction(baseURL, studentID, "reissue");
+}
+
+async function cardAction(baseURL: string, studentID: string, action: "revoke" | "reissue"): Promise<void> {
+  const res = await authFetch(url(baseURL, `${BASE_PATH}/students/${encodeURIComponent(studentID)}/card/${action}`), {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw await studentsFailure(res);
+  }
 }
