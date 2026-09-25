@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/garcia-lorca/pkg/authctx"
 	"github.com/garcia-lorca/pkg/authctx/gormtx"
@@ -675,6 +676,52 @@ func (r *Repository) DeleteNonWorkingPeriod(ctx context.Context, id string) erro
 		}
 		if res.RowsAffected == 0 {
 			return glerrors.ErrNotFound
+		}
+		return nil
+	})
+}
+
+// --- the school's details (task 12) ----------------------------------------
+
+// GetSchoolProfile returns the school's details; found is false when there is
+// no row yet.
+func (r *Repository) GetSchoolProfile(ctx context.Context) (domain.SchoolProfile, bool, error) {
+	var (
+		out   domain.SchoolProfile
+		found bool
+	)
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var rows []schoolProfileModel
+		if err := tx.Limit(1).Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "reading the school's details", err)
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+		p, derr := toDomainSchoolProfile(rows[0])
+		if derr != nil {
+			return derr
+		}
+		out, found = p, true
+		return nil
+	})
+	if err != nil {
+		return domain.SchoolProfile{}, false, err
+	}
+	return out, found, nil
+}
+
+// UpsertSchoolProfile writes the school's one set of details, replacing every
+// field: a field left empty on save is empty afterwards.
+func (r *Repository) UpsertSchoolProfile(ctx context.Context, p domain.SchoolProfile) error {
+	model := fromDomainSchoolProfile(p)
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "tenant_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"name", "legal_name", "rfc", "cct", "address", "phone", "legend", "updated_at"}),
+		}).Create(&model).Error
+		if err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "saving the school's details", err)
 		}
 		return nil
 	})

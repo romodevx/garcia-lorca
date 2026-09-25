@@ -284,6 +284,24 @@ func (s *CatalogService) CreateSchoolEvent(ctx context.Context, in SchoolEventIn
 	return event, nil
 }
 
+// GetSchoolProfile returns what a receipt prints about the school (task 12);
+// found is false until somebody fills it in.
+func (s *CatalogService) GetSchoolProfile(ctx context.Context) (domain.SchoolProfile, bool, error) {
+	return s.repo.GetSchoolProfile(ctx)
+}
+
+// SetSchoolProfile validates and saves the school's details, replacing any.
+func (s *CatalogService) SetSchoolProfile(ctx context.Context, in domain.SchoolProfileInput) (domain.SchoolProfile, error) {
+	profile, err := domain.NewSchoolProfile(s.tenant, in)
+	if err != nil {
+		return domain.SchoolProfile{}, err
+	}
+	if err := s.repo.UpsertSchoolProfile(ctx, profile); err != nil {
+		return domain.SchoolProfile{}, err
+	}
+	return profile, nil
+}
+
 // ListSchoolEvents returns a cycle's agenda, earliest first.
 func (s *CatalogService) ListSchoolEvents(ctx context.Context, cycleID string) ([]domain.SchoolEvent, error) {
 	return s.repo.ListSchoolEvents(ctx, cycleID)

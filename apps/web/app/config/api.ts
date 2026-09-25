@@ -373,3 +373,45 @@ export function listGroups(baseURL: string, cycleId: string, gradeLevelId?: stri
   return getList<Group>(baseURL, `/groups${query({ cycleId, gradeLevelId })}`, "groups");
 }
 
+
+// --- the school's details (task 12) ---------------------------------------
+
+/** What a receipt prints about the school. Only the name is required. */
+export interface SchoolProfile {
+  name: string;
+  legalName: string;
+  rfc: string;
+  cct: string;
+  address: string;
+  phone: string;
+  legend: string;
+}
+
+/** The details, and whether the school has filled them yet. */
+export interface SchoolProfileRead {
+  profile: SchoolProfile;
+  found: boolean;
+}
+
+/** GET /api/v1/config/school-profile. */
+export async function getSchoolProfile(baseURL: string): Promise<SchoolProfileRead> {
+  const res = await authFetch(url(baseURL, `${BASE_PATH}/school-profile`), { credentials: "include" });
+  if (!res.ok) {
+    throw await configFailure(res);
+  }
+  return (await res.json()) as SchoolProfileRead;
+}
+
+/** PUT /api/v1/config/school-profile: every field is replaced. */
+export async function saveSchoolProfile(baseURL: string, profile: SchoolProfile): Promise<SchoolProfile> {
+  const res = await authFetch(url(baseURL, `${BASE_PATH}/school-profile`), {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(profile),
+  });
+  if (!res.ok) {
+    throw await configFailure(res);
+  }
+  return ((await res.json()) as { profile: SchoolProfile }).profile;
+}

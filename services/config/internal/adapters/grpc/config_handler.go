@@ -594,6 +594,39 @@ func (h *ConfigHandler) DeleteSchoolEvent(ctx context.Context, req *connect.Requ
 	return connect.NewResponse(&configv1.DeleteSchoolEventResponse{}), nil
 }
 
+// --- the school's details (task 12) ----------------------------------------
+
+func (h *ConfigHandler) GetSchoolProfile(ctx context.Context, _ *connect.Request[configv1.GetSchoolProfileRequest]) (*connect.Response[configv1.GetSchoolProfileResponse], error) {
+	p, found, err := h.catalog.GetSchoolProfile(ctx)
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	res := &configv1.GetSchoolProfileResponse{Found: found}
+	if found {
+		res.Profile = toProtoSchoolProfile(p)
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (h *ConfigHandler) SetSchoolProfile(ctx context.Context, req *connect.Request[configv1.SetSchoolProfileRequest]) (*connect.Response[configv1.SetSchoolProfileResponse], error) {
+	in := req.Msg.GetProfile()
+	p, err := h.catalog.SetSchoolProfile(ctx, domain.SchoolProfileInput{
+		Name: in.GetName(), LegalName: in.GetLegalName(), RFC: in.GetRfc(), CCT: in.GetCct(),
+		Address: in.GetAddress(), Phone: in.GetPhone(), Legend: in.GetLegend(),
+	})
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.SetSchoolProfileResponse{Profile: toProtoSchoolProfile(p)}), nil
+}
+
+func toProtoSchoolProfile(p domain.SchoolProfile) *configv1.SchoolProfile {
+	return &configv1.SchoolProfile{
+		Name: p.Name(), LegalName: p.LegalName(), Rfc: p.RFC(), Cct: p.CCT(),
+		Address: p.Address(), Phone: p.Phone(), Legend: p.Legend(),
+	}
+}
+
 func toProtoSchoolEvent(e domain.SchoolEvent) *configv1.SchoolEvent {
 	return &configv1.SchoolEvent{
 		Id:          e.ID(),

@@ -35,6 +35,7 @@ type fakeCatalog struct {
 	assignments map[string]domain.TeachingAssignment
 	periods     map[string]domain.NonWorkingPeriod
 	events      map[string]domain.SchoolEvent
+	profile     *domain.SchoolProfile
 	unique      map[string]bool // scope-qualified unique keys across all entities
 }
 
@@ -60,6 +61,18 @@ func (f *fakeCatalog) claim(key string) error {
 		return glerrors.ErrConflict
 	}
 	f.unique[key] = true
+	return nil
+}
+
+func (f *fakeCatalog) GetSchoolProfile(_ context.Context) (domain.SchoolProfile, bool, error) {
+	if f.profile == nil {
+		return domain.SchoolProfile{}, false, nil
+	}
+	return *f.profile, true, nil
+}
+
+func (f *fakeCatalog) UpsertSchoolProfile(_ context.Context, p domain.SchoolProfile) error {
+	f.profile = &p
 	return nil
 }
 

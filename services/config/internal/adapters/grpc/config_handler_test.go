@@ -40,6 +40,7 @@ type fakeCatalog struct {
 	assignments map[string]domain.TeachingAssignment
 	periods     []domain.NonWorkingPeriod
 	events      []domain.SchoolEvent
+	profile     *domain.SchoolProfile
 	unique      map[string]bool
 }
 
@@ -62,6 +63,18 @@ func (f *fakeCatalog) claim(key string) error {
 		return glerrors.ErrConflict
 	}
 	f.unique[key] = true
+	return nil
+}
+
+func (f *fakeCatalog) GetSchoolProfile(_ context.Context) (domain.SchoolProfile, bool, error) {
+	if f.profile == nil {
+		return domain.SchoolProfile{}, false, nil
+	}
+	return *f.profile, true, nil
+}
+
+func (f *fakeCatalog) UpsertSchoolProfile(_ context.Context, p domain.SchoolProfile) error {
+	f.profile = &p
 	return nil
 }
 
@@ -1105,4 +1118,35 @@ func (f *fakeCatalog) ActivateCycle(_ context.Context, c domain.Cycle) error {
 	}
 	f.cycles[c.ID()] = c
 	return nil
+}
+
+// Task 12: the school's details over the wire — "not set" is found=false, a
+// profile with no name is InvalidArgument, and the saved one comes back
+// normalised.
+func TestSchoolProfileRPCs(t *testing.T) {
+	h, _ := newHandler(t)
+
+	got, err := h.GetSchoolProfile(ctx(), connect.NewRequest(&configv1.GetSchoolProfileRequest{}))
+	if err != nil || got.Msg.GetFound() {
+		t.Fatalf("before any save: found %v, err %v", got.Msg.GetFound(), err)
+	}
+
+	_, err = h.SetSchoolProfile(ctx(), connect.NewRequest(&configv1.SetSchoolProfileRequest{Profile: &configv1.SchoolProfile{}}))
+	if codeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("no name: code = %v, want InvalidArgument", codeOf(err))
+	}
+
+	set, err := h.SetSchoolProfile(ctx(), connect.NewRequest(&configv1.SetSchoolProfileRequest{
+		Profile: &configv1.SchoolProfile{Name: "Colegio García Lorca", Rfc: "egl150101ab1", Phone: "55 1234 5678"},
+	}))
+	if err != nil {
+		t.Fatalf("SetSchoolProfile: %v", err)
+	}
+	if set.Msg.GetProfile().GetRfc() != "EGL150101AB1" || set.Msg.GetProfile().GetPhone() != "5512345678" {
+		t.Errorf("saved = %+v; want RFC upper-cased and phone as digits", set.Msg.GetProfile())
+	}
+	got, err = h.GetSchoolProfile(ctx(), connect.NewRequest(&configv1.GetSchoolProfileRequest{}))
+	if err != nil || !got.Msg.GetFound() || got.Msg.GetProfile().GetName() != "Colegio García Lorca" {
+		t.Errorf("read back: %+v, err %v", got.Msg, err)
+	}
 }
