@@ -47,6 +47,12 @@ the school's income and the tables that set prices.
   "Cobranza".
 - A cashier keys money under their own name (task 7's `received_by`), and the
   owner sees it, flagged when captured late, in the cash-up.
+- Accepted risk, by the owner's decision (2026-09-24): a cashier may date a
+  payment any day back, as the owner may (task 7: "the tuition table itself"
+  is the only floor). The date prices the payment, so dating it into an
+  earlier early-payment window lowers what the family pays. It is not
+  prevented; it is traced: the deposit carries the cashier's name and its
+  capture time, and the cash-up flags one keyed late.
 - Out of scope, by the owner's decision: voiding one's own deposit, and selling
   uniforms at the counter (`uniforms:write`). Either can be granted later as its
   own permission without touching this one.
