@@ -92,19 +92,54 @@ func TestADepositCoversTheMonthAndItsSurcharge(t *testing.T) {
 	}
 }
 
-// The surcharge exists only where money landed on it. A family that pays nothing
-// must not accumulate a table of surcharge rows nobody asked for.
-func TestNoMoneyMeansNoSurchargeRow(t *testing.T) {
+// Money short of the month leaves the month open, and an open month keeps
+// earning: its surcharge is derived again tomorrow, so no row is written yet.
+func TestAPartPaymentWritesNoSurchargeRow(t *testing.T) {
 	f := depositFixture(t)
 
-	// Enough for September alone, not for its surcharge.
+	got := deposit(t, f, 100000, "2026-10-10")
+
+	if len(got.Surcharges) != 0 {
+		t.Errorf("materialised %d surcharge rows while the month is still open", len(got.Surcharges))
+	}
+}
+
+// Task 9: settling the month without its surcharge does not forgive it. The
+// days it earned are written down as a debt of their own — or a cashier could
+// take $3,500, key $3,200 and leave no trace of the $300. Forgiving it is the
+// owner's discount or cancellation.
+func TestSettlingTheMonthLeavesItsSurchargeOwed(t *testing.T) {
+	f := depositFixture(t)
+
+	// September alone: $3,200, not its thirty days of surcharge.
 	got := deposit(t, f, 320000, "2026-10-10")
 
 	if len(got.Allocations) != 1 {
-		t.Fatalf("split into %d payments, want 1", len(got.Allocations))
+		t.Fatalf("split into %d payments, want 1 (September)", len(got.Allocations))
 	}
-	if len(got.Surcharges) != 0 {
-		t.Errorf("materialised %d surcharge rows for money that never reached them", len(got.Surcharges))
+	if len(got.Surcharges) != 1 || got.Surcharges[0].Amount().Int64() != 30000 {
+		t.Fatalf("surcharges = %+v, want September's $300 written down", got.Surcharges)
+	}
+
+	expected, err := f.svc.ExpectedToday(context.Background(), testStudent, f.clock)
+	if err != nil {
+		t.Fatalf("ExpectedToday: %v", err)
+	}
+	if expected.SurchargeCents != 30000 || expected.AmountCents != 350000 {
+		t.Errorf("expected after = %d (surcharge %d), want 350000 with 30000 surcharge — October plus September's fee",
+			expected.AmountCents, expected.SurchargeCents)
+	}
+
+	// The next deposit collects it, and never charges those days twice.
+	next, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 350000, Method: domain.MethodCash,
+		PaidAt: time.Date(2026, time.October, 10, 0, 0, 0, 0, time.UTC), IdempotencyKey: "dep-key-second",
+	})
+	if err != nil {
+		t.Fatalf("second deposit: %v", err)
+	}
+	if next.UnallocatedCents != 0 || len(next.Surcharges) != 0 {
+		t.Errorf("second deposit: unallocated %d, new surcharges %d; want 0 and 0", next.UnallocatedCents, len(next.Surcharges))
 	}
 }
 

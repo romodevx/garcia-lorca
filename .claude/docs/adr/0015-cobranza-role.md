@@ -47,6 +47,12 @@ the school's income and the tables that set prices.
   "Cobranza".
 - A cashier keys money under their own name (task 7's `received_by`), and the
   owner sees it, flagged when captured late, in the cash-up.
+- A daily surcharge is no longer forgiven by settling its month without it
+  (owner's decision, 2026-09-24). Before, it existed only where money reached
+  it, so keying the month alone erased it with no trace — harmless while only
+  the owner collected, a leak once a cashier does. Now a deposit that settles a
+  month writes the days it earned as a debt of their own; forgiving it is the
+  owner's discount or cancellation.
 - Accepted risk, by the owner's decision (2026-09-24): a cashier may date a
   payment any day back, as the owner may (task 7: "the tuition table itself"
   is the only floor). The date prices the payment, so dating it into an
