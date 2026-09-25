@@ -86,4 +86,53 @@ describe("SizeQuantityPicker (tarea 11)", () => {
     expect(onAdd).not.toHaveBeenCalled();
     expect(screen.getByRole("alert")).toHaveTextContent("Elige al menos una talla");
   });
+
+  it("takes a chosen size back out with a second tap", async () => {
+    const user = userEvent.setup();
+    pick();
+
+    await user.click(screen.getByRole("button", { name: /Talla 4/ }));
+    expect(screen.getByRole("button", { name: /Talla 4/ })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: /Talla 4/ }));
+    expect(screen.queryByLabelText("Cantidad talla 4")).toBeNull();
+  });
+
+  it("names the chosen quantity on the chip, as the sighted see it", async () => {
+    const user = userEvent.setup();
+    pick();
+
+    await user.click(screen.getByRole("button", { name: /Talla 8/ }));
+    expect(screen.getByRole("button", { name: /Talla 8/ })).toHaveAccessibleName("Talla 8, 1 elegida de 2 libres");
+  });
+
+  it("never sends more than is free when the shelf shrank after choosing", async () => {
+    const user = userEvent.setup();
+    const onAdd = vi.fn();
+    const { rerender } = render(<SizeQuantityPicker sizes={SIZES} unitPriceCents={45000} onAdd={onAdd} />);
+
+    await user.click(screen.getByRole("button", { name: /Talla 4/ }));
+    await user.click(screen.getByRole("button", { name: "Una más de talla 4" }));
+    await user.click(screen.getByRole("button", { name: "Una más de talla 4" }));
+    rerender(<SizeQuantityPicker sizes={[{ label: "4", available: 1 }]} unitPriceCents={45000} onAdd={onAdd} />);
+    await user.click(screen.getByRole("button", { name: "Agregar al carrito" }));
+
+    expect(onAdd).toHaveBeenCalledWith([{ sizeLabel: "4", qty: 1 }]);
+  });
+
+  it("returns focus to the size's chip when its row goes away", async () => {
+    const user = userEvent.setup();
+    pick();
+
+    await user.click(screen.getByRole("button", { name: /Talla 4/ }));
+    await user.click(screen.getByRole("button", { name: "Una menos de talla 4" }));
+    expect(screen.getByRole("button", { name: /Talla 4/ })).toHaveFocus();
+  });
+
+  it("sends focus to the first size on sale when nothing was chosen", async () => {
+    const user = userEvent.setup();
+    pick();
+
+    await user.click(screen.getByRole("button", { name: "Agregar al carrito" }));
+    expect(screen.getByRole("button", { name: /Talla 4/ })).toHaveFocus();
+  });
 });

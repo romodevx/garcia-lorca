@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactElement } from "react";
+import { useRef, useState, type ReactElement } from "react";
 
 import { formatCents } from "../_lib/money";
 import { Btn } from "./Controls";
@@ -40,6 +40,9 @@ const NOTHING_CHOSEN = "Elige al menos una talla.";
 export function SizeQuantityPicker({ sizes, unitPriceCents, inCart = {}, onAdd }: SizeQuantityPickerProps): ReactElement {
   const [qty, setQty] = useState<Record<string, number>>({});
   const [error, setError] = useState("");
+  // The chips, by size: focus comes back to one when its row goes away, and to
+  // the first on sale when "Agregar" finds nothing chosen.
+  const chips = useRef(new Map<string, HTMLButtonElement>());
 
   const free = (size: PickableSize): number => Math.max(0, size.available - (inCart[size.label] ?? 0));
   const set = (label: string, next: number): void => {
@@ -58,12 +61,26 @@ export function SizeQuantityPicker({ sizes, unitPriceCents, inCart = {}, onAdd }
   const chosen = sizes.filter((s) => (qty[s.label] ?? 0) > 0);
   const pieces = chosen.reduce((sum, s) => sum + (qty[s.label] ?? 0), 0);
 
+  const drop = (label: string): void => {
+    set(label, 0);
+    chips.current.get(label)?.focus();
+  };
+
   const add = (): void => {
-    if (chosen.length === 0) {
+    // Capped at what is free NOW: the shelf may have shrunk since the choice
+    // (a reload after an out-of-stock sale), and the server would refuse more.
+    const picks = chosen
+      .map((s) => ({ sizeLabel: s.label, qty: Math.min(qty[s.label] ?? 0, free(s)) }))
+      .filter((p) => p.qty > 0);
+    if (picks.length === 0) {
       setError(NOTHING_CHOSEN);
+      const first = sizes.find((s) => free(s) > 0);
+      if (first !== undefined) {
+        chips.current.get(first.label)?.focus();
+      }
       return;
     }
-    onAdd(chosen.map((s) => ({ sizeLabel: s.label, qty: qty[s.label] ?? 0 })));
+    onAdd(picks);
     setQty({});
   };
 
@@ -79,18 +96,27 @@ export function SizeQuantityPicker({ sizes, unitPriceCents, inCart = {}, onAdd }
               type="button"
               aria-disabled={soldOut}
               aria-pressed={picked > 0}
-              aria-label={`Talla ${size.label}, ${soldOut ? "agotada" : `${free(size)} libres`}`}
-              onClick={() => {
-                if (!soldOut && picked === 0) {
-                  set(size.label, 1);
+              aria-label={chipLabel(size.label, picked, free(size))}
+              ref={(el) => {
+                if (el === null) {
+                  chips.current.delete(size.label);
+                } else {
+                  chips.current.set(size.label, el);
                 }
+              }}
+              onClick={() => {
+                if (soldOut) {
+                  return;
+                }
+                // A toggle, as aria-pressed says: a second tap takes it out.
+                set(size.label, picked > 0 ? 0 : 1);
               }}
               style={{
                 minHeight: 64,
                 padding: "6px 4px",
                 borderRadius: "var(--r-md)",
                 border: picked > 0 ? "1.5px solid var(--forest)" : "1px solid var(--border)",
-                background: picked > 0 ? "var(--ok-bg)" : "var(--surface)",
+                background: picked > 0 ? "color-mix(in oklab, var(--forest) 12%, var(--surface))" : "var(--surface)",
                 opacity: soldOut ? 0.45 : 1,
                 cursor: soldOut ? "not-allowed" : "pointer",
                 display: "grid",
@@ -114,7 +140,7 @@ export function SizeQuantityPicker({ sizes, unitPriceCents, inCart = {}, onAdd }
             label={size.label}
             qty={qty[size.label] ?? 0}
             max={free(size)}
-            onChange={(next) => set(size.label, next)}
+            onChange={(next) => (next <= 0 ? drop(size.label) : set(size.label, next))}
           />
         </div>
       ))}
@@ -134,6 +160,17 @@ export function SizeQuantityPicker({ sizes, unitPriceCents, inCart = {}, onAdd }
       )}
     </div>
   );
+}
+
+/** What a screen reader hears for a chip: the size, what is chosen and what is free. */
+function chipLabel(label: string, picked: number, free: number): string {
+  if (free <= 0 && picked === 0) {
+    return `Talla ${label}, agotada`;
+  }
+  if (picked > 0) {
+    return `Talla ${label}, ${picked} ${picked === 1 ? "elegida" : "elegidas"} de ${free} libres`;
+  }
+  return `Talla ${label}, ${free} libres`;
 }
 
 function Stepper({ label, qty, max, onChange }: { label: string; qty: number; max: number; onChange: (next: number) => void }): ReactElement {

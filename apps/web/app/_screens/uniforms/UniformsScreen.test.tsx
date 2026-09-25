@@ -198,6 +198,8 @@ describe("the till", () => {
     await user.click(screen.getByRole("button", { name: "Una más de talla M" }));
     await user.click(screen.getByRole("button", { name: "Agregar al carrito" }));
     expect(screen.getByText("× 2")).toBeInTheDocument();
+    // The picker is gone with the button that had focus: focus lands on the cart.
+    expect(screen.getByRole("region", { name: "Carrito" })).toHaveFocus();
 
     await user.click(screen.getByText("Suéter verde"));
     // Two are in the cart already: four are free.

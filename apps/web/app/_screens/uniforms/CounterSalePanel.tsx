@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { pesosToCents } from "../../_lib/money";
 import { Btn } from "../../_design/Controls";
 import { MoneyField } from "../../_design/form";
@@ -50,6 +50,16 @@ export function CounterSalePanel({
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<UniformsError | null>(null);
   const [sold, setSold] = useState<UniformOrder | null>(null);
+  // "Agregar al carrito" unmounts the picker with the button that had focus;
+  // focus goes to the cart instead of falling to the page (task 11).
+  const cartRef = useRef<HTMLElement>(null);
+  const [focusCart, setFocusCart] = useState(false);
+  useEffect(() => {
+    if (focusCart) {
+      cartRef.current?.focus();
+      setFocusCart(false);
+    }
+  }, [focusCart]);
 
   // Minted when the drawer OPENS, not when the button is pressed: a retry of
   // this sale carries the same key, while the next parent in the queue carries a
@@ -93,6 +103,7 @@ export function CounterSalePanel({
       return next;
     });
     setSelectedItem(null);
+    setFocusCart(true);
   }, []);
 
   const sell = useCallback(async (): Promise<void> => {
@@ -223,6 +234,9 @@ export function CounterSalePanel({
 
       {cart.length > 0 && (
         <section
+          ref={cartRef}
+          tabIndex={-1}
+          aria-label="Carrito"
           style={{
             padding: 16,
             borderRadius: "var(--r-lg)",
@@ -434,14 +448,7 @@ function SaleReceipt({
   );
 }
 
-/**
- * A fresh idempotency key.
- *
- * crypto.randomUUID is not available in every browser this school uses, so there
- * is a fallback — a sale that cannot mint a key is a sale that cannot be
- * protected from a double click, which is worse than an ugly string.
- */
-export /** Units of each size of one garment already in the cart. */
+/** Units of each size of one garment already in the cart. */
 function inCartOf(cart: CartLine[], itemId: string): Record<string, number> {
   const out: Record<string, number> = {};
   for (const line of cart) {
@@ -452,7 +459,14 @@ function inCartOf(cart: CartLine[], itemId: string): Record<string, number> {
   return out;
 }
 
-function newSaleKey(): string {
+/**
+ * A fresh idempotency key.
+ *
+ * crypto.randomUUID is not available in every browser this school uses, so there
+ * is a fallback — a sale that cannot mint a key is a sale that cannot be
+ * protected from a double click, which is worse than an ugly string.
+ */
+export function newSaleKey(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
