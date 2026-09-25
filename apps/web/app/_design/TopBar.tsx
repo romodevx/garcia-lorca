@@ -103,7 +103,9 @@ export function TopBar({
       </div>
       <div className="topbar-spacer" style={{ flex: 1 }} />
       <div className="topbar-actions" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <IconBtn name="bell" badge={3} label={t("action.notifications")} />
+        {/* No count until something feeds it: a fixed number announced
+            notices an empty school did not have (QA 2026-09-25, ISSUE-001). */}
+        <IconBtn name="bell" label={t("action.notifications")} />
         {/* Wrapped so the stylesheet can drop it on a phone: it is the one
             control here that a person changes once and then never again. */}
         <span className="topbar-lang">

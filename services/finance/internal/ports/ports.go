@@ -22,6 +22,13 @@ import (
 // truth), so every read and return path that needs the pair carries it here.
 // What the student still owes is Charge.Effective() - PaidCents, floored at
 // zero: an over-collected charge is a credit, never a negative debt.
+// LoosePayment is a payment taken outside a deposit, with the description of
+// the charge it paid, so a cash-up can say what the money was for.
+type LoosePayment struct {
+	Payment     domain.Payment
+	Description string
+}
+
 type ChargeWithPaid struct {
 	Charge    domain.Charge
 	PaidCents int64
@@ -374,6 +381,11 @@ type FinanceRepository interface {
 	// included — the day's cash-up decides what to do with those, and a reader
 	// that never saw them could not explain a gap.
 	ListDepositsOn(ctx context.Context, day time.Time) ([]domain.Deposit, error)
+
+	// ListLoosePaymentsOn returns the payments taken on one day outside any
+	// deposit — a counter sale's, paid straight against its charge — with what
+	// each one paid for. They are in the drawer as much as a deposit is.
+	ListLoosePaymentsOn(ctx context.Context, day time.Time) ([]LoosePayment, error)
 
 	// VoidDeposit cancels a deposit and releases its allocations, in one
 	// transaction. The deposit row survives with its reason; the payments it

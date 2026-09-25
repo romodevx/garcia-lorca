@@ -17,6 +17,7 @@ beforeEach(() => {
   finance.getCashUp.mockResolvedValue({
     deposits: [deposit("d1", 320000, "cash"), deposit("d2", 150000, "transfer")],
     cancelled: [],
+    payments: [],
     cashCents: 320000,
     cardCents: 0,
     transferCents: 150000,
@@ -42,6 +43,7 @@ describe("CashUpPanel", () => {
     finance.getCashUp.mockResolvedValue({
       deposits: [deposit("d1", 320000, "cash")],
       cancelled: [{ ...deposit("d2", 150000, "cash"), voidedAt: "2026-10-10T16:00:00Z", voidReason: "importe capturado mal" }],
+      payments: [],
       cashCents: 320000, cardCents: 0, transferCents: 0, totalCents: 320000,
     });
 
@@ -51,9 +53,31 @@ describe("CashUpPanel", () => {
     expect(screen.getByText(/importe capturado mal/)).toBeInTheDocument();
   });
 
+  // QA 2026-09-25, ISSUE-010: a counter sale is paid outside a deposit. The cut
+  // lists it with what it paid for; the total the server sends already counts it.
+  it("lists the payments taken outside a deposit, with what they paid for", async () => {
+    finance.getCashUp.mockResolvedValue({
+      deposits: [deposit("d1", 550000, "cash")],
+      cancelled: [],
+      payments: [{
+        id: "p1", chargeId: "c1", amountCents: 135000, method: "cash", reference: "",
+        paidAt: "2026-10-10T17:44:00Z", description: "Uniformes · U-2026-000001",
+      }],
+      cashCents: 685000, cardCents: 0, transferCents: 0, totalCents: 685000,
+    });
+
+    render(<CashUpPanel day="2026-10-10" />);
+
+    expect(await screen.findByTestId("cash-up-total")).toHaveTextContent("6,850");
+    const rows = screen.getAllByTestId("cash-up-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toHaveTextContent(/Uniformes · U-2026-000001/);
+    expect(rows[1]).toHaveTextContent("1,350");
+  });
+
   it("says so plainly when nothing came in", async () => {
     finance.getCashUp.mockResolvedValue({
-      deposits: [], cancelled: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0,
+      deposits: [], cancelled: [], payments: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0,
     });
 
     render(<CashUpPanel day="2026-10-10" />);
@@ -73,7 +97,7 @@ describe("CashUpPanel", () => {
         { ...deposit("d2", 150000, "cash"), receivedByName: "Pedro Caja", capturedAt: "2026-10-13T10:00:00" },
       ],
       cancelled: [],
-      cashCents: 470000, cardCents: 0, transferCents: 0, totalCents: 470000,
+      payments: [], cashCents: 470000, cardCents: 0, transferCents: 0, totalCents: 470000,
     } as unknown as financeApi.CashUp);
     render(<CashUpPanel day="2026-10-10" />);
 
@@ -91,7 +115,7 @@ describe("CashUpPanel", () => {
     finance.getCashUp.mockResolvedValue({
       deposits: [{ ...deposit("d1", 320000, "cash"), folio: "P-2026-000042" }],
       cancelled: [],
-      cashCents: 320000, cardCents: 0, transferCents: 0, totalCents: 320000,
+      payments: [], cashCents: 320000, cardCents: 0, transferCents: 0, totalCents: 320000,
     } as unknown as financeApi.CashUp);
     const open = vi.spyOn(window, "open").mockImplementation(() => null);
     const user = userEvent.setup();
@@ -107,7 +131,7 @@ describe("CashUpPanel", () => {
     finance.getCashUp.mockResolvedValue({
       deposits: [],
       cancelled: [{ ...deposit("d9", 100000, "cash"), paidAt: "2026-10-03T00:00:00Z", capturedAt: "2026-10-12T10:00:00", voidedAt: "2026-10-12T11:00:00Z", voidReason: "doble" }],
-      cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0,
+      payments: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0,
     } as unknown as financeApi.CashUp);
     render(<CashUpPanel day="2026-10-03" />);
 

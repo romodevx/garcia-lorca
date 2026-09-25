@@ -6,7 +6,7 @@ import { Btn } from "../../_design/Controls";
 import { Icon, type IconName } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import type { ColorKey } from "../../_design/colors";
-import { listGroups, listSubjects, listTerms, type Group, type Subject, type Term } from "../../config/api";
+import { listLabelledGroups, listSubjects, listTerms, type LabelledGroup, type Subject, type Term } from "../../config/api";
 import { listTeachers, listTeachingAssignments, type Teacher, type TeachingAssignment } from "../../teachers/api";
 import { captureGrade, getRoster, type RosterRow } from "../../grades/api";
 import { listStudents, type Student } from "../../students/api";
@@ -32,7 +32,7 @@ export interface DirectorCaptureProps {
 export function DirectorCapture({ onBack }: DirectorCaptureProps): ReactElement {
   const [assignments, setAssignments] = useState<TeachingAssignment[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
-  const [groups, setGroups] = useState<Group[]>([]);
+  const [groups, setGroups] = useState<LabelledGroup[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [terms, setTerms] = useState<Term[]>([]);
@@ -50,7 +50,7 @@ export function DirectorCapture({ onBack }: DirectorCaptureProps): ReactElement 
     (async (): Promise<void> => {
       try {
         const [asgs, ss, ts] = await Promise.all([listTeachingAssignments(API_URL), listStudents(API_URL), listTeachers(API_URL)]);
-        const gs = await Promise.all(distinct(asgs.map((a) => a.cycleId)).map((id) => listGroups(API_URL, id)));
+        const gs = await Promise.all(distinct(asgs.map((a) => a.cycleId)).map((id) => listLabelledGroups(API_URL, id)));
         const flatGroups = gs.flat();
         const subjectLists = await Promise.all(distinct(flatGroups.map((g) => g.gradeLevelId)).map((id) => listSubjects(API_URL, id)));
         setAssignments(asgs); setStudents(ss); setTeachers(ts); setGroups(flatGroups); setSubjects(subjectLists.flat());
@@ -58,7 +58,7 @@ export function DirectorCapture({ onBack }: DirectorCaptureProps): ReactElement 
     })();
   }, []);
 
-  const groupName = useCallback((id: string): string => groups.find((g) => g.id === id)?.name ?? id, [groups]);
+  const groupName = useCallback((id: string): string => groups.find((g) => g.id === id)?.label ?? id, [groups]);
   const subjectName = useCallback((id: string): string => subjects.find((s) => s.id === id)?.name ?? id, [subjects]);
   const teacherName = useCallback((id: string): string => { const t = teachers.find((x) => x.id === id); return t !== undefined ? `${t.firstName} ${t.lastName}` : id; }, [teachers]);
   const studentName = useCallback((id: string): string => { const s = students.find((x) => x.id === id); return s !== undefined ? `${s.firstName} ${s.lastName}` : id; }, [students]);

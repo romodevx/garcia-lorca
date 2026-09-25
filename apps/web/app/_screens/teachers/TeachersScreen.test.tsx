@@ -6,6 +6,13 @@ import * as configApi from "../../config/api";
 import * as teachersApi from "../../teachers/api";
 import { TeachersScreen } from "./TeachersScreen";
 
+// The screens read labelled groups (ISSUE-002); label them from the listGroups mock.
+beforeEach(() => {
+  vi.mocked(configApi.listLabelledGroups).mockImplementation(async (...args) =>
+    (await vi.mocked(configApi.listGroups)(...args)).map((g) => ({ ...g, label: g.name })));
+});
+
+
 /**
  * Pide el CAMPO y no su ayuda: el (?) de junto es un botón que se llama
  * "Ayuda sobre <campo>", así que una consulta laxa encuentra los dos.
@@ -22,7 +29,7 @@ vi.mock("../../teachers/api", async (importOriginal) => ({
 vi.mock("../../config/api", async (importOriginal) => ({
   ...(await importOriginal<typeof configApi>()),
   listCycles: vi.fn(),
-  listGroups: vi.fn(),
+  listGroups: vi.fn(), listLabelledGroups: vi.fn(),
   listSubjects: vi.fn(),
 }));
 

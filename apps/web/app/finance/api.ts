@@ -626,10 +626,23 @@ export interface CashUp {
   deposits: Deposit[];
   /** Voided that day. They count for nothing and are shown anyway. */
   cancelled: Deposit[];
+  /** Taken outside a deposit (a counter sale's). The totals already count them. */
+  payments: CashUpPayment[];
   cashCents: number;
   cardCents: number;
   transferCents: number;
   totalCents: number;
+}
+
+/** A payment taken outside a deposit, with what it paid for. */
+export interface CashUpPayment {
+  id: string;
+  chargeId: string;
+  amountCents: number;
+  method: PaymentMethod;
+  reference: string;
+  paidAt: string;
+  description: string;
 }
 
 /**
@@ -640,6 +653,7 @@ export async function getCashUp(baseURL: string, day: string): Promise<CashUp> {
   const res = await getJSON<{
     deposits?: Wire<Deposit, "method">[];
     cancelled?: Wire<Deposit, "method">[];
+    payments?: Wire<CashUpPayment, "method">[];
     cashCents?: number;
     cardCents?: number;
     transferCents?: number;
@@ -648,6 +662,7 @@ export async function getCashUp(baseURL: string, day: string): Promise<CashUp> {
   return {
     deposits: (res.deposits ?? []).map(toDeposit),
     cancelled: (res.cancelled ?? []).map(toDeposit),
+    payments: (res.payments ?? []).map((p) => ({ ...p, method: oneOf(PAYMENT_METHODS, p.method, "cash") })),
     cashCents: res.cashCents ?? 0,
     cardCents: res.cardCents ?? 0,
     transferCents: res.transferCents ?? 0,

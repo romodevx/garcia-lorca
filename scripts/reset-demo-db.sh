@@ -6,7 +6,7 @@
 # the owner would lock the demo out of its own system, and dropping the migration
 # ledger would make the next `make migrate` try to re-apply everything.
 #
-# TRUNCATE ... CASCADE, in one transaction, with RESTART IDENTITY so folio
+# TRUNCATE ... CASCADE, in one statement, with RESTART IDENTITY so folio
 # counters and sequences start over — a demo that opens on "U-2026-000042" has
 # some explaining to do.
 #
@@ -67,19 +67,28 @@ psql_do() {
   fi
 }
 
+# WHAT IS KEPT is what login needs, and nothing else. Every other table in the
+# schema is emptied — derived from pg_tables, never hand-listed: the first
+# version kept a list, and deposits, their folio counter, the finance outbox,
+# the school's details and the matrícula counter were all added after it and
+# survived every "wipe" (scripts/reset-demo-db_test.sh guards this).
+KEEP_TABLES="users roles user_roles user_invitations schema_migrations"
+
+KEEP_SQL="$(printf "'%s'," $KEEP_TABLES | sed 's/,$//')"
 SQL="
-BEGIN;
-TRUNCATE
-  uniform_sale_keys, uniform_stock_moves, uniform_order_lines, uniform_fulfillments,
-  uniform_orders, uniform_stock, uniform_items, uniform_folio_counters, uniform_settings,
-  payments, charges, charge_concepts, tuition_plans,
-  attendance,
-  grade_entries,
-  guardian_students, enrollments, students,
-  teaching_assignments, teachers, groups, terms, subjects, grade_levels, levels, cycles,
-  notifications, devices, processed_events
-RESTART IDENTITY CASCADE;
-COMMIT;
+DO \$\$
+DECLARE
+  targets text;
+BEGIN
+  SELECT string_agg(format('%I', tablename), ', ' ORDER BY tablename)
+    INTO targets
+    FROM pg_tables
+   WHERE schemaname = 'public' AND tablename NOT IN (${KEEP_SQL});
+  IF targets IS NOT NULL THEN
+    EXECUTE 'TRUNCATE ' || targets || ' RESTART IDENTITY CASCADE';
+  END IF;
+END
+\$\$;
 "
 
 echo "[reset] emptying operational data in ${PGDATABASE}@${PGHOST:-$CONTAINER} (users and roles are kept)"

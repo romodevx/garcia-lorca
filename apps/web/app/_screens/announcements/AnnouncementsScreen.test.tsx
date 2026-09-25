@@ -7,8 +7,15 @@ import * as configApi from "../../config/api";
 import * as studentsApi from "../../students/api";
 import { AnnouncementsScreen } from "./AnnouncementsScreen";
 
+// The screens read labelled groups (ISSUE-002); label them from the listGroups mock.
+beforeEach(() => {
+  vi.mocked(configApi.listLabelledGroups).mockImplementation(async (...args) =>
+    (await vi.mocked(configApi.listGroups)(...args)).map((g) => ({ ...g, label: g.name })));
+});
+
+
 vi.mock("../../comms/api", () => ({ announce: vi.fn() }));
-vi.mock("../../config/api", () => ({ listCycles: vi.fn(), listLevels: vi.fn(), listGroups: vi.fn() }));
+vi.mock("../../config/api", () => ({ listCycles: vi.fn(), listLevels: vi.fn(), listGroups: vi.fn(), listLabelledGroups: vi.fn() }));
 vi.mock("../../students/api", () => ({ listStudents: vi.fn() }));
 
 const comms = vi.mocked(commsApi);

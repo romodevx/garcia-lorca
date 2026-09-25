@@ -4,6 +4,7 @@ import { useMemo, useState, type ReactElement } from "react";
 import type { AdmissionStatus, Student } from "../../students/api";
 import { TextField } from "../../_design/form";
 import { EmptyHint, Section } from "../config/parts";
+import { matchesSearch } from "../../_design/textSearch";
 
 const STATUS_LABEL: Record<AdmissionStatus, string> = {
   pending: "Pendiente",
@@ -36,15 +37,10 @@ export function StudentDirectoryPanel({ students }: StudentDirectoryPanelProps):
   const [query, setQuery] = useState("");
 
   const rows = useMemo(() => {
-    const needle = query.trim().toLowerCase();
     const sorted = [...students].sort((a, b) =>
       `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`, "es"),
     );
-    if (needle === "") return sorted;
-    return sorted.filter((s) =>
-      [`${s.firstName} ${s.lastName}`, s.curp, s.gradeGroup, s.guardianName]
-        .some((field) => field.toLowerCase().includes(needle)),
-    );
+    return sorted.filter((s) => matchesSearch(query, `${s.firstName} ${s.lastName}`, s.curp, s.gradeGroup, s.guardianName));
   }, [students, query]);
 
   const th: React.CSSProperties = { textAlign: "left", padding: "8px 10px", color: "var(--text-muted)", fontSize: 12.5, fontWeight: 600, borderBottom: "1px solid var(--border)" };

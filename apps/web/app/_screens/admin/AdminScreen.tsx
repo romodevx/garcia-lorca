@@ -29,6 +29,7 @@ import {
 import { PERMISSION_CATALOG } from "./catalog";
 
 import { API_URL } from "../../api-url";
+import { matchesSearch } from "../../_design/textSearch";
 
 const AV: ColorKey[] = ["lime", "forest", "orange", "purple", "yellow"];
 const fi: CSSProperties = { width: "100%", height: 50, padding: "0 16px", borderRadius: "var(--r-md)", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 15.5, outline: "none" };
@@ -138,9 +139,8 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
   const roleName = useCallback((id: string): string => roles.find((r) => r.id === id)?.name ?? id, [roles]);
   const stats = useMemo(() => ({ users: users.length, roles: roles.length, active: users.filter((u) => u.status === "active").length, suspended: users.filter((u) => u.status === "suspended").length, invited: users.filter((u) => u.status === "invited").length }), [users, roles]);
 
-  const needle = q.trim().toLowerCase();
-  const usersF = users.filter((u) => needle === "" || u.displayName.toLowerCase().includes(needle) || u.email.toLowerCase().includes(needle));
-  const rolesF = roles.filter((r) => needle === "" || r.name.toLowerCase().includes(needle));
+  const usersF = users.filter((u) => matchesSearch(q, u.displayName, u.email));
+  const rolesF = roles.filter((r) => matchesSearch(q, r.name));
 
   const onCreateUser = async (input: CreateUserInput): Promise<void> => { await createUser(API_URL, input); setAddUser(false); reload(); say(`Usuario creado · ${input.displayName}`); };
   const onInviteUser = async (input: InviteUserInput): Promise<void> => {

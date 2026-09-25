@@ -48,7 +48,7 @@ beforeEach(() => {
   finance.getOverdue.mockResolvedValue([]);
   finance.getAccount.mockResolvedValue({ charges: [], payments: [], totalBalanceCents: 0, unallocatedCents: 0, dueTodayCents: 0, surchargeCents: 0, earlyDiscountCents: 0, asOf: "" });
   finance.previewDeposit.mockResolvedValue({ allocations: [], surcharges: [], unallocatedCents: 0 });
-  finance.getCashUp.mockResolvedValue({ deposits: [], cancelled: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0 });
+  finance.getCashUp.mockResolvedValue({ deposits: [], cancelled: [], payments: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0 });
   finance.getIncome.mockResolvedValue({ lines: [], totalCents: 0 });
 });
 afterEach(() => vi.clearAllMocks());
@@ -188,7 +188,7 @@ describe("FinanceScreen — corte de caja", () => {
   it("opens the day's takings", async () => {
     const user = userEvent.setup();
     finance.getCashUp.mockResolvedValue({
-      deposits: [], cancelled: [], cashCents: 320000, cardCents: 0, transferCents: 150000, totalCents: 470000,
+      deposits: [], cancelled: [], payments: [], cashCents: 320000, cardCents: 0, transferCents: 150000, totalCents: 470000,
     });
     render(<FinanceScreen onBack={() => {}} />);
     await screen.findByText("Valentina Cruz");
@@ -206,7 +206,7 @@ describe("FinanceScreen — el corte de otro día (tarea 7)", () => {
   it("opens the cut of a day the office chooses", async () => {
     const user = userEvent.setup();
     finance.getCashUp.mockResolvedValue({
-      deposits: [], cancelled: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0,
+      deposits: [], cancelled: [], payments: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0,
     });
     render(<FinanceScreen onBack={() => {}} today="2026-10-12" />);
     await screen.findByText("Valentina Cruz");

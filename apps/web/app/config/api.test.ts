@@ -11,6 +11,7 @@ import {
   listCycles,
   listGradeLevels,
   listGroups,
+  listLabelledGroups,
   listLevels,
   listSubjects,
   listTerms,
@@ -299,5 +300,35 @@ describe("school profile", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("the RFC does not have the SAT's shape", { status: 400 })));
 
     await expect(saveSchoolProfile(BASE, profile)).rejects.toMatchObject({ status: 400, isInvalid: true });
+  });
+});
+
+// QA 2026-09-25, ISSUE-002: every grade has a group "A", so a picker that shows
+// only the letter offers "A, A, A, B" and nobody can tell them apart.
+describe("listLabelledGroups", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const groups = [
+    { id: "g1", cycleId: "c1", gradeLevelId: "k1", name: "A", capacity: 30 },
+    { id: "g2", cycleId: "c1", gradeLevelId: "p1", name: "A", capacity: 2 },
+    { id: "g3", cycleId: "c1", gradeLevelId: "p1", name: "B", capacity: 30 },
+  ];
+  const grades = [
+    { id: "p1", levelId: "lp", name: "1° PRIMARIA", ordinal: 1 },
+    { id: "k1", levelId: "lk", name: "1° KÍNDER", ordinal: 1 },
+  ];
+
+  it("names each group with its grade", async () => {
+    vi.stubGlobal("fetch", vi.fn((url: string) =>
+      Promise.resolve(jsonResponse(url.includes("/grade-levels") ? { gradeLevels: grades } : { groups }))));
+    const out = await listLabelledGroups(BASE, "c1");
+    expect(out.map((g) => g.label)).toEqual(["1° KÍNDER · A", "1° PRIMARIA · A", "1° PRIMARIA · B"]);
+    expect(out[1]).toMatchObject({ id: "g2", name: "A", capacity: 2 });
+  });
+
+  it("falls back to the bare name when the grades cannot be read", async () => {
+    vi.stubGlobal("fetch", vi.fn((url: string) =>
+      Promise.resolve(url.includes("/grade-levels") ? jsonResponse({}, 500) : jsonResponse({ groups }))));
+    const out = await listLabelledGroups(BASE, "c1");
+    expect(out.map((g) => g.label)).toEqual(["A", "A", "B"]);
   });
 });

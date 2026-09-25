@@ -5,6 +5,7 @@ import { listStudents, type Student } from "../../students/api";
 import { field } from "./parts";
 
 import { API_URL } from "../../api-url";
+import { matchesSearch } from "../../_design/textSearch";
 
 
 /**
@@ -49,10 +50,9 @@ export function StudentPicker({
   }, []);
 
   const matches = useMemo(() => {
-    const needle = term.trim().toLowerCase();
-    if (needle === "" || students === null) return [];
+    if (term.trim() === "" || students === null) return [];
     return students
-      .filter((s) => fullName(s).toLowerCase().includes(needle) || s.curp.toLowerCase().includes(needle))
+      .filter((s) => matchesSearch(term, fullName(s), s.curp))
       .slice(0, 6);
   }, [students, term]);
 

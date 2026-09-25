@@ -8,6 +8,7 @@ import (
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/finance/internal/domain"
+	"github.com/garcia-lorca/services/finance/internal/ports"
 	"github.com/garcia-lorca/services/finance/internal/usecase"
 )
 
@@ -482,6 +483,48 @@ func TestDailyCashUpTotalsWhatCameIn(t *testing.T) {
 	}
 	if len(cut.Deposits) != 1 {
 		t.Errorf("listed %d deposits, want 1", len(cut.Deposits))
+	}
+}
+
+// Money taken outside a deposit — a counter sale's, paid straight against its
+// charge — is in the drawer too. The cut that counted deposits alone said
+// $6,500 while the drawer held $1,350 more (QA 2026-09-25, ISSUE-010).
+func TestDailyCashUpCountsPaymentsTakenOutsideADeposit(t *testing.T) {
+	f := depositFixture(t)
+	charges, err := f.svc.ListCharges(context.Background(), testStudent, "")
+	if err != nil {
+		t.Fatalf("ListCharges: %v", err)
+	}
+	var open ports.ChargeWithPaid
+	for _, c := range charges {
+		if c.Charge.Amount().Int64()-c.Charge.Discount().Int64()-c.PaidCents > 0 {
+			open = c
+			break
+		}
+	}
+	if open.Charge.ID() == "" {
+		t.Fatal("the fixture left no charge open")
+	}
+	if _, _, err := f.svc.RegisterPayment(context.Background(), open.Charge.ID(), 5000, domain.MethodCard, "", "counter-sale-1"); err != nil {
+		t.Fatalf("RegisterPayment: %v", err)
+	}
+	deposit(t, f, 320000, "2026-10-10")
+
+	cut, err := f.svc.DailyCashUp(context.Background(), time.Date(2026, time.October, 10, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("DailyCashUp: %v", err)
+	}
+	if cut.TotalCents != 325000 {
+		t.Errorf("total = %d, want 325000 (the deposit and the loose payment)", cut.TotalCents)
+	}
+	if cut.ByMethod[domain.MethodCard] != 5000 {
+		t.Errorf("card = %d, want 5000", cut.ByMethod[domain.MethodCard])
+	}
+	if len(cut.Payments) != 1 {
+		t.Fatalf("listed %d loose payments, want 1", len(cut.Payments))
+	}
+	if got := cut.Payments[0].Description; got != open.Charge.Description() {
+		t.Errorf("the loose payment says %q, want what it paid for: %q", got, open.Charge.Description())
 	}
 }
 

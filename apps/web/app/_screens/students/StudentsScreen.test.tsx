@@ -6,6 +6,13 @@ import * as studentsApi from "../../students/api";
 import * as configApi from "../../config/api";
 import { StudentsScreen } from "./StudentsScreen";
 
+// The screens read labelled groups (ISSUE-002); label them from the listGroups mock.
+beforeEach(() => {
+  vi.mocked(configApi.listLabelledGroups).mockImplementation(async (...args) =>
+    (await vi.mocked(configApi.listGroups)(...args)).map((g) => ({ ...g, label: g.name })));
+});
+
+
 vi.mock("../../students/api", async (importOriginal) => ({
   ...(await importOriginal<typeof studentsApi>()),
   listStudents: vi.fn(),
@@ -15,7 +22,7 @@ vi.mock("../../students/api", async (importOriginal) => ({
 }));
 vi.mock("../../config/api", () => ({
   listCycles: vi.fn(),
-  listGroups: vi.fn(),
+  listGroups: vi.fn(), listLabelledGroups: vi.fn(),
   listLevels: vi.fn(),
   listGradeLevels: vi.fn(),
 }));
@@ -62,6 +69,19 @@ describe("StudentsScreen", () => {
     // also names a tab, so assert at least one pill exists).
     expect(screen.getByText("Inscrito")).toBeInTheDocument();
     expect(screen.getAllByText("Trámite").length).toBeGreaterThan(0);
+  });
+
+  // QA 2026-09-25, ISSUE-005: the floating "Nuevo alumno" sat on top of the
+  // pagination's "Siguiente". The page ends with room for it, so the last row
+  // and the pager scroll clear of the button.
+  it("leaves room under the table for the floating button", async () => {
+    render(<StudentsScreen onBack={() => {}} />);
+    await screen.findByText("Valentina Cruz");
+
+    const fab = screen.getByTitle("Nuevo alumno");
+    const room = screen.getByTestId("fab-clearance");
+    const footprint = parseInt(fab.style.height, 10) + parseInt(fab.style.bottom, 10);
+    expect(parseInt(room.style.height, 10)).toBeGreaterThan(footprint);
   });
 
   it("names each row's open button after the pupil it opens", async () => {

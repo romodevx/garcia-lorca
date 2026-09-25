@@ -8,10 +8,17 @@ import * as studentsApi from "../../students/api";
 import * as teachingApi from "../../teaching/api";
 import { GradesScreen } from "./GradesScreen";
 
+// The screens read labelled groups (ISSUE-002); label them from the listGroups mock.
+beforeEach(() => {
+  vi.mocked(configApi.listLabelledGroups).mockImplementation(async (...args) =>
+    (await vi.mocked(configApi.listGroups)(...args)).map((g) => ({ ...g, label: g.name })));
+});
+
+
 // Both the director path (grades/config/students) and the teacher path (teaching)
 // are mocked so we can assert WHICH client set is exercised for each role.
 vi.mock("../../config/api", () => ({
-  listGroups: vi.fn(),
+  listGroups: vi.fn(), listLabelledGroups: vi.fn(),
   listSubjects: vi.fn(),
   listTerms: vi.fn(),
 }));

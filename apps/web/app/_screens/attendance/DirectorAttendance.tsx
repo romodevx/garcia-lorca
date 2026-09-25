@@ -58,7 +58,7 @@ export function DirectorAttendance({ onBack, today }: DirectorAttendanceProps): 
 
       <div className="fade-up" style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
         <select value={cycleId} onChange={(e) => setCycleId(e.target.value)} aria-label="Ciclo" style={sel}>{cycles.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
-        <select value={groupId} onChange={(e) => setGroupId(e.target.value)} aria-label="Grupo" style={sel}><option value="">Selecciona un grupo…</option>{groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}</select>
+        <select value={groupId} onChange={(e) => setGroupId(e.target.value)} aria-label="Grupo" style={sel}><option value="">Selecciona un grupo…</option>{groups.map((g) => <option key={g.id} value={g.id}>{g.label}</option>)}</select>
         <div style={{ minWidth: 0 }}>
           <DateField label="Fecha" value={date} onChange={setDate} />
         </div>

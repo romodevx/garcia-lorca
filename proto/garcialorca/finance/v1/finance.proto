@@ -786,6 +786,15 @@ message DailyCashUpResponse {
   int64 card_cents = 4;
   int64 transfer_cents = 5;
   int64 total_cents = 6;
+  // Payments taken outside a deposit (a counter sale's, paid straight against
+  // its charge). They are in the drawer, so they are in the totals too.
+  repeated CashUpPayment payments = 7;
+}
+
+// CashUpPayment is a payment taken outside a deposit, with what it paid for.
+message CashUpPayment {
+  Payment payment = 1;
+  string description = 2;
 }
 
 // IncomeByConceptRequest asks what came in between two days, both inclusive.

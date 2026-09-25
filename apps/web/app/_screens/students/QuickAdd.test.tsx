@@ -7,6 +7,13 @@ import * as configApi from "../../config/api";
 import { StudentsScreen, missingFieldMessage, createFailureMessage } from "./StudentsScreen";
 import { StudentsError } from "../../students/api";
 
+// The screens read labelled groups (ISSUE-002); label them from the listGroups mock.
+beforeEach(() => {
+  vi.mocked(configApi.listLabelledGroups).mockImplementation(async (...args) =>
+    (await vi.mocked(configApi.listGroups)(...args)).map((g) => ({ ...g, label: g.name })));
+});
+
+
 /**
  * Pide el CAMPO y no su ayuda: el (?) de junto es un botón que se llama
  * "Ayuda sobre <campo>", así que una consulta laxa encuentra los dos.
@@ -21,7 +28,7 @@ vi.mock("../../students/api", async (importOriginal) => ({
   enrollIntoGrade: vi.fn(),
   addNote: vi.fn(),
 }));
-vi.mock("../../config/api", () => ({ listCycles: vi.fn(), listGroups: vi.fn(), listLevels: vi.fn(), listGradeLevels: vi.fn() }));
+vi.mock("../../config/api", () => ({ listCycles: vi.fn(), listGroups: vi.fn(), listLabelledGroups: vi.fn(), listLevels: vi.fn(), listGradeLevels: vi.fn() }));
 
 const students = vi.mocked(studentsApi);
 const config = vi.mocked(configApi);

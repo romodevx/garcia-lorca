@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
-import { listGroups, listSubjects, listTerms, type Group, type Subject, type Term } from "../../config/api";
+import { listLabelledGroups, listSubjects, listTerms, type LabelledGroup, type Subject, type Term } from "../../config/api";
 import {
   listTeachers,
   listTeachingAssignments,
@@ -40,7 +40,7 @@ function distinct(ids: readonly string[]): string[] {
 export function GradeCapture({ onBack }: GradeCaptureProps): ReactElement {
   const [assignments, setAssignments] = useState<TeachingAssignment[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
-  const [groups, setGroups] = useState<Group[]>([]);
+  const [groups, setGroups] = useState<LabelledGroup[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,7 +59,7 @@ export function GradeCapture({ onBack }: GradeCaptureProps): ReactElement {
           listStudents(API_URL),
           listTeachers(API_URL),
         ]);
-        const groupLists = await Promise.all(distinct(asgs.map((a) => a.cycleId)).map((id) => listGroups(API_URL, id)));
+        const groupLists = await Promise.all(distinct(asgs.map((a) => a.cycleId)).map((id) => listLabelledGroups(API_URL, id)));
         const gs = groupLists.flat();
         const subjectLists = await Promise.all(distinct(gs.map((g) => g.gradeLevelId)).map((id) => listSubjects(API_URL, id)));
         if (!active) return;
@@ -79,7 +79,7 @@ export function GradeCapture({ onBack }: GradeCaptureProps): ReactElement {
     };
   }, []);
 
-  const groupName = useCallback((id: string): string => groups.find((g) => g.id === id)?.name ?? id, [groups]);
+  const groupName = useCallback((id: string): string => groups.find((g) => g.id === id)?.label ?? id, [groups]);
   const subjectName = useCallback((id: string): string => subjects.find((s) => s.id === id)?.name ?? id, [subjects]);
   const teacherName = useCallback(
     (id: string): string => {

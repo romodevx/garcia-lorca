@@ -339,7 +339,7 @@ export function createGradeLevel(baseURL: string, input: CreateGradeLevelInput):
   return postJSON<GradeLevel>(baseURL, "/grade-levels", input);
 }
 
-export function listGradeLevels(baseURL: string, levelId: string): Promise<GradeLevel[]> {
+export function listGradeLevels(baseURL: string, levelId?: string): Promise<GradeLevel[]> {
   return getList<GradeLevel>(baseURL, `/grade-levels${query({ levelId })}`, "gradeLevels");
 }
 
@@ -371,6 +371,29 @@ export function createGroup(baseURL: string, input: CreateGroupInput): Promise<G
 
 export function listGroups(baseURL: string, cycleId: string, gradeLevelId?: string): Promise<Group[]> {
   return getList<Group>(baseURL, `/groups${query({ cycleId, gradeLevelId })}`, "groups");
+}
+
+/** A group named for a picker: its grade and its letter, "1° PRIMARIA · A". */
+export interface LabelledGroup extends Group {
+  label: string;
+}
+
+/**
+ * The cycle's groups, each labelled with its grade. Every grade has an "A", so
+ * a picker that offers the bare name offers "A, A, A, B". When the grades
+ * cannot be read the label falls back to the bare name: a worse picker, not a
+ * broken one.
+ */
+export async function listLabelledGroups(baseURL: string, cycleId: string, gradeLevelId?: string): Promise<LabelledGroup[]> {
+  const [groups, grades] = await Promise.all([
+    listGroups(baseURL, cycleId, gradeLevelId),
+    listGradeLevels(baseURL).catch((): GradeLevel[] => []),
+  ]);
+  const gradeName = new Map(grades.map((g) => [g.id, g.name]));
+  return groups.map((g) => {
+    const grade = gradeName.get(g.gradeLevelId);
+    return { ...g, label: grade === undefined ? g.name : `${grade} · ${g.name}` };
+  });
 }
 
 

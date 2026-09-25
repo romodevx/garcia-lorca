@@ -11,6 +11,7 @@ import { API_URL } from "../../api-url";
 import { formatCents } from "../../_lib/money";
 import { CashUpDrawer } from "../finance/CashUpDrawer";
 import { CollectDrawer, type CollectStudent } from "../finance/CollectDrawer";
+import { matchesSearch } from "../../_design/textSearch";
 
 const search: CSSProperties = {
   width: "100%", height: 60, paddingLeft: 52, paddingRight: 18,
@@ -62,12 +63,11 @@ export function PaymentsScreen({ onBack, canGrantDiscounts = false }: PaymentsSc
   useEffect(loadRoll, [loadRoll]);
 
   const matches = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    if (needle === "") {
+    if (q.trim() === "") {
       return [];
     }
     return students
-      .filter((s) => `${s.firstName} ${s.lastName}`.toLowerCase().includes(needle) || s.curp.toLowerCase().includes(needle))
+      .filter((s) => matchesSearch(q, `${s.firstName} ${s.lastName}`, s.curp))
       .slice(0, MAX_RESULTS);
   }, [students, q]);
 

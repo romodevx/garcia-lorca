@@ -880,3 +880,45 @@ func TestAFolioClashIsNotADuplicatePayment(t *testing.T) {
 		t.Errorf("a folio clash answered %v (%v); want an internal fault, not a conflict", kind, err)
 	}
 }
+
+// QA 2026-09-25, ISSUE-010: the cash-up reads the day's payments taken outside
+// a deposit (a counter sale's), with what each paid for, and never a slice of a
+// deposit, which the cut already counts through the deposit itself.
+func TestListLoosePaymentsOnReadsOnlyPaymentsOutsideADeposit(t *testing.T) {
+	tenant, student := tenantA, "80000000-0000-0000-0000-0000000000c7"
+	loose := seedConceptAndCharge(t, tenant, "60000000-0000-0000-0000-0000000000c7", "uniformes suelto",
+		"61000000-0000-0000-0000-0000000000c7", student, "70000000-0000-0000-0000-0000000000c7", 135000, 0,
+		time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC))
+	sliced := seedConceptAndCharge(t, tenant, "60000000-0000-0000-0000-0000000000c8", "colegiatura suelto",
+		"61000000-0000-0000-0000-0000000000c8", student, "70000000-0000-0000-0000-0000000000c7", 250000, 0,
+		time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC))
+	paidOn := time.Date(2026, 11, 17, 15, 0, 0, 0, time.UTC)
+
+	repo := appRepo(t, tenant)
+	if _, _, _, err := repo.RegisterPayment(context.Background(),
+		newPayment(t, "91000000-0000-0000-0000-0000000000c7", tenant, loose.ID(), 135000, paidOn), derive, nil); err != nil {
+		t.Fatalf("RegisterPayment: %v", err)
+	}
+	dep := newDeposit(t, "62000000-0000-0000-0000-0000000000c8", tenant, student, 250000, paidOn, "")
+	slice := newPayment(t, "91000000-0000-0000-0000-0000000000c8", tenant, sliced.ID(), 250000, paidOn)
+	if _, _, err := repo.RegisterDeposit(context.Background(), dep,
+		func([]ports.ChargeWithPaid) (ports.DepositWrite, error) {
+			return ports.DepositWrite{Allocations: []domain.Payment{slice}}, nil
+		}, nil); err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+
+	got, err := repo.ListLoosePaymentsOn(context.Background(), time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("ListLoosePaymentsOn: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("read %d loose payments, want 1 (the deposit's slice is not one)", len(got))
+	}
+	if got[0].Payment.ID() != "91000000-0000-0000-0000-0000000000c7" || got[0].Payment.Amount().Int64() != 135000 {
+		t.Errorf("loose payment = %s %d", got[0].Payment.ID(), got[0].Payment.Amount().Int64())
+	}
+	if got[0].Description != loose.Description() {
+		t.Errorf("description = %q, want the charge's %q", got[0].Description, loose.Description())
+	}
+}

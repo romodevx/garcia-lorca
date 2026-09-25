@@ -8,11 +8,18 @@ import * as teachingApi from "../../teaching/api";
 import { AttendanceScreen } from "./AttendanceScreen";
 import { Providers } from "../../test-utils";
 
+// The screens read labelled groups (ISSUE-002); label them from the listGroups mock.
+beforeEach(() => {
+  vi.mocked(configApi.listLabelledGroups).mockImplementation(async (...args) =>
+    (await vi.mocked(configApi.listGroups)(...args)).map((g) => ({ ...g, label: g.name })));
+});
+
+
 // Both paths are mocked so we can assert WHICH client set each role exercises.
 // The director path boots the admin attendance + config + students clients; the
 // teacher path is self-scoped to the teaching client alone.
 vi.mock("../../attendance/api", () => ({ getDailyRoster: vi.fn(), saveDailyAttendance: vi.fn() }));
-vi.mock("../../config/api", () => ({ listCycles: vi.fn(), listGroups: vi.fn() }));
+vi.mock("../../config/api", () => ({ listCycles: vi.fn(), listGroups: vi.fn(), listLabelledGroups: vi.fn() }));
 vi.mock("../../students/api", () => ({ listStudents: vi.fn() }));
 vi.mock("../../teaching/api", () => ({
   listGroups: vi.fn(),

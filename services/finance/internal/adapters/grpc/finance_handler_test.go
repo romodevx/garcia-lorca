@@ -92,6 +92,7 @@ type fakeRepo struct {
 	payments map[string][]domain.Payment // keyed by charge id
 	plans    []domain.TuitionPlan
 	receipt  *ports.DepositReceipt
+	loose    []ports.LoosePayment
 }
 
 func newFakeRepo() *fakeRepo {
@@ -147,6 +148,10 @@ func (f *fakeRepo) ListDeposits(_ context.Context, _ string) ([]domain.Deposit, 
 
 func (f *fakeRepo) ListDepositsOn(_ context.Context, _ time.Time) ([]domain.Deposit, error) {
 	return nil, nil
+}
+
+func (f *fakeRepo) ListLoosePaymentsOn(_ context.Context, _ time.Time) ([]ports.LoosePayment, error) {
+	return f.loose, nil
 }
 
 func (f *fakeRepo) VoidDeposit(_ context.Context, _ domain.Deposit) error { return nil }
@@ -884,5 +889,31 @@ func TestGetDepositReceipt(t *testing.T) {
 	}
 	if l := got.GetLines()[0]; l.GetDiscountCents() != 10000 {
 		t.Errorf("month line = %+v, want its 10000 discount", l)
+	}
+}
+
+// QA 2026-09-25, ISSUE-010: the cash-up carries the payments taken outside a
+// deposit, with what they paid for, and counts them in its totals.
+func TestDailyCashUpCarriesLoosePayments(t *testing.T) {
+	f := newFixture(t)
+	p, err := domain.NewPayment("pay-1", testTenant, "chg-1", 135000, domain.MethodCash, "", fixedNow, "")
+	if err != nil {
+		t.Fatalf("NewPayment: %v", err)
+	}
+	f.repo.loose = []ports.LoosePayment{{Payment: p, Description: "Uniformes · U-2026-000001"}}
+
+	res, err := f.h.DailyCashUp(context.Background(), connect.NewRequest(&financev1.DailyCashUpRequest{Day: "2026-09-15"}))
+	if err != nil {
+		t.Fatalf("DailyCashUp: %v", err)
+	}
+	if res.Msg.GetTotalCents() != 135000 || res.Msg.GetCashCents() != 135000 {
+		t.Errorf("total %d cash %d, want 135000 each", res.Msg.GetTotalCents(), res.Msg.GetCashCents())
+	}
+	if len(res.Msg.GetPayments()) != 1 {
+		t.Fatalf("carried %d payments, want 1", len(res.Msg.GetPayments()))
+	}
+	got := res.Msg.GetPayments()[0]
+	if got.GetDescription() != "Uniformes · U-2026-000001" || got.GetPayment().GetId() != "pay-1" || got.GetPayment().GetAmountCents() != 135000 {
+		t.Errorf("payment = %+v", got)
 	}
 }

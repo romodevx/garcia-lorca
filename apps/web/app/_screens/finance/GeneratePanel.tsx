@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactElement } from "react";
 import { useTranslations } from "next-intl";
 import { Btn } from "../../_design/Controls";
-import type { Cycle, Group } from "../../config/api";
+import type { Cycle, LabelledGroup } from "../../config/api";
 import type { ChargeConcept, GenerateChargesInput } from "../../finance/api";
 import { pesosToCents } from "../../_lib/money";
 import { DateField, SelectField, TextField } from "../../_design/form";
@@ -15,7 +15,7 @@ export interface GeneratePanelProps {
   cycleId: string;
   onCycleChange: (cycleId: string) => void;
   /** Groups of the chosen cycle; loaded by the orchestrator. */
-  groups: readonly Group[];
+  groups: readonly LabelledGroup[];
   onSubmit: (input: GenerateChargesInput) => Promise<void>;
 }
 
@@ -75,7 +75,7 @@ export function GeneratePanel({ concepts, cycles, cycleId, onCycleChange, groups
           <SelectField
             label={t("field.group")}
             value={groupId}
-            options={groups.map((group) => ({ value: group.id, label: group.name }))}
+            options={groups.map((group) => ({ value: group.id, label: group.label }))}
             onChange={setGroupId}
             help={t("help.group")}
             disabled={cycleId === ""}

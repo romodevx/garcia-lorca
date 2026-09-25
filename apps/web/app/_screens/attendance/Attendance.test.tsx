@@ -8,6 +8,13 @@ import * as studentsApi from "../../students/api";
 import { Providers } from "../../test-utils";
 import { Attendance } from "./Attendance";
 
+// The screens read labelled groups (ISSUE-002); label them from the listGroups mock.
+beforeEach(() => {
+  vi.mocked(configApi.listLabelledGroups).mockImplementation(async (...args) =>
+    (await vi.mocked(configApi.listGroups)(...args)).map((g) => ({ ...g, label: g.name })));
+});
+
+
 // The surface talks to the gateway only through the attendance/config/students
 // api clients, so we mock them wholesale and assert the calls (the fetch itself
 // is covered by app/attendance/api.test.ts). Neutral literals only.
@@ -18,7 +25,7 @@ vi.mock("../../attendance/api", () => ({
 }));
 vi.mock("../../config/api", () => ({
   listCycles: vi.fn(),
-  listGroups: vi.fn(),
+  listGroups: vi.fn(), listLabelledGroups: vi.fn(),
 }));
 vi.mock("../../students/api", () => ({
   listStudents: vi.fn(),

@@ -2212,7 +2212,7 @@ components:
     CashUp:
       type: object
       description: One day's takings, split by how the money arrived.
-      required: [deposits, cancelled, cashCents, cardCents, transferCents, totalCents]
+      required: [deposits, cancelled, cashCents, cardCents, transferCents, totalCents, payments]
       properties:
         deposits:
           type: array
@@ -2221,10 +2221,29 @@ components:
           type: array
           description: Voided that day. They count for nothing and are shown anyway.
           items: { $ref: '#/components/schemas/Deposit' }
+        payments:
+          type: array
+          description: >
+            Payments taken outside a deposit that day (a counter sale's, paid
+            straight against its charge). The totals include them.
+          items: { $ref: '#/components/schemas/CashUpPayment' }
         cashCents: { type: integer, format: int64, minimum: 0 }
         cardCents: { type: integer, format: int64, minimum: 0 }
         transferCents: { type: integer, format: int64, minimum: 0 }
         totalCents: { type: integer, format: int64, minimum: 0 }
+
+    CashUpPayment:
+      type: object
+      description: A payment taken outside a deposit, with what it paid for.
+      required: [id, chargeId, amountCents, method, reference, paidAt, description]
+      properties:
+        id: { type: string, format: uuid }
+        chargeId: { type: string, format: uuid }
+        amountCents: { type: integer, format: int64, minimum: 1, example: 135000 }
+        method: { type: string, enum: [cash, card, transfer] }
+        reference: { type: string }
+        paidAt: { type: string, format: date-time }
+        description: { type: string, example: "Uniformes · U-2026-000001" }
 
     BillingRun:
       type: object

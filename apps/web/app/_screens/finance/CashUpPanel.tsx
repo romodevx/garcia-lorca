@@ -67,7 +67,7 @@ export function CashUpPanel({ day }: CashUpPanelProps): ReactElement {
         </div>
       </div>
 
-      {cut.deposits.length === 0 && cut.cancelled.length === 0 && (
+      {cut.deposits.length === 0 && cut.cancelled.length === 0 && cut.payments.length === 0 && (
         <p style={{ color: "var(--text-muted)", fontSize: 15, margin: 0 }}>No se recibió nada este día.</p>
       )}
 
@@ -78,7 +78,7 @@ export function CashUpPanel({ day }: CashUpPanelProps): ReactElement {
               <span style={{ fontSize: 14, color: "var(--text-muted)" }}>
                 {/* A back-dated payment carries a day, not an hour: none is shown. */}
                 {capturedLate(d) ? "" : `${hourOf(d.paidAt)} · `}
-                {d.method === "cash" ? "Efectivo" : d.method === "card" ? "Tarjeta" : "Transferencia"}
+                {methodLabel(d.method)}
                 {d.receivedByName !== undefined && d.receivedByName !== "" && ` · ${d.receivedByName}`}
                 {d.folio !== undefined && d.folio !== "" && ` · ${d.folio}`}
                 {capturedLate(d) && (
@@ -102,6 +102,21 @@ export function CashUpPanel({ day }: CashUpPanelProps): ReactElement {
                   <Icon name="documents" size={18} />
                 </button>
               </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {cut.payments.length > 0 && (
+        // Taken outside a deposit: a counter sale, paid straight against its
+        // charge. It is in the drawer, so it is in the total and listed here.
+        <div style={{ borderRadius: "var(--r-lg)", border: "1px solid var(--border)", background: "var(--surface)", overflow: "hidden" }}>
+          {cut.payments.map((p) => (
+            <div key={p.id} data-testid="cash-up-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "13px 20px", borderTop: "1px solid var(--border)" }}>
+              <span style={{ fontSize: 14, color: "var(--text-muted)" }}>
+                {`${hourOf(p.paidAt)} · ${methodLabel(p.method)} · ${p.description}`}
+              </span>
+              <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15.5, color: "var(--text)" }}>{formatCents(p.amountCents)}</span>
             </div>
           ))}
         </div>
@@ -148,4 +163,9 @@ function dayLabel(iso: string): string {
 function hourOf(iso: string): string {
   const at = new Date(iso);
   return Number.isNaN(at.getTime()) ? "—" : at.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
+}
+
+/** How the money arrived, as the office says it. */
+function methodLabel(method: string): string {
+  return method === "cash" ? "Efectivo" : method === "card" ? "Tarjeta" : "Transferencia";
 }

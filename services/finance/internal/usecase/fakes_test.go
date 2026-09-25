@@ -594,6 +594,21 @@ func (f *fakeRepo) ListDepositsOn(_ context.Context, day time.Time) ([]domain.De
 	return out, nil
 }
 
+func (f *fakeRepo) ListLoosePaymentsOn(_ context.Context, day time.Time) ([]ports.LoosePayment, error) {
+	var out []ports.LoosePayment
+	for chargeID, ps := range f.payments {
+		for _, p := range ps {
+			if _, inDeposit := f.depositOfPayment[p.ID()]; inDeposit {
+				continue
+			}
+			if p.PaidAt().Year() == day.Year() && p.PaidAt().YearDay() == day.YearDay() {
+				out = append(out, ports.LoosePayment{Payment: p, Description: f.charges[chargeID].Description()})
+			}
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeRepo) VoidDeposit(_ context.Context, d domain.Deposit) error {
 	for i, stored := range f.deposits {
 		if stored.ID() != d.ID() {

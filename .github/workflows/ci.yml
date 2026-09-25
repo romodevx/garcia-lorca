@@ -245,6 +245,11 @@ jobs:
       - name: Test the shard assignment
         run: sh scripts/ci-shards_test.sh
 
+      # Same silent failure, other list: the demo wipe must empty every table
+      # added after it was written (it derives them from pg_tables).
+      - name: Test the demo wipe keeps only what login needs
+        run: sh scripts/reset-demo-db_test.sh
+
       - name: Derive the Go shard matrix from go.work
         id: modules
         run: |

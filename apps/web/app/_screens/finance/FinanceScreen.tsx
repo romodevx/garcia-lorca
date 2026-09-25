@@ -23,6 +23,7 @@ import { API_URL } from "../../api-url";
 import { CashUpDrawer } from "./CashUpDrawer";
 import { IncomePanel } from "./IncomePanel";
 import { csvName, downloadCsv, toCsv, type CsvColumn } from "../../_lib/csv";
+import { matchesSearch } from "../../_design/textSearch";
 
 /** One key per payment attempt. Mirrors PaymentPanel, which had it right. */
 function newAttemptKey(): string {
@@ -303,11 +304,10 @@ export function FinanceScreen({ onBack, today: officeDay }: FinanceScreenProps):
   );
 
   const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
     return rows
       .filter((r) => (tab === "all" || r.visual === tab)
         && (month === "todos" || r.charge.dueDate.startsWith(month))
-        && (needle === "" || r.name.toLowerCase().includes(needle) || r.charge.description.toLowerCase().includes(needle)))
+        && matchesSearch(q, r.name, r.charge.description))
       .sort((a, b) => a.name.localeCompare(b.name, "es"));
   }, [rows, tab, month, q]);
 

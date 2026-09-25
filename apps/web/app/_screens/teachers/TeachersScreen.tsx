@@ -6,10 +6,10 @@ import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import {
   listCycles,
-  listGroups,
+  listLabelledGroups,
   listSubjects,
   type Cycle,
-  type Group,
+  type LabelledGroup,
   type Subject,
 } from "../../config/api";
 import {
@@ -79,7 +79,7 @@ export function TeachersScreen({ onBack }: TeachersScreenProps): ReactElement {
     [],
   );
 
-  const loadGroups = useCallback((cycleId: string): Promise<Group[]> => listGroups(API_URL, cycleId), []);
+  const loadGroups = useCallback((cycleId: string): Promise<LabelledGroup[]> => listLabelledGroups(API_URL, cycleId), []);
   const loadSubjects = useCallback(
     (gradeLevelId: string): Promise<Subject[]> => listSubjects(API_URL, gradeLevelId),
     [],

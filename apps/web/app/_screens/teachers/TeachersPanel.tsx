@@ -3,8 +3,10 @@
 import { useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import type { CreateTeacherInput, Teacher } from "../../teachers/api";
-import { EmailField, TextField, useEmailShapeOnSave } from "../../_design/form";
+import { EmailField, TextField, useEmailShapeOnSave, useRequired } from "../../_design/form";
 import { EmptyHint, ErrorAlert, Section } from "../config/parts";
+
+const REQUIRED = ["firstName", "lastName", "email"] as const;
 
 export interface TeachersPanelProps {
   teachers: readonly Teacher[];
@@ -25,11 +27,14 @@ export function TeachersPanel({ teachers, onCreate }: TeachersPanelProps): React
   // Enter guarda sin salir del campo, así que la forma del correo también se
   // revisa aquí, al guardar, y no sólo al salir de él.
   const emailShape = useEmailShapeOnSave();
-
-  const canSubmit = firstName.trim() !== "" && lastName.trim() !== "" && email.trim() !== "" && !pending;
+  // The server requires all three. The button is never disabled: saving says
+  // what is missing, on the field (ui-forms-and-modals rules).
+  const required = useRequired(REQUIRED);
 
   const submit = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
+    if (pending) return;
+    if (!required.check({ firstName, lastName, email })) return;
     if (!emailShape.check(email)) return;
     setPending(true);
     setError(undefined);
@@ -67,8 +72,8 @@ export function TeachersPanel({ teachers, onCreate }: TeachersPanelProps): React
 
       <form aria-label="Agregar profesor" onSubmit={submit}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-          <TextField label="Nombre" value={firstName} onChange={setFirstName} uppercase required help="Sólo los nombres de pila del docente, sin apellidos." />
-          <TextField label="Apellidos" value={lastName} onChange={setLastName} uppercase required help="Los dos apellidos: primero el paterno, luego el materno." />
+          <TextField label="Nombre" value={firstName} onChange={setFirstName} uppercase required error={required.errors.firstName} onClearError={() => required.clear("firstName")} help="Sólo los nombres de pila del docente, sin apellidos." />
+          <TextField label="Apellidos" value={lastName} onChange={setLastName} uppercase required error={required.errors.lastName} onClearError={() => required.clear("lastName")} help="Los dos apellidos: primero el paterno, luego el materno." />
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12, alignItems: "end" }}>
           <EmailField
@@ -78,10 +83,12 @@ export function TeachersPanel({ teachers, onCreate }: TeachersPanelProps): React
               setEmail(v);
               emailShape.forgive(v);
             }}
-            help="El correo donde el docente recibirá su acceso. Puede quedar vacío y agregarse después."
-            error={emailShape.error}
+            required
+            onClearError={() => required.clear("email")}
+            help="El correo donde el docente recibirá su acceso."
+            error={required.errors.email ?? emailShape.error}
           />
-          <Btn type="submit" icon="plus" disabled={!canSubmit}>
+          <Btn type="submit" icon="plus">
             Crear profesor
           </Btn>
         </div>

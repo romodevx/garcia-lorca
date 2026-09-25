@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import { listCycles, listGroups, type Cycle, type Group } from "../../config/api";
+import { listCycles, listLabelledGroups, type Cycle, type LabelledGroup } from "../../config/api";
 import {
   applyDiscount,
   cancelCharge,
@@ -43,7 +43,7 @@ export interface FinanceState {
   cycles: readonly Cycle[];
   students: readonly Student[];
   concepts: readonly ChargeConcept[];
-  groups: readonly Group[];
+  groups: readonly LabelledGroup[];
   charges: readonly Charge[];
   cycleId: string;
   setCycleId: (cycleId: string) => void;
@@ -94,7 +94,7 @@ export function useFinance(initialSection: FinanceSection): FinanceState {
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [concepts, setConcepts] = useState<ChargeConcept[]>([]);
-  const [groups, setGroups] = useState<Group[]>([]);
+  const [groups, setGroups] = useState<LabelledGroup[]>([]);
   const [charges, setCharges] = useState<Charge[]>([]);
   const [cycleId, setCycleId] = useState("");
   const [studentId, setStudentId] = useState("");
@@ -155,7 +155,7 @@ export function useFinance(initialSection: FinanceSection): FinanceState {
   useEffect(() => {
     if (cycleId === "") return;
     let active = true;
-    listGroups(API_URL, cycleId)
+    listLabelledGroups(API_URL, cycleId)
       .then((gs) => active && setGroups(gs))
       .catch(() => active && setGroups([]));
     return () => {

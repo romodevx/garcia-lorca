@@ -30,7 +30,7 @@ export function Attendance({ onBack, today }: AttendanceProps): ReactElement {
   const list = usePassList(today);
 
   const cycleOptions: SelectOption[] = list.cycles.map((cycle) => ({ value: cycle.id, label: cycle.name }));
-  const groupOptions: SelectOption[] = list.groups.map((group) => ({ value: group.id, label: group.name }));
+  const groupOptions: SelectOption[] = list.groups.map((group) => ({ value: group.id, label: group.label }));
 
   return (
     <Page>

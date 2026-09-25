@@ -1576,6 +1576,53 @@ func (r *Repository) ListDepositsOn(ctx context.Context, day time.Time) ([]domai
 	return out, nil
 }
 
+// ListLoosePaymentsOn returns the payments taken on one day outside any
+// deposit, with the description of the charge each one paid. Same window as
+// ListDepositsOn: [day, day+1) on paid_at.
+func (r *Repository) ListLoosePaymentsOn(ctx context.Context, day time.Time) ([]ports.LoosePayment, error) {
+	from := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, day.Location())
+	var out []ports.LoosePayment
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var rows []paymentModel
+		if err := tx.Where("deposit_id IS NULL AND paid_at >= ? AND paid_at < ?", from, from.AddDate(0, 0, 1)).
+			Order("paid_at ASC, id ASC").Limit(maxListLimit).Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing the day's loose payments", err)
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+		chargeIDs := make([]string, 0, len(rows))
+		for _, m := range rows {
+			chargeIDs = append(chargeIDs, m.ChargeID)
+		}
+		var described []struct {
+			ID          string
+			Description string
+		}
+		if err := tx.Model(&chargeModel{}).Select("id, description").Where("id IN ?", chargeIDs).
+			Scan(&described).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "reading what the loose payments paid", err)
+		}
+		descriptionOf := make(map[string]string, len(described))
+		for _, d := range described {
+			descriptionOf[d.ID] = d.Description
+		}
+		out = make([]ports.LoosePayment, 0, len(rows))
+		for _, m := range rows {
+			p, perr := toDomainPayment(m)
+			if perr != nil {
+				return perr
+			}
+			out = append(out, ports.LoosePayment{Payment: p, Description: descriptionOf[m.ChargeID]})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // VoidDeposit cancels a deposit and releases what it settled, in one
 // transaction: the allocations are removed and every charge they touched goes
 // back to the status its remaining payments imply.

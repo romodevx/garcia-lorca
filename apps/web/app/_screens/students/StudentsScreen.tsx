@@ -19,13 +19,20 @@ import {
   type Enrollment,
   type Student,
 } from "../../students/api";
-import { listCycles, listGradeLevels, listGroups, listLevels, type Cycle, type GradeLevel, type Group, type Level } from "../../config/api";
+import { listCycles, listGradeLevels, listLabelledGroups, listLevels, type Cycle, type GradeLevel, type LabelledGroup, type Level } from "../../config/api";
 import { addNote, enrollIntoGrade, reissueCard, revokeCard, StudentsError, type Placement } from "../../students/api";
 import { VerifyCardDrawer } from "./VerifyCardDrawer";
 
 import { API_URL } from "../../api-url";
 import { csvName, downloadCsv, toCsv, type CsvColumn } from "../../_lib/csv";
 import { ContactsPanel } from "./ContactsPanel";
+import { matchesSearch } from "../../_design/textSearch";
+
+/** The floating "Nuevo alumno": its height, its distance from the bottom, and
+ * the breathing room the page leaves above it. */
+const FAB_HEIGHT = 60;
+const FAB_BOTTOM = 32;
+const FAB_GAP = 16;
 
 
 // ── admission status → pill (design language) ──
@@ -431,7 +438,7 @@ function StudentSheet({
   canRevokeCard = false,
 }: {
   st: Student;
-  groups: readonly Group[];
+  groups: readonly LabelledGroup[];
   /** The cycle whose groups are shown: the pupil's enrolment in THIS cycle. */
   cycleId: string;
   gradeLevels: readonly GradeLevel[];
@@ -563,7 +570,7 @@ function StudentSheet({
               {transferring && (
                 <p style={{ fontSize: 14, color: "var(--text)" }}>
                   <span style={{ color: "var(--text-muted)" }}>Grupo actual: </span>
-                  <strong>{currentGroup?.name ?? st.gradeGroup}</strong>
+                  <strong>{currentGroup?.label ?? st.gradeGroup}</strong>
                 </p>
               )}
               <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>
@@ -577,7 +584,7 @@ function StudentSheet({
                 <div role="group" aria-label={transferring ? "Cambiar a" : "Inscribir en"} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   {choices.map((g) => {
                     const on = gid === g.id;
-                    return <button key={g.id} type="button" aria-pressed={on} onClick={() => { setGid(g.id); setRefusal(undefined); }} style={{ height: 44, padding: "0 15px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>{g.name}</button>;
+                    return <button key={g.id} type="button" aria-pressed={on} onClick={() => { setGid(g.id); setRefusal(undefined); }} style={{ height: 44, padding: "0 15px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>{g.label}</button>;
                   })}
                 </div>
               )}
@@ -630,7 +637,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
   const [students, setStudents] = useState<Student[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
-  const [groups, setGroups] = useState<Group[]>([]);
+  const [groups, setGroups] = useState<LabelledGroup[]>([]);
   // Every level's grades, so the sheet can tell which level a group belongs to.
   const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
   const [gradeLevelsFailed, setGradeLevelsFailed] = useState(false);
@@ -678,7 +685,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
       const active = cs.find((c) => c.status === "active") ?? cs[0];
       if (active !== undefined) {
         setGroupsCycleId(active.id);
-        listGroups(API_URL, active.id).then(setGroups).catch(() => {});
+        listLabelledGroups(API_URL, active.id).then(setGroups).catch(() => {});
       }
     }).catch(() => {});
   }, [reload]);
@@ -700,10 +707,9 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
   };
 
   const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
     return students
       .filter((s) => (tab === "all" || statusOf(s.admissionStatus).tab === tab) && (level === "Todos" || s.level === level) &&
-        (needle === "" || `${s.firstName} ${s.lastName}`.toLowerCase().includes(needle) || s.curp.toLowerCase().includes(needle) || s.guardianName.toLowerCase().includes(needle)))
+        matchesSearch(q, `${s.firstName} ${s.lastName}`, s.curp, s.guardianName))
       .sort((a, b) => `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`, "es"));
   }, [students, tab, level, q]);
 
@@ -896,7 +902,11 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
         )}
       </div>
 
-      <button onClick={() => setAdd(true)} title="Nuevo alumno" style={{ position: "fixed", right: 32, bottom: 32, zIndex: 50, height: 60, padding: "0 26px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 10, background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16.5, cursor: "pointer", boxShadow: "0 10px 30px color-mix(in oklab, var(--lime) 45%, transparent)" }}><Icon name="plus" size={22} stroke={2.6} />Nuevo alumno</button>
+      {/* Room for the floating button, so the last row and the pager scroll
+          clear of it instead of hiding under it (QA 2026-09-25, ISSUE-005). */}
+      <div aria-hidden data-testid="fab-clearance" style={{ height: FAB_BOTTOM + FAB_HEIGHT + FAB_GAP }} />
+
+      <button onClick={() => setAdd(true)} title="Nuevo alumno" style={{ position: "fixed", right: 32, bottom: FAB_BOTTOM, zIndex: 50, height: FAB_HEIGHT, padding: "0 26px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 10, background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16.5, cursor: "pointer", boxShadow: "0 10px 30px color-mix(in oklab, var(--lime) 45%, transparent)" }}><Icon name="plus" size={22} stroke={2.6} />Nuevo alumno</button>
 
       {add && <QuickAdd onClose={() => setAdd(false)} onSave={onSave} levels={levels} withNote={canWriteNotes} />}
       {sheet !== null && <StudentSheet st={sheet} groups={groups} cycleId={groupsCycleId} gradeLevels={gradeLevels} gradeLevelsFailed={gradeLevelsFailed} onClose={() => setSheet(null)} onPlaced={onPlaced} onEdit={onEdit === undefined ? undefined : () => onEdit(sheet.id)} canRevokeCard={canRevokeCard} />}

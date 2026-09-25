@@ -126,7 +126,7 @@ describe("getCashUp · who took the money (tarea 7)", () => {
         id: "d1", studentId: "s1", amountCents: 280000, method: "cash", reference: "",
         paidAt: "2026-09-01T00:00:00Z", calendarVersion: "", receivedByName: "Director", capturedAt: "2026-09-24T21:57:13Z",
       }],
-      cancelled: [], cashCents: 280000, cardCents: 0, transferCents: 0, totalCents: 280000,
+      cancelled: [], payments: [], cashCents: 280000, cardCents: 0, transferCents: 0, totalCents: 280000,
     }));
     vi.stubGlobal("fetch", fetchMock);
 

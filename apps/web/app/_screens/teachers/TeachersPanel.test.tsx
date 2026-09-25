@@ -41,4 +41,24 @@ describe("TeachersPanel", () => {
 
     expect(onCreate).toHaveBeenCalledWith({ firstName: "ANA", lastName: "RUIZ", email: "ana@colegio.mx" });
   });
+
+  // QA 2026-09-25, ISSUE-003: the server requires the email, the help said it
+  // could stay empty, and "Crear profesor" sat disabled with no reason given.
+  // The button is never disabled: saving says what is missing, on the field.
+  it("nunca deshabilita Crear profesor: al guardar marca lo que falta, correo incluido", async () => {
+    const user = userEvent.setup();
+    const onCreate = vi.fn().mockResolvedValue(undefined);
+    render(<TeachersPanel teachers={[]} onCreate={onCreate} />);
+
+    await user.type(screen.getByLabelText(/^Nombre/), "Ana");
+    await user.type(screen.getByLabelText(/^Apellidos/), "Torres");
+    const save = screen.getByRole("button", { name: /Crear profesor/ });
+    expect(save).toBeEnabled();
+    await user.click(save);
+
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(/^Correo/)).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText(/^Correo/)).toHaveFocus();
+    expect(screen.getByText("Correo").parentElement).toHaveTextContent("*");
+  });
 });

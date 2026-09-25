@@ -10,7 +10,7 @@ import {
   type Mark,
   type RosterRow,
 } from "../../attendance/api";
-import { listCycles, listGroups, type Cycle, type Group } from "../../config/api";
+import { listCycles, listLabelledGroups, type Cycle, type LabelledGroup } from "../../config/api";
 import { listStudents, type Student } from "../../students/api";
 
 import { API_URL } from "../../api-url";
@@ -48,7 +48,7 @@ function tally(rows: readonly RosterRow[]): Record<AttendanceStatus, number> {
 /** Everything the pass-list view needs: pickers, the day's rows, and the save. */
 export interface PassListState {
   cycles: readonly Cycle[];
-  groups: readonly Group[];
+  groups: readonly LabelledGroup[];
   cycleId: string;
   setCycleId: (cycleId: string) => void;
   groupId: string;
@@ -85,7 +85,7 @@ export interface PassListState {
 export function usePassList(initialDate?: string): PassListState {
   const t = useTranslations("attendance");
   const [cycles, setCycles] = useState<Cycle[]>([]);
-  const [groups, setGroups] = useState<Group[]>([]);
+  const [groups, setGroups] = useState<LabelledGroup[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [cycleId, setCycleId] = useState("");
   const [groupId, setGroupId] = useState("");
@@ -144,7 +144,7 @@ export function usePassList(initialDate?: string): PassListState {
     if (cycleId === "") return;
     let active = true;
     setGroupId("");
-    listGroups(API_URL, cycleId)
+    listLabelledGroups(API_URL, cycleId)
       .then((gs) => active && setGroups(gs))
       .catch(() => active && setGroups([]));
     return () => {

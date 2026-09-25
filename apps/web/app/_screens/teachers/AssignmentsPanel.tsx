@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
-import type { Cycle, Group, Subject } from "../../config/api";
+import type { Cycle, LabelledGroup, Subject } from "../../config/api";
 import type {
   CreateTeachingAssignmentInput,
   Teacher,
@@ -15,7 +15,7 @@ export interface AssignmentsPanelProps {
   cycles: readonly Cycle[];
   teachers: readonly Teacher[];
   /** Groups of the chosen cycle. */
-  loadGroups: (cycleId: string) => Promise<Group[]>;
+  loadGroups: (cycleId: string) => Promise<LabelledGroup[]>;
   /** Subjects teachable for a grade level — scopes the subject dropdown. */
   loadSubjects: (gradeLevelId: string) => Promise<Subject[]>;
   /** Current assignments of a group (teacher per subject). */
@@ -39,7 +39,7 @@ export function AssignmentsPanel({
   onCreate,
 }: AssignmentsPanelProps): ReactElement {
   const [cycleId, setCycleId] = useState("");
-  const [groups, setGroups] = useState<Group[]>([]);
+  const [groups, setGroups] = useState<LabelledGroup[]>([]);
   const [groupId, setGroupId] = useState("");
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [subjectId, setSubjectId] = useState("");
@@ -117,7 +117,7 @@ export function AssignmentsPanel({
   }
 
   const cycleOptions: SelectOption[] = cycles.map((c) => ({ value: c.id, label: c.name }));
-  const groupOptions: SelectOption[] = groups.map((g) => ({ value: g.id, label: g.name }));
+  const groupOptions: SelectOption[] = groups.map((g) => ({ value: g.id, label: g.label }));
   const subjectOptions: SelectOption[] = subjects.map((s) => ({ value: s.id, label: s.name }));
   const teacherOptions: SelectOption[] = teachers.map((t) => ({ value: t.id, label: `${t.firstName} ${t.lastName}` }));
 

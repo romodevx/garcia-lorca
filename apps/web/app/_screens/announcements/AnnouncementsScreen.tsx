@@ -6,7 +6,7 @@ import { HelpTip, TextField } from "../../_design/form";
 import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import { announce, type AnnouncementScope } from "../../comms/api";
-import { listCycles, listGroups, listLevels, type Cycle, type Group, type Level } from "../../config/api";
+import { listCycles, listLabelledGroups, listLevels, type Cycle, type LabelledGroup, type Level } from "../../config/api";
 import { listStudents, type Student } from "../../students/api";
 import { API_URL } from "../../api-url";
 
@@ -42,7 +42,7 @@ export interface AnnouncementsScreenProps {
 export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): ReactElement {
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
-  const [groups, setGroups] = useState<Group[]>([]);
+  const [groups, setGroups] = useState<LabelledGroup[]>([]);
   const [scope, setScope] = useState<AnnouncementScope>("group");
   // A list, always: one pupil is a list of one, and "1° A y 1° B" is a list of
   // two. Keeping two shapes for the same question is how the send ends up
@@ -68,7 +68,7 @@ export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): React
     if (cycle === undefined) {
       return;
     }
-    listGroups(API_URL, cycle.id, "").then(setGroups).catch(() => {});
+    listLabelledGroups(API_URL, cycle.id).then(setGroups).catch(() => {});
   }, [cycle]);
 
   const send = async (e: FormEvent): Promise<void> => {
@@ -114,7 +114,7 @@ export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): React
     ? levels.map((l) => ({ id: l.id, name: l.name }))
     : scope === "student"
       ? students.map((s) => ({ id: s.id, name: `${s.firstName} ${s.lastName}` }))
-      : groups.map((g) => ({ id: g.id, name: g.name }));
+      : groups.map((g) => ({ id: g.id, name: g.label }));
 
   const toggle = (id: string): void => {
     setPicked((prev) => {

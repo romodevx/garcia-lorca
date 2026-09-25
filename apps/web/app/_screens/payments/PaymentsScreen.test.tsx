@@ -126,7 +126,7 @@ describe("PaymentsScreen · corte de caja", () => {
   it("opens the day's cut from the counter", async () => {
     const user = userEvent.setup();
     finance.getCashUp.mockResolvedValue({
-      deposits: [], cancelled: [], cashCents: 320000, cardCents: 0, transferCents: 0, totalCents: 320000,
+      deposits: [], cancelled: [], payments: [], cashCents: 320000, cardCents: 0, transferCents: 0, totalCents: 320000,
     });
     render(<PaymentsScreen onBack={() => {}} />);
     await user.click(await screen.findByRole("button", { name: /Corte de caja/ }));

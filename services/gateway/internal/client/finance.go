@@ -483,6 +483,20 @@ type CashUp struct {
 	CardCents     int64     `json:"cardCents"`
 	TransferCents int64     `json:"transferCents"`
 	TotalCents    int64     `json:"totalCents"`
+	// Payments taken outside a deposit (a counter sale's). The totals count
+	// them: the money is in the drawer.
+	Payments []CashUpPayment `json:"payments"`
+}
+
+// CashUpPayment is a payment taken outside a deposit, with what it paid for.
+type CashUpPayment struct {
+	ID          string `json:"id"`
+	ChargeID    string `json:"chargeId"`
+	AmountCents int64  `json:"amountCents"`
+	Method      string `json:"method"`
+	Reference   string `json:"reference"`
+	PaidAt      string `json:"paidAt"`
+	Description string `json:"description"`
 }
 
 // DailyCashUp returns what came in on one day, and in what form.
@@ -491,14 +505,27 @@ func (c *FinanceClient) DailyCashUp(ctx context.Context, day string) (CashUp, er
 	if err != nil {
 		return CashUp{}, err
 	}
+	return toCashUp(res.Msg), nil
+}
+
+func toCashUp(m *financev1.DailyCashUpResponse) CashUp {
+	payments := make([]CashUpPayment, 0, len(m.GetPayments()))
+	for _, p := range m.GetPayments() {
+		paid := toPayment(p.GetPayment())
+		payments = append(payments, CashUpPayment{
+			ID: paid.ID, ChargeID: paid.ChargeID, AmountCents: paid.AmountCents, Method: paid.Method,
+			Reference: paid.Reference, PaidAt: paid.PaidAt, Description: p.GetDescription(),
+		})
+	}
 	return CashUp{
-		Deposits:      toDeposits(res.Msg.GetDeposits()),
-		Cancelled:     toDeposits(res.Msg.GetCancelled()),
-		CashCents:     res.Msg.GetCashCents(),
-		CardCents:     res.Msg.GetCardCents(),
-		TransferCents: res.Msg.GetTransferCents(),
-		TotalCents:    res.Msg.GetTotalCents(),
-	}, nil
+		Deposits:      toDeposits(m.GetDeposits()),
+		Cancelled:     toDeposits(m.GetCancelled()),
+		CashCents:     m.GetCashCents(),
+		CardCents:     m.GetCardCents(),
+		TransferCents: m.GetTransferCents(),
+		TotalCents:    m.GetTotalCents(),
+		Payments:      payments,
+	}
 }
 
 func toDeposits(ds []*financev1.Deposit) []Deposit {

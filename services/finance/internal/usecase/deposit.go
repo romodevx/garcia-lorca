@@ -494,6 +494,9 @@ type CashUp struct {
 	Deposits   []domain.Deposit
 	ByMethod   map[string]int64
 	TotalCents int64
+	// Payments are the day's payments taken outside a deposit (a counter
+	// sale's). They are counted: the money is in the drawer.
+	Payments []ports.LoosePayment
 	// Cancelled are the day's voided deposits. They count for nothing and are
 	// listed anyway: a cash-up that hid them could not explain why the drawer
 	// holds less than the receipts say.
@@ -523,6 +526,15 @@ func (s *FinanceService) DailyCashUp(ctx context.Context, day time.Time) (CashUp
 		cut.Deposits = append(cut.Deposits, d)
 		cut.ByMethod[d.Method()] += d.Amount().Int64()
 		cut.TotalCents += d.Amount().Int64()
+	}
+	loose, err := s.repo.ListLoosePaymentsOn(ctx, day)
+	if err != nil {
+		return CashUp{}, err
+	}
+	for _, p := range loose {
+		cut.Payments = append(cut.Payments, p)
+		cut.ByMethod[p.Payment.Method()] += p.Payment.Amount().Int64()
+		cut.TotalCents += p.Payment.Amount().Int64()
 	}
 	return cut, nil
 }

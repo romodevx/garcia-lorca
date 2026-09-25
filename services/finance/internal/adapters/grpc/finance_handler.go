@@ -357,7 +357,16 @@ func (h *FinanceHandler) DailyCashUp(ctx context.Context, req *connect.Request[f
 		CardCents:     cut.ByMethod[domain.MethodCard],
 		TransferCents: cut.ByMethod[domain.MethodTransfer],
 		TotalCents:    cut.TotalCents,
+		Payments:      toProtoCashUpPayments(cut.Payments),
 	}), nil
+}
+
+func toProtoCashUpPayments(ps []ports.LoosePayment) []*financev1.CashUpPayment {
+	out := make([]*financev1.CashUpPayment, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, &financev1.CashUpPayment{Payment: toProtoPayment(p.Payment), Description: p.Description})
+	}
+	return out
 }
 
 func toProtoDeposits(ds []domain.Deposit) []*financev1.Deposit {

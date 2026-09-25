@@ -99,3 +99,25 @@ func TestABillingRunReportsTheFeesItIssued(t *testing.T) {
 		t.Errorf("moved inscriptions came back as %d, want 7", got.EnrollmentMoved)
 	}
 }
+
+// QA 2026-09-25, ISSUE-010: the cash-up the office reads names every payment
+// taken outside a deposit, with what it paid for — not only the deposits.
+func TestCashUpCarriesLoosePayments(t *testing.T) {
+	cut := toCashUp(&financev1.DailyCashUpResponse{
+		CashCents: 135000, TotalCents: 135000,
+		Payments: []*financev1.CashUpPayment{{
+			Payment:     &financev1.Payment{Id: "pay-1", ChargeId: "chg-1", AmountCents: 135000, Method: "cash", Reference: "r"},
+			Description: "Uniformes · U-2026-000001",
+		}},
+	})
+	if len(cut.Payments) != 1 {
+		t.Fatalf("carried %d payments, want 1", len(cut.Payments))
+	}
+	want := CashUpPayment{ID: "pay-1", ChargeID: "chg-1", AmountCents: 135000, Method: "cash", Reference: "r", Description: "Uniformes · U-2026-000001"}
+	if cut.Payments[0] != want {
+		t.Errorf("payment = %+v, want %+v", cut.Payments[0], want)
+	}
+	if cut.TotalCents != 135000 {
+		t.Errorf("total = %d", cut.TotalCents)
+	}
+}

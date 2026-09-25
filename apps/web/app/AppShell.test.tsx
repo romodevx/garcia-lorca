@@ -38,7 +38,7 @@ vi.mock("./finance/api", () => ({
   registerPayment: vi.fn(),
   getAccount: vi.fn(),
   getIncome: vi.fn().mockResolvedValue({ lines: [], totalCents: 0 }),
-  getCashUp: vi.fn().mockResolvedValue({ deposits: [], cancelled: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0 }),
+  getCashUp: vi.fn().mockResolvedValue({ deposits: [], cancelled: [], payments: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0 }),
   getExpected: vi.fn().mockResolvedValue({ amountCents: 0, surchargeCents: 0, discountCents: 0, annualBalanceCents: 0 }),
   previewDeposit: vi.fn(),
   registerDeposit: vi.fn(),
@@ -47,6 +47,7 @@ vi.mock("./finance/api", () => ({
 vi.mock("./config/api", () => ({
   listCycles: vi.fn().mockResolvedValue([]),
   listGroups: vi.fn().mockResolvedValue([]),
+  listLabelledGroups: vi.fn().mockResolvedValue([]),
   listLevels: vi.fn().mockResolvedValue([]),
   listGradeLevels: vi.fn().mockResolvedValue([]),
 }));
@@ -178,6 +179,20 @@ describe("AppShell navigation flow", () => {
     // No login submit — the boot restore lands straight on the dashboard.
     expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Entrar al sistema" })).not.toBeInTheDocument();
+  });
+
+  // QA 2026-09-25, ISSUE-001: the bell showed a hard-coded "3" on an empty
+  // school. Nothing feeds it yet, so it shows no count at all.
+  it("shows no invented count on the notifications bell", async () => {
+    mockMe.mockResolvedValueOnce({ userId: "u1", email: "owner@example.com", permissions: [] });
+    render(
+      <Providers flags={{}}>
+        <AppShell />
+      </Providers>
+    );
+
+    await screen.findByRole("heading", { name: /Módulos/ });
+    expect(screen.getByRole("button", { name: /Notificaciones/ })).not.toHaveTextContent(/\d/);
   });
 
   it("shows the gateway's real display name (not the email-derived one), with the email as the subtitle", async () => {

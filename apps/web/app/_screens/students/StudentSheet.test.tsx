@@ -7,6 +7,13 @@ import * as configApi from "../../config/api";
 import { StudentsError } from "../../students/api";
 import { StudentsScreen, placementRefusal } from "./StudentsScreen";
 
+// The screens read labelled groups (ISSUE-002); label them from the listGroups mock.
+beforeEach(() => {
+  vi.mocked(configApi.listLabelledGroups).mockImplementation(async (...args) =>
+    (await vi.mocked(configApi.listGroups)(...args)).map((g) => ({ ...g, label: g.name })));
+});
+
+
 vi.mock("../../students/api", async (importOriginal) => ({
   ...(await importOriginal<typeof studentsApi>()),
   listStudents: vi.fn(),
@@ -18,7 +25,7 @@ vi.mock("../../students/api", async (importOriginal) => ({
 }));
 vi.mock("../../config/api", () => ({
   listCycles: vi.fn(),
-  listGroups: vi.fn(),
+  listGroups: vi.fn(), listLabelledGroups: vi.fn(),
   listLevels: vi.fn(),
   listGradeLevels: vi.fn(),
 }));
