@@ -135,4 +135,18 @@ describe("SizeQuantityPicker (tarea 11)", () => {
     await user.click(screen.getByRole("button", { name: "Agregar al carrito" }));
     expect(screen.getByRole("button", { name: /Talla 4/ })).toHaveFocus();
   });
+
+  it("says the chosen sizes ran out, rather than that none was chosen", async () => {
+    const user = userEvent.setup();
+    const onAdd = vi.fn();
+    const { rerender } = render(<SizeQuantityPicker sizes={SIZES} unitPriceCents={45000} onAdd={onAdd} />);
+
+    await user.click(screen.getByRole("button", { name: /Talla 4/ }));
+    rerender(<SizeQuantityPicker sizes={[{ label: "4", available: 0 }, { label: "8", available: 2 }]} unitPriceCents={45000} onAdd={onAdd} />);
+    await user.click(screen.getByRole("button", { name: "Agregar al carrito" }));
+
+    expect(onAdd).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Ya no queda existencia libre de lo que elegiste");
+    expect(screen.queryByLabelText("Cantidad talla 4")).toBeNull();
+  });
 });

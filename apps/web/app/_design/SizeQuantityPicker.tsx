@@ -29,6 +29,7 @@ export interface SizeQuantityPickerProps {
 }
 
 const NOTHING_CHOSEN = "Elige al menos una talla.";
+const RAN_OUT = "Ya no queda existencia libre de lo que elegiste: elige otra talla.";
 
 /**
  * Sizes and quantities in one pass (task 11). A tap on a size puts one in; its
@@ -73,7 +74,10 @@ export function SizeQuantityPicker({ sizes, unitPriceCents, inCart = {}, onAdd }
       .map((s) => ({ sizeLabel: s.label, qty: Math.min(qty[s.label] ?? 0, free(s)) }))
       .filter((p) => p.qty > 0);
     if (picks.length === 0) {
-      setError(NOTHING_CHOSEN);
+      // Chosen but gone from the shelf is not the same as nothing chosen: say
+      // which, and clear the stale choices.
+      setQty({});
+      setError(chosen.length > 0 ? RAN_OUT : NOTHING_CHOSEN);
       const first = sizes.find((s) => free(s) > 0);
       if (first !== undefined) {
         chips.current.get(first.label)?.focus();
