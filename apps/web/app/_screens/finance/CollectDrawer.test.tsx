@@ -83,7 +83,7 @@ describe("CollectDrawer", () => {
       },
       allocations: [], surcharges: [], unallocatedCents: 0, replayed: false,
     });
-    render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} />);
+    render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} canGrantDiscounts />);
     await screen.findByTestId("amount-expected");
 
     await user.click(screen.getByLabelText("Aplicar pronto pago"));
@@ -91,6 +91,15 @@ describe("CollectDrawer", () => {
 
     await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
     expect(finance.registerDeposit.mock.calls[0]?.[1]?.grantEarlyPayment).toBe(true);
+  });
+
+  // Task 9: the late reward is a discount, finance:write's. The Cobranza role
+  // takes money at the listed price, so the switch is not offered to it.
+  it("does not offer the late reward to whoever cannot grant discounts", async () => {
+    render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} />);
+    await screen.findByTestId("amount-expected");
+
+    expect(screen.queryByLabelText("Aplicar pronto pago")).toBeNull();
   });
 
   // One field. The cashier types what was handed over and the system says what

@@ -116,3 +116,35 @@ func TestRequireAnyPermission(t *testing.T) {
 		t.Errorf("holder of neither got %d, want 403", rec.Code)
 	}
 }
+
+// Task 9: the counter reads one pupil at a time; whoever holds the wide
+// permission (finance:read) reads the whole ledger as before.
+func TestRequireStudentScopeUnless(t *testing.T) {
+	mw := middleware.RequireStudentScopeUnless("finance:read")
+	serve := func(target string, perms []string) int {
+		next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		if perms != nil {
+			req = req.WithContext(middleware.WithPrincipal(req.Context(), middleware.Principal{UserID: "u", Permissions: perms}))
+		}
+		rec := httptest.NewRecorder()
+		mw(next).ServeHTTP(rec, req)
+		return rec.Code
+	}
+	cases := []struct {
+		name, target string
+		perms        []string
+		want         int
+	}{
+		{"one pupil, counter", "/x?studentId=stu-1", []string{"collections:read"}, http.StatusOK},
+		{"no pupil, counter", "/x?cycleId=cyc-1", []string{"collections:read"}, http.StatusForbidden},
+		{"blank pupil, counter", "/x?studentId=%20%20", []string{"collections:read"}, http.StatusForbidden},
+		{"no pupil, finance:read", "/x?cycleId=cyc-1", []string{"finance:read"}, http.StatusOK},
+		{"no principal", "/x?studentId=stu-1", nil, http.StatusUnauthorized},
+	}
+	for _, tc := range cases {
+		if got := serve(tc.target, tc.perms); got != tc.want {
+			t.Errorf("%s: status %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}

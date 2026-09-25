@@ -42,7 +42,9 @@ type FinanceService interface {
 // proxying to the finance service. It translates JSON ↔ the FinanceClient and
 // Connect error codes ↔ HTTP status. Every route must run behind the module
 // guard (module_finance) plus RequireAuth + rotation-enforcement, with mutations
-// gated on finance:write and reads on finance:read.
+// gated on finance:write and reads on finance:read. The counter's routes also
+// answer to collections:read and payments:write (the Cobranza role, ADR 0015);
+// cmd/main.go is where each route's permission is set.
 //
 // MONEY IS ALWAYS INTEGER CENTS (int64) on the wire: every amount field is
 // named …Cents and is a JSON integer, never a float currency value.
@@ -416,6 +418,9 @@ type registerDepositRequest struct {
 	ChargeIDs []string `json:"chargeIds"`
 }
 
+// grantsDiscounts is the permission that may lower what a family owes.
+const grantsDiscounts = "finance:write"
+
 type voidDepositRequest struct {
 	Reason string `json:"reason"`
 }
@@ -437,6 +442,13 @@ func (h *FinanceHandler) RegisterDeposit(w http.ResponseWriter, r *http.Request)
 	}
 	if msg := invalidChoice(req.ChargeIDs); msg != "" {
 		http.Error(w, msg, http.StatusBadRequest)
+		return
+	}
+	// The late reward is a discount the school grants, and discounts are
+	// finance:write's: payments:write alone takes money at the listed price
+	// (ADR 0015).
+	if req.GrantEarlyPayment && !callerHolds(r, grantsDiscounts) {
+		http.Error(w, "granting the early-payment discount requires "+grantsDiscounts, http.StatusForbidden)
 		return
 	}
 	got, derr := h.svc.RegisterDeposit(r.Context(), req.StudentID, req.AmountCents,

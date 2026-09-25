@@ -71,6 +71,12 @@ export interface CollectDrawerProps {
   onCollected: () => void;
   /** The office's day (aaaa-mm-dd); injected by tests. Defaults to today, locally. */
   today?: string;
+  /**
+   * finance:write: may grant the early-payment reward after its window. It is a
+   * discount, so the Cobranza role is not offered it (task 9); the gateway
+   * refuses it anyway.
+   */
+  canGrantDiscounts?: boolean;
 }
 
 const FUTURE_PAYMENT = "La fecha de pago no puede ser futura.";
@@ -108,7 +114,7 @@ export function paymentDateError(paidOn: string, day: string): string | undefine
  * arithmetic the system already knows how to do. Here the split is previewed
  * while they type and taken when they press Enter.
  */
-export function CollectDrawer({ student, onClose, onCollected, today }: CollectDrawerProps): ReactElement {
+export function CollectDrawer({ student, onClose, onCollected, today, canGrantDiscounts = false }: CollectDrawerProps): ReactElement {
   const day = today ?? localISODate();
   // The day the family paid, which is not always the day it is keyed: a
   // cashier catching up on Monday records Friday. Every rule reads it — the
@@ -343,7 +349,7 @@ export function CollectDrawer({ student, onClose, onCollected, today }: CollectD
                   </div>
                 )}
 
-                {expected !== null && expected.discountCents === 0 && (
+                {canGrantDiscounts && expected !== null && expected.discountCents === 0 && (
                   <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
                     <input type="checkbox" checked={grantEarly} onChange={(e) => setGrantEarly(e.target.checked)} aria-label="Aplicar pronto pago" style={{ width: 18, height: 18 }} />
                     <span style={{ fontSize: 14, color: "var(--text-muted)" }}>

@@ -983,3 +983,26 @@ func TestFinanceRefusesChosenChargesThatAreNotCharges(t *testing.T) {
 		})
 	}
 }
+
+// Task 9: granting the early-payment reward after its window is a discount, and
+// discounts stay finance:write's (ADR 0015). A cashier's deposit that asks for
+// it is refused before finance is called; the owner's goes through.
+func TestFinanceOnlyFinanceWriteGrantsTheLateReward(t *testing.T) {
+	body := `{"studentId":"stu-1","amountCents":1000,"method":"cash","grantEarlyPayment":true}`
+
+	svc := &fakeFinance{}
+	h := handler.NewFinanceHandler(svc)
+	rec := httptest.NewRecorder()
+	h.RegisterDeposit(rec, notesRequest(http.MethodPost, "/api/v1/finance/deposits", body, "payments:write", "collections:read"))
+	if rec.Code != http.StatusForbidden || svc.depositStudent != "" {
+		t.Errorf("cashier: status %d, finance called with %q; want 403 and no call", rec.Code, svc.depositStudent)
+	}
+
+	svc = &fakeFinance{depositResult: client.DepositResult{Deposit: client.Deposit{ID: "dep-1"}}}
+	h = handler.NewFinanceHandler(svc)
+	rec = httptest.NewRecorder()
+	h.RegisterDeposit(rec, notesRequest(http.MethodPost, "/api/v1/finance/deposits", body, "finance:write"))
+	if rec.Code != http.StatusCreated || !svc.depositGranted {
+		t.Errorf("owner: status %d, granted %v; want 201 and the reward granted", rec.Code, svc.depositGranted)
+	}
+}

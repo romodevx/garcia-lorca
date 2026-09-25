@@ -25,12 +25,14 @@ export interface ModuleDef {
    * in the panel/palette. A single string requires exactly that permission; an
    * array is ANY-OF — holding any one of the listed perms reveals the module (so
    * a surface with role-adaptive sub-views, like Calificaciones for directors OR
-   * teachers, stays visible to either audience). UX-only: the gateway (403/404)
+   * teachers, stays visible to either audience). An entry that is itself an
+   * array is ALL-OF: the counter needs to read what is owed AND to key money,
+   * so neither permission alone reveals it. UX-only: the gateway (403/404)
    * is the real security boundary. Modules with no backend (e.g. scholarships)
    * carry a permission nobody is ever granted, so they naturally disappear — no
    * special-casing.
    */
-  perm: string | readonly string[];
+  perm: string | readonly (string | readonly string[])[];
   /**
    * Deactivated from the product (the school doesn't offer this module). Hidden
    * from the panel entirely — this is distinct from a flag being OFF, which
@@ -49,7 +51,7 @@ export const MODULES: readonly ModuleDef[] = [
   // Sentence case, like every other label and description in this list — and
   // like Spanish orthography, which capitalises only the first word. It read
   // "Registro de Pagos" until the palette's own copy disagreed with it.
-  { id: "payments", label: "Registro de pagos", icon: "card", color: "forest", desc: "Cobrar en ventanilla", badge: null, flag: "module_finance", perm: "finance:write" },
+  { id: "payments", label: "Registro de pagos", icon: "card", color: "forest", desc: "Cobrar en ventanilla", badge: null, flag: "module_finance", perm: [["collections:read", "payments:write"], ["finance:read", "finance:write"]] },
   { id: "finance", label: "Finanzas", icon: "finance", color: "orange", desc: "Ingresos y adeudos", badge: null, flag: "module_finance", perm: "finance:read" },
   // QR capture is deferred; the module ships as the daily pass list.
   // Any-of: directors/admins pass lists via attendance:read; teachers use their
@@ -83,7 +85,8 @@ export const MODULES: readonly ModuleDef[] = [
  */
 export function moduleHasPerm(m: ModuleDef, permissions: readonly string[]): boolean {
   const required = typeof m.perm === "string" ? [m.perm] : m.perm;
-  return required.some((p) => permissions.includes(p));
+  const holds = (p: string): boolean => permissions.includes(p);
+  return required.some((p) => (typeof p === "string" ? holds(p) : p.every(holds)));
 }
 
 /**

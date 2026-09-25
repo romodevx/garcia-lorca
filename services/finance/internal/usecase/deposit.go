@@ -715,8 +715,11 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 	})
 
 	var (
-		items      []domain.Payable
-		newFees    = map[string]domain.Charge{}
+		items   []domain.Payable
+		newFees = map[string]domain.Charge{}
+		// feeOwedBy pairs each derived surcharge with its month and what the
+		// month owed before this deposit, to tell afterwards whether it settled.
+		feeOwedBy  []derivedFee
 		fresh      []domain.Charge
 		discounted []domain.Charge
 		repriced   []domain.Charge
@@ -798,6 +801,7 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 		}
 		if ok {
 			newFees[fee.ID()] = fee
+			feeOwedBy = append(feeOwedBy, derivedFee{fee: fee, parentID: charge.ID(), parentDue: due})
 			items = append(items, domain.Payable{
 				ChargeID:  fee.ID(),
 				DueOn:     c.Charge.DueDate(),
@@ -809,13 +813,14 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 	}
 
 	allocations, unallocated := domain.Allocate(p.deposit.Amount().Int64(), items)
+	fresh = append(fresh, settledWithoutFee(feeOwedBy, allocations)...)
 
 	payments := make([]domain.Payment, 0, len(allocations))
 	for _, a := range allocations {
-		if fee, isNew := newFees[a.ChargeID]; isNew {
-			// A surcharge row exists only where money reached it. This is the
-			// one place that decides that, so the ledger never fills with fees
-			// nobody paid and nobody asked for.
+		if fee, isNew := newFees[a.ChargeID]; isNew && !written(fresh, fee.ID()) {
+			// A surcharge row exists where money reached it, or where its month
+			// was settled (settledWithoutFee): an open month's fee is derived
+			// again next time, so the ledger never fills with fees nobody asked for.
 			fresh = append(fresh, fee)
 		}
 		payment, err := domain.NewPayment(p.svc.newID(), p.svc.tenantID, a.ChargeID,
@@ -832,6 +837,44 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 		Allocations:      payments,
 		UnallocatedCents: unallocated,
 	}, nil
+}
+
+// derivedFee is a daily surcharge worked out for this deposit, with the month it
+// rides on and what that month owed before the money came in.
+type derivedFee struct {
+	fee       domain.Charge
+	parentID  string
+	parentDue int64
+}
+
+// settledWithoutFee returns the surcharges of the months this deposit settles
+// whether or not money reached them (task 9). A settled month stops earning and
+// is never derived again, so its surcharge must be written now: left out, it
+// would be forgiven with no discount, no reason and no trace. A month left open
+// keeps earning and is derived again on its next payment, so it writes nothing.
+func settledWithoutFee(derived []derivedFee, allocations []domain.Allocation) []domain.Charge {
+	paid := make(map[string]int64, len(allocations))
+	for _, a := range allocations {
+		paid[a.ChargeID] += a.AmountCents
+	}
+	var out []domain.Charge
+	for _, d := range derived {
+		// parentDue <= 0: the reward alone closed the month, no money needed.
+		if paid[d.parentID] >= d.parentDue {
+			out = append(out, d.fee)
+		}
+	}
+	return out
+}
+
+// written reports whether a surcharge is already among those to write.
+func written(fees []domain.Charge, id string) bool {
+	for _, f := range fees {
+		if f.ID() == id {
+			return true
+		}
+	}
+	return false
 }
 
 // chosenSet is the cashier's selection as a set; nil when nothing was chosen.
@@ -968,6 +1011,9 @@ func (p *depositPlanner) earlyPayment(c ports.ChargeWithPaid, budget int64) (dom
 		// reason, so a report can always tell the rule from the decision.
 		discount, reason = p.policy.EarlyPaymentCents, domain.ReasonEarlyPaymentGranted
 	}
+	// Never more than the month still owes, as the quote caps it: a reward
+	// larger than the balance would push the charge below what was paid.
+	discount = min(discount, owed(c))
 	if discount <= 0 || budget < owed(c)-discount {
 		return domain.Charge{}, false, nil
 	}

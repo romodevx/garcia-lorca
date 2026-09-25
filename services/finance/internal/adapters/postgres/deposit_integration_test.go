@@ -564,3 +564,53 @@ func TestVoidingADepositTakesBackItsPriceAtPaymentDateDiscount(t *testing.T) {
 			after.Charge.Discount().Int64(), after.Charge.DiscountReason(), after.Charge.Status())
 	}
 }
+
+// Task 9: a deposit that settles a month writes its daily surcharge, paid or
+// not. That row exists only because of the deposit, so voiding it cancels the
+// row when nothing else paid it — or a void and a re-key dated earlier would
+// leave the family owing the days of the wrong date.
+func TestVoidingADepositCancelsTheSurchargeItWrote(t *testing.T) {
+	tenant, student := tenantA, "80000000-0000-0000-0000-0000000000b8"
+	due := time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)
+	month := seedConceptAndCharge(t, tenant, "60000000-0000-0000-0000-0000000000b8", "colegiatura recargo void",
+		"61000000-0000-0000-0000-0000000000b8", student, "70000000-0000-0000-0000-0000000000b8", 320000, 0, due)
+	paidOn := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+	deposit := newDeposit(t, "62000000-0000-0000-0000-0000000000b8", tenant, student, 320000, paidOn, "")
+	fee := newCharge(t, "63000000-0000-0000-0000-0000000000b8", tenant, student,
+		"70000000-0000-0000-0000-0000000000b8", "60000000-0000-0000-0000-0000000000b8", 40000, 0, due)
+	fee, err := fee.WithExternalRef("dailyfee:" + month.ID() + ":" + deposit.ID())
+	if err != nil {
+		t.Fatalf("WithExternalRef: %v", err)
+	}
+	payment := newPayment(t, "90000000-0000-0000-0000-0000000000b8", tenant, month.ID(), 320000, paidOn)
+
+	repo := appRepo(t, tenant)
+	if _, _, err := repo.RegisterDeposit(context.Background(), deposit,
+		func([]ports.ChargeWithPaid) (ports.DepositWrite, error) {
+			return ports.DepositWrite{Surcharges: []domain.Charge{fee}, Allocations: []domain.Payment{payment}}, nil
+		}, nil); err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+	voided, err := deposit.Void("fecha equivocada", paidOn)
+	if err != nil {
+		t.Fatalf("Void: %v", err)
+	}
+	if err := repo.VoidDeposit(context.Background(), voided); err != nil {
+		t.Fatalf("VoidDeposit: %v", err)
+	}
+
+	after, err := repo.GetCharge(context.Background(), fee.ID())
+	if err != nil {
+		t.Fatalf("GetCharge: %v", err)
+	}
+	if after.Charge.Status() != domain.StatusCancelled {
+		t.Errorf("the voided deposit's surcharge is %s, want cancelled", after.Charge.Status())
+	}
+	reopened, err := repo.GetCharge(context.Background(), month.ID())
+	if err != nil {
+		t.Fatalf("GetCharge month: %v", err)
+	}
+	if reopened.Charge.Status() != domain.StatusPending {
+		t.Errorf("month after the void is %s, want pending", reopened.Charge.Status())
+	}
+}

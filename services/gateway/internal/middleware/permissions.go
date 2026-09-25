@@ -3,6 +3,7 @@ package middleware
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 // This file holds the two permission gates that RequirePermission cannot express,
@@ -112,5 +113,26 @@ func missingPermissionMessage(permission string) string {
 		return "Necesitas permiso de almacén para esta acción"
 	default:
 		return "Tu cuenta no tiene permiso para esta acción"
+	}
+}
+
+// RequireStudentScopeUnless lets a request through only when it names one
+// pupil (?studentId=), unless the caller holds `wide`. The counter (task 9)
+// reads one family at a time; a whole cycle's ledger is finance:read's.
+func RequireStudentScopeUnless(wide string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			p, ok := PrincipalFrom(r.Context())
+			if !ok {
+				unauthorized(w)
+				return
+			}
+			if hasPermission(p, wide) || strings.TrimSpace(r.URL.Query().Get("studentId")) != "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			WriteError(w, http.StatusForbidden, "forbidden",
+				"Tu cuenta consulta un alumno a la vez", nil)
+		})
 	}
 }

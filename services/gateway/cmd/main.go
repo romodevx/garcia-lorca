@@ -488,6 +488,20 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	financeRead := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("finance", requireAuthChanged(middleware.RequirePermission("finance:read")(http.HandlerFunc(h))))
 	}
+	// Task 9 (ADR 0015): the counter answers to finance:read OR collections:read
+	// — balances, what is due, what is late, the day's cut — and taking money to
+	// finance:write OR payments:write. The Cobranza role holds only the second of
+	// each; everything that prices, bills, discounts, cancels, voids or reports
+	// income stays finance:* (owner).
+	collectionsRead := func(h http.Handler) http.Handler {
+		return guard.Protect("finance", requireAuthChanged(middleware.RequireAnyPermission("finance:read", "collections:read")(h)))
+	}
+	paymentsWrite := func(h http.Handler) http.Handler {
+		return guard.Protect("finance", requireAuthChanged(middleware.RequireAnyPermission("finance:write", "payments:write")(h)))
+	}
+	// A family's charges and deposits are the counter's one pupil at a time;
+	// the whole ledger (a cycle, every deposit) stays finance:read's.
+	onePupil := middleware.RequireStudentScopeUnless("finance:read")
 	// M15 tuition: pricing a level and running the month are WRITES on the
 	// ledger, so they answer to finance:write; reading the table is finance:read.
 	// The screen lives in Configuración because that is where a director looks
@@ -502,17 +516,23 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/finance/charges/generate", financeWrite(financeH.GenerateCharges))
 	mux.Handle("POST /api/v1/finance/charges/{id}/discount", financeWrite(financeH.ApplyDiscount))
 	mux.Handle("POST /api/v1/finance/charges/{id}/cancel", financeWrite(financeH.CancelCharge))
-	mux.Handle("GET /api/v1/finance/charges", financeRead(financeH.ListCharges))
+	// One pupil's charges are the counter's; a whole cycle's ledger is finance.
+	mux.Handle("GET /api/v1/finance/charges", collectionsRead(onePupil(http.HandlerFunc(financeH.ListCharges))))
+	// Paying one charge by id takes its stored amount, skipping the daily late
+	// fee and the inscription climb a deposit prices in: finance:write only. The
+	// counter (payments:write) collects through deposits.
 	mux.Handle("POST /api/v1/finance/payments", financeWrite(financeH.RegisterPayment))
-	mux.Handle("POST /api/v1/finance/deposits", financeWrite(financeH.RegisterDeposit))
-	mux.Handle("POST /api/v1/finance/deposits/preview", financeRead(financeH.PreviewDeposit))
-	mux.Handle("GET /api/v1/finance/deposits", financeRead(financeH.ListDeposits))
-	mux.Handle("GET /api/v1/finance/expected", financeRead(financeH.ExpectedToday))
-	mux.Handle("GET /api/v1/finance/cash-up", financeRead(financeH.DailyCashUp))
+	mux.Handle("POST /api/v1/finance/deposits", paymentsWrite(http.HandlerFunc(financeH.RegisterDeposit)))
+	mux.Handle("POST /api/v1/finance/deposits/preview", collectionsRead(http.HandlerFunc(financeH.PreviewDeposit)))
+	mux.Handle("GET /api/v1/finance/deposits", collectionsRead(onePupil(http.HandlerFunc(financeH.ListDeposits))))
+	mux.Handle("GET /api/v1/finance/expected", collectionsRead(http.HandlerFunc(financeH.ExpectedToday)))
+	mux.Handle("GET /api/v1/finance/cash-up", collectionsRead(http.HandlerFunc(financeH.DailyCashUp)))
 	mux.Handle("GET /api/v1/finance/income", financeRead(financeH.IncomeByConcept))
 	mux.Handle("POST /api/v1/finance/deposits/{id}/void", financeWrite(financeH.VoidDeposit))
-	mux.Handle("GET /api/v1/finance/accounts/{studentId}", financeRead(financeH.GetAccount))
-	mux.Handle("GET /api/v1/finance/overdue", financeRead(financeH.ListOverdue))
+	mux.Handle("GET /api/v1/finance/accounts/{studentId}", collectionsRead(http.HandlerFunc(financeH.GetAccount)))
+	// The overdue list is school-wide on purpose: it is the counter's own report
+	// (who to call), which the owner approved for this role (ADR 0015).
+	mux.Handle("GET /api/v1/finance/overdue", collectionsRead(http.HandlerFunc(financeH.ListOverdue)))
 
 	// M06 attendance (daily pass list): flag-guarded, authenticated + rotation-
 	// enforced, permission-gated. Saving a group·day is the only write
