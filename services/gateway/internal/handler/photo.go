@@ -60,6 +60,11 @@ func (h *PhotoHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, err)
 		return
 	}
+	writePhoto(w, data, contentType)
+}
+
+// writePhoto sends a pupil's photo: never cached, never sniffed.
+func writePhoto(w http.ResponseWriter, data []byte, contentType string) {
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")

@@ -175,6 +175,32 @@ func (c *StudentsClient) GetStudent(ctx context.Context, id string) (StudentResu
 	return toStudentResult(res.Msg.GetStudent()), nil
 }
 
+// --- the virtual card (task 13) ---------------------------------------------
+
+// CardCode returns the code a pupil's card shows (GLCARD:<token>).
+func (c *StudentsClient) CardCode(ctx context.Context, studentID string) (string, error) {
+	res, err := c.rpc.GetCardCode(ctx, connect.NewRequest(&studentsv1.GetCardCodeRequest{StudentId: studentID}))
+	if err != nil {
+		return "", err
+	}
+	return res.Msg.GetCode(), nil
+}
+
+// RevokeCard retires a pupil's current card code.
+func (c *StudentsClient) RevokeCard(ctx context.Context, studentID string) error {
+	_, err := c.rpc.RevokeCard(ctx, connect.NewRequest(&studentsv1.RevokeCardRequest{StudentId: studentID}))
+	return err
+}
+
+// VerifyCard reads a scanned code: whose card, and whether it still counts.
+func (c *StudentsClient) VerifyCard(ctx context.Context, code string) (StudentResult, bool, error) {
+	res, err := c.rpc.VerifyCard(ctx, connect.NewRequest(&studentsv1.VerifyCardRequest{Code: code}))
+	if err != nil {
+		return StudentResult{}, false, err
+	}
+	return toStudentResult(res.Msg.GetStudent()), res.Msg.GetValid(), nil
+}
+
 // --- enrollments ----------------------------------------------------------
 
 // Enroll places a student into a group of a cycle. The server derives the cycle

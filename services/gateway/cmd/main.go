@@ -707,6 +707,21 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/family/students/{studentId}/attendance",
 		familyReadModules([]string{"attendance", "students"}, familyH.Attendance))
 
+	// The virtual card (task 13), behind module_student_card (default OFF): the
+	// family reads its own child's card and photo; staff verify a scanned code
+	// (students:read) and revoke a card (students:update).
+	cardH := handler.NewCardHandler(studentsClient, studentsClient, studentsClient, configClient, configClient)
+	mux.Handle("GET /api/v1/family/students/{studentId}/card",
+		familyReadModules([]string{"student_card", "students"}, cardH.FamilyCard))
+	mux.Handle("GET /api/v1/family/students/{studentId}/photo",
+		familyReadModules([]string{"student_card", "students"}, cardH.FamilyPhoto))
+	cardStaff := func(permission string, h http.HandlerFunc) http.Handler {
+		return guard.Protect("student_card", guard.Protect("students",
+			requireAuthChanged(middleware.RequirePermission(permission)(h))))
+	}
+	mux.Handle("POST /api/v1/students/card/verify", cardStaff("students:read", cardH.Verify))
+	mux.Handle("POST /api/v1/students/{id}/card/revoke", cardStaff("students:update", cardH.Revoke))
+
 	// Phase 6 iam admin (user/role CRUD): flag-guarded (module_iam), authenticated
 	// + rotation-enforced, permission-gated. User routes need users:read (GET) /
 	// users:write (POST); role routes need roles:read / roles:write. Every route

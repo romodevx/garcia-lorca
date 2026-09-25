@@ -171,6 +171,12 @@ type stubStudents struct {
 	studentsv1connect.UnimplementedStudentsServiceHandler
 }
 
+// VerifyCard answers every code as one valid card (task 13): the gateway tests
+// are about who reaches the route, not about the codes.
+func (stubStudents) VerifyCard(_ context.Context, _ *connect.Request[studentsv1.VerifyCardRequest]) (*connect.Response[studentsv1.VerifyCardResponse], error) {
+	return connect.NewResponse(&studentsv1.VerifyCardResponse{Student: &studentsv1.Student{Id: "stu-1"}, Valid: true}), nil
+}
+
 func (stubStudents) CreateApplicant(_ context.Context, req *connect.Request[studentsv1.CreateApplicantRequest]) (*connect.Response[studentsv1.CreateApplicantResponse], error) {
 	return connect.NewResponse(&studentsv1.CreateApplicantResponse{Student: &studentsv1.Student{
 		Id:              "stu-1",
@@ -2884,5 +2890,34 @@ func TestReceiptsAnswerToWhoCanSeeTheMoney(t *testing.T) {
 		if c.reachable == denied || res.StatusCode == http.StatusNotFound && c.reachable {
 			t.Errorf("%s as %s: status %d, reachable want %v", c.path, c.token, res.StatusCode, c.reachable)
 		}
+	}
+}
+
+// Task 13: the card lives behind module_student_card — off, every route is 404
+// before auth runs. On, a family reads its child's card; staff with
+// students:read verify and with students:update revoke; a family cannot verify.
+func TestTheCardSitsBehindItsFlag(t *testing.T) {
+	routes := []struct{ method, path, body, token string }{
+		{http.MethodGet, "/api/v1/family/students/stu-1/card", "", "family-reader"},
+		{http.MethodGet, "/api/v1/family/students/stu-1/photo", "", "family-reader"},
+		{http.MethodPost, "/api/v1/students/card/verify", `{"code":"GLCARD:AQAAAAAAAAAAAAAAAAAAAA"}`, "student-reader"},
+		{http.MethodPost, "/api/v1/students/stu-1/card/revoke", "", "roles-writer"},
+	}
+	off := newTestGateway(t, map[string]bool{"module_students": true})
+	for _, r := range routes {
+		if res := doGateway(t, off, r.method, r.path, r.token, r.body); res.StatusCode != http.StatusNotFound {
+			t.Errorf("flag off: %s %s = %d, want 404", r.method, r.path, res.StatusCode)
+		}
+	}
+
+	on := newTestGateway(t, map[string]bool{"module_students": true, "module_student_card": true})
+	if res := doGateway(t, on, http.MethodPost, "/api/v1/students/card/verify", "family-reader", `{"code":"x"}`); res.StatusCode != http.StatusForbidden {
+		t.Errorf("a family verifying a card: %d, want 403", res.StatusCode)
+	}
+	if res := doGateway(t, on, http.MethodPost, "/api/v1/students/stu-1/card/revoke", "student-reader", ""); res.StatusCode != http.StatusForbidden {
+		t.Errorf("revoking with students:read only: %d, want 403", res.StatusCode)
+	}
+	if res := doGateway(t, on, http.MethodPost, "/api/v1/students/card/verify", "student-reader", `{"code":"x"}`); res.StatusCode == http.StatusForbidden || res.StatusCode == http.StatusUnauthorized {
+		t.Errorf("staff verifying a card: %d, want it reachable", res.StatusCode)
 	}
 }
