@@ -181,8 +181,32 @@ describe("the till", () => {
     await waitFor(() => expect(screen.getByText("Suéter verde")).toBeInTheDocument());
     await user.click(screen.getByText("Suéter verde"));
 
-    const soldOut = screen.getByRole("button", { name: /G\s*agotada/ });
-    expect(soldOut).toBeDisabled();
+    const soldOut = screen.getByRole("button", { name: /Talla G, agotada/ });
+    expect(soldOut).toHaveAttribute("aria-disabled", "true");
+  });
+
+  // Task 11: two of a size in one go, then more of it later — one cart line,
+  // and never more than the shelf has free.
+  it("adds a quantity per size, and grows the line it already has", async () => {
+    stubCatalogue([jumper]);
+    const user = userEvent.setup();
+    render(<UniformsScreen onBack={() => {}} permissions={ALL} />);
+
+    await waitFor(() => expect(screen.getByText("Suéter verde")).toBeInTheDocument());
+    await user.click(screen.getByText("Suéter verde"));
+    await user.click(screen.getByRole("button", { name: /Talla M, 6 libres/ }));
+    await user.click(screen.getByRole("button", { name: "Una más de talla M" }));
+    await user.click(screen.getByRole("button", { name: "Agregar al carrito" }));
+    expect(screen.getByText("× 2")).toBeInTheDocument();
+    // The picker is gone with the button that had focus: focus lands on the cart.
+    expect(screen.getByRole("region", { name: "Carrito" })).toHaveFocus();
+
+    await user.click(screen.getByText("Suéter verde"));
+    // Two are in the cart already: four are free.
+    await user.click(screen.getByRole("button", { name: /Talla M, 4 libres/ }));
+    await user.click(screen.getByRole("button", { name: "Agregar al carrito" }));
+    expect(screen.getByText("× 3")).toBeInTheDocument();
+    expect(screen.queryByText("× 2")).toBeNull();
   });
 
   it("keeps the confirm button shut until it has everything it needs", async () => {
@@ -195,7 +219,8 @@ describe("the till", () => {
     expect(confirm()).toBeDisabled();
 
     await user.click(screen.getByText("Suéter verde"));
-    await user.click(screen.getByRole("button", { name: /M\s*6 libres/ }));
+    await user.click(screen.getByRole("button", { name: /Talla M, 6 libres/ }));
+    await user.click(screen.getByRole("button", { name: "Agregar al carrito" }));
     // A cart is not enough: an anonymous sale needs a note, and a named one
     // needs the pupil.
     expect(confirm()).toBeDisabled();
@@ -236,7 +261,8 @@ describe("the till", () => {
 
     await waitFor(() => expect(screen.getByText("Suéter verde")).toBeInTheDocument());
     await user.click(screen.getByText("Suéter verde"));
-    await user.click(screen.getByRole("button", { name: /M\s*6 libres/ }));
+    await user.click(screen.getByRole("button", { name: /Talla M, 6 libres/ }));
+    await user.click(screen.getByRole("button", { name: "Agregar al carrito" }));
     await chooseZoe(user);
     await user.click(screen.getByRole("button", { name: /Cobrar y entregar/ }));
 
@@ -253,7 +279,8 @@ describe("the till", () => {
 
     await waitFor(() => expect(screen.getByText("Suéter verde")).toBeInTheDocument());
     await user.click(screen.getByText("Suéter verde"));
-    await user.click(screen.getByRole("button", { name: /M\s*6 libres/ }));
+    await user.click(screen.getByRole("button", { name: /Talla M, 6 libres/ }));
+    await user.click(screen.getByRole("button", { name: "Agregar al carrito" }));
     await chooseZoe(user);
     await user.click(screen.getByRole("button", { name: /Cobrar y entregar/ }));
 
@@ -286,7 +313,8 @@ describe("the till", () => {
 
     await waitFor(() => expect(screen.getByText("Suéter verde")).toBeInTheDocument());
     await user.click(screen.getByText("Suéter verde"));
-    await user.click(screen.getByRole("button", { name: /M\s*6 libres/ }));
+    await user.click(screen.getByRole("button", { name: /Talla M, 6 libres/ }));
+    await user.click(screen.getByRole("button", { name: "Agregar al carrito" }));
     await chooseZoe(user);
     await user.click(screen.getByRole("button", { name: /Cobrar y entregar/ }));
 
