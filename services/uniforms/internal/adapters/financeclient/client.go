@@ -79,7 +79,7 @@ func (c *Client) EnsureConcept(ctx context.Context) (string, error) {
 		// No default amount: a uniform charge is always the sum of what was
 		// actually sold, never a fixed figure somebody might edit by accident.
 		DefaultAmountCents: 0,
-		Recurrence:         "one_off",
+		Recurrence:         "once",
 	}))
 	if err != nil {
 		if connect.CodeOf(err) == connect.CodeAlreadyExists {

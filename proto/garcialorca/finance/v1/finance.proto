@@ -256,6 +256,9 @@ message UpdateConceptResponse {
 // from the concept's defaults for a single student without editing the concept.
 message CreateChargeRequest {
   string student_id = 1;
+  // cycle_id may be empty only together with external_ref: another module's
+  // sale to a pupil not yet placed in a group (task 10). The school's own
+  // charges always name their cycle.
   string cycle_id = 2;
   string concept_id = 3;
   // amount_cents_override 0 ⇒ use the concept's default_amount_cents.

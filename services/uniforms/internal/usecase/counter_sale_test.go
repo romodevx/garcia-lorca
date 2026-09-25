@@ -3,7 +3,6 @@ package usecase_test
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -339,13 +338,11 @@ func TestCounterSaleAcceptsAWellFormedId(t *testing.T) {
 	}
 }
 
-// TestCounterSaleToAnUnenrolledPupilIsRefusedInPlainSpanish pins the message a
-// cashier reads. A pupil who has been registered but not yet placed in a group
-// has no cycle, and a charge must name one — the sale genuinely cannot go
-// through. What must not happen is what used to: the domain's internal English
-// sentence ("an order for a student needs the cycle it belongs to") reaching a
-// Spanish till, where it names a concept the person at the counter cannot act on.
-func TestCounterSaleToAnUnenrolledPupilIsRefusedInPlainSpanish(t *testing.T) {
+// Task 10 (owner's decision): a pupil registered but not yet placed in a group
+// buys at the counter. The sale goes through, the goods leave the shelf, and
+// finance is charged to the pupil with no cycle — the delivery's ref is what the
+// charge answers to. Nothing is flagged: the money is where it belongs.
+func TestCounterSaleToAPupilWithNoGroupYet(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
 	item := f.seedItem(t, "UNE", "8", 32000, 5)
@@ -353,28 +350,32 @@ func TestCounterSaleToAnUnenrolledPupilIsRefusedInPlainSpanish(t *testing.T) {
 	const newcomer = "9f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
 	f.students.byID[newcomer] = ports.StudentRef{
 		ID: newcomer, FullName: "Zoe Villalobos", Level: domain.Level("c1000000-0000-0000-0000-000000000002"),
-		GradeGroup: "1 A", CycleID: "", Status: "in_process",
+		CycleID: "", Status: "in_process",
 	}
 
 	in := saleFor(item, "8", 1)
 	in.StudentID = newcomer
-	_, err := f.svc.CounterSale(ctx, in)
-
-	if err == nil {
-		t.Fatal("a pupil with no live enrolment has no cycle to bill; the sale must be refused")
+	got, err := f.svc.CounterSale(ctx, in)
+	if err != nil {
+		t.Fatalf("CounterSale to a pupil with no group: %v", err)
 	}
-	if got := glerrors.KindOf(err); got != glerrors.KindInvalid {
-		t.Errorf("kind = %v; want Invalid", got)
+	if got.Order.StudentID() != newcomer || got.Order.CycleID() != "" {
+		t.Errorf("order = student %q, cycle %q; want the pupil and no cycle", got.Order.StudentID(), got.Order.CycleID())
 	}
-	if !strings.Contains(err.Error(), "inscrito") {
-		t.Errorf("message = %q; it must tell the cashier the pupil is not enrolled yet", err.Error())
+	if len(f.finance.charges) != 1 || f.finance.charges[0].StudentID != newcomer || f.finance.charges[0].CycleID != "" {
+		t.Fatalf("finance charges = %+v; want one, to the pupil, with no cycle", f.finance.charges)
 	}
-	// The shelf must be untouched: nothing was handed over.
+	if len(f.finance.payments) != 1 {
+		t.Errorf("payments = %d; want the sale paid", len(f.finance.payments))
+	}
+	if reason := f.repo.flagged[got.Fulfillments[0].ID()]; reason != "" {
+		t.Errorf("delivery flagged %q; want it clean", reason)
+	}
 	stock, err := f.repo.GetStockBySize(ctx, item.ID(), "8")
 	if err != nil {
 		t.Fatalf("read stock: %v", err)
 	}
-	if stock.OnHand() != 5 {
-		t.Errorf("on hand = %d; want 5 — a refused sale moves no goods", stock.OnHand())
+	if stock.OnHand() != 4 {
+		t.Errorf("on hand = %d; want 4 — the garment left with the pupil", stock.OnHand())
 	}
 }

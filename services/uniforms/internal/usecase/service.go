@@ -282,20 +282,10 @@ func (s *Service) resolveBuyer(ctx context.Context, in CounterSaleInput) (ports.
 		return ports.StudentRef{}, glerrors.New(glerrors.KindInvalid,
 			"student id must be an identifier, not a name")
 	}
-	student, err := s.students.ByID(ctx, in.StudentID)
-	if err != nil {
-		return ports.StudentRef{}, err
-	}
-	// A pupil who has been registered but not yet placed in a group has no cycle,
-	// and a charge must name one — the sale genuinely cannot go through. The
-	// refusal is worded HERE, in the language of the till, because the domain's
-	// own sentence names a concept ("the cycle it belongs to") that the person at
-	// the counter cannot act on, and it rides to the panel in details.reason.
-	if strings.TrimSpace(student.CycleID) == "" {
-		return ports.StudentRef{}, glerrors.New(glerrors.KindInvalid,
-			"ese alumno aún no está inscrito en un ciclo: inscríbelo en un grupo y vuelve a cobrar")
-	}
-	return student, nil
+	// A pupil registered but not yet placed in a group has no cycle and buys all
+	// the same (task 10): finance charges the pupil with no cycle, answering to
+	// the delivery's ref.
+	return s.students.ByID(ctx, in.StudentID)
 }
 
 // uuidPattern is the canonical 8-4-4-4-12 form. It is deliberately a shape check

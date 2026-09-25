@@ -50,14 +50,28 @@ func TestAnonymousOrdersAreOnlyForTheCounter(t *testing.T) {
 	}
 }
 
-// TestOrderWithAStudentNeedsACycle mirrors the table's CHECK: a charge has to
-// belong to a school year, so a named student always brings one.
+// TestOrderWithAStudentNeedsACycle mirrors the table's CHECK for the orders a
+// family or the staff place: a child's order belongs to a school year.
 func TestOrderWithAStudentNeedsACycle(t *testing.T) {
 	_, err := domain.NewOrder("ord-1", "t-1", "U-2026-000123", domain.OrderStudent{
 		ID: "stu-1", FullName: "Zoe", Level: domain.Level("c1000000-0000-0000-0000-000000000002"),
 	}, domain.SourceFamily, "usr-1", placedAt)
 	if glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("want KindInvalid without a cycle, got %v", err)
+	}
+}
+
+// Task 10: at the counter, a pupil registered but not yet placed in a group
+// buys with no cycle to name.
+func TestACounterSaleToAPupilMayNameNoCycle(t *testing.T) {
+	o, err := domain.NewOrder("ord-1", "t-1", "U-2026-000124", domain.OrderStudent{
+		ID: "stu-1", FullName: "Zoe", Level: domain.Level("c1000000-0000-0000-0000-000000000002"),
+	}, domain.SourceCounter, "usr-1", placedAt)
+	if err != nil {
+		t.Fatalf("counter sale to a pupil with no cycle: %v", err)
+	}
+	if o.StudentID() != "stu-1" || o.CycleID() != "" {
+		t.Errorf("order = student %q, cycle %q; want the pupil and no cycle", o.StudentID(), o.CycleID())
 	}
 }
 

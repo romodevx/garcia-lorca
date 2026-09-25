@@ -281,10 +281,7 @@ func fromDomainConcept(c domain.ChargeConcept) chargeConceptModel {
 // derived when it stored the row. Given the same paid total, the result's
 // Status() equals the stored status.
 func toDomainCharge(m chargeModel, paidCents int64) (domain.Charge, error) {
-	c, err := domain.NewCharge(
-		m.ID, m.TenantID, m.StudentID, m.CycleID, m.ConceptID,
-		m.Description, m.AmountCents, m.DiscountCents, m.DueDate,
-	)
+	c, err := chargeOf(m)
 	if err != nil {
 		return domain.Charge{}, err
 	}
@@ -294,7 +291,7 @@ func toDomainCharge(m chargeModel, paidCents int64) (domain.Charge, error) {
 			return domain.Charge{}, err
 		}
 	}
-	if m.ExternalRef != "" {
+	if m.ExternalRef != "" && m.CycleID != nil {
 		c, err = c.WithExternalRef(m.ExternalRef)
 		if err != nil {
 			return domain.Charge{}, err
@@ -306,6 +303,25 @@ func toDomainCharge(m chargeModel, paidCents int64) (domain.Charge, error) {
 	return c.WithStatus(paidCents), nil
 }
 
+// chargeOf builds the pending charge a row describes: a cycle-free sale charge
+// (with its ref) or the school's own.
+func chargeOf(m chargeModel) (domain.Charge, error) {
+	if m.CycleID == nil {
+		return domain.NewSaleCharge(m.ID, m.TenantID, m.StudentID, m.ConceptID,
+			m.Description, m.AmountCents, m.DueDate, m.ExternalRef)
+	}
+	return domain.NewCharge(m.ID, m.TenantID, m.StudentID, *m.CycleID, m.ConceptID,
+		m.Description, m.AmountCents, 0, m.DueDate)
+}
+
+// cycleColumn is the cycle as the column stores it: NULL when there is none.
+func cycleColumn(cycleID string) *string {
+	if cycleID == "" {
+		return nil
+	}
+	return &cycleID
+}
+
 // fromDomainCharge projects a domain Charge into its GORM row for insert.
 // CreatedAt/UpdatedAt are left zero so the DB assigns them via DEFAULT now().
 func fromDomainCharge(c domain.Charge) chargeModel {
@@ -313,7 +329,7 @@ func fromDomainCharge(c domain.Charge) chargeModel {
 		ID:             c.ID(),
 		TenantID:       c.TenantID(),
 		StudentID:      c.StudentID(),
-		CycleID:        c.CycleID(),
+		CycleID:        cycleColumn(c.CycleID()),
 		ConceptID:      c.ConceptID(),
 		Description:    c.Description(),
 		AmountCents:    c.Amount().Int64(),

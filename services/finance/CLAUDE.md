@@ -22,6 +22,9 @@ ledger operations run in a single transaction (Unit of Work).
   UUIDs), gross `amount` and `discount` (Cents), `dueDate`, and a status derived
   from payments (`pending|partially_paid|paid|cancelled`). `Effective() = amount
   - discount`. The charge stores no paid field — the ledger owns it.
+  A charge with no cycle exists only as another module's sale to a pupil not yet
+  placed in a group (task 10, ADR 0016): `NewSaleCharge`, ref required, and a
+  CHECK in finance/0017.
 - `Payment` — an append-only movement against a charge: amount (Cents), method
   (`cash|card|transfer`), reference ("con qué se pagó"), `paidAt`.
 - An account statement is DERIVED (charges + payments + balance), not a stored row.

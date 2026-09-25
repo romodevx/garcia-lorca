@@ -176,8 +176,13 @@ func (s *FinanceService) CreateCharge(ctx context.Context, in CreateChargeInput)
 	if err := s.requireStudent(ctx, in.StudentID); err != nil {
 		return ports.ChargeWithPaid{}, err
 	}
-	if err := s.requireCycle(ctx, in.CycleID); err != nil {
-		return ports.ChargeWithPaid{}, err
+	// A sale to a pupil not yet placed in a group names no cycle (task 10); the
+	// domain lets it through only with the sale's ref.
+	cycleFree := strings.TrimSpace(in.CycleID) == "" && strings.TrimSpace(in.ExternalRef) != ""
+	if !cycleFree {
+		if err := s.requireCycle(ctx, in.CycleID); err != nil {
+			return ports.ChargeWithPaid{}, err
+		}
 	}
 	concept, err := s.requireActiveConcept(ctx, in.ConceptID)
 	if err != nil {
@@ -188,22 +193,29 @@ func (s *FinanceService) CreateCharge(ctx context.Context, in CreateChargeInput)
 		return ports.ChargeWithPaid{}, err
 	}
 
-	charge, err := domain.NewCharge(s.newID(), s.tenantID, in.StudentID, in.CycleID, in.ConceptID,
-		resolveDescription(concept, in.DescriptionOverride), resolveAmount(concept, in.AmountCentsOverride), 0, due)
+	charge, err := s.newChargeFor(in, concept, due, cycleFree)
 	if err != nil {
 		return ports.ChargeWithPaid{}, err
-	}
-	if in.ExternalRef != "" {
-		charge, err = charge.WithExternalRef(in.ExternalRef)
-		if err != nil {
-			return ports.ChargeWithPaid{}, err
-		}
 	}
 	created, err := s.repo.CreateCharge(ctx, charge)
 	if err != nil {
 		return ports.ChargeWithPaid{}, err
 	}
 	return ports.ChargeWithPaid{Charge: created, PaidCents: 0}, nil
+}
+
+// newChargeFor builds the charge CreateCharge stores: a cycle-free sale charge,
+// or the school's own, carrying the ref when there is one.
+func (s *FinanceService) newChargeFor(in CreateChargeInput, concept domain.ChargeConcept, due time.Time, cycleFree bool) (domain.Charge, error) {
+	description, amount := resolveDescription(concept, in.DescriptionOverride), resolveAmount(concept, in.AmountCentsOverride)
+	if cycleFree {
+		return domain.NewSaleCharge(s.newID(), s.tenantID, in.StudentID, in.ConceptID, description, amount, due, in.ExternalRef)
+	}
+	charge, err := domain.NewCharge(s.newID(), s.tenantID, in.StudentID, in.CycleID, in.ConceptID, description, amount, 0, due)
+	if err != nil || in.ExternalRef == "" {
+		return charge, err
+	}
+	return charge.WithExternalRef(in.ExternalRef)
 }
 
 // GenerateCharges issues the same concept to every ACTIVE enrollment of a cycle
