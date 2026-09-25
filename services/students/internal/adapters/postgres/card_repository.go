@@ -56,6 +56,11 @@ func (r *Repository) ActiveCard(ctx context.Context, studentID string) (domain.C
 // SaveCard stores a newly issued card code.
 func (r *Repository) SaveCard(ctx context.Context, c domain.CardToken) error {
 	row := cardTokenModel{ID: c.ID(), TenantID: c.TenantID(), StudentID: c.StudentID(), Token: c.Token(), IssuedAt: c.IssuedAt()}
+	if !c.Active() {
+		// A card born revoked (revoked before the family ever opened it).
+		revoked := c.RevokedAt()
+		row.RevokedAt = &revoked
+	}
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
 		if err := tx.Create(&row).Error; err != nil {
 			if isUniqueViolation(err) {

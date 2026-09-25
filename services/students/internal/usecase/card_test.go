@@ -201,3 +201,18 @@ func TestTwoFirstViewsShowOneCode(t *testing.T) {
 		t.Errorf("CardCode = %+v (%v), want the winner's %q", got, err, winner.Code())
 	}
 }
+
+// Review of task 13: a card revoked before the family ever opened it is
+// suspended too — the lost phone must not be handed a first, valid code.
+func TestRevokingACardNeverOpenedSuspendsIt(t *testing.T) {
+	svc, _ := cardService(fakePupils{"stu-1": pupilWith(t, "stu-1", domain.AdmissionEnrolled)})
+	ctx := context.Background()
+
+	if err := svc.RevokeCard(ctx, "stu-1"); err != nil {
+		t.Fatalf("RevokeCard: %v", err)
+	}
+	got, err := svc.CardCode(ctx, "stu-1")
+	if err != nil || !got.Suspended || got.Code != "" {
+		t.Errorf("first view after revoking = %+v (%v), want suspended", got, err)
+	}
+}

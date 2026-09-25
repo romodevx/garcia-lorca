@@ -957,7 +957,7 @@ function RevokeCard({ studentId }: { studentId: string }): ReactElement {
 
   const reissue = (): void => {
     void run(() => reissueCard(API_URL, studentId),
-      "Listo: la app de la familia ya muestra la nueva credencial.",
+      "Listo: la familia verá la nueva credencial al abrirla.",
       (err) => (err instanceof StudentsError && err.status === 409
         ? "La credencial sigue vigente: revócala primero si hay que cambiarla."
         : "No se pudo emitir la credencial."));

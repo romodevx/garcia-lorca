@@ -54,3 +54,28 @@ func TestCardTokensRoundTripAndIsolation(t *testing.T) {
 		t.Errorf("the revoked card = active %v (%v); want kept and inactive", kept.Active(), err)
 	}
 }
+
+// Review of task 13: a card stored already revoked (revoked before the family
+// ever opened it) is kept, counts as issued, and is not active.
+func TestACardBornRevokedIsStoredRevoked(t *testing.T) {
+	ctx := context.Background()
+	repo := appRepo(t, tenantA)
+	pupil := applicant(t, "aaaaaaaa-0000-0000-0000-0000000013e2", tenantA, "CARF050312MDFRNN08", "")
+	if err := repo.Create(ctx, pupil); err != nil {
+		t.Fatalf("Create pupil: %v", err)
+	}
+	at := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	card, err := domain.NewCardToken("cccccccc-0000-0000-0000-0000000013e2", tenantA, pupil.ID(), [16]byte{4, 4}, at)
+	if err != nil {
+		t.Fatalf("NewCardToken: %v", err)
+	}
+	if err := repo.SaveCard(ctx, card.Revoke(at)); err != nil {
+		t.Fatalf("SaveCard: %v", err)
+	}
+	if _, found, _ := repo.ActiveCard(ctx, pupil.ID()); found {
+		t.Error("a card born revoked is active")
+	}
+	if ever, err := repo.EverIssued(ctx, pupil.ID()); err != nil || !ever {
+		t.Errorf("EverIssued = %v (%v), want true", ever, err)
+	}
+}

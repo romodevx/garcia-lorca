@@ -121,7 +121,29 @@ func (s *CardService) RevokeCard(ctx context.Context, studentID string) error {
 	if _, err := s.pupils.FindByID(ctx, studentID); err != nil {
 		return err
 	}
+	issuedBefore, err := s.cards.EverIssued(ctx, studentID)
+	if err != nil {
+		return err
+	}
+	if !issuedBefore {
+		// No card yet (the family never opened it): a revoked one is stored,
+		// so the suspension holds and the lost phone's first view gets no code.
+		return s.suspendUnissued(ctx, studentID)
+	}
 	return s.cards.RevokeCards(ctx, studentID, s.now())
+}
+
+// suspendUnissued records a card that is born revoked.
+func (s *CardService) suspendUnissued(ctx context.Context, studentID string) error {
+	random, err := s.random()
+	if err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "minting a card code", err)
+	}
+	card, err := domain.NewCardToken(s.newID(), s.tenant, studentID, random, s.now())
+	if err != nil {
+		return err
+	}
+	return s.cards.SaveCard(ctx, card.Revoke(s.now()))
 }
 
 // VerifyCard reads a scanned code: KindInvalid when it is not a card code,
