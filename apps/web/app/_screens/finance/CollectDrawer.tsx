@@ -489,7 +489,7 @@ function Receipt({ result, describe, onClose }: { result: DepositResult; describ
             {formatCents(result.deposit.amountCents)}
           </div>
           <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 8 }}>
-            Folio {folio(result.deposit.id)}
+            Folio {result.deposit.folio ?? idTail(result.deposit.id)}
             {result.replayed && " · ya estaba registrado, no se cobró de nuevo"}
           </p>
         </div>
@@ -516,7 +516,10 @@ function Receipt({ result, describe, onClose }: { result: DepositResult; describ
   );
 }
 
-/** A folio a person can read aloud: the tail of the deposit id, uppercased. */
-function folio(id: string): string {
+/**
+ * The deposit's id, shortened, for a deposit that reached the screen without a
+ * folio (a gateway older than task 12). Every stored deposit has one.
+ */
+function idTail(id: string): string {
   return id.replace(/-/g, "").slice(-8).toUpperCase();
 }

@@ -428,6 +428,7 @@ func toProtoDeposit(d domain.Deposit) *financev1.Deposit {
 		VoidReason:      d.VoidReason(),
 		ReceivedBy:      d.ReceivedBy().UserID,
 		ReceivedByName:  d.ReceivedBy().Name,
+		Folio:           d.Folio(),
 	}
 	if d.Voided() {
 		out.VoidedAt = timestamppb.New(d.VoidedAt())

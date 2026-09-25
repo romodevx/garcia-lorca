@@ -152,6 +152,8 @@ type depositModel struct {
 	ReceivedBy     *string   `gorm:"column:received_by"`
 	ReceivedByName string    `gorm:"column:received_by_name"`
 	CreatedAt      time.Time `gorm:"column:created_at"`
+	// Folio is the receipt number (task 12, migration 0018).
+	Folio string `gorm:"column:folio"`
 }
 
 func (depositModel) TableName() string { return "deposits" }

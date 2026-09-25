@@ -5,6 +5,8 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"regexp"
+	"strconv"
 	"testing"
 	"time"
 
@@ -613,4 +615,58 @@ func TestVoidingADepositCancelsTheSurchargeItWrote(t *testing.T) {
 	if reopened.Charge.Status() != domain.StatusPending {
 		t.Errorf("month after the void is %s, want pending", reopened.Charge.Status())
 	}
+}
+
+// Task 12: every deposit gets a folio the receipt prints — P-<year>-<six
+// digits>, one run per school and year, allocated in the deposit's own
+// transaction. The year is the capture's, as created_at records it.
+func TestDepositsGetAFolioPerSchool(t *testing.T) {
+	ctx := context.Background()
+	empty := func([]ports.ChargeWithPaid) (ports.DepositWrite, error) { return ports.DepositWrite{}, nil }
+	paidOn := time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)
+
+	repoA := appRepo(t, tenantA)
+	first, _, err := repoA.RegisterDeposit(ctx, newDeposit(t, "62000000-0000-0000-0000-0000000000c1", tenantA,
+		"80000000-0000-0000-0000-0000000000c1", 100, paidOn, ""), empty, nil)
+	if err != nil {
+		t.Fatalf("first deposit: %v", err)
+	}
+	second, _, err := repoA.RegisterDeposit(ctx, newDeposit(t, "62000000-0000-0000-0000-0000000000c2", tenantA,
+		"80000000-0000-0000-0000-0000000000c1", 100, paidOn, ""), empty, nil)
+	if err != nil {
+		t.Fatalf("second deposit: %v", err)
+	}
+	f1, f2 := first.Deposit.Folio(), second.Deposit.Folio()
+	if !regexp.MustCompile(`^P-[0-9]{4}-[0-9]{6}$`).MatchString(f1) {
+		t.Fatalf("folio %q is not P-YYYY-NNNNNN", f1)
+	}
+	if seqOf(t, f2) != seqOf(t, f1)+1 || f1[:6] != f2[:6] {
+		t.Errorf("folios %q then %q; want the next number of the same year", f1, f2)
+	}
+	stored, err := repoA.GetDeposit(ctx, first.Deposit.ID())
+	if err != nil {
+		t.Fatalf("GetDeposit: %v", err)
+	}
+	if stored.Folio() != f1 {
+		t.Errorf("read back %q, want %q", stored.Folio(), f1)
+	}
+
+	// Another school keeps its own run: its first deposit is number 1.
+	other, _, err := appRepo(t, tenantB).RegisterDeposit(ctx, newDeposit(t, "62000000-0000-0000-0000-0000000000c3", tenantB,
+		"80000000-0000-0000-0000-0000000000c3", 100, paidOn, ""), empty, nil)
+	if err != nil {
+		t.Fatalf("tenant B deposit: %v", err)
+	}
+	if seqOf(t, other.Deposit.Folio()) != 1 {
+		t.Errorf("tenant B's first folio = %q, want number 1 of its own run", other.Deposit.Folio())
+	}
+}
+
+func seqOf(t *testing.T, folio string) int {
+	t.Helper()
+	n, err := strconv.Atoi(folio[len(folio)-6:])
+	if err != nil {
+		t.Fatalf("folio %q: %v", folio, err)
+	}
+	return n
 }

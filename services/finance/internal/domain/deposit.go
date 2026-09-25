@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -38,7 +39,22 @@ type Deposit struct {
 	cardType        string
 	receivedBy      Receiver
 	capturedAt      time.Time
+	// folio is the number the receipt prints (task 12): P-<year>-<six digits>,
+	// one run per school and year, allocated when the deposit is stored.
+	folio string
 }
+
+// FormatDepositFolio renders a deposit's receipt number.
+func FormatDepositFolio(year, seq int) string { return fmt.Sprintf("P-%04d-%06d", year, seq) }
+
+// WithFolio returns the deposit carrying its receipt number.
+func (d Deposit) WithFolio(folio string) Deposit {
+	d.folio = folio
+	return d
+}
+
+// Folio is the receipt number; empty until the deposit is stored.
+func (d Deposit) Folio() string { return d.folio }
 
 // Receiver is who took the money at the counter: the account, and its name as
 // it read then (task 7). Empty on deposits captured before it was recorded.

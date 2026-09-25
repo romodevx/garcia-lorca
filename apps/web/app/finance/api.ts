@@ -116,6 +116,8 @@ export interface Deposit {
   cardType?: CardType;
   voidedAt?: string;
   voidReason?: string;
+  /** The receipt number, P-<year>-<six digits> (task 12). */
+  folio?: string;
   /** Who took the money, as the name read then (task 7). Absent on older deposits. */
   receivedByName?: string;
   /** When it was keyed; a later day than paidAt means it was captured late. */
@@ -718,6 +720,7 @@ function toDeposit(d: Wire<Deposit, "method">): Deposit {
     // "capturado el …" mark reads these.
     ...(d.receivedByName !== undefined && d.receivedByName !== "" ? { receivedByName: d.receivedByName } : {}),
     ...(d.capturedAt !== undefined && d.capturedAt !== "" ? { capturedAt: d.capturedAt } : {}),
+    ...(d.folio !== undefined && d.folio !== "" ? { folio: d.folio } : {}),
   };
 }
 

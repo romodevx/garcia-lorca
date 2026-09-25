@@ -1084,6 +1084,11 @@ func (r *Repository) RegisterDeposit(
 			return err
 		}
 
+		folio, err := r.nextDepositFolio(tx)
+		if err != nil {
+			return err
+		}
+		d = d.WithFolio(folio)
 		row := fromDomainDeposit(d)
 		if err := tx.Create(&row).Error; err != nil {
 			if isUniqueViolation(err) {
@@ -1290,6 +1295,25 @@ func cancelUnpaidSurchargesOf(tx *gorm.DB, studentID, depositID string) error {
 		}
 	}
 	return nil
+}
+
+// nextDepositFolio allocates the school's next receipt number for the year of
+// this transaction — the instant created_at records — under the counter row's
+// own lock (migration 0018). Per school: a SEQUENCE would share one run.
+func (r *Repository) nextDepositFolio(tx *gorm.DB) (string, error) {
+	var got struct {
+		Year int
+		Seq  int
+	}
+	err := tx.Raw(`INSERT INTO deposit_folio_counters (tenant_id, year, next_seq)
+	               VALUES (?, EXTRACT(YEAR FROM now() AT TIME ZONE 'UTC')::int, 2)
+	               ON CONFLICT (tenant_id, year)
+	               DO UPDATE SET next_seq = deposit_folio_counters.next_seq + 1
+	               RETURNING year, next_seq - 1 AS seq`, r.tenantID).Scan(&got).Error
+	if err != nil {
+		return "", glerrors.Wrap(glerrors.KindInternal, "allocating a deposit folio", err)
+	}
+	return domain.FormatDepositFolio(got.Year, got.Seq), nil
 }
 
 // depositByIdempotencyKey finds a deposit already stored under key. An empty key

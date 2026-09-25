@@ -686,6 +686,8 @@ message Deposit {
   // When the deposit was keyed, which is not paid_at when a payment is
   // captured late.
   google.protobuf.Timestamp captured_at = 13;
+  // folio is the receipt number, P-<year>-<six digits> (task 12).
+  string folio = 14;
 }
 
 message RegisterDepositRequest {

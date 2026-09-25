@@ -307,6 +307,8 @@ type Deposit struct {
 	// from before it was recorded.
 	ReceivedByName string `json:"receivedByName,omitempty"`
 	CapturedAt     string `json:"capturedAt,omitempty"`
+	// Folio is the receipt number, P-<year>-<six digits> (task 12).
+	Folio string `json:"folio,omitempty"`
 }
 
 // DepositResult is what the money did, in the shape a receipt needs.
@@ -524,6 +526,7 @@ func toDeposit(d *financev1.Deposit) Deposit {
 		CardType:        d.GetCardType(),
 		VoidReason:      d.GetVoidReason(),
 		ReceivedByName:  d.GetReceivedByName(),
+		Folio:           d.GetFolio(),
 	}
 	if d.GetCapturedAt() != nil {
 		out.CapturedAt = d.GetCapturedAt().AsTime().Format(time.RFC3339)

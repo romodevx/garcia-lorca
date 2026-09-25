@@ -102,6 +102,25 @@ describe("CollectDrawer", () => {
     expect(screen.queryByLabelText("Aplicar pronto pago")).toBeNull();
   });
 
+  // Task 12: the receipt says the deposit's folio, the one the printed
+  // receipt and the PDF carry — not a slice of its id.
+  it("shows the deposit's folio on the receipt", async () => {
+    const user = userEvent.setup();
+    finance.registerDeposit.mockResolvedValue({
+      deposit: {
+        id: "0c4a4943-0000-0000-0000-000000000001", studentId: "s1", amountCents: 310000, method: "cash", reference: "",
+        paidAt: "2026-09-20T00:00:00Z", calendarVersion: "abc", folio: "P-2026-000042",
+      },
+      allocations: [], surcharges: [], unallocatedCents: 0, replayed: false,
+    });
+    render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} />);
+    await screen.findByTestId("amount-expected");
+
+    await user.click(screen.getByRole("button", { name: /Cobrar/ }));
+
+    expect(await screen.findByText(/P-2026-000042/)).toBeInTheDocument();
+  });
+
   // One field. The cashier types what was handed over and the system says what
   // it covers — that is the whole interaction the school asked for.
   it("shows what the typed amount would cover, before anything is taken", async () => {
