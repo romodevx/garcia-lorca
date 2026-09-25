@@ -1130,3 +1130,48 @@ func TestRescheduleUnpaidCannotReachAnotherTenant(t *testing.T) {
 		t.Errorf("the deadline moved to %s", got.Charge.DueDate().Format("2006-01-02"))
 	}
 }
+
+// Task 10: a uniform sold to a pupil not yet placed in a group is charged with
+// no cycle. It is stored, read back and listed with the pupil's charges; a row
+// with no cycle AND no ref is refused by the table itself.
+func TestASaleChargeWithoutACycle(t *testing.T) {
+	ctx := context.Background()
+	const (
+		conceptID = "c0000000-0000-0000-0000-00000000ab10"
+		studentID = "50000000-0000-0000-0000-00000000ab10"
+		chargeID  = "d0000000-0000-0000-0000-00000000ab10"
+	)
+	repo := appRepo(t, tenantA)
+	if _, err := repo.CreateConcept(ctx, newConcept(t, conceptID, tenantA, "uniformes sin ciclo", 45000)); err != nil {
+		t.Fatalf("seed concept: %v", err)
+	}
+	sale, err := domain.NewSaleCharge(chargeID, tenantA, studentID, conceptID, "Uniformes · U-2026-000010", 45000, today, "uniforms:ful-nocycle")
+	if err != nil {
+		t.Fatalf("NewSaleCharge: %v", err)
+	}
+	if _, err := repo.CreateCharge(ctx, sale); err != nil {
+		t.Fatalf("CreateCharge: %v", err)
+	}
+
+	got, err := repo.GetCharge(ctx, chargeID)
+	if err != nil {
+		t.Fatalf("GetCharge: %v", err)
+	}
+	if got.Charge.CycleID() != "" || got.Charge.ExternalRef() != "uniforms:ful-nocycle" {
+		t.Errorf("read back: cycle %q, ref %q; want none and the sale's ref", got.Charge.CycleID(), got.Charge.ExternalRef())
+	}
+	listed, err := repo.ListCharges(ctx, studentID, "")
+	if err != nil {
+		t.Fatalf("ListCharges: %v", err)
+	}
+	if len(listed) != 1 {
+		t.Errorf("the pupil's charges = %d, want the sale", len(listed))
+	}
+
+	err = superDB.Exec(`INSERT INTO charges (id, tenant_id, student_id, cycle_id, concept_id, description, amount_cents, due_date, status)
+		VALUES ('d0000000-0000-0000-0000-00000000ab11', ?, ?, NULL, ?, 'sin ciclo ni ref', 100, ?, 'pending')`,
+		tenantA, studentID, conceptID, today).Error
+	if err == nil {
+		t.Error("a charge with no cycle and no ref was stored; want the table to refuse it")
+	}
+}

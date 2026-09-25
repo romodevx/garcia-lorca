@@ -270,6 +270,31 @@ func TestCounterSaleWritesTheLedger(t *testing.T) {
 	}
 }
 
+// Task 10: a pupil registered but not yet placed in a group buys at the counter.
+// The order names the pupil and no cycle, and reads back that way.
+func TestCounterSaleToAPupilWithNoCycle(t *testing.T) {
+	ctx := context.Background()
+	repo := appRepo(t, tenantA)
+	item, _ := seedGarment(t, repo, "NOCY-1", "8", 32000, 5)
+
+	cmd := saleCmd(t, item, "8", 1, "key-nocycle")
+	cmd.StudentID, cmd.StudentName = newUUID(t), "Zoe Villalobos"
+	saved, _, err := repo.CounterSale(ctx, cmd)
+	if err != nil {
+		t.Fatalf("CounterSale to a pupil with no cycle: %v", err)
+	}
+	if saved.Order.StudentID() != cmd.StudentID || saved.Order.CycleID() != "" {
+		t.Errorf("order = student %q, cycle %q; want the pupil and no cycle", saved.Order.StudentID(), saved.Order.CycleID())
+	}
+
+	// A family order still names its cycle: the table refuses a child's order
+	// with none that did not come from the counter.
+	err = superDB.Exec(`UPDATE uniform_orders SET source = 'family' WHERE id = ?`, saved.Order.ID()).Error
+	if err == nil {
+		t.Error("a family order with a pupil and no cycle was stored; want the table to refuse it")
+	}
+}
+
 // --- FIFO allocation ---------------------------------------------------------
 
 // TestReceiveStockAllocatesOldestFirst is the shop's fairness rule. A family who

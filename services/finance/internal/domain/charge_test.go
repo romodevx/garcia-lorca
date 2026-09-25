@@ -322,3 +322,26 @@ func TestRemovingADiscountClearsItsReason(t *testing.T) {
 		t.Errorf("reason = %q after removing the discount, want empty", cleared.DiscountReason())
 	}
 }
+
+// Task 10: a sale to a pupil registered but not yet placed in a group (a
+// uniform at the counter) has no cycle to name. It may be charged without one,
+// but only as another module's sale: the ref is what it answers to.
+func TestNewSaleChargeNeedsNoCycleButARef(t *testing.T) {
+	c, err := domain.NewSaleCharge("ch-9", "t1", "stu-1", "cc-1", "Uniformes · U-2026-000001", 45000, dueDate, "uniforms:f-1")
+	if err != nil {
+		t.Fatalf("NewSaleCharge: %v", err)
+	}
+	if c.CycleID() != "" || c.ExternalRef() != "uniforms:f-1" || c.Status() != domain.StatusPending {
+		t.Errorf("sale charge = cycle %q, ref %q, %s; want no cycle, the ref, pending", c.CycleID(), c.ExternalRef(), c.Status())
+	}
+
+	if _, err := domain.NewSaleCharge("ch-9", "t1", "stu-1", "cc-1", "Uniformes", 45000, dueDate, " "); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("a sale charge with no ref: err = %v, want KindInvalid", err)
+	}
+	if _, err := domain.NewSaleCharge("ch-9", "t1", "", "cc-1", "Uniformes", 45000, dueDate, "uniforms:f-1"); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("a sale charge with no student: err = %v, want KindInvalid", err)
+	}
+	if _, err := domain.NewCharge("ch-9", "t1", "stu-1", "", "cc-1", "Colegiatura", 45000, 0, dueDate); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("NewCharge still requires a cycle: err = %v", err)
+	}
+}

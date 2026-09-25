@@ -919,6 +919,32 @@ func TestCreateChargeWithoutExternalRefStaysKeyless(t *testing.T) {
 	}
 }
 
+// Task 10: a pupil registered but not yet placed in a group buys a uniform. The
+// sale is charged to the pupil with no cycle, answering to its ref; the school's
+// own charges (no ref) still need a cycle.
+func TestCreateChargeWithoutACycleOnlyForASale(t *testing.T) {
+	f := newFixture(t)
+	concept := f.seedConcept(t, "Uniformes", 45000)
+
+	got, err := f.svc.CreateCharge(context.Background(), usecase.CreateChargeInput{
+		StudentID: testStudent, ConceptID: concept.ID(), DueDate: testDueDate,
+		ExternalRef: "uniforms:ful-43",
+	})
+	if err != nil {
+		t.Fatalf("CreateCharge for a pupil with no cycle: %v", err)
+	}
+	if got.Charge.CycleID() != "" || got.Charge.ExternalRef() != "uniforms:ful-43" {
+		t.Errorf("charge = cycle %q, ref %q; want no cycle and the sale's ref", got.Charge.CycleID(), got.Charge.ExternalRef())
+	}
+
+	_, err = f.svc.CreateCharge(context.Background(), usecase.CreateChargeInput{
+		StudentID: testStudent, ConceptID: concept.ID(), DueDate: testDueDate,
+	})
+	if glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("a school charge with no cycle: err = %v, want KindInvalid", err)
+	}
+}
+
 // TestCancelChargeIfUnpaidDelegatesToRepo proves the use case hands the decision
 // to the repository, where it can be made under the charge's row lock. Deciding
 // it here — read, then write — would reopen the very race it exists to close.

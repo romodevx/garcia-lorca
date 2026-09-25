@@ -61,6 +61,26 @@ type Charge struct {
 // non-negative, and the discount may not exceed the amount. Every failure is
 // KindInvalid.
 func NewCharge(id, tenantID, studentID, cycleID, conceptID, description string, amountCents, discountCents int64, dueDate time.Time) (Charge, error) {
+	if strings.TrimSpace(cycleID) == "" {
+		return Charge{}, glerrors.New(glerrors.KindInvalid, "cycle id is required")
+	}
+	return newCharge(id, tenantID, studentID, cycleID, conceptID, description, amountCents, discountCents, dueDate)
+}
+
+// NewSaleCharge builds a charge for another module's sale to a pupil who has no
+// cycle yet: registered, not yet placed in a group (task 10). It names no cycle,
+// so it answers to the external ref instead, which is required. A charge with
+// neither would be a debt nothing could explain.
+func NewSaleCharge(id, tenantID, studentID, conceptID, description string, amountCents int64, dueDate time.Time, externalRef string) (Charge, error) {
+	c, err := newCharge(id, tenantID, studentID, "", conceptID, description, amountCents, 0, dueDate)
+	if err != nil {
+		return Charge{}, err
+	}
+	return c.WithExternalRef(externalRef)
+}
+
+// newCharge validates everything but the cycle, which its callers decide on.
+func newCharge(id, tenantID, studentID, cycleID, conceptID, description string, amountCents, discountCents int64, dueDate time.Time) (Charge, error) {
 	if strings.TrimSpace(id) == "" {
 		return Charge{}, glerrors.New(glerrors.KindInvalid, "charge id is required")
 	}
@@ -69,9 +89,6 @@ func NewCharge(id, tenantID, studentID, cycleID, conceptID, description string, 
 	}
 	if strings.TrimSpace(studentID) == "" {
 		return Charge{}, glerrors.New(glerrors.KindInvalid, "student id is required")
-	}
-	if strings.TrimSpace(cycleID) == "" {
-		return Charge{}, glerrors.New(glerrors.KindInvalid, "cycle id is required")
 	}
 	if strings.TrimSpace(conceptID) == "" {
 		return Charge{}, glerrors.New(glerrors.KindInvalid, "charge concept id is required")

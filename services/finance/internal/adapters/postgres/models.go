@@ -80,14 +80,16 @@ func (tuitionPlanModel) TableName() string { return "tuition_plans" }
 // date part is meaningful. Status is a cached projection of the payments posted
 // against the charge (plus the terminal cancelled state).
 type chargeModel struct {
-	ID            string `gorm:"column:id;primaryKey"`
-	TenantID      string `gorm:"column:tenant_id"`
-	StudentID     string `gorm:"column:student_id"`
-	CycleID       string `gorm:"column:cycle_id"`
-	ConceptID     string `gorm:"column:concept_id"`
-	Description   string `gorm:"column:description"`
-	AmountCents   int64  `gorm:"column:amount_cents"`
-	DiscountCents int64  `gorm:"column:discount_cents"`
+	ID        string `gorm:"column:id;primaryKey"`
+	TenantID  string `gorm:"column:tenant_id"`
+	StudentID string `gorm:"column:student_id"`
+	// CycleID is nil for a sale to a pupil with no cycle yet (migration 0017),
+	// which then answers to ExternalRef.
+	CycleID       *string `gorm:"column:cycle_id"`
+	ConceptID     string  `gorm:"column:concept_id"`
+	Description   string  `gorm:"column:description"`
+	AmountCents   int64   `gorm:"column:amount_cents"`
+	DiscountCents int64   `gorm:"column:discount_cents"`
 	// Why the discount exists. Empty on the ones given before there was
 	// anywhere to record it, which is the truth about them.
 	DiscountReason string    `gorm:"column:discount_reason"`

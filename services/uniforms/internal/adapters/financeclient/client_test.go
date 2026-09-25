@@ -48,6 +48,12 @@ func (s *stubFinance) CreateConcept(_ context.Context, req *connect.Request[fina
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.createConceptCalls++
+	// What the real ledger does: it knows two recurrences and refuses the rest.
+	// A stub that took anything is how "one_off" shipped and no counter sale
+	// could reach finance on a school without the concept (task 10).
+	if r := req.Msg.GetRecurrence(); r != "once" && r != "monthly" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("unknown recurrence "+r))
+	}
 	for _, c := range s.concepts {
 		if c.GetName() == req.Msg.GetName() {
 			// What the real ledger does: a name is unique per school.

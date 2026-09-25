@@ -91,8 +91,10 @@ func NewOrder(id, tenantID, folio string, student OrderStudent, source OrderSour
 		}
 		student = OrderStudent{}
 	} else {
-		// A charge has to belong to a school year, so a named pupil brings one.
-		if strings.TrimSpace(student.CycleID) == "" {
+		// A charge has to belong to a school year, so a named pupil brings one —
+		// except at the counter, which sells to pupils registered but not yet
+		// placed in a group (task 10): finance charges those with no cycle.
+		if strings.TrimSpace(student.CycleID) == "" && source != SourceCounter {
 			return Order{}, glerrors.New(glerrors.KindInvalid, "an order for a student needs the cycle it belongs to")
 		}
 		name := strings.TrimSpace(student.FullName)

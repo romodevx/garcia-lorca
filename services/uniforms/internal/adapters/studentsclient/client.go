@@ -102,10 +102,11 @@ func fullName(first, last string) string {
 }
 
 var admissionStatuses = map[studentsv1.AdmissionStatus]string{
-	studentsv1.AdmissionStatus_ADMISSION_STATUS_PENDING:  "pending",
-	studentsv1.AdmissionStatus_ADMISSION_STATUS_ACCEPTED: "accepted",
-	studentsv1.AdmissionStatus_ADMISSION_STATUS_REJECTED: "rejected",
-	studentsv1.AdmissionStatus_ADMISSION_STATUS_ENROLLED: "enrolled",
+	studentsv1.AdmissionStatus_ADMISSION_STATUS_PENDING:   "pending",
+	studentsv1.AdmissionStatus_ADMISSION_STATUS_ACCEPTED:  "accepted",
+	studentsv1.AdmissionStatus_ADMISSION_STATUS_REJECTED:  "rejected",
+	studentsv1.AdmissionStatus_ADMISSION_STATUS_ENROLLED:  "enrolled",
+	studentsv1.AdmissionStatus_ADMISSION_STATUS_WITHDRAWN: "withdrawn",
 }
 
 func admissionStatus(s studentsv1.AdmissionStatus) string { return admissionStatuses[s] }
