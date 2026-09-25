@@ -117,6 +117,9 @@ service FinanceService {
   // VoidDeposit cancels a deposit and releases what it settled. The row stays,
   // with its reason: a school that deletes money rows cannot explain its ledger.
   rpc VoidDeposit(VoidDepositRequest) returns (VoidDepositResponse);
+  // GetDepositReceipt returns a deposit and what it paid, concept by concept,
+  // for its receipt (task 12). A voided deposit comes back with no lines.
+  rpc GetDepositReceipt(GetDepositReceiptRequest) returns (GetDepositReceiptResponse);
 
   // --- tuition (M15: what each level costs, and the monthly run) ---
   // UpsertTuitionPlan sets (or replaces) the tuition table for one level of one
@@ -846,4 +849,27 @@ message DrainOutboxRequest {
 // answer: the payment path drains its own events.
 message DrainOutboxResponse {
   int32 published = 1;
+}
+
+message GetDepositReceiptRequest {
+  string deposit_id = 1;
+}
+
+// ReceiptLine is one concept a deposit paid.
+message ReceiptLine {
+  string charge_id = 1;
+  string description = 2;
+  // amount_cents is what THIS deposit put on the charge.
+  int64 amount_cents = 3;
+  // surcharge marks a late fee, printed as such.
+  bool surcharge = 4;
+  // discount_cents is the charge's discount (pronto pago, beca), shown beside it.
+  int64 discount_cents = 5;
+}
+
+message GetDepositReceiptResponse {
+  Deposit deposit = 1;
+  repeated ReceiptLine lines = 2;
+  // unallocated_cents is what no charge claimed: the family's credit.
+  int64 unallocated_cents = 3;
 }

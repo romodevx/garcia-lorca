@@ -670,3 +670,52 @@ func seqOf(t *testing.T, folio string) int {
 	}
 	return n
 }
+
+// Task 12: a deposit read back for its receipt — what it put on each charge, the
+// late fee marked as such, the discount beside its month, and the credit left.
+func TestDepositReceiptReadsWhatTheMoneyPaid(t *testing.T) {
+	ctx := context.Background()
+	tenant, student := tenantA, "80000000-0000-0000-0000-0000000000d1"
+	due := time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)
+	month := seedConceptAndCharge(t, tenant, "60000000-0000-0000-0000-0000000000d1", "colegiatura recibo",
+		"61000000-0000-0000-0000-0000000000d1", student, "70000000-0000-0000-0000-0000000000d1", 320000, 10000, due)
+	fee := newCharge(t, "63000000-0000-0000-0000-0000000000d1", tenant, student,
+		"70000000-0000-0000-0000-0000000000d1", "60000000-0000-0000-0000-0000000000d1", 30000, 0, due)
+	paidOn := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
+	deposit := newDeposit(t, "62000000-0000-0000-0000-0000000000d1", tenant, student, 350000, paidOn, "")
+	fee, err := fee.WithExternalRef("dailyfee:" + month.ID() + ":" + deposit.ID())
+	if err != nil {
+		t.Fatalf("WithExternalRef: %v", err)
+	}
+	repo := appRepo(t, tenant)
+	if _, _, err := repo.RegisterDeposit(ctx, deposit, func([]ports.ChargeWithPaid) (ports.DepositWrite, error) {
+		return ports.DepositWrite{
+			Surcharges: []domain.Charge{fee},
+			Allocations: []domain.Payment{
+				newPayment(t, "90000000-0000-0000-0000-0000000000d1", tenant, month.ID(), 310000, paidOn),
+				newPayment(t, "90000000-0000-0000-0000-0000000000d2", tenant, fee.ID(), 30000, paidOn),
+			},
+			UnallocatedCents: 10000,
+		}, nil
+	}, nil); err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+
+	got, err := repo.DepositReceipt(ctx, deposit.ID())
+	if err != nil {
+		t.Fatalf("DepositReceipt: %v", err)
+	}
+	if got.Deposit.Folio() == "" || len(got.Lines) != 2 || got.UnallocatedCents != 10000 {
+		t.Fatalf("receipt = folio %q, %d lines, credit %d; want a folio, 2 lines, 10000", got.Deposit.Folio(), len(got.Lines), got.UnallocatedCents)
+	}
+	byCharge := map[string]ports.ReceiptLine{}
+	for _, l := range got.Lines {
+		byCharge[l.ChargeID] = l
+	}
+	if l := byCharge[month.ID()]; l.AmountCents != 310000 || l.Surcharge || l.DiscountCents != 10000 || l.Description == "" {
+		t.Errorf("month line = %+v; want 310000, not a surcharge, 10000 discount, its description", l)
+	}
+	if l := byCharge[fee.ID()]; l.AmountCents != 30000 || !l.Surcharge {
+		t.Errorf("fee line = %+v; want 30000 marked as a surcharge", l)
+	}
+}

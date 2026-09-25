@@ -527,6 +527,14 @@ func (s *FinanceService) DailyCashUp(ctx context.Context, day time.Time) (CashUp
 }
 
 // ListDeposits returns a student's deposits, newest first.
+// DepositReceipt returns a deposit and what it paid, for its receipt (task 12).
+func (s *FinanceService) DepositReceipt(ctx context.Context, id string) (ports.DepositReceipt, error) {
+	if strings.TrimSpace(id) == "" {
+		return ports.DepositReceipt{}, glerrors.New(glerrors.KindInvalid, "deposit id is required")
+	}
+	return s.repo.DepositReceipt(ctx, id)
+}
+
 func (s *FinanceService) ListDeposits(ctx context.Context, studentID string) ([]domain.Deposit, error) {
 	return s.repo.ListDeposits(ctx, studentID)
 }

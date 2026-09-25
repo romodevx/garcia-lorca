@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -1359,6 +1360,65 @@ func rebuildDepositRecord(tx *gorm.DB, d domain.Deposit) (ports.DepositRecord, e
 		Allocations:      allocations,
 		UnallocatedCents: d.Amount().Int64() - allocated,
 	}, nil
+}
+
+// DepositReceipt reads a deposit and what it paid, concept by concept (task
+// 12). One join: each payment of the deposit with its charge and the charge's
+// concept, whose kind says a hand-typed late fee; the ref says the daily and
+// monthly ones. A voided deposit has no payments left, so no lines.
+func (r *Repository) DepositReceipt(ctx context.Context, id string) (ports.DepositReceipt, error) {
+	var out ports.DepositReceipt
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var m depositModel
+		if err := tx.Where("id = ?", id).First(&m).Error; err != nil {
+			return translateFindErr(err)
+		}
+		d, err := toDomainDeposit(m)
+		if err != nil {
+			return err
+		}
+		var rows []struct {
+			ChargeID      string
+			Description   string
+			AmountCents   int64
+			ExternalRef   string
+			Kind          string
+			DiscountCents int64
+		}
+		if err := tx.Raw(`SELECT p.charge_id, c.description, p.amount_cents, c.external_ref,
+		                         cc.kind, c.discount_cents
+		                    FROM payments p
+		                    JOIN charges c ON c.id = p.charge_id
+		                    JOIN charge_concepts cc ON cc.id = c.concept_id
+		                   WHERE p.deposit_id = ?
+		                   ORDER BY c.due_date, p.id`, id).Scan(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "reading the deposit's receipt", err)
+		}
+		out = ports.DepositReceipt{Deposit: d, Lines: make([]ports.ReceiptLine, 0, len(rows))}
+		var allocated int64
+		for _, row := range rows {
+			out.Lines = append(out.Lines, ports.ReceiptLine{
+				ChargeID: row.ChargeID, Description: row.Description, AmountCents: row.AmountCents,
+				Surcharge:     row.Kind == domain.KindLateFee || isFeeRef(row.ExternalRef),
+				DiscountCents: row.DiscountCents,
+			})
+			allocated += row.AmountCents
+		}
+		if !d.Voided() {
+			out.UnallocatedCents = d.Amount().Int64() - allocated
+		}
+		return nil
+	})
+	if err != nil {
+		return ports.DepositReceipt{}, err
+	}
+	return out, nil
+}
+
+// isFeeRef reports whether a charge's ref names a late fee: daily (written by a
+// deposit) or monthly (issued by the billing run).
+func isFeeRef(ref string) bool {
+	return strings.HasPrefix(ref, "dailyfee:") || strings.HasPrefix(ref, "latefee:")
 }
 
 // UnallocatedCents is what a family has paid that no charge has claimed.

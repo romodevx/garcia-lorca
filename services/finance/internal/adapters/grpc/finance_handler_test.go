@@ -91,6 +91,7 @@ type fakeRepo struct {
 	charges  map[string]domain.Charge
 	payments map[string][]domain.Payment // keyed by charge id
 	plans    []domain.TuitionPlan
+	receipt  *ports.DepositReceipt
 }
 
 func newFakeRepo() *fakeRepo {
@@ -127,6 +128,13 @@ func (f *fakeRepo) UnallocatedCents(_ context.Context, _ string) (int64, error) 
 
 func (f *fakeRepo) IncomeLines(_ context.Context, _, _ time.Time) ([]ports.IncomeLine, error) {
 	return nil, nil
+}
+
+func (f *fakeRepo) DepositReceipt(_ context.Context, _ string) (ports.DepositReceipt, error) {
+	if f.receipt == nil {
+		return ports.DepositReceipt{}, glerrors.ErrNotFound
+	}
+	return *f.receipt, nil
 }
 
 func (f *fakeRepo) GetDeposit(_ context.Context, _ string) (domain.Deposit, error) {
@@ -841,4 +849,40 @@ func (fakeCatalog) ListLevels(_ context.Context) ([]ports.LevelRef, error) { ret
 
 func (fakeCatalog) GroupLevels(_ context.Context, _ string) ([]ports.GroupLevel, error) {
 	return nil, nil
+}
+
+// Task 12: a deposit's receipt over the wire — its folio, what each concept
+// got, the late fee marked, the credit left; an unknown deposit is NotFound.
+func TestGetDepositReceipt(t *testing.T) {
+	f := newFixture(t)
+	if _, err := f.h.GetDepositReceipt(context.Background(), connect.NewRequest(&financev1.GetDepositReceiptRequest{DepositId: "nope"})); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Errorf("unknown deposit: code = %v, want NotFound", connect.CodeOf(err))
+	}
+
+	d, err := domain.NewDeposit("dep-1", testTenant, "stu-1", 350000, domain.MethodCash, "", fixedNow, "", "cal")
+	if err != nil {
+		t.Fatalf("NewDeposit: %v", err)
+	}
+	f.repo.receipt = &ports.DepositReceipt{
+		Deposit: d.WithFolio("P-2026-000042"),
+		Lines: []ports.ReceiptLine{
+			{ChargeID: "ch-1", Description: "Colegiatura septiembre 2026", AmountCents: 310000, DiscountCents: 10000},
+			{ChargeID: "fee-1", Description: "Recargo · Colegiatura septiembre 2026", AmountCents: 30000, Surcharge: true},
+		},
+		UnallocatedCents: 10000,
+	}
+	res, err := f.h.GetDepositReceipt(context.Background(), connect.NewRequest(&financev1.GetDepositReceiptRequest{DepositId: "dep-1"}))
+	if err != nil {
+		t.Fatalf("GetDepositReceipt: %v", err)
+	}
+	got := res.Msg
+	if got.GetDeposit().GetFolio() != "P-2026-000042" || len(got.GetLines()) != 2 || got.GetUnallocatedCents() != 10000 {
+		t.Fatalf("receipt = %+v", got)
+	}
+	if l := got.GetLines()[1]; !l.GetSurcharge() || l.GetAmountCents() != 30000 {
+		t.Errorf("fee line = %+v, want the surcharge flag and 30000", l)
+	}
+	if l := got.GetLines()[0]; l.GetDiscountCents() != 10000 {
+		t.Errorf("month line = %+v, want its 10000 discount", l)
+	}
 }
