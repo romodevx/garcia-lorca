@@ -44,6 +44,17 @@ service StudentsService {
   rpc ListStudentNotes(ListStudentNotesRequest) returns (ListStudentNotesResponse);
   rpc VoidStudentNote(VoidStudentNoteRequest) returns (VoidStudentNoteResponse);
 
+  // --- virtual card (task 13) ---
+  // GetCardCode returns the code a pupil's card shows as a QR (GLCARD:<token>),
+  // issuing one the first time.
+  rpc GetCardCode(GetCardCodeRequest) returns (GetCardCodeResponse);
+  // RevokeCard retires a pupil's current code; the card shows a new one next.
+  rpc RevokeCard(RevokeCardRequest) returns (RevokeCardResponse);
+  // VerifyCard reads a scanned code: whose card it is, and whether it still
+  // counts (an active code of an enrolled pupil). An unknown code is NOT_FOUND;
+  // something that is not a card code, INVALID_ARGUMENT.
+  rpc VerifyCard(VerifyCardRequest) returns (VerifyCardResponse);
+
   // ListStudents lists students, optionally filtered by level/group/status.
   rpc ListStudents(ListStudentsRequest) returns (ListStudentsResponse);
 
@@ -583,3 +594,26 @@ message RemoveContactRequest {
 }
 
 message RemoveContactResponse {}
+
+message GetCardCodeRequest {
+  string student_id = 1;
+}
+
+message GetCardCodeResponse {
+  string code = 1;
+}
+
+message RevokeCardRequest {
+  string student_id = 1;
+}
+
+message RevokeCardResponse {}
+
+message VerifyCardRequest {
+  string code = 1;
+}
+
+message VerifyCardResponse {
+  Student student = 1;
+  bool valid = 2;
+}

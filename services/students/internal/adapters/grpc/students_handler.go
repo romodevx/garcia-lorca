@@ -29,6 +29,7 @@ type StudentsHandler struct {
 	guardian *usecase.GuardianService
 	health   *usecase.HealthService
 	notes    *usecase.NoteService
+	cards    *usecase.CardService
 }
 
 // NewStudentsHandler wires the handler to the student, enrollment, guardian, and
@@ -47,6 +48,14 @@ func NewStudentsHandler(
 func (h *StudentsHandler) WithNotes(notes *usecase.NoteService) *StudentsHandler {
 	cp := *h
 	cp.notes = notes
+	return &cp
+}
+
+// WithCards returns the handler serving the pupils' card codes through `cards`
+// (task 13). Without it the card RPCs answer Unimplemented.
+func (h *StudentsHandler) WithCards(cards *usecase.CardService) *StudentsHandler {
+	cp := *h
+	cp.cards = cards
 	return &cp
 }
 
