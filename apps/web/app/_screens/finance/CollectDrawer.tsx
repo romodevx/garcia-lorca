@@ -24,6 +24,7 @@ import {
 import { API_URL } from "../../api-url";
 import { localISODate, shortDayLabel } from "../../_lib/localDate";
 import { DebtList } from "./DebtList";
+import { ReceiptActions } from "../receipts/ReceiptActions";
 import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 
 /**
@@ -508,7 +509,7 @@ function Receipt({ result, describe, onClose }: { result: DepositResult; describ
         )}
       </div>
       <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "18px 26px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>
-        <Btn kind="ghost" type="button" onClick={() => window.print()}>Imprimir</Btn>
+        <ReceiptActions kind="payment" id={result.deposit.id} />
         <div style={{ flex: 1 }} />
         <Btn icon="check" type="button" onClick={onClose}>Listo</Btn>
       </div>

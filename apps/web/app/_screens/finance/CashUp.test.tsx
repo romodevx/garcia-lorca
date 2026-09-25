@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as financeApi from "../../finance/api";
@@ -83,6 +84,21 @@ describe("CashUpPanel", () => {
     expect(rows[1]).toHaveTextContent(/capturado el 13 oct/i);
     // A back-dated payment carries a day, not an hour: none is invented.
     expect(rows[1]).not.toHaveTextContent(/p\. ?m\.|a\. ?m\./i);
+  });
+
+  // Task 12: any payment of the day can be printed again.
+  it("reprints a payment's ticket", async () => {
+    finance.getCashUp.mockResolvedValue({
+      deposits: [{ ...deposit("d1", 320000, "cash"), folio: "P-2026-000042" }],
+      cancelled: [],
+      cashCents: 320000, cardCents: 0, transferCents: 0, totalCents: 320000,
+    } as unknown as financeApi.CashUp);
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    const user = userEvent.setup();
+    render(<CashUpPanel day="2026-10-10" />);
+
+    await user.click(await screen.findByRole("button", { name: "Reimprimir P-2026-000042" }));
+    expect(open).toHaveBeenCalledWith("/comprobantes/payment/d1?print=1", "_blank", "noopener");
   });
 
   it("names the day of a past cut, and invents no hour for a cancelled back-dated payment", async () => {

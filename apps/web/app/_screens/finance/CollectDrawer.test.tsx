@@ -119,6 +119,12 @@ describe("CollectDrawer", () => {
     await user.click(screen.getByRole("button", { name: /Cobrar/ }));
 
     expect(await screen.findByText(/P-2026-000042/)).toBeInTheDocument();
+
+    // The ticket prints on its own 80 mm page; the PDF downloads.
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    await user.click(screen.getByRole("button", { name: "Imprimir ticket" }));
+    expect(open).toHaveBeenCalledWith("/comprobantes/payment/0c4a4943-0000-0000-0000-000000000001?print=1", "_blank", "noopener");
+    expect(screen.getByRole("button", { name: "Descargar PDF" })).toBeInTheDocument();
   });
 
   // One field. The cashier types what was handed over and the system says what

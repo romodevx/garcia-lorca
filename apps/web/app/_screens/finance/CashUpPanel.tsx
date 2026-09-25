@@ -5,6 +5,7 @@ import { Icon } from "../../_design/Icon";
 import { getCashUp, type CashUp, type Deposit } from "../../finance/api";
 import { API_URL } from "../../api-url";
 import { localISODate, shortDayLabel } from "../../_lib/localDate";
+import { ticketPath } from "../../receipts/api";
 import { formatCents } from "../../_lib/money";
 
 export interface CashUpPanelProps {
@@ -87,7 +88,19 @@ export function CashUpPanel({ day }: CashUpPanelProps): ReactElement {
                   </span>
                 )}
               </span>
-              <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15.5, color: "var(--text)" }}>{formatCents(d.amountCents)}</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15.5, color: "var(--text)" }}>{formatCents(d.amountCents)}</span>
+                {/* Task 12: the ticket, printed again on its own 80 mm page. */}
+                <button
+                  type="button"
+                  aria-label={`Reimprimir ${d.folio ?? "comprobante"}`}
+                  title="Reimprimir comprobante"
+                  onClick={() => window.open(ticketPath("payment", d.id), "_blank", "noopener")}
+                  style={{ minWidth: 44, minHeight: 44, display: "grid", placeItems: "center", borderRadius: "var(--r-md)", color: "var(--text-muted)" }}
+                >
+                  <Icon name="documents" size={18} />
+                </button>
+              </span>
             </div>
           ))}
         </div>
