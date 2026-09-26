@@ -107,9 +107,13 @@ func TestTeachingAttendanceClasses(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
 	assert.Equal(t, []map[string]any{
-		{"groupId": "grp-prim", "groupLabel": "1° PRIMARIA · A", "levelName": "Primaria", "mode": "daily"},
 		{
-			"groupId": "grp-sec", "groupLabel": "1° SECUNDARIA · A", "levelName": "Secundaria", "mode": "per_class",
+			"groupId": "grp-prim", "groupLabel": "1° PRIMARIA · A", "groupName": "A", "gradeLevelName": "1° PRIMARIA",
+			"levelName": "Primaria", "mode": "daily",
+		},
+		{
+			"groupId": "grp-sec", "groupLabel": "1° SECUNDARIA · A", "groupName": "A", "gradeLevelName": "1° SECUNDARIA",
+			"levelName": "Secundaria", "mode": "per_class",
 			"subjectId": "sub-mat1", "subjectName": "Matemáticas I", "assignmentId": "asg-3",
 		},
 	}, out.Classes)

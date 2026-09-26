@@ -179,15 +179,19 @@ func (h *TeachingAttendanceHandler) Groups(w http.ResponseWriter, r *http.Reques
 
 // attendanceClassResponse is one pass list the caller takes: a DAILY group
 // (once, however many subjects the caller teaches there) or a PER_CLASS
-// assignment (group + subject).
+// assignment (group + subject). GradeLevelName and GroupName are groupLabel's
+// two halves, so a picker can tell two same-named subjects of different grades
+// apart ("MATEMÁTICAS · 1° SECUNDARIA" vs "· 2° SECUNDARIA").
 type attendanceClassResponse struct {
-	GroupID      string `json:"groupId"`
-	GroupLabel   string `json:"groupLabel"`
-	LevelName    string `json:"levelName"`
-	Mode         string `json:"mode"`
-	SubjectID    string `json:"subjectId,omitempty"`
-	SubjectName  string `json:"subjectName,omitempty"`
-	AssignmentID string `json:"assignmentId,omitempty"`
+	GroupID        string `json:"groupId"`
+	GroupLabel     string `json:"groupLabel"`
+	GroupName      string `json:"groupName"`
+	GradeLevelName string `json:"gradeLevelName,omitempty"`
+	LevelName      string `json:"levelName"`
+	Mode           string `json:"mode"`
+	SubjectID      string `json:"subjectId,omitempty"`
+	SubjectName    string `json:"subjectName,omitempty"`
+	AssignmentID   string `json:"assignmentId,omitempty"`
 }
 
 // Classes handles GET /api/v1/teaching/attendance/classes — the lists the CALLER
@@ -231,7 +235,10 @@ func classesFor(assignments []client.TeachingAssignment, catalog attendanceCatal
 		if !ok {
 			continue // a group the catalog no longer holds takes no list
 		}
-		class := attendanceClassResponse{GroupID: a.GroupID, GroupLabel: group.Label, LevelName: group.LevelName, Mode: group.Mode}
+		class := attendanceClassResponse{
+			GroupID: a.GroupID, GroupLabel: group.Label, GroupName: group.Name, GradeLevelName: group.GradeName,
+			LevelName: group.LevelName, Mode: group.Mode,
+		}
 		if group.Mode == attendanceModeDaily {
 			if seenDaily[a.GroupID] {
 				continue

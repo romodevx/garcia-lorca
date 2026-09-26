@@ -80,6 +80,8 @@ type listGroup struct {
 	Mode      string
 	Label     string // "1° SECUNDARIA · A"
 	LevelName string
+	GradeName string // "1° SECUNDARIA"; "" when the grade is unknown
+	Name      string // the group's own name, its letter: "A"
 }
 
 // loadAttendanceCatalog reads the catalog. Every read is a hard dependency: a
@@ -137,7 +139,7 @@ func (c attendanceCatalog) group(id string) (listGroup, bool) {
 	if grade.Name != "" {
 		label = grade.Name + groupLabelSeparator + g.Name
 	}
-	return listGroup{Mode: mode, Label: label, LevelName: level.Name}, true
+	return listGroup{Mode: mode, Label: label, LevelName: level.Name, GradeName: grade.Name, Name: g.Name}, true
 }
 
 // listModeRefusal is the 400 sentence for a subject that does not fit the

@@ -11,7 +11,7 @@ import {
 } from "../../teaching/api";
 import { ErrorAlert } from "../config/parts";
 import { TeachingPicker } from "../teaching/TeachingPicker";
-import { subjectLabel } from "../teaching/selection";
+import { groupLabel, subjectLabel } from "../teaching/selection";
 import { AttendanceHeader } from "./AttendanceHeader";
 import { toAttendanceOptions, type AttendanceOption } from "./attendanceOptions";
 import { PassSheet } from "./PassSheet";
@@ -25,7 +25,7 @@ export interface TeacherAttendanceProps {
 }
 
 const titleOf = (option: AttendanceOption): string =>
-  option.attendanceSubjectId !== undefined ? `${option.groupName} · ${subjectLabel(option)}` : option.groupName;
+  option.attendanceSubjectId !== undefined ? `${groupLabel(option)} · ${subjectLabel(option)}` : groupLabel(option);
 
 /**
  * Teacher-scoped pass list (module_attendance, `attendance_own:read/write`).

@@ -31,12 +31,23 @@ function dailyOption(cls: AttendanceClass, bySubject: boolean): AttendanceOption
     : { ...base, id: cls.groupId };
 }
 
+/**
+ * A per-class option carries its grade apart from the letter, so the subject
+ * step can tell "MATEMÁTICAS · 1° SECUNDARIA" from "· 2° SECUNDARIA". Without
+ * both halves (an older gateway) it falls back to the ready-made label.
+ */
+function groupParts(cls: AttendanceClass): Pick<AttendanceOption, "groupName" | "gradeLevelName"> {
+  const name = cls.groupName?.trim() ?? "";
+  const grade = cls.gradeLevelName?.trim() ?? "";
+  return name !== "" && grade !== "" ? { groupName: name, gradeLevelName: grade } : { groupName: cls.groupLabel };
+}
+
 function perClassOption(cls: AttendanceClass): AttendanceOption {
   const subjectId = cls.subjectId ?? "";
   return {
     id: cls.assignmentId ?? `${subjectId}:${cls.groupId}`,
     groupId: cls.groupId,
-    groupName: cls.groupLabel,
+    ...groupParts(cls),
     subjectId,
     subjectName: cls.subjectName,
     attendanceSubjectId: subjectId,

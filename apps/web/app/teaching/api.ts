@@ -170,6 +170,9 @@ export interface AttendanceClass {
   groupId: string;
   /** Ready to show: "1° SECUNDARIA · A". */
   groupLabel: string;
+  /** groupLabel's halves — the group's letter and its grade — when the gateway sends them. */
+  groupName?: string;
+  gradeLevelName?: string;
   levelName: string;
   mode: AttendanceMode;
   subjectId?: string;
