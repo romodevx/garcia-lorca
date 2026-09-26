@@ -256,6 +256,19 @@ describe("TeacherLoadScreen", () => {
     expect(screen.getByRole("checkbox", { name: "Todos los de Secundaria" })).not.toBeChecked();
   });
 
+  // QA 2026-09-25, ISSUE-004: a bulk call that only skipped (all already this
+  // teacher's) answered with silence.
+  it("says the groups were already assigned when the bulk result only skipped", async () => {
+    teachers.assignTeachingLoad.mockResolvedValueOnce({ ...emptyResult, skipped: [{ groupId: "s2A", subjectId: "mat-s2" }] });
+    const user = await renderPage();
+    await chooseSubject(user, "Matemáticas");
+
+    await user.click(screen.getByRole("checkbox", { name: "2° Secundaria · A" }));
+    await user.click(screen.getByRole("button", { name: "Asignar (1 grupo)" }));
+
+    expect(await screen.findByText("Esos grupos ya los tenía asignados.")).toBeInTheDocument();
+  });
+
   it("'Todos' leaves out a grade that lacks the subject", async () => {
     const user = await renderPage();
     await chooseSubject(user, "Física");

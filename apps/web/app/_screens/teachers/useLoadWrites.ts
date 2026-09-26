@@ -16,6 +16,8 @@ import type { NamedConflict } from "./ConflictNotice";
 /** The undo window for a freed class — at least eight seconds (ui-forms rules). */
 const UNDO_MS = 8000;
 const TOAST_MS = 2600;
+/** Said when the bulk call only skipped: every picked group was already the teacher's. */
+const ALREADY_ASSIGNED = "Esos grupos ya los tenía asignados.";
 
 export interface LoadWrites {
   /** Sends slots for the teacher; throws when the request itself failed. */
@@ -109,6 +111,7 @@ export function useLoadWrites({ teacherId, cycleId, catalogue, reload, drop }: L
       if (sentFor !== shownCycle.current) return;
       const done = result.created.length + result.reassigned.length;
       if (done > 0) say(assignedMessage(done));
+      else if (result.conflicts.length === 0 && result.skipped.length > 0) say(ALREADY_ASSIGNED);
       setRaw(result.conflicts);
       await reload().catch(() => setError("Se guardó, pero no pudimos releer la carga. Recarga la página."));
     },
