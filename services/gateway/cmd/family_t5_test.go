@@ -8,8 +8,17 @@ import (
 
 	connect "connectrpc.com/connect"
 
+	attendancev1 "github.com/garcia-lorca/gen/go/garcialorca/attendance/v1"
 	commsv1 "github.com/garcia-lorca/gen/go/garcialorca/comms/v1"
 )
+
+func (stubAttendance) ListSessions(_ context.Context, req *connect.Request[attendancev1.ListSessionsRequest]) (*connect.Response[attendancev1.ListSessionsResponse], error) {
+	out := make([]*attendancev1.TakenList, 0, len(req.Msg.GetGroupIds()))
+	for _, g := range req.Msg.GetGroupIds() {
+		out = append(out, &attendancev1.TakenList{GroupId: g, Date: "2026-09-01"})
+	}
+	return connect.NewResponse(&attendancev1.ListSessionsResponse{Lists: out}), nil
+}
 
 func (stubComms) UnregisterDevice(context.Context, *connect.Request[commsv1.UnregisterDeviceRequest]) (*connect.Response[commsv1.UnregisterDeviceResponse], error) {
 	return connect.NewResponse(&commsv1.UnregisterDeviceResponse{}), nil
