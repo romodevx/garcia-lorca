@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { SelectField, type SelectOption } from "../../_design/form";
 import { captureGrade, getRoster, type TeachingAssignment, type TeachingRosterRow, type TeachingTerm } from "../../teaching/api";
 import { EmptyHint, ErrorAlert, Section } from "../config/parts";
+import { groupLabel } from "../teaching/selection";
 import { GradeRow } from "./GradeRow";
 
 export interface TeacherGradeListProps {
@@ -59,7 +60,7 @@ export function TeacherGradeList({ assignment, terms }: TeacherGradeListProps): 
   const termOptions: SelectOption[] = cycleTerms.map((t) => ({ value: t.id, label: t.name }));
 
   return (
-    <Section title={`${assignment.subjectName} · ${assignment.groupName}`} subtitle="Elige el periodo; captura o edita la calificación (0–10) de cada alumno.">
+    <Section title={`${assignment.subjectName} · ${groupLabel(assignment)}`} subtitle="Elige el periodo; captura o edita la calificación (0–10) de cada alumno.">
       <form aria-label="Elegir periodo" style={{ maxWidth: 320, marginBottom: 16 }}>
         <SelectField
           label="Periodo"

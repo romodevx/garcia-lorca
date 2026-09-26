@@ -14,6 +14,11 @@ export interface TeachingOption {
   id: string;
   groupId: string;
   groupName: string;
+  /**
+   * The group's grade ("1° PRIMARIA"). Groups are named by letter and subjects
+   * exist per grade, so without it "A" in two grades reads as the same choice.
+   */
+  gradeLevelName?: string;
   /** Present when the picker goes by subject first: what the subject step is keyed by. */
   subjectId?: string;
   subjectName?: string;
@@ -34,6 +39,8 @@ export interface SubjectChoice {
   id: string;
   /** What is shown; "Asignatura sin nombre" for a blank one. */
   name: string;
+  /** The grade the subject belongs to, when known: what tells two "Matemáticas" apart. */
+  grade?: string;
 }
 
 const SUBJECT_KEY = "asignatura";
@@ -63,6 +70,17 @@ export function subjectLabel(option: Pick<TeachingOption, "subjectName">): strin
   const name = option.subjectName?.trim() ?? "";
   return name === "" ? NAMELESS_SUBJECT : name;
 }
+
+const gradeOf = (option: Pick<TeachingOption, "gradeLevelName">): string => option.gradeLevelName?.trim() ?? "";
+
+/** The group as a person reads it: "1° PRIMARIA · A", or just "A" when the grade is unknown. */
+export function groupLabel(option: Pick<TeachingOption, "groupName" | "gradeLevelName">): string {
+  const grade = gradeOf(option);
+  return grade === "" ? option.groupName : `${grade} · ${option.groupName}`;
+}
+
+const byLabel = (a: TeachingOption, b: TeachingOption): number =>
+  groupLabel(a).localeCompare(groupLabel(b), "es", { numeric: true }) || a.id.localeCompare(b.id);
 
 export function parseSelection(search: string): SelectionQuery {
   const params = new URLSearchParams(search);
@@ -95,9 +113,15 @@ function distinctSubjects(options: readonly TeachingOption[]): SubjectChoice[] {
   const byId = new Map<string, SubjectChoice>();
   for (const o of options) {
     const id = subjectKey(o);
-    if (!byId.has(id)) byId.set(id, { id, name: subjectLabel(o) });
+    const grade = gradeOf(o);
+    if (!byId.has(id)) byId.set(id, { id, name: subjectLabel(o), ...(grade !== "" ? { grade } : {}) });
   }
-  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, "es") || a.id.localeCompare(b.id));
+  return [...byId.values()].sort(
+    (a, b) =>
+      a.name.localeCompare(b.name, "es") ||
+      (a.grade ?? "").localeCompare(b.grade ?? "", "es", { numeric: true }) ||
+      a.id.localeCompare(b.id),
+  );
 }
 
 /**
@@ -113,7 +137,7 @@ export function resolveSelection<T extends TeachingOption>(
   const subjects = bySubject ? distinctSubjects(options) : [];
   const subjectSkipped = !bySubject || subjects.length === 1;
   const subject = !bySubject ? undefined : subjectSkipped ? subjects[0] : subjects.find((s) => s.id === query.subject);
-  const groups = bySubject ? options.filter((o) => subject !== undefined && subjectKey(o) === subject.id) : [...options];
+  const groups = (bySubject ? options.filter((o) => subject !== undefined && subjectKey(o) === subject.id) : [...options]).sort(byLabel);
   const groupSkipped = groups.length === 1;
   const matches = (o: T): boolean => (bySubject ? o.id === query.assignment : o.groupId === query.group);
   const selected = groupSkipped ? groups[0] : groups.find(matches);

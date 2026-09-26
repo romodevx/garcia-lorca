@@ -55,6 +55,7 @@ type TeachingAssignmentReader interface {
 type TeachingCatalogReader interface {
 	ListGroups(ctx context.Context, cycleID, gradeLevelID string) ([]client.GroupResult, error)
 	ListSubjects(ctx context.Context, gradeLevelID string) ([]client.SubjectResult, error)
+	ListGradeLevels(ctx context.Context, levelID string) ([]client.GradeLevelResult, error)
 	ListTerms(ctx context.Context, cycleID, levelID string) ([]client.TermResult, error)
 }
 
@@ -236,6 +237,10 @@ type teacherAssignmentResponse struct {
 	TeacherID   string `json:"teacherId"`
 	GroupName   string `json:"groupName"`
 	SubjectName string `json:"subjectName"`
+	// GradeLevelName is the group's grade ("1° PRIMARIA"). Groups are named by
+	// letter and subjects exist per grade, so without it a teacher of "A" in two
+	// grades sees two identical choices.
+	GradeLevelName string `json:"gradeLevelName"`
 }
 
 // Assignments handles GET /api/v1/teaching/assignments — the groups+subjects the
@@ -258,43 +263,40 @@ func (h *TeachingHandler) Assignments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Resolve the id→name maps ONCE, and only when there is something to enrich.
-	groupNames, subjectNames := h.catalogNames(r.Context(), len(assignments) > 0)
+	groupNames, groupGrades, subjectNames := h.catalogNames(r.Context(), len(assignments) > 0)
 	out := make([]teacherAssignmentResponse, 0, len(assignments))
 	for _, a := range assignments {
 		out = append(out, teacherAssignmentResponse{
-			ID:          a.ID,
-			CycleID:     a.CycleID,
-			GroupID:     a.GroupID,
-			SubjectID:   a.SubjectID,
-			TeacherID:   a.TeacherID,
-			GroupName:   groupNames[a.GroupID],
-			SubjectName: subjectNames[a.SubjectID],
+			ID:             a.ID,
+			CycleID:        a.CycleID,
+			GroupID:        a.GroupID,
+			SubjectID:      a.SubjectID,
+			TeacherID:      a.TeacherID,
+			GroupName:      groupNames[a.GroupID],
+			SubjectName:    subjectNames[a.SubjectID],
+			GradeLevelName: groupGrades[a.GroupID],
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"assignments": out})
 }
 
-// catalogNames builds the group and subject id→name maps used to enrich the
-// assignments read. It is best-effort by design: no assignments to enrich or a
-// failed lookup each yields an empty map, and the caller reads a missing id as
-// "" — a display gap, never a failed read. Both non-nil maps are always returned,
-// so lookups never panic.
-func (h *TeachingHandler) catalogNames(ctx context.Context, enrich bool) (groups, subjects map[string]string) {
-	groups, subjects = map[string]string{}, map[string]string{}
+// catalogNames builds the group, group-grade and subject id→name maps used to
+// enrich the assignments read. It is best-effort by design: no assignments to
+// enrich or a failed lookup each yields an empty map, and the caller reads a
+// missing id as "" — a display gap, never a failed read. All three maps are
+// always non-nil, so lookups never panic.
+func (h *TeachingHandler) catalogNames(ctx context.Context, enrich bool) (groups, groupGrades, subjects map[string]string) {
+	groups, groupGrades = h.groupCatalogNames(ctx, enrich)
+	subjects = map[string]string{}
 	if !enrich {
-		return groups, subjects
-	}
-	if grps, err := h.config.ListGroups(ctx, "", ""); err == nil {
-		for _, g := range grps {
-			groups[g.ID] = g.Name
-		}
+		return groups, groupGrades, subjects
 	}
 	if subs, err := h.config.ListSubjects(ctx, ""); err == nil {
 		for _, s := range subs {
 			subjects[s.ID] = s.Name
 		}
 	}
-	return groups, subjects
+	return groups, groupGrades, subjects
 }
 
 // --- terms -----------------------------------------------------------------

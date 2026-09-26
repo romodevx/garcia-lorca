@@ -56,7 +56,7 @@ export function TeacherAttendance({ onBack, today }: TeacherAttendanceProps): Re
   }, []);
 
   const options = useMemo<(TeachingOption & { group: TeacherGroup })[]>(
-    () => groups.map((g) => ({ id: g.id, groupId: g.id, groupName: g.name, group: g })),
+    () => groups.map((g) => ({ id: g.id, groupId: g.id, groupName: g.name, gradeLevelName: g.gradeLevelName, group: g })),
     [groups],
   );
 

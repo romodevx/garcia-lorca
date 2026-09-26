@@ -5,6 +5,7 @@ import type { AttendanceException, AttendanceStatus, Mark } from "../../attendan
 import { DateField } from "../../_design/form";
 import { getAttendanceRoster, saveAttendance, type TeacherGroup, type TeachingAttendanceRosterRow } from "../../teaching/api";
 import { EmptyHint, ErrorAlert, Section } from "../config/parts";
+import { groupLabel } from "../teaching/selection";
 import { StatusCounters, StatusPicker, type CounterDef, type StatusOption } from "./parts";
 
 export interface TeacherPassListProps {
@@ -100,7 +101,7 @@ export function TeacherPassList({ group, today }: TeacherPassListProps): ReactEl
   const counters: readonly CounterDef[] = ORDER.map((status) => ({ status, label: LABEL[status], count: counts[status] }));
 
   return (
-    <Section title={`Pase de lista · ${group.name}`} subtitle="Todos empiezan presentes; marca solo las excepciones.">
+    <Section title={`Pase de lista · ${groupLabel({ groupName: group.name, gradeLevelName: group.gradeLevelName })}`} subtitle="Todos empiezan presentes; marca solo las excepciones.">
       <div style={{ maxWidth: 240, marginBottom: 16 }}>
         <DateField label="Fecha" value={date} onChange={setDate} />
       </div>

@@ -35,6 +35,8 @@ export interface TeachingAssignment {
   teacherId: string;
   groupName: string;
   subjectName: string;
+  /** The group's grade ("1° PRIMARIA"); groups are named by letter only. */
+  gradeLevelName?: string;
 }
 
 /** A term of one of the caller's cycles. */
@@ -157,6 +159,8 @@ export function captureGrade(input: CaptureGradeInput): Promise<TeachingGradeEnt
 export interface TeacherGroup {
   id: string;
   name: string;
+  /** The group's grade ("1° PRIMARIA"); `name` is the letter only. */
+  gradeLevelName?: string;
 }
 
 /**

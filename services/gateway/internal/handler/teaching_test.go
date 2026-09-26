@@ -37,6 +37,9 @@ type fakeTeachingConfig struct {
 	gotListGroups   int
 	gotListSubjects int
 
+	gradeLevels    []client.GradeLevelResult
+	gradeLevelsErr error
+
 	termsByCycle   map[string][]client.TermResult
 	termsErr       error
 	gotListTerms   int
@@ -84,6 +87,10 @@ func (f *fakeTeachingConfig) ListGroups(_ context.Context, _, _ string) ([]clien
 func (f *fakeTeachingConfig) ListSubjects(_ context.Context, _ string) ([]client.SubjectResult, error) {
 	f.gotListSubjects++
 	return f.subjects, f.subjectsErr
+}
+
+func (f *fakeTeachingConfig) ListGradeLevels(_ context.Context, _ string) ([]client.GradeLevelResult, error) {
+	return f.gradeLevels, f.gradeLevelsErr
 }
 
 func (f *fakeTeachingConfig) ListTerms(_ context.Context, cycleID, _ string) ([]client.TermResult, error) {

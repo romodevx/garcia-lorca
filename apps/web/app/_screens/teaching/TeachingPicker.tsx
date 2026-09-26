@@ -4,7 +4,7 @@ import { useEffect, useRef, type ReactElement, type ReactNode } from "react";
 
 import { EmptyHint, Section } from "../config/parts";
 import { TeachingCrumbs } from "./TeachingCrumbs";
-import type { TeachingOption } from "./selection";
+import { groupLabel, type TeachingOption } from "./selection";
 import { useTeachingSelection } from "./useTeachingSelection";
 
 export interface TeachingPickerProps<T extends TeachingOption> {
@@ -52,8 +52,9 @@ export function TeachingPicker<T extends TeachingOption>({ title, options, bySub
         <ChoiceStep heading={heading} title="Elige la asignatura" listLabel="Asignaturas">
           {selection.subjects.map((s) => {
             const count = options.filter((o) => (o.subjectId ?? "") === s.id).length;
+            const groupsText = `${count} ${count === 1 ? "grupo" : "grupos"}`;
             return (
-              <ChoiceButton key={s.id} onClick={() => selection.chooseSubject(s.id)} detail={`${count} ${count === 1 ? "grupo" : "grupos"}`}>
+              <ChoiceButton key={s.id} onClick={() => selection.chooseSubject(s.id)} detail={s.grade !== undefined ? `${s.grade} · ${groupsText}` : groupsText}>
                 {s.name}
               </ChoiceButton>
             );
@@ -63,7 +64,7 @@ export function TeachingPicker<T extends TeachingOption>({ title, options, bySub
       {selection.step === "group" && (
         <ChoiceStep heading={heading} title="Elige el grupo" listLabel="Grupos">
           {selection.groups.map((g) => (
-            <ChoiceButton key={g.id} onClick={() => selection.chooseGroup(g)}>{g.groupName}</ChoiceButton>
+            <ChoiceButton key={g.id} onClick={() => selection.chooseGroup(g)}>{groupLabel(g)}</ChoiceButton>
           ))}
         </ChoiceStep>
       )}
