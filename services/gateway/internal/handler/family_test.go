@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	connect "connectrpc.com/connect"
@@ -33,6 +34,13 @@ type fakeFamilyStudents struct {
 	enrollments             []client.Enrollment
 	listEnrollmentsErr      error
 	gotEnrollmentsStudentID string
+
+	transfers    []client.Transfer
+	transfersErr error
+}
+
+func (f *fakeFamilyStudents) ListTransfers(_ context.Context, _ string) ([]client.Transfer, error) {
+	return f.transfers, f.transfersErr
 }
 
 func (f *fakeFamilyStudents) ListStudentsForGuardian(_ context.Context, guardianUserID string) ([]client.GuardianLink, error) {
@@ -125,6 +133,7 @@ func (f *fakeFamilyGrades) ListGradeEntries(_ context.Context, enrollmentID, ter
 // fakeFamilyAttendance doubles the attendance range read, keyed by enrollment,
 // and the batched taken-lists read.
 type fakeFamilyAttendance struct {
+	mu               sync.Mutex // the view reads enrollments concurrently
 	gotEnrollmentIDs []string
 	gotFrom, gotTo   string
 	byEnrollment     map[string][]client.AttendanceRecord
@@ -136,16 +145,33 @@ type fakeFamilyAttendance struct {
 	gotSessionsFrom  string
 	gotSessionsTo    string
 	sessionsErr      error
+	sessionCalls     [][]string // every call's groups, in call order
 }
 
+// ListSessions answers the lists of the ASKED groups only, as the service does.
 func (f *fakeFamilyAttendance) ListSessions(_ context.Context, groupIDs []string, from, to string) ([]client.TakenList, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.sessionsCalls++
-	f.gotSessionGroups = append([]string(nil), groupIDs...)
+	f.gotSessionGroups = append(f.gotSessionGroups, groupIDs...)
+	f.sessionCalls = append(f.sessionCalls, append([]string(nil), groupIDs...))
 	f.gotSessionsFrom, f.gotSessionsTo = from, to
-	return f.sessions, f.sessionsErr
+	asked := map[string]bool{}
+	for _, g := range groupIDs {
+		asked[g] = true
+	}
+	var out []client.TakenList
+	for _, s := range f.sessions {
+		if asked[s.GroupID] {
+			out = append(out, s)
+		}
+	}
+	return out, f.sessionsErr
 }
 
 func (f *fakeFamilyAttendance) ListAttendance(_ context.Context, enrollmentID, from, to string) ([]client.AttendanceRecord, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.gotEnrollmentIDs = append(f.gotEnrollmentIDs, enrollmentID)
 	f.gotFrom, f.gotTo = from, to
 	if f.err != nil {
@@ -165,6 +191,12 @@ type fakeFamilyConfig struct {
 	termsErr        error
 	gotListSubjects int
 	gotListTerms    int
+	cycles          []client.CycleResult
+	cyclesErr       error
+}
+
+func (f *fakeFamilyConfig) ListCycles(_ context.Context) ([]client.CycleResult, error) {
+	return f.cycles, f.cyclesErr
 }
 
 func (f *fakeFamilyConfig) ListSubjects(_ context.Context, _ string) ([]client.SubjectResult, error) {

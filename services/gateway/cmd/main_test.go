@@ -245,6 +245,11 @@ func (stubStudents) ListEnrollments(_ context.Context, req *connect.Request[stud
 	}}), nil
 }
 
+// ListTransfers: the stub's pupils never moved.
+func (stubStudents) ListTransfers(_ context.Context, _ *connect.Request[studentsv1.ListTransfersRequest]) (*connect.Response[studentsv1.ListTransfersResponse], error) {
+	return connect.NewResponse(&studentsv1.ListTransfersResponse{}), nil
+}
+
 // Guardian-link RPCs on the stub. ListStudentsForGuardian answers with TWO
 // children so the family aggregation is observable end to end; the guardian id
 // is echoed back, proving the gateway sent the principal's own id.

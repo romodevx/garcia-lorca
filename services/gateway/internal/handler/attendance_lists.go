@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -221,13 +222,16 @@ type SubjectReader interface {
 // subjectName is the display name of a per-class list's subject, carried onto
 // the events a save publishes so the family's notification names the class
 // (T5). It is a courtesy, never a gate: a daily list (no subject), an unknown
-// subject or a catalog that cannot answer all yield "" and the save proceeds.
+// subject or a catalog that cannot answer all yield "" and the save proceeds —
+// logged (ids only), so a broken catalog does not hide behind unnamed classes.
 func subjectName(ctx context.Context, subjects SubjectReader, subjectID string) string {
 	if subjectID == "" {
 		return ""
 	}
 	s, err := subjects.GetSubject(ctx, subjectID)
 	if err != nil {
+		slog.WarnContext(ctx, "subject lookup failed; the attendance event goes without a class name",
+			"subject_id", subjectID, "error", err)
 		return ""
 	}
 	return s.Name

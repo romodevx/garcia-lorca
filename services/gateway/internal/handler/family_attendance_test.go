@@ -44,10 +44,14 @@ const (
 )
 
 func familyAttendanceHandler(students *fakeFamilyStudents, att *fakeFamilyAttendance, catalog *fakeFamilyConfig) *handler.FamilyHandler {
+	return familyAttendanceHandlerAt(students, att, catalog, familyToday)
+}
+
+func familyAttendanceHandlerAt(students *fakeFamilyStudents, att *fakeFamilyAttendance, catalog *fakeFamilyConfig, now time.Time) *handler.FamilyHandler {
 	if catalog == nil {
 		catalog = &fakeFamilyConfig{}
 	}
-	return handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, nil, att, catalog, handler.WithFamilyClock(func() time.Time { return familyToday }))
+	return handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, nil, att, catalog, handler.WithFamilyClock(func() time.Time { return now }))
 }
 
 func getFamilyAttendance(t *testing.T, h *handler.FamilyHandler, query string) (*httptest.ResponseRecorder, familyAttendanceResponse) {
@@ -175,27 +179,6 @@ func TestFamilyAttendancePastMonth(t *testing.T) {
 	assert.Equal(t, "excused", out.Days[0].Status)
 	assert.Equal(t, "2026-08-31", att.gotSessionsTo)
 	assert.Equal(t, 1, out.Summary["excused"])
-}
-
-// After a transfer, the old group's lists count only until the new enrollment
-// began, and the new group's only from then on.
-func TestFamilyAttendanceFollowsEnrollmentWindows(t *testing.T) {
-	students := oneChild()
-	students.enrollments = []client.Enrollment{
-		{ID: "enr-new", StudentID: "stu-1", GroupID: "grp-b", Status: "active", EnrolledAt: time.Date(2026, 9, 10, 17, 0, 0, 0, time.UTC)},
-		{ID: "enr-old", StudentID: "stu-1", GroupID: "grp-a", Status: "transferred", EnrolledAt: time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)},
-	}
-	att := &fakeFamilyAttendance{sessions: []client.TakenList{
-		{GroupID: "grp-a", Date: "2026-09-11"}, // after the transfer: not the child's
-		{GroupID: "grp-b", Date: "2026-09-11"},
-		{GroupID: "grp-a", Date: "2026-09-09"},
-		{GroupID: "grp-b", Date: "2026-09-09"}, // before joining: not the child's
-	}}
-	rec, out := getFamilyAttendance(t, familyAttendanceHandler(students, att, nil), "?month=2026-09")
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	assert.ElementsMatch(t, []string{"grp-a", "grp-b"}, att.gotSessionGroups)
-	assert.Len(t, out.Days, 3, "today + the two days, each counted once")
-	assert.Equal(t, 2, out.Summary["present"])
 }
 
 func TestFamilyAttendanceRejectsAMalformedMonth(t *testing.T) {

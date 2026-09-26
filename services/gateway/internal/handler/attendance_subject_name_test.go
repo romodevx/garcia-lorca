@@ -1,6 +1,8 @@
 package handler_test
 
 import (
+	"bytes"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -53,6 +55,10 @@ func TestSavesCarryTheSubjectName(t *testing.T) {
 // The label is a courtesy: a catalog that cannot answer never blocks a save,
 // it only leaves the name empty (comms then renders the daily copy).
 func TestSubjectNameLookupFailureNeverBlocksTheSave(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
 	config := listTeacher()
 	config.getSubjectErr = connect.NewError(connect.CodeUnavailable, errString("config down"))
 	att := &fakeTeachingAttendance{}
@@ -62,4 +68,6 @@ func TestSubjectNameLookupFailureNeverBlocksTheSave(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.Equal(t, 1, att.saveCalls)
 	assert.Empty(t, att.gotSave.SubjectName)
+	assert.Contains(t, logs.String(), "level=WARN", "a degraded label is logged (review #10)")
+	assert.Contains(t, logs.String(), "subject_id=sub-mat1")
 }

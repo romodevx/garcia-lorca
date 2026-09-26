@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"sort"
 	"time"
@@ -62,15 +63,26 @@ type familyAttendanceResponse struct {
 	Summary familyAttendanceSummary `json:"summary"`
 }
 
+// maxSessionGroups is how many groups one ListSessions call may name (the
+// attendance service's documented bound); more are read in chunks.
+const maxSessionGroups = 20
+
+// firstServedMonth is the earliest ?month= the view answers; later than the
+// month after today's is refused too (review #11).
+var firstServedMonth = time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+
 // Attendance handles GET /api/v1/family/students/{studentId}/attendance?month=
 // — the child's month, one row per day, newest first (see buildAttendanceDays).
-// month defaults to the current UTC month (the fleet's school day, see
-// schoolToday). Another family's child is 404, like every by-child route.
+// month defaults to the current UTC month. The school day is the UTC date on
+// purpose (schoolToday): it is the same fleet-wide offset finance and the
+// teachers' lists use, so every date the school sees agrees. Another family's
+// child is 404, like every by-child route.
 //
-// Reads, all batched: the child's enrollments (students), each enrollment's
-// exceptions for the month (attendance; a child has one or two), ONE read of the
-// lists taken for the child's groups, and — only when a per-class list is in the
-// month — the subject names once.
+// Reads: the child's enrollments, the school years and the child's transfer
+// history (once each) to place the group windows; then, only for the windows
+// overlapping the month, the enrollments' exceptions (concurrently), the lists
+// taken for those groups (in chunks of maxSessionGroups, concurrently) and —
+// only when a per-class list is in the month — the subject names once.
 func (h *FamilyHandler) Attendance(w http.ResponseWriter, r *http.Request) {
 	p, ok := middleware.PrincipalFrom(r.Context())
 	if !ok {
@@ -87,12 +99,12 @@ func (h *FamilyHandler) Attendance(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, msgInvalidMonth)
 		return
 	}
-	enrollments, err := h.linkedEnrollments(r.Context(), studentID)
+	windows, err := h.groupWindows(r.Context(), studentID, today)
 	if err != nil {
 		writeConnectError(w, err)
 		return
 	}
-	view, err := h.readMonth(r.Context(), enrollments, first)
+	view, err := h.readMonth(r.Context(), windows, first)
 	if err != nil {
 		writeConnectError(w, err)
 		return
@@ -109,12 +121,15 @@ func (h *FamilyHandler) Attendance(w http.ResponseWriter, r *http.Request) {
 }
 
 // parseMonth reads ?month=YYYY-MM as its first day; empty is today's month.
+// Months before firstServedMonth or after the one following today's are
+// refused: nothing is recorded there, and an absurd year is a client bug.
 func parseMonth(value string, today time.Time) (time.Time, bool) {
+	current := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
 	if value == "" {
-		return time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC), true
+		return current, true
 	}
 	first, err := time.Parse(monthLayout, value)
-	if err != nil || first.Year() < 1 {
+	if err != nil || first.Before(firstServedMonth) || first.After(current.AddDate(0, 1, 0)) {
 		return time.Time{}, false
 	}
 	return first, true
@@ -144,31 +159,72 @@ func (v monthView) hasPerClass() bool {
 	return false
 }
 
-// readMonth reads the month's exceptions and taken lists for the child.
-func (h *FamilyHandler) readMonth(ctx context.Context, enrollments []client.Enrollment, first time.Time) (monthView, error) {
-	view := monthView{first: first, last: first.AddDate(0, 1, -1), windows: enrollmentWindows(enrollments)}
-	from, to := view.first.Format(attendanceDateLayout), view.last.Format(attendanceDateLayout)
-	for _, e := range enrollments {
-		records, err := h.attendance.ListAttendance(ctx, e.ID, from, to)
-		if err != nil {
-			return monthView{}, err
-		}
-		view.records = append(view.records, records...)
+// groupWindows reads what places the child's group windows — the enrollments,
+// the school years and the transfer history — and derives them (see
+// buildGroupWindows). A child with no enrollment reads nothing more.
+func (h *FamilyHandler) groupWindows(ctx context.Context, studentID string, today time.Time) ([]enrollmentWindow, error) {
+	enrollments, err := h.linkedEnrollments(ctx, studentID)
+	if err != nil || len(enrollments) == 0 {
+		return nil, err
 	}
-	groups := windowGroups(view.windows)
-	if len(groups) == 0 {
+	cycles, err := h.cycleSpans(ctx)
+	if err != nil {
+		return nil, err
+	}
+	transfers, err := h.students.ListTransfers(ctx, studentID)
+	if err != nil {
+		return nil, err
+	}
+	return buildGroupWindows(enrollments, transfers, cycles, today), nil
+}
+
+// cycleSpans reads the school years by id. A handler wired without a catalog
+// knows none, and every enrollment's cycle is then unbounded.
+func (h *FamilyHandler) cycleSpans(ctx context.Context) (map[string]client.CycleResult, error) {
+	out := map[string]client.CycleResult{}
+	if h.catalog == nil {
+		return out, nil
+	}
+	cycles, err := h.catalog.ListCycles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range cycles {
+		out[c.ID] = c
+	}
+	return out, nil
+}
+
+// readMonth reads the month's exceptions and taken lists, only for the windows
+// overlapping the month: a month none overlaps costs no attendance read.
+func (h *FamilyHandler) readMonth(ctx context.Context, windows []enrollmentWindow, first time.Time) (monthView, error) {
+	view := monthView{first: first, last: first.AddDate(0, 1, -1)}
+	from, to := view.first.Format(attendanceDateLayout), view.last.Format(attendanceDateLayout)
+	view.windows = overlapping(windows, from, to)
+	if len(view.windows) == 0 {
 		return view, nil
 	}
-	sessions, err := h.attendance.ListSessions(ctx, groups, from, to)
+	enrollmentIDs := distinct(view.windows, func(w enrollmentWindow) string { return w.enrollmentID })
+	records, err := fanOut(ctx, len(enrollmentIDs), func(ctx context.Context, i int) ([]client.AttendanceRecord, error) {
+		return h.attendance.ListAttendance(ctx, enrollmentIDs[i], from, to)
+	})
 	if err != nil {
 		return monthView{}, err
 	}
-	view.sessions = sessions
+	chunks := chunk(distinct(view.windows, func(w enrollmentWindow) string { return w.groupID }), maxSessionGroups)
+	sessions, err := fanOut(ctx, len(chunks), func(ctx context.Context, i int) ([]client.TakenList, error) {
+		return h.attendance.ListSessions(ctx, chunks[i], from, to)
+	})
+	if err != nil {
+		return monthView{}, err
+	}
+	view.records, view.sessions = records, sessions
 	return view, nil
 }
 
 // subjectNames resolves the per-class labels once; best-effort like the grades
-// enrichment (a failed catalog read leaves names empty, never fails the view).
+// enrichment (a failed catalog read leaves names empty, never fails the view —
+// but it is logged, so a broken catalog does not hide behind blank labels).
 func (h *FamilyHandler) subjectNames(ctx context.Context, needed bool) map[string]string {
 	names := map[string]string{}
 	if !needed || h.catalog == nil {
@@ -176,70 +232,13 @@ func (h *FamilyHandler) subjectNames(ctx context.Context, needed bool) map[strin
 	}
 	subjects, err := h.catalog.ListSubjects(ctx, "")
 	if err != nil {
+		slog.WarnContext(ctx, "subject catalog lookup failed; attendance classes go unnamed", "error", err)
 		return names
 	}
 	for _, s := range subjects {
 		names[s.ID] = s.Name
 	}
 	return names
-}
-
-// enrollmentWindow is the span of school days a group's lists are the child's:
-// from the enrollment's start up to the day before the next enrollment began.
-// to is "" when open-ended. A list outside every window was taken for a group
-// the child was not in that day.
-type enrollmentWindow struct {
-	groupID  string
-	from, to string // ISO days, inclusive; "" = unbounded
-}
-
-// enrollmentWindows orders the child's enrollments by start and derives each
-// one's window. The last one is open-ended only while it is ACTIVE: a withdrawn
-// enrollment has no end date recorded, so its lists are not claimed (its stored
-// exceptions still show).
-func enrollmentWindows(enrollments []client.Enrollment) []enrollmentWindow {
-	sorted := append([]client.Enrollment(nil), enrollments...)
-	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].EnrolledAt.Before(sorted[j].EnrolledAt) })
-	out := make([]enrollmentWindow, 0, len(sorted))
-	for i, e := range sorted {
-		if e.GroupID == "" {
-			continue
-		}
-		w := enrollmentWindow{groupID: e.GroupID, from: isoDay(e.EnrolledAt)}
-		switch {
-		case i+1 < len(sorted):
-			w.to = isoDay(sorted[i+1].EnrolledAt.AddDate(0, 0, -1))
-		case e.Status != "active":
-			continue
-		}
-		out = append(out, w)
-	}
-	return out
-}
-
-// isoDay renders an instant's UTC day, or "" for the zero time (no bound).
-func isoDay(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.UTC().Format(attendanceDateLayout)
-}
-
-func (w enrollmentWindow) covers(groupID, date string) bool {
-	return w.groupID == groupID && (w.from == "" || date >= w.from) && (w.to == "" || date <= w.to)
-}
-
-// windowGroups is the distinct group ids of the windows, in order.
-func windowGroups(windows []enrollmentWindow) []string {
-	seen := map[string]bool{}
-	out := make([]string, 0, len(windows))
-	for _, w := range windows {
-		if !seen[w.groupID] {
-			seen[w.groupID] = true
-			out = append(out, w.groupID)
-		}
-	}
-	return out
 }
 
 // dayMarks is what one day holds while it is being built.
@@ -338,31 +337,47 @@ func coveredByAny(windows []enrollmentWindow, groupID, date string) bool {
 	return false
 }
 
-// row renders one built day.
+// row renders one built day. A day with only a daily list carries its status;
+// one with only per-class lists the status its classes share (partial when
+// they differ). A day with BOTH derives it from every list taken: absent on
+// the daily list is an absent day, otherwise the status all lists share, or
+// partial — an absence in one class of a present day is partial, as in a
+// per-class day.
 func (d *dayMarks) row(date string) familyDayResponse {
 	classes := make([]familyClassResponse, 0, len(d.classes))
 	for _, c := range d.classes {
 		classes = append(classes, c)
 	}
 	sort.Slice(classes, func(i, j int) bool { return classes[i].SubjectName < classes[j].SubjectName })
-	if d.daily {
-		status := d.status
-		if status == "" {
-			status = dayPresent
-		}
-		return familyDayResponse{Date: date, Status: status, Mode: attendanceModeDaily, Note: d.note, Classes: classes}
+	statuses := make([]string, 0, len(classes)+1)
+	for _, c := range classes {
+		statuses = append(statuses, c.Status)
 	}
-	return familyDayResponse{Date: date, Status: sharedStatus(classes), Mode: attendanceModePerClass, Classes: classes}
+	if !d.daily {
+		return familyDayResponse{Date: date, Status: sharedStatus(statuses), Mode: attendanceModePerClass, Classes: classes}
+	}
+	daily := d.status
+	if daily == "" {
+		daily = dayPresent
+	}
+	if len(classes) == 0 {
+		return familyDayResponse{Date: date, Status: daily, Mode: attendanceModeDaily, Note: d.note, Classes: classes}
+	}
+	status := dayAbsent
+	if daily != dayAbsent {
+		status = sharedStatus(append(statuses, daily))
+	}
+	return familyDayResponse{Date: date, Status: status, Mode: attendanceModePerClass, Note: d.note, Classes: classes}
 }
 
-// sharedStatus is the status every class shares, or partial when they differ.
-func sharedStatus(classes []familyClassResponse) string {
-	for _, c := range classes[1:] {
-		if c.Status != classes[0].Status {
+// sharedStatus is the status every list shares, or partial when they differ.
+func sharedStatus(statuses []string) string {
+	for _, s := range statuses[1:] {
+		if s != statuses[0] {
 			return dayPartial
 		}
 	}
-	return classes[0].Status
+	return statuses[0]
 }
 
 // count adds one day to its counter.

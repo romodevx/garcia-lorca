@@ -140,13 +140,20 @@ paths:
       description: >
         The child's month, newest first. A day appears when a list was taken
         for the child's group that day (while the child was in it) or an
-        exception is stored for it; TODAY always appears (`not_taken` until a
-        list is taken). A `daily` day carries the list's status (`present` when
-        taken with no exception). A `per_class` day lists every class taken
-        that day with the child's status; the day is the status all classes
-        share, or `partial` when they differ. The summary counts DAYS. "Today"
-        and the default month are the system's UTC date (the school is UTC-6).
-        Behind `module_attendance` and `module_students`.
+        exception is stored for it; TODAY always appears in the current month
+        (`not_taken` until a list is taken). "While the child was in it" is the
+        group window: the enrollment's school year intersected with its active
+        period (from enrollment, until the day before a withdrawal), split by
+        transfers (the move day belongs to the new group). A `daily` day
+        carries the list's status (`present` when taken with no exception). A
+        `per_class` day lists every class taken that day with the child's
+        status; the day is the status all classes share, or `partial` when they
+        differ. A day with both a daily list and classes is `per_class`: absent
+        on the daily list is `absent`, otherwise the status every list shares,
+        or `partial`. The summary counts DAYS. "Today" and the default month
+        are the system's UTC date (the school is UTC-6), consistently with
+        every other date the system shows. Behind `module_attendance` and
+        `module_students`.
       operationId: getFamilyAttendance
       security: [{ familyBearer: [] }]
       parameters:
@@ -157,7 +164,9 @@ paths:
         - name: month
           in: query
           required: false
-          description: The month to read; defaults to the current UTC month.
+          description: >
+            The month to read; defaults to the current UTC month. From 2000-01
+            up to the month after the current one; outside that range is 400.
           schema: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$', example: '2026-09' }
       responses:
         '200':

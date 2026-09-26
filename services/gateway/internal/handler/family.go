@@ -87,6 +87,16 @@ type AttendanceRangeReader interface {
 type FamilyCatalogReader interface {
 	ListSubjects(ctx context.Context, gradeLevelID string) ([]client.SubjectResult, error)
 	ListTerms(ctx context.Context, cycleID, levelID string) ([]client.TermResult, error)
+	// ListCycles bounds the attendance view's group windows to each
+	// enrollment's school year.
+	ListCycles(ctx context.Context) ([]client.CycleResult, error)
+}
+
+// TransferHistoryReader reads a student's group moves. A transfer rewrites the
+// enrollment's group in place, so this is the only record of which group a
+// pupil was in on a past day.
+type TransferHistoryReader interface {
+	ListTransfers(ctx context.Context, studentID string) ([]client.Transfer, error)
 }
 
 // FamilyStudentsReader is the students surface the family handler consumes: the
@@ -95,6 +105,7 @@ type FamilyCatalogReader interface {
 type FamilyStudentsReader interface {
 	GuardianLinkReader
 	StudentProfileReader
+	TransferHistoryReader
 }
 
 // FamilyCommsReader is the comms surface the family handler consumes: reading the
