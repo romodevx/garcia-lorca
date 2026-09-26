@@ -92,6 +92,14 @@ func (f *fakeTeacherLinkConfig) GetTeacher(_ context.Context, id string) (client
 	return t, nil
 }
 
+func (f *fakeTeacherLinkConfig) ListTeachers(context.Context) ([]client.Teacher, error) {
+	out := make([]client.Teacher, 0, len(f.teachers))
+	for _, t := range f.teachers {
+		out = append(out, t)
+	}
+	return out, nil
+}
+
 func (f *fakeTeacherLinkConfig) SetTeacherUser(_ context.Context, teacherID, userID string) (client.Teacher, error) {
 	f.linkCalls++
 	f.linkedTeacherID, f.linkedUserID = teacherID, userID
@@ -337,4 +345,18 @@ func TestTeacherAccessPropagatesALinkConflict(t *testing.T) {
 	cfg.linkErr = connect.NewError(connect.CodeAlreadyExists, errors.New("user already linked to another teacher"))
 	rec := doTeacherAccess(t, handler.NewTeacherAccessHandler(iam, cfg), "tch-1", ownerCaller)
 	assert.Equal(t, http.StatusConflict, rec.Code)
+}
+
+// Every refusal happens before the first write: an address whose account is
+// already the account of ANOTHER teacher is a 409 decided up front, not the
+// link conflict config raises after iam has already been written to.
+func TestTeacherAccessAccountOfAnotherTeacherIsRefusedBeforeAnyWrite(t *testing.T) {
+	iam, cfg := teacherIAM(), teacherConfig(unlinkedTeacher())
+	iam.users = []client.User{{ID: "usr-other", Email: "gabriela@example.com", Status: "invited", RoleIDs: []string{maestroRoleID}}}
+	cfg.teachers["tch-2"] = client.Teacher{ID: "tch-2", FirstName: "Otra", Email: "gabriela@example.com", UserID: "usr-other"}
+	rec := doTeacherAccess(t, handler.NewTeacherAccessHandler(iam, cfg), "tch-1", ownerCaller)
+
+	assert.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+	assert.Zero(t, iam.writes(), "nothing is written to iam")
+	assert.Zero(t, cfg.linkCalls)
 }

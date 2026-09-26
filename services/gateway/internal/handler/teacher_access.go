@@ -26,6 +26,10 @@ const userStatusInvited = "invited"
 // nowhere to send the invitation, and the account is keyed by email.
 const errTeacherHasNoEmail = "El docente no tiene correo"
 
+// errAccountOfAnotherTeacher is the refusal an address gets whose account
+// already signs in as a different teacher: one login is one teacher.
+const errAccountOfAnotherTeacher = "La cuenta con ese correo ya está vinculada a otro docente"
+
 // TeacherAccountIssuer is the iam surface "Dar acceso al sistema" needs.
 // Consumer-defined, so the handler is testable without iam.
 type TeacherAccountIssuer interface {
@@ -40,6 +44,7 @@ type TeacherAccountIssuer interface {
 // TeacherAccessConfig is the config surface: the teacher, and its user link.
 type TeacherAccessConfig interface {
 	GetTeacher(ctx context.Context, id string) (client.Teacher, error)
+	ListTeachers(ctx context.Context) ([]client.Teacher, error)
 	SetTeacherUser(ctx context.Context, teacherID, userID string) (client.Teacher, error)
 }
 
@@ -120,6 +125,17 @@ func (h *TeacherAccessHandler) GrantAccess(w http.ResponseWriter, r *http.Reques
 		writeConnectError(w, err)
 		return
 	}
+	if found && teacher.UserID == "" {
+		taken, err := h.linkedToAnotherTeacher(ctx, teacher.ID, user.ID)
+		if err != nil {
+			writeConnectError(w, err)
+			return
+		}
+		if taken {
+			http.Error(w, errAccountOfAnotherTeacher, http.StatusConflict)
+			return
+		}
+	}
 	var invitation *invitationResponse
 	if found {
 		if user.Status == userStatusInvited {
@@ -173,6 +189,22 @@ func (h *TeacherAccessHandler) existingAccount(ctx context.Context, teacher clie
 		}
 	}
 	return client.User{}, false, nil
+}
+
+// linkedToAnotherTeacher reports whether userID is already the account of a
+// teacher other than teacherID. Asked BEFORE any write, so the conflict config
+// would raise on the link never arrives after iam has been touched.
+func (h *TeacherAccessHandler) linkedToAnotherTeacher(ctx context.Context, teacherID, userID string) (bool, error) {
+	teachers, err := h.config.ListTeachers(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, t := range teachers {
+		if t.ID != teacherID && t.UserID == userID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // refresh brings an existing account up to date: the maestro role if it lacked
