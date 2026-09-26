@@ -250,7 +250,7 @@ describe("linkTeacherUser", () => {
 
     expect(res).toEqual(teacher);
     const [url, init] = lastCall(fetchMock);
-    expect(url).toBe("http://gw/api/v1/config/teachers/t1/user");
+    expect(url).toBe("http://gw/api/v1/teachers/t1/user");
     expect(init.method).toBe("POST");
     expect(init.credentials).toBe("include");
     expect(JSON.parse(init.body as string)).toEqual({ userId: "u1" });
@@ -264,7 +264,7 @@ describe("linkTeacherUser", () => {
     await linkTeacherUser(BASE, "t1", "");
 
     const [url, init] = lastCall(fetchMock);
-    expect(url).toBe("http://gw/api/v1/config/teachers/t1/user");
+    expect(url).toBe("http://gw/api/v1/teachers/t1/user");
     expect(JSON.parse(init.body as string)).toEqual({ userId: "" });
   });
 });

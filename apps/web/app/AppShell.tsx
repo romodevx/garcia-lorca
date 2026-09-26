@@ -9,7 +9,9 @@ import { TopBar } from "./_design/TopBar";
 import { MODULES, USERS, type ModuleDef, type Role, type UserProfile } from "./_design/data";
 import { Dashboard } from "./_screens/Dashboard";
 import { AttendanceScreen } from "./_screens/attendance/AttendanceScreen";
+import { TeacherLoadScreen } from "./_screens/teachers/TeacherLoadScreen";
 import { TeachersScreen } from "./_screens/teachers/TeachersScreen";
+import { canEditTeachingLoad } from "./teachers/permissions";
 import { UniformsScreen } from "./_screens/uniforms/UniformsScreen";
 import { FinanceScreen } from "./_screens/finance/FinanceScreen";
 import { Catalog } from "./_screens/config/Catalog";
@@ -409,6 +411,7 @@ export function AppShell(): ReactElement {
   // UX only: the gateway refuses PUT /students/{id} without students:update.
   const canEditStudents = principal?.permissions?.includes("students:update") === true;
   const editStudent = (studentId: string): void => go({ screen: "studentEdit", studentId });
+  const openTeacherLoad = (teacherId: string): void => go({ screen: "teacherLoad", teacherId });
   const open = useCallback((id: string, _intent?: string): void => {
     if (id === "finance") {
       go({ screen: "finance" });
@@ -604,10 +607,22 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "teachers" &&
         (teachersEnabled ? (
-          <TeachersScreen onBack={home} />
+          <TeachersScreen onBack={home} onOpenLoad={openTeacherLoad} />
         ) : (
           // Flag OFF: never render the roster; show the friendly stub so
           // navigation never dead-ends. (Backend 404 is authoritative.)
+          <ModulePlaceholder m={MODULES.find((m) => m.id === "teachers") as ModuleDef} onBack={home} />
+        ))}
+      {view.screen === "teacherLoad" &&
+        (teachersEnabled ? (
+          <TeacherLoadScreen
+            key={view.teacherId}
+            teacherId={view.teacherId}
+            onBack={() => go({ screen: "teachers" })}
+            canWrite={canEditTeachingLoad(principal?.permissions)}
+          />
+        ) : (
+          // Flag OFF: same friendly stub as the roster. (Backend 404 is authoritative.)
           <ModulePlaceholder m={MODULES.find((m) => m.id === "teachers") as ModuleDef} onBack={home} />
         ))}
       {view.screen === "uniforms" &&

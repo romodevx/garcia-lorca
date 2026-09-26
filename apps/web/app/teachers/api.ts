@@ -55,6 +55,37 @@ export interface TeachingAssignmentFilters {
   teacherId?: string;
 }
 
+/** One (group, subject) slot of a teaching load. */
+export interface TeachingLoadItem {
+  groupId: string;
+  subjectId: string;
+}
+
+export interface AssignTeachingLoadInput {
+  teacherId: string;
+  /** 1..500 slots — a bound on one transaction, not on a teacher's load. */
+  items: readonly TeachingLoadItem[];
+  /** Hand slots another teacher holds to this one. Explicit, never implied. */
+  replaceConflicts: boolean;
+}
+
+/** A requested slot another teacher already holds, left untouched. */
+export interface TeachingLoadConflict extends TeachingLoadItem {
+  assignmentId: string;
+  teacherId: string;
+  /** "first last" of the teacher holding it. */
+  teacherName: string;
+}
+
+/** What happened to each requested slot. Every list is present. */
+export interface TeachingLoadResult {
+  created: TeachingAssignment[];
+  reassigned: TeachingAssignment[];
+  /** Slots that were already this teacher's. */
+  skipped: TeachingLoadItem[];
+  conflicts: TeachingLoadConflict[];
+}
+
 function url(baseURL: string, path: string): string {
   return `${baseURL.replace(/\/+$/, "")}${BASE_PATH}${path}`;
 }
@@ -64,9 +95,9 @@ async function failure(res: Response): Promise<ConfigError> {
   return new ConfigError(res.status, body.trim());
 }
 
-async function postJSON<T>(baseURL: string, path: string, body: unknown): Promise<T> {
+async function sendJSON<T>(method: "POST" | "PATCH", baseURL: string, path: string, body: unknown): Promise<T> {
   const res = await authFetch(url(baseURL, path), {
-    method: "POST",
+    method,
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -75,6 +106,10 @@ async function postJSON<T>(baseURL: string, path: string, body: unknown): Promis
     throw await failure(res);
   }
   return (await res.json()) as T;
+}
+
+function postJSON<T>(baseURL: string, path: string, body: unknown): Promise<T> {
+  return sendJSON<T>("POST", baseURL, path, body);
 }
 
 /** GET a list endpoint and unwrap the single-key envelope (`{ <key>: [...] }`). */
@@ -124,4 +159,44 @@ export function listTeachingAssignments(
 ): Promise<TeachingAssignment[]> {
   const qs = query({ cycleId: filters.cycleId, groupId: filters.groupId, teacherId: filters.teacherId });
   return getList<TeachingAssignment>(baseURL, `/teaching-assignments${qs}`, "teachingAssignments");
+}
+
+// --- carga académica (a teacher's whole load) ------------------------------
+
+/**
+ * Gives one teacher many slots in one transaction. The answer is always 200 and
+ * says per slot what happened; a slot another teacher holds comes back as a
+ * conflict unless `replaceConflicts` was asked for.
+ */
+export async function assignTeachingLoad(
+  baseURL: string,
+  input: AssignTeachingLoadInput,
+): Promise<TeachingLoadResult> {
+  const res = await postJSON<Partial<TeachingLoadResult>>(baseURL, "/teaching-assignments/bulk", input);
+  return {
+    created: res.created ?? [],
+    reassigned: res.reassigned ?? [],
+    skipped: res.skipped ?? [],
+    conflicts: res.conflicts ?? [],
+  };
+}
+
+/** Frees a slot; anyone can be given it afterwards. */
+export async function deleteTeachingAssignment(baseURL: string, id: string): Promise<void> {
+  const res = await authFetch(url(baseURL, `/teaching-assignments/${encodeURIComponent(id)}`), {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw await failure(res);
+  }
+}
+
+/** Hands a slot to another teacher, keeping its id. */
+export function reassignTeachingAssignment(
+  baseURL: string,
+  id: string,
+  teacherId: string,
+): Promise<TeachingAssignment> {
+  return sendJSON<TeachingAssignment>("PATCH", baseURL, `/teaching-assignments/${encodeURIComponent(id)}`, { teacherId });
 }

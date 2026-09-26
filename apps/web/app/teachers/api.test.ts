@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ConfigError } from "../config/api";
 import {
+  assignTeachingLoad,
   createTeacher,
+  deleteTeachingAssignment,
+  reassignTeachingAssignment,
   createTeachingAssignment,
   listTeachers,
   listTeachingAssignments,
@@ -107,5 +111,95 @@ describe("teaching assignments", () => {
 
     await listTeachingAssignments(BASE);
     expect(lastCall(fetchMock)[0]).toBe("http://gw/api/v1/teaching-assignments");
+  });
+});
+
+describe("carga académica", () => {
+  const ta = { id: "ta1", cycleId: "c1", groupId: "g1", subjectId: "s1", teacherId: "t1" };
+
+  it("assignTeachingLoad POSTs teacherId, items and replaceConflicts to /bulk and returns every list", async () => {
+    const result = {
+      created: [ta],
+      reassigned: [],
+      skipped: [{ groupId: "g2", subjectId: "s1" }],
+      conflicts: [{ groupId: "g3", subjectId: "s1", assignmentId: "ta9", teacherId: "t9", teacherName: "Ana Ruiz" }],
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(result));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await assignTeachingLoad(BASE, {
+      teacherId: "t1",
+      items: [{ groupId: "g1", subjectId: "s1" }],
+      replaceConflicts: false,
+    });
+
+    expect(res).toEqual(result);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/teaching-assignments/bulk");
+    expect(init.method).toBe("POST");
+    expect(init.credentials).toBe("include");
+    expect(JSON.parse(init.body as string)).toEqual({
+      teacherId: "t1",
+      items: [{ groupId: "g1", subjectId: "s1" }],
+      replaceConflicts: false,
+    });
+  });
+
+  it("assignTeachingLoad fills a missing list with [] so callers never guard", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ created: [ta] })));
+    await expect(
+      assignTeachingLoad(BASE, { teacherId: "t1", items: [{ groupId: "g1", subjectId: "s1" }], replaceConflicts: false }),
+    ).resolves.toEqual({ created: [ta], reassigned: [], skipped: [], conflicts: [] });
+  });
+
+  it("assignTeachingLoad throws a ConfigError carrying the status", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("items[0]: unknown group", { status: 400 })));
+    const call = assignTeachingLoad(BASE, { teacherId: "t1", items: [{ groupId: "x", subjectId: "s1" }], replaceConflicts: false });
+    await expect(call).rejects.toBeInstanceOf(ConfigError);
+    await expect(call).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("deleteTeachingAssignment DELETEs the assignment and resolves on 204", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deleteTeachingAssignment(BASE, "ta 1")).resolves.toBeUndefined();
+
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/teaching-assignments/ta%201");
+    expect(init.method).toBe("DELETE");
+    expect(init.credentials).toBe("include");
+  });
+
+  // The gateway answers these routes in text/plain (docs/api/openapi.yaml,
+  // Plain* responses): the sentence itself must reach describeLoadWriteError.
+  it("carries the gateway's text/plain sentence as the error detail", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response("items[0].groupId must be a group id\n", { status: 400, headers: { "Content-Type": "text/plain; charset=utf-8" } }),
+      ),
+    );
+    const call = assignTeachingLoad(BASE, { teacherId: "t1", items: [{ groupId: "x", subjectId: "s1" }], replaceConflicts: false });
+    await expect(call).rejects.toMatchObject({ status: 400, detail: "items[0].groupId must be a group id" });
+  });
+
+  it("deleteTeachingAssignment throws on 404", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 404 })));
+    await expect(deleteTeachingAssignment(BASE, "ta1")).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("reassignTeachingAssignment PATCHes the new teacherId and returns the assignment", async () => {
+    const moved = { ...ta, teacherId: "t2" };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(moved));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(reassignTeachingAssignment(BASE, "ta1", "t2")).resolves.toEqual(moved);
+
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/teaching-assignments/ta1");
+    expect(init.method).toBe("PATCH");
+    expect(init.credentials).toBe("include");
+    expect(JSON.parse(init.body as string)).toEqual({ teacherId: "t2" });
   });
 });

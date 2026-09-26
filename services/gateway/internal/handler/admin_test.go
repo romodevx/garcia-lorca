@@ -481,13 +481,33 @@ func TestAdminSetRolePermissions(t *testing.T) {
 
 // --- teacher ↔ user link --------------------------------------------------
 
+// linkRoute mounts LinkTeacherUser on the PRODUCTION route pattern, so these
+// tests exercise the path a client must call — the web once posted to
+// /config/teachers/{id}/user, which nothing served.
+func linkRoute(f *fakeAdmin, l *fakeLinker) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc(handler.TeacherUserLinkRoute, newAdminHandler(f, l).LinkTeacherUser)
+	return mux
+}
+
+func TestAdminLinkTeacherUserStaleConfigPathIsNotServed(t *testing.T) {
+	f := &fakeAdmin{getUser: client.User{Email: "prof@example.com", Status: "active"}}
+	l := &fakeLinker{}
+	w := doAdminReq(t, linkRoute(f, l), http.MethodPost, "/api/v1/config/teachers/tch-1/user", `{"userId":"usr-1"}`)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 for the stale /config/ path", w.Code)
+	}
+	if l.teacherID != "" {
+		t.Errorf("linker must not be reached through the stale path, got %q", l.teacherID)
+	}
+}
+
 // The link handler validates the user exists via iam GetUser, THEN calls config
 // SetTeacherUser. Happy path: user exists ⇒ config is called and 200.
 func TestAdminLinkTeacherUser(t *testing.T) {
 	f := &fakeAdmin{getUser: client.User{Email: "prof@example.com", Status: "active"}}
 	l := &fakeLinker{}
-	h := http.HandlerFunc(newAdminHandler(f, l).LinkTeacherUser)
-	w := doAdminReq(t, h, http.MethodPost, "/api/v1/config/teachers/tch-1/user", `{"userId":"usr-1"}`, "id", "tch-1")
+	w := doAdminReq(t, linkRoute(f, l), http.MethodPost, "/api/v1/teachers/tch-1/user", `{"userId":"usr-1"}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
@@ -501,8 +521,7 @@ func TestAdminLinkTeacherUser(t *testing.T) {
 func TestAdminLinkTeacherUserUnknownUserIs404(t *testing.T) {
 	f := &fakeAdmin{getUserErr: connect.NewError(connect.CodeNotFound, errString("no user"))}
 	l := &fakeLinker{}
-	h := http.HandlerFunc(newAdminHandler(f, l).LinkTeacherUser)
-	w := doAdminReq(t, h, http.MethodPost, "/api/v1/config/teachers/tch-1/user", `{"userId":"ghost"}`, "id", "tch-1")
+	w := doAdminReq(t, linkRoute(f, l), http.MethodPost, "/api/v1/teachers/tch-1/user", `{"userId":"ghost"}`)
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", w.Code)
 	}
@@ -515,8 +534,7 @@ func TestAdminLinkTeacherUserUnknownUserIs404(t *testing.T) {
 func TestAdminLinkTeacherUserUnlinkSkipsValidation(t *testing.T) {
 	f := &fakeAdmin{getUserErr: connect.NewError(connect.CodeNotFound, errString("should not be called"))}
 	l := &fakeLinker{}
-	h := http.HandlerFunc(newAdminHandler(f, l).LinkTeacherUser)
-	w := doAdminReq(t, h, http.MethodPost, "/api/v1/config/teachers/tch-1/user", `{"userId":""}`, "id", "tch-1")
+	w := doAdminReq(t, linkRoute(f, l), http.MethodPost, "/api/v1/teachers/tch-1/user", `{"userId":""}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (unlink)", w.Code)
 	}

@@ -113,7 +113,8 @@ export function inputStyle(invalid: boolean): CSSProperties {
     color: "var(--text)",
     fontFamily: "var(--font-ui)",
     fontSize: 15,
-    outline: "none",
+    // No `outline` here: an inline value beats globals.css's :focus-visible
+    // ring and leaves a keyboard user with no idea where focus is.
     width: "100%",
     minWidth: 0,
   };

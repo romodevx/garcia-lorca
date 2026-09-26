@@ -1,14 +1,15 @@
 /**
  * Typed fetch helpers for the gateway's iam admin endpoints (`/api/v1/users`,
  * `/api/v1/roles`) plus the gateway-orchestrated teacher↔user link
- * (`/api/v1/config/teachers/{id}/user`), gated behind the `module_iam` flag +
+ * (`/api/v1/teachers/{id}/user`, behind `module_teachers` + `teachers:write`),
+ * the admin routes gated behind the `module_iam` flag +
  * cookie auth. The session lives ONLY in the HttpOnly cookie the gateway set, so
  * every call uses `credentials:"include"`; nothing secret ever travels in the
  * body or response.
  *
  * Reads require `users:read`/`roles:read`, writes `users:write`/`roles:write`
  * (the owner role holds all four); the teacher-link route sits under
- * `config:write`. These helpers mirror `app/config/api.ts`: a `url()`
+ * `teachers:write`. These helpers mirror `app/config/api.ts`: a `url()`
  * trailing-slash guard, throw on any non-2xx, and parse the gateway's
  * `{users:[…]}`/`{roles:[…]}` envelopes. Shapes match the gateway REST contract
  * (services/gateway/internal/handler/admin.go) exactly.
@@ -210,5 +211,5 @@ export function setRolePermissions(baseURL: string, id: string, permissions: str
  * teacher record.
  */
 export function linkTeacherUser(baseURL: string, teacherId: string, userId: string): Promise<Teacher> {
-  return postJSON<Teacher>(baseURL, `/config/teachers/${teacherId}/user`, { userId });
+  return postJSON<Teacher>(baseURL, `/teachers/${teacherId}/user`, { userId });
 }

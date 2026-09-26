@@ -25,3 +25,17 @@ func TestTranslateCreateErrKeepsOtherChecksInternal(t *testing.T) {
 		t.Fatalf("kind = %v, want KindInternal", glerrors.KindOf(err))
 	}
 }
+
+// A deadlock or a serialization failure is two writers racing, not a server
+// fault: the transaction rolled back whole and the caller should retry, so both
+// surface as KindConflict (409), never as a 500 that pages someone.
+func TestTranslateCreateErrMapsConcurrencyAbortsToConflict(t *testing.T) {
+	for _, code := range []string{"40P01", "40001"} {
+		t.Run(code, func(t *testing.T) {
+			err := translateCreateErr(&pgconn.PgError{Code: code}, "creating teaching load", "duplicate")
+			if glerrors.KindOf(err) != glerrors.KindConflict {
+				t.Fatalf("kind = %v, want KindConflict", glerrors.KindOf(err))
+			}
+		})
+	}
+}

@@ -155,4 +155,43 @@ type CatalogRepository interface {
 	// groupID, and teacherID ("" = do not filter on that field; all "" = every
 	// assignment in the tenant).
 	ListTeachingAssignments(ctx context.Context, cycleID string, groupID string, teacherID string) ([]domain.TeachingAssignment, error)
+	// ApplyTeachingLoad gives teacherID a batch of slots in ONE transaction.
+	// Inside it the adapter reads the teacher, the referenced groups and
+	// subjects, and the assignments already occupying the requested slots
+	// (locked FOR UPDATE, so a concurrent load cannot change them underneath),
+	// hands that snapshot to plan, and writes what plan returns. An error from
+	// plan aborts the transaction and writes nothing. A slot taken by a
+	// concurrent writer between snapshot and insert surfaces as KindConflict
+	// and also rolls everything back.
+	ApplyTeachingLoad(ctx context.Context, teacherID string, slots []domain.TeachingSlot,
+		plan func(TeachingLoadSnapshot) (TeachingLoadWrite, error)) error
+	// DeleteTeachingAssignment removes one assignment, or KindNotFound.
+	DeleteTeachingAssignment(ctx context.Context, id string) error
+	// ReassignTeachingAssignmentTx hands assignment id to teacherID in ONE
+	// transaction: it locks the assignment (SELECT … FOR UPDATE), reads whether
+	// teacherID exists, and passes both to decide. The row moves only when
+	// decide returns write=true; an error from decide rolls back. An id that
+	// matches no row is KindNotFound and decide is not called.
+	ReassignTeachingAssignmentTx(ctx context.Context, id, teacherID string,
+		decide func(a domain.TeachingAssignment, teacherFound bool) (write bool, err error)) error
+}
+
+// TeachingLoadSnapshot is what ApplyTeachingLoad reads before the use case
+// decides. Missing ids are simply absent from the maps.
+type TeachingLoadSnapshot struct {
+	Teacher      domain.Teacher
+	TeacherFound bool
+	Groups       map[string]domain.Group   // by id
+	Subjects     map[string]domain.Subject // by id
+	// Occupied holds the existing assignment of every requested slot that has one.
+	Occupied map[domain.TeachingSlot]domain.TeachingAssignment
+	// Holders are the teachers of the Occupied assignments, by id.
+	Holders map[string]domain.Teacher
+}
+
+// TeachingLoadWrite is the plan's decision: rows to insert, and existing rows
+// (same id) whose teacher changes.
+type TeachingLoadWrite struct {
+	Create   []domain.TeachingAssignment
+	Reassign []domain.TeachingAssignment
 }

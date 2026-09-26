@@ -50,8 +50,21 @@ beforeEach(() => {
 afterEach(() => vi.clearAllMocks());
 
 describe("the Docentes module", () => {
+  // Regression: a principal with teachers:read only could not even LOOK at a
+  // teacher's load. Everyone who sees the roster gets the button; the page is
+  // read-only without teachers:write (TeacherLoadScreen's own test).
+  // Found by /code-review on 2026-09-25
+  it("offers Carga académica to everyone who can see the roster, read-only principals included", async () => {
+    const onOpenLoad = vi.fn();
+    render(<TeachersScreen onBack={() => {}} onOpenLoad={onOpenLoad} />);
+
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Carga académica de Ada Lovelace" }));
+
+    expect(onOpenLoad).toHaveBeenCalledWith("t1");
+  });
+
   it("opens on the staff roster", async () => {
-    render(<TeachersScreen onBack={() => {}} />);
+    render(<TeachersScreen onBack={() => {}} onOpenLoad={() => {}} />);
 
     expect(await screen.findByRole("heading", { name: "Docentes", level: 1 })).toBeInTheDocument();
     // Scoped to the roster list: the assignment panel offers every teacher as a
@@ -65,7 +78,7 @@ describe("the Docentes module", () => {
     teachers.createTeacher.mockResolvedValue({
       id: "t2", firstName: "Grace", lastName: "Hopper", email: "grace@escuela.mx", userId: "",
     });
-    render(<TeachersScreen onBack={() => {}} />);
+    render(<TeachersScreen onBack={() => {}} onOpenLoad={() => {}} />);
     const form = await screen.findByRole("form", { name: "Agregar profesor" });
 
     await user.type(within(form).getByLabelText(/Nombre/, CAMPO), "Grace");
@@ -83,10 +96,27 @@ describe("the Docentes module", () => {
     // Configuración. A teachers:read holder without config:read gets a 403 there
     // — and an empty dropdown would read as "the school has no groups".
     config.listCycles.mockRejectedValue(new configApi.ConfigError(403, "forbidden"));
-    render(<TeachersScreen onBack={() => {}} />);
+    render(<TeachersScreen onBack={() => {}} onOpenLoad={() => {}} />);
 
     expect(await screen.findByText(/no tienes acceso al catálogo/i)).toBeInTheDocument();
     // The roster itself still works: it does not depend on the catalogue.
     expect(await screen.findByText(/Ada Lovelace/)).toBeInTheDocument();
+  });
+
+  // Regression: the carga académica page reads cycles, levels and grades from
+  // Configuración, so without config:read the whole page errored. Without the
+  // catalogue it could only show bare ids, so the roster does not offer it.
+  // Found by /code-review on 2026-09-25
+  it("does not offer Carga académica when the catalogue is closed, and says why", async () => {
+    config.listCycles.mockRejectedValue(new configApi.ConfigError(403, "forbidden"));
+    render(<TeachersScreen onBack={() => {}} onOpenLoad={() => {}} />);
+
+    expect(
+      await screen.findByText(
+        "No tienes acceso al catálogo académico; pide a la dirección el permiso de Configuración para ver nombres y asignar materias.",
+      ),
+    ).toBeInTheDocument();
+    expect(await screen.findByText(/Ada Lovelace/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Carga académica/ })).not.toBeInTheDocument();
   });
 });

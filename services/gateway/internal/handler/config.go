@@ -37,6 +37,9 @@ type ConfigService interface {
 	DeleteSchoolEvent(ctx context.Context, id string) error
 	CreateTeachingAssignment(ctx context.Context, groupID, subjectID, teacherID string) (client.TeachingAssignment, error)
 	ListTeachingAssignments(ctx context.Context, cycleID, groupID, teacherID string) ([]client.TeachingAssignment, error)
+	AssignTeachingLoad(ctx context.Context, in client.TeachingLoadInput) (client.TeachingLoadResult, error)
+	DeleteTeachingAssignment(ctx context.Context, id string) error
+	ReassignTeachingAssignment(ctx context.Context, id, teacherID string) (client.TeachingAssignment, error)
 }
 
 // ConfigHandler exposes the front-facing (HTTP/JSON) academic-catalog endpoints,
@@ -473,7 +476,7 @@ func toTeacherResponse(t client.Teacher) teacherResponse {
 	}
 }
 
-// CreateTeacher handles POST /api/v1/config/teachers.
+// CreateTeacher handles POST /api/v1/teachers.
 func (h *ConfigHandler) CreateTeacher(w http.ResponseWriter, r *http.Request) {
 	var req createTeacherRequest
 	if err := decodeJSONBody(w, r, &req); err != nil {
@@ -488,7 +491,7 @@ func (h *ConfigHandler) CreateTeacher(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, toTeacherResponse(res))
 }
 
-// ListTeachers handles GET /api/v1/config/teachers.
+// ListTeachers handles GET /api/v1/teachers.
 func (h *ConfigHandler) ListTeachers(w http.ResponseWriter, r *http.Request) {
 	res, err := h.svc.ListTeachers(r.Context())
 	if err != nil {
@@ -531,7 +534,7 @@ func toTeachingAssignmentResponse(a client.TeachingAssignment) teachingAssignmen
 	}
 }
 
-// CreateTeachingAssignment handles POST /api/v1/config/teaching-assignments.
+// CreateTeachingAssignment handles POST /api/v1/teaching-assignments.
 func (h *ConfigHandler) CreateTeachingAssignment(w http.ResponseWriter, r *http.Request) {
 	var req createTeachingAssignmentRequest
 	if err := decodeJSONBody(w, r, &req); err != nil {
@@ -547,7 +550,7 @@ func (h *ConfigHandler) CreateTeachingAssignment(w http.ResponseWriter, r *http.
 }
 
 // ListTeachingAssignments handles
-// GET /api/v1/config/teaching-assignments?cycleId=...&groupId=...&teacherId=...
+// GET /api/v1/teaching-assignments?cycleId=...&groupId=...&teacherId=...
 func (h *ConfigHandler) ListTeachingAssignments(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	res, err := h.svc.ListTeachingAssignments(r.Context(), q.Get("cycleId"), q.Get("groupId"), q.Get("teacherId"))

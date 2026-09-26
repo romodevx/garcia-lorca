@@ -30,6 +30,8 @@ import { API_URL } from "../../api-url";
 
 export interface TeachersScreenProps {
   onBack: () => void;
+  /** Opens one teacher's carga académica page. */
+  onOpenLoad: (teacherId: string) => void;
 }
 
 /**
@@ -47,7 +49,7 @@ export interface TeachersScreenProps {
  * sentence saying so rather than three empty dropdowns that read like a school
  * with no groups.
  */
-export function TeachersScreen({ onBack }: TeachersScreenProps): ReactElement {
+export function TeachersScreen({ onBack, onOpenLoad }: TeachersScreenProps): ReactElement {
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [catalogueClosed, setCatalogueClosed] = useState(false);
@@ -122,13 +124,13 @@ export function TeachersScreen({ onBack }: TeachersScreenProps): ReactElement {
       {rosterError !== undefined && <Note>{rosterError}</Note>}
       {catalogueClosed && (
         <Note>
-          No tienes acceso al catálogo académico, así que no puedes asignar materias desde aquí.
-          Pídele a la dirección el permiso de Configuración.
+          No tienes acceso al catálogo académico; pide a la dirección el permiso de Configuración para ver nombres y asignar materias.
         </Note>
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 18 }}>
-        <TeachersPanel teachers={teachers} onCreate={handleCreateTeacher} />
+        {/* The load page names groups and subjects from Configuración: without it, only bare ids. */}
+        <TeachersPanel teachers={teachers} onCreate={handleCreateTeacher} onOpenLoad={catalogueClosed ? undefined : onOpenLoad} />
         {!catalogueClosed && (
           <AssignmentsPanel
             cycles={cycles}

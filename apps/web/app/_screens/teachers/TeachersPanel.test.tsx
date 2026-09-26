@@ -12,7 +12,7 @@ describe("TeachersPanel", () => {
   it("marca un correo mal escrito al guardar con Enter y no lo manda", async () => {
     const user = userEvent.setup();
     const onCreate = vi.fn().mockResolvedValue(undefined);
-    render(<TeachersPanel teachers={[]} onCreate={onCreate} />);
+    render(<TeachersPanel teachers={[]} onCreate={onCreate} onOpenLoad={vi.fn()} />);
 
     await user.type(screen.getByLabelText(/^Nombre/), "Ana");
     await user.type(screen.getByLabelText(/^Apellidos/), "Ruiz");
@@ -33,7 +33,7 @@ describe("TeachersPanel", () => {
   it("con un correo bien escrito sí lo crea", async () => {
     const user = userEvent.setup();
     const onCreate = vi.fn().mockResolvedValue(undefined);
-    render(<TeachersPanel teachers={[]} onCreate={onCreate} />);
+    render(<TeachersPanel teachers={[]} onCreate={onCreate} onOpenLoad={vi.fn()} />);
 
     await user.type(screen.getByLabelText(/^Nombre/), "Ana");
     await user.type(screen.getByLabelText(/^Apellidos/), "Ruiz");
@@ -48,7 +48,7 @@ describe("TeachersPanel", () => {
   it("nunca deshabilita Crear profesor: al guardar marca lo que falta, correo incluido", async () => {
     const user = userEvent.setup();
     const onCreate = vi.fn().mockResolvedValue(undefined);
-    render(<TeachersPanel teachers={[]} onCreate={onCreate} />);
+    render(<TeachersPanel teachers={[]} onCreate={onCreate} onOpenLoad={vi.fn()} />);
 
     await user.type(screen.getByLabelText(/^Nombre/), "Ana");
     await user.type(screen.getByLabelText(/^Apellidos/), "Torres");
@@ -60,5 +60,16 @@ describe("TeachersPanel", () => {
     expect(screen.getByLabelText(/^Correo/)).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByLabelText(/^Correo/)).toHaveFocus();
     expect(screen.getByText("Correo").parentElement).toHaveTextContent("*");
+  });
+
+  it("cada docente de la plantilla abre su carga académica", async () => {
+    const user = userEvent.setup();
+    const onOpenLoad = vi.fn();
+    const ada = { id: "t1", firstName: "Ada", lastName: "Lovelace", email: "ada@escuela.mx", userId: "" };
+    render(<TeachersPanel teachers={[ada]} onCreate={vi.fn()} onOpenLoad={onOpenLoad} />);
+
+    await user.click(screen.getByRole("button", { name: "Carga académica de Ada Lovelace" }));
+
+    expect(onOpenLoad).toHaveBeenCalledWith("t1");
   });
 });

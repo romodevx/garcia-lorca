@@ -121,6 +121,22 @@ service ConfigService {
   // ListTeachingAssignments lists assignments, optionally filtered by
   // cycle_id / group_id / teacher_id (empty = any).
   rpc ListTeachingAssignments(ListTeachingAssignmentsRequest) returns (ListTeachingAssignmentsResponse);
+  // AssignTeachingLoad gives one teacher a batch of (group, subject) slots in
+  // ONE transaction ("carga académica"). Every item is validated first; one
+  // invalid item (malformed id, unknown group/subject/teacher, a subject of
+  // another grade level, the same slot twice) fails the whole request and names
+  // it. A slot already held by this teacher is skipped; a slot held by someone
+  // else is reported in `conflicts` and left untouched, unless
+  // replace_conflicts is set, in which case it is reassigned to this teacher.
+  // Each slot still has exactly one teacher per cycle (no co-teaching).
+  rpc AssignTeachingLoad(AssignTeachingLoadRequest) returns (AssignTeachingLoadResponse);
+  // DeleteTeachingAssignment frees a (group, subject) slot. NotFound if the id
+  // does not exist.
+  rpc DeleteTeachingAssignment(DeleteTeachingAssignmentRequest) returns (DeleteTeachingAssignmentResponse);
+  // ReassignTeachingAssignment hands an existing slot to another teacher,
+  // keeping the assignment id. NotFound if the assignment does not exist;
+  // InvalidArgument if the teacher does not.
+  rpc ReassignTeachingAssignment(ReassignTeachingAssignmentRequest) returns (ReassignTeachingAssignmentResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -548,6 +564,59 @@ message ListTeachingAssignmentsRequest {
 // ListTeachingAssignmentsResponse returns the matching assignments.
 message ListTeachingAssignmentsResponse {
   repeated TeachingAssignment teaching_assignments = 1;
+}
+
+// TeachingLoadItem is one (group, subject) slot of a teaching load. The cycle
+// is derived from the group.
+message TeachingLoadItem {
+  string group_id = 1;
+  string subject_id = 2;
+}
+
+// TeachingLoadConflict is a requested slot another teacher already holds.
+message TeachingLoadConflict {
+  string group_id = 1;
+  string subject_id = 2;
+  string assignment_id = 3;  // the existing assignment occupying the slot
+  string teacher_id = 4;     // the teacher currently holding it
+  string teacher_name = 5;   // "first last" of that teacher
+}
+
+// AssignTeachingLoadRequest assigns every item to teacher_id. At most 500
+// items per request (a technical bound on one transaction, not a limit on how
+// many classes a teacher may hold).
+message AssignTeachingLoadRequest {
+  string teacher_id = 1;
+  repeated TeachingLoadItem items = 2;
+  bool replace_conflicts = 3;
+}
+
+// AssignTeachingLoadResponse reports what happened to each item, in request
+// order within each list.
+message AssignTeachingLoadResponse {
+  repeated TeachingAssignment created = 1;
+  repeated TeachingAssignment reassigned = 2;
+  repeated TeachingLoadItem skipped = 3;  // already held by this teacher
+  repeated TeachingLoadConflict conflicts = 4;  // left untouched (replace_conflicts=false)
+}
+
+// DeleteTeachingAssignmentRequest removes one assignment by id.
+message DeleteTeachingAssignmentRequest {
+  string id = 1;
+}
+
+// DeleteTeachingAssignmentResponse is empty: success means the slot is free.
+message DeleteTeachingAssignmentResponse {}
+
+// ReassignTeachingAssignmentRequest moves an assignment to another teacher.
+message ReassignTeachingAssignmentRequest {
+  string id = 1;
+  string teacher_id = 2;
+}
+
+// ReassignTeachingAssignmentResponse returns the updated assignment.
+message ReassignTeachingAssignmentResponse {
+  TeachingAssignment teaching_assignment = 1;
 }
 
 // --- School calendar (M16) ------------------------------------------------

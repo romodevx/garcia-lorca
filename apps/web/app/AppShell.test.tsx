@@ -52,6 +52,13 @@ vi.mock("./config/api", () => ({
   listGradeLevels: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock("./teachers/api", () => ({
+  listTeachers: vi.fn().mockResolvedValue([
+    { id: "t1", firstName: "Ada", lastName: "Lovelace", email: "ada@escuela.mx", userId: "" },
+  ]),
+  listTeachingAssignments: vi.fn().mockResolvedValue([]),
+}));
+
 vi.mock("./students/api", () => ({
   listStudents: vi.fn().mockResolvedValue([]),
   listContacts: vi.fn().mockResolvedValue([]),
@@ -520,6 +527,31 @@ describe("la dirección manda sobre la pantalla", () => {
 
     expect(await screen.findByRole("heading", { name: "Estudiantes" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Editar ficha" })).not.toBeInTheDocument();
+  });
+
+  it("la carga académica de un docente tiene su propia dirección", async () => {
+    resetFakeRouter("/docentes/t1/carga");
+    mockMe.mockResolvedValue(OWNER_ME);
+    render(
+      <Providers flags={{ module_teachers: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    expect(await screen.findByRole("heading", { name: "Carga académica de Ada Lovelace" })).toBeInTheDocument();
+  });
+
+  it("con Docentes apagado, la dirección de la carga no pinta la página", async () => {
+    resetFakeRouter("/docentes/t1/carga");
+    mockMe.mockResolvedValue(OWNER_ME);
+    render(
+      <Providers flags={{ module_teachers: false }}>
+        <AppShell />
+      </Providers>
+    );
+
+    expect(await screen.findByRole("heading", { level: 1 })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Carga académica/ })).not.toBeInTheDocument();
   });
 
   it("pinta la pantalla que dice la dirección, no la última visitada", async () => {

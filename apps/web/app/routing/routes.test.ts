@@ -19,6 +19,7 @@ describe("el mapa de rutas", () => {
     ["/administracion", { screen: "admin" }],
     ["/modulo/reportes", { screen: "module", moduleId: "reportes" }],
     ["/alumnos/stu-1/editar", { screen: "studentEdit", studentId: "stu-1" }],
+    ["/docentes/tch-1/carga", { screen: "teacherLoad", teacherId: "tch-1" }],
   ];
 
   it.each(pares)("%s ida y vuelta", (path, view) => {
@@ -33,6 +34,17 @@ describe("el mapa de rutas", () => {
   it("un id de alumno con diagonal o vacío no se cuela", () => {
     expect(pathToView("/alumnos//editar")).toEqual({ screen: "dashboard" });
     expect(pathToView("/alumnos/a/b/editar")).toEqual({ screen: "dashboard" });
+  });
+
+  it("un id de docente con diagonal o vacío no se cuela", () => {
+    expect(pathToView("/docentes//carga")).toEqual({ screen: "dashboard" });
+    expect(pathToView("/docentes/a/b/carga")).toEqual({ screen: "dashboard" });
+    expect(pathToView("/docentes/%E0%A4%A/carga")).toEqual({ screen: "dashboard" });
+  });
+
+  it("el id del docente viaja escapado en la dirección", () => {
+    expect(viewToPath({ screen: "teacherLoad", teacherId: "a b" })).toBe("/docentes/a%20b/carga");
+    expect(pathToView("/docentes/a%20b/carga")).toEqual({ screen: "teacherLoad", teacherId: "a b" });
   });
 
   it("un id con un escape roto no tumba la app", () => {

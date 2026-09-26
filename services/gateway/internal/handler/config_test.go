@@ -71,6 +71,13 @@ type fakeConfig struct {
 	asgGroup      string
 	asgTeacher    string
 
+	// teaching load ("carga académica")
+	load              *client.TeachingLoadInput
+	loadResult        client.TeachingLoadResult
+	deletedAssignment string
+	reassignID        string
+	reassignTo        string
+
 	err error
 }
 
