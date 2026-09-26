@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import { usePathname, useRouter } from "next/navigation";
 import { useFlag } from "@garcia-lorca/ui/flags";
 import { pathToView, viewToPath, type View } from "./routing/routes";
+import { canReachView } from "./routing/moduleAccess";
 import { CommandPaletteHost } from "./command/CommandPaletteHost";
 import { TopBar } from "./_design/TopBar";
 import { MODULES, USERS, type ModuleDef, type Role, type UserProfile } from "./_design/data";
@@ -99,7 +100,7 @@ export function AppShell(): ReactElement {
   // y la web entera respondía en "/", así que el navegador nunca veía una
   // segunda página: el botón "atrás" sólo podía sacar del sitio y F5 devolvía
   // al tablero.
-  const view = pathToView(pathname);
+  const addressedView = pathToView(pathname);
 
   /** Navegar dejando huella: "atrás" regresa aquí. */
   const go = useCallback((next: View): void => { router.push(viewToPath(next)); }, [router]);
@@ -155,6 +156,15 @@ export function AppShell(): ReactElement {
   // like in the demo (dev, 2026-09-07) until somebody reported "no veo ningún
   // módulo".
   const [principalFailed, setPrincipalFailed] = useState(false);
+
+  // A typed address to a module the principal cannot see (a teacher at
+  // /finanzas) lands on the dashboard instead of an empty 403 shell, and the
+  // address follows. UX only: the gateway still refuses the data.
+  const reachable = canReachView(addressedView, principal?.permissions);
+  const view: View = reachable ? addressedView : { screen: "dashboard" };
+  useEffect(() => {
+    if (!reachable) router.replace(viewToPath({ screen: "dashboard" }));
+  }, [reachable, router]);
 
   // Loading the caller's permissions, and recording whether it worked. Shared by
   // the login flow and the retry button so both go through the same path.
