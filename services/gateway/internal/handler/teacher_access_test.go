@@ -23,8 +23,9 @@ import (
 // accounts that already exist, and the writes, each recorded so a test can prove
 // a refused request wrote nothing.
 type fakeTeacherIAM struct {
-	roles []client.Role
-	users []client.User
+	roles      []client.Role
+	users      []client.User
+	getUserErr error
 
 	invitedEmail   string
 	invitedName    string
@@ -46,6 +47,9 @@ func (f *fakeTeacherIAM) ListRoles(context.Context) ([]client.Role, error) { ret
 func (f *fakeTeacherIAM) ListUsers(context.Context) ([]client.User, error) { return f.users, nil }
 
 func (f *fakeTeacherIAM) GetUser(_ context.Context, id string) (client.User, error) {
+	if f.getUserErr != nil {
+		return client.User{}, f.getUserErr
+	}
 	for _, u := range f.users {
 		if u.ID == id {
 			return u, nil
@@ -358,5 +362,48 @@ func TestTeacherAccessAccountOfAnotherTeacherIsRefusedBeforeAnyWrite(t *testing.
 
 	assert.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
 	assert.Zero(t, iam.writes(), "nothing is written to iam")
+	assert.Zero(t, cfg.linkCalls)
+}
+
+// A link to an account iam no longer has is no link: the teacher is treated as
+// unlinked — a fresh invitation, and the link is rewritten to the new account.
+func TestTeacherAccessStaleLinkInvitesAndRelinks(t *testing.T) {
+	stale := unlinkedTeacher()
+	stale.UserID = "usr-gone"
+	iam, cfg := teacherIAM(), teacherConfig(stale)
+	rec := doTeacherAccess(t, handler.NewTeacherAccessHandler(iam, cfg), "tch-1", ownerCaller)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, 1, iam.inviteCalls)
+	assert.Equal(t, 1, cfg.linkCalls, "the stale link is rewritten")
+	assert.Equal(t, "usr-new", cfg.linkedUserID)
+	assert.Equal(t, "usr-new", decodeTeacherAccess(t, rec).Teacher.UserID)
+}
+
+// The stale link falls through to the address: an account already there (a
+// maestro one, so no confirmation is due) is reused and relinked.
+func TestTeacherAccessStaleLinkReusesTheAccountByEmail(t *testing.T) {
+	stale := unlinkedTeacher()
+	stale.UserID = "usr-gone"
+	iam, cfg := teacherIAM(), teacherConfig(stale)
+	iam.users = []client.User{{ID: "usr-m", Email: "gabriela@example.com", Status: "active", RoleIDs: []string{maestroRoleID}}}
+	rec := doTeacherAccess(t, handler.NewTeacherAccessHandler(iam, cfg), "tch-1", ownerCaller)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Zero(t, iam.writes())
+	assert.Equal(t, "usr-m", cfg.linkedUserID)
+}
+
+// Only NotFound means "no such account". iam being down is an error, never a
+// reason to mint a second account for a teacher who may well have one.
+func TestTeacherAccessLinkedLookupFailureIsNotAStaleLink(t *testing.T) {
+	linked := unlinkedTeacher()
+	linked.UserID = "usr-new"
+	iam, cfg := teacherIAM(), teacherConfig(linked)
+	iam.getUserErr = connect.NewError(connect.CodeUnavailable, errors.New("iam down"))
+	rec := doTeacherAccess(t, handler.NewTeacherAccessHandler(iam, cfg), "tch-1", ownerCaller)
+
+	assert.GreaterOrEqual(t, rec.Code, http.StatusInternalServerError, rec.Body.String())
+	assert.Zero(t, iam.writes())
 	assert.Zero(t, cfg.linkCalls)
 }

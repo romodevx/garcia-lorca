@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 
+	connect "connectrpc.com/connect"
+
 	"github.com/garcia-lorca/services/gateway/internal/client"
 )
 
@@ -114,18 +116,25 @@ func (h *TeacherAccessHandler) GrantAccess(w http.ResponseWriter, r *http.Reques
 		writeConnectError(w, err)
 		return
 	}
-	email := strings.TrimSpace(teacher.Email)
-	if teacher.UserID == "" && email == "" {
-		http.Error(w, errTeacherHasNoEmail, http.StatusBadRequest)
-		return
-	}
-
-	user, found, err := h.existingAccount(ctx, teacher, email)
+	linkedUser, linked, err := h.linkedAccount(ctx, teacher)
 	if err != nil {
 		writeConnectError(w, err)
 		return
 	}
-	if found && teacher.UserID == "" {
+	email := strings.TrimSpace(teacher.Email)
+	if !linked && email == "" {
+		http.Error(w, errTeacherHasNoEmail, http.StatusBadRequest)
+		return
+	}
+
+	user, found := linkedUser, linked
+	if !linked {
+		if user, found, err = h.accountByEmail(ctx, email); err != nil {
+			writeConnectError(w, err)
+			return
+		}
+	}
+	if found && !linked {
 		taken, err := h.linkedToAnotherTeacher(ctx, teacher.ID, user.ID)
 		if err != nil {
 			writeConnectError(w, err)
@@ -153,7 +162,7 @@ func (h *TeacherAccessHandler) GrantAccess(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if teacher.UserID == "" {
+	if !linked {
 		if teacher, err = h.config.SetTeacherUser(ctx, teacher.ID, user.ID); err != nil {
 			writeConnectError(w, err)
 			return
@@ -168,17 +177,26 @@ func (h *TeacherAccessHandler) GrantAccess(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// existingAccount finds the account this teacher already has: the linked one,
-// else the one registered under the teacher's address (case-insensitive — iam
-// stores emails lowercased, a teacher record may not).
-func (h *TeacherAccessHandler) existingAccount(ctx context.Context, teacher client.Teacher, email string) (client.User, bool, error) {
-	if teacher.UserID != "" {
-		user, err := h.iam.GetUser(ctx, teacher.UserID)
-		if err != nil {
-			return client.User{}, false, err
-		}
-		return user, true, nil
+// linkedAccount returns the account the teacher is linked to. A link to an
+// account iam no longer has (NotFound) is no link at all: linked is false, so
+// the caller falls through to the address and rewrites the link.
+func (h *TeacherAccessHandler) linkedAccount(ctx context.Context, teacher client.Teacher) (client.User, bool, error) {
+	if teacher.UserID == "" {
+		return client.User{}, false, nil
 	}
+	user, err := h.iam.GetUser(ctx, teacher.UserID)
+	if connect.CodeOf(err) == connect.CodeNotFound {
+		return client.User{}, false, nil
+	}
+	if err != nil {
+		return client.User{}, false, err
+	}
+	return user, true, nil
+}
+
+// accountByEmail finds the account registered under the teacher's address
+// (case-insensitive — iam stores emails lowercased, a teacher record may not).
+func (h *TeacherAccessHandler) accountByEmail(ctx context.Context, email string) (client.User, bool, error) {
 	users, err := h.iam.ListUsers(ctx)
 	if err != nil {
 		return client.User{}, false, err
