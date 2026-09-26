@@ -51,7 +51,7 @@ afterEach(() => vi.clearAllMocks());
 
 describe("the Docentes module", () => {
   it("opens on the staff roster", async () => {
-    render(<TeachersScreen onBack={() => {}} />);
+    render(<TeachersScreen onBack={() => {}} onOpenLoad={() => {}} />);
 
     expect(await screen.findByRole("heading", { name: "Docentes", level: 1 })).toBeInTheDocument();
     // Scoped to the roster list: the assignment panel offers every teacher as a
@@ -65,7 +65,7 @@ describe("the Docentes module", () => {
     teachers.createTeacher.mockResolvedValue({
       id: "t2", firstName: "Grace", lastName: "Hopper", email: "grace@escuela.mx", userId: "",
     });
-    render(<TeachersScreen onBack={() => {}} />);
+    render(<TeachersScreen onBack={() => {}} onOpenLoad={() => {}} />);
     const form = await screen.findByRole("form", { name: "Agregar profesor" });
 
     await user.type(within(form).getByLabelText(/Nombre/, CAMPO), "Grace");
@@ -83,7 +83,7 @@ describe("the Docentes module", () => {
     // Configuración. A teachers:read holder without config:read gets a 403 there
     // — and an empty dropdown would read as "the school has no groups".
     config.listCycles.mockRejectedValue(new configApi.ConfigError(403, "forbidden"));
-    render(<TeachersScreen onBack={() => {}} />);
+    render(<TeachersScreen onBack={() => {}} onOpenLoad={() => {}} />);
 
     expect(await screen.findByText(/no tienes acceso al catálogo/i)).toBeInTheDocument();
     // The roster itself still works: it does not depend on the catalogue.

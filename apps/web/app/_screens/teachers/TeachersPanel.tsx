@@ -11,6 +11,8 @@ const REQUIRED = ["firstName", "lastName", "email"] as const;
 export interface TeachersPanelProps {
   teachers: readonly Teacher[];
   onCreate: (input: CreateTeacherInput) => Promise<void>;
+  /** Opens the teacher's carga académica page. */
+  onOpenLoad: (teacherId: string) => void;
 }
 
 /**
@@ -18,7 +20,7 @@ export interface TeachersPanelProps {
  * for a future IAM link and intentionally not collected here. Dumb panel — data
  * + an async `onCreate` come from the Catalog orchestrator.
  */
-export function TeachersPanel({ teachers, onCreate }: TeachersPanelProps): ReactElement {
+export function TeachersPanel({ teachers, onCreate, onOpenLoad }: TeachersPanelProps): ReactElement {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
@@ -57,12 +59,22 @@ export function TeachersPanel({ teachers, onCreate }: TeachersPanelProps): React
           {teachers.map((t) => (
             <li
               key={t.id}
-              style={{ padding: "8px 12px", borderRadius: "var(--r-md)", background: "var(--surface-2)", fontSize: 14 }}
+              style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 6px 6px 12px", borderRadius: "var(--r-md)", background: "var(--surface-2)", fontSize: 14 }}
             >
-              <span style={{ fontWeight: 600 }}>
-                {t.firstName} {t.lastName}
-              </span>{" "}
-              <span style={{ color: "var(--text-muted)" }}>· {t.email}</span>
+              <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>
+                <span style={{ fontWeight: 600 }}>
+                  {t.firstName} {t.lastName}
+                </span>{" "}
+                <span style={{ color: "var(--text-muted)" }}>· {t.email}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => onOpenLoad(t.id)}
+                aria-label={`Carga académica de ${t.firstName} ${t.lastName}`}
+                style={{ minHeight: 44, padding: "0 14px", borderRadius: "var(--r-pill)", border: "1.5px solid var(--forest)", color: "var(--forest)", fontWeight: 600, fontSize: 13.5, cursor: "pointer" }}
+              >
+                Carga académica
+              </button>
             </li>
           ))}
         </ul>
