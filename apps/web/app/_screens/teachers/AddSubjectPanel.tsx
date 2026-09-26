@@ -47,10 +47,15 @@ export function AddSubjectPanel({ teacherId, catalogue, onAssign }: AddSubjectPa
     setGroupError(undefined);
   };
 
-  const pickedItems = (): TeachingLoadItem[] =>
-    tree.flatMap((l) => l.grades.flatMap((g) => g.groups)).flatMap(({ group, availability }) =>
-      isSelectable(availability) && selected.has(group.id) ? [{ groupId: group.id, subjectId: availability.subjectId }] : [],
-    );
+  // Derived once per (tree, selection): the button's count and the submit
+  // send the very same list.
+  const picked = useMemo<TeachingLoadItem[]>(
+    () =>
+      tree.flatMap((l) => l.grades.flatMap((g) => g.groups)).flatMap(({ group, availability }) =>
+        isSelectable(availability) && selected.has(group.id) ? [{ groupId: group.id, subjectId: availability.subjectId }] : [],
+      ),
+    [tree, selected],
+  );
 
   const submit = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
@@ -60,8 +65,7 @@ export function AddSubjectPanel({ teacherId, catalogue, onAssign }: AddSubjectPa
       focusFirstInvalid();
       return;
     }
-    const items = pickedItems();
-    if (items.length === 0) {
+    if (picked.length === 0) {
       setGroupError(NO_GROUP);
       gridRef.current?.querySelector<HTMLInputElement>("input:not(:disabled)")?.focus();
       return;
@@ -69,7 +73,7 @@ export function AddSubjectPanel({ teacherId, catalogue, onAssign }: AddSubjectPa
     setPending(true);
     setFailure(undefined);
     try {
-      await onAssign(items);
+      await onAssign(picked);
       setSelected(new Set());
     } catch (cause) {
       setFailure(describeLoadWriteError(cause, "No se pudo asignar."));
@@ -78,7 +82,7 @@ export function AddSubjectPanel({ teacherId, catalogue, onAssign }: AddSubjectPa
     }
   };
 
-  const count = pickedItems().length;
+  const count = picked.length;
 
   return (
     <Section title="Agregar asignatura" subtitle="Elige la asignatura y luego los grupos donde la imparte.">
