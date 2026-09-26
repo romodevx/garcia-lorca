@@ -333,6 +333,7 @@ func (h *TeachingAttendanceHandler) SaveAttendance(w http.ResponseWriter, r *htt
 		Marks:       toMarks(req.Marks),
 		TakenBy:     p.UserID,
 		TakenByName: takerName(r.Context(), h.users, p),
+		SubjectName: subjectName(r.Context(), h.scope.config, req.SubjectID),
 	})
 	if err != nil {
 		writeConnectError(w, err)

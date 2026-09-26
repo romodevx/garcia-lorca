@@ -26,6 +26,9 @@ type AttendanceService interface {
 type DirectorAttendanceCatalogReader interface {
 	AttendanceGroupReader
 	ListTeachingAssignments(ctx context.Context, cycleID, groupID, teacherID string) ([]client.TeachingAssignment, error)
+	// GetSubject names a per-class list's subject on the events a save
+	// publishes (T5).
+	SubjectReader
 }
 
 // AttendanceHandler exposes the director-facing (HTTP/JSON) attendance
@@ -241,6 +244,7 @@ func (h *AttendanceHandler) SaveDaily(w http.ResponseWriter, r *http.Request) {
 		Marks:       toMarks(req.Marks),
 		TakenBy:     p.UserID,
 		TakenByName: takerName(r.Context(), h.users, p),
+		SubjectName: subjectName(r.Context(), h.catalog, req.SubjectID),
 	})
 	if err != nil {
 		writeConnectError(w, err)

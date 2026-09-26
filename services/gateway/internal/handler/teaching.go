@@ -61,6 +61,8 @@ type TeachingCatalogReader interface {
 	ListLevels(ctx context.Context) ([]client.LevelResult, error)
 	// The point reads resolve ONE pass list's group → grade → level.
 	AttendanceGroupReader
+	// GetSubject names a per-class list's subject on a save's events (T5).
+	SubjectReader
 }
 
 // TeachingCycleReader lists the school's cycles, so the surface can tell which

@@ -58,6 +58,9 @@ type SaveAttendanceInput struct {
 	Marks       []Mark
 	TakenBy     string
 	TakenByName string
+	// SubjectName is the per-class list's display label, carried onto the
+	// events (comms names the class). Empty for a daily list.
+	SubjectName string
 }
 
 // Mark is one exception submitted for a group·day. Status is normally
@@ -130,6 +133,7 @@ func (c *AttendanceClient) SaveDailyAttendance(ctx context.Context, in SaveAtten
 		Marks:       fromMarks(in.Marks),
 		TakenBy:     in.TakenBy,
 		TakenByName: in.TakenByName,
+		SubjectName: in.SubjectName,
 	}))
 	if err != nil {
 		return 0, 0, err
@@ -152,6 +156,32 @@ func (c *AttendanceClient) ListAttendance(ctx context.Context, enrollmentID, fro
 	out := make([]AttendanceRecord, 0, len(res.Msg.GetRecords()))
 	for _, r := range res.Msg.GetRecords() {
 		out = append(out, toAttendanceRecord(r))
+	}
+	return out, nil
+}
+
+// TakenList is one list that was taken: its group, ISO day and subject (empty
+// for the daily list).
+type TakenList struct {
+	GroupID   string
+	Date      string
+	SubjectID string
+}
+
+// ListSessions returns which lists were taken for groupIDs between two inclusive
+// ISO days (at most 62 days, 20 groups), newest first, in one call.
+func (c *AttendanceClient) ListSessions(ctx context.Context, groupIDs []string, from, to string) ([]TakenList, error) {
+	res, err := c.rpc.ListSessions(ctx, connect.NewRequest(&attendancev1.ListSessionsRequest{
+		GroupIds: groupIDs,
+		FromDate: from,
+		ToDate:   to,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TakenList, 0, len(res.Msg.GetLists()))
+	for _, l := range res.Msg.GetLists() {
+		out = append(out, TakenList{GroupID: l.GetGroupId(), Date: l.GetDate(), SubjectID: l.GetSubjectId()})
 	}
 	return out, nil
 }

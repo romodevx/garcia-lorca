@@ -213,6 +213,26 @@ func resolveListGroup(ctx context.Context, r AttendanceGroupReader, groupID stri
 	return newListGroup(g, grade, level), true, nil
 }
 
+// SubjectReader reads ONE subject by id. The Connect ConfigClient satisfies it.
+type SubjectReader interface {
+	GetSubject(ctx context.Context, id string) (client.SubjectResult, error)
+}
+
+// subjectName is the display name of a per-class list's subject, carried onto
+// the events a save publishes so the family's notification names the class
+// (T5). It is a courtesy, never a gate: a daily list (no subject), an unknown
+// subject or a catalog that cannot answer all yield "" and the save proceeds.
+func subjectName(ctx context.Context, subjects SubjectReader, subjectID string) string {
+	if subjectID == "" {
+		return ""
+	}
+	s, err := subjects.GetSubject(ctx, subjectID)
+	if err != nil {
+		return ""
+	}
+	return s.Name
+}
+
 // isNotFound reports a Connect NotFound.
 func isNotFound(err error) bool {
 	return err != nil && connect.CodeOf(err) == connect.CodeNotFound
