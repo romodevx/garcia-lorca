@@ -102,4 +102,21 @@ describe("the Docentes module", () => {
     // The roster itself still works: it does not depend on the catalogue.
     expect(await screen.findByText(/Ada Lovelace/)).toBeInTheDocument();
   });
+
+  // Regression: the carga académica page reads cycles, levels and grades from
+  // Configuración, so without config:read the whole page errored. Without the
+  // catalogue it could only show bare ids, so the roster does not offer it.
+  // Found by /code-review on 2026-09-25
+  it("does not offer Carga académica when the catalogue is closed, and says why", async () => {
+    config.listCycles.mockRejectedValue(new configApi.ConfigError(403, "forbidden"));
+    render(<TeachersScreen onBack={() => {}} onOpenLoad={() => {}} />);
+
+    expect(
+      await screen.findByText(
+        "No tienes acceso al catálogo académico; pide a la dirección el permiso de Configuración para ver nombres y asignar materias.",
+      ),
+    ).toBeInTheDocument();
+    expect(await screen.findByText(/Ada Lovelace/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Carga académica/ })).not.toBeInTheDocument();
+  });
 });

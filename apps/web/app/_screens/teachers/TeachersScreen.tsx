@@ -124,13 +124,13 @@ export function TeachersScreen({ onBack, onOpenLoad }: TeachersScreenProps): Rea
       {rosterError !== undefined && <Note>{rosterError}</Note>}
       {catalogueClosed && (
         <Note>
-          No tienes acceso al catálogo académico, así que no puedes asignar materias desde aquí.
-          Pídele a la dirección el permiso de Configuración.
+          No tienes acceso al catálogo académico; pide a la dirección el permiso de Configuración para ver nombres y asignar materias.
         </Note>
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 18 }}>
-        <TeachersPanel teachers={teachers} onCreate={handleCreateTeacher} onOpenLoad={onOpenLoad} />
+        {/* The load page names groups and subjects from Configuración: without it, only bare ids. */}
+        <TeachersPanel teachers={teachers} onCreate={handleCreateTeacher} onOpenLoad={catalogueClosed ? undefined : onOpenLoad} />
         {!catalogueClosed && (
           <AssignmentsPanel
             cycles={cycles}

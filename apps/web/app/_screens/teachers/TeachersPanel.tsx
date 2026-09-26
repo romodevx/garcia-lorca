@@ -14,9 +14,10 @@ export interface TeachersPanelProps {
   /**
    * Opens the teacher's carga académica page. Offered to everyone who sees the
    * roster (teachers:read): the page itself hides its write controls from
-   * those without teachers:write.
+   * those without teachers:write. Absent when the academic catalogue is
+   * closed to this account: the page could not name a single class.
    */
-  onOpenLoad: (teacherId: string) => void;
+  onOpenLoad?: (teacherId: string) => void;
 }
 
 /**
@@ -71,6 +72,7 @@ export function TeachersPanel({ teachers, onCreate, onOpenLoad }: TeachersPanelP
                 </span>{" "}
                 <span style={{ color: "var(--text-muted)" }}>· {t.email}</span>
               </span>
+              {onOpenLoad !== undefined && (
               <button
                 type="button"
                 onClick={() => onOpenLoad(t.id)}
@@ -79,6 +81,7 @@ export function TeachersPanel({ teachers, onCreate, onOpenLoad }: TeachersPanelP
               >
                 Carga académica
               </button>
+              )}
             </li>
           ))}
         </ul>
