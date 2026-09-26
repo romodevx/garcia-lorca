@@ -71,6 +71,49 @@ describe("useAsyncResource", () => {
   });
 });
 
+describe("useAsyncResource identity change", () => {
+  it("clears the previous data when load changes, so child A is never shown under child B", async () => {
+    const loadA = jest.fn().mockResolvedValue("A");
+    const loadB = jest.fn(() => new Promise<string>(() => undefined));
+    const { rerender } = await render(<Probe load={loadA} />);
+    await waitFor(() => expect(text("data")).toBe("A"));
+
+    await act(async () => {
+      rerender(<Probe load={loadB} />);
+    });
+
+    expect(text("data")).toBe("null");
+    expect(text("loading")).toBe("true");
+  });
+
+  it("keeps the data on a manual reload (pull-to-refresh)", async () => {
+    let resolveSecond: (v: string) => void = () => undefined;
+    const load = jest
+      .fn()
+      .mockResolvedValueOnce("first")
+      .mockImplementationOnce(() => new Promise<string>((resolve) => (resolveSecond = resolve)));
+    let reload: () => Promise<void> = async () => undefined;
+    function ReloadProbe(): ReactElement {
+      const resource = useAsyncResource(load);
+      reload = resource.reload;
+      return <Text testID="data">{resource.data ?? "null"}</Text>;
+    }
+    await render(<ReloadProbe />);
+    await waitFor(() => expect(text("data")).toBe("first"));
+
+    let pending: Promise<void> = Promise.resolve();
+    await act(async () => {
+      pending = reload();
+    });
+    expect(text("data")).toBe("first");
+    await act(async () => {
+      resolveSecond("second");
+      await pending;
+    });
+    expect(text("data")).toBe("second");
+  });
+});
+
 describe("useAsyncResource errorStatus", () => {
   function StatusProbe({ load }: { load: () => Promise<string> }): ReactElement {
     const { errorStatus } = useAsyncResource(load);

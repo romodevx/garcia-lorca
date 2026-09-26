@@ -16,6 +16,22 @@ describe("freshness signal", () => {
   });
 });
 
+describe("idle subscribers", () => {
+  it("does not subscribe while inactive (an idle resource has nothing to reload)", async () => {
+    const reload = jest.fn(async () => undefined);
+    const { rerender } = await renderHook(({ active }: { active: boolean }) => useFreshDataSignal(reload, active), {
+      initialProps: { active: false },
+    });
+
+    await act(async () => requestFreshData());
+    expect(reload).not.toHaveBeenCalled();
+
+    await rerender({ active: true });
+    await act(async () => requestFreshData());
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("useForegroundRefresh", () => {
   let listener: ((state: AppStateStatus) => void) | null = null;
   const remove = jest.fn();

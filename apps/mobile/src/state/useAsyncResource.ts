@@ -22,6 +22,10 @@ export interface AsyncResource<T> {
  * the notifications slice uses. When `load` becomes a function, the resource
  * (re)loads.
  *
+ * A new `load` is a new identity (another child, another month): the previous
+ * data is cleared at once, so one child's record is never shown under another
+ * child's header. A manual reload keeps the data on screen while it refreshes.
+ *
  * Callers MUST memoize `load` (useMemo/useCallback keyed on its inputs) so the
  * effect re-runs only when the inputs actually change.
  */
@@ -69,6 +73,7 @@ export function useAsyncResource<T>(load: (() => Promise<T>) | null): AsyncResou
   }, [load]);
 
   useEffect(() => {
+    setData(null);
     void reload();
     // Cancel the in-flight load on cleanup (load changed / unmount) so its late
     // response is discarded rather than applied over the next load's state.

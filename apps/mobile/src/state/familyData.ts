@@ -18,6 +18,27 @@ import { useAsyncResource, type AsyncResource } from "./useAsyncResource";
  * screen only pays for the data it shows.
  */
 
+/**
+ * In-flight requests for one (child, month), shared: Inicio and Asistencia read
+ * the same month, and the freshness signal reloads both at once — one request
+ * serves them. Only IN-FLIGHT calls are shared; a settled month is never served
+ * from memory, so a reload always reaches the server.
+ */
+const attendanceInFlight = new Map<string, Promise<AttendanceMonth>>();
+
+function sharedAttendanceMonth(childId: string, month: string): Promise<AttendanceMonth> {
+  const key = `${childId}|${month}`;
+  const pending = attendanceInFlight.get(key);
+  if (pending) {
+    return pending;
+  }
+  const request = getAttendanceMonth(childId, month).finally(() => {
+    attendanceInFlight.delete(key);
+  });
+  attendanceInFlight.set(key, request);
+  return request;
+}
+
 /** The selected child's finance statement. */
 export function useChildAccount(childId: string | null): AsyncResource<FamilyAccount> {
   const load = useMemo(() => (childId ? () => getAccount(childId) : null), [childId]);
@@ -34,11 +55,11 @@ export function useChildAttendanceMonth(
   month: string | null,
 ): AsyncResource<AttendanceMonth> {
   const load = useMemo(
-    () => (childId && month ? () => getAttendanceMonth(childId, month) : null),
+    () => (childId && month ? () => sharedAttendanceMonth(childId, month) : null),
     [childId, month],
   );
   const resource = useAsyncResource(load);
-  useFreshDataSignal(resource.reload);
+  useFreshDataSignal(resource.reload, load !== null);
   return resource;
 }
 

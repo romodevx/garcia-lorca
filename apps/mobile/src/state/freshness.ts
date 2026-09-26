@@ -20,17 +20,24 @@ export function requestFreshData(): void {
   }
 }
 
-/** Subscribes `reload` to the freshness signal for the component's lifetime. */
-export function useFreshDataSignal(reload: Reload): void {
+/**
+ * Subscribes `reload` to the freshness signal while `active` (default: for the
+ * component's lifetime). An idle resource passes `active = false`: it has
+ * nothing to reload, so it does not listen.
+ */
+export function useFreshDataSignal(reload: Reload, active = true): void {
   const latest = useRef(reload);
   latest.current = reload;
   useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
     const listener: Reload = () => latest.current();
     listeners.add(listener);
     return () => {
       listeners.delete(listener);
     };
-  }, []);
+  }, [active]);
 }
 
 /**
