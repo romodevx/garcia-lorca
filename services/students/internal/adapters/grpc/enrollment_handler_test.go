@@ -29,8 +29,9 @@ const (
 // fakeEnrollmentRepo is an in-memory EnrollmentRepository sufficient for the
 // handler tests (uniqueness + transfer/group-move contract).
 type fakeEnrollmentRepo struct {
-	byID map[string]domain.Enrollment
-	uniq map[string]bool
+	byID    map[string]domain.Enrollment
+	uniq    map[string]bool
+	history map[string][]domain.EnrollmentTransfer // by student id
 }
 
 func newFakeEnrollmentRepo() *fakeEnrollmentRepo {
@@ -71,6 +72,10 @@ func (r *fakeEnrollmentRepo) ListEnrollments(_ context.Context, studentID, cycle
 	return out, nil
 }
 
+func (r *fakeEnrollmentRepo) ListTransfers(_ context.Context, studentID string) ([]domain.EnrollmentTransfer, error) {
+	return r.history[studentID], nil
+}
+
 func (r *fakeEnrollmentRepo) TransferEnrollment(_ context.Context, cmd ports.TransferCommand) error {
 	enrollmentID, toGroupID := cmd.EnrollmentID, cmd.To.ID
 	cur, ok := r.byID[enrollmentID]
@@ -96,9 +101,13 @@ func (r *fakeEnrollmentRepo) SetEnrollmentStatus(_ context.Context, id string, s
 	if err != nil {
 		return err
 	}
-	r.byID[id] = updated
+	r.byID[id] = updated.WithEndedAt(enrollmentEndedAt)
 	return nil
 }
+
+// enrollmentEndedAt is the status-change instant the fake stamps, as the
+// repository stamps updated_at.
+var enrollmentEndedAt = time.Date(2026, 10, 3, 17, 0, 0, 0, time.UTC)
 
 // fakeCatalogValidator is an in-memory CatalogValidator: a missing group/term is
 // glerrors.ErrNotFound (matching the real Connect client's NotFound mapping).
@@ -126,6 +135,12 @@ func (c *fakeCatalogValidator) TermByID(_ context.Context, id string) (ports.Ter
 // the same cycle, returning the handler and the seeded student id.
 func enrollmentHandler(t *testing.T) (*grpcadapter.StudentsHandler, string) {
 	t.Helper()
+	return enrollmentHandlerWith(t, newFakeEnrollmentRepo())
+}
+
+// enrollmentHandlerWith is enrollmentHandler over a given enrollment repo.
+func enrollmentHandlerWith(t *testing.T, enrollments *fakeEnrollmentRepo) (*grpcadapter.StudentsHandler, string) {
+	t.Helper()
 	studentRepo := newFakeRepo()
 	student := seedApplicant(t, studentRepo)
 	catalog := &fakeCatalogValidator{
@@ -138,7 +153,7 @@ func enrollmentHandler(t *testing.T) (*grpcadapter.StudentsHandler, string) {
 	ids := 0
 	newID := func() string { ids++; return "enr-1" }
 	now := func() time.Time { return time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC) }
-	enroll := usecase.NewEnrollmentService(studentRepo, newFakeEnrollmentRepo(), catalog, nil, testTenant, newID, now)
+	enroll := usecase.NewEnrollmentService(studentRepo, enrollments, catalog, nil, testTenant, newID, now)
 	stu := usecase.NewStudentService(studentRepo, &fakePublisher{}, testLevels, testTenant, func() string { return "stu-x" })
 	return grpcadapter.NewStudentsHandler(stu, enroll, nil, usecase.NewHealthService("students")), student.ID()
 }
@@ -332,4 +347,57 @@ func (f *fakeCatalogValidator) LevelOfGrade(_ context.Context, _ string) (string
 
 func (f *fakeCatalogValidator) GroupsOfGrade(_ context.Context, _ string) ([]ports.GroupSeats, error) {
 	return f.gradeGroups, nil
+}
+
+// A withdrawn enrollment says on the wire when it stopped being active; an
+// active one carries no end.
+func TestEnrollmentCarriesItsEndInstant(t *testing.T) {
+	h, studentID := enrollmentHandler(t)
+	enrolled, err := h.Enroll(context.Background(), connect.NewRequest(&studentsv1.EnrollRequest{
+		StudentId: studentID, GroupId: enrollGroup,
+	}))
+	if err != nil {
+		t.Fatalf("Enroll: %v", err)
+	}
+	if enrolled.Msg.GetEnrollment().GetEndedAt() != nil {
+		t.Error("an active enrollment must carry no ended_at")
+	}
+	res, err := h.WithdrawEnrollment(context.Background(), connect.NewRequest(&studentsv1.WithdrawEnrollmentRequest{
+		Id: enrolled.Msg.GetEnrollment().GetId(),
+	}))
+	if err != nil {
+		t.Fatalf("WithdrawEnrollment: %v", err)
+	}
+	if got := res.Msg.GetEnrollment().GetEndedAt().AsTime(); !got.Equal(enrollmentEndedAt) {
+		t.Errorf("ended_at = %v, want %v", got, enrollmentEndedAt)
+	}
+}
+
+// ListTransfers projects a pupil's moves onto the wire, oldest first; a
+// malformed student id is InvalidArgument.
+func TestListTransfersProjectsTheHistory(t *testing.T) {
+	const pupil = "dddddddd-0000-0000-0000-000000000801"
+	moved := time.Date(2026, 9, 2, 15, 0, 0, 0, time.UTC)
+	move, err := domain.NewEnrollmentTransfer("tr-1", testTenant, "enr-1", enrollGroup, otherGroup, "balanceo", moved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := newFakeEnrollmentRepo()
+	repo.history = map[string][]domain.EnrollmentTransfer{pupil: {move}}
+	h, _ := enrollmentHandlerWith(t, repo)
+
+	res, err := h.ListTransfers(context.Background(), connect.NewRequest(&studentsv1.ListTransfersRequest{StudentId: pupil}))
+	if err != nil {
+		t.Fatalf("ListTransfers: %v", err)
+	}
+	got := res.Msg.GetTransfers()
+	if len(got) != 1 || got[0].GetFromGroupId() != enrollGroup || got[0].GetToGroupId() != otherGroup ||
+		got[0].GetEnrollmentId() != "enr-1" || !got[0].GetMovedAt().AsTime().Equal(moved) {
+		t.Fatalf("transfers = %+v", got)
+	}
+
+	_, err = h.ListTransfers(context.Background(), connect.NewRequest(&studentsv1.ListTransfersRequest{StudentId: "nope"}))
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("malformed id: code = %v, want InvalidArgument", connect.CodeOf(err))
+	}
 }

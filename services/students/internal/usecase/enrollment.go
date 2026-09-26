@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/google/uuid"
+
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/students/internal/domain"
 	"github.com/garcia-lorca/services/students/internal/ports"
@@ -299,6 +301,17 @@ func (s *EnrollmentService) Withdraw(ctx context.Context, enrollmentID string) (
 // GetEnrollment returns an enrollment by id (KindNotFound if absent).
 func (s *EnrollmentService) GetEnrollment(ctx context.Context, id string) (domain.Enrollment, error) {
 	return s.enrollments.GetEnrollment(ctx, id)
+}
+
+// ListTransfers returns a pupil's group moves, oldest first. A transfer rewrites
+// the enrollment's group in place, so this history is the only record of which
+// group the pupil was in on a past day. The id is checked here: the column is a
+// uuid, and a malformed one is the caller's mistake, not an outage.
+func (s *EnrollmentService) ListTransfers(ctx context.Context, studentID string) ([]domain.EnrollmentTransfer, error) {
+	if err := uuid.Validate(studentID); err != nil {
+		return nil, glerrors.New(glerrors.KindInvalid, "invalid student id")
+	}
+	return s.enrollments.ListTransfers(ctx, studentID)
 }
 
 // ListEnrollments returns enrollments matching the given filters ("" skips a filter).

@@ -3,6 +3,7 @@ package grpcadapter
 import (
 	"context"
 	"errors"
+	"time"
 
 	connect "connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -254,6 +255,27 @@ func (h *StudentsHandler) TransferStudent(ctx context.Context, req *connect.Requ
 	return connect.NewResponse(&studentsv1.TransferStudentResponse{Enrollment: toProtoEnrollment(enrollment)}), nil
 }
 
+// ListTransfers returns a pupil's group moves, oldest first. A malformed
+// student id is InvalidArgument.
+func (h *StudentsHandler) ListTransfers(ctx context.Context, req *connect.Request[studentsv1.ListTransfersRequest]) (*connect.Response[studentsv1.ListTransfersResponse], error) {
+	transfers, err := h.enroll.ListTransfers(ctx, req.Msg.GetStudentId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	out := make([]*studentsv1.EnrollmentTransfer, 0, len(transfers))
+	for _, t := range transfers {
+		out = append(out, &studentsv1.EnrollmentTransfer{
+			Id:           t.ID(),
+			EnrollmentId: t.EnrollmentID(),
+			FromGroupId:  t.FromGroupID(),
+			ToGroupId:    t.ToGroupID(),
+			Reason:       t.Reason(),
+			MovedAt:      timestamppb.New(t.MovedAt()),
+		})
+	}
+	return connect.NewResponse(&studentsv1.ListTransfersResponse{Transfers: out}), nil
+}
+
 func (h *StudentsHandler) WithdrawEnrollment(ctx context.Context, req *connect.Request[studentsv1.WithdrawEnrollmentRequest]) (*connect.Response[studentsv1.WithdrawEnrollmentResponse], error) {
 	enrollment, err := h.enroll.Withdraw(ctx, req.Msg.GetId())
 	if err != nil {
@@ -433,7 +455,16 @@ func toProtoEnrollment(e domain.Enrollment) *studentsv1.Enrollment {
 		TermId:     e.TermID(),
 		Status:     protoconv.ToProtoEnrollmentStatus(e.Status()),
 		EnrolledAt: timestamppb.New(e.EnrolledAt()),
+		EndedAt:    optionalTimestamp(e.EndedAt()),
 	}
+}
+
+// optionalTimestamp is nil for the zero time (an unset field on the wire).
+func optionalTimestamp(t time.Time) *timestamppb.Timestamp {
+	if t.IsZero() {
+		return nil
+	}
+	return timestamppb.New(t)
 }
 
 // toProtoGuardianLink projects a domain GuardianLink onto the wire. The

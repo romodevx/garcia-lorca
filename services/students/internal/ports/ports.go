@@ -170,6 +170,9 @@ type EnrollmentRepository interface {
 	// transfer history row, updates the enrollment's group, and names the new
 	// group on the pupil's file.
 	TransferEnrollment(ctx context.Context, cmd TransferCommand) error
+	// ListTransfers returns the moves of one student's enrollments, oldest
+	// moved_at first (empty when the pupil never moved).
+	ListTransfers(ctx context.Context, studentID string) ([]domain.EnrollmentTransfer, error)
 	// SetEnrollmentStatus updates an enrollment's status (e.g. to withdrawn).
 	SetEnrollmentStatus(ctx context.Context, id string, status domain.EnrollmentStatus) error
 }
