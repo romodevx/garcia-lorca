@@ -37,6 +37,8 @@ type fakeCatalog struct {
 	events      map[string]domain.SchoolEvent
 	profile     *domain.SchoolProfile
 	unique      map[string]bool // scope-qualified unique keys across all entities
+	// reassignWrites counts the reassignments that actually moved a row.
+	reassignWrites int
 }
 
 func newFake() *fakeCatalog {

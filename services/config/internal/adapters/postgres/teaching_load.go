@@ -220,11 +220,41 @@ func setAssignmentTeacher(tx *gorm.DB, id, teacherID string) error {
 	return nil
 }
 
-// UpdateTeachingAssignmentTeacher moves one assignment to teacherID.
-func (r *Repository) UpdateTeachingAssignmentTeacher(ctx context.Context, id, teacherID string) error {
+// ReassignTeachingAssignmentTx locks the assignment, checks the target teacher
+// and moves the row, all in one tenant-bound transaction: a concurrent
+// reassign or delete of the same slot waits on the row lock instead of racing
+// the decision. An unknown id (or another tenant's, hidden by RLS) is
+// KindNotFound.
+func (r *Repository) ReassignTeachingAssignmentTx(ctx context.Context, id, teacherID string,
+	decide func(domain.TeachingAssignment, bool) (bool, error)) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		a, err := lockTeachingAssignment(tx, id)
+		if err != nil {
+			return err
+		}
+		_, teacherFound, err := findTeacher(tx, teacherID)
+		if err != nil {
+			return err
+		}
+		write, err := decide(a, teacherFound)
+		if err != nil || !write {
+			return err
+		}
 		return setAssignmentTeacher(tx, id, teacherID)
 	})
+}
+
+// lockTeachingAssignment reads one assignment FOR UPDATE, or KindNotFound.
+func lockTeachingAssignment(tx *gorm.DB, id string) (domain.TeachingAssignment, error) {
+	var m teachingAssignmentModel
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&m).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return domain.TeachingAssignment{}, glerrors.ErrNotFound
+	}
+	if err != nil {
+		return domain.TeachingAssignment{}, translateCreateErr(err, "locking teaching assignment", "the assignment changed concurrently")
+	}
+	return toDomainTeachingAssignment(m)
 }
 
 // DeleteTeachingAssignment removes one assignment. An id that matches no row

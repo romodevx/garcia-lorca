@@ -167,20 +167,93 @@ func TestDeleteTeachingAssignment(t *testing.T) {
 	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(repo.DeleteTeachingAssignment(ctx, rig.heldID)))
 }
 
-func TestUpdateTeachingAssignmentTeacher(t *testing.T) {
+// TestReassignTeachingAssignmentTx proves the read, the teacher check and the
+// update happen in one transaction around the locked row: decide sees the
+// current holder and whether the target teacher exists, and only its "write"
+// verdict moves the row.
+func TestReassignTeachingAssignmentTx(t *testing.T) {
 	ctx := context.Background()
-	rig := seedLoadRig(t, tenantA, "c5c5")
-	repo := pgadapter.NewRepository(appDB(t), tenantA)
+	unknown := func(p string) string { return p + "ffff-0000-0000-0000-000000000099" }
+	tests := []struct {
+		name       string
+		prefix     string
+		id         func(rig loadRig) string
+		teacherID  func(rig loadRig) string
+		decide     func(a domain.TeachingAssignment, teacherFound bool) (bool, error)
+		wantKind   glerrors.Kind
+		wantCalled bool
+		wantHolder func(rig loadRig) string
+	}{
+		{
+			name: "moves the row when decide says write", prefix: "c5c5",
+			id:        func(rig loadRig) string { return rig.heldID },
+			teacherID: func(rig loadRig) string { return rig.teacher1 },
+			decide: func(_ domain.TeachingAssignment, teacherFound bool) (bool, error) {
+				return teacherFound, nil
+			},
+			wantCalled: true,
+			wantHolder: func(rig loadRig) string { return rig.teacher1 },
+		},
+		{
+			name: "unknown teacher reaches decide as not found and writes nothing", prefix: "c7c7",
+			id:        func(rig loadRig) string { return rig.heldID },
+			teacherID: func(loadRig) string { return unknown("c7c7") },
+			decide: func(_ domain.TeachingAssignment, teacherFound bool) (bool, error) {
+				if !teacherFound {
+					return false, glerrors.New(glerrors.KindInvalid, "teacher not found")
+				}
+				return true, nil
+			},
+			wantKind:   glerrors.KindInvalid,
+			wantCalled: true,
+			wantHolder: func(rig loadRig) string { return rig.teacher2 },
+		},
+		{
+			name: "unknown assignment is NotFound without calling decide", prefix: "c8c8",
+			id:        func(loadRig) string { return unknown("c8c8") },
+			teacherID: func(rig loadRig) string { return rig.teacher1 },
+			decide: func(domain.TeachingAssignment, bool) (bool, error) {
+				return true, nil
+			},
+			wantKind:   glerrors.KindNotFound,
+			wantHolder: func(rig loadRig) string { return rig.teacher2 },
+		},
+		{
+			name: "no write when decide says so", prefix: "c9c9",
+			id:        func(rig loadRig) string { return rig.heldID },
+			teacherID: func(rig loadRig) string { return rig.teacher1 },
+			decide: func(domain.TeachingAssignment, bool) (bool, error) {
+				return false, nil
+			},
+			wantCalled: true,
+			wantHolder: func(rig loadRig) string { return rig.teacher2 },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rig := seedLoadRig(t, tenantA, tt.prefix)
+			repo := pgadapter.NewRepository(appDB(t), tenantA)
+			called := false
 
-	require.NoError(t, repo.UpdateTeachingAssignmentTeacher(ctx, rig.heldID, rig.teacher1))
-	got, err := repo.GetTeachingAssignment(ctx, rig.heldID)
-	require.NoError(t, err)
-	assert.Equal(t, rig.teacher1, got.TeacherID())
+			err := repo.ReassignTeachingAssignmentTx(ctx, tt.id(rig), tt.teacherID(rig),
+				func(a domain.TeachingAssignment, teacherFound bool) (bool, error) {
+					called = true
+					assert.Equal(t, rig.heldID, a.ID())
+					assert.Equal(t, rig.teacher2, a.TeacherID(), "decide sees the current holder")
+					return tt.decide(a, teacherFound)
+				})
 
-	err = repo.UpdateTeachingAssignmentTeacher(ctx, "c5c5ffff-0000-0000-0000-000000000099", rig.teacher1)
-	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err), "unknown assignment")
-	err = repo.UpdateTeachingAssignmentTeacher(ctx, rig.heldID, "c5c5ffff-0000-0000-0000-000000000098")
-	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err), "unknown teacher trips the FK")
+			if tt.wantKind != glerrors.KindUnknown {
+				assert.Equal(t, tt.wantKind, glerrors.KindOf(err))
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tt.wantCalled, called)
+			got, err := repo.GetTeachingAssignment(ctx, rig.heldID)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantHolder(rig), got.TeacherID())
+		})
+	}
 }
 
 // TestRLSIsolatesTeachingLoadWrites proves tenant B can neither see tenant A's
@@ -202,7 +275,8 @@ func TestRLSIsolatesTeachingLoadWrites(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(repoB.DeleteTeachingAssignment(ctx, rig.heldID)))
-	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(repoB.UpdateTeachingAssignmentTeacher(ctx, rig.heldID, rig.teacher1)))
+	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(repoB.ReassignTeachingAssignmentTx(ctx, rig.heldID, rig.teacher1,
+		func(domain.TeachingAssignment, bool) (bool, error) { return true, nil })))
 
 	got, err := repoA.GetTeachingAssignment(ctx, rig.heldID)
 	require.NoError(t, err, "tenant A's assignment survives")

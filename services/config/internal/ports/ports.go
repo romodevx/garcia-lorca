@@ -167,10 +167,13 @@ type CatalogRepository interface {
 		plan func(TeachingLoadSnapshot) (TeachingLoadWrite, error)) error
 	// DeleteTeachingAssignment removes one assignment, or KindNotFound.
 	DeleteTeachingAssignment(ctx context.Context, id string) error
-	// UpdateTeachingAssignmentTeacher moves an assignment to teacherID. An id
-	// that matches no row is KindNotFound; a teacher that does not exist
-	// surfaces as the FK violation (KindInvalid).
-	UpdateTeachingAssignmentTeacher(ctx context.Context, id, teacherID string) error
+	// ReassignTeachingAssignmentTx hands assignment id to teacherID in ONE
+	// transaction: it locks the assignment (SELECT … FOR UPDATE), reads whether
+	// teacherID exists, and passes both to decide. The row moves only when
+	// decide returns write=true; an error from decide rolls back. An id that
+	// matches no row is KindNotFound and decide is not called.
+	ReassignTeachingAssignmentTx(ctx context.Context, id, teacherID string,
+		decide func(a domain.TeachingAssignment, teacherFound bool) (write bool, err error)) error
 }
 
 // TeachingLoadSnapshot is what ApplyTeachingLoad reads before the use case

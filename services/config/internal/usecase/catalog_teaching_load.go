@@ -170,23 +170,27 @@ func (s *CatalogService) DeleteTeachingAssignment(ctx context.Context, id string
 // the assignment id. An unknown assignment is KindNotFound; an unknown teacher
 // is KindInvalid (a precondition on the request body, as in
 // CreateTeachingAssignment). Reassigning to the current teacher writes nothing.
+// The read, the teacher check and the write share one transaction with the
+// assignment locked, so a concurrent change cannot slip between them.
 func (s *CatalogService) ReassignTeachingAssignment(ctx context.Context, id, teacherID string) (domain.TeachingAssignment, error) {
-	a, err := s.repo.GetTeachingAssignment(ctx, id)
+	var out domain.TeachingAssignment
+	err := s.repo.ReassignTeachingAssignmentTx(ctx, id, teacherID, func(a domain.TeachingAssignment, teacherFound bool) (bool, error) {
+		if a.HeldBy(teacherID) {
+			out = a
+			return false, nil
+		}
+		if !teacherFound {
+			return false, glerrors.New(glerrors.KindInvalid, "teacher not found")
+		}
+		moved, err := a.ReassignTo(teacherID)
+		if err != nil {
+			return false, err
+		}
+		out = moved
+		return true, nil
+	})
 	if err != nil {
 		return domain.TeachingAssignment{}, err
 	}
-	if a.HeldBy(teacherID) {
-		return a, nil
-	}
-	moved, err := a.ReassignTo(teacherID)
-	if err != nil {
-		return domain.TeachingAssignment{}, err
-	}
-	if _, err := s.repo.GetTeacher(ctx, teacherID); err != nil {
-		return domain.TeachingAssignment{}, requireParent(err, "teacher not found")
-	}
-	if err := s.repo.UpdateTeachingAssignmentTeacher(ctx, id, teacherID); err != nil {
-		return domain.TeachingAssignment{}, err
-	}
-	return moved, nil
+	return out, nil
 }

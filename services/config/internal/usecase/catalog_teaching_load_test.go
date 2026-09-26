@@ -69,16 +69,22 @@ func (f *fakeCatalog) DeleteTeachingAssignment(_ context.Context, id string) err
 	return nil
 }
 
-func (f *fakeCatalog) UpdateTeachingAssignmentTeacher(_ context.Context, id, teacherID string) error {
+func (f *fakeCatalog) ReassignTeachingAssignmentTx(_ context.Context, id, teacherID string, decide func(domain.TeachingAssignment, bool) (bool, error)) error {
 	a, ok := f.assignments[id]
 	if !ok {
 		return glerrors.ErrNotFound
+	}
+	_, teacherFound := f.teachers[teacherID]
+	write, err := decide(a, teacherFound)
+	if err != nil || !write {
+		return err
 	}
 	moved, err := a.ReassignTo(teacherID)
 	if err != nil {
 		return err
 	}
 	f.assignments[id] = moved
+	f.reassignWrites++
 	return nil
 }
 
@@ -294,17 +300,19 @@ func TestDeleteTeachingAssignment(t *testing.T) {
 
 func TestReassignTeachingAssignment(t *testing.T) {
 	tests := []struct {
-		name      string
-		id        func(a domain.TeachingAssignment) string
-		teacherID func(fx loadFixture) string
-		wantKind  glerrors.Kind
-		wantHeld  func(fx loadFixture) string
+		name       string
+		id         func(a domain.TeachingAssignment) string
+		teacherID  func(fx loadFixture) string
+		wantKind   glerrors.Kind
+		wantHeld   func(fx loadFixture) string
+		wantWrites int
 	}{
 		{
-			name:      "hands the slot to another teacher",
-			id:        func(a domain.TeachingAssignment) string { return a.ID() },
-			teacherID: func(fx loadFixture) string { return fx.grace.ID() },
-			wantHeld:  func(fx loadFixture) string { return fx.grace.ID() },
+			name:       "hands the slot to another teacher",
+			id:         func(a domain.TeachingAssignment) string { return a.ID() },
+			teacherID:  func(fx loadFixture) string { return fx.grace.ID() },
+			wantHeld:   func(fx loadFixture) string { return fx.grace.ID() },
+			wantWrites: 1,
 		},
 		{
 			name:      "same teacher is a no-op",
@@ -344,6 +352,7 @@ func TestReassignTeachingAssignment(t *testing.T) {
 				assert.Equal(t, tt.wantHeld(fx), got.TeacherID())
 			}
 			assert.Equal(t, tt.wantHeld(fx), repo.assignments[a.ID()].TeacherID())
+			assert.Equal(t, tt.wantWrites, repo.reassignWrites, "only a real hand-over writes")
 		})
 	}
 }
