@@ -100,7 +100,7 @@ export function AppShell(): ReactElement {
   // y la web entera respondía en "/", así que el navegador nunca veía una
   // segunda página: el botón "atrás" sólo podía sacar del sitio y F5 devolvía
   // al tablero.
-  const addressedView = pathToView(pathname);
+  const addressedView = useMemo(() => pathToView(pathname), [pathname]);
 
   /** Navegar dejando huella: "atrás" regresa aquí. */
   const go = useCallback((next: View): void => { router.push(viewToPath(next)); }, [router]);
@@ -161,7 +161,7 @@ export function AppShell(): ReactElement {
   // /finanzas) lands on the dashboard instead of an empty 403 shell, and the
   // address follows. UX only: the gateway still refuses the data.
   const reachable = canReachView(addressedView, principal?.permissions);
-  const view: View = reachable ? addressedView : { screen: "dashboard" };
+  const view = useMemo<View>(() => (reachable ? addressedView : { screen: "dashboard" }), [reachable, addressedView]);
   useEffect(() => {
     if (!reachable) router.replace(viewToPath({ screen: "dashboard" }));
   }, [reachable, router]);
