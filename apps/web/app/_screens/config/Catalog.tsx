@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
+import type { AttendanceMode } from "../../attendance/sheet";
 import {
   createCycle,
   createGradeLevel,
   createGroup,
   createLevel,
+  updateLevelAttendanceMode,
   createSubject,
   createTerm,
   activateCycle,
@@ -158,6 +160,11 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
     setSelectedLevelId(created.id);
   }, []);
 
+  const handleSetAttendanceMode = useCallback(async (levelId: string, mode: AttendanceMode): Promise<void> => {
+    const updated = await updateLevelAttendanceMode(API_URL, levelId, mode);
+    setLevels((prev) => prev.map((l) => (l.id === levelId ? { ...l, ...updated, attendanceMode: updated.attendanceMode ?? mode } : l)));
+  }, []);
+
   const handleCreateGradeLevel = useCallback(async (input: CreateGradeLevelInput): Promise<void> => {
     const created = await createGradeLevel(API_URL, input);
     setGradeLevels((prev) => [...prev, created]);
@@ -287,7 +294,7 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
 
           {!pricing && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 18 }}>
-            <LevelsPanel levels={levels} selectedLevelId={selectedLevelId} onSelect={setSelectedLevelId} onCreate={handleCreateLevel} />
+            <LevelsPanel levels={levels} selectedLevelId={selectedLevelId} onSelect={setSelectedLevelId} onCreate={handleCreateLevel} onSetAttendanceMode={handleSetAttendanceMode} />
 
             {selectedLevel !== undefined && (
               <GradeLevelsPanel
