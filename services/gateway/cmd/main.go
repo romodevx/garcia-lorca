@@ -194,7 +194,7 @@ func main() {
 //	                             RequireAuth → rotation →
 //	                             RequirePermission(teachers:read|write) → config
 //	                             (staff roster + assignments)
-//	POST /api/v1/teachers/{id}/access → ModuleGuard(teachers) → RequireAuth →
+//	POST /api/v1/teachers/{id}/access → ModuleGuard(teachers) → ModuleGuard(iam) → RequireAuth →
 //	                             rotation → RequireAllPermissions(teachers:write,
 //	                             users:write) → subset guard → iam + config
 //	POST /api/v1/teachers/{id}/user → ModuleGuard(teachers) → RequireAuth →
@@ -769,7 +769,9 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// Not behind inviteLimiter: that budget guards the anonymous doors; like
 	// POST /users/invite, this is an authenticated administrator's action.
 	teacherAccessH := handler.NewTeacherAccessHandler(authClient, configClient)
-	mux.Handle(handler.TeacherAccessRoute, guard.Protect("teachers", requireAuthChanged(
-		middleware.RequireAllPermissions("teachers:write", "users:write")(http.HandlerFunc(teacherAccessH.GrantAccess)))))
+	// Guarded on BOTH modules it composes: with Usuarios (module_iam) hidden,
+	// minting an account from Docentes is hidden too (404), not half-working.
+	mux.Handle(handler.TeacherAccessRoute, guard.Protect("teachers", guard.Protect("iam", requireAuthChanged(
+		middleware.RequireAllPermissions("teachers:write", "users:write")(http.HandlerFunc(teacherAccessH.GrantAccess))))))
 	return mux
 }

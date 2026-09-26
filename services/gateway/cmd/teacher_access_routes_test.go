@@ -14,7 +14,7 @@ import (
 	iamv1 "github.com/garcia-lorca/gen/go/garcialorca/iam/v1"
 )
 
-// POST /api/v1/teachers/{id}/access: ModuleGuard(teachers) → RequireAuth →
+// POST /api/v1/teachers/{id}/access: ModuleGuard(teachers) → ModuleGuard(iam) → RequireAuth →
 // rotation → RequireAllPermissions(teachers:write, users:write) → handler
 // (caller-subset guard on the maestro role).
 
@@ -40,7 +40,7 @@ func (stubIAM) InviteUser(_ context.Context, req *connect.Request[iamv1.InviteUs
 const teacherAccessPath = "/api/v1/teachers/tch-1/access"
 
 func TestTeacherAccessRouteSecurityChain(t *testing.T) {
-	on := map[string]bool{"module_teachers": true}
+	on := map[string]bool{"module_teachers": true, "module_iam": true}
 	tests := []struct {
 		name  string
 		flags map[string]bool
@@ -49,6 +49,9 @@ func TestTeacherAccessRouteSecurityChain(t *testing.T) {
 		want  int
 	}{
 		{"module off is 404", map[string]bool{}, teacherAccessPath, "teacher-access-admin", http.StatusNotFound},
+		{"teachers off is 404", map[string]bool{"module_iam": true}, teacherAccessPath, "teacher-access-admin", http.StatusNotFound},
+		// It mints an account: with the Usuarios module hidden the action is too.
+		{"iam off is 404", map[string]bool{"module_teachers": true}, teacherAccessPath, "teacher-access-admin", http.StatusNotFound},
 		{"no token is 401", on, teacherAccessPath, "", http.StatusUnauthorized},
 		{"without users:write is 403", on, teacherAccessPath, "teacher-access-no-users", http.StatusForbidden},
 		{"without teachers:write is 403", on, teacherAccessPath, "teacher-access-no-teachers", http.StatusForbidden},
@@ -66,7 +69,7 @@ func TestTeacherAccessRouteSecurityChain(t *testing.T) {
 }
 
 func TestTeacherAccessRouteReturnsTheLinkedTeacherAndTheAccount(t *testing.T) {
-	res := doGateway(t, newTestGateway(t, map[string]bool{"module_teachers": true}), http.MethodPost, teacherAccessPath, "teacher-access-admin", "")
+	res := doGateway(t, newTestGateway(t, map[string]bool{"module_teachers": true, "module_iam": true}), http.MethodPost, teacherAccessPath, "teacher-access-admin", "")
 	require.Equal(t, http.StatusOK, res.StatusCode)
 	var out struct {
 		Teacher struct {

@@ -1301,8 +1301,8 @@ paths:
         before the confirmation is asked for.
 
 
-        AUTHORIZATION. `module_teachers`, a session with a rotated password,
-        `teachers:write` AND `users:write`. On top of that the caller-subset
+        AUTHORIZATION. `module_teachers` AND `module_iam` (either off ⇒ 404), a
+        session with a rotated password, `teachers:write` AND `users:write`. On top of that the caller-subset
         guard: the caller must itself hold every permission of the maestro role,
         and may only resend the link of an existing account whose roles it could
         have assigned (a resent link hands the account over). Every refusal
@@ -1386,7 +1386,7 @@ paths:
         '404':
           description: >
             No such teacher (a teacher of another school is invisible, so it
-            answers the same), or `module_teachers` is off.
+            answers the same), or `module_teachers` or `module_iam` is off.
           content:
             text/plain:
               schema: { type: string }
