@@ -247,6 +247,15 @@ func (c *ConfigClient) ListLevels(ctx context.Context) ([]LevelResult, error) {
 	return out, nil
 }
 
+// GetLevel reads one level of the tenant catalog (NotFound when missing).
+func (c *ConfigClient) GetLevel(ctx context.Context, id string) (LevelResult, error) {
+	res, err := c.rpc.GetLevel(ctx, connect.NewRequest(&configv1.GetLevelRequest{Id: id}))
+	if err != nil {
+		return LevelResult{}, err
+	}
+	return toLevelResult(res.Msg.GetLevel()), nil
+}
+
 // SetLevelAttendanceMode changes how a level takes attendance ("daily" or
 // "per_class"). An unknown mode reaches config as UNSPECIFIED and comes back
 // InvalidArgument; an unknown level is NotFound.
@@ -270,6 +279,15 @@ func (c *ConfigClient) CreateGradeLevel(ctx context.Context, in CreateGradeLevel
 		Name:    in.Name,
 		Ordinal: int32(in.Ordinal),
 	}))
+	if err != nil {
+		return GradeLevelResult{}, err
+	}
+	return toGradeLevelResult(res.Msg.GetGradeLevel()), nil
+}
+
+// GetGradeLevel reads one grade of the tenant catalog (NotFound when missing).
+func (c *ConfigClient) GetGradeLevel(ctx context.Context, id string) (GradeLevelResult, error) {
+	res, err := c.rpc.GetGradeLevel(ctx, connect.NewRequest(&configv1.GetGradeLevelRequest{Id: id}))
 	if err != nil {
 		return GradeLevelResult{}, err
 	}
@@ -357,6 +375,15 @@ func (c *ConfigClient) CreateGroup(ctx context.Context, in CreateGroupInput) (Gr
 		Name:         in.Name,
 		Capacity:     int32(in.Capacity),
 	}))
+	if err != nil {
+		return GroupResult{}, err
+	}
+	return toGroupResult(res.Msg.GetGroup()), nil
+}
+
+// GetGroup reads one group of the tenant catalog (NotFound when missing).
+func (c *ConfigClient) GetGroup(ctx context.Context, id string) (GroupResult, error) {
+	res, err := c.rpc.GetGroup(ctx, connect.NewRequest(&configv1.GetGroupRequest{Id: id}))
 	if err != nil {
 		return GroupResult{}, err
 	}

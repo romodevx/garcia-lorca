@@ -79,16 +79,19 @@ func TestAttendanceGetRoster(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			att := &fakeAttendance{fakeTeachingAttendance: fakeTeachingAttendance{roster: []client.AttendanceRosterRow{
-				{EnrollmentID: "enr-1", StudentID: "stu-1", Status: "late", Note: "8:15"},
-			}}}
+			att := &fakeAttendance{}
+			if tt.wantCode == http.StatusOK { // a refused list must not look taken (see the mode probe)
+				att.roster = []client.AttendanceRosterRow{{EnrollmentID: "enr-1", StudentID: "stu-1", Status: "late", Note: "8:15"}}
+			}
 			h := newDirectorAttendance(att)
 			rec := httptest.NewRecorder()
 			h.GetRoster(rec, directorReq(http.MethodGet, "/api/v1/attendance/roster?"+tt.query, ""))
 
 			require.Equal(t, tt.wantCode, rec.Code, rec.Body.String())
 			if tt.wantCode != http.StatusOK {
-				assert.Zero(t, att.rosterCalls)
+				if tt.wantCode == http.StatusNotFound {
+					assert.Zero(t, att.rosterCalls)
+				}
 				assert.Contains(t, rec.Body.String(), tt.wantBody)
 				return
 			}

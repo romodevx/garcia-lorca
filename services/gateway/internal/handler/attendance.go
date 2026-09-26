@@ -3,6 +3,9 @@ package handler
 import (
 	"context"
 	"net/http"
+	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
@@ -18,10 +21,10 @@ type AttendanceService interface {
 }
 
 // DirectorAttendanceCatalogReader is the config surface the director's pass
-// list needs: the group → level chain (mode + label) and the group's teaching
+// list needs: the group → grade → level chain (mode) and the group's teaching
 // assignments, which say which subjects a per-class list may be taken for.
 type DirectorAttendanceCatalogReader interface {
-	AttendanceCatalogReader
+	AttendanceGroupReader
 	ListTeachingAssignments(ctx context.Context, cycleID, groupID, teacherID string) ([]client.TeachingAssignment, error)
 }
 
@@ -42,13 +45,27 @@ type AttendanceHandler struct {
 	catalog  DirectorAttendanceCatalogReader
 	students TeachingStudentReader
 	users    AttendanceUserReader
+	now      func() time.Time
+}
+
+// AttendanceHandlerOption configures an AttendanceHandler (functional options).
+type AttendanceHandlerOption func(*AttendanceHandler)
+
+// WithDirectorAttendanceClock replaces the wall clock the roster's `today` is
+// read from (tests pin it).
+func WithDirectorAttendanceClock(now func() time.Time) AttendanceHandlerOption {
+	return func(h *AttendanceHandler) { h.now = now }
 }
 
 // NewAttendanceHandler wires the handler to the attendance service, the config
 // catalog (mode + subjects), the students directory (row names) and the iam
 // directory (the taker's display name).
-func NewAttendanceHandler(svc AttendanceService, catalog DirectorAttendanceCatalogReader, students TeachingStudentReader, users AttendanceUserReader) *AttendanceHandler {
-	return &AttendanceHandler{svc: svc, catalog: catalog, students: students, users: users}
+func NewAttendanceHandler(svc AttendanceService, catalog DirectorAttendanceCatalogReader, students TeachingStudentReader, users AttendanceUserReader, opts ...AttendanceHandlerOption) *AttendanceHandler {
+	h := &AttendanceHandler{svc: svc, catalog: catalog, students: students, users: users, now: time.Now}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // --- request bodies --------------------------------------------------------
@@ -105,34 +122,55 @@ func toAttendanceRecordResponse(r client.AttendanceRecord) attendanceRecordRespo
 
 // --- list resolution ----------------------------------------------------------
 
-// resolveList checks a (group, subject) pair against the catalog and writes the
-// refusal itself: 404 for an unknown group, 400 for a subject that does not fit
-// the group's mode or is not taught in the group. It returns the group's mode
-// and true when the list exists.
-func (h *AttendanceHandler) resolveList(w http.ResponseWriter, r *http.Request, groupID, subjectID string) (string, bool) {
-	catalog, err := loadAttendanceCatalog(r.Context(), h.catalog)
-	if err != nil {
+// resolveList checks a list key against the catalog and writes the refusal
+// itself: 404 for an unknown group, 400 for a subject that does not fit the
+// group's mode or is not taught in the group. It returns the list's mode and
+// true when the list may be read and saved.
+//
+// The group's chain (group → grade → level) and, for a per-class key, the
+// group's assignments are independent reads, so they run concurrently.
+//
+// The level's mode governs NEW lists only: a key that does not fit it is still
+// served when that exact list already exists (listExists) — it was taken before
+// the level changed mode — and answers in the key's own shape.
+func (h *AttendanceHandler) resolveList(w http.ResponseWriter, r *http.Request, groupID, date, subjectID string) (string, bool) {
+	var (
+		group  listGroup
+		found  bool
+		taught bool
+	)
+	g, gctx := errgroup.WithContext(r.Context())
+	g.Go(func() (err error) {
+		group, found, err = resolveListGroup(gctx, h.catalog, groupID)
+		return err
+	})
+	if subjectID != "" {
+		g.Go(func() (err error) {
+			taught, err = h.subjectTaughtIn(gctx, groupID, subjectID)
+			return err
+		})
+	}
+	if err := g.Wait(); err != nil {
 		writeConnectError(w, err)
 		return "", false
 	}
-	group, ok := catalog.group(groupID)
-	if !ok {
+	if !found {
 		writeNotFound(w)
 		return "", false
 	}
 	if msg := listModeRefusal(group.Mode, subjectID); msg != "" {
-		writeBadRequest(w, msg)
-		return "", false
+		exists, err := listExists(r.Context(), h.svc, groupID, date, subjectID)
+		if err != nil {
+			writeConnectError(w, err)
+			return "", false
+		}
+		if !exists {
+			writeBadRequest(w, msg)
+			return "", false
+		}
+		return keyMode(subjectID), true
 	}
-	if subjectID == "" {
-		return group.Mode, true
-	}
-	taught, err := h.subjectTaughtIn(r.Context(), groupID, subjectID)
-	if err != nil {
-		writeConnectError(w, err)
-		return "", false
-	}
-	if !taught {
+	if subjectID != "" && !taught {
 		writeBadRequest(w, msgSubjectNotInGroup)
 		return "", false
 	}
@@ -159,11 +197,12 @@ func (h *AttendanceHandler) subjectTaughtIn(ctx context.Context, groupID, subjec
 // GetRoster handles GET /api/v1/attendance/roster?groupId=&date=[&subjectId=] —
 // one list, one row per active enrollment (rows with no stored mark read back
 // "present"), with the students' names and the list's session. The director has
-// no date window, so every list is editable.
+// no date window, so every list is editable (no readOnlyReason); `today` is
+// the server's school day.
 func (h *AttendanceHandler) GetRoster(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	groupID, date, subjectID := q.Get("groupId"), q.Get("date"), q.Get("subjectId")
-	mode, ok := h.resolveList(w, r, groupID, subjectID)
+	mode, ok := h.resolveList(w, r, groupID, date, subjectID)
 	if !ok {
 		return
 	}
@@ -173,7 +212,8 @@ func (h *AttendanceHandler) GetRoster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	names := studentNamesFrom(r.Context(), h.students, len(roster.Rows) > 0)
-	writeJSON(w, http.StatusOK, toAttendanceListResponse(mode, date, true, roster, names))
+	view := listView{Mode: mode, Date: date, Today: schoolToday(h.now())}
+	writeJSON(w, http.StatusOK, toAttendanceListResponse(view, roster, names))
 }
 
 // SaveDaily handles POST /api/v1/attendance: reconcile one list, stamping the
@@ -189,7 +229,7 @@ func (h *AttendanceHandler) SaveDaily(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if _, ok := h.resolveList(w, r, req.GroupID, req.SubjectID); !ok {
+	if _, ok := h.resolveList(w, r, req.GroupID, req.Date, req.SubjectID); !ok {
 		return
 	}
 	absent, marked, err := h.svc.SaveDailyAttendance(r.Context(), client.SaveAttendanceInput{

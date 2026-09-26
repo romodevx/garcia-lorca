@@ -171,10 +171,16 @@ func TestTeachingAttendanceRoster(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			att := &fakeTeachingAttendance{roster: []client.AttendanceRosterRow{
-				{EnrollmentID: "enr-1", StudentID: "stu-1", Status: "excused", Note: "cita médica"},
-				{EnrollmentID: "enr-2", StudentID: "stu-2", Status: "present"},
-			}}
+			// A refused list gets an empty attendance double: the mode refusal
+			// probes whether the list already exists (a stored mark or a
+			// session would let it through), and here it must not.
+			att := &fakeTeachingAttendance{}
+			if tt.wantCode == http.StatusOK {
+				att.roster = []client.AttendanceRosterRow{
+					{EnrollmentID: "enr-1", StudentID: "stu-1", Status: "excused", Note: "cita médica"},
+					{EnrollmentID: "enr-2", StudentID: "stu-2", Status: "present"},
+				}
+			}
 			students := &fakeTeachingStudents{students: []client.StudentResult{
 				{ID: "stu-1", FirstName: "Ana", LastName: "García"},
 				{ID: "stu-2", FirstName: "Luis", LastName: "Pérez"},
@@ -189,7 +195,9 @@ func TestTeachingAttendanceRoster(t *testing.T) {
 
 			require.Equal(t, tt.wantCode, rec.Code, rec.Body.String())
 			if tt.wantCode != http.StatusOK {
-				assert.Zero(t, att.rosterCalls, "a refused list must never reach the attendance service")
+				if tt.wantCode == http.StatusNotFound {
+					assert.Zero(t, att.rosterCalls, "a list the caller does not own must never reach the attendance service")
+				}
 				assert.Contains(t, rec.Body.String(), tt.wantBody)
 				return
 			}

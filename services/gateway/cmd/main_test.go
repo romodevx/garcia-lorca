@@ -361,6 +361,16 @@ func (stubConfig) ListGroups(_ context.Context, _ *connect.Request[configv1.List
 	}}), nil
 }
 
+// GetGroup backs one pass list's group → grade → level resolution: grp-1 (the
+// only stub group) carries no grade, so its list resolves as daily; any other id
+// is NotFound.
+func (stubConfig) GetGroup(_ context.Context, req *connect.Request[configv1.GetGroupRequest]) (*connect.Response[configv1.GetGroupResponse], error) {
+	if req.Msg.GetId() != "grp-1" {
+		return nil, connect.NewError(connect.CodeNotFound, errStr("group not found"))
+	}
+	return connect.NewResponse(&configv1.GetGroupResponse{Group: &configv1.Group{Id: "grp-1", CycleId: "cyc-1", Name: "3° A"}}), nil
+}
+
 // ListGradeLevels backs the attendance mode resolution: the stub group carries
 // no grade, so its list resolves as daily (the column's default).
 func (stubConfig) ListGradeLevels(_ context.Context, _ *connect.Request[configv1.ListGradeLevelsRequest]) (*connect.Response[configv1.ListGradeLevelsResponse], error) {
@@ -490,7 +500,16 @@ type stubAttendance struct {
 	attendancev1connect.UnimplementedAttendanceServiceHandler
 }
 
-func (stubAttendance) GetDailyRoster(_ context.Context, _ *connect.Request[attendancev1.GetDailyRosterRequest]) (*connect.Response[attendancev1.GetDailyRosterResponse], error) {
+// GetDailyRoster answers the daily list with one stored absence. A per-class
+// key (the stub group is daily) is a list nobody took — all present, no
+// session — so the edge's mode refusal still applies to it (a list that
+// already exists would be served in its own shape).
+func (stubAttendance) GetDailyRoster(_ context.Context, req *connect.Request[attendancev1.GetDailyRosterRequest]) (*connect.Response[attendancev1.GetDailyRosterResponse], error) {
+	if req.Msg.GetSubjectId() != "" {
+		return connect.NewResponse(&attendancev1.GetDailyRosterResponse{Rows: []*attendancev1.RosterRow{
+			{EnrollmentId: "enr-1", StudentId: "stu-1", Status: "present"},
+		}}), nil
+	}
 	return connect.NewResponse(&attendancev1.GetDailyRosterResponse{Rows: []*attendancev1.RosterRow{
 		{EnrollmentId: "enr-1", StudentId: "stu-1", Status: "present"},
 		{EnrollmentId: "enr-2", StudentId: "stu-2", Status: "absent"},

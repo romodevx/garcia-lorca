@@ -43,6 +43,10 @@ type fakeTeachingConfig struct {
 	levels    []client.LevelResult
 	levelsErr error
 
+	// gotPointReads counts GetGroup/GetGradeLevel/GetLevel calls: resolving one
+	// pass list's group must use these, never the whole-catalog lists.
+	gotPointReads int
+
 	// assignmentsByGroup answers ListTeachingAssignments when it is asked by
 	// group (teacherID ""), the director's "is this subject taught here" read.
 	assignmentsByGroup map[string][]client.TeachingAssignment
@@ -91,6 +95,45 @@ func (f *fakeTeachingConfig) ListTeachingAssignments(_ context.Context, _, group
 
 func (f *fakeTeachingConfig) ListLevels(_ context.Context) ([]client.LevelResult, error) {
 	return f.levels, f.levelsErr
+}
+
+func (f *fakeTeachingConfig) GetGroup(_ context.Context, id string) (client.GroupResult, error) {
+	f.gotPointReads++
+	if f.groupsErr != nil {
+		return client.GroupResult{}, f.groupsErr
+	}
+	for _, g := range f.groups {
+		if g.ID == id {
+			return g, nil
+		}
+	}
+	return client.GroupResult{}, connect.NewError(connect.CodeNotFound, errString("group not found"))
+}
+
+func (f *fakeTeachingConfig) GetGradeLevel(_ context.Context, id string) (client.GradeLevelResult, error) {
+	f.gotPointReads++
+	if f.gradeLevelsErr != nil {
+		return client.GradeLevelResult{}, f.gradeLevelsErr
+	}
+	for _, g := range f.gradeLevels {
+		if g.ID == id {
+			return g, nil
+		}
+	}
+	return client.GradeLevelResult{}, connect.NewError(connect.CodeNotFound, errString("grade level not found"))
+}
+
+func (f *fakeTeachingConfig) GetLevel(_ context.Context, id string) (client.LevelResult, error) {
+	f.gotPointReads++
+	if f.levelsErr != nil {
+		return client.LevelResult{}, f.levelsErr
+	}
+	for _, l := range f.levels {
+		if l.ID == id {
+			return l, nil
+		}
+	}
+	return client.LevelResult{}, connect.NewError(connect.CodeNotFound, errString("level not found"))
 }
 
 func (f *fakeTeachingConfig) ListGroups(_ context.Context, _, _ string) ([]client.GroupResult, error) {

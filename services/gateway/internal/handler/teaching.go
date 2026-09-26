@@ -59,6 +59,8 @@ type TeachingCatalogReader interface {
 	// ListLevels resolves a group's level, whose attendance mode decides whether
 	// its pass list is daily or per class (T3).
 	ListLevels(ctx context.Context) ([]client.LevelResult, error)
+	// The point reads resolve ONE pass list's group → grade → level.
+	AttendanceGroupReader
 }
 
 // TeachingCycleReader lists the school's cycles, so the surface can tell which

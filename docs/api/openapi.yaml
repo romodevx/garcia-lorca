@@ -1622,7 +1622,11 @@ paths:
         `subjectId` (400 "Esta lista es por clase: elige la asignatura"), a
         `daily` group refuses one (400 "Esta lista es por día"), and the
         subject must be taught in the group (400 "La asignatura no se imparte
-        en este grupo"). An unknown group is 404. Requires `attendance:read`.
+        en este grupo"). The mode governs NEW lists only: a list that already
+        exists for the exact (group, date, subject-or-none) key — it has a
+        session or a stored mark — stays readable and correctable after its
+        level changes mode, and answers in its own shape. An unknown group is
+        404. Requires `attendance:read`.
       operationId: getAttendanceRoster
       security: [{ sessionCookie: [] }]
       parameters:
@@ -1746,7 +1750,9 @@ paths:
       summary: One of the caller's pass lists (teacher)
       description: >
         Any date may be read; `editable` says whether the caller may still save
-        it (today and up to `windowDays` back, never the future). A group the
+        it (`today` and up to `windowDays` back, never the future) and
+        `readOnlyReason` why not. As on the director route, a list taken before
+        its level changed mode stays readable and correctable. A group the
         caller does not teach — or, for a `per_class` list, a subject that is
         not the caller's (another teacher's class in the same group) — is 404,
         exactly like a group that does not exist. Mode errors are 400 as on the
@@ -1775,9 +1781,10 @@ paths:
       summary: Save one of the caller's pass lists (teacher)
       description: >
         Same reconcile as the director route, restricted to the caller's own
-        lists (404 otherwise) and to today and up to 7 days back: 400 "Solo
-        puedes corregir hasta 7 días atrás" / "No puedes registrar una fecha
-        futura". An enrollment of another group is refused by the attendance
+        lists (404 otherwise) and to today (the server's UTC school day) and up
+        to 7 days back: 400 "No puedes registrar una fecha futura" for a date
+        after today, "Solo puedes corregir hasta 7 días atrás" for one before
+        the window. An enrollment of another group is refused by the attendance
         service (400). The caller is stamped as the list's taker. Requires
         `attendance_own:write`.
       operationId: saveTeachingAttendance
@@ -2972,11 +2979,35 @@ components:
         updatedAt: { type: string, format: date-time }
     AttendanceList:
       type: object
-      required: [mode, date, editable, windowDays, session, rows]
+      required: [mode, date, editable, today, windowDays, session, rows]
       properties:
-        mode: { $ref: '#/components/schemas/AttendanceMode' }
+        mode:
+          allOf: [{ $ref: '#/components/schemas/AttendanceMode' }]
+          description: >
+            The list's shape. Usually the level's mode; a list taken before
+            its level changed mode keeps the shape it was taken in (a key
+            with a subject is per_class, without one daily).
         date: { type: string, format: date }
         editable: { type: boolean, description: Whether the caller may still save this list. }
+        readOnlyReason:
+          type: string
+          enum: [future, window]
+          description: >
+            Present only when `editable` is false, and says why: `future` — the
+            date is after `today` (web text "No puedes registrar una fecha
+            futura"); `window` — more than `windowDays` before `today` (web
+            text "Solo puedes corregir hasta 7 días atrás"). A code, not a
+            sentence: the web maps it to its own text. Never sent to the
+            director, who has no window.
+        today:
+          type: string
+          format: date
+          description: >
+            The server's school day (the UTC date, the same day finance uses).
+            The teacher's window is measured from it, so the web should base
+            its date picker on `today` rather than the browser's local date
+            (after 18:00 in the school's UTC-6 the server is already on the
+            next day).
         windowDays: { type: integer, const: 7, description: How many days back a teacher may correct. }
         session:
           oneOf:
@@ -2998,6 +3029,7 @@ components:
         mode: daily
         date: "2026-09-15"
         editable: true
+        today: "2026-09-15"
         windowDays: 7
         session: { takenAt: "2026-09-15T14:05:00Z", takenByName: Gabriela Rojas, updatedAt: "2026-09-15T14:05:00Z" }
         rows:
