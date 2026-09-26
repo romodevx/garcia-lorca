@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -34,6 +35,7 @@ type decodedEvent struct {
 	studentID   string
 	kind        eventKind
 	status      string
+	previous    string // the exception this one corrects ("" = a new mark)
 	date        string
 	class       string
 	amountCents int64
@@ -54,6 +56,12 @@ func (e decodedEvent) render(name string) Notification {
 		return n
 	}
 	n.Type, n.Title, n.Body = attendanceCopy(e.status, name, e.class, spanishDate(e.date))
+	// A change between two exceptions (absent → late) corrects what the family
+	// was already told; a clear back to present already reads as a correction.
+	if before, ok := exceptionNames[e.previous]; ok && e.previous != e.status && e.status != statusPresent {
+		n.Title = correctionTitle
+		n.Body = fmt.Sprintf("Corrección: %s (antes: %s).", strings.TrimSuffix(n.Body, "."), before)
+	}
 	return n
 }
 
@@ -84,6 +92,17 @@ func attendanceCopy(status, name, class, date string) (kind, title, body string)
 		}
 		return typeAttendance, "Corrección de asistencia", fmt.Sprintf("Corrección: %s sí asistió el %s.", name, date)
 	}
+}
+
+// correctionTitle heads every correction of what a family was already told.
+const correctionTitle = "Corrección de asistencia"
+
+// exceptionNames is how a family reads a replaced exception in a correction
+// ("antes: falta"). Only the stored exceptions can be corrected from.
+var exceptionNames = map[string]string{
+	statusAbsent:  "falta",
+	statusLate:    "retardo",
+	statusExcused: "falta justificada",
 }
 
 // pushData is the routing payload of this event's push: ids only.

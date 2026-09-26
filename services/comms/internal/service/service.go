@@ -81,6 +81,12 @@ var (
 	errUndeliverable = errors.New("event cannot be turned into a notification")
 )
 
+// ErrStudentsTransient marks a students-directory failure worth a redelivery
+// (the directory is down or too slow right now). A StudentNameReader wraps it;
+// any other lookup failure is permanent, and the notification is stored with
+// the neutral name rather than redelivered forever.
+var ErrStudentsTransient = errors.New("students directory temporarily unavailable")
+
 // --- seams -------------------------------------------------------------------
 //
 // The interfaces below are consumer-defined: comms declares the narrow view it
@@ -313,18 +319,26 @@ func (s *CommsService) HandleEvent(ctx context.Context, msg pubsub.Message) erro
 }
 
 // studentName resolves the pupil's first name for an event whose copy uses it.
-// A pupil the directory does not know falls back to fallbackStudentName; an
-// outage is returned so the event is redelivered.
+// Only a TRANSIENT failure (ErrStudentsTransient) is returned, so the event is
+// redelivered while students recovers. A pupil the directory does not know, and
+// any permanent failure — which a redelivery could never fix, and would loop on
+// forever — fall back to fallbackStudentName; the permanent one is logged.
 func (s *CommsService) studentName(ctx context.Context, ev decodedEvent) (string, error) {
 	if !ev.namesStudent() || s.names == nil {
 		return fallbackStudentName, nil
 	}
 	name, err := s.names.FirstName(ctx, ev.studentID)
 	switch {
+	case errors.Is(err, ErrStudentsTransient):
+		return "", err
 	case glerrors.KindOf(err) == glerrors.KindNotFound:
 		return fallbackStudentName, nil
 	case err != nil:
-		return "", err
+		s.log.Warn("comms fell back to the neutral name after a permanent lookup failure",
+			slog.String("event_key", ev.key),
+			slog.String("student_id", ev.studentID),
+			slog.Any("error", err))
+		return fallbackStudentName, nil
 	case strings.TrimSpace(name) == "":
 		return fallbackStudentName, nil
 	}
@@ -482,7 +496,7 @@ func (s *CommsService) decode(eventType string, data []byte) (decodedEvent, erro
 			return decodedEvent{}, fmt.Errorf("%w: unreadable %s payload: %w", errUndeliverable, eventType, err)
 		}
 		return s.checked(eventType, e.GetRecordId(), e.GetMarkVersion(), e.GetStudentId(), e.GetTenantId(), decodedEvent{
-			kind: kindAttendance, status: statusAbsent, date: e.GetDate(), class: e.GetSubjectName(),
+			kind: kindAttendance, status: statusAbsent, previous: e.GetPreviousStatus(), date: e.GetDate(), class: e.GetSubjectName(),
 		})
 
 	case eventAttendanceMarked:
@@ -494,7 +508,7 @@ func (s *CommsService) decode(eventType string, data []byte) (decodedEvent, erro
 			return decodedEvent{}, err
 		}
 		return s.checked(eventType, e.GetRecordId(), e.GetMarkVersion(), e.GetStudentId(), e.GetTenantId(), decodedEvent{
-			kind: kindAttendance, status: e.GetStatus(), date: e.GetDate(), class: e.GetSubjectName(),
+			kind: kindAttendance, status: e.GetStatus(), previous: e.GetPreviousStatus(), date: e.GetDate(), class: e.GetSubjectName(),
 		})
 
 	case eventPaymentRegistered:
@@ -527,8 +541,8 @@ func (s *CommsService) checked(eventType, eventID string, version int64, student
 	if eventID == "" {
 		return decodedEvent{}, fmt.Errorf("%w: %s carries no event id", errUndeliverable, eventType)
 	}
-	if studentID == "" {
-		return decodedEvent{}, fmt.Errorf("%w: %s carries no student id", errUndeliverable, eventType)
+	if uuid.Validate(studentID) != nil {
+		return decodedEvent{}, fmt.Errorf("%w: %s carries no valid student id", errUndeliverable, eventType)
 	}
 	if tenantID != s.tenantID {
 		return decodedEvent{}, fmt.Errorf("%w: %s belongs to another tenant", errUndeliverable, eventType)

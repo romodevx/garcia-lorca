@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -133,7 +134,7 @@ func TestStudentNameLookup(t *testing.T) {
 	})
 	t.Run("outage redelivers", func(t *testing.T) {
 		repo := newFakeRepo()
-		svc := newNamedService(t, repo, nil, &fakeNames{err: errors.New("students down")})
+		svc := newNamedService(t, repo, nil, &fakeNames{err: fmt.Errorf("students down: %w", service.ErrStudentsTransient)})
 		err := svc.HandleEvent(context.Background(), classAbsence(t, "eeeeeeee-5000-0000-0000-000000000006", "", "", 1))
 		require.Error(t, err)
 		assert.Zero(t, repo.recordCalls, "nothing is claimed before the copy can be rendered")

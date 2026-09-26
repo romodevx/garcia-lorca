@@ -225,6 +225,11 @@ message AttendanceMarked {
   // subject_name is the per-class list's display label as the saver's edge
   // resolved it (T5); empty for a daily list or when it was not resolvable.
   string subject_name = 9;
+  // previous_status is the stored status this change replaced (absent, late or
+  // excused) when the mark was CORRECTED in place or cleared; empty for a new
+  // exception or when unknown. Consumers render a change between two
+  // exceptions (absent → late) as a correction, not as a fresh event.
+  string previous_status = 10;
 }
 
 // AbsenceRecorded fires when a student is recorded absent on a date (feeds
@@ -244,4 +249,6 @@ message AbsenceRecorded {
   int64 mark_version = 7;
   // subject_name: see AttendanceMarked.subject_name.
   string subject_name = 8;
+  // previous_status: see AttendanceMarked.previous_status (late → absent).
+  string previous_status = 9;
 }

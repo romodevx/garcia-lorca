@@ -15,6 +15,7 @@ import (
 	"github.com/garcia-lorca/gen/go/garcialorca/students/v1/studentsv1connect"
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/comms/internal/adapters/studentsclient"
+	"github.com/garcia-lorca/services/comms/internal/service"
 )
 
 type fakeStudents struct {
@@ -62,6 +63,28 @@ func TestFirstName(t *testing.T) {
 			}
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// Review #6: only Unavailable and DeadlineExceeded are transient — the one
+// failure comms asks a redelivery for. Every other code is permanent.
+func TestFirstNameClassifiesTransientFailures(t *testing.T) {
+	tests := []struct {
+		code          connect.Code
+		wantTransient bool
+	}{
+		{connect.CodeUnavailable, true},
+		{connect.CodeDeadlineExceeded, true},
+		{connect.CodePermissionDenied, false},
+		{connect.CodeInvalidArgument, false},
+		{connect.CodeInternal, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.code.String(), func(t *testing.T) {
+			_, err := serve(t, &fakeStudents{code: tt.code}).FirstName(context.Background(), "3f2504e0-4f89-41d3-9a0c-0305e82c3301")
+			require.Error(t, err)
+			assert.Equal(t, tt.wantTransient, errors.Is(err, service.ErrStudentsTransient))
 		})
 	}
 }
