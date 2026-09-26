@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 
+import type { AttendanceStatus } from "../../attendance/api";
 import type { CardScanResult, ScanCardInput } from "../../attendance/scan";
 import { Toast } from "../../_design/Toast";
 import { DateField } from "../../_design/form";
@@ -58,11 +59,23 @@ export function PassSheet({ title, groupId, subjectId, today, restrictDates, loa
     () => (scan === undefined ? undefined : (code: string) => scan({ groupId, ...(subjectId !== undefined ? { subjectId } : {}), date, code })),
     [scan, groupId, subjectId, date],
   );
-  const scanner = useCardScan({ target: { groupId, subjectId, date }, sheet, rows, resolve, setStatus: list.setStatus });
+  const scanner = useCardScan({ target: { groupId, subjectId, date }, sheet, loadedFor: list.loadedFor, rows, resolve, setStatus: list.setStatus });
   /** Scanning is taking attendance now: only on today's editable list. */
   const canScan = scan !== undefined && editable && date === today;
   const saveList = async (): Promise<void> => {
-    if (await list.save()) scanner.saved();
+    const saved = await list.save();
+    if (saved !== undefined) scanner.saved(saved);
+  };
+  /** A change by hand: the scanner leaves that row alone from now on. */
+  const setStatusByHand = (enrollmentId: string, status: AttendanceStatus): void => {
+    if (locked) return;
+    scanner.touch([enrollmentId]);
+    list.setStatus(enrollmentId, status);
+  };
+  const allPresent = (): void => {
+    if (locked) return;
+    scanner.touch(rows.map((row) => row.enrollmentId));
+    list.allPresent();
   };
 
   useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
@@ -96,7 +109,7 @@ export function PassSheet({ title, groupId, subjectId, today, restrictDates, loa
             {editable && (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {canScan && <ScanButton disabled={locked} onClick={scanner.start} />}
-              <button type="button" aria-disabled={locked || undefined} onClick={list.allPresent} style={{ minHeight: 44, padding: "0 16px", borderRadius: "var(--r-pill)", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontWeight: 700, fontSize: 14, cursor: locked ? "progress" : "pointer", opacity: locked ? LOCKED_OPACITY : 1 }}>
+              <button type="button" aria-disabled={locked || undefined} onClick={allPresent} style={{ minHeight: 44, padding: "0 16px", borderRadius: "var(--r-pill)", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontWeight: 700, fontSize: 14, cursor: locked ? "progress" : "pointer", opacity: locked ? LOCKED_OPACITY : 1 }}>
                 Todos presentes
               </button>
               </div>
@@ -104,7 +117,7 @@ export function PassSheet({ title, groupId, subjectId, today, restrictDates, loa
           </div>
           <ul aria-label="Pase de lista" style={{ display: "grid", gap: 8, listStyle: "none", margin: 0, padding: 0 }}>
             {rows.map((row) => (
-              <PassSheetRow key={row.enrollmentId} row={row} editable={editable} locked={locked} showStatus={!untaken} pending={scanner.open && !scanner.scanned.has(row.enrollmentId)} onStatus={list.setStatus} onNote={list.setNote} />
+              <PassSheetRow key={row.enrollmentId} row={row} editable={editable} locked={locked} showStatus={!untaken} pending={scanner.open && scanner.unregistered.has(row.enrollmentId)} onStatus={setStatusByHand} onNote={list.setNote} />
             ))}
           </ul>
           {editable && (

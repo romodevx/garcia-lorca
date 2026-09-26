@@ -30,6 +30,8 @@ const ROWS = [
   { enrollmentId: "en2", studentId: "st2", name: "Alan Turing", status: "present" as const, note: "" },
   { enrollmentId: "en3", studentId: "st3", name: "Grace Hopper", status: "late" as const, note: "" },
 ];
+/** A reload interrupted this: Alan scanned, the rest turned absent by Terminar, Grace left late. */
+const DRAFT = { statuses: { en1: "absent", en2: "present", en3: "late" }, scanned: ["en2"], touched: [] };
 const sheet: AttendanceSheet = { mode: "daily", date: TODAY, editable: true, windowDays: 7, session: null, rows: ROWS };
 
 const load = vi.fn<() => Promise<AttendanceSheet>>();
@@ -103,13 +105,13 @@ describe("PassSheet — scan button", () => {
 });
 
 describe("PassSheet — scanning", () => {
-  it("opening the scanner leaves every row 'Sin registrar' until scanned", async () => {
+  it("opening the scanner leaves every present-by-default row 'Sin registrar' until scanned; a late one keeps its status", async () => {
     const user = userEvent.setup();
     renderSheet();
     await openScanner(user);
 
     expect(row("Ada Lovelace: Sin registrar")).toBeInTheDocument();
-    expect(row("Grace Hopper: Sin registrar")).toBeInTheDocument();
+    expect(row("Grace Hopper: Retardo")).toBeInTheDocument();
     expect(screen.getByText("Escaneados 0 de 3")).toBeInTheDocument();
   });
 
@@ -202,7 +204,7 @@ describe("PassSheet — scanning", () => {
 });
 
 describe("PassSheet — finishing", () => {
-  it("Terminar turns every unscanned row absent, closes the camera and asks for a review; Guardar sends the absences", async () => {
+  it("Terminar turns every 'Sin registrar' row absent, closes the camera and asks for a review; Guardar sends the exceptions", async () => {
     const user = userEvent.setup();
     scan.mockResolvedValue(ok("en1", "Ada Lovelace"));
     renderSheet();
@@ -214,15 +216,14 @@ describe("PassSheet — finishing", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(row("Ada Lovelace: Presente")).toBeInTheDocument();
     expect(row("Alan Turing: Ausente")).toBeInTheDocument();
-    expect(row("Grace Hopper: Ausente")).toBeInTheDocument();
-    expect(screen.getByText("Revisa la lista: 2 alumnos quedaron como ausentes.")).toBeInTheDocument();
+    expect(row("Grace Hopper: Retardo")).toBeInTheDocument();
+    expect(screen.getByText("Revisa la lista: 1 alumno quedó como ausente.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Escanear QR" })).toHaveFocus();
 
-    await user.click(row("Alan Turing: Ausente"));
     await user.click(screen.getByRole("button", { name: "Guardar lista" }));
 
     await waitFor(() => expect(save).toHaveBeenCalled());
-    expect(save.mock.calls[0]?.[0].marks).toEqual([{ enrollmentId: "en3", status: "absent" }]);
+    expect(save.mock.calls[0]?.[0].marks).toEqual([{ enrollmentId: "en2", status: "absent" }, { enrollmentId: "en3", status: "late" }]);
   });
 
   it("re-opening continues: the already present stay present", async () => {
@@ -250,7 +251,7 @@ describe("PassSheet — finishing", () => {
     await user.keyboard("{Escape}");
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByText("Revisa la lista: 2 alumnos quedaron como ausentes.")).toBeInTheDocument();
+    expect(screen.getByText("Revisa la lista: 1 alumno quedó como ausente.")).toBeInTheDocument();
   });
 });
 
@@ -263,13 +264,17 @@ describe("PassSheet — scan draft", () => {
 
     await read("GLCARD:alan");
 
-    expect(JSON.parse(window.sessionStorage.getItem(scanDraftKey(TARGET)) ?? "{}")).toEqual({ scanned: ["en2"] });
+    expect(JSON.parse(window.sessionStorage.getItem(scanDraftKey(TARGET)) ?? "{}")).toEqual({
+      statuses: { en1: "present", en2: "present", en3: "late" },
+      scanned: ["en2"],
+      touched: [],
+    });
     expect(save).not.toHaveBeenCalled();
   });
 
   it("restores the scans after a reload with a banner, and clears them after a successful save", async () => {
     const user = userEvent.setup();
-    window.sessionStorage.setItem(scanDraftKey(TARGET), JSON.stringify({ scanned: ["en2"] }));
+    window.sessionStorage.setItem(scanDraftKey(TARGET), JSON.stringify(DRAFT));
     renderSheet();
 
     expect(await screen.findByText("Recuperamos tus escaneos sin guardar")).toBeInTheDocument();
@@ -285,7 +290,7 @@ describe("PassSheet — scan draft", () => {
   it("keeps the draft when the save fails", async () => {
     const user = userEvent.setup();
     save.mockRejectedValue(new Error("boom"));
-    window.sessionStorage.setItem(scanDraftKey(TARGET), JSON.stringify({ scanned: ["en2"] }));
+    window.sessionStorage.setItem(scanDraftKey(TARGET), JSON.stringify(DRAFT));
     renderSheet();
     await screen.findByText("Recuperamos tus escaneos sin guardar");
 
@@ -304,6 +309,6 @@ describe("PassSheet — scan draft", () => {
     await user.click(screen.getByRole("button", { name: "Terminar" }));
 
     const list = screen.getByRole("list", { name: "Pase de lista" });
-    expect(within(list).getAllByRole("button", { name: /: Ausente$/ })).toHaveLength(2);
+    expect(within(list).getAllByRole("button", { name: /: Ausente$/ })).toHaveLength(1);
   });
 });

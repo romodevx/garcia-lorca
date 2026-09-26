@@ -119,6 +119,6 @@ describe("PassSheet — finishing with nothing scanned", () => {
 
     expect(row("Ada Lovelace: Presente")).toBeInTheDocument();
     expect(row("Alan Turing: Ausente")).toBeInTheDocument();
-    expect(within(screen.getByRole("status")).getByText(/2 alumnos quedaron como ausentes/)).toBeInTheDocument();
+    expect(within(screen.getByRole("status")).getByText(/1 alumno quedó como ausente/)).toBeInTheDocument();
   });
 });
