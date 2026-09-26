@@ -32,7 +32,7 @@ const (
 	// alongside another feature's locks by construction of the text.
 	listLockNamespace = "attendance-list"
 	// upsertMarkColumns is how many bound values one upsertMarkRow carries.
-	upsertMarkColumns = 7
+	upsertMarkColumns = 8
 	// maxSessionsLimit caps a ListSessions read. The service bounds the query to
 	// 20 groups × 62 days; this is the documented backstop behind that bound.
 	maxSessionsLimit = 2000
@@ -84,11 +84,11 @@ func (r *Repo) MarksForList(ctx context.Context, enrollmentIDs []string, key ser
 		return out, nil
 	}
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		rows, err := r.loadList(tx, enrollmentIDs, key, false)
+		marks, err := r.loadList(tx, enrollmentIDs, key, false)
 		if err != nil {
 			return err
 		}
-		for id, rec := range rows {
+		for id, rec := range marks.own {
 			out[id] = rec
 		}
 		return nil
@@ -99,11 +99,29 @@ func (r *Repo) MarksForList(ctx context.Context, enrollmentIDs []string, key ser
 	return out, nil
 }
 
-// loadList reads one list's marks for enrollmentIDs, keyed by enrollment id.
-// forUpdate row-locks them, so a reconcile plans against rows no concurrent save
-// can change underneath it.
-func (r *Repo) loadList(tx *gorm.DB, enrollmentIDs []string, key service.ListKey, forUpdate bool) (map[string]service.AttendanceRecord, error) {
-	out := make(map[string]service.AttendanceRecord, len(enrollmentIDs))
+// listMarks is what is stored for one list's pupils on its day·subject, split
+// by ownership. A mark belongs to the list (group) that stored it (0004):
+//
+//   - own: stored by this list, or legacy (group_id NULL, stored before the
+//     group was recorded) — the list reads and reconciles these;
+//   - heldElsewhere: stored by ANOTHER group's list. The one-mark key is
+//     (tenant, enrollment, date, subject), so the pupil·day·subject is frozen
+//     for this list: never shown, cleared, updated nor re-marked from it.
+//
+// This is what keeps a transfer honest: enrollments.group_id is rewritten in
+// place, so after a move group B's retroactive list of a day before it also
+// holds the pupil — and must not clear or overwrite group A's absence.
+type listMarks struct {
+	own           map[string]service.AttendanceRecord
+	heldElsewhere map[string]bool
+}
+
+// loadList reads the marks stored for enrollmentIDs on key's day·subject,
+// keyed by enrollment id and split by ownership (see listMarks). forUpdate
+// row-locks them, so a reconcile plans against rows no concurrent save can
+// change underneath it.
+func (r *Repo) loadList(tx *gorm.DB, enrollmentIDs []string, key service.ListKey, forUpdate bool) (listMarks, error) {
+	out := listMarks{own: make(map[string]service.AttendanceRecord, len(enrollmentIDs)), heldElsewhere: map[string]bool{}}
 	if len(enrollmentIDs) == 0 {
 		return out, nil
 	}
@@ -113,10 +131,14 @@ func (r *Repo) loadList(tx *gorm.DB, enrollmentIDs []string, key service.ListKey
 	}
 	var rows []attendanceModel
 	if err := q.Find(&rows).Error; err != nil {
-		return nil, glerrors.Wrap(glerrors.KindInternal, "loading attendance marks", err)
+		return listMarks{}, glerrors.Wrap(glerrors.KindInternal, "loading attendance marks", err)
 	}
 	for _, m := range rows {
-		out[m.EnrollmentID] = toRecord(m)
+		if m.GroupID != nil && *m.GroupID != key.GroupID {
+			out.heldElsewhere[m.EnrollmentID] = true
+			continue
+		}
+		out.own[m.EnrollmentID] = toRecord(m)
 	}
 	return out, nil
 }
@@ -177,14 +199,15 @@ func (r *Repo) ReconcileList(ctx context.Context, key service.ListKey, enrollmen
 		if err != nil {
 			return err
 		}
-		changes, err := plan(current)
+		planned, err := plan(current.own)
 		if err != nil {
 			return err
 		}
+		changes := withoutHeld(planned, current.heldElsewhere)
 		if err := r.deleteMarks(tx, changes.Deletes); err != nil {
 			return err
 		}
-		stored, err := r.upsertMarks(tx, changes)
+		stored, err := r.upsertMarks(tx, key.GroupID, changes)
 		if err != nil {
 			return err
 		}
@@ -198,6 +221,23 @@ func (r *Repo) ReconcileList(ctx context.Context, key service.ListKey, enrollmen
 		return service.ListChanges{}, err
 	}
 	return applied, nil
+}
+
+// withoutHeld drops the planned inserts of pupils whose day·subject another
+// group's list holds (see listMarks): the plan only saw this list's own marks,
+// so it would otherwise try to store a second mark on the one-mark key.
+// Updates and deletes only ever target own marks, so they pass through.
+func withoutHeld(planned service.ListChanges, held map[string]bool) service.ListChanges {
+	if len(held) == 0 {
+		return planned
+	}
+	out := service.ListChanges{Updates: planned.Updates, Deletes: planned.Deletes}
+	for _, rec := range planned.Inserts {
+		if !held[rec.EnrollmentID] {
+			out.Inserts = append(out.Inserts, rec)
+		}
+	}
+	return out
 }
 
 // lockList takes the transaction-scoped advisory lock of one list (tenant,
@@ -237,18 +277,23 @@ type storedMark struct {
 }
 
 // upsertMarkSQL writes a batch of marks as ONE statement. The VALUES rows are
-// appended by upsertMarks.
-const upsertMarkSQL = `INSERT INTO attendance (id, tenant_id, enrollment_id, date, subject_id, status, note, created_at, updated_at) VALUES %s
+// appended by upsertMarks. Every written row stamps the list's group (a legacy
+// NULL one is claimed by the list that corrects it). The WHERE is the backstop
+// of the ownership rule (see listMarks): a row another group's list stored —
+// committed by a concurrent save after this one's plan — is left alone and,
+// not being RETURNed, is not reported as stored.
+const upsertMarkSQL = `INSERT INTO attendance (id, tenant_id, enrollment_id, date, subject_id, group_id, status, note, created_at, updated_at) VALUES %s
 ON CONFLICT (tenant_id, enrollment_id, date, subject_id)
-DO UPDATE SET status = excluded.status, note = excluded.note, revision = attendance.revision + 1, updated_at = now()
+DO UPDATE SET status = excluded.status, note = excluded.note, group_id = excluded.group_id, revision = attendance.revision + 1, updated_at = now()
+WHERE attendance.group_id IS NULL OR attendance.group_id = excluded.group_id
 RETURNING id, enrollment_id, revision, (xmax = 0) AS inserted`
 
 // upsertMarkRow is one VALUES row of upsertMarkSQL.
-const upsertMarkRow = "(?, ?, ?, ?::date, ?, ?, ?, now(), now())"
+const upsertMarkRow = "(?, ?, ?, ?::date, ?, ?, ?, ?, now(), now())"
 
 // upsertMarks stores inserts and in-place updates as one upsert and returns
 // what Postgres actually did to each row, keyed by enrollment id.
-func (r *Repo) upsertMarks(tx *gorm.DB, changes service.ListChanges) (map[string]storedMark, error) {
+func (r *Repo) upsertMarks(tx *gorm.DB, groupID string, changes service.ListChanges) (map[string]storedMark, error) {
 	records := make([]service.AttendanceRecord, 0, len(changes.Inserts)+len(changes.Updates))
 	records = append(records, changes.Inserts...)
 	for _, u := range changes.Updates {
@@ -262,7 +307,7 @@ func (r *Repo) upsertMarks(tx *gorm.DB, changes service.ListChanges) (map[string
 	args := make([]any, 0, len(records)*upsertMarkColumns)
 	for _, rec := range records {
 		rows = append(rows, upsertMarkRow)
-		args = append(args, rec.ID, r.tenantID, rec.EnrollmentID, rec.Date.Format(dateLayout), nullable(rec.SubjectID), rec.Status, rec.Note)
+		args = append(args, rec.ID, r.tenantID, rec.EnrollmentID, rec.Date.Format(dateLayout), nullable(rec.SubjectID), groupID, rec.Status, rec.Note)
 	}
 	var stored []storedMark
 	if err := tx.Raw(fmt.Sprintf(upsertMarkSQL, strings.Join(rows, ", ")), args...).Scan(&stored).Error; err != nil {
@@ -275,17 +320,19 @@ func (r *Repo) upsertMarks(tx *gorm.DB, changes service.ListChanges) (map[string
 }
 
 // asStored rewrites a plan into what was stored: every insert and update
-// carries the row's STORED id and revision, and a planned insert that Postgres
+// carries the row's STORED id and revision, a planned insert that Postgres
 // turned into an update (it met an existing row) is reported as a
-// status-changing update.
+// status-changing update, and one the ownership backstop skipped (another
+// group's row) is not reported at all — nothing of it was stored.
 func asStored(planned service.ListChanges, stored map[string]storedMark) service.ListChanges {
 	out := service.ListChanges{Deletes: planned.Deletes}
 	for _, rec := range planned.Inserts {
 		m, ok := stored[rec.EnrollmentID]
-		if ok {
-			rec.ID, rec.Revision = m.ID, m.Revision
+		if !ok {
+			continue
 		}
-		if !ok || m.Inserted {
+		rec.ID, rec.Revision = m.ID, m.Revision
+		if m.Inserted {
 			out.Inserts = append(out.Inserts, rec)
 			continue
 		}

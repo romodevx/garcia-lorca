@@ -16,6 +16,7 @@ type attendanceModel struct {
 	EnrollmentID string    `gorm:"column:enrollment_id"`
 	Date         time.Time `gorm:"column:date"`
 	SubjectID    *string   `gorm:"column:subject_id"`
+	GroupID      *string   `gorm:"column:group_id"` // the list that stored it; NULL = legacy (pre-0004)
 	Status       string    `gorm:"column:status"`
 	Note         string    `gorm:"column:note"`
 	Revision     int64     `gorm:"column:revision;default:1"`
