@@ -3,6 +3,7 @@ package grpcadapter_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	connect "connectrpc.com/connect"
@@ -83,14 +84,14 @@ func (f *fakeCatalog) UpdateTeachingAssignmentTeacher(_ context.Context, id, tea
 
 // newUUIDHandler is newHandler with a mint of well-formed uuids: the teaching
 // load RPCs reject malformed ids at the boundary, so the fixtures must be real
-// uuids.
+// uuids. They carry hex letters so an upper-cased copy is a different string.
 func newUUIDHandler(t *testing.T) (*grpcadapter.ConfigHandler, *fakeCatalog) {
 	t.Helper()
 	repo := newFake()
 	ids := 0
 	svc := usecase.NewCatalogService(repo, tenant, func() string {
 		ids++
-		return fmt.Sprintf("00000000-0000-4000-8000-%012d", ids)
+		return fmt.Sprintf("abcdef00-0000-4000-8000-%012d", ids)
 	})
 	return grpcadapter.NewConfigHandler(svc, usecase.NewHealthService("config")), repo
 }
@@ -242,4 +243,54 @@ func TestReassignTeachingAssignmentHandler(t *testing.T) {
 			assert.Equal(t, tt.wantCode, codeOf(err))
 		})
 	}
+}
+
+// Uuids are case-insensitive: an edge may send upper-case hex while Postgres
+// hands back lower case. The handler canonicalizes every id, so duplicates,
+// slot lookups and "already yours" compare equal whatever the case.
+func TestTeachingLoadHandlersCanonicalizeIDCase(t *testing.T) {
+	up := strings.ToUpper
+	h, repo := newUUIDHandler(t)
+	_, groupID, subjectID, teacherID := seedKnot(t, h)
+	other := seedTeacher(t, h, "ada@example.com")
+
+	res, err := h.AssignTeachingLoad(ctx(), connect.NewRequest(&configv1.AssignTeachingLoadRequest{
+		TeacherId: up(teacherID),
+		Items:     []*configv1.TeachingLoadItem{{GroupId: up(groupID), SubjectId: up(subjectID)}},
+	}))
+	require.NoError(t, err, "upper-case ids are accepted")
+	require.Len(t, res.Msg.GetCreated(), 1)
+	created := res.Msg.GetCreated()[0]
+	assert.Equal(t, teacherID, created.GetTeacherId(), "stored in canonical lower case")
+	assert.Equal(t, groupID, created.GetGroupId())
+	assert.Equal(t, subjectID, created.GetSubjectId())
+
+	again, err := h.AssignTeachingLoad(ctx(), connect.NewRequest(&configv1.AssignTeachingLoadRequest{
+		TeacherId: up(teacherID),
+		Items:     []*configv1.TeachingLoadItem{{GroupId: up(groupID), SubjectId: up(subjectID)}},
+	}))
+	require.NoError(t, err)
+	assert.Len(t, again.Msg.GetSkipped(), 1, "the teacher's own slot sent upper-case is skipped")
+	assert.Empty(t, again.Msg.GetConflicts(), "not reported as a conflict with itself")
+
+	_, err = h.AssignTeachingLoad(ctx(), connect.NewRequest(&configv1.AssignTeachingLoadRequest{
+		TeacherId: other,
+		Items: []*configv1.TeachingLoadItem{
+			{GroupId: up(groupID), SubjectId: up(subjectID)},
+			{GroupId: groupID, SubjectId: subjectID},
+		},
+	}))
+	require.Error(t, err, "the same slot in two cases is one slot twice")
+	assert.Equal(t, connect.CodeInvalidArgument, codeOf(err))
+	assert.Contains(t, err.Error(), "items[1]")
+
+	id := created.GetId()
+	moved, err := h.ReassignTeachingAssignment(ctx(), connect.NewRequest(&configv1.ReassignTeachingAssignmentRequest{Id: up(id), TeacherId: up(other)}))
+	require.NoError(t, err)
+	assert.Equal(t, id, moved.Msg.GetTeachingAssignment().GetId())
+	assert.Equal(t, other, moved.Msg.GetTeachingAssignment().GetTeacherId())
+
+	_, err = h.DeleteTeachingAssignment(ctx(), connect.NewRequest(&configv1.DeleteTeachingAssignmentRequest{Id: up(id)}))
+	require.NoError(t, err)
+	assert.Empty(t, repo.assignments)
 }

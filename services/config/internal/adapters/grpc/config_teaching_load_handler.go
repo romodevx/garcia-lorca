@@ -15,7 +15,10 @@ import (
 
 // The teaching-load RPCs check id FORMAT here, at the edge: a malformed id
 // would otherwise reach Postgres as an invalid uuid literal and come back as an
-// opaque internal error instead of an InvalidArgument naming the field.
+// opaque internal error instead of an InvalidArgument naming the field. They
+// also CANONICALIZE every id to lower case: uuids are case-insensitive and
+// Postgres returns lower case, so the use case's duplicate check, snapshot
+// lookups and "already yours" comparisons only hold on one spelling.
 
 // AssignTeachingLoad gives one teacher a batch of slots in one transaction.
 func (h *ConfigHandler) AssignTeachingLoad(ctx context.Context, req *connect.Request[configv1.AssignTeachingLoadRequest]) (*connect.Response[configv1.AssignTeachingLoadResponse], error) {
@@ -32,10 +35,11 @@ func (h *ConfigHandler) AssignTeachingLoad(ctx context.Context, req *connect.Req
 
 // DeleteTeachingAssignment frees a slot.
 func (h *ConfigHandler) DeleteTeachingAssignment(ctx context.Context, req *connect.Request[configv1.DeleteTeachingAssignmentRequest]) (*connect.Response[configv1.DeleteTeachingAssignmentResponse], error) {
-	if err := requireUUID("id", req.Msg.GetId()); err != nil {
+	id, err := canonicalUUID("id", req.Msg.GetId())
+	if err != nil {
 		return nil, connectErr(err)
 	}
-	if err := h.catalog.DeleteTeachingAssignment(ctx, req.Msg.GetId()); err != nil {
+	if err := h.catalog.DeleteTeachingAssignment(ctx, id); err != nil {
 		return nil, connectErr(err)
 	}
 	return connect.NewResponse(&configv1.DeleteTeachingAssignmentResponse{}), nil
@@ -43,37 +47,42 @@ func (h *ConfigHandler) DeleteTeachingAssignment(ctx context.Context, req *conne
 
 // ReassignTeachingAssignment hands an existing slot to another teacher.
 func (h *ConfigHandler) ReassignTeachingAssignment(ctx context.Context, req *connect.Request[configv1.ReassignTeachingAssignmentRequest]) (*connect.Response[configv1.ReassignTeachingAssignmentResponse], error) {
-	if err := requireUUID("id", req.Msg.GetId()); err != nil {
+	id, err := canonicalUUID("id", req.Msg.GetId())
+	if err != nil {
 		return nil, connectErr(err)
 	}
-	if err := requireUUID("teacher_id", req.Msg.GetTeacherId()); err != nil {
+	teacherID, err := canonicalUUID("teacher_id", req.Msg.GetTeacherId())
+	if err != nil {
 		return nil, connectErr(err)
 	}
-	a, err := h.catalog.ReassignTeachingAssignment(ctx, req.Msg.GetId(), req.Msg.GetTeacherId())
+	a, err := h.catalog.ReassignTeachingAssignment(ctx, id, teacherID)
 	if err != nil {
 		return nil, connectErr(err)
 	}
 	return connect.NewResponse(&configv1.ReassignTeachingAssignmentResponse{TeachingAssignment: toProtoTeachingAssignment(a)}), nil
 }
 
-// toTeachingLoadRequest checks every id is a uuid and maps the request inward.
-// Emptiness and duplicates are the use case's to judge.
+// toTeachingLoadRequest checks every id is a uuid, canonicalizes it, and maps
+// the request inward. Emptiness and duplicates are the use case's to judge.
 func toTeachingLoadRequest(msg *configv1.AssignTeachingLoadRequest) (usecase.TeachingLoadRequest, error) {
-	if err := requireUUID("teacher_id", msg.GetTeacherId()); err != nil {
+	teacherID, err := canonicalUUID("teacher_id", msg.GetTeacherId())
+	if err != nil {
 		return usecase.TeachingLoadRequest{}, err
 	}
 	items := make([]domain.TeachingSlot, 0, len(msg.GetItems()))
 	for i, it := range msg.GetItems() {
-		if err := requireUUID(fmt.Sprintf("items[%d].group_id", i), it.GetGroupId()); err != nil {
+		groupID, err := canonicalUUID(fmt.Sprintf("items[%d].group_id", i), it.GetGroupId())
+		if err != nil {
 			return usecase.TeachingLoadRequest{}, err
 		}
-		if err := requireUUID(fmt.Sprintf("items[%d].subject_id", i), it.GetSubjectId()); err != nil {
+		subjectID, err := canonicalUUID(fmt.Sprintf("items[%d].subject_id", i), it.GetSubjectId())
+		if err != nil {
 			return usecase.TeachingLoadRequest{}, err
 		}
-		items = append(items, domain.TeachingSlot{GroupID: it.GetGroupId(), SubjectID: it.GetSubjectId()})
+		items = append(items, domain.TeachingSlot{GroupID: groupID, SubjectID: subjectID})
 	}
 	return usecase.TeachingLoadRequest{
-		TeacherID:        msg.GetTeacherId(),
+		TeacherID:        teacherID,
 		Items:            items,
 		ReplaceConflicts: msg.GetReplaceConflicts(),
 	}, nil
@@ -111,10 +120,12 @@ func toProtoTeachingLoadResult(r usecase.TeachingLoadResult) *configv1.AssignTea
 // also accepts urn:uuid: and braced forms; only the canonical one is on the wire.
 const canonicalUUIDLen = 36
 
-// requireUUID rejects an id that is not a canonical uuid, naming the field.
-func requireUUID(field, id string) error {
-	if _, err := uuid.Parse(id); err != nil || len(id) != canonicalUUIDLen {
-		return glerrors.New(glerrors.KindInvalid, field+" must be a valid uuid")
+// canonicalUUID rejects an id that is not a hyphenated uuid, naming the field,
+// and returns it in canonical lower case (the form Postgres returns).
+func canonicalUUID(field, id string) (string, error) {
+	parsed, err := uuid.Parse(id)
+	if err != nil || len(id) != canonicalUUIDLen {
+		return "", glerrors.New(glerrors.KindInvalid, field+" must be a valid uuid")
 	}
-	return nil
+	return parsed.String(), nil
 }
