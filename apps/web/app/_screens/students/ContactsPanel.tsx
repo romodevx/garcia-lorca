@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactEle
 import { Btn } from "../../_design/Controls";
 import { EmailField, SelectField, TextField, useEmailShapeOnSave, useFormatError, useRequired } from "../../_design/form";
 import { Icon } from "../../_design/Icon";
+import { InviteLink } from "../../_design/InviteLink";
 import { UndoToast } from "../../_design/UndoToast";
 import { useUndoableRemoval } from "../../_design/useUndoableRemoval";
 import {
@@ -432,13 +433,7 @@ function AccessOutcome({ name, result }: { name: string; result: ContactAccessRe
           <strong>No se pudo enviar</strong> el correo{invitation.sendError !== undefined && invitation.sendError !== "" ? ` (${invitation.sendError})` : ""}.
           La cuenta sí quedó creada: copia esta liga y entrégasela a {who}.
         </span>
-        <input
-          readOnly
-          value={invitation.url}
-          aria-label="Liga de acceso"
-          onFocus={(e) => e.currentTarget.select()}
-          style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 12.5, fontFamily: "monospace" }}
-        />
+        <InviteLink url={invitation.url} />
       </div>
     );
   }
