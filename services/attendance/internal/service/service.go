@@ -130,6 +130,9 @@ type Taker struct {
 type RecordUpdate struct {
 	Record        AttendanceRecord
 	StatusChanged bool
+	// PreviousStatus is the stored status the update replaced ("" when the
+	// repository could not know it: a planned insert that met a row).
+	PreviousStatus string
 }
 
 // ListChanges is what a save does to a list: exceptions to insert, stored ones
@@ -192,6 +195,9 @@ type AbsenceEvent struct {
 	SubjectID    string
 	SubjectName  string // the per-class list's label, "" for daily (never stored)
 	MarkVersion  int64  // the mark's stored revision; with RecordID, the consumer's dedupe key
+	// PreviousStatus is the exception this absence replaced (late → absent), ""
+	// for a new absence.
+	PreviousStatus string
 }
 
 // MarkedEvent announces that a student's mark CHANGED on a list: a new
@@ -208,6 +214,9 @@ type MarkedEvent struct {
 	SubjectID    string
 	SubjectName  string // the per-class list's label, "" for daily (never stored)
 	MarkVersion  int64  // the mark's stored revision; with RecordID, the consumer's dedupe key
+	// PreviousStatus is the stored status this change replaced (an in-place
+	// correction or a clear), "" for a new exception.
+	PreviousStatus string
 }
 
 // Publisher announces stored attendance on the messaging boundary. Publishing is
@@ -428,7 +437,7 @@ func DiffList(current map[string]AttendanceRecord, desired []AttendanceRecord) L
 			changes.Inserts = append(changes.Inserts, want)
 		case have.Status != want.Status || have.Note != want.Note:
 			want.ID = have.ID
-			changes.Updates = append(changes.Updates, RecordUpdate{Record: want, StatusChanged: have.Status != want.Status})
+			changes.Updates = append(changes.Updates, RecordUpdate{Record: want, StatusChanged: have.Status != want.Status, PreviousStatus: have.Status})
 		}
 	}
 	cleared := make([]string, 0, len(current))
@@ -579,15 +588,15 @@ func (s *AttendanceService) publishChanges(ctx context.Context, changes ListChan
 		return
 	}
 	for _, rec := range changes.Inserts {
-		s.publishMark(ctx, rec, rec.Status, rec.Revision, ec)
+		s.publishMark(ctx, rec, markChange{status: rec.Status, version: rec.Revision}, ec)
 	}
 	for _, u := range changes.Updates {
 		if u.StatusChanged {
-			s.publishMark(ctx, u.Record, u.Record.Status, u.Record.Revision, ec)
+			s.publishMark(ctx, u.Record, markChange{status: u.Record.Status, previous: u.PreviousStatus, version: u.Record.Revision}, ec)
 		}
 	}
 	for _, rec := range changes.Deletes {
-		s.publishMark(ctx, rec, statusPresent, clearedVersion(rec), ec)
+		s.publishMark(ctx, rec, markChange{status: statusPresent, previous: rec.Status, version: clearedVersion(rec)}, ec)
 	}
 }
 
@@ -606,37 +615,47 @@ func clearedVersion(rec AttendanceRecord) int64 {
 	return rec.Revision + 1
 }
 
-// publishMark announces one changed mark as status at version, plus the absence
-// companion (same version) when status is absent. The version is what makes a
-// correction a NEW event to a consumer that dedupes on (record id, version),
-// while the record id stays the stored one.
-func (s *AttendanceService) publishMark(ctx context.Context, rec AttendanceRecord, status string, version int64, ec eventContext) {
+// markChange is what one published mark announces: its new status, the stored
+// status it replaced ("" for a new exception) and its version.
+type markChange struct {
+	status, previous string
+	version          int64
+}
+
+// publishMark announces one changed mark as its status at its version, plus the
+// absence companion (same version) when the status is absent. The version is
+// what makes a correction a NEW event to a consumer that dedupes on (record id,
+// version), while the record id stays the stored one.
+func (s *AttendanceService) publishMark(ctx context.Context, rec AttendanceRecord, change markChange, ec eventContext) {
+	status, version := change.status, change.version
 	day := rec.Date.Format(dateLayout)
 	studentID := ec.students[rec.EnrollmentID]
 	err := s.publisher.PublishAttendanceMarked(ctx, MarkedEvent{
-		RecordID:     rec.ID,
-		EnrollmentID: rec.EnrollmentID,
-		StudentID:    studentID,
-		TenantID:     s.tenantID,
-		Date:         day,
-		Status:       status,
-		SubjectID:    rec.SubjectID,
-		SubjectName:  ec.subjectName,
-		MarkVersion:  version,
+		RecordID:       rec.ID,
+		EnrollmentID:   rec.EnrollmentID,
+		StudentID:      studentID,
+		TenantID:       s.tenantID,
+		Date:           day,
+		Status:         status,
+		SubjectID:      rec.SubjectID,
+		SubjectName:    ec.subjectName,
+		MarkVersion:    version,
+		PreviousStatus: change.previous,
 	})
 	s.logDroppedEvent(err, rec.ID)
 	if status != statusAbsent {
 		return
 	}
 	err = s.publisher.PublishAbsenceRecorded(ctx, AbsenceEvent{
-		RecordID:     rec.ID,
-		EnrollmentID: rec.EnrollmentID,
-		StudentID:    studentID,
-		TenantID:     s.tenantID,
-		Date:         day,
-		SubjectID:    rec.SubjectID,
-		SubjectName:  ec.subjectName,
-		MarkVersion:  version,
+		RecordID:       rec.ID,
+		EnrollmentID:   rec.EnrollmentID,
+		StudentID:      studentID,
+		TenantID:       s.tenantID,
+		Date:           day,
+		SubjectID:      rec.SubjectID,
+		SubjectName:    ec.subjectName,
+		MarkVersion:    version,
+		PreviousStatus: change.previous,
 	})
 	s.logDroppedEvent(err, rec.ID)
 }

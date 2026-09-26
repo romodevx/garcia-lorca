@@ -50,7 +50,7 @@ func TestDiffList(t *testing.T) {
 			current: map[string]service.AttendanceRecord{"a": stored("old-a", "a", "absent", "")},
 			desired: []service.AttendanceRecord{want("new-1", "a", "excused", "")},
 			want: service.ListChanges{Updates: []service.RecordUpdate{
-				{Record: want("old-a", "a", "excused", ""), StatusChanged: true},
+				{Record: want("old-a", "a", "excused", ""), StatusChanged: true, PreviousStatus: "absent"},
 			}},
 		},
 		{
@@ -58,7 +58,7 @@ func TestDiffList(t *testing.T) {
 			current: map[string]service.AttendanceRecord{"a": stored("old-a", "a", "late", "")},
 			desired: []service.AttendanceRecord{want("new-1", "a", "late", "tráfico")},
 			want: service.ListChanges{Updates: []service.RecordUpdate{
-				{Record: want("old-a", "a", "late", "tráfico"), StatusChanged: false},
+				{Record: want("old-a", "a", "late", "tráfico"), StatusChanged: false, PreviousStatus: "late"},
 			}},
 		},
 		{
