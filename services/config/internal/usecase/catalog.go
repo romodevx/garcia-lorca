@@ -116,6 +116,19 @@ func (s *CatalogService) GetLevel(ctx context.Context, id string) (domain.Level,
 	return s.repo.GetLevel(ctx, id)
 }
 
+// SetLevelAttendanceMode changes how a level takes attendance and returns the
+// updated level. An unknown mode is KindInvalid (checked before any write); an
+// unknown level is KindNotFound.
+func (s *CatalogService) SetLevelAttendanceMode(ctx context.Context, id string, mode domain.AttendanceMode) (domain.Level, error) {
+	if !mode.Valid() {
+		return domain.Level{}, glerrors.New(glerrors.KindInvalid, "level attendance mode is invalid")
+	}
+	if err := s.repo.UpdateLevelAttendanceMode(ctx, id, mode); err != nil {
+		return domain.Level{}, err
+	}
+	return s.repo.GetLevel(ctx, id)
+}
+
 // ListLevels returns every level in the tenant catalog.
 func (s *CatalogService) ListLevels(ctx context.Context) ([]domain.Level, error) {
 	return s.repo.ListLevels(ctx)

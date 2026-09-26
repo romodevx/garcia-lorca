@@ -195,6 +195,25 @@ func (r *Repository) ListLevels(ctx context.Context) ([]domain.Level, error) {
 	return out, nil
 }
 
+// UpdateLevelAttendanceMode changes one level's attendance mode. It writes only
+// attendance_mode and updated_at; a level that does not exist — or that RLS
+// hides, i.e. another tenant's — is KindNotFound.
+func (r *Repository) UpdateLevelAttendanceMode(ctx context.Context, id string, mode domain.AttendanceMode) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Model(&levelModel{}).Where("id = ?", id).Updates(map[string]any{
+			"attendance_mode": mode.String(),
+			"updated_at":      gorm.Expr("now()"),
+		})
+		if res.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "updating level attendance mode", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return glerrors.ErrNotFound
+		}
+		return nil
+	})
+}
+
 // --- grade levels ---------------------------------------------------------
 
 // CreateGradeLevel persists a new grade level. A duplicate (level_id, ordinal)

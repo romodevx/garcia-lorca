@@ -26,6 +26,9 @@ service ConfigService {
   rpc GetLevel(GetLevelRequest) returns (GetLevelResponse);
   // ListLevels lists every level in the tenant catalog.
   rpc ListLevels(ListLevelsRequest) returns (ListLevelsResponse);
+  // SetLevelAttendanceMode chooses how a level takes attendance: one list per
+  // group per day (daily) or one per group, subject and day (per_class).
+  rpc SetLevelAttendanceMode(SetLevelAttendanceModeRequest) returns (SetLevelAttendanceModeResponse);
 
   // --- cycles (per-cycle umbrella) ---
   // CreateCycle adds a school-year umbrella (status defaults to draft).
@@ -159,6 +162,15 @@ enum EnrollmentGranularity {
   ENROLLMENT_GRANULARITY_TERM = 2;
 }
 
+// AttendanceMode is how a level takes attendance (T3). DAILY: one pass list per
+// group per day, which any teacher of the group may take. PER_CLASS: one pass
+// list per group, subject and day, taken only by that subject's teacher.
+enum AttendanceMode {
+  ATTENDANCE_MODE_UNSPECIFIED = 0;
+  ATTENDANCE_MODE_DAILY = 1;
+  ATTENDANCE_MODE_PER_CLASS = 2;
+}
+
 // CycleStatus is a cycle's lifecycle state.
 enum CycleStatus {
   CYCLE_STATUS_UNSPECIFIED = 0;
@@ -179,6 +191,8 @@ message Level {
   EnrollmentGranularity enrollment_granularity = 5;
   google.protobuf.Timestamp created_at = 6;
   google.protobuf.Timestamp updated_at = 7;
+  // attendance_mode is how the level's groups take attendance.
+  AttendanceMode attendance_mode = 8;
 }
 
 // Cycle is a school-year umbrella (e.g. "2026-2027").
@@ -270,6 +284,17 @@ message ListLevelsRequest {}
 // ListLevelsResponse returns the tenant levels.
 message ListLevelsResponse {
   repeated Level levels = 1;
+}
+
+// SetLevelAttendanceModeRequest changes one level's attendance mode.
+message SetLevelAttendanceModeRequest {
+  string id = 1;
+  AttendanceMode attendance_mode = 2;
+}
+
+// SetLevelAttendanceModeResponse returns the updated level.
+message SetLevelAttendanceModeResponse {
+  Level level = 1;
 }
 
 // --- Cycle RPC messages ---------------------------------------------------

@@ -55,6 +55,9 @@ type CatalogRepository interface {
 	GetLevel(ctx context.Context, id string) (domain.Level, error)
 	// ListLevels returns every level in the tenant catalog.
 	ListLevels(ctx context.Context) ([]domain.Level, error)
+	// UpdateLevelAttendanceMode changes one level's attendance mode, or
+	// KindNotFound when the level does not exist.
+	UpdateLevelAttendanceMode(ctx context.Context, id string, mode domain.AttendanceMode) error
 
 	// --- grade levels (grados, catalog; child of level) ---
 
