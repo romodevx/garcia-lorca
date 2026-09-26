@@ -36,3 +36,13 @@ func TestInLockOrderSortsByGroupThenSubject(t *testing.T) {
 	assert.Equal(t, []string{"4", "2", "3", "1"}, ids)
 	assert.Equal(t, "1", in[0].ID(), "the input keeps request order")
 }
+
+// byIDs answers an empty id list with an empty (non-nil) map and never touches
+// the database: a load with no holders must not issue an `IN ()` query.
+func TestByIDsWithNoIDsSkipsTheQuery(t *testing.T) {
+	got, err := byIDs[groupModel, domain.Group](nil, nil, toDomainGroup, "groups")
+
+	require.NoError(t, err)
+	assert.NotNil(t, got)
+	assert.Empty(t, got)
+}

@@ -49,10 +49,10 @@ func loadTeachingSnapshot(tx *gorm.DB, teacherID string, slots []domain.Teaching
 		return ports.TeachingLoadSnapshot{}, err
 	}
 	groupIDs, subjectIDs, pairs := slotKeys(slots)
-	if snap.Groups, err = groupsByID(tx, groupIDs); err != nil {
+	if snap.Groups, err = byIDs(tx, groupIDs, toDomainGroup, "groups"); err != nil {
 		return ports.TeachingLoadSnapshot{}, err
 	}
-	if snap.Subjects, err = subjectsByID(tx, subjectIDs); err != nil {
+	if snap.Subjects, err = byIDs(tx, subjectIDs, toDomainSubject, "subjects"); err != nil {
 		return ports.TeachingLoadSnapshot{}, err
 	}
 	if snap.Occupied, err = occupiedSlots(tx, pairs); err != nil {
@@ -62,7 +62,7 @@ func loadTeachingSnapshot(tx *gorm.DB, teacherID string, slots []domain.Teaching
 	for _, a := range snap.Occupied {
 		holderIDs = append(holderIDs, a.TeacherID())
 	}
-	if snap.Holders, err = teachersByID(tx, holderIDs); err != nil {
+	if snap.Holders, err = byIDs(tx, holderIDs, toDomainTeacher, "teachers"); err != nil {
 		return ports.TeachingLoadSnapshot{}, err
 	}
 	return snap, nil
@@ -104,59 +104,24 @@ func findTeacher(tx *gorm.DB, id string) (domain.Teacher, bool, error) {
 	return te, true, nil
 }
 
-func groupsByID(tx *gorm.DB, ids []string) (map[string]domain.Group, error) {
-	out := make(map[string]domain.Group, len(ids))
+// byIDs loads the rows whose id is in ids and maps them to domain values keyed
+// by id. An empty ids slice answers an empty map without a query. what names
+// the rows in the wrapped error ("groups", "subjects", ...).
+func byIDs[M any, D interface{ ID() string }](tx *gorm.DB, ids []string, toDomain func(M) (D, error), what string) (map[string]D, error) {
+	out := make(map[string]D, len(ids))
 	if len(ids) == 0 {
 		return out, nil
 	}
-	var rows []groupModel
+	var rows []M
 	if err := tx.Where("id IN ?", ids).Find(&rows).Error; err != nil {
-		return nil, glerrors.Wrap(glerrors.KindInternal, "loading groups", err)
+		return nil, glerrors.Wrap(glerrors.KindInternal, "loading "+what, err)
 	}
 	for _, m := range rows {
-		g, err := toDomainGroup(m)
+		d, err := toDomain(m)
 		if err != nil {
 			return nil, err
 		}
-		out[g.ID()] = g
-	}
-	return out, nil
-}
-
-func subjectsByID(tx *gorm.DB, ids []string) (map[string]domain.Subject, error) {
-	out := make(map[string]domain.Subject, len(ids))
-	if len(ids) == 0 {
-		return out, nil
-	}
-	var rows []subjectModel
-	if err := tx.Where("id IN ?", ids).Find(&rows).Error; err != nil {
-		return nil, glerrors.Wrap(glerrors.KindInternal, "loading subjects", err)
-	}
-	for _, m := range rows {
-		s, err := toDomainSubject(m)
-		if err != nil {
-			return nil, err
-		}
-		out[s.ID()] = s
-	}
-	return out, nil
-}
-
-func teachersByID(tx *gorm.DB, ids []string) (map[string]domain.Teacher, error) {
-	out := make(map[string]domain.Teacher, len(ids))
-	if len(ids) == 0 {
-		return out, nil
-	}
-	var rows []teacherModel
-	if err := tx.Where("id IN ?", ids).Find(&rows).Error; err != nil {
-		return nil, glerrors.Wrap(glerrors.KindInternal, "loading teachers", err)
-	}
-	for _, m := range rows {
-		te, err := toDomainTeacher(m)
-		if err != nil {
-			return nil, err
-		}
-		out[te.ID()] = te
+		out[d.ID()] = d
 	}
 	return out, nil
 }
