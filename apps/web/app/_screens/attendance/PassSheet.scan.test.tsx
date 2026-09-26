@@ -117,16 +117,16 @@ describe("PassSheet — scanning", () => {
 
   it("a good card marks the student present, flashes the name, beeps and vibrates — without leaving the camera", async () => {
     const user = userEvent.setup();
-    scan.mockResolvedValue(ok("en3", "Grace Hopper"));
+    scan.mockResolvedValue(ok("en1", "Ada Lovelace"));
     renderSheet();
     await openScanner(user);
 
-    await read("GLCARD:grace");
+    await read("GLCARD:ada");
 
-    expect(scan).toHaveBeenCalledWith({ groupId: "g1", date: TODAY, code: "GLCARD:grace" });
-    expect(row("Grace Hopper: Presente")).toBeInTheDocument();
-    expect(screen.getByTestId("scan-flash")).toHaveTextContent("Grace Hopper");
-    expect(screen.getByRole("status")).toHaveTextContent("Presente: Grace Hopper");
+    expect(scan).toHaveBeenCalledWith({ groupId: "g1", date: TODAY, code: "GLCARD:ada" });
+    expect(row("Ada Lovelace: Presente")).toBeInTheDocument();
+    expect(screen.getByTestId("scan-flash")).toHaveTextContent("Ada Lovelace");
+    expect(screen.getByRole("status")).toHaveTextContent("Presente: Ada Lovelace");
     expect(screen.getByText("Escaneados 1 de 3")).toBeInTheDocument();
     expect(oscillator).toHaveBeenCalledTimes(1);
     expect(navigator.vibrate).toHaveBeenCalledWith(60);

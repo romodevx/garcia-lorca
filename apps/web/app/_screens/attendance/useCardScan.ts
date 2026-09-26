@@ -50,6 +50,8 @@ const NONE: ReadonlySet<string> = new Set();
 const reviewText = (absent: number): string =>
   absent === 1 ? "Revisa la lista: 1 alumno quedó como ausente." : `Revisa la lista: ${absent} alumnos quedaron como ausentes.`;
 const duplicateText = (name: string): string => `Ya registrado: ${name}`;
+/** Statuses someone chose on purpose: a card never turns them present. */
+const KEPT: Partial<Record<AttendanceStatus, string>> = { late: "Retardo", excused: "Justificada" };
 
 /**
  * Taking attendance by scanning credentials. A good card makes its row
@@ -81,6 +83,8 @@ export function useCardScan({ target, sheet, loadedFor, rows, resolve, setStatus
   const flashId = useRef(0);
   /** The list whose session was already opened: the quiet re-read after a save must not reopen it. */
   const appliedFor = useRef<string | undefined>(undefined);
+  /** The list whose session is live: until its sheet arrives, its stored draft is left alone. */
+  const [liveKey, setLiveKey] = useState<string | undefined>(undefined);
   const latest = useRef({ target, draftKey, rows, resolve, setStatus });
   latest.current = { target, draftKey, rows, resolve, setStatus };
 
@@ -96,17 +100,19 @@ export function useCardScan({ target, sheet, loadedFor, rows, resolve, setStatus
     codes.current.clear();
     const { session: opened, restore } = openSession(draftKey, sheet, stash.key === draftKey ? stash.draft : undefined);
     commit(opened);
+    setLiveKey(draftKey);
     setBanner(undefined);
     if (restore === undefined) return;
     for (const [id, status] of Object.entries(restore)) latest.current.setStatus(id, status);
     setBanner(RESTORED);
   }, [sheet, loadedFor, draftKey, stash, commit]);
 
-  // sessionStorage mirrors the session of the list on screen (its stored draft until the list arrives).
+  // sessionStorage mirrors the session of the list on screen — only once that list arrived and its session opened.
   const current = session.key === draftKey;
+  const live = current && liveKey === draftKey;
   useEffect(() => {
-    writeScanDraft(latest.current.target, current ? draftOf(session, rows) : stash.draft);
-  }, [current, session, rows, stash]);
+    if (live) writeScanDraft(latest.current.target, draftOf(session, rows));
+  }, [live, session, rows]);
 
   // Leaving a list (another day, class, or screen) discards its unsaved session. A reload never runs this.
   const { groupId, subjectId, date } = target;
@@ -146,6 +152,13 @@ export function useCardScan({ target, sheet, loadedFor, rows, resolve, setStatus
     codes.current.set(code, result.student);
     if (sessionRef.current.scanned.has(enrollmentId)) {
       show("duplicate", duplicateText(name), duplicateText(name));
+      return;
+    }
+    const status = latest.current.rows.find((row) => row.enrollmentId === enrollmentId)?.status;
+    const kept = status === undefined ? undefined : KEPT[status];
+    if (kept !== undefined) {
+      const text = `${duplicateText(name)} (${kept})`;
+      show("duplicate", text, text);
       return;
     }
     latest.current.setStatus(enrollmentId, "present");
