@@ -1280,14 +1280,25 @@ paths:
         (exactly `teaching:read`, `teaching:write`, `attendance_own:read`,
         `attendance_own:write` — Calificaciones and Asistencias, and only for
         the teacher's own assignments of the active cycle), and config links
-        the account to the teacher. No body.
+        the account to the teacher. The body is optional: send none, or
+        `{"confirmReuse": true}` after the user confirmed a reuse (see 409).
 
 
-        IDEMPOTENT. A teacher already linked keeps its account; an address that
-        already has an account reuses it (and receives the maestro role if it
-        lacked it) instead of creating a duplicate; an account still `invited`
-        gets a fresh link. Pressing it again after a failed link heals the
-        orphaned account by matching its address.
+        IDEMPOTENT. A teacher already linked keeps its account (a link to an
+        account iam no longer has counts as no link and is rewritten); an
+        account still `invited` gets a fresh link. Pressing it again after a
+        failed link heals the orphaned account by matching its address.
+
+
+        REUSING AN EXISTING ACCOUNT. When the teacher's address already has an
+        account that is not exactly a maestro-only one (it signs somebody in as
+        something else, or holds no role), it is never reused silently: the
+        answer is 409 with `X-Confirm-Required: reuse-account` and a Spanish
+        question naming the account's roles. Resending with
+        `{"confirmReuse": true}` links it and adds the maestro role (its other
+        roles stay). The caller-subset guard still applies: the caller must hold
+        every permission of the account's CURRENT roles, otherwise 403 — decided
+        before the confirmation is asked for.
 
 
         AUTHORIZATION. `module_teachers`, a session with a rotated password,
@@ -1305,6 +1316,22 @@ paths:
           required: true
           description: The teacher.
           schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                confirmReuse:
+                  type: boolean
+                  description: >
+                    True once the user agreed to link the account that already
+                    exists under the teacher's address (answer to the 409 with
+                    `X-Confirm-Required: reuse-account`).
+            example:
+              confirmReuse: true
       responses:
         '200':
           description: >
@@ -1346,12 +1373,6 @@ paths:
                   url: http://localhost:3002/invitacion/abc123
                   expiresAt: '2026-10-02T18:00:00Z'
                   sent: false
-        '400':
-          description: The teacher has no email to send the invitation to.
-          content:
-            text/plain:
-              schema: { type: string }
-              example: El docente no tiene correo
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403':
           description: >
@@ -1370,11 +1391,29 @@ paths:
             text/plain:
               schema: { type: string }
               example: teacher not found
-        '409':
-          description: The account is already linked to another teacher; nothing else changed.
+        '400':
+          description: >
+            The teacher has no email to send the invitation to, or the body is
+            not valid JSON of the declared shape.
           content:
             text/plain:
               schema: { type: string }
+              example: El docente no tiene correo
+        '409':
+          description: >
+            Nothing was written. Either the account under that address is
+            already linked to ANOTHER teacher (final; no header), or it exists
+            and is not a maestro-only account: then `X-Confirm-Required:
+            reuse-account` is set and the body is the question to show — resend
+            with `{"confirmReuse": true}` to proceed.
+          headers:
+            X-Confirm-Required:
+              description: Present (value `reuse-account`) only when the conflict is resolved by confirming.
+              schema: { type: string, enum: [reuse-account] }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: "Ya existe una cuenta con ese correo (owner). ¿Vincularla y darle acceso de maestro?"
         '500':
           description: The maestro role is missing from this deployment (migrations/iam/0022 not applied).
           content:

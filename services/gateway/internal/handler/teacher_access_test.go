@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	connect "connectrpc.com/connect"
@@ -146,9 +147,18 @@ func unlinkedTeacher() client.Teacher {
 
 func doTeacherAccess(t *testing.T, h *handler.TeacherAccessHandler, teacherID string, perms []string) *httptest.ResponseRecorder {
 	t.Helper()
+	return doTeacherAccessBody(t, h, teacherID, perms, "")
+}
+
+// confirmReuseBody is what the web resends once the director confirmed that
+// an existing account may become the teacher's.
+const confirmReuseBody = `{"confirmReuse": true}`
+
+func doTeacherAccessBody(t *testing.T, h *handler.TeacherAccessHandler, teacherID string, perms []string, body string) *httptest.ResponseRecorder {
+	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc(handler.TeacherAccessRoute, h.GrantAccess)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/teachers/"+teacherID+"/access", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/teachers/"+teacherID+"/access", strings.NewReader(body))
 	req = req.WithContext(middleware.WithPrincipal(req.Context(), middleware.Principal{
 		UserID: "usr-admin", TenantID: "t1", Permissions: perms,
 	}))
@@ -208,13 +218,13 @@ func TestTeacherAccessInvitesAndLinksANewAccount(t *testing.T) {
 	assert.Equal(t, "http://localhost:3002/invitacion/tok", out.Invitation.URL)
 }
 
-// An account already exists for the teacher's address: it is reused, not
-// duplicated, and given the maestro role it lacked. It is active, so nothing
-// is sent.
+// An account already exists for the teacher's address and the director
+// confirmed the reuse: it is reused, not duplicated, and given the maestro role
+// it lacked. It is active, so nothing is sent.
 func TestTeacherAccessReusesAnActiveAccountByEmail(t *testing.T) {
 	iam, cfg := teacherIAM(), teacherConfig(unlinkedTeacher())
 	iam.users = []client.User{{ID: "usr-old", Email: "Gabriela@Example.com ", Status: "active", RoleIDs: []string{}}}
-	rec := doTeacherAccess(t, handler.NewTeacherAccessHandler(iam, cfg), "tch-1", ownerCaller)
+	rec := doTeacherAccessBody(t, handler.NewTeacherAccessHandler(iam, cfg), "tch-1", ownerCaller, confirmReuseBody)
 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.Zero(t, iam.inviteCalls, "an existing account is never duplicated")
@@ -406,4 +416,87 @@ func TestTeacherAccessLinkedLookupFailureIsNotAStaleLink(t *testing.T) {
 	assert.GreaterOrEqual(t, rec.Code, http.StatusInternalServerError, rec.Body.String())
 	assert.Zero(t, iam.writes())
 	assert.Zero(t, cfg.linkCalls)
+}
+
+// --- reusing an account that is not a maestro one asks first -----------------
+
+// An address that already signs somebody in as something else (here: the
+// owner's own account) is never silently turned into a teacher. The gateway
+// answers 409 with a marker the web reads to ask the director, and writes nothing.
+func TestTeacherAccessExistingOtherAccountAsksForConfirmation(t *testing.T) {
+	for _, status := range []string{"active", "suspended", "invited"} {
+		t.Run(status, func(t *testing.T) {
+			iam, cfg := teacherIAM(), teacherConfig(unlinkedTeacher())
+			iam.users = []client.User{{ID: "usr-boss", Email: "gabriela@example.com", Status: status, RoleIDs: []string{"role-owner"}}}
+			rec := doTeacherAccess(t, handler.NewTeacherAccessHandler(iam, cfg), "tch-1", ownerCaller)
+
+			require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+			assert.Equal(t, "reuse-account", rec.Header().Get("X-Confirm-Required"))
+			assert.Contains(t, rec.Body.String(), "Ya existe una cuenta con ese correo (owner). ¿Vincularla y darle acceso de maestro?")
+			assert.Zero(t, iam.writes())
+			assert.Zero(t, cfg.linkCalls)
+		})
+	}
+}
+
+// Confirmed: the account keeps its roles, gains maestro, and is linked.
+func TestTeacherAccessConfirmedReuseLinksAndAddsMaestro(t *testing.T) {
+	iam, cfg := teacherIAM(), teacherConfig(unlinkedTeacher())
+	iam.users = []client.User{{ID: "usr-boss", Email: "gabriela@example.com", Status: "active", RoleIDs: []string{"role-owner"}}}
+	rec := doTeacherAccessBody(t, handler.NewTeacherAccessHandler(iam, cfg), "tch-1", ownerCaller, confirmReuseBody)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, maestroRoleID, iam.assignedRoleID)
+	assert.Equal(t, "usr-boss", cfg.linkedUserID)
+	assert.Zero(t, iam.inviteCalls)
+}
+
+// Confirming does not widen what the caller may do: linking an account whose
+// CURRENT roles carry a permission the caller lacks would hand it over. 403,
+// decided before any write, and before the confirmation is even asked for.
+func TestTeacherAccessReuseOfABroaderAccountIsForbidden(t *testing.T) {
+	notOwner := append([]string{"teachers:write", "users:write"}, maestroPerms...)
+	for _, body := range []string{"", confirmReuseBody} {
+		t.Run("body="+body, func(t *testing.T) {
+			iam, cfg := teacherIAM(), teacherConfig(unlinkedTeacher())
+			iam.users = []client.User{{ID: "usr-boss", Email: "gabriela@example.com", Status: "active", RoleIDs: []string{"role-owner"}}}
+			rec := doTeacherAccessBody(t, handler.NewTeacherAccessHandler(iam, cfg), "tch-1", notOwner, body)
+
+			assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+			assert.Empty(t, rec.Header().Get("X-Confirm-Required"))
+			assert.Zero(t, iam.writes())
+			assert.Zero(t, cfg.linkCalls)
+		})
+	}
+}
+
+// An account with no role at all is not a maestro account either: it asks.
+func TestTeacherAccessRolelessAccountAsksForConfirmation(t *testing.T) {
+	iam, cfg := teacherIAM(), teacherConfig(unlinkedTeacher())
+	iam.users = []client.User{{ID: "usr-old", Email: "gabriela@example.com", Status: "active", RoleIDs: []string{}}}
+	rec := doTeacherAccess(t, handler.NewTeacherAccessHandler(iam, cfg), "tch-1", ownerCaller)
+
+	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+	assert.Equal(t, "reuse-account", rec.Header().Get("X-Confirm-Required"))
+	assert.Contains(t, rec.Body.String(), "(sin rol)")
+	assert.Zero(t, iam.writes())
+}
+
+// An account that is ONLY a maestro (the orphan a failed link leaves behind) is
+// this very action's own work: it is reused without asking.
+func TestTeacherAccessMaestroOnlyAccountIsReusedWithoutAsking(t *testing.T) {
+	iam, cfg := teacherIAM(), teacherConfig(unlinkedTeacher())
+	iam.users = []client.User{{ID: "usr-orphan", Email: "gabriela@example.com", Status: "invited", RoleIDs: []string{maestroRoleID}}}
+	rec := doTeacherAccess(t, handler.NewTeacherAccessHandler(iam, cfg), "tch-1", ownerCaller)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, 1, iam.resendCalls)
+	assert.Equal(t, "usr-orphan", cfg.linkedUserID)
+}
+
+func TestTeacherAccessMalformedBodyIs400(t *testing.T) {
+	iam, cfg := teacherIAM(), teacherConfig(unlinkedTeacher())
+	rec := doTeacherAccessBody(t, handler.NewTeacherAccessHandler(iam, cfg), "tch-1", ownerCaller, `{"confirmReuse": "yes"}`)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Zero(t, iam.writes())
 }

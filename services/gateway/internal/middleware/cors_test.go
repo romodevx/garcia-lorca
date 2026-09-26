@@ -99,3 +99,20 @@ func TestCORSNoOriginPassesThrough(t *testing.T) {
 		t.Error("same-origin/no-Origin requests must pass through untouched")
 	}
 }
+
+// A cross-origin fetch only sees the safelisted response headers unless the
+// server exposes more. The web reads X-Confirm-Required on the teacher-access
+// 409 to ask before reusing an account, so it must be exposed.
+func TestCORSExposesTheConfirmRequiredHeader(t *testing.T) {
+	var ran bool
+	h := middleware.CORS([]string{"http://localhost:3002"})(okHandler(&ran))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/teachers/tch-1/access", nil)
+	req.Header.Set("Origin", "http://localhost:3002")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Access-Control-Expose-Headers"); got != "X-Confirm-Required" {
+		t.Errorf("Expose-Headers = %q, want X-Confirm-Required", got)
+	}
+}

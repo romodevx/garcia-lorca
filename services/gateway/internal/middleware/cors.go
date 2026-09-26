@@ -8,6 +8,11 @@ import (
 // preflightMaxAge caps how long a browser may cache a preflight result (seconds).
 const preflightMaxAge = "600"
 
+// exposedHeaders are the non-safelisted response headers the web must read:
+// X-Confirm-Required marks a 409 the user can resolve by confirming (teacher
+// access reusing an existing account).
+const exposedHeaders = "X-Confirm-Required"
+
 // CORS returns middleware that enables the browser web client to call the
 // gateway cross-origin. The web fetches with credentials (auth cookies), so the
 // response MUST carry Access-Control-Allow-Credentials:true and reflect the exact
@@ -33,6 +38,7 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 				h.Add("Vary", "Origin")
 				h.Set("Access-Control-Allow-Origin", origin)
 				h.Set("Access-Control-Allow-Credentials", "true")
+				h.Set("Access-Control-Expose-Headers", exposedHeaders)
 				if r.Method == http.MethodOptions {
 					reqHeaders := r.Header.Get("Access-Control-Request-Headers")
 					if reqHeaders == "" {

@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -31,6 +33,18 @@ const errTeacherHasNoEmail = "El docente no tiene correo"
 // errAccountOfAnotherTeacher is the refusal an address gets whose account
 // already signs in as a different teacher: one login is one teacher.
 const errAccountOfAnotherTeacher = "La cuenta con ese correo ya está vinculada a otro docente"
+
+// ConfirmRequiredHeader marks a 409 the caller can resolve by asking the user
+// and resending with confirmReuse. The gateway's errors are text/plain; the
+// header is what tells this conflict apart from the ones that are final.
+const ConfirmRequiredHeader = "X-Confirm-Required"
+
+// confirmReuseAccount is the ConfirmRequiredHeader value for "an account already
+// exists under this address and is not a maestro one".
+const confirmReuseAccount = "reuse-account"
+
+// noRoleLabel names, in the confirmation, an account that holds no role.
+const noRoleLabel = "sin rol"
 
 // TeacherAccountIssuer is the iam surface "Dar acceso al sistema" needs.
 // Consumer-defined, so the handler is testable without iam.
@@ -84,9 +98,15 @@ type teacherAccessResponse struct {
 // GrantAccess handles POST /api/v1/teachers/{id}/access.
 //
 // IDEMPOTENT. Pressing it again never mints a second account: a teacher already
-// linked keeps its account, an address that already has one reuses it (and gets
-// the maestro role if it lacked it), and an account still in "invited" gets a
-// fresh link. Every refusal happens before the first write.
+// linked keeps its account (a link to an account iam lost counts as none), and
+// an account still in "invited" gets a fresh link. Every refusal happens before
+// the first write.
+//
+// REUSE ASKS FIRST. An account already under the teacher's address that is not
+// a maestro-only one is someone's login for something else: it is linked only
+// once the user confirmed ({"confirmReuse": true}, after a 409 carrying
+// ConfirmRequiredHeader), and only if the caller holds every permission of its
+// current roles — linking hands the account over to whoever reads the link.
 //
 // THE WINDOW THAT LEAVES. If the link fails after the invitation succeeded, an
 // iam account exists that no teacher points at. Pressing again heals it: the
@@ -108,6 +128,11 @@ func (h *TeacherAccessHandler) GrantAccess(w http.ResponseWriter, r *http.Reques
 	held := callerHeld(ctx)
 	if perm, missing := firstUnheld(held, maestro.Permissions); missing {
 		forbidAssign(w, perm)
+		return
+	}
+	confirmed, err := decodeConfirmReuse(w, r)
+	if err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -143,6 +168,16 @@ func (h *TeacherAccessHandler) GrantAccess(w http.ResponseWriter, r *http.Reques
 		if taken {
 			http.Error(w, errAccountOfAnotherTeacher, http.StatusConflict)
 			return
+		}
+		if !isMaestroOnly(user, maestro.ID) {
+			if perm, missing := firstUnheldInRoles(held, roles, user.RoleIDs); missing {
+				forbidReach(w, perm)
+				return
+			}
+			if !confirmed {
+				askToConfirmReuse(w, roles, user)
+				return
+			}
 		}
 	}
 	var invitation *invitationResponse
@@ -223,6 +258,51 @@ func (h *TeacherAccessHandler) linkedToAnotherTeacher(ctx context.Context, teach
 		}
 	}
 	return false, nil
+}
+
+// teacherAccessRequest is the optional body: confirmReuse is sent only after
+// the user agreed, on the 409 with ConfirmRequiredHeader, to link an account
+// that already existed under the teacher's address.
+type teacherAccessRequest struct {
+	ConfirmReuse bool `json:"confirmReuse"`
+}
+
+// decodeConfirmReuse reads the optional body. No body is "not confirmed".
+func decodeConfirmReuse(w http.ResponseWriter, r *http.Request) (bool, error) {
+	var req teacherAccessRequest
+	err := decodeJSONBody(w, r, &req)
+	if errors.Is(err, io.EOF) {
+		return false, nil
+	}
+	return req.ConfirmReuse, err
+}
+
+// isMaestroOnly reports whether the account holds exactly the maestro role —
+// the account this very action mints, so reusing it needs nobody's say-so.
+func isMaestroOnly(user client.User, maestroID string) bool {
+	return len(user.RoleIDs) == 1 && user.RoleIDs[0] == maestroID
+}
+
+// askToConfirmReuse answers the 409 the web turns into a question: the account
+// exists, it signs somebody in as something else, link it anyway?
+func askToConfirmReuse(w http.ResponseWriter, roles []client.Role, user client.User) {
+	w.Header().Set(ConfirmRequiredHeader, confirmReuseAccount)
+	msg := "Ya existe una cuenta con ese correo (" + roleNames(roles, user.RoleIDs) + "). ¿Vincularla y darle acceso de maestro?"
+	http.Error(w, msg, http.StatusConflict)
+}
+
+// roleNames lists, for a person to read, the names of the roles in ids.
+func roleNames(roles []client.Role, ids []string) string {
+	names := make([]string, 0, len(ids))
+	for _, role := range roles {
+		if slices.Contains(ids, role.ID) {
+			names = append(names, role.Name)
+		}
+	}
+	if len(names) == 0 {
+		return noRoleLabel
+	}
+	return strings.Join(names, ", ")
 }
 
 // refresh brings an existing account up to date: the maestro role if it lacked
