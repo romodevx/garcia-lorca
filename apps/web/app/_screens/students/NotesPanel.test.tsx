@@ -175,6 +175,30 @@ describe("NotesPanel", () => {
     }
   });
 
+  // A timer can fire while the clock still reads before the cutoff (it fired
+  // early, or the wall clock stepped back). It must re-arm, or nothing ever
+  // takes the button away.
+  it("re-arms the cutoff when its timer fires before the clock reaches it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const cutoff = WRITTEN + 15 * 60_000 - 10_000;
+      let clock = cutoff - 100;
+      renderPanel({ now: () => clock });
+      await screen.findByText("Llegó con fiebre");
+      await act(async () => {
+        vi.advanceTimersByTime(500); // the timer fires; the clock has not moved
+      });
+      expect(screen.getByRole("button", { name: "Anular nota" })).toBeInTheDocument();
+      clock = cutoff + 1;
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+      expect(screen.queryByRole("button", { name: "Anular nota" })).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // Timers stop while a laptop sleeps: the button can outlive the window on a
   // page that just woke up. The click itself re-checks, so it never starts a
   // void the server would refuse.

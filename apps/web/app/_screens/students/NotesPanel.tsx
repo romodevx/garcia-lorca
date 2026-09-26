@@ -64,13 +64,15 @@ export function NotesPanel({ studentId, userId, canWrite, canVoidAny, now = Date
   // Re-renders an open page at the exact moment the next of the author's own
   // voids stops being offered — not at a periodic re-check, which would leave
   // a gap in which a click is voided after the server's window.
-  const [, setTick] = useState(0);
+  // Each tick re-arms: a timer that fires while the clock still reads before
+  // the cutoff (early, or the wall clock stepped back) must not be the last.
+  const [tick, setTick] = useState(0);
   const nextCutoff = canWrite && !canVoidAny ? earliestCutoff(notes, userId, now()) : undefined;
   useEffect(() => {
     if (nextCutoff === undefined) return;
     const timer = setTimeout(() => setTick((n) => n + 1), Math.max(0, nextCutoff - now()) + 1);
     return () => clearTimeout(timer);
-  }, [nextCutoff, now]);
+  }, [nextCutoff, now, tick]);
   const removal = useUndoableRemoval<StudentNote>();
   const focusFirstInvalid = useFocusFirstInvalid();
   // A reload inside the grace period must not bring a voided note back.
