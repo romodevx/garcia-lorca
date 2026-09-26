@@ -25,7 +25,7 @@ openapi: 3.1.0
 
 info:
   title: García Lorca API
-  version: 0.12.0
+  version: 0.13.0
   license:
     name: Proprietary
     url: https://garcialorca.edu.mx/legal
@@ -50,6 +50,10 @@ tags:
     description: The order list. Requires `uniforms:orders`, which is owner-only.
   - name: uniforms-settings
     description: Per-school limits and windows.
+  - name: teachers
+    description: >
+      Staff roster and who teaches what ("carga académica"). Behind
+      `module_teachers`; writes require `teachers:write`.
 
 paths:
   /api/v1/uniforms/items:
@@ -1264,6 +1268,123 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
 
+  /api/v1/teaching-assignments/bulk:
+    post:
+      tags: [teachers]
+      summary: Give one teacher a whole teaching load at once
+      description: >
+        Assigns every (group, subject) item to the teacher in ONE transaction.
+        One bad item (malformed id, unknown group/subject/teacher, a subject of
+        another grade level, the same slot twice) rejects the whole request and
+        the message names it as items[i]. Otherwise the answer is always 200 and
+        says, per item, what happened: created (the slot was free), skipped (it
+        was already this teacher's), conflicts (another teacher holds it and it
+        was left untouched) or — with replaceConflicts — reassigned (handed to
+        this teacher, keeping its id). A slot still has exactly one teacher per
+        cycle: replacing is explicit, never co-teaching. At most 500 items per
+        request, a technical bound on one transaction — not a limit on how many
+        classes a teacher may hold. Requires `teachers:write`.
+      operationId: assignTeachingLoad
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [teacherId, items]
+              properties:
+                teacherId: { type: string, format: uuid }
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items: { $ref: '#/components/schemas/TeachingLoadItem' }
+                replaceConflicts: { type: boolean, default: false }
+            example:
+              teacherId: 3f1c1a52-8d1e-4c1b-9a47-0d6f3b8f2a10
+              items:
+                - groupId: 8a2b6c1e-4f5d-4e3a-9b1c-2d3e4f5a6b7c
+                  subjectId: 1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e
+              replaceConflicts: false
+      responses:
+        '200':
+          description: What happened to each item, in request order within each list.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TeachingLoadResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+        '409':
+          description: >
+            A free slot was taken by someone else between reading and writing;
+            nothing was written. Retrying answers against the new state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/teaching-assignments/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      tags: [teachers]
+      summary: Free a slot
+      description: Removes the assignment; the (group, subject) slot can then be given to anyone. Requires `teachers:write`.
+      operationId: deleteTeachingAssignment
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      responses:
+        '204': { description: Removed. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: No such assignment, or `module_teachers` is off.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    patch:
+      tags: [teachers]
+      summary: Hand a slot to another teacher
+      description: >
+        Same assignment id, same group and subject, a different teacher.
+        An unknown teacher is 400; an unknown assignment is 404. Requires
+        `teachers:write`.
+      operationId: reassignTeachingAssignment
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [teacherId]
+              properties:
+                teacherId: { type: string, format: uuid }
+            example:
+              teacherId: 3f1c1a52-8d1e-4c1b-9a47-0d6f3b8f2a10
+      responses:
+        '200':
+          description: The assignment, now held by teacherId.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TeachingAssignment' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: No such assignment, or `module_teachers` is off.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/finance/tuition-plans:
     get:
       tags: [finance-tuition]
@@ -2277,6 +2398,55 @@ components:
           description: >
             Levels nobody has priced, by NAME. Reported rather than billed at
             zero: a family charged nothing is a problem a school finds in June.
+    TeachingAssignment:
+      type: object
+      description: One teacher holding one (group, subject) slot in a cycle. cycleId is derived from the group.
+      required: [id, cycleId, groupId, subjectId, teacherId]
+      properties:
+        id: { type: string, format: uuid }
+        cycleId: { type: string, format: uuid }
+        groupId: { type: string, format: uuid }
+        subjectId: { type: string, format: uuid }
+        teacherId: { type: string, format: uuid }
+
+    TeachingLoadItem:
+      type: object
+      required: [groupId, subjectId]
+      properties:
+        groupId: { type: string, format: uuid }
+        subjectId: { type: string, format: uuid }
+
+    TeachingLoadConflict:
+      type: object
+      description: A requested slot another teacher already holds.
+      required: [groupId, subjectId, assignmentId, teacherId, teacherName]
+      properties:
+        groupId: { type: string, format: uuid }
+        subjectId: { type: string, format: uuid }
+        assignmentId: { type: string, format: uuid }
+        teacherId: { type: string, format: uuid }
+        teacherName: { type: string, description: '"first last" of the teacher holding it.' }
+
+    TeachingLoadResult:
+      type: object
+      description: Every list is present; an empty one is [].
+      required: [created, reassigned, skipped, conflicts]
+      properties:
+        created:
+          type: array
+          items: { $ref: '#/components/schemas/TeachingAssignment' }
+        reassigned:
+          type: array
+          items: { $ref: '#/components/schemas/TeachingAssignment' }
+        skipped:
+          type: array
+          description: Slots that were already this teacher's.
+          items: { $ref: '#/components/schemas/TeachingLoadItem' }
+        conflicts:
+          type: array
+          description: Slots another teacher holds, left untouched (replaceConflicts=false).
+          items: { $ref: '#/components/schemas/TeachingLoadConflict' }
+
     Error:
       type: object
       required: [error]

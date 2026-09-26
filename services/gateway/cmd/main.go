@@ -398,6 +398,11 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/teachers", teachersRead(configH.ListTeachers))
 	mux.Handle("POST /api/v1/teaching-assignments", teachersWrite(configH.CreateTeachingAssignment))
 	mux.Handle("GET /api/v1/teaching-assignments", teachersRead(configH.ListTeachingAssignments))
+	// Carga académica: a whole teaching load at once, and freeing or handing a
+	// slot to someone else. Same guard as creating one assignment.
+	mux.Handle("POST /api/v1/teaching-assignments/bulk", teachersWrite(configH.AssignTeachingLoad))
+	mux.Handle("DELETE /api/v1/teaching-assignments/{id}", teachersWrite(configH.DeleteTeachingAssignment))
+	mux.Handle("PATCH /api/v1/teaching-assignments/{id}", teachersWrite(configH.ReassignTeachingAssignment))
 
 	// M07 grades (grade capture): flag-guarded, authenticated + rotation-enforced,
 	// permission-gated. Capture is a write (grades:write); roster + list are reads
