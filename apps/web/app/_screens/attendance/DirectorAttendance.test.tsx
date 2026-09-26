@@ -8,7 +8,7 @@ import * as configApi from "../../config/api";
 import * as teachersApi from "../../teachers/api";
 import { DirectorAttendance } from "./DirectorAttendance";
 
-vi.mock("../../attendance/api", () => ({ getAttendanceSheet: vi.fn(), saveAttendanceSheet: vi.fn() }));
+vi.mock("../../attendance/api", () => ({ getAttendanceSheet: vi.fn(), saveAttendanceSheet: vi.fn(), scanAttendanceCard: vi.fn() }));
 vi.mock("../../config/api", () => ({
   listCycles: vi.fn(),
   listLevels: vi.fn(),
@@ -150,5 +150,21 @@ describe("DirectorAttendance", () => {
 
     expect(confirm).toHaveBeenCalled();
     expect(screen.getByLabelText("Grupo")).toHaveValue("gPri");
+  });
+});
+
+describe("DirectorAttendance — Escanear QR", () => {
+  it("with canScanCards the list offers Escanear QR", async () => {
+    render(<DirectorAttendance onBack={() => {}} today={TODAY} canScanCards />);
+    await pickGroup("1° PRIMARIA · A");
+    await screen.findByRole("button", { name: "Ada Lovelace: Presente" });
+    expect(screen.getByRole("button", { name: "Escanear QR" })).toBeInTheDocument();
+  });
+
+  it("without it there is no button", async () => {
+    renderScreen();
+    await pickGroup("1° PRIMARIA · A");
+    await screen.findByRole("button", { name: "Ada Lovelace: Presente" });
+    expect(screen.queryByRole("button", { name: "Escanear QR" })).not.toBeInTheDocument();
   });
 });

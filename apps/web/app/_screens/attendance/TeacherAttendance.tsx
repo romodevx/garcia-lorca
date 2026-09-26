@@ -7,6 +7,7 @@ import {
   getTeachingAttendanceSheet,
   listAttendanceClasses,
   saveTeachingAttendance,
+  scanTeachingCard,
   type AttendanceClass,
 } from "../../teaching/api";
 import { ErrorAlert } from "../config/parts";
@@ -22,6 +23,8 @@ export interface TeacherAttendanceProps {
   onBack: () => void;
   /** Pins the day (tests, deep links); defaults to the local today. */
   today?: string;
+  /** module_student_card is on: the list offers "Escanear QR". */
+  canScanCards?: boolean;
 }
 
 const titleOf = (option: AttendanceOption): string =>
@@ -37,7 +40,7 @@ const titleOf = (option: AttendanceOption): string =>
  * subjects when the teacher also has daily groups). Steps with one choice are
  * skipped. The gateway is the security boundary — this is UX only.
  */
-export function TeacherAttendance({ onBack, today }: TeacherAttendanceProps): ReactElement {
+export function TeacherAttendance({ onBack, today, canScanCards = false }: TeacherAttendanceProps): ReactElement {
   const [classes, setClasses] = useState<AttendanceClass[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
@@ -79,6 +82,7 @@ export function TeacherAttendance({ onBack, today }: TeacherAttendanceProps): Re
                 restrictDates
                 load={getTeachingAttendanceSheet}
                 save={saveTeachingAttendance}
+                scan={canScanCards ? scanTeachingCard : undefined}
                 onDirtyChange={guard.setDirty}
               />
             )}

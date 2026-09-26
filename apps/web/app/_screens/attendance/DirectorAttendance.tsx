@@ -4,7 +4,8 @@ import type { CSSProperties, ReactElement } from "react";
 
 import { API_URL } from "../../api-url";
 import { Page } from "../../_design/Page";
-import { getAttendanceSheet, saveAttendanceSheet } from "../../attendance/api";
+import { getAttendanceSheet, saveAttendanceSheet, scanAttendanceCard } from "../../attendance/api";
+import type { ScanCardInput } from "../../attendance/scan";
 import type { AttendanceSheetQuery, SaveSheetInput } from "../../attendance/sheet";
 import { EmptyHint, ErrorAlert, SelectChip } from "../config/parts";
 import { AttendanceHeader } from "./AttendanceHeader";
@@ -17,12 +18,15 @@ export interface DirectorAttendanceProps {
   onBack: () => void;
   /** Pins the day (tests, deep links); defaults to the local today. */
   today?: string;
+  /** module_student_card is on: the list offers "Escanear QR". */
+  canScanCards?: boolean;
 }
 
 const SELECT: CSSProperties = { minHeight: 48, maxWidth: "100%", padding: "0 16px", borderRadius: "var(--r-pill)", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 16, fontFamily: "var(--font-ui)", cursor: "pointer" };
 
 const loadSheet = (q: AttendanceSheetQuery) => getAttendanceSheet(API_URL, q);
 const saveSheet = (input: SaveSheetInput) => saveAttendanceSheet(API_URL, input);
+const scanCard = (input: ScanCardInput) => scanAttendanceCard(API_URL, input);
 
 function SubjectStep({ classes, canLeave }: { classes: DirectorClasses; canLeave: () => boolean }): ReactElement {
   if (classes.subjectsLoading) return <EmptyHint>Cargando asignaturas…</EmptyHint>;
@@ -46,7 +50,7 @@ function SubjectStep({ classes, canLeave }: { classes: DirectorClasses; canLeave
  * cycle, any date. A group whose level takes attendance per class asks for the
  * subject first. The list itself is the same PassSheet the teacher uses.
  */
-export function DirectorAttendance({ onBack, today }: DirectorAttendanceProps): ReactElement {
+export function DirectorAttendance({ onBack, today, canScanCards = false }: DirectorAttendanceProps): ReactElement {
   const classes = useDirectorClasses();
   const guard = useLeaveGuard();
   const { group, mode, subjectId } = classes;
@@ -81,6 +85,7 @@ export function DirectorAttendance({ onBack, today }: DirectorAttendanceProps): 
               restrictDates={false}
               load={loadSheet}
               save={saveSheet}
+              scan={canScanCards ? scanCard : undefined}
               onDirtyChange={guard.setDirty}
             />
           )}
