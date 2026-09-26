@@ -126,7 +126,7 @@ export function TeacherPassList({ group, today }: TeacherPassListProps): ReactEl
       ) : rows.length === 0 ? (
         <EmptyHint>Este grupo no tiene alumnos inscritos.</EmptyHint>
       ) : (
-        <table aria-label="Pase de lista" style={{ width: "100%", borderCollapse: "collapse" }}>
+        <table aria-label="Pase de lista" className="roster-table" style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr>
               <th style={{ textAlign: "left", padding: "0 8px 8px", fontSize: 13, fontWeight: 600, color: "var(--text-muted)" }}>Alumno</th>

@@ -527,3 +527,40 @@ input { font-family: var(--font-ui); }
 @media (min-width: 1100px) {
   .create-page-grid { grid-template-columns: minmax(0, 1fr) 280px; }
 }
+
+/* ============================================================
+   LISTAS DEL MAESTRO EN EL TELÉFONO
+
+   El pase de lista y la captura de calificaciones del maestro se usan de pie,
+   entre clases, en el teléfono: son la otra excepción a "el teléfono queda
+   fuera". A 360px la fila (nombre + cuatro estados, o nombre + calificación +
+   Guardar) no cabe en un renglón y empujaba la página de lado. Aquí la fila se
+   parte en dos: el nombre arriba, los controles abajo, y los cuatro estados en
+   una rejilla de 2×2.
+
+   `display` y el radio del selector de estado viven aquí, no en línea, porque
+   un estilo en línea le gana a cualquier @media.
+   ============================================================ */
+
+.status-picker {
+  display: inline-flex;
+  border-radius: var(--r-pill);
+}
+
+@media (max-width: 560px) {
+  .roster-table thead { display: none; }
+  .roster-table tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 8px;
+  }
+  .roster-table td { flex: 0 1 auto; }
+  .roster-table td:first-child { flex-basis: 100%; padding-bottom: 0 !important; }
+  .roster-table .status-picker {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+    border-radius: var(--r-md);
+  }
+}

@@ -79,7 +79,7 @@ export function TeacherGradeList({ assignment, terms }: TeacherGradeListProps): 
       ) : roster.length === 0 ? (
         <EmptyHint>Este grupo aún no tiene alumnos inscritos.</EmptyHint>
       ) : (
-        <table aria-label="Roster de calificaciones" style={{ width: "100%", borderCollapse: "collapse" }}>
+        <table aria-label="Roster de calificaciones" className="roster-table" style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr>
               <th style={TH}>Alumno</th>

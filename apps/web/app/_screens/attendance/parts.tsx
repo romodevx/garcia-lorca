@@ -47,13 +47,12 @@ export function StatusPicker({
     <div
       role="radiogroup"
       aria-label={label}
+      className="status-picker"
       style={{
-        display: "inline-flex",
         gap: 4,
         padding: 4,
         background: "var(--surface-3)",
         border: "1px solid var(--border)",
-        borderRadius: "var(--r-pill)",
       }}
     >
       {options.map((option) => {
