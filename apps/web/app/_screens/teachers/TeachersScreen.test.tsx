@@ -127,6 +127,7 @@ describe("the Docentes module — acceso al sistema", () => {
     const user = userEvent.setup();
     teachers.grantTeacherAccess.mockResolvedValue({
       teacher: { ...ada, userId: "u1" }, userId: "u1", email: ada.email, status: "invited",
+      invitation: { url: "https://colegio.mx/invitacion/abc", expiresAt: "2026-10-02T18:00:00Z", sent: true },
     });
     render(<TeachersScreen onBack={() => {}} onOpenLoad={vi.fn()} canGrantAccess />);
 

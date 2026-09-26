@@ -25,7 +25,8 @@ export function TeacherRow({ teacher, access, granting, error, inviteUrl, onGran
   const name = `${teacher.firstName} ${teacher.lastName}`;
   // An active login needs nothing; any other linked login may need its invitation again.
   const action = access === "none" ? "Dar acceso al sistema" : "Reenviar invitación";
-  const offerAccess = onGrantAccess !== undefined && access !== "active";
+  // Suspension is lifted in Usuarios, not by resending a link.
+  const offerAccess = onGrantAccess !== undefined && access !== "active" && access !== "suspended";
 
   return (
     <li style={{ display: "grid", gap: 8, padding: "6px 6px 6px 12px", borderRadius: "var(--r-md)", background: "var(--surface-2)", fontSize: 14 }}>
@@ -33,7 +34,7 @@ export function TeacherRow({ teacher, access, granting, error, inviteUrl, onGran
         <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>
           <span style={{ fontWeight: 600 }}>{name}</span>{" "}
           <span style={{ color: "var(--text-muted)" }}>· {teacher.email}</span>{" "}
-          <AccessPill linked={access !== "none"} />
+          <AccessPill access={access} />
         </span>
         <span style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {offerAccess && (
@@ -61,13 +62,20 @@ export function TeacherRow({ teacher, access, granting, error, inviteUrl, onGran
   );
 }
 
-function AccessPill({ linked }: { linked: boolean }): ReactElement {
+const PILL: Record<TeacherAccessState, { label: string; bg: string; fg: string; check: boolean }> = {
+  none: { label: "Sin acceso", bg: "var(--surface-3)", fg: "var(--text-muted)", check: false },
+  linked: { label: "Con acceso", bg: "var(--ok-bg)", fg: "var(--ok-fg)", check: true },
+  invited: { label: "Con acceso", bg: "var(--ok-bg)", fg: "var(--ok-fg)", check: true },
+  active: { label: "Con acceso", bg: "var(--ok-bg)", fg: "var(--ok-fg)", check: true },
+  suspended: { label: "Acceso suspendido", bg: "var(--bad-bg)", fg: "var(--bad-fg)", check: false },
+};
+
+function AccessPill({ access }: { access: TeacherAccessState }): ReactElement {
+  const pill = PILL[access];
   return (
-    <span
-      style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 9px", borderRadius: 99, fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", background: linked ? "var(--ok-bg)" : "var(--surface-3)", color: linked ? "var(--ok-fg)" : "var(--text-muted)" }}
-    >
-      {linked && <Icon name="check" size={12} stroke={2.6} />}
-      {linked ? "Con acceso" : "Sin acceso"}
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 9px", borderRadius: 99, fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", background: pill.bg, color: pill.fg }}>
+      {pill.check && <Icon name="check" size={12} stroke={2.6} />}
+      {pill.label}
     </span>
   );
 }

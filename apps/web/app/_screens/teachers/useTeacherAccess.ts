@@ -48,11 +48,7 @@ export function useTeacherAccess(onGrantAccess?: (teacherId: string) => Promise<
       try {
         const result = await onGrantAccess(teacher.id);
         setOutcomes((prev) => ({ ...prev, [teacher.id]: result }));
-        announce(
-          result.status === "active"
-            ? `${teacher.firstName} ${teacher.lastName} ya entra al sistema con su contraseña.`
-            : `Enviamos la invitación a ${result.email}`,
-        );
+        announce(outcomeMessage(teacher, result));
       } catch (cause) {
         setErrors((prev) => ({ ...prev, [teacher.id]: describeAccessError(cause) }));
       } finally {
@@ -73,7 +69,25 @@ export function useTeacherAccess(onGrantAccess?: (teacherId: string) => Promise<
     grant,
     grantingId,
     errorOf: (id) => errors[id],
-    inviteUrlOf: (id) => outcomes[id]?.inviteUrl,
+    inviteUrlOf: (id) => unsentLink(outcomes[id]),
     toast,
   };
+}
+
+/** The link to hand over by hand: only when one was minted and not mailed. */
+function unsentLink(result: TeacherAccessResult | undefined): string | undefined {
+  const invitation = result?.invitation ?? null;
+  return invitation !== null && !invitation.sent ? invitation.url : undefined;
+}
+
+/**
+ * What the office is told. Each branch says what actually happened: "Enviamos"
+ * only when the mail went out, never about a link that is waiting to be copied.
+ */
+function outcomeMessage(teacher: Teacher, result: TeacherAccessResult): string {
+  const name = `${teacher.firstName} ${teacher.lastName}`;
+  if (result.status === "active") return `${name} ya entra al sistema con su contraseña.`;
+  if (result.status === "suspended") return `La cuenta de ${name} está suspendida. Reactívala en Administración › Usuarios.`;
+  if (result.invitation?.sent === true) return `Enviamos la invitación a ${result.email}`;
+  return `Acceso creado para ${name}: copia la liga y entrégasela.`;
 }

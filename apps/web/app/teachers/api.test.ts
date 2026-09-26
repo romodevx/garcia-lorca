@@ -209,7 +209,10 @@ describe("teacher access", () => {
   const linked = { id: "tch1", firstName: "Ada", lastName: "Lovelace", email: "ada@example.com", userId: "u1" };
 
   it("grantTeacherAccess POSTs with no body to /teachers/{id}/access and returns the outcome", async () => {
-    const outcome = { teacher: linked, userId: "u1", email: "ada@example.com", status: "invited", inviteUrl: "http://web/activar?t=x" };
+    const outcome = {
+      teacher: linked, userId: "u1", email: "ada@example.com", status: "invited",
+      invitation: { url: "http://web/invitacion/x", expiresAt: "2026-10-02T18:00:00Z", sent: false },
+    };
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(outcome));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -223,13 +226,13 @@ describe("teacher access", () => {
     expect(init.body).toBeUndefined();
   });
 
-  it("grantTeacherAccess leaves inviteUrl out when the server sent none", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ teacher: linked, userId: "u1", email: "ada@example.com", status: "active" })));
+  it("grantTeacherAccess keeps a null invitation (active or suspended: nothing sent)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ teacher: linked, userId: "u1", email: "ada@example.com", status: "suspended", invitation: null })));
 
     const res = await grantTeacherAccess(BASE, "tch1");
 
-    expect(res.status).toBe("active");
-    expect(res.inviteUrl).toBeUndefined();
+    expect(res.status).toBe("suspended");
+    expect(res.invitation).toBeNull();
   });
 
   it("grantTeacherAccess throws a ConfigError carrying the status and the server's words", async () => {

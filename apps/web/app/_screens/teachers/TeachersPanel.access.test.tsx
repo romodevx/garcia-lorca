@@ -10,7 +10,11 @@ const ada: Teacher = { id: "t1", firstName: "Ada", lastName: "Lovelace", email: 
 const alan: Teacher = { id: "t2", firstName: "Alan", lastName: "Turing", email: "alan@escuela.mx", userId: "u2" };
 
 function outcome(over: Partial<TeacherAccessResult> = {}): TeacherAccessResult {
-  return { teacher: { ...ada, userId: "u1" }, userId: "u1", email: ada.email, status: "invited", ...over };
+  return {
+    teacher: { ...ada, userId: "u1" }, userId: "u1", email: ada.email, status: "invited",
+    invitation: { url: "https://colegio.mx/invitacion/abc", expiresAt: "2026-10-02T18:00:00Z", sent: true },
+    ...over,
+  };
 }
 
 function rowOf(name: string): HTMLElement {
@@ -49,18 +53,54 @@ describe("TeachersPanel — acceso al sistema", () => {
 
   it("with no mail provider (local), shows the link with Copiar liga", async () => {
     const user = userEvent.setup();
-    const onGrantAccess = vi.fn().mockResolvedValue(outcome({ inviteUrl: "http://localhost:3002/activar?t=abc" }));
+    const onGrantAccess = vi.fn().mockResolvedValue(
+      outcome({ invitation: { url: "http://localhost:3002/activar?t=abc", expiresAt: "2026-10-02T18:00:00Z", sent: false } }),
+    );
     render(<TeachersPanel teachers={[ada]} onCreate={vi.fn()} onGrantAccess={onGrantAccess} />);
 
     await user.click(screen.getByRole("button", { name: "Dar acceso al sistema a Ada Lovelace" }));
 
     expect(await screen.findByLabelText("Liga de acceso")).toHaveValue("http://localhost:3002/activar?t=abc");
     expect(screen.getByRole("button", { name: "Copiar liga" })).toBeInTheDocument();
+    // Nothing was mailed, so nothing may say it was.
+    expect(screen.queryByText(/Enviamos la invitación/)).toBeNull();
+  });
+
+  it("a sent invitation shows no link: it is in the teacher's inbox", async () => {
+    const user = userEvent.setup();
+    render(<TeachersPanel teachers={[ada]} onCreate={vi.fn()} onGrantAccess={vi.fn().mockResolvedValue(outcome())} />);
+
+    await user.click(screen.getByRole("button", { name: "Dar acceso al sistema a Ada Lovelace" }));
+
+    await screen.findByText("Enviamos la invitación a ada@escuela.mx");
+    expect(screen.queryByLabelText("Liga de acceso")).toBeNull();
+  });
+
+  it("a suspended account is named as such and offers no button", async () => {
+    const user = userEvent.setup();
+    const onGrantAccess = vi.fn().mockResolvedValue(outcome({ teacher: alan, userId: "u2", email: alan.email, status: "suspended", invitation: null }));
+    render(<TeachersPanel teachers={[alan]} onCreate={vi.fn()} onGrantAccess={onGrantAccess} />);
+
+    await user.click(screen.getByRole("button", { name: "Reenviar invitación a Alan Turing" }));
+
+    expect(await within(rowOf("Alan Turing")).findByText("Acceso suspendido")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Reenviar invitación/ })).toBeNull();
+    expect(screen.getByText(/La cuenta de Alan Turing está suspendida/)).toBeInTheDocument();
+  });
+
+  it("a 409 says the account belongs to another teacher", async () => {
+    const user = userEvent.setup();
+    const onGrantAccess = vi.fn().mockRejectedValue(new ConfigError(409, "already linked"));
+    render(<TeachersPanel teachers={[ada]} onCreate={vi.fn()} onGrantAccess={onGrantAccess} />);
+
+    await user.click(screen.getByRole("button", { name: "Dar acceso al sistema a Ada Lovelace" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/ligada a otro docente/);
   });
 
   it("a linked teacher is offered Reenviar invitación, and nothing once the account is active", async () => {
     const user = userEvent.setup();
-    const onGrantAccess = vi.fn().mockResolvedValue(outcome({ teacher: alan, userId: "u2", email: alan.email, status: "active" }));
+    const onGrantAccess = vi.fn().mockResolvedValue(outcome({ teacher: alan, userId: "u2", email: alan.email, status: "active", invitation: null }));
     render(<TeachersPanel teachers={[alan]} onCreate={vi.fn()} onGrantAccess={onGrantAccess} />);
 
     await user.click(screen.getByRole("button", { name: "Reenviar invitación a Alan Turing" }));

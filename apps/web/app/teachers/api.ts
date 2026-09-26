@@ -12,6 +12,7 @@
  */
 import { authFetch } from "../auth/authFetch";
 import { ConfigError } from "../config/api";
+import type { Invitation } from "../students/api";
 
 const BASE_PATH = "/api/v1";
 
@@ -203,22 +204,26 @@ export function reassignTeachingAssignment(
 
 // --- access to the system (the teacher's login) -----------------------------
 
-/** "invited": the login exists and waits for its password; "active": it is in use. */
-export type TeacherAccessStatus = "invited" | "active";
+/**
+ * "invited": the login waits for its password; "active": it is in use;
+ * "suspended": switched off in Usuarios (lifted there, not here).
+ */
+export type TeacherAccessStatus = "invited" | "active" | "suspended";
 
 /** What giving a teacher access did. */
 export interface TeacherAccessResult {
   /** The teacher, now linked to the login (`userId` set). */
   teacher: Teacher;
   userId: string;
-  /** Where the invitation went. */
+  /** The address the account signs in with. */
   email: string;
   status: TeacherAccessStatus;
   /**
-   * The activation link, only when no mail provider sent it (local dev): the
-   * office hands it over itself.
+   * The link minted for an `invited` account; null when nothing was sent
+   * (active or suspended). Read `sent` before saying the mail went out: when
+   * it is false (always in local), `url` is the link to hand over.
    */
-  inviteUrl?: string;
+  invitation: Invitation | null;
 }
 
 /**
