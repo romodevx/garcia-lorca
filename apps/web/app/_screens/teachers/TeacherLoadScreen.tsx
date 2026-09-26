@@ -90,7 +90,7 @@ export function TeacherLoadScreen({ teacherId: rawTeacherId, onBack, canWrite = 
       {data.status === "ready" && data.teacher !== undefined && data.cycles.length > 0 && (
         <div style={{ display: "grid", gap: 18, maxWidth: 760 }}>
           {writes.error !== undefined && <ErrorAlert message={writes.error} />}
-          <CurrentLoadPanel load={load} onRemove={canWrite ? writes.remove : undefined} />
+          <CurrentLoadPanel load={load} onRemove={canWrite ? writes.remove : undefined} removing={writes.removing} />
           {canWrite && (
             <div>
               <AddSubjectPanel teacherId={teacherId} catalogue={catalogue} onAssign={writes.assign} />

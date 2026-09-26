@@ -10,7 +10,7 @@ import {
   type TeachingLoadItem,
 } from "../../teachers/api";
 import type { LoadCatalogue, LoadSlot } from "../../teachers/load";
-import { describeLoadWriteError, isConcurrentChange } from "../../teachers/loadErrors";
+import { describeLoadWriteError, isAlreadyGone, isConcurrentChange } from "../../teachers/loadErrors";
 import type { NamedConflict } from "./ConflictNotice";
 
 /** The undo window for a freed class — at least eight seconds (ui-forms rules). */
@@ -25,6 +25,8 @@ export interface LoadWrites {
   replaceConflicts: () => Promise<void>;
   keepConflicts: () => void;
   undoable: LoadSlot | undefined;
+  /** Assignment ids whose DELETE is in flight; their × ignores clicks. */
+  removing: ReadonlySet<string>;
   conflicts: readonly NamedConflict[];
   toast: string | undefined;
   error: string | undefined;
@@ -56,6 +58,10 @@ export function useLoadWrites({ teacherId, cycleId, catalogue, reload, drop }: L
   const undoTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const shownCycle = useRef(cycleId);
+  // The ref guards synchronously (two clicks can land before a re-render);
+  // the state is what the chips render from.
+  const inFlight = useRef(new Set<string>());
+  const [removing, setRemoving] = useState<ReadonlySet<string>>(new Set());
 
   useEffect(() => () => {
     clearTimeout(undoTimer.current);
@@ -102,22 +108,50 @@ export function useLoadWrites({ teacherId, cycleId, catalogue, reload, drop }: L
 
   const assign = useCallback((items: TeachingLoadItem[]) => send(items, false), [send]);
 
+  const markRemoving = useCallback((assignmentId: string, pending: boolean): void => {
+    if (pending) inFlight.current.add(assignmentId);
+    else inFlight.current.delete(assignmentId);
+    setRemoving(new Set(inFlight.current));
+  }, []);
+
+  const freed = useCallback(
+    (slot: LoadSlot): void => {
+      drop(slot.assignmentId);
+      clearTimeout(undoTimer.current);
+      setUndoable(slot);
+      undoTimer.current = setTimeout(() => setUndoable(undefined), UNDO_MS);
+    },
+    [drop],
+  );
+
+  /** A 404 means someone freed it first: the goal is met, so re-read quietly. */
+  const removalFailed = useCallback(
+    async (slot: LoadSlot, cause: unknown): Promise<void> => {
+      if (isAlreadyGone(cause)) {
+        drop(slot.assignmentId);
+        await reload().catch(() => undefined);
+        return;
+      }
+      await rereadIfStale(cause).catch((c: unknown) =>
+        setError(describeLoadWriteError(c, `No se pudo quitar ${slot.subjectName} de ${slot.groupLabel}.`)),
+      );
+    },
+    [drop, reload, rereadIfStale],
+  );
+
   const remove = useCallback(
     (slot: LoadSlot): void => {
+      if (inFlight.current.has(slot.assignmentId)) return;
+      markRemoving(slot.assignmentId, true);
       setError(undefined);
-      deleteTeachingAssignment(API_URL, slot.assignmentId)
-        .catch(rereadIfStale)
-        .then(() => {
-          drop(slot.assignmentId);
-          clearTimeout(undoTimer.current);
-          setUndoable(slot);
-          undoTimer.current = setTimeout(() => setUndoable(undefined), UNDO_MS);
-        })
-        .catch((cause: unknown) =>
-          setError(describeLoadWriteError(cause, `No se pudo quitar ${slot.subjectName} de ${slot.groupLabel}.`)),
-        );
+      void deleteTeachingAssignment(API_URL, slot.assignmentId)
+        .then(
+          () => freed(slot),
+          (cause: unknown) => removalFailed(slot, cause),
+        )
+        .finally(() => markRemoving(slot.assignmentId, false));
     },
-    [drop, rereadIfStale],
+    [markRemoving, freed, removalFailed],
   );
 
   const undo = useCallback(async (): Promise<void> => {
@@ -136,7 +170,7 @@ export function useLoadWrites({ teacherId, cycleId, catalogue, reload, drop }: L
 
   const keepConflicts = useCallback(() => setRaw([]), []);
 
-  return { assign, remove, undo, replaceConflicts, keepConflicts, undoable, conflicts: nameConflicts(raw, catalogue), toast, error };
+  return { assign, remove, undo, replaceConflicts, keepConflicts, undoable, removing, conflicts: nameConflicts(raw, catalogue), toast, error };
 }
 
 function nameConflicts(conflicts: readonly TeachingLoadConflict[], catalogue: LoadCatalogue): NamedConflict[] {

@@ -1,6 +1,7 @@
 import { ConfigError } from "../config/api";
 
 const FORBIDDEN = 403;
+const NOT_FOUND = 404;
 const CONFLICT = 409;
 
 const NO_PERMISSION = "No tienes permiso para cambiar la carga académica.";
@@ -9,6 +10,11 @@ const CONCURRENT_CHANGE = "Alguien cambió esta carga al mismo tiempo; recargamo
 /** The server answered that someone else changed the load first. */
 export function isConcurrentChange(cause: unknown): boolean {
   return cause instanceof ConfigError && cause.status === CONFLICT;
+}
+
+/** The row is not there any more: a removal that 404s already happened. */
+export function isAlreadyGone(cause: unknown): boolean {
+  return cause instanceof ConfigError && cause.status === NOT_FOUND;
 }
 
 /**

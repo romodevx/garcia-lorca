@@ -467,6 +467,40 @@ describe("TeacherLoadScreen", () => {
     expect(await screen.findByText("1° Secundaria · A")).toBeInTheDocument();
   });
 
+  // Regression: a second click on × while its DELETE was in flight sent a
+  // second DELETE, which 404'd into a red banner for a slot that WAS freed.
+  // Found by /code-review on 2026-09-25
+  it("ignores a second click on × while its removal is in flight, and marks it busy", async () => {
+    withAssignments([ta("a1", "s1A", "mat-s1", "ada")]);
+    let finish: () => void = () => undefined;
+    teachers.deleteTeachingAssignment.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const user = await renderPage();
+    const remove = await screen.findByRole("button", { name: "Quitar Matemáticas de 1° Secundaria · A" });
+
+    await user.click(remove);
+    await user.click(remove);
+
+    expect(teachers.deleteTeachingAssignment).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveAttribute("aria-busy", "true");
+    finish();
+    expect(await screen.findByRole("button", { name: "Deshacer" })).toBeInTheDocument();
+  });
+
+  it("a 404 on removal means the slot is already free: re-read the list, no error", async () => {
+    withAssignments([ta("a1", "s1A", "mat-s1", "ada")]);
+    teachers.deleteTeachingAssignment.mockRejectedValueOnce(new ConfigError(404, "teaching assignment not found"));
+    const user = await renderPage();
+    const readsBefore = teachers.listTeachingAssignments.mock.calls.length;
+    withAssignments([]);
+
+    await user.click(await screen.findByRole("button", { name: "Quitar Matemáticas de 1° Secundaria · A" }));
+
+    await waitFor(() => expect(teachers.listTeachingAssignments.mock.calls.length).toBeGreaterThan(readsBefore));
+    expect(await screen.findByText(/Aún no tiene asignaturas/)).toBeInTheDocument();
+    expect(screen.queryByText(/No se pudo quitar/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Deshacer" })).not.toBeInTheDocument();
+  });
+
   it("a read-only viewer sees the load but no write controls", async () => {
     withAssignments([ta("a1", "s1A", "mat-s1", "ada")]);
     await renderPage(vi.fn(), false);

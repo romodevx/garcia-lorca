@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ConfigError } from "../config/api";
-import { describeLoadWriteError, isConcurrentChange } from "./loadErrors";
+import { describeLoadWriteError, isAlreadyGone, isConcurrentChange } from "./loadErrors";
 
 const FAILED = "No se pudo asignar.";
 
@@ -40,5 +40,13 @@ describe("isConcurrentChange", () => {
     expect(isConcurrentChange(new ConfigError(409, ""))).toBe(true);
     expect(isConcurrentChange(new ConfigError(403, ""))).toBe(false);
     expect(isConcurrentChange(new TypeError("x"))).toBe(false);
+  });
+});
+
+describe("isAlreadyGone", () => {
+  it("is true only for a 404 from the server", () => {
+    expect(isAlreadyGone(new ConfigError(404, "teaching assignment not found"))).toBe(true);
+    expect(isAlreadyGone(new ConfigError(409, ""))).toBe(false);
+    expect(isAlreadyGone(new TypeError("x"))).toBe(false);
   });
 });

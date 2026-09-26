@@ -10,14 +10,18 @@ export interface CurrentLoadPanelProps {
   load: readonly SubjectLoad[];
   /** Frees a slot; absent for a read-only viewer, who gets no ×. */
   onRemove?: (slot: LoadSlot) => void;
+  /** Assignment ids whose removal is in flight: their × is busy. */
+  removing?: ReadonlySet<string>;
 }
+
+const NONE: ReadonlySet<string> = new Set();
 
 /**
  * What the teacher already teaches, one card per subject name with its groups
  * as chips. The × frees the slot at once; the page offers Deshacer instead of
  * a confirmation (a removed class is not irreversible).
  */
-export function CurrentLoadPanel({ load, onRemove }: CurrentLoadPanelProps): ReactElement {
+export function CurrentLoadPanel({ load, onRemove, removing = NONE }: CurrentLoadPanelProps): ReactElement {
   const groupCount = load.reduce((n, s) => n + s.slots.length, 0);
   const subtitle =
     load.length === 0 ? "Asignaturas y grupos que imparte." : `${load.length} ${plural(load.length, "asignatura", "asignaturas")} · ${groupCount} ${plural(groupCount, "grupo", "grupos")}`;
@@ -29,7 +33,7 @@ export function CurrentLoadPanel({ load, onRemove }: CurrentLoadPanelProps): Rea
       ) : (
         <div style={{ display: "grid", gap: 12 }}>
           {load.map((subject) => (
-            <SubjectCard key={subject.subjectName} subject={subject} onRemove={onRemove} />
+            <SubjectCard key={subject.subjectName} subject={subject} onRemove={onRemove} removing={removing} />
           ))}
         </div>
       )}
@@ -37,7 +41,13 @@ export function CurrentLoadPanel({ load, onRemove }: CurrentLoadPanelProps): Rea
   );
 }
 
-function SubjectCard({ subject, onRemove }: { subject: SubjectLoad; onRemove?: (slot: LoadSlot) => void }): ReactElement {
+interface SubjectCardProps {
+  subject: SubjectLoad;
+  onRemove?: (slot: LoadSlot) => void;
+  removing: ReadonlySet<string>;
+}
+
+function SubjectCard({ subject, onRemove, removing }: SubjectCardProps): ReactElement {
   const titleId = useId();
   return (
     <section
@@ -58,8 +68,11 @@ function SubjectCard({ subject, onRemove }: { subject: SubjectLoad; onRemove?: (
             <button
               type="button"
               onClick={() => onRemove(slot)}
+              // aria-disabled, not disabled: focus stays on the chip while it frees.
+              aria-busy={removing.has(slot.assignmentId)}
+              aria-disabled={removing.has(slot.assignmentId)}
               aria-label={`Quitar ${slot.subjectName} de ${slot.groupLabel}`}
-              style={{ width: 44, height: 44, flexShrink: 0, display: "grid", placeItems: "center", borderRadius: "var(--r-pill)", color: "var(--text-muted)", cursor: "pointer" }}
+              style={{ width: 44, height: 44, flexShrink: 0, display: "grid", placeItems: "center", borderRadius: "var(--r-pill)", color: "var(--text-muted)", cursor: removing.has(slot.assignmentId) ? "progress" : "pointer" }}
             >
               <Icon name="close" size={16} stroke={2.4} />
             </button>
