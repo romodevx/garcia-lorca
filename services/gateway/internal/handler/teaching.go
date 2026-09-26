@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
 )
@@ -148,11 +150,7 @@ func (h *TeachingHandler) callerAssignments(ctx context.Context, principal middl
 	if teacherID == "" {
 		return "", nil, nil // the principal is linked to no teacher record
 	}
-	all, err := h.config.ListTeachingAssignments(ctx, "", "", teacherID)
-	if err != nil {
-		return "", nil, err
-	}
-	active, err := h.activeCycleIDs(ctx)
+	all, active, err := h.assignmentsAndActiveCycles(ctx, teacherID)
 	if err != nil {
 		return "", nil, err
 	}
@@ -162,6 +160,29 @@ func (h *TeachingHandler) callerAssignments(ctx context.Context, principal middl
 		}
 	}
 	return teacherID, assignments, nil
+}
+
+// assignmentsAndActiveCycles reads the teacher's assignments and the school's
+// active cycles concurrently — two independent config reads on every teaching
+// request. The first failure cancels the other and is what the caller gets.
+func (h *TeachingHandler) assignmentsAndActiveCycles(ctx context.Context, teacherID string) ([]client.TeachingAssignment, map[string]struct{}, error) {
+	var (
+		all    []client.TeachingAssignment
+		active map[string]struct{}
+	)
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() (err error) {
+		all, err = h.config.ListTeachingAssignments(gctx, "", "", teacherID)
+		return err
+	})
+	g.Go(func() (err error) {
+		active, err = h.activeCycleIDs(gctx)
+		return err
+	})
+	if err := g.Wait(); err != nil {
+		return nil, nil, err
+	}
+	return all, active, nil
 }
 
 // activeCycleIDs is the set of the school's active cycles.
