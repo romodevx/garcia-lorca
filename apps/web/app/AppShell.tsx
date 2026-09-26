@@ -11,6 +11,7 @@ import { Dashboard } from "./_screens/Dashboard";
 import { AttendanceScreen } from "./_screens/attendance/AttendanceScreen";
 import { TeacherLoadScreen } from "./_screens/teachers/TeacherLoadScreen";
 import { TeachersScreen } from "./_screens/teachers/TeachersScreen";
+import { canEditTeachingLoad } from "./teachers/permissions";
 import { UniformsScreen } from "./_screens/uniforms/UniformsScreen";
 import { FinanceScreen } from "./_screens/finance/FinanceScreen";
 import { Catalog } from "./_screens/config/Catalog";
@@ -606,7 +607,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "teachers" &&
         (teachersEnabled ? (
-          <TeachersScreen onBack={home} onOpenLoad={openTeacherLoad} />
+          <TeachersScreen onBack={home} onOpenLoad={openTeacherLoad} permissions={principal?.permissions} />
         ) : (
           // Flag OFF: never render the roster; show the friendly stub so
           // navigation never dead-ends. (Backend 404 is authoritative.)
@@ -614,7 +615,12 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "teacherLoad" &&
         (teachersEnabled ? (
-          <TeacherLoadScreen key={view.teacherId} teacherId={view.teacherId} onBack={() => go({ screen: "teachers" })} />
+          <TeacherLoadScreen
+            key={view.teacherId}
+            teacherId={view.teacherId}
+            onBack={() => go({ screen: "teachers" })}
+            canWrite={canEditTeachingLoad(principal?.permissions)}
+          />
         ) : (
           // Flag OFF: same friendly stub as the roster. (Backend 404 is authoritative.)
           <ModulePlaceholder m={MODULES.find((m) => m.id === "teachers") as ModuleDef} onBack={home} />

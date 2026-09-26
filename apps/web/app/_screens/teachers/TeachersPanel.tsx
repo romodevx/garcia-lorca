@@ -13,6 +13,8 @@ export interface TeachersPanelProps {
   onCreate: (input: CreateTeacherInput) => Promise<void>;
   /** Opens the teacher's carga académica page. */
   onOpenLoad: (teacherId: string) => void;
+  /** Holds teachers:write; only they get the Carga académica button. */
+  canEditLoad?: boolean;
 }
 
 /**
@@ -20,7 +22,7 @@ export interface TeachersPanelProps {
  * for a future IAM link and intentionally not collected here. Dumb panel — data
  * + an async `onCreate` come from the Catalog orchestrator.
  */
-export function TeachersPanel({ teachers, onCreate, onOpenLoad }: TeachersPanelProps): ReactElement {
+export function TeachersPanel({ teachers, onCreate, onOpenLoad, canEditLoad = true }: TeachersPanelProps): ReactElement {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
@@ -67,6 +69,7 @@ export function TeachersPanel({ teachers, onCreate, onOpenLoad }: TeachersPanelP
                 </span>{" "}
                 <span style={{ color: "var(--text-muted)" }}>· {t.email}</span>
               </span>
+              {canEditLoad && (
               <button
                 type="button"
                 onClick={() => onOpenLoad(t.id)}
@@ -75,6 +78,7 @@ export function TeachersPanel({ teachers, onCreate, onOpenLoad }: TeachersPanelP
               >
                 Carga académica
               </button>
+              )}
             </li>
           ))}
         </ul>

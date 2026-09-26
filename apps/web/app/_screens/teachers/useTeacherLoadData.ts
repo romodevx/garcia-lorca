@@ -4,9 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { API_URL } from "../../api-url";
 import {
+  labelGroups,
   listCycles,
   listGradeLevels,
-  listLabelledGroups,
+  listGroups,
   listLevels,
   listSubjects,
   type Cycle,
@@ -26,6 +27,8 @@ export interface TeacherLoadData {
   cycles: readonly Cycle[];
   cycleId: string;
   selectCycle: (cycleId: string) => void;
+  /** Reads again whatever failed: the roster and catalogue, or the cycle. */
+  retry: () => void;
   catalogue: LoadCatalogue;
   /** Re-reads the cycle's assignments after a write. */
   reloadAssignments: () => Promise<void>;
@@ -41,18 +44,23 @@ interface Shared {
 }
 
 interface OfCycle {
+  /** The cycle these rows belong to, so a late answer for another is dropped. */
+  cycleId: string;
   groups: LabelledGroup[];
   subjects: Subject[];
   assignments: TeachingAssignment[];
 }
 
-const NO_CYCLE: OfCycle = { groups: [], subjects: [], assignments: [] };
+const NO_CYCLE: Omit<OfCycle, "cycleId"> = { groups: [], subjects: [], assignments: [] };
 
-/** Subjects live per grade level: read those of every grade that has a group. */
+/**
+ * Subjects live per grade level: ONE read of the whole catalogue, kept to the
+ * grades that have a group in the cycle.
+ */
 async function subjectsOf(groups: readonly LabelledGroup[]): Promise<Subject[]> {
-  const gradeIds = [...new Set(groups.map((g) => g.gradeLevelId))];
-  const perGrade = await Promise.all(gradeIds.map((id) => listSubjects(API_URL, id)));
-  return perGrade.flat();
+  const gradeIds = new Set(groups.map((g) => g.gradeLevelId));
+  const all = await listSubjects(API_URL, "");
+  return all.filter((s) => gradeIds.has(s.gradeLevelId));
 }
 
 /**
@@ -64,40 +72,53 @@ export function useTeacherLoadData(teacherId: string): TeacherLoadData {
   const [shared, setShared] = useState<Shared | undefined>(undefined);
   const [cycleId, setCycleId] = useState("");
   const [ofCycle, setOfCycle] = useState<OfCycle | undefined>(undefined);
-  const [failed, setFailed] = useState(false);
+  const [sharedFailed, setSharedFailed] = useState(false);
+  const [cycleFailed, setCycleFailed] = useState(false);
+  const [sharedAttempt, setSharedAttempt] = useState(0);
+  const [cycleAttempt, setCycleAttempt] = useState(0);
 
   useEffect(() => {
     let active = true;
+    setSharedFailed(false);
     Promise.all([listTeachers(API_URL), listCycles(API_URL), listLevels(API_URL), listGradeLevels(API_URL)])
       .then(([teachers, cycles, levels, grades]) => {
         if (!active) return;
         setShared({ teachers, cycles, levels, grades });
         setCycleId((cycles.find((c) => c.status === "active") ?? cycles[0])?.id ?? "");
       })
-      .catch(() => active && setFailed(true));
+      .catch(() => active && setSharedFailed(true));
     return () => {
       active = false;
     };
-  }, []);
+  }, [sharedAttempt]);
 
+  const grades = shared?.grades;
   useEffect(() => {
-    if (cycleId === "") return;
+    if (cycleId === "" || grades === undefined) return;
     let active = true;
     setOfCycle(undefined);
-    Promise.all([listLabelledGroups(API_URL, cycleId), listTeachingAssignments(API_URL, { cycleId })])
-      .then(async ([groups, assignments]) => {
+    setCycleFailed(false);
+    Promise.all([listGroups(API_URL, cycleId), listTeachingAssignments(API_URL, { cycleId })])
+      .then(async ([rawGroups, assignments]) => {
+        const groups = labelGroups(rawGroups, grades);
         const subjects = await subjectsOf(groups);
-        if (active) setOfCycle({ groups, subjects, assignments });
+        if (active) setOfCycle({ cycleId, groups, subjects, assignments });
       })
-      .catch(() => active && setFailed(true));
+      .catch(() => active && setCycleFailed(true));
     return () => {
       active = false;
     };
-  }, [cycleId]);
+  }, [cycleId, grades, cycleAttempt]);
+
+  const retry = useCallback((): void => {
+    if (shared === undefined) setSharedAttempt((n) => n + 1);
+    else setCycleAttempt((n) => n + 1);
+  }, [shared]);
 
   const reloadAssignments = useCallback(async (): Promise<void> => {
-    const assignments = await listTeachingAssignments(API_URL, { cycleId });
-    setOfCycle((prev) => (prev === undefined ? prev : { ...prev, assignments }));
+    const requested = cycleId;
+    const assignments = await listTeachingAssignments(API_URL, { cycleId: requested });
+    setOfCycle((prev) => (prev === undefined || prev.cycleId !== requested ? prev : { ...prev, assignments }));
   }, [cycleId]);
 
   const dropAssignment = useCallback((assignmentId: string): void => {
@@ -107,14 +128,19 @@ export function useTeacherLoadData(teacherId: string): TeacherLoadData {
   }, []);
 
   const cycleLoaded = shared !== undefined && (cycleId === "" || ofCycle !== undefined);
-  const status: LoadStatus = failed ? "error" : cycleLoaded ? "ready" : "loading";
+  const status: LoadStatus = sharedFailed || cycleFailed ? "error" : cycleLoaded ? "ready" : "loading";
   const catalogue = useMemo<LoadCatalogue>(
-    () => ({
-      levels: shared?.levels ?? [],
-      grades: shared?.grades ?? [],
-      teachers: shared?.teachers ?? [],
-      ...(ofCycle ?? NO_CYCLE),
-    }),
+    () => {
+      const rows = ofCycle ?? NO_CYCLE;
+      return {
+        levels: shared?.levels ?? [],
+        grades: shared?.grades ?? [],
+        teachers: shared?.teachers ?? [],
+        groups: rows.groups,
+        subjects: rows.subjects,
+        assignments: rows.assignments,
+      };
+    },
     [shared, ofCycle],
   );
 
@@ -124,6 +150,7 @@ export function useTeacherLoadData(teacherId: string): TeacherLoadData {
     cycles: shared?.cycles ?? [],
     cycleId,
     selectCycle: setCycleId,
+    retry,
     catalogue,
     reloadAssignments,
     dropAssignment,

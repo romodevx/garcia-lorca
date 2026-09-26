@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as configApi from "../../config/api";
-import type { GradeLevel, LabelledGroup, Level, Subject } from "../../config/api";
+import { ConfigError, type Cycle, type GradeLevel, type LabelledGroup, type Level, type Subject } from "../../config/api";
 import * as teachersApi from "../../teachers/api";
 import type { TeachingAssignment } from "../../teachers/api";
 import { TeacherLoadScreen } from "./TeacherLoadScreen";
@@ -21,6 +21,7 @@ vi.mock("../../config/api", async (importOriginal) => ({
   listLevels: vi.fn(),
   listGradeLevels: vi.fn(),
   listLabelledGroups: vi.fn(),
+  listGroups: vi.fn(),
   listSubjects: vi.fn(),
 }));
 
@@ -70,6 +71,10 @@ const ta = (id: string, groupId: string, subjectId: string, teacherId: string): 
   subjectId,
   teacherId,
 });
+const twoCycles: Cycle[] = [
+  { id: "c0", name: "2025-2026", status: "closed", startsOn: "2025-08-01", endsOn: "2026-06-30" },
+  { id: "c1", name: "2026-2027", status: "active", startsOn: "2026-08-01", endsOn: "2027-06-30" },
+];
 const emptyResult = { created: [], reassigned: [], skipped: [], conflicts: [] };
 
 function withAssignments(assignments: TeachingAssignment[]): void {
@@ -87,13 +92,16 @@ beforeEach(() => {
   config.listLevels.mockResolvedValue(levels);
   config.listGradeLevels.mockResolvedValue(grades);
   config.listLabelledGroups.mockResolvedValue(groups);
-  config.listSubjects.mockImplementation(async (_base, gradeLevelId) => subjectsByGrade[gradeLevelId] ?? []);
+  config.listGroups.mockResolvedValue(groups.map(({ label: _label, ...g }) => g));
+  config.listSubjects.mockImplementation(async (_base, gradeLevelId) =>
+    gradeLevelId === "" ? Object.values(subjectsByGrade).flat() : (subjectsByGrade[gradeLevelId] ?? []),
+  );
 });
 afterEach(() => vi.clearAllMocks());
 
-async function renderPage(onBack = vi.fn()): Promise<ReturnType<typeof userEvent.setup>> {
+async function renderPage(onBack = vi.fn(), canWrite = true): Promise<ReturnType<typeof userEvent.setup>> {
   const user = userEvent.setup();
-  render(<TeacherLoadScreen teacherId="ada" onBack={onBack} />);
+  render(<TeacherLoadScreen teacherId="ada" onBack={onBack} canWrite={canWrite} />);
   await screen.findByRole("heading", { name: "Carga académica de Ada Lovelace" });
   return user;
 }
@@ -118,7 +126,7 @@ describe("TeacherLoadScreen", () => {
     ]);
     await renderPage();
 
-    await waitFor(() => expect(config.listLabelledGroups).toHaveBeenCalledWith(expect.any(String), "c1"));
+    await waitFor(() => expect(config.listGroups).toHaveBeenCalledWith(expect.any(String), "c1"));
     expect(teachers.listTeachingAssignments).toHaveBeenCalledWith(expect.any(String), { cycleId: "c1" });
     expect(screen.getByLabelText("Ciclo", CAMPO)).toHaveValue("c1");
   });
@@ -306,5 +314,154 @@ describe("TeacherLoadScreen", () => {
     expect(screen.getByText("Elige al menos un grupo.")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Todos los de Primaria" })).toHaveFocus();
     expect(teachers.assignTeachingLoad).not.toHaveBeenCalled();
+  });
+  // --- regressions found by /code-review on 2026-09-25 -----------------------
+
+  it("reads every subject in ONE request and labels groups from the grades it already has", async () => {
+    await renderPage();
+    await screen.findByText(/Aún no tiene asignaturas/);
+
+    expect(config.listSubjects).toHaveBeenCalledTimes(1);
+    expect(config.listSubjects).toHaveBeenCalledWith(expect.any(String), "");
+    expect(config.listGradeLevels).toHaveBeenCalledTimes(1);
+    expect(config.listLabelledGroups).not.toHaveBeenCalled();
+  });
+
+  it("offers only the cycle's grades' subjects when the catalogue has others", async () => {
+    config.listSubjects.mockResolvedValue([
+      ...Object.values(subjectsByGrade).flat(),
+      { id: "art-x", gradeLevelId: "other-grade", name: "Artes" },
+    ]);
+    await renderPage();
+
+    const subject = await screen.findByLabelText("Asignatura", CAMPO);
+    expect(within(subject).queryByRole("option", { name: "Artes" })).not.toBeInTheDocument();
+    expect(within(subject).getByRole("option", { name: "Física" })).toBeInTheDocument();
+  });
+
+  it("drops a pending conflict when the cycle changes, so Reemplazar cannot touch the old cycle", async () => {
+    config.listCycles.mockResolvedValue(twoCycles);
+    teachers.assignTeachingLoad.mockResolvedValueOnce({
+      ...emptyResult,
+      conflicts: [{ groupId: "s1B", subjectId: "mat-s1", assignmentId: "x1", teacherId: "ana", teacherName: "Ana Ruiz" }],
+    });
+    const user = await renderPage();
+    await chooseSubject(user, "Matemáticas");
+    await user.click(screen.getByRole("checkbox", { name: "1° Secundaria · B" }));
+    await user.click(screen.getByRole("button", { name: "Asignar (1 grupo)" }));
+    await screen.findByRole("region", { name: /ya tienen? docente/ });
+
+    await user.selectOptions(screen.getByLabelText("Ciclo", CAMPO), "c0");
+
+    await waitFor(() => expect(screen.queryByRole("region", { name: /ya tienen? docente/ })).not.toBeInTheDocument());
+  });
+
+  it("recovers from a failed cycle load: the picker stays and Reintentar reads again", async () => {
+    config.listCycles.mockResolvedValue(twoCycles);
+    config.listGroups.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    const user = await renderPage();
+
+    expect(await screen.findByText(/No pudimos cargar el catálogo académico/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Ciclo", CAMPO)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Reintentar" }));
+
+    expect(await screen.findByText(/Aún no tiene asignaturas/)).toBeInTheDocument();
+    expect(screen.queryByText(/No pudimos cargar el catálogo académico/)).not.toBeInTheDocument();
+  });
+
+  it("switching cycle after a failure clears the error", async () => {
+    config.listCycles.mockResolvedValue(twoCycles);
+    config.listGroups.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    const user = await renderPage();
+    await screen.findByText(/No pudimos cargar el catálogo académico/);
+
+    await user.selectOptions(screen.getByLabelText("Ciclo", CAMPO), "c0");
+
+    expect(await screen.findByText(/Aún no tiene asignaturas/)).toBeInTheDocument();
+  });
+
+  it("ignores a late re-read of the previous cycle after switching", async () => {
+    config.listCycles.mockResolvedValue(twoCycles);
+    let resolveStale: (a: TeachingAssignment[]) => void = () => undefined;
+    teachers.listTeachingAssignments.mockImplementation(async (_b, filters) => {
+      if (filters?.cycleId === "c0") return [ta("old", "s2A", "mat-s2", "ada")];
+      return [];
+    });
+    teachers.assignTeachingLoad.mockResolvedValueOnce({ ...emptyResult, created: [ta("n1", "s1A", "mat-s1", "ada")] });
+    const user = await renderPage();
+    await chooseSubject(user, "Matemáticas");
+    await user.click(screen.getByRole("checkbox", { name: "1° Secundaria · A" }));
+    // The re-read after the write hangs until the cycle has changed.
+    teachers.listTeachingAssignments.mockImplementationOnce(
+      () => new Promise<TeachingAssignment[]>((resolve) => { resolveStale = resolve; }),
+    );
+    await user.click(screen.getByRole("button", { name: "Asignar (1 grupo)" }));
+
+    await user.selectOptions(screen.getByLabelText("Ciclo", CAMPO), "c0");
+    const math = await screen.findByRole("region", { name: "Matemáticas" });
+    expect(within(math).getByText("2° Secundaria · A")).toBeInTheDocument();
+
+    resolveStale([ta("n1", "s1A", "mat-s1", "ada")]);
+
+    await new Promise((r) => setTimeout(r, 0));
+    expect(within(screen.getByRole("region", { name: "Matemáticas" })).queryByText("1° Secundaria · A")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Matemáticas" })).getByText("2° Secundaria · A")).toBeInTheDocument();
+  });
+
+  it("says a 403 on assign is a permission problem, not the connection", async () => {
+    teachers.assignTeachingLoad.mockRejectedValueOnce(new ConfigError(403, "forbidden"));
+    const user = await renderPage();
+    await chooseSubject(user, "Matemáticas");
+    await user.click(screen.getByRole("checkbox", { name: "1° Secundaria · A" }));
+    await user.click(screen.getByRole("button", { name: "Asignar (1 grupo)" }));
+
+    expect(await screen.findByText("No tienes permiso para cambiar la carga académica.")).toBeInTheDocument();
+    expect(screen.queryByText(/Revisa tu conexión/)).not.toBeInTheDocument();
+  });
+
+  it("on a 409 it says someone else changed the load and re-reads it", async () => {
+    teachers.assignTeachingLoad.mockRejectedValueOnce(new ConfigError(409, "conflict"));
+    const user = await renderPage();
+    await chooseSubject(user, "Matemáticas");
+    await user.click(screen.getByRole("checkbox", { name: "1° Secundaria · A" }));
+    const readsBefore = teachers.listTeachingAssignments.mock.calls.length;
+    await user.click(screen.getByRole("button", { name: "Asignar (1 grupo)" }));
+
+    expect(await screen.findByText(/Alguien cambió esta carga al mismo tiempo/)).toBeInTheDocument();
+    expect(teachers.listTeachingAssignments.mock.calls.length).toBeGreaterThan(readsBefore);
+  });
+
+  it("a failed chip removal names the server's reason", async () => {
+    withAssignments([ta("a1", "s1A", "mat-s1", "ada")]);
+    teachers.deleteTeachingAssignment.mockRejectedValueOnce(new ConfigError(403, "forbidden"));
+    const user = await renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Quitar Matemáticas de 1° Secundaria · A" }));
+
+    expect(await screen.findByText("No tienes permiso para cambiar la carga académica.")).toBeInTheDocument();
+  });
+
+  it("clears the previous write's error as soon as the next write starts", async () => {
+    withAssignments([ta("a1", "s1A", "mat-s1", "ada")]);
+    teachers.deleteTeachingAssignment.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    const user = await renderPage();
+    await user.click(await screen.findByRole("button", { name: "Quitar Matemáticas de 1° Secundaria · A" }));
+    await screen.findByText(/No se pudo quitar Matemáticas/);
+
+    await chooseSubject(user, "Matemáticas");
+    await user.click(screen.getByRole("checkbox", { name: "1° Secundaria · B" }));
+    await user.click(screen.getByRole("button", { name: "Asignar (1 grupo)" }));
+
+    await waitFor(() => expect(screen.queryByText(/No se pudo quitar Matemáticas/)).not.toBeInTheDocument());
+  });
+
+  it("a read-only viewer sees the load but no write controls", async () => {
+    withAssignments([ta("a1", "s1A", "mat-s1", "ada")]);
+    await renderPage(vi.fn(), false);
+
+    expect(await screen.findByText("1° Secundaria · A")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Quitar/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "Agregar asignatura" })).not.toBeInTheDocument();
   });
 });

@@ -10,6 +10,7 @@ import {
   type TeachingLoadItem,
 } from "../../teachers/api";
 import type { LoadCatalogue, LoadSlot } from "../../teachers/load";
+import { describeLoadWriteError, isConcurrentChange } from "../../teachers/loadErrors";
 import type { NamedConflict } from "./ConflictNotice";
 
 /** The undo window for a freed class — at least eight seconds (ui-forms rules). */
@@ -29,6 +30,15 @@ export interface LoadWrites {
   error: string | undefined;
 }
 
+export interface LoadWritesDeps {
+  teacherId: string;
+  /** The cycle the page shows; pending conflicts and undo belong to it alone. */
+  cycleId: string;
+  catalogue: LoadCatalogue;
+  reload: () => Promise<void>;
+  drop: (assignmentId: string) => void;
+}
+
 function assignedMessage(count: number): string {
   return count === 1 ? "1 grupo asignado" : `${count} grupos asignados`;
 }
@@ -38,23 +48,28 @@ function assignedMessage(count: number): string {
  * leave it assigned) and Deshacer gives it back through the bulk call; a slot
  * someone else holds comes back as a conflict the person resolves explicitly.
  */
-export function useLoadWrites(
-  teacherId: string,
-  catalogue: LoadCatalogue,
-  reload: () => Promise<void>,
-  drop: (assignmentId: string) => void,
-): LoadWrites {
+export function useLoadWrites({ teacherId, cycleId, catalogue, reload, drop }: LoadWritesDeps): LoadWrites {
   const [raw, setRaw] = useState<TeachingLoadConflict[]>([]);
   const [undoable, setUndoable] = useState<LoadSlot | undefined>(undefined);
   const [toast, setToast] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const shownCycle = useRef(cycleId);
 
   useEffect(() => () => {
     clearTimeout(undoTimer.current);
     clearTimeout(toastTimer.current);
   }, []);
+
+  // A conflict or an undo of another cycle must never act on this one.
+  useEffect(() => {
+    shownCycle.current = cycleId;
+    clearTimeout(undoTimer.current);
+    setRaw([]);
+    setUndoable(undefined);
+    setError(undefined);
+  }, [cycleId]);
 
   const say = useCallback((message: string): void => {
     clearTimeout(toastTimer.current);
@@ -62,15 +77,27 @@ export function useLoadWrites(
     toastTimer.current = setTimeout(() => setToast(undefined), TOAST_MS);
   }, []);
 
+  /** A 409 means the list on screen is stale: re-read it, then let the caller say so. */
+  const rereadIfStale = useCallback(
+    async (cause: unknown): Promise<never> => {
+      if (isConcurrentChange(cause)) await reload().catch(() => undefined);
+      throw cause;
+    },
+    [reload],
+  );
+
   const send = useCallback(
     async (items: readonly TeachingLoadItem[], replace: boolean): Promise<void> => {
-      const result = await assignTeachingLoad(API_URL, { teacherId, items, replaceConflicts: replace });
+      setError(undefined);
+      const sentFor = shownCycle.current;
+      const result = await assignTeachingLoad(API_URL, { teacherId, items, replaceConflicts: replace }).catch(rereadIfStale);
+      if (sentFor !== shownCycle.current) return;
       const done = result.created.length + result.reassigned.length;
       if (done > 0) say(assignedMessage(done));
       setRaw(result.conflicts);
       await reload().catch(() => setError("Se guardó, pero no pudimos releer la carga. Recarga la página."));
     },
-    [teacherId, reload, say],
+    [teacherId, reload, say, rereadIfStale],
   );
 
   const assign = useCallback((items: TeachingLoadItem[]) => send(items, false), [send]);
@@ -79,29 +106,32 @@ export function useLoadWrites(
     (slot: LoadSlot): void => {
       setError(undefined);
       deleteTeachingAssignment(API_URL, slot.assignmentId)
+        .catch(rereadIfStale)
         .then(() => {
           drop(slot.assignmentId);
           clearTimeout(undoTimer.current);
           setUndoable(slot);
           undoTimer.current = setTimeout(() => setUndoable(undefined), UNDO_MS);
         })
-        .catch(() => setError(`No se pudo quitar ${slot.subjectName} de ${slot.groupLabel}. Intenta de nuevo.`));
+        .catch((cause: unknown) =>
+          setError(describeLoadWriteError(cause, `No se pudo quitar ${slot.subjectName} de ${slot.groupLabel}.`)),
+        );
     },
-    [drop],
+    [drop, rereadIfStale],
   );
 
   const undo = useCallback(async (): Promise<void> => {
     if (undoable === undefined) return;
     clearTimeout(undoTimer.current);
     setUndoable(undefined);
-    await send([{ groupId: undoable.groupId, subjectId: undoable.subjectId }], false).catch(() =>
-      setError(`No se pudo devolver ${undoable.subjectName} a ${undoable.groupLabel}. Agrégala de nuevo abajo.`),
+    await send([{ groupId: undoable.groupId, subjectId: undoable.subjectId }], false).catch((cause: unknown) =>
+      setError(describeLoadWriteError(cause, `No se pudo devolver ${undoable.subjectName} a ${undoable.groupLabel}.`)),
     );
   }, [undoable, send]);
 
   const replaceConflicts = useCallback(async (): Promise<void> => {
     const items = raw.map(({ groupId, subjectId }) => ({ groupId, subjectId }));
-    await send(items, true).catch(() => setError("No se pudo reemplazar. Intenta de nuevo."));
+    await send(items, true).catch((cause: unknown) => setError(describeLoadWriteError(cause, "No se pudo reemplazar.")));
   }, [raw, send]);
 
   const keepConflicts = useCallback(() => setRaw([]), []);

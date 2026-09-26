@@ -72,4 +72,14 @@ describe("TeachersPanel", () => {
 
     expect(onOpenLoad).toHaveBeenCalledWith("t1");
   });
+  // Regression: the roster offered "Carga académica" to people who cannot
+  // change it. Found by /code-review on 2026-09-25
+  it("offers Carga académica only to those who may change it", () => {
+    const ada = { id: "ada", firstName: "Ada", lastName: "Lovelace", email: "ada@escuela.mx", userId: "" };
+    const { rerender } = render(<TeachersPanel teachers={[ada]} onCreate={vi.fn()} onOpenLoad={vi.fn()} canEditLoad={false} />);
+    expect(screen.queryByRole("button", { name: "Carga académica de Ada Lovelace" })).not.toBeInTheDocument();
+
+    rerender(<TeachersPanel teachers={[ada]} onCreate={vi.fn()} onOpenLoad={vi.fn()} canEditLoad />);
+    expect(screen.getByRole("button", { name: "Carga académica de Ada Lovelace" })).toBeInTheDocument();
+  });
 });

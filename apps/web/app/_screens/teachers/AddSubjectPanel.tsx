@@ -6,6 +6,7 @@ import { Btn } from "../../_design/Controls";
 import { SelectField, useFocusFirstInvalid } from "../../_design/form";
 import type { TeachingLoadItem } from "../../teachers/api";
 import { groupChoices, isSelectable, subjectNames, type LoadCatalogue } from "../../teachers/load";
+import { describeLoadWriteError } from "../../teachers/loadErrors";
 import { EmptyHint, ErrorAlert, Section } from "../config/parts";
 import { GroupGrid } from "./GroupGrid";
 
@@ -70,8 +71,8 @@ export function AddSubjectPanel({ teacherId, catalogue, onAssign }: AddSubjectPa
     try {
       await onAssign(items);
       setSelected(new Set());
-    } catch {
-      setFailure("No se pudo asignar. Revisa tu conexión e intenta de nuevo.");
+    } catch (cause) {
+      setFailure(describeLoadWriteError(cause, "No se pudo asignar."));
     } finally {
       setPending(false);
     }

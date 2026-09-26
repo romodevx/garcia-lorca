@@ -2,11 +2,13 @@
 
 import { useMemo, type ReactElement } from "react";
 
+import { Btn } from "../../_design/Controls";
 import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import { Toast } from "../../_design/Toast";
 import { UndoToast } from "../../_design/UndoToast";
 import { SelectField } from "../../_design/form";
+import type { Cycle } from "../../config/api";
 import { currentLoad, teacherName, type LoadSlot } from "../../teachers/load";
 import { EmptyHint, ErrorAlert } from "../config/parts";
 import { AddSubjectPanel } from "./AddSubjectPanel";
@@ -18,6 +20,8 @@ import { useTeacherLoadData } from "./useTeacherLoadData";
 export interface TeacherLoadScreenProps {
   teacherId: string;
   onBack: () => void;
+  /** May change the load (teachers:write). Without it the page only shows it. */
+  canWrite?: boolean;
 }
 
 /**
@@ -26,10 +30,16 @@ export interface TeacherLoadScreenProps {
  * (group + subject) has exactly one teacher, so taking one from a colleague is
  * always an explicit "Reemplazar".
  */
-export function TeacherLoadScreen({ teacherId, onBack }: TeacherLoadScreenProps): ReactElement {
+export function TeacherLoadScreen({ teacherId, onBack, canWrite = true }: TeacherLoadScreenProps): ReactElement {
   const data = useTeacherLoadData(teacherId);
   const { catalogue } = data;
-  const writes = useLoadWrites(teacherId, catalogue, data.reloadAssignments, data.dropAssignment);
+  const writes = useLoadWrites({
+    teacherId,
+    cycleId: data.cycleId,
+    catalogue,
+    reload: data.reloadAssignments,
+    drop: data.dropAssignment,
+  });
   const load = useMemo(() => currentLoad(teacherId, catalogue), [teacherId, catalogue]);
   const name = data.teacher === undefined ? "" : teacherName(data.teacher);
 
@@ -56,8 +66,18 @@ export function TeacherLoadScreen({ teacherId, onBack }: TeacherLoadScreenProps)
         </div>
       </div>
 
+      {data.cycles.length > 1 && (data.status === "ready" || data.status === "error") && (
+        <div style={{ maxWidth: 760, marginBottom: 18 }}>
+          <CyclePicker cycles={data.cycles} cycleId={data.cycleId} onChange={data.selectCycle} />
+        </div>
+      )}
       {data.status === "loading" && <EmptyHint>Cargando la carga académica…</EmptyHint>}
-      {data.status === "error" && <ErrorAlert message="No pudimos cargar el catálogo académico. Revisa tu permiso de Configuración o intenta de nuevo." />}
+      {data.status === "error" && (
+        <div style={{ display: "grid", gap: 10, justifyItems: "start", maxWidth: 760 }}>
+          <ErrorAlert message="No pudimos cargar el catálogo académico. Revisa tu permiso de Configuración o intenta de nuevo." />
+          <Btn type="button" kind="forest" onClick={data.retry}>Reintentar</Btn>
+        </div>
+      )}
       {data.status === "ready" && data.teacher === undefined && <ErrorAlert message="No encontramos a este docente. Vuelve a Docentes y elígelo de la lista." />}
       {data.status === "ready" && data.teacher !== undefined && data.cycles.length === 0 && (
         <EmptyHint>Crea un ciclo escolar en Configuración para poder asignar materias.</EmptyHint>
@@ -65,23 +85,16 @@ export function TeacherLoadScreen({ teacherId, onBack }: TeacherLoadScreenProps)
 
       {data.status === "ready" && data.teacher !== undefined && data.cycles.length > 0 && (
         <div style={{ display: "grid", gap: 18, maxWidth: 760 }}>
-          {data.cycles.length > 1 && (
-            <SelectField
-              label="Ciclo"
-              value={data.cycleId}
-              options={data.cycles.map((c) => ({ value: c.id, label: c.status === "active" ? `${c.name} (activo)` : c.name }))}
-              onChange={data.selectCycle}
-              help="La carga se arma por ciclo escolar. Empieza en el activo."
-            />
-          )}
           {writes.error !== undefined && <ErrorAlert message={writes.error} />}
-          <CurrentLoadPanel load={load} onRemove={writes.remove} />
-          <div>
-            <AddSubjectPanel teacherId={teacherId} catalogue={catalogue} onAssign={writes.assign} />
-            {writes.conflicts.length > 0 && (
-              <ConflictNotice conflicts={writes.conflicts} onReplace={writes.replaceConflicts} onKeep={writes.keepConflicts} />
-            )}
-          </div>
+          <CurrentLoadPanel load={load} onRemove={canWrite ? writes.remove : undefined} />
+          {canWrite && (
+            <div>
+              <AddSubjectPanel teacherId={teacherId} catalogue={catalogue} onAssign={writes.assign} />
+              {writes.conflicts.length > 0 && (
+                <ConflictNotice conflicts={writes.conflicts} onReplace={writes.replaceConflicts} onKeep={writes.keepConflicts} />
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -91,6 +104,18 @@ export function TeacherLoadScreen({ teacherId, onBack }: TeacherLoadScreenProps)
         writes.toast !== undefined && <Toast>{writes.toast}</Toast>
       )}
     </Page>
+  );
+}
+
+function CyclePicker({ cycles, cycleId, onChange }: { cycles: readonly Cycle[]; cycleId: string; onChange: (id: string) => void }): ReactElement {
+  return (
+    <SelectField
+      label="Ciclo"
+      value={cycleId}
+      options={cycles.map((c) => ({ value: c.id, label: c.status === "active" ? `${c.name} (activo)` : c.name }))}
+      onChange={onChange}
+      help="La carga se arma por ciclo escolar. Empieza en el activo."
+    />
   );
 }
 

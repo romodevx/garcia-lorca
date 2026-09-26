@@ -26,12 +26,15 @@ import { AssignmentsPanel } from "./AssignmentsPanel";
 import { TeachersPanel } from "./TeachersPanel";
 
 import { API_URL } from "../../api-url";
+import { canEditTeachingLoad } from "../../teachers/permissions";
 
 
 export interface TeachersScreenProps {
   onBack: () => void;
   /** Opens one teacher's carga académica page. */
   onOpenLoad: (teacherId: string) => void;
+  /** The principal's permissions; only teachers:write gets Carga académica. */
+  permissions?: readonly string[];
 }
 
 /**
@@ -49,7 +52,7 @@ export interface TeachersScreenProps {
  * sentence saying so rather than three empty dropdowns that read like a school
  * with no groups.
  */
-export function TeachersScreen({ onBack, onOpenLoad }: TeachersScreenProps): ReactElement {
+export function TeachersScreen({ onBack, onOpenLoad, permissions }: TeachersScreenProps): ReactElement {
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [catalogueClosed, setCatalogueClosed] = useState(false);
@@ -130,7 +133,7 @@ export function TeachersScreen({ onBack, onOpenLoad }: TeachersScreenProps): Rea
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 18 }}>
-        <TeachersPanel teachers={teachers} onCreate={handleCreateTeacher} onOpenLoad={onOpenLoad} />
+        <TeachersPanel teachers={teachers} onCreate={handleCreateTeacher} onOpenLoad={onOpenLoad} canEditLoad={canEditTeachingLoad(permissions)} />
         {!catalogueClosed && (
           <AssignmentsPanel
             cycles={cycles}
