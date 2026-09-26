@@ -11,10 +11,12 @@ const REQUIRED = ["firstName", "lastName", "email"] as const;
 export interface TeachersPanelProps {
   teachers: readonly Teacher[];
   onCreate: (input: CreateTeacherInput) => Promise<void>;
-  /** Opens the teacher's carga académica page. */
+  /**
+   * Opens the teacher's carga académica page. Offered to everyone who sees the
+   * roster (teachers:read): the page itself hides its write controls from
+   * those without teachers:write.
+   */
   onOpenLoad: (teacherId: string) => void;
-  /** Holds teachers:write; only they get the Carga académica button. */
-  canEditLoad?: boolean;
 }
 
 /**
@@ -22,7 +24,7 @@ export interface TeachersPanelProps {
  * for a future IAM link and intentionally not collected here. Dumb panel — data
  * + an async `onCreate` come from the Catalog orchestrator.
  */
-export function TeachersPanel({ teachers, onCreate, onOpenLoad, canEditLoad = true }: TeachersPanelProps): ReactElement {
+export function TeachersPanel({ teachers, onCreate, onOpenLoad }: TeachersPanelProps): ReactElement {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
@@ -69,7 +71,6 @@ export function TeachersPanel({ teachers, onCreate, onOpenLoad, canEditLoad = tr
                 </span>{" "}
                 <span style={{ color: "var(--text-muted)" }}>· {t.email}</span>
               </span>
-              {canEditLoad && (
               <button
                 type="button"
                 onClick={() => onOpenLoad(t.id)}
@@ -78,7 +79,6 @@ export function TeachersPanel({ teachers, onCreate, onOpenLoad, canEditLoad = tr
               >
                 Carga académica
               </button>
-              )}
             </li>
           ))}
         </ul>

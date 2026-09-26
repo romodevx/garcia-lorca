@@ -474,5 +474,7 @@ describe("TeacherLoadScreen", () => {
     expect(await screen.findByText("1° Secundaria · A")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Quitar/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("form", { name: "Agregar asignatura" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Agregar asignatura")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Asignar/ })).not.toBeInTheDocument();
   });
 });

@@ -50,6 +50,19 @@ beforeEach(() => {
 afterEach(() => vi.clearAllMocks());
 
 describe("the Docentes module", () => {
+  // Regression: a principal with teachers:read only could not even LOOK at a
+  // teacher's load. Everyone who sees the roster gets the button; the page is
+  // read-only without teachers:write (TeacherLoadScreen's own test).
+  // Found by /code-review on 2026-09-25
+  it("offers Carga académica to everyone who can see the roster, read-only principals included", async () => {
+    const onOpenLoad = vi.fn();
+    render(<TeachersScreen onBack={() => {}} onOpenLoad={onOpenLoad} />);
+
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Carga académica de Ada Lovelace" }));
+
+    expect(onOpenLoad).toHaveBeenCalledWith("t1");
+  });
+
   it("opens on the staff roster", async () => {
     render(<TeachersScreen onBack={() => {}} onOpenLoad={() => {}} />);
 
