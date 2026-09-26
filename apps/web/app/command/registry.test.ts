@@ -2,6 +2,7 @@ import { messages } from "@garcia-lorca/i18n";
 import type { FlagSet } from "@garcia-lorca/ui/flags";
 import { describe, expect, it } from "vitest";
 
+import { MODULES } from "../_design/data";
 import { buildCommandRegistry } from "./registry";
 
 /**
@@ -194,5 +195,14 @@ describe("buildCommandRegistry", () => {
       const got = buildCommandRegistry({ module_finance: true }, t).map((c) => c.id);
       expect(got).toContain("finance.nav");
     });
+  });
+
+  it("a teacher (maestro role) gets only Asistencia and Calificaciones commands, every flag ON", () => {
+    const allOn = Object.fromEntries(MODULES.map((m) => [m.flag, true]));
+    const maestro = ["teaching:read", "teaching:write", "attendance_own:read", "attendance_own:write"];
+
+    const modules = new Set(buildCommandRegistry(allOn, t, maestro).map((c) => c.moduleId));
+
+    expect([...modules].sort()).toEqual(["attendance", "grades"]);
   });
 });

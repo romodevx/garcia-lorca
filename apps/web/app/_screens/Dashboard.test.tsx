@@ -58,6 +58,19 @@ describe("Dashboard", () => {
     expect(screen.queryByText("Estudiantes")).not.toBeInTheDocument();
   });
 
+  // The maestro role (iam 0022) holds exactly these four: Calificaciones and
+  // Asistencia for the teacher's own classes, and nothing else.
+  it("a teacher (maestro role) sees exactly Asistencia and Calificaciones", () => {
+    const maestro = ["teaching:read", "teaching:write", "attendance_own:read", "attendance_own:write"];
+    render(<Dashboard user={USERS.teacher} onOpen={() => {}} permissions={maestro} now={NOW} />);
+
+    expect(visibleFor(maestro).map((m) => m.label).sort()).toEqual(["Asistencia", "Calificaciones"]);
+    for (const m of MODULES) {
+      if (m.id === "grades" || m.id === "attendance") expect(screen.getByText(m.label)).toBeInTheDocument();
+      else expect(screen.queryByText(m.label)).not.toBeInTheDocument();
+    }
+  });
+
   it("gates the KPI shortcuts by permission (grades-only user sees no finance/students KPIs)", () => {
     render(<Dashboard user={USERS.teacher} onOpen={() => {}} permissions={["grades:read"]} now={NOW} />);
 
