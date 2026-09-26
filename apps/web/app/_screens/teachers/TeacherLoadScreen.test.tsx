@@ -456,6 +456,17 @@ describe("TeacherLoadScreen", () => {
     await waitFor(() => expect(screen.queryByText(/No se pudo quitar Matemáticas/)).not.toBeInTheDocument());
   });
 
+  // Regression: a hand-typed /docentes/ADA/carga found no teacher — ids come
+  // back from the API in lower case and were compared with ===.
+  // Found by /code-review on 2026-09-25
+  it("finds the teacher and their load whatever the case of the id in the URL", async () => {
+    withAssignments([ta("a1", "s1A", "mat-s1", "ada")]);
+    render(<TeacherLoadScreen teacherId="ADA" onBack={vi.fn()} />);
+
+    expect(await screen.findByRole("heading", { name: "Carga académica de Ada Lovelace" })).toBeInTheDocument();
+    expect(await screen.findByText("1° Secundaria · A")).toBeInTheDocument();
+  });
+
   it("a read-only viewer sees the load but no write controls", async () => {
     withAssignments([ta("a1", "s1A", "mat-s1", "ada")]);
     await renderPage(vi.fn(), false);

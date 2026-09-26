@@ -18,6 +18,7 @@ import { useLoadWrites } from "./useLoadWrites";
 import { useTeacherLoadData } from "./useTeacherLoadData";
 
 export interface TeacherLoadScreenProps {
+  /** The teacher's id as the URL carries it, any case. */
   teacherId: string;
   onBack: () => void;
   /** May change the load (teachers:write). Without it the page only shows it. */
@@ -30,7 +31,10 @@ export interface TeacherLoadScreenProps {
  * (group + subject) has exactly one teacher, so taking one from a colleague is
  * always an explicit "Reemplazar".
  */
-export function TeacherLoadScreen({ teacherId, onBack, canWrite = true }: TeacherLoadScreenProps): ReactElement {
+export function TeacherLoadScreen({ teacherId: rawTeacherId, onBack, canWrite = true }: TeacherLoadScreenProps): ReactElement {
+  // Ids come back from the API in lower case; a hand-typed URL may not.
+  // Normalised once here, so every comparison below is plain ===.
+  const teacherId = rawTeacherId.toLowerCase();
   const data = useTeacherLoadData(teacherId);
   const { catalogue } = data;
   const writes = useLoadWrites({
