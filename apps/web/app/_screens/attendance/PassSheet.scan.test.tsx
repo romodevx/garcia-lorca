@@ -242,13 +242,15 @@ describe("PassSheet — finishing", () => {
 
   it("Esc finishes like Terminar", async () => {
     const user = userEvent.setup();
+    scan.mockResolvedValue(ok("en1", "Ada Lovelace"));
     renderSheet();
     await openScanner(user);
+    await read("GLCARD:ada");
 
     await user.keyboard("{Escape}");
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByText("Revisa la lista: 3 alumnos quedaron como ausentes.")).toBeInTheDocument();
+    expect(screen.getByText("Revisa la lista: 2 alumnos quedaron como ausentes.")).toBeInTheDocument();
   });
 });
 
@@ -295,11 +297,13 @@ describe("PassSheet — scan draft", () => {
 
   it("the review banner lists who is absent in the list itself", async () => {
     const user = userEvent.setup();
+    scan.mockResolvedValue(ok("en1", "Ada Lovelace"));
     renderSheet();
     await openScanner(user);
+    await read("GLCARD:ada");
     await user.click(screen.getByRole("button", { name: "Terminar" }));
 
     const list = screen.getByRole("list", { name: "Pase de lista" });
-    expect(within(list).getAllByRole("button", { name: /: Ausente$/ })).toHaveLength(3);
+    expect(within(list).getAllByRole("button", { name: /: Ausente$/ })).toHaveLength(2);
   });
 });

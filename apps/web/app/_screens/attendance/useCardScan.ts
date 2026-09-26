@@ -45,7 +45,7 @@ const reviewText = (absent: number): string =>
 /**
  * Taking attendance by scanning credentials. While the camera is open every
  * student not yet scanned is "Sin registrar"; a good card makes that row
- * present. "Terminar" turns the rest absent for the teacher to review before
+ * present. "Terminar" turns the rest absent (when at least one was scanned) for the teacher to review before
  * the ordinary "Guardar lista". Nothing reaches the server per scan: the scans
  * live in memory, mirrored to sessionStorage so a reload keeps them.
  */
@@ -147,11 +147,17 @@ export function useCardScan({ target, sheet, rows, resolve, setStatus }: Args): 
     setOpen(true);
   }, []);
 
+  /**
+   * With nothing scanned (a camera that never opened, a change of mind) the
+   * list is left as it was: turning the whole class absent would be one
+   * "Guardar lista" away from a notice to every family.
+   */
   const finish = useCallback((): void => {
     setOpen(false);
     setFlash(undefined);
     feedback.current?.dispose();
     feedback.current = undefined;
+    if (scannedRef.current.size === 0) return;
     setBanner(reviewText(markRestAbsent(scannedRef.current)));
   }, [markRestAbsent]);
 
