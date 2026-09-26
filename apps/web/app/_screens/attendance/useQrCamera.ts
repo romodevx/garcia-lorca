@@ -41,6 +41,43 @@ export function cameraErrorMessage(cause: unknown): string {
   return FAILED;
 }
 
+/** The camera permission, or undefined where the Permissions API cannot tell (older Safari, Firefox). */
+async function cameraPermission(): Promise<PermissionState | undefined> {
+  try {
+    const status = await navigator.permissions?.query({ name: "camera" as PermissionName });
+    return status?.state;
+  } catch {
+    return undefined;
+  }
+}
+
+async function cameraCount(): Promise<number> {
+  try {
+    const devices = (await navigator.mediaDevices?.enumerateDevices()) ?? [];
+    return devices.filter((d) => d.kind === "videoinput").length;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * qr-scanner swallows getUserMedia's own error and throws "Camera not found."
+ * for every failure, a denied permission included, so the cause is asked of
+ * the browser afterwards: a camera that exists but was not allowed is a
+ * permission problem, not a missing camera.
+ */
+async function explainLibraryFailure(): Promise<string> {
+  const permission = await cameraPermission();
+  if (permission === "denied") return DENIED;
+  if ((await cameraCount()) === 0) return NO_CAMERA;
+  return permission === "granted" ? FAILED : DENIED;
+}
+
+/** Why the camera did not open, in words the teacher can act on. */
+async function describeFailure(cause: unknown): Promise<string> {
+  return cause === LIBRARY_NO_CAMERA ? explainLibraryFailure() : cameraErrorMessage(cause);
+}
+
 function stopTracks(video: HTMLVideoElement | null): void {
   const stream = (video as unknown as { srcObject?: MediaStream | null } | null)?.srcObject;
   stream?.getTracks().forEach((t) => t.stop());
@@ -81,8 +118,10 @@ export function useQrCamera(video: HTMLVideoElement | null, onCode: (code: strin
         if (!cancelled) setStatus("live");
       } catch (cause) {
         if (cancelled) return;
+        const message = await describeFailure(cause);
+        if (cancelled) return;
         setStatus("error");
-        setError(cameraErrorMessage(cause));
+        setError(message);
       }
     })();
 
