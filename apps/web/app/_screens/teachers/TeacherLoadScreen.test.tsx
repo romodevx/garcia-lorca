@@ -501,6 +501,24 @@ describe("TeacherLoadScreen", () => {
     expect(screen.queryByRole("button", { name: "Deshacer" })).not.toBeInTheDocument();
   });
 
+  // Regression: a DELETE that resolved after a cycle switch armed Deshacer on
+  // the new cycle. Found by /code-review on 2026-09-25
+  it("a removal that resolves after a cycle switch arms no Deshacer on the new cycle", async () => {
+    config.listCycles.mockResolvedValue(twoCycles);
+    withAssignments([ta("a1", "s1A", "mat-s1", "ada")]);
+    let finish: () => void = () => undefined;
+    teachers.deleteTeachingAssignment.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const user = await renderPage();
+    await user.click(await screen.findByRole("button", { name: "Quitar Matemáticas de 1° Secundaria · A" }));
+
+    await user.selectOptions(screen.getByLabelText("Ciclo", CAMPO), "c0");
+    await screen.findByRole("region", { name: "Matemáticas" });
+    finish();
+
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByRole("button", { name: "Deshacer" })).not.toBeInTheDocument();
+  });
+
   it("a read-only viewer sees the load but no write controls", async () => {
     withAssignments([ta("a1", "s1A", "mat-s1", "ada")]);
     await renderPage(vi.fn(), false);

@@ -144,10 +144,14 @@ export function useLoadWrites({ teacherId, cycleId, catalogue, reload, drop }: L
       if (inFlight.current.has(slot.assignmentId)) return;
       markRemoving(slot.assignmentId, true);
       setError(undefined);
+      // Like send(): an answer for a cycle no longer on screen must not arm
+      // Deshacer or a banner on the one that is.
+      const sentFor = shownCycle.current;
+      const stillShown = (): boolean => sentFor === shownCycle.current;
       void deleteTeachingAssignment(API_URL, slot.assignmentId)
         .then(
-          () => freed(slot),
-          (cause: unknown) => removalFailed(slot, cause),
+          () => (stillShown() ? freed(slot) : undefined),
+          (cause: unknown) => (stillShown() ? removalFailed(slot, cause) : undefined),
         )
         .finally(() => markRemoving(slot.assignmentId, false));
     },
