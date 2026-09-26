@@ -226,18 +226,51 @@ export interface TeacherAccessResult {
   invitation: Invitation | null;
 }
 
+/** The marker a 409 carries when the user can resolve it by confirming. */
+const CONFIRM_REQUIRED_HEADER = "X-Confirm-Required";
+const CONFIRM_REUSE_ACCOUNT = "reuse-account";
+
+/**
+ * The teacher's address already has an account that signs somebody in as
+ * something else. Not a failure: `detail` is the server's question, to be
+ * shown with "Vincular y dar acceso" (resend with confirmReuse) or "Cancelar".
+ */
+export class ReuseConfirmationRequired extends ConfigError {
+  constructor(detail: string) {
+    super(409, detail);
+    this.name = "ReuseConfirmationRequired";
+  }
+}
+
+export interface GrantTeacherAccessOptions {
+  /** True once the user agreed to link the account that already exists. */
+  confirmReuse?: boolean;
+}
+
 /**
  * Gives a teacher a login with the teacher role and mails the invitation; for
  * an already invited teacher it sends the invitation again. Idempotent on the
- * server, so a second press never creates a second account.
+ * server, so a second press never creates a second account. An existing
+ * account that is not a maestro one is never linked silently: that answer is a
+ * ReuseConfirmationRequired, and the call is repeated with confirmReuse.
  */
-export async function grantTeacherAccess(baseURL: string, teacherId: string): Promise<TeacherAccessResult> {
+export async function grantTeacherAccess(
+  baseURL: string,
+  teacherId: string,
+  options: GrantTeacherAccessOptions = {},
+): Promise<TeacherAccessResult> {
+  const body = options.confirmReuse === true ? { confirmReuse: true } : undefined;
   const res = await authFetch(url(baseURL, `/teachers/${encodeURIComponent(teacherId)}/access`), {
     method: "POST",
     credentials: "include",
+    ...(body !== undefined ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}),
   });
   if (!res.ok) {
-    throw await failure(res);
+    const error = await failure(res);
+    if (res.status === 409 && res.headers.get(CONFIRM_REQUIRED_HEADER) === CONFIRM_REUSE_ACCOUNT) {
+      throw new ReuseConfirmationRequired(error.detail);
+    }
+    throw error;
   }
   return (await res.json()) as TeacherAccessResult;
 }

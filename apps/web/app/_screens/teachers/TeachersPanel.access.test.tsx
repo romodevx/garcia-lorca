@@ -3,7 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { ConfigError } from "../../config/api";
-import type { Teacher, TeacherAccessResult } from "../../teachers/api";
+import type { UserStatus } from "../../admin/api";
+import { ReuseConfirmationRequired, type Teacher, type TeacherAccessResult } from "../../teachers/api";
 import { TeachersPanel } from "./TeachersPanel";
 
 const ada: Teacher = { id: "t1", firstName: "Ada", lastName: "Lovelace", email: "ada@escuela.mx", userId: "" };
@@ -17,6 +18,8 @@ function outcome(over: Partial<TeacherAccessResult> = {}): TeacherAccessResult {
   };
 }
 
+const invitedAlan: ReadonlyMap<string, UserStatus> = new Map([["u2", "invited"]]);
+
 function rowOf(name: string): HTMLElement {
   const row = screen.getByText(name).closest("li");
   if (row === null) throw new Error(`no row for ${name}`);
@@ -24,11 +27,31 @@ function rowOf(name: string): HTMLElement {
 }
 
 describe("TeachersPanel — acceso al sistema", () => {
-  it("each row says whether the teacher can sign in", () => {
+  it("each row says whether the teacher can sign in; a login of unknown state is just Vinculado", () => {
     render(<TeachersPanel teachers={[ada, alan]} onCreate={vi.fn()} />);
 
     expect(within(rowOf("Ada Lovelace")).getByText("Sin acceso")).toBeInTheDocument();
-    expect(within(rowOf("Alan Turing")).getByText("Con acceso")).toBeInTheDocument();
+    expect(within(rowOf("Alan Turing")).getByText("Vinculado")).toBeInTheDocument();
+  });
+
+  it("an unknown state offers no resend: it might be an active login", () => {
+    render(<TeachersPanel teachers={[alan]} onCreate={vi.fn()} onGrantAccess={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: /Reenviar invitación/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Dar acceso al sistema/ })).toBeNull();
+  });
+
+  it.each<[UserStatus, string, boolean]>([
+    ["active", "Con acceso", false],
+    ["invited", "Invitación enviada", true],
+    ["suspended", "Acceso suspendido", false],
+    ["unknown", "Vinculado", false],
+  ])("with the account's status known (%s) the row says %s", (status, label, resend) => {
+    const statuses = new Map<string, UserStatus>([["u2", status]]);
+    render(<TeachersPanel teachers={[alan]} onCreate={vi.fn()} onGrantAccess={vi.fn()} accountStatuses={statuses} />);
+
+    expect(within(rowOf("Alan Turing")).getByText(label)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reenviar invitación a Alan Turing" }) !== null).toBe(resend);
   });
 
   it("without the permission there is no button at all", () => {
@@ -47,7 +70,7 @@ describe("TeachersPanel — acceso al sistema", () => {
 
     expect(onGrantAccess).toHaveBeenCalledWith("t1");
     expect(await screen.findByText("Enviamos la invitación a ada@escuela.mx")).toBeInTheDocument();
-    expect(within(rowOf("Ada Lovelace")).getByText("Con acceso")).toBeInTheDocument();
+    expect(within(rowOf("Ada Lovelace")).getByText("Invitación enviada")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reenviar invitación a Ada Lovelace" })).toBeInTheDocument();
   });
 
@@ -79,7 +102,7 @@ describe("TeachersPanel — acceso al sistema", () => {
   it("a suspended account is named as such and offers no button", async () => {
     const user = userEvent.setup();
     const onGrantAccess = vi.fn().mockResolvedValue(outcome({ teacher: alan, userId: "u2", email: alan.email, status: "suspended", invitation: null }));
-    render(<TeachersPanel teachers={[alan]} onCreate={vi.fn()} onGrantAccess={onGrantAccess} />);
+    render(<TeachersPanel teachers={[alan]} onCreate={vi.fn()} onGrantAccess={onGrantAccess} accountStatuses={invitedAlan} />);
 
     await user.click(screen.getByRole("button", { name: "Reenviar invitación a Alan Turing" }));
 
@@ -98,10 +121,10 @@ describe("TeachersPanel — acceso al sistema", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/ligada a otro docente/);
   });
 
-  it("a linked teacher is offered Reenviar invitación, and nothing once the account is active", async () => {
+  it("an invited teacher is offered Reenviar invitación, and nothing once the account is active", async () => {
     const user = userEvent.setup();
     const onGrantAccess = vi.fn().mockResolvedValue(outcome({ teacher: alan, userId: "u2", email: alan.email, status: "active", invitation: null }));
-    render(<TeachersPanel teachers={[alan]} onCreate={vi.fn()} onGrantAccess={onGrantAccess} />);
+    render(<TeachersPanel teachers={[alan]} onCreate={vi.fn()} onGrantAccess={onGrantAccess} accountStatuses={invitedAlan} />);
 
     await user.click(screen.getByRole("button", { name: "Reenviar invitación a Alan Turing" }));
 
@@ -165,5 +188,41 @@ describe("TeachersPanel — acceso al sistema", () => {
     expect(await within(rowOf("Ada Lovelace")).findByRole("button", { name: "Reenviar invitación a Ada Lovelace" })).toHaveTextContent("Reenviar invitación");
     // Ada's answer does not end Bea's wait.
     expect(within(rowOf("Bea Ruiz")).getByText("Enviando…")).toBeInTheDocument();
+  });
+
+  describe("an existing account under the address", () => {
+    const question = "Ya existe una cuenta con ese correo (owner). ¿Vincularla y darle acceso de maestro?";
+
+    it("asks on the row, in the server's words, before linking it", async () => {
+      const user = userEvent.setup();
+      const onGrantAccess = vi.fn().mockRejectedValueOnce(new ReuseConfirmationRequired(question)).mockResolvedValueOnce(outcome({ status: "active", invitation: null }));
+      render(<TeachersPanel teachers={[ada]} onCreate={vi.fn()} onGrantAccess={onGrantAccess} />);
+
+      await user.click(screen.getByRole("button", { name: "Dar acceso al sistema a Ada Lovelace" }));
+
+      const row = rowOf("Ada Lovelace");
+      expect(await within(row).findByText(question)).toBeInTheDocument();
+      expect(within(row).queryByRole("alert")).toBeNull();
+
+      await user.click(within(row).getByRole("button", { name: "Vincular y dar acceso" }));
+
+      expect(onGrantAccess).toHaveBeenLastCalledWith("t1", { confirmReuse: true });
+      expect(await screen.findByText(/Ada Lovelace ya entra al sistema/)).toBeInTheDocument();
+      expect(screen.queryByText(question)).toBeNull();
+      expect(within(rowOf("Ada Lovelace")).getByText("Con acceso")).toBeInTheDocument();
+    });
+
+    it("Cancelar drops the question and sends nothing", async () => {
+      const user = userEvent.setup();
+      const onGrantAccess = vi.fn().mockRejectedValue(new ReuseConfirmationRequired(question));
+      render(<TeachersPanel teachers={[ada]} onCreate={vi.fn()} onGrantAccess={onGrantAccess} />);
+
+      await user.click(screen.getByRole("button", { name: "Dar acceso al sistema a Ada Lovelace" }));
+      await user.click(await screen.findByRole("button", { name: "Cancelar" }));
+
+      expect(screen.queryByText(question)).toBeNull();
+      expect(onGrantAccess).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("button", { name: "Dar acceso al sistema a Ada Lovelace" })).toBeInTheDocument();
+    });
   });
 });

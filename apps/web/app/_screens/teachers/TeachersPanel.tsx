@@ -3,11 +3,12 @@
 import { useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { Toast } from "../../_design/Toast";
-import type { CreateTeacherInput, Teacher, TeacherAccessResult } from "../../teachers/api";
+import type { UserStatus } from "../../admin/api";
+import type { CreateTeacherInput, Teacher } from "../../teachers/api";
 import { EmailField, TextField, useEmailShapeOnSave, useRequired } from "../../_design/form";
 import { EmptyHint, ErrorAlert, Section } from "../config/parts";
 import { TeacherRow } from "./TeacherRow";
-import { useTeacherAccess } from "./useTeacherAccess";
+import { useTeacherAccess, type GrantAccessCall } from "./useTeacherAccess";
 
 const REQUIRED = ["firstName", "lastName", "email"] as const;
 
@@ -25,7 +26,13 @@ export interface TeachersPanelProps {
    * Gives the teacher a login (or sends its invitation again). Absent unless
    * the principal holds teachers:write AND users:write.
    */
-  onGrantAccess?: (teacherId: string) => Promise<TeacherAccessResult>;
+  onGrantAccess?: GrantAccessCall;
+  /**
+   * user id → account status, when the principal may list users (users:read).
+   * Without it a linked teacher's login is shown as "Vinculado" and offers
+   * nothing: its state is not known, so no claim is made about it.
+   */
+  accountStatuses?: ReadonlyMap<string, UserStatus>;
 }
 
 /**
@@ -33,8 +40,8 @@ export interface TeachersPanelProps {
  * acceso al sistema" on the row creates it and fills `userId`. Dumb panel —
  * data and the async writes come from the screen.
  */
-export function TeachersPanel({ teachers, onCreate, onOpenLoad, onGrantAccess }: TeachersPanelProps): ReactElement {
-  const access = useTeacherAccess(onGrantAccess);
+export function TeachersPanel({ teachers, onCreate, onOpenLoad, onGrantAccess, accountStatuses }: TeachersPanelProps): ReactElement {
+  const access = useTeacherAccess(onGrantAccess, accountStatuses);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
@@ -78,6 +85,9 @@ export function TeachersPanel({ teachers, onCreate, onOpenLoad, onGrantAccess }:
               granting={access.isGranting(t.id)}
               error={access.errorOf(t.id)}
               inviteUrl={access.inviteUrlOf(t.id)}
+              confirmation={access.confirmationOf(t.id)}
+              onConfirmReuse={() => void access.confirmReuse(t)}
+              onCancelReuse={() => access.cancelReuse(t.id)}
               onGrantAccess={onGrantAccess === undefined ? undefined : () => void access.grant(t)}
               onOpenLoad={onOpenLoad === undefined ? undefined : () => onOpenLoad(t.id)}
             />

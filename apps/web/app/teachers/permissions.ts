@@ -30,3 +30,13 @@ export function canGrantTeacherAccess(permissions: readonly string[] | undefined
   const required = [TEACHERS_WRITE, USERS_WRITE, ...MAESTRO_PERMISSIONS];
   return required.every((p) => permissions.includes(p));
 }
+
+const USERS_READ = "users:read";
+
+/**
+ * Whether Docentes may read the accounts (Usuarios) to say if each linked login
+ * is active, invited or suspended. Unknown permissions read nothing. UX only.
+ */
+export function canListUsers(permissions: readonly string[] | undefined): boolean {
+  return permissions !== undefined && permissions.includes(USERS_READ);
+}

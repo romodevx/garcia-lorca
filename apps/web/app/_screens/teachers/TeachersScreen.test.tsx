@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as adminApi from "../../admin/api";
 import * as configApi from "../../config/api";
 import * as teachersApi from "../../teachers/api";
 import { TeachersScreen } from "./TeachersScreen";
@@ -27,6 +28,10 @@ vi.mock("../../teachers/api", async (importOriginal) => ({
   createTeachingAssignment: vi.fn(),
   grantTeacherAccess: vi.fn(),
 }));
+vi.mock("../../admin/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof adminApi>()),
+  listUsers: vi.fn(),
+}));
 vi.mock("../../config/api", async (importOriginal) => ({
   ...(await importOriginal<typeof configApi>()),
   listCycles: vi.fn(),
@@ -36,6 +41,7 @@ vi.mock("../../config/api", async (importOriginal) => ({
 
 const teachers = vi.mocked(teachersApi);
 const config = vi.mocked(configApi);
+const admin = vi.mocked(adminApi);
 
 const ada = { id: "t1", firstName: "Ada", lastName: "Lovelace", email: "ada@escuela.mx", userId: "" };
 
@@ -133,7 +139,7 @@ describe("the Docentes module — acceso al sistema", () => {
 
     await user.click(await screen.findByRole("button", { name: "Dar acceso al sistema a Ada Lovelace" }));
 
-    await waitFor(() => expect(teachers.grantTeacherAccess).toHaveBeenCalledWith(expect.any(String), "t1"));
+    await waitFor(() => expect(teachers.grantTeacherAccess).toHaveBeenCalledWith(expect.any(String), "t1", undefined));
     const stat = screen.getByText("Con acceso al sistema").parentElement as HTMLElement;
     await waitFor(() => expect(stat).toHaveTextContent("1"));
   });
@@ -143,5 +149,37 @@ describe("the Docentes module — acceso al sistema", () => {
 
     await screen.findByRole("button", { name: "Carga académica de Ada Lovelace" });
     expect(screen.queryByRole("button", { name: /Dar acceso al sistema/ })).toBeNull();
+  });
+});
+
+describe("the Docentes module — what each login is", () => {
+  const alan = { id: "t2", firstName: "Alan", lastName: "Turing", email: "alan@escuela.mx", userId: "u2" };
+  const invitedUser = { id: "u2", email: alan.email, displayName: "Alan Turing", status: "invited" as const, mustChangePassword: false, roleIds: [] };
+
+  it("with users:read it reads the accounts once and names each login's state", async () => {
+    teachers.listTeachers.mockResolvedValue([ada, alan]);
+    admin.listUsers.mockResolvedValue([invitedUser]);
+    render(<TeachersScreen onBack={() => {}} onOpenLoad={vi.fn()} canGrantAccess canListUsers />);
+
+    expect(await screen.findByText("Invitación enviada")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reenviar invitación a Alan Turing" })).toBeInTheDocument();
+    expect(admin.listUsers).toHaveBeenCalledTimes(1);
+  });
+
+  it("without users:read it asks nothing and claims nothing: Vinculado, no resend", async () => {
+    teachers.listTeachers.mockResolvedValue([alan]);
+    render(<TeachersScreen onBack={() => {}} onOpenLoad={vi.fn()} canGrantAccess />);
+
+    expect(await screen.findByText("Vinculado")).toBeInTheDocument();
+    expect(admin.listUsers).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /Reenviar invitación/ })).toBeNull();
+  });
+
+  it("if the accounts cannot be read, the roster still shows, as Vinculado", async () => {
+    teachers.listTeachers.mockResolvedValue([alan]);
+    admin.listUsers.mockRejectedValue(new Error("admin /users: HTTP 404"));
+    render(<TeachersScreen onBack={() => {}} onOpenLoad={vi.fn()} canGrantAccess canListUsers />);
+
+    expect(await screen.findByText("Vinculado")).toBeInTheDocument();
   });
 });

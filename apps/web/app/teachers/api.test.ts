@@ -3,6 +3,7 @@ import { ConfigError } from "../config/api";
 import {
   assignTeachingLoad,
   grantTeacherAccess,
+  ReuseConfirmationRequired,
   createTeacher,
   deleteTeachingAssignment,
   reassignTeachingAssignment,
@@ -242,5 +243,35 @@ describe("teacher access", () => {
 
     await expect(call).rejects.toBeInstanceOf(ConfigError);
     await expect(call).rejects.toMatchObject({ status: 400, detail: "el docente no tiene correo" });
+  });
+
+  it("a 409 marked X-Confirm-Required: reuse-account is a question, not a failure", async () => {
+    const question = "Ya existe una cuenta con ese correo (owner). ¿Vincularla y darle acceso de maestro?";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(`${question}\n`, { status: 409, headers: { "X-Confirm-Required": "reuse-account" } })));
+
+    const call = grantTeacherAccess(BASE, "tch1");
+
+    await expect(call).rejects.toBeInstanceOf(ReuseConfirmationRequired);
+    await expect(call).rejects.toMatchObject({ status: 409, detail: question });
+  });
+
+  it("a plain 409 stays a plain ConfigError", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("La cuenta ya está vinculada a otro docente", { status: 409 })));
+
+    const call = grantTeacherAccess(BASE, "tch1");
+
+    await expect(call).rejects.toBeInstanceOf(ConfigError);
+    await expect(call).rejects.not.toBeInstanceOf(ReuseConfirmationRequired);
+  });
+
+  it("confirming resends with {confirmReuse: true} as JSON", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ teacher: linked, userId: "u1", email: "ada@example.com", status: "active", invitation: null }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await grantTeacherAccess(BASE, "tch1", { confirmReuse: true });
+
+    const [, init] = lastCall(fetchMock);
+    expect(JSON.parse(init.body as string)).toEqual({ confirmReuse: true });
+    expect(new Headers(init.headers).get("Content-Type")).toBe("application/json");
   });
 });

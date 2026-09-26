@@ -13,6 +13,10 @@ export interface TeacherRowProps {
   granting: boolean;
   error: string | undefined;
   inviteUrl: string | undefined;
+  /** The server's question when an existing account would be linked. */
+  confirmation?: string;
+  onConfirmReuse?: () => void;
+  onCancelReuse?: () => void;
   /** Absent when this principal may not give access (teachers:write + users:write). */
   onGrantAccess?: () => void;
   onOpenLoad?: () => void;
@@ -21,12 +25,10 @@ export interface TeacherRowProps {
 const ROW_BUTTON = { minHeight: 44, padding: "0 14px", borderRadius: "var(--r-pill)", border: "1.5px solid var(--forest)", color: "var(--forest)", fontWeight: 600, fontSize: 13.5, cursor: "pointer" } as const;
 
 /** One roster row: who, whether they can sign in, and what can be done about it. */
-export function TeacherRow({ teacher, access, granting, error, inviteUrl, onGrantAccess, onOpenLoad }: TeacherRowProps): ReactElement {
+export function TeacherRow({ teacher, access, granting, error, inviteUrl, confirmation, onConfirmReuse, onCancelReuse, onGrantAccess, onOpenLoad }: TeacherRowProps): ReactElement {
   const name = `${teacher.firstName} ${teacher.lastName}`;
-  // An active login needs nothing; any other linked login may need its invitation again.
-  const action = access === "none" ? "Dar acceso al sistema" : "Reenviar invitación";
-  // Suspension is lifted in Usuarios, not by resending a link.
-  const offerAccess = onGrantAccess !== undefined && access !== "active" && access !== "suspended";
+  const action = ACTION[access];
+  const offerAccess = onGrantAccess !== undefined && action !== undefined && confirmation === undefined;
 
   return (
     <li style={{ display: "grid", gap: 8, padding: "6px 6px 6px 12px", borderRadius: "var(--r-md)", background: "var(--surface-2)", fontSize: 14 }}>
@@ -49,6 +51,19 @@ export function TeacherRow({ teacher, access, granting, error, inviteUrl, onGran
           )}
         </span>
       </div>
+      {confirmation !== undefined && (
+        <div role="group" aria-label={`Confirmar acceso de ${name}`} style={{ display: "grid", gap: 8, padding: "10px 12px", borderRadius: "var(--r-md)", background: "var(--surface)", border: "1.5px solid var(--border)" }}>
+          <p style={{ margin: 0, fontSize: 13.5, color: "var(--text)" }}>{confirmation}</p>
+          <span style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <button type="button" onClick={onConfirmReuse} aria-busy={granting} style={{ ...ROW_BUTTON, background: "var(--forest)", color: "#fff", opacity: granting ? 0.6 : 1 }}>
+              {granting ? "Enviando…" : "Vincular y dar acceso"}
+            </button>
+            <button type="button" onClick={onCancelReuse} style={{ minHeight: 44, padding: "0 10px", color: "var(--text-muted)", fontWeight: 600, fontSize: 13.5, cursor: "pointer" }}>
+              Cancelar
+            </button>
+          </span>
+        </div>
+      )}
       {error !== undefined && (
         <p role="alert" style={{ margin: 0, color: "var(--bad-fg)", fontSize: 13.5 }}>{error}</p>
       )}
@@ -62,10 +77,23 @@ export function TeacherRow({ teacher, access, granting, error, inviteUrl, onGran
   );
 }
 
+/**
+ * What the row offers per state. Only two states have something to do: no
+ * login yet, or an invitation still waiting. An active login needs nothing, a
+ * suspension is lifted in Usuarios, and an unknown state is never guessed at.
+ */
+const ACTION: Record<TeacherAccessState, string | undefined> = {
+  none: "Dar acceso al sistema",
+  invited: "Reenviar invitación",
+  linked: undefined,
+  active: undefined,
+  suspended: undefined,
+};
+
 const PILL: Record<TeacherAccessState, { label: string; bg: string; fg: string; check: boolean }> = {
   none: { label: "Sin acceso", bg: "var(--surface-3)", fg: "var(--text-muted)", check: false },
-  linked: { label: "Con acceso", bg: "var(--ok-bg)", fg: "var(--ok-fg)", check: true },
-  invited: { label: "Con acceso", bg: "var(--ok-bg)", fg: "var(--ok-fg)", check: true },
+  linked: { label: "Vinculado", bg: "var(--surface-3)", fg: "var(--text)", check: false },
+  invited: { label: "Invitación enviada", bg: "var(--warn-bg)", fg: "var(--warn-fg)", check: false },
   active: { label: "Con acceso", bg: "var(--ok-bg)", fg: "var(--ok-fg)", check: true },
   suspended: { label: "Acceso suspendido", bg: "var(--bad-bg)", fg: "var(--bad-fg)", check: false },
 };

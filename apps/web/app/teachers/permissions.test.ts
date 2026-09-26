@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { canEditTeachingLoad, canGrantTeacherAccess } from "./permissions";
+import { canEditTeachingLoad, canGrantTeacherAccess, canListUsers } from "./permissions";
 
 describe("canEditTeachingLoad", () => {
   it("needs teachers:write", () => {
@@ -31,5 +31,13 @@ describe("canGrantTeacherAccess", () => {
 
   it("offers nothing while the permissions are still unknown: it creates logins", () => {
     expect(canGrantTeacherAccess(undefined)).toBe(false);
+  });
+});
+
+describe("canListUsers", () => {
+  it("needs users:read, and waits for the answer: it reads every account", () => {
+    expect(canListUsers(["users:read"])).toBe(true);
+    expect(canListUsers(["users:write"])).toBe(false);
+    expect(canListUsers(undefined)).toBe(false);
   });
 });
