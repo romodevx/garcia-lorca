@@ -22,9 +22,19 @@
 // contract clean instead of carrying reserved gaps from a placeholder. Once this
 // module ships behind an enabled flag, field numbers here are frozen and any
 // further break requires a version bump plus an ADR (api-standards).
+//
+// T3 (per-class lists + sessions), ADDITIVE only: every list is now keyed by
+// (group, date, subject_id). An empty subject_id is the DAILY list (one per group
+// per day, the Phase 8 shape — existing rows keep a NULL subject); a subject_id is
+// a PER_CLASS list. Which of the two a group uses is its level's attendance mode,
+// enforced at the gateway; this service stores whichever key it is given. A saved
+// list also records a SESSION (who took it, when), so a day where everybody was
+// present is distinguishable from a day nobody took.
 syntax = "proto3";
 
 package garcialorca.attendance.v1;
+
+import "google/protobuf/timestamp.proto";
 
 // AttendanceService is the attendance API surface.
 service AttendanceService {
@@ -32,16 +42,17 @@ service AttendanceService {
   rpc Health(HealthRequest) returns (HealthResponse);
 
   // GetDailyRoster returns one row per active enrollment in the group for the
-  // given date, each carrying the effective status for that day. Rows with no
+  // given list (date + optional subject), each carrying the effective status and
+  // note, plus the list's session when it has been taken. Rows with no
   // stored mark come back as "present" (default-present model). Student names
   // are NOT returned — attendance stays free of student PII; the web resolves
   // names from the students list.
   rpc GetDailyRoster(GetDailyRosterRequest) returns (GetDailyRosterResponse);
 
-  // SaveDailyAttendance reconciles a whole group·day in one call. `marks` carry
+  // SaveDailyAttendance reconciles a whole list in one call. `marks` carry
   // ONLY the non-present exceptions; every enrollment in the group that is
   // absent from `marks` is reset to present (its stored mark, if any, is
-  // dropped). Saving the same day again is idempotent.
+  // dropped). Saving the same list again is idempotent and publishes nothing.
   rpc SaveDailyAttendance(SaveDailyAttendanceRequest) returns (SaveDailyAttendanceResponse);
 
   // ListAttendance lists a single enrollment's stored attendance records within
@@ -71,6 +82,17 @@ message AttendanceRecord {
   string date = 3;
   string status = 4;
   string note = 5;
+  // subject_id is the per-class subject the mark belongs to; empty for a daily
+  // list's mark.
+  string subject_id = 6;
+}
+
+// AttendanceSession records that a list was taken: taken_at/taken_by_name are the
+// FIRST save of the list, updated_at the latest correction.
+message AttendanceSession {
+  google.protobuf.Timestamp taken_at = 1;
+  string taken_by_name = 2;
+  google.protobuf.Timestamp updated_at = 3;
 }
 
 // RosterRow is one student's slot in a day's pass list: the enrollment, the
@@ -80,6 +102,8 @@ message RosterRow {
   string enrollment_id = 1;
   string student_id = 2;
   string status = 3;
+  // note is the stored mark's justification; empty for a present row.
+  string note = 4;
 }
 
 // Mark is one exception submitted for a group·day. `status` is normally one of
@@ -96,22 +120,36 @@ message Mark {
 // --- RPC messages ---------------------------------------------------------
 
 // GetDailyRosterRequest asks for a group's pass list on one date
-// (ISO "YYYY-MM-DD").
+// (ISO "YYYY-MM-DD"). subject_id selects a per-class list; empty is the daily
+// list.
 message GetDailyRosterRequest {
   string group_id = 1;
   string date = 2;
+  string subject_id = 3;
 }
 
+// GetDailyRosterResponse carries the rows and, when the list has been taken, its
+// session (unset for a list nobody has saved yet).
 message GetDailyRosterResponse {
   repeated RosterRow rows = 1;
+  AttendanceSession session = 2;
 }
 
 // SaveDailyAttendanceRequest reconciles one group·day. `marks` is the COMPLETE
 // set of exceptions for that day; anything not listed is present.
+//
+// subject_id selects a per-class list (empty = daily). taken_by (user UUID) and
+// taken_by_name (display name) are REQUIRED: they are stamped on the session.
+// A correction updates the stored rows in place and publishes events only for
+// what changed (a new exception, a changed status, or an exception cleared back
+// to present — announced as AttendanceMarked with status "present").
 message SaveDailyAttendanceRequest {
   string group_id = 1;
   string date = 2;
   repeated Mark marks = 3;
+  string subject_id = 4;
+  string taken_by = 5;
+  string taken_by_name = 6;
 }
 
 // SaveDailyAttendanceResponse reports the state after reconciling:
@@ -136,8 +174,10 @@ message ListAttendanceResponse {
 
 // --- Domain events (published) --------------------------------------------
 
-// AttendanceMarked fires when an attendance exception is stored for a student
-// on a date. `status` is one of absent|late|excused.
+// AttendanceMarked fires when a student's mark CHANGES on a list: a new
+// exception, a changed status, or (status "present") a stored exception cleared
+// by a correction. Re-saving an unchanged list publishes nothing. `subject_id`
+// is empty for a daily list.
 message AttendanceMarked {
   string record_id = 1;
   string enrollment_id = 2;
@@ -145,6 +185,7 @@ message AttendanceMarked {
   string tenant_id = 4;
   string date = 5;
   string status = 6;
+  string subject_id = 7;
 }
 
 // AbsenceRecorded fires when a student is recorded absent on a date (feeds
@@ -155,4 +196,5 @@ message AbsenceRecorded {
   string student_id = 3;
   string tenant_id = 4;
   string date = 5;
+  string subject_id = 6;
 }

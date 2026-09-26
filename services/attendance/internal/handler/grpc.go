@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	connect "connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	attendancev1 "github.com/garcia-lorca/gen/go/garcialorca/attendance/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/attendance/v1/attendancev1connect"
@@ -42,27 +43,45 @@ func (h *AttendanceHandler) Health(_ context.Context, _ *connect.Request[attenda
 	return connect.NewResponse(&attendancev1.HealthResponse{Status: statusServing}), nil
 }
 
-// GetDailyRoster returns the group's pass list for one day. Rows with no stored
-// mark come back "present" (the default-present model).
+// GetDailyRoster returns one list (the group's daily list, or a subject's
+// per-class list) for one day, with its session when it has been taken. Rows
+// with no stored mark come back "present" (the default-present model).
 func (h *AttendanceHandler) GetDailyRoster(ctx context.Context, req *connect.Request[attendancev1.GetDailyRosterRequest]) (*connect.Response[attendancev1.GetDailyRosterResponse], error) {
 	m := req.Msg
-	rows, err := h.svc.GetDailyRoster(ctx, m.GetGroupId(), m.GetDate())
+	roster, err := h.svc.GetDailyRoster(ctx, m.GetGroupId(), m.GetDate(), m.GetSubjectId())
 	if err != nil {
 		return nil, connectErr(err)
 	}
-	out := make([]*attendancev1.RosterRow, 0, len(rows))
-	for _, r := range rows {
+	out := make([]*attendancev1.RosterRow, 0, len(roster.Rows))
+	for _, r := range roster.Rows {
 		out = append(out, &attendancev1.RosterRow{
 			EnrollmentId: r.EnrollmentID,
 			StudentId:    r.StudentID,
 			Status:       r.Status,
+			Note:         r.Note,
 		})
 	}
-	return connect.NewResponse(&attendancev1.GetDailyRosterResponse{Rows: out}), nil
+	return connect.NewResponse(&attendancev1.GetDailyRosterResponse{
+		Rows:    out,
+		Session: toProtoSession(roster.Session),
+	}), nil
 }
 
-// SaveDailyAttendance reconciles a whole group·day from the complete set of
-// exceptions the client submits.
+// toProtoSession maps a list's session to the wire; nil (an untaken list) stays
+// unset.
+func toProtoSession(s *service.Session) *attendancev1.AttendanceSession {
+	if s == nil {
+		return nil
+	}
+	return &attendancev1.AttendanceSession{
+		TakenAt:     timestamppb.New(s.TakenAt),
+		TakenByName: s.TakenByName,
+		UpdatedAt:   timestamppb.New(s.UpdatedAt),
+	}
+}
+
+// SaveDailyAttendance reconciles one list from the complete set of exceptions
+// the client submits, stamping the session with the given taker.
 func (h *AttendanceHandler) SaveDailyAttendance(ctx context.Context, req *connect.Request[attendancev1.SaveDailyAttendanceRequest]) (*connect.Response[attendancev1.SaveDailyAttendanceResponse], error) {
 	m := req.Msg
 	marks := make([]service.Mark, 0, len(m.GetMarks()))
@@ -73,7 +92,14 @@ func (h *AttendanceHandler) SaveDailyAttendance(ctx context.Context, req *connec
 			Note:         mark.GetNote(),
 		})
 	}
-	absentCount, markedCount, err := h.svc.SaveDailyAttendance(ctx, m.GetGroupId(), m.GetDate(), marks)
+	absentCount, markedCount, err := h.svc.SaveDailyAttendance(ctx, service.SaveRequest{
+		GroupID:     m.GetGroupId(),
+		Date:        m.GetDate(),
+		SubjectID:   m.GetSubjectId(),
+		Marks:       marks,
+		TakenBy:     m.GetTakenBy(),
+		TakenByName: m.GetTakenByName(),
+	})
 	if err != nil {
 		return nil, connectErr(err)
 	}
@@ -99,6 +125,7 @@ func (h *AttendanceHandler) ListAttendance(ctx context.Context, req *connect.Req
 			Date:         rec.Date.Format(dateLayout),
 			Status:       rec.Status,
 			Note:         rec.Note,
+			SubjectId:    rec.SubjectID,
 		})
 	}
 	return connect.NewResponse(&attendancev1.ListAttendanceResponse{Records: out}), nil

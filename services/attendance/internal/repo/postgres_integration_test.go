@@ -44,6 +44,7 @@ const (
 // non-owner role gets privileges on every table.
 var migrationFiles = []string{
 	"../../../../migrations/attendance/0001_init.sql",
+	"../../../../migrations/attendance/0002_per_class_and_sessions.sql",
 }
 
 var (
@@ -154,6 +155,26 @@ func day(t *testing.T, value string) time.Time {
 	return d
 }
 
+// testGroup is the group every daily-list fixture belongs to; testTaker saves.
+const testGroup = "90000000-0000-0000-0000-000000000001"
+
+var testTaker = service.Taker{UserID: "80000000-0000-0000-0000-000000000001", Name: "Gabriela Rojas"}
+
+// reconcile saves records as the COMPLETE exception set of testGroup's daily list
+// on date, through the service's real diff.
+func reconcile(r *repo.Repo, ctx context.Context, scope []string, date time.Time, records []service.AttendanceRecord) error {
+	_, err := r.ReconcileList(ctx, service.ListKey{GroupID: testGroup, Date: date}, scope, testTaker,
+		func(current map[string]service.AttendanceRecord) (service.ListChanges, error) {
+			return service.DiffList(current, records), nil
+		})
+	return err
+}
+
+// marksFor reads testGroup's daily list on date.
+func marksFor(r *repo.Repo, ctx context.Context, scope []string, date time.Time) (map[string]service.AttendanceRecord, error) {
+	return r.MarksForList(ctx, scope, service.ListKey{GroupID: testGroup, Date: date})
+}
+
 func mark(id, enrollmentID string, date time.Time, status, note string) service.AttendanceRecord {
 	return service.AttendanceRecord{ID: id, EnrollmentID: enrollmentID, Date: date, Status: status, Note: note}
 }
@@ -193,13 +214,13 @@ func TestReconcileDayReplacesMarks(t *testing.T) {
 	date := day(t, "2026-08-05")
 	scope := []string{enrollmentReconcileOne, enrollmentReconcileTwo}
 
-	if err := r.ReconcileDay(ctx, scope, date, []service.AttendanceRecord{
+	if err := reconcile(r, ctx, scope, date, []service.AttendanceRecord{
 		mark("aaaaaaaa-0000-0000-0000-000000000001", enrollmentReconcileOne, date, "absent", ""),
 		mark("aaaaaaaa-0000-0000-0000-000000000002", enrollmentReconcileTwo, date, "absent", "sin justificar"),
 	}); err != nil {
 		t.Fatalf("first reconcile: %v", err)
 	}
-	marks, err := r.MarksForDate(ctx, scope, date)
+	marks, err := marksFor(r, ctx, scope, date)
 	if err != nil {
 		t.Fatalf("MarksForDate after first reconcile: %v", err)
 	}
@@ -211,12 +232,12 @@ func TestReconcileDayReplacesMarks(t *testing.T) {
 	}
 
 	// Replace the day: only the second enrollment is an exception now, as "late".
-	if err := r.ReconcileDay(ctx, scope, date, []service.AttendanceRecord{
+	if err := reconcile(r, ctx, scope, date, []service.AttendanceRecord{
 		mark("aaaaaaaa-0000-0000-0000-000000000003", enrollmentReconcileTwo, date, "late", "llegó 8:15"),
 	}); err != nil {
 		t.Fatalf("second reconcile: %v", err)
 	}
-	marks, err = r.MarksForDate(ctx, scope, date)
+	marks, err = marksFor(r, ctx, scope, date)
 	if err != nil {
 		t.Fatalf("MarksForDate after replace: %v", err)
 	}
@@ -224,18 +245,18 @@ func TestReconcileDayReplacesMarks(t *testing.T) {
 		t.Error("the enrollment dropped from the exception set still has a mark (not present again)")
 	}
 	got, ok := marks[enrollmentReconcileTwo]
-	if !ok || got.Status != "late" || got.ID != "aaaaaaaa-0000-0000-0000-000000000003" {
-		t.Errorf("replaced mark = %+v (ok=%v), want the new late row", got, ok)
+	if !ok || got.Status != "late" || got.ID != "aaaaaaaa-0000-0000-0000-000000000002" {
+		t.Errorf("corrected mark = %+v (ok=%v), want late under the STORED id (updated in place)", got, ok)
 	}
 	if n := countMarks(t, tenantA, enrollmentReconcileOne); n != 0 {
 		t.Errorf("rows for the cleared enrollment = %d, want 0", n)
 	}
 
 	// An empty exception set is an all-present day: it wipes the remaining mark.
-	if err := r.ReconcileDay(ctx, scope, date, nil); err != nil {
+	if err := reconcile(r, ctx, scope, date, nil); err != nil {
 		t.Fatalf("clearing reconcile: %v", err)
 	}
-	marks, err = r.MarksForDate(ctx, scope, date)
+	marks, err = marksFor(r, ctx, scope, date)
 	if err != nil {
 		t.Fatalf("MarksForDate after clear: %v", err)
 	}
@@ -253,18 +274,18 @@ func TestReconcileDayLeavesOtherDaysAlone(t *testing.T) {
 	tuesday := day(t, "2026-09-08")
 	scope := []string{enrollmentRange}
 
-	if err := r.ReconcileDay(ctx, scope, monday, []service.AttendanceRecord{
+	if err := reconcile(r, ctx, scope, monday, []service.AttendanceRecord{
 		mark("aaaaaaaa-0000-0000-0000-000000000010", enrollmentRange, monday, "absent", ""),
 	}); err != nil {
 		t.Fatalf("seed monday: %v", err)
 	}
-	if err := r.ReconcileDay(ctx, scope, tuesday, []service.AttendanceRecord{
+	if err := reconcile(r, ctx, scope, tuesday, []service.AttendanceRecord{
 		mark("aaaaaaaa-0000-0000-0000-000000000011", enrollmentRange, tuesday, "late", ""),
 	}); err != nil {
 		t.Fatalf("seed tuesday: %v", err)
 	}
 
-	mondayMarks, err := r.MarksForDate(ctx, scope, monday)
+	mondayMarks, err := marksFor(r, ctx, scope, monday)
 	if err != nil {
 		t.Fatalf("MarksForDate monday: %v", err)
 	}
@@ -307,7 +328,7 @@ func TestReconcileDayUpsertsOverAPreExistingRow(t *testing.T) {
 	ctx := context.Background()
 	date := day(t, "2026-08-10")
 
-	if err := r.ReconcileDay(ctx, []string{enrollmentUpsert}, date, []service.AttendanceRecord{
+	if err := reconcile(r, ctx, []string{enrollmentUpsert}, date, []service.AttendanceRecord{
 		mark("aaaaaaaa-0000-0000-0000-000000000030", enrollmentUpsert, date, "absent", "first"),
 	}); err != nil {
 		t.Fatalf("seed reconcile: %v", err)
@@ -316,13 +337,13 @@ func TestReconcileDayUpsertsOverAPreExistingRow(t *testing.T) {
 
 	// An empty scope skips the DELETE, so the insert collides head-on with the row
 	// already stored for that enrollment·day.
-	if err := r.ReconcileDay(ctx, nil, date, []service.AttendanceRecord{
+	if err := reconcile(r, ctx, nil, date, []service.AttendanceRecord{
 		mark("aaaaaaaa-0000-0000-0000-000000000031", enrollmentUpsert, date, "late", "second"),
 	}); err != nil {
 		t.Fatalf("a colliding reconcile must upsert, not fail: %v", err)
 	}
 
-	marks, err := r.MarksForDate(ctx, []string{enrollmentUpsert}, date)
+	marks, err := marksFor(r, ctx, []string{enrollmentUpsert}, date)
 	if err != nil {
 		t.Fatalf("MarksForDate: %v", err)
 	}
@@ -354,7 +375,7 @@ func TestReconcileDayConcurrentSaveLastWriteWins(t *testing.T) {
 	statuses := []string{"absent", "late"}
 	for i, status := range statuses {
 		go func(i int, status string) {
-			errs <- appRepo(t, tenantA).ReconcileDay(ctx, scope, date, []service.AttendanceRecord{
+			errs <- reconcile(appRepo(t, tenantA), ctx, scope, date, []service.AttendanceRecord{
 				mark(fmt.Sprintf("aaaaaaaa-0000-0000-0000-00000000004%d", i), enrollmentRace, date, status, status),
 			})
 		}(i, status)
@@ -368,7 +389,7 @@ func TestReconcileDayConcurrentSaveLastWriteWins(t *testing.T) {
 	if n := countMarks(t, tenantA, enrollmentRace); n != 1 {
 		t.Fatalf("rows after two concurrent saves = %d, want exactly 1", n)
 	}
-	marks, err := appRepo(t, tenantA).MarksForDate(ctx, scope, date)
+	marks, err := marksFor(appRepo(t, tenantA), ctx, scope, date)
 	if err != nil {
 		t.Fatalf("MarksForDate: %v", err)
 	}
@@ -410,14 +431,14 @@ func TestMarksForDateBatched(t *testing.T) {
 	date := day(t, "2026-08-06")
 	scope := []string{enrollmentBatchOne, enrollmentBatchTwo, enrollmentBatchClean}
 
-	if err := r.ReconcileDay(ctx, scope, date, []service.AttendanceRecord{
+	if err := reconcile(r, ctx, scope, date, []service.AttendanceRecord{
 		mark("aaaaaaaa-0000-0000-0000-000000000020", enrollmentBatchOne, date, "absent", ""),
 		mark("aaaaaaaa-0000-0000-0000-000000000021", enrollmentBatchTwo, date, "excused", "cita médica"),
 	}); err != nil {
 		t.Fatalf("seed day: %v", err)
 	}
 
-	marks, err := r.MarksForDate(ctx, scope, date)
+	marks, err := marksFor(r, ctx, scope, date)
 	if err != nil {
 		t.Fatalf("MarksForDate: %v", err)
 	}
@@ -437,7 +458,7 @@ func TestMarksForDateBatched(t *testing.T) {
 		t.Errorf("round-tripped date = %v, want %v", marks[enrollmentBatchOne].Date, date)
 	}
 
-	empty, err := r.MarksForDate(ctx, nil, date)
+	empty, err := marksFor(r, ctx, nil, date)
 	if err != nil {
 		t.Fatalf("MarksForDate(nil): %v", err)
 	}
@@ -463,7 +484,7 @@ func TestListByEnrollmentIsNewestFirstAndBounded(t *testing.T) {
 		date := start.AddDate(0, 0, i)
 		dates = append(dates, date)
 		id := fmt.Sprintf("aaaaaaaa-0000-0000-0000-0000000004%02d", i)
-		if err := r.ReconcileDay(ctx, []string{enrollmentOrder}, date, []service.AttendanceRecord{
+		if err := reconcile(r, ctx, []string{enrollmentOrder}, date, []service.AttendanceRecord{
 			mark(id, enrollmentOrder, date, "absent", ""),
 		}); err != nil {
 			t.Fatalf("seed %s: %v", date.Format(dateLayout), err)
@@ -494,19 +515,19 @@ func TestRLSIsolatesAttendance(t *testing.T) {
 	date := day(t, "2026-08-07")
 	scope := []string{enrollmentRLS}
 
-	if err := appRepo(t, tenantB).ReconcileDay(ctx, scope, date, []service.AttendanceRecord{
+	if err := reconcile(appRepo(t, tenantB), ctx, scope, date, []service.AttendanceRecord{
 		mark("bbbbbbbb-0000-0000-0000-000000000001", enrollmentRLS, date, "absent", "B's absence"),
 	}); err != nil {
 		t.Fatalf("seed B: %v", err)
 	}
 
 	// Read isolation: tenant A cannot see tenant B's mark; tenant B can.
-	if gotA, err := appRepo(t, tenantA).MarksForDate(ctx, scope, date); err != nil {
+	if gotA, err := marksFor(appRepo(t, tenantA), ctx, scope, date); err != nil {
 		t.Errorf("tenant A MarksForDate: %v", err)
 	} else if _, ok := gotA[enrollmentRLS]; ok {
 		t.Error("tenant A saw tenant B's mark (RLS read breach)")
 	}
-	if gotB, err := appRepo(t, tenantB).MarksForDate(ctx, scope, date); err != nil {
+	if gotB, err := marksFor(appRepo(t, tenantB), ctx, scope, date); err != nil {
 		t.Errorf("tenant B MarksForDate: %v", err)
 	} else if _, ok := gotB[enrollmentRLS]; !ok {
 		t.Error("tenant B should see its own mark")
@@ -515,12 +536,12 @@ func TestRLSIsolatesAttendance(t *testing.T) {
 	// Write isolation: tenant A reconciling the SAME enrollment·day cannot delete
 	// or overwrite tenant B's row — its DELETE is bounded by RLS, so it inserts
 	// only its own row and B's absence survives untouched.
-	if err := appRepo(t, tenantA).ReconcileDay(ctx, scope, date, []service.AttendanceRecord{
+	if err := reconcile(appRepo(t, tenantA), ctx, scope, date, []service.AttendanceRecord{
 		mark("aaaaaaaa-0000-0000-0000-0000000000a1", enrollmentRLS, date, "late", "A's own mark"),
 	}); err != nil {
 		t.Fatalf("tenant A reconcile: %v", err)
 	}
-	afterB, err := appRepo(t, tenantB).MarksForDate(ctx, scope, date)
+	afterB, err := marksFor(appRepo(t, tenantB), ctx, scope, date)
 	if err != nil {
 		t.Fatalf("re-read B: %v", err)
 	}
@@ -529,7 +550,7 @@ func TestRLSIsolatesAttendance(t *testing.T) {
 		t.Errorf("tenant A's reconcile leaked into tenant B: %+v (ok=%v), want B's absent row intact", gotB, ok)
 	}
 	// A clearing save by tenant A likewise cannot wipe tenant B's day.
-	if err := appRepo(t, tenantA).ReconcileDay(ctx, scope, date, nil); err != nil {
+	if err := reconcile(appRepo(t, tenantA), ctx, scope, date, nil); err != nil {
 		t.Fatalf("tenant A clearing reconcile: %v", err)
 	}
 	if n := countMarks(t, tenantB, enrollmentRLS); n != 1 {

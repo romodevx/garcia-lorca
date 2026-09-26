@@ -16,37 +16,63 @@ import (
 
 // --- fakes (service-level seams) ---------------------------------------------
 
-// fakeRepo is an in-memory store with the real reconcile semantics, so the
-// handler tests exercise the same default-present behaviour the service defines.
+// fakeRepo is an in-memory store with the real reconcile semantics (the
+// service's own DiffList applied to a map), so the handler tests exercise the
+// same default-present behaviour the service defines.
 type fakeRepo struct {
-	rows map[string]service.AttendanceRecord // enrollmentID|date → record
-	list []service.AttendanceRecord
+	rows     map[string]service.AttendanceRecord // enrollmentID|date|subject → record
+	sessions map[string]service.Session
+	list     []service.AttendanceRecord
+	taker    service.Taker
 }
 
-func newFakeRepo() *fakeRepo { return &fakeRepo{rows: map[string]service.AttendanceRecord{}} }
-
-func dayKey(enrollmentID string, date time.Time) string {
-	return enrollmentID + "|" + date.Format("2006-01-02")
+func newFakeRepo() *fakeRepo {
+	return &fakeRepo{rows: map[string]service.AttendanceRecord{}, sessions: map[string]service.Session{}}
 }
 
-func (f *fakeRepo) MarksForDate(_ context.Context, enrollmentIDs []string, date time.Time) (map[string]service.AttendanceRecord, error) {
+func markKey(enrollmentID string, key service.ListKey) string {
+	return enrollmentID + "|" + key.Date.Format("2006-01-02") + "|" + key.SubjectID
+}
+
+func listKey(key service.ListKey) string {
+	return key.GroupID + "|" + key.Date.Format("2006-01-02") + "|" + key.SubjectID
+}
+
+func (f *fakeRepo) MarksForList(_ context.Context, enrollmentIDs []string, key service.ListKey) (map[string]service.AttendanceRecord, error) {
 	out := make(map[string]service.AttendanceRecord, len(enrollmentIDs))
 	for _, id := range enrollmentIDs {
-		if rec, ok := f.rows[dayKey(id, date)]; ok {
+		if rec, ok := f.rows[markKey(id, key)]; ok {
 			out[id] = rec
 		}
 	}
 	return out, nil
 }
 
-func (f *fakeRepo) ReconcileDay(_ context.Context, enrollmentIDs []string, date time.Time, records []service.AttendanceRecord) error {
-	for _, id := range enrollmentIDs {
-		delete(f.rows, dayKey(id, date))
+func (f *fakeRepo) SessionFor(_ context.Context, key service.ListKey) (service.Session, bool, error) {
+	s, ok := f.sessions[listKey(key)]
+	return s, ok, nil
+}
+
+func (f *fakeRepo) ReconcileList(ctx context.Context, key service.ListKey, enrollmentIDs []string, taker service.Taker, plan service.PlanFunc) (service.ListChanges, error) {
+	current, _ := f.MarksForList(ctx, enrollmentIDs, key)
+	changes, err := plan(current)
+	if err != nil {
+		return service.ListChanges{}, err
 	}
-	for _, rec := range records {
-		f.rows[dayKey(rec.EnrollmentID, rec.Date)] = rec
+	for _, rec := range changes.Deletes {
+		delete(f.rows, markKey(rec.EnrollmentID, key))
 	}
-	return nil
+	for _, rec := range changes.Inserts {
+		f.rows[markKey(rec.EnrollmentID, key)] = rec
+	}
+	for _, u := range changes.Updates {
+		f.rows[markKey(u.Record.EnrollmentID, key)] = u.Record
+	}
+	f.taker = taker
+	if _, ok := f.sessions[listKey(key)]; !ok {
+		f.sessions[listKey(key)] = service.Session{TakenAt: takenAt, TakenByName: taker.Name, UpdatedAt: takenAt}
+	}
+	return changes, nil
 }
 
 func (f *fakeRepo) ListByEnrollment(_ context.Context, _ string, _, _ time.Time) ([]service.AttendanceRecord, error) {
@@ -80,7 +106,12 @@ const (
 	// ListAttendance validates its enrollment id as a UUID at the boundary, so
 	// its tests carry a real one (the readable ids above never reach it).
 	enrollmentUUID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+
+	takerID     = "8f000000-0000-4000-8000-000000000001"
+	subjectUUID = "5b000000-0000-4000-8000-00000000000a"
 )
+
+var takenAt = time.Date(2026, 9, 15, 14, 30, 0, 0, time.UTC)
 
 func activeEnrollment(id, studentID string) service.EnrollmentRef {
 	return service.EnrollmentRef{ID: id, StudentID: studentID, GroupID: groupID, Status: "active"}
@@ -162,7 +193,7 @@ func TestSaveDailyAttendanceCountsAndReflectsInRoster(t *testing.T) {
 	})
 
 	res, err := h.SaveDailyAttendance(context.Background(), connect.NewRequest(&attendancev1.SaveDailyAttendanceRequest{
-		GroupId: groupID, Date: testDate,
+		GroupId: groupID, Date: testDate, TakenBy: takerID, TakenByName: "Gabriela Rojas",
 		Marks: []*attendancev1.Mark{
 			{EnrollmentId: "enr-1", Status: "absent", Note: "sin aviso"},
 			{EnrollmentId: "enr-2", Status: "late"},
@@ -193,7 +224,7 @@ func TestSaveDailyAttendanceCountsAndReflectsInRoster(t *testing.T) {
 func TestSaveDailyAttendanceMarkOutsideGroupIsInvalidArgument(t *testing.T) {
 	h := newHandler(newFakeRepo(), []service.EnrollmentRef{activeEnrollment("enr-1", "stu-1")})
 	_, err := h.SaveDailyAttendance(context.Background(), connect.NewRequest(&attendancev1.SaveDailyAttendanceRequest{
-		GroupId: groupID, Date: testDate,
+		GroupId: groupID, Date: testDate, TakenBy: takerID, TakenByName: "Gabriela Rojas",
 		Marks: []*attendancev1.Mark{{EnrollmentId: "intruder", Status: "absent"}},
 	}))
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {
@@ -253,5 +284,80 @@ func TestListAttendanceMalformedEnrollmentIDIsInvalidArgument(t *testing.T) {
 	}))
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Errorf("want InvalidArgument, got %v", connect.CodeOf(err))
+	}
+}
+
+// T3 wire contract: a per-class save carries its subject and taker through, the
+// roster returns notes and the session, and records carry their subject.
+func TestPerClassListRoundTripsSubjectNoteAndSession(t *testing.T) {
+	repo := newFakeRepo()
+	h := newHandler(repo, []service.EnrollmentRef{activeEnrollment("enr-1", "stu-1")})
+	ctx := context.Background()
+
+	before, err := h.GetDailyRoster(ctx, connect.NewRequest(&attendancev1.GetDailyRosterRequest{
+		GroupId: groupID, Date: testDate, SubjectId: subjectUUID,
+	}))
+	if err != nil {
+		t.Fatalf("GetDailyRoster: %v", err)
+	}
+	if before.Msg.GetSession() != nil {
+		t.Errorf("an untaken list must have no session, got %v", before.Msg.GetSession())
+	}
+
+	if _, err := h.SaveDailyAttendance(ctx, connect.NewRequest(&attendancev1.SaveDailyAttendanceRequest{
+		GroupId: groupID, Date: testDate, SubjectId: subjectUUID,
+		TakenBy: takerID, TakenByName: "Gabriela Rojas",
+		Marks: []*attendancev1.Mark{{EnrollmentId: "enr-1", Status: "excused", Note: "cita médica"}},
+	})); err != nil {
+		t.Fatalf("SaveDailyAttendance: %v", err)
+	}
+	if repo.taker.UserID != takerID || repo.taker.Name != "Gabriela Rojas" {
+		t.Errorf("taker = %+v", repo.taker)
+	}
+
+	after, err := h.GetDailyRoster(ctx, connect.NewRequest(&attendancev1.GetDailyRosterRequest{
+		GroupId: groupID, Date: testDate, SubjectId: subjectUUID,
+	}))
+	if err != nil {
+		t.Fatalf("GetDailyRoster: %v", err)
+	}
+	row := after.Msg.GetRows()[0]
+	if row.GetStatus() != "excused" || row.GetNote() != "cita médica" {
+		t.Errorf("row = %v, want excused with its note", row)
+	}
+	session := after.Msg.GetSession()
+	if session.GetTakenByName() != "Gabriela Rojas" || !session.GetTakenAt().AsTime().Equal(takenAt) || !session.GetUpdatedAt().AsTime().Equal(takenAt) {
+		t.Errorf("session = %v", session)
+	}
+
+	daily, err := h.GetDailyRoster(ctx, connect.NewRequest(&attendancev1.GetDailyRosterRequest{GroupId: groupID, Date: testDate}))
+	if err != nil {
+		t.Fatalf("GetDailyRoster daily: %v", err)
+	}
+	if daily.Msg.GetRows()[0].GetStatus() != "present" || daily.Msg.GetSession() != nil {
+		t.Errorf("the daily list must not see the per-class save: %v", daily.Msg)
+	}
+}
+
+func TestSaveDailyAttendanceWithoutTakerIsInvalidArgument(t *testing.T) {
+	h := newHandler(newFakeRepo(), []service.EnrollmentRef{activeEnrollment("enr-1", "stu-1")})
+	_, err := h.SaveDailyAttendance(context.Background(), connect.NewRequest(&attendancev1.SaveDailyAttendanceRequest{
+		GroupId: groupID, Date: testDate,
+	}))
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("want InvalidArgument, got %v", connect.CodeOf(err))
+	}
+}
+
+func TestListAttendanceCarriesSubject(t *testing.T) {
+	repo := newFakeRepo()
+	repo.list = []service.AttendanceRecord{{ID: "r1", EnrollmentID: enrollmentUUID, Date: takenAt, SubjectID: subjectUUID, Status: "absent"}}
+	h := newHandler(repo, nil)
+	res, err := h.ListAttendance(context.Background(), connect.NewRequest(&attendancev1.ListAttendanceRequest{EnrollmentId: enrollmentUUID}))
+	if err != nil {
+		t.Fatalf("ListAttendance: %v", err)
+	}
+	if res.Msg.GetRecords()[0].GetSubjectId() != subjectUUID {
+		t.Errorf("record = %v, want its subject", res.Msg.GetRecords()[0])
 	}
 }
