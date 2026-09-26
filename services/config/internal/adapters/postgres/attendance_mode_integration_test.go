@@ -113,3 +113,22 @@ func TestLevelAttendanceModeRoundTrip(t *testing.T) {
 		t.Errorf("a foreign tenant changed the mode: %v", got.AttendanceMode())
 	}
 }
+
+// The gateway resolves a pass list's group → grade → level with these point
+// reads, straight from a request's groupId. A malformed id names no row: it is
+// NotFound (→ 404 at the edge), never a uuid cast error surfacing as Internal.
+func TestPointReadsTreatAMalformedIDAsNotFound(t *testing.T) {
+	ctx := context.Background()
+	repo := pgadapter.NewRepository(appDB(t), tenantA)
+	const malformed = "not-a-uuid"
+
+	if _, err := repo.GetGroup(ctx, malformed); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("GetGroup(malformed): want KindNotFound, got %v", err)
+	}
+	if _, err := repo.GetGradeLevel(ctx, malformed); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("GetGradeLevel(malformed): want KindNotFound, got %v", err)
+	}
+	if _, err := repo.GetLevel(ctx, malformed); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("GetLevel(malformed): want KindNotFound, got %v", err)
+	}
+}
