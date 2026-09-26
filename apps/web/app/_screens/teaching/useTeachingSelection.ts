@@ -34,6 +34,8 @@ function pushSelection(query: SelectionQuery): void {
   for (const listener of listeners) listener();
 }
 
+const alwaysLeave = (): boolean => true;
+
 export type PickerStep = "subject" | "group";
 
 export interface TeachingSelection<T extends TeachingOption> extends ResolvedSelection<T> {
@@ -47,22 +49,36 @@ export interface TeachingSelection<T extends TeachingOption> extends ResolvedSel
   goTo: (step: PickerStep) => void;
 }
 
-/** The URL for an option: its subject and the class itself, or just its group. */
-function queryFor(option: TeachingOption, bySubject: boolean): SelectionQuery {
-  return bySubject ? { subject: option.subjectId ?? "", assignment: option.id } : { group: option.groupId };
+/** The URL for an option: its subject and the class (or group), or just its group. */
+function queryFor(option: TeachingOption, bySubject: boolean, keyByGroup: boolean): SelectionQuery {
+  if (!bySubject) return { group: option.groupId };
+  const subject = option.subjectId ?? "";
+  return keyByGroup ? { subject, group: option.groupId } : { subject, assignment: option.id };
 }
 
 /** Where the teacher stands among `options`, kept in the URL. */
-export function useTeachingSelection<T extends TeachingOption>(options: readonly T[], bySubject: boolean): TeachingSelection<T> {
+export function useTeachingSelection<T extends TeachingOption>(
+  options: readonly T[],
+  bySubject: boolean,
+  keyByGroup = false,
+  canLeave: () => boolean = alwaysLeave,
+): TeachingSelection<T> {
   const search = useSyncExternalStore(subscribe, currentSearch, serverSearch);
-  const resolved = useMemo(() => resolveSelection(options, parseSelection(search), bySubject), [options, search, bySubject]);
+  const resolved = useMemo(
+    () => resolveSelection(options, parseSelection(search), bySubject, keyByGroup),
+    [options, search, bySubject, keyByGroup],
+  );
   const subjectId = resolved.subject?.id;
 
-  const chooseSubject = useCallback((next: string) => pushSelection({ subject: next }), []);
-  const choose = useCallback((option: T) => pushSelection(queryFor(option, bySubject)), [bySubject]);
+  // Every move away from the open list asks first when it has unsaved changes.
+  const move = useCallback((query: SelectionQuery) => {
+    if (canLeave()) pushSelection(query);
+  }, [canLeave]);
+  const chooseSubject = useCallback((next: string) => move({ subject: next }), [move]);
+  const choose = useCallback((option: T) => move(queryFor(option, bySubject, keyByGroup)), [move, bySubject, keyByGroup]);
   const goTo = useCallback(
-    (step: PickerStep) => pushSelection(step === "group" && bySubject ? { subject: subjectId } : {}),
-    [bySubject, subjectId],
+    (step: PickerStep) => move(step === "group" && bySubject ? { subject: subjectId } : {}),
+    [move, bySubject, subjectId],
   );
 
   return { ...resolved, chooseSubject, chooseGroup: choose, choose, goTo };

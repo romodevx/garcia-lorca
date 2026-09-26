@@ -8,23 +8,23 @@ import * as teachingApi from "../../teaching/api";
 import { AttendanceScreen } from "./AttendanceScreen";
 import { Providers } from "../../test-utils";
 
-// The screens read labelled groups (ISSUE-002); label them from the listGroups mock.
-beforeEach(() => {
-  vi.mocked(configApi.listLabelledGroups).mockImplementation(async (...args) =>
-    (await vi.mocked(configApi.listGroups)(...args)).map((g) => ({ ...g, label: g.name })));
-});
-
-
 // Both paths are mocked so we can assert WHICH client set each role exercises.
 // The director path boots the admin attendance + config + students clients; the
 // teacher path is self-scoped to the teaching client alone.
-vi.mock("../../attendance/api", () => ({ getDailyRoster: vi.fn(), saveDailyAttendance: vi.fn() }));
-vi.mock("../../config/api", () => ({ listCycles: vi.fn(), listGroups: vi.fn(), listLabelledGroups: vi.fn() }));
+vi.mock("../../attendance/api", () => ({ getAttendanceSheet: vi.fn(), saveAttendanceSheet: vi.fn() }));
+vi.mock("../../config/api", () => ({
+  listCycles: vi.fn(),
+  listLevels: vi.fn(),
+  listGradeLevels: vi.fn(),
+  listLabelledGroups: vi.fn(),
+  listSubjects: vi.fn(),
+}));
+vi.mock("../../teachers/api", () => ({ listTeachingAssignments: vi.fn() }));
 vi.mock("../../students/api", () => ({ listStudents: vi.fn() }));
 vi.mock("../../teaching/api", () => ({
-  listGroups: vi.fn(),
-  getAttendanceRoster: vi.fn(),
-  saveAttendance: vi.fn(),
+  listAttendanceClasses: vi.fn(),
+  getTeachingAttendanceSheet: vi.fn(),
+  saveTeachingAttendance: vi.fn(),
 }));
 
 const att = vi.mocked(attApi);
@@ -34,11 +34,11 @@ const teaching = vi.mocked(teachingApi);
 
 beforeEach(() => {
   config.listCycles.mockResolvedValue([]);
-  config.listGroups.mockResolvedValue([]);
+  config.listLevels.mockResolvedValue([]);
+  config.listGradeLevels.mockResolvedValue([]);
+  config.listLabelledGroups.mockResolvedValue([]);
   students.listStudents.mockResolvedValue([]);
-  att.getDailyRoster.mockResolvedValue([]);
-  teaching.listGroups.mockResolvedValue([]);
-  teaching.getAttendanceRoster.mockResolvedValue([]);
+  teaching.listAttendanceClasses.mockResolvedValue([]);
 });
 
 afterEach(() => vi.clearAllMocks());
@@ -53,11 +53,11 @@ describe("AttendanceScreen — role-adaptive branch", () => {
 
     // The teacher subtitle distinguishes the self-scoped surface.
     expect(await screen.findByText(/solo tus grupos/)).toBeInTheDocument();
-    await waitFor(() => expect(teaching.listGroups).toHaveBeenCalled());
+    await waitFor(() => expect(teaching.listAttendanceClasses).toHaveBeenCalled());
 
     // A teacher must never hit the director-only clients (they'd 403).
     expect(students.listStudents).not.toHaveBeenCalled();
-    expect(att.getDailyRoster).not.toHaveBeenCalled();
+    expect(att.getAttendanceSheet).not.toHaveBeenCalled();
     expect(config.listCycles).not.toHaveBeenCalled();
   });
 
@@ -73,6 +73,6 @@ describe("AttendanceScreen — role-adaptive branch", () => {
     await waitFor(() => expect(config.listCycles).toHaveBeenCalled());
 
     // The director path never touches the teacher client.
-    expect(teaching.listGroups).not.toHaveBeenCalled();
+    expect(teaching.listAttendanceClasses).not.toHaveBeenCalled();
   });
 });
