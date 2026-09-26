@@ -629,6 +629,9 @@ func TestSeededRolesHoldTheirPermissions(t *testing.T) {
 		}},
 		// Task 9: the cashier. Reads the counter, takes money, finds pupils.
 		{"cobranza", []string{"students:read", "students:list", "collections:read", "payments:write"}},
+		// T2: the teacher. Only their own grades and attendance, both scoped in
+		// the gateway by principal→teacher→assignments of the active cycle.
+		{"maestro", []string{"teaching:read", "teaching:write", "attendance_own:read", "attendance_own:write"}},
 		{"guardian", []string{
 			"family:read",
 			"uniforms_own:read", "uniforms_own:write",
@@ -697,6 +700,45 @@ func TestSeededRolesHoldTheirPermissions(t *testing.T) {
 			if domain.IsOwnerOnly(p) {
 				t.Errorf("cobranza holds the owner-only permission %q", p)
 			}
+		}
+	})
+
+	// T2: an existing "maestro" role (the dev seed made one by hand) is brought
+	// to exactly the teacher's four, whatever it held before.
+	t.Run("an existing maestro role is brought to the teacher's four", func(t *testing.T) {
+		if err := superDB.Exec(`UPDATE roles SET permissions = ARRAY['grades:write','finance:read'] WHERE tenant_id = ? AND name = 'maestro'`, seedTenant).Error; err != nil {
+			t.Fatalf("widen: %v", err)
+		}
+		sql, err := os.ReadFile(filepath.Join(migrationsDir, "0022_maestro_role.sql"))
+		if err != nil {
+			t.Fatalf("read migration: %v", err)
+		}
+		if err := superDB.Exec(string(sql)).Error; err != nil {
+			t.Fatalf("re-run 0022: %v", err)
+		}
+		var got []string
+		if err := superDB.Raw(`SELECT unnest(permissions) FROM roles WHERE tenant_id = ? AND name = 'maestro'`, seedTenant).Scan(&got).Error; err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		if strings.Join(got, ",") != "teaching:read,teaching:write,attendance_own:read,attendance_own:write" {
+			t.Errorf("maestro = %v, want exactly the teacher's four", got)
+		}
+		for _, p := range got {
+			if domain.IsOwnerOnly(p) {
+				t.Errorf("maestro holds the owner-only permission %q", p)
+			}
+		}
+	})
+
+	// The maestro role keeps its fixed id, so a deployment can tell it apart from
+	// a school-made role of another name.
+	t.Run("maestro has its fixed id", func(t *testing.T) {
+		var id string
+		if err := superDB.Raw(`SELECT id::text FROM roles WHERE tenant_id = ? AND name = 'maestro'`, seedTenant).Scan(&id).Error; err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		if id != "00000000-0000-0000-0000-0000000000a4" {
+			t.Errorf("maestro id = %q, want the fixed ...00a4", id)
 		}
 	})
 
