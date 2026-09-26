@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ApiError } from "../api/errors";
 
 /**
  * The state of one asynchronously-loaded resource: its data (null until loaded),
@@ -9,6 +10,8 @@ export interface AsyncResource<T> {
   data: T | null;
   loading: boolean;
   error: boolean;
+  /** HTTP status of the last failure when the server answered (404 = not yours), else null. */
+  errorStatus: number | null;
   reload: () => Promise<void>;
 }
 
@@ -26,6 +29,7 @@ export function useAsyncResource<T>(load: (() => Promise<T>) | null): AsyncResou
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState<boolean>(load !== null);
   const [error, setError] = useState(false);
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
 
   // Monotonic generation shared by the effect and the manual reload. Every new
   // load (a childId switch, a logout, a retry) and every effect cleanup advances
@@ -41,18 +45,21 @@ export function useAsyncResource<T>(load: (() => Promise<T>) | null): AsyncResou
       setData(null);
       setLoading(false);
       setError(false);
+      setErrorStatus(null);
       return;
     }
     setLoading(true);
     setError(false);
+    setErrorStatus(null);
     try {
       const result = await load();
       if (isCurrent()) {
         setData(result);
       }
-    } catch {
+    } catch (failure) {
       if (isCurrent()) {
         setError(true);
+        setErrorStatus(failure instanceof ApiError ? failure.status : null);
       }
     } finally {
       if (isCurrent()) {
@@ -70,5 +77,5 @@ export function useAsyncResource<T>(load: (() => Promise<T>) | null): AsyncResou
     };
   }, [reload]);
 
-  return { data, loading, error, reload };
+  return { data, loading, error, errorStatus, reload };
 }

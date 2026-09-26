@@ -70,3 +70,23 @@ describe("useAsyncResource", () => {
     expect(text("data")).toBe("B");
   });
 });
+
+describe("useAsyncResource errorStatus", () => {
+  function StatusProbe({ load }: { load: () => Promise<string> }): ReactElement {
+    const { errorStatus } = useAsyncResource(load);
+    return <Text testID="status">{String(errorStatus)}</Text>;
+  }
+
+  it("exposes the HTTP status of an ApiError so a screen can tell 404 from a network failure", async () => {
+    const { ApiError } = jest.requireActual("../api/errors") as typeof import("../api/errors");
+    const load = jest.fn().mockRejectedValue(new ApiError(404));
+    await render(<StatusProbe load={load} />);
+    await waitFor(() => expect(text("status")).toBe("404"));
+  });
+
+  it("reports null for a failure without an HTTP status", async () => {
+    const load = jest.fn().mockRejectedValue(new Error("offline"));
+    await render(<StatusProbe load={load} />);
+    await waitFor(() => expect(text("status")).toBe("null"));
+  });
+});
