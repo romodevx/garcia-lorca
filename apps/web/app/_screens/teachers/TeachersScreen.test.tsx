@@ -25,6 +25,7 @@ vi.mock("../../teachers/api", async (importOriginal) => ({
   createTeacher: vi.fn(),
   listTeachingAssignments: vi.fn(),
   createTeachingAssignment: vi.fn(),
+  grantTeacherAccess: vi.fn(),
 }));
 vi.mock("../../config/api", async (importOriginal) => ({
   ...(await importOriginal<typeof configApi>()),
@@ -118,5 +119,28 @@ describe("the Docentes module", () => {
     ).toBeInTheDocument();
     expect(await screen.findByText(/Ada Lovelace/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Carga académica/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("the Docentes module — acceso al sistema", () => {
+  it("with the permission, giving access links the teacher and counts it", async () => {
+    const user = userEvent.setup();
+    teachers.grantTeacherAccess.mockResolvedValue({
+      teacher: { ...ada, userId: "u1" }, userId: "u1", email: ada.email, status: "invited",
+    });
+    render(<TeachersScreen onBack={() => {}} onOpenLoad={vi.fn()} canGrantAccess />);
+
+    await user.click(await screen.findByRole("button", { name: "Dar acceso al sistema a Ada Lovelace" }));
+
+    await waitFor(() => expect(teachers.grantTeacherAccess).toHaveBeenCalledWith(expect.any(String), "t1"));
+    const stat = screen.getByText("Con acceso al sistema").parentElement as HTMLElement;
+    await waitFor(() => expect(stat).toHaveTextContent("1"));
+  });
+
+  it("without it, the button is not offered", async () => {
+    render(<TeachersScreen onBack={() => {}} onOpenLoad={vi.fn()} />);
+
+    await screen.findByRole("button", { name: "Carga académica de Ada Lovelace" });
+    expect(screen.queryByRole("button", { name: /Dar acceso al sistema/ })).toBeNull();
   });
 });

@@ -11,7 +11,7 @@ import { Dashboard } from "./_screens/Dashboard";
 import { AttendanceScreen } from "./_screens/attendance/AttendanceScreen";
 import { TeacherLoadScreen } from "./_screens/teachers/TeacherLoadScreen";
 import { TeachersScreen } from "./_screens/teachers/TeachersScreen";
-import { canEditTeachingLoad } from "./teachers/permissions";
+import { canEditTeachingLoad, canGrantTeacherAccess } from "./teachers/permissions";
 import { UniformsScreen } from "./_screens/uniforms/UniformsScreen";
 import { FinanceScreen } from "./_screens/finance/FinanceScreen";
 import { Catalog } from "./_screens/config/Catalog";
@@ -607,7 +607,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "teachers" &&
         (teachersEnabled ? (
-          <TeachersScreen onBack={home} onOpenLoad={openTeacherLoad} />
+          <TeachersScreen onBack={home} onOpenLoad={openTeacherLoad} canGrantAccess={canGrantTeacherAccess(principal?.permissions)} />
         ) : (
           // Flag OFF: never render the roster; show the friendly stub so
           // navigation never dead-ends. (Backend 404 is authoritative.)

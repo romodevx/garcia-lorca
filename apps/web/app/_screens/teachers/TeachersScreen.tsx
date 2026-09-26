@@ -15,11 +15,13 @@ import {
 import {
   createTeacher,
   createTeachingAssignment,
+  grantTeacherAccess,
   listTeachers,
   listTeachingAssignments,
   type CreateTeacherInput,
   type CreateTeachingAssignmentInput,
   type Teacher,
+  type TeacherAccessResult,
   type TeachingAssignment,
 } from "../../teachers/api";
 import { AssignmentsPanel } from "./AssignmentsPanel";
@@ -32,6 +34,8 @@ export interface TeachersScreenProps {
   onBack: () => void;
   /** Opens one teacher's carga académica page. */
   onOpenLoad: (teacherId: string) => void;
+  /** teachers:write AND users:write: the roster offers "Dar acceso al sistema". */
+  canGrantAccess?: boolean;
 }
 
 /**
@@ -49,7 +53,7 @@ export interface TeachersScreenProps {
  * sentence saying so rather than three empty dropdowns that read like a school
  * with no groups.
  */
-export function TeachersScreen({ onBack, onOpenLoad }: TeachersScreenProps): ReactElement {
+export function TeachersScreen({ onBack, onOpenLoad, canGrantAccess = false }: TeachersScreenProps): ReactElement {
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [catalogueClosed, setCatalogueClosed] = useState(false);
@@ -72,6 +76,14 @@ export function TeachersScreen({ onBack, onOpenLoad }: TeachersScreenProps): Rea
   const handleCreateTeacher = useCallback(async (input: CreateTeacherInput): Promise<void> => {
     const created = await createTeacher(API_URL, input);
     setTeachers((prev) => [...prev, created]);
+  }, []);
+
+  // The answer carries the linked teacher: the row and the "con acceso" count
+  // follow it without re-reading the roster.
+  const handleGrantAccess = useCallback(async (teacherId: string): Promise<TeacherAccessResult> => {
+    const result = await grantTeacherAccess(API_URL, teacherId);
+    setTeachers((prev) => prev.map((t) => (t.id === teacherId ? { ...t, userId: result.userId } : t)));
+    return result;
   }, []);
 
   const handleCreateAssignment = useCallback(
@@ -130,7 +142,12 @@ export function TeachersScreen({ onBack, onOpenLoad }: TeachersScreenProps): Rea
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 18 }}>
         {/* The load page names groups and subjects from Configuración: without it, only bare ids. */}
-        <TeachersPanel teachers={teachers} onCreate={handleCreateTeacher} onOpenLoad={catalogueClosed ? undefined : onOpenLoad} />
+        <TeachersPanel
+          teachers={teachers}
+          onCreate={handleCreateTeacher}
+          onOpenLoad={catalogueClosed ? undefined : onOpenLoad}
+          onGrantAccess={canGrantAccess ? handleGrantAccess : undefined}
+        />
         {!catalogueClosed && (
           <AssignmentsPanel
             cycles={cycles}
