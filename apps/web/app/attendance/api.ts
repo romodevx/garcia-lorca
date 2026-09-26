@@ -27,6 +27,7 @@ import {
   type AttendanceSheetQuery,
   type SaveSheetInput,
 } from "./sheet";
+import { postCardScan, type CardScanResult, type ScanCardInput } from "./scan";
 
 export type AttendanceStatus = "present" | "absent" | "late" | "excused";
 
@@ -108,4 +109,9 @@ export async function saveAttendanceSheet(baseURL: string, input: SaveSheetInput
   if (!res.ok) {
     throw await attendanceFailure(res);
   }
+}
+
+/** Resolves one scanned student card against a list; a rejected card is a result, not a throw. */
+export function scanAttendanceCard(baseURL: string, input: ScanCardInput): Promise<CardScanResult> {
+  return postCardScan(url(baseURL, `${BASE_PATH}/attendance/scan`), input);
 }
