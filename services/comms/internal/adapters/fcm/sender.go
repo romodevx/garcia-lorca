@@ -2,11 +2,10 @@
 // a rendered notification plus its target tokens → a transport call; the service
 // never learns what the transport is.
 //
-// Only LogSender ships in this phase: it reports the delivery to the log instead
-// of calling Firebase, which is enough to develop and demo the whole consumer
-// path (the durable feed is the product; push is the courtesy on top). Wiring the
-// real Firebase Cloud Messaging client is a deliberate carry-forward — it needs a
-// service-account credential in the secret manager. WHICH devices a notification
+// LogSender reports the delivery to the log instead of sending it: the default
+// (PUSH_PROVIDER=log) for development and for any environment without push
+// credentials. Real delivery is the Expo adapter (adapters/expo,
+// PUSH_PROVIDER=expo), since the family app registers Expo push tokens. WHICH devices a notification
 // belongs to is already exact: the service targets the student's guardians (see
 // service.GuardianReader and service.Repo.DevicesForUsers).
 package fcm
@@ -49,15 +48,15 @@ func NewLogSender(log *slog.Logger) *LogSender {
 // Pushing to nobody is a no-op, not a log line: a student whose guardians have
 // registered no device is the ordinary state of a school still onboarding its
 // families, and the service already reports the cases worth looking at.
-func (s *LogSender) Push(_ context.Context, tokens []string, title, _ string) error {
-	if len(tokens) == 0 {
-		return nil
+func (s *LogSender) Push(_ context.Context, m service.PushMessage) (service.PushReport, error) {
+	if len(m.Tokens) == 0 {
+		return service.PushReport{}, nil
 	}
 	s.log.Info("comms push (log sender: no delivery)",
-		slog.Int("target_count", len(tokens)),
-		slog.String("first_target", truncateToken(tokens[0])),
-		slog.String("title", title))
-	return nil
+		slog.Int("target_count", len(m.Tokens)),
+		slog.String("first_target", truncateToken(m.Tokens[0])),
+		slog.String("title", m.Title))
+	return service.PushReport{}, nil
 }
 
 // truncateToken reduces a token to a correlation handle.

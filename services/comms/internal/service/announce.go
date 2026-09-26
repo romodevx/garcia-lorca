@@ -71,7 +71,7 @@ func (s *CommsService) Announce(ctx context.Context, a Announcement) (int, error
 			continue
 		}
 		created++
-		s.push(ctx, stored)
+		s.push(ctx, stored, map[string]string{dataType: typeAnnouncement, dataStudentID: studentID})
 	}
 	return created, nil
 }

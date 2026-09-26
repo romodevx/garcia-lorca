@@ -21,11 +21,13 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -44,6 +46,7 @@ import (
 	"github.com/garcia-lorca/pkg/gcpauth"
 	"github.com/garcia-lorca/pkg/logger"
 	"github.com/garcia-lorca/pkg/pubsub/gcp"
+	"github.com/garcia-lorca/services/comms/internal/adapters/expo"
 	"github.com/garcia-lorca/services/comms/internal/adapters/fcm"
 	"github.com/garcia-lorca/services/comms/internal/adapters/studentsclient"
 	"github.com/garcia-lorca/services/comms/internal/handler"
@@ -124,11 +127,16 @@ func run(ctx context.Context, log *slog.Logger) error {
 	// call (mirrors attendance and grades).
 	studentsBaseURL := envOr("STUDENTS_BASE_URL", defaultStudentsBaseURL)
 	guardians := studentsclient.New(studentsBaseURL, gcpauth.HTTPClient(ctx, studentsBaseURL))
-	// Push is the courtesy on top of the durable feed, and only the logging sender
-	// ships in this phase (see adapters/fcm): the real Firebase client needs a
-	// service-account credential in the secret manager.
-	sender := fcm.NewLogSender(log)
-	svc := service.NewCommsService(repo, guardians, sender, tenantID, uuid.NewString, time.Now, log)
+	// Push is the courtesy on top of the durable feed. PUSH_PROVIDER=expo delivers
+	// through the Expo Push Service (EXPO_ACCESS_TOKEN optional, required once
+	// enhanced push security is on); anything unset keeps the logging sender.
+	sender, err := selectSender(os.Getenv("PUSH_PROVIDER"), os.Getenv("EXPO_ACCESS_TOKEN"), log)
+	if err != nil {
+		return err
+	}
+	// The same students client names the pupil in the copy ("Ana faltó…").
+	svc := service.NewCommsService(repo, guardians, sender, tenantID, uuid.NewString, time.Now, log,
+		service.WithStudentNames(guardians))
 
 	mux := http.NewServeMux()
 	path, connectHandler := commsv1connect.NewCommsServiceHandler(handler.NewCommsHandler(svc, tenantID), connect.WithRecover(recoverFn))
@@ -300,6 +308,28 @@ func recoverFn(_ context.Context, _ connect.Spec, _ http.Header, _ any) error {
 func pushMode() bool {
 	enabled, err := strconv.ParseBool(os.Getenv("PUBSUB_PUSH_MODE"))
 	return err == nil && enabled
+}
+
+// The push providers PUSH_PROVIDER accepts.
+const (
+	pushProviderLog  = "log"
+	pushProviderExpo = "expo"
+)
+
+// selectSender builds the push sender PUSH_PROVIDER names: "" or "log" logs
+// instead of sending (development, or no credentials), "expo" delivers through
+// the Expo Push Service. Any other value fails startup: a misspelt provider must
+// not silently turn every push into a log line.
+func selectSender(provider, expoAccessToken string, log *slog.Logger) (service.Sender, error) {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "", pushProviderLog:
+		return fcm.NewLogSender(log), nil
+	case pushProviderExpo:
+		log.Info("comms push via Expo", slog.Bool("access_token", expoAccessToken != ""))
+		return expo.NewSender(expo.WithAccessToken(expoAccessToken), expo.WithLogger(log)), nil
+	default:
+		return nil, fmt.Errorf("PUSH_PROVIDER %q is not one of log, expo", provider)
+	}
 }
 
 func envOr(key, fallback string) string {

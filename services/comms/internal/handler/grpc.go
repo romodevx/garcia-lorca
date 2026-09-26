@@ -100,6 +100,16 @@ func (h *CommsHandler) Announce(ctx context.Context, req *connect.Request[commsv
 	return connect.NewResponse(&commsv1.AnnounceResponse{Created: int32(created)}), nil
 }
 
+// UnregisterDevice removes a push token for its owner only (a family logging
+// out); anyone else's token is left alone and the answer is the same.
+func (h *CommsHandler) UnregisterDevice(ctx context.Context, req *connect.Request[commsv1.UnregisterDeviceRequest]) (*connect.Response[commsv1.UnregisterDeviceResponse], error) {
+	m := req.Msg
+	if err := h.svc.UnregisterDevice(ctx, m.GetUserId(), m.GetFcmToken()); err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&commsv1.UnregisterDeviceResponse{}), nil
+}
+
 func (h *CommsHandler) notification(n service.Notification) *commsv1.Notification {
 	return &commsv1.Notification{
 		Id:        n.ID,

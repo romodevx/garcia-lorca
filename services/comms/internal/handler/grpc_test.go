@@ -89,6 +89,22 @@ func (f *fakeRepo) DevicesForUsers(_ context.Context, userIDs []string) ([]servi
 	return out, nil
 }
 
+func (f *fakeRepo) DeactivateDevices(_ context.Context, _ []string) error { return f.failWith }
+
+func (f *fakeRepo) DeleteUserDevice(_ context.Context, userID, token string) error {
+	if f.failWith != nil {
+		return f.failWith
+	}
+	kept := f.devices[:0]
+	for _, d := range f.devices {
+		if !(d.UserID == userID && d.FCMToken == token) {
+			kept = append(kept, d)
+		}
+	}
+	f.devices = kept
+	return nil
+}
+
 // --- fixtures -----------------------------------------------------------------
 
 const (
@@ -271,5 +287,34 @@ func TestStorageFailureIsInternalWithoutDetail(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "connection refused") {
 		t.Errorf("internal detail leaked to the client: %q", err.Error())
+	}
+}
+
+// T5: UnregisterDevice removes the caller's token and never another user's.
+func TestUnregisterDeviceRemovesOnlyTheCallersToken(t *testing.T) {
+	const otherUser = "3f2504e0-4f89-41d3-9a0c-0305e82c33ff"
+	repo := &fakeRepo{devices: []service.Device{
+		{ID: "d1", UserID: userID, FCMToken: "ExponentPushToken[mine]"},
+		{ID: "d2", UserID: otherUser, FCMToken: "ExponentPushToken[theirs]"},
+	}}
+	h := newHandler(repo)
+	ctx := context.Background()
+
+	_, err := h.UnregisterDevice(ctx, connect.NewRequest(&commsv1.UnregisterDeviceRequest{UserId: userID, FcmToken: "ExponentPushToken[theirs]"}))
+	if err != nil {
+		t.Fatalf("UnregisterDevice(another user's token): %v", err)
+	}
+	if len(repo.devices) != 2 {
+		t.Fatalf("another user's token was removed: %+v", repo.devices)
+	}
+	if _, err := h.UnregisterDevice(ctx, connect.NewRequest(&commsv1.UnregisterDeviceRequest{UserId: userID, FcmToken: "ExponentPushToken[mine]"})); err != nil {
+		t.Fatalf("UnregisterDevice: %v", err)
+	}
+	if len(repo.devices) != 1 || repo.devices[0].UserID != otherUser {
+		t.Errorf("devices = %+v, want only the other user's", repo.devices)
+	}
+	_, err = h.UnregisterDevice(ctx, connect.NewRequest(&commsv1.UnregisterDeviceRequest{UserId: "nope", FcmToken: "x"}))
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("malformed user: code = %v, want InvalidArgument", connect.CodeOf(err))
 	}
 }

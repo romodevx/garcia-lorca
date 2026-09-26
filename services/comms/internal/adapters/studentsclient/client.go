@@ -75,3 +75,22 @@ func guardianUserIDs(links []*studentsv1.GuardianLink) []string {
 func mapStudentsErr(err error) error {
 	return glerrors.Wrap(glerrors.KindInternal, "students guardian lookup failed", err)
 }
+
+// Compile-time proof the adapter also satisfies the name seam.
+var _ service.StudentNameReader = (*Client)(nil)
+
+// FirstName reads a pupil's first name(s) — never the surname: the copy a family
+// reads says "Ana faltó…", and comms carries no more PII than that. A pupil
+// students does not know is glerrors.ErrNotFound (the caller falls back to a
+// neutral name); any other failure is KindInternal, so an outage is never taken
+// for a missing pupil.
+func (c *Client) FirstName(ctx context.Context, studentID string) (string, error) {
+	res, err := c.rpc.GetStudent(ctx, connect.NewRequest(&studentsv1.GetStudentRequest{Id: studentID}))
+	if err != nil {
+		if connect.CodeOf(err) == connect.CodeNotFound {
+			return "", glerrors.ErrNotFound
+		}
+		return "", glerrors.Wrap(glerrors.KindInternal, "students name lookup failed", err)
+	}
+	return res.Msg.GetStudent().GetFirstName(), nil
+}

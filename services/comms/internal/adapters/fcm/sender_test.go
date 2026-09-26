@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/garcia-lorca/services/comms/internal/adapters/fcm"
+	"github.com/garcia-lorca/services/comms/internal/service"
 )
 
 // newSender wires a LogSender over a buffer so the tests can read exactly what
@@ -28,9 +29,10 @@ func TestLogSenderReportsTheDeliveryWithoutLeakingTokens(t *testing.T) {
 	const fakeToken = "device-token-fixture-not-a-real-credential"
 	sender, logs := newSender(t)
 
-	if err := sender.Push(context.Background(),
-		[]string{fakeToken, "otro-token-largo-de-dispositivo"},
-		"Ausencia registrada", "Se registró una ausencia el 2026-08-06."); err != nil {
+	if _, err := sender.Push(context.Background(), service.PushMessage{
+		Tokens: []string{fakeToken, "otro-token-largo-de-dispositivo"},
+		Title:  "Ausencia registrada", Body: "Se registró una ausencia el 2026-08-06.",
+	}); err != nil {
 		t.Fatalf("Push: %v", err)
 	}
 
@@ -54,7 +56,7 @@ func TestLogSenderReportsTheDeliveryWithoutLeakingTokens(t *testing.T) {
 func TestLogSenderWithNoTargetsIsANoOp(t *testing.T) {
 	sender, logs := newSender(t)
 
-	if err := sender.Push(context.Background(), nil, "Pago recibido", "body"); err != nil {
+	if _, err := sender.Push(context.Background(), service.PushMessage{Title: "Pago recibido", Body: "body"}); err != nil {
 		t.Fatalf("Push with no targets: %v", err)
 	}
 	if logs.Len() != 0 {
@@ -65,7 +67,7 @@ func TestLogSenderWithNoTargetsIsANoOp(t *testing.T) {
 // TestNewLogSenderToleratesANilLogger proves the adapter cannot panic on a
 // half-wired composition root: a nil logger falls back to the default.
 func TestNewLogSenderToleratesANilLogger(t *testing.T) {
-	if err := fcm.NewLogSender(nil).Push(context.Background(), []string{"token"}, "t", "b"); err != nil {
+	if _, err := fcm.NewLogSender(nil).Push(context.Background(), service.PushMessage{Tokens: []string{"token"}, Title: "t", Body: "b"}); err != nil {
 		t.Fatalf("Push with a nil logger: %v", err)
 	}
 }
