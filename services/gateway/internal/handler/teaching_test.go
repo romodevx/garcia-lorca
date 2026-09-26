@@ -40,6 +40,13 @@ type fakeTeachingConfig struct {
 	gradeLevels    []client.GradeLevelResult
 	gradeLevelsErr error
 
+	levels    []client.LevelResult
+	levelsErr error
+
+	// assignmentsByGroup answers ListTeachingAssignments when it is asked by
+	// group (teacherID ""), the director's "is this subject taught here" read.
+	assignmentsByGroup map[string][]client.TeachingAssignment
+
 	termsByCycle   map[string][]client.TermResult
 	termsErr       error
 	gotListTerms   int
@@ -70,13 +77,20 @@ func (f *fakeTeachingConfig) ListTeachers(_ context.Context) ([]client.Teacher, 
 	return f.teachers, f.teachersErr
 }
 
-func (f *fakeTeachingConfig) ListTeachingAssignments(_ context.Context, _, _, teacherID string) ([]client.TeachingAssignment, error) {
+func (f *fakeTeachingConfig) ListTeachingAssignments(_ context.Context, _, groupID, teacherID string) ([]client.TeachingAssignment, error) {
 	f.gotListAssignments++
 	f.gotTeacherID = teacherID
 	if f.assignmentsErr != nil {
 		return nil, f.assignmentsErr
 	}
+	if teacherID == "" && groupID != "" {
+		return f.assignmentsByGroup[groupID], nil
+	}
 	return f.assignmentsByTeacher[teacherID], nil
+}
+
+func (f *fakeTeachingConfig) ListLevels(_ context.Context) ([]client.LevelResult, error) {
+	return f.levels, f.levelsErr
 }
 
 func (f *fakeTeachingConfig) ListGroups(_ context.Context, _, _ string) ([]client.GroupResult, error) {

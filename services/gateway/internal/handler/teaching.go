@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"net/http"
-	"strings"
 
 	"golang.org/x/sync/errgroup"
 
@@ -57,6 +56,9 @@ type TeachingCatalogReader interface {
 	ListSubjects(ctx context.Context, gradeLevelID string) ([]client.SubjectResult, error)
 	ListGradeLevels(ctx context.Context, levelID string) ([]client.GradeLevelResult, error)
 	ListTerms(ctx context.Context, cycleID, levelID string) ([]client.TermResult, error)
+	// ListLevels resolves a group's level, whose attendance mode decides whether
+	// its pass list is daily or per class (T3).
+	ListLevels(ctx context.Context) ([]client.LevelResult, error)
 }
 
 // TeachingCycleReader lists the school's cycles, so the surface can tell which
@@ -417,18 +419,7 @@ func (h *TeachingHandler) Roster(w http.ResponseWriter, r *http.Request) {
 // failed read. A non-nil map is always returned, so lookups never panic. The map
 // is built from ONE list read, not one GetStudent per row.
 func (h *TeachingHandler) studentNames(ctx context.Context, enrich bool) map[string]string {
-	names := map[string]string{}
-	if !enrich {
-		return names
-	}
-	students, err := h.students.ListStudents(ctx, "")
-	if err != nil {
-		return names
-	}
-	for _, s := range students {
-		names[s.ID] = strings.TrimSpace(s.FirstName + " " + s.LastName)
-	}
-	return names
+	return studentNamesFrom(ctx, h.students, enrich)
 }
 
 // --- capture ---------------------------------------------------------------

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"sort"
+	"time"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
@@ -14,8 +15,9 @@ import (
 // groups they teach. It is the attendance twin of the teaching (grades) surface
 // in teaching.go and carries the identical safety property.
 //
-// Attendance is taken per GROUP, not per subject, so the caller's scope is the
-// DISTINCT set of group_ids across their teaching_assignments. That set is
+// The caller's scope is their teaching_assignments of the active cycle: the
+// DISTINCT groups for a daily list, the (group, subject) pairs for a per-class
+// one. That set is
 // derived BY CONSTRUCTION from the authenticated principal (the Teacher whose
 // user_id == principal.UserID → that teacher's assignments → their groups), so no
 // request field (body, query or path) can widen it. This is what makes
@@ -24,10 +26,14 @@ import (
 // attendance:read / attendance:write, which touch ANY group and stay broad staff
 // permissions.
 //
-// A groupId a roster/save request carries IS caller-supplied, so each one first
-// calls assertOwnsGroup and answers 404 for any group outside the caller's own
-// set — the same answer a non-existent group gets, so a teacher can never probe
-// whether another group exists.
+// A groupId (and subjectId) a roster/save request carries IS caller-supplied,
+// so each one first calls assertOwnsList and answers 404 for any list outside
+// the caller's own — the same answer a non-existent group gets, so a teacher can
+// never probe whether another group or class exists.
+//
+// T3: a group's LEVEL decides whether its list is daily (any teacher of the
+// group takes it) or per class (only the subject's teacher does); a teacher may
+// save today and up to attendanceWindowDays days back, never the future.
 
 // --- consumer-defined attendance interface ---------------------------------
 
@@ -38,8 +44,8 @@ import (
 // AttendanceClient (the same one backing the admin /attendance/* routes)
 // satisfies it.
 type TeachingAttendanceService interface {
-	GetDailyRoster(ctx context.Context, groupID, date string) ([]client.AttendanceRosterRow, error)
-	SaveDailyAttendance(ctx context.Context, groupID, date string, marks []client.Mark) (int32, int32, error)
+	GetDailyRoster(ctx context.Context, groupID, date, subjectID string) (client.AttendanceRoster, error)
+	SaveDailyAttendance(ctx context.Context, in client.SaveAttendanceInput) (int32, int32, error)
 }
 
 // TeachingAttendanceHandler is the teacher-facing, self-scoped daily attendance
@@ -50,13 +56,30 @@ type TeachingAttendanceService interface {
 type TeachingAttendanceHandler struct {
 	scope      *TeachingHandler
 	attendance TeachingAttendanceService
+	users      AttendanceUserReader
+	now        func() time.Time
+}
+
+// TeachingAttendanceOption configures a TeachingAttendanceHandler (functional
+// options).
+type TeachingAttendanceOption func(*TeachingAttendanceHandler)
+
+// WithAttendanceClock replaces the wall clock the teacher's date window is
+// measured against (tests pin it).
+func WithAttendanceClock(now func() time.Time) TeachingAttendanceOption {
+	return func(h *TeachingAttendanceHandler) { h.now = now }
 }
 
 // NewTeachingAttendanceHandler wires the attendance surface to the teaching scope
-// handler (config + students, providing callerGroups / assertOwnsGroup /
-// studentNames / groupCatalogNames) and the attendance service (roster + save).
-func NewTeachingAttendanceHandler(scope *TeachingHandler, attendance TeachingAttendanceService) *TeachingAttendanceHandler {
-	return &TeachingAttendanceHandler{scope: scope, attendance: attendance}
+// handler (config + students: caller→teacher→assignments, catalog and student
+// names), the attendance service (roster + save) and the iam directory (the
+// taker's display name).
+func NewTeachingAttendanceHandler(scope *TeachingHandler, attendance TeachingAttendanceService, users AttendanceUserReader, opts ...TeachingAttendanceOption) *TeachingAttendanceHandler {
+	h := &TeachingAttendanceHandler{scope: scope, attendance: attendance, users: users, now: time.Now}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // --- scoping core (methods on the scope handler) ---------------------------
@@ -79,26 +102,6 @@ func (h *TeachingHandler) callerGroups(ctx context.Context, principal middleware
 		}
 	}
 	return teacherID, groups, nil
-}
-
-// assertOwnsGroup is the ownership gate of the roster and save routes: it resolves
-// the caller's DISTINCT taught groups and reports whether groupID is among them.
-// The set is derived from the PRINCIPAL, so no path/query/body value can widen it.
-// It writes the failure response itself — 404 for a group the caller does not
-// teach (never 403, so a teacher cannot probe whether another group exists), the
-// mapped status on a lookup error — and returns true only when the read/write may
-// proceed. An empty groupID is never in the set (fail closed), so it too gets 404.
-func (h *TeachingHandler) assertOwnsGroup(w http.ResponseWriter, r *http.Request, principal middleware.Principal, groupID string) bool {
-	_, groups, err := h.callerGroups(r.Context(), principal)
-	if err != nil {
-		writeConnectError(w, err)
-		return false
-	}
-	if _, ok := groups[groupID]; ok {
-		return true
-	}
-	writeNotFound(w)
-	return false
 }
 
 // groupCatalogNames builds the group id→name and group id→grade-name maps used
@@ -172,27 +175,142 @@ func (h *TeachingAttendanceHandler) Groups(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"groups": out})
 }
 
-// --- roster ----------------------------------------------------------------
+// --- classes (T3) -------------------------------------------------------------
 
-// teachingAttendanceRosterRowResponse is the teaching-route-local roster
-// projection: the same fields the admin attendance roster returns (enrollment,
-// student, status) PLUS the student's readable name the teacher's pass-list screen
-// needs — the join a Maestro cannot do client-side without students:read. The
-// admin attendance roster (attendanceRosterRowResponse in attendance.go) is
-// untouched; only this surface enriches. A name that cannot be resolved degrades
-// to "" — never an error.
-type teachingAttendanceRosterRowResponse struct {
-	EnrollmentID string `json:"enrollmentId"`
-	StudentID    string `json:"studentId"`
-	StudentName  string `json:"studentName"`
-	Status       string `json:"status"`
+// attendanceClassResponse is one pass list the caller takes: a DAILY group
+// (once, however many subjects the caller teaches there) or a PER_CLASS
+// assignment (group + subject).
+type attendanceClassResponse struct {
+	GroupID      string `json:"groupId"`
+	GroupLabel   string `json:"groupLabel"`
+	LevelName    string `json:"levelName"`
+	Mode         string `json:"mode"`
+	SubjectID    string `json:"subjectId,omitempty"`
+	SubjectName  string `json:"subjectName,omitempty"`
+	AssignmentID string `json:"assignmentId,omitempty"`
 }
 
-// Roster handles GET /api/v1/teaching/attendance/roster?groupId=&date= — the day's
-// pass list for one of the caller's OWN groups, each row enriched with the
-// student's readable name. The groupId is caller-supplied, so it is verified
-// against the caller's own set first (404 for any other group), and only then is
-// the attendance service asked for the roster.
+// Classes handles GET /api/v1/teaching/attendance/classes — the lists the CALLER
+// takes in the active cycle: one per daily group they teach (deduped) and one
+// per per-class assignment. Derived from the principal (callerAssignments), so
+// no request field can widen it; a principal with no linked teacher gets an
+// empty list. The catalog read is a hard dependency — a group's mode is never
+// guessed. Sorted by group label, then subject name.
+//
+// It runs behind RequireAuth + rotation, the module_attendance + module_config
+// guards and RequirePermission("attendance_own:read").
+func (h *TeachingAttendanceHandler) Classes(w http.ResponseWriter, r *http.Request) {
+	p, ok := middleware.PrincipalFrom(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	_, assignments, err := h.scope.callerAssignments(r.Context(), p)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	out := make([]attendanceClassResponse, 0, len(assignments))
+	if len(assignments) > 0 {
+		catalog, err := loadAttendanceCatalog(r.Context(), h.scope.config)
+		if err != nil {
+			writeConnectError(w, err)
+			return
+		}
+		out = classesFor(assignments, catalog)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"classes": out})
+}
+
+// classesFor projects the caller's assignments onto their pass lists.
+func classesFor(assignments []client.TeachingAssignment, catalog attendanceCatalog) []attendanceClassResponse {
+	out := make([]attendanceClassResponse, 0, len(assignments))
+	seenDaily := make(map[string]bool, len(assignments))
+	for _, a := range assignments {
+		group, ok := catalog.group(a.GroupID)
+		if !ok {
+			continue // a group the catalog no longer holds takes no list
+		}
+		class := attendanceClassResponse{GroupID: a.GroupID, GroupLabel: group.Label, LevelName: group.LevelName, Mode: group.Mode}
+		if group.Mode == attendanceModeDaily {
+			if seenDaily[a.GroupID] {
+				continue
+			}
+			seenDaily[a.GroupID] = true
+		} else {
+			class.SubjectID, class.SubjectName, class.AssignmentID = a.SubjectID, catalog.subjects[a.SubjectID], a.ID
+		}
+		out = append(out, class)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].GroupLabel != out[j].GroupLabel {
+			return out[i].GroupLabel < out[j].GroupLabel
+		}
+		return out[i].SubjectName < out[j].SubjectName
+	})
+	return out
+}
+
+// --- list ownership (T3) ---------------------------------------------------------
+
+// assertOwnsList is the ownership gate of the roster and save routes. It writes
+// the refusal itself and returns the group's mode and true only when the caller
+// may touch the list:
+//
+//   - 404 when the caller teaches nothing in the group (active cycle) — the same
+//     answer as a group that does not exist, so nothing leaks;
+//   - 400 when the subject does not fit the group's mode;
+//   - 404 on a per-class list whose (group, subject) assignment is not the
+//     caller's — another teacher's class in the same group is invisible too.
+//
+// The caller's assignments come from the PRINCIPAL, never the request.
+func (h *TeachingAttendanceHandler) assertOwnsList(w http.ResponseWriter, r *http.Request, p middleware.Principal, groupID, subjectID string) (string, bool) {
+	_, assignments, err := h.scope.callerAssignments(r.Context(), p)
+	if err != nil {
+		writeConnectError(w, err)
+		return "", false
+	}
+	teachesGroup, teachesSubject := false, false
+	for _, a := range assignments {
+		if a.GroupID != groupID || groupID == "" {
+			continue
+		}
+		teachesGroup = true
+		if a.SubjectID == subjectID {
+			teachesSubject = true
+		}
+	}
+	if !teachesGroup {
+		writeNotFound(w)
+		return "", false
+	}
+	catalog, err := loadAttendanceCatalog(r.Context(), h.scope.config)
+	if err != nil {
+		writeConnectError(w, err)
+		return "", false
+	}
+	group, ok := catalog.group(groupID)
+	if !ok {
+		writeNotFound(w)
+		return "", false
+	}
+	if msg := listModeRefusal(group.Mode, subjectID); msg != "" {
+		writeBadRequest(w, msg)
+		return "", false
+	}
+	if group.Mode == attendanceModePerClass && !teachesSubject {
+		writeNotFound(w)
+		return "", false
+	}
+	return group.Mode, true
+}
+
+// --- roster ----------------------------------------------------------------
+
+// Roster handles GET /api/v1/teaching/attendance/roster?groupId=&date=[&subjectId=]
+// — one of the caller's OWN lists (see assertOwnsList), each row enriched with
+// the student's name. Any date may be READ; editable says whether the caller may
+// still save it (today back to attendanceWindowDays days, never the future).
 //
 // It runs behind RequireAuth + rotation, the module_attendance guard and
 // RequirePermission("attendance_own:read").
@@ -203,38 +321,33 @@ func (h *TeachingAttendanceHandler) Roster(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	q := r.URL.Query()
-	groupID := q.Get("groupId")
-	if !h.scope.assertOwnsGroup(w, r, p, groupID) {
+	groupID, dateStr, subjectID := q.Get("groupId"), q.Get("date"), q.Get("subjectId")
+	mode, ok := h.assertOwnsList(w, r, p, groupID, subjectID)
+	if !ok {
 		return
 	}
-	rows, err := h.attendance.GetDailyRoster(r.Context(), groupID, q.Get("date"))
+	date, ok := parseListDate(dateStr)
+	if !ok {
+		writeBadRequest(w, msgInvalidDate)
+		return
+	}
+	roster, err := h.attendance.GetDailyRoster(r.Context(), groupID, dateStr, subjectID)
 	if err != nil {
 		writeConnectError(w, err)
 		return
 	}
-	// Resolve the studentId→name map ONCE, and only when there is a row to enrich.
-	studentNames := h.scope.studentNames(r.Context(), len(rows) > 0)
-	out := make([]teachingAttendanceRosterRowResponse, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, teachingAttendanceRosterRowResponse{
-			EnrollmentID: row.EnrollmentID,
-			StudentID:    row.StudentID,
-			StudentName:  studentNames[row.StudentID],
-			Status:       row.Status,
-		})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"roster": out})
+	names := h.scope.studentNames(r.Context(), len(roster.Rows) > 0)
+	editable := teacherWindowRefusal(date, h.now()) == ""
+	writeJSON(w, http.StatusOK, toAttendanceListResponse(mode, dateStr, editable, roster, names))
 }
 
 // --- save ------------------------------------------------------------------
 
-// SaveAttendance handles POST /api/v1/teaching/attendance — reconcile one
-// group·day for one of the caller's OWN groups. The body is the admin
-// saveDailyRequest shape (groupId, date, marks[]); the groupId is caller-supplied,
-// so it is verified against the caller's own set first (404 for any other group —
-// a teacher can never write another group's attendance), and only then is the day
-// reconciled. The model is DEFAULT-PRESENT: an empty marks array legitimately
-// means "everybody present" and is never rejected.
+// SaveAttendance handles POST /api/v1/teaching/attendance — reconcile one of the
+// caller's OWN lists (see assertOwnsList) on a day inside the window (today back
+// to attendanceWindowDays days; never the future), stamping the caller as its
+// taker. The model is DEFAULT-PRESENT: an empty marks array legitimately means
+// "everybody present" and is never rejected.
 //
 // It runs behind RequireAuth + rotation, the module_attendance guard and
 // RequirePermission("attendance_own:write").
@@ -249,10 +362,26 @@ func (h *TeachingAttendanceHandler) SaveAttendance(w http.ResponseWriter, r *htt
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if !h.scope.assertOwnsGroup(w, r, p, req.GroupID) {
+	if _, ok := h.assertOwnsList(w, r, p, req.GroupID, req.SubjectID); !ok {
 		return
 	}
-	absent, marked, err := h.attendance.SaveDailyAttendance(r.Context(), req.GroupID, req.Date, toMarks(req.Marks))
+	date, ok := parseListDate(req.Date)
+	if !ok {
+		writeBadRequest(w, msgInvalidDate)
+		return
+	}
+	if msg := teacherWindowRefusal(date, h.now()); msg != "" {
+		writeBadRequest(w, msg)
+		return
+	}
+	absent, marked, err := h.attendance.SaveDailyAttendance(r.Context(), client.SaveAttendanceInput{
+		GroupID:     req.GroupID,
+		Date:        req.Date,
+		SubjectID:   req.SubjectID,
+		Marks:       toMarks(req.Marks),
+		TakenBy:     p.UserID,
+		TakenByName: takerName(r.Context(), h.users, p),
+	})
 	if err != nil {
 		writeConnectError(w, err)
 		return

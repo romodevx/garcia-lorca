@@ -361,6 +361,16 @@ func (stubConfig) ListGroups(_ context.Context, _ *connect.Request[configv1.List
 	}}), nil
 }
 
+// ListGradeLevels backs the attendance mode resolution: the stub group carries
+// no grade, so its list resolves as daily (the column's default).
+func (stubConfig) ListGradeLevels(_ context.Context, _ *connect.Request[configv1.ListGradeLevelsRequest]) (*connect.Response[configv1.ListGradeLevelsResponse], error) {
+	return connect.NewResponse(&configv1.ListGradeLevelsResponse{}), nil
+}
+
+// schoolTodayISO is the system's school day (UTC), the one date a teacher may
+// always save.
+func schoolTodayISO() string { return time.Now().UTC().Format("2006-01-02") }
+
 func (stubConfig) ListSubjects(_ context.Context, _ *connect.Request[configv1.ListSubjectsRequest]) (*connect.Response[configv1.ListSubjectsResponse], error) {
 	return connect.NewResponse(&configv1.ListSubjectsResponse{Subjects: []*configv1.Subject{
 		{Id: "sub-1", Name: "Matemáticas"},
@@ -1528,14 +1538,15 @@ func TestAttendanceRosterWithReadPermission200(t *testing.T) {
 		t.Fatalf("status = %d, want 200", res.StatusCode)
 	}
 	var out struct {
-		Roster []map[string]any `json:"roster"`
+		Mode string           `json:"mode"`
+		Rows []map[string]any `json:"rows"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	// Default-present survives the whole chain: an unmarked row reads "present".
-	if len(out.Roster) != 2 || out.Roster[0]["status"] != "present" || out.Roster[1]["status"] != "absent" {
-		t.Errorf("body = %v", out.Roster)
+	if out.Mode != "daily" || len(out.Rows) != 2 || out.Rows[0]["status"] != "present" || out.Rows[1]["status"] != "absent" {
+		t.Errorf("body = %+v", out)
 	}
 }
 
@@ -2472,17 +2483,17 @@ func TestTeachingAttendanceRosterOwnedGroupReturns200(t *testing.T) {
 		t.Fatalf("status = %d, want 200", res.StatusCode)
 	}
 	var out struct {
-		Roster []map[string]any `json:"roster"`
+		Rows []map[string]any `json:"rows"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	// The gateway resolves the student name for the Maestro (who holds no
 	// students:read): the stub roster's stu-1 comes back named "Ana".
-	if len(out.Roster) != 2 || out.Roster[0]["enrollmentId"] != "enr-1" ||
-		out.Roster[0]["studentId"] != "stu-1" || out.Roster[0]["studentName"] != "Ana" ||
-		out.Roster[0]["status"] != "present" {
-		t.Errorf("roster = %v, want enr-1/stu-1/Ana/present enriched", out.Roster)
+	if len(out.Rows) != 2 || out.Rows[0]["enrollmentId"] != "enr-1" ||
+		out.Rows[0]["studentId"] != "stu-1" || out.Rows[0]["name"] != "Ana" ||
+		out.Rows[0]["status"] != "present" {
+		t.Errorf("rows = %v, want enr-1/stu-1/Ana/present enriched", out.Rows)
 	}
 }
 
@@ -2527,7 +2538,7 @@ func TestTeachingAttendanceSaveWithoutAttendanceOwnWriteIs403(t *testing.T) {
 func TestTeachingAttendanceSaveOwnedGroupReturns200(t *testing.T) {
 	gw := newTestGateway(t, map[string]bool{"module_attendance": true})
 	res := doGateway(t, gw, http.MethodPost, "/api/v1/teaching/attendance", "att-own-writer",
-		`{"groupId":"grp-1","date":"2026-09-01","marks":[{"enrollmentId":"enr-1","status":"absent"}]}`)
+		`{"groupId":"grp-1","date":"`+schoolTodayISO()+`","marks":[{"enrollmentId":"enr-1","status":"absent"}]}`)
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", res.StatusCode)
 	}

@@ -26,6 +26,9 @@ type fakeConfig struct {
 	levelIn client.CreateLevelInput
 	levels  []client.LevelResult
 
+	modeLevelID string
+	modeIn      string
+
 	periodIn      client.NonWorkingPeriod
 	periods       []client.NonWorkingPeriod
 	periodsCycle  string
@@ -150,6 +153,14 @@ func (f *fakeConfig) CreateLevel(_ context.Context, in client.CreateLevelInput) 
 
 func (f *fakeConfig) ListLevels(_ context.Context) ([]client.LevelResult, error) {
 	return f.levels, f.err
+}
+
+func (f *fakeConfig) SetLevelAttendanceMode(_ context.Context, id, mode string) (client.LevelResult, error) {
+	f.modeLevelID, f.modeIn = id, mode
+	if f.err != nil {
+		return client.LevelResult{}, f.err
+	}
+	return client.LevelResult{ID: id, Name: "Secundaria", Granularity: "cycle", AttendanceMode: mode}, nil
 }
 
 func (f *fakeConfig) CreateGradeLevel(_ context.Context, in client.CreateGradeLevelInput) (client.GradeLevelResult, error) {

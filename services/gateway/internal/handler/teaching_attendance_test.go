@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
+	"time"
 
 	connect "connectrpc.com/connect"
 
@@ -14,54 +14,78 @@ import (
 	"github.com/garcia-lorca/services/gateway/internal/handler"
 )
 
-// fakeTeachingAttendance doubles the daily pass-list surface the teaching
-// attendance handler consumes, counting its calls so the ownership guard's "a
-// group the caller does not teach must never reach downstream" contract is
-// observable, and recording the group id it was keyed on.
+// fakeTeachingAttendance doubles the pass-list surface the attendance handlers
+// consume, counting its calls so the ownership guard's "a list the caller may not
+// touch must never reach downstream" contract is observable, and recording what
+// each call was keyed on.
 type fakeTeachingAttendance struct {
-	gotRosterGroupID string
-	gotRosterDate    string
-	roster           []client.AttendanceRosterRow
-	rosterErr        error
-	rosterCalls      int
+	gotRosterGroupID   string
+	gotRosterDate      string
+	gotRosterSubjectID string
+	roster             []client.AttendanceRosterRow
+	session            *client.AttendanceSession
+	rosterErr          error
+	rosterCalls        int
 
-	gotSaveGroupID string
-	gotSaveDate    string
-	gotSaveMarks   []client.Mark
-	saveAbsent     int32
-	saveMarked     int32
-	saveErr        error
-	saveCalls      int
+	gotSave    client.SaveAttendanceInput
+	saveAbsent int32
+	saveMarked int32
+	saveErr    error
+	saveCalls  int
 }
 
-func (f *fakeTeachingAttendance) GetDailyRoster(_ context.Context, groupID, date string) ([]client.AttendanceRosterRow, error) {
+func (f *fakeTeachingAttendance) GetDailyRoster(_ context.Context, groupID, date, subjectID string) (client.AttendanceRoster, error) {
 	f.rosterCalls++
-	f.gotRosterGroupID = groupID
-	f.gotRosterDate = date
+	f.gotRosterGroupID, f.gotRosterDate, f.gotRosterSubjectID = groupID, date, subjectID
 	if f.rosterErr != nil {
-		return nil, f.rosterErr
+		return client.AttendanceRoster{}, f.rosterErr
 	}
-	return f.roster, nil
+	return client.AttendanceRoster{Rows: f.roster, Session: f.session}, nil
 }
 
-func (f *fakeTeachingAttendance) SaveDailyAttendance(_ context.Context, groupID, date string, marks []client.Mark) (int32, int32, error) {
+func (f *fakeTeachingAttendance) SaveDailyAttendance(_ context.Context, in client.SaveAttendanceInput) (int32, int32, error) {
 	f.saveCalls++
-	f.gotSaveGroupID = groupID
-	f.gotSaveDate = date
-	f.gotSaveMarks = marks
+	f.gotSave = in
 	if f.saveErr != nil {
 		return 0, 0, f.saveErr
 	}
 	return f.saveAbsent, f.saveMarked, nil
 }
 
+// fakeUsers doubles the iam directory the handlers read the taker's display
+// name from.
+type fakeUsers struct {
+	users map[string]client.User
+	err   error
+}
+
+func (f *fakeUsers) GetUser(_ context.Context, id string) (client.User, error) {
+	if f.err != nil {
+		return client.User{}, f.err
+	}
+	u, ok := f.users[id]
+	if !ok {
+		return client.User{}, connect.NewError(connect.CodeNotFound, errString("user not found"))
+	}
+	return u, nil
+}
+
+// attendanceNow is the fixed clock of every attendance test: 20:00 UTC on
+// 2026-09-15, so the system's "today" is 2026-09-15 and the teacher's window
+// runs 2026-09-08..2026-09-15.
+var attendanceNow = time.Date(2026, 9, 15, 20, 0, 0, 0, time.UTC)
+
+func fixedClock() time.Time { return attendanceNow }
+
+var teacherUsers = &fakeUsers{users: map[string]client.User{"usr-t": {ID: "usr-t", DisplayName: "Gabriela Rojas"}}}
+
 // newTeachingAttendance builds the teacher self-scoped attendance handler over a
-// config (caller→teacher→groups scoping + group-name enrichment), an attendance
-// service (roster + save) and a students directory (roster name enrichment). The
-// grades dependency of the scope handler is unused here, so a bare fake suffices.
+// config (caller→teacher→assignments scoping + catalog), an attendance service
+// (roster + save) and a students directory (roster name enrichment), on the
+// fixed test clock. The grades dependency of the scope handler is unused here.
 func newTeachingAttendance(config handler.TeachingConfigReader, att handler.TeachingAttendanceService, students handler.TeachingStudentReader) *handler.TeachingAttendanceHandler {
 	scope := handler.NewTeachingHandler(config, &fakeTeachingGrades{}, students)
-	return handler.NewTeachingAttendanceHandler(scope, att)
+	return handler.NewTeachingAttendanceHandler(scope, att, teacherUsers, handler.WithAttendanceClock(fixedClock))
 }
 
 // twoGroupTeacher is the multi-group fixture: the principal usr-t is linked to
@@ -245,225 +269,8 @@ func TestTeachingGroupsEmptyPrincipalNeverMatchesUnlinkedTeacher(t *testing.T) {
 	}
 }
 
-// --- roster ----------------------------------------------------------------
-
-func TestTeachingAttendanceRosterOwnedGroupReads(t *testing.T) {
-	config := oneTeacher() // teaches grp-1 (asg-1)
-	att := &fakeTeachingAttendance{roster: []client.AttendanceRosterRow{
-		{EnrollmentID: "enr-1", StudentID: "stu-1", Status: "present"},
-		{EnrollmentID: "enr-2", StudentID: "stu-2", Status: "absent"},
-	}}
-	// The Maestro holds no students:read, so the gateway resolves the names on its
-	// behalf: ONE list read builds the studentId→name map.
-	students := &fakeTeachingStudents{students: []client.StudentResult{
-		{ID: "stu-1", FirstName: "Ana", LastName: "García"},
-		{ID: "stu-2", FirstName: "Luis", LastName: "Pérez"},
-		{ID: "stu-9", FirstName: "Otra", LastName: "Persona"},
-	}}
-	h := newTeachingAttendance(config, att, students)
-
-	rec := httptest.NewRecorder()
-	h.Roster(rec, teacherGET("/api/v1/teaching/attendance/roster?groupId=grp-1&date=2026-09-01", "usr-t"))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if att.rosterCalls != 1 || att.gotRosterGroupID != "grp-1" || att.gotRosterDate != "2026-09-01" {
-		t.Errorf("roster read = %d call(s) for %q/%q, want 1 for grp-1/2026-09-01",
-			att.rosterCalls, att.gotRosterGroupID, att.gotRosterDate)
-	}
-	if students.gotListCalls != 1 {
-		t.Errorf("students listed %d time(s), want exactly 1 for the whole roster", students.gotListCalls)
-	}
-	var out struct {
-		Roster []map[string]any `json:"roster"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(out.Roster) != 2 {
-		t.Fatalf("roster = %v, want two rows", out.Roster)
-	}
-	byEnr := map[string]map[string]any{}
-	for _, row := range out.Roster {
-		byEnr[row["enrollmentId"].(string)] = row
-	}
-	if byEnr["enr-1"]["studentId"] != "stu-1" || byEnr["enr-1"]["studentName"] != "Ana García" ||
-		byEnr["enr-1"]["status"] != "present" {
-		t.Errorf("enr-1 = %v, want fields kept and studentName enriched", byEnr["enr-1"])
-	}
-	if byEnr["enr-2"]["studentName"] != "Luis Pérez" || byEnr["enr-2"]["status"] != "absent" {
-		t.Errorf("enr-2 = %v, want Luis Pérez / absent", byEnr["enr-2"])
-	}
-}
-
-// A students-lookup miss must never fail the roster read: the names degrade to
-// empty strings while the rows still come back 200.
-func TestTeachingAttendanceRosterStudentLookupErrorDegradesToEmptyName(t *testing.T) {
-	config := oneTeacher()
-	att := &fakeTeachingAttendance{roster: []client.AttendanceRosterRow{
-		{EnrollmentID: "enr-1", StudentID: "stu-1", Status: "late"},
-	}}
-	students := &fakeTeachingStudents{err: connect.NewError(connect.CodeUnavailable, errString("students down"))}
-	h := newTeachingAttendance(config, att, students)
-
-	rec := httptest.NewRecorder()
-	h.Roster(rec, teacherGET("/api/v1/teaching/attendance/roster?groupId=grp-1&date=2026-09-01", "usr-t"))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 despite the students error", rec.Code)
-	}
-	var out struct {
-		Roster []map[string]any `json:"roster"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(out.Roster) != 1 {
-		t.Fatalf("roster = %d, want 1 (the row still comes back)", len(out.Roster))
-	}
-	row := out.Roster[0]
-	if row["studentId"] != "stu-1" || row["studentName"] != "" || row["status"] != "late" {
-		t.Errorf("row = %v, want ids/status kept and studentName degraded to empty string", row)
-	}
-}
-
-// The ownership core: a groupId NOT belonging to the caller answers 404 and NEVER
-// reaches the attendance service — no roster is read for another teacher's group.
-func TestTeachingAttendanceRosterForeignGroupIs404AndDoesNotRead(t *testing.T) {
-	config := oneTeacher() // teaches only grp-1
-	att := &fakeTeachingAttendance{}
-	h := newTeachingAttendance(config, att, &fakeTeachingStudents{})
-
-	rec := httptest.NewRecorder()
-	h.Roster(rec, teacherGET("/api/v1/teaching/attendance/roster?groupId=grp-999&date=2026-09-01", "usr-t"))
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 (never 403 — no existence leak)", rec.Code)
-	}
-	if att.rosterCalls != 0 {
-		t.Errorf("roster was read %d time(s); an unowned group must never reach downstream", att.rosterCalls)
-	}
-}
-
-// An empty principal resolves to an empty group set, so even a real group id
-// answers 404 and never reaches the attendance service.
-func TestTeachingAttendanceRosterEmptyPrincipalIs404AndDoesNotRead(t *testing.T) {
-	config := oneTeacher()
-	att := &fakeTeachingAttendance{}
-	h := newTeachingAttendance(config, att, &fakeTeachingStudents{})
-
-	rec := httptest.NewRecorder()
-	h.Roster(rec, teacherGET("/api/v1/teaching/attendance/roster?groupId=grp-1&date=2026-09-01", ""))
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 (empty principal owns no group)", rec.Code)
-	}
-	if att.rosterCalls != 0 {
-		t.Errorf("roster was read %d time(s); an empty principal must never reach downstream", att.rosterCalls)
-	}
-}
-
-func TestTeachingAttendanceRosterWithoutPrincipalIs401(t *testing.T) {
-	h := newTeachingAttendance(oneTeacher(), &fakeTeachingAttendance{}, &fakeTeachingStudents{})
-	rec := httptest.NewRecorder()
-	h.Roster(rec, httptest.NewRequest(http.MethodGet, "/api/v1/teaching/attendance/roster?groupId=grp-1", nil))
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", rec.Code)
-	}
-}
-
-// --- save ------------------------------------------------------------------
-
-func TestTeachingAttendanceSaveOwnedGroupSaves(t *testing.T) {
-	config := oneTeacher()
-	att := &fakeTeachingAttendance{saveAbsent: 1, saveMarked: 2}
-	h := newTeachingAttendance(config, att, &fakeTeachingStudents{})
-
-	rec := httptest.NewRecorder()
-	h.SaveAttendance(rec, teacherPOST("/api/v1/teaching/attendance", "usr-t",
-		`{"groupId":"grp-1","date":"2026-09-01","marks":[{"enrollmentId":"enr-1","status":"absent","note":"cita médica"},{"enrollmentId":"enr-2","status":"late"}]}`))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if att.saveCalls != 1 || att.gotSaveGroupID != "grp-1" || att.gotSaveDate != "2026-09-01" {
-		t.Errorf("save = %d call(s) for %q/%q, want 1 for grp-1/2026-09-01",
-			att.saveCalls, att.gotSaveGroupID, att.gotSaveDate)
-	}
-	if len(att.gotSaveMarks) != 2 || att.gotSaveMarks[0].EnrollmentID != "enr-1" ||
-		att.gotSaveMarks[0].Status != "absent" || att.gotSaveMarks[0].Note != "cita médica" {
-		t.Errorf("marks = %+v, want the exceptions passed through unchanged", att.gotSaveMarks)
-	}
-	var out map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if out["absentCount"] != float64(1) || out["markedCount"] != float64(2) {
-		t.Errorf("summary = %v, want absentCount 1 / markedCount 2", out)
-	}
-}
-
-// The ownership core on the write path: saving against a group the caller does
-// not teach answers 404 and NEVER reaches the attendance service.
-func TestTeachingAttendanceSaveForeignGroupIs404AndDoesNotSave(t *testing.T) {
-	config := oneTeacher() // teaches only grp-1
-	att := &fakeTeachingAttendance{}
-	h := newTeachingAttendance(config, att, &fakeTeachingStudents{})
-
-	rec := httptest.NewRecorder()
-	h.SaveAttendance(rec, teacherPOST("/api/v1/teaching/attendance", "usr-t",
-		`{"groupId":"grp-999","date":"2026-09-01","marks":[]}`))
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 (not the caller's group)", rec.Code)
-	}
-	if att.saveCalls != 0 {
-		t.Errorf("save ran %d time(s); an unowned group must never reach downstream", att.saveCalls)
-	}
-}
-
-// An empty principal owns no group, so even a real group id answers 404 and never
-// reaches the save.
-func TestTeachingAttendanceSaveEmptyPrincipalIs404AndDoesNotSave(t *testing.T) {
-	config := oneTeacher()
-	att := &fakeTeachingAttendance{}
-	h := newTeachingAttendance(config, att, &fakeTeachingStudents{})
-
-	rec := httptest.NewRecorder()
-	h.SaveAttendance(rec, teacherPOST("/api/v1/teaching/attendance", "",
-		`{"groupId":"grp-1","date":"2026-09-01","marks":[]}`))
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 (empty principal owns no group)", rec.Code)
-	}
-	if att.saveCalls != 0 {
-		t.Errorf("save ran %d time(s); an empty principal must never reach downstream", att.saveCalls)
-	}
-}
-
-func TestTeachingAttendanceSaveInvalidBodyIs400(t *testing.T) {
-	att := &fakeTeachingAttendance{}
-	h := newTeachingAttendance(oneTeacher(), att, &fakeTeachingStudents{})
-
-	rec := httptest.NewRecorder()
-	h.SaveAttendance(rec, teacherPOST("/api/v1/teaching/attendance", "usr-t", `{not json`))
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", rec.Code)
-	}
-	if att.saveCalls != 0 {
-		t.Errorf("save ran %d time(s); a malformed body must never reach downstream", att.saveCalls)
-	}
-}
-
-func TestTeachingAttendanceSaveWithoutPrincipalIs401(t *testing.T) {
-	h := newTeachingAttendance(oneTeacher(), &fakeTeachingAttendance{}, &fakeTeachingStudents{})
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/teaching/attendance",
-		strings.NewReader(`{"groupId":"grp-1","date":"2026-09-01","marks":[]}`))
-	h.SaveAttendance(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", rec.Code)
-	}
+// newTeachingAttendanceWithUsers is newTeachingAttendance with its own directory.
+func newTeachingAttendanceWithUsers(config handler.TeachingConfigReader, att handler.TeachingAttendanceService, users handler.AttendanceUserReader) *handler.TeachingAttendanceHandler {
+	scope := handler.NewTeachingHandler(config, &fakeTeachingGrades{}, &fakeTeachingStudents{})
+	return handler.NewTeachingAttendanceHandler(scope, att, users, handler.WithAttendanceClock(fixedClock))
 }

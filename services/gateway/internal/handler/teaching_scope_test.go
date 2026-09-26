@@ -47,6 +47,9 @@ func twoCycleTeacher() *fakeTeachingConfig {
 			"cyc-old": {{ID: "trm-old", CycleID: "cyc-old"}},
 			"cyc-now": {{ID: "trm-now", CycleID: "cyc-now"}},
 		},
+		// The groups resolve (to a daily list: no level mode) so a refusal in
+		// these tests is the ownership rule, never a missing catalog entry.
+		groups: []client.GroupResult{{ID: "grp-old"}, {ID: "grp-now"}, {ID: "grp-b"}},
 	}
 }
 
@@ -254,11 +257,11 @@ func TestTeachingForeignEnrollmentInsideOwnScopeIsRefusedDownstream(t *testing.T
 		rec := httptest.NewRecorder()
 		newTeachingAttendance(twoCycleTeacher(), att, &fakeTeachingStudents{}).
 			SaveAttendance(rec, teacherPOST("/api/v1/teaching/attendance", "usr-t",
-				`{"groupId":"grp-now","date":"2026-09-01","marks":[{"enrollmentId":"enr-of-grp-b","status":"absent"}]}`))
+				`{"groupId":"grp-now","date":"2026-09-15","marks":[{"enrollmentId":"enr-of-grp-b","status":"absent"}]}`))
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
 		require.Equal(t, 1, att.saveCalls)
-		assert.Equal(t, "grp-now", att.gotSaveGroupID, "the save is keyed on the OWNED group")
-		assert.Equal(t, "enr-of-grp-b", att.gotSaveMarks[0].EnrollmentID)
+		assert.Equal(t, "grp-now", att.gotSave.GroupID, "the save is keyed on the OWNED group")
+		assert.Equal(t, "enr-of-grp-b", att.gotSave.Marks[0].EnrollmentID)
 	})
 
 	t.Run("grades", func(t *testing.T) {

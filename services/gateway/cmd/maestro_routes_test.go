@@ -58,7 +58,9 @@ func TestMaestroReachesItsOwnTeachingSurface(t *testing.T) {
 		{http.MethodGet, "/api/v1/teaching/roster?assignmentId=asg-1&termId=trm-1", ""},
 		{http.MethodPost, "/api/v1/teaching/grades", `{"assignmentId":"asg-1","enrollmentId":"enr-1","termId":"trm-1","value":9}`},
 		{http.MethodGet, "/api/v1/teaching/attendance/roster?groupId=grp-1&date=2026-09-01", ""},
-		{http.MethodPost, "/api/v1/teaching/attendance", `{"groupId":"grp-1","date":"2026-09-01","marks":[]}`},
+		// A teacher saves inside the window only: today's school (UTC) date.
+		{http.MethodPost, "/api/v1/teaching/attendance", `{"groupId":"grp-1","date":"` + schoolTodayISO() + `","marks":[]}`},
+		{http.MethodGet, "/api/v1/teaching/attendance/classes", ""},
 	}
 	gw := newTestGateway(t, allModulesOn)
 	for _, rt := range routes {

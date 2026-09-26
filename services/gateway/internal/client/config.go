@@ -65,6 +65,31 @@ type LevelResult struct {
 	Name        string
 	SEPCode     string
 	Granularity string
+	// AttendanceMode is "daily" (one list per group per day) or "per_class"
+	// (one per group, subject and day); "" only if config sent none.
+	AttendanceMode string
+}
+
+// Attendance modes as the edge names them.
+const (
+	AttendanceModeDaily    = "daily"
+	AttendanceModePerClass = "per_class"
+)
+
+var attendanceModeNames = map[configv1.AttendanceMode]string{
+	configv1.AttendanceMode_ATTENDANCE_MODE_DAILY:     AttendanceModeDaily,
+	configv1.AttendanceMode_ATTENDANCE_MODE_PER_CLASS: AttendanceModePerClass,
+}
+
+// attendanceModeFromName maps an edge mode name to the wire enum; an unknown
+// name maps to UNSPECIFIED, which config rejects as invalid.
+func attendanceModeFromName(name string) configv1.AttendanceMode {
+	for mode, n := range attendanceModeNames {
+		if n == name {
+			return mode
+		}
+	}
+	return configv1.AttendanceMode_ATTENDANCE_MODE_UNSPECIFIED
 }
 
 // CreateGradeLevelInput is the edge's view of a new grade-within-a-level.
@@ -220,6 +245,20 @@ func (c *ConfigClient) ListLevels(ctx context.Context) ([]LevelResult, error) {
 		out = append(out, toLevelResult(l))
 	}
 	return out, nil
+}
+
+// SetLevelAttendanceMode changes how a level takes attendance ("daily" or
+// "per_class"). An unknown mode reaches config as UNSPECIFIED and comes back
+// InvalidArgument; an unknown level is NotFound.
+func (c *ConfigClient) SetLevelAttendanceMode(ctx context.Context, id, mode string) (LevelResult, error) {
+	res, err := c.rpc.SetLevelAttendanceMode(ctx, connect.NewRequest(&configv1.SetLevelAttendanceModeRequest{
+		Id:             id,
+		AttendanceMode: attendanceModeFromName(mode),
+	}))
+	if err != nil {
+		return LevelResult{}, err
+	}
+	return toLevelResult(res.Msg.GetLevel()), nil
 }
 
 // --- grade_levels ---------------------------------------------------------
@@ -601,6 +640,8 @@ func toLevelResult(l *configv1.Level) LevelResult {
 		Name:        l.GetName(),
 		SEPCode:     l.GetSepCode(),
 		Granularity: granularityName(l.GetEnrollmentGranularity()),
+		// An unknown enum value reads as "" (the map's zero value).
+		AttendanceMode: attendanceModeNames[l.GetAttendanceMode()],
 	}
 }
 

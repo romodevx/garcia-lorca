@@ -4,221 +4,198 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	connect "connectrpc.com/connect"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/handler"
+	"github.com/garcia-lorca/services/gateway/internal/middleware"
 )
 
-// fakeAttendance is a hand-written double for the attendance surface the handler
-// needs. It records the last input and returns canned results/errors so each
-// handler is exercised in isolation (no Connect round-trip).
+// fakeAttendance is the director's attendance surface: the pass-list double of
+// the teaching tests plus the per-enrollment history read.
 type fakeAttendance struct {
-	rosterGroup string
-	rosterDate  string
-	roster      []client.AttendanceRosterRow
-
-	saveGroup string
-	saveDate  string
-	saveMarks []client.Mark
-	absent    int32
-	marked    int32
+	fakeTeachingAttendance
 
 	listEnrollment string
 	listFrom       string
 	listTo         string
 	records        []client.AttendanceRecord
-
-	err error
-}
-
-func (f *fakeAttendance) GetDailyRoster(_ context.Context, groupID, date string) ([]client.AttendanceRosterRow, error) {
-	f.rosterGroup, f.rosterDate = groupID, date
-	return f.roster, f.err
-}
-
-func (f *fakeAttendance) SaveDailyAttendance(_ context.Context, groupID, date string, marks []client.Mark) (int32, int32, error) {
-	f.saveGroup, f.saveDate, f.saveMarks = groupID, date, marks
-	if f.err != nil {
-		return 0, 0, f.err
-	}
-	return f.absent, f.marked, nil
+	listErr        error
 }
 
 func (f *fakeAttendance) ListAttendance(_ context.Context, enrollmentID, from, to string) ([]client.AttendanceRecord, error) {
 	f.listEnrollment, f.listFrom, f.listTo = enrollmentID, from, to
-	return f.records, f.err
+	return f.records, f.listErr
+}
+
+var directorUsers = &fakeUsers{users: map[string]client.User{"usr-dir": {ID: "usr-dir", DisplayName: "Dirección"}}}
+
+func newDirectorAttendance(att handler.AttendanceService) *handler.AttendanceHandler {
+	students := &fakeTeachingStudents{students: []client.StudentResult{{ID: "stu-1", FirstName: "Ana", LastName: "García"}}}
+	return handler.NewAttendanceHandler(att, listTeacher(), students, directorUsers)
+}
+
+// directorReq is an authenticated director request (attendance:read/write).
+func directorReq(method, target, body string) *http.Request {
+	var r *http.Request
+	if body == "" {
+		r = httptest.NewRequest(method, target, nil)
+	} else {
+		r = httptest.NewRequest(method, target, strings.NewReader(body))
+	}
+	return r.WithContext(middleware.WithPrincipal(r.Context(), middleware.Principal{
+		UserID: "usr-dir", TenantID: "t1", Email: "director@garcialorca.edu.mx",
+		Permissions: []string{"attendance:read", "attendance:write"},
+	}))
 }
 
 // --- roster ----------------------------------------------------------------
 
-func TestAttendanceGetRosterForwardsQueryAndReturnsRows(t *testing.T) {
-	svc := &fakeAttendance{roster: []client.AttendanceRosterRow{
-		{EnrollmentID: "enr-1", StudentID: "stu-1", Status: "present"},
-		{EnrollmentID: "enr-2", StudentID: "stu-2", Status: "absent"},
-	}}
-	h := handler.NewAttendanceHandler(svc)
+// The director has no date window (every day is editable, future included) but
+// the level's mode still applies, and a per-class subject must be one taught in
+// that group.
+func TestAttendanceGetRoster(t *testing.T) {
+	tests := []struct {
+		name        string
+		query       string
+		wantCode    int
+		wantBody    string
+		wantMode    string
+		wantSubject string
+	}{
+		{name: "daily list long ago is editable", query: "groupId=grp-prim&date=2026-01-10", wantCode: 200, wantMode: "daily"},
+		{name: "daily list in the future is editable", query: "groupId=grp-prim&date=2026-12-01", wantCode: 200, wantMode: "daily"},
+		{name: "per-class list of any subject taught in the group", query: "groupId=grp-sec&date=2026-09-15&subjectId=sub-hist", wantCode: 200, wantMode: "per_class", wantSubject: "sub-hist"},
+		{name: "per-class list without a subject", query: "groupId=grp-sec&date=2026-09-15", wantCode: 400, wantBody: "Esta lista es por clase: elige la asignatura"},
+		{name: "daily list with a subject", query: "groupId=grp-prim&date=2026-09-15&subjectId=sub-esp", wantCode: 400, wantBody: "Esta lista es por día"},
+		{name: "a subject not taught in the group", query: "groupId=grp-sec&date=2026-09-15&subjectId=sub-esp", wantCode: 400, wantBody: "La asignatura no se imparte en este grupo"},
+		{name: "unknown group", query: "groupId=ghost&date=2026-09-15", wantCode: 404},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			att := &fakeAttendance{fakeTeachingAttendance: fakeTeachingAttendance{roster: []client.AttendanceRosterRow{
+				{EnrollmentID: "enr-1", StudentID: "stu-1", Status: "late", Note: "8:15"},
+			}}}
+			h := newDirectorAttendance(att)
+			rec := httptest.NewRecorder()
+			h.GetRoster(rec, directorReq(http.MethodGet, "/api/v1/attendance/roster?"+tt.query, ""))
 
-	rec := doReq(t, h.GetRoster, http.MethodGet, "/api/v1/attendance/roster?groupId=grp-1&date=2026-09-01", "")
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if svc.rosterGroup != "grp-1" || svc.rosterDate != "2026-09-01" {
-		t.Errorf("forwarded input = %q %q", svc.rosterGroup, svc.rosterDate)
-	}
-	var out struct {
-		Roster []map[string]any `json:"roster"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
-	// Default-present: a row with no stored mark still reports "present".
-	if len(out.Roster) != 2 || out.Roster[0]["status"] != "present" || out.Roster[1]["status"] != "absent" {
-		t.Errorf("body = %v", out.Roster)
-	}
-	if out.Roster[0]["enrollmentId"] != "enr-1" || out.Roster[0]["studentId"] != "stu-1" {
-		t.Errorf("row = %v", out.Roster[0])
-	}
-}
-
-// An unknown group is an InvalidArgument at the domain ⇒ 400.
-func TestAttendanceGetRosterUnknownGroupIs400(t *testing.T) {
-	svc := &fakeAttendance{err: connect.NewError(connect.CodeInvalidArgument, nil)}
-	h := handler.NewAttendanceHandler(svc)
-	rec := doReq(t, h.GetRoster, http.MethodGet, "/api/v1/attendance/roster?groupId=ghost&date=2026-09-01", "")
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", rec.Code)
+			require.Equal(t, tt.wantCode, rec.Code, rec.Body.String())
+			if tt.wantCode != http.StatusOK {
+				assert.Zero(t, att.rosterCalls)
+				assert.Contains(t, rec.Body.String(), tt.wantBody)
+				return
+			}
+			out := decodeAttendanceList(t, rec)
+			assert.Equal(t, tt.wantMode, out.Mode)
+			assert.True(t, out.Editable, "the director has no date window")
+			assert.Equal(t, 7, out.WindowDays)
+			assert.Equal(t, tt.wantSubject, att.gotRosterSubjectID)
+			require.Len(t, out.Rows, 1)
+			assert.Equal(t, "Ana García", out.Rows[0].Name)
+			assert.Equal(t, "8:15", out.Rows[0].Note)
+		})
 	}
 }
 
 func TestAttendanceGetRosterUpstreamFailureIs500(t *testing.T) {
-	svc := &fakeAttendance{err: connect.NewError(connect.CodeInternal, nil)}
-	h := handler.NewAttendanceHandler(svc)
-	rec := doReq(t, h.GetRoster, http.MethodGet, "/api/v1/attendance/roster?groupId=grp-1&date=2026-09-01", "")
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500", rec.Code)
-	}
+	att := &fakeAttendance{fakeTeachingAttendance: fakeTeachingAttendance{rosterErr: connect.NewError(connect.CodeInternal, nil)}}
+	rec := httptest.NewRecorder()
+	newDirectorAttendance(att).GetRoster(rec, directorReq(http.MethodGet, "/api/v1/attendance/roster?groupId=grp-prim&date=2026-09-01", ""))
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
 // --- save the day ----------------------------------------------------------
 
-func TestAttendanceSaveDailyReturnsCounts(t *testing.T) {
-	svc := &fakeAttendance{absent: 2, marked: 3}
-	h := handler.NewAttendanceHandler(svc)
-
-	rec := doReq(t, h.SaveDaily, http.MethodPost, "/api/v1/attendance",
-		`{"groupId":"grp-1","date":"2026-09-01","marks":[`+
-			`{"enrollmentId":"enr-1","status":"absent","note":"cita médica"},`+
-			`{"enrollmentId":"enr-2","status":"late","note":""}]}`)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
+func TestAttendanceSaveDaily(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		wantCode int
+		wantBody string
+	}{
+		{name: "an old day", body: `{"groupId":"grp-prim","date":"2026-02-02","marks":[]}`, wantCode: 200},
+		{name: "per-class list", body: `{"groupId":"grp-sec","date":"2026-09-15","subjectId":"sub-mat1","marks":[]}`, wantCode: 200},
+		{name: "per-class list without a subject", body: `{"groupId":"grp-sec","date":"2026-09-15","marks":[]}`, wantCode: 400, wantBody: "Esta lista es por clase"},
+		{name: "a subject not taught in the group", body: `{"groupId":"grp-sec","date":"2026-09-15","subjectId":"sub-esp","marks":[]}`, wantCode: 400, wantBody: "La asignatura no se imparte en este grupo"},
+		{name: "unknown group", body: `{"groupId":"ghost","date":"2026-09-15","marks":[]}`, wantCode: 404},
+		{name: "malformed body", body: `{`, wantCode: 400},
 	}
-	if svc.saveGroup != "grp-1" || svc.saveDate != "2026-09-01" || len(svc.saveMarks) != 2 {
-		t.Fatalf("forwarded input = %q %q %v", svc.saveGroup, svc.saveDate, svc.saveMarks)
-	}
-	if svc.saveMarks[0] != (client.Mark{EnrollmentID: "enr-1", Status: "absent", Note: "cita médica"}) {
-		t.Errorf("mark[0] = %+v", svc.saveMarks[0])
-	}
-	if svc.saveMarks[1] != (client.Mark{EnrollmentID: "enr-2", Status: "late"}) {
-		t.Errorf("mark[1] = %+v", svc.saveMarks[1])
-	}
-	var out map[string]any
-	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
-	if out["absentCount"] != float64(2) || out["markedCount"] != float64(3) {
-		t.Errorf("body = %v", out)
-	}
-}
-
-// An empty marks array is the legitimate "everybody present" reconcile: it must
-// reach the service (as an empty set), not be rejected at the edge.
-func TestAttendanceSaveDailyEmptyMarksIsAllPresent(t *testing.T) {
-	svc := &fakeAttendance{}
-	h := handler.NewAttendanceHandler(svc)
-
-	rec := doReq(t, h.SaveDaily, http.MethodPost, "/api/v1/attendance",
-		`{"groupId":"grp-1","date":"2026-09-01","marks":[]}`)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if svc.saveGroup != "grp-1" || len(svc.saveMarks) != 0 {
-		t.Errorf("forwarded input = %q %v", svc.saveGroup, svc.saveMarks)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			att := &fakeAttendance{fakeTeachingAttendance: fakeTeachingAttendance{saveAbsent: 2, saveMarked: 3}}
+			rec := httptest.NewRecorder()
+			newDirectorAttendance(att).SaveDaily(rec, directorReq(http.MethodPost, "/api/v1/attendance", tt.body))
+			require.Equal(t, tt.wantCode, rec.Code, rec.Body.String())
+			if tt.wantCode != http.StatusOK {
+				assert.Zero(t, att.saveCalls)
+				assert.Contains(t, rec.Body.String(), tt.wantBody)
+				return
+			}
+			assert.Equal(t, "usr-dir", att.gotSave.TakenBy)
+			assert.Equal(t, "Dirección", att.gotSave.TakenByName)
+			assert.JSONEq(t, `{"absentCount":2,"markedCount":3}`, rec.Body.String())
+		})
 	}
 }
 
-func TestAttendanceSaveDailyInvalidBodyIs400(t *testing.T) {
-	h := handler.NewAttendanceHandler(&fakeAttendance{})
-	rec := doReq(t, h.SaveDaily, http.MethodPost, "/api/v1/attendance", `{`)
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", rec.Code)
-	}
+func TestAttendanceSaveDailyForwardsMarks(t *testing.T) {
+	att := &fakeAttendance{}
+	rec := httptest.NewRecorder()
+	newDirectorAttendance(att).SaveDaily(rec, directorReq(http.MethodPost, "/api/v1/attendance",
+		`{"groupId":"grp-prim","date":"2026-09-01","marks":[{"enrollmentId":"enr-1","status":"absent","note":"cita médica"},{"enrollmentId":"enr-2","status":"late"}]}`))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, []client.Mark{
+		{EnrollmentID: "enr-1", Status: "absent", Note: "cita médica"},
+		{EnrollmentID: "enr-2", Status: "late"},
+	}, att.gotSave.Marks)
 }
 
 // A client error raised upstream (an unknown status, an enrollment outside the
-// group, an over-long note) arrives as Connect InvalidArgument and must surface
-// at the edge as 400, not 500. This covers the mapping only — what the attendance
-// service itself rejects is pinned by its own service tests.
+// group, an over-long note) arrives as Connect InvalidArgument ⇒ 400.
 func TestAttendanceSaveDailyUpstreamInvalidArgumentIs400(t *testing.T) {
-	svc := &fakeAttendance{err: connect.NewError(connect.CodeInvalidArgument, nil)}
-	h := handler.NewAttendanceHandler(svc)
-	rec := doReq(t, h.SaveDaily, http.MethodPost, "/api/v1/attendance",
-		`{"groupId":"grp-1","date":"2026-09-01","marks":[{"enrollmentId":"enr-1","status":"tarde"}]}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", rec.Code)
-	}
+	att := &fakeAttendance{fakeTeachingAttendance: fakeTeachingAttendance{saveErr: connect.NewError(connect.CodeInvalidArgument, nil)}}
+	rec := httptest.NewRecorder()
+	newDirectorAttendance(att).SaveDaily(rec, directorReq(http.MethodPost, "/api/v1/attendance",
+		`{"groupId":"grp-prim","date":"2026-09-01","marks":[{"enrollmentId":"enr-1","status":"tarde"}]}`))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 // --- list ------------------------------------------------------------------
 
 func TestAttendanceListForwardsRangeAndReturnsRecords(t *testing.T) {
-	svc := &fakeAttendance{records: []client.AttendanceRecord{
-		{ID: "att-1", EnrollmentID: "enr-1", Date: "2026-09-01", Status: "absent", Note: "cita médica"},
+	att := &fakeAttendance{records: []client.AttendanceRecord{
+		{ID: "att-1", EnrollmentID: "enr-1", Date: "2026-09-01", Status: "absent", Note: "cita médica", SubjectID: "sub-mat1"},
 	}}
-	h := handler.NewAttendanceHandler(svc)
-
-	rec := doReq(t, h.ListAttendance, http.MethodGet,
-		"/api/v1/attendance?enrollmentId=enr-1&from=2026-09-01&to=2026-09-30", "")
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if svc.listEnrollment != "enr-1" || svc.listFrom != "2026-09-01" || svc.listTo != "2026-09-30" {
-		t.Errorf("forwarded filters = %q %q %q", svc.listEnrollment, svc.listFrom, svc.listTo)
-	}
+	rec := httptest.NewRecorder()
+	newDirectorAttendance(att).ListAttendance(rec, directorReq(http.MethodGet, "/api/v1/attendance?enrollmentId=enr-1&from=2026-09-01&to=2026-09-30", ""))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "enr-1", att.listEnrollment)
+	assert.Equal(t, "2026-09-01", att.listFrom)
+	assert.Equal(t, "2026-09-30", att.listTo)
 	var out struct {
 		Records []map[string]any `json:"records"`
 	}
-	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
-	// Only exceptions are stored, so present days never appear in the result.
-	if len(out.Records) != 1 || out.Records[0]["id"] != "att-1" ||
-		out.Records[0]["date"] != "2026-09-01" || out.Records[0]["status"] != "absent" {
-		t.Errorf("body = %v", out.Records)
-	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+	assert.Equal(t, []map[string]any{{
+		"id": "att-1", "enrollmentId": "enr-1", "date": "2026-09-01", "status": "absent", "note": "cita médica", "subjectId": "sub-mat1",
+	}}, out.Records)
 }
 
-func TestAttendanceListUnknownEnrollmentIs404(t *testing.T) {
-	svc := &fakeAttendance{err: connect.NewError(connect.CodeNotFound, nil)}
-	h := handler.NewAttendanceHandler(svc)
-	rec := doReq(t, h.ListAttendance, http.MethodGet, "/api/v1/attendance?enrollmentId=ghost", "")
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", rec.Code)
-	}
-}
-
-func TestAttendanceListInvalidRangeIs400(t *testing.T) {
-	svc := &fakeAttendance{err: connect.NewError(connect.CodeInvalidArgument, nil)}
-	h := handler.NewAttendanceHandler(svc)
-	rec := doReq(t, h.ListAttendance, http.MethodGet,
-		"/api/v1/attendance?enrollmentId=enr-1&from=2026-09-30&to=2026-09-01", "")
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", rec.Code)
+func TestAttendanceListUpstreamErrors(t *testing.T) {
+	for code, want := range map[connect.Code]int{
+		connect.CodeNotFound:        http.StatusNotFound,
+		connect.CodeInvalidArgument: http.StatusBadRequest,
+	} {
+		att := &fakeAttendance{listErr: connect.NewError(code, nil)}
+		rec := httptest.NewRecorder()
+		newDirectorAttendance(att).ListAttendance(rec, directorReq(http.MethodGet, "/api/v1/attendance?enrollmentId=ghost", ""))
+		assert.Equal(t, want, rec.Code, code.String())
 	}
 }

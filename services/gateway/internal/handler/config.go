@@ -17,6 +17,7 @@ type ConfigService interface {
 	ActivateCycle(ctx context.Context, id string) (client.CycleResult, error)
 	CreateLevel(ctx context.Context, in client.CreateLevelInput) (client.LevelResult, error)
 	ListLevels(ctx context.Context) ([]client.LevelResult, error)
+	SetLevelAttendanceMode(ctx context.Context, id, mode string) (client.LevelResult, error)
 	CreateGradeLevel(ctx context.Context, in client.CreateGradeLevelInput) (client.GradeLevelResult, error)
 	ListGradeLevels(ctx context.Context, levelID string) ([]client.GradeLevelResult, error)
 	CreateSubject(ctx context.Context, in client.CreateSubjectInput) (client.SubjectResult, error)
@@ -162,6 +163,8 @@ type levelResponse struct {
 	Name                  string `json:"name"`
 	SEPCode               string `json:"sepCode"`
 	EnrollmentGranularity string `json:"enrollmentGranularity"`
+	// AttendanceMode is "daily" or "per_class" (T3).
+	AttendanceMode string `json:"attendanceMode"`
 }
 
 func toLevelResponse(l client.LevelResult) levelResponse {
@@ -170,7 +173,35 @@ func toLevelResponse(l client.LevelResult) levelResponse {
 		Name:                  l.Name,
 		SEPCode:               l.SEPCode,
 		EnrollmentGranularity: l.Granularity,
+		AttendanceMode:        l.AttendanceMode,
 	}
+}
+
+// setLevelAttendanceModeRequest is the body of PATCH /api/v1/config/levels/{id}.
+type setLevelAttendanceModeRequest struct {
+	AttendanceMode string `json:"attendanceMode"`
+}
+
+// SetLevelAttendanceMode handles PATCH /api/v1/config/levels/{id}: choose how
+// the level's groups take attendance — "daily" (one list per group per day) or
+// "per_class" (one per group, subject and day). Any other value is refused at
+// the edge (400) before config is called; an unknown level is 404.
+func (h *ConfigHandler) SetLevelAttendanceMode(w http.ResponseWriter, r *http.Request) {
+	var req setLevelAttendanceModeRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.AttendanceMode != client.AttendanceModeDaily && req.AttendanceMode != client.AttendanceModePerClass {
+		http.Error(w, "attendanceMode must be daily or per_class", http.StatusBadRequest)
+		return
+	}
+	res, err := h.svc.SetLevelAttendanceMode(r.Context(), r.PathValue("id"), req.AttendanceMode)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toLevelResponse(res))
 }
 
 // CreateLevel handles POST /api/v1/config/levels.
