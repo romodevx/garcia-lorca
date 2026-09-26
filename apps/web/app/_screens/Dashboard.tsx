@@ -307,29 +307,40 @@ export function Dashboard({ user, onOpen, permissions, permissionsFailed = false
   const canSee = (perm: string): boolean => resolved && permissions.includes(perm);
 
   // Real KPIs — no mock numbers: students from the roster, money from the ledger.
+  // Each read runs only for a caller who may make it: a maestro or a cajera has
+  // no students:read / config:read, and reading anyway filled their console
+  // with 403s on the one screen everybody opens.
   const [kpi, setKpi] = useState({ students: 0, pending: 0, collected: 0, withBalance: 0 });
-  const [cycleName, setCycleName] = useState("—");
+  const [cycleName, setCycleName] = useState<string | undefined>(undefined);
+  const readsStudents = canSee("students:read");
+  const readsCycles = canSee("config:read");
+  const readsLedger = readsCycles && canSee("finance:read");
   useEffect(() => {
     let active = true;
     // "Registrados": the active admission pipeline — exclude rejected/withdrawn,
     // which are not current students, so the count never over-reports.
-    listStudents(API_URL).then((ss) => active && setKpi((k) => ({ ...k, students: ss.filter((s) => s.admissionStatus !== "rejected" && s.admissionStatus !== "withdrawn").length }))).catch(() => {});
-    listCycles(API_URL).then((cs) => {
-      const cyc = cs.find((c) => c.status === "active") ?? cs[0];
-      if (cyc === undefined) return;
-      if (active) setCycleName(cyc.name);
-      listCharges(API_URL, { cycleId: cyc.id }).then((chs) => {
-        if (!active) return;
-        setKpi((k) => ({
-          ...k,
-          collected: chs.reduce((a, c) => a + c.paidCents, 0),
-          pending: chs.reduce((a, c) => a + Math.max(0, c.remainingCents), 0),
-          withBalance: chs.filter((c) => c.remainingCents > 0).length,
-        }));
+    if (readsStudents) {
+      listStudents(API_URL).then((ss) => active && setKpi((k) => ({ ...k, students: ss.filter((s) => s.admissionStatus !== "rejected" && s.admissionStatus !== "withdrawn").length }))).catch(() => {});
+    }
+    if (readsCycles) {
+      listCycles(API_URL).then((cs) => {
+        const cyc = cs.find((c) => c.status === "active") ?? cs[0];
+        if (cyc === undefined) return;
+        if (active) setCycleName(cyc.name);
+        if (!readsLedger) return;
+        listCharges(API_URL, { cycleId: cyc.id }).then((chs) => {
+          if (!active) return;
+          setKpi((k) => ({
+            ...k,
+            collected: chs.reduce((a, c) => a + c.paidCents, 0),
+            pending: chs.reduce((a, c) => a + Math.max(0, c.remainingCents), 0),
+            withBalance: chs.filter((c) => c.remainingCents > 0).length,
+          }));
+        }).catch(() => {});
       }).catch(() => {});
-    }).catch(() => {});
+    }
     return () => { active = false; };
-  }, []);
+  }, [readsStudents, readsCycles, readsLedger]);
 
   return (
     <Page>
@@ -343,7 +354,7 @@ export function Dashboard({ user, onOpen, permissions, permissionsFailed = false
             {greet}, {user.first} 🌱
           </h1>
           <p style={{ color: "var(--text-muted)", fontSize: 16, marginTop: 6, textTransform: "capitalize" }}>
-            {today} · Ciclo {cycleName}
+            {today}{cycleName !== undefined && ` · Ciclo ${cycleName}`}
           </p>
         </div>
         {canSee("comms:read") && (
@@ -362,7 +373,7 @@ export function Dashboard({ user, onOpen, permissions, permissionsFailed = false
           {canSee("finance:read") && (
             <>
               <KpiCard icon="finance" color="orange" label="Por cobrar" value={money(kpi.pending)} sub={`${kpi.withBalance} cargos con saldo`} onClick={() => onOpen("finance")} />
-              <KpiCard icon="trend" color="lime" label="Cobrado" value={money(kpi.collected)} sub={`Ciclo ${cycleName}`} onClick={() => onOpen("finance")} />
+              <KpiCard icon="trend" color="lime" label="Cobrado" value={money(kpi.collected)} sub={`Ciclo ${cycleName ?? "—"}`} onClick={() => onOpen("finance")} />
             </>
           )}
         </div>
