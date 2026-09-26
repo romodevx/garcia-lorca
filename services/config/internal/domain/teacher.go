@@ -107,3 +107,6 @@ func (t Teacher) UserID() string { return t.userID }
 
 // HasUser reports whether the teacher is linked to an IAM user account.
 func (t Teacher) HasUser() bool { return t.userID != "" }
+
+// FullName returns "first last", the way the school writes a teacher's name.
+func (t Teacher) FullName() string { return t.firstName + " " + t.lastName }

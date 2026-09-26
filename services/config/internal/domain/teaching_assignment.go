@@ -68,3 +68,31 @@ func (a TeachingAssignment) SubjectID() string { return a.subjectID }
 
 // TeacherID returns the assigned teacher identifier.
 func (a TeachingAssignment) TeacherID() string { return a.teacherID }
+
+// TeachingSlot is one (group, subject) place a teacher can be given. The group
+// fixes the cycle, so a slot is unique per cycle and holds at most one teacher
+// (the owner ruled out co-teaching; see migration 0002's UNIQUE).
+type TeachingSlot struct {
+	GroupID   string
+	SubjectID string
+}
+
+// Slot returns the (group, subject) place this assignment occupies.
+func (a TeachingAssignment) Slot() TeachingSlot {
+	return TeachingSlot{GroupID: a.groupID, SubjectID: a.subjectID}
+}
+
+// HeldBy reports whether teacherID is the teacher holding this slot.
+func (a TeachingAssignment) HeldBy(teacherID string) bool {
+	return teacherID != "" && a.teacherID == teacherID
+}
+
+// ReassignTo returns the same assignment (same id, cycle and slot) handed to
+// another teacher. The receiver is left untouched.
+func (a TeachingAssignment) ReassignTo(teacherID string) (TeachingAssignment, error) {
+	if strings.TrimSpace(teacherID) == "" {
+		return TeachingAssignment{}, glerrors.New(glerrors.KindInvalid, "teaching assignment teacher id is required")
+	}
+	a.teacherID = teacherID
+	return a, nil
+}
