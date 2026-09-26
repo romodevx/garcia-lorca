@@ -54,9 +54,11 @@ service StudentsService {
   // ReissueCard gives a suspended pupil a new card, on purpose. ALREADY_EXISTS
   // when the pupil's card is valid.
   rpc ReissueCard(ReissueCardRequest) returns (ReissueCardResponse);
-  // VerifyCard reads a scanned code: whose card it is, and whether it still
-  // counts (an active code of an enrolled pupil). An unknown code is NOT_FOUND;
-  // something that is not a card code, INVALID_ARGUMENT.
+  // VerifyCard reads a scanned code: whose card it is, whether it still counts
+  // as a school credential (valid: an active code of an enrolled pupil), and
+  // whether the office revoked it (revoked: the card's own state, independent
+  // of admission). An unknown code is NOT_FOUND; something that is not a card
+  // code, INVALID_ARGUMENT.
   rpc VerifyCard(VerifyCardRequest) returns (VerifyCardResponse);
 
   // ListStudents lists students, optionally filtered by level/group/status.
@@ -628,5 +630,10 @@ message VerifyCardRequest {
 
 message VerifyCardResponse {
   Student student = 1;
+  // valid: an active (not revoked) code of an enrolled pupil.
   bool valid = 2;
+  // revoked: the office retired this code. Independent of the pupil's
+  // admission status — attendance scanning counts any code that is not revoked,
+  // since the group's roster already decides who belongs to the list.
+  bool revoked = 3;
 }

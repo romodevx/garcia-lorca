@@ -30,11 +30,14 @@ func NewCardService(cards ports.CardRepository, pupils PupilFinder, tenant strin
 	return &CardService{cards: cards, pupils: pupils, tenant: tenant, newID: newID, random: random, now: now}
 }
 
-// CardVerification is what a scanned code says: whose card it is, and whether
-// it still counts — an active code of an enrolled pupil.
+// CardVerification is what a scanned code says: whose card it is, whether it
+// still counts as a school credential (Valid: an active code of an enrolled
+// pupil), and whether the office revoked it (Revoked: the card's own state,
+// independent of admission).
 type CardVerification struct {
 	Student *domain.Student
 	Valid   bool
+	Revoked bool
 }
 
 // CardCodeResult is what the family's card shows: its code, or that the office
@@ -166,5 +169,9 @@ func (s *CardService) VerifyCard(ctx context.Context, code string) (CardVerifica
 	if err != nil {
 		return CardVerification{}, err
 	}
-	return CardVerification{Student: pupil, Valid: card.Active() && pupil.Status() == domain.AdmissionEnrolled}, nil
+	return CardVerification{
+		Student: pupil,
+		Valid:   card.Active() && pupil.Status() == domain.AdmissionEnrolled,
+		Revoked: !card.Active(),
+	}, nil
 }

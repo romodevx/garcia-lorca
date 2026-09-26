@@ -54,5 +54,5 @@ func (h *StudentsHandler) VerifyCard(ctx context.Context, req *connect.Request[s
 	if err != nil {
 		return nil, connectErr(err)
 	}
-	return connect.NewResponse(&studentsv1.VerifyCardResponse{Student: toProtoStudent(got.Student), Valid: got.Valid}), nil
+	return connect.NewResponse(&studentsv1.VerifyCardResponse{Student: toProtoStudent(got.Student), Valid: got.Valid, Revoked: got.Revoked}), nil
 }

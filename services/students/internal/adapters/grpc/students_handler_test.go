@@ -529,8 +529,15 @@ func TestCardRPCs(t *testing.T) {
 	if got.Msg.GetValid() {
 		t.Error("a pupil not yet enrolled verifies as valid")
 	}
+	if got.Msg.GetRevoked() {
+		t.Error("an active card of a pupil not yet enrolled reads as revoked")
+	}
 	if _, err := h.RevokeCard(ctx, connect.NewRequest(&studentsv1.RevokeCardRequest{StudentId: pupil.GetId()})); err != nil {
 		t.Fatalf("RevokeCard: %v", err)
+	}
+	old, err := h.VerifyCard(ctx, connect.NewRequest(&studentsv1.VerifyCardRequest{Code: code.Msg.GetCode()}))
+	if err != nil || old.Msg.GetValid() || !old.Msg.GetRevoked() {
+		t.Fatalf("VerifyCard(revoked) = %+v (%v), want not valid and revoked", old.Msg, err)
 	}
 	// Revoked: suspended, no code, until the office reissues it.
 	suspended, err := h.GetCardCode(ctx, connect.NewRequest(&studentsv1.GetCardCodeRequest{StudentId: pupil.GetId()}))
