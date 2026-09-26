@@ -32,7 +32,7 @@ interface Args {
   setStatus: (enrollmentId: string, status: AttendanceStatus) => void;
 }
 
-/** The same code is ignored for this long: a card held in front of the camera is read many times. */
+/** A code is ignored until it has been out of view this long: a card held in front of the camera is read many times. */
 export const SAME_CODE_DEBOUNCE_MS = 2500;
 const FLASH_MS: Record<ScanTone, number> = { ok: 1200, duplicate: 1600, error: 2500 };
 const FOREIGN = "Este alumno no pertenece a este grupo";
@@ -132,8 +132,9 @@ export function useCardScan({ target, sheet, rows, resolve, setStatus }: Args): 
     const resolveCard = latest.current.resolve;
     const now = Date.now();
     const seen = lastSeen.current.get(code);
-    if (resolveCard === undefined || (seen !== undefined && now - seen < SAME_CODE_DEBOUNCE_MS)) return;
+    // Every sighting slides the window: a card still in view is the same read.
     lastSeen.current.set(code, now);
+    if (resolveCard === undefined || (seen !== undefined && now - seen < SAME_CODE_DEBOUNCE_MS)) return;
     resolveCard(code).then(accept, () => show("error", OFFLINE, OFFLINE));
   }, [accept, show]);
 
