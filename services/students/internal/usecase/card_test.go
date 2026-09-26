@@ -112,8 +112,8 @@ func TestARevokedCardStaysSuspendedUntilReissued(t *testing.T) {
 		t.Fatalf("after revoking = %+v (%v), want suspended and no code", suspended, err)
 	}
 	old, err := svc.VerifyCard(ctx, first.Code)
-	if err != nil || old.Valid {
-		t.Errorf("the revoked code verifies as %+v (%v); want it known but not valid", old, err)
+	if err != nil || old.Valid || !old.Revoked {
+		t.Errorf("the revoked code verifies as %+v (%v); want it known, not valid and revoked", old, err)
 	}
 
 	if err := svc.ReissueCard(ctx, "stu-1"); err != nil {
@@ -134,20 +134,29 @@ func TestVerifyingACard(t *testing.T) {
 	pupils := fakePupils{
 		"stu-1": pupilWith(t, "stu-1", domain.AdmissionEnrolled),
 		"stu-2": pupilWith(t, "stu-2", domain.AdmissionWithdrawn),
+		"stu-3": pupilWith(t, "stu-3", domain.AdmissionPending),
 	}
 	svc, _ := cardService(pupils)
 	ctx := context.Background()
 	enrolledCard, _ := svc.CardCode(ctx, "stu-1")
 	goneCard, _ := svc.CardCode(ctx, "stu-2")
-	enrolled, gone := enrolledCard.Code, goneCard.Code
+	pendingCard, _ := svc.CardCode(ctx, "stu-3")
+	enrolled, gone, pending := enrolledCard.Code, goneCard.Code, pendingCard.Code
 
 	got, err := svc.VerifyCard(ctx, enrolled)
-	if err != nil || !got.Valid || got.Student.ID() != "stu-1" {
+	if err != nil || !got.Valid || got.Revoked || got.Student.ID() != "stu-1" {
 		t.Errorf("enrolled pupil: %+v (%v), want valid", got, err)
 	}
 	got, err = svc.VerifyCard(ctx, gone)
-	if err != nil || got.Valid || got.Student.ID() != "stu-2" {
-		t.Errorf("withdrawn pupil: %+v (%v), want known and not valid", got, err)
+	if err != nil || got.Valid || got.Revoked || got.Student.ID() != "stu-2" {
+		t.Errorf("withdrawn pupil: %+v (%v), want known, not valid, not revoked", got, err)
+	}
+	// Revoked is the card's own state, independent of admission: a pending
+	// pupil's card is not valid (it is not a school credential yet) but it is
+	// not revoked either — attendance scanning counts it.
+	got, err = svc.VerifyCard(ctx, pending)
+	if err != nil || got.Valid || got.Revoked || got.Student.ID() != "stu-3" {
+		t.Errorf("pending pupil: %+v (%v), want known, not valid, not revoked", got, err)
 	}
 	if _, err := svc.VerifyCard(ctx, "GLCARD:AAAAAAAAAAAAAAAAAAAAAA"); glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Errorf("an unknown code: %v, want KindNotFound", err)

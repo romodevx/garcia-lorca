@@ -12,6 +12,7 @@ let listAttendanceClasses: typeof import("./api").listAttendanceClasses;
 let getTeachingAttendanceSheet: typeof import("./api").getTeachingAttendanceSheet;
 let saveTeachingAttendance: typeof import("./api").saveTeachingAttendance;
 let listTerms: typeof import("./api").listTerms;
+let scanTeachingCard: typeof import("./api").scanTeachingCard;
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -21,7 +22,7 @@ afterEach(() => {
 beforeEach(async () => {
   vi.stubEnv("NEXT_PUBLIC_API_URL", "http://gw");
   vi.resetModules();
-  ({ captureGrade, getRoster, listAssignments, listTerms, listAttendanceClasses, getTeachingAttendanceSheet, saveTeachingAttendance } =
+  ({ captureGrade, getRoster, listAssignments, listTerms, listAttendanceClasses, getTeachingAttendanceSheet, saveTeachingAttendance, scanTeachingCard } =
     await import("./api"));
 });
 
@@ -267,5 +268,26 @@ describe("saveTeachingAttendance", () => {
     // vi.resetModules() gives the client its own copy of the error class, so it is
     // matched by name rather than instanceof.
     expect(err).toMatchObject({ name: "AttendanceRequestError", message: "Solo puedes corregir hasta 7 días atrás", status: 400 });
+  });
+});
+
+describe("scanTeachingCard", () => {
+  it("POSTs the code and the list's date to the teacher's /teaching/attendance/scan with the subject of a per-class list", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ enrollmentId: "en1", studentId: "st1", name: "Ada" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const out = await scanTeachingCard({ groupId: "g1", subjectId: "s1", date: "2026-09-10", code: "GLCARD:abc" });
+
+    expect(out).toEqual({ kind: "ok", student: { enrollmentId: "en1", studentId: "st1", name: "Ada" } });
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/teaching/attendance/scan");
+    expect(init.credentials).toBe("include");
+    expect(JSON.parse(init.body as string)).toEqual({ groupId: "g1", subjectId: "s1", date: "2026-09-10", code: "GLCARD:abc" });
+  });
+
+  it("returns a rejection (not a throw) for a foreign card", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("Este alumno no pertenece a este grupo", { status: 422, headers: { "X-Scan-Result": "foreign" } })));
+
+    await expect(scanTeachingCard({ groupId: "g1", date: "2026-09-10", code: "GLCARD:x" })).resolves.toEqual({ kind: "rejected", reason: "foreign", message: "Este alumno no pertenece a este grupo" });
   });
 });

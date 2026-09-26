@@ -17,6 +17,9 @@ export const STATUS_META: Record<AttendanceStatus, { label: string; icon: IconNa
   excused: { label: "Justificada", icon: "documents", tone: "var(--purple)" },
 };
 
+/** While the scanner is open: not scanned yet — a transient state, never saved. */
+const PENDING_META = { label: "Sin registrar", icon: "qrScan" as IconName, tone: "var(--text-muted)" };
+
 const SECONDARY: readonly AttendanceStatus[] = ["late", "excused"];
 const LOCKED_OPACITY = 0.6;
 
@@ -27,14 +30,15 @@ export interface PassSheetRowProps {
   locked?: boolean;
   /** False for a past list nobody took: there is no status to show. */
   showStatus?: boolean;
+  /** Scanning: this student has not been scanned yet ("Sin registrar"). */
+  pending?: boolean;
   onStatus: (enrollmentId: string, status: AttendanceStatus) => void;
   onNote: (enrollmentId: string, note: string) => void;
 }
 
-function StatusPill({ status }: { status: AttendanceStatus }): ReactElement {
-  const meta = STATUS_META[status];
+function StatusPill({ meta, dashed = false }: { meta: { label: string; icon: IconName; tone: string }; dashed?: boolean }): ReactElement {
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0, padding: "6px 12px", borderRadius: "var(--r-pill)", border: `1.5px solid ${meta.tone}`, background: `color-mix(in oklab, ${meta.tone} 14%, var(--surface))`, color: meta.tone, fontSize: 14, fontWeight: 700 }}>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0, padding: "6px 12px", borderRadius: "var(--r-pill)", border: `1.5px ${dashed ? "dashed" : "solid"} ${meta.tone}`, background: `color-mix(in oklab, ${meta.tone} 14%, var(--surface))`, color: meta.tone, fontSize: 14, fontWeight: 700 }}>
       <Icon name={meta.icon} size={16} stroke={2.6} />
       {meta.label}
     </span>
@@ -46,10 +50,10 @@ function StatusPill({ status }: { status: AttendanceStatus }): ReactElement {
  * classroom the teacher aims a thumb at a name, not at a small segment. The
  * rarer choices — Retardo, Justificada, a note — sit behind "Más".
  */
-export function PassSheetRow({ row, editable, locked = false, showStatus = true, onStatus, onNote }: PassSheetRowProps): ReactElement {
+export function PassSheetRow({ row, editable, locked = false, showStatus = true, pending = false, onStatus, onNote }: PassSheetRowProps): ReactElement {
   const [open, setOpen] = useState(false);
   const panelId = useId();
-  const meta = STATUS_META[row.status];
+  const meta = pending ? PENDING_META : STATUS_META[row.status];
   const setStatus = (status: AttendanceStatus): void => {
     if (!locked) onStatus(row.enrollmentId, status);
   };
@@ -57,7 +61,7 @@ export function PassSheetRow({ row, editable, locked = false, showStatus = true,
   const face = (
     <>
       <span style={{ flex: "1 1 auto", minWidth: 0, fontSize: 16, fontWeight: 600, color: "var(--text)", overflowWrap: "anywhere", textAlign: "left" }}>{row.name}</span>
-      {showStatus && <StatusPill status={row.status} />}
+      {showStatus && <StatusPill meta={meta} dashed={pending} />}
     </>
   );
 

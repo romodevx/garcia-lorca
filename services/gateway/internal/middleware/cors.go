@@ -10,8 +10,9 @@ const preflightMaxAge = "600"
 
 // exposedHeaders are the non-safelisted response headers the web must read:
 // X-Confirm-Required marks a 409 the user can resolve by confirming (teacher
-// access reusing an existing account).
-const exposedHeaders = "X-Confirm-Required"
+// access reusing an existing account); X-Scan-Result names an attendance
+// scan's verdict (T4), since two of its refusals share 422.
+const exposedHeaders = "X-Confirm-Required, X-Scan-Result"
 
 // CORS returns middleware that enables the browser web client to call the
 // gateway cross-origin. The web fetches with credentials (auth cookies), so the

@@ -29,6 +29,7 @@ import {
   type SaveSheetInput,
 } from "../attendance/sheet";
 
+import { postCardScan, type CardScanResult, type ScanCardInput } from "../attendance/scan";
 import { API_URL } from "../api-url";
 
 // --- entity types (match the gateway JSON contract) -----------------------
@@ -214,4 +215,9 @@ export async function saveTeachingAttendance(input: SaveSheetInput): Promise<voi
   if (!res.ok) {
     throw await attendanceFailure(res);
   }
+}
+
+/** Resolves one scanned student card against one of the caller's lists. */
+export function scanTeachingCard(input: ScanCardInput): Promise<CardScanResult> {
+  return postCardScan(url("/teaching/attendance/scan"), input);
 }

@@ -35,3 +35,23 @@ export function ReadOnlyBanner({ text }: { text: string }): ReactElement {
     </p>
   );
 }
+
+/** After scanning: what the teacher should check before saving. */
+export function ScanBanner({ text }: { text: string }): ReactElement {
+  return (
+    <p role="status" style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 0 12px", padding: "10px 14px", borderRadius: "var(--r-md)", background: "var(--ok-bg)", color: "var(--ok-fg)", fontSize: 14, fontWeight: 700 }}>
+      <Icon name="qrScan" size={18} stroke={2.4} />
+      {text}
+    </p>
+  );
+}
+
+/** Opens the camera to scan credentials (module_student_card). */
+export function ScanButton({ onClick, disabled }: { onClick: () => void; disabled: boolean }): ReactElement {
+  return (
+    <button type="button" aria-disabled={disabled || undefined} onClick={() => !disabled && onClick()} style={{ minHeight: 44, display: "inline-flex", alignItems: "center", gap: 8, padding: "0 16px", borderRadius: "var(--r-pill)", border: "1.5px solid var(--forest)", background: "var(--surface)", color: "var(--forest)", fontWeight: 700, fontSize: 14, cursor: disabled ? "progress" : "pointer" }}>
+      <Icon name="qrScan" size={18} stroke={2.4} />
+      Escanear QR
+    </button>
+  );
+}

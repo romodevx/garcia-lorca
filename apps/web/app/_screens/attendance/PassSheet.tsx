@@ -1,14 +1,18 @@
 "use client";
 
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
 
+import type { AttendanceStatus } from "../../attendance/api";
+import type { CardScanResult, ScanCardInput } from "../../attendance/scan";
 import { Toast } from "../../_design/Toast";
 import { DateField } from "../../_design/form";
 import { EmptyHint, ErrorAlert, Section } from "../config/parts";
 import { PassSheetRow } from "./PassSheetRow";
-import { Counters, ReadOnlyBanner } from "./PassSheetParts";
+import { Counters, ReadOnlyBanner, ScanBanner, ScanButton } from "./PassSheetParts";
+import { QrScanDialog } from "./QrScanDialog";
 import { dateWindow, readOnlyText, sessionLine } from "./sheetModel";
 import { useAttendanceSheet, type LoadSheet, type SaveSheet } from "./useAttendanceSheet";
+import { useCardScan } from "./useCardScan";
 import { confirmDiscard } from "./useLeaveGuard";
 
 export interface PassSheetProps {
@@ -23,6 +27,11 @@ export interface PassSheetProps {
   restrictDates: boolean;
   load: LoadSheet;
   save: SaveSheet;
+  /**
+   * Resolves a scanned credential. Given only when module_student_card is on
+   * (the screen reads the flag); without it there is no "Escanear QR".
+   */
+  scan?: (input: ScanCardInput) => Promise<CardScanResult>;
   /** Tells the screen whether leaving would lose marks. */
   onDirtyChange?: (dirty: boolean) => void;
 }
@@ -36,7 +45,7 @@ const UNTAKEN_LINE = "Lista no tomada ese día";
  * "Guardar lista" that sends only the exceptions. Mobile-first: one column,
  * everything wraps, no fixed widths — it is used standing, on a phone.
  */
-export function PassSheet({ title, groupId, subjectId, today, restrictDates, load, save, onDirtyChange }: PassSheetProps): ReactElement {
+export function PassSheet({ title, groupId, subjectId, today, restrictDates, load, save, scan, onDirtyChange }: PassSheetProps): ReactElement {
   const [date, setDate] = useState(today);
   const list = useAttendanceSheet({ groupId, subjectId, date }, load, save);
   const { sheet, rows, dirty } = list;
@@ -46,6 +55,28 @@ export function PassSheet({ title, groupId, subjectId, today, restrictDates, loa
   /** A past (or future) list nobody took: no statuses, no counters — "Presentes 4" would be a lie. */
   const untaken = sheet !== undefined && !editable && sheet.session === null;
   const locked = list.saving;
+  const resolve = useMemo(
+    () => (scan === undefined ? undefined : (code: string) => scan({ groupId, ...(subjectId !== undefined ? { subjectId } : {}), date, code })),
+    [scan, groupId, subjectId, date],
+  );
+  const scanner = useCardScan({ target: { groupId, subjectId, date }, sheet, loadedFor: list.loadedFor, rows, resolve, setStatus: list.setStatus });
+  /** Scanning is taking attendance now: only on today's editable list. */
+  const canScan = scan !== undefined && editable && date === today;
+  const saveList = async (): Promise<void> => {
+    const saved = await list.save();
+    if (saved !== undefined) scanner.saved(saved);
+  };
+  /** A change by hand: the scanner leaves that row alone from now on. */
+  const setStatusByHand = (enrollmentId: string, status: AttendanceStatus): void => {
+    if (locked) return;
+    scanner.touch([enrollmentId]);
+    list.setStatus(enrollmentId, status);
+  };
+  const allPresent = (): void => {
+    if (locked) return;
+    scanner.touch(rows.map((row) => row.enrollmentId));
+    list.allPresent();
+  };
 
   useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
@@ -72,23 +103,27 @@ export function PassSheet({ title, groupId, subjectId, today, restrictDates, loa
       ) : (
         <>
           {!editable && <ReadOnlyBanner text={readOnlyText(sheet.readOnlyReason, windowDays, restrictDates)} />}
+          {scanner.banner !== undefined && <ScanBanner text={scanner.banner} />}
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
             {!untaken && <Counters counts={list.counts} />}
             {editable && (
-              <button type="button" aria-disabled={locked || undefined} onClick={list.allPresent} style={{ minHeight: 44, padding: "0 16px", borderRadius: "var(--r-pill)", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontWeight: 700, fontSize: 14, cursor: locked ? "progress" : "pointer", opacity: locked ? LOCKED_OPACITY : 1 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {canScan && <ScanButton disabled={locked} onClick={scanner.start} />}
+              <button type="button" aria-disabled={locked || undefined} onClick={allPresent} style={{ minHeight: 44, padding: "0 16px", borderRadius: "var(--r-pill)", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontWeight: 700, fontSize: 14, cursor: locked ? "progress" : "pointer", opacity: locked ? LOCKED_OPACITY : 1 }}>
                 Todos presentes
               </button>
+              </div>
             )}
           </div>
           <ul aria-label="Pase de lista" style={{ display: "grid", gap: 8, listStyle: "none", margin: 0, padding: 0 }}>
             {rows.map((row) => (
-              <PassSheetRow key={row.enrollmentId} row={row} editable={editable} locked={locked} showStatus={!untaken} onStatus={list.setStatus} onNote={list.setNote} />
+              <PassSheetRow key={row.enrollmentId} row={row} editable={editable} locked={locked} showStatus={!untaken} pending={scanner.open && scanner.unregistered.has(row.enrollmentId)} onStatus={setStatusByHand} onNote={list.setNote} />
             ))}
           </ul>
           {editable && (
             <div style={{ position: "sticky", bottom: 0, zIndex: 5, marginTop: 14, padding: "12px 0", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: 12, background: "var(--surface)", borderTop: "1px solid var(--border)" }}>
               {dirty && <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--warn-fg)" }}>Cambios sin guardar</span>}
-              <button type="button" aria-busy={list.saving} onClick={() => void list.save()} style={{ minHeight: 52, flex: "1 1 200px", maxWidth: 320, padding: "0 24px", borderRadius: "var(--r-pill)", background: "var(--primary)", color: "var(--primary-ink)", fontWeight: 800, fontSize: 16, cursor: "pointer" }}>
+              <button type="button" aria-busy={list.saving} onClick={() => void saveList()} style={{ minHeight: 52, flex: "1 1 200px", maxWidth: 320, padding: "0 24px", borderRadius: "var(--r-pill)", background: "var(--primary)", color: "var(--primary-ink)", fontWeight: 800, fontSize: 16, cursor: "pointer" }}>
                 {list.saving ? "Guardando…" : "Guardar lista"}
               </button>
             </div>
@@ -98,6 +133,9 @@ export function PassSheet({ title, groupId, subjectId, today, restrictDates, loa
 
       {list.saveError !== undefined && <ErrorAlert message={list.saveError} />}
       {list.toast !== undefined && <Toast>{list.toast}</Toast>}
+      {scanner.open && (
+        <QrScanDialog scannedCount={scanner.scanned.size} total={rows.length} flash={scanner.flash} announcement={scanner.announcement} onCode={scanner.onCode} onFinish={scanner.finish} />
+      )}
     </Section>
   );
 }

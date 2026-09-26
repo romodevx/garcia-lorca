@@ -43,9 +43,11 @@ import { Icon, type IconName } from "./Icon";
  * Cuánto espacio pide la forma que va dentro.
  *
  * `sm` fichas y lectura · `md` altas de un puñado de campos · `lg` formularios
- * grandes, que además se acomodan en dos columnas en un monitor ancho.
+ * grandes, que además se acomodan en dos columnas en un monitor ancho ·
+ * `full` la cámara del pase de lista por QR: la pantalla entera en un teléfono,
+ * una columna de alto completo en un monitor. No es para formas.
  */
-export type DrawerSize = "sm" | "md" | "lg";
+export type DrawerSize = "sm" | "md" | "lg" | "full";
 
 const closeButton: CSSProperties = {
   width: 40,
@@ -268,6 +270,7 @@ export function DrawerShell({
      * donde viene — deslizarse desde la derecha ya no querría decir nada.
      */
     animation: "pop .2s var(--ease) both",
+    ...(size === "full" ? { height: "100%", maxHeight: "100%", borderRadius: 0, border: "none", overflow: "hidden" } : {}),
   };
 
   const chrome = (
@@ -365,7 +368,7 @@ export function DrawerShell({
          */
         justifyContent: "center",
         alignItems: "center",
-        padding: 24,
+        padding: size === "full" ? 0 : 24,
       }}
     >
       {onSubmit !== undefined ? (

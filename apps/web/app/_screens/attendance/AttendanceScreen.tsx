@@ -1,6 +1,9 @@
 "use client";
 
 import { type ReactElement } from "react";
+
+import { useFlag } from "@garcia-lorca/ui/flags";
+
 import { DirectorAttendance } from "./DirectorAttendance";
 import { TeacherAttendance } from "./TeacherAttendance";
 
@@ -30,8 +33,10 @@ export interface AttendanceScreenProps {
  */
 export function AttendanceScreen({ onBack, today, permissions }: AttendanceScreenProps): ReactElement {
   const perms = permissions ?? [];
+  /** The credential scanner rides on the student card module (UX only; the gateway enforces it). */
+  const canScanCards = useFlag("module_student_card");
   if (!perms.includes("attendance:read") && perms.includes("attendance_own:read")) {
-    return <TeacherAttendance onBack={onBack} today={today} />;
+    return <TeacherAttendance onBack={onBack} today={today} canScanCards={canScanCards} />;
   }
-  return <DirectorAttendance onBack={onBack} today={today} />;
+  return <DirectorAttendance onBack={onBack} today={today} canScanCards={canScanCards} />;
 }

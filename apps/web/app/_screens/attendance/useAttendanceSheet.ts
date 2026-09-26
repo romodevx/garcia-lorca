@@ -23,6 +23,8 @@ export interface SheetTarget {
 
 export interface AttendanceSheetState {
   sheet: AttendanceSheet | undefined;
+  /** The list `sheet` was loaded for: until the new list arrives, the old one stays on screen. */
+  loadedFor: AttendanceSheetQuery | undefined;
   rows: readonly AttendanceSheetRow[];
   counts: StatusCounts;
   dirty: boolean;
@@ -34,7 +36,12 @@ export interface AttendanceSheetState {
   setStatus: (enrollmentId: string, status: AttendanceStatus) => void;
   setNote: (enrollmentId: string, note: string) => void;
   allPresent: () => void;
-  save: () => Promise<void>;
+  /**
+   * Resolves the list the server now has — the one on screen when "Guardar"
+   * was pressed, even if the day changed meanwhile — or undefined when the
+   * save failed or was refused.
+   */
+  save: () => Promise<AttendanceSheetQuery | undefined>;
 }
 
 /**
@@ -47,6 +54,7 @@ export interface AttendanceSheetState {
 export function useAttendanceSheet(target: SheetTarget, load: LoadSheet, save: SaveSheet): AttendanceSheetState {
   const { groupId, subjectId, date } = target;
   const [sheet, setSheet] = useState<AttendanceSheet | undefined>(undefined);
+  const [loadedFor, setLoadedFor] = useState<AttendanceSheetQuery | undefined>(undefined);
   const [rows, setRows] = useState<AttendanceSheetRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
@@ -67,6 +75,8 @@ export function useAttendanceSheet(target: SheetTarget, load: LoadSheet, save: S
   currentQuery.current = query;
   /** Mirrors `saving` synchronously so edits are refused while a save is in flight. */
   const savingNow = useRef(false);
+  /** The list being saved: only ITS rows are locked; another day's list is free to edit. */
+  const savingFor = useRef<AttendanceSheetQuery | undefined>(undefined);
 
   const read = useCallback(async (quiet: boolean, q: AttendanceSheetQuery): Promise<void> => {
     const id = (request.current += 1);
@@ -78,6 +88,7 @@ export function useAttendanceSheet(target: SheetTarget, load: LoadSheet, save: S
       const next = await io.current.load(q);
       if (id !== request.current) return;
       setSheet(next);
+      setLoadedFor(q);
       setRows(next.rows);
     } catch (cause) {
       if (id === request.current && !quiet) setLoadError(reasonOf(cause, LOAD_FALLBACK));
@@ -94,9 +105,9 @@ export function useAttendanceSheet(target: SheetTarget, load: LoadSheet, save: S
 
   useEffect(() => () => window.clearTimeout(toastTimer.current), []);
 
-  /** Rows are locked while saving: the post-save reread would otherwise drop the edit. */
+  /** The list being saved is locked: the post-save reread would otherwise drop the edit. */
   const edit = useCallback((change: (prev: AttendanceSheetRow[]) => AttendanceSheetRow[]) => {
-    if (!savingNow.current) setRows(change);
+    if (!savingNow.current || savingFor.current !== currentQuery.current) setRows(change);
   }, []);
   const setStatus = useCallback((enrollmentId: string, status: AttendanceStatus) => {
     edit((prev) => prev.map((row) => (row.enrollmentId === enrollmentId ? { ...row, status } : row)));
@@ -106,10 +117,11 @@ export function useAttendanceSheet(target: SheetTarget, load: LoadSheet, save: S
   }, [edit]);
   const allPresent = useCallback(() => edit((prev) => prev.map((row) => ({ ...row, status: "present" }))), [edit]);
 
-  const saveList = useCallback(async (): Promise<void> => {
-    if (savingNow.current) return;
+  const saveList = useCallback(async (): Promise<AttendanceSheetQuery | undefined> => {
+    if (savingNow.current) return undefined;
     const saved = query;
     savingNow.current = true;
+    savingFor.current = saved;
     setSaving(true);
     setSaveError(undefined);
     try {
@@ -118,13 +130,15 @@ export function useAttendanceSheet(target: SheetTarget, load: LoadSheet, save: S
       setToast("Lista guardada");
       toastTimer.current = window.setTimeout(() => setToast(undefined), TOAST_MS);
       // The day or class changed mid-save: that list's own load already owns the screen.
-      if (currentQuery.current !== saved) return;
+      if (currentQuery.current !== saved) return saved;
       // What was just saved IS the server's list now: it becomes the baseline at
       // once, so the screen is clean even if the quiet re-read below fails.
       setSheet((prev) => (prev === undefined ? prev : { ...prev, rows: [...rows] }));
       await read(true, saved);
+      return saved;
     } catch (cause) {
       setSaveError(reasonOf(cause, SAVE_FALLBACK));
+      return undefined;
     } finally {
       savingNow.current = false;
       setSaving(false);
@@ -134,5 +148,5 @@ export function useAttendanceSheet(target: SheetTarget, load: LoadSheet, save: S
   const counts = useMemo(() => tally(rows), [rows]);
   const dirty = useMemo(() => sheet !== undefined && isDirty(rows, sheet.rows), [rows, sheet]);
 
-  return { sheet, rows, counts, dirty, loading, loadError, saving, saveError, toast, setStatus, setNote, allPresent, save: saveList };
+  return { sheet, loadedFor, rows, counts, dirty, loading, loadError, saving, saveError, toast, setStatus, setNote, allPresent, save: saveList };
 }
