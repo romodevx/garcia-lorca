@@ -1,6 +1,7 @@
 import { router } from "expo-router";
 import { useEffect } from "react";
 import { onSessionLost } from "@/src/api";
+import { unregisterPush } from "@/src/push/unregister";
 import { useAppState } from "@/src/state/AppState";
 
 /**
@@ -14,13 +15,16 @@ import { useAppState } from "@/src/state/AppState";
  * guardian's child slice (bug_006): resetting only notifications left
  * `children`/`selectedChildId` holding the prior guardian's data. Mounted inside
  * the router + provider context by the root layout; the subscription is set up
- * once and torn down on unmount.
+ * once and torn down on unmount. The phone's push token is unregistered too,
+ * best-effort: the session is already gone, so it becomes a pending delete
+ * retried before the next registration.
  */
 export function useSessionLostRedirect(): void {
   const { refreshChildren, refreshNotifications } = useAppState();
   useEffect(() => {
     return onSessionLost(() => {
       router.replace("/");
+      void unregisterPush();
       // Tokens are already cleared by refresh(), so both short-circuit to an empty
       // slice without firing a request.
       void refreshChildren();

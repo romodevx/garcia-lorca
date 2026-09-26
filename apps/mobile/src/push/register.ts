@@ -3,6 +3,7 @@ import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { registerDevice, type DevicePlatform } from "../api/devices";
 import { markPermissionAsked, saveRegisteredToken, wasPermissionAsked } from "./pushStore";
+import { retryPendingUnregisters } from "./unregister";
 
 /** The Android channel attendance alerts are posted on. */
 export const ATTENDANCE_CHANNEL_ID = "asistencia";
@@ -17,9 +18,14 @@ export function resetMissingProjectLogForTests(): void {
   missingProjectLogged = false;
 }
 
+function nonEmpty(value: unknown): string | null {
+  return typeof value === "string" && value !== "" ? value : null;
+}
+
+/** The EAS build's projectId first (set on EAS builds), then the app config's. */
 function easProjectId(): string | null {
-  const eas = Constants.expoConfig?.extra?.eas as { projectId?: unknown } | undefined;
-  return typeof eas?.projectId === "string" && eas.projectId !== "" ? eas.projectId : null;
+  const extra = Constants.expoConfig?.extra?.eas as { projectId?: unknown } | undefined;
+  return nonEmpty(Constants.easConfig?.projectId) ?? nonEmpty(extra?.projectId);
 }
 
 function devicePlatform(): DevicePlatform | null {
@@ -64,8 +70,10 @@ async function hasPermission(): Promise<boolean> {
 }
 
 /**
- * Registers this phone for attendance pushes: channel → permission → Expo push
- * token → `POST /family/devices`. Without an EAS projectId (true until the owner
+ * Registers this phone for attendance pushes: pending deletes → channel →
+ * permission → Expo push token → `POST /family/devices`. A token whose delete
+ * never reached the gateway is retried FIRST; while one still fails, nothing is
+ * registered (that late DELETE could remove the new registration). Without an EAS projectId (true until the owner
  * configures EAS) it skips before prompting, so nobody is asked for a
  * permission that cannot yet do anything. Never throws.
  */
@@ -80,6 +88,9 @@ export async function registerForPush(): Promise<PushRegistration> {
     return "unsupported";
   }
   try {
+    if (!(await retryPendingUnregisters())) {
+      return "failed";
+    }
     await ensureAttendanceChannel();
     if (!(await hasPermission())) {
       return "denied";

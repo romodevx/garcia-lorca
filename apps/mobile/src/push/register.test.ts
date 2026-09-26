@@ -2,15 +2,19 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { clearTokens, saveTokens } from "../api";
-import { readRegisteredToken } from "./pushStore";
+import { readPendingUnregisters, readRegisteredToken, savePendingUnregister } from "./pushStore";
 import { ATTENDANCE_CHANNEL_ID, registerForPush, resetMissingProjectLogForTests } from "./register";
 
 const mockExpoConfig: { extra?: { eas?: { projectId?: string } } } = {};
+const mockEasConfig: { projectId?: string } = {};
 jest.mock("expo-constants", () => ({
   __esModule: true,
   default: {
     get expoConfig() {
       return mockExpoConfig;
+    },
+    get easConfig() {
+      return mockEasConfig.projectId ? mockEasConfig : null;
     },
   },
 }));
@@ -40,6 +44,7 @@ describe("registerForPush", () => {
     await AsyncStorage.clear();
     await saveTokens({ accessToken: "a1", refreshToken: "r1" });
     mockExpoConfig.extra = { eas: { projectId: "proj-123" } };
+    delete mockEasConfig.projectId;
     resetMissingProjectLogForTests();
     mocked.getExpoPushTokenAsync.mockResolvedValue({ type: "expo", data: "ExponentPushToken[xyz]" });
   });
@@ -119,5 +124,38 @@ describe("registerForPush", () => {
       expect.objectContaining({ name: "Asistencia" }),
     );
     Object.defineProperty(Platform, "OS", { value: original, configurable: true });
+  });
+
+  it("prefers the EAS build's projectId (Constants.easConfig)", async () => {
+    mockGateway();
+    mockExpoConfig.extra = {};
+    mockEasConfig.projectId = "eas-build-proj";
+    mocked.getPermissionsAsync.mockResolvedValue(perm("granted"));
+
+    await expect(registerForPush()).resolves.toBe("registered");
+    expect(mocked.getExpoPushTokenAsync).toHaveBeenCalledWith({ projectId: "eas-build-proj" });
+  });
+
+  it("deletes a token left pending by an earlier sign-out BEFORE registering again", async () => {
+    await savePendingUnregister("ExponentPushToken[old]");
+    const fetchMock = mockGateway();
+    mocked.getPermissionsAsync.mockResolvedValue(perm("granted"));
+
+    await expect(registerForPush()).resolves.toBe("registered");
+
+    const methods = fetchMock.mock.calls.map((c) => (c as unknown as [string, RequestInit])[1].method);
+    expect(methods).toEqual(["DELETE", "POST"]);
+    expect(await readPendingUnregisters()).toEqual([]);
+  });
+
+  it("does not register while an old token still cannot be deleted (it would be deleted later)", async () => {
+    await savePendingUnregister("ExponentPushToken[old]");
+    const fetchMock = jest.fn(async () => ({ ok: false, status: 503, json: async () => ({}) }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    mocked.getPermissionsAsync.mockResolvedValue(perm("granted"));
+
+    await expect(registerForPush()).resolves.toBe("failed");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mocked.getExpoPushTokenAsync).not.toHaveBeenCalled();
   });
 });

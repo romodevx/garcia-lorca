@@ -3,6 +3,7 @@ import { router } from "expo-router";
 import { type ReactElement } from "react";
 import { clearTokens, emitSessionLost, saveTokens } from "@/src/api";
 import { renderWithProviders } from "@/src/test/renderWithProviders";
+import { readPendingUnregisters, readRegisteredToken, saveRegisteredToken } from "@/src/push/pushStore";
 import { useSessionLostRedirect } from "./useSessionLostRedirect";
 
 /** Mounts the hook under test; renders nothing itself. */
@@ -59,6 +60,22 @@ describe("useSessionLostRedirect", () => {
     expect(router.replace).toHaveBeenCalledWith("/");
 
     await clearTokens();
+  });
+
+  it("unregisters this phone's push token best-effort, keeping it as a pending delete (no Bearer left)", async () => {
+    await saveRegisteredToken("ExponentPushToken[xyz]");
+    const fetchMock = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ students: [], notifications: [] }) }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    await renderWithProviders(<Harness />);
+
+    await act(async () => {
+      emitSessionLost();
+    });
+
+    await waitFor(async () => expect(await readRegisteredToken()).toBeNull());
+    expect(await readPendingUnregisters()).toEqual(["ExponentPushToken[xyz]"]);
+    const deletes = fetchMock.mock.calls.filter((c) => String((c as unknown[])[0]).includes("/family/devices"));
+    expect(deletes).toHaveLength(0);
   });
 
   it("stops reacting once unmounted (subscription is cleaned up)", async () => {
