@@ -13,6 +13,7 @@
 // --- entity types (match the gateway JSON contract) -----------------------
 
 import { authFetch } from "../auth/authFetch";
+import type { AttendanceMode } from "../attendance/sheet";
 
 export type CycleStatus = "draft" | "active" | "closed";
 
@@ -39,6 +40,8 @@ export interface Level {
   name: string;
   sepCode: string;
   enrollmentGranularity: EnrollmentGranularity;
+  /** How the level takes attendance; absent from older gateways (read as "daily"). */
+  attendanceMode?: AttendanceMode;
 }
 
 export interface CreateLevelInput {
@@ -331,6 +334,20 @@ export function createLevel(baseURL: string, input: CreateLevelInput): Promise<L
 
 export function listLevels(baseURL: string): Promise<Level[]> {
   return getList<Level>(baseURL, "/levels", "levels");
+}
+
+/** Sets how a level takes attendance: one list per day, or one per class. */
+export async function updateLevelAttendanceMode(baseURL: string, id: string, attendanceMode: AttendanceMode): Promise<Level> {
+  const res = await authFetch(url(baseURL, `${BASE_PATH}/levels/${encodeURIComponent(id)}`), {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ attendanceMode }),
+  });
+  if (!res.ok) {
+    throw await configFailure(res);
+  }
+  return (await res.json()) as Level;
 }
 
 // --- grade levels ---------------------------------------------------------

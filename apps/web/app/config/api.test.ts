@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  updateLevelAttendanceMode,
   ConfigError,
   createCycle,
   createGradeLevel,
@@ -97,6 +98,24 @@ describe("levels", () => {
     const levels = [{ id: "l1", name: "Primaria", sepCode: "PRI", enrollmentGranularity: "cycle" }];
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ levels })));
     await expect(listLevels(BASE)).resolves.toEqual(levels);
+  });
+
+  it("updateLevelAttendanceMode PATCHes /levels/{id} with {attendanceMode} and returns the level", async () => {
+    const updated = { id: "l1", name: "Secundaria", sepCode: "SEC", enrollmentGranularity: "cycle", attendanceMode: "per_class" };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(updated));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(updateLevelAttendanceMode(BASE, "l1", "per_class")).resolves.toEqual(updated);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/config/levels/l1");
+    expect(init.method).toBe("PATCH");
+    expect(init.credentials).toBe("include");
+    expect(JSON.parse(init.body as string)).toEqual({ attendanceMode: "per_class" });
+  });
+
+  it("updateLevelAttendanceMode throws the server's text on failure", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("nivel no encontrado", { status: 404 })));
+    await expect(updateLevelAttendanceMode(BASE, "lX", "daily")).rejects.toThrow("nivel no encontrado");
   });
 });
 

@@ -361,6 +361,26 @@ func (stubConfig) ListGroups(_ context.Context, _ *connect.Request[configv1.List
 	}}), nil
 }
 
+// GetGroup backs one pass list's group → grade → level resolution: grp-1 (the
+// only stub group) carries no grade, so its list resolves as daily; any other id
+// is NotFound.
+func (stubConfig) GetGroup(_ context.Context, req *connect.Request[configv1.GetGroupRequest]) (*connect.Response[configv1.GetGroupResponse], error) {
+	if req.Msg.GetId() != "grp-1" {
+		return nil, connect.NewError(connect.CodeNotFound, errStr("group not found"))
+	}
+	return connect.NewResponse(&configv1.GetGroupResponse{Group: &configv1.Group{Id: "grp-1", CycleId: "cyc-1", Name: "3° A"}}), nil
+}
+
+// ListGradeLevels backs the attendance mode resolution: the stub group carries
+// no grade, so its list resolves as daily (the column's default).
+func (stubConfig) ListGradeLevels(_ context.Context, _ *connect.Request[configv1.ListGradeLevelsRequest]) (*connect.Response[configv1.ListGradeLevelsResponse], error) {
+	return connect.NewResponse(&configv1.ListGradeLevelsResponse{}), nil
+}
+
+// schoolTodayISO is the system's school day (UTC), the one date a teacher may
+// always save.
+func schoolTodayISO() string { return time.Now().UTC().Format("2006-01-02") }
+
 func (stubConfig) ListSubjects(_ context.Context, _ *connect.Request[configv1.ListSubjectsRequest]) (*connect.Response[configv1.ListSubjectsResponse], error) {
 	return connect.NewResponse(&configv1.ListSubjectsResponse{Subjects: []*configv1.Subject{
 		{Id: "sub-1", Name: "Matemáticas"},
@@ -480,7 +500,16 @@ type stubAttendance struct {
 	attendancev1connect.UnimplementedAttendanceServiceHandler
 }
 
-func (stubAttendance) GetDailyRoster(_ context.Context, _ *connect.Request[attendancev1.GetDailyRosterRequest]) (*connect.Response[attendancev1.GetDailyRosterResponse], error) {
+// GetDailyRoster answers the daily list with one stored absence. A per-class
+// key (the stub group is daily) is a list nobody took — all present, no
+// session — so the edge's mode refusal still applies to it (a list that
+// already exists would be served in its own shape).
+func (stubAttendance) GetDailyRoster(_ context.Context, req *connect.Request[attendancev1.GetDailyRosterRequest]) (*connect.Response[attendancev1.GetDailyRosterResponse], error) {
+	if req.Msg.GetSubjectId() != "" {
+		return connect.NewResponse(&attendancev1.GetDailyRosterResponse{Rows: []*attendancev1.RosterRow{
+			{EnrollmentId: "enr-1", StudentId: "stu-1", Status: "present"},
+		}}), nil
+	}
 	return connect.NewResponse(&attendancev1.GetDailyRosterResponse{Rows: []*attendancev1.RosterRow{
 		{EnrollmentId: "enr-1", StudentId: "stu-1", Status: "present"},
 		{EnrollmentId: "enr-2", StudentId: "stu-2", Status: "absent"},
@@ -1528,14 +1557,15 @@ func TestAttendanceRosterWithReadPermission200(t *testing.T) {
 		t.Fatalf("status = %d, want 200", res.StatusCode)
 	}
 	var out struct {
-		Roster []map[string]any `json:"roster"`
+		Mode string           `json:"mode"`
+		Rows []map[string]any `json:"rows"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	// Default-present survives the whole chain: an unmarked row reads "present".
-	if len(out.Roster) != 2 || out.Roster[0]["status"] != "present" || out.Roster[1]["status"] != "absent" {
-		t.Errorf("body = %v", out.Roster)
+	if out.Mode != "daily" || len(out.Rows) != 2 || out.Rows[0]["status"] != "present" || out.Rows[1]["status"] != "absent" {
+		t.Errorf("body = %+v", out)
 	}
 }
 
@@ -2387,57 +2417,14 @@ func TestTeachingCaptureUnownedAssignmentIs404(t *testing.T) {
 // group-ownership scoping. attendance_own:* is NOT attendance:* — a broad
 // attendance-staff token must be forbidden here, and a foreign group answers 404.
 
-// Groups composes module_attendance + module_config: either OFF ⇒ 404.
-func TestTeachingGroupsDisabledAttendanceModuleIs404(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_config": true}) // module_attendance OFF
+// GET /api/v1/teaching/groups was the pre-T3 daily-group picker; the web now
+// reads /teaching/attendance/classes, so the route is gone — even for a token
+// that holds attendance_own:read with every module on.
+func TestTeachingGroupsRouteIsGone(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_attendance": true, "module_config": true})
 	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/groups", "att-own-reader", "")
 	if res.StatusCode != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", res.StatusCode)
-	}
-}
-
-func TestTeachingGroupsDisabledConfigModuleIs404(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_attendance": true}) // module_config OFF
-	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/groups", "att-own-reader", "")
-	if res.StatusCode != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", res.StatusCode)
-	}
-}
-
-func TestTeachingGroupsNoTokenIs401(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_attendance": true, "module_config": true})
-	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/groups", "", "")
-	if res.StatusCode != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", res.StatusCode)
-	}
-}
-
-// attendance:read is NOT attendance_own:read: a broad attendance-staff token
-// cannot reach the teacher self-scoped surface.
-func TestTeachingGroupsWithoutAttendanceOwnReadIs403(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_attendance": true, "module_config": true})
-	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/groups", "att-reader", "")
-	if res.StatusCode != http.StatusForbidden {
-		t.Errorf("status = %d, want 403 (attendance:read is not attendance_own:read)", res.StatusCode)
-	}
-}
-
-func TestTeachingGroupsWithAttendanceOwnReadReturns200(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_attendance": true, "module_config": true})
-	res := doGateway(t, gw, http.MethodGet, "/api/v1/teaching/groups", "att-own-reader", "")
-	if res.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", res.StatusCode)
-	}
-	var out struct {
-		Groups []map[string]any `json:"groups"`
-	}
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	// The stub teacher tch-1 teaches grp-1, enriched to "3° A" from the config
-	// catalog. No other group is the caller's.
-	if len(out.Groups) != 1 || out.Groups[0]["id"] != "grp-1" || out.Groups[0]["name"] != "3° A" {
-		t.Errorf("groups = %v, want one group grp-1 named 3° A", out.Groups)
+		t.Errorf("status = %d, want 404 (route removed)", res.StatusCode)
 	}
 }
 
@@ -2472,17 +2459,17 @@ func TestTeachingAttendanceRosterOwnedGroupReturns200(t *testing.T) {
 		t.Fatalf("status = %d, want 200", res.StatusCode)
 	}
 	var out struct {
-		Roster []map[string]any `json:"roster"`
+		Rows []map[string]any `json:"rows"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	// The gateway resolves the student name for the Maestro (who holds no
 	// students:read): the stub roster's stu-1 comes back named "Ana".
-	if len(out.Roster) != 2 || out.Roster[0]["enrollmentId"] != "enr-1" ||
-		out.Roster[0]["studentId"] != "stu-1" || out.Roster[0]["studentName"] != "Ana" ||
-		out.Roster[0]["status"] != "present" {
-		t.Errorf("roster = %v, want enr-1/stu-1/Ana/present enriched", out.Roster)
+	if len(out.Rows) != 2 || out.Rows[0]["enrollmentId"] != "enr-1" ||
+		out.Rows[0]["studentId"] != "stu-1" || out.Rows[0]["name"] != "Ana" ||
+		out.Rows[0]["status"] != "present" {
+		t.Errorf("rows = %v, want enr-1/stu-1/Ana/present enriched", out.Rows)
 	}
 }
 
@@ -2527,7 +2514,7 @@ func TestTeachingAttendanceSaveWithoutAttendanceOwnWriteIs403(t *testing.T) {
 func TestTeachingAttendanceSaveOwnedGroupReturns200(t *testing.T) {
 	gw := newTestGateway(t, map[string]bool{"module_attendance": true})
 	res := doGateway(t, gw, http.MethodPost, "/api/v1/teaching/attendance", "att-own-writer",
-		`{"groupId":"grp-1","date":"2026-09-01","marks":[{"enrollmentId":"enr-1","status":"absent"}]}`)
+		`{"groupId":"grp-1","date":"`+schoolTodayISO()+`","marks":[{"enrollmentId":"enr-1","status":"absent"}]}`)
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", res.StatusCode)
 	}

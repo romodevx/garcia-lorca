@@ -952,3 +952,16 @@ func TestActivateCycleRejectsAYearThatDoesNotExist(t *testing.T) {
 		t.Error("activating a cycle that does not exist must fail")
 	}
 }
+
+func (f *fakeCatalog) UpdateLevelAttendanceMode(_ context.Context, id string, mode domain.AttendanceMode) error {
+	l, ok := f.levels[id]
+	if !ok {
+		return glerrors.ErrNotFound
+	}
+	changed, err := l.WithAttendanceMode(mode)
+	if err != nil {
+		return err
+	}
+	f.levels[id] = changed
+	return nil
+}

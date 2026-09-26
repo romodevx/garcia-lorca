@@ -10,6 +10,7 @@
  * No React, no I/O: everything is a projection of the cycle's catalogue.
  */
 import type { GradeLevel, LabelledGroup, Level, Subject } from "../config/api";
+import { schoolOrder } from "../config/schoolOrder";
 import type { Teacher, TeachingAssignment } from "./api";
 
 const LOCALE = "es-MX";
@@ -77,21 +78,6 @@ export function subjectNames(subjects: readonly Subject[]): string[] {
 
 export function teacherName(teacher: Teacher): string {
   return `${teacher.firstName} ${teacher.lastName}`;
-}
-
-/** Orders groups the way the school reads them: level, grade, letter. */
-function schoolOrder(cat: LoadCatalogue): (a: LabelledGroup, b: LabelledGroup) => number {
-  const levelIndex = new Map(cat.levels.map((l, i) => [l.id, i]));
-  const gradeById = new Map(cat.grades.map((g) => [g.id, g]));
-  const rank = (g: LabelledGroup): [number, number] => {
-    const grade = gradeById.get(g.gradeLevelId);
-    return [levelIndex.get(grade?.levelId ?? "") ?? Number.MAX_SAFE_INTEGER, grade?.ordinal ?? 0];
-  };
-  return (a, b) => {
-    const [la, ga] = rank(a);
-    const [lb, gb] = rank(b);
-    return la - lb || ga - gb || byName(a.name, b.name);
-  };
 }
 
 /** One teacher's slots, grouped by subject name. */

@@ -1,37 +1,36 @@
 import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import * as attApi from "../../attendance/api";
 import * as configApi from "../../config/api";
 import * as studentsApi from "../../students/api";
 import { AttendanceScreen } from "./AttendanceScreen";
 import { Providers } from "../../test-utils";
 
-// The screens read labelled groups (ISSUE-002); label them from the listGroups mock.
-beforeEach(() => {
-  vi.mocked(configApi.listLabelledGroups).mockImplementation(async (...args) =>
-    (await vi.mocked(configApi.listGroups)(...args)).map((g) => ({ ...g, label: g.name })));
-});
-
-
-vi.mock("../../attendance/api", () => ({ getDailyRoster: vi.fn(), saveDailyAttendance: vi.fn() }));
-vi.mock("../../config/api", () => ({ listCycles: vi.fn(), listGroups: vi.fn(), listLabelledGroups: vi.fn() }));
+vi.mock("../../attendance/api", () => ({ getAttendanceSheet: vi.fn(), saveAttendanceSheet: vi.fn() }));
+vi.mock("../../config/api", () => ({
+  listCycles: vi.fn(),
+  listLevels: vi.fn(),
+  listGradeLevels: vi.fn(),
+  listLabelledGroups: vi.fn(),
+  listSubjects: vi.fn(),
+}));
+vi.mock("../../teachers/api", () => ({ listTeachingAssignments: vi.fn() }));
 vi.mock("../../students/api", () => ({ listStudents: vi.fn() }));
 
-const att = vi.mocked(attApi);
 const config = vi.mocked(configApi);
 const students = vi.mocked(studentsApi);
 
 beforeEach(() => {
   config.listCycles.mockResolvedValue([{ id: "c1", name: "2026-2027", status: "active", startsOn: "2026-08-01", endsOn: "2027-06-30" }]);
-  config.listGroups.mockResolvedValue([{ id: "g1", cycleId: "c1", gradeLevelId: "gl1", name: "1° A", capacity: 30 }]);
+  config.listLevels.mockResolvedValue([]);
+  config.listGradeLevels.mockResolvedValue([]);
+  config.listLabelledGroups.mockResolvedValue([{ id: "g1", cycleId: "c1", gradeLevelId: "gl1", name: "A", capacity: 30, label: "1° A" }]);
   students.listStudents.mockResolvedValue([]);
-  att.getDailyRoster.mockResolvedValue([]);
 });
 afterEach(() => vi.clearAllMocks());
 
 describe("AttendanceScreen", () => {
-  it("renders the header, the day pickers and the stat cards", async () => {
+  it("renders the header and the group pickers", async () => {
     render(
       <Providers flags={{}}>
         <AttendanceScreen onBack={() => {}} today="2026-09-01" />
@@ -40,8 +39,7 @@ describe("AttendanceScreen", () => {
     expect(await screen.findByRole("heading", { name: "Asistencia" })).toBeInTheDocument();
     expect(screen.getByLabelText("Ciclo")).toBeInTheDocument();
     expect(screen.getByLabelText("Grupo")).toBeInTheDocument();
-    expect(screen.getByLabelText("Fecha")).toBeInTheDocument();
-    expect(screen.getByText("Presentes")).toBeInTheDocument();
-    expect(screen.getByText("Ausentes")).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "1° A" })).toBeInTheDocument();
+    expect(screen.getByText("Selecciona un grupo para pasar lista.")).toBeInTheDocument();
   });
 });

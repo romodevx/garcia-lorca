@@ -4,7 +4,9 @@ import (
 	"context"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -27,10 +29,15 @@ const (
 // enrollmentStatusActive is the only enrollment status that appears on a roster.
 const enrollmentStatusActive = "active"
 
-// maxNoteLength bounds the free-text justification a client may attach to a
+// maxNoteLength bounds, in CHARACTERS (runes, like the column CHECK length()
+// and the web counter), the free-text justification a client may attach to a
 // mark. The column carries the same CHECK, so the cap holds even for a writer
 // that bypasses this layer.
 const maxNoteLength = 500
+
+// maxTakerNameLength bounds the display-name snapshot stamped on a session; the
+// column carries the same CHECK.
+const maxTakerNameLength = 200
 
 // --- seams -------------------------------------------------------------------
 //
@@ -67,30 +74,86 @@ type GroupReader interface {
 }
 
 // AttendanceRecord is one stored attendance exception: an enrollment, the school
-// day it applies to, its status (never statusPresent) and an optional note.
+// day it applies to, the list's subject ("" for a daily list), its status (never
+// statusPresent) and an optional note.
 type AttendanceRecord struct {
 	ID           string
 	EnrollmentID string
 	Date         time.Time
+	SubjectID    string
 	Status       string
 	Note         string
+	// Revision is the stored row's version: 1 when inserted, bumped by every
+	// in-place write. The repository reports it as STORED (never the plan's
+	// guess); it is what a mark event's version is made of.
+	Revision int64
 }
+
+// ListKey identifies one pass list: a group's school day and, for a per-class
+// list, the subject. An empty SubjectID is the daily list. Which of the two a
+// group uses is its level's attendance mode, enforced at the gateway: this
+// service stores whichever key it is given.
+type ListKey struct {
+	GroupID   string
+	Date      time.Time
+	SubjectID string
+}
+
+// Session records that a list was taken: TakenAt/TakenByName are its first save,
+// UpdatedAt its latest correction.
+type Session struct {
+	TakenAt     time.Time
+	TakenByName string
+	UpdatedAt   time.Time
+}
+
+// Taker is who saved a list: the iam user id and a display-name snapshot.
+type Taker struct {
+	UserID string
+	Name   string
+}
+
+// RecordUpdate is a stored exception rewritten in place by a correction: Record
+// carries the STORED id. StatusChanged tells a notifying change from a note-only
+// edit.
+type RecordUpdate struct {
+	Record        AttendanceRecord
+	StatusChanged bool
+}
+
+// ListChanges is what a save does to a list: exceptions to insert, stored ones
+// to update in place, and stored ones cleared back to present (deleted).
+type ListChanges struct {
+	Inserts []AttendanceRecord
+	Updates []RecordUpdate
+	Deletes []AttendanceRecord
+}
+
+// PlanFunc turns a list's CURRENT stored marks (keyed by enrollment id) into the
+// changes to apply. The repository calls it inside the reconcile transaction, so
+// the plan is computed against the rows it is about to change.
+type PlanFunc func(current map[string]AttendanceRecord) (ListChanges, error)
 
 // Repo stores the attendance marks. All access is tenant-scoped for RLS (the
 // adapter binds app.current_tenant per transaction, as in students/grades).
 type Repo interface {
-	// MarksForDate batch-loads the stored marks for many enrollments on one date
-	// in a single query, so building a roster never fans out into a lookup per
-	// student (N+1). The result is keyed by enrollment_id and holds an entry ONLY
-	// for enrollments with a stored exception; present students are simply absent
-	// from the map. An empty enrollmentIDs slice yields an empty map without
-	// touching the database.
-	MarksForDate(ctx context.Context, enrollmentIDs []string, date time.Time) (map[string]AttendanceRecord, error)
-	// ReconcileDay makes the stored state of one group·day match records, in ONE
-	// transaction: every mark held by enrollmentIDs on that date is dropped and
-	// records are inserted in its place. It is atomic on purpose — a partially
-	// reconciled day would silently misreport who was present.
-	ReconcileDay(ctx context.Context, enrollmentIDs []string, date time.Time, records []AttendanceRecord) error
+	// MarksForList batch-loads the stored marks of many enrollments on one list
+	// (key's date and subject) in a single query, so building a roster never fans
+	// out into a lookup per student (N+1). The result is keyed by enrollment_id
+	// and holds an entry ONLY for enrollments with a stored exception; present
+	// students are simply absent from the map. An empty enrollmentIDs slice
+	// yields an empty map without touching the database.
+	MarksForList(ctx context.Context, enrollmentIDs []string, key ListKey) (map[string]AttendanceRecord, error)
+	// SessionFor returns the list's session; found is false for a list nobody
+	// has saved.
+	SessionFor(ctx context.Context, key ListKey) (s Session, found bool, err error)
+	// ReconcileList applies a save to one list in ONE transaction: it loads the
+	// list's current marks for enrollmentIDs, asks plan for the changes, applies
+	// them (inserts and in-place updates as one upsert, deletes by id) and
+	// upserts the list's session for taker (the first taker is kept). It returns
+	// the changes applied. Atomic on purpose — a partially reconciled list would
+	// silently misreport who was present.
+	ReconcileList(ctx context.Context, key ListKey, enrollmentIDs []string, taker Taker, plan PlanFunc) (ListChanges, error)
 	// ListByEnrollment returns one enrollment's stored marks within an inclusive
 	// date range, ordered by date. A zero from or to skips that bound.
 	ListByEnrollment(ctx context.Context, enrollmentID string, from, to time.Time) ([]AttendanceRecord, error)
@@ -104,11 +167,14 @@ type AbsenceEvent struct {
 	StudentID    string
 	TenantID     string
 	Date         string
+	SubjectID    string
+	MarkVersion  int64 // the mark's stored revision; with RecordID, the consumer's dedupe key
 }
 
-// MarkedEvent announces that an attendance exception was stored for a student on
-// a date. It is the general companion of AbsenceEvent: Status is one of
-// absent|late|excused.
+// MarkedEvent announces that a student's mark CHANGED on a list: a new
+// exception, a changed status, or — Status statusPresent — a stored exception
+// cleared by a correction. It is the general companion of AbsenceEvent.
+// SubjectID is empty for a daily list.
 type MarkedEvent struct {
 	RecordID     string
 	EnrollmentID string
@@ -116,10 +182,12 @@ type MarkedEvent struct {
 	TenantID     string
 	Date         string
 	Status       string
+	SubjectID    string
+	MarkVersion  int64 // the mark's stored revision; with RecordID, the consumer's dedupe key
 }
 
 // Publisher announces stored attendance on the messaging boundary. Publishing is
-// best-effort (see publishDay): a nil Publisher disables it entirely.
+// best-effort (see publishChanges): a nil Publisher disables it entirely.
 type Publisher interface {
 	PublishAbsenceRecorded(ctx context.Context, e AbsenceEvent) error
 	PublishAttendanceMarked(ctx context.Context, e MarkedEvent) error
@@ -134,6 +202,24 @@ type RosterRow struct {
 	EnrollmentID string
 	StudentID    string
 	Status       string
+	Note         string
+}
+
+// Roster is one list's rows plus its session (nil when nobody has taken it).
+type Roster struct {
+	Rows    []RosterRow
+	Session *Session
+}
+
+// SaveRequest is one save of a list: the group·day, the subject for a per-class
+// list ("" for daily), the COMPLETE set of exceptions, and who is saving.
+type SaveRequest struct {
+	GroupID     string
+	Date        string
+	SubjectID   string
+	Marks       []Mark
+	TakenBy     string
+	TakenByName string
 }
 
 // Mark is one submitted exception for a group·day. A Mark with statusPresent
@@ -193,31 +279,41 @@ func NewAttendanceService(
 	}
 }
 
-// GetDailyRoster returns one row per ACTIVE enrollment in the group for the given
-// day, each carrying its effective status: the stored exception, or statusPresent
-// when nothing is stored (default-present). Every mark is resolved in ONE batched
-// read. Rows are ordered by enrollment id, deterministically.
-func (s *AttendanceService) GetDailyRoster(ctx context.Context, groupID, dateStr string) ([]RosterRow, error) {
-	// The pure check first: a malformed date costs nothing to reject and must not
-	// be reported as "group not found" when the request is wrong in both.
-	date, err := parseDate(dateStr)
+// GetDailyRoster returns one row per ACTIVE enrollment in the group for one list
+// (the day's daily list, or a subject's per-class list), each carrying its
+// effective status and note: the stored exception, or statusPresent when nothing
+// is stored (default-present). Every mark is resolved in ONE batched read, and
+// the list's session comes along (nil when nobody has taken it). Rows are
+// ordered by enrollment id, deterministically.
+func (s *AttendanceService) GetDailyRoster(ctx context.Context, groupID, dateStr, subjectID string) (Roster, error) {
+	// The pure checks first: a malformed date or subject costs nothing to reject
+	// and must not be reported as "group not found" when the request is wrong in
+	// both.
+	key, err := parseListKey(groupID, dateStr, subjectID)
 	if err != nil {
-		return nil, err
+		return Roster{}, err
 	}
 	if err := s.requireGroup(ctx, groupID); err != nil {
-		return nil, err
+		return Roster{}, err
 	}
 	enrollmentIDs, studentByEnrollment, err := s.activeRoster(ctx, groupID)
 	if err != nil {
-		return nil, err
+		return Roster{}, err
 	}
 
-	marks, err := s.repo.MarksForDate(ctx, enrollmentIDs, date)
+	marks, err := s.repo.MarksForList(ctx, enrollmentIDs, key)
 	if err != nil {
-		return nil, err
+		return Roster{}, err
+	}
+	session, found, err := s.repo.SessionFor(ctx, key)
+	if err != nil {
+		return Roster{}, err
 	}
 
-	rows := make([]RosterRow, 0, len(enrollmentIDs))
+	out := Roster{Rows: make([]RosterRow, 0, len(enrollmentIDs))}
+	if found {
+		out.Session = &session
+	}
 	for _, enrollmentID := range enrollmentIDs {
 		row := RosterRow{
 			EnrollmentID: enrollmentID,
@@ -226,50 +322,95 @@ func (s *AttendanceService) GetDailyRoster(ctx context.Context, groupID, dateStr
 		}
 		if mark, ok := marks[enrollmentID]; ok {
 			row.Status = mark.Status
+			row.Note = mark.Note
 		}
-		rows = append(rows, row)
+		out.Rows = append(out.Rows, row)
 	}
-	return rows, nil
+	return out, nil
 }
 
-// SaveDailyAttendance reconciles a whole group·day: marks is the COMPLETE set of
-// exceptions for that day, so every active enrollment missing from it — and every
-// enrollment explicitly marked statusPresent — ends the call present. It returns
-// how many stored marks are absences and how many exceptions were stored in
-// total. The batch is validated before anything is written, so a rejected save
-// leaves the day untouched.
-func (s *AttendanceService) SaveDailyAttendance(ctx context.Context, groupID, dateStr string, marks []Mark) (absentCount, markedCount int, err error) {
-	// Cheap pure check before the network round trip (see GetDailyRoster).
-	date, err := parseDate(dateStr)
+// SaveDailyAttendance reconciles one list: req.Marks is the COMPLETE set of
+// exceptions, so every active enrollment missing from it — and every enrollment
+// explicitly marked statusPresent — ends the call present. A correction changes
+// the stored rows IN PLACE (their ids survive) and publishes events only for
+// what changed (see DiffList), so re-saving never re-notifies the parents. The
+// list's session is recorded for the taker. It returns how many stored marks are
+// absences and how many exceptions the list holds. The batch is validated before
+// anything is written, so a rejected save leaves the list untouched.
+func (s *AttendanceService) SaveDailyAttendance(ctx context.Context, req SaveRequest) (absentCount, markedCount int, err error) {
+	// Cheap pure checks before the network round trip (see GetDailyRoster).
+	key, err := parseListKey(req.GroupID, req.Date, req.SubjectID)
 	if err != nil {
 		return 0, 0, err
 	}
-	if err := s.requireGroup(ctx, groupID); err != nil {
+	taker, err := parseTaker(req.TakenBy, req.TakenByName)
+	if err != nil {
 		return 0, 0, err
 	}
-	enrollmentIDs, studentByEnrollment, err := s.activeRoster(ctx, groupID)
+	if err := s.requireGroup(ctx, req.GroupID); err != nil {
+		return 0, 0, err
+	}
+	enrollmentIDs, studentByEnrollment, err := s.activeRoster(ctx, req.GroupID)
 	if err != nil {
 		return 0, 0, err
 	}
 
-	records, err := s.recordsFor(marks, studentByEnrollment, date)
+	desired, err := s.recordsFor(req.Marks, studentByEnrollment, key)
 	if err != nil {
 		return 0, 0, err
 	}
 
-	// One transaction replaces the whole day: dropped marks become present again.
-	if err := s.repo.ReconcileDay(ctx, enrollmentIDs, date, records); err != nil {
+	changes, err := s.repo.ReconcileList(ctx, key, enrollmentIDs, taker, func(current map[string]AttendanceRecord) (ListChanges, error) {
+		return DiffList(current, desired), nil
+	})
+	if err != nil {
 		return 0, 0, err
 	}
 
-	s.publishDay(ctx, records, studentByEnrollment, date)
+	s.publishChanges(ctx, changes, studentByEnrollment)
 
-	for _, rec := range records {
+	for _, rec := range desired {
 		if rec.Status == statusAbsent {
 			absentCount++
 		}
 	}
-	return absentCount, len(records), nil
+	return absentCount, len(desired), nil
+}
+
+// DiffList computes what a save does to a list. current is the list's stored
+// marks keyed by enrollment id; desired is the complete set of exceptions the
+// save asks for, each with a freshly minted id. A desired mark with no stored
+// row is an INSERT; one whose status or note differs from the stored row is an
+// UPDATE that keeps the STORED id (StatusChanged tells a notifying change from a
+// note-only edit); an identical one produces nothing. A stored row missing from
+// desired is a DELETE — the student is present again. Inserts and updates follow
+// desired's order, deletes are ordered by enrollment id, so the result is
+// deterministic.
+func DiffList(current map[string]AttendanceRecord, desired []AttendanceRecord) ListChanges {
+	var changes ListChanges
+	kept := make(map[string]bool, len(desired))
+	for _, want := range desired {
+		kept[want.EnrollmentID] = true
+		have, stored := current[want.EnrollmentID]
+		switch {
+		case !stored:
+			changes.Inserts = append(changes.Inserts, want)
+		case have.Status != want.Status || have.Note != want.Note:
+			want.ID = have.ID
+			changes.Updates = append(changes.Updates, RecordUpdate{Record: want, StatusChanged: have.Status != want.Status})
+		}
+	}
+	cleared := make([]string, 0, len(current))
+	for enrollmentID := range current {
+		if !kept[enrollmentID] {
+			cleared = append(cleared, enrollmentID)
+		}
+	}
+	sort.Strings(cleared)
+	for _, enrollmentID := range cleared {
+		changes.Deletes = append(changes.Deletes, current[enrollmentID])
+	}
+	return changes
 }
 
 // ListAttendance returns one enrollment's stored marks between two optional ISO
@@ -298,7 +439,7 @@ func (s *AttendanceService) ListAttendance(ctx context.Context, enrollmentID, fr
 // the same enrollment (the stored key is one mark per enrollment·day) is a client
 // error; a statusPresent mark is dropped, since being present is the absence of a
 // record.
-func (s *AttendanceService) recordsFor(marks []Mark, studentByEnrollment map[string]string, date time.Time) ([]AttendanceRecord, error) {
+func (s *AttendanceService) recordsFor(marks []Mark, studentByEnrollment map[string]string, key ListKey) ([]AttendanceRecord, error) {
 	records := make([]AttendanceRecord, 0, len(marks))
 	seen := make(map[string]bool, len(marks))
 	for _, mark := range marks {
@@ -308,7 +449,7 @@ func (s *AttendanceService) recordsFor(marks []Mark, studentByEnrollment map[str
 		if !isStorableStatus(mark.Status) && mark.Status != statusPresent {
 			return nil, glerrors.New(glerrors.KindInvalid, "invalid attendance status")
 		}
-		if len(mark.Note) > maxNoteLength {
+		if utf8.RuneCountInString(mark.Note) > maxNoteLength {
 			return nil, glerrors.New(glerrors.KindInvalid, "note is too long")
 		}
 		if seen[mark.EnrollmentID] {
@@ -322,7 +463,8 @@ func (s *AttendanceService) recordsFor(marks []Mark, studentByEnrollment map[str
 		records = append(records, AttendanceRecord{
 			ID:           s.newID(),
 			EnrollmentID: mark.EnrollmentID,
-			Date:         date,
+			Date:         key.Date,
+			SubjectID:    key.SubjectID,
 			Status:       mark.Status,
 			Note:         mark.Note,
 		})
@@ -330,40 +472,70 @@ func (s *AttendanceService) recordsFor(marks []Mark, studentByEnrollment map[str
 	return records, nil
 }
 
-// publishDay announces the marks that were just stored: one AttendanceMarked per
-// exception and, for the absences, one AbsenceRecorded (what comms M10 listens
-// for). A nil publisher is a no-op and a failure never fails the call — the day
-// is already durable, and losing a notification is strictly better than failing a
-// teacher's save — but every dropped event is logged, so best-effort stays
-// diagnosable instead of silent.
-func (s *AttendanceService) publishDay(ctx context.Context, records []AttendanceRecord, studentByEnrollment map[string]string, date time.Time) {
+// publishChanges announces what a save CHANGED, and nothing else, so a
+// correction never re-notifies the parents: one AttendanceMarked per inserted
+// exception, per status change and — with statusPresent — per cleared exception;
+// plus one AbsenceRecorded (what comms M10 listens for) whenever a mark BECAME
+// absent. A note-only edit is silent. A nil publisher is a no-op and a failure
+// never fails the call — the list is already durable, and losing a notification
+// is strictly better than failing a teacher's save — but every dropped event is
+// logged, so best-effort stays diagnosable instead of silent.
+func (s *AttendanceService) publishChanges(ctx context.Context, changes ListChanges, studentByEnrollment map[string]string) {
 	if s.publisher == nil {
 		return
 	}
-	day := date.Format(dateLayout)
-	for _, rec := range records {
-		studentID := studentByEnrollment[rec.EnrollmentID]
-		err := s.publisher.PublishAttendanceMarked(ctx, MarkedEvent{
-			RecordID:     rec.ID,
-			EnrollmentID: rec.EnrollmentID,
-			StudentID:    studentID,
-			TenantID:     s.tenantID,
-			Date:         day,
-			Status:       rec.Status,
-		})
-		s.logDroppedEvent(err, rec.ID)
-		if rec.Status != statusAbsent {
-			continue
-		}
-		err = s.publisher.PublishAbsenceRecorded(ctx, AbsenceEvent{
-			RecordID:     rec.ID,
-			EnrollmentID: rec.EnrollmentID,
-			StudentID:    studentID,
-			TenantID:     s.tenantID,
-			Date:         day,
-		})
-		s.logDroppedEvent(err, rec.ID)
+	for _, rec := range changes.Inserts {
+		s.publishMark(ctx, rec, rec.Status, rec.Revision, studentByEnrollment)
 	}
+	for _, u := range changes.Updates {
+		if u.StatusChanged {
+			s.publishMark(ctx, u.Record, u.Record.Status, u.Record.Revision, studentByEnrollment)
+		}
+	}
+	for _, rec := range changes.Deletes {
+		s.publishMark(ctx, rec, statusPresent, clearedVersion(rec), studentByEnrollment)
+	}
+}
+
+// clearedVersion is the version announcing that a stored mark was cleared back
+// to present: one past its last stored revision. The row is gone, and a later
+// exception for the same student·day is a new row with a new id, so no other
+// event can ever carry this (record id, version) pair.
+func clearedVersion(rec AttendanceRecord) int64 {
+	return rec.Revision + 1
+}
+
+// publishMark announces one changed mark as status at version, plus the absence
+// companion (same version) when status is absent. The version is what makes a
+// correction a NEW event to a consumer that dedupes on (record id, version),
+// while the record id stays the stored one.
+func (s *AttendanceService) publishMark(ctx context.Context, rec AttendanceRecord, status string, version int64, studentByEnrollment map[string]string) {
+	day := rec.Date.Format(dateLayout)
+	studentID := studentByEnrollment[rec.EnrollmentID]
+	err := s.publisher.PublishAttendanceMarked(ctx, MarkedEvent{
+		RecordID:     rec.ID,
+		EnrollmentID: rec.EnrollmentID,
+		StudentID:    studentID,
+		TenantID:     s.tenantID,
+		Date:         day,
+		Status:       status,
+		SubjectID:    rec.SubjectID,
+		MarkVersion:  version,
+	})
+	s.logDroppedEvent(err, rec.ID)
+	if status != statusAbsent {
+		return
+	}
+	err = s.publisher.PublishAbsenceRecorded(ctx, AbsenceEvent{
+		RecordID:     rec.ID,
+		EnrollmentID: rec.EnrollmentID,
+		StudentID:    studentID,
+		TenantID:     s.tenantID,
+		Date:         day,
+		SubjectID:    rec.SubjectID,
+		MarkVersion:  version,
+	})
+	s.logDroppedEvent(err, rec.ID)
 }
 
 // logDroppedEvent records a best-effort publish that did not make it to the bus.
@@ -430,6 +602,33 @@ func parseDate(value string) (time.Time, error) {
 		return time.Time{}, glerrors.New(glerrors.KindInvalid, "date must be an ISO date (YYYY-MM-DD)")
 	}
 	return date, nil
+}
+
+// parseListKey validates a list's key at the boundary: an ISO date and, for a
+// per-class list, a subject UUID (the column is a uuid, so a malformed one would
+// otherwise surface as an infrastructure error for a plain client mistake).
+func parseListKey(groupID, dateStr, subjectID string) (ListKey, error) {
+	date, err := parseDate(dateStr)
+	if err != nil {
+		return ListKey{}, err
+	}
+	if subjectID != "" && uuid.Validate(subjectID) != nil {
+		return ListKey{}, glerrors.New(glerrors.KindInvalid, "invalid subject id")
+	}
+	return ListKey{GroupID: groupID, Date: date, SubjectID: subjectID}, nil
+}
+
+// parseTaker validates who is saving: an iam user UUID and a non-blank display
+// name of at most maxTakerNameLength characters, stored trimmed.
+func parseTaker(userID, name string) (Taker, error) {
+	if uuid.Validate(userID) != nil {
+		return Taker{}, glerrors.New(glerrors.KindInvalid, "invalid taken_by user id")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || utf8.RuneCountInString(name) > maxTakerNameLength {
+		return Taker{}, glerrors.New(glerrors.KindInvalid, "taken_by_name is required (at most 200 characters)")
+	}
+	return Taker{UserID: userID, Name: name}, nil
 }
 
 // parseOptionalDate parses an ISO bound, mapping an empty string to the zero

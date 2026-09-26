@@ -47,6 +47,7 @@ func fromDomainLevel(l domain.Level) levelModel {
 		SEPCode:  l.SEPCode(),
 		// DDL CHECK requires UPPERCASE 'CYCLE'/'TERM'; domain String() is lowercase.
 		EnrollmentGranularity: strings.ToUpper(l.Granularity().String()),
+		AttendanceMode:        l.AttendanceMode().String(), // lowercase, as the CHECK spells it
 	}
 }
 
@@ -55,7 +56,15 @@ func toDomainLevel(m levelModel) (domain.Level, error) {
 	if err != nil {
 		return domain.Level{}, glerrors.Wrap(glerrors.KindInternal, "unknown enrollment granularity in db: "+m.EnrollmentGranularity, err)
 	}
-	return domain.NewLevel(m.ID, m.TenantID, m.Name, m.SEPCode, gran)
+	mode, err := domain.ParseAttendanceMode(m.AttendanceMode)
+	if err != nil {
+		return domain.Level{}, glerrors.Wrap(glerrors.KindInternal, "unknown attendance mode in db: "+m.AttendanceMode, err)
+	}
+	l, err := domain.NewLevel(m.ID, m.TenantID, m.Name, m.SEPCode, gran)
+	if err != nil {
+		return domain.Level{}, err
+	}
+	return l.WithAttendanceMode(mode)
 }
 
 // --- grade levels ---------------------------------------------------------

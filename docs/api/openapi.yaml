@@ -27,7 +27,7 @@ openapi: 3.1.0
 
 info:
   title: García Lorca API
-  version: 0.13.1
+  version: 0.14.0
   license:
     name: Proprietary
     url: https://garcialorca.edu.mx/legal
@@ -56,6 +56,24 @@ tags:
     description: >
       Staff roster and who teaches what ("carga académica"). Behind
       `module_teachers`; writes require `teachers:write`.
+  - name: config-levels
+    description: >
+      The school's levels (Preescolar, Primaria…). Behind `module_config`;
+      reads require `config:read`, writes `config:write`.
+  - name: attendance
+    description: >
+      Pass lists (T3). Behind `module_attendance`. A list is keyed by
+      (group, date, subject): the group's LEVEL decides its attendance mode —
+      `daily` (one list per group per day, no subject) or `per_class` (one per
+      group, subject and day). Storage is default-present: only absences,
+      lates and excused absences are stored. A saved list records a session
+      (who took it, when), so an all-present day is distinguishable from a day
+      nobody took. The director routes (`attendance:read` / `attendance:write`)
+      reach any group on any date; the teacher routes under
+      `/api/v1/teaching/attendance` (`attendance_own:read` /
+      `attendance_own:write`) reach only the caller's own lists, and saving is
+      allowed for today and up to 7 days back, never the future. "Today" is the
+      system's UTC date (a known fleet-wide offset: the school is UTC-6).
 
 paths:
   /api/v1/uniforms/items:
@@ -1532,6 +1550,263 @@ paths:
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
 
+  /api/v1/config/levels:
+    get:
+      tags: [config-levels]
+      summary: List the school's levels
+      operationId: listLevels
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Every level, with how it takes attendance.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [levels]
+                properties:
+                  levels:
+                    type: array
+                    items: { $ref: '#/components/schemas/Level' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/config/levels/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      tags: [config-levels]
+      summary: Choose how a level takes attendance
+      description: >
+        `daily` — one pass list per group per day, taken by any teacher of the
+        group. `per_class` — one per group, subject and day, taken only by that
+        subject's teacher. Any other value is 400; an unknown level is 404.
+        Requires `config:write`.
+      operationId: setLevelAttendanceMode
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [attendanceMode]
+              properties:
+                attendanceMode: { $ref: '#/components/schemas/AttendanceMode' }
+            example:
+              attendanceMode: per_class
+      responses:
+        '200':
+          description: The level, updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Level' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/attendance/roster:
+    get:
+      tags: [attendance]
+      summary: A pass list (director)
+      description: >
+        One row per active enrollment of the group; a row with no stored mark
+        reads `present`. The director has no date window, so `editable` is
+        always true. The level's mode still applies: a `per_class` group needs
+        `subjectId` (400 "Esta lista es por clase: elige la asignatura"), a
+        `daily` group refuses one (400 "Esta lista es por día"), and the
+        subject must be taught in the group (400 "La asignatura no se imparte
+        en este grupo"). The mode governs NEW lists only: a list that already
+        exists for the exact (group, date, subject-or-none) key — it has a
+        session or a stored mark — stays readable and correctable after its
+        level changes mode, and answers in its own shape. An unknown group is
+        404. Requires `attendance:read`.
+      operationId: getAttendanceRoster
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/AttendanceGroupId'
+        - $ref: '#/components/parameters/AttendanceDate'
+        - $ref: '#/components/parameters/AttendanceSubjectId'
+      responses:
+        '200':
+          description: The list.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttendanceList' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/attendance:
+    post:
+      tags: [attendance]
+      summary: Save a pass list (director)
+      description: >
+        Reconciles the whole list: `marks` is the COMPLETE set of exceptions,
+        so every enrollment missing from it (or marked `present`) ends present.
+        Stored rows are corrected in place and events go out only for what
+        changed, so re-saving never re-notifies the family. The caller is
+        stamped as the list's taker. Same mode rules as the roster; any date.
+        Requires `attendance:write`.
+      operationId: saveAttendance
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SaveAttendanceRequest' }
+            example:
+              groupId: 7a1c2e3d-0000-4000-8000-000000000001
+              date: "2026-09-15"
+              subjectId: 5b7a1c2e-0000-4000-8000-00000000000a
+              marks:
+                - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301, status: absent, note: "" }
+      responses:
+        '200': { $ref: '#/components/responses/AttendanceSaved' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+    get:
+      tags: [attendance]
+      summary: One enrollment's stored exceptions
+      description: >
+        Only exceptions are stored, so present days never appear. A per-class
+        school has one record per subject for the same day; `subjectId` tells
+        them apart (empty for a daily mark). At most 500 rows, newest first.
+        Requires `attendance:read`.
+      operationId: listAttendance
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: enrollmentId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: The records.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [records]
+                properties:
+                  records:
+                    type: array
+                    items: { $ref: '#/components/schemas/AttendanceRecord' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/teaching/attendance/classes:
+    get:
+      tags: [attendance]
+      summary: The lists the caller takes (teacher)
+      description: >
+        Active cycle only. One entry per DAILY group the caller teaches (once,
+        however many subjects) and one per PER_CLASS assignment. Derived from
+        the authenticated principal, so no parameter can widen it; a caller
+        with no linked teacher gets an empty list. Behind `module_attendance`
+        AND `module_config`. Requires `attendance_own:read`.
+      operationId: listTeachingAttendanceClasses
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The caller's lists, sorted by group label then subject.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [classes]
+                properties:
+                  classes:
+                    type: array
+                    items: { $ref: '#/components/schemas/AttendanceClass' }
+              example:
+                classes:
+                  - { groupId: 7a1c2e3d-0000-4000-8000-000000000001, groupLabel: "1° PRIMARIA · A", levelName: Primaria, mode: daily }
+                  - groupId: 7a1c2e3d-0000-4000-8000-000000000002
+                    groupLabel: "1° SECUNDARIA · A"
+                    levelName: Secundaria
+                    mode: per_class
+                    subjectId: 5b7a1c2e-0000-4000-8000-00000000000a
+                    subjectName: Matemáticas I
+                    assignmentId: 9c3d1e2f-0000-4000-8000-000000000003
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/teaching/attendance/roster:
+    get:
+      tags: [attendance]
+      summary: One of the caller's pass lists (teacher)
+      description: >
+        Any date may be read; `editable` says whether the caller may still save
+        it (`today` and up to `windowDays` back, never the future) and
+        `readOnlyReason` why not. As on the director route, a list taken before
+        its level changed mode stays readable and correctable. A group the
+        caller does not teach — or, for a `per_class` list, a subject that is
+        not the caller's (another teacher's class in the same group) — is 404,
+        exactly like a group that does not exist. Mode errors are 400 as on the
+        director route. Rows carry the students' names (a teacher holds no
+        `students:read`). Requires `attendance_own:read`.
+      operationId: getTeachingAttendanceRoster
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/AttendanceGroupId'
+        - $ref: '#/components/parameters/AttendanceDate'
+        - $ref: '#/components/parameters/AttendanceSubjectId'
+      responses:
+        '200':
+          description: The list.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttendanceList' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/teaching/attendance:
+    post:
+      tags: [attendance]
+      summary: Save one of the caller's pass lists (teacher)
+      description: >
+        Same reconcile as the director route, restricted to the caller's own
+        lists (404 otherwise) and to today (the server's UTC school day) and up
+        to 7 days back: 400 "No puedes registrar una fecha futura" for a date
+        after today, "Solo puedes corregir hasta 7 días atrás" for one before
+        the window. An enrollment of another group is refused by the attendance
+        service (400). The caller is stamped as the list's taker. Requires
+        `attendance_own:write`.
+      operationId: saveTeachingAttendance
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SaveAttendanceRequest' }
+            example:
+              groupId: 7a1c2e3d-0000-4000-8000-000000000001
+              date: "2026-09-15"
+              marks:
+                - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301, status: late, note: "8:15" }
+      responses:
+        '200': { $ref: '#/components/responses/AttendanceSaved' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
   /api/v1/finance/tuition-plans:
     get:
       tags: [finance-tuition]
@@ -1991,6 +2266,22 @@ components:
         The web panel's session. Secure, HttpOnly, SameSite=Strict. Because it is
         a cookie, every state-changing call also requires the CSRF header.
   parameters:
+    AttendanceGroupId:
+      name: groupId
+      in: query
+      required: true
+      schema: { type: string, format: uuid }
+    AttendanceDate:
+      name: date
+      in: query
+      required: true
+      description: The school day, ISO `YYYY-MM-DD`.
+      schema: { type: string, format: date }
+    AttendanceSubjectId:
+      name: subjectId
+      in: query
+      description: Required for a `per_class` group, refused for a `daily` one.
+      schema: { type: string, format: uuid }
     StudentIdPath:
       name: id
       in: path
@@ -2016,6 +2307,17 @@ components:
       schema: { type: string, format: uuid }
 
   responses:
+    AttendanceSaved:
+      description: The list's stored state after the save.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [absentCount, markedCount]
+            properties:
+              absentCount: { type: integer, minimum: 0, description: Stored marks that are absences. }
+              markedCount: { type: integer, minimum: 0, description: Exceptions the list holds in total. }
+          example: { absentCount: 1, markedCount: 2 }
     BadRequest:
       description: The request did not satisfy the contract.
       content:
@@ -2638,6 +2940,127 @@ components:
           description: Slots another teacher holds, left untouched (replaceConflicts=false).
           items: { $ref: '#/components/schemas/TeachingLoadConflict' }
 
+    AttendanceMode:
+      type: string
+      enum: [daily, per_class]
+      description: >
+        How a level takes attendance. New levels default by name
+        (secundaria/preparatoria/bachillerato → per_class, others → daily).
+    Level:
+      type: object
+      required: [id, name, sepCode, enrollmentGranularity, attendanceMode]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, example: Secundaria }
+        sepCode: { type: string }
+        enrollmentGranularity: { type: string, enum: [cycle, term] }
+        attendanceMode: { $ref: '#/components/schemas/AttendanceMode' }
+    AttendanceStatus:
+      type: string
+      enum: [present, absent, late, excused]
+    AttendanceClass:
+      type: object
+      required: [groupId, groupLabel, levelName, mode]
+      properties:
+        groupId: { type: string, format: uuid }
+        groupLabel: { type: string, example: "1° SECUNDARIA · A" }
+        levelName: { type: string, example: Secundaria }
+        mode: { $ref: '#/components/schemas/AttendanceMode' }
+        subjectId: { type: string, format: uuid, description: Only on a per_class entry. }
+        subjectName: { type: string, description: Only on a per_class entry. }
+        assignmentId: { type: string, format: uuid, description: Only on a per_class entry. }
+    AttendanceSession:
+      type: object
+      description: The list was taken. takenAt/takenByName are its first save, updatedAt the latest correction.
+      required: [takenAt, takenByName, updatedAt]
+      properties:
+        takenAt: { type: string, format: date-time }
+        takenByName: { type: string, example: Gabriela Rojas }
+        updatedAt: { type: string, format: date-time }
+    AttendanceList:
+      type: object
+      required: [mode, date, editable, today, windowDays, session, rows]
+      properties:
+        mode:
+          allOf: [{ $ref: '#/components/schemas/AttendanceMode' }]
+          description: >
+            The list's shape. Usually the level's mode; a list taken before
+            its level changed mode keeps the shape it was taken in (a key
+            with a subject is per_class, without one daily).
+        date: { type: string, format: date }
+        editable: { type: boolean, description: Whether the caller may still save this list. }
+        readOnlyReason:
+          type: string
+          enum: [future, window]
+          description: >
+            Present only when `editable` is false, and says why: `future` — the
+            date is after `today` (web text "No puedes registrar una fecha
+            futura"); `window` — more than `windowDays` before `today` (web
+            text "Solo puedes corregir hasta 7 días atrás"). A code, not a
+            sentence: the web maps it to its own text. Never sent to the
+            director, who has no window.
+        today:
+          type: string
+          format: date
+          description: >
+            The server's school day (the UTC date, the same day finance uses).
+            The teacher's window is measured from it, so the web should base
+            its date picker on `today` rather than the browser's local date
+            (after 18:00 in the school's UTC-6 the server is already on the
+            next day).
+        windowDays: { type: integer, const: 7, description: How many days back a teacher may correct. }
+        session:
+          oneOf:
+            - { $ref: '#/components/schemas/AttendanceSession' }
+            - { type: 'null' }
+          description: Null for a list nobody has taken.
+        rows:
+          type: array
+          items:
+            type: object
+            required: [enrollmentId, studentId, name, status, note]
+            properties:
+              enrollmentId: { type: string, format: uuid }
+              studentId: { type: string, format: uuid }
+              name: { type: string, description: '"" when the name cannot be resolved.' }
+              status: { $ref: '#/components/schemas/AttendanceStatus' }
+              note: { type: string, maxLength: 500 }
+      example:
+        mode: daily
+        date: "2026-09-15"
+        editable: true
+        today: "2026-09-15"
+        windowDays: 7
+        session: { takenAt: "2026-09-15T14:05:00Z", takenByName: Gabriela Rojas, updatedAt: "2026-09-15T14:05:00Z" }
+        rows:
+          - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301, studentId: 1b2c3d4e-0000-4000-8000-000000000001, name: Ana García, status: excused, note: cita médica }
+    SaveAttendanceRequest:
+      type: object
+      required: [groupId, date, marks]
+      properties:
+        groupId: { type: string, format: uuid }
+        date: { type: string, format: date }
+        subjectId: { type: string, format: uuid, description: "Required for a per_class group, refused for a daily one." }
+        marks:
+          type: array
+          description: The COMPLETE set of exceptions; an empty array means everybody present.
+          items:
+            type: object
+            required: [enrollmentId, status]
+            properties:
+              enrollmentId: { type: string, format: uuid }
+              status: { $ref: '#/components/schemas/AttendanceStatus' }
+              note: { type: string, maxLength: 500 }
+    AttendanceRecord:
+      type: object
+      required: [id, enrollmentId, date, status, note, subjectId]
+      properties:
+        id: { type: string, format: uuid }
+        enrollmentId: { type: string, format: uuid }
+        date: { type: string, format: date }
+        status: { $ref: '#/components/schemas/AttendanceStatus' }
+        note: { type: string }
+        subjectId: { type: string, description: 'The per-class subject; "" for a daily mark.' }
     Error:
       type: object
       required: [error]

@@ -21,7 +21,9 @@
    owner-only `attendance:read` (tenant-wide) and the self-scoped `attendance_own:*`.
 
 2. **Self-scoped routes under the `teaching/*` family** (same edge as teacher grades):
-   - `GET  /api/v1/teaching/groups` — the caller-teacher's groups.
+   - ~~`GET  /api/v1/teaching/groups` — the caller-teacher's groups.~~ Removed
+     2026-09-26 (T3): the picker reads `GET /api/v1/teaching/attendance/classes`,
+     which also carries each list's mode and per-class subject.
    - `GET  /api/v1/teaching/attendance/roster?groupId&date` — pass list for a group·date.
    - `POST /api/v1/teaching/attendance` — save the pass list.
 

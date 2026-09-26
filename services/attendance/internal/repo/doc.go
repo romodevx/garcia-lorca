@@ -5,8 +5,9 @@
 // via mapper.go) keeps the application layer framework-free: it depends on the
 // service.Repo interface it declares itself, never on this package.
 //
-// Only exceptions are stored (default-present), so a day's save is a RECONCILE:
-// ReconcileDay deletes and re-inserts the day's marks for the roster it is given
-// inside ONE tenant-bound transaction — a partially applied day would misreport
-// who was present.
+// Only exceptions are stored (default-present), so a list's save is a RECONCILE:
+// ReconcileList loads the list's marks, applies the service's diff (upsert in
+// place, delete what was cleared) and records the list's session inside ONE
+// tenant-bound transaction — a partially applied list would misreport who was
+// present.
 package repo

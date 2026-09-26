@@ -30,6 +30,7 @@ type levelModel struct {
 	Name                  string    `gorm:"column:name"`
 	SEPCode               string    `gorm:"column:sep_code"`
 	EnrollmentGranularity string    `gorm:"column:enrollment_granularity"`
+	AttendanceMode        string    `gorm:"column:attendance_mode"`
 	CreatedAt             time.Time `gorm:"column:created_at"`
 	UpdatedAt             time.Time `gorm:"column:updated_at"`
 }

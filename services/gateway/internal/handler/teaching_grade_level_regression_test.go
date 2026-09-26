@@ -74,21 +74,6 @@ func TestTeachingAssignmentsCarryTheGroupGradeLevelName(t *testing.T) {
 	}
 }
 
-func TestTeachingGroupsCarryTheGradeLevelName(t *testing.T) {
-	h := newTeachingAttendance(sameLetterTeacher(), &fakeTeachingAttendance{}, &fakeTeachingStudents{})
-
-	rec := httptest.NewRecorder()
-	h.Groups(rec, teacherGET("/api/v1/teaching/groups", "usr-t"))
-
-	byID := decodeList(t, rec, "groups")
-	if got := byID["grp-p"]["gradeLevelName"]; got != "1° PRIMARIA" {
-		t.Errorf("grp-p gradeLevelName = %v, want 1° PRIMARIA", got)
-	}
-	if got := byID["grp-s"]["gradeLevelName"]; got != "1° SECUNDARIA" {
-		t.Errorf("grp-s gradeLevelName = %v, want 1° SECUNDARIA", got)
-	}
-}
-
 // The grade name is display enrichment like the others: a failed grade-level
 // read degrades to "", never a failed list.
 func TestTeachingGradeLevelNameDegradesToEmpty(t *testing.T) {

@@ -51,10 +51,12 @@ type Level struct {
 	name        string
 	sepCode     string
 	granularity EnrollmentGranularity
+	attendance  AttendanceMode
 }
 
 // NewLevel constructs a level. `id`, `tenantID`, and `name` are required, and
-// `gran` must be a known granularity.
+// `gran` must be a known granularity. The attendance mode starts at the default
+// for the level's name (DefaultAttendanceMode); WithAttendanceMode changes it.
 func NewLevel(id, tenantID, name, sepCode string, gran EnrollmentGranularity) (Level, error) {
 	if strings.TrimSpace(id) == "" {
 		return Level{}, glerrors.New(glerrors.KindInvalid, "level id is required")
@@ -74,6 +76,7 @@ func NewLevel(id, tenantID, name, sepCode string, gran EnrollmentGranularity) (L
 		name:        name,
 		sepCode:     sepCode,
 		granularity: gran,
+		attendance:  DefaultAttendanceMode(name),
 	}, nil
 }
 
@@ -91,3 +94,16 @@ func (l Level) SEPCode() string { return l.sepCode }
 
 // Granularity returns the per-level enrollment granularity.
 func (l Level) Granularity() EnrollmentGranularity { return l.granularity }
+
+// AttendanceMode returns how the level's groups take attendance.
+func (l Level) AttendanceMode() AttendanceMode { return l.attendance }
+
+// WithAttendanceMode returns a copy of the level taking attendance in mode. An
+// unknown mode is KindInvalid; the receiver is never modified.
+func (l Level) WithAttendanceMode(mode AttendanceMode) (Level, error) {
+	if !mode.Valid() {
+		return Level{}, glerrors.New(glerrors.KindInvalid, "level attendance mode is invalid")
+	}
+	l.attendance = mode
+	return l, nil
+}

@@ -14,6 +14,7 @@ vi.mock("../../config/api", () => ({
   createCycle: vi.fn(),
   listLevels: vi.fn(),
   createLevel: vi.fn(),
+  updateLevelAttendanceMode: vi.fn(),
   listGradeLevels: vi.fn(),
   createGradeLevel: vi.fn(),
   listSubjects: vi.fn(),
@@ -115,6 +116,20 @@ describe("Catalog — cycles", () => {
 });
 
 describe("Catalog — nested level → grade level", () => {
+  it("switches a level's attendance to per class and keeps the new value on screen", async () => {
+    const user = userEvent.setup();
+    const secundaria = { id: "l1", name: "SECUNDARIA", sepCode: "", enrollmentGranularity: "cycle" as const, attendanceMode: "daily" as const };
+    mocked.listLevels.mockResolvedValue([secundaria]);
+    mocked.updateLevelAttendanceMode.mockResolvedValue({ ...secundaria, attendanceMode: "per_class" });
+    render(<Catalog onBack={() => {}} />);
+
+    await user.click(await screen.findByRole("button", { name: /SECUNDARIA/ }));
+    await user.click(screen.getByRole("radio", { name: "Por clase" }));
+
+    await waitFor(() => expect(mocked.updateLevelAttendanceMode).toHaveBeenCalledWith(expect.any(String), "l1", "per_class"));
+    expect(await screen.findByRole("radio", { name: "Por clase" })).toBeChecked();
+  });
+
   // A grade is unique by name as well as by order within its level (task 2).
   // The refusal must not blame the order when it is the name that repeats.
   it("a refused grade names both reasons, not only the order", async () => {

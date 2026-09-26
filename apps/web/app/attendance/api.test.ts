@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getDailyRoster, listAttendance, saveDailyAttendance } from "./api";
+import { getAttendanceSheet, listAttendance, saveAttendanceSheet } from "./api";
 
 const BASE = "http://gw";
 
@@ -18,83 +18,7 @@ function lastCall(mock: ReturnType<typeof vi.fn>): [string, RequestInit] {
   return [call[0], call[1]];
 }
 
-const rosterRow = { enrollmentId: "en1", studentId: "st1", status: "present" as const };
 const record = { id: "at1", enrollmentId: "en1", date: "2026-08-06", status: "absent" as const, note: "cita médica" };
-
-describe("getDailyRoster", () => {
-  it("GETs /attendance/roster with credentials, the query params, and unwraps {roster}", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ roster: [rosterRow] }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const res = await getDailyRoster(BASE, { groupId: "grp1", date: "2026-08-06" });
-
-    expect(res).toEqual([rosterRow]);
-    const [url, init] = lastCall(fetchMock);
-    expect(url).toBe("http://gw/api/v1/attendance/roster?groupId=grp1&date=2026-08-06");
-    expect(init.credentials).toBe("include");
-    expect(init.method ?? "GET").toBe("GET");
-  });
-
-  it("returns [] when the envelope key is absent", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({})));
-    await expect(getDailyRoster(BASE, { groupId: "grp1", date: "2026-08-06" })).resolves.toEqual([]);
-  });
-
-  it("throws on a non-ok response", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 403 })));
-    await expect(getDailyRoster(BASE, { groupId: "grp1", date: "2026-08-06" })).rejects.toThrow();
-  });
-});
-
-describe("saveDailyAttendance", () => {
-  it("POSTs {groupId, date, marks} carrying ONLY the exceptions and returns the counts", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ absentCount: 1, markedCount: 2 }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const res = await saveDailyAttendance(BASE, {
-      groupId: "grp1",
-      date: "2026-08-06",
-      marks: [
-        { enrollmentId: "en1", status: "absent" },
-        { enrollmentId: "en2", status: "late", note: "llegó 8:20" },
-      ],
-    });
-
-    expect(res).toEqual({ absentCount: 1, markedCount: 2 });
-    const [url, init] = lastCall(fetchMock);
-    expect(url).toBe("http://gw/api/v1/attendance");
-    expect(init.method).toBe("POST");
-    expect(init.credentials).toBe("include");
-    const body = JSON.parse(init.body as string);
-    expect(body).toEqual({
-      groupId: "grp1",
-      date: "2026-08-06",
-      marks: [
-        { enrollmentId: "en1", status: "absent" },
-        { enrollmentId: "en2", status: "late", note: "llegó 8:20" },
-      ],
-    });
-    // DEFAULT-PRESENT: a present student is an omission, never a mark.
-    expect(body.marks.some((m: { status: string }) => m.status === "present")).toBe(false);
-  });
-
-  it("sends an empty marks array when the whole group is present", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ absentCount: 0, markedCount: 0 }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await saveDailyAttendance(BASE, { groupId: "grp1", date: "2026-08-06", marks: [] });
-
-    const body = JSON.parse(lastCall(fetchMock)[1].body as string);
-    expect(body).toEqual({ groupId: "grp1", date: "2026-08-06", marks: [] });
-  });
-
-  it("throws on a non-ok response", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 400 })));
-    await expect(
-      saveDailyAttendance(BASE, { groupId: "grp1", date: "2026-08-06", marks: [] }),
-    ).rejects.toThrow();
-  });
-});
 
 describe("listAttendance", () => {
   it("GETs /attendance with credentials, the query params, and unwraps {records}", async () => {
@@ -121,5 +45,57 @@ describe("listAttendance", () => {
   it("returns [] when the envelope key is absent", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({})));
     await expect(listAttendance(BASE, { enrollmentId: "en1" })).resolves.toEqual([]);
+  });
+});
+
+// --- the attendance sheet (director, per-level mode) ------------------------
+
+describe("getAttendanceSheet", () => {
+  const sheet = { mode: "per_class", date: "2026-09-01", editable: true, windowDays: 7, session: null, rows: [] };
+
+  it("GETs /attendance/roster with groupId, date and subjectId, returning the sheet as is", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sheet));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getAttendanceSheet(BASE, { groupId: "g1", date: "2026-09-01", subjectId: "s1" })).resolves.toEqual(sheet);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/attendance/roster?groupId=g1&date=2026-09-01&subjectId=s1");
+    expect(init.credentials).toBe("include");
+  });
+
+  it("throws the server's text on failure", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("Esta lista es por clase: elige la asignatura", { status: 400 })));
+    await expect(getAttendanceSheet(BASE, { groupId: "g1", date: "2026-09-01" })).rejects.toThrow(
+      "Esta lista es por clase: elige la asignatura",
+    );
+  });
+});
+
+describe("saveAttendanceSheet", () => {
+  it("POSTs /attendance with the exception marks (notes only when typed) and accepts a 204", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await saveAttendanceSheet(BASE, {
+      groupId: "g1",
+      date: "2026-09-01",
+      subjectId: "s1",
+      marks: [{ enrollmentId: "en1", status: "late", note: "  " }],
+    });
+
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/attendance");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({
+      groupId: "g1",
+      date: "2026-09-01",
+      subjectId: "s1",
+      marks: [{ enrollmentId: "en1", status: "late" }],
+    });
+  });
+
+  it("falls back to the status when the body is empty", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 500 })));
+    await expect(saveAttendanceSheet(BASE, { groupId: "g1", date: "2026-09-01", marks: [] })).rejects.toThrow("HTTP 500");
   });
 });

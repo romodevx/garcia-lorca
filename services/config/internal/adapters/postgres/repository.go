@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -155,6 +156,9 @@ func (r *Repository) CreateLevel(ctx context.Context, l domain.Level) error {
 
 // GetLevel returns a level by id, or KindNotFound.
 func (r *Repository) GetLevel(ctx context.Context, id string) (domain.Level, error) {
+	if !isUUID(id) {
+		return domain.Level{}, glerrors.ErrNotFound
+	}
 	var out domain.Level
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var m levelModel
@@ -195,6 +199,25 @@ func (r *Repository) ListLevels(ctx context.Context) ([]domain.Level, error) {
 	return out, nil
 }
 
+// UpdateLevelAttendanceMode changes one level's attendance mode. It writes only
+// attendance_mode and updated_at; a level that does not exist — or that RLS
+// hides, i.e. another tenant's — is KindNotFound.
+func (r *Repository) UpdateLevelAttendanceMode(ctx context.Context, id string, mode domain.AttendanceMode) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Model(&levelModel{}).Where("id = ?", id).Updates(map[string]any{
+			"attendance_mode": mode.String(),
+			"updated_at":      gorm.Expr("now()"),
+		})
+		if res.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "updating level attendance mode", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return glerrors.ErrNotFound
+		}
+		return nil
+	})
+}
+
 // --- grade levels ---------------------------------------------------------
 
 // CreateGradeLevel persists a new grade level. A duplicate (level_id, ordinal)
@@ -212,6 +235,9 @@ func (r *Repository) CreateGradeLevel(ctx context.Context, g domain.GradeLevel) 
 
 // GetGradeLevel returns a grade level by id, or KindNotFound.
 func (r *Repository) GetGradeLevel(ctx context.Context, id string) (domain.GradeLevel, error) {
+	if !isUUID(id) {
+		return domain.GradeLevel{}, glerrors.ErrNotFound
+	}
 	var out domain.GradeLevel
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var m gradeLevelModel
@@ -395,6 +421,9 @@ func (r *Repository) CreateGroup(ctx context.Context, g domain.Group) error {
 
 // GetGroup returns a group by id, or KindNotFound.
 func (r *Repository) GetGroup(ctx context.Context, id string) (domain.Group, error) {
+	if !isUUID(id) {
+		return domain.Group{}, glerrors.ErrNotFound
+	}
 	var out domain.Group
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var m groupModel
@@ -626,6 +655,13 @@ func pgCode(err error) string {
 		return pgErr.Code
 	}
 	return ""
+}
+
+// isUUID reports whether id can name a row of a uuid-keyed table. A point read
+// by a malformed id finds nothing — NotFound — instead of letting Postgres fail
+// the uuid cast (22P02) and surface a caller's typo as an Internal error.
+func isUUID(id string) bool {
+	return uuid.Validate(id) == nil
 }
 
 func translateFindErr(err error) error {

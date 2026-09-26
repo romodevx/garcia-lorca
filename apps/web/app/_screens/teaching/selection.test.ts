@@ -129,3 +129,25 @@ describe("resolveSelection — group only (attendance)", () => {
     expect(resolveSelection([g1, g2], { group: "g2" }, false).selected).toBe(g2);
   });
 });
+
+describe("resolveSelection — by subject then GROUP (attendance per class)", () => {
+  const matA: TeachingOption = { id: "a1", groupId: "gA", groupName: "1° A", subjectId: "s-mat", subjectName: "Matemáticas" };
+  const matB: TeachingOption = { id: "a2", groupId: "gB", groupName: "1° B", subjectId: "s-mat", subjectName: "Matemáticas" };
+  const diaA: TeachingOption = { id: "dia:gA", groupId: "gA", groupName: "1° A", subjectId: "dia", subjectName: "Lista del día" };
+
+  it("the group step is keyed by the group id, within the chosen subject", () => {
+    const r = resolveSelection([matA, matB, diaA], { subject: "s-mat", group: "gA" }, true, true);
+    expect(r.step).toBe("ready");
+    expect(r.selected).toBe(matA);
+  });
+
+  it("the same group under another subject is a different choice", () => {
+    const r = resolveSelection([matA, matB, diaA], { subject: "dia", group: "gA" }, true, true);
+    expect(r.selected).toBe(diaA);
+    expect(r.groupSkipped).toBe(true);
+  });
+
+  it("an assignment id in the URL means nothing in this mode", () => {
+    expect(resolveSelection([matA, matB, diaA], { subject: "s-mat", assignment: "a1" }, true, true).step).toBe("group");
+  });
+});

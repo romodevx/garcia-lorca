@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"net/http"
+	"time"
 
 	connect "connectrpc.com/connect"
 
@@ -29,6 +30,34 @@ type AttendanceRosterRow struct {
 	EnrollmentID string
 	StudentID    string
 	Status       string
+	Note         string
+}
+
+// AttendanceRoster is one list's rows plus its session; Session is nil for a
+// list nobody has taken.
+type AttendanceRoster struct {
+	Rows    []AttendanceRosterRow
+	Session *AttendanceSession
+}
+
+// AttendanceSession records that a list was taken: TakenAt/TakenByName are the
+// first save, UpdatedAt the latest correction.
+type AttendanceSession struct {
+	TakenAt     time.Time
+	TakenByName string
+	UpdatedAt   time.Time
+}
+
+// SaveAttendanceInput is one save of a list: the group·day, the subject of a
+// per-class list ("" for daily), the COMPLETE exception set, and who saves it
+// (iam user id + display name, stamped on the list's session).
+type SaveAttendanceInput struct {
+	GroupID     string
+	Date        string
+	SubjectID   string
+	Marks       []Mark
+	TakenBy     string
+	TakenByName string
 }
 
 // Mark is one exception submitted for a group·day. Status is normally
@@ -49,6 +78,7 @@ type AttendanceRecord struct {
 	Date         string
 	Status       string
 	Note         string
+	SubjectID    string
 }
 
 // NewAttendanceClient builds an AttendanceClient targeting the attendance base
@@ -60,34 +90,46 @@ func NewAttendanceClient(baseURL string, httpClient connect.HTTPClient) *Attenda
 	return &AttendanceClient{rpc: attendancev1connect.NewAttendanceServiceClient(httpClient, baseURL)}
 }
 
-// GetDailyRoster returns one row per active enrollment in the group on the given
-// date (ISO "YYYY-MM-DD"), each carrying the effective status for that day. Rows
-// with no stored mark come back as "present".
-func (c *AttendanceClient) GetDailyRoster(ctx context.Context, groupID, date string) ([]AttendanceRosterRow, error) {
+// GetDailyRoster returns one list — the group's daily list (subjectID "") or a
+// subject's per-class list — on the given date (ISO "YYYY-MM-DD"): one row per
+// active enrollment with its effective status and note ("present" when nothing
+// is stored), plus the list's session when it has been taken.
+func (c *AttendanceClient) GetDailyRoster(ctx context.Context, groupID, date, subjectID string) (AttendanceRoster, error) {
 	res, err := c.rpc.GetDailyRoster(ctx, connect.NewRequest(&attendancev1.GetDailyRosterRequest{
-		GroupId: groupID,
-		Date:    date,
+		GroupId:   groupID,
+		Date:      date,
+		SubjectId: subjectID,
 	}))
 	if err != nil {
-		return nil, err
+		return AttendanceRoster{}, err
 	}
-	out := make([]AttendanceRosterRow, 0, len(res.Msg.GetRows()))
+	out := AttendanceRoster{Rows: make([]AttendanceRosterRow, 0, len(res.Msg.GetRows()))}
 	for _, row := range res.Msg.GetRows() {
-		out = append(out, toAttendanceRosterRow(row))
+		out.Rows = append(out.Rows, toAttendanceRosterRow(row))
+	}
+	if s := res.Msg.GetSession(); s != nil {
+		out.Session = &AttendanceSession{
+			TakenAt:     s.GetTakenAt().AsTime(),
+			TakenByName: s.GetTakenByName(),
+			UpdatedAt:   s.GetUpdatedAt().AsTime(),
+		}
 	}
 	return out, nil
 }
 
-// SaveDailyAttendance reconciles a whole group·day in one call: marks is the
+// SaveDailyAttendance reconciles a whole list in one call: in.Marks is the
 // COMPLETE set of exceptions, so every enrollment absent from it is reset to
 // present. It returns how many stored marks are "absent" and how many
 // exceptions are stored for the day in total. Saving the same day again is
 // idempotent.
-func (c *AttendanceClient) SaveDailyAttendance(ctx context.Context, groupID, date string, marks []Mark) (int32, int32, error) {
+func (c *AttendanceClient) SaveDailyAttendance(ctx context.Context, in SaveAttendanceInput) (int32, int32, error) {
 	res, err := c.rpc.SaveDailyAttendance(ctx, connect.NewRequest(&attendancev1.SaveDailyAttendanceRequest{
-		GroupId: groupID,
-		Date:    date,
-		Marks:   fromMarks(marks),
+		GroupId:     in.GroupID,
+		Date:        in.Date,
+		SubjectId:   in.SubjectID,
+		Marks:       fromMarks(in.Marks),
+		TakenBy:     in.TakenBy,
+		TakenByName: in.TakenByName,
 	}))
 	if err != nil {
 		return 0, 0, err
@@ -119,6 +161,7 @@ func toAttendanceRosterRow(r *attendancev1.RosterRow) AttendanceRosterRow {
 		EnrollmentID: r.GetEnrollmentId(),
 		StudentID:    r.GetStudentId(),
 		Status:       r.GetStatus(),
+		Note:         r.GetNote(),
 	}
 }
 
@@ -129,6 +172,7 @@ func toAttendanceRecord(r *attendancev1.AttendanceRecord) AttendanceRecord {
 		Date:         r.GetDate(),
 		Status:       r.GetStatus(),
 		Note:         r.GetNote(),
+		SubjectID:    r.GetSubjectId(),
 	}
 }
 

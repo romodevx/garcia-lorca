@@ -43,8 +43,8 @@ func NewEventPublisher(bus pubsub.Publisher) *EventPublisher {
 	return &EventPublisher{bus: bus}
 }
 
-// PublishAttendanceMarked announces that an exception (absent|late|excused) was
-// stored for a student on a school day. It is the general event; absences also
+// PublishAttendanceMarked announces that a student's mark CHANGED on a list (a new
+// exception, a changed status, or "present" for a cleared one). It is the general event; absences also
 // get the narrower AbsenceRecorded below.
 func (p *EventPublisher) PublishAttendanceMarked(ctx context.Context, e service.MarkedEvent) error {
 	return p.publish(ctx, e.TenantID, typeAttendanceMarked, &attendancev1.AttendanceMarked{
@@ -54,6 +54,8 @@ func (p *EventPublisher) PublishAttendanceMarked(ctx context.Context, e service.
 		TenantId:     e.TenantID,
 		Date:         e.Date,
 		Status:       e.Status,
+		SubjectId:    e.SubjectID,
+		MarkVersion:  e.MarkVersion,
 	})
 }
 
@@ -67,6 +69,8 @@ func (p *EventPublisher) PublishAbsenceRecorded(ctx context.Context, e service.A
 		StudentId:    e.StudentID,
 		TenantId:     e.TenantID,
 		Date:         e.Date,
+		SubjectId:    e.SubjectID,
+		MarkVersion:  e.MarkVersion,
 	})
 }
 

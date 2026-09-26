@@ -65,6 +65,31 @@ type LevelResult struct {
 	Name        string
 	SEPCode     string
 	Granularity string
+	// AttendanceMode is "daily" (one list per group per day) or "per_class"
+	// (one per group, subject and day); "" only if config sent none.
+	AttendanceMode string
+}
+
+// Attendance modes as the edge names them.
+const (
+	AttendanceModeDaily    = "daily"
+	AttendanceModePerClass = "per_class"
+)
+
+var attendanceModeNames = map[configv1.AttendanceMode]string{
+	configv1.AttendanceMode_ATTENDANCE_MODE_DAILY:     AttendanceModeDaily,
+	configv1.AttendanceMode_ATTENDANCE_MODE_PER_CLASS: AttendanceModePerClass,
+}
+
+// attendanceModeFromName maps an edge mode name to the wire enum; an unknown
+// name maps to UNSPECIFIED, which config rejects as invalid.
+func attendanceModeFromName(name string) configv1.AttendanceMode {
+	for mode, n := range attendanceModeNames {
+		if n == name {
+			return mode
+		}
+	}
+	return configv1.AttendanceMode_ATTENDANCE_MODE_UNSPECIFIED
 }
 
 // CreateGradeLevelInput is the edge's view of a new grade-within-a-level.
@@ -222,6 +247,29 @@ func (c *ConfigClient) ListLevels(ctx context.Context) ([]LevelResult, error) {
 	return out, nil
 }
 
+// GetLevel reads one level of the tenant catalog (NotFound when missing).
+func (c *ConfigClient) GetLevel(ctx context.Context, id string) (LevelResult, error) {
+	res, err := c.rpc.GetLevel(ctx, connect.NewRequest(&configv1.GetLevelRequest{Id: id}))
+	if err != nil {
+		return LevelResult{}, err
+	}
+	return toLevelResult(res.Msg.GetLevel()), nil
+}
+
+// SetLevelAttendanceMode changes how a level takes attendance ("daily" or
+// "per_class"). An unknown mode reaches config as UNSPECIFIED and comes back
+// InvalidArgument; an unknown level is NotFound.
+func (c *ConfigClient) SetLevelAttendanceMode(ctx context.Context, id, mode string) (LevelResult, error) {
+	res, err := c.rpc.SetLevelAttendanceMode(ctx, connect.NewRequest(&configv1.SetLevelAttendanceModeRequest{
+		Id:             id,
+		AttendanceMode: attendanceModeFromName(mode),
+	}))
+	if err != nil {
+		return LevelResult{}, err
+	}
+	return toLevelResult(res.Msg.GetLevel()), nil
+}
+
 // --- grade_levels ---------------------------------------------------------
 
 // CreateGradeLevel adds a grade within a level.
@@ -231,6 +279,15 @@ func (c *ConfigClient) CreateGradeLevel(ctx context.Context, in CreateGradeLevel
 		Name:    in.Name,
 		Ordinal: int32(in.Ordinal),
 	}))
+	if err != nil {
+		return GradeLevelResult{}, err
+	}
+	return toGradeLevelResult(res.Msg.GetGradeLevel()), nil
+}
+
+// GetGradeLevel reads one grade of the tenant catalog (NotFound when missing).
+func (c *ConfigClient) GetGradeLevel(ctx context.Context, id string) (GradeLevelResult, error) {
+	res, err := c.rpc.GetGradeLevel(ctx, connect.NewRequest(&configv1.GetGradeLevelRequest{Id: id}))
 	if err != nil {
 		return GradeLevelResult{}, err
 	}
@@ -318,6 +375,15 @@ func (c *ConfigClient) CreateGroup(ctx context.Context, in CreateGroupInput) (Gr
 		Name:         in.Name,
 		Capacity:     int32(in.Capacity),
 	}))
+	if err != nil {
+		return GroupResult{}, err
+	}
+	return toGroupResult(res.Msg.GetGroup()), nil
+}
+
+// GetGroup reads one group of the tenant catalog (NotFound when missing).
+func (c *ConfigClient) GetGroup(ctx context.Context, id string) (GroupResult, error) {
+	res, err := c.rpc.GetGroup(ctx, connect.NewRequest(&configv1.GetGroupRequest{Id: id}))
 	if err != nil {
 		return GroupResult{}, err
 	}
@@ -601,6 +667,8 @@ func toLevelResult(l *configv1.Level) LevelResult {
 		Name:        l.GetName(),
 		SEPCode:     l.GetSepCode(),
 		Granularity: granularityName(l.GetEnrollmentGranularity()),
+		// An unknown enum value reads as "" (the map's zero value).
+		AttendanceMode: attendanceModeNames[l.GetAttendanceMode()],
 	}
 }
 

@@ -15,22 +15,28 @@ import (
 
 // --- fakes -------------------------------------------------------------------
 
-// fakeRepo is an in-memory attendance store with the REAL reconcile semantics
-// (delete the day's marks for the given enrollments, then insert the new set),
-// so the tests can prove a re-save clears the marks that were dropped from the
-// exception list. It also records how it was called, which is how the "one
-// batched read, no N+1" and "reconcile spans the whole active roster" claims are
-// checked.
+// fakeRepo is an in-memory attendance store with the REAL reconcile semantics:
+// ReconcileList hands the plan the list's current marks (scoped to the given
+// enrollments, date and subject), applies the changes it returns — upserts keyed
+// by enrollment·date·subject, deletes by id — and upserts the list's session. It
+// also records how it was called, which is how the "one batched read, no N+1",
+// "one atomic reconcile" and "reconcile spans the whole active roster" claims
+// are checked.
 type fakeRepo struct {
-	rows map[string]service.AttendanceRecord // enrollmentID|date → record
+	rows     map[string]service.AttendanceRecord // enrollmentID|date|subject → record
+	sessions map[string]service.Session          // group|date|subject → session
 
 	marksForDateCalls int
 	lastMarksIDs      []string
 	lastMarksDate     time.Time
+	lastMarksSubject  string
 
 	reconcileCalls    int
 	lastReconcileIDs  []string
-	lastReconcileRecs []service.AttendanceRecord
+	lastReconcileRecs []service.AttendanceRecord // rows written (inserts + updates)
+	lastChanges       service.ListChanges
+	lastTaker         service.Taker
+	lastKey           service.ListKey
 
 	listCalls          int
 	lastListEnrollment string
@@ -42,43 +48,95 @@ type fakeRepo struct {
 }
 
 func newFakeRepo() *fakeRepo {
-	return &fakeRepo{rows: map[string]service.AttendanceRecord{}}
+	return &fakeRepo{rows: map[string]service.AttendanceRecord{}, sessions: map[string]service.Session{}}
 }
 
+// dayKey keys a DAILY-list mark (no subject); subjectDayKey a per-class one.
 func dayKey(enrollmentID string, date time.Time) string {
-	return enrollmentID + "|" + date.Format(dateLayout)
+	return subjectDayKey(enrollmentID, date, "")
 }
 
-func (f *fakeRepo) MarksForDate(_ context.Context, enrollmentIDs []string, date time.Time) (map[string]service.AttendanceRecord, error) {
+func subjectDayKey(enrollmentID string, date time.Time, subjectID string) string {
+	return enrollmentID + "|" + date.Format(dateLayout) + "|" + subjectID
+}
+
+func sessionKey(k service.ListKey) string {
+	return k.GroupID + "|" + k.Date.Format(dateLayout) + "|" + k.SubjectID
+}
+
+func (f *fakeRepo) MarksForList(_ context.Context, enrollmentIDs []string, key service.ListKey) (map[string]service.AttendanceRecord, error) {
 	f.marksForDateCalls++
 	f.lastMarksIDs = append([]string(nil), enrollmentIDs...)
-	f.lastMarksDate = date
+	f.lastMarksDate = key.Date
+	f.lastMarksSubject = key.SubjectID
 	if f.err != nil {
 		return nil, f.err
 	}
+	return f.current(enrollmentIDs, key), nil
+}
+
+func (f *fakeRepo) current(enrollmentIDs []string, key service.ListKey) map[string]service.AttendanceRecord {
 	out := make(map[string]service.AttendanceRecord, len(enrollmentIDs))
 	for _, id := range enrollmentIDs {
-		if rec, ok := f.rows[dayKey(id, date)]; ok {
+		if rec, ok := f.rows[subjectDayKey(id, key.Date, key.SubjectID)]; ok {
 			out[id] = rec
 		}
 	}
-	return out, nil
+	return out
 }
 
-func (f *fakeRepo) ReconcileDay(_ context.Context, enrollmentIDs []string, date time.Time, records []service.AttendanceRecord) error {
-	f.reconcileCalls++
-	f.lastReconcileIDs = append([]string(nil), enrollmentIDs...)
-	f.lastReconcileRecs = append([]service.AttendanceRecord(nil), records...)
+func (f *fakeRepo) SessionFor(_ context.Context, key service.ListKey) (service.Session, bool, error) {
 	if f.err != nil {
-		return f.err
+		return service.Session{}, false, f.err
 	}
-	for _, id := range enrollmentIDs {
-		delete(f.rows, dayKey(id, date))
+	s, ok := f.sessions[sessionKey(key)]
+	return s, ok, nil
+}
+
+func (f *fakeRepo) ReconcileList(_ context.Context, key service.ListKey, enrollmentIDs []string, taker service.Taker, plan service.PlanFunc) (service.ListChanges, error) {
+	f.reconcileCalls++
+	f.lastKey = key
+	f.lastTaker = taker
+	f.lastReconcileIDs = append([]string(nil), enrollmentIDs...)
+	if f.err != nil {
+		return service.ListChanges{}, f.err
 	}
-	for _, rec := range records {
-		f.rows[dayKey(rec.EnrollmentID, rec.Date)] = rec
+	current := f.current(enrollmentIDs, key)
+	changes, err := plan(current)
+	if err != nil {
+		return service.ListChanges{}, err
 	}
-	return nil
+	// lastReconcileRecs is what the plan asked to write (inserts + updates).
+	f.lastReconcileRecs = nil
+	f.lastReconcileRecs = append(f.lastReconcileRecs, changes.Inserts...)
+	for _, u := range changes.Updates {
+		f.lastReconcileRecs = append(f.lastReconcileRecs, u.Record)
+	}
+	// Like the real upsert's RETURNING, report the STORED revision: a new row
+	// starts at 1 and every in-place write bumps the stored one.
+	stored := service.ListChanges{Deletes: changes.Deletes}
+	for _, rec := range changes.Inserts {
+		rec.Revision = 1
+		stored.Inserts = append(stored.Inserts, rec)
+		f.rows[subjectDayKey(rec.EnrollmentID, rec.Date, rec.SubjectID)] = rec
+	}
+	for _, u := range changes.Updates {
+		u.Record.Revision = current[u.Record.EnrollmentID].Revision + 1
+		stored.Updates = append(stored.Updates, u)
+		f.rows[subjectDayKey(u.Record.EnrollmentID, u.Record.Date, u.Record.SubjectID)] = u.Record
+	}
+	f.lastChanges = changes
+	for _, rec := range changes.Deletes {
+		delete(f.rows, subjectDayKey(rec.EnrollmentID, rec.Date, rec.SubjectID))
+	}
+	sk := sessionKey(key)
+	s, ok := f.sessions[sk]
+	if !ok {
+		s = service.Session{TakenAt: sessionTakenAt, TakenByName: taker.Name}
+	}
+	s.UpdatedAt = sessionTakenAt.Add(time.Duration(f.reconcileCalls) * time.Minute)
+	f.sessions[sk] = s
+	return stored, nil
 }
 
 func (f *fakeRepo) ListByEnrollment(_ context.Context, enrollmentID string, from, to time.Time) ([]service.AttendanceRecord, error) {
@@ -168,6 +226,25 @@ const (
 	studentBeto = "stu-b"
 	studentCruz = "stu-c"
 )
+
+// testTaker is who saves in the tests that are not about the taker itself.
+var testTaker = service.Taker{UserID: "9b2f7c1e-0000-4000-8000-000000000001", Name: "Gabriela Rojas"}
+
+// sessionTakenAt is the instant the fake stamps on a list's first save.
+var sessionTakenAt = time.Date(2026, 8, 5, 14, 0, 0, 0, time.UTC)
+
+// save is SaveDailyAttendance on the DAILY list (no subject) by testTaker.
+func save(svc *service.AttendanceService, ctx context.Context, group, date string, marks []service.Mark) (int, int, error) {
+	return svc.SaveDailyAttendance(ctx, service.SaveRequest{
+		GroupID: group, Date: date, Marks: marks, TakenBy: testTaker.UserID, TakenByName: testTaker.Name,
+	})
+}
+
+// roster is GetDailyRoster on the DAILY list, returning only its rows.
+func roster(svc *service.AttendanceService, ctx context.Context, group, date string) ([]service.RosterRow, error) {
+	r, err := svc.GetDailyRoster(ctx, group, date, "")
+	return r.Rows, err
+}
 
 // maxNote is the longest note the service accepts; one more character is a
 // client error (the column carries the same CHECK).
@@ -261,7 +338,7 @@ func TestGetDailyRosterDefaultsPresentAndOverlaysMarks(t *testing.T) {
 	}
 	svc := newService(t, repo, nil)
 
-	rows, err := svc.GetDailyRoster(context.Background(), groupID, schoolDay)
+	rows, err := roster(svc, context.Background(), groupID, schoolDay)
 	if err != nil {
 		t.Fatalf("GetDailyRoster: %v", err)
 	}
@@ -269,7 +346,7 @@ func TestGetDailyRosterDefaultsPresentAndOverlaysMarks(t *testing.T) {
 	want := []service.RosterRow{
 		{EnrollmentID: enrollmentAna, StudentID: studentAna, Status: "present"},
 		{EnrollmentID: enrollmentBeto, StudentID: studentBeto, Status: "absent"},
-		{EnrollmentID: enrollmentCruz, StudentID: studentCruz, Status: "late"},
+		{EnrollmentID: enrollmentCruz, StudentID: studentCruz, Status: "late", Note: "traffic"}, // the note round-trips
 	}
 	if len(rows) != len(want) {
 		t.Fatalf("roster has %d rows, want %d: %+v", len(rows), len(want), rows)
@@ -309,7 +386,7 @@ func TestGetDailyRosterRejectsBadInput(t *testing.T) {
 			repo := newFakeRepo()
 			svc := newService(t, repo, nil)
 
-			_, err := svc.GetDailyRoster(context.Background(), tt.groupID, tt.date)
+			_, err := roster(svc, context.Background(), tt.groupID, tt.date)
 			wantInvalid(t, err)
 			if repo.marksForDateCalls != 0 {
 				t.Errorf("repo was queried despite invalid input (%d calls)", repo.marksForDateCalls)
@@ -327,13 +404,13 @@ func TestMalformedDateIsCheckedBeforeTheGroupRPC(t *testing.T) {
 
 	t.Run("GetDailyRoster", func(t *testing.T) {
 		svc := newRosterService(t, newFakeRepo(), calls)
-		_, err := svc.GetDailyRoster(context.Background(), "grp-nope", badDate)
+		_, err := roster(svc, context.Background(), "grp-nope", badDate)
 		wantDateError(t, err, calls)
 	})
 	t.Run("SaveDailyAttendance", func(t *testing.T) {
 		calls.calls = 0
 		svc := newRosterService(t, newFakeRepo(), calls)
-		_, _, err := svc.SaveDailyAttendance(context.Background(), "grp-nope", badDate, nil)
+		_, _, err := save(svc, context.Background(), "grp-nope", badDate, nil)
 		wantDateError(t, err, calls)
 	})
 }
@@ -370,7 +447,7 @@ func TestGetDailyRosterPropagatesRepoFailure(t *testing.T) {
 	repo.err = errors.New("connection reset")
 	svc := newService(t, repo, nil)
 
-	if _, err := svc.GetDailyRoster(context.Background(), groupID, schoolDay); err == nil {
+	if _, err := roster(svc, context.Background(), groupID, schoolDay); err == nil {
 		t.Fatal("want the repo failure to propagate, got nil")
 	}
 }
@@ -386,7 +463,7 @@ func TestSaveDailyAttendanceStoresExceptions(t *testing.T) {
 	svc := newService(t, repo, nil, "rec-1", "rec-2")
 	date := day(t, schoolDay)
 
-	absent, marked, err := svc.SaveDailyAttendance(context.Background(), groupID, schoolDay, []service.Mark{
+	absent, marked, err := save(svc, context.Background(), groupID, schoolDay, []service.Mark{
 		{EnrollmentID: enrollmentAna, Status: "absent"},
 		{EnrollmentID: enrollmentBeto, Status: "absent", Note: "sin justificar"},
 	})
@@ -424,14 +501,14 @@ func TestSaveDailyAttendanceReSaveClearsDroppedMarks(t *testing.T) {
 	svc := newService(t, repo, nil, "rec-1", "rec-2", "rec-3")
 	ctx := context.Background()
 
-	if _, _, err := svc.SaveDailyAttendance(ctx, groupID, schoolDay, []service.Mark{
+	if _, _, err := save(svc, ctx, groupID, schoolDay, []service.Mark{
 		{EnrollmentID: enrollmentAna, Status: "absent"},
 		{EnrollmentID: enrollmentBeto, Status: "absent"},
 	}); err != nil {
 		t.Fatalf("first save: %v", err)
 	}
 
-	absent, marked, err := svc.SaveDailyAttendance(ctx, groupID, schoolDay, []service.Mark{
+	absent, marked, err := save(svc, ctx, groupID, schoolDay, []service.Mark{
 		{EnrollmentID: enrollmentBeto, Status: "late", Note: "llegó 8:15"},
 	})
 	if err != nil {
@@ -441,7 +518,7 @@ func TestSaveDailyAttendanceReSaveClearsDroppedMarks(t *testing.T) {
 		t.Errorf("counts = (absent %d, marked %d), want (0, 1)", absent, marked)
 	}
 
-	rows, err := svc.GetDailyRoster(ctx, groupID, schoolDay)
+	rows, err := roster(svc, ctx, groupID, schoolDay)
 	if err != nil {
 		t.Fatalf("roster after re-save: %v", err)
 	}
@@ -465,13 +542,13 @@ func TestSaveDailyAttendanceDropsPresentMarks(t *testing.T) {
 	svc := newService(t, repo, nil)
 	ctx := context.Background()
 
-	if _, _, err := svc.SaveDailyAttendance(ctx, groupID, schoolDay, []service.Mark{
+	if _, _, err := save(svc, ctx, groupID, schoolDay, []service.Mark{
 		{EnrollmentID: enrollmentAna, Status: "absent"},
 	}); err != nil {
 		t.Fatalf("seed save: %v", err)
 	}
 
-	absent, marked, err := svc.SaveDailyAttendance(ctx, groupID, schoolDay, []service.Mark{
+	absent, marked, err := save(svc, ctx, groupID, schoolDay, []service.Mark{
 		{EnrollmentID: enrollmentAna, Status: "present"},
 	})
 	if err != nil {
@@ -563,7 +640,7 @@ func TestSaveDailyAttendanceRejectsBadInput(t *testing.T) {
 			repo := newFakeRepo()
 			svc := newService(t, repo, nil)
 
-			absent, marked, err := svc.SaveDailyAttendance(context.Background(), tt.groupID, tt.date, tt.marks)
+			absent, marked, err := save(svc, context.Background(), tt.groupID, tt.date, tt.marks)
 			wantInvalid(t, err)
 			if absent != 0 || marked != 0 {
 				t.Errorf("rejected save reported counts (%d, %d), want (0, 0)", absent, marked)
@@ -583,7 +660,7 @@ func TestSaveDailyAttendancePublishesEvents(t *testing.T) {
 	pub := &spyPublisher{}
 	svc := newService(t, repo, pub, "rec-1", "rec-2")
 
-	if _, _, err := svc.SaveDailyAttendance(context.Background(), groupID, schoolDay, []service.Mark{
+	if _, _, err := save(svc, context.Background(), groupID, schoolDay, []service.Mark{
 		{EnrollmentID: enrollmentAna, Status: "absent"},
 		{EnrollmentID: enrollmentBeto, Status: "late"},
 	}); err != nil {
@@ -592,14 +669,14 @@ func TestSaveDailyAttendancePublishesEvents(t *testing.T) {
 
 	wantAbsences := []service.AbsenceEvent{{
 		RecordID: "rec-1", EnrollmentID: enrollmentAna, StudentID: studentAna,
-		TenantID: testTenant, Date: schoolDay,
+		TenantID: testTenant, Date: schoolDay, MarkVersion: 1,
 	}}
 	if len(pub.absences) != 1 || pub.absences[0] != wantAbsences[0] {
 		t.Errorf("absences = %+v, want %+v", pub.absences, wantAbsences)
 	}
 	wantMarked := []service.MarkedEvent{
-		{RecordID: "rec-1", EnrollmentID: enrollmentAna, StudentID: studentAna, TenantID: testTenant, Date: schoolDay, Status: "absent"},
-		{RecordID: "rec-2", EnrollmentID: enrollmentBeto, StudentID: studentBeto, TenantID: testTenant, Date: schoolDay, Status: "late"},
+		{RecordID: "rec-1", EnrollmentID: enrollmentAna, StudentID: studentAna, TenantID: testTenant, Date: schoolDay, Status: "absent", MarkVersion: 1},
+		{RecordID: "rec-2", EnrollmentID: enrollmentBeto, StudentID: studentBeto, TenantID: testTenant, Date: schoolDay, Status: "late", MarkVersion: 1},
 	}
 	if len(pub.marked) != len(wantMarked) {
 		t.Fatalf("marked events = %+v, want %+v", pub.marked, wantMarked)
@@ -631,7 +708,7 @@ func TestSaveDailyAttendancePublishingIsBestEffort(t *testing.T) {
 			log, logs := captureLogs()
 			svc := newLoggingService(t, repo, tt.pub, log, "rec-1")
 
-			absent, marked, err := svc.SaveDailyAttendance(context.Background(), groupID, schoolDay, []service.Mark{
+			absent, marked, err := save(svc, context.Background(), groupID, schoolDay, []service.Mark{
 				{EnrollmentID: enrollmentAna, Status: "absent"},
 			})
 			if err != nil {
@@ -669,7 +746,7 @@ func TestSaveDailyAttendancePropagatesRepoFailure(t *testing.T) {
 	pub := &spyPublisher{}
 	svc := newService(t, repo, pub)
 
-	if _, _, err := svc.SaveDailyAttendance(context.Background(), groupID, schoolDay, []service.Mark{
+	if _, _, err := save(svc, context.Background(), groupID, schoolDay, []service.Mark{
 		{EnrollmentID: enrollmentAna, Status: "absent"},
 	}); err == nil {
 		t.Fatal("want the reconcile failure to propagate, got nil")
@@ -696,7 +773,7 @@ func TestSaveDailyAttendanceAcceptsEveryStoredStatus(t *testing.T) {
 			pub := &spyPublisher{}
 			svc := newService(t, repo, pub)
 
-			absent, marked, err := svc.SaveDailyAttendance(context.Background(), groupID, schoolDay, []service.Mark{
+			absent, marked, err := save(svc, context.Background(), groupID, schoolDay, []service.Mark{
 				{EnrollmentID: enrollmentAna, Status: tt.status},
 			})
 			if err != nil {
@@ -718,23 +795,30 @@ func TestSaveDailyAttendanceAcceptsEveryStoredStatus(t *testing.T) {
 // TestSaveDailyAttendanceCapsNoteLength pins the free-text boundary: a note of
 // exactly the cap is stored, one character more is rejected before anything is
 // written. Without it an unbounded note reaches a text column straight from a
-// teacher's browser.
+// teacher's browser. The cap counts CHARACTERS, like the column's CHECK
+// (length()) and the web's counter: an accented note is not cut at half length
+// because "é" is two bytes.
 func TestSaveDailyAttendanceCapsNoteLength(t *testing.T) {
+	const accented = "é"
 	tests := []struct {
 		name       string
+		char       string
 		length     int
 		wantStored bool
 	}{
-		{name: "at the cap", length: maxNote, wantStored: true},
-		{name: "one over the cap", length: maxNote + 1},
+		{name: "at the cap", char: "x", length: maxNote, wantStored: true},
+		{name: "one over the cap", char: "x", length: maxNote + 1},
+		{name: "400 accented characters (800 bytes)", char: accented, length: 400, wantStored: true},
+		{name: "accented at the cap", char: accented, length: maxNote, wantStored: true},
+		{name: "accented one over the cap", char: accented, length: maxNote + 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newFakeRepo()
 			svc := newService(t, repo, nil)
 
-			_, marked, err := svc.SaveDailyAttendance(context.Background(), groupID, schoolDay, []service.Mark{
-				{EnrollmentID: enrollmentAna, Status: "excused", Note: strings.Repeat("x", tt.length)},
+			_, marked, err := save(svc, context.Background(), groupID, schoolDay, []service.Mark{
+				{EnrollmentID: enrollmentAna, Status: "excused", Note: strings.Repeat(tt.char, tt.length)},
 			})
 			if !tt.wantStored {
 				wantInvalid(t, err)
@@ -744,7 +828,7 @@ func TestSaveDailyAttendanceCapsNoteLength(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatalf("a note of exactly %d chars must be accepted: %v", maxNote, err)
+				t.Fatalf("a note of %d characters must be accepted: %v", tt.length, err)
 			}
 			if marked != 1 {
 				t.Errorf("marked = %d, want 1", marked)
@@ -761,13 +845,13 @@ func TestSaveDailyAttendanceEmptyMarksClearsTheDay(t *testing.T) {
 	svc := newService(t, repo, nil)
 	ctx := context.Background()
 
-	if _, _, err := svc.SaveDailyAttendance(ctx, groupID, schoolDay, []service.Mark{
+	if _, _, err := save(svc, ctx, groupID, schoolDay, []service.Mark{
 		{EnrollmentID: enrollmentAna, Status: "absent"},
 	}); err != nil {
 		t.Fatalf("seed save: %v", err)
 	}
 
-	absent, marked, err := svc.SaveDailyAttendance(ctx, groupID, schoolDay, nil)
+	absent, marked, err := save(svc, ctx, groupID, schoolDay, nil)
 	if err != nil {
 		t.Fatalf("empty save: %v", err)
 	}

@@ -369,6 +369,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/config/cycles/{id}/activate", configWrite(configH.ActivateCycle))
 	mux.Handle("POST /api/v1/config/levels", configWrite(configH.CreateLevel))
 	mux.Handle("GET /api/v1/config/levels", configRead(configH.ListLevels))
+	mux.Handle("PATCH /api/v1/config/levels/{id}", configWrite(configH.SetLevelAttendanceMode))
 	mux.Handle("POST /api/v1/config/grade-levels", configWrite(configH.CreateGradeLevel))
 	mux.Handle("GET /api/v1/config/grade-levels", configRead(configH.ListGradeLevels))
 	mux.Handle("POST /api/v1/config/subjects", configWrite(configH.CreateSubject))
@@ -469,14 +470,15 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// enrichment — a Maestro holds no students:read) are reused via the scope
 	// handler.
 	//
-	// Groups composes module_attendance + module_config (it enriches group names);
-	// roster and save touch only the attendance service, so they need only
-	// module_attendance. A supplied groupId is verified against the caller's OWN set
+	// Roster and save need only module_attendance (the classes list also reads
+	// the config catalog, hence module_config). A supplied groupId is verified against the caller's OWN set
 	// before any roster/save call — a group outside it answers 404, never 403,
 	// leaking nothing about whether another group exists.
-	teachingAttH := handler.NewTeachingAttendanceHandler(teachingH, attendanceClient)
-	mux.Handle("GET /api/v1/teaching/groups",
-		teachingModules("attendance_own:read", []string{"attendance", "config"}, teachingAttH.Groups))
+	teachingAttH := handler.NewTeachingAttendanceHandler(teachingH, attendanceClient, authClient)
+	// T3: the lists the caller takes (daily groups + per-class assignments). It
+	// reads the config catalog for each group's level mode, hence module_config.
+	mux.Handle("GET /api/v1/teaching/attendance/classes",
+		teachingModules("attendance_own:read", []string{"attendance", "config"}, teachingAttH.Classes))
 	mux.Handle("GET /api/v1/teaching/attendance/roster",
 		teachingModules("attendance_own:read", []string{"attendance"}, teachingAttH.Roster))
 	mux.Handle("POST /api/v1/teaching/attendance",
@@ -553,7 +555,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// module_attendance OFF ⇒ 404 (the module is invisible before auth even
 	// runs). The more specific /attendance/roster wins over /attendance under
 	// ServeMux's specificity rule.
-	attendanceH := handler.NewAttendanceHandler(attendanceClient)
+	attendanceH := handler.NewAttendanceHandler(attendanceClient, configClient, studentsClient, authClient)
 	attendanceWrite := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("attendance", requireAuthChanged(middleware.RequirePermission("attendance:write")(http.HandlerFunc(h))))
 	}

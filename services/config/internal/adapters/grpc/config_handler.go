@@ -66,6 +66,17 @@ func (h *ConfigHandler) ListLevels(ctx context.Context, _ *connect.Request[confi
 	return connect.NewResponse(&configv1.ListLevelsResponse{Levels: out}), nil
 }
 
+// SetLevelAttendanceMode changes how a level takes attendance (daily or per
+// class) and returns the updated level. An unspecified or unknown mode is
+// InvalidArgument; an unknown level is NotFound.
+func (h *ConfigHandler) SetLevelAttendanceMode(ctx context.Context, req *connect.Request[configv1.SetLevelAttendanceModeRequest]) (*connect.Response[configv1.SetLevelAttendanceModeResponse], error) {
+	l, err := h.catalog.SetLevelAttendanceMode(ctx, req.Msg.GetId(), toDomainAttendanceMode(req.Msg.GetAttendanceMode()))
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.SetLevelAttendanceModeResponse{Level: toProtoLevel(l)}), nil
+}
+
 // --- cycles ----------------------------------------------------------------
 
 func (h *ConfigHandler) CreateCycle(ctx context.Context, req *connect.Request[configv1.CreateCycleRequest]) (*connect.Response[configv1.CreateCycleResponse], error) {
@@ -298,6 +309,7 @@ func toProtoLevel(l domain.Level) *configv1.Level {
 		Name:                  l.Name(),
 		SepCode:               l.SEPCode(),
 		EnrollmentGranularity: toProtoGranularity(l.Granularity()),
+		AttendanceMode:        toProtoAttendanceMode(l.AttendanceMode()),
 	}
 }
 
@@ -402,6 +414,32 @@ func toProtoGranularity(g domain.EnrollmentGranularity) configv1.EnrollmentGranu
 		return configv1.EnrollmentGranularity_ENROLLMENT_GRANULARITY_TERM
 	default:
 		return configv1.EnrollmentGranularity_ENROLLMENT_GRANULARITY_UNSPECIFIED
+	}
+}
+
+// toProtoAttendanceMode maps the domain attendance mode to the wire enum.
+func toProtoAttendanceMode(m domain.AttendanceMode) configv1.AttendanceMode {
+	switch m {
+	case domain.AttendanceDaily:
+		return configv1.AttendanceMode_ATTENDANCE_MODE_DAILY
+	case domain.AttendancePerClass:
+		return configv1.AttendanceMode_ATTENDANCE_MODE_PER_CLASS
+	default:
+		return configv1.AttendanceMode_ATTENDANCE_MODE_UNSPECIFIED
+	}
+}
+
+// toDomainAttendanceMode maps the wire enum to the domain mode. UNSPECIFIED and
+// any unknown value map to AttendanceModeUnspecified, which the use case rejects
+// as invalid.
+func toDomainAttendanceMode(m configv1.AttendanceMode) domain.AttendanceMode {
+	switch m {
+	case configv1.AttendanceMode_ATTENDANCE_MODE_DAILY:
+		return domain.AttendanceDaily
+	case configv1.AttendanceMode_ATTENDANCE_MODE_PER_CLASS:
+		return domain.AttendancePerClass
+	default:
+		return domain.AttendanceModeUnspecified
 	}
 }
 

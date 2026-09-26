@@ -128,18 +128,23 @@ function distinctSubjects(options: readonly TeachingOption[]): SubjectChoice[] {
  * Turns the teacher's options and the URL's choices into the current step. A
  * step with a single choice is skipped, and a choice the teacher no longer has
  * (a stale link) counts as not made.
+ *
+ * `keyByGroup` (by-subject only): the group step is read from `grupo` instead of
+ * `clase` — attendance per class, where a subject has one list per group and
+ * the "subject" may be the daily list, which has no assignment.
  */
 export function resolveSelection<T extends TeachingOption>(
   options: readonly T[],
   query: SelectionQuery,
   bySubject: boolean,
+  keyByGroup = false,
 ): ResolvedSelection<T> {
   const subjects = bySubject ? distinctSubjects(options) : [];
   const subjectSkipped = !bySubject || subjects.length === 1;
   const subject = !bySubject ? undefined : subjectSkipped ? subjects[0] : subjects.find((s) => s.id === query.subject);
   const groups = (bySubject ? options.filter((o) => subject !== undefined && subjectKey(o) === subject.id) : [...options]).sort(byLabel);
   const groupSkipped = groups.length === 1;
-  const matches = (o: T): boolean => (bySubject ? o.id === query.assignment : o.groupId === query.group);
+  const matches = (o: T): boolean => (bySubject && !keyByGroup ? o.id === query.assignment : o.groupId === query.group);
   const selected = groupSkipped ? groups[0] : groups.find(matches);
 
   const step: SelectionStep =

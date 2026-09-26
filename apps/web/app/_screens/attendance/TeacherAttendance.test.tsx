@@ -2,136 +2,190 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { AttendanceSheet } from "../../attendance/sheet";
 import * as teachingApi from "../../teaching/api";
+import type { AttendanceClass } from "../../teaching/api";
 import { TeacherAttendance } from "./TeacherAttendance";
 
 // The teacher surface talks to the gateway EXCLUSIVELY through the self-scoped
 // teaching client — never the admin attendance/config/students clients (the
-// teacher lacks those permissions). Mock only that client. The transport itself
-// is covered by app/teaching/api.test.ts.
+// teacher lacks those permissions). The transport is covered by
+// app/teaching/api.test.ts; the list itself by PassSheet.test.tsx.
 vi.mock("../../teaching/api", () => ({
-  listGroups: vi.fn(),
-  getAttendanceRoster: vi.fn(),
-  saveAttendance: vi.fn(),
+  listAttendanceClasses: vi.fn(),
+  getTeachingAttendanceSheet: vi.fn(),
+  saveTeachingAttendance: vi.fn(),
 }));
 
 const teaching = vi.mocked(teachingApi);
+const TODAY = "2026-09-01";
 
-const group = { id: "g1", name: "1° A" };
-const ada = { enrollmentId: "en1", studentId: "st1", studentName: "Ada Lovelace", status: "present" as const };
-const alan = { enrollmentId: "en2", studentId: "st2", studentName: "Alan Turing", status: "present" as const };
+const daily = (groupId: string, groupLabel: string): AttendanceClass => ({ groupId, groupLabel, levelName: "Primaria", mode: "daily" });
+const perClass = (groupId: string, groupLabel: string, subjectId: string, subjectName: string): AttendanceClass => ({
+  groupId,
+  groupLabel,
+  levelName: "Secundaria",
+  mode: "per_class",
+  subjectId,
+  subjectName,
+  assignmentId: `${subjectId}-${groupId}`,
+});
+
+const sheet: AttendanceSheet = {
+  mode: "daily",
+  date: TODAY,
+  editable: true,
+  windowDays: 7,
+  session: null,
+  rows: [{ enrollmentId: "en1", studentId: "st1", name: "Ada Lovelace", status: "present", note: "" }],
+};
+
+const renderScreen = (onBack: () => void = () => {}) => render(<TeacherAttendance onBack={onBack} today={TODAY} />);
 
 beforeEach(() => {
   // The picker keeps its place in the URL: every test starts at the first step.
   window.history.replaceState(null, "", "/asistencia");
-  teaching.listGroups.mockResolvedValue([group]);
-  teaching.getAttendanceRoster.mockResolvedValue([ada, alan]);
-  teaching.saveAttendance.mockResolvedValue({ absentCount: 0, markedCount: 0 });
+  teaching.listAttendanceClasses.mockResolvedValue([daily("g1", "1° PRIMARIA · A")]);
+  teaching.getTeachingAttendanceSheet.mockResolvedValue(sheet);
+  teaching.saveTeachingAttendance.mockResolvedValue(undefined);
 });
 
-afterEach(() => vi.clearAllMocks());
-
-/** One group: the picker skips straight to today's pass list. */
-async function openRoster(): Promise<HTMLElement> {
-  await waitFor(() => expect(teaching.getAttendanceRoster).toHaveBeenCalledWith("g1", "2026-09-01"));
-  return screen.findByRole("table", { name: "Pase de lista" });
-}
-
-describe("TeacherAttendance — groups + roster", () => {
-  it("lists the teacher's own groups and loads the default-present roster with names from the roster itself", async () => {
-    render(<TeacherAttendance onBack={() => {}} today="2026-09-01" />);
-
-    const list = await openRoster();
-    // Names come from the roster row — NOT a students-list lookup.
-    expect(within(list).getByText("Ada Lovelace")).toBeInTheDocument();
-    expect(within(list).getByText("Alan Turing")).toBeInTheDocument();
-    // Default-present: every row opens on "Presente".
-    const adaRow = screen.getByRole("radiogroup", { name: "Asistencia de Ada Lovelace" });
-    expect(within(adaRow).getByRole("radio", { name: "Presente" })).toHaveAttribute("aria-checked", "true");
-  });
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.clearAllMocks();
 });
 
-describe("TeacherAttendance — picking the group", () => {
-  it("with one group, today's list opens with no step at all", async () => {
-    render(<TeacherAttendance onBack={() => {}} today="2026-09-01" />);
+describe("TeacherAttendance — daily groups only", () => {
+  it("one group: today's list opens with no step, asking the server for the day list", async () => {
+    renderScreen();
 
-    await openRoster();
+    await screen.findByRole("button", { name: "Ada Lovelace: Presente" });
+    expect(teaching.getTeachingAttendanceSheet).toHaveBeenCalledWith({ groupId: "g1", date: TODAY });
     expect(screen.queryByRole("heading", { name: "Elige el grupo" })).toBeNull();
-    expect(screen.getByRole("navigation", { name: "Ruta" })).toHaveTextContent("Asistencia›1° A");
+    expect(screen.getByRole("navigation", { name: "Ruta" })).toHaveTextContent("Asistencia›1° PRIMARIA · A");
   });
 
-  it("with two groups, the teacher taps one and gets its list", async () => {
+  it("two groups: the group step only, kept in the URL", async () => {
     const user = userEvent.setup();
-    teaching.listGroups.mockResolvedValue([group, { id: "g2", name: "2° B" }]);
-    render(<TeacherAttendance onBack={() => {}} today="2026-09-01" />);
+    teaching.listAttendanceClasses.mockResolvedValue([daily("g1", "1° PRIMARIA · A"), daily("g2", "2° PRIMARIA · B")]);
+    renderScreen();
 
-    await user.click(await screen.findByRole("button", { name: "2° B" }));
+    expect(await screen.findByRole("heading", { name: "Elige el grupo" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Elige la asignatura" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "2° PRIMARIA · B" }));
 
-    await waitFor(() => expect(teaching.getAttendanceRoster).toHaveBeenCalledWith("g2", "2026-09-01"));
+    await waitFor(() => expect(teaching.getTeachingAttendanceSheet).toHaveBeenCalledWith({ groupId: "g2", date: TODAY }));
     expect(window.location.search).toBe("?grupo=g2");
   });
 });
 
-describe("TeacherAttendance — save", () => {
-  it("sends ONLY the exceptions (a student toggled to absent) and reflects the saved counts", async () => {
+describe("TeacherAttendance — per-class lists", () => {
+  it("subject first, then the list of that subject's only group, sending the subject", async () => {
     const user = userEvent.setup();
-    teaching.saveAttendance.mockResolvedValue({ absentCount: 1, markedCount: 1 });
-    render(<TeacherAttendance onBack={() => {}} today="2026-09-01" />);
+    teaching.listAttendanceClasses.mockResolvedValue([
+      perClass("gA", "1° SECUNDARIA · A", "s-mat", "Matemáticas"),
+      perClass("gA", "1° SECUNDARIA · A", "s-esp", "Español"),
+    ]);
+    renderScreen();
 
-    await openRoster();
-    const adaRow = screen.getByRole("radiogroup", { name: "Asistencia de Ada Lovelace" });
-    await user.click(within(adaRow).getByRole("radio", { name: "Ausente" }));
-    await user.click(screen.getByRole("button", { name: "Guardar lista" }));
+    const subjects = await screen.findByRole("list", { name: "Asignaturas" });
+    await user.click(within(subjects).getByRole("button", { name: /Matemáticas/ }));
 
-    // Default-present reconcile: only the non-present row travels; Alan is omitted.
     await waitFor(() =>
-      expect(teaching.saveAttendance).toHaveBeenCalledWith({
-        groupId: "g1",
-        date: "2026-09-01",
-        marks: [{ enrollmentId: "en1", status: "absent" }],
-      }),
+      expect(teaching.getTeachingAttendanceSheet).toHaveBeenCalledWith({ groupId: "gA", date: TODAY, subjectId: "s-mat" }),
     );
-    // The saved counts are reflected back to the teacher.
-    expect(await screen.findByRole("status")).toHaveTextContent(/1/);
+    // A skipped step (one group) stays out of the URL, like every picker step.
+    expect(window.location.search).toBe("?asignatura=s-mat");
+    expect(await screen.findByText("Pase de lista · 1° SECUNDARIA · A · Matemáticas")).toBeInTheDocument();
   });
 
-  it("sends an empty marks array when nobody is marked (everybody present)", async () => {
+  it("a single per-class item skips every step", async () => {
+    teaching.listAttendanceClasses.mockResolvedValue([perClass("gA", "1° SECUNDARIA · A", "s-mat", "Matemáticas")]);
+    renderScreen();
+
+    await screen.findByRole("button", { name: "Ada Lovelace: Presente" });
+    expect(teaching.getTeachingAttendanceSheet).toHaveBeenCalledWith({ groupId: "gA", date: TODAY, subjectId: "s-mat" });
+  });
+
+  it("mixed: 'Lista del día' sits beside the subjects and leads to the daily groups, with no subject sent", async () => {
     const user = userEvent.setup();
-    render(<TeacherAttendance onBack={() => {}} today="2026-09-01" />);
+    teaching.listAttendanceClasses.mockResolvedValue([
+      daily("g1", "1° PRIMARIA · A"),
+      daily("g2", "2° PRIMARIA · B"),
+      perClass("gA", "1° SECUNDARIA · A", "s-mat", "Matemáticas"),
+    ]);
+    renderScreen();
 
-    await openRoster();
-    await user.click(screen.getByRole("button", { name: "Guardar lista" }));
+    const subjects = await screen.findByRole("list", { name: "Asignaturas" });
+    expect(within(subjects).getByRole("button", { name: /Matemáticas/ })).toBeInTheDocument();
+    await user.click(within(subjects).getByRole("button", { name: /Lista del día/ }));
 
-    await waitFor(() =>
-      expect(teaching.saveAttendance).toHaveBeenCalledWith({ groupId: "g1", date: "2026-09-01", marks: [] }),
-    );
+    const groups = await screen.findByRole("list", { name: "Grupos" });
+    expect(within(groups).getAllByRole("button")).toHaveLength(2);
+    await user.click(within(groups).getByRole("button", { name: "1° PRIMARIA · A" }));
+
+    await waitFor(() => expect(teaching.getTeachingAttendanceSheet).toHaveBeenCalledWith({ groupId: "g1", date: TODAY }));
+    expect(window.location.search).toBe("?asignatura=dia&grupo=g1");
+  });
+});
+
+describe("TeacherAttendance — unsaved changes", () => {
+  beforeEach(() => {
+    teaching.listAttendanceClasses.mockResolvedValue([daily("g1", "1° PRIMARIA · A"), daily("g2", "2° PRIMARIA · B")]);
+    window.history.replaceState(null, "", "/asistencia?grupo=g1");
+  });
+
+  it("switching group with unsaved marks asks first, and staying keeps the list", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderScreen();
+
+    await user.click(await screen.findByRole("button", { name: "Ada Lovelace: Presente" }));
+    await user.click(screen.getByRole("button", { name: "Cambiar" }));
+    await user.click(screen.getByRole("button", { name: "2° PRIMARIA · B" }));
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(window.location.search).toBe("?grupo=g1");
+    expect(screen.getByRole("button", { name: "Ada Lovelace: Ausente" })).toBeInTheDocument();
+  });
+
+  it("does not ask when nothing changed", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm");
+    const onBack = vi.fn();
+    renderScreen(onBack);
+
+    await screen.findByRole("button", { name: "Ada Lovelace: Presente" });
+    await user.click(screen.getByRole("button", { name: "Volver al inicio" }));
+
+    expect(confirm).not.toHaveBeenCalled();
+    expect(onBack).toHaveBeenCalled();
+  });
+
+  it("going back home with unsaved marks asks first", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const onBack = vi.fn();
+    renderScreen(onBack);
+
+    await user.click(await screen.findByRole("button", { name: "Ada Lovelace: Presente" }));
+    await user.click(screen.getByRole("button", { name: "Volver al inicio" }));
+
+    expect(confirm).toHaveBeenCalled();
+    expect(onBack).not.toHaveBeenCalled();
   });
 });
 
 describe("TeacherAttendance — states", () => {
-  it("shows an error when groups fail to load", async () => {
-    teaching.listGroups.mockRejectedValue(new Error("boom"));
-    render(<TeacherAttendance onBack={() => {}} today="2026-09-01" />);
+  it("shows an error when the classes fail to load", async () => {
+    teaching.listAttendanceClasses.mockRejectedValue(new Error("boom"));
+    renderScreen();
     expect(await screen.findByRole("alert")).toHaveTextContent(/No se pudieron cargar/);
   });
 
   it("tells a teacher without groups who to ask", async () => {
-    teaching.listGroups.mockResolvedValue([]);
-    render(<TeacherAttendance onBack={() => {}} today="2026-09-01" />);
+    teaching.listAttendanceClasses.mockResolvedValue([]);
+    renderScreen();
     expect(await screen.findByText(/Aún no tienes grupos asignados\. Pide a la dirección/)).toBeInTheDocument();
-  });
-
-  it("shows an empty hint when the chosen group has no enrolled students", async () => {
-    teaching.getAttendanceRoster.mockResolvedValue([]);
-    render(<TeacherAttendance onBack={() => {}} today="2026-09-01" />);
-
-    expect(await screen.findByText(/no tiene alumnos inscritos/i)).toBeInTheDocument();
-  });
-
-  it("shows an error when the roster fails to load", async () => {
-    teaching.getAttendanceRoster.mockRejectedValue(new Error("boom"));
-    render(<TeacherAttendance onBack={() => {}} today="2026-09-01" />);
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(/No se pudo cargar/);
   });
 });

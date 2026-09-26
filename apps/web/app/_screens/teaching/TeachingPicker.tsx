@@ -13,6 +13,10 @@ export interface TeachingPickerProps<T extends TeachingOption> {
   options: readonly T[];
   /** Subject first, then group (grades); otherwise group only (attendance). */
   bySubject: boolean;
+  /** By subject: the group step is keyed by group id (`grupo`) instead of the class (`clase`). */
+  keyByGroup?: boolean;
+  /** Asked before leaving the open list (crumbs, "Cambiar"); false keeps the teacher where they are. */
+  canLeave?: () => boolean;
   /** The list for the chosen class or group. */
   children: (selected: T) => ReactNode;
 }
@@ -25,8 +29,8 @@ const EMPTY = "Aún no tienes grupos asignados. Pide a la dirección que te asig
  * reload stays) and a breadcrumb to step back. Large tappable choices, not
  * selects: this is used standing, on a phone, between classes.
  */
-export function TeachingPicker<T extends TeachingOption>({ title, options, bySubject, children }: TeachingPickerProps<T>): ReactElement {
-  const selection = useTeachingSelection(options, bySubject);
+export function TeachingPicker<T extends TeachingOption>({ title, options, bySubject, keyByGroup, canLeave, children }: TeachingPickerProps<T>): ReactElement {
+  const selection = useTeachingSelection(options, bySubject, keyByGroup, canLeave);
   const heading = useRef<HTMLHeadingElement>(null);
   const previousStep = useRef(selection.step);
 
