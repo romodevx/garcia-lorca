@@ -35,6 +35,17 @@ const enrollmentStatusActive = "active"
 // that bypasses this layer.
 const maxNoteLength = 500
 
+// maxSubjectNameLength bounds, in characters, the per-class list label a save
+// may carry onto its events (it is not stored).
+const maxSubjectNameLength = 200
+
+// Bounds of a ListSessions query: it serves a family's month view, so two whole
+// months and a family's handful of groups are the widest honest read.
+const (
+	maxSessionRangeDays = 62
+	maxSessionGroups    = 20
+)
+
 // maxTakerNameLength bounds the display-name snapshot stamped on a session; the
 // column carries the same CHECK.
 const maxTakerNameLength = 200
@@ -157,6 +168,17 @@ type Repo interface {
 	// ListByEnrollment returns one enrollment's stored marks within an inclusive
 	// date range, ordered by date. A zero from or to skips that bound.
 	ListByEnrollment(ctx context.Context, enrollmentID string, from, to time.Time) ([]AttendanceRecord, error)
+	// ListSessions returns the lists TAKEN for any of groupIDs between two
+	// inclusive days, newest first, in one query.
+	ListSessions(ctx context.Context, groupIDs []string, from, to time.Time) ([]TakenList, error)
+}
+
+// TakenList is one list that was taken: its group, school day and subject (""
+// for the daily list).
+type TakenList struct {
+	GroupID   string
+	Date      time.Time
+	SubjectID string
 }
 
 // AbsenceEvent announces that a student was recorded absent on a date (feeds
@@ -168,7 +190,8 @@ type AbsenceEvent struct {
 	TenantID     string
 	Date         string
 	SubjectID    string
-	MarkVersion  int64 // the mark's stored revision; with RecordID, the consumer's dedupe key
+	SubjectName  string // the per-class list's label, "" for daily (never stored)
+	MarkVersion  int64  // the mark's stored revision; with RecordID, the consumer's dedupe key
 }
 
 // MarkedEvent announces that a student's mark CHANGED on a list: a new
@@ -183,7 +206,8 @@ type MarkedEvent struct {
 	Date         string
 	Status       string
 	SubjectID    string
-	MarkVersion  int64 // the mark's stored revision; with RecordID, the consumer's dedupe key
+	SubjectName  string // the per-class list's label, "" for daily (never stored)
+	MarkVersion  int64  // the mark's stored revision; with RecordID, the consumer's dedupe key
 }
 
 // Publisher announces stored attendance on the messaging boundary. Publishing is
@@ -220,6 +244,9 @@ type SaveRequest struct {
 	Marks       []Mark
 	TakenBy     string
 	TakenByName string
+	// SubjectName is the per-class list's display label, carried onto the
+	// published events only (comms names the class). Ignored for a daily list.
+	SubjectName string
 }
 
 // Mark is one submitted exception for a group·day. A Mark with statusPresent
@@ -347,6 +374,10 @@ func (s *AttendanceService) SaveDailyAttendance(ctx context.Context, req SaveReq
 	if err != nil {
 		return 0, 0, err
 	}
+	label, err := parseSubjectName(key.SubjectID, req.SubjectName)
+	if err != nil {
+		return 0, 0, err
+	}
 	if err := s.requireGroup(ctx, req.GroupID); err != nil {
 		return 0, 0, err
 	}
@@ -367,7 +398,7 @@ func (s *AttendanceService) SaveDailyAttendance(ctx context.Context, req SaveReq
 		return 0, 0, err
 	}
 
-	s.publishChanges(ctx, changes, studentByEnrollment)
+	s.publishChanges(ctx, changes, eventContext{students: studentByEnrollment, subjectName: label})
 
 	for _, rec := range desired {
 		if rec.Status == statusAbsent {
@@ -433,6 +464,69 @@ func (s *AttendanceService) ListAttendance(ctx context.Context, enrollmentID, fr
 	return s.repo.ListByEnrollment(ctx, enrollmentID, from, to)
 }
 
+// ListSessions returns which lists were taken for groupIDs between two required
+// inclusive ISO days, newest first. The query is bounded at the boundary — at
+// most maxSessionGroups distinct group UUIDs and maxSessionRangeDays days — so a
+// caller can never turn it into a scan of the whole history.
+func (s *AttendanceService) ListSessions(ctx context.Context, groupIDs []string, fromStr, toStr string) ([]TakenList, error) {
+	groups, err := distinctGroupIDs(groupIDs)
+	if err != nil {
+		return nil, err
+	}
+	from, err := parseDate(fromStr)
+	if err != nil {
+		return nil, err
+	}
+	to, err := parseDate(toStr)
+	if err != nil {
+		return nil, err
+	}
+	if to.Before(from) {
+		return nil, glerrors.New(glerrors.KindInvalid, "to_date is before from_date")
+	}
+	if days := int(to.Sub(from).Hours()/hoursPerDay) + 1; days > maxSessionRangeDays {
+		return nil, glerrors.New(glerrors.KindInvalid, "the range spans more than 62 days")
+	}
+	return s.repo.ListSessions(ctx, groups, from, to)
+}
+
+// hoursPerDay converts a UTC-midnight difference to days (no DST in UTC).
+const hoursPerDay = 24
+
+// distinctGroupIDs validates a ListSessions group set: 1..maxSessionGroups
+// UUIDs, duplicates collapsed in first-seen order.
+func distinctGroupIDs(groupIDs []string) ([]string, error) {
+	out := make([]string, 0, len(groupIDs))
+	seen := make(map[string]bool, len(groupIDs))
+	for _, id := range groupIDs {
+		if uuid.Validate(id) != nil {
+			return nil, glerrors.New(glerrors.KindInvalid, "invalid group id")
+		}
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	if len(out) == 0 || len(out) > maxSessionGroups {
+		return nil, glerrors.New(glerrors.KindInvalid, "between 1 and 20 group ids are required")
+	}
+	return out, nil
+}
+
+// parseSubjectName validates the list label a save carries onto its events:
+// trimmed, at most maxSubjectNameLength characters, and dropped for a daily
+// list (which has no class to name).
+func parseSubjectName(subjectID, name string) (string, error) {
+	if subjectID == "" {
+		return "", nil
+	}
+	name = strings.TrimSpace(name)
+	if utf8.RuneCountInString(name) > maxSubjectNameLength {
+		return "", glerrors.New(glerrors.KindInvalid, "subject_name is too long (at most 200 characters)")
+	}
+	return name, nil
+}
+
 // recordsFor validates the submitted marks against the day's active roster and
 // projects the exceptions into storable records. A mark for an enrollment that is
 // not on the roster, an unknown status, an over-long note or a second mark for
@@ -480,21 +574,28 @@ func (s *AttendanceService) recordsFor(marks []Mark, studentByEnrollment map[str
 // never fails the call — the list is already durable, and losing a notification
 // is strictly better than failing a teacher's save — but every dropped event is
 // logged, so best-effort stays diagnosable instead of silent.
-func (s *AttendanceService) publishChanges(ctx context.Context, changes ListChanges, studentByEnrollment map[string]string) {
+func (s *AttendanceService) publishChanges(ctx context.Context, changes ListChanges, ec eventContext) {
 	if s.publisher == nil {
 		return
 	}
 	for _, rec := range changes.Inserts {
-		s.publishMark(ctx, rec, rec.Status, rec.Revision, studentByEnrollment)
+		s.publishMark(ctx, rec, rec.Status, rec.Revision, ec)
 	}
 	for _, u := range changes.Updates {
 		if u.StatusChanged {
-			s.publishMark(ctx, u.Record, u.Record.Status, u.Record.Revision, studentByEnrollment)
+			s.publishMark(ctx, u.Record, u.Record.Status, u.Record.Revision, ec)
 		}
 	}
 	for _, rec := range changes.Deletes {
-		s.publishMark(ctx, rec, statusPresent, clearedVersion(rec), studentByEnrollment)
+		s.publishMark(ctx, rec, statusPresent, clearedVersion(rec), ec)
 	}
+}
+
+// eventContext is what every event of one save shares: the roster's student
+// ids and the list's label.
+type eventContext struct {
+	students    map[string]string
+	subjectName string
 }
 
 // clearedVersion is the version announcing that a stored mark was cleared back
@@ -509,9 +610,9 @@ func clearedVersion(rec AttendanceRecord) int64 {
 // companion (same version) when status is absent. The version is what makes a
 // correction a NEW event to a consumer that dedupes on (record id, version),
 // while the record id stays the stored one.
-func (s *AttendanceService) publishMark(ctx context.Context, rec AttendanceRecord, status string, version int64, studentByEnrollment map[string]string) {
+func (s *AttendanceService) publishMark(ctx context.Context, rec AttendanceRecord, status string, version int64, ec eventContext) {
 	day := rec.Date.Format(dateLayout)
-	studentID := studentByEnrollment[rec.EnrollmentID]
+	studentID := ec.students[rec.EnrollmentID]
 	err := s.publisher.PublishAttendanceMarked(ctx, MarkedEvent{
 		RecordID:     rec.ID,
 		EnrollmentID: rec.EnrollmentID,
@@ -520,6 +621,7 @@ func (s *AttendanceService) publishMark(ctx context.Context, rec AttendanceRecor
 		Date:         day,
 		Status:       status,
 		SubjectID:    rec.SubjectID,
+		SubjectName:  ec.subjectName,
 		MarkVersion:  version,
 	})
 	s.logDroppedEvent(err, rec.ID)
@@ -533,6 +635,7 @@ func (s *AttendanceService) publishMark(ctx context.Context, rec AttendanceRecor
 		TenantID:     s.tenantID,
 		Date:         day,
 		SubjectID:    rec.SubjectID,
+		SubjectName:  ec.subjectName,
 		MarkVersion:  version,
 	})
 	s.logDroppedEvent(err, rec.ID)

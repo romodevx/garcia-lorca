@@ -24,6 +24,11 @@ type fakeRepo struct {
 	sessions map[string]service.Session
 	list     []service.AttendanceRecord
 	taker    service.Taker
+	taken    []service.TakenList
+}
+
+func (f *fakeRepo) ListSessions(_ context.Context, _ []string, _, _ time.Time) ([]service.TakenList, error) {
+	return f.taken, nil
 }
 
 func newFakeRepo() *fakeRepo {

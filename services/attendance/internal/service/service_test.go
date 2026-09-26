@@ -44,7 +44,23 @@ type fakeRepo struct {
 	lastListTo         time.Time
 	listResult         []service.AttendanceRecord
 
+	sessionsCalls     int
+	lastSessionGroups []string
+	lastSessionFrom   time.Time
+	lastSessionTo     time.Time
+	sessionsResult    []service.TakenList
+
 	err error // forced failure, returned by every method when set
+}
+
+func (f *fakeRepo) ListSessions(_ context.Context, groupIDs []string, from, to time.Time) ([]service.TakenList, error) {
+	f.sessionsCalls++
+	f.lastSessionGroups = append([]string(nil), groupIDs...)
+	f.lastSessionFrom, f.lastSessionTo = from, to
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.sessionsResult, nil
 }
 
 func newFakeRepo() *fakeRepo {

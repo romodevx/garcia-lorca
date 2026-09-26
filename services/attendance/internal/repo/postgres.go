@@ -33,6 +33,9 @@ const (
 	listLockNamespace = "attendance-list"
 	// upsertMarkColumns is how many bound values one upsertMarkRow carries.
 	upsertMarkColumns = 7
+	// maxSessionsLimit caps a ListSessions read. The service bounds the query to
+	// 20 groups × 62 days; this is the documented backstop behind that bound.
+	maxSessionsLimit = 2000
 )
 
 // Repo is the GORM-backed attendance repository. Every operation runs in a
@@ -348,6 +351,37 @@ func (r *Repo) ListByEnrollment(ctx context.Context, enrollmentID string, from, 
 		}
 		for _, m := range rows {
 			out = append(out, toRecord(m))
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ListSessions returns the lists taken for any of groupIDs between two inclusive
+// days in ONE tenant-bound query — a family's month is never a read per day or
+// per group. At most maxSessionsLimit rows, newest first, ordered by
+// (date DESC, group_id, subject_id NULLS FIRST) so the cut is deterministic.
+func (r *Repo) ListSessions(ctx context.Context, groupIDs []string, from, to time.Time) ([]service.TakenList, error) {
+	if len(groupIDs) == 0 {
+		return nil, nil
+	}
+	var out []service.TakenList
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var rows []sessionModel
+		if err := tx.Model(&sessionModel{}).
+			Select("group_id", "date", "subject_id").
+			Where("group_id IN ? AND date BETWEEN ?::date AND ?::date", groupIDs, from.Format(dateLayout), to.Format(dateLayout)).
+			Order("date DESC, group_id ASC, subject_id ASC NULLS FIRST").
+			Limit(maxSessionsLimit).
+			Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing attendance sessions", err)
+		}
+		out = make([]service.TakenList, 0, len(rows))
+		for _, m := range rows {
+			out = append(out, toTakenList(m))
 		}
 		return nil
 	})
