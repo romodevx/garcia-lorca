@@ -38,9 +38,12 @@ export function GroupGrid({ tree, selected, onChange }: GroupGridProps): ReactEl
 type Toggle = (ids: readonly string[], on: boolean) => void;
 
 function LevelBlock({ level, selected, onToggle }: { level: LevelChoices; selected: ReadonlySet<string>; onToggle: Toggle }): ReactElement {
-  const eligible = level.grades.flatMap((g) => g.groups).filter((c) => isSelectable(c.availability)).map((c) => c.group.id);
+  const choices = level.grades.flatMap((g) => g.groups);
+  const eligible = choices.filter((c) => isSelectable(c.availability)).map((c) => c.group.id);
   const picked = eligible.filter((id) => selected.has(id)).length;
-  const all = eligible.length > 0 && picked === eligible.length;
+  // Nothing left to pick because the teacher already holds it all: covered, not empty.
+  const allMine = eligible.length === 0 && choices.some((c) => c.availability.kind === "mine");
+  const all = allMine || (eligible.length > 0 && picked === eligible.length);
   const some = picked > 0 && !all;
   const allRef = useRef<HTMLInputElement>(null);
 

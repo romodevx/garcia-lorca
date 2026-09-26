@@ -243,6 +243,19 @@ describe("TeacherLoadScreen", () => {
     });
   });
 
+  // QA 2026-09-25, ISSUE-003: every group of Primaria already this teacher's
+  // left "Todos los de Primaria" unchecked, as if nothing were covered.
+  it("'Todos' shows checked and locked when every group of the level is already assigned", async () => {
+    withAssignments([ta("a1", "p1A", "mat-p1", "ada")]);
+    const user = await renderPage();
+    await chooseSubject(user, "Matemáticas");
+
+    const all = screen.getByRole("checkbox", { name: "Todos los de Primaria" });
+    expect(all).toBeChecked();
+    expect(all).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Todos los de Secundaria" })).not.toBeChecked();
+  });
+
   it("'Todos' leaves out a grade that lacks the subject", async () => {
     const user = await renderPage();
     await chooseSubject(user, "Física");
