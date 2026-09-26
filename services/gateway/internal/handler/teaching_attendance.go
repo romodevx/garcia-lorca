@@ -101,23 +101,31 @@ func (h *TeachingHandler) assertOwnsGroup(w http.ResponseWriter, r *http.Request
 	return false
 }
 
-// groupCatalogNames builds the group id→name map used to enrich the caller's
-// groups. It is best-effort by design: no groups to enrich or a failed lookup each
-// yields an empty map, and the caller reads a missing id as "" — a display gap,
-// never a failed read. A non-nil map is always returned, so lookups never panic.
-func (h *TeachingHandler) groupCatalogNames(ctx context.Context, enrich bool) map[string]string {
-	names := map[string]string{}
+// groupCatalogNames builds the group id→name and group id→grade-name maps used
+// to enrich the caller's groups. It is best-effort by design: no groups to
+// enrich or a failed lookup each yields an empty map, and the caller reads a
+// missing id as "" — a display gap, never a failed read. Both maps are always
+// non-nil, so lookups never panic.
+func (h *TeachingHandler) groupCatalogNames(ctx context.Context, enrich bool) (names, grades map[string]string) {
+	names, grades = map[string]string{}, map[string]string{}
 	if !enrich {
-		return names
+		return names, grades
 	}
 	groups, err := h.config.ListGroups(ctx, "", "")
 	if err != nil {
-		return names
+		return names, grades
+	}
+	gradeNames := map[string]string{}
+	if levels, err := h.config.ListGradeLevels(ctx, ""); err == nil {
+		for _, gl := range levels {
+			gradeNames[gl.ID] = gl.Name
+		}
 	}
 	for _, g := range groups {
 		names[g.ID] = g.Name
+		grades[g.ID] = gradeNames[g.GradeLevelID]
 	}
-	return names
+	return names, grades
 }
 
 // --- groups ----------------------------------------------------------------
@@ -127,6 +135,9 @@ func (h *TeachingHandler) groupCatalogNames(ctx context.Context, enrich bool) ma
 type teacherGroupResponse struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// GradeLevelName is the group's grade ("1° PRIMARIA"): groups are named by
+	// letter, so "A" alone does not say which one.
+	GradeLevelName string `json:"gradeLevelName"`
 }
 
 // Groups handles GET /api/v1/teaching/groups — the DISTINCT groups the CALLER
@@ -148,7 +159,7 @@ func (h *TeachingAttendanceHandler) Groups(w http.ResponseWriter, r *http.Reques
 		writeConnectError(w, err)
 		return
 	}
-	names := h.scope.groupCatalogNames(r.Context(), len(groups) > 0)
+	names, grades := h.scope.groupCatalogNames(r.Context(), len(groups) > 0)
 	ids := make([]string, 0, len(groups))
 	for id := range groups {
 		ids = append(ids, id)
@@ -156,7 +167,7 @@ func (h *TeachingAttendanceHandler) Groups(w http.ResponseWriter, r *http.Reques
 	sort.Strings(ids)
 	out := make([]teacherGroupResponse, 0, len(ids))
 	for _, id := range ids {
-		out = append(out, teacherGroupResponse{ID: id, Name: names[id]})
+		out = append(out, teacherGroupResponse{ID: id, Name: names[id], GradeLevelName: grades[id]})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"groups": out})
 }

@@ -157,12 +157,8 @@ func (h *ContactAccessHandler) guardianRoleID(ctx context.Context) (string, erro
 	if err != nil {
 		return "", err
 	}
-	for _, role := range roles {
-		if role.Name == guardianRoleName {
-			return role.ID, nil
-		}
-	}
-	return "", nil
+	role, _ := findRoleByName(roles, guardianRoleName)
+	return role.ID, nil
 }
 
 // accountFor returns the iam account for this address, inviting one if there is
@@ -172,14 +168,8 @@ func (h *ContactAccessHandler) guardianRoleID(ctx context.Context) (string, erro
 //
 // The returned invitation is nil in that case — nothing was sent.
 func (h *ContactAccessHandler) accountFor(ctx context.Context, email, displayName, roleID string) (client.User, *invitationResponse, error) {
-	users, err := h.iam.ListUsers(ctx)
-	if err != nil {
-		return client.User{}, nil, err
-	}
-	for _, u := range users {
-		if strings.EqualFold(strings.TrimSpace(u.Email), email) {
-			return u, nil, nil
-		}
+	if existing, found, err := userByEmail(ctx, h.iam, email); err != nil || found {
+		return existing, nil, err
 	}
 
 	user, invitation, err := h.iam.InviteUser(ctx, email, displayName, []string{roleID})

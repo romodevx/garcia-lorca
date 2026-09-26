@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type ReactElement } from "react";
 
+import { listUsers, type UserStatus } from "../../admin/api";
 import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import {
@@ -15,11 +16,14 @@ import {
 import {
   createTeacher,
   createTeachingAssignment,
+  grantTeacherAccess,
   listTeachers,
   listTeachingAssignments,
   type CreateTeacherInput,
   type CreateTeachingAssignmentInput,
+  type GrantTeacherAccessOptions,
   type Teacher,
+  type TeacherAccessResult,
   type TeachingAssignment,
 } from "../../teachers/api";
 import { AssignmentsPanel } from "./AssignmentsPanel";
@@ -32,6 +36,10 @@ export interface TeachersScreenProps {
   onBack: () => void;
   /** Opens one teacher's carga académica page. */
   onOpenLoad: (teacherId: string) => void;
+  /** teachers:write AND users:write: the roster offers "Dar acceso al sistema". */
+  canGrantAccess?: boolean;
+  /** users:read: the roster can say whether each linked login is active, invited or suspended. */
+  canListUsers?: boolean;
 }
 
 /**
@@ -49,8 +57,9 @@ export interface TeachersScreenProps {
  * sentence saying so rather than three empty dropdowns that read like a school
  * with no groups.
  */
-export function TeachersScreen({ onBack, onOpenLoad }: TeachersScreenProps): ReactElement {
+export function TeachersScreen({ onBack, onOpenLoad, canGrantAccess = false, canListUsers = false }: TeachersScreenProps): ReactElement {
   const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [accountStatuses, setAccountStatuses] = useState<ReadonlyMap<string, UserStatus> | undefined>(undefined);
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [catalogueClosed, setCatalogueClosed] = useState(false);
   const [rosterError, setRosterError] = useState<string | undefined>(undefined);
@@ -60,6 +69,15 @@ export function TeachersScreen({ onBack, onOpenLoad }: TeachersScreenProps): Rea
       .then(setTeachers)
       .catch(() => setRosterError("No pudimos cargar la plantilla docente."));
   }, []);
+
+  // The logins' states come from Usuarios, read once. Without users:read, or if
+  // the read fails, the rows say only "Vinculado": no state is guessed.
+  useEffect(() => {
+    if (!canListUsers) return;
+    listUsers(API_URL)
+      .then((users) => setAccountStatuses(new Map(users.map((u) => [u.id, u.status]))))
+      .catch(() => setAccountStatuses(undefined));
+  }, [canListUsers]);
 
   // Separate from the roster on purpose: losing the catalogue must not take the
   // roster down with it, because they answer to different permissions.
@@ -72,6 +90,14 @@ export function TeachersScreen({ onBack, onOpenLoad }: TeachersScreenProps): Rea
   const handleCreateTeacher = useCallback(async (input: CreateTeacherInput): Promise<void> => {
     const created = await createTeacher(API_URL, input);
     setTeachers((prev) => [...prev, created]);
+  }, []);
+
+  // The answer carries the linked teacher: the row and the "con acceso" count
+  // follow it without re-reading the roster.
+  const handleGrantAccess = useCallback(async (teacherId: string, options?: GrantTeacherAccessOptions): Promise<TeacherAccessResult> => {
+    const result = await grantTeacherAccess(API_URL, teacherId, options);
+    setTeachers((prev) => prev.map((t) => (t.id === teacherId ? { ...t, userId: result.userId } : t)));
+    return result;
   }, []);
 
   const handleCreateAssignment = useCallback(
@@ -130,7 +156,13 @@ export function TeachersScreen({ onBack, onOpenLoad }: TeachersScreenProps): Rea
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 18 }}>
         {/* The load page names groups and subjects from Configuración: without it, only bare ids. */}
-        <TeachersPanel teachers={teachers} onCreate={handleCreateTeacher} onOpenLoad={catalogueClosed ? undefined : onOpenLoad} />
+        <TeachersPanel
+          teachers={teachers}
+          onCreate={handleCreateTeacher}
+          onOpenLoad={catalogueClosed ? undefined : onOpenLoad}
+          onGrantAccess={canGrantAccess ? handleGrantAccess : undefined}
+          accountStatuses={accountStatuses}
+        />
         {!catalogueClosed && (
           <AssignmentsPanel
             cycles={cycles}

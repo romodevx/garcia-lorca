@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfigError } from "../config/api";
 import {
   assignTeachingLoad,
+  grantTeacherAccess,
+  ReuseConfirmationRequired,
   createTeacher,
   deleteTeachingAssignment,
   reassignTeachingAssignment,
@@ -201,5 +203,75 @@ describe("carga académica", () => {
     expect(init.method).toBe("PATCH");
     expect(init.credentials).toBe("include");
     expect(JSON.parse(init.body as string)).toEqual({ teacherId: "t2" });
+  });
+});
+
+describe("teacher access", () => {
+  const linked = { id: "tch1", firstName: "Ada", lastName: "Lovelace", email: "ada@example.com", userId: "u1" };
+
+  it("grantTeacherAccess POSTs with no body to /teachers/{id}/access and returns the outcome", async () => {
+    const outcome = {
+      teacher: linked, userId: "u1", email: "ada@example.com", status: "invited",
+      invitation: { url: "http://web/invitacion/x", expiresAt: "2026-10-02T18:00:00Z", sent: false },
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(outcome));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await grantTeacherAccess(BASE, "tch 1");
+
+    expect(res).toEqual(outcome);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/teachers/tch%201/access");
+    expect(init.method).toBe("POST");
+    expect(init.credentials).toBe("include");
+    expect(init.body).toBeUndefined();
+  });
+
+  it("grantTeacherAccess keeps a null invitation (active or suspended: nothing sent)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ teacher: linked, userId: "u1", email: "ada@example.com", status: "suspended", invitation: null })));
+
+    const res = await grantTeacherAccess(BASE, "tch1");
+
+    expect(res.status).toBe("suspended");
+    expect(res.invitation).toBeNull();
+  });
+
+  it("grantTeacherAccess throws a ConfigError carrying the status and the server's words", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("el docente no tiene correo\n", { status: 400 })));
+
+    const call = grantTeacherAccess(BASE, "tch1");
+
+    await expect(call).rejects.toBeInstanceOf(ConfigError);
+    await expect(call).rejects.toMatchObject({ status: 400, detail: "el docente no tiene correo" });
+  });
+
+  it("a 409 marked X-Confirm-Required: reuse-account is a question, not a failure", async () => {
+    const question = "Ya existe una cuenta con ese correo (owner). ¿Vincularla y darle acceso de maestro?";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(`${question}\n`, { status: 409, headers: { "X-Confirm-Required": "reuse-account" } })));
+
+    const call = grantTeacherAccess(BASE, "tch1");
+
+    await expect(call).rejects.toBeInstanceOf(ReuseConfirmationRequired);
+    await expect(call).rejects.toMatchObject({ status: 409, detail: question });
+  });
+
+  it("a plain 409 stays a plain ConfigError", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("La cuenta ya está vinculada a otro docente", { status: 409 })));
+
+    const call = grantTeacherAccess(BASE, "tch1");
+
+    await expect(call).rejects.toBeInstanceOf(ConfigError);
+    await expect(call).rejects.not.toBeInstanceOf(ReuseConfirmationRequired);
+  });
+
+  it("confirming resends with {confirmReuse: true} as JSON", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ teacher: linked, userId: "u1", email: "ada@example.com", status: "active", invitation: null }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await grantTeacherAccess(BASE, "tch1", { confirmReuse: true });
+
+    const [, init] = lastCall(fetchMock);
+    expect(JSON.parse(init.body as string)).toEqual({ confirmReuse: true });
+    expect(new Headers(init.headers).get("Content-Type")).toBe("application/json");
   });
 });

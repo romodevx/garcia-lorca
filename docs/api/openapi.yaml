@@ -1270,6 +1270,156 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
 
+  /api/v1/teachers/{id}/access:
+    post:
+      tags: [teachers]
+      summary: Give a teacher access to the system (Maestro role)
+      description: >
+        "Dar acceso al sistema". One action for the school, two services
+        underneath: iam invites the teacher's email into the `maestro` role
+        (exactly `teaching:read`, `teaching:write`, `attendance_own:read`,
+        `attendance_own:write` — Calificaciones and Asistencias, and only for
+        the teacher's own assignments of the active cycle), and config links
+        the account to the teacher. The body is optional: send none, or
+        `{"confirmReuse": true}` after the user confirmed a reuse (see 409).
+
+
+        IDEMPOTENT. A teacher already linked keeps its account (a link to an
+        account iam no longer has counts as no link and is rewritten); an
+        account still `invited` gets a fresh link. Pressing it again after a
+        failed link heals the orphaned account by matching its address.
+
+
+        REUSING AN EXISTING ACCOUNT. When the teacher's address already has an
+        account that is not exactly a maestro-only one (it signs somebody in as
+        something else, or holds no role), it is never reused silently: the
+        answer is 409 with `X-Confirm-Required: reuse-account` and a Spanish
+        question naming the account's roles. Resending with
+        `{"confirmReuse": true}` links it and adds the maestro role (its other
+        roles stay). The caller-subset guard still applies: the caller must hold
+        every permission of the account's CURRENT roles, otherwise 403 — decided
+        before the confirmation is asked for.
+
+
+        AUTHORIZATION. `module_teachers` AND `module_iam` (either off ⇒ 404), a
+        session with a rotated password, `teachers:write` AND `users:write`. On top of that the caller-subset
+        guard: the caller must itself hold every permission of the maestro role,
+        and may only resend the link of an existing account whose roles it could
+        have assigned (a resent link hands the account over). Every refusal
+        happens before the first write.
+      operationId: grantTeacherAccess
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - name: id
+          in: path
+          required: true
+          description: The teacher.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                confirmReuse:
+                  type: boolean
+                  description: >
+                    True once the user agreed to link the account that already
+                    exists under the teacher's address (answer to the 409 with
+                    `X-Confirm-Required: reuse-account`).
+            example:
+              confirmReuse: true
+      responses:
+        '200':
+          description: >
+            The teacher, now linked, and the account it signs in with.
+            `invitation` is present when a link was minted (a new account, or an
+            existing one still `invited`); read `invitation.sent` before telling
+            anybody the mail went out — when it is false (every time in local,
+            with no mail relay), `invitation.url` is the link to hand over.
+            `invitation` is NULL when the account is `active` (nothing to send)
+            or `suspended` (lifted in Usuarios, not here).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [teacher, userId, email, status, invitation]
+                properties:
+                  teacher: { $ref: '#/components/schemas/Teacher' }
+                  userId: { type: string, format: uuid }
+                  email: { type: string, format: email }
+                  status:
+                    type: string
+                    enum: [invited, active, suspended]
+                  invitation:
+                    description: Null when nothing was sent.
+                    oneOf:
+                      - $ref: '#/components/schemas/Invitation'
+                      - type: 'null'
+              example:
+                teacher:
+                  id: 3f1c1a52-8d1e-4c1b-9a47-0d6f3b8f2a10
+                  firstName: Gabriela
+                  lastName: Rojas
+                  email: gabriela.rojas@garcialorca.edu.mx
+                  userId: 7d0b2c3e-1f4a-4b5c-8d6e-9f0a1b2c3d4e
+                userId: 7d0b2c3e-1f4a-4b5c-8d6e-9f0a1b2c3d4e
+                email: gabriela.rojas@garcialorca.edu.mx
+                status: invited
+                invitation:
+                  url: http://localhost:3002/invitacion/abc123
+                  expiresAt: '2026-10-02T18:00:00Z'
+                  sent: false
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403':
+          description: >
+            Missing `teachers:write` or `users:write`, or the caller-subset guard
+            refused (the caller does not hold a maestro permission, or the
+            existing account holds a permission the caller does not).
+          content:
+            text/plain:
+              schema: { type: string }
+              example: "forbidden: cannot assign a role granting a permission you do not hold: attendance_own:write"
+        '404':
+          description: >
+            No such teacher (a teacher of another school is invisible, so it
+            answers the same), or `module_teachers` or `module_iam` is off.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: teacher not found
+        '400':
+          description: >
+            The teacher has no email to send the invitation to, or the body is
+            not valid JSON of the declared shape.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: El docente no tiene correo
+        '409':
+          description: >
+            Nothing was written. Either the account under that address is
+            already linked to ANOTHER teacher (final; no header), or it exists
+            and is not a maestro-only account: then `X-Confirm-Required:
+            reuse-account` is set and the body is the question to show — resend
+            with `{"confirmReuse": true}` to proceed.
+          headers:
+            X-Confirm-Required:
+              description: Present (value `reuse-account`) only when the conflict is resolved by confirming.
+              schema: { type: string, enum: [reuse-account] }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: "Ya existe una cuenta con ese correo (owner). ¿Vincularla y darle acceso de maestro?"
+        '500':
+          description: The maestro role is missing from this deployment (migrations/iam/0022 not applied).
+          content:
+            text/plain:
+              schema: { type: string }
+
   /api/v1/teaching-assignments/bulk:
     post:
       tags: [teachers]
@@ -2114,6 +2264,9 @@ components:
         sendError:
           type: string
           description: Why it did not, when sent is false.
+        via:
+          type: string
+          description: "Which road the message took when sent: smtp (our link, 24 h) or provider (the identity provider's own link, 1 h). Omitted when nothing went out."
 
     SchoolEvent:
       type: object
@@ -2425,6 +2578,17 @@ components:
           description: >
             Levels nobody has priced, by NAME. Reported rather than billed at
             zero: a family charged nothing is a problem a school finds in June.
+    Teacher:
+      type: object
+      description: A member of the staff roster (config). `userId` is empty until the teacher can sign in.
+      required: [id, firstName, lastName, email, userId]
+      properties:
+        id: { type: string, format: uuid }
+        firstName: { type: string, example: Gabriela }
+        lastName: { type: string, example: Rojas }
+        email: { type: string, example: gabriela.rojas@garcialorca.edu.mx }
+        userId: { type: string, description: 'The iam account, or empty when none is linked.' }
+
     TeachingAssignment:
       type: object
       description: One teacher holding one (group, subject) slot in a cycle. cycleId is derived from the group.

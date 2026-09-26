@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
 )
@@ -53,18 +55,31 @@ type TeachingAssignmentReader interface {
 type TeachingCatalogReader interface {
 	ListGroups(ctx context.Context, cycleID, gradeLevelID string) ([]client.GroupResult, error)
 	ListSubjects(ctx context.Context, gradeLevelID string) ([]client.SubjectResult, error)
+	ListGradeLevels(ctx context.Context, levelID string) ([]client.GradeLevelResult, error)
 	ListTerms(ctx context.Context, cycleID, levelID string) ([]client.TermResult, error)
 }
 
+// TeachingCycleReader lists the school's cycles, so the surface can tell which
+// one is live. A teacher keeps past years' assignments in the catalogue, but the
+// teaching surfaces answer only for the active cycle (T2).
+type TeachingCycleReader interface {
+	ListCycles(ctx context.Context) ([]client.CycleResult, error)
+}
+
 // TeachingConfigReader is the config surface the teaching handler consumes: the
-// teacher directory (caller→teacher resolution), the teacher's assignments, and
-// the group/subject catalog for name enrichment. The Connect ConfigClient (the
-// same one backing the /config/* routes) satisfies it.
+// teacher directory (caller→teacher resolution), the teacher's assignments, the
+// cycle list (active-cycle scope), and the group/subject catalog for name
+// enrichment. The Connect ConfigClient (the same one backing the /config/*
+// routes) satisfies it.
 type TeachingConfigReader interface {
 	TeacherDirectoryReader
 	TeachingAssignmentReader
+	TeachingCycleReader
 	TeachingCatalogReader
 }
+
+// cycleStatusActive is the status the config client names a live cycle with.
+const cycleStatusActive = "active"
 
 // TeachingGradesService is the grade surface the teaching handler consumes: the
 // per-assignment roster read and the grade capture. The Connect GradesClient
@@ -106,6 +121,12 @@ func NewTeachingHandler(config TeachingConfigReader, grades TeachingGradesServic
 // searched for the Teacher whose user id matches, then that teacher's assignments
 // are listed. No request field selects the teacher.
 //
+// Only assignments of an ACTIVE cycle are returned (every active one, should
+// there be several). Past cycles are history: an id from one then falls outside
+// the set and every caller of this answers 404, exactly as for an id that never
+// existed. Failing to read the cycles is an error, never "all cycles" — not
+// knowing which year is live must not widen the scope.
+//
 // A principal with no linked teacher record teaches nothing — teacherID "" and a
 // nil slice, never an error and never a downstream assignment read. That is the
 // "a maestro that teaches nothing" case, not a failure.
@@ -130,11 +151,54 @@ func (h *TeachingHandler) callerAssignments(ctx context.Context, principal middl
 	if teacherID == "" {
 		return "", nil, nil // the principal is linked to no teacher record
 	}
-	assignments, err = h.config.ListTeachingAssignments(ctx, "", "", teacherID)
+	all, active, err := h.assignmentsAndActiveCycles(ctx, teacherID)
 	if err != nil {
 		return "", nil, err
 	}
+	for _, a := range all {
+		if _, ok := active[a.CycleID]; ok {
+			assignments = append(assignments, a)
+		}
+	}
 	return teacherID, assignments, nil
+}
+
+// assignmentsAndActiveCycles reads the teacher's assignments and the school's
+// active cycles concurrently — two independent config reads on every teaching
+// request. The first failure cancels the other and is what the caller gets.
+func (h *TeachingHandler) assignmentsAndActiveCycles(ctx context.Context, teacherID string) ([]client.TeachingAssignment, map[string]struct{}, error) {
+	var (
+		all    []client.TeachingAssignment
+		active map[string]struct{}
+	)
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() (err error) {
+		all, err = h.config.ListTeachingAssignments(gctx, "", "", teacherID)
+		return err
+	})
+	g.Go(func() (err error) {
+		active, err = h.activeCycleIDs(gctx)
+		return err
+	})
+	if err := g.Wait(); err != nil {
+		return nil, nil, err
+	}
+	return all, active, nil
+}
+
+// activeCycleIDs is the set of the school's active cycles.
+func (h *TeachingHandler) activeCycleIDs(ctx context.Context) (map[string]struct{}, error) {
+	cycles, err := h.config.ListCycles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	active := make(map[string]struct{}, 1)
+	for _, c := range cycles {
+		if c.Status == cycleStatusActive {
+			active[c.ID] = struct{}{}
+		}
+	}
+	return active, nil
 }
 
 // assertOwnsAssignment is the ownership gate of the roster and capture routes: it
@@ -173,6 +237,10 @@ type teacherAssignmentResponse struct {
 	TeacherID   string `json:"teacherId"`
 	GroupName   string `json:"groupName"`
 	SubjectName string `json:"subjectName"`
+	// GradeLevelName is the group's grade ("1° PRIMARIA"). Groups are named by
+	// letter and subjects exist per grade, so without it a teacher of "A" in two
+	// grades sees two identical choices.
+	GradeLevelName string `json:"gradeLevelName"`
 }
 
 // Assignments handles GET /api/v1/teaching/assignments — the groups+subjects the
@@ -195,43 +263,40 @@ func (h *TeachingHandler) Assignments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Resolve the id→name maps ONCE, and only when there is something to enrich.
-	groupNames, subjectNames := h.catalogNames(r.Context(), len(assignments) > 0)
+	groupNames, groupGrades, subjectNames := h.catalogNames(r.Context(), len(assignments) > 0)
 	out := make([]teacherAssignmentResponse, 0, len(assignments))
 	for _, a := range assignments {
 		out = append(out, teacherAssignmentResponse{
-			ID:          a.ID,
-			CycleID:     a.CycleID,
-			GroupID:     a.GroupID,
-			SubjectID:   a.SubjectID,
-			TeacherID:   a.TeacherID,
-			GroupName:   groupNames[a.GroupID],
-			SubjectName: subjectNames[a.SubjectID],
+			ID:             a.ID,
+			CycleID:        a.CycleID,
+			GroupID:        a.GroupID,
+			SubjectID:      a.SubjectID,
+			TeacherID:      a.TeacherID,
+			GroupName:      groupNames[a.GroupID],
+			SubjectName:    subjectNames[a.SubjectID],
+			GradeLevelName: groupGrades[a.GroupID],
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"assignments": out})
 }
 
-// catalogNames builds the group and subject id→name maps used to enrich the
-// assignments read. It is best-effort by design: no assignments to enrich or a
-// failed lookup each yields an empty map, and the caller reads a missing id as
-// "" — a display gap, never a failed read. Both non-nil maps are always returned,
-// so lookups never panic.
-func (h *TeachingHandler) catalogNames(ctx context.Context, enrich bool) (groups, subjects map[string]string) {
-	groups, subjects = map[string]string{}, map[string]string{}
+// catalogNames builds the group, group-grade and subject id→name maps used to
+// enrich the assignments read. It is best-effort by design: no assignments to
+// enrich or a failed lookup each yields an empty map, and the caller reads a
+// missing id as "" — a display gap, never a failed read. All three maps are
+// always non-nil, so lookups never panic.
+func (h *TeachingHandler) catalogNames(ctx context.Context, enrich bool) (groups, groupGrades, subjects map[string]string) {
+	groups, groupGrades = h.groupCatalogNames(ctx, enrich)
+	subjects = map[string]string{}
 	if !enrich {
-		return groups, subjects
-	}
-	if grps, err := h.config.ListGroups(ctx, "", ""); err == nil {
-		for _, g := range grps {
-			groups[g.ID] = g.Name
-		}
+		return groups, groupGrades, subjects
 	}
 	if subs, err := h.config.ListSubjects(ctx, ""); err == nil {
 		for _, s := range subs {
 			subjects[s.ID] = s.Name
 		}
 	}
-	return groups, subjects
+	return groups, groupGrades, subjects
 }
 
 // --- terms -----------------------------------------------------------------

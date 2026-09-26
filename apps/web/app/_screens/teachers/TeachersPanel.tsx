@@ -2,9 +2,13 @@
 
 import { useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
+import { Toast } from "../../_design/Toast";
+import type { UserStatus } from "../../admin/api";
 import type { CreateTeacherInput, Teacher } from "../../teachers/api";
 import { EmailField, TextField, useEmailShapeOnSave, useRequired } from "../../_design/form";
 import { EmptyHint, ErrorAlert, Section } from "../config/parts";
+import { TeacherRow } from "./TeacherRow";
+import { useTeacherAccess, type GrantAccessCall } from "./useTeacherAccess";
 
 const REQUIRED = ["firstName", "lastName", "email"] as const;
 
@@ -18,14 +22,26 @@ export interface TeachersPanelProps {
    * closed to this account: the page could not name a single class.
    */
   onOpenLoad?: (teacherId: string) => void;
+  /**
+   * Gives the teacher a login (or sends its invitation again). Absent unless
+   * the principal holds teachers:write AND users:write.
+   */
+  onGrantAccess?: GrantAccessCall;
+  /**
+   * user id → account status, when the principal may list users (users:read).
+   * Without it a linked teacher's login is shown as "Vinculado" and offers
+   * nothing: its state is not known, so no claim is made about it.
+   */
+  accountStatuses?: ReadonlyMap<string, UserStatus>;
 }
 
 /**
- * Teachers catalog: person records (NOT login accounts). `userId` is reserved
- * for a future IAM link and intentionally not collected here. Dumb panel — data
- * + an async `onCreate` come from the Catalog orchestrator.
+ * Teachers catalog: person records. The login is not collected here: "Dar
+ * acceso al sistema" on the row creates it and fills `userId`. Dumb panel —
+ * data and the async writes come from the screen.
  */
-export function TeachersPanel({ teachers, onCreate, onOpenLoad }: TeachersPanelProps): ReactElement {
+export function TeachersPanel({ teachers, onCreate, onOpenLoad, onGrantAccess, accountStatuses }: TeachersPanelProps): ReactElement {
+  const access = useTeacherAccess(onGrantAccess, accountStatuses);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
@@ -62,27 +78,20 @@ export function TeachersPanel({ teachers, onCreate, onOpenLoad }: TeachersPanelP
       {teachers.length > 0 ? (
         <ul style={{ listStyle: "none", padding: 0, margin: "0 0 16px", display: "grid", gap: 6 }}>
           {teachers.map((t) => (
-            <li
+            <TeacherRow
               key={t.id}
-              style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 6px 6px 12px", borderRadius: "var(--r-md)", background: "var(--surface-2)", fontSize: 14 }}
-            >
-              <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>
-                <span style={{ fontWeight: 600 }}>
-                  {t.firstName} {t.lastName}
-                </span>{" "}
-                <span style={{ color: "var(--text-muted)" }}>· {t.email}</span>
-              </span>
-              {onOpenLoad !== undefined && (
-              <button
-                type="button"
-                onClick={() => onOpenLoad(t.id)}
-                aria-label={`Carga académica de ${t.firstName} ${t.lastName}`}
-                style={{ minHeight: 44, padding: "0 14px", borderRadius: "var(--r-pill)", border: "1.5px solid var(--forest)", color: "var(--forest)", fontWeight: 600, fontSize: 13.5, cursor: "pointer" }}
-              >
-                Carga académica
-              </button>
-              )}
-            </li>
+              teacher={t}
+              access={access.stateOf(t)}
+              granting={access.isGranting(t.id)}
+              error={access.errorOf(t.id)}
+              inviteUrl={access.inviteUrlOf(t.id)}
+              sendError={access.sendErrorOf(t.id)}
+              confirmation={access.confirmationOf(t.id)}
+              onConfirmReuse={() => void access.confirmReuse(t)}
+              onCancelReuse={() => access.cancelReuse(t.id)}
+              onGrantAccess={onGrantAccess === undefined ? undefined : () => void access.grant(t)}
+              onOpenLoad={onOpenLoad === undefined ? undefined : () => onOpenLoad(t.id)}
+            />
           ))}
         </ul>
       ) : (
@@ -113,6 +122,7 @@ export function TeachersPanel({ teachers, onCreate, onOpenLoad }: TeachersPanelP
         </div>
       </form>
       {error !== undefined && <ErrorAlert message={error} />}
+      {access.toast !== undefined && <Toast>{access.toast}</Toast>}
     </Section>
   );
 }

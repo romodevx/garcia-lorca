@@ -12,6 +12,7 @@
  */
 import { authFetch } from "../auth/authFetch";
 import { ConfigError } from "../config/api";
+import type { Invitation } from "../students/api";
 
 const BASE_PATH = "/api/v1";
 
@@ -199,4 +200,77 @@ export function reassignTeachingAssignment(
   teacherId: string,
 ): Promise<TeachingAssignment> {
   return sendJSON<TeachingAssignment>("PATCH", baseURL, `/teaching-assignments/${encodeURIComponent(id)}`, { teacherId });
+}
+
+// --- access to the system (the teacher's login) -----------------------------
+
+/**
+ * "invited": the login waits for its password; "active": it is in use;
+ * "suspended": switched off in Usuarios (lifted there, not here).
+ */
+export type TeacherAccessStatus = "invited" | "active" | "suspended";
+
+/** What giving a teacher access did. */
+export interface TeacherAccessResult {
+  /** The teacher, now linked to the login (`userId` set). */
+  teacher: Teacher;
+  userId: string;
+  /** The address the account signs in with. */
+  email: string;
+  status: TeacherAccessStatus;
+  /**
+   * The link minted for an `invited` account; null when nothing was sent
+   * (active or suspended). Read `sent` before saying the mail went out: when
+   * it is false (always in local), `url` is the link to hand over.
+   */
+  invitation: Invitation | null;
+}
+
+/** The marker a 409 carries when the user can resolve it by confirming. */
+const CONFIRM_REQUIRED_HEADER = "X-Confirm-Required";
+const CONFIRM_REUSE_ACCOUNT = "reuse-account";
+
+/**
+ * The teacher's address already has an account that signs somebody in as
+ * something else. Not a failure: `detail` is the server's question, to be
+ * shown with "Vincular y dar acceso" (resend with confirmReuse) or "Cancelar".
+ */
+export class ReuseConfirmationRequired extends ConfigError {
+  constructor(detail: string) {
+    super(409, detail);
+    this.name = "ReuseConfirmationRequired";
+  }
+}
+
+export interface GrantTeacherAccessOptions {
+  /** True once the user agreed to link the account that already exists. */
+  confirmReuse?: boolean;
+}
+
+/**
+ * Gives a teacher a login with the teacher role and mails the invitation; for
+ * an already invited teacher it sends the invitation again. Idempotent on the
+ * server, so a second press never creates a second account. An existing
+ * account that is not a maestro one is never linked silently: that answer is a
+ * ReuseConfirmationRequired, and the call is repeated with confirmReuse.
+ */
+export async function grantTeacherAccess(
+  baseURL: string,
+  teacherId: string,
+  options: GrantTeacherAccessOptions = {},
+): Promise<TeacherAccessResult> {
+  const body = options.confirmReuse === true ? { confirmReuse: true } : undefined;
+  const res = await authFetch(url(baseURL, `/teachers/${encodeURIComponent(teacherId)}/access`), {
+    method: "POST",
+    credentials: "include",
+    ...(body !== undefined ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}),
+  });
+  if (!res.ok) {
+    const error = await failure(res);
+    if (res.status === 409 && res.headers.get(CONFIRM_REQUIRED_HEADER) === CONFIRM_REUSE_ACCOUNT) {
+      throw new ReuseConfirmationRequired(error.detail);
+    }
+    throw error;
+  }
+  return (await res.json()) as TeacherAccessResult;
 }

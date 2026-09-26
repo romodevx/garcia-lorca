@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import { usePathname, useRouter } from "next/navigation";
 import { useFlag } from "@garcia-lorca/ui/flags";
 import { pathToView, viewToPath, type View } from "./routing/routes";
+import { canReachView } from "./routing/moduleAccess";
 import { CommandPaletteHost } from "./command/CommandPaletteHost";
 import { TopBar } from "./_design/TopBar";
 import { MODULES, USERS, type ModuleDef, type Role, type UserProfile } from "./_design/data";
@@ -11,7 +12,7 @@ import { Dashboard } from "./_screens/Dashboard";
 import { AttendanceScreen } from "./_screens/attendance/AttendanceScreen";
 import { TeacherLoadScreen } from "./_screens/teachers/TeacherLoadScreen";
 import { TeachersScreen } from "./_screens/teachers/TeachersScreen";
-import { canEditTeachingLoad } from "./teachers/permissions";
+import { canEditTeachingLoad, canGrantTeacherAccess, canListUsers } from "./teachers/permissions";
 import { UniformsScreen } from "./_screens/uniforms/UniformsScreen";
 import { FinanceScreen } from "./_screens/finance/FinanceScreen";
 import { Catalog } from "./_screens/config/Catalog";
@@ -99,7 +100,7 @@ export function AppShell(): ReactElement {
   // y la web entera respondía en "/", así que el navegador nunca veía una
   // segunda página: el botón "atrás" sólo podía sacar del sitio y F5 devolvía
   // al tablero.
-  const view = pathToView(pathname);
+  const addressedView = useMemo(() => pathToView(pathname), [pathname]);
 
   /** Navegar dejando huella: "atrás" regresa aquí. */
   const go = useCallback((next: View): void => { router.push(viewToPath(next)); }, [router]);
@@ -155,6 +156,15 @@ export function AppShell(): ReactElement {
   // like in the demo (dev, 2026-09-07) until somebody reported "no veo ningún
   // módulo".
   const [principalFailed, setPrincipalFailed] = useState(false);
+
+  // A typed address to a module the principal cannot see (a teacher at
+  // /finanzas) lands on the dashboard instead of an empty 403 shell, and the
+  // address follows. UX only: the gateway still refuses the data.
+  const reachable = canReachView(addressedView, principal?.permissions);
+  const view = useMemo<View>(() => (reachable ? addressedView : { screen: "dashboard" }), [reachable, addressedView]);
+  useEffect(() => {
+    if (!reachable) router.replace(viewToPath({ screen: "dashboard" }));
+  }, [reachable, router]);
 
   // Loading the caller's permissions, and recording whether it worked. Shared by
   // the login flow and the retry button so both go through the same path.
@@ -607,7 +617,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "teachers" &&
         (teachersEnabled ? (
-          <TeachersScreen onBack={home} onOpenLoad={openTeacherLoad} />
+          <TeachersScreen onBack={home} onOpenLoad={openTeacherLoad} canGrantAccess={canGrantTeacherAccess(principal?.permissions)} canListUsers={canListUsers(principal?.permissions)} />
         ) : (
           // Flag OFF: never render the roster; show the friendly stub so
           // navigation never dead-ends. (Backend 404 is authoritative.)

@@ -59,6 +59,12 @@ vi.mock("./teachers/api", () => ({
   listTeachingAssignments: vi.fn().mockResolvedValue([]),
 }));
 
+// Docentes reads Usuarios for the login states when the principal holds users:read.
+vi.mock("./admin/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./admin/api")>()),
+  listUsers: vi.fn().mockResolvedValue([]),
+}));
+
 vi.mock("./students/api", () => ({
   listStudents: vi.fn().mockResolvedValue([]),
   listContacts: vi.fn().mockResolvedValue([]),
@@ -77,7 +83,7 @@ vi.mock("./students/api", () => ({
 const OWNER_ME = {
   userId: "u1",
   email: "owner@example.com",
-  permissions: ["students:read", "finance:read", "grades:read", "comms:read", "config:read", "users:read", "attendance:read"],
+  permissions: ["students:read", "finance:read", "grades:read", "comms:read", "config:read", "users:read", "attendance:read", "teachers:read"],
 };
 
 const mockLogin = vi.mocked(apiLogin);
@@ -668,5 +674,48 @@ describe("la guardia de sesión", () => {
 
     expect(screen.queryByRole("heading", { name: "Finanzas" })).toBeNull();
     expect(await screen.findByRole("button", { name: "Entrar al sistema" })).toBeInTheDocument();
+  });
+});
+
+describe("la guardia de módulos", () => {
+  const MAESTRO_ME = {
+    userId: "u2",
+    email: "maestra@example.com",
+    permissions: ["teaching:read", "teaching:write", "attendance_own:read", "attendance_own:write"],
+  };
+  const ALL_FLAGS = { module_students: true, module_finance: true, module_teachers: true, module_config: true, module_iam: true };
+
+  it.each(["/alumnos", "/finanzas", "/docentes", "/configuracion", "/administracion", "/alumnos/st1/editar"])(
+    "un maestro que escribe %s aterriza en el tablero",
+    async (path) => {
+      resetFakeRouter(path);
+      mockMe.mockResolvedValue(MAESTRO_ME);
+      render(
+        <Providers flags={ALL_FLAGS}>
+          <AppShell />
+        </Providers>
+      );
+
+      expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
+      expect(fakePath()).toBe("/");
+      expect(screen.queryByRole("heading", { name: /Estudiantes|Finanzas|Docentes|Administración|Configuración/ })).toBeNull();
+    },
+  );
+
+  it.each([
+    ["/alumnos", "Estudiantes"],
+    ["/finanzas", "Finanzas"],
+    ["/docentes", "Docentes"],
+  ])("el director sí llega a %s", async (path, heading) => {
+    resetFakeRouter(path);
+    mockMe.mockResolvedValue(OWNER_ME);
+    render(
+      <Providers flags={ALL_FLAGS}>
+        <AppShell />
+      </Providers>
+    );
+
+    expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
+    expect(fakePath()).toBe(path);
   });
 });

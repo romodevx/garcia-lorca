@@ -72,3 +72,29 @@ func TestConfigClientSetTeacherUserNotFound(t *testing.T) {
 		t.Errorf("code = %v, want NotFound", connect.CodeOf(err))
 	}
 }
+
+func (stubConfig) GetTeacher(_ context.Context, req *connect.Request[configv1.GetTeacherRequest]) (*connect.Response[configv1.GetTeacherResponse], error) {
+	if req.Msg.GetId() == "ghost" {
+		return nil, connect.NewError(connect.CodeNotFound, errString("teacher not found"))
+	}
+	return connect.NewResponse(&configv1.GetTeacherResponse{Teacher: &configv1.Teacher{
+		Id: req.Msg.GetId(), FirstName: "Gabriela", LastName: "Rojas", Email: "gabriela@example.com", UserId: "usr-9",
+	}}), nil
+}
+
+func TestConfigClientGetTeacher(t *testing.T) {
+	c, stop := newConfigStub(t)
+	defer stop()
+
+	tch, err := c.GetTeacher(context.Background(), "tch-1")
+	if err != nil {
+		t.Fatalf("GetTeacher: %v", err)
+	}
+	want := client.Teacher{ID: "tch-1", FirstName: "Gabriela", LastName: "Rojas", Email: "gabriela@example.com", UserID: "usr-9"}
+	if tch != want {
+		t.Errorf("teacher = %+v, want %+v", tch, want)
+	}
+	if _, err := c.GetTeacher(context.Background(), "ghost"); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Errorf("ghost: code = %v, want NotFound", connect.CodeOf(err))
+	}
+}

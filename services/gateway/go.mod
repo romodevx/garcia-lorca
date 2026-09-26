@@ -8,6 +8,7 @@ require (
 	github.com/ledongthuc/pdf v0.0.0-20260907135840-6c8c28e0e8a0
 	github.com/signintech/gopdf v0.38.1
 	github.com/stretchr/testify v1.11.1
+	golang.org/x/sync v0.21.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 )

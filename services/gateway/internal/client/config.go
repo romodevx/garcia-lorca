@@ -368,6 +368,16 @@ func (c *ConfigClient) SetTeacherUser(ctx context.Context, teacherID, userID str
 	return toTeacher(res.Msg.GetTeacher()), nil
 }
 
+// GetTeacher reads one teacher of the tenant catalog. A teacher of another
+// tenant is invisible to config's RLS, so it answers NotFound like a missing one.
+func (c *ConfigClient) GetTeacher(ctx context.Context, id string) (Teacher, error) {
+	res, err := c.rpc.GetTeacher(ctx, connect.NewRequest(&configv1.GetTeacherRequest{Id: id}))
+	if err != nil {
+		return Teacher{}, err
+	}
+	return toTeacher(res.Msg.GetTeacher()), nil
+}
+
 // ListTeachers lists every teacher in the tenant catalog.
 func (c *ConfigClient) ListTeachers(ctx context.Context) ([]Teacher, error) {
 	res, err := c.rpc.ListTeachers(ctx, connect.NewRequest(&configv1.ListTeachersRequest{}))

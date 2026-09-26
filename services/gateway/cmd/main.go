@@ -194,6 +194,9 @@ func main() {
 //	                             RequireAuth → rotation →
 //	                             RequirePermission(teachers:read|write) → config
 //	                             (staff roster + assignments)
+//	POST /api/v1/teachers/{id}/access → ModuleGuard(teachers) → ModuleGuard(iam) → RequireAuth →
+//	                             rotation → RequireAllPermissions(teachers:write,
+//	                             users:write) → subset guard → iam + config
 //	POST /api/v1/teachers/{id}/user → ModuleGuard(teachers) → RequireAuth →
 //	                             rotation → RequirePermission(teachers:write) →
 //	                             validate iam user (GetUser) then config SetTeacherUser
@@ -758,5 +761,17 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// handler itself performs the gateway-orchestrated cross-service validation
 	// (iam GetUser) before the config write.
 	mux.Handle(handler.TeacherUserLinkRoute, teachersWrite(adminH.LinkTeacherUser))
+
+	// "Dar acceso al sistema" (T2): invite the teacher into the maestro role and
+	// link the account, in one action. It edits a teacher AND mints an account,
+	// so it needs both teachers:write and users:write; inside, the caller-subset
+	// guard refuses a caller that does not itself hold the maestro permissions.
+	// Not behind inviteLimiter: that budget guards the anonymous doors; like
+	// POST /users/invite, this is an authenticated administrator's action.
+	teacherAccessH := handler.NewTeacherAccessHandler(authClient, configClient)
+	// Guarded on BOTH modules it composes: with Usuarios (module_iam) hidden,
+	// minting an account from Docentes is hidden too (404), not half-working.
+	mux.Handle(handler.TeacherAccessRoute, guard.Protect("teachers", guard.Protect("iam", requireAuthChanged(
+		middleware.RequireAllPermissions("teachers:write", "users:write")(http.HandlerFunc(teacherAccessH.GrantAccess))))))
 	return mux
 }
