@@ -85,6 +85,7 @@ export function TeachersPanel({ teachers, onCreate, onOpenLoad, onGrantAccess, a
               granting={access.isGranting(t.id)}
               error={access.errorOf(t.id)}
               inviteUrl={access.inviteUrlOf(t.id)}
+              sendError={access.sendErrorOf(t.id)}
               confirmation={access.confirmationOf(t.id)}
               onConfirmReuse={() => void access.confirmReuse(t)}
               onCancelReuse={() => access.cancelReuse(t.id)}

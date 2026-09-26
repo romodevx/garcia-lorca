@@ -12,11 +12,14 @@ import { describeAccessError } from "../../teachers/accessErrors";
 const TOAST_MS = 4000;
 
 /**
- * "none": no login; "linked": a login whose state this page cannot know (the
- * principal cannot list users, or iam answered a status this build does not
- * recognise) — so nothing is claimed and nothing is offered.
+ * "none": no login; "linked": a login whose state this page cannot read (the
+ * principal cannot list users) — nothing is claimed, but a resend is safe: the
+ * server answers with the account's real state; "unrecognised": iam answered a
+ * status this build does not know — nothing is claimed and nothing is offered;
+ * "invited": waiting for its password, no mail known to have left;
+ * "invitationSent": invited, and this page saw the mail go out.
  */
-export type TeacherAccessState = "none" | "linked" | TeacherAccessResult["status"];
+export type TeacherAccessState = "none" | "linked" | "unrecognised" | "invitationSent" | TeacherAccessResult["status"];
 
 /** The server call: the plain press, or the resend after the user confirmed a reuse. */
 export type GrantAccessCall = (teacherId: string, options?: GrantTeacherAccessOptions) => Promise<TeacherAccessResult>;
@@ -34,12 +37,19 @@ export interface TeacherAccess {
   isGranting: (teacherId: string) => boolean;
   errorOf: (teacherId: string) => string | undefined;
   inviteUrlOf: (teacherId: string) => string | undefined;
+  /** Why the invitation mail failed, when a send was tried; undefined when no mail is configured. */
+  sendErrorOf: (teacherId: string) => string | undefined;
   toast: string | undefined;
 }
 
 /** A status iam reported for the account, as the row reads it. */
-function stateOfStatus(status: UserStatus | undefined): TeacherAccessState {
-  return status === "active" || status === "invited" || status === "suspended" ? status : "linked";
+function stateOfStatus(status: UserStatus): TeacherAccessState {
+  return status === "active" || status === "invited" || status === "suspended" ? status : "unrecognised";
+}
+
+/** What a press's answer says about the login: "invited" only claims a mail when it left. */
+function stateOfOutcome(result: TeacherAccessResult): TeacherAccessState {
+  return result.status === "invited" && result.invitation?.sent === true ? "invitationSent" : result.status;
 }
 
 function without<V>(record: Record<string, V>, key: string): Record<string, V> {
@@ -104,10 +114,11 @@ export function useTeacherAccess(onGrantAccess?: GrantAccessCall, accountStatuse
 
   const stateOf = useCallback(
     (teacher: Teacher): TeacherAccessState => {
-      const known = outcomes[teacher.id]?.status;
-      if (known !== undefined) return known;
+      const known = outcomes[teacher.id];
+      if (known !== undefined) return stateOfOutcome(known);
       if (teacher.userId === "") return "none";
-      return stateOfStatus(accountStatuses?.get(teacher.userId));
+      const status = accountStatuses?.get(teacher.userId);
+      return status === undefined ? "linked" : stateOfStatus(status);
     },
     [outcomes, accountStatuses],
   );
@@ -121,6 +132,7 @@ export function useTeacherAccess(onGrantAccess?: GrantAccessCall, accountStatuse
     isGranting: (id) => granting.has(id),
     errorOf: (id) => errors[id],
     inviteUrlOf: (id) => unsentLink(outcomes[id]),
+    sendErrorOf: (id) => failedSendReason(outcomes[id]),
     toast,
   };
 }
@@ -129,6 +141,14 @@ export function useTeacherAccess(onGrantAccess?: GrantAccessCall, accountStatuse
 function unsentLink(result: TeacherAccessResult | undefined): string | undefined {
   const invitation = result?.invitation ?? null;
   return invitation !== null && !invitation.sent ? invitation.url : undefined;
+}
+
+/** The mail provider's reason, when one was configured and the send failed. */
+function failedSendReason(result: TeacherAccessResult | undefined): string | undefined {
+  const invitation = result?.invitation ?? null;
+  if (invitation === null || invitation.sent) return undefined;
+  const reason = invitation.sendError?.trim() ?? "";
+  return reason === "" ? undefined : reason;
 }
 
 /**

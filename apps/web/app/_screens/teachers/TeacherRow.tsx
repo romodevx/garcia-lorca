@@ -13,6 +13,8 @@ export interface TeacherRowProps {
   granting: boolean;
   error: string | undefined;
   inviteUrl: string | undefined;
+  /** Why the mail failed; undefined when no mail is configured at all. */
+  sendError?: string;
   /** The server's question when an existing account would be linked. */
   confirmation?: string;
   onConfirmReuse?: () => void;
@@ -25,7 +27,7 @@ export interface TeacherRowProps {
 const ROW_BUTTON = { minHeight: 44, padding: "0 14px", borderRadius: "var(--r-pill)", border: "1.5px solid var(--forest)", color: "var(--forest)", fontWeight: 600, fontSize: 13.5, cursor: "pointer" } as const;
 
 /** One roster row: who, whether they can sign in, and what can be done about it. */
-export function TeacherRow({ teacher, access, granting, error, inviteUrl, confirmation, onConfirmReuse, onCancelReuse, onGrantAccess, onOpenLoad }: TeacherRowProps): ReactElement {
+export function TeacherRow({ teacher, access, granting, error, inviteUrl, sendError, confirmation, onConfirmReuse, onCancelReuse, onGrantAccess, onOpenLoad }: TeacherRowProps): ReactElement {
   const name = `${teacher.firstName} ${teacher.lastName}`;
   const action = ACTION[access];
   const offerAccess = onGrantAccess !== undefined && action !== undefined && confirmation === undefined;
@@ -69,7 +71,11 @@ export function TeacherRow({ teacher, access, granting, error, inviteUrl, confir
       )}
       {inviteUrl !== undefined && (
         <div style={{ display: "grid", gap: 6 }}>
-          <span style={{ fontSize: 13, color: "var(--text-muted)" }}>No hay correo configurado: copia esta liga y entrégasela a {teacher.firstName}.</span>
+          <span style={{ fontSize: 13, color: sendError === undefined ? "var(--text-muted)" : "var(--warn-fg)" }}>
+            {sendError === undefined
+              ? `No hay correo configurado: copia esta liga y entrégasela a ${teacher.firstName}.`
+              : `No pudimos enviar el correo: ${sendError}. Copia esta liga y entrégasela.`}
+          </span>
           <InviteLink url={inviteUrl} />
         </div>
       )}
@@ -78,14 +84,18 @@ export function TeacherRow({ teacher, access, granting, error, inviteUrl, confir
 }
 
 /**
- * What the row offers per state. Only two states have something to do: no
- * login yet, or an invitation still waiting. An active login needs nothing, a
- * suspension is lifted in Usuarios, and an unknown state is never guessed at.
+ * What the row offers per state: a login to create, or an invitation to send
+ * again — also for a login this page cannot read, since the server answers
+ * with its real state. An active login needs nothing, a suspension is lifted
+ * in Usuarios, and a status iam named but this build does not know is never
+ * guessed at.
  */
 const ACTION: Record<TeacherAccessState, string | undefined> = {
   none: "Dar acceso al sistema",
   invited: "Reenviar invitación",
-  linked: undefined,
+  invitationSent: "Reenviar invitación",
+  linked: "Reenviar invitación",
+  unrecognised: undefined,
   active: undefined,
   suspended: undefined,
 };
@@ -93,7 +103,9 @@ const ACTION: Record<TeacherAccessState, string | undefined> = {
 const PILL: Record<TeacherAccessState, { label: string; bg: string; fg: string; check: boolean }> = {
   none: { label: "Sin acceso", bg: "var(--surface-3)", fg: "var(--text-muted)", check: false },
   linked: { label: "Vinculado", bg: "var(--surface-3)", fg: "var(--text)", check: false },
-  invited: { label: "Invitación enviada", bg: "var(--warn-bg)", fg: "var(--warn-fg)", check: false },
+  unrecognised: { label: "Vinculado", bg: "var(--surface-3)", fg: "var(--text)", check: false },
+  invited: { label: "Invitación pendiente", bg: "var(--warn-bg)", fg: "var(--warn-fg)", check: false },
+  invitationSent: { label: "Invitación enviada", bg: "var(--warn-bg)", fg: "var(--warn-fg)", check: false },
   active: { label: "Con acceso", bg: "var(--ok-bg)", fg: "var(--ok-fg)", check: true },
   suspended: { label: "Acceso suspendido", bg: "var(--bad-bg)", fg: "var(--bad-fg)", check: false },
 };

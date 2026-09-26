@@ -34,16 +34,41 @@ describe("TeachersPanel — acceso al sistema", () => {
     expect(within(rowOf("Alan Turing")).getByText("Vinculado")).toBeInTheDocument();
   });
 
-  it("an unknown state offers no resend: it might be an active login", () => {
+  it("a login whose state cannot be read (users:write, no users:read) is offered Reenviar invitación", () => {
     render(<TeachersPanel teachers={[alan]} onCreate={vi.fn()} onGrantAccess={vi.fn()} />);
 
-    expect(screen.queryByRole("button", { name: /Reenviar invitación/ })).toBeNull();
+    expect(within(rowOf("Alan Turing")).getByText("Vinculado")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reenviar invitación a Alan Turing" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Dar acceso al sistema/ })).toBeNull();
+  });
+
+  it("resending to an unreadable login that turns out active says Con acceso and shows no link", async () => {
+    const user = userEvent.setup();
+    const onGrantAccess = vi.fn().mockResolvedValue(outcome({ teacher: alan, userId: "u2", email: alan.email, status: "active", invitation: null }));
+    render(<TeachersPanel teachers={[alan]} onCreate={vi.fn()} onGrantAccess={onGrantAccess} />);
+
+    await user.click(screen.getByRole("button", { name: "Reenviar invitación a Alan Turing" }));
+
+    expect(onGrantAccess).toHaveBeenCalledWith("t2");
+    expect(await within(rowOf("Alan Turing")).findByText("Con acceso")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Liga de acceso")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Reenviar invitación/ })).toBeNull();
+  });
+
+  it("resending to an unreadable login that is still invited flips it to Invitación enviada", async () => {
+    const user = userEvent.setup();
+    const onGrantAccess = vi.fn().mockResolvedValue(outcome({ teacher: alan, userId: "u2", email: alan.email }));
+    render(<TeachersPanel teachers={[alan]} onCreate={vi.fn()} onGrantAccess={onGrantAccess} />);
+
+    await user.click(screen.getByRole("button", { name: "Reenviar invitación a Alan Turing" }));
+
+    expect(await within(rowOf("Alan Turing")).findByText("Invitación enviada")).toBeInTheDocument();
   });
 
   it.each<[UserStatus, string, boolean]>([
     ["active", "Con acceso", false],
-    ["invited", "Invitación enviada", true],
+    // The listing says the login waits for its password, not that a mail left.
+    ["invited", "Invitación pendiente", true],
     ["suspended", "Acceso suspendido", false],
     ["unknown", "Vinculado", false],
   ])("with the account's status known (%s) the row says %s", (status, label, resend) => {
@@ -85,8 +110,26 @@ describe("TeachersPanel — acceso al sistema", () => {
 
     expect(await screen.findByLabelText("Liga de acceso")).toHaveValue("http://localhost:3002/activar?t=abc");
     expect(screen.getByRole("button", { name: "Copiar liga" })).toBeInTheDocument();
+    expect(screen.getByText(/No hay correo configurado/)).toBeInTheDocument();
     // Nothing was mailed, so nothing may say it was.
     expect(screen.queryByText(/Enviamos la invitación/)).toBeNull();
+    expect(within(rowOf("Ada Lovelace")).getByText("Invitación pendiente")).toBeInTheDocument();
+    expect(within(rowOf("Ada Lovelace")).queryByText("Invitación enviada")).toBeNull();
+  });
+
+  it("a failed send names the reason, not a missing mail configuration", async () => {
+    const user = userEvent.setup();
+    const onGrantAccess = vi.fn().mockResolvedValue(
+      outcome({ invitation: { url: "https://colegio.mx/activar?t=abc", expiresAt: "2026-10-02T18:00:00Z", sent: false, sendError: "SMTP 535 auth failed" } }),
+    );
+    render(<TeachersPanel teachers={[ada]} onCreate={vi.fn()} onGrantAccess={onGrantAccess} />);
+
+    await user.click(screen.getByRole("button", { name: "Dar acceso al sistema a Ada Lovelace" }));
+
+    expect(await screen.findByText("No pudimos enviar el correo: SMTP 535 auth failed. Copia esta liga y entrégasela.")).toBeInTheDocument();
+    expect(screen.queryByText(/No hay correo configurado/)).toBeNull();
+    expect(screen.getByLabelText("Liga de acceso")).toHaveValue("https://colegio.mx/activar?t=abc");
+    expect(within(rowOf("Ada Lovelace")).getByText("Invitación pendiente")).toBeInTheDocument();
   });
 
   it("a sent invitation shows no link: it is in the teacher's inbox", async () => {

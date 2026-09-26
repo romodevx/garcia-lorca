@@ -161,18 +161,18 @@ describe("the Docentes module — what each login is", () => {
     admin.listUsers.mockResolvedValue([invitedUser]);
     render(<TeachersScreen onBack={() => {}} onOpenLoad={vi.fn()} canGrantAccess canListUsers />);
 
-    expect(await screen.findByText("Invitación enviada")).toBeInTheDocument();
+    expect(await screen.findByText("Invitación pendiente")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reenviar invitación a Alan Turing" })).toBeInTheDocument();
     expect(admin.listUsers).toHaveBeenCalledTimes(1);
   });
 
-  it("without users:read it asks nothing and claims nothing: Vinculado, no resend", async () => {
+  it("without users:read it asks nothing and claims nothing: Vinculado, with a resend the server can answer", async () => {
     teachers.listTeachers.mockResolvedValue([alan]);
     render(<TeachersScreen onBack={() => {}} onOpenLoad={vi.fn()} canGrantAccess />);
 
     expect(await screen.findByText("Vinculado")).toBeInTheDocument();
     expect(admin.listUsers).not.toHaveBeenCalled();
-    expect(screen.queryByRole("button", { name: /Reenviar invitación/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Reenviar invitación a Alan Turing" })).toBeInTheDocument();
   });
 
   it("if the accounts cannot be read, the roster still shows, as Vinculado", async () => {
