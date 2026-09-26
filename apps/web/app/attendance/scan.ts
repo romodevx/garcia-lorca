@@ -15,6 +15,8 @@ export interface ScanCardInput {
   groupId: string;
   /** Only for a per-class list. */
   subjectId?: string;
+  /** `YYYY-MM-DD`: the day of the list being taken; the server checks it against its window. */
+  date: string;
   /** The QR's raw content (`GLCARD:<token>`). */
   code: string;
 }
@@ -75,7 +77,7 @@ export async function readScanResponse(res: Response): Promise<CardScanResult> {
 /** The POST body: subjectId only when there is one. */
 function scanBody(input: ScanCardInput): ScanCardInput {
   const subject = input.subjectId !== undefined && input.subjectId !== "" ? { subjectId: input.subjectId } : {};
-  return { groupId: input.groupId, ...subject, code: input.code };
+  return { groupId: input.groupId, ...subject, date: input.date, code: input.code };
 }
 
 /** POSTs one scanned code to `url` and reads the outcome. */

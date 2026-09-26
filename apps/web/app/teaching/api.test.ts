@@ -272,22 +272,22 @@ describe("saveTeachingAttendance", () => {
 });
 
 describe("scanTeachingCard", () => {
-  it("POSTs the code to the teacher's /teaching/attendance/scan with the subject of a per-class list", async () => {
+  it("POSTs the code and the list's date to the teacher's /teaching/attendance/scan with the subject of a per-class list", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ enrollmentId: "en1", studentId: "st1", name: "Ada" }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const out = await scanTeachingCard({ groupId: "g1", subjectId: "s1", code: "GLCARD:abc" });
+    const out = await scanTeachingCard({ groupId: "g1", subjectId: "s1", date: "2026-09-10", code: "GLCARD:abc" });
 
     expect(out).toEqual({ kind: "ok", student: { enrollmentId: "en1", studentId: "st1", name: "Ada" } });
     const [url, init] = lastCall(fetchMock);
     expect(url).toBe("http://gw/api/v1/teaching/attendance/scan");
     expect(init.credentials).toBe("include");
-    expect(JSON.parse(init.body as string)).toEqual({ groupId: "g1", subjectId: "s1", code: "GLCARD:abc" });
+    expect(JSON.parse(init.body as string)).toEqual({ groupId: "g1", subjectId: "s1", date: "2026-09-10", code: "GLCARD:abc" });
   });
 
   it("returns a rejection (not a throw) for a foreign card", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("Este alumno no pertenece a este grupo", { status: 422, headers: { "X-Scan-Result": "foreign" } })));
 
-    await expect(scanTeachingCard({ groupId: "g1", code: "GLCARD:x" })).resolves.toEqual({ kind: "rejected", reason: "foreign", message: "Este alumno no pertenece a este grupo" });
+    await expect(scanTeachingCard({ groupId: "g1", date: "2026-09-10", code: "GLCARD:x" })).resolves.toEqual({ kind: "rejected", reason: "foreign", message: "Este alumno no pertenece a este grupo" });
   });
 });

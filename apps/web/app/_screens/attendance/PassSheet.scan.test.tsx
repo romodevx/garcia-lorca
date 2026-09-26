@@ -121,7 +121,7 @@ describe("PassSheet — scanning", () => {
 
     await read("GLCARD:grace");
 
-    expect(scan).toHaveBeenCalledWith({ groupId: "g1", code: "GLCARD:grace" });
+    expect(scan).toHaveBeenCalledWith({ groupId: "g1", date: TODAY, code: "GLCARD:grace" });
     expect(row("Grace Hopper: Presente")).toBeInTheDocument();
     expect(screen.getByTestId("scan-flash")).toHaveTextContent("Grace Hopper");
     expect(screen.getByRole("status")).toHaveTextContent("Presente: Grace Hopper");

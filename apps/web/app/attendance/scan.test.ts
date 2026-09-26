@@ -37,23 +37,27 @@ describe("readScanResponse", () => {
     await expect(readScanResponse(text("", 500))).resolves.toMatchObject({ reason: "unknown", message: "No se pudo leer la credencial. Intenta de nuevo." });
   });
 
+  it("a 400 outside the date window is a rejection with the server's words", async () => {
+    await expect(readScanResponse(text("Solo puedes registrar hasta 7 días atrás", 400))).resolves.toEqual({ kind: "rejected", reason: "unknown", message: "Solo puedes registrar hasta 7 días atrás" });
+  });
+
   it("a 200 without the student's fields is not a success", async () => {
     await expect(readScanResponse(new Response("{}", { status: 200 }))).resolves.toMatchObject({ kind: "rejected", reason: "unknown" });
   });
 });
 
 describe("scanAttendanceCard", () => {
-  it("POSTs the code to /attendance/scan with credentials, subjectId only when set", async () => {
+  it("POSTs the code and the list's date to /attendance/scan with credentials, subjectId only when set", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ enrollmentId: "en1", studentId: "st1", name: "Ada" }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const out = await scanAttendanceCard(BASE, { groupId: "g1", code: "GLCARD:abc" });
+    const out = await scanAttendanceCard(BASE, { groupId: "g1", date: "2026-09-10", code: "GLCARD:abc" });
 
     expect(out).toMatchObject({ kind: "ok" });
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("http://gw/api/v1/attendance/scan");
     expect(init.method).toBe("POST");
     expect(init.credentials).toBe("include");
-    expect(JSON.parse(init.body as string)).toEqual({ groupId: "g1", code: "GLCARD:abc" });
+    expect(JSON.parse(init.body as string)).toEqual({ groupId: "g1", date: "2026-09-10", code: "GLCARD:abc" });
   });
 });

@@ -55,8 +55,8 @@ export function PassSheet({ title, groupId, subjectId, today, restrictDates, loa
   const untaken = sheet !== undefined && !editable && sheet.session === null;
   const locked = list.saving;
   const resolve = useMemo(
-    () => (scan === undefined ? undefined : (code: string) => scan({ groupId, ...(subjectId !== undefined ? { subjectId } : {}), code })),
-    [scan, groupId, subjectId],
+    () => (scan === undefined ? undefined : (code: string) => scan({ groupId, ...(subjectId !== undefined ? { subjectId } : {}), date, code })),
+    [scan, groupId, subjectId, date],
   );
   const scanner = useCardScan({ target: { groupId, subjectId, date }, sheet, rows, resolve, setStatus: list.setStatus });
   /** Scanning is taking attendance now: only on today's editable list. */
