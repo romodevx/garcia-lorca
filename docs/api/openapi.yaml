@@ -11,7 +11,9 @@ openapi: 3.1.0
 # (#/components/schemas/Error). The gateway's older handlers still answer with
 # text/plain, which is why the shared web client reads JSON first and falls back
 # to text: one module moving to the envelope must not fork error handling. The
-# rest migrating is the tech-debt item above.
+# rest migrating is the tech-debt item above. Until a route migrates, its entry
+# documents what it really answers with the Plain* responses below, never the
+# envelope it does not send (the teaching-load routes are the first to do so).
 #
 # AUTH. The routes here are the staff panel's, authenticated with a session
 # cookie (Secure, HttpOnly, SameSite=Strict), which is why every state-changing
@@ -25,7 +27,7 @@ openapi: 3.1.0
 
 info:
   title: García Lorca API
-  version: 0.13.0
+  version: 0.13.1
   license:
     name: Proprietary
     url: https://garcialorca.edu.mx/legal
@@ -1316,17 +1318,18 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TeachingLoadResult' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/ModuleDisabled' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
         '409':
           description: >
             A free slot was taken by someone else between reading and writing;
             nothing was written. Retrying answers against the new state.
           content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+            text/plain:
+              schema: { type: string }
+              example: a teacher is already assigned to this group and subject in the cycle
 
   /api/v1/teaching-assignments/{id}:
     parameters:
@@ -1343,14 +1346,10 @@ paths:
       parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
       responses:
         '204': { description: Removed. }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404':
-          description: No such assignment, or `module_teachers` is off.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
     patch:
       tags: [teachers]
       summary: Hand a slot to another teacher
@@ -1378,14 +1377,10 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TeachingAssignment' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404':
-          description: No such assignment, or `module_teachers` is off.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
 
   /api/v1/finance/tuition-plans:
     get:
@@ -1901,6 +1896,36 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+
+    # The text/plain answers of the gateway's older handlers (see ERRORS at the
+    # top): the body is one sentence — the service's own when it gave one, safe
+    # to show — or the bare status text.
+    PlainBadRequest:
+      description: The request did not satisfy the contract; the body says which field.
+      content:
+        text/plain:
+          schema: { type: string }
+          example: items[0].groupId must be a group id
+    PlainUnauthorized:
+      description: No session, or it expired.
+      content:
+        text/plain:
+          schema: { type: string }
+          example: unauthorized
+    PlainForbidden:
+      description: Authenticated, but lacking the permission this route needs.
+      content:
+        text/plain:
+          schema: { type: string }
+          example: forbidden
+    PlainNotFound:
+      description: |
+        No such row, or the route's module flag is off — a disabled module is
+        invisible, so both answer 404.
+      content:
+        text/plain:
+          schema: { type: string }
+          example: teaching assignment not found
 
   schemas:
     TuitionPlan:

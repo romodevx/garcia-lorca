@@ -171,6 +171,19 @@ describe("carga académica", () => {
     expect(init.credentials).toBe("include");
   });
 
+  // The gateway answers these routes in text/plain (docs/api/openapi.yaml,
+  // Plain* responses): the sentence itself must reach describeLoadWriteError.
+  it("carries the gateway's text/plain sentence as the error detail", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response("items[0].groupId must be a group id\n", { status: 400, headers: { "Content-Type": "text/plain; charset=utf-8" } }),
+      ),
+    );
+    const call = assignTeachingLoad(BASE, { teacherId: "t1", items: [{ groupId: "x", subjectId: "s1" }], replaceConflicts: false });
+    await expect(call).rejects.toMatchObject({ status: 400, detail: "items[0].groupId must be a group id" });
+  });
+
   it("deleteTeachingAssignment throws on 404", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 404 })));
     await expect(deleteTeachingAssignment(BASE, "ta1")).rejects.toMatchObject({ status: 404 });
