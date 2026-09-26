@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -28,7 +29,8 @@ const (
 // enrollmentStatusActive is the only enrollment status that appears on a roster.
 const enrollmentStatusActive = "active"
 
-// maxNoteLength bounds the free-text justification a client may attach to a
+// maxNoteLength bounds, in CHARACTERS (runes, like the column CHECK length()
+// and the web counter), the free-text justification a client may attach to a
 // mark. The column carries the same CHECK, so the cap holds even for a writer
 // that bypasses this layer.
 const maxNoteLength = 500
@@ -441,7 +443,7 @@ func (s *AttendanceService) recordsFor(marks []Mark, studentByEnrollment map[str
 		if !isStorableStatus(mark.Status) && mark.Status != statusPresent {
 			return nil, glerrors.New(glerrors.KindInvalid, "invalid attendance status")
 		}
-		if len(mark.Note) > maxNoteLength {
+		if utf8.RuneCountInString(mark.Note) > maxNoteLength {
 			return nil, glerrors.New(glerrors.KindInvalid, "note is too long")
 		}
 		if seen[mark.EnrollmentID] {
@@ -605,7 +607,7 @@ func parseTaker(userID, name string) (Taker, error) {
 		return Taker{}, glerrors.New(glerrors.KindInvalid, "invalid taken_by user id")
 	}
 	name = strings.TrimSpace(name)
-	if name == "" || len([]rune(name)) > maxTakerNameLength {
+	if name == "" || utf8.RuneCountInString(name) > maxTakerNameLength {
 		return Taker{}, glerrors.New(glerrors.KindInvalid, "taken_by_name is required (at most 200 characters)")
 	}
 	return Taker{UserID: userID, Name: name}, nil

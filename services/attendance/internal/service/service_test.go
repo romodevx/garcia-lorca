@@ -784,15 +784,22 @@ func TestSaveDailyAttendanceAcceptsEveryStoredStatus(t *testing.T) {
 // TestSaveDailyAttendanceCapsNoteLength pins the free-text boundary: a note of
 // exactly the cap is stored, one character more is rejected before anything is
 // written. Without it an unbounded note reaches a text column straight from a
-// teacher's browser.
+// teacher's browser. The cap counts CHARACTERS, like the column's CHECK
+// (length()) and the web's counter: an accented note is not cut at half length
+// because "é" is two bytes.
 func TestSaveDailyAttendanceCapsNoteLength(t *testing.T) {
+	const accented = "é"
 	tests := []struct {
 		name       string
+		char       string
 		length     int
 		wantStored bool
 	}{
-		{name: "at the cap", length: maxNote, wantStored: true},
-		{name: "one over the cap", length: maxNote + 1},
+		{name: "at the cap", char: "x", length: maxNote, wantStored: true},
+		{name: "one over the cap", char: "x", length: maxNote + 1},
+		{name: "400 accented characters (800 bytes)", char: accented, length: 400, wantStored: true},
+		{name: "accented at the cap", char: accented, length: maxNote, wantStored: true},
+		{name: "accented one over the cap", char: accented, length: maxNote + 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -800,7 +807,7 @@ func TestSaveDailyAttendanceCapsNoteLength(t *testing.T) {
 			svc := newService(t, repo, nil)
 
 			_, marked, err := save(svc, context.Background(), groupID, schoolDay, []service.Mark{
-				{EnrollmentID: enrollmentAna, Status: "excused", Note: strings.Repeat("x", tt.length)},
+				{EnrollmentID: enrollmentAna, Status: "excused", Note: strings.Repeat(tt.char, tt.length)},
 			})
 			if !tt.wantStored {
 				wantInvalid(t, err)
@@ -810,7 +817,7 @@ func TestSaveDailyAttendanceCapsNoteLength(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatalf("a note of exactly %d chars must be accepted: %v", maxNote, err)
+				t.Fatalf("a note of %d characters must be accepted: %v", tt.length, err)
 			}
 			if marked != 1 {
 				t.Errorf("marked = %d, want 1", marked)
