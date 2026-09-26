@@ -389,6 +389,11 @@ export async function listLabelledGroups(baseURL: string, cycleId: string, grade
     listGroups(baseURL, cycleId, gradeLevelId),
     listGradeLevels(baseURL).catch((): GradeLevel[] => []),
   ]);
+  return labelGroups(groups, grades);
+}
+
+/** Labels groups from grades already in hand; an unknown grade keeps the bare name. */
+export function labelGroups(groups: readonly Group[], grades: readonly GradeLevel[]): LabelledGroup[] {
   const gradeName = new Map(grades.map((g) => [g.id, g.name]));
   return groups.map((g) => {
     const grade = gradeName.get(g.gradeLevelId);

@@ -8,6 +8,7 @@ import {
   createSubject,
   createTerm,
   getSchoolProfile,
+  labelGroups,
   listCycles,
   listGradeLevels,
   listGroups,
@@ -198,6 +199,18 @@ describe("groups", () => {
 
     await expect(listGroups(BASE, "c1", "g1")).resolves.toEqual(groups);
     expect(lastCall(fetchMock)[0]).toBe("http://gw/api/v1/config/groups?cycleId=c1&gradeLevelId=g1");
+  });
+
+  it("labelGroups names each group with its grade, bare name when the grade is unknown", () => {
+    const grades = [{ id: "g1", levelId: "l1", name: "1° Primaria", ordinal: 1 }];
+    const labelled = labelGroups(
+      [
+        { id: "a", cycleId: "c1", gradeLevelId: "g1", name: "A", capacity: 30 },
+        { id: "b", cycleId: "c1", gradeLevelId: "gX", name: "B", capacity: 30 },
+      ],
+      grades,
+    );
+    expect(labelled.map((g) => g.label)).toEqual(["1° Primaria · A", "B"]);
   });
 
   it("listGroups omits gradeLevelId when not given", async () => {
