@@ -102,7 +102,7 @@ export function TeacherLoadScreen({ teacherId: rawTeacherId, onBack, canWrite = 
         </div>
       )}
 
-      {writes.undoable !== undefined ? (
+      {writes.undoable.length > 0 ? (
         <UndoToast message={removedMessage(writes.undoable)} onUndo={() => void writes.undo()} />
       ) : (
         writes.toast !== undefined && <Toast>{writes.toast}</Toast>
@@ -123,6 +123,8 @@ function CyclePicker({ cycles, cycleId, onChange }: { cycles: readonly Cycle[]; 
   );
 }
 
-function removedMessage(slot: LoadSlot): string {
-  return `Quitaste ${slot.subjectName} de ${slot.groupLabel}`;
+function removedMessage(slots: readonly LoadSlot[]): string {
+  const [only] = slots;
+  if (slots.length === 1 && only !== undefined) return `Quitaste ${only.subjectName} de ${only.groupLabel}`;
+  return `Quitaste ${slots.length} clases`;
 }

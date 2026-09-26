@@ -24,7 +24,8 @@ export interface LoadWrites {
   undo: () => Promise<void>;
   replaceConflicts: () => Promise<void>;
   keepConflicts: () => void;
-  undoable: LoadSlot | undefined;
+  /** Classes freed inside the current undo window; empty when there is none. */
+  undoable: readonly LoadSlot[];
   /** Assignment ids whose DELETE is in flight; their × ignores clicks. */
   removing: ReadonlySet<string>;
   conflicts: readonly NamedConflict[];
@@ -41,6 +42,14 @@ export interface LoadWritesDeps {
   drop: (assignmentId: string) => void;
 }
 
+const NOTHING_TO_UNDO: readonly LoadSlot[] = [];
+
+function restoreFailed(slots: readonly LoadSlot[]): string {
+  const [only] = slots;
+  if (slots.length === 1 && only !== undefined) return `No se pudo devolver ${only.subjectName} a ${only.groupLabel}.`;
+  return `No se pudieron devolver las ${slots.length} clases.`;
+}
+
 function assignedMessage(count: number): string {
   return count === 1 ? "1 grupo asignado" : `${count} grupos asignados`;
 }
@@ -52,7 +61,7 @@ function assignedMessage(count: number): string {
  */
 export function useLoadWrites({ teacherId, cycleId, catalogue, reload, drop }: LoadWritesDeps): LoadWrites {
   const [raw, setRaw] = useState<TeachingLoadConflict[]>([]);
-  const [undoable, setUndoable] = useState<LoadSlot | undefined>(undefined);
+  const [undoable, setUndoable] = useState<readonly LoadSlot[]>(NOTHING_TO_UNDO);
   const [toast, setToast] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -73,7 +82,7 @@ export function useLoadWrites({ teacherId, cycleId, catalogue, reload, drop }: L
     shownCycle.current = cycleId;
     clearTimeout(undoTimer.current);
     setRaw([]);
-    setUndoable(undefined);
+    setUndoable(NOTHING_TO_UNDO);
     setError(undefined);
   }, [cycleId]);
 
@@ -117,9 +126,11 @@ export function useLoadWrites({ teacherId, cycleId, catalogue, reload, drop }: L
   const freed = useCallback(
     (slot: LoadSlot): void => {
       drop(slot.assignmentId);
+      // Each removal joins the batch and restarts the window; when it runs
+      // out the whole batch is kept as removed.
       clearTimeout(undoTimer.current);
-      setUndoable(slot);
-      undoTimer.current = setTimeout(() => setUndoable(undefined), UNDO_MS);
+      setUndoable((batch) => [...batch, slot]);
+      undoTimer.current = setTimeout(() => setUndoable(NOTHING_TO_UNDO), UNDO_MS);
     },
     [drop],
   );
@@ -159,12 +170,11 @@ export function useLoadWrites({ teacherId, cycleId, catalogue, reload, drop }: L
   );
 
   const undo = useCallback(async (): Promise<void> => {
-    if (undoable === undefined) return;
+    if (undoable.length === 0) return;
     clearTimeout(undoTimer.current);
-    setUndoable(undefined);
-    await send([{ groupId: undoable.groupId, subjectId: undoable.subjectId }], false).catch((cause: unknown) =>
-      setError(describeLoadWriteError(cause, `No se pudo devolver ${undoable.subjectName} a ${undoable.groupLabel}.`)),
-    );
+    setUndoable(NOTHING_TO_UNDO);
+    const items = undoable.map(({ groupId, subjectId }) => ({ groupId, subjectId }));
+    await send(items, false).catch((cause: unknown) => setError(describeLoadWriteError(cause, restoreFailed(undoable))));
   }, [undoable, send]);
 
   const replaceConflicts = useCallback(async (): Promise<void> => {

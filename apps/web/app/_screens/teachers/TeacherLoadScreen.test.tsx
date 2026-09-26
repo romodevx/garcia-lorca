@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -517,6 +517,54 @@ describe("TeacherLoadScreen", () => {
 
     await new Promise((r) => setTimeout(r, 0));
     expect(screen.queryByRole("button", { name: "Deshacer" })).not.toBeInTheDocument();
+  });
+
+  // Regression: freeing a second class inside the undo window dropped the
+  // first one's Deshacer. Found by /code-review on 2026-09-25
+  it("accumulates removals in one undo, and Deshacer restores them all in ONE bulk call", async () => {
+    withAssignments([ta("a1", "s1A", "mat-s1", "ada"), ta("a2", "s2A", "mat-s2", "ada")]);
+    const user = await renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Quitar Matemáticas de 1° Secundaria · A" }));
+    await screen.findByText("Quitaste Matemáticas de 1° Secundaria · A");
+    await user.click(screen.getByRole("button", { name: "Quitar Matemáticas de 2° Secundaria · A" }));
+    expect(await screen.findByText("Quitaste 2 clases")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Deshacer" }));
+    expect(teachers.assignTeachingLoad).toHaveBeenCalledTimes(1);
+    expect(teachers.assignTeachingLoad).toHaveBeenCalledWith(expect.any(String), {
+      teacherId: "ada",
+      items: [
+        { groupId: "s1A", subjectId: "mat-s1" },
+        { groupId: "s2A", subjectId: "mat-s2" },
+      ],
+      replaceConflicts: false,
+    });
+  });
+
+  it("restarts the 8 s undo window on each removal, and starts afresh once it expires", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      withAssignments([ta("a1", "s1A", "mat-s1", "ada"), ta("a2", "s2A", "mat-s2", "ada"), ta("a3", "s1B", "fis-s1", "ada")]);
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      render(<TeacherLoadScreen teacherId="ada" onBack={vi.fn()} />);
+
+      await user.click(await screen.findByRole("button", { name: "Quitar Matemáticas de 1° Secundaria · A" }));
+      await screen.findByText("Quitaste Matemáticas de 1° Secundaria · A");
+      act(() => vi.advanceTimersByTime(5000));
+      await user.click(screen.getByRole("button", { name: "Quitar Matemáticas de 2° Secundaria · A" }));
+      await screen.findByText("Quitaste 2 clases");
+
+      act(() => vi.advanceTimersByTime(5000));
+      expect(screen.getByRole("button", { name: "Deshacer" })).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(3500));
+      expect(screen.queryByRole("button", { name: "Deshacer" })).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Quitar Física de 1° Secundaria · B" }));
+      expect(await screen.findByText("Quitaste Física de 1° Secundaria · B")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a read-only viewer sees the load but no write controls", async () => {
