@@ -1,6 +1,7 @@
-import type { AttendanceDay } from "../api/attendance";
+import type { AttendanceDay, AttendanceMonth } from "../api/attendance";
 import {
   dayLabel,
+  findToday,
   monthLabel,
   monthOf,
   shiftMonth,
@@ -63,8 +64,48 @@ describe("attendance view helpers", () => {
     expect(todayHeadline(partial).text).toBe("Asistió a 4 de 6 clases");
   });
 
-  it("headlines a missing day (no list yet) as not taken", () => {
-    expect(todayHeadline(undefined).text).toBe("Lista aún no tomada");
+  it("headlines an unknown today as a dash, never as a false 'not taken'", () => {
+    const headline = todayHeadline(null);
+    expect(headline.text).toBe("—");
+    expect(headline.spoken).toBe("Sin datos todavía");
+  });
+
+  it("says there are no classes on a weekend day without a list", () => {
+    // 2026-09-26 is a Saturday, 2026-09-27 a Sunday.
+    expect(todayHeadline(day({ date: "2026-09-26", status: "not_taken" })).text).toBe("Sin clases hoy");
+    expect(todayHeadline(day({ date: "2026-09-27", status: "not_taken" })).text).toBe("Sin clases hoy");
+    // A weekend day that DID get a list still says what happened.
+    expect(todayHeadline(day({ date: "2026-09-26", status: "present" })).text).toBe("Asistió");
+  });
+
+  describe("findToday", () => {
+    const month = (over: Partial<AttendanceMonth>): AttendanceMonth => ({
+      month: "2026-09",
+      today: "2026-09-28",
+      days: [day({ date: "2026-09-28", status: "absent" }), day({ date: "2026-09-25" })],
+      summary: { present: 0, absent: 0, late: 0, excused: 0, partial: 0 },
+      ...over,
+    });
+
+    it("finds today's entry in the current month", () => {
+      expect(findToday(month({}))?.status).toBe("absent");
+    });
+
+    it("is unknown before the month has loaded", () => {
+      expect(findToday(null)).toBeNull();
+    });
+
+    it("is unknown when today's entry is missing", () => {
+      expect(findToday(month({ days: [day({ date: "2026-09-25" })] }))).toBeNull();
+    });
+
+    it("is unknown when the server sent no today", () => {
+      expect(findToday(month({ today: "" }))).toBeNull();
+    });
+
+    it("is unknown when today falls outside the fetched month (midnight rollover)", () => {
+      expect(findToday(month({ today: "2026-10-01", days: [day({ date: "2026-10-01" })] }))).toBeNull();
+    });
   });
 
   it("gives every status a text pill, never color alone", () => {

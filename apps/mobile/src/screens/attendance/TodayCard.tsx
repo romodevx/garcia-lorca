@@ -8,8 +8,8 @@ import { statusPill, todayHeadline } from "../attendanceView";
 import { chipTint } from "./tint";
 
 export interface TodayCardProps {
-  /** Today's record, or undefined when the list has not been taken yet. */
-  day: AttendanceDay | undefined;
+  /** Today's record, or null when today is unknown (not loaded, or no entry). */
+  day: AttendanceDay | null;
 }
 
 /**
@@ -21,9 +21,10 @@ export function TodayCard({ day }: TodayCardProps): ReactElement {
   const theme = useTheme();
   const headline = todayHeadline(day);
   const tint = chipTint(theme.colors, headline.kind);
+  const spoken = day?.note ? `Hoy: ${headline.spoken}. ${day.note}` : `Hoy: ${headline.spoken}`;
   return (
     <Card padded style={styles.card}>
-      <View style={styles.top} accessible accessibilityLabel={`Hoy: ${headline.text}`}>
+      <View style={styles.top} accessible accessibilityLabel={spoken}>
         <View style={[styles.circle, { backgroundColor: tint.bg }]}>
           <Icon name={headline.icon} size={30} stroke={2.6} color={tint.fg} />
         </View>

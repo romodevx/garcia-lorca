@@ -1,4 +1,4 @@
-import type { AttendanceDay, AttendanceStatus } from "../api/attendance";
+import type { AttendanceDay, AttendanceMonth, AttendanceStatus } from "../api/attendance";
 import type { ChipKind } from "../data/mock";
 import type { IconName } from "../icons";
 
@@ -16,6 +16,9 @@ const MONTHS_LONG = [
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
 ];
 const MONTHS_PER_YEAR = 12;
+
+const SATURDAY = 6;
+const SUNDAY = 0;
 
 /** Statuses in which the child was in the classroom. */
 const ATTENDED: ReadonlySet<AttendanceStatus> = new Set(["present", "late"]);
@@ -59,25 +62,55 @@ export function deviceMonth(now: Date = new Date()): string {
 
 export interface Headline {
   text: string;
+  /** What a screen reader says; differs from `text` only where the text is a symbol. */
+  spoken: string;
   icon: IconName;
   kind: ChipKind;
 }
 
-/** The big line of the "Hoy" card. A day with no record reads as "not taken yet". */
-export function todayHeadline(day: AttendanceDay | undefined): Headline {
-  switch (day?.status) {
+const headline = (text: string, icon: IconName, kind: ChipKind): Headline => ({ text, spoken: text, icon, kind });
+
+const UNKNOWN_TODAY: Headline = { text: "—", spoken: "Sin datos todavía", icon: "clock", kind: "neutral" };
+
+function isWeekend(isoDay: string): boolean {
+  const { year, month, day } = parseDay(isoDay);
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  return weekday === SATURDAY || weekday === SUNDAY;
+}
+
+/**
+ * Today's entry, looked up ONLY in the month that contains the school's today.
+ * Null means unknown — not loaded yet, no `today` from the server, today outside
+ * the fetched month (a midnight rollover), or no entry for it — and is never
+ * read as "the list was not taken".
+ */
+export function findToday(month: AttendanceMonth | null): AttendanceDay | null {
+  if (month === null || month.today === "" || month.month !== monthOf(month.today)) {
+    return null;
+  }
+  return month.days.find((d) => d.date === month.today) ?? null;
+}
+
+/** The big line of the "Hoy" card. An unknown today reads as a dash, not as a verdict. */
+export function todayHeadline(day: AttendanceDay | null): Headline {
+  if (day === null) {
+    return UNKNOWN_TODAY;
+  }
+  switch (day.status) {
     case "present":
-      return { text: "Asistió", icon: "check-circle", kind: "ok" };
+      return headline("Asistió", "check-circle", "ok");
     case "absent":
-      return { text: "Faltó", icon: "x-circle", kind: "bad" };
+      return headline("Faltó", "x-circle", "bad");
     case "late":
-      return { text: "Llegó tarde", icon: "clock", kind: "warn" };
+      return headline("Llegó tarde", "clock", "warn");
     case "excused":
-      return { text: "Falta justificada", icon: "document", kind: "warn" };
+      return headline("Falta justificada", "document", "warn");
     case "partial":
-      return { text: partialText(day), icon: "alert", kind: "warn" };
+      return headline(partialText(day), "alert", "warn");
     default:
-      return { text: "Lista aún no tomada", icon: "clock", kind: "neutral" };
+      return isWeekend(day.date)
+        ? headline("Sin clases hoy", "calendar", "neutral")
+        : headline("Lista aún no tomada", "clock", "neutral");
   }
 }
 

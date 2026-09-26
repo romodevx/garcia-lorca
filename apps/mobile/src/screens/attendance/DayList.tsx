@@ -34,6 +34,10 @@ function DayRow({ day, divider }: { day: AttendanceDay; divider: boolean }): Rea
   const pill = statusPill(day.status);
   const label = dayLabel(day.date);
   const expandable = day.classes.length > 0;
+  const toggleHint = open ? "Ocultar clases" : "Ver clases";
+  const spoken = [`${label}: ${pill.label}`, day.note, expandable ? toggleHint : undefined]
+    .filter((part): part is string => Boolean(part))
+    .join(". ");
 
   const summary = (
     <View style={styles.row}>
@@ -55,14 +59,15 @@ function DayRow({ day, divider }: { day: AttendanceDay; divider: boolean }): Rea
       {expandable ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${label}: ${pill.label}. ${open ? "Ocultar clases" : "Ver clases"}`}
+          accessibilityLabel={spoken}
+          hitSlop={ROW_HIT_SLOP}
           accessibilityState={{ expanded: open }}
           onPress={() => setOpen((v) => !v)}
         >
           {summary}
         </Pressable>
       ) : (
-        <View accessible accessibilityLabel={`${label}: ${pill.label}`}>
+        <View accessible accessibilityLabel={spoken}>
           {summary}
         </View>
       )}
@@ -70,6 +75,9 @@ function DayRow({ day, divider }: { day: AttendanceDay; divider: boolean }): Rea
     </View>
   );
 }
+
+/** Extends the toggle over the row's vertical padding, so the chevron's target is the whole row. */
+const ROW_HIT_SLOP = { top: 12, bottom: 12, left: 16, right: 16 };
 
 const styles = StyleSheet.create({
   card: { marginTop: 8 },

@@ -5,16 +5,17 @@ import { useChildAttendanceMonth } from "../state/familyData";
 import type { AsyncResource } from "../state/useAsyncResource";
 import type { AttendanceMonth } from "../api/attendance";
 import { ScreenTitle, SectionLabel } from "../ui";
-import { AsyncErrorState, AsyncLoading } from "./AsyncStates";
+import { AsyncErrorState, AsyncLoading, StaleNotice } from "./AsyncStates";
 import { DayList } from "./attendance/DayList";
 import { MonthSelector, MonthSummary } from "./attendance/MonthBar";
 import { TodayCard } from "./attendance/TodayCard";
-import { deviceMonth, monthOf, shiftMonth } from "./attendanceView";
+import { shiftMonth } from "./attendanceView";
+import { useSchoolMonth } from "./attendance/useSchoolMonth";
 
 const HTTP_NOT_FOUND = 404;
 
 export interface AttendanceScreenProps {
-  /** The month to open on; the phone's month by default (tests pin it). */
+  /** The month to ask for first; the phone's by default (tests pin it). The school's today then decides. */
   initialMonth?: string;
 }
 
@@ -27,11 +28,12 @@ export interface AttendanceScreenProps {
  */
 export function AttendanceScreen({ initialMonth }: AttendanceScreenProps): ReactElement {
   const { selectedChildId, childLoading, childError, refreshChildren } = useAppState();
-  const [openingMonth] = useState(() => initialMonth ?? deviceMonth());
-  const [selected, setSelected] = useState(openingMonth);
+  const { month: currentMonth, resource: current, today } = useSchoolMonth(selectedChildId, initialMonth);
+  // null = "the current month"; a picked month is only honoured while it is in the past.
+  const [picked, setPicked] = useState<string | null>(null);
+  const selected = picked !== null && picked < currentMonth ? picked : currentMonth;
 
-  const current = useChildAttendanceMonth(selectedChildId, openingMonth);
-  const isCurrentSelected = selected === openingMonth;
+  const isCurrentSelected = selected === currentMonth;
   const other = useChildAttendanceMonth(selectedChildId, isCurrentSelected ? null : selected);
   const shown = isCurrentSelected ? current : other;
 
@@ -42,7 +44,7 @@ export function AttendanceScreen({ initialMonth }: AttendanceScreenProps): React
   if (childError) {
     return <Failed onRetry={refreshChildren} />;
   }
-  if (current.error) {
+  if (current.error && current.data === null) {
     return <Failed onRetry={current.reload} notFound={current.errorStatus === HTTP_NOT_FOUND} />;
   }
   if (current.data === null) {
@@ -54,19 +56,22 @@ export function AttendanceScreen({ initialMonth }: AttendanceScreenProps): React
     );
   }
 
-  const today = current.data.today;
-  const todayRecord = current.data.days.find((d) => d.date === today);
-  const lastMonth = today ? monthOf(today) : openingMonth;
+  const stale = current.error || (shown.error && shown.data !== null);
+  const goNext = (): void => {
+    const next = shiftMonth(selected, 1);
+    setPicked(next < currentMonth ? next : null);
+  };
 
   return (
     <>
       <ScreenTitle>Asistencia</ScreenTitle>
-      <TodayCard day={todayRecord} />
+      {stale ? <StaleNotice /> : null}
+      <TodayCard day={today} />
       <MonthSelector
         month={selected}
-        canGoNext={selected < lastMonth}
-        onPrevious={() => setSelected((m) => shiftMonth(m, -1))}
-        onNext={() => setSelected((m) => (m < lastMonth ? shiftMonth(m, 1) : m))}
+        canGoNext={selected < currentMonth}
+        onPrevious={() => setPicked(shiftMonth(selected, -1))}
+        onNext={goNext}
       />
       <MonthSection resource={shown} />
     </>
@@ -74,7 +79,7 @@ export function AttendanceScreen({ initialMonth }: AttendanceScreenProps): React
 }
 
 function MonthSection({ resource }: { resource: AsyncResource<AttendanceMonth> }): ReactElement {
-  if (resource.error) {
+  if (resource.error && resource.data === null) {
     return (
       <AsyncErrorState
         title="No pudimos cargar este mes"

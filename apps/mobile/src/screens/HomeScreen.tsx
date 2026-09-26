@@ -1,15 +1,16 @@
 import { router } from "expo-router";
-import { useState, type ReactElement } from "react";
+import { type ReactElement } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Icon } from "../icons";
 import { useAppState } from "../state/AppState";
 import { toChildView } from "../state/childView";
 import { useRefreshHandler } from "../components/refresh";
-import { useChildAccount, useChildAttendanceMonth } from "../state/familyData";
+import { useChildAccount } from "../state/familyData";
 import { useTheme } from "../theme";
 import { Card, Chip, SectionLabel, TintIcon } from "../ui";
 import { AsyncErrorState } from "./AsyncStates";
-import { deviceMonth, todayHeadline } from "./attendanceView";
+import { todayHeadline } from "./attendanceView";
+import { useSchoolMonth } from "./attendance/useSchoolMonth";
 import { pesos } from "./format";
 
 /**
@@ -24,8 +25,7 @@ export function HomeScreen(): ReactElement {
   const { child, selectedChildId, unreadCount, childError, refreshChildren, refreshNotifications } = useAppState();
   const view = toChildView(child);
   const account = useChildAccount(selectedChildId);
-  const [month] = useState(deviceMonth);
-  const attendance = useChildAttendanceMonth(selectedChildId, month);
+  const { resource: attendance, today: todayRecord } = useSchoolMonth(selectedChildId);
   useRefreshHandler(async () => {
     await Promise.all([account.reload(), attendance.reload(), refreshNotifications()]);
   });
@@ -43,8 +43,6 @@ export function HomeScreen(): ReactElement {
     );
   }
 
-  // The school's today, from the same read the Asistencia screen uses.
-  const todayRecord = attendance.data?.days.find((d) => d.date === attendance.data?.today);
   const balanceCents = account.data?.totalBalanceCents ?? null;
   const settled = balanceCents !== null && balanceCents <= 0;
 
@@ -72,7 +70,7 @@ export function HomeScreen(): ReactElement {
           <View style={styles.heroMain}>
             <Text style={[styles.heroLabel, { color: theme.colors.text2, fontFamily: theme.fonts.ui }]}>Asistencia de hoy</Text>
             <Text style={[styles.heroValue, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>
-              {attendance.data ? todayHeadline(todayRecord).text : "—"}
+              {todayHeadline(todayRecord).text}
             </Text>
             {todayRecord?.note ? (
               <Text style={[styles.heroSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{todayRecord.note}</Text>

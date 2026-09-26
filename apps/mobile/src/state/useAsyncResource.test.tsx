@@ -89,7 +89,7 @@ describe("useAsyncResource identity change", () => {
   it("keeps the data on a manual reload (pull-to-refresh)", async () => {
     let resolveSecond: (v: string) => void = () => undefined;
     const load = jest
-      .fn()
+      .fn<Promise<string>, []>()
       .mockResolvedValueOnce("first")
       .mockImplementationOnce(() => new Promise<string>((resolve) => (resolveSecond = resolve)));
     let reload: () => Promise<void> = async () => undefined;

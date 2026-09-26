@@ -47,3 +47,33 @@ describe.each<[string, () => ReactElement, string]>([
     await waitFor(() => expect(callsTo(fetchMock, endpoint)).toBe(before + 1));
   });
 });
+
+describe.each<[string, () => ReactElement, string, string]>([
+  ["Cuenta", () => <AccountScreen />, "/family/students/s1/account", "No pudimos cargar tu cuenta"],
+  ["Calificaciones", () => <GradesScreen />, "/family/students/s1/grades", "No pudimos cargar las calificaciones"],
+])("%s failed refresh", (_name, ui, endpoint, fullScreenError) => {
+  beforeEach(async () => {
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+  });
+  afterEach(async () => {
+    await clearTokens();
+  });
+
+  it("keeps the content and shows an inline notice instead of a full-screen error", async () => {
+    const fetchMock = mockGateway();
+    await renderWithProviders(<ScreenScroll>{ui()}</ScreenScroll>);
+    await waitFor(() => expect(callsTo(fetchMock, endpoint)).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getByTestId("screen-scroll").props.refreshControl).toBeTruthy());
+
+    fetchMock.mockImplementation(async (url: string) =>
+      String(url).split("?")[0]?.endsWith(endpoint)
+        ? { ok: false, status: 500, json: async () => ({}) }
+        : { ok: true, status: 200, json: async () => ({ students: [kid], notifications: [] }) },
+    );
+    const control = screen.getByTestId("screen-scroll").props.refreshControl as { props: { onRefresh: () => void } };
+    await act(async () => control.props.onRefresh());
+
+    await waitFor(() => expect(screen.getByText("No pudimos actualizar. Desliza para reintentar.")).toBeTruthy());
+    expect(screen.queryByText(fullScreenError)).toBeNull();
+  });
+});

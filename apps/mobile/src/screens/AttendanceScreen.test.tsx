@@ -19,6 +19,9 @@ const day = (over: Partial<AttendanceDay>): AttendanceDay => ({
   ...over,
 });
 
+/** The school's today the fake gateway answers with; tests move it to roll midnight. */
+let serverToday = "2026-09-28";
+
 /** Routes family requests; `months` answers attendance per YYYY-MM. */
 function mockGateway(months: Record<string, MonthReply | (() => MonthReply)>): jest.Mock {
   const fetchMock = jest.fn(async (url: string) => {
@@ -31,7 +34,7 @@ function mockGateway(months: Record<string, MonthReply | (() => MonthReply)>): j
       return {
         ok: true,
         status: 200,
-        json: async () => ({ month: match[1], today: "2026-09-28", days: reply.days ?? [], summary: reply.summary ?? SUMMARY }),
+        json: async () => ({ month: match[1], today: serverToday, days: reply.days ?? [], summary: reply.summary ?? SUMMARY }),
       };
     }
     if (u.endsWith("/family/students")) return { ok: true, status: 200, json: async () => ({ students: [child] }) };
@@ -44,10 +47,12 @@ function mockGateway(months: Record<string, MonthReply | (() => MonthReply)>): j
 const attendanceCalls = (mock: jest.Mock, month: string): number =>
   mock.mock.calls.filter((c) => String((c as unknown[])[0]).includes(`attendance?month=${month}`)).length;
 
-const render = (): Promise<unknown> => renderWithProviders(<AttendanceScreen initialMonth="2026-09" />);
+const render = (initialMonth = "2026-09"): Promise<unknown> =>
+  renderWithProviders(<AttendanceScreen initialMonth={initialMonth} />);
 
 describe("AttendanceScreen", () => {
   beforeEach(async () => {
+    serverToday = "2026-09-28";
     await saveTokens({ accessToken: "a1", refreshToken: "r1" });
   });
   afterEach(async () => {
@@ -77,10 +82,17 @@ describe("AttendanceScreen", () => {
       expect(screen.getByText("Sin aviso")).toBeTruthy();
     });
 
-    it("says the list has not been taken yet when today has no record", async () => {
+    it("says nothing is known yet (never a false 'not taken') when today has no entry", async () => {
       mockGateway({ "2026-09": { status: 200, days: [day({ date: "2026-09-25", status: "absent" })] } });
       await render();
-      await waitFor(() => expect(screen.getByLabelText("Hoy: Lista aún no tomada")).toBeTruthy());
+      await waitFor(() => expect(screen.getByLabelText("Hoy: Sin datos todavía")).toBeTruthy());
+      expect(screen.queryByLabelText("Hoy: Lista aún no tomada")).toBeNull();
+    });
+
+    it("reads the note aloud with today's status", async () => {
+      mockGateway({ "2026-09": { status: 200, days: [day({ status: "late", note: "Llegó 8:15" })] } });
+      await render();
+      await waitFor(() => expect(screen.getByLabelText("Hoy: Llegó tarde. Llegó 8:15")).toBeTruthy());
     });
 
     it("says the list has not been taken yet for a not_taken day", async () => {
@@ -117,6 +129,7 @@ describe("AttendanceScreen", () => {
     await render();
     await waitFor(() => expect(screen.getByText("Lun 28 sep")).toBeTruthy());
     expect(screen.getByText("Retardo")).toBeTruthy();
+    expect(screen.getByLabelText("Lun 28 sep: Retardo. Llegó 8:15")).toBeTruthy();
     expect(screen.getAllByText("Llegó 8:15").length).toBeGreaterThan(0);
 
     expect(screen.queryByLabelText("Historia: Faltó")).toBeNull();
@@ -199,5 +212,59 @@ describe("AttendanceScreen", () => {
 
     await act(async () => requestFreshData());
     await waitFor(() => expect(attendanceCalls(fetchMock, "2026-09")).toBe(before + 2));
+  });
+
+  describe("the school's month, not the phone's", () => {
+    it("re-keys to the school's month when the phone clock is behind", async () => {
+      const fetchMock = mockGateway({ "2026-09": { status: 200, days: [day({})] } });
+      await render("2026-08");
+      await waitFor(() => expect(screen.getByText("Septiembre 2026")).toBeTruthy());
+      await waitFor(() => expect(screen.getByLabelText("Hoy: Asistió")).toBeTruthy());
+      expect(attendanceCalls(fetchMock, "2026-09")).toBeGreaterThan(0);
+      expect(screen.getByLabelText("Mes siguiente").props.accessibilityState).toMatchObject({ disabled: true });
+    });
+
+    it("clamps to the school's month when the phone clock is ahead", async () => {
+      mockGateway({ "2026-09": { status: 200, days: [day({})] } });
+      await render("2026-10");
+      await waitFor(() => expect(screen.getByText("Septiembre 2026")).toBeTruthy());
+      await waitFor(() => expect(screen.getByLabelText("Hoy: Asistió")).toBeTruthy());
+      expect(screen.queryByText("Octubre 2026")).toBeNull();
+      expect(screen.getByLabelText("Mes siguiente").props.accessibilityState).toMatchObject({ disabled: true });
+    });
+
+    it("follows the school into a new month when the app comes back after midnight", async () => {
+      const fetchMock = mockGateway({
+        "2026-09": { status: 200, days: [day({})] },
+        "2026-10": { status: 200, days: [day({ date: "2026-10-01", status: "absent" })] },
+      });
+      await render();
+      await waitFor(() => expect(screen.getByLabelText("Hoy: Asistió")).toBeTruthy());
+
+      serverToday = "2026-10-01";
+      await act(async () => requestFreshData());
+
+      await waitFor(() => expect(screen.getByText("Octubre 2026")).toBeTruthy());
+      await waitFor(() => expect(screen.getByLabelText("Hoy: Faltó")).toBeTruthy());
+      expect(attendanceCalls(fetchMock, "2026-10")).toBeGreaterThan(0);
+    });
+  });
+
+  it("keeps the month on screen when a background reload fails, with an inline notice", async () => {
+    let calls = 0;
+    mockGateway({
+      "2026-09": () => {
+        calls += 1;
+        return calls === 1 ? { status: 200, days: [day({})] } : { status: 500 };
+      },
+    });
+    await render();
+    await waitFor(() => expect(screen.getByLabelText("Hoy: Asistió")).toBeTruthy());
+
+    await act(async () => requestFreshData());
+
+    await waitFor(() => expect(screen.getByText("No pudimos actualizar. Desliza para reintentar.")).toBeTruthy());
+    expect(screen.getByLabelText("Hoy: Asistió")).toBeTruthy();
+    expect(screen.queryByText("No pudimos cargar la asistencia")).toBeNull();
   });
 });
