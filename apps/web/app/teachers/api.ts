@@ -200,3 +200,39 @@ export function reassignTeachingAssignment(
 ): Promise<TeachingAssignment> {
   return sendJSON<TeachingAssignment>("PATCH", baseURL, `/teaching-assignments/${encodeURIComponent(id)}`, { teacherId });
 }
+
+// --- access to the system (the teacher's login) -----------------------------
+
+/** "invited": the login exists and waits for its password; "active": it is in use. */
+export type TeacherAccessStatus = "invited" | "active";
+
+/** What giving a teacher access did. */
+export interface TeacherAccessResult {
+  /** The teacher, now linked to the login (`userId` set). */
+  teacher: Teacher;
+  userId: string;
+  /** Where the invitation went. */
+  email: string;
+  status: TeacherAccessStatus;
+  /**
+   * The activation link, only when no mail provider sent it (local dev): the
+   * office hands it over itself.
+   */
+  inviteUrl?: string;
+}
+
+/**
+ * Gives a teacher a login with the teacher role and mails the invitation; for
+ * an already invited teacher it sends the invitation again. Idempotent on the
+ * server, so a second press never creates a second account.
+ */
+export async function grantTeacherAccess(baseURL: string, teacherId: string): Promise<TeacherAccessResult> {
+  const res = await authFetch(url(baseURL, `/teachers/${encodeURIComponent(teacherId)}/access`), {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw await failure(res);
+  }
+  return (await res.json()) as TeacherAccessResult;
+}

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfigError } from "../config/api";
 import {
   assignTeachingLoad,
+  grantTeacherAccess,
   createTeacher,
   deleteTeachingAssignment,
   reassignTeachingAssignment,
@@ -201,5 +202,42 @@ describe("carga académica", () => {
     expect(init.method).toBe("PATCH");
     expect(init.credentials).toBe("include");
     expect(JSON.parse(init.body as string)).toEqual({ teacherId: "t2" });
+  });
+});
+
+describe("teacher access", () => {
+  const linked = { id: "tch1", firstName: "Ada", lastName: "Lovelace", email: "ada@example.com", userId: "u1" };
+
+  it("grantTeacherAccess POSTs with no body to /teachers/{id}/access and returns the outcome", async () => {
+    const outcome = { teacher: linked, userId: "u1", email: "ada@example.com", status: "invited", inviteUrl: "http://web/activar?t=x" };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(outcome));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await grantTeacherAccess(BASE, "tch 1");
+
+    expect(res).toEqual(outcome);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/teachers/tch%201/access");
+    expect(init.method).toBe("POST");
+    expect(init.credentials).toBe("include");
+    expect(init.body).toBeUndefined();
+  });
+
+  it("grantTeacherAccess leaves inviteUrl out when the server sent none", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ teacher: linked, userId: "u1", email: "ada@example.com", status: "active" })));
+
+    const res = await grantTeacherAccess(BASE, "tch1");
+
+    expect(res.status).toBe("active");
+    expect(res.inviteUrl).toBeUndefined();
+  });
+
+  it("grantTeacherAccess throws a ConfigError carrying the status and the server's words", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("el docente no tiene correo\n", { status: 400 })));
+
+    const call = grantTeacherAccess(BASE, "tch1");
+
+    await expect(call).rejects.toBeInstanceOf(ConfigError);
+    await expect(call).rejects.toMatchObject({ status: 400, detail: "el docente no tiene correo" });
   });
 });
