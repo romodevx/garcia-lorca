@@ -19,6 +19,7 @@ func toRecord(m attendanceModel) service.AttendanceRecord {
 		SubjectID:    fromNullable(m.SubjectID),
 		Status:       m.Status,
 		Note:         m.Note,
+		Revision:     m.Revision,
 	}
 }
 

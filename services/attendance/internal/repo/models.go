@@ -8,7 +8,8 @@ import "time"
 // only its date part is meaningful. SubjectID is NULL for a daily list's mark and
 // the subject UUID for a per-class one. Status is constrained by the DB to
 // present|absent|late|excused, but the service never stores "present" (a student
-// with no row IS present). CreatedAt/UpdatedAt are managed on write.
+// with no row IS present). Revision is the mark's version (1 on insert, bumped
+// by every in-place write). CreatedAt/UpdatedAt are managed on write.
 type attendanceModel struct {
 	ID           string    `gorm:"column:id;primaryKey"`
 	TenantID     string    `gorm:"column:tenant_id"`
@@ -17,6 +18,7 @@ type attendanceModel struct {
 	SubjectID    *string   `gorm:"column:subject_id"`
 	Status       string    `gorm:"column:status"`
 	Note         string    `gorm:"column:note"`
+	Revision     int64     `gorm:"column:revision;default:1"`
 	CreatedAt    time.Time `gorm:"column:created_at"`
 	UpdatedAt    time.Time `gorm:"column:updated_at"`
 }

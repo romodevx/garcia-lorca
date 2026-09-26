@@ -366,6 +366,124 @@ func TestHandleEventDistinctEventsBothLand(t *testing.T) {
 	}
 }
 
+// versionedMarked / versionedAbsence build attendance events carrying the mark
+// version: attendance keeps a mark's id across corrections, so the version is
+// what tells two changes of the same mark apart.
+func versionedMarked(t *testing.T, recordID, status string, version int64) pubsub.Message {
+	t.Helper()
+	return protoMessage(t, "AttendanceMarked", &attendancev1.AttendanceMarked{
+		RecordId: recordID, EnrollmentId: "cccccccc-0000-0000-0000-000000000002",
+		StudentId: studentID, TenantId: tenantID, Date: "2026-08-06", Status: status, MarkVersion: version,
+	}, tenantID)
+}
+
+func versionedAbsence(t *testing.T, recordID string, version int64) pubsub.Message {
+	t.Helper()
+	return protoMessage(t, "AbsenceRecorded", &attendancev1.AbsenceRecorded{
+		RecordId: recordID, EnrollmentId: "cccccccc-0000-0000-0000-000000000002",
+		StudentId: studentID, TenantId: tenantID, Date: "2026-08-06", MarkVersion: version,
+	}, tenantID)
+}
+
+// TestHandleEventCorrectionsOfOneMarkAreNewNotifications is the regression for
+// corrections that never reached the family: a correction keeps the record id,
+// so keying the ledger on the id alone swallowed late → excused (no "Ausencia
+// justificada") and the second absence of absent → excused → absent. Keyed on
+// (id, version), each correction lands, while a redelivery of one version is
+// still deduped.
+func TestHandleEventCorrectionsOfOneMarkAreNewNotifications(t *testing.T) {
+	const recordID = "eeeeeeee-0000-0000-0000-0000000000a1"
+	titles := func(repo *fakeRepo) []string {
+		out := make([]string, 0, len(repo.notifications))
+		for _, n := range repo.notifications {
+			out = append(out, n.Title)
+		}
+		return out
+	}
+	tests := []struct {
+		name       string
+		deliveries []pubsub.Message
+		want       []string
+	}{
+		{
+			name: "late then excused",
+			deliveries: []pubsub.Message{
+				versionedMarked(t, recordID, "late", 1),
+				versionedMarked(t, recordID, "excused", 2),
+			},
+			want: []string{"Llegada tarde", "Ausencia justificada"},
+		},
+		{
+			name: "absent, excused, absent again",
+			deliveries: []pubsub.Message{
+				versionedAbsence(t, recordID, 1),
+				versionedMarked(t, recordID, "excused", 2),
+				versionedAbsence(t, recordID, 3),
+			},
+			want: []string{"Ausencia registrada", "Ausencia justificada", "Ausencia registrada"},
+		},
+		{
+			name: "a redelivered version is deduped",
+			deliveries: []pubsub.Message{
+				versionedMarked(t, recordID, "late", 1),
+				versionedMarked(t, recordID, "late", 1),
+				versionedMarked(t, recordID, "excused", 2),
+				versionedMarked(t, recordID, "excused", 2),
+			},
+			want: []string{"Llegada tarde", "Ausencia justificada"},
+		},
+		{
+			name: "an unversioned (pre-versioning) event still dedupes on its id",
+			deliveries: []pubsub.Message{
+				markedMessage(t, recordID, studentID, tenantID, "2026-08-06", "late"),
+				markedMessage(t, recordID, studentID, tenantID, "2026-08-06", "late"),
+			},
+			want: []string{"Llegada tarde"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newFakeRepo()
+			svc, _ := newService(t, repo, newFakeGuardians(), &spySender{})
+			for _, msg := range tt.deliveries {
+				if err := svc.HandleEvent(context.Background(), msg); err != nil {
+					t.Fatalf("HandleEvent: %v", err)
+				}
+			}
+			if got := titles(repo); !slices.Equal(got, tt.want) {
+				t.Errorf("notifications = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// The ledger key keeps the documented "<event type>:<event id>" form for an
+// unversioned event (so events already in flight still match their claims) and
+// appends ":<version>" when the event carries one.
+func TestHandleEventLedgerKeyCarriesTheMarkVersion(t *testing.T) {
+	const recordID = "eeeeeeee-0000-0000-0000-0000000000a2"
+	repo := newFakeRepo()
+	svc, _ := newService(t, repo, newFakeGuardians(), &spySender{})
+	for _, msg := range []pubsub.Message{
+		markedMessage(t, recordID, studentID, tenantID, "2026-08-06", "late"),
+		versionedMarked(t, recordID, "excused", 2),
+		versionedAbsence(t, recordID, 3),
+	} {
+		if err := svc.HandleEvent(context.Background(), msg); err != nil {
+			t.Fatalf("HandleEvent: %v", err)
+		}
+	}
+	for _, key := range []string{
+		"AttendanceMarked:" + recordID,
+		"AttendanceMarked:" + recordID + ":2",
+		"AbsenceRecorded:" + recordID + ":3",
+	} {
+		if !repo.claimed[key] {
+			t.Errorf("ledger key %q not claimed; claimed = %v", key, repo.claimed)
+		}
+	}
+}
+
 // TestHandleEventPushesOnlyToTheStudentsGuardians is the targeting contract of
 // this phase, and the reason the guardian reader exists: a notification reaches
 // the devices of the student's OWN guardians and nobody else's. The stranger's

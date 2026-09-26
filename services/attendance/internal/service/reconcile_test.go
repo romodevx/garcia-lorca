@@ -161,6 +161,59 @@ func TestSaveDailyAttendanceChangeToAbsentPublishesAbsence(t *testing.T) {
 	assert.Equal(t, "rec-1", pub.absences[0].RecordID)
 }
 
+// Every stored change of a mark is a NEW version of it, so a consumer that
+// dedupes on (record id, version) hears each correction — late→excused, and a
+// second absence after absent→excused→absent — while the record id stays the
+// stored one. A cleared mark is announced one version past its last stored
+// revision; the absence companion carries the same version as its marked event.
+func TestSaveDailyAttendanceEveryStatusChangeIsANewMarkVersion(t *testing.T) {
+	repo := newFakeRepo()
+	pub := &spyPublisher{}
+	svc := newService(t, repo, pub, "rec-1", "rec-2", "rec-3", "rec-4", "rec-5", "rec-6")
+	ctx := context.Background()
+	saveAna := func(status string) {
+		t.Helper()
+		pub.marked, pub.absences = nil, nil
+		marks := []service.Mark{}
+		if status != "" {
+			marks = append(marks, service.Mark{EnrollmentID: enrollmentAna, Status: status})
+		}
+		_, _, err := save(svc, ctx, groupID, schoolDay, marks)
+		require.NoError(t, err)
+	}
+	type version struct {
+		Status  string
+		Version int64
+	}
+	marked := func() []version {
+		out := make([]version, 0, len(pub.marked))
+		for _, e := range pub.marked {
+			assert.Equal(t, "rec-1", e.RecordID, "the stored id survives every correction")
+			out = append(out, version{e.Status, e.MarkVersion})
+		}
+		return out
+	}
+
+	saveAna("absent")
+	assert.Equal(t, []version{{"absent", 1}}, marked())
+	require.Len(t, pub.absences, 1)
+	assert.Equal(t, int64(1), pub.absences[0].MarkVersion)
+
+	saveAna("excused")
+	assert.Equal(t, []version{{"excused", 2}}, marked())
+
+	saveAna("absent")
+	assert.Equal(t, []version{{"absent", 3}}, marked())
+	require.Len(t, pub.absences, 1)
+	assert.Equal(t, int64(3), pub.absences[0].MarkVersion, "the second absence is a new version, not a duplicate")
+
+	saveAna("absent")
+	assert.Empty(t, pub.marked, "an unchanged re-save publishes nothing")
+
+	saveAna("")
+	assert.Equal(t, []version{{"present", 4}}, marked(), "a cleared mark is one version past its last revision")
+}
+
 // --- per-class lists -------------------------------------------------------------
 
 // A per-class list is its own key: it is reconciled and read apart from the

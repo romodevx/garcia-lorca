@@ -31,6 +31,8 @@ const (
 	groupRace     = "90000000-0000-0000-0000-000000000105"
 
 	enrollmentListRace = "e0000000-0000-0000-0000-000000000104"
+	enrollmentRevision = "e0000000-0000-0000-0000-000000000105"
+	groupRevision      = "90000000-0000-0000-0000-000000000106"
 
 	subjectMath    = "50000000-0000-0000-0000-00000000000a"
 	subjectSpanish = "50000000-0000-0000-0000-00000000000b"
@@ -288,4 +290,50 @@ func waitAtMost(wg *sync.WaitGroup, d time.Duration) {
 	case <-ch:
 	case <-time.After(d):
 	}
+}
+
+// Every stored write of a mark bumps its revision, and ReconcileList reports the
+// STORED revision (from RETURNING), never the plan's: an insert is 1, each
+// in-place update (status or note) is one more, a planned insert that lands on
+// an existing row is reported at that row's next revision, reads carry it, and a
+// cleared mark is reported with its last stored revision. This is what makes
+// every correction a distinct (record id, version) event for comms.
+func TestReconcileListReportsTheStoredRevision(t *testing.T) {
+	r := appRepo(t, tenantA)
+	ctx := context.Background()
+	date := day(t, "2026-09-21")
+	key := service.ListKey{GroupID: groupRevision, Date: date}
+	scope := []string{enrollmentRevision}
+	storedID := "a0000000-0000-0000-0000-000000000601"
+
+	changes := saveList(t, r, key, scope, testTaker, mark(storedID, enrollmentRevision, date, "absent", ""))
+	require.Len(t, changes.Inserts, 1)
+	assert.Equal(t, int64(1), changes.Inserts[0].Revision)
+
+	changes = saveList(t, r, key, scope, testTaker, mark("a0000000-0000-0000-0000-000000000602", enrollmentRevision, date, "excused", ""))
+	require.Len(t, changes.Updates, 1)
+	assert.Equal(t, storedID, changes.Updates[0].Record.ID)
+	assert.Equal(t, int64(2), changes.Updates[0].Record.Revision)
+
+	changes = saveList(t, r, key, scope, testTaker, mark("a0000000-0000-0000-0000-000000000603", enrollmentRevision, date, "excused", "receta"))
+	require.Len(t, changes.Updates, 1)
+	assert.Equal(t, int64(3), changes.Updates[0].Record.Revision, "a note-only write is a stored change too")
+
+	// A plan that insists on inserting over the stored row (a writer outside
+	// DiffList) is reported as an update at the row's next revision.
+	changes, err := r.ReconcileList(ctx, key, scope, testTaker, func(map[string]service.AttendanceRecord) (service.ListChanges, error) {
+		return service.ListChanges{Inserts: []service.AttendanceRecord{mark("a0000000-0000-0000-0000-000000000604", enrollmentRevision, date, "absent", "")}}, nil
+	})
+	require.NoError(t, err)
+	require.Len(t, changes.Updates, 1)
+	assert.Equal(t, storedID, changes.Updates[0].Record.ID)
+	assert.Equal(t, int64(4), changes.Updates[0].Record.Revision)
+
+	marks, err := r.MarksForList(ctx, scope, key)
+	require.NoError(t, err)
+	assert.Equal(t, int64(4), marks[enrollmentRevision].Revision, "reads carry the stored revision")
+
+	changes = saveList(t, r, key, scope, testTaker)
+	require.Len(t, changes.Deletes, 1)
+	assert.Equal(t, int64(4), changes.Deletes[0].Revision, "a cleared mark reports its last stored revision")
 }

@@ -186,6 +186,12 @@ message AttendanceMarked {
   string date = 5;
   string status = 6;
   string subject_id = 7;
+  // mark_version is the stored mark's revision this event announces: every
+  // stored change of a mark (per record_id) yields a strictly greater version,
+  // and a mark cleared to present carries its last revision + 1. Consumers
+  // dedupe on (record_id, mark_version), so a correction is a NEW event while a
+  // redelivery of the same one is not. 0 means unset (a pre-versioning event).
+  int64 mark_version = 8;
 }
 
 // AbsenceRecorded fires when a student is recorded absent on a date (feeds
@@ -197,4 +203,10 @@ message AbsenceRecorded {
   string tenant_id = 4;
   string date = 5;
   string subject_id = 6;
+  // mark_version is the stored mark's revision this event announces: every
+  // stored change of a mark (per record_id) yields a strictly greater version,
+  // and a mark cleared to present carries its last revision + 1. Consumers
+  // dedupe on (record_id, mark_version), so a correction is a NEW event while a
+  // redelivery of the same one is not. 0 means unset (a pre-versioning event).
+  int64 mark_version = 7;
 }

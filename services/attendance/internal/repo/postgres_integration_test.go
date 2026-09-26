@@ -45,6 +45,7 @@ const (
 var migrationFiles = []string{
 	"../../../../migrations/attendance/0001_init.sql",
 	"../../../../migrations/attendance/0002_per_class_and_sessions.sql",
+	"../../../../migrations/attendance/0003_mark_revision.sql",
 }
 
 var (

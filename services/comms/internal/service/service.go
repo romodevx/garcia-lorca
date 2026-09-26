@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -373,7 +374,7 @@ func (s *CommsService) render(eventType string, data []byte) (eventKey string, n
 		if err := proto.Unmarshal(data, &e); err != nil {
 			return "", Notification{}, fmt.Errorf("%w: unreadable %s payload: %w", errUndeliverable, eventType, err)
 		}
-		return s.notification(eventType, e.GetRecordId(), e.GetStudentId(), e.GetTenantId(), Notification{
+		return s.notification(eventType, e.GetRecordId(), e.GetMarkVersion(), e.GetStudentId(), e.GetTenantId(), Notification{
 			Type:  typeAbsence,
 			Title: "Ausencia registrada",
 			Body:  fmt.Sprintf("Se registró una ausencia el %s.", e.GetDate()),
@@ -388,7 +389,7 @@ func (s *CommsService) render(eventType string, data []byte) (eventKey string, n
 		if err != nil {
 			return "", Notification{}, err
 		}
-		return s.notification(eventType, e.GetRecordId(), e.GetStudentId(), e.GetTenantId(), Notification{
+		return s.notification(eventType, e.GetRecordId(), e.GetMarkVersion(), e.GetStudentId(), e.GetTenantId(), Notification{
 			Type:  typeAttendance,
 			Title: title,
 			Body:  body,
@@ -399,7 +400,7 @@ func (s *CommsService) render(eventType string, data []byte) (eventKey string, n
 		if err := proto.Unmarshal(data, &e); err != nil {
 			return "", Notification{}, fmt.Errorf("%w: unreadable %s payload: %w", errUndeliverable, eventType, err)
 		}
-		return s.notification(eventType, e.GetPaymentId(), e.GetStudentId(), e.GetTenantId(), Notification{
+		return s.notification(eventType, e.GetPaymentId(), unversioned, e.GetStudentId(), e.GetTenantId(), Notification{
 			Type:  typePayment,
 			Title: "Pago recibido",
 			Body:  fmt.Sprintf("Recibimos tu pago de %s MXN.", pesos(e.GetAmountCents())),
@@ -410,11 +411,19 @@ func (s *CommsService) render(eventType string, data []byte) (eventKey string, n
 	}
 }
 
+// unversioned is the version of an event whose id is never reused (a payment),
+// and what a pre-versioning attendance event decodes to.
+const unversioned int64 = 0
+
 // notification completes a rendered notification with the parts every event
 // shares — its ledger key and its student — after the checks that make it
 // storable at all. The key is "<event type>:<event id>", the form the
-// processed_events column documents.
-func (s *CommsService) notification(eventType, eventID, studentID, tenantID string, n Notification) (string, Notification, error) {
+// processed_events column documents, plus ":<version>" for a versioned event:
+// attendance keeps a mark's id across corrections, so only the version tells a
+// correction (a new notification) from a redelivery (deduped). An unversioned
+// event keeps the bare key, so events published before versioning still match
+// the claims they already made.
+func (s *CommsService) notification(eventType, eventID string, version int64, studentID, tenantID string, n Notification) (string, Notification, error) {
 	if eventID == "" {
 		return "", Notification{}, fmt.Errorf("%w: %s carries no event id", errUndeliverable, eventType)
 	}
@@ -425,7 +434,17 @@ func (s *CommsService) notification(eventType, eventID, studentID, tenantID stri
 		return "", Notification{}, fmt.Errorf("%w: %s belongs to another tenant", errUndeliverable, eventType)
 	}
 	n.StudentID = studentID
-	return eventType + ":" + eventID, n, nil
+	return ledgerKey(eventType, eventID, version), n, nil
+}
+
+// ledgerKey is the idempotency key of one event: "<type>:<id>" or, when the
+// event is versioned, "<type>:<id>:<version>".
+func ledgerKey(eventType, eventID string, version int64) string {
+	key := eventType + ":" + eventID
+	if version == unversioned {
+		return key
+	}
+	return key + ":" + strconv.FormatInt(version, 10)
 }
 
 // attendanceCopy renders the copy for a general attendance exception. A status

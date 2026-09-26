@@ -40,6 +40,7 @@ func TestPublishAttendanceMarkedMarshalsProtoToAttendanceEventsTopic(t *testing.
 		Date:         "2026-09-15",
 		Status:       "late",
 		SubjectID:    "sub-1",
+		MarkVersion:  3,
 	})
 	if err != nil {
 		t.Fatalf("PublishAttendanceMarked: %v", err)
@@ -68,7 +69,7 @@ func TestPublishAttendanceMarkedMarshalsProtoToAttendanceEventsTopic(t *testing.
 	if got.GetRecordId() != "rec-1" || got.GetEnrollmentId() != "enr-1" || got.GetStudentId() != "stu-1" {
 		t.Errorf("payload ids = %+v", &got)
 	}
-	if got.GetTenantId() != "t1" || got.GetDate() != "2026-09-15" || got.GetStatus() != "late" || got.GetSubjectId() != "sub-1" {
+	if got.GetTenantId() != "t1" || got.GetDate() != "2026-09-15" || got.GetStatus() != "late" || got.GetSubjectId() != "sub-1" || got.GetMarkVersion() != 3 {
 		t.Errorf("payload body = %+v", &got)
 	}
 }
@@ -84,6 +85,7 @@ func TestPublishAbsenceRecordedMarshalsProtoToAttendanceEventsTopic(t *testing.T
 		TenantID:     "t1",
 		Date:         "2026-09-16",
 		SubjectID:    "sub-2",
+		MarkVersion:  4,
 	})
 	if err != nil {
 		t.Fatalf("PublishAbsenceRecorded: %v", err)
@@ -112,7 +114,7 @@ func TestPublishAbsenceRecordedMarshalsProtoToAttendanceEventsTopic(t *testing.T
 	if got.GetRecordId() != "rec-2" || got.GetEnrollmentId() != "enr-2" || got.GetStudentId() != "stu-2" {
 		t.Errorf("payload ids = %+v", &got)
 	}
-	if got.GetTenantId() != "t1" || got.GetDate() != "2026-09-16" || got.GetSubjectId() != "sub-2" {
+	if got.GetTenantId() != "t1" || got.GetDate() != "2026-09-16" || got.GetSubjectId() != "sub-2" || got.GetMarkVersion() != 4 {
 		t.Errorf("payload body = %+v", &got)
 	}
 }

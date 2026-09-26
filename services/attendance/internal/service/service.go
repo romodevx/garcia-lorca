@@ -83,6 +83,10 @@ type AttendanceRecord struct {
 	SubjectID    string
 	Status       string
 	Note         string
+	// Revision is the stored row's version: 1 when inserted, bumped by every
+	// in-place write. The repository reports it as STORED (never the plan's
+	// guess); it is what a mark event's version is made of.
+	Revision int64
 }
 
 // ListKey identifies one pass list: a group's school day and, for a per-class
@@ -164,6 +168,7 @@ type AbsenceEvent struct {
 	TenantID     string
 	Date         string
 	SubjectID    string
+	MarkVersion  int64 // the mark's stored revision; with RecordID, the consumer's dedupe key
 }
 
 // MarkedEvent announces that a student's mark CHANGED on a list: a new
@@ -178,6 +183,7 @@ type MarkedEvent struct {
 	Date         string
 	Status       string
 	SubjectID    string
+	MarkVersion  int64 // the mark's stored revision; with RecordID, the consumer's dedupe key
 }
 
 // Publisher announces stored attendance on the messaging boundary. Publishing is
@@ -479,21 +485,31 @@ func (s *AttendanceService) publishChanges(ctx context.Context, changes ListChan
 		return
 	}
 	for _, rec := range changes.Inserts {
-		s.publishMark(ctx, rec, rec.Status, studentByEnrollment)
+		s.publishMark(ctx, rec, rec.Status, rec.Revision, studentByEnrollment)
 	}
 	for _, u := range changes.Updates {
 		if u.StatusChanged {
-			s.publishMark(ctx, u.Record, u.Record.Status, studentByEnrollment)
+			s.publishMark(ctx, u.Record, u.Record.Status, u.Record.Revision, studentByEnrollment)
 		}
 	}
 	for _, rec := range changes.Deletes {
-		s.publishMark(ctx, rec, statusPresent, studentByEnrollment)
+		s.publishMark(ctx, rec, statusPresent, clearedVersion(rec), studentByEnrollment)
 	}
 }
 
-// publishMark announces one changed mark as status, plus the absence companion
-// when status is absent.
-func (s *AttendanceService) publishMark(ctx context.Context, rec AttendanceRecord, status string, studentByEnrollment map[string]string) {
+// clearedVersion is the version announcing that a stored mark was cleared back
+// to present: one past its last stored revision. The row is gone, and a later
+// exception for the same student·day is a new row with a new id, so no other
+// event can ever carry this (record id, version) pair.
+func clearedVersion(rec AttendanceRecord) int64 {
+	return rec.Revision + 1
+}
+
+// publishMark announces one changed mark as status at version, plus the absence
+// companion (same version) when status is absent. The version is what makes a
+// correction a NEW event to a consumer that dedupes on (record id, version),
+// while the record id stays the stored one.
+func (s *AttendanceService) publishMark(ctx context.Context, rec AttendanceRecord, status string, version int64, studentByEnrollment map[string]string) {
 	day := rec.Date.Format(dateLayout)
 	studentID := studentByEnrollment[rec.EnrollmentID]
 	err := s.publisher.PublishAttendanceMarked(ctx, MarkedEvent{
@@ -504,6 +520,7 @@ func (s *AttendanceService) publishMark(ctx context.Context, rec AttendanceRecor
 		Date:         day,
 		Status:       status,
 		SubjectID:    rec.SubjectID,
+		MarkVersion:  version,
 	})
 	s.logDroppedEvent(err, rec.ID)
 	if status != statusAbsent {
@@ -516,6 +533,7 @@ func (s *AttendanceService) publishMark(ctx context.Context, rec AttendanceRecor
 		TenantID:     s.tenantID,
 		Date:         day,
 		SubjectID:    rec.SubjectID,
+		MarkVersion:  version,
 	})
 	s.logDroppedEvent(err, rec.ID)
 }

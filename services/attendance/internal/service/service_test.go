@@ -101,20 +101,31 @@ func (f *fakeRepo) ReconcileList(_ context.Context, key service.ListKey, enrollm
 	if f.err != nil {
 		return service.ListChanges{}, f.err
 	}
-	changes, err := plan(f.current(enrollmentIDs, key))
+	current := f.current(enrollmentIDs, key)
+	changes, err := plan(current)
 	if err != nil {
 		return service.ListChanges{}, err
 	}
-	f.lastChanges = changes
+	// lastReconcileRecs is what the plan asked to write (inserts + updates).
 	f.lastReconcileRecs = nil
+	f.lastReconcileRecs = append(f.lastReconcileRecs, changes.Inserts...)
+	for _, u := range changes.Updates {
+		f.lastReconcileRecs = append(f.lastReconcileRecs, u.Record)
+	}
+	// Like the real upsert's RETURNING, report the STORED revision: a new row
+	// starts at 1 and every in-place write bumps the stored one.
+	stored := service.ListChanges{Deletes: changes.Deletes}
 	for _, rec := range changes.Inserts {
-		f.lastReconcileRecs = append(f.lastReconcileRecs, rec)
+		rec.Revision = 1
+		stored.Inserts = append(stored.Inserts, rec)
 		f.rows[subjectDayKey(rec.EnrollmentID, rec.Date, rec.SubjectID)] = rec
 	}
 	for _, u := range changes.Updates {
-		f.lastReconcileRecs = append(f.lastReconcileRecs, u.Record)
+		u.Record.Revision = current[u.Record.EnrollmentID].Revision + 1
+		stored.Updates = append(stored.Updates, u)
 		f.rows[subjectDayKey(u.Record.EnrollmentID, u.Record.Date, u.Record.SubjectID)] = u.Record
 	}
+	f.lastChanges = changes
 	for _, rec := range changes.Deletes {
 		delete(f.rows, subjectDayKey(rec.EnrollmentID, rec.Date, rec.SubjectID))
 	}
@@ -125,7 +136,7 @@ func (f *fakeRepo) ReconcileList(_ context.Context, key service.ListKey, enrollm
 	}
 	s.UpdatedAt = sessionTakenAt.Add(time.Duration(f.reconcileCalls) * time.Minute)
 	f.sessions[sk] = s
-	return changes, nil
+	return stored, nil
 }
 
 func (f *fakeRepo) ListByEnrollment(_ context.Context, enrollmentID string, from, to time.Time) ([]service.AttendanceRecord, error) {
@@ -658,14 +669,14 @@ func TestSaveDailyAttendancePublishesEvents(t *testing.T) {
 
 	wantAbsences := []service.AbsenceEvent{{
 		RecordID: "rec-1", EnrollmentID: enrollmentAna, StudentID: studentAna,
-		TenantID: testTenant, Date: schoolDay,
+		TenantID: testTenant, Date: schoolDay, MarkVersion: 1,
 	}}
 	if len(pub.absences) != 1 || pub.absences[0] != wantAbsences[0] {
 		t.Errorf("absences = %+v, want %+v", pub.absences, wantAbsences)
 	}
 	wantMarked := []service.MarkedEvent{
-		{RecordID: "rec-1", EnrollmentID: enrollmentAna, StudentID: studentAna, TenantID: testTenant, Date: schoolDay, Status: "absent"},
-		{RecordID: "rec-2", EnrollmentID: enrollmentBeto, StudentID: studentBeto, TenantID: testTenant, Date: schoolDay, Status: "late"},
+		{RecordID: "rec-1", EnrollmentID: enrollmentAna, StudentID: studentAna, TenantID: testTenant, Date: schoolDay, Status: "absent", MarkVersion: 1},
+		{RecordID: "rec-2", EnrollmentID: enrollmentBeto, StudentID: studentBeto, TenantID: testTenant, Date: schoolDay, Status: "late", MarkVersion: 1},
 	}
 	if len(pub.marked) != len(wantMarked) {
 		t.Fatalf("marked events = %+v, want %+v", pub.marked, wantMarked)

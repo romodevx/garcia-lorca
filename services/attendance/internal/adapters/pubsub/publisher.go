@@ -55,6 +55,7 @@ func (p *EventPublisher) PublishAttendanceMarked(ctx context.Context, e service.
 		Date:         e.Date,
 		Status:       e.Status,
 		SubjectId:    e.SubjectID,
+		MarkVersion:  e.MarkVersion,
 	})
 }
 
@@ -69,6 +70,7 @@ func (p *EventPublisher) PublishAbsenceRecorded(ctx context.Context, e service.A
 		TenantId:     e.TenantID,
 		Date:         e.Date,
 		SubjectId:    e.SubjectID,
+		MarkVersion:  e.MarkVersion,
 	})
 }
 

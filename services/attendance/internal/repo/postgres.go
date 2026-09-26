@@ -224,10 +224,12 @@ func (r *Repo) deleteMarks(tx *gorm.DB, cleared []service.AttendanceRecord) erro
 }
 
 // storedMark is what the upsert's RETURNING clause says about one row: its
-// stored id and whether this statement inserted it (xmax = 0) or updated it.
+// stored id, its stored revision, and whether this statement inserted it
+// (xmax = 0) or updated it.
 type storedMark struct {
 	ID           string
 	EnrollmentID string
+	Revision     int64
 	Inserted     bool
 }
 
@@ -235,8 +237,8 @@ type storedMark struct {
 // appended by upsertMarks.
 const upsertMarkSQL = `INSERT INTO attendance (id, tenant_id, enrollment_id, date, subject_id, status, note, created_at, updated_at) VALUES %s
 ON CONFLICT (tenant_id, enrollment_id, date, subject_id)
-DO UPDATE SET status = excluded.status, note = excluded.note, updated_at = now()
-RETURNING id, enrollment_id, (xmax = 0) AS inserted`
+DO UPDATE SET status = excluded.status, note = excluded.note, revision = attendance.revision + 1, updated_at = now()
+RETURNING id, enrollment_id, revision, (xmax = 0) AS inserted`
 
 // upsertMarkRow is one VALUES row of upsertMarkSQL.
 const upsertMarkRow = "(?, ?, ?, ?::date, ?, ?, ?, now(), now())"
@@ -270,14 +272,15 @@ func (r *Repo) upsertMarks(tx *gorm.DB, changes service.ListChanges) (map[string
 }
 
 // asStored rewrites a plan into what was stored: every insert and update
-// carries the row's STORED id, and a planned insert that Postgres turned into
-// an update (it met an existing row) is reported as a status-changing update.
+// carries the row's STORED id and revision, and a planned insert that Postgres
+// turned into an update (it met an existing row) is reported as a
+// status-changing update.
 func asStored(planned service.ListChanges, stored map[string]storedMark) service.ListChanges {
 	out := service.ListChanges{Deletes: planned.Deletes}
 	for _, rec := range planned.Inserts {
 		m, ok := stored[rec.EnrollmentID]
 		if ok {
-			rec.ID = m.ID
+			rec.ID, rec.Revision = m.ID, m.Revision
 		}
 		if !ok || m.Inserted {
 			out.Inserts = append(out.Inserts, rec)
@@ -287,7 +290,7 @@ func asStored(planned service.ListChanges, stored map[string]storedMark) service
 	}
 	for _, u := range planned.Updates {
 		if m, ok := stored[u.Record.EnrollmentID]; ok {
-			u.Record.ID = m.ID
+			u.Record.ID, u.Record.Revision = m.ID, m.Revision
 		}
 		out.Updates = append(out.Updates, u)
 	}
