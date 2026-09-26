@@ -22,6 +22,11 @@ const (
 	uniqueViolation     = "23505"
 	foreignKeyViolation = "23503"
 	checkViolation      = "23514"
+	// deadlockDetected and serializationFailure abort a transaction that raced
+	// another writer. Nothing was committed and a retry can succeed, so both are
+	// KindConflict, not an internal fault.
+	deadlockDetected     = "40P01"
+	serializationFailure = "40001"
 	// emailNormalizedCheck is the CHECK the email migration adds. It is the one
 	// CHECK an API client can trip (a raw email that bypassed the domain, e.g.
 	// against the previous revision mid-deploy), so it alone maps to KindInvalid;
@@ -592,6 +597,8 @@ func translateCreateErr(err error, internalMsg, conflictMsg string) error {
 		return glerrors.Wrap(glerrors.KindConflict, conflictMsg, err)
 	case foreignKeyViolation:
 		return glerrors.Wrap(glerrors.KindInvalid, "referenced parent does not exist", err)
+	case deadlockDetected, serializationFailure:
+		return glerrors.Wrap(glerrors.KindConflict, "the request collided with a concurrent change; retry", err)
 	case checkViolation:
 		if isEmailCheck(err) {
 			return glerrors.Wrap(glerrors.KindInvalid, "email is not in its normalized form", err)

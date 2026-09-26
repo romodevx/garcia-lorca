@@ -1,8 +1,11 @@
 package postgres
 
 import (
+	"cmp"
 	"context"
 	"errors"
+	"slices"
+	"strings"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -182,11 +185,12 @@ func occupiedSlots(tx *gorm.DB, pairs [][]any) (map[domain.TeachingSlot]domain.T
 	return out, nil
 }
 
-// writeTeachingLoad inserts the new assignments and moves the reassigned ones.
+// writeTeachingLoad inserts the new assignments (in lock order) and moves the
+// reassigned ones.
 func writeTeachingLoad(tx *gorm.DB, w ports.TeachingLoadWrite) error {
 	if len(w.Create) > 0 {
 		models := make([]teachingAssignmentModel, 0, len(w.Create))
-		for _, a := range w.Create {
+		for _, a := range inLockOrder(w.Create) {
 			models = append(models, fromDomainTeachingAssignment(a))
 		}
 		if err := tx.Create(&models).Error; err != nil {
@@ -237,4 +241,17 @@ func (r *Repository) DeleteTeachingAssignment(ctx context.Context, id string) er
 		}
 		return nil
 	})
+}
+
+// inLockOrder returns a copy of as sorted by (group_id, subject_id): the key of
+// the one-teacher-per-slot UNIQUE (the group fixes the cycle). Inserting in
+// that order makes every concurrent load take the index locks in the same
+// order, so overlapping loads queue instead of deadlocking. The caller's slice
+// keeps its request order.
+func inLockOrder(as []domain.TeachingAssignment) []domain.TeachingAssignment {
+	out := slices.Clone(as)
+	slices.SortFunc(out, func(a, b domain.TeachingAssignment) int {
+		return cmp.Or(strings.Compare(a.GroupID(), b.GroupID()), strings.Compare(a.SubjectID(), b.SubjectID()))
+	})
+	return out
 }
