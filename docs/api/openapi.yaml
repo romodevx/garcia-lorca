@@ -27,7 +27,7 @@ openapi: 3.1.0
 
 info:
   title: García Lorca API
-  version: 0.14.0
+  version: 0.15.0
   license:
     name: Proprietary
     url: https://garcialorca.edu.mx/legal
@@ -1706,6 +1706,34 @@ paths:
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
 
+  /api/v1/attendance/scan:
+    post:
+      tags: [attendance]
+      summary: Resolve a scanned card to a list row (director)
+      description: >
+        T4, attendance by QR. Resolves the scanned virtual card (task 13) to
+        the row of the (group, subject-or-none) list on today's school day —
+        it NEVER writes attendance: the screen marks the row and the list is
+        saved with `POST /api/v1/attendance`. The list is checked first, with
+        the roster's rules (unknown group 404; mode and subject errors 400), so
+        a list the caller may not read never looks the card up. The verdict
+        travels in `X-Scan-Result` (`ok` | `invalid` | `foreign` | `suspended`)
+        because two refusals share 422. Every answer carries
+        `Cache-Control: no-store`. Behind `module_attendance` AND
+        `module_student_card`. Requires `attendance:read`.
+      operationId: scanAttendanceCard
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody: { $ref: '#/components/requestBodies/AttendanceScan' }
+      responses:
+        '200': { $ref: '#/components/responses/AttendanceScanResolved' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409': { $ref: '#/components/responses/AttendanceScanSuspended' }
+        '422': { $ref: '#/components/responses/AttendanceScanRefused' }
+
   /api/v1/teaching/attendance/classes:
     get:
       tags: [attendance]
@@ -1806,6 +1834,31 @@ paths:
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/teaching/attendance/scan:
+    post:
+      tags: [attendance]
+      summary: Resolve a scanned card to a row of one of the caller's lists (teacher)
+      description: >
+        Same resolve and verdicts as `POST /api/v1/attendance/scan`, restricted
+        to the caller's OWN lists with the roster's ownership rule: a group the
+        caller does not teach, or a `per_class` subject that is not the
+        caller's, is 404 before any card is looked up. Never writes attendance
+        (the list is saved with `POST /api/v1/teaching/attendance`). Behind
+        `module_attendance` AND `module_student_card`. Requires
+        `attendance_own:read`.
+      operationId: scanTeachingAttendanceCard
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody: { $ref: '#/components/requestBodies/AttendanceScan' }
+      responses:
+        '200': { $ref: '#/components/responses/AttendanceScanResolved' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409': { $ref: '#/components/responses/AttendanceScanSuspended' }
+        '422': { $ref: '#/components/responses/AttendanceScanRefused' }
 
   /api/v1/finance/tuition-plans:
     get:
@@ -2265,6 +2318,28 @@ components:
       description: |
         The web panel's session. Secure, HttpOnly, SameSite=Strict. Because it is
         a cookie, every state-changing call also requires the CSRF header.
+  headers:
+    XScanResult:
+      description: An attendance scan's verdict, for the screen's sound and colour.
+      schema: { type: string, enum: [ok, invalid, foreign, suspended] }
+    NoStore:
+      description: A scan names a pupil from a credential; nothing caches it.
+      schema: { type: string, const: no-store }
+  requestBodies:
+    AttendanceScan:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [groupId, code]
+            properties:
+              groupId: { type: string, format: uuid }
+              subjectId: { type: string, format: uuid, description: The subject of a `per_class` list; omitted for a daily one. }
+              code: { type: string, description: 'The scanned QR, `GLCARD:` + 22 base64url characters. Never logged.' }
+          example:
+            groupId: 7a1c2e3d-0000-4000-8000-000000000001
+            code: GLCARD:AQAAAAAAAAAAAAAAAAAAAA
   parameters:
     AttendanceGroupId:
       name: groupId
@@ -2307,6 +2382,43 @@ components:
       schema: { type: string, format: uuid }
 
   responses:
+    AttendanceScanResolved:
+      description: The card is valid and its pupil is actively enrolled in the group.
+      headers:
+        X-Scan-Result: { $ref: '#/components/headers/XScanResult' }
+        Cache-Control: { $ref: '#/components/headers/NoStore' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/AttendanceScanResult' }
+          example: { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301, studentId: 6e1d2c3b-0000-4000-8000-000000000042, name: Ana García }
+    AttendanceScanSuspended:
+      description: >
+        `X-Scan-Result: suspended` — the pupil belongs to the group but the
+        card does not count (revoked, or the pupil is no longer enrolled at the
+        school). Body "Credencial suspendida".
+      headers:
+        X-Scan-Result: { $ref: '#/components/headers/XScanResult' }
+        Cache-Control: { $ref: '#/components/headers/NoStore' }
+      content:
+        text/plain:
+          schema: { type: string }
+          example: Credencial suspendida
+    AttendanceScanRefused:
+      description: >
+        `X-Scan-Result: invalid` — not a card code, or a code no card carried
+        (indistinguishable on purpose, so codes cannot be probed); body
+        "Código no válido". `X-Scan-Result: foreign` — a card whose pupil has
+        no active enrollment in the group (judged before suspension); body
+        "Este alumno no pertenece a este grupo", and nothing about that pupil.
+      headers:
+        X-Scan-Result: { $ref: '#/components/headers/XScanResult' }
+        Cache-Control: { $ref: '#/components/headers/NoStore' }
+      content:
+        text/plain:
+          schema: { type: string }
+          examples:
+            invalid: { value: Código no válido }
+            foreign: { value: Este alumno no pertenece a este grupo }
     AttendanceSaved:
       description: The list's stored state after the save.
       content:
@@ -2380,6 +2492,14 @@ components:
           example: teaching assignment not found
 
   schemas:
+    AttendanceScanResult:
+      type: object
+      description: The list row a scanned card resolved to.
+      required: [enrollmentId, studentId, name]
+      properties:
+        enrollmentId: { type: string, format: uuid, description: The row to mark (the pupil's active enrollment in the group). }
+        studentId: { type: string, format: uuid }
+        name: { type: string, description: '"First Last".' }
     TuitionPlan:
       type: object
       description: What one level costs in one school year. Every amount is integer cents.

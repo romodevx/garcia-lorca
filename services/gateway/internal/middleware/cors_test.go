@@ -3,6 +3,7 @@ package middleware_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
@@ -112,7 +113,23 @@ func TestCORSExposesTheConfirmRequiredHeader(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
-	if got := rec.Header().Get("Access-Control-Expose-Headers"); got != "X-Confirm-Required" {
-		t.Errorf("Expose-Headers = %q, want X-Confirm-Required", got)
+	if got := rec.Header().Get("Access-Control-Expose-Headers"); !strings.Contains(got, "X-Confirm-Required") {
+		t.Errorf("Expose-Headers = %q, want it to include X-Confirm-Required", got)
+	}
+}
+
+// T4: the web picks the scan's sound and colour from X-Scan-Result (two
+// refusals share 422), so a cross-origin fetch must be able to read it.
+func TestCORSExposesTheScanResultHeader(t *testing.T) {
+	var ran bool
+	h := middleware.CORS([]string{"http://localhost:3002"})(okHandler(&ran))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/attendance/scan", nil)
+	req.Header.Set("Origin", "http://localhost:3002")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Access-Control-Expose-Headers"); !strings.Contains(got, "X-Scan-Result") {
+		t.Errorf("Expose-Headers = %q, want it to include X-Scan-Result", got)
 	}
 }

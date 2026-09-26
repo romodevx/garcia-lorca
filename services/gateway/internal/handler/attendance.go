@@ -45,6 +45,7 @@ type AttendanceHandler struct {
 	catalog  DirectorAttendanceCatalogReader
 	students TeachingStudentReader
 	users    AttendanceUserReader
+	cards    ScanCardVerifier // T4 scan; nil = the route is not served
 	now      func() time.Time
 }
 

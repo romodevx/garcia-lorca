@@ -474,7 +474,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// the config catalog, hence module_config). A supplied groupId is verified against the caller's OWN set
 	// before any roster/save call — a group outside it answers 404, never 403,
 	// leaking nothing about whether another group exists.
-	teachingAttH := handler.NewTeachingAttendanceHandler(teachingH, attendanceClient, authClient)
+	teachingAttH := handler.NewTeachingAttendanceHandler(teachingH, attendanceClient, authClient, handler.WithScanCards(studentsClient))
 	// T3: the lists the caller takes (daily groups + per-class assignments). It
 	// reads the config catalog for each group's level mode, hence module_config.
 	mux.Handle("GET /api/v1/teaching/attendance/classes",
@@ -483,6 +483,11 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 		teachingModules("attendance_own:read", []string{"attendance"}, teachingAttH.Roster))
 	mux.Handle("POST /api/v1/teaching/attendance",
 		teachingModules("attendance_own:write", []string{"attendance"}, teachingAttH.SaveAttendance))
+	// T4: a scanned virtual card resolves to a row of one of the caller's OWN
+	// lists (the roster's ownership rule). It reads only — the list is saved by
+	// the route above — and needs the card module too.
+	mux.Handle("POST /api/v1/teaching/attendance/scan",
+		teachingModules("attendance_own:read", []string{"attendance", "student_card"}, teachingAttH.Scan))
 
 	// M05 finance (adeudos): flag-guarded, authenticated + rotation-enforced,
 	// permission-gated. Everything that moves money or the catalog is a write
@@ -555,7 +560,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// module_attendance OFF ⇒ 404 (the module is invisible before auth even
 	// runs). The more specific /attendance/roster wins over /attendance under
 	// ServeMux's specificity rule.
-	attendanceH := handler.NewAttendanceHandler(attendanceClient, configClient, studentsClient, authClient)
+	attendanceH := handler.NewAttendanceHandler(attendanceClient, configClient, studentsClient, authClient, handler.WithDirectorScanCards(studentsClient))
 	attendanceWrite := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("attendance", requireAuthChanged(middleware.RequirePermission("attendance:write")(http.HandlerFunc(h))))
 	}
@@ -565,6 +570,9 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/attendance/roster", attendanceRead(attendanceH.GetRoster))
 	mux.Handle("POST /api/v1/attendance", attendanceWrite(attendanceH.SaveDaily))
 	mux.Handle("GET /api/v1/attendance", attendanceRead(attendanceH.ListAttendance))
+	// T4: resolve a scanned card to a row of any list (a read, like the roster),
+	// behind module_student_card as well.
+	mux.Handle("POST /api/v1/attendance/scan", guard.Protect("student_card", attendanceRead(attendanceH.Scan)))
 
 	// M10 comms (push + notification inbox): flag-guarded, authenticated +
 	// rotation-enforced, permission-gated. Registering a device and marking a
