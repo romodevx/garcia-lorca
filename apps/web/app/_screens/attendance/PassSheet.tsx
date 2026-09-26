@@ -2,13 +2,12 @@
 
 import { useEffect, useState, type ReactElement } from "react";
 
-import { Icon } from "../../_design/Icon";
 import { Toast } from "../../_design/Toast";
 import { DateField } from "../../_design/form";
-import type { AttendanceStatus } from "../../attendance/api";
 import { EmptyHint, ErrorAlert, Section } from "../config/parts";
-import { PassSheetRow, STATUS_META } from "./PassSheetRow";
-import { dateWindow, sessionLine, type StatusCounts } from "./sheetModel";
+import { PassSheetRow } from "./PassSheetRow";
+import { Counters, ReadOnlyBanner } from "./PassSheetParts";
+import { dateWindow, readOnlyText, sessionLine } from "./sheetModel";
 import { useAttendanceSheet, type LoadSheet, type SaveSheet } from "./useAttendanceSheet";
 import { confirmDiscard } from "./useLeaveGuard";
 
@@ -18,7 +17,7 @@ export interface PassSheetProps {
   groupId: string;
   /** Only for a per-class list. */
   subjectId?: string;
-  /** The local today: where the list opens, and the top of a teacher's window. */
+  /** The local today: where the list opens; the roster's server day, when sent, bounds the picker. */
   today: string;
   /** A teacher may open only today…today−window; the director any day. */
   restrictDates: boolean;
@@ -29,27 +28,8 @@ export interface PassSheetProps {
 }
 
 const DEFAULT_WINDOW_DAYS = 7;
-const COUNTERS: readonly { status: AttendanceStatus; label: string }[] = [
-  { status: "present", label: "Presentes" },
-  { status: "absent", label: "Ausentes" },
-  { status: "late", label: "Retardos" },
-  { status: "excused", label: "Justificadas" },
-];
-
-function Counters({ counts }: { counts: StatusCounts }): ReactElement {
-  return (
-    <ul aria-label="Resumen de la lista" style={{ display: "flex", flexWrap: "wrap", gap: 8, listStyle: "none", margin: 0, padding: 0 }}>
-      {COUNTERS.map(({ status, label }) => (
-        <li key={status} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: "var(--r-pill)", border: "1px solid var(--border)", background: "var(--surface)", fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>
-          <Icon name={STATUS_META[status].icon} size={15} stroke={2.4} style={{ color: STATUS_META[status].tone }} />
-          {label}
-          <strong style={{ color: "var(--text)", fontFamily: "var(--font-display)" }}>{counts[status]}</strong>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
+const LOCKED_OPACITY = 0.6;
+const UNTAKEN_LINE = "Lista no tomada ese día";
 /**
  * The pass list shared by the teacher and the director: everyone opens
  * present, one tap per absence, "Más" for the rare cases, and one sticky
@@ -62,7 +42,10 @@ export function PassSheet({ title, groupId, subjectId, today, restrictDates, loa
   const { sheet, rows, dirty } = list;
   const editable = sheet?.editable ?? false;
   const windowDays = sheet?.windowDays ?? DEFAULT_WINDOW_DAYS;
-  const bounds = dateWindow(today, windowDays, restrictDates);
+  const bounds = dateWindow(sheet?.today ?? today, windowDays, restrictDates);
+  /** A past (or future) list nobody took: no statuses, no counters — "Presentes 4" would be a lie. */
+  const untaken = sheet !== undefined && !editable && sheet.session === null;
+  const locked = list.saving;
 
   useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
@@ -77,7 +60,7 @@ export function PassSheet({ title, groupId, subjectId, today, restrictDates, loa
         <div style={{ flex: "0 1 220px", minWidth: 0 }}>
           <DateField label="Fecha" value={date} onChange={changeDate} {...bounds} />
         </div>
-        {sheet !== undefined && <p style={{ margin: 0, padding: "10px 0", fontSize: 14, fontWeight: 600, color: sheet.session === null ? "var(--text-muted)" : "var(--forest)" }}>{sessionLine(sheet.session)}</p>}
+        {sheet !== undefined && <p style={{ margin: 0, padding: "10px 0", fontSize: 14, fontWeight: 600, color: sheet.session === null ? "var(--text-muted)" : "var(--forest)" }}>{untaken ? UNTAKEN_LINE : sessionLine(sheet.session)}</p>}
       </div>
 
       {list.loading ? (
@@ -88,22 +71,18 @@ export function PassSheet({ title, groupId, subjectId, today, restrictDates, loa
         <EmptyHint>Este grupo no tiene alumnos inscritos.</EmptyHint>
       ) : (
         <>
-          {!editable && (
-            <p style={{ margin: "0 0 12px", padding: "10px 14px", borderRadius: "var(--r-md)", background: "var(--warn-bg)", color: "var(--warn-fg)", fontSize: 14, fontWeight: 600 }}>
-              Solo lectura: {restrictDates ? `solo puedes corregir hasta ${windowDays} días atrás.` : "esta lista ya no se puede modificar."}
-            </p>
-          )}
+          {!editable && <ReadOnlyBanner text={readOnlyText(sheet.readOnlyReason, windowDays, restrictDates)} />}
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
-            <Counters counts={list.counts} />
+            {!untaken && <Counters counts={list.counts} />}
             {editable && (
-              <button type="button" onClick={list.allPresent} style={{ minHeight: 44, padding: "0 16px", borderRadius: "var(--r-pill)", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+              <button type="button" aria-disabled={locked || undefined} onClick={list.allPresent} style={{ minHeight: 44, padding: "0 16px", borderRadius: "var(--r-pill)", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontWeight: 700, fontSize: 14, cursor: locked ? "progress" : "pointer", opacity: locked ? LOCKED_OPACITY : 1 }}>
                 Todos presentes
               </button>
             )}
           </div>
           <ul aria-label="Pase de lista" style={{ display: "grid", gap: 8, listStyle: "none", margin: 0, padding: 0 }}>
             {rows.map((row) => (
-              <PassSheetRow key={row.enrollmentId} row={row} editable={editable} onStatus={list.setStatus} onNote={list.setNote} />
+              <PassSheetRow key={row.enrollmentId} row={row} editable={editable} locked={locked} showStatus={!untaken} onStatus={list.setStatus} onNote={list.setNote} />
             ))}
           </ul>
           {editable && (

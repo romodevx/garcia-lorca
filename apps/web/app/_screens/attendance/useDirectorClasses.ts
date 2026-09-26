@@ -14,10 +14,12 @@ import {
   type Level,
   type Subject,
 } from "../../config/api";
+import { sortBySchoolOrder } from "../../config/schoolOrder";
 import { listTeachingAssignments } from "../../teachers/api";
 
 export interface DirectorClasses {
   cycles: readonly Cycle[];
+  /** In school order: level → grade → letter. */
   groups: readonly LabelledGroup[];
   cycleId: string;
   setCycleId: (id: string) => void;
@@ -78,6 +80,7 @@ export function useDirectorClasses(): DirectorClasses {
     };
   }, [cycleId]);
 
+  const orderedGroups = useMemo(() => sortBySchoolOrder(groups, { levels, grades }), [groups, levels, grades]);
   const group = groups.find((g) => g.id === groupId);
   const mode = useMemo<AttendanceMode>(() => {
     const levelId = grades.find((g) => g.id === group?.gradeLevelId)?.levelId;
@@ -114,5 +117,5 @@ export function useDirectorClasses(): DirectorClasses {
     setSubjectId("");
   };
 
-  return { cycles, groups, cycleId, setCycleId, groupId, setGroupId, group, mode, subjects, subjectsLoading, subjectId, setSubjectId, loadError };
+  return { cycles, groups: orderedGroups, cycleId, setCycleId, groupId, setGroupId, group, mode, subjects, subjectsLoading, subjectId, setSubjectId, loadError };
 }

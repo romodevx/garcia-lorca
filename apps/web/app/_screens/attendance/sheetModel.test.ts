@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AttendanceSheetRow } from "../../attendance/sheet";
-import { addDays, dateWindow, exceptionsOf, isDirty, sessionLine, tally, toggled } from "./sheetModel";
+import { addDays, dateWindow, exceptionsOf, isDirty, readOnlyText, sessionLine, tally, toggled } from "./sheetModel";
 
 const row = (enrollmentId: string, status: AttendanceSheetRow["status"], note = ""): AttendanceSheetRow => ({
   enrollmentId,
@@ -71,5 +71,14 @@ describe("sessionLine", () => {
 
   it("says the list has not been taken yet", () => {
     expect(sessionLine(null)).toBe("Lista aún no tomada");
+  });
+});
+
+describe("readOnlyText", () => {
+  it("names the server's reason, and falls back to the old wording without one", () => {
+    expect(readOnlyText("future", 7, true)).toBe("No puedes registrar una fecha futura.");
+    expect(readOnlyText("window", 5, false)).toBe("Solo puedes corregir hasta 5 días atrás.");
+    expect(readOnlyText(undefined, 7, true)).toBe("Solo puedes corregir hasta 7 días atrás.");
+    expect(readOnlyText(undefined, 7, false)).toBe("Esta lista ya no se puede modificar.");
   });
 });

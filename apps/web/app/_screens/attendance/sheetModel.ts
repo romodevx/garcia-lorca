@@ -5,7 +5,7 @@
  */
 
 import type { AttendanceException, AttendanceStatus } from "../../attendance/api";
-import type { AttendanceSession, AttendanceSheetRow, SheetMark } from "../../attendance/sheet";
+import type { AttendanceSession, AttendanceSheetRow, ReadOnlyReason, SheetMark } from "../../attendance/sheet";
 
 const MS_PER_DAY = 86_400_000;
 
@@ -66,4 +66,11 @@ export function sessionLine(session: AttendanceSession | null): string {
   const at = new Date(session.takenAt);
   const time = `${at.getHours()}:${`${at.getMinutes()}`.padStart(2, "0")}`;
   return `Lista guardada a las ${time} por ${session.takenByName}`;
+}
+
+/** Why the list is read-only, in words; without a server reason, the teacher's window or a plain "locked". */
+export function readOnlyText(reason: ReadOnlyReason | undefined, windowDays: number, restricted: boolean): string {
+  if (reason === "future") return "No puedes registrar una fecha futura.";
+  if (reason === "window" || restricted) return `Solo puedes corregir hasta ${windowDays} días atrás.`;
+  return "Esta lista ya no se puede modificar.";
 }

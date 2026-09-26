@@ -208,3 +208,86 @@ describe("PassSheet — unsaved changes", () => {
     expect(screen.getByLabelText("Fecha")).toHaveValue(TODAY);
   });
 });
+
+describe("PassSheet — saving races (review findings)", () => {
+  const pendingSave = (): (() => void) => {
+    let finish: () => void = () => {};
+    save.mockReturnValue(new Promise<void>((resolve) => { finish = resolve; }));
+    return () => finish();
+  };
+
+  it("a day switched during the save keeps the NEW day's list: the post-save reread of the old day never lands", async () => {
+    const OTHER = "2026-09-08";
+    load.mockImplementation(async (q) =>
+      q.date === OTHER
+        ? sheetOf({ date: OTHER, rows: [{ enrollmentId: "en9", studentId: "st9", name: "Otro Día", status: "present", note: "" }] })
+        : sheetOf(),
+    );
+    const user = userEvent.setup();
+    const finish = pendingSave();
+    renderSheet();
+
+    await user.click(await screen.findByRole("button", { name: "Guardar lista" }));
+    fireEvent.change(screen.getByLabelText("Fecha"), { target: { value: OTHER } });
+    await screen.findByRole("button", { name: "Otro Día: Presente" });
+    const callsBefore = load.mock.calls.length;
+
+    await act(async () => finish());
+
+    expect(load.mock.calls.slice(callsBefore).some(([q]) => q.date === TODAY)).toBe(false);
+    expect(screen.getByRole("button", { name: "Otro Día: Presente" })).toBeInTheDocument();
+    expect(screen.queryByText("Ada Lovelace")).toBeNull();
+    expect(screen.getByLabelText("Fecha")).toHaveValue(OTHER);
+  });
+
+  it("rows are locked while saving, so a tap during 'Guardando…' is never silently lost", async () => {
+    const user = userEvent.setup();
+    const finish = pendingSave();
+    renderSheet();
+
+    await user.click(await screen.findByRole("button", { name: "Guardar lista" }));
+    const ada = screen.getByRole("button", { name: "Ada Lovelace: Presente" });
+    expect(ada).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Todos presentes" })).toHaveAttribute("aria-disabled", "true");
+    await user.click(ada);
+    expect(screen.getByRole("button", { name: "Ada Lovelace: Presente" })).toBeInTheDocument();
+
+    await act(async () => finish());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Ada Lovelace: Presente" })).not.toHaveAttribute("aria-disabled", "true"));
+    await user.click(screen.getByRole("button", { name: "Ada Lovelace: Presente" }));
+    expect(screen.getByRole("button", { name: "Ada Lovelace: Ausente" })).toBeInTheDocument();
+  });
+});
+
+describe("PassSheet — the server's day and read-only reasons", () => {
+  it("bounds a teacher's picker by the server's today when the roster carries it", async () => {
+    load.mockResolvedValue(sheetOf({ today: "2026-09-11" }));
+    renderSheet();
+    await screen.findByRole("button", { name: "Ada Lovelace: Presente" });
+
+    expect(screen.getByLabelText("Fecha")).toHaveAttribute("max", "2026-09-11");
+    expect(screen.getByLabelText("Fecha")).toHaveAttribute("min", "2026-09-04");
+  });
+
+  it("says a future day cannot be recorded", async () => {
+    load.mockResolvedValue(sheetOf({ editable: false, readOnlyReason: "future" }));
+    renderSheet({ restrictDates: false });
+    expect(await screen.findByText(/No puedes registrar una fecha futura/)).toBeInTheDocument();
+    expect(screen.queryByText(/ya no se puede modificar/)).toBeNull();
+  });
+
+  it("says how far back a correction may go, with the roster's window", async () => {
+    load.mockResolvedValue(sheetOf({ editable: false, readOnlyReason: "window", windowDays: 5 }));
+    renderSheet({ restrictDates: false });
+    expect(await screen.findByText(/Solo puedes corregir hasta 5 días atrás/)).toBeInTheDocument();
+  });
+
+  it("a past list nobody took says so, and shows no counters", async () => {
+    load.mockResolvedValue(sheetOf({ editable: false, readOnlyReason: "window", session: null }));
+    renderSheet();
+
+    expect(await screen.findByText("Lista no tomada ese día")).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Resumen de la lista" })).toBeNull();
+    expect(screen.queryByText(/Presentes/)).toBeNull();
+  });
+});

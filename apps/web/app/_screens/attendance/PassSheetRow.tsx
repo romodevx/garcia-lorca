@@ -18,10 +18,15 @@ export const STATUS_META: Record<AttendanceStatus, { label: string; icon: IconNa
 };
 
 const SECONDARY: readonly AttendanceStatus[] = ["late", "excused"];
+const LOCKED_OPACITY = 0.6;
 
 export interface PassSheetRowProps {
   row: AttendanceSheetRow;
   editable: boolean;
+  /** A save is in flight: controls stay visible but refuse taps (aria-disabled, dimmed). */
+  locked?: boolean;
+  /** False for a past list nobody took: there is no status to show. */
+  showStatus?: boolean;
   onStatus: (enrollmentId: string, status: AttendanceStatus) => void;
   onNote: (enrollmentId: string, note: string) => void;
 }
@@ -41,22 +46,26 @@ function StatusPill({ status }: { status: AttendanceStatus }): ReactElement {
  * classroom the teacher aims a thumb at a name, not at a small segment. The
  * rarer choices — Retardo, Justificada, a note — sit behind "Más".
  */
-export function PassSheetRow({ row, editable, onStatus, onNote }: PassSheetRowProps): ReactElement {
+export function PassSheetRow({ row, editable, locked = false, showStatus = true, onStatus, onNote }: PassSheetRowProps): ReactElement {
   const [open, setOpen] = useState(false);
   const panelId = useId();
   const meta = STATUS_META[row.status];
+  const setStatus = (status: AttendanceStatus): void => {
+    if (!locked) onStatus(row.enrollmentId, status);
+  };
+  const lock = locked ? { "aria-disabled": true, style: { opacity: LOCKED_OPACITY, cursor: "progress" } } : undefined;
   const face = (
     <>
       <span style={{ flex: "1 1 auto", minWidth: 0, fontSize: 16, fontWeight: 600, color: "var(--text)", overflowWrap: "anywhere", textAlign: "left" }}>{row.name}</span>
-      <StatusPill status={row.status} />
+      {showStatus && <StatusPill status={row.status} />}
     </>
   );
 
   return (
-    <li style={{ borderRadius: "var(--r-md)", background: "var(--surface)", border: "1px solid var(--border)", boxShadow: `inset 4px 0 0 ${meta.tone}`, overflow: "hidden" }}>
+    <li style={{ borderRadius: "var(--r-md)", background: "var(--surface)", border: "1px solid var(--border)", boxShadow: showStatus ? `inset 4px 0 0 ${meta.tone}` : undefined, overflow: "hidden", ...lock?.style }}>
       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
         {editable ? (
-          <button type="button" aria-label={`${row.name}: ${meta.label}`} onClick={() => onStatus(row.enrollmentId, toggled(row.status))} style={{ flex: "1 1 auto", minWidth: 0, minHeight: 56, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: "8px 12px", cursor: "pointer", background: "transparent" }}>
+          <button type="button" aria-label={`${row.name}: ${meta.label}`} aria-disabled={lock?.["aria-disabled"]} onClick={() => setStatus(toggled(row.status))} style={{ flex: "1 1 auto", minWidth: 0, minHeight: 56, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: "8px 12px", cursor: locked ? "progress" : "pointer", background: "transparent" }}>
             {face}
           </button>
         ) : (
@@ -76,7 +85,7 @@ export function PassSheetRow({ row, editable, onStatus, onNote }: PassSheetRowPr
               const on = row.status === status;
               const tone = STATUS_META[status].tone;
               return (
-                <button key={status} type="button" aria-pressed={on} onClick={() => onStatus(row.enrollmentId, on ? "present" : status)} style={{ minHeight: 44, display: "inline-flex", alignItems: "center", gap: 6, padding: "0 16px", borderRadius: "var(--r-pill)", fontWeight: 700, fontSize: 14, cursor: "pointer", border: `1.5px solid ${on ? tone : "var(--border)"}`, background: on ? `color-mix(in oklab, ${tone} 14%, var(--surface))` : "var(--surface)", color: on ? tone : "var(--text-muted)" }}>
+                <button key={status} type="button" aria-pressed={on} aria-disabled={lock?.["aria-disabled"]} onClick={() => setStatus(on ? "present" : status)} style={{ minHeight: 44, display: "inline-flex", alignItems: "center", gap: 6, padding: "0 16px", borderRadius: "var(--r-pill)", fontWeight: 700, fontSize: 14, cursor: "pointer", border: `1.5px solid ${on ? tone : "var(--border)"}`, background: on ? `color-mix(in oklab, ${tone} 14%, var(--surface))` : "var(--surface)", color: on ? tone : "var(--text-muted)" }}>
                   <Icon name={STATUS_META[status].icon} size={16} stroke={2.4} />
                   {STATUS_META[status].label}
                 </button>
@@ -85,7 +94,7 @@ export function PassSheetRow({ row, editable, onStatus, onNote }: PassSheetRowPr
           </div>
           <label style={{ display: "grid", gap: 6, fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>
             Nota
-            <textarea aria-label={`Nota de ${row.name}`} value={row.note} maxLength={NOTE_MAX} rows={2} onChange={(e) => onNote(row.enrollmentId, e.target.value)} style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: "var(--r-md)", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 16, fontFamily: "var(--font-ui)", resize: "vertical" }} />
+            <textarea aria-label={`Nota de ${row.name}`} value={row.note} maxLength={NOTE_MAX} rows={2} readOnly={locked} onChange={(e) => onNote(row.enrollmentId, e.target.value)} style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: "var(--r-md)", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 16, fontFamily: "var(--font-ui)", resize: "vertical" }} />
           </label>
           <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 8, fontSize: 12.5, color: "var(--text-faint)" }}>
             <span>{row.status === "present" && row.note !== "" ? "La nota se guarda solo si no está presente." : ""}</span>

@@ -39,7 +39,8 @@ export interface AttendanceSheetState {
 
 /**
  * One list's reads and writes: load the day, edit rows locally, save only the
- * exceptions, then re-read quietly so the "guardada por" line is the server's.
+ * exceptions, then re-read quietly so the "guardada por" line is the server's —
+ * only if that list is still the one on screen. Rows are locked while saving.
  * A monotonic request id drops stale responses (day or class switched mid-flight).
  */
 export function useAttendanceSheet(target: SheetTarget, load: LoadSheet, save: SaveSheet): AttendanceSheetState {
@@ -60,15 +61,20 @@ export function useAttendanceSheet(target: SheetTarget, load: LoadSheet, save: S
     () => ({ groupId, date, ...(subjectId !== undefined ? { subjectId } : {}) }),
     [groupId, subjectId, date],
   );
+  /** The list on screen now — a save compares against it before re-reading. */
+  const currentQuery = useRef(query);
+  currentQuery.current = query;
+  /** Mirrors `saving` synchronously so edits are refused while a save is in flight. */
+  const savingNow = useRef(false);
 
-  const read = useCallback(async (quiet: boolean): Promise<void> => {
+  const read = useCallback(async (quiet: boolean, q: AttendanceSheetQuery): Promise<void> => {
     const id = (request.current += 1);
     if (!quiet) {
       setLoading(true);
       setLoadError(undefined);
     }
     try {
-      const next = await io.current.load(query);
+      const next = await io.current.load(q);
       if (id !== request.current) return;
       setSheet(next);
       setRows(next.rows);
@@ -77,40 +83,48 @@ export function useAttendanceSheet(target: SheetTarget, load: LoadSheet, save: S
     } finally {
       if (id === request.current) setLoading(false);
     }
-  }, [query]);
+  }, []);
 
   useEffect(() => {
     if (query.date === "") return;
     setSaveError(undefined);
-    void read(false);
+    void read(false, query);
   }, [query, read]);
 
   useEffect(() => () => window.clearTimeout(toastTimer.current), []);
 
+  /** Rows are locked while saving: the post-save reread would otherwise drop the edit. */
+  const edit = useCallback((change: (prev: AttendanceSheetRow[]) => AttendanceSheetRow[]) => {
+    if (!savingNow.current) setRows(change);
+  }, []);
   const setStatus = useCallback((enrollmentId: string, status: AttendanceStatus) => {
-    setRows((prev) => prev.map((row) => (row.enrollmentId === enrollmentId ? { ...row, status } : row)));
-  }, []);
+    edit((prev) => prev.map((row) => (row.enrollmentId === enrollmentId ? { ...row, status } : row)));
+  }, [edit]);
   const setNote = useCallback((enrollmentId: string, note: string) => {
-    setRows((prev) => prev.map((row) => (row.enrollmentId === enrollmentId ? { ...row, note } : row)));
-  }, []);
-  const allPresent = useCallback(() => setRows((prev) => prev.map((row) => ({ ...row, status: "present" }))), []);
+    edit((prev) => prev.map((row) => (row.enrollmentId === enrollmentId ? { ...row, note } : row)));
+  }, [edit]);
+  const allPresent = useCallback(() => edit((prev) => prev.map((row) => ({ ...row, status: "present" }))), [edit]);
 
   const saveList = useCallback(async (): Promise<void> => {
-    if (saving) return;
+    if (savingNow.current) return;
+    const saved = query;
+    savingNow.current = true;
     setSaving(true);
     setSaveError(undefined);
     try {
-      await io.current.save({ ...query, marks: exceptionsOf(rows) });
+      await io.current.save({ ...saved, marks: exceptionsOf(rows) });
       window.clearTimeout(toastTimer.current);
       setToast("Lista guardada");
       toastTimer.current = window.setTimeout(() => setToast(undefined), TOAST_MS);
-      await read(true);
+      // The day or class changed mid-save: that list's own load already owns the screen.
+      if (currentQuery.current === saved) await read(true, saved);
     } catch (cause) {
       setSaveError(reasonOf(cause, SAVE_FALLBACK));
     } finally {
+      savingNow.current = false;
       setSaving(false);
     }
-  }, [query, read, rows, saving]);
+  }, [query, read, rows]);
 
   const counts = useMemo(() => tally(rows), [rows]);
   const dirty = useMemo(() => sheet !== undefined && isDirty(rows, sheet.rows), [rows, sheet]);

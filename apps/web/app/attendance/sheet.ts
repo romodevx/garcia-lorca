@@ -27,6 +27,9 @@ export interface AttendanceSheetRow {
   note: string;
 }
 
+/** Why a list is read-only: a future day, or a teacher past the correction window. */
+export type ReadOnlyReason = "future" | "window";
+
 export interface AttendanceSheet {
   mode: AttendanceMode;
   date: string;
@@ -36,6 +39,10 @@ export interface AttendanceSheet {
   windowDays: number;
   session: AttendanceSession | null;
   rows: AttendanceSheetRow[];
+  /** Set by newer gateways when `editable` is false. */
+  readOnlyReason?: ReadOnlyReason;
+  /** The server's school day (`YYYY-MM-DD`, UTC); absent from older gateways. */
+  today?: string;
 }
 
 export interface AttendanceSheetQuery {

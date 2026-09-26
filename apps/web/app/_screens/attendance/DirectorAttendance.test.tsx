@@ -72,6 +72,19 @@ async function pickGroup(label: string): Promise<void> {
 }
 
 describe("DirectorAttendance", () => {
+  it("lists groups in school order: level → grade → letter", async () => {
+    config.listLabelledGroups.mockResolvedValue([
+      { id: "gSec", cycleId: "c1", gradeLevelId: "glSec1", name: "A", capacity: 30, label: "1° SECUNDARIA · A" },
+      { id: "gPriB", cycleId: "c1", gradeLevelId: "glPri1", name: "B", capacity: 30, label: "1° PRIMARIA · B" },
+      { id: "gPri", cycleId: "c1", gradeLevelId: "glPri1", name: "A", capacity: 30, label: "1° PRIMARIA · A" },
+    ]);
+    renderScreen();
+    await screen.findByRole("option", { name: "1° PRIMARIA · B" });
+
+    const labels = screen.getAllByRole("option").map((o) => o.textContent).filter((t) => t?.includes("·"));
+    expect(labels).toEqual(["1° PRIMARIA · A", "1° PRIMARIA · B", "1° SECUNDARIA · A"]);
+  });
+
   it("a daily-level group opens its day list, with no date window", async () => {
     renderScreen();
     await pickGroup("1° PRIMARIA · A");
