@@ -4,6 +4,7 @@ import type { FamilyGradeEntry } from "../api";
 import { useAppState } from "../state/AppState";
 import { toChildView } from "../state/childView";
 import { useChildGrades } from "../state/familyData";
+import { useRefreshHandler } from "../components/refresh";
 import { useTheme, type ThemeColors } from "../theme";
 import { Card, EmptyState, ListRow, Ring, ScreenTitle, SectionLabel } from "../ui";
 import { AsyncErrorState, AsyncLoading } from "./AsyncStates";
@@ -90,6 +91,7 @@ export function GradesScreen(): ReactElement {
   const { child, selectedChildId, childLoading, childError, refreshChildren } = useAppState();
   const view = toChildView(child);
   const { data, loading, error, reload } = useChildGrades(selectedChildId);
+  useRefreshHandler(reload);
   const theme = useTheme();
 
   const entries = data ?? [];

@@ -1,14 +1,14 @@
 import { useMemo } from "react";
 import {
   getAccount,
-  getAttendance,
   getCard,
   getGrades,
   type FamilyAccount,
   type FamilyCard,
-  type FamilyAttendanceRecord,
   type FamilyGradeEntry,
 } from "../api";
+import { getAttendanceMonth, type AttendanceMonth } from "../api/attendance";
+import { useFreshDataSignal } from "./freshness";
 import { useAsyncResource, type AsyncResource } from "./useAsyncResource";
 
 /**
@@ -24,10 +24,22 @@ export function useChildAccount(childId: string | null): AsyncResource<FamilyAcc
   return useAsyncResource(load);
 }
 
-/** The selected child's stored attendance records. */
-export function useChildAttendance(childId: string | null): AsyncResource<FamilyAttendanceRecord[]> {
-  const load = useMemo(() => (childId ? () => getAttendance(childId) : null), [childId]);
-  return useAsyncResource(load);
+/**
+ * One month (YYYY-MM) of the selected child's attendance. A null month is a
+ * no-op, like a null child. It reloads on the freshness signal (app back in the
+ * foreground, an attendance push) — a teacher can change it at any moment.
+ */
+export function useChildAttendanceMonth(
+  childId: string | null,
+  month: string | null,
+): AsyncResource<AttendanceMonth> {
+  const load = useMemo(
+    () => (childId && month ? () => getAttendanceMonth(childId, month) : null),
+    [childId, month],
+  );
+  const resource = useAsyncResource(load);
+  useFreshDataSignal(resource.reload);
+  return resource;
 }
 
 /** The selected child's numeric grade entries. */

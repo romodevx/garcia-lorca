@@ -6,6 +6,7 @@ import type { FamilyAccount, FamilyCharge, FamilyPayment } from "../api";
 import type { IconName } from "../icons";
 import { useAppState } from "../state/AppState";
 import { useChildAccount } from "../state/familyData";
+import { useRefreshHandler } from "../components/refresh";
 import { useTheme, type TintName } from "../theme";
 import { Card, Chip, EmptyState, ListRow, ScreenTitle, SectionLabel, TintIcon } from "../ui";
 import { AsyncErrorState, AsyncLoading } from "./AsyncStates";
@@ -73,6 +74,7 @@ function toLedger(account: FamilyAccount): Movement[] {
 export function AccountScreen(): ReactElement {
   const { selectedChildId, childLoading, childError, refreshChildren } = useAppState();
   const { data, loading, error, reload } = useChildAccount(selectedChildId);
+  useRefreshHandler(reload);
   const cardEnabled = useFlag("module_student_card");
   const theme = useTheme();
 

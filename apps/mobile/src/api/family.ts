@@ -98,25 +98,11 @@ export interface FamilyGradeEntry {
   termName: string;
 }
 
-/** The attendance statuses the backend stores as exceptions. */
-export type FamilyAttendanceStatus = "present" | "absent" | "late" | "excused";
-
-/** One stored attendance record for a child on a given day (ISO date). */
-export interface FamilyAttendanceRecord {
-  id: string;
-  date: string;
-  status: FamilyAttendanceStatus;
-  note: string;
-}
-
 interface StudentsEnvelope {
   students: FamilyStudent[] | null;
 }
 interface GradesEnvelope {
   gradeEntries: FamilyGradeEntry[] | null;
-}
-interface AttendanceEnvelope {
-  records: FamilyAttendanceRecord[] | null;
 }
 
 /** Reads one non-2xx into a typed error so callers branch on `.status`. */
@@ -166,23 +152,6 @@ export async function getGrades(studentId: string, termId?: string): Promise<Fam
     "grades",
   );
   return data.gradeEntries ?? [];
-}
-
-/** Reads one child's stored attendance records over an optional inclusive range. */
-export async function getAttendance(
-  studentId: string,
-  from?: string,
-  to?: string,
-): Promise<FamilyAttendanceRecord[]> {
-  const params = new URLSearchParams();
-  if (from) params.set("from", from);
-  if (to) params.set("to", to);
-  const query = params.toString() ? `?${params.toString()}` : "";
-  const data = await unwrap<AttendanceEnvelope>(
-    await apiFetch(`/api/v1/family/students/${studentId}/attendance${query}`),
-    "attendance",
-  );
-  return data.records ?? [];
 }
 
 /**

@@ -54,4 +54,30 @@ describe("HomeScreen summary cards", () => {
     expect(screen.queryByText("Suspensión de clases")).toBeNull();
     expect(screen.queryByText("Festival de Primavera")).toBeNull();
   });
+
+  it("shows today's attendance from the school's monthly read", async () => {
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+    const kid = { id: "s1", firstName: "Mateo", lastName: "Herrera", level: "Primaria", levelId: "l1", gradeGroup: "3° A" };
+    globalThis.fetch = jest.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/family/students/s1/attendance?month=")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            month: "2026-09",
+            today: "2026-09-28",
+            days: [{ date: "2026-09-28", status: "absent", mode: "daily", classes: [] }],
+            summary: { present: 0, absent: 1, late: 0, excused: 0, partial: 0 },
+          }),
+        };
+      }
+      if (u.endsWith("/family/students")) return { ok: true, status: 200, json: async () => ({ students: [kid] }) };
+      return { ok: true, status: 200, json: async () => ({ notifications: [], charges: [], payments: [] }) };
+    }) as unknown as typeof fetch;
+
+    await renderWithProviders(<HomeScreen />);
+
+    await waitFor(() => expect(screen.getByText("Faltó")).toBeTruthy());
+  });
 });
