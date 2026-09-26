@@ -509,7 +509,11 @@ type linkTeacherUserRequest struct {
 	UserID string `json:"userId"`
 }
 
-// LinkTeacherUser handles POST /api/v1/config/teachers/{id}/user. It is the
+// TeacherUserLinkRoute is where LinkTeacherUser is served. It is shared with the
+// composition root so the tests pin the path a client must call.
+const TeacherUserLinkRoute = "POST /api/v1/teachers/{id}/user"
+
+// LinkTeacherUser handles POST /api/v1/teachers/{id}/user. It is the
 // gateway-orchestrated cross-service link: for a non-empty userId it FIRST
 // validates the iam user exists (GetUser) — a missing user maps to 404 and no
 // config write happens — THEN calls config SetTeacherUser to store the link. An

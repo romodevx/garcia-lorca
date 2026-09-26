@@ -748,10 +748,10 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/roles", iamAdmin("roles:read", adminH.ListRoles))
 	mux.Handle("POST /api/v1/roles/{id}/permissions", iamAdmin("roles:write", adminH.SetRolePermissions))
 
-	// The teacher↔user link mutates a CONFIG teacher, so it sits under
-	// module_config + config:write (reusing configWrite), not module_iam. The
+	// The teacher↔user link mutates a teacher record, so it sits under
+	// module_teachers + teachers:write (teachersWrite), not module_iam. The
 	// handler itself performs the gateway-orchestrated cross-service validation
 	// (iam GetUser) before the config write.
-	mux.Handle("POST /api/v1/teachers/{id}/user", teachersWrite(adminH.LinkTeacherUser))
+	mux.Handle(handler.TeacherUserLinkRoute, teachersWrite(adminH.LinkTeacherUser))
 	return mux
 }
