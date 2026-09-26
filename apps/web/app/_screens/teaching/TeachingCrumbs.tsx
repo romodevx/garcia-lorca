@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useRef, useState, type ReactElement } from "react";
 
-import type { TeachingOption } from "./selection";
+import { subjectLabel, type TeachingOption } from "./selection";
 import type { PickerStep, TeachingSelection } from "./useTeachingSelection";
 
 interface Crumb {
@@ -19,7 +19,7 @@ function firstStep<T extends TeachingOption>(sel: TeachingSelection<T>, bySubjec
 
 function crumbsOf<T extends TeachingOption>(title: string, sel: TeachingSelection<T>, bySubject: boolean): Crumb[] {
   const crumbs: Crumb[] = [{ label: title, target: firstStep(sel, bySubject) }];
-  if (bySubject && sel.subject !== undefined) crumbs.push({ label: sel.subject, target: sel.groupSkipped ? undefined : "group" });
+  if (bySubject && sel.subject !== undefined) crumbs.push({ label: sel.subject.name, target: sel.groupSkipped ? undefined : "group" });
   if (sel.selected !== undefined) crumbs.push({ label: sel.selected.groupName, target: undefined });
   return crumbs;
 }
@@ -107,7 +107,7 @@ function SwitchMenu<T extends TeachingOption>({ options, current, bySubject, onC
                   onClick={() => { onChoose(o); close(); }}
                   style={{ width: "100%", minHeight: 44, padding: "0 12px", textAlign: "left", borderRadius: 10, fontSize: 14.5, fontWeight: o.id === current?.id ? 800 : 600, color: "var(--text)", background: o.id === current?.id ? "var(--surface-2)" : "transparent", cursor: "pointer" }}
                 >
-                  {bySubject && o.subjectName !== undefined ? `${o.subjectName} · ${o.groupName}` : o.groupName}
+                  {bySubject ? `${subjectLabel(o)} · ${o.groupName}` : o.groupName}
                 </button>
               </li>
             ))}

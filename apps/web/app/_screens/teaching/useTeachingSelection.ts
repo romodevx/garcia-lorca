@@ -37,33 +37,33 @@ function pushSelection(query: SelectionQuery): void {
 export type PickerStep = "subject" | "group";
 
 export interface TeachingSelection<T extends TeachingOption> extends ResolvedSelection<T> {
-  chooseSubject: (subject: string) => void;
-  chooseGroup: (groupId: string) => void;
+  /** Pick a subject by id. */
+  chooseSubject: (subjectId: string) => void;
+  /** Pick one of the options offered at the group step. */
+  chooseGroup: (option: T) => void;
   /** Jump to any option at once (the "Cambiar" menu). */
   choose: (option: T) => void;
   /** Back to a step, leaving a history entry like any other move. */
   goTo: (step: PickerStep) => void;
 }
 
+/** The URL for an option: its subject and the class itself, or just its group. */
+function queryFor(option: TeachingOption, bySubject: boolean): SelectionQuery {
+  return bySubject ? { subject: option.subjectId ?? "", assignment: option.id } : { group: option.groupId };
+}
+
 /** Where the teacher stands among `options`, kept in the URL. */
 export function useTeachingSelection<T extends TeachingOption>(options: readonly T[], bySubject: boolean): TeachingSelection<T> {
   const search = useSyncExternalStore(subscribe, currentSearch, serverSearch);
   const resolved = useMemo(() => resolveSelection(options, parseSelection(search), bySubject), [options, search, bySubject]);
-  const { subject } = resolved;
+  const subjectId = resolved.subject?.id;
 
   const chooseSubject = useCallback((next: string) => pushSelection({ subject: next }), []);
-  const chooseGroup = useCallback(
-    (groupId: string) => pushSelection(bySubject ? { subject, group: groupId } : { group: groupId }),
-    [bySubject, subject],
-  );
-  const choose = useCallback(
-    (option: T) => pushSelection(bySubject ? { subject: option.subjectName, group: option.groupId } : { group: option.groupId }),
-    [bySubject],
-  );
+  const choose = useCallback((option: T) => pushSelection(queryFor(option, bySubject)), [bySubject]);
   const goTo = useCallback(
-    (step: PickerStep) => pushSelection(step === "group" && bySubject ? { subject } : {}),
-    [bySubject, subject],
+    (step: PickerStep) => pushSelection(step === "group" && bySubject ? { subject: subjectId } : {}),
+    [bySubject, subjectId],
   );
 
-  return { ...resolved, chooseSubject, chooseGroup, choose, goTo };
+  return { ...resolved, chooseSubject, chooseGroup: choose, choose, goTo };
 }

@@ -89,7 +89,7 @@ describe("TeacherCapture — picking the class", () => {
   it("switching class with Cambiar starts the new list without the old term", async () => {
     const user = userEvent.setup();
     teaching.listAssignments.mockResolvedValue([assignment, spanish2B]);
-    window.history.replaceState(null, "", "/calificaciones?asignatura=Matem%C3%A1ticas");
+    window.history.replaceState(null, "", "/calificaciones?asignatura=s1");
     render(<TeacherCapture onBack={() => {}} />);
     await openRoster(user);
 

@@ -51,10 +51,10 @@ export function TeachingPicker<T extends TeachingOption>({ title, options, bySub
       {selection.step === "subject" && (
         <ChoiceStep heading={heading} title="Elige la asignatura" listLabel="Asignaturas">
           {selection.subjects.map((s) => {
-            const count = options.filter((o) => o.subjectName === s).length;
+            const count = options.filter((o) => (o.subjectId ?? "") === s.id).length;
             return (
-              <ChoiceButton key={s} onClick={() => selection.chooseSubject(s)} detail={`${count} ${count === 1 ? "grupo" : "grupos"}`}>
-                {s}
+              <ChoiceButton key={s.id} onClick={() => selection.chooseSubject(s.id)} detail={`${count} ${count === 1 ? "grupo" : "grupos"}`}>
+                {s.name}
               </ChoiceButton>
             );
           })}
@@ -63,7 +63,7 @@ export function TeachingPicker<T extends TeachingOption>({ title, options, bySub
       {selection.step === "group" && (
         <ChoiceStep heading={heading} title="Elige el grupo" listLabel="Grupos">
           {selection.groups.map((g) => (
-            <ChoiceButton key={g.id} onClick={() => selection.chooseGroup(g.groupId)}>{g.groupName}</ChoiceButton>
+            <ChoiceButton key={g.id} onClick={() => selection.chooseGroup(g)}>{g.groupName}</ChoiceButton>
           ))}
         </ChoiceStep>
       )}

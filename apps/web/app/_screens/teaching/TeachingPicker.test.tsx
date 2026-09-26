@@ -5,9 +5,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { TeachingPicker } from "./TeachingPicker";
 import type { TeachingOption } from "./selection";
 
-const mat2B: TeachingOption = { id: "a1", groupId: "g2b", groupName: "2° B", subjectName: "Matemáticas" };
-const mat3A: TeachingOption = { id: "a2", groupId: "g3a", groupName: "3° A", subjectName: "Matemáticas" };
-const esp2B: TeachingOption = { id: "a3", groupId: "g2b", groupName: "2° B", subjectName: "Español" };
+const mat2B: TeachingOption = { id: "a1", groupId: "g2b", groupName: "2° B", subjectId: "s-mat", subjectName: "Matemáticas" };
+const mat3A: TeachingOption = { id: "a2", groupId: "g3a", groupName: "3° A", subjectId: "s-mat", subjectName: "Matemáticas" };
+const esp2B: TeachingOption = { id: "a3", groupId: "g2b", groupName: "2° B", subjectId: "s-esp", subjectName: "Español" };
 const ALL = [mat2B, mat3A, esp2B];
 
 function List({ option }: { option: TeachingOption }): React.ReactElement {
@@ -85,6 +85,33 @@ describe("TeachingPicker — steps", () => {
     expect(window.location.search).toBe("?grupo=g2");
   });
 
+  it("a subject with no name is offered as such, and opens", async () => {
+    const user = userEvent.setup();
+    const nameless: TeachingOption = { id: "a7", groupId: "g4c", groupName: "4° C", subjectId: "s-x", subjectName: "" };
+    renderPicker([mat2B, nameless]);
+
+    await user.click(screen.getByRole("button", { name: /^Asignatura sin nombre/ }));
+
+    expect(screen.getByText("Lista de a7")).toBeInTheDocument();
+    expect(crumbs()).toHaveTextContent("Calificaciones›Asignatura sin nombre›4° C");
+  });
+
+  it("two subjects with the same name are two choices, each opening its own class", async () => {
+    const user = userEvent.setup();
+    const matSec: TeachingOption = { id: "a9", groupId: "g1s", groupName: "1° Sec", subjectId: "s-mat-sec", subjectName: "Matemáticas" };
+    renderPicker([mat2B, matSec]);
+
+    const [first, second] = screen.getAllByRole("button", { name: /^Matemáticas/ });
+    expect(first).toBeDefined();
+    expect(second).toBeDefined();
+    await user.click(second as HTMLElement);
+    const opened = screen.getByText(/Lista de a/).textContent;
+    await user.click(within(crumbs()).getByRole("button", { name: "Calificaciones" }));
+    await user.click(screen.getAllByRole("button", { name: /^Matemáticas/ })[0] as HTMLElement);
+
+    expect(screen.getByText(/Lista de a/).textContent).not.toBe(opened);
+  });
+
   it("with no classes it says who to ask", () => {
     renderPicker([]);
 
@@ -99,14 +126,14 @@ describe("TeachingPicker — the URL", () => {
 
     await user.click(screen.getByRole("button", { name: /^Matemáticas/ }));
     expect(window.location.pathname).toBe("/calificaciones");
-    expect(window.location.search).toBe("?asignatura=Matem%C3%A1ticas");
+    expect(window.location.search).toBe("?asignatura=s-mat");
 
     await user.click(screen.getByRole("button", { name: "3° A" }));
-    expect(window.location.search).toBe("?asignatura=Matem%C3%A1ticas&grupo=g3a");
+    expect(window.location.search).toBe("?asignatura=s-mat&clase=a2");
   });
 
   it("a reload keeps the place", () => {
-    window.history.replaceState(null, "", "/calificaciones?asignatura=Matem%C3%A1ticas&grupo=g2b");
+    window.history.replaceState(null, "", "/calificaciones?asignatura=s-mat&clase=a1");
     renderPicker(ALL);
 
     expect(screen.getByText("Lista de a1")).toBeInTheDocument();
@@ -128,7 +155,7 @@ describe("TeachingPicker — the URL", () => {
 
 describe("TeachingPicker — breadcrumbs", () => {
   it("names the whole path, the last crumb being the current page", async () => {
-    window.history.replaceState(null, "", "/calificaciones?asignatura=Matem%C3%A1ticas&grupo=g2b");
+    window.history.replaceState(null, "", "/calificaciones?asignatura=s-mat&clase=a1");
     renderPicker(ALL);
 
     expect(crumbs()).toHaveTextContent("Calificaciones›Matemáticas›2° B");
@@ -137,7 +164,7 @@ describe("TeachingPicker — breadcrumbs", () => {
 
   it("each crumb goes back to its step", async () => {
     const user = userEvent.setup();
-    window.history.replaceState(null, "", "/calificaciones?asignatura=Matem%C3%A1ticas&grupo=g2b");
+    window.history.replaceState(null, "", "/calificaciones?asignatura=s-mat&clase=a1");
     renderPicker(ALL);
 
     await user.click(within(crumbs()).getByRole("button", { name: "Matemáticas" }));
@@ -158,7 +185,7 @@ describe("TeachingPicker — breadcrumbs", () => {
 describe("TeachingPicker — Cambiar", () => {
   it("switches to any other class in one tap and closes", async () => {
     const user = userEvent.setup();
-    window.history.replaceState(null, "", "/calificaciones?asignatura=Matem%C3%A1ticas&grupo=g2b");
+    window.history.replaceState(null, "", "/calificaciones?asignatura=s-mat&clase=a1");
     renderPicker(ALL);
 
     const toggle = screen.getByRole("button", { name: "Cambiar" });
@@ -173,7 +200,7 @@ describe("TeachingPicker — Cambiar", () => {
 
   it("Escape closes it and gives the focus back to Cambiar", async () => {
     const user = userEvent.setup();
-    window.history.replaceState(null, "", "/calificaciones?asignatura=Matem%C3%A1ticas&grupo=g2b");
+    window.history.replaceState(null, "", "/calificaciones?asignatura=s-mat&clase=a1");
     renderPicker(ALL);
 
     await user.click(screen.getByRole("button", { name: "Cambiar" }));
