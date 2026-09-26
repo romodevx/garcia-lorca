@@ -470,14 +470,11 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// enrichment — a Maestro holds no students:read) are reused via the scope
 	// handler.
 	//
-	// Groups composes module_attendance + module_config (it enriches group names);
-	// roster and save touch only the attendance service, so they need only
-	// module_attendance. A supplied groupId is verified against the caller's OWN set
+	// Roster and save need only module_attendance (the classes list also reads
+	// the config catalog, hence module_config). A supplied groupId is verified against the caller's OWN set
 	// before any roster/save call — a group outside it answers 404, never 403,
 	// leaking nothing about whether another group exists.
 	teachingAttH := handler.NewTeachingAttendanceHandler(teachingH, attendanceClient, authClient)
-	mux.Handle("GET /api/v1/teaching/groups",
-		teachingModules("attendance_own:read", []string{"attendance", "config"}, teachingAttH.Groups))
 	// T3: the lists the caller takes (daily groups + per-class assignments). It
 	// reads the config catalog for each group's level mode, hence module_config.
 	mux.Handle("GET /api/v1/teaching/attendance/classes",

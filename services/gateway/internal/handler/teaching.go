@@ -303,6 +303,33 @@ func (h *TeachingHandler) catalogNames(ctx context.Context, enrich bool) (groups
 	return groups, groupGrades, subjects
 }
 
+// groupCatalogNames builds the group id→name and group id→grade-name maps used
+// to enrich the caller's groups. It is best-effort by design: no groups to
+// enrich or a failed lookup each yields an empty map, and the caller reads a
+// missing id as "" — a display gap, never a failed read. Both maps are always
+// non-nil, so lookups never panic.
+func (h *TeachingHandler) groupCatalogNames(ctx context.Context, enrich bool) (names, grades map[string]string) {
+	names, grades = map[string]string{}, map[string]string{}
+	if !enrich {
+		return names, grades
+	}
+	groups, err := h.config.ListGroups(ctx, "", "")
+	if err != nil {
+		return names, grades
+	}
+	gradeNames := map[string]string{}
+	if levels, err := h.config.ListGradeLevels(ctx, ""); err == nil {
+		for _, gl := range levels {
+			gradeNames[gl.ID] = gl.Name
+		}
+	}
+	for _, g := range groups {
+		names[g.ID] = g.Name
+		grades[g.ID] = gradeNames[g.GradeLevelID]
+	}
+	return names, grades
+}
+
 // --- terms -----------------------------------------------------------------
 
 // teachingTermResponse is the term-picker projection the teacher's roster screen

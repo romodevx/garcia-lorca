@@ -54,7 +54,6 @@ func TestMaestroReachesItsOwnTeachingSurface(t *testing.T) {
 		method, path, body string
 	}{
 		{http.MethodGet, "/api/v1/teaching/assignments", ""},
-		{http.MethodGet, "/api/v1/teaching/groups", ""},
 		{http.MethodGet, "/api/v1/teaching/roster?assignmentId=asg-1&termId=trm-1", ""},
 		{http.MethodPost, "/api/v1/teaching/grades", `{"assignmentId":"asg-1","enrollmentId":"enr-1","termId":"trm-1","value":9}`},
 		{http.MethodGet, "/api/v1/teaching/attendance/roster?groupId=grp-1&date=2026-09-01", ""},

@@ -87,14 +87,6 @@ func TestTeachingListsAnswerForTheActiveCycleOnly(t *testing.T) {
 			},
 			key: "terms", want: []string{"trm-now"},
 		},
-		{
-			name: "attendance groups",
-			serve: func(c *fakeTeachingConfig, rec *httptest.ResponseRecorder) {
-				newTeachingAttendance(c, &fakeTeachingAttendance{}, &fakeTeachingStudents{}).
-					Groups(rec, teacherGET("/api/v1/teaching/groups", "usr-t"))
-			},
-			key: "groups", want: []string{"grp-now"},
-		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
