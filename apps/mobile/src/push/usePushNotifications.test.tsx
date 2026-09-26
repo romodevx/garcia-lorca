@@ -5,14 +5,19 @@ import { type ReactNode } from "react";
 import { clearTokens, saveTokens } from "../api";
 import { Providers } from "../Providers";
 import { useAppState } from "../state/AppState";
-import { useFreshDataSignal } from "../state/freshness";
+import { requestFreshData, useFreshDataSignal } from "../state/freshness";
 import { registerForPush } from "./register";
 import { usePushNotifications } from "./usePushNotifications";
 
 jest.mock("./register", () => ({ registerForPush: jest.fn(async () => "registered") }));
 
 type Listener = (event: unknown) => void;
-const mockListeners: { received: Listener | null; response: Listener | null } = { received: null, response: null };
+const mockListeners: { received: Listener | null; response: Listener | null; token: Listener | null } = {
+  received: null,
+  response: null,
+  token: null,
+};
+const mockTokenRemove = jest.fn();
 jest.mock("expo-notifications", () => ({
   setNotificationHandler: jest.fn(),
   addNotificationReceivedListener: jest.fn((l: Listener) => {
@@ -24,6 +29,11 @@ jest.mock("expo-notifications", () => ({
     return { remove: jest.fn() };
   }),
   getLastNotificationResponseAsync: jest.fn(async () => null),
+  clearLastNotificationResponse: jest.fn(),
+  addPushTokenListener: jest.fn((l: Listener) => {
+    mockListeners.token = l;
+    return { remove: mockTokenRemove };
+  }),
 }));
 
 const children = [
@@ -51,6 +61,7 @@ describe("usePushNotifications", () => {
     jest.clearAllMocks();
     mockListeners.received = null;
     mockListeners.response = null;
+    mockListeners.token = null;
     await saveTokens({ accessToken: "a1", refreshToken: "r1" });
     mockGateway();
   });
@@ -116,5 +127,93 @@ describe("usePushNotifications", () => {
     await renderHook(() => usePushNotifications(), { wrapper });
 
     await waitFor(() => expect(router.navigate).toHaveBeenCalledWith("/(tabs)/asistencia"));
+  });
+
+  it("clears the cold-start response once handled, so it never replays", async () => {
+    (Notifications.getLastNotificationResponseAsync as jest.Mock).mockResolvedValueOnce({
+      notification: notification({ type: "attendance", studentId: "s2", date: "2026-09-28" }, "cold"),
+      actionIdentifier: "default",
+    });
+
+    await renderHook(() => usePushNotifications(), { wrapper });
+
+    await waitFor(() => expect(Notifications.clearLastNotificationResponse).toHaveBeenCalled());
+  });
+
+  it("ignores a tapped push for a child who is not this guardian's, and opens Avisos instead", async () => {
+    const { result } = await renderHook(
+      () => {
+        usePushNotifications();
+        return useAppState();
+      },
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.selectedChildId).toBe("s1"));
+
+    await act(async () =>
+      mockListeners.response?.({
+        notification: notification({ type: "attendance", studentId: "stranger", date: "2026-09-28" }),
+        actionIdentifier: "default",
+      }),
+    );
+
+    expect(result.current.selectedChildId).toBe("s1");
+    expect(router.navigate).not.toHaveBeenCalledWith("/(tabs)/asistencia");
+    expect(router.navigate).toHaveBeenCalledWith("/(tabs)/avisos");
+  });
+
+  it("on a cold start waits for the child list before selecting the tapped child", async () => {
+    let releaseStudents: () => void = () => undefined;
+    const studentsGate = new Promise<void>((resolve) => (releaseStudents = resolve));
+    globalThis.fetch = jest.fn(async (url: string) => {
+      if (String(url).endsWith("/family/students")) {
+        await studentsGate;
+        return { ok: true, status: 200, json: async () => ({ students: children }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ notifications: [] }) };
+    }) as unknown as typeof fetch;
+    (Notifications.getLastNotificationResponseAsync as jest.Mock).mockResolvedValueOnce({
+      notification: notification({ type: "attendance", studentId: "s2", date: "2026-09-28" }, "cold-wait"),
+      actionIdentifier: "default",
+    });
+
+    const { result } = await renderHook(
+      () => {
+        usePushNotifications();
+        return useAppState();
+      },
+      { wrapper },
+    );
+    await act(async () => undefined);
+    expect(router.navigate).not.toHaveBeenCalled();
+
+    await act(async () => releaseStudents());
+
+    await waitFor(() => expect(router.navigate).toHaveBeenCalledWith("/(tabs)/asistencia"));
+    expect(result.current.selectedChildId).toBe("s2");
+  });
+
+  it("retries a failed registration when the app comes back, but not a finished one", async () => {
+    (registerForPush as jest.Mock).mockResolvedValueOnce("failed");
+    await renderHook(() => usePushNotifications(), { wrapper });
+    await waitFor(() => expect(registerForPush).toHaveBeenCalledTimes(1));
+
+    await act(async () => requestFreshData());
+    await waitFor(() => expect(registerForPush).toHaveBeenCalledTimes(2));
+
+    await act(async () => requestFreshData());
+    await act(async () => undefined);
+    expect(registerForPush).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-registers when the push service rotates the token, and stops listening on unmount", async () => {
+    const { unmount } = await renderHook(() => usePushNotifications(), { wrapper });
+    await waitFor(() => expect(registerForPush).toHaveBeenCalledTimes(1));
+
+    await act(async () => mockListeners.token?.({ type: "ios", data: "new-device-token" }));
+    await waitFor(() => expect(registerForPush).toHaveBeenCalledTimes(2));
+
+    await act(async () => unmount());
+    expect(mockTokenRemove).toHaveBeenCalled();
   });
 });

@@ -1,10 +1,10 @@
 import * as Notifications from "expo-notifications";
 import { router } from "expo-router";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getAccessToken } from "../api";
 import { useAppState } from "../state/AppState";
 import { requestFreshData } from "../state/freshness";
-import { registerForPush } from "./register";
+import { usePushRegistration } from "./usePushRegistration";
 
 /** The push payload comms sends when a teacher saves an exception. */
 interface AttendancePush {
@@ -14,6 +14,7 @@ interface AttendancePush {
 }
 
 const ATTENDANCE_ROUTE = "/(tabs)/asistencia";
+const INBOX_ROUTE = "/(tabs)/avisos";
 
 function attendancePayload(notification: Notifications.Notification): AttendancePush | null {
   const data = notification.request.content.data as Record<string, unknown> | null | undefined;
@@ -43,47 +44,50 @@ function installForegroundHandler(): void {
 
 /**
  * Wires attendance pushes into the app. Mount once, inside the providers:
- *  - registers the phone once per signed-in session (after login or on a cold
- *    start with a stored session);
+ *  - keeps the phone registered while a family is signed in (usePushRegistration);
  *  - an attendance push arriving in the foreground reloads what is on screen;
- *  - tapping one (also the tap that cold-started the app) selects that child
- *    and opens Asistencia.
+ *  - tapping one (also the tap that cold-started the app) opens Asistencia for
+ *    that child — but only once the child list has loaded, and only when the
+ *    child is one of THIS guardian's; any other push opens Avisos instead.
  */
 export function usePushNotifications(): void {
-  const { selectedChildId, selectChild } = useAppState();
-  const registeredThisSession = useRef(false);
+  const { children: linkedChildren, childLoading, selectedChildId, selectChild } = useAppState();
   const handledResponses = useRef(new Set<string>());
+  const [pendingTap, setPendingTap] = useState<AttendancePush | null>(null);
 
   useEffect(installForegroundHandler, []);
 
   // A loaded child means a signed-in family; losing it means the session ended.
-  const signedIn = selectedChildId !== null;
-  useEffect(() => {
-    if (!signedIn) {
-      registeredThisSession.current = false;
-      return;
-    }
-    if (registeredThisSession.current) {
-      return;
-    }
-    registeredThisSession.current = true;
-    void registerForPush();
-  }, [signedIn]);
+  usePushRegistration(selectedChildId !== null);
 
-  const openAttendance = useCallback(
-    (response: Notifications.NotificationResponse) => {
-      const id = response.notification.request.identifier;
-      const payload = attendancePayload(response.notification);
-      if (payload === null || handledResponses.current.has(id) || getAccessToken() === null) {
-        return;
-      }
-      handledResponses.current.add(id);
-      selectChild(payload.studentId);
-      router.navigate(ATTENDANCE_ROUTE);
-      requestFreshData();
-    },
-    [selectChild],
-  );
+  const queueTap = useCallback((response: Notifications.NotificationResponse) => {
+    const id = response.notification.request.identifier;
+    const payload = attendancePayload(response.notification);
+    if (payload === null || handledResponses.current.has(id)) {
+      return;
+    }
+    handledResponses.current.add(id);
+    setPendingTap(payload);
+  }, []);
+
+  useEffect(() => {
+    if (pendingTap === null || childLoading) {
+      return;
+    }
+    setPendingTap(null);
+    // Consumed: a remount (or the next cold start) must not replay it.
+    Notifications.clearLastNotificationResponse();
+    if (getAccessToken() === null) {
+      return;
+    }
+    if (!linkedChildren.some((c) => c.id === pendingTap.studentId)) {
+      router.navigate(INBOX_ROUTE);
+      return;
+    }
+    selectChild(pendingTap.studentId);
+    router.navigate(ATTENDANCE_ROUTE);
+    requestFreshData();
+  }, [pendingTap, childLoading, linkedChildren, selectChild]);
 
   useEffect(() => {
     const received = Notifications.addNotificationReceivedListener((notification) => {
@@ -91,11 +95,11 @@ export function usePushNotifications(): void {
         requestFreshData();
       }
     });
-    const tapped = Notifications.addNotificationResponseReceivedListener(openAttendance);
+    const tapped = Notifications.addNotificationResponseReceivedListener(queueTap);
     void Notifications.getLastNotificationResponseAsync()
       .then((response) => {
         if (response) {
-          openAttendance(response);
+          queueTap(response);
         }
       })
       .catch(() => undefined);
@@ -103,5 +107,5 @@ export function usePushNotifications(): void {
       received.remove();
       tapped.remove();
     };
-  }, [openAttendance]);
+  }, [queueTap]);
 }
