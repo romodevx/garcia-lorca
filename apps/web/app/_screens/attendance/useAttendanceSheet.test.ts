@@ -51,4 +51,23 @@ describe("useAttendanceSheet", () => {
     expect(result.current.sheet?.session?.takenByName).toBe("Gabriela Rojas");
     expect(result.current.dirty).toBe(false);
   });
+
+  it("save dice si llegó al servidor: true al guardar, false si falló", async () => {
+    const load = vi.fn<LoadSheet>().mockResolvedValue(sheet);
+    const save = vi.fn<SaveSheet>().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("boom"));
+    const { result } = renderHook(() => useAttendanceSheet(target, load, save));
+    await waitFor(() => expect(result.current.sheet).toBeDefined());
+
+    let first: boolean | undefined;
+    await act(async () => {
+      first = await result.current.save();
+    });
+    let second: boolean | undefined;
+    await act(async () => {
+      second = await result.current.save();
+    });
+
+    expect(first).toBe(true);
+    expect(second).toBe(false);
+  });
 });

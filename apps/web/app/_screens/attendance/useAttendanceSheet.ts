@@ -34,7 +34,8 @@ export interface AttendanceSheetState {
   setStatus: (enrollmentId: string, status: AttendanceStatus) => void;
   setNote: (enrollmentId: string, note: string) => void;
   allPresent: () => void;
-  save: () => Promise<void>;
+  /** Resolves true once the server has the list, false when the save failed or was refused. */
+  save: () => Promise<boolean>;
 }
 
 /**
@@ -106,8 +107,8 @@ export function useAttendanceSheet(target: SheetTarget, load: LoadSheet, save: S
   }, [edit]);
   const allPresent = useCallback(() => edit((prev) => prev.map((row) => ({ ...row, status: "present" }))), [edit]);
 
-  const saveList = useCallback(async (): Promise<void> => {
-    if (savingNow.current) return;
+  const saveList = useCallback(async (): Promise<boolean> => {
+    if (savingNow.current) return false;
     const saved = query;
     savingNow.current = true;
     setSaving(true);
@@ -118,13 +119,15 @@ export function useAttendanceSheet(target: SheetTarget, load: LoadSheet, save: S
       setToast("Lista guardada");
       toastTimer.current = window.setTimeout(() => setToast(undefined), TOAST_MS);
       // The day or class changed mid-save: that list's own load already owns the screen.
-      if (currentQuery.current !== saved) return;
+      if (currentQuery.current !== saved) return true;
       // What was just saved IS the server's list now: it becomes the baseline at
       // once, so the screen is clean even if the quiet re-read below fails.
       setSheet((prev) => (prev === undefined ? prev : { ...prev, rows: [...rows] }));
       await read(true, saved);
+      return true;
     } catch (cause) {
       setSaveError(reasonOf(cause, SAVE_FALLBACK));
+      return false;
     } finally {
       savingNow.current = false;
       setSaving(false);
