@@ -73,7 +73,7 @@ export async function readScanResponse(res: Response): Promise<CardScanResult> {
 }
 
 /** The POST body: subjectId only when there is one. */
-function scanBody(input: ScanCardInput): Record<string, string> {
+function scanBody(input: ScanCardInput): ScanCardInput {
   const subject = input.subjectId !== undefined && input.subjectId !== "" ? { subjectId: input.subjectId } : {};
   return { groupId: input.groupId, ...subject, code: input.code };
 }
