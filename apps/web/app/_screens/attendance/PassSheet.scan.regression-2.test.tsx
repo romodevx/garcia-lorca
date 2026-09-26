@@ -5,7 +5,7 @@
 // The debounce counted from the FIRST sighting, so a card held for 3 s beeped
 // "Ya registrado" (or buzzed its refusal again, with a second server call).
 // A card counts as new only after it has been out of view for the window.
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -29,7 +29,6 @@ vi.mock("qr-scanner", () => ({
 }));
 
 const TODAY = "2026-09-10";
-const TARGET = { groupId: "g1", date: TODAY };
 
 const ROWS = [
   { enrollmentId: "en1", studentId: "st1", name: "Ada Lovelace", status: "present" as const, note: "" },
@@ -75,8 +74,6 @@ async function read(code: string): Promise<void> {
     scanner.decode?.({ data: code });
   });
 }
-
-const row = (label: string): HTMLElement => screen.getByRole("button", { name: label });
 
 beforeEach(() => {
   Object.defineProperty(window, "isSecureContext", { value: true, configurable: true });

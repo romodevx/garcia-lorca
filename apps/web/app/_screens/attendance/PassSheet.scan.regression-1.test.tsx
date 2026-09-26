@@ -29,7 +29,6 @@ vi.mock("qr-scanner", () => ({
 }));
 
 const TODAY = "2026-09-10";
-const TARGET = { groupId: "g1", date: TODAY };
 
 const ROWS = [
   { enrollmentId: "en1", studentId: "st1", name: "Ada Lovelace", status: "present" as const, note: "" },
