@@ -2,6 +2,8 @@ package repo
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -26,6 +28,11 @@ const (
 	// bound, not a hidden one: the capped method says so, as does the proto
 	// contract. Explicit pagination is the follow-up that removes the need for it.
 	maxListLimit = 500
+	// listLockNamespace prefixes a list's advisory-lock key so it cannot hash
+	// alongside another feature's locks by construction of the text.
+	listLockNamespace = "attendance-list"
+	// upsertMarkColumns is how many bound values one upsertMarkRow carries.
+	upsertMarkColumns = 7
 )
 
 // Repo is the GORM-backed attendance repository. Every operation runs in a
@@ -137,20 +144,32 @@ func (r *Repo) SessionFor(ctx context.Context, key service.ListKey) (service.Ses
 
 // ReconcileList applies one save to a list inside ONE tenant-bound transaction:
 //
-//  1. load the list's current marks for enrollmentIDs, row-locked;
-//  2. ask plan for the changes (the service's DiffList);
-//  3. write inserts and in-place updates as ONE upsert, delete cleared rows by id;
-//  4. upsert the list's session.
+//  1. take the list's transaction-scoped advisory lock, so two saves of the
+//     same list run one after the other;
+//  2. load the list's current marks for enrollmentIDs, row-locked;
+//  3. ask plan for the changes (the service's DiffList);
+//  4. write inserts and in-place updates as ONE upsert, delete cleared rows by id;
+//  5. upsert the list's session.
 //
-// The write is an UPSERT on the (tenant, enrollment, date, subject) key — NULLS
-// NOT DISTINCT, so a daily list's NULL subjects collide as they should. An update
-// carries the stored id and lands on the same row, so the id survives a
-// correction; a concurrent save that inserted the same student·list first is
-// absorbed as an update too (last write wins) instead of failing on the key.
-// Every statement is bounded by RLS, so another tenant's rows are untouched.
+// The advisory lock is what makes the plan honest. Row locks only cover rows
+// that exist, so without it two concurrent saves of a student nobody had marked
+// would both plan an INSERT; the key would absorb the loser as an update, yet it
+// would still be reported — and published — as an insert with an id that was
+// never stored. Serialized, the second save plans against the first one's row.
+//
+// The upsert is still keyed on (tenant, enrollment, date, subject) — NULLS NOT
+// DISTINCT, so a daily list's NULL subjects collide — and its RETURNING clause
+// decides what is reported: the STORED id of every row, and whether Postgres
+// inserted or updated it. A planned insert that landed on an existing row (a
+// writer outside this method) is reported as a status-changing update of the
+// stored row, never as a second insert. Every statement is bounded by RLS, so
+// another tenant's rows are untouched.
 func (r *Repo) ReconcileList(ctx context.Context, key service.ListKey, enrollmentIDs []string, taker service.Taker, plan service.PlanFunc) (service.ListChanges, error) {
 	var applied service.ListChanges
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := r.lockList(tx, key); err != nil {
+			return err
+		}
 		current, err := r.loadList(tx, enrollmentIDs, key, true)
 		if err != nil {
 			return err
@@ -162,19 +181,32 @@ func (r *Repo) ReconcileList(ctx context.Context, key service.ListKey, enrollmen
 		if err := r.deleteMarks(tx, changes.Deletes); err != nil {
 			return err
 		}
-		if err := r.upsertMarks(tx, changes); err != nil {
+		stored, err := r.upsertMarks(tx, changes)
+		if err != nil {
 			return err
 		}
 		if err := r.upsertSession(tx, key, taker); err != nil {
 			return err
 		}
-		applied = changes
+		applied = asStored(changes, stored)
 		return nil
 	})
 	if err != nil {
 		return service.ListChanges{}, err
 	}
 	return applied, nil
+}
+
+// lockList takes the transaction-scoped advisory lock of one list (tenant,
+// group, date, subject). It is released with the transaction, so it can never
+// leak; saves of different lists never wait on each other (barring a hash
+// collision, which only costs a brief wait).
+func (r *Repo) lockList(tx *gorm.DB, key service.ListKey) error {
+	lockKey := strings.Join([]string{listLockNamespace, r.tenantID, key.GroupID, key.Date.Format(dateLayout), key.SubjectID}, "|")
+	if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", lockKey).Error; err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "locking attendance list", err)
+	}
+	return nil
 }
 
 func (r *Repo) deleteMarks(tx *gorm.DB, cleared []service.AttendanceRecord) error {
@@ -191,31 +223,75 @@ func (r *Repo) deleteMarks(tx *gorm.DB, cleared []service.AttendanceRecord) erro
 	return nil
 }
 
-func (r *Repo) upsertMarks(tx *gorm.DB, changes service.ListChanges) error {
-	models := make([]attendanceModel, 0, len(changes.Inserts)+len(changes.Updates))
-	for _, rec := range changes.Inserts {
-		models = append(models, fromRecord(rec, r.tenantID))
-	}
+// storedMark is what the upsert's RETURNING clause says about one row: its
+// stored id and whether this statement inserted it (xmax = 0) or updated it.
+type storedMark struct {
+	ID           string
+	EnrollmentID string
+	Inserted     bool
+}
+
+// upsertMarkSQL writes a batch of marks as ONE statement. The VALUES rows are
+// appended by upsertMarks.
+const upsertMarkSQL = `INSERT INTO attendance (id, tenant_id, enrollment_id, date, subject_id, status, note, created_at, updated_at) VALUES %s
+ON CONFLICT (tenant_id, enrollment_id, date, subject_id)
+DO UPDATE SET status = excluded.status, note = excluded.note, updated_at = now()
+RETURNING id, enrollment_id, (xmax = 0) AS inserted`
+
+// upsertMarkRow is one VALUES row of upsertMarkSQL.
+const upsertMarkRow = "(?, ?, ?, ?::date, ?, ?, ?, now(), now())"
+
+// upsertMarks stores inserts and in-place updates as one upsert and returns
+// what Postgres actually did to each row, keyed by enrollment id.
+func (r *Repo) upsertMarks(tx *gorm.DB, changes service.ListChanges) (map[string]storedMark, error) {
+	records := make([]service.AttendanceRecord, 0, len(changes.Inserts)+len(changes.Updates))
+	records = append(records, changes.Inserts...)
 	for _, u := range changes.Updates {
-		models = append(models, fromRecord(u.Record, r.tenantID))
+		records = append(records, u.Record)
 	}
-	if len(models) == 0 {
-		return nil
+	out := make(map[string]storedMark, len(records))
+	if len(records) == 0 {
+		return out, nil
 	}
-	err := tx.Clauses(clause.OnConflict{
-		Columns: []clause.Column{
-			{Name: "tenant_id"}, {Name: "enrollment_id"}, {Name: "date"}, {Name: "subject_id"},
-		},
-		DoUpdates: clause.Assignments(map[string]any{
-			"status":     gorm.Expr("excluded.status"),
-			"note":       gorm.Expr("excluded.note"),
-			"updated_at": gorm.Expr("now()"),
-		}),
-	}).Create(&models).Error
-	if err != nil {
-		return glerrors.Wrap(glerrors.KindInternal, "storing attendance marks", err)
+	rows := make([]string, 0, len(records))
+	args := make([]any, 0, len(records)*upsertMarkColumns)
+	for _, rec := range records {
+		rows = append(rows, upsertMarkRow)
+		args = append(args, rec.ID, r.tenantID, rec.EnrollmentID, rec.Date.Format(dateLayout), nullable(rec.SubjectID), rec.Status, rec.Note)
 	}
-	return nil
+	var stored []storedMark
+	if err := tx.Raw(fmt.Sprintf(upsertMarkSQL, strings.Join(rows, ", ")), args...).Scan(&stored).Error; err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "storing attendance marks", err)
+	}
+	for _, m := range stored {
+		out[m.EnrollmentID] = m
+	}
+	return out, nil
+}
+
+// asStored rewrites a plan into what was stored: every insert and update
+// carries the row's STORED id, and a planned insert that Postgres turned into
+// an update (it met an existing row) is reported as a status-changing update.
+func asStored(planned service.ListChanges, stored map[string]storedMark) service.ListChanges {
+	out := service.ListChanges{Deletes: planned.Deletes}
+	for _, rec := range planned.Inserts {
+		m, ok := stored[rec.EnrollmentID]
+		if ok {
+			rec.ID = m.ID
+		}
+		if !ok || m.Inserted {
+			out.Inserts = append(out.Inserts, rec)
+			continue
+		}
+		out.Updates = append(out.Updates, service.RecordUpdate{Record: rec, StatusChanged: true})
+	}
+	for _, u := range planned.Updates {
+		if m, ok := stored[u.Record.EnrollmentID]; ok {
+			u.Record.ID = m.ID
+		}
+		out.Updates = append(out.Updates, u)
+	}
+	return out
 }
 
 // upsertSession records that the list was taken. The first save's taker and

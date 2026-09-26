@@ -4,6 +4,8 @@ package repo_test
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,6 +28,9 @@ const (
 	groupSession  = "90000000-0000-0000-0000-000000000102"
 	groupRLS      = "90000000-0000-0000-0000-000000000103"
 	groupInPlace  = "90000000-0000-0000-0000-000000000104"
+	groupRace     = "90000000-0000-0000-0000-000000000105"
+
+	enrollmentListRace = "e0000000-0000-0000-0000-000000000104"
 
 	subjectMath    = "50000000-0000-0000-0000-00000000000a"
 	subjectSpanish = "50000000-0000-0000-0000-00000000000b"
@@ -212,4 +217,75 @@ func countSessionRows(t *testing.T, tenant, group string) int64 {
 	})
 	require.NoError(t, err)
 	return n
+}
+
+// raceBarrierWait bounds how long each concurrent reconcile waits, inside its
+// plan, for the other one to reach its plan too. Unserialized saves both get
+// there (and both plan an INSERT); serialized ones never do, so the first stops
+// waiting and commits.
+const raceBarrierWait = 500 * time.Millisecond
+
+// Two saves of the SAME list at the same time — both find the student
+// unmarked. The list must end with exactly one stored row, and what the two
+// reconciles REPORT (what the service publishes events from) must name that
+// stored row's id, as an insert exactly once: a planned insert that was
+// absorbed by the other save's row, reported with an id that was never stored,
+// is a duplicate event carrying a dangling record id.
+func TestConcurrentReconcilesReportOnlyTheStoredRow(t *testing.T) {
+	ctx := context.Background()
+	date := day(t, "2026-09-21")
+	key := service.ListKey{GroupID: groupRace, Date: date}
+	scope := []string{enrollmentListRace}
+
+	var arrived sync.WaitGroup
+	arrived.Add(2)
+	results := make([]service.ListChanges, 2)
+	errs := make([]error, 2)
+	var done sync.WaitGroup
+	for i, status := range []string{"absent", "late"} {
+		done.Add(1)
+		go func(i int, status string) {
+			defer done.Done()
+			var once sync.Once
+			want := []service.AttendanceRecord{
+				mark(fmt.Sprintf("a0000000-0000-0000-0000-00000000050%d", i), enrollmentListRace, date, status, ""),
+			}
+			results[i], errs[i] = appRepo(t, tenantA).ReconcileList(ctx, key, scope, testTaker,
+				func(current map[string]service.AttendanceRecord) (service.ListChanges, error) {
+					once.Do(arrived.Done)
+					waitAtMost(&arrived, raceBarrierWait)
+					return service.DiffList(current, want), nil
+				})
+		}(i, status)
+	}
+	done.Wait()
+	require.NoError(t, errs[0])
+	require.NoError(t, errs[1])
+
+	require.Equal(t, int64(1), countMarks(t, tenantA, enrollmentListRace), "exactly one stored row")
+	marks, err := appRepo(t, tenantA).MarksForList(ctx, scope, key)
+	require.NoError(t, err)
+	stored := marks[enrollmentListRace].ID
+
+	inserts := 0
+	for _, res := range results {
+		for _, rec := range res.Inserts {
+			inserts++
+			assert.Equal(t, stored, rec.ID, "an insert reported with an id that was never stored")
+		}
+		for _, u := range res.Updates {
+			assert.Equal(t, stored, u.Record.ID, "an update reported with an id that was never stored")
+		}
+	}
+	assert.Equal(t, 1, inserts, "the stored row is reported as inserted exactly once")
+}
+
+// waitAtMost waits for wg, giving up after d.
+func waitAtMost(wg *sync.WaitGroup, d time.Duration) {
+	ch := make(chan struct{})
+	go func() { wg.Wait(); close(ch) }()
+	select {
+	case <-ch:
+	case <-time.After(d):
+	}
 }
