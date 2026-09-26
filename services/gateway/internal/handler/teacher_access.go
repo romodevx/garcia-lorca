@@ -154,7 +154,7 @@ func (h *TeacherAccessHandler) GrantAccess(w http.ResponseWriter, r *http.Reques
 
 	user, found := linkedUser, linked
 	if !linked {
-		if user, found, err = h.accountByEmail(ctx, email); err != nil {
+		if user, found, err = userByEmail(ctx, h.iam, email); err != nil {
 			writeConnectError(w, err)
 			return
 		}
@@ -227,21 +227,6 @@ func (h *TeacherAccessHandler) linkedAccount(ctx context.Context, teacher client
 		return client.User{}, false, err
 	}
 	return user, true, nil
-}
-
-// accountByEmail finds the account registered under the teacher's address
-// (case-insensitive — iam stores emails lowercased, a teacher record may not).
-func (h *TeacherAccessHandler) accountByEmail(ctx context.Context, email string) (client.User, bool, error) {
-	users, err := h.iam.ListUsers(ctx)
-	if err != nil {
-		return client.User{}, false, err
-	}
-	for _, u := range users {
-		if strings.EqualFold(strings.TrimSpace(u.Email), email) {
-			return u, true, nil
-		}
-	}
-	return client.User{}, false, nil
 }
 
 // linkedToAnotherTeacher reports whether userID is already the account of a
@@ -335,15 +320,4 @@ func (h *TeacherAccessHandler) invite(ctx context.Context, teacher client.Teache
 	}
 	res := toInvitationResponse(inv)
 	return user, &res, nil
-}
-
-// findRoleByName resolves a seeded role by NAME rather than its migration uuid,
-// like the guardian role in contact_access.go.
-func findRoleByName(roles []client.Role, name string) (client.Role, bool) {
-	for _, role := range roles {
-		if role.Name == name {
-			return role, true
-		}
-	}
-	return client.Role{}, false
 }
