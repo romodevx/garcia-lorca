@@ -97,6 +97,8 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		// Task 9: the cashier. Reads collections and takes money; nothing else
 		// in finance.
 		"cobranza": {"students:read", "students:list", "collections:read", "payments:write"},
+		// T2: the maestro role, exactly as migrations/iam/0022 seeds it.
+		"maestro": {"teaching:read", "teaching:write", "attendance_own:read", "attendance_own:write"},
 	}
 	granted, ok := perms[req.Msg.GetAccessToken()]
 	if !ok {
@@ -280,7 +282,9 @@ func (stubConfig) CreateCycle(_ context.Context, req *connect.Request[configv1.C
 
 func (stubConfig) ListCycles(_ context.Context, _ *connect.Request[configv1.ListCyclesRequest]) (*connect.Response[configv1.ListCyclesResponse], error) {
 	return connect.NewResponse(&configv1.ListCyclesResponse{Cycles: []*configv1.Cycle{
-		{Id: "cyc-1", Name: "2026-2027", Status: configv1.CycleStatus_CYCLE_STATUS_DRAFT},
+		// Active: the teacher surfaces answer only for the live cycle, and the
+		// one teaching assignment below (asg-1) lives in cyc-1.
+		{Id: "cyc-1", Name: "2026-2027", Status: configv1.CycleStatus_CYCLE_STATUS_ACTIVE},
 	}}), nil
 }
 

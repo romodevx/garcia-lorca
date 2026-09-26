@@ -56,15 +56,27 @@ type TeachingCatalogReader interface {
 	ListTerms(ctx context.Context, cycleID, levelID string) ([]client.TermResult, error)
 }
 
+// TeachingCycleReader lists the school's cycles, so the surface can tell which
+// one is live. A teacher keeps past years' assignments in the catalogue, but the
+// teaching surfaces answer only for the active cycle (T2).
+type TeachingCycleReader interface {
+	ListCycles(ctx context.Context) ([]client.CycleResult, error)
+}
+
 // TeachingConfigReader is the config surface the teaching handler consumes: the
-// teacher directory (caller→teacher resolution), the teacher's assignments, and
-// the group/subject catalog for name enrichment. The Connect ConfigClient (the
-// same one backing the /config/* routes) satisfies it.
+// teacher directory (caller→teacher resolution), the teacher's assignments, the
+// cycle list (active-cycle scope), and the group/subject catalog for name
+// enrichment. The Connect ConfigClient (the same one backing the /config/*
+// routes) satisfies it.
 type TeachingConfigReader interface {
 	TeacherDirectoryReader
 	TeachingAssignmentReader
+	TeachingCycleReader
 	TeachingCatalogReader
 }
+
+// cycleStatusActive is the status the config client names a live cycle with.
+const cycleStatusActive = "active"
 
 // TeachingGradesService is the grade surface the teaching handler consumes: the
 // per-assignment roster read and the grade capture. The Connect GradesClient
@@ -106,6 +118,12 @@ func NewTeachingHandler(config TeachingConfigReader, grades TeachingGradesServic
 // searched for the Teacher whose user id matches, then that teacher's assignments
 // are listed. No request field selects the teacher.
 //
+// Only assignments of an ACTIVE cycle are returned (every active one, should
+// there be several). Past cycles are history: an id from one then falls outside
+// the set and every caller of this answers 404, exactly as for an id that never
+// existed. Failing to read the cycles is an error, never "all cycles" — not
+// knowing which year is live must not widen the scope.
+//
 // A principal with no linked teacher record teaches nothing — teacherID "" and a
 // nil slice, never an error and never a downstream assignment read. That is the
 // "a maestro that teaches nothing" case, not a failure.
@@ -130,11 +148,35 @@ func (h *TeachingHandler) callerAssignments(ctx context.Context, principal middl
 	if teacherID == "" {
 		return "", nil, nil // the principal is linked to no teacher record
 	}
-	assignments, err = h.config.ListTeachingAssignments(ctx, "", "", teacherID)
+	all, err := h.config.ListTeachingAssignments(ctx, "", "", teacherID)
 	if err != nil {
 		return "", nil, err
 	}
+	active, err := h.activeCycleIDs(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	for _, a := range all {
+		if _, ok := active[a.CycleID]; ok {
+			assignments = append(assignments, a)
+		}
+	}
 	return teacherID, assignments, nil
+}
+
+// activeCycleIDs is the set of the school's active cycles.
+func (h *TeachingHandler) activeCycleIDs(ctx context.Context) (map[string]struct{}, error) {
+	cycles, err := h.config.ListCycles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	active := make(map[string]struct{}, 1)
+	for _, c := range cycles {
+		if c.Status == cycleStatusActive {
+			active[c.ID] = struct{}{}
+		}
+	}
+	return active, nil
 }
 
 // assertOwnsAssignment is the ownership gate of the roster and capture routes: it

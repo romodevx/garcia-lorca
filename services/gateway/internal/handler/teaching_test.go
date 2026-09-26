@@ -41,6 +41,25 @@ type fakeTeachingConfig struct {
 	termsErr       error
 	gotListTerms   int
 	gotTermsCycles []string
+
+	// cycles is the school's cycle list. nil means the fixtures' default: both
+	// cycles they use (cyc-1, cyc-2) are active, so a test that is not about the
+	// active-cycle scope never has to restate it. A test about that scope sets
+	// cycles explicitly (an empty, non-nil slice means "no cycles at all").
+	cycles        []client.CycleResult
+	cyclesErr     error
+	gotListCycles int
+}
+
+func (f *fakeTeachingConfig) ListCycles(_ context.Context) ([]client.CycleResult, error) {
+	f.gotListCycles++
+	if f.cyclesErr != nil {
+		return nil, f.cyclesErr
+	}
+	if f.cycles == nil {
+		return []client.CycleResult{{ID: "cyc-1", Status: "active"}, {ID: "cyc-2", Status: "active"}}, nil
+	}
+	return f.cycles, nil
 }
 
 func (f *fakeTeachingConfig) ListTeachers(_ context.Context) ([]client.Teacher, error) {
@@ -313,8 +332,8 @@ func TestTeachingAssignmentsEmptyPrincipalNeverMatchesUnlinkedTeacher(t *testing
 			{ID: "tch-1", UserID: "usr-t"},
 		},
 		assignmentsByTeacher: map[string][]client.TeachingAssignment{
-			"tch-unlinked": {{ID: "asg-ghost", TeacherID: "tch-unlinked"}},
-			"tch-1":        {{ID: "asg-1", TeacherID: "tch-1"}},
+			"tch-unlinked": {{ID: "asg-ghost", CycleID: "cyc-1", TeacherID: "tch-unlinked"}},
+			"tch-1":        {{ID: "asg-1", CycleID: "cyc-1", TeacherID: "tch-1"}},
 		},
 	}
 	h := handler.NewTeachingHandler(config, &fakeTeachingGrades{}, &fakeTeachingStudents{})
