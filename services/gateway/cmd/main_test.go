@@ -99,6 +99,12 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"cobranza": {"students:read", "students:list", "collections:read", "payments:write"},
 		// T2: the maestro role, exactly as migrations/iam/0022 seeds it.
 		"maestro": {"teaching:read", "teaching:write", "attendance_own:read", "attendance_own:write"},
+		// "Dar acceso al sistema" needs teachers:write AND users:write, and the
+		// caller must hold the maestro role's four to grant it.
+		"teacher-access-admin":       {"teachers:write", "users:write", "teaching:read", "teaching:write", "attendance_own:read", "attendance_own:write"},
+		"teacher-access-no-users":    {"teachers:write", "teaching:read", "teaching:write", "attendance_own:read", "attendance_own:write"},
+		"teacher-access-no-teachers": {"users:write", "teaching:read", "teaching:write", "attendance_own:read", "attendance_own:write"},
+		"teacher-access-no-subset":   {"teachers:write", "users:write"},
 	}
 	granted, ok := perms[req.Msg.GetAccessToken()]
 	if !ok {
@@ -165,6 +171,7 @@ func (stubIAM) CreateRole(_ context.Context, req *connect.Request[iamv1.CreateRo
 func (stubIAM) ListRoles(_ context.Context, _ *connect.Request[iamv1.ListRolesRequest]) (*connect.Response[iamv1.ListRolesResponse], error) {
 	return connect.NewResponse(&iamv1.ListRolesResponse{Roles: []*iamv1.Role{
 		{Id: "rol-1", Name: "docente", Permissions: []string{"grades:read"}},
+		{Id: "00000000-0000-0000-0000-0000000000a4", Name: "maestro", Permissions: []string{"teaching:read", "teaching:write", "attendance_own:read", "attendance_own:write"}},
 	}}), nil
 }
 

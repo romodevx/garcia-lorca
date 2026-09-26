@@ -98,17 +98,26 @@ func (h *AdminHandler) callerCanAssign(ctx context.Context, ids []string) (offen
 	if err != nil {
 		return "", false, err
 	}
+	if perm, missing := firstUnheldInRoles(callerHeld(ctx), roles, ids); missing {
+		return perm, false, nil
+	}
+	return "", true, nil
+}
+
+// firstUnheldInRoles is the subset check over a set of role ids, against an
+// already-fetched role catalog: the first permission any of those roles carries
+// that held lacks. An id missing from the catalog contributes nothing.
+func firstUnheldInRoles(held map[string]struct{}, roles []client.Role, ids []string) (string, bool) {
 	permsByRole := make(map[string][]string, len(roles))
 	for _, role := range roles {
 		permsByRole[role.ID] = role.Permissions
 	}
-	held := callerHeld(ctx)
 	for _, id := range ids {
 		if perm, missing := firstUnheld(held, permsByRole[id]); missing {
-			return perm, false, nil
+			return perm, true
 		}
 	}
-	return "", true, nil
+	return "", false
 }
 
 func forbidGrant(w http.ResponseWriter, perm string) {
