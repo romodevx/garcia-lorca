@@ -1281,9 +1281,11 @@ paths:
         was already this teacher's), conflicts (another teacher holds it and it
         was left untouched) or — with replaceConflicts — reassigned (handed to
         this teacher, keeping its id). A slot still has exactly one teacher per
-        cycle: replacing is explicit, never co-teaching. At most 500 items per
-        request, a technical bound on one transaction — not a limit on how many
-        classes a teacher may hold. Requires `teachers:write`.
+        cycle: replacing is explicit, never co-teaching. Ids are
+        case-insensitive (answered in lower case). At most 500 items per
+        request, a technical bound on one transaction enforced by the config
+        service — not a limit on how many classes a teacher may hold. Requires
+        `teachers:write`.
       operationId: assignTeachingLoad
       security: [{ sessionCookie: [] }]
       parameters: [{ $ref: '#/components/parameters/CsrfToken' }]

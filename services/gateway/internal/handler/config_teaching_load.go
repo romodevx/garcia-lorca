@@ -7,12 +7,6 @@ import (
 	"github.com/garcia-lorca/services/gateway/internal/client"
 )
 
-// MaxTeachingLoadItems bounds one bulk request. It is a TECHNICAL guard on the
-// size of a single config transaction, not a business rule: a teacher may hold
-// any number of classes, sent in as many requests as needed. It matches the
-// config service's own bound.
-const MaxTeachingLoadItems = 500
-
 type teachingLoadItemJSON struct {
 	GroupID   string `json:"groupId"`
 	SubjectID string `json:"subjectId"`
@@ -105,17 +99,17 @@ func (h *ConfigHandler) ReassignTeachingAssignment(w http.ResponseWriter, r *htt
 	writeJSON(w, http.StatusOK, toTeachingAssignmentResponse(a))
 }
 
-// invalidTeachingLoad checks the body against the contract. "" means valid.
-// Duplicates and existence are config's to judge (it names the item too).
+// invalidTeachingLoad checks the body's SHAPE only (uuids, at least one item).
+// "" means valid. The per-request item bound, duplicates and existence are
+// config's to judge — it is the single authority for them, names the item, and
+// its sentence is forwarded as is. The gateway's own transport guard is the
+// body-size cap in decodeJSONBody (maxRequestBytes).
 func invalidTeachingLoad(req teachingLoadRequest) string {
 	if !uuidShape.MatchString(req.TeacherID) {
 		return "teacherId must be a teacher id"
 	}
 	if len(req.Items) == 0 {
 		return "items must not be empty"
-	}
-	if len(req.Items) > MaxTeachingLoadItems {
-		return fmt.Sprintf("items must not exceed %d per request", MaxTeachingLoadItems)
 	}
 	for i, it := range req.Items {
 		if !uuidShape.MatchString(it.GroupID) {

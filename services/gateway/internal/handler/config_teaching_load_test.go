@@ -97,7 +97,6 @@ func TestAssignTeachingLoadForwardsAndAnswersTheFourLists(t *testing.T) {
 
 func TestAssignTeachingLoadRejectsBadBodiesAtTheEdge(t *testing.T) {
 	item := fmt.Sprintf(`{"groupId":%q,"subjectId":%q}`, grpA, subA)
-	tooMany := strings.TrimSuffix(strings.Repeat(item+",", handler.MaxTeachingLoadItems+1), ",")
 	tests := []struct {
 		name    string
 		body    string
@@ -107,7 +106,6 @@ func TestAssignTeachingLoadRejectsBadBodiesAtTheEdge(t *testing.T) {
 		{"missing teacher", fmt.Sprintf(`{"items":[%s]}`, item), "teacherId"},
 		{"malformed teacher", fmt.Sprintf(`{"teacherId":"tch-1","items":[%s]}`, item), "teacherId"},
 		{"no items", fmt.Sprintf(`{"teacherId":%q,"items":[]}`, tchA), "items"},
-		{"too many items", fmt.Sprintf(`{"teacherId":%q,"items":[%s]}`, tchA, tooMany), "items"},
 		{"malformed group names the item", fmt.Sprintf(`{"teacherId":%q,"items":[%s,{"groupId":"g","subjectId":%q}]}`, tchA, item, subA), "items[1].groupId"},
 		{"malformed subject names the item", fmt.Sprintf(`{"teacherId":%q,"items":[{"groupId":%q,"subjectId":""}]}`, tchA, grpA), "items[0].subjectId"},
 	}
@@ -123,6 +121,28 @@ func TestAssignTeachingLoadRejectsBadBodiesAtTheEdge(t *testing.T) {
 			assert.Nil(t, svc.load, "a bad body never reaches config")
 		})
 	}
+}
+
+// configLoadBound is the config service's per-request item bound (its
+// usecase.MaxTeachingLoadItems, documented as maxItems in openapi.yaml). The
+// gateway does NOT repeat it: config is the one authority, so the two can never
+// drift. The gateway only forwards config's refusal, sentence included.
+const configLoadBound = 500
+
+func TestAssignTeachingLoadLeavesTheItemBoundToConfig(t *testing.T) {
+	item := fmt.Sprintf(`{"groupId":%q,"subjectId":%q}`, grpA, subA)
+	tooMany := strings.TrimSuffix(strings.Repeat(item+",", configLoadBound+1), ",")
+	const configSays = "items must not exceed 500 per request"
+	svc := &fakeConfig{err: connect.NewError(connect.CodeInvalidArgument, errString(configSays))}
+	h := handler.NewConfigHandler(svc)
+
+	rec := doReq(t, h.AssignTeachingLoad, http.MethodPost, "/api/v1/teaching-assignments/bulk",
+		fmt.Sprintf(`{"teacherId":%q,"items":[%s]}`, tchA, tooMany))
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), configSays, "config's own sentence reaches the caller")
+	require.NotNil(t, svc.load, "the gateway forwards the request instead of judging the bound itself")
+	assert.Len(t, svc.load.Items, configLoadBound+1)
 }
 
 // upstreamCases are the config refusals every teaching-load route maps.
