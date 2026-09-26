@@ -192,3 +192,24 @@ describe("el contrato de foco, en los bordes", () => {
     expect(screen.getByLabelText("Monto")).toHaveFocus();
   });
 });
+
+describe("el tamaño de pantalla completa", () => {
+  /*
+   * La cámara del pase de lista por QR: en un teléfono tiene que ocupar la
+   * pantalla entera — el velo sin relleno y el panel de arriba abajo — y en un
+   * monitor queda como una columna centrada del ancho de un cajón mediano.
+   */
+  it("size=\"full\" llena el alto y el velo no deja margen", () => {
+    render(
+      <DrawerShell title="Escanear credenciales" icon="qrScan" size="full" onClose={() => {}}>
+        <p>cámara</p>
+      </DrawerShell>,
+    );
+
+    const panel = screen.getByRole("dialog", { name: "Escanear credenciales" });
+    expect(panel).toHaveClass("drawer-full");
+    expect(panel.style.height).toBe("100%");
+    expect(panel.style.maxHeight).toBe("100%");
+    expect(screen.getByTestId("drawer-backdrop").style.padding).toBe("0px");
+  });
+});

@@ -281,6 +281,8 @@ input { font-family: var(--font-ui); }
 /* ---- el cajón ---- */
 .drawer-sm { width: min(460px, 100%); }
 .drawer-md { width: min(560px, 100%); }
+/* La cámara del pase por QR: ancho de cajón mediano, alto lo pone la cáscara. */
+.drawer-full { width: min(560px, 100%); }
 /* El tabulador de colegiaturas —inscripción multi-concepto, tramos de precio,
    colegiatura, cobranza y cuotas— se capturaba por un túnel de 520px, tuviera
    el monitor 1280 o 2560. */
