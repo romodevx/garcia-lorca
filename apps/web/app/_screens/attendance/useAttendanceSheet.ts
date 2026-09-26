@@ -39,7 +39,8 @@ export interface AttendanceSheetState {
 
 /**
  * One list's reads and writes: load the day, edit rows locally, save only the
- * exceptions, then re-read quietly so the "guardada por" line is the server's —
+ * exceptions (what was saved becomes the clean baseline at once), then re-read
+ * quietly so the "guardada por" line is the server's —
  * only if that list is still the one on screen. Rows are locked while saving.
  * A monotonic request id drops stale responses (day or class switched mid-flight).
  */
@@ -117,7 +118,11 @@ export function useAttendanceSheet(target: SheetTarget, load: LoadSheet, save: S
       setToast("Lista guardada");
       toastTimer.current = window.setTimeout(() => setToast(undefined), TOAST_MS);
       // The day or class changed mid-save: that list's own load already owns the screen.
-      if (currentQuery.current === saved) await read(true, saved);
+      if (currentQuery.current !== saved) return;
+      // What was just saved IS the server's list now: it becomes the baseline at
+      // once, so the screen is clean even if the quiet re-read below fails.
+      setSheet((prev) => (prev === undefined ? prev : { ...prev, rows: [...rows] }));
+      await read(true, saved);
     } catch (cause) {
       setSaveError(reasonOf(cause, SAVE_FALLBACK));
     } finally {
