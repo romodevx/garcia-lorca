@@ -75,7 +75,7 @@ export function TeachersPanel({ teachers, onCreate, onOpenLoad, onGrantAccess }:
               key={t.id}
               teacher={t}
               access={access.stateOf(t)}
-              granting={access.grantingId === t.id}
+              granting={access.isGranting(t.id)}
               error={access.errorOf(t.id)}
               inviteUrl={access.inviteUrlOf(t.id)}
               onGrantAccess={onGrantAccess === undefined ? undefined : () => void access.grant(t)}

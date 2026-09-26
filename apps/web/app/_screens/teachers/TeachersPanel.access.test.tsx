@@ -146,4 +146,24 @@ describe("TeachersPanel — acceso al sistema", () => {
     expect(await screen.findByText("Enviamos la invitación a ada@escuela.mx")).toBeInTheDocument();
     expect(onGrantAccess).toHaveBeenCalledTimes(1);
   });
+
+  it("presses on two rows both go out, and each row shows its own Enviando…", async () => {
+    const user = userEvent.setup();
+    const bea: Teacher = { id: "t3", firstName: "Bea", lastName: "Ruiz", email: "bea@escuela.mx", userId: "" };
+    const pending = new Map<string, (r: TeacherAccessResult) => void>();
+    const onGrantAccess = vi.fn((id: string) => new Promise<TeacherAccessResult>((r) => { pending.set(id, r); }));
+    render(<TeachersPanel teachers={[ada, bea]} onCreate={vi.fn()} onGrantAccess={onGrantAccess} />);
+
+    await user.click(screen.getByRole("button", { name: "Dar acceso al sistema a Ada Lovelace" }));
+    await user.click(screen.getByRole("button", { name: "Dar acceso al sistema a Bea Ruiz" }));
+
+    expect(onGrantAccess).toHaveBeenCalledTimes(2);
+    expect(within(rowOf("Ada Lovelace")).getByText("Enviando…")).toBeInTheDocument();
+    expect(within(rowOf("Bea Ruiz")).getByText("Enviando…")).toBeInTheDocument();
+
+    pending.get("t1")?.(outcome());
+    expect(await within(rowOf("Ada Lovelace")).findByRole("button", { name: "Reenviar invitación a Ada Lovelace" })).toHaveTextContent("Reenviar invitación");
+    // Ada's answer does not end Bea's wait.
+    expect(within(rowOf("Bea Ruiz")).getByText("Enviando…")).toBeInTheDocument();
+  });
 });

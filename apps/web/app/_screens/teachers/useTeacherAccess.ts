@@ -11,24 +11,26 @@ export type TeacherAccessState = "none" | "linked" | TeacherAccessResult["status
 export interface TeacherAccess {
   stateOf: (teacher: Teacher) => TeacherAccessState;
   grant: (teacher: Teacher) => Promise<void>;
-  grantingId: string | undefined;
+  /** Whether this teacher's press is still waiting for the server. */
+  isGranting: (teacherId: string) => boolean;
   errorOf: (teacherId: string) => string | undefined;
   inviteUrlOf: (teacherId: string) => string | undefined;
   toast: string | undefined;
 }
 
 /**
- * The "Dar acceso al sistema" flow of the roster, one teacher at a time: what
- * each row's login looks like, the press itself (never sent twice while in
- * flight), the confirmation and the per-row failure. The server call is the
+ * The "Dar acceso al sistema" flow of the roster: what each row's login looks
+ * like, the press itself (never sent twice for the same teacher while in
+ * flight; different rows proceed independently), the confirmation and the
+ * per-row failure. The server call is the
  * caller's, so the screen can relink the roster row it owns.
  */
 export function useTeacherAccess(onGrantAccess?: (teacherId: string) => Promise<TeacherAccessResult>): TeacherAccess {
   const [outcomes, setOutcomes] = useState<Record<string, TeacherAccessResult>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [grantingId, setGrantingId] = useState<string | undefined>(undefined);
+  const [granting, setGranting] = useState<ReadonlySet<string>>(() => new Set());
   const [toast, setToast] = useState<string | undefined>(undefined);
-  const inFlight = useRef(false);
+  const inFlight = useRef(new Set<string>());
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => () => clearTimeout(toastTimer.current), []);
@@ -41,9 +43,9 @@ export function useTeacherAccess(onGrantAccess?: (teacherId: string) => Promise<
 
   const grant = useCallback(
     async (teacher: Teacher): Promise<void> => {
-      if (onGrantAccess === undefined || inFlight.current) return;
-      inFlight.current = true;
-      setGrantingId(teacher.id);
+      if (onGrantAccess === undefined || inFlight.current.has(teacher.id)) return;
+      inFlight.current.add(teacher.id);
+      setGranting(new Set(inFlight.current));
       setErrors(({ [teacher.id]: _dropped, ...rest }) => rest);
       try {
         const result = await onGrantAccess(teacher.id);
@@ -52,8 +54,8 @@ export function useTeacherAccess(onGrantAccess?: (teacherId: string) => Promise<
       } catch (cause) {
         setErrors((prev) => ({ ...prev, [teacher.id]: describeAccessError(cause) }));
       } finally {
-        inFlight.current = false;
-        setGrantingId(undefined);
+        inFlight.current.delete(teacher.id);
+        setGranting(new Set(inFlight.current));
       }
     },
     [onGrantAccess, announce],
@@ -67,7 +69,7 @@ export function useTeacherAccess(onGrantAccess?: (teacherId: string) => Promise<
   return {
     stateOf,
     grant,
-    grantingId,
+    isGranting: (id) => granting.has(id),
     errorOf: (id) => errors[id],
     inviteUrlOf: (id) => unsentLink(outcomes[id]),
     toast,
