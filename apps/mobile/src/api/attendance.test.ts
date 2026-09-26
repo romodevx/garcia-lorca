@@ -37,7 +37,7 @@ describe("getAttendanceMonth", () => {
     const url = String(fetchMock.mock.calls[0][0]);
     expect(url).toContain("/api/v1/family/students/s%201/attendance?month=2026-09");
     expect(month.today).toBe("2026-09-28");
-    expect(month.days[0].classes[0]).toEqual({ subjectName: "Matemáticas", status: "absent", note: "Salió temprano" });
+    expect(month.days[0]?.classes[0]).toEqual({ subjectName: "Matemáticas", status: "absent", note: "Salió temprano" });
     expect(month.summary).toEqual({ present: 10, absent: 1, late: 2, excused: 0, partial: 1 });
   });
 
@@ -50,7 +50,7 @@ describe("getAttendanceMonth", () => {
 
     const month = await getAttendanceMonth("s1", "2026-09");
 
-    expect(month.days[0].classes).toEqual([]);
+    expect(month.days[0]?.classes).toEqual([]);
     expect(month.summary).toEqual({ present: 0, absent: 0, late: 0, excused: 0, partial: 0 });
   });
 

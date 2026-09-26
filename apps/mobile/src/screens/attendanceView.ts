@@ -21,7 +21,7 @@ const MONTHS_PER_YEAR = 12;
 const ATTENDED: ReadonlySet<AttendanceStatus> = new Set(["present", "late"]);
 
 function parseDay(iso: string): { year: number; month: number; day: number } {
-  const [year, month, day] = iso.split("-").map(Number);
+  const [year = 0, month = 1, day = 1] = iso.split("-").map(Number);
   return { year, month, day };
 }
 

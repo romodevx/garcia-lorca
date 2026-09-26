@@ -4,6 +4,7 @@ import { View } from "react-native";
 import { signOut } from "@/src/api";
 import { DetailHeader } from "@/src/components/DetailHeader";
 import { ScreenScroll } from "@/src/components/ScreenScroll";
+import { unregisterPush } from "@/src/push/unregister";
 import { MoreScreen } from "@/src/screens/MoreScreen";
 import { useAppState } from "@/src/state/AppState";
 import { useTheme } from "@/src/theme";
@@ -18,8 +19,10 @@ export default function MasRoute(): ReactNode {
   // token be minted with no password and exchanged for a whole new session, so
   // "Cerrar sesión" would log nobody out. Then reset the child list and inbox so
   // the next guardian never sees the previous one, and return to the login
-  // screen.
+  // screen. The push token goes first: its DELETE still needs the Bearer, and a
+  // signed-out phone must stop receiving the child's attendance news.
   const onLogout = async (): Promise<void> => {
+    await unregisterPush();
     await signOut();
     await refreshChildren();
     await refreshNotifications();

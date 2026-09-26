@@ -41,3 +41,17 @@ jest.mock("@expo-google-fonts/nunito", () => ({
   Nunito_800ExtraBold: "Nunito_800ExtraBold",
   Nunito_500Medium: "Nunito_500Medium",
 }));
+
+// expo-notifications is a native module; the default stub keeps every screen
+// and route renderable. Push tests replace it with their own jest.mock.
+jest.mock("expo-notifications", () => ({
+  setNotificationHandler: jest.fn(),
+  addNotificationReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
+  addNotificationResponseReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
+  getLastNotificationResponseAsync: jest.fn(async () => null),
+  getPermissionsAsync: jest.fn(async () => ({ status: "undetermined", granted: false, canAskAgain: true })),
+  requestPermissionsAsync: jest.fn(async () => ({ status: "denied", granted: false, canAskAgain: false })),
+  getExpoPushTokenAsync: jest.fn(async () => ({ type: "expo", data: "ExponentPushToken[test]" })),
+  setNotificationChannelAsync: jest.fn(async () => null),
+  AndroidImportance: { HIGH: 4 },
+}));
