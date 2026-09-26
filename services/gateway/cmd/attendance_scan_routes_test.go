@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -11,7 +12,8 @@ import (
 // permission each surface reads with. The stub students service answers every
 // code as stu-1's valid card; stu-1 is actively enrolled in the stub grp-1.
 func TestAttendanceScanRoutesSecurityChain(t *testing.T) {
-	const body = `{"groupId":"grp-1","code":"GLCARD:AAAAAAAAAAAAAAAAAAAAAA"}`
+	// The list on screen is today's (the teacher's window allows it).
+	body := `{"date":"` + time.Now().UTC().Format(time.DateOnly) + `","groupId":"grp-1","code":"GLCARD:AAAAAAAAAAAAAAAAAAAAAA"}`
 	both := map[string]bool{"module_attendance": true, "module_student_card": true}
 	tests := []struct {
 		name    string

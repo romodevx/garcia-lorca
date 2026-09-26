@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"net/http"
+	"time"
 
 	connect "connectrpc.com/connect"
 	"golang.org/x/sync/errgroup"
@@ -19,15 +20,22 @@ import (
 // screen marks the row and the list is saved by the T3 routes, so a scan obeys
 // exactly the rules a save does.
 //
+// A scan is against the list ON SCREEN: the body names its date, and ownership,
+// the mode check and the group's enrollments are all resolved for that day —
+// never the server's school day, which differs from the screen's after 18:00
+// local (schoolToday is UTC) and whenever a past list is corrected.
+//
 // Both surfaces (teacher /teaching/attendance/scan, director /attendance/scan)
 // first run their own list gate (assertOwnsList / resolveList), and only then
 // look the card up: a list the caller may not touch answers before any card is
-// read, so the route cannot be used to probe codes.
+// read. The teacher's scan also obeys the save's date window.
 
-// ScanCardVerifier reads a scanned card code: whose card it is and whether it
-// counts. The Connect StudentsClient satisfies it.
+// ScanCardVerifier reads a scanned card code for attendance: whose card it is
+// and whether the office revoked it. The pupil's admission status plays no
+// part (owner decision, QA ISSUE-004): a pupil on the group's list counts
+// whatever their admission. The Connect StudentsClient satisfies it.
 type ScanCardVerifier interface {
-	VerifyCard(ctx context.Context, code string) (client.StudentResult, bool, error)
+	ScanCard(ctx context.Context, code string) (client.ScannedCard, error)
 }
 
 // scanResultHeader tells the web which sound and colour a scan gets: two
@@ -43,7 +51,11 @@ const (
 )
 
 // The scan refusals (text/plain). An unknown code and something that is not a
-// code read the same, so nothing tells a guessed code from a real one.
+// code read the same ("invalid"). A real card of a pupil outside the group
+// answers "foreign", on purpose — the owner wants a clear warning at the door.
+// That does reveal that a code is SOME real card, but never whose (no name, no
+// id), and card tokens carry 128 random bits, so finding real codes by
+// guessing is impractical.
 const (
 	msgScanInvalid   = "Código no válido"
 	msgScanSuspended = "Credencial suspendida"
@@ -54,8 +66,9 @@ const (
 // enough to correlate repeated scans, never enough to rebuild the code.
 const codeRefLen = 8
 
-// scanRequest is one scan against one list.
+// scanRequest is one scan against one list: the list of Date (YYYY-MM-DD).
 type scanRequest struct {
+	Date      string `json:"date"`
 	GroupID   string `json:"groupId"`
 	SubjectID string `json:"subjectId"`
 	Code      string `json:"code"`
@@ -81,7 +94,8 @@ func WithDirectorScanCards(cards ScanCardVerifier) AttendanceHandlerOption {
 }
 
 // Scan handles POST /api/v1/teaching/attendance/scan — resolve a card against
-// one of the caller's OWN lists (assertOwnsList, keyed on today's school day).
+// one of the caller's OWN lists (assertOwnsList) of the body's date, a day the
+// caller may still save (today back to attendanceWindowDays; never the future).
 //
 // It runs behind RequireAuth + rotation, the module_attendance and
 // module_student_card guards and RequirePermission("attendance_own:read").
@@ -95,19 +109,24 @@ func (h *TeachingAttendanceHandler) Scan(w http.ResponseWriter, r *http.Request)
 		writeNotFound(w)
 		return
 	}
-	req, ok := decodeScan(w, r)
+	req, date, ok := decodeScan(w, r)
 	if !ok {
 		return
 	}
-	today := schoolToday(h.now()).Format(attendanceDateLayout)
-	if _, ok := h.assertOwnsList(w, r, p, req.GroupID, today, req.SubjectID); !ok {
+	access, ok := h.assertOwnsList(w, r, p, req.GroupID, req.Date, req.SubjectID)
+	if !ok {
 		return
 	}
-	resolveScan(w, r, h.cards, h.attendance, req, today)
+	if msg := teacherWindowRefusal(date, h.now()); msg != "" {
+		writeBadRequest(w, msg)
+		return
+	}
+	resolveScan(w, r, h.cards, h.attendance, access, req)
 }
 
 // Scan handles POST /api/v1/attendance/scan — resolve a card against any list
-// the director may read (resolveList, keyed on today's school day).
+// the director may read (resolveList) of the body's date. The director has no
+// date window.
 //
 // It runs behind RequireAuth + rotation, the module_attendance and
 // module_student_card guards and RequirePermission("attendance:read").
@@ -116,52 +135,59 @@ func (h *AttendanceHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		writeNotFound(w)
 		return
 	}
-	req, ok := decodeScan(w, r)
+	req, _, ok := decodeScan(w, r)
 	if !ok {
 		return
 	}
-	today := schoolToday(h.now()).Format(attendanceDateLayout)
-	if _, ok := h.resolveList(w, r, req.GroupID, today, req.SubjectID); !ok {
+	access, ok := h.resolveList(w, r, req.GroupID, req.Date, req.SubjectID)
+	if !ok {
 		return
 	}
-	resolveScan(w, r, h.cards, h.svc, req, today)
+	resolveScan(w, r, h.cards, h.svc, access, req)
 }
 
-func decodeScan(w http.ResponseWriter, r *http.Request) (scanRequest, bool) {
+// decodeScan reads the body and its required date, answering 400 itself for a
+// malformed body or a date that is not YYYY-MM-DD.
+func decodeScan(w http.ResponseWriter, r *http.Request) (scanRequest, time.Time, bool) {
 	var req scanRequest
 	if err := decodeJSONBody(w, r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return scanRequest{}, false
+		return scanRequest{}, time.Time{}, false
 	}
-	return req, true
+	date, ok := parseListDate(req.Date)
+	if !ok {
+		writeBadRequest(w, msgInvalidDate)
+		return scanRequest{}, time.Time{}, false
+	}
+	return req, date, true
 }
 
-// resolveScan reads the card and the group's active enrollments (one roster
-// read, concurrently with the card) and answers the verdict:
+// resolveScan reads the card and the group's active enrollments on the list's
+// date — reusing the roster the gate already read, else one read concurrently
+// with the card — and answers the verdict:
 //
 //   - 422 invalid: not a card code, or a code no card carried;
 //   - 422 foreign: a card whose pupil has no active enrollment in the group —
 //     judged before suspension, and answered with no data of that pupil;
-//   - 409 suspended: the pupil's card does not count (revoked, or the pupil is
-//     no longer enrolled at the school);
-//   - 200: the row, with the pupil's name.
+//   - 409 suspended: the office revoked the card;
+//   - 200: the row, with the pupil's name — whatever the pupil's admission
+//     status, since the group's roster already lists them.
 //
 // A downstream failure is an error, never a verdict.
-func resolveScan(w http.ResponseWriter, r *http.Request, cards ScanCardVerifier, rosters ListRosterReader, req scanRequest, date string) {
+func resolveScan(w http.ResponseWriter, r *http.Request, cards ScanCardVerifier, rosters ListRosterReader, access listAccess, req scanRequest) {
 	ctx := r.Context()
 	var (
-		pupil            client.StudentResult
-		valid            bool
+		card             client.ScannedCard
 		roster           client.AttendanceRoster
 		cardErr, listErr error
 		reads            errgroup.Group
 	)
 	reads.Go(func() error {
-		pupil, valid, cardErr = cards.VerifyCard(ctx, req.Code)
+		card, cardErr = cards.ScanCard(ctx, req.Code)
 		return nil
 	})
 	reads.Go(func() error {
-		roster, listErr = rosters.GetDailyRoster(ctx, req.GroupID, date, req.SubjectID)
+		roster, listErr = rosterOf(ctx, rosters, access, req.GroupID, req.Date, req.SubjectID)
 		return nil
 	})
 	_ = reads.Wait() // both closures record their own error and return nil
@@ -179,11 +205,12 @@ func resolveScan(w http.ResponseWriter, r *http.Request, cards ScanCardVerifier,
 		writeConnectError(w, listErr)
 		return
 	}
+	pupil := card.Student
 	enrollmentID, enrolled := enrollmentOf(roster, pupil.ID)
 	switch {
 	case !enrolled:
 		refuseScan(w, r, req, scanResultForeign, http.StatusUnprocessableEntity, msgScanForeign)
-	case !valid:
+	case card.Revoked:
 		refuseScan(w, r, req, scanResultSuspended, http.StatusConflict, msgScanSuspended)
 	default:
 		w.Header().Set(scanResultHeader, scanResultOK)

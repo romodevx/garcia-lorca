@@ -208,6 +208,25 @@ func (c *StudentsClient) VerifyCard(ctx context.Context, code string) (StudentRe
 	return toStudentResult(res.Msg.GetStudent()), res.Msg.GetValid(), nil
 }
 
+// ScannedCard is what attendance scanning reads from a card: whose it is, and
+// whether the office revoked it. The pupil's admission status plays no part —
+// the group's roster decides who belongs to a list.
+type ScannedCard struct {
+	Student StudentResult
+	Revoked bool
+}
+
+// ScanCard reads a scanned code for attendance: whose card, and whether it was
+// revoked. Connect errors propagate (InvalidArgument: not a card code;
+// NotFound: no card carried it).
+func (c *StudentsClient) ScanCard(ctx context.Context, code string) (ScannedCard, error) {
+	res, err := c.rpc.VerifyCard(ctx, connect.NewRequest(&studentsv1.VerifyCardRequest{Code: code}))
+	if err != nil {
+		return ScannedCard{}, err
+	}
+	return ScannedCard{Student: toStudentResult(res.Msg.GetStudent()), Revoked: res.Msg.GetRevoked()}, nil
+}
+
 // --- enrollments ----------------------------------------------------------
 
 // Enroll places a student into a group of a cycle. The server derives the cycle

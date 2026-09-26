@@ -1712,11 +1712,15 @@ paths:
       summary: Resolve a scanned card to a list row (director)
       description: >
         T4, attendance by QR. Resolves the scanned virtual card (task 13) to
-        the row of the (group, subject-or-none) list on today's school day —
-        it NEVER writes attendance: the screen marks the row and the list is
-        saved with `POST /api/v1/attendance`. The list is checked first, with
-        the roster's rules (unknown group 404; mode and subject errors 400), so
-        a list the caller may not read never looks the card up. The verdict
+        the row of the (group, subject-or-none) list of the body's `date` — the
+        list on screen, not the server's school day — and it NEVER writes
+        attendance: the screen marks the row and the list is saved with
+        `POST /api/v1/attendance`. A missing or malformed `date` is 400. The
+        list is checked first, with the roster's rules (unknown group 404; mode
+        and subject errors 400), so a list the caller may not read never looks
+        the card up. The director has no date window. A card counts unless the
+        office revoked it, whatever the pupil's admission status: the group's
+        roster already decides who belongs to the list. The verdict
         travels in `X-Scan-Result` (`ok` | `invalid` | `foreign` | `suspended`)
         because two refusals share 422. Every answer carries
         `Cache-Control: no-store`. Behind `module_attendance` AND
@@ -1843,7 +1847,10 @@ paths:
         Same resolve and verdicts as `POST /api/v1/attendance/scan`, restricted
         to the caller's OWN lists with the roster's ownership rule: a group the
         caller does not teach, or a `per_class` subject that is not the
-        caller's, is 404 before any card is looked up. Never writes attendance
+        caller's, is 404 before any card is looked up. The `date` obeys the
+        save's window: a future day is 400 "No puedes registrar una fecha
+        futura", a day more than 7 back is 400 "Solo puedes corregir hasta 7
+        días atrás". Never writes attendance
         (the list is saved with `POST /api/v1/teaching/attendance`). Behind
         `module_attendance` AND `module_student_card`. Requires
         `attendance_own:read`.
@@ -2332,12 +2339,14 @@ components:
         application/json:
           schema:
             type: object
-            required: [groupId, code]
+            required: [date, groupId, code]
             properties:
+              date: { type: string, format: date, description: 'The day of the list on screen, ISO `YYYY-MM-DD`. Ownership, mode and enrollments are resolved for this day.' }
               groupId: { type: string, format: uuid }
               subjectId: { type: string, format: uuid, description: The subject of a `per_class` list; omitted for a daily one. }
               code: { type: string, description: 'The scanned QR, `GLCARD:` + 22 base64url characters. Never logged.' }
           example:
+            date: '2026-09-15'
             groupId: 7a1c2e3d-0000-4000-8000-000000000001
             code: GLCARD:AQAAAAAAAAAAAAAAAAAAAA
   parameters:
@@ -2383,7 +2392,9 @@ components:
 
   responses:
     AttendanceScanResolved:
-      description: The card is valid and its pupil is actively enrolled in the group.
+      description: >
+        The card is not revoked and its pupil is actively enrolled in the group
+        on the list's date (whatever the pupil's admission status).
       headers:
         X-Scan-Result: { $ref: '#/components/headers/XScanResult' }
         Cache-Control: { $ref: '#/components/headers/NoStore' }
@@ -2394,8 +2405,7 @@ components:
     AttendanceScanSuspended:
       description: >
         `X-Scan-Result: suspended` — the pupil belongs to the group but the
-        card does not count (revoked, or the pupil is no longer enrolled at the
-        school). Body "Credencial suspendida".
+        office revoked the card. Body "Credencial suspendida".
       headers:
         X-Scan-Result: { $ref: '#/components/headers/XScanResult' }
         Cache-Control: { $ref: '#/components/headers/NoStore' }
@@ -2406,10 +2416,13 @@ components:
     AttendanceScanRefused:
       description: >
         `X-Scan-Result: invalid` — not a card code, or a code no card carried
-        (indistinguishable on purpose, so codes cannot be probed); body
-        "Código no válido". `X-Scan-Result: foreign` — a card whose pupil has
-        no active enrollment in the group (judged before suspension); body
-        "Este alumno no pertenece a este grupo", and nothing about that pupil.
+        (these two read the same); body "Código no válido".
+        `X-Scan-Result: foreign` — a real card whose pupil has no active
+        enrollment in the group (judged before suspension); body "Este alumno
+        no pertenece a este grupo". Distinct on purpose, so the door gets a
+        clear warning: it reveals that a code is SOME real card, never whose
+        (no name, no id). Card tokens carry 128 random bits, so finding real
+        codes by guessing is impractical.
       headers:
         X-Scan-Result: { $ref: '#/components/headers/XScanResult' }
         Cache-Control: { $ref: '#/components/headers/NoStore' }

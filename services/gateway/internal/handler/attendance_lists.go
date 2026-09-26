@@ -246,28 +246,53 @@ type ListRosterReader interface {
 	GetDailyRoster(ctx context.Context, groupID, date, subjectID string) (client.AttendanceRoster, error)
 }
 
+// listAccess is what a list gate (assertOwnsList / resolveList) learned: the
+// list's mode and, when the gate had to read the list to decide (listExists),
+// that roster — so a caller that needs it reuses it instead of reading it
+// twice.
+type listAccess struct {
+	mode   string
+	roster *client.AttendanceRoster // nil when the gate did not read the list
+}
+
+// rosterOf is the list's roster: the one the gate already read, else a fresh
+// read.
+func rosterOf(ctx context.Context, r ListRosterReader, access listAccess, groupID, date, subjectID string) (client.AttendanceRoster, error) {
+	if access.roster != nil {
+		return *access.roster, nil
+	}
+	return r.GetDailyRoster(ctx, groupID, date, subjectID)
+}
+
 // listExists reports whether the exact list (group, date, subject-or-none) was
-// already taken — it has a session or any stored mark. Such a list stays
-// readable and correctable after its level changes mode: the mode decides which
-// NEW lists may be started, it never orphans a day the school already
-// recorded. A malformed date names no list.
-func listExists(ctx context.Context, r ListRosterReader, groupID, date, subjectID string) (bool, error) {
+// already taken — it has a session or any stored mark — and returns the roster
+// it read (nil when it read none). Such a list stays readable and correctable
+// after its level changes mode: the mode decides which NEW lists may be
+// started, it never orphans a day the school already recorded. A malformed
+// date names no list.
+func listExists(ctx context.Context, r ListRosterReader, groupID, date, subjectID string) (*client.AttendanceRoster, bool, error) {
 	if _, ok := parseListDate(date); !ok {
-		return false, nil
+		return nil, false, nil
 	}
 	roster, err := r.GetDailyRoster(ctx, groupID, date, subjectID)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
+	return &roster, rosterTaken(roster), nil
+}
+
+// rosterTaken reports whether a roster was already taken: a session, or any
+// row that is not the default present.
+func rosterTaken(roster client.AttendanceRoster) bool {
 	if roster.Session != nil {
-		return true, nil
+		return true
 	}
 	for _, row := range roster.Rows {
 		if row.Status != attendanceStatusPresent {
-			return true, nil
+			return true
 		}
 	}
-	return false, nil
+	return false
 }
 
 // schoolToday is the system's school day: the UTC date. It is a known,

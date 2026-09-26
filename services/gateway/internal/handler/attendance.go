@@ -125,8 +125,9 @@ func toAttendanceRecordResponse(r client.AttendanceRecord) attendanceRecordRespo
 
 // resolveList checks a list key against the catalog and writes the refusal
 // itself: 404 for an unknown group, 400 for a subject that does not fit the
-// group's mode or is not taught in the group. It returns the list's mode and
-// true when the list may be read and saved.
+// group's mode or is not taught in the group. It returns the list's access
+// (mode, and the roster when it had to read it) and true when the list may be
+// read and saved.
 //
 // The group's chain (group → grade → level) and, for a per-class key, the
 // group's assignments are independent reads, so they run concurrently.
@@ -134,7 +135,7 @@ func toAttendanceRecordResponse(r client.AttendanceRecord) attendanceRecordRespo
 // The level's mode governs NEW lists only: a key that does not fit it is still
 // served when that exact list already exists (listExists) — it was taken before
 // the level changed mode — and answers in the key's own shape.
-func (h *AttendanceHandler) resolveList(w http.ResponseWriter, r *http.Request, groupID, date, subjectID string) (string, bool) {
+func (h *AttendanceHandler) resolveList(w http.ResponseWriter, r *http.Request, groupID, date, subjectID string) (listAccess, bool) {
 	var (
 		group  listGroup
 		found  bool
@@ -153,29 +154,29 @@ func (h *AttendanceHandler) resolveList(w http.ResponseWriter, r *http.Request, 
 	}
 	if err := g.Wait(); err != nil {
 		writeConnectError(w, err)
-		return "", false
+		return listAccess{}, false
 	}
 	if !found {
 		writeNotFound(w)
-		return "", false
+		return listAccess{}, false
 	}
 	if msg := listModeRefusal(group.Mode, subjectID); msg != "" {
-		exists, err := listExists(r.Context(), h.svc, groupID, date, subjectID)
+		roster, exists, err := listExists(r.Context(), h.svc, groupID, date, subjectID)
 		if err != nil {
 			writeConnectError(w, err)
-			return "", false
+			return listAccess{}, false
 		}
 		if !exists {
 			writeBadRequest(w, msg)
-			return "", false
+			return listAccess{}, false
 		}
-		return keyMode(subjectID), true
+		return listAccess{mode: keyMode(subjectID), roster: roster}, true
 	}
 	if subjectID != "" && !taught {
 		writeBadRequest(w, msgSubjectNotInGroup)
-		return "", false
+		return listAccess{}, false
 	}
-	return group.Mode, true
+	return listAccess{mode: group.Mode}, true
 }
 
 // subjectTaughtIn reports whether any teaching assignment binds subjectID to
@@ -203,17 +204,17 @@ func (h *AttendanceHandler) subjectTaughtIn(ctx context.Context, groupID, subjec
 func (h *AttendanceHandler) GetRoster(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	groupID, date, subjectID := q.Get("groupId"), q.Get("date"), q.Get("subjectId")
-	mode, ok := h.resolveList(w, r, groupID, date, subjectID)
+	access, ok := h.resolveList(w, r, groupID, date, subjectID)
 	if !ok {
 		return
 	}
-	roster, err := h.svc.GetDailyRoster(r.Context(), groupID, date, subjectID)
+	roster, err := rosterOf(r.Context(), h.svc, access, groupID, date, subjectID)
 	if err != nil {
 		writeConnectError(w, err)
 		return
 	}
 	names := studentNamesFrom(r.Context(), h.students, len(roster.Rows) > 0)
-	view := listView{Mode: mode, Date: date, Today: schoolToday(h.now())}
+	view := listView{Mode: access.mode, Date: date, Today: schoolToday(h.now())}
 	writeJSON(w, http.StatusOK, toAttendanceListResponse(view, roster, names))
 }
 

@@ -171,8 +171,8 @@ func classesFor(assignments []client.TeachingAssignment, catalog attendanceCatal
 // --- list ownership (T3) ---------------------------------------------------------
 
 // assertOwnsList is the ownership gate of the roster and save routes. It writes
-// the refusal itself and returns the list's mode and true only when the caller
-// may touch the list:
+// the refusal itself and returns the list's access (mode, and the roster when it
+// had to read it) and true only when the caller may touch the list:
 //
 //   - 404 when the caller teaches nothing in the group (active cycle) — the same
 //     answer as a group that does not exist, so nothing leaks;
@@ -189,7 +189,7 @@ func classesFor(assignments []client.TeachingAssignment, catalog attendanceCatal
 // grade → level) are independent reads, so they run concurrently; ownership is
 // judged first, so a group the caller does not teach is 404 even when its
 // chain failed to load.
-func (h *TeachingAttendanceHandler) assertOwnsList(w http.ResponseWriter, r *http.Request, p middleware.Principal, groupID, date, subjectID string) (string, bool) {
+func (h *TeachingAttendanceHandler) assertOwnsList(w http.ResponseWriter, r *http.Request, p middleware.Principal, groupID, date, subjectID string) (listAccess, bool) {
 	ctx := r.Context()
 	var (
 		assignments       []client.TeachingAssignment
@@ -209,34 +209,34 @@ func (h *TeachingAttendanceHandler) assertOwnsList(w http.ResponseWriter, r *htt
 	_ = reads.Wait() // both closures record their own error and return nil
 	if scopeErr != nil {
 		writeConnectError(w, scopeErr)
-		return "", false
+		return listAccess{}, false
 	}
 	if !ownsKey(assignments, groupID, subjectID) {
 		writeNotFound(w)
-		return "", false
+		return listAccess{}, false
 	}
 	if listErr != nil {
 		writeConnectError(w, listErr)
-		return "", false
+		return listAccess{}, false
 	}
 	if !found {
 		writeNotFound(w)
-		return "", false
+		return listAccess{}, false
 	}
 	msg := listModeRefusal(group.Mode, subjectID)
 	if msg == "" {
-		return group.Mode, true
+		return listAccess{mode: group.Mode}, true
 	}
-	exists, err := listExists(ctx, h.attendance, groupID, date, subjectID)
+	roster, exists, err := listExists(ctx, h.attendance, groupID, date, subjectID)
 	if err != nil {
 		writeConnectError(w, err)
-		return "", false
+		return listAccess{}, false
 	}
 	if !exists {
 		writeBadRequest(w, msg)
-		return "", false
+		return listAccess{}, false
 	}
-	return keyMode(subjectID), true
+	return listAccess{mode: keyMode(subjectID), roster: roster}, true
 }
 
 // ownsKey reports whether assignments cover the list key: any assignment in
@@ -273,7 +273,7 @@ func (h *TeachingAttendanceHandler) Roster(w http.ResponseWriter, r *http.Reques
 	}
 	q := r.URL.Query()
 	groupID, dateStr, subjectID := q.Get("groupId"), q.Get("date"), q.Get("subjectId")
-	mode, ok := h.assertOwnsList(w, r, p, groupID, dateStr, subjectID)
+	access, ok := h.assertOwnsList(w, r, p, groupID, dateStr, subjectID)
 	if !ok {
 		return
 	}
@@ -282,14 +282,14 @@ func (h *TeachingAttendanceHandler) Roster(w http.ResponseWriter, r *http.Reques
 		writeBadRequest(w, msgInvalidDate)
 		return
 	}
-	roster, err := h.attendance.GetDailyRoster(r.Context(), groupID, dateStr, subjectID)
+	roster, err := rosterOf(r.Context(), h.attendance, access, groupID, dateStr, subjectID)
 	if err != nil {
 		writeConnectError(w, err)
 		return
 	}
 	names := h.scope.studentNames(r.Context(), len(roster.Rows) > 0)
 	now := h.now()
-	view := listView{Mode: mode, Date: dateStr, ReadOnlyReason: teacherReadOnlyReason(date, now), Today: schoolToday(now)}
+	view := listView{Mode: access.mode, Date: dateStr, ReadOnlyReason: teacherReadOnlyReason(date, now), Today: schoolToday(now)}
 	writeJSON(w, http.StatusOK, toAttendanceListResponse(view, roster, names))
 }
 
