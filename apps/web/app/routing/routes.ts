@@ -23,12 +23,15 @@ export type View =
   | { screen: "uniforms" }
   | { screen: "admin" }
   | { screen: "module"; moduleId: string }
-  | { screen: "studentEdit"; studentId: string };
+  | { screen: "studentEdit"; studentId: string }
+  | { screen: "teacherLoad"; teacherId: string };
 
 /** El prefijo de un módulo que aún no tiene pantalla propia. */
 const MODULE_PREFIX = "/modulo/";
 /** /alumnos/{id}/editar — the full edit page of one pupil's file. */
 const STUDENT_EDIT = /^\/alumnos\/([^/]+)\/editar$/;
+/** /docentes/{id}/carga — one teacher's teaching load (carga académica). */
+const TEACHER_LOAD = /^\/docentes\/([^/]+)\/carga$/;
 
 /**
  * Las pantallas de una sola pieza. Los módulos sin backend van por
@@ -48,7 +51,7 @@ const BY_SCREEN = {
   teachers: "/docentes",
   uniforms: "/uniformes",
   admin: "/administracion",
-} as const satisfies Record<Exclude<View["screen"], "module" | "studentEdit">, string>;
+} as const satisfies Record<Exclude<View["screen"], "module" | "studentEdit" | "teacherLoad">, string>;
 
 const BY_PATH: ReadonlyMap<string, View> = new Map(
   Object.entries(BY_SCREEN).map(([screen, path]) => [path, { screen } as View]),
@@ -61,6 +64,9 @@ export function viewToPath(view: View): string {
   }
   if (view.screen === "studentEdit") {
     return `/alumnos/${encodeURIComponent(view.studentId)}/editar`;
+  }
+  if (view.screen === "teacherLoad") {
+    return `/docentes/${encodeURIComponent(view.teacherId)}/carga`;
   }
   return BY_SCREEN[view.screen];
 }
@@ -94,6 +100,12 @@ export function pathToView(pathname: string): View {
   const studentId = edit?.[1] === undefined ? undefined : safeDecode(edit[1]);
   if (studentId !== undefined) {
     return { screen: "studentEdit", studentId };
+  }
+
+  const load = TEACHER_LOAD.exec(clean);
+  const teacherId = load?.[1] === undefined ? undefined : safeDecode(load[1]);
+  if (teacherId !== undefined) {
+    return { screen: "teacherLoad", teacherId };
   }
 
   return { screen: "dashboard" };
