@@ -60,6 +60,12 @@ tags:
     description: >
       The school's levels (Preescolar, Primaria…). Behind `module_config`;
       reads require `config:read`, writes `config:write`.
+  - name: config-terms
+    description: >
+      The periods (trimesters) of each cycle and level, and the calendar months
+      each one covers — configured per cycle and level, never hard-coded.
+      Behind `module_config`; reads require `config:read`, writes
+      `config:write`.
   - name: attendance
     description: >
       Pass lists (T3). Behind `module_attendance`. A list is keyed by
@@ -1751,6 +1757,151 @@ paths:
             text/plain:
               schema: { type: string }
               example: Ya hay calificaciones capturadas en este ciclo que no cumplirían la nueva escala
+
+  /api/v1/config/terms:
+    get:
+      tags: [config-terms]
+      summary: The terms of a cycle, optionally of one level
+      description: >
+        Ordered by ordinal. Every term carries `months` — the calendar months
+        it covers ("YYYY-MM", ascending; `[]` when none are set). Requires
+        `config:read`.
+      operationId: listConfigTerms
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: cycleId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: levelId, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The terms.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [terms]
+                properties:
+                  terms:
+                    type: array
+                    items: { $ref: '#/components/schemas/ConfigTerm' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/config/terms/{id}/months:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      tags: [config-terms]
+      summary: Set the calendar months a term covers (T7)
+      description: >
+        Replaces the term's month set (`{"months": []}` clears it); duplicates
+        are folded and the answer is sorted. Every month must touch the term's
+        cycle — else 400 `X-Error-Code: MONTH_OUTSIDE_CYCLE` ("El mes está
+        fuera del ciclo: 2027-09"). A month belongs to at most one term of the
+        same cycle and level — else 409 `X-Error-Code: MONTH_IN_OTHER_TERM`
+        ("Ese mes ya pertenece a otro periodo del nivel: 2026-12", naming the
+        earliest clashing month). A month not shaped YYYY-MM is 400
+        `X-Error-Code: MONTH_INVALID` at the edge. Nothing is written on any
+        refusal. An unknown term is 404. Requires `config:write`.
+      operationId: setTermMonths
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [months]
+              properties:
+                months:
+                  type: array
+                  items: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$', example: '2026-09' }
+            example: { months: ['2026-09', '2026-10', '2026-11'] }
+      responses:
+        '200':
+          description: The term with its new months.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigTerm' }
+        '400':
+          description: A malformed body or month, or a month outside the cycle.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: 'El mes está fuera del ciclo: 2027-09'
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: A month another term of the same cycle and level already covers.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: 'Ese mes ya pertenece a otro periodo del nivel: 2026-12'
+
+  /api/v1/config/terms/copy-months:
+    post:
+      tags: [config-terms]
+      summary: Copy one level's trimester months onto other levels (T7)
+      description: >
+        For each target level of the cycle, in ONE transaction: terms are
+        matched by `ordinal`; a matched term keeps its own name and dates and
+        takes the source's months; a missing one is created from the source
+        (name, ordinal, dates, months); a target term the source has no ordinal
+        for is kept (it may carry grades) but its months are cleared. Targets
+        are de-duplicated. 400 when `toLevelIds` is empty or contains the
+        source, a level or the cycle does not exist, or the source level has no
+        terms in the cycle. Returns the target levels' terms, level by level in
+        request order, then by ordinal. Requires `config:write`.
+      operationId: copyTermMonths
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cycleId, fromLevelId, toLevelIds]
+              properties:
+                cycleId: { type: string, format: uuid }
+                fromLevelId: { type: string, format: uuid }
+                toLevelIds:
+                  type: array
+                  minItems: 1
+                  items: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The target levels' terms.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [terms]
+                properties:
+                  terms:
+                    type: array
+                    items: { $ref: '#/components/schemas/ConfigTerm' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: A concurrent change took one of the months first.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: Ese mes ya pertenece a otro periodo del nivel
 
   /api/v1/attendance/roster:
     get:
@@ -3670,12 +3821,31 @@ components:
           type: array
           items:
             type: object
-            required: [id, name, cycleId, levelId]
+            required: [id, name, cycleId, levelId, months]
             properties:
               id: { type: string, format: uuid }
               name: { type: string, example: Bloque 1 }
               cycleId: { type: string, format: uuid }
               levelId: { type: string, format: uuid }
+              months:
+                type: array
+                description: The calendar months the term covers, ascending; [] when none are set.
+                items: { type: string, example: '2026-09' }
+    ConfigTerm:
+      type: object
+      required: [id, cycleId, levelId, name, ordinal, startsOn, endsOn, months]
+      properties:
+        id: { type: string, format: uuid }
+        cycleId: { type: string, format: uuid }
+        levelId: { type: string, format: uuid }
+        name: { type: string, example: Trimestre 1 }
+        ordinal: { type: integer, minimum: 1, example: 1 }
+        startsOn: { type: string, format: date }
+        endsOn: { type: string, format: date }
+        months:
+          type: array
+          description: The calendar months the term covers ("YYYY-MM", ascending); [] when none are set.
+          items: { type: string, example: '2026-09' }
     MonthlySheet:
       type: object
       required: [assignmentId, month, months, scale, gradingEnabled, currentMonth, editable, rows]

@@ -292,6 +292,14 @@ func (stubConfig) CreateCycle(_ context.Context, req *connect.Request[configv1.C
 	}}), nil
 }
 
+func (stubConfig) SetTermMonths(_ context.Context, req *connect.Request[configv1.SetTermMonthsRequest]) (*connect.Response[configv1.SetTermMonthsResponse], error) {
+	return connect.NewResponse(&configv1.SetTermMonthsResponse{Term: &configv1.Term{Id: req.Msg.GetTermId(), Months: req.Msg.GetMonths()}}), nil
+}
+
+func (stubConfig) CopyTermMonths(_ context.Context, req *connect.Request[configv1.CopyTermMonthsRequest]) (*connect.Response[configv1.CopyTermMonthsResponse], error) {
+	return connect.NewResponse(&configv1.CopyTermMonthsResponse{}), nil
+}
+
 func (stubConfig) ListCycles(_ context.Context, _ *connect.Request[configv1.ListCyclesRequest]) (*connect.Response[configv1.ListCyclesResponse], error) {
 	return connect.NewResponse(&configv1.ListCyclesResponse{Cycles: []*configv1.Cycle{
 		// Active: the teacher surfaces answer only for the live cycle, and the
@@ -877,6 +885,45 @@ func TestConfigReadDisabledModuleIs404(t *testing.T) {
 	res := doGateway(t, gw, http.MethodGet, "/api/v1/config/cycles", "config-reader", "")
 	if res.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+// T7: the term-months writes ride the config chain — module_config OFF ⇒ 404,
+// config:read alone ⇒ 403, config:write ⇒ 200. The table pins the real route
+// patterns (the handler tests bind the path value by hand).
+func TestTermMonthsRoutesGuardChain(t *testing.T) {
+	const (
+		putPath  = "/api/v1/config/terms/trm-1/months"
+		putBody  = `{"months":["2026-09"]}`
+		copyPath = "/api/v1/config/terms/copy-months"
+		copyBody = `{"cycleId":"cyc-1","fromLevelId":"lvl-1","toLevelIds":["lvl-2"]}`
+	)
+	on := map[string]bool{"module_config": true}
+	tests := []struct {
+		name   string
+		flags  map[string]bool
+		method string
+		path   string
+		body   string
+		token  string
+		want   int
+	}{
+		{"put: module off hides it", map[string]bool{}, http.MethodPut, putPath, putBody, "config-writer", http.StatusNotFound},
+		{"put: no token", on, http.MethodPut, putPath, putBody, "", http.StatusUnauthorized},
+		{"put: read-only", on, http.MethodPut, putPath, putBody, "config-reader", http.StatusForbidden},
+		{"put: writer", on, http.MethodPut, putPath, putBody, "config-writer", http.StatusOK},
+		{"copy: module off hides it", map[string]bool{}, http.MethodPost, copyPath, copyBody, "config-writer", http.StatusNotFound},
+		{"copy: read-only", on, http.MethodPost, copyPath, copyBody, "config-reader", http.StatusForbidden},
+		{"copy: writer", on, http.MethodPost, copyPath, copyBody, "config-writer", http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gw := newTestGateway(t, tt.flags)
+			res := doGateway(t, gw, tt.method, tt.path, tt.token, tt.body)
+			if res.StatusCode != tt.want {
+				t.Errorf("status = %d, want %d", res.StatusCode, tt.want)
+			}
+		})
 	}
 }
 

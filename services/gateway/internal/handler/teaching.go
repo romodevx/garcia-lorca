@@ -355,6 +355,8 @@ type teachingTermResponse struct {
 	Name    string `json:"name"`
 	CycleID string `json:"cycleId"`
 	LevelID string `json:"levelId"`
+	// Months are the calendar months the term covers ("YYYY-MM"), [] if none.
+	Months []string `json:"months"`
 }
 
 // Terms handles GET /api/v1/teaching/terms[?assignmentId=] — the terms of the

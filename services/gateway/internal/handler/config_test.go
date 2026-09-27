@@ -56,14 +56,20 @@ type fakeConfig struct {
 	subjects    []client.SubjectResult
 	subjectsFor string // captured grade_level_id filter on list
 
-	termIn      client.CreateTermInput
-	terms       []client.TermResult
-	termsCycle  string
-	termsLevel  string
-	groupIn     client.CreateGroupInput
-	groups      []client.GroupResult
-	groupsCycle string
-	groupsGrade string
+	termIn     client.CreateTermInput
+	terms      []client.TermResult
+	termsCycle string
+	termsLevel string
+	// T7 term months.
+	monthsTermID string
+	monthsIn     []string
+	copyCycle    string
+	copyFrom     string
+	copyTo       []string
+	groupIn      client.CreateGroupInput
+	groups       []client.GroupResult
+	groupsCycle  string
+	groupsGrade  string
 
 	teacherFirst string
 	teacherLast  string

@@ -390,6 +390,8 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/config/subjects", configRead(configH.ListSubjects))
 	mux.Handle("POST /api/v1/config/terms", configWrite(configH.CreateTerm))
 	mux.Handle("GET /api/v1/config/terms", configRead(configH.ListTerms))
+	mux.Handle("PUT /api/v1/config/terms/{id}/months", configWrite(configH.PutTermMonths))
+	mux.Handle("POST /api/v1/config/terms/copy-months", configWrite(configH.CopyTermMonths))
 	mux.Handle("POST /api/v1/config/events", configWrite(configH.CreateSchoolEvent))
 	mux.Handle("GET /api/v1/config/events", configRead(configH.ListSchoolEvents))
 	mux.Handle("GET /api/v1/config/school-profile", configRead(configH.GetSchoolProfile))
