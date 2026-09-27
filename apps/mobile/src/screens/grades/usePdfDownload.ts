@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { downloadPdf, PdfError, sharePdf, type PdfErrorKind } from "../../files/reportCardPdf";
 
 export type PdfDownloadState =
@@ -8,12 +8,15 @@ export type PdfDownloadState =
 
 export interface PdfDownloadTarget {
   path: string;
-  fallbackName: string;
+  /** Cache file name, from pdfFileName. */
+  fileName: string;
   title: string;
 }
 
 const MESSAGES: Record<PdfErrorKind, string> = {
   network: "No pudimos descargar la boleta. Revisa tu conexión e inténtalo de nuevo.",
+  server: "La escuela no pudo entregar la boleta en este momento. Inténtalo más tarde.",
+  storage: "No pudimos guardar la boleta en el teléfono. Libera espacio e inténtalo de nuevo.",
   not_found: "Esta boleta ya no está disponible. Puede que la escuela haya emitido una versión nueva.",
   session: "Tu sesión terminó. Vuelve a iniciar sesión para descargar la boleta.",
   unavailable: "Este teléfono no puede abrir el PDF. Inténtalo desde otro dispositivo.",
@@ -21,11 +24,21 @@ const MESSAGES: Record<PdfErrorKind, string> = {
 
 /**
  * Download-then-share for one PDF: progress while it downloads, a plain-words
- * message when it fails. A second tap while downloading is ignored.
+ * message when it fails. A second tap while downloading is ignored. When the
+ * screen closes mid-download the result is dropped: no share sheet pops up
+ * over whatever the parent went to, and no state is set on an unmounted screen.
  */
 export function usePdfDownload(target: PdfDownloadTarget | null): { state: PdfDownloadState; start: () => void } {
   const [state, setState] = useState<PdfDownloadState>({ status: "idle" });
   const busy = useRef(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const start = useCallback(() => {
     if (target === null || busy.current) {
@@ -33,18 +46,22 @@ export function usePdfDownload(target: PdfDownloadTarget | null): { state: PdfDo
     }
     busy.current = true;
     setState({ status: "downloading", progress: null });
+    const update = (next: PdfDownloadState): void => {
+      if (mounted.current) setState(next);
+    };
     void (async () => {
       try {
         const uri = await downloadPdf({
           path: target.path,
-          fallbackName: target.fallbackName,
-          onProgress: (progress) => setState({ status: "downloading", progress }),
+          fileName: target.fileName,
+          onProgress: (progress) => update({ status: "downloading", progress }),
         });
+        if (!mounted.current) return;
         await sharePdf(uri, target.title);
-        setState({ status: "idle" });
+        update({ status: "idle" });
       } catch (failure) {
         const kind = failure instanceof PdfError ? failure.kind : "network";
-        setState({ status: "failed", message: MESSAGES[kind] });
+        update({ status: "failed", message: MESSAGES[kind] });
       } finally {
         busy.current = false;
       }

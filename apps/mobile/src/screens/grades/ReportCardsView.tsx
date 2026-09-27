@@ -14,9 +14,9 @@ import { averageText, reportCardLabel, reportCardTitle, versionBadge } from "./r
 
 const HTTP_NOT_FOUND = 404;
 
-/** Opens one boleta's preview (also the target of a boleta push). */
-export function openReportCard(id: string): void {
-  router.push({ pathname: "/boleta/[id]", params: { id } });
+/** Opens one child's boleta preview (also the target of a boleta push). */
+export function openReportCard(id: string, studentId: string): void {
+  router.push({ pathname: "/boleta/[id]", params: { id, studentId } });
 }
 
 /**
@@ -39,7 +39,7 @@ export function ReportCardsView(): ReactElement | null {
       />
     );
   }
-  if (data === null) {
+  if (data === null || selectedChildId === null) {
     return childLoading || loading ? <AsyncLoading /> : null;
   }
   if (data.length === 0) {
@@ -58,7 +58,7 @@ export function ReportCardsView(): ReactElement | null {
       {error ? <StaleNotice /> : null}
       <Card style={styles.top}>
         {data.map((card, i) => (
-          <ListRow key={card.id} divider={i > 0} onPress={() => openReportCard(card.id)} accessibilityLabel={reportCardLabel(card)} accessibilityHint="Ver la boleta">
+          <ListRow key={card.id} divider={i > 0} onPress={() => openReportCard(card.id, selectedChildId)} accessibilityLabel={reportCardLabel(card)} accessibilityHint="Ver la boleta">
             <ReportCardRow card={card} />
           </ListRow>
         ))}

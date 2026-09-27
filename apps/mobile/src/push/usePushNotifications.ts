@@ -26,7 +26,7 @@ function openPushTarget({ push, responseId }: PendingTap): void {
     return;
   }
   router.navigate({ pathname: GRADES_ROUTE, params: { vista: "boletas", k: responseId } });
-  router.push({ pathname: REPORT_CARD_ROUTE, params: { id: push.reportCardId } });
+  router.push({ pathname: REPORT_CARD_ROUTE, params: { id: push.reportCardId, studentId: push.studentId } });
 }
 
 let handlerInstalled = false;

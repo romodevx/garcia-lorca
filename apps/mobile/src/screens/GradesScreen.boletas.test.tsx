@@ -81,7 +81,7 @@ describe("GradesScreen — Boletas", () => {
 
     await fireEvent.press(screen.getByLabelText(/^2\.º trimestre/));
 
-    expect(router.push).toHaveBeenCalledWith({ pathname: "/boleta/[id]", params: { id: "rc2" } });
+    expect(router.push).toHaveBeenCalledWith({ pathname: "/boleta/[id]", params: { id: "rc2", studentId: "s1" } });
   });
 
   it("says so when no boleta has been issued", async () => {

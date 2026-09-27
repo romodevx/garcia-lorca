@@ -212,7 +212,7 @@ describe("usePushNotifications", () => {
 
     expect(result.current.selectedChildId).toBe("s2");
     expect(router.navigate).toHaveBeenCalledWith({ pathname: "/(tabs)/calificaciones", params: { vista: "boletas", k: "rc-push" } });
-    expect(router.push).toHaveBeenCalledWith({ pathname: "/boleta/[id]", params: { id: "rc9" } });
+    expect(router.push).toHaveBeenCalledWith({ pathname: "/boleta/[id]", params: { id: "rc9", studentId: "s2" } });
   });
 
   it("ignores a boleta push for a child who is not this guardian's", async () => {

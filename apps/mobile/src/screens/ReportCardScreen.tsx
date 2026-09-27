@@ -1,7 +1,7 @@
 import { useMemo, type ReactElement } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { reportCardPdfPath } from "../api/reportCards";
-import { fallbackPdfName } from "../files/reportCardPdf";
+import { pdfFileName } from "../files/reportCardPdf";
 import { useAppState } from "../state/AppState";
 import { useChildReportCard } from "../state/familyData";
 import { useTheme } from "../theme";
@@ -17,23 +17,31 @@ const PERCENT = 100;
 
 export interface ReportCardScreenProps {
   id: string;
+  /** The child the boleta belongs to (route param). Absent → the selected child. */
+  studentId?: string;
 }
 
 /**
- * One issued boleta of the selected child: the subject × month table with each
+ * One issued boleta of the child named in the route (a push can open a
+ * sibling's boleta, and the selection may change behind this screen): the subject × month table with each
  * average and the general average, and a primary "Descargar PDF" that saves the
  * official PDF and opens the phone's share / preview sheet.
  */
-export function ReportCardScreen({ id }: ReportCardScreenProps): ReactElement | null {
+export function ReportCardScreen({ id, studentId }: ReportCardScreenProps): ReactElement | null {
   const theme = useTheme();
   const { selectedChildId, childLoading } = useAppState();
-  const { data, loading, error, errorStatus, reload } = useChildReportCard(selectedChildId, id);
+  const childId = studentId || selectedChildId;
+  const { data, loading, error, errorStatus, reload } = useChildReportCard(childId, id);
   const target = useMemo(
     () =>
-      data === null || selectedChildId === null
+      data === null || childId === null
         ? null
-        : { path: reportCardPdfPath(selectedChildId, data.id), fallbackName: fallbackPdfName(data.termName, data.version), title: `Boleta ${data.termName}` },
-    [data, selectedChildId],
+        : {
+            path: reportCardPdfPath(childId, data.id),
+            fileName: pdfFileName({ studentId: childId, termOrdinal: data.termOrdinal, termName: data.termName, version: data.version }),
+            title: `Boleta ${data.termName}`,
+          },
+    [data, childId],
   );
   const { state, start } = usePdfDownload(target);
 
