@@ -33,10 +33,10 @@ afterEach(() => vi.clearAllMocks());
 // hands it vitest's, so findBy/waitFor still resolve.
 function useFakeClock(): void {
   vi.useFakeTimers();
-  vi.stubGlobal("jest", { advanceTimersByTime: (ms: number) => vi.advanceTimersByTime(ms) });
+  Object.assign(globalThis, { jest: { advanceTimersByTime: (ms: number) => vi.advanceTimersByTime(ms) } });
 }
 function useRealClock(): void {
-  vi.unstubAllGlobals();
+  Reflect.deleteProperty(globalThis, "jest");
   vi.useRealTimers();
 }
 
