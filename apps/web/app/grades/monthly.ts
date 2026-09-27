@@ -24,6 +24,10 @@ export interface MonthlyGradeRow {
   name: string;
   value: number | null;
   updatedAt: string | null;
+  /** False for a month that belongs to the pupil's previous group (a transfer). */
+  rowEditable: boolean;
+  /** Why the row cannot change, in the server's words. */
+  rowReadOnlyReason?: string;
 }
 
 export interface GradeSheet {
@@ -74,18 +78,39 @@ export interface GradeSheetClient {
 export class GradeRequestError extends Error {
   readonly status: number;
   readonly detail: string;
+  /** The refusal's machine code (`X-Error-Code`), when the server sent one. */
+  readonly code: string | undefined;
 
-  constructor(status: number, detail: string) {
+  constructor(status: number, detail: string, code?: string) {
     super(detail !== "" ? detail : `HTTP ${status}`);
     this.name = "GradeRequestError";
     this.status = status;
     this.detail = detail;
+    this.code = code;
   }
 }
 
+export const ERROR_CODE_HEADER = "X-Error-Code";
+
 export async function gradeFailure(res: Response): Promise<GradeRequestError> {
   const body = await res.text().catch(() => "");
-  return new GradeRequestError(res.status, body.trim());
+  return new GradeRequestError(res.status, body.trim(), res.headers.get(ERROR_CODE_HEADER) ?? undefined);
+}
+
+/**
+ * Where a refused save belongs: on its row (the value is wrong — also any
+ * code this page does not know yet, shown in the server's words), a row
+ * that can no longer change (the month belongs to the pupil's previous
+ * group), or the whole sheet (the level cannot take grades right now).
+ */
+export type RefusalScope = "row" | "rowLocked" | "sheet";
+
+const MONTH_PREVIOUS_GROUP = "MONTH_PREVIOUS_GROUP";
+const LEVEL_CODES: ReadonlySet<string> = new Set(["LEVEL_NOT_GRADED", "LEVEL_SCALE_NOT_CONFIGURED"]);
+
+export function refusalScope(code: string | undefined): RefusalScope {
+  if (code === MONTH_PREVIOUS_GROUP) return "rowLocked";
+  return code !== undefined && LEVEL_CODES.has(code) ? "sheet" : "row";
 }
 
 const BAD_REQUEST = 400;

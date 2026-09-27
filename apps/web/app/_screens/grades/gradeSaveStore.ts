@@ -1,4 +1,4 @@
-import { isRejectedValue, type GradeSheet, type GradeSheetClient, type MonthlyGradeKey } from "../../grades/monthly";
+import { isRejectedValue, refusalScope, type GradeSheet, type GradeSheetClient, type MonthlyGradeKey } from "../../grades/monthly";
 
 export type CellStatus =
   | { kind: "idle" }
@@ -8,7 +8,11 @@ export type CellStatus =
   /** Network or server trouble: the same value can be sent again. */
   | { kind: "failed" }
   /** The server refused the value itself; its words go on the row. */
-  | { kind: "rejected"; message: string };
+  | { kind: "rejected"; message: string }
+  /** The month belongs to the pupil's previous group: the row can no longer change. */
+  | { kind: "locked"; reason: string }
+  /** The level cannot take grades right now: a notice for the whole sheet. */
+  | { kind: "sheetRefused"; message: string };
 
 type Grade = number | null;
 
@@ -38,6 +42,20 @@ const inScope = (k: MonthlyGradeKey, s: SaveScope | undefined): boolean =>
   s === undefined || (k.assignmentId === s.assignmentId && (s.month === undefined || k.month === s.month));
 const isUnsaved = (c: Cell): boolean => c.status.kind === "failed" || c.status.kind === "rejected" || c.invalidText !== undefined;
 const format = (g: Grade): string => (g === null ? "" : String(g));
+/** Nothing the teacher can do on this row will store the value: stop, and do not resend. */
+const isFinal = (s: CellStatus): boolean => s.kind === "locked" || s.kind === "sheetRefused";
+
+function refusalOutcome(err: unknown): CellStatus {
+  if (!isRejectedValue(err)) return { kind: "failed" };
+  switch (refusalScope(err.code)) {
+    case "rowLocked":
+      return { kind: "locked", reason: err.detail };
+    case "sheet":
+      return { kind: "sheetRefused", message: err.detail };
+    default:
+      return { kind: "rejected", message: err.detail };
+  }
+}
 
 /**
  * Every grade cell's save, for the whole capture screen — it lives above the
@@ -130,6 +148,14 @@ export class GradeSaveStore {
     return this.count((c) => inScope(c.key, scope) && isUnsaved(c));
   }
 
+  /** Why the level refused a save of this sheet, when it did. */
+  sheetNotice(scope: SaveScope): string | undefined {
+    for (const cell of this.cells.values()) {
+      if (cell.status.kind === "sheetRefused" && inScope(cell.key, scope)) return cell.status.message;
+    }
+    return undefined;
+  }
+
   retryableCount(): number {
     return this.count((c) => c.status.kind === "failed" && c.sent === undefined);
   }
@@ -153,7 +179,8 @@ export class GradeSaveStore {
       const id = idOf({ assignmentId: sheet.assignmentId, month: sheet.month, enrollmentId: row.enrollmentId });
       const cell = this.cells.get(id);
       if (cell === undefined || cell.sent !== undefined) continue;
-      if (isUnsaved(cell)) cell.confirmed = row.value;
+      // A row the server says cannot change keeps no draft: there is nothing to save.
+      if (row.rowEditable && isUnsaved(cell)) cell.confirmed = row.value;
       else this.cells.delete(id);
     }
     this.notify();
@@ -180,13 +207,19 @@ export class GradeSaveStore {
         cell.confirmed = value;
         this.settle(cell, value, { kind: "saved" });
       },
-      (err: unknown) => this.settle(cell, value, isRejectedValue(err) ? { kind: "rejected", message: err.detail } : { kind: "failed" }),
+      (err: unknown) => this.settle(cell, value, refusalOutcome(err)),
     );
   }
 
   /** The request for `value` is over: send the newer wish, or report how it went. */
   private settle(cell: Cell, value: Grade, outcome: CellStatus): void {
     cell.sent = undefined;
+    if (isFinal(outcome)) {
+      cell.desired = cell.confirmed;
+      cell.status = outcome;
+      this.notify();
+      return;
+    }
     if (cell.desired !== value) {
       this.send(cell);
       return;

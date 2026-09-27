@@ -2,10 +2,11 @@
 
 import { useCallback, useRef, type ReactElement } from "react";
 
-import { sheetStats, type GradeSheet, type MonthlyGradeKey } from "../../grades/monthly";
+import { sheetStats, type GradeSheet, type MonthlyGradeKey, type MonthlyGradeRow } from "../../grades/monthly";
 import { EmptyHint } from "../config/parts";
-import type { GradeSaveStore } from "./gradeSaveStore";
+import type { CellStatus, GradeSaveStore } from "./gradeSaveStore";
 import { GradeSheetRow } from "./GradeSheetRow";
+import { LockedGradeRow } from "./LockedGradeRow";
 import { SheetCounters } from "./SheetCounters";
 import { useSaveStoreVersion } from "./useGradeSaves";
 
@@ -41,13 +42,18 @@ export function GradeSheetTable({ sheet, saves }: GradeSheetTableProps): ReactEl
   const confirmed = sheet.rows.map((r) => saves.confirmedOf(keyOf(r.enrollmentId), r.value));
   const stats = sheetStats(confirmed, passing);
 
+  /** Focus the next EDITABLE student `step` away; read-only rows leave no input here. */
   const move = useCallback((from: number, step: 1 | -1): boolean => {
-    const next = inputs.current[from + step];
-    if (next === null || next === undefined) return false;
-    next.focus();
-    next.select();
-    return true;
+    for (let i = from + step; i >= 0 && i < inputs.current.length; i += step) {
+      const next = inputs.current[i];
+      if (next === null || next === undefined) continue;
+      next.focus();
+      next.select();
+      return true;
+    }
+    return false;
   }, []);
+  const notice = saves.sheetNotice({ assignmentId: sheet.assignmentId, month: sheet.month });
 
   if (sheet.rows.length === 0) return <EmptyHint>Este grupo aún no tiene alumnos inscritos.</EmptyHint>;
 
@@ -57,6 +63,11 @@ export function GradeSheetTable({ sheet, saves }: GradeSheetTableProps): ReactEl
       {!sheet.editable && (
         <p role="note" style={{ margin: "0 0 12px", padding: "12px 16px", borderRadius: "var(--r-md)", background: "var(--warn-bg)", color: "var(--warn-fg)", fontSize: 15, fontWeight: 600 }}>
           {sheet.readOnlyReason ?? "Este mes ya no se puede modificar."}
+        </p>
+      )}
+      {notice !== undefined && (
+        <p role="alert" style={{ margin: "0 0 12px", padding: "12px 16px", borderRadius: "var(--r-md)", background: "var(--bad-bg)", color: "var(--bad-fg)", fontSize: 15, fontWeight: 600 }}>
+          {notice}
         </p>
       )}
       <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-xl)", boxShadow: "var(--shadow-card)", padding: "4px 8px" }}>
@@ -73,13 +84,18 @@ export function GradeSheetTable({ sheet, saves }: GradeSheetTableProps): ReactEl
               const value = confirmed[index] ?? null;
               const failing = value !== null && value < passing;
               if (!sheet.editable) return <ReadOnlyRow key={row.enrollmentId} name={row.name} value={value} failing={failing} />;
+              const status = saves.statusOf(key);
+              const lockReason = rowLockReason(row, status);
+              if (lockReason !== undefined) {
+                return <LockedGradeRow key={row.enrollmentId} name={row.name} value={value} reason={lockReason} failing={failing} />;
+              }
               return (
                 <GradeSheetRow
                   key={row.enrollmentId}
                   row={row}
                   initialText={saves.draftOf(key)}
                   scale={sheet.scale}
-                  status={saves.statusOf(key)}
+                  status={status}
                   failing={failing}
                   inputRef={(el) => { inputs.current[index] = el; }}
                   onCommit={(next) => saves.commit(key, next, row.value)}
@@ -95,6 +111,14 @@ export function GradeSheetTable({ sheet, saves }: GradeSheetTableProps): ReactEl
       </div>
     </div>
   );
+}
+
+const PREVIOUS_GROUP_FALLBACK = "Este mes no se puede modificar para este alumno.";
+
+/** Why a row of an open month cannot change: the loaded sheet says so, or a save was just refused for it. */
+function rowLockReason(row: MonthlyGradeRow, status: CellStatus): string | undefined {
+  if (!row.rowEditable) return row.rowReadOnlyReason ?? PREVIOUS_GROUP_FALLBACK;
+  return status.kind === "locked" ? status.reason || PREVIOUS_GROUP_FALLBACK : undefined;
 }
 
 function ReadOnlyRow({ name, value, failing }: { name: string; value: number | null; failing: boolean }): ReactElement {

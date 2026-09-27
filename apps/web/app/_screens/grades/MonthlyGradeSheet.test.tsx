@@ -13,9 +13,9 @@ const SHEET: GradeSheet = {
   scale: { min: 5, max: 10, decimals: 1, passing: 6 },
   editable: true,
   rows: [
-    { enrollmentId: "en1", studentId: "st1", name: "Ada Lovelace", value: 9, updatedAt: "2026-09-10T10:00:00Z" },
-    { enrollmentId: "en2", studentId: "st2", name: "Alan Turing", value: null, updatedAt: null },
-    { enrollmentId: "en3", studentId: "st3", name: "Grace Hopper", value: null, updatedAt: null },
+    { enrollmentId: "en1", studentId: "st1", name: "Ada Lovelace", value: 9, updatedAt: "2026-09-10T10:00:00Z", rowEditable: true },
+    { enrollmentId: "en2", studentId: "st2", name: "Alan Turing", value: null, updatedAt: null, rowEditable: true },
+    { enrollmentId: "en3", studentId: "st3", name: "Grace Hopper", value: null, updatedAt: null, rowEditable: true },
   ],
 };
 
@@ -425,5 +425,85 @@ describe("MonthlyGradeSheet — nothing unsaved passes for saved", () => {
 
     await waitFor(() => expect(client.load).toHaveBeenCalledTimes(3));
     expect(await screen.findByRole("textbox", { name: "Calificación de Alan Turing" })).toHaveValue("8");
+  });
+});
+
+describe("MonthlyGradeSheet — rows of the previous group", () => {
+  const PREVIOUS = "Ese mes corresponde al grupo anterior del alumno";
+  const WITH_TRANSFER: GradeSheet = {
+    ...SHEET,
+    rows: SHEET.rows.map((r) => (r.enrollmentId === "en2" ? { ...r, value: 7, rowEditable: false, rowReadOnlyReason: PREVIOUS } : r)),
+  };
+
+  it("shows the row read-only with its reason under the name", async () => {
+    await renderSheet(fakeClient(WITH_TRANSFER));
+
+    const row = screen.getByRole("row", { name: /Alan Turing/ });
+    expect(within(row).getByText(PREVIOUS)).toBeInTheDocument();
+    expect(input("Alan Turing")).toHaveAttribute("readonly");
+    expect(input("Alan Turing")).toHaveAttribute("aria-readonly", "true");
+    expect(input("Alan Turing")).toHaveValue("7");
+  });
+
+  it("Enter and Tab skip it, both ways", async () => {
+    const user = userEvent.setup();
+    await renderSheet(fakeClient(WITH_TRANSFER));
+
+    await user.click(input("Ada Lovelace"));
+    await user.keyboard("{Enter}");
+    expect(input("Grace Hopper")).toHaveFocus();
+
+    await user.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(input("Ada Lovelace")).toHaveFocus();
+
+    await user.keyboard("{Tab}");
+    expect(input("Grace Hopper")).toHaveFocus();
+  });
+
+  it("is not counted in the grades of the month it cannot change", async () => {
+    await renderSheet(fakeClient(WITH_TRANSFER));
+    expect(screen.queryByText(/sin guardar/)).toBeNull();
+  });
+
+  it("a save refused with MONTH_PREVIOUS_GROUP turns the row read-only, not unsaved", async () => {
+    const user = userEvent.setup();
+    const client = fakeClient();
+    client.save.mockRejectedValue(new GradeRequestError(400, PREVIOUS, "MONTH_PREVIOUS_GROUP"));
+    await renderSheet(client);
+
+    await user.type(input("Alan Turing"), "9{Enter}");
+
+    const row = screen.getByRole("row", { name: /Alan Turing/ });
+    expect(await within(row).findByText(PREVIOUS)).toBeInTheDocument();
+    expect(input("Alan Turing")).toHaveAttribute("aria-readonly", "true");
+    expect(input("Alan Turing")).toHaveValue("");
+    expect(screen.queryByText(/sin guardar/)).toBeNull();
+  });
+});
+
+describe("MonthlyGradeSheet — refusals by code", () => {
+  it("a LEVEL_* refusal is a notice for the whole sheet", async () => {
+    const user = userEvent.setup();
+    const client = fakeClient();
+    client.save.mockRejectedValue(new GradeRequestError(400, "El nivel aún no tiene escala de calificación", "LEVEL_SCALE_NOT_CONFIGURED"));
+    await renderSheet(client);
+
+    await user.type(input("Alan Turing"), "9{Enter}");
+
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveTextContent("El nivel aún no tiene escala de calificación");
+    expect(within(screen.getByRole("row", { name: /Alan Turing/ })).queryByText("El nivel aún no tiene escala de calificación")).toBeNull();
+  });
+
+  it("an unknown code still shows the server's text on the row", async () => {
+    const user = userEvent.setup();
+    const client = fakeClient();
+    client.save.mockRejectedValue(new GradeRequestError(400, "Algo nuevo que el servidor explica", "BRAND_NEW_CODE"));
+    await renderSheet(client);
+
+    await user.type(input("Alan Turing"), "9{Enter}");
+
+    const row = screen.getByRole("row", { name: /Alan Turing/ });
+    expect(await within(row).findByText("Algo nuevo que el servidor explica")).toBeInTheDocument();
   });
 });

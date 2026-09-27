@@ -32,7 +32,7 @@ function sheet(value: number | null): GradeSheet {
     months: ["2026-09"],
     scale: { min: 5, max: 10, decimals: 1, passing: 6 },
     editable: true,
-    rows: [{ enrollmentId: "en1", studentId: "s1", name: "Ada", value, updatedAt: null }],
+    rows: [{ enrollmentId: "en1", studentId: "s1", name: "Ada", value, updatedAt: null, rowEditable: true }],
   };
 }
 
@@ -204,5 +204,62 @@ describe("GradeSaveStore — loading a month", () => {
     store.markInvalid(KEY, "11");
     store.adopt(sheet(9));
     expect(store.draftOf(KEY)).toBe("11");
+  });
+});
+
+describe("GradeSaveStore — refusals by code", () => {
+  const refused = (code: string, text: string): GradeRequestError => new GradeRequestError(400, text, code);
+
+  it("MONTH_PREVIOUS_GROUP locks the row with the reason and is not unsaved", async () => {
+    const { client, calls } = manualClient();
+    const store = new GradeSaveStore(client);
+
+    store.commit(KEY, 8, null);
+    calls[0]!.settle.reject(refused("MONTH_PREVIOUS_GROUP", "Ese mes corresponde al grupo anterior del alumno"));
+    await flush();
+
+    expect(store.statusOf(KEY)).toEqual({ kind: "locked", reason: "Ese mes corresponde al grupo anterior del alumno" });
+    expect(store.unsavedCount()).toBe(0);
+    expect(store.draftOf(KEY)).toBeUndefined();
+  });
+
+  it("a LEVEL_* refusal is a notice for the whole sheet, not a row error", async () => {
+    const { client, calls } = manualClient();
+    const store = new GradeSaveStore(client);
+
+    store.commit(KEY, 8, null);
+    calls[0]!.settle.reject(refused("LEVEL_SCALE_NOT_CONFIGURED", "El nivel no tiene escala"));
+    await flush();
+
+    expect(store.sheetNotice({ assignmentId: "a1", month: "2026-09" })).toBe("El nivel no tiene escala");
+    expect(store.sheetNotice({ assignmentId: "a1", month: "2026-10" })).toBeUndefined();
+    expect(store.statusOf(KEY).kind).not.toBe("rejected");
+    expect(store.unsavedCount()).toBe(0);
+  });
+
+  it("a validation code stays on the row, in the server's words", async () => {
+    const { client, calls } = manualClient();
+    const store = new GradeSaveStore(client);
+
+    store.commit(KEY, 8, null);
+    calls[0]!.settle.reject(refused("GRADE_DECIMALS", "Solo se permite 1 decimal"));
+    await flush();
+
+    expect(store.statusOf(KEY)).toEqual({ kind: "rejected", message: "Solo se permite 1 decimal" });
+  });
+
+  it("a reloaded read-only row drops the draft kept for it", async () => {
+    const { client, calls } = manualClient();
+    const store = new GradeSaveStore(client);
+    store.commit(KEY, 8, null);
+    calls[0]!.settle.reject(new Error("offline"));
+    await flush();
+    expect(store.unsavedCount()).toBe(1);
+
+    const loaded = sheet(null);
+    store.adopt({ ...loaded, rows: loaded.rows.map((r) => ({ ...r, rowEditable: false, rowReadOnlyReason: "Ese mes corresponde al grupo anterior del alumno" })) });
+
+    expect(store.unsavedCount()).toBe(0);
+    expect(store.draftOf(KEY)).toBeUndefined();
   });
 });

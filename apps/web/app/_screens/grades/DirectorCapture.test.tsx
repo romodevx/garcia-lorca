@@ -67,7 +67,7 @@ beforeEach(() => {
     months: ["2026-09"],
     scale: { min: 5, max: 10, decimals: 1, passing: 6 },
     editable: true,
-    rows: [{ enrollmentId: "en1", studentId: "st1", name: "Grace Hopper", value: null, updatedAt: null }],
+    rows: [{ enrollmentId: "en1", studentId: "st1", name: "Grace Hopper", value: null, updatedAt: null, rowEditable: true }],
   });
 });
 

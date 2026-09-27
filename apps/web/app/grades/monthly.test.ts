@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { gradeFailure, GradeRequestError, monthChips, parseGradeInput, sheetStats, validateGrade, type GradeScale } from "./monthly";
+import { gradeFailure, GradeRequestError, monthChips, parseGradeInput, refusalScope, sheetStats, validateGrade, type GradeScale } from "./monthly";
 
 const SCALE: GradeScale = { min: 5, max: 10, decimals: 1, passing: 6 };
 
@@ -107,5 +107,33 @@ describe("gradeFailure", () => {
     const err = await gradeFailure(new Response("", { status: 503 }));
     expect(err.message).toBe("HTTP 503");
     expect(err.detail).toBe("");
+  });
+
+  it("carries the refusal's machine code from X-Error-Code", async () => {
+    const res = new Response("Solo se permite 1 decimal", { status: 400, headers: { "X-Error-Code": "GRADE_DECIMALS" } });
+    const err = await gradeFailure(res);
+    expect(err.code).toBe("GRADE_DECIMALS");
+  });
+
+  it("has no code when the server sent none", async () => {
+    const err = await gradeFailure(new Response("x", { status: 400 }));
+    expect(err.code).toBeUndefined();
+  });
+});
+
+describe("refusalScope", () => {
+  it.each([
+    ["GRADE_OUT_OF_RANGE", "row"],
+    ["GRADE_DECIMALS", "row"],
+    ["GRADE_NOT_NUMBER", "row"],
+    ["MONTH_OUTSIDE_CYCLE", "row"],
+    ["ENROLLMENT_NOT_IN_GROUP", "row"],
+    ["SOMETHING_NEW", "row"],
+    [undefined, "row"],
+    ["MONTH_PREVIOUS_GROUP", "rowLocked"],
+    ["LEVEL_NOT_GRADED", "sheet"],
+    ["LEVEL_SCALE_NOT_CONFIGURED", "sheet"],
+  ] as const)("%s belongs to the %s", (code, scope) => {
+    expect(refusalScope(code)).toBe(scope);
   });
 });

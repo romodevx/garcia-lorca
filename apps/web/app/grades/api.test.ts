@@ -23,7 +23,7 @@ const sheet = {
   months: ["2026-08", "2026-09"],
   scale: { min: 5, max: 10, decimals: 1, passing: 6 },
   editable: true,
-  rows: [{ enrollmentId: "en1", studentId: "st1", name: "Ada Lovelace", value: 9.5, updatedAt: "2026-09-10T10:00:00Z" }],
+  rows: [{ enrollmentId: "en1", studentId: "st1", name: "Ada Lovelace", value: 9.5, updatedAt: "2026-09-10T10:00:00Z", rowEditable: true }],
 };
 
 describe("gradeSheetClient (director)", () => {

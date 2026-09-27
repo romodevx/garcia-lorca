@@ -32,7 +32,7 @@ const sheetFor = (assignmentId: string) => ({
   months: ["2026-09"],
   scale: { min: 5, max: 10, decimals: 1, passing: 6 },
   editable: true,
-  rows: [{ enrollmentId: "en1", studentId: "st1", name: "Ada Lovelace", value: 8, updatedAt: null }],
+  rows: [{ enrollmentId: "en1", studentId: "st1", name: "Ada Lovelace", value: 8, updatedAt: null, rowEditable: true }],
 });
 
 beforeEach(() => {
