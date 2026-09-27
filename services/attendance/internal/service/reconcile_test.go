@@ -50,7 +50,7 @@ func TestDiffList(t *testing.T) {
 			current: map[string]service.AttendanceRecord{"a": stored("old-a", "a", "absent", "")},
 			desired: []service.AttendanceRecord{want("new-1", "a", "excused", "")},
 			want: service.ListChanges{Updates: []service.RecordUpdate{
-				{Record: want("old-a", "a", "excused", ""), StatusChanged: true},
+				{Record: want("old-a", "a", "excused", ""), StatusChanged: true, PreviousStatus: "absent"},
 			}},
 		},
 		{
@@ -58,7 +58,7 @@ func TestDiffList(t *testing.T) {
 			current: map[string]service.AttendanceRecord{"a": stored("old-a", "a", "late", "")},
 			desired: []service.AttendanceRecord{want("new-1", "a", "late", "tráfico")},
 			want: service.ListChanges{Updates: []service.RecordUpdate{
-				{Record: want("old-a", "a", "late", "tráfico"), StatusChanged: false},
+				{Record: want("old-a", "a", "late", "tráfico"), StatusChanged: false, PreviousStatus: "late"},
 			}},
 		},
 		{
@@ -224,7 +224,7 @@ func TestPerClassListIsKeyedBySubject(t *testing.T) {
 	svc := newService(t, repo, pub, "rec-1", "rec-2")
 	ctx := context.Background()
 
-	_, _, err := svc.SaveDailyAttendance(ctx, service.SaveRequest{
+	_, err := svc.SaveDailyAttendance(ctx, service.SaveRequest{
 		GroupID: groupID, Date: schoolDay, SubjectID: subjectMath,
 		Marks:   []service.Mark{{EnrollmentID: enrollmentAna, Status: "absent"}},
 		TakenBy: testTaker.UserID, TakenByName: testTaker.Name,
@@ -299,7 +299,7 @@ func TestSaveDailyAttendanceRejectsBadListInput(t *testing.T) {
 			repo := newFakeRepo()
 			svc := newService(t, repo, nil)
 			tt.req.GroupID, tt.req.Date = groupID, schoolDay
-			_, _, err := svc.SaveDailyAttendance(context.Background(), tt.req)
+			_, err := svc.SaveDailyAttendance(context.Background(), tt.req)
 			wantInvalid(t, err)
 			assert.Zero(t, repo.reconcileCalls, "a rejected save must not write")
 		})
@@ -318,7 +318,7 @@ func TestGetDailyRosterRejectsMalformedSubject(t *testing.T) {
 func TestSaveDailyAttendanceTrimsTakerName(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newService(t, repo, nil)
-	_, _, err := svc.SaveDailyAttendance(context.Background(), service.SaveRequest{
+	_, err := svc.SaveDailyAttendance(context.Background(), service.SaveRequest{
 		GroupID: groupID, Date: schoolDay, TakenBy: testTaker.UserID, TakenByName: "  Gabriela Rojas ",
 	})
 	require.NoError(t, err)

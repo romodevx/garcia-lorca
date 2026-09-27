@@ -130,7 +130,14 @@ func enrollmentToDomain(m enrollmentModel) (domain.Enrollment, error) {
 	if m.TermID != nil {
 		term = *m.TermID
 	}
-	return domain.NewEnrollment(m.ID, m.TenantID, m.StudentID, m.CycleID, m.GroupID, term, status, m.EnrolledAt)
+	e, err := domain.NewEnrollment(m.ID, m.TenantID, m.StudentID, m.CycleID, m.GroupID, term, status, m.EnrolledAt)
+	if err != nil {
+		return domain.Enrollment{}, err
+	}
+	// A non-active enrollment is never written again after its status change
+	// (only an ACTIVE one can be transferred or withdrawn), so updated_at is the
+	// instant it ended. WithEndedAt ignores it for an active one.
+	return e.WithEndedAt(m.UpdatedAt), nil
 }
 
 // enrollmentFromDomain projects a domain Enrollment into its GORM row. An empty
@@ -202,6 +209,11 @@ func transferFromDomain(t domain.EnrollmentTransfer) enrollmentTransferModel {
 		Reason:       t.Reason(),
 		MovedAt:      t.MovedAt(),
 	}
+}
+
+// transferToDomain rebuilds a domain EnrollmentTransfer from its row.
+func transferToDomain(m enrollmentTransferModel) (domain.EnrollmentTransfer, error) {
+	return domain.NewEnrollmentTransfer(m.ID, m.TenantID, m.EnrollmentID, m.FromGroupID, m.ToGroupID, m.Reason, m.MovedAt)
 }
 
 // nullableID maps the domain's "" (no config level) to SQL NULL.

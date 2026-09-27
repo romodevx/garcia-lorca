@@ -1,30 +1,17 @@
 import { router } from "expo-router";
 import { type ReactElement } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import type { FamilyAttendanceStatus } from "../api";
 import { Icon } from "../icons";
 import { useAppState } from "../state/AppState";
 import { toChildView } from "../state/childView";
-import { useChildAccount, useChildAttendance } from "../state/familyData";
+import { useRefreshHandler } from "../components/refresh";
+import { useChildAccount } from "../state/familyData";
 import { useTheme } from "../theme";
 import { Card, Chip, SectionLabel, TintIcon } from "../ui";
 import { AsyncErrorState } from "./AsyncStates";
+import { todayHeadline } from "./attendanceView";
+import { useSchoolMonth } from "./attendance/useSchoolMonth";
 import { pesos } from "./format";
-
-const STATUS_LABEL: Record<FamilyAttendanceStatus, string> = {
-  present: "Asistió",
-  absent: "Falta",
-  late: "Retardo",
-  excused: "Justificada",
-};
-
-/** Today's ISO calendar day (local), used to find today's attendance record. */
-function todayIso(): string {
-  const now = new Date();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${now.getFullYear()}-${m}-${d}`;
-}
 
 /**
  * Inicio: greeting + actionable summary cards, each routing to its detail. The
@@ -35,10 +22,13 @@ function todayIso(): string {
  */
 export function HomeScreen(): ReactElement {
   const theme = useTheme();
-  const { child, selectedChildId, unreadCount, childError, refreshChildren } = useAppState();
+  const { child, selectedChildId, unreadCount, childError, refreshChildren, refreshNotifications } = useAppState();
   const view = toChildView(child);
   const account = useChildAccount(selectedChildId);
-  const attendance = useChildAttendance(selectedChildId);
+  const { resource: attendance, today: todayRecord } = useSchoolMonth(selectedChildId);
+  useRefreshHandler(async () => {
+    await Promise.all([account.reload(), attendance.reload(), refreshNotifications()]);
+  });
 
   // The child bootstrap failed: there is no child to summarize. Surface the error
   // (retrying the child load) instead of the neutral "Sin novedades / —" cards,
@@ -53,7 +43,6 @@ export function HomeScreen(): ReactElement {
     );
   }
 
-  const todayRecord = (attendance.data ?? []).find((r) => r.date === todayIso());
   const balanceCents = account.data?.totalBalanceCents ?? null;
   const settled = balanceCents !== null && balanceCents <= 0;
 
@@ -81,7 +70,7 @@ export function HomeScreen(): ReactElement {
           <View style={styles.heroMain}>
             <Text style={[styles.heroLabel, { color: theme.colors.text2, fontFamily: theme.fonts.ui }]}>Asistencia de hoy</Text>
             <Text style={[styles.heroValue, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>
-              {todayRecord ? STATUS_LABEL[todayRecord.status] : "Sin novedades"}
+              {todayHeadline(todayRecord).text}
             </Text>
             {todayRecord?.note ? (
               <Text style={[styles.heroSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{todayRecord.note}</Text>

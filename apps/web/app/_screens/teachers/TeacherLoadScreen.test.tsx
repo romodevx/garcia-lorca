@@ -110,6 +110,19 @@ async function chooseSubject(user: ReturnType<typeof userEvent.setup>, name: str
   await user.selectOptions(await screen.findByLabelText("Asignatura", CAMPO), name);
 }
 
+// Fake timers WITHOUT shouldAdvanceTime: wall-clock time must never reach the
+// fake clock, or a stalled runner expires the undo window early. Testing
+// Library only drives fake timers through a global `jest`; this shim hands it
+// vitest's, so findBy/waitFor still resolve.
+function useFakeClock(): void {
+  vi.useFakeTimers();
+  Object.assign(globalThis, { jest: { advanceTimersByTime: (ms: number) => vi.advanceTimersByTime(ms) } });
+}
+function useRealClock(): void {
+  Reflect.deleteProperty(globalThis, "jest");
+  vi.useRealTimers();
+}
+
 describe("TeacherLoadScreen", () => {
   it("names the teacher and goes back to Docentes", async () => {
     const onBack = vi.fn();
@@ -569,7 +582,7 @@ describe("TeacherLoadScreen", () => {
   });
 
   it("restarts the 8 s undo window on each removal, and starts afresh once it expires", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    useFakeClock();
     try {
       withAssignments([ta("a1", "s1A", "mat-s1", "ada"), ta("a2", "s2A", "mat-s2", "ada"), ta("a3", "s1B", "fis-s1", "ada")]);
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
@@ -589,7 +602,7 @@ describe("TeacherLoadScreen", () => {
       await user.click(screen.getByRole("button", { name: "Quitar Física de 1° Secundaria · B" }));
       expect(await screen.findByText("Quitaste Física de 1° Secundaria · B")).toBeInTheDocument();
     } finally {
-      vi.useRealTimers();
+      useRealClock();
     }
   });
 

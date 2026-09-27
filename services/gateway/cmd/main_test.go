@@ -245,6 +245,11 @@ func (stubStudents) ListEnrollments(_ context.Context, req *connect.Request[stud
 	}}), nil
 }
 
+// ListTransfers: the stub's pupils never moved.
+func (stubStudents) ListTransfers(_ context.Context, _ *connect.Request[studentsv1.ListTransfersRequest]) (*connect.Response[studentsv1.ListTransfersResponse], error) {
+	return connect.NewResponse(&studentsv1.ListTransfersResponse{}), nil
+}
+
 // Guardian-link RPCs on the stub. ListStudentsForGuardian answers with TWO
 // children so the family aggregation is observable end to end; the guardian id
 // is echoed back, proving the gateway sent the principal's own id.
@@ -2125,18 +2130,48 @@ var familyAttendanceModulesOn = map[string]bool{"module_attendance": true, "modu
 func TestFamilyAttendanceOwnedChildReturns200(t *testing.T) {
 	gw := newTestGateway(t, familyAttendanceModulesOn)
 	res := doGateway(t, gw, http.MethodGet,
-		"/api/v1/family/students/stu-1/attendance?from=2026-09-01&to=2026-09-30", "family-reader", "")
+		"/api/v1/family/students/stu-1/attendance?month=2026-09", "family-reader", "")
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", res.StatusCode)
 	}
 	var out struct {
-		Records []map[string]any `json:"records"`
+		Month string           `json:"month"`
+		Days  []map[string]any `json:"days"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(out.Records) != 1 || out.Records[0]["enrollmentId"] != "enr-1" {
-		t.Errorf("records = %v, want one keyed on enr-1", out.Records)
+	if out.Month != "2026-09" {
+		t.Errorf("month = %q", out.Month)
+	}
+	// The stub stores one absence on 2026-09-01 and its group's list that day.
+	var found bool
+	for _, d := range out.Days {
+		if d["date"] == "2026-09-01" {
+			found = true
+			if d["status"] != "absent" {
+				t.Errorf("2026-09-01 = %v, want absent", d)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("days = %v, want 2026-09-01", out.Days)
+	}
+}
+
+func TestFamilyAttendanceMalformedMonthIs400(t *testing.T) {
+	gw := newTestGateway(t, familyAttendanceModulesOn)
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/students/stu-1/attendance?month=2026-13", "family-reader", "")
+	if res.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", res.StatusCode)
+	}
+}
+
+func TestFamilyAttendanceDisabledAttendanceModuleIs404(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true})
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/family/students/stu-1/attendance", "family-reader", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", res.StatusCode)
 	}
 }
 

@@ -4,9 +4,10 @@ import type { FamilyGradeEntry } from "../api";
 import { useAppState } from "../state/AppState";
 import { toChildView } from "../state/childView";
 import { useChildGrades } from "../state/familyData";
+import { useRefreshHandler } from "../components/refresh";
 import { useTheme, type ThemeColors } from "../theme";
 import { Card, EmptyState, ListRow, Ring, ScreenTitle, SectionLabel } from "../ui";
-import { AsyncErrorState, AsyncLoading } from "./AsyncStates";
+import { AsyncErrorState, AsyncLoading, StaleNotice } from "./AsyncStates";
 
 /** One subject's entries collapsed into a display row. */
 interface SubjectGroup {
@@ -90,6 +91,7 @@ export function GradesScreen(): ReactElement {
   const { child, selectedChildId, childLoading, childError, refreshChildren } = useAppState();
   const view = toChildView(child);
   const { data, loading, error, reload } = useChildGrades(selectedChildId);
+  useRefreshHandler(reload);
   const theme = useTheme();
 
   const entries = data ?? [];
@@ -127,7 +129,8 @@ export function GradesScreen(): ReactElement {
     );
   }
 
-  if (error) {
+  // A failed refresh over data already on screen keeps the data (inline notice below).
+  if (error && data === null) {
     return (
       <>
         <ScreenTitle>Calificaciones</ScreenTitle>
@@ -153,6 +156,7 @@ export function GradesScreen(): ReactElement {
     return (
       <>
         <ScreenTitle>Calificaciones</ScreenTitle>
+        {error ? <StaleNotice /> : null}
         <Card padded style={{ marginTop: 12 }}>
           <EmptyState
             icon="book"
@@ -167,6 +171,7 @@ export function GradesScreen(): ReactElement {
   return (
     <>
       <ScreenTitle>Calificaciones</ScreenTitle>
+      {error ? <StaleNotice /> : null}
 
       <Card style={styles.avgHero}>
         <Ring pct={average / 10} color={theme.colors.ok} track={theme.colors.surfaceSunken}>

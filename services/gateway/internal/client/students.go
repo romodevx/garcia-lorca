@@ -96,6 +96,20 @@ type Enrollment struct {
 	TermID     string
 	Status     string
 	EnrolledAt time.Time
+	// EndedAt is when a withdrawn/transferred enrollment stopped being active;
+	// zero while active (or when students did not record it).
+	EndedAt time.Time
+}
+
+// Transfer is one move of an enrollment between groups. A transfer rewrites
+// the enrollment's group in place, so these are the only record of which group
+// a pupil was in on a past day.
+type Transfer struct {
+	ID           string
+	EnrollmentID string
+	FromGroupID  string
+	ToGroupID    string
+	MovedAt      time.Time
 }
 
 // NewStudentsClient builds a StudentsClient targeting the students base URL over
@@ -280,6 +294,25 @@ func (c *StudentsClient) ListEnrollments(ctx context.Context, studentID, cycleID
 	out := make([]Enrollment, 0, len(res.Msg.GetEnrollments()))
 	for _, e := range res.Msg.GetEnrollments() {
 		out = append(out, toEnrollment(e))
+	}
+	return out, nil
+}
+
+// ListTransfers returns a student's group moves, oldest first.
+func (c *StudentsClient) ListTransfers(ctx context.Context, studentID string) ([]Transfer, error) {
+	res, err := c.rpc.ListTransfers(ctx, connect.NewRequest(&studentsv1.ListTransfersRequest{StudentId: studentID}))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Transfer, 0, len(res.Msg.GetTransfers()))
+	for _, t := range res.Msg.GetTransfers() {
+		out = append(out, Transfer{
+			ID:           t.GetId(),
+			EnrollmentID: t.GetEnrollmentId(),
+			FromGroupID:  t.GetFromGroupId(),
+			ToGroupID:    t.GetToGroupId(),
+			MovedAt:      timeFromTS(t.GetMovedAt()),
+		})
 	}
 	return out, nil
 }
@@ -490,6 +523,7 @@ func toEnrollment(e *studentsv1.Enrollment) Enrollment {
 		TermID:     e.GetTermId(),
 		Status:     enrollmentStatusName(e.GetStatus()),
 		EnrolledAt: timeFromTS(e.GetEnrolledAt()),
+		EndedAt:    timeFromTS(e.GetEndedAt()),
 	}
 }
 

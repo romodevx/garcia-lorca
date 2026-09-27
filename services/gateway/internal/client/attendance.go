@@ -58,6 +58,9 @@ type SaveAttendanceInput struct {
 	Marks       []Mark
 	TakenBy     string
 	TakenByName string
+	// SubjectName is the per-class list's display label, carried onto the
+	// events (comms names the class). Empty for a daily list.
+	SubjectName string
 }
 
 // Mark is one exception submitted for a group·day. Status is normally
@@ -117,12 +120,21 @@ func (c *AttendanceClient) GetDailyRoster(ctx context.Context, groupID, date, su
 	return out, nil
 }
 
+// SaveAttendanceResult summarizes a list after a save, from what was STORED:
+// AbsentCount stored marks are absences, MarkedCount exceptions are stored in
+// total, and HeldElsewhere (ascending) are the submitted enrollments skipped
+// because another group's list already holds their mark for that day.
+type SaveAttendanceResult struct {
+	AbsentCount   int32
+	MarkedCount   int32
+	HeldElsewhere []string
+}
+
 // SaveDailyAttendance reconciles a whole list in one call: in.Marks is the
 // COMPLETE set of exceptions, so every enrollment absent from it is reset to
-// present. It returns how many stored marks are "absent" and how many
-// exceptions are stored for the day in total. Saving the same day again is
-// idempotent.
-func (c *AttendanceClient) SaveDailyAttendance(ctx context.Context, in SaveAttendanceInput) (int32, int32, error) {
+// present. It returns the stored state's summary (see SaveAttendanceResult).
+// Saving the same day again is idempotent.
+func (c *AttendanceClient) SaveDailyAttendance(ctx context.Context, in SaveAttendanceInput) (SaveAttendanceResult, error) {
 	res, err := c.rpc.SaveDailyAttendance(ctx, connect.NewRequest(&attendancev1.SaveDailyAttendanceRequest{
 		GroupId:     in.GroupID,
 		Date:        in.Date,
@@ -130,11 +142,16 @@ func (c *AttendanceClient) SaveDailyAttendance(ctx context.Context, in SaveAtten
 		Marks:       fromMarks(in.Marks),
 		TakenBy:     in.TakenBy,
 		TakenByName: in.TakenByName,
+		SubjectName: in.SubjectName,
 	}))
 	if err != nil {
-		return 0, 0, err
+		return SaveAttendanceResult{}, err
 	}
-	return res.Msg.GetAbsentCount(), res.Msg.GetMarkedCount(), nil
+	return SaveAttendanceResult{
+		AbsentCount:   res.Msg.GetAbsentCount(),
+		MarkedCount:   res.Msg.GetMarkedCount(),
+		HeldElsewhere: res.Msg.GetHeldElsewhere(),
+	}, nil
 }
 
 // ListAttendance lists one enrollment's stored exceptions within an inclusive
@@ -152,6 +169,32 @@ func (c *AttendanceClient) ListAttendance(ctx context.Context, enrollmentID, fro
 	out := make([]AttendanceRecord, 0, len(res.Msg.GetRecords()))
 	for _, r := range res.Msg.GetRecords() {
 		out = append(out, toAttendanceRecord(r))
+	}
+	return out, nil
+}
+
+// TakenList is one list that was taken: its group, ISO day and subject (empty
+// for the daily list).
+type TakenList struct {
+	GroupID   string
+	Date      string
+	SubjectID string
+}
+
+// ListSessions returns which lists were taken for groupIDs between two inclusive
+// ISO days (at most 62 days, 20 groups), newest first, in one call.
+func (c *AttendanceClient) ListSessions(ctx context.Context, groupIDs []string, from, to string) ([]TakenList, error) {
+	res, err := c.rpc.ListSessions(ctx, connect.NewRequest(&attendancev1.ListSessionsRequest{
+		GroupIds: groupIDs,
+		FromDate: from,
+		ToDate:   to,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TakenList, 0, len(res.Msg.GetLists()))
+	for _, l := range res.Msg.GetLists() {
+		out = append(out, TakenList{GroupID: l.GetGroupId(), Date: l.GetDate(), SubjectID: l.GetSubjectId()})
 	}
 	return out, nil
 }

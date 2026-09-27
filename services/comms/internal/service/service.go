@@ -43,8 +43,8 @@ const (
 // The attendance statuses that reach this consumer. statusAbsent is deliberately
 // NOT notified from AttendanceMarked: attendance publishes both events for an
 // absence, and rendering each would notify the family twice for one absence.
-// statusPresent is not notified either — attendance stores only exceptions, so it
-// should never arrive, but a presence is a non-event rather than a fault.
+// statusPresent only arrives when a correction CLEARS a stored exception, and is
+// notified as a correction ("sí asistió").
 const (
 	statusAbsent  = "absent"
 	statusPresent = "present"
@@ -69,7 +69,7 @@ const (
 var (
 	// errNotNotifiable marks an event this consumer deliberately does not notify
 	// on: an absence arriving as AttendanceMarked (AbsenceRecorded already
-	// notified it), a presence. This happens on every school day, so it is logged
+	// notified it). This happens on every school day, so it is logged
 	// at Debug — warning on it would bury the real problems in noise.
 	errNotNotifiable = errors.New("event is deliberately not notified")
 
@@ -80,6 +80,12 @@ var (
 	// is logged at Warn.
 	errUndeliverable = errors.New("event cannot be turned into a notification")
 )
+
+// ErrStudentsTransient marks a students-directory failure worth a redelivery
+// (the directory is down or too slow right now). A StudentNameReader wraps it;
+// any other lookup failure is permanent, and the notification is stored with
+// the neutral name rather than redelivered forever.
+var ErrStudentsTransient = errors.New("students directory temporarily unavailable")
 
 // --- seams -------------------------------------------------------------------
 //
@@ -137,6 +143,20 @@ type Repo interface {
 	// notification, its student's guardians. It is one batched read, never one
 	// per user, and no userIDs means no targets (and no query).
 	DevicesForUsers(ctx context.Context, userIDs []string) ([]Device, error)
+	// DeactivateDevices removes the devices registered under tokens — the ones
+	// the push provider reported as no longer registered. Unknown tokens are
+	// ignored.
+	DeactivateDevices(ctx context.Context, tokens []string) error
+	// DeleteUserDevice removes token ONLY when it is registered to userID. A
+	// token of anyone else, or no token at all, is left alone without error.
+	DeleteUserDevice(ctx context.Context, userID, token string) error
+}
+
+// StudentNameReader resolves a pupil's first name for the copy a family reads.
+// A pupil the directory does not know is glerrors.ErrNotFound; any other error
+// is an outage. Comms keeps no names: the students bounded context owns them.
+type StudentNameReader interface {
+	FirstName(ctx context.Context, studentID string) (string, error)
 }
 
 // GuardianReader resolves which users are a student's guardians — the audience a
@@ -150,10 +170,37 @@ type GuardianReader interface {
 	GuardiansForStudent(ctx context.Context, studentID string) ([]string, error)
 }
 
+// PushMessage is one rendered notification bound for a set of device tokens.
+// Data is the small routing payload the app opens the right screen with
+// ({type, studentId, date}); it carries ids only, never copy or PII.
+type PushMessage struct {
+	Tokens []string
+	Title  string
+	Body   string
+	Data   map[string]string
+}
+
+// PushReport is what the provider said about individual targets. Unregistered
+// lists the tokens it reported as no longer registered (Expo's
+// DeviceNotRegistered): the service deactivates those devices.
+type PushReport struct {
+	Unregistered []string
+}
+
 // Sender delivers a rendered notification to push targets. Delivery is
-// best-effort (see push): a nil Sender disables it entirely.
+// best-effort (see push): a nil Sender disables it entirely. A sender may return
+// a report AND an error (some batches failed, others answered).
 type Sender interface {
-	Push(ctx context.Context, tokens []string, title, body string) error
+	Push(ctx context.Context, m PushMessage) (PushReport, error)
+}
+
+// Option configures optional CommsService collaborators (functional options).
+type Option func(*CommsService)
+
+// WithStudentNames lets the attendance copy name the pupil ("Ana faltó…").
+// Without it the copy uses fallbackStudentName.
+func WithStudentNames(r StudentNameReader) Option {
+	return func(s *CommsService) { s.names = r }
 }
 
 // --- service -----------------------------------------------------------------
@@ -175,6 +222,7 @@ type CommsService struct {
 	repo      Repo
 	guardians GuardianReader
 	sender    Sender
+	names     StudentNameReader
 	tenantID  string
 	newID     func() string
 	now       func() time.Time
@@ -195,11 +243,12 @@ func NewCommsService(
 	newID func() string,
 	now func() time.Time,
 	log *slog.Logger,
+	opts ...Option,
 ) *CommsService {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &CommsService{
+	s := &CommsService{
 		repo:      repo,
 		guardians: guardians,
 		sender:    sender,
@@ -208,6 +257,10 @@ func NewCommsService(
 		now:       now,
 		log:       log,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // HandleEvent is the idempotent consumer, usable directly as a pubsub.Handler.
@@ -227,7 +280,7 @@ func NewCommsService(
 func (s *CommsService) HandleEvent(ctx context.Context, msg pubsub.Message) error {
 	eventType := msg.Attributes[attrType]
 
-	eventKey, n, err := s.render(eventType, msg.Data)
+	ev, err := s.decode(eventType, msg.Data)
 	switch {
 	case errors.Is(err, errNotNotifiable):
 		s.log.Debug("comms skipped an event it does not notify on",
@@ -241,21 +294,68 @@ func (s *CommsService) HandleEvent(ctx context.Context, msg pubsub.Message) erro
 		return nil
 	}
 
+	name, err := s.studentName(ctx, ev)
+	if err != nil {
+		// Nothing is stored yet, so a redelivery is the recovery: a family must
+		// not get a permanently anonymous message because students blinked.
+		return fmt.Errorf("resolving the student's name for %s: %w", ev.key, err)
+	}
+	n := ev.render(name)
 	n.ID = s.newID()
 	n.CreatedAt = s.now()
-	created, isNew, err := s.repo.RecordEvent(ctx, eventKey, n)
+	created, isNew, err := s.repo.RecordEvent(ctx, ev.key, n)
 	if err != nil {
-		return fmt.Errorf("recording event %s: %w", eventKey, err)
+		return fmt.Errorf("recording event %s: %w", ev.key, err)
 	}
 	if !isNew {
 		// A redelivery of an event already handled: acking is the whole point of
 		// the ledger.
-		s.log.Debug("comms skipped an already-handled event", slog.String("event_key", eventKey))
+		s.log.Debug("comms skipped an already-handled event", slog.String("event_key", ev.key))
 		return nil
 	}
 
-	s.push(ctx, created)
+	s.push(ctx, created, ev.pushData())
 	return nil
+}
+
+// studentName resolves the pupil's first name for an event whose copy uses it.
+// Only a TRANSIENT failure (ErrStudentsTransient) is returned, so the event is
+// redelivered while students recovers. A pupil the directory does not know, and
+// any permanent failure — which a redelivery could never fix, and would loop on
+// forever — fall back to fallbackStudentName; the permanent one is logged.
+func (s *CommsService) studentName(ctx context.Context, ev decodedEvent) (string, error) {
+	if !ev.namesStudent() || s.names == nil {
+		return fallbackStudentName, nil
+	}
+	name, err := s.names.FirstName(ctx, ev.studentID)
+	switch {
+	case errors.Is(err, ErrStudentsTransient):
+		return "", err
+	case glerrors.KindOf(err) == glerrors.KindNotFound:
+		return fallbackStudentName, nil
+	case err != nil:
+		s.log.Warn("comms fell back to the neutral name after a permanent lookup failure",
+			slog.String("event_key", ev.key),
+			slog.String("student_id", ev.studentID),
+			slog.Any("error", err))
+		return fallbackStudentName, nil
+	case strings.TrimSpace(name) == "":
+		return fallbackStudentName, nil
+	}
+	return strings.TrimSpace(name), nil
+}
+
+// UnregisterDevice removes a push token, but only when it is registered to
+// userID (a family logging out). Anyone else's token, or an unknown one, is left
+// alone and answers success: idempotent, and it reveals nothing.
+func (s *CommsService) UnregisterDevice(ctx context.Context, userID, token string) error {
+	if err := uuid.Validate(userID); err != nil {
+		return glerrors.New(glerrors.KindInvalid, "invalid user id")
+	}
+	if strings.TrimSpace(token) == "" {
+		return glerrors.New(glerrors.KindInvalid, "token is required")
+	}
+	return s.repo.DeleteUserDevice(ctx, userID, token)
 }
 
 // RegisterDevice registers (or refreshes) the FCM token a user's device is
@@ -309,7 +409,7 @@ func (s *CommsService) MarkNotificationRead(ctx context.Context, id string) (Not
 // it. A failure never widens the audience either: when the guardians cannot be
 // resolved, nothing is pushed, because pushing one family's absence to a guessed
 // audience is worse than pushing late.
-func (s *CommsService) push(ctx context.Context, n Notification) {
+func (s *CommsService) push(ctx context.Context, n Notification, data map[string]string) {
 	if s.sender == nil {
 		return
 	}
@@ -349,17 +449,38 @@ func (s *CommsService) push(ctx context.Context, n Notification) {
 	for _, d := range devices {
 		tokens = append(tokens, d.FCMToken)
 	}
-	if err := s.sender.Push(ctx, tokens, n.Title, n.Body); err != nil {
+	report, err := s.sender.Push(ctx, PushMessage{Tokens: tokens, Title: n.Title, Body: n.Body, Data: data})
+	if err != nil {
 		s.log.Warn("comms push not delivered",
 			slog.String("notification_id", n.ID),
 			slog.Int("target_count", len(tokens)),
 			slog.Any("error", err))
 	}
+	s.deactivate(ctx, n.ID, report.Unregistered)
 }
 
-// render turns a raw event into its ledger key and the notification to store. It
-// is PURE — no clock, no ids, no I/O — so the whole rendering contract is
-// table-testable, and it is the single place that knows the upstream protos.
+// deactivate removes the devices the provider reported as no longer
+// registered, so the next push does not pay for them again. Best-effort like the
+// push itself: a failure is logged, never returned.
+func (s *CommsService) deactivate(ctx context.Context, notificationID string, tokens []string) {
+	if len(tokens) == 0 {
+		return
+	}
+	if err := s.repo.DeactivateDevices(ctx, tokens); err != nil {
+		s.log.Warn("comms could not deactivate unregistered devices",
+			slog.String("notification_id", notificationID),
+			slog.Int("device_count", len(tokens)),
+			slog.Any("error", err))
+		return
+	}
+	s.log.Info("comms deactivated unregistered devices",
+		slog.String("notification_id", notificationID),
+		slog.Int("device_count", len(tokens)))
+}
+
+// decode turns a raw event into what the copy is made of, after the checks that
+// make it storable at all. It is PURE — no clock, no ids, no I/O — and it is the
+// single place that knows the upstream protos.
 //
 // Every message it produces no notification for comes back as errUndeliverable
 // (the message is wrong: an unknown type, an unreadable payload, an event with no
@@ -367,47 +488,40 @@ func (s *CommsService) push(ctx context.Context, n Notification) {
 // event belonging to someone else, which the repository would otherwise store
 // under ours) or errNotNotifiable (a well-formed event this consumer skips by
 // design). HandleEvent acks both and logs them at different levels.
-func (s *CommsService) render(eventType string, data []byte) (eventKey string, n Notification, err error) {
+func (s *CommsService) decode(eventType string, data []byte) (decodedEvent, error) {
 	switch eventType {
 	case eventAbsenceRecorded:
 		var e attendancev1.AbsenceRecorded
 		if err := proto.Unmarshal(data, &e); err != nil {
-			return "", Notification{}, fmt.Errorf("%w: unreadable %s payload: %w", errUndeliverable, eventType, err)
+			return decodedEvent{}, fmt.Errorf("%w: unreadable %s payload: %w", errUndeliverable, eventType, err)
 		}
-		return s.notification(eventType, e.GetRecordId(), e.GetMarkVersion(), e.GetStudentId(), e.GetTenantId(), Notification{
-			Type:  typeAbsence,
-			Title: "Ausencia registrada",
-			Body:  fmt.Sprintf("Se registró una ausencia el %s.", e.GetDate()),
+		return s.checked(eventType, e.GetRecordId(), e.GetMarkVersion(), e.GetStudentId(), e.GetTenantId(), decodedEvent{
+			kind: kindAttendance, status: statusAbsent, previous: e.GetPreviousStatus(), date: e.GetDate(), class: e.GetSubjectName(),
 		})
 
 	case eventAttendanceMarked:
 		var e attendancev1.AttendanceMarked
 		if err := proto.Unmarshal(data, &e); err != nil {
-			return "", Notification{}, fmt.Errorf("%w: unreadable %s payload: %w", errUndeliverable, eventType, err)
+			return decodedEvent{}, fmt.Errorf("%w: unreadable %s payload: %w", errUndeliverable, eventType, err)
 		}
-		title, body, err := attendanceCopy(e.GetStatus(), e.GetDate())
-		if err != nil {
-			return "", Notification{}, err
+		if err := notifiedMarkStatus(e.GetStatus()); err != nil {
+			return decodedEvent{}, err
 		}
-		return s.notification(eventType, e.GetRecordId(), e.GetMarkVersion(), e.GetStudentId(), e.GetTenantId(), Notification{
-			Type:  typeAttendance,
-			Title: title,
-			Body:  body,
+		return s.checked(eventType, e.GetRecordId(), e.GetMarkVersion(), e.GetStudentId(), e.GetTenantId(), decodedEvent{
+			kind: kindAttendance, status: e.GetStatus(), previous: e.GetPreviousStatus(), date: e.GetDate(), class: e.GetSubjectName(),
 		})
 
 	case eventPaymentRegistered:
 		var e financev1.PaymentRegistered
 		if err := proto.Unmarshal(data, &e); err != nil {
-			return "", Notification{}, fmt.Errorf("%w: unreadable %s payload: %w", errUndeliverable, eventType, err)
+			return decodedEvent{}, fmt.Errorf("%w: unreadable %s payload: %w", errUndeliverable, eventType, err)
 		}
-		return s.notification(eventType, e.GetPaymentId(), unversioned, e.GetStudentId(), e.GetTenantId(), Notification{
-			Type:  typePayment,
-			Title: "Pago recibido",
-			Body:  fmt.Sprintf("Recibimos tu pago de %s MXN.", pesos(e.GetAmountCents())),
+		return s.checked(eventType, e.GetPaymentId(), unversioned, e.GetStudentId(), e.GetTenantId(), decodedEvent{
+			kind: kindPayment, amountCents: e.GetAmountCents(),
 		})
 
 	default:
-		return "", Notification{}, fmt.Errorf("%w: unknown event type %q", errUndeliverable, eventType)
+		return decodedEvent{}, fmt.Errorf("%w: unknown event type %q", errUndeliverable, eventType)
 	}
 }
 
@@ -415,26 +529,27 @@ func (s *CommsService) render(eventType string, data []byte) (eventKey string, n
 // and what a pre-versioning attendance event decodes to.
 const unversioned int64 = 0
 
-// notification completes a rendered notification with the parts every event
-// shares — its ledger key and its student — after the checks that make it
-// storable at all. The key is "<event type>:<event id>", the form the
-// processed_events column documents, plus ":<version>" for a versioned event:
-// attendance keeps a mark's id across corrections, so only the version tells a
-// correction (a new notification) from a redelivery (deduped). An unversioned
-// event keeps the bare key, so events published before versioning still match
-// the claims they already made.
-func (s *CommsService) notification(eventType, eventID string, version int64, studentID, tenantID string, n Notification) (string, Notification, error) {
+// checked completes a decoded event with the parts every event shares — its
+// ledger key and its student — after the checks that make it storable at all.
+// The key is "<event type>:<event id>", the form the processed_events column
+// documents, plus ":<version>" for a versioned event: attendance keeps a mark's
+// id across corrections, so only the version tells a correction (a new
+// notification) from a redelivery (deduped). An unversioned event keeps the bare
+// key, so events published before versioning still match the claims they
+// already made.
+func (s *CommsService) checked(eventType, eventID string, version int64, studentID, tenantID string, ev decodedEvent) (decodedEvent, error) {
 	if eventID == "" {
-		return "", Notification{}, fmt.Errorf("%w: %s carries no event id", errUndeliverable, eventType)
+		return decodedEvent{}, fmt.Errorf("%w: %s carries no event id", errUndeliverable, eventType)
 	}
-	if studentID == "" {
-		return "", Notification{}, fmt.Errorf("%w: %s carries no student id", errUndeliverable, eventType)
+	if uuid.Validate(studentID) != nil {
+		return decodedEvent{}, fmt.Errorf("%w: %s carries no valid student id", errUndeliverable, eventType)
 	}
 	if tenantID != s.tenantID {
-		return "", Notification{}, fmt.Errorf("%w: %s belongs to another tenant", errUndeliverable, eventType)
+		return decodedEvent{}, fmt.Errorf("%w: %s belongs to another tenant", errUndeliverable, eventType)
 	}
-	n.StudentID = studentID
-	return ledgerKey(eventType, eventID, version), n, nil
+	ev.key = ledgerKey(eventType, eventID, version)
+	ev.studentID = studentID
+	return ev, nil
 }
 
 // ledgerKey is the idempotency key of one event: "<type>:<id>" or, when the
@@ -447,21 +562,20 @@ func ledgerKey(eventType, eventID string, version int64) string {
 	return key + ":" + strconv.FormatInt(version, 10)
 }
 
-// attendanceCopy renders the copy for a general attendance exception. A status
-// that produces no notification is reported as the sentinel that says WHY: an
-// absence or a presence is skipped by design (an absence is already notified by
-// AbsenceRecorded, and notifying on both would tell the family twice), while
-// anything else means attendance's vocabulary and this consumer's have drifted.
-func attendanceCopy(status, date string) (title, body string, err error) {
+// notifiedMarkStatus classifies an AttendanceMarked status. An absence is
+// skipped by design (AbsenceRecorded already notifies it, and notifying on both
+// would tell the family twice); late, excused and present (a stored exception
+// CLEARED by a correction — attendance publishes present for nothing else) are
+// notified; anything else means attendance's vocabulary and this consumer's have
+// drifted.
+func notifiedMarkStatus(status string) error {
 	switch status {
-	case statusLate:
-		return "Llegada tarde", fmt.Sprintf("Se registró una llegada tarde el %s.", date), nil
-	case statusExcused:
-		return "Ausencia justificada", fmt.Sprintf("Se registró una ausencia justificada el %s.", date), nil
-	case statusAbsent, statusPresent:
-		return "", "", fmt.Errorf("%w: attendance status %q", errNotNotifiable, status)
+	case statusLate, statusExcused, statusPresent:
+		return nil
+	case statusAbsent:
+		return fmt.Errorf("%w: attendance status %q", errNotNotifiable, status)
 	default:
-		return "", "", fmt.Errorf("%w: attendance status %q is outside the contract", errUndeliverable, status)
+		return fmt.Errorf("%w: attendance status %q is outside the contract", errUndeliverable, status)
 	}
 }
 

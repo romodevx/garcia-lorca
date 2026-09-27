@@ -8,7 +8,7 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "jsEngine": "hermes",
-    "plugins": ["expo-router"],
+    "plugins": ["expo-router", "expo-notifications"],
     "ios": {
       "supportsTablet": true,
       "jsEngine": "hermes"

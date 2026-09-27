@@ -167,6 +167,13 @@ func main() {
 //	                             composes two modules, so EITHER flag OFF ⇒ 404.
 //	                             Scoped by construction: the caller reads only their
 //	                             own children, no request field can widen it.
+//	POST /api/v1/family/devices, DELETE /api/v1/family/devices/{token}
+//	                           → same guards as /family/notifications; the device
+//	                             owner is the PRINCIPAL (register = upsert that
+//	                             moves the token to the caller; delete = own only).
+//	GET  /api/v1/family/students/{studentId}/attendance?month=YYYY-MM
+//	                           → ModuleGuard(attendance) → ModuleGuard(students) →
+//	                             family:read → ownership (404) → one row per day.
 //	/api/v1/config/...         → ModuleGuard(config) → RequireAuth → rotation →
 //	                             RequirePermission(config:write on POST, config:read
 //	                             on GET) → config (academic catalog) service
@@ -710,6 +717,13 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	}
 	mux.Handle("GET /api/v1/family/notifications", familyComms(familyH.Notifications))
 	mux.Handle("POST /api/v1/family/notifications/{notificationId}/read", familyComms(familyH.MarkNotificationRead))
+	// T5 push registration for the family app. The guardian holds family:read,
+	// not comms:write, so this is its own door; the owner is the principal. It
+	// is guarded on comms (the device store) AND students, like the inbox it
+	// feeds, so either module OFF hides it.
+	familyDevicesH := handler.NewFamilyDevicesHandler(commsClient)
+	mux.Handle("POST /api/v1/family/devices", familyComms(familyDevicesH.Register))
+	mux.Handle("DELETE /api/v1/family/devices/{token}", familyComms(familyDevicesH.Unregister))
 	// The students list is scoped by the principal alone (no {studentId}), so it
 	// needs only module_students — the app calls it first to discover its children.
 	mux.Handle("GET /api/v1/family/students",

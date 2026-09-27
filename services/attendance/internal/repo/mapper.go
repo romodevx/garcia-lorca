@@ -59,3 +59,13 @@ func fromNullable(v *string) string {
 	}
 	return *v
 }
+
+// toTakenList projects a session row onto the taken-list view: a NULL subject
+// (the daily list) becomes "".
+func toTakenList(m sessionModel) service.TakenList {
+	out := service.TakenList{GroupID: m.GroupID, Date: m.Date.UTC()}
+	if m.SubjectID != nil {
+		out.SubjectID = *m.SubjectID
+	}
+	return out
+}

@@ -92,20 +92,22 @@ func (h *AttendanceHandler) SaveDailyAttendance(ctx context.Context, req *connec
 			Note:         mark.GetNote(),
 		})
 	}
-	absentCount, markedCount, err := h.svc.SaveDailyAttendance(ctx, service.SaveRequest{
+	res, err := h.svc.SaveDailyAttendance(ctx, service.SaveRequest{
 		GroupID:     m.GetGroupId(),
 		Date:        m.GetDate(),
 		SubjectID:   m.GetSubjectId(),
 		Marks:       marks,
 		TakenBy:     m.GetTakenBy(),
 		TakenByName: m.GetTakenByName(),
+		SubjectName: m.GetSubjectName(),
 	})
 	if err != nil {
 		return nil, connectErr(err)
 	}
 	return connect.NewResponse(&attendancev1.SaveDailyAttendanceResponse{
-		AbsentCount: int32(absentCount),
-		MarkedCount: int32(markedCount),
+		AbsentCount:   int32(res.AbsentCount),
+		MarkedCount:   int32(res.MarkedCount),
+		HeldElsewhere: res.HeldElsewhere,
 	}), nil
 }
 
@@ -139,6 +141,24 @@ func (h *AttendanceHandler) ListAttendance(ctx context.Context, req *connect.Req
 // caller's business, and it never is. Error() concatenates the cause, so handing
 // the error straight to connect.NewError shipped Postgres constraint names and
 // SQLSTATEs — and on some constraints the conflicting value — to whoever called.
+// ListSessions reports which lists were taken for a set of groups over a range.
+func (h *AttendanceHandler) ListSessions(ctx context.Context, req *connect.Request[attendancev1.ListSessionsRequest]) (*connect.Response[attendancev1.ListSessionsResponse], error) {
+	m := req.Msg
+	lists, err := h.svc.ListSessions(ctx, m.GetGroupIds(), m.GetFromDate(), m.GetToDate())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	out := make([]*attendancev1.TakenList, 0, len(lists))
+	for _, l := range lists {
+		out = append(out, &attendancev1.TakenList{
+			GroupId:   l.GroupID,
+			Date:      l.Date.Format(dateLayout),
+			SubjectId: l.SubjectID,
+		})
+	}
+	return connect.NewResponse(&attendancev1.ListSessionsResponse{Lists: out}), nil
+}
+
 func connectErr(err error) *connect.Error {
 	safe := errors.New(glerrors.SafeMessage(err))
 

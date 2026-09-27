@@ -1,169 +1,114 @@
-import { useMemo, type ReactElement } from "react";
-import { StyleSheet, Text, View } from "react-native";
-import type { FamilyAttendanceRecord, FamilyAttendanceStatus } from "../api";
-import type { ChipKind } from "../data/mock";
+import { useState, type ReactElement } from "react";
+import { useRefreshHandler } from "../components/refresh";
 import { useAppState } from "../state/AppState";
-import { useChildAttendance } from "../state/familyData";
-import { useTheme, type ThemeColors } from "../theme";
-import { Card, Chip, ListRow, ScreenTitle, SectionLabel, StatusDot } from "../ui";
-import { AsyncErrorState, AsyncLoading } from "./AsyncStates";
-import { formatDate } from "./format";
+import { useChildAttendanceMonth } from "../state/familyData";
+import type { AsyncResource } from "../state/useAsyncResource";
+import type { AttendanceMonth } from "../api/attendance";
+import { ScreenTitle, SectionLabel } from "../ui";
+import { AsyncErrorState, AsyncLoading, StaleNotice } from "./AsyncStates";
+import { DayList } from "./attendance/DayList";
+import { MonthSelector, MonthSummary } from "./attendance/MonthBar";
+import { TodayCard } from "./attendance/TodayCard";
+import { shiftMonth } from "./attendanceView";
+import { useSchoolMonth } from "./attendance/useSchoolMonth";
 
-const STATUS_LABEL: Record<FamilyAttendanceStatus, string> = {
-  present: "Asistió",
-  absent: "Falta",
-  late: "Retardo",
-  excused: "Justificada",
-};
-const STATUS_CHIP: Record<FamilyAttendanceStatus, ChipKind> = {
-  present: "ok",
-  absent: "bad",
-  late: "warn",
-  excused: "warn",
-};
+const HTTP_NOT_FOUND = 404;
 
-function dotColor(colors: ThemeColors, status: FamilyAttendanceStatus): string {
-  switch (status) {
-    case "present":
-      return colors.ok;
-    case "absent":
-      return colors.bad;
-    default:
-      return colors.warn;
-  }
-}
-
-/** Counts of the exception statuses a parent watches, derived from the records. */
-function tally(records: FamilyAttendanceRecord[]): { faltas: number; retardos: number; justificadas: number } {
-  return {
-    faltas: records.filter((r) => r.status === "absent").length,
-    retardos: records.filter((r) => r.status === "late").length,
-    justificadas: records.filter((r) => r.status === "excused").length,
-  };
+export interface AttendanceScreenProps {
+  /** The month to ask for first; the phone's by default (tests pin it). The school's today then decides. */
+  initialMonth?: string;
 }
 
 /**
- * Asistencia: the child's real attendance records from
- * `GET /api/v1/family/students/{id}/attendance` — the stored exceptions (absence,
- * retardo, justificante) with the counts derived from them. No attendance
- * percentage is shown: it can't be computed without the school-day calendar, and
- * a fabricated figure would mislead. Handles loading/error/empty.
+ * Asistencia: today first (did my child attend?), then the month — summary,
+ * selector and every school day. Reads
+ * `GET /family/students/{id}/attendance?month=`; reloads on pull, on returning
+ * to the foreground and on an attendance push. Never fabricates: a failed read
+ * is an error with retry, a 404 says the child was not found.
  */
-export function AttendanceScreen(): ReactElement {
+export function AttendanceScreen({ initialMonth }: AttendanceScreenProps): ReactElement {
   const { selectedChildId, childLoading, childError, refreshChildren } = useAppState();
-  const { data, loading, error, reload } = useChildAttendance(selectedChildId);
-  const theme = useTheme();
+  const { month: currentMonth, resource: current, today } = useSchoolMonth(selectedChildId, initialMonth);
+  // null = "the current month"; a picked month is only honoured while it is in the past.
+  const [picked, setPicked] = useState<string | null>(null);
+  const selected = picked !== null && picked < currentMonth ? picked : currentMonth;
 
-  const records = data ?? [];
-  const stats = useMemo(() => tally(records), [records]);
+  const isCurrentSelected = selected === currentMonth;
+  const other = useChildAttendanceMonth(selectedChildId, isCurrentSelected ? null : selected);
+  const shown = isCurrentSelected ? current : other;
 
-  // No child to read against (child bootstrap failed): show the error, never the
-  // fabricated "Sin registros" empty state (bug_005).
+  useRefreshHandler(async () => {
+    await Promise.all([current.reload(), isCurrentSelected ? Promise.resolve() : other.reload()]);
+  });
+
   if (childError) {
+    return <Failed onRetry={refreshChildren} />;
+  }
+  if (current.error && current.data === null) {
+    return <Failed onRetry={current.reload} notFound={current.errorStatus === HTTP_NOT_FOUND} />;
+  }
+  if (current.data === null) {
     return (
       <>
         <ScreenTitle>Asistencia</ScreenTitle>
-        <AsyncErrorState
-          title="No pudimos cargar la asistencia"
-          subtitle="Revisa tu conexión e inténtalo de nuevo."
-          onRetry={refreshChildren}
-        />
+        {childLoading || current.loading ? <AsyncLoading /> : null}
       </>
     );
   }
 
-  if (error) {
-    return (
-      <>
-        <ScreenTitle>Asistencia</ScreenTitle>
-        <AsyncErrorState
-          title="No pudimos cargar la asistencia"
-          subtitle="Revisa tu conexión e inténtalo de nuevo."
-          onRetry={reload}
-        />
-      </>
-    );
-  }
-
-  if ((childLoading || loading) && data === null) {
-    return (
-      <>
-        <ScreenTitle>Asistencia</ScreenTitle>
-        <AsyncLoading />
-      </>
-    );
-  }
+  const stale = current.error || (shown.error && shown.data !== null);
+  const goNext = (): void => {
+    const next = shiftMonth(selected, 1);
+    setPicked(next < currentMonth ? next : null);
+  };
 
   return (
     <>
       <ScreenTitle>Asistencia</ScreenTitle>
-
-      {records.length === 0 ? (
-        <Card padded style={{ marginTop: 12 }}>
-          <Text style={[styles.empty, { color: theme.colors.text2, fontFamily: theme.fonts.uiExtra }]}>
-            Sin registros de asistencia
-          </Text>
-          <Text style={[styles.emptySub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>
-            Aquí verás faltas, retardos y justificantes.
-          </Text>
-        </Card>
-      ) : (
-        <>
-          <Card style={{ marginTop: 12 }}>
-            <View style={styles.statGrid}>
-              <Stat value={stats.faltas} label="Faltas" color={theme.colors.bad} />
-              <Stat value={stats.retardos} label="Retardos" color={theme.colors.warn} bordered />
-              <Stat value={stats.justificadas} label="Justificadas" color={theme.colors.ok} />
-            </View>
-          </Card>
-
-          <SectionLabel>Registros</SectionLabel>
-          <Card>
-            {records.map((r, i) => (
-              <ListRow key={r.id} divider={i > 0}>
-                <StatusDot color={dotColor(theme.colors, r.status)} size={12} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.rowTitle, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>
-                    {formatDate(r.date, "long")}
-                  </Text>
-                  {r.note ? (
-                    <Text style={[styles.rowSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{r.note}</Text>
-                  ) : null}
-                </View>
-                <Chip kind={STATUS_CHIP[r.status]}>{STATUS_LABEL[r.status]}</Chip>
-              </ListRow>
-            ))}
-          </Card>
-        </>
-      )}
+      {stale ? <StaleNotice /> : null}
+      <TodayCard day={today} />
+      <MonthSelector
+        month={selected}
+        canGoNext={selected < currentMonth}
+        onPrevious={() => setPicked(shiftMonth(selected, -1))}
+        onNext={goNext}
+      />
+      <MonthSection resource={shown} />
     </>
   );
 }
 
-function Stat({ value, label, color, bordered }: { value: number; label: string; color: string; bordered?: boolean }): ReactElement {
-  const theme = useTheme();
+function MonthSection({ resource }: { resource: AsyncResource<AttendanceMonth> }): ReactElement {
+  if (resource.error && resource.data === null) {
+    return (
+      <AsyncErrorState
+        title="No pudimos cargar este mes"
+        subtitle="Revisa tu conexión e inténtalo de nuevo."
+        onRetry={resource.reload}
+      />
+    );
+  }
+  if (resource.data === null) {
+    return <AsyncLoading />;
+  }
   return (
-    <View
-      style={[
-        styles.stat,
-        bordered ? { borderLeftWidth: 1, borderRightWidth: 1, borderColor: theme.colors.line } : null,
-      ]}
-    >
-      <Text accessibilityLabel={label} style={[styles.statNum, { color, fontFamily: theme.fonts.display }]}>
-        {String(value)}
-      </Text>
-      <Text style={[styles.statLab, { color: theme.colors.text3, fontFamily: theme.fonts.ui }]}>{label}</Text>
-    </View>
+    <>
+      <MonthSummary summary={resource.data.summary} />
+      <SectionLabel>Días</SectionLabel>
+      <DayList days={resource.data.days} />
+    </>
   );
 }
 
-const styles = StyleSheet.create({
-  statGrid: { flexDirection: "row" },
-  stat: { flex: 1, alignItems: "center", paddingVertical: 14 },
-  statNum: { fontSize: 26, fontWeight: "800", letterSpacing: -0.5 },
-  statLab: { fontSize: 11.5, fontWeight: "700", marginTop: 6 },
-  rowTitle: { fontSize: 15, fontWeight: "800", textTransform: "capitalize" },
-  rowSub: { fontSize: 12.5, fontWeight: "600", marginTop: 3 },
-  empty: { fontSize: 16, fontWeight: "800", textAlign: "center" },
-  emptySub: { fontSize: 13, fontWeight: "600", marginTop: 4, textAlign: "center" },
-});
+function Failed({ onRetry, notFound = false }: { onRetry: () => void; notFound?: boolean }): ReactElement {
+  return (
+    <>
+      <ScreenTitle>Asistencia</ScreenTitle>
+      <AsyncErrorState
+        title={notFound ? "No encontramos a este alumno" : "No pudimos cargar la asistencia"}
+        subtitle={notFound ? "Si crees que es un error, avisa a la escuela." : "Revisa tu conexión e inténtalo de nuevo."}
+        onRetry={onRetry}
+      />
+    </>
+  );
+}

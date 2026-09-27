@@ -62,6 +62,7 @@ type Enrollment struct {
 	termID     string
 	status     EnrollmentStatus
 	enrolledAt time.Time
+	endedAt    time.Time // zero while active
 }
 
 // NewEnrollment builds a validated Enrollment. All identity references except
@@ -97,6 +98,17 @@ func NewEnrollment(id, tenantID, studentID, cycleID, groupID, termID string, sta
 	}, nil
 }
 
+// WithEndedAt records when the enrollment stopped being active (its
+// status-change instant). An active enrollment has not ended, so it is returned
+// unchanged.
+func (e Enrollment) WithEndedAt(t time.Time) Enrollment {
+	if e.status == EnrollmentStatusActive {
+		return e
+	}
+	e.endedAt = t
+	return e
+}
+
 // CanTransfer reports whether the enrollment may be transferred to another group.
 func (e Enrollment) CanTransfer() bool { return e.status == EnrollmentStatusActive }
 
@@ -112,3 +124,4 @@ func (e Enrollment) GroupID() string          { return e.groupID }
 func (e Enrollment) TermID() string           { return e.termID }
 func (e Enrollment) Status() EnrollmentStatus { return e.status }
 func (e Enrollment) EnrolledAt() time.Time    { return e.enrolledAt }
+func (e Enrollment) EndedAt() time.Time       { return e.endedAt }

@@ -60,6 +60,12 @@ service AttendanceService {
   // absent from the result by construction. Returns at most 500 rows (most
   // recent first); explicit pagination is a follow-up.
   rpc ListAttendance(ListAttendanceRequest) returns (ListAttendanceResponse);
+
+  // ListSessions lists which pass lists were TAKEN for a set of groups over an
+  // inclusive date range, in one batched read (T5: the family per-day view tells
+  // "present" from "nobody took the list"). Both bounds are required and span at
+  // most 62 days; at most 20 group ids per call. Newest first, at most 2000 rows.
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -150,14 +156,24 @@ message SaveDailyAttendanceRequest {
   string subject_id = 4;
   string taken_by = 5;
   string taken_by_name = 6;
+  // subject_name is the per-class list's display label (T5), carried on the
+  // events this save publishes so comms can say WHICH class a student missed.
+  // It is NOT stored. Optional; ignored for a daily list; at most 200 chars.
+  string subject_name = 7;
 }
 
 // SaveDailyAttendanceResponse reports the state after reconciling:
 // `absent_count` is how many of the stored marks are status "absent";
 // `marked_count` is how many exceptions are stored for the day in total.
+// Both count what THIS list stored, never what was submitted: a submitted
+// mark for a pupil whose day·subject another group's list already holds (a
+// transferred pupil on a day before the move) is not stored and not counted.
+// `held_elsewhere` lists those skipped enrollment ids, ascending, so the
+// client can tell the taker which marks did not land.
 message SaveDailyAttendanceResponse {
   int32 absent_count = 1;
   int32 marked_count = 2;
+  repeated string held_elsewhere = 3;
 }
 
 // ListAttendanceRequest bounds the query by enrollment and an inclusive date
@@ -170,6 +186,26 @@ message ListAttendanceRequest {
 
 message ListAttendanceResponse {
   repeated AttendanceRecord records = 1;
+}
+
+// ListSessionsRequest bounds the query by groups and an inclusive date range
+// (both ISO "YYYY-MM-DD", both required).
+message ListSessionsRequest {
+  repeated string group_ids = 1;
+  string from_date = 2;
+  string to_date = 3;
+}
+
+// TakenList is one list that was taken: its group, day and subject (empty for
+// the daily list).
+message TakenList {
+  string group_id = 1;
+  string date = 2;
+  string subject_id = 3;
+}
+
+message ListSessionsResponse {
+  repeated TakenList lists = 1;
 }
 
 // --- Domain events (published) --------------------------------------------
@@ -192,6 +228,14 @@ message AttendanceMarked {
   // dedupe on (record_id, mark_version), so a correction is a NEW event while a
   // redelivery of the same one is not. 0 means unset (a pre-versioning event).
   int64 mark_version = 8;
+  // subject_name is the per-class list's display label as the saver's edge
+  // resolved it (T5); empty for a daily list or when it was not resolvable.
+  string subject_name = 9;
+  // previous_status is the stored status this change replaced (absent, late or
+  // excused) when the mark was CORRECTED in place or cleared; empty for a new
+  // exception or when unknown. Consumers render a change between two
+  // exceptions (absent → late) as a correction, not as a fresh event.
+  string previous_status = 10;
 }
 
 // AbsenceRecorded fires when a student is recorded absent on a date (feeds
@@ -209,4 +253,8 @@ message AbsenceRecorded {
   // dedupe on (record_id, mark_version), so a correction is a NEW event while a
   // redelivery of the same one is not. 0 means unset (a pre-versioning event).
   int64 mark_version = 7;
+  // subject_name: see AttendanceMarked.subject_name.
+  string subject_name = 8;
+  // previous_status: see AttendanceMarked.previous_status (late → absent).
+  string previous_status = 9;
 }

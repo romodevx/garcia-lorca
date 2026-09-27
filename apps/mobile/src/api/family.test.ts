@@ -1,7 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   getAccount,
-  getAttendance,
   getGrades,
   getProfile,
   listChildren,
@@ -183,31 +182,6 @@ describe("family API client", () => {
 
       expect(await getGrades("s1")).toEqual([]);
       expect(lastUrl(fetchMock)).not.toContain("termId");
-    });
-  });
-
-  describe("getAttendance", () => {
-    it("returns the records and forwards the from/to range", async () => {
-      const fetchMock = jest.fn().mockResolvedValue(
-        jsonOk({
-          records: [{ id: "a1", enrollmentId: "e1", date: "2026-06-04", status: "absent", note: "" }],
-        }),
-      );
-      globalThis.fetch = fetchMock as unknown as typeof fetch;
-
-      const records = await getAttendance("s1", "2026-06-01", "2026-06-30");
-
-      expect(records).toHaveLength(1);
-      expect(records[0]).toMatchObject({ date: "2026-06-04", status: "absent" });
-      const url = lastUrl(fetchMock);
-      expect(url).toContain("/api/v1/family/students/s1/attendance");
-      expect(url).toContain("from=2026-06-01");
-      expect(url).toContain("to=2026-06-30");
-    });
-
-    it("returns an empty array when the envelope carries a null list", async () => {
-      globalThis.fetch = jest.fn().mockResolvedValue(jsonOk({ records: null })) as unknown as typeof fetch;
-      expect(await getAttendance("s1")).toEqual([]);
     });
   });
 

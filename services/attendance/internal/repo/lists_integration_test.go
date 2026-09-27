@@ -337,3 +337,42 @@ func TestReconcileListReportsTheStoredRevision(t *testing.T) {
 	require.Len(t, changes.Deletes, 1)
 	assert.Equal(t, int64(4), changes.Deletes[0].Revision, "a cleared mark reports its last stored revision")
 }
+
+// T5 fixtures for ListSessions.
+const (
+	groupSessionsA = "90000000-0000-0000-0000-000000000201"
+	groupSessionsB = "90000000-0000-0000-0000-000000000202"
+	groupSessionsC = "90000000-0000-0000-0000-000000000203"
+)
+
+// ListSessions returns every taken list of the asked groups inside the range —
+// daily and per-class alike — newest first, and nothing of another group, of a
+// day outside the range, or of another tenant (RLS).
+func TestListSessionsIsBatchedBoundedAndTenantScoped(t *testing.T) {
+	ctx := context.Background()
+	a := appRepo(t, tenantA)
+	for _, k := range []service.ListKey{
+		{GroupID: groupSessionsA, Date: day(t, "2026-10-01")},
+		{GroupID: groupSessionsA, Date: day(t, "2026-10-02"), SubjectID: subjectMath},
+		{GroupID: groupSessionsA, Date: day(t, "2026-10-02"), SubjectID: subjectSpanish},
+		{GroupID: groupSessionsB, Date: day(t, "2026-10-03")},
+		{GroupID: groupSessionsC, Date: day(t, "2026-10-02")}, // not asked for
+		{GroupID: groupSessionsA, Date: day(t, "2026-11-01")}, // outside the range
+	} {
+		saveList(t, a, k, nil, testTaker)
+	}
+	// Tenant B's list of the same group·day must not leak into A's read.
+	saveList(t, appRepo(t, tenantB), service.ListKey{GroupID: groupSessionsB, Date: day(t, "2026-10-04")}, nil, testTaker)
+
+	got, err := a.ListSessions(ctx, []string{groupSessionsA, groupSessionsB}, day(t, "2026-10-01"), day(t, "2026-10-31"))
+	require.NoError(t, err)
+	require.Len(t, got, 4)
+	assert.Equal(t, service.TakenList{GroupID: groupSessionsB, Date: day(t, "2026-10-03")}, got[0], "newest first")
+	assert.Equal(t, "2026-10-02", got[1].Date.Format("2006-01-02"))
+	assert.ElementsMatch(t, []string{subjectMath, subjectSpanish}, []string{got[1].SubjectID, got[2].SubjectID})
+	assert.Equal(t, service.TakenList{GroupID: groupSessionsA, Date: day(t, "2026-10-01")}, got[3], "a daily list has no subject")
+
+	gotB, err := appRepo(t, tenantB).ListSessions(ctx, []string{groupSessionsA, groupSessionsB}, day(t, "2026-10-01"), day(t, "2026-10-31"))
+	require.NoError(t, err)
+	require.Len(t, gotB, 1, "tenant B sees only its own list")
+}

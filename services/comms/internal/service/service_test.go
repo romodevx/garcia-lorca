@@ -59,6 +59,34 @@ type fakeRepo struct {
 
 	recordErr  error
 	devicesErr error
+
+	deactivated   []string // tokens removed as dead
+	deactivateErr error
+	unregistered  [][2]string // (user, token) pairs asked to unregister
+}
+
+func (f *fakeRepo) DeactivateDevices(_ context.Context, tokens []string) error {
+	if f.deactivateErr != nil {
+		return f.deactivateErr
+	}
+	f.deactivated = append(f.deactivated, tokens...)
+	dead := make(map[string]bool, len(tokens))
+	for _, tok := range tokens {
+		dead[tok] = true
+	}
+	kept := f.devices[:0]
+	for _, d := range f.devices {
+		if !dead[d.FCMToken] {
+			kept = append(kept, d)
+		}
+	}
+	f.devices = kept
+	return nil
+}
+
+func (f *fakeRepo) DeleteUserDevice(_ context.Context, userID, token string) error {
+	f.unregistered = append(f.unregistered, [2]string{userID, token})
+	return nil
 }
 
 func newFakeRepo() *fakeRepo {
@@ -173,21 +201,23 @@ type spySender struct {
 	tokens []string
 	title  string
 	body   string
+	data   map[string]string
+	report service.PushReport // what the provider "answers"
 	err    error
 }
 
-func (s *spySender) Push(_ context.Context, tokens []string, title, body string) error {
+func (s *spySender) Push(_ context.Context, m service.PushMessage) (service.PushReport, error) {
 	s.calls++
-	s.tokens = append([]string(nil), tokens...)
-	s.title, s.body = title, body
-	return s.err
+	s.tokens = append([]string(nil), m.Tokens...)
+	s.title, s.body, s.data = m.Title, m.Body, m.Data
+	return s.report, s.err
 }
 
 // --- helpers -----------------------------------------------------------------
 
 // newService wires a deterministic service: ids come from a counter and the
 // clock is fixed, so every assertion below is on an exact value.
-func newService(t *testing.T, repo service.Repo, guardians service.GuardianReader, sender service.Sender) (*service.CommsService, *bytes.Buffer) {
+func newService(t *testing.T, repo service.Repo, guardians service.GuardianReader, sender service.Sender, opts ...service.Option) (*service.CommsService, *bytes.Buffer) {
 	t.Helper()
 	var logs bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
@@ -197,7 +227,7 @@ func newService(t *testing.T, repo service.Repo, guardians service.GuardianReade
 		ids++
 		return "id-" + string(rune('0'+ids))
 	}
-	return service.NewCommsService(repo, guardians, sender, tenantID, newID, func() time.Time { return fixedNow }, log), &logs
+	return service.NewCommsService(repo, guardians, sender, tenantID, newID, func() time.Time { return fixedNow }, log, opts...), &logs
 }
 
 // absenceMessage builds the transport message attendance publishes for an
@@ -284,7 +314,7 @@ func TestHandleEventMaterialisesAnAbsence(t *testing.T) {
 	if got.Title != "Ausencia registrada" {
 		t.Errorf("title = %q, want %q", got.Title, "Ausencia registrada")
 	}
-	if !strings.Contains(got.Body, "2026-08-06") {
+	if !strings.Contains(got.Body, "6 de agosto") {
 		t.Errorf("body = %q, want it to name the day", got.Body)
 	}
 	if got.ID == "" {
@@ -737,8 +767,6 @@ func TestHandleEventUnhandledMessagesAreAcked(t *testing.T) {
 			"eeeeeeee-0000-0000-0000-000000000012", studentID, tenantID, "2026-08-06", "sick"), levelWrong},
 		{"an absence arriving as AttendanceMarked (AbsenceRecorded already covers it)",
 			absentMarked, levelSkipped},
-		{"a presence, which no family is notified about", markedMessage(t,
-			"eeeeeeee-0000-0000-0000-000000000013", studentID, tenantID, "2026-08-06", "present"), levelSkipped},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -784,21 +812,21 @@ func TestHandleEventRendersEveryNotifiableEvent(t *testing.T) {
 			msg:       absenceMessage(t, "eeeeeeee-1000-0000-0000-000000000001", studentID, tenantID, "2026-08-06"),
 			wantType:  "absence",
 			wantTitle: "Ausencia registrada",
-			wantBody:  "Se registró una ausencia el 2026-08-06.",
+			wantBody:  "Tu hijo(a) faltó el 6 de agosto.",
 		},
 		{
 			name:      "late arrival",
 			msg:       markedMessage(t, "eeeeeeee-1000-0000-0000-000000000002", studentID, tenantID, "2026-08-06", "late"),
 			wantType:  "attendance",
 			wantTitle: "Llegada tarde",
-			wantBody:  "Se registró una llegada tarde el 2026-08-06.",
+			wantBody:  "Tu hijo(a) llegó tarde el 6 de agosto.",
 		},
 		{
 			name:      "excused absence",
 			msg:       markedMessage(t, "eeeeeeee-1000-0000-0000-000000000003", studentID, tenantID, "2026-08-06", "excused"),
 			wantType:  "attendance",
 			wantTitle: "Ausencia justificada",
-			wantBody:  "Se registró una ausencia justificada el 2026-08-06.",
+			wantBody:  "Tu hijo(a) tiene falta justificada el 6 de agosto.",
 		},
 		{
 			name:      "payment",

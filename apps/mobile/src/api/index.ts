@@ -17,7 +17,6 @@ export {
   getProfile,
   getAccount,
   getGrades,
-  getAttendance,
   markNotificationRead,
   type FamilyStudent,
   type FamilyEnrollment,
@@ -26,9 +25,17 @@ export {
   type FamilyPayment,
   type FamilyAccount,
   type FamilyGradeEntry,
-  type FamilyAttendanceRecord,
-  type FamilyAttendanceStatus,
   type FamilyCard,
   getCard,
   cardPhotoPath,
 } from "./family";
+export {
+  getAttendanceMonth,
+  type AttendanceMonth,
+  type AttendanceDay,
+  type AttendanceClass,
+  type AttendanceStatus,
+  type AttendanceMode,
+  type AttendanceSummary,
+} from "./attendance";
+export { registerDevice, unregisterDevice, type DevicePlatform } from "./devices";

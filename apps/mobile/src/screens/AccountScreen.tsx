@@ -6,9 +6,10 @@ import type { FamilyAccount, FamilyCharge, FamilyPayment } from "../api";
 import type { IconName } from "../icons";
 import { useAppState } from "../state/AppState";
 import { useChildAccount } from "../state/familyData";
+import { useRefreshHandler } from "../components/refresh";
 import { useTheme, type TintName } from "../theme";
 import { Card, Chip, EmptyState, ListRow, ScreenTitle, SectionLabel, TintIcon } from "../ui";
-import { AsyncErrorState, AsyncLoading } from "./AsyncStates";
+import { AsyncErrorState, AsyncLoading, StaleNotice } from "./AsyncStates";
 import { formatDate, pesos } from "./format";
 
 const CHARGE_STATUS_LABEL: Record<string, string> = {
@@ -73,6 +74,7 @@ function toLedger(account: FamilyAccount): Movement[] {
 export function AccountScreen(): ReactElement {
   const { selectedChildId, childLoading, childError, refreshChildren } = useAppState();
   const { data, loading, error, reload } = useChildAccount(selectedChildId);
+  useRefreshHandler(reload);
   const cardEnabled = useFlag("module_student_card");
   const theme = useTheme();
 
@@ -92,7 +94,8 @@ export function AccountScreen(): ReactElement {
     );
   }
 
-  if (error) {
+  // A failed refresh over data already on screen keeps the data (inline notice below).
+  if (error && data === null) {
     return (
       <>
         <ScreenTitle>Cuenta</ScreenTitle>
@@ -132,6 +135,7 @@ export function AccountScreen(): ReactElement {
   return (
     <>
       <ScreenTitle>Cuenta</ScreenTitle>
+      {error ? <StaleNotice /> : null}
 
       <Card style={[styles.balanceHero, { marginTop: 12 }]}>
         <Text style={[styles.cap, { color: theme.colors.text2, fontFamily: theme.fonts.uiExtra }]}>

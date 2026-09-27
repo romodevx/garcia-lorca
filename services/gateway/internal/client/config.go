@@ -321,6 +321,15 @@ func (c *ConfigClient) CreateSubject(ctx context.Context, in CreateSubjectInput)
 	return toSubjectResult(res.Msg.GetSubject()), nil
 }
 
+// GetSubject reads one subject of the tenant catalog (NotFound when missing).
+func (c *ConfigClient) GetSubject(ctx context.Context, id string) (SubjectResult, error) {
+	res, err := c.rpc.GetSubject(ctx, connect.NewRequest(&configv1.GetSubjectRequest{Id: id}))
+	if err != nil {
+		return SubjectResult{}, err
+	}
+	return toSubjectResult(res.Msg.GetSubject()), nil
+}
+
 // ListSubjects lists the subjects of a grade (scoped by gradeLevelID).
 func (c *ConfigClient) ListSubjects(ctx context.Context, gradeLevelID string) ([]SubjectResult, error) {
 	res, err := c.rpc.ListSubjects(ctx, connect.NewRequest(&configv1.ListSubjectsRequest{GradeLevelId: gradeLevelID}))

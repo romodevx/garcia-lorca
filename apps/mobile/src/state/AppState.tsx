@@ -16,6 +16,7 @@ import {
   type FamilyStudent,
 } from "../api";
 import { isUnread } from "../screens/notificationView";
+import { useFreshDataSignal } from "./freshness";
 
 /**
  * App-wide interactive state for the parent app.
@@ -135,6 +136,9 @@ export function AppStateProvider({ children }: AppStateProviderProps): ReactNode
     void refreshChildren();
     void refreshNotifications();
   }, [refreshChildren, refreshNotifications]);
+
+  // Back from the background or an attendance push: the inbox may have news.
+  useFreshDataSignal(refreshNotifications);
 
   const selectChild = useCallback((id: string) => setSelectedChildId(id), []);
 

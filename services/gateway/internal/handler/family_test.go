@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	connect "connectrpc.com/connect"
@@ -33,6 +34,13 @@ type fakeFamilyStudents struct {
 	enrollments             []client.Enrollment
 	listEnrollmentsErr      error
 	gotEnrollmentsStudentID string
+
+	transfers    []client.Transfer
+	transfersErr error
+}
+
+func (f *fakeFamilyStudents) ListTransfers(_ context.Context, _ string) ([]client.Transfer, error) {
+	return f.transfers, f.transfersErr
 }
 
 func (f *fakeFamilyStudents) ListStudentsForGuardian(_ context.Context, guardianUserID string) ([]client.GuardianLink, error) {
@@ -122,15 +130,48 @@ func (f *fakeFamilyGrades) ListGradeEntries(_ context.Context, enrollmentID, ter
 	return f.byEnrollment[enrollmentID], nil
 }
 
-// fakeFamilyAttendance doubles the attendance range read, keyed by enrollment.
+// fakeFamilyAttendance doubles the attendance range read, keyed by enrollment,
+// and the batched taken-lists read.
 type fakeFamilyAttendance struct {
+	mu               sync.Mutex // the view reads enrollments concurrently
 	gotEnrollmentIDs []string
 	gotFrom, gotTo   string
 	byEnrollment     map[string][]client.AttendanceRecord
 	err              error
+
+	sessions         []client.TakenList
+	sessionsCalls    int
+	gotSessionGroups []string
+	gotSessionsFrom  string
+	gotSessionsTo    string
+	sessionsErr      error
+	sessionCalls     [][]string // every call's groups, in call order
+}
+
+// ListSessions answers the lists of the ASKED groups only, as the service does.
+func (f *fakeFamilyAttendance) ListSessions(_ context.Context, groupIDs []string, from, to string) ([]client.TakenList, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sessionsCalls++
+	f.gotSessionGroups = append(f.gotSessionGroups, groupIDs...)
+	f.sessionCalls = append(f.sessionCalls, append([]string(nil), groupIDs...))
+	f.gotSessionsFrom, f.gotSessionsTo = from, to
+	asked := map[string]bool{}
+	for _, g := range groupIDs {
+		asked[g] = true
+	}
+	var out []client.TakenList
+	for _, s := range f.sessions {
+		if asked[s.GroupID] {
+			out = append(out, s)
+		}
+	}
+	return out, f.sessionsErr
 }
 
 func (f *fakeFamilyAttendance) ListAttendance(_ context.Context, enrollmentID, from, to string) ([]client.AttendanceRecord, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.gotEnrollmentIDs = append(f.gotEnrollmentIDs, enrollmentID)
 	f.gotFrom, f.gotTo = from, to
 	if f.err != nil {
@@ -150,6 +191,12 @@ type fakeFamilyConfig struct {
 	termsErr        error
 	gotListSubjects int
 	gotListTerms    int
+	cycles          []client.CycleResult
+	cyclesErr       error
+}
+
+func (f *fakeFamilyConfig) ListCycles(_ context.Context) ([]client.CycleResult, error) {
+	return f.cycles, f.cyclesErr
 }
 
 func (f *fakeFamilyConfig) ListSubjects(_ context.Context, _ string) ([]client.SubjectResult, error) {
@@ -794,38 +841,6 @@ func TestFamilyGradesUnlinkedChildIs404AndDoesNotRead(t *testing.T) {
 	}
 	if students.gotEnrollmentsStudentID != "" || len(grades.gotEnrollmentIDs) != 0 {
 		t.Errorf("an unlinked child must never reach enrollment resolution or grades")
-	}
-}
-
-func TestFamilyAttendanceOwnedChildResolvesEnrollmentThenReads(t *testing.T) {
-	students := oneChild()
-	students.enrollments = []client.Enrollment{{ID: "enr-1", StudentID: "stu-1", Status: "active"}}
-	attendance := &fakeFamilyAttendance{byEnrollment: map[string][]client.AttendanceRecord{
-		"enr-1": {{ID: "att-1", EnrollmentID: "enr-1", Date: "2026-09-01", Status: "absent"}},
-	}}
-	h := handler.NewFamilyHandler(students, &fakeFamilyComms{}, nil, nil, attendance, nil)
-
-	rec := httptest.NewRecorder()
-	h.Attendance(rec, guardianRequest(http.MethodGet,
-		"/api/v1/family/students/stu-1/attendance?from=2026-09-01&to=2026-09-30", "usr-9", "studentId", "stu-1"))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if len(attendance.gotEnrollmentIDs) != 1 || attendance.gotEnrollmentIDs[0] != "enr-1" {
-		t.Errorf("attendance read for %v, want [enr-1]", attendance.gotEnrollmentIDs)
-	}
-	if attendance.gotFrom != "2026-09-01" || attendance.gotTo != "2026-09-30" {
-		t.Errorf("range = %q..%q, want the from/to passthrough", attendance.gotFrom, attendance.gotTo)
-	}
-	var out struct {
-		Records []map[string]any `json:"records"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(out.Records) != 1 || out.Records[0]["id"] != "att-1" {
-		t.Errorf("records = %v, want att-1", out.Records)
 	}
 }
 

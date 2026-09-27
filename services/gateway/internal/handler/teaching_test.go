@@ -46,6 +46,10 @@ type fakeTeachingConfig struct {
 	// gotPointReads counts GetGroup/GetGradeLevel/GetLevel calls: resolving one
 	// pass list's group must use these, never the whole-catalog lists.
 	gotPointReads int
+	// gotGetSubject counts GetSubject point reads (a save naming its class, T5);
+	// getSubjectErr makes them fail.
+	gotGetSubject int
+	getSubjectErr error
 
 	// assignmentsByGroup answers ListTeachingAssignments when it is asked by
 	// group (teacherID ""), the director's "is this subject taught here" read.
@@ -139,6 +143,19 @@ func (f *fakeTeachingConfig) GetLevel(_ context.Context, id string) (client.Leve
 func (f *fakeTeachingConfig) ListGroups(_ context.Context, _, _ string) ([]client.GroupResult, error) {
 	f.gotListGroups++
 	return f.groups, f.groupsErr
+}
+
+func (f *fakeTeachingConfig) GetSubject(_ context.Context, id string) (client.SubjectResult, error) {
+	f.gotGetSubject++
+	if f.getSubjectErr != nil {
+		return client.SubjectResult{}, f.getSubjectErr
+	}
+	for _, s := range f.subjects {
+		if s.ID == id {
+			return s, nil
+		}
+	}
+	return client.SubjectResult{}, connect.NewError(connect.CodeNotFound, errString("no subject"))
 }
 
 func (f *fakeTeachingConfig) ListSubjects(_ context.Context, _ string) ([]client.SubjectResult, error) {

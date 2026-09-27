@@ -147,6 +147,35 @@ func (r *Repository) TransferEnrollment(ctx context.Context, cmd ports.TransferC
 	})
 }
 
+// ListTransfers returns the moves of one student's enrollments, oldest moved_at
+// first (id breaks ties), in one tenant-bound query joined on enrollments.
+func (r *Repository) ListTransfers(ctx context.Context, studentID string) ([]domain.EnrollmentTransfer, error) {
+	var out []domain.EnrollmentTransfer
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var rows []enrollmentTransferModel
+		if err := tx.Model(&enrollmentTransferModel{}).
+			Joins("JOIN enrollments e ON e.id = enrollment_transfers.enrollment_id").
+			Where("e.student_id = ?", studentID).
+			Order("enrollment_transfers.moved_at ASC, enrollment_transfers.id ASC").
+			Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing transfers", err)
+		}
+		out = make([]domain.EnrollmentTransfer, 0, len(rows))
+		for _, m := range rows {
+			t, err := transferToDomain(m)
+			if err != nil {
+				return glerrors.Wrap(glerrors.KindInternal, "invalid transfer in db", err)
+			}
+			out = append(out, t)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SetEnrollmentStatus updates an enrollment's status (e.g. to withdrawn).
 func (r *Repository) SetEnrollmentStatus(ctx context.Context, id string, status domain.EnrollmentStatus) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {

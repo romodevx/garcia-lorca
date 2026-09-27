@@ -17,9 +17,9 @@ openapi: 3.1.0
 #
 # AUTH. The routes here are the staff panel's, authenticated with a session
 # cookie (Secure, HttpOnly, SameSite=Strict), which is why every state-changing
-# call also carries a CSRF header. The family routes authenticate with a bearer
-# token instead and have no cookie to forge; their scheme is declared when those
-# routes land, because an unused security scheme is dead contract.
+# call also carries a CSRF header. The family routes (/api/v1/family/*)
+# authenticate with a bearer token instead (familyBearer) and have no cookie to
+# forge, so they carry no CSRF header.
 #
 # MODULE FLAG. Every path below sits behind `module_uniforms`. With the flag off
 # the routes answer 404 — not 403 — because a disabled module must be invisible,
@@ -27,7 +27,7 @@ openapi: 3.1.0
 
 info:
   title: García Lorca API
-  version: 0.15.0
+  version: 0.16.0
   license:
     name: Proprietary
     url: https://garcialorca.edu.mx/legal
@@ -75,7 +75,111 @@ tags:
       allowed for today and up to 7 days back, never the future. "Today" is the
       system's UTC date (a known fleet-wide offset: the school is UTC-6).
 
+  - name: family
+    description: >
+      The family app (T5). Bearer-authenticated, `family:read`. Self-scoped by
+      construction: the caller is the principal, and a child the caller is not
+      linked to answers 404 — never 403 — so nothing says whether it exists.
+      Each route is guarded on every module it composes (either flag OFF ⇒ 404).
+
 paths:
+  /api/v1/family/devices:
+    post:
+      tags: [family]
+      summary: Register this phone for push notifications
+      description: >
+        Registers (or refreshes) the Expo push token of the caller's phone. The
+        app calls it on every launch; it is idempotent (upsert by token). The
+        device owner is ALWAYS the caller: a token previously registered by
+        someone else (a phone handed over) moves to the caller, who alone
+        receives on it from then on. Pushes go out only for absences, lates,
+        excused absences and corrections of those. Behind `module_comms` and
+        `module_students`.
+      operationId: registerFamilyDevice
+      security: [{ familyBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FamilyDeviceRequest' }
+      responses:
+        '204': { description: Registered. }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/family/devices/{token}:
+    delete:
+      tags: [family]
+      summary: Stop pushing to this phone (logout)
+      description: >
+        Removes the token only when the caller owns it. Another user's token,
+        or an unknown one, is left alone and answers the same 204: the call is
+        idempotent and reveals nothing. Behind `module_comms` and
+        `module_students`.
+      operationId: unregisterFamilyDevice
+      security: [{ familyBearer: [] }]
+      parameters:
+        - name: token
+          in: path
+          required: true
+          description: The Expo push token, URL-encoded.
+          schema: { $ref: '#/components/schemas/ExpoPushToken' }
+      responses:
+        '204': { description: Removed (or was not the caller's). }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/family/students/{studentId}/attendance:
+    get:
+      tags: [family]
+      summary: A child's attendance, one row per day
+      description: >
+        The child's month, newest first. A day appears when a list was taken
+        for the child's group that day (while the child was in it) or an
+        exception is stored for it; TODAY always appears in the current month
+        (`not_taken` until a list is taken). "While the child was in it" is the
+        group window: the enrollment's school year intersected with its active
+        period (from enrollment, until the day before a withdrawal), split by
+        transfers (the move day belongs to the new group). A `daily` day
+        carries the list's status (`present` when taken with no exception). A
+        `per_class` day lists every class taken that day with the child's
+        status; the day's status follows the day rule (see
+        `FamilyDayStatus`). A day with both a daily list and classes is
+        `per_class`: absent on the daily list is `absent`, otherwise the day
+        rule over every list taken. The summary counts DAYS by that status
+        (`partial` in its own counter). "Today" and the default month
+        are the system's UTC date (the school is UTC-6), consistently with
+        every other date the system shows. Behind `module_attendance` and
+        `module_students`.
+      operationId: getFamilyAttendance
+      security: [{ familyBearer: [] }]
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: month
+          in: query
+          required: false
+          description: >
+            The month to read; defaults to the current UTC month. From 2000-01
+            up to the month after the current one; outside that range is 400.
+          schema: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$', example: '2026-09' }
+      responses:
+        '200':
+          description: The month.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FamilyAttendanceMonth' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
   /api/v1/uniforms/items:
     get:
       tags: [uniforms-catalogue]
@@ -2325,6 +2429,12 @@ components:
       description: |
         The web panel's session. Secure, HttpOnly, SameSite=Strict. Because it is
         a cookie, every state-changing call also requires the CSRF header.
+    familyBearer:
+      type: http
+      scheme: bearer
+      description: |
+        The family app's access token (/api/v1/auth/mobile/*), sent as
+        `Authorization: Bearer <token>`. No cookie, so no CSRF header.
   headers:
     XScanResult:
       description: An attendance scan's verdict, for the screen's sound and colour.
@@ -2433,16 +2543,27 @@ components:
             invalid: { value: Código no válido }
             foreign: { value: Este alumno no pertenece a este grupo }
     AttendanceSaved:
-      description: The list's stored state after the save.
+      description: >-
+        The list's stored state after the save. Counts describe what THIS list
+        stored, never what was submitted: a mark for a pupil whose day·subject
+        another group's list already holds (a transferred pupil, on a day before
+        the move) is not stored, not counted, and listed in heldElsewhere.
       content:
         application/json:
           schema:
             type: object
-            required: [absentCount, markedCount]
+            required: [absentCount, markedCount, heldElsewhere]
             properties:
               absentCount: { type: integer, minimum: 0, description: Stored marks that are absences. }
               markedCount: { type: integer, minimum: 0, description: Exceptions the list holds in total. }
-          example: { absentCount: 1, markedCount: 2 }
+              heldElsewhere:
+                type: array
+                description: >-
+                  Enrollment ids (ascending) whose submitted mark was skipped
+                  because another group's list holds it. Always present; empty
+                  when every mark landed.
+                items: { type: string, format: uuid }
+          example: { absentCount: 1, markedCount: 2, heldElsewhere: ['3f2504e0-4f89-41d3-9a0c-0305e82c3301'] }
     BadRequest:
       description: The request did not satisfy the contract.
       content:
@@ -2505,6 +2626,77 @@ components:
           example: teaching assignment not found
 
   schemas:
+    ExpoPushToken:
+      type: string
+      pattern: '^(ExponentPushToken|ExpoPushToken)\[[A-Za-z0-9_-]{1,200}\]$'
+      example: 'ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]'
+    FamilyDeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [token, platform]
+      properties:
+        token: { $ref: '#/components/schemas/ExpoPushToken' }
+        platform: { type: string, enum: [ios, android] }
+      example: { token: 'ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]', platform: ios }
+    FamilyDayStatus:
+      type: string
+      description: >
+        The day's status over every list taken that day. With no absent list:
+        `late` if any list is late, else `excused` if any is excused, else
+        `present` (present+late → late, late+excused → late, present+excused →
+        excused). Absent in some lists but not all → `partial`. Absent in every
+        list taken → `absent`. `not_taken` is today before any list was taken.
+      enum: [present, absent, late, excused, partial, not_taken]
+    FamilyAttendanceClass:
+      type: object
+      required: [subjectName, status]
+      properties:
+        subjectName: { type: string, example: Matemáticas }
+        status: { $ref: '#/components/schemas/AttendanceStatus' }
+        note: { type: string }
+    FamilyAttendanceDay:
+      type: object
+      required: [date, status, mode, classes]
+      properties:
+        date: { type: string, format: date }
+        status: { $ref: '#/components/schemas/FamilyDayStatus' }
+        mode: { $ref: '#/components/schemas/AttendanceMode' }
+        note: { type: string, description: The daily list's justification. }
+        classes:
+          type: array
+          description: Per-class days only (empty for a daily day).
+          items: { $ref: '#/components/schemas/FamilyAttendanceClass' }
+    FamilyAttendanceMonth:
+      type: object
+      required: [month, today, days, summary]
+      properties:
+        month: { type: string, example: '2026-09' }
+        today: { type: string, format: date }
+        days:
+          type: array
+          items: { $ref: '#/components/schemas/FamilyAttendanceDay' }
+        summary:
+          type: object
+          description: Days per status (not_taken is not counted).
+          required: [present, absent, late, excused, partial]
+          properties:
+            present: { type: integer, minimum: 0 }
+            absent: { type: integer, minimum: 0 }
+            late: { type: integer, minimum: 0 }
+            excused: { type: integer, minimum: 0 }
+            partial: { type: integer, minimum: 0 }
+      example:
+        month: '2026-09'
+        today: '2026-09-17'
+        days:
+          - { date: '2026-09-17', status: not_taken, mode: per_class, classes: [] }
+          - date: '2026-09-16'
+            status: partial
+            mode: per_class
+            classes:
+              - { subjectName: Español, status: present }
+              - { subjectName: Matemáticas, status: absent, note: cita médica }
+        summary: { present: 0, absent: 0, late: 0, excused: 0, partial: 1 }
     AttendanceScanResult:
       type: object
       description: The list row a scanned card resolved to.

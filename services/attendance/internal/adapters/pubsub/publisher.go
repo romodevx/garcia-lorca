@@ -48,14 +48,16 @@ func NewEventPublisher(bus pubsub.Publisher) *EventPublisher {
 // get the narrower AbsenceRecorded below.
 func (p *EventPublisher) PublishAttendanceMarked(ctx context.Context, e service.MarkedEvent) error {
 	return p.publish(ctx, e.TenantID, typeAttendanceMarked, &attendancev1.AttendanceMarked{
-		RecordId:     e.RecordID,
-		EnrollmentId: e.EnrollmentID,
-		StudentId:    e.StudentID,
-		TenantId:     e.TenantID,
-		Date:         e.Date,
-		Status:       e.Status,
-		SubjectId:    e.SubjectID,
-		MarkVersion:  e.MarkVersion,
+		RecordId:       e.RecordID,
+		EnrollmentId:   e.EnrollmentID,
+		StudentId:      e.StudentID,
+		TenantId:       e.TenantID,
+		Date:           e.Date,
+		Status:         e.Status,
+		SubjectId:      e.SubjectID,
+		SubjectName:    e.SubjectName,
+		MarkVersion:    e.MarkVersion,
+		PreviousStatus: e.PreviousStatus,
 	})
 }
 
@@ -64,13 +66,15 @@ func (p *EventPublisher) PublishAttendanceMarked(ctx context.Context, e service.
 // any consumer.
 func (p *EventPublisher) PublishAbsenceRecorded(ctx context.Context, e service.AbsenceEvent) error {
 	return p.publish(ctx, e.TenantID, typeAbsenceRecorded, &attendancev1.AbsenceRecorded{
-		RecordId:     e.RecordID,
-		EnrollmentId: e.EnrollmentID,
-		StudentId:    e.StudentID,
-		TenantId:     e.TenantID,
-		Date:         e.Date,
-		SubjectId:    e.SubjectID,
-		MarkVersion:  e.MarkVersion,
+		RecordId:       e.RecordID,
+		EnrollmentId:   e.EnrollmentID,
+		StudentId:      e.StudentID,
+		TenantId:       e.TenantID,
+		Date:           e.Date,
+		SubjectId:      e.SubjectID,
+		SubjectName:    e.SubjectName,
+		MarkVersion:    e.MarkVersion,
+		PreviousStatus: e.PreviousStatus,
 	})
 }
 

@@ -72,9 +72,11 @@ type GradeEntriesReader interface {
 }
 
 // AttendanceRangeReader reads one enrollment's stored attendance exceptions over
-// a date range.
+// a date range, and which lists were taken for a set of groups (T5: the per-day
+// view tells "present" from "nobody took the list").
 type AttendanceRangeReader interface {
 	ListAttendance(ctx context.Context, enrollmentID, from, to string) ([]client.AttendanceRecord, error)
+	ListSessions(ctx context.Context, groupIDs []string, from, to string) ([]client.TakenList, error)
 }
 
 // FamilyCatalogReader reads the academic catalog the family grades screen needs
@@ -85,6 +87,16 @@ type AttendanceRangeReader interface {
 type FamilyCatalogReader interface {
 	ListSubjects(ctx context.Context, gradeLevelID string) ([]client.SubjectResult, error)
 	ListTerms(ctx context.Context, cycleID, levelID string) ([]client.TermResult, error)
+	// ListCycles bounds the attendance view's group windows to each
+	// enrollment's school year.
+	ListCycles(ctx context.Context) ([]client.CycleResult, error)
+}
+
+// TransferHistoryReader reads a student's group moves. A transfer rewrites the
+// enrollment's group in place, so this is the only record of which group a
+// pupil was in on a past day.
+type TransferHistoryReader interface {
+	ListTransfers(ctx context.Context, studentID string) ([]client.Transfer, error)
 }
 
 // FamilyStudentsReader is the students surface the family handler consumes: the
@@ -93,6 +105,7 @@ type FamilyCatalogReader interface {
 type FamilyStudentsReader interface {
 	GuardianLinkReader
 	StudentProfileReader
+	TransferHistoryReader
 }
 
 // FamilyCommsReader is the comms surface the family handler consumes: reading the
@@ -110,6 +123,16 @@ type FamilyHandler struct {
 	grades     GradeEntriesReader
 	attendance AttendanceRangeReader
 	catalog    FamilyCatalogReader
+	now        func() time.Time
+}
+
+// FamilyOption configures a FamilyHandler (functional options).
+type FamilyOption func(*FamilyHandler)
+
+// WithFamilyClock replaces the wall clock the attendance view's "today" and
+// default month come from (tests pin it).
+func WithFamilyClock(now func() time.Time) FamilyOption {
+	return func(h *FamilyHandler) { h.now = now }
 }
 
 // NewFamilyHandler wires the handler to the students (guardian links + profile),
@@ -117,8 +140,12 @@ type FamilyHandler struct {
 // catalog (config, for grade subject/term names) readers. Any of
 // finance/grades/attendance/catalog may be nil for a handler that only serves
 // the routes that do not use them.
-func NewFamilyHandler(students FamilyStudentsReader, comms FamilyCommsReader, finance AccountReader, grades GradeEntriesReader, attendance AttendanceRangeReader, catalog FamilyCatalogReader) *FamilyHandler {
-	return &FamilyHandler{students: students, comms: comms, finance: finance, grades: grades, attendance: attendance, catalog: catalog}
+func NewFamilyHandler(students FamilyStudentsReader, comms FamilyCommsReader, finance AccountReader, grades GradeEntriesReader, attendance AttendanceRangeReader, catalog FamilyCatalogReader, opts ...FamilyOption) *FamilyHandler {
+	h := &FamilyHandler{students: students, comms: comms, finance: finance, grades: grades, attendance: attendance, catalog: catalog, now: time.Now}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // --- ownership gate --------------------------------------------------------
@@ -515,44 +542,6 @@ func (h *FamilyHandler) catalogNames(ctx context.Context, enrich bool) (subjects
 		}
 	}
 	return subjects, terms
-}
-
-// --- attendance ------------------------------------------------------------
-
-// Attendance handles
-// GET /api/v1/family/students/{studentId}/attendance?from=&to= — the child's
-// stored attendance exceptions over an inclusive date range. Attendance is keyed
-// by enrollment, so the child id is resolved to its enrollment(s) first and the
-// records are aggregated across them.
-func (h *FamilyHandler) Attendance(w http.ResponseWriter, r *http.Request) {
-	p, ok := middleware.PrincipalFrom(r.Context())
-	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	studentID := r.PathValue("studentId")
-	if !h.guardOwnsChild(w, r, p.UserID, studentID) {
-		return
-	}
-	enrollments, err := h.linkedEnrollments(r.Context(), studentID)
-	if err != nil {
-		writeConnectError(w, err)
-		return
-	}
-	q := r.URL.Query()
-	from, to := q.Get("from"), q.Get("to")
-	out := make([]attendanceRecordResponse, 0, len(enrollments))
-	for _, e := range enrollments {
-		records, err := h.attendance.ListAttendance(r.Context(), e.ID, from, to)
-		if err != nil {
-			writeConnectError(w, err)
-			return
-		}
-		for _, rec := range records {
-			out = append(out, toAttendanceRecordResponse(rec))
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"records": out})
 }
 
 // --- shared helpers --------------------------------------------------------

@@ -48,6 +48,12 @@ service CommsService {
   // know what a group or a level is — the gateway owns that question, because it
   // already speaks to config and students.
   rpc Announce(AnnounceRequest) returns (AnnounceResponse);
+
+  // UnregisterDevice removes a push token, but ONLY when it is registered to
+  // user_id (T5: a family logging out of the app). A token registered to anyone
+  // else, or not registered at all, is left untouched and answers the same
+  // empty success, so the call is idempotent and reveals nothing.
+  rpc UnregisterDevice(UnregisterDeviceRequest) returns (UnregisterDeviceResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -100,6 +106,14 @@ message RegisterDeviceRequest {
 message RegisterDeviceResponse {
   Device device = 1;
 }
+
+// UnregisterDeviceRequest names the caller (user_id) and the token to remove.
+message UnregisterDeviceRequest {
+  string user_id = 1;
+  string fcm_token = 2;
+}
+
+message UnregisterDeviceResponse {}
 
 message ListNotificationsRequest {
   string student_id = 1;

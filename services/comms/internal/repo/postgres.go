@@ -220,6 +220,36 @@ func (r *Repo) DevicesForUsers(ctx context.Context, userIDs []string) ([]service
 	return out, nil
 }
 
+// DeactivateDevices removes the devices registered under tokens — the ones the
+// push provider reported as no longer registered — in one tenant-bound DELETE.
+// A row is deleted rather than flagged: a dead token can never receive again,
+// and a reinstalled app registers a NEW token (UpsertDevice) anyway. Unknown
+// tokens, and another tenant's rows (RLS), are untouched.
+func (r *Repo) DeactivateDevices(ctx context.Context, tokens []string) error {
+	if len(tokens) == 0 {
+		return nil
+	}
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := tx.Where("fcm_token IN ?", tokens).Delete(&deviceModel{}).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "deactivating push devices", err)
+		}
+		return nil
+	})
+}
+
+// DeleteUserDevice removes token only when it is registered to userID: the
+// owner predicate is part of the DELETE, so a token re-registered by someone
+// else since (UpsertDevice moves ownership) cannot be removed by its previous
+// owner. No matching row is not an error — logging out twice is fine.
+func (r *Repo) DeleteUserDevice(ctx context.Context, userID, token string) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := tx.Where("user_id = ? AND fcm_token = ?", userID, token).Delete(&deviceModel{}).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "removing push device", err)
+		}
+		return nil
+	})
+}
+
 // translateFindErr maps GORM's "no row" into the shared NotFound sentinel and
 // wraps anything else as internal. A row hidden by RLS is indistinguishable from
 // a missing one here, which is exactly the behaviour tenant isolation wants.

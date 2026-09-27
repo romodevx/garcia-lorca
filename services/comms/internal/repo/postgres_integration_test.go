@@ -664,3 +664,79 @@ func TestListNotificationsIsNewestFirstOverManyRows(t *testing.T) {
 		}
 	}
 }
+
+// T5 fixtures.
+const (
+	userDevicesOwner = "b0000000-0000-0000-0000-000000000101"
+	userDevicesOther = "b0000000-0000-0000-0000-000000000102"
+)
+
+// DeactivateDevices removes the provider's dead tokens and nothing else — and
+// never another tenant's row carrying the same token (RLS).
+func TestDeactivateDevicesRemovesOnlyTheNamedTokens(t *testing.T) {
+	ctx := context.Background()
+	a := appRepo(t, tenantA)
+	for i, tok := range []string{"ExponentPushToken[dead-1]", "ExponentPushToken[dead-2]", "ExponentPushToken[live]"} {
+		_, err := a.UpsertDevice(ctx, service.Device{ID: fmt.Sprintf("d0000000-0000-0000-0000-00000000010%d", i), UserID: userDevicesOwner, FCMToken: tok, Platform: "ios"})
+		if err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	if _, err := appRepo(t, tenantB).UpsertDevice(ctx, service.Device{ID: "d0000000-0000-0000-0000-000000000109", UserID: userDevicesOwner, FCMToken: "ExponentPushToken[dead-1]", Platform: "ios"}); err != nil {
+		t.Fatalf("seed B: %v", err)
+	}
+
+	if err := a.DeactivateDevices(ctx, []string{"ExponentPushToken[dead-1]", "ExponentPushToken[dead-2]", "ExponentPushToken[unknown]"}); err != nil {
+		t.Fatalf("DeactivateDevices: %v", err)
+	}
+	left, err := a.DevicesForUsers(ctx, []string{userDevicesOwner})
+	if err != nil {
+		t.Fatalf("DevicesForUsers: %v", err)
+	}
+	if len(left) != 1 || left[0].FCMToken != "ExponentPushToken[live]" {
+		t.Errorf("devices left = %+v, want only the live token", left)
+	}
+	if n := countRows(t, tenantB, "devices", "fcm_token = ?", "ExponentPushToken[dead-1]"); n != 1 {
+		t.Errorf("tenant B's row with the same token was touched (rows = %d)", n)
+	}
+	if err := a.DeactivateDevices(ctx, nil); err != nil {
+		t.Errorf("DeactivateDevices(nil): %v", err)
+	}
+}
+
+// DeleteUserDevice removes a token only for its owner; after a re-registration
+// moved the token to another user, the previous owner can no longer delete it.
+func TestDeleteUserDeviceIsOwnerOnly(t *testing.T) {
+	ctx := context.Background()
+	a := appRepo(t, tenantA)
+	const token = "ExponentPushToken[shared-phone]"
+	if _, err := a.UpsertDevice(ctx, service.Device{ID: "d0000000-0000-0000-0000-000000000111", UserID: userDevicesOwner, FCMToken: token, Platform: "android"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// The phone is handed to another parent, who logs in and registers it.
+	if _, err := a.UpsertDevice(ctx, service.Device{ID: "d0000000-0000-0000-0000-000000000112", UserID: userDevicesOther, FCMToken: token, Platform: "android"}); err != nil {
+		t.Fatalf("re-register: %v", err)
+	}
+	prev, err := a.DevicesForUsers(ctx, []string{userDevicesOwner})
+	if err != nil {
+		t.Fatalf("DevicesForUsers: %v", err)
+	}
+	for _, d := range prev {
+		if d.FCMToken == token {
+			t.Fatalf("the previous owner still receives the re-registered phone's pushes")
+		}
+	}
+
+	if err := a.DeleteUserDevice(ctx, userDevicesOwner, token); err != nil {
+		t.Fatalf("DeleteUserDevice(previous owner): %v", err)
+	}
+	if n := countRows(t, tenantA, "devices", "fcm_token = ?", token); n != 1 {
+		t.Fatalf("the previous owner deleted the new owner's device (rows = %d)", n)
+	}
+	if err := a.DeleteUserDevice(ctx, userDevicesOther, token); err != nil {
+		t.Fatalf("DeleteUserDevice(owner): %v", err)
+	}
+	if n := countRows(t, tenantA, "devices", "fcm_token = ?", token); n != 0 {
+		t.Errorf("rows = %d after the owner logged out, want 0", n)
+	}
+}

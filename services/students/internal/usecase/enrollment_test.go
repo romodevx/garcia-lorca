@@ -30,6 +30,7 @@ type fakeEnrollRepo struct {
 	lastTransfer ports.TransferCommand
 	createErr    error
 	createSeen   []domain.Enrollment
+	history      map[string][]domain.EnrollmentTransfer // by student id
 }
 
 // CreateEnrollmentInFirstFreeGroup models what the transaction does: it counts
@@ -62,6 +63,10 @@ func (r *fakeEnrollRepo) CreateEnrollmentInFirstFreeGroup(
 		return g, nil
 	}
 	return ports.GroupSeats{}, glerrors.New(glerrors.KindConflict, "no quedan lugares")
+}
+
+func (r *fakeEnrollRepo) ListTransfers(_ context.Context, studentID string) ([]domain.EnrollmentTransfer, error) {
+	return r.history[studentID], nil
 }
 
 func newEnrollRepo() *fakeEnrollRepo {

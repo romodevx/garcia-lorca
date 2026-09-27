@@ -1,5 +1,5 @@
 import { type ReactElement } from "react";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { useTheme } from "../theme";
 import { Button, EmptyState } from "../ui";
 import type { IconName } from "../icons";
@@ -38,7 +38,28 @@ export function AsyncErrorState({ title, subtitle, onRetry, icon = "alert" }: As
   );
 }
 
+/**
+ * A background reload failed but the last good data is still on screen: say so
+ * inline instead of replacing the content with a full-screen error.
+ */
+export function StaleNotice(): ReactElement {
+  const theme = useTheme();
+  return (
+    <View
+      style={[styles.notice, { backgroundColor: theme.colors.orangeSoft }]}
+      accessibilityLiveRegion="polite"
+      accessibilityRole="alert"
+    >
+      <Text style={[styles.noticeText, { color: theme.colors.tintOrangeInk, fontFamily: theme.fonts.uiSemi }]}>
+        No pudimos actualizar. Desliza para reintentar.
+      </Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  notice: { borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, marginTop: 12 },
+  noticeText: { fontSize: 14, fontWeight: "600" },
   centered: { alignItems: "center" },
   retry: { width: "auto", paddingHorizontal: 22, marginTop: -8 },
 });

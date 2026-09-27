@@ -72,6 +72,17 @@ func (c *CommsClient) RegisterDevice(ctx context.Context, userID, fcmToken, plat
 	return toDevice(res.Msg.GetDevice()), nil
 }
 
+// UnregisterDevice removes a push token, but only when it is registered to
+// userID (a family logging out). Anyone else's token is left alone and the call
+// still succeeds.
+func (c *CommsClient) UnregisterDevice(ctx context.Context, userID, token string) error {
+	_, err := c.rpc.UnregisterDevice(ctx, connect.NewRequest(&commsv1.UnregisterDeviceRequest{
+		UserId:   userID,
+		FcmToken: token,
+	}))
+	return err
+}
+
 // ListNotifications returns the notifications materialised for one student,
 // newest first. With unreadOnly, only notifications that have not been read yet
 // come back.

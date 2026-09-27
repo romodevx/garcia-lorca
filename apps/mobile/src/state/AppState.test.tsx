@@ -1,9 +1,10 @@
-import { screen, waitFor } from "@testing-library/react-native";
+import { act, screen, waitFor } from "@testing-library/react-native";
 import { type ReactElement } from "react";
 import { Text } from "react-native";
 import { clearTokens, saveTokens } from "../api";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { useAppState } from "./AppState";
+import { requestFreshData } from "./freshness";
 
 /** Surfaces the notifications slice as plain text for assertions. */
 function NotificationsProbe(): ReactElement {
@@ -133,5 +134,27 @@ describe("AppState child slice", () => {
 
     await waitFor(() => expect(text("childError")).toBe("true"));
     expect(text("selected")).toBe("none");
+  });
+});
+
+describe("AppState freshness", () => {
+  afterEach(async () => {
+    await clearTokens();
+  });
+
+  it("refetches the inbox when fresh data is requested (foreground / attendance push)", async () => {
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+    const fetchMock = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ notifications: [], students: [] }) }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await renderWithProviders(<NotificationsProbe />);
+    await waitFor(() => expect(screen.getByTestId("loading").props.children).toBe("false"));
+    const inboxCalls = (): number =>
+      fetchMock.mock.calls.filter((c) => String((c as unknown[])[0]).endsWith("/family/notifications")).length;
+    const before = inboxCalls();
+
+    await act(async () => requestFreshData());
+
+    expect(inboxCalls()).toBe(before + 1);
   });
 });

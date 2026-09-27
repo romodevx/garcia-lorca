@@ -118,6 +118,18 @@ async function submitLogin(user: ReturnType<typeof userEvent.setup>): Promise<vo
   await user.click(screen.getByRole("button", { name: "Entrar al sistema" }));
 }
 
+// Fake timers WITHOUT shouldAdvanceTime: wall-clock time must never reach the
+// fake clock. Testing Library only drives fake timers through a global `jest`;
+// this shim hands it vitest's, so findBy/waitFor still resolve.
+function useFakeClock(): void {
+  vi.useFakeTimers();
+  Object.assign(globalThis, { jest: { advanceTimersByTime: (ms: number) => vi.advanceTimersByTime(ms) } });
+}
+function useRealClock(): void {
+  Reflect.deleteProperty(globalThis, "jest");
+  vi.useRealTimers();
+}
+
 describe("AppShell navigation flow", () => {
   it("goes login → dashboard → finance → back, then logs out", async () => {
     mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: false });
@@ -349,8 +361,8 @@ describe("AppShell — la sesión no se cierra por inactividad", () => {
   it("leaves a panel nobody touched for two hours signed in", async () => {
     // Fake timers BEFORE the render: the keep-alive interval is created on
     // mount, and one created under real timers would never see the clock move.
-    // shouldAdvanceTime keeps the session probe's promises resolving.
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // The shim lets Testing Library drive the fake timers; no wall-clock leaks in.
+    useFakeClock();
     try {
       mockMe.mockResolvedValueOnce({ userId: "u1", email: "owner@example.com", permissions: [] });
       render(
@@ -363,7 +375,7 @@ describe("AppShell — la sesión no se cierra por inactividad", () => {
 
       await act(async () => { vi.advanceTimersByTime(2 * 60 * 60 * 1000); });
     } finally {
-      vi.useRealTimers();
+      useRealClock();
     }
 
     expect(mockLogout).not.toHaveBeenCalled();

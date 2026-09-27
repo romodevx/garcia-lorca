@@ -4,6 +4,8 @@ import { ActivityIndicator, View } from "react-native";
 import { Providers } from "@/src/Providers";
 import { useSessionLostRedirect } from "@/src/boot/useSessionLostRedirect";
 import { useTokenBootstrap } from "@/src/boot/useTokenBootstrap";
+import { usePushNotifications } from "@/src/push/usePushNotifications";
+import { useForegroundRefresh } from "@/src/state/freshness";
 import { useAppFonts } from "@/src/theme/useAppFonts";
 
 /** Full-screen splash shown while a boot dependency (fonts, tokens) settles. */
@@ -29,6 +31,10 @@ function RootNavigator(): ReactNode {
   // Runs inside the provider + router context: on a dead session it forces the
   // user back to Login instead of leaving a zombie signed-in state (bug_007).
   useSessionLostRedirect();
+  // Attendance freshness: reload on returning to the foreground, register for
+  // attendance pushes, and open Asistencia when one is tapped.
+  useForegroundRefresh();
+  usePushNotifications();
   if (!fontsReady) {
     return <BootSplash />;
   }

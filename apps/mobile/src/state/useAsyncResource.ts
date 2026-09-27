@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ApiError } from "../api/errors";
 
 /**
  * The state of one asynchronously-loaded resource: its data (null until loaded),
@@ -9,6 +10,8 @@ export interface AsyncResource<T> {
   data: T | null;
   loading: boolean;
   error: boolean;
+  /** HTTP status of the last failure when the server answered (404 = not yours), else null. */
+  errorStatus: number | null;
   reload: () => Promise<void>;
 }
 
@@ -19,6 +22,10 @@ export interface AsyncResource<T> {
  * the notifications slice uses. When `load` becomes a function, the resource
  * (re)loads.
  *
+ * A new `load` is a new identity (another child, another month): the previous
+ * data is cleared at once, so one child's record is never shown under another
+ * child's header. A manual reload keeps the data on screen while it refreshes.
+ *
  * Callers MUST memoize `load` (useMemo/useCallback keyed on its inputs) so the
  * effect re-runs only when the inputs actually change.
  */
@@ -26,6 +33,7 @@ export function useAsyncResource<T>(load: (() => Promise<T>) | null): AsyncResou
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState<boolean>(load !== null);
   const [error, setError] = useState(false);
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
 
   // Monotonic generation shared by the effect and the manual reload. Every new
   // load (a childId switch, a logout, a retry) and every effect cleanup advances
@@ -41,18 +49,21 @@ export function useAsyncResource<T>(load: (() => Promise<T>) | null): AsyncResou
       setData(null);
       setLoading(false);
       setError(false);
+      setErrorStatus(null);
       return;
     }
     setLoading(true);
     setError(false);
+    setErrorStatus(null);
     try {
       const result = await load();
       if (isCurrent()) {
         setData(result);
       }
-    } catch {
+    } catch (failure) {
       if (isCurrent()) {
         setError(true);
+        setErrorStatus(failure instanceof ApiError ? failure.status : null);
       }
     } finally {
       if (isCurrent()) {
@@ -62,6 +73,7 @@ export function useAsyncResource<T>(load: (() => Promise<T>) | null): AsyncResou
   }, [load]);
 
   useEffect(() => {
+    setData(null);
     void reload();
     // Cancel the in-flight load on cleanup (load changed / unmount) so its late
     // response is discarded rather than applied over the next load's state.
@@ -70,5 +82,5 @@ export function useAsyncResource<T>(load: (() => Promise<T>) | null): AsyncResou
     };
   }, [reload]);
 
-  return { data, loading, error, reload };
+  return { data, loading, error, errorStatus, reload };
 }

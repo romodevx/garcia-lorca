@@ -91,6 +91,11 @@ service StudentsService {
   // cycle, recording a dated, reasoned transfer. Returns the updated enrollment.
   rpc TransferStudent(TransferStudentRequest) returns (TransferStudentResponse);
 
+  // ListTransfers returns the group moves of a student's enrollments, oldest
+  // first. A transfer rewrites the enrollment's group_id in place, so this
+  // history is the only record of which group a pupil was in on a past day.
+  rpc ListTransfers(ListTransfersRequest) returns (ListTransfersResponse);
+
   // WithdrawEnrollment marks an enrollment as withdrawn. Returns the updated
   // enrollment.
   rpc WithdrawEnrollment(WithdrawEnrollmentRequest) returns (WithdrawEnrollmentResponse);
@@ -436,6 +441,9 @@ message Enrollment {
   string term_id = 6;   // optional
   EnrollmentStatus status = 7;
   google.protobuf.Timestamp enrolled_at = 8;
+  // ended_at is when the enrollment stopped being active (withdrawn or
+  // transferred): its status-change instant. Unset while ACTIVE.
+  google.protobuf.Timestamp ended_at = 9;
 }
 
 // EnrollmentTransfer is a dated, reasoned record of a move between groups.
@@ -476,6 +484,14 @@ message ListEnrollmentsRequest {
 
 message ListEnrollmentsResponse {
   repeated Enrollment enrollments = 1;
+}
+
+message ListTransfersRequest {
+  string student_id = 1;  // required
+}
+
+message ListTransfersResponse {
+  repeated EnrollmentTransfer transfers = 1;  // oldest moved_at first
 }
 
 message TransferStudentRequest {

@@ -128,3 +128,52 @@ func TestPublishPropagatesTransportFailure(t *testing.T) {
 		t.Errorf("err = %v, want it to wrap %v", err, wantErr)
 	}
 }
+
+// T5: the list label reaches both events' payloads.
+func TestPublishCarriesTheSubjectName(t *testing.T) {
+	bus := &fakeBus{}
+	pub := pubsubadapter.NewEventPublisher(bus)
+	ctx := context.Background()
+	if err := pub.PublishAttendanceMarked(ctx, service.MarkedEvent{RecordID: "r", SubjectName: "Matemáticas"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := pub.PublishAbsenceRecorded(ctx, service.AbsenceEvent{RecordID: "r", SubjectName: "Historia"}); err != nil {
+		t.Fatal(err)
+	}
+	var marked attendancev1.AttendanceMarked
+	if err := proto.Unmarshal(bus.msgs[0].Data, &marked); err != nil {
+		t.Fatal(err)
+	}
+	var absence attendancev1.AbsenceRecorded
+	if err := proto.Unmarshal(bus.msgs[1].Data, &absence); err != nil {
+		t.Fatal(err)
+	}
+	if marked.GetSubjectName() != "Matemáticas" || absence.GetSubjectName() != "Historia" {
+		t.Errorf("subject names = %q, %q", marked.GetSubjectName(), absence.GetSubjectName())
+	}
+}
+
+// Review #9: the replaced status reaches both events, so comms can render a
+// change between two exceptions as a correction.
+func TestPublishCarriesThePreviousStatus(t *testing.T) {
+	bus := &fakeBus{}
+	pub := pubsubadapter.NewEventPublisher(bus)
+	ctx := context.Background()
+	if err := pub.PublishAttendanceMarked(ctx, service.MarkedEvent{RecordID: "r", Status: "late", PreviousStatus: "absent"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := pub.PublishAbsenceRecorded(ctx, service.AbsenceEvent{RecordID: "r", PreviousStatus: "excused"}); err != nil {
+		t.Fatal(err)
+	}
+	var marked attendancev1.AttendanceMarked
+	if err := proto.Unmarshal(bus.msgs[0].Data, &marked); err != nil {
+		t.Fatal(err)
+	}
+	var absence attendancev1.AbsenceRecorded
+	if err := proto.Unmarshal(bus.msgs[1].Data, &absence); err != nil {
+		t.Fatal(err)
+	}
+	if marked.GetPreviousStatus() != "absent" || absence.GetPreviousStatus() != "excused" {
+		t.Errorf("previous statuses = %q, %q", marked.GetPreviousStatus(), absence.GetPreviousStatus())
+	}
+}

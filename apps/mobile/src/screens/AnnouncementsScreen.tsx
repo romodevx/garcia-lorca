@@ -2,6 +2,7 @@ import { router } from "expo-router";
 import { type ReactElement } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { FamilyNotification } from "../api";
+import { useRefreshHandler } from "../components/refresh";
 import { useAppState } from "../state/AppState";
 import { useTheme } from "../theme";
 import { Card, EmptyState, ScreenTitle, TintIcon } from "../ui";
@@ -31,6 +32,7 @@ export function AnnouncementsScreen(): ReactElement {
     markRead,
     markAllRead,
   } = useAppState();
+  useRefreshHandler(refreshNotifications);
 
   const open = (id: string): void => {
     markRead(id);

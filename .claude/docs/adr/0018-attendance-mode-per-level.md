@@ -54,3 +54,18 @@ new record ids, so each correction re-notified the parents.
 - `ListAttendance` (and so the family attendance view) can now return several
   records for one day in a per-class school. `subject_id` tells them apart. T5
   renders them.
+- A mark belongs to the list (group) that stored it (migration
+  `attendance/0004`, `attendance.group_id`). A list never shows, clears,
+  updates nor re-marks a pupil·day·subject another group's list holds (a
+  transferred pupil, on a day before the move). A save skips such marks and
+  says so: `SaveDailyAttendanceResponse.held_elsewhere` (gateway:
+  `heldElsewhere`) lists the skipped enrollment ids, and `absentCount` /
+  `markedCount` count only what this list stored, never what was submitted.
+- **Known limitation — legacy marks.** A mark stored before `attendance/0004`
+  has `group_id NULL` and is claimed by ANY list of its day: every such list
+  reads it as its own and may correct or clear it (the correction stamps the
+  correcting list's group). No backfill was written because those rows exist
+  only in local dev databases today; a shared environment migrated before its
+  first attendance save has none. If legacy rows ever reach a shared database,
+  backfill `group_id` from the enrollment's group at mark time before relying
+  on the ownership rule.

@@ -2,10 +2,19 @@ import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { router } from "expo-router";
 import { clearTokens, saveTokens } from "../api";
 import { HomeScreen } from "./HomeScreen";
+
+const mockDeviceMonth = jest.fn<string, []>();
+jest.mock("./attendanceView", () => {
+  const actual = jest.requireActual("./attendanceView");
+  return { ...actual, deviceMonth: () => mockDeviceMonth() || actual.deviceMonth() };
+});
 import { renderWithProviders } from "../test/renderWithProviders";
 
 describe("HomeScreen summary cards", () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockDeviceMonth.mockReturnValue("");
+  });
   afterEach(async () => {
     await clearTokens();
   });
@@ -53,5 +62,52 @@ describe("HomeScreen summary cards", () => {
     expect(screen.queryByLabelText("Próximo evento")).toBeNull();
     expect(screen.queryByText("Suspensión de clases")).toBeNull();
     expect(screen.queryByText("Festival de Primavera")).toBeNull();
+  });
+
+  it("shows today's attendance from the school's monthly read", async () => {
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+    const kid = { id: "s1", firstName: "Mateo", lastName: "Herrera", level: "Primaria", levelId: "l1", gradeGroup: "3° A" };
+    globalThis.fetch = jest.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/family/students/s1/attendance?month=")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            month: "2026-09",
+            today: "2026-09-28",
+            days: [{ date: "2026-09-28", status: "absent", mode: "daily", classes: [] }],
+            summary: { present: 0, absent: 1, late: 0, excused: 0, partial: 0 },
+          }),
+        };
+      }
+      if (u.endsWith("/family/students")) return { ok: true, status: 200, json: async () => ({ students: [kid] }) };
+      return { ok: true, status: 200, json: async () => ({ notifications: [], charges: [], payments: [] }) };
+    }) as unknown as typeof fetch;
+
+    await renderWithProviders(<HomeScreen />);
+
+    await waitFor(() => expect(screen.getByText("Faltó")).toBeTruthy());
+  });
+
+  it("reads today from the school's month even when the phone clock is a month behind", async () => {
+    mockDeviceMonth.mockReturnValue("2026-08");
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+    const kid = { id: "s1", firstName: "Mateo", lastName: "Herrera", level: "Primaria", levelId: "l1", gradeGroup: "3° A" };
+    globalThis.fetch = jest.fn(async (url: string) => {
+      const u = String(url);
+      const match = /attendance\?month=(\d{4}-\d{2})/.exec(u);
+      if (match) {
+        const days = match[1] === "2026-09" ? [{ date: "2026-09-28", status: "absent", mode: "daily", classes: [] }] : [];
+        return { ok: true, status: 200, json: async () => ({ month: match[1], today: "2026-09-28", days, summary: {} }) };
+      }
+      if (u.endsWith("/family/students")) return { ok: true, status: 200, json: async () => ({ students: [kid] }) };
+      return { ok: true, status: 200, json: async () => ({ notifications: [], charges: [], payments: [] }) };
+    }) as unknown as typeof fetch;
+
+    await renderWithProviders(<HomeScreen />);
+
+    await waitFor(() => expect(screen.getByText("Faltó")).toBeTruthy());
+    expect(screen.queryByText("Lista aún no tomada")).toBeNull();
   });
 });

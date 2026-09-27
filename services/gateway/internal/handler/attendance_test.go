@@ -143,9 +143,19 @@ func TestAttendanceSaveDaily(t *testing.T) {
 			}
 			assert.Equal(t, "usr-dir", att.gotSave.TakenBy)
 			assert.Equal(t, "Dirección", att.gotSave.TakenByName)
-			assert.JSONEq(t, `{"absentCount":2,"markedCount":3}`, rec.Body.String())
+			assert.JSONEq(t, `{"absentCount":2,"markedCount":3,"heldElsewhere":[]}`, rec.Body.String())
 		})
 	}
+}
+
+// Marks another group's list holds were not stored: the response names them so
+// the taker learns which marks did not land.
+func TestAttendanceSaveDailyReportsHeldElsewhere(t *testing.T) {
+	att := &fakeAttendance{fakeTeachingAttendance: fakeTeachingAttendance{saveAbsent: 0, saveMarked: 1, saveHeld: []string{"enr-1"}}}
+	rec := httptest.NewRecorder()
+	newDirectorAttendance(att).SaveDaily(rec, directorReq(http.MethodPost, "/api/v1/attendance", `{"groupId":"grp-prim","date":"2026-02-02","marks":[]}`))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.JSONEq(t, `{"absentCount":0,"markedCount":1,"heldElsewhere":["enr-1"]}`, rec.Body.String())
 }
 
 func TestAttendanceSaveDailyForwardsMarks(t *testing.T) {
