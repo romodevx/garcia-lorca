@@ -1,6 +1,6 @@
 import { reportCardLabel, reportCardTitle, versionBadge } from "./reportCardView";
 
-const card = { id: "rc2", termId: "t2", termName: "2.º trimestre", cycleName: "2026-2027", version: 2, issuedAt: "2027-03-20", generalAverage: 8.75, hasGrades: true };
+const card = { id: "rc2", termId: "t2", termName: "2.º trimestre", termOrdinal: 2, cycleName: "2026-2027", version: 2, issuedAt: "2027-03-20", generalAverage: 8.75, hasGrades: true };
 
 describe("reportCardView", () => {
   it("titles a boleta with its term and cycle, or the term alone", () => {

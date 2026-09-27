@@ -14,7 +14,9 @@ export interface ReportCardSummary {
   id: string;
   termId: string;
   termName: string;
-  /** Empty when the server does not send it (the family list omits it today). */
+  /** The term's order in its cycle (1, 2, 3…); 0 for a card issued before terms carried one. */
+  termOrdinal: number;
+  /** The cycle's name ("2026-2027"); empty only when the server omits it. */
   cycleName: string;
   version: number;
   /** RFC 3339, or null when not stamped. */
@@ -27,6 +29,8 @@ export interface ReportCardSummary {
 
 /** One subject row of a boleta: its grade per month ("YYYY-MM") and the term average. */
 export interface ReportCardLine {
+  /** Stable subject id; empty only when the server omits it. */
+  subjectId: string;
   subjectName: string;
   months: Record<string, number>;
   average: number | null;
@@ -37,6 +41,8 @@ export interface ReportCard {
   version: number;
   issuedAt: string | null;
   termName: string;
+  /** See {@link ReportCardSummary.termOrdinal}. */
+  termOrdinal: number;
   cycleName: string;
   /** The term's months, oldest first. */
   months: string[];
@@ -54,6 +60,7 @@ interface WireSummary {
   id?: string;
   termId?: string;
   termName?: string;
+  termOrdinal?: number;
   cycleName?: string;
   version?: number;
   issuedAt?: string | null;
@@ -62,6 +69,7 @@ interface WireSummary {
 }
 
 interface WireLine {
+  subjectId?: string;
   subjectName?: string;
   months?: Record<string, WireNumber> | null;
   average?: WireNumber;
@@ -72,6 +80,7 @@ interface WireReportCard {
   version?: number;
   issuedAt?: string | null;
   termName?: string;
+  termOrdinal?: number;
   cycleName?: string;
   months?: string[] | null;
   lines?: WireLine[] | null;
@@ -81,6 +90,8 @@ interface WireReportCard {
 }
 
 const FIRST_VERSION = 1;
+/** A card issued before terms carried an ordinal. */
+const NO_ORDINAL = 0;
 
 function toNumber(value: WireNumber): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -121,6 +132,7 @@ export async function listReportCards(studentId: string): Promise<ReportCardSumm
     id: c.id ?? "",
     termId: c.termId ?? "",
     termName: c.termName ?? "",
+    termOrdinal: c.termOrdinal ?? NO_ORDINAL,
     cycleName: c.cycleName ?? "",
     version: c.version ?? FIRST_VERSION,
     issuedAt: c.issuedAt ?? null,
@@ -141,9 +153,11 @@ export async function getReportCard(studentId: string, reportCardId: string): Pr
     version: data.version ?? FIRST_VERSION,
     issuedAt: data.issuedAt ?? null,
     termName: data.termName ?? "",
+    termOrdinal: data.termOrdinal ?? NO_ORDINAL,
     cycleName: data.cycleName ?? "",
     months: data.months ?? [],
     lines: (data.lines ?? []).map((l) => ({
+      subjectId: l.subjectId ?? "",
       subjectName: l.subjectName ?? "",
       months: toMonthValues(l.months),
       average: toNumber(l.average),

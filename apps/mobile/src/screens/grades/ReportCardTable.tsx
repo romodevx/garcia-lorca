@@ -20,6 +20,11 @@ export function lineLabel(line: ReportCardLine, months: string[], card: Pick<Rep
   return `${line.subjectName}: ${[...perMonth, average].join(", ")}${failed}`;
 }
 
+/** A row's React key: the subject id, or its position and name when the server sent none. */
+export function lineKey(line: ReportCardLine, index: number): string {
+  return line.subjectId || `${index}-${line.subjectName}`;
+}
+
 /**
  * The boleta as a table: one row per subject, one column per month, then the
  * term average. A failing average says "Reprobada" in words under the number.
@@ -42,12 +47,12 @@ export function ReportCardTable({ card }: { card: ReportCard }): ReactElement {
           ))}
           <Text style={[head, styles.valueCol]}>Prom.</Text>
         </View>
-        {card.lines.map((line) => {
+        {card.lines.map((line, index) => {
           const failed = line.average !== null && isFailing(line.average, card.scale);
           const cell = [styles.cell, styles.valueCol, { color: theme.colors.text, fontFamily: theme.fonts.uiSemi }];
           return (
             <View
-              key={line.subjectName}
+              key={lineKey(line, index)}
               accessible
               accessibilityLabel={lineLabel(line, card.months, card)}
               style={[styles.row, { borderTopColor: theme.colors.line, borderTopWidth: StyleSheet.hairlineWidth }]}
