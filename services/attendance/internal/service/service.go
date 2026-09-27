@@ -137,10 +137,25 @@ type RecordUpdate struct {
 
 // ListChanges is what a save does to a list: exceptions to insert, stored ones
 // to update in place, and stored ones cleared back to present (deleted).
+//
+// HeldElsewhere is filled by the repository only: the enrollment ids whose
+// planned mark was NOT stored because another group's list holds that
+// pupil·day·subject (see the repository's ownership rule, attendance/0004).
 type ListChanges struct {
-	Inserts []AttendanceRecord
-	Updates []RecordUpdate
-	Deletes []AttendanceRecord
+	Inserts       []AttendanceRecord
+	Updates       []RecordUpdate
+	Deletes       []AttendanceRecord
+	HeldElsewhere []string
+}
+
+// SaveResult summarizes the list AFTER a save, from what was stored rather
+// than what was submitted: AbsentCount stored marks are absences, MarkedCount
+// exceptions are stored for this list, and HeldElsewhere (ascending) are the
+// submitted enrollments skipped because another group's list holds their mark.
+type SaveResult struct {
+	AbsentCount   int
+	MarkedCount   int
+	HeldElsewhere []string
 }
 
 // PlanFunc turns a list's CURRENT stored marks (keyed by enrollment id) into the
@@ -370,51 +385,78 @@ func (s *AttendanceService) GetDailyRoster(ctx context.Context, groupID, dateStr
 // explicitly marked statusPresent — ends the call present. A correction changes
 // the stored rows IN PLACE (their ids survive) and publishes events only for
 // what changed (see DiffList), so re-saving never re-notifies the parents. The
-// list's session is recorded for the taker. It returns how many stored marks are
-// absences and how many exceptions the list holds. The batch is validated before
-// anything is written, so a rejected save leaves the list untouched.
-func (s *AttendanceService) SaveDailyAttendance(ctx context.Context, req SaveRequest) (absentCount, markedCount int, err error) {
+// list's session is recorded for the taker. The result is counted from what the
+// reconcile STORED (see SaveResult): a submitted mark the repository skipped
+// because another group's list holds it is reported in HeldElsewhere, never
+// counted. The batch is validated before anything is written, so a rejected
+// save leaves the list untouched.
+//
+// Known limitation: a mark stored before attendance/0004 has no group
+// (group_id NULL) and is treated as this list's own, so any list of its day
+// may read, correct or clear it (ADR 0018). Such legacy rows exist only in
+// local dev databases today.
+func (s *AttendanceService) SaveDailyAttendance(ctx context.Context, req SaveRequest) (SaveResult, error) {
 	// Cheap pure checks before the network round trip (see GetDailyRoster).
 	key, err := parseListKey(req.GroupID, req.Date, req.SubjectID)
 	if err != nil {
-		return 0, 0, err
+		return SaveResult{}, err
 	}
 	taker, err := parseTaker(req.TakenBy, req.TakenByName)
 	if err != nil {
-		return 0, 0, err
+		return SaveResult{}, err
 	}
 	label, err := parseSubjectName(key.SubjectID, req.SubjectName)
 	if err != nil {
-		return 0, 0, err
+		return SaveResult{}, err
 	}
 	if err := s.requireGroup(ctx, req.GroupID); err != nil {
-		return 0, 0, err
+		return SaveResult{}, err
 	}
 	enrollmentIDs, studentByEnrollment, err := s.activeRoster(ctx, req.GroupID)
 	if err != nil {
-		return 0, 0, err
+		return SaveResult{}, err
 	}
 
 	desired, err := s.recordsFor(req.Marks, studentByEnrollment, key)
 	if err != nil {
-		return 0, 0, err
+		return SaveResult{}, err
 	}
 
 	changes, err := s.repo.ReconcileList(ctx, key, enrollmentIDs, taker, func(current map[string]AttendanceRecord) (ListChanges, error) {
 		return DiffList(current, desired), nil
 	})
 	if err != nil {
-		return 0, 0, err
+		return SaveResult{}, err
 	}
 
 	s.publishChanges(ctx, changes, eventContext{students: studentByEnrollment, subjectName: label})
+	return summarizeStored(desired, changes.HeldElsewhere), nil
+}
 
+// summarizeStored counts the list's stored state after a reconcile. desired is
+// the complete set of exceptions the save asked for; every one of them ends
+// stored (inserted, updated or already identical) EXCEPT those held by another
+// group's list, so the stored state is desired minus held.
+func summarizeStored(desired []AttendanceRecord, held []string) SaveResult {
+	skipped := make(map[string]bool, len(held))
+	for _, id := range held {
+		skipped[id] = true
+	}
+	var out SaveResult
 	for _, rec := range desired {
+		if skipped[rec.EnrollmentID] {
+			continue
+		}
+		out.MarkedCount++
 		if rec.Status == statusAbsent {
-			absentCount++
+			out.AbsentCount++
 		}
 	}
-	return absentCount, len(desired), nil
+	if len(held) > 0 {
+		out.HeldElsewhere = append([]string(nil), held...)
+		sort.Strings(out.HeldElsewhere)
+	}
+	return out
 }
 
 // DiffList computes what a save does to a list. current is the list's stored

@@ -55,6 +55,7 @@ func TestAnotherGroupsListNeverTouchesAStoredMark(t *testing.T) {
 	overwritten := saveList(t, r, listB, scope, testTaker, subjectMark("a0000000-0000-0000-0000-000000001402", enrollmentMoved, monday, "", "late"))
 	assert.Empty(t, overwritten.Inserts, "a pupil·day held by A is not re-marked from B")
 	assert.Empty(t, overwritten.Updates)
+	assert.Equal(t, []string{enrollmentMoved}, overwritten.HeldElsewhere, "the skipped mark is reported, so the save's counts exclude it")
 
 	marksA, err := r.MarksForList(ctx, scope, listA)
 	require.NoError(t, err)

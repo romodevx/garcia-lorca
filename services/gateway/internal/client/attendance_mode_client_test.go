@@ -90,7 +90,7 @@ func (s *stubAttendance) GetDailyRoster(_ context.Context, req *connect.Request[
 
 func (s *stubAttendance) SaveDailyAttendance(_ context.Context, req *connect.Request[attendancev1.SaveDailyAttendanceRequest]) (*connect.Response[attendancev1.SaveDailyAttendanceResponse], error) {
 	s.gotSave = req.Msg
-	return connect.NewResponse(&attendancev1.SaveDailyAttendanceResponse{AbsentCount: 1, MarkedCount: 2}), nil
+	return connect.NewResponse(&attendancev1.SaveDailyAttendanceResponse{AbsentCount: 1, MarkedCount: 2, HeldElsewhere: []string{"enr-9"}}), nil
 }
 
 func (s *stubAttendance) ListAttendance(context.Context, *connect.Request[attendancev1.ListAttendanceRequest]) (*connect.Response[attendancev1.ListAttendanceResponse], error) {
@@ -131,13 +131,12 @@ func TestAttendanceClientListRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, untaken.Session)
 
-	absent, marked, err := c.SaveDailyAttendance(ctx, client.SaveAttendanceInput{
+	saved, err := c.SaveDailyAttendance(ctx, client.SaveAttendanceInput{
 		GroupID: "grp-1", Date: "2026-09-15", SubjectID: "sub-1", TakenBy: "usr-1", TakenByName: "Gabriela",
 		Marks: []client.Mark{{EnrollmentID: "enr-1", Status: "absent", Note: "gripa"}},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, int32(1), absent)
-	assert.Equal(t, int32(2), marked)
+	assert.Equal(t, client.SaveAttendanceResult{AbsentCount: 1, MarkedCount: 2, HeldElsewhere: []string{"enr-9"}}, saved)
 	assert.Equal(t, "sub-1", stub.gotSave.GetSubjectId())
 	assert.Equal(t, "usr-1", stub.gotSave.GetTakenBy())
 	assert.Equal(t, "Gabriela", stub.gotSave.GetTakenByName())

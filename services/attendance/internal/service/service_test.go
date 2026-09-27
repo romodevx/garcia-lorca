@@ -50,6 +50,11 @@ type fakeRepo struct {
 	lastSessionTo     time.Time
 	sessionsResult    []service.TakenList
 
+	// held marks pupil·day·subject keys (subjectDayKey) another group's list
+	// holds: like the real repository, a planned insert for one is not stored
+	// and is reported in ListChanges.HeldElsewhere.
+	held map[string]bool
+
 	err error // forced failure, returned by every method when set
 }
 
@@ -132,6 +137,10 @@ func (f *fakeRepo) ReconcileList(_ context.Context, key service.ListKey, enrollm
 	// starts at 1 and every in-place write bumps the stored one.
 	stored := service.ListChanges{Deletes: changes.Deletes}
 	for _, rec := range changes.Inserts {
+		if f.held[subjectDayKey(rec.EnrollmentID, rec.Date, rec.SubjectID)] {
+			stored.HeldElsewhere = append(stored.HeldElsewhere, rec.EnrollmentID)
+			continue
+		}
 		rec.Revision = 1
 		stored.Inserts = append(stored.Inserts, rec)
 		f.rows[subjectDayKey(rec.EnrollmentID, rec.Date, rec.SubjectID)] = rec
@@ -251,9 +260,10 @@ var sessionTakenAt = time.Date(2026, 8, 5, 14, 0, 0, 0, time.UTC)
 
 // save is SaveDailyAttendance on the DAILY list (no subject) by testTaker.
 func save(svc *service.AttendanceService, ctx context.Context, group, date string, marks []service.Mark) (int, int, error) {
-	return svc.SaveDailyAttendance(ctx, service.SaveRequest{
+	res, err := svc.SaveDailyAttendance(ctx, service.SaveRequest{
 		GroupID: group, Date: date, Marks: marks, TakenBy: testTaker.UserID, TakenByName: testTaker.Name,
 	})
+	return res.AbsentCount, res.MarkedCount, err
 }
 
 // roster is GetDailyRoster on the DAILY list, returning only its rows.

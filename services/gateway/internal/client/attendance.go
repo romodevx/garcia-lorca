@@ -120,12 +120,21 @@ func (c *AttendanceClient) GetDailyRoster(ctx context.Context, groupID, date, su
 	return out, nil
 }
 
+// SaveAttendanceResult summarizes a list after a save, from what was STORED:
+// AbsentCount stored marks are absences, MarkedCount exceptions are stored in
+// total, and HeldElsewhere (ascending) are the submitted enrollments skipped
+// because another group's list already holds their mark for that day.
+type SaveAttendanceResult struct {
+	AbsentCount   int32
+	MarkedCount   int32
+	HeldElsewhere []string
+}
+
 // SaveDailyAttendance reconciles a whole list in one call: in.Marks is the
 // COMPLETE set of exceptions, so every enrollment absent from it is reset to
-// present. It returns how many stored marks are "absent" and how many
-// exceptions are stored for the day in total. Saving the same day again is
-// idempotent.
-func (c *AttendanceClient) SaveDailyAttendance(ctx context.Context, in SaveAttendanceInput) (int32, int32, error) {
+// present. It returns the stored state's summary (see SaveAttendanceResult).
+// Saving the same day again is idempotent.
+func (c *AttendanceClient) SaveDailyAttendance(ctx context.Context, in SaveAttendanceInput) (SaveAttendanceResult, error) {
 	res, err := c.rpc.SaveDailyAttendance(ctx, connect.NewRequest(&attendancev1.SaveDailyAttendanceRequest{
 		GroupId:     in.GroupID,
 		Date:        in.Date,
@@ -136,9 +145,13 @@ func (c *AttendanceClient) SaveDailyAttendance(ctx context.Context, in SaveAtten
 		SubjectName: in.SubjectName,
 	}))
 	if err != nil {
-		return 0, 0, err
+		return SaveAttendanceResult{}, err
 	}
-	return res.Msg.GetAbsentCount(), res.Msg.GetMarkedCount(), nil
+	return SaveAttendanceResult{
+		AbsentCount:   res.Msg.GetAbsentCount(),
+		MarkedCount:   res.Msg.GetMarkedCount(),
+		HeldElsewhere: res.Msg.GetHeldElsewhere(),
+	}, nil
 }
 
 // ListAttendance lists one enrollment's stored exceptions within an inclusive

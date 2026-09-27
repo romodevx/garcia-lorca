@@ -16,7 +16,7 @@ import (
 // implements it.
 type AttendanceService interface {
 	GetDailyRoster(ctx context.Context, groupID, date, subjectID string) (client.AttendanceRoster, error)
-	SaveDailyAttendance(ctx context.Context, in client.SaveAttendanceInput) (int32, int32, error)
+	SaveDailyAttendance(ctx context.Context, in client.SaveAttendanceInput) (client.SaveAttendanceResult, error)
 	ListAttendance(ctx context.Context, enrollmentID, from, to string) ([]client.AttendanceRecord, error)
 }
 
@@ -237,7 +237,7 @@ func (h *AttendanceHandler) SaveDaily(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.resolveList(w, r, req.GroupID, req.Date, req.SubjectID); !ok {
 		return
 	}
-	absent, marked, err := h.svc.SaveDailyAttendance(r.Context(), client.SaveAttendanceInput{
+	saved, err := h.svc.SaveDailyAttendance(r.Context(), client.SaveAttendanceInput{
 		GroupID:     req.GroupID,
 		Date:        req.Date,
 		SubjectID:   req.SubjectID,
@@ -250,7 +250,18 @@ func (h *AttendanceHandler) SaveDaily(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"absentCount": absent, "markedCount": marked})
+	writeJSON(w, http.StatusOK, saveSummary(saved))
+}
+
+// saveSummary is the JSON body both save routes answer with. heldElsewhere is
+// always an array (never null): the enrollment ids whose submitted mark was not
+// stored because another group's list holds that pupil·day (a transfer).
+func saveSummary(r client.SaveAttendanceResult) map[string]any {
+	held := r.HeldElsewhere
+	if held == nil {
+		held = []string{}
+	}
+	return map[string]any{"absentCount": r.AbsentCount, "markedCount": r.MarkedCount, "heldElsewhere": held}
 }
 
 // ListAttendance handles GET /api/v1/attendance?enrollmentId=...&from=...&to=...

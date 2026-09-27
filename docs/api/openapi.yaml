@@ -2543,16 +2543,27 @@ components:
             invalid: { value: Código no válido }
             foreign: { value: Este alumno no pertenece a este grupo }
     AttendanceSaved:
-      description: The list's stored state after the save.
+      description: >-
+        The list's stored state after the save. Counts describe what THIS list
+        stored, never what was submitted: a mark for a pupil whose day·subject
+        another group's list already holds (a transferred pupil, on a day before
+        the move) is not stored, not counted, and listed in heldElsewhere.
       content:
         application/json:
           schema:
             type: object
-            required: [absentCount, markedCount]
+            required: [absentCount, markedCount, heldElsewhere]
             properties:
               absentCount: { type: integer, minimum: 0, description: Stored marks that are absences. }
               markedCount: { type: integer, minimum: 0, description: Exceptions the list holds in total. }
-          example: { absentCount: 1, markedCount: 2 }
+              heldElsewhere:
+                type: array
+                description: >-
+                  Enrollment ids (ascending) whose submitted mark was skipped
+                  because another group's list holds it. Always present; empty
+                  when every mark landed.
+                items: { type: string, format: uuid }
+          example: { absentCount: 1, markedCount: 2, heldElsewhere: ['3f2504e0-4f89-41d3-9a0c-0305e82c3301'] }
     BadRequest:
       description: The request did not satisfy the contract.
       content:

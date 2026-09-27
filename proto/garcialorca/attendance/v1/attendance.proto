@@ -165,9 +165,15 @@ message SaveDailyAttendanceRequest {
 // SaveDailyAttendanceResponse reports the state after reconciling:
 // `absent_count` is how many of the stored marks are status "absent";
 // `marked_count` is how many exceptions are stored for the day in total.
+// Both count what THIS list stored, never what was submitted: a submitted
+// mark for a pupil whose day·subject another group's list already holds (a
+// transferred pupil on a day before the move) is not stored and not counted.
+// `held_elsewhere` lists those skipped enrollment ids, ascending, so the
+// client can tell the taker which marks did not land.
 message SaveDailyAttendanceResponse {
   int32 absent_count = 1;
   int32 marked_count = 2;
+  repeated string held_elsewhere = 3;
 }
 
 // ListAttendanceRequest bounds the query by enrollment and an inclusive date

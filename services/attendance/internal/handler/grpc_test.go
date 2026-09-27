@@ -25,6 +25,7 @@ type fakeRepo struct {
 	list     []service.AttendanceRecord
 	taker    service.Taker
 	taken    []service.TakenList
+	held     map[string]bool // enrollment ids another group's list holds
 }
 
 func (f *fakeRepo) ListSessions(_ context.Context, _ []string, _, _ time.Time) ([]service.TakenList, error) {
@@ -67,7 +68,13 @@ func (f *fakeRepo) ReconcileList(ctx context.Context, key service.ListKey, enrol
 	for _, rec := range changes.Deletes {
 		delete(f.rows, markKey(rec.EnrollmentID, key))
 	}
+	stored := service.ListChanges{Updates: changes.Updates, Deletes: changes.Deletes}
 	for _, rec := range changes.Inserts {
+		if f.held[rec.EnrollmentID] {
+			stored.HeldElsewhere = append(stored.HeldElsewhere, rec.EnrollmentID)
+			continue
+		}
+		stored.Inserts = append(stored.Inserts, rec)
 		f.rows[markKey(rec.EnrollmentID, key)] = rec
 	}
 	for _, u := range changes.Updates {
@@ -77,7 +84,7 @@ func (f *fakeRepo) ReconcileList(ctx context.Context, key service.ListKey, enrol
 	if _, ok := f.sessions[listKey(key)]; !ok {
 		f.sessions[listKey(key)] = service.Session{TakenAt: takenAt, TakenByName: taker.Name, UpdatedAt: takenAt}
 	}
-	return changes, nil
+	return stored, nil
 }
 
 func (f *fakeRepo) ListByEnrollment(_ context.Context, _ string, _, _ time.Time) ([]service.AttendanceRecord, error) {
@@ -223,6 +230,34 @@ func TestSaveDailyAttendanceCountsAndReflectsInRoster(t *testing.T) {
 	}
 	if rows[0].GetStatus() != "absent" || rows[1].GetStatus() != "late" || rows[2].GetStatus() != "present" {
 		t.Errorf("statuses = %q/%q/%q", rows[0].GetStatus(), rows[1].GetStatus(), rows[2].GetStatus())
+	}
+}
+
+// A mark another group's list holds is skipped: the counts exclude it and its
+// enrollment id comes back in held_elsewhere.
+func TestSaveDailyAttendanceReportsMarksHeldElsewhere(t *testing.T) {
+	repo := newFakeRepo()
+	repo.held = map[string]bool{"enr-1": true}
+	h := newHandler(repo, []service.EnrollmentRef{
+		activeEnrollment("enr-1", "stu-1"),
+		activeEnrollment("enr-2", "stu-2"),
+	})
+
+	res, err := h.SaveDailyAttendance(context.Background(), connect.NewRequest(&attendancev1.SaveDailyAttendanceRequest{
+		GroupId: groupID, Date: testDate, TakenBy: takerID, TakenByName: "Gabriela Rojas",
+		Marks: []*attendancev1.Mark{
+			{EnrollmentId: "enr-1", Status: "absent"},
+			{EnrollmentId: "enr-2", Status: "late"},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("SaveDailyAttendance: %v", err)
+	}
+	if res.Msg.GetAbsentCount() != 0 || res.Msg.GetMarkedCount() != 1 {
+		t.Errorf("counts = absent %d marked %d, want 0/1", res.Msg.GetAbsentCount(), res.Msg.GetMarkedCount())
+	}
+	if got := res.Msg.GetHeldElsewhere(); len(got) != 1 || got[0] != "enr-1" {
+		t.Errorf("held_elsewhere = %v, want [enr-1]", got)
 	}
 }
 

@@ -47,7 +47,7 @@ import (
 // satisfies it.
 type TeachingAttendanceService interface {
 	GetDailyRoster(ctx context.Context, groupID, date, subjectID string) (client.AttendanceRoster, error)
-	SaveDailyAttendance(ctx context.Context, in client.SaveAttendanceInput) (int32, int32, error)
+	SaveDailyAttendance(ctx context.Context, in client.SaveAttendanceInput) (client.SaveAttendanceResult, error)
 }
 
 // TeachingAttendanceHandler is the teacher-facing, self-scoped daily attendance
@@ -326,7 +326,7 @@ func (h *TeachingAttendanceHandler) SaveAttendance(w http.ResponseWriter, r *htt
 		writeBadRequest(w, msg)
 		return
 	}
-	absent, marked, err := h.attendance.SaveDailyAttendance(r.Context(), client.SaveAttendanceInput{
+	saved, err := h.attendance.SaveDailyAttendance(r.Context(), client.SaveAttendanceInput{
 		GroupID:     req.GroupID,
 		Date:        req.Date,
 		SubjectID:   req.SubjectID,
@@ -339,5 +339,5 @@ func (h *TeachingAttendanceHandler) SaveAttendance(w http.ResponseWriter, r *htt
 		writeConnectError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"absentCount": absent, "markedCount": marked})
+	writeJSON(w, http.StatusOK, saveSummary(saved))
 }

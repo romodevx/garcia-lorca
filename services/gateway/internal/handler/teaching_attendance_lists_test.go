@@ -291,12 +291,23 @@ func TestTeachingAttendanceSave(t *testing.T) {
 			assert.Equal(t, tt.wantSubject, att.gotSave.SubjectID)
 			assert.Equal(t, "usr-t", att.gotSave.TakenBy, "the taker is the principal, never a request field")
 			assert.Equal(t, "Gabriela Rojas", att.gotSave.TakenByName)
-			assert.JSONEq(t, `{"absentCount":1,"markedCount":1}`, rec.Body.String())
+			assert.JSONEq(t, `{"absentCount":1,"markedCount":1,"heldElsewhere":[]}`, rec.Body.String())
 		})
 	}
 }
 
 // The marks go through unchanged, notes included.
+// The teacher's save reports the marks another group's list holds, like the
+// director's.
+func TestTeachingAttendanceSaveReportsHeldElsewhere(t *testing.T) {
+	att := &fakeTeachingAttendance{saveMarked: 1, saveHeld: []string{"enr-1", "enr-2"}}
+	h := newTeachingAttendance(listTeacher(), att, &fakeTeachingStudents{})
+	rec := httptest.NewRecorder()
+	h.SaveAttendance(rec, teacherPOST("/api/v1/teaching/attendance", "usr-t", `{"groupId":"grp-prim","date":"2026-09-15","marks":[]}`))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.JSONEq(t, `{"absentCount":0,"markedCount":1,"heldElsewhere":["enr-1","enr-2"]}`, rec.Body.String())
+}
+
 func TestTeachingAttendanceSavePassesMarksThrough(t *testing.T) {
 	att := &fakeTeachingAttendance{}
 	h := newTeachingAttendance(listTeacher(), att, &fakeTeachingStudents{})

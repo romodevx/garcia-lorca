@@ -92,7 +92,7 @@ func (h *AttendanceHandler) SaveDailyAttendance(ctx context.Context, req *connec
 			Note:         mark.GetNote(),
 		})
 	}
-	absentCount, markedCount, err := h.svc.SaveDailyAttendance(ctx, service.SaveRequest{
+	res, err := h.svc.SaveDailyAttendance(ctx, service.SaveRequest{
 		GroupID:     m.GetGroupId(),
 		Date:        m.GetDate(),
 		SubjectID:   m.GetSubjectId(),
@@ -105,8 +105,9 @@ func (h *AttendanceHandler) SaveDailyAttendance(ctx context.Context, req *connec
 		return nil, connectErr(err)
 	}
 	return connect.NewResponse(&attendancev1.SaveDailyAttendanceResponse{
-		AbsentCount: int32(absentCount),
-		MarkedCount: int32(markedCount),
+		AbsentCount:   int32(res.AbsentCount),
+		MarkedCount:   int32(res.MarkedCount),
+		HeldElsewhere: res.HeldElsewhere,
 	}), nil
 }
 

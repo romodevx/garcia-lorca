@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -107,6 +108,10 @@ func (r *Repo) MarksForList(ctx context.Context, enrollmentIDs []string, key ser
 //   - heldElsewhere: stored by ANOTHER group's list. The one-mark key is
 //     (tenant, enrollment, date, subject), so the pupil·day·subject is frozen
 //     for this list: never shown, cleared, updated nor re-marked from it.
+//
+// Known limitation (ADR 0018): a legacy mark is claimed by EVERY list of its
+// day, so two groups' lists can both read and correct it. Legacy rows exist
+// only in local dev databases today; no backfill was written.
 //
 // This is what keeps a transfer honest: enrollments.group_id is rewritten in
 // place, so after a move group B's retroactive list of a day before it also
@@ -226,16 +231,20 @@ func (r *Repo) ReconcileList(ctx context.Context, key service.ListKey, enrollmen
 // withoutHeld drops the planned inserts of pupils whose day·subject another
 // group's list holds (see listMarks): the plan only saw this list's own marks,
 // so it would otherwise try to store a second mark on the one-mark key.
-// Updates and deletes only ever target own marks, so they pass through.
+// Updates and deletes only ever target own marks, so they pass through. The
+// dropped enrollments are recorded in HeldElsewhere, so the save reports them
+// and never counts them as stored.
 func withoutHeld(planned service.ListChanges, held map[string]bool) service.ListChanges {
 	if len(held) == 0 {
 		return planned
 	}
-	out := service.ListChanges{Updates: planned.Updates, Deletes: planned.Deletes}
+	out := service.ListChanges{Updates: planned.Updates, Deletes: planned.Deletes, HeldElsewhere: planned.HeldElsewhere}
 	for _, rec := range planned.Inserts {
-		if !held[rec.EnrollmentID] {
-			out.Inserts = append(out.Inserts, rec)
+		if held[rec.EnrollmentID] {
+			out.HeldElsewhere = append(out.HeldElsewhere, rec.EnrollmentID)
+			continue
 		}
+		out.Inserts = append(out.Inserts, rec)
 	}
 	return out
 }
@@ -323,12 +332,14 @@ func (r *Repo) upsertMarks(tx *gorm.DB, groupID string, changes service.ListChan
 // carries the row's STORED id and revision, a planned insert that Postgres
 // turned into an update (it met an existing row) is reported as a
 // status-changing update, and one the ownership backstop skipped (another
-// group's row) is not reported at all — nothing of it was stored.
+// group's row) is not reported as a change — nothing of it was stored — but
+// joins HeldElsewhere (ascending) with the ones withoutHeld dropped.
 func asStored(planned service.ListChanges, stored map[string]storedMark) service.ListChanges {
-	out := service.ListChanges{Deletes: planned.Deletes}
+	out := service.ListChanges{Deletes: planned.Deletes, HeldElsewhere: planned.HeldElsewhere}
 	for _, rec := range planned.Inserts {
 		m, ok := stored[rec.EnrollmentID]
 		if !ok {
+			out.HeldElsewhere = append(out.HeldElsewhere, rec.EnrollmentID)
 			continue
 		}
 		rec.ID, rec.Revision = m.ID, m.Revision
@@ -344,6 +355,7 @@ func asStored(planned service.ListChanges, stored map[string]storedMark) service
 		}
 		out.Updates = append(out.Updates, u)
 	}
+	sort.Strings(out.HeldElsewhere)
 	return out
 }
 

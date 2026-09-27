@@ -26,6 +26,7 @@ type fakeTeachingAttendance struct {
 	gotSave    client.SaveAttendanceInput
 	saveAbsent int32
 	saveMarked int32
+	saveHeld   []string
 	saveErr    error
 	saveCalls  int
 }
@@ -39,13 +40,13 @@ func (f *fakeTeachingAttendance) GetDailyRoster(_ context.Context, groupID, date
 	return client.AttendanceRoster{Rows: f.roster, Session: f.session}, nil
 }
 
-func (f *fakeTeachingAttendance) SaveDailyAttendance(_ context.Context, in client.SaveAttendanceInput) (int32, int32, error) {
+func (f *fakeTeachingAttendance) SaveDailyAttendance(_ context.Context, in client.SaveAttendanceInput) (client.SaveAttendanceResult, error) {
 	f.saveCalls++
 	f.gotSave = in
 	if f.saveErr != nil {
-		return 0, 0, f.saveErr
+		return client.SaveAttendanceResult{}, f.saveErr
 	}
-	return f.saveAbsent, f.saveMarked, nil
+	return client.SaveAttendanceResult{AbsentCount: f.saveAbsent, MarkedCount: f.saveMarked, HeldElsewhere: f.saveHeld}, nil
 }
 
 // fakeUsers doubles the iam directory the handlers read the taker's display

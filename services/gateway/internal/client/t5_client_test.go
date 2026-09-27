@@ -53,7 +53,7 @@ func TestAttendanceClientT5RoundTrip(t *testing.T) {
 	path, h := attendancev1connect.NewAttendanceServiceHandler(stub)
 	c := client.NewAttendanceClient(serveConnect(t, path, h), nil)
 
-	_, _, err := c.SaveDailyAttendance(context.Background(), client.SaveAttendanceInput{GroupID: "grp-1", Date: "2026-09-15", SubjectID: "sub-1", SubjectName: "Matemáticas"})
+	_, err := c.SaveDailyAttendance(context.Background(), client.SaveAttendanceInput{GroupID: "grp-1", Date: "2026-09-15", SubjectID: "sub-1", SubjectName: "Matemáticas"})
 	require.NoError(t, err)
 	assert.Equal(t, "Matemáticas", stub.gotSave.GetSubjectName())
 

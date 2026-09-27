@@ -28,7 +28,7 @@ func TestSaveCarriesTheSubjectNameOnEvents(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			pub := &spyPublisher{}
 			svc := newService(t, newFakeRepo(), pub, "rec-1", "rec-2")
-			_, _, err := svc.SaveDailyAttendance(context.Background(), service.SaveRequest{
+			_, err := svc.SaveDailyAttendance(context.Background(), service.SaveRequest{
 				GroupID: groupID, Date: schoolDay, SubjectID: tt.subjectID, SubjectName: tt.subjectName,
 				Marks: []service.Mark{
 					{EnrollmentID: enrollmentAna, Status: "absent"},
@@ -57,10 +57,10 @@ func TestClearedMarkCarriesTheSubjectName(t *testing.T) {
 		Marks:   []service.Mark{{EnrollmentID: enrollmentAna, Status: "absent"}},
 		TakenBy: testTaker.UserID, TakenByName: testTaker.Name,
 	}
-	_, _, err := svc.SaveDailyAttendance(context.Background(), req)
+	_, err := svc.SaveDailyAttendance(context.Background(), req)
 	require.NoError(t, err)
 	req.Marks = nil
-	_, _, err = svc.SaveDailyAttendance(context.Background(), req)
+	_, err = svc.SaveDailyAttendance(context.Background(), req)
 	require.NoError(t, err)
 	require.Len(t, pub.marked, 2)
 	assert.Equal(t, "present", pub.marked[1].Status)
@@ -69,7 +69,7 @@ func TestClearedMarkCarriesTheSubjectName(t *testing.T) {
 
 func TestSaveRejectsAnOverlongSubjectName(t *testing.T) {
 	svc := newService(t, newFakeRepo(), nil)
-	_, _, err := svc.SaveDailyAttendance(context.Background(), service.SaveRequest{
+	_, err := svc.SaveDailyAttendance(context.Background(), service.SaveRequest{
 		GroupID: groupID, Date: schoolDay, SubjectID: subjectMath, SubjectName: strings.Repeat("á", 201),
 		TakenBy: testTaker.UserID, TakenByName: testTaker.Name,
 	})
