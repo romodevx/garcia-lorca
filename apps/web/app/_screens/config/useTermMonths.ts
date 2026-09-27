@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ConfigError, type Term } from "../../config/api";
-import { assignMonth, savePlan, type MonthAssignment } from "../../config/termMonths";
+import { assignMonth, savePlan, type MonthAssignment, type TermMonthsSave } from "../../config/termMonths";
 import { monthChips } from "../../grades/monthly";
 
 export type SaveTermMonths = (termId: string, months: readonly string[]) => Promise<Term>;
@@ -19,6 +19,12 @@ interface Tap {
 }
 
 const FALLBACK_REASON = "No se pudo guardar. Quedó como estaba.";
+const NOT_RESTORED = "y no se pudo devolver a su periodo; recarga la página para ver cómo quedó.";
+
+/** The server's cap on a term's months (TERM_TOO_LONG), checked here before any PUT. */
+const MAX_MONTHS_PER_TERM = 6;
+const TERM_CLOSED = "TERM_CLOSED";
+const TERM_TOO_LONG = "TERM_TOO_LONG";
 
 /** Why a month-write was refused, in words, for the codes the server may omit words for. */
 const REASON_BY_CODE: Readonly<Record<string, string>> = {
@@ -32,7 +38,22 @@ function assignmentOf(terms: readonly Term[]): MonthAssignment {
   return Object.fromEntries(terms.map((t) => [t.id, [...(t.months ?? [])].sort()]));
 }
 
+/** A refusal decided here, from what is already known, before any PUT. */
+class LocalRefusal extends ConfigError {
+  constructor(code: string) {
+    super(0, "", code);
+  }
+}
+
+/** A step of a move that failed after an earlier step was saved, and whether that step was undone. */
+class PartialMove extends Error {
+  constructor(readonly refusal: unknown, readonly restored: boolean) {
+    super("partial move");
+  }
+}
+
 function refusalReason(err: unknown): string {
+  if (err instanceof PartialMove) return refusalReason(err.refusal);
   if (!(err instanceof ConfigError)) return FALLBACK_REASON;
   if (err.detail !== "") return err.detail;
   return (err.code !== undefined ? REASON_BY_CODE[err.code] : undefined) ?? FALLBACK_REASON;
@@ -41,7 +62,19 @@ function refusalReason(err: unknown): string {
 /** "No se guardó noviembre de 2026: Un periodo puede tener hasta 6 meses." */
 function refusalMessage(month: string, err: unknown): string {
   const name = monthChips([month])[0]?.fullName ?? month;
+  if (err instanceof PartialMove && !err.restored) return `No se guardó ${name} ${NOT_RESTORED}`;
   return `No se guardó ${name}: ${refusalReason(err)}`;
+}
+
+/** The first term the plan would grow into a refusal the server is known to give. */
+function knownRefusal(plan: readonly TermMonthsSave[], before: MonthAssignment, closed: ReadonlySet<string>): LocalRefusal | undefined {
+  for (const step of plan) {
+    const grows = step.months.some((m) => !(before[step.termId] ?? []).includes(m));
+    if (!grows) continue;
+    if (closed.has(step.termId)) return new LocalRefusal(TERM_CLOSED);
+    if (step.months.length > MAX_MONTHS_PER_TERM) return new LocalRefusal(TERM_TOO_LONG);
+  }
+  return undefined;
 }
 
 /** Keeps what is known for the ids still present, and seeds only the ids that are new. */
@@ -63,6 +96,8 @@ export function useTermMonths(terms: readonly Term[], save: SaveTermMonths): Ter
   const confirmed = useRef<MonthAssignment>(assignment);
   const pending = useRef<Tap[]>([]);
   const queue = useRef<Promise<void>>(Promise.resolve());
+  // Terms the server refused as closed: a later move into one is refused here, before any PUT.
+  const closedTerms = useRef<Set<string>>(new Set());
 
   const show = useCallback((): void => {
     setAssignment(pending.current.reduce((acc, t) => assignMonth(acc, t.termId, t.month), confirmed.current));
@@ -76,22 +111,56 @@ export function useTermMonths(terms: readonly Term[], save: SaveTermMonths): Ter
     show();
   }, [termIds, show]);
 
+  const putMonths = useCallback(async (termId: string, months: readonly string[]): Promise<void> => {
+    const saved = await save(termId, months);
+    confirmed.current = { ...confirmed.current, [termId]: [...(saved.months ?? months)].sort() };
+  }, [save]);
+
+  /** Puts the given terms back to `before`, newest first; says whether all of them went back. */
+  const restore = useCallback(async (termIds: readonly string[], before: MonthAssignment): Promise<boolean> => {
+    try {
+      for (const id of [...termIds].reverse()) await putMonths(id, before[id] ?? []);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [putMonths]);
+
+  /**
+   * Runs the plan's PUTs in order. A step refused after earlier steps were
+   * saved undoes those steps (a month freed from its term goes back), so a
+   * half-done move never strands a month outside every term.
+   */
+  const applyPlan = useCallback(async (plan: readonly TermMonthsSave[]): Promise<void> => {
+    const before = confirmed.current;
+    const done: string[] = [];
+    for (const step of plan) {
+      try {
+        await putMonths(step.termId, step.months);
+        done.push(step.termId);
+      } catch (err) {
+        if (err instanceof ConfigError && err.code === TERM_CLOSED) closedTerms.current.add(step.termId);
+        if (done.length === 0) throw err;
+        throw new PartialMove(err, await restore(done, before));
+      }
+    }
+  }, [putMonths, restore]);
+
   const saveNext = useCallback(async (): Promise<void> => {
     const next = pending.current[0];
     if (next === undefined) return;
-    const target = assignMonth(confirmed.current, next.termId, next.month);
+    const plan = savePlan(confirmed.current, assignMonth(confirmed.current, next.termId, next.month));
     try {
-      for (const step of savePlan(confirmed.current, target)) {
-        const saved = await save(step.termId, step.months);
-        confirmed.current = { ...confirmed.current, [step.termId]: [...(saved.months ?? step.months)].sort() };
-      }
+      const refusal = knownRefusal(plan, confirmed.current, closedTerms.current);
+      if (refusal !== undefined) throw refusal;
+      await applyPlan(plan);
     } catch (err) {
       setError(refusalMessage(next.month, err));
     } finally {
       pending.current = pending.current.slice(1);
       show();
     }
-  }, [save, show]);
+  }, [applyPlan, show]);
 
   const tap = useCallback((termId: string, month: string): void => {
     pending.current = [...pending.current, { termId, month }];

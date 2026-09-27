@@ -111,6 +111,72 @@ describe("TermsPanel — months × trimesters grid", () => {
     expect(alert).toHaveTextContent(reason);
   });
 
+  it("refuses a move into a term that would pass 6 months before any PUT, keeping the month where it was", async () => {
+    const user = userEvent.setup();
+    const full = ["2026-11", "2026-12", "2027-01", "2027-02", "2027-03", "2027-04"];
+    const props = setup({ terms: [term("t1", 1, ["2026-09", "2026-10"]), term("t2", 2, full)] });
+
+    await user.click(cell("octubre de 2026", "2.er trimestre"));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("octubre de 2026");
+    expect(alert).toHaveTextContent("Un periodo puede tener hasta 6 meses");
+    expect(props.onSetMonths).not.toHaveBeenCalled();
+    expect(cell("octubre de 2026", "1.er trimestre")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("once a term is known closed, a move into it is refused before any PUT (the month never leaves its term)", async () => {
+    const user = userEvent.setup();
+    const onSetMonths = vi.fn(async (termId: string, months: readonly string[]) => {
+      if (termId === "t2") throw new ConfigError(409, "", "TERM_CLOSED");
+      return { ...term(termId, 1, []), months: [...months] };
+    });
+    setup({ onSetMonths });
+    await user.click(cell("noviembre de 2026", "2.er trimestre"));
+    await screen.findByRole("alert");
+    onSetMonths.mockClear();
+
+    await user.click(cell("octubre de 2026", "2.er trimestre"));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("octubre de 2026"));
+    expect(screen.getByRole("alert")).toHaveTextContent("El periodo está cerrado");
+    expect(onSetMonths).not.toHaveBeenCalled();
+    expect(cell("octubre de 2026", "1.er trimestre")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("when the second PUT of a move fails, the month is put back into its original term", async () => {
+    const user = userEvent.setup();
+    const onSetMonths = vi.fn(async (termId: string, months: readonly string[]) => {
+      if (termId === "t2") throw new ConfigError(400, "", "MONTH_INVALID");
+      return { ...term(termId, 1, []), months: [...months] };
+    });
+    setup({ onSetMonths });
+
+    await user.click(cell("octubre de 2026", "2.er trimestre"));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("octubre de 2026");
+    expect(alert).toHaveTextContent("Ese mes no es válido para este ciclo");
+    expect(onSetMonths.mock.calls).toEqual([["t1", ["2026-09"]], ["t2", ["2026-10"]], ["t1", ["2026-09", "2026-10"]]]);
+    expect(cell("octubre de 2026", "1.er trimestre")).toHaveAttribute("aria-pressed", "true");
+    expect(cell("octubre de 2026", "2.er trimestre")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("says so when the month could not be put back either", async () => {
+    const user = userEvent.setup();
+    const onSetMonths = vi.fn()
+      .mockImplementationOnce(async (termId: string, months: readonly string[]) => ({ ...term(termId, 1, []), months: [...months] }))
+      .mockRejectedValue(new ConfigError(503, "", undefined));
+    setup({ onSetMonths });
+
+    await user.click(cell("octubre de 2026", "2.er trimestre"));
+
+    await waitFor(() => expect(onSetMonths).toHaveBeenCalledTimes(3));
+    expect(await screen.findByRole("alert")).toHaveTextContent("no se pudo devolver a su periodo");
+    expect(cell("octubre de 2026", "1.er trimestre")).toHaveAttribute("aria-pressed", "false");
+    expect(cell("octubre de 2026", "2.er trimestre")).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("a new term joining the list never reverts months already saved (the parent's copy may be older)", async () => {
     const user = userEvent.setup();
     const props: TermsPanelProps = {
