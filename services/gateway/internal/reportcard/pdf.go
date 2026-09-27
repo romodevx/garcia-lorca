@@ -27,21 +27,26 @@ type Document struct {
 }
 
 const (
-	pageMargin   = 48.0
-	pageWidth    = 612.0 // US Letter, in points
-	pageHeight   = 792.0
-	contentWidth = pageWidth - 2*pageMargin
+	pageMargin = 48.0
+	// letterShort and letterLong are the sides of a US Letter page, in points.
+	letterShort  = 612.0
+	letterLong   = 792.0
 	monthWidth   = 58.0
 	averageWidth = 64.0
-	rowHeight    = 18.0
-	bodySize     = 10.0
-	smallSize    = 9.0
-	titleSize    = 14.0
-	schoolSize   = 16.0
-	lineGap      = 6.0
-	bottomLimit  = pageHeight - pageMargin
-	noGrade      = "—"
-	hundredths   = 100
+	// minSubjectWidth is the narrowest the subject column may get: the month
+	// columns give way before a subject name is squeezed into one-word lines.
+	minSubjectWidth = 160.0
+	// maxPortraitMonths is the longest term a portrait page holds; a longer
+	// one (config caps a term at six months) prints landscape.
+	maxPortraitMonths = 4
+	rowHeight         = 18.0
+	bodySize          = 10.0
+	smallSize         = 9.0
+	titleSize         = 14.0
+	schoolSize        = 16.0
+	lineGap           = 6.0
+	noGrade           = "—"
+	hundredths        = 100
 )
 
 // spanishMonths names the months as the school writes them.
@@ -50,16 +55,48 @@ var (
 	monthLong  = [...]string{"enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"}
 )
 
-// PDF renders the report card on a letter page (more pages when its subjects
-// do not fit one).
+// layout is the page geometry of one report card, decided by how many months
+// its term has.
+type layout struct {
+	landscape    bool
+	pageWidth    float64
+	pageHeight   float64
+	contentWidth float64
+	bottom       float64
+	monthWidth   float64
+	subjectWidth float64
+}
+
+// layoutFor turns the page landscape past maxPortraitMonths and keeps the
+// subject column at least minSubjectWidth wide: when the months would crowd
+// it, they share what is left between the subject and the average columns.
+func layoutFor(months int) layout {
+	l := layout{pageWidth: letterShort, pageHeight: letterLong}
+	if months > maxPortraitMonths {
+		l.landscape, l.pageWidth, l.pageHeight = true, letterLong, letterShort
+	}
+	l.contentWidth = l.pageWidth - 2*pageMargin
+	l.bottom = l.pageHeight - pageMargin
+	l.monthWidth = monthWidth
+	l.subjectWidth = l.contentWidth - float64(months)*monthWidth - averageWidth
+	if l.subjectWidth < minSubjectWidth {
+		l.subjectWidth = minSubjectWidth
+		l.monthWidth = (l.contentWidth - minSubjectWidth - averageWidth) / float64(months)
+	}
+	return l
+}
+
+// PDF renders the report card on a letter page, landscape for a term longer
+// than four months (more pages when its subjects do not fit one).
 func PDF(d Document) ([]byte, error) {
+	l := layoutFor(len(d.Card.Months))
 	pdf := &gopdf.GoPdf{}
-	pdf.Start(gopdf.Config{PageSize: *gopdf.PageSizeLetter})
+	pdf.Start(gopdf.Config{PageSize: gopdf.Rect{W: l.pageWidth, H: l.pageHeight}})
 	pdf.AddPage()
 	if err := pdffont.Register(pdf); err != nil {
 		return nil, err
 	}
-	w := &writer{pdf: pdf, y: pageMargin}
+	w := &writer{pdf: pdf, l: l, y: pageMargin}
 	w.header(d)
 	w.student(d.Card)
 	w.table(d.Card)
@@ -108,8 +145,12 @@ func slug(s string) string {
 // writer keeps the first error, so the layout reads as a list of steps.
 type writer struct {
 	pdf *gopdf.GoPdf
+	l   layout
 	y   float64
 	err error
+	// tableHeader reprints the table's header row; set while the table's
+	// body is printing, so a page break repeats it on the new page.
+	tableHeader func()
 }
 
 func (w *writer) header(d Document) {
@@ -134,33 +175,68 @@ func (w *writer) student(c client.ReportCard) {
 }
 
 // table prints subject × month and the trimester grade, then the general
-// average. The subject column takes what the months and the average leave.
+// average. A page break inside the body repeats the header row on top.
 func (w *writer) table(c client.ReportCard) {
-	subjectWidth := contentWidth - float64(len(c.Months))*monthWidth - averageWidth
-	w.row(pdffont.Bold, "Materia", monthLabels(c.Months), "Promedio", subjectWidth)
+	labels := monthLabels(c.Months)
+	w.tableHeader = func() { w.row(pdffont.Bold, "Materia", labels, "Promedio") }
+	w.breakPage(2 * rowHeight)
+	w.tableHeader()
 	for _, l := range c.Lines {
 		values := make([]string, 0, len(c.Months))
 		for _, m := range c.Months {
 			values = append(values, orDash(l.MonthValues[m]))
 		}
-		w.row(pdffont.Regular, l.SubjectName, values, orDash(l.TermAverage), subjectWidth)
+		w.bodyRow(pdffont.Regular, l.SubjectName, values, orDash(l.TermAverage))
 	}
+	w.tableHeader = nil
 	w.rule()
-	w.cell(pdffont.Bold, titleSize-1, "Promedio general", pageMargin, contentWidth-averageWidth, gopdf.Left)
-	w.cell(pdffont.Bold, titleSize-1, orDash(c.GeneralAverage), pageMargin+contentWidth-averageWidth, averageWidth, gopdf.Right)
+	averageX := pageMargin + w.l.contentWidth - averageWidth
+	w.breakPage(titleSize + lineGap)
+	w.cell(pdffont.Bold, titleSize-1, "Promedio general", pageMargin, w.l.contentWidth-averageWidth, gopdf.Left)
+	w.cell(pdffont.Bold, titleSize-1, orDash(c.GeneralAverage), averageX, averageWidth, gopdf.Right)
 	w.y += titleSize + lineGap
 }
 
-// row prints one table row; the subject name wraps inside its column.
-func (w *writer) row(family, subject string, values []string, average string, subjectWidth float64) {
-	w.breakPage(rowHeight * 2)
-	x := pageMargin + subjectWidth
+// bodyRow measures the row's wrapped subject name first; a row that would
+// cross the bottom margin starts a new page, under the repeated header.
+func (w *writer) bodyRow(family, subject string, values []string, average string) {
+	need := w.rowLines(family, subject) * rowHeight
+	if w.err == nil && w.y+need > w.l.bottom {
+		w.newPage()
+		if w.tableHeader != nil {
+			w.tableHeader()
+		}
+	}
+	w.row(family, subject, values, average)
+}
+
+// rowLines is how many lines the subject name wraps to in its column (≥ 1).
+func (w *writer) rowLines(family, subject string) float64 {
+	if w.err != nil || subject == "" {
+		return 1
+	}
+	if err := w.pdf.SetFont(family, "", bodySize); err != nil {
+		w.err = err
+		return 1
+	}
+	lines, err := w.pdf.SplitTextWithWordWrap(subject, w.l.subjectWidth-lineGap)
+	if err != nil {
+		w.err = err
+		return 1
+	}
+	return max(1, float64(len(lines)))
+}
+
+// row prints one table row where it stands; the subject name wraps inside
+// its column. Callers decide the page (bodyRow, table).
+func (w *writer) row(family, subject string, values []string, average string) {
+	x := pageMargin + w.l.subjectWidth
 	for _, v := range values {
-		w.cell(family, bodySize, v, x, monthWidth, gopdf.Center)
-		x += monthWidth
+		w.cell(family, bodySize, v, x, w.l.monthWidth, gopdf.Center)
+		x += w.l.monthWidth
 	}
 	w.cell(family, bodySize, average, x, averageWidth, gopdf.Right)
-	taken := w.wrapped(family, bodySize, subject, pageMargin, subjectWidth-lineGap)
+	taken := w.wrapped(family, bodySize, subject, pageMargin, w.l.subjectWidth-lineGap)
 	w.y += max(1, taken) * rowHeight
 }
 
@@ -177,9 +253,13 @@ func (w *writer) foot(d Document) {
 // --- primitives ----------------------------------------------------------------
 
 func (w *writer) breakPage(need float64) {
-	if w.err != nil || w.y+need <= bottomLimit {
+	if w.err != nil || w.y+need <= w.l.bottom {
 		return
 	}
+	w.newPage()
+}
+
+func (w *writer) newPage() {
 	w.pdf.AddPage()
 	w.y = pageMargin
 }
@@ -189,7 +269,7 @@ func (w *writer) text(family string, size float64, s string) {
 		return
 	}
 	w.breakPage(size + lineGap)
-	w.y += w.wrapped(family, size, s, pageMargin, contentWidth) * (size + lineGap)
+	w.y += w.wrapped(family, size, s, pageMargin, w.l.contentWidth) * (size + lineGap)
 }
 
 // wrapped writes s word-wrapped in a box, starting at the current height, and
@@ -234,7 +314,7 @@ func (w *writer) rule() {
 	}
 	w.y += 4
 	w.pdf.SetLineWidth(0.6)
-	w.pdf.Line(pageMargin, w.y, pageMargin+contentWidth, w.y)
+	w.pdf.Line(pageMargin, w.y, pageMargin+w.l.contentWidth, w.y)
 	w.y += 10
 }
 

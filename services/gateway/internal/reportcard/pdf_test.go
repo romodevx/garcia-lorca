@@ -2,6 +2,7 @@ package reportcard_test
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -90,4 +91,86 @@ func TestFilename(t *testing.T) {
 	card := sampleCard()
 	card.EnrollmentNumber, card.StudentID, card.Version, card.TermName = "", "stu-9", 2, "Trimestre Único ñ"
 	assert.Equal(t, "boleta-stu-9-trimestre-unico-n-v2.pdf", reportcard.Filename(card))
+}
+
+// pages opens the PDF and returns each page's plain text and whether it is
+// landscape (MediaBox wider than tall).
+func pages(t *testing.T, doc []byte) (texts []string, landscape []bool) {
+	t.Helper()
+	r, err := pdf.NewReader(bytes.NewReader(doc), int64(len(doc)))
+	require.NoError(t, err, "the PDF does not open")
+	for i := 1; i <= r.NumPage(); i++ {
+		p := r.Page(i)
+		text, err := p.GetPlainText(nil)
+		require.NoError(t, err)
+		texts = append(texts, text)
+		box := p.V.Key("MediaBox")
+		if box.Len() == 0 {
+			box = p.V.Key("Parent").Key("MediaBox")
+		}
+		require.Equal(t, 4, box.Len(), "page %d has a MediaBox", i)
+		landscape = append(landscape, box.Index(2).Float64()-box.Index(0).Float64() > box.Index(3).Float64()-box.Index(1).Float64())
+	}
+	return texts, landscape
+}
+
+func sixMonthCard() client.ReportCard {
+	card := sampleCard()
+	card.Months = []string{"2027-01", "2027-02", "2027-03", "2027-04", "2027-05", "2027-06"}
+	card.Lines = []client.ReportCardLine{
+		{SubjectName: "Formación Cívica y Ética y Proyecto de Vida Comunitaria FIN", Position: 1,
+			MonthValues: map[string]string{"2027-01": "9", "2027-06": "10"}, TermAverage: "9.5"},
+		{SubjectName: "Matemáticas", Position: 2, MonthValues: map[string]string{"2027-03": "8.5"}, TermAverage: "8.5"},
+	}
+	return card
+}
+
+// A term of up to four months prints on a portrait letter page.
+func TestAShortTermPrintsPortrait(t *testing.T) {
+	doc, err := reportcard.PDF(reportcard.Document{School: school, Card: sampleCard()})
+	require.NoError(t, err)
+	_, landscape := pages(t, doc)
+	assert.Equal(t, []bool{false}, landscape)
+}
+
+// Item 6: a six-month term turns the page landscape; every month label, every
+// grade and the whole long subject name are there.
+func TestASixMonthTermPrintsLandscape(t *testing.T) {
+	doc, err := reportcard.PDF(reportcard.Document{School: school, Card: sixMonthCard()})
+	require.NoError(t, err)
+	texts, landscape := pages(t, doc)
+	require.Len(t, texts, 1)
+	assert.Equal(t, []bool{true}, landscape)
+	for _, want := range []string{"Ene 2027", "Feb 2027", "Mar 2027", "Abr 2027", "May 2027", "Jun 2027",
+		"FIN", "Matemáticas", "9.5", "10", "Promedio general"} {
+		assert.Contains(t, texts[0], want)
+	}
+}
+
+// Item 7: sixteen subjects with long names run onto a second page, and the
+// table header is printed again on top of it; no subject is lost.
+func TestManySubjectsBreakPagesAndRepeatTheHeader(t *testing.T) {
+	card := sampleCard()
+	card.Lines = nil
+	for i := 1; i <= 16; i++ {
+		card.Lines = append(card.Lines, client.ReportCardLine{
+			SubjectName: fmt.Sprintf("Asignatura %02d de Formación Integral, Lenguajes y Saberes Científicos Comunitarios", i),
+			Position:    i, MonthValues: map[string]string{"2026-09": "9"}, TermAverage: "9.0",
+		})
+	}
+	doc, err := reportcard.PDF(reportcard.Document{School: school, Card: card})
+	require.NoError(t, err)
+	texts, _ := pages(t, doc)
+	require.Greater(t, len(texts), 1, "sixteen long subjects do not fit one page")
+	all := strings.Join(texts, "\n")
+	for i := 1; i <= 16; i++ {
+		assert.Contains(t, all, fmt.Sprintf("Asignatura %02d", i))
+	}
+	for i, text := range texts {
+		if !strings.Contains(text, "Asignatura") {
+			continue // a trailing page with only the footer
+		}
+		assert.Contains(t, text, "Materia", "page %d repeats the table header", i+1)
+		assert.Contains(t, text, "Sep 2026", "page %d repeats the month labels", i+1)
+	}
 }
