@@ -44,7 +44,9 @@ vi.mock("./finance/api", () => ({
   registerDeposit: vi.fn(),
 }));
 
-vi.mock("./config/api", () => ({
+vi.mock("./config/api", async (importOriginal) => ({
+  // The real error class: screens import it at module scope to branch on refusals.
+  ConfigError: (await importOriginal<typeof import("./config/api")>()).ConfigError,
   listCycles: vi.fn().mockResolvedValue([]),
   listGroups: vi.fn().mockResolvedValue([]),
   listLabelledGroups: vi.fn().mockResolvedValue([]),
