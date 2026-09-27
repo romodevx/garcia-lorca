@@ -2,7 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { Level } from "../../config/api";
+import { ConfigError, type Level } from "../../config/api";
 import { GradingControl } from "./GradingControl";
 
 const primaria: Level = {
@@ -158,5 +158,37 @@ describe("GradingControl", () => {
     await user.click(screen.getByRole("button", { name: "Guardar calificación" }));
 
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("No se pudo guardar la calificación del nivel: el nivel no existe"));
+  });
+
+  describe("a scale the captured grades would not fit (SCALE_TIGHTENING)", () => {
+    const TEXT = "Ya hay calificaciones capturadas en este ciclo que no cumplirían la nueva escala";
+    const tightening = (): ConfigError => new ConfigError(409, TEXT, "SCALE_TIGHTENING");
+
+    it("the scale form says so next to it and puts the saved values back", async () => {
+      const user = userEvent.setup();
+      renderControl(primaria, vi.fn().mockRejectedValue(tightening()));
+
+      await user.clear(screen.getByLabelText("Calificación mínima", CAMPO));
+      await user.type(screen.getByLabelText("Calificación mínima", CAMPO), "5.5");
+      await user.click(screen.getByRole("radio", { name: "Sin decimales" }));
+      await user.click(screen.getByRole("button", { name: "Guardar calificación" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(TEXT);
+      expect(screen.getByRole("alert")).not.toHaveTextContent("No se pudo guardar");
+      expect(screen.getByLabelText("Calificación mínima", CAMPO)).toHaveValue(5);
+      expect(screen.getByRole("radio", { name: "1 decimal" })).toBeChecked();
+    });
+
+    it("turning grading off goes back on and says why", async () => {
+      const user = userEvent.setup();
+      renderControl(primaria, vi.fn().mockRejectedValue(tightening()));
+      const toggle = screen.getByRole("checkbox", { name: "Lleva calificación numérica" });
+
+      await user.click(toggle);
+
+      await waitFor(() => expect(toggle).toBeChecked());
+      expect(screen.getByRole("alert")).toHaveTextContent(TEXT);
+      expect(screen.getByLabelText("Calificación máxima", CAMPO)).toHaveValue(10);
+    });
   });
 });

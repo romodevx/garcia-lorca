@@ -142,12 +142,15 @@ export class ConfigError extends Error {
   readonly status: number;
   /** The server's own words, when it sent any. */
   readonly detail: string;
+  /** The refusal's machine code (`X-Error-Code`), e.g. SCALE_TIGHTENING. */
+  readonly code: string | undefined;
 
-  constructor(status: number, detail: string) {
+  constructor(status: number, detail: string, code?: string) {
     super(detail !== "" ? detail : `HTTP ${status}`);
     this.name = "ConfigError";
     this.status = status;
     this.detail = detail;
+    this.code = code;
   }
 
   /** The thing already exists. Retrying the same input never helps. */
@@ -163,7 +166,7 @@ export class ConfigError extends Error {
 
 async function configFailure(res: Response): Promise<ConfigError> {
   const body = await res.text().catch(() => "");
-  return new ConfigError(res.status, body.trim());
+  return new ConfigError(res.status, body.trim(), res.headers.get("X-Error-Code") ?? undefined);
 }
 
 async function postJSON<T>(baseURL: string, path: string, body: unknown): Promise<T> {

@@ -5,12 +5,16 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactEle
 import { Btn } from "../../_design/Controls";
 import { Toast } from "../../_design/Toast";
 import { NumberField, useFocusFirstInvalid } from "../../_design/form";
-import type { Level, LevelGrading } from "../../config/api";
+import { ConfigError, type Level, type LevelGrading } from "../../config/api";
 import { DEFAULT_GRADING, fromDraft, gradingErrors, toDraft, type GradingDraft, type GradingErrors, type GradingField } from "./gradingDraft";
 import { ErrorAlert, RadioGroup } from "./parts";
 import { useSerialToggle } from "./useSerialToggle";
 
 const TOAST_MS = 2600;
+/** Grades already captured this cycle would not fit the new (or disabled) scale. */
+const SCALE_TIGHTENING = "SCALE_TIGHTENING";
+
+const isScaleTightening = (err: unknown): err is ConfigError => err instanceof ConfigError && err.code === SCALE_TIGHTENING && err.detail !== "";
 const DECIMAL_OPTIONS = [
   { value: "0", label: "Sin decimales" },
   { value: "1", label: "1 decimal" },
@@ -51,6 +55,13 @@ export function GradingControl({ level, onChange }: GradingControlProps): ReactE
       timer.current = window.setTimeout(() => setToast(undefined), TOAST_MS);
       return true;
     } catch (err) {
+      if (isScaleTightening(err)) {
+        // The server kept the saved scale: show it again, with the reason beside it.
+        setDraft(toDraft(lastSaved.current));
+        setErrors({});
+        setFailure(err.detail);
+        return false;
+      }
       setFailure(`No se pudo guardar la calificación del nivel: ${err instanceof Error ? err.message : "reintenta"}`);
       return false;
     }
