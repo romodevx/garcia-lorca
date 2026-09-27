@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -90,6 +90,65 @@ describe("GradingControl", () => {
 
     expect(await screen.findByText("La máxima debe ser mayor que la mínima.")).toBeInTheDocument();
     expect(save).not.toHaveBeenCalled();
+  });
+
+  it("the toggle saves the last saved scale, never a half-typed invalid one", async () => {
+    const user = userEvent.setup();
+    const save = renderControl(primaria);
+
+    await user.clear(screen.getByLabelText("Calificación máxima", CAMPO));
+    await user.type(screen.getByLabelText("Calificación máxima", CAMPO), "101");
+    await user.click(screen.getByRole("checkbox", { name: "Lleva calificación numérica" }));
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledWith("l1", { enabled: false, min: 5, max: 10, decimals: 1, passing: 6 });
+  });
+
+  it("a toggle that fails to save goes back and says so", async () => {
+    const user = userEvent.setup();
+    renderControl(primaria, vi.fn().mockRejectedValue(new Error("sin red")));
+    const toggle = screen.getByRole("checkbox", { name: "Lleva calificación numérica" });
+
+    await user.click(toggle);
+
+    await waitFor(() => expect(toggle).toBeChecked());
+    expect(screen.getByRole("alert")).toHaveTextContent("No se pudo guardar la calificación del nivel: sin red");
+  });
+
+  it("toggles are sent one at a time; only the latest wish follows", async () => {
+    const user = userEvent.setup();
+    let release!: () => void;
+    const save = vi.fn().mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; })).mockResolvedValue(undefined);
+    renderControl(primaria, save);
+    const toggle = screen.getByRole("checkbox", { name: "Lleva calificación numérica" });
+
+    await user.click(toggle);
+    await user.click(toggle);
+    await user.click(toggle);
+    await user.click(toggle);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(toggle).toBeChecked();
+
+    await act(async () => release());
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    expect(save).toHaveBeenLastCalledWith("l1", { enabled: true, min: 5, max: 10, decimals: 1, passing: 6 });
+  });
+
+  it("toggles that end where the server already is send nothing more", async () => {
+    const user = userEvent.setup();
+    let release!: () => void;
+    const save = vi.fn().mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; })).mockResolvedValue(undefined);
+    renderControl(primaria, save);
+    const toggle = screen.getByRole("checkbox", { name: "Lleva calificación numérica" });
+
+    await user.click(toggle);
+    await user.click(toggle);
+    await user.click(toggle);
+    await act(async () => release());
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(toggle).not.toBeChecked();
   });
 
   it("says so when the save fails, in the server's words", async () => {
