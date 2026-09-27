@@ -38,7 +38,7 @@ export function MonthlyGradeSheet({ assignmentId, client, saves }: MonthlyGradeS
   return (
     <div>
       {lastSheet !== undefined && lastSheet.months.length > 0 && shownMonth !== undefined && (
-        <MonthChips months={lastSheet.months} selected={shownMonth} currentMonth={lastSheet.currentMonth} onChoose={choose} />
+        <MonthChips months={lastSheet.months} selected={shownMonth} currentMonth={lastSheet.currentMonth} closedMonths={lastSheet.closedMonths} onChoose={choose} />
       )}
       {load.kind === "loading" && <EmptyHint>Cargando lista…</EmptyHint>}
       {load.kind === "unavailable" && <EmptyHint>{load.reason}</EmptyHint>}

@@ -3,32 +3,43 @@
 import { type ReactElement } from "react";
 
 import { Icon } from "../../_design/Icon";
-import { monthChips } from "../../grades/monthly";
+import { monthChips, type MonthChip } from "../../grades/monthly";
 
 /** Said on a month that has not come yet — the server's own words for the refusal. */
 export const FUTURE_MONTH_REASON = "Aún no llega ese mes";
+/** Said on a month whose period the director closed. */
+export const CLOSED_MONTH_REASON = "Periodo cerrado";
 
 export interface MonthChipsProps {
   months: readonly string[];
   selected: string;
   /** The server's current month; the later months carry a lock (still selectable, read-only). */
   currentMonth?: string;
+  /** Months of a closed period; they carry a lock too (still selectable, read-only). */
+  closedMonths?: readonly string[];
   onChoose: (month: string) => void;
 }
 
 /** The cycle's months as one row of pills; it scrolls sideways on its own, never the page. */
-export function MonthChips({ months, selected, currentMonth, onChoose }: MonthChipsProps): ReactElement {
+function chipTitle(chip: MonthChip): string {
+  if (chip.closed) return `${chip.fullName} · ${CLOSED_MONTH_REASON}`;
+  return chip.future ? `${chip.fullName} · ${FUTURE_MONTH_REASON}` : chip.fullName;
+}
+
+export function MonthChips({ months, selected, currentMonth, closedMonths, onChoose }: MonthChipsProps): ReactElement {
   return (
     <div role="group" aria-label="Mes" style={{ display: "flex", gap: 8, overflowX: "auto", padding: "2px 2px 6px", marginBottom: 14, maxWidth: "100%" }}>
-      {monthChips(months, currentMonth).map((chip) => {
+      {monthChips(months, currentMonth, closedMonths).map((chip) => {
         const active = chip.month === selected;
+        const locked = chip.future || chip.closed;
         return (
           <button
             key={chip.month}
             type="button"
             aria-pressed={active}
-            title={chip.future ? `${chip.fullName} · ${FUTURE_MONTH_REASON}` : chip.fullName}
+            title={chipTitle(chip)}
             data-future={chip.future ? "true" : undefined}
+            data-closed={chip.closed ? "true" : undefined}
             onClick={() => onChoose(chip.month)}
             style={{
               flexShrink: 0,
@@ -41,13 +52,13 @@ export function MonthChips({ months, selected, currentMonth, onChoose }: MonthCh
               display: "inline-flex",
               alignItems: "center",
               gap: 6,
-              color: chip.future ? "var(--text-muted)" : "var(--text)",
+              color: locked ? "var(--text-muted)" : "var(--text)",
               fontSize: 16,
               fontWeight: active ? 700 : 600,
               cursor: "pointer",
             }}
           >
-            {chip.future && <Icon name="lock" size={16} />}
+            {locked && <Icon name="lock" size={16} />}
             {chip.label}
           </button>
         );

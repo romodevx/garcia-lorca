@@ -526,3 +526,30 @@ describe("MonthlyGradeSheet — refusals by code", () => {
     expect(await within(row).findByText("Algo nuevo que el servidor explica")).toBeInTheDocument();
   });
 });
+
+describe("MonthlyGradeSheet — closed period (T7)", () => {
+  it("a MONTH_LOCKED refusal is a notice for the whole sheet, and is not retried", async () => {
+    const user = userEvent.setup();
+    const client = fakeClient();
+    client.save.mockRejectedValue(new GradeRequestError(409, "El periodo está cerrado", "MONTH_LOCKED"));
+    await renderSheet(client);
+
+    await user.type(input("Alan Turing"), "9{Enter}");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("El periodo está cerrado");
+    expect(screen.queryByRole("button", { name: /Reintentar/ })).toBeNull();
+    expect(client.save).toHaveBeenCalledTimes(1);
+  });
+
+  it("puts a lock on the months of a closed period and shows the read-only reason", async () => {
+    const closed: GradeSheet = { ...SHEET, closedMonths: ["2026-08", "2026-09"], editable: false, readOnlyReason: "El periodo está cerrado" };
+    await renderSheet(fakeClient(closed));
+
+    const september = screen.getByRole("button", { name: "Sep" });
+    expect(september).toHaveAttribute("data-closed", "true");
+    expect(september).toHaveAttribute("title", "septiembre de 2026 · Periodo cerrado");
+    expect(screen.getByRole("button", { name: "Oct" })).not.toHaveAttribute("data-closed");
+    expect(screen.getByRole("note")).toHaveTextContent("El periodo está cerrado");
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+});

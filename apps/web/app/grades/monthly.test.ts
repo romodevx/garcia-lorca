@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { gradeFailure, GradeRequestError, monthChips, parseGradeInput, refusalScope, sheetStats, validateGrade, type GradeScale } from "./monthly";
+import { gradeFailure, GradeRequestError, isRejectedValue, monthChips, parseGradeInput, refusalScope, sheetStats, validateGrade, type GradeScale } from "./monthly";
 
 const SCALE: GradeScale = { min: 5, max: 10, decimals: 1, passing: 6 };
 
@@ -91,7 +91,7 @@ describe("monthChips", () => {
   });
 
   it("gives every chip its full name", () => {
-    expect(monthChips(["2026-01"])[0]).toEqual({ month: "2026-01", label: "Ene", fullName: "enero de 2026", future: false });
+    expect(monthChips(["2026-01"])[0]).toEqual({ month: "2026-01", label: "Ene", fullName: "enero de 2026", future: false, closed: false });
   });
 
   it("marks the months after the server's current month as future", () => {
@@ -142,7 +142,24 @@ describe("refusalScope", () => {
     ["LEVEL_NOT_GRADED", "sheet"],
     ["LEVEL_SCALE_NOT_CONFIGURED", "sheet"],
     ["MONTH_IN_FUTURE", "sheet"],
+    ["MONTH_LOCKED", "sheet"],
   ] as const)("%s belongs to the %s", (code, scope) => {
     expect(refusalScope(code)).toBe(scope);
+  });
+});
+
+describe("closed periods (T7)", () => {
+  it("a MONTH_LOCKED refusal is final whatever its status: resending never helps", () => {
+    expect(isRejectedValue(new GradeRequestError(409, "El periodo está cerrado", "MONTH_LOCKED"))).toBe(true);
+    expect(isRejectedValue(new GradeRequestError(409, "Conflicto sin código"))).toBe(false);
+  });
+
+  it("marks the months of a closed period, when the sheet names them", () => {
+    const chips = monthChips(["2026-09", "2026-10", "2026-11"], "2026-11", ["2026-09", "2026-10"]);
+    expect(chips.map((c) => c.closed)).toEqual([true, true, false]);
+  });
+
+  it("marks none when the sheet does not say", () => {
+    expect(monthChips(["2026-09"], "2026-09").every((c) => !c.closed)).toBe(true);
   });
 });
