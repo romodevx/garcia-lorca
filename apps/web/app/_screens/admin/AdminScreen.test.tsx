@@ -159,9 +159,10 @@ describe("AdminScreen", () => {
     await user.click(screen.getByRole("button", { name: "Roles 1" }));
     await user.click(screen.getByRole("button", { name: /Nuevo rol/ }));
     const dialog = await screen.findByRole("dialog", { name: "Nuevo rol" });
-    const close = within(dialog).getByRole("button", { name: /Cerrar periodos y emitir boletas/ });
-    expect(close).toBeDisabled();
-    expect(close).toHaveAccessibleName(/solo el dueño/i);
+    expect(within(dialog).queryByRole("button", { name: /Cerrar periodos y emitir boletas/ })).toBeNull();
+    const item = within(dialog).getByText("Cerrar periodos y emitir boletas").closest("li");
+    expect(item).not.toBeNull();
+    expect(item).toHaveTextContent("Solo el dueño");
   });
 
   // Both actions are gated on the row's state, and both used to be gated on

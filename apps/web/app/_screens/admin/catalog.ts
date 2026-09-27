@@ -22,7 +22,7 @@ export interface PermissionDef {
 }
 
 /** Appended to an owner-only permission's name in the editors. */
-export const OWNER_ONLY_NOTE = "solo el dueño";
+export const OWNER_ONLY_NOTE = "Solo el dueño";
 
 export interface PermissionGroup {
   resource: string;
