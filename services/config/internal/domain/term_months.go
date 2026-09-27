@@ -12,6 +12,13 @@ import (
 // monthLayout is the wire form of a calendar month: "2026-09".
 const monthLayout = "2006-01"
 
+// MaxTermMonths is the most months one term may cover. A report card prints
+// one column per month, and a longer term no longer fits a page (T7).
+const MaxTermMonths = 6
+
+// msgTermTooLong is the refusal for a term longer than MaxTermMonths.
+const msgTermTooLong = "Un periodo puede tener hasta 6 meses"
+
 // ParseMonth reads a "YYYY-MM" month into its first day, in UTC. Anything else
 // (a day, a one-digit month, month 13) is KindInvalid.
 func ParseMonth(raw string) (time.Time, error) {
@@ -39,7 +46,8 @@ func (t Term) Months() []time.Time {
 }
 
 // WithMonths returns a copy of t covering exactly months (first day of each),
-// sorted and de-duplicated. An empty set clears the term. Whether a month lies
+// sorted and de-duplicated. An empty set clears the term; more than
+// MaxTermMonths distinct months is refused with TERM_TOO_LONG. Whether a month lies
 // in the cycle, or already belongs to a sibling term, needs the cycle and the
 // siblings, so the use case and the repository decide those.
 func (t Term) WithMonths(months []time.Time) (Term, error) {
@@ -55,6 +63,9 @@ func (t Term) WithMonths(months []time.Time) (Term, error) {
 		}
 		seen[key] = struct{}{}
 		out = append(out, key)
+	}
+	if len(out) > MaxTermMonths {
+		return Term{}, refusal(glerrors.KindInvalid, CodeTermTooLong, msgTermTooLong)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Before(out[j]) })
 	t.months = out
@@ -77,6 +88,7 @@ type RefusalCode string
 const (
 	CodeMonthInOtherTerm  RefusalCode = "MONTH_IN_OTHER_TERM"
 	CodeMonthOutsideCycle RefusalCode = "MONTH_OUTSIDE_CYCLE"
+	CodeTermTooLong       RefusalCode = "TERM_TOO_LONG"
 )
 
 // RefusalError is a typed domain error that also names its RefusalCode. It

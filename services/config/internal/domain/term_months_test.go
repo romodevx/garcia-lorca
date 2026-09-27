@@ -162,3 +162,21 @@ func TestFirstMonthInOtherTerm(t *testing.T) {
 		})
 	}
 }
+
+// A term covers at most six months: longer ones are refused (TERM_TOO_LONG),
+// counted after de-duplication.
+func TestTermWithMonthsCapsAtSixMonths(t *testing.T) {
+	term := newTestTerm(t)
+	six := []time.Time{
+		month(2026, time.September), month(2026, time.October), month(2026, time.November),
+		month(2026, time.December), month(2027, time.January), month(2027, time.February),
+	}
+	got, err := term.WithMonths(append(six, month(2026, time.September)))
+	require.NoError(t, err, "a duplicate does not count twice")
+	assert.Len(t, got.Months(), 6)
+
+	_, err = term.WithMonths(append(six, month(2027, time.March)))
+	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err))
+	assert.Equal(t, domain.CodeTermTooLong, domain.RefusalCodeOf(err))
+	assert.Equal(t, "Un periodo puede tener hasta 6 meses", glerrors.SafeMessage(err))
+}

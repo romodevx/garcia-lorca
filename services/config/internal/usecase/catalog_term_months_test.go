@@ -102,6 +102,19 @@ func TestSetTermMonths(t *testing.T) {
 			want:   []string{"2026-08", "2027-08"},
 		},
 		{
+			name:     "a term longer than six months is refused",
+			termID:   func(r rig) string { return r.t1.ID() },
+			months:   months("2026-09", "2026-10", "2026-11", "2026-12", "2027-01", "2027-02", "2027-03"),
+			wantKind: glerrors.KindInvalid,
+			wantCode: domain.CodeTermTooLong,
+		},
+		{
+			name:   "six months is the longest term",
+			termID: func(r rig) string { return r.t1.ID() },
+			months: months("2026-09", "2026-10", "2026-11", "2026-12", "2027-01", "2027-02"),
+			want:   []string{"2026-09", "2026-10", "2026-11", "2026-12", "2027-01", "2027-02"},
+		},
+		{
 			name:     "a month outside the cycle is refused",
 			termID:   func(r rig) string { return r.t1.ID() },
 			months:   months("2026-09", "2027-09"),
