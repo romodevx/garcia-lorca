@@ -1,224 +1,114 @@
-import { useMemo, type ReactElement } from "react";
-import { StyleSheet, Text, View } from "react-native";
-import type { FamilyGradeEntry } from "../api";
+import { useState, type ReactElement } from "react";
+import { useRefreshHandler } from "../components/refresh";
 import { useAppState } from "../state/AppState";
 import { toChildView } from "../state/childView";
-import { useChildGrades } from "../state/familyData";
-import { useRefreshHandler } from "../components/refresh";
-import { useTheme, type ThemeColors } from "../theme";
-import { Card, EmptyState, ListRow, Ring, ScreenTitle, SectionLabel } from "../ui";
+import { useChildMonthlyGrades } from "../state/familyData";
+import { Card, EmptyState, ScreenTitle } from "../ui";
+import { deviceMonth } from "./attendanceView";
 import { AsyncErrorState, AsyncLoading, StaleNotice } from "./AsyncStates";
+import { MonthChips } from "./grades/MonthChips";
+import { MonthGrades } from "./grades/MonthGrades";
+import { defaultMonth } from "./gradesView";
 
-/** One subject's entries collapsed into a display row. */
-interface SubjectGroup {
-  subjectId: string;
-  subjectName: string;
-  average: number;
-  termCount: number;
+const HTTP_NOT_FOUND = 404;
+const TITLE = "Calificaciones";
+
+export interface GradesScreenProps {
+  /** The phone's month by default (tests pin it); only a fallback for the first month shown. */
+  currentMonth?: string;
 }
 
-const MISSING_SUBJECT_NAME = "Materia sin nombre";
-
-function numericBadge(colors: ThemeColors, g: number): { bg: string; fg: string } {
-  if (g >= 9) return { bg: colors.okBg, fg: colors.ok };
-  if (g >= 8) return { bg: colors.primarySoft, fg: colors.primaryInk };
-  if (g >= 7) return { bg: colors.warnBg, fg: colors.warn };
-  return { bg: colors.badBg, fg: colors.bad };
-}
-
-function fmt(n: number): string {
-  return n === 10 ? "10" : n.toFixed(1);
-}
-
-function mean(values: number[]): number {
-  return values.length === 0 ? 0 : values.reduce((a, b) => a + b, 0) / values.length;
-}
-
-/** Accumulator for one subject while grouping (values + best-known display name). */
-interface SubjectAccumulator {
-  values: number[];
-  name: string;
+/** A month the parent picked, remembered only for the child it was picked on. */
+interface PickedMonth {
+  childId: string | null;
+  month: string;
 }
 
 /**
- * Collapses the flat entries into one row per subject, preserving first-seen order.
- * Grouping keys on the STABLE `subjectId`, never the display name: the gateway
- * degrades `subjectName` to "" on a config outage (a tested contract), so keying
- * on the name would merge every subject into one bogus row (bug_004). The display
- * name is derived separately and upgraded from a later entry for the same subject
- * that carries a non-empty name.
+ * Calificaciones: the child's monthly grade per subject, visible as soon as the
+ * teacher captures it (`GET /family/students/{id}/grades/monthly`). Month chips,
+ * the month's average, and each subject's grade — a failing one says
+ * "Reprobada" in words, never by colour alone. Preescolar keeps the
+ * qualitative "Próximamente" placeholder. Reloads on pull and on foreground.
  */
-function groupBySubject(entries: FamilyGradeEntry[]): SubjectGroup[] {
-  const order: string[] = [];
-  const bySubject = new Map<string, SubjectAccumulator>();
-  for (const e of entries) {
-    let acc = bySubject.get(e.subjectId);
-    if (!acc) {
-      acc = { values: [], name: "" };
-      bySubject.set(e.subjectId, acc);
-      order.push(e.subjectId);
-    }
-    acc.values.push(e.value);
-    // Keep the first non-empty name we see for this subject (upgrade the label).
-    if (!acc.name && e.subjectName) {
-      acc.name = e.subjectName;
-    }
-  }
-  return order.map((subjectId) => {
-    const acc = bySubject.get(subjectId) ?? { values: [], name: "" };
-    return {
-      subjectId,
-      subjectName: acc.name || MISSING_SUBJECT_NAME,
-      average: mean(acc.values),
-      termCount: acc.values.length,
-    };
-  });
-}
-
-/**
- * Calificaciones: the child's real numeric grades from
- * `GET /api/v1/family/students/{id}/grades`, grouped by subject with a
- * real-average ring.
- *
- * Qualitative gap: the backend stores a single numeric `value` per entry and has
- * no qualitative (logrado/proceso) representation. Kínder is evaluated
- * qualitatively, so for a kínder child the screen shows a "Próximamente" state
- * rather than fabricating either numeric or qualitative marks.
- * TODO(pendiente-backend: qualitative grades) — render the real qualitative
- * boleta once the grades service exposes it.
- */
-export function GradesScreen(): ReactElement {
+export function GradesScreen({ currentMonth }: GradesScreenProps): ReactElement {
   const { child, selectedChildId, childLoading, childError, refreshChildren } = useAppState();
-  const view = toChildView(child);
-  const { data, loading, error, reload } = useChildGrades(selectedChildId);
+  const { data, loading, error, errorStatus, reload } = useChildMonthlyGrades(selectedChildId);
+  const [picked, setPicked] = useState<PickedMonth | null>(null);
   useRefreshHandler(reload);
-  const theme = useTheme();
 
-  const entries = data ?? [];
-  const subjects = useMemo(() => groupBySubject(entries), [entries]);
-  const average = useMemo(() => mean(entries.map((e) => e.value)), [entries]);
-
-  // No child to read against (child bootstrap failed): show the error, never the
-  // fabricated "Aún no hay calificaciones" empty state (bug_005).
   if (childError) {
-    return (
-      <>
-        <ScreenTitle>Calificaciones</ScreenTitle>
-        <AsyncErrorState
-          title="No pudimos cargar las calificaciones"
-          subtitle="Revisa tu conexión e inténtalo de nuevo."
-          onRetry={refreshChildren}
-        />
-      </>
-    );
+    return <Failed onRetry={refreshChildren} />;
   }
-
-  // Qualitative levels (kínder) have no backend representation — never fabricate.
-  if (view.qualitative) {
-    return (
-      <>
-        <ScreenTitle>Calificaciones</ScreenTitle>
-        <Card padded style={{ marginTop: 12 }}>
-          <EmptyState
-            icon="sparkles"
-            title="Próximamente"
-            subtitle="La boleta cualitativa de este nivel estará disponible pronto."
-          />
-        </Card>
-      </>
-    );
+  if (toChildView(child).qualitative || data?.gradingEnabled === false) {
+    return <QualitativePending />;
   }
-
-  // A failed refresh over data already on screen keeps the data (inline notice below).
   if (error && data === null) {
+    return <Failed onRetry={reload} notFound={errorStatus === HTTP_NOT_FOUND} />;
+  }
+  if (data === null) {
     return (
       <>
-        <ScreenTitle>Calificaciones</ScreenTitle>
-        <AsyncErrorState
-          title="No pudimos cargar las calificaciones"
-          subtitle="Revisa tu conexión e inténtalo de nuevo."
-          onRetry={reload}
-        />
+        <ScreenTitle>{TITLE}</ScreenTitle>
+        {childLoading || loading ? <AsyncLoading /> : null}
       </>
     );
   }
 
-  if ((childLoading || loading) && data === null) {
-    return (
-      <>
-        <ScreenTitle>Calificaciones</ScreenTitle>
-        <AsyncLoading />
-      </>
-    );
-  }
+  const pickedMonth = picked?.childId === selectedChildId ? picked.month : null;
+  const month =
+    pickedMonth !== null && data.months.includes(pickedMonth) ? pickedMonth : defaultMonth(data, currentMonth ?? deviceMonth());
 
-  if (entries.length === 0) {
-    return (
-      <>
-        <ScreenTitle>Calificaciones</ScreenTitle>
-        {error ? <StaleNotice /> : null}
+  return (
+    <>
+      <ScreenTitle>{TITLE}</ScreenTitle>
+      {error ? <StaleNotice /> : null}
+      {data.subjects.length === 0 ? (
         <Card padded style={{ marginTop: 12 }}>
           <EmptyState
             icon="book"
             title="Aún no hay calificaciones"
-            subtitle="Aquí verás las materias y su promedio cuando la escuela las publique."
+            subtitle="Aquí verás las materias y su calificación de cada mes cuando la escuela las capture."
           />
         </Card>
-      </>
-    );
-  }
+      ) : (
+        <>
+          <MonthChips
+            months={data.months}
+            selected={month}
+            onSelect={(m) => setPicked({ childId: selectedChildId, month: m })}
+          />
+          <MonthGrades subjects={data.subjects} month={month} scale={data.scale} />
+        </>
+      )}
+    </>
+  );
+}
 
+function QualitativePending(): ReactElement {
   return (
     <>
-      <ScreenTitle>Calificaciones</ScreenTitle>
-      {error ? <StaleNotice /> : null}
-
-      <Card style={styles.avgHero}>
-        <Ring pct={average / 10} color={theme.colors.ok} track={theme.colors.surfaceSunken}>
-          <Text accessibilityLabel="Promedio" style={[styles.avgNum, { color: theme.colors.ok, fontFamily: theme.fonts.uiExtra }]}>
-            {fmt(average)}
-          </Text>
-          <Text style={[styles.avgOf, { color: theme.colors.text3, fontFamily: theme.fonts.ui }]}>de 10</Text>
-        </Ring>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.heroTitle, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>Promedio general</Text>
-          <Text style={[styles.heroSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>
-            {subjects.length} materias
-          </Text>
-        </View>
-      </Card>
-
-      <SectionLabel>Materias</SectionLabel>
-      <Card>
-        {subjects.map((s, i) => {
-          const badge = numericBadge(theme.colors, s.average);
-          return (
-            <ListRow key={s.subjectId} divider={i > 0} accessibilityLabel={s.subjectName}>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.subjTitle, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{s.subjectName}</Text>
-                <Text style={[styles.subjSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>
-                  {s.termCount} {s.termCount === 1 ? "periodo" : "periodos"} · prom. {fmt(s.average)}
-                </Text>
-              </View>
-              <View style={[styles.gradeBadge, { backgroundColor: badge.bg }]}>
-                <Text style={[styles.gradeText, { color: badge.fg, fontFamily: theme.fonts.uiExtra }]}>{fmt(s.average)}</Text>
-              </View>
-            </ListRow>
-          );
-        })}
+      <ScreenTitle>{TITLE}</ScreenTitle>
+      <Card padded style={{ marginTop: 12 }}>
+        <EmptyState
+          icon="sparkles"
+          title="Próximamente"
+          subtitle="La boleta cualitativa de este nivel estará disponible pronto."
+        />
       </Card>
     </>
   );
 }
 
-const styles = StyleSheet.create({
-  avgHero: { padding: 20, marginTop: 12, flexDirection: "row", alignItems: "center", gap: 18 },
-  avgNum: { fontSize: 30, fontWeight: "800", letterSpacing: -0.5 },
-  avgOf: { fontSize: 12, fontWeight: "700" },
-  heroTitle: { fontSize: 19, fontWeight: "800" },
-  heroSub: { fontSize: 13, fontWeight: "600", marginTop: 2 },
-  subjTitle: { fontSize: 15, fontWeight: "800" },
-  subjSub: { fontSize: 12.5, fontWeight: "600", marginTop: 3 },
-  gradeBadge: { minWidth: 46, height: 46, borderRadius: 23, paddingHorizontal: 8, alignItems: "center", justifyContent: "center" },
-  gradeText: { fontSize: 20, fontWeight: "800" },
-});
+function Failed({ onRetry, notFound = false }: { onRetry: () => void; notFound?: boolean }): ReactElement {
+  return (
+    <>
+      <ScreenTitle>{TITLE}</ScreenTitle>
+      <AsyncErrorState
+        title={notFound ? "No encontramos a este alumno" : "No pudimos cargar las calificaciones"}
+        subtitle={notFound ? "Si crees que es un error, avisa a la escuela." : "Revisa tu conexión e inténtalo de nuevo."}
+        onRetry={onRetry}
+      />
+    </>
+  );
+}
