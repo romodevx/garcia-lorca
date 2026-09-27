@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent, type ReactElement } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import type { Cycle, LabelledGroup, Subject } from "../../config/api";
 import type {
@@ -8,8 +8,11 @@ import type {
   Teacher,
   TeachingAssignment,
 } from "../../teachers/api";
-import { SelectField, type SelectOption } from "../../_design/form";
+import { SelectField, useRequired, type SelectOption } from "../../_design/form";
 import { EmptyHint, ErrorAlert, Section } from "../config/parts";
+
+/** What an assignment needs, in the order the form shows it (the first missing takes the focus). */
+const REQUIRED = ["cycleId", "groupId", "subjectId", "teacherId"] as const;
 
 export interface AssignmentsPanelProps {
   cycles: readonly Cycle[];
@@ -28,7 +31,8 @@ export interface AssignmentsPanelProps {
  * impossible: once a group is chosen the subject dropdown is scoped to THAT
  * group's grade level (only teachable subjects appear), and cycleId is never
  * entered — the server derives it from the group. The gateway enforces the same
- * invariants; this screen is UX only.
+ * invariants; this screen is UX only. "Asignar profesor" is never disabled: a
+ * submit with something missing marks every missing field and focuses the first.
  */
 export function AssignmentsPanel({
   cycles,
@@ -45,8 +49,9 @@ export function AssignmentsPanel({
   const [subjectId, setSubjectId] = useState("");
   const [teacherId, setTeacherId] = useState("");
   const [assignments, setAssignments] = useState<TeachingAssignment[]>([]);
-  const [pending, setPending] = useState(false);
+  const pending = useRef(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  const required = useRequired(REQUIRED);
 
   // Auto-select a cycle (active, else first) so the flow starts one click ahead.
   useEffect(() => {
@@ -89,11 +94,16 @@ export function AssignmentsPanel({
     };
   }, [groupId, groups, loadSubjects, loadAssignments]);
 
-  const canSubmit = groupId !== "" && subjectId !== "" && teacherId !== "" && !pending;
+  const choose = (key: (typeof REQUIRED)[number], set: (value: string) => void) => (value: string): void => {
+    set(value);
+    if (value !== "") required.clear(key);
+  };
 
   const submit = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
-    setPending(true);
+    if (pending.current) return;
+    if (!required.check({ cycleId, groupId, subjectId, teacherId })) return;
+    pending.current = true;
     setError(undefined);
     try {
       await onCreate({ groupId, subjectId, teacherId });
@@ -104,7 +114,7 @@ export function AssignmentsPanel({
     } catch {
       setError("No se pudo asignar al profesor. Intenta de nuevo.");
     } finally {
-      setPending(false);
+      pending.current = false;
     }
   };
 
@@ -152,7 +162,8 @@ export function AssignmentsPanel({
             label="Ciclo"
             value={cycleId}
             options={cycleOptions}
-            onChange={setCycleId}
+            onChange={choose("cycleId", setCycleId)}
+            error={required.errors.cycleId}
             // Sin esta opción, cuando no hay ciclo activo el valor queda en ""
             // y el <select> se pinta en blanco con selectedIndex -1: parece
             // roto. El SelectField viejo siempre traía una opción vacía; el
@@ -163,28 +174,28 @@ export function AssignmentsPanel({
             label="Grupo"
             value={groupId}
             options={groupOptions}
-            onChange={setGroupId}
-            help="El salón que le toca. Se enciende en cuanto eliges el ciclo."
-            disabled={groups.length === 0}
+            onChange={choose("groupId", setGroupId)}
+            error={required.errors.groupId}
+            help="El salón que le toca. La lista sale del ciclo elegido."
           />
           <SelectField
             label="Materia"
             value={subjectId}
             options={subjectOptions}
-            onChange={setSubjectId}
-            help="La materia que va a impartir en ese grupo."
-            disabled={groupId === ""}
+            onChange={choose("subjectId", setSubjectId)}
+            error={required.errors.subjectId}
+            help="La materia que va a impartir en ese grupo. La lista sale del grado del grupo."
           />
           <SelectField
             label="Profesor"
             value={teacherId}
             options={teacherOptions}
-            onChange={setTeacherId}
+            onChange={choose("teacherId", setTeacherId)}
+            error={required.errors.teacherId}
             help="Quién la imparte. Sólo aparecen los docentes dados de alta."
-            disabled={teachers.length === 0}
           />
         </div>
-        <Btn type="submit" icon="plus" disabled={!canSubmit}>
+        <Btn type="submit" icon="plus">
           Asignar profesor
         </Btn>
       </form>
