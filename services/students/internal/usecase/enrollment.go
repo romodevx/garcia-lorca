@@ -314,6 +314,15 @@ func (s *EnrollmentService) ListTransfers(ctx context.Context, studentID string)
 	return s.enrollments.ListTransfers(ctx, studentID)
 }
 
+// ListTransfersIntoGroup returns every move INTO a group, oldest first, so a
+// class list learns in ONE read when each pupil joined it.
+func (s *EnrollmentService) ListTransfersIntoGroup(ctx context.Context, groupID string) ([]domain.EnrollmentTransfer, error) {
+	if err := uuid.Validate(groupID); err != nil {
+		return nil, glerrors.New(glerrors.KindInvalid, "invalid group id")
+	}
+	return s.enrollments.ListTransfersIntoGroup(ctx, groupID)
+}
+
 // ListEnrollments returns enrollments matching the given filters ("" skips a filter).
 func (s *EnrollmentService) ListEnrollments(ctx context.Context, studentID, cycleID, groupID string) ([]domain.Enrollment, error) {
 	return s.enrollments.ListEnrollments(ctx, studentID, cycleID, groupID)

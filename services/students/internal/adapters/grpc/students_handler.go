@@ -163,6 +163,7 @@ func (h *StudentsHandler) ListStudents(ctx context.Context, req *connect.Request
 		LevelID:    m.GetLevelId(),
 		Status:     protoconv.ToDomainStatus(m.GetStatus()),
 		GradeGroup: m.GetGradeGroup(),
+		IDs:        m.GetIds(),
 		PageSize:   int(m.GetPageSize()),
 		PageToken:  m.GetPageToken(),
 	})
@@ -255,10 +256,23 @@ func (h *StudentsHandler) TransferStudent(ctx context.Context, req *connect.Requ
 	return connect.NewResponse(&studentsv1.TransferStudentResponse{Enrollment: toProtoEnrollment(enrollment)}), nil
 }
 
-// ListTransfers returns a pupil's group moves, oldest first. A malformed
-// student id is InvalidArgument.
+// ListTransfers returns a pupil's group moves (student_id) or every move into
+// a group (to_group_id), oldest first. Exactly one filter must be named; a
+// malformed id is InvalidArgument.
 func (h *StudentsHandler) ListTransfers(ctx context.Context, req *connect.Request[studentsv1.ListTransfersRequest]) (*connect.Response[studentsv1.ListTransfersResponse], error) {
-	transfers, err := h.enroll.ListTransfers(ctx, req.Msg.GetStudentId())
+	var (
+		transfers []domain.EnrollmentTransfer
+		err       error
+	)
+	studentID, groupID := req.Msg.GetStudentId(), req.Msg.GetToGroupId()
+	switch {
+	case groupID != "" && studentID != "":
+		err = glerrors.New(glerrors.KindInvalid, "name student_id or to_group_id, not both")
+	case groupID != "":
+		transfers, err = h.enroll.ListTransfersIntoGroup(ctx, groupID)
+	default:
+		transfers, err = h.enroll.ListTransfers(ctx, studentID)
+	}
 	if err != nil {
 		return nil, connectErr(err)
 	}

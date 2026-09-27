@@ -322,5 +322,24 @@ func (s *StudentService) ListStudents(ctx context.Context, f ports.ListFilter) (
 			return nil, "", glerrors.New(glerrors.KindInvalid, "level id is not a level id")
 		}
 	}
+	if err := validateStudentIDs(f.IDs); err != nil {
+		return nil, "", err
+	}
 	return s.repo.List(ctx, f)
+}
+
+// MaxListIDs is how many students one ids-filtered list may name: one page.
+const MaxListIDs = 200
+
+// validateStudentIDs checks an ids filter: at most MaxListIDs uuids.
+func validateStudentIDs(ids []string) error {
+	if len(ids) > MaxListIDs {
+		return glerrors.New(glerrors.KindInvalid, "too many student ids")
+	}
+	for _, id := range ids {
+		if err := uuid.Validate(id); err != nil {
+			return glerrors.New(glerrors.KindInvalid, "student id is not a student id")
+		}
+	}
+	return nil
 }

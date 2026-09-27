@@ -269,6 +269,16 @@ func TestListFilterAndPaginate(t *testing.T) {
 	if len(page2) != 1 || next2 != "" {
 		t.Errorf("page2 = %d rows, next=%q; want 1 + empty (last page)", len(page2), next2)
 	}
+
+	// An ids filter answers exactly the named students.
+	named := []string{"bbbbbbbb-1111-0000-0000-000000000001", "bbbbbbbb-1111-0000-0000-000000000003"}
+	byIDs, _, err := repo.List(ctx, ports.ListFilter{IDs: named, PageSize: len(named)})
+	if err != nil {
+		t.Fatalf("List by ids: %v", err)
+	}
+	if len(byIDs) != 2 || byIDs[0].ID() != named[0] || byIDs[1].ID() != named[1] {
+		t.Errorf("by ids = %d rows; want exactly the two named", len(byIDs))
+	}
 }
 
 func mustCURP(t *testing.T, s string) domain.CURP {

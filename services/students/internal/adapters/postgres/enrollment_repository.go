@@ -150,12 +150,24 @@ func (r *Repository) TransferEnrollment(ctx context.Context, cmd ports.TransferC
 // ListTransfers returns the moves of one student's enrollments, oldest moved_at
 // first (id breaks ties), in one tenant-bound query joined on enrollments.
 func (r *Repository) ListTransfers(ctx context.Context, studentID string) ([]domain.EnrollmentTransfer, error) {
+	return r.listTransfers(ctx, func(q *gorm.DB) *gorm.DB {
+		return q.Joins("JOIN enrollments e ON e.id = enrollment_transfers.enrollment_id").Where("e.student_id = ?", studentID)
+	})
+}
+
+// ListTransfersIntoGroup returns every move into one group, oldest moved_at
+// first (id breaks ties), in one tenant-bound query.
+func (r *Repository) ListTransfersIntoGroup(ctx context.Context, groupID string) ([]domain.EnrollmentTransfer, error) {
+	return r.listTransfers(ctx, func(q *gorm.DB) *gorm.DB {
+		return q.Where("enrollment_transfers.to_group_id = ?", groupID)
+	})
+}
+
+func (r *Repository) listTransfers(ctx context.Context, filter func(*gorm.DB) *gorm.DB) ([]domain.EnrollmentTransfer, error) {
 	var out []domain.EnrollmentTransfer
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var rows []enrollmentTransferModel
-		if err := tx.Model(&enrollmentTransferModel{}).
-			Joins("JOIN enrollments e ON e.id = enrollment_transfers.enrollment_id").
-			Where("e.student_id = ?", studentID).
+		if err := filter(tx.Model(&enrollmentTransferModel{})).
 			Order("enrollment_transfers.moved_at ASC, enrollment_transfers.id ASC").
 			Find(&rows).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "listing transfers", err)

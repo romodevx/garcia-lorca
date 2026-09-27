@@ -296,13 +296,15 @@ func TestListStudentsMapsFilterAndToken(t *testing.T) {
 		GradeGroup: "3° B",
 		PageSize:   25,
 		PageToken:  "tok-1",
+		Ids:        []string{"dddddddd-0000-0000-0000-000000000001"},
 	}))
 	if err != nil {
 		t.Fatalf("ListStudents: %v", err)
 	}
 	got := repo.lastFilter
 	if got.LevelID != "e1000000-0000-0000-0000-000000000003" || got.Status != domain.AdmissionAccepted ||
-		got.GradeGroup != "3° B" || got.PageSize != 25 || got.PageToken != "tok-1" {
+		got.GradeGroup != "3° B" || got.PageSize != 25 || got.PageToken != "tok-1" ||
+		len(got.IDs) != 1 || got.IDs[0] != "dddddddd-0000-0000-0000-000000000001" {
 		t.Errorf("filter not mapped 1:1 from the wire: %+v", got)
 	}
 	if res.Msg.GetNextPageToken() != "next-42" {

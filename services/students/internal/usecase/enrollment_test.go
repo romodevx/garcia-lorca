@@ -69,6 +69,10 @@ func (r *fakeEnrollRepo) ListTransfers(_ context.Context, studentID string) ([]d
 	return r.history[studentID], nil
 }
 
+func (r *fakeEnrollRepo) ListTransfersIntoGroup(_ context.Context, groupID string) ([]domain.EnrollmentTransfer, error) {
+	return r.history[groupID], nil
+}
+
 func newEnrollRepo() *fakeEnrollRepo {
 	return &fakeEnrollRepo{byID: map[string]domain.Enrollment{}, uniq: map[string]bool{}}
 }
