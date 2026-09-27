@@ -10,7 +10,11 @@ const secundaria: Level = { id: "l2", name: "SECUNDARIA", sepCode: "", enrollmen
 
 afterEach(() => vi.clearAllMocks());
 
-function renderPanel(selectedLevelId: string | undefined, onSetAttendanceMode = vi.fn().mockResolvedValue(undefined)) {
+function renderPanel(
+  selectedLevelId: string | undefined,
+  onSetAttendanceMode = vi.fn().mockResolvedValue(undefined),
+  onSetGrading = vi.fn().mockResolvedValue(undefined),
+) {
   render(
     <LevelsPanel
       levels={[primaria, secundaria, { ...primaria, id: "l3", name: "KINDER", attendanceMode: undefined }]}
@@ -18,6 +22,7 @@ function renderPanel(selectedLevelId: string | undefined, onSetAttendanceMode = 
       onSelect={() => {}}
       onCreate={vi.fn()}
       onSetAttendanceMode={onSetAttendanceMode}
+      onSetGrading={onSetGrading}
     />,
   );
   return onSetAttendanceMode;
@@ -58,5 +63,22 @@ describe("LevelsPanel — attendance mode", () => {
   it("offers nothing until a level is chosen", () => {
     renderPanel(undefined);
     expect(screen.queryByRole("radio", { name: "Por clase" })).toBeNull();
+  });
+});
+
+describe("LevelsPanel — grading", () => {
+  it("offers the selected level's numeric grading under its attendance", async () => {
+    const user = userEvent.setup();
+    const setGrading = vi.fn().mockResolvedValue(undefined);
+    renderPanel("l1", undefined, setGrading);
+
+    await user.click(screen.getByRole("checkbox", { name: "Lleva calificación numérica" }));
+
+    expect(setGrading).toHaveBeenCalledWith("l1", { enabled: false, min: 5, max: 10, decimals: 1, passing: 6 });
+  });
+
+  it("offers nothing until a level is chosen", () => {
+    renderPanel(undefined);
+    expect(screen.queryByRole("checkbox", { name: "Lleva calificación numérica" })).toBeNull();
   });
 });

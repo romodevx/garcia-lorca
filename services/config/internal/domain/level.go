@@ -52,11 +52,13 @@ type Level struct {
 	sepCode     string
 	granularity EnrollmentGranularity
 	attendance  AttendanceMode
+	grading     GradingScale
 }
 
 // NewLevel constructs a level. `id`, `tenantID`, and `name` are required, and
 // `gran` must be a known granularity. The attendance mode starts at the default
 // for the level's name (DefaultAttendanceMode); WithAttendanceMode changes it.
+// Likewise the grading scale starts at DefaultGradingScale; WithGrading changes it.
 func NewLevel(id, tenantID, name, sepCode string, gran EnrollmentGranularity) (Level, error) {
 	if strings.TrimSpace(id) == "" {
 		return Level{}, glerrors.New(glerrors.KindInvalid, "level id is required")
@@ -77,6 +79,7 @@ func NewLevel(id, tenantID, name, sepCode string, gran EnrollmentGranularity) (L
 		sepCode:     sepCode,
 		granularity: gran,
 		attendance:  DefaultAttendanceMode(name),
+		grading:     DefaultGradingScale(name),
 	}, nil
 }
 
@@ -105,5 +108,19 @@ func (l Level) WithAttendanceMode(mode AttendanceMode) (Level, error) {
 		return Level{}, glerrors.New(glerrors.KindInvalid, "level attendance mode is invalid")
 	}
 	l.attendance = mode
+	return l, nil
+}
+
+// Grading returns the level's numeric grading scale.
+func (l Level) Grading() GradingScale { return l.grading }
+
+// WithGrading returns a copy of the level grading on scale. A scale that breaks
+// the invariant (including the zero value) is KindInvalid; the receiver is never
+// modified.
+func (l Level) WithGrading(scale GradingScale) (Level, error) {
+	if err := scale.validate(); err != nil {
+		return Level{}, err
+	}
+	l.grading = scale
 	return l, nil
 }

@@ -23,13 +23,15 @@ var _ gradesv1connect.GradesServiceHandler = (*GradesHandler)(nil)
 
 // GradesHandler adapts the grades use cases to the generated Connect service.
 type GradesHandler struct {
-	grades *usecase.GradesService
-	health *usecase.HealthService
+	grades  *usecase.GradesService
+	monthly *usecase.MonthlyGradesService
+	health  *usecase.HealthService
 }
 
-// NewGradesHandler wires the handler to the grades + health use cases.
-func NewGradesHandler(grades *usecase.GradesService, health *usecase.HealthService) *GradesHandler {
-	return &GradesHandler{grades: grades, health: health}
+// NewGradesHandler wires the handler to the term grades, monthly grades and
+// health use cases.
+func NewGradesHandler(grades *usecase.GradesService, monthly *usecase.MonthlyGradesService, health *usecase.HealthService) *GradesHandler {
+	return &GradesHandler{grades: grades, monthly: monthly, health: health}
 }
 
 // Health is the liveness/ping probe present on every service.
@@ -111,6 +113,18 @@ func toProtoGradeEntry(e domain.GradeEntry) *gradesv1.GradeEntry {
 // the error straight to connect.NewError shipped Postgres constraint names and
 // SQLSTATEs — and on some constraints the conflicting value — to whoever called.
 func connectErr(err error) *connect.Error {
+	ce := connectErrForKind(err)
+	if code := domain.RefusalCodeOf(err); code != "" {
+		ce.Meta().Set(ErrorCodeMeta, string(code))
+	}
+	return ce
+}
+
+// ErrorCodeMeta is the error-metadata key a refusal's machine code rides in; the
+// gateway forwards it as the X-Error-Code response header.
+const ErrorCodeMeta = "X-Error-Code"
+
+func connectErrForKind(err error) *connect.Error {
 	safe := errors.New(glerrors.SafeMessage(err))
 
 	switch glerrors.KindOf(err) {

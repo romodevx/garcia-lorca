@@ -31,6 +31,11 @@ type levelModel struct {
 	SEPCode               string    `gorm:"column:sep_code"`
 	EnrollmentGranularity string    `gorm:"column:enrollment_granularity"`
 	AttendanceMode        string    `gorm:"column:attendance_mode"`
+	GradingEnabled        bool      `gorm:"column:grading_enabled"`
+	GradeMin              float64   `gorm:"column:grade_min"`
+	GradeMax              float64   `gorm:"column:grade_max"`
+	GradeDecimals         int       `gorm:"column:grade_decimals"`
+	GradePassing          float64   `gorm:"column:grade_passing"`
 	CreatedAt             time.Time `gorm:"column:created_at"`
 	UpdatedAt             time.Time `gorm:"column:updated_at"`
 }

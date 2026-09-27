@@ -1,13 +1,7 @@
 import { useMemo } from "react";
-import {
-  getAccount,
-  getCard,
-  getGrades,
-  type FamilyAccount,
-  type FamilyCard,
-  type FamilyGradeEntry,
-} from "../api";
+import { getAccount, getCard, type FamilyAccount, type FamilyCard } from "../api";
 import { getAttendanceMonth, type AttendanceMonth } from "../api/attendance";
+import { getMonthlyGrades, type MonthlyGrades } from "../api/grades";
 import { useFreshDataSignal } from "./freshness";
 import { useAsyncResource, type AsyncResource } from "./useAsyncResource";
 
@@ -63,10 +57,15 @@ export function useChildAttendanceMonth(
   return resource;
 }
 
-/** The selected child's numeric grade entries. */
-export function useChildGrades(childId: string | null): AsyncResource<FamilyGradeEntry[]> {
-  const load = useMemo(() => (childId ? () => getGrades(childId) : null), [childId]);
-  return useAsyncResource(load);
+/**
+ * The selected child's monthly grades for the cycle. Reloads on the freshness
+ * signal: a teacher's capture should show up when the parent reopens the app.
+ */
+export function useChildMonthlyGrades(childId: string | null): AsyncResource<MonthlyGrades> {
+  const load = useMemo(() => (childId ? () => getMonthlyGrades(childId) : null), [childId]);
+  const resource = useAsyncResource(load);
+  useFreshDataSignal(resource.reload, load !== null);
+  return resource;
 }
 
 /** The selected child's virtual card (task 13). */

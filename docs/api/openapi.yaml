@@ -75,6 +75,22 @@ tags:
       allowed for today and up to 7 days back, never the future. "Today" is the
       system's UTC date (a known fleet-wide offset: the school is UTC-6).
 
+  - name: grades
+    description: >
+      Monthly grades (T6). The school captures one grade per student, subject
+      and MONTH, autosaved per cell. The group's LEVEL decides the scale
+      (`GradingScale`: range, decimals, passing mark) and whether it takes
+      numeric grades at all (Preescolar does not). Every rule is judged by the
+      grades service, so the director routes (`grades:read` / `grades:write`,
+      any assignment of the school) and the teacher routes under
+      `/api/v1/teaching/grades` (`teaching:read` / `teaching:write`, only the
+      assignments the caller teaches in the active cycle — any other id is 404)
+      refuse with the same sentences. A grade is a JSON NUMBER whose exact text
+      is judged with decimal arithmetic (9.95 on a one-decimal scale is
+      refused, never rounded). Subject and teacher are derived from the
+      assignment. Corrections are always allowed while the period is open
+      (periods and closing arrive in T7).
+
   - name: family
     description: >
       The family app (T5). Bearer-authenticated, `family:read`. Self-scoped by
@@ -1684,13 +1700,22 @@ paths:
         schema: { type: string, format: uuid }
     patch:
       tags: [config-levels]
-      summary: Choose how a level takes attendance
+      summary: Change a level's attendance mode and/or grading scale
       description: >
-        `daily` — one pass list per group per day, taken by any teacher of the
-        group. `per_class` — one per group, subject and day, taken only by that
-        subject's teacher. Any other value is 400; an unknown level is 404.
-        Requires `config:write`.
-      operationId: setLevelAttendanceMode
+        `attendanceMode`: `daily` — one pass list per group per day, taken by
+        any teacher of the group; `per_class` — one per group, subject and day,
+        taken only by that subject's teacher. `grading` (T6): the WHOLE scale
+        (every field required), marks in the units a person types with at most
+        two decimals; config enforces 0 <= min < passing <= max <= 100 and
+        decimals 0..2 and answers its own sentence otherwise. Send either field
+        or both: they are applied in ONE config transaction, validated whole
+        before anything changes (a half-valid body changes nothing). A scale
+        may be LOOSENED freely (lower min, higher max, more decimals, another
+        passing mark); TIGHTENING it (higher min, lower max, fewer decimals) or
+        disabling grading is 409 `X-Error-Code: SCALE_TIGHTENING` when grades
+        already captured in the level's active cycle would not fit. An unknown
+        level is 404. Requires `config:write`.
+      operationId: patchLevel
       security: [{ sessionCookie: [] }]
       parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
       requestBody:
@@ -1699,11 +1724,13 @@ paths:
           application/json:
             schema:
               type: object
-              required: [attendanceMode]
+              minProperties: 1
               properties:
                 attendanceMode: { $ref: '#/components/schemas/AttendanceMode' }
-            example:
-              attendanceMode: per_class
+                grading: { $ref: '#/components/schemas/LevelGrading' }
+            examples:
+              attendance: { value: { attendanceMode: per_class } }
+              grading: { value: { grading: { enabled: true, min: 5, max: 10, decimals: 1, passing: 6 } } }
       responses:
         '200':
           description: The level, updated.
@@ -1714,6 +1741,16 @@ paths:
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: >
+            Grades already captured in the level's active cycle would not fit
+            the tightened (or disabled) scale.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: Ya hay calificaciones capturadas en este ciclo que no cumplirían la nueva escala
 
   /api/v1/attendance/roster:
     get:
@@ -2420,6 +2457,239 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
 
+  /api/v1/teaching/terms:
+    get:
+      tags: [grades]
+      summary: The terms the caller may pick (teacher, legacy term capture)
+      description: >
+        A term belongs to a cycle AND a level: this lists the terms of each
+        (cycle, group level) the caller teaches in the active cycle — never
+        another level's. With `assignmentId`, only that assignment's cycle and
+        level (404 when the caller does not teach it). A group whose level
+        cannot be resolved lists nothing. Behind `module_grades` AND
+        `module_config`. Requires `teaching:read`.
+      operationId: listTeachingTerms
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: assignmentId
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: The terms.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TermList' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/grades/terms:
+    get:
+      tags: [grades]
+      summary: The terms of an assignment's cycle and level (director, legacy term capture)
+      description: >
+        Only the terms the legacy capture accepts for this assignment: its
+        cycle's terms of its group's level. Behind `module_grades` AND
+        `module_config`. Requires `grades:read`.
+      operationId: listGradesTerms
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: assignmentId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The terms.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TermList' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/teaching/grades/sheet:
+    get:
+      tags: [grades]
+      summary: The monthly capture sheet of one of the caller's assignments (teacher)
+      description: >
+        Same as `GET /api/v1/grades/sheet`, limited to an assignment the caller
+        teaches in the active cycle (any other id is 404, like an unknown one).
+        A pupil who joined the group by transfer shows the earlier months
+        read-only (`rowEditable: false`, `rowReadOnlyReason` "Ese mes
+        corresponde al grupo anterior del alumno"): they belong to the previous
+        group. Behind `module_grades` AND `module_config`. Requires
+        `teaching:read`.
+      operationId: getTeachingMonthlySheet
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/GradesAssignmentId'
+        - $ref: '#/components/parameters/GradesMonth'
+      responses:
+        '200':
+          description: The sheet.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MonthlySheet' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/teaching/grades/monthly:
+    put:
+      tags: [grades]
+      summary: Save one monthly grade (teacher autosave)
+      description: >
+        Same as `PUT /api/v1/grades/monthly`, limited to an assignment the
+        caller teaches in the active cycle (404 otherwise). A month before the
+        pupil joined the group by transfer is 400 "Ese mes corresponde al grupo
+        anterior del alumno" (`X-Error-Code: MONTH_PREVIOUS_GROUP`). A month
+        after the current UTC month is 400 "Aún no llega ese mes"
+        (`X-Error-Code: MONTH_IN_FUTURE`). Behind
+        `module_grades` AND `module_config`. Requires `teaching:write`.
+      operationId: putTeachingMonthlyGrade
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody: { $ref: '#/components/requestBodies/MonthlyGrade' }
+      responses:
+        '200': { $ref: '#/components/responses/MonthlyGradeSaved' }
+        '400': { $ref: '#/components/responses/MonthlyGradeRefused' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+    delete:
+      tags: [grades]
+      summary: Empty one monthly grade (teacher)
+      description: >
+        Same as `DELETE /api/v1/grades/monthly`, limited to an assignment the
+        caller teaches in the active cycle (404 otherwise); the same
+        previous-group and future-month rules as the PUT. Requires `teaching:write`.
+      operationId: deleteTeachingMonthlyGrade
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/GradesAssignmentId'
+        - $ref: '#/components/parameters/GradesMonthRequired'
+        - $ref: '#/components/parameters/GradesEnrollmentId'
+      responses:
+        '204': { description: The cell is empty (also when it already was). }
+        '400': { $ref: '#/components/responses/MonthlyGradeRefused' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/grades/sheet:
+    get:
+      tags: [grades]
+      summary: The monthly capture sheet of an assignment (director)
+      description: >
+        One row per active enrollment of the assignment's group, sorted by last
+        name (Spanish order), with the grade of the month (`value`/`updatedAt`
+        null when empty). `months` are the cycle's months (start to end,
+        inclusive); `month` omitted ⇒ the current UTC month clamped into them.
+        A level without numeric grading still answers, with
+        `editable: false` and `readOnlyReason`. A month after the current UTC
+        month is listed in `months` but read-only (`editable: false`,
+        `readOnlyReason` "Aún no llega ese mes"), for every caller. A month outside the cycle is
+        400 "Ese mes no pertenece al ciclo"; an unknown assignment 404. Behind
+        `module_grades`. Requires `grades:read`.
+      operationId: getMonthlySheet
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/GradesAssignmentId'
+        - $ref: '#/components/parameters/GradesMonth'
+      responses:
+        '200':
+          description: The sheet.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MonthlySheet' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/grades/monthly:
+    put:
+      tags: [grades]
+      summary: Save one monthly grade (director autosave)
+      description: >
+        Records or corrects one student's grade for a subject and month (one
+        cell). `value` must be a JSON number — a string, null or a missing
+        value is 400; to empty a cell send DELETE. The caller is recorded as
+        who captured it. The director acts for the whole school: the months a
+        transferred pupil spent in a previous group stay writable, but a month
+        after the current UTC month is 400 "Aún no llega ese mes"
+        (`X-Error-Code: MONTH_IN_FUTURE`), as for a teacher. Every
+        refusal carries its code in `X-Error-Code`. Behind `module_grades`.
+        Requires `grades:write`.
+      operationId: putMonthlyGrade
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody: { $ref: '#/components/requestBodies/MonthlyGrade' }
+      responses:
+        '200': { $ref: '#/components/responses/MonthlyGradeSaved' }
+        '400': { $ref: '#/components/responses/MonthlyGradeRefused' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+    delete:
+      tags: [grades]
+      summary: Empty one monthly grade (director)
+      description: >
+        Removes one cell; emptying an empty cell succeeds. Same rules as the
+        PUT (month in the cycle and not in the future, enrollment in the group,
+        level with numeric grading). Behind `module_grades`. Requires `grades:write`.
+      operationId: deleteMonthlyGrade
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/GradesAssignmentId'
+        - $ref: '#/components/parameters/GradesMonthRequired'
+        - $ref: '#/components/parameters/GradesEnrollmentId'
+      responses:
+        '204': { description: The cell is empty (also when it already was). }
+        '400': { $ref: '#/components/responses/MonthlyGradeRefused' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/family/students/{studentId}/grades/monthly:
+    get:
+      tags: [family]
+      summary: A child's monthly grades
+      description: >
+        The child's ACTIVE enrollment, visible as soon as a grade is captured:
+        one entry per subject of the group (sorted by name, Spanish order),
+        each a month → grade object (`{}` when nothing is captured yet). A
+        level without numeric grading answers `gradingEnabled: false`, still
+        listing any grade captured before it stopped (never hidden, shown as
+        stored) and omitting `scale`. Of two active enrollments (re-enrolled for
+        next year) the one whose cycle is active is shown — else the one whose
+        cycle contains today (UTC). A child that is not the caller's, or has no
+        active enrollment, is 404. Behind `module_grades` AND
+        `module_students`.
+      operationId: getFamilyMonthlyGrades
+      security: [{ familyBearer: [] }]
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The child's monthly grades.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FamilyMonthlyGrades' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
 components:
   securitySchemes:
     sessionCookie:
@@ -2436,6 +2706,19 @@ components:
         The family app's access token (/api/v1/auth/mobile/*), sent as
         `Authorization: Bearer <token>`. No cookie, so no CSRF header.
   headers:
+    XErrorCode:
+      description: >
+        The refusal's machine code, so a screen can react (mark the cell, lock
+        the row) without parsing the sentence. Exposed to the web via CORS.
+        Monthly grades: GRADE_OUT_OF_RANGE, GRADE_DECIMALS, GRADE_NOT_NUMBER,
+        MONTH_OUTSIDE_CYCLE, LEVEL_NOT_GRADED, ENROLLMENT_NOT_IN_GROUP,
+        MONTH_PREVIOUS_GROUP, MONTH_IN_FUTURE, LEVEL_SCALE_NOT_CONFIGURED (and MONTH_LOCKED once
+        periods close, T7). Level scale change: SCALE_TIGHTENING. Absent on a
+        refusal without a code.
+      schema:
+        type: string
+        pattern: '^[A-Z][A-Z0-9_]{0,63}$'
+        example: GRADE_DECIMALS
     XScanResult:
       description: An attendance scan's verdict, for the screen's sound and colour.
       schema: { type: string, enum: [ok, invalid, foreign, suspended] }
@@ -2443,6 +2726,27 @@ components:
       description: A scan names a pupil from a credential; nothing caches it.
       schema: { type: string, const: no-store }
   requestBodies:
+    MonthlyGrade:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [assignmentId, month, enrollmentId, value]
+            properties:
+              assignmentId: { type: string, format: uuid }
+              month: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$', example: '2026-09' }
+              enrollmentId: { type: string, format: uuid }
+              value:
+                type: number
+                description: >
+                  A JSON number (never a string). Judged exactly on the level's
+                  scale: range first, then decimals.
+          example:
+            assignmentId: 9c3d1e2f-0000-4000-8000-000000000003
+            month: '2026-09'
+            enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301
+            value: 9.5
     AttendanceScan:
       required: true
       content:
@@ -2460,6 +2764,28 @@ components:
             groupId: 7a1c2e3d-0000-4000-8000-000000000001
             code: GLCARD:AQAAAAAAAAAAAAAAAAAAAA
   parameters:
+    GradesAssignmentId:
+      name: assignmentId
+      in: query
+      required: true
+      description: A teaching assignment (group + subject). Malformed or unknown ⇒ 404.
+      schema: { type: string, format: uuid }
+    GradesMonth:
+      name: month
+      in: query
+      required: false
+      description: '`YYYY-MM`; omitted ⇒ the current UTC month clamped into the cycle.'
+      schema: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$', example: '2026-09' }
+    GradesMonthRequired:
+      name: month
+      in: query
+      required: true
+      schema: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$', example: '2026-09' }
+    GradesEnrollmentId:
+      name: enrollmentId
+      in: query
+      required: true
+      schema: { type: string, format: uuid }
     AttendanceGroupId:
       name: groupId
       in: query
@@ -2501,6 +2827,38 @@ components:
       schema: { type: string, format: uuid }
 
   responses:
+    MonthlyGradeSaved:
+      description: The stored cell.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [enrollmentId, month, value, updatedAt]
+            properties:
+              enrollmentId: { type: string, format: uuid }
+              month: { type: string, example: '2026-09' }
+              value: { type: number, example: 9.5 }
+              updatedAt: { type: [string, 'null'], format: date-time }
+          example: { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301, month: '2026-09', value: 9.5, updatedAt: '2026-09-03T15:04:05Z' }
+    MonthlyGradeRefused:
+      description: >
+        A sentence for the teacher, shown as is, with its machine code in
+        `X-Error-Code`.
+      headers:
+        X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+      content:
+        text/plain:
+          schema: { type: string }
+          examples:
+            range: { value: La calificación debe estar entre 5 y 10 }
+            decimals: { value: Solo se permite 1 decimal }
+            month: { value: Ese mes no pertenece al ciclo }
+            future: { value: Aún no llega ese mes }
+            level: { value: Este nivel no lleva calificación numérica }
+            notNumber: { value: La calificación debe ser un número }
+            enrollment: { value: El alumno no está inscrito en este grupo }
+            previousGroup: { value: Ese mes corresponde al grupo anterior del alumno }
+            scaleNotConfigured: { value: La escala de calificación del nivel no está configurada }
     AttendanceScanResolved:
       description: >
         The card is not revoked and its pupil is actively enrolled in the group
@@ -3273,13 +3631,138 @@ components:
         (secundaria/preparatoria/bachillerato → per_class, others → daily).
     Level:
       type: object
-      required: [id, name, sepCode, enrollmentGranularity, attendanceMode]
+      required: [id, name, sepCode, enrollmentGranularity, attendanceMode, grading]
       properties:
         id: { type: string, format: uuid }
         name: { type: string, example: Secundaria }
         sepCode: { type: string }
         enrollmentGranularity: { type: string, enum: [cycle, term] }
         attendanceMode: { $ref: '#/components/schemas/AttendanceMode' }
+        grading: { $ref: '#/components/schemas/LevelGrading' }
+    GradingScale:
+      type: object
+      description: >
+        A level's numeric scale, in the units a person reads (at most two
+        decimals). 0 <= min < passing <= max <= 100; decimals 0..2.
+      required: [min, max, decimals, passing]
+      properties:
+        min: { type: number, example: 5 }
+        max: { type: number, example: 10 }
+        decimals: { type: integer, minimum: 0, maximum: 2, example: 1 }
+        passing: { type: number, example: 6 }
+    LevelGrading:
+      description: >
+        Whether the level takes numeric grades (`enabled`; Preescolar, Kínder
+        and Maternal start disabled) and on which scale. New levels default to
+        5–10, one decimal, 6 to pass.
+      allOf:
+        - $ref: '#/components/schemas/GradingScale'
+        - type: object
+          required: [enabled]
+          properties:
+            enabled: { type: boolean }
+      example: { enabled: true, min: 5, max: 10, decimals: 1, passing: 6 }
+    TermList:
+      type: object
+      required: [terms]
+      properties:
+        terms:
+          type: array
+          items:
+            type: object
+            required: [id, name, cycleId, levelId]
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string, example: Bloque 1 }
+              cycleId: { type: string, format: uuid }
+              levelId: { type: string, format: uuid }
+    MonthlySheet:
+      type: object
+      required: [assignmentId, month, months, scale, gradingEnabled, currentMonth, editable, rows]
+      properties:
+        assignmentId: { type: string, format: uuid }
+        month: { type: string, example: '2026-09' }
+        months:
+          type: array
+          description: The cycle's months, start to end inclusive.
+          items: { type: string, example: '2026-08' }
+        scale: { $ref: '#/components/schemas/GradingScale' }
+        gradingEnabled: { type: boolean }
+        currentMonth:
+          type: string
+          pattern: '^\d{4}-\d{2}$'
+          description: >
+            The server's current UTC month. Every month in `months` after it is
+            not gradable yet (read-only sheet, writes refused with
+            `MONTH_IN_FUTURE`), so the screen can mark those months up front.
+          example: '2026-09'
+        editable: { type: boolean }
+        readOnlyReason:
+          type: string
+          description: Why the sheet cannot be edited; absent when it can.
+          example: Este nivel no lleva calificación numérica
+        rows:
+          type: array
+          items:
+            type: object
+            required: [enrollmentId, studentId, name, value, updatedAt, rowEditable]
+            properties:
+              enrollmentId: { type: string, format: uuid }
+              studentId: { type: string, format: uuid }
+              name: { type: string, example: Ana Ávila }
+              value: { type: [number, 'null'], example: 9.5 }
+              updatedAt: { type: [string, 'null'], format: date-time }
+              rowEditable:
+                type: boolean
+                description: >
+                  Whether the caller may write THIS row's cell. False when the
+                  whole sheet is read-only, or — on the teacher's routes — when
+                  the month is before the one the pupil joined this group by
+                  transfer (it belongs to the previous group; the director may
+                  edit it).
+              rowReadOnlyReason:
+                type: string
+                description: Why the row cannot be edited; absent when it can.
+                example: Ese mes corresponde al grupo anterior del alumno
+      example:
+        assignmentId: 9c3d1e2f-0000-4000-8000-000000000003
+        month: '2026-09'
+        months: ['2026-08', '2026-09', '2026-10']
+        scale: { min: 5, max: 10, decimals: 1, passing: 6 }
+        gradingEnabled: true
+        editable: true
+        rows:
+          - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301, studentId: 6e1d2c3b-0000-4000-8000-000000000042, name: Ana Ávila, value: 9.5, updatedAt: '2026-09-03T15:04:05Z', rowEditable: true }
+          - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3302, studentId: 6e1d2c3b-0000-4000-8000-000000000043, name: Nico Núñez, value: null, updatedAt: null, rowEditable: false, rowReadOnlyReason: Ese mes corresponde al grupo anterior del alumno }
+    FamilyMonthlyGrades:
+      type: object
+      required: [gradingEnabled, cycleName, months, subjects]
+      properties:
+        gradingEnabled: { type: boolean }
+        cycleName: { type: string, example: 2026-2027 }
+        months:
+          type: array
+          items: { type: string, example: '2026-09' }
+        scale:
+          allOf: [{ $ref: '#/components/schemas/GradingScale' }]
+          description: >
+            The level's scale, present only when `gradingEnabled` is true.
+            A level that stopped grading numerically omits it: grades do not
+            record the scale they were captured under, so the app shows them
+            as stored and marks none as failing.
+        subjects:
+          type: array
+          items:
+            type: object
+            required: [subjectId, subjectName, grades]
+            properties:
+              subjectId: { type: string, format: uuid }
+              subjectName: { type: string, example: Matemáticas }
+              grades:
+                type: object
+                description: Month (`YYYY-MM`) → grade; `{}` when nothing is captured.
+                additionalProperties: { type: number }
+                example: { '2026-09': 9.5 }
     AttendanceStatus:
       type: string
       enum: [present, absent, late, excused]

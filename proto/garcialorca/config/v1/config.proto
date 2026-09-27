@@ -29,6 +29,14 @@ service ConfigService {
   // SetLevelAttendanceMode chooses how a level takes attendance: one list per
   // group per day (daily) or one per group, subject and day (per_class).
   rpc SetLevelAttendanceMode(SetLevelAttendanceModeRequest) returns (SetLevelAttendanceModeResponse);
+  // SetLevelGradingScale configures a level's numeric grading (T6): whether it
+  // is captured at all, its range, decimals and passing mark.
+  rpc SetLevelGradingScale(SetLevelGradingScaleRequest) returns (SetLevelGradingScaleResponse);
+  // UpdateLevel changes a level's attendance mode and/or grading scale in ONE
+  // transaction: every present field is validated before anything is written,
+  // so a half-valid request changes nothing. An absent field keeps its value;
+  // a request with neither is InvalidArgument; an unknown level is NotFound.
+  rpc UpdateLevel(UpdateLevelRequest) returns (UpdateLevelResponse);
 
   // --- cycles (per-cycle umbrella) ---
   // CreateCycle adds a school-year umbrella (status defaults to draft).
@@ -193,6 +201,21 @@ message Level {
   google.protobuf.Timestamp updated_at = 7;
   // attendance_mode is how the level's groups take attendance.
   AttendanceMode attendance_mode = 8;
+  // grading is the level's numeric grading scale (T6).
+  GradingScale grading = 9;
+}
+
+// GradingScale is how a level grades numerically. Marks are exact hundredths
+// (5.00 = 500) so no float ever carries a grade boundary. enabled=false means
+// the level takes no numeric capture at all (Preescolar); the numbers are then
+// kept but unused. Invariant: 0 <= min < passing <= max <= 10000, decimals 0..2.
+message GradingScale {
+  bool enabled = 1;
+  int32 min_hundredths = 2;
+  int32 max_hundredths = 3;
+  // decimals is how many decimal places a captured grade may carry.
+  int32 decimals = 4;
+  int32 passing_hundredths = 5;
 }
 
 // Cycle is a school-year umbrella (e.g. "2026-2027").
@@ -294,6 +317,30 @@ message SetLevelAttendanceModeRequest {
 
 // SetLevelAttendanceModeResponse returns the updated level.
 message SetLevelAttendanceModeResponse {
+  Level level = 1;
+}
+
+// SetLevelGradingScaleRequest replaces one level's grading scale.
+message SetLevelGradingScaleRequest {
+  string id = 1;
+  GradingScale grading = 2;
+}
+
+// SetLevelGradingScaleResponse returns the updated level.
+message SetLevelGradingScaleResponse {
+  Level level = 1;
+}
+
+// UpdateLevelRequest patches one level. attendance_mode and grading are each
+// optional (absent = unchanged); at least one must be present.
+message UpdateLevelRequest {
+  string id = 1;
+  optional AttendanceMode attendance_mode = 2;
+  GradingScale grading = 3;
+}
+
+// UpdateLevelResponse returns the level after the change.
+message UpdateLevelResponse {
   Level level = 1;
 }
 

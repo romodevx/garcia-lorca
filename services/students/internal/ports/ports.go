@@ -16,8 +16,10 @@ type ListFilter struct {
 	LevelID    string
 	Status     domain.AdmissionStatus
 	GradeGroup string
-	PageSize   int
-	PageToken  string
+	// IDs narrows the list to these students (empty = any); at most one page.
+	IDs       []string
+	PageSize  int
+	PageToken string
 }
 
 // StudentRepository loads and persists students. All access is tenant-scoped for
@@ -173,6 +175,9 @@ type EnrollmentRepository interface {
 	// ListTransfers returns the moves of one student's enrollments, oldest
 	// moved_at first (empty when the pupil never moved).
 	ListTransfers(ctx context.Context, studentID string) ([]domain.EnrollmentTransfer, error)
+	// ListTransfersIntoGroup returns every move INTO one group, oldest moved_at
+	// first — one read for a whole class list.
+	ListTransfersIntoGroup(ctx context.Context, groupID string) ([]domain.EnrollmentTransfer, error)
 	// SetEnrollmentStatus updates an enrollment's status (e.g. to withdrawn).
 	SetEnrollmentStatus(ctx context.Context, id string, status domain.EnrollmentStatus) error
 }

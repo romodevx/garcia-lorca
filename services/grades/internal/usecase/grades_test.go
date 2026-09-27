@@ -35,7 +35,28 @@ func (f *fakeAssignments) TermByID(_ context.Context, id string) (ports.TermRef,
 }
 
 type fakeEnrollments struct {
-	byID map[string]ports.EnrollmentRef
+	byID      map[string]ports.EnrollmentRef
+	transfers []ports.TransferRef
+}
+
+func (f *fakeEnrollments) TransfersIntoGroup(_ context.Context, groupID string) ([]ports.TransferRef, error) {
+	var out []ports.TransferRef
+	for _, t := range f.transfers {
+		if t.ToGroupID == groupID {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeEnrollments) ByCycle(_ context.Context, cycleID string) ([]ports.EnrollmentRef, error) {
+	var out []ports.EnrollmentRef
+	for _, e := range f.byID {
+		if e.CycleID == cycleID {
+			out = append(out, e)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeEnrollments) ByID(_ context.Context, id string) (ports.EnrollmentRef, error) {
@@ -131,7 +152,7 @@ func baseAssignments() *fakeAssignments {
 			assignmentID: {ID: assignmentID, GroupID: groupID, SubjectID: subjectID, TeacherID: teacherID, CycleID: cycleID},
 		},
 		terms: map[string]ports.TermRef{
-			termID: {ID: termID, CycleID: cycleID},
+			termID: {ID: termID, CycleID: cycleID, LevelID: levelPrimaria},
 		},
 	}
 }
@@ -152,7 +173,7 @@ func newService(a ports.AssignmentReader, e ports.EnrollmentReader, r ports.Grad
 	fixedNow := func() time.Time { return time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC) }
 	seq := 0
 	newID := func() string { seq++; return "ge-" + string(rune('0'+seq)) }
-	return usecase.NewGradesService(r, a, e, testTenant, newID, fixedNow)
+	return usecase.NewGradesService(r, a, legacyCatalog(), e, testTenant, newID, fixedNow)
 }
 
 // --- CaptureGrade ------------------------------------------------------------
@@ -364,5 +385,52 @@ func TestListGradeEntriesPassthrough(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].EnrollmentID() != enrollmentID {
 		t.Errorf("passthrough mismatch: %+v", got)
+	}
+}
+
+// legacyCatalog places the test group in Primaria for the term-level check.
+func legacyCatalog() *fakeCatalog {
+	return &fakeCatalog{levelByGroup: map[string]ports.LevelRef{groupID: {ID: levelPrimaria, GradingEnabled: true}}}
+}
+
+// A term belongs to a cycle AND a level: a Secundaria term must not grade a
+// Primaria group even inside the same cycle (T2 QA finding).
+func TestLegacyCaptureAndRosterRejectATermOfAnotherLevel(t *testing.T) {
+	asg := baseAssignments()
+	asg.terms["term-sec"] = ports.TermRef{ID: "term-sec", CycleID: cycleID, LevelID: "lvl-sec"}
+	enr := &fakeEnrollments{byID: map[string]ports.EnrollmentRef{enrollmentID: activeEnrollment(enrollmentID, "stu-1")}}
+	repo := newFakeEntries()
+	svc := newService(asg, enr, repo)
+
+	_, err := svc.CaptureGrade(context.Background(), assignmentID, enrollmentID, "term-sec", 8)
+	if glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Fatalf("capture with another level's term: want KindInvalid, got %v", err)
+	}
+	if len(repo.rows) != 0 {
+		t.Error("a refused capture must not be stored")
+	}
+	if _, err := svc.Roster(context.Background(), assignmentID, "term-sec"); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("roster with another level's term: want KindInvalid, got %v", err)
+	}
+	if _, err := svc.CaptureGrade(context.Background(), assignmentID, enrollmentID, termID, 8); err != nil {
+		t.Errorf("the group's own level term must still capture: %v", err)
+	}
+}
+
+// The legacy term check needs only the group's level ID: a level whose monthly
+// scale is unusable must not stop term capture (review finding 4).
+func TestLegacyCaptureIgnoresTheMonthlyScale(t *testing.T) {
+	asg := baseAssignments()
+	enr := &fakeEnrollments{byID: map[string]ports.EnrollmentRef{enrollmentID: activeEnrollment(enrollmentID, "stu-1")}}
+	repo := newFakeEntries()
+	catalog := legacyCatalog()
+	catalog.scaleErr = glerrors.New(glerrors.KindInvalid, "La escala de calificación del nivel no está configurada")
+	svc := usecase.NewGradesService(repo, asg, catalog, enr, testTenant, func() string { return "ge-1" }, func() time.Time { return time.Time{} })
+
+	if _, err := svc.CaptureGrade(context.Background(), assignmentID, enrollmentID, termID, 8); err != nil {
+		t.Fatalf("legacy capture must not depend on the scale: %v", err)
+	}
+	if _, err := svc.Roster(context.Background(), assignmentID, termID); err != nil {
+		t.Fatalf("legacy roster must not depend on the scale: %v", err)
 	}
 }

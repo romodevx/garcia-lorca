@@ -8,6 +8,7 @@ import (
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/config/internal/domain"
+	"github.com/garcia-lorca/services/config/internal/ports"
 	"github.com/garcia-lorca/services/config/internal/usecase"
 )
 
@@ -25,18 +26,19 @@ var (
 // use case's parent-existence checks work against persisted state.
 
 type fakeCatalog struct {
-	cycles      map[string]domain.Cycle
-	levels      map[string]domain.Level
-	gradeLevels map[string]domain.GradeLevel
-	subjects    map[string]domain.Subject
-	terms       map[string]domain.Term
-	groups      map[string]domain.Group
-	teachers    map[string]domain.Teacher
-	assignments map[string]domain.TeachingAssignment
-	periods     map[string]domain.NonWorkingPeriod
-	events      map[string]domain.SchoolEvent
-	profile     *domain.SchoolProfile
-	unique      map[string]bool // scope-qualified unique keys across all entities
+	cycles       map[string]domain.Cycle
+	levels       map[string]domain.Level
+	levelPatches int
+	gradeLevels  map[string]domain.GradeLevel
+	subjects     map[string]domain.Subject
+	terms        map[string]domain.Term
+	groups       map[string]domain.Group
+	teachers     map[string]domain.Teacher
+	assignments  map[string]domain.TeachingAssignment
+	periods      map[string]domain.NonWorkingPeriod
+	events       map[string]domain.SchoolEvent
+	profile      *domain.SchoolProfile
+	unique       map[string]bool // scope-qualified unique keys across all entities
 	// reassignWrites counts the reassignments that actually moved a row.
 	reassignWrites int
 }
@@ -959,6 +961,40 @@ func (f *fakeCatalog) UpdateLevelAttendanceMode(_ context.Context, id string, mo
 		return glerrors.ErrNotFound
 	}
 	changed, err := l.WithAttendanceMode(mode)
+	if err != nil {
+		return err
+	}
+	f.levels[id] = changed
+	return nil
+}
+
+func (f *fakeCatalog) UpdateLevel(_ context.Context, id string, patch ports.LevelPatch) error {
+	f.levelPatches++
+	l, ok := f.levels[id]
+	if !ok {
+		return glerrors.ErrNotFound
+	}
+	var err error
+	if patch.AttendanceMode != nil {
+		if l, err = l.WithAttendanceMode(*patch.AttendanceMode); err != nil {
+			return err
+		}
+	}
+	if patch.Grading != nil {
+		if l, err = l.WithGrading(*patch.Grading); err != nil {
+			return err
+		}
+	}
+	f.levels[id] = l
+	return nil
+}
+
+func (f *fakeCatalog) UpdateLevelGrading(_ context.Context, id string, scale domain.GradingScale) error {
+	l, ok := f.levels[id]
+	if !ok {
+		return glerrors.ErrNotFound
+	}
+	changed, err := l.WithGrading(scale)
 	if err != nil {
 		return err
 	}

@@ -29,6 +29,11 @@ type fakeConfig struct {
 	modeLevelID string
 	modeIn      string
 
+	gradingLevelID string
+	gradingIn      client.LevelGrading
+	gradingErr     error
+	updateCalls    int
+
 	periodIn      client.NonWorkingPeriod
 	periods       []client.NonWorkingPeriod
 	periodsCycle  string
@@ -155,12 +160,30 @@ func (f *fakeConfig) ListLevels(_ context.Context) ([]client.LevelResult, error)
 	return f.levels, f.err
 }
 
-func (f *fakeConfig) SetLevelAttendanceMode(_ context.Context, id, mode string) (client.LevelResult, error) {
-	f.modeLevelID, f.modeIn = id, mode
+// UpdateLevel records each present field the way the two former single-field
+// calls did, and counts calls: a PATCH must reach config exactly once.
+func (f *fakeConfig) UpdateLevel(_ context.Context, id string, p client.LevelPatch) (client.LevelResult, error) {
+	f.updateCalls++
+	if p.AttendanceMode != nil {
+		f.modeLevelID, f.modeIn = id, *p.AttendanceMode
+	}
+	if p.Grading != nil {
+		f.gradingLevelID, f.gradingIn = id, *p.Grading
+		if f.gradingErr != nil {
+			return client.LevelResult{}, f.gradingErr
+		}
+	}
 	if f.err != nil {
 		return client.LevelResult{}, f.err
 	}
-	return client.LevelResult{ID: id, Name: "Secundaria", Granularity: "cycle", AttendanceMode: mode}, nil
+	res := client.LevelResult{ID: id, Name: "Secundaria", Granularity: "cycle", AttendanceMode: f.modeIn}
+	if p.Grading != nil {
+		res.Name, res.Grading = "Primaria", *p.Grading
+		if res.AttendanceMode == "" {
+			res.AttendanceMode = "daily"
+		}
+	}
+	return res, nil
 }
 
 func (f *fakeConfig) CreateGradeLevel(_ context.Context, in client.CreateGradeLevelInput) (client.GradeLevelResult, error) {

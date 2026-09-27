@@ -36,6 +36,33 @@ service GradesService {
   // ListGradeEntries lists grade entries, optionally filtered by enrollment
   // and/or term (each filter is independent; empty = any).
   rpc ListGradeEntries(ListGradeEntriesRequest) returns (ListGradeEntriesResponse);
+
+  // --- monthly grades (T6) ---
+  // The school captures one grade per student, subject and MONTH. The subject
+  // and teacher are DERIVED from the assignment; the level's grading scale
+  // (config) bounds the value; the month must fall inside the assignment's
+  // cycle; the enrollment must be active in the assignment's group.
+
+  // UpsertMonthlyGrade records or corrects one student's grade for a month
+  // (autosave per cell). Scale, decimals, month and level refusals are
+  // InvalidArgument with a sentence for the user; an unknown assignment is
+  // NotFound.
+  rpc UpsertMonthlyGrade(UpsertMonthlyGradeRequest) returns (UpsertMonthlyGradeResponse);
+  // ClearMonthlyGrade removes one student's grade for a month (an emptied
+  // cell). Clearing a grade that does not exist succeeds.
+  rpc ClearMonthlyGrade(ClearMonthlyGradeRequest) returns (ClearMonthlyGradeResponse);
+  // GetMonthlySheet is the capture grid of one assignment for one month: the
+  // cycle's months, the level's scale, whether it is editable, and one row per
+  // active enrollment of the group (student names are resolved at the edge).
+  rpc GetMonthlySheet(GetMonthlySheetRequest) returns (GetMonthlySheetResponse);
+  // GetEnrollmentMonthlyGrades is one enrollment's monthly grades for its
+  // cycle: the months, the scale, the group's subjects and every captured grade.
+  rpc GetEnrollmentMonthlyGrades(GetEnrollmentMonthlyGradesRequest) returns (GetEnrollmentMonthlyGradesResponse);
+  // CountScaleViolations counts the monthly grades already captured in the
+  // level's ACTIVE cycle that a proposed scale would refuse (out of range or
+  // too many decimals; with grading disabled, every grade counts). Loosening a
+  // scale can never produce a violation. No active cycle counts 0.
+  rpc CountScaleViolations(CountScaleViolationsRequest) returns (CountScaleViolationsResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -103,6 +130,111 @@ message ListGradeEntriesRequest {
 
 message ListGradeEntriesResponse {
   repeated GradeEntry entries = 1;
+}
+
+// --- Monthly grades (T6) --------------------------------------------------
+
+// GradingScale is the level's numeric scale in exact hundredths (5.00 = 500).
+message GradingScale {
+  int32 min_hundredths = 1;
+  int32 max_hundredths = 2;
+  int32 decimals = 3;
+  int32 passing_hundredths = 4;
+}
+
+// MonthlyGrade is one captured monthly grade. `month` is "YYYY-MM"; `value` is
+// the canonical decimal text ("9.5", "10") — never a float, so a boundary like
+// 9.95 is judged exactly.
+message MonthlyGrade {
+  string enrollment_id = 1;
+  string subject_id = 2;
+  string month = 3;
+  string value = 4;
+  google.protobuf.Timestamp updated_at = 5;
+}
+
+message UpsertMonthlyGradeRequest {
+  string assignment_id = 1;
+  string month = 2;          // "YYYY-MM"
+  string enrollment_id = 3;
+  string value = 4;          // decimal text, e.g. "9.5"
+  string captured_by = 5;    // the authenticated user id (audit)
+  // school_wide is set by the director's routes: the caller acts for the whole
+  // school, so months that belong to a transferred pupil's previous group stay
+  // writable. Unset (a teacher) = those months are read-only.
+  bool school_wide = 6;
+}
+
+message UpsertMonthlyGradeResponse {
+  MonthlyGrade grade = 1;
+}
+
+message ClearMonthlyGradeRequest {
+  string assignment_id = 1;
+  string month = 2;
+  string enrollment_id = 3;
+  bool school_wide = 4;      // see UpsertMonthlyGradeRequest.school_wide
+}
+
+message ClearMonthlyGradeResponse {}
+
+message GetMonthlySheetRequest {
+  string assignment_id = 1;
+  // month "YYYY-MM"; empty = the current UTC month clamped into the cycle.
+  string month = 2;
+  bool school_wide = 3;      // see UpsertMonthlyGradeRequest.school_wide
+}
+
+// MonthlySheetRow is one active enrollment of the group; value is "" when no
+// grade is captured for the month.
+message MonthlySheetRow {
+  string enrollment_id = 1;
+  string student_id = 2;
+  string value = 3;
+  google.protobuf.Timestamp updated_at = 4;
+  // editable is false when THIS row's month cannot be written by the caller
+  // (a month before the pupil joined the group by transfer); read_only_reason
+  // then says why. The sheet-level editable still gates every row.
+  bool editable = 5;
+  string read_only_reason = 6;
+}
+
+message GetMonthlySheetResponse {
+  string assignment_id = 1;
+  string month = 2;
+  repeated string months = 3;
+  GradingScale scale = 4;
+  bool grading_enabled = 5;
+  bool editable = 6;
+  string read_only_reason = 7;
+  repeated MonthlySheetRow rows = 8;
+}
+
+message GetEnrollmentMonthlyGradesRequest {
+  string enrollment_id = 1;
+}
+
+message GetEnrollmentMonthlyGradesResponse {
+  string cycle_id = 1;
+  string cycle_name = 2;
+  repeated string months = 3;
+  GradingScale scale = 4;
+  bool grading_enabled = 5;
+  // subject_ids are the group's subjects plus any subject already graded.
+  repeated string subject_ids = 6;
+  repeated MonthlyGrade grades = 7;
+}
+
+message CountScaleViolationsRequest {
+  string level_id = 1;
+  // grading_enabled=false means "disable numeric grading": every captured
+  // grade of the cycle is a violation.
+  bool grading_enabled = 2;
+  GradingScale scale = 3;
+}
+
+message CountScaleViolationsResponse {
+  int32 violations = 1;
 }
 
 // --- Domain events (published) --------------------------------------------

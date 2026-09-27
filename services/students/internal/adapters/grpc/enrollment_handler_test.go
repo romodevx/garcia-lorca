@@ -76,6 +76,18 @@ func (r *fakeEnrollmentRepo) ListTransfers(_ context.Context, studentID string) 
 	return r.history[studentID], nil
 }
 
+func (r *fakeEnrollmentRepo) ListTransfersIntoGroup(_ context.Context, groupID string) ([]domain.EnrollmentTransfer, error) {
+	var out []domain.EnrollmentTransfer
+	for _, moves := range r.history {
+		for _, m := range moves {
+			if m.ToGroupID() == groupID {
+				out = append(out, m)
+			}
+		}
+	}
+	return out, nil
+}
+
 func (r *fakeEnrollmentRepo) TransferEnrollment(_ context.Context, cmd ports.TransferCommand) error {
 	enrollmentID, toGroupID := cmd.EnrollmentID, cmd.To.ID
 	cur, ok := r.byID[enrollmentID]
@@ -399,5 +411,40 @@ func TestListTransfersProjectsTheHistory(t *testing.T) {
 	_, err = h.ListTransfers(context.Background(), connect.NewRequest(&studentsv1.ListTransfersRequest{StudentId: "nope"}))
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Errorf("malformed id: code = %v, want InvalidArgument", connect.CodeOf(err))
+	}
+}
+
+// ListTransfers by to_group_id answers every move INTO the group (one read for a
+// whole class list); naming both filters, or neither, is InvalidArgument.
+func TestListTransfersIntoGroup(t *testing.T) {
+	const pupil = "dddddddd-0000-0000-0000-000000000801"
+	moved := time.Date(2026, 10, 2, 15, 0, 0, 0, time.UTC)
+	in, err := domain.NewEnrollmentTransfer("tr-in", testTenant, "enr-1", enrollGroup, otherGroup, "balanceo", moved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := domain.NewEnrollmentTransfer("tr-out", testTenant, "enr-2", otherGroup, enrollGroup, "regresa", moved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := newFakeEnrollmentRepo()
+	repo.history = map[string][]domain.EnrollmentTransfer{pupil: {in, out}}
+	h, _ := enrollmentHandlerWith(t, repo)
+
+	res, err := h.ListTransfers(context.Background(), connect.NewRequest(&studentsv1.ListTransfersRequest{ToGroupId: otherGroup}))
+	if err != nil {
+		t.Fatalf("ListTransfers: %v", err)
+	}
+	if got := res.Msg.GetTransfers(); len(got) != 1 || got[0].GetId() != "tr-in" {
+		t.Fatalf("transfers = %+v, want only the move into the group", got)
+	}
+	for name, req := range map[string]*studentsv1.ListTransfersRequest{
+		"both":      {StudentId: pupil, ToGroupId: otherGroup},
+		"neither":   {},
+		"bad group": {ToGroupId: "nope"},
+	} {
+		if _, err := h.ListTransfers(context.Background(), connect.NewRequest(req)); connect.CodeOf(err) != connect.CodeInvalidArgument {
+			t.Errorf("%s: code = %v, want InvalidArgument", name, connect.CodeOf(err))
+		}
 	}
 }

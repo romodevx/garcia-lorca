@@ -73,6 +73,7 @@ func (c *Client) TermByID(ctx context.Context, id string) (ports.TermRef, error)
 	return ports.TermRef{
 		ID:      t.GetId(),
 		CycleID: t.GetCycleId(),
+		LevelID: t.GetLevelId(),
 	}, nil
 }
 

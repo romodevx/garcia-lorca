@@ -106,6 +106,12 @@ const ICON_PATHS = {
   chevron: <path d="M9 5l7 7-7 7" />,
   chevronDown: <path d="M5 9l7 7 7-7" />,
   check: <path d="M5 12.5l4.5 4.5L19 7" />,
+  lock: (
+    <g>
+      <rect x="5" y="10.5" width="14" height="10" rx="2" />
+      <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+    </g>
+  ),
   clock: (
     <g>
       <circle cx="12" cy="12" r="8.5" />

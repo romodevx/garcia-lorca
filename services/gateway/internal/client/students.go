@@ -298,6 +298,27 @@ func (c *StudentsClient) ListEnrollments(ctx context.Context, studentID, cycleID
 	return out, nil
 }
 
+// studentsByIDsChunk is how many ids one ListStudents call may name (the
+// students service caps an ids filter at one page).
+const studentsByIDsChunk = 200
+
+// StudentsByIDs reads only the named students, in chunks of one page — a
+// class list's names without draining the whole school. No ids, no call.
+func (c *StudentsClient) StudentsByIDs(ctx context.Context, ids []string) ([]StudentResult, error) {
+	out := make([]StudentResult, 0, len(ids))
+	for start := 0; start < len(ids); start += studentsByIDsChunk {
+		chunk := ids[start:min(start+studentsByIDsChunk, len(ids))]
+		res, err := c.rpc.ListStudents(ctx, connect.NewRequest(&studentsv1.ListStudentsRequest{Ids: chunk, PageSize: int32(len(chunk))}))
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range res.Msg.GetStudents() {
+			out = append(out, toStudentResult(s))
+		}
+	}
+	return out, nil
+}
+
 // ListTransfers returns a student's group moves, oldest first.
 func (c *StudentsClient) ListTransfers(ctx context.Context, studentID string) ([]Transfer, error) {
 	res, err := c.rpc.ListTransfers(ctx, connect.NewRequest(&studentsv1.ListTransfersRequest{StudentId: studentID}))

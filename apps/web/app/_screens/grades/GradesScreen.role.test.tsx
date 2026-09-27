@@ -8,31 +8,23 @@ import * as studentsApi from "../../students/api";
 import * as teachingApi from "../../teaching/api";
 import { GradesScreen } from "./GradesScreen";
 
-// The screens read labelled groups (ISSUE-002); label them from the listGroups mock.
-beforeEach(() => {
-  vi.mocked(configApi.listLabelledGroups).mockImplementation(async (...args) =>
-    (await vi.mocked(configApi.listGroups)(...args)).map((g) => ({ ...g, label: g.name })));
-});
-
-
 // Both the director path (grades/config/students) and the teacher path (teaching)
 // are mocked so we can assert WHICH client set is exercised for each role.
 vi.mock("../../config/api", () => ({
-  listGroups: vi.fn(), listLabelledGroups: vi.fn(),
+  listLabelledGroups: vi.fn(),
   listSubjects: vi.fn(),
-  listTerms: vi.fn(),
+  listLevels: vi.fn(),
+  listGradeLevels: vi.fn(),
 }));
 vi.mock("../../teachers/api", () => ({
   listTeachers: vi.fn(),
   listTeachingAssignments: vi.fn(),
 }));
-vi.mock("../../grades/api", () => ({ getRoster: vi.fn(), captureGrade: vi.fn() }));
+vi.mock("../../grades/api", () => ({ gradeSheetClient: vi.fn(() => ({ load: vi.fn(), save: vi.fn(), remove: vi.fn() })) }));
 vi.mock("../../students/api", () => ({ listStudents: vi.fn() }));
 vi.mock("../../teaching/api", () => ({
   listAssignments: vi.fn(),
-  listTerms: vi.fn(),
-  getRoster: vi.fn(),
-  captureGrade: vi.fn(),
+  teachingGradeSheet: { load: vi.fn(), save: vi.fn(), remove: vi.fn() },
 }));
 
 const config = vi.mocked(configApi);
@@ -43,14 +35,12 @@ const teaching = vi.mocked(teachingApi);
 
 beforeEach(() => {
   teachers.listTeachingAssignments.mockResolvedValue([]);
-  config.listGroups.mockResolvedValue([]);
+  config.listLabelledGroups.mockResolvedValue([]);
   config.listSubjects.mockResolvedValue([]);
+  config.listLevels.mockResolvedValue([]);
+  config.listGradeLevels.mockResolvedValue([]);
   teachers.listTeachers.mockResolvedValue([]);
-  config.listTerms.mockResolvedValue([]);
-  grades.getRoster.mockResolvedValue([]);
-  students.listStudents.mockResolvedValue([]);
   teaching.listAssignments.mockResolvedValue([]);
-  teaching.listTerms.mockResolvedValue([]);
 });
 
 afterEach(() => vi.clearAllMocks());
@@ -65,7 +55,7 @@ describe("GradesScreen — role-adaptive branch", () => {
 
     // A teacher must never hit the director-only clients (they'd 403).
     expect(students.listStudents).not.toHaveBeenCalled();
-    expect(grades.getRoster).not.toHaveBeenCalled();
+    expect(grades.gradeSheetClient).not.toHaveBeenCalled();
     expect(teachers.listTeachingAssignments).not.toHaveBeenCalled();
   });
 
@@ -73,7 +63,7 @@ describe("GradesScreen — role-adaptive branch", () => {
     render(<GradesScreen onBack={() => {}} permissions={["grades:read", "teaching:read"]} />);
 
     // The director subtitle distinguishes the full surface.
-    expect(await screen.findByText(/un clic por alumno/)).toBeInTheDocument();
+    expect(await screen.findByText(/se guarda sola/)).toBeInTheDocument();
     await waitFor(() => expect(teachers.listTeachingAssignments).toHaveBeenCalled());
 
     // The director path never touches the teacher client.

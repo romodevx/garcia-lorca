@@ -154,6 +154,11 @@ func appRepo(t *testing.T, tenant string) *pgadapter.Repository {
 	if err != nil {
 		t.Fatalf("open app db: %v", err)
 	}
+	// Each call opens its own pool; close it with the test, or the suite
+	// leaks connections until Postgres refuses new ones (53300).
+	if sqlDB, err := db.DB(); err == nil {
+		t.Cleanup(func() { _ = sqlDB.Close() })
+	}
 	return pgadapter.NewRepository(db, tenant)
 }
 
@@ -268,6 +273,16 @@ func TestListFilterAndPaginate(t *testing.T) {
 	page2, next2, _ := repo.List(ctx, ports.ListFilter{LevelID: secundariaLevelID, PageSize: 2, PageToken: next})
 	if len(page2) != 1 || next2 != "" {
 		t.Errorf("page2 = %d rows, next=%q; want 1 + empty (last page)", len(page2), next2)
+	}
+
+	// An ids filter answers exactly the named students.
+	named := []string{"bbbbbbbb-1111-0000-0000-000000000001", "bbbbbbbb-1111-0000-0000-000000000003"}
+	byIDs, _, err := repo.List(ctx, ports.ListFilter{IDs: named, PageSize: len(named)})
+	if err != nil {
+		t.Fatalf("List by ids: %v", err)
+	}
+	if len(byIDs) != 2 || byIDs[0].ID() != named[0] || byIDs[1].ID() != named[1] {
+		t.Errorf("by ids = %d rows; want exactly the two named", len(byIDs))
 	}
 }
 

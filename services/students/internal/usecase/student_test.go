@@ -566,3 +566,26 @@ func TestWithoutABucketThereIsNoPhoto(t *testing.T) {
 		t.Errorf("DeletePhoto: want KindNotFound, got %v", err)
 	}
 }
+
+// An ids filter names students by uuid, at most one page of them.
+func TestListStudentsValidatesIDs(t *testing.T) {
+	svc := newStudentSvcForIDs(t)
+	ok := []string{"dddddddd-0000-0000-0000-000000000001"}
+	if _, _, err := svc.ListStudents(context.Background(), ports.ListFilter{IDs: ok}); err != nil {
+		t.Fatalf("valid ids: %v", err)
+	}
+	tooMany := make([]string, 201)
+	for i := range tooMany {
+		tooMany[i] = ok[0]
+	}
+	for name, ids := range map[string][]string{"malformed": {"nope"}, "too many": tooMany} {
+		if _, _, err := svc.ListStudents(context.Background(), ports.ListFilter{IDs: ids}); glerrors.KindOf(err) != glerrors.KindInvalid {
+			t.Errorf("%s: want KindInvalid, got %v", name, err)
+		}
+	}
+}
+
+func newStudentSvcForIDs(t *testing.T) *usecase.StudentService {
+	t.Helper()
+	return usecase.NewStudentService(newRepo(), &fakePub{}, levelsMustNotBeAsked{t}, tenant, func() string { return "id-1" })
+}

@@ -65,3 +65,45 @@ func TestAnEndedEnrollmentCarriesItsEndInstant(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, withdrawn.EndedAt().IsZero(), "a withdrawn enrollment says when")
 }
+
+// ListTransfersIntoGroup answers every move INTO one group (whoever made it),
+// oldest first, and nothing from another tenant.
+func TestListTransfersIntoGroupIsTheClassListHistory(t *testing.T) {
+	repo := appRepo(t, tenantA)
+	ctx := context.Background()
+	a := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-000000000611", "HEGB050312HDFRNN71")
+	b := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-000000000612", "HEGB050312HDFRNN72")
+	const enrA, enrB = "e0000000-0000-0000-0000-000000000611", "e0000000-0000-0000-0000-000000000612"
+	require.NoError(t, repo.CreateEnrollment(ctx, enrollment(t, enrA, tenantA, a, groupOne)))
+	require.NoError(t, repo.CreateEnrollment(ctx, enrollment(t, enrB, tenantA, b, groupOne)))
+
+	intoTwoLate, err := domain.NewEnrollmentTransfer("70000000-0000-0000-0000-000000000611", tenantA, enrA, groupOne, groupTwo, "balanceo", enrollClock.AddDate(0, 0, 30))
+	require.NoError(t, err)
+	intoTwoEarly, err := domain.NewEnrollmentTransfer("70000000-0000-0000-0000-000000000612", tenantA, enrB, groupOne, groupTwo, "balanceo", enrollClock.AddDate(0, 0, 3))
+	require.NoError(t, err)
+	require.NoError(t, repo.TransferEnrollment(ctx, transferInto(enrA, groupTwo, intoTwoLate)))
+	require.NoError(t, repo.TransferEnrollment(ctx, transferInto(enrB, groupTwo, intoTwoEarly)))
+
+	got, err := repo.ListTransfersIntoGroup(ctx, groupTwo)
+	require.NoError(t, err)
+	ids := make([]string, 0, len(got))
+	for _, m := range got {
+		assert.Equal(t, groupTwo, m.ToGroupID())
+		ids = append(ids, m.ID())
+	}
+	assert.Subset(t, ids, []string{"70000000-0000-0000-0000-000000000611", "70000000-0000-0000-0000-000000000612"})
+	assert.Less(t, indexOf(ids, "70000000-0000-0000-0000-000000000612"), indexOf(ids, "70000000-0000-0000-0000-000000000611"), "oldest move first")
+
+	none, err := appRepo(t, tenantB).ListTransfersIntoGroup(ctx, groupTwo)
+	require.NoError(t, err)
+	assert.Empty(t, none, "RLS hides another tenant's moves")
+}
+
+func indexOf(ids []string, id string) int {
+	for i, v := range ids {
+		if v == id {
+			return i
+		}
+	}
+	return -1
+}

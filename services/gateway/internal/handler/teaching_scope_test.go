@@ -44,12 +44,14 @@ func twoCycleTeacher() *fakeTeachingConfig {
 			{ID: "cyc-next", Status: "draft"},
 		},
 		termsByCycle: map[string][]client.TermResult{
-			"cyc-old": {{ID: "trm-old", CycleID: "cyc-old"}},
-			"cyc-now": {{ID: "trm-now", CycleID: "cyc-now"}},
+			"cyc-old": {{ID: "trm-old", CycleID: "cyc-old", LevelID: "lvl-1"}},
+			"cyc-now": {{ID: "trm-now", CycleID: "cyc-now", LevelID: "lvl-1"}},
 		},
 		// The groups resolve (to a daily list: no level mode) so a refusal in
-		// these tests is the ownership rule, never a missing catalog entry.
-		groups: []client.GroupResult{{ID: "grp-old"}, {ID: "grp-now"}, {ID: "grp-b"}},
+		// these tests is the ownership rule, never a missing catalog entry. Their
+		// grade places them in lvl-1, whose terms the teacher may pick.
+		groups:      []client.GroupResult{{ID: "grp-old", GradeLevelID: "gl-1"}, {ID: "grp-now", GradeLevelID: "gl-1"}, {ID: "grp-b", GradeLevelID: "gl-1"}},
+		gradeLevels: []client.GradeLevelResult{{ID: "gl-1", LevelID: "lvl-1"}},
 	}
 }
 

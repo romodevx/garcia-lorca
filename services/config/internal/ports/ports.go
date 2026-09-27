@@ -58,6 +58,13 @@ type CatalogRepository interface {
 	// UpdateLevelAttendanceMode changes one level's attendance mode, or
 	// KindNotFound when the level does not exist.
 	UpdateLevelAttendanceMode(ctx context.Context, id string, mode domain.AttendanceMode) error
+	// UpdateLevelGrading replaces one level's grading scale, or KindNotFound when
+	// the level does not exist.
+	UpdateLevelGrading(ctx context.Context, id string, scale domain.GradingScale) error
+	// UpdateLevel writes every present field of patch in ONE statement (so a
+	// half-applied patch cannot exist), or KindNotFound when the level does not
+	// exist. The caller has already validated the patch.
+	UpdateLevel(ctx context.Context, id string, patch LevelPatch) error
 
 	// --- grade levels (grados, catalog; child of level) ---
 
@@ -197,4 +204,10 @@ type TeachingLoadSnapshot struct {
 type TeachingLoadWrite struct {
 	Create   []domain.TeachingAssignment
 	Reassign []domain.TeachingAssignment
+}
+
+// LevelPatch is a partial change of a level: a nil field keeps its value.
+type LevelPatch struct {
+	AttendanceMode *domain.AttendanceMode
+	Grading        *domain.GradingScale
 }

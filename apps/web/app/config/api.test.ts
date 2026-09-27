@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   updateLevelAttendanceMode,
+  updateLevelGrading,
   ConfigError,
   createCycle,
   createGradeLevel,
@@ -111,6 +112,24 @@ describe("levels", () => {
     expect(init.method).toBe("PATCH");
     expect(init.credentials).toBe("include");
     expect(JSON.parse(init.body as string)).toEqual({ attendanceMode: "per_class" });
+  });
+
+  it("updateLevelGrading PATCHes /levels/{id} with {grading} and returns the level", async () => {
+    const grading = { enabled: true, min: 5, max: 10, decimals: 1, passing: 6 };
+    const updated = { id: "l1", name: "Primaria", sepCode: "PRI", enrollmentGranularity: "cycle", grading };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(updated));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(updateLevelGrading(BASE, "l1", grading)).resolves.toEqual(updated);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/config/levels/l1");
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(init.body as string)).toEqual({ grading });
+  });
+
+  it("updateLevelGrading throws the server's text on failure", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("el mínimo aprobatorio debe estar en la escala", { status: 400 })));
+    await expect(updateLevelGrading(BASE, "l1", { enabled: true, min: 5, max: 10, decimals: 1, passing: 11 })).rejects.toThrow("el mínimo aprobatorio");
   });
 
   it("updateLevelAttendanceMode throws the server's text on failure", async () => {
@@ -295,6 +314,16 @@ describe("what a failure tells the user", () => {
     }).catch((e: unknown) => e)) as ConfigError;
 
     expect(err.detail).toBe("cycle name already used");
+  });
+
+  it("carries X-Error-Code, so a screen can branch on it and not on the sentence", async () => {
+    const text = "Ya hay calificaciones capturadas en este ciclo que no cumplirían la nueva escala";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(text, { status: 409, headers: { "X-Error-Code": "SCALE_TIGHTENING" } })));
+
+    const err = (await updateLevelGrading("http://gw", "l1", { enabled: false, min: 5, max: 10, decimals: 1, passing: 6 }).catch((e: unknown) => e)) as ConfigError;
+
+    expect(err.code).toBe("SCALE_TIGHTENING");
+    expect(err.detail).toBe(text);
   });
 });
 

@@ -367,6 +367,9 @@ message ListStudentsRequest {
   int32 page_size = 4;
   string page_token = 5;
   string level_id = 6;         // optional filter (empty = any)
+  // ids narrows the list to these students (empty = any). At most 200 ids —
+  // one page — so a caller naming a class list never drains the whole school.
+  repeated string ids = 7;
 }
 
 message ListStudentsResponse {
@@ -487,7 +490,10 @@ message ListEnrollmentsResponse {
 }
 
 message ListTransfersRequest {
-  string student_id = 1;  // required
+  // Exactly one filter: student_id (that pupil's moves) or to_group_id (every
+  // move INTO that group, whoever made it — one read for a whole class list).
+  string student_id = 1;
+  string to_group_id = 2;
 }
 
 message ListTransfersResponse {

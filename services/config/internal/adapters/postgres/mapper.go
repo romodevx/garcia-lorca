@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"math"
 	"strings"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -48,8 +49,22 @@ func fromDomainLevel(l domain.Level) levelModel {
 		// DDL CHECK requires UPPERCASE 'CYCLE'/'TERM'; domain String() is lowercase.
 		EnrollmentGranularity: strings.ToUpper(l.Granularity().String()),
 		AttendanceMode:        l.AttendanceMode().String(), // lowercase, as the CHECK spells it
+		GradingEnabled:        l.Grading().Enabled(),
+		GradeMin:              fromHundredths(l.Grading().MinHundredths()),
+		GradeMax:              fromHundredths(l.Grading().MaxHundredths()),
+		GradeDecimals:         l.Grading().Decimals(),
+		GradePassing:          fromHundredths(l.Grading().PassingHundredths()),
 	}
 }
+
+// hundredthsPerUnit converts a numeric(5,2) mark to exact hundredths. A value
+// with at most two decimals up to 100 survives the float64 trip exactly once
+// rounded, so math.Round is the whole conversion.
+const hundredthsPerUnit = 100
+
+func fromHundredths(h int) float64 { return float64(h) / hundredthsPerUnit }
+
+func toHundredths(v float64) int { return int(math.Round(v * hundredthsPerUnit)) }
 
 func toDomainLevel(m levelModel) (domain.Level, error) {
 	gran, err := domain.ParseEnrollmentGranularity(m.EnrollmentGranularity)
@@ -60,11 +75,18 @@ func toDomainLevel(m levelModel) (domain.Level, error) {
 	if err != nil {
 		return domain.Level{}, glerrors.Wrap(glerrors.KindInternal, "unknown attendance mode in db: "+m.AttendanceMode, err)
 	}
+	scale, err := domain.NewGradingScale(m.GradingEnabled, toHundredths(m.GradeMin), toHundredths(m.GradeMax), toHundredths(m.GradePassing), m.GradeDecimals)
+	if err != nil {
+		return domain.Level{}, glerrors.Wrap(glerrors.KindInternal, "inconsistent grading scale in db", err)
+	}
 	l, err := domain.NewLevel(m.ID, m.TenantID, m.Name, m.SEPCode, gran)
 	if err != nil {
 		return domain.Level{}, err
 	}
-	return l.WithAttendanceMode(mode)
+	if l, err = l.WithAttendanceMode(mode); err != nil {
+		return domain.Level{}, err
+	}
+	return l.WithGrading(scale)
 }
 
 // --- grade levels ---------------------------------------------------------

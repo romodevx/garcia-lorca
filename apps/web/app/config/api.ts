@@ -42,6 +42,18 @@ export interface Level {
   enrollmentGranularity: EnrollmentGranularity;
   /** How the level takes attendance; absent from older gateways (read as "daily"). */
   attendanceMode?: AttendanceMode;
+  /** How the level grades; absent from older gateways (read as the 5–10 default). */
+  grading?: LevelGrading;
+}
+
+/** A level's numeric grading: preescolar usually has none (`enabled:false`). */
+export interface LevelGrading {
+  enabled: boolean;
+  min: number;
+  max: number;
+  /** 0, 1 or 2. */
+  decimals: number;
+  passing: number;
 }
 
 export interface CreateLevelInput {
@@ -130,12 +142,15 @@ export class ConfigError extends Error {
   readonly status: number;
   /** The server's own words, when it sent any. */
   readonly detail: string;
+  /** The refusal's machine code (`X-Error-Code`), e.g. SCALE_TIGHTENING. */
+  readonly code: string | undefined;
 
-  constructor(status: number, detail: string) {
+  constructor(status: number, detail: string, code?: string) {
     super(detail !== "" ? detail : `HTTP ${status}`);
     this.name = "ConfigError";
     this.status = status;
     this.detail = detail;
+    this.code = code;
   }
 
   /** The thing already exists. Retrying the same input never helps. */
@@ -151,7 +166,7 @@ export class ConfigError extends Error {
 
 async function configFailure(res: Response): Promise<ConfigError> {
   const body = await res.text().catch(() => "");
-  return new ConfigError(res.status, body.trim());
+  return new ConfigError(res.status, body.trim(), res.headers.get("X-Error-Code") ?? undefined);
 }
 
 async function postJSON<T>(baseURL: string, path: string, body: unknown): Promise<T> {
@@ -336,18 +351,28 @@ export function listLevels(baseURL: string): Promise<Level[]> {
   return getList<Level>(baseURL, "/levels", "levels");
 }
 
-/** Sets how a level takes attendance: one list per day, or one per class. */
-export async function updateLevelAttendanceMode(baseURL: string, id: string, attendanceMode: AttendanceMode): Promise<Level> {
+/** PATCH one level with a partial body; the server answers with the whole level. */
+async function patchLevel(baseURL: string, id: string, body: Partial<Pick<Level, "attendanceMode" | "grading">>): Promise<Level> {
   const res = await authFetch(url(baseURL, `${BASE_PATH}/levels/${encodeURIComponent(id)}`), {
     method: "PATCH",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ attendanceMode }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     throw await configFailure(res);
   }
   return (await res.json()) as Level;
+}
+
+/** Sets how a level takes attendance: one list per day, or one per class. */
+export function updateLevelAttendanceMode(baseURL: string, id: string, attendanceMode: AttendanceMode): Promise<Level> {
+  return patchLevel(baseURL, id, { attendanceMode });
+}
+
+/** Sets how a level grades: whether it does at all, its scale and passing mark. */
+export function updateLevelGrading(baseURL: string, id: string, grading: LevelGrading): Promise<Level> {
+  return patchLevel(baseURL, id, { grading });
 }
 
 // --- grade levels ---------------------------------------------------------

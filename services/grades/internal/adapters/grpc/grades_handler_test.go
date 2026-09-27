@@ -39,7 +39,28 @@ func (f *fakeAssignments) TermByID(_ context.Context, id string) (ports.TermRef,
 }
 
 type fakeEnrollments struct {
-	byID map[string]ports.EnrollmentRef
+	byID      map[string]ports.EnrollmentRef
+	transfers []ports.TransferRef
+}
+
+func (f *fakeEnrollments) ByCycle(_ context.Context, cycle string) ([]ports.EnrollmentRef, error) {
+	var out []ports.EnrollmentRef
+	for _, e := range f.byID {
+		if e.CycleID == cycle {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeEnrollments) TransfersIntoGroup(_ context.Context, group string) ([]ports.TransferRef, error) {
+	var out []ports.TransferRef
+	for _, t := range f.transfers {
+		if t.ToGroupID == group {
+			out = append(out, t)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeEnrollments) ByID(_ context.Context, id string) (ports.EnrollmentRef, error) {
@@ -113,7 +134,7 @@ func baseAssignments() *fakeAssignments {
 		assignments: map[string]ports.AssignmentRef{
 			assignmentID: {ID: assignmentID, GroupID: groupID, SubjectID: subjectID, TeacherID: teacherID, CycleID: cycleID},
 		},
-		terms: map[string]ports.TermRef{termID: {ID: termID, CycleID: cycleID}},
+		terms: map[string]ports.TermRef{termID: {ID: termID, CycleID: cycleID, LevelID: levelID}},
 	}
 }
 
@@ -121,12 +142,18 @@ func activeEnrollment(id, studentID string) ports.EnrollmentRef {
 	return ports.EnrollmentRef{ID: id, StudentID: studentID, GroupID: groupID, CycleID: cycleID, Status: "active"}
 }
 
+// monthlyNow is the monthly surface's clock: mid-October, so September and
+// October are gradable and November is still in the future.
+func monthlyNow() time.Time { return time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC) }
+
 func newHandler(a ports.AssignmentReader, e ports.EnrollmentReader, r ports.GradeEntryRepository) *grpcadapter.GradesHandler {
 	now := func() time.Time { return time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC) }
 	seq := 0
 	newID := func() string { seq++; return "ge-" + string(rune('0'+seq)) }
-	svc := usecase.NewGradesService(r, a, e, testTenant, newID, now)
-	return grpcadapter.NewGradesHandler(svc, usecase.NewHealthService("grades"))
+	catalog := newFakeCatalog()
+	svc := usecase.NewGradesService(r, a, catalog, e, testTenant, newID, now)
+	monthly := usecase.NewMonthlyGradesService(newFakeMonthly(), a, catalog, e, testTenant, newID, monthlyNow)
+	return grpcadapter.NewGradesHandler(svc, monthly, usecase.NewHealthService("grades"))
 }
 
 // --- tests ------------------------------------------------------------------

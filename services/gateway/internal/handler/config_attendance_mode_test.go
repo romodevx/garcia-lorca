@@ -18,7 +18,7 @@ func patchLevel(h *handler.ConfigHandler, id, body string) *httptest.ResponseRec
 	r := httptest.NewRequest(http.MethodPatch, "/api/v1/config/levels/"+id, strings.NewReader(body))
 	r.SetPathValue("id", id)
 	rec := httptest.NewRecorder()
-	h.SetLevelAttendanceMode(rec, r)
+	h.PatchLevel(rec, r)
 	return rec
 }
 
@@ -45,7 +45,8 @@ func TestConfigSetLevelAttendanceMode(t *testing.T) {
 				return
 			}
 			assert.Equal(t, "lvl-1", svc.modeLevelID)
-			assert.JSONEq(t, `{"id":"lvl-1","name":"Secundaria","sepCode":"","enrollmentGranularity":"cycle","attendanceMode":"`+tt.wantMode+`"}`, rec.Body.String())
+			assert.JSONEq(t, `{"id":"lvl-1","name":"Secundaria","sepCode":"","enrollmentGranularity":"cycle","attendanceMode":"`+tt.wantMode+`",
+				"grading":{"enabled":false,"min":0,"max":0,"decimals":0,"passing":0}}`, rec.Body.String())
 		})
 	}
 }

@@ -35,3 +35,20 @@ func TestListTransfers(t *testing.T) {
 		}
 	}
 }
+
+func TestListTransfersIntoGroupValidatesTheGroupID(t *testing.T) {
+	const group = "aaaaaaaa-0000-0000-0000-000000000702"
+	svc, _, enrolls, _, _ := newEnrollService(t)
+	move, err := domain.NewEnrollmentTransfer("tr-2", "t", "enr-1", "grp-1", group, "balanceo", time.Date(2026, 9, 2, 15, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enrolls.history = map[string][]domain.EnrollmentTransfer{group: {move}}
+	got, err := svc.ListTransfersIntoGroup(context.Background(), group)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+	if _, err := svc.ListTransfersIntoGroup(context.Background(), "nope"); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("malformed group: want KindInvalid, got %v", err)
+	}
+}

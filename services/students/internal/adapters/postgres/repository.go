@@ -194,6 +194,9 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]*domain.St
 		if f.GradeGroup != "" {
 			q = q.Where("grade_group = ?", f.GradeGroup)
 		}
+		if len(f.IDs) > 0 {
+			q = q.Where("id IN ?", f.IDs)
+		}
 		if f.PageToken != "" {
 			q = q.Where("id > ?", f.PageToken)
 		}

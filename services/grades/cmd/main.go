@@ -103,9 +103,12 @@ func buildMux() (*http.ServeMux, error) {
 	enrollments := studentsclient.New(studentsBaseURL, gcpauth.HTTPClient(context.Background(), studentsBaseURL))
 
 	newID := func() string { return uuid.NewString() }
-	svc := usecase.NewGradesService(repo, assignments, enrollments, tenantID, newID, time.Now)
+	// The same config client reads the catalog (group → level scale, cycles,
+	// a group's assignments) for the monthly knot and the term-level check.
+	svc := usecase.NewGradesService(repo, assignments, assignments, enrollments, tenantID, newID, time.Now)
+	monthly := usecase.NewMonthlyGradesService(repo, assignments, assignments, enrollments, tenantID, newID, time.Now)
 	health := usecase.NewHealthService(serviceName)
-	handler := grpcadapter.NewGradesHandler(svc, health)
+	handler := grpcadapter.NewGradesHandler(svc, monthly, health)
 
 	mux := http.NewServeMux()
 	path, h := gradesv1connect.NewGradesServiceHandler(handler, connect.WithRecover(recoverFn))

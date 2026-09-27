@@ -188,6 +188,14 @@ describe("NumberField", () => {
     expect(onChange).toHaveBeenCalledWith("8");
   });
 
+  it("avisa al salir del campo, donde la pantalla acusa un dato mal escrito", async () => {
+    const onBlur = vi.fn();
+    render(<NumberField label="Calificación" value="" onChange={vi.fn()} onBlur={onBlur} />);
+    await userEvent.click(screen.getByLabelText("Calificación"));
+    await userEvent.tab();
+    expect(onBlur).toHaveBeenCalledTimes(1);
+  });
+
   it("acepta el rango que se le dé", () => {
     render(<NumberField label="Calificación" value="" onChange={vi.fn()} min={0} max={10} step={0.1} />);
     const input = screen.getByLabelText("Calificación");
