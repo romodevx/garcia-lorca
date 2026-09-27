@@ -77,6 +77,59 @@ describe("TermsPanel — months × trimesters grid", () => {
     expect(cell("noviembre de 2026", "2.er trimestre")).toHaveAttribute("aria-pressed", "false");
   });
 
+  it("a refused tap undoes only itself: a tap queued behind it is still saved, and the error names the month", async () => {
+    const user = userEvent.setup();
+    let refuse: (reason: unknown) => void = () => {};
+    const onSetMonths = vi.fn()
+      .mockImplementationOnce(() => new Promise<Term>((_, reject) => { refuse = reject; }))
+      .mockImplementation(async (termId: string, months: readonly string[]) => ({ ...term(termId, 1, []), months: [...months] }));
+    setup({ onSetMonths });
+
+    await user.click(cell("noviembre de 2026", "2.er trimestre"));
+    await user.click(cell("diciembre de 2026", "1.er trimestre"));
+    refuse(new ConfigError(409, "", "TERM_CLOSED"));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("noviembre de 2026");
+    expect(alert).toHaveTextContent("El periodo está cerrado; reábrelo para cambiar sus meses");
+    await waitFor(() => expect(onSetMonths).toHaveBeenLastCalledWith("t1", ["2026-09", "2026-10", "2026-12"]));
+    expect(cell("noviembre de 2026", "2.er trimestre")).toHaveAttribute("aria-pressed", "false");
+    expect(cell("diciembre de 2026", "1.er trimestre")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it.each([
+    ["TERM_TOO_LONG", "Un periodo puede tener hasta 6 meses"],
+    ["MONTH_IN_OTHER_TERM", "Ese mes ya es de otro periodo"],
+  ])("a %s refusal without server words still says why, naming the month", async (code, reason) => {
+    const user = userEvent.setup();
+    setup({ onSetMonths: vi.fn().mockRejectedValue(new ConfigError(400, "", code)) });
+
+    await user.click(cell("noviembre de 2026", "2.er trimestre"));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("noviembre de 2026");
+    expect(alert).toHaveTextContent(reason);
+  });
+
+  it("a new term joining the list never reverts months already saved (the parent's copy may be older)", async () => {
+    const user = userEvent.setup();
+    const props: TermsPanelProps = {
+      cycle, level: PRIMARIA, levels,
+      terms: [term("t1", 1, [])],
+      onCreate: vi.fn().mockResolvedValue(undefined),
+      onSetMonths: vi.fn(async (termId: string, months: readonly string[]) => ({ ...term(termId, 1, []), months: [...months] })),
+      onCopyMonths: vi.fn().mockResolvedValue([]),
+    };
+    const { rerender } = render(<TermsPanel {...props} />);
+    await user.click(cell("septiembre de 2026", "1.er trimestre"));
+    await waitFor(() => expect(props.onSetMonths).toHaveBeenCalled());
+
+    rerender(<TermsPanel {...props} terms={[term("t1", 1, []), term("t9", 9, ["2027-01"])]} />);
+
+    expect(cell("septiembre de 2026", "1.er trimestre")).toHaveAttribute("aria-pressed", "true");
+    expect(cell("enero de 2027", "9.er trimestre")).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("lists the months no term has yet", () => {
     setup();
     expect(screen.getByText(/Sin periodo: /)).toHaveTextContent("Sin periodo: Ago, Nov, Dic, Ene, Feb, Mar, Abr, May, Jun, Jul");

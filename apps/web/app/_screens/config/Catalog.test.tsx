@@ -499,4 +499,62 @@ describe("Catalog — meses de cada periodo (tarea 7)", () => {
 
     await waitFor(() => expect(mocked.setTermMonths).toHaveBeenCalledWith(expect.any(String), "t1", ["2026-09"]));
   });
+
+  const CYCLE = { id: "c1", name: "2026-2027", status: "active", startsOn: "2026-08-01", endsOn: "2027-06-30" } as const;
+  const T1 = { id: "t1", cycleId: "c1", levelId: "l1", name: "1.er trimestre", ordinal: 1, startsOn: "2026-08-01", endsOn: "2026-11-30", months: [] as string[] };
+
+  it("creating a term after a tap keeps the tapped month (the saved term is merged into the list)", async () => {
+    const user = userEvent.setup();
+    mocked.listCycles.mockResolvedValue([CYCLE]);
+    mocked.listLevels.mockResolvedValue([{ id: "l1", name: "PRIMARIA", sepCode: "PRI", enrollmentGranularity: "cycle" }]);
+    mocked.listTerms.mockResolvedValue([T1]);
+    mocked.setTermMonths.mockResolvedValue({ ...T1, months: ["2026-09"] });
+    mocked.createTerm.mockResolvedValue({ ...T1, id: "t2", name: "BIMESTRE EXTRA", ordinal: 2, months: [] });
+
+    render(<Catalog onBack={() => {}} />);
+    await user.click(await screen.findByRole("button", { name: /PRIMARIA/ }));
+    await user.click(await screen.findByRole("button", { name: "septiembre de 2026 en 1.er trimestre" }));
+    await waitFor(() => expect(mocked.setTermMonths).toHaveBeenCalled());
+
+    await user.click(screen.getByRole("button", { name: "Nuevo periodo" }));
+    await user.type(screen.getByLabelText("Nombre del periodo"), "bimestre extra");
+    await user.type(screen.getByLabelText("Inicio del periodo"), "2026-12-01");
+    await user.type(screen.getByLabelText("Fin del periodo"), "2027-01-31{Enter}");
+
+    expect(await screen.findByRole("button", { name: "septiembre de 2026 en BIMESTRE EXTRA" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "septiembre de 2026 en 1.er trimestre" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("never shows one level's terms under another while the other's load", async () => {
+    const user = userEvent.setup();
+    mocked.listCycles.mockResolvedValue([CYCLE]);
+    mocked.listLevels.mockResolvedValue([
+      { id: "l1", name: "PRIMARIA", sepCode: "PRI", enrollmentGranularity: "cycle" },
+      { id: "l2", name: "SECUNDARIA", sepCode: "SEC", enrollmentGranularity: "cycle" },
+    ]);
+    mocked.listTerms.mockImplementation((_url: string, _cycleId: string, levelId?: string) => (levelId === "l1" ? Promise.resolve([T1]) : new Promise<api.Term[]>(() => {})));
+
+    render(<Catalog onBack={() => {}} />);
+    await user.click(await screen.findByRole("button", { name: /PRIMARIA/ }));
+    expect(await screen.findByRole("button", { name: "septiembre de 2026 en 1.er trimestre" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /SECUNDARIA/ }));
+
+    expect(await screen.findByText("Cargando periodos…")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "septiembre de 2026 en 1.er trimestre" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Crear trimestres" })).toBeNull();
+  });
+
+  it("says so when a level's terms cannot load, instead of offering to create them", async () => {
+    const user = userEvent.setup();
+    mocked.listCycles.mockResolvedValue([CYCLE]);
+    mocked.listLevels.mockResolvedValue([{ id: "l1", name: "PRIMARIA", sepCode: "PRI", enrollmentGranularity: "cycle" }]);
+    mocked.listTerms.mockRejectedValue(new Error("boom"));
+
+    render(<Catalog onBack={() => {}} />);
+    await user.click(await screen.findByRole("button", { name: /PRIMARIA/ }));
+
+    expect(await screen.findByText("No se pudieron cargar los periodos de este nivel.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Crear trimestres" })).toBeNull();
+  });
 });
