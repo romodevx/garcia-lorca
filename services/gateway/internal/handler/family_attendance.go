@@ -17,7 +17,7 @@ import (
 // counts six "faltas" for one day.
 
 // The day statuses the view answers with. present/absent/late/excused are the
-// attendance vocabulary; partial is a per-class day with mixed statuses and
+// attendance vocabulary; partial is a day absent in some lists but not all, and
 // not_taken is today before any list was taken.
 const (
 	dayPresent  = "present"
@@ -255,11 +255,11 @@ type dayMarks struct {
 //
 //   - Daily day: the list's status — present when taken with no exception.
 //   - Per-class day: classes = every list taken that day with the child's status;
-//     the day is the status all classes share (present, absent, late…), or
-//     partial when they differ.
+//     the day's status is dayStatus over them (late > excused > present with no
+//     absence; partial when absent in some classes; absent when absent in all).
 //
 // Rows are newest first; the summary counts DAYS (a per-class day is one day),
-// with mixed days in their own partial counter. not_taken counts nowhere.
+// with partial days in their own counter. not_taken counts nowhere.
 func buildAttendanceDays(v monthView) ([]familyDayResponse, familyAttendanceSummary) {
 	byDay := map[string]*dayMarks{}
 	get := func(date string) *dayMarks {
@@ -338,11 +338,10 @@ func coveredByAny(windows []enrollmentWindow, groupID, date string) bool {
 }
 
 // row renders one built day. A day with only a daily list carries its status;
-// one with only per-class lists the status its classes share (partial when
-// they differ). A day with BOTH derives it from every list taken: absent on
-// the daily list is an absent day, otherwise the status all lists share, or
-// partial — an absence in one class of a present day is partial, as in a
-// per-class day.
+// one with only per-class lists takes dayStatus over its classes. A day with
+// BOTH: absent on the daily list is an absent day, otherwise dayStatus over
+// every list taken — an absence in one class of a present day is partial, as
+// in a per-class day.
 func (d *dayMarks) row(date string) familyDayResponse {
 	classes := make([]familyClassResponse, 0, len(d.classes))
 	for _, c := range d.classes {
@@ -354,7 +353,7 @@ func (d *dayMarks) row(date string) familyDayResponse {
 		statuses = append(statuses, c.Status)
 	}
 	if !d.daily {
-		return familyDayResponse{Date: date, Status: sharedStatus(statuses), Mode: attendanceModePerClass, Classes: classes}
+		return familyDayResponse{Date: date, Status: dayStatus(statuses), Mode: attendanceModePerClass, Classes: classes}
 	}
 	daily := d.status
 	if daily == "" {
@@ -365,19 +364,38 @@ func (d *dayMarks) row(date string) familyDayResponse {
 	}
 	status := dayAbsent
 	if daily != dayAbsent {
-		status = sharedStatus(append(statuses, daily))
+		status = dayStatus(append(statuses, daily))
 	}
 	return familyDayResponse{Date: date, Status: status, Mode: attendanceModePerClass, Note: d.note, Classes: classes}
 }
 
-// sharedStatus is the status every list shares, or partial when they differ.
-func sharedStatus(statuses []string) string {
-	for _, s := range statuses[1:] {
-		if s != statuses[0] {
-			return dayPartial
+// dayStatus is the day's status over every list taken that day (owner rule):
+// with no absence, late beats excused beats present; absent in some lists but
+// not all is partial; absent in every list is absent.
+func dayStatus(statuses []string) string {
+	var absent, late, excused int
+	for _, s := range statuses {
+		switch s {
+		case dayAbsent:
+			absent++
+		case dayLate:
+			late++
+		case dayExcused:
+			excused++
 		}
 	}
-	return statuses[0]
+	switch {
+	case absent == len(statuses):
+		return dayAbsent
+	case absent > 0:
+		return dayPartial
+	case late > 0:
+		return dayLate
+	case excused > 0:
+		return dayExcused
+	default:
+		return dayPresent
+	}
 }
 
 // count adds one day to its counter.

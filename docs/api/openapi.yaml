@@ -147,10 +147,11 @@ paths:
         transfers (the move day belongs to the new group). A `daily` day
         carries the list's status (`present` when taken with no exception). A
         `per_class` day lists every class taken that day with the child's
-        status; the day is the status all classes share, or `partial` when they
-        differ. A day with both a daily list and classes is `per_class`: absent
-        on the daily list is `absent`, otherwise the status every list shares,
-        or `partial`. The summary counts DAYS. "Today" and the default month
+        status; the day's status follows the day rule (see
+        `FamilyDayStatus`). A day with both a daily list and classes is
+        `per_class`: absent on the daily list is `absent`, otherwise the day
+        rule over every list taken. The summary counts DAYS by that status
+        (`partial` in its own counter). "Today" and the default month
         are the system's UTC date (the school is UTC-6), consistently with
         every other date the system shows. Behind `module_attendance` and
         `module_students`.
@@ -2628,6 +2629,12 @@ components:
       example: { token: 'ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]', platform: ios }
     FamilyDayStatus:
       type: string
+      description: >
+        The day's status over every list taken that day. With no absent list:
+        `late` if any list is late, else `excused` if any is excused, else
+        `present` (present+late → late, late+excused → late, present+excused →
+        excused). Absent in some lists but not all → `partial`. Absent in every
+        list taken → `absent`. `not_taken` is today before any list was taken.
       enum: [present, absent, late, excused, partial, not_taken]
     FamilyAttendanceClass:
       type: object

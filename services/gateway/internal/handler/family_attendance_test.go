@@ -123,8 +123,9 @@ func TestFamilyAttendanceDailyDays(t *testing.T) {
 }
 
 // A per-class group: classes = every taken list with the child's status; the
-// day is present when all are, absent when absent in all, the shared status when
-// all share one, partial otherwise. Class names come from the catalog.
+// day's status follows dayStatus (late beats excused beats present when nothing
+// is absent; partial when absent in some classes; absent when absent in all).
+// Class names come from the catalog.
 func TestFamilyAttendancePerClassDays(t *testing.T) {
 	sessions := func(date string, subjects ...string) []client.TakenList {
 		out := make([]client.TakenList, 0, len(subjects))
@@ -138,6 +139,7 @@ func TestFamilyAttendancePerClassDays(t *testing.T) {
 	all = append(all, sessions("2026-09-16", "sub-mat", "sub-esp")...)
 	all = append(all, sessions("2026-09-15", "sub-mat", "sub-esp")...)
 	all = append(all, sessions("2026-09-14", "sub-mat", "sub-esp")...)
+	all = append(all, sessions("2026-09-11", "sub-mat", "sub-esp")...)
 	att := &fakeFamilyAttendance{
 		sessions: all,
 		byEnrollment: map[string][]client.AttendanceRecord{"enr-1": {
@@ -146,6 +148,7 @@ func TestFamilyAttendancePerClassDays(t *testing.T) {
 			{EnrollmentID: "enr-1", Date: "2026-09-15", Status: "late", SubjectID: "sub-mat", Note: "8:20"},
 			{EnrollmentID: "enr-1", Date: "2026-09-14", Status: "late", SubjectID: "sub-mat"},
 			{EnrollmentID: "enr-1", Date: "2026-09-14", Status: "late", SubjectID: "sub-esp"},
+			{EnrollmentID: "enr-1", Date: "2026-09-11", Status: "absent", SubjectID: "sub-mat"},
 		}},
 	}
 	catalog := &fakeFamilyConfig{subjects: []client.SubjectResult{{ID: "sub-mat", Name: "Matemáticas"}, {ID: "sub-esp", Name: "Español"}}}
@@ -158,11 +161,12 @@ func TestFamilyAttendancePerClassDays(t *testing.T) {
 	assert.Equal(t, []familyAttendanceClass{{SubjectName: "Español", Status: "present"}, {SubjectName: "Matemáticas", Status: "present"}}, today.Classes, "sorted by name")
 
 	assert.Equal(t, "absent", dayOf(t, out.Days, "2026-09-16").Status)
-	partial := dayOf(t, out.Days, "2026-09-15")
-	assert.Equal(t, "partial", partial.Status)
-	assert.Contains(t, partial.Classes, familyAttendanceClass{SubjectName: "Matemáticas", Status: "late", Note: "8:20"})
+	lateOnce := dayOf(t, out.Days, "2026-09-15")
+	assert.Equal(t, "late", lateOnce.Status, "present + late is a late day")
+	assert.Contains(t, lateOnce.Classes, familyAttendanceClass{SubjectName: "Matemáticas", Status: "late", Note: "8:20"})
 	assert.Equal(t, "late", dayOf(t, out.Days, "2026-09-14").Status, "late in every class")
-	assert.Equal(t, map[string]int{"present": 1, "absent": 1, "late": 1, "excused": 0, "partial": 1}, out.Summary)
+	assert.Equal(t, "partial", dayOf(t, out.Days, "2026-09-11").Status, "absent in one class of two")
+	assert.Equal(t, map[string]int{"present": 1, "absent": 1, "late": 2, "excused": 0, "partial": 1}, out.Summary)
 	assert.Equal(t, 1, catalog.gotListSubjects, "names resolved once")
 }
 

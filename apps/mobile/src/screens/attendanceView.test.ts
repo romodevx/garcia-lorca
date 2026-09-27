@@ -64,6 +64,43 @@ describe("attendance view helpers", () => {
     expect(todayHeadline(partial).text).toBe("Asistió a 4 de 6 clases");
   });
 
+  it("headlines an excused per-class day with how many classes were excused", () => {
+    const excused = day({
+      status: "excused",
+      mode: "per_class",
+      classes: [
+        { subjectName: "Español", status: "present" },
+        { subjectName: "Matemáticas", status: "excused" },
+        { subjectName: "Inglés", status: "present" },
+      ],
+    });
+    expect(todayHeadline(excused).text).toBe("Falta justificada en 1 de 3 clases");
+  });
+
+  it("headlines a per-class day excused in every class as a plain excused day", () => {
+    const excused = day({
+      status: "excused",
+      mode: "per_class",
+      classes: [
+        { subjectName: "Español", status: "excused" },
+        { subjectName: "Matemáticas", status: "excused" },
+      ],
+    });
+    expect(todayHeadline(excused).text).toBe("Falta justificada");
+  });
+
+  it("headlines a per-class day late in one class as late", () => {
+    const late = day({
+      status: "late",
+      mode: "per_class",
+      classes: [
+        { subjectName: "Español", status: "present" },
+        { subjectName: "Matemáticas", status: "late" },
+      ],
+    });
+    expect(todayHeadline(late).text).toBe("Llegó tarde");
+  });
+
   it("headlines an unknown today as a dash, never as a false 'not taken'", () => {
     const headline = todayHeadline(null);
     expect(headline.text).toBe("—");

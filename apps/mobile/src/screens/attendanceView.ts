@@ -104,7 +104,7 @@ export function todayHeadline(day: AttendanceDay | null): Headline {
     case "late":
       return headline("Llegó tarde", "clock", "warn");
     case "excused":
-      return headline("Falta justificada", "document", "warn");
+      return headline(excusedText(day), "document", "warn");
     case "partial":
       return headline(partialText(day), "alert", "warn");
     default:
@@ -112,6 +112,15 @@ export function todayHeadline(day: AttendanceDay | null): Headline {
         ? headline("Sin clases hoy", "calendar", "neutral")
         : headline("Lista aún no tomada", "clock", "neutral");
   }
+}
+
+/** An excused per-class day may be excused in only some classes (the rest attended). */
+function excusedText(day: AttendanceDay): string {
+  const excused = day.classes.filter((c) => c.status === "excused").length;
+  if (excused === 0 || excused === day.classes.length) {
+    return "Falta justificada";
+  }
+  return `Falta justificada en ${excused} de ${day.classes.length} clases`;
 }
 
 function partialText(day: AttendanceDay): string {

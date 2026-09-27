@@ -208,6 +208,12 @@ func TestFamilyAttendanceMixedDayCombinesEveryList(t *testing.T) {
 			{EnrollmentID: "enr-1", Date: "2026-09-15", Status: "late"},
 			{EnrollmentID: "enr-1", Date: "2026-09-15", SubjectID: "sub-mat", Status: "late"},
 		}, "late"},
+		{"late in one class of a present day", []client.AttendanceRecord{{EnrollmentID: "enr-1", Date: "2026-09-15", SubjectID: "sub-mat", Status: "late"}}, "late"},
+		{"excused daily, late class", []client.AttendanceRecord{
+			{EnrollmentID: "enr-1", Date: "2026-09-15", Status: "excused"},
+			{EnrollmentID: "enr-1", Date: "2026-09-15", SubjectID: "sub-mat", Status: "late"},
+		}, "late"},
+		{"excused on the daily list only", []client.AttendanceRecord{{EnrollmentID: "enr-1", Date: "2026-09-15", Status: "excused"}}, "excused"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
