@@ -18,6 +18,23 @@ type MonthlyGradeInput struct {
 	EnrollmentID string
 	Value        string
 	CapturedBy   string // the authenticated user id
+	SchoolWide   bool   // the director's routes: months of a previous group stay writable
+}
+
+// MonthlyCell names one cell to clear.
+type MonthlyCell struct {
+	AssignmentID string
+	Month        string
+	EnrollmentID string
+	SchoolWide   bool
+}
+
+// MonthlySheetQuery names the sheet to read; Month "" lets the service pick
+// the current month clamped into the cycle.
+type MonthlySheetQuery struct {
+	AssignmentID string
+	Month        string
+	SchoolWide   bool
 }
 
 // MonthlyGrade is one captured monthly grade. Value is canonical decimal text
@@ -31,11 +48,15 @@ type MonthlyGrade struct {
 }
 
 // MonthlySheetRow is one active enrollment of the sheet; Value "" = no grade.
+// Editable is whether the caller may write this row's cell; ReadOnlyReason
+// says why not.
 type MonthlySheetRow struct {
-	EnrollmentID string
-	StudentID    string
-	Value        string
-	UpdatedAt    time.Time
+	EnrollmentID   string
+	StudentID      string
+	Value          string
+	UpdatedAt      time.Time
+	Editable       bool
+	ReadOnlyReason string
 }
 
 // MonthlySheet is the capture grid of one assignment for one month.
@@ -67,6 +88,7 @@ type EnrollmentMonthlyGrades struct {
 func (c *GradesClient) UpsertMonthlyGrade(ctx context.Context, in MonthlyGradeInput) (MonthlyGrade, error) {
 	res, err := c.rpc.UpsertMonthlyGrade(ctx, connect.NewRequest(&gradesv1.UpsertMonthlyGradeRequest{
 		AssignmentId: in.AssignmentID, Month: in.Month, EnrollmentId: in.EnrollmentID, Value: in.Value, CapturedBy: in.CapturedBy,
+		SchoolWide: in.SchoolWide,
 	}))
 	if err != nil {
 		return MonthlyGrade{}, err
@@ -75,24 +97,28 @@ func (c *GradesClient) UpsertMonthlyGrade(ctx context.Context, in MonthlyGradeIn
 }
 
 // ClearMonthlyGrade empties one cell (clearing an empty cell succeeds).
-func (c *GradesClient) ClearMonthlyGrade(ctx context.Context, assignmentID, month, enrollmentID string) error {
+func (c *GradesClient) ClearMonthlyGrade(ctx context.Context, cell MonthlyCell) error {
 	_, err := c.rpc.ClearMonthlyGrade(ctx, connect.NewRequest(&gradesv1.ClearMonthlyGradeRequest{
-		AssignmentId: assignmentID, Month: month, EnrollmentId: enrollmentID,
+		AssignmentId: cell.AssignmentID, Month: cell.Month, EnrollmentId: cell.EnrollmentID, SchoolWide: cell.SchoolWide,
 	}))
 	return err
 }
 
-// GetMonthlySheet reads the capture grid; month "" lets the service pick the
-// current month clamped into the cycle.
-func (c *GradesClient) GetMonthlySheet(ctx context.Context, assignmentID, month string) (MonthlySheet, error) {
-	res, err := c.rpc.GetMonthlySheet(ctx, connect.NewRequest(&gradesv1.GetMonthlySheetRequest{AssignmentId: assignmentID, Month: month}))
+// GetMonthlySheet reads the capture grid.
+func (c *GradesClient) GetMonthlySheet(ctx context.Context, q MonthlySheetQuery) (MonthlySheet, error) {
+	res, err := c.rpc.GetMonthlySheet(ctx, connect.NewRequest(&gradesv1.GetMonthlySheetRequest{
+		AssignmentId: q.AssignmentID, Month: q.Month, SchoolWide: q.SchoolWide,
+	}))
 	if err != nil {
 		return MonthlySheet{}, err
 	}
 	m := res.Msg
 	rows := make([]MonthlySheetRow, 0, len(m.GetRows()))
 	for _, r := range m.GetRows() {
-		rows = append(rows, MonthlySheetRow{EnrollmentID: r.GetEnrollmentId(), StudentID: r.GetStudentId(), Value: r.GetValue(), UpdatedAt: timeOrZero(r.GetUpdatedAt())})
+		rows = append(rows, MonthlySheetRow{
+			EnrollmentID: r.GetEnrollmentId(), StudentID: r.GetStudentId(), Value: r.GetValue(), UpdatedAt: timeOrZero(r.GetUpdatedAt()),
+			Editable: r.GetEditable(), ReadOnlyReason: r.GetReadOnlyReason(),
+		})
 	}
 	return MonthlySheet{
 		AssignmentID: m.GetAssignmentId(), Month: m.GetMonth(), Months: m.GetMonths(), Scale: toGradeScale(m.GetScale()),
@@ -115,6 +141,23 @@ func (c *GradesClient) GetEnrollmentMonthlyGrades(ctx context.Context, enrollmen
 		CycleID: m.GetCycleId(), CycleName: m.GetCycleName(), Months: m.GetMonths(), Scale: toGradeScale(m.GetScale()),
 		GradingEnabled: m.GetGradingEnabled(), SubjectIDs: m.GetSubjectIds(), Grades: grades,
 	}, nil
+}
+
+// CountScaleViolations counts the grades captured in the level's active cycle
+// that the proposed grading would refuse (every grade when it disables
+// grading).
+func (c *GradesClient) CountScaleViolations(ctx context.Context, levelID string, g LevelGrading) (int, error) {
+	res, err := c.rpc.CountScaleViolations(ctx, connect.NewRequest(&gradesv1.CountScaleViolationsRequest{
+		LevelId: levelID, GradingEnabled: g.Enabled,
+		Scale: &gradesv1.GradingScale{
+			MinHundredths: int32(g.Scale.MinHundredths), MaxHundredths: int32(g.Scale.MaxHundredths),
+			Decimals: int32(g.Scale.Decimals), PassingHundredths: int32(g.Scale.PassingHundredths),
+		},
+	}))
+	if err != nil {
+		return 0, err
+	}
+	return int(res.Msg.GetViolations()), nil
 }
 
 func toMonthlyGrade(g *gradesv1.MonthlyGrade) MonthlyGrade {

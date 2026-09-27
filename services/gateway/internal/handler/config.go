@@ -3,9 +3,13 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
+
+	connect "connectrpc.com/connect"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 )
@@ -18,8 +22,7 @@ type ConfigService interface {
 	ActivateCycle(ctx context.Context, id string) (client.CycleResult, error)
 	CreateLevel(ctx context.Context, in client.CreateLevelInput) (client.LevelResult, error)
 	ListLevels(ctx context.Context) ([]client.LevelResult, error)
-	SetLevelAttendanceMode(ctx context.Context, id, mode string) (client.LevelResult, error)
-	SetLevelGradingScale(ctx context.Context, id string, g client.LevelGrading) (client.LevelResult, error)
+	UpdateLevel(ctx context.Context, id string, p client.LevelPatch) (client.LevelResult, error)
 	CreateGradeLevel(ctx context.Context, in client.CreateGradeLevelInput) (client.GradeLevelResult, error)
 	ListGradeLevels(ctx context.Context, levelID string) ([]client.GradeLevelResult, error)
 	CreateSubject(ctx context.Context, in client.CreateSubjectInput) (client.SubjectResult, error)
@@ -51,12 +54,27 @@ type ConfigService interface {
 // guard (module_config) plus RequireAuth + rotation-enforcement, with writes
 // gated on config:write and reads on config:read.
 type ConfigHandler struct {
-	svc ConfigService
+	svc   ConfigService
+	scale ScaleGuard
+}
+
+// ScaleGuard counts the grades already captured in a level's active cycle that
+// a proposed grading would refuse. The Connect GradesClient satisfies it.
+type ScaleGuard interface {
+	CountScaleViolations(ctx context.Context, levelID string, g client.LevelGrading) (int, error)
 }
 
 // NewConfigHandler wires the handler to a catalog service.
 func NewConfigHandler(svc ConfigService) *ConfigHandler {
 	return &ConfigHandler{svc: svc}
+}
+
+// WithScaleGuard makes PATCH /config/levels/{id} refuse a grading change that
+// captured grades would break (see PatchLevel). Without it the change is not
+// checked — the composition root always wires it.
+func (h *ConfigHandler) WithScaleGuard(g ScaleGuard) *ConfigHandler {
+	h.scale = g
+	return h
 }
 
 // dateLayout is the wire format for catalog dates: a plain calendar day, parsed
@@ -254,51 +272,84 @@ func (g levelGradingRequest) toLevelGrading() (client.LevelGrading, string) {
 	}}, ""
 }
 
+// Scale tightening refusal (T6): the sentence and its machine code.
+const (
+	msgScaleTightening  = "Ya hay calificaciones capturadas en este ciclo que no cumplirían la nueva escala"
+	codeScaleTightening = "SCALE_TIGHTENING"
+)
+
 // PatchLevel handles PATCH /api/v1/config/levels/{id}: change how the level's
 // groups take attendance ("daily" | "per_class") and/or its numeric grading
-// scale (T6). The whole body is validated at the edge before config is called,
-// so a half-valid body changes nothing; an unknown level is 404. The response
-// is the level after the last change.
+// scale (T6).
+//
+// Atomic by construction: the body's shape is validated at the edge, then ONE
+// config call (UpdateLevel) validates every field again and writes them in one
+// transaction — a half-valid body changes nothing; an unknown level is 404.
+//
+// A grading change first asks grades how many grades captured in the level's
+// active cycle the new scale would refuse. Loosening (lower min, higher max,
+// more decimals, another passing mark) can never refuse one; tightening or
+// disabling grading that would is 409 SCALE_TIGHTENING, and config is never
+// called. A failed check fails closed. The check and the write are two calls,
+// so a grade captured between them is judged by the next write, not this one.
 func (h *ConfigHandler) PatchLevel(w http.ResponseWriter, r *http.Request) {
 	var req patchLevelRequest
 	if err := decodeJSONBody(w, r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if req.AttendanceMode == nil && req.Grading == nil {
-		http.Error(w, msgPatchLevelEmpty, http.StatusBadRequest)
+	patch, msg := req.toLevelPatch()
+	if msg != "" {
+		http.Error(w, msg, http.StatusBadRequest)
 		return
-	}
-	if req.AttendanceMode != nil && *req.AttendanceMode != client.AttendanceModeDaily && *req.AttendanceMode != client.AttendanceModePerClass {
-		http.Error(w, msgAttendanceModeValues, http.StatusBadRequest)
-		return
-	}
-	var grading client.LevelGrading
-	if req.Grading != nil {
-		var msg string
-		if grading, msg = req.Grading.toLevelGrading(); msg != "" {
-			http.Error(w, msg, http.StatusBadRequest)
-			return
-		}
 	}
 	id := r.PathValue("id")
-	var (
-		res client.LevelResult
-		err error
-	)
-	if req.AttendanceMode != nil {
-		if res, err = h.svc.SetLevelAttendanceMode(r.Context(), id, *req.AttendanceMode); err != nil {
-			writeConnectError(w, err)
-			return
-		}
+	if patch.Grading != nil && !h.scaleAllowed(w, r, id, *patch.Grading) {
+		return
 	}
-	if req.Grading != nil {
-		if res, err = h.svc.SetLevelGradingScale(r.Context(), id, grading); err != nil {
-			writeConnectError(w, err)
-			return
-		}
+	res, err := h.svc.UpdateLevel(r.Context(), id, patch)
+	if err != nil {
+		writeConnectError(w, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, toLevelResponse(res))
+}
+
+// toLevelPatch validates the body's shape and converts it; msg is the refusal.
+func (req patchLevelRequest) toLevelPatch() (client.LevelPatch, string) {
+	if req.AttendanceMode == nil && req.Grading == nil {
+		return client.LevelPatch{}, msgPatchLevelEmpty
+	}
+	if req.AttendanceMode != nil && *req.AttendanceMode != client.AttendanceModeDaily && *req.AttendanceMode != client.AttendanceModePerClass {
+		return client.LevelPatch{}, msgAttendanceModeValues
+	}
+	patch := client.LevelPatch{AttendanceMode: req.AttendanceMode}
+	if req.Grading != nil {
+		grading, msg := req.Grading.toLevelGrading()
+		if msg != "" {
+			return client.LevelPatch{}, msg
+		}
+		patch.Grading = &grading
+	}
+	return patch, ""
+}
+
+// scaleAllowed asks grades whether captured grades would break the new
+// grading; it writes the refusal itself and reports whether to go on.
+func (h *ConfigHandler) scaleAllowed(w http.ResponseWriter, r *http.Request, levelID string, g client.LevelGrading) bool {
+	if h.scale == nil {
+		return true
+	}
+	n, err := h.scale.CountScaleViolations(r.Context(), levelID, g)
+	if err != nil {
+		writeConnectError(w, err)
+		return false
+	}
+	if n > 0 {
+		writeCodedError(w, http.StatusConflict, codeScaleTightening, msgScaleTightening)
+		return false
+	}
+	return true
 }
 
 // CreateLevel handles POST /api/v1/config/levels.
@@ -711,13 +762,45 @@ func writeConnectError(w http.ResponseWriter, err error) {
 // errors at its own boundary (pkg/errors.SafeMessage), so nothing from a driver
 // or a query reaches this point. Exported so the behaviour can be tested for what
 // it is — the one thing standing between a written message and a person.
+//
+// A service's machine code for the refusal (the X-Error-Code error metadata,
+// e.g. GRADE_DECIMALS) is forwarded as the X-Error-Code response header — only
+// when it is shaped like a code, so nothing else a service sent rides along.
 func WriteConnectError(w http.ResponseWriter, err error) {
 	status := httpStatusFor(err)
 	message := connectMessage(err)
 	if message == "" {
 		message = http.StatusText(status)
 	}
+	if code := connectErrorCode(err); code != "" {
+		w.Header().Set(errorCodeHeader, code)
+	}
 	http.Error(w, message, status)
+}
+
+// errorCodeHeader carries a refusal's machine code to the client (and is the
+// error-metadata key the services put it under).
+const errorCodeHeader = "X-Error-Code"
+
+// errorCodeShape is what a machine code looks like: UPPER_SNAKE, bounded.
+var errorCodeShape = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
+
+// connectErrorCode is the service's machine code for err, or "".
+func connectErrorCode(err error) string {
+	var ce *connect.Error
+	if !errors.As(err, &ce) {
+		return ""
+	}
+	if code := ce.Meta().Get(errorCodeHeader); errorCodeShape.MatchString(code) {
+		return code
+	}
+	return ""
+}
+
+// writeCodedError answers an edge refusal with its sentence and machine code.
+func writeCodedError(w http.ResponseWriter, status int, code, msg string) {
+	w.Header().Set(errorCodeHeader, code)
+	http.Error(w, msg, status)
 }
 
 // ActivateCycle: POST /api/v1/config/cycles/{id}/activate

@@ -33,9 +33,9 @@ func (s *stubLevels) ListLevels(context.Context, *connect.Request[configv1.ListL
 	}}), nil
 }
 
-func (s *stubLevels) SetLevelAttendanceMode(_ context.Context, req *connect.Request[configv1.SetLevelAttendanceModeRequest]) (*connect.Response[configv1.SetLevelAttendanceModeResponse], error) {
+func (s *stubLevels) UpdateLevel(_ context.Context, req *connect.Request[configv1.UpdateLevelRequest]) (*connect.Response[configv1.UpdateLevelResponse], error) {
 	s.gotMode = req.Msg.GetAttendanceMode()
-	return connect.NewResponse(&configv1.SetLevelAttendanceModeResponse{Level: &configv1.Level{
+	return connect.NewResponse(&configv1.UpdateLevelResponse{Level: &configv1.Level{
 		Id: req.Msg.GetId(), Name: "Primaria", AttendanceMode: req.Msg.GetAttendanceMode(),
 	}}), nil
 }
@@ -62,7 +62,8 @@ func TestConfigClientLevelAttendanceModeRoundTrip(t *testing.T) {
 		{"daily", configv1.AttendanceMode_ATTENDANCE_MODE_DAILY},
 		{"weekly", configv1.AttendanceMode_ATTENDANCE_MODE_UNSPECIFIED},
 	} {
-		got, err := c.SetLevelAttendanceMode(context.Background(), "lvl-1", tt.mode)
+		mode := tt.mode
+		got, err := c.UpdateLevel(context.Background(), "lvl-1", client.LevelPatch{AttendanceMode: &mode})
 		require.NoError(t, err)
 		assert.Equal(t, tt.wire, stub.gotMode, "mode %q on the wire", tt.mode)
 		if tt.wire != configv1.AttendanceMode_ATTENDANCE_MODE_UNSPECIFIED {

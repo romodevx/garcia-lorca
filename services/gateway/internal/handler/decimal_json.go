@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -33,11 +34,21 @@ func numberText(raw json.RawMessage) (string, bool) {
 	return n.String(), true
 }
 
+// maxDecimalText caps a mark's text: no mark needs more than 16 characters,
+// and the bound keeps big.Rat from ever doing unbounded work.
+const maxDecimalText = 16
+
+// plainDecimal is the only shape a mark may take: optional minus, digits,
+// optional fraction. Exponent ("1e9"), hex and binary forms are refused BEFORE
+// big.Rat sees them — SetString would build "1e1000000000" digit by digit.
+var plainDecimal = regexp.MustCompile(`^-?[0-9]+(\.[0-9]+)?$`)
+
 // parseHundredths converts a JSON number with at most two decimals into exact
-// hundredths (5 → 500, 69.5 → 6950).
+// hundredths (5 → 500, 69.5 → 6950). Only plain decimals of at most 16
+// characters are read.
 func parseHundredths(raw json.RawMessage) (int, bool) {
 	text, ok := numberText(raw)
-	if !ok {
+	if !ok || len(text) > maxDecimalText || !plainDecimal.MatchString(text) {
 		return 0, false
 	}
 	r, ok := new(big.Rat).SetString(text)

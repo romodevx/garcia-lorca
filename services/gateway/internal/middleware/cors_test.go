@@ -133,3 +133,19 @@ func TestCORSExposesTheScanResultHeader(t *testing.T) {
 		t.Errorf("Expose-Headers = %q, want it to include X-Scan-Result", got)
 	}
 }
+
+// T6: the monthly grade screen reacts to a refusal's machine code (mark the
+// cell, lock the row) from X-Error-Code, so a cross-origin fetch must read it.
+func TestCORSExposesTheErrorCodeHeader(t *testing.T) {
+	var ran bool
+	h := middleware.CORS([]string{"http://localhost:3002"})(okHandler(&ran))
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/grades/monthly", nil)
+	req.Header.Set("Origin", "http://localhost:3002")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Access-Control-Expose-Headers"); !strings.Contains(got, "X-Error-Code") {
+		t.Errorf("Expose-Headers = %q, want it to include X-Error-Code", got)
+	}
+}

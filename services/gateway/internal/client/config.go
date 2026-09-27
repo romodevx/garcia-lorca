@@ -273,34 +273,33 @@ func (c *ConfigClient) GetLevel(ctx context.Context, id string) (LevelResult, er
 	return toLevelResult(res.Msg.GetLevel()), nil
 }
 
-// SetLevelAttendanceMode changes how a level takes attendance ("daily" or
-// "per_class"). An unknown mode reaches config as UNSPECIFIED and comes back
-// InvalidArgument; an unknown level is NotFound.
-func (c *ConfigClient) SetLevelAttendanceMode(ctx context.Context, id, mode string) (LevelResult, error) {
-	res, err := c.rpc.SetLevelAttendanceMode(ctx, connect.NewRequest(&configv1.SetLevelAttendanceModeRequest{
-		Id:             id,
-		AttendanceMode: attendanceModeFromName(mode),
-	}))
-	if err != nil {
-		return LevelResult{}, err
-	}
-	return toLevelResult(res.Msg.GetLevel()), nil
+// LevelPatch is a partial change of a level: a nil field keeps its value.
+// AttendanceMode is the edge name ("daily" | "per_class").
+type LevelPatch struct {
+	AttendanceMode *string
+	Grading        *LevelGrading
 }
 
-// SetLevelGradingScale replaces a level's grading configuration. An
-// inconsistent scale comes back InvalidArgument with config's sentence; an
-// unknown level is NotFound.
-func (c *ConfigClient) SetLevelGradingScale(ctx context.Context, id string, g LevelGrading) (LevelResult, error) {
-	res, err := c.rpc.SetLevelGradingScale(ctx, connect.NewRequest(&configv1.SetLevelGradingScaleRequest{
-		Id: id,
-		Grading: &configv1.GradingScale{
+// UpdateLevel changes a level's attendance mode and/or grading scale in ONE
+// config call, which validates everything before writing anything (a
+// half-valid patch changes nothing). An unknown mode reaches config as
+// UNSPECIFIED and comes back InvalidArgument; an unknown level is NotFound.
+func (c *ConfigClient) UpdateLevel(ctx context.Context, id string, p LevelPatch) (LevelResult, error) {
+	req := &configv1.UpdateLevelRequest{Id: id}
+	if p.AttendanceMode != nil {
+		mode := attendanceModeFromName(*p.AttendanceMode)
+		req.AttendanceMode = &mode
+	}
+	if g := p.Grading; g != nil {
+		req.Grading = &configv1.GradingScale{
 			Enabled:           g.Enabled,
 			MinHundredths:     int32(g.Scale.MinHundredths),
 			MaxHundredths:     int32(g.Scale.MaxHundredths),
 			Decimals:          int32(g.Scale.Decimals),
 			PassingHundredths: int32(g.Scale.PassingHundredths),
-		},
-	}))
+		}
+	}
+	res, err := c.rpc.UpdateLevel(ctx, connect.NewRequest(req))
 	if err != nil {
 		return LevelResult{}, err
 	}

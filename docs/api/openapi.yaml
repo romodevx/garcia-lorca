@@ -1708,8 +1708,13 @@ paths:
         (every field required), marks in the units a person types with at most
         two decimals; config enforces 0 <= min < passing <= max <= 100 and
         decimals 0..2 and answers its own sentence otherwise. Send either field
-        or both; the body is validated whole before anything changes. An
-        unknown level is 404. Requires `config:write`.
+        or both: they are applied in ONE config transaction, validated whole
+        before anything changes (a half-valid body changes nothing). A scale
+        may be LOOSENED freely (lower min, higher max, more decimals, another
+        passing mark); TIGHTENING it (higher min, lower max, fewer decimals) or
+        disabling grading is 409 `X-Error-Code: SCALE_TIGHTENING` when grades
+        already captured in the level's active cycle would not fit. An unknown
+        level is 404. Requires `config:write`.
       operationId: patchLevel
       security: [{ sessionCookie: [] }]
       parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
@@ -1736,6 +1741,16 @@ paths:
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: >
+            Grades already captured in the level's active cycle would not fit
+            the tightened (or disabled) scale.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: Ya hay calificaciones capturadas en este ciclo que no cumplirían la nueva escala
 
   /api/v1/attendance/roster:
     get:
@@ -2503,7 +2518,11 @@ paths:
       description: >
         Same as `GET /api/v1/grades/sheet`, limited to an assignment the caller
         teaches in the active cycle (any other id is 404, like an unknown one).
-        Behind `module_grades` AND `module_config`. Requires `teaching:read`.
+        A pupil who joined the group by transfer shows the earlier months
+        read-only (`rowEditable: false`, `rowReadOnlyReason` "Ese mes
+        corresponde al grupo anterior del alumno"): they belong to the previous
+        group. Behind `module_grades` AND `module_config`. Requires
+        `teaching:read`.
       operationId: getTeachingMonthlySheet
       security: [{ sessionCookie: [] }]
       parameters:
@@ -2526,7 +2545,9 @@ paths:
       summary: Save one monthly grade (teacher autosave)
       description: >
         Same as `PUT /api/v1/grades/monthly`, limited to an assignment the
-        caller teaches in the active cycle (404 otherwise). Behind
+        caller teaches in the active cycle (404 otherwise). A month before the
+        pupil joined the group by transfer is 400 "Ese mes corresponde al grupo
+        anterior del alumno" (`X-Error-Code: MONTH_PREVIOUS_GROUP`). Behind
         `module_grades` AND `module_config`. Requires `teaching:write`.
       operationId: putTeachingMonthlyGrade
       security: [{ sessionCookie: [] }]
@@ -2543,8 +2564,8 @@ paths:
       summary: Empty one monthly grade (teacher)
       description: >
         Same as `DELETE /api/v1/grades/monthly`, limited to an assignment the
-        caller teaches in the active cycle (404 otherwise). Requires
-        `teaching:write`.
+        caller teaches in the active cycle (404 otherwise); the same
+        previous-group rule as the PUT. Requires `teaching:write`.
       operationId: deleteTeachingMonthlyGrade
       security: [{ sessionCookie: [] }]
       parameters:
@@ -2596,7 +2617,10 @@ paths:
         Records or corrects one student's grade for a subject and month (one
         cell). `value` must be a JSON number — a string, null or a missing
         value is 400; to empty a cell send DELETE. The caller is recorded as
-        who captured it. Behind `module_grades`. Requires `grades:write`.
+        who captured it. The director acts for the whole school: the months a
+        transferred pupil spent in a previous group stay writable. Every
+        refusal carries its code in `X-Error-Code`. Behind `module_grades`.
+        Requires `grades:write`.
       operationId: putMonthlyGrade
       security: [{ sessionCookie: [] }]
       parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
@@ -2636,9 +2660,13 @@ paths:
         The child's ACTIVE enrollment, visible as soon as a grade is captured:
         one entry per subject of the group (sorted by name, Spanish order),
         each a month → grade object (`{}` when nothing is captured yet). A
-        level without numeric grading answers `gradingEnabled: false` with no
-        subjects. A child that is not the caller's, or has no active
-        enrollment, is 404. Behind `module_grades` AND `module_students`.
+        level without numeric grading answers `gradingEnabled: false`, still
+        listing any grade captured before it stopped (never hidden; `scale` is
+        the level's current one). Of two active enrollments (re-enrolled for
+        next year) the one whose cycle is active is shown — else the one whose
+        cycle contains today (UTC). A child that is not the caller's, or has no
+        active enrollment, is 404. Behind `module_grades` AND
+        `module_students`.
       operationId: getFamilyMonthlyGrades
       security: [{ familyBearer: [] }]
       parameters:
@@ -2672,6 +2700,19 @@ components:
         The family app's access token (/api/v1/auth/mobile/*), sent as
         `Authorization: Bearer <token>`. No cookie, so no CSRF header.
   headers:
+    XErrorCode:
+      description: >
+        The refusal's machine code, so a screen can react (mark the cell, lock
+        the row) without parsing the sentence. Exposed to the web via CORS.
+        Monthly grades: GRADE_OUT_OF_RANGE, GRADE_DECIMALS, GRADE_NOT_NUMBER,
+        MONTH_OUTSIDE_CYCLE, LEVEL_NOT_GRADED, ENROLLMENT_NOT_IN_GROUP,
+        MONTH_PREVIOUS_GROUP, LEVEL_SCALE_NOT_CONFIGURED (and MONTH_LOCKED once
+        periods close, T7). Level scale change: SCALE_TIGHTENING. Absent on a
+        refusal without a code.
+      schema:
+        type: string
+        pattern: '^[A-Z][A-Z0-9_]{0,63}$'
+        example: GRADE_DECIMALS
     XScanResult:
       description: An attendance scan's verdict, for the screen's sound and colour.
       schema: { type: string, enum: [ok, invalid, foreign, suspended] }
@@ -2795,7 +2836,10 @@ components:
           example: { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301, month: '2026-09', value: 9.5, updatedAt: '2026-09-03T15:04:05Z' }
     MonthlyGradeRefused:
       description: >
-        A sentence for the teacher, shown as is.
+        A sentence for the teacher, shown as is, with its machine code in
+        `X-Error-Code`.
+      headers:
+        X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
       content:
         text/plain:
           schema: { type: string }
@@ -2806,6 +2850,8 @@ components:
             level: { value: Este nivel no lleva calificación numérica }
             notNumber: { value: La calificación debe ser un número }
             enrollment: { value: El alumno no está inscrito en este grupo }
+            previousGroup: { value: Ese mes corresponde al grupo anterior del alumno }
+            scaleNotConfigured: { value: La escala de calificación del nivel no está configurada }
     AttendanceScanResolved:
       description: >
         The card is not revoked and its pupil is actively enrolled in the group
@@ -3644,13 +3690,25 @@ components:
           type: array
           items:
             type: object
-            required: [enrollmentId, studentId, name, value, updatedAt]
+            required: [enrollmentId, studentId, name, value, updatedAt, rowEditable]
             properties:
               enrollmentId: { type: string, format: uuid }
               studentId: { type: string, format: uuid }
               name: { type: string, example: Ana Ávila }
               value: { type: [number, 'null'], example: 9.5 }
               updatedAt: { type: [string, 'null'], format: date-time }
+              rowEditable:
+                type: boolean
+                description: >
+                  Whether the caller may write THIS row's cell. False when the
+                  whole sheet is read-only, or — on the teacher's routes — when
+                  the month is before the one the pupil joined this group by
+                  transfer (it belongs to the previous group; the director may
+                  edit it).
+              rowReadOnlyReason:
+                type: string
+                description: Why the row cannot be edited; absent when it can.
+                example: Ese mes corresponde al grupo anterior del alumno
       example:
         assignmentId: 9c3d1e2f-0000-4000-8000-000000000003
         month: '2026-09'
@@ -3659,8 +3717,8 @@ components:
         gradingEnabled: true
         editable: true
         rows:
-          - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301, studentId: 6e1d2c3b-0000-4000-8000-000000000042, name: Ana Ávila, value: 9.5, updatedAt: '2026-09-03T15:04:05Z' }
-          - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3302, studentId: 6e1d2c3b-0000-4000-8000-000000000043, name: Nico Núñez, value: null, updatedAt: null }
+          - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301, studentId: 6e1d2c3b-0000-4000-8000-000000000042, name: Ana Ávila, value: 9.5, updatedAt: '2026-09-03T15:04:05Z', rowEditable: true }
+          - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3302, studentId: 6e1d2c3b-0000-4000-8000-000000000043, name: Nico Núñez, value: null, updatedAt: null, rowEditable: false, rowReadOnlyReason: Ese mes corresponde al grupo anterior del alumno }
     FamilyMonthlyGrades:
       type: object
       required: [gradingEnabled, cycleName, months, scale, subjects]

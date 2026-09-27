@@ -11,9 +11,9 @@ import (
 	configv1 "github.com/garcia-lorca/gen/go/garcialorca/config/v1"
 )
 
-// SetLevelAttendanceMode echoes the new mode so the PATCH route answers 200.
-func (stubConfig) SetLevelAttendanceMode(_ context.Context, req *connect.Request[configv1.SetLevelAttendanceModeRequest]) (*connect.Response[configv1.SetLevelAttendanceModeResponse], error) {
-	return connect.NewResponse(&configv1.SetLevelAttendanceModeResponse{Level: &configv1.Level{
+// UpdateLevel echoes the new mode so the PATCH route answers 200.
+func (stubConfig) UpdateLevel(_ context.Context, req *connect.Request[configv1.UpdateLevelRequest]) (*connect.Response[configv1.UpdateLevelResponse], error) {
+	return connect.NewResponse(&configv1.UpdateLevelResponse{Level: &configv1.Level{
 		Id: req.Msg.GetId(), Name: "Secundaria", AttendanceMode: req.Msg.GetAttendanceMode(),
 	}}), nil
 }

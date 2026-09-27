@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
+	"time"
 
 	"golang.org/x/text/collate"
 	"golang.org/x/text/language"
@@ -41,11 +42,20 @@ type FamilyMonthlyGradesHandler struct {
 	students FamilyEnrollmentReader
 	grades   EnrollmentMonthlyGradesReader
 	subjects SubjectNamesReader
+	cycles   CycleLister
+	now      func() time.Time
 }
 
-// NewFamilyMonthlyGradesHandler wires the handler.
-func NewFamilyMonthlyGradesHandler(students FamilyEnrollmentReader, grades EnrollmentMonthlyGradesReader, subjects SubjectNamesReader) *FamilyMonthlyGradesHandler {
-	return &FamilyMonthlyGradesHandler{students: students, grades: grades, subjects: subjects}
+// NewFamilyMonthlyGradesHandler wires the handler. cycles decides which of a
+// child's active enrollments is the current school year's.
+func NewFamilyMonthlyGradesHandler(students FamilyEnrollmentReader, grades EnrollmentMonthlyGradesReader, subjects SubjectNamesReader, cycles CycleLister) *FamilyMonthlyGradesHandler {
+	return &FamilyMonthlyGradesHandler{students: students, grades: grades, subjects: subjects, cycles: cycles, now: time.Now}
+}
+
+// WithClock replaces the clock "today" is read from (tests).
+func (h *FamilyMonthlyGradesHandler) WithClock(now func() time.Time) *FamilyMonthlyGradesHandler {
+	h.now = now
+	return h
 }
 
 // enrollmentStatusActive is how the students client names a live enrollment.
@@ -69,8 +79,9 @@ type familyMonthlyGradesResponse struct {
 // — the child's ACTIVE enrollment's monthly grades: one entry per subject of
 // the group (sorted by name, Spanish order), each a month → grade object ({}
 // when nothing is captured yet). A level without numeric grading answers
-// gradingEnabled:false with no subjects; a child without an active enrollment
-// is 404.
+// gradingEnabled:false, still listing the grades captured before it stopped
+// (never hidden); a child without an active enrollment is 404. Of two active
+// enrollments (re-enrolled for next year) the current cycle's is shown.
 //
 // It runs behind RequireAuth + rotation, the module_grades + module_students
 // guards and RequirePermission("family:read").
@@ -107,18 +118,65 @@ func (h *FamilyMonthlyGradesHandler) MonthlyGrades(w http.ResponseWriter, r *htt
 	writeJSON(w, http.StatusOK, h.toResponse(r.Context(), got))
 }
 
-// activeEnrollment is the child's live enrollment id, or "" when there is none.
+// activeEnrollment is the child's current enrollment id, or "" when there is
+// none. A child re-enrolled for next year holds TWO active enrollments, so the
+// pick is by cycle, deterministically: the enrollment whose cycle is ACTIVE;
+// else the one whose cycle's dates contain today (UTC); else the active
+// enrollment of the earliest-starting cycle (enrollment id breaks every tie).
 func (h *FamilyMonthlyGradesHandler) activeEnrollment(ctx context.Context, studentID string) (string, error) {
 	enrollments, err := h.students.ListEnrollments(ctx, studentID, "", "")
 	if err != nil {
 		return "", err
 	}
+	var live []client.Enrollment
 	for _, e := range enrollments {
 		if e.Status == enrollmentStatusActive {
-			return e.ID, nil
+			live = append(live, e)
 		}
 	}
-	return "", nil
+	if len(live) <= 1 {
+		if len(live) == 1 {
+			return live[0].ID, nil
+		}
+		return "", nil
+	}
+	cycles, err := h.cycles.ListCycles(ctx)
+	if err != nil {
+		return "", err
+	}
+	return pickCurrentEnrollment(live, cycles, h.now().UTC()), nil
+}
+
+// pickCurrentEnrollment ranks each live enrollment by its cycle (active <
+// contains today < anything else), then by the cycle's start, then by id.
+func pickCurrentEnrollment(live []client.Enrollment, cycles []client.CycleResult, today time.Time) string {
+	byID := make(map[string]client.CycleResult, len(cycles))
+	for _, c := range cycles {
+		byID[c.ID] = c
+	}
+	rank := func(e client.Enrollment) int {
+		c := byID[e.CycleID]
+		switch {
+		case c.Status == cycleStatusActive:
+			return 0
+		case !c.StartsOn.IsZero() && !c.EndsOn.IsZero() && !today.Before(c.StartsOn) && !today.After(c.EndsOn):
+			return 1
+		default:
+			return 2
+		}
+	}
+	sort.SliceStable(live, func(i, j int) bool {
+		ri, rj := rank(live[i]), rank(live[j])
+		if ri != rj {
+			return ri < rj
+		}
+		si, sj := byID[live[i].CycleID].StartsOn, byID[live[j].CycleID].StartsOn
+		if !si.Equal(sj) {
+			return si.Before(sj)
+		}
+		return live[i].ID < live[j].ID
+	})
+	return live[0].ID
 }
 
 func (h *FamilyMonthlyGradesHandler) toResponse(ctx context.Context, g client.EnrollmentMonthlyGrades) familyMonthlyGradesResponse {
@@ -129,9 +187,6 @@ func (h *FamilyMonthlyGradesHandler) toResponse(ctx context.Context, g client.En
 	out := familyMonthlyGradesResponse{
 		GradingEnabled: g.GradingEnabled, CycleName: g.CycleName, Months: months,
 		Scale: toGradeScaleResponse(g.Scale), Subjects: []familySubjectGradesResponse{},
-	}
-	if !g.GradingEnabled {
-		return out
 	}
 	names := h.subjectNames(ctx, len(g.SubjectIDs) > 0)
 	bySubject := make(map[string]map[string]json.Number, len(g.SubjectIDs))

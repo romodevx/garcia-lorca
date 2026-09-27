@@ -116,3 +116,30 @@ func TestMonthlyGradeRoutes(t *testing.T) {
 		})
 	}
 }
+
+// CountScaleViolations: level "lvl-busy" has captured grades a new scale would
+// break; any other level has none.
+func (stubGrades) CountScaleViolations(_ context.Context, req *connect.Request[gradesv1.CountScaleViolationsRequest]) (*connect.Response[gradesv1.CountScaleViolationsResponse], error) {
+	var n int32
+	if req.Msg.GetLevelId() == "lvl-busy" {
+		n = 4
+	}
+	return connect.NewResponse(&gradesv1.CountScaleViolationsResponse{Violations: n}), nil
+}
+
+// PATCH /config/levels/{id} with a grading change asks grades first (the
+// composition root wires the scale guard): 409 SCALE_TIGHTENING when captured
+// grades would break, 200 otherwise.
+func TestPatchLevelGradingRouteChecksCapturedGrades(t *testing.T) {
+	const body = `{"grading":{"enabled":true,"min":5,"max":9,"decimals":0,"passing":6}}`
+	gw := newTestGateway(t, map[string]bool{"module_config": true})
+
+	res := doGateway(t, gw, http.MethodPatch, "/api/v1/config/levels/lvl-busy", "config-writer", body)
+	if res.StatusCode != http.StatusConflict || res.Header.Get("X-Error-Code") != "SCALE_TIGHTENING" {
+		t.Errorf("busy level: status %d code %q, want 409 SCALE_TIGHTENING", res.StatusCode, res.Header.Get("X-Error-Code"))
+	}
+	res = doGateway(t, gw, http.MethodPatch, "/api/v1/config/levels/lvl-1", "config-writer", body)
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("free level: status %d, want 200", res.StatusCode)
+	}
+}

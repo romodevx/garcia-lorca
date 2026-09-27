@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,12 +32,27 @@ func (f fakeSubjectNames) ListSubjects(_ context.Context, _ string) ([]client.Su
 	return f.subjects, nil
 }
 
+// fakeCycles lists the school's cycles.
+type fakeCycles struct{ cycles []client.CycleResult }
+
+func (f fakeCycles) ListCycles(context.Context) ([]client.CycleResult, error) { return f.cycles, nil }
+
+var (
+	cycleNow     = client.CycleResult{ID: "cyc-1", Name: "2026-2027", Status: "active", StartsOn: time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC), EndsOn: time.Date(2027, 7, 9, 0, 0, 0, 0, time.UTC)}
+	cycleNext    = client.CycleResult{ID: "cyc-2", Name: "2027-2028", Status: "draft", StartsOn: time.Date(2027, 8, 23, 0, 0, 0, 0, time.UTC), EndsOn: time.Date(2028, 7, 7, 0, 0, 0, 0, time.UTC)}
+	schoolCycles = fakeCycles{cycles: []client.CycleResult{cycleNext, cycleNow}}
+)
+
+func newFamilyMonthly(students handler.FamilyEnrollmentReader, grades handler.EnrollmentMonthlyGradesReader, subjects handler.SubjectNamesReader) *handler.FamilyMonthlyGradesHandler {
+	return handler.NewFamilyMonthlyGradesHandler(students, grades, subjects, schoolCycles)
+}
+
 func familyMonthlyStudents() *fakeFamilyStudents {
 	return &fakeFamilyStudents{
 		links: []client.GuardianLink{{ID: "gl-1", GuardianUserID: "usr-9", StudentID: "stu-1"}},
 		enrollments: []client.Enrollment{
-			{ID: "enr-old", StudentID: "stu-1", Status: "withdrawn"},
-			{ID: "enr-1", StudentID: "stu-1", Status: "active"},
+			{ID: "enr-old", StudentID: "stu-1", Status: "withdrawn", CycleID: "cyc-0"},
+			{ID: "enr-1", StudentID: "stu-1", Status: "active", CycleID: "cyc-1"},
 		},
 	}
 }
@@ -60,7 +76,7 @@ func TestFamilyMonthlyGradesShape(t *testing.T) {
 	subjects := fakeSubjectNames{subjects: []client.SubjectResult{
 		{ID: "sub-mat", Name: "Matemáticas"}, {ID: "sub-esp", Name: "Español"}, {ID: "sub-art", Name: "Artes"},
 	}}
-	h := handler.NewFamilyMonthlyGradesHandler(familyMonthlyStudents(), grades, subjects)
+	h := newFamilyMonthly(familyMonthlyStudents(), grades, subjects)
 
 	rec := httptest.NewRecorder()
 	h.MonthlyGrades(rec, familyMonthlyReq("usr-9", "stu-1"))
@@ -81,7 +97,7 @@ func TestFamilyMonthlyGradesPreescolar(t *testing.T) {
 	grades := &fakeEnrollmentMonthly{res: client.EnrollmentMonthlyGrades{
 		CycleName: "2026-2027", Months: []string{"2026-08"}, Scale: monthlyScale, GradingEnabled: false,
 	}}
-	h := handler.NewFamilyMonthlyGradesHandler(familyMonthlyStudents(), grades, fakeSubjectNames{})
+	h := newFamilyMonthly(familyMonthlyStudents(), grades, fakeSubjectNames{})
 	rec := httptest.NewRecorder()
 	h.MonthlyGrades(rec, familyMonthlyReq("usr-9", "stu-1"))
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -91,7 +107,7 @@ func TestFamilyMonthlyGradesPreescolar(t *testing.T) {
 
 func TestFamilyMonthlyGradesOwnershipAndEnrollment(t *testing.T) {
 	grades := &fakeEnrollmentMonthly{}
-	h := handler.NewFamilyMonthlyGradesHandler(familyMonthlyStudents(), grades, fakeSubjectNames{})
+	h := newFamilyMonthly(familyMonthlyStudents(), grades, fakeSubjectNames{})
 
 	rec := httptest.NewRecorder()
 	h.MonthlyGrades(rec, familyMonthlyReq("usr-9", "stu-someone-else"))
@@ -100,11 +116,64 @@ func TestFamilyMonthlyGradesOwnershipAndEnrollment(t *testing.T) {
 	noActive := familyMonthlyStudents()
 	noActive.enrollments = []client.Enrollment{{ID: "enr-old", StudentID: "stu-1", Status: "withdrawn"}}
 	rec = httptest.NewRecorder()
-	handler.NewFamilyMonthlyGradesHandler(noActive, grades, fakeSubjectNames{}).MonthlyGrades(rec, familyMonthlyReq("usr-9", "stu-1"))
+	newFamilyMonthly(noActive, grades, fakeSubjectNames{}).MonthlyGrades(rec, familyMonthlyReq("usr-9", "stu-1"))
 	assert.Equal(t, http.StatusNotFound, rec.Code, "no active enrollment ⇒ nothing to show")
 	assert.Zero(t, grades.calls, "grades is never asked about a child that is not the caller's or not enrolled")
 
 	rec = httptest.NewRecorder()
 	h.MonthlyGrades(rec, httptest.NewRequest(http.MethodGet, "/api/v1/family/students/stu-1/grades/monthly", nil))
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+}
+
+// A child re-enrolled for next year has TWO active enrollments: the parent sees
+// the one whose cycle is ACTIVE, whatever order students lists them in; with no
+// active cycle, the one whose dates contain today (UTC).
+func TestFamilyMonthlyGradesPicksTheCurrentCycle(t *testing.T) {
+	twoActive := func(order ...client.Enrollment) *fakeFamilyStudents {
+		s := familyMonthlyStudents()
+		s.enrollments = order
+		return s
+	}
+	current := client.Enrollment{ID: "enr-now", StudentID: "stu-1", Status: "active", CycleID: "cyc-1"}
+	next := client.Enrollment{ID: "enr-next", StudentID: "stu-1", Status: "active", CycleID: "cyc-2"}
+	inactiveNow := cycleNow
+	inactiveNow.Status = "closed"
+	tests := []struct {
+		name     string
+		students *fakeFamilyStudents
+		cycles   fakeCycles
+		today    time.Time
+		want     string
+	}{
+		{"active cycle, listed first", twoActive(current, next), schoolCycles, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), "enr-now"},
+		{"active cycle, listed last", twoActive(next, current), schoolCycles, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), "enr-now"},
+		{"no active cycle: the one containing today", twoActive(next, current), fakeCycles{cycles: []client.CycleResult{cycleNext, inactiveNow}}, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), "enr-now"},
+		{"no active cycle, today in next year", twoActive(current, next), fakeCycles{cycles: []client.CycleResult{cycleNext, inactiveNow}}, time.Date(2027, 9, 1, 0, 0, 0, 0, time.UTC), "enr-next"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			grades := &fakeEnrollmentMonthly{res: client.EnrollmentMonthlyGrades{GradingEnabled: true}}
+			h := handler.NewFamilyMonthlyGradesHandler(tt.students, grades, fakeSubjectNames{}, tt.cycles).WithClock(func() time.Time { return tt.today })
+			rec := httptest.NewRecorder()
+			h.MonthlyGrades(rec, familyMonthlyReq("usr-9", "stu-1"))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			assert.Equal(t, tt.want, grades.got)
+		})
+	}
+}
+
+// A level that stopped grading numerically still shows the grades already
+// captured.
+func TestFamilyMonthlyGradesKeepsCapturedGradesWhenGradingIsOff(t *testing.T) {
+	grades := &fakeEnrollmentMonthly{res: client.EnrollmentMonthlyGrades{
+		CycleName: "2026-2027", Months: []string{"2026-09"}, Scale: monthlyScale, GradingEnabled: false,
+		SubjectIDs: []string{"sub-mat"}, Grades: []client.MonthlyGrade{{SubjectID: "sub-mat", Month: "2026-09", Value: "9"}},
+	}}
+	h := newFamilyMonthly(familyMonthlyStudents(), grades, fakeSubjectNames{subjects: []client.SubjectResult{{ID: "sub-mat", Name: "Matemáticas"}}})
+	rec := httptest.NewRecorder()
+	h.MonthlyGrades(rec, familyMonthlyReq("usr-9", "stu-1"))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.JSONEq(t, `{"gradingEnabled":false,"cycleName":"2026-2027","months":["2026-09"],
+		"scale":{"min":5,"max":10,"decimals":1,"passing":6},
+		"subjects":[{"subjectId":"sub-mat","subjectName":"Matemáticas","grades":{"2026-09":9}}]}`, rec.Body.String())
 }

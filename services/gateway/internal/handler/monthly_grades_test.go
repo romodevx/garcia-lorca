@@ -32,6 +32,7 @@ type fakeMonthlyGrades struct {
 	sheetErr   error
 	gotSheetID string
 	gotMonth   string
+	gotSheetQ  client.MonthlySheetQuery
 	sheetCalls int
 
 	upsertIn    client.MonthlyGradeInput
@@ -39,13 +40,14 @@ type fakeMonthlyGrades struct {
 	upsertCalls int
 
 	clearAsg, clearMonth, clearEnr string
+	clearCell                      client.MonthlyCell
 	clearErr                       error
 	clearCalls                     int
 }
 
-func (f *fakeMonthlyGrades) GetMonthlySheet(_ context.Context, assignmentID, month string) (client.MonthlySheet, error) {
+func (f *fakeMonthlyGrades) GetMonthlySheet(_ context.Context, q client.MonthlySheetQuery) (client.MonthlySheet, error) {
 	f.sheetCalls++
-	f.gotSheetID, f.gotMonth = assignmentID, month
+	f.gotSheetID, f.gotMonth, f.gotSheetQ = q.AssignmentID, q.Month, q
 	return f.sheet, f.sheetErr
 }
 
@@ -58,10 +60,34 @@ func (f *fakeMonthlyGrades) UpsertMonthlyGrade(_ context.Context, in client.Mont
 	return client.MonthlyGrade{EnrollmentID: in.EnrollmentID, SubjectID: "sub-1", Month: in.Month, Value: "9.5", UpdatedAt: mUpdated}, nil
 }
 
-func (f *fakeMonthlyGrades) ClearMonthlyGrade(_ context.Context, assignmentID, month, enrollmentID string) error {
+func (f *fakeMonthlyGrades) ClearMonthlyGrade(_ context.Context, cell client.MonthlyCell) error {
 	f.clearCalls++
-	f.clearAsg, f.clearMonth, f.clearEnr = assignmentID, month, enrollmentID
+	f.clearAsg, f.clearMonth, f.clearEnr, f.clearCell = cell.AssignmentID, cell.Month, cell.EnrollmentID, cell
 	return f.clearErr
+}
+
+// fakeSheetStudents names students by id and records which ids it was asked
+// for: a sheet must never read the whole school.
+type fakeSheetStudents struct {
+	students []client.StudentResult
+	gotIDs   []string
+	calls    int
+}
+
+func (f *fakeSheetStudents) StudentsByIDs(_ context.Context, ids []string) ([]client.StudentResult, error) {
+	f.calls++
+	f.gotIDs = append([]string(nil), ids...)
+	want := map[string]bool{}
+	for _, id := range ids {
+		want[id] = true
+	}
+	var out []client.StudentResult
+	for _, s := range f.students {
+		if want[s.ID] {
+			out = append(out, s)
+		}
+	}
+	return out, nil
 }
 
 func sheetFixture() client.MonthlySheet {
@@ -70,15 +96,16 @@ func sheetFixture() client.MonthlySheet {
 		Scale:          client.GradeScale{MinHundredths: 500, MaxHundredths: 1000, Decimals: 1, PassingHundredths: 600},
 		GradingEnabled: true, Editable: true,
 		Rows: []client.MonthlySheetRow{
-			{EnrollmentID: "enr-z", StudentID: "stu-z"},
-			{EnrollmentID: "enr-a", StudentID: "stu-a", Value: "9.5", UpdatedAt: mUpdated},
-			{EnrollmentID: "enr-n", StudentID: "stu-n"},
+			{EnrollmentID: "enr-z", StudentID: "stu-z", Editable: true},
+			{EnrollmentID: "enr-a", StudentID: "stu-a", Value: "9.5", UpdatedAt: mUpdated, Editable: true},
+			{EnrollmentID: "enr-n", StudentID: "stu-n", ReadOnlyReason: "Ese mes corresponde al grupo anterior del alumno"},
 		},
 	}
 }
 
-func sheetStudents() *fakeTeachingStudents {
-	return &fakeTeachingStudents{students: []client.StudentResult{
+func sheetStudents() *fakeSheetStudents {
+	return &fakeSheetStudents{students: []client.StudentResult{
+		{ID: "stu-other", FirstName: "Otro", LastName: "Grupo"},
 		{ID: "stu-z", FirstName: "Zoe", LastName: "Zúñiga"},
 		{ID: "stu-a", FirstName: "Ana", LastName: "Ávila"},
 		{ID: "stu-n", FirstName: "Nico", LastName: "Núñez"},
@@ -100,7 +127,7 @@ func principalReq(method, target, body string) *http.Request {
 
 func TestMonthlySheetShapeAndSpanishOrder(t *testing.T) {
 	grades := &fakeMonthlyGrades{sheet: sheetFixture()}
-	h := handler.NewMonthlyGradesHandler(grades, sheetStudents(), handler.AnyTenantAssignment)
+	h := handler.NewMonthlyGradesHandler(grades, sheetStudents(), handler.AnyTenantAssignment, handler.ScopeSchool)
 
 	rec := httptest.NewRecorder()
 	h.Sheet(rec, principalReq(http.MethodGet, "/api/v1/grades/sheet?assignmentId="+strings.ToUpper(mAsg), ""))
@@ -113,16 +140,78 @@ func TestMonthlySheetShapeAndSpanishOrder(t *testing.T) {
 		"scale": {"min":5,"max":10,"decimals":1,"passing":6},
 		"gradingEnabled": true, "editable": true,
 		"rows": [
-			{"enrollmentId":"enr-a","studentId":"stu-a","name":"Ana Ávila","value":9.5,"updatedAt":"2026-09-03T15:04:05Z"},
-			{"enrollmentId":"enr-n","studentId":"stu-n","name":"Nico Núñez","value":null,"updatedAt":null},
-			{"enrollmentId":"enr-z","studentId":"stu-z","name":"Zoe Zúñiga","value":null,"updatedAt":null}
+			{"enrollmentId":"enr-a","studentId":"stu-a","name":"Ana Ávila","value":9.5,"updatedAt":"2026-09-03T15:04:05Z","rowEditable":true},
+			{"enrollmentId":"enr-n","studentId":"stu-n","name":"Nico Núñez","value":null,"updatedAt":null,"rowEditable":false,
+			 "rowReadOnlyReason":"Ese mes corresponde al grupo anterior del alumno"},
+			{"enrollmentId":"enr-z","studentId":"stu-z","name":"Zoe Zúñiga","value":null,"updatedAt":null,"rowEditable":true}
 		]}`, rec.Body.String(), "rows sorted by last name, Spanish collation (Á with A, Ñ after N)")
+	assert.True(t, grades.gotSheetQ.SchoolWide, "the director's sheet is school-wide")
+}
+
+// A sheet names only its own pupils, in ONE read by id — never the whole school.
+func TestMonthlySheetNamesOnlyItsOwnPupils(t *testing.T) {
+	students := sheetStudents()
+	h := handler.NewMonthlyGradesHandler(&fakeMonthlyGrades{sheet: sheetFixture()}, students, handler.AnyTenantAssignment, handler.ScopeSchool)
+	rec := httptest.NewRecorder()
+	h.Sheet(rec, principalReq(http.MethodGet, "/api/v1/grades/sheet?assignmentId="+mAsg, ""))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, 1, students.calls)
+	assert.ElementsMatch(t, []string{"stu-z", "stu-a", "stu-n"}, students.gotIDs)
+	assert.NotContains(t, rec.Body.String(), "Otro Grupo")
+}
+
+// The teacher's routes are never school-wide: the previous-group rule applies.
+func TestTeacherMonthlyRoutesAreNotSchoolWide(t *testing.T) {
+	grades := &fakeMonthlyGrades{sheet: sheetFixture()}
+	h := handler.NewMonthlyGradesHandler(grades, sheetStudents(), handler.AnyTenantAssignment, handler.ScopeTeacher)
+	h.Sheet(httptest.NewRecorder(), principalReq(http.MethodGet, "/api/v1/teaching/grades/sheet?assignmentId="+mAsg, ""))
+	h.Put(httptest.NewRecorder(), principalReq(http.MethodPut, "/api/v1/teaching/grades/monthly",
+		`{"assignmentId":"`+mAsg+`","month":"2026-09","enrollmentId":"`+mEnr+`","value":9}`))
+	h.Clear(httptest.NewRecorder(), principalReq(http.MethodDelete, "/api/v1/teaching/grades/monthly?assignmentId="+mAsg+"&month=2026-09&enrollmentId="+mEnr, ""))
+	assert.False(t, grades.gotSheetQ.SchoolWide)
+	assert.False(t, grades.upsertIn.SchoolWide)
+	assert.False(t, grades.clearCell.SchoolWide)
+	assert.Equal(t, 1, grades.upsertCalls)
+	assert.Equal(t, 1, grades.clearCalls)
+}
+
+// Every monthly refusal names its machine code in X-Error-Code: the edge's own
+// and the grades service's (forwarded from the error metadata).
+func TestMonthlyRefusalsCarryErrorCodes(t *testing.T) {
+	coded := func(code, msg string) error {
+		e := connect.NewError(connect.CodeInvalidArgument, errString(msg))
+		e.Meta().Set("X-Error-Code", code)
+		return e
+	}
+	body := func(value string) string {
+		return `{"assignmentId":"` + mAsg + `","month":"2026-09","enrollmentId":"` + mEnr + `","value":` + value + `}`
+	}
+	tests := []struct {
+		name, body, wantCode string
+		svcErr               error
+	}{
+		{"string value", body(`"9.5"`), "GRADE_NOT_NUMBER", nil},
+		{"malformed enrollment", `{"assignmentId":"` + mAsg + `","month":"2026-09","enrollmentId":"x","value":9}`, "ENROLLMENT_NOT_IN_GROUP", nil},
+		{"previous group", body(`9`), "MONTH_PREVIOUS_GROUP", coded("MONTH_PREVIOUS_GROUP", "Ese mes corresponde al grupo anterior del alumno")},
+		{"out of range", body(`11`), "GRADE_OUT_OF_RANGE", coded("GRADE_OUT_OF_RANGE", "La calificación debe estar entre 5 y 10")},
+		{"a code that is not a code is dropped", body(`9`), "", coded("bad code\r\nX-Evil: 1", "x")},
+		{"uncoded refusal", body(`9`), "", connect.NewError(connect.CodeInvalidArgument, errString("x"))},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			h := handler.NewMonthlyGradesHandler(&fakeMonthlyGrades{upsertErr: tt.svcErr}, sheetStudents(), handler.AnyTenantAssignment, handler.ScopeSchool)
+			h.Put(rec, principalReq(http.MethodPut, "/api/v1/grades/monthly", tt.body))
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Equal(t, tt.wantCode, rec.Header().Get("X-Error-Code"))
+		})
+	}
 }
 
 func TestMonthlySheetReadOnlyCarriesReason(t *testing.T) {
 	sheet := sheetFixture()
 	sheet.GradingEnabled, sheet.Editable, sheet.ReadOnlyReason = false, false, "Este nivel no lleva calificación numérica"
-	h := handler.NewMonthlyGradesHandler(&fakeMonthlyGrades{sheet: sheet}, sheetStudents(), handler.AnyTenantAssignment)
+	h := handler.NewMonthlyGradesHandler(&fakeMonthlyGrades{sheet: sheet}, sheetStudents(), handler.AnyTenantAssignment, handler.ScopeSchool)
 	rec := httptest.NewRecorder()
 	h.Sheet(rec, principalReq(http.MethodGet, "/api/v1/grades/sheet?assignmentId="+mAsg+"&month=2026-09", ""))
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -151,7 +240,7 @@ func TestMonthlySheetRefusals(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			grades := &fakeMonthlyGrades{sheet: sheetFixture(), sheetErr: tt.svcErr}
 			rec := httptest.NewRecorder()
-			handler.NewMonthlyGradesHandler(grades, sheetStudents(), tt.gate).Sheet(rec, principalReq(http.MethodGet, tt.target, ""))
+			handler.NewMonthlyGradesHandler(grades, sheetStudents(), tt.gate, handler.ScopeTeacher).Sheet(rec, principalReq(http.MethodGet, tt.target, ""))
 			assert.Equal(t, tt.wantCode, rec.Code, rec.Body.String())
 			assert.Contains(t, rec.Body.String(), tt.wantBody)
 			assert.Equal(t, tt.wantCall, grades.sheetCalls == 1)
@@ -163,13 +252,13 @@ func TestMonthlySheetRefusals(t *testing.T) {
 
 func TestMonthlyPutForwardsExactTextAndCaller(t *testing.T) {
 	grades := &fakeMonthlyGrades{}
-	h := handler.NewMonthlyGradesHandler(grades, sheetStudents(), handler.AnyTenantAssignment)
+	h := handler.NewMonthlyGradesHandler(grades, sheetStudents(), handler.AnyTenantAssignment, handler.ScopeSchool)
 	rec := httptest.NewRecorder()
 	h.Put(rec, principalReq(http.MethodPut, "/api/v1/grades/monthly",
 		`{"assignmentId":"`+strings.ToUpper(mAsg)+`","month":"2026-09","enrollmentId":"`+mEnr+`","value":9.95}`))
 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	assert.Equal(t, client.MonthlyGradeInput{AssignmentID: mAsg, Month: "2026-09", EnrollmentID: mEnr, Value: "9.95", CapturedBy: mUser}, grades.upsertIn,
+	assert.Equal(t, client.MonthlyGradeInput{AssignmentID: mAsg, Month: "2026-09", EnrollmentID: mEnr, Value: "9.95", CapturedBy: mUser, SchoolWide: true}, grades.upsertIn,
 		"the number's exact text reaches grades — never a float")
 	assert.JSONEq(t, `{"enrollmentId":"`+mEnr+`","month":"2026-09","value":9.5,"updatedAt":"2026-09-03T15:04:05Z"}`, rec.Body.String())
 }
@@ -203,7 +292,7 @@ func TestMonthlyPutRefusals(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			grades := &fakeMonthlyGrades{upsertErr: tt.svcErr}
 			rec := httptest.NewRecorder()
-			handler.NewMonthlyGradesHandler(grades, sheetStudents(), tt.gate).Put(rec, principalReq(http.MethodPut, "/api/v1/grades/monthly", tt.body))
+			handler.NewMonthlyGradesHandler(grades, sheetStudents(), tt.gate, handler.ScopeTeacher).Put(rec, principalReq(http.MethodPut, "/api/v1/grades/monthly", tt.body))
 			assert.Equal(t, tt.wantCode, rec.Code, rec.Body.String())
 			assert.Contains(t, rec.Body.String(), tt.wantBody)
 			if tt.svcErr == nil {
@@ -217,7 +306,7 @@ func TestMonthlyPutWithoutPrincipalIs401(t *testing.T) {
 	grades := &fakeMonthlyGrades{}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/grades/monthly", strings.NewReader(`{"assignmentId":"`+mAsg+`","month":"2026-09","enrollmentId":"`+mEnr+`","value":9}`))
-	handler.NewMonthlyGradesHandler(grades, sheetStudents(), handler.AnyTenantAssignment).Put(rec, req)
+	handler.NewMonthlyGradesHandler(grades, sheetStudents(), handler.AnyTenantAssignment, handler.ScopeSchool).Put(rec, req)
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	assert.Zero(t, grades.upsertCalls)
 }
@@ -226,11 +315,12 @@ func TestMonthlyPutWithoutPrincipalIs401(t *testing.T) {
 
 func TestMonthlyDelete(t *testing.T) {
 	grades := &fakeMonthlyGrades{}
-	h := handler.NewMonthlyGradesHandler(grades, sheetStudents(), handler.AnyTenantAssignment)
+	h := handler.NewMonthlyGradesHandler(grades, sheetStudents(), handler.AnyTenantAssignment, handler.ScopeSchool)
 	rec := httptest.NewRecorder()
 	h.Clear(rec, principalReq(http.MethodDelete, "/api/v1/grades/monthly?assignmentId="+mAsg+"&month=2026-09&enrollmentId="+strings.ToUpper(mEnr), ""))
 	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
 	assert.Equal(t, []string{mAsg, "2026-09", mEnr}, []string{grades.clearAsg, grades.clearMonth, grades.clearEnr})
+	assert.True(t, grades.clearCell.SchoolWide, "the director clears any month")
 
 	for _, tt := range []struct {
 		name     string
@@ -244,7 +334,7 @@ func TestMonthlyDelete(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			grades := &fakeMonthlyGrades{}
 			rec := httptest.NewRecorder()
-			handler.NewMonthlyGradesHandler(grades, sheetStudents(), tt.gate).Clear(rec, principalReq(http.MethodDelete, tt.target, ""))
+			handler.NewMonthlyGradesHandler(grades, sheetStudents(), tt.gate, handler.ScopeTeacher).Clear(rec, principalReq(http.MethodDelete, tt.target, ""))
 			assert.Equal(t, tt.wantCode, rec.Code)
 			assert.Zero(t, grades.clearCalls)
 		})
@@ -261,7 +351,7 @@ func TestTeachingOwnsAssignmentGate(t *testing.T) {
 	teaching := handler.NewTeachingHandler(config, &fakeTeachingGrades{}, &fakeTeachingStudents{})
 
 	grades := &fakeMonthlyGrades{sheet: sheetFixture()}
-	h := handler.NewMonthlyGradesHandler(grades, sheetStudents(), teaching.OwnsAssignment)
+	h := handler.NewMonthlyGradesHandler(grades, sheetStudents(), teaching.OwnsAssignment, handler.ScopeTeacher)
 
 	rec := httptest.NewRecorder()
 	h.Sheet(rec, teacherGET("/api/v1/teaching/grades/sheet?assignmentId="+mAsg, "usr-t"))

@@ -23,7 +23,7 @@ import (
 
 type stubGrading struct {
 	configv1connect.UnimplementedConfigServiceHandler
-	got *configv1.SetLevelGradingScaleRequest
+	got *configv1.UpdateLevelRequest
 }
 
 func (s *stubGrading) GetLevel(_ context.Context, req *connect.Request[configv1.GetLevelRequest]) (*connect.Response[configv1.GetLevelResponse], error) {
@@ -31,9 +31,10 @@ func (s *stubGrading) GetLevel(_ context.Context, req *connect.Request[configv1.
 		Grading: &configv1.GradingScale{Enabled: false, MinHundredths: 500, MaxHundredths: 1000, Decimals: 1, PassingHundredths: 600}}}), nil
 }
 
-func (s *stubGrading) SetLevelGradingScale(_ context.Context, req *connect.Request[configv1.SetLevelGradingScaleRequest]) (*connect.Response[configv1.SetLevelGradingScaleResponse], error) {
+func (s *stubGrading) UpdateLevel(_ context.Context, req *connect.Request[configv1.UpdateLevelRequest]) (*connect.Response[configv1.UpdateLevelResponse], error) {
 	s.got = req.Msg
-	return connect.NewResponse(&configv1.SetLevelGradingScaleResponse{Level: &configv1.Level{Id: req.Msg.GetId(), Grading: req.Msg.GetGrading()}}), nil
+	return connect.NewResponse(&configv1.UpdateLevelResponse{Level: &configv1.Level{Id: req.Msg.GetId(), Grading: req.Msg.GetGrading(),
+		AttendanceMode: req.Msg.GetAttendanceMode()}}), nil
 }
 
 func (s *stubGrading) GetTeachingAssignment(_ context.Context, req *connect.Request[configv1.GetTeachingAssignmentRequest]) (*connect.Response[configv1.GetTeachingAssignmentResponse], error) {
@@ -58,12 +59,19 @@ func TestConfigClientGradingScaleRoundTrip(t *testing.T) {
 	assert.Equal(t, client.LevelGrading{Enabled: false, Scale: client.GradeScale{MinHundredths: 500, MaxHundredths: 1000, Decimals: 1, PassingHundredths: 600}}, lvl.Grading)
 
 	want := client.LevelGrading{Enabled: true, Scale: client.GradeScale{MinHundredths: 0, MaxHundredths: 10000, Decimals: 2, PassingHundredths: 7000}}
-	got, err := c.SetLevelGradingScale(context.Background(), "lvl-1", want)
+	got, err := c.UpdateLevel(context.Background(), "lvl-1", client.LevelPatch{Grading: &want})
 	require.NoError(t, err)
 	assert.Equal(t, want, got.Grading, "the response level carries the new scale back")
 	assert.Equal(t, "lvl-1", stub.got.GetId())
 	assert.Equal(t, int32(7000), stub.got.GetGrading().GetPassingHundredths())
 	assert.True(t, stub.got.GetGrading().GetEnabled())
+	assert.Nil(t, stub.got.AttendanceMode, "an absent mode stays absent on the wire")
+
+	daily := "daily"
+	got, err = c.UpdateLevel(context.Background(), "lvl-1", client.LevelPatch{AttendanceMode: &daily, Grading: &want})
+	require.NoError(t, err)
+	assert.Equal(t, configv1.AttendanceMode_ATTENDANCE_MODE_DAILY, stub.got.GetAttendanceMode(), "both fields travel in ONE request")
+	assert.Equal(t, "daily", got.AttendanceMode)
 
 	asg, err := c.GetTeachingAssignment(context.Background(), "asg-1")
 	require.NoError(t, err)
@@ -81,6 +89,12 @@ type stubMonthly struct {
 	gotUpsert *gradesv1.UpsertMonthlyGradeRequest
 	gotClear  *gradesv1.ClearMonthlyGradeRequest
 	gotSheet  *gradesv1.GetMonthlySheetRequest
+	gotCount  *gradesv1.CountScaleViolationsRequest
+}
+
+func (s *stubMonthly) CountScaleViolations(_ context.Context, req *connect.Request[gradesv1.CountScaleViolationsRequest]) (*connect.Response[gradesv1.CountScaleViolationsResponse], error) {
+	s.gotCount = req.Msg
+	return connect.NewResponse(&gradesv1.CountScaleViolationsResponse{Violations: 3}), nil
 }
 
 func (s *stubMonthly) UpsertMonthlyGrade(_ context.Context, req *connect.Request[gradesv1.UpsertMonthlyGradeRequest]) (*connect.Response[gradesv1.UpsertMonthlyGradeResponse], error) {
@@ -101,8 +115,8 @@ func (s *stubMonthly) GetMonthlySheet(_ context.Context, req *connect.Request[gr
 		Scale:          &gradesv1.GradingScale{MinHundredths: 500, MaxHundredths: 1000, Decimals: 1, PassingHundredths: 600},
 		GradingEnabled: true, Editable: false, ReadOnlyReason: "Periodo cerrado",
 		Rows: []*gradesv1.MonthlySheetRow{
-			{EnrollmentId: "enr-1", StudentId: "stu-1", Value: "8", UpdatedAt: timestamppb.New(updated)},
-			{EnrollmentId: "enr-2", StudentId: "stu-2"},
+			{EnrollmentId: "enr-1", StudentId: "stu-1", Value: "8", UpdatedAt: timestamppb.New(updated), Editable: true},
+			{EnrollmentId: "enr-2", StudentId: "stu-2", ReadOnlyReason: "Ese mes corresponde al grupo anterior del alumno"},
 		},
 	}), nil
 }
@@ -126,29 +140,39 @@ func TestGradesClientMonthlyRoundTrip(t *testing.T) {
 	c := client.NewGradesClient(srv.URL, srv.Client())
 	ctx := context.Background()
 
-	g, err := c.UpsertMonthlyGrade(ctx, client.MonthlyGradeInput{AssignmentID: "asg-1", Month: "2026-09", EnrollmentID: "enr-1", Value: "9.5", CapturedBy: "usr-1"})
+	g, err := c.UpsertMonthlyGrade(ctx, client.MonthlyGradeInput{AssignmentID: "asg-1", Month: "2026-09", EnrollmentID: "enr-1", Value: "9.5", CapturedBy: "usr-1", SchoolWide: true})
 	require.NoError(t, err)
 	assert.Equal(t, client.MonthlyGrade{EnrollmentID: "enr-1", SubjectID: "sub-1", Month: "2026-09", Value: "9.5", UpdatedAt: updated}, g)
 	assert.Equal(t, "usr-1", stub.gotUpsert.GetCapturedBy())
 	assert.Equal(t, "9.5", stub.gotUpsert.GetValue())
 	assert.Equal(t, "asg-1", stub.gotUpsert.GetAssignmentId())
+	assert.True(t, stub.gotUpsert.GetSchoolWide())
 
-	require.NoError(t, c.ClearMonthlyGrade(ctx, "asg-1", "2026-09", "enr-1"))
+	require.NoError(t, c.ClearMonthlyGrade(ctx, client.MonthlyCell{AssignmentID: "asg-1", Month: "2026-09", EnrollmentID: "enr-1", SchoolWide: true}))
 	assert.Equal(t, "enr-1", stub.gotClear.GetEnrollmentId())
 	assert.Equal(t, "2026-09", stub.gotClear.GetMonth())
+	assert.True(t, stub.gotClear.GetSchoolWide())
 
-	sheet, err := c.GetMonthlySheet(ctx, "asg-1", "")
+	sheet, err := c.GetMonthlySheet(ctx, client.MonthlySheetQuery{AssignmentID: "asg-1"})
 	require.NoError(t, err)
 	assert.Equal(t, "", stub.gotSheet.GetMonth())
+	assert.False(t, stub.gotSheet.GetSchoolWide())
 	assert.Equal(t, client.MonthlySheet{
 		AssignmentID: "asg-1", Month: "2026-09", Months: []string{"2026-08", "2026-09"},
 		Scale:          client.GradeScale{MinHundredths: 500, MaxHundredths: 1000, Decimals: 1, PassingHundredths: 600},
 		GradingEnabled: true, Editable: false, ReadOnlyReason: "Periodo cerrado",
 		Rows: []client.MonthlySheetRow{
-			{EnrollmentID: "enr-1", StudentID: "stu-1", Value: "8", UpdatedAt: updated},
-			{EnrollmentID: "enr-2", StudentID: "stu-2"},
+			{EnrollmentID: "enr-1", StudentID: "stu-1", Value: "8", UpdatedAt: updated, Editable: true},
+			{EnrollmentID: "enr-2", StudentID: "stu-2", ReadOnlyReason: "Ese mes corresponde al grupo anterior del alumno"},
 		},
 	}, sheet)
+
+	n, err := c.CountScaleViolations(ctx, "lvl-1", client.LevelGrading{Enabled: true, Scale: client.GradeScale{MinHundredths: 500, MaxHundredths: 950, Decimals: 1, PassingHundredths: 600}})
+	require.NoError(t, err)
+	assert.Equal(t, 3, n)
+	assert.Equal(t, "lvl-1", stub.gotCount.GetLevelId())
+	assert.True(t, stub.gotCount.GetGradingEnabled())
+	assert.Equal(t, int32(950), stub.gotCount.GetScale().GetMaxHundredths())
 
 	fam, err := c.GetEnrollmentMonthlyGrades(ctx, "enr-1")
 	require.NoError(t, err)

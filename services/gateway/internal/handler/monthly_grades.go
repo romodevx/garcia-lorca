@@ -22,18 +22,41 @@ import (
 //   - the director, on /api/v1/grades/{sheet,monthly}, over any assignment of
 //     the school (AnyTenantAssignment).
 //
-// The only difference is the AssignmentGate. Everything the grade itself must
-// satisfy — scale, decimals, month in the cycle, enrollment in the group, level
-// with numeric grading — is judged by the grades service, so both audiences get
-// the same rules and the same sentences.
+// The differences are the AssignmentGate and the CaptureScope: the director is
+// school-wide, so the months a transferred pupil spent in a previous group stay
+// writable; for a teacher they are read-only (per row on the sheet). Everything
+// the grade itself must satisfy — scale, decimals, month in the cycle,
+// enrollment in the group, level with numeric grading — is judged by the grades
+// service, so both audiences get the same rules and the same sentences.
+//
+// Every refusal carries a machine code in the X-Error-Code header
+// (GRADE_OUT_OF_RANGE, GRADE_DECIMALS, GRADE_NOT_NUMBER, MONTH_OUTSIDE_CYCLE,
+// LEVEL_NOT_GRADED, ENROLLMENT_NOT_IN_GROUP, MONTH_PREVIOUS_GROUP, …).
 
 // MonthlyGradesService is the grades surface the monthly handler consumes. The
 // Connect GradesClient satisfies it.
 type MonthlyGradesService interface {
-	GetMonthlySheet(ctx context.Context, assignmentID, month string) (client.MonthlySheet, error)
+	GetMonthlySheet(ctx context.Context, q client.MonthlySheetQuery) (client.MonthlySheet, error)
 	UpsertMonthlyGrade(ctx context.Context, in client.MonthlyGradeInput) (client.MonthlyGrade, error)
-	ClearMonthlyGrade(ctx context.Context, assignmentID, month, enrollmentID string) error
+	ClearMonthlyGrade(ctx context.Context, cell client.MonthlyCell) error
 }
+
+// StudentNamesReader names a sheet's pupils by id in one read. The Connect
+// StudentsClient satisfies it.
+type StudentNamesReader interface {
+	StudentsByIDs(ctx context.Context, ids []string) ([]client.StudentResult, error)
+}
+
+// CaptureScope is on whose behalf the monthly routes act.
+type CaptureScope uint8
+
+const (
+	// ScopeTeacher: a teacher on their own assignments; months before a
+	// pupil's transfer into the group are read-only.
+	ScopeTeacher CaptureScope = iota
+	// ScopeSchool: the director, acting for the whole school.
+	ScopeSchool
+)
 
 // AssignmentGate decides whether the request may touch assignmentID. It writes
 // the refusal itself (404 for an assignment the caller may not see) and returns
@@ -44,33 +67,46 @@ type AssignmentGate func(w http.ResponseWriter, r *http.Request, assignmentID st
 // assignment of the school, and an unknown one is the grades service's 404.
 func AnyTenantAssignment(http.ResponseWriter, *http.Request, string) bool { return true }
 
-// Sentences the edge refuses with before the grades service is called.
+// Sentences (and machine codes) the edge refuses with before the grades
+// service is called — the same the service would answer.
 const (
-	msgValueNotNumber     = "La calificación debe ser un número"
-	msgEnrollmentNotGroup = "El alumno no está inscrito en este grupo"
+	msgValueNotNumber        = "La calificación debe ser un número"
+	msgEnrollmentNotGroup    = "El alumno no está inscrito en este grupo"
+	codeGradeNotNumber       = "GRADE_NOT_NUMBER"
+	codeEnrollmentNotInGroup = "ENROLLMENT_NOT_IN_GROUP"
 )
 
 // MonthlyGradesHandler serves the monthly capture sheet and its per-cell writes.
 type MonthlyGradesHandler struct {
 	grades   MonthlyGradesService
-	students TeachingStudentReader
+	students StudentNamesReader
 	gate     AssignmentGate
+	scope    CaptureScope
 }
 
 // NewMonthlyGradesHandler wires the handler. students resolves row names (the
-// gateway reads them on the caller's behalf: a Maestro holds no students:read).
-func NewMonthlyGradesHandler(grades MonthlyGradesService, students TeachingStudentReader, gate AssignmentGate) *MonthlyGradesHandler {
-	return &MonthlyGradesHandler{grades: grades, students: students, gate: gate}
+// gateway reads them on the caller's behalf: a Maestro holds no students:read);
+// scope is ScopeSchool on the director's routes, ScopeTeacher on the teacher's.
+func NewMonthlyGradesHandler(grades MonthlyGradesService, students StudentNamesReader, gate AssignmentGate, scope CaptureScope) *MonthlyGradesHandler {
+	return &MonthlyGradesHandler{grades: grades, students: students, gate: gate, scope: scope}
 }
+
+func (h *MonthlyGradesHandler) schoolWide() bool { return h.scope == ScopeSchool }
 
 // --- responses ---------------------------------------------------------------
 
+// monthlySheetRowResponse is one pupil's cell. rowEditable says whether the
+// caller may write THIS row (false, with rowReadOnlyReason, for the months a
+// transferred pupil spent in their previous group, or when the whole sheet is
+// read-only).
 type monthlySheetRowResponse struct {
-	EnrollmentID string       `json:"enrollmentId"`
-	StudentID    string       `json:"studentId"`
-	Name         string       `json:"name"`
-	Value        *json.Number `json:"value"`
-	UpdatedAt    *string      `json:"updatedAt"`
+	EnrollmentID      string       `json:"enrollmentId"`
+	StudentID         string       `json:"studentId"`
+	Name              string       `json:"name"`
+	Value             *json.Number `json:"value"`
+	UpdatedAt         *string      `json:"updatedAt"`
+	RowEditable       bool         `json:"rowEditable"`
+	RowReadOnlyReason string       `json:"rowReadOnlyReason,omitempty"`
 }
 
 type monthlySheetResponse struct {
@@ -111,7 +147,9 @@ func (h *MonthlyGradesHandler) Sheet(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	sheet, err := h.grades.GetMonthlySheet(r.Context(), assignmentID, q.Get("month"))
+	sheet, err := h.grades.GetMonthlySheet(r.Context(), client.MonthlySheetQuery{
+		AssignmentID: assignmentID, Month: q.Get("month"), SchoolWide: h.schoolWide(),
+	})
 	if err != nil {
 		writeConnectError(w, err)
 		return
@@ -135,7 +173,7 @@ func (h *MonthlyGradesHandler) Put(w http.ResponseWriter, r *http.Request) {
 	}
 	value, ok := numberText(req.Value)
 	if !ok {
-		writeBadRequest(w, msgValueNotNumber)
+		writeCodedError(w, http.StatusBadRequest, codeGradeNotNumber, msgValueNotNumber)
 		return
 	}
 	enrollmentID, ok := canonicalEnrollment(w, req.EnrollmentID)
@@ -148,6 +186,7 @@ func (h *MonthlyGradesHandler) Put(w http.ResponseWriter, r *http.Request) {
 	}
 	g, err := h.grades.UpsertMonthlyGrade(r.Context(), client.MonthlyGradeInput{
 		AssignmentID: assignmentID, Month: req.Month, EnrollmentID: enrollmentID, Value: value, CapturedBy: p.UserID,
+		SchoolWide: h.schoolWide(),
 	})
 	if err != nil {
 		writeConnectError(w, err)
@@ -170,7 +209,8 @@ func (h *MonthlyGradesHandler) Clear(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.grades.ClearMonthlyGrade(r.Context(), assignmentID, q.Get("month"), enrollmentID); err != nil {
+	cell := client.MonthlyCell{AssignmentID: assignmentID, Month: q.Get("month"), EnrollmentID: enrollmentID, SchoolWide: h.schoolWide()}
+	if err := h.grades.ClearMonthlyGrade(r.Context(), cell); err != nil {
 		writeConnectError(w, err)
 		return
 	}
@@ -199,7 +239,7 @@ func (h *MonthlyGradesHandler) admitAssignment(w http.ResponseWriter, r *http.Re
 func canonicalEnrollment(w http.ResponseWriter, raw string) (string, bool) {
 	id, ok := canonicalUUID(raw)
 	if !ok {
-		writeBadRequest(w, msgEnrollmentNotGroup)
+		writeCodedError(w, http.StatusBadRequest, codeEnrollmentNotInGroup, msgEnrollmentNotGroup)
 		return "", false
 	}
 	return id, true
@@ -215,10 +255,13 @@ func canonicalUUID(raw string) (string, bool) {
 }
 
 func (h *MonthlyGradesHandler) toSheetResponse(ctx context.Context, s client.MonthlySheet) monthlySheetResponse {
-	students := studentsByID(ctx, h.students, len(s.Rows) > 0)
+	students := studentsByID(ctx, h.students, s.Rows)
 	rows := make([]monthlySheetRowResponse, 0, len(s.Rows))
 	for _, row := range s.Rows {
-		out := monthlySheetRowResponse{EnrollmentID: row.EnrollmentID, StudentID: row.StudentID, Name: students.name(row.StudentID)}
+		out := monthlySheetRowResponse{
+			EnrollmentID: row.EnrollmentID, StudentID: row.StudentID, Name: students.name(row.StudentID),
+			RowEditable: row.Editable, RowReadOnlyReason: row.ReadOnlyReason,
+		}
 		if row.Value != "" {
 			v := json.Number(row.Value)
 			out.Value, out.UpdatedAt = &v, rfc3339OrNil(row.UpdatedAt)
@@ -255,14 +298,19 @@ func joinName(first, last string) string {
 	}
 }
 
-// studentsByID reads the school's students ONCE (never one read per row). It is
-// best-effort: a failed read leaves names empty, never fails the sheet.
-func studentsByID(ctx context.Context, students TeachingStudentReader, enrich bool) studentDirectory {
+// studentsByID names the sheet's own pupils in ONE read by id (never the whole
+// school, never one read per row). It is best-effort: a failed read leaves
+// names empty, never fails the sheet.
+func studentsByID(ctx context.Context, students StudentNamesReader, rows []client.MonthlySheetRow) studentDirectory {
 	out := studentDirectory{}
-	if !enrich || students == nil {
+	if len(rows) == 0 || students == nil {
 		return out
 	}
-	list, err := students.ListStudents(ctx, "")
+	ids := make([]string, 0, len(rows))
+	for _, r := range rows {
+		ids = append(ids, r.StudentID)
+	}
+	list, err := students.StudentsByIDs(ctx, ids)
 	if err != nil {
 		return out
 	}
