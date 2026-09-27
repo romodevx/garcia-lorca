@@ -78,9 +78,9 @@ export function RadioGroup<Value extends string>({
   onChange: (value: Value) => void;
 }): ReactElement {
   return (
-    <fieldset style={{ border: "none", padding: 0, margin: 0 }}>
+    <fieldset style={{ border: "none", padding: 0, margin: 0, minWidth: 0 }}>
       <legend style={labelStyle}>{legend}</legend>
-      <div style={{ display: "flex", gap: 8 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
         {options.map((opt) => {
           const on = value === opt.value;
           return (
@@ -99,6 +99,7 @@ export function RadioGroup<Value extends string>({
                 color: on ? "var(--forest)" : "var(--text-muted)",
                 fontWeight: 600,
                 fontSize: 14,
+                whiteSpace: "nowrap",
               }}
             >
               <input

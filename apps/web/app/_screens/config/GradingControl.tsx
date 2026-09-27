@@ -99,8 +99,8 @@ export function GradingControl({ level, onChange }: GradingControlProps): ReactE
         Lleva calificación numérica
       </label>
       {enabled && (
-        <form aria-label={`Calificación de ${level.name}`} onSubmit={submit} noValidate style={{ display: "grid", gap: 12, maxWidth: 360 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <form aria-label={`Calificación de ${level.name}`} onSubmit={submit} noValidate style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 12, maxWidth: 360 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>
             <NumberField label="Calificación mínima" value={draft.min} onChange={(v) => edit("min", v)} onBlur={() => check("min")} error={errors.min} />
             <NumberField label="Calificación máxima" value={draft.max} onChange={(v) => edit("max", v)} onBlur={() => check("max")} error={errors.max} />
           </div>
