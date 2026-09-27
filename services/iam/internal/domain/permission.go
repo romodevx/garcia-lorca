@@ -59,6 +59,10 @@ var ownerOnlyPermissions = map[string]struct{}{
 	// 15 minutes, taking back what the school wrote about a child is the
 	// owner's call alone. students:notes_write is delegable and stays out.
 	"students:notes_void": {},
+	// Closing a trimester (T7) locks every group's grades school-wide and is
+	// what makes a boleta final: the owner's decision alone, like voiding a
+	// note. grades:write (capturing) stays delegable.
+	"grades:close": {},
 }
 
 // IsOwnerOnly reports whether raw is a tenant-wide sensitive read that only the

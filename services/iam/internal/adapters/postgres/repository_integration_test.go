@@ -626,6 +626,8 @@ func TestSeededRolesHoldTheirPermissions(t *testing.T) {
 			// Task 9: the owner holds the counter's two permissions so it can
 			// delegate them (the caller-subset guard).
 			"collections:read", "payments:write",
+			// T7: closing a trimester is the owner's decision alone.
+			"grades:close",
 		}},
 		// Task 9: the cashier. Reads the counter, takes money, finds pupils.
 		{"cobranza", []string{"students:read", "students:list", "collections:read", "payments:write"}},
@@ -727,6 +729,26 @@ func TestSeededRolesHoldTheirPermissions(t *testing.T) {
 			if domain.IsOwnerOnly(p) {
 				t.Errorf("maestro holds the owner-only permission %q", p)
 			}
+		}
+	})
+
+	// T7: 0023 is idempotent — re-running it never duplicates grades:close.
+	t.Run("re-running 0023 grants grades:close exactly once", func(t *testing.T) {
+		sql, err := os.ReadFile(filepath.Join(migrationsDir, "0023_grades_close_permission.sql"))
+		if err != nil {
+			t.Fatalf("read migration: %v", err)
+		}
+		if err := superDB.Exec(string(sql)).Error; err != nil {
+			t.Fatalf("re-run 0023: %v", err)
+		}
+		var n int
+		if err := superDB.Raw(
+			`SELECT count(*) FROM roles, unnest(permissions) p WHERE tenant_id = ? AND id = '00000000-0000-0000-0000-0000000000a1' AND p = 'grades:close'`,
+			seedTenant).Scan(&n).Error; err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		if n != 1 {
+			t.Errorf("owner holds grades:close %d times, want exactly once", n)
 		}
 	})
 
