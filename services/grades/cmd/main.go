@@ -82,16 +82,17 @@ func run(ctx context.Context, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	sweepCtx, stopSweep := context.WithCancel(ctx)
-	defer stopSweep()
-	go sweepOutbox(sweepCtx, drain, log)
 	// The publisher owns the broker client's per-topic batching goroutines, so
-	// releasing it belongs next to the code that built it.
+	// releasing it belongs next to the code that built it. Defers run last in,
+	// first out: the sweep (registered after) stops — and its goroutine ends —
+	// before the publisher it publishes through is closed.
 	defer func() {
 		if err := events.Close(); err != nil {
 			log.Warn("grades could not close the event publisher", slog.Any("error", err))
 		}
 	}()
+	stopSweep := startSweep(ctx, drain, log, outboxSweep)
+	defer stopSweep()
 
 	addr := envOr("ADDR", defaultAddr)
 	log.Info("grades starting", slog.String("addr", addr))
@@ -169,12 +170,28 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 // went out.
 type outboxDrain func(ctx context.Context) (int, error)
 
-// sweepOutbox drains the outbox every outboxSweep until ctx ends. A close
+// startSweep runs sweepOutbox in its own goroutine and returns the func that
+// stops it: stop cancels the sweep and waits for the goroutine to end, so no
+// drain is in flight once it returns. Calling stop again is a no-op.
+func startSweep(ctx context.Context, drain outboxDrain, log *slog.Logger, every time.Duration) (stop func()) {
+	sweepCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sweepOutbox(sweepCtx, drain, log, every)
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+// sweepOutbox drains the outbox every `every` until ctx ends. A close
 // drains its own events the moment it commits; this is for what that cannot
 // cover — the broker was down, or the process died between the commit and the
 // drain. A failed sweep is logged, never fatal: the next tick tries again.
-func sweepOutbox(ctx context.Context, drain outboxDrain, log *slog.Logger) {
-	ticker := time.NewTicker(outboxSweep)
+func sweepOutbox(ctx context.Context, drain outboxDrain, log *slog.Logger, every time.Duration) {
+	ticker := time.NewTicker(every)
 	defer ticker.Stop()
 	for {
 		select {
