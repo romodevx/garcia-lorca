@@ -114,3 +114,19 @@ type reportCardLineModel struct {
 }
 
 func (reportCardLineModel) TableName() string { return "report_card_lines" }
+
+// outboxModel is the GORM row for `grades_outbox`: an event queued in the
+// transaction that produced it. The database mints the id (a queue entry has
+// no domain identity), so the default tag keeps GORM from sending "".
+type outboxModel struct {
+	ID            string     `gorm:"column:id;primaryKey;default:gen_random_uuid()"`
+	TenantID      string     `gorm:"column:tenant_id"`
+	EventType     string     `gorm:"column:event_type"`
+	Payload       []byte     `gorm:"column:payload;type:jsonb"`
+	CreatedAt     time.Time  `gorm:"column:created_at;default:now()"`
+	PublishedAt   *time.Time `gorm:"column:published_at"`
+	Attempts      int        `gorm:"column:attempts"`
+	NextAttemptAt time.Time  `gorm:"column:next_attempt_at;default:now()"`
+}
+
+func (outboxModel) TableName() string { return "grades_outbox" }

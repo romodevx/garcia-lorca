@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -13,7 +12,7 @@ import (
 	gradesv1 "github.com/garcia-lorca/gen/go/garcialorca/grades/v1"
 	"github.com/garcia-lorca/pkg/pubsub"
 	pubsubadapter "github.com/garcia-lorca/services/grades/internal/adapters/pubsub"
-	"github.com/garcia-lorca/services/grades/internal/domain"
+	"github.com/garcia-lorca/services/grades/internal/ports"
 )
 
 type fakeBus struct {
@@ -29,26 +28,18 @@ func (b *fakeBus) Publish(_ context.Context, msg pubsub.Message) error {
 	return nil
 }
 
-func issued(t *testing.T) domain.ReportCard {
-	t.Helper()
-	m, err := domain.ParseMonth("2026-09")
-	require.NoError(t, err)
-	scale, err := domain.NewGradingScale(500, 1000, 600, 1)
-	require.NoError(t, err)
-	rc, err := domain.BuildReportCard(domain.ReportCardHeader{
-		ID: "rc-1", TenantID: "ten-1", TermID: "term-1", CycleID: "cyc-1", LevelID: "lvl-1", GroupID: "grp-1",
-		EnrollmentID: "enr-1", StudentID: "stu-1", Version: 2, IssuedAt: time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC),
-		IssuedBy: "dir", TermName: "1.er trimestre", Months: []domain.Month{m}, Scale: scale,
-	}, nil, nil)
-	require.NoError(t, err)
-	return rc
+func issued() ports.ReportCardIssuedEvent {
+	return ports.ReportCardIssuedEvent{
+		ReportCardID: "rc-1", TenantID: "ten-1", StudentID: "stu-1", EnrollmentID: "enr-1",
+		CycleID: "cyc-1", TermID: "term-1", TermName: "1.er trimestre", Version: 2,
+	}
 }
 
 // T7: an issued report card goes out as GradesPublished on grades-events,
 // typed and tenant-routed, carrying what comms keys and renders on.
 func TestPublishReportCardIssued(t *testing.T) {
 	bus := &fakeBus{}
-	require.NoError(t, pubsubadapter.NewEventPublisher(bus).PublishReportCardIssued(context.Background(), issued(t)))
+	require.NoError(t, pubsubadapter.NewEventPublisher(bus).PublishReportCardIssued(context.Background(), issued()))
 	require.Len(t, bus.msgs, 1)
 	msg := bus.msgs[0]
 	assert.Equal(t, "grades-events", msg.Topic)
@@ -69,6 +60,6 @@ func TestPublishReportCardIssued(t *testing.T) {
 
 func TestPublishReportCardIssuedSurfacesTransportFailure(t *testing.T) {
 	boom := errors.New("broker down")
-	err := pubsubadapter.NewEventPublisher(&fakeBus{err: boom}).PublishReportCardIssued(context.Background(), issued(t))
+	err := pubsubadapter.NewEventPublisher(&fakeBus{err: boom}).PublishReportCardIssued(context.Background(), issued())
 	assert.ErrorIs(t, err, boom)
 }

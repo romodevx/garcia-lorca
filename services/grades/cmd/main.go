@@ -8,9 +8,11 @@
 // clients (network-private in shared environments).
 //
 // T7 adds period closing and report cards (PeriodsService). An issued report
-// card is announced as GradesPublished on grades-events through the publisher
-// selected from the environment (gcp.PublisherFromEnv: the Pub/Sub emulator or
-// broker when configured, the logging dev bus otherwise).
+// card is announced as GradesPublished on grades-events through a
+// transactional outbox (queued with the close, drained after its commit and by
+// a periodic sweep) and the publisher selected from the environment
+// (gcp.PublisherFromEnv: the Pub/Sub emulator or broker when configured, the
+// logging dev bus otherwise).
 package main
 
 import (
@@ -58,6 +60,10 @@ const (
 	readTimeout       = 30 * time.Second
 	writeTimeout      = 30 * time.Second
 	idleTimeout       = 120 * time.Second
+
+	// outboxSweep is how often queued events are looked for (their backoff
+	// decides when a failed one is tried again).
+	outboxSweep = 30 * time.Second
 )
 
 func main() {
@@ -72,10 +78,13 @@ func main() {
 // run is the process lifecycle: build the composition root, serve until the
 // listener stops, and release the event transport on the way out.
 func run(ctx context.Context, log *slog.Logger) error {
-	mux, events, err := buildMux(ctx, log)
+	mux, events, drain, err := buildMux(ctx, log)
 	if err != nil {
 		return err
 	}
+	sweepCtx, stopSweep := context.WithCancel(ctx)
+	defer stopSweep()
+	go sweepOutbox(sweepCtx, drain, log)
 	// The publisher owns the broker client's per-topic batching goroutines, so
 	// releasing it belongs next to the code that built it.
 	defer func() {
@@ -104,14 +113,14 @@ func run(ctx context.Context, log *slog.Logger) error {
 // buildMux is the composition root: config → adapters (both reader clients,
 // repo and publisher) → use cases → Connect handler, returning the mounted
 // routes plus the event publisher the caller must close on shutdown.
-func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.PublisherCloser, error) {
+func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.PublisherCloser, outboxDrain, error) {
 	// Single-tenant for this phase: the tenant is fixed here (not derived from
 	// the caller), so RLS binds this one tenant for every request. See ADR 0001.
 	tenantID := envOr("GRADES_TENANT_ID", defaultTenant)
 
 	db, err := openDB()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	repo := pgadapter.NewRepository(db, tenantID)
@@ -128,7 +137,7 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 
 	events, err := gcp.PublisherFromEnv(ctx, log)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	newID := func() string { return uuid.NewString() }
@@ -153,7 +162,35 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	return mux, events, nil
+	return mux, events, func(c context.Context) (int, error) { return periods.DrainOutbox(c, 0) }, nil
+}
+
+// outboxDrain publishes the queued GradesPublished events and says how many
+// went out.
+type outboxDrain func(ctx context.Context) (int, error)
+
+// sweepOutbox drains the outbox every outboxSweep until ctx ends. A close
+// drains its own events the moment it commits; this is for what that cannot
+// cover — the broker was down, or the process died between the commit and the
+// drain. A failed sweep is logged, never fatal: the next tick tries again.
+func sweepOutbox(ctx context.Context, drain outboxDrain, log *slog.Logger) {
+	ticker := time.NewTicker(outboxSweep)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			published, err := drain(ctx)
+			if err != nil {
+				log.Warn("grades could not drain the outbox", slog.Any("error", err))
+				continue
+			}
+			if published > 0 {
+				log.Info("grades published stranded events", slog.Int("count", published))
+			}
+		}
+	}
 }
 
 // openDB opens the GORM Postgres pool, resolving its DSN via pkg/dbdsn:

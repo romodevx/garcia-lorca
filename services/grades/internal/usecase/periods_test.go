@@ -25,6 +25,49 @@ type fakePeriods struct {
 	grades    *fakeMonthly
 	cards     []domain.ReportCard
 	lockCalls int
+	// outbox holds the queued events, committed with the transaction.
+	outbox []fakeOutboxRow
+	// cancelAfterLock, when set, runs once the transaction returns (the
+	// request's client hangs up right after the commit).
+	cancelAfterLock func()
+}
+
+type fakeOutboxRow struct {
+	event     ports.OutboxEvent
+	published bool
+	attempts  int
+}
+
+// DrainOutbox publishes the unpublished rows in order, marking the ones that
+// went out and counting every attempt, like the real drain.
+func (f *fakePeriods) DrainOutbox(_ context.Context, limit int, publish func(ports.OutboxEvent) error) (int, error) {
+	published := 0
+	for i := range f.outbox {
+		if published >= limit {
+			break
+		}
+		row := &f.outbox[i]
+		if row.published {
+			continue
+		}
+		row.attempts++
+		if err := publish(row.event); err != nil {
+			continue
+		}
+		row.published = true
+		published++
+	}
+	return published, nil
+}
+
+func (f *fakePeriods) pending() int {
+	n := 0
+	for _, r := range f.outbox {
+		if !r.published {
+			n++
+		}
+	}
+	return n
 }
 
 type fakePeriodTx struct {
@@ -33,11 +76,15 @@ type fakePeriodTx struct {
 	closure  *domain.PeriodClosure
 	issued   []domain.ReportCard
 	issuing  bool
+	queued   []ports.OutboxEvent
 	lockedAt int
 }
 
 func (f *fakePeriods) WithPeriodLock(ctx context.Context, termID string, fn func(context.Context, ports.PeriodTx) error) error {
 	f.lockCalls++
+	if f.cancelAfterLock != nil {
+		defer f.cancelAfterLock()
+	}
 	tx := &fakePeriodTx{p: f, termID: termID}
 	if err := fn(ctx, tx); err != nil {
 		return err
@@ -53,6 +100,14 @@ func (f *fakePeriods) WithPeriodLock(ctx context.Context, termID string, fn func
 		}
 	}
 	f.cards = append(f.cards, tx.issued...)
+	for _, e := range tx.queued {
+		f.outbox = append(f.outbox, fakeOutboxRow{event: e})
+	}
+	return nil
+}
+
+func (t *fakePeriodTx) QueueEvents(_ context.Context, events []ports.OutboxEvent) error {
+	t.queued = append(t.queued, events...)
 	return nil
 }
 
@@ -121,13 +176,21 @@ func (f *fakeDirectory) StudentsByIDs(_ context.Context, ids []string) (map[stri
 }
 
 type fakePublisher struct {
-	published []domain.ReportCard
+	published []ports.ReportCardIssuedEvent
 	err       error
+	// ctxErr records whether a publish saw an already-cancelled context.
+	ctxErr error
 }
 
-func (f *fakePublisher) PublishReportCardIssued(_ context.Context, rc domain.ReportCard) error {
-	f.published = append(f.published, rc)
-	return f.err
+func (f *fakePublisher) PublishReportCardIssued(ctx context.Context, e ports.ReportCardIssuedEvent) error {
+	if ctx.Err() != nil {
+		f.ctxErr = ctx.Err()
+	}
+	if f.err != nil {
+		return f.err
+	}
+	f.published = append(f.published, e)
+	return nil
 }
 
 // --- fixture -----------------------------------------------------------------
@@ -471,8 +534,8 @@ func TestReopenAndCloseAgainIssuesVersion2(t *testing.T) {
 	}
 	assert.Equal(t, 3, superseded)
 	versions := []int{}
-	for _, rc := range f.publisher.published {
-		versions = append(versions, rc.Version())
+	for _, e := range f.publisher.published {
+		versions = append(versions, e.Version)
 	}
 	sort.Ints(versions)
 	assert.Equal(t, []int{1, 1, 1, 2, 2, 2}, versions)
@@ -486,15 +549,57 @@ func TestReopenRefusals(t *testing.T) {
 	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err))
 }
 
-// The announcement is best-effort: the closure and the report cards are
-// already committed, so a failed publish never fails the close.
-func TestClosePublishFailureDoesNotFailTheClose(t *testing.T) {
+// GradesPublished rides a transactional outbox: the events are queued in the
+// close's transaction (one per report card) and drained right after the
+// commit. A broker that is down never fails the close — the events stay
+// queued, and the next drain (the sweep) publishes them.
+func TestCloseQueuesGradesPublishedInItsTransaction(t *testing.T) {
 	f := newPeriodsFixture(t)
 	f.publisher.err = errors.New("broker down")
 	res, err := f.svc.Close(context.Background(), firstTermID, true, dirActor)
 	require.NoError(t, err)
 	assert.Equal(t, 3, res.ReportCards)
 	assert.True(t, f.grades.closures[firstTermID].IsClosed())
+	require.Len(t, f.periods.outbox, 3, "one queued event per report card, with the commit")
+	assert.Equal(t, 3, f.periods.pending(), "nothing went out: still queued")
+	assert.Equal(t, ports.OutboxGradesPublished, f.periods.outbox[0].event.Type)
+
+	f.publisher.err = nil
+	n, err := f.svc.DrainOutbox(context.Background(), 0)
+	require.NoError(t, err)
+	assert.Equal(t, 3, n, "the sweep publishes what the broker refused")
+	assert.Zero(t, f.periods.pending())
+	require.Len(t, f.publisher.published, 3)
+	ev := f.publisher.published[0]
+	assert.Equal(t, testTenant, ev.TenantID)
+	assert.Equal(t, firstTermID, ev.TermID)
+	assert.Equal(t, "1.er trimestre", ev.TermName)
+	assert.Equal(t, cycleID, ev.CycleID)
+	assert.Equal(t, 1, ev.Version)
+	assert.NotEmpty(t, ev.ReportCardID)
+	assert.NotEmpty(t, ev.EnrollmentID)
+	assert.NotEmpty(t, ev.StudentID)
+}
+
+// A refused close queues nothing (the events roll back with it).
+func TestRefusedCloseQueuesNothing(t *testing.T) {
+	f := newPeriodsFixture(t)
+	_, err := f.svc.Close(context.Background(), firstTermID, false, dirActor)
+	require.Error(t, err)
+	assert.Empty(t, f.periods.outbox)
+}
+
+// The drain after a close runs detached from the request: a client that hung
+// up (cancelled context) does not cancel the publication.
+func TestCloseDrainsDetachedFromTheRequest(t *testing.T) {
+	f := newPeriodsFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	f.periods.cancelAfterLock = cancel
+	_, err := f.svc.Close(ctx, firstTermID, true, dirActor)
+	require.NoError(t, err)
+	assert.NoError(t, f.publisher.ctxErr, "the drain must not inherit the request's cancellation")
+	assert.Len(t, f.publisher.published, 3)
+	assert.Zero(t, f.periods.pending())
 }
 
 // --- lists -------------------------------------------------------------------

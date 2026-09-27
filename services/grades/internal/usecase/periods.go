@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -32,8 +33,10 @@ const (
 //	       all BEFORE writing; any failure aborts with nothing written)
 //	       ─> ONE transaction holding the term's exclusive lock: closure
 //	       state, the grades under the lock, missing count (force?),
-//	       report cards v = closure.version+1, supersede v-1, closure closed
-//	       ─> after commit, GradesPublished per report card (best-effort)
+//	       report cards v = closure.version+1, supersede v-1, one
+//	       GradesPublished per card QUEUED in the outbox, closure closed
+//	       ─> after commit, the outbox is drained (detached, bounded); what
+//	          the broker refuses stays queued for the sweep (DrainOutbox)
 //
 // Closure state and report cards live in this service's database, so there
 // is no cross-service commit. It depends only on ports + domain.
@@ -310,12 +313,19 @@ func (s *PeriodsService) Close(ctx context.Context, termID string, force bool, a
 		if err := tx.IssueReportCards(ctx, issued); err != nil {
 			return err
 		}
+		events, err := issuedEvents(issued)
+		if err != nil {
+			return err
+		}
+		if err := tx.QueueEvents(ctx, events); err != nil {
+			return err
+		}
 		return tx.SaveClosure(ctx, closed)
 	})
 	if err != nil {
 		return CloseResult{}, err
 	}
-	s.announce(ctx, issued)
+	s.drainQuietly(ctx)
 	return CloseResult{Status: closed.Status(), Version: closed.Version(), ReportCards: len(issued)}, nil
 }
 
@@ -366,21 +376,72 @@ func (s *PeriodsService) refuseClosed(ctx context.Context, termID string) error 
 	return nil
 }
 
-// announce publishes GradesPublished for each issued report card. The cards
-// are committed: a failed publish is logged, never returned (the close stands).
-func (s *PeriodsService) announce(ctx context.Context, cards []domain.ReportCard) {
+// DrainOutbox publishes the queued events (up to limit; 0 = drainBatch). The
+// sweep calls it so nothing stays stuck when the broker was down or the
+// process died between a close's commit and its drain.
+func (s *PeriodsService) DrainOutbox(ctx context.Context, limit int) (int, error) {
 	if s.publisher == nil {
-		return
+		return 0, nil
 	}
-	for _, rc := range cards {
-		if err := s.publisher.PublishReportCardIssued(ctx, rc); err != nil {
-			s.log.Warn("grades could not announce a report card",
-				slog.String("report_card_id", rc.ID()),
-				slog.Int("version", rc.Version()),
-				slog.Any("error", err))
-		}
+	if limit <= 0 {
+		limit = drainBatch
+	}
+	return s.periods.DrainOutbox(ctx, limit, func(e ports.OutboxEvent) error {
+		return s.publishQueued(ctx, e)
+	})
+}
+
+// drainQuietly gets a close's events out right after its commit, detached
+// from the request (a client that hangs up must not cancel a publication in
+// flight) and bounded by drainDeadline (a dead broker costs the director a
+// blink, not a wait). A failure is logged: the events stay queued.
+func (s *PeriodsService) drainQuietly(ctx context.Context) {
+	drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), drainDeadline)
+	defer cancel()
+	if _, err := s.DrainOutbox(drainCtx, 0); err != nil {
+		s.log.Warn("grades could not drain the outbox after a close", slog.Any("error", err))
 	}
 }
+
+// publishQueued turns one queued row back into a typed publication. An
+// unknown type is refused, never dropped: its climbing attempt count is how
+// somebody notices.
+func (s *PeriodsService) publishQueued(ctx context.Context, e ports.OutboxEvent) error {
+	switch e.Type {
+	case ports.OutboxGradesPublished:
+		var ev ports.ReportCardIssuedEvent
+		if err := json.Unmarshal(e.Payload, &ev); err != nil {
+			return fmt.Errorf("decoding a queued %s: %w", e.Type, err)
+		}
+		return s.publisher.PublishReportCardIssued(ctx, ev)
+	default:
+		return glerrors.New(glerrors.KindInternal, "unknown outbox event: "+e.Type)
+	}
+}
+
+// issuedEvents is one queued GradesPublished per issued report card.
+func issuedEvents(cards []domain.ReportCard) ([]ports.OutboxEvent, error) {
+	out := make([]ports.OutboxEvent, 0, len(cards))
+	for _, rc := range cards {
+		h := rc.Header()
+		payload, err := json.Marshal(ports.ReportCardIssuedEvent{
+			ReportCardID: h.ID, TenantID: h.TenantID, StudentID: h.StudentID, EnrollmentID: h.EnrollmentID,
+			CycleID: h.CycleID, TermID: h.TermID, TermName: h.TermName, Version: h.Version,
+		})
+		if err != nil {
+			return nil, glerrors.Wrap(glerrors.KindInternal, "encoding GradesPublished", err)
+		}
+		out = append(out, ports.OutboxEvent{Type: ports.OutboxGradesPublished, Payload: payload})
+	}
+	return out, nil
+}
+
+// drainDeadline bounds the drain on the close path; drainBatch is how many
+// events one drain publishes (a whole level's cards clear in a few passes).
+const (
+	drainDeadline = 2 * time.Second
+	drainBatch    = 200
+)
 
 // --- computation ---------------------------------------------------------------
 

@@ -237,6 +237,9 @@ type PeriodTx interface {
 	MonthlyGrades(ctx context.Context, enrollmentIDs []string, months []domain.Month) ([]domain.MonthlyGrade, error)
 	// SaveClosure stores the closure (insert or update every column).
 	SaveClosure(ctx context.Context, c domain.PeriodClosure) error
+	// QueueEvents writes events to the outbox in THIS transaction: they are
+	// published only if the close commits.
+	QueueEvents(ctx context.Context, events []OutboxEvent) error
 	// IssueReportCards marks EVERY published report card of the term
 	// superseded (a withdrawn pupil's included), then inserts the cards with
 	// their lines.
@@ -262,9 +265,43 @@ type PeriodRepository interface {
 	// ReportCard reads one report card with its lines (any status). Unknown id
 	// is glerrors.ErrNotFound.
 	ReportCard(ctx context.Context, id string) (domain.ReportCard, error)
+	// DrainOutbox publishes up to limit DUE events, oldest first, marking the
+	// ones publish accepts. One publish refuses stays pending with its attempt
+	// counted and its next attempt pushed out (backoff). Rows are taken under
+	// SKIP LOCKED, so two instances never publish the same event at once.
+	// Delivery is at least once: consumers dedupe (comms keys on report card
+	// id + version).
+	DrainOutbox(ctx context.Context, limit int, publish func(OutboxEvent) error) (int, error)
+}
+
+// OutboxGradesPublished is the outbox event type of an issued report card —
+// the name the messaging boundary stamps, so a row read with psql says what
+// it is.
+const OutboxGradesPublished = "GradesPublished"
+
+// OutboxEvent is a domain event queued in the transaction that produced it.
+// Payload is the JSON of the event (ReportCardIssuedEvent for
+// GradesPublished), not proto bytes: the wire is the publisher's business.
+type OutboxEvent struct {
+	Type    string
+	Payload []byte
+}
+
+// ReportCardIssuedEvent is what GradesPublished announces about one issued
+// report card: enough for comms to key idempotency (id + version) and word
+// the family's notification.
+type ReportCardIssuedEvent struct {
+	ReportCardID string `json:"reportCardId"`
+	TenantID     string `json:"tenantId"`
+	StudentID    string `json:"studentId"`
+	EnrollmentID string `json:"enrollmentId"`
+	CycleID      string `json:"cycleId"`
+	TermID       string `json:"termId"`
+	TermName     string `json:"termName"`
+	Version      int    `json:"version"`
 }
 
 // ReportCardPublisher announces an issued report card (GradesPublished).
 type ReportCardPublisher interface {
-	PublishReportCardIssued(ctx context.Context, rc domain.ReportCard) error
+	PublishReportCardIssued(ctx context.Context, e ReportCardIssuedEvent) error
 }

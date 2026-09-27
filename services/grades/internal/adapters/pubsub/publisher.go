@@ -9,7 +9,6 @@ import (
 	gradesv1 "github.com/garcia-lorca/gen/go/garcialorca/grades/v1"
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/pkg/pubsub"
-	"github.com/garcia-lorca/services/grades/internal/domain"
 	"github.com/garcia-lorca/services/grades/internal/ports"
 )
 
@@ -40,11 +39,10 @@ func NewEventPublisher(bus pubsub.Publisher) *EventPublisher {
 
 // PublishReportCardIssued announces an issued report card (T7): comms turns it
 // into the family's "boleta disponible / actualizada" notification.
-func (p *EventPublisher) PublishReportCardIssued(ctx context.Context, rc domain.ReportCard) error {
-	h := rc.Header()
+func (p *EventPublisher) PublishReportCardIssued(ctx context.Context, e ports.ReportCardIssuedEvent) error {
 	data, err := proto.Marshal(&gradesv1.GradesPublished{
-		StudentId: h.StudentID, CycleId: h.CycleID, TenantId: h.TenantID, ReportCardId: h.ID,
-		TermId: h.TermID, TermName: h.TermName, Version: int32(h.Version), EnrollmentId: h.EnrollmentID,
+		StudentId: e.StudentID, CycleId: e.CycleID, TenantId: e.TenantID, ReportCardId: e.ReportCardID,
+		TermId: e.TermID, TermName: e.TermName, Version: int32(e.Version), EnrollmentId: e.EnrollmentID,
 	})
 	if err != nil {
 		return glerrors.Wrap(glerrors.KindInternal, "marshal "+typeGradesPublished+" event", err)
@@ -54,10 +52,10 @@ func (p *EventPublisher) PublishReportCardIssued(ctx context.Context, rc domain.
 		Data:  data,
 		Attributes: map[string]string{
 			pubsub.AttrType: typeGradesPublished,
-			attrTenantID:    h.TenantID,
+			attrTenantID:    e.TenantID,
 		},
 	}); err != nil {
-		return fmt.Errorf("publishing report card %s: %w", h.ID, err)
+		return fmt.Errorf("publishing report card %s: %w", e.ReportCardID, err)
 	}
 	return nil
 }
