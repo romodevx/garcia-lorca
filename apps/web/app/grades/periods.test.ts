@@ -81,8 +81,12 @@ describe("periodsClient", () => {
   });
 
   it("fetches a boleta's PDF as a blob, with credentials, and the server's file name", async () => {
-    const headers = { "Content-Disposition": 'attachment; filename="boleta-2026-00042-1-er-trimestre-v1.pdf"' };
-    const fetchMock = vi.fn().mockResolvedValue(new Response(new Blob(["%PDF-1.4"], { type: "application/pdf" }), { status: 200, headers }));
+    const headers = {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": 'attachment; filename="boleta-2026-00042-1-er-trimestre-v1.pdf"',
+    };
+    // A string body, not a Blob: jsdom's Blob has no stream() on every Node, and undici's Response needs it.
+    const fetchMock = vi.fn().mockResolvedValue(new Response("%PDF-1.4", { status: 200, headers }));
     vi.stubGlobal("fetch", fetchMock);
 
     const { blob, fileName } = await api.reportCardPdf("rc1");
@@ -93,7 +97,7 @@ describe("periodsClient", () => {
   });
 
   it("a PDF without a readable Content-Disposition has no file name (the caller falls back)", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(new Blob(["%PDF-1.4"]), { status: 200 })));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("%PDF-1.4", { status: 200 })));
 
     expect((await api.reportCardPdf("rc1")).fileName).toBeUndefined();
   });
