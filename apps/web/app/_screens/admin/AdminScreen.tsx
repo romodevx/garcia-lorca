@@ -27,6 +27,7 @@ import {
   type Role,
 } from "../../admin/api";
 import { PERMISSION_CATALOG } from "./catalog";
+import { OwnerOnlyList } from "./parts";
 
 import { API_URL } from "../../api-url";
 import { matchesSearch } from "../../_design/textSearch";
@@ -431,8 +432,11 @@ function PermChecklist({ selected, onToggle }: { selected: string[]; onToggle: (
         <div key={g.resource}>
           <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 8 }}>{g.resource}</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {g.permissions.map((p) => <button key={p.value} aria-label={p.label} onClick={() => onToggle(p.value)} style={chip(selected.includes(p.value), "lime")}>{p.label}</button>)}
+            {g.permissions.filter((p) => p.ownerOnly !== true).map((p) => (
+              <button key={p.value} aria-label={p.label} onClick={() => onToggle(p.value)} style={chip(selected.includes(p.value), "lime")}>{p.label}</button>
+            ))}
           </div>
+          <OwnerOnlyList labels={g.permissions.filter((p) => p.ownerOnly === true).map((p) => p.label)} />
         </div>
       ))}
     </div>

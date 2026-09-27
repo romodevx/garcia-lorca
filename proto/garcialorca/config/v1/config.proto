@@ -74,6 +74,15 @@ service ConfigService {
   rpc GetTerm(GetTermRequest) returns (GetTermResponse);
   // ListTerms lists the terms of a cycle (scoped by cycle_id, optional level_id).
   rpc ListTerms(ListTermsRequest) returns (ListTermsResponse);
+  // SetTermMonths replaces the calendar months a term covers. A month outside
+  // the cycle is InvalidArgument (X-Error-Code MONTH_OUTSIDE_CYCLE); a month
+  // another term of the same cycle+level holds is AlreadyExists
+  // (MONTH_IN_OTHER_TERM), naming the month.
+  rpc SetTermMonths(SetTermMonthsRequest) returns (SetTermMonthsResponse);
+  // CopyTermMonths makes each target level's terms mirror the source level's
+  // months in one cycle (matched by ordinal; missing terms created from the
+  // source; unmatched target terms emptied), in one transaction.
+  rpc CopyTermMonths(CopyTermMonthsRequest) returns (CopyTermMonthsResponse);
 
   // --- groups (per cycle, grade_level) ---
   // CreateGroup adds a class group within a cycle for a grade.
@@ -263,6 +272,8 @@ message Term {
   google.protobuf.Timestamp ends_on = 8;
   google.protobuf.Timestamp created_at = 9;
   google.protobuf.Timestamp updated_at = 10;
+  // months are the calendar months the term covers, "YYYY-MM", ascending.
+  repeated string months = 11;
 }
 
 // Group is a class group within a cycle for a grade (per cycle).
@@ -487,6 +498,31 @@ message ListTermsRequest {
 
 // ListTermsResponse returns the terms of the cycle.
 message ListTermsResponse {
+  repeated Term terms = 1;
+}
+
+// SetTermMonthsRequest replaces a term's months ("YYYY-MM" each; empty clears).
+message SetTermMonthsRequest {
+  string term_id = 1;
+  repeated string months = 2;
+}
+
+// SetTermMonthsResponse returns the term with its new months.
+message SetTermMonthsResponse {
+  Term term = 1;
+}
+
+// CopyTermMonthsRequest copies one level's term months onto other levels of
+// the same cycle.
+message CopyTermMonthsRequest {
+  string cycle_id = 1;
+  string from_level_id = 2;
+  repeated string to_level_ids = 3;
+}
+
+// CopyTermMonthsResponse returns the target levels' terms, level by level in
+// request order, then by ordinal.
+message CopyTermMonthsResponse {
   repeated Term terms = 1;
 }
 

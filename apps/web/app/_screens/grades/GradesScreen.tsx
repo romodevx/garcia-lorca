@@ -29,5 +29,5 @@ export function GradesScreen({ onBack, permissions }: GradesScreenProps): ReactE
   if (!perms.includes("grades:read") && perms.includes("teaching:read")) {
     return <TeacherCapture onBack={onBack} />;
   }
-  return <DirectorCapture onBack={onBack} />;
+  return <DirectorCapture onBack={onBack} permissions={perms} />;
 }

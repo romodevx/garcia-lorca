@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -161,5 +161,21 @@ describe("Admin — teacher link", () => {
     await user.click(screen.getByRole("button", { name: "Vincular" }));
 
     await waitFor(() => expect(admin.linkTeacherUser).toHaveBeenCalledWith(expect.any(String), "t1", "u1"));
+  });
+
+  it("shows an owner-only permission as locked text in both editors, never as a control (tarea 7)", async () => {
+    const user = userEvent.setup();
+    admin.listRoles.mockResolvedValue([{ id: "r1", name: "Coordinación", permissions: [] }]);
+    render(<Admin onBack={() => {}} />);
+
+    const create = await screen.findByRole("form", { name: "Crear rol" });
+    const inCreate = within(create).getByText("Cerrar periodos y emitir boletas").closest("li");
+    expect(inCreate).toHaveTextContent("Solo el dueño");
+    expect(within(create).queryByRole("checkbox", { name: /Cerrar periodos/ })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Editar permisos de Coordinación" }));
+    const editor = screen.getByRole("group", { name: "Permisos de Coordinación" });
+    expect(within(editor).getByText("Cerrar periodos y emitir boletas").closest("li")).toHaveTextContent("Solo el dueño");
+    expect(within(editor).queryByRole("checkbox", { name: /Cerrar periodos/ })).toBeNull();
   });
 });

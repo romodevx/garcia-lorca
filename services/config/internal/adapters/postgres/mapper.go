@@ -3,6 +3,7 @@ package postgres
 import (
 	"math"
 	"strings"
+	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/config/internal/domain"
@@ -135,8 +136,22 @@ func fromDomainTerm(t domain.Term) termModel {
 	}
 }
 
-func toDomainTerm(m termModel) (domain.Term, error) {
-	return domain.NewTerm(m.ID, m.TenantID, m.CycleID, m.LevelID, m.Name, m.Ordinal, m.StartsOn, m.EndsOn)
+func toDomainTerm(m termModel, months []time.Time) (domain.Term, error) {
+	t, err := domain.NewTerm(m.ID, m.TenantID, m.CycleID, m.LevelID, m.Name, m.Ordinal, m.StartsOn, m.EndsOn)
+	if err != nil {
+		return domain.Term{}, err
+	}
+	return t.WithMonths(months)
+}
+
+// fromDomainTermMonths is one term_months row per month of t.
+func fromDomainTermMonths(t domain.Term) []termMonthModel {
+	months := t.Months()
+	rows := make([]termMonthModel, 0, len(months))
+	for _, m := range months {
+		rows = append(rows, termMonthModel{TenantID: t.TenantID(), TermID: t.ID(), CycleID: t.CycleID(), LevelID: t.LevelID(), Month: m})
+	}
+	return rows
 }
 
 // --- groups ---------------------------------------------------------------

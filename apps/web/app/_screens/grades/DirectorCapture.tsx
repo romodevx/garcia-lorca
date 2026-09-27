@@ -8,13 +8,24 @@ import { SelectField } from "../../_design/form";
 import { API_URL } from "../../api-url";
 import { gradeSheetClient } from "../../grades/api";
 import { EmptyHint, ErrorAlert } from "../config/parts";
+import { TabBar } from "../finance/parts";
 import { MonthlyGradeSheet } from "./MonthlyGradeSheet";
+import { PeriodsPanel } from "./PeriodsPanel";
 import { useDirectorAssignments } from "./useDirectorAssignments";
 import { confirmLeavingUnsaved, useGradeSaves } from "./useGradeSaves";
 
 export interface DirectorCaptureProps {
   onBack: () => void;
+  /** The principal's permissions: `grades:read` opens the Periodos tab, `grades:close` lets it close. UX only. */
+  permissions?: readonly string[];
 }
+
+type Section = "capture" | "periods";
+
+const SECTIONS = [
+  { id: "capture", label: "Captura" },
+  { id: "periods", label: "Periodos" },
+] as const;
 
 /**
  * Director-scoped grade capture (module_grades, `grades:read/write`): any
@@ -22,7 +33,10 @@ export interface DirectorCaptureProps {
  * uses. Names come from the sheet itself, so no students list is fetched. The
  * gateway is the security boundary; this is UX only.
  */
-export function DirectorCapture({ onBack }: DirectorCaptureProps): ReactElement {
+export function DirectorCapture({ onBack, permissions }: DirectorCaptureProps): ReactElement {
+  const canSeePeriods = permissions?.includes("grades:read") === true;
+  const canClose = permissions?.includes("grades:close") === true;
+  const [section, setSection] = useState<Section>("capture");
   const { choices, loading, failed } = useDirectorAssignments();
   const [assignmentId, setAssignmentId] = useState("");
   const client = useMemo(() => gradeSheetClient(API_URL), []);
@@ -51,6 +65,13 @@ export function DirectorCapture({ onBack }: DirectorCaptureProps): ReactElement 
         </div>
       </div>
 
+      {canSeePeriods && (
+        <div className="fade-up" style={{ marginBottom: 18, display: "flex" }}>
+          <TabBar label="Secciones de calificaciones" tabs={SECTIONS} active={section} onSelect={setSection} />
+        </div>
+      )}
+
+      {section === "periods" ? <PeriodsPanel canClose={canClose} /> : (
       <div className="fade-up">
         {failed ? (
           <ErrorAlert message="No se pudieron cargar las asignaciones." />
@@ -69,6 +90,7 @@ export function DirectorCapture({ onBack }: DirectorCaptureProps): ReactElement 
         {!failed && assignmentId === "" && <EmptyHint>Elige una asignación para capturar sus calificaciones del mes.</EmptyHint>}
         {assignmentId !== "" && <MonthlyGradeSheet key={assignmentId} assignmentId={assignmentId} client={client} saves={saves} />}
       </div>
+      )}
     </Page>
   );
 }

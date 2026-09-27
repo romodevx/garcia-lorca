@@ -84,6 +84,19 @@ type termModel struct {
 
 func (termModel) TableName() string { return "terms" }
 
+// termMonthModel is the GORM row for `term_months`: one calendar month (its
+// first day) a term covers. cycle_id/level_id are the term's, denormalised so
+// the DB can hold "a month belongs to one term per cycle+level".
+type termMonthModel struct {
+	TenantID string    `gorm:"column:tenant_id;primaryKey"`
+	TermID   string    `gorm:"column:term_id;primaryKey"`
+	CycleID  string    `gorm:"column:cycle_id"`
+	LevelID  string    `gorm:"column:level_id"`
+	Month    time.Time `gorm:"column:month;primaryKey;type:date"`
+}
+
+func (termMonthModel) TableName() string { return "term_months" }
+
 // groupModel is the GORM row for `groups` (per cycle+grade level).
 type groupModel struct {
 	ID           string    `gorm:"column:id;primaryKey"`

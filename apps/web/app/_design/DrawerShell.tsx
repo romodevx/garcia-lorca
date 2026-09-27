@@ -328,6 +328,9 @@ export function DrawerShell({
         <div
           style={{
             display: "flex",
+            // A long primary ("Cerrar de todos modos") drops a line at 360 px
+            // instead of being clipped past the dialog's edge.
+            flexWrap: "wrap",
             gap: 12,
             alignItems: "center",
             padding: "18px 26px",

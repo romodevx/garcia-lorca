@@ -139,7 +139,7 @@ func TestMonthlySheetShapeAndSpanishOrder(t *testing.T) {
 	assert.JSONEq(t, `{
 		"assignmentId": "`+mAsg+`", "month": "2026-09", "months": ["2026-08","2026-09"],
 		"scale": {"min":5,"max":10,"decimals":1,"passing":6},
-		"gradingEnabled": true, "currentMonth": "2026-09", "editable": true,
+		"gradingEnabled": true, "currentMonth": "2026-09", "editable": true, "closedMonths": [], "unmappedMonths": [],
 		"rows": [
 			{"enrollmentId":"enr-a","studentId":"stu-a","name":"Ana Ávila","value":9.5,"updatedAt":"2026-09-03T15:04:05Z","rowEditable":true},
 			{"enrollmentId":"enr-n","studentId":"stu-n","name":"Nico Núñez","value":null,"updatedAt":null,"rowEditable":false,
@@ -397,4 +397,31 @@ func TestTeachingOwnsAssignmentGate(t *testing.T) {
 	rec = httptest.NewRecorder()
 	h.Sheet(rec, teacherGET("/api/v1/teaching/grades/sheet?assignmentId="+mAsg, "usr-other"))
 	assert.Equal(t, http.StatusNotFound, rec.Code, "another teacher's assignment is 404")
+}
+
+// T7: the sheet names the months a closed period locks, so the screen marks
+// them read-only up front.
+func TestMonthlySheetCarriesClosedMonths(t *testing.T) {
+	sheet := sheetFixture()
+	sheet.ClosedMonths = []string{"2026-08", "2026-09"}
+	sheet.Editable, sheet.ReadOnlyReason = false, "El periodo está cerrado"
+	h := handler.NewMonthlyGradesHandler(&fakeMonthlyGrades{sheet: sheet}, sheetStudents(), handler.AnyTenantAssignment, handler.ScopeSchool)
+	rec := httptest.NewRecorder()
+	h.Sheet(rec, principalReq(http.MethodGet, "/api/v1/grades/sheet?assignmentId="+mAsg+"&month=2026-09", ""))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"closedMonths":["2026-08","2026-09"]`)
+	assert.Contains(t, rec.Body.String(), `"unmappedMonths":[]`, "always a list, never null")
+	assert.Contains(t, rec.Body.String(), `"readOnlyReason":"El periodo está cerrado"`)
+}
+
+// T7: months no period covers stay capturable and are listed apart, so the
+// screen can mark them "Sin periodo".
+func TestMonthlySheetCarriesUnmappedMonths(t *testing.T) {
+	sheet := sheetFixture()
+	sheet.UnmappedMonths = []string{"2026-08"}
+	h := handler.NewMonthlyGradesHandler(&fakeMonthlyGrades{sheet: sheet}, sheetStudents(), handler.AnyTenantAssignment, handler.ScopeSchool)
+	rec := httptest.NewRecorder()
+	h.Sheet(rec, principalReq(http.MethodGet, "/api/v1/grades/sheet?assignmentId="+mAsg+"&month=2026-09", ""))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"unmappedMonths":["2026-08"]`)
 }

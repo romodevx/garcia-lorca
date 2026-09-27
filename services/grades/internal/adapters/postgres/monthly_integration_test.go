@@ -75,14 +75,14 @@ func TestMonthlyUpsertTwiceEditsInPlace(t *testing.T) {
 	repo := appRepo(t, tenantA)
 	ctx := context.Background()
 
-	first, err := repo.UpsertMonthlyGrade(ctx, monthlyGrade(t, "a1000000-0000-0000-0000-000000000001", tenantA, mEnrollmentA, mSubject, mTeacher, mUser, "2026-09", "9.95"))
+	first, err := repo.UpsertMonthlyGrade(ctx, monthlyGrade(t, "a1000000-0000-0000-0000-000000000001", tenantA, mEnrollmentA, mSubject, mTeacher, mUser, "2026-09", "9.95"), ports.PeriodLock{})
 	require.NoError(t, err)
 	assert.Equal(t, 995, first.Value().Hundredths())
 	assert.Equal(t, "2026-09", first.Month().String())
 	assert.False(t, first.UpdatedAt().IsZero())
 
 	time.Sleep(10 * time.Millisecond) // now() must move between the two transactions
-	second, err := repo.UpsertMonthlyGrade(ctx, monthlyGrade(t, "a1000000-0000-0000-0000-000000000099", tenantA, mEnrollmentA, mSubject, mTeacherTwo, mDirector, "2026-09", "7"))
+	second, err := repo.UpsertMonthlyGrade(ctx, monthlyGrade(t, "a1000000-0000-0000-0000-000000000099", tenantA, mEnrollmentA, mSubject, mTeacherTwo, mDirector, "2026-09", "7"), ports.PeriodLock{})
 	require.NoError(t, err)
 	assert.Equal(t, first.ID(), second.ID(), "the upsert must keep the row")
 	assert.Equal(t, 700, second.Value().Hundredths())
@@ -92,7 +92,7 @@ func TestMonthlyUpsertTwiceEditsInPlace(t *testing.T) {
 	assert.Equal(t, int64(1), countMonthly(t, tenantA, mEnrollmentA))
 
 	// Another month is another cell.
-	_, err = repo.UpsertMonthlyGrade(ctx, monthlyGrade(t, "a1000000-0000-0000-0000-000000000002", tenantA, mEnrollmentA, mSubject, mTeacher, mUser, "2026-10", "8.5"))
+	_, err = repo.UpsertMonthlyGrade(ctx, monthlyGrade(t, "a1000000-0000-0000-0000-000000000002", tenantA, mEnrollmentA, mSubject, mTeacher, mUser, "2026-10", "8.5"), ports.PeriodLock{})
 	require.NoError(t, err)
 	all, err := repo.MonthlyGradesForEnrollment(ctx, mEnrollmentA)
 	require.NoError(t, err)
@@ -106,9 +106,9 @@ func TestMonthlyUpsertTwiceEditsInPlace(t *testing.T) {
 func TestMonthlyGradesForSheet(t *testing.T) {
 	repo := appRepo(t, tenantA)
 	ctx := context.Background()
-	_, err := repo.UpsertMonthlyGrade(ctx, monthlyGrade(t, "a1000000-0000-0000-0000-000000000010", tenantA, mEnrollmentB, mSubject, mTeacher, mUser, "2026-11", "6"))
+	_, err := repo.UpsertMonthlyGrade(ctx, monthlyGrade(t, "a1000000-0000-0000-0000-000000000010", tenantA, mEnrollmentB, mSubject, mTeacher, mUser, "2026-11", "6"), ports.PeriodLock{})
 	require.NoError(t, err)
-	_, err = repo.UpsertMonthlyGrade(ctx, monthlyGrade(t, "a1000000-0000-0000-0000-000000000011", tenantA, mEnrollmentB, mSubjectTwo, mTeacher, mUser, "2026-11", "10"))
+	_, err = repo.UpsertMonthlyGrade(ctx, monthlyGrade(t, "a1000000-0000-0000-0000-000000000011", tenantA, mEnrollmentB, mSubjectTwo, mTeacher, mUser, "2026-11", "10"), ports.PeriodLock{})
 	require.NoError(t, err)
 
 	got, err := repo.MonthlyGradesForSheet(ctx, []string{mEnrollmentB, mEnrollmentC}, mSubject, month(t, "2026-11"))
@@ -124,12 +124,12 @@ func TestMonthlyGradesForSheet(t *testing.T) {
 func TestMonthlyDeleteIsIdempotent(t *testing.T) {
 	repo := appRepo(t, tenantA)
 	ctx := context.Background()
-	_, err := repo.UpsertMonthlyGrade(ctx, monthlyGrade(t, "a1000000-0000-0000-0000-000000000020", tenantA, mEnrollmentC, mSubject, mTeacher, mUser, "2026-12", "9"))
+	_, err := repo.UpsertMonthlyGrade(ctx, monthlyGrade(t, "a1000000-0000-0000-0000-000000000020", tenantA, mEnrollmentC, mSubject, mTeacher, mUser, "2026-12", "9"), ports.PeriodLock{})
 	require.NoError(t, err)
 
-	require.NoError(t, repo.DeleteMonthlyGrade(ctx, mEnrollmentC, mSubject, month(t, "2026-12")))
+	require.NoError(t, repo.DeleteMonthlyGrade(ctx, mEnrollmentC, mSubject, month(t, "2026-12"), ports.PeriodLock{}))
 	assert.Equal(t, int64(0), countMonthly(t, tenantA, mEnrollmentC))
-	require.NoError(t, repo.DeleteMonthlyGrade(ctx, mEnrollmentC, mSubject, month(t, "2026-12")), "deleting an empty cell is not an error")
+	require.NoError(t, repo.DeleteMonthlyGrade(ctx, mEnrollmentC, mSubject, month(t, "2026-12"), ports.PeriodLock{}), "deleting an empty cell is not an error")
 }
 
 // The table refuses a month that is not a first day and a value outside 0–100,
@@ -153,7 +153,7 @@ func TestMonthlyChecks(t *testing.T) {
 // nor delete tenant B's monthly grade.
 func TestRLSIsolatesMonthlyGrades(t *testing.T) {
 	ctx := context.Background()
-	b, err := appRepo(t, tenantB).UpsertMonthlyGrade(ctx, monthlyGrade(t, "b1000000-0000-0000-0000-000000000001", tenantB, mEnrollmentRL, mSubject, mTeacher, mUser, "2026-09", "7"))
+	b, err := appRepo(t, tenantB).UpsertMonthlyGrade(ctx, monthlyGrade(t, "b1000000-0000-0000-0000-000000000001", tenantB, mEnrollmentRL, mSubject, mTeacher, mUser, "2026-09", "7"), ports.PeriodLock{})
 	require.NoError(t, err)
 
 	a := appRepo(t, tenantA)
@@ -164,8 +164,8 @@ func TestRLSIsolatesMonthlyGrades(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, sheet)
 
-	require.NoError(t, a.DeleteMonthlyGrade(ctx, mEnrollmentRL, mSubject, month(t, "2026-09")))
-	_, err = a.UpsertMonthlyGrade(ctx, monthlyGrade(t, "a1000000-0000-0000-0000-0000000000a1", tenantA, mEnrollmentRL, mSubject, mTeacher, mUser, "2026-09", "3"))
+	require.NoError(t, a.DeleteMonthlyGrade(ctx, mEnrollmentRL, mSubject, month(t, "2026-09"), ports.PeriodLock{}))
+	_, err = a.UpsertMonthlyGrade(ctx, monthlyGrade(t, "a1000000-0000-0000-0000-0000000000a1", tenantA, mEnrollmentRL, mSubject, mTeacher, mUser, "2026-09", "3"), ports.PeriodLock{})
 	require.NoError(t, err)
 
 	after, err := appRepo(t, tenantB).MonthlyGradesForEnrollment(ctx, mEnrollmentRL)
@@ -191,10 +191,10 @@ func TestCountScaleViolations(t *testing.T) {
 		{enrV1, "2026-09", "9.5"}, {enrV1, "2026-10", "6"}, {enrV2, "2026-09", "10"}, {enrV2, "2026-10", "7.25"},
 	} {
 		id := "a1000000-0000-0000-0000-00000000005" + string(rune('0'+i))
-		_, err := repo.UpsertMonthlyGrade(ctx, monthlyGrade(t, id, tenantA, c.enr, mSubject, mTeacher, mUser, c.month, c.value))
+		_, err := repo.UpsertMonthlyGrade(ctx, monthlyGrade(t, id, tenantA, c.enr, mSubject, mTeacher, mUser, c.month, c.value), ports.PeriodLock{})
 		require.NoError(t, err)
 	}
-	_, err := appRepo(t, tenantB).UpsertMonthlyGrade(ctx, monthlyGrade(t, "a1000000-0000-0000-0000-000000000059", tenantB, enrV1, mSubject, mTeacher, mUser, "2026-11", "1"))
+	_, err := appRepo(t, tenantB).UpsertMonthlyGrade(ctx, monthlyGrade(t, "a1000000-0000-0000-0000-000000000059", tenantB, enrV1, mSubject, mTeacher, mUser, "2026-11", "1"), ports.PeriodLock{})
 	require.NoError(t, err)
 
 	scale := func(minH, maxH, passH, dec int) domain.GradingScale {

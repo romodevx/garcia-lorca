@@ -41,6 +41,9 @@ type fakeCatalog struct {
 	unique       map[string]bool // scope-qualified unique keys across all entities
 	// reassignWrites counts the reassignments that actually moved a row.
 	reassignWrites int
+	// applyCalls counts ApplyTermMonths transactions; applyErr fails them.
+	applyCalls int
+	applyErr   error
 }
 
 func newFake() *fakeCatalog {

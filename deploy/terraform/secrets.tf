@@ -193,3 +193,22 @@ resource "google_secret_manager_secret_version" "smtp_password" {
   # identity provider send its own link.
   secret_data = var.smtp_password
 }
+
+# ---- Expo push access token (comms) -----------------------------------------
+# Optional: Expo accepts pushes without it until the project turns on "enhanced
+# push security". The container is created empty and costs nothing; the value is
+# written out of band, and only then does var.expo_access_token_enabled mount it
+# into comms (services.tf comms_secret_env). No value ever lives in Terraform.
+#   printf '%s' "$TOKEN" | gcloud secrets versions add \
+#     garcia-lorca-expo-access-token-dev --data-file=-
+resource "google_secret_manager_secret" "expo_access_token" {
+  project   = var.project_id
+  secret_id = "garcia-lorca-expo-access-token-${var.env}"
+  labels    = local.labels
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.apis]
+}

@@ -13,8 +13,9 @@ const preflightMaxAge = "600"
 // access reusing an existing account); X-Scan-Result names an attendance
 // scan's verdict (T4), since two of its refusals share 422; X-Error-Code names
 // a refusal's machine code (T6 monthly grades), so the screen reacts to it
-// without parsing the sentence.
-const exposedHeaders = "X-Confirm-Required, X-Scan-Result, X-Error-Code"
+// without parsing the sentence; Content-Disposition carries the report-card
+// PDF's filename (T7), which the web uses to name the download.
+const exposedHeaders = "X-Confirm-Required, X-Scan-Result, X-Error-Code, Content-Disposition"
 
 // CORS returns middleware that enables the browser web client to call the
 // gateway cross-origin. The web fetches with credentials (auth cookies), so the

@@ -96,6 +96,12 @@ type CatalogRepository interface {
 	// ListTerms returns the terms of cycleID, optionally narrowed to levelID
 	// ("" = all levels of the cycle).
 	ListTerms(ctx context.Context, cycleID string, levelID string) ([]domain.Term, error)
+	// ApplyTermMonths writes, in ONE transaction, every term in creates (with
+	// its months) and replaces the month set of every term in updates. Terms
+	// read by GetTerm/ListTerms carry their months (batched, never per term).
+	// A month another term of the same cycle and level still holds is
+	// domain.MonthInOtherTerm (KindConflict); nothing is written then.
+	ApplyTermMonths(ctx context.Context, creates []domain.Term, updates []domain.Term) error
 
 	// --- groups (grupos, per (cycle, grade level)) ---
 

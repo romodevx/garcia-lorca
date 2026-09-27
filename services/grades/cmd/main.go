@@ -6,6 +6,13 @@
 // roster combine two cross-service seams — config (teaching assignment + term)
 // and students (enrollments) — both reached over Connect as server-to-server
 // clients (network-private in shared environments).
+//
+// T7 adds period closing and report cards (PeriodsService). An issued report
+// card is announced as GradesPublished on grades-events through a
+// transactional outbox (queued with the close, drained after its commit and by
+// a periodic sweep) and the publisher selected from the environment
+// (gcp.PublisherFromEnv: the Pub/Sub emulator or broker when configured, the
+// logging dev bus otherwise).
 package main
 
 import (
@@ -29,9 +36,12 @@ import (
 	"github.com/garcia-lorca/pkg/dbpool"
 	"github.com/garcia-lorca/pkg/gcpauth"
 	"github.com/garcia-lorca/pkg/logger"
+	"github.com/garcia-lorca/pkg/pubsub"
+	"github.com/garcia-lorca/pkg/pubsub/gcp"
 	"github.com/garcia-lorca/services/grades/internal/adapters/configclient"
 	grpcadapter "github.com/garcia-lorca/services/grades/internal/adapters/grpc"
 	pgadapter "github.com/garcia-lorca/services/grades/internal/adapters/postgres"
+	pubsubadapter "github.com/garcia-lorca/services/grades/internal/adapters/pubsub"
 	"github.com/garcia-lorca/services/grades/internal/adapters/studentsclient"
 	"github.com/garcia-lorca/services/grades/internal/usecase"
 )
@@ -50,16 +60,39 @@ const (
 	readTimeout       = 30 * time.Second
 	writeTimeout      = 30 * time.Second
 	idleTimeout       = 120 * time.Second
+
+	// outboxSweep is how often queued events are looked for (their backoff
+	// decides when a failed one is tried again).
+	outboxSweep = 30 * time.Second
 )
 
 func main() {
 	log := logger.Default()
 
-	mux, err := buildMux()
-	if err != nil {
-		log.Error("grades failed to start", slog.Any("error", err))
+	if err := run(context.Background(), log); err != nil {
+		log.Error("grades stopped", slog.Any("error", err))
 		os.Exit(1)
 	}
+}
+
+// run is the process lifecycle: build the composition root, serve until the
+// listener stops, and release the event transport on the way out.
+func run(ctx context.Context, log *slog.Logger) error {
+	mux, events, drain, err := buildMux(ctx, log)
+	if err != nil {
+		return err
+	}
+	// The publisher owns the broker client's per-topic batching goroutines, so
+	// releasing it belongs next to the code that built it. Defers run last in,
+	// first out: the sweep (registered after) stops — and its goroutine ends —
+	// before the publisher it publishes through is closed.
+	defer func() {
+		if err := events.Close(); err != nil {
+			log.Warn("grades could not close the event publisher", slog.Any("error", err))
+		}
+	}()
+	stopSweep := startSweep(ctx, drain, log, outboxSweep)
+	defer stopSweep()
 
 	addr := envOr("ADDR", defaultAddr)
 	log.Info("grades starting", slog.String("addr", addr))
@@ -73,21 +106,22 @@ func main() {
 		IdleTimeout:       idleTimeout,
 	}
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Error("grades server stopped", slog.Any("error", err))
-		os.Exit(1)
+		return err
 	}
+	return nil
 }
 
-// buildMux is the composition root: config → adapters (both reader clients +
-// repo) → use case → Connect handler, returning the mounted routes.
-func buildMux() (*http.ServeMux, error) {
+// buildMux is the composition root: config → adapters (both reader clients,
+// repo and publisher) → use cases → Connect handler, returning the mounted
+// routes plus the event publisher the caller must close on shutdown.
+func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.PublisherCloser, outboxDrain, error) {
 	// Single-tenant for this phase: the tenant is fixed here (not derived from
 	// the caller), so RLS binds this one tenant for every request. See ADR 0001.
 	tenantID := envOr("GRADES_TENANT_ID", defaultTenant)
 
 	db, err := openDB()
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 
 	repo := pgadapter.NewRepository(db, tenantID)
@@ -99,16 +133,28 @@ func buildMux() (*http.ServeMux, error) {
 	// sufficient for these unary calls.
 	configBaseURL := envOr("CONFIG_BASE_URL", defaultConfigBaseURL)
 	studentsBaseURL := envOr("STUDENTS_BASE_URL", defaultStudentsBaseURL)
-	assignments := configclient.New(configBaseURL, gcpauth.HTTPClient(context.Background(), configBaseURL))
-	enrollments := studentsclient.New(studentsBaseURL, gcpauth.HTTPClient(context.Background(), studentsBaseURL))
+	assignments := configclient.New(configBaseURL, gcpauth.HTTPClient(ctx, configBaseURL))
+	enrollments := studentsclient.New(studentsBaseURL, gcpauth.HTTPClient(ctx, studentsBaseURL))
+
+	events, err := gcp.PublisherFromEnv(ctx, log)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 
 	newID := func() string { return uuid.NewString() }
 	// The same config client reads the catalog (group → level scale, cycles,
 	// a group's assignments) for the monthly knot and the term-level check.
 	svc := usecase.NewGradesService(repo, assignments, assignments, enrollments, tenantID, newID, time.Now)
 	monthly := usecase.NewMonthlyGradesService(repo, assignments, assignments, enrollments, tenantID, newID, time.Now)
+	// Period closing (T7): the same repository stores closures and report
+	// cards; the students client names the pupils a report card freezes.
+	periods := usecase.NewPeriodsService(usecase.PeriodsDeps{
+		Periods: repo, Grades: repo, Terms: assignments, Catalog: assignments, Enrollments: enrollments,
+		Students: enrollments, Publisher: pubsubadapter.NewEventPublisher(events), TenantID: tenantID,
+		NewID: newID, Now: time.Now, Log: log,
+	})
 	health := usecase.NewHealthService(serviceName)
-	handler := grpcadapter.NewGradesHandler(svc, monthly, health)
+	handler := grpcadapter.NewGradesHandler(svc, monthly, periods, health)
 
 	mux := http.NewServeMux()
 	path, h := gradesv1connect.NewGradesServiceHandler(handler, connect.WithRecover(recoverFn))
@@ -117,7 +163,51 @@ func buildMux() (*http.ServeMux, error) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	return mux, nil
+	return mux, events, func(c context.Context) (int, error) { return periods.DrainOutbox(c, 0) }, nil
+}
+
+// outboxDrain publishes the queued GradesPublished events and says how many
+// went out.
+type outboxDrain func(ctx context.Context) (int, error)
+
+// startSweep runs sweepOutbox in its own goroutine and returns the func that
+// stops it: stop cancels the sweep and waits for the goroutine to end, so no
+// drain is in flight once it returns. Calling stop again is a no-op.
+func startSweep(ctx context.Context, drain outboxDrain, log *slog.Logger, every time.Duration) (stop func()) {
+	sweepCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sweepOutbox(sweepCtx, drain, log, every)
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+// sweepOutbox drains the outbox every `every` until ctx ends. A close
+// drains its own events the moment it commits; this is for what that cannot
+// cover — the broker was down, or the process died between the commit and the
+// drain. A failed sweep is logged, never fatal: the next tick tries again.
+func sweepOutbox(ctx context.Context, drain outboxDrain, log *slog.Logger, every time.Duration) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			published, err := drain(ctx)
+			if err != nil {
+				log.Warn("grades could not drain the outbox", slog.Any("error", err))
+				continue
+			}
+			if published > 0 {
+				log.Info("grades published stranded events", slog.Int("count", published))
+			}
+		}
+	}
 }
 
 // openDB opens the GORM Postgres pool, resolving its DSN via pkg/dbdsn:

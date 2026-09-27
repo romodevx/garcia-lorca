@@ -61,6 +61,8 @@ func (h *GradesHandler) GetMonthlySheet(ctx context.Context, req *connect.Reques
 		Editable:       sheet.Editable,
 		ReadOnlyReason: sheet.ReadOnlyReason,
 		Rows:           rows,
+		ClosedMonths:   monthStrings(sheet.ClosedMonths),
+		UnmappedMonths: monthStrings(sheet.UnmappedMonths),
 	}), nil
 }
 

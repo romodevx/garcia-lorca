@@ -2,6 +2,9 @@
 
 import type { CSSProperties, ReactElement, ReactNode } from "react";
 
+import { Icon } from "../../_design/Icon";
+import { OWNER_ONLY_NOTE } from "./catalog";
+
 /**
  * Presentational primitives for the admin surface. The catalog panels reuse the
  * config primitives (Section/TextField/ErrorAlert/EmptyHint) — re-exported here
@@ -26,6 +29,29 @@ export interface CheckOption {
 }
 
 /**
+ * Permissions only the owner role holds, as plain list text with a lock and the
+ * words "Solo el dueño" — seen and read by everyone (a screen reader lists them),
+ * never a control that looks like it could be pressed. Both role editors use it.
+ */
+export function OwnerOnlyList({ labels }: { labels: readonly string[] }): ReactElement | null {
+  if (labels.length === 0) return null;
+  return (
+    <ul style={{ listStyle: "none", padding: 0, margin: "8px 0 0", display: "flex", flexWrap: "wrap", gap: 8 }}>
+      {labels.map((label) => (
+        <li
+          key={label}
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: "var(--r-md)", border: "1.5px dashed var(--border)", color: "var(--text-muted)", fontSize: 13.5, fontWeight: 600 }}
+        >
+          <Icon name="lock" size={14} />
+          <span>{label}</span>
+          <span style={{ color: "var(--text-faint)" }}>{`· ${OWNER_ONLY_NOTE}`}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
  * An accessible multi-select checklist rendered as a `<fieldset>` with a
  * `<legend>`; `groups` optionally clusters options under sub-headings (used by
  * the permission catalog). Each checkbox carries an `aria-label` so tests select
@@ -41,7 +67,7 @@ export function CheckList({
 }: {
   legend: string;
   options?: readonly CheckOption[];
-  groups?: readonly { heading: string; options: readonly CheckOption[] }[];
+  groups?: readonly { heading: string; options: readonly CheckOption[]; ownerOnly?: readonly string[] }[];
   selected: ReadonlySet<string>;
   onToggle: (value: string) => void;
   disabled?: boolean;
@@ -88,6 +114,7 @@ export function CheckList({
                 {g.heading}
               </p>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>{g.options.map(renderOption)}</div>
+              <OwnerOnlyList labels={g.ownerOnly ?? []} />
             </div>
           ))
         : (

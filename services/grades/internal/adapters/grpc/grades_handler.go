@@ -25,13 +25,14 @@ var _ gradesv1connect.GradesServiceHandler = (*GradesHandler)(nil)
 type GradesHandler struct {
 	grades  *usecase.GradesService
 	monthly *usecase.MonthlyGradesService
+	periods PeriodsUseCase
 	health  *usecase.HealthService
 }
 
-// NewGradesHandler wires the handler to the term grades, monthly grades and
-// health use cases.
-func NewGradesHandler(grades *usecase.GradesService, monthly *usecase.MonthlyGradesService, health *usecase.HealthService) *GradesHandler {
-	return &GradesHandler{grades: grades, monthly: monthly, health: health}
+// NewGradesHandler wires the handler to the term grades, monthly grades,
+// period closing (T7) and health use cases.
+func NewGradesHandler(grades *usecase.GradesService, monthly *usecase.MonthlyGradesService, periods PeriodsUseCase, health *usecase.HealthService) *GradesHandler {
+	return &GradesHandler{grades: grades, monthly: monthly, periods: periods, health: health}
 }
 
 // Health is the liveness/ping probe present on every service.

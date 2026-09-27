@@ -371,7 +371,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// enforced, permission-gated. Writes need config:write, reads config:read;
 	// every route sits behind guard.Protect("config", …) so module_config OFF ⇒
 	// 404 (the module is invisible before auth even runs).
-	configH := handler.NewConfigHandler(configClient).WithScaleGuard(gradesClient)
+	configH := handler.NewConfigHandler(configClient).WithScaleGuard(gradesClient).WithTermLock(gradesClient)
 	configWrite := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("config", requireAuthChanged(middleware.RequirePermission("config:write")(http.HandlerFunc(h))))
 	}
@@ -390,6 +390,8 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/config/subjects", configRead(configH.ListSubjects))
 	mux.Handle("POST /api/v1/config/terms", configWrite(configH.CreateTerm))
 	mux.Handle("GET /api/v1/config/terms", configRead(configH.ListTerms))
+	mux.Handle("PUT /api/v1/config/terms/{id}/months", configWrite(configH.PutTermMonths))
+	mux.Handle("POST /api/v1/config/terms/copy-months", configWrite(configH.CopyTermMonths))
 	mux.Handle("POST /api/v1/config/events", configWrite(configH.CreateSchoolEvent))
 	mux.Handle("GET /api/v1/config/events", configRead(configH.ListSchoolEvents))
 	mux.Handle("GET /api/v1/config/school-profile", configRead(configH.GetSchoolProfile))
@@ -449,6 +451,24 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/grades/sheet", gradesRead(directorMonthlyH.Sheet))
 	mux.Handle("PUT /api/v1/grades/monthly", gradesWrite(directorMonthlyH.Put))
 	mux.Handle("DELETE /api/v1/grades/monthly", gradesWrite(directorMonthlyH.Clear))
+
+	// T7 period closing and report cards. Reading the periods, their progress
+	// and the report cards is grades:read; closing and reopening is
+	// grades:close, which only the owner holds (iam 0023) — grades:write is not
+	// enough. The closing director is named from iam's directory for the
+	// snapshot. The PDF prints the school's details from config.
+	gradesClose := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("grades", requireAuthChanged(middleware.RequirePermission("grades:close")(http.HandlerFunc(h))))
+	}
+	periodsH := handler.NewGradesPeriodsHandler(gradesClient, authClient)
+	mux.Handle("GET /api/v1/grades/periods", gradesRead(periodsH.List))
+	mux.Handle("GET /api/v1/grades/periods/{termId}/progress", gradesRead(periodsH.Progress))
+	mux.Handle("POST /api/v1/grades/periods/{termId}/close", gradesClose(periodsH.Close))
+	mux.Handle("POST /api/v1/grades/periods/{termId}/reopen", gradesClose(periodsH.Reopen))
+	reportCardsH := handler.NewReportCardsHandler(gradesClient, configClient, studentsClient)
+	mux.Handle("GET /api/v1/grades/report-cards", gradesRead(reportCardsH.List))
+	mux.Handle("GET /api/v1/grades/report-cards/{id}", gradesRead(reportCardsH.Get))
+	mux.Handle("GET /api/v1/grades/report-cards/{id}/pdf", gradesRead(reportCardsH.PDF))
 
 	// M07 teaching (teacher self-scoped grades): the maestro-facing surface that
 	// exposes ONLY the caller's own groups+subjects, scoped by construction from
@@ -770,6 +790,15 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	familyMonthlyH := handler.NewFamilyMonthlyGradesHandler(studentsClient, gradesClient, configClient, configClient)
 	mux.Handle("GET /api/v1/family/students/{studentId}/grades/monthly",
 		familyReadModules([]string{"grades", "students"}, familyMonthlyH.MonthlyGrades))
+	// T7: the child's report cards — the latest published version per period —
+	// and their PDF. Ownership (404 for another family's child, or a card of
+	// another pupil) is checked by the handler.
+	mux.Handle("GET /api/v1/family/students/{studentId}/report-cards",
+		familyReadModules([]string{"grades", "students"}, reportCardsH.FamilyList))
+	mux.Handle("GET /api/v1/family/students/{studentId}/report-cards/{id}",
+		familyReadModules([]string{"grades", "students"}, reportCardsH.FamilyGet))
+	mux.Handle("GET /api/v1/family/students/{studentId}/report-cards/{id}/pdf",
+		familyReadModules([]string{"grades", "students"}, reportCardsH.FamilyPDF))
 	mux.Handle("GET /api/v1/family/students/{studentId}/attendance",
 		familyReadModules([]string{"attendance", "students"}, familyH.Attendance))
 

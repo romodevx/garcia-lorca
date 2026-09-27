@@ -12,20 +12,19 @@ import {
   updateLevelAttendanceMode,
   updateLevelGrading,
   createSubject,
-  createTerm,
   activateCycle,
   listCycles,
   listGradeLevels,
   listGroups,
   listLevels,
   listSubjects,
-  listTerms,
+  copyTermMonths,
+  type CopyTermMonthsInput,
   type CreateCycleInput,
   type CreateGradeLevelInput,
   type CreateGroupInput,
   type CreateLevelInput,
   type CreateSubjectInput,
-  type CreateTermInput,
   type Cycle,
   type GradeLevel,
   type Group,
@@ -42,7 +41,9 @@ import { TuitionPanel } from "./TuitionPanel";
 import { CalendarPanel } from "./CalendarPanel";
 import { SchoolProfilePanel } from "./SchoolProfilePanel";
 import { SubjectsPanel } from "./SubjectsPanel";
+import { EmptyHint, ErrorAlert } from "./parts";
 import { TermsPanel } from "./TermsPanel";
+import { useLevelTerms } from "./useLevelTerms";
 
 import { API_URL } from "../../api-url";
 
@@ -66,7 +67,6 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
   const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
-  const [terms, setTerms] = useState<Term[]>([]);
 
   const [selectedCycleId, setSelectedCycleId] = useState<string | undefined>(undefined);
   const [selectedLevelId, setSelectedLevelId] = useState<string | undefined>(undefined);
@@ -131,17 +131,8 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
     };
   }, [selectedCycleId, selectedGradeLevelId]);
 
-  // Terms are per (cycle, level).
-  useEffect(() => {
-    if (selectedCycleId === undefined || selectedLevelId === undefined) return;
-    let active = true;
-    listTerms(API_URL, selectedCycleId, selectedLevelId)
-      .then((ts) => active && setTerms(ts))
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, [selectedCycleId, selectedLevelId]);
+  // Terms are per (cycle, level); the hook never hands over another selection's list.
+  const levelTerms = useLevelTerms(selectedCycleId, selectedLevelId);
 
   const handleActivateCycle = useCallback(async (id: string): Promise<void> => {
     const activated = await activateCycle(API_URL, id);
@@ -187,10 +178,7 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
     setGroups((prev) => [...prev, created]);
   }, []);
 
-  const handleCreateTerm = useCallback(async (input: CreateTermInput): Promise<void> => {
-    const created = await createTerm(API_URL, input);
-    setTerms((prev) => [...prev, created]);
-  }, []);
+  const handleCopyTermMonths = useCallback((input: CopyTermMonthsInput): Promise<Term[]> => copyTermMonths(API_URL, input), []);
 
 
   const selectedCycle = cycles.find((c) => c.id === selectedCycleId);
@@ -315,7 +303,23 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
             )}
 
             {selectedLevel !== undefined && selectedCycle !== undefined && (
-              <TermsPanel key={`${selectedCycle.id}:${selectedLevel.id}`} cycle={selectedCycle} level={selectedLevel} terms={terms} onCreate={handleCreateTerm} />
+              // Full row: the months grid needs the width, and scrolls inside its own box when there is none.
+              <div style={{ gridColumn: "1 / -1", minWidth: 0 }}>
+                {levelTerms.load.kind === "ready" && (
+                  <TermsPanel
+                    key={`${selectedCycle.id}:${selectedLevel.id}`}
+                    cycle={selectedCycle}
+                    level={selectedLevel}
+                    levels={levels}
+                    terms={levelTerms.load.terms}
+                    onCreate={levelTerms.create}
+                    onSetMonths={levelTerms.setMonths}
+                    onCopyMonths={handleCopyTermMonths}
+                  />
+                )}
+                {levelTerms.load.kind === "loading" && <EmptyHint>Cargando periodos…</EmptyHint>}
+                {levelTerms.load.kind === "failed" && <ErrorAlert message="No se pudieron cargar los periodos de este nivel." />}
+              </div>
             )}
 
             {selectedGradeLevel !== undefined && (

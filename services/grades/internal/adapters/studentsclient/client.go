@@ -14,6 +14,7 @@ package studentsclient
 import (
 	"context"
 	"net/http"
+	"time"
 
 	connect "connectrpc.com/connect"
 
@@ -106,7 +107,17 @@ func toRef(e *studentsv1.Enrollment) ports.EnrollmentRef {
 		GroupID:   e.GetGroupId(),
 		CycleID:   e.GetCycleId(),
 		Status:    statusString(e.GetStatus()),
+		// Unset stays the zero time (unknown): the use case then expects every
+		// month rather than inventing a start.
+		EnrolledAt: enrolledAt(e),
 	}
+}
+
+func enrolledAt(e *studentsv1.Enrollment) time.Time {
+	if e.GetEnrolledAt() == nil {
+		return time.Time{}
+	}
+	return e.GetEnrolledAt().AsTime().UTC()
 }
 
 // statusString maps the proto EnrollmentStatus enum to the lowercase status

@@ -49,7 +49,7 @@ func levelTerms(ctx context.Context, catalog LevelTermsReader, assignments []cli
 				continue
 			}
 			seenTerm[t.ID] = true
-			out = append(out, teachingTermResponse{ID: t.ID, Name: t.Name, CycleID: t.CycleID, LevelID: t.LevelID})
+			out = append(out, teachingTermResponse{ID: t.ID, Name: t.Name, CycleID: t.CycleID, LevelID: t.LevelID, Months: nonNilMonths(t.Months)})
 		}
 	}
 	return out

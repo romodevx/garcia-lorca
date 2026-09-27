@@ -19,6 +19,9 @@ type Term struct {
 	ordinal  int
 	startsOn time.Time
 	endsOn   time.Time
+	// months are the calendar months the term covers (first day of each,
+	// sorted). A trimester is a set of months, configured per cycle and level.
+	months []time.Time
 }
 
 // NewTerm constructs a term. `id`, `tenantID`, `cycleID`, `levelID`, and `name`

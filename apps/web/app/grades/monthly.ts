@@ -41,6 +41,10 @@ export interface GradeSheet {
   gradingEnabled?: boolean;
   /** The server's current UTC month ("YYYY-MM"): later months are not gradable yet. */
   currentMonth?: string;
+  /** Months whose period (trimester) the director closed, when the server says: read-only for everyone. */
+  closedMonths?: string[];
+  /** Months no period grades, when the server says: still capturable, but no boleta counts them. */
+  unmappedMonths?: string[];
   editable: boolean;
   readOnlyReason?: string;
   rows: MonthlyGradeRow[];
@@ -110,8 +114,10 @@ export async function gradeFailure(res: Response): Promise<GradeRequestError> {
 export type RefusalScope = "row" | "rowLocked" | "sheet";
 
 const MONTH_PREVIOUS_GROUP = "MONTH_PREVIOUS_GROUP";
-/** Refusals that lock the whole month: the level cannot grade, or the month has not come yet. */
-const SHEET_CODES: ReadonlySet<string> = new Set(["LEVEL_NOT_GRADED", "LEVEL_SCALE_NOT_CONFIGURED", "MONTH_IN_FUTURE"]);
+/** The month's period is closed (T7): only the director reopening it lets it change. */
+export const MONTH_LOCKED = "MONTH_LOCKED";
+/** Refusals that lock the whole month: the level cannot grade, the month has not come yet, or its period is closed. */
+const SHEET_CODES: ReadonlySet<string> = new Set(["LEVEL_NOT_GRADED", "LEVEL_SCALE_NOT_CONFIGURED", "MONTH_IN_FUTURE", MONTH_LOCKED]);
 
 export function refusalScope(code: string | undefined): RefusalScope {
   if (code === MONTH_PREVIOUS_GROUP) return "rowLocked";
@@ -120,9 +126,13 @@ export function refusalScope(code: string | undefined): RefusalScope {
 
 const BAD_REQUEST = 400;
 
-/** The server said the value itself is wrong: retrying the same one won't help. */
+/**
+ * The server refused for a reason resending cannot fix: the value itself is
+ * wrong (400), or the month's period is closed (MONTH_LOCKED, whatever status).
+ */
 export function isRejectedValue(err: unknown): err is GradeRequestError {
-  return err instanceof GradeRequestError && err.status === BAD_REQUEST && err.detail !== "";
+  if (!(err instanceof GradeRequestError) || err.detail === "") return false;
+  return err.status === BAD_REQUEST || err.code === MONTH_LOCKED;
 }
 
 /** `?assignmentId=…[&month=…]`. */
@@ -203,6 +213,10 @@ export interface MonthChip {
   fullName: string;
   /** After the server's current month: not gradable yet (its sheet is read-only). */
   future: boolean;
+  /** Its period is closed: read-only until the director reopens it. */
+  closed: boolean;
+  /** No period grades it: capturable, but it counts in no boleta. */
+  unmapped: boolean;
 }
 
 function splitMonth(month: string): { year: string; index: number } {
@@ -214,7 +228,14 @@ function splitMonth(month: string): { year: string; index: number } {
  * "Sep", "Oct"… — with the year only when a short name would repeat. A month
  * after `currentMonth` is `future`; without it nothing is (the server decides).
  */
-export function monthChips(months: readonly string[], currentMonth?: string): MonthChip[] {
+export function monthChips(
+  months: readonly string[],
+  currentMonth?: string,
+  closedMonths: readonly string[] = [],
+  unmappedMonths: readonly string[] = [],
+): MonthChip[] {
+  const closed = new Set(closedMonths);
+  const unmapped = new Set(unmappedMonths);
   const shortOf = (m: string): string => SHORT[splitMonth(m).index] ?? m;
   const seen = new Map<string, number>();
   for (const m of months) seen.set(shortOf(m), (seen.get(shortOf(m)) ?? 0) + 1);
@@ -227,6 +248,8 @@ export function monthChips(months: readonly string[], currentMonth?: string): Mo
       fullName: `${FULL[index] ?? month} de ${year}`,
       // "YYYY-MM" strings order like the months they name.
       future: currentMonth !== undefined && month > currentMonth,
+      closed: closed.has(month),
+      unmapped: unmapped.has(month),
     };
   });
 }

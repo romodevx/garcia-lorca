@@ -261,7 +261,7 @@ func TestAdminSetRolePermissions(t *testing.T) {
 // vulnerable config.
 
 func TestAdminSetRolePermissionsRejectsOwnerOnlyPermissionOnNonOwnerRole(t *testing.T) {
-	for _, restricted := range []string{"finance:read", "attendance:read", "comms:read"} {
+	for _, restricted := range []string{"finance:read", "attendance:read", "comms:read", "grades:close"} {
 		roles := &fakeRoles{byID: map[string]domain.Role{
 			"r1": mustRole(t, "r1", "Docente", []string{"students:read"}),
 		}}
@@ -343,7 +343,7 @@ func TestAdminSetRolePermissionsUnknownRoleWithOwnerOnlyPermissionFailsClosed(t 
 }
 
 func TestAdminCreateRoleRejectsOwnerOnlyPermissionOnNonOwnerRole(t *testing.T) {
-	for _, restricted := range []string{"finance:read", "attendance:read", "comms:read"} {
+	for _, restricted := range []string{"finance:read", "attendance:read", "comms:read", "grades:close"} {
 		roles := &fakeRoles{}
 		svc := newAdmin(&fakeUsers{}, roles, func() string { return "role-new" })
 

@@ -566,3 +566,32 @@ input { font-family: var(--font-ui); }
     border-radius: var(--r-md);
   }
 }
+
+/* ============================================================
+   Boletas de un grupo (Calificaciones → Periodos → Ver boletas).
+   A 360px las cuatro columnas no caben en el cajón y la tabla se
+   desplazaba de lado dentro del diálogo, con "Descargar PDF" fuera
+   de la vista. Aquí el renglón se parte: el alumno arriba; versión,
+   promedio y la descarga abajo, cada valor con su etiqueta (el
+   encabezado se oculta). `!important` sólo donde el borde vive en línea.
+   ============================================================ */
+@media (max-width: 560px) {
+  .boletas-table thead { display: none; }
+  .boletas-table tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 14px;
+    border-top: 1px solid var(--border);
+  }
+  .boletas-table th[scope="row"] { flex-basis: 100%; padding-bottom: 0 !important; border-top: none !important; }
+  .boletas-table td { border-top: none !important; }
+  .boletas-table td:last-child { margin-left: auto; }
+  .boletas-table td[data-label]::before {
+    content: attr(data-label) " ";
+    font-family: var(--font-ui);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+}

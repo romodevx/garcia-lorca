@@ -7,8 +7,8 @@
 // Cross-service references (enrollment_id, subject_id, term_id, teacher_id) are
 // plain UUIDs validated by RPC, NOT foreign keys.
 //
-// Boleta generation + the SEP-level grading Strategy + the publish/boleta flow
-// (GradesPublished / published_at) are OUT of scope for this phase.
+// T7 adds period closing and report cards (boletas): ClosePeriod, the report
+// card reads and the GradesPublished event. grade_entries.published_at stays unused.
 syntax = "proto3";
 
 package garcialorca.grades.v1;
@@ -63,6 +63,37 @@ service GradesService {
   // too many decimals; with grading disabled, every grade counts). Loosening a
   // scale can never produce a violation. No active cycle counts 0.
   rpc CountScaleViolations(CountScaleViolationsRequest) returns (CountScaleViolationsResponse);
+
+  // --- period closing and report cards (T7) ---
+  // A period is one config term: exactly one level of one cycle, covering a
+  // set of months. Closing it snapshots a report card per active enrollment of
+  // the level (one transaction with the closure) and locks the term's months
+  // for every writer; reopening unlocks them, and closing again issues the
+  // next version, which supersedes the previous one.
+
+  // ListPeriods lists every term of a cycle with its closure state and capture
+  // progress.
+  rpc ListPeriods(ListPeriodsRequest) returns (ListPeriodsResponse);
+  // GetPeriodProgress is one term's capture progress and what is missing,
+  // grouped by group and subject. NotFound for an unknown term.
+  rpc GetPeriodProgress(GetPeriodProgressRequest) returns (GetPeriodProgressResponse);
+  // ClosePeriod closes a term and issues its report cards. Refusals are
+  // AlreadyExists (409 at the edge) with an X-Error-Code: MISSING_GRADES
+  // (captures missing and force unset), TERM_WITHOUT_MONTHS, ALREADY_CLOSED,
+  // LEVEL_NOT_GRADED.
+  rpc ClosePeriod(ClosePeriodRequest) returns (ClosePeriodResponse);
+  // ReopenPeriod reopens a closed term (ALREADY_OPEN otherwise). Its report
+  // cards stay published.
+  rpc ReopenPeriod(ReopenPeriodRequest) returns (ReopenPeriodResponse);
+  // ListReportCards lists the LATEST published report card of each enrollment,
+  // filtered by term, group and/or student (at least one filter is required).
+  rpc ListReportCards(ListReportCardsRequest) returns (ListReportCardsResponse);
+  // GetReportCard is one report card's full snapshot (any version).
+  rpc GetReportCard(GetReportCardRequest) returns (GetReportCardResponse);
+  // ClosedTerms answers which of these terms are closed, in one read. The
+  // gateway asks before config changes a term's months: a closed term's
+  // months are frozen until it is reopened (TERM_CLOSED).
+  rpc ClosedTerms(ClosedTermsRequest) returns (ClosedTermsResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -208,6 +239,12 @@ message GetMonthlySheetResponse {
   bool editable = 6;
   string read_only_reason = 7;
   repeated MonthlySheetRow rows = 8;
+  // closed_months are the months of the sheet that belong to a CLOSED period
+  // of the level: nobody may write them until the director reopens it.
+  repeated string closed_months = 9;
+  // unmapped_months are the months of the sheet no period of the level
+  // covers: still capturable, but no report card prints them ("Sin periodo").
+  repeated string unmapped_months = 10;
 }
 
 message GetEnrollmentMonthlyGradesRequest {
@@ -239,10 +276,181 @@ message CountScaleViolationsResponse {
 
 // --- Domain events (published) --------------------------------------------
 
-// GradesPublished fires when grades for a period are released.
-// Reserved for a future phase (boleta/publish flow) — NOT emitted yet.
+// GradesPublished fires once per report card issued when a period closes (on
+// the grades-events topic, type attribute "GradesPublished"). version > 1
+// means the report card replaces an earlier one. Consumers key idempotency on
+// report_card_id + version.
 message GradesPublished {
   string student_id = 1;
   string cycle_id = 2;
   string tenant_id = 3;
+  string report_card_id = 4;
+  string term_id = 5;
+  string term_name = 6;
+  int32 version = 7;
+  string enrollment_id = 8;
+}
+
+// --- Period closing and report cards (T7) --------------------------------
+
+// PeriodProgress counts the expected monthly captures of a term (active
+// enrollments x the subjects taught in their group x every month of the term
+// from the one the pupil joined the group in) and how many are captured.
+message PeriodProgress {
+  int32 captured = 1;
+  int32 expected = 2;
+}
+
+// Period is one term with its closure state. status is "open" or "closed";
+// version is how many times it has been closed (the version of its latest
+// report cards; 0 = never closed).
+message Period {
+  string term_id = 1;
+  string term_name = 2;
+  int32 ordinal = 3;
+  string level_id = 4;
+  string level_name = 5;
+  repeated string months = 6;
+  string status = 7;
+  google.protobuf.Timestamp closed_at = 8;
+  string closed_by_name = 9;
+  int32 version = 10;
+  PeriodProgress progress = 11;
+}
+
+message ListPeriodsRequest {
+  string cycle_id = 1;
+}
+
+message ListPeriodsResponse {
+  repeated Period periods = 1;
+}
+
+message GetPeriodProgressRequest {
+  string term_id = 1;
+}
+
+// MissingGrades is how many captures one group+subject still owes.
+message MissingGrades {
+  string group_id = 1;
+  string group_label = 2;
+  string subject_id = 3;
+  string subject_name = 4;
+  string teacher_name = 5;
+  int32 missing_count = 6;
+}
+
+message GetPeriodProgressResponse {
+  string term_id = 1;
+  repeated string months = 2;
+  int32 expected = 3;
+  int32 captured = 4;
+  repeated MissingGrades missing = 5;
+  // unfinished_months are the term's months after the current UTC month: they
+  // are still expected (closing now needs force), but have not been taught yet.
+  repeated string unfinished_months = 6;
+}
+
+message ClosedTermsRequest {
+  repeated string term_ids = 1;
+}
+
+message ClosedTermsResponse {
+  // closed_term_ids are the requested terms that are closed now.
+  repeated string closed_term_ids = 1;
+}
+
+message ClosePeriodRequest {
+  string term_id = 1;
+  // force closes even with missing captures.
+  bool force = 2;
+  // actor_id / actor_name are the authenticated director (audit, snapshot).
+  string actor_id = 3;
+  string actor_name = 4;
+}
+
+message ClosePeriodResponse {
+  string status = 1;
+  int32 version = 2;
+  int32 report_cards = 3;
+}
+
+message ReopenPeriodRequest {
+  string term_id = 1;
+  string actor_id = 2;
+}
+
+message ReopenPeriodResponse {
+  string status = 1;
+}
+
+message ListReportCardsRequest {
+  string term_id = 1;
+  string group_id = 2;
+  string student_id = 3;
+}
+
+// ReportCardSummary is one report card in a list. general_average is decimal
+// text with one decimal ("8.5"); "" = none.
+message ReportCardSummary {
+  string id = 1;
+  string term_id = 2;
+  string term_name = 3;
+  string student_id = 4;
+  string student_name = 5;
+  string group_id = 6;
+  string group_label = 7;
+  int32 version = 8;
+  google.protobuf.Timestamp issued_at = 9;
+  string general_average = 10;
+  string enrollment_id = 11;
+}
+
+message ListReportCardsResponse {
+  repeated ReportCardSummary report_cards = 1;
+}
+
+message GetReportCardRequest {
+  string id = 1;
+}
+
+// ReportCardLine is one subject of a report card. month_values maps "YYYY-MM"
+// to the captured grade's exact decimal text; a month without a grade is
+// absent. term_average is one decimal ("8.5"); "" = no grade in the term.
+message ReportCardLine {
+  string subject_id = 1;
+  string subject_name = 2;
+  int32 position = 3;
+  map<string, string> month_values = 4;
+  string term_average = 5;
+}
+
+// ReportCard is the frozen snapshot issued when a period closed. Names are
+// copied at issue time, so a later rename never changes an issued report card.
+message ReportCard {
+  string id = 1;
+  string term_id = 2;
+  string cycle_id = 3;
+  string level_id = 4;
+  string group_id = 5;
+  string enrollment_id = 6;
+  string student_id = 7;
+  int32 version = 8;
+  string status = 9; // "published" | "superseded"
+  google.protobuf.Timestamp issued_at = 10;
+  string issued_by = 11;
+  string student_name = 12;
+  string enrollment_number = 13;
+  string group_label = 14;
+  string level_name = 15;
+  string cycle_name = 16;
+  string term_name = 17;
+  repeated string months = 18;
+  string general_average = 19;
+  GradingScale scale = 20;
+  repeated ReportCardLine lines = 21;
+}
+
+message GetReportCardResponse {
+  ReportCard report_card = 1;
 }

@@ -30,7 +30,7 @@ func levelTermsConfig() *fakeTeachingConfig {
 		termsByCycle: map[string][]client.TermResult{
 			"cyc-1": {
 				{ID: "trm-p1", CycleID: "cyc-1", LevelID: "lvl-p", Name: "Primaria 1"},
-				{ID: "trm-s1", CycleID: "cyc-1", LevelID: "lvl-s", Name: "Secundaria 1"},
+				{ID: "trm-s1", CycleID: "cyc-1", LevelID: "lvl-s", Name: "Secundaria 1", Months: []string{"2026-09", "2026-10"}},
 				{ID: "trm-x1", CycleID: "cyc-1", LevelID: "lvl-x", Name: "Otro nivel"},
 			},
 		},
@@ -111,4 +111,26 @@ func TestGradesTermsForAssignmentOnlyItsLevel(t *testing.T) {
 	rec = httptest.NewRecorder()
 	h.Terms(rec, httptest.NewRequest(http.MethodGet, "/api/v1/grades/terms", nil))
 	assert.Equal(t, http.StatusBadRequest, rec.Code, "assignmentId is required")
+}
+
+// T7: the term pickers carry each term's months, [] when none are set.
+func TestTermPickersCarryMonths(t *testing.T) {
+	config := levelTermsConfig()
+	h := handler.NewTeachingHandler(config, &fakeTeachingGrades{}, &fakeTeachingStudents{})
+	rec := httptest.NewRecorder()
+	h.Terms(rec, teacherGET("/api/v1/teaching/terms", "usr-t"))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var out struct {
+		Terms []struct {
+			ID     string          `json:"id"`
+			Months json.RawMessage `json:"months"`
+		} `json:"terms"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+	got := map[string]string{}
+	for _, tm := range out.Terms {
+		got[tm.ID] = string(tm.Months)
+	}
+	assert.Equal(t, map[string]string{"trm-p1": `[]`, "trm-s1": `["2026-09","2026-10"]`}, got)
 }

@@ -151,6 +151,20 @@ describe("AdminScreen", () => {
     expect(admin.createRole).toHaveBeenCalledWith(expect.any(String), { name: "COORDINACIÓN", permissions: ["users:read"] });
   });
 
+  it("shows grades:close as owner-only: visible, locked, never grantable (tarea 7)", async () => {
+    const user = userEvent.setup();
+    render(<AdminScreen onBack={() => {}} />);
+    await screen.findByText("Director");
+
+    await user.click(screen.getByRole("button", { name: "Roles 1" }));
+    await user.click(screen.getByRole("button", { name: /Nuevo rol/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Nuevo rol" });
+    expect(within(dialog).queryByRole("button", { name: /Cerrar periodos y emitir boletas/ })).toBeNull();
+    const item = within(dialog).getByText("Cerrar periodos y emitir boletas").closest("li");
+    expect(item).not.toBeNull();
+    expect(item).toHaveTextContent("Solo el dueño");
+  });
+
   // Both actions are gated on the row's state, and both used to be gated on
   // "not active", which is not the same thing.
   //

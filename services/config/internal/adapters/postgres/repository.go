@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -36,6 +37,9 @@ const (
 	// gradeNamePerLevelKey is the unique index migration 0006 adds: one grade
 	// name per level, case-insensitively.
 	gradeNamePerLevelKey = "grade_levels_name_per_level_key"
+	// termMonthPerLevelKey is migration 0010's UNIQUE: a month belongs to at
+	// most one term of a cycle and level.
+	termMonthPerLevelKey = "term_months_one_term_per_month"
 )
 
 // Repository is the GORM-backed config CatalogRepository. Every operation runs
@@ -420,8 +424,12 @@ func (r *Repository) GetTerm(ctx context.Context, id string) (domain.Term, error
 		if err := tx.Where("id = ?", id).First(&m).Error; err != nil {
 			return translateFindErr(err)
 		}
+		months, err := loadTermMonths(tx, []string{m.ID})
+		if err != nil {
+			return err
+		}
 		var derr error
-		out, derr = toDomainTerm(m)
+		out, derr = toDomainTerm(m, months[m.ID])
 		return derr
 	})
 	if err != nil {
@@ -448,9 +456,17 @@ func (r *Repository) ListTerms(ctx context.Context, cycleID string, levelID stri
 		if err := q.Order("ordinal").Find(&rows).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "listing terms", err)
 		}
+		ids := make([]string, 0, len(rows))
+		for _, m := range rows {
+			ids = append(ids, m.ID)
+		}
+		months, err := loadTermMonths(tx, ids)
+		if err != nil {
+			return err
+		}
 		out = make([]domain.Term, 0, len(rows))
 		for _, m := range rows {
-			t, derr := toDomainTerm(m)
+			t, derr := toDomainTerm(m, months[m.ID])
 			if derr != nil {
 				return derr
 			}
@@ -462,6 +478,108 @@ func (r *Repository) ListTerms(ctx context.Context, cycleID string, levelID stri
 		return nil, err
 	}
 	return out, nil
+}
+
+// loadTermMonths reads the months of every term in termIDs in ONE query (never
+// one per term), keyed by term id, each list ascending.
+func loadTermMonths(tx *gorm.DB, termIDs []string) (map[string][]time.Time, error) {
+	out := make(map[string][]time.Time, len(termIDs))
+	if len(termIDs) == 0 {
+		return out, nil
+	}
+	var rows []termMonthModel
+	if err := tx.Where("term_id IN ?", termIDs).Order("term_id, month").Find(&rows).Error; err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "listing term months", err)
+	}
+	for _, r := range rows {
+		out[r.TermID] = append(out[r.TermID], r.Month.UTC())
+	}
+	return out, nil
+}
+
+// ApplyTermMonths writes creates (with their months) and replaces the months
+// of updates, in ONE transaction:
+//
+//  1. every update's current months are released first, so two siblings can
+//     swap months in one call without tripping the per-level UNIQUE;
+//  2. the new terms are inserted;
+//  3. for each (cycle, level) touched, a month still held by another term is
+//     refused as MonthInOtherTerm naming the earliest one — the use case checks
+//     this too, so here it only catches a concurrent writer;
+//  4. the months are inserted. A UNIQUE violation at this point is a writer
+//     that committed between 3 and 4: still MonthInOtherTerm, unnamed.
+func (r *Repository) ApplyTermMonths(ctx context.Context, creates []domain.Term, updates []domain.Term) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := releaseTermMonths(tx, updates); err != nil {
+			return err
+		}
+		for _, t := range creates {
+			model := fromDomainTerm(t)
+			if err := translateCreateErr(tx.Create(&model).Error, "creating term", "a term with this ordinal already exists in the cycle and level"); err != nil {
+				return err
+			}
+		}
+		written := append(append([]domain.Term(nil), creates...), updates...)
+		if err := refuseHeldMonths(tx, written); err != nil {
+			return err
+		}
+		rows := make([]termMonthModel, 0, len(written))
+		for _, t := range written {
+			rows = append(rows, fromDomainTermMonths(t)...)
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+		if err := tx.Create(&rows).Error; err != nil {
+			if isConstraint(err, termMonthPerLevelKey) {
+				return domain.MonthInOtherTerm(time.Time{})
+			}
+			return translateCreateErr(err, "writing term months", "a term month already exists")
+		}
+		return nil
+	})
+}
+
+// releaseTermMonths deletes the current months of every term in terms.
+func releaseTermMonths(tx *gorm.DB, terms []domain.Term) error {
+	if len(terms) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(terms))
+	for _, t := range terms {
+		ids = append(ids, t.ID())
+	}
+	if err := tx.Where("term_id IN ?", ids).Delete(&termMonthModel{}).Error; err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "releasing term months", err)
+	}
+	return nil
+}
+
+// refuseHeldMonths answers MonthInOtherTerm for the earliest month of terms
+// that a term outside the batch still holds in the same cycle and level. One
+// query per (cycle, level) touched — a copy touches a handful of levels.
+func refuseHeldMonths(tx *gorm.DB, terms []domain.Term) error {
+	type scope struct{ cycleID, levelID string }
+	wanted := make(map[scope][]time.Time)
+	for _, t := range terms {
+		k := scope{t.CycleID(), t.LevelID()}
+		wanted[k] = append(wanted[k], t.Months()...)
+	}
+	for k, months := range wanted {
+		if len(months) == 0 {
+			continue
+		}
+		var held []time.Time
+		if err := tx.Model(&termMonthModel{}).
+			Where("cycle_id = ? AND level_id = ? AND month IN ?", k.cycleID, k.levelID, months).
+			Order("month").Limit(1).Pluck("month", &held).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "checking term months", err)
+		}
+		if len(held) > 0 {
+			return domain.MonthInOtherTerm(held[0].UTC())
+		}
+	}
+	return nil
 }
 
 // --- groups ---------------------------------------------------------------

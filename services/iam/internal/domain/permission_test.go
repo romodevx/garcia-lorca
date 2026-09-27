@@ -120,6 +120,10 @@ func TestIsOwnerOnly(t *testing.T) {
 		// one is delegable.
 		{"students:notes_void", true},
 		{"students:notes_write", false},
+		// T7: closing a period locks every group's grades school-wide; only
+		// the owner decides when a trimester is final.
+		{"grades:close", true},
+		{"grades:write", false},
 		// Task 9: the counter's permissions are the Cobranza role's, so they
 		// must be grantable; finance:read stays owner-only.
 		{"collections:read", false},

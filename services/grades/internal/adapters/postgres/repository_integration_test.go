@@ -42,6 +42,9 @@ const (
 var migrationFiles = []string{
 	"../../../../../migrations/grades/0001_init.sql",
 	"../../../../../migrations/grades/0002_monthly_grades.sql",
+	"../../../../../migrations/grades/0003_period_closures_report_cards.sql",
+	"../../../../../migrations/grades/0004_period_closure_months.sql",
+	"../../../../../migrations/grades/0005_outbox.sql",
 }
 
 var (
@@ -143,6 +146,13 @@ func appRepo(t *testing.T, tenant string) *pgadapter.Repository {
 	if err != nil {
 		t.Fatalf("open app db: %v", err)
 	}
+	// One pool per call: close it with the test, or a growing suite runs the
+	// server out of connections.
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
 	return pgadapter.NewRepository(db, tenant)
 }
 

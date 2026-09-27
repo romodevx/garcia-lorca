@@ -2,26 +2,18 @@ package receipt
 
 import (
 	"bytes"
-	_ "embed"
 	"fmt"
 	"strings"
 
 	"github.com/signintech/gopdf"
+
+	"github.com/garcia-lorca/services/gateway/internal/pdffont"
 )
 
-// Poppins, the web's display face (SIL Open Font License, fonts/OFL.txt). A
-// TrueType font is embedded because the PDF must print "García" and "ñ" exactly,
-// and gopdf has no built-in faces (ADR 0017).
-var (
-	//go:embed fonts/Poppins-Regular.ttf
-	fontRegular []byte
-	//go:embed fonts/Poppins-SemiBold.ttf
-	fontBold []byte
-)
-
+// The embedded faces (package pdffont, ADR 0017).
 const (
-	familyRegular = "poppins"
-	familyBold    = "poppins-bold"
+	familyRegular = pdffont.Regular
+	familyBold    = pdffont.Bold
 
 	pageMargin   = 48.0
 	pageWidth    = 612.0 // US Letter, in points
@@ -62,11 +54,8 @@ func newWriter() (*writer, error) {
 	pdf := &gopdf.GoPdf{}
 	pdf.Start(gopdf.Config{PageSize: *gopdf.PageSizeLetter})
 	pdf.AddPage()
-	if err := pdf.AddTTFFontData(familyRegular, fontRegular); err != nil {
-		return nil, fmt.Errorf("loading the regular face: %w", err)
-	}
-	if err := pdf.AddTTFFontData(familyBold, fontBold); err != nil {
-		return nil, fmt.Errorf("loading the bold face: %w", err)
+	if err := pdffont.Register(pdf); err != nil {
+		return nil, err
 	}
 	return &writer{pdf: pdf, y: pageMargin}, nil
 }

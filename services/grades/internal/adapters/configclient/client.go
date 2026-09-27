@@ -63,18 +63,14 @@ func (c *Client) ByID(ctx context.Context, id string) (ports.AssignmentRef, erro
 }
 
 // TermByID fetches a term by id and projects it to the grades-owned view (its
-// identity and cycle). A missing term is glerrors.ErrNotFound.
+// identity, cycle, level, name, ordinal and months). A missing term is
+// glerrors.ErrNotFound.
 func (c *Client) TermByID(ctx context.Context, id string) (ports.TermRef, error) {
 	res, err := c.rpc.GetTerm(ctx, connect.NewRequest(&configv1.GetTermRequest{Id: id}))
 	if err != nil {
 		return ports.TermRef{}, mapConfigErr(err, "term")
 	}
-	t := res.Msg.GetTerm()
-	return ports.TermRef{
-		ID:      t.GetId(),
-		CycleID: t.GetCycleId(),
-		LevelID: t.GetLevelId(),
-	}, nil
+	return toTermRef(res.Msg.GetTerm())
 }
 
 // mapConfigErr translates a Connect transport error to the port's error

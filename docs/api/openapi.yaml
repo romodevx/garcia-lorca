@@ -60,6 +60,12 @@ tags:
     description: >
       The school's levels (Preescolar, Primaria…). Behind `module_config`;
       reads require `config:read`, writes `config:write`.
+  - name: config-terms
+    description: >
+      The periods (trimesters) of each cycle and level, and the calendar months
+      each one covers — configured per cycle and level, never hard-coded.
+      Behind `module_config`; reads require `config:read`, writes
+      `config:write`.
   - name: attendance
     description: >
       Pass lists (T3). Behind `module_attendance`. A list is keyed by
@@ -1752,6 +1758,185 @@ paths:
               schema: { type: string }
               example: Ya hay calificaciones capturadas en este ciclo que no cumplirían la nueva escala
 
+  /api/v1/config/terms:
+    get:
+      tags: [config-terms]
+      summary: The terms of a cycle, optionally of one level
+      description: >
+        Ordered by ordinal. Every term carries `months` — the calendar months
+        it covers ("YYYY-MM", ascending; `[]` when none are set). Requires
+        `config:read`.
+      operationId: listConfigTerms
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: cycleId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: levelId, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The terms.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [terms]
+                properties:
+                  terms:
+                    type: array
+                    items: { $ref: '#/components/schemas/ConfigTerm' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/config/terms/{id}/months:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      tags: [config-terms]
+      summary: Set the calendar months a term covers (T7)
+      description: >
+        Replaces the term's month set (`{"months": []}` clears it); duplicates
+        are folded and the answer is sorted. Every month must touch the term's
+        cycle — else 400 `X-Error-Code: MONTH_OUTSIDE_CYCLE` ("El mes está
+        fuera del ciclo: 2027-09"). A month belongs to at most one term of the
+        same cycle and level — else 409 `X-Error-Code: MONTH_IN_OTHER_TERM`
+        ("Ese mes ya pertenece a otro periodo del nivel: 2026-12", naming the
+        earliest clashing month). A term covers at most six months — else 400
+        `X-Error-Code: TERM_TOO_LONG` ("Un periodo puede tener hasta 6
+        meses"). A month not shaped YYYY-MM is 400 `X-Error-Code:
+        MONTH_INVALID` at the edge. A CLOSED period's months are frozen: the
+        gateway asks grades first and answers 409 `X-Error-Code: TERM_CLOSED`
+        ("El periodo está cerrado; reábrelo para cambiar sus meses") without
+        touching config. Nothing is written on any refusal. An unknown term is
+        404. Requires `config:write`.
+      operationId: setTermMonths
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [months]
+              properties:
+                months:
+                  type: array
+                  items: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$', example: '2026-09' }
+            example: { months: ['2026-09', '2026-10', '2026-11'] }
+      responses:
+        '200':
+          description: The term with its new months.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigTerm' }
+        '400':
+          description: >
+            A malformed body; a month not shaped YYYY-MM (`MONTH_INVALID`); a
+            month outside the cycle (`MONTH_OUTSIDE_CYCLE`); more than six
+            months (`TERM_TOO_LONG`).
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              examples:
+                outsideCycle: { value: 'El mes está fuera del ciclo: 2027-09' }
+                tooLong: { value: Un periodo puede tener hasta 6 meses }
+                invalid: { value: Mes inválido (usa AAAA-MM) }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: >
+            A month another term of the same cycle and level already covers
+            (`MONTH_IN_OTHER_TERM`), or the term is a closed period
+            (`TERM_CLOSED`).
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              examples:
+                otherTerm: { value: 'Ese mes ya pertenece a otro periodo del nivel: 2026-12' }
+                closed: { value: El periodo está cerrado; reábrelo para cambiar sus meses }
+
+  /api/v1/config/terms/copy-months:
+    post:
+      tags: [config-terms]
+      summary: Copy one level's trimester months onto other levels (T7)
+      description: >
+        For each target level of the cycle, in ONE transaction: terms are
+        matched by `ordinal`; a matched term keeps its own name and dates and
+        takes the source's months; a missing one is created from the source
+        (name, ordinal, dates, months); a target term the source has no ordinal
+        for is kept (it may carry grades) but its months are cleared. Targets
+        are de-duplicated. 400 when `toLevelIds` is empty or contains the
+        source, a level or the cycle does not exist, or the source level has no
+        terms in the cycle; 400 `TERM_TOO_LONG` when a copied term would cover
+        more than six months. When any term of a TARGET level is a closed
+        period, the gateway answers 409 `TERM_CLOSED` ("El periodo está
+        cerrado; reábrelo para cambiar sus meses") before config is asked.
+        Returns the target levels' terms, level by level in request order, then
+        by ordinal. Requires `config:write`.
+      operationId: copyTermMonths
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cycleId, fromLevelId, toLevelIds]
+              properties:
+                cycleId: { type: string, format: uuid }
+                fromLevelId: { type: string, format: uuid }
+                toLevelIds:
+                  type: array
+                  minItems: 1
+                  items: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The target levels' terms.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [terms]
+                properties:
+                  terms:
+                    type: array
+                    items: { $ref: '#/components/schemas/ConfigTerm' }
+        '400':
+          description: >
+            A malformed body or scope (no sentence code), or a copied term
+            longer than six months (`TERM_TOO_LONG`).
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: Un periodo puede tener hasta 6 meses
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: >
+            A target level's term is a closed period (`TERM_CLOSED`), or a
+            concurrent change took one of the months first
+            (`MONTH_IN_OTHER_TERM`).
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              examples:
+                closed: { value: El periodo está cerrado; reábrelo para cambiar sus meses }
+                otherTerm: { value: Ese mes ya pertenece a otro periodo del nivel }
+
   /api/v1/attendance/roster:
     get:
       tags: [attendance]
@@ -2561,6 +2746,7 @@ paths:
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409': { $ref: '#/components/responses/PeriodRefused' }
     delete:
       tags: [grades]
       summary: Empty one monthly grade (teacher)
@@ -2581,6 +2767,7 @@ paths:
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409': { $ref: '#/components/responses/PeriodRefused' }
 
   /api/v1/grades/sheet:
     get:
@@ -2594,7 +2781,15 @@ paths:
         A level without numeric grading still answers, with
         `editable: false` and `readOnlyReason`. A month after the current UTC
         month is listed in `months` but read-only (`editable: false`,
-        `readOnlyReason` "Aún no llega ese mes"), for every caller. A month outside the cycle is
+        `readOnlyReason` "Aún no llega ese mes"), for every caller (the
+        current month is the UTC month, fleet-wide). `months` always lists
+        every month of the cycle, mapped into a term or not (T7):
+        `unmappedMonths` are those no period of the level covers — still
+        capturable, marked "Sin periodo" (no report card prints them);
+        `closedMonths` are those of a CLOSED period (the months it was closed
+        with plus any mapped into it since) — read-only for every caller
+        (`readOnlyReason` "El periodo está cerrado"; writes are 409
+        `MONTH_LOCKED`). A month outside the cycle is
         400 "Ese mes no pertenece al ciclo"; an unknown assignment 404. Behind
         `module_grades`. Requires `grades:read`.
       operationId: getMonthlySheet
@@ -2637,6 +2832,7 @@ paths:
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409': { $ref: '#/components/responses/PeriodRefused' }
     delete:
       tags: [grades]
       summary: Empty one monthly grade (director)
@@ -2657,6 +2853,7 @@ paths:
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409': { $ref: '#/components/responses/PeriodRefused' }
 
   /api/v1/family/students/{studentId}/grades/monthly:
     get:
@@ -2690,6 +2887,300 @@ paths:
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
 
+  /api/v1/grades/periods:
+    get:
+      tags: [grades]
+      summary: The periods (terms) of a cycle with their closure and progress
+      description: >
+        Every term of the cycle, of every level (a term is exactly one level of
+        one cycle), with its months, whether it is `open` or `closed`, how many
+        times it was closed (`version`, 0 = never; it is the version of its
+        latest report cards) and its capture progress: `expected` = active
+        enrollments of the level's groups × the subjects taught in each group ×
+        EVERY month of the term (reached or not) from the month each pupil
+        joined their group (enrolment, or the latest transfer into it);
+        `captured` = how many of those cells have a grade. A level without
+        numeric grades expects 0. Withdrawn pupils are not expected and get no
+        report card.
+        Behind `module_grades`. Requires `grades:read`.
+      operationId: listGradePeriods
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: cycleId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The cycle's periods.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [periods]
+                properties:
+                  periods:
+                    type: array
+                    items: { $ref: '#/components/schemas/GradePeriod' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/grades/periods/{termId}/progress:
+    get:
+      tags: [grades]
+      summary: What a period still owes before it closes
+      description: >
+        The period's expected and captured grades (see the periods list) and
+        what is missing, grouped by group and subject with the teacher who
+        owes it, sorted by group then subject (Spanish order).
+        `unfinishedMonths` are the term's months after the current UTC month:
+        they are still expected — closing now reports them missing and needs
+        `force` — so the screen warns "Aún no terminan sus meses". Behind
+        `module_grades`. Requires `grades:read`.
+      operationId: getGradePeriodProgress
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/TermIdPath' }]
+      responses:
+        '200':
+          description: The progress.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GradePeriodProgress' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/grades/periods/{termId}/close:
+    post:
+      tags: [grades]
+      summary: Close a period and issue its report cards (director)
+      description: >
+        Closes the period and, in the SAME transaction, freezes a report card
+        for every ACTIVE enrollment of the level's groups (version = the
+        period's close count; withdrawn pupils get none) and snapshots the
+        term's months. From then on nobody — teacher or director — may write a
+        grade of those months, nor of any month mapped into the term later (409
+        `MONTH_LOCKED` "El periodo está cerrado"), nor change the term's months
+        (409 `TERM_CLOSED`), until it is reopened. Every month of the term
+        counts, so closing before its last month ends needs `force`. A period with missing captures is 409
+        `MISSING_GRADES` "Faltan N calificaciones por capturar" unless
+        `force: true`; a period without months is 409 `TERM_WITHOUT_MONTHS`; a
+        closed one 409 `ALREADY_CLOSED`; a level without numeric grades 409
+        `LEVEL_NOT_GRADED`. Closing again after a reopen issues version 2, which
+        supersedes EVERY version-1 card of the term — a pupil withdrawn in
+        between included (families see the latest) — and notifies them
+        "Boleta actualizada". Notifications go through a transactional outbox:
+        a broker outage delays them, never loses them. An empty body means `force: false`. Behind
+        `module_grades`. Requires `grades:close` (owner only).
+      operationId: closeGradePeriod
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/TermIdPath'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force:
+                  type: boolean
+                  description: Close even with missing captures.
+                  default: false
+            example: { force: true }
+      responses:
+        '200':
+          description: The period is closed and its report cards are issued.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, version, reportCards]
+                properties:
+                  status: { type: string, enum: [closed] }
+                  version: { type: integer, minimum: 1, example: 1 }
+                  reportCards: { type: integer, minimum: 0, example: 31 }
+              example: { status: closed, version: 1, reportCards: 31 }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409': { $ref: '#/components/responses/PeriodRefused' }
+
+  /api/v1/grades/periods/{termId}/reopen:
+    post:
+      tags: [grades]
+      summary: Reopen a closed period (director)
+      description: >
+        Unlocks the period's months so its grades can be corrected. Its report
+        cards stay published until the next close supersedes them. An open
+        period (or one never closed) is 409 `ALREADY_OPEN`. Behind
+        `module_grades`. Requires `grades:close` (owner only).
+      operationId: reopenGradePeriod
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/TermIdPath'
+      responses:
+        '200':
+          description: The period is open.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, enum: [open] }
+              example: { status: open }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409': { $ref: '#/components/responses/PeriodRefused' }
+
+  /api/v1/grades/report-cards:
+    get:
+      tags: [grades]
+      summary: The latest report card of each pupil of a period or group
+      description: >
+        Only the latest PUBLISHED version of each pupil's report card, sorted by
+        pupil name. `termId` or `groupId` is required (both may be given).
+        Behind `module_grades`. Requires `grades:read`.
+      operationId: listReportCards
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: termId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: groupId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The report cards.
+          headers:
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reportCards]
+                properties:
+                  reportCards:
+                    type: array
+                    items: { $ref: '#/components/schemas/ReportCardSummary' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/grades/report-cards/{id}:
+    get:
+      tags: [grades]
+      summary: One report card (director)
+      description: >
+        The frozen snapshot (any version, `status` published or superseded)
+        plus the school's details from config. Behind `module_grades`.
+        Requires `grades:read`.
+      operationId: getReportCard
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/ReportCardIdPath' }]
+      responses:
+        '200': { $ref: '#/components/responses/ReportCardJSON' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/grades/report-cards/{id}/pdf:
+    get:
+      tags: [grades]
+      summary: One report card as a PDF (director)
+      description: >
+        The school's internal format (not SEP): the school's header, the title
+        "Boleta de calificaciones — <periodo>", the pupil, matrícula, cycle,
+        level and group, a subject × month table with each subject's
+        "Promedio", the general average, the passing mark, "Versión N —
+        reemplaza a la anterior" when N > 1, and the issue date. Downloaded as
+        `boleta-<matrícula>-<periodo>-v<N>.pdf`, `no-store`. Behind
+        `module_grades`. Requires `grades:read`.
+      operationId: getReportCardPdf
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/ReportCardIdPath' }]
+      responses:
+        '200': { $ref: '#/components/responses/ReportCardPDF' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/family/students/{studentId}/report-cards:
+    get:
+      tags: [family]
+      summary: A child's report cards
+      description: >
+        The latest published report card of each period of the child. A child
+        that is not the caller's is 404. Behind `module_grades` AND
+        `module_students`. Requires `family:read`.
+      operationId: listFamilyReportCards
+      security: [{ familyBearer: [] }]
+      parameters: [{ $ref: '#/components/parameters/FamilyStudentIdPath' }]
+      responses:
+        '200':
+          description: The child's report cards.
+          headers:
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reportCards]
+                properties:
+                  reportCards:
+                    type: array
+                    items: { $ref: '#/components/schemas/FamilyReportCardSummary' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/family/students/{studentId}/report-cards/{id}:
+    get:
+      tags: [family]
+      summary: One of a child's report cards
+      description: >
+        Same body as the director's. 404 when the child is not the caller's,
+        the report card belongs to another pupil, or a later version
+        superseded it. Behind `module_grades` AND `module_students`. Requires
+        `family:read`.
+      operationId: getFamilyReportCard
+      security: [{ familyBearer: [] }]
+      parameters:
+        - $ref: '#/components/parameters/FamilyStudentIdPath'
+        - $ref: '#/components/parameters/ReportCardIdPath'
+      responses:
+        '200': { $ref: '#/components/responses/ReportCardJSON' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/family/students/{studentId}/report-cards/{id}/pdf:
+    get:
+      tags: [family]
+      summary: One of a child's report cards as a PDF
+      description: >
+        Same PDF as the director's, same 404 rules as the JSON. Behind
+        `module_grades` AND `module_students`. Requires `family:read`.
+      operationId: getFamilyReportCardPdf
+      security: [{ familyBearer: [] }]
+      parameters:
+        - $ref: '#/components/parameters/FamilyStudentIdPath'
+        - $ref: '#/components/parameters/ReportCardIdPath'
+      responses:
+        '200': { $ref: '#/components/responses/ReportCardPDF' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
 components:
   securitySchemes:
     sessionCookie:
@@ -2712,9 +3203,15 @@ components:
         the row) without parsing the sentence. Exposed to the web via CORS.
         Monthly grades: GRADE_OUT_OF_RANGE, GRADE_DECIMALS, GRADE_NOT_NUMBER,
         MONTH_OUTSIDE_CYCLE, LEVEL_NOT_GRADED, ENROLLMENT_NOT_IN_GROUP,
-        MONTH_PREVIOUS_GROUP, MONTH_IN_FUTURE, LEVEL_SCALE_NOT_CONFIGURED (and MONTH_LOCKED once
-        periods close, T7). Level scale change: SCALE_TIGHTENING. Absent on a
-        refusal without a code.
+        MONTH_PREVIOUS_GROUP, MONTH_IN_FUTURE, LEVEL_SCALE_NOT_CONFIGURED, and
+        MONTH_LOCKED (409, a month of a closed period, T7 — also on the legacy
+        per-term capture POST /api/v1/grades). Level scale change:
+        SCALE_TIGHTENING. Period closing (409): MISSING_GRADES,
+        TERM_WITHOUT_MONTHS, ALREADY_CLOSED, ALREADY_OPEN, LEVEL_NOT_GRADED.
+        Term months (T7): MONTH_INVALID (400), MONTH_OUTSIDE_CYCLE (400),
+        TERM_TOO_LONG (400, more than six months), MONTH_IN_OTHER_TERM (409),
+        TERM_CLOSED (409, the term is a closed period).
+        Absent on a refusal without a code.
       schema:
         type: string
         pattern: '^[A-Z][A-Z0-9_]{0,63}$'
@@ -2807,6 +3304,22 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    FamilyStudentIdPath:
+      name: studentId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    TermIdPath:
+      name: termId
+      in: path
+      required: true
+      description: The period (a config term) — a malformed id is 404.
+      schema: { type: string, format: uuid }
+    ReportCardIdPath:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     CsrfToken:
       name: X-CSRF-Token
       in: header
@@ -2827,6 +3340,40 @@ components:
       schema: { type: string, format: uuid }
 
   responses:
+    PeriodRefused:
+      description: >
+        The period's state refuses the request; the sentence is shown as is and
+        the machine code rides in `X-Error-Code` (MISSING_GRADES,
+        TERM_WITHOUT_MONTHS, ALREADY_CLOSED, ALREADY_OPEN, LEVEL_NOT_GRADED;
+        MONTH_LOCKED on a grade write; TERM_CLOSED on a term-months change).
+      headers:
+        X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+      content:
+        text/plain:
+          schema: { type: string }
+          examples:
+            missing: { value: Faltan 3 calificaciones por capturar }
+            noMonths: { value: El periodo no tiene meses asignados }
+            closed: { value: El periodo ya está cerrado }
+            open: { value: El periodo ya está abierto }
+            locked: { value: El periodo está cerrado }
+    ReportCardJSON:
+      description: The report card and the school's details.
+      headers:
+        Cache-Control: { $ref: '#/components/headers/NoStore' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ReportCard' }
+    ReportCardPDF:
+      description: The report card as a letter-size PDF, downloaded as an attachment.
+      headers:
+        Cache-Control: { $ref: '#/components/headers/NoStore' }
+        Content-Disposition:
+          description: attachment; filename="boleta-<matrícula>-<periodo>-v<N>.pdf"
+          schema: { type: string, example: 'attachment; filename="boleta-2026-00042-1-er-trimestre-v1.pdf"' }
+      content:
+        application/pdf:
+          schema: { type: string, format: binary }
     MonthlyGradeSaved:
       description: The stored cell.
       content:
@@ -2984,6 +3531,202 @@ components:
           example: teaching assignment not found
 
   schemas:
+    GradePeriod:
+      type: object
+      required: [termId, termName, ordinal, levelId, levelName, months, status, version, progress]
+      properties:
+        termId: { type: string, format: uuid }
+        termName: { type: string, example: 1.er trimestre }
+        ordinal: { type: integer, example: 1 }
+        levelId: { type: string, format: uuid }
+        levelName: { type: string, example: Primaria }
+        months:
+          type: array
+          items: { type: string, example: '2026-09' }
+        status: { type: string, enum: [open, closed] }
+        closedAt:
+          type: string
+          format: date-time
+          description: When it was last closed; absent when never closed.
+        closedByName:
+          type: string
+          description: Who last closed it; absent when never closed.
+          example: Directora Ruiz
+        version:
+          type: integer
+          minimum: 0
+          description: How many times it was closed (the version of its latest report cards).
+        progress:
+          type: object
+          required: [captured, expected]
+          properties:
+            captured: { type: integer, example: 270 }
+            expected: { type: integer, example: 288 }
+      example:
+        termId: 7a000000-0000-4000-8000-000000000001
+        termName: 1.er trimestre
+        ordinal: 1
+        levelId: 1a000000-0000-4000-8000-000000000001
+        levelName: Primaria
+        months: ['2026-09', '2026-10', '2026-11']
+        status: closed
+        closedAt: '2026-12-01T16:00:00Z'
+        closedByName: Directora Ruiz
+        version: 1
+        progress: { captured: 288, expected: 288 }
+    GradePeriodProgress:
+      type: object
+      required: [termId, months, unfinishedMonths, expected, captured, missing]
+      properties:
+        termId: { type: string, format: uuid }
+        months:
+          type: array
+          items: { type: string, example: '2026-09' }
+        unfinishedMonths:
+          type: array
+          description: >
+            The term's months after the current UTC month: still expected, not
+            taught yet ("Aún no terminan sus meses"). [] when none.
+          items: { type: string, example: '2026-11' }
+        expected: { type: integer, example: 288 }
+        captured: { type: integer, example: 270 }
+        missing:
+          type: array
+          items:
+            type: object
+            required: [groupId, groupLabel, subjectId, subjectName, teacherName, missingCount]
+            properties:
+              groupId: { type: string, format: uuid }
+              groupLabel: { type: string, example: 1° PRIMARIA · A }
+              subjectId: { type: string, format: uuid }
+              subjectName: { type: string, example: Matemáticas }
+              teacherName: { type: string, example: Gabriela Rojas }
+              missingCount: { type: integer, minimum: 1, example: 18 }
+      example:
+        termId: 7a000000-0000-4000-8000-000000000001
+        months: ['2026-09', '2026-10', '2026-11']
+        unfinishedMonths: ['2026-11']
+        expected: 288
+        captured: 270
+        missing:
+          - { groupId: 4a000000-0000-4000-8000-000000000001, groupLabel: 1° PRIMARIA · A, subjectId: 5a000000-0000-4000-8000-000000000001, subjectName: Matemáticas, teacherName: Gabriela Rojas, missingCount: 18 }
+    ReportCardSummary:
+      type: object
+      required: [id, termId, termName, studentId, studentName, groupId, groupLabel, version, issuedAt, generalAverage, hasGrades]
+      properties:
+        id: { type: string, format: uuid }
+        termId: { type: string, format: uuid }
+        termName: { type: string, example: 1.er trimestre }
+        studentId: { type: string, format: uuid }
+        studentName: { type: string, example: Ana López }
+        groupId: { type: string, format: uuid }
+        groupLabel: { type: string, example: 1° PRIMARIA · A }
+        version: { type: integer, minimum: 1, example: 1 }
+        issuedAt: { type: [string, 'null'], format: date-time }
+        generalAverage:
+          type: [number, 'null']
+          description: One decimal, half-up; null when no subject has a grade.
+          example: 8.5
+        hasGrades:
+          type: boolean
+          description: False when no subject has a grade in the term; the card is still issued and consumers show "Sin calificaciones capturadas en este periodo" instead of a table.
+          example: true
+    FamilyReportCardSummary:
+      type: object
+      required: [id, termId, termName, version, issuedAt, generalAverage, hasGrades]
+      properties:
+        id: { type: string, format: uuid }
+        termId: { type: string, format: uuid }
+        termName: { type: string, example: 1.er trimestre }
+        version: { type: integer, minimum: 1, example: 2 }
+        issuedAt: { type: [string, 'null'], format: date-time }
+        generalAverage: { type: [number, 'null'], example: 8.5 }
+        hasGrades:
+          type: boolean
+          description: False when no subject has a grade in the term; the card is still issued and consumers show "Sin calificaciones capturadas en este periodo" instead of a table.
+          example: true
+    ReportCard:
+      type: object
+      description: >
+        The frozen snapshot issued when the period closed: names as they read
+        then, the term's months, each subject's grade per month (exact, as
+        captured) and its trimester grade — the arithmetic mean of its captured
+        grades, one decimal, rounded half-up with exact arithmetic — and the
+        general average (the mean of the subjects that have a grade, one
+        decimal, half-up). A month without a grade is absent from `months`;
+        `average` is null for a subject without grades.
+      required: [id, termId, termName, cycleName, levelName, groupId, groupLabel, studentId, studentName, enrollmentNumber, version, status, issuedAt, months, scale, generalAverage, hasGrades, lines, school]
+      properties:
+        id: { type: string, format: uuid }
+        termId: { type: string, format: uuid }
+        termName: { type: string, example: 1.er trimestre }
+        cycleName: { type: string, example: 2026-2027 }
+        levelName: { type: string, example: Primaria }
+        groupId: { type: string, format: uuid }
+        groupLabel: { type: string, example: 1° PRIMARIA · A }
+        studentId: { type: string, format: uuid }
+        studentName: { type: string, example: Ana López }
+        enrollmentNumber: { type: string, example: 2026-00042 }
+        version: { type: integer, minimum: 1 }
+        status: { type: string, enum: [published, superseded] }
+        issuedAt: { type: [string, 'null'], format: date-time }
+        months:
+          type: array
+          items: { type: string, example: '2026-09' }
+        scale: { $ref: '#/components/schemas/GradingScale' }
+        generalAverage: { type: [number, 'null'], example: 8.4 }
+        hasGrades:
+          type: boolean
+          description: False when no subject has a grade in the term; the card is still issued and consumers show "Sin calificaciones capturadas en este periodo" instead of a table.
+          example: true
+        lines:
+          type: array
+          items:
+            type: object
+            required: [subjectId, subjectName, position, months, average]
+            properties:
+              subjectId: { type: string, format: uuid }
+              subjectName: { type: string, example: Matemáticas }
+              position: { type: integer, minimum: 1 }
+              months:
+                type: object
+                description: '"YYYY-MM" → the captured grade.'
+                additionalProperties: { type: number }
+                example: { '2026-09': 8.4, '2026-10': 8.5 }
+              average: { type: [number, 'null'], example: 8.5 }
+        school:
+          type: object
+          required: [name, legalName, rfc, cct, address, phone, legend]
+          properties:
+            name: { type: string }
+            legalName: { type: string }
+            rfc: { type: string }
+            cct: { type: string }
+            address: { type: string }
+            phone: { type: string }
+            legend: { type: string }
+      example:
+        id: 7c000000-0000-4000-8000-000000000001
+        termId: 7a000000-0000-4000-8000-000000000001
+        termName: 1.er trimestre
+        cycleName: 2026-2027
+        levelName: Primaria
+        groupId: 4a000000-0000-4000-8000-000000000001
+        groupLabel: 1° PRIMARIA · A
+        studentId: 57000000-0000-4000-8000-000000000001
+        studentName: Ana López
+        enrollmentNumber: 2026-00042
+        version: 1
+        status: published
+        issuedAt: '2026-12-01T16:00:00Z'
+        months: ['2026-09', '2026-10', '2026-11']
+        scale: { min: 5, max: 10, decimals: 1, passing: 6 }
+        generalAverage: 8.4
+        hasGrades: true
+        lines:
+          - { subjectId: 5a000000-0000-4000-8000-000000000002, subjectName: Español, position: 1, months: { '2026-09': 8, '2026-11': 8.5 }, average: 8.3 }
+          - { subjectId: 5a000000-0000-4000-8000-000000000001, subjectName: Matemáticas, position: 2, months: { '2026-09': 8.4, '2026-10': 8.5 }, average: 8.5 }
+        school: { name: COLEGIO GARCÍA LORCA, legalName: '', rfc: '', cct: 09PPR0001A, address: '', phone: '', legend: '' }
     ExpoPushToken:
       type: string
       pattern: '^(ExponentPushToken|ExpoPushToken)\[[A-Za-z0-9_-]{1,200}\]$'
@@ -3670,21 +4413,56 @@ components:
           type: array
           items:
             type: object
-            required: [id, name, cycleId, levelId]
+            required: [id, name, cycleId, levelId, months]
             properties:
               id: { type: string, format: uuid }
               name: { type: string, example: Bloque 1 }
               cycleId: { type: string, format: uuid }
               levelId: { type: string, format: uuid }
+              months:
+                type: array
+                description: The calendar months the term covers, ascending; [] when none are set.
+                items: { type: string, example: '2026-09' }
+    ConfigTerm:
+      type: object
+      required: [id, cycleId, levelId, name, ordinal, startsOn, endsOn, months]
+      properties:
+        id: { type: string, format: uuid }
+        cycleId: { type: string, format: uuid }
+        levelId: { type: string, format: uuid }
+        name: { type: string, example: Trimestre 1 }
+        ordinal: { type: integer, minimum: 1, example: 1 }
+        startsOn: { type: string, format: date }
+        endsOn: { type: string, format: date }
+        months:
+          type: array
+          description: The calendar months the term covers ("YYYY-MM", ascending); [] when none are set.
+          items: { type: string, example: '2026-09' }
     MonthlySheet:
       type: object
-      required: [assignmentId, month, months, scale, gradingEnabled, currentMonth, editable, rows]
+      required: [assignmentId, month, months, scale, gradingEnabled, currentMonth, editable, closedMonths, unmappedMonths, rows]
       properties:
         assignmentId: { type: string, format: uuid }
         month: { type: string, example: '2026-09' }
         months:
           type: array
-          description: The cycle's months, start to end inclusive.
+          description: >
+            The cycle's months, start to end inclusive, mapped into a term or
+            not (T7).
+          items: { type: string, example: '2026-08' }
+        closedMonths:
+          type: array
+          description: >
+            The months of `months` that belong to a CLOSED period of the level
+            (T7): read-only for everyone (writes answer 409 `MONTH_LOCKED`)
+            until the director reopens it. [] when none.
+          items: { type: string, example: '2026-09' }
+        unmappedMonths:
+          type: array
+          description: >
+            The months of `months` no period of the level covers (T7): still
+            capturable, but no report card prints them — the screen marks them
+            "Sin periodo". [] when none.
           items: { type: string, example: '2026-08' }
         scale: { $ref: '#/components/schemas/GradingScale' }
         gradingEnabled: { type: boolean }
@@ -3730,7 +4508,10 @@ components:
         months: ['2026-08', '2026-09', '2026-10']
         scale: { min: 5, max: 10, decimals: 1, passing: 6 }
         gradingEnabled: true
+        currentMonth: '2026-09'
         editable: true
+        closedMonths: []
+        unmappedMonths: ['2026-08']
         rows:
           - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301, studentId: 6e1d2c3b-0000-4000-8000-000000000042, name: Ana Ávila, value: 9.5, updatedAt: '2026-09-03T15:04:05Z', rowEditable: true }
           - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3302, studentId: 6e1d2c3b-0000-4000-8000-000000000043, name: Nico Núñez, value: null, updatedAt: null, rowEditable: false, rowReadOnlyReason: Ese mes corresponde al grupo anterior del alumno }

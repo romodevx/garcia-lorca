@@ -156,6 +156,8 @@ type TermResult struct {
 	Ordinal  int
 	StartsOn time.Time
 	EndsOn   time.Time
+	// Months are the calendar months the term covers, "YYYY-MM", ascending.
+	Months []string
 }
 
 // CreateGroupInput is the edge's view of a new class group within a cycle for a
@@ -395,6 +397,31 @@ func (c *ConfigClient) CreateTerm(ctx context.Context, in CreateTermInput) (Term
 		return TermResult{}, err
 	}
 	return toTermResult(res.Msg.GetTerm()), nil
+}
+
+// SetTermMonths replaces the calendar months ("YYYY-MM") a term covers.
+func (c *ConfigClient) SetTermMonths(ctx context.Context, termID string, months []string) (TermResult, error) {
+	res, err := c.rpc.SetTermMonths(ctx, connect.NewRequest(&configv1.SetTermMonthsRequest{TermId: termID, Months: months}))
+	if err != nil {
+		return TermResult{}, err
+	}
+	return toTermResult(res.Msg.GetTerm()), nil
+}
+
+// CopyTermMonths mirrors one level's term months onto other levels of a cycle
+// and returns the target levels' terms.
+func (c *ConfigClient) CopyTermMonths(ctx context.Context, cycleID, fromLevelID string, toLevelIDs []string) ([]TermResult, error) {
+	res, err := c.rpc.CopyTermMonths(ctx, connect.NewRequest(&configv1.CopyTermMonthsRequest{
+		CycleId: cycleID, FromLevelId: fromLevelID, ToLevelIds: toLevelIDs,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TermResult, 0, len(res.Msg.GetTerms()))
+	for _, tm := range res.Msg.GetTerms() {
+		out = append(out, toTermResult(tm))
+	}
+	return out, nil
 }
 
 // ListTerms lists the terms of a cycle, optionally filtered by level.
@@ -758,6 +785,7 @@ func toTermResult(t *configv1.Term) TermResult {
 		Ordinal:  int(t.GetOrdinal()),
 		StartsOn: timeFromTS(t.GetStartsOn()),
 		EndsOn:   timeFromTS(t.GetEndsOn()),
+		Months:   t.GetMonths(),
 	}
 }
 

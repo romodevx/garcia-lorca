@@ -6,7 +6,7 @@
 //   - the generated garcialorca.comms.v1 Connect service — device registration
 //     plus reading the notification feed materialised for a student;
 //   - a Pub/Sub subscriber loop over the domain events other services own
-//     (payment-events, attendance-events — see consumedTopics), which is what
+//     (payment-events, attendance-events, grades-events — see consumedTopics), which is what
 //     fills that feed. Comms PUBLISHES NOTHING: sending is a side effect of
 //     consuming an event, never an RPC.
 //
@@ -79,7 +79,8 @@ const (
 // a restart resumes where it left off instead of replaying from nothing.
 //
 // It lists ONLY topics the service renders (see internal/service.render). This
-// phase notifies on absence, attendance and payment events; student-events
+// phase notifies on absence, attendance, payment and report-card (grades-events,
+// T7) events; student-events
 // (StudentEnrolled, AdmissionStatusChanged) is deliberately absent, because
 // subscribing to events nothing renders is worse than not subscribing at all — it
 // creates a durable subscription whose backlog only grows while every delivery is
@@ -88,6 +89,7 @@ const (
 var consumedTopics = map[string]string{
 	"payment-events":    "comms-payment-events",
 	"attendance-events": "comms-attendance-events",
+	"grades-events":     "comms-grades-events",
 }
 
 func main() {

@@ -96,6 +96,7 @@ func TestConsumedTopicsAreOnlyWhatCommsRenders(t *testing.T) {
 	want := map[string]string{
 		"payment-events":    "comms-payment-events",
 		"attendance-events": "comms-attendance-events",
+		"grades-events":     "comms-grades-events",
 	}
 
 	if len(consumedTopics) != len(want) {

@@ -62,16 +62,18 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"student-reader":   {"students:read"},
 		"grades-writer":    {"grades:write", "grades:read"},
 		"grades-reader":    {"grades:read"},
-		"teaching-writer":  {"teaching:write", "teaching:read"},
-		"teaching-reader":  {"teaching:read"},
-		"finance-writer":   {"finance:write", "finance:read"},
-		"finance-reader":   {"finance:read"},
-		"att-writer":       {"attendance:write", "attendance:read"},
-		"att-reader":       {"attendance:read"},
-		"att-own-writer":   {"attendance_own:write", "attendance_own:read"},
-		"att-own-reader":   {"attendance_own:read"},
-		"comms-writer":     {"comms:write", "comms:read"},
-		"comms-reader":     {"comms:read"},
+		// T7: closing a period is the owner.s alone (iam 0023); grades:write is not enough.
+		"grades-closer":   {"grades:close", "grades:read"},
+		"teaching-writer": {"teaching:write", "teaching:read"},
+		"teaching-reader": {"teaching:read"},
+		"finance-writer":  {"finance:write", "finance:read"},
+		"finance-reader":  {"finance:read"},
+		"att-writer":      {"attendance:write", "attendance:read"},
+		"att-reader":      {"attendance:read"},
+		"att-own-writer":  {"attendance_own:write", "attendance_own:read"},
+		"att-own-reader":  {"attendance_own:read"},
+		"comms-writer":    {"comms:write", "comms:read"},
+		"comms-reader":    {"comms:read"},
 		// The uniform shop's split. The storeroom role holds stock + write and
 		// deliberately NOT uniforms:orders, which carries every pupil's name.
 		"uni-storeroom": {"uniforms:stock", "uniforms:write"},
@@ -290,6 +292,14 @@ func (stubConfig) CreateCycle(_ context.Context, req *connect.Request[configv1.C
 		Name:   req.Msg.GetName(),
 		Status: req.Msg.GetStatus(),
 	}}), nil
+}
+
+func (stubConfig) SetTermMonths(_ context.Context, req *connect.Request[configv1.SetTermMonthsRequest]) (*connect.Response[configv1.SetTermMonthsResponse], error) {
+	return connect.NewResponse(&configv1.SetTermMonthsResponse{Term: &configv1.Term{Id: req.Msg.GetTermId(), Months: req.Msg.GetMonths()}}), nil
+}
+
+func (stubConfig) CopyTermMonths(_ context.Context, req *connect.Request[configv1.CopyTermMonthsRequest]) (*connect.Response[configv1.CopyTermMonthsResponse], error) {
+	return connect.NewResponse(&configv1.CopyTermMonthsResponse{}), nil
 }
 
 func (stubConfig) ListCycles(_ context.Context, _ *connect.Request[configv1.ListCyclesRequest]) (*connect.Response[configv1.ListCyclesResponse], error) {
@@ -877,6 +887,45 @@ func TestConfigReadDisabledModuleIs404(t *testing.T) {
 	res := doGateway(t, gw, http.MethodGet, "/api/v1/config/cycles", "config-reader", "")
 	if res.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", res.StatusCode)
+	}
+}
+
+// T7: the term-months writes ride the config chain — module_config OFF ⇒ 404,
+// config:read alone ⇒ 403, config:write ⇒ 200. The table pins the real route
+// patterns (the handler tests bind the path value by hand).
+func TestTermMonthsRoutesGuardChain(t *testing.T) {
+	const (
+		putPath  = "/api/v1/config/terms/trm-1/months"
+		putBody  = `{"months":["2026-09"]}`
+		copyPath = "/api/v1/config/terms/copy-months"
+		copyBody = `{"cycleId":"cyc-1","fromLevelId":"lvl-1","toLevelIds":["lvl-2"]}`
+	)
+	on := map[string]bool{"module_config": true}
+	tests := []struct {
+		name   string
+		flags  map[string]bool
+		method string
+		path   string
+		body   string
+		token  string
+		want   int
+	}{
+		{"put: module off hides it", map[string]bool{}, http.MethodPut, putPath, putBody, "config-writer", http.StatusNotFound},
+		{"put: no token", on, http.MethodPut, putPath, putBody, "", http.StatusUnauthorized},
+		{"put: read-only", on, http.MethodPut, putPath, putBody, "config-reader", http.StatusForbidden},
+		{"put: writer", on, http.MethodPut, putPath, putBody, "config-writer", http.StatusOK},
+		{"copy: module off hides it", map[string]bool{}, http.MethodPost, copyPath, copyBody, "config-writer", http.StatusNotFound},
+		{"copy: read-only", on, http.MethodPost, copyPath, copyBody, "config-reader", http.StatusForbidden},
+		{"copy: writer", on, http.MethodPost, copyPath, copyBody, "config-writer", http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gw := newTestGateway(t, tt.flags)
+			res := doGateway(t, gw, tt.method, tt.path, tt.token, tt.body)
+			if res.StatusCode != tt.want {
+				t.Errorf("status = %d, want %d", res.StatusCode, tt.want)
+			}
+		})
 	}
 }
 
@@ -2958,5 +3007,64 @@ func TestTheCardSitsBehindItsFlag(t *testing.T) {
 	}
 	if res := doGateway(t, on, http.MethodPost, "/api/v1/students/card/verify", "student-reader", `{"code":"x"}`); res.StatusCode == http.StatusForbidden || res.StatusCode == http.StatusUnauthorized {
 		t.Errorf("staff verifying a card: %d, want it reachable", res.StatusCode)
+	}
+}
+
+// T7: the periods and report cards sit behind module_grades. Reads answer to
+// grades:read; closing and reopening ONLY to grades:close (owner-only), so a
+// grades:write holder or a teacher is 403. A family reaches its child's report
+// cards with family:read (the ownership check itself is the handler's).
+func TestPeriodsAndReportCardsAuthz(t *testing.T) {
+	const (
+		term   = "70000000-0000-0000-0000-000000000001"
+		cycle  = "c0000000-0000-0000-0000-000000000001"
+		card   = "7c000000-0000-0000-0000-000000000001"
+		pupil  = "57000000-0000-0000-0000-000000000001"
+		family = "/api/v1/family/students/" + pupil + "/report-cards"
+	)
+	routes := []struct {
+		method, path, token string
+		reachable           bool
+	}{
+		{http.MethodGet, "/api/v1/grades/periods?cycleId=" + cycle, "grades-reader", true},
+		{http.MethodGet, "/api/v1/grades/periods?cycleId=" + cycle, "maestro", false},
+		{http.MethodGet, "/api/v1/grades/periods/" + term + "/progress", "grades-reader", true},
+		{http.MethodGet, "/api/v1/grades/periods/" + term + "/progress", "teaching-writer", false},
+		{http.MethodPost, "/api/v1/grades/periods/" + term + "/close", "grades-closer", true},
+		{http.MethodPost, "/api/v1/grades/periods/" + term + "/close", "grades-writer", false},
+		{http.MethodPost, "/api/v1/grades/periods/" + term + "/close", "maestro", false},
+		{http.MethodPost, "/api/v1/grades/periods/" + term + "/reopen", "grades-closer", true},
+		{http.MethodPost, "/api/v1/grades/periods/" + term + "/reopen", "grades-writer", false},
+		{http.MethodGet, "/api/v1/grades/report-cards?termId=" + term, "grades-reader", true},
+		{http.MethodGet, "/api/v1/grades/report-cards?termId=" + term, "maestro", false},
+		{http.MethodGet, "/api/v1/grades/report-cards/" + card, "grades-reader", true},
+		{http.MethodGet, "/api/v1/grades/report-cards/" + card + "/pdf", "grades-reader", true},
+		{http.MethodGet, "/api/v1/grades/report-cards/" + card + "/pdf", "family-reader", false},
+		{http.MethodGet, family, "family-reader", true},
+		{http.MethodGet, family + "/" + card, "family-reader", true},
+		{http.MethodGet, family + "/" + card + "/pdf", "family-reader", true},
+		{http.MethodGet, family, "grades-reader", false},
+	}
+	on := newTestGateway(t, map[string]bool{"module_grades": true, "module_students": true})
+	for _, r := range routes {
+		res := doGateway(t, on, r.method, r.path, r.token, "")
+		denied := res.StatusCode == http.StatusForbidden || res.StatusCode == http.StatusUnauthorized
+		// A reachable staff route must also EXIST (a 404 would be a missing route);
+		// a family route may 404 from the ownership check against the stub.
+		missing := r.reachable && res.StatusCode == http.StatusNotFound && !strings.HasPrefix(r.path, "/api/v1/family/")
+		if denied == r.reachable || missing || res.StatusCode == http.StatusMethodNotAllowed {
+			t.Errorf("%s %s as %s: status %d, reachable want %v", r.method, r.path, r.token, res.StatusCode, r.reachable)
+		}
+	}
+
+	off := newTestGateway(t, map[string]bool{"module_students": true})
+	for _, r := range routes {
+		if res := doGateway(t, off, r.method, r.path, r.token, ""); res.StatusCode != http.StatusNotFound {
+			t.Errorf("module_grades off: %s %s = %d, want 404", r.method, r.path, res.StatusCode)
+		}
+	}
+	familyOnly := newTestGateway(t, map[string]bool{"module_grades": true})
+	if res := doGateway(t, familyOnly, http.MethodGet, family, "family-reader", ""); res.StatusCode != http.StatusNotFound {
+		t.Errorf("module_students off: family report cards = %d, want 404", res.StatusCode)
 	}
 }
