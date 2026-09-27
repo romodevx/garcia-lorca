@@ -39,6 +39,8 @@ export interface GradeSheet {
   scale: GradeScale;
   /** False for a level without numeric grades (Kínder): its scale is meaningless. */
   gradingEnabled?: boolean;
+  /** The server's current UTC month ("YYYY-MM"): later months are not gradable yet. */
+  currentMonth?: string;
   editable: boolean;
   readOnlyReason?: string;
   rows: MonthlyGradeRow[];
@@ -108,11 +110,12 @@ export async function gradeFailure(res: Response): Promise<GradeRequestError> {
 export type RefusalScope = "row" | "rowLocked" | "sheet";
 
 const MONTH_PREVIOUS_GROUP = "MONTH_PREVIOUS_GROUP";
-const LEVEL_CODES: ReadonlySet<string> = new Set(["LEVEL_NOT_GRADED", "LEVEL_SCALE_NOT_CONFIGURED"]);
+/** Refusals that lock the whole month: the level cannot grade, or the month has not come yet. */
+const SHEET_CODES: ReadonlySet<string> = new Set(["LEVEL_NOT_GRADED", "LEVEL_SCALE_NOT_CONFIGURED", "MONTH_IN_FUTURE"]);
 
 export function refusalScope(code: string | undefined): RefusalScope {
   if (code === MONTH_PREVIOUS_GROUP) return "rowLocked";
-  return code !== undefined && LEVEL_CODES.has(code) ? "sheet" : "row";
+  return code !== undefined && SHEET_CODES.has(code) ? "sheet" : "row";
 }
 
 const BAD_REQUEST = 400;
@@ -198,6 +201,8 @@ export interface MonthChip {
   month: string;
   label: string;
   fullName: string;
+  /** After the server's current month: not gradable yet (its sheet is read-only). */
+  future: boolean;
 }
 
 function splitMonth(month: string): { year: string; index: number } {
@@ -205,8 +210,11 @@ function splitMonth(month: string): { year: string; index: number } {
   return { year, index: Number(mm) - 1 };
 }
 
-/** "Sep", "Oct"… — with the year only when a short name would repeat. */
-export function monthChips(months: readonly string[]): MonthChip[] {
+/**
+ * "Sep", "Oct"… — with the year only when a short name would repeat. A month
+ * after `currentMonth` is `future`; without it nothing is (the server decides).
+ */
+export function monthChips(months: readonly string[], currentMonth?: string): MonthChip[] {
   const shortOf = (m: string): string => SHORT[splitMonth(m).index] ?? m;
   const seen = new Map<string, number>();
   for (const m of months) seen.set(shortOf(m), (seen.get(shortOf(m)) ?? 0) + 1);
@@ -217,6 +225,8 @@ export function monthChips(months: readonly string[]): MonthChip[] {
       month,
       label: (seen.get(short) ?? 0) > 1 ? `${short} ${year}` : short,
       fullName: `${FULL[index] ?? month} de ${year}`,
+      // "YYYY-MM" strings order like the months they name.
+      future: currentMonth !== undefined && month > currentMonth,
     };
   });
 }

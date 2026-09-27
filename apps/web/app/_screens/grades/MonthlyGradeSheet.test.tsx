@@ -96,6 +96,25 @@ describe("MonthlyGradeSheet — loading", () => {
     expect(screen.queryByRole("table")).toBeNull();
   });
 
+  it("locks the months after the current one, and still lets you look at them read-only", async () => {
+    const user = userEvent.setup();
+    const client = fakeClient({ ...SHEET, currentMonth: "2026-09" });
+    const future: GradeSheet = { ...SHEET, month: "2026-10", currentMonth: "2026-09", editable: false, readOnlyReason: "Aún no llega ese mes",
+      rows: SHEET.rows.map((r) => ({ ...r, value: null, updatedAt: null, rowEditable: false, rowReadOnlyReason: "Aún no llega ese mes" })) };
+    client.load.mockImplementation(async (q: { month?: string }) => (q.month === "2026-10" ? future : { ...SHEET, currentMonth: "2026-09" }));
+    await renderSheet(client);
+
+    const october = screen.getByRole("button", { name: "Oct" });
+    expect(october).toHaveAttribute("title", "octubre de 2026 · Aún no llega ese mes");
+    expect(october).toHaveAttribute("data-future", "true");
+    expect(screen.getByRole("button", { name: "Sep" })).not.toHaveAttribute("data-future");
+    expect(october).not.toBeDisabled();
+
+    await user.click(october);
+    expect(await screen.findByText("Aún no llega ese mes")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
   it("offers a retry when the sheet fails to load", async () => {
     const user = userEvent.setup();
     const client = fakeClient();

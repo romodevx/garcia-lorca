@@ -91,7 +91,15 @@ describe("monthChips", () => {
   });
 
   it("gives every chip its full name", () => {
-    expect(monthChips(["2026-01"])[0]).toEqual({ month: "2026-01", label: "Ene", fullName: "enero de 2026" });
+    expect(monthChips(["2026-01"])[0]).toEqual({ month: "2026-01", label: "Ene", fullName: "enero de 2026", future: false });
+  });
+
+  it("marks the months after the server's current month as future", () => {
+    expect(monthChips(["2026-09", "2026-10", "2026-11", "2027-01"], "2026-10").map((c) => c.future)).toEqual([false, false, true, true]);
+  });
+
+  it("marks nothing future when the server did not say what month it is", () => {
+    expect(monthChips(["2026-09", "2030-01"]).some((c) => c.future)).toBe(false);
   });
 });
 
@@ -133,6 +141,7 @@ describe("refusalScope", () => {
     ["MONTH_PREVIOUS_GROUP", "rowLocked"],
     ["LEVEL_NOT_GRADED", "sheet"],
     ["LEVEL_SCALE_NOT_CONFIGURED", "sheet"],
+    ["MONTH_IN_FUTURE", "sheet"],
   ] as const)("%s belongs to the %s", (code, scope) => {
     expect(refusalScope(code)).toBe(scope);
   });
