@@ -218,6 +218,36 @@ func (r *Repository) UpdateLevelAttendanceMode(ctx context.Context, id string, m
 	})
 }
 
+// UpdateLevel writes the present fields of patch in ONE UPDATE, so the mode and
+// the scale land together or not at all. A level that does not exist — or that
+// RLS hides — is KindNotFound.
+func (r *Repository) UpdateLevel(ctx context.Context, id string, patch ports.LevelPatch) error {
+	if !isUUID(id) {
+		return glerrors.ErrNotFound
+	}
+	cols := map[string]any{"updated_at": gorm.Expr("now()")}
+	if patch.AttendanceMode != nil {
+		cols["attendance_mode"] = patch.AttendanceMode.String()
+	}
+	if g := patch.Grading; g != nil {
+		cols["grading_enabled"] = g.Enabled()
+		cols["grade_min"] = fromHundredths(g.MinHundredths())
+		cols["grade_max"] = fromHundredths(g.MaxHundredths())
+		cols["grade_decimals"] = g.Decimals()
+		cols["grade_passing"] = fromHundredths(g.PassingHundredths())
+	}
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Model(&levelModel{}).Where("id = ?", id).Updates(cols)
+		if res.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "updating level", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return glerrors.ErrNotFound
+		}
+		return nil
+	})
+}
+
 // UpdateLevelGrading replaces one level's grading scale. It writes only the five
 // grading columns and updated_at; a level that does not exist — or that RLS
 // hides, i.e. another tenant's — is KindNotFound.

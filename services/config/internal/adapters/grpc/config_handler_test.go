@@ -12,6 +12,7 @@ import (
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	grpcadapter "github.com/garcia-lorca/services/config/internal/adapters/grpc"
 	"github.com/garcia-lorca/services/config/internal/domain"
+	"github.com/garcia-lorca/services/config/internal/ports"
 	"github.com/garcia-lorca/services/config/internal/usecase"
 )
 
@@ -1161,6 +1162,26 @@ func (f *fakeCatalog) UpdateLevelAttendanceMode(_ context.Context, id string, mo
 		return err
 	}
 	f.levels[id] = changed
+	return nil
+}
+
+func (f *fakeCatalog) UpdateLevel(_ context.Context, id string, patch ports.LevelPatch) error {
+	l, ok := f.levels[id]
+	if !ok {
+		return glerrors.ErrNotFound
+	}
+	var err error
+	if patch.AttendanceMode != nil {
+		if l, err = l.WithAttendanceMode(*patch.AttendanceMode); err != nil {
+			return err
+		}
+	}
+	if patch.Grading != nil {
+		if l, err = l.WithGrading(*patch.Grading); err != nil {
+			return err
+		}
+	}
+	f.levels[id] = l
 	return nil
 }
 

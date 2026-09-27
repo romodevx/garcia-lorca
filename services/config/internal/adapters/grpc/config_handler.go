@@ -12,6 +12,7 @@ import (
 	"github.com/garcia-lorca/gen/go/garcialorca/config/v1/configv1connect"
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/config/internal/domain"
+	"github.com/garcia-lorca/services/config/internal/ports"
 	"github.com/garcia-lorca/services/config/internal/usecase"
 )
 
@@ -94,6 +95,31 @@ func (h *ConfigHandler) SetLevelGradingScale(ctx context.Context, req *connect.R
 		return nil, connectErr(err)
 	}
 	return connect.NewResponse(&configv1.SetLevelGradingScaleResponse{Level: toProtoLevel(l)}), nil
+}
+
+// UpdateLevel changes a level's attendance mode and/or grading scale in one
+// transaction. Every present field is validated before anything is written:
+// an unspecified mode or an inconsistent scale is InvalidArgument and changes
+// nothing; a request with neither field is InvalidArgument; an unknown level is
+// NotFound.
+func (h *ConfigHandler) UpdateLevel(ctx context.Context, req *connect.Request[configv1.UpdateLevelRequest]) (*connect.Response[configv1.UpdateLevelResponse], error) {
+	var patch ports.LevelPatch
+	if req.Msg.AttendanceMode != nil {
+		mode := toDomainAttendanceMode(req.Msg.GetAttendanceMode())
+		patch.AttendanceMode = &mode
+	}
+	if g := req.Msg.GetGrading(); g != nil {
+		scale, err := domain.NewGradingScale(g.GetEnabled(), int(g.GetMinHundredths()), int(g.GetMaxHundredths()), int(g.GetPassingHundredths()), int(g.GetDecimals()))
+		if err != nil {
+			return nil, connectErr(err)
+		}
+		patch.Grading = &scale
+	}
+	l, err := h.catalog.UpdateLevel(ctx, req.Msg.GetId(), patch)
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.UpdateLevelResponse{Level: toProtoLevel(l)}), nil
 }
 
 // --- cycles ----------------------------------------------------------------

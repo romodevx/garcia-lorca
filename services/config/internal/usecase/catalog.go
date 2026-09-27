@@ -142,6 +142,29 @@ func (s *CatalogService) SetLevelGradingScale(ctx context.Context, id string, sc
 	return s.repo.GetLevel(ctx, id)
 }
 
+// UpdateLevel applies a partial change of a level atomically: every present
+// field is validated first (an unknown mode or an inconsistent scale is
+// KindInvalid), then all of them are written in one repository call, so a
+// half-valid patch changes nothing. An empty patch is KindInvalid; an unknown
+// level is KindNotFound.
+func (s *CatalogService) UpdateLevel(ctx context.Context, id string, patch ports.LevelPatch) (domain.Level, error) {
+	if patch.AttendanceMode == nil && patch.Grading == nil {
+		return domain.Level{}, glerrors.New(glerrors.KindInvalid, "level patch changes nothing")
+	}
+	if patch.AttendanceMode != nil && !patch.AttendanceMode.Valid() {
+		return domain.Level{}, glerrors.New(glerrors.KindInvalid, "level attendance mode is invalid")
+	}
+	if g := patch.Grading; g != nil {
+		if _, err := domain.NewGradingScale(g.Enabled(), g.MinHundredths(), g.MaxHundredths(), g.PassingHundredths(), g.Decimals()); err != nil {
+			return domain.Level{}, err
+		}
+	}
+	if err := s.repo.UpdateLevel(ctx, id, patch); err != nil {
+		return domain.Level{}, err
+	}
+	return s.repo.GetLevel(ctx, id)
+}
+
 // ListLevels returns every level in the tenant catalog.
 func (s *CatalogService) ListLevels(ctx context.Context) ([]domain.Level, error) {
 	return s.repo.ListLevels(ctx)

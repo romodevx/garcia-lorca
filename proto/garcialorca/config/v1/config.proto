@@ -32,6 +32,11 @@ service ConfigService {
   // SetLevelGradingScale configures a level's numeric grading (T6): whether it
   // is captured at all, its range, decimals and passing mark.
   rpc SetLevelGradingScale(SetLevelGradingScaleRequest) returns (SetLevelGradingScaleResponse);
+  // UpdateLevel changes a level's attendance mode and/or grading scale in ONE
+  // transaction: every present field is validated before anything is written,
+  // so a half-valid request changes nothing. An absent field keeps its value;
+  // a request with neither is InvalidArgument; an unknown level is NotFound.
+  rpc UpdateLevel(UpdateLevelRequest) returns (UpdateLevelResponse);
 
   // --- cycles (per-cycle umbrella) ---
   // CreateCycle adds a school-year umbrella (status defaults to draft).
@@ -323,6 +328,19 @@ message SetLevelGradingScaleRequest {
 
 // SetLevelGradingScaleResponse returns the updated level.
 message SetLevelGradingScaleResponse {
+  Level level = 1;
+}
+
+// UpdateLevelRequest patches one level. attendance_mode and grading are each
+// optional (absent = unchanged); at least one must be present.
+message UpdateLevelRequest {
+  string id = 1;
+  optional AttendanceMode attendance_mode = 2;
+  GradingScale grading = 3;
+}
+
+// UpdateLevelResponse returns the level after the change.
+message UpdateLevelResponse {
   Level level = 1;
 }
 
