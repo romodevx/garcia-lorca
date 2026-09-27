@@ -17,6 +17,8 @@ const (
 	dataType      = "type"
 	dataStudentID = "studentId"
 	dataDate      = "date"
+	// dataReportCardID opens the issued report card (T7).
+	dataReportCardID = "reportCardId"
 )
 
 // eventKind groups events by the copy and push payload they get.
@@ -25,6 +27,7 @@ type eventKind int
 const (
 	kindAttendance eventKind = iota + 1
 	kindPayment
+	kindReportCard
 )
 
 // decodedEvent is what the copy of one consumed event is made of. class is the
@@ -39,12 +42,16 @@ type decodedEvent struct {
 	date        string
 	class       string
 	amountCents int64
+	// termName, reportCardID and version describe an issued report card.
+	termName     string
+	reportCardID string
+	version      int32
 }
 
 // namesStudent reports whether the copy uses the pupil's name (so the directory
 // is only asked when it matters).
 func (e decodedEvent) namesStudent() bool {
-	return e.kind == kindAttendance
+	return e.kind == kindAttendance || e.kind == kindReportCard
 }
 
 // render builds the notification for this event, for a pupil called name.
@@ -53,6 +60,11 @@ func (e decodedEvent) render(name string) Notification {
 	if e.kind == kindPayment {
 		n.Type, n.Title = typePayment, "Pago recibido"
 		n.Body = fmt.Sprintf("Recibimos tu pago de %s MXN.", pesos(e.amountCents))
+		return n
+	}
+	if e.kind == kindReportCard {
+		n.Type = typeReportCard
+		n.Title, n.Body = reportCardCopy(e.termName, name, e.version)
 		return n
 	}
 	n.Type, n.Title, n.Body = attendanceCopy(e.status, name, e.class, spanishDate(e.date))
@@ -105,10 +117,29 @@ var exceptionNames = map[string]string{
 	statusExcused: "falta justificada",
 }
 
+// reportCardCopy is the copy of an issued report card: "available" for the
+// first version of a period, "updated" for a later one, which replaces it.
+func reportCardCopy(termName, name string, version int32) (title, body string) {
+	term := strings.TrimSpace(termName)
+	if version > 1 {
+		if term == "" {
+			return "Boleta actualizada", fmt.Sprintf("Boleta actualizada de %s.", name)
+		}
+		return "Boleta actualizada", fmt.Sprintf("Boleta actualizada: %s de %s.", term, name)
+	}
+	if term == "" {
+		return "Boleta disponible", fmt.Sprintf("La boleta de %s ya está disponible.", name)
+	}
+	return fmt.Sprintf("Boleta del %s disponible", term), fmt.Sprintf("La boleta del %s de %s ya está disponible.", term, name)
+}
+
 // pushData is the routing payload of this event's push: ids only.
 func (e decodedEvent) pushData() map[string]string {
 	if e.kind == kindPayment {
 		return map[string]string{dataType: typePayment, dataStudentID: e.studentID}
+	}
+	if e.kind == kindReportCard {
+		return map[string]string{dataType: typeReportCard, dataStudentID: e.studentID, dataReportCardID: e.reportCardID}
 	}
 	return map[string]string{dataType: typeAttendance, dataStudentID: e.studentID, dataDate: e.date}
 }

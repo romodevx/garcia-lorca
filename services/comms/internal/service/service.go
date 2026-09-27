@@ -14,6 +14,7 @@ import (
 
 	attendancev1 "github.com/garcia-lorca/gen/go/garcialorca/attendance/v1"
 	financev1 "github.com/garcia-lorca/gen/go/garcialorca/finance/v1"
+	gradesv1 "github.com/garcia-lorca/gen/go/garcialorca/grades/v1"
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/pkg/pubsub"
 )
@@ -24,6 +25,7 @@ const (
 	eventAbsenceRecorded   = "AbsenceRecorded"
 	eventAttendanceMarked  = "AttendanceMarked"
 	eventPaymentRegistered = "PaymentRegistered"
+	eventGradesPublished   = "GradesPublished"
 )
 
 // attrType is the routing attribute carrying the event type name. It comes from
@@ -38,6 +40,7 @@ const (
 	typeAbsence    = "absence"
 	typeAttendance = "attendance"
 	typePayment    = "payment"
+	typeReportCard = "report_card"
 )
 
 // The attendance statuses that reach this consumer. statusAbsent is deliberately
@@ -518,6 +521,20 @@ func (s *CommsService) decode(eventType string, data []byte) (decodedEvent, erro
 		}
 		return s.checked(eventType, e.GetPaymentId(), unversioned, e.GetStudentId(), e.GetTenantId(), decodedEvent{
 			kind: kindPayment, amountCents: e.GetAmountCents(),
+		})
+
+	case eventGradesPublished:
+		var e gradesv1.GradesPublished
+		if err := proto.Unmarshal(data, &e); err != nil {
+			return decodedEvent{}, fmt.Errorf("%w: unreadable %s payload: %w", errUndeliverable, eventType, err)
+		}
+		// Every issued report card has a version from 1; a zero would fall back
+		// to the unversioned key and dedupe a correction against its original.
+		if e.GetVersion() < 1 {
+			return decodedEvent{}, fmt.Errorf("%w: %s carries no version", errUndeliverable, eventType)
+		}
+		return s.checked(eventType, e.GetReportCardId(), int64(e.GetVersion()), e.GetStudentId(), e.GetTenantId(), decodedEvent{
+			kind: kindReportCard, termName: e.GetTermName(), reportCardID: e.GetReportCardId(), version: e.GetVersion(),
 		})
 
 	default:

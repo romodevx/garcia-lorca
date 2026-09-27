@@ -68,7 +68,8 @@ message HealthResponse {
 
 // Notification is one message materialised for a student from a consumed
 // domain event. `type` is the stable client-facing KIND — one of
-// "absence"|"attendance"|"payment" — which a client switches on for its icon;
+// "absence"|"attendance"|"payment"|"report_card" (T7) — which a client
+// switches on for its icon;
 // it is deliberately NOT the producing event's name, so an upstream contract
 // change never reaches the client. `title` / `body` are the rendered push
 // payload. `read_at` unset means the notification is still unread.
