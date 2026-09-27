@@ -166,6 +166,7 @@ export function NumberField(props: NumberFieldProps): ReactElement {
             onChange(e.target.value);
             onClearError?.();
           }}
+          onBlur={props.onBlur}
           style={inputStyle(error !== undefined)}
         />
       )}

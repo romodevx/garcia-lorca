@@ -15,6 +15,7 @@ vi.mock("../../config/api", () => ({
   listLevels: vi.fn(),
   createLevel: vi.fn(),
   updateLevelAttendanceMode: vi.fn(),
+  updateLevelGrading: vi.fn(),
   listGradeLevels: vi.fn(),
   createGradeLevel: vi.fn(),
   listSubjects: vi.fn(),
@@ -128,6 +129,21 @@ describe("Catalog — nested level → grade level", () => {
 
     await waitFor(() => expect(mocked.updateLevelAttendanceMode).toHaveBeenCalledWith(expect.any(String), "l1", "per_class"));
     expect(await screen.findByRole("radio", { name: "Por clase" })).toBeChecked();
+  });
+
+  it("turns a level's numeric grading off and keeps it off on screen", async () => {
+    const user = userEvent.setup();
+    const kinder = { id: "l1", name: "KINDER", sepCode: "", enrollmentGranularity: "cycle" as const };
+    const off = { enabled: false, min: 5, max: 10, decimals: 1, passing: 6 };
+    mocked.listLevels.mockResolvedValue([kinder]);
+    mocked.updateLevelGrading.mockResolvedValue({ ...kinder, grading: off });
+    render(<Catalog onBack={() => {}} />);
+
+    await user.click(await screen.findByRole("button", { name: /KINDER/ }));
+    await user.click(screen.getByRole("checkbox", { name: "Lleva calificación numérica" }));
+
+    await waitFor(() => expect(mocked.updateLevelGrading).toHaveBeenCalledWith(expect.any(String), "l1", off));
+    expect(screen.getByRole("checkbox", { name: "Lleva calificación numérica" })).not.toBeChecked();
   });
 
   // A grade is unique by name as well as by order within its level (task 2).

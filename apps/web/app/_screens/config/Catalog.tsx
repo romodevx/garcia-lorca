@@ -10,6 +10,7 @@ import {
   createGroup,
   createLevel,
   updateLevelAttendanceMode,
+  updateLevelGrading,
   createSubject,
   createTerm,
   activateCycle,
@@ -29,6 +30,7 @@ import {
   type GradeLevel,
   type Group,
   type Level,
+  type LevelGrading,
   type Subject,
   type Term,
 } from "../../config/api";
@@ -165,6 +167,11 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
     setLevels((prev) => prev.map((l) => (l.id === levelId ? { ...l, ...updated, attendanceMode: updated.attendanceMode ?? mode } : l)));
   }, []);
 
+  const handleSetGrading = useCallback(async (levelId: string, grading: LevelGrading): Promise<void> => {
+    const updated = await updateLevelGrading(API_URL, levelId, grading);
+    setLevels((prev) => prev.map((l) => (l.id === levelId ? { ...l, ...updated, grading: updated.grading ?? grading } : l)));
+  }, []);
+
   const handleCreateGradeLevel = useCallback(async (input: CreateGradeLevelInput): Promise<void> => {
     const created = await createGradeLevel(API_URL, input);
     setGradeLevels((prev) => [...prev, created]);
@@ -294,7 +301,7 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
 
           {!pricing && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 18 }}>
-            <LevelsPanel levels={levels} selectedLevelId={selectedLevelId} onSelect={setSelectedLevelId} onCreate={handleCreateLevel} onSetAttendanceMode={handleSetAttendanceMode} />
+            <LevelsPanel levels={levels} selectedLevelId={selectedLevelId} onSelect={setSelectedLevelId} onCreate={handleCreateLevel} onSetAttendanceMode={handleSetAttendanceMode} onSetGrading={handleSetGrading} />
 
             {selectedLevel !== undefined && (
               <GradeLevelsPanel

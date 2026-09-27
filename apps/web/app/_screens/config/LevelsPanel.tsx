@@ -4,9 +4,10 @@ import { useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { SlideOver } from "../../_design/SlideOver";
 import type { AttendanceMode } from "../../attendance/sheet";
-import type { CreateLevelInput, EnrollmentGranularity, Level } from "../../config/api";
+import type { CreateLevelInput, EnrollmentGranularity, Level, LevelGrading } from "../../config/api";
 import { TextField } from "../../_design/form";
 import { AttendanceModeControl } from "./AttendanceModeControl";
+import { GradingControl } from "./GradingControl";
 import { EmptyHint, RadioGroup, Section, SelectChip } from "./parts";
 
 export interface LevelsPanelProps {
@@ -16,6 +17,8 @@ export interface LevelsPanelProps {
   onCreate: (input: CreateLevelInput) => Promise<void>;
   /** Saves how the level takes attendance (per day or per class). */
   onSetAttendanceMode: (levelId: string, mode: AttendanceMode) => Promise<void>;
+  /** Saves whether and how the level grades (scale, decimals, passing mark). */
+  onSetGrading: (levelId: string, grading: LevelGrading) => Promise<void>;
 }
 
 const GRANULARITY_OPTIONS = [
@@ -33,7 +36,7 @@ const GRANULARITY_LABEL: Record<string, string> = { cycle: "por ciclo", term: "p
  * Now the panel is the list, and creating opens the same drawer a new pupil
  * does.
  */
-export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSetAttendanceMode }: LevelsPanelProps): ReactElement {
+export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSetAttendanceMode, onSetGrading }: LevelsPanelProps): ReactElement {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [sepCode, setSepCode] = useState("");
@@ -98,7 +101,12 @@ export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSet
         <EmptyHint>Aún no hay niveles. Agrega el primero.</EmptyHint>
       )}
 
-      {selectedLevel !== undefined && <AttendanceModeControl key={selectedLevel.id} level={selectedLevel} onChange={onSetAttendanceMode} />}
+      {selectedLevel !== undefined && (
+        <>
+          <AttendanceModeControl key={selectedLevel.id} level={selectedLevel} onChange={onSetAttendanceMode} />
+          <GradingControl key={`grading-${selectedLevel.id}`} level={selectedLevel} onChange={onSetGrading} />
+        </>
+      )}
 
       <Btn icon="plus" onClick={() => { setError(undefined); setCreating(true); }}>Nuevo nivel</Btn>
 
