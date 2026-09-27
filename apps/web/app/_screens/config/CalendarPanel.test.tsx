@@ -23,6 +23,20 @@ beforeEach(() => {
     { id: "per-1", cycleId: "c1", label: "Independencia", kind: "holiday", startsOn: "2026-09-16", endsOn: "2026-09-16" },
   ]);
 });
+// Fake timers WITHOUT shouldAdvanceTime: wall-clock time must never reach the
+// fake clock. Testing Library only drives fake timers through a global `jest`;
+// this shim hands it vitest's, so findBy/waitFor still resolve.
+function useFakeClock(): void {
+  vi.useFakeTimers();
+  Object.assign(globalThis, { jest: { advanceTimersByTime: (ms: number) => vi.advanceTimersByTime(ms) } });
+}
+function useRealClock(): void {
+  Reflect.deleteProperty(globalThis, "jest");
+  vi.useRealTimers();
+}
+
+afterEach(useRealClock);
+
 afterEach(() => vi.clearAllMocks());
 
 describe("CalendarPanel", () => {
@@ -88,7 +102,7 @@ describe("CalendarPanel", () => {
   });
 
   it("si nadie deshace, el borrado sí llega al servidor", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    useFakeClock();
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     config.deleteNonWorkingPeriod.mockResolvedValue(undefined);
     render(<CalendarPanel cycle={cycle} />);
@@ -98,7 +112,7 @@ describe("CalendarPanel", () => {
     await act(async () => { vi.advanceTimersByTime(8000); });
 
     expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-1");
-    vi.useRealTimers();
+    useRealClock();
   });
 
   // The agenda lives on the same screen and means something different: a
@@ -193,7 +207,7 @@ describe("la captura del calendario", () => {
  */
 describe("quitar varios días dentro del mismo plazo", () => {
   it("borra los dos, no sólo el último", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    useFakeClock();
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     config.deleteNonWorkingPeriod.mockResolvedValue(undefined);
     config.listNonWorkingPeriods.mockResolvedValue([
@@ -210,7 +224,7 @@ describe("quitar varios días dentro del mismo plazo", () => {
 
     expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-1");
     expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-2");
-    vi.useRealTimers();
+    useRealClock();
   });
 
   // Irse de la pantalla dentro del plazo no puede cancelar un borrado que la
