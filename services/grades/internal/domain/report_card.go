@@ -193,17 +193,19 @@ func (r ReportCard) WithStatus(s ReportCardStatus) ReportCard {
 }
 
 // SortNewestTermFirst returns cards (a copy; the input keeps its order) newest
-// period first: the newest cycle first, then the highest term ordinal. A cycle
-// is dated by the earliest month any of its cards covers — never by its name,
-// which the school chooses freely, nor by issue date, which a reopen moves.
-// Ties fall back to ids so the order is deterministic.
+// period first: the newest cycle first, then, within a cycle, the card whose
+// first month is latest. A cycle is dated by the earliest month any of its
+// cards covers — never by its name, which the school chooses freely, nor by
+// issue date, which a reopen moves. The term ordinal only breaks ties: legacy
+// cards carry ordinal 0, so ordering by it first would put a legacy T3 behind
+// a new T1. Remaining ties fall back to ids so the order is deterministic.
 func SortNewestTermFirst(cards []ReportCard) []ReportCard {
 	cycleStart := map[string]time.Time{}
 	for _, c := range cards {
 		if len(c.header.Months) == 0 {
 			continue // only a zero ReportCard has none; it sorts last
 		}
-		first := c.header.Months[0].FirstDay()
+		first := firstMonth(c.header)
 		if start, ok := cycleStart[c.header.CycleID]; !ok || first.Before(start) {
 			cycleStart[c.header.CycleID] = first
 		}
@@ -214,10 +216,20 @@ func SortNewestTermFirst(cards []ReportCard) []ReportCard {
 		return cmp.Or(
 			cycleStart[hb.CycleID].Compare(cycleStart[ha.CycleID]),
 			cmp.Compare(hb.CycleID, ha.CycleID),
+			firstMonth(hb).Compare(firstMonth(ha)),
 			cmp.Compare(hb.TermOrdinal, ha.TermOrdinal),
 			cmp.Compare(ha.TermID, hb.TermID),
 			cmp.Compare(ha.ID, hb.ID),
 		)
 	})
 	return out
+}
+
+// firstMonth is the first day of the card's first month; a zero header (no
+// months) answers the zero time, so it sorts last.
+func firstMonth(h ReportCardHeader) time.Time {
+	if len(h.Months) == 0 {
+		return time.Time{}
+	}
+	return h.Months[0].FirstDay()
 }
