@@ -43,6 +43,8 @@ export interface GradeSheet {
   currentMonth?: string;
   /** Months whose period (trimester) the director closed, when the server says: read-only for everyone. */
   closedMonths?: string[];
+  /** Months no period grades, when the server says: still capturable, but no boleta counts them. */
+  unmappedMonths?: string[];
   editable: boolean;
   readOnlyReason?: string;
   rows: MonthlyGradeRow[];
@@ -213,6 +215,8 @@ export interface MonthChip {
   future: boolean;
   /** Its period is closed: read-only until the director reopens it. */
   closed: boolean;
+  /** No period grades it: capturable, but it counts in no boleta. */
+  unmapped: boolean;
 }
 
 function splitMonth(month: string): { year: string; index: number } {
@@ -224,8 +228,14 @@ function splitMonth(month: string): { year: string; index: number } {
  * "Sep", "Oct"… — with the year only when a short name would repeat. A month
  * after `currentMonth` is `future`; without it nothing is (the server decides).
  */
-export function monthChips(months: readonly string[], currentMonth?: string, closedMonths: readonly string[] = []): MonthChip[] {
+export function monthChips(
+  months: readonly string[],
+  currentMonth?: string,
+  closedMonths: readonly string[] = [],
+  unmappedMonths: readonly string[] = [],
+): MonthChip[] {
   const closed = new Set(closedMonths);
+  const unmapped = new Set(unmappedMonths);
   const shortOf = (m: string): string => SHORT[splitMonth(m).index] ?? m;
   const seen = new Map<string, number>();
   for (const m of months) seen.set(shortOf(m), (seen.get(shortOf(m)) ?? 0) + 1);
@@ -239,6 +249,7 @@ export function monthChips(months: readonly string[], currentMonth?: string, clo
       // "YYYY-MM" strings order like the months they name.
       future: currentMonth !== undefined && month > currentMonth,
       closed: closed.has(month),
+      unmapped: unmapped.has(month),
     };
   });
 }

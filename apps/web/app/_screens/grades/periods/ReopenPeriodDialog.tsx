@@ -1,36 +1,46 @@
 "use client";
 
-import { useState, type ReactElement } from "react";
+import { useRef, useState, type ReactElement } from "react";
 
 import { Btn } from "../../../_design/Controls";
 import { DrawerShell } from "../../../_design/DrawerShell";
-import { GradeRequestError } from "../../../grades/monthly";
 import type { GradingPeriod, PeriodsClient } from "../../../grades/periods";
 import { ErrorAlert } from "../../config/parts";
 import { periodTitle } from "./format";
+import { reopenRefusal } from "./refusals";
 
 export interface ReopenPeriodDialogProps {
   period: GradingPeriod;
   client: PeriodsClient;
   onClose: () => void;
   onReopened: () => void;
+  /** The period was already open (someone reopened it first): reload and say so. */
+  onStale: (message: string) => void;
 }
 
-const REOPEN_FAILED = "No se pudo reabrir el periodo. Intenta de nuevo.";
-
 /** Reopening lets grades change again; the families keep the current boleta until the next close issues a new version. */
-export function ReopenPeriodDialog({ period, client, onClose, onReopened }: ReopenPeriodDialogProps): ReactElement {
+export function ReopenPeriodDialog({ period, client, onClose, onReopened, onStale }: ReopenPeriodDialogProps): ReactElement {
   const [error, setError] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  // A ref, not the state: two clicks inside one render would both read `busy` as false.
+  const inFlight = useRef(false);
 
   const reopen = async (): Promise<void> => {
-    if (busy) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     try {
       await client.reopen(period.termId);
       onReopened();
     } catch (err) {
-      setError(err instanceof GradeRequestError && err.detail !== "" ? err.detail : REOPEN_FAILED);
+      const refusal = reopenRefusal(err);
+      if (refusal.kind === "stale") {
+        onStale(refusal.toast);
+        return;
+      }
+      setError(refusal.text);
+    } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };

@@ -91,11 +91,15 @@ describe("monthChips", () => {
   });
 
   it("gives every chip its full name", () => {
-    expect(monthChips(["2026-01"])[0]).toEqual({ month: "2026-01", label: "Ene", fullName: "enero de 2026", future: false, closed: false });
+    expect(monthChips(["2026-01"])[0]).toEqual({ month: "2026-01", label: "Ene", fullName: "enero de 2026", future: false, closed: false, unmapped: false });
   });
 
   it("marks the months after the server's current month as future", () => {
     expect(monthChips(["2026-09", "2026-10", "2026-11", "2027-01"], "2026-10").map((c) => c.future)).toEqual([false, false, true, true]);
+  });
+
+  it("marks the months no period grades as unmapped", () => {
+    expect(monthChips(["2026-07", "2026-08", "2026-09"], undefined, [], ["2026-07", "2026-08"]).map((c) => c.unmapped)).toEqual([true, true, false]);
   });
 
   it("marks nothing future when the server did not say what month it is", () => {

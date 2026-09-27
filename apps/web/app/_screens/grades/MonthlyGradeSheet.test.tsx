@@ -541,6 +541,17 @@ describe("MonthlyGradeSheet — closed period (T7)", () => {
     expect(client.save).toHaveBeenCalledTimes(1);
   });
 
+  it("hints \"Sin periodo\" on the months no period grades; they stay capturable", async () => {
+    const unmapped: GradeSheet = { ...SHEET, unmappedMonths: ["2026-08"] };
+    await renderSheet(fakeClient(unmapped));
+
+    const august = screen.getByRole("button", { name: /Ago/ });
+    expect(august).toHaveAttribute("data-unmapped", "true");
+    expect(august).toHaveTextContent("Sin periodo");
+    expect(august).toHaveAttribute("title", "agosto de 2026 · Sin periodo");
+    expect(screen.getByRole("button", { name: "Sep" })).not.toHaveAttribute("data-unmapped");
+  });
+
   it("puts a lock on the months of a closed period and shows the read-only reason", async () => {
     const closed: GradeSheet = { ...SHEET, closedMonths: ["2026-08", "2026-09"], editable: false, readOnlyReason: "El periodo está cerrado" };
     await renderSheet(fakeClient(closed));

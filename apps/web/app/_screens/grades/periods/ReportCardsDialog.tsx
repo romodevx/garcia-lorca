@@ -16,6 +16,8 @@ export interface ReportCardsDialogProps {
   cycleId: string;
   client: PeriodsClient;
   onClose: () => void;
+  /** Hands the PDF to the browser; injectable so tests never touch object URLs or timers. */
+  download?: (blob: Blob, fileName: string) => void;
 }
 
 const TH: CSSProperties = { padding: "8px 6px", fontSize: 12.5, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--text-faint)", textAlign: "left" };
@@ -24,7 +26,7 @@ const TD: CSSProperties = { padding: "10px 6px", fontSize: 15, borderTop: "1px s
 const average = (value: number | null): string => (value === null ? "—" : value.toFixed(1));
 
 /** A group's boletas for the term, each one a PDF on demand. */
-export function ReportCardsDialog({ period, cycleId, client, onClose }: ReportCardsDialogProps): ReactElement {
+export function ReportCardsDialog({ period, cycleId, client, onClose, download: save = downloadBlob }: ReportCardsDialogProps): ReactElement {
   const groups = useLevelGroups(cycleId, period.levelId);
   const [groupId, setGroupId] = useState("");
   const cards = useReportCards(client, period.termId, groupId);
@@ -38,7 +40,8 @@ export function ReportCardsDialog({ period, cycleId, client, onClose }: ReportCa
   const download = async (card: ReportCard): Promise<void> => {
     setDownloadError(undefined);
     try {
-      downloadBlob(await client.reportCardPdf(card.id), boletaFileName(card.studentName, period.termName));
+      const file = await client.reportCardPdf(card.id);
+      save(file.blob, file.fileName ?? boletaFileName(card.studentName, period.termName, card.version));
     } catch {
       setDownloadError(`No se pudo descargar la boleta de ${card.studentName}.`);
     }

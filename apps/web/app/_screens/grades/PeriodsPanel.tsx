@@ -22,6 +22,12 @@ interface OpenDialog {
   period: GradingPeriod;
 }
 
+/** Which card takes the focus after its dialog finished, and a counter so the same card can take it twice. */
+interface FocusRequest {
+  termId: string;
+  token: number;
+}
+
 const TOAST_MS = 4000;
 
 function publishedMessage(result: CloseResult): string {
@@ -49,6 +55,7 @@ export function PeriodsPanel({ canClose }: PeriodsPanelProps): ReactElement {
   const { load, reload } = usePeriods(client);
   const [dialog, setDialog] = useState<OpenDialog | undefined>(undefined);
   const [toast, setToast] = useState<string | undefined>(undefined);
+  const [focus, setFocus] = useState<FocusRequest | undefined>(undefined);
 
   useEffect(() => {
     if (toast === undefined) return;
@@ -57,6 +64,10 @@ export function PeriodsPanel({ canClose }: PeriodsPanelProps): ReactElement {
   }, [toast]);
 
   const done = (message: string): void => {
+    if (dialog !== undefined) {
+      const termId = dialog.period.termId;
+      setFocus((prev) => ({ termId, token: (prev?.token ?? 0) + 1 }));
+    }
     setDialog(undefined);
     setToast(message);
     reload();
@@ -74,16 +85,24 @@ export function PeriodsPanel({ canClose }: PeriodsPanelProps): ReactElement {
         <section key={level.levelId} aria-labelledby={`level-${level.levelId}`}>
           <h2 id={`level-${level.levelId}`} style={{ fontSize: 18, fontWeight: 700, color: "var(--text)", marginBottom: 10 }}>{level.levelName}</h2>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 280px), 1fr))", gap: 14 }}>
-            {level.periods.map((p) => <PeriodCard key={p.termId} period={p} canClose={canClose} onAction={(action, period) => setDialog({ action, period })} />)}
+            {level.periods.map((p) => (
+              <PeriodCard
+                key={p.termId}
+                period={p}
+                canClose={canClose}
+                focusToken={focus?.termId === p.termId ? focus.token : undefined}
+                onAction={(action, period) => setDialog({ action, period })}
+              />
+            ))}
           </div>
         </section>
       ))}
 
       {dialog?.action === "close" && (
-        <ClosePeriodDialog period={dialog.period} client={client} onClose={dismiss} onClosed={(result) => done(publishedMessage(result))} />
+        <ClosePeriodDialog period={dialog.period} client={client} onClose={dismiss} onClosed={(result) => done(publishedMessage(result))} onStale={done} />
       )}
       {dialog?.action === "reopen" && (
-        <ReopenPeriodDialog period={dialog.period} client={client} onClose={dismiss} onReopened={() => done("Periodo reabierto")} />
+        <ReopenPeriodDialog period={dialog.period} client={client} onClose={dismiss} onReopened={() => done("Periodo reabierto")} onStale={done} />
       )}
       {dialog?.action === "cards" && <ReportCardsDialog period={dialog.period} cycleId={load.cycle.id} client={client} onClose={dismiss} />}
       {toast !== undefined && <Toast>{toast}</Toast>}

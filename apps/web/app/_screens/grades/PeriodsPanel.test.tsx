@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -6,6 +6,7 @@ import * as configApi from "../../config/api";
 import { GradeRequestError } from "../../grades/monthly";
 import * as periodsApi from "../../grades/periods";
 import type { GradingPeriod, PeriodCaptureProgress, PeriodsClient } from "../../grades/periods";
+import { downloadBlob } from "./periods/downloadBlob";
 import { PeriodsPanel } from "./PeriodsPanel";
 
 vi.mock("../../config/api", () => ({
@@ -14,6 +15,7 @@ vi.mock("../../config/api", () => ({
   listLabelledGroups: vi.fn(),
 }));
 vi.mock(import("../../grades/periods"), async (original) => ({ ...(await original()), periodsClient: vi.fn() }));
+vi.mock("./periods/downloadBlob", () => ({ downloadBlob: vi.fn() }));
 
 const config = vi.mocked(configApi);
 const periods = vi.mocked(periodsApi);
@@ -32,9 +34,9 @@ const SECUNDARIA: GradingPeriod = { ...OPEN, termId: "t4", levelId: "l2", levelN
 const MISSING: PeriodCaptureProgress = {
   termId: "t1", months: OPEN.months, expected: 450, captured: 412,
   missing: [
-    { groupId: "g1", groupLabel: "1° PRIMARIA · A", subjectName: "Matemáticas", teacherName: "Ada Lovelace", missingCount: 30 },
-    { groupId: "g1", groupLabel: "1° PRIMARIA · A", subjectName: "Historia", teacherName: "Alan Turing", missingCount: 5 },
-    { groupId: "g2", groupLabel: "2° PRIMARIA · A", subjectName: "Español", teacherName: "Grace Hopper", missingCount: 3 },
+    { groupId: "g1", groupLabel: "1° PRIMARIA · A", subjectId: "s1", subjectName: "Matemáticas", teacherName: "Ada Lovelace", missingCount: 30 },
+    { groupId: "g1", groupLabel: "1° PRIMARIA · A", subjectId: "s2", subjectName: "Historia", teacherName: "Alan Turing", missingCount: 5 },
+    { groupId: "g2", groupLabel: "2° PRIMARIA · A", subjectId: "s3", subjectName: "Español", teacherName: "Grace Hopper", missingCount: 3 },
   ],
 };
 const COMPLETE: PeriodCaptureProgress = { ...MISSING, captured: 450, missing: [] };
@@ -49,8 +51,11 @@ beforeEach(() => {
     close: vi.fn().mockResolvedValue({ status: "closed", version: 1, reportCards: 124 }),
     reopen: vi.fn().mockResolvedValue({ status: "open" }),
     reportCards: vi.fn().mockResolvedValue([]),
-    reportCardPdf: vi.fn().mockResolvedValue(new Blob(["%PDF"], { type: "application/pdf" })),
+    reportCardPdf: vi.fn().mockResolvedValue({ blob: new Blob(["%PDF"], { type: "application/pdf" }) }),
   };
+  // Only the clock: the capture review compares the term's months with today's (December 2026 at the school).
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-12-15T18:00:00Z"));
   periods.periodsClient.mockReturnValue(client as unknown as PeriodsClient);
   config.listCycles.mockResolvedValue([
     { id: "c0", name: "2025-2026", status: "closed", startsOn: "2025-08-01", endsOn: "2026-07-31" },
@@ -64,6 +69,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.clearAllMocks();
   vi.unstubAllGlobals();
 });
@@ -196,19 +203,22 @@ describe("PeriodsPanel — Reabrir", () => {
 describe("PeriodsPanel — Ver boletas", () => {
   const BOLETA = { id: "rc1", studentId: "s1", studentName: "José Núñez", groupLabel: "1° PRIMARIA · A", version: 2, issuedAt: "2026-12-01T18:00:00Z", generalAverage: 8.7 };
 
-  it("lists a group's boletas and downloads the PDF with its name", async () => {
-    const user = userEvent.setup();
-    client.reportCards.mockResolvedValue([BOLETA, { ...BOLETA, id: "rc2", studentName: "Ana Ruiz", version: 1, generalAverage: null }]);
-    const createObjectURL = vi.fn(() => "blob:boleta");
-    Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() });
-    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-    render(<PeriodsPanel canClose />);
+  const openGroup = async (user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> => {
     await user.click(within(await card("PRIMARIA · 2.º trimestre")).getByRole("button", { name: "Ver boletas" }));
-
     const dialog = await screen.findByRole("dialog", { name: "Boletas · PRIMARIA · 2.º trimestre" });
     const groupSelect = await within(dialog).findByRole("combobox", { name: "Grupo" });
     expect(within(groupSelect).queryByRole("option", { name: "1° SECUNDARIA · A" })).toBeNull();
     await user.selectOptions(groupSelect, "g1");
+    return dialog;
+  };
+
+  it("lists a group's boletas and downloads the PDF with the server's file name", async () => {
+    const user = userEvent.setup();
+    const blob = new Blob(["%PDF"], { type: "application/pdf" });
+    client.reportCardPdf.mockResolvedValue({ blob, fileName: "boleta-2026-00042-2-o-trimestre-v2.pdf" });
+    client.reportCards.mockResolvedValue([BOLETA, { ...BOLETA, id: "rc2", studentName: "Ana Ruiz", version: 1, generalAverage: null }]);
+    render(<PeriodsPanel canClose />);
+    const dialog = await openGroup(user);
 
     expect(client.reportCards).toHaveBeenCalledWith("t2", "g1");
     const row = await within(dialog).findByRole("row", { name: /José Núñez/ });
@@ -218,11 +228,19 @@ describe("PeriodsPanel — Ver boletas", () => {
 
     await user.click(within(row).getByRole("button", { name: "Descargar PDF de José Núñez" }));
 
-    await waitFor(() => expect(click).toHaveBeenCalled());
+    await waitFor(() => expect(downloadBlob).toHaveBeenCalledWith(blob, "boleta-2026-00042-2-o-trimestre-v2.pdf"));
     expect(client.reportCardPdf).toHaveBeenCalledWith("rc1");
-    const anchor = click.mock.contexts[0] as HTMLAnchorElement;
-    expect(anchor.download).toBe("boleta-jose-nunez-2-o-trimestre.pdf");
-    expect(anchor.href).toBe("blob:boleta");
+  });
+
+  it("without the server's file name it names the PDF boleta-<alumno>-<periodo>-v<N>.pdf", async () => {
+    const user = userEvent.setup();
+    client.reportCards.mockResolvedValue([BOLETA]);
+    render(<PeriodsPanel canClose />);
+    const dialog = await openGroup(user);
+
+    await user.click(await within(dialog).findByRole("button", { name: "Descargar PDF de José Núñez" }));
+
+    await waitFor(() => expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), "boleta-jose-nunez-2-o-trimestre-v2.pdf"));
   });
 
   it("says when a group has no boletas yet", async () => {
@@ -234,5 +252,187 @@ describe("PeriodsPanel — Ver boletas", () => {
     await user.selectOptions(await within(dialog).findByRole("combobox", { name: "Grupo" }), "g1");
 
     expect(await within(dialog).findByText("Este grupo aún no tiene boletas de este periodo.")).toBeInTheDocument();
+  });
+});
+
+const openClose = async (user: ReturnType<typeof userEvent.setup>, name = "PRIMARIA · 1.er trimestre"): Promise<HTMLElement> => {
+  await user.click(within(await card(name)).getByRole("button", { name: "Revisar y cerrar" }));
+  return screen.findByRole("dialog");
+};
+
+describe("PeriodsPanel — a period whose months have not finished", () => {
+  const SPRING: GradingPeriod = {
+    ...OPEN, termId: "t3", termName: "3.er trimestre", ordinal: 3, months: ["2027-04", "2027-05", "2027-06"], progress: { captured: 0, expected: 450 },
+  };
+
+  it("warns which months have not finished instead of calling the capture complete, and only offers closing anyway", async () => {
+    const user = userEvent.setup();
+    client.list.mockResolvedValue([SPRING]);
+    client.progress.mockResolvedValue({ termId: "t3", months: SPRING.months, expected: 450, captured: 450, missing: [], unfinishedMonths: ["2027-04", "2027-05", "2027-06"] });
+    render(<PeriodsPanel canClose />);
+    const dialog = await openClose(user, "PRIMARIA · 3.er trimestre");
+
+    expect(await within(dialog).findByText("Aún no terminan sus meses: Abr, May, Jun")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Todas las calificaciones están capturadas.")).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: "Cerrar periodo" })).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: "Cerrar de todos modos" }));
+    expect(client.close).toHaveBeenCalledWith("t3", true);
+  });
+
+  it("works it out from today's month when the server does not list them", async () => {
+    const user = userEvent.setup();
+    client.list.mockResolvedValue([SPRING]);
+    client.progress.mockResolvedValue({ termId: "t3", months: SPRING.months, expected: 450, captured: 450, missing: [] });
+    render(<PeriodsPanel canClose />);
+    const dialog = await openClose(user, "PRIMARIA · 3.er trimestre");
+
+    expect(await within(dialog).findByText("Aún no terminan sus meses: Abr, May, Jun")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Todas las calificaciones están capturadas.")).toBeNull();
+  });
+
+  it("with nothing expected it never says the capture is complete", async () => {
+    const user = userEvent.setup();
+    client.progress.mockResolvedValue({ ...COMPLETE, expected: 0, captured: 0 });
+    render(<PeriodsPanel canClose />);
+    const dialog = await openClose(user);
+
+    expect(await within(dialog).findByRole("button", { name: "Cerrar de todos modos" })).toBeInTheDocument();
+    expect(within(dialog).queryByText("Todas las calificaciones están capturadas.")).toBeNull();
+    expect(within(dialog).getByText(/no hay calificaciones que revisar/i)).toBeInTheDocument();
+  });
+
+  it("lists two subjects that share a name as two rows (keyed by subject id)", async () => {
+    const user = userEvent.setup();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    client.progress.mockResolvedValue({
+      ...MISSING,
+      missing: [
+        { groupId: "g1", groupLabel: "1° PRIMARIA · A", subjectId: "s1", subjectName: "Taller", teacherName: "Ada Lovelace", missingCount: 2 },
+        { groupId: "g1", groupLabel: "1° PRIMARIA · A", subjectId: "s2", subjectName: "Taller", teacherName: "Ada Lovelace", missingCount: 3 },
+      ],
+    });
+    render(<PeriodsPanel canClose />);
+    const dialog = await openClose(user);
+
+    expect(await within(dialog).findByText("Taller · Ada Lovelace · faltan 2")).toBeInTheDocument();
+    expect(within(dialog).getByText("Taller · Ada Lovelace · faltan 3")).toBeInTheDocument();
+    expect(errors.mock.calls.flat().join(" ")).not.toMatch(/same key/);
+  });
+});
+
+describe("PeriodsPanel — refusals that mean something", () => {
+  it("ALREADY_CLOSED: someone closed it meanwhile — reload, dismiss and say so", async () => {
+    const user = userEvent.setup();
+    client.progress.mockResolvedValue(COMPLETE);
+    client.close.mockRejectedValueOnce(new GradeRequestError(409, "El periodo ya está cerrado", "ALREADY_CLOSED"));
+    render(<PeriodsPanel canClose />);
+    const dialog = await openClose(user);
+    await user.click(await within(dialog).findByRole("button", { name: "Cerrar periodo" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("El periodo ya estaba cerrado");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(client.list).toHaveBeenCalledTimes(2);
+  });
+
+  it("ALREADY_OPEN on reopen: reload, dismiss and say so", async () => {
+    const user = userEvent.setup();
+    client.reopen.mockRejectedValueOnce(new GradeRequestError(409, "El periodo ya está abierto", "ALREADY_OPEN"));
+    render(<PeriodsPanel canClose />);
+    await user.click(within(await card("PRIMARIA · 2.º trimestre")).getByRole("button", { name: "Reabrir" }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Reabrir periodo" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("El periodo ya estaba abierto");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(client.list).toHaveBeenCalledTimes(2);
+  });
+
+  it("TERM_WITHOUT_MONTHS says where to assign them", async () => {
+    const user = userEvent.setup();
+    client.progress.mockResolvedValue(COMPLETE);
+    client.close.mockRejectedValueOnce(new GradeRequestError(409, "El periodo no tiene meses asignados", "TERM_WITHOUT_MONTHS"));
+    render(<PeriodsPanel canClose />);
+    const dialog = await openClose(user);
+    await user.click(await within(dialog).findByRole("button", { name: "Cerrar periodo" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Configuración → Periodos");
+  });
+
+  it("LEVEL_NOT_GRADED says the level has no numeric grades", async () => {
+    const user = userEvent.setup();
+    client.progress.mockResolvedValue(COMPLETE);
+    client.close.mockRejectedValueOnce(new GradeRequestError(409, "", "LEVEL_NOT_GRADED"));
+    render(<PeriodsPanel canClose />);
+    const dialog = await openClose(user);
+    await user.click(await within(dialog).findByRole("button", { name: "Cerrar periodo" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(/no se califica con números/);
+  });
+});
+
+describe("PeriodsPanel — focus and double submits", () => {
+  it("after closing, the focus lands on the period's heading, never on the page body", async () => {
+    const user = userEvent.setup();
+    client.progress.mockResolvedValue(COMPLETE);
+    client.list.mockResolvedValueOnce([OPEN, CLOSED]).mockResolvedValue([{ ...OPEN, status: "closed", version: 1 }, CLOSED]);
+    render(<PeriodsPanel canClose />);
+    const dialog = await openClose(user);
+    await user.click(await within(dialog).findByRole("button", { name: "Cerrar periodo" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(within(screen.getByRole("article", { name: "PRIMARIA · 1.er trimestre" })).getByText("Cerrado v1")).toBeInTheDocument());
+    expect(within(screen.getByRole("article", { name: "PRIMARIA · 1.er trimestre" })).getByRole("heading", { name: "1.er trimestre" })).toHaveFocus();
+  });
+
+  it("after reopening, the focus lands on the period's heading", async () => {
+    const user = userEvent.setup();
+    client.list.mockResolvedValueOnce([OPEN, CLOSED]).mockResolvedValue([OPEN, { ...CLOSED, status: "open" }]);
+    render(<PeriodsPanel canClose />);
+    await user.click(within(await card("PRIMARIA · 2.º trimestre")).getByRole("button", { name: "Reabrir" }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Reabrir periodo" }));
+
+    await waitFor(() => expect(within(screen.getByRole("article", { name: "PRIMARIA · 2.º trimestre" })).getByText("Abierto")).toBeInTheDocument());
+    expect(within(screen.getByRole("article", { name: "PRIMARIA · 2.º trimestre" })).getByRole("heading", { name: "2.º trimestre" })).toHaveFocus();
+  });
+
+  it("two clicks on Cerrar periodo in the same instant close once", async () => {
+    const user = userEvent.setup();
+    client.progress.mockResolvedValue(COMPLETE);
+    client.close.mockReturnValue(new Promise(() => {}));
+    render(<PeriodsPanel canClose />);
+    const dialog = await openClose(user);
+    const button = await within(dialog).findByRole("button", { name: "Cerrar periodo" });
+
+    act(() => {
+      button.click();
+      button.click();
+    });
+
+    expect(client.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("two clicks on Reabrir periodo in the same instant reopen once", async () => {
+    const user = userEvent.setup();
+    client.reopen.mockReturnValue(new Promise(() => {}));
+    render(<PeriodsPanel canClose />);
+    await user.click(within(await card("PRIMARIA · 2.º trimestre")).getByRole("button", { name: "Reabrir" }));
+    const button = within(await screen.findByRole("dialog")).getByRole("button", { name: "Reabrir periodo" });
+
+    act(() => {
+      button.click();
+      button.click();
+    });
+
+    expect(client.reopen).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("PeriodsPanel — a period without months", () => {
+  it("offers no close; it says where to assign its months", async () => {
+    client.list.mockResolvedValue([{ ...OPEN, months: [], progress: { captured: 0, expected: 0 } }]);
+    render(<PeriodsPanel canClose />);
+
+    const open = await card("PRIMARIA · 1.er trimestre");
+    expect(within(open).queryByRole("button", { name: "Revisar y cerrar" })).toBeNull();
+    expect(within(open).getByText("Asigna meses a este periodo en Configuración → Periodos")).toBeInTheDocument();
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactElement } from "react";
+import { useEffect, useRef, type ReactElement } from "react";
 
 import { Btn } from "../../../_design/Controls";
 import { Icon } from "../../../_design/Icon";
@@ -15,7 +15,14 @@ export interface PeriodCardProps {
   /** `grades:close`: only then are closing and reopening offered. */
   canClose: boolean;
   onAction: (action: PeriodAction, period: GradingPeriod) => void;
+  /**
+   * Bumped after this period was closed or reopened: the button that opened the
+   * dialog is gone, so the focus comes to the card's heading instead of the body.
+   */
+  focusToken?: number;
 }
+
+export const NO_MONTHS_HINT = "Asigna meses a este periodo en Configuración → Periodos";
 
 function StatusPill({ period }: { period: GradingPeriod }): ReactElement {
   const closed = period.status === "closed";
@@ -31,8 +38,14 @@ function StatusPill({ period }: { period: GradingPeriod }): ReactElement {
 }
 
 /** One trimester of one level: where its capture stands and what the director can do with it. */
-export function PeriodCard({ period, canClose, onAction }: PeriodCardProps): ReactElement {
+export function PeriodCard({ period, canClose, onAction, focusToken }: PeriodCardProps): ReactElement {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (focusToken !== undefined) heading.current?.focus();
+  }, [focusToken]);
+
   const closed = period.status === "closed";
+  const hasMonths = period.months.length > 0;
   const closedLine = closed && period.closedAt !== undefined
     ? `${dayLabel(period.closedAt)}${period.closedByName !== undefined ? ` · por ${period.closedByName}` : ""}`
     : undefined;
@@ -42,16 +55,17 @@ export function PeriodCard({ period, canClose, onAction }: PeriodCardProps): Rea
       style={{ display: "grid", gap: 12, alignContent: "start", padding: "18px 20px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-lg)", boxShadow: "var(--shadow-card)" }}
     >
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <h3 style={{ fontSize: 17, fontWeight: 700, color: "var(--text)" }}>{period.termName}</h3>
+        <h3 ref={heading} tabIndex={-1} style={{ fontSize: 17, fontWeight: 700, color: "var(--text)", outlineOffset: 3 }}>{period.termName}</h3>
         <StatusPill period={period} />
       </header>
       {closedLine !== undefined && <p style={{ fontSize: 13, color: "var(--text-faint)" }}>{closedLine}</p>}
       <p style={{ fontSize: 14, color: "var(--text-muted)" }}>
-        {period.months.length > 0 ? monthsLabel(period.months) : "Sin meses asignados"}
+        {hasMonths ? monthsLabel(period.months) : "Sin meses asignados"}
       </p>
       <ProgressBar captured={period.progress.captured} expected={period.progress.expected} />
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {canClose && !closed && <Btn kind="forest" icon="lock" onClick={() => onAction("close", period)} style={{ height: 44, fontSize: 15 }}>Revisar y cerrar</Btn>}
+        {canClose && !closed && !hasMonths && <p style={{ fontSize: 14, color: "var(--warn-fg)", fontWeight: 600 }}>{NO_MONTHS_HINT}</p>}
+        {canClose && !closed && hasMonths && <Btn kind="forest" icon="lock" onClick={() => onAction("close", period)} style={{ height: 44, fontSize: 15 }}>Revisar y cerrar</Btn>}
         {canClose && closed && <Btn kind="ghost" onClick={() => onAction("reopen", period)} style={{ height: 44, fontSize: 15 }}>Reabrir</Btn>}
         {(closed || period.version > 0) && <Btn kind="outline" icon="documents" onClick={() => onAction("cards", period)} style={{ height: 44, fontSize: 15 }}>Ver boletas</Btn>}
       </div>

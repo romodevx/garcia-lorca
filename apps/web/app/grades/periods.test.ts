@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { GradeRequestError } from "./monthly";
-import { boletaFileName, periodsClient } from "./periods";
+import { boletaFileName, fileNameFromDisposition, periodsClient, type MissingCapture, type ReportCard } from "./periods";
 
 const BASE = "http://gw";
 
@@ -80,19 +80,50 @@ describe("periodsClient", () => {
     expect(call(fetchMock)[0]).toBe("http://gw/api/v1/grades/report-cards?termId=t1&groupId=g1");
   });
 
-  it("fetches a boleta's PDF as a blob, with credentials", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(new Blob(["%PDF-1.4"], { type: "application/pdf" }), { status: 200 }));
+  it("fetches a boleta's PDF as a blob, with credentials, and the server's file name", async () => {
+    const headers = { "Content-Disposition": 'attachment; filename="boleta-2026-00042-1-er-trimestre-v1.pdf"' };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new Blob(["%PDF-1.4"], { type: "application/pdf" }), { status: 200, headers }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const blob = await api.reportCardPdf("rc1");
+    const { blob, fileName } = await api.reportCardPdf("rc1");
     expect(blob.size).toBeGreaterThan(0);
+    expect(fileName).toBe("boleta-2026-00042-1-er-trimestre-v1.pdf");
     expect(call(fetchMock)[0]).toBe("http://gw/api/v1/grades/report-cards/rc1/pdf");
     expect(call(fetchMock)[1].credentials).toBe("include");
+  });
+
+  it("a PDF without a readable Content-Disposition has no file name (the caller falls back)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(new Blob(["%PDF-1.4"]), { status: 200 })));
+
+    expect((await api.reportCardPdf("rc1")).fileName).toBeUndefined();
   });
 });
 
 describe("boletaFileName", () => {
-  it("is boleta-<alumno>-<trimestre>.pdf, without accents or spaces", () => {
-    expect(boletaFileName("José Núñez Peña", "1.er trimestre")).toBe("boleta-jose-nunez-pena-1-er-trimestre.pdf");
+  it("is boleta-<alumno>-<trimestre>-v<N>.pdf, without accents or spaces", () => {
+    expect(boletaFileName("José Núñez Peña", "1.er trimestre", 2)).toBe("boleta-jose-nunez-pena-1-er-trimestre-v2.pdf");
+  });
+});
+
+describe("fileNameFromDisposition", () => {
+  it.each([
+    ['attachment; filename="boleta-2026-00042-1-er-trimestre-v1.pdf"', "boleta-2026-00042-1-er-trimestre-v1.pdf"],
+    ["attachment; filename=boleta-a-v1.pdf", "boleta-a-v1.pdf"],
+    ["attachment; filename*=UTF-8''boleta-jos%C3%A9-v1.pdf", "boleta-josé-v1.pdf"],
+  ])("reads %s", (header, expected) => {
+    expect(fileNameFromDisposition(header)).toBe(expected);
+  });
+
+  it.each([null, "", "attachment", 'attachment; filename="../../etc/passwd"'])("gives nothing usable for %s", (header) => {
+    expect(fileNameFromDisposition(header)).toBeUndefined();
+  });
+});
+
+describe("contract types (openapi GradePeriodProgress / ReportCardSummary)", () => {
+  it("a missing capture names its subject by id and a boleta may not have an issue date yet", () => {
+    const missing: MissingCapture = { groupId: "g", groupLabel: "1° A", subjectId: "s", subjectName: "Mate", teacherName: "Ada", missingCount: 1 };
+    const card: ReportCard = { id: "rc", studentId: "st", studentName: "Ana", groupLabel: "1° A", version: 1, issuedAt: null, generalAverage: null };
+    expect(missing.subjectId).toBe("s");
+    expect(card.issuedAt).toBeNull();
   });
 });

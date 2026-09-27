@@ -34,6 +34,7 @@ export interface GradingPeriod {
 export interface MissingCapture {
   groupId: string;
   groupLabel: string;
+  subjectId: string;
   subjectName: string;
   teacherName: string;
   missingCount: number;
@@ -45,6 +46,8 @@ export interface PeriodCaptureProgress {
   expected: number;
   captured: number;
   missing: MissingCapture[];
+  /** The term's months after the server's current month: their grades cannot be complete yet. */
+  unfinishedMonths?: string[];
 }
 
 export interface CloseResult {
@@ -59,13 +62,23 @@ export interface ReportCard {
   studentName: string;
   groupLabel: string;
   version: number;
-  issuedAt: string;
+  issuedAt: string | null;
   generalAverage: number | null;
+}
+
+/** A boleta's PDF and the name the server gave it, when the browser may read it. */
+export interface ReportCardFile {
+  blob: Blob;
+  fileName?: string;
 }
 
 /** Codes a close can be refused with. */
 export const MISSING_GRADES = "MISSING_GRADES";
 export const TERM_WITHOUT_MONTHS = "TERM_WITHOUT_MONTHS";
+export const ALREADY_CLOSED = "ALREADY_CLOSED";
+export const LEVEL_NOT_GRADED = "LEVEL_NOT_GRADED";
+/** The code a reopen of an open period is refused with. */
+export const ALREADY_OPEN = "ALREADY_OPEN";
 
 export interface PeriodsClient {
   list: (cycleId: string) => Promise<GradingPeriod[]>;
@@ -73,7 +86,7 @@ export interface PeriodsClient {
   close: (termId: string, force: boolean) => Promise<CloseResult>;
   reopen: (termId: string) => Promise<{ status: "open" }>;
   reportCards: (termId: string, groupId: string) => Promise<ReportCard[]>;
-  reportCardPdf: (reportCardId: string) => Promise<Blob>;
+  reportCardPdf: (reportCardId: string) => Promise<ReportCardFile>;
 }
 
 export function periodsClient(baseURL: string): PeriodsClient {
@@ -103,7 +116,10 @@ export function periodsClient(baseURL: string): PeriodsClient {
       const res = await send(`/report-cards?${new URLSearchParams({ termId, groupId }).toString()}`);
       return ((await res.json()) as { reportCards?: ReportCard[] }).reportCards ?? [];
     },
-    reportCardPdf: async (reportCardId) => (await send(`/report-cards/${id(reportCardId)}/pdf`)).blob(),
+    reportCardPdf: async (reportCardId) => {
+      const res = await send(`/report-cards/${id(reportCardId)}/pdf`);
+      return { blob: await res.blob(), fileName: fileNameFromDisposition(res.headers.get("Content-Disposition")) };
+    },
   };
 }
 
@@ -120,7 +136,31 @@ function slug(text: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-/** `boleta-<alumno>-<trimestre>.pdf`. */
-export function boletaFileName(studentName: string, termName: string): string {
-  return `boleta-${slug(studentName)}-${slug(termName)}.pdf`;
+/** `boleta-<alumno>-<trimestre>-v<N>.pdf` — the fallback when the server's name cannot be read. */
+export function boletaFileName(studentName: string, termName: string, version: number): string {
+  return `boleta-${slug(studentName)}-${slug(termName)}-v${version}.pdf`;
+}
+
+const EXTENDED_FILENAME = /filename\*\s*=\s*[^']*'[^']*'([^;]+)/i;
+const PLAIN_FILENAME = /filename\s*=\s*(?:"([^"]*)"|([^;]+))/i;
+
+function decoded(value: string): string | undefined {
+  try {
+    return decodeURIComponent(value.trim());
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The file name in a `Content-Disposition` header (RFC 6266: `filename*` wins
+ * over `filename`). A name with a path in it is refused, never trimmed.
+ */
+export function fileNameFromDisposition(header: string | null): string | undefined {
+  if (header === null) return undefined;
+  const extended = EXTENDED_FILENAME.exec(header)?.[1];
+  const plain = PLAIN_FILENAME.exec(header);
+  const name = extended !== undefined ? decoded(extended) : (plain?.[1] ?? plain?.[2])?.trim();
+  if (name === undefined || name === "" || /[\\/]/.test(name)) return undefined;
+  return name;
 }
