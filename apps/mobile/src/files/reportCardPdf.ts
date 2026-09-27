@@ -9,11 +9,14 @@ import { getAccessToken } from "../api/tokenStore";
  * to the phone's native share / preview sheet.
  *
  * The download is native (expo-file-system `File.downloadFileAsync`) so the
- * bytes never cross the JS bridge. It writes straight to a deterministic file
- * named by student, term and version, overwriting a previous download of the
- * same boleta; any other file in the folder is deleted first, so the cache
- * holds only the boleta being opened (and {@link clearPdfCache} empties it on
- * sign-out). Native downloads bypass {@link apiFetch}, so an expired access
+ * bytes never cross the JS bridge. Each child has a folder
+ * (`cache/boletas/<studentId>/`), so siblings never collide; the file keeps
+ * the server's Content-Disposition name (`boleta-<matrícula>-<periodo>-v<N>.pdf`)
+ * or, when that did not reach the native layer, is renamed to
+ * {@link fallbackPdfName} — never an id, since the parent sees the name when
+ * sharing. Everything else under `boletas/` is deleted first, so the cache holds
+ * only the boleta being opened and a re-download overwrites it
+ * (and {@link clearPdfCache} empties it on sign-out). Native downloads bypass {@link apiFetch}, so an expired access
  * token is handled here the same way: refresh once, retry once.
  */
 
@@ -30,8 +33,10 @@ export class PdfError extends Error {
 export interface PdfDownloadRequest {
   /** Authenticated API path of the PDF. */
   path: string;
-  /** The cache file to write, from {@link pdfFileName}. */
-  fileName: string;
+  /** The child the boleta belongs to: names its cache folder, never the file. */
+  studentId: string;
+  /** Used when the server's filename did not reach the native layer, from {@link fallbackPdfName}. */
+  fallbackName: string;
   /** Fraction 0–1, or null when the server did not send a size. */
   onProgress?: (fraction: number | null) => void;
 }
@@ -77,22 +82,44 @@ function cacheFolder(): Directory {
   return new Directory(Paths.cache, CACHE_FOLDER);
 }
 
-/** Creates the cache folder, deletes everything in it but `fileName`, and answers that target. */
-function prepareTarget(fileName: string): File {
+function storageError(failure: unknown): PdfError {
+  return new PdfError("storage", messageOf(failure));
+}
+
+/**
+ * Empties `boletas/` except this child's (now empty) folder and answers that
+ * folder. A path-like student id is slugged so it stays inside `boletas/`.
+ */
+function prepareStudentFolder(studentId: string): Directory {
   try {
-    const folder = cacheFolder();
-    folder.create({ idempotent: true, intermediates: true });
-    for (const entry of folder.list()) {
-      if (entry.name !== fileName) entry.delete();
+    const root = cacheFolder();
+    const folderName = slug(studentId) || "alumno";
+    root.create({ idempotent: true, intermediates: true });
+    for (const entry of root.list()) {
+      if (entry.name !== folderName) entry.delete();
     }
-    return new File(folder, fileName);
+    const folder = new Directory(root, folderName);
+    folder.create({ idempotent: true, intermediates: true });
+    for (const entry of folder.list()) entry.delete();
+    return folder;
   } catch (failure) {
-    throw new PdfError("storage", messageOf(failure));
+    throw storageError(failure);
   }
 }
 
-async function downloadOnce(request: PdfDownloadRequest, target: File): Promise<File> {
-  return File.downloadFileAsync(apiUrl(request.path), target, {
+/** Gives a file the native layer named from the URL ("pdf") its readable fallback name. */
+function ensurePdfName(file: File, fallbackName: string): File {
+  if (file.name.toLowerCase().endsWith(PDF_EXTENSION)) return file;
+  try {
+    file.rename(fallbackName);
+    return file;
+  } catch (failure) {
+    throw storageError(failure);
+  }
+}
+
+async function downloadOnce(request: PdfDownloadRequest, folder: Directory): Promise<File> {
+  return File.downloadFileAsync(apiUrl(request.path), folder, {
     headers: bearer(),
     idempotent: true,
     onProgress: ({ bytesWritten, totalBytes }) =>
@@ -100,9 +127,9 @@ async function downloadOnce(request: PdfDownloadRequest, target: File): Promise<
   });
 }
 
-async function downloadWithSessionRetry(request: PdfDownloadRequest, target: File): Promise<File> {
+async function downloadWithSessionRetry(request: PdfDownloadRequest, folder: Directory): Promise<File> {
   try {
-    return await downloadOnce(request, target);
+    return await downloadOnce(request, folder);
   } catch (failure) {
     const error = classify(failure);
     if (error.kind !== "session" || !(await refreshOnce())) {
@@ -110,17 +137,17 @@ async function downloadWithSessionRetry(request: PdfDownloadRequest, target: Fil
     }
   }
   try {
-    return await downloadOnce(request, target);
+    return await downloadOnce(request, folder);
   } catch (failure) {
     throw classify(failure);
   }
 }
 
-/** Downloads the PDF into the app cache and answers its local file URI. */
+/** Downloads the PDF into the child's cache folder and answers its local file URI. */
 export async function downloadPdf(request: PdfDownloadRequest): Promise<string> {
-  const target = prepareTarget(request.fileName);
-  const file = await downloadWithSessionRetry(request, target);
-  return file.uri;
+  const folder = prepareStudentFolder(request.studentId);
+  const file = await downloadWithSessionRetry(request, folder);
+  return ensurePdfName(file, request.fallbackName).uri;
 }
 
 /**
@@ -141,7 +168,6 @@ export async function sharePdf(uri: string, title: string): Promise<void> {
 }
 
 export interface PdfFileNameParts {
-  studentId: string;
   /** 0 when the card predates term ordinals. */
   termOrdinal: number;
   termName: string;
@@ -158,8 +184,8 @@ function slug(text: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-/** Student s1, "1.er Trimestre", v2 → "boleta-s1-1er-trimestre-v2.pdf" (unique per child, term and version). */
-export function pdfFileName({ studentId, termOrdinal, termName, version }: PdfFileNameParts): string {
+/** "1.er Trimestre", v2 → "boleta-1er-trimestre-v2.pdf" — no ids: the parent sees this name when sharing. */
+export function fallbackPdfName({ termOrdinal, termName, version }: PdfFileNameParts): string {
   const term = slug(termName) || (termOrdinal > 0 ? `t${termOrdinal}` : "periodo");
-  return `boleta-${slug(studentId)}-${term}-v${version}${PDF_EXTENSION}`;
+  return `boleta-${term}-v${version}${PDF_EXTENSION}`;
 }

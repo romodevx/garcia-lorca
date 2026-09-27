@@ -1,9 +1,10 @@
 import * as Sharing from "expo-sharing";
 import { clearTokens, saveTokens } from "../api/tokenStore";
-import { clearPdfCache, downloadPdf, pdfFileName, PdfError, sharePdf } from "./reportCardPdf";
+import { clearPdfCache, downloadPdf, fallbackPdfName, PdfError, sharePdf } from "./reportCardPdf";
 
 type DownloadOptions = { headers?: Record<string, string>; idempotent?: boolean; onProgress?: (p: { bytesWritten: number; totalBytes: number }) => void };
-type Target = { uri: string; name: string };
+type Folder = { uri: string };
+type Written = { uri: string; name: string };
 
 // The rejections expo-file-system 56 really raises for a non-2xx response
 // (UnableToDownloadException): ios/FileSystemDownload.swift and
@@ -18,7 +19,9 @@ const IOS_OFFLINE = "Unable to download a file: The Internet connection appears 
 const mockDownload = jest.fn();
 const mockCreate = jest.fn();
 const mockDeleted: string[] = [];
-const mockCache = { exists: true, entries: [] as string[], failDelete: false };
+const mockRenamed: string[] = [];
+/** Folder uri → names inside it. */
+const mockCache = { exists: true, entries: {} as Record<string, string[]>, failDelete: false, failRename: false };
 
 jest.mock("expo-file-system", () => {
   function uriOf(parts: Array<string | { uri: string }>): string {
@@ -38,6 +41,12 @@ jest.mock("expo-file-system", () => {
     delete(): void {
       remove(this.uri);
     }
+    rename(next: string): void {
+      if (mockCache.failRename) throw new Error("Unable to move file: exists");
+      mockRenamed.push(next);
+      this.uri = `${this.uri.slice(0, this.uri.lastIndexOf("/"))}/${next}`;
+      this.name = next;
+    }
     static downloadFileAsync(...args: unknown[]): unknown {
       return mockDownload(...args);
     }
@@ -51,10 +60,10 @@ jest.mock("expo-file-system", () => {
       return mockCache.exists;
     }
     create(options: unknown): void {
-      mockCreate(options);
+      mockCreate(this.uri, options);
     }
     list(): MockFile[] {
-      return mockCache.entries.map((name) => new MockFile(this, name));
+      return (mockCache.entries[this.uri] ?? []).map((name) => new MockFile(this, name));
     }
     delete(): void {
       remove(this.uri);
@@ -68,9 +77,11 @@ jest.mock("expo-sharing", () => ({
   shareAsync: jest.fn(async () => undefined),
 }));
 
-/** Resolves like the native download: the File it wrote at the requested target. */
-function writesTarget(): void {
-  mockDownload.mockImplementation(async (_url: string, target: Target) => target);
+const { File: MockFile } = jest.requireMock("expo-file-system") as { File: new (...parts: Array<string | Folder>) => Written };
+
+/** Resolves like the native download into a folder: the File it named `name`. */
+function writes(name: string): void {
+  mockDownload.mockImplementation(async (_url: string, folder: Folder) => new MockFile(folder, name));
 }
 
 function refreshSucceeds(): void {
@@ -81,71 +92,109 @@ function refreshSucceeds(): void {
   })) as unknown as typeof fetch;
 }
 
-const NAME = "boleta-s1-1er-trimestre-v2.pdf";
+const ROOT = "file:///cache/boletas";
+const SERVER_NAME = "boleta-A0123-1er-trimestre-v2.pdf";
+const REQUEST = { path: "/api/v1/x/pdf", studentId: "s1", fallbackName: "boleta-1er-trimestre-v2.pdf" };
 
 describe("downloadPdf", () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     mockDeleted.length = 0;
-    Object.assign(mockCache, { exists: true, entries: [], failDelete: false });
+    mockRenamed.length = 0;
+    Object.assign(mockCache, { exists: true, entries: {}, failDelete: false, failRename: false });
     await saveTokens({ accessToken: "a1", refreshToken: "r1" });
   });
   afterEach(async () => {
     await clearTokens();
   });
 
-  it("downloads straight to its named file in the cache, with the Bearer token, overwriting", async () => {
-    writesTarget();
+  it("downloads into the child's own folder with the Bearer token, keeping the server's filename", async () => {
+    writes(SERVER_NAME);
 
-    const uri = await downloadPdf({ path: "/api/v1/x/pdf", fileName: NAME });
+    const uri = await downloadPdf(REQUEST);
 
-    const [url, target, options] = mockDownload.mock.calls[0] as [string, Target, DownloadOptions];
+    const [url, folder, options] = mockDownload.mock.calls[0] as [string, Folder, DownloadOptions];
     expect(url).toMatch(/\/api\/v1\/x\/pdf$/);
-    expect(target.uri).toBe(`file:///cache/boletas/${NAME}`);
+    expect(folder.uri).toBe(`${ROOT}/s1`);
     expect(options.headers).toEqual({ Authorization: "Bearer a1" });
     expect(options.idempotent).toBe(true);
-    expect(mockCreate).toHaveBeenCalledWith({ idempotent: true, intermediates: true });
-    expect(uri).toBe(`file:///cache/boletas/${NAME}`);
+    expect(mockCreate).toHaveBeenCalledWith(`${ROOT}/s1`, { idempotent: true, intermediates: true });
+    expect(uri).toBe(`${ROOT}/s1/${SERVER_NAME}`);
+    expect(mockRenamed).toEqual([]);
+  });
+
+  it("names the file boleta-<periodo>-v<N>.pdf (no ids) when the server gave no filename", async () => {
+    writes("pdf");
+
+    const uri = await downloadPdf(REQUEST);
+
+    expect(mockRenamed).toEqual(["boleta-1er-trimestre-v2.pdf"]);
+    expect(uri).toBe(`${ROOT}/s1/boleta-1er-trimestre-v2.pdf`);
+    expect(uri).not.toMatch(/boleta-s1/);
   });
 
   it("downloads the same boleta a second time onto the same file", async () => {
-    writesTarget();
-    await downloadPdf({ path: "/p", fileName: NAME });
-    mockCache.entries = [NAME];
+    writes(SERVER_NAME);
+    await downloadPdf(REQUEST);
+    mockCache.entries = { [ROOT]: ["s1"], [`${ROOT}/s1`]: [SERVER_NAME] };
 
-    const uri = await downloadPdf({ path: "/p", fileName: NAME });
+    const uri = await downloadPdf(REQUEST);
 
-    expect(uri).toBe(`file:///cache/boletas/${NAME}`);
-    expect(mockDeleted).toEqual([]);
-    expect((mockDownload.mock.calls[1] as [string, Target, DownloadOptions])[2].idempotent).toBe(true);
+    expect(uri).toBe(`${ROOT}/s1/${SERVER_NAME}`);
+    expect((mockDownload.mock.calls[1] as [string, Folder, DownloadOptions])[2].idempotent).toBe(true);
   });
 
-  it("keeps only the current boleta: a sibling's earlier download is deleted first", async () => {
-    writesTarget();
-    mockCache.entries = ["boleta-s2-1er-trimestre-v1.pdf", NAME, "pdf"];
+  it("keeps siblings apart: each child downloads into a separate folder", async () => {
+    writes("pdf");
 
-    await downloadPdf({ path: "/p", fileName: NAME });
+    const mine = await downloadPdf(REQUEST);
+    const sibling = await downloadPdf({ ...REQUEST, studentId: "s2" });
 
-    expect(mockDeleted).toEqual(["file:///cache/boletas/boleta-s2-1er-trimestre-v1.pdf", "file:///cache/boletas/pdf"]);
+    expect(mine).toBe(`${ROOT}/s1/boleta-1er-trimestre-v2.pdf`);
+    expect(sibling).toBe(`${ROOT}/s2/boleta-1er-trimestre-v2.pdf`);
   });
 
-  it("fails as storage when the phone cannot write the file", async () => {
-    mockCache.entries = ["old.pdf"];
+  it("keeps only the current boleta: other children's folders and older files go first", async () => {
+    writes(SERVER_NAME);
+    mockCache.entries = { [ROOT]: ["s2", "s1"], [`${ROOT}/s1`]: ["boleta-A0123-1er-trimestre-v1.pdf"] };
+
+    await downloadPdf(REQUEST);
+
+    expect(mockDeleted).toEqual([`${ROOT}/s2`, `${ROOT}/s1/boleta-A0123-1er-trimestre-v1.pdf`]);
+  });
+
+  it("keeps a student id with path characters inside the boletas folder", async () => {
+    writes(SERVER_NAME);
+
+    await downloadPdf({ ...REQUEST, studentId: "../x" });
+
+    expect((mockDownload.mock.calls[0] as [string, Folder])[1].uri).toBe(`${ROOT}/x`);
+  });
+
+  it("fails as storage when the phone cannot clear the folder", async () => {
+    mockCache.entries = { [ROOT]: ["s2"] };
     mockCache.failDelete = true;
 
-    await expect(downloadPdf({ path: "/p", fileName: NAME })).rejects.toMatchObject({ kind: "storage" });
+    await expect(downloadPdf(REQUEST)).rejects.toMatchObject({ kind: "storage" });
     expect(mockDownload).not.toHaveBeenCalled();
   });
 
+  it("fails as storage when the downloaded file cannot be renamed", async () => {
+    writes("pdf");
+    mockCache.failRename = true;
+
+    await expect(downloadPdf(REQUEST)).rejects.toMatchObject({ kind: "storage" });
+  });
+
   it("reports progress as a fraction, or null when the size is unknown", async () => {
-    mockDownload.mockImplementation(async (_u: string, target: Target, options: DownloadOptions) => {
+    mockDownload.mockImplementation(async (_u: string, folder: Folder, options: DownloadOptions) => {
       options.onProgress?.({ bytesWritten: 50, totalBytes: 200 });
       options.onProgress?.({ bytesWritten: 50, totalBytes: -1 });
-      return target;
+      return new MockFile(folder, SERVER_NAME);
     });
     const onProgress = jest.fn();
 
-    await downloadPdf({ path: "/p", fileName: NAME, onProgress });
+    await downloadPdf({ ...REQUEST, onProgress });
 
     expect(onProgress.mock.calls).toEqual([[0.25], [null]]);
   });
@@ -155,9 +204,10 @@ describe("downloadPdf", () => {
     ["Android", ANDROID_401],
   ])("refreshes an expired session once and retries with the new token (%s)", async (_platform, message) => {
     refreshSucceeds();
-    mockDownload.mockRejectedValueOnce(new Error(message)).mockImplementationOnce(async (_u: string, target: Target) => target);
+    writes(SERVER_NAME);
+    mockDownload.mockRejectedValueOnce(new Error(message));
 
-    await downloadPdf({ path: "/p", fileName: NAME });
+    await downloadPdf(REQUEST);
 
     expect(mockDownload).toHaveBeenCalledTimes(2);
     expect((mockDownload.mock.calls[1] as [string, unknown, DownloadOptions])[2].headers).toEqual({ Authorization: "Bearer a2" });
@@ -167,7 +217,7 @@ describe("downloadPdf", () => {
     refreshSucceeds();
     mockDownload.mockRejectedValue(new Error(ANDROID_401));
 
-    await expect(downloadPdf({ path: "/p", fileName: NAME })).rejects.toMatchObject({ kind: "session" });
+    await expect(downloadPdf(REQUEST)).rejects.toMatchObject({ kind: "session" });
     expect(mockDownload).toHaveBeenCalledTimes(2);
   });
 
@@ -179,7 +229,7 @@ describe("downloadPdf", () => {
   ])("classifies %s", async (_case, message, kind) => {
     mockDownload.mockRejectedValueOnce(new Error(message));
 
-    const failure = downloadPdf({ path: "/p", fileName: NAME });
+    const failure = downloadPdf(REQUEST);
 
     await expect(failure).rejects.toBeInstanceOf(PdfError);
     await expect(failure).rejects.toMatchObject({ kind });
@@ -190,12 +240,12 @@ describe("downloadPdf", () => {
 describe("clearPdfCache", () => {
   beforeEach(() => {
     mockDeleted.length = 0;
-    Object.assign(mockCache, { exists: true, entries: [], failDelete: false });
+    Object.assign(mockCache, { exists: true, entries: {}, failDelete: false });
   });
 
   it("deletes the whole boletas folder", () => {
     clearPdfCache();
-    expect(mockDeleted).toEqual(["file:///cache/boletas"]);
+    expect(mockDeleted).toEqual([ROOT]);
   });
 
   it("does nothing when nothing was ever downloaded", () => {
@@ -226,23 +276,14 @@ describe("sharePdf", () => {
   });
 });
 
-describe("pdfFileName", () => {
-  it("names the file by student, term and version, without accents or punctuation", () => {
-    expect(pdfFileName({ studentId: "s1", termOrdinal: 1, termName: "1.er Trimestre", version: 2 })).toBe("boleta-s1-1er-trimestre-v2.pdf");
-    expect(pdfFileName({ studentId: "s1", termOrdinal: 0, termName: "2.º periodo", version: 1 })).toBe("boleta-s1-2o-periodo-v1.pdf");
+describe("fallbackPdfName", () => {
+  it("slugs the term name without accents, punctuation or ids", () => {
+    expect(fallbackPdfName({ termOrdinal: 1, termName: "1.er Trimestre", version: 2 })).toBe("boleta-1er-trimestre-v2.pdf");
+    expect(fallbackPdfName({ termOrdinal: 0, termName: "2.º periodo", version: 1 })).toBe("boleta-2o-periodo-v1.pdf");
   });
 
   it("falls back to the term ordinal, then to a generic word, when the name slugs to nothing", () => {
-    expect(pdfFileName({ studentId: "s1", termOrdinal: 3, termName: "", version: 1 })).toBe("boleta-s1-t3-v1.pdf");
-    expect(pdfFileName({ studentId: "s1", termOrdinal: 0, termName: "", version: 1 })).toBe("boleta-s1-periodo-v1.pdf");
-  });
-
-  it("gives siblings different files for the same term", () => {
-    const term = { termOrdinal: 1, termName: "1.er Trimestre", version: 1 };
-    expect(pdfFileName({ studentId: "s1", ...term })).not.toBe(pdfFileName({ studentId: "s2", ...term }));
-  });
-
-  it("keeps a student id with path characters inside the folder", () => {
-    expect(pdfFileName({ studentId: "../x", termOrdinal: 1, termName: "T1", version: 1 })).toBe("boleta-x-t1-v1.pdf");
+    expect(fallbackPdfName({ termOrdinal: 3, termName: "", version: 1 })).toBe("boleta-t3-v1.pdf");
+    expect(fallbackPdfName({ termOrdinal: 0, termName: "", version: 1 })).toBe("boleta-periodo-v1.pdf");
   });
 });

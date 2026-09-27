@@ -102,7 +102,7 @@ describe("ReportCardScreen", () => {
 
     await waitFor(() => expect(sharePdf).toHaveBeenCalledWith("file:///cache/boletas/boleta.pdf", "Boleta 1.er trimestre"));
     expect(downloadPdf).toHaveBeenCalledWith(
-      expect.objectContaining({ path: "/api/v1/family/students/s1/report-cards/rc1/pdf", fileName: "boleta-s1-1er-trimestre-v2.pdf" }),
+      expect.objectContaining({ path: "/api/v1/family/students/s1/report-cards/rc1/pdf", studentId: "s1", fallbackName: "boleta-1er-trimestre-v2.pdf" }),
     );
     await waitFor(() => expect(screen.getByRole("button", { name: "Descargar PDF" })).toBeTruthy());
   });
@@ -136,7 +136,7 @@ describe("ReportCardScreen", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Descargar PDF" }));
     await waitFor(() =>
       expect(downloadPdf).toHaveBeenCalledWith(
-        expect.objectContaining({ path: "/api/v1/family/students/s2/report-cards/rc1/pdf", fileName: "boleta-s2-1er-trimestre-v2.pdf" }),
+        expect.objectContaining({ path: "/api/v1/family/students/s2/report-cards/rc1/pdf", studentId: "s2", fallbackName: "boleta-1er-trimestre-v2.pdf" }),
       ),
     );
   });

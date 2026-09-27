@@ -8,8 +8,9 @@ export type PdfDownloadState =
 
 export interface PdfDownloadTarget {
   path: string;
-  /** Cache file name, from pdfFileName. */
-  fileName: string;
+  studentId: string;
+  /** Used when the server's filename is unavailable, from fallbackPdfName. */
+  fallbackName: string;
   title: string;
 }
 
@@ -53,7 +54,8 @@ export function usePdfDownload(target: PdfDownloadTarget | null): { state: PdfDo
       try {
         const uri = await downloadPdf({
           path: target.path,
-          fileName: target.fileName,
+          studentId: target.studentId,
+          fallbackName: target.fallbackName,
           onProgress: (progress) => update({ status: "downloading", progress }),
         });
         if (!mounted.current) return;

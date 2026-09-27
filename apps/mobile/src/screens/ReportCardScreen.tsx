@@ -1,7 +1,7 @@
 import { useMemo, type ReactElement } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { reportCardPdfPath } from "../api/reportCards";
-import { pdfFileName } from "../files/reportCardPdf";
+import { fallbackPdfName } from "../files/reportCardPdf";
 import { useAppState } from "../state/AppState";
 import { useChildReportCard } from "../state/familyData";
 import { useTheme } from "../theme";
@@ -38,7 +38,8 @@ export function ReportCardScreen({ id, studentId }: ReportCardScreenProps): Reac
         ? null
         : {
             path: reportCardPdfPath(childId, data.id),
-            fileName: pdfFileName({ studentId: childId, termOrdinal: data.termOrdinal, termName: data.termName, version: data.version }),
+            studentId: childId,
+            fallbackName: fallbackPdfName(data),
             title: `Boleta ${data.termName}`,
           },
     [data, childId],
