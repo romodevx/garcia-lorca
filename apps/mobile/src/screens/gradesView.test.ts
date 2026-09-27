@@ -1,5 +1,5 @@
 import type { MonthlyGrades } from "../api/grades";
-import { defaultMonth, formatGrade, isFailing, monthAverage, shortMonthLabel } from "./gradesView";
+import { defaultMonth, formatAverage, formatGrade, isFailing, monthAverage, shortMonthLabel } from "./gradesView";
 
 const scale = { min: 5, max: 10, decimals: 1, passing: 6 };
 
@@ -35,9 +35,12 @@ describe("defaultMonth", () => {
 });
 
 describe("formatGrade / isFailing", () => {
-  it("formats with the scale decimals", () => {
-    expect(formatGrade(9.5, scale)).toBe("9.5");
-    expect(formatGrade(8, { ...scale, decimals: 0 })).toBe("8");
+  it("writes the stored value, never rounded to the scale", () => {
+    expect(formatGrade(9.5)).toBe("9.5");
+    expect(formatGrade(8)).toBe("8");
+    expect(formatGrade(5.5)).toBe("5.5");
+    expect(formatGrade(8.25)).toBe("8.25");
+    expect(formatGrade(9.1)).toBe("9.1");
   });
 
   it("fails strictly below passing", () => {
@@ -50,6 +53,13 @@ describe("monthAverage", () => {
   it("averages only the captured subjects of the month", () => {
     const data = grades(["2026-09"], [{ "2026-09": 9 }, { "2026-09": 8 }, {}]);
     expect(monthAverage(data.subjects, "2026-09")).toBe(8.5);
+  });
+
+  it("rounds half-up to one decimal", () => {
+    const data = grades(["2026-09"], [{ "2026-09": 8 }, { "2026-09": 8.5 }]);
+    expect(monthAverage(data.subjects, "2026-09")).toBe(8.3);
+    expect(formatAverage(8.3)).toBe("8.3");
+    expect(formatAverage(8)).toBe("8.0");
   });
 
   it("is null when nothing is captured", () => {

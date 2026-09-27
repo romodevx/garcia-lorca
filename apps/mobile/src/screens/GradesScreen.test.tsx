@@ -91,7 +91,7 @@ describe("GradesScreen (monthly grades)", () => {
 
     await fireEvent.press(screen.getByRole("button", { name: "Agosto 2026" }));
 
-    expect(screen.getByLabelText("Matemáticas: 8.0")).toBeTruthy();
+    expect(screen.getByLabelText("Matemáticas: 8")).toBeTruthy();
     expect(selectedChip()).toBe("Agosto 2026");
   });
 
@@ -110,7 +110,7 @@ describe("GradesScreen (monthly grades)", () => {
     await render();
 
     await waitFor(() => expect(screen.getByText("Reprobada")).toBeTruthy());
-    expect(screen.getByLabelText("Historia: 5.0, Reprobada")).toBeTruthy();
+    expect(screen.getByLabelText("Historia: 5, Reprobada")).toBeTruthy();
     expect(screen.getByText(/Aprobatoria: 6/)).toBeTruthy();
   });
 

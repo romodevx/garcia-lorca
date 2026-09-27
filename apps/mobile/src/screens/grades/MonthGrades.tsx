@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from "react-native";
 import type { GradeScale, MonthlySubject } from "../../api/grades";
 import { useTheme } from "../../theme";
 import { Card, ListRow, SectionLabel } from "../../ui";
-import { formatGrade, isFailing, monthAverage } from "../gradesView";
+import { formatAverage, formatGrade, isFailing, monthAverage } from "../gradesView";
 
 const MISSING_SUBJECT_NAME = "Materia sin nombre";
 const NO_GRADE = "Sin calificación aún";
@@ -34,7 +34,7 @@ export function MonthGrades({ subjects, month, scale }: MonthGradesProps): React
 
 function AverageCard({ average, scale }: { average: number | null; scale: GradeScale }): ReactElement {
   const theme = useTheme();
-  const text = average === null ? "—" : formatGrade(average, scale);
+  const text = average === null ? "—" : formatAverage(average);
   return (
     <Card style={styles.hero}>
       <View accessible accessibilityLabel={`Promedio del mes: ${average === null ? NO_GRADE : text}`}>
@@ -42,7 +42,7 @@ function AverageCard({ average, scale }: { average: number | null; scale: GradeS
         <Text style={[styles.heroNum, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{text}</Text>
       </View>
       <Text style={[styles.heroRule, { color: theme.colors.text2, fontFamily: theme.fonts.uiSemi }]}>
-        {`Aprobatoria: ${formatGrade(scale.passing, scale)} de ${formatGrade(scale.max, scale)}`}
+        {`Aprobatoria: ${formatGrade(scale.passing)} de ${formatGrade(scale.max)}`}
       </Text>
     </Card>
   );
@@ -51,7 +51,7 @@ function AverageCard({ average, scale }: { average: number | null; scale: GradeS
 function SubjectGrade({ name, value, scale }: { name: string; value: number | undefined; scale: GradeScale }): ReactElement {
   const theme = useTheme();
   const failed = value !== undefined && isFailing(value, scale);
-  const grade = value === undefined ? null : formatGrade(value, scale);
+  const grade = value === undefined ? null : formatGrade(value);
   const label = grade === null ? `${name}: ${NO_GRADE}` : `${name}: ${grade}${failed ? `, ${FAILED}` : ""}`;
   const gradeColor = failed ? theme.colors.bad : theme.colors.text;
   return (
