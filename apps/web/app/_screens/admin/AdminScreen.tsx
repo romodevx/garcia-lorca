@@ -26,7 +26,7 @@ import {
   resendInvitation,
   type Role,
 } from "../../admin/api";
-import { PERMISSION_CATALOG } from "./catalog";
+import { OWNER_ONLY_NOTE, PERMISSION_CATALOG } from "./catalog";
 
 import { API_URL } from "../../api-url";
 import { matchesSearch } from "../../_design/textSearch";
@@ -431,7 +431,9 @@ function PermChecklist({ selected, onToggle }: { selected: string[]; onToggle: (
         <div key={g.resource}>
           <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 8 }}>{g.resource}</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {g.permissions.map((p) => <button key={p.value} aria-label={p.label} onClick={() => onToggle(p.value)} style={chip(selected.includes(p.value), "lime")}>{p.label}</button>)}
+            {g.permissions.map((p) => p.ownerOnly === true
+              ? <button key={p.value} type="button" disabled aria-label={`${p.label} (${OWNER_ONLY_NOTE})`} title="Sólo el rol de dueño lo tiene; no se puede dar a otro rol." style={{ ...chip(false, "lime"), cursor: "not-allowed", opacity: 0.7, display: "inline-flex", alignItems: "center", gap: 6 }}><Icon name="lock" size={14} />{p.label} · {OWNER_ONLY_NOTE}</button>
+              : <button key={p.value} aria-label={p.label} onClick={() => onToggle(p.value)} style={chip(selected.includes(p.value), "lime")}>{p.label}</button>)}
           </div>
         </div>
       ))}

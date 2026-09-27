@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ALL_PERMISSIONS, PERMISSION_CATALOG } from "./catalog";
+import { ALL_PERMISSIONS, GRANTABLE_PERMISSIONS, PERMISSION_CATALOG } from "./catalog";
 
 describe("PERMISSION_CATALOG — teaching (Maestro role)", () => {
   it("offers teaching:read and teaching:write so an admin can build a Maestro role", () => {
@@ -35,5 +35,22 @@ describe("PERMISSION_CATALOG — ventanilla (tarea 9)", () => {
     expect(ALL_PERMISSIONS).toContain("payments:write");
     expect(ALL_PERMISSIONS).not.toContain("finance:read");
     expect(ALL_PERMISSIONS).not.toContain("finance:write");
+  });
+});
+
+describe("PERMISSION_CATALOG — cerrar periodos (tarea 7)", () => {
+  // Closing a trimester publishes boletas to every family: the owner's call
+  // alone. It is listed so the director sees it exists, marked owner-only so
+  // the editor never lets a role be granted it.
+  it("lists grades:close under Calificaciones, marked owner-only", () => {
+    const group = PERMISSION_CATALOG.find((g) => g.resource === "Calificaciones");
+    const close = group?.permissions.find((p) => p.value === "grades:close");
+    expect(close?.label).toBe("Cerrar periodos y emitir boletas");
+    expect(close?.ownerOnly).toBe(true);
+  });
+
+  it("keeps it out of the grantable set", () => {
+    expect(GRANTABLE_PERMISSIONS).not.toContain("grades:close");
+    expect(GRANTABLE_PERMISSIONS).toContain("grades:write");
   });
 });

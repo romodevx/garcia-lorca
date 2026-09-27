@@ -14,7 +14,15 @@ export interface PermissionDef {
   value: string;
   /** Human label shown next to the checkbox. */
   label: string;
+  /**
+   * Only the owner role may hold it (iam refuses to grant it). Listed so the
+   * director sees it exists; the editors show it locked, never toggleable.
+   */
+  ownerOnly?: boolean;
 }
+
+/** Appended to an owner-only permission's name in the editors. */
+export const OWNER_ONLY_NOTE = "solo el dueño";
 
 export interface PermissionGroup {
   resource: string;
@@ -59,6 +67,8 @@ export const PERMISSION_CATALOG: readonly PermissionGroup[] = [
     permissions: [
       { value: "grades:read", label: "Ver calificaciones" },
       { value: "grades:write", label: "Capturar calificaciones" },
+      // Closing a trimester publishes boletas to every family (tarea 7).
+      { value: "grades:close", label: "Cerrar periodos y emitir boletas", ownerOnly: true },
     ],
   },
   {
@@ -86,4 +96,9 @@ export const PERMISSION_CATALOG: readonly PermissionGroup[] = [
 /** Flat list of every permission string in the catalog (stable order). */
 export const ALL_PERMISSIONS: readonly string[] = PERMISSION_CATALOG.flatMap((g) =>
   g.permissions.map((p) => p.value),
+);
+
+/** What a role editor may actually grant: every catalog permission but the owner-only ones. */
+export const GRANTABLE_PERMISSIONS: readonly string[] = PERMISSION_CATALOG.flatMap((g) =>
+  g.permissions.filter((p) => p.ownerOnly !== true).map((p) => p.value),
 );

@@ -16,7 +16,8 @@ export interface RolesPanelProps {
 // Catalog grouped for the checklist (resource sub-headings + labelled options).
 const PERMISSION_GROUPS = PERMISSION_CATALOG.map((g) => ({
   heading: g.resource,
-  options: g.permissions.map((p) => ({ value: p.value, label: p.label })),
+  // Owner-only permissions are never grantable, so this checklist leaves them out.
+  options: g.permissions.filter((p) => p.ownerOnly !== true).map((p) => ({ value: p.value, label: p.label })),
 }));
 
 /**
