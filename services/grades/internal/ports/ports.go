@@ -63,6 +63,9 @@ type EnrollmentRef struct {
 	GroupID   string
 	CycleID   string
 	Status    string
+	// EnrolledAt is when the pupil enrolled (zero when unknown): a period
+	// expects no grade of theirs before that month.
+	EnrolledAt time.Time
 }
 
 // EnrollmentReader reads enrollments from the students bounded context (by RPC).

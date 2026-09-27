@@ -90,6 +90,10 @@ service GradesService {
   rpc ListReportCards(ListReportCardsRequest) returns (ListReportCardsResponse);
   // GetReportCard is one report card's full snapshot (any version).
   rpc GetReportCard(GetReportCardRequest) returns (GetReportCardResponse);
+  // ClosedTerms answers which of these terms are closed, in one read. The
+  // gateway asks before config changes a term's months: a closed term's
+  // months are frozen until it is reopened (TERM_CLOSED).
+  rpc ClosedTerms(ClosedTermsRequest) returns (ClosedTermsResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -238,6 +242,9 @@ message GetMonthlySheetResponse {
   // closed_months are the months of the sheet that belong to a CLOSED period
   // of the level: nobody may write them until the director reopens it.
   repeated string closed_months = 9;
+  // unmapped_months are the months of the sheet no period of the level
+  // covers: still capturable, but no report card prints them ("Sin periodo").
+  repeated string unmapped_months = 10;
 }
 
 message GetEnrollmentMonthlyGradesRequest {
@@ -287,8 +294,8 @@ message GradesPublished {
 // --- Period closing and report cards (T7) --------------------------------
 
 // PeriodProgress counts the expected monthly captures of a term (active
-// enrollments x the subjects taught in their group x the term's months up to
-// the current month) and how many of them are captured.
+// enrollments x the subjects taught in their group x every month of the term
+// from the one the pupil joined the group in) and how many are captured.
 message PeriodProgress {
   int32 captured = 1;
   int32 expected = 2;
@@ -339,6 +346,18 @@ message GetPeriodProgressResponse {
   int32 expected = 3;
   int32 captured = 4;
   repeated MissingGrades missing = 5;
+  // unfinished_months are the term's months after the current UTC month: they
+  // are still expected (closing now needs force), but have not been taught yet.
+  repeated string unfinished_months = 6;
+}
+
+message ClosedTermsRequest {
+  repeated string term_ids = 1;
+}
+
+message ClosedTermsResponse {
+  // closed_term_ids are the requested terms that are closed now.
+  repeated string closed_term_ids = 1;
 }
 
 message ClosePeriodRequest {

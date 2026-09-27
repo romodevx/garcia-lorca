@@ -20,6 +20,19 @@ type PeriodsUseCase interface {
 	Reopen(ctx context.Context, termID, actorID string) (domain.PeriodStatus, error)
 	ReportCards(ctx context.Context, filter ports.ReportCardFilter) ([]domain.ReportCard, error)
 	ReportCard(ctx context.Context, id string) (domain.ReportCard, error)
+	ClosedTerms(ctx context.Context, termIDs []string) ([]string, error)
+}
+
+// ClosedTerms answers which of the requested terms are closed now.
+func (h *GradesHandler) ClosedTerms(ctx context.Context, req *connect.Request[gradesv1.ClosedTermsRequest]) (*connect.Response[gradesv1.ClosedTermsResponse], error) {
+	closed, err := h.periods.ClosedTerms(ctx, req.Msg.GetTermIds())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	if closed == nil {
+		closed = []string{}
+	}
+	return connect.NewResponse(&gradesv1.ClosedTermsResponse{ClosedTermIds: closed}), nil
 }
 
 // ListPeriods returns a cycle's terms with their closure and progress.
@@ -56,7 +69,8 @@ func (h *GradesHandler) GetPeriodProgress(ctx context.Context, req *connect.Requ
 		})
 	}
 	return connect.NewResponse(&gradesv1.GetPeriodProgressResponse{
-		TermId: p.TermID, Months: monthStrings(p.Months), Expected: int32(p.Expected), Captured: int32(p.Captured), Missing: missing,
+		TermId: p.TermID, Months: monthStrings(p.Months), UnfinishedMonths: monthStrings(p.UnfinishedMonths),
+		Expected: int32(p.Expected), Captured: int32(p.Captured), Missing: missing,
 	}), nil
 }
 

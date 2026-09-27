@@ -45,6 +45,9 @@ type PeriodClosure struct {
 	closedBy     string
 	closedByName string
 	reopenedAt   time.Time
+	// months are the term's months when it was last closed: while closed, the
+	// term locks them even if config later moves a month out of the term.
+	months []Month
 }
 
 // PeriodClosureFields are the stored parts of a PeriodClosure.
@@ -58,6 +61,7 @@ type PeriodClosureFields struct {
 	ClosedBy     string
 	ClosedByName string
 	ReopenedAt   time.Time
+	Months       []Month
 }
 
 // NewOpenPeriod is a period that was never closed: open, version 0.
@@ -80,18 +84,21 @@ func RestorePeriodClosure(f PeriodClosureFields) (PeriodClosure, error) {
 	return PeriodClosure{
 		termID: f.TermID, cycleID: f.CycleID, levelID: f.LevelID, status: f.Status, version: f.Version,
 		closedAt: f.ClosedAt, closedBy: f.ClosedBy, closedByName: f.ClosedByName, reopenedAt: f.ReopenedAt,
+		months: append([]Month(nil), f.Months...),
 	}, nil
 }
 
-// Close closes an open period at `at` on behalf of actor and bumps the
-// version. A closed period is refused with ALREADY_CLOSED.
-func (p PeriodClosure) Close(actor Actor, at time.Time) (PeriodClosure, error) {
+// Close closes an open period at `at` on behalf of actor, bumps the version
+// and snapshots the months the term covers now (copied). A closed period is
+// refused with ALREADY_CLOSED.
+func (p PeriodClosure) Close(actor Actor, at time.Time, months []Month) (PeriodClosure, error) {
 	if p.status == PeriodClosed {
 		return PeriodClosure{}, Conflict(CodeAlreadyClosed, msgAlreadyClosed)
 	}
 	p.status = PeriodClosed
 	p.version++
 	p.closedAt, p.closedBy, p.closedByName = at, actor.ID, actor.Name
+	p.months = append([]Month(nil), months...)
 	return p, nil
 }
 
@@ -119,3 +126,6 @@ func (p PeriodClosure) ClosedByName() string { return p.closedByName }
 func (p PeriodClosure) ReopenedAt() time.Time {
 	return p.reopenedAt
 }
+
+// Months is the snapshot of the term's months taken by the last close (a copy).
+func (p PeriodClosure) Months() []Month { return append([]Month(nil), p.months...) }

@@ -23,11 +23,17 @@ func fromDomainClosure(tenantID string, c domain.PeriodClosure) periodClosureMod
 		ClosedBy:     stringPtr(c.ClosedBy()),
 		ClosedByName: stringPtr(c.ClosedByName()),
 		ReopenedAt:   timePtr(c.ReopenedAt()),
+		Months:       monthTexts(c.Months()),
 	}
 }
 
 func toDomainClosure(m periodClosureModel) (domain.PeriodClosure, error) {
+	months, err := parseMonthTexts(m.Months)
+	if err != nil {
+		return domain.PeriodClosure{}, glerrors.Wrap(glerrors.KindInternal, "invalid period closure months", err)
+	}
 	c, err := domain.RestorePeriodClosure(domain.PeriodClosureFields{
+		Months: months,
 		TermID: m.TermID, CycleID: m.CycleID, LevelID: m.LevelID,
 		Status: domain.PeriodStatus(m.Status), Version: m.Version,
 		ClosedAt: deref(m.ClosedAt), ClosedBy: derefString(m.ClosedBy), ClosedByName: derefString(m.ClosedByName),
@@ -66,13 +72,9 @@ func fromDomainReportCard(rc domain.ReportCard) (reportCardModel, []reportCardLi
 }
 
 func toDomainReportCard(m reportCardModel, lineRows []reportCardLineModel) (domain.ReportCard, error) {
-	months := make([]domain.Month, 0, len(m.Months))
-	for _, raw := range m.Months {
-		mo, err := domain.ParseMonth(raw)
-		if err != nil {
-			return domain.ReportCard{}, glerrors.Wrap(glerrors.KindInternal, "invalid report card month", err)
-		}
-		months = append(months, mo)
+	months, err := parseMonthTexts(m.Months)
+	if err != nil {
+		return domain.ReportCard{}, glerrors.Wrap(glerrors.KindInternal, "invalid report card month", err)
 	}
 	scale, err := domain.NewGradingScale(m.ScaleMinHundredths, m.ScaleMaxHundredths, m.ScalePassingHundredths, m.ScaleDecimals)
 	if err != nil {
@@ -146,6 +148,19 @@ func hundredthsOf(text string) (int, error) {
 		return 0, glerrors.Wrap(glerrors.KindInternal, "invalid report card grade text", err)
 	}
 	return v.Hundredths(), nil
+}
+
+// parseMonthTexts reads a text[] of "YYYY-MM" back to months.
+func parseMonthTexts(raw []string) ([]domain.Month, error) {
+	out := make([]domain.Month, 0, len(raw))
+	for _, r := range raw {
+		m, err := domain.ParseMonth(r)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, nil
 }
 
 func monthTexts(ms []domain.Month) []string {

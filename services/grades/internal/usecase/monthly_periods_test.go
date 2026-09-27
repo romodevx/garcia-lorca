@@ -42,7 +42,7 @@ func withTrimesters(t *testing.T, f monthlyFixture) {
 
 func closeTerm(t *testing.T, f monthlyFixture, termID string) {
 	t.Helper()
-	c, err := domain.NewOpenPeriod(termID, cycleID, levelPrimaria).Close(domain.Actor{ID: "dir"}, sheetNow)
+	c, err := domain.NewOpenPeriod(termID, cycleID, levelPrimaria).Close(domain.Actor{ID: "dir"}, sheetNow, f.asg.terms[termID].Months)
 	require.NoError(t, err)
 	f.repo.closures[termID] = c
 }
@@ -55,24 +55,26 @@ func monthStrings(ms []domain.Month) []string {
 	return out
 }
 
-// T7: once a level maps months into terms, the sheet lists only those months;
-// a level without any mapping keeps every month of the cycle (as before).
-func TestSheetListsOnlyMappedMonths(t *testing.T) {
+// T7 (decision): the sheet lists EVERY month of the cycle whether or not a
+// term maps it; unmapped months stay capturable and are listed apart so the
+// screen can mark them "Sin periodo". Only closed-term months lock.
+func TestSheetListsEveryMonthAndMarksTheUnmapped(t *testing.T) {
 	f := newMonthlyFixture(t)
 	sheet, err := f.svc.Sheet(context.Background(), usecase.ScopeTeacher, assignmentID, "2026-09")
 	require.NoError(t, err)
-	assert.Len(t, sheet.Months, 12, "no mapping yet: the whole cycle")
+	assert.Len(t, sheet.Months, 12, "the whole cycle")
+	assert.Len(t, sheet.UnmappedMonths, 12, "no mapping yet: every month is without a term")
 	assert.Empty(t, sheet.ClosedMonths)
 
 	withTrimesters(t, f)
-	sheet, err = f.svc.Sheet(context.Background(), usecase.ScopeTeacher, assignmentID, "2026-09")
-	require.NoError(t, err)
-	assert.Equal(t, []string{"2026-09", "2026-10", "2026-11", "2026-12", "2027-01"}, monthStrings(sheet.Months))
+	sheet, err = f.svc.Sheet(context.Background(), usecase.ScopeTeacher, assignmentID, "2026-08")
+	require.NoError(t, err, "a month outside every term is still on the sheet")
+	assert.Len(t, sheet.Months, 12)
+	assert.Equal(t, []string{"2026-08", "2027-02", "2027-03", "2027-04", "2027-05", "2027-06", "2027-07"}, monthStrings(sheet.UnmappedMonths))
 
-	_, err = f.svc.Sheet(context.Background(), usecase.ScopeTeacher, assignmentID, "2026-08")
-	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err), "a month outside every term is not on the sheet")
+	*f.now = time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)
 	_, err = f.svc.Upsert(context.Background(), upsertInput("2026-08", enrollmentID, "9"))
-	assert.Equal(t, domain.CodeMonthOutsideCycle, domain.RefusalCodeOf(err), "nor writable")
+	require.NoError(t, err, "and writable")
 }
 
 // A closed term's months are read-only for EVERYONE (teacher and director),
@@ -151,4 +153,56 @@ func TestOtherLevelsClosureDoesNotLock(t *testing.T) {
 	closeTerm(t, f, "term-kinder")
 	_, err := f.svc.Upsert(context.Background(), upsertInput("2026-10", enrollmentID, "9"))
 	require.NoError(t, err)
+}
+
+// T7: the close snapshots the term's months. Taking a month OUT of a closed
+// term in config (the gateway refuses it, but config is its own service) must
+// not unlock it: a closed term locks the union of its snapshot and its current
+// mapping, and the write names the closed term so the store re-checks it.
+func TestClosedTermLocksItsSnapshotMonths(t *testing.T) {
+	f := newMonthlyFixture(t)
+	withTrimesters(t, f)
+	closeTerm(t, f, firstTermID) // snapshot Sep–Nov
+	shrunk := f.asg.terms[firstTermID]
+	shrunk.Months = months(t, "2026-09", "2026-10")
+	f.asg.terms[firstTermID] = shrunk
+
+	for _, scope := range []usecase.CaptureScope{usecase.ScopeTeacher, usecase.ScopeSchool} {
+		in := upsertInput("2026-11", enrollmentID, "8")
+		in.Scope = scope
+		_, err := f.svc.Upsert(context.Background(), in)
+		assert.Equal(t, domain.CodeMonthLocked, domain.RefusalCodeOf(err), "scope %d: November left the term but was closed with it", scope)
+	}
+	sheet, err := f.svc.Sheet(context.Background(), usecase.ScopeSchool, assignmentID, "2026-11")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"2026-09", "2026-10", "2026-11"}, monthStrings(sheet.ClosedMonths))
+	assert.False(t, sheet.Editable)
+
+	// A month ADDED to the closed term after the close is locked too.
+	grown := f.asg.terms[firstTermID]
+	grown.Months = months(t, "2026-09", "2026-10", "2026-11", "2026-12")
+	f.asg.terms[firstTermID] = grown
+	delete(f.asg.terms, secondTermID)
+	*f.now = time.Date(2026, 12, 10, 0, 0, 0, 0, time.UTC)
+	_, err = f.svc.Upsert(context.Background(), upsertInput("2026-12", enrollmentID, "8"))
+	assert.Equal(t, domain.CodeMonthLocked, domain.RefusalCodeOf(err))
+}
+
+// A snapshot month now mapped into ANOTHER (open) term still locks: the
+// closed term's snapshot wins over the open term's mapping, before the store.
+func TestSnapshotMonthMovedToAnOpenTermStaysLocked(t *testing.T) {
+	f := newMonthlyFixture(t)
+	withTrimesters(t, f)
+	closeTerm(t, f, firstTermID) // snapshot Sep–Nov
+	first := f.asg.terms[firstTermID]
+	first.Months = months(t, "2026-09", "2026-10")
+	f.asg.terms[firstTermID] = first
+	second := f.asg.terms[secondTermID]
+	second.Months = months(t, "2026-11", "2026-12", "2027-01")
+	f.asg.terms[secondTermID] = second
+
+	f.repo.locks = nil
+	_, err := f.svc.Upsert(context.Background(), upsertInput("2026-11", enrollmentID, "8"))
+	assert.Equal(t, domain.CodeMonthLocked, domain.RefusalCodeOf(err))
+	assert.Empty(t, f.repo.locks, "refused before the store")
 }

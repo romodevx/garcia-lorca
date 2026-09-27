@@ -63,6 +63,8 @@ type periodClosureModel struct {
 	ClosedBy     *string    `gorm:"column:closed_by"`
 	ClosedByName *string    `gorm:"column:closed_by_name"`
 	ReopenedAt   *time.Time `gorm:"column:reopened_at"`
+	// Months is the text[] snapshot of "YYYY-MM" the last close covered.
+	Months pq.StringArray `gorm:"column:months;type:text[]"`
 }
 
 func (periodClosureModel) TableName() string { return "period_closures" }

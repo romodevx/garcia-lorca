@@ -63,18 +63,20 @@ func TestByID_MapsFieldsStatusAndNotFound(t *testing.T) {
 		groupID      = "40000000-0000-0000-0000-000000000001"
 		cycleID      = "c0000000-0000-0000-0000-000000000001"
 	)
+	enrolledAt := time.Date(2026, 10, 10, 15, 0, 0, 0, time.UTC)
 
 	t.Run("found projects fields and lowercases the status enum", func(t *testing.T) {
 		c := newClient(t, &stubStudentsService{enrollment: &studentsv1.Enrollment{
 			Id: enrollmentID, StudentId: studentID, GroupId: groupID, CycleId: cycleID,
-			Status: studentsv1.EnrollmentStatus_ENROLLMENT_STATUS_ACTIVE,
+			Status:     studentsv1.EnrollmentStatus_ENROLLMENT_STATUS_ACTIVE,
+			EnrolledAt: timestamppb.New(enrolledAt),
 		}})
 		got, err := c.ByID(context.Background(), enrollmentID)
 		if err != nil {
 			t.Fatalf("ByID: %v", err)
 		}
 		if got.ID != enrollmentID || got.StudentID != studentID || got.GroupID != groupID ||
-			got.CycleID != cycleID || got.Status != "active" {
+			got.CycleID != cycleID || got.Status != "active" || !got.EnrolledAt.Equal(enrolledAt) {
 			t.Errorf("mapping mismatch: %+v", got)
 		}
 	})

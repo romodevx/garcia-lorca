@@ -39,8 +39,8 @@ const (
 //
 //	assignment (config) ─> group's level: grading enabled + scale (config)
 //	  ─> enrollment active in the assignment's group and cycle (students)
-//	  ─> month inside the assignment cycle's months (config) — only the
-//	     months mapped into the level's terms once it has any (T7)
+//	  ─> month inside the assignment cycle's months (config) — mapped into a
+//	     term or not (T7: an unmapped month stays capturable)
 //	  ─> ensureEditable (future month, previous group, closed period)
 //	  ─> value judged on the level's scale ─> upsert/delete, guarded by the
 //	     covering term's lock (the store re-checks the closure in its tx)
@@ -112,6 +112,9 @@ type MonthlySheet struct {
 	// ClosedMonths are the sheet's months that belong to a CLOSED term of the
 	// level (T7): read-only for everyone until the director reopens it.
 	ClosedMonths []domain.Month
+	// UnmappedMonths are the sheet's months no term of the level covers: still
+	// capturable, but no report card will print them ("Sin periodo").
+	UnmappedMonths []domain.Month
 }
 
 // EnrollmentMonthlyGrades is one enrollment's monthly grades for its cycle.
@@ -141,6 +144,17 @@ type assignmentContext struct {
 // lockFor is the period lock guarding a write of month m.
 func (ac assignmentContext) lockFor(m domain.Month) ports.PeriodLock {
 	return ports.PeriodLock{TermID: ac.termOf[m]}
+}
+
+// unmappedMonths lists the months of ac.months no term of the level covers.
+func (ac assignmentContext) unmappedMonths() []domain.Month {
+	out := []domain.Month{}
+	for _, m := range ac.months {
+		if _, ok := ac.termOf[m]; !ok {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // closedMonths lists the months of ac.months that belong to a closed term.
@@ -214,6 +228,7 @@ func (s *MonthlyGradesService) Sheet(ctx context.Context, scope CaptureScope, as
 	sheet := MonthlySheet{
 		AssignmentID: assignmentID, Month: m, Months: ac.months, Scale: ac.level.Scale,
 		GradingEnabled: ac.level.GradingEnabled, Editable: true, Rows: rows, ClosedMonths: ac.closedMonths(),
+		UnmappedMonths: ac.unmappedMonths(),
 	}
 	if reason := s.readOnlyReason(ctx, ac, m); reason != "" {
 		sheet.Editable, sheet.ReadOnlyReason = false, reason
@@ -406,9 +421,11 @@ func (s *MonthlyGradesService) resolveAssignment(ctx context.Context, assignment
 }
 
 // loadPeriods reads the level's terms in the cycle (one config read) and their
-// closures (one query). Once the level maps any month into a term, the months
-// a sheet shows and a write accepts are only the mapped ones; a level with no
-// mapping keeps every month of the cycle.
+// closures (one query). A closed term locks the UNION of the months it was
+// closed with (the closure's snapshot) and the months config maps into it
+// now, so moving a month out of — or into — a closed term never unlocks it.
+// The months a sheet shows and a write accepts stay every month of the cycle,
+// mapped or not (T7 decision): only a closed term's months lock.
 func (s *MonthlyGradesService) loadPeriods(ctx context.Context, ac *assignmentContext) error {
 	ac.termOf, ac.closed = map[domain.Month]string{}, map[domain.Month]bool{}
 	terms, err := s.assignments.ListTerms(ctx, ac.assignment.CycleID, ac.level.ID)
@@ -422,22 +439,19 @@ func (s *MonthlyGradesService) loadPeriods(ctx context.Context, ac *assignmentCo
 			ac.termOf[m] = t.ID
 		}
 	}
-	if len(ac.termOf) == 0 {
+	if len(ids) == 0 {
 		return nil
 	}
-	mapped := make([]domain.Month, 0, len(ac.termOf))
-	for _, m := range ac.months {
-		if _, ok := ac.termOf[m]; ok {
-			mapped = append(mapped, m)
-		}
-	}
-	ac.months = mapped
 	closures, err := s.grades.PeriodClosures(ctx, ids)
 	if err != nil {
 		return err
 	}
-	for m, termID := range ac.termOf {
-		if c, ok := closures[termID]; ok && c.IsClosed() {
+	for _, t := range terms {
+		c, ok := closures[t.ID]
+		if !ok || !c.IsClosed() {
+			continue
+		}
+		for _, m := range append(c.Months(), t.Months...) {
 			ac.closed[m] = true
 		}
 	}
@@ -478,7 +492,9 @@ func requireMonthInCycle(months []domain.Month, raw string) (domain.Month, error
 // and director alike (T7): the director reopens the period to correct it.
 //
 // A month after the current UTC month is not graded yet, for anyone (teacher
-// or director): nothing has been taught in it.
+// or director): nothing has been taught in it. The school day is the UTC day
+// fleet-wide (finance reads the same clock): after 18:00 in Mexico the next
+// month opens a few hours early, the same way in every service.
 //
 // It also enforces the previous-group rule: a transfer rewrites the
 // enrollment's group in place, so after a move the new group's teacher would

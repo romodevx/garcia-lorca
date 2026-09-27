@@ -151,6 +151,7 @@ type periodsFixture struct {
 	publisher *fakePublisher
 	catalog   *fakeCatalog
 	asg       *fakeAssignments
+	enr       *fakeEnrollments
 	now       *time.Time
 }
 
@@ -201,7 +202,7 @@ func newPeriodsFixture(t *testing.T) periodsFixture {
 		NewID: func() string { seq++; return "rc-" + string(rune('a'+seq-1)) },
 		Now:   func() time.Time { return now },
 	})
-	return periodsFixture{svc: svc, grades: grades, periods: periods, directory: directory, publisher: publisher, catalog: catalog, asg: asg, now: &now}
+	return periodsFixture{svc: svc, grades: grades, periods: periods, directory: directory, publisher: publisher, catalog: catalog, asg: asg, enr: enr, now: &now}
 }
 
 // capture stores a grade directly (the monthly knot is tested elsewhere).
@@ -256,13 +257,22 @@ func TestPeriodProgressCountsAndGroupsWhatIsMissing(t *testing.T) {
 	}, got.Missing)
 }
 
-// Months after the current one are not owed yet.
-func TestPeriodProgressOnlyCountsMonthsUpToNow(t *testing.T) {
+// Every month of the term is expected, even those not reached yet: closing an
+// unfinished term reports them missing (and needs force). The months after the
+// current UTC month are listed apart so the screen can warn about them.
+func TestPeriodProgressCountsEveryMonthAndListsTheUnfinished(t *testing.T) {
 	f := newPeriodsFixture(t)
 	*f.now = time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
 	got, err := f.svc.Progress(context.Background(), firstTermID)
 	require.NoError(t, err)
-	assert.Equal(t, 10, got.Expected, "September and October only")
+	assert.Equal(t, 15, got.Expected, "November is expected too")
+	assert.Equal(t, []string{"2026-11"}, monthStrings(got.UnfinishedMonths))
+
+	*f.now = periodsNow
+	got, err = f.svc.Progress(context.Background(), firstTermID)
+	require.NoError(t, err)
+	assert.Empty(t, got.UnfinishedMonths, "November has begun")
+	assert.NotNil(t, got.UnfinishedMonths)
 
 	empty, err := f.svc.Progress(context.Background(), "term-empty")
 	require.NoError(t, err)
@@ -270,6 +280,35 @@ func TestPeriodProgressOnlyCountsMonthsUpToNow(t *testing.T) {
 
 	_, err = f.svc.Progress(context.Background(), "ghost")
 	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err))
+}
+
+// A pupil is expected only from the month they joined their group: the month
+// they enrolled in, or the month they were last moved INTO it. Earlier months
+// are not expected (they belong to before, or to the previous group).
+func TestPeriodProgressExpectsFromTheMonthThePupilJoined(t *testing.T) {
+	f := newPeriodsFixture(t)
+	late := f.enr.byID["enr-3"]
+	late.EnrolledAt = time.Date(2026, 10, 10, 8, 0, 0, 0, time.UTC)
+	f.enr.byID["enr-3"] = late
+	moved := f.enr.byID["enr-2"]
+	moved.EnrolledAt = time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	f.enr.byID["enr-2"] = moved
+	f.enr.transfers = []ports.TransferRef{
+		{EnrollmentID: "enr-2", ToGroupID: group2ID, MovedAt: time.Date(2026, 9, 5, 0, 0, 0, 0, time.UTC)},
+		{EnrollmentID: "enr-2", ToGroupID: groupID, MovedAt: time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)},
+	}
+	f.capture(t, "enr-2", subjectID, "2026-09", 900) // before joining: neither expected nor counted
+
+	got, err := f.svc.Progress(context.Background(), firstTermID)
+	require.NoError(t, err)
+	// enr-1: 2 subjects × 3 months; enr-2: 2 × November; enr-3: 1 × Oct–Nov.
+	assert.Equal(t, 6+2+2, got.Expected)
+	assert.Zero(t, got.Captured)
+
+	f.captureAll(t)
+	res, err := f.svc.Close(context.Background(), firstTermID, false, dirActor)
+	require.NoError(t, err, "complete from each pupil's joining month: no force needed")
+	assert.Equal(t, 3, res.ReportCards)
 }
 
 // --- close -------------------------------------------------------------------
@@ -482,7 +521,8 @@ func TestListPeriods(t *testing.T) {
 	assert.Equal(t, 15, first.Captured)
 	second := byTerm[secondTermID]
 	assert.False(t, second.Closure.IsClosed())
-	assert.Zero(t, second.Expected, "December has not arrived")
+	assert.Equal(t, 15, second.Expected, "every month of the term is expected, reached or not")
+	assert.Zero(t, second.Captured)
 	assert.Equal(t, "Preescolar", byTerm["term-kinder"].LevelName)
 	assert.Zero(t, byTerm["term-kinder"].Expected, "a level without numeric grades owes nothing")
 	assert.Equal(t, 1, f.grades.batchCalls, "every grade of the cycle in ONE read")
@@ -494,4 +534,35 @@ func TestReportCardsNeedAFilter(t *testing.T) {
 	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err))
 	_, err = f.svc.ReportCard(context.Background(), "ghost")
 	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err))
+}
+
+// ClosedTerms lists the requested terms that are closed now, in one read; a
+// reopened term is open.
+func TestClosedTerms(t *testing.T) {
+	f := newPeriodsFixture(t)
+	_, err := f.svc.Close(context.Background(), firstTermID, true, dirActor)
+	require.NoError(t, err)
+	_, err = f.svc.Close(context.Background(), secondTermID, true, dirActor)
+	require.NoError(t, err)
+	_, err = f.svc.Reopen(context.Background(), secondTermID, director)
+	require.NoError(t, err)
+
+	got, err := f.svc.ClosedTerms(context.Background(), []string{secondTermID, firstTermID, "ghost"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{firstTermID}, got)
+
+	none, err := f.svc.ClosedTerms(context.Background(), nil)
+	require.NoError(t, err)
+	assert.Empty(t, none)
+}
+
+// Closing a term whose months are not over reports them missing: without
+// force it is refused.
+func TestCloseUnfinishedTermNeedsForce(t *testing.T) {
+	f := newPeriodsFixture(t)
+	f.captureAll(t)
+	*f.now = time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+	delete(f.grades.rows, monthlyKey("enr-3", subjectID, months(t, "2026-11")[0]))
+	_, err := f.svc.Close(context.Background(), firstTermID, false, dirActor)
+	assert.Equal(t, domain.CodeMissingGrades, domain.RefusalCodeOf(err))
 }

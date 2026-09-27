@@ -31,6 +31,8 @@ type stubPeriods struct {
 	closeActor  domain.Actor
 	reopenActor string
 	filter      ports.ReportCardFilter
+	closed      []string
+	closedAsked []string
 }
 
 func (s *stubPeriods) ListPeriods(context.Context, string) ([]usecase.Period, error) {
@@ -58,6 +60,11 @@ func (s *stubPeriods) ReportCards(_ context.Context, f ports.ReportCardFilter) (
 
 func (s *stubPeriods) ReportCard(context.Context, string) (domain.ReportCard, error) {
 	return s.card, s.err
+}
+
+func (s *stubPeriods) ClosedTerms(_ context.Context, ids []string) ([]string, error) {
+	s.closedAsked = ids
+	return s.closed, s.err
 }
 
 func periodsHandler(p *stubPeriods) *grpcadapter.GradesHandler {
@@ -88,7 +95,7 @@ func sampleCard(t *testing.T) domain.ReportCard {
 }
 
 func TestListPeriodsRPC(t *testing.T) {
-	closed, err := domain.NewOpenPeriod(termID, cycleID, levelID).Close(domain.Actor{ID: "dir", Name: "Directora"}, issuedAt)
+	closed, err := domain.NewOpenPeriod(termID, cycleID, levelID).Close(domain.Actor{ID: "dir", Name: "Directora"}, issuedAt, nil)
 	require.NoError(t, err)
 	sep, err := domain.ParseMonth("2026-09")
 	require.NoError(t, err)
@@ -120,7 +127,7 @@ func TestListPeriodsRPC(t *testing.T) {
 func TestGetPeriodProgressRPC(t *testing.T) {
 	sep, err := domain.ParseMonth("2026-09")
 	require.NoError(t, err)
-	p := &stubPeriods{progress: usecase.PeriodProgress{TermID: termID, Months: []domain.Month{sep}, Expected: 4, Captured: 1,
+	p := &stubPeriods{progress: usecase.PeriodProgress{TermID: termID, Months: []domain.Month{sep}, UnfinishedMonths: []domain.Month{sep}, Expected: 4, Captured: 1,
 		Missing: []usecase.MissingGrades{{GroupID: groupID, GroupLabel: "1° · A", SubjectID: subjectID, SubjectName: "Matemáticas", TeacherName: "Gabriela", Missing: 3}}}}
 	res, err := periodsHandler(p).GetPeriodProgress(context.Background(), connect.NewRequest(&gradesv1.GetPeriodProgressRequest{TermId: termID}))
 	require.NoError(t, err)
@@ -128,6 +135,7 @@ func TestGetPeriodProgressRPC(t *testing.T) {
 	assert.Equal(t, int32(4), m.GetExpected())
 	assert.Equal(t, int32(1), m.GetCaptured())
 	assert.Equal(t, []string{"2026-09"}, m.GetMonths())
+	assert.Equal(t, []string{"2026-09"}, m.GetUnfinishedMonths())
 	require.Len(t, m.GetMissing(), 1)
 	assert.Equal(t, &gradesv1.MissingGrades{GroupId: groupID, GroupLabel: "1° · A", SubjectId: subjectID, SubjectName: "Matemáticas", TeacherName: "Gabriela", MissingCount: 3}, m.GetMissing()[0])
 }
@@ -209,7 +217,7 @@ func TestMonthlySheetCarriesClosedMonths(t *testing.T) {
 	asg := baseAssignments()
 	asg.terms["term-t1"] = ports.TermRef{ID: "term-t1", CycleID: cycleID, LevelID: levelID, Months: []domain.Month{sep}}
 	repo := newFakeMonthly()
-	closed, err := domain.NewOpenPeriod("term-t1", cycleID, levelID).Close(domain.Actor{ID: "dir"}, issuedAt)
+	closed, err := domain.NewOpenPeriod("term-t1", cycleID, levelID).Close(domain.Actor{ID: "dir"}, issuedAt, nil)
 	require.NoError(t, err)
 	repo.closures["term-t1"] = closed
 	enr := &fakeEnrollments{byID: map[string]ports.EnrollmentRef{enrollmentID: activeEnrollment(enrollmentID, "stu-1")}}
@@ -219,7 +227,10 @@ func TestMonthlySheetCarriesClosedMonths(t *testing.T) {
 	res, err := h.GetMonthlySheet(context.Background(), connect.NewRequest(&gradesv1.GetMonthlySheetRequest{AssignmentId: assignmentID, Month: "2026-09"}))
 	require.NoError(t, err)
 	assert.Equal(t, []string{"2026-09"}, res.Msg.GetClosedMonths())
-	assert.Equal(t, []string{"2026-09"}, res.Msg.GetMonths(), "only mapped months")
+	assert.Contains(t, res.Msg.GetMonths(), "2026-09")
+	assert.Greater(t, len(res.Msg.GetMonths()), 1, "every month of the cycle, mapped or not")
+	assert.NotContains(t, res.Msg.GetUnmappedMonths(), "2026-09")
+	assert.Len(t, res.Msg.GetUnmappedMonths(), len(res.Msg.GetMonths())-1, "the rest belong to no term")
 	assert.False(t, res.Msg.GetEditable())
 	assert.Equal(t, "El periodo está cerrado", res.Msg.GetReadOnlyReason())
 
@@ -230,4 +241,22 @@ func TestMonthlySheetCarriesClosedMonths(t *testing.T) {
 	var ce *connect.Error
 	require.ErrorAs(t, err, &ce)
 	assert.Equal(t, "MONTH_LOCKED", ce.Meta().Get(grpcadapter.ErrorCodeMeta))
+}
+
+// ClosedTerms answers which requested terms are closed, in one call.
+func TestClosedTermsRPC(t *testing.T) {
+	p := &stubPeriods{closed: []string{"term-t1"}}
+	res, err := periodsHandler(p).ClosedTerms(context.Background(), connect.NewRequest(&gradesv1.ClosedTermsRequest{TermIds: []string{"term-t1", "term-t2"}}))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"term-t1"}, res.Msg.GetClosedTermIds())
+	assert.Equal(t, []string{"term-t1", "term-t2"}, p.closedAsked)
+
+	p = &stubPeriods{}
+	res, err = periodsHandler(p).ClosedTerms(context.Background(), connect.NewRequest(&gradesv1.ClosedTermsRequest{}))
+	require.NoError(t, err)
+	assert.NotNil(t, res.Msg.GetClosedTermIds(), "an empty answer is a list")
+
+	p.err = glerrors.New(glerrors.KindInternal, "db down")
+	_, err = periodsHandler(p).ClosedTerms(context.Background(), connect.NewRequest(&gradesv1.ClosedTermsRequest{TermIds: []string{"x"}}))
+	assert.Equal(t, connect.CodeInternal, connect.CodeOf(err))
 }

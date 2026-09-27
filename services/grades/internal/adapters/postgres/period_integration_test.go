@@ -36,7 +36,7 @@ func termMonths(t *testing.T) []domain.Month {
 
 func closedPeriod(t *testing.T, termID string) domain.PeriodClosure {
 	t.Helper()
-	c, err := domain.NewOpenPeriod(termID, pCycle, pLevel).Close(domain.Actor{ID: pDirector, Name: "Directora Ruiz"}, pClock)
+	c, err := domain.NewOpenPeriod(termID, pCycle, pLevel).Close(domain.Actor{ID: pDirector, Name: "Directora Ruiz"}, pClock, termMonths(t))
 	require.NoError(t, err)
 	return c
 }
@@ -80,6 +80,7 @@ func TestPeriodClosureUpsertsTwice(t *testing.T) {
 	assert.Equal(t, pDirector, got[term].ClosedBy())
 	assert.True(t, got[term].ClosedAt().Equal(pClock))
 	assert.Equal(t, pCycle, got[term].CycleID())
+	assert.Equal(t, []string{"2026-09", "2026-10", "2026-11"}, monthsText(got[term].Months()), "the months snapshot is stored")
 
 	reopenAt := pClock.Add(time.Hour)
 	require.NoError(t, repo.WithPeriodLock(ctx, term, func(ctx context.Context, tx ports.PeriodTx) error {
@@ -99,7 +100,7 @@ func TestPeriodClosureUpsertsTwice(t *testing.T) {
 	require.NoError(t, repo.WithPeriodLock(ctx, term, func(ctx context.Context, tx ports.PeriodTx) error {
 		c, _, err := tx.Closure(ctx)
 		require.NoError(t, err)
-		again, err := c.Close(domain.Actor{ID: pDirector, Name: "Otra Persona"}, reopenAt.Add(time.Hour))
+		again, err := c.Close(domain.Actor{ID: pDirector, Name: "Otra Persona"}, reopenAt.Add(time.Hour), termMonths(t)[:2])
 		require.NoError(t, err)
 		return tx.SaveClosure(ctx, again)
 	}))
@@ -107,6 +108,7 @@ func TestPeriodClosureUpsertsTwice(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2, got[term].Version())
 	assert.Equal(t, "Otra Persona", got[term].ClosedByName())
+	assert.Equal(t, []string{"2026-09", "2026-10"}, monthsText(got[term].Months()), "a re-close rewrites the snapshot")
 
 	empty, err := repo.PeriodClosures(ctx, nil)
 	require.NoError(t, err)

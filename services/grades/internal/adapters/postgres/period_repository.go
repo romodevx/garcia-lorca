@@ -216,6 +216,7 @@ func (p *periodTx) SaveClosure(_ context.Context, c domain.PeriodClosure) error 
 			"closed_by":      m.ClosedBy,
 			"closed_by_name": m.ClosedByName,
 			"reopened_at":    m.ReopenedAt,
+			"months":         m.Months,
 			"updated_at":     gorm.Expr("now()"),
 		}),
 	}).Create(&m).Error
