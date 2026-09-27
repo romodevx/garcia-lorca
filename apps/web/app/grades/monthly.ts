@@ -6,6 +6,8 @@
  * (`grades/api.ts`, `teaching/api.ts`) import from this file.
  */
 
+import { averageHalfUp } from "./average";
+
 // --- gateway shapes -------------------------------------------------------
 
 /** How a level grades: the range, the decimals allowed and the passing mark. */
@@ -112,19 +114,21 @@ export type ParsedGrade =
   | { kind: "invalid" }
   | { kind: "value"; value: number; decimals: number };
 
+/** Digits, optionally a point and more digits — no signs, exponents, hex or inner spaces. */
 const NUMBER_SHAPE = /^(\d+)(?:\.(\d+))?$/;
 
-/** "9,5" and "9.5" are the same grade; an empty field clears it. */
+/** "9,5" and "9.5" are the same grade; an empty field clears it; "9.50" has one decimal. */
 export function parseGradeInput(raw: string): ParsedGrade {
   const text = raw.trim().replace(",", ".");
   if (text === "") return { kind: "empty" };
   const match = NUMBER_SHAPE.exec(text);
   if (match === null) return { kind: "invalid" };
-  return { kind: "value", value: Number(text), decimals: match[2]?.length ?? 0 };
+  const significant = (match[2] ?? "").replace(/0+$/, "");
+  return { kind: "value", value: Number(text), decimals: significant.length };
 }
 
 function decimalsMessage(decimals: number): string {
-  if (decimals === 0) return "Solo se permiten números enteros";
+  if (decimals === 0) return "Solo se permiten calificaciones enteras";
   return decimals === 1 ? "Solo se permite 1 decimal" : `Solo se permiten ${decimals} decimales`;
 }
 
@@ -132,7 +136,7 @@ function decimalsMessage(decimals: number): string {
 export function validateGrade(raw: string, scale: GradeScale): string | undefined {
   const parsed = parseGradeInput(raw);
   if (parsed.kind === "empty") return undefined;
-  if (parsed.kind === "invalid") return "Escribe un número, como 9 o 9.5";
+  if (parsed.kind === "invalid") return "La calificación debe ser un número";
   if (parsed.value < scale.min || parsed.value > scale.max) {
     return `La calificación debe estar entre ${scale.min} y ${scale.max}`;
   }
@@ -150,11 +154,10 @@ export interface SheetStats {
 
 export function sheetStats(values: readonly (number | null)[], passing: number): SheetStats {
   const captured = values.filter((v): v is number => v !== null);
-  const sum = captured.reduce((acc, v) => acc + v, 0);
   return {
     captured: captured.length,
     total: values.length,
-    average: captured.length > 0 ? sum / captured.length : undefined,
+    average: averageHalfUp(captured),
     failing: captured.filter((v) => v < passing).length,
   };
 }

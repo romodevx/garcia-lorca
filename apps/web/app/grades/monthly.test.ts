@@ -20,6 +20,20 @@ describe("parseGradeInput", () => {
     expect(parseGradeInput("abc")).toEqual({ kind: "invalid" });
     expect(parseGradeInput("-3")).toEqual({ kind: "invalid" });
   });
+
+  it("rejects exponents, hex and spaces inside the number, but trims around it", () => {
+    expect(parseGradeInput("1e1")).toEqual({ kind: "invalid" });
+    expect(parseGradeInput("0x9")).toEqual({ kind: "invalid" });
+    expect(parseGradeInput("9 5")).toEqual({ kind: "invalid" });
+    expect(parseGradeInput("9, 5")).toEqual({ kind: "invalid" });
+    expect(parseGradeInput("\t9,5 ")).toEqual({ kind: "value", value: 9.5, decimals: 1 });
+  });
+
+  it("counts decimals on the exact value, ignoring trailing zeros", () => {
+    expect(parseGradeInput("10.0")).toEqual({ kind: "value", value: 10, decimals: 0 });
+    expect(parseGradeInput("9,0")).toEqual({ kind: "value", value: 9, decimals: 0 });
+    expect(parseGradeInput("9.50")).toEqual({ kind: "value", value: 9.5, decimals: 1 });
+  });
 });
 
 describe("validateGrade", () => {
@@ -35,12 +49,19 @@ describe("validateGrade", () => {
 
   it("names the allowed decimals", () => {
     expect(validateGrade("9.55", SCALE)).toBe("Solo se permite 1 decimal");
-    expect(validateGrade("9.5", { ...SCALE, decimals: 0 })).toBe("Solo se permiten números enteros");
+    expect(validateGrade("9.5", { ...SCALE, decimals: 0 })).toBe("Solo se permiten calificaciones enteras");
     expect(validateGrade("9.555", { ...SCALE, decimals: 2 })).toBe("Solo se permiten 2 decimales");
   });
 
-  it("explains a non-number", () => {
-    expect(validateGrade("x", SCALE)).toBe("Escribe un número, como 9 o 9.5");
+  it("explains a non-number, in the server's words", () => {
+    expect(validateGrade("x", SCALE)).toBe("La calificación debe ser un número");
+    expect(validateGrade("1e1", SCALE)).toBe("La calificación debe ser un número");
+  });
+
+  it("accepts trailing zeros the scale allows", () => {
+    expect(validateGrade("10.0", { ...SCALE, decimals: 0 })).toBeUndefined();
+    expect(validateGrade("9,0", { ...SCALE, decimals: 0 })).toBeUndefined();
+    expect(validateGrade("9.50", SCALE)).toBeUndefined();
   });
 });
 
@@ -48,6 +69,11 @@ describe("sheetStats", () => {
   it("counts captured, averages them and counts those below passing", () => {
     const stats = sheetStats([9, null, 5.5, 8], SCALE.passing);
     expect(stats).toEqual({ captured: 3, total: 4, average: 7.5, failing: 1 });
+  });
+
+  it("rounds the average half-up to one decimal", () => {
+    expect(sheetStats([8.4, 8.5], 6).average).toBe(8.5);
+    expect(sheetStats([8, 8.5], 6).average).toBe(8.3);
   });
 
   it("has no average when nothing is captured", () => {
