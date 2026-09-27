@@ -46,11 +46,15 @@ func (r *Repository) withTenant(ctx context.Context, fn func(tx *gorm.DB) error)
 // path and leaves the reserved published_at column untouched (NULL). The stored
 // row is re-read inside the same tenant-bound transaction and returned, so the
 // caller sees the canonical id/value even when the upsert updated a pre-existing
-// row.
+// row. The entry's term guards it like a monthly write (guardPeriod): a closed
+// term refuses it with MONTH_LOCKED, serialised against a close.
 func (r *Repository) UpsertGradeEntry(ctx context.Context, e domain.GradeEntry) (domain.GradeEntry, error) {
 	model := fromDomain(e)
 	var out domain.GradeEntry
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := r.guardPeriod(tx, ports.PeriodLock{TermID: model.TermID}); err != nil {
+			return err
+		}
 		res := tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{
 				{Name: "tenant_id"}, {Name: "enrollment_id"}, {Name: "subject_id"}, {Name: "term_id"},

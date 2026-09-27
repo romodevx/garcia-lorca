@@ -388,3 +388,35 @@ func TestRLSIsolatesPeriodTables(t *testing.T) {
 	}))
 	assert.Equal(t, int64(0), n, "tenant A read tenant B's lines")
 }
+
+// The legacy per-term capture (CaptureGrade → UpsertGradeEntry) honours the
+// period lock too: its term closed, the upsert is refused with MONTH_LOCKED
+// under the same shared advisory lock a monthly write takes.
+func TestGradeEntryWriteRespectsTheClosure(t *testing.T) {
+	const (
+		term = "70700000-0000-0000-0000-000000000009"
+		enr  = "e7000000-0000-0000-0000-000000000009"
+	)
+	repo := appRepo(t, tenantA)
+	ctx := context.Background()
+	entry := func(id string, value float64) domain.GradeEntry {
+		e, err := domain.NewGradeEntry(id, tenantA, enr, subjectOne, term, teacherOne, value, captureClock)
+		require.NoError(t, err)
+		return e
+	}
+	_, err := repo.UpsertGradeEntry(ctx, entry("a7000000-0000-0000-0000-000000000091", 9))
+	require.NoError(t, err, "a term never closed is open")
+
+	require.NoError(t, repo.WithPeriodLock(ctx, term, func(ctx context.Context, tx ports.PeriodTx) error {
+		return tx.SaveClosure(ctx, closedPeriod(t, term))
+	}))
+	_, err = repo.UpsertGradeEntry(ctx, entry("a7000000-0000-0000-0000-000000000092", 5))
+	assert.Equal(t, glerrors.KindConflict, glerrors.KindOf(err))
+	assert.Equal(t, domain.CodeMonthLocked, domain.RefusalCodeOf(err))
+	assert.Equal(t, "El periodo está cerrado", glerrors.SafeMessage(err))
+
+	stored, err := repo.ListGradeEntries(ctx, enr, term)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.InDelta(t, 9.0, stored[0].Value(), 0.001, "the locked write changed nothing")
+}

@@ -96,7 +96,9 @@ type TransferRef struct {
 type GradeEntryRepository interface {
 	// UpsertGradeEntry inserts a grade entry, or updates the value of the
 	// existing row on the (tenant, enrollment, subject, term) key — one grade per
-	// student·subject·term ("capturar/editar"). Returns the stored entry.
+	// student·subject·term ("capturar/editar"). Returns the stored entry. A
+	// closed term refuses it with MONTH_LOCKED, re-checked inside the write's
+	// transaction under the term's shared lock (like a monthly write).
 	UpsertGradeEntry(ctx context.Context, e domain.GradeEntry) (domain.GradeEntry, error)
 	// GetForKeys batch-loads the grade entries for many enrollments under the
 	// same (subject, term), in ONE tenant-bound query, so building a roster never
