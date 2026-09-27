@@ -5,13 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // has to be stubbed BEFORE importing, which is also what production actually
 // does. Stubbing afterwards used to appear to work only because the old helper
 // re-read process.env on every request.
-let captureGrade: typeof import("./api").captureGrade;
-let getRoster: typeof import("./api").getRoster;
 let listAssignments: typeof import("./api").listAssignments;
 let listAttendanceClasses: typeof import("./api").listAttendanceClasses;
 let getTeachingAttendanceSheet: typeof import("./api").getTeachingAttendanceSheet;
 let saveTeachingAttendance: typeof import("./api").saveTeachingAttendance;
-let listTerms: typeof import("./api").listTerms;
+let teachingGradeSheet: typeof import("./api").teachingGradeSheet;
 let scanTeachingCard: typeof import("./api").scanTeachingCard;
 
 afterEach(() => {
@@ -22,7 +20,7 @@ afterEach(() => {
 beforeEach(async () => {
   vi.stubEnv("NEXT_PUBLIC_API_URL", "http://gw");
   vi.resetModules();
-  ({ captureGrade, getRoster, listAssignments, listTerms, listAttendanceClasses, getTeachingAttendanceSheet, saveTeachingAttendance, scanTeachingCard } =
+  ({ teachingGradeSheet, listAssignments, listAttendanceClasses, getTeachingAttendanceSheet, saveTeachingAttendance, scanTeachingCard } =
     await import("./api"));
 });
 
@@ -47,25 +45,6 @@ const assignment = {
   teacherId: "t1",
   groupName: "1° A",
   subjectName: "Matemáticas",
-};
-
-const term = { id: "term1", name: "Bloque 1", cycleId: "c1" };
-
-const rosterRow = {
-  enrollmentId: "en1",
-  studentId: "st1",
-  studentName: "Ada Lovelace",
-  value: 9.5,
-  hasValue: true,
-};
-
-const gradeEntry = {
-  id: "ge1",
-  enrollmentId: "en1",
-  subjectId: "s1",
-  termId: "term1",
-  teacherId: "t1",
-  value: 9.5,
 };
 
 describe("listAssignments", () => {
@@ -93,70 +72,52 @@ describe("listAssignments", () => {
   });
 });
 
-describe("listTerms", () => {
-  it("GETs /teaching/terms with credentials and unwraps {terms}", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ terms: [term] }));
+describe("teacher grade sheet", () => {
+  const gradeSheet = {
+    assignmentId: "a1",
+    month: "2026-09",
+    months: ["2026-09"],
+    scale: { min: 5, max: 10, decimals: 1, passing: 6 },
+    editable: true,
+    rows: [],
+  };
+
+  it("getTeachingGradeSheet GETs /teaching/grades/sheet with credentials", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(gradeSheet));
     vi.stubGlobal("fetch", fetchMock);
 
-    const res = await listTerms();
-
-    expect(res).toEqual([term]);
+    await expect(teachingGradeSheet.load({ assignmentId: "a1", month: "2026-09" })).resolves.toEqual(gradeSheet);
     const [url, init] = lastCall(fetchMock);
-    expect(url).toBe("http://gw/api/v1/teaching/terms");
+    expect(url).toBe("http://gw/api/v1/teaching/grades/sheet?assignmentId=a1&month=2026-09");
     expect(init.credentials).toBe("include");
   });
 
-  it("returns [] when the envelope key is absent", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({})));
-    await expect(listTerms()).resolves.toEqual([]);
-  });
-});
-
-describe("getRoster", () => {
-  it("GETs /teaching/roster with credentials, the query params, and unwraps {roster}", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ roster: [rosterRow] }));
+  it("saves with a PUT to /teaching/grades/monthly", async () => {
+    const saved = { enrollmentId: "en1", month: "2026-09", value: 9.5, updatedAt: "2026-09-11T10:00:00Z" };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(saved));
     vi.stubGlobal("fetch", fetchMock);
 
-    const res = await getRoster("a1", "term1");
-
-    expect(res).toEqual([rosterRow]);
+    await teachingGradeSheet.save({ assignmentId: "a1", month: "2026-09", enrollmentId: "en1", value: 9.5 });
     const [url, init] = lastCall(fetchMock);
-    expect(url).toBe("http://gw/api/v1/teaching/roster?assignmentId=a1&termId=term1");
-    expect(init.credentials).toBe("include");
-    expect(init.method ?? "GET").toBe("GET");
+    expect(url).toBe("http://gw/api/v1/teaching/grades/monthly");
+    expect(init.method).toBe("PUT");
   });
 
-  it("throws on a non-ok response (e.g. 403)", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 403 })));
-    await expect(getRoster("a1", "term1")).rejects.toThrow();
-  });
-});
-
-describe("captureGrade", () => {
-  it("POSTs {assignmentId, enrollmentId, termId, value} and NEVER sends subject/teacher", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(gradeEntry, 201));
+  it("clears with a DELETE to /teaching/grades/monthly", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const res = await captureGrade({ assignmentId: "a1", enrollmentId: "en1", termId: "term1", value: 9.5 });
-
-    expect(res).toEqual(gradeEntry);
+    await teachingGradeSheet.remove({ assignmentId: "a1", month: "2026-09", enrollmentId: "en1" });
     const [url, init] = lastCall(fetchMock);
-    expect(url).toBe("http://gw/api/v1/teaching/grades");
-    expect(init.method).toBe("POST");
-    expect(init.credentials).toBe("include");
-    const body = JSON.parse(init.body as string);
-    expect(body).toEqual({ assignmentId: "a1", enrollmentId: "en1", termId: "term1", value: 9.5 });
-    // subject/teacher are DERIVED server-side — the client must never send them.
-    expect(body).not.toHaveProperty("subjectId");
-    expect(body).not.toHaveProperty("teacherId");
-    expect(typeof body.value).toBe("number");
+    expect(url).toBe("http://gw/api/v1/teaching/grades/monthly?assignmentId=a1&month=2026-09&enrollmentId=en1");
+    expect(init.method).toBe("DELETE");
   });
 
-  it("throws on a non-ok response (e.g. server range 400)", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 400 })));
+  it("rejects with the server's own words", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("Solo se permite 1 decimal", { status: 400 })));
     await expect(
-      captureGrade({ assignmentId: "a1", enrollmentId: "en1", termId: "term1", value: 11 }),
-    ).rejects.toThrow();
+      teachingGradeSheet.save({ assignmentId: "a1", month: "2026-09", enrollmentId: "en1", value: 9.55 }),
+    ).rejects.toThrow("Solo se permite 1 decimal");
   });
 });
 

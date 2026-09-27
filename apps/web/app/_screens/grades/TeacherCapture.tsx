@@ -3,10 +3,10 @@
 import { useEffect, useState, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
-import { listAssignments, listTerms, type TeachingAssignment, type TeachingTerm } from "../../teaching/api";
+import { listAssignments, teachingGradeSheet, type TeachingAssignment } from "../../teaching/api";
 import { ErrorAlert } from "../config/parts";
 import { TeachingPicker } from "../teaching/TeachingPicker";
-import { TeacherGradeList } from "./TeacherGradeList";
+import { MonthlyGradeSheet } from "./MonthlyGradeSheet";
 
 export interface TeacherCaptureProps {
   onBack: () => void;
@@ -18,26 +18,23 @@ export interface TeacherCaptureProps {
  * `/api/v1/teaching/*` client, so a teacher never triggers a students-list,
  * `/grades/*`, or `/config/*` fetch (all of which they lack permission for).
  *
- * Fewest taps: subject → group → the capture list, each step skipped when it
- * has a single choice (TeachingPicker), then the term inside the list. The
- * gateway is the security boundary — this is UX only.
+ * Fewest taps: subject → group → the month's sheet, each step skipped when it
+ * has a single choice (TeachingPicker); the month is a chip inside the sheet.
+ * The gateway is the security boundary — this is UX only.
  */
 export function TeacherCapture({ onBack }: TeacherCaptureProps): ReactElement {
   const [assignments, setAssignments] = useState<TeachingAssignment[]>([]);
-  const [terms, setTerms] = useState<TeachingTerm[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
 
-  // Boot: the teacher's own assignments + the terms of their cycles.
+  // Boot: the teacher's own assignments.
   useEffect(() => {
     let active = true;
     setLoading(true);
     void (async (): Promise<void> => {
       try {
-        const [asgs, ts] = await Promise.all([listAssignments(), listTerms()]);
-        if (!active) return;
-        setAssignments(asgs);
-        setTerms(ts);
+        const asgs = await listAssignments();
+        if (active) setAssignments(asgs);
       } catch {
         if (active) setLoadError("No se pudieron cargar tus asignaciones.");
       } finally {
@@ -66,7 +63,7 @@ export function TeacherCapture({ onBack }: TeacherCaptureProps): ReactElement {
         </div>
         <div>
           <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Calificaciones</h1>
-          <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Captura por materia y grupo · solo tus grupos</p>
+          <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Captura mensual por materia y grupo · solo tus grupos</p>
         </div>
       </div>
 
@@ -77,7 +74,7 @@ export function TeacherCapture({ onBack }: TeacherCaptureProps): ReactElement {
           <ErrorAlert message={loadError} />
         ) : (
           <TeachingPicker title="Calificaciones" options={assignments} bySubject>
-            {(assignment) => <TeacherGradeList key={assignment.id} assignment={assignment} terms={terms} />}
+            {(assignment) => <MonthlyGradeSheet key={assignment.id} assignmentId={assignment.id} client={teachingGradeSheet} />}
           </TeachingPicker>
         )}
       </div>
