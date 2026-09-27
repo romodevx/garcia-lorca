@@ -32,6 +32,7 @@ type fakePeriodTx struct {
 	termID   string
 	closure  *domain.PeriodClosure
 	issued   []domain.ReportCard
+	issuing  bool
 	lockedAt int
 }
 
@@ -44,14 +45,14 @@ func (f *fakePeriods) WithPeriodLock(ctx context.Context, termID string, fn func
 	if tx.closure != nil {
 		f.grades.closures[termID] = *tx.closure
 	}
-	for _, rc := range tx.issued {
+	if tx.issuing {
 		for i, old := range f.cards {
-			if old.TermID() == rc.TermID() && old.EnrollmentID() == rc.EnrollmentID() && old.Status() == domain.ReportCardPublished {
+			if old.TermID() == termID && old.Status() == domain.ReportCardPublished {
 				f.cards[i] = old.WithStatus(domain.ReportCardSuperseded)
 			}
 		}
-		f.cards = append(f.cards, rc)
 	}
+	f.cards = append(f.cards, tx.issued...)
 	return nil
 }
 
@@ -70,6 +71,7 @@ func (t *fakePeriodTx) SaveClosure(_ context.Context, c domain.PeriodClosure) er
 }
 
 func (t *fakePeriodTx) IssueReportCards(_ context.Context, cards []domain.ReportCard) error {
+	t.issuing = true
 	t.issued = append(t.issued, cards...)
 	return nil
 }

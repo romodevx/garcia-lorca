@@ -135,8 +135,10 @@ func TestWithPeriodLockRollsBack(t *testing.T) {
 	assert.Empty(t, cards)
 }
 
-// Issuing v2 supersedes v1 of the same enrollment and term: the list shows
-// only the latest published card, while v1 stays readable, superseded. The
+// Issuing v2 supersedes EVERY published v1 of the term — including the card
+// of a pupil withdrawn between the two closes, who gets no v2 (ADR 0020): a
+// re-close replaces the term's report cards as a whole, so a stale v1 never
+// stays published beside the new version. v1 stays readable, superseded. The
 // snapshot keeps names, months, exact month values and averages.
 func TestIssueReportCardsSupersedes(t *testing.T) {
 	const (
@@ -167,9 +169,11 @@ func TestIssueReportCardsSupersedes(t *testing.T) {
 
 	latest, err := repo.LatestReportCards(ctx, ports.ReportCardFilter{TermID: term})
 	require.NoError(t, err)
-	require.Len(t, latest, 2, "one published card per enrollment")
-	ids := []string{latest[0].ID(), latest[1].ID()}
-	assert.ElementsMatch(t, []string{v2ID, otherID}, ids, "v1 is superseded; the other pupil's v1 was not reissued and stays")
+	require.Len(t, latest, 1, "only the re-close's cards are published")
+	assert.Equal(t, v2ID, latest[0].ID())
+	withdrawn, err := repo.ReportCard(ctx, otherID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.ReportCardSuperseded, withdrawn.Status(), "the withdrawn pupil's v1 is superseded, not left published")
 
 	byStudent, err := repo.LatestReportCards(ctx, ports.ReportCardFilter{StudentID: stu})
 	require.NoError(t, err)
@@ -179,7 +183,7 @@ func TestIssueReportCardsSupersedes(t *testing.T) {
 
 	byGroup, err := repo.LatestReportCards(ctx, ports.ReportCardFilter{TermID: term, GroupID: pGroup})
 	require.NoError(t, err)
-	assert.Len(t, byGroup, 2)
+	assert.Len(t, byGroup, 1)
 
 	v1, err := repo.ReportCard(ctx, v1ID)
 	require.NoError(t, err)

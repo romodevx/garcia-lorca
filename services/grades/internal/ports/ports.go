@@ -232,8 +232,9 @@ type PeriodTx interface {
 	MonthlyGrades(ctx context.Context, enrollmentIDs []string, months []domain.Month) ([]domain.MonthlyGrade, error)
 	// SaveClosure stores the closure (insert or update every column).
 	SaveClosure(ctx context.Context, c domain.PeriodClosure) error
-	// IssueReportCards marks the published report cards of these cards'
-	// enrollments for the term superseded, then inserts the cards with their lines.
+	// IssueReportCards marks EVERY published report card of the term
+	// superseded (a withdrawn pupil's included), then inserts the cards with
+	// their lines.
 	IssueReportCards(ctx context.Context, cards []domain.ReportCard) error
 }
 

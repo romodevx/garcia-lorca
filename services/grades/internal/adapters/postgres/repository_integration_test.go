@@ -144,6 +144,13 @@ func appRepo(t *testing.T, tenant string) *pgadapter.Repository {
 	if err != nil {
 		t.Fatalf("open app db: %v", err)
 	}
+	// One pool per call: close it with the test, or a growing suite runs the
+	// server out of connections.
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
 	return pgadapter.NewRepository(db, tenant)
 }
 

@@ -225,14 +225,20 @@ func (p *periodTx) SaveClosure(_ context.Context, c domain.PeriodClosure) error 
 	return nil
 }
 
-// IssueReportCards supersedes the published cards of the cards' enrollments
-// for the term (BEFORE inserting: at most one published card per enrollment
-// and term), then inserts the cards and their lines.
+// IssueReportCards supersedes EVERY published card of the term (BEFORE
+// inserting: at most one published card per enrollment and term), then
+// inserts the cards and their lines. A re-close replaces the term's cards as a
+// whole: a pupil withdrawn since the previous close gets no new card, and
+// their old one must not stay published beside the new version (ADR 0020).
 func (p *periodTx) IssueReportCards(_ context.Context, cards []domain.ReportCard) error {
+	if err := p.tx.Model(&reportCardModel{}).
+		Where("term_id = ? AND status = ?", p.termID, string(domain.ReportCardPublished)).
+		Update("status", string(domain.ReportCardSuperseded)).Error; err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "superseding report cards", err)
+	}
 	if len(cards) == 0 {
 		return nil
 	}
-	enrollmentIDs := make([]string, 0, len(cards))
 	cardRows := make([]reportCardModel, 0, len(cards))
 	var lineRows []reportCardLineModel
 	for _, rc := range cards {
@@ -240,14 +246,8 @@ func (p *periodTx) IssueReportCards(_ context.Context, cards []domain.ReportCard
 		if err != nil {
 			return err
 		}
-		enrollmentIDs = append(enrollmentIDs, rc.EnrollmentID())
 		cardRows = append(cardRows, card)
 		lineRows = append(lineRows, lines...)
-	}
-	if err := p.tx.Model(&reportCardModel{}).
-		Where("term_id = ? AND status = ? AND enrollment_id IN ?", p.termID, string(domain.ReportCardPublished), enrollmentIDs).
-		Update("status", string(domain.ReportCardSuperseded)).Error; err != nil {
-		return glerrors.Wrap(glerrors.KindInternal, "superseding report cards", err)
 	}
 	if err := p.tx.CreateInBatches(cardRows, insertBatchSize).Error; err != nil {
 		return glerrors.Wrap(glerrors.KindInternal, "inserting report cards", err)
