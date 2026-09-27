@@ -111,3 +111,38 @@ func TestRestoreReportCard(t *testing.T) {
 	_, err = domain.RestoreReportCard(h, "weird", domain.Average{}, nil)
 	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err))
 }
+
+// Owner decision: a re-close notifies only the pupils whose card changed. Two
+// cards carry the same grades when their subject set, month values, trimester
+// grades and general average agree; ids, versions, names and order do not count.
+func TestReportCardSameGradesAs(t *testing.T) {
+	subjects := []domain.ReportCardSubject{{ID: "mat", Name: "Matemáticas"}, {ID: "esp", Name: "Español"}}
+	base := []domain.MonthlyGrade{grade(t, "enr-1", "mat", "2026-09", 840), grade(t, "enr-1", "esp", "2026-10", 900)}
+	build := func(h domain.ReportCardHeader, subs []domain.ReportCardSubject, gs []domain.MonthlyGrade) domain.ReportCard {
+		rc, err := domain.BuildReportCard(h, subs, gs)
+		require.NoError(t, err)
+		return rc
+	}
+	previous := build(header(t), subjects, base)
+	v2 := header(t)
+	v2.ID, v2.Version, v2.StudentName = "rc-2", 2, "Ana López R."
+
+	cases := []struct {
+		name string
+		next domain.ReportCard
+		same bool
+	}{
+		{"same grades, new version and names", build(v2, subjects, base), true},
+		{"subjects in another order", build(v2, []domain.ReportCardSubject{subjects[1], subjects[0]}, base), true},
+		{"a month value changed", build(v2, subjects, []domain.MonthlyGrade{grade(t, "enr-1", "mat", "2026-09", 850), base[1]}), false},
+		{"a grade added in another month", build(v2, subjects, append(base, grade(t, "enr-1", "mat", "2026-11", 840))), false},
+		{"a subject added without grades", build(v2, append(subjects, domain.ReportCardSubject{ID: "art", Name: "Artes"}), base), false},
+		{"a subject dropped", build(v2, subjects[:1], base[:1]), false},
+		{"grades removed", build(v2, subjects, base[:1]), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.same, c.next.SameGradesAs(previous))
+		})
+	}
+}

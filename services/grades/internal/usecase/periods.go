@@ -310,10 +310,14 @@ func (s *PeriodsService) Close(ctx context.Context, termID string, force bool, a
 		if issued, err = s.buildReportCards(view, term, closed, actor, names, grades); err != nil {
 			return err
 		}
+		news, err := newsworthy(ctx, tx, issued, closed.Version())
+		if err != nil {
+			return err
+		}
 		if err := tx.IssueReportCards(ctx, issued); err != nil {
 			return err
 		}
-		events, err := issuedEvents(issued)
+		events, err := issuedEvents(news)
 		if err != nil {
 			return err
 		}
@@ -417,6 +421,32 @@ func (s *PeriodsService) publishQueued(ctx context.Context, e ports.OutboxEvent)
 	default:
 		return glerrors.New(glerrors.KindInternal, "unknown outbox event: "+e.Type)
 	}
+}
+
+// newsworthy is the issued cards the families must hear about. A first close
+// (version 1) announces every card. A re-close announces only a pupil whose
+// card differs from their previous published one (SameGradesAs) or who had
+// none; an unchanged pupil still gets the new version, silently.
+func newsworthy(ctx context.Context, tx ports.PeriodTx, issued []domain.ReportCard, version int) ([]domain.ReportCard, error) {
+	if version <= 1 {
+		return issued, nil
+	}
+	previous, err := tx.PublishedReportCards(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byStudent := make(map[string]domain.ReportCard, len(previous))
+	for _, rc := range previous {
+		byStudent[rc.StudentID()] = rc
+	}
+	out := make([]domain.ReportCard, 0, len(issued))
+	for _, rc := range issued {
+		if prev, ok := byStudent[rc.StudentID()]; ok && rc.SameGradesAs(prev) {
+			continue
+		}
+		out = append(out, rc)
+	}
+	return out, nil
 }
 
 // issuedEvents is one queued GradesPublished per issued report card.

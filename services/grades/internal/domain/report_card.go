@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"maps"
 	"strings"
 	"time"
 
@@ -147,6 +148,28 @@ func validateHeader(h ReportCardHeader) error {
 		return glerrors.New(glerrors.KindInvalid, "report card months are required")
 	}
 	return nil
+}
+
+// SameGradesAs reports whether r carries the grades other did: the same
+// subjects (by id), and per subject the same month values and trimester grade,
+// and the same general average. Ids, versions, names and print order do not
+// count — a re-close that changes none of these has nothing new to tell the
+// family.
+func (r ReportCard) SameGradesAs(other ReportCard) bool {
+	if r.generalAverage != other.generalAverage || len(r.lines) != len(other.lines) {
+		return false
+	}
+	previous := make(map[string]ReportCardLine, len(other.lines))
+	for _, l := range other.lines {
+		previous[l.SubjectID] = l
+	}
+	for _, l := range r.lines {
+		p, ok := previous[l.SubjectID]
+		if !ok || l.TermAverage != p.TermAverage || !maps.Equal(l.MonthValueStrings(), p.MonthValueStrings()) {
+			return false
+		}
+	}
+	return true
 }
 
 // Accessors.

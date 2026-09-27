@@ -226,6 +226,40 @@ func (p *periodTx) SaveClosure(_ context.Context, c domain.PeriodClosure) error 
 	return nil
 }
 
+// PublishedReportCards reads the term's published cards and, in ONE more
+// query, all their lines (no query per card), each card's in print order.
+func (p *periodTx) PublishedReportCards(context.Context) ([]domain.ReportCard, error) {
+	var cards []reportCardModel
+	if err := p.tx.Where("term_id = ? AND status = ?", p.termID, string(domain.ReportCardPublished)).
+		Order("student_name, id").Find(&cards).Error; err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "reading the published report cards", err)
+	}
+	if len(cards) == 0 {
+		return nil, nil
+	}
+	ids := make([]string, 0, len(cards))
+	for _, c := range cards {
+		ids = append(ids, c.ID)
+	}
+	var lines []reportCardLineModel
+	if err := p.tx.Where("report_card_id IN ?", ids).Order("report_card_id, position").Find(&lines).Error; err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "reading the published report card lines", err)
+	}
+	byCard := make(map[string][]reportCardLineModel, len(cards))
+	for _, l := range lines {
+		byCard[l.ReportCardID] = append(byCard[l.ReportCardID], l)
+	}
+	out := make([]domain.ReportCard, 0, len(cards))
+	for _, c := range cards {
+		rc, err := toDomainReportCard(c, byCard[c.ID])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rc)
+	}
+	return out, nil
+}
+
 // IssueReportCards supersedes EVERY published card of the term (BEFORE
 // inserting: at most one published card per enrollment and term), then
 // inserts the cards and their lines. A re-close replaces the term's cards as a

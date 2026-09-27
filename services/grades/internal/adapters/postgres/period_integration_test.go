@@ -420,3 +420,46 @@ func TestGradeEntryWriteRespectsTheClosure(t *testing.T) {
 	require.Len(t, stored, 1)
 	assert.InDelta(t, 9.0, stored[0].Value(), 0.001, "the locked write changed nothing")
 }
+
+// A re-close compares against the term's published cards: read under the
+// lock, lines included, exactly as they were issued (so an unchanged pupil
+// compares equal), and never a superseded card.
+func TestPublishedReportCardsReadsTheTermsCardsWithLines(t *testing.T) {
+	const (
+		term  = "70700000-0000-0000-0000-000000000009"
+		other = "70700000-0000-0000-0000-00000000000a"
+		enr   = "e7000000-0000-0000-0000-000000000009"
+		stu   = "57700000-0000-0000-0000-000000000009"
+		v1ID  = "a7000000-0000-0000-0000-000000000091"
+		v2ID  = "a7000000-0000-0000-0000-000000000092"
+		oID   = "a7000000-0000-0000-0000-000000000093"
+	)
+	repo := appRepo(t, tenantA)
+	ctx := context.Background()
+	grades := []domain.MonthlyGrade{
+		monthlyGrade(t, "a7000000-0000-0000-0000-0000000000b1", tenantA, enr, pSubjectA, mTeacher, mUser, "2026-09", "8.4"),
+		monthlyGrade(t, "a7000000-0000-0000-0000-0000000000b2", tenantA, enr, pSubjectB, mTeacher, mUser, "2026-11", "9.5"),
+	}
+	issue := func(termID string, cards ...domain.ReportCard) {
+		require.NoError(t, repo.WithPeriodLock(ctx, termID, func(ctx context.Context, tx ports.PeriodTx) error {
+			return tx.IssueReportCards(ctx, cards)
+		}))
+	}
+	issue(term, reportCard(t, v1ID, tenantA, term, enr, stu, 1, grades))
+	issue(other, reportCard(t, oID, tenantA, other, enr, stu, 1, nil))
+	v2 := reportCard(t, v2ID, tenantA, term, enr, stu, 2, grades)
+	issue(term, v2)
+
+	var published []domain.ReportCard
+	require.NoError(t, repo.WithPeriodLock(ctx, term, func(ctx context.Context, tx ports.PeriodTx) error {
+		var err error
+		published, err = tx.PublishedReportCards(ctx)
+		return err
+	}))
+
+	require.Len(t, published, 1, "only this term's published card; v1 is superseded, the other term is not ours")
+	assert.Equal(t, v2ID, published[0].ID())
+	require.Len(t, published[0].Lines(), 2)
+	assert.True(t, reportCard(t, "a7000000-0000-0000-0000-000000000094", tenantA, term, enr, stu, 3, grades).SameGradesAs(published[0]),
+		"a stored card round-trips to the same grades")
+}

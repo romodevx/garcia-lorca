@@ -125,6 +125,18 @@ func (t *fakePeriodTx) SaveClosure(_ context.Context, c domain.PeriodClosure) er
 	return nil
 }
 
+// PublishedReportCards is the term's published cards, lines included, as the
+// transaction reads them before superseding them.
+func (t *fakePeriodTx) PublishedReportCards(context.Context) ([]domain.ReportCard, error) {
+	var out []domain.ReportCard
+	for _, rc := range t.p.cards {
+		if rc.TermID() == t.termID && rc.Status() == domain.ReportCardPublished {
+			out = append(out, rc)
+		}
+	}
+	return out, nil
+}
+
 func (t *fakePeriodTx) IssueReportCards(_ context.Context, cards []domain.ReportCard) error {
 	t.issuing = true
 	t.issued = append(t.issued, cards...)
@@ -538,7 +550,57 @@ func TestReopenAndCloseAgainIssuesVersion2(t *testing.T) {
 		versions = append(versions, e.Version)
 	}
 	sort.Ints(versions)
-	assert.Equal(t, []int{1, 1, 1, 2, 2, 2}, versions)
+	assert.Equal(t, []int{1, 1, 1, 2}, versions, "v1 notifies everyone; v2 only the pupil whose card changed")
+	assert.Equal(t, "stu-1", f.publisher.published[3].StudentID)
+}
+
+// Owner decision: a re-close whose cards match the previous ones still issues
+// the new version (parents see the latest), but notifies nobody.
+func TestReCloseWithoutChangesNotifiesNobody(t *testing.T) {
+	f := newPeriodsFixture(t)
+	f.captureAll(t)
+	_, err := f.svc.Close(context.Background(), firstTermID, false, dirActor)
+	require.NoError(t, err)
+	require.Len(t, f.publisher.published, 3, "v1 always notifies")
+	_, err = f.svc.Reopen(context.Background(), firstTermID, director)
+	require.NoError(t, err)
+
+	res, err := f.svc.Close(context.Background(), firstTermID, false, dirActor)
+	require.NoError(t, err)
+
+	assert.Equal(t, usecase.CloseResult{Status: domain.PeriodClosed, Version: 2, ReportCards: 3}, res)
+	latest, err := f.svc.ReportCards(context.Background(), ports.ReportCardFilter{TermID: firstTermID})
+	require.NoError(t, err)
+	for _, rc := range latest {
+		assert.Equal(t, 2, rc.Version(), "unchanged pupils still get the new version")
+	}
+	assert.Len(t, f.publisher.published, 3, "nothing changed: no GradesPublished for v2")
+	assert.Len(t, f.periods.outbox, 3, "and nothing queued")
+}
+
+// A pupil with no previous card (enrolled since the last close) is news.
+func TestReCloseNotifiesAPupilWithoutAPreviousCard(t *testing.T) {
+	f := newPeriodsFixture(t)
+	f.captureAll(t)
+	_, err := f.svc.Close(context.Background(), firstTermID, false, dirActor)
+	require.NoError(t, err)
+	_, err = f.svc.Reopen(context.Background(), firstTermID, director)
+	require.NoError(t, err)
+	// The previous card of stu-3 is gone from the published set (as if it never existed).
+	kept := f.periods.cards[:0]
+	for _, rc := range f.periods.cards {
+		if rc.StudentID() != "stu-3" {
+			kept = append(kept, rc)
+		}
+	}
+	f.periods.cards = kept
+	f.publisher.published = nil
+
+	_, err = f.svc.Close(context.Background(), firstTermID, false, dirActor)
+	require.NoError(t, err)
+
+	require.Len(t, f.publisher.published, 1)
+	assert.Equal(t, "stu-3", f.publisher.published[0].StudentID)
 }
 
 func TestReopenRefusals(t *testing.T) {

@@ -240,6 +240,9 @@ type PeriodTx interface {
 	// QueueEvents writes events to the outbox in THIS transaction: they are
 	// published only if the close commits.
 	QueueEvents(ctx context.Context, events []OutboxEvent) error
+	// PublishedReportCards reads the term's PUBLISHED report cards with their
+	// lines, under the lock (before IssueReportCards supersedes them).
+	PublishedReportCards(ctx context.Context) ([]domain.ReportCard, error)
 	// IssueReportCards marks EVERY published report card of the term
 	// superseded (a withdrawn pupil's included), then inserts the cards with
 	// their lines.
