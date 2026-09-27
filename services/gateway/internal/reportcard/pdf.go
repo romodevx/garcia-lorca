@@ -100,7 +100,7 @@ func PDF(d Document) ([]byte, error) {
 	w.header(d)
 	w.student(d.Card)
 	w.table(d.Card)
-	w.foot(d)
+	w.foot(d.Card)
 	if w.err != nil {
 		return nil, fmt.Errorf("rendering report card %s: %w", d.Card.ID, w.err)
 	}
@@ -240,14 +240,14 @@ func (w *writer) row(family, subject string, values []string, average string) {
 	w.y += max(1, taken) * rowHeight
 }
 
-func (w *writer) foot(d Document) {
+// foot prints the scale and the issue date. The school's legend is the
+// receipt's footer ("Gracias por su pago…"), so it never prints here.
+func (w *writer) foot(c client.ReportCard) {
 	w.y += lineGap
-	s := d.Card.Scale
+	s := c.Scale
 	w.text(pdffont.Regular, smallSize, fmt.Sprintf("Calificación mínima aprobatoria: %s · Escala de %s a %s",
 		decimal(s.PassingHundredths), decimal(s.MinHundredths), decimal(s.MaxHundredths)))
-	w.text(pdffont.Regular, smallSize, prefixed("Emitida el ", spanishDate(d.Card.IssuedAt)))
-	w.y += lineGap
-	w.text(pdffont.Regular, smallSize, d.School.Legend)
+	w.text(pdffont.Regular, smallSize, prefixed("Emitida el ", spanishDate(c.IssuedAt)))
 }
 
 // --- primitives ----------------------------------------------------------------

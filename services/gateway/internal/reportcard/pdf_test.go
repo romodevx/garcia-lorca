@@ -43,7 +43,7 @@ func sampleCard() client.ReportCard {
 	}
 }
 
-var school = client.SchoolProfile{Name: "COLEGIO GARCÍA LORCA", RFC: "EGL150101AB1", CCT: "09PPR0001A", Legend: "Documento interno del colegio."}
+var school = client.SchoolProfile{Name: "COLEGIO GARCÍA LORCA", RFC: "EGL150101AB1", CCT: "09PPR0001A", Legend: "Gracias por su pago."}
 
 // T7: the report card says who, when, which period, each subject's grade per
 // month and its average, the general average and the passing mark — accents
@@ -57,11 +57,13 @@ func TestThePDFSaysWhatTheReportCardSays(t *testing.T) {
 		"COLEGIO GARCÍA LORCA", "Boleta de calificaciones — 1.er trimestre", "Camila Zamora Sánchez", "2026-00042",
 		"2026-2027", "Primaria · 1° PRIMARIA · A", "Español", "Matemáticas", "Educación Artística",
 		"Sep 2026", "Oct 2026", "Nov 2026", "Promedio", "8.4", "8.5", "8.3", "Promedio general",
-		"Calificación mínima aprobatoria: 6", "1 de diciembre de 2026", "Documento interno del colegio.",
+		"Calificación mínima aprobatoria: 6", "1 de diciembre de 2026",
 	} {
 		assert.Contains(t, text, want)
 	}
 	assert.NotContains(t, text, "reemplaza", "a first version replaces nothing")
+	// QA ISSUE-003: the school's legend is the RECEIPT footer; a report card is no receipt.
+	assert.NotContains(t, text, "Gracias por su pago", "the receipt footer never prints on a report card")
 }
 
 func TestASecondVersionSaysItReplacesTheFirst(t *testing.T) {
