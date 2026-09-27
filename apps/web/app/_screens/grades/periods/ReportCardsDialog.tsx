@@ -58,8 +58,9 @@ export function ReportCardsDialog({ period, cycleId, client, onClose, download: 
         {cards.kind === "failed" && <ErrorAlert message="No se pudieron cargar las boletas." />}
         {cards.kind === "ready" && cards.value.length === 0 && <EmptyHint>Este grupo aún no tiene boletas de este periodo.</EmptyHint>}
         {cards.kind === "ready" && cards.value.length > 0 && (
-          <div style={{ overflowX: "auto", contain: "inline-size" }}>
-            <table aria-label="Boletas del grupo" style={{ width: "100%", borderCollapse: "collapse" }}>
+          <div>
+            {/* Below 560 px .boletas-table (globals.css) splits each row instead of scrolling sideways. */}
+            <table aria-label="Boletas del grupo" className="boletas-table" style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr>
                   <th scope="col" style={TH}>Alumno</th>
@@ -72,8 +73,8 @@ export function ReportCardsDialog({ period, cycleId, client, onClose, download: 
                 {cards.value.map((card) => (
                   <tr key={card.id}>
                     <th scope="row" style={{ ...TD, textAlign: "left", fontWeight: 600 }}>{card.studentName}</th>
-                    <td style={TD}>{`v${card.version}`}</td>
-                    <td style={{ ...TD, fontFamily: "var(--font-display)", fontWeight: 700 }}>{average(card.generalAverage)}</td>
+                    <td data-label="Versión" style={TD}>{`v${card.version}`}</td>
+                    <td data-label="Promedio general" style={{ ...TD, fontFamily: "var(--font-display)", fontWeight: 700 }}>{average(card.generalAverage)}</td>
                     <td style={{ ...TD, textAlign: "right" }}>
                       <button type="button" aria-label={`Descargar PDF de ${card.studentName}`} onClick={() => void download(card)}
                         style={{ display: "inline-flex", alignItems: "center", gap: 6, minHeight: 44, padding: "0 14px", borderRadius: "var(--r-pill)", border: "1px solid var(--border)", background: "var(--surface-3)", color: "var(--text)", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
