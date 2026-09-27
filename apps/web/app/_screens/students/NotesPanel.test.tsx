@@ -27,6 +27,19 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
+// Fake timers WITHOUT shouldAdvanceTime: wall-clock time must never reach the
+// fake clock, or a stalled runner fires timers the test did not advance.
+// Testing Library only drives fake timers through a global `jest`; this shim
+// hands it vitest's, so findBy/waitFor still resolve.
+function useFakeClock(): void {
+  vi.useFakeTimers();
+  vi.stubGlobal("jest", { advanceTimersByTime: (ms: number) => vi.advanceTimersByTime(ms) });
+}
+function useRealClock(): void {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+}
+
 describe("NotesPanel", () => {
   it("shows the history newest first, with who wrote each note", async () => {
     renderPanel();
@@ -118,7 +131,7 @@ describe("NotesPanel", () => {
 
   // A page left open does not keep offering a void the server will refuse.
   it("takes the button away when the window closes on an open page", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    useFakeClock();
     try {
       let clock = WRITTEN + 14 * 60_000;
       renderPanel({ now: () => clock });
@@ -130,7 +143,7 @@ describe("NotesPanel", () => {
       });
       expect(screen.queryByRole("button", { name: "Anular nota" })).not.toBeInTheDocument();
     } finally {
-      vi.useRealTimers();
+      useRealClock();
     }
   });
 
@@ -158,7 +171,7 @@ describe("NotesPanel", () => {
   // The button leaves at the exact cutoff, not at the next periodic re-check:
   // a click just after it would be voided after the server's window.
   it("takes the button away at the cutoff itself", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    useFakeClock();
     try {
       const cutoff = WRITTEN + 15 * 60_000 - 10_000;
       let clock = cutoff - 100;
@@ -171,7 +184,7 @@ describe("NotesPanel", () => {
       });
       expect(screen.queryByRole("button", { name: "Anular nota" })).not.toBeInTheDocument();
     } finally {
-      vi.useRealTimers();
+      useRealClock();
     }
   });
 
@@ -179,7 +192,7 @@ describe("NotesPanel", () => {
   // early, or the wall clock stepped back). It must re-arm, or nothing ever
   // takes the button away.
   it("re-arms the cutoff when its timer fires before the clock reaches it", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    useFakeClock();
     try {
       const cutoff = WRITTEN + 15 * 60_000 - 10_000;
       let clock = cutoff - 100;
@@ -195,7 +208,7 @@ describe("NotesPanel", () => {
       });
       expect(screen.queryByRole("button", { name: "Anular nota" })).not.toBeInTheDocument();
     } finally {
-      vi.useRealTimers();
+      useRealClock();
     }
   });
 
