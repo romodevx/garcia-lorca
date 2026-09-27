@@ -151,6 +151,79 @@ describe("GradingControl", () => {
     expect(toggle).not.toBeChecked();
   });
 
+  describe("the scale save and the toggle share one queue", () => {
+    const disabled: Level = { ...primaria, grading: { enabled: false, min: 5, max: 10, decimals: 1, passing: 6 } };
+    const held = (): { save: ReturnType<typeof vi.fn>; release: () => void } => {
+      let release!: () => void;
+      const save = vi.fn().mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; })).mockResolvedValue(undefined);
+      return { save, release: () => release() };
+    };
+
+    it("a scale saved while the toggle is in flight waits for it, then goes out", async () => {
+      const user = userEvent.setup();
+      const { save, release } = held();
+      renderControl(disabled, save);
+
+      await user.click(screen.getByRole("checkbox", { name: "Lleva calificación numérica" }));
+      await user.clear(screen.getByLabelText("Mínimo aprobatorio", CAMPO));
+      await user.type(screen.getByLabelText("Mínimo aprobatorio", CAMPO), "7");
+      await user.click(screen.getByRole("button", { name: "Guardar calificación" }));
+      expect(save).toHaveBeenCalledTimes(1);
+
+      await act(async () => release());
+
+      await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+      expect(save).toHaveBeenNthCalledWith(1, "l1", { enabled: true, min: 5, max: 10, decimals: 1, passing: 6 });
+      expect(save).toHaveBeenNthCalledWith(2, "l1", { enabled: true, min: 5, max: 10, decimals: 1, passing: 7 });
+    });
+
+    it("a toggle made while the scale is saving waits, then sends the scale just saved", async () => {
+      const user = userEvent.setup();
+      const { save, release } = held();
+      renderControl(primaria, save);
+
+      await user.clear(screen.getByLabelText("Mínimo aprobatorio", CAMPO));
+      await user.type(screen.getByLabelText("Mínimo aprobatorio", CAMPO), "8");
+      await user.click(screen.getByRole("button", { name: "Guardar calificación" }));
+      await user.click(screen.getByRole("checkbox", { name: "Lleva calificación numérica" }));
+      expect(save).toHaveBeenCalledTimes(1);
+
+      await act(async () => release());
+
+      await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+      expect(save).toHaveBeenLastCalledWith("l1", { enabled: false, min: 5, max: 10, decimals: 1, passing: 8 });
+    });
+
+    it("a failed toggle drops the scale queued behind it and the switch goes back", async () => {
+      const user = userEvent.setup();
+      let fail!: (e: Error) => void;
+      const save = vi.fn().mockImplementationOnce(() => new Promise<void>((_, reject) => { fail = reject; })).mockResolvedValue(undefined);
+      renderControl(disabled, save);
+      const toggle = screen.getByRole("checkbox", { name: "Lleva calificación numérica" });
+
+      await user.click(toggle);
+      await user.click(screen.getByRole("button", { name: "Guardar calificación" }));
+      await act(async () => fail(new Error("sin red")));
+
+      await waitFor(() => expect(toggle).not.toBeChecked());
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("alert")).toHaveTextContent("sin red");
+    });
+
+    it("a failed scale save leaves the switch where the server is", async () => {
+      const user = userEvent.setup();
+      const save = vi.fn().mockRejectedValueOnce(new Error("sin red")).mockResolvedValue(undefined);
+      renderControl(primaria, save);
+
+      await user.click(screen.getByRole("button", { name: "Guardar calificación" }));
+      await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("sin red"));
+      expect(screen.getByRole("checkbox", { name: "Lleva calificación numérica" })).toBeChecked();
+
+      await user.click(screen.getByRole("checkbox", { name: "Lleva calificación numérica" }));
+      expect(save).toHaveBeenLastCalledWith("l1", { enabled: false, min: 5, max: 10, decimals: 1, passing: 6 });
+    });
+  });
+
   it("says so when the save fails, in the server's words", async () => {
     const user = userEvent.setup();
     renderControl(primaria, vi.fn().mockRejectedValue(new Error("el nivel no existe")));

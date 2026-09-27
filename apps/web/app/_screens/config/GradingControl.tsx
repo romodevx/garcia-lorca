@@ -8,7 +8,7 @@ import { NumberField, useFocusFirstInvalid } from "../../_design/form";
 import { ConfigError, type Level, type LevelGrading } from "../../config/api";
 import { DEFAULT_GRADING, fromDraft, gradingErrors, toDraft, type GradingDraft, type GradingErrors, type GradingField } from "./gradingDraft";
 import { ErrorAlert, RadioGroup } from "./parts";
-import { useSerialToggle } from "./useSerialToggle";
+import { useSerialGrading } from "./useSerialGrading";
 
 const TOAST_MS = 2600;
 /** Grades already captured this cycle would not fit the new (or disabled) scale. */
@@ -30,8 +30,9 @@ export interface GradingControlProps {
  * How a level grades, under its attendance mode: whether it carries a numeric
  * grade at all (preescolar usually does not — the toggle saves at once), and
  * its scale. The scale saves with one button; min < passing ≤ max is checked
- * on leaving each field and again on saving. The toggle sends the last SAVED
- * scale — never a half-typed one — one request at a time, and goes back on failure.
+ * on leaving each field and again on saving. The toggle and the scale save share
+ * ONE queue (never two requests at once): the toggle sends the last SAVED scale
+ * — never a half-typed one — and a failure goes back to what the server holds.
  */
 export function GradingControl({ level, onChange }: GradingControlProps): ReactElement {
   const initial = level.grading ?? DEFAULT_GRADING;
@@ -40,16 +41,14 @@ export function GradingControl({ level, onChange }: GradingControlProps): ReactE
   const [failure, setFailure] = useState<string | undefined>(undefined);
   const [toast, setToast] = useState<string | undefined>(undefined);
   const timer = useRef<number | undefined>(undefined);
-  const lastSaved = useRef<LevelGrading>(initial);
   const focusFirstInvalid = useFocusFirstInvalid();
 
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
-  const persist = useCallback(async (grading: LevelGrading): Promise<boolean> => {
+  const persist = useCallback(async (grading: LevelGrading, confirmed: LevelGrading): Promise<boolean> => {
     setFailure(undefined);
     try {
       await onChange(level.id, grading);
-      lastSaved.current = grading;
       window.clearTimeout(timer.current);
       setToast(`${level.name}: calificación guardada`);
       timer.current = window.setTimeout(() => setToast(undefined), TOAST_MS);
@@ -57,7 +56,7 @@ export function GradingControl({ level, onChange }: GradingControlProps): ReactE
     } catch (err) {
       if (isScaleTightening(err)) {
         // The server kept the saved scale: show it again, with the reason beside it.
-        setDraft(toDraft(lastSaved.current));
+        setDraft(toDraft(confirmed));
         setErrors({});
         setFailure(err.detail);
         return false;
@@ -67,8 +66,7 @@ export function GradingControl({ level, onChange }: GradingControlProps): ReactE
     }
   }, [level.id, level.name, onChange]);
 
-  const saveToggle = useCallback((next: boolean) => persist({ ...lastSaved.current, enabled: next }), [persist]);
-  const { on: enabled, toggle } = useSerialToggle(initial.enabled, saveToggle);
+  const { enabled, toggle, saveScale } = useSerialGrading(initial, persist);
 
   const edit = (field: keyof GradingDraft, value: string): void => {
     const next = { ...draft, [field]: value };
@@ -89,7 +87,7 @@ export function GradingControl({ level, onChange }: GradingControlProps): ReactE
       focusFirstInvalid();
       return;
     }
-    void persist(fromDraft(draft, true));
+    saveScale(fromDraft(draft, true));
   };
 
   return (
