@@ -77,7 +77,7 @@ const styles = StyleSheet.create({
   table: { flexGrow: 1, borderWidth: 1, borderRadius: 20, overflow: "hidden", marginTop: 14 },
   row: { flexDirection: "row", alignItems: "center", minHeight: 48, paddingHorizontal: 12, paddingVertical: 8 },
   head: { fontSize: 14, fontWeight: "800", textAlign: "center" },
-  valueCol: { minWidth: 56, flexGrow: 1, alignItems: "center", textAlign: "center" },
+  valueCol: { minWidth: 44, flexGrow: 1, alignItems: "center", textAlign: "center" },
   cell: { fontSize: 17 },
   average: { fontWeight: "800", textAlign: "center" },
   failed: { fontSize: 12, fontWeight: "800", textAlign: "center" },
