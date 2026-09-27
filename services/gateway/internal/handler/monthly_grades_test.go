@@ -127,7 +127,8 @@ func principalReq(method, target, body string) *http.Request {
 
 func TestMonthlySheetShapeAndSpanishOrder(t *testing.T) {
 	grades := &fakeMonthlyGrades{sheet: sheetFixture()}
-	h := handler.NewMonthlyGradesHandler(grades, sheetStudents(), handler.AnyTenantAssignment, handler.ScopeSchool)
+	clock := func() time.Time { return time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC) }
+	h := handler.NewMonthlyGradesHandler(grades, sheetStudents(), handler.AnyTenantAssignment, handler.ScopeSchool, handler.WithMonthlyClock(clock))
 
 	rec := httptest.NewRecorder()
 	h.Sheet(rec, principalReq(http.MethodGet, "/api/v1/grades/sheet?assignmentId="+strings.ToUpper(mAsg), ""))
@@ -138,7 +139,7 @@ func TestMonthlySheetShapeAndSpanishOrder(t *testing.T) {
 	assert.JSONEq(t, `{
 		"assignmentId": "`+mAsg+`", "month": "2026-09", "months": ["2026-08","2026-09"],
 		"scale": {"min":5,"max":10,"decimals":1,"passing":6},
-		"gradingEnabled": true, "editable": true,
+		"gradingEnabled": true, "currentMonth": "2026-09", "editable": true,
 		"rows": [
 			{"enrollmentId":"enr-a","studentId":"stu-a","name":"Ana Ávila","value":9.5,"updatedAt":"2026-09-03T15:04:05Z","rowEditable":true},
 			{"enrollmentId":"enr-n","studentId":"stu-n","name":"Nico Núñez","value":null,"updatedAt":null,"rowEditable":false,
@@ -206,6 +207,37 @@ func TestMonthlyRefusalsCarryErrorCodes(t *testing.T) {
 			assert.Equal(t, tt.wantCode, rec.Header().Get("X-Error-Code"))
 		})
 	}
+}
+
+// A future month is refused by the grades service on BOTH audiences' writes;
+// the edge forwards it as 400 + MONTH_IN_FUTURE with the sentence.
+func TestMonthlyFutureMonthIsRefusedOnEveryRoute(t *testing.T) {
+	future := connect.NewError(connect.CodeInvalidArgument, errString("Aún no llega ese mes"))
+	future.Meta().Set("X-Error-Code", "MONTH_IN_FUTURE")
+	put := `{"assignmentId":"` + mAsg + `","month":"2026-11","enrollmentId":"` + mEnr + `","value":9}`
+	del := "?assignmentId=" + mAsg + "&month=2026-11&enrollmentId=" + mEnr
+	for _, scope := range []handler.CaptureScope{handler.ScopeTeacher, handler.ScopeSchool} {
+		h := handler.NewMonthlyGradesHandler(&fakeMonthlyGrades{upsertErr: future, clearErr: future}, sheetStudents(), handler.AnyTenantAssignment, scope)
+		putRec, delRec := httptest.NewRecorder(), httptest.NewRecorder()
+		h.Put(putRec, principalReq(http.MethodPut, "/api/v1/grades/monthly", put))
+		h.Clear(delRec, principalReq(http.MethodDelete, "/api/v1/grades/monthly"+del, ""))
+		for _, rec := range []*httptest.ResponseRecorder{putRec, delRec} {
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Equal(t, "MONTH_IN_FUTURE", rec.Header().Get("X-Error-Code"))
+			assert.Contains(t, rec.Body.String(), "Aún no llega ese mes")
+		}
+	}
+}
+
+// The sheet names the server's current UTC month, so the screen can lock the
+// month chips that come after it before anyone picks one.
+func TestMonthlySheetNamesTheCurrentUTCMonth(t *testing.T) {
+	clock := func() time.Time { return time.Date(2026, 10, 31, 23, 30, 0, 0, time.FixedZone("CST", -6*3600)) }
+	h := handler.NewMonthlyGradesHandler(&fakeMonthlyGrades{sheet: sheetFixture()}, sheetStudents(), handler.AnyTenantAssignment, handler.ScopeTeacher, handler.WithMonthlyClock(clock))
+	rec := httptest.NewRecorder()
+	h.Sheet(rec, principalReq(http.MethodGet, "/api/v1/teaching/grades/sheet?assignmentId="+mAsg, ""))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"currentMonth":"2026-11"`, "23:30 CST on Oct 31 is already November in UTC")
 }
 
 func TestMonthlySheetReadOnlyCarriesReason(t *testing.T) {

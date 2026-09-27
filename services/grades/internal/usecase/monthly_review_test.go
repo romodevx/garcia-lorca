@@ -54,6 +54,7 @@ func TestMonthsBeforeATransferBelongToThePreviousGroup(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := transferredFixture(t)
+			*f.now = time.Date(2026, 11, 30, 23, 0, 0, 0, time.UTC)
 			in := upsertInput(tt.month, tt.enroll, "9")
 			in.Scope = tt.scope
 			_, err := f.svc.Upsert(context.Background(), in)
@@ -202,4 +203,68 @@ func TestMonthlyWritesSurfaceAnUnconfiguredScale(t *testing.T) {
 	_, err := f.svc.Upsert(context.Background(), upsertInput("2026-09", enrollmentID, "9"))
 	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err))
 	assert.Equal(t, "La escala de calificación del nivel no está configurada", glerrors.SafeMessage(err))
+}
+
+const msgMonthInFuture = "Aún no llega ese mes"
+
+// A month after the current UTC month cannot be graded yet, by the teacher or
+// the director: writes and clears refuse with MONTH_IN_FUTURE and the sheet
+// still answers (so the screen can show it) but read-only, for that reason.
+func TestFutureMonthsAreReadOnly(t *testing.T) {
+	tests := []struct {
+		name     string
+		month    string
+		scope    usecase.CaptureScope
+		wantCode domain.RefusalCode
+	}{
+		{name: "teacher, current month", month: "2026-10", scope: usecase.ScopeTeacher},
+		{name: "teacher, past month", month: "2026-09", scope: usecase.ScopeTeacher},
+		{name: "teacher, next month", month: "2026-11", scope: usecase.ScopeTeacher, wantCode: domain.CodeMonthInFuture},
+		{name: "director, next month", month: "2026-11", scope: usecase.ScopeSchool, wantCode: domain.CodeMonthInFuture},
+		{name: "director, last month of the cycle", month: "2027-07", scope: usecase.ScopeSchool, wantCode: domain.CodeMonthInFuture},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newMonthlyFixture(t) // now = 2026-10-15
+			in := upsertInput(tt.month, enrollmentID, "9")
+			in.Scope = tt.scope
+			_, err := f.svc.Upsert(context.Background(), in)
+			clearErr := f.svc.Clear(context.Background(), tt.scope, assignmentID, tt.month, enrollmentID)
+			sheet, sheetErr := f.svc.Sheet(context.Background(), tt.scope, assignmentID, tt.month)
+			require.NoError(t, sheetErr)
+			require.Len(t, sheet.Months, 12, "the sheet still lists the whole cycle")
+			if tt.wantCode == "" {
+				require.NoError(t, err)
+				require.NoError(t, clearErr)
+				assert.True(t, sheet.Editable)
+				return
+			}
+			for _, e := range []error{err, clearErr} {
+				assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(e))
+				assert.Equal(t, msgMonthInFuture, glerrors.SafeMessage(e))
+				assert.Equal(t, tt.wantCode, domain.RefusalCodeOf(e))
+			}
+			assert.Empty(t, f.repo.rows)
+			assert.Empty(t, f.repo.deleted)
+			assert.False(t, sheet.Editable)
+			assert.Equal(t, msgMonthInFuture, sheet.ReadOnlyReason)
+			for _, r := range sheet.Rows {
+				assert.False(t, r.Editable)
+				assert.Equal(t, msgMonthInFuture, r.ReadOnlyReason)
+			}
+		})
+	}
+}
+
+// "Now" is the UTC month: the last instant of October still refuses November,
+// and the first instant of November accepts it.
+func TestFutureMonthBoundaryIsUTC(t *testing.T) {
+	f := newMonthlyFixture(t)
+	*f.now = time.Date(2026, 10, 31, 23, 59, 59, 0, time.UTC)
+	_, err := f.svc.Upsert(context.Background(), upsertInput("2026-11", enrollmentID, "9"))
+	assert.Equal(t, domain.CodeMonthInFuture, domain.RefusalCodeOf(err))
+
+	*f.now = time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	_, err = f.svc.Upsert(context.Background(), upsertInput("2026-11", enrollmentID, "9"))
+	require.NoError(t, err)
 }

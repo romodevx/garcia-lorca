@@ -17,6 +17,7 @@ const (
 	msgNotInGroup        = "El alumno no está inscrito en este grupo"
 	msgCycleWithoutDates = "El ciclo escolar no tiene fechas de inicio y fin"
 	msgPreviousGroup     = "Ese mes corresponde al grupo anterior del alumno"
+	msgMonthInFuture     = "Aún no llega ese mes"
 )
 
 // CaptureScope is on whose behalf a monthly read or write runs.
@@ -403,13 +404,19 @@ func requireMonthInCycle(months []domain.Month, raw string) (domain.Month, error
 // each row's editable flag all go through here, so every lock lands in ONE
 // place (period closing arrives in T7).
 //
-// Today it enforces the previous-group rule: a transfer rewrites the
+// A month after the current UTC month is not graded yet, for anyone (teacher
+// or director): nothing has been taught in it.
+//
+// It also enforces the previous-group rule: a transfer rewrites the
 // enrollment's group in place, so after a move the new group's teacher would
 // otherwise write the months the pupil spent in the old group. For a teacher,
 // a month before the one the pupil joined the group in belongs to the previous
 // group and is read-only. The director (ScopeSchool) may edit any month. The
 // sheet-wide check passes a zero joinedGroup and is never refused by it.
 func (s *MonthlyGradesService) ensureEditable(_ context.Context, _ assignmentContext, m domain.Month, target editTarget) error {
+	if m.FirstDay().After(domain.MonthOf(s.now()).FirstDay()) {
+		return domain.Refusal(domain.CodeMonthInFuture, msgMonthInFuture)
+	}
 	if target.scope != ScopeSchool && !target.joinedGroup.IsZero() && m.FirstDay().Before(target.joinedGroup.FirstDay()) {
 		return domain.Refusal(domain.CodeMonthPreviousGroup, msgPreviousGroup)
 	}

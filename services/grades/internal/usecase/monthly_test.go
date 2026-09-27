@@ -182,6 +182,8 @@ type monthlyFixture struct {
 	catalog *fakeCatalog
 	asg     *fakeAssignments
 	enr     *fakeEnrollments
+	// now is the fixture's clock; a test moves it to reach later months.
+	now *time.Time
 }
 
 func newMonthlyFixture(t *testing.T) monthlyFixture {
@@ -199,8 +201,9 @@ func newMonthlyFixture(t *testing.T) monthlyFixture {
 	catalog := baseCatalog(t)
 	seq := 0
 	newID := func() string { seq++; return "mg-" + string(rune('0'+seq)) }
-	svc := usecase.NewMonthlyGradesService(repo, asg, catalog, enr, testTenant, newID, func() time.Time { return sheetNow })
-	return monthlyFixture{svc: svc, repo: repo, catalog: catalog, asg: asg, enr: enr}
+	now := sheetNow
+	svc := usecase.NewMonthlyGradesService(repo, asg, catalog, enr, testTenant, newID, func() time.Time { return now })
+	return monthlyFixture{svc: svc, repo: repo, catalog: catalog, asg: asg, enr: enr, now: &now}
 }
 
 func upsertInput(month, enrollment, value string) usecase.UpsertMonthlyInput {
@@ -245,6 +248,7 @@ func TestUpsertMonthlyGradeKnot(t *testing.T) {
 
 func TestUpsertMonthlyGradeDerivesSubjectAndTeacher(t *testing.T) {
 	f := newMonthlyFixture(t)
+	*f.now = time.Date(2027, 7, 1, 0, 0, 0, 0, time.UTC)
 	g, err := f.svc.Upsert(context.Background(), upsertInput("2027-07", enrollmentID, "10.0"))
 	require.NoError(t, err)
 	assert.Equal(t, subjectID, g.SubjectID())

@@ -21,6 +21,7 @@ const (
 	CodeLevelNotGraded        RefusalCode = "LEVEL_NOT_GRADED"
 	CodeEnrollmentNotInGroup  RefusalCode = "ENROLLMENT_NOT_IN_GROUP"
 	CodeMonthPreviousGroup    RefusalCode = "MONTH_PREVIOUS_GROUP"
+	CodeMonthInFuture         RefusalCode = "MONTH_IN_FUTURE"
 	CodeLevelScaleUnavailable RefusalCode = "LEVEL_SCALE_NOT_CONFIGURED"
 )
 

@@ -31,7 +31,8 @@ import (
 //
 // Every refusal carries a machine code in the X-Error-Code header
 // (GRADE_OUT_OF_RANGE, GRADE_DECIMALS, GRADE_NOT_NUMBER, MONTH_OUTSIDE_CYCLE,
-// LEVEL_NOT_GRADED, ENROLLMENT_NOT_IN_GROUP, MONTH_PREVIOUS_GROUP, …).
+// LEVEL_NOT_GRADED, ENROLLMENT_NOT_IN_GROUP, MONTH_PREVIOUS_GROUP,
+// MONTH_IN_FUTURE, …).
 
 // MonthlyGradesService is the grades surface the monthly handler consumes. The
 // Connect GradesClient satisfies it.
@@ -82,13 +83,27 @@ type MonthlyGradesHandler struct {
 	students StudentNamesReader
 	gate     AssignmentGate
 	scope    CaptureScope
+	now      func() time.Time
+}
+
+// MonthlyOption tunes a MonthlyGradesHandler.
+type MonthlyOption func(*MonthlyGradesHandler)
+
+// WithMonthlyClock replaces time.Now as the clock the sheet's currentMonth is
+// read from (tests pin it).
+func WithMonthlyClock(now func() time.Time) MonthlyOption {
+	return func(h *MonthlyGradesHandler) { h.now = now }
 }
 
 // NewMonthlyGradesHandler wires the handler. students resolves row names (the
 // gateway reads them on the caller's behalf: a Maestro holds no students:read);
 // scope is ScopeSchool on the director's routes, ScopeTeacher on the teacher's.
-func NewMonthlyGradesHandler(grades MonthlyGradesService, students StudentNamesReader, gate AssignmentGate, scope CaptureScope) *MonthlyGradesHandler {
-	return &MonthlyGradesHandler{grades: grades, students: students, gate: gate, scope: scope}
+func NewMonthlyGradesHandler(grades MonthlyGradesService, students StudentNamesReader, gate AssignmentGate, scope CaptureScope, opts ...MonthlyOption) *MonthlyGradesHandler {
+	h := &MonthlyGradesHandler{grades: grades, students: students, gate: gate, scope: scope, now: time.Now}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 func (h *MonthlyGradesHandler) schoolWide() bool { return h.scope == ScopeSchool }
@@ -110,11 +125,15 @@ type monthlySheetRowResponse struct {
 }
 
 type monthlySheetResponse struct {
-	AssignmentID   string                    `json:"assignmentId"`
-	Month          string                    `json:"month"`
-	Months         []string                  `json:"months"`
-	Scale          gradeScaleResponse        `json:"scale"`
-	GradingEnabled bool                      `json:"gradingEnabled"`
+	AssignmentID   string             `json:"assignmentId"`
+	Month          string             `json:"month"`
+	Months         []string           `json:"months"`
+	Scale          gradeScaleResponse `json:"scale"`
+	GradingEnabled bool               `json:"gradingEnabled"`
+	// CurrentMonth is the server's UTC month: the months after it are not
+	// gradable yet (the grades service refuses them with MONTH_IN_FUTURE), so
+	// the screen locks their chips up front.
+	CurrentMonth   string                    `json:"currentMonth"`
 	Editable       bool                      `json:"editable"`
 	ReadOnlyReason string                    `json:"readOnlyReason,omitempty"`
 	Rows           []monthlySheetRowResponse `json:"rows"`
@@ -275,7 +294,8 @@ func (h *MonthlyGradesHandler) toSheetResponse(ctx context.Context, s client.Mon
 	}
 	return monthlySheetResponse{
 		AssignmentID: s.AssignmentID, Month: s.Month, Months: months, Scale: toGradeScaleResponse(s.Scale),
-		GradingEnabled: s.GradingEnabled, Editable: s.Editable, ReadOnlyReason: s.ReadOnlyReason, Rows: rows,
+		GradingEnabled: s.GradingEnabled, CurrentMonth: h.now().UTC().Format(monthLayout),
+		Editable: s.Editable, ReadOnlyReason: s.ReadOnlyReason, Rows: rows,
 	}
 }
 

@@ -2547,7 +2547,9 @@ paths:
         Same as `PUT /api/v1/grades/monthly`, limited to an assignment the
         caller teaches in the active cycle (404 otherwise). A month before the
         pupil joined the group by transfer is 400 "Ese mes corresponde al grupo
-        anterior del alumno" (`X-Error-Code: MONTH_PREVIOUS_GROUP`). Behind
+        anterior del alumno" (`X-Error-Code: MONTH_PREVIOUS_GROUP`). A month
+        after the current UTC month is 400 "Aún no llega ese mes"
+        (`X-Error-Code: MONTH_IN_FUTURE`). Behind
         `module_grades` AND `module_config`. Requires `teaching:write`.
       operationId: putTeachingMonthlyGrade
       security: [{ sessionCookie: [] }]
@@ -2565,7 +2567,7 @@ paths:
       description: >
         Same as `DELETE /api/v1/grades/monthly`, limited to an assignment the
         caller teaches in the active cycle (404 otherwise); the same
-        previous-group rule as the PUT. Requires `teaching:write`.
+        previous-group and future-month rules as the PUT. Requires `teaching:write`.
       operationId: deleteTeachingMonthlyGrade
       security: [{ sessionCookie: [] }]
       parameters:
@@ -2590,7 +2592,9 @@ paths:
         null when empty). `months` are the cycle's months (start to end,
         inclusive); `month` omitted ⇒ the current UTC month clamped into them.
         A level without numeric grading still answers, with
-        `editable: false` and `readOnlyReason`. A month outside the cycle is
+        `editable: false` and `readOnlyReason`. A month after the current UTC
+        month is listed in `months` but read-only (`editable: false`,
+        `readOnlyReason` "Aún no llega ese mes"), for every caller. A month outside the cycle is
         400 "Ese mes no pertenece al ciclo"; an unknown assignment 404. Behind
         `module_grades`. Requires `grades:read`.
       operationId: getMonthlySheet
@@ -2618,7 +2622,9 @@ paths:
         cell). `value` must be a JSON number — a string, null or a missing
         value is 400; to empty a cell send DELETE. The caller is recorded as
         who captured it. The director acts for the whole school: the months a
-        transferred pupil spent in a previous group stay writable. Every
+        transferred pupil spent in a previous group stay writable, but a month
+        after the current UTC month is 400 "Aún no llega ese mes"
+        (`X-Error-Code: MONTH_IN_FUTURE`), as for a teacher. Every
         refusal carries its code in `X-Error-Code`. Behind `module_grades`.
         Requires `grades:write`.
       operationId: putMonthlyGrade
@@ -2636,8 +2642,8 @@ paths:
       summary: Empty one monthly grade (director)
       description: >
         Removes one cell; emptying an empty cell succeeds. Same rules as the
-        PUT (month in the cycle, enrollment in the group, level with numeric
-        grading). Behind `module_grades`. Requires `grades:write`.
+        PUT (month in the cycle and not in the future, enrollment in the group,
+        level with numeric grading). Behind `module_grades`. Requires `grades:write`.
       operationId: deleteMonthlyGrade
       security: [{ sessionCookie: [] }]
       parameters:
@@ -2706,7 +2712,7 @@ components:
         the row) without parsing the sentence. Exposed to the web via CORS.
         Monthly grades: GRADE_OUT_OF_RANGE, GRADE_DECIMALS, GRADE_NOT_NUMBER,
         MONTH_OUTSIDE_CYCLE, LEVEL_NOT_GRADED, ENROLLMENT_NOT_IN_GROUP,
-        MONTH_PREVIOUS_GROUP, LEVEL_SCALE_NOT_CONFIGURED (and MONTH_LOCKED once
+        MONTH_PREVIOUS_GROUP, MONTH_IN_FUTURE, LEVEL_SCALE_NOT_CONFIGURED (and MONTH_LOCKED once
         periods close, T7). Level scale change: SCALE_TIGHTENING. Absent on a
         refusal without a code.
       schema:
@@ -2847,6 +2853,7 @@ components:
             range: { value: La calificación debe estar entre 5 y 10 }
             decimals: { value: Solo se permite 1 decimal }
             month: { value: Ese mes no pertenece al ciclo }
+            future: { value: Aún no llega ese mes }
             level: { value: Este nivel no lleva calificación numérica }
             notNumber: { value: La calificación debe ser un número }
             enrollment: { value: El alumno no está inscrito en este grupo }
@@ -3671,7 +3678,7 @@ components:
               levelId: { type: string, format: uuid }
     MonthlySheet:
       type: object
-      required: [assignmentId, month, months, scale, gradingEnabled, editable, rows]
+      required: [assignmentId, month, months, scale, gradingEnabled, currentMonth, editable, rows]
       properties:
         assignmentId: { type: string, format: uuid }
         month: { type: string, example: '2026-09' }
@@ -3681,6 +3688,14 @@ components:
           items: { type: string, example: '2026-08' }
         scale: { $ref: '#/components/schemas/GradingScale' }
         gradingEnabled: { type: boolean }
+        currentMonth:
+          type: string
+          pattern: '^\d{4}-\d{2}$'
+          description: >
+            The server's current UTC month. Every month in `months` after it is
+            not gradable yet (read-only sheet, writes refused with
+            `MONTH_IN_FUTURE`), so the screen can mark those months up front.
+          example: '2026-09'
         editable: { type: boolean }
         readOnlyReason:
           type: string

@@ -196,6 +196,13 @@ func TestMonthlyRefusalsCarryTheirCodeAsMetadata(t *testing.T) {
 	require.ErrorAs(t, err, &ce)
 	assert.Equal(t, "GRADE_DECIMALS", ce.Meta().Get("X-Error-Code"))
 
+	_, err = h.ClearMonthlyGrade(context.Background(), connect.NewRequest(&gradesv1.ClearMonthlyGradeRequest{
+		AssignmentId: assignmentID, Month: "2026-11", EnrollmentId: enrollmentID, SchoolWide: true,
+	}))
+	require.ErrorAs(t, err, &ce)
+	assert.Equal(t, connect.CodeInvalidArgument, ce.Code())
+	assert.Equal(t, "MONTH_IN_FUTURE", ce.Meta().Get("X-Error-Code"), "a future month is refused even school-wide")
+
 	_, err = h.GetEnrollmentMonthlyGrades(context.Background(), connect.NewRequest(&gradesv1.GetEnrollmentMonthlyGradesRequest{EnrollmentId: "ghost"}))
 	require.ErrorAs(t, err, &ce)
 	assert.Empty(t, ce.Meta().Get("X-Error-Code"), "an uncoded error carries no code")
