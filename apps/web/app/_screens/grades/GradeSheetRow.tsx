@@ -44,6 +44,8 @@ export function GradeSheetRow({ row, initialText, scale, status, failing, inputR
   const [error, setError] = useState<string | undefined>(() => (initialText === undefined ? undefined : validateGrade(initialText, scale)));
   const errorId = useId();
   const shownError = error ?? (status.kind === "rejected" ? status.message : undefined);
+  // "Guardado" speaks for the field's text: a value the scale refused was never sent.
+  const shownStatus: CellStatus = error !== undefined && status.kind === "saved" ? { kind: "idle" } : status;
 
   /** Checks and saves the cell; false when it is wrong and must be fixed first. */
   const settle = (): boolean => {
@@ -98,7 +100,7 @@ export function GradeSheetRow({ row, initialText, scale, status, failing, inputR
           style={inputStyle(shownError !== undefined)}
         />
         {shownError !== undefined && <p id={errorId} role="alert" style={{ margin: "4px 0 0", fontSize: 13.5, fontWeight: 600, color: "var(--bad-fg)" }}>{shownError}</p>}
-        <CellStatusLine status={status} onRetry={onRetry} />
+        <CellStatusLine status={shownStatus} onRetry={onRetry} />
       </td>
     </tr>
   );
