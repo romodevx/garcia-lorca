@@ -24,6 +24,8 @@ vi.mock("../../config/api", () => ({
   createGroup: vi.fn(),
   listTerms: vi.fn(),
   createTerm: vi.fn(),
+  setTermMonths: vi.fn(),
+  copyTermMonths: vi.fn(),
   listNonWorkingPeriods: vi.fn(),
   createNonWorkingPeriod: vi.fn(),
   deleteNonWorkingPeriod: vi.fn(),
@@ -479,5 +481,22 @@ describe("editar un tabulador existente", () => {
     expect(screen.getByLabelText("Fecha límite de inscripción")).toHaveValue("2026-06-30");
     // Las cuotas guardadas siguen ahí: guardar no puede borrarlas.
     expect(screen.getByRole("button", { name: /Cuotas/ })).toHaveTextContent("1");
+  });
+});
+
+describe("Catalog — meses de cada periodo (tarea 7)", () => {
+  it("saves a tapped month through the config api", async () => {
+    const user = userEvent.setup();
+    mocked.listCycles.mockResolvedValue([{ id: "c1", name: "2026-2027", status: "active", startsOn: "2026-08-01", endsOn: "2027-06-30" }]);
+    mocked.listLevels.mockResolvedValue([{ id: "l1", name: "PRIMARIA", sepCode: "PRI", enrollmentGranularity: "cycle" }]);
+    const t1 = { id: "t1", cycleId: "c1", levelId: "l1", name: "1.er trimestre", ordinal: 1, startsOn: "2026-08-01", endsOn: "2026-11-30", months: [] };
+    mocked.listTerms.mockResolvedValue([t1]);
+    mocked.setTermMonths.mockResolvedValue({ ...t1, months: ["2026-09"] });
+
+    render(<Catalog onBack={() => {}} />);
+    await user.click(await screen.findByRole("button", { name: /PRIMARIA/ }));
+    await user.click(await screen.findByRole("button", { name: "septiembre de 2026 en 1.er trimestre" }));
+
+    await waitFor(() => expect(mocked.setTermMonths).toHaveBeenCalledWith(expect.any(String), "t1", ["2026-09"]));
   });
 });

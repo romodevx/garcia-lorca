@@ -20,6 +20,9 @@ import {
   listLevels,
   listSubjects,
   listTerms,
+  setTermMonths,
+  copyTermMonths,
+  type CopyTermMonthsInput,
   type CreateCycleInput,
   type CreateGradeLevelInput,
   type CreateGroupInput,
@@ -192,6 +195,11 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
     setTerms((prev) => [...prev, created]);
   }, []);
 
+  // The grid keeps its own optimistic copy; the list here only needs the ids, which a month never changes.
+  const handleSetTermMonths = useCallback((termId: string, months: readonly string[]): Promise<Term> => setTermMonths(API_URL, termId, months), []);
+
+  const handleCopyTermMonths = useCallback((input: CopyTermMonthsInput): Promise<Term[]> => copyTermMonths(API_URL, input), []);
+
 
   const selectedCycle = cycles.find((c) => c.id === selectedCycleId);
 
@@ -315,7 +323,19 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
             )}
 
             {selectedLevel !== undefined && selectedCycle !== undefined && (
-              <TermsPanel key={`${selectedCycle.id}:${selectedLevel.id}`} cycle={selectedCycle} level={selectedLevel} terms={terms} onCreate={handleCreateTerm} />
+              // Full row: the months grid needs the width, and scrolls inside its own box when there is none.
+              <div style={{ gridColumn: "1 / -1", minWidth: 0 }}>
+                <TermsPanel
+                  key={`${selectedCycle.id}:${selectedLevel.id}`}
+                  cycle={selectedCycle}
+                  level={selectedLevel}
+                  levels={levels}
+                  terms={terms}
+                  onCreate={handleCreateTerm}
+                  onSetMonths={handleSetTermMonths}
+                  onCopyMonths={handleCopyTermMonths}
+                />
+              </div>
             )}
 
             {selectedGradeLevel !== undefined && (

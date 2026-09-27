@@ -1,114 +1,87 @@
 "use client";
 
-import { useMemo, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
 
-import { InlineCreateRow } from "../../_design/InlineCreateRow";
-import type { CreateTermInput, Cycle, Level, Term } from "../../config/api";
+import { Btn } from "../../_design/Controls";
+import { Toast } from "../../_design/Toast";
+import type { CopyTermMonthsInput, CreateTermInput, Cycle, Level, Term } from "../../config/api";
+import { cycleMonths, trimesterInputs } from "../../config/termMonths";
+import { CopyMonthsInline } from "./CopyMonthsInline";
+import { NewTermRow } from "./NewTermRow";
 import { EmptyHint, ErrorAlert, Section } from "./parts";
+import { TermMonthsEditor } from "./TermMonthsEditor";
+import { useTermMonths, type SaveTermMonths } from "./useTermMonths";
 
 export interface TermsPanelProps {
   cycle: Cycle;
   level: Level;
+  /** Every level of the school: the others can receive this one's months. */
+  levels: readonly Level[];
   terms: readonly Term[];
   onCreate: (input: CreateTermInput) => Promise<void>;
+  onSetMonths: SaveTermMonths;
+  onCopyMonths: (input: CopyTermMonthsInput) => Promise<Term[]>;
 }
 
-/** El orden que sigue, para no obligar a nadie a contar la lista. */
-function nextOrdinal(terms: readonly Term[]): number {
-  return terms.reduce((max, t) => Math.max(max, t.ordinal), 0) + 1;
+const TOAST_MS = 4000;
+const TRIMESTERS_FAILED = "No se pudieron crear los trimestres. Revisa las fechas del ciclo.";
+
+function copiedMessage(count: number): string {
+  return count === 1 ? "Se copiaron los meses a 1 nivel" : `Se copiaron los meses a ${count} niveles`;
 }
 
 /**
- * Los periodos en que se califica un nivel —trimestres, bimestres— de un ciclo.
- *
- * Una escuela captura estos cinco seguidos al abrir el año, así que cada tecla
- * de más se paga cinco veces. El renglón deja los cinco en una sola sentada, con
- * el orden ya propuesto y el fin revisado contra el inicio al salir de la celda.
+ * Los periodos en que se califica un nivel —trimestres, bimestres— de un ciclo,
+ * y qué meses cuenta cada uno. Los meses NO son fijos: cada colegio los reparte
+ * por ciclo y nivel, y de ahí sale el promedio de cada trimestre en la boleta.
  */
-export function TermsPanel({ cycle, level, terms, onCreate }: TermsPanelProps): ReactElement {
-  const [error, setError] = useState<string | undefined>(undefined);
+export function TermsPanel({ cycle, level, levels, terms, onCreate, onSetMonths, onCopyMonths }: TermsPanelProps): ReactElement {
+  const months = useMemo(() => cycleMonths(cycle.startsOn, cycle.endsOn), [cycle.startsOn, cycle.endsOn]);
+  const { assignment, error, tap } = useTermMonths(terms, onSetMonths);
+  const [toast, setToast] = useState<string | undefined>(undefined);
+  const [createError, setCreateError] = useState<string | undefined>(undefined);
+  const sorted = useMemo(() => [...terms].sort((a, b) => a.ordinal - b.ordinal), [terms]);
 
-  const defaults = useMemo(() => ({ ordinal: String(nextOrdinal(terms)) }), [terms]);
+  useEffect(() => {
+    if (toast === undefined) return;
+    const timer = setTimeout(() => setToast(undefined), TOAST_MS);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
-  // La fecha imposible se revisa al salir de la celda, no al teclear: el dato ya
-  // está escrito y la persona sigue parada ahí, que es cuando corregir es barato.
-  const rules = useMemo(
-    () => ({
-      endsOn: (value: string, all: Readonly<Record<string, string>>): string | undefined => {
-        const from = all.startsOn ?? "";
-        return from !== "" && value < from ? "El fin del periodo es antes que su inicio." : undefined;
-      },
-    }),
-    [],
-  );
+  const createTrimesters = async (): Promise<void> => {
+    setCreateError(undefined);
+    try {
+      // One after the other: the ordinals must arrive in order.
+      for (const input of trimesterInputs(cycle, level.id)) await onCreate(input);
+    } catch {
+      setCreateError(TRIMESTERS_FAILED);
+    }
+  };
+
+  const copy = async (toLevelIds: string[]): Promise<void> => {
+    await onCopyMonths({ cycleId: cycle.id, fromLevelId: level.id, toLevelIds });
+    setToast(copiedMessage(toLevelIds.length));
+  };
 
   return (
-    <Section title={`Periodos de ${level.name}`} subtitle={`En el ciclo ${cycle.name}.`}>
-      {terms.length > 0 ? (
-        <ul style={{ listStyle: "none", padding: 0, margin: "0 0 16px", display: "grid", gap: 6 }}>
-          {terms.map((t) => (
-            <li
-              key={t.id}
-              style={{ padding: "8px 12px", borderRadius: "var(--r-md)", background: "var(--surface-2)", fontSize: 14 }}
-            >
-              {t.ordinal}. {t.name} · {t.startsOn} → {t.endsOn}
-            </li>
-          ))}
-        </ul>
+    <Section title={`Periodos de ${level.name}`} subtitle={`En el ciclo ${cycle.name}. Toca un mes para sumarlo al periodo.`}>
+      {sorted.length > 0 ? (
+        <>
+          <TermMonthsEditor terms={sorted} months={months} assignment={assignment} error={error} onTap={tap} />
+          <div style={{ marginBottom: 16 }}>
+            <CopyMonthsInline targets={levels.filter((l) => l.id !== level.id)} onCopy={copy} />
+          </div>
+        </>
       ) : (
-        <EmptyHint>Aún no hay periodos para este nivel en el ciclo.</EmptyHint>
+        <div style={{ display: "grid", gap: 10, justifyItems: "start", marginBottom: 16 }}>
+          <EmptyHint>Aún no hay periodos para este nivel en el ciclo.</EmptyHint>
+          <Btn icon="plus" onClick={() => void createTrimesters()} style={{ height: 44 }}>Crear trimestres</Btn>
+          {createError !== undefined && <ErrorAlert message={createError} />}
+        </div>
       )}
 
-      <div style={{ border: "1px solid var(--border)", borderRadius: "var(--r-md)", overflow: "hidden" }}>
-        <InlineCreateRow
-          addLabel="Nuevo periodo"
-          defaults={defaults}
-          rules={rules}
-          columns={[
-            {
-              key: "name",
-              label: "Nombre del periodo",
-              kind: "text",
-              uppercase: true,
-              required: true,
-              help: "Cómo se llama el periodo de evaluación. Es lo que verán los docentes al capturar.",
-            },
-            { key: "ordinal", label: "Orden", kind: "number", required: true, width: 100 },
-            { key: "startsOn", label: "Inicio del periodo", kind: "date", required: true, width: 165 },
-            { key: "endsOn", label: "Fin del periodo", kind: "date", required: true, width: 165 },
-          ]}
-          onCreate={async (values) => {
-            const ordinal = Number(values.ordinal);
-            if (!Number.isFinite(ordinal) || ordinal < 1) {
-              // Number("") es 0, y un 0 que nadie escribió es un dato falso.
-              setError("El orden del periodo tiene que ser un número mayor que cero.");
-              // También se relanza: para el renglón, "no pasó" es no pasó, sea
-              // por la red o por el dato.
-              throw new Error("El orden del periodo tiene que ser un número mayor que cero.");
-            }
-            setError(undefined);
-            try {
-              await onCreate({
-                cycleId: cycle.id,
-                levelId: level.id,
-                name: (values.name ?? "").trim(),
-                ordinal,
-                startsOn: values.startsOn ?? "",
-                endsOn: values.endsOn ?? "",
-              });
-            } catch (cause) {
-              setError("No se pudo crear el periodo. Revisa las fechas y el orden.");
-              // Se RELANZA: el renglón necesita saber que no se guardó para
-              // conservar lo escrito. Tragarse el error aquí dejaba el mensaje
-              // hablando de un renglón que ya se había vaciado solo, y obligaba
-              // a reescribir todo.
-              throw cause;
-            }
-          }}
-        />
-      </div>
-
-      {error !== undefined && <ErrorAlert message={error} />}
+      <NewTermRow cycle={cycle} level={level} terms={terms} onCreate={onCreate} />
+      {toast !== undefined && <Toast>{toast}</Toast>}
     </Section>
   );
 }
