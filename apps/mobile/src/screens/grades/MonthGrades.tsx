@@ -12,7 +12,8 @@ const FAILED = "Reprobada";
 export interface MonthGradesProps {
   subjects: MonthlySubject[];
   month: string;
-  scale: GradeScale;
+  /** Null when there is nothing to judge by: no passing line, nothing marked failing. */
+  scale: GradeScale | null;
 }
 
 /** One month: its average on top, then every subject with its grade or "Sin calificación aún". */
@@ -32,7 +33,7 @@ export function MonthGrades({ subjects, month, scale }: MonthGradesProps): React
   );
 }
 
-function AverageCard({ average, scale }: { average: number | null; scale: GradeScale }): ReactElement {
+function AverageCard({ average, scale }: { average: number | null; scale: GradeScale | null }): ReactElement {
   const theme = useTheme();
   const text = average === null ? "—" : formatAverage(average);
   return (
@@ -41,14 +42,16 @@ function AverageCard({ average, scale }: { average: number | null; scale: GradeS
         <Text style={[styles.heroLabel, { color: theme.colors.text2, fontFamily: theme.fonts.uiSemi }]}>Promedio del mes</Text>
         <Text style={[styles.heroNum, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{text}</Text>
       </View>
-      <Text style={[styles.heroRule, { color: theme.colors.text2, fontFamily: theme.fonts.uiSemi }]}>
-        {`Aprobatoria: ${formatGrade(scale.passing)} de ${formatGrade(scale.max)}`}
-      </Text>
+      {scale === null ? null : (
+        <Text style={[styles.heroRule, { color: theme.colors.text2, fontFamily: theme.fonts.uiSemi }]}>
+          {`Aprobatoria: ${formatGrade(scale.passing)} de ${formatGrade(scale.max)}`}
+        </Text>
+      )}
     </Card>
   );
 }
 
-function SubjectGrade({ name, value, scale }: { name: string; value: number | undefined; scale: GradeScale }): ReactElement {
+function SubjectGrade({ name, value, scale }: { name: string; value: number | undefined; scale: GradeScale | null }): ReactElement {
   const theme = useTheme();
   const failed = value !== undefined && isFailing(value, scale);
   const grade = value === undefined ? null : formatGrade(value);

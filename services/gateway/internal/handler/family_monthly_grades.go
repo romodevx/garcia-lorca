@@ -68,11 +68,14 @@ type familySubjectGradesResponse struct {
 }
 
 type familyMonthlyGradesResponse struct {
-	GradingEnabled bool                          `json:"gradingEnabled"`
-	CycleName      string                        `json:"cycleName"`
-	Months         []string                      `json:"months"`
-	Scale          gradeScaleResponse            `json:"scale"`
-	Subjects       []familySubjectGradesResponse `json:"subjects"`
+	GradingEnabled bool     `json:"gradingEnabled"`
+	CycleName      string   `json:"cycleName"`
+	Months         []string `json:"months"`
+	// Scale is absent when the level no longer grades numerically: grades do
+	// not record the scale they were captured under, so there is nothing
+	// honest to judge them by (the app then marks none as failing).
+	Scale    *gradeScaleResponse           `json:"scale,omitempty"`
+	Subjects []familySubjectGradesResponse `json:"subjects"`
 }
 
 // MonthlyGrades handles GET /api/v1/family/students/{studentId}/grades/monthly
@@ -186,7 +189,11 @@ func (h *FamilyMonthlyGradesHandler) toResponse(ctx context.Context, g client.En
 	}
 	out := familyMonthlyGradesResponse{
 		GradingEnabled: g.GradingEnabled, CycleName: g.CycleName, Months: months,
-		Scale: toGradeScaleResponse(g.Scale), Subjects: []familySubjectGradesResponse{},
+		Subjects: []familySubjectGradesResponse{},
+	}
+	if g.GradingEnabled {
+		scale := toGradeScaleResponse(g.Scale)
+		out.Scale = &scale
 	}
 	names := h.subjectNames(ctx, len(g.SubjectIDs) > 0)
 	bySubject := make(map[string]map[string]json.Number, len(g.SubjectIDs))

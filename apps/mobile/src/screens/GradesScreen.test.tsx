@@ -9,7 +9,7 @@ import { GradesScreen } from "./GradesScreen";
 
 type Child = { id: string; firstName: string; lastName: string; level: string; levelId: string; gradeGroup: string };
 type Subject = { subjectId: string; subjectName: string; grades: Record<string, number> };
-type Reply = { status: number; subjects?: Subject[]; gradingEnabled?: boolean } | "hang";
+type Reply = { status: number; subjects?: Subject[]; gradingEnabled?: boolean; scale?: typeof SCALE | null } | "hang";
 
 const MONTHS = ["2026-08", "2026-09", "2026-10"];
 const SCALE = { min: 5, max: 10, decimals: 1, passing: 6 };
@@ -39,7 +39,7 @@ function mockGateway(replies: Record<string, Reply | (() => Reply)>, children: C
         json: async () => ({
           cycleName: "2026-2027",
           months: MONTHS,
-          scale: SCALE,
+          ...(reply.scale === null ? {} : { scale: reply.scale ?? SCALE }),
           gradingEnabled: reply.gradingEnabled ?? true,
           subjects: reply.subjects ?? [],
         }),
@@ -132,6 +132,33 @@ describe("GradesScreen (monthly grades)", () => {
 
     await waitFor(() => expect(screen.getByText("Próximamente")).toBeTruthy());
     expect(screen.queryByText(/Promedio/)).toBeNull();
+  });
+
+  it("shows grades captured before the level stopped grading, as stored, without a passing line", async () => {
+    mockGateway({ s1: { status: 200, gradingEnabled: false, scale: null, subjects: [subject("Matemáticas", { "2026-09": 5.25 })] } });
+    await render();
+
+    await waitFor(() => expect(screen.getByLabelText("Matemáticas: 5.25")).toBeTruthy());
+    expect(screen.queryByText("Próximamente")).toBeNull();
+    expect(screen.queryByText(/Aprobatoria/)).toBeNull();
+    expect(screen.queryByText("Reprobada")).toBeNull();
+  });
+
+  it("shows captured grades for a qualitative level too, instead of the placeholder", async () => {
+    const kinder: Child = { ...mateo, level: "Kínder" };
+    mockGateway({ s1: { status: 200, gradingEnabled: false, scale: null, subjects: [subject("Lenguaje", { "2026-09": 9 })] } }, [kinder]);
+    await render();
+
+    await waitFor(() => expect(screen.getByLabelText("Lenguaje: 9")).toBeTruthy());
+    expect(screen.queryByText("Próximamente")).toBeNull();
+  });
+
+  it("never marks failing against a 0–0 scale", async () => {
+    mockGateway({ s1: { status: 200, gradingEnabled: false, scale: { min: 0, max: 0, decimals: 0, passing: 0 }, subjects: [subject("Arte", { "2026-09": 3 })] } });
+    await render();
+
+    await waitFor(() => expect(screen.getByLabelText("Arte: 3")).toBeTruthy());
+    expect(screen.queryByText(/Aprobatoria/)).toBeNull();
   });
 
   it("says the child was not found on a 404", async () => {

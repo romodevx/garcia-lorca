@@ -8,7 +8,7 @@ import { deviceMonth } from "./attendanceView";
 import { AsyncErrorState, AsyncLoading, StaleNotice } from "./AsyncStates";
 import { MonthChips } from "./grades/MonthChips";
 import { MonthGrades } from "./grades/MonthGrades";
-import { defaultMonth } from "./gradesView";
+import { defaultMonth, hasCapturedGrades } from "./gradesView";
 
 const HTTP_NOT_FOUND = 404;
 const TITLE = "Calificaciones";
@@ -28,8 +28,10 @@ interface PickedMonth {
  * Calificaciones: the child's monthly grade per subject, visible as soon as the
  * teacher captures it (`GET /family/students/{id}/grades/monthly`). Month chips,
  * the month's average, and each subject's grade — a failing one says
- * "Reprobada" in words, never by colour alone. Preescolar keeps the
- * qualitative "Próximamente" placeholder. Reloads on pull and on foreground.
+ * "Reprobada" in words, never by colour alone. A level without numeric grades
+ * shows what was captured before it stopped (as stored, judged by no scale);
+ * only with nothing captured does it keep the qualitative "Próximamente"
+ * placeholder. Reloads on pull and on foreground.
  */
 export function GradesScreen({ currentMonth }: GradesScreenProps): ReactElement {
   const { child, selectedChildId, childLoading, childError, refreshChildren } = useAppState();
@@ -40,7 +42,8 @@ export function GradesScreen({ currentMonth }: GradesScreenProps): ReactElement 
   if (childError) {
     return <Failed onRetry={refreshChildren} />;
   }
-  if (toChildView(child).qualitative || data?.gradingEnabled === false) {
+  const withoutNumericGrades = toChildView(child).qualitative || data?.gradingEnabled === false;
+  if (withoutNumericGrades && (data === null || !hasCapturedGrades(data))) {
     return <QualitativePending />;
   }
   if (error && data === null) {

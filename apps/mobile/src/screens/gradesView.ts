@@ -43,9 +43,14 @@ export function formatAverage(average: number): string {
   return average.toFixed(AVERAGE_DECIMALS);
 }
 
-/** A grade strictly below the scale's passing mark fails. */
-export function isFailing(value: number, scale: GradeScale): boolean {
-  return value < scale.passing;
+/** A grade strictly below the scale's passing mark fails; without a scale nothing does. */
+export function isFailing(value: number, scale: GradeScale | null): boolean {
+  return scale !== null && value < scale.passing;
+}
+
+/** Whether any subject carries a grade in any month. */
+export function hasCapturedGrades(data: MonthlyGrades): boolean {
+  return data.subjects.some((s) => Object.keys(s.grades).length > 0);
 }
 
 /** Mean of the month's captured grades, half-up to one decimal; null when none is captured. */

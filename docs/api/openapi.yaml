@@ -2667,8 +2667,8 @@ paths:
         one entry per subject of the group (sorted by name, Spanish order),
         each a month → grade object (`{}` when nothing is captured yet). A
         level without numeric grading answers `gradingEnabled: false`, still
-        listing any grade captured before it stopped (never hidden; `scale` is
-        the level's current one). Of two active enrollments (re-enrolled for
+        listing any grade captured before it stopped (never hidden, shown as
+        stored) and omitting `scale`. Of two active enrollments (re-enrolled for
         next year) the one whose cycle is active is shown — else the one whose
         cycle contains today (UTC). A child that is not the caller's, or has no
         active enrollment, is 404. Behind `module_grades` AND
@@ -3736,14 +3736,20 @@ components:
           - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3302, studentId: 6e1d2c3b-0000-4000-8000-000000000043, name: Nico Núñez, value: null, updatedAt: null, rowEditable: false, rowReadOnlyReason: Ese mes corresponde al grupo anterior del alumno }
     FamilyMonthlyGrades:
       type: object
-      required: [gradingEnabled, cycleName, months, scale, subjects]
+      required: [gradingEnabled, cycleName, months, subjects]
       properties:
         gradingEnabled: { type: boolean }
         cycleName: { type: string, example: 2026-2027 }
         months:
           type: array
           items: { type: string, example: '2026-09' }
-        scale: { $ref: '#/components/schemas/GradingScale' }
+        scale:
+          allOf: [{ $ref: '#/components/schemas/GradingScale' }]
+          description: >
+            The level's scale, present only when `gradingEnabled` is true.
+            A level that stopped grading numerically omits it: grades do not
+            record the scale they were captured under, so the app shows them
+            as stored and marks none as failing.
         subjects:
           type: array
           items:

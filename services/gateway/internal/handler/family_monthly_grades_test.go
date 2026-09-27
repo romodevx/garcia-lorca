@@ -101,8 +101,8 @@ func TestFamilyMonthlyGradesPreescolar(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.MonthlyGrades(rec, familyMonthlyReq("usr-9", "stu-1"))
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.JSONEq(t, `{"gradingEnabled":false,"cycleName":"2026-2027","months":["2026-08"],
-		"scale":{"min":5,"max":10,"decimals":1,"passing":6},"subjects":[]}`, rec.Body.String())
+	assert.JSONEq(t, `{"gradingEnabled":false,"cycleName":"2026-2027","months":["2026-08"],"subjects":[]}`, rec.Body.String(),
+		"a level without numeric grading sends no scale (its current one is not the one to judge by)")
 }
 
 func TestFamilyMonthlyGradesOwnershipAndEnrollment(t *testing.T) {
@@ -163,17 +163,18 @@ func TestFamilyMonthlyGradesPicksTheCurrentCycle(t *testing.T) {
 }
 
 // A level that stopped grading numerically still shows the grades already
-// captured.
+// captured — exactly as stored — and omits the scale: grades do not record the
+// scale they were captured under, and the level's current one (often 0–0)
+// would mark every grade as failing.
 func TestFamilyMonthlyGradesKeepsCapturedGradesWhenGradingIsOff(t *testing.T) {
 	grades := &fakeEnrollmentMonthly{res: client.EnrollmentMonthlyGrades{
 		CycleName: "2026-2027", Months: []string{"2026-09"}, Scale: monthlyScale, GradingEnabled: false,
-		SubjectIDs: []string{"sub-mat"}, Grades: []client.MonthlyGrade{{SubjectID: "sub-mat", Month: "2026-09", Value: "9"}},
+		SubjectIDs: []string{"sub-mat"}, Grades: []client.MonthlyGrade{{SubjectID: "sub-mat", Month: "2026-09", Value: "9.5"}},
 	}}
 	h := newFamilyMonthly(familyMonthlyStudents(), grades, fakeSubjectNames{subjects: []client.SubjectResult{{ID: "sub-mat", Name: "Matemáticas"}}})
 	rec := httptest.NewRecorder()
 	h.MonthlyGrades(rec, familyMonthlyReq("usr-9", "stu-1"))
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.JSONEq(t, `{"gradingEnabled":false,"cycleName":"2026-2027","months":["2026-09"],
-		"scale":{"min":5,"max":10,"decimals":1,"passing":6},
-		"subjects":[{"subjectId":"sub-mat","subjectName":"Matemáticas","grades":{"2026-09":9}}]}`, rec.Body.String())
+		"subjects":[{"subjectId":"sub-mat","subjectName":"Matemáticas","grades":{"2026-09":9.5}}]}`, rec.Body.String())
 }
