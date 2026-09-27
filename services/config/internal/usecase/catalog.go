@@ -129,6 +129,19 @@ func (s *CatalogService) SetLevelAttendanceMode(ctx context.Context, id string, 
 	return s.repo.GetLevel(ctx, id)
 }
 
+// SetLevelGradingScale replaces a level's numeric grading scale and returns the
+// updated level. A scale that breaks the invariant (the zero value included) is
+// KindInvalid, checked before any write; an unknown level is KindNotFound.
+func (s *CatalogService) SetLevelGradingScale(ctx context.Context, id string, scale domain.GradingScale) (domain.Level, error) {
+	if _, err := domain.NewGradingScale(scale.Enabled(), scale.MinHundredths(), scale.MaxHundredths(), scale.PassingHundredths(), scale.Decimals()); err != nil {
+		return domain.Level{}, err
+	}
+	if err := s.repo.UpdateLevelGrading(ctx, id, scale); err != nil {
+		return domain.Level{}, err
+	}
+	return s.repo.GetLevel(ctx, id)
+}
+
 // ListLevels returns every level in the tenant catalog.
 func (s *CatalogService) ListLevels(ctx context.Context) ([]domain.Level, error) {
 	return s.repo.ListLevels(ctx)

@@ -58,6 +58,9 @@ type CatalogRepository interface {
 	// UpdateLevelAttendanceMode changes one level's attendance mode, or
 	// KindNotFound when the level does not exist.
 	UpdateLevelAttendanceMode(ctx context.Context, id string, mode domain.AttendanceMode) error
+	// UpdateLevelGrading replaces one level's grading scale, or KindNotFound when
+	// the level does not exist.
+	UpdateLevelGrading(ctx context.Context, id string, scale domain.GradingScale) error
 
 	// --- grade levels (grados, catalog; child of level) ---
 

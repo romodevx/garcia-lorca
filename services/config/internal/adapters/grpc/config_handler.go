@@ -77,6 +77,25 @@ func (h *ConfigHandler) SetLevelAttendanceMode(ctx context.Context, req *connect
 	return connect.NewResponse(&configv1.SetLevelAttendanceModeResponse{Level: toProtoLevel(l)}), nil
 }
 
+// SetLevelGradingScale replaces a level's numeric grading scale and returns the
+// updated level. A missing or inconsistent scale is InvalidArgument; an unknown
+// level is NotFound.
+func (h *ConfigHandler) SetLevelGradingScale(ctx context.Context, req *connect.Request[configv1.SetLevelGradingScaleRequest]) (*connect.Response[configv1.SetLevelGradingScaleResponse], error) {
+	g := req.Msg.GetGrading()
+	if g == nil {
+		return nil, connectErr(glerrors.New(glerrors.KindInvalid, "grading scale is required"))
+	}
+	scale, err := domain.NewGradingScale(g.GetEnabled(), int(g.GetMinHundredths()), int(g.GetMaxHundredths()), int(g.GetPassingHundredths()), int(g.GetDecimals()))
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	l, err := h.catalog.SetLevelGradingScale(ctx, req.Msg.GetId(), scale)
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.SetLevelGradingScaleResponse{Level: toProtoLevel(l)}), nil
+}
+
 // --- cycles ----------------------------------------------------------------
 
 func (h *ConfigHandler) CreateCycle(ctx context.Context, req *connect.Request[configv1.CreateCycleRequest]) (*connect.Response[configv1.CreateCycleResponse], error) {
@@ -310,6 +329,18 @@ func toProtoLevel(l domain.Level) *configv1.Level {
 		SepCode:               l.SEPCode(),
 		EnrollmentGranularity: toProtoGranularity(l.Granularity()),
 		AttendanceMode:        toProtoAttendanceMode(l.AttendanceMode()),
+		Grading:               toProtoGradingScale(l.Grading()),
+	}
+}
+
+// toProtoGradingScale maps the domain scale to the wire message (hundredths).
+func toProtoGradingScale(g domain.GradingScale) *configv1.GradingScale {
+	return &configv1.GradingScale{
+		Enabled:           g.Enabled(),
+		MinHundredths:     int32(g.MinHundredths()),
+		MaxHundredths:     int32(g.MaxHundredths()),
+		Decimals:          int32(g.Decimals()),
+		PassingHundredths: int32(g.PassingHundredths()),
 	}
 }
 

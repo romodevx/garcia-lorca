@@ -965,3 +965,16 @@ func (f *fakeCatalog) UpdateLevelAttendanceMode(_ context.Context, id string, mo
 	f.levels[id] = changed
 	return nil
 }
+
+func (f *fakeCatalog) UpdateLevelGrading(_ context.Context, id string, scale domain.GradingScale) error {
+	l, ok := f.levels[id]
+	if !ok {
+		return glerrors.ErrNotFound
+	}
+	changed, err := l.WithGrading(scale)
+	if err != nil {
+		return err
+	}
+	f.levels[id] = changed
+	return nil
+}

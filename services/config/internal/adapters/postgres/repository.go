@@ -218,6 +218,32 @@ func (r *Repository) UpdateLevelAttendanceMode(ctx context.Context, id string, m
 	})
 }
 
+// UpdateLevelGrading replaces one level's grading scale. It writes only the five
+// grading columns and updated_at; a level that does not exist — or that RLS
+// hides, i.e. another tenant's — is KindNotFound.
+func (r *Repository) UpdateLevelGrading(ctx context.Context, id string, scale domain.GradingScale) error {
+	if !isUUID(id) {
+		return glerrors.ErrNotFound
+	}
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Model(&levelModel{}).Where("id = ?", id).Updates(map[string]any{
+			"grading_enabled": scale.Enabled(),
+			"grade_min":       fromHundredths(scale.MinHundredths()),
+			"grade_max":       fromHundredths(scale.MaxHundredths()),
+			"grade_decimals":  scale.Decimals(),
+			"grade_passing":   fromHundredths(scale.PassingHundredths()),
+			"updated_at":      gorm.Expr("now()"),
+		})
+		if res.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "updating level grading scale", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return glerrors.ErrNotFound
+		}
+		return nil
+	})
+}
+
 // --- grade levels ---------------------------------------------------------
 
 // CreateGradeLevel persists a new grade level. A duplicate (level_id, ordinal)
