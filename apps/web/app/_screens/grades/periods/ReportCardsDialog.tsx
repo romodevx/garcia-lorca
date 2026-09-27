@@ -5,7 +5,7 @@ import { useEffect, useState, type CSSProperties, type ReactElement } from "reac
 import { DrawerShell } from "../../../_design/DrawerShell";
 import { Icon } from "../../../_design/Icon";
 import { SelectField } from "../../../_design/form";
-import { boletaFileName, type GradingPeriod, type PeriodsClient, type ReportCard } from "../../../grades/periods";
+import { boletaFileName, NO_GRADES_NOTICE, reportCardHasGrades, type GradingPeriod, type PeriodsClient, type ReportCard } from "../../../grades/periods";
 import { EmptyHint, ErrorAlert } from "../../config/parts";
 import { downloadBlob } from "./downloadBlob";
 import { periodTitle } from "./format";
@@ -74,7 +74,7 @@ export function ReportCardsDialog({ period, cycleId, client, onClose, download: 
                   <tr key={card.id}>
                     <th scope="row" style={{ ...TD, textAlign: "left", fontWeight: 600 }}>{card.studentName}</th>
                     <td data-label="Versión" style={TD}>{`v${card.version}`}</td>
-                    <td data-label="Promedio general" style={{ ...TD, fontFamily: "var(--font-display)", fontWeight: 700 }}>{average(card.generalAverage)}</td>
+                    <td data-label="Promedio general" style={{ ...TD, fontFamily: "var(--font-display)", fontWeight: 700 }}>{reportCardHasGrades(card) ? average(card.generalAverage) : <span style={{ fontFamily: "var(--font-ui)", fontWeight: 400, color: "var(--text-muted)" }}>{NO_GRADES_NOTICE}</span>}</td>
                     <td style={{ ...TD, textAlign: "right" }}>
                       <button type="button" aria-label={`Descargar PDF de ${card.studentName}`} onClick={() => void download(card)}
                         style={{ display: "inline-flex", alignItems: "center", gap: 6, minHeight: 44, padding: "0 14px", borderRadius: "var(--r-pill)", border: "1px solid var(--border)", background: "var(--surface-3)", color: "var(--text)", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>

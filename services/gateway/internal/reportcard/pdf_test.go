@@ -176,3 +176,32 @@ func TestManySubjectsBreakPagesAndRepeatTheHeader(t *testing.T) {
 		assert.Contains(t, text, "Sep 2026", "page %d repeats the month labels", i+1)
 	}
 }
+
+// Owner decision: a pupil with no grade in the term still gets a report card,
+// but it says so in words instead of printing a table of dashes.
+func TestAPupilWithoutGradesGetsASentenceNotADashTable(t *testing.T) {
+	card := sampleCard()
+	card.GeneralAverage = ""
+	for i := range card.Lines {
+		card.Lines[i].MonthValues, card.Lines[i].TermAverage = map[string]string{}, ""
+	}
+	doc, err := reportcard.PDF(reportcard.Document{School: school, Card: card})
+	require.NoError(t, err)
+	text := textOf(t, doc)
+	assert.Contains(t, text, "Sin calificaciones capturadas en este periodo")
+	assert.Contains(t, text, "Camila Zamora Sánchez", "the card is still issued to the pupil")
+	for _, absent := range []string{"Materia", "Promedio general", "Español"} {
+		assert.NotContains(t, text, absent)
+	}
+	assert.Equal(t, 1, strings.Count(text, "—"), "only the title's dash; no dash cells")
+}
+
+func TestHasGrades(t *testing.T) {
+	card := sampleCard()
+	assert.True(t, reportcard.HasGrades(card))
+	card.Lines = []client.ReportCardLine{{SubjectName: "Español", MonthValues: map[string]string{}}}
+	card.GeneralAverage = ""
+	assert.False(t, reportcard.HasGrades(card))
+	card.Lines = nil
+	assert.False(t, reportcard.HasGrades(card), "no subjects, no grades")
+}

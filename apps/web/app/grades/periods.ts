@@ -64,6 +64,20 @@ export interface ReportCard {
   version: number;
   issuedAt: string | null;
   generalAverage: number | null;
+  /**
+   * False when no subject has a grade in the term: the boleta is still issued
+   * and reads NO_GRADES_NOTICE. Absent from older gateways (read from
+   * generalAverage, which is null exactly then).
+   */
+  hasGrades?: boolean;
+}
+
+/** What a boleta without any grade says instead of a table of dashes. */
+export const NO_GRADES_NOTICE = "Sin calificaciones capturadas en este periodo";
+
+/** Whether the boleta has any grade (see ReportCard.hasGrades). */
+export function reportCardHasGrades(card: Pick<ReportCard, "hasGrades" | "generalAverage">): boolean {
+  return card.hasGrades ?? card.generalAverage !== null;
 }
 
 /** A boleta's PDF and the name the server gave it, when the browser may read it. */

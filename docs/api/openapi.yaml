@@ -3612,7 +3612,7 @@ components:
           - { groupId: 4a000000-0000-4000-8000-000000000001, groupLabel: 1° PRIMARIA · A, subjectId: 5a000000-0000-4000-8000-000000000001, subjectName: Matemáticas, teacherName: Gabriela Rojas, missingCount: 18 }
     ReportCardSummary:
       type: object
-      required: [id, termId, termName, studentId, studentName, groupId, groupLabel, version, issuedAt, generalAverage]
+      required: [id, termId, termName, studentId, studentName, groupId, groupLabel, version, issuedAt, generalAverage, hasGrades]
       properties:
         id: { type: string, format: uuid }
         termId: { type: string, format: uuid }
@@ -3627,9 +3627,13 @@ components:
           type: [number, 'null']
           description: One decimal, half-up; null when no subject has a grade.
           example: 8.5
+        hasGrades:
+          type: boolean
+          description: False when no subject has a grade in the term; the card is still issued and consumers show "Sin calificaciones capturadas en este periodo" instead of a table.
+          example: true
     FamilyReportCardSummary:
       type: object
-      required: [id, termId, termName, version, issuedAt, generalAverage]
+      required: [id, termId, termName, version, issuedAt, generalAverage, hasGrades]
       properties:
         id: { type: string, format: uuid }
         termId: { type: string, format: uuid }
@@ -3637,6 +3641,10 @@ components:
         version: { type: integer, minimum: 1, example: 2 }
         issuedAt: { type: [string, 'null'], format: date-time }
         generalAverage: { type: [number, 'null'], example: 8.5 }
+        hasGrades:
+          type: boolean
+          description: False when no subject has a grade in the term; the card is still issued and consumers show "Sin calificaciones capturadas en este periodo" instead of a table.
+          example: true
     ReportCard:
       type: object
       description: >
@@ -3647,7 +3655,7 @@ components:
         general average (the mean of the subjects that have a grade, one
         decimal, half-up). A month without a grade is absent from `months`;
         `average` is null for a subject without grades.
-      required: [id, termId, termName, cycleName, levelName, groupId, groupLabel, studentId, studentName, enrollmentNumber, version, status, issuedAt, months, scale, generalAverage, lines, school]
+      required: [id, termId, termName, cycleName, levelName, groupId, groupLabel, studentId, studentName, enrollmentNumber, version, status, issuedAt, months, scale, generalAverage, hasGrades, lines, school]
       properties:
         id: { type: string, format: uuid }
         termId: { type: string, format: uuid }
@@ -3667,6 +3675,10 @@ components:
           items: { type: string, example: '2026-09' }
         scale: { $ref: '#/components/schemas/GradingScale' }
         generalAverage: { type: [number, 'null'], example: 8.4 }
+        hasGrades:
+          type: boolean
+          description: False when no subject has a grade in the term; the card is still issued and consumers show "Sin calificaciones capturadas en este periodo" instead of a table.
+          example: true
         lines:
           type: array
           items:
@@ -3710,6 +3722,7 @@ components:
         months: ['2026-09', '2026-10', '2026-11']
         scale: { min: 5, max: 10, decimals: 1, passing: 6 }
         generalAverage: 8.4
+        hasGrades: true
         lines:
           - { subjectId: 5a000000-0000-4000-8000-000000000002, subjectName: Español, position: 1, months: { '2026-09': 8, '2026-11': 8.5 }, average: 8.3 }
           - { subjectId: 5a000000-0000-4000-8000-000000000001, subjectName: Matemáticas, position: 2, months: { '2026-09': 8.4, '2026-10': 8.5 }, average: 8.5 }

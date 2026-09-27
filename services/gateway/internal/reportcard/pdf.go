@@ -46,7 +46,9 @@ const (
 	schoolSize        = 16.0
 	lineGap           = 6.0
 	noGrade           = "—"
-	hundredths        = 100
+	// NoGradesNotice replaces the table on a report card with no grade at all.
+	NoGradesNotice = "Sin calificaciones capturadas en este periodo"
+	hundredths     = 100
 )
 
 // spanishMonths names the months as the school writes them.
@@ -99,7 +101,12 @@ func PDF(d Document) ([]byte, error) {
 	w := &writer{pdf: pdf, l: l, y: pageMargin}
 	w.header(d)
 	w.student(d.Card)
-	w.table(d.Card)
+	if HasGrades(d.Card) {
+		w.table(d.Card)
+	} else {
+		w.text(pdffont.Bold, bodySize, NoGradesNotice)
+		w.rule()
+	}
 	w.foot(d.Card)
 	if w.err != nil {
 		return nil, fmt.Errorf("rendering report card %s: %w", d.Card.ID, w.err)
@@ -109,6 +116,26 @@ func PDF(d Document) ([]byte, error) {
 		return nil, fmt.Errorf("writing report card %s: %w", d.Card.ID, err)
 	}
 	return out.Bytes(), nil
+}
+
+// HasGrades reports whether any subject of the card has a grade in the term: a
+// month value or a trimester grade. A card without one is still issued, but
+// says NoGradesNotice instead of a table of dashes.
+func HasGrades(c client.ReportCard) bool {
+	if c.GeneralAverage != "" {
+		return true
+	}
+	for _, l := range c.Lines {
+		if l.TermAverage != "" {
+			return true
+		}
+		for _, v := range l.MonthValues {
+			if v != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Filename is the download name: boleta-<matrícula>-<period>-v<version>.pdf,

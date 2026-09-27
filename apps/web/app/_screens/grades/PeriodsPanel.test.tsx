@@ -201,7 +201,7 @@ describe("PeriodsPanel — Reabrir", () => {
 });
 
 describe("PeriodsPanel — Ver boletas", () => {
-  const BOLETA = { id: "rc1", studentId: "s1", studentName: "José Núñez", groupLabel: "1° PRIMARIA · A", version: 2, issuedAt: "2026-12-01T18:00:00Z", generalAverage: 8.7 };
+  const BOLETA = { id: "rc1", studentId: "s1", studentName: "José Núñez", groupLabel: "1° PRIMARIA · A", version: 2, issuedAt: "2026-12-01T18:00:00Z", generalAverage: 8.7, hasGrades: true };
 
   const openGroup = async (user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> => {
     await user.click(within(await card("PRIMARIA · 2.º trimestre")).getByRole("button", { name: "Ver boletas" }));
@@ -230,6 +230,18 @@ describe("PeriodsPanel — Ver boletas", () => {
 
     await waitFor(() => expect(downloadBlob).toHaveBeenCalledWith(blob, "boleta-2026-00042-2-o-trimestre-v2.pdf"));
     expect(client.reportCardPdf).toHaveBeenCalledWith("rc1");
+  });
+
+  it("a boleta without any grade says so in words instead of a dash (it is still issued)", async () => {
+    const user = userEvent.setup();
+    client.reportCards.mockResolvedValue([{ ...BOLETA, id: "rc2", studentName: "Ana Ruiz", generalAverage: null, hasGrades: false }]);
+    render(<PeriodsPanel canClose />);
+    const dialog = await openGroup(user);
+
+    const row = await within(dialog).findByRole("row", { name: /Ana Ruiz/ });
+    expect(within(row).getByText("Sin calificaciones capturadas en este periodo")).toBeInTheDocument();
+    expect(within(row).queryByText("—")).toBeNull();
+    expect(within(row).getByRole("button", { name: "Descargar PDF de Ana Ruiz" })).toBeInTheDocument();
   });
 
   it("without the server's file name it names the PDF boleta-<alumno>-<periodo>-v<N>.pdf", async () => {

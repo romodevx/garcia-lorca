@@ -53,6 +53,7 @@ type reportCardSummaryResponse struct {
 	Version        int          `json:"version"`
 	IssuedAt       *string      `json:"issuedAt"`
 	GeneralAverage *json.Number `json:"generalAverage"`
+	HasGrades      bool         `json:"hasGrades"`
 }
 
 type familyReportCardSummaryResponse struct {
@@ -62,6 +63,7 @@ type familyReportCardSummaryResponse struct {
 	Version        int          `json:"version"`
 	IssuedAt       *string      `json:"issuedAt"`
 	GeneralAverage *json.Number `json:"generalAverage"`
+	HasGrades      bool         `json:"hasGrades"`
 }
 
 type reportCardLineResponse struct {
@@ -89,6 +91,7 @@ type reportCardResponse struct {
 	Months           []string                 `json:"months"`
 	Scale            gradeScaleResponse       `json:"scale"`
 	GeneralAverage   *json.Number             `json:"generalAverage"`
+	HasGrades        bool                     `json:"hasGrades"`
 	Lines            []reportCardLineResponse `json:"lines"`
 	School           client.SchoolProfile     `json:"school"`
 }
@@ -113,7 +116,7 @@ func (h *ReportCardsHandler) List(w http.ResponseWriter, r *http.Request) {
 		out = append(out, reportCardSummaryResponse{
 			ID: c.ID, TermID: c.TermID, TermName: c.TermName, StudentID: c.StudentID, StudentName: c.StudentName,
 			GroupID: c.GroupID, GroupLabel: c.GroupLabel, Version: c.Version, IssuedAt: rfc3339OrNil(c.IssuedAt),
-			GeneralAverage: numberOrNil(c.GeneralAverage),
+			GeneralAverage: numberOrNil(c.GeneralAverage), HasGrades: summaryHasGrades(c),
 		})
 	}
 	writePrivateJSON(w, map[string][]reportCardSummaryResponse{"reportCards": out})
@@ -191,7 +194,7 @@ func (h *ReportCardsHandler) FamilyList(w http.ResponseWriter, r *http.Request) 
 	for _, c := range cards {
 		out = append(out, familyReportCardSummaryResponse{
 			ID: c.ID, TermID: c.TermID, TermName: c.TermName, Version: c.Version,
-			IssuedAt: rfc3339OrNil(c.IssuedAt), GeneralAverage: numberOrNil(c.GeneralAverage),
+			IssuedAt: rfc3339OrNil(c.IssuedAt), GeneralAverage: numberOrNil(c.GeneralAverage), HasGrades: summaryHasGrades(c),
 		})
 	}
 	writePrivateJSON(w, map[string][]familyReportCardSummaryResponse{"reportCards": out})
@@ -281,7 +284,7 @@ func (h *ReportCardsHandler) serveJSON(w http.ResponseWriter, r *http.Request, c
 		GroupID: c.GroupID, GroupLabel: c.GroupLabel, StudentID: c.StudentID, StudentName: c.StudentName,
 		EnrollmentNumber: c.EnrollmentNumber, Version: c.Version, Status: c.Status, IssuedAt: rfc3339OrNil(c.IssuedAt),
 		Months: nonNilMonths(c.Months), Scale: toGradeScaleResponse(c.Scale), GeneralAverage: numberOrNil(c.GeneralAverage),
-		Lines: lines, School: school,
+		HasGrades: reportcard.HasGrades(c), Lines: lines, School: school,
 	})
 }
 
@@ -309,6 +312,11 @@ func writePrivateJSON(w http.ResponseWriter, body any) {
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, body)
 }
+
+// summaryHasGrades reads a summary, which carries no lines: grades computes the
+// general average over every subject that has a grade, so it is absent exactly
+// when no subject has one.
+func summaryHasGrades(c client.ReportCardSummary) bool { return c.GeneralAverage != "" }
 
 // numberOrNil is exact decimal text as a JSON number, or null for "".
 func numberOrNil(s string) *json.Number {

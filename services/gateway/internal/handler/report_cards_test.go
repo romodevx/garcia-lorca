@@ -101,9 +101,9 @@ func TestDirectorListsTheLatestReportCards(t *testing.T) {
 	assert.Equal(t, client.ReportCardFilter{TermID: pTerm, GroupID: rcGroup}, f.gotFilter)
 	assert.JSONEq(t, `{"reportCards":[
 		{"id":"`+rcID+`","termId":"`+pTerm+`","termName":"1.er trimestre","studentId":"`+rcStudent+`","studentName":"Ana López",
-		 "groupId":"`+rcGroup+`","groupLabel":"1° · A","version":2,"issuedAt":"2026-12-01T10:00:00Z","generalAverage":8.5},
+		 "groupId":"`+rcGroup+`","groupLabel":"1° · A","version":2,"issuedAt":"2026-12-01T10:00:00Z","generalAverage":8.5,"hasGrades":true},
 		{"id":"rc-2","termId":"","termName":"","studentId":"stu-2","studentName":"Beto","groupId":"","groupLabel":"","version":1,
-		 "issuedAt":"2026-12-01T10:00:00Z","generalAverage":null}
+		 "issuedAt":"2026-12-01T10:00:00Z","generalAverage":null,"hasGrades":false}
 	]}`, rec.Body.String())
 	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
 
@@ -127,7 +127,7 @@ func TestDirectorReadsAReportCard(t *testing.T) {
 		"id":"`+rcID+`","termId":"`+pTerm+`","termName":"1.er trimestre","cycleName":"2026-2027","levelName":"Primaria",
 		"groupId":"`+rcGroup+`","groupLabel":"1° · A","studentId":"`+rcStudent+`","studentName":"Ana López","enrollmentNumber":"2026-00001",
 		"version":2,"status":"published","issuedAt":"2026-12-01T10:00:00Z","months":["2026-09","2026-10"],
-		"scale":{"min":5,"max":10,"decimals":1,"passing":6},"generalAverage":8.5,
+		"scale":{"min":5,"max":10,"decimals":1,"passing":6},"generalAverage":8.5,"hasGrades":true,
 		"lines":[
 			{"subjectId":"sub-1","subjectName":"Matemáticas","position":1,"months":{"2026-09":8.4,"2026-10":8.5},"average":8.5},
 			{"subjectId":"sub-2","subjectName":"Artes","position":2,"months":{},"average":null}
@@ -167,7 +167,7 @@ func TestFamilyListsOwnChildsReportCards(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.Equal(t, client.ReportCardFilter{StudentID: rcStudent}, f.gotFilter)
 	assert.JSONEq(t, `{"reportCards":[{"id":"`+rcID+`","termId":"`+pTerm+`","termName":"1.er trimestre","version":2,
-		"issuedAt":"2026-12-01T10:00:00Z","generalAverage":8.5}]}`, rec.Body.String())
+		"issuedAt":"2026-12-01T10:00:00Z","generalAverage":8.5,"hasGrades":true}]}`, rec.Body.String())
 }
 
 // Another family's child is 404 on every family route, and grades is never asked.
