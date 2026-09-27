@@ -153,7 +153,7 @@ describe("GradingControl", () => {
 
   describe("the scale save and the toggle share one queue", () => {
     const disabled: Level = { ...primaria, grading: { enabled: false, min: 5, max: 10, decimals: 1, passing: 6 } };
-    const held = (): { save: ReturnType<typeof vi.fn>; release: () => void } => {
+    const held = () => {
       let release!: () => void;
       const save = vi.fn().mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; })).mockResolvedValue(undefined);
       return { save, release: () => release() };
