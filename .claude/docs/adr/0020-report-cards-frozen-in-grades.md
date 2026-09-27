@@ -39,17 +39,36 @@
 
 - Only `grades:close` (owner-only) closes or reopens. Before closing, the
   progress says what is expected — active enrollments of the level's groups ×
-  subjects taught in each group × the term's months up to the current UTC
-  month — and what is missing per group and subject, with the teacher.
+  subjects taught in each group × EVERY month of the term, reached or not,
+  from the month each pupil joined their group (enrolment date, or the latest
+  transfer into it; earlier months are not expected) — and what is missing per
+  group and subject, with the teacher. So closing a term whose last month has
+  not ended reports those months missing and needs `force`; the progress lists
+  them as `unfinishedMonths` (after the current UTC month) so the screen warns
+  "Aún no terminan sus meses".
+- Report cards are issued only for ACTIVE enrollments. A withdrawn pupil gets
+  none and is not expected in the progress.
 - Missing captures refuse the close with 409 `MISSING_GRADES` "Faltan N
   calificaciones por capturar" unless `force: true`. Other refusals (409):
   `TERM_WITHOUT_MONTHS`, `ALREADY_CLOSED`, `LEVEL_NOT_GRADED`, `ALREADY_OPEN`.
 - Closed means NOBODY writes a grade of the term's months — teacher or
   director: 409 `MONTH_LOCKED` "El periodo está cerrado". The sheet lists those
-  months in `closedMonths` and marks them read-only.
+  months in `closedMonths` and marks them read-only. The legacy per-term
+  capture (`CaptureGrade`, grade_entries) honours the same lock.
+- The close SNAPSHOTS the term's months (`period_closures.months`, migration
+  `grades/0004`). A closed term locks the UNION of that snapshot and its
+  current config mapping, so moving a month out of (or into) a closed term in
+  config never unlocks it. The gateway also refuses to change a closed term's
+  months — PUT `/config/terms/{id}/months` and `copy-months` ask grades
+  (`ClosedTerms`) first and answer 409 `TERM_CLOSED` "El periodo está cerrado;
+  reábrelo para cambiar sus meses".
+- A term covers at most six months (config, 400 `TERM_TOO_LONG`): the PDF
+  prints one column per month, landscape above four.
 - Reopening keeps the report cards published. Closing again issues version
-  `closure.version + 1` for every active enrollment and marks the enrollment's
-  previous published card `superseded` (a partial unique index keeps one
+  `closure.version + 1` for every active enrollment and marks EVERY published
+  card of the term `superseded` first — including the card of a pupil
+  withdrawn between the two closes, who gets no new version: a re-close
+  replaces the term's report cards as a whole (a partial unique index keeps one
   published card per enrollment and term). Families see only the published
   one; a superseded card is 404 on the family routes.
 
@@ -64,17 +83,23 @@ EXCLUSIVE and reads the grades under it. The lock needs no row, so a term never
 closed is covered too. An integration test proves a write that arrives during a
 close waits and is refused.
 
-### Once a level maps months, only those months exist
+### Unmapped months stay capturable (revised)
 
-When a level has any month mapped to a term, the monthly sheet lists (and a
-write accepts) only mapped months; a level without mappings keeps every month
-of the cycle, as before T7.
+The first cut hid months no term maps. Reversed: the monthly sheet lists every
+month of the cycle again and an unmapped month stays capturable; the sheet
+names them in `unmappedMonths` so the screen marks them "Sin periodo" (no
+report card prints them). Only a closed term's months lock.
 
 ### Notification and PDF
 
-- After the commit, grades publishes `GradesPublished` per report card on
-  `grades-events` (best-effort and logged, like the other publishers: the cards
-  are already committed, so a failed publish never fails the close).
+- `GradesPublished` (one per report card, on `grades-events`) rides a
+  transactional OUTBOX (`grades_outbox`, migration `grades/0005`, RLS like
+  `finance_outbox`): the events are written in the close's own transaction,
+  drained right after the commit on a detached, 2-second-bounded context, and
+  swept every 30 s. A refused publish counts the attempt and backs off (30 s,
+  doubling, capped at 30 min); rows are taken `FOR UPDATE SKIP LOCKED`.
+  Delivery is at least once — comms dedupes on report card id + version. A
+  broker outage delays a notification, never loses it or fails the close.
 - comms consumes it (subscription `comms-grades-events`), keyed
   `GradesPublished:<report_card_id>:<version>`: v1 "La boleta del <periodo> de
   <Nombre> ya está disponible."; v>1 "Boleta actualizada: <periodo> de
@@ -87,15 +112,12 @@ of the cycle, as before T7.
 
 - The school day is the UTC day (see the `school-day-is-utc-day` note): the
   "months up to the current month" cut and the issue date follow UTC.
-- A best-effort publish can lose a notification if the broker is down at
-  close time; the report card itself is durable and visible in the app. An
-  outbox (as finance has) is the upgrade path if that proves to matter.
 - Closing reads every grade of the level in one query and names pupils in
   pages of 200: a level of a few hundred pupils is a handful of calls.
 
 ## Deploy order
 
-**config → students → grades (migration 0003) → comms → gateway.**
+**config → students → grades (migrations 0003–0005) → comms → gateway.**
 Infrastructure: the `grades-events` topic, its DLQ and the
 `comms-grades-events` push subscription must be added to
 `deploy/terraform/pubsub.tf`, and the grades service needs the Pub/Sub
