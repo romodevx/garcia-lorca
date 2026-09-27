@@ -149,3 +149,19 @@ func TestCORSExposesTheErrorCodeHeader(t *testing.T) {
 		t.Errorf("Expose-Headers = %q, want it to include X-Error-Code", got)
 	}
 }
+
+// The web names the downloaded report-card PDF from Content-Disposition, which
+// is not CORS-safelisted: without exposing it, a cross-origin read sees null.
+func TestCORSExposesContentDisposition(t *testing.T) {
+	var ran bool
+	h := middleware.CORS([]string{"http://localhost:3002"})(okHandler(&ran))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/grades/report-cards/x/pdf", nil)
+	req.Header.Set("Origin", "http://localhost:3002")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Access-Control-Expose-Headers"); !strings.Contains(got, "Content-Disposition") {
+		t.Errorf("Expose-Headers = %q, want it to include Content-Disposition", got)
+	}
+}
