@@ -72,7 +72,7 @@ describe("GradesScreen (monthly grades)", () => {
     mockGateway({ s1: { status: 200, subjects: [subject("Matemáticas", { "2026-08": 8, "2026-09": 9.5 })] } });
     await render();
 
-    await waitFor(() => expect(screen.getByLabelText("Matemáticas: 9.5")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("Matemáticas, septiembre: 9.5")).toBeTruthy());
     expect(selectedChip()).toBe("Septiembre 2026");
   });
 
@@ -87,11 +87,11 @@ describe("GradesScreen (monthly grades)", () => {
   it("switches month when a chip is pressed", async () => {
     mockGateway({ s1: { status: 200, subjects: [subject("Matemáticas", { "2026-08": 8, "2026-09": 9.5 })] } });
     await render();
-    await waitFor(() => expect(screen.getByLabelText("Matemáticas: 9.5")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("Matemáticas, septiembre: 9.5")).toBeTruthy());
 
     await fireEvent.press(screen.getByRole("button", { name: "Agosto 2026" }));
 
-    expect(screen.getByLabelText("Matemáticas: 8")).toBeTruthy();
+    expect(screen.getByLabelText("Matemáticas, agosto: 8")).toBeTruthy();
     expect(selectedChip()).toBe("Agosto 2026");
   });
 
@@ -110,7 +110,7 @@ describe("GradesScreen (monthly grades)", () => {
     await render();
 
     await waitFor(() => expect(screen.getByText("Reprobada")).toBeTruthy());
-    expect(screen.getByLabelText("Historia: 5, Reprobada")).toBeTruthy();
+    expect(screen.getByLabelText("Historia, septiembre: 5, reprobada")).toBeTruthy();
     expect(screen.getByText(/Aprobatoria: 6/)).toBeTruthy();
   });
 
@@ -138,7 +138,7 @@ describe("GradesScreen (monthly grades)", () => {
     mockGateway({ s1: { status: 200, gradingEnabled: false, scale: null, subjects: [subject("Matemáticas", { "2026-09": 5.25 })] } });
     await render();
 
-    await waitFor(() => expect(screen.getByLabelText("Matemáticas: 5.25")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("Matemáticas, septiembre: 5.25")).toBeTruthy());
     expect(screen.queryByText("Próximamente")).toBeNull();
     expect(screen.queryByText(/Aprobatoria/)).toBeNull();
     expect(screen.queryByText("Reprobada")).toBeNull();
@@ -149,7 +149,7 @@ describe("GradesScreen (monthly grades)", () => {
     mockGateway({ s1: { status: 200, gradingEnabled: false, scale: null, subjects: [subject("Lenguaje", { "2026-09": 9 })] } }, [kinder]);
     await render();
 
-    await waitFor(() => expect(screen.getByLabelText("Lenguaje: 9")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("Lenguaje, septiembre: 9")).toBeTruthy());
     expect(screen.queryByText("Próximamente")).toBeNull();
   });
 
@@ -157,7 +157,7 @@ describe("GradesScreen (monthly grades)", () => {
     mockGateway({ s1: { status: 200, gradingEnabled: false, scale: { min: 0, max: 0, decimals: 0, passing: 0 }, subjects: [subject("Arte", { "2026-09": 3 })] } });
     await render();
 
-    await waitFor(() => expect(screen.getByLabelText("Arte: 3")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("Arte, septiembre: 3")).toBeTruthy());
     expect(screen.queryByText(/Aprobatoria/)).toBeNull();
   });
 
@@ -180,7 +180,7 @@ describe("GradesScreen (monthly grades)", () => {
     fail = false;
     await fireEvent.press(screen.getByRole("button", { name: "Reintentar" }));
 
-    await waitFor(() => expect(screen.getByLabelText("Matemáticas: 9.5")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("Matemáticas, septiembre: 9.5")).toBeTruthy());
     expect(gradeCalls(fetchMock)).toBe(before + 1);
   });
 
@@ -192,11 +192,29 @@ describe("GradesScreen (monthly grades)", () => {
         <GradesScreen currentMonth="2026-10" />
       </>,
     );
-    await waitFor(() => expect(screen.getByLabelText("Matemáticas: 9.5")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("Matemáticas, septiembre: 9.5")).toBeTruthy());
 
     await fireEvent.press(screen.getByText("pick s2"));
 
     await waitFor(() => expect(screen.queryByText("Matemáticas")).toBeNull());
+  });
+
+  it("opens a subject's sheet with its grade for every month of the cycle", async () => {
+    mockGateway({
+      s1: { status: 200, subjects: [subject("Matemáticas", { "2026-08": 8, "2026-09": 5 }), subject("Inglés", { "2026-09": 9 })] },
+    });
+    await render();
+    await waitFor(() => expect(screen.getByLabelText("Matemáticas, septiembre: 5, reprobada")).toBeTruthy());
+    expect(screen.queryByLabelText("Matemáticas, agosto: 8")).toBeNull();
+
+    await fireEvent.press(screen.getByLabelText("Matemáticas, septiembre: 5, reprobada"));
+
+    expect(screen.getByLabelText("Matemáticas, agosto: 8")).toBeTruthy();
+    expect(screen.getAllByLabelText("Matemáticas, septiembre: 5, reprobada").length).toBe(2);
+    expect(screen.getByLabelText("Matemáticas, octubre: sin calificación aún")).toBeTruthy();
+    expect(screen.getByText("—")).toBeTruthy();
+    expect(screen.getByLabelText("Promedio del ciclo: 6.5")).toBeTruthy();
+    expect(screen.queryByLabelText(/Inglés, agosto/)).toBeNull();
   });
 
   it("reloads when the app comes back to the foreground", async () => {

@@ -81,7 +81,7 @@ export function GradesScreen({ currentMonth }: GradesScreenProps): ReactElement 
             selected={month}
             onSelect={(m) => setPicked({ childId: selectedChildId, month: m })}
           />
-          <MonthGrades subjects={data.subjects} month={month} scale={data.scale} />
+          <MonthGrades subjects={data.subjects} month={month} months={data.months} scale={data.scale} />
         </>
       )}
     </>

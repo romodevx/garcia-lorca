@@ -63,3 +63,28 @@ export function monthAverage(subjects: MonthlySubject[], month: string): number 
 export function shortMonthLabel(month: string): string {
   return monthLabel(month).slice(0, SHORT_LABEL_LENGTH);
 }
+
+/** "2026-09" → "septiembre": the month as it is read aloud, no year. */
+export function monthName(month: string): string {
+  return monthLabel(month).split(" ")[0]?.toLowerCase() ?? month;
+}
+
+const NO_GRADE_SPOKEN = "sin calificación aún";
+const FAILED_SPOKEN = "reprobada";
+
+/**
+ * What a screen reader says for one subject in one month:
+ * "Matemáticas, septiembre: 9.5, reprobada". Failing is said in words.
+ */
+export function gradeLabel(subjectName: string, month: string, value: number | undefined, scale: GradeScale | null): string {
+  const head = `${subjectName}, ${monthName(month)}`;
+  if (value === undefined) {
+    return `${head}: ${NO_GRADE_SPOKEN}`;
+  }
+  return `${head}: ${formatGrade(value)}${isFailing(value, scale) ? `, ${FAILED_SPOKEN}` : ""}`;
+}
+
+/** Mean of every captured month of one subject, half-up to one decimal; null with none. */
+export function subjectAverage(subject: MonthlySubject): number | null {
+  return averageHalfUp(Object.values(subject.grades)) ?? null;
+}

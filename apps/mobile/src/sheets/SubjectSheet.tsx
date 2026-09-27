@@ -1,77 +1,96 @@
 import { type ReactElement } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import type { NumericSubject } from "../data/mock";
-import { useTheme, type ThemeColors } from "../theme";
-import { BottomSheet, Button, ProgressBar, TintIcon } from "../ui";
+import type { GradeScale, MonthlySubject } from "../api/grades";
+import { monthLabel } from "../screens/attendanceView";
+import { formatAverage, formatGrade, gradeLabel, isFailing, subjectAverage } from "../screens/gradesView";
+import { useTheme } from "../theme";
+import { BottomSheet, Button } from "../ui";
 
 export interface SubjectSheetProps {
   visible: boolean;
-  subject: NumericSubject | null;
+  subject: MonthlySubject | null;
+  /** Every month of the cycle, oldest first. */
+  months: string[];
+  scale: GradeScale | null;
   onClose: () => void;
 }
 
-function gradeColors(colors: ThemeColors, g: number): { bg: string; fg: string } {
-  if (g >= 9) return { bg: colors.okBg, fg: colors.ok };
-  if (g >= 8) return { bg: colors.primarySoft, fg: colors.primaryInk };
-  if (g >= 7) return { bg: colors.warnBg, fg: colors.warn };
-  return { bg: colors.badBg, fg: colors.bad };
-}
+const MISSING = "—";
+const FAILED = "Reprobada";
 
-function fmt(n: number): string {
-  return n === 10 ? "10" : n.toFixed(1);
-}
-
-/** Subject detail sheet: per-parcial breakdown with bars + period average. */
-export function SubjectSheet({ visible, subject, onClose }: SubjectSheetProps): ReactElement | null {
+/**
+ * One subject across the whole cycle: its average on top, then each month with
+ * its grade ("—" when not captured). A failing grade says "Reprobada" in words
+ * as well as in colour.
+ */
+export function SubjectSheet({ visible, subject, months, scale, onClose }: SubjectSheetProps): ReactElement {
   const theme = useTheme();
   if (subject === null) {
     return <BottomSheet visible={visible} onClose={onClose} />;
   }
-  const badge = gradeColors(theme.colors, subject.grade);
+  const name = subject.subjectName || "Materia sin nombre";
+  const average = subjectAverage(subject);
+  const averageText = average === null ? MISSING : formatAverage(average);
 
   return (
     <BottomSheet visible={visible} onClose={onClose}>
-      <View style={styles.head}>
-        <TintIcon name={subject.icon} tint={subject.tint} size={50} icon={26} />
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.title, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{subject.name}</Text>
-          <Text style={[styles.sub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>Promedio del periodo</Text>
-        </View>
-        <View style={[styles.gradeBadge, { backgroundColor: badge.bg }]}>
-          <Text style={[styles.gradeText, { color: badge.fg, fontFamily: theme.fonts.uiExtra }]}>{fmt(subject.grade)}</Text>
-        </View>
+      <Text accessibilityRole="header" style={[styles.title, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>
+        {name}
+      </Text>
+      <View
+        accessible
+        accessibilityLabel={`Promedio del ciclo: ${average === null ? "sin calificaciones aún" : averageText}`}
+        style={styles.averageRow}
+      >
+        <Text style={[styles.averageLabel, { color: theme.colors.text2, fontFamily: theme.fonts.uiSemi }]}>Promedio del ciclo</Text>
+        <Text style={[styles.averageValue, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{averageText}</Text>
       </View>
 
-      <Text style={[styles.section, { color: theme.colors.text3, fontFamily: theme.fonts.uiExtra }]}>POR PARCIAL</Text>
-
       <View style={[styles.card, { backgroundColor: theme.colors.surface, borderColor: theme.colors.line }]}>
-        {subject.terms.map((t, i) => {
-          const fill = t >= 9 ? theme.colors.ok : t >= 8 ? theme.palette.lime : theme.colors.warn;
+        {months.map((month, i) => {
+          const value = subject.grades[month];
+          const failed = value !== undefined && isFailing(value, scale);
           return (
-            <View key={i} style={[styles.termRow, i > 0 ? { borderTopColor: theme.colors.line, borderTopWidth: StyleSheet.hairlineWidth } : null]}>
-              <Text style={[styles.termLabel, { color: theme.colors.text, fontFamily: theme.fonts.ui }]}>{i + 1}.er parcial</Text>
-              <ProgressBar pct={t / 10} color={fill} style={styles.bar} />
-              <Text style={[styles.termGrade, { color: theme.colors.text, fontFamily: theme.fonts.display }]}>{fmt(t)}</Text>
+            <View
+              key={month}
+              accessible
+              accessibilityLabel={gradeLabel(name, month, value, scale)}
+              style={[styles.row, i > 0 ? { borderTopColor: theme.colors.line, borderTopWidth: StyleSheet.hairlineWidth } : null]}
+            >
+              <View style={styles.monthText}>
+                <Text style={[styles.month, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{monthLabel(month)}</Text>
+                {failed ? <Text style={[styles.failed, { color: theme.colors.bad, fontFamily: theme.fonts.uiExtra }]}>{FAILED}</Text> : null}
+              </View>
+              <Text
+                style={[
+                  styles.grade,
+                  { color: failed ? theme.colors.bad : value === undefined ? theme.colors.text3 : theme.colors.text, fontFamily: theme.fonts.uiExtra },
+                ]}
+              >
+                {value === undefined ? MISSING : formatGrade(value)}
+              </Text>
             </View>
           );
         })}
       </View>
 
-      <Button label="Cerrar" variant="ghost" onPress={onClose} style={{ marginTop: 18 }} />
+      <Button label="Cerrar" variant="ghost" onPress={onClose} style={styles.close} />
     </BottomSheet>
   );
 }
 
+const MIN_TOUCH_TARGET = 44;
+
 const styles = StyleSheet.create({
-  head: { flexDirection: "row", alignItems: "center", gap: 13, marginBottom: 6 },
-  title: { fontSize: 19, fontWeight: "800", letterSpacing: -0.3 },
-  sub: { fontSize: 13, fontWeight: "600", marginTop: 2 },
-  gradeBadge: { minWidth: 56, height: 56, borderRadius: 28, alignItems: "center", justifyContent: "center", paddingHorizontal: 8 },
-  gradeText: { fontSize: 24, fontWeight: "800" },
-  section: { fontSize: 12.5, fontWeight: "800", letterSpacing: 0.4, marginTop: 14, marginBottom: 6 },
+  title: { fontSize: 21, fontWeight: "800" },
+  averageRow: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", marginTop: 8, marginBottom: 12 },
+  averageLabel: { fontSize: 16, fontWeight: "600" },
+  averageValue: { fontSize: 28, fontWeight: "800" },
   card: { borderWidth: 1, borderRadius: 20, overflow: "hidden" },
-  termRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 14, paddingHorizontal: 16 },
-  termLabel: { fontSize: 15, fontWeight: "700", flex: 1 },
-  bar: { flex: 1, maxWidth: 120 },
-  termGrade: { fontSize: 16, fontWeight: "700", minWidth: 36, textAlign: "right" },
+  row: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: MIN_TOUCH_TARGET + 8, paddingVertical: 12, paddingHorizontal: 16 },
+  monthText: { flex: 1 },
+  month: { fontSize: 17, fontWeight: "800" },
+  failed: { fontSize: 15, fontWeight: "800", marginTop: 2 },
+  grade: { fontSize: 22, fontWeight: "800" },
+  close: { marginTop: 18 },
 });

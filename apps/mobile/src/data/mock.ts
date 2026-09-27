@@ -13,15 +13,6 @@ import type { TintName } from "../theme";
 
 export type ChipKind = "ok" | "warn" | "bad" | "neutral" | "lime" | "purple";
 
-/** Kept for the subject-detail sheet's prop shape (see sheets/SubjectSheet). */
-export interface NumericSubject {
-  name: string;
-  grade: number;
-  icon: IconName;
-  tint: TintName;
-  terms: number[];
-}
-
 export interface SchoolEvent {
   day: string;
   mon: string;

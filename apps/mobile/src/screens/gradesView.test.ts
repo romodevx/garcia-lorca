@@ -1,5 +1,5 @@
 import type { MonthlyGrades } from "../api/grades";
-import { defaultMonth, formatAverage, formatGrade, isFailing, monthAverage, shortMonthLabel } from "./gradesView";
+import { defaultMonth, formatAverage, formatGrade, gradeLabel, isFailing, monthAverage, monthName, shortMonthLabel, subjectAverage } from "./gradesView";
 
 const scale = { min: 5, max: 10, decimals: 1, passing: 6 };
 
@@ -70,5 +70,26 @@ describe("monthAverage", () => {
 describe("shortMonthLabel", () => {
   it("abbreviates the month name", () => {
     expect(shortMonthLabel("2026-09")).toBe("Sep");
+  });
+});
+
+describe("monthName", () => {
+  it("is the lowercase month without the year, as it is read aloud", () => {
+    expect(monthName("2026-09")).toBe("septiembre");
+  });
+});
+
+describe("gradeLabel", () => {
+  it("reads subject, month and grade, and says reprobada in words", () => {
+    expect(gradeLabel("Matemáticas", "2026-09", 9.5, scale)).toBe("Matemáticas, septiembre: 9.5");
+    expect(gradeLabel("Historia", "2026-09", 5, scale)).toBe("Historia, septiembre: 5, reprobada");
+    expect(gradeLabel("Inglés", "2026-10", undefined, scale)).toBe("Inglés, octubre: sin calificación aún");
+  });
+});
+
+describe("subjectAverage", () => {
+  it("averages every captured month of one subject, null with none", () => {
+    expect(subjectAverage({ subjectId: "m", subjectName: "M", grades: { "2026-08": 8, "2026-09": 5 } })).toBe(6.5);
+    expect(subjectAverage({ subjectId: "m", subjectName: "M", grades: {} })).toBeNull();
   });
 });
