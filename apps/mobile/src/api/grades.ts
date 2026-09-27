@@ -42,7 +42,7 @@ export interface MonthlyGrades {
 const DEFAULT_SCALE: GradeScale = { min: 0, max: 10, decimals: 1, passing: 6 };
 
 /** The wire scale, or null when absent or empty (max not above min: nothing to judge by). */
-function normalizeScale(scale: Partial<GradeScale> | null | undefined): GradeScale | null {
+export function normalizeScale(scale: Partial<GradeScale> | null | undefined): GradeScale | null {
   if (scale === null || scale === undefined) return null;
   const full = { ...DEFAULT_SCALE, ...scale };
   return full.max > full.min ? full : null;
