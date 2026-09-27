@@ -58,6 +58,11 @@ service GradesService {
   // GetEnrollmentMonthlyGrades is one enrollment's monthly grades for its
   // cycle: the months, the scale, the group's subjects and every captured grade.
   rpc GetEnrollmentMonthlyGrades(GetEnrollmentMonthlyGradesRequest) returns (GetEnrollmentMonthlyGradesResponse);
+  // CountScaleViolations counts the monthly grades already captured in the
+  // level's ACTIVE cycle that a proposed scale would refuse (out of range or
+  // too many decimals; with grading disabled, every grade counts). Loosening a
+  // scale can never produce a violation. No active cycle counts 0.
+  rpc CountScaleViolations(CountScaleViolationsRequest) returns (CountScaleViolationsResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -154,6 +159,10 @@ message UpsertMonthlyGradeRequest {
   string enrollment_id = 3;
   string value = 4;          // decimal text, e.g. "9.5"
   string captured_by = 5;    // the authenticated user id (audit)
+  // school_wide is set by the director's routes: the caller acts for the whole
+  // school, so months that belong to a transferred pupil's previous group stay
+  // writable. Unset (a teacher) = those months are read-only.
+  bool school_wide = 6;
 }
 
 message UpsertMonthlyGradeResponse {
@@ -164,6 +173,7 @@ message ClearMonthlyGradeRequest {
   string assignment_id = 1;
   string month = 2;
   string enrollment_id = 3;
+  bool school_wide = 4;      // see UpsertMonthlyGradeRequest.school_wide
 }
 
 message ClearMonthlyGradeResponse {}
@@ -172,6 +182,7 @@ message GetMonthlySheetRequest {
   string assignment_id = 1;
   // month "YYYY-MM"; empty = the current UTC month clamped into the cycle.
   string month = 2;
+  bool school_wide = 3;      // see UpsertMonthlyGradeRequest.school_wide
 }
 
 // MonthlySheetRow is one active enrollment of the group; value is "" when no
@@ -181,6 +192,11 @@ message MonthlySheetRow {
   string student_id = 2;
   string value = 3;
   google.protobuf.Timestamp updated_at = 4;
+  // editable is false when THIS row's month cannot be written by the caller
+  // (a month before the pupil joined the group by transfer); read_only_reason
+  // then says why. The sheet-level editable still gates every row.
+  bool editable = 5;
+  string read_only_reason = 6;
 }
 
 message GetMonthlySheetResponse {
@@ -207,6 +223,18 @@ message GetEnrollmentMonthlyGradesResponse {
   // subject_ids are the group's subjects plus any subject already graded.
   repeated string subject_ids = 6;
   repeated MonthlyGrade grades = 7;
+}
+
+message CountScaleViolationsRequest {
+  string level_id = 1;
+  // grading_enabled=false means "disable numeric grading": every captured
+  // grade of the cycle is a violation.
+  bool grading_enabled = 2;
+  GradingScale scale = 3;
+}
+
+message CountScaleViolationsResponse {
+  int32 violations = 1;
 }
 
 // --- Domain events (published) --------------------------------------------

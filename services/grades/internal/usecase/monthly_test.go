@@ -27,12 +27,37 @@ const (
 
 // fakeCatalog resolves groups to levels, cycles and a group's assignments.
 type fakeCatalog struct {
-	levelByGroup map[string]ports.LevelRef
-	cycles       map[string]ports.CycleRef
-	assignments  []ports.AssignmentRef
+	levelByGroup  map[string]ports.LevelRef
+	cycles        map[string]ports.CycleRef
+	assignments   []ports.AssignmentRef
+	scaleErr      error // LevelOfGroup fails with it (a level whose scale is unusable)
+	activeCycle   *ports.CycleRef
+	groupsByLevel map[string][]string
+}
+
+func (f *fakeCatalog) LevelIDOfGroup(_ context.Context, groupID string) (string, error) {
+	l, ok := f.levelByGroup[groupID]
+	if !ok {
+		return "", glerrors.ErrNotFound
+	}
+	return l.ID, nil
+}
+
+func (f *fakeCatalog) ActiveCycle(_ context.Context) (ports.CycleRef, bool, error) {
+	if f.activeCycle == nil {
+		return ports.CycleRef{}, false, nil
+	}
+	return *f.activeCycle, true, nil
+}
+
+func (f *fakeCatalog) GroupsOfLevel(_ context.Context, _, levelID string) ([]string, error) {
+	return f.groupsByLevel[levelID], nil
 }
 
 func (f *fakeCatalog) LevelOfGroup(_ context.Context, groupID string) (ports.LevelRef, error) {
+	if f.scaleErr != nil {
+		return ports.LevelRef{}, f.scaleErr
+	}
 	l, ok := f.levelByGroup[groupID]
 	if !ok {
 		return ports.LevelRef{}, glerrors.ErrNotFound
@@ -120,6 +145,20 @@ func (f *fakeMonthly) MonthlyGradesForSheet(_ context.Context, ids []string, sub
 		}
 	}
 	return out, nil
+}
+
+func (f *fakeMonthly) CountScaleViolations(_ context.Context, ids []string, check ports.ScaleCheck) (int, error) {
+	in := map[string]bool{}
+	for _, id := range ids {
+		in[id] = true
+	}
+	n := 0
+	for _, g := range f.rows {
+		if in[g.EnrollmentID()] && (!check.GradingEnabled || !check.Scale.Admits(g.Value())) {
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (f *fakeMonthly) MonthlyGradesForEnrollment(_ context.Context, enrollment string) ([]domain.MonthlyGrade, error) {
@@ -229,9 +268,9 @@ func TestClearMonthlyGrade(t *testing.T) {
 	_, err := f.svc.Upsert(context.Background(), upsertInput("2026-09", enrollmentID, "9"))
 	require.NoError(t, err)
 
-	require.NoError(t, f.svc.Clear(context.Background(), assignmentID, "2026-09", enrollmentID))
+	require.NoError(t, f.svc.Clear(context.Background(), usecase.ScopeTeacher, assignmentID, "2026-09", enrollmentID))
 	assert.Empty(t, f.repo.rows)
-	require.NoError(t, f.svc.Clear(context.Background(), assignmentID, "2026-09", enrollmentID), "clearing an empty cell succeeds")
+	require.NoError(t, f.svc.Clear(context.Background(), usecase.ScopeTeacher, assignmentID, "2026-09", enrollmentID), "clearing an empty cell succeeds")
 
 	tests := []struct {
 		name, asg, month, enrollment string
@@ -245,7 +284,7 @@ func TestClearMonthlyGrade(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newMonthlyFixture(t)
-			err := f.svc.Clear(context.Background(), tt.asg, tt.month, tt.enrollment)
+			err := f.svc.Clear(context.Background(), usecase.ScopeTeacher, tt.asg, tt.month, tt.enrollment)
 			assert.Equal(t, tt.wantKind, glerrors.KindOf(err), "err = %v", err)
 			assert.Empty(t, f.repo.deleted, "a refused clear must not reach the store")
 		})
@@ -259,7 +298,7 @@ func TestMonthlySheet(t *testing.T) {
 	_, err := f.svc.Upsert(context.Background(), upsertInput("2026-10", "enr-2", "7.5"))
 	require.NoError(t, err)
 
-	sheet, err := f.svc.Sheet(context.Background(), assignmentID, "")
+	sheet, err := f.svc.Sheet(context.Background(), usecase.ScopeTeacher, assignmentID, "")
 	require.NoError(t, err)
 	assert.Equal(t, "2026-10", sheet.Month.String(), "month omitted ⇒ the current UTC month")
 	require.Len(t, sheet.Months, 12)
@@ -278,7 +317,7 @@ func TestMonthlySheet(t *testing.T) {
 	assert.Equal(t, "7.5", byEnrollment["enr-2"].Value.String())
 	assert.Equal(t, "stu-2", byEnrollment["enr-2"].StudentID)
 
-	other, err := f.svc.Sheet(context.Background(), assignmentID, "2026-09")
+	other, err := f.svc.Sheet(context.Background(), usecase.ScopeTeacher, assignmentID, "2026-09")
 	require.NoError(t, err)
 	assert.False(t, other.Rows[0].HasValue || other.Rows[1].HasValue, "another month has its own cells")
 }
@@ -286,23 +325,23 @@ func TestMonthlySheet(t *testing.T) {
 func TestMonthlySheetClampsAndRefuses(t *testing.T) {
 	f := newMonthlyFixture(t)
 	f.catalog.cycles[cycleID] = ports.CycleRef{ID: cycleID, StartsOn: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC), EndsOn: time.Date(2027, 6, 30, 0, 0, 0, 0, time.UTC)}
-	sheet, err := f.svc.Sheet(context.Background(), assignmentID, "")
+	sheet, err := f.svc.Sheet(context.Background(), usecase.ScopeTeacher, assignmentID, "")
 	require.NoError(t, err)
 	assert.Equal(t, "2027-01", sheet.Month.String(), "before the cycle ⇒ its first month")
 
-	_, err = f.svc.Sheet(context.Background(), assignmentID, "2026-12")
+	_, err = f.svc.Sheet(context.Background(), usecase.ScopeTeacher, assignmentID, "2026-12")
 	assert.Equal(t, "Ese mes no pertenece al ciclo", glerrors.SafeMessage(err))
-	_, err = f.svc.Sheet(context.Background(), "nope", "")
+	_, err = f.svc.Sheet(context.Background(), usecase.ScopeTeacher, "nope", "")
 	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err))
 
 	f.catalog.cycles[cycleID] = ports.CycleRef{ID: cycleID}
-	_, err = f.svc.Sheet(context.Background(), assignmentID, "")
+	_, err = f.svc.Sheet(context.Background(), usecase.ScopeTeacher, assignmentID, "")
 	assert.Equal(t, "El ciclo escolar no tiene fechas de inicio y fin", glerrors.SafeMessage(err))
 }
 
 func TestMonthlySheetPreescolarIsReadOnly(t *testing.T) {
 	f := newMonthlyFixture(t)
-	sheet, err := f.svc.Sheet(context.Background(), kinderAsgID, "2026-09")
+	sheet, err := f.svc.Sheet(context.Background(), usecase.ScopeTeacher, kinderAsgID, "2026-09")
 	require.NoError(t, err)
 	assert.False(t, sheet.GradingEnabled)
 	assert.False(t, sheet.Editable)

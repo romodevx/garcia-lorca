@@ -64,6 +64,20 @@ type EnrollmentRef struct {
 type EnrollmentReader interface {
 	ByID(ctx context.Context, id string) (EnrollmentRef, error)
 	ByGroup(ctx context.Context, groupID string) ([]EnrollmentRef, error)
+	// ByCycle lists every enrollment of a cycle, whatever its status.
+	ByCycle(ctx context.Context, cycleID string) ([]EnrollmentRef, error)
+	// TransfersIntoGroup lists every move INTO a group (one read per sheet).
+	TransfersIntoGroup(ctx context.Context, groupID string) ([]TransferRef, error)
+}
+
+// TransferRef is the grades-owned view of a students group move: which
+// enrollment moved into which group, and when. A transfer rewrites the
+// enrollment's group in place, so this is the only record of when a pupil
+// joined the group they sit in now.
+type TransferRef struct {
+	EnrollmentID string
+	ToGroupID    string
+	MovedAt      time.Time
 }
 
 // GradeEntryRepository loads and persists grade entries. All access is
@@ -106,8 +120,16 @@ type CycleRef struct {
 // CatalogReader reads the rest of the academic catalog the monthly knot needs
 // from config (by RPC). A missing group/cycle is glerrors.ErrNotFound.
 type CatalogReader interface {
-	// LevelOfGroup resolves group → grade level → level.
+	// LevelOfGroup resolves group → grade level → level, with its scale. A
+	// grading level whose scale cannot be read is a KindInvalid refusal.
 	LevelOfGroup(ctx context.Context, groupID string) (LevelRef, error)
+	// LevelIDOfGroup resolves group → grade level → level id only, for checks
+	// that must not depend on the scale (the legacy term check).
+	LevelIDOfGroup(ctx context.Context, groupID string) (string, error)
+	// ActiveCycle is the school's active cycle; false when none is active.
+	ActiveCycle(ctx context.Context) (CycleRef, bool, error)
+	// GroupsOfLevel lists the ids of the groups of a level in a cycle.
+	GroupsOfLevel(ctx context.Context, cycleID, levelID string) ([]string, error)
 	CycleByID(ctx context.Context, id string) (CycleRef, error)
 	// AssignmentsByGroup lists the teaching assignments of a group in a cycle.
 	AssignmentsByGroup(ctx context.Context, cycleID, groupID string) ([]AssignmentRef, error)
@@ -128,4 +150,14 @@ type MonthlyGradeRepository interface {
 	MonthlyGradesForSheet(ctx context.Context, enrollmentIDs []string, subjectID string, month domain.Month) (map[string]domain.MonthlyGrade, error)
 	// MonthlyGradesForEnrollment lists every monthly grade of one enrollment.
 	MonthlyGradesForEnrollment(ctx context.Context, enrollmentID string) ([]domain.MonthlyGrade, error)
+	// CountScaleViolations counts, in ONE query, the grades of these
+	// enrollments that check refuses. Empty enrollmentIDs counts 0.
+	CountScaleViolations(ctx context.Context, enrollmentIDs []string, check ScaleCheck) (int, error)
+}
+
+// ScaleCheck is a proposed level scale to judge captured grades against.
+// GradingEnabled=false (disabling numeric grading) refuses every grade.
+type ScaleCheck struct {
+	GradingEnabled bool
+	Scale          domain.GradingScale
 }

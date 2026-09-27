@@ -9,6 +9,7 @@ import (
 
 	gradesv1 "github.com/garcia-lorca/gen/go/garcialorca/grades/v1"
 	"github.com/garcia-lorca/services/grades/internal/domain"
+	"github.com/garcia-lorca/services/grades/internal/ports"
 	"github.com/garcia-lorca/services/grades/internal/usecase"
 )
 
@@ -18,7 +19,7 @@ func (h *GradesHandler) UpsertMonthlyGrade(ctx context.Context, req *connect.Req
 	m := req.Msg
 	g, err := h.monthly.Upsert(ctx, usecase.UpsertMonthlyInput{
 		AssignmentID: m.GetAssignmentId(), Month: m.GetMonth(), EnrollmentID: m.GetEnrollmentId(),
-		Value: m.GetValue(), CapturedBy: m.GetCapturedBy(),
+		Value: m.GetValue(), CapturedBy: m.GetCapturedBy(), Scope: scopeOf(m.GetSchoolWide()),
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -29,7 +30,7 @@ func (h *GradesHandler) UpsertMonthlyGrade(ctx context.Context, req *connect.Req
 // ClearMonthlyGrade empties one monthly cell (idempotent).
 func (h *GradesHandler) ClearMonthlyGrade(ctx context.Context, req *connect.Request[gradesv1.ClearMonthlyGradeRequest]) (*connect.Response[gradesv1.ClearMonthlyGradeResponse], error) {
 	m := req.Msg
-	if err := h.monthly.Clear(ctx, m.GetAssignmentId(), m.GetMonth(), m.GetEnrollmentId()); err != nil {
+	if err := h.monthly.Clear(ctx, scopeOf(m.GetSchoolWide()), m.GetAssignmentId(), m.GetMonth(), m.GetEnrollmentId()); err != nil {
 		return nil, connectErr(err)
 	}
 	return connect.NewResponse(&gradesv1.ClearMonthlyGradeResponse{}), nil
@@ -37,13 +38,15 @@ func (h *GradesHandler) ClearMonthlyGrade(ctx context.Context, req *connect.Requ
 
 // GetMonthlySheet returns the capture grid of one assignment for one month.
 func (h *GradesHandler) GetMonthlySheet(ctx context.Context, req *connect.Request[gradesv1.GetMonthlySheetRequest]) (*connect.Response[gradesv1.GetMonthlySheetResponse], error) {
-	sheet, err := h.monthly.Sheet(ctx, req.Msg.GetAssignmentId(), req.Msg.GetMonth())
+	sheet, err := h.monthly.Sheet(ctx, scopeOf(req.Msg.GetSchoolWide()), req.Msg.GetAssignmentId(), req.Msg.GetMonth())
 	if err != nil {
 		return nil, connectErr(err)
 	}
 	rows := make([]*gradesv1.MonthlySheetRow, 0, len(sheet.Rows))
 	for _, r := range sheet.Rows {
-		row := &gradesv1.MonthlySheetRow{EnrollmentId: r.EnrollmentID, StudentId: r.StudentID}
+		row := &gradesv1.MonthlySheetRow{
+			EnrollmentId: r.EnrollmentID, StudentId: r.StudentID, Editable: r.Editable, ReadOnlyReason: r.ReadOnlyReason,
+		}
 		if r.HasValue {
 			row.Value, row.UpdatedAt = r.Value.String(), timestampOrNil(r.UpdatedAt)
 		}
@@ -80,6 +83,36 @@ func (h *GradesHandler) GetEnrollmentMonthlyGrades(ctx context.Context, req *con
 		SubjectIds:     got.SubjectIDs,
 		Grades:         grades,
 	}), nil
+}
+
+// CountScaleViolations counts the captured grades of the level's active cycle
+// a proposed scale would refuse. An inconsistent enabled scale is
+// InvalidArgument; a disabling request ignores the scale.
+func (h *GradesHandler) CountScaleViolations(ctx context.Context, req *connect.Request[gradesv1.CountScaleViolationsRequest]) (*connect.Response[gradesv1.CountScaleViolationsResponse], error) {
+	m := req.Msg
+	check := ports.ScaleCheck{GradingEnabled: m.GetGradingEnabled()}
+	if check.GradingEnabled {
+		sc := m.GetScale()
+		scale, err := domain.NewGradingScale(int(sc.GetMinHundredths()), int(sc.GetMaxHundredths()), int(sc.GetPassingHundredths()), int(sc.GetDecimals()))
+		if err != nil {
+			return nil, connectErr(err)
+		}
+		check.Scale = scale
+	}
+	n, err := h.monthly.CountScaleViolations(ctx, m.GetLevelId(), check)
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&gradesv1.CountScaleViolationsResponse{Violations: int32(n)}), nil
+}
+
+// scopeOf maps the wire flag to the use case's scope: only the director's
+// routes set school_wide.
+func scopeOf(schoolWide bool) usecase.CaptureScope {
+	if schoolWide {
+		return usecase.ScopeSchool
+	}
+	return usecase.ScopeTeacher
 }
 
 func toProtoMonthlyGrade(g domain.MonthlyGrade) *gradesv1.MonthlyGrade {

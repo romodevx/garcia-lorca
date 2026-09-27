@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -108,3 +109,45 @@ func (r *Repository) MonthlyGradesForEnrollment(ctx context.Context, enrollmentI
 	}
 	return out, nil
 }
+
+// CountScaleViolations counts, in ONE tenant-bound query, the grades of the
+// named enrollments that check refuses. The comparison runs on the exact
+// numeric column: bounds travel as decimal text cast to numeric, and "too many
+// decimals" is value·10^d not being a whole number — no float anywhere.
+func (r *Repository) CountScaleViolations(ctx context.Context, enrollmentIDs []string, check ports.ScaleCheck) (int, error) {
+	if len(enrollmentIDs) == 0 {
+		return 0, nil
+	}
+	var n int64
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		q := tx.Model(&monthlyGradeModel{}).Where("enrollment_id IN ?", enrollmentIDs)
+		if check.GradingEnabled {
+			s := check.Scale
+			factor := decimalFactor(s.Decimals())
+			q = q.Where("(value < ?::numeric OR value > ?::numeric OR value * ? <> trunc(value * ?))",
+				hundredthsText(s.MinHundredths()), hundredthsText(s.MaxHundredths()), factor, factor)
+		}
+		if err := q.Count(&n).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "counting scale violations", err)
+		}
+		return nil
+	})
+	return int(n), err
+}
+
+// hundredthsText prints hundredths as exact decimal text for a numeric cast.
+func hundredthsText(h int) string {
+	return fmt.Sprintf("%d.%02d", h/hundredthsPerUnit, h%hundredthsPerUnit)
+}
+
+// decimalFactor is 10^decimals.
+func decimalFactor(decimals int) int {
+	f := 1
+	for i := 0; i < decimals; i++ {
+		f *= decimalBase
+	}
+	return f
+}
+
+// decimalBase is the radix decimals count in.
+const decimalBase = 10

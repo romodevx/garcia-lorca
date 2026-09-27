@@ -3,6 +3,7 @@ package domain
 import (
 	"fmt"
 	"math/big"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -26,6 +27,7 @@ const (
 	hundredthsPerUnit = 100
 	scaleCeiling      = 100 * hundredthsPerUnit
 	maxScaleDecimals  = 2
+	decimalBase       = 10
 )
 
 // NewGradingScale builds a validated scale: 0 <= min < passing <= max <= 100.00
@@ -59,25 +61,51 @@ func (s GradingScale) Decimals() int { return s.decimals }
 func (s GradingScale) ParseValue(text string) (GradeValue, error) {
 	r, ok := parseDecimal(text)
 	if !ok {
-		return GradeValue{}, glerrors.New(glerrors.KindInvalid, "La calificación debe ser un número")
+		return GradeValue{}, Refusal(CodeGradeNotNumber, "La calificación debe ser un número")
 	}
 	if r.Cmp(ratHundredths(s.min)) < 0 || r.Cmp(ratHundredths(s.max)) > 0 {
-		return GradeValue{}, glerrors.New(glerrors.KindInvalid, fmt.Sprintf(
+		return GradeValue{}, Refusal(CodeGradeOutOfRange, fmt.Sprintf(
 			"La calificación debe estar entre %s y %s", formatHundredths(s.min), formatHundredths(s.max)))
 	}
 	if !hasAtMostDecimals(r, s.decimals) {
-		return GradeValue{}, glerrors.New(glerrors.KindInvalid, decimalsMessage(s.decimals))
+		return GradeValue{}, Refusal(CodeGradeDecimals, decimalsMessage(s.decimals))
 	}
 	scaled := new(big.Rat).Mul(r, big.NewRat(hundredthsPerUnit, 1))
 	return GradeValue{hundredths: int(scaled.Num().Int64())}, nil
 }
 
-// parseDecimal reads plain decimal or exponent notation exactly. big.Rat also
-// accepts fractions ("1/2") and SetString would read "Inf"/"NaN" as failures
-// anyway; a fraction is refused so only a JSON-number shape gets through.
+// Admits reports whether a stored value fits this scale: inside the range and
+// with no more decimals than it allows — what ParseValue would have accepted.
+func (s GradingScale) Admits(v GradeValue) bool {
+	h := v.hundredths
+	step := stepFor(s.decimals)
+	return h >= s.min && h <= s.max && h%step == 0
+}
+
+// stepFor is the hundredths granularity a number of decimals allows (0 → 100,
+// 1 → 10, 2 → 1).
+func stepFor(decimals int) int {
+	step := hundredthsPerUnit
+	for i := 0; i < decimals; i++ {
+		step /= decimalBase
+	}
+	return step
+}
+
+// maxDecimalText caps the typed text: no grade needs more than 16 characters,
+// and a bound keeps big.Rat from ever doing unbounded work.
+const maxDecimalText = 16
+
+// plainDecimal is the only shape a grade may be typed in: optional minus,
+// digits, optional fraction. Exponent ("1e9"), hex ("0x1p3"), binary ("0b1")
+// and fraction ("1/2") forms are refused BEFORE big.Rat sees them — SetString
+// would accept "1e1000000000" and build a billion-digit number.
+var plainDecimal = regexp.MustCompile(`^-?[0-9]+(\.[0-9]+)?$`)
+
+// parseDecimal reads a plain decimal exactly.
 func parseDecimal(text string) (*big.Rat, bool) {
 	text = strings.TrimSpace(text)
-	if text == "" || strings.Contains(text, "/") {
+	if len(text) > maxDecimalText || !plainDecimal.MatchString(text) {
 		return nil, false
 	}
 	return new(big.Rat).SetString(text)

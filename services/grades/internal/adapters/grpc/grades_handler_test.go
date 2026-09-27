@@ -39,7 +39,28 @@ func (f *fakeAssignments) TermByID(_ context.Context, id string) (ports.TermRef,
 }
 
 type fakeEnrollments struct {
-	byID map[string]ports.EnrollmentRef
+	byID      map[string]ports.EnrollmentRef
+	transfers []ports.TransferRef
+}
+
+func (f *fakeEnrollments) ByCycle(_ context.Context, cycle string) ([]ports.EnrollmentRef, error) {
+	var out []ports.EnrollmentRef
+	for _, e := range f.byID {
+		if e.CycleID == cycle {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeEnrollments) TransfersIntoGroup(_ context.Context, group string) ([]ports.TransferRef, error) {
+	var out []ports.TransferRef
+	for _, t := range f.transfers {
+		if t.ToGroupID == group {
+			out = append(out, t)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeEnrollments) ByID(_ context.Context, id string) (ports.EnrollmentRef, error) {

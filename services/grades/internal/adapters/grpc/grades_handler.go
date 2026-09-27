@@ -113,6 +113,18 @@ func toProtoGradeEntry(e domain.GradeEntry) *gradesv1.GradeEntry {
 // the error straight to connect.NewError shipped Postgres constraint names and
 // SQLSTATEs — and on some constraints the conflicting value — to whoever called.
 func connectErr(err error) *connect.Error {
+	ce := connectErrForKind(err)
+	if code := domain.RefusalCodeOf(err); code != "" {
+		ce.Meta().Set(ErrorCodeMeta, string(code))
+	}
+	return ce
+}
+
+// ErrorCodeMeta is the error-metadata key a refusal's machine code rides in; the
+// gateway forwards it as the X-Error-Code response header.
+const ErrorCodeMeta = "X-Error-Code"
+
+func connectErrForKind(err error) *connect.Error {
 	safe := errors.New(glerrors.SafeMessage(err))
 
 	switch glerrors.KindOf(err) {

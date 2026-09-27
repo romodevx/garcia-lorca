@@ -69,6 +69,34 @@ func (c *Client) ByGroup(ctx context.Context, groupID string) ([]ports.Enrollmen
 	return out, nil
 }
 
+// ByCycle lists every enrollment of a cycle (any status) in ONE read.
+func (c *Client) ByCycle(ctx context.Context, cycleID string) ([]ports.EnrollmentRef, error) {
+	res, err := c.rpc.ListEnrollments(ctx, connect.NewRequest(&studentsv1.ListEnrollmentsRequest{CycleId: cycleID}))
+	if err != nil {
+		return nil, mapStudentsErr(err, "enrollments")
+	}
+	src := res.Msg.GetEnrollments()
+	out := make([]ports.EnrollmentRef, 0, len(src))
+	for _, e := range src {
+		out = append(out, toRef(e))
+	}
+	return out, nil
+}
+
+// TransfersIntoGroup lists every move INTO a group in ONE read.
+func (c *Client) TransfersIntoGroup(ctx context.Context, groupID string) ([]ports.TransferRef, error) {
+	res, err := c.rpc.ListTransfers(ctx, connect.NewRequest(&studentsv1.ListTransfersRequest{ToGroupId: groupID}))
+	if err != nil {
+		return nil, mapStudentsErr(err, "transfers")
+	}
+	src := res.Msg.GetTransfers()
+	out := make([]ports.TransferRef, 0, len(src))
+	for _, t := range src {
+		out = append(out, ports.TransferRef{EnrollmentID: t.GetEnrollmentId(), ToGroupID: t.GetToGroupId(), MovedAt: t.GetMovedAt().AsTime().UTC()})
+	}
+	return out, nil
+}
+
 // toRef projects a proto Enrollment to the grades-owned view, mapping the status
 // enum to the lowercase string the use case compares against ("active", …).
 func toRef(e *studentsv1.Enrollment) ports.EnrollmentRef {

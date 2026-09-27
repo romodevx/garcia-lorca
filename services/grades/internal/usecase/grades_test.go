@@ -35,7 +35,28 @@ func (f *fakeAssignments) TermByID(_ context.Context, id string) (ports.TermRef,
 }
 
 type fakeEnrollments struct {
-	byID map[string]ports.EnrollmentRef
+	byID      map[string]ports.EnrollmentRef
+	transfers []ports.TransferRef
+}
+
+func (f *fakeEnrollments) TransfersIntoGroup(_ context.Context, groupID string) ([]ports.TransferRef, error) {
+	var out []ports.TransferRef
+	for _, t := range f.transfers {
+		if t.ToGroupID == groupID {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeEnrollments) ByCycle(_ context.Context, cycleID string) ([]ports.EnrollmentRef, error) {
+	var out []ports.EnrollmentRef
+	for _, e := range f.byID {
+		if e.CycleID == cycleID {
+			out = append(out, e)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeEnrollments) ByID(_ context.Context, id string) (ports.EnrollmentRef, error) {
@@ -393,5 +414,23 @@ func TestLegacyCaptureAndRosterRejectATermOfAnotherLevel(t *testing.T) {
 	}
 	if _, err := svc.CaptureGrade(context.Background(), assignmentID, enrollmentID, termID, 8); err != nil {
 		t.Errorf("the group's own level term must still capture: %v", err)
+	}
+}
+
+// The legacy term check needs only the group's level ID: a level whose monthly
+// scale is unusable must not stop term capture (review finding 4).
+func TestLegacyCaptureIgnoresTheMonthlyScale(t *testing.T) {
+	asg := baseAssignments()
+	enr := &fakeEnrollments{byID: map[string]ports.EnrollmentRef{enrollmentID: activeEnrollment(enrollmentID, "stu-1")}}
+	repo := newFakeEntries()
+	catalog := legacyCatalog()
+	catalog.scaleErr = glerrors.New(glerrors.KindInvalid, "La escala de calificación del nivel no está configurada")
+	svc := usecase.NewGradesService(repo, asg, catalog, enr, testTenant, func() string { return "ge-1" }, func() time.Time { return time.Time{} })
+
+	if _, err := svc.CaptureGrade(context.Background(), assignmentID, enrollmentID, termID, 8); err != nil {
+		t.Fatalf("legacy capture must not depend on the scale: %v", err)
+	}
+	if _, err := svc.Roster(context.Background(), assignmentID, termID); err != nil {
+		t.Fatalf("legacy roster must not depend on the scale: %v", err)
 	}
 }

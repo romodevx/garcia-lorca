@@ -42,6 +42,22 @@ func (f *fakeCatalog) LevelOfGroup(_ context.Context, g string) (ports.LevelRef,
 	return f.level, nil
 }
 
+func (f *fakeCatalog) LevelIDOfGroup(ctx context.Context, g string) (string, error) {
+	l, err := f.LevelOfGroup(ctx, g)
+	return l.ID, err
+}
+
+func (f *fakeCatalog) ActiveCycle(_ context.Context) (ports.CycleRef, bool, error) {
+	return f.cycle, true, nil
+}
+
+func (f *fakeCatalog) GroupsOfLevel(_ context.Context, _, level string) ([]string, error) {
+	if level != levelID {
+		return nil, nil
+	}
+	return []string{groupID}, nil
+}
+
 func (f *fakeCatalog) CycleByID(_ context.Context, id string) (ports.CycleRef, error) {
 	if id != cycleID {
 		return ports.CycleRef{}, glerrors.ErrNotFound
@@ -77,6 +93,18 @@ func (f *fakeMonthly) MonthlyGradesForSheet(_ context.Context, ids []string, _ s
 		}
 	}
 	return out, nil
+}
+
+func (f *fakeMonthly) CountScaleViolations(_ context.Context, ids []string, check ports.ScaleCheck) (int, error) {
+	n := 0
+	for _, id := range ids {
+		for _, g := range f.rows {
+			if g.EnrollmentID() == id && (!check.GradingEnabled || !check.Scale.Admits(g.Value())) {
+				n++
+			}
+		}
+	}
+	return n, nil
 }
 
 func (f *fakeMonthly) MonthlyGradesForEnrollment(_ context.Context, enr string) ([]domain.MonthlyGrade, error) {
@@ -155,4 +183,89 @@ func TestMonthlyRPCErrorCodes(t *testing.T) {
 	assert.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
 	_, err = h.GetEnrollmentMonthlyGrades(ctx, connect.NewRequest(&gradesv1.GetEnrollmentMonthlyGradesRequest{EnrollmentId: "ghost"}))
 	assert.Equal(t, connect.CodeNotFound, connect.CodeOf(err))
+}
+
+// A refusal's machine code rides as the X-Error-Code error metadata, which the
+// gateway forwards as a response header.
+func TestMonthlyRefusalsCarryTheirCodeAsMetadata(t *testing.T) {
+	h := monthlyHandler(t)
+	_, err := h.UpsertMonthlyGrade(context.Background(), connect.NewRequest(&gradesv1.UpsertMonthlyGradeRequest{
+		AssignmentId: assignmentID, Month: "2026-09", EnrollmentId: enrollmentID, Value: "9.95", CapturedBy: "user-1",
+	}))
+	var ce *connect.Error
+	require.ErrorAs(t, err, &ce)
+	assert.Equal(t, "GRADE_DECIMALS", ce.Meta().Get("X-Error-Code"))
+
+	_, err = h.GetEnrollmentMonthlyGrades(context.Background(), connect.NewRequest(&gradesv1.GetEnrollmentMonthlyGradesRequest{EnrollmentId: "ghost"}))
+	require.ErrorAs(t, err, &ce)
+	assert.Empty(t, ce.Meta().Get("X-Error-Code"), "an uncoded error carries no code")
+}
+
+// school_wide lifts the previous-group rule; the sheet marks the row for a
+// teacher.
+func TestMonthlyRPCsHonourThePreviousGroupRule(t *testing.T) {
+	enr := &fakeEnrollments{
+		byID:      map[string]ports.EnrollmentRef{enrollmentID: activeEnrollment(enrollmentID, "stu-1")},
+		transfers: []ports.TransferRef{{EnrollmentID: enrollmentID, ToGroupID: groupID, MovedAt: time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC)}},
+	}
+	h := newHandler(baseAssignments(), enr, newFakeEntries())
+	ctx := context.Background()
+	req := &gradesv1.UpsertMonthlyGradeRequest{AssignmentId: assignmentID, Month: "2026-09", EnrollmentId: enrollmentID, Value: "9", CapturedBy: "user-1"}
+
+	_, err := h.UpsertMonthlyGrade(ctx, connect.NewRequest(req))
+	var ce *connect.Error
+	require.ErrorAs(t, err, &ce)
+	assert.Equal(t, connect.CodeInvalidArgument, ce.Code())
+	assert.Equal(t, "Ese mes corresponde al grupo anterior del alumno", ce.Message())
+	assert.Equal(t, "MONTH_PREVIOUS_GROUP", ce.Meta().Get("X-Error-Code"))
+
+	_, err = h.ClearMonthlyGrade(ctx, connect.NewRequest(&gradesv1.ClearMonthlyGradeRequest{AssignmentId: assignmentID, Month: "2026-09", EnrollmentId: enrollmentID}))
+	assert.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+
+	req.SchoolWide = true
+	_, err = h.UpsertMonthlyGrade(ctx, connect.NewRequest(req))
+	require.NoError(t, err, "the director writes any month")
+
+	sheet, err := h.GetMonthlySheet(ctx, connect.NewRequest(&gradesv1.GetMonthlySheetRequest{AssignmentId: assignmentID, Month: "2026-09"}))
+	require.NoError(t, err)
+	row := sheet.Msg.GetRows()[0]
+	assert.False(t, row.GetEditable())
+	assert.Equal(t, "Ese mes corresponde al grupo anterior del alumno", row.GetReadOnlyReason())
+	assert.Equal(t, "9", row.GetValue(), "the earlier month is still readable")
+
+	director, err := h.GetMonthlySheet(ctx, connect.NewRequest(&gradesv1.GetMonthlySheetRequest{AssignmentId: assignmentID, Month: "2026-09", SchoolWide: true}))
+	require.NoError(t, err)
+	assert.True(t, director.Msg.GetRows()[0].GetEditable())
+}
+
+func TestCountScaleViolationsRPC(t *testing.T) {
+	h := monthlyHandler(t)
+	ctx := context.Background()
+	_, err := h.UpsertMonthlyGrade(ctx, connect.NewRequest(&gradesv1.UpsertMonthlyGradeRequest{
+		AssignmentId: assignmentID, Month: "2026-09", EnrollmentId: enrollmentID, Value: "9.5", CapturedBy: "user-1",
+	}))
+	require.NoError(t, err)
+
+	tests := []struct {
+		name     string
+		req      *gradesv1.CountScaleViolationsRequest
+		want     int32
+		wantCode connect.Code
+	}{
+		{"loosen", &gradesv1.CountScaleViolationsRequest{LevelId: levelID, GradingEnabled: true, Scale: &gradesv1.GradingScale{MinHundredths: 0, MaxHundredths: 1000, PassingHundredths: 600, Decimals: 2}}, 0, 0},
+		{"tighten to whole numbers", &gradesv1.CountScaleViolationsRequest{LevelId: levelID, GradingEnabled: true, Scale: &gradesv1.GradingScale{MinHundredths: 500, MaxHundredths: 1000, PassingHundredths: 600, Decimals: 0}}, 1, 0},
+		{"disable", &gradesv1.CountScaleViolationsRequest{LevelId: levelID}, 1, 0},
+		{"inconsistent scale", &gradesv1.CountScaleViolationsRequest{LevelId: levelID, GradingEnabled: true, Scale: &gradesv1.GradingScale{MinHundredths: 900, MaxHundredths: 500}}, 0, connect.CodeInvalidArgument},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res, err := h.CountScaleViolations(ctx, connect.NewRequest(tt.req))
+			if tt.wantCode != 0 {
+				assert.Equal(t, tt.wantCode, connect.CodeOf(err))
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, res.Msg.GetViolations())
+		})
+	}
 }

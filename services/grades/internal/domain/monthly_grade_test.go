@@ -41,28 +41,42 @@ func TestNewGradingScaleRejectsInconsistentScales(t *testing.T) {
 // float): 9.95 carries two decimals even though a float64 would print it as
 // 9.949999…, and 10.0 is ten.
 func TestGradingScaleParseValue(t *testing.T) {
+	const (
+		notNumber = "La calificación debe ser un número"
+		outRange  = "La calificación debe estar entre 5 y 10"
+		oneDec    = "Solo se permite 1 decimal"
+	)
 	tests := []struct {
-		text    string
-		want    int
-		wantMsg string
+		text     string
+		want     int
+		wantMsg  string
+		wantCode domain.RefusalCode
 	}{
-		{"10", 1000, ""},
-		{"10.0", 1000, ""},
-		{"5", 500, ""},
-		{"9.5", 950, ""},
-		{"6.0", 600, ""},
-		{"1e1", 1000, ""},
-		{"9.95", 0, "Solo se permite 1 decimal"},
-		{"7.25", 0, "Solo se permite 1 decimal"},
-		{"4.9", 0, "La calificación debe estar entre 5 y 10"},
-		{"10.1", 0, "La calificación debe estar entre 5 y 10"},
-		{"10.05", 0, "La calificación debe estar entre 5 y 10"},
-		{"-7", 0, "La calificación debe estar entre 5 y 10"},
-		{"", 0, "La calificación debe ser un número"},
-		{"abc", 0, "La calificación debe ser un número"},
-		{"NaN", 0, "La calificación debe ser un número"},
-		{"Inf", 0, "La calificación debe ser un número"},
-		{"1/2", 0, "La calificación debe ser un número"},
+		{"10", 1000, "", ""},
+		{"10.0", 1000, "", ""},
+		{"5", 500, "", ""},
+		{"9.5", 950, "", ""},
+		{"6.0", 600, "", ""},
+		{"9.50000000000000", 950, "", ""}, // 16 chars: still a number
+		{"9.95", 0, oneDec, domain.CodeGradeDecimals},
+		{"7.25", 0, oneDec, domain.CodeGradeDecimals},
+		{"4.9", 0, outRange, domain.CodeGradeOutOfRange},
+		{"10.1", 0, outRange, domain.CodeGradeOutOfRange},
+		{"10.05", 0, outRange, domain.CodeGradeOutOfRange},
+		{"-7", 0, outRange, domain.CodeGradeOutOfRange},
+		{"", 0, notNumber, domain.CodeGradeNotNumber},
+		{"abc", 0, notNumber, domain.CodeGradeNotNumber},
+		{"NaN", 0, notNumber, domain.CodeGradeNotNumber},
+		{"Inf", 0, notNumber, domain.CodeGradeNotNumber},
+		{"1/2", 0, notNumber, domain.CodeGradeNotNumber},
+		// Exponent, hex and binary forms never reach big.Rat: "1e1000000000"
+		// would make it build a billion-digit number.
+		{"1e1", 0, notNumber, domain.CodeGradeNotNumber},
+		{"1e1000000000", 0, notNumber, domain.CodeGradeNotNumber},
+		{"0x1p3", 0, notNumber, domain.CodeGradeNotNumber},
+		{"0b1010", 0, notNumber, domain.CodeGradeNotNumber},
+		{"+9", 0, notNumber, domain.CodeGradeNotNumber},
+		{"9.500000000000000", 0, notNumber, domain.CodeGradeNotNumber}, // 17 chars
 	}
 	scale := defaultScale(t)
 	for _, tt := range tests {
@@ -72,12 +86,22 @@ func TestGradingScaleParseValue(t *testing.T) {
 				require.Error(t, err)
 				assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err))
 				assert.Equal(t, tt.wantMsg, glerrors.SafeMessage(err))
+				assert.Equal(t, tt.wantCode, domain.RefusalCodeOf(err))
 				return
 			}
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got.Hundredths())
 		})
 	}
+}
+
+// A refusal carries a machine code without hiding its kind or its sentence.
+func TestRefusalKeepsKindAndMessage(t *testing.T) {
+	err := domain.Refusal(domain.CodeMonthOutsideCycle, "Ese mes no pertenece al ciclo")
+	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err))
+	assert.Equal(t, "Ese mes no pertenece al ciclo", glerrors.SafeMessage(err))
+	assert.Equal(t, domain.CodeMonthOutsideCycle, domain.RefusalCodeOf(err))
+	assert.Equal(t, domain.RefusalCode(""), domain.RefusalCodeOf(glerrors.New(glerrors.KindInvalid, "x")))
 }
 
 func TestGradingScaleDecimalsWording(t *testing.T) {
@@ -196,4 +220,13 @@ func TestNewMonthlyGrade(t *testing.T) {
 	_, err = domain.NewMonthlyGrade(domain.MonthlyGradeFields{ID: "mg-1", TenantID: "t1", EnrollmentID: "enr-1",
 		SubjectID: "subj-1", TeacherID: "teacher-1", CapturedBy: "user-1", Value: value})
 	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err), "a zero month is not a month")
+}
+
+// Admits judges a stored value against a (possibly new) scale: range and
+// decimals, exactly as ParseValue would have.
+func TestGradingScaleAdmits(t *testing.T) {
+	s := defaultScale(t)
+	for h, want := range map[int]bool{500: true, 1000: true, 950: true, 495: false, 1010: false, 925: false} {
+		assert.Equal(t, want, s.Admits(domain.GradeValueFromHundredths(h)), "hundredths %d", h)
+	}
 }

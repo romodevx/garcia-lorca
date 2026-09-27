@@ -192,11 +192,11 @@ func (s *GradesService) requireTermOfAssignment(ctx context.Context, termID stri
 	if term.CycleID != asg.CycleID {
 		return glerrors.New(glerrors.KindInvalid, "term does not belong to the assignment's cycle")
 	}
-	level, err := s.catalog.LevelOfGroup(ctx, asg.GroupID)
+	levelID, err := s.catalog.LevelIDOfGroup(ctx, asg.GroupID)
 	if err != nil {
 		return err
 	}
-	if term.LevelID != level.ID {
+	if term.LevelID != levelID {
 		return glerrors.New(glerrors.KindInvalid, "El periodo no corresponde al nivel del grupo")
 	}
 	return nil

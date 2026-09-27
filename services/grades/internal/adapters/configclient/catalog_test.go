@@ -16,6 +16,7 @@ import (
 	"github.com/garcia-lorca/gen/go/garcialorca/config/v1/configv1connect"
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/grades/internal/adapters/configclient"
+	"github.com/garcia-lorca/services/grades/internal/domain"
 )
 
 // stubCatalog serves the group → grade → level chain, cycles and a group's
@@ -28,6 +29,36 @@ type stubCatalog struct {
 	cycles      map[string]*configv1.Cycle
 	assignments []*configv1.TeachingAssignment
 	listReq     *configv1.ListTeachingAssignmentsRequest
+	allGroups   []*configv1.Group
+	gradeLevels []*configv1.GradeLevel
+}
+
+func (s *stubCatalog) ListCycles(context.Context, *connect.Request[configv1.ListCyclesRequest]) (*connect.Response[configv1.ListCyclesResponse], error) {
+	out := make([]*configv1.Cycle, 0, len(s.cycles))
+	for _, c := range s.cycles {
+		out = append(out, c)
+	}
+	return connect.NewResponse(&configv1.ListCyclesResponse{Cycles: out}), nil
+}
+
+func (s *stubCatalog) ListGroups(_ context.Context, r *connect.Request[configv1.ListGroupsRequest]) (*connect.Response[configv1.ListGroupsResponse], error) {
+	var out []*configv1.Group
+	for _, g := range s.allGroups {
+		if g.GetCycleId() == r.Msg.GetCycleId() {
+			out = append(out, g)
+		}
+	}
+	return connect.NewResponse(&configv1.ListGroupsResponse{Groups: out}), nil
+}
+
+func (s *stubCatalog) ListGradeLevels(_ context.Context, r *connect.Request[configv1.ListGradeLevelsRequest]) (*connect.Response[configv1.ListGradeLevelsResponse], error) {
+	var out []*configv1.GradeLevel
+	for _, g := range s.gradeLevels {
+		if g.GetLevelId() == r.Msg.GetLevelId() {
+			out = append(out, g)
+		}
+	}
+	return connect.NewResponse(&configv1.ListGradeLevelsResponse{GradeLevels: out}), nil
 }
 
 func notFound() error { return connect.NewError(connect.CodeNotFound, nil) }
@@ -107,13 +138,68 @@ func TestLevelOfGroupWalksGroupGradeLevel(t *testing.T) {
 	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err))
 }
 
-// A level whose scale config never sent (an old config) or sent inconsistent is
-// an internal failure, never a silent 0–0 scale that refuses every grade.
+// A grading level whose scale config never sent (an older config deployed
+// after grades) or sent inconsistent is refused with a sentence the sheet can
+// show — never a silent 0–0 scale that refuses every grade, never a bare 500.
 func TestLevelOfGroupRejectsAMissingScale(t *testing.T) {
+	for name, grading := range map[string]*configv1.GradingScale{
+		"absent":       nil,
+		"inconsistent": {Enabled: true, MinHundredths: 900, MaxHundredths: 500},
+	} {
+		t.Run(name, func(t *testing.T) {
+			stub := catalogStub()
+			stub.levels["lvl-1"].Grading = grading
+			_, err := newCatalogClient(t, stub).LevelOfGroup(context.Background(), "grp-1")
+			assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err))
+			assert.Equal(t, "La escala de calificación del nivel no está configurada", glerrors.SafeMessage(err))
+			assert.Equal(t, domain.CodeLevelScaleUnavailable, domain.RefusalCodeOf(err))
+		})
+	}
+}
+
+// A level that takes no numeric grades needs no usable scale to be read.
+func TestLevelOfGroupToleratesAnUnusedScale(t *testing.T) {
+	stub := catalogStub()
+	stub.levels["lvl-1"].Grading = &configv1.GradingScale{Enabled: false}
+	got, err := newCatalogClient(t, stub).LevelOfGroup(context.Background(), "grp-1")
+	require.NoError(t, err)
+	assert.False(t, got.GradingEnabled)
+}
+
+// LevelIDOfGroup needs no scale at all.
+func TestLevelIDOfGroupIgnoresTheScale(t *testing.T) {
 	stub := catalogStub()
 	stub.levels["lvl-1"].Grading = nil
-	_, err := newCatalogClient(t, stub).LevelOfGroup(context.Background(), "grp-1")
-	assert.Equal(t, glerrors.KindInternal, glerrors.KindOf(err))
+	id, err := newCatalogClient(t, stub).LevelIDOfGroup(context.Background(), "grp-1")
+	require.NoError(t, err)
+	assert.Equal(t, "lvl-1", id)
+	_, err = newCatalogClient(t, stub).LevelIDOfGroup(context.Background(), "ghost")
+	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err))
+}
+
+func TestActiveCycleAndGroupsOfLevel(t *testing.T) {
+	stub := catalogStub()
+	c := newCatalogClient(t, stub)
+	_, ok, err := c.ActiveCycle(context.Background())
+	require.NoError(t, err)
+	assert.False(t, ok, "no cycle is active")
+
+	stub.cycles["cyc-1"].Status = configv1.CycleStatus_CYCLE_STATUS_ACTIVE
+	stub.cycles["cyc-0"] = &configv1.Cycle{Id: "cyc-0", Status: configv1.CycleStatus_CYCLE_STATUS_CLOSED}
+	got, ok, err := c.ActiveCycle(context.Background())
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "cyc-1", got.ID)
+
+	stub.gradeLevels = []*configv1.GradeLevel{{Id: "gl-1", LevelId: "lvl-1"}, {Id: "gl-9", LevelId: "lvl-9"}}
+	stub.allGroups = []*configv1.Group{
+		{Id: "grp-1", CycleId: "cyc-1", GradeLevelId: "gl-1"},
+		{Id: "grp-2", CycleId: "cyc-1", GradeLevelId: "gl-9"},
+		{Id: "grp-3", CycleId: "cyc-0", GradeLevelId: "gl-1"},
+	}
+	groups, err := c.GroupsOfLevel(context.Background(), "cyc-1", "lvl-1")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"grp-1"}, groups)
 }
 
 func TestCycleByID(t *testing.T) {

@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/garcia-lorca/services/grades/internal/domain"
+	"github.com/garcia-lorca/services/grades/internal/ports"
 )
 
 // Neutral cross-service references for the monthly tests (disjoint from the
@@ -173,4 +174,55 @@ func TestRLSIsolatesMonthlyGrades(t *testing.T) {
 	assert.Equal(t, b.ID(), after[0].ID())
 	assert.Equal(t, 700, after[0].Value().Hundredths(), "tenant A's write or delete leaked into tenant B")
 	assert.Equal(t, int64(1), countMonthly(t, tenantA, mEnrollmentRL))
+}
+
+// CountScaleViolations counts, in one tenant-bound query, the named
+// enrollments' grades a proposed scale refuses: out of range, too many
+// decimals, or — disabling grading — every grade. Another tenant's grades never
+// count.
+func TestCountScaleViolations(t *testing.T) {
+	const (
+		enrV1 = "e1000000-0000-0000-0000-000000000051"
+		enrV2 = "e1000000-0000-0000-0000-000000000052"
+	)
+	repo := appRepo(t, tenantA)
+	ctx := context.Background()
+	for i, c := range []struct{ enr, month, value string }{
+		{enrV1, "2026-09", "9.5"}, {enrV1, "2026-10", "6"}, {enrV2, "2026-09", "10"}, {enrV2, "2026-10", "7.25"},
+	} {
+		id := "a1000000-0000-0000-0000-00000000005" + string(rune('0'+i))
+		_, err := repo.UpsertMonthlyGrade(ctx, monthlyGrade(t, id, tenantA, c.enr, mSubject, mTeacher, mUser, c.month, c.value))
+		require.NoError(t, err)
+	}
+	_, err := appRepo(t, tenantB).UpsertMonthlyGrade(ctx, monthlyGrade(t, "a1000000-0000-0000-0000-000000000059", tenantB, enrV1, mSubject, mTeacher, mUser, "2026-11", "1"))
+	require.NoError(t, err)
+
+	scale := func(minH, maxH, passH, dec int) domain.GradingScale {
+		s, err := domain.NewGradingScale(minH, maxH, passH, dec)
+		require.NoError(t, err)
+		return s
+	}
+	both := []string{enrV1, enrV2}
+	tests := []struct {
+		name  string
+		ids   []string
+		check ports.ScaleCheck
+		want  int
+	}{
+		{"loosen", both, ports.ScaleCheck{GradingEnabled: true, Scale: scale(0, 1000, 600, 2)}, 0},
+		{"max 9.5", both, ports.ScaleCheck{GradingEnabled: true, Scale: scale(500, 950, 600, 2)}, 1},
+		{"min 7", both, ports.ScaleCheck{GradingEnabled: true, Scale: scale(700, 1000, 800, 2)}, 1},
+		{"one decimal", both, ports.ScaleCheck{GradingEnabled: true, Scale: scale(500, 1000, 600, 1)}, 1},
+		{"whole numbers", both, ports.ScaleCheck{GradingEnabled: true, Scale: scale(500, 1000, 600, 0)}, 2},
+		{"disable", both, ports.ScaleCheck{}, 4},
+		{"only the named", []string{enrV2}, ports.ScaleCheck{}, 2},
+		{"none named", nil, ports.ScaleCheck{}, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			n, err := repo.CountScaleViolations(ctx, tt.ids, tt.check)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, n)
+		})
+	}
 }
