@@ -68,5 +68,7 @@ describe("GradesScreen — role-adaptive branch", () => {
 
     // The director path never touches the teacher client.
     expect(teaching.listAssignments).not.toHaveBeenCalled();
+    // The permissions reach the director surface: grades:read opens the Periodos tab.
+    expect(screen.getByRole("tab", { name: "Periodos" })).toBeInTheDocument();
   });
 });

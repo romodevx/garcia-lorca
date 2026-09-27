@@ -111,7 +111,10 @@ export function periodsClient(baseURL: string): PeriodsClient {
 function slug(text: string): string {
   return text
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
+    // Ordinal indicators ("2.º", "1.ª") read as letters, like "1.er" does.
+    .replace(/\u00ba/g, "o")
+    .replace(/\u00aa/g, "a")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");

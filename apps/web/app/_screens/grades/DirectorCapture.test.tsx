@@ -18,6 +18,10 @@ vi.mock("../../teachers/api", () => ({
   listTeachingAssignments: vi.fn(),
 }));
 vi.mock("../../grades/api", () => ({ gradeSheetClient: vi.fn() }));
+// The Periodos tab has its own suite (PeriodsPanel.test.tsx); here only what reaches it matters.
+vi.mock("./PeriodsPanel", () => ({
+  PeriodsPanel: ({ canClose }: { canClose: boolean }) => <p>{canClose ? "periodos: puede cerrar" : "periodos: solo lectura"}</p>,
+}));
 
 const config = vi.mocked(configApi);
 const teachers = vi.mocked(teachersApi);
@@ -136,5 +140,32 @@ describe("DirectorCapture", () => {
     const leaving = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(leaving);
     expect(leaving.defaultPrevented).toBe(true);
+  });
+});
+
+describe("DirectorCapture — Periodos tab (tarea 7)", () => {
+  it("offers Captura and Periodos to a grades:read principal; closing only with grades:close", async () => {
+    const user = userEvent.setup();
+    render(<DirectorCapture onBack={() => {}} permissions={["grades:read", "grades:write"]} />);
+
+    const tabs = screen.getByRole("tablist", { name: "Secciones de calificaciones" });
+    expect(within(tabs).getByRole("tab", { name: "Captura" })).toHaveAttribute("aria-selected", "true");
+    await user.click(within(tabs).getByRole("tab", { name: "Periodos" }));
+
+    expect(await screen.findByText("periodos: solo lectura")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /Asignación/ })).toBeNull();
+  });
+
+  it("tells the Periodos tab it may close with grades:close", async () => {
+    const user = userEvent.setup();
+    render(<DirectorCapture onBack={() => {}} permissions={["grades:read", "grades:close"]} />);
+
+    await user.click(screen.getByRole("tab", { name: "Periodos" }));
+    expect(await screen.findByText("periodos: puede cerrar")).toBeInTheDocument();
+  });
+
+  it("shows no tabs without grades:read", () => {
+    render(<DirectorCapture onBack={() => {}} />);
+    expect(screen.queryByRole("tablist")).toBeNull();
   });
 });
