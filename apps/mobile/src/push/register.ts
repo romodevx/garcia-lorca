@@ -1,7 +1,7 @@
 import Constants from "expo-constants";
-import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { registerDevice, type DevicePlatform } from "../api/devices";
+import { loadNotifications, type NotificationsModule } from "./notificationsModule";
 import { markPermissionAsked, saveRegisteredToken, wasPermissionAsked } from "./pushStore";
 import { retryPendingUnregisters } from "./unregister";
 
@@ -42,13 +42,13 @@ function logMissingProjectOnce(): void {
   }
 }
 
-async function ensureAttendanceChannel(): Promise<void> {
+async function ensureAttendanceChannel(notifications: NotificationsModule): Promise<void> {
   if (Platform.OS !== "android") {
     return;
   }
-  await Notifications.setNotificationChannelAsync(ATTENDANCE_CHANNEL_ID, {
+  await notifications.setNotificationChannelAsync(ATTENDANCE_CHANNEL_ID, {
     name: "Asistencia",
-    importance: Notifications.AndroidImportance.HIGH,
+    importance: notifications.AndroidImportance.HIGH,
   });
 }
 
@@ -56,8 +56,8 @@ async function ensureAttendanceChannel(): Promise<void> {
  * Permission, asked politely and ONCE: if the parent already answered (or the
  * OS says we may not ask), we take the answer and never prompt again.
  */
-async function hasPermission(): Promise<boolean> {
-  const current = await Notifications.getPermissionsAsync();
+async function hasPermission(notifications: NotificationsModule): Promise<boolean> {
+  const current = await notifications.getPermissionsAsync();
   if (current.granted) {
     return true;
   }
@@ -65,7 +65,7 @@ async function hasPermission(): Promise<boolean> {
     return false;
   }
   await markPermissionAsked();
-  const answer = await Notifications.requestPermissionsAsync();
+  const answer = await notifications.requestPermissionsAsync();
   return answer.granted;
 }
 
@@ -84,18 +84,19 @@ export async function registerForPush(): Promise<PushRegistration> {
     return "no-project";
   }
   const platform = devicePlatform();
-  if (platform === null) {
+  const notifications = loadNotifications();
+  if (platform === null || notifications === null) {
     return "unsupported";
   }
   try {
     if (!(await retryPendingUnregisters())) {
       return "failed";
     }
-    await ensureAttendanceChannel();
-    if (!(await hasPermission())) {
+    await ensureAttendanceChannel(notifications);
+    if (!(await hasPermission(notifications))) {
       return "denied";
     }
-    const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
+    const { data: token } = await notifications.getExpoPushTokenAsync({ projectId });
     await registerDevice(token, platform);
     await saveRegisteredToken(token);
     return "registered";

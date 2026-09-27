@@ -1,6 +1,6 @@
-import * as Notifications from "expo-notifications";
 import { useCallback, useEffect, useRef } from "react";
 import { useFreshDataSignal } from "../state/freshness";
+import { loadNotifications } from "./notificationsModule";
 import { registerForPush, type PushRegistration } from "./register";
 
 /** Outcomes that end registration for this session; only "failed" is retried. */
@@ -52,7 +52,11 @@ export function usePushRegistration(signedIn: boolean): void {
   useFreshDataSignal(retryIfUnsettled, signedIn);
 
   useEffect(() => {
-    const subscription = Notifications.addPushTokenListener(() => {
+    const notifications = loadNotifications();
+    if (notifications === null) {
+      return;
+    }
+    const subscription = notifications.addPushTokenListener(() => {
       void attempt(true);
     });
     return () => subscription.remove();

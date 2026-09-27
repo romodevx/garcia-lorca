@@ -55,3 +55,8 @@ jest.mock("expo-notifications", () => ({
   setNotificationChannelAsync: jest.fn(async () => null),
   AndroidImportance: { HIGH: 4 },
 }));
+
+// jest-expo answers requireNativeModule() for ANY name, so expo's
+// isRunningInExpoGo() reads true under Jest. Tests model a dev/store build,
+// where push works; the Expo Go case mocks this back to true itself.
+jest.mock("expo", () => ({ ...jest.requireActual("expo"), isRunningInExpoGo: () => false }));

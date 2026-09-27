@@ -1,9 +1,10 @@
-import * as Notifications from "expo-notifications";
+import type { Notification, NotificationResponse } from "expo-notifications";
 import { router } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getAccessToken } from "../api";
 import { useAppState } from "../state/AppState";
 import { requestFreshData } from "../state/freshness";
+import { loadNotifications } from "./notificationsModule";
 import { usePushRegistration } from "./usePushRegistration";
 
 /** The push payload comms sends when a teacher saves an exception. */
@@ -16,7 +17,7 @@ interface AttendancePush {
 const ATTENDANCE_ROUTE = "/(tabs)/asistencia";
 const INBOX_ROUTE = "/(tabs)/avisos";
 
-function attendancePayload(notification: Notifications.Notification): AttendancePush | null {
+function attendancePayload(notification: Notification): AttendancePush | null {
   const data = notification.request.content.data as Record<string, unknown> | null | undefined;
   if (data?.type !== "attendance" || typeof data.studentId !== "string") {
     return null;
@@ -28,11 +29,12 @@ let handlerInstalled = false;
 
 /** A push arriving with the app open still shows its banner (it is news the parent wants). */
 function installForegroundHandler(): void {
-  if (handlerInstalled) {
+  const notifications = loadNotifications();
+  if (handlerInstalled || notifications === null) {
     return;
   }
   handlerInstalled = true;
-  Notifications.setNotificationHandler({
+  notifications.setNotificationHandler({
     handleNotification: async () => ({
       shouldShowBanner: true,
       shouldShowList: true,
@@ -60,7 +62,7 @@ export function usePushNotifications(): void {
   // A loaded child means a signed-in family; losing it means the session ended.
   usePushRegistration(selectedChildId !== null);
 
-  const queueTap = useCallback((response: Notifications.NotificationResponse) => {
+  const queueTap = useCallback((response: NotificationResponse) => {
     const id = response.notification.request.identifier;
     const payload = attendancePayload(response.notification);
     if (payload === null || handledResponses.current.has(id)) {
@@ -76,7 +78,7 @@ export function usePushNotifications(): void {
     }
     setPendingTap(null);
     // Consumed: a remount (or the next cold start) must not replay it.
-    Notifications.clearLastNotificationResponse();
+    loadNotifications()?.clearLastNotificationResponse();
     if (getAccessToken() === null) {
       return;
     }
@@ -90,13 +92,17 @@ export function usePushNotifications(): void {
   }, [pendingTap, childLoading, linkedChildren, selectChild]);
 
   useEffect(() => {
-    const received = Notifications.addNotificationReceivedListener((notification) => {
+    const notifications = loadNotifications();
+    if (notifications === null) {
+      return;
+    }
+    const received = notifications.addNotificationReceivedListener((notification) => {
       if (attendancePayload(notification) !== null) {
         requestFreshData();
       }
     });
-    const tapped = Notifications.addNotificationResponseReceivedListener(queueTap);
-    void Notifications.getLastNotificationResponseAsync()
+    const tapped = notifications.addNotificationResponseReceivedListener(queueTap);
+    void notifications.getLastNotificationResponseAsync()
       .then((response) => {
         if (response) {
           queueTap(response);
