@@ -51,7 +51,7 @@ export const events: SchoolEvent[] = [
 
 export const modules: ModuleTile[] = [
   // Deactivated from the panel per the school (kept future-ready; nothing deleted). See [[module-docs-deactivated]].
-  { id: "documentos", title: "Documentos", sub: "Boletas y constancias", icon: "document", tint: "forest", hidden: true },
+  { id: "documentos", title: "Documentos", sub: "Constancias y reglamento", icon: "document", tint: "forest", hidden: true },
   { id: "uniformes", title: "Uniformes", sub: "Tienda y tallas", icon: "shirt", tint: "lime" },
   { id: "facturas", title: "Facturas", sub: "CFDI y recibos", icon: "receipt", tint: "orange" },
   { id: "becas", title: "Becas", sub: "Estado de tu beca", icon: "cap", tint: "purple" },

@@ -12,7 +12,6 @@ export interface ModuleDetailScreenProps {
 // TODO(pendiente-backend: docs — docs service is a shell, no RPCs)
 // — static placeholder data. Do not delete. See .claude/docs/PLAN-mock-data-audit.md #B8.
 const DOCS: ReadonlyArray<[string, string]> = [
-  ["Boleta 2.º periodo", "PDF · 240 KB"],
   ["Constancia de estudios", "PDF · 180 KB"],
   ["Reglamento escolar", "PDF · 1.2 MB"],
 ];
