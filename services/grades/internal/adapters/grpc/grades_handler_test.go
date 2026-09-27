@@ -113,7 +113,7 @@ func baseAssignments() *fakeAssignments {
 		assignments: map[string]ports.AssignmentRef{
 			assignmentID: {ID: assignmentID, GroupID: groupID, SubjectID: subjectID, TeacherID: teacherID, CycleID: cycleID},
 		},
-		terms: map[string]ports.TermRef{termID: {ID: termID, CycleID: cycleID}},
+		terms: map[string]ports.TermRef{termID: {ID: termID, CycleID: cycleID, LevelID: levelID}},
 	}
 }
 
@@ -125,8 +125,10 @@ func newHandler(a ports.AssignmentReader, e ports.EnrollmentReader, r ports.Grad
 	now := func() time.Time { return time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC) }
 	seq := 0
 	newID := func() string { seq++; return "ge-" + string(rune('0'+seq)) }
-	svc := usecase.NewGradesService(r, a, e, testTenant, newID, now)
-	return grpcadapter.NewGradesHandler(svc, usecase.NewHealthService("grades"))
+	catalog := newFakeCatalog()
+	svc := usecase.NewGradesService(r, a, catalog, e, testTenant, newID, now)
+	monthly := usecase.NewMonthlyGradesService(newFakeMonthly(), a, catalog, e, testTenant, newID, now)
+	return grpcadapter.NewGradesHandler(svc, monthly, usecase.NewHealthService("grades"))
 }
 
 // --- tests ------------------------------------------------------------------

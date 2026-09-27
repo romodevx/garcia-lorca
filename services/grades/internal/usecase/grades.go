@@ -36,6 +36,7 @@ type RosterRow struct {
 type GradesService struct {
 	entries     ports.GradeEntryRepository
 	assignments ports.AssignmentReader
+	catalog     ports.CatalogReader
 	enrollments ports.EnrollmentReader
 	tenantID    string
 	newID       func() string
@@ -48,6 +49,7 @@ type GradesService struct {
 func NewGradesService(
 	entries ports.GradeEntryRepository,
 	assignments ports.AssignmentReader,
+	catalog ports.CatalogReader,
 	enrollments ports.EnrollmentReader,
 	tenantID string,
 	newID func() string,
@@ -56,6 +58,7 @@ func NewGradesService(
 	return &GradesService{
 		entries:     entries,
 		assignments: assignments,
+		catalog:     catalog,
 		enrollments: enrollments,
 		tenantID:    tenantID,
 		newID:       newID,
@@ -95,7 +98,7 @@ func (s *GradesService) CaptureGrade(ctx context.Context, assignmentID, enrollme
 		return domain.GradeEntry{}, glerrors.New(glerrors.KindInvalid, "enrollment is not in the assignment's cycle")
 	}
 
-	if err := s.requireTermInCycle(ctx, termID, asg.CycleID); err != nil {
+	if err := s.requireTermOfAssignment(ctx, termID, asg); err != nil {
 		return domain.GradeEntry{}, err
 	}
 
@@ -115,7 +118,7 @@ func (s *GradesService) Roster(ctx context.Context, assignmentID, termID string)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.requireTermInCycle(ctx, termID, asg.CycleID); err != nil {
+	if err := s.requireTermOfAssignment(ctx, termID, asg); err != nil {
 		return nil, err
 	}
 
@@ -174,9 +177,11 @@ func (s *GradesService) requireAssignment(ctx context.Context, assignmentID stri
 	return asg, nil
 }
 
-// requireTermInCycle loads a term and asserts it belongs to the given cycle,
-// mapping a NotFound to KindInvalid and a cycle mismatch to KindInvalid.
-func (s *GradesService) requireTermInCycle(ctx context.Context, termID, cycleID string) error {
+// requireTermOfAssignment loads a term and asserts it belongs to the
+// assignment's cycle AND to its group's level — a term is per cycle and per
+// level, so a Secundaria term must never grade a Primaria group. A missing term
+// and either mismatch are KindInvalid.
+func (s *GradesService) requireTermOfAssignment(ctx context.Context, termID string, asg ports.AssignmentRef) error {
 	term, err := s.assignments.TermByID(ctx, termID)
 	if err != nil {
 		if glerrors.KindOf(err) == glerrors.KindNotFound {
@@ -184,8 +189,15 @@ func (s *GradesService) requireTermInCycle(ctx context.Context, termID, cycleID 
 		}
 		return err
 	}
-	if term.CycleID != cycleID {
+	if term.CycleID != asg.CycleID {
 		return glerrors.New(glerrors.KindInvalid, "term does not belong to the assignment's cycle")
+	}
+	level, err := s.catalog.LevelOfGroup(ctx, asg.GroupID)
+	if err != nil {
+		return err
+	}
+	if term.LevelID != level.ID {
+		return glerrors.New(glerrors.KindInvalid, "El periodo no corresponde al nivel del grupo")
 	}
 	return nil
 }

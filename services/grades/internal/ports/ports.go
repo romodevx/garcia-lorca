@@ -2,6 +2,7 @@ package ports
 
 import (
 	"context"
+	"time"
 
 	"github.com/garcia-lorca/services/grades/internal/domain"
 )
@@ -27,10 +28,12 @@ type AssignmentRef struct {
 	CycleID   string
 }
 
-// TermRef is the grades-owned view of a config term (its identity and cycle).
+// TermRef is the grades-owned view of a config term: its identity, cycle and
+// the level it belongs to (a term is per cycle AND per level).
 type TermRef struct {
 	ID      string
 	CycleID string
+	LevelID string
 }
 
 // AssignmentReader validates teaching-assignment and term references against the
@@ -81,4 +84,48 @@ type GradeEntryRepository interface {
 	// ListGradeEntries returns entries for an enrollment in a term; an empty
 	// string skips that filter.
 	ListGradeEntries(ctx context.Context, enrollmentID, termID string) ([]domain.GradeEntry, error)
+}
+
+// LevelRef is the grades-owned view of the level a group belongs to: whether it
+// captures numeric grades at all and on which scale (config, T6).
+type LevelRef struct {
+	ID             string
+	GradingEnabled bool
+	Scale          domain.GradingScale
+}
+
+// CycleRef is the grades-owned view of a config cycle: its name and the dates
+// whose months bound monthly capture. Either date may be zero (not set).
+type CycleRef struct {
+	ID       string
+	Name     string
+	StartsOn time.Time
+	EndsOn   time.Time
+}
+
+// CatalogReader reads the rest of the academic catalog the monthly knot needs
+// from config (by RPC). A missing group/cycle is glerrors.ErrNotFound.
+type CatalogReader interface {
+	// LevelOfGroup resolves group → grade level → level.
+	LevelOfGroup(ctx context.Context, groupID string) (LevelRef, error)
+	CycleByID(ctx context.Context, id string) (CycleRef, error)
+	// AssignmentsByGroup lists the teaching assignments of a group in a cycle.
+	AssignmentsByGroup(ctx context.Context, cycleID, groupID string) ([]AssignmentRef, error)
+}
+
+// MonthlyGradeRepository loads and persists monthly grades. All access is
+// tenant-scoped for RLS (the adapter binds app.current_tenant per transaction).
+type MonthlyGradeRepository interface {
+	// UpsertMonthlyGrade inserts the grade or updates value/teacher/captured_by
+	// of the existing row on the (tenant, enrollment, subject, month) key, and
+	// returns the stored row (with its id and updated_at).
+	UpsertMonthlyGrade(ctx context.Context, g domain.MonthlyGrade) (domain.MonthlyGrade, error)
+	// DeleteMonthlyGrade removes the grade on the key; no row is not an error.
+	DeleteMonthlyGrade(ctx context.Context, enrollmentID, subjectID string, month domain.Month) error
+	// MonthlyGradesForSheet batch-loads, in ONE query, the grades of many
+	// enrollments for one subject and month, keyed by enrollment id (absent =
+	// not captured). Empty enrollmentIDs returns an empty map without querying.
+	MonthlyGradesForSheet(ctx context.Context, enrollmentIDs []string, subjectID string, month domain.Month) (map[string]domain.MonthlyGrade, error)
+	// MonthlyGradesForEnrollment lists every monthly grade of one enrollment.
+	MonthlyGradesForEnrollment(ctx context.Context, enrollmentID string) ([]domain.MonthlyGrade, error)
 }

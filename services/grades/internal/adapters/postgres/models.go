@@ -27,3 +27,21 @@ type gradeEntryModel struct {
 }
 
 func (gradeEntryModel) TableName() string { return "grade_entries" }
+
+// monthlyGradeModel is the GORM row for `monthly_grades` (T6). Month is the
+// first day of the month (date column); Value is numeric(5,2), read through a
+// float64 and rounded back to exact hundredths by the mapper.
+type monthlyGradeModel struct {
+	ID           string    `gorm:"column:id;primaryKey"`
+	TenantID     string    `gorm:"column:tenant_id"`
+	EnrollmentID string    `gorm:"column:enrollment_id"`
+	SubjectID    string    `gorm:"column:subject_id"`
+	TeacherID    string    `gorm:"column:teacher_id"`
+	Month        time.Time `gorm:"column:month;type:date"`
+	Value        float64   `gorm:"column:value"`
+	CapturedBy   string    `gorm:"column:captured_by"`
+	CreatedAt    time.Time `gorm:"column:created_at;->"`
+	UpdatedAt    time.Time `gorm:"column:updated_at;->"`
+}
+
+func (monthlyGradeModel) TableName() string { return "monthly_grades" }
