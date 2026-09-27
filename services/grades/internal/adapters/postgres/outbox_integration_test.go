@@ -37,7 +37,7 @@ func queue(t *testing.T, repo interface {
 
 // Events are queued in the close's transaction: a rolled-back close leaves
 // none; a committed one leaves them pending until a drain publishes and marks
-// them, oldest first.
+// them.
 func TestOutboxQueuesInTheTransactionAndDrains(t *testing.T) {
 	const term = "70700000-0000-0000-0000-0000000000a1"
 	repo := appRepo(t, outboxTenant)
@@ -55,8 +55,9 @@ func TestOutboxQueuesInTheTransactionAndDrains(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, 2, n)
-	assert.JSONEq(t, `{"reportCardId":"a"}`, got[0])
-	assert.JSONEq(t, `{"reportCardId":"b"}`, got[1])
+	// Events of ONE transaction share its created_at: their relative order is
+	// not meaningful (each is one report card), only that both go out.
+	assert.ElementsMatch(t, []string{`{"reportCardId": "a"}`, `{"reportCardId": "b"}`}, got)
 
 	n, err = repo.DrainOutbox(ctx, 10, func(ports.OutboxEvent) error {
 		t.Fatal("a published event was drained again")
