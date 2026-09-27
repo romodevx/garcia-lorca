@@ -9,6 +9,8 @@ import {
   createLevel,
   createSubject,
   createTerm,
+  copyTermMonths,
+  setTermMonths,
   getSchoolProfile,
   labelGroups,
   listCycles,
@@ -391,5 +393,41 @@ describe("listLabelledGroups", () => {
       Promise.resolve(url.includes("/grade-levels") ? jsonResponse({}, 500) : jsonResponse({ groups }))));
     const out = await listLabelledGroups(BASE, "c1");
     expect(out.map((g) => g.label)).toEqual(["A", "A", "B"]);
+  });
+});
+
+describe("term months (T7)", () => {
+  const term = { id: "t1", cycleId: "c1", levelId: "l1", name: "1.ER TRIMESTRE", ordinal: 1, startsOn: "2026-08-24", endsOn: "2026-11-30", months: ["2026-09"] };
+
+  it("setTermMonths PUTs {months} to /terms/{id}/months and returns the term", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(term));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(setTermMonths(BASE, "t1", ["2026-09"])).resolves.toEqual(term);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/config/terms/t1/months");
+    expect(init.method).toBe("PUT");
+    expect(init.credentials).toBe("include");
+    expect(JSON.parse(init.body as string)).toEqual({ months: ["2026-09"] });
+  });
+
+  it("setTermMonths surfaces the refusal code (MONTH_IN_OTHER_TERM)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("El mes ya está en otro periodo", { status: 409, headers: { "X-Error-Code": "MONTH_IN_OTHER_TERM" } })));
+
+    const err = (await setTermMonths(BASE, "t1", ["2026-09"]).catch((e: unknown) => e)) as ConfigError;
+    expect(err).toBeInstanceOf(ConfigError);
+    expect(err.code).toBe("MONTH_IN_OTHER_TERM");
+    expect(err.detail).toBe("El mes ya está en otro periodo");
+  });
+
+  it("copyTermMonths POSTs the source and targets and unwraps {terms}", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ terms: [term] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(copyTermMonths(BASE, { cycleId: "c1", fromLevelId: "l1", toLevelIds: ["l2", "l3"] })).resolves.toEqual([term]);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/config/terms/copy-months");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ cycleId: "c1", fromLevelId: "l1", toLevelIds: ["l2", "l3"] });
   });
 });

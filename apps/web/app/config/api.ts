@@ -94,6 +94,17 @@ export interface Term {
   ordinal: number;
   startsOn: string;
   endsOn: string;
+  /**
+   * The cycle's months ("YYYY-MM") this term grades — configured per cycle and
+   * level. Absent from older gateways (read as none).
+   */
+  months?: string[];
+}
+
+export interface CopyTermMonthsInput {
+  cycleId: string;
+  fromLevelId: string;
+  toLevelIds: string[];
 }
 
 export interface CreateTermInput {
@@ -403,6 +414,30 @@ export function createTerm(baseURL: string, input: CreateTermInput): Promise<Ter
 
 export function listTerms(baseURL: string, cycleId: string, levelId?: string): Promise<Term[]> {
   return getList<Term>(baseURL, `/terms${query({ cycleId, levelId })}`, "terms");
+}
+
+/**
+ * Replaces the months a term grades. A month belongs to one term only: the
+ * server refuses one still held by another (409 MONTH_IN_OTHER_TERM) or one
+ * outside the cycle (400 MONTH_OUTSIDE_CYCLE).
+ */
+export async function setTermMonths(baseURL: string, termId: string, months: readonly string[]): Promise<Term> {
+  const res = await authFetch(url(baseURL, `${BASE_PATH}/terms/${encodeURIComponent(termId)}/months`), {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ months }),
+  });
+  if (!res.ok) {
+    throw await configFailure(res);
+  }
+  return (await res.json()) as Term;
+}
+
+/** Copies one level's month-to-term layout onto other levels of the same cycle. */
+export async function copyTermMonths(baseURL: string, input: CopyTermMonthsInput): Promise<Term[]> {
+  const data = await postJSON<{ terms?: Term[] }>(baseURL, "/terms/copy-months", input);
+  return data.terms ?? [];
 }
 
 // --- groups ---------------------------------------------------------------
