@@ -78,6 +78,11 @@ output "attendance_events_topic" {
   value       = google_pubsub_topic.attendance_events.id
 }
 
+output "grades_events_topic" {
+  description = "Pub/Sub topic id for grades events (report cards issued)."
+  value       = google_pubsub_topic.grades_events.id
+}
+
 output "student_events_topic" {
   description = "Pub/Sub topic id for student events."
   value       = google_pubsub_topic.student_events.id

@@ -281,3 +281,26 @@ variable "smtp_from_name" {
   type        = string
   default     = "Colegio García Lorca"
 }
+
+variable "push_provider" {
+  description = <<-EOT
+    How comms delivers push notifications: "log" only logs them (the durable
+    in-app feed still works), "expo" sends them through the Expo Push Service.
+  EOT
+  type        = string
+  default     = "log"
+  validation {
+    condition     = contains(["log", "expo"], var.push_provider)
+    error_message = "push_provider must be one of: log, expo."
+  }
+}
+
+variable "expo_access_token_enabled" {
+  description = <<-EOT
+    Mount the Expo access token secret into comms. Turn on only AFTER a version
+    has been written to garcia-lorca-expo-access-token-<env>: a revision that
+    references a secret with no version fails to start.
+  EOT
+  type        = bool
+  default     = false
+}

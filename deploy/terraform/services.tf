@@ -155,6 +155,9 @@ locals {
     PUBSUB_PUSH_SA_EMAIL = google_service_account.pubsub_push.email
   })
 
+  # grades publishes GradesPublished on grades-events after a period close
+  # (ADR 0020). It needs nothing beyond common_env's PUBSUB_PROJECT_ID for that —
+  # the same as attendance — and the topic is pre-declared in pubsub.tf.
   grades_env = merge(local.common_env, {
     CONFIG_BASE_URL   = module.config.uri
     STUDENTS_BASE_URL = module.students.uri
@@ -181,7 +184,20 @@ locals {
     # run.invoker holder can forge events. Enforced only when non-empty;
     # local docker-compose leaves it unset (check skipped).
     PUBSUB_PUSH_SA_EMAIL = google_service_account.pubsub_push.email
+    # Push delivery to the families' phones: "log" (default) only logs, "expo"
+    # delivers through the Expo Push Service. See var.push_provider.
+    PUSH_PROVIDER = var.push_provider
   })
+
+  # The Expo access token is mounted only once an operator has written a value
+  # into its secret (var.expo_access_token_enabled): Cloud Run refuses to start
+  # a revision that references a secret with no version.
+  comms_secret_env = merge(local.common_secret_env, var.expo_access_token_enabled ? {
+    EXPO_ACCESS_TOKEN = {
+      secret_id = google_secret_manager_secret.expo_access_token.secret_id
+      version   = "latest"
+    }
+  } : {})
 
   # uniforms sells at the counter, which creates a charge in finance by
   # external_ref (ADR 0008), and resolves pupils for the order list.
@@ -444,7 +460,7 @@ module "comms" {
 
   cloudsql_instances = local.cloudsql_instances
   env                = local.comms_env
-  secret_env         = local.common_secret_env
+  secret_env         = local.comms_secret_env
 
   depends_on = [google_project_service.apis]
 }

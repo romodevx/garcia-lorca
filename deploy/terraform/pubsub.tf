@@ -301,3 +301,82 @@ resource "google_pubsub_subscription_iam_member" "student_events_dlq_subscriber"
   role         = "roles/pubsub.subscriber"
   member       = local.pubsub_sa
 }
+
+# ---- grades-events (grades publishes; comms consumes) -----------------------
+# GradesPublished, one per report card issued by a period close (ADR 0020).
+# Pre-declared like attendance-events so neither side relies on runtime
+# auto-creation. Mirrors the attendance-events topic + DLQ + comms-subscription
+# shape above.
+resource "google_pubsub_topic" "grades_events" {
+  project = var.project_id
+  name    = "grades-events"
+  labels  = local.labels
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_pubsub_topic" "grades_events_dlq" {
+  project = var.project_id
+  name    = "grades-events-dlq"
+  labels  = local.labels
+
+  depends_on = [google_project_service.apis]
+}
+
+# Subscription NAME matches the comms consumer (consumedTopics:
+# "grades-events" -> "comms-grades-events").
+resource "google_pubsub_subscription" "grades_events_comms" {
+  project = var.project_id
+  name    = "comms-grades-events"
+  topic   = google_pubsub_topic.grades_events.id
+
+  ack_deadline_seconds = 30
+
+  # Authenticated PUSH (same shape as comms-attendance-events above): Pub/Sub
+  # POSTs to comms /pubsub with an OIDC token, waking it from scale-to-zero.
+  push_config {
+    push_endpoint = "${module.comms.uri}/pubsub"
+    oidc_token {
+      service_account_email = google_service_account.pubsub_push.email
+      audience              = module.comms.uri
+    }
+  }
+
+  retry_policy {
+    minimum_backoff = "10s"
+    maximum_backoff = "600s"
+  }
+
+  dead_letter_policy {
+    dead_letter_topic     = google_pubsub_topic.grades_events_dlq.id
+    max_delivery_attempts = 5
+  }
+
+  message_retention_duration = "604800s" # 7 days
+  expiration_policy {
+    ttl = "" # never expire the subscription
+  }
+}
+
+resource "google_pubsub_subscription" "grades_events_dlq_drain" {
+  project = var.project_id
+  name    = "grades-events-dlq-drain"
+  topic   = google_pubsub_topic.grades_events_dlq.id
+
+  ack_deadline_seconds       = 60
+  message_retention_duration = "604800s" # 7 days
+}
+
+resource "google_pubsub_topic_iam_member" "grades_dlq_publisher" {
+  project = var.project_id
+  topic   = google_pubsub_topic.grades_events_dlq.id
+  role    = "roles/pubsub.publisher"
+  member  = local.pubsub_sa
+}
+
+resource "google_pubsub_subscription_iam_member" "grades_dlq_subscriber" {
+  project      = var.project_id
+  subscription = google_pubsub_subscription.grades_events_comms.id
+  role         = "roles/pubsub.subscriber"
+  member       = local.pubsub_sa
+}
