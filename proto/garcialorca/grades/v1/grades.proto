@@ -391,7 +391,9 @@ message ListReportCardsRequest {
 }
 
 // ReportCardSummary is one report card in a list. general_average is decimal
-// text with one decimal ("8.5"); "" = none.
+// text with one decimal ("8.5"); "" = none. term_ordinal is the term's order in
+// its cycle as frozen at issue (1 = first; 0 = issued before it was recorded).
+// A student's list comes newest period first (cycle, then term_ordinal).
 message ReportCardSummary {
   string id = 1;
   string term_id = 2;
@@ -404,6 +406,9 @@ message ReportCardSummary {
   google.protobuf.Timestamp issued_at = 9;
   string general_average = 10;
   string enrollment_id = 11;
+  int32 term_ordinal = 12;
+  string cycle_id = 13;
+  string cycle_name = 14;
 }
 
 message ListReportCardsResponse {
@@ -449,6 +454,7 @@ message ReportCard {
   string general_average = 19;
   GradingScale scale = 20;
   repeated ReportCardLine lines = 21;
+  int32 term_ordinal = 22; // see ReportCardSummary.term_ordinal
 }
 
 message GetReportCardResponse {

@@ -91,6 +91,7 @@ type reportCardModel struct {
 	LevelName              string         `gorm:"column:level_name"`
 	CycleName              string         `gorm:"column:cycle_name"`
 	TermName               string         `gorm:"column:term_name"`
+	TermOrdinal            int            `gorm:"column:term_ordinal"`
 	Months                 pq.StringArray `gorm:"column:months;type:text[]"`
 	GeneralAverage         *float64       `gorm:"column:general_average"`
 	ScaleMinHundredths     int            `gorm:"column:scale_min_hundredths"`

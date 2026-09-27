@@ -88,7 +88,7 @@ func sampleCard(t *testing.T) domain.ReportCard {
 		ID: "rc-1", TenantID: testTenant, TermID: termID, CycleID: cycleID, LevelID: levelID, GroupID: groupID,
 		EnrollmentID: enrollmentID, StudentID: "stu-1", Version: 2, IssuedAt: issuedAt, IssuedBy: "dir",
 		StudentName: "Ana López", EnrollmentNumber: "2026-00001", GroupLabel: "1° · A", LevelName: "Primaria",
-		CycleName: "2026-2027", TermName: "1.er trimestre", Months: []domain.Month{sep, oct}, Scale: scale,
+		CycleName: "2026-2027", TermName: "1.er trimestre", TermOrdinal: 1, Months: []domain.Month{sep, oct}, Scale: scale,
 	}, []domain.ReportCardSubject{{ID: subjectID, Name: "Matemáticas"}, {ID: "subj-2", Name: "Español"}}, []domain.MonthlyGrade{g})
 	require.NoError(t, err)
 	return rc
@@ -189,6 +189,9 @@ func TestReportCardRPCs(t *testing.T) {
 	assert.Equal(t, "9.5", sum.GetGeneralAverage())
 	assert.Equal(t, enrollmentID, sum.GetEnrollmentId())
 	assert.Equal(t, issuedAt, sum.GetIssuedAt().AsTime())
+	assert.Equal(t, int32(1), sum.GetTermOrdinal())
+	assert.Equal(t, cycleID, sum.GetCycleId())
+	assert.Equal(t, "2026-2027", sum.GetCycleName())
 
 	one, err := periodsHandler(p).GetReportCard(context.Background(), connect.NewRequest(&gradesv1.GetReportCardRequest{Id: "rc-1"}))
 	require.NoError(t, err)
@@ -197,6 +200,7 @@ func TestReportCardRPCs(t *testing.T) {
 	assert.Equal(t, "2026-00001", card.GetEnrollmentNumber())
 	assert.Equal(t, "Primaria", card.GetLevelName())
 	assert.Equal(t, "2026-2027", card.GetCycleName())
+	assert.Equal(t, int32(1), card.GetTermOrdinal())
 	assert.Equal(t, []string{"2026-09", "2026-10"}, card.GetMonths())
 	assert.Equal(t, &gradesv1.GradingScale{MinHundredths: 500, MaxHundredths: 1000, Decimals: 1, PassingHundredths: 600}, card.GetScale())
 	require.Len(t, card.GetLines(), 2)
