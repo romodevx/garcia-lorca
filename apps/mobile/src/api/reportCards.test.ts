@@ -18,7 +18,7 @@ describe("report cards API", () => {
     const fetchMock = jest.fn().mockResolvedValue(
       respond(200, {
         reportCards: [
-          { id: "rc2", termId: "t2", termName: "2.º trimestre", version: 2, issuedAt: "2026-12-10T18:00:00Z", generalAverage: 8.75, hasGrades: true },
+          { id: "rc2", termId: "t2", termName: "2.º trimestre", version: 2, issuedAt: "2026-12-10T18:00:00Z", generalAverage: "8.75", hasGrades: true },
           { id: "rc1", termId: "t1", termName: "1.er trimestre", cycleName: "2026-2027", version: 1, issuedAt: null, generalAverage: null },
         ],
       }),
@@ -29,8 +29,8 @@ describe("report cards API", () => {
 
     expect(String(fetchMock.mock.calls[0][0])).toContain("/api/v1/family/students/s%201/report-cards");
     expect(cards).toEqual([
-      { id: "rc2", termId: "t2", termName: "2.º trimestre", cycleName: "", version: 2, issuedAt: "2026-12-10T18:00:00Z", generalAverage: 8.75 },
-      { id: "rc1", termId: "t1", termName: "1.er trimestre", cycleName: "2026-2027", version: 1, issuedAt: null, generalAverage: null },
+      { id: "rc2", termId: "t2", termName: "2.º trimestre", cycleName: "", version: 2, issuedAt: "2026-12-10T18:00:00Z", generalAverage: 8.75, hasGrades: true },
+      { id: "rc1", termId: "t1", termName: "1.er trimestre", cycleName: "2026-2027", version: 1, issuedAt: null, generalAverage: null, hasGrades: false },
     ]);
   });
 

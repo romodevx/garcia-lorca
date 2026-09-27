@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { getAccount, getCard, type FamilyAccount, type FamilyCard } from "../api";
 import { getAttendanceMonth, type AttendanceMonth } from "../api/attendance";
 import { getMonthlyGrades, type MonthlyGrades } from "../api/grades";
+import { getReportCard, listReportCards, type ReportCard, type ReportCardSummary } from "../api/reportCards";
 import { useFreshDataSignal } from "./freshness";
 import { useAsyncResource, type AsyncResource } from "./useAsyncResource";
 
@@ -66,6 +67,26 @@ export function useChildMonthlyGrades(childId: string | null): AsyncResource<Mon
   const resource = useAsyncResource(load);
   useFreshDataSignal(resource.reload, load !== null);
   return resource;
+}
+
+/**
+ * The selected child's issued boletas. Reloads on the freshness signal: a new
+ * boleta (or a corrected version) arrives with a push or on reopening the app.
+ */
+export function useChildReportCards(childId: string | null): AsyncResource<ReportCardSummary[]> {
+  const load = useMemo(() => (childId ? () => listReportCards(childId) : null), [childId]);
+  const resource = useAsyncResource(load);
+  useFreshDataSignal(resource.reload, load !== null);
+  return resource;
+}
+
+/** One boleta of the selected child. A null id is a no-op. */
+export function useChildReportCard(childId: string | null, reportCardId: string | null): AsyncResource<ReportCard> {
+  const load = useMemo(
+    () => (childId && reportCardId ? () => getReportCard(childId, reportCardId) : null),
+    [childId, reportCardId],
+  );
+  return useAsyncResource(load);
 }
 
 /** The selected child's virtual card (task 13). */

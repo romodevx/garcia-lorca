@@ -21,6 +21,8 @@ export interface ReportCardSummary {
   issuedAt: string | null;
   /** Null when no subject has a grade. */
   generalAverage: number | null;
+  /** False when the term closed with nothing captured. */
+  hasGrades: boolean;
 }
 
 /** One subject row of a boleta: its grade per month ("YYYY-MM") and the term average. */
@@ -56,6 +58,7 @@ interface WireSummary {
   version?: number;
   issuedAt?: string | null;
   generalAverage?: WireNumber;
+  hasGrades?: boolean;
 }
 
 interface WireLine {
@@ -122,6 +125,7 @@ export async function listReportCards(studentId: string): Promise<ReportCardSumm
     version: c.version ?? FIRST_VERSION,
     issuedAt: c.issuedAt ?? null,
     generalAverage: toNumber(c.generalAverage),
+    hasGrades: c.hasGrades ?? toNumber(c.generalAverage) !== null,
   }));
 }
 
