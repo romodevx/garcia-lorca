@@ -162,3 +162,68 @@ func serve(hf http.HandlerFunc, r *http.Request) *httptest.ResponseRecorder {
 	hf(rec, r)
 	return rec
 }
+
+// fakeTermLock answers which terms are closed and records what it was asked.
+type fakeTermLock struct {
+	closed []string
+	err    error
+	asked  []string
+	calls  int
+}
+
+func (f *fakeTermLock) ClosedTerms(_ context.Context, termIDs []string) ([]string, error) {
+	f.calls++
+	f.asked = termIDs
+	return f.closed, f.err
+}
+
+// T7: a closed period's months are frozen. PUT months on a closed term is
+// refused with 409 TERM_CLOSED before config is asked; an open one goes on.
+func TestPutTermMonthsRefusesAClosedTerm(t *testing.T) {
+	svc := &fakeConfig{}
+	lock := &fakeTermLock{closed: []string{"trm-1"}}
+	h := handler.NewConfigHandler(svc).WithTermLock(lock)
+	rec := serve(h.PutTermMonths, newPathRequest(http.MethodPut, "/api/v1/config/terms/trm-1/months", `{"months":["2026-09"]}`, "id", "trm-1"))
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Equal(t, "TERM_CLOSED", rec.Header().Get("X-Error-Code"))
+	assert.Contains(t, rec.Body.String(), "El periodo está cerrado; reábrelo para cambiar sus meses")
+	assert.Empty(t, svc.monthsTermID, "config is never asked")
+	assert.Equal(t, []string{"trm-1"}, lock.asked)
+
+	lock.closed = nil
+	rec = serve(h.PutTermMonths, newPathRequest(http.MethodPut, "/api/v1/config/terms/trm-1/months", `{"months":["2026-09"]}`, "id", "trm-1"))
+	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	lock.err = errors.New("grades down")
+	rec = serve(h.PutTermMonths, newPathRequest(http.MethodPut, "/api/v1/config/terms/trm-1/months", `{"months":["2026-09"]}`, "id", "trm-1"))
+	assert.Equal(t, http.StatusInternalServerError, rec.Code, "an unknown closure state never lets the change through")
+
+	lock.err = nil
+	calls := lock.calls
+	rec = serve(h.PutTermMonths, newPathRequest(http.MethodPut, "/api/v1/config/terms/trm-1/months", `{"months":["2026-9"]}`, "id", "trm-1"))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Equal(t, calls, lock.calls, "a malformed body never costs a grades call")
+}
+
+// Copying months onto levels whose terms include a closed one is refused
+// with 409 TERM_CLOSED; only the TARGET levels' terms are asked about (one
+// config read, one grades read).
+func TestCopyTermMonthsRefusesClosedTargetTerms(t *testing.T) {
+	svc := &fakeConfig{terms: []client.TermResult{
+		{ID: "src-1", LevelID: "lvl-1"}, {ID: "tgt-1", LevelID: "lvl-2"}, {ID: "tgt-2", LevelID: "lvl-2"}, {ID: "oth-1", LevelID: "lvl-9"},
+	}}
+	lock := &fakeTermLock{closed: []string{"tgt-2"}}
+	h := handler.NewConfigHandler(svc).WithTermLock(lock)
+	body := `{"cycleId":"cyc-1","fromLevelId":"lvl-1","toLevelIds":["lvl-2"]}`
+	rec := doReq(t, h.CopyTermMonths, http.MethodPost, "/api/v1/config/terms/copy-months", body)
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Equal(t, "TERM_CLOSED", rec.Header().Get("X-Error-Code"))
+	assert.Empty(t, svc.copyCycle, "config is never asked to copy")
+	assert.Equal(t, "cyc-1", svc.termsCycle)
+	assert.ElementsMatch(t, []string{"tgt-1", "tgt-2"}, lock.asked)
+
+	lock.closed = nil
+	rec = doReq(t, h.CopyTermMonths, http.MethodPost, "/api/v1/config/terms/copy-months", body)
+	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, "cyc-1", svc.copyCycle)
+}

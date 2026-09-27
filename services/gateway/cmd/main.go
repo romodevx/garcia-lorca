@@ -371,7 +371,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// enforced, permission-gated. Writes need config:write, reads config:read;
 	// every route sits behind guard.Protect("config", …) so module_config OFF ⇒
 	// 404 (the module is invisible before auth even runs).
-	configH := handler.NewConfigHandler(configClient).WithScaleGuard(gradesClient)
+	configH := handler.NewConfigHandler(configClient).WithScaleGuard(gradesClient).WithTermLock(gradesClient)
 	configWrite := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("config", requireAuthChanged(middleware.RequirePermission("config:write")(http.HandlerFunc(h))))
 	}

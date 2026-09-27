@@ -58,6 +58,46 @@ type ConfigService interface {
 type ConfigHandler struct {
 	svc   ConfigService
 	scale ScaleGuard
+	lock  TermLockGuard
+}
+
+// TermLockGuard answers which terms are closed periods (grades, T7): their
+// months are frozen until the director reopens them. The Connect GradesClient
+// satisfies it.
+type TermLockGuard interface {
+	ClosedTerms(ctx context.Context, termIDs []string) ([]string, error)
+}
+
+// WithTermLock makes the term-months writes refuse a closed term with 409
+// TERM_CLOSED (see termsOpen). The composition root always wires it.
+func (h *ConfigHandler) WithTermLock(g TermLockGuard) *ConfigHandler {
+	h.lock = g
+	return h
+}
+
+// The refusal for changing the months of a closed period.
+const (
+	codeTermClosed = "TERM_CLOSED"
+	msgTermClosed  = "El periodo está cerrado; reábrelo para cambiar sus meses"
+)
+
+// termsOpen asks grades whether any of termIDs is a closed period; it writes
+// the refusal itself (409 TERM_CLOSED, or the grades failure: an unknown
+// closure state never lets a change through) and reports whether to go on.
+func (h *ConfigHandler) termsOpen(w http.ResponseWriter, r *http.Request, termIDs []string) bool {
+	if h.lock == nil || len(termIDs) == 0 {
+		return true
+	}
+	closed, err := h.lock.ClosedTerms(r.Context(), termIDs)
+	if err != nil {
+		writeConnectError(w, err)
+		return false
+	}
+	if len(closed) > 0 {
+		writeCodedError(w, http.StatusConflict, codeTermClosed, msgTermClosed)
+		return false
+	}
+	return true
 }
 
 // ScaleGuard counts the grades already captured in a level's active cycle that
@@ -544,7 +584,9 @@ type termMonthsRequest struct {
 // PutTermMonths handles PUT /api/v1/config/terms/{id}/months: the calendar
 // months the term covers, replaced as a set ({"months":[]} clears it). A month
 // of another term of the level is 409 MONTH_IN_OTHER_TERM; one outside the
-// cycle is 400 MONTH_OUTSIDE_CYCLE (both decided by the config service).
+// cycle is 400 MONTH_OUTSIDE_CYCLE; more than six months is 400 TERM_TOO_LONG
+// (all decided by the config service). A closed period is 409 TERM_CLOSED,
+// asked of grades before config is touched.
 func (h *ConfigHandler) PutTermMonths(w http.ResponseWriter, r *http.Request) {
 	var req termMonthsRequest
 	if err := decodeJSONBody(w, r, &req); err != nil || req.Months == nil {
@@ -557,7 +599,11 @@ func (h *ConfigHandler) PutTermMonths(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	res, err := h.svc.SetTermMonths(r.Context(), r.PathValue("id"), *req.Months)
+	termID := r.PathValue("id")
+	if !h.termsOpen(w, r, []string{termID}) {
+		return
+	}
+	res, err := h.svc.SetTermMonths(r.Context(), termID, *req.Months)
 	if err != nil {
 		writeConnectError(w, err)
 		return
@@ -574,6 +620,7 @@ type copyTermMonthsRequest struct {
 // CopyTermMonths handles POST /api/v1/config/terms/copy-months: each target
 // level's terms take the source level's months in one transaction (matched by
 // ordinal; missing terms created from the source; unmatched ones emptied).
+// Any closed period among the target levels' terms is 409 TERM_CLOSED.
 func (h *ConfigHandler) CopyTermMonths(w http.ResponseWriter, r *http.Request) {
 	var req copyTermMonthsRequest
 	if err := decodeJSONBody(w, r, &req); err != nil {
@@ -582,6 +629,9 @@ func (h *ConfigHandler) CopyTermMonths(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(req.CycleID) == "" || strings.TrimSpace(req.FromLevelID) == "" || len(req.ToLevelIDs) == 0 {
 		http.Error(w, "cycleId, fromLevelId and at least one toLevelIds are required", http.StatusBadRequest)
+		return
+	}
+	if !h.targetTermsOpen(w, r, req.CycleID, req.ToLevelIDs) {
 		return
 	}
 	res, err := h.svc.CopyTermMonths(r.Context(), req.CycleID, req.FromLevelID, req.ToLevelIDs)
@@ -594,6 +644,30 @@ func (h *ConfigHandler) CopyTermMonths(w http.ResponseWriter, r *http.Request) {
 		out = append(out, toTermResponse(t))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"terms": out})
+}
+
+// targetTermsOpen reads the cycle's terms once, keeps the target levels' and
+// asks grades whether any is closed (see termsOpen).
+func (h *ConfigHandler) targetTermsOpen(w http.ResponseWriter, r *http.Request, cycleID string, levelIDs []string) bool {
+	if h.lock == nil {
+		return true
+	}
+	terms, err := h.svc.ListTerms(r.Context(), cycleID, "")
+	if err != nil {
+		writeConnectError(w, err)
+		return false
+	}
+	target := make(map[string]bool, len(levelIDs))
+	for _, id := range levelIDs {
+		target[strings.TrimSpace(id)] = true
+	}
+	ids := []string{}
+	for _, t := range terms {
+		if target[t.LevelID] {
+			ids = append(ids, t.ID)
+		}
+	}
+	return h.termsOpen(w, r, ids)
 }
 
 // CreateTerm handles POST /api/v1/config/terms.

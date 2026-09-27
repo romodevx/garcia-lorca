@@ -1803,9 +1803,14 @@ paths:
         fuera del ciclo: 2027-09"). A month belongs to at most one term of the
         same cycle and level — else 409 `X-Error-Code: MONTH_IN_OTHER_TERM`
         ("Ese mes ya pertenece a otro periodo del nivel: 2026-12", naming the
-        earliest clashing month). A month not shaped YYYY-MM is 400
-        `X-Error-Code: MONTH_INVALID` at the edge. Nothing is written on any
-        refusal. An unknown term is 404. Requires `config:write`.
+        earliest clashing month). A term covers at most six months — else 400
+        `X-Error-Code: TERM_TOO_LONG` ("Un periodo puede tener hasta 6
+        meses"). A month not shaped YYYY-MM is 400 `X-Error-Code:
+        MONTH_INVALID` at the edge. A CLOSED period's months are frozen: the
+        gateway asks grades first and answers 409 `X-Error-Code: TERM_CLOSED`
+        ("El periodo está cerrado; reábrelo para cambiar sus meses") without
+        touching config. Nothing is written on any refusal. An unknown term is
+        404. Requires `config:write`.
       operationId: setTermMonths
       security: [{ sessionCookie: [] }]
       parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
@@ -1828,24 +1833,35 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ConfigTerm' }
         '400':
-          description: A malformed body or month, or a month outside the cycle.
+          description: >
+            A malformed body; a month not shaped YYYY-MM (`MONTH_INVALID`); a
+            month outside the cycle (`MONTH_OUTSIDE_CYCLE`); more than six
+            months (`TERM_TOO_LONG`).
           headers:
             X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
           content:
             text/plain:
               schema: { type: string }
-              example: 'El mes está fuera del ciclo: 2027-09'
+              examples:
+                outsideCycle: { value: 'El mes está fuera del ciclo: 2027-09' }
+                tooLong: { value: Un periodo puede tener hasta 6 meses }
+                invalid: { value: Mes inválido (usa AAAA-MM) }
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
         '409':
-          description: A month another term of the same cycle and level already covers.
+          description: >
+            A month another term of the same cycle and level already covers
+            (`MONTH_IN_OTHER_TERM`), or the term is a closed period
+            (`TERM_CLOSED`).
           headers:
             X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
           content:
             text/plain:
               schema: { type: string }
-              example: 'Ese mes ya pertenece a otro periodo del nivel: 2026-12'
+              examples:
+                otherTerm: { value: 'Ese mes ya pertenece a otro periodo del nivel: 2026-12' }
+                closed: { value: El periodo está cerrado; reábrelo para cambiar sus meses }
 
   /api/v1/config/terms/copy-months:
     post:
@@ -1859,8 +1875,12 @@ paths:
         for is kept (it may carry grades) but its months are cleared. Targets
         are de-duplicated. 400 when `toLevelIds` is empty or contains the
         source, a level or the cycle does not exist, or the source level has no
-        terms in the cycle. Returns the target levels' terms, level by level in
-        request order, then by ordinal. Requires `config:write`.
+        terms in the cycle; 400 `TERM_TOO_LONG` when a copied term would cover
+        more than six months. When any term of a TARGET level is a closed
+        period, the gateway answers 409 `TERM_CLOSED` ("El periodo está
+        cerrado; reábrelo para cambiar sus meses") before config is asked.
+        Returns the target levels' terms, level by level in request order, then
+        by ordinal. Requires `config:write`.
       operationId: copyTermMonths
       security: [{ sessionCookie: [] }]
       parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
@@ -1890,18 +1910,32 @@ paths:
                   terms:
                     type: array
                     items: { $ref: '#/components/schemas/ConfigTerm' }
-        '400': { $ref: '#/components/responses/PlainBadRequest' }
-        '401': { $ref: '#/components/responses/PlainUnauthorized' }
-        '403': { $ref: '#/components/responses/PlainForbidden' }
-        '404': { $ref: '#/components/responses/PlainNotFound' }
-        '409':
-          description: A concurrent change took one of the months first.
+        '400':
+          description: >
+            A malformed body or scope (no sentence code), or a copied term
+            longer than six months (`TERM_TOO_LONG`).
           headers:
             X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
           content:
             text/plain:
               schema: { type: string }
-              example: Ese mes ya pertenece a otro periodo del nivel
+              example: Un periodo puede tener hasta 6 meses
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: >
+            A target level's term is a closed period (`TERM_CLOSED`), or a
+            concurrent change took one of the months first
+            (`MONTH_IN_OTHER_TERM`).
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              examples:
+                closed: { value: El periodo está cerrado; reábrelo para cambiar sus meses }
+                otherTerm: { value: Ese mes ya pertenece a otro periodo del nivel }
 
   /api/v1/attendance/roster:
     get:
@@ -2747,11 +2781,15 @@ paths:
         A level without numeric grading still answers, with
         `editable: false` and `readOnlyReason`. A month after the current UTC
         month is listed in `months` but read-only (`editable: false`,
-        `readOnlyReason` "Aún no llega ese mes"), for every caller. Once the
-        level maps months into its terms (T7), `months` lists only the mapped
-        months, and `closedMonths` those of a CLOSED period — read-only for
-        every caller (`readOnlyReason` "El periodo está cerrado"; writes are
-        409 `MONTH_LOCKED`). A month outside the cycle is
+        `readOnlyReason` "Aún no llega ese mes"), for every caller (the
+        current month is the UTC month, fleet-wide). `months` always lists
+        every month of the cycle, mapped into a term or not (T7):
+        `unmappedMonths` are those no period of the level covers — still
+        capturable, marked "Sin periodo" (no report card prints them);
+        `closedMonths` are those of a CLOSED period (the months it was closed
+        with plus any mapped into it since) — read-only for every caller
+        (`readOnlyReason` "El periodo está cerrado"; writes are 409
+        `MONTH_LOCKED`). A month outside the cycle is
         400 "Ese mes no pertenece al ciclo"; an unknown assignment 404. Behind
         `module_grades`. Requires `grades:read`.
       operationId: getMonthlySheet
@@ -2859,8 +2897,11 @@ paths:
         times it was closed (`version`, 0 = never; it is the version of its
         latest report cards) and its capture progress: `expected` = active
         enrollments of the level's groups × the subjects taught in each group ×
-        the term's months up to the current UTC month; `captured` = how many of
-        those cells have a grade. A level without numeric grades expects 0.
+        EVERY month of the term (reached or not) from the month each pupil
+        joined their group (enrolment, or the latest transfer into it);
+        `captured` = how many of those cells have a grade. A level without
+        numeric grades expects 0. Withdrawn pupils are not expected and get no
+        report card.
         Behind `module_grades`. Requires `grades:read`.
       operationId: listGradePeriods
       security: [{ sessionCookie: [] }]
@@ -2893,7 +2934,10 @@ paths:
       description: >
         The period's expected and captured grades (see the periods list) and
         what is missing, grouped by group and subject with the teacher who
-        owes it, sorted by group then subject (Spanish order). Behind
+        owes it, sorted by group then subject (Spanish order).
+        `unfinishedMonths` are the term's months after the current UTC month:
+        they are still expected — closing now reports them missing and needs
+        `force` — so the screen warns "Aún no terminan sus meses". Behind
         `module_grades`. Requires `grades:read`.
       operationId: getGradePeriodProgress
       security: [{ sessionCookie: [] }]
@@ -2914,16 +2958,21 @@ paths:
       summary: Close a period and issue its report cards (director)
       description: >
         Closes the period and, in the SAME transaction, freezes a report card
-        for every active enrollment of the level's groups (version = the
-        period's close count). From then on nobody — teacher or director — may
-        write a grade of its months (409 `MONTH_LOCKED` "El periodo está
-        cerrado") until it is reopened. A period with missing captures is 409
+        for every ACTIVE enrollment of the level's groups (version = the
+        period's close count; withdrawn pupils get none) and snapshots the
+        term's months. From then on nobody — teacher or director — may write a
+        grade of those months, nor of any month mapped into the term later (409
+        `MONTH_LOCKED` "El periodo está cerrado"), nor change the term's months
+        (409 `TERM_CLOSED`), until it is reopened. Every month of the term
+        counts, so closing before its last month ends needs `force`. A period with missing captures is 409
         `MISSING_GRADES` "Faltan N calificaciones por capturar" unless
         `force: true`; a period without months is 409 `TERM_WITHOUT_MONTHS`; a
         closed one 409 `ALREADY_CLOSED`; a level without numeric grades 409
         `LEVEL_NOT_GRADED`. Closing again after a reopen issues version 2, which
-        supersedes version 1 (families see the latest) and notifies them
-        "Boleta actualizada". An empty body means `force: false`. Behind
+        supersedes EVERY version-1 card of the term — a pupil withdrawn in
+        between included (families see the latest) — and notifies them
+        "Boleta actualizada". Notifications go through a transactional outbox:
+        a broker outage delays them, never loses them. An empty body means `force: false`. Behind
         `module_grades`. Requires `grades:close` (owner only).
       operationId: closeGradePeriod
       security: [{ sessionCookie: [] }]
@@ -3155,9 +3204,13 @@ components:
         Monthly grades: GRADE_OUT_OF_RANGE, GRADE_DECIMALS, GRADE_NOT_NUMBER,
         MONTH_OUTSIDE_CYCLE, LEVEL_NOT_GRADED, ENROLLMENT_NOT_IN_GROUP,
         MONTH_PREVIOUS_GROUP, MONTH_IN_FUTURE, LEVEL_SCALE_NOT_CONFIGURED, and
-        MONTH_LOCKED (409, a month of a closed period, T7). Level scale change:
+        MONTH_LOCKED (409, a month of a closed period, T7 — also on the legacy
+        per-term capture POST /api/v1/grades). Level scale change:
         SCALE_TIGHTENING. Period closing (409): MISSING_GRADES,
         TERM_WITHOUT_MONTHS, ALREADY_CLOSED, ALREADY_OPEN, LEVEL_NOT_GRADED.
+        Term months (T7): MONTH_INVALID (400), MONTH_OUTSIDE_CYCLE (400),
+        TERM_TOO_LONG (400, more than six months), MONTH_IN_OTHER_TERM (409),
+        TERM_CLOSED (409, the term is a closed period).
         Absent on a refusal without a code.
       schema:
         type: string
@@ -3292,7 +3345,7 @@ components:
         The period's state refuses the request; the sentence is shown as is and
         the machine code rides in `X-Error-Code` (MISSING_GRADES,
         TERM_WITHOUT_MONTHS, ALREADY_CLOSED, ALREADY_OPEN, LEVEL_NOT_GRADED;
-        MONTH_LOCKED on a grade write).
+        MONTH_LOCKED on a grade write; TERM_CLOSED on a term-months change).
       headers:
         X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
       content:
@@ -3523,12 +3576,18 @@ components:
         progress: { captured: 288, expected: 288 }
     GradePeriodProgress:
       type: object
-      required: [termId, months, expected, captured, missing]
+      required: [termId, months, unfinishedMonths, expected, captured, missing]
       properties:
         termId: { type: string, format: uuid }
         months:
           type: array
           items: { type: string, example: '2026-09' }
+        unfinishedMonths:
+          type: array
+          description: >
+            The term's months after the current UTC month: still expected, not
+            taught yet ("Aún no terminan sus meses"). [] when none.
+          items: { type: string, example: '2026-11' }
         expected: { type: integer, example: 288 }
         captured: { type: integer, example: 270 }
         missing:
@@ -3546,6 +3605,7 @@ components:
       example:
         termId: 7a000000-0000-4000-8000-000000000001
         months: ['2026-09', '2026-10', '2026-11']
+        unfinishedMonths: ['2026-11']
         expected: 288
         captured: 270
         missing:
@@ -4367,15 +4427,15 @@ components:
           items: { type: string, example: '2026-09' }
     MonthlySheet:
       type: object
-      required: [assignmentId, month, months, scale, gradingEnabled, currentMonth, editable, closedMonths, rows]
+      required: [assignmentId, month, months, scale, gradingEnabled, currentMonth, editable, closedMonths, unmappedMonths, rows]
       properties:
         assignmentId: { type: string, format: uuid }
         month: { type: string, example: '2026-09' }
         months:
           type: array
           description: >
-            The cycle's months, start to end inclusive — or, once the level maps
-            months into its terms (T7), only the mapped ones.
+            The cycle's months, start to end inclusive, mapped into a term or
+            not (T7).
           items: { type: string, example: '2026-08' }
         closedMonths:
           type: array
@@ -4384,6 +4444,13 @@ components:
             (T7): read-only for everyone (writes answer 409 `MONTH_LOCKED`)
             until the director reopens it. [] when none.
           items: { type: string, example: '2026-09' }
+        unmappedMonths:
+          type: array
+          description: >
+            The months of `months` no period of the level covers (T7): still
+            capturable, but no report card prints them — the screen marks them
+            "Sin periodo". [] when none.
+          items: { type: string, example: '2026-08' }
         scale: { $ref: '#/components/schemas/GradingScale' }
         gradingEnabled: { type: boolean }
         currentMonth:
@@ -4431,6 +4498,7 @@ components:
         currentMonth: '2026-09'
         editable: true
         closedMonths: []
+        unmappedMonths: ['2026-08']
         rows:
           - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301, studentId: 6e1d2c3b-0000-4000-8000-000000000042, name: Ana Ávila, value: 9.5, updatedAt: '2026-09-03T15:04:05Z', rowEditable: true }
           - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3302, studentId: 6e1d2c3b-0000-4000-8000-000000000043, name: Nico Núñez, value: null, updatedAt: null, rowEditable: false, rowReadOnlyReason: Ese mes corresponde al grupo anterior del alumno }

@@ -38,11 +38,13 @@ type MissingGrades struct {
 
 // PeriodProgress is one term's capture progress and what is missing.
 type PeriodProgress struct {
-	TermID   string
-	Months   []string
-	Expected int
-	Captured int
-	Missing  []MissingGrades
+	TermID string
+	Months []string
+	// UnfinishedMonths are the term's months after the current UTC month.
+	UnfinishedMonths []string
+	Expected         int
+	Captured         int
+	Missing          []MissingGrades
 }
 
 // ClosePeriodInput closes a term on behalf of the authenticated director.
@@ -150,7 +152,19 @@ func (c *GradesClient) GetPeriodProgress(ctx context.Context, termID string) (Pe
 			TeacherName: g.GetTeacherName(), MissingCount: int(g.GetMissingCount()),
 		})
 	}
-	return PeriodProgress{TermID: m.GetTermId(), Months: m.GetMonths(), Expected: int(m.GetExpected()), Captured: int(m.GetCaptured()), Missing: missing}, nil
+	return PeriodProgress{
+		TermID: m.GetTermId(), Months: m.GetMonths(), UnfinishedMonths: m.GetUnfinishedMonths(),
+		Expected: int(m.GetExpected()), Captured: int(m.GetCaptured()), Missing: missing,
+	}, nil
+}
+
+// ClosedTerms asks which of these terms are closed periods (one call).
+func (c *GradesClient) ClosedTerms(ctx context.Context, termIDs []string) ([]string, error) {
+	res, err := c.rpc.ClosedTerms(ctx, connect.NewRequest(&gradesv1.ClosedTermsRequest{TermIds: termIDs}))
+	if err != nil {
+		return nil, err
+	}
+	return res.Msg.GetClosedTermIds(), nil
 }
 
 // ClosePeriod closes a term and issues its report cards. Refusals come back

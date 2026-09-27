@@ -71,6 +71,8 @@ type MonthlySheet struct {
 	Rows           []MonthlySheetRow
 	// ClosedMonths are the months of a CLOSED period of the level (T7).
 	ClosedMonths []string
+	// UnmappedMonths are the months no period of the level covers.
+	UnmappedMonths []string
 }
 
 // EnrollmentMonthlyGrades is one enrollment's monthly grades for its cycle.
@@ -125,7 +127,7 @@ func (c *GradesClient) GetMonthlySheet(ctx context.Context, q MonthlySheetQuery)
 	return MonthlySheet{
 		AssignmentID: m.GetAssignmentId(), Month: m.GetMonth(), Months: m.GetMonths(), Scale: toGradeScale(m.GetScale()),
 		GradingEnabled: m.GetGradingEnabled(), Editable: m.GetEditable(), ReadOnlyReason: m.GetReadOnlyReason(), Rows: rows,
-		ClosedMonths: m.GetClosedMonths(),
+		ClosedMonths: m.GetClosedMonths(), UnmappedMonths: m.GetUnmappedMonths(),
 	}, nil
 }
 

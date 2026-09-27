@@ -141,6 +141,9 @@ type monthlySheetResponse struct {
 	// ClosedMonths are the months of a CLOSED period of the level (T7): every
 	// write to them answers 409 MONTH_LOCKED until the director reopens it.
 	ClosedMonths []string `json:"closedMonths"`
+	// UnmappedMonths are the months no period of the level covers: still
+	// capturable, but no report card prints them (the screen says "Sin periodo").
+	UnmappedMonths []string `json:"unmappedMonths"`
 }
 
 type monthlyGradeResponse struct {
@@ -300,6 +303,7 @@ func (h *MonthlyGradesHandler) toSheetResponse(ctx context.Context, s client.Mon
 		AssignmentID: s.AssignmentID, Month: s.Month, Months: months, Scale: toGradeScaleResponse(s.Scale),
 		GradingEnabled: s.GradingEnabled, CurrentMonth: h.now().UTC().Format(monthLayout),
 		Editable: s.Editable, ReadOnlyReason: s.ReadOnlyReason, Rows: rows, ClosedMonths: nonNilMonths(s.ClosedMonths),
+		UnmappedMonths: nonNilMonths(s.UnmappedMonths),
 	}
 }
 

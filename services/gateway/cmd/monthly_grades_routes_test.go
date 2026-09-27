@@ -127,6 +127,30 @@ func (stubGrades) CountScaleViolations(_ context.Context, req *connect.Request[g
 	return connect.NewResponse(&gradesv1.CountScaleViolationsResponse{Violations: n}), nil
 }
 
+// ClosedTerms: term "trm-closed" is a closed period; every other term is open.
+func (stubGrades) ClosedTerms(_ context.Context, req *connect.Request[gradesv1.ClosedTermsRequest]) (*connect.Response[gradesv1.ClosedTermsResponse], error) {
+	closed := []string{}
+	for _, id := range req.Msg.GetTermIds() {
+		if id == "trm-closed" {
+			closed = append(closed, id)
+		}
+	}
+	return connect.NewResponse(&gradesv1.ClosedTermsResponse{ClosedTermIds: closed}), nil
+}
+
+// T7: PUT /config/terms/{id}/months asks grades first; a closed period is 409
+// TERM_CLOSED and config is never reached.
+func TestTermMonthsOfAClosedPeriodAre409(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_config": true})
+	res := doGateway(t, gw, http.MethodPut, "/api/v1/config/terms/trm-closed/months", "config-writer", `{"months":["2026-09"]}`)
+	if res.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", res.StatusCode)
+	}
+	if got := res.Header.Get("X-Error-Code"); got != "TERM_CLOSED" {
+		t.Errorf("X-Error-Code = %q, want TERM_CLOSED", got)
+	}
+}
+
 // PATCH /config/levels/{id} with a grading change asks grades first (the
 // composition root wires the scale guard): 409 SCALE_TIGHTENING when captured
 // grades would break, 200 otherwise.

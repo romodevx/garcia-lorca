@@ -73,11 +73,15 @@ type missingGradesResponse struct {
 }
 
 type progressResponse struct {
-	TermID   string                  `json:"termId"`
-	Months   []string                `json:"months"`
-	Expected int                     `json:"expected"`
-	Captured int                     `json:"captured"`
-	Missing  []missingGradesResponse `json:"missing"`
+	TermID string   `json:"termId"`
+	Months []string `json:"months"`
+	// UnfinishedMonths are the term's months after the current UTC month:
+	// still expected (closing now needs force), so the screen warns "Aún no
+	// terminan sus meses".
+	UnfinishedMonths []string                `json:"unfinishedMonths"`
+	Expected         int                     `json:"expected"`
+	Captured         int                     `json:"captured"`
+	Missing          []missingGradesResponse `json:"missing"`
 }
 
 type closePeriodRequest struct {
@@ -138,7 +142,10 @@ func (h *GradesPeriodsHandler) Progress(w http.ResponseWriter, r *http.Request) 
 			TeacherName: m.TeacherName, MissingCount: m.MissingCount,
 		})
 	}
-	writeJSON(w, http.StatusOK, progressResponse{TermID: p.TermID, Months: nonNilMonths(p.Months), Expected: p.Expected, Captured: p.Captured, Missing: missing})
+	writeJSON(w, http.StatusOK, progressResponse{
+		TermID: p.TermID, Months: nonNilMonths(p.Months), UnfinishedMonths: nonNilMonths(p.UnfinishedMonths),
+		Expected: p.Expected, Captured: p.Captured, Missing: missing,
+	})
 }
 
 // Close handles POST /api/v1/grades/periods/{termId}/close {force} — close the

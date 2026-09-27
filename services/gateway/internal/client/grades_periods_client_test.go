@@ -31,6 +31,7 @@ type stubPeriodsGrades struct {
 	cardsReq   *gradesv1.ListReportCardsRequest
 	cardReq    *gradesv1.GetReportCardRequest
 	sheetClose []string
+	closedReq  *gradesv1.ClosedTermsRequest
 }
 
 func (s *stubPeriodsGrades) ListPeriods(_ context.Context, r *connect.Request[gradesv1.ListPeriodsRequest]) (*connect.Response[gradesv1.ListPeriodsResponse], error) {
@@ -44,7 +45,7 @@ func (s *stubPeriodsGrades) ListPeriods(_ context.Context, r *connect.Request[gr
 
 func (s *stubPeriodsGrades) GetPeriodProgress(_ context.Context, r *connect.Request[gradesv1.GetPeriodProgressRequest]) (*connect.Response[gradesv1.GetPeriodProgressResponse], error) {
 	s.progReq = r.Msg
-	return connect.NewResponse(&gradesv1.GetPeriodProgressResponse{TermId: "term-1", Months: []string{"2026-09"}, Expected: 9, Captured: 7,
+	return connect.NewResponse(&gradesv1.GetPeriodProgressResponse{TermId: "term-1", Months: []string{"2026-09"}, UnfinishedMonths: []string{"2026-09"}, Expected: 9, Captured: 7,
 		Missing: []*gradesv1.MissingGrades{{GroupId: "grp-1", GroupLabel: "1° · A", SubjectId: "sub-1", SubjectName: "Matemáticas", TeacherName: "Gabriela", MissingCount: 2}}}), nil
 }
 
@@ -79,7 +80,12 @@ func (s *stubPeriodsGrades) GetReportCard(_ context.Context, r *connect.Request[
 }
 
 func (s *stubPeriodsGrades) GetMonthlySheet(_ context.Context, _ *connect.Request[gradesv1.GetMonthlySheetRequest]) (*connect.Response[gradesv1.GetMonthlySheetResponse], error) {
-	return connect.NewResponse(&gradesv1.GetMonthlySheetResponse{AssignmentId: "asg-1", Month: "2026-09", ClosedMonths: s.sheetClose}), nil
+	return connect.NewResponse(&gradesv1.GetMonthlySheetResponse{AssignmentId: "asg-1", Month: "2026-09", ClosedMonths: s.sheetClose, UnmappedMonths: []string{"2026-08"}}), nil
+}
+
+func (s *stubPeriodsGrades) ClosedTerms(_ context.Context, r *connect.Request[gradesv1.ClosedTermsRequest]) (*connect.Response[gradesv1.ClosedTermsResponse], error) {
+	s.closedReq = r.Msg
+	return connect.NewResponse(&gradesv1.ClosedTermsResponse{ClosedTermIds: []string{"term-1"}}), nil
 }
 
 func newPeriodsGradesClient(t *testing.T, stub *stubPeriodsGrades) *client.GradesClient {
@@ -109,7 +115,7 @@ func TestGradesClientPeriodsRoundTrip(t *testing.T) {
 	prog, err := c.GetPeriodProgress(ctx, "term-1")
 	require.NoError(t, err)
 	assert.Equal(t, "term-1", stub.progReq.GetTermId())
-	assert.Equal(t, client.PeriodProgress{TermID: "term-1", Months: []string{"2026-09"}, Expected: 9, Captured: 7,
+	assert.Equal(t, client.PeriodProgress{TermID: "term-1", Months: []string{"2026-09"}, UnfinishedMonths: []string{"2026-09"}, Expected: 9, Captured: 7,
 		Missing: []client.MissingGrades{{GroupID: "grp-1", GroupLabel: "1° · A", SubjectID: "sub-1", SubjectName: "Matemáticas", TeacherName: "Gabriela", MissingCount: 2}}}, prog)
 
 	closed, err := c.ClosePeriod(ctx, client.ClosePeriodInput{TermID: "term-1", Force: true, ActorID: "usr-dir", ActorName: "Directora"})
@@ -143,4 +149,10 @@ func TestGradesClientPeriodsRoundTrip(t *testing.T) {
 	sheet, err := c.GetMonthlySheet(ctx, client.MonthlySheetQuery{AssignmentID: "asg-1"})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"2026-09"}, sheet.ClosedMonths)
+	assert.Equal(t, []string{"2026-08"}, sheet.UnmappedMonths)
+
+	closedTerms, err := c.ClosedTerms(ctx, []string{"term-1", "term-2"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"term-1", "term-2"}, stub.closedReq.GetTermIds())
+	assert.Equal(t, []string{"term-1"}, closedTerms)
 }
