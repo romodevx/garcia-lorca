@@ -218,6 +218,28 @@ func (h *ConfigHandler) ListSubjects(ctx context.Context, req *connect.Request[c
 
 // --- terms -----------------------------------------------------------------
 
+// SetTermMonths replaces the calendar months a term covers.
+func (h *ConfigHandler) SetTermMonths(ctx context.Context, req *connect.Request[configv1.SetTermMonthsRequest]) (*connect.Response[configv1.SetTermMonthsResponse], error) {
+	t, err := h.catalog.SetTermMonths(ctx, req.Msg.GetTermId(), req.Msg.GetMonths())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.SetTermMonthsResponse{Term: toProtoTerm(t)}), nil
+}
+
+// CopyTermMonths mirrors one level's term months onto other levels of a cycle.
+func (h *ConfigHandler) CopyTermMonths(ctx context.Context, req *connect.Request[configv1.CopyTermMonthsRequest]) (*connect.Response[configv1.CopyTermMonthsResponse], error) {
+	terms, err := h.catalog.CopyTermMonths(ctx, req.Msg.GetCycleId(), req.Msg.GetFromLevelId(), req.Msg.GetToLevelIds())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	out := make([]*configv1.Term, 0, len(terms))
+	for _, t := range terms {
+		out = append(out, toProtoTerm(t))
+	}
+	return connect.NewResponse(&configv1.CopyTermMonthsResponse{Terms: out}), nil
+}
+
 func (h *ConfigHandler) CreateTerm(ctx context.Context, req *connect.Request[configv1.CreateTermRequest]) (*connect.Response[configv1.CreateTermResponse], error) {
 	t, err := h.catalog.CreateTerm(ctx, req.Msg.GetCycleId(), req.Msg.GetLevelId(), req.Msg.GetName(), int(req.Msg.GetOrdinal()), asTime(req.Msg.GetStartsOn()), asTime(req.Msg.GetEndsOn()))
 	if err != nil {
@@ -410,7 +432,17 @@ func toProtoTerm(t domain.Term) *configv1.Term {
 		Ordinal:  int32(t.Ordinal()),
 		StartsOn: timestamppb.New(t.StartsOn()),
 		EndsOn:   timestamppb.New(t.EndsOn()),
+		Months:   formatMonths(t.Months()),
 	}
+}
+
+// formatMonths renders a term's months as "YYYY-MM", keeping their order.
+func formatMonths(months []time.Time) []string {
+	out := make([]string, 0, len(months))
+	for _, m := range months {
+		out = append(out, domain.FormatMonth(m))
+	}
+	return out
 }
 
 func toProtoGroup(g domain.Group) *configv1.Group {
@@ -552,6 +584,18 @@ func asTime(ts *timestamppb.Timestamp) time.Time {
 // the error straight to connect.NewError shipped Postgres constraint names and
 // SQLSTATEs — and on some constraints the conflicting value — to whoever called.
 func connectErr(err error) *connect.Error {
+	ce := connectErrForKind(err)
+	if code := domain.RefusalCodeOf(err); code != "" {
+		ce.Meta().Set(ErrorCodeMeta, string(code))
+	}
+	return ce
+}
+
+// ErrorCodeMeta is the error-metadata key a refusal's machine code rides in; the
+// gateway forwards it as the X-Error-Code response header.
+const ErrorCodeMeta = "X-Error-Code"
+
+func connectErrForKind(err error) *connect.Error {
 	safe := errors.New(glerrors.SafeMessage(err))
 
 	switch glerrors.KindOf(err) {

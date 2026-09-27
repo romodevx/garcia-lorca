@@ -157,6 +157,13 @@ func appDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open app db: %v", err)
 	}
+	// One pool per call: close it with the test, or a growing suite exhausts
+	// max_connections (53300).
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
 	return db
 }
 
