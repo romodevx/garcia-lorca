@@ -1,19 +1,22 @@
 "use client";
 
-import { type ReactElement } from "react";
+import { useCallback, type ReactElement } from "react";
 
 import { Btn } from "../../_design/Controls";
 import type { GradeSheetClient } from "../../grades/monthly";
 import { EmptyHint, ErrorAlert } from "../config/parts";
+import type { GradeSaveStore } from "./gradeSaveStore";
 import { GradeSheetTable } from "./GradeSheetTable";
 import { MonthChips } from "./MonthChips";
 import { useGradeSheet } from "./useGradeSheet";
-import { usePendingSaves } from "./usePendingSaves";
+import { confirmLeavingUnsaved } from "./useGradeSaves";
 
 export interface MonthlyGradeSheetProps {
   assignmentId: string;
   /** Teacher (`/teaching/grades`) or director (`/grades`) — same contract. */
   client: GradeSheetClient;
+  /** Owned by the capture screen (`useGradeSaves`), above this keyed sheet. */
+  saves: GradeSaveStore;
 }
 
 /**
@@ -22,14 +25,20 @@ export interface MonthlyGradeSheetProps {
  * and says how it went; nothing waits for a "Guardar" at the bottom. Built for
  * a teacher on a tablet in the classroom: large fields, no sideways scroll.
  */
-export function MonthlyGradeSheet({ assignmentId, client }: MonthlyGradeSheetProps): ReactElement {
-  const { load, lastSheet, month, chooseMonth, reload } = useGradeSheet(client, assignmentId);
-  const { pending, track } = usePendingSaves();
+export function MonthlyGradeSheet({ assignmentId, client, saves }: MonthlyGradeSheetProps): ReactElement {
+  const { load, lastSheet, month, chooseMonth, reload } = useGradeSheet(client, assignmentId, saves);
+  const shownMonth = month ?? lastSheet?.month;
+
+  const choose = useCallback((next: string) => {
+    if (next === shownMonth) return;
+    const unsaved = shownMonth === undefined ? 0 : saves.unsavedCount({ assignmentId, month: shownMonth });
+    if (confirmLeavingUnsaved(unsaved)) chooseMonth(next);
+  }, [assignmentId, chooseMonth, saves, shownMonth]);
 
   return (
     <div>
-      {lastSheet !== undefined && lastSheet.months.length > 0 && (
-        <MonthChips months={lastSheet.months} selected={month ?? lastSheet.month} onChoose={chooseMonth} />
+      {lastSheet !== undefined && lastSheet.months.length > 0 && shownMonth !== undefined && (
+        <MonthChips months={lastSheet.months} selected={shownMonth} onChoose={choose} />
       )}
       {load.kind === "loading" && <EmptyHint>Cargando lista…</EmptyHint>}
       {load.kind === "unavailable" && <EmptyHint>{load.reason}</EmptyHint>}
@@ -39,9 +48,7 @@ export function MonthlyGradeSheet({ assignmentId, client }: MonthlyGradeSheetPro
           <Btn kind="ghost" icon="clock" onClick={reload}>Reintentar</Btn>
         </div>
       )}
-      {load.kind === "ready" && (
-        <GradeSheetTable key={`${load.sheet.assignmentId}:${load.sheet.month}`} sheet={load.sheet} client={client} pending={pending} track={track} />
-      )}
+      {load.kind === "ready" && <GradeSheetTable key={`${load.sheet.assignmentId}:${load.sheet.month}`} sheet={load.sheet} saves={saves} />}
     </div>
   );
 }

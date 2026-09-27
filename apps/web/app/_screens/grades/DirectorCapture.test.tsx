@@ -71,7 +71,10 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.restoreAllMocks();
+});
 
 describe("DirectorCapture", () => {
   it("lists every assignment as group · subject · teacher, in school order", async () => {
@@ -110,5 +113,28 @@ describe("DirectorCapture", () => {
     teachers.listTeachingAssignments.mockRejectedValue(new Error("boom"));
     render(<DirectorCapture onBack={() => {}} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("No se pudieron cargar las asignaciones.");
+  });
+
+  it("switching assignment with an unsaved grade asks first, and keeps the pending counter", async () => {
+    const user = userEvent.setup();
+    client.save.mockRejectedValue(new Error("network"));
+    render(<DirectorCapture onBack={() => {}} />);
+    const picker = await screen.findByLabelText("Asignación", CAMPO);
+    await within(picker).findByRole("option", { name: "2° PRIMARIA · A · Matemáticas · Ada Lovelace" });
+    await user.selectOptions(picker, "a-p2");
+    await user.type(await screen.findByRole("textbox", { name: "Calificación de Grace Hopper" }), "8{Enter}");
+    await screen.findByRole("button", { name: "Error — reintentar" });
+    const ask = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+
+    await user.selectOptions(picker, "a-p1");
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(picker).toHaveValue("a-p2");
+
+    await user.selectOptions(picker, "a-p1");
+    await waitFor(() => expect(client.load).toHaveBeenLastCalledWith({ assignmentId: "a-p1" }));
+    expect(await screen.findByRole("button", { name: "1 sin guardar — reintentar" })).toBeInTheDocument();
+    const leaving = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(leaving);
+    expect(leaving.defaultPrevented).toBe(true);
   });
 });

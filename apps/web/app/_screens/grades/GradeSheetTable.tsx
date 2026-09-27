@@ -1,18 +1,17 @@
 "use client";
 
-import { useCallback, useMemo, useRef, type ReactElement } from "react";
+import { useCallback, useRef, type ReactElement } from "react";
 
-import { sheetStats, type GradeSheet, type GradeSheetClient } from "../../grades/monthly";
+import { sheetStats, type GradeSheet, type MonthlyGradeKey } from "../../grades/monthly";
 import { EmptyHint } from "../config/parts";
+import type { GradeSaveStore } from "./gradeSaveStore";
 import { GradeSheetRow } from "./GradeSheetRow";
 import { SheetCounters } from "./SheetCounters";
-import { useCellSaves } from "./useCellSaves";
+import { useSaveStoreVersion } from "./useGradeSaves";
 
 export interface GradeSheetTableProps {
   sheet: GradeSheet;
-  client: GradeSheetClient;
-  pending: number;
-  track: <T>(work: Promise<T>) => Promise<T>;
+  saves: GradeSaveStore;
 }
 
 const TH: React.CSSProperties = {
@@ -30,14 +29,17 @@ const TH: React.CSSProperties = {
 
 /**
  * One month of one class: the counters and the capture table. Mounted per
- * month, so a switch starts with fresh statuses; saves still travelling are
- * counted by the parent's `track`.
+ * month; every cell's save state lives in the screen's store, so a switch
+ * forgets nothing — an unsaved value comes back in its field.
  */
-export function GradeSheetTable({ sheet, client, pending, track }: GradeSheetTableProps): ReactElement {
-  const saves = useCellSaves(client, sheet, track);
+export function GradeSheetTable({ sheet, saves }: GradeSheetTableProps): ReactElement {
+  useSaveStoreVersion(saves);
   const inputs = useRef<(HTMLInputElement | null)[]>([]);
   const { passing } = sheet.scale;
-  const stats = useMemo(() => sheetStats(Object.values(saves.values), passing), [saves.values, passing]);
+  const keyOf = useCallback((enrollmentId: string): MonthlyGradeKey => ({ assignmentId: sheet.assignmentId, month: sheet.month, enrollmentId }), [sheet.assignmentId, sheet.month]);
+  // Read fresh on every store change (a class is a few dozen rows).
+  const confirmed = sheet.rows.map((r) => saves.confirmedOf(keyOf(r.enrollmentId), r.value));
+  const stats = sheetStats(confirmed, passing);
 
   const move = useCallback((from: number, step: 1 | -1): boolean => {
     const next = inputs.current[from + step];
@@ -51,7 +53,7 @@ export function GradeSheetTable({ sheet, client, pending, track }: GradeSheetTab
 
   return (
     <div>
-      <SheetCounters stats={stats} pending={pending} />
+      <SheetCounters stats={stats} pending={saves.pendingCount()} unsaved={saves.unsavedCount()} retryable={saves.retryableCount()} onRetryAll={() => saves.retryAll()} />
       {!sheet.editable && (
         <p role="note" style={{ margin: "0 0 12px", padding: "12px 16px", borderRadius: "var(--r-md)", background: "var(--warn-bg)", color: "var(--warn-fg)", fontSize: 15, fontWeight: 600 }}>
           {sheet.readOnlyReason ?? "Este mes ya no se puede modificar."}
@@ -67,21 +69,24 @@ export function GradeSheetTable({ sheet, client, pending, track }: GradeSheetTab
           </thead>
           <tbody>
             {sheet.rows.map((row, index) => {
-              const confirmed = saves.values[row.enrollmentId] ?? null;
-              const failing = confirmed !== null && confirmed < passing;
-              if (!sheet.editable) return <ReadOnlyRow key={row.enrollmentId} name={row.name} value={confirmed} failing={failing} />;
+              const key = keyOf(row.enrollmentId);
+              const value = confirmed[index] ?? null;
+              const failing = value !== null && value < passing;
+              if (!sheet.editable) return <ReadOnlyRow key={row.enrollmentId} name={row.name} value={value} failing={failing} />;
               return (
                 <GradeSheetRow
                   key={row.enrollmentId}
                   row={row}
+                  initialText={saves.draftOf(key)}
                   scale={sheet.scale}
-                  status={saves.statusOf(row.enrollmentId)}
+                  status={saves.statusOf(key)}
                   failing={failing}
                   inputRef={(el) => { inputs.current[index] = el; }}
-                  onCommit={(next) => saves.commit(row.enrollmentId, next)}
+                  onCommit={(next) => saves.commit(key, next, row.value)}
+                  onInvalid={(text) => saves.markInvalid(key, text, row.value)}
                   onMove={(step) => move(index, step)}
-                  onRetry={() => saves.retry(row.enrollmentId)}
-                  onTyping={() => saves.dismissRejection(row.enrollmentId)}
+                  onRetry={() => saves.retry(key)}
+                  onTyping={() => saves.dismissRejection(key)}
                 />
               );
             })}

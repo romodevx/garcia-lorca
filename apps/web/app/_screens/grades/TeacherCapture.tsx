@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import { listAssignments, teachingGradeSheet, type TeachingAssignment } from "../../teaching/api";
 import { ErrorAlert } from "../config/parts";
 import { TeachingPicker } from "../teaching/TeachingPicker";
 import { MonthlyGradeSheet } from "./MonthlyGradeSheet";
+import { confirmLeavingUnsaved, useGradeSaves } from "./useGradeSaves";
 
 export interface TeacherCaptureProps {
   onBack: () => void;
@@ -26,6 +27,13 @@ export function TeacherCapture({ onBack }: TeacherCaptureProps): ReactElement {
   const [assignments, setAssignments] = useState<TeachingAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
+  // Above the keyed sheet: a class switch keeps saves in flight and unsaved values.
+  const saves = useGradeSaves(teachingGradeSheet);
+  const openAssignment = useRef<string | undefined>(undefined);
+  const canLeave = useCallback(() => {
+    const open = openAssignment.current;
+    return confirmLeavingUnsaved(open === undefined ? 0 : saves.unsavedCount({ assignmentId: open }));
+  }, [saves]);
 
   // Boot: the teacher's own assignments.
   useEffect(() => {
@@ -73,11 +81,26 @@ export function TeacherCapture({ onBack }: TeacherCaptureProps): ReactElement {
         ) : loadError !== undefined ? (
           <ErrorAlert message={loadError} />
         ) : (
-          <TeachingPicker title="Calificaciones" options={assignments} bySubject>
-            {(assignment) => <MonthlyGradeSheet key={assignment.id} assignmentId={assignment.id} client={teachingGradeSheet} />}
+          <TeachingPicker title="Calificaciones" options={assignments} bySubject canLeave={canLeave}>
+            {(assignment) => (
+              <OpenSheet key={assignment.id} assignmentId={assignment.id} openAssignment={openAssignment}>
+                <MonthlyGradeSheet assignmentId={assignment.id} client={teachingGradeSheet} saves={saves} />
+              </OpenSheet>
+            )}
           </TeachingPicker>
         )}
       </div>
     </Page>
   );
+}
+
+/** Records which class is open, for the "leave with unsaved grades?" question. */
+function OpenSheet({ assignmentId, openAssignment, children }: { assignmentId: string; openAssignment: { current: string | undefined }; children: ReactElement }): ReactElement {
+  useEffect(() => {
+    openAssignment.current = assignmentId;
+    return () => {
+      openAssignment.current = undefined;
+    };
+  }, [assignmentId, openAssignment]);
+  return children;
 }

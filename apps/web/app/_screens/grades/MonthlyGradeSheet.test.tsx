@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { GradeRequestError, type GradeSheet, type GradeSheetClient, type SavedMonthlyGrade } from "../../grades/monthly";
 import { MonthlyGradeSheet } from "./MonthlyGradeSheet";
+import { useGradeSaves } from "./useGradeSaves";
 
 const SHEET: GradeSheet = {
   assignmentId: "a1",
@@ -48,13 +49,22 @@ function fakeClient(sheet: GradeSheet = SHEET): MockClient {
 
 const input = (name: string): HTMLInputElement => screen.getByRole("textbox", { name: `Calificación de ${name}` });
 
+/** The capture screens own the save store, above the sheet — as here. */
+function Screen({ client }: { client: GradeSheetClient }) {
+  const saves = useGradeSaves(client);
+  return <MonthlyGradeSheet assignmentId="a1" client={client} saves={saves} />;
+}
+
 async function renderSheet(client: MockClient = fakeClient()): Promise<MockClient> {
-  render(<MonthlyGradeSheet assignmentId="a1" client={client} />);
+  render(<Screen client={client} />);
   await screen.findByRole("table", { name: "Calificaciones del mes" });
   return client;
 }
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.restoreAllMocks();
+});
 
 describe("MonthlyGradeSheet — loading", () => {
   it("asks the server for the current month and shows one field per student", async () => {
@@ -80,7 +90,7 @@ describe("MonthlyGradeSheet — loading", () => {
   it("says when a level has no numeric grade", async () => {
     const client = fakeClient();
     client.load.mockRejectedValue(new GradeRequestError(400, "Este nivel no lleva calificación numérica"));
-    render(<MonthlyGradeSheet assignmentId="a1" client={client} />);
+    render(<Screen client={client} />);
 
     expect(await screen.findByText("Este nivel no lleva calificación numérica")).toBeInTheDocument();
     expect(screen.queryByRole("table")).toBeNull();
@@ -90,7 +100,7 @@ describe("MonthlyGradeSheet — loading", () => {
     const user = userEvent.setup();
     const client = fakeClient();
     client.load.mockRejectedValueOnce(new Error("boom"));
-    render(<MonthlyGradeSheet assignmentId="a1" client={client} />);
+    render(<Screen client={client} />);
 
     await user.click(await screen.findByRole("button", { name: "Reintentar" }));
     expect(await screen.findByRole("table", { name: "Calificaciones del mes" })).toBeInTheDocument();
@@ -175,6 +185,16 @@ describe("MonthlyGradeSheet — validation", () => {
 
     expect(await screen.findByText("Solo se permite 1 decimal")).toBeInTheDocument();
     expect(client.save).not.toHaveBeenCalled();
+  });
+
+  it("announces the error it shows on leaving the field", async () => {
+    const user = userEvent.setup();
+    await renderSheet();
+
+    await user.type(input("Alan Turing"), "1e1");
+    await user.tab();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("La calificación debe ser un número");
   });
 
   it("shows the server's rejection on its row, without a retry", async () => {
@@ -263,5 +283,147 @@ describe("MonthlyGradeSheet — months", () => {
 
     expect(input("Ada Lovelace")).toHaveValue("7");
     expect(screen.getByRole("button", { name: "Oct" })).toHaveAttribute("aria-pressed", "true");
+  });
+});
+
+describe("MonthlyGradeSheet — one save per cell at a time", () => {
+  it("8 then 9: the 9 waits for the 8, and Guardado only once the 9 is confirmed", async () => {
+    const user = userEvent.setup();
+    const client = fakeClient();
+    const first = deferred<SavedMonthlyGrade>();
+    const second = deferred<SavedMonthlyGrade>();
+    client.save.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    await renderSheet(client);
+    const row = screen.getByRole("row", { name: /Alan Turing/ });
+
+    await user.type(input("Alan Turing"), "8{Enter}");
+    await user.clear(input("Alan Turing"));
+    await user.type(input("Alan Turing"), "9{Enter}");
+    expect(client.save).toHaveBeenCalledTimes(1);
+
+    await act(async () => first.resolve({ enrollmentId: "en2", month: "2026-09", value: 8, updatedAt: "x" }));
+    expect(client.save).toHaveBeenCalledTimes(2);
+    expect(client.save).toHaveBeenLastCalledWith({ assignmentId: "a1", month: "2026-09", enrollmentId: "en2", value: 9 });
+    expect(within(row).getByText("Guardando…")).toBeInTheDocument();
+    expect(within(row).queryByText("Guardado")).toBeNull();
+
+    await act(async () => second.resolve({ enrollmentId: "en2", month: "2026-09", value: 9, updatedAt: "x" }));
+    expect(within(row).getByText("Guardado")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Resumen del mes" })).toHaveTextContent("Promedio9.0");
+  });
+
+  it("8 then clear: the delete waits for the save and the cell ends empty", async () => {
+    const user = userEvent.setup();
+    const client = fakeClient();
+    const first = deferred<SavedMonthlyGrade>();
+    client.save.mockReturnValueOnce(first.promise);
+    await renderSheet(client);
+
+    await user.type(input("Alan Turing"), "8{Enter}");
+    await user.clear(input("Alan Turing"));
+    await user.keyboard("{Enter}");
+    expect(client.remove).not.toHaveBeenCalled();
+
+    await act(async () => first.resolve({ enrollmentId: "en2", month: "2026-09", value: 8, updatedAt: "x" }));
+    await waitFor(() => expect(client.remove).toHaveBeenCalledWith({ assignmentId: "a1", month: "2026-09", enrollmentId: "en2" }));
+    const counters = screen.getByRole("group", { name: "Resumen del mes" });
+    await waitFor(() => expect(counters).toHaveTextContent("Capturadas1 de 3"));
+    expect(within(screen.getByRole("row", { name: /Alan Turing/ })).getByText("Guardado")).toBeInTheDocument();
+  });
+});
+
+describe("MonthlyGradeSheet — nothing unsaved passes for saved", () => {
+  async function failOne(): Promise<{ user: ReturnType<typeof userEvent.setup>; client: MockClient }> {
+    const user = userEvent.setup();
+    const client = fakeClient();
+    client.save.mockRejectedValueOnce(new Error("network"));
+    await renderSheet(client);
+    await user.type(input("Alan Turing"), "8{Enter}");
+    await screen.findByRole("button", { name: "Error — reintentar" });
+    return { user, client };
+  }
+
+  it("a failed cell is counted as unsaved, with a retry for all", async () => {
+    const { user, client } = await failOne();
+
+    expect(screen.queryByText("Todo guardado")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "1 sin guardar — reintentar" }));
+
+    await waitFor(() => expect(client.save).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Todo guardado")).toBeInTheDocument();
+  });
+
+  it("a failed cell still guards leaving the page", async () => {
+    await failOne();
+    const leaving = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(leaving);
+    expect(leaving.defaultPrevented).toBe(true);
+  });
+
+  it("an invalid cell is counted too", async () => {
+    const user = userEvent.setup();
+    await renderSheet();
+    await user.type(input("Alan Turing"), "11");
+    await user.tab();
+    expect(await screen.findByText("1 sin guardar")).toBeInTheDocument();
+  });
+
+  it("Tab from a failed cell reaches its retry button", async () => {
+    const { user } = await failOne();
+    await user.click(input("Alan Turing"));
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Error — reintentar" })).toHaveFocus();
+  });
+
+  it("switching month with a failed cell asks first; declined, the month stays", async () => {
+    const { user, client } = await failOne();
+    const ask = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    await user.click(screen.getByRole("button", { name: "Oct" }));
+
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(client.load).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Sep" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("accepted, the unsaved value is kept and comes back with the month", async () => {
+    const { user, client } = await failOne();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    await user.click(screen.getByRole("button", { name: "Oct" }));
+    await waitFor(() => expect(client.load).toHaveBeenLastCalledWith({ assignmentId: "a1", month: "2026-10" }));
+    await user.click(await screen.findByRole("button", { name: "Sep" }));
+
+    await waitFor(() => expect(input("Alan Turing")).toHaveValue("8"));
+    expect(screen.getByRole("button", { name: "Error — reintentar" })).toBeInTheDocument();
+  });
+
+  it("switching month with everything saved asks nothing", async () => {
+    const user = userEvent.setup();
+    const ask = vi.spyOn(window, "confirm");
+    const client = await renderSheet();
+    await user.click(screen.getByRole("button", { name: "Oct" }));
+    await waitFor(() => expect(client.load).toHaveBeenCalledTimes(2));
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("coming back to a month waits for its saves in flight before loading it", async () => {
+    const user = userEvent.setup();
+    const client = fakeClient();
+    const slow = deferred<SavedMonthlyGrade>();
+    client.save.mockReturnValueOnce(slow.promise);
+    await renderSheet(client);
+
+    await user.type(input("Alan Turing"), "8{Enter}");
+    await user.click(screen.getByRole("button", { name: "Oct" }));
+    await waitFor(() => expect(client.load).toHaveBeenCalledTimes(2));
+    await user.click(await screen.findByRole("button", { name: "Sep" }));
+    expect(client.load).toHaveBeenCalledTimes(2);
+
+    client.load.mockResolvedValueOnce({ ...SHEET, rows: [SHEET.rows[0]!, { ...SHEET.rows[1]!, value: 8 }, SHEET.rows[2]!] });
+    await act(async () => slow.resolve({ enrollmentId: "en2", month: "2026-09", value: 8, updatedAt: "x" }));
+
+    await waitFor(() => expect(client.load).toHaveBeenCalledTimes(3));
+    expect(await screen.findByRole("textbox", { name: "Calificación de Alan Turing" })).toHaveValue("8");
   });
 });

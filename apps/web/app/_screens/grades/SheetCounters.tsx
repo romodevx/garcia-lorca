@@ -9,6 +9,11 @@ export interface SheetCountersProps {
   stats: SheetStats;
   /** Saves still in flight. */
   pending: number;
+  /** Cells whose value the server does not hold: failed, refused or invalid. */
+  unsaved: number;
+  /** Of those, the ones a resend can fix (network or server trouble). */
+  retryable: number;
+  onRetryAll: () => void;
 }
 
 interface Counter {
@@ -23,12 +28,13 @@ interface Counter {
 const AVERAGE_DECIMALS = 1;
 
 function pendingText(pending: number): string {
-  if (pending === 0) return "Todo guardado";
   return pending === 1 ? "Guardando 1 calificación…" : `Guardando ${pending} calificaciones…`;
 }
 
+const STATUS_TEXT: React.CSSProperties = { margin: "8px 2px 0", fontSize: 13.5, fontWeight: 600 };
+
 /** The month at a glance: how many are in, their average, and how many fail. */
-export function SheetCounters({ stats, pending }: SheetCountersProps): ReactElement {
+export function SheetCounters({ stats, pending, unsaved, retryable, onRetryAll }: SheetCountersProps): ReactElement {
   const counters: Counter[] = [
     { icon: "check", color: "lime", label: "Capturadas", value: `${stats.captured} de ${stats.total}` },
     { icon: "star", color: "purple", label: "Promedio", value: stats.average === undefined ? "—" : stats.average.toFixed(AVERAGE_DECIMALS) },
@@ -49,7 +55,24 @@ export function SheetCounters({ stats, pending }: SheetCountersProps): ReactElem
           </div>
         ))}
       </div>
-      <p role="status" style={{ margin: "8px 2px 0", fontSize: 13.5, fontWeight: 600, color: pending > 0 ? "var(--warn-fg)" : "var(--text-muted)" }}>{pendingText(pending)}</p>
+      <SaveSummary pending={pending} unsaved={unsaved} retryable={retryable} onRetryAll={onRetryAll} />
+    </div>
+  );
+}
+
+/** "Todo guardado" only when nothing is travelling AND nothing is left unsaved. */
+function SaveSummary({ pending, unsaved, retryable, onRetryAll }: Omit<SheetCountersProps, "stats">): ReactElement {
+  const unsavedText = `${unsaved} sin guardar`;
+  return (
+    <div role="status" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
+      {pending > 0 && <p style={{ ...STATUS_TEXT, color: "var(--warn-fg)" }}>{pendingText(pending)}</p>}
+      {unsaved > 0 && retryable > 0 && (
+        <button type="button" onClick={onRetryAll} style={{ ...STATUS_TEXT, minHeight: 44, color: "var(--bad-fg)", textDecoration: "underline", cursor: "pointer" }}>
+          {`${unsavedText} — reintentar`}
+        </button>
+      )}
+      {unsaved > 0 && retryable === 0 && <p style={{ ...STATUS_TEXT, color: "var(--bad-fg)" }}>{unsavedText}</p>}
+      {pending === 0 && unsaved === 0 && <p style={{ ...STATUS_TEXT, color: "var(--text-muted)" }}>Todo guardado</p>}
     </div>
   );
 }

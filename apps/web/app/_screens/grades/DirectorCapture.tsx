@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactElement } from "react";
+import { useCallback, useMemo, useState, type ReactElement } from "react";
 
 import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
@@ -10,6 +10,7 @@ import { gradeSheetClient } from "../../grades/api";
 import { EmptyHint, ErrorAlert } from "../config/parts";
 import { MonthlyGradeSheet } from "./MonthlyGradeSheet";
 import { useDirectorAssignments } from "./useDirectorAssignments";
+import { confirmLeavingUnsaved, useGradeSaves } from "./useGradeSaves";
 
 export interface DirectorCaptureProps {
   onBack: () => void;
@@ -25,6 +26,13 @@ export function DirectorCapture({ onBack }: DirectorCaptureProps): ReactElement 
   const { choices, loading, failed } = useDirectorAssignments();
   const [assignmentId, setAssignmentId] = useState("");
   const client = useMemo(() => gradeSheetClient(API_URL), []);
+  // Above the keyed sheet: an assignment switch keeps saves in flight and unsaved values.
+  const saves = useGradeSaves(client);
+
+  const choose = useCallback((next: string) => {
+    const unsaved = assignmentId === "" ? 0 : saves.unsavedCount({ assignmentId });
+    if (next !== assignmentId && confirmLeavingUnsaved(unsaved)) setAssignmentId(next);
+  }, [assignmentId, saves]);
 
   return (
     <Page>
@@ -52,14 +60,14 @@ export function DirectorCapture({ onBack }: DirectorCaptureProps): ReactElement 
               label="Asignación"
               value={assignmentId}
               options={choices.map((c) => ({ value: c.id, label: c.label }))}
-              onChange={setAssignmentId}
+              onChange={choose}
               disabled={loading}
               help="El grupo, la materia y quien la imparte. Ordenadas por nivel y grado."
             />
           </div>
         )}
         {!failed && assignmentId === "" && <EmptyHint>Elige una asignación para capturar sus calificaciones del mes.</EmptyHint>}
-        {assignmentId !== "" && <MonthlyGradeSheet key={assignmentId} assignmentId={assignmentId} client={client} />}
+        {assignmentId !== "" && <MonthlyGradeSheet key={assignmentId} assignmentId={assignmentId} client={client} saves={saves} />}
       </div>
     </Page>
   );
