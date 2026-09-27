@@ -59,6 +59,7 @@ type fakeTeachingConfig struct {
 	termsErr       error
 	gotListTerms   int
 	gotTermsCycles []string
+	gotTermsLevels []string
 
 	// cycles is the school's cycle list. nil means the fixtures' default: both
 	// cycles they use (cyc-1, cyc-2) are active, so a test that is not about the
@@ -167,13 +168,28 @@ func (f *fakeTeachingConfig) ListGradeLevels(_ context.Context, _ string) ([]cli
 	return f.gradeLevels, f.gradeLevelsErr
 }
 
-func (f *fakeTeachingConfig) ListTerms(_ context.Context, cycleID, _ string) ([]client.TermResult, error) {
+func (f *fakeTeachingConfig) ListTerms(_ context.Context, cycleID, levelID string) ([]client.TermResult, error) {
 	f.gotListTerms++
 	f.gotTermsCycles = append(f.gotTermsCycles, cycleID)
+	f.gotTermsLevels = append(f.gotTermsLevels, levelID)
 	if f.termsErr != nil {
 		return nil, f.termsErr
 	}
-	return f.termsByCycle[cycleID], nil
+	var out []client.TermResult
+	for _, t := range f.termsByCycle[cycleID] {
+		if levelID == "" || t.LevelID == levelID {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
+// termsCatalog places grp-p (Primaria) and grp-s (Secundaria) for the
+// term-by-level tests.
+func termsCatalog(f *fakeTeachingConfig) *fakeTeachingConfig {
+	f.groups = []client.GroupResult{{ID: "grp-p", GradeLevelID: "gl-p"}, {ID: "grp-s", GradeLevelID: "gl-s"}}
+	f.gradeLevels = []client.GradeLevelResult{{ID: "gl-p", LevelID: "lvl-p"}, {ID: "gl-s", LevelID: "lvl-s"}}
+	return f
 }
 
 // fakeTeachingGrades doubles the grades surface, counting its calls so the
@@ -464,25 +480,25 @@ func TestTeachingAssignmentsEmptyPrincipalNeverMatchesUnlinkedTeacher(t *testing
 // the gateway serves ONLY the terms of the cycles the caller actually teaches in
 // — the union across the caller's assignments' cycles, deduped by term id.
 func TestTeachingTermsReturnsUnionAcrossTaughtCycles(t *testing.T) {
-	config := &fakeTeachingConfig{
+	config := termsCatalog(&fakeTeachingConfig{
 		teachers: []client.Teacher{{ID: "tch-1", UserID: "usr-t"}},
 		assignmentsByTeacher: map[string][]client.TeachingAssignment{
 			"tch-1": {
-				{ID: "asg-1", CycleID: "cyc-1", TeacherID: "tch-1"},
-				{ID: "asg-2", CycleID: "cyc-2", TeacherID: "tch-1"},
-				{ID: "asg-3", CycleID: "cyc-1", TeacherID: "tch-1"}, // same cycle as asg-1
+				{ID: "asg-1", CycleID: "cyc-1", GroupID: "grp-p", TeacherID: "tch-1"},
+				{ID: "asg-2", CycleID: "cyc-2", GroupID: "grp-p", TeacherID: "tch-1"},
+				{ID: "asg-3", CycleID: "cyc-1", GroupID: "grp-p", TeacherID: "tch-1"}, // same cycle and level as asg-1
 			},
 		},
 		termsByCycle: map[string][]client.TermResult{
 			"cyc-1": {
-				{ID: "trm-1", CycleID: "cyc-1", Name: "Bloque 1"},
-				{ID: "trm-2", CycleID: "cyc-1", Name: "Bloque 2"},
+				{ID: "trm-1", CycleID: "cyc-1", LevelID: "lvl-p", Name: "Bloque 1"},
+				{ID: "trm-2", CycleID: "cyc-1", LevelID: "lvl-p", Name: "Bloque 2"},
 			},
 			"cyc-2": {
-				{ID: "trm-3", CycleID: "cyc-2", Name: "Trimestre 1"},
+				{ID: "trm-3", CycleID: "cyc-2", LevelID: "lvl-p", Name: "Trimestre 1"},
 			},
 		},
-	}
+	})
 	h := handler.NewTeachingHandler(config, &fakeTeachingGrades{}, &fakeTeachingStudents{})
 
 	rec := httptest.NewRecorder()
@@ -494,7 +510,7 @@ func TestTeachingTermsReturnsUnionAcrossTaughtCycles(t *testing.T) {
 	// Only the DISTINCT cycles the caller teaches are queried — cyc-1 once, not
 	// twice, despite two assignments in it.
 	if config.gotListTerms != 2 {
-		t.Errorf("ListTerms called %d time(s), want 2 (one per distinct taught cycle)", config.gotListTerms)
+		t.Errorf("ListTerms called %d time(s), want 2 (one per distinct taught cycle and level)", config.gotListTerms)
 	}
 	var out struct {
 		Terms []map[string]any `json:"terms"`
@@ -519,19 +535,19 @@ func TestTeachingTermsReturnsUnionAcrossTaughtCycles(t *testing.T) {
 
 // A term that appears in more than one taught cycle's list is returned once.
 func TestTeachingTermsDedupsByTermID(t *testing.T) {
-	config := &fakeTeachingConfig{
+	config := termsCatalog(&fakeTeachingConfig{
 		teachers: []client.Teacher{{ID: "tch-1", UserID: "usr-t"}},
 		assignmentsByTeacher: map[string][]client.TeachingAssignment{
 			"tch-1": {
-				{ID: "asg-1", CycleID: "cyc-1", TeacherID: "tch-1"},
-				{ID: "asg-2", CycleID: "cyc-2", TeacherID: "tch-1"},
+				{ID: "asg-1", CycleID: "cyc-1", GroupID: "grp-p", TeacherID: "tch-1"},
+				{ID: "asg-2", CycleID: "cyc-2", GroupID: "grp-p", TeacherID: "tch-1"},
 			},
 		},
 		termsByCycle: map[string][]client.TermResult{
-			"cyc-1": {{ID: "trm-shared", CycleID: "cyc-1", Name: "Bloque 1"}},
-			"cyc-2": {{ID: "trm-shared", CycleID: "cyc-2", Name: "Bloque 1"}},
+			"cyc-1": {{ID: "trm-shared", CycleID: "cyc-1", LevelID: "lvl-p", Name: "Bloque 1"}},
+			"cyc-2": {{ID: "trm-shared", CycleID: "cyc-2", LevelID: "lvl-p", Name: "Bloque 1"}},
 		},
-	}
+	})
 	h := handler.NewTeachingHandler(config, &fakeTeachingGrades{}, &fakeTeachingStudents{})
 
 	rec := httptest.NewRecorder()

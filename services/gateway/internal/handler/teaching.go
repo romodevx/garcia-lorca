@@ -229,6 +229,19 @@ func (h *TeachingHandler) assertOwnsAssignment(w http.ResponseWriter, r *http.Re
 	return false
 }
 
+// OwnsAssignment is the teacher's AssignmentGate for the monthly grade routes
+// (T6): the same active-cycle ownership rule as the roster and capture, with the
+// principal taken from the request. 401 without a principal; 404 for any
+// assignment the caller does not teach.
+func (h *TeachingHandler) OwnsAssignment(w http.ResponseWriter, r *http.Request, assignmentID string) bool {
+	p, ok := middleware.PrincipalFrom(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	return h.assertOwnsAssignment(w, r, p, assignmentID)
+}
+
 // --- assignments -----------------------------------------------------------
 
 // teacherAssignmentResponse is the caller's own assignment, enriched with the
@@ -334,27 +347,28 @@ func (h *TeachingHandler) groupCatalogNames(ctx context.Context, enrich bool) (n
 
 // --- terms -----------------------------------------------------------------
 
-// teachingTermResponse is the term-picker projection the teacher's roster screen
-// needs: a term's id, readable name and the cycle it belongs to. A Maestro holds
-// no config:read, so the /config/terms route is unreachable to it — this surface
-// serves only the terms of cycles the caller actually teaches in.
+// teachingTermResponse is the term-picker projection the roster screen needs: a
+// term's id, readable name, and the cycle and level it belongs to. A Maestro
+// holds no config:read, so /config/terms is unreachable to it.
 type teachingTermResponse struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
 	CycleID string `json:"cycleId"`
+	LevelID string `json:"levelId"`
 }
 
-// Terms handles GET /api/v1/teaching/terms — the terms of every cycle the CALLER
-// teaches in, deduped by term id. The cycle set is derived from the principal's
-// own assignments (via callerAssignments), so no request field can widen it — a
-// teacher never sees the terms of a cycle they do not teach. A principal with no
-// linked teacher record (or no assignments) gets an empty list.
+// Terms handles GET /api/v1/teaching/terms[?assignmentId=] — the terms of the
+// cycles AND levels the CALLER teaches: a term is per cycle and per level, so a
+// Primaria group's teacher never sees Secundaria's terms. With assignmentId the
+// list narrows to that one assignment (404 when the caller does not teach it).
+// The assignment set comes from the principal, so no request field widens it; a
+// principal with no linked teacher gets an empty list.
 //
-// It runs behind RequireAuth + rotation, the module_grades + module_config guards
-// and RequirePermission("teaching:read") — the same wrapper as
-// /teaching/assignments. Resolving the caller's assignments is a hard dependency
-// (a failure there is a real 500), but each per-cycle terms lookup is best-effort:
-// a failed cycle is skipped, never a 500, mirroring the name enrichment.
+// It runs behind RequireAuth + rotation, the module_grades + module_config
+// guards and RequirePermission("teaching:read"). Resolving the caller's
+// assignments is a hard dependency (a real 500); each terms lookup is
+// best-effort, and a group whose level cannot be resolved lists nothing rather
+// than every level's terms.
 func (h *TeachingHandler) Terms(w http.ResponseWriter, r *http.Request) {
 	p, ok := middleware.PrincipalFrom(r.Context())
 	if !ok {
@@ -366,27 +380,23 @@ func (h *TeachingHandler) Terms(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, err)
 		return
 	}
-	out := make([]teachingTermResponse, 0, len(assignments))
-	seenCycle := make(map[string]bool, len(assignments))
-	seenTerm := make(map[string]bool, len(assignments))
-	for _, a := range assignments {
-		if a.CycleID == "" || seenCycle[a.CycleID] {
-			continue // each DISTINCT taught cycle is resolved exactly once
-		}
-		seenCycle[a.CycleID] = true
-		terms, err := h.config.ListTerms(r.Context(), a.CycleID, "")
-		if err != nil {
-			continue // best-effort: skip a cycle whose terms cannot be read
-		}
-		for _, t := range terms {
-			if seenTerm[t.ID] {
-				continue // a term shared across cycles is returned once
-			}
-			seenTerm[t.ID] = true
-			out = append(out, teachingTermResponse{ID: t.ID, Name: t.Name, CycleID: t.CycleID})
+	if id := r.URL.Query().Get("assignmentId"); id != "" {
+		assignments = onlyAssignment(assignments, id)
+		if len(assignments) == 0 {
+			writeNotFound(w)
+			return
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"terms": out})
+	writeJSON(w, http.StatusOK, map[string]any{"terms": levelTerms(r.Context(), h.config, assignments)})
+}
+
+func onlyAssignment(assignments []client.TeachingAssignment, id string) []client.TeachingAssignment {
+	for _, a := range assignments {
+		if a.ID == id {
+			return []client.TeachingAssignment{a}
+		}
+	}
+	return nil
 }
 
 // --- roster ----------------------------------------------------------------

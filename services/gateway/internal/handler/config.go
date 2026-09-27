@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ type ConfigService interface {
 	CreateLevel(ctx context.Context, in client.CreateLevelInput) (client.LevelResult, error)
 	ListLevels(ctx context.Context) ([]client.LevelResult, error)
 	SetLevelAttendanceMode(ctx context.Context, id, mode string) (client.LevelResult, error)
+	SetLevelGradingScale(ctx context.Context, id string, g client.LevelGrading) (client.LevelResult, error)
 	CreateGradeLevel(ctx context.Context, in client.CreateGradeLevelInput) (client.GradeLevelResult, error)
 	ListGradeLevels(ctx context.Context, levelID string) ([]client.GradeLevelResult, error)
 	CreateSubject(ctx context.Context, in client.CreateSubjectInput) (client.SubjectResult, error)
@@ -165,6 +167,31 @@ type levelResponse struct {
 	EnrollmentGranularity string `json:"enrollmentGranularity"`
 	// AttendanceMode is "daily" or "per_class" (T3).
 	AttendanceMode string `json:"attendanceMode"`
+	// Grading is the level's numeric grading scale, in person units (T6).
+	Grading levelGradingResponse `json:"grading"`
+}
+
+// levelGradingResponse is a grading scale as a person reads it (5, 9.5).
+type levelGradingResponse struct {
+	Enabled bool `json:"enabled"`
+	gradeScaleResponse
+}
+
+// gradeScaleResponse is a scale's numbers as JSON numbers, exact.
+type gradeScaleResponse struct {
+	Min      json.Number `json:"min"`
+	Max      json.Number `json:"max"`
+	Decimals int         `json:"decimals"`
+	Passing  json.Number `json:"passing"`
+}
+
+func toGradeScaleResponse(s client.GradeScale) gradeScaleResponse {
+	return gradeScaleResponse{
+		Min:      hundredthsNumber(s.MinHundredths),
+		Max:      hundredthsNumber(s.MaxHundredths),
+		Decimals: s.Decimals,
+		Passing:  hundredthsNumber(s.PassingHundredths),
+	}
 }
 
 func toLevelResponse(l client.LevelResult) levelResponse {
@@ -174,32 +201,102 @@ func toLevelResponse(l client.LevelResult) levelResponse {
 		SEPCode:               l.SEPCode,
 		EnrollmentGranularity: l.Granularity,
 		AttendanceMode:        l.AttendanceMode,
+		Grading:               levelGradingResponse{Enabled: l.Grading.Enabled, gradeScaleResponse: toGradeScaleResponse(l.Grading.Scale)},
 	}
 }
 
-// setLevelAttendanceModeRequest is the body of PATCH /api/v1/config/levels/{id}.
-type setLevelAttendanceModeRequest struct {
-	AttendanceMode string `json:"attendanceMode"`
+// patchLevelRequest is the body of PATCH /api/v1/config/levels/{id}: either or
+// both of the level's attendance mode and its grading scale.
+type patchLevelRequest struct {
+	AttendanceMode *string              `json:"attendanceMode"`
+	Grading        *levelGradingRequest `json:"grading"`
 }
 
-// SetLevelAttendanceMode handles PATCH /api/v1/config/levels/{id}: choose how
-// the level's groups take attendance — "daily" (one list per group per day) or
-// "per_class" (one per group, subject and day). Any other value is refused at
-// the edge (400) before config is called; an unknown level is 404.
-func (h *ConfigHandler) SetLevelAttendanceMode(w http.ResponseWriter, r *http.Request) {
-	var req setLevelAttendanceModeRequest
+// levelGradingRequest is a whole grading scale in the units a person types (5,
+// 9.5). Every field is required; the marks stay raw so no float touches them.
+type levelGradingRequest struct {
+	Enabled  *bool           `json:"enabled"`
+	Min      json.RawMessage `json:"min"`
+	Max      json.RawMessage `json:"max"`
+	Decimals *int            `json:"decimals"`
+	Passing  json.RawMessage `json:"passing"`
+}
+
+// Sentences the PATCH refuses with before config is called.
+const (
+	msgPatchLevelEmpty      = "envía attendanceMode, grading o ambos"
+	msgAttendanceModeValues = "attendanceMode must be daily or per_class"
+	msgGradingIncomplete    = "grading requiere enabled, min, max, decimals y passing"
+	msgGradingTwoDecimals   = "La escala admite hasta 2 decimales"
+)
+
+// toLevelGrading validates the shape of a grading body and converts its marks
+// to exact hundredths. The scale's own rules (min < passing <= max, …) are
+// config's to judge; this only refuses what cannot be a scale at all.
+func (g levelGradingRequest) toLevelGrading() (client.LevelGrading, string) {
+	if g.Enabled == nil || g.Decimals == nil {
+		return client.LevelGrading{}, msgGradingIncomplete
+	}
+	marks := [3]json.RawMessage{g.Min, g.Max, g.Passing}
+	var hundredths [3]int
+	for i, raw := range marks {
+		if _, ok := numberText(raw); !ok {
+			return client.LevelGrading{}, msgGradingIncomplete
+		}
+		h, ok := parseHundredths(raw)
+		if !ok {
+			return client.LevelGrading{}, msgGradingTwoDecimals
+		}
+		hundredths[i] = h
+	}
+	return client.LevelGrading{Enabled: *g.Enabled, Scale: client.GradeScale{
+		MinHundredths: hundredths[0], MaxHundredths: hundredths[1], PassingHundredths: hundredths[2], Decimals: *g.Decimals,
+	}}, ""
+}
+
+// PatchLevel handles PATCH /api/v1/config/levels/{id}: change how the level's
+// groups take attendance ("daily" | "per_class") and/or its numeric grading
+// scale (T6). The whole body is validated at the edge before config is called,
+// so a half-valid body changes nothing; an unknown level is 404. The response
+// is the level after the last change.
+func (h *ConfigHandler) PatchLevel(w http.ResponseWriter, r *http.Request) {
+	var req patchLevelRequest
 	if err := decodeJSONBody(w, r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if req.AttendanceMode != client.AttendanceModeDaily && req.AttendanceMode != client.AttendanceModePerClass {
-		http.Error(w, "attendanceMode must be daily or per_class", http.StatusBadRequest)
+	if req.AttendanceMode == nil && req.Grading == nil {
+		http.Error(w, msgPatchLevelEmpty, http.StatusBadRequest)
 		return
 	}
-	res, err := h.svc.SetLevelAttendanceMode(r.Context(), r.PathValue("id"), req.AttendanceMode)
-	if err != nil {
-		writeConnectError(w, err)
+	if req.AttendanceMode != nil && *req.AttendanceMode != client.AttendanceModeDaily && *req.AttendanceMode != client.AttendanceModePerClass {
+		http.Error(w, msgAttendanceModeValues, http.StatusBadRequest)
 		return
+	}
+	var grading client.LevelGrading
+	if req.Grading != nil {
+		var msg string
+		if grading, msg = req.Grading.toLevelGrading(); msg != "" {
+			http.Error(w, msg, http.StatusBadRequest)
+			return
+		}
+	}
+	id := r.PathValue("id")
+	var (
+		res client.LevelResult
+		err error
+	)
+	if req.AttendanceMode != nil {
+		if res, err = h.svc.SetLevelAttendanceMode(r.Context(), id, *req.AttendanceMode); err != nil {
+			writeConnectError(w, err)
+			return
+		}
+	}
+	if req.Grading != nil {
+		if res, err = h.svc.SetLevelGradingScale(r.Context(), id, grading); err != nil {
+			writeConnectError(w, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, toLevelResponse(res))
 }

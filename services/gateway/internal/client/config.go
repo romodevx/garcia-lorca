@@ -68,6 +68,23 @@ type LevelResult struct {
 	// AttendanceMode is "daily" (one list per group per day) or "per_class"
 	// (one per group, subject and day); "" only if config sent none.
 	AttendanceMode string
+	// Grading is the level's numeric grading scale (T6).
+	Grading LevelGrading
+}
+
+// GradeScale is a numeric grading scale in exact hundredths (5.00 = 500).
+type GradeScale struct {
+	MinHundredths     int
+	MaxHundredths     int
+	Decimals          int
+	PassingHundredths int
+}
+
+// LevelGrading is a level's grading configuration: whether it captures numeric
+// grades at all (Enabled) and on which scale.
+type LevelGrading struct {
+	Enabled bool
+	Scale   GradeScale
 }
 
 // Attendance modes as the edge names them.
@@ -263,6 +280,26 @@ func (c *ConfigClient) SetLevelAttendanceMode(ctx context.Context, id, mode stri
 	res, err := c.rpc.SetLevelAttendanceMode(ctx, connect.NewRequest(&configv1.SetLevelAttendanceModeRequest{
 		Id:             id,
 		AttendanceMode: attendanceModeFromName(mode),
+	}))
+	if err != nil {
+		return LevelResult{}, err
+	}
+	return toLevelResult(res.Msg.GetLevel()), nil
+}
+
+// SetLevelGradingScale replaces a level's grading configuration. An
+// inconsistent scale comes back InvalidArgument with config's sentence; an
+// unknown level is NotFound.
+func (c *ConfigClient) SetLevelGradingScale(ctx context.Context, id string, g LevelGrading) (LevelResult, error) {
+	res, err := c.rpc.SetLevelGradingScale(ctx, connect.NewRequest(&configv1.SetLevelGradingScaleRequest{
+		Id: id,
+		Grading: &configv1.GradingScale{
+			Enabled:           g.Enabled,
+			MinHundredths:     int32(g.Scale.MinHundredths),
+			MaxHundredths:     int32(g.Scale.MaxHundredths),
+			Decimals:          int32(g.Scale.Decimals),
+			PassingHundredths: int32(g.Scale.PassingHundredths),
+		},
 	}))
 	if err != nil {
 		return LevelResult{}, err
@@ -678,7 +715,22 @@ func toLevelResult(l *configv1.Level) LevelResult {
 		Granularity: granularityName(l.GetEnrollmentGranularity()),
 		// An unknown enum value reads as "" (the map's zero value).
 		AttendanceMode: attendanceModeNames[l.GetAttendanceMode()],
+		Grading:        toLevelGrading(l.GetGrading()),
 	}
+}
+
+// toLevelGrading maps the wire scale; a level config sent without one reads as
+// the zero LevelGrading (disabled), never as a made-up scale.
+func toLevelGrading(g *configv1.GradingScale) LevelGrading {
+	if g == nil {
+		return LevelGrading{}
+	}
+	return LevelGrading{Enabled: g.GetEnabled(), Scale: GradeScale{
+		MinHundredths:     int(g.GetMinHundredths()),
+		MaxHundredths:     int(g.GetMaxHundredths()),
+		Decimals:          int(g.GetDecimals()),
+		PassingHundredths: int(g.GetPassingHundredths()),
+	}}
 }
 
 func toGradeLevelResult(g *configv1.GradeLevel) GradeLevelResult {
@@ -728,6 +780,15 @@ func toTeacher(t *configv1.Teacher) Teacher {
 		Email:     t.GetEmail(),
 		UserID:    t.GetUserId(),
 	}
+}
+
+// GetTeachingAssignment reads one teaching assignment (NotFound when missing).
+func (c *ConfigClient) GetTeachingAssignment(ctx context.Context, id string) (TeachingAssignment, error) {
+	res, err := c.rpc.GetTeachingAssignment(ctx, connect.NewRequest(&configv1.GetTeachingAssignmentRequest{Id: id}))
+	if err != nil {
+		return TeachingAssignment{}, err
+	}
+	return toTeachingAssignment(res.Msg.GetTeachingAssignment()), nil
 }
 
 func toTeachingAssignment(a *configv1.TeachingAssignment) TeachingAssignment {

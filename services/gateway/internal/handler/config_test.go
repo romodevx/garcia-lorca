@@ -29,6 +29,10 @@ type fakeConfig struct {
 	modeLevelID string
 	modeIn      string
 
+	gradingLevelID string
+	gradingIn      client.LevelGrading
+	gradingErr     error
+
 	periodIn      client.NonWorkingPeriod
 	periods       []client.NonWorkingPeriod
 	periodsCycle  string
@@ -161,6 +165,18 @@ func (f *fakeConfig) SetLevelAttendanceMode(_ context.Context, id, mode string) 
 		return client.LevelResult{}, f.err
 	}
 	return client.LevelResult{ID: id, Name: "Secundaria", Granularity: "cycle", AttendanceMode: mode}, nil
+}
+
+func (f *fakeConfig) SetLevelGradingScale(_ context.Context, id string, g client.LevelGrading) (client.LevelResult, error) {
+	f.gradingLevelID, f.gradingIn = id, g
+	if f.gradingErr != nil {
+		return client.LevelResult{}, f.gradingErr
+	}
+	mode := f.modeIn
+	if mode == "" {
+		mode = "daily"
+	}
+	return client.LevelResult{ID: id, Name: "Primaria", Granularity: "cycle", AttendanceMode: mode, Grading: g}, nil
 }
 
 func (f *fakeConfig) CreateGradeLevel(_ context.Context, in client.CreateGradeLevelInput) (client.GradeLevelResult, error) {

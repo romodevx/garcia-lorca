@@ -362,7 +362,7 @@ func (stubConfig) ListLevels(_ context.Context, _ *connect.Request[configv1.List
 
 func (stubConfig) ListGroups(_ context.Context, _ *connect.Request[configv1.ListGroupsRequest]) (*connect.Response[configv1.ListGroupsResponse], error) {
 	return connect.NewResponse(&configv1.ListGroupsResponse{Groups: []*configv1.Group{
-		{Id: "grp-1", CycleId: "cyc-1", Name: "3° A"},
+		{Id: "grp-1", CycleId: "cyc-1", Name: "3° A", GradeLevelId: "gl-1"},
 	}}), nil
 }
 
@@ -376,10 +376,13 @@ func (stubConfig) GetGroup(_ context.Context, req *connect.Request[configv1.GetG
 	return connect.NewResponse(&configv1.GetGroupResponse{Group: &configv1.Group{Id: "grp-1", CycleId: "cyc-1", Name: "3° A"}}), nil
 }
 
-// ListGradeLevels backs the attendance mode resolution: the stub group carries
-// no grade, so its list resolves as daily (the column's default).
+// ListGradeLevels places the stub group's grade gl-1 in lvl-1, the level whose
+// terms the teacher may pick (a term is per cycle AND level, T6). lvl-1 is not
+// among ListLevels, so an attendance mode resolved from it reads daily.
 func (stubConfig) ListGradeLevels(_ context.Context, _ *connect.Request[configv1.ListGradeLevelsRequest]) (*connect.Response[configv1.ListGradeLevelsResponse], error) {
-	return connect.NewResponse(&configv1.ListGradeLevelsResponse{}), nil
+	return connect.NewResponse(&configv1.ListGradeLevelsResponse{GradeLevels: []*configv1.GradeLevel{
+		{Id: "gl-1", LevelId: "lvl-1", Name: "3°"},
+	}}), nil
 }
 
 // schoolTodayISO is the system's school day (UTC), the one date a teacher may
@@ -396,11 +399,11 @@ func (stubConfig) ListSubjects(_ context.Context, _ *connect.Request[configv1.Li
 // assignment lives in, so the teacher self-scoped terms surface has exactly one
 // term to return.
 func (stubConfig) ListTerms(_ context.Context, req *connect.Request[configv1.ListTermsRequest]) (*connect.Response[configv1.ListTermsResponse], error) {
-	if req.Msg.GetCycleId() != "cyc-1" {
+	if req.Msg.GetCycleId() != "cyc-1" || (req.Msg.GetLevelId() != "" && req.Msg.GetLevelId() != "lvl-1") {
 		return connect.NewResponse(&configv1.ListTermsResponse{}), nil
 	}
 	return connect.NewResponse(&configv1.ListTermsResponse{Terms: []*configv1.Term{
-		{Id: "trm-1", CycleId: "cyc-1", Name: "Bloque 1"},
+		{Id: "trm-1", CycleId: "cyc-1", LevelId: "lvl-1", Name: "Bloque 1"},
 	}}), nil
 }
 
