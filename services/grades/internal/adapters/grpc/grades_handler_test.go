@@ -30,6 +30,16 @@ func (f *fakeAssignments) ByID(_ context.Context, id string) (ports.AssignmentRe
 	return a, nil
 }
 
+func (f *fakeAssignments) ListTerms(_ context.Context, cycle, level string) ([]ports.TermRef, error) {
+	out := []ports.TermRef{}
+	for _, tm := range f.terms {
+		if tm.CycleID == cycle && (level == "" || tm.LevelID == level) {
+			out = append(out, tm)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeAssignments) TermByID(_ context.Context, id string) (ports.TermRef, error) {
 	tm, ok := f.terms[id]
 	if !ok {
@@ -153,7 +163,7 @@ func newHandler(a ports.AssignmentReader, e ports.EnrollmentReader, r ports.Grad
 	catalog := newFakeCatalog()
 	svc := usecase.NewGradesService(r, a, catalog, e, testTenant, newID, now)
 	monthly := usecase.NewMonthlyGradesService(newFakeMonthly(), a, catalog, e, testTenant, newID, monthlyNow)
-	return grpcadapter.NewGradesHandler(svc, monthly, usecase.NewHealthService("grades"))
+	return grpcadapter.NewGradesHandler(svc, monthly, &stubPeriods{}, usecase.NewHealthService("grades"))
 }
 
 // --- tests ------------------------------------------------------------------

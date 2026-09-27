@@ -18,6 +18,7 @@ const (
 	msgCycleWithoutDates = "El ciclo escolar no tiene fechas de inicio y fin"
 	msgPreviousGroup     = "Ese mes corresponde al grupo anterior del alumno"
 	msgMonthInFuture     = "Aún no llega ese mes"
+	msgPeriodClosed      = "El periodo está cerrado"
 )
 
 // CaptureScope is on whose behalf a monthly read or write runs.
@@ -38,9 +39,11 @@ const (
 //
 //	assignment (config) ─> group's level: grading enabled + scale (config)
 //	  ─> enrollment active in the assignment's group and cycle (students)
-//	  ─> month inside the assignment cycle's months (config)
-//	  ─> ensureEditable (the ONE place a period lock will live, T7)
-//	  ─> value judged on the level's scale ─> upsert/delete
+//	  ─> month inside the assignment cycle's months (config) — only the
+//	     months mapped into the level's terms once it has any (T7)
+//	  ─> ensureEditable (future month, previous group, closed period)
+//	  ─> value judged on the level's scale ─> upsert/delete, guarded by the
+//	     covering term's lock (the store re-checks the closure in its tx)
 //
 // subject_id and teacher_id are DERIVED from the assignment; a client never
 // sets them. It depends only on ports + domain.
@@ -106,6 +109,9 @@ type MonthlySheet struct {
 	Editable       bool
 	ReadOnlyReason string
 	Rows           []MonthlySheetRow
+	// ClosedMonths are the sheet's months that belong to a CLOSED term of the
+	// level (T7): read-only for everyone until the director reopens it.
+	ClosedMonths []domain.Month
 }
 
 // EnrollmentMonthlyGrades is one enrollment's monthly grades for its cycle.
@@ -125,6 +131,27 @@ type assignmentContext struct {
 	level      ports.LevelRef
 	cycle      ports.CycleRef
 	months     []domain.Month
+	// termOf maps each month of the level's terms to its term id; closed
+	// holds the months of the terms that are closed. Both are read once per
+	// request (one config read, one closures read).
+	termOf map[domain.Month]string
+	closed map[domain.Month]bool
+}
+
+// lockFor is the period lock guarding a write of month m.
+func (ac assignmentContext) lockFor(m domain.Month) ports.PeriodLock {
+	return ports.PeriodLock{TermID: ac.termOf[m]}
+}
+
+// closedMonths lists the months of ac.months that belong to a closed term.
+func (ac assignmentContext) closedMonths() []domain.Month {
+	out := []domain.Month{}
+	for _, m := range ac.months {
+		if ac.closed[m] {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // editTarget is the cell (or, for the sheet-wide check, no cell) whose
@@ -154,7 +181,7 @@ func (s *MonthlyGradesService) Upsert(ctx context.Context, in UpsertMonthlyInput
 	if err != nil {
 		return domain.MonthlyGrade{}, err
 	}
-	return s.grades.UpsertMonthlyGrade(ctx, g)
+	return s.grades.UpsertMonthlyGrade(ctx, g, ac.lockFor(month))
 }
 
 // Clear removes one cell (an emptied input). Clearing an empty cell succeeds;
@@ -164,7 +191,7 @@ func (s *MonthlyGradesService) Clear(ctx context.Context, scope CaptureScope, as
 	if err != nil {
 		return err
 	}
-	return s.grades.DeleteMonthlyGrade(ctx, enrollmentID, ac.assignment.SubjectID, m)
+	return s.grades.DeleteMonthlyGrade(ctx, enrollmentID, ac.assignment.SubjectID, m, ac.lockFor(m))
 }
 
 // Sheet builds the capture grid. An empty month means the current UTC month
@@ -186,7 +213,7 @@ func (s *MonthlyGradesService) Sheet(ctx context.Context, scope CaptureScope, as
 	}
 	sheet := MonthlySheet{
 		AssignmentID: assignmentID, Month: m, Months: ac.months, Scale: ac.level.Scale,
-		GradingEnabled: ac.level.GradingEnabled, Editable: true, Rows: rows,
+		GradingEnabled: ac.level.GradingEnabled, Editable: true, Rows: rows, ClosedMonths: ac.closedMonths(),
 	}
 	if reason := s.readOnlyReason(ctx, ac, m); reason != "" {
 		sheet.Editable, sheet.ReadOnlyReason = false, reason
@@ -368,10 +395,53 @@ func (s *MonthlyGradesService) resolveAssignment(ctx context.Context, assignment
 	if err != nil {
 		return assignmentContext{}, err
 	}
-	return assignmentContext{
+	ac := assignmentContext{
 		assignment: asg, level: level, cycle: cycle,
 		months: domain.CycleMonths(cycle.StartsOn, cycle.EndsOn),
-	}, nil
+	}
+	if err := s.loadPeriods(ctx, &ac); err != nil {
+		return assignmentContext{}, err
+	}
+	return ac, nil
+}
+
+// loadPeriods reads the level's terms in the cycle (one config read) and their
+// closures (one query). Once the level maps any month into a term, the months
+// a sheet shows and a write accepts are only the mapped ones; a level with no
+// mapping keeps every month of the cycle.
+func (s *MonthlyGradesService) loadPeriods(ctx context.Context, ac *assignmentContext) error {
+	ac.termOf, ac.closed = map[domain.Month]string{}, map[domain.Month]bool{}
+	terms, err := s.assignments.ListTerms(ctx, ac.assignment.CycleID, ac.level.ID)
+	if err != nil {
+		return err
+	}
+	ids := make([]string, 0, len(terms))
+	for _, t := range terms {
+		ids = append(ids, t.ID)
+		for _, m := range t.Months {
+			ac.termOf[m] = t.ID
+		}
+	}
+	if len(ac.termOf) == 0 {
+		return nil
+	}
+	mapped := make([]domain.Month, 0, len(ac.termOf))
+	for _, m := range ac.months {
+		if _, ok := ac.termOf[m]; ok {
+			mapped = append(mapped, m)
+		}
+	}
+	ac.months = mapped
+	closures, err := s.grades.PeriodClosures(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for m, termID := range ac.termOf {
+		if c, ok := closures[termID]; ok && c.IsClosed() {
+			ac.closed[m] = true
+		}
+	}
+	return nil
 }
 
 // requireEnrollmentInGroup asserts the enrollment exists, is active, and sits in
@@ -402,7 +472,10 @@ func requireMonthInCycle(months []domain.Month, raw string) (domain.Month, error
 // ensureEditable is the single place that decides whether a month of an
 // assignment still accepts corrections. Writes, the sheet's editable flag and
 // each row's editable flag all go through here, so every lock lands in ONE
-// place (period closing arrives in T7).
+// place.
+//
+// A month of a CLOSED term of the level is read-only for everyone, teacher
+// and director alike (T7): the director reopens the period to correct it.
 //
 // A month after the current UTC month is not graded yet, for anyone (teacher
 // or director): nothing has been taught in it.
@@ -413,7 +486,10 @@ func requireMonthInCycle(months []domain.Month, raw string) (domain.Month, error
 // a month before the one the pupil joined the group in belongs to the previous
 // group and is read-only. The director (ScopeSchool) may edit any month. The
 // sheet-wide check passes a zero joinedGroup and is never refused by it.
-func (s *MonthlyGradesService) ensureEditable(_ context.Context, _ assignmentContext, m domain.Month, target editTarget) error {
+func (s *MonthlyGradesService) ensureEditable(_ context.Context, ac assignmentContext, m domain.Month, target editTarget) error {
+	if ac.closed[m] {
+		return domain.Conflict(domain.CodeMonthLocked, msgPeriodClosed)
+	}
 	if m.FirstDay().After(domain.MonthOf(s.now()).FirstDay()) {
 		return domain.Refusal(domain.CodeMonthInFuture, msgMonthInFuture)
 	}

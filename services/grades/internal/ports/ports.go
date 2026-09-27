@@ -29,11 +29,15 @@ type AssignmentRef struct {
 }
 
 // TermRef is the grades-owned view of a config term: its identity, cycle and
-// the level it belongs to (a term is per cycle AND per level).
+// the level it belongs to (a term is per cycle AND per level), plus its name,
+// its order and the calendar months it covers (T7; ascending, may be empty).
 type TermRef struct {
 	ID      string
 	CycleID string
 	LevelID string
+	Name    string
+	Ordinal int
+	Months  []domain.Month
 }
 
 // AssignmentReader validates teaching-assignment and term references against the
@@ -44,6 +48,9 @@ type TermRef struct {
 type AssignmentReader interface {
 	ByID(ctx context.Context, id string) (AssignmentRef, error)
 	TermByID(ctx context.Context, id string) (TermRef, error)
+	// ListTerms lists a cycle's terms, of one level when levelID is set (one
+	// read), in ordinal order.
+	ListTerms(ctx context.Context, cycleID, levelID string) ([]TermRef, error)
 }
 
 // EnrollmentRef is the grades-owned view of a students enrollment: enough to
@@ -133,6 +140,43 @@ type CatalogReader interface {
 	CycleByID(ctx context.Context, id string) (CycleRef, error)
 	// AssignmentsByGroup lists the teaching assignments of a group in a cycle.
 	AssignmentsByGroup(ctx context.Context, cycleID, groupID string) ([]AssignmentRef, error)
+	// LevelCatalog reads, in a fixed number of calls whatever the school's
+	// size, everything a period of the level needs: its name and scale, its
+	// groups in the cycle (labelled "1° A"), their teaching assignments and the
+	// names of those subjects and teachers (T7).
+	LevelCatalog(ctx context.Context, cycleID, levelID string) (LevelCatalog, error)
+}
+
+// GroupRef is a group of a level with the label a report card prints ("1° A").
+type GroupRef struct {
+	ID    string
+	Label string
+}
+
+// LevelCatalog is one level's academic catalog in one cycle, as a period's
+// progress and report cards read it.
+type LevelCatalog struct {
+	LevelName      string
+	GradingEnabled bool
+	Scale          domain.GradingScale
+	Groups         []GroupRef
+	Assignments    []AssignmentRef
+	SubjectNames   map[string]string
+	TeacherNames   map[string]string
+}
+
+// StudentRef is the grades-owned view of a pupil for a report card: the full
+// name and the matricula, copied into the snapshot at issue time.
+type StudentRef struct {
+	ID               string
+	Name             string
+	EnrollmentNumber string
+}
+
+// StudentDirectory names pupils by id in as few reads as the students service
+// allows (it pages ids by 200). A pupil it does not know is simply absent.
+type StudentDirectory interface {
+	StudentsByIDs(ctx context.Context, ids []string) (map[string]StudentRef, error)
 }
 
 // MonthlyGradeRepository loads and persists monthly grades. All access is
@@ -140,10 +184,19 @@ type CatalogReader interface {
 type MonthlyGradeRepository interface {
 	// UpsertMonthlyGrade inserts the grade or updates value/teacher/captured_by
 	// of the existing row on the (tenant, enrollment, subject, month) key, and
-	// returns the stored row (with its id and updated_at).
-	UpsertMonthlyGrade(ctx context.Context, g domain.MonthlyGrade) (domain.MonthlyGrade, error)
+	// returns the stored row (with its id and updated_at). When lock names a
+	// term, the write re-checks that term's closure INSIDE its transaction,
+	// serialised against a close, and refuses a closed one with MONTH_LOCKED.
+	UpsertMonthlyGrade(ctx context.Context, g domain.MonthlyGrade, lock PeriodLock) (domain.MonthlyGrade, error)
 	// DeleteMonthlyGrade removes the grade on the key; no row is not an error.
-	DeleteMonthlyGrade(ctx context.Context, enrollmentID, subjectID string, month domain.Month) error
+	// lock works as for UpsertMonthlyGrade.
+	DeleteMonthlyGrade(ctx context.Context, enrollmentID, subjectID string, month domain.Month, lock PeriodLock) error
+	// PeriodClosures reads the stored closures of these terms in ONE query,
+	// keyed by term id; a term never closed is absent (open, version 0).
+	PeriodClosures(ctx context.Context, termIDs []string) (map[string]domain.PeriodClosure, error)
+	// MonthlyGradesForEnrollments lists, in ONE query, every grade of these
+	// enrollments in these months. Empty ids or months returns nothing.
+	MonthlyGradesForEnrollments(ctx context.Context, enrollmentIDs []string, months []domain.Month) ([]domain.MonthlyGrade, error)
 	// MonthlyGradesForSheet batch-loads, in ONE query, the grades of many
 	// enrollments for one subject and month, keyed by enrollment id (absent =
 	// not captured). Empty enrollmentIDs returns an empty map without querying.
@@ -160,4 +213,52 @@ type MonthlyGradeRepository interface {
 type ScaleCheck struct {
 	GradingEnabled bool
 	Scale          domain.GradingScale
+}
+
+// PeriodLock names the term whose closure guards a monthly write; the zero
+// value (no term covers the month) guards nothing.
+type PeriodLock struct {
+	TermID string
+}
+
+// PeriodTx is what a period's close or reopen may do inside its one
+// transaction, which holds the term's exclusive lock: no grade of the term can
+// be written until it commits.
+type PeriodTx interface {
+	// Closure is the locked term's stored closure; found is false when the term
+	// was never closed.
+	Closure(ctx context.Context) (closure domain.PeriodClosure, found bool, err error)
+	// MonthlyGrades reads the enrollments' grades in these months, under the lock.
+	MonthlyGrades(ctx context.Context, enrollmentIDs []string, months []domain.Month) ([]domain.MonthlyGrade, error)
+	// SaveClosure stores the closure (insert or update every column).
+	SaveClosure(ctx context.Context, c domain.PeriodClosure) error
+	// IssueReportCards marks the published report cards of these cards'
+	// enrollments for the term superseded, then inserts the cards with their lines.
+	IssueReportCards(ctx context.Context, cards []domain.ReportCard) error
+}
+
+// ReportCardFilter narrows a report-card list; empty fields do not filter.
+type ReportCardFilter struct {
+	TermID    string
+	GroupID   string
+	StudentID string
+}
+
+// PeriodRepository stores period closures and report cards (T7). All access
+// is tenant-scoped for RLS.
+type PeriodRepository interface {
+	// WithPeriodLock runs fn in ONE transaction holding the term's exclusive
+	// lock; fn's error rolls everything back.
+	WithPeriodLock(ctx context.Context, termID string, fn func(ctx context.Context, tx PeriodTx) error) error
+	// LatestReportCards lists the PUBLISHED report cards matching filter
+	// (without lines), ordered by student name.
+	LatestReportCards(ctx context.Context, filter ReportCardFilter) ([]domain.ReportCard, error)
+	// ReportCard reads one report card with its lines (any status). Unknown id
+	// is glerrors.ErrNotFound.
+	ReportCard(ctx context.Context, id string) (domain.ReportCard, error)
+}
+
+// ReportCardPublisher announces an issued report card (GradesPublished).
+type ReportCardPublisher interface {
+	PublishReportCardIssued(ctx context.Context, rc domain.ReportCard) error
 }

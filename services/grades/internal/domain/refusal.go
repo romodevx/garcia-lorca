@@ -25,7 +25,17 @@ const (
 	CodeLevelScaleUnavailable RefusalCode = "LEVEL_SCALE_NOT_CONFIGURED"
 )
 
-// RefusalError is a KindInvalid domain error that also names its RefusalCode.
+// The period-closing codes (T7). They are conflicts with the period's state
+// (409 at the edge), not malformed input.
+const (
+	CodeMonthLocked       RefusalCode = "MONTH_LOCKED"
+	CodeMissingGrades     RefusalCode = "MISSING_GRADES"
+	CodeTermWithoutMonths RefusalCode = "TERM_WITHOUT_MONTHS"
+	CodeAlreadyClosed     RefusalCode = "ALREADY_CLOSED"
+	CodeAlreadyOpen       RefusalCode = "ALREADY_OPEN"
+)
+
+// RefusalError is a typed domain error (KindInvalid or KindConflict) naming its RefusalCode.
 // It unwraps to the *glerrors.Error, so KindOf and SafeMessage read it as any
 // other typed error.
 type RefusalError struct {
@@ -36,6 +46,12 @@ type RefusalError struct {
 // Refusal builds a KindInvalid error with a sentence for the user and a code.
 func Refusal(code RefusalCode, msg string) error {
 	return &RefusalError{Code: code, err: glerrors.New(glerrors.KindInvalid, msg)}
+}
+
+// Conflict builds a KindConflict error with a sentence for the user and a code:
+// the request is well formed but the state refuses it (a closed period).
+func Conflict(code RefusalCode, msg string) error {
+	return &RefusalError{Code: code, err: glerrors.New(glerrors.KindConflict, msg)}
 }
 
 // Error implements error.

@@ -31,6 +31,11 @@ func (c *Client) LevelOfGroup(ctx context.Context, groupID string) (ports.LevelR
 	if err != nil {
 		return ports.LevelRef{}, err
 	}
+	return toLevelRef(l)
+}
+
+// toLevelRef projects a level and its grading scale (see LevelOfGroup).
+func toLevelRef(l *configv1.Level) (ports.LevelRef, error) {
 	g := l.GetGrading()
 	if g == nil {
 		return ports.LevelRef{}, domain.Refusal(domain.CodeLevelScaleUnavailable, msgScaleNotConfigured)

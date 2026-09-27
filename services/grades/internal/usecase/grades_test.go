@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"sort"
 	"testing"
 	"time"
 
@@ -24,6 +25,18 @@ func (f *fakeAssignments) ByID(_ context.Context, id string) (ports.AssignmentRe
 		return ports.AssignmentRef{}, glerrors.ErrNotFound
 	}
 	return a, nil
+}
+
+// ListTerms lists the cycle's terms (of one level when set) in ordinal order.
+func (f *fakeAssignments) ListTerms(_ context.Context, cycleID, levelID string) ([]ports.TermRef, error) {
+	out := []ports.TermRef{}
+	for _, tm := range f.terms {
+		if tm.CycleID == cycleID && (levelID == "" || tm.LevelID == levelID) {
+			out = append(out, tm)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Ordinal < out[j].Ordinal })
+	return out, nil
 }
 
 func (f *fakeAssignments) TermByID(_ context.Context, id string) (ports.TermRef, error) {

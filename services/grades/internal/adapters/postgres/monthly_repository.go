@@ -19,11 +19,15 @@ var _ ports.MonthlyGradeRepository = (*Repository)(nil)
 // month) key, updates value, teacher_id, captured_by and updated_at — every
 // column a correction can change. The stored row is re-read in the same
 // tenant-bound transaction, so the caller gets the canonical id and updated_at
-// even when the upsert hit an existing row.
-func (r *Repository) UpsertMonthlyGrade(ctx context.Context, g domain.MonthlyGrade) (domain.MonthlyGrade, error) {
+// even when the upsert hit an existing row. A lock naming a closed term refuses the
+// write with MONTH_LOCKED (see guardPeriod).
+func (r *Repository) UpsertMonthlyGrade(ctx context.Context, g domain.MonthlyGrade, lock ports.PeriodLock) (domain.MonthlyGrade, error) {
 	model := fromDomainMonthly(g)
 	var out domain.MonthlyGrade
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := r.guardPeriod(tx, lock); err != nil {
+			return err
+		}
 		res := tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "tenant_id"}, {Name: "enrollment_id"}, {Name: "subject_id"}, {Name: "month"}},
 			DoUpdates: clause.Assignments(map[string]any{
@@ -52,9 +56,13 @@ func (r *Repository) UpsertMonthlyGrade(ctx context.Context, g domain.MonthlyGra
 }
 
 // DeleteMonthlyGrade removes the cell on the key. No row — never captured, or
-// hidden by RLS — is not an error: clearing an empty cell succeeds.
-func (r *Repository) DeleteMonthlyGrade(ctx context.Context, enrollmentID, subjectID string, month domain.Month) error {
+// hidden by RLS — is not an error: clearing an empty cell succeeds. A lock
+// naming a closed term refuses it with MONTH_LOCKED.
+func (r *Repository) DeleteMonthlyGrade(ctx context.Context, enrollmentID, subjectID string, month domain.Month, lock ports.PeriodLock) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := r.guardPeriod(tx, lock); err != nil {
+			return err
+		}
 		if err := tx.Where("enrollment_id = ? AND subject_id = ? AND month = ?",
 			enrollmentID, subjectID, month.FirstDay()).Delete(&monthlyGradeModel{}).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "deleting monthly grade", err)

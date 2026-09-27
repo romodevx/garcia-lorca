@@ -17,6 +17,7 @@ import (
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/grades/internal/adapters/configclient"
 	"github.com/garcia-lorca/services/grades/internal/domain"
+	"github.com/garcia-lorca/services/grades/internal/ports"
 )
 
 // stubCatalog serves the group → grade → level chain, cycles and a group's
@@ -31,6 +32,23 @@ type stubCatalog struct {
 	listReq     *configv1.ListTeachingAssignmentsRequest
 	allGroups   []*configv1.Group
 	gradeLevels []*configv1.GradeLevel
+	subjects    []*configv1.Subject
+	teachers    []*configv1.Teacher
+	terms       []*configv1.Term
+	termsReq    *configv1.ListTermsRequest
+}
+
+func (s *stubCatalog) ListSubjects(context.Context, *connect.Request[configv1.ListSubjectsRequest]) (*connect.Response[configv1.ListSubjectsResponse], error) {
+	return connect.NewResponse(&configv1.ListSubjectsResponse{Subjects: s.subjects}), nil
+}
+
+func (s *stubCatalog) ListTeachers(context.Context, *connect.Request[configv1.ListTeachersRequest]) (*connect.Response[configv1.ListTeachersResponse], error) {
+	return connect.NewResponse(&configv1.ListTeachersResponse{Teachers: s.teachers}), nil
+}
+
+func (s *stubCatalog) ListTerms(_ context.Context, r *connect.Request[configv1.ListTermsRequest]) (*connect.Response[configv1.ListTermsResponse], error) {
+	s.termsReq = r.Msg
+	return connect.NewResponse(&configv1.ListTermsResponse{Terms: s.terms}), nil
 }
 
 func (s *stubCatalog) ListCycles(context.Context, *connect.Request[configv1.ListCyclesRequest]) (*connect.Response[configv1.ListCyclesResponse], error) {
@@ -236,4 +254,62 @@ func TestTermByIDCarriesItsLevel(t *testing.T) {
 	got, err := c.TermByID(context.Background(), "term-1")
 	require.NoError(t, err)
 	assert.Equal(t, "lvl-1", got.LevelID)
+}
+
+// T7: a level catalog is read in a fixed number of calls — the level, its
+// grades, the cycle groups, the cycle assignments, every subject and every
+// teacher — and keeps only the level groups and their assignments.
+func TestLevelCatalogReadsOnlyTheLevel(t *testing.T) {
+	stub := catalogStub()
+	stub.levels["lvl-1"].Name = "Primaria"
+	stub.gradeLevels = []*configv1.GradeLevel{{Id: "gl-1", LevelId: "lvl-1", Name: "1° PRIMARIA"}, {Id: "gl-9", LevelId: "lvl-9", Name: "1° SECUNDARIA"}}
+	stub.allGroups = []*configv1.Group{
+		{Id: "grp-1", CycleId: "cyc-1", GradeLevelId: "gl-1", Name: "A"},
+		{Id: "grp-2", CycleId: "cyc-1", GradeLevelId: "gl-9", Name: "A"},
+	}
+	stub.assignments = []*configv1.TeachingAssignment{
+		{Id: "a1", GroupId: "grp-1", SubjectId: "s1", TeacherId: "t1", CycleId: "cyc-1"},
+		{Id: "a2", GroupId: "grp-2", SubjectId: "s2", TeacherId: "t2", CycleId: "cyc-1"},
+	}
+	stub.subjects = []*configv1.Subject{{Id: "s1", Name: "Matemáticas"}, {Id: "s2", Name: "Física"}}
+	stub.teachers = []*configv1.Teacher{{Id: "t1", FirstName: "Gabriela", LastName: "Rojas"}, {Id: "t2", FirstName: "Otro", LastName: "Docente"}}
+
+	got, err := newCatalogClient(t, stub).LevelCatalog(context.Background(), "cyc-1", "lvl-1")
+	require.NoError(t, err)
+	assert.Equal(t, "Primaria", got.LevelName)
+	assert.True(t, got.GradingEnabled)
+	assert.Equal(t, 600, got.Scale.PassingHundredths())
+	assert.Equal(t, []ports.GroupRef{{ID: "grp-1", Label: "1° PRIMARIA · A"}}, got.Groups)
+	require.Len(t, got.Assignments, 1)
+	assert.Equal(t, "a1", got.Assignments[0].ID)
+	assert.Equal(t, "cyc-1", stub.listReq.GetCycleId())
+	assert.Empty(t, stub.listReq.GetGroupId(), "ONE read for the whole cycle, never one per group")
+	assert.Equal(t, "Matemáticas", got.SubjectNames["s1"])
+	assert.Equal(t, "Gabriela Rojas", got.TeacherNames["t1"])
+
+	_, err = newCatalogClient(t, stub).LevelCatalog(context.Background(), "cyc-1", "ghost")
+	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err))
+}
+
+// A term carries its name, ordinal and months; a cycle lists its terms, of one
+// level when asked.
+func TestListTermsProjectsMonths(t *testing.T) {
+	stub := catalogStub()
+	stub.terms = []*configv1.Term{
+		{Id: "term-2", CycleId: "cyc-1", LevelId: "lvl-1", Name: "2.º trimestre", Ordinal: 2, Months: []string{"2026-12", "2027-01"}},
+		{Id: "term-1", CycleId: "cyc-1", LevelId: "lvl-1", Name: "1.er trimestre", Ordinal: 1, Months: []string{"2026-09", "2026-10", "2026-11"}},
+	}
+	got, err := newCatalogClient(t, stub).ListTerms(context.Background(), "cyc-1", "lvl-1")
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, "term-1", got[0].ID, "ordinal order")
+	assert.Equal(t, "1.er trimestre", got[0].Name)
+	assert.Equal(t, 1, got[0].Ordinal)
+	require.Len(t, got[0].Months, 3)
+	assert.Equal(t, "2026-09", got[0].Months[0].String())
+	assert.Equal(t, "lvl-1", stub.termsReq.GetLevelId())
+
+	stub.terms = []*configv1.Term{{Id: "bad", Months: []string{"sept"}}}
+	_, err = newCatalogClient(t, stub).ListTerms(context.Background(), "cyc-1", "")
+	assert.Equal(t, glerrors.KindInternal, glerrors.KindOf(err), "a malformed month from config is not silently dropped")
 }

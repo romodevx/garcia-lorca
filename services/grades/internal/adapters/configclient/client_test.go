@@ -107,3 +107,14 @@ func TestTermByID_MapsFieldsAndNotFound(t *testing.T) {
 		}
 	})
 }
+
+func TestTermByIDCarriesNameOrdinalAndMonths(t *testing.T) {
+	c := newClient(t, &stubConfigService{term: &configv1.Term{Id: "term-1", CycleId: "cyc-1", LevelId: "lvl-1", Name: "1.er trimestre", Ordinal: 1, Months: []string{"2026-09", "2026-10"}}})
+	got, err := c.TermByID(context.Background(), "term-1")
+	if err != nil {
+		t.Fatalf("TermByID: %v", err)
+	}
+	if got.Name != "1.er trimestre" || got.Ordinal != 1 || len(got.Months) != 2 || got.Months[1].String() != "2026-10" {
+		t.Errorf("mapping mismatch: %+v", got)
+	}
+}

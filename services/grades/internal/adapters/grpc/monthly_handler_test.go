@@ -69,18 +69,39 @@ func (f *fakeCatalog) AssignmentsByGroup(_ context.Context, _, _ string) ([]port
 	return []ports.AssignmentRef{{ID: assignmentID, GroupID: groupID, SubjectID: subjectID, TeacherID: teacherID, CycleID: cycleID}}, nil
 }
 
-type fakeMonthly struct {
-	rows map[string]domain.MonthlyGrade
+func (f *fakeCatalog) LevelCatalog(context.Context, string, string) (ports.LevelCatalog, error) {
+	return ports.LevelCatalog{}, glerrors.ErrNotFound
 }
 
-func newFakeMonthly() *fakeMonthly { return &fakeMonthly{rows: map[string]domain.MonthlyGrade{}} }
+type fakeMonthly struct {
+	rows     map[string]domain.MonthlyGrade
+	closures map[string]domain.PeriodClosure
+}
 
-func (f *fakeMonthly) UpsertMonthlyGrade(_ context.Context, g domain.MonthlyGrade) (domain.MonthlyGrade, error) {
+func newFakeMonthly() *fakeMonthly {
+	return &fakeMonthly{rows: map[string]domain.MonthlyGrade{}, closures: map[string]domain.PeriodClosure{}}
+}
+
+func (f *fakeMonthly) PeriodClosures(_ context.Context, ids []string) (map[string]domain.PeriodClosure, error) {
+	out := map[string]domain.PeriodClosure{}
+	for _, id := range ids {
+		if c, ok := f.closures[id]; ok {
+			out[id] = c
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeMonthly) MonthlyGradesForEnrollments(context.Context, []string, []domain.Month) ([]domain.MonthlyGrade, error) {
+	return nil, nil
+}
+
+func (f *fakeMonthly) UpsertMonthlyGrade(_ context.Context, g domain.MonthlyGrade, _ ports.PeriodLock) (domain.MonthlyGrade, error) {
 	f.rows[g.EnrollmentID()+g.Month().String()] = g
 	return g, nil
 }
 
-func (f *fakeMonthly) DeleteMonthlyGrade(_ context.Context, enr, _ string, m domain.Month) error {
+func (f *fakeMonthly) DeleteMonthlyGrade(_ context.Context, enr, _ string, m domain.Month, _ ports.PeriodLock) error {
 	delete(f.rows, enr+m.String())
 	return nil
 }

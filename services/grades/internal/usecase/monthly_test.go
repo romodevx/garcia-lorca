@@ -33,6 +33,22 @@ type fakeCatalog struct {
 	scaleErr      error // LevelOfGroup fails with it (a level whose scale is unusable)
 	activeCycle   *ports.CycleRef
 	groupsByLevel map[string][]string
+	// levelCatalogs answers LevelCatalog per level; catalogErr fails it.
+	levelCatalogs map[string]ports.LevelCatalog
+	catalogErr    error
+	catalogCalls  int
+}
+
+func (f *fakeCatalog) LevelCatalog(_ context.Context, _, levelID string) (ports.LevelCatalog, error) {
+	f.catalogCalls++
+	if f.catalogErr != nil {
+		return ports.LevelCatalog{}, f.catalogErr
+	}
+	c, ok := f.levelCatalogs[levelID]
+	if !ok {
+		return ports.LevelCatalog{}, glerrors.ErrNotFound
+	}
+	return c, nil
 }
 
 func (f *fakeCatalog) LevelIDOfGroup(_ context.Context, groupID string) (string, error) {
@@ -116,20 +132,60 @@ type fakeMonthly struct {
 	rows       map[string]domain.MonthlyGrade
 	sheetCalls int
 	deleted    []string
+	// locks records the period lock every write was guarded by.
+	locks []ports.PeriodLock
+	// closures are the stored period closures, keyed by term id.
+	closures map[string]domain.PeriodClosure
+	// batchCalls counts MonthlyGradesForEnrollments reads.
+	batchCalls int
 }
 
-func newFakeMonthly() *fakeMonthly { return &fakeMonthly{rows: map[string]domain.MonthlyGrade{}} }
+func (f *fakeMonthly) PeriodClosures(_ context.Context, termIDs []string) (map[string]domain.PeriodClosure, error) {
+	out := map[string]domain.PeriodClosure{}
+	for _, id := range termIDs {
+		if c, ok := f.closures[id]; ok {
+			out[id] = c
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeMonthly) MonthlyGradesForEnrollments(_ context.Context, ids []string, months []domain.Month) ([]domain.MonthlyGrade, error) {
+	f.batchCalls++
+	return f.gradesIn(ids, months), nil
+}
+
+func (f *fakeMonthly) gradesIn(ids []string, months []domain.Month) []domain.MonthlyGrade {
+	in := map[string]bool{}
+	for _, id := range ids {
+		in[id] = true
+	}
+	out := []domain.MonthlyGrade{}
+	for _, g := range f.rows {
+		if in[g.EnrollmentID()] && domain.ContainsMonth(months, g.Month()) {
+			out = append(out, g)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID() < out[j].ID() })
+	return out
+}
+
+func newFakeMonthly() *fakeMonthly {
+	return &fakeMonthly{rows: map[string]domain.MonthlyGrade{}, closures: map[string]domain.PeriodClosure{}}
+}
 
 func monthlyKey(enrollment, subject string, m domain.Month) string {
 	return enrollment + "|" + subject + "|" + m.String()
 }
 
-func (f *fakeMonthly) UpsertMonthlyGrade(_ context.Context, g domain.MonthlyGrade) (domain.MonthlyGrade, error) {
+func (f *fakeMonthly) UpsertMonthlyGrade(_ context.Context, g domain.MonthlyGrade, lock ports.PeriodLock) (domain.MonthlyGrade, error) {
+	f.locks = append(f.locks, lock)
 	f.rows[monthlyKey(g.EnrollmentID(), g.SubjectID(), g.Month())] = g
 	return g, nil
 }
 
-func (f *fakeMonthly) DeleteMonthlyGrade(_ context.Context, enrollment, subject string, m domain.Month) error {
+func (f *fakeMonthly) DeleteMonthlyGrade(_ context.Context, enrollment, subject string, m domain.Month, lock ports.PeriodLock) error {
+	f.locks = append(f.locks, lock)
 	k := monthlyKey(enrollment, subject, m)
 	delete(f.rows, k)
 	f.deleted = append(f.deleted, k)
