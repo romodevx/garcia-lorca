@@ -37,6 +37,8 @@ export interface GradeSheet {
   /** Every month of the cycle the sheet can show, oldest first. */
   months: string[];
   scale: GradeScale;
+  /** False for a level without numeric grades (Kínder): its scale is meaningless. */
+  gradingEnabled?: boolean;
   editable: boolean;
   readOnlyReason?: string;
   rows: MonthlyGradeRow[];

@@ -55,6 +55,8 @@ export function GradeSheetTable({ sheet, saves }: GradeSheetTableProps): ReactEl
   }, []);
   const notice = saves.sheetNotice({ assignmentId: sheet.assignmentId, month: sheet.month });
 
+  // No grades at all: counters, a "(0–0)" scale and a column of dashes would say nothing.
+  if (sheet.gradingEnabled === false) return <EmptyHint>{sheet.readOnlyReason ?? NOT_GRADED_FALLBACK}</EmptyHint>;
   if (sheet.rows.length === 0) return <EmptyHint>Este grupo aún no tiene alumnos inscritos.</EmptyHint>;
 
   return (
@@ -113,6 +115,7 @@ export function GradeSheetTable({ sheet, saves }: GradeSheetTableProps): ReactEl
   );
 }
 
+const NOT_GRADED_FALLBACK = "Este nivel no lleva calificación numérica";
 const PREVIOUS_GROUP_FALLBACK = "Este mes no se puede modificar para este alumno.";
 
 /** Why a row of an open month cannot change: the loaded sheet says so, or a save was just refused for it. */
