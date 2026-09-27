@@ -32,7 +32,8 @@ import (
 // Every refusal carries a machine code in the X-Error-Code header
 // (GRADE_OUT_OF_RANGE, GRADE_DECIMALS, GRADE_NOT_NUMBER, MONTH_OUTSIDE_CYCLE,
 // LEVEL_NOT_GRADED, ENROLLMENT_NOT_IN_GROUP, MONTH_PREVIOUS_GROUP,
-// MONTH_IN_FUTURE, …).
+// MONTH_IN_FUTURE, and — T7 — MONTH_LOCKED with 409 for a month of a closed period,
+// …).
 
 // MonthlyGradesService is the grades surface the monthly handler consumes. The
 // Connect GradesClient satisfies it.
@@ -137,6 +138,9 @@ type monthlySheetResponse struct {
 	Editable       bool                      `json:"editable"`
 	ReadOnlyReason string                    `json:"readOnlyReason,omitempty"`
 	Rows           []monthlySheetRowResponse `json:"rows"`
+	// ClosedMonths are the months of a CLOSED period of the level (T7): every
+	// write to them answers 409 MONTH_LOCKED until the director reopens it.
+	ClosedMonths []string `json:"closedMonths"`
 }
 
 type monthlyGradeResponse struct {
@@ -295,7 +299,7 @@ func (h *MonthlyGradesHandler) toSheetResponse(ctx context.Context, s client.Mon
 	return monthlySheetResponse{
 		AssignmentID: s.AssignmentID, Month: s.Month, Months: months, Scale: toGradeScaleResponse(s.Scale),
 		GradingEnabled: s.GradingEnabled, CurrentMonth: h.now().UTC().Format(monthLayout),
-		Editable: s.Editable, ReadOnlyReason: s.ReadOnlyReason, Rows: rows,
+		Editable: s.Editable, ReadOnlyReason: s.ReadOnlyReason, Rows: rows, ClosedMonths: nonNilMonths(s.ClosedMonths),
 	}
 }
 
