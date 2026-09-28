@@ -98,3 +98,13 @@ export function trashSummary(counts: LevelDeletionCounts): string {
   if (counts.students > 0) parts.push(counted(counts.students, STUDENTS));
   return parts.length === 0 ? "Nivel vacío" : parts.join(" · ");
 }
+
+/** A deletion of this level is already running (or failed half-way and waits in the trash). */
+export const DELETION_IN_PROGRESS = "Ya se está eliminando este nivel; espera un momento y revisa la Papelera.";
+
+/** The trash row's state line, when the batch is not a plain deletion. */
+export function trashStatusLine(status: string): string | undefined {
+  if (status === "failed_partial") return "Eliminación incompleta — Restaurar para recuperar lo que se alcanzó a borrar";
+  if (status === "restored_partial") return "Restaurado en parte — lo que no cupo sigue aquí; Restaurar lo intenta de nuevo";
+  return undefined;
+}

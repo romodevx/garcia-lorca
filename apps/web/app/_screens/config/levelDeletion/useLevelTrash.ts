@@ -30,6 +30,11 @@ function refusalMessage(err: unknown, levelName: string): string {
   if (err instanceof ConfigError && err.code === "TRASH_EXPIRED") {
     return `Pasaron los 7 días: ${levelName} ya no se puede restaurar.`;
   }
+  // A half-done restore, a missing part, a level being deleted: the server's
+  // own sentence says what happened and what a retry does.
+  if (err instanceof ConfigError && (err.code !== undefined || err.status >= 500) && err.message !== `HTTP ${err.status}`) {
+    return err.message;
+  }
   return "No se pudo restaurar el nivel. Revisa tu conexión e intenta de nuevo.";
 }
 

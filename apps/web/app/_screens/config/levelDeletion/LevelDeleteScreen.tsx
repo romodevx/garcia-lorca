@@ -75,7 +75,7 @@ export function LevelDeleteScreen({ levelId, onBack, onDeleted }: LevelDeleteScr
         {d.load.kind === "loading" && <p style={{ color: "var(--text-muted)" }}>Cargando resumen…</p>}
         {d.load.kind === "failed" && (
           <div style={{ display: "grid", gap: 10, justifyItems: "start" }}>
-            <p role="alert" style={alertStyle}>No se pudo cargar el resumen de este nivel.</p>
+            <p role="alert" style={alertStyle}>{d.load.message ?? "No se pudo cargar el resumen de este nivel."}</p>
             <Btn kind="ghost" onClick={d.retry}>Reintentar</Btn>
           </div>
         )}

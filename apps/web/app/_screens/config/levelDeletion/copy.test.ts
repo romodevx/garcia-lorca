@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { LevelDeletionCounts } from "../../../config/api";
-import { daysLeft, deletedLines, keptLines, longDay, namesMatch, restoredSummary, skippedLine, trashSummary } from "./copy";
+import { daysLeft, deletedLines, keptLines, longDay, namesMatch, restoredSummary, skippedLine, trashStatusLine, trashSummary } from "./copy";
 
 const ZERO: LevelDeletionCounts = {
   gradeLevels: 0, groups: 0, subjects: 0, terms: 0, teachingAssignments: 0, students: 0, enrollments: 0,
@@ -83,5 +83,13 @@ describe("restore copy", () => {
   it("trashSummary keeps the row short", () => {
     expect(trashSummary({ ...ZERO, gradeLevels: 6, groups: 12, subjects: 40, terms: 3, students: 120 })).toBe("6 grados · 12 grupos · 40 asignaturas · 120 alumnos");
     expect(trashSummary(ZERO)).toBe("Nivel vacío");
+  });
+});
+
+describe("trashStatusLine", () => {
+  it("names the incomplete states and nothing else", () => {
+    expect(trashStatusLine("failed_partial")).toBe("Eliminación incompleta — Restaurar para recuperar lo que se alcanzó a borrar");
+    expect(trashStatusLine("restored_partial")).toMatch(/^Restaurado en parte/);
+    expect(trashStatusLine("deleted")).toBeUndefined();
   });
 });

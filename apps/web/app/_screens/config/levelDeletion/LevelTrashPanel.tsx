@@ -7,7 +7,7 @@ import { DrawerShell } from "../../../_design/DrawerShell";
 import { Toast } from "../../../_design/Toast";
 import type { LevelTrashItem } from "../../../config/api";
 import { EmptyHint, ErrorAlert, Section } from "../parts";
-import { daysLeft, longDay, restoredSummary, skippedLine, trashSummary } from "./copy";
+import { daysLeft, longDay, restoredSummary, skippedLine, trashStatusLine, trashSummary } from "./copy";
 import { useLevelTrash, type LevelTrash, type RestoreOutcome } from "./useLevelTrash";
 
 export interface LevelTrashPanelProps {
@@ -47,6 +47,9 @@ function TrashRow({ item, left, onRestore }: { item: LevelTrashItem; left: numbe
         <p style={{ fontWeight: 700, color: "var(--text)" }}>{item.levelName}</p>
         <p style={{ fontSize: 13.5, color: "var(--text-muted)" }}>{`Eliminado el ${longDay(item.deletedAt)} por ${item.deletedByName}`}</p>
         <p style={{ fontSize: 13.5, color: "var(--text-muted)" }}>{trashSummary(item.counts)}</p>
+        {trashStatusLine(item.status) !== undefined && (
+          <p style={{ fontSize: 13.5, fontWeight: 600, color: "var(--warn-fg)" }}>{trashStatusLine(item.status)}</p>
+        )}
       </div>
       {left > 0 ? (
         <>

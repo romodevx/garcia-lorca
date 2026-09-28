@@ -207,6 +207,36 @@ describe("step 3 — the password", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(text);
   });
 
+  it("DELETION_IN_PROGRESS says a deletion already runs and points to the trash", async () => {
+    api.deleteLevel.mockRejectedValue(new ConfigError(409, "Ya se está eliminando", "DELETION_IN_PROGRESS"));
+    const { user, onDeleted } = renderScreen();
+    await toPasswordStep(user);
+    await submitPassword(user);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Ya se está eliminando este nivel; espera un momento y revisa la Papelera.",
+    );
+    expect(onDeleted).not.toHaveBeenCalled();
+  });
+
+  it("DELETION_INCOMPLETE shows the server's sentence, with its folio", async () => {
+    const text = "No se pudo eliminar el nivel y no se pudo deshacer por completo (folio b-42). Aparece en la Papelera como eliminación incompleta.";
+    api.deleteLevel.mockRejectedValue(new ConfigError(500, text, "DELETION_INCOMPLETE"));
+    const { user } = renderScreen();
+    await toPasswordStep(user);
+    await submitPassword(user);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("folio b-42");
+  });
+
+  it("a summary refused because the level is being deleted says so", async () => {
+    api.getLevelDeletionPreview.mockReset();
+    api.getLevelDeletionPreview.mockRejectedValue(new ConfigError(409, "", "DELETION_IN_PROGRESS"));
+    renderScreen();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ya se está eliminando este nivel; espera un momento y revisa la Papelera.");
+  });
+
   it("a double click sends one delete", async () => {
     api.deleteLevel.mockReturnValue(new Promise(() => undefined));
     const { user } = renderScreen();

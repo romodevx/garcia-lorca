@@ -20,7 +20,7 @@ const COUNTS = {
 };
 const ITEM: LevelTrashItem = {
   batchId: "b1", levelId: "l1", levelName: "PRIMARIA", deletedAt: "2026-09-27T17:00:00Z", restorableUntil: "2026-10-04T17:00:00Z",
-  deletedByName: "Luis Beltrán", counts: COUNTS, status: "active",
+  deletedByName: "Luis Beltrán", counts: COUNTS, status: "deleted",
 };
 
 afterEach(() => vi.clearAllMocks());
@@ -103,6 +103,39 @@ describe("LevelTrashPanel", () => {
 
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("Pasaron los 7 días: PRIMARIA ya no se puede restaurar.");
     await waitFor(() => expect(api.listLevelTrash).toHaveBeenCalledTimes(2));
+  });
+
+  it("marks an incomplete deletion and still offers to restore it", async () => {
+    renderPanel([{ ...ITEM, status: "failed_partial" }]);
+
+    const row = (await screen.findByText("PRIMARIA")).closest("li") as HTMLElement;
+    expect(row).toHaveTextContent("Eliminación incompleta — Restaurar para recuperar lo que se alcanzó a borrar");
+    expect(within(row).getByRole("button", { name: "Restaurar PRIMARIA" })).toBeInTheDocument();
+  });
+
+  it("marks a partly restored level", async () => {
+    renderPanel([{ ...ITEM, status: "restored_partial" }]);
+
+    const row = (await screen.findByText("PRIMARIA")).closest("li") as HTMLElement;
+    expect(row).toHaveTextContent("Restaurado en parte — lo que no cupo sigue aquí; Restaurar lo intenta de nuevo");
+  });
+
+  it("a half-done restore shows the server's sentence", async () => {
+    api.restoreLevel.mockRejectedValue(new ConfigError(500, "La restauración quedó a medias; vuelve a intentarlo", undefined));
+    const { user } = renderPanel();
+    const dialog = await openRestore(user);
+    await user.click(within(dialog).getByRole("button", { name: "Restaurar nivel" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("La restauración quedó a medias; vuelve a intentarlo");
+  });
+
+  it("a part of the batch already gone says what the server says", async () => {
+    api.restoreLevel.mockRejectedValue(new ConfigError(500, "Parte de este nivel ya no estaba en la papelera (finance); lo demás se restauró", "RESTORE_INCOMPLETE"));
+    const { user } = renderPanel();
+    const dialog = await openRestore(user);
+    await user.click(within(dialog).getByRole("button", { name: "Restaurar nivel" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("lo demás se restauró");
   });
 
   it("a double click restores once", async () => {

@@ -4,13 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { API_URL } from "../../../api-url";
 import { ConfigError, deleteLevel, getLevelDeletionPreview, type LevelDeletionPreview } from "../../../config/api";
-import { longDay, namesMatch } from "./copy";
+import { DELETION_IN_PROGRESS, longDay, namesMatch } from "./copy";
 
 export type Step = 1 | 2 | 3;
 
 export type PreviewLoad =
   | { kind: "loading" }
-  | { kind: "failed" }
+  | { kind: "failed"; message?: string }
   | { kind: "ready"; preview: LevelDeletionPreview };
 
 export const STALE_NOTICE = "El nivel cambió mientras confirmabas. Revisa el resumen actualizado y vuelve a confirmar.";
@@ -42,6 +42,10 @@ export interface LevelDeletion {
   submit: () => Promise<void>;
 }
 
+function isCode(err: unknown, code: string): boolean {
+  return err instanceof ConfigError && err.code === code;
+}
+
 /**
  * The three confirmations of deleting a level, and every way the server can
  * refuse the last one. The step lives here, not in the page, because a refusal
@@ -65,7 +69,9 @@ export function useLevelDeletion(levelId: string, onDeleted: (message: string) =
     setLoad({ kind: "loading" });
     getLevelDeletionPreview(API_URL, levelId)
       .then((preview) => setLoad({ kind: "ready", preview }))
-      .catch(() => setLoad({ kind: "failed" }));
+      .catch((err: unknown) =>
+        setLoad(isCode(err, "DELETION_IN_PROGRESS") ? { kind: "failed", message: DELETION_IN_PROGRESS } : { kind: "failed" }),
+      );
   }, [levelId]);
 
   useEffect(fetchPreview, [fetchPreview]);
@@ -104,6 +110,9 @@ export function useLevelDeletion(levelId: string, onDeleted: (message: string) =
       return setStep(2);
     }
     if (err.code === "REAUTH_FAILED") return setPasswordError(WRONG_PASSWORD);
+    if (err.code === "DELETION_IN_PROGRESS") return setSubmitError(DELETION_IN_PROGRESS);
+    // The server's own sentence: the incomplete deletion names its folio.
+    if (err.code === "DELETION_INCOMPLETE" || err.code === "LEVEL_BEING_DELETED") return setSubmitError(err.message);
     if (err.status === 403) return setSubmitError(FORBIDDEN);
     if (err.status === 404) return setSubmitError(GONE);
     setSubmitError(NETWORK);
