@@ -12,6 +12,7 @@
 
 // --- entity types (match the gateway JSON contract) -----------------------
 
+import { matchesSearch } from "../_design/textSearch";
 import { authFetch } from "../auth/authFetch";
 import type { AttendanceMode } from "../attendance/sheet";
 
@@ -462,20 +463,36 @@ export interface LabelledGroup extends Group {
  * broken one.
  */
 export async function listLabelledGroups(baseURL: string, cycleId: string, gradeLevelId?: string): Promise<LabelledGroup[]> {
-  const [groups, grades] = await Promise.all([
+  const [groups, grades, levels] = await Promise.all([
     listGroups(baseURL, cycleId, gradeLevelId),
     listGradeLevels(baseURL).catch((): GradeLevel[] => []),
+    listLevels(baseURL).catch((): Level[] => []),
   ]);
-  return labelGroups(groups, grades);
+  return labelGroups(groups, grades, levels);
 }
 
-/** Labels groups from grades already in hand; an unknown grade keeps the bare name. */
-export function labelGroups(groups: readonly Group[], grades: readonly GradeLevel[]): LabelledGroup[] {
-  const gradeName = new Map(grades.map((g) => [g.id, g.name]));
+/**
+ * Labels groups from grades already in hand; an unknown grade keeps the bare name.
+ * The config screen asks for the grade "as the school names it", so "1°" under
+ * PRIMARIA and "1°" under SECUNDARIA are both normal: when the grade's name does
+ * not already carry its level, the level is added ("1° PRIMARIA · A").
+ */
+export function labelGroups(
+  groups: readonly Group[],
+  grades: readonly GradeLevel[],
+  levels: readonly Pick<Level, "id" | "name">[] = [],
+): LabelledGroup[] {
+  const levelName = new Map(levels.map((l) => [l.id, l.name]));
+  const gradeName = new Map(grades.map((g) => [g.id, gradeWithLevel(g.name, levelName.get(g.levelId))]));
   return groups.map((g) => {
     const grade = gradeName.get(g.gradeLevelId);
     return { ...g, label: grade === undefined ? g.name : `${grade} · ${g.name}` };
   });
+}
+
+function gradeWithLevel(grade: string, level: string | undefined): string {
+  if (level === undefined || matchesSearch(level, grade)) return grade;
+  return `${grade} ${level}`;
 }
 
 
