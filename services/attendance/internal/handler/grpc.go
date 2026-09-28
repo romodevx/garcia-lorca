@@ -10,6 +10,7 @@ import (
 	attendancev1 "github.com/garcia-lorca/gen/go/garcialorca/attendance/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/attendance/v1/attendancev1connect"
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/services/attendance/internal/service"
 )
 
@@ -160,7 +161,21 @@ func (h *AttendanceHandler) ListSessions(ctx context.Context, req *connect.Reque
 	return connect.NewResponse(&attendancev1.ListSessionsResponse{Lists: out}), nil
 }
 
+// ErrorCodeMeta is the error-metadata key a refusal's machine code rides in;
+// the gateway forwards it as the X-Error-Code response header.
+const ErrorCodeMeta = "X-Error-Code"
+
+// connectErr maps a typed error to its Connect code and, when it names one,
+// attaches its machine code (e.g. LEVEL_BEING_DELETED) as X-Error-Code.
 func connectErr(err error) *connect.Error {
+	ce := connectErrForKind(err)
+	if code := levelarchive.CodeOf(err); code != "" {
+		ce.Meta().Set(ErrorCodeMeta, code)
+	}
+	return ce
+}
+
+func connectErrForKind(err error) *connect.Error {
 	safe := errors.New(glerrors.SafeMessage(err))
 
 	switch glerrors.KindOf(err) {

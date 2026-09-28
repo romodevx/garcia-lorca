@@ -19,6 +19,7 @@ import (
 	configv1 "github.com/garcia-lorca/gen/go/garcialorca/config/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/config/v1/configv1connect"
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/services/attendance/internal/service"
 )
 
@@ -46,6 +47,29 @@ func New(baseURL string, httpClient connect.HTTPClient) *Client {
 func (c *Client) ByID(ctx context.Context, id string) error {
 	if _, err := c.rpc.GetGroup(ctx, connect.NewRequest(&configv1.GetGroupRequest{Id: id})); err != nil {
 		return mapConfigErr(err, "group")
+	}
+	return nil
+}
+
+// WritableByID reports whether a group exists AND its level may be written:
+// group → grade level → level (three point reads, the write path only). A level
+// whose config status is DELETING is levelarchive.LevelBeingDeleted (ADR 0021);
+// an older config that sends no status leaves the level writable.
+func (c *Client) WritableByID(ctx context.Context, id string) error {
+	group, err := c.rpc.GetGroup(ctx, connect.NewRequest(&configv1.GetGroupRequest{Id: id}))
+	if err != nil {
+		return mapConfigErr(err, "group")
+	}
+	grade, err := c.rpc.GetGradeLevel(ctx, connect.NewRequest(&configv1.GetGradeLevelRequest{Id: group.Msg.GetGroup().GetGradeLevelId()}))
+	if err != nil {
+		return mapConfigErr(err, "grade level")
+	}
+	level, err := c.rpc.GetLevel(ctx, connect.NewRequest(&configv1.GetLevelRequest{Id: grade.Msg.GetGradeLevel().GetLevelId()}))
+	if err != nil {
+		return mapConfigErr(err, "level")
+	}
+	if level.Msg.GetLevel().GetStatus() == configv1.LevelStatus_LEVEL_STATUS_DELETING {
+		return levelarchive.LevelBeingDeleted()
 	}
 	return nil
 }

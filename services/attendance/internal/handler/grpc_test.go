@@ -108,6 +108,8 @@ func (f *fakeGroups) ByID(_ context.Context, id string) error {
 	return nil
 }
 
+func (f *fakeGroups) WritableByID(ctx context.Context, id string) error { return f.ByID(ctx, id) }
+
 // --- fixtures -----------------------------------------------------------------
 
 const (

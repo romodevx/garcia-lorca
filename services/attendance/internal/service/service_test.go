@@ -10,6 +10,7 @@ import (
 	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/services/attendance/internal/service"
 )
 
@@ -193,6 +194,7 @@ func (f *fakeEnrollments) ByGroup(_ context.Context, groupID string) ([]service.
 // NotFound (existence is all attendance needs).
 type fakeGroups struct {
 	existing map[string]bool
+	deleting map[string]bool // the group's level is being deleted (ADR 0021)
 	err      error
 }
 
@@ -202,6 +204,16 @@ func (f *fakeGroups) ByID(_ context.Context, id string) error {
 	}
 	if !f.existing[id] {
 		return glerrors.ErrNotFound
+	}
+	return nil
+}
+
+func (f *fakeGroups) WritableByID(ctx context.Context, id string) error {
+	if err := f.ByID(ctx, id); err != nil {
+		return err
+	}
+	if f.deleting[id] {
+		return levelarchive.LevelBeingDeleted()
 	}
 	return nil
 }
@@ -448,6 +460,8 @@ func (c *countingGroups) ByID(context.Context, string) error {
 	c.calls++
 	return glerrors.ErrNotFound
 }
+
+func (c *countingGroups) WritableByID(ctx context.Context, id string) error { return c.ByID(ctx, id) }
 
 func newRosterService(t *testing.T, repo *fakeRepo, groups service.GroupReader) *service.AttendanceService {
 	t.Helper()
@@ -992,5 +1006,33 @@ func assertBound(t *testing.T, name string, got time.Time, want string) {
 	}
 	if got.Format(dateLayout) != want {
 		t.Errorf("%s bound = %v, want %s", name, got, want)
+	}
+}
+
+// Review finding 4: while a level's deletion runs, a list saved for one of its
+// groups is refused with LEVEL_BEING_DELETED (409) — a mark written after
+// attendance's archive step would otherwise survive the level. The roster
+// still reads.
+func TestSaveRefusesAGroupWhoseLevelIsBeingDeleted(t *testing.T) {
+	repo := newFakeRepo()
+	enrollments := &fakeEnrollments{byGroup: map[string][]service.EnrollmentRef{
+		groupID: {{ID: enrollmentAna, StudentID: studentAna, GroupID: groupID, Status: "active"}},
+	}}
+	groups := &fakeGroups{existing: map[string]bool{groupID: true}, deleting: map[string]bool{groupID: true}}
+	svc := service.NewAttendanceService(repo, enrollments, groups, nil, testTenant, fixedIDs("rec-1"), slog.New(slog.DiscardHandler))
+	ctx := context.Background()
+
+	_, _, err := save(svc, ctx, groupID, schoolDay, []service.Mark{{EnrollmentID: enrollmentAna, Status: "absent"}})
+	if code := levelarchive.CodeOf(err); code != levelarchive.CodeLevelBeingDeleted {
+		t.Fatalf("CodeOf(%v) = %q, want %q", err, code, levelarchive.CodeLevelBeingDeleted)
+	}
+	if kind := glerrors.KindOf(err); kind != glerrors.KindConflict {
+		t.Fatalf("KindOf = %v, want KindConflict", kind)
+	}
+	if len(repo.rows) != 0 || len(repo.sessions) != 0 {
+		t.Fatal("a refused list must store nothing")
+	}
+	if _, err := roster(svc, ctx, groupID, schoolDay); err != nil {
+		t.Fatalf("the roster still reads: %v", err)
 	}
 }

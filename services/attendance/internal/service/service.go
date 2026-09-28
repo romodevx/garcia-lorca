@@ -82,6 +82,10 @@ type EnrollmentReader interface {
 // does not exist.
 type GroupReader interface {
 	ByID(ctx context.Context, id string) error
+	// WritableByID is ByID for a write: it also resolves the group's level and
+	// refuses one whose deletion runs with levelarchive.LevelBeingDeleted (409
+	// LEVEL_BEING_DELETED, ADR 0021).
+	WritableByID(ctx context.Context, id string) error
 }
 
 // AttendanceRecord is one stored attendance exception: an enrollment, the school
@@ -409,7 +413,7 @@ func (s *AttendanceService) SaveDailyAttendance(ctx context.Context, req SaveReq
 	if err != nil {
 		return SaveResult{}, err
 	}
-	if err := s.requireGroup(ctx, req.GroupID); err != nil {
+	if err := s.requireWritableGroup(ctx, req.GroupID); err != nil {
 		return SaveResult{}, err
 	}
 	enrollmentIDs, studentByEnrollment, err := s.activeRoster(ctx, req.GroupID)
@@ -739,6 +743,19 @@ func (s *AttendanceService) activeRoster(ctx context.Context, groupID string) ([
 // any other error.
 func (s *AttendanceService) requireGroup(ctx context.Context, groupID string) error {
 	if err := s.groups.ByID(ctx, groupID); err != nil {
+		if glerrors.KindOf(err) == glerrors.KindNotFound {
+			return glerrors.New(glerrors.KindInvalid, "group not found")
+		}
+		return err
+	}
+	return nil
+}
+
+// requireWritableGroup is requireGroup for a write: a group whose level is
+// being deleted is refused (LEVEL_BEING_DELETED), so no mark lands after
+// attendance's archive step of the deletion.
+func (s *AttendanceService) requireWritableGroup(ctx context.Context, groupID string) error {
+	if err := s.groups.WritableByID(ctx, groupID); err != nil {
 		if glerrors.KindOf(err) == glerrors.KindNotFound {
 			return glerrors.New(glerrors.KindInvalid, "group not found")
 		}
