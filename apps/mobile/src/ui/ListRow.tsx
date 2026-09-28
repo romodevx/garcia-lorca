@@ -9,6 +9,8 @@ export interface ListRowProps {
   divider?: boolean;
   style?: StyleProp<ViewStyle>;
   accessibilityLabel?: string;
+  /** What pressing the row does, read after the label ("Ver todos los meses"). */
+  accessibilityHint?: string;
 }
 
 /**
@@ -21,6 +23,7 @@ export function ListRow({
   divider = false,
   style,
   accessibilityLabel,
+  accessibilityHint,
 }: ListRowProps): ReactElement {
   const theme = useTheme();
   const content = (
@@ -37,6 +40,7 @@ export function ListRow({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
+        accessibilityHint={accessibilityHint}
         onPress={onPress}
         android_ripple={{ color: theme.colors.surface2 }}
       >

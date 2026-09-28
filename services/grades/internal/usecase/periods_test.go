@@ -441,6 +441,7 @@ func TestCloseWithForceIssuesReportCards(t *testing.T) {
 	assert.Equal(t, levelName, h.LevelName)
 	assert.Equal(t, "2026-2027", h.CycleName)
 	assert.Equal(t, "1.er trimestre", h.TermName)
+	assert.Equal(t, 1, h.TermOrdinal, "the term's order is frozen with the card")
 	assert.Equal(t, director, h.IssuedBy)
 	assert.Equal(t, periodsNow, h.IssuedAt)
 	assert.Equal(t, 600, h.Scale.PassingHundredths())
@@ -693,6 +694,30 @@ func TestListPeriods(t *testing.T) {
 	assert.Equal(t, "Preescolar", byTerm["term-kinder"].LevelName)
 	assert.Zero(t, byTerm["term-kinder"].Expected, "a level without numeric grades owes nothing")
 	assert.Equal(t, 1, f.grades.batchCalls, "every grade of the cycle in ONE read")
+}
+
+// A pupil's list is newest period first (term ordinal, not issue date): T1
+// re-closed AFTER T2 still lists below it, and only its latest version shows.
+func TestStudentReportCardsNewestTermFirst(t *testing.T) {
+	f := newPeriodsFixture(t)
+	f.captureAll(t)
+	_, err := f.svc.Close(context.Background(), firstTermID, false, dirActor)
+	require.NoError(t, err)
+	_, err = f.svc.Close(context.Background(), secondTermID, true, dirActor)
+	require.NoError(t, err)
+	_, err = f.svc.Reopen(context.Background(), firstTermID, director)
+	require.NoError(t, err)
+	_, err = f.svc.Close(context.Background(), firstTermID, false, dirActor) // v2 of T1, issued last
+	require.NoError(t, err)
+
+	latest, err := f.svc.ReportCards(context.Background(), ports.ReportCardFilter{StudentID: "stu-1"})
+	require.NoError(t, err)
+
+	require.Len(t, latest, 2)
+	assert.Equal(t, secondTermID, latest[0].TermID())
+	assert.Equal(t, 2, latest[0].Header().TermOrdinal)
+	assert.Equal(t, firstTermID, latest[1].TermID())
+	assert.Equal(t, 2, latest[1].Version(), "only the latest published version of T1")
 }
 
 func TestReportCardsNeedAFilter(t *testing.T) {

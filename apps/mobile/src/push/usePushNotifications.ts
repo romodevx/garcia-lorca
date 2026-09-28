@@ -1,28 +1,32 @@
-import type { Notification, NotificationResponse } from "expo-notifications";
+import type { NotificationResponse } from "expo-notifications";
 import { router } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getAccessToken } from "../api";
 import { useAppState } from "../state/AppState";
 import { requestFreshData } from "../state/freshness";
 import { loadNotifications } from "./notificationsModule";
+import { familyPush, type FamilyPush } from "./pushPayload";
 import { usePushRegistration } from "./usePushRegistration";
 
-/** The push payload comms sends when a teacher saves an exception. */
-interface AttendancePush {
-  type: "attendance";
-  studentId: string;
-  date: string;
-}
-
 const ATTENDANCE_ROUTE = "/(tabs)/asistencia";
+const GRADES_ROUTE = "/(tabs)/calificaciones";
+const REPORT_CARD_ROUTE = "/boleta/[id]";
 const INBOX_ROUTE = "/(tabs)/avisos";
 
-function attendancePayload(notification: Notification): AttendancePush | null {
-  const data = notification.request.content.data as Record<string, unknown> | null | undefined;
-  if (data?.type !== "attendance" || typeof data.studentId !== "string") {
-    return null;
+/** A tapped push waiting for the child list, with the id of the tap that queued it. */
+interface PendingTap {
+  push: FamilyPush;
+  responseId: string;
+}
+
+/** Opens the screen a push is about; the child is already selected. */
+function openPushTarget({ push, responseId }: PendingTap): void {
+  if (push.type === "attendance") {
+    router.navigate(ATTENDANCE_ROUTE);
+    return;
   }
-  return { type: "attendance", studentId: data.studentId, date: String(data.date ?? "") };
+  router.navigate({ pathname: GRADES_ROUTE, params: { vista: "boletas", k: responseId } });
+  router.push({ pathname: REPORT_CARD_ROUTE, params: { id: push.reportCardId, studentId: push.studentId } });
 }
 
 let handlerInstalled = false;
@@ -45,17 +49,18 @@ function installForegroundHandler(): void {
 }
 
 /**
- * Wires attendance pushes into the app. Mount once, inside the providers:
+ * Wires family pushes into the app. Mount once, inside the providers:
  *  - keeps the phone registered while a family is signed in (usePushRegistration);
- *  - an attendance push arriving in the foreground reloads what is on screen;
- *  - tapping one (also the tap that cold-started the app) opens Asistencia for
- *    that child — but only once the child list has loaded, and only when the
- *    child is one of THIS guardian's; any other push opens Avisos instead.
+ *  - an attendance or boleta push arriving in the foreground reloads what is on screen;
+ *  - tapping one (also the tap that cold-started the app) selects that child and
+ *    opens Asistencia, or Calificaciones → Boletas → that boleta — but only once
+ *    the child list has loaded, and only when the child is one of THIS
+ *    guardian's; any other push opens Avisos instead.
  */
 export function usePushNotifications(): void {
   const { children: linkedChildren, childLoading, selectedChildId, selectChild } = useAppState();
   const handledResponses = useRef(new Set<string>());
-  const [pendingTap, setPendingTap] = useState<AttendancePush | null>(null);
+  const [pendingTap, setPendingTap] = useState<PendingTap | null>(null);
 
   useEffect(installForegroundHandler, []);
 
@@ -64,12 +69,12 @@ export function usePushNotifications(): void {
 
   const queueTap = useCallback((response: NotificationResponse) => {
     const id = response.notification.request.identifier;
-    const payload = attendancePayload(response.notification);
-    if (payload === null || handledResponses.current.has(id)) {
+    const push = familyPush(response.notification);
+    if (push === null || handledResponses.current.has(id)) {
       return;
     }
     handledResponses.current.add(id);
-    setPendingTap(payload);
+    setPendingTap({ push, responseId: id });
   }, []);
 
   useEffect(() => {
@@ -82,12 +87,13 @@ export function usePushNotifications(): void {
     if (getAccessToken() === null) {
       return;
     }
-    if (!linkedChildren.some((c) => c.id === pendingTap.studentId)) {
+    const { studentId } = pendingTap.push;
+    if (!linkedChildren.some((c) => c.id === studentId)) {
       router.navigate(INBOX_ROUTE);
       return;
     }
-    selectChild(pendingTap.studentId);
-    router.navigate(ATTENDANCE_ROUTE);
+    selectChild(studentId);
+    openPushTarget(pendingTap);
     requestFreshData();
   }, [pendingTap, childLoading, linkedChildren, selectChild]);
 
@@ -97,7 +103,7 @@ export function usePushNotifications(): void {
       return;
     }
     const received = notifications.addNotificationReceivedListener((notification) => {
-      if (attendancePayload(notification) !== null) {
+      if (familyPush(notification) !== null) {
         requestFreshData();
       }
     });

@@ -60,6 +60,8 @@ type familyReportCardSummaryResponse struct {
 	ID             string       `json:"id"`
 	TermID         string       `json:"termId"`
 	TermName       string       `json:"termName"`
+	TermOrdinal    int          `json:"termOrdinal"`
+	CycleName      string       `json:"cycleName"`
 	Version        int          `json:"version"`
 	IssuedAt       *string      `json:"issuedAt"`
 	GeneralAverage *json.Number `json:"generalAverage"`
@@ -78,6 +80,7 @@ type reportCardResponse struct {
 	ID               string                   `json:"id"`
 	TermID           string                   `json:"termId"`
 	TermName         string                   `json:"termName"`
+	TermOrdinal      int                      `json:"termOrdinal"`
 	CycleName        string                   `json:"cycleName"`
 	LevelName        string                   `json:"levelName"`
 	GroupID          string                   `json:"groupId"`
@@ -179,7 +182,9 @@ func (h *ReportCardsHandler) directorCard(w http.ResponseWriter, r *http.Request
 // --- family --------------------------------------------------------------------
 
 // FamilyList handles GET /api/v1/family/students/{studentId}/report-cards —
-// the child's latest published card per period.
+// the child's latest published card per period, newest period first (cycle,
+// then term ordinal — never issue date, which a reopen moves). grades owns
+// that order; the gateway keeps it.
 func (h *ReportCardsHandler) FamilyList(w http.ResponseWriter, r *http.Request) {
 	studentID, ok := h.ownChild(w, r)
 	if !ok {
@@ -193,7 +198,7 @@ func (h *ReportCardsHandler) FamilyList(w http.ResponseWriter, r *http.Request) 
 	out := make([]familyReportCardSummaryResponse, 0, len(cards))
 	for _, c := range cards {
 		out = append(out, familyReportCardSummaryResponse{
-			ID: c.ID, TermID: c.TermID, TermName: c.TermName, Version: c.Version,
+			ID: c.ID, TermID: c.TermID, TermName: c.TermName, TermOrdinal: c.TermOrdinal, CycleName: c.CycleName, Version: c.Version,
 			IssuedAt: rfc3339OrNil(c.IssuedAt), GeneralAverage: numberOrNil(c.GeneralAverage), HasGrades: summaryHasGrades(c),
 		})
 	}
@@ -280,7 +285,7 @@ func (h *ReportCardsHandler) serveJSON(w http.ResponseWriter, r *http.Request, c
 		})
 	}
 	writePrivateJSON(w, reportCardResponse{
-		ID: c.ID, TermID: c.TermID, TermName: c.TermName, CycleName: c.CycleName, LevelName: c.LevelName,
+		ID: c.ID, TermID: c.TermID, TermName: c.TermName, TermOrdinal: c.TermOrdinal, CycleName: c.CycleName, LevelName: c.LevelName,
 		GroupID: c.GroupID, GroupLabel: c.GroupLabel, StudentID: c.StudentID, StudentName: c.StudentName,
 		EnrollmentNumber: c.EnrollmentNumber, Version: c.Version, Status: c.Status, IssuedAt: rfc3339OrNil(c.IssuedAt),
 		Months: nonNilMonths(c.Months), Scale: toGradeScaleResponse(c.Scale), GeneralAverage: numberOrNil(c.GeneralAverage),

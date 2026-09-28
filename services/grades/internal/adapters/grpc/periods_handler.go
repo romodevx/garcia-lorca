@@ -110,6 +110,7 @@ func (h *GradesHandler) ListReportCards(ctx context.Context, req *connect.Reques
 			Id: hd.ID, TermId: hd.TermID, TermName: hd.TermName, StudentId: hd.StudentID, StudentName: hd.StudentName,
 			GroupId: hd.GroupID, GroupLabel: hd.GroupLabel, Version: int32(hd.Version), IssuedAt: timestampOrNil(hd.IssuedAt),
 			GeneralAverage: rc.GeneralAverage().String(), EnrollmentId: hd.EnrollmentID,
+			TermOrdinal: int32(hd.TermOrdinal), CycleId: hd.CycleID, CycleName: hd.CycleName,
 		})
 	}
 	return connect.NewResponse(&gradesv1.ListReportCardsResponse{ReportCards: out}), nil
@@ -138,7 +139,7 @@ func toProtoReportCard(rc domain.ReportCard) *gradesv1.ReportCard {
 		EnrollmentId: hd.EnrollmentID, StudentId: hd.StudentID, Version: int32(hd.Version), Status: string(rc.Status()),
 		IssuedAt: timestampOrNil(hd.IssuedAt), IssuedBy: hd.IssuedBy, StudentName: hd.StudentName,
 		EnrollmentNumber: hd.EnrollmentNumber, GroupLabel: hd.GroupLabel, LevelName: hd.LevelName,
-		CycleName: hd.CycleName, TermName: hd.TermName, Months: monthStrings(hd.Months),
+		CycleName: hd.CycleName, TermName: hd.TermName, TermOrdinal: int32(hd.TermOrdinal), Months: monthStrings(hd.Months),
 		GeneralAverage: rc.GeneralAverage().String(), Scale: toProtoScale(hd.Scale), Lines: lines,
 	}
 }

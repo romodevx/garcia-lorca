@@ -146,3 +146,62 @@ func TestReportCardSameGradesAs(t *testing.T) {
 		})
 	}
 }
+
+// A family reads its child's report cards newest period first: the newest
+// cycle first (cycles are dated by the earliest month any of their cards
+// covers, never by name or issue date), then the highest term ordinal. A term
+// re-issued late (a reopen) does not jump ahead of a later term.
+func TestSortNewestTermFirst(t *testing.T) {
+	card := func(id, cycle string, ordinal int, firstMonth string, issued time.Time) domain.ReportCard {
+		h := header(t)
+		h.ID, h.CycleID, h.TermID, h.TermOrdinal, h.IssuedAt = id, cycle, "term-"+id, ordinal, issued
+		h.Months = []domain.Month{mustMonth(t, firstMonth)}
+		rc, err := domain.RestoreReportCard(h, domain.ReportCardPublished, domain.Average{}, nil)
+		require.NoError(t, err)
+		return rc
+	}
+	day := func(y int, m time.Month) time.Time { return time.Date(y, m, 1, 0, 0, 0, 0, time.UTC) }
+	cards := []domain.ReportCard{
+		card("old-t2", "cyc-2025", 2, "2025-12", day(2026, 3)),
+		card("new-t1", "cyc-2026", 1, "2026-09", day(2027, 5)), // T1 re-issued after T2
+		card("old-t1", "cyc-2025", 1, "2025-09", day(2025, 11)),
+		card("new-t2", "cyc-2026", 2, "2026-12", day(2027, 3)),
+	}
+
+	sorted := domain.SortNewestTermFirst(cards)
+
+	ids := make([]string, 0, len(sorted))
+	for _, c := range sorted {
+		ids = append(ids, c.ID())
+	}
+	assert.Equal(t, []string{"new-t2", "new-t1", "old-t2", "old-t1"}, ids)
+	assert.Equal(t, "old-t2", cards[0].ID(), "the input is not reordered in place")
+	assert.Equal(t, 2, sorted[0].Header().TermOrdinal)
+}
+
+// A cycle can mix legacy cards (ordinal 0, issued before terms carried an
+// ordinal) with new ones. Within a cycle the card's first month decides, so a
+// legacy T3 is still newer than a new T1; the ordinal only breaks ties.
+func TestSortNewestTermFirst_MixedLegacyAndOrdinalCards(t *testing.T) {
+	card := func(id string, ordinal int, firstMonth string) domain.ReportCard {
+		h := header(t)
+		h.ID, h.CycleID, h.TermID, h.TermOrdinal = id, "cyc-2026", "term-"+id, ordinal
+		h.Months = []domain.Month{mustMonth(t, firstMonth)}
+		rc, err := domain.RestoreReportCard(h, domain.ReportCardPublished, domain.Average{}, nil)
+		require.NoError(t, err)
+		return rc
+	}
+	cards := []domain.ReportCard{
+		card("t1-new", 1, "2026-09"),
+		card("t3-legacy", 0, "2027-03"),
+		card("t2-legacy", 0, "2026-12"),
+	}
+
+	sorted := domain.SortNewestTermFirst(cards)
+
+	ids := make([]string, 0, len(sorted))
+	for _, c := range sorted {
+		ids = append(ids, c.ID())
+	}
+	assert.Equal(t, []string{"t3-legacy", "t2-legacy", "t1-new"}, ids)
+}

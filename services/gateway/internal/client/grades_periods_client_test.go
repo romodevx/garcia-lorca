@@ -64,6 +64,7 @@ func (s *stubPeriodsGrades) ListReportCards(_ context.Context, r *connect.Reques
 	return connect.NewResponse(&gradesv1.ListReportCardsResponse{ReportCards: []*gradesv1.ReportCardSummary{{
 		Id: "rc-1", TermId: "term-1", TermName: "1.er trimestre", StudentId: "stu-1", StudentName: "Ana López",
 		GroupId: "grp-1", GroupLabel: "1° · A", Version: 2, IssuedAt: timestamppb.New(periodClock), GeneralAverage: "8.5", EnrollmentId: "enr-1",
+		TermOrdinal: 1, CycleId: "cyc-1", CycleName: "2026-2027",
 	}}}), nil
 }
 
@@ -73,7 +74,7 @@ func (s *stubPeriodsGrades) GetReportCard(_ context.Context, r *connect.Request[
 		Id: "rc-1", TermId: "term-1", CycleId: "cyc-1", LevelId: "lvl-1", GroupId: "grp-1", EnrollmentId: "enr-1", StudentId: "stu-1",
 		Version: 2, Status: "published", IssuedAt: timestamppb.New(periodClock), IssuedBy: "usr-dir", StudentName: "Ana López",
 		EnrollmentNumber: "2026-00001", GroupLabel: "1° · A", LevelName: "Primaria", CycleName: "2026-2027", TermName: "1.er trimestre",
-		Months: []string{"2026-09", "2026-10"}, GeneralAverage: "8.5",
+		Months: []string{"2026-09", "2026-10"}, GeneralAverage: "8.5", TermOrdinal: 1,
 		Scale: &gradesv1.GradingScale{MinHundredths: 500, MaxHundredths: 1000, Decimals: 1, PassingHundredths: 600},
 		Lines: []*gradesv1.ReportCardLine{{SubjectId: "sub-1", SubjectName: "Matemáticas", Position: 1, MonthValues: map[string]string{"2026-09": "8.4"}, TermAverage: "8.4"}},
 	}}), nil
@@ -132,7 +133,8 @@ func TestGradesClientPeriodsRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, proto.Equal(&gradesv1.ListReportCardsRequest{TermId: "term-1", GroupId: "grp-1", StudentId: "stu-1"}, stub.cardsReq), "request = %v", stub.cardsReq)
 	assert.Equal(t, []client.ReportCardSummary{{ID: "rc-1", TermID: "term-1", TermName: "1.er trimestre", StudentID: "stu-1", StudentName: "Ana López",
-		GroupID: "grp-1", GroupLabel: "1° · A", Version: 2, IssuedAt: periodClock, GeneralAverage: "8.5", EnrollmentID: "enr-1"}}, cards)
+		GroupID: "grp-1", GroupLabel: "1° · A", Version: 2, IssuedAt: periodClock, GeneralAverage: "8.5", EnrollmentID: "enr-1",
+		TermOrdinal: 1, CycleID: "cyc-1", CycleName: "2026-2027"}}, cards)
 
 	card, err := c.GetReportCard(ctx, "rc-1")
 	require.NoError(t, err)
@@ -141,7 +143,7 @@ func TestGradesClientPeriodsRoundTrip(t *testing.T) {
 		ID: "rc-1", TermID: "term-1", CycleID: "cyc-1", LevelID: "lvl-1", GroupID: "grp-1", EnrollmentID: "enr-1", StudentID: "stu-1",
 		Version: 2, Status: "published", IssuedAt: periodClock, IssuedBy: "usr-dir", StudentName: "Ana López",
 		EnrollmentNumber: "2026-00001", GroupLabel: "1° · A", LevelName: "Primaria", CycleName: "2026-2027", TermName: "1.er trimestre",
-		Months: []string{"2026-09", "2026-10"}, GeneralAverage: "8.5",
+		Months: []string{"2026-09", "2026-10"}, GeneralAverage: "8.5", TermOrdinal: 1,
 		Scale: client.GradeScale{MinHundredths: 500, MaxHundredths: 1000, Decimals: 1, PassingHundredths: 600},
 		Lines: []client.ReportCardLine{{SubjectID: "sub-1", SubjectName: "Matemáticas", Position: 1, MonthValues: map[string]string{"2026-09": "8.4"}, TermAverage: "8.4"}},
 	}, card)

@@ -70,7 +70,8 @@ type ReportCardFilter struct {
 }
 
 // ReportCardSummary is one report card in a list. GeneralAverage is one
-// decimal ("8.5") or "" when there is none.
+// decimal ("8.5") or "" when there is none. TermOrdinal is the term's order in
+// its cycle frozen at issue (0 = issued before it was recorded).
 type ReportCardSummary struct {
 	ID             string
 	TermID         string
@@ -83,6 +84,9 @@ type ReportCardSummary struct {
 	IssuedAt       time.Time
 	GeneralAverage string
 	EnrollmentID   string
+	TermOrdinal    int
+	CycleID        string
+	CycleName      string
 }
 
 // ReportCardLine is one subject of a report card: month → exact grade text,
@@ -114,6 +118,7 @@ type ReportCard struct {
 	LevelName        string
 	CycleName        string
 	TermName         string
+	TermOrdinal      int
 	Months           []string
 	GeneralAverage   string
 	Scale            GradeScale
@@ -204,6 +209,7 @@ func (c *GradesClient) ListReportCards(ctx context.Context, f ReportCardFilter) 
 			ID: s.GetId(), TermID: s.GetTermId(), TermName: s.GetTermName(), StudentID: s.GetStudentId(), StudentName: s.GetStudentName(),
 			GroupID: s.GetGroupId(), GroupLabel: s.GetGroupLabel(), Version: int(s.GetVersion()), IssuedAt: timeOrZero(s.GetIssuedAt()),
 			GeneralAverage: s.GetGeneralAverage(), EnrollmentID: s.GetEnrollmentId(),
+			TermOrdinal: int(s.GetTermOrdinal()), CycleID: s.GetCycleId(), CycleName: s.GetCycleName(),
 		})
 	}
 	return out, nil
@@ -228,7 +234,7 @@ func (c *GradesClient) GetReportCard(ctx context.Context, id string) (ReportCard
 		EnrollmentID: rc.GetEnrollmentId(), StudentID: rc.GetStudentId(), Version: int(rc.GetVersion()), Status: rc.GetStatus(),
 		IssuedAt: timeOrZero(rc.GetIssuedAt()), IssuedBy: rc.GetIssuedBy(), StudentName: rc.GetStudentName(),
 		EnrollmentNumber: rc.GetEnrollmentNumber(), GroupLabel: rc.GetGroupLabel(), LevelName: rc.GetLevelName(),
-		CycleName: rc.GetCycleName(), TermName: rc.GetTermName(), Months: rc.GetMonths(), GeneralAverage: rc.GetGeneralAverage(),
+		CycleName: rc.GetCycleName(), TermName: rc.GetTermName(), TermOrdinal: int(rc.GetTermOrdinal()), Months: rc.GetMonths(), GeneralAverage: rc.GetGeneralAverage(),
 		Scale: toGradeScale(rc.GetScale()), Lines: lines,
 	}, nil
 }

@@ -1,3 +1,4 @@
+import { clearPdfCache } from "../files/reportCardPdf";
 import { logout } from "./auth";
 import { providerLoginEnabled } from "./providerFlag";
 
@@ -47,5 +48,19 @@ export async function endSession(
  * (that is exactly why providerFlag has no SDK import).
  */
 export async function signOut(): Promise<void> {
-  await endSession(logout, providerLoginEnabled(), () => import("./firebase"));
+  await endSession(clearLocalSession, providerLoginEnabled(), () => import("./firebase"));
+}
+
+/**
+ * Our half of the session: the token pair, then the downloaded boletas (a
+ * child's grades must not outlive the session on a shared phone). The cache is
+ * cleared even when the tokens fail to clear; a cache failure rejects, and
+ * endSession absorbs it like any other so sign-out always completes.
+ */
+async function clearLocalSession(): Promise<void> {
+  try {
+    await logout();
+  } finally {
+    clearPdfCache();
+  }
 }

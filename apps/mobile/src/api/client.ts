@@ -13,7 +13,11 @@ import { getAccessToken } from "./tokenStore";
 
 let refreshInFlight: Promise<boolean> | null = null;
 
-function refreshOnce(): Promise<boolean> {
+/**
+ * Rotates the session once, shared with every concurrent caller. Exported for
+ * requests that do not go through {@link apiFetch} (native file downloads).
+ */
+export function refreshOnce(): Promise<boolean> {
   refreshInFlight ??= refresh().finally(() => {
     refreshInFlight = null;
   });

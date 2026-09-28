@@ -52,7 +52,7 @@ func fromDomainReportCard(rc domain.ReportCard) (reportCardModel, []reportCardLi
 		GroupID: h.GroupID, EnrollmentID: h.EnrollmentID, StudentID: h.StudentID, Version: h.Version,
 		Status: string(rc.Status()), IssuedAt: h.IssuedAt, IssuedBy: h.IssuedBy,
 		StudentName: h.StudentName, EnrollmentNumber: h.EnrollmentNumber, GroupLabel: h.GroupLabel,
-		LevelName: h.LevelName, CycleName: h.CycleName, TermName: h.TermName,
+		LevelName: h.LevelName, CycleName: h.CycleName, TermName: h.TermName, TermOrdinal: h.TermOrdinal,
 		Months: monthTexts(h.Months), GeneralAverage: averagePtr(rc.GeneralAverage()),
 		ScaleMinHundredths: h.Scale.MinHundredths(), ScaleMaxHundredths: h.Scale.MaxHundredths(),
 		ScaleDecimals: h.Scale.Decimals(), ScalePassingHundredths: h.Scale.PassingHundredths(),
@@ -93,7 +93,7 @@ func toDomainReportCard(m reportCardModel, lineRows []reportCardLineModel) (doma
 		GroupID: m.GroupID, EnrollmentID: m.EnrollmentID, StudentID: m.StudentID, Version: m.Version,
 		IssuedAt: m.IssuedAt, IssuedBy: m.IssuedBy, StudentName: m.StudentName, EnrollmentNumber: m.EnrollmentNumber,
 		GroupLabel: m.GroupLabel, LevelName: m.LevelName, CycleName: m.CycleName, TermName: m.TermName,
-		Months: months, Scale: scale,
+		TermOrdinal: m.TermOrdinal, Months: months, Scale: scale,
 	}, domain.ReportCardStatus(m.Status), averageOf(m.GeneralAverage), lines)
 	if err != nil {
 		return domain.ReportCard{}, glerrors.Wrap(glerrors.KindInternal, "invalid report card row", err)

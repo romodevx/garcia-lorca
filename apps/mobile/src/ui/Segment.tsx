@@ -58,6 +58,6 @@ export function Segment<T extends string>({ options, value, onChange }: SegmentP
 
 const styles = StyleSheet.create({
   track: { flexDirection: "row", borderRadius: 999, padding: 4, gap: 4 },
-  button: { flex: 1, height: 38, borderRadius: 999, alignItems: "center", justifyContent: "center" },
-  label: { fontSize: 13.5, fontWeight: "800" },
+  button: { flex: 1, minHeight: 44, paddingHorizontal: 8, borderRadius: 999, alignItems: "center", justifyContent: "center" },
+  label: { fontSize: 15, fontWeight: "800", textAlign: "center" },
 });

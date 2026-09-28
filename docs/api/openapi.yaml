@@ -3119,9 +3119,11 @@ paths:
       tags: [family]
       summary: A child's report cards
       description: >
-        The latest published report card of each period of the child. A child
-        that is not the caller's is 404. Behind `module_grades` AND
-        `module_students`. Requires `family:read`.
+        The latest published report card of each period of the child (a
+        superseded version never shows), newest period first: by cycle (newest
+        first), then by `termOrdinal` (highest first) — never by issue date,
+        which a reopen moves. A child that is not the caller's is 404. Behind
+        `module_grades` AND `module_students`. Requires `family:read`.
       operationId: listFamilyReportCards
       security: [{ familyBearer: [] }]
       parameters: [{ $ref: '#/components/parameters/FamilyStudentIdPath' }]
@@ -3633,11 +3635,17 @@ components:
           example: true
     FamilyReportCardSummary:
       type: object
-      required: [id, termId, termName, version, issuedAt, generalAverage, hasGrades]
+      required: [id, termId, termName, termOrdinal, cycleName, version, issuedAt, generalAverage, hasGrades]
       properties:
         id: { type: string, format: uuid }
         termId: { type: string, format: uuid }
         termName: { type: string, example: 1.er trimestre }
+        termOrdinal:
+          type: integer
+          minimum: 0
+          description: The term's order in its cycle, frozen when the card was issued (1 = first). 0 = issued before the order was recorded; it sorts below the numbered terms of its cycle.
+          example: 1
+        cycleName: { type: string, description: The cycle's name as it read at issue., example: 2026-2027 }
         version: { type: integer, minimum: 1, example: 2 }
         issuedAt: { type: [string, 'null'], format: date-time }
         generalAverage: { type: [number, 'null'], example: 8.5 }
@@ -3655,11 +3663,12 @@ components:
         general average (the mean of the subjects that have a grade, one
         decimal, half-up). A month without a grade is absent from `months`;
         `average` is null for a subject without grades.
-      required: [id, termId, termName, cycleName, levelName, groupId, groupLabel, studentId, studentName, enrollmentNumber, version, status, issuedAt, months, scale, generalAverage, hasGrades, lines, school]
+      required: [id, termId, termName, termOrdinal, cycleName, levelName, groupId, groupLabel, studentId, studentName, enrollmentNumber, version, status, issuedAt, months, scale, generalAverage, hasGrades, lines, school]
       properties:
         id: { type: string, format: uuid }
         termId: { type: string, format: uuid }
         termName: { type: string, example: 1.er trimestre }
+        termOrdinal: { type: integer, minimum: 0, description: See FamilyReportCardSummary.termOrdinal., example: 1 }
         cycleName: { type: string, example: 2026-2027 }
         levelName: { type: string, example: Primaria }
         groupId: { type: string, format: uuid }
@@ -3709,6 +3718,7 @@ components:
         id: 7c000000-0000-4000-8000-000000000001
         termId: 7a000000-0000-4000-8000-000000000001
         termName: 1.er trimestre
+        termOrdinal: 1
         cycleName: 2026-2027
         levelName: Primaria
         groupId: 4a000000-0000-4000-8000-000000000001

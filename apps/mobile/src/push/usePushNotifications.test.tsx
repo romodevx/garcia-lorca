@@ -193,6 +193,65 @@ describe("usePushNotifications", () => {
     expect(result.current.selectedChildId).toBe("s2");
   });
 
+  it("opens Calificaciones → Boletas → that boleta for the child named in a tapped boleta push", async () => {
+    const { result } = await renderHook(
+      () => {
+        usePushNotifications();
+        return useAppState();
+      },
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.selectedChildId).toBe("s1"));
+
+    await act(async () =>
+      mockListeners.response?.({
+        notification: notification({ type: "report_card", studentId: "s2", reportCardId: "rc9" }, "rc-push"),
+        actionIdentifier: "default",
+      }),
+    );
+
+    expect(result.current.selectedChildId).toBe("s2");
+    expect(router.navigate).toHaveBeenCalledWith({ pathname: "/(tabs)/calificaciones", params: { vista: "boletas", k: "rc-push" } });
+    expect(router.push).toHaveBeenCalledWith({ pathname: "/boleta/[id]", params: { id: "rc9", studentId: "s2" } });
+  });
+
+  it("ignores a boleta push for a child who is not this guardian's", async () => {
+    const { result } = await renderHook(
+      () => {
+        usePushNotifications();
+        return useAppState();
+      },
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.selectedChildId).toBe("s1"));
+
+    await act(async () =>
+      mockListeners.response?.({
+        notification: notification({ type: "report_card", studentId: "stranger", reportCardId: "rc9" }),
+        actionIdentifier: "default",
+      }),
+    );
+
+    expect(result.current.selectedChildId).toBe("s1");
+    expect(router.push).not.toHaveBeenCalled();
+    expect(router.navigate).toHaveBeenCalledWith("/(tabs)/avisos");
+  });
+
+  it("reloads the on-screen data when a boleta push arrives in the foreground", async () => {
+    const reload = jest.fn(async () => undefined);
+    await renderHook(
+      () => {
+        usePushNotifications();
+        useFreshDataSignal(reload);
+      },
+      { wrapper },
+    );
+
+    await act(async () => mockListeners.received?.(notification({ type: "report_card", studentId: "s1", reportCardId: "rc9" })));
+
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
   it("retries a failed registration when the app comes back, but not a finished one", async () => {
     (registerForPush as jest.Mock).mockResolvedValueOnce("failed");
     await renderHook(() => usePushNotifications(), { wrapper });

@@ -241,11 +241,17 @@ func (s *PeriodsService) ListPeriods(ctx context.Context, cycleID string) ([]Per
 
 // ReportCards lists the latest published report card of each enrollment
 // matching filter. At least one filter is required: never the whole school.
+// A pupil's list (student filter only) spans periods, so it reads newest
+// period first; a term's or group's list keeps the repository's name order.
 func (s *PeriodsService) ReportCards(ctx context.Context, filter ports.ReportCardFilter) ([]domain.ReportCard, error) {
 	if filter.TermID == "" && filter.GroupID == "" && filter.StudentID == "" {
 		return nil, glerrors.New(glerrors.KindInvalid, msgFilterRequired)
 	}
-	return s.periods.LatestReportCards(ctx, filter)
+	cards, err := s.periods.LatestReportCards(ctx, filter)
+	if err != nil || filter.StudentID == "" {
+		return cards, err
+	}
+	return domain.SortNewestTermFirst(cards), nil
 }
 
 // ReportCard reads one report card's full snapshot (any version).
@@ -645,7 +651,7 @@ func (s *PeriodsService) buildReportCards(v levelView, term ports.TermRef, close
 			IssuedAt: closed.ClosedAt(), IssuedBy: actor.ID, StudentName: student.Name,
 			EnrollmentNumber: student.EnrollmentNumber, GroupLabel: v.groupLabel[e.GroupID],
 			LevelName: v.catalog.LevelName, CycleName: v.cycle.Name, TermName: term.Name,
-			Months: term.Months, Scale: v.catalog.Scale,
+			TermOrdinal: term.Ordinal, Months: term.Months, Scale: v.catalog.Scale,
 		}, s.subjectsFor(v, e.GroupID, graded[e.ID]), grades)
 		if err != nil {
 			return nil, err

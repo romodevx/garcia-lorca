@@ -69,7 +69,7 @@ func issuedCard() client.ReportCard {
 	return client.ReportCard{
 		ID: rcID, TermID: pTerm, CycleID: pCycle, LevelID: "lvl-1", GroupID: rcGroup, EnrollmentID: "enr-1", StudentID: rcStudent,
 		Version: 2, Status: "published", IssuedAt: rcIssued, IssuedBy: pDir, StudentName: "Ana López", EnrollmentNumber: "2026-00001",
-		GroupLabel: "1° · A", LevelName: "Primaria", CycleName: "2026-2027", TermName: "1.er trimestre",
+		GroupLabel: "1° · A", LevelName: "Primaria", CycleName: "2026-2027", TermName: "1.er trimestre", TermOrdinal: 1,
 		Months: []string{"2026-09", "2026-10"}, GeneralAverage: "8.5",
 		Scale: client.GradeScale{MinHundredths: 500, MaxHundredths: 1000, Decimals: 1, PassingHundredths: 600},
 		Lines: []client.ReportCardLine{
@@ -124,7 +124,7 @@ func TestDirectorReadsAReportCard(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.Equal(t, rcID, f.gotID)
 	assert.JSONEq(t, `{
-		"id":"`+rcID+`","termId":"`+pTerm+`","termName":"1.er trimestre","cycleName":"2026-2027","levelName":"Primaria",
+		"id":"`+rcID+`","termId":"`+pTerm+`","termName":"1.er trimestre","termOrdinal":1,"cycleName":"2026-2027","levelName":"Primaria",
 		"groupId":"`+rcGroup+`","groupLabel":"1° · A","studentId":"`+rcStudent+`","studentName":"Ana López","enrollmentNumber":"2026-00001",
 		"version":2,"status":"published","issuedAt":"2026-12-01T10:00:00Z","months":["2026-09","2026-10"],
 		"scale":{"min":5,"max":10,"decimals":1,"passing":6},"generalAverage":8.5,"hasGrades":true,
@@ -157,8 +157,15 @@ func TestDirectorDownloadsTheReportCardPDF(t *testing.T) {
 // --- family ------------------------------------------------------------------
 
 func TestFamilyListsOwnChildsReportCards(t *testing.T) {
-	f := &fakeReportCards{list: []client.ReportCardSummary{{ID: rcID, TermID: pTerm, TermName: "1.er trimestre", StudentID: rcStudent,
-		Version: 2, IssuedAt: rcIssued, GeneralAverage: "8.5"}}}
+	const secondTerm = "70000000-0000-0000-0000-0000000000b2"
+	// grades answers newest period first (cycle, then term ordinal); the
+	// gateway keeps that order — here T2 above a T1 re-issued later.
+	f := &fakeReportCards{list: []client.ReportCardSummary{
+		{ID: rcID, TermID: secondTerm, TermName: "2.º trimestre", TermOrdinal: 2, CycleID: pCycle, CycleName: "2026-2027",
+			StudentID: rcStudent, Version: 1, IssuedAt: rcIssued, GeneralAverage: ""},
+		{ID: "7c000000-0000-0000-0000-000000000002", TermID: pTerm, TermName: "1.er trimestre", TermOrdinal: 1, CycleID: pCycle,
+			CycleName: "2026-2027", StudentID: rcStudent, Version: 2, IssuedAt: rcIssued.AddDate(0, 3, 0), GeneralAverage: "8.5"},
+	}}
 	h := newReportCardsHandler(f, rcStudent)
 	req := guardianReq("/x")
 	req.SetPathValue("studentId", rcStudent)
@@ -166,8 +173,12 @@ func TestFamilyListsOwnChildsReportCards(t *testing.T) {
 	h.FamilyList(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.Equal(t, client.ReportCardFilter{StudentID: rcStudent}, f.gotFilter)
-	assert.JSONEq(t, `{"reportCards":[{"id":"`+rcID+`","termId":"`+pTerm+`","termName":"1.er trimestre","version":2,
-		"issuedAt":"2026-12-01T10:00:00Z","generalAverage":8.5,"hasGrades":true}]}`, rec.Body.String())
+	assert.JSONEq(t, `{"reportCards":[
+		{"id":"`+rcID+`","termId":"`+secondTerm+`","termName":"2.º trimestre","termOrdinal":2,"cycleName":"2026-2027","version":1,
+			"issuedAt":"2026-12-01T10:00:00Z","generalAverage":null,"hasGrades":false},
+		{"id":"7c000000-0000-0000-0000-000000000002","termId":"`+pTerm+`","termName":"1.er trimestre","termOrdinal":1,"cycleName":"2026-2027","version":2,
+			"issuedAt":"2027-03-01T10:00:00Z","generalAverage":8.5,"hasGrades":true}
+	]}`, rec.Body.String())
 }
 
 // Another family's child is 404 on every family route, and grades is never asked.

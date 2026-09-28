@@ -43,13 +43,18 @@ func closedPeriod(t *testing.T, termID string) domain.PeriodClosure {
 
 func reportCard(t *testing.T, id, tenant, termID, enrollment, student string, version int, grades []domain.MonthlyGrade) domain.ReportCard {
 	t.Helper()
+	return reportCardOfTerm(t, id, tenant, termID, 1, enrollment, student, version, grades)
+}
+
+func reportCardOfTerm(t *testing.T, id, tenant, termID string, ordinal int, enrollment, student string, version int, grades []domain.MonthlyGrade) domain.ReportCard {
+	t.Helper()
 	scale, err := domain.NewGradingScale(500, 1000, 600, 1)
 	require.NoError(t, err)
 	rc, err := domain.BuildReportCard(domain.ReportCardHeader{
 		ID: id, TenantID: tenant, TermID: termID, CycleID: pCycle, LevelID: pLevel, GroupID: pGroup,
 		EnrollmentID: enrollment, StudentID: student, Version: version, IssuedAt: pClock, IssuedBy: pDirector,
 		StudentName: "Ana López Ñúñez", EnrollmentNumber: "2026-00042", GroupLabel: "1° A", LevelName: "Primaria",
-		CycleName: "2026-2027", TermName: "1.er trimestre", Months: termMonths(t), Scale: scale,
+		CycleName: "2026-2027", TermName: "1.er trimestre", TermOrdinal: ordinal, Months: termMonths(t), Scale: scale,
 	}, []domain.ReportCardSubject{{ID: pSubjectA, Name: "Matemáticas"}, {ID: pSubjectB, Name: "Español"}}, grades)
 	require.NoError(t, err)
 	return rc
@@ -197,6 +202,7 @@ func TestIssueReportCardsSupersedes(t *testing.T) {
 	assert.Equal(t, "Primaria", h.LevelName)
 	assert.Equal(t, "2026-2027", h.CycleName)
 	assert.Equal(t, "1.er trimestre", h.TermName)
+	assert.Equal(t, 1, h.TermOrdinal, "the term's order is part of the snapshot")
 	assert.Equal(t, []string{"2026-09", "2026-10", "2026-11"}, monthsText(h.Months))
 	assert.Equal(t, 500, h.Scale.MinHundredths())
 	assert.Equal(t, 600, h.Scale.PassingHundredths())
@@ -462,4 +468,39 @@ func TestPublishedReportCardsReadsTheTermsCardsWithLines(t *testing.T) {
 	require.Len(t, published[0].Lines(), 2)
 	assert.True(t, reportCard(t, "a7000000-0000-0000-0000-000000000094", tenantA, term, enr, stu, 3, grades).SameGradesAs(published[0]),
 		"a stored card round-trips to the same grades")
+}
+
+// A pupil's list spans terms: the latest published card of EACH term, each
+// with its frozen term ordinal; a superseded version never shows.
+func TestLatestReportCardsOfAStudentAcrossTerms(t *testing.T) {
+	const (
+		termOne = "70700000-0000-0000-0000-000000000081"
+		termTwo = "70700000-0000-0000-0000-000000000082"
+		enr     = "e7000000-0000-0000-0000-000000000081"
+		stu     = "57700000-0000-0000-0000-000000000081"
+		t1v1    = "a7000000-0000-0000-0000-000000000811"
+		t1v2    = "a7000000-0000-0000-0000-000000000812"
+		t2v1    = "a7000000-0000-0000-0000-000000000821"
+		t2v2    = "a7000000-0000-0000-0000-000000000822"
+	)
+	repo := appRepo(t, tenantA)
+	ctx := context.Background()
+	issue := func(term string, cards ...domain.ReportCard) {
+		require.NoError(t, repo.WithPeriodLock(ctx, term, func(ctx context.Context, tx ports.PeriodTx) error {
+			return tx.IssueReportCards(ctx, cards)
+		}))
+	}
+	issue(termOne, reportCardOfTerm(t, t1v1, tenantA, termOne, 1, enr, stu, 1, nil))
+	issue(termTwo, reportCardOfTerm(t, t2v1, tenantA, termTwo, 2, enr, stu, 1, nil))
+	issue(termTwo, reportCardOfTerm(t, t2v2, tenantA, termTwo, 2, enr, stu, 2, nil))
+	issue(termOne, reportCardOfTerm(t, t1v2, tenantA, termOne, 1, enr, stu, 2, nil))
+
+	cards, err := repo.LatestReportCards(ctx, ports.ReportCardFilter{StudentID: stu})
+	require.NoError(t, err)
+
+	ordinalByID := map[string]int{}
+	for _, c := range cards {
+		ordinalByID[c.ID()] = c.Header().TermOrdinal
+	}
+	assert.Equal(t, map[string]int{t1v2: 1, t2v2: 2}, ordinalByID)
 }
