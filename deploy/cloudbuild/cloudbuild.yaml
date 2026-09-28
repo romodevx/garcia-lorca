@@ -11,7 +11,7 @@
 # Step order: lint -> generate -> images, in THREE LANES of one image at a time:
 #   A: gateway -> config -> uniforms
 #   B: iam -> students -> finance
-#   C: web -> grades -> attendance -> comms
+#   C: grades -> attendance -> comms -> web
 # All ten used to start together on the default e2-medium (2 vCPU, 4 GB). That
 # box is CPU-bound either way — each image took ~20 min because ten builds
 # shared two cores — so lanes cost little wall-clock time, but ten concurrent
@@ -19,8 +19,10 @@
 # 2026-09-28 the gateway step died twice at the same point with only
 # "unexpected EOF" from the Docker daemon, while the identical build (same code,
 # same --cache-from) passed locally. Three at a time keeps peak memory at about
-# a third. Lanes are balanced by count; the web opens lane C because it is the
-# heaviest on memory and should not overlap two others late in the build.
+# a third. Lanes are balanced by count. Cloud Build only lets a step wait for a
+# step DEFINED ABOVE it (anything else is rejected at submit as "has not been
+# defined"), so each lane's order follows the order of the steps in this file —
+# which is why the web, defined last, closes lane C instead of opening it.
 #
 # Trigger substitutions (set on the trigger):
 #   _REGION       deployment region                (e.g. us-central1)
@@ -254,7 +256,7 @@ steps:
         # Moving the :cache tag is what makes the NEXT build fast. Pushed after
         # the real tag so a failure here never loses the deployable image.
         docker push "$$CACHE"
-    waitFor: ["image-web"]
+    waitFor: ["buf-generate"]
 
   - id: image-attendance
     name: gcr.io/cloud-builders/docker
@@ -378,7 +380,7 @@ steps:
           -t "$$IMG" -t "$$CACHE" .
         docker push "$$IMG"
         docker push "$$CACHE"
-    waitFor: ["buf-generate"]
+    waitFor: ["image-comms"]
 
 # The rollout is NOT here.
 #
