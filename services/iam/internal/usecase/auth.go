@@ -48,9 +48,13 @@ type AuthService struct {
 	// the moment they activate. NIL is valid — an environment without the store
 	// simply skips that cleanup.
 	invitations ports.InvitationRepository
-	tenantID    string
-	accessTTL   time.Duration
-	now         func() time.Time
+	// providerPasswords re-checks a password at the provider when the provider
+	// owns credentials (idTokens != nil). NIL there makes VerifyPassword fail
+	// closed as a server fault; it is never consulted in password mode.
+	providerPasswords ports.ProviderPasswordChecker
+	tenantID          string
+	accessTTL         time.Duration
+	now               func() time.Time
 }
 
 // NewAuthService wires the use case. `tenantID` is the single-tenant scope for
@@ -80,6 +84,53 @@ func NewAuthService(
 		accessTTL:   accessTTL,
 		now:         now,
 	}
+}
+
+// WithProviderPasswords wires the provider's password check used by
+// VerifyPassword in provider mode.
+func (s *AuthService) WithProviderPasswords(c ports.ProviderPasswordChecker) *AuthService {
+	s.providerPasswords = c
+	return s
+}
+
+// VerifyPassword re-checks the principal's password before a destructive action
+// (deleting a level, ADR 0021), the SAME way sign-in checks it in the active
+// mode:
+//
+//   - password mode: the bcrypt hash this service stores;
+//   - provider mode (an ID-token verifier is configured): Identity Platform,
+//     which is what actually lets somebody in there. The local hash is NOT
+//     consulted: it may be a stale import, and accepting it would make the
+//     re-authentication weaker than the login it stands in for.
+//
+// The subject comes from the verified access token, never from the request.
+// Every failure the caller can cause is the same generic Unauthorized.
+func (s *AuthService) VerifyPassword(ctx context.Context, accessToken, password string) error {
+	claims, err := s.validator.ValidateAccessToken(ctx, accessToken)
+	if err != nil {
+		return glerrors.New(glerrors.KindUnauthorized, "invalid access token")
+	}
+	user, hash, err := s.users.FindAuthByID(ctx, claims.Subject)
+	if err != nil {
+		return glerrors.New(glerrors.KindUnauthorized, "invalid credentials")
+	}
+	if !user.CanAuthenticate() {
+		return glerrors.New(glerrors.KindForbidden, "account is not active")
+	}
+	if password == "" {
+		return glerrors.New(glerrors.KindUnauthorized, "invalid credentials")
+	}
+	if s.idTokens == nil {
+		if err := s.hasher.Verify(hash, password); err != nil {
+			return glerrors.New(glerrors.KindUnauthorized, "invalid credentials")
+		}
+		return nil
+	}
+	if s.providerPasswords == nil {
+		return glerrors.New(glerrors.KindInternal,
+			"no hay llave del proveedor configurada; no se puede verificar la contraseña")
+	}
+	return s.providerPasswords.CheckPassword(ctx, user.Email().String(), password)
 }
 
 // AuthResult is the outcome of a successful Authenticate/RefreshToken.

@@ -124,6 +124,11 @@ func TestIsOwnerOnly(t *testing.T) {
 		// the owner decides when a trimester is final.
 		{"grades:close", true},
 		{"grades:write", false},
+		// ADR 0021: deleting a level erases a whole level's academic history
+		// (grades, attendance, enrollments) school-wide. The director alone.
+		{"levels:delete", true},
+		{" LEVELS:DELETE ", true},
+		{"config:write", false},
 		// Task 9: the counter's permissions are the Cobranza role's, so they
 		// must be grantable; finance:read stays owner-only.
 		{"collections:read", false},

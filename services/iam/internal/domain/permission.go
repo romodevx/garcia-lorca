@@ -63,6 +63,10 @@ var ownerOnlyPermissions = map[string]struct{}{
 	// what makes a boleta final: the owner's decision alone, like voiding a
 	// note. grades:write (capturing) stays delegable.
 	"grades:close": {},
+	// Deleting a level (ADR 0021) erases a whole level's academic history —
+	// grades, attendance, enrollments, report cards — school-wide, behind a
+	// 7-day trash. The director's decision alone, re-authenticated each time.
+	"levels:delete": {},
 }
 
 // IsOwnerOnly reports whether raw is a tenant-wide sensitive read that only the

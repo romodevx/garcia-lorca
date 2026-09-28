@@ -107,6 +107,7 @@ func buildMux(log *slog.Logger) (*http.ServeMux, error) {
 	// path is closed.
 	var idTokens ports.IDTokenVerifier
 	var provisioner ports.IdentityProvisioner
+	var providerPasswords ports.ProviderPasswordChecker
 	if project := os.Getenv("IDENTITY_PLATFORM_PROJECT"); project != "" {
 		v, p, err := googleid.NewFromProject(context.Background(), project, os.Getenv("IDENTITY_PLATFORM_API_KEY"))
 		if err != nil {
@@ -117,12 +118,17 @@ func buildMux(log *slog.Logger) (*http.ServeMux, error) {
 		}
 		idTokens = v
 		provisioner = p
+		// Re-authentication (ADR 0021) asks the provider the same question the
+		// browser's sign-in does. Without the web key VerifyPassword fails closed
+		// with a server fault, never with a silent pass.
+		providerPasswords = googleid.NewPasswordChecker(os.Getenv("IDENTITY_PLATFORM_API_KEY"), "", nil)
 		log.Info("identity provider wired", "project", project)
 	}
 
 	invitationRepo := pgadapter.NewInvitationRepo(db, tenantID)
 
-	auth := usecase.NewAuthService(userRepo, roleRepo, hasher, tokens, tokens, idTokens, invitationRepo, tenantID, accessTokenTTL, time.Now)
+	auth := usecase.NewAuthService(userRepo, roleRepo, hasher, tokens, tokens, idTokens, invitationRepo, tenantID, accessTokenTTL, time.Now).
+		WithProviderPasswords(providerPasswords)
 	// provisioner comes from the SAME optional provider above: with no project
 	// named it stays nil, InviteUser refuses, and the older password-based
 	// CreateUser is untouched.
