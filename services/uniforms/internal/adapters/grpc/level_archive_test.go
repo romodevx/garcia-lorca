@@ -39,6 +39,11 @@ func (f *fakeTrash) RestoreLevelBatch(_ context.Context, b string) (levelarchive
 
 func (f *fakeTrash) PurgeLevelArchives(context.Context, time.Time) (int64, error) { return 7, nil }
 
+func (f *fakeTrash) PurgeLevelBatch(_ context.Context, b string) (int64, error) {
+	f.batch = b
+	return 9, nil
+}
+
 const (
 	hLevel = "aaaaaaaa-0000-0000-0000-000000000001"
 	hGroup = "aaaaaaaa-0000-0000-0000-000000000002"
@@ -81,6 +86,11 @@ func TestLevelArchiveWire(t *testing.T) {
 	purge, err := h.PurgeLevelArchives(ctx, connect.NewRequest(&uniformsv1.PurgeLevelArchivesRequest{}))
 	require.NoError(t, err)
 	assert.Equal(t, int64(7), purge.Msg.GetPurgedRows())
+
+	one, err := h.PurgeLevelBatch(ctx, connect.NewRequest(&uniformsv1.PurgeLevelBatchRequest{BatchId: hBatch}))
+	require.NoError(t, err)
+	assert.Equal(t, int64(9), one.Msg.GetPurgedRows())
+	assert.Equal(t, hBatch, f.batch)
 }
 
 func TestLevelArchiveWireRefusesMalformedIDs(t *testing.T) {

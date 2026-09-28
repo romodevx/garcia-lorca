@@ -17,6 +17,7 @@ type fakeLevelArchiveRepo struct {
 	scope  levelarchive.Scope
 	batch  string
 	cutoff time.Time
+	purged string
 }
 
 func (f *fakeLevelArchiveRepo) PreviewLevelDeletion(_ context.Context, s levelarchive.Scope) (levelarchive.Counts, error) {
@@ -32,6 +33,11 @@ func (f *fakeLevelArchiveRepo) ArchiveLevel(_ context.Context, b string, s level
 func (f *fakeLevelArchiveRepo) RestoreLevelBatch(_ context.Context, b string) (levelarchive.Report, error) {
 	f.batch = b
 	return levelarchive.NewReport(), nil
+}
+
+func (f *fakeLevelArchiveRepo) PurgeLevelBatch(_ context.Context, b string) (int64, error) {
+	f.purged = b
+	return 2, nil
 }
 
 func (f *fakeLevelArchiveRepo) PurgeLevelArchives(_ context.Context, c time.Time) (int64, error) {
@@ -95,4 +101,15 @@ func TestLevelArchiveServicePurgesPastTheRetention(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), n)
 	assert.Equal(t, now.Add(-7*24*time.Hour), repo.cutoff)
+}
+
+func TestLevelArchiveServicePurgesOneBatch(t *testing.T) {
+	repo := &fakeLevelArchiveRepo{}
+	svc := usecase.NewLevelArchiveService(repo, time.Now)
+	n, err := svc.PurgeLevelBatch(context.Background(), "AAAAAAAA-0000-0000-0000-000000000003")
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), n)
+	assert.Equal(t, archBatch, repo.purged)
+	_, err = svc.PurgeLevelBatch(context.Background(), "x")
+	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err))
 }

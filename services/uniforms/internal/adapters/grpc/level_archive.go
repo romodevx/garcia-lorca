@@ -74,6 +74,18 @@ func (h *UniformsHandler) PurgeLevelArchives(ctx context.Context, _ *connect.Req
 	return connect.NewResponse(&uniformsv1.PurgeLevelArchivesResponse{PurgedRows: n}), nil
 }
 
+// PurgeLevelBatch drops one batch's archive (the gateway's retention sweep).
+func (h *UniformsHandler) PurgeLevelBatch(ctx context.Context, req *connect.Request[uniformsv1.PurgeLevelBatchRequest]) (*connect.Response[uniformsv1.PurgeLevelBatchResponse], error) {
+	if h.trash == nil {
+		return nil, errNoTrash
+	}
+	n, err := h.trash.PurgeLevelBatch(ctx, req.Msg.GetBatchId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&uniformsv1.PurgeLevelBatchResponse{PurgedRows: n}), nil
+}
+
 func fromProtoScope(s *uniformsv1.LevelScope) levelarchive.Scope {
 	return levelarchive.Scope{
 		LevelID:       s.GetLevelId(),

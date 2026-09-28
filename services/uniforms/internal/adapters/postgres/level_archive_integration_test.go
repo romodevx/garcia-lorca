@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/services/uniforms/internal/domain"
 )
@@ -128,6 +129,38 @@ func TestUniformsLevelArchiveRestoreSkipsARescopedGarment(t *testing.T) {
 	assert.Equal(t, int64(1), rep.Skipped[0].Count)
 	assert.NotEmpty(t, rep.Skipped[0].Reason)
 	assert.Equal(t, int64(1), countD(t, "uniform_items", "id = ? AND level_id = ?", uaItem2, uaOther), "staff's choice wins")
+
+	// "Keep the new value" is final, not a clash to retry: the snapshot leaves
+	// the trash once applied, so a retry neither re-applies it (staff may move
+	// the garment back to unresolved later) nor miscounts it.
+	assert.Zero(t, countD(t, "uniforms_deletion_archive", "batch_id = ? AND table_name <> '_batch'", batch),
+		"the applied snapshot leaves the trash")
+	require.NoError(t, superDB.Exec("UPDATE uniform_items SET level_id = NULL, level = 'nivel-eliminado' WHERE id = ?", uaItem2).Error)
+	again, err := repo.RestoreLevelBatch(ctx, batch)
+	require.NoError(t, err)
+	assert.Equal(t, rep, again, "the retry answers the first report")
+	assert.Equal(t, int64(1), countD(t, "uniform_items", "id = ? AND level_id IS NULL", uaItem2), "and re-applies nothing")
+}
+
+func TestUniformsLevelArchivePurgeBatchTouchesOnlyThatBatch(t *testing.T) {
+	seedUniformsArchive(t)
+	ctx := context.Background()
+	repo := appRepo(t, tenantD)
+	const doomed, kept = "d0000000-0000-0000-0000-00000000b006", "d0000000-0000-0000-0000-00000000b007"
+	_, err := repo.ArchiveLevel(ctx, doomed, uaScope())
+	require.NoError(t, err)
+	_, err = repo.ArchiveLevel(ctx, kept, levelarchive.Scope{LevelID: uaOther})
+	require.NoError(t, err)
+
+	n, err := repo.PurgeLevelBatch(ctx, doomed)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), n, "two snapshots and the marker")
+	assert.Zero(t, countD(t, "uniforms_deletion_archive", "batch_id = ?", doomed))
+	assert.Positive(t, countD(t, "uniforms_deletion_archive", "batch_id = ?", kept))
+
+	n, err = repo.PurgeLevelBatch(ctx, doomed)
+	require.NoError(t, err)
+	assert.Zero(t, n)
 }
 
 func TestUniformsLevelArchivePurgeHonoursTheRetention(t *testing.T) {
@@ -147,6 +180,9 @@ func TestUniformsLevelArchivePurgeHonoursTheRetention(t *testing.T) {
 	require.NoError(t, err)
 	assert.Positive(t, n)
 	assert.Zero(t, countD(t, "uniforms_deletion_archive", "batch_id = ?", batch))
+
+	_, err = repo.RestoreLevelBatch(ctx, batch)
+	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err), "a purged batch is NotFound, never a silent success")
 }
 
 func TestUniformsLevelArchiveIsTenantIsolated(t *testing.T) {
@@ -157,9 +193,8 @@ func TestUniformsLevelArchiveIsTenantIsolated(t *testing.T) {
 	require.NoError(t, err)
 
 	outsider := appRepo(t, tenantB)
-	rep, err := outsider.RestoreLevelBatch(ctx, batch)
-	require.NoError(t, err)
-	assert.Empty(t, rep.Restored, "B cannot restore D's batch")
+	_, err = outsider.RestoreLevelBatch(ctx, batch)
+	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err), "B cannot even see D's batch")
 	assert.Zero(t, countD(t, "uniform_items", "level_id = ?", uaLevel))
 
 	counts, err := outsider.ArchiveLevel(ctx, "d0000000-0000-0000-0000-00000000b005", levelarchive.Scope{LevelID: uaOther})

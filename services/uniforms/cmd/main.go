@@ -32,7 +32,6 @@ import (
 	"github.com/garcia-lorca/pkg/dbdsn"
 	"github.com/garcia-lorca/pkg/dbpool"
 	"github.com/garcia-lorca/pkg/gcpauth"
-	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/pkg/logger"
 	"github.com/garcia-lorca/services/uniforms/internal/adapters/financeclient"
 	grpcadapter "github.com/garcia-lorca/services/uniforms/internal/adapters/grpc"
@@ -118,10 +117,10 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, error) {
 	shop := usecase.NewService(repo, students, finance, nil, tenantID,
 		func() string { return uuid.NewString() }, now)
 	// The level-deletion trash (ADR 0021): the gateway's saga archives and
-	// restores through it; an hourly sweep on a detached context drops what is
-	// past the 7-day retention.
+	// restores through it, and the gateway's hourly sweep (always warm, unlike
+	// this scale-to-zero service) purges each batch past config's
+	// restorable_until through PurgeLevelBatch.
 	trash := usecase.NewLevelArchiveService(repo, now)
-	levelarchive.StartPurger(context.Background(), trash.PurgeLevelArchives, log)
 	handler := grpcadapter.NewUniformsHandler(shop, usecase.NewHealthService(serviceName)).WithLevelArchive(trash)
 
 	mux := http.NewServeMux()

@@ -213,4 +213,5 @@ type LevelArchiveRepository interface {
 	ArchiveLevel(ctx context.Context, batchID string, scope levelarchive.Scope) (levelarchive.Counts, error)
 	RestoreLevelBatch(ctx context.Context, batchID string) (levelarchive.Report, error)
 	PurgeLevelArchives(ctx context.Context, cutoff time.Time) (int64, error)
+	PurgeLevelBatch(ctx context.Context, batchID string) (int64, error)
 }

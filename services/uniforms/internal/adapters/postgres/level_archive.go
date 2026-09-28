@@ -78,7 +78,9 @@ func (r *Repository) ArchiveLevel(ctx context.Context, batchID string, s levelar
 
 // RestoreLevelBatch gives each garment its level back — only while it still
 // waits unresolved; one staff re-scoped meanwhile keeps their choice and is
-// reported as skipped.
+// reported as skipped. "Keep the new value" is final, not a clash to retry, so
+// the snapshot leaves the trash once applied: a retry answers the first
+// report and re-applies nothing.
 func (r *Repository) RestoreLevelBatch(ctx context.Context, batchID string) (levelarchive.Report, error) {
 	var rep levelarchive.Report
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
@@ -99,11 +101,27 @@ func (r *Repository) RestoreLevelBatch(ctx context.Context, batchID string) (lev
 				return out, glerrors.Wrap(glerrors.KindInternal, "restoring the garments' level", res.Error)
 			}
 			out.Record(kindItems, res.RowsAffected, total-res.RowsAffected, itemSkipReason)
+			if err := levelTrash.Clear(tx, batchID, itemLevelSnapshot); err != nil {
+				return out, glerrors.Wrap(glerrors.KindInternal, "clearing the garments' applied snapshot", err)
+			}
 			return out, nil
 		})
 		return err
 	})
 	return rep, err
+}
+
+// PurgeLevelBatch drops one batch's archive, marker included.
+func (r *Repository) PurgeLevelBatch(ctx context.Context, batchID string) (int64, error) {
+	var n int64
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var err error
+		if n, err = levelTrash.PurgeBatch(tx, batchID); err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "purging a batch of the uniforms trash", err)
+		}
+		return nil
+	})
+	return n, err
 }
 
 // PurgeLevelArchives drops every archive row filed before cutoff.
