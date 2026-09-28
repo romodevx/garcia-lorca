@@ -53,6 +53,13 @@ const STATUS: Record<AdmissionStatus, StatusMeta> = {
 const FALLBACK_STATUS: StatusMeta = { label: "—", dot: "var(--text-faint)", bg: "var(--surface-3)", fg: "var(--text-muted)", tab: "pending" };
 const statusOf = (s: AdmissionStatus): StatusMeta => STATUS[s] ?? FALLBACK_STATUS;
 
+// A pupil whose level was deleted (ADR 0021) keeps no level, grade or group:
+// the office has to find them to reassign them, so the list names the gap.
+const NO_LEVEL = "Sin nivel";
+const NO_GROUP = "Sin grupo";
+const levelOf = (s: Student): string => (s.level.trim() === "" ? NO_LEVEL : s.level);
+const groupOf = (s: Student): string => (s.gradeGroup.trim() === "" ? NO_GROUP : s.gradeGroup);
+
 const AV: ColorKey[] = ["lime", "forest", "orange", "purple", "yellow"];
 
 function StatusPill({ status }: { status: AdmissionStatus }): ReactElement {
@@ -453,7 +460,7 @@ function StudentSheet({
   const rows: [string, string][] = [
     ["Matrícula", st.enrollmentNumber ?? ""],
     ["CURP", st.curp],
-    ["Nivel", `${st.level} · ${st.gradeGroup}`],
+    ["Nivel", `${levelOf(st)} · ${groupOf(st)}`],
     ["Tutor", st.guardianName],
     ["Admisión", statusOf(st.admissionStatus).label],
   ];
@@ -696,7 +703,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
     pending: students.filter((s) => statusOf(s.admissionStatus).tab === "pending").length,
     inactive: students.filter((s) => statusOf(s.admissionStatus).tab === "inactive").length,
   }), [students]);
-  const levelsPresent = useMemo(() => Array.from(new Set(students.map((s) => s.level))), [students]);
+  const levelsPresent = useMemo(() => Array.from(new Set(students.map(levelOf))), [students]);
 
 
   // The padrón as it is on screen: the tab, the level and the search. A file
@@ -708,7 +715,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
 
   const filtered = useMemo(() => {
     return students
-      .filter((s) => (tab === "all" || statusOf(s.admissionStatus).tab === tab) && (level === "Todos" || s.level === level) &&
+      .filter((s) => (tab === "all" || statusOf(s.admissionStatus).tab === tab) && (level === "Todos" || levelOf(s) === level) &&
         matchesSearch(q, `${s.firstName} ${s.lastName}`, s.curp, s.guardianName))
       .sort((a, b) => `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`, "es"));
   }, [students, tab, level, q]);
@@ -719,7 +726,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
   const perGroup = useMemo(() => {
     const counted = new Map<string, number>();
     for (const s of filtered) {
-      counted.set(s.gradeGroup, (counted.get(s.gradeGroup) ?? 0) + 1);
+      counted.set(groupOf(s), (counted.get(groupOf(s)) ?? 0) + 1);
     }
     return [...counted.entries()].sort((a, b) => a[0].localeCompare(b[0], "es"));
   }, [filtered]);
@@ -773,7 +780,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
     { icon: "check" as IconName, c: "lime", label: "Inscritos", val: String(counts.active), sub: "Admisión activa" },
     { icon: "clock" as IconName, c: "yellow", label: "En trámite", val: String(counts.pending), sub: "Faltan documentos" },
     { icon: "students" as IconName, c: "forest", label: "Total", val: String(counts.all), sub: "Alumnos registrados" },
-    { icon: "graduation" as IconName, c: "purple", label: "Niveles", val: String(levelsPresent.length), sub: "Kínder a Preparatoria" },
+    { icon: "graduation" as IconName, c: "purple", label: "Niveles", val: String(levelsPresent.filter((l) => l !== NO_LEVEL).length), sub: "Kínder a Preparatoria" },
   ];
 
   return (
@@ -1003,7 +1010,7 @@ function StuRow({ st, i, onOpen, onEdit }: { st: Student; i: number; onOpen: () 
           <div style={{ fontSize: 12.5, color: "var(--text-faint)", fontFamily: "monospace" }}>{st.curp}</div>
         </div>
       </div>
-      <div style={{ fontSize: 14, color: "var(--text-muted)", textTransform: "capitalize" }}>{st.level}<div style={{ fontSize: 12.5, color: "var(--text-faint)" }}>{st.gradeGroup}</div></div>
+      <div style={{ fontSize: 14, color: "var(--text-muted)", textTransform: "capitalize" }}>{levelOf(st)}<div style={{ fontSize: 12.5, color: "var(--text-faint)" }}>{groupOf(st)}</div></div>
       <div style={{ minWidth: 0, fontSize: 14, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{st.guardianName}</div>
       <div><StatusPill status={st.admissionStatus} /></div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, width: 84 }}>
