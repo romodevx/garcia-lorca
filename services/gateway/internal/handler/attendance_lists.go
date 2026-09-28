@@ -162,7 +162,20 @@ func newListGroup(g client.GroupResult, grade client.GradeLevelResult, level cli
 	if mode != attendanceModePerClass {
 		mode = attendanceModeDaily
 	}
-	return listGroup{Mode: mode, Label: groupLabel(grade.Name, g.Name), LevelName: level.Name, GradeName: grade.Name, Name: g.Name}
+	gradeName := gradeWithLevel(grade.Name, level.Name)
+	return listGroup{Mode: mode, Label: groupLabel(gradeName, g.Name), LevelName: level.Name, GradeName: gradeName, Name: g.Name}
+}
+
+// gradeWithLevel is a grade's name as a screen shows it. The config screen asks
+// for the grade "as the school names it", so "1°" under PRIMARIA and "1°" under
+// SECUNDARIA are both normal: when the grade's name does not already carry its
+// level, the level is added ("1° PRIMARIA"). An unknown grade or level keeps
+// what is known.
+func gradeWithLevel(gradeName, levelName string) string {
+	if gradeName == "" || levelName == "" || strings.Contains(strings.ToUpper(gradeName), strings.ToUpper(levelName)) {
+		return gradeName
+	}
+	return gradeName + " " + levelName
 }
 
 // groupLabel is how a group is named on screen: "1° SECUNDARIA · A", or the

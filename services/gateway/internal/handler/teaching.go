@@ -332,10 +332,16 @@ func (h *TeachingHandler) groupCatalogNames(ctx context.Context, enrich bool) (n
 	if err != nil {
 		return names, grades
 	}
+	levelNames := map[string]string{}
+	if levels, err := h.config.ListLevels(ctx); err == nil {
+		for _, l := range levels {
+			levelNames[l.ID] = l.Name
+		}
+	}
 	gradeNames := map[string]string{}
-	if levels, err := h.config.ListGradeLevels(ctx, ""); err == nil {
-		for _, gl := range levels {
-			gradeNames[gl.ID] = gl.Name
+	if grades, err := h.config.ListGradeLevels(ctx, ""); err == nil {
+		for _, gl := range grades {
+			gradeNames[gl.ID] = gradeWithLevel(gl.Name, levelNames[gl.LevelID])
 		}
 	}
 	for _, g := range groups {
