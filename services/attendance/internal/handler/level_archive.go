@@ -49,7 +49,7 @@ func (h *AttendanceHandler) RestoreLevelBatch(ctx context.Context, req *connect.
 	if h.trash == nil {
 		return nil, errNoTrash
 	}
-	rep, err := h.trash.RestoreLevelBatch(ctx, req.Msg.GetBatchId())
+	rep, err := h.trash.RestoreLevelBatch(ctx, req.Msg.GetBatchId(), req.Msg.GetSkipEnrollmentIds())
 	if err != nil {
 		return nil, connectErr(err)
 	}
@@ -72,6 +72,18 @@ func (h *AttendanceHandler) PurgeLevelArchives(ctx context.Context, _ *connect.R
 		return nil, connectErr(err)
 	}
 	return connect.NewResponse(&attendancev1.PurgeLevelArchivesResponse{PurgedRows: n}), nil
+}
+
+// PurgeLevelBatch drops one batch's archive (the gateway's retention sweep).
+func (h *AttendanceHandler) PurgeLevelBatch(ctx context.Context, req *connect.Request[attendancev1.PurgeLevelBatchRequest]) (*connect.Response[attendancev1.PurgeLevelBatchResponse], error) {
+	if h.trash == nil {
+		return nil, errNoTrash
+	}
+	n, err := h.trash.PurgeLevelBatch(ctx, req.Msg.GetBatchId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&attendancev1.PurgeLevelBatchResponse{PurgedRows: n}), nil
 }
 
 func fromProtoScope(s *attendancev1.LevelScope) levelarchive.Scope {

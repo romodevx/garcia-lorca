@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/services/attendance/internal/repo"
 )
@@ -140,7 +141,7 @@ func TestLevelArchiveRoundTripIsIdempotent(t *testing.T) {
 	assert.Equal(t, int64(1), countC(t, "attendance", "date = '2026-09-02'"), "and moves nothing more")
 	require.NoError(t, superDB.Exec("DELETE FROM attendance WHERE tenant_id = ? AND date = '2026-09-02'", tenantC).Error)
 
-	rep, err := r.RestoreLevelBatch(ctx, batch)
+	rep, err := r.RestoreLevelBatch(ctx, batch, nil)
 	require.NoError(t, err)
 	assert.Equal(t, wantAttendanceCounts, rep.Restored)
 	assert.Empty(t, rep.Skipped)
@@ -149,7 +150,7 @@ func TestLevelArchiveRoundTripIsIdempotent(t *testing.T) {
 	assert.Equal(t, int64(1), countC(t, "attendance", "enrollment_id = ? AND subject_id = ? AND status = 'late'", laEnrollment, laSubject),
 		"a restored mark keeps every column")
 
-	rep2, err := r.RestoreLevelBatch(ctx, batch)
+	rep2, err := r.RestoreLevelBatch(ctx, batch, nil)
 	require.NoError(t, err)
 	assert.Equal(t, rep.Restored, rep2.Restored, "a retried restore answers its first report")
 	assert.Equal(t, int64(4), countC(t, "attendance", ""))
@@ -169,7 +170,7 @@ func TestLevelArchiveRestoreSkipsAndReportsConflicts(t *testing.T) {
 	require.NoError(t, superDB.Exec(`INSERT INTO attendance_sessions (tenant_id, group_id, date, subject_id, taken_by, taken_by_name)
 		VALUES (?, ?, '2026-09-01', NULL, ?, 'Otra')`, tenantC, laGroup, laTaker).Error)
 
-	rep, err := r.RestoreLevelBatch(ctx, batch)
+	rep, err := r.RestoreLevelBatch(ctx, batch, nil)
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), rep.Restored["attendanceMarks"])
 	assert.Equal(t, int64(1), rep.Restored["attendanceSessions"])
@@ -200,9 +201,9 @@ func TestLevelArchivePurgeHonoursTheRetention(t *testing.T) {
 	assert.Positive(t, n)
 	assert.Zero(t, countC(t, "attendance_deletion_archive", "batch_id = ?", batch))
 
-	rep, err := r.RestoreLevelBatch(ctx, batch)
-	require.NoError(t, err)
-	assert.Empty(t, rep.Restored, "a purged batch restores nothing")
+	_, err = r.RestoreLevelBatch(ctx, batch, nil)
+	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err),
+		"a purged batch is NotFound, never a silent empty success")
 }
 
 func TestLevelArchiveIsTenantIsolated(t *testing.T) {
@@ -214,9 +215,8 @@ func TestLevelArchiveIsTenantIsolated(t *testing.T) {
 	require.NoError(t, err)
 
 	rB, dbB := archiveRepo(t, tenantB)
-	rep, err := rB.RestoreLevelBatch(ctx, batch)
-	require.NoError(t, err)
-	assert.Empty(t, rep.Restored, "B cannot restore C's batch")
+	_, err = rB.RestoreLevelBatch(ctx, batch, nil)
+	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err), "B cannot even see C's batch")
 	assert.Equal(t, int64(1), countC(t, "attendance", ""), "C's marks stay in C's trash")
 
 	counts, err := rB.ArchiveLevel(ctx, "c0000000-0000-0000-0000-00000000b005", laScope())
@@ -232,4 +232,83 @@ func TestLevelArchiveIsTenantIsolated(t *testing.T) {
 		return tx.Raw("SELECT count(*) FROM attendance_deletion_archive WHERE batch_id = ?", batch).Scan(&visible).Error
 	}))
 	assert.Zero(t, visible, "RLS hides C's archive rows from B")
+}
+
+// Review finding 3: a restore must take out of the archive ONLY the rows it put
+// back. What did not fit stays archived, so the director can clear the clash
+// and retry — and the retry brings exactly those rows back.
+func TestLevelArchiveSkippedRowsStayArchivedUntilARetryFits(t *testing.T) {
+	seedLevelArchive(t)
+	ctx := context.Background()
+	r, _ := archiveRepo(t, tenantC)
+	const batch = "c0000000-0000-0000-0000-00000000b006"
+	_, err := r.ArchiveLevel(ctx, batch, laScope())
+	require.NoError(t, err)
+	require.NoError(t, superDB.Exec(`INSERT INTO attendance (tenant_id, enrollment_id, date, status, group_id)
+		VALUES (?, ?, '2026-09-01', 'excused', ?)`, tenantC, laEnrollment, laGroup).Error)
+
+	rep, err := r.RestoreLevelBatch(ctx, batch, nil)
+	require.NoError(t, err)
+	require.Len(t, rep.Skipped, 1)
+	assert.Equal(t, int64(1), countC(t, "attendance_deletion_archive", "batch_id = ? AND table_name = 'attendance'", batch),
+		"the skipped mark stays in the trash")
+	assert.Zero(t, countC(t, "attendance_deletion_archive", "batch_id = ? AND table_name = 'attendance_sessions'", batch),
+		"what went back left the trash")
+
+	require.NoError(t, superDB.Exec("DELETE FROM attendance WHERE tenant_id = ? AND status = 'excused'", tenantC).Error)
+	again, err := r.RestoreLevelBatch(ctx, batch, nil)
+	require.NoError(t, err)
+	assert.Empty(t, again.Skipped, "the retry fits now")
+	assert.Equal(t, int64(3), again.Restored["attendanceMarks"], "the report accumulates what came back")
+	assert.Zero(t, countC(t, "attendance_deletion_archive", "batch_id = ? AND table_name <> '_batch'", batch))
+	assert.Equal(t, int64(1), countC(t, "attendance", "enrollment_id = ? AND date = '2026-09-01' AND subject_id IS NULL AND status = 'absent'", laEnrollment),
+		"the archived mark is back")
+
+	third, err := r.RestoreLevelBatch(ctx, batch, nil)
+	require.NoError(t, err)
+	assert.Equal(t, again, third, "a batch with nothing left answers its last report")
+}
+
+// Review finding 6: marks of an enrollment students could not restore stay in
+// the trash (reported), instead of coming back pointing at nothing.
+func TestLevelArchiveRestoreKeepsUnrestoredEnrollmentsArchived(t *testing.T) {
+	seedLevelArchive(t)
+	ctx := context.Background()
+	r, _ := archiveRepo(t, tenantC)
+	const batch = "c0000000-0000-0000-0000-00000000b007"
+	_, err := r.ArchiveLevel(ctx, batch, laScope())
+	require.NoError(t, err)
+
+	rep, err := r.RestoreLevelBatch(ctx, batch, []string{laEnrollment})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), rep.Restored["attendanceMarks"], "only laMovedOut's mark comes back")
+	assert.Equal(t, int64(2), rep.Restored["attendanceSessions"])
+	require.Len(t, rep.Skipped, 1)
+	assert.Equal(t, "attendanceMarks", rep.Skipped[0].Kind)
+	assert.Equal(t, int64(2), rep.Skipped[0].Count)
+	assert.Zero(t, countC(t, "attendance", "enrollment_id = ?", laEnrollment))
+	assert.Equal(t, int64(2), countC(t, "attendance_deletion_archive", "batch_id = ? AND table_name = 'attendance'", batch))
+}
+
+// Review finding 8: the gateway's sweep purges one batch at a time, on
+// config's clock; nothing else is touched.
+func TestLevelArchivePurgeBatchTouchesOnlyThatBatch(t *testing.T) {
+	seedLevelArchive(t)
+	ctx := context.Background()
+	r, _ := archiveRepo(t, tenantC)
+	const doomed, kept = "c0000000-0000-0000-0000-00000000b008", "c0000000-0000-0000-0000-00000000b009"
+	_, err := r.ArchiveLevel(ctx, doomed, laScope())
+	require.NoError(t, err)
+	_, err = r.ArchiveLevel(ctx, kept, levelarchive.Scope{LevelID: laScope().LevelID, GroupIDs: []string{otherGroup}})
+	require.NoError(t, err)
+
+	n, err := r.PurgeLevelBatch(ctx, doomed)
+	require.NoError(t, err)
+	assert.Equal(t, int64(6), n, "five data rows and the marker")
+	assert.Zero(t, countC(t, "attendance_deletion_archive", "batch_id = ?", doomed))
+	assert.Positive(t, countC(t, "attendance_deletion_archive", "batch_id = ?", kept))
+
+	n, err = r.PurgeLevelBatch(ctx, doomed)
+	require.NoError(t, err)
+	assert.Zero(t, n, "purging twice is harmless")
 }

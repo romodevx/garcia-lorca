@@ -52,7 +52,7 @@ func TestMoveSQLDeletesAndFilesInOneStatement(t *testing.T) {
 
 func TestReinsertSQLGuardsEveryParent(t *testing.T) {
 	a := New("x_deletion_archive")
-	sql := a.reinsertSQL("groups", []Parent{{Column: "cycle_id", Table: "cycles"}, {Column: "grade_level_id", Table: "grade_levels", Nullable: true}})
+	sql := a.reinsertSQL("groups", []string{"id"}, Exclude{}, []Parent{{Column: "cycle_id", Table: "cycles"}, {Column: "grade_level_id", Table: "grade_levels", Nullable: true}})
 	for _, want := range []string{
 		"INSERT INTO groups SELECT r.* FROM x_deletion_archive a",
 		"jsonb_populate_record(NULL::groups, a.\"row\") r",
@@ -63,6 +63,43 @@ func TestReinsertSQLGuardsEveryParent(t *testing.T) {
 		if !strings.Contains(sql, want) {
 			t.Errorf("reinsertSQL missing %q:\n%s", want, sql)
 		}
+	}
+}
+
+// Review finding 3: the archive loses only what went back — the DELETE is
+// joined to the INSERT's RETURNING on the primary key, in the same statement.
+func TestReinsertSQLClearsOnlyTheRowsItInserted(t *testing.T) {
+	a := New("x_deletion_archive")
+	sql := a.reinsertSQL("period_closures", []string{"tenant_id", "term_id"}, Exclude{}, nil)
+	for _, want := range []string{
+		"ON CONFLICT DO NOTHING RETURNING tenant_id, term_id)",
+		"cleared AS (DELETE FROM x_deletion_archive a USING ins WHERE a.batch_id = ? AND a.table_name = ?",
+		`a."row"->'tenant_id' = to_jsonb(ins.tenant_id)`,
+		`a."row"->'term_id' = to_jsonb(ins.term_id)`,
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("reinsertSQL missing %q:\n%s", want, sql)
+		}
+	}
+	if strings.Contains(sql, "table_name <>") {
+		t.Errorf("reinsertSQL must never clear the whole batch:\n%s", sql)
+	}
+}
+
+// Review finding 6: rows of excluded enrollments never enter the INSERT.
+func TestReinsertSQLExcludesNamedRows(t *testing.T) {
+	a := New("x_deletion_archive")
+	sql := a.reinsertSQL("attendance", []string{"id"}, Exclude{Column: "enrollment_id", Values: []string{"e"}}, nil)
+	if want := "(r.enrollment_id::text IS NULL OR r.enrollment_id::text NOT IN ?)"; !strings.Contains(sql, want) {
+		t.Errorf("reinsertSQL missing %q:\n%s", want, sql)
+	}
+	js := a.reinsertSQL("grades_outbox", []string{"id"}, Exclude{Column: "payload", JSONKey: "enrollmentId", Values: []string{"e"}}, nil)
+	if want := "((r.payload->>'enrollmentId') IS NULL OR (r.payload->>'enrollmentId') NOT IN ?)"; !strings.Contains(js, want) {
+		t.Errorf("reinsertSQL missing %q:\n%s", want, js)
+	}
+	none := a.reinsertSQL("attendance", []string{"id"}, Exclude{Column: "enrollment_id"}, nil)
+	if strings.Contains(none, "NOT IN") {
+		t.Errorf("an empty exclusion must exclude nothing (NOT IN (NULL) would drop every row):\n%s", none)
 	}
 }
 

@@ -43,6 +43,16 @@ func NormalizeID(id, what string) (string, error) {
 	return c, nil
 }
 
+// NormalizeIDs canonicalizes a list of ids (lowercase, deduplicated), refusing
+// any malformed one with KindInvalid naming what.
+func NormalizeIDs(ids []string, what string) ([]string, error) {
+	out, err := canonicalIDs(ids)
+	if err != nil {
+		return nil, glerrors.New(glerrors.KindInvalid, what+" must be uuids")
+	}
+	return out, nil
+}
+
 // Normalize canonicalizes every id, drops duplicates and refuses a missing
 // level or any malformed id (KindInvalid).
 func (s Scope) Normalize() (Scope, error) {

@@ -14,8 +14,9 @@ import (
 type LevelArchiveRepo interface {
 	PreviewLevelDeletion(ctx context.Context, scope levelarchive.Scope) (levelarchive.Counts, error)
 	ArchiveLevel(ctx context.Context, batchID string, scope levelarchive.Scope) (levelarchive.Counts, error)
-	RestoreLevelBatch(ctx context.Context, batchID string) (levelarchive.Report, error)
+	RestoreLevelBatch(ctx context.Context, batchID string, skipEnrollmentIDs []string) (levelarchive.Report, error)
 	PurgeLevelArchives(ctx context.Context, cutoff time.Time) (int64, error)
+	PurgeLevelBatch(ctx context.Context, batchID string) (int64, error)
 }
 
 // LevelArchiveService validates a level deletion's ids at the boundary and
@@ -53,13 +54,30 @@ func (s *LevelArchiveService) ArchiveLevel(ctx context.Context, batchID string, 
 	return s.repo.ArchiveLevel(ctx, batch, norm)
 }
 
-// RestoreLevelBatch puts a batch back and reports what it skipped.
-func (s *LevelArchiveService) RestoreLevelBatch(ctx context.Context, batchID string) (levelarchive.Report, error) {
+// RestoreLevelBatch puts a batch back and reports what it skipped. Marks of
+// skipEnrollmentIDs (enrollments students could not restore) stay archived and
+// are reported as skipped. A batch with no archive here is
+// levelarchive.ErrBatchNotFound.
+func (s *LevelArchiveService) RestoreLevelBatch(ctx context.Context, batchID string, skipEnrollmentIDs []string) (levelarchive.Report, error) {
 	batch, err := levelarchive.NormalizeBatchID(batchID)
 	if err != nil {
 		return levelarchive.Report{}, err
 	}
-	return s.repo.RestoreLevelBatch(ctx, batch)
+	skip, err := levelarchive.NormalizeIDs(skipEnrollmentIDs, "skipped enrollment ids")
+	if err != nil {
+		return levelarchive.Report{}, err
+	}
+	return s.repo.RestoreLevelBatch(ctx, batch, skip)
+}
+
+// PurgeLevelBatch hard-deletes one batch's archive (the gateway's sweep, on
+// config's clock).
+func (s *LevelArchiveService) PurgeLevelBatch(ctx context.Context, batchID string) (int64, error) {
+	batch, err := levelarchive.NormalizeBatchID(batchID)
+	if err != nil {
+		return 0, err
+	}
+	return s.repo.PurgeLevelBatch(ctx, batch)
 }
 
 // PurgeLevelArchives drops archives past the retention.

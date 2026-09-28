@@ -16,6 +16,8 @@ import (
 type fakeLevelArchiveRepo struct {
 	scope  levelarchive.Scope
 	batch  string
+	skip   []string
+	purged string
 	cutoff time.Time
 }
 
@@ -29,9 +31,14 @@ func (f *fakeLevelArchiveRepo) ArchiveLevel(_ context.Context, b string, s level
 	return levelarchive.Counts{"attendanceMarks": 1}, nil
 }
 
-func (f *fakeLevelArchiveRepo) RestoreLevelBatch(_ context.Context, b string) (levelarchive.Report, error) {
-	f.batch = b
+func (f *fakeLevelArchiveRepo) RestoreLevelBatch(_ context.Context, b string, skip []string) (levelarchive.Report, error) {
+	f.batch, f.skip = b, skip
 	return levelarchive.NewReport(), nil
+}
+
+func (f *fakeLevelArchiveRepo) PurgeLevelBatch(_ context.Context, b string) (int64, error) {
+	f.purged = b
+	return 4, nil
 }
 
 func (f *fakeLevelArchiveRepo) PurgeLevelArchives(_ context.Context, c time.Time) (int64, error) {
@@ -79,8 +86,10 @@ func TestLevelArchiveServicePreviewAndRestoreValidate(t *testing.T) {
 	svc := service.NewLevelArchiveService(&fakeLevelArchiveRepo{}, time.Now)
 	_, err := svc.PreviewLevelDeletion(context.Background(), levelarchive.Scope{LevelID: "kinder"})
 	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err))
-	_, err = svc.RestoreLevelBatch(context.Background(), "x")
+	_, err = svc.RestoreLevelBatch(context.Background(), "x", nil)
 	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err))
+	_, err = svc.RestoreLevelBatch(context.Background(), archBatch, []string{"nope"})
+	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err), "skipped enrollments must be uuids")
 
 	got, err := svc.PreviewLevelDeletion(context.Background(), levelarchive.Scope{LevelID: archLevel})
 	require.NoError(t, err)
@@ -95,4 +104,23 @@ func TestLevelArchiveServicePurgesPastTheRetention(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), n)
 	assert.Equal(t, now.Add(-7*24*time.Hour), repo.cutoff)
+}
+
+func TestLevelArchiveServiceRestoreCanonicalizesSkippedEnrollments(t *testing.T) {
+	repo := &fakeLevelArchiveRepo{}
+	svc := service.NewLevelArchiveService(repo, time.Now)
+	_, err := svc.RestoreLevelBatch(context.Background(), archBatch, []string{"AAAAAAAA-0000-0000-0000-000000000002", archGroup})
+	require.NoError(t, err)
+	assert.Equal(t, []string{archGroup}, repo.skip, "lowercased and deduplicated")
+}
+
+func TestLevelArchiveServicePurgesOneBatch(t *testing.T) {
+	repo := &fakeLevelArchiveRepo{}
+	svc := service.NewLevelArchiveService(repo, time.Now)
+	n, err := svc.PurgeLevelBatch(context.Background(), "AAAAAAAA-0000-0000-0000-000000000003")
+	require.NoError(t, err)
+	assert.Equal(t, int64(4), n)
+	assert.Equal(t, archBatch, repo.purged)
+	_, err = svc.PurgeLevelBatch(context.Background(), "x")
+	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err))
 }

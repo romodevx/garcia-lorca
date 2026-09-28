@@ -164,12 +164,18 @@ service FinanceService {
   rpc ArchiveLevel(ArchiveLevelRequest) returns (ArchiveLevelResponse);
   // RestoreLevelBatch puts a batch back in dependency order inside ONE
   // transaction, skipping rows that now conflict and reporting them.
-  // Idempotent: an unknown batch restores nothing, a restored one answers the
-  // first report.
+  // Converges on retry: rows put back leave the archive, rows that do not fit
+  // stay archived (until the purge) and a retry tries them again; a batch with
+  // nothing left answers its last report. NotFound when this service holds no
+  // archive for the batch (never archived, or purged) — never a silent success.
   rpc RestoreLevelBatch(RestoreLevelBatchRequest) returns (RestoreLevelBatchResponse);
   // PurgeLevelArchives hard-deletes archives past the 7-day retention. The
   // retention is fixed server-side: no caller can purge fresh trash.
   rpc PurgeLevelArchives(PurgeLevelArchivesRequest) returns (PurgeLevelArchivesResponse);
+  // PurgeLevelBatch hard-deletes this service's archive rows of one batch, when
+  // the gateway's sweep finds the batch past its restorable_until (config's
+  // clock, ADR 0021). Idempotent: an unknown batch purges nothing.
+  rpc PurgeLevelBatch(PurgeLevelBatchRequest) returns (PurgeLevelBatchResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -960,5 +966,13 @@ message RestoreLevelBatchResponse {
 message PurgeLevelArchivesRequest {}
 
 message PurgeLevelArchivesResponse {
+  int64 purged_rows = 1;
+}
+
+message PurgeLevelBatchRequest {
+  string batch_id = 1;
+}
+
+message PurgeLevelBatchResponse {
   int64 purged_rows = 1;
 }

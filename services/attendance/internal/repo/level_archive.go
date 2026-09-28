@@ -43,9 +43,20 @@ func levelSteps(s levelarchive.Scope) []gormarchive.Step {
 // restoreOrder is the way back: pass lists, then their marks. Neither has a
 // parent in this service; a row whose unique key was taken again while the
 // level sat in the trash (the same list, the same pupil and day) is skipped.
-var restoreOrder = []struct{ kind, table string }{
-	{kindSessions, "attendance_sessions"},
-	{kindMarks, "attendance"},
+var restoreOrder = []restoreStep{
+	{kindSessions, "attendance_sessions", ""},
+	{kindMarks, "attendance", "enrollment_id"},
+}
+
+// restoreStep is one table's way back; enrollmentColumn (if any) is what the
+// enrollments students could not restore are matched on.
+type restoreStep struct{ kind, table, enrollmentColumn string }
+
+func (s restoreStep) exclude(enrollmentIDs []string) gormarchive.Exclude {
+	if s.enrollmentColumn == "" {
+		return gormarchive.Exclude{}
+	}
+	return gormarchive.Exclude{Column: s.enrollmentColumn, Values: enrollmentIDs}
 }
 
 // skipReason is the one sentence a skipped attendance row gets.
@@ -91,14 +102,16 @@ func (r *Repo) ArchiveLevel(ctx context.Context, batchID string, s levelarchive.
 }
 
 // RestoreLevelBatch puts a batch back, skipping and reporting what conflicts.
-func (r *Repo) RestoreLevelBatch(ctx context.Context, batchID string) (levelarchive.Report, error) {
+// Marks of skipEnrollmentIDs stay archived (students could not restore those
+// enrollments); what did not fit stays archived for a retry or the purge.
+func (r *Repo) RestoreLevelBatch(ctx context.Context, batchID string, skipEnrollmentIDs []string) (levelarchive.Report, error) {
 	var rep levelarchive.Report
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var err error
 		rep, err = levelTrash.RestoreBatch(tx, batchID, func(tx *gorm.DB) (levelarchive.Report, error) {
 			out := levelarchive.NewReport()
 			for _, step := range restoreOrder {
-				restored, skipped, err := levelTrash.Reinsert(tx, batchID, step.table)
+				restored, skipped, err := levelTrash.ReinsertExcept(tx, batchID, step.table, step.exclude(skipEnrollmentIDs))
 				if err != nil {
 					return out, glerrors.Wrap(glerrors.KindInternal, "restoring the level's attendance", err)
 				}
@@ -109,6 +122,19 @@ func (r *Repo) RestoreLevelBatch(ctx context.Context, batchID string) (levelarch
 		return err
 	})
 	return rep, err
+}
+
+// PurgeLevelBatch drops one batch's archive, marker included.
+func (r *Repo) PurgeLevelBatch(ctx context.Context, batchID string) (int64, error) {
+	var n int64
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var err error
+		if n, err = levelTrash.PurgeBatch(tx, batchID); err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "purging a batch of the attendance trash", err)
+		}
+		return nil
+	})
+	return n, err
 }
 
 // PurgeLevelArchives drops every archive row filed before cutoff.

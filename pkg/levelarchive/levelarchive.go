@@ -20,8 +20,11 @@
 package levelarchive
 
 import (
+	"errors"
 	"sort"
 	"time"
+
+	glerrors "github.com/garcia-lorca/pkg/errors"
 )
 
 // Retention is how long a deleted level stays restorable.
@@ -79,4 +82,41 @@ func (r *Report) Record(kind string, restored, skipped int64, reason string) {
 	if skipped > 0 {
 		r.Skipped = append(r.Skipped, Skip{Kind: kind, Count: skipped, Reason: reason})
 	}
+}
+
+// ErrBatchNotFound is a restore of a batch this service holds no archive for:
+// never archived here, or already purged. The gateway turns it into
+// TRASH_EXPIRED (or a partial-restore error), never a silent success.
+var ErrBatchNotFound = glerrors.New(glerrors.KindNotFound, "este nivel ya no está en la papelera")
+
+// CodeLevelBeingDeleted is the refusal code of any write that resolves a level
+// while its deletion runs (the X-Error-Code the gateway forwards).
+const CodeLevelBeingDeleted = "LEVEL_BEING_DELETED"
+
+// CodedError is a typed error that also names a machine code for the screen.
+// It unwraps to the *glerrors.Error, so KindOf and SafeMessage read it.
+type CodedError struct {
+	Code string
+	err  *glerrors.Error
+}
+
+// Error implements error.
+func (e *CodedError) Error() string { return e.err.Error() }
+
+// Unwrap exposes the typed error.
+func (e *CodedError) Unwrap() error { return e.err }
+
+// LevelBeingDeleted refuses a write that resolves a level whose deletion is in
+// flight (config's levels.status = deleting): a conflict, 409 at the edge.
+func LevelBeingDeleted() error {
+	return &CodedError{Code: CodeLevelBeingDeleted, err: glerrors.New(glerrors.KindConflict, "Este nivel se está eliminando")}
+}
+
+// CodeOf is err's machine code, or "" when it carries none.
+func CodeOf(err error) string {
+	var c *CodedError
+	if errors.As(err, &c) {
+		return c.Code
+	}
+	return ""
 }

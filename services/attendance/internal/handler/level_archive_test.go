@@ -16,8 +16,10 @@ import (
 )
 
 type fakeTrash struct {
-	scope levelarchive.Scope
-	batch string
+	scope  levelarchive.Scope
+	batch  string
+	skip   []string
+	missed bool
 }
 
 func (f *fakeTrash) PreviewLevelDeletion(_ context.Context, s levelarchive.Scope) (levelarchive.Counts, error) {
@@ -30,14 +32,22 @@ func (f *fakeTrash) ArchiveLevel(_ context.Context, b string, s levelarchive.Sco
 	return levelarchive.Counts{"attendanceMarks": 5, "attendanceSessions": 2}, nil
 }
 
-func (f *fakeTrash) RestoreLevelBatch(_ context.Context, b string) (levelarchive.Report, error) {
-	f.batch = b
+func (f *fakeTrash) RestoreLevelBatch(_ context.Context, b string, skip []string) (levelarchive.Report, error) {
+	f.batch, f.skip = b, skip
+	if f.missed {
+		return levelarchive.Report{}, levelarchive.ErrBatchNotFound
+	}
 	rep := levelarchive.NewReport()
 	rep.Record("attendanceMarks", 4, 1, "ya hay otra lista o marca para ese día")
 	return rep, nil
 }
 
 func (f *fakeTrash) PurgeLevelArchives(context.Context, time.Time) (int64, error) { return 7, nil }
+
+func (f *fakeTrash) PurgeLevelBatch(_ context.Context, b string) (int64, error) {
+	f.batch = b
+	return 9, nil
+}
 
 const (
 	hLevel = "aaaaaaaa-0000-0000-0000-000000000001"
@@ -71,8 +81,9 @@ func TestLevelArchiveWire(t *testing.T) {
 	assert.Len(t, arch.Msg.GetCounts(), 2)
 	assert.Equal(t, hBatch, f.batch)
 
-	rest, err := h.RestoreLevelBatch(ctx, connect.NewRequest(&attendancev1.RestoreLevelBatchRequest{BatchId: hBatch}))
+	rest, err := h.RestoreLevelBatch(ctx, connect.NewRequest(&attendancev1.RestoreLevelBatchRequest{BatchId: hBatch, SkipEnrollmentIds: []string{hGroup}}))
 	require.NoError(t, err)
+	assert.Equal(t, []string{hGroup}, f.skip, "the enrollments students could not restore reach the repository")
 	require.Len(t, rest.Msg.GetSkipped(), 1)
 	assert.Equal(t, int64(1), rest.Msg.GetSkipped()[0].GetCount())
 	assert.NotEmpty(t, rest.Msg.GetSkipped()[0].GetReason())
@@ -81,6 +92,18 @@ func TestLevelArchiveWire(t *testing.T) {
 	purge, err := h.PurgeLevelArchives(ctx, connect.NewRequest(&attendancev1.PurgeLevelArchivesRequest{}))
 	require.NoError(t, err)
 	assert.Equal(t, int64(7), purge.Msg.GetPurgedRows())
+
+	one, err := h.PurgeLevelBatch(ctx, connect.NewRequest(&attendancev1.PurgeLevelBatchRequest{BatchId: hBatch}))
+	require.NoError(t, err)
+	assert.Equal(t, int64(9), one.Msg.GetPurgedRows())
+	assert.Equal(t, hBatch, f.batch)
+}
+
+func TestLevelArchiveWireMissingArchiveIsNotFound(t *testing.T) {
+	h, f := trashHandler(t)
+	f.missed = true
+	_, err := h.RestoreLevelBatch(context.Background(), connect.NewRequest(&attendancev1.RestoreLevelBatchRequest{BatchId: hBatch}))
+	assert.Equal(t, connect.CodeNotFound, connect.CodeOf(err), "never a silent success")
 }
 
 func TestLevelArchiveWireRefusesMalformedIDs(t *testing.T) {

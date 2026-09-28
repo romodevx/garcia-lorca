@@ -3,10 +3,13 @@ package levelarchive
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"testing"
 	"time"
+
+	glerrors "github.com/garcia-lorca/pkg/errors"
 )
 
 func TestCountsSortedIsDeterministic(t *testing.T) {
@@ -67,4 +70,26 @@ func TestPurgerSurvivesAFailedRun(t *testing.T) {
 	<-calls
 	tick <- time.Now()
 	<-calls
+}
+
+func TestLevelBeingDeletedIsACodedConflict(t *testing.T) {
+	err := LevelBeingDeleted()
+	if got := CodeOf(fmt.Errorf("wrapped: %w", err)); got != CodeLevelBeingDeleted {
+		t.Fatalf("CodeOf = %q, want %q", got, CodeLevelBeingDeleted)
+	}
+	if glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Fatalf("kind = %v, want conflict", glerrors.KindOf(err))
+	}
+	if msg := glerrors.SafeMessage(err); msg != "Este nivel se está eliminando" {
+		t.Fatalf("message = %q", msg)
+	}
+	if CodeOf(errors.New("plain")) != "" {
+		t.Fatal("a plain error carries no code")
+	}
+}
+
+func TestBatchNotFoundIsNotFound(t *testing.T) {
+	if glerrors.KindOf(ErrBatchNotFound) != glerrors.KindNotFound {
+		t.Fatal("a missing archive must be NotFound")
+	}
 }
