@@ -134,6 +134,7 @@ const (
 	codeDeletionInProgress = "DELETION_IN_PROGRESS"
 	msgDeletionInProgress  = "Ya se está eliminando este nivel; espera un momento y revisa la Papelera."
 	codeDeletionIncomplete = "DELETION_INCOMPLETE"
+	codeRestoreIncomplete  = "RESTORE_INCOMPLETE"
 )
 
 // Batch states, as config's ledger names them.
@@ -600,7 +601,8 @@ type restoreResponse struct {
 // Config first (its restore also judges the 7-day window, on the database's
 // clock), then students, whose unrestored enrollments grades and attendance
 // then keep archived. A deleted batch asks every step and a missing archive is
-// an error (410 when nothing came back, 500 otherwise), never a silent
+// an error (410 TRASH_EXPIRED when nothing came back, 500 RESTORE_INCOMPLETE
+// naming the missing part otherwise), never a silent
 // success; a failed_partial batch asks only its pending steps, and a step that
 // never archived is fine. Every step converges on retry. Only when every step
 // answers is the batch closed: restored, or restored_partial if something did
@@ -644,7 +646,7 @@ func (h *LevelDeletionHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	case len(out.missing) > 0:
 		h.d.Log.ErrorContext(ctx, "level restore found archives missing",
 			slog.String("batch", batch), slog.Any("missing", out.missing))
-		writeCodedError(w, http.StatusGone, codeTrashExpired, fmt.Sprintf(
+		writeCodedError(w, http.StatusInternalServerError, codeRestoreIncomplete, fmt.Sprintf(
 			"Parte de este nivel ya no estaba en la papelera (%s); lo demás se restauró", strings.Join(out.missing, ", ")))
 		return
 	}

@@ -1978,9 +1978,8 @@ paths:
               example: Ya existe un nivel con ese nombre; renómbralo antes de restaurar
         '410':
           description: >
-            `TRASH_EXPIRED`: more than 7 days passed, the batch was purged, or
-            a service no longer holds its part of the batch (the sentence names
-            it; whatever did come back stays restored).
+            `TRASH_EXPIRED`: more than 7 days passed, or the batch was purged
+            (no service holds it any more).
           headers:
             X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
           content:
@@ -1991,6 +1990,11 @@ paths:
           description: >
             A service failed mid-way; the batch stays in the trash and a retry
             finishes it without duplicating what already came back.
+            `RESTORE_INCOMPLETE`: a service no longer holds its part of the
+            batch — never a silent success; the sentence names it and what did
+            come back stays restored.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
           content:
             text/plain:
               schema: { type: string }

@@ -687,8 +687,8 @@ func TestLevelRestore(t *testing.T) {
 		rig := newLevelDeletionRig(true)
 		rig.finance.restoreErr = connect.NewError(connect.CodeNotFound, errors.New("no archive"))
 		w := rig.restore(t)
-		assert.Equal(t, http.StatusGone, w.Code)
-		assert.Equal(t, "TRASH_EXPIRED", w.Header().Get("X-Error-Code"))
+		assert.Equal(t, http.StatusInternalServerError, w.Code, "config and students came back; finance's part is gone")
+		assert.Equal(t, "RESTORE_INCOMPLETE", w.Header().Get("X-Error-Code"))
 		assert.Contains(t, w.Body.String(), "finance")
 		assert.False(t, rig.cfg.marked)
 	})
@@ -701,6 +701,15 @@ func TestLevelRestore(t *testing.T) {
 		w := rig.restore(t)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		assert.Equal(t, []string{"restore:students", "restore:attendance", "restore:grades", "mark:config"}, rig.log.calls)
+	})
+
+	t.Run("nothing found at all is an expired batch", func(t *testing.T) {
+		rig := newLevelDeletionRig(true)
+		rig.cfg.restoreErr = connect.NewError(connect.CodeNotFound, errors.New("no archive"))
+		w := rig.restore(t)
+		assert.Equal(t, http.StatusGone, w.Code)
+		assert.Equal(t, "TRASH_EXPIRED", w.Header().Get("X-Error-Code"))
+		assert.False(t, rig.cfg.marked)
 	})
 
 	t.Run("a service failing midway leaves the batch in the trash to retry", func(t *testing.T) {
