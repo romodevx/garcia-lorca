@@ -35,6 +35,7 @@ import (
 	"github.com/garcia-lorca/pkg/dbdsn"
 	"github.com/garcia-lorca/pkg/dbpool"
 	"github.com/garcia-lorca/pkg/gcpauth"
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/pkg/logger"
 	"github.com/garcia-lorca/pkg/pubsub"
 	"github.com/garcia-lorca/pkg/pubsub/gcp"
@@ -154,7 +155,12 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 		NewID: newID, Now: time.Now, Log: log,
 	})
 	health := usecase.NewHealthService(serviceName)
-	handler := grpcadapter.NewGradesHandler(svc, monthly, periods, health)
+	// Level deletion (ADR 0021): grades' step of the gateway's saga, plus the
+	// hourly sweep that drops archives past the 7-day retention. The sweep runs
+	// on the process's context, never a request's.
+	levels := usecase.NewLevelArchiveService(repo, time.Now)
+	levelarchive.StartPurger(ctx, levels.PurgeLevelArchives, log)
+	handler := grpcadapter.NewGradesHandler(svc, monthly, periods, health).WithLevelArchive(levels)
 
 	mux := http.NewServeMux()
 	path, h := gradesv1connect.NewGradesServiceHandler(handler, connect.WithRecover(recoverFn))

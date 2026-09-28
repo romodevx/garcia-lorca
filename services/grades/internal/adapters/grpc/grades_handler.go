@@ -27,6 +27,7 @@ type GradesHandler struct {
 	monthly *usecase.MonthlyGradesService
 	periods PeriodsUseCase
 	health  *usecase.HealthService
+	levels  *usecase.LevelArchiveService
 }
 
 // NewGradesHandler wires the handler to the term grades, monthly grades,

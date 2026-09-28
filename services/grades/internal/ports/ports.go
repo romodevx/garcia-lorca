@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/services/grades/internal/domain"
 )
 
@@ -307,4 +308,15 @@ type ReportCardIssuedEvent struct {
 // ReportCardPublisher announces an issued report card (GradesPublished).
 type ReportCardPublisher interface {
 	PublishReportCardIssued(ctx context.Context, e ReportCardIssuedEvent) error
+}
+
+// LevelArchiveRepository moves grades' rows of a deleted level into the
+// service's deletion archive and back (ADR 0021). Archive and restore each run
+// in ONE tenant-bound transaction and are idempotent per batch id; a restore
+// skips — and reports — rows that now conflict.
+type LevelArchiveRepository interface {
+	PreviewLevelDeletion(ctx context.Context, scope levelarchive.Scope) (levelarchive.Counts, error)
+	ArchiveLevel(ctx context.Context, batchID string, scope levelarchive.Scope) (levelarchive.Counts, error)
+	RestoreLevelBatch(ctx context.Context, batchID string) (levelarchive.Report, error)
+	PurgeLevelArchives(ctx context.Context, cutoff time.Time) (int64, error)
 }
