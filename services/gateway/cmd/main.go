@@ -104,8 +104,14 @@ func main() {
 	// see the comment at the routes for why sharing the login one would let a
 	// public endpoint lock the school out of logging in.
 	inviteLimiter := middleware.NewRateLimiter(loginRL.Burst, loginRL.RefillPerSec(), time.Now)
+	// Re-authentication (deleting a level, ADR 0021) checks a password, so it is
+	// throttled like a login — on its OWN bucket of the same size: it sits
+	// behind an owner session, and sharing the login budget would let a
+	// director's typos lock the school out of signing in.
+	reauthLimiter := middleware.NewRateLimiter(loginRL.Burst, loginRL.RefillPerSec(), time.Now)
+	deletionKey := config.ParseDeletionTokenKey(os.Getenv, log)
 
-	mux := newMux(iamHealth, authClient, studentsClient, configClient, gradesClient, financeClient, attendanceClient, commsClient, uniformsClient, flags, loginLimiter, inviteLimiter)
+	mux := newMux(iamHealth, authClient, studentsClient, configClient, gradesClient, financeClient, attendanceClient, commsClient, uniformsClient, flags, loginLimiter, inviteLimiter, reauthLimiter, deletionKey)
 
 	log.Info("gateway starting",
 		slog.String("addr", addr),
@@ -221,7 +227,7 @@ func main() {
 //
 // `flags` (via middleware.NewModuleGuard) is the module-visibility boundary:
 // disabled module ⇒ 404, evaluated before auth so a hidden module is invisible.
-func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, configClient *client.ConfigClient, gradesClient *client.GradesClient, financeClient *client.FinanceClient, attendanceClient *client.AttendanceClient, commsClient *client.CommsClient, uniformsClient *client.UniformsClient, flags featureflag.Checker, loginLimiter, inviteLimiter *middleware.RateLimiter) *http.ServeMux {
+func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, configClient *client.ConfigClient, gradesClient *client.GradesClient, financeClient *client.FinanceClient, attendanceClient *client.AttendanceClient, commsClient *client.CommsClient, uniformsClient *client.UniformsClient, flags featureflag.Checker, loginLimiter, inviteLimiter, reauthLimiter *middleware.RateLimiter, deletionKey []byte) *http.ServeMux {
 	mux := http.NewServeMux()
 	handler.NewHealthHandler(iamHealth).Register(mux)
 
@@ -402,6 +408,25 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("DELETE /api/v1/config/calendar/{id}", configWrite(configH.DeleteNonWorkingPeriod))
 	mux.Handle("POST /api/v1/config/groups", configWrite(configH.CreateGroup))
 	mux.Handle("GET /api/v1/config/groups", configRead(configH.ListGroups))
+
+	// ADR 0021 deleting a level: the owner's alone (levels:delete, owner-only in
+	// iam), under module_config like the catalog it edits. The delete itself
+	// re-checks the password, so it runs on the re-auth limiter. The saga
+	// reaches every data service regardless of their module flags: a disabled
+	// module's rows still belong to the level being deleted.
+	levelDeletionH := handler.NewLevelDeletionHandler(handler.LevelDeletionDeps{
+		Config: configClient, Students: studentsClient,
+		Grades: gradesClient, Attendance: attendanceClient, Finance: financeClient, Uniforms: uniformsClient,
+		Passwords: authClient, Users: authClient,
+		Tokens: handler.NewDeletionTokens(deletionKey, time.Now),
+	})
+	levelsDelete := func(h http.Handler) http.Handler {
+		return guard.Protect("config", requireAuthChanged(middleware.RequirePermission("levels:delete")(h)))
+	}
+	mux.Handle("GET /api/v1/config/levels/{id}/deletion-preview", levelsDelete(http.HandlerFunc(levelDeletionH.Preview)))
+	mux.Handle("POST /api/v1/config/levels/{id}/delete", levelsDelete(reauthLimiter.Middleware(http.HandlerFunc(levelDeletionH.Delete))))
+	mux.Handle("GET /api/v1/config/level-trash", levelsDelete(http.HandlerFunc(levelDeletionH.Trash)))
+	mux.Handle("POST /api/v1/config/level-trash/{batchId}/restore", levelsDelete(http.HandlerFunc(levelDeletionH.Restore)))
 
 	// M14 teachers (staff roster + who teaches what): the same config service
 	// answers these, but they are a MODULE of their own now, so they carry their
