@@ -720,7 +720,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// goods and takes money in one act. RequireAllPermissions names the missing
 	// one so the panel can disable the entry point and SAY WHY -- otherwise a
 	// cashier keys in six lines with a parent waiting and eats a bare 403.
-	uniformsH := handler.NewUniformsHandler(uniformsClient)
+	uniformsH := handler.NewUniformsHandler(uniformsClient).WithLevelGuard(configClient)
 	uniformsStock := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("uniforms", requireAuthChanged(middleware.RequirePermission("uniforms:stock")(http.HandlerFunc(h))))
 	}

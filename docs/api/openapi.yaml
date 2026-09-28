@@ -278,6 +278,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
+        '409': { $ref: '#/components/responses/LevelBeingDeleted' }
 
   /api/v1/uniforms/items/{id}/sizes:
     post:
@@ -2490,6 +2491,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
+        '409': { $ref: '#/components/responses/PlainLevelBeingDeleted' }
 
   /api/v1/finance/deposits:
     post:
@@ -3456,8 +3458,9 @@ components:
         TERM_TOO_LONG (400, more than six months), MONTH_IN_OTHER_TERM (409),
         TERM_CLOSED (409, the term is a closed period). Level deletion (ADR
         0021): LEVEL_BEING_DELETED (409) on ANY write that resolves a level
-        whose deletion is running (grades capture, attendance lists, enrolling
-        or transferring a pupil, the level's structure in config).
+        whose deletion is running (grades capture, closing or reopening a
+        period, attendance lists, enrolling or transferring a pupil, a tuition
+        plan, a garment scoped to it, the level's structure in config).
         Absent on a refusal without a code.
       schema:
         type: string
@@ -3738,6 +3741,15 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    LevelBeingDeleted:
+      description: |
+        The garment's level is being deleted (ADR 0021): X-Error-Code and the
+        envelope's code are LEVEL_BEING_DELETED. Retry once the deletion ends.
+      headers:
+        X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
     ModuleDisabled:
       description: |
         `module_uniforms` is off. A disabled module answers 404 because it must be
@@ -3750,6 +3762,16 @@ components:
     # The text/plain answers of the gateway's older handlers (see ERRORS at the
     # top): the body is one sentence — the service's own when it gave one, safe
     # to show — or the bare status text.
+    PlainLevelBeingDeleted:
+      description: |
+        The level is being deleted (ADR 0021): X-Error-Code LEVEL_BEING_DELETED.
+        Retry once the deletion ends.
+      headers:
+        X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+      content:
+        text/plain:
+          schema: { type: string }
+          example: Este nivel se está eliminando
     PlainBadRequest:
       description: The request did not satisfy the contract; the body says which field.
       content:

@@ -33,8 +33,13 @@ func (pointStub) GetGradeLevel(_ context.Context, req *connect.Request[configv1.
 }
 
 func (pointStub) GetLevel(_ context.Context, req *connect.Request[configv1.GetLevelRequest]) (*connect.Response[configv1.GetLevelResponse], error) {
+	status := configv1.LevelStatus_LEVEL_STATUS_ACTIVE
+	if req.Msg.GetId() == "lvl-deleting" {
+		status = configv1.LevelStatus_LEVEL_STATUS_DELETING
+	}
 	return connect.NewResponse(&configv1.GetLevelResponse{Level: &configv1.Level{
 		Id: req.Msg.GetId(), Name: "Secundaria", AttendanceMode: configv1.AttendanceMode_ATTENDANCE_MODE_PER_CLASS,
+		Status: status,
 	}}), nil
 }
 
@@ -64,6 +69,11 @@ func TestConfigClientPointReads(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Secundaria", l.Name)
 	assert.Equal(t, client.AttendanceModePerClass, l.AttendanceMode)
+	assert.False(t, l.Deleting)
+
+	l, err = c.GetLevel(ctx, "lvl-deleting")
+	require.NoError(t, err)
+	assert.True(t, l.Deleting, "config's DELETING status reaches the edge (ADR 0021)")
 
 	_, err = c.GetGroup(ctx, "ghost")
 	assert.Equal(t, connect.CodeNotFound, connect.CodeOf(err), "a missing group keeps its NotFound code")
