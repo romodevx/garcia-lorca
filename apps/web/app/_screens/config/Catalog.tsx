@@ -288,7 +288,7 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
           {!pricing && selectedCycle !== undefined && <CalendarPanel cycle={selectedCycle} />}
 
           {!pricing && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 18 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(340px, 100%), 1fr))", gap: 18 }}>
             <LevelsPanel levels={levels} selectedLevelId={selectedLevelId} onSelect={setSelectedLevelId} onCreate={handleCreateLevel} onSetAttendanceMode={handleSetAttendanceMode} onSetGrading={handleSetGrading} />
 
             {selectedLevel !== undefined && (
