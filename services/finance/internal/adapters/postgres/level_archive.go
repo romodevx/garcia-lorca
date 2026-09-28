@@ -82,7 +82,7 @@ func (r *Repository) ArchiveLevel(ctx context.Context, batchID string, scope lev
 }
 
 // RestoreLevelBatch puts the plans back, skipping a (cycle, level) that got a
-// new plan meanwhile.
+// new plan meanwhile; a skipped plan stays archived for a retry or the purge.
 func (r *Repository) RestoreLevelBatch(ctx context.Context, batchID string) (levelarchive.Report, error) {
 	var rep levelarchive.Report
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
@@ -99,6 +99,19 @@ func (r *Repository) RestoreLevelBatch(ctx context.Context, batchID string) (lev
 		return err
 	})
 	return rep, err
+}
+
+// PurgeLevelBatch drops one batch's archive, marker included.
+func (r *Repository) PurgeLevelBatch(ctx context.Context, batchID string) (int64, error) {
+	var n int64
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var err error
+		if n, err = levelTrash.PurgeBatch(tx, batchID); err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "purging a batch of the finance trash", err)
+		}
+		return nil
+	})
+	return n, err
 }
 
 // PurgeLevelArchives drops the archives filed before cutoff.

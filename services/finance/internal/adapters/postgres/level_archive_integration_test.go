@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/pkg/levelarchive"
 	pgadapter "github.com/garcia-lorca/services/finance/internal/adapters/postgres"
 )
@@ -190,6 +191,9 @@ func TestFinanceLevelPurgeHonoursTheRetention(t *testing.T) {
 	var left int64
 	require.NoError(t, superDB.Raw("SELECT count(*) FROM finance_deletion_archive WHERE batch_id = ?", batch).Scan(&left).Error)
 	assert.Zero(t, left)
+
+	_, err = repo.RestoreLevelBatch(ctx, batch)
+	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err), "a purged batch is NotFound, never a silent success")
 }
 
 func TestFinanceLevelTrashIsTenantIsolated(t *testing.T) {
@@ -205,9 +209,8 @@ func TestFinanceLevelTrashIsTenantIsolated(t *testing.T) {
 	for kind, n := range counts {
 		assert.Zero(t, n, "tenant B sees none of H's %s", kind)
 	}
-	rep, err := other.RestoreLevelBatch(ctx, batch)
-	require.NoError(t, err)
-	assert.Empty(t, rep.Restored, "B cannot restore H's batch")
+	_, err = other.RestoreLevelBatch(ctx, batch)
+	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err), "B cannot even see H's batch")
 	assert.Zero(t, countPlans(t, flLevel))
 
 	db, err := open(appDSN)
@@ -225,4 +228,65 @@ func TestFinanceLevelTrashIsTenantIsolated(t *testing.T) {
 		return tx.Raw("SELECT count(*) FROM finance_deletion_archive").Scan(&visible).Error
 	}))
 	assert.Zero(t, visible, "RLS hides H's archive rows from B")
+}
+
+func archivedPlans(t *testing.T, batch string) int64 {
+	t.Helper()
+	var n int64
+	require.NoError(t, superDB.Raw("SELECT count(*) FROM finance_deletion_archive WHERE batch_id = ? AND table_name <> '_batch'", batch).Scan(&n).Error)
+	return n
+}
+
+// A plan that did not fit stays in the trash; once the clash is gone a retry
+// brings it back and the batch converges.
+func TestFinanceLevelSkippedPlanStaysArchivedUntilARetryFits(t *testing.T) {
+	seedFinanceLevel(t)
+	ctx := context.Background()
+	repo := levelRepo(t, tenantH)
+	const batch = "f5000000-0000-0000-0000-00000000f005"
+	_, err := repo.ArchiveLevel(ctx, batch, flScope)
+	require.NoError(t, err)
+	require.NoError(t, superDB.Exec(`INSERT INTO tuition_plans (tenant_id, cycle_id, level_id, enrollment_cents, monthly_cents, months, first_billed_month, due_day)
+		VALUES (?, ?, ?, 1, 1, 10, 9, 10)`, tenantH, flCycle, flLevel).Error)
+
+	rep, err := repo.RestoreLevelBatch(ctx, batch)
+	require.NoError(t, err)
+	require.Len(t, rep.Skipped, 1)
+	assert.Equal(t, int64(1), archivedPlans(t, batch), "the skipped plan stays archived")
+
+	require.NoError(t, superDB.Exec("DELETE FROM tuition_plans WHERE tenant_id = ? AND enrollment_cents = 1", tenantH).Error)
+	again, err := repo.RestoreLevelBatch(ctx, batch)
+	require.NoError(t, err)
+	assert.Empty(t, again.Skipped)
+	assert.Equal(t, int64(2), again.Restored["tuitionPlans"], "the report accumulates")
+	assert.Zero(t, archivedPlans(t, batch))
+	assert.Equal(t, int64(2), countPlans(t, flLevel))
+
+	third, err := repo.RestoreLevelBatch(ctx, batch)
+	require.NoError(t, err)
+	assert.Equal(t, again, third, "nothing left: the last report")
+}
+
+func TestFinanceLevelPurgeBatchTouchesOnlyThatBatch(t *testing.T) {
+	seedFinanceLevel(t)
+	ctx := context.Background()
+	repo := levelRepo(t, tenantH)
+	const doomed, kept = "f5000000-0000-0000-0000-00000000f006", "f5000000-0000-0000-0000-00000000f007"
+	_, err := repo.ArchiveLevel(ctx, doomed, flScope)
+	require.NoError(t, err)
+	_, err = repo.ArchiveLevel(ctx, kept, levelarchive.Scope{LevelID: byLevel})
+	require.NoError(t, err)
+
+	n, err := repo.PurgeLevelBatch(ctx, doomed)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), n, "two plans and the marker")
+	var left int64
+	require.NoError(t, superDB.Raw("SELECT count(*) FROM finance_deletion_archive WHERE batch_id = ?", doomed).Scan(&left).Error)
+	assert.Zero(t, left)
+	require.NoError(t, superDB.Raw("SELECT count(*) FROM finance_deletion_archive WHERE batch_id = ?", kept).Scan(&left).Error)
+	assert.Positive(t, left)
+
+	n, err = repo.PurgeLevelBatch(ctx, doomed)
+	require.NoError(t, err)
+	assert.Zero(t, n)
 }

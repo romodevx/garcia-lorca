@@ -57,6 +57,15 @@ func (h *FinanceHandler) PurgeLevelArchives(ctx context.Context, _ *connect.Requ
 	return connect.NewResponse(&financev1.PurgeLevelArchivesResponse{PurgedRows: n}), nil
 }
 
+// PurgeLevelBatch drops one batch's archive (the gateway's retention sweep).
+func (h *FinanceHandler) PurgeLevelBatch(ctx context.Context, req *connect.Request[financev1.PurgeLevelBatchRequest]) (*connect.Response[financev1.PurgeLevelBatchResponse], error) {
+	n, err := h.levels.PurgeLevelBatch(ctx, req.Msg.GetBatchId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&financev1.PurgeLevelBatchResponse{PurgedRows: n}), nil
+}
+
 // toLevelScope reads the wire scope; a missing scope is an empty one, which
 // the use case refuses for its missing level.
 func toLevelScope(s *financev1.LevelScope) levelarchive.Scope {

@@ -37,6 +37,9 @@ func (s *stubLevelArchive) RestoreLevelBatch(context.Context, string) (levelarch
 	rep.Record("tuitionPlans", 4, 1, "ya existe")
 	return rep, nil
 }
+func (s *stubLevelArchive) PurgeLevelBatch(context.Context, string) (int64, error) {
+	return 3, nil
+}
 func (s *stubLevelArchive) PurgeLevelArchives(context.Context, time.Time) (int64, error) {
 	return 9, nil
 }
@@ -75,6 +78,10 @@ func TestLevelArchiveHandlerWireMapping(t *testing.T) {
 	purge, err := h.PurgeLevelArchives(ctx, connect.NewRequest(&financev1.PurgeLevelArchivesRequest{}))
 	require.NoError(t, err)
 	assert.Equal(t, int64(9), purge.Msg.GetPurgedRows())
+
+	one, err := h.PurgeLevelBatch(ctx, connect.NewRequest(&financev1.PurgeLevelBatchRequest{BatchId: hBatch}))
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), one.Msg.GetPurgedRows())
 }
 
 func TestLevelArchiveHandlerRefusesAMalformedScope(t *testing.T) {
