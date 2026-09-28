@@ -8,7 +8,19 @@
 # there watching the stream. CI is the gate; deploy-dev.yml refuses to submit a
 # build unless CI is green on that exact SHA. The rollout lives on the runner.
 #
-# Step order: lint -> generate -> images (all 10 in parallel).
+# Step order: lint -> generate -> images, in THREE LANES of one image at a time:
+#   A: gateway -> config -> uniforms
+#   B: iam -> students -> finance
+#   C: web -> grades -> attendance -> comms
+# All ten used to start together on the default e2-medium (2 vCPU, 4 GB). That
+# box is CPU-bound either way — each image took ~20 min because ten builds
+# shared two cores — so lanes cost little wall-clock time, but ten concurrent
+# BuildKit builds plus the web's Next build ran the machine out of memory: on
+# 2026-09-28 the gateway step died twice at the same point with only
+# "unexpected EOF" from the Docker daemon, while the identical build (same code,
+# same --cache-from) passed locally. Three at a time keeps peak memory at about
+# a third. Lanes are balanced by count; the web opens lane C because it is the
+# heaviest on memory and should not overlap two others late in the build.
 #
 # Trigger substitutions (set on the trigger):
 #   _REGION       deployment region                (e.g. us-central1)
@@ -152,7 +164,7 @@ steps:
         # Moving the :cache tag is what makes the NEXT build fast. Pushed after
         # the real tag so a failure here never loses the deployable image.
         docker push "$$CACHE"
-    waitFor: ["buf-generate"]
+    waitFor: ["image-iam"]
 
   - id: image-config
     name: gcr.io/cloud-builders/docker
@@ -182,7 +194,7 @@ steps:
         # Moving the :cache tag is what makes the NEXT build fast. Pushed after
         # the real tag so a failure here never loses the deployable image.
         docker push "$$CACHE"
-    waitFor: ["buf-generate"]
+    waitFor: ["image-gateway"]
 
   - id: image-finance
     name: gcr.io/cloud-builders/docker
@@ -212,7 +224,7 @@ steps:
         # Moving the :cache tag is what makes the NEXT build fast. Pushed after
         # the real tag so a failure here never loses the deployable image.
         docker push "$$CACHE"
-    waitFor: ["buf-generate"]
+    waitFor: ["image-students"]
 
   - id: image-grades
     name: gcr.io/cloud-builders/docker
@@ -242,7 +254,7 @@ steps:
         # Moving the :cache tag is what makes the NEXT build fast. Pushed after
         # the real tag so a failure here never loses the deployable image.
         docker push "$$CACHE"
-    waitFor: ["buf-generate"]
+    waitFor: ["image-web"]
 
   - id: image-attendance
     name: gcr.io/cloud-builders/docker
@@ -272,7 +284,7 @@ steps:
         # Moving the :cache tag is what makes the NEXT build fast. Pushed after
         # the real tag so a failure here never loses the deployable image.
         docker push "$$CACHE"
-    waitFor: ["buf-generate"]
+    waitFor: ["image-grades"]
 
   - id: image-comms
     name: gcr.io/cloud-builders/docker
@@ -302,7 +314,7 @@ steps:
         # Moving the :cache tag is what makes the NEXT build fast. Pushed after
         # the real tag so a failure here never loses the deployable image.
         docker push "$$CACHE"
-    waitFor: ["buf-generate"]
+    waitFor: ["image-attendance"]
 
   - id: image-uniforms
     name: gcr.io/cloud-builders/docker
@@ -332,7 +344,7 @@ steps:
         # Moving the :cache tag is what makes the NEXT build fast. Pushed after
         # the real tag so a failure here never loses the deployable image.
         docker push "$$CACHE"
-    waitFor: ["buf-generate"]
+    waitFor: ["image-config"]
 
   # The web image builds from the repo root like the Go services, but the root
   # .dockerignore excludes apps/ and packages/ for them — so this relies on
