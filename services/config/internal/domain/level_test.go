@@ -3,6 +3,9 @@ package domain_test
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/config/internal/domain"
 )
@@ -68,4 +71,13 @@ func TestParseEnrollmentGranularity(t *testing.T) {
 	if _, err := domain.ParseEnrollmentGranularity("bogus"); glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("unknown granularity must be Invalid, got %v", glerrors.KindOf(err))
 	}
+}
+
+func TestLevelDeletingIsCarriedNotChosen(t *testing.T) {
+	l, err := domain.NewLevel("l1", "t1", "Primaria", "", domain.GranularityCycle)
+	require.NoError(t, err)
+	assert.False(t, l.Deleting(), "a new level is active")
+	d := l.WithDeleting(true)
+	assert.True(t, d.Deleting())
+	assert.False(t, l.Deleting(), "levels are values")
 }

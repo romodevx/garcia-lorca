@@ -26,7 +26,6 @@ import (
 	"github.com/garcia-lorca/gen/go/garcialorca/config/v1/configv1connect"
 	"github.com/garcia-lorca/pkg/dbdsn"
 	"github.com/garcia-lorca/pkg/dbpool"
-	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/pkg/logger"
 	grpcadapter "github.com/garcia-lorca/services/config/internal/adapters/grpc"
 	pgadapter "github.com/garcia-lorca/services/config/internal/adapters/postgres"
@@ -87,10 +86,10 @@ func buildMux(log *slog.Logger) (*http.ServeMux, error) {
 	repo := pgadapter.NewRepository(db, tenantID)
 	catalog := usecase.NewCatalogService(repo, tenantID, func() string { return uuid.NewString() })
 	health := usecase.NewHealthService(serviceName)
-	// The level trash (ADR 0021) and its hourly retention sweep, on the
-	// process's own context: the sweep outlives every request.
+	// The level trash (ADR 0021). Its retention sweep runs in the gateway
+	// (always warm), batch by batch on restorable_until; this scale-to-zero
+	// service keeps no ticker of its own.
 	trash := usecase.NewLevelDeletionService(repo, time.Now)
-	levelarchive.StartPurger(context.Background(), trash.PurgeLevelArchives, log)
 	handler := grpcadapter.NewConfigHandler(catalog, health).WithLevelDeletion(trash)
 
 	mux := http.NewServeMux()

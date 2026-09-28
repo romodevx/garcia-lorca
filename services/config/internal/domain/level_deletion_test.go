@@ -72,3 +72,52 @@ func TestLevelNameTakenIsACodedConflict(t *testing.T) {
 	assert.Equal(t, domain.CodeLevelNameTaken, domain.RefusalCodeOf(err))
 	assert.Equal(t, "Ya existe un nivel con ese nombre; renómbralo antes de restaurar", glerrors.SafeMessage(err))
 }
+
+func TestLevelDeletionRestorableStatuses(t *testing.T) {
+	at := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
+	cases := []struct {
+		status     domain.LevelDeletionStatus
+		restorable bool
+		inTrash    bool
+	}{
+		{domain.LevelDeletionDeleting, true, false}, // compensation undoes a running saga
+		{domain.LevelDeletionDeleted, true, true},
+		{domain.LevelDeletionFailedPartial, true, true},
+		{domain.LevelDeletionRestoredPartial, true, true}, // a retry finishes it
+		{domain.LevelDeletionRestored, false, false},
+		{domain.LevelDeletionCancelled, false, false},
+		{domain.LevelDeletionPurged, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.status), func(t *testing.T) {
+			d, err := domain.NewLevelDeletion(batch, level, "Primaria", user, "Laura", nil, at)
+			require.NoError(t, err)
+			d.Status = tc.status
+			err = d.CheckRestorable(at)
+			if tc.restorable {
+				assert.NoError(t, err)
+			} else {
+				assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err))
+			}
+			assert.Equal(t, tc.inTrash, d.Status.InTrash())
+		})
+	}
+}
+
+func TestLevelDeletionRefusalsAreCodedConflicts(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		code domain.RefusalCode
+	}{
+		{domain.DeletionInProgress(), domain.CodeDeletionInProgress},
+		{domain.PreviewTokenUsed(), domain.CodePreviewStale},
+	} {
+		assert.Equal(t, glerrors.KindConflict, glerrors.KindOf(tc.err))
+		assert.Equal(t, tc.code, domain.RefusalCodeOf(tc.err))
+		assert.NotEmpty(t, glerrors.SafeMessage(tc.err))
+	}
+}
+
+func TestLevelDeletionStepsAreEverySagaStep(t *testing.T) {
+	assert.Equal(t, []string{"grades", "attendance", "finance", "uniforms", "students", "config"}, domain.LevelDeletionSteps)
+}

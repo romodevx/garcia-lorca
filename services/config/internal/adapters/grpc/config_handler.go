@@ -11,6 +11,7 @@ import (
 	configv1 "github.com/garcia-lorca/gen/go/garcialorca/config/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/config/v1/configv1connect"
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/services/config/internal/domain"
 	"github.com/garcia-lorca/services/config/internal/ports"
 	"github.com/garcia-lorca/services/config/internal/usecase"
@@ -386,7 +387,16 @@ func toProtoLevel(l domain.Level) *configv1.Level {
 		EnrollmentGranularity: toProtoGranularity(l.Granularity()),
 		AttendanceMode:        toProtoAttendanceMode(l.AttendanceMode()),
 		Grading:               toProtoGradingScale(l.Grading()),
+		Status:                toProtoLevelStatus(l.Deleting()),
 	}
+}
+
+// toProtoLevelStatus names the level's lifecycle on the wire (ADR 0021).
+func toProtoLevelStatus(deleting bool) configv1.LevelStatus {
+	if deleting {
+		return configv1.LevelStatus_LEVEL_STATUS_DELETING
+	}
+	return configv1.LevelStatus_LEVEL_STATUS_ACTIVE
 }
 
 // toProtoGradingScale maps the domain scale to the wire message (hundredths).
@@ -595,6 +605,8 @@ func connectErr(err error) *connect.Error {
 	ce := connectErrForKind(err)
 	if code := domain.RefusalCodeOf(err); code != "" {
 		ce.Meta().Set(ErrorCodeMeta, string(code))
+	} else if code := levelarchive.CodeOf(err); code != "" {
+		ce.Meta().Set(ErrorCodeMeta, code)
 	}
 	return ce
 }

@@ -59,10 +59,13 @@ func NewRepository(db *gorm.DB, tenantID string) *Repository {
 // withTenant runs fn inside a transaction that has bound app.current_tenant,
 // delegating to the shared pkg/authctx RLS primitive so tenant binding lives in
 // exactly one place across every service.
+//
+// Every write of a level's structure passes through here, so this is where the
+// freeze trigger's refusal (migration 0012) becomes LEVEL_BEING_DELETED.
 func (r *Repository) withTenant(ctx context.Context, fn func(tx *gorm.DB) error) error {
-	return authctx.WithTenantContext(ctx, gormtx.NewRunner(r.db), r.tenantID, func(tx authctx.Tx) error {
+	return asLevelBeingDeleted(authctx.WithTenantContext(ctx, gormtx.NewRunner(r.db), r.tenantID, func(tx authctx.Tx) error {
 		return fn(gormtx.Gorm(tx))
-	})
+	}))
 }
 
 // --- cycles ---------------------------------------------------------------

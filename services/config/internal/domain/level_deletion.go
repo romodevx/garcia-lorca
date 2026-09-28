@@ -11,19 +11,57 @@ import (
 // LevelDeletionStatus is where a deleted level stands in the trash.
 type LevelDeletionStatus string
 
-// A batch starts deleted and ends restored (by the director) or purged (by the
-// retention sweep). Neither end goes back.
+// A batch starts deleting (BeginLevelDeletion, the saga's lock) and becomes
+// deleted when every step archived. A failed saga ends cancelled (fully undone)
+// or failed_partial (not fully: in the trash, restorable). A restore ends
+// restored, or restored_partial when some rows did not fit (still in the trash,
+// a retry finishes it). The retention sweep ends everything purged.
 const (
-	LevelDeletionDeleted  LevelDeletionStatus = "deleted"
-	LevelDeletionRestored LevelDeletionStatus = "restored"
-	LevelDeletionPurged   LevelDeletionStatus = "purged"
+	LevelDeletionDeleting        LevelDeletionStatus = "deleting"
+	LevelDeletionDeleted         LevelDeletionStatus = "deleted"
+	LevelDeletionFailedPartial   LevelDeletionStatus = "failed_partial"
+	LevelDeletionRestoredPartial LevelDeletionStatus = "restored_partial"
+	LevelDeletionRestored        LevelDeletionStatus = "restored"
+	LevelDeletionCancelled       LevelDeletionStatus = "cancelled"
+	LevelDeletionPurged          LevelDeletionStatus = "purged"
 )
+
+// InTrash reports whether the director sees the batch in the trash.
+func (s LevelDeletionStatus) InTrash() bool {
+	return s == LevelDeletionDeleted || s == LevelDeletionFailedPartial || s == LevelDeletionRestoredPartial
+}
+
+// restorable reports whether a restore (or a compensation) may run on it.
+func (s LevelDeletionStatus) restorable() bool { return s == LevelDeletionDeleting || s.InTrash() }
+
+// LevelDeletionSteps are the saga's steps, in deletion order. A saga that died
+// mid-way leaves every one of them pending.
+var LevelDeletionSteps = []string{"grades", "attendance", "finance", "uniforms", "students", "config"}
+
+// SagaStallAfter is how long a batch may sit in `deleting` before the sweep
+// takes the saga for dead (a gateway that crashed mid-way): far beyond the
+// saga's and its compensation's timeouts.
+const SagaStallAfter = 30 * time.Minute
 
 // The refusal codes of the level trash (ADR 0021).
 const (
-	CodeLevelNameTaken RefusalCode = "LEVEL_NAME_TAKEN"
-	CodeTrashExpired   RefusalCode = "TRASH_EXPIRED"
+	CodeLevelNameTaken     RefusalCode = "LEVEL_NAME_TAKEN"
+	CodeTrashExpired       RefusalCode = "TRASH_EXPIRED"
+	CodeDeletionInProgress RefusalCode = "DELETION_IN_PROGRESS"
+	CodePreviewStale       RefusalCode = "PREVIEW_STALE"
 )
+
+// DeletionInProgress refuses a second deletion of a level whose deletion runs
+// (or failed half-way and waits in the trash).
+func DeletionInProgress() error {
+	return refusal(glerrors.KindConflict, CodeDeletionInProgress,
+		"Ya se está eliminando este nivel; espera un momento y revisa la Papelera.")
+}
+
+// PreviewTokenUsed refuses a confirm token that already opened a saga.
+func PreviewTokenUsed() error {
+	return refusal(glerrors.KindConflict, CodePreviewStale, "Los datos cambiaron; revisa el resumen de nuevo")
+}
 
 // maxDeletionNameRunes bounds the names a batch records (the DDL CHECK).
 const maxDeletionNameRunes = 200
@@ -40,6 +78,11 @@ type LevelDeletion struct {
 	DeletedAt       time.Time
 	RestorableUntil time.Time
 	Status          LevelDeletionStatus
+	// PendingSteps (failed_partial) are the steps whose archives may still hold
+	// rows of the batch; a restore asks exactly these.
+	PendingSteps []string
+	// Skipped is what a compensation or a restore could not put back.
+	Skipped []levelarchive.Skip
 }
 
 // NewLevelDeletion records a fresh deletion. It stays restorable for exactly
@@ -71,11 +114,12 @@ func NewLevelDeletion(batchID, levelID, levelName, deletedBy, deletedByName stri
 	}, nil
 }
 
-// CheckRestorable refuses a batch that is no longer in the trash (NotFound) or
+// CheckRestorable refuses a batch that is no longer restorable (NotFound) or
 // whose window has closed (TRASH_EXPIRED). The last instant of the window
-// still counts.
+// still counts. now is the database's clock (the one restorable_until was
+// written with).
 func (d LevelDeletion) CheckRestorable(now time.Time) error {
-	if d.Status != LevelDeletionDeleted {
+	if !d.Status.restorable() {
 		return glerrors.ErrNotFound
 	}
 	if now.After(d.RestorableUntil) {

@@ -18,9 +18,14 @@ import (
 // fakeTrash records what the use case hands the repository.
 type fakeTrash struct {
 	previewed   string
+	begun       ports.BeginLevelDeletionInput
 	archived    ports.ArchiveLevelInput
-	restoredAt  time.Time
 	restoredID  string
+	partial     bool
+	failed      []string
+	failSkips   []levelarchive.Skip
+	stallAfter  time.Duration
+	purgedBatch string
 	purgeCutoff time.Time
 }
 
@@ -29,18 +34,47 @@ func (f *fakeTrash) PreviewLevelDeletion(_ context.Context, levelID string) (por
 	return ports.LevelStructure{LevelID: levelID, LevelName: "Primaria", Counts: levelarchive.Counts{"groups": 1}}, nil
 }
 
+func (f *fakeTrash) BeginLevelDeletion(_ context.Context, in ports.BeginLevelDeletionInput) (domain.LevelDeletion, error) {
+	f.begun = in
+	return domain.LevelDeletion{BatchID: in.BatchID, Status: domain.LevelDeletionDeleting}, nil
+}
+
 func (f *fakeTrash) ArchiveLevel(_ context.Context, in ports.ArchiveLevelInput) (levelarchive.Counts, domain.LevelDeletion, error) {
 	f.archived = in
 	return levelarchive.Counts{"groups": 1}, domain.LevelDeletion{BatchID: in.BatchID}, nil
 }
 
-func (f *fakeTrash) RestoreLevelBatch(_ context.Context, batchID string, now time.Time) (levelarchive.Report, error) {
-	f.restoredID, f.restoredAt = batchID, now
+func (f *fakeTrash) RestoreLevelBatch(_ context.Context, batchID string) (levelarchive.Report, error) {
+	f.restoredID = batchID
 	return levelarchive.NewReport(), nil
 }
 
-func (f *fakeTrash) MarkLevelDeletionRestored(_ context.Context, batchID string) (domain.LevelDeletion, error) {
+func (f *fakeTrash) MarkLevelDeletionRestored(_ context.Context, batchID string, partial bool) (domain.LevelDeletion, error) {
+	f.partial = partial
 	return domain.LevelDeletion{BatchID: batchID, Status: domain.LevelDeletionRestored}, nil
+}
+
+func (f *fakeTrash) CancelLevelDeletion(_ context.Context, batchID string) (domain.LevelDeletion, error) {
+	return domain.LevelDeletion{BatchID: batchID, Status: domain.LevelDeletionCancelled}, nil
+}
+
+func (f *fakeTrash) FailLevelDeletion(_ context.Context, batchID string, pending []string, skipped []levelarchive.Skip) (domain.LevelDeletion, error) {
+	f.failed, f.failSkips = pending, skipped
+	return domain.LevelDeletion{BatchID: batchID, Status: domain.LevelDeletionFailedPartial}, nil
+}
+
+func (f *fakeTrash) SweepLevelDeletions(_ context.Context, stalledAfter time.Duration) ([]domain.LevelDeletion, int64, error) {
+	f.stallAfter = stalledAfter
+	return []domain.LevelDeletion{{BatchID: "b"}}, 1, nil
+}
+
+func (f *fakeTrash) MarkLevelDeletionPurged(_ context.Context, batchID string) (domain.LevelDeletion, error) {
+	return domain.LevelDeletion{BatchID: batchID, Status: domain.LevelDeletionPurged}, nil
+}
+
+func (f *fakeTrash) PurgeLevelBatch(_ context.Context, batchID string) (int64, error) {
+	f.purgedBatch = batchID
+	return 5, nil
 }
 
 func (f *fakeTrash) ListLevelDeletions(context.Context) ([]domain.LevelDeletion, error) {
@@ -67,26 +101,38 @@ const (
 	okBatch = "aaaaaaaa-0000-0000-0000-00000000000b"
 	okLevel = "aaaaaaaa-0000-0000-0000-00000000000c"
 	okUser  = "aaaaaaaa-0000-0000-0000-00000000000d"
+	okHash  = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 )
 
 func TestLevelDeletionServiceRefusesMalformedIDs(t *testing.T) {
 	svc, _ := newTrash()
 	ctx := context.Background()
+	begin := func(c usecase.BeginLevelDeletionCommand) func() error {
+		return func() error { _, err := svc.BeginLevelDeletion(ctx, c); return err }
+	}
 	cases := []struct {
 		name string
 		call func() error
 	}{
 		{"preview", func() error { _, err := svc.PreviewLevelDeletion(ctx, "kinder"); return err }},
+		{"begin batch", begin(usecase.BeginLevelDeletionCommand{BatchID: "x", LevelID: okLevel, TokenHash: okHash, DeletedBy: okUser, DeletedByName: "L"})},
+		{"begin level", begin(usecase.BeginLevelDeletionCommand{BatchID: okBatch, LevelID: "x", TokenHash: okHash, DeletedBy: okUser, DeletedByName: "L"})},
+		{"begin token", begin(usecase.BeginLevelDeletionCommand{BatchID: okBatch, LevelID: okLevel, TokenHash: "nope", DeletedBy: okUser, DeletedByName: "L"})},
 		{"archive batch", func() error {
-			_, _, err := svc.ArchiveLevel(ctx, usecase.ArchiveLevelCommand{BatchID: "x", LevelID: okLevel, DeletedBy: okUser, DeletedByName: "L"})
+			_, _, err := svc.ArchiveLevel(ctx, usecase.ArchiveLevelCommand{BatchID: "x", LevelID: okLevel})
 			return err
 		}},
 		{"archive level", func() error {
-			_, _, err := svc.ArchiveLevel(ctx, usecase.ArchiveLevelCommand{BatchID: okBatch, LevelID: "x", DeletedBy: okUser, DeletedByName: "L"})
+			_, _, err := svc.ArchiveLevel(ctx, usecase.ArchiveLevelCommand{BatchID: okBatch, LevelID: "x"})
 			return err
 		}},
 		{"restore", func() error { _, err := svc.RestoreLevelBatch(ctx, "x"); return err }},
-		{"mark", func() error { _, err := svc.MarkLevelDeletionRestored(ctx, "x"); return err }},
+		{"mark", func() error { _, err := svc.MarkLevelDeletionRestored(ctx, "x", false); return err }},
+		{"cancel", func() error { _, err := svc.CancelLevelDeletion(ctx, "x"); return err }},
+		{"fail", func() error { _, err := svc.FailLevelDeletion(ctx, "x", nil, nil); return err }},
+		{"fail step", func() error { _, err := svc.FailLevelDeletion(ctx, okBatch, []string{"payroll"}, nil); return err }},
+		{"purged", func() error { _, err := svc.MarkLevelDeletionPurged(ctx, "x"); return err }},
+		{"purge batch", func() error { _, err := svc.PurgeLevelBatch(ctx, "x"); return err }},
 		{"get", func() error { _, err := svc.GetLevelDeletion(ctx, "x"); return err }},
 	}
 	for _, tc := range cases {
@@ -96,7 +142,7 @@ func TestLevelDeletionServiceRefusesMalformedIDs(t *testing.T) {
 	}
 }
 
-func TestLevelDeletionServiceCanonicalizesAndStampsTheClock(t *testing.T) {
+func TestLevelDeletionServiceCanonicalizes(t *testing.T) {
 	svc, f := newTrash()
 	ctx := context.Background()
 
@@ -104,20 +150,47 @@ func TestLevelDeletionServiceCanonicalizesAndStampsTheClock(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, okLevel, f.previewed)
 
-	_, _, err = svc.ArchiveLevel(ctx, usecase.ArchiveLevelCommand{
-		BatchID: okBatch, LevelID: okLevel, DeletedBy: okUser, DeletedByName: "Laura",
-		Summary: levelarchive.Counts{"students": 2},
+	_, err = svc.BeginLevelDeletion(ctx, usecase.BeginLevelDeletionCommand{
+		BatchID: "AAAAAAAA-0000-0000-0000-00000000000B", LevelID: okLevel, TokenHash: okHash,
+		DeletedBy: okUser, DeletedByName: "Laura",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, trashNow, f.archived.At, "the deletion instant is the service's clock, never the caller's")
+	assert.Equal(t, okBatch, f.begun.BatchID)
+	assert.Equal(t, okHash, f.begun.TokenHash)
+
+	_, _, err = svc.ArchiveLevel(ctx, usecase.ArchiveLevelCommand{
+		BatchID: okBatch, LevelID: okLevel, Summary: levelarchive.Counts{"students": 2},
+	})
+	require.NoError(t, err)
 	assert.Equal(t, int64(2), f.archived.Summary["students"])
 
 	_, err = svc.RestoreLevelBatch(ctx, okBatch)
 	require.NoError(t, err)
-	assert.Equal(t, trashNow, f.restoredAt)
+	assert.Equal(t, okBatch, f.restoredID)
 
-	n, err := svc.PurgeLevelArchives(ctx)
+	_, err = svc.MarkLevelDeletionRestored(ctx, okBatch, true)
+	require.NoError(t, err)
+	assert.True(t, f.partial)
+
+	skips := []levelarchive.Skip{{Kind: "enrollments", Count: 1, Reason: "r"}}
+	_, err = svc.FailLevelDeletion(ctx, okBatch, []string{"students", "grades"}, skips)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"students", "grades"}, f.failed)
+	assert.Equal(t, skips, f.failSkips)
+
+	got, stalled, err := svc.SweepLevelDeletions(ctx)
+	require.NoError(t, err)
+	assert.Len(t, got, 1)
+	assert.Equal(t, int64(1), stalled)
+	assert.Equal(t, domain.SagaStallAfter, f.stallAfter)
+
+	n, err := svc.PurgeLevelBatch(ctx, okBatch)
+	require.NoError(t, err)
+	assert.Equal(t, int64(5), n)
+	assert.Equal(t, okBatch, f.purgedBatch)
+
+	n, err = svc.PurgeLevelArchives(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), n)
-	assert.Equal(t, trashNow.Add(-levelarchive.Retention), f.purgeCutoff, "only archives past the 7-day retention")
+	assert.Equal(t, trashNow.Add(-levelarchive.Retention), f.purgeCutoff)
 }

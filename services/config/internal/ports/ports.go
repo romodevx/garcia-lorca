@@ -222,10 +222,11 @@ type LevelPatch struct {
 
 // LevelStructure is a level's whole structure across every cycle, as deleting
 // it would reach it (ADR 0021): the ids the other services need, and config's
-// own counts by kind.
+// own counts by kind. Deleting reports that a deletion of it already runs.
 type LevelStructure struct {
 	LevelID       string
 	LevelName     string
+	Deleting      bool
 	GradeLevelIDs []string
 	GroupIDs      []string
 	SubjectIDs    []string
@@ -233,33 +234,52 @@ type LevelStructure struct {
 	Counts        levelarchive.Counts
 }
 
-// ArchiveLevelInput is one saga's config step: the batch, the level, who
-// deleted it, what the other services archived (Summary) and when.
-type ArchiveLevelInput struct {
+// BeginLevelDeletionInput opens one saga: the batch, the level, the hash of
+// the confirm token (single use) and who deletes it (the verified principal).
+type BeginLevelDeletionInput struct {
 	BatchID       string
 	LevelID       string
+	TokenHash     string
 	DeletedBy     string
 	DeletedByName string
-	Summary       levelarchive.Counts
-	At            time.Time
+}
+
+// ArchiveLevelInput is one saga's config step: the batch, the level and what
+// the other services archived (Summary).
+type ArchiveLevelInput struct {
+	BatchID string
+	LevelID string
+	Summary levelarchive.Counts
 }
 
 // LevelDeletionRepository moves a level's structure into config's trash and
-// back, and keeps the trash's ledger (level_deletions).
+// back, and keeps the trash's ledger (level_deletions). Every instant it
+// records or compares is the DATABASE's now(): the trash has one clock.
 //
 //   - PreviewLevelDeletion changes nothing; KindNotFound for an unknown level.
-//   - ArchiveLevel archives and records the batch in ONE transaction; a retry of
-//     the same batch answers the first result. KindNotFound for an unknown level.
-//   - RestoreLevelBatch refuses a batch not in the trash (KindNotFound), past its
+//   - BeginLevelDeletion is the saga's lock: level → deleting, batch → deleting
+//     with restorable_until = now() + retention. DELETION_IN_PROGRESS when the
+//     level is already being deleted, PREVIEW_STALE when the token was used;
+//     the same batch again answers its record.
+//   - ArchiveLevel archives the structure and completes the begun batch
+//     (deleted) in ONE transaction; a retry answers the first result.
+//   - RestoreLevelBatch refuses a batch not restorable (KindNotFound), past its
 //     window (TRASH_EXPIRED) or whose level name is taken (LEVEL_NAME_TAKEN,
-//     nothing restored); anything else that conflicts is skipped and reported.
-//   - PurgeLevelArchives drops archives filed before cutoff and marks their
-//     batches purged.
+//     nothing restored); a batch with no archive here is KindNotFound; what
+//     conflicts is skipped, reported and kept archived for a retry.
+//   - Cancel/Fail/MarkRestored/MarkPurged move the ledger and the level's
+//     status; SweepLevelDeletions unsticks dead sagas and lists expired batches.
 type LevelDeletionRepository interface {
 	PreviewLevelDeletion(ctx context.Context, levelID string) (LevelStructure, error)
+	BeginLevelDeletion(ctx context.Context, in BeginLevelDeletionInput) (domain.LevelDeletion, error)
 	ArchiveLevel(ctx context.Context, in ArchiveLevelInput) (levelarchive.Counts, domain.LevelDeletion, error)
-	RestoreLevelBatch(ctx context.Context, batchID string, now time.Time) (levelarchive.Report, error)
-	MarkLevelDeletionRestored(ctx context.Context, batchID string) (domain.LevelDeletion, error)
+	RestoreLevelBatch(ctx context.Context, batchID string) (levelarchive.Report, error)
+	MarkLevelDeletionRestored(ctx context.Context, batchID string, partial bool) (domain.LevelDeletion, error)
+	CancelLevelDeletion(ctx context.Context, batchID string) (domain.LevelDeletion, error)
+	FailLevelDeletion(ctx context.Context, batchID string, pending []string, skipped []levelarchive.Skip) (domain.LevelDeletion, error)
+	SweepLevelDeletions(ctx context.Context, stalledAfter time.Duration) ([]domain.LevelDeletion, int64, error)
+	MarkLevelDeletionPurged(ctx context.Context, batchID string) (domain.LevelDeletion, error)
+	PurgeLevelBatch(ctx context.Context, batchID string) (int64, error)
 	ListLevelDeletions(ctx context.Context) ([]domain.LevelDeletion, error)
 	GetLevelDeletion(ctx context.Context, batchID string) (domain.LevelDeletion, error)
 	PurgeLevelArchives(ctx context.Context, cutoff time.Time) (int64, error)

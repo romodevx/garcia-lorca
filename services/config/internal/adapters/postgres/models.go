@@ -25,19 +25,22 @@ func (cycleModel) TableName() string { return "cycles" }
 // levelModel is the GORM row for `levels`. enrollment_granularity is text in the
 // DDL's UPPERCASE domain (CYCLE/TERM) — see mapper.go for the casing bridge.
 type levelModel struct {
-	ID                    string    `gorm:"column:id;primaryKey"`
-	TenantID              string    `gorm:"column:tenant_id"`
-	Name                  string    `gorm:"column:name"`
-	SEPCode               string    `gorm:"column:sep_code"`
-	EnrollmentGranularity string    `gorm:"column:enrollment_granularity"`
-	AttendanceMode        string    `gorm:"column:attendance_mode"`
-	GradingEnabled        bool      `gorm:"column:grading_enabled"`
-	GradeMin              float64   `gorm:"column:grade_min"`
-	GradeMax              float64   `gorm:"column:grade_max"`
-	GradeDecimals         int       `gorm:"column:grade_decimals"`
-	GradePassing          float64   `gorm:"column:grade_passing"`
-	CreatedAt             time.Time `gorm:"column:created_at"`
-	UpdatedAt             time.Time `gorm:"column:updated_at"`
+	ID                    string  `gorm:"column:id;primaryKey"`
+	TenantID              string  `gorm:"column:tenant_id"`
+	Name                  string  `gorm:"column:name"`
+	SEPCode               string  `gorm:"column:sep_code"`
+	EnrollmentGranularity string  `gorm:"column:enrollment_granularity"`
+	AttendanceMode        string  `gorm:"column:attendance_mode"`
+	GradingEnabled        bool    `gorm:"column:grading_enabled"`
+	GradeMin              float64 `gorm:"column:grade_min"`
+	GradeMax              float64 `gorm:"column:grade_max"`
+	GradeDecimals         int     `gorm:"column:grade_decimals"`
+	GradePassing          float64 `gorm:"column:grade_passing"`
+	// Status is read-only here: only the level deletion's own statements
+	// (BeginLevelDeletion, its compensation, a restore) change it.
+	Status    string    `gorm:"column:status;->"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+	UpdatedAt time.Time `gorm:"column:updated_at"`
 }
 
 func (levelModel) TableName() string { return "levels" }

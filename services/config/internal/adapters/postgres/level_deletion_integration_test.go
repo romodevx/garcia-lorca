@@ -8,6 +8,9 @@ package postgres_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -116,10 +119,39 @@ var wantLevelCounts = levelarchive.Counts{
 
 func archiveInput(batch string) ports.ArchiveLevelInput {
 	return ports.ArchiveLevelInput{
-		BatchID: batch, LevelID: ldLevel, DeletedBy: deleter, DeletedByName: "Laura Díaz",
+		BatchID: batch, LevelID: ldLevel,
 		Summary: levelarchive.Counts{"students": 3, "enrollments": 3},
-		At:      time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC),
 	}
+}
+
+// tokenHash is a well-formed confirm-token hash, distinct per batch.
+func tokenHash(batch string) string {
+	return fmt.Sprintf("%064x", sha256.Sum256([]byte(batch)))
+}
+
+func beginInput(batch string) ports.BeginLevelDeletionInput {
+	return ports.BeginLevelDeletionInput{
+		BatchID: batch, LevelID: ldLevel, TokenHash: tokenHash(batch),
+		DeletedBy: deleter, DeletedByName: "Laura Díaz",
+	}
+}
+
+// beginAndArchive runs config's two saga steps (the first and the last).
+func beginAndArchive(t *testing.T, repo *pgadapter.Repository, batch string) (levelarchive.Counts, domain.LevelDeletion) {
+	t.Helper()
+	_, err := repo.BeginLevelDeletion(context.Background(), beginInput(batch))
+	require.NoError(t, err)
+	counts, rec, err := repo.ArchiveLevel(context.Background(), archiveInput(batch))
+	require.NoError(t, err)
+	return counts, rec
+}
+
+// levelStatus reads a level's status as the superuser.
+func levelStatus(t *testing.T, id string) string {
+	t.Helper()
+	var st string
+	require.NoError(t, superDB(t).Raw("SELECT status FROM levels WHERE id = ?", id).Scan(&st).Error)
+	return st
 }
 
 func TestLevelDeletionPreviewResolvesTheStructureAcrossCycles(t *testing.T) {
@@ -147,8 +179,7 @@ func TestLevelDeletionArchiveRestoreRoundTrip(t *testing.T) {
 	repo := pgadapter.NewRepository(appDB(t), tenantF)
 	const batch = "f0000000-0000-0000-0000-00000000b001"
 
-	counts, rec, err := repo.ArchiveLevel(ctx, archiveInput(batch))
-	require.NoError(t, err)
+	counts, rec := beginAndArchive(t, repo, batch)
 	assert.Equal(t, wantLevelCounts, counts)
 	assert.Equal(t, domain.LevelDeletionDeleted, rec.Status)
 	assert.Equal(t, "Primaria", rec.LevelName)
@@ -174,19 +205,20 @@ func TestLevelDeletionArchiveRestoreRoundTrip(t *testing.T) {
 	require.Len(t, trash, 1)
 	assert.Equal(t, batch, trash[0].BatchID)
 
-	rep, err := repo.RestoreLevelBatch(ctx, batch, rec.DeletedAt.Add(time.Hour))
+	rep, err := repo.RestoreLevelBatch(ctx, batch)
 	require.NoError(t, err)
 	assert.Equal(t, wantLevelCounts, rep.Restored)
 	assert.Empty(t, rep.Skipped)
 	assert.Equal(t, int64(1), countRows(t, "levels", "id = ? AND name = 'Primaria'", ldLevel))
+	assert.Equal(t, "active", levelStatus(t, ldLevel), "a restored level is writable again, never frozen as it was archived")
 	assert.Equal(t, int64(2), countRows(t, "term_months", "level_id = ?", ldLevel))
 	assert.Equal(t, int64(1), countRows(t, "teaching_assignments", "id = ?", ldAssign))
 
-	rep2, err := repo.RestoreLevelBatch(ctx, batch, rec.DeletedAt.Add(time.Hour))
+	rep2, err := repo.RestoreLevelBatch(ctx, batch)
 	require.NoError(t, err, "a retried restore answers its first report")
 	assert.Equal(t, rep.Restored, rep2.Restored)
 
-	done, err := repo.MarkLevelDeletionRestored(ctx, batch)
+	done, err := repo.MarkLevelDeletionRestored(ctx, batch, false)
 	require.NoError(t, err)
 	assert.Equal(t, domain.LevelDeletionRestored, done.Status)
 	trash, err = repo.ListLevelDeletions(ctx)
@@ -199,13 +231,12 @@ func TestLevelDeletionRestoreRefusesATakenName(t *testing.T) {
 	ctx := context.Background()
 	repo := pgadapter.NewRepository(appDB(t), tenantF)
 	const batch = "f0000000-0000-0000-0000-00000000b002"
-	_, rec, err := repo.ArchiveLevel(ctx, archiveInput(batch))
-	require.NoError(t, err)
+	beginAndArchive(t, repo, batch)
 
 	require.NoError(t, superDB(t).Exec(
 		"INSERT INTO levels (tenant_id, name, enrollment_granularity) VALUES (?, 'Primaria', 'CYCLE')", tenantF).Error)
 
-	_, err = repo.RestoreLevelBatch(ctx, batch, rec.DeletedAt.Add(time.Hour))
+	_, err := repo.RestoreLevelBatch(ctx, batch)
 	assert.Equal(t, domain.CodeLevelNameTaken, domain.RefusalCodeOf(err))
 	assert.Zero(t, countRows(t, "grade_levels", "id = ?", ldGrade), "a refused restore restores nothing")
 	assert.Equal(t, int64(1), countRows(t, "config_deletion_archive", "batch_id = ? AND table_name = 'levels'", batch),
@@ -217,13 +248,12 @@ func TestLevelDeletionRestoreSkipsWhatLostItsParent(t *testing.T) {
 	ctx := context.Background()
 	repo := pgadapter.NewRepository(appDB(t), tenantF)
 	const batch = "f0000000-0000-0000-0000-00000000b003"
-	_, rec, err := repo.ArchiveLevel(ctx, archiveInput(batch))
-	require.NoError(t, err)
+	beginAndArchive(t, repo, batch)
 
 	// While the level sat in the trash, the teacher left the school.
 	require.NoError(t, superDB(t).Exec("DELETE FROM teachers WHERE id = ?", ldTeacher).Error)
 
-	rep, err := repo.RestoreLevelBatch(ctx, batch, rec.DeletedAt.Add(time.Hour))
+	rep, err := repo.RestoreLevelBatch(ctx, batch)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), rep.Restored["teachingAssignments"])
 	require.Len(t, rep.Skipped, 1)
@@ -231,6 +261,17 @@ func TestLevelDeletionRestoreSkipsWhatLostItsParent(t *testing.T) {
 	assert.Equal(t, int64(1), rep.Skipped[0].Count)
 	assert.NotEmpty(t, rep.Skipped[0].Reason)
 	assert.Equal(t, int64(1), countRows(t, "groups", "id = ?", ldGroup), "the rest came back")
+
+	// Review finding 2/3: the teacher comes back; a retry finishes the batch —
+	// no LEVEL_NAME_TAKEN from its own, already restored level.
+	require.NoError(t, superDB(t).Exec(`INSERT INTO teachers (id, tenant_id, first_name, last_name, email)
+		VALUES (?, ?, 'Ana', 'Ruiz', 'ana@f.mx')`, ldTeacher, tenantF).Error)
+	again, err := repo.RestoreLevelBatch(ctx, batch)
+	require.NoError(t, err, "a retry after a partial restore converges")
+	assert.Empty(t, again.Skipped)
+	assert.Equal(t, int64(1), again.Restored["teachingAssignments"])
+	assert.Equal(t, int64(1), countRows(t, "teaching_assignments", "id = ?", ldAssign))
+	assert.Zero(t, countRows(t, "config_deletion_archive", "batch_id = ? AND table_name <> '_batch'", batch))
 }
 
 func TestLevelDeletionRestoreRefusesAnExpiredBatch(t *testing.T) {
@@ -238,10 +279,11 @@ func TestLevelDeletionRestoreRefusesAnExpiredBatch(t *testing.T) {
 	ctx := context.Background()
 	repo := pgadapter.NewRepository(appDB(t), tenantF)
 	const batch = "f0000000-0000-0000-0000-00000000b004"
-	_, rec, err := repo.ArchiveLevel(ctx, archiveInput(batch))
-	require.NoError(t, err)
+	beginAndArchive(t, repo, batch)
 
-	_, err = repo.RestoreLevelBatch(ctx, batch, rec.RestorableUntil.Add(time.Minute))
+	// The window is the database's: move it into the past there.
+	require.NoError(t, superDB(t).Exec("UPDATE level_deletions SET deleted_at = now() - interval '8 days', restorable_until = now() - interval '1 minute' WHERE batch_id = ?", batch).Error)
+	_, err := repo.RestoreLevelBatch(ctx, batch)
 	assert.Equal(t, domain.CodeTrashExpired, domain.RefusalCodeOf(err))
 }
 
@@ -250,8 +292,7 @@ func TestLevelDeletionPurgeHonoursTheRetention(t *testing.T) {
 	ctx := context.Background()
 	repo := pgadapter.NewRepository(appDB(t), tenantF)
 	const batch = "f0000000-0000-0000-0000-00000000b005"
-	_, _, err := repo.ArchiveLevel(ctx, archiveInput(batch))
-	require.NoError(t, err)
+	beginAndArchive(t, repo, batch)
 
 	purged, err := repo.PurgeLevelArchives(ctx, time.Now().Add(-levelarchive.Retention))
 	require.NoError(t, err)
@@ -275,8 +316,7 @@ func TestLevelDeletionTrashIsTenantIsolated(t *testing.T) {
 	ctx := context.Background()
 	repoF := pgadapter.NewRepository(appDB(t), tenantF)
 	const batch = "f0000000-0000-0000-0000-00000000b006"
-	_, _, err := repoF.ArchiveLevel(ctx, archiveInput(batch))
-	require.NoError(t, err)
+	beginAndArchive(t, repoF, batch)
 
 	repoB := pgadapter.NewRepository(appDB(t), tenantB)
 	trash, err := repoB.ListLevelDeletions(ctx)
@@ -284,7 +324,7 @@ func TestLevelDeletionTrashIsTenantIsolated(t *testing.T) {
 	assert.Empty(t, trash, "another school sees none of F's trash")
 	_, err = repoB.GetLevelDeletion(ctx, batch)
 	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err))
-	rep, err := repoB.RestoreLevelBatch(ctx, batch, time.Now())
+	rep, err := repoB.RestoreLevelBatch(ctx, batch)
 	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err), "B cannot restore F's batch: %+v", rep)
 	assert.Equal(t, int64(0), countRows(t, "levels", "id = ?", ldLevel), "F's level is still in F's trash")
 
@@ -296,4 +336,230 @@ func TestLevelDeletionTrashIsTenantIsolated(t *testing.T) {
 		return tx.Raw("SELECT count(*) FROM config_deletion_archive").Scan(&visible).Error
 	}))
 	assert.Zero(t, visible, "RLS hides F's archive rows from B")
+}
+
+// --- review fixes: the lock, the single-use token, the one clock --------------
+
+func TestBeginLevelDeletionLocksTheLevelOnTheDatabaseClock(t *testing.T) {
+	seedLevelDeletion(t)
+	ctx := context.Background()
+	repo := pgadapter.NewRepository(appDB(t), tenantF)
+	const batch = "f0000000-0000-0000-0000-00000000c001"
+
+	before := time.Now()
+	rec, err := repo.BeginLevelDeletion(ctx, beginInput(batch))
+	require.NoError(t, err)
+	assert.Equal(t, domain.LevelDeletionDeleting, rec.Status)
+	assert.Equal(t, "Primaria", rec.LevelName)
+	assert.WithinDuration(t, before, rec.DeletedAt, time.Minute, "deleted_at is the database's now()")
+	assert.True(t, rec.RestorableUntil.Equal(rec.DeletedAt.Add(levelarchive.Retention)))
+	assert.Equal(t, "deleting", levelStatus(t, ldLevel))
+
+	st, err := repo.PreviewLevelDeletion(ctx, ldLevel)
+	require.NoError(t, err)
+	assert.True(t, st.Deleting, "the preview says the level is being deleted")
+
+	again, err := repo.BeginLevelDeletion(ctx, beginInput(batch))
+	require.NoError(t, err, "the same batch is idempotent")
+	assert.Equal(t, rec.DeletedAt, again.DeletedAt)
+
+	_, err = repo.BeginLevelDeletion(ctx, beginInput("f0000000-0000-0000-0000-00000000c002"))
+	assert.Equal(t, domain.CodeDeletionInProgress, domain.RefusalCodeOf(err))
+	assert.Equal(t, glerrors.KindConflict, glerrors.KindOf(err))
+
+	trash, err := repo.ListLevelDeletions(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, trash, "a running saga is not in the trash yet")
+
+	_, err = repo.BeginLevelDeletion(ctx, ports.BeginLevelDeletionInput{
+		BatchID: "f0000000-0000-0000-0000-00000000c003", LevelID: "f0000000-0000-0000-0000-00000000dead",
+		TokenHash: tokenHash("x"), DeletedBy: deleter, DeletedByName: "Laura",
+	})
+	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err))
+}
+
+func TestBeginLevelDeletionConcurrentDeletesRunOneSaga(t *testing.T) {
+	seedLevelDeletion(t)
+	ctx := context.Background()
+	const racers = 8
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		won      int
+		inFlight int
+	)
+	for i := 0; i < racers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			repo := pgadapter.NewRepository(appDB(t), tenantF)
+			batch := fmt.Sprintf("f0000000-0000-0000-0000-0000000d%04d", i)
+			_, err := repo.BeginLevelDeletion(ctx, beginInput(batch))
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case err == nil:
+				won++
+			case domain.RefusalCodeOf(err) == domain.CodeDeletionInProgress:
+				inFlight++
+			default:
+				t.Errorf("racer %d: unexpected %v", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	assert.Equal(t, 1, won, "exactly one saga starts")
+	assert.Equal(t, racers-1, inFlight, "every other request is told a deletion is in progress")
+	assert.Equal(t, int64(1), countRows(t, "level_deletions", "status = 'deleting'"))
+}
+
+func TestConfirmTokenOpensOneSagaOnly(t *testing.T) {
+	seedLevelDeletion(t)
+	ctx := context.Background()
+	repo := pgadapter.NewRepository(appDB(t), tenantF)
+	const first, second = "f0000000-0000-0000-0000-00000000c011", "f0000000-0000-0000-0000-00000000c012"
+
+	_, err := repo.BeginLevelDeletion(ctx, beginInput(first))
+	require.NoError(t, err)
+	cancelled, err := repo.CancelLevelDeletion(ctx, first)
+	require.NoError(t, err)
+	assert.Equal(t, domain.LevelDeletionCancelled, cancelled.Status)
+	assert.Equal(t, "active", levelStatus(t, ldLevel), "a fully undone deletion unfreezes the level")
+
+	in := beginInput(second)
+	in.TokenHash = tokenHash(first)
+	_, err = repo.BeginLevelDeletion(ctx, in)
+	assert.Equal(t, domain.CodePreviewStale, domain.RefusalCodeOf(err), "a used token is stale")
+	assert.Equal(t, "active", levelStatus(t, ldLevel))
+}
+
+func TestArchiveLevelNeedsABegunDeletion(t *testing.T) {
+	seedLevelDeletion(t)
+	repo := pgadapter.NewRepository(appDB(t), tenantF)
+	_, _, err := repo.ArchiveLevel(context.Background(), archiveInput("f0000000-0000-0000-0000-00000000c021"))
+	assert.Error(t, err)
+	assert.Equal(t, int64(1), countRows(t, "levels", "id = ?", ldLevel), "nothing moved")
+}
+
+// Review finding 4: while the level is being deleted, nothing of its structure
+// can be written — by any path. A bystander level is untouched.
+func TestADeletingLevelRefusesStructureWrites(t *testing.T) {
+	seedLevelDeletion(t)
+	ctx := context.Background()
+	repo := pgadapter.NewRepository(appDB(t), tenantF)
+	_, err := repo.BeginLevelDeletion(ctx, beginInput("f0000000-0000-0000-0000-00000000c031"))
+	require.NoError(t, err)
+
+	writes := []struct{ name, sql string }{
+		{"grade level", `INSERT INTO grade_levels (tenant_id, level_id, name, ordinal) VALUES (@t, @l, '2°', 2)`},
+		{"subject", `INSERT INTO subjects (tenant_id, grade_level_id, name) VALUES (@t, @g, 'Español')`},
+		{"group", `INSERT INTO groups (tenant_id, cycle_id, grade_level_id, name) VALUES (@t, @c, @g, 'B')`},
+		{"term", `INSERT INTO terms (tenant_id, cycle_id, level_id, name, ordinal, starts_on, ends_on) VALUES (@t, @c, @l, 'T2', 2, '2026-12-01', '2027-02-28')`},
+		{"term month", `INSERT INTO term_months (tenant_id, term_id, cycle_id, level_id, month) VALUES (@t, @term, @c, @l, '2026-11-01')`},
+		{"teaching assignment", `UPDATE teaching_assignments SET teacher_id = teacher_id WHERE id = @a`},
+		{"event of the level", `INSERT INTO school_events (tenant_id, cycle_id, title, starts_on, ends_on, level_id) VALUES (@t, @c, 'x', '2026-10-09', '2026-10-09', @l)`},
+		{"event of a group", `INSERT INTO school_events (tenant_id, cycle_id, title, starts_on, ends_on, group_id) VALUES (@t, @c, 'x', '2026-10-09', '2026-10-09', @grp)`},
+		{"the level itself", `UPDATE levels SET name = 'Primaria 2' WHERE id = @l`},
+	}
+	args := map[string]any{"t": tenantF, "l": ldLevel, "g": ldGrade, "c": ldCycle, "term": ldTerm, "a": ldAssign, "grp": ldGroup}
+	for _, w := range writes {
+		t.Run(w.name, func(t *testing.T) {
+			err := appDB(t).Transaction(func(tx *gorm.DB) error {
+				if err := tx.Exec("SELECT set_config('app.current_tenant', ?, true)", tenantF).Error; err != nil {
+					return err
+				}
+				return tx.Exec(w.sql, args).Error
+			})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "LEVEL_BEING_DELETED")
+		})
+	}
+
+	// Through the repository the refusal is the coded conflict.
+	gl, err := domain.NewGradeLevel("f0000000-0000-0000-0000-0000000000a9", tenantF, ldLevel, "3°", 3)
+	require.NoError(t, err)
+	err = repo.CreateGradeLevel(ctx, gl)
+	assert.Equal(t, levelarchive.CodeLevelBeingDeleted, levelarchive.CodeOf(err))
+	assert.Equal(t, glerrors.KindConflict, glerrors.KindOf(err))
+
+	other, err := domain.NewGradeLevel("f0000000-0000-0000-0000-0000000000b9", tenantF, mLevel, "2°", 2)
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateGradeLevel(ctx, other), "another level is not frozen")
+}
+
+func TestFailedPartialDeletionStaysFrozenInTheTrashUntilRestored(t *testing.T) {
+	seedLevelDeletion(t)
+	ctx := context.Background()
+	repo := pgadapter.NewRepository(appDB(t), tenantF)
+	const batch = "f0000000-0000-0000-0000-00000000c041"
+	_, err := repo.BeginLevelDeletion(ctx, beginInput(batch))
+	require.NoError(t, err)
+
+	skipped := []levelarchive.Skip{{Kind: "enrollments", Count: 2, Reason: "ya inscrito en otro grupo"}}
+	rec, err := repo.FailLevelDeletion(ctx, batch, []string{"grades", "students"}, skipped)
+	require.NoError(t, err)
+	assert.Equal(t, domain.LevelDeletionFailedPartial, rec.Status)
+	assert.Equal(t, []string{"grades", "students"}, rec.PendingSteps)
+	assert.Equal(t, skipped, rec.Skipped)
+	assert.Equal(t, "deleting", levelStatus(t, ldLevel), "half a level stays frozen until it is restored")
+
+	trash, err := repo.ListLevelDeletions(ctx)
+	require.NoError(t, err)
+	require.Len(t, trash, 1, "the director sees it in the trash")
+	assert.Equal(t, domain.LevelDeletionFailedPartial, trash[0].Status)
+
+	_, err = repo.RestoreLevelBatch(ctx, batch)
+	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err), "config never archived: NotFound, the gateway knows it was pending")
+
+	done, err := repo.MarkLevelDeletionRestored(ctx, batch, true)
+	require.NoError(t, err)
+	assert.Equal(t, domain.LevelDeletionRestoredPartial, done.Status, "some rows did not fit: it stays in the trash")
+	assert.Equal(t, "active", levelStatus(t, ldLevel))
+	trash, err = repo.ListLevelDeletions(ctx)
+	require.NoError(t, err)
+	assert.Len(t, trash, 1)
+
+	done, err = repo.MarkLevelDeletionRestored(ctx, batch, false)
+	require.NoError(t, err)
+	assert.Equal(t, domain.LevelDeletionRestored, done.Status)
+}
+
+func TestSweepFindsExpiredBatchesAndUnsticksDeadSagas(t *testing.T) {
+	seedLevelDeletion(t)
+	ctx := context.Background()
+	repo := pgadapter.NewRepository(appDB(t), tenantF)
+	const expired, stuck = "f0000000-0000-0000-0000-00000000c051", "f0000000-0000-0000-0000-00000000c052"
+	beginAndArchive(t, repo, expired)
+	db := superDB(t)
+	require.NoError(t, db.Exec("UPDATE level_deletions SET deleted_at = now() - interval '8 days', restorable_until = now() - interval '1 day' WHERE batch_id = ?", expired).Error)
+
+	// A gateway died mid-saga on the bystander level an hour ago.
+	in := beginInput(stuck)
+	in.LevelID = mLevel
+	_, err := repo.BeginLevelDeletion(ctx, in)
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("UPDATE level_deletions SET deleted_at = now() - interval '1 hour', restorable_until = now() + interval '6 days' WHERE batch_id = ?", stuck).Error)
+
+	got, stalled, err := repo.SweepLevelDeletions(ctx, 30*time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), stalled)
+	require.Len(t, got, 1)
+	assert.Equal(t, expired, got[0].BatchID)
+
+	st, err := repo.GetLevelDeletion(ctx, stuck)
+	require.NoError(t, err)
+	assert.Equal(t, domain.LevelDeletionFailedPartial, st.Status, "a dead saga lands in the trash, restorable")
+	assert.ElementsMatch(t, domain.LevelDeletionSteps, st.PendingSteps)
+
+	n, err := repo.PurgeLevelBatch(ctx, expired)
+	require.NoError(t, err)
+	assert.Positive(t, n)
+	assert.Zero(t, countRows(t, "config_deletion_archive", "batch_id = ?", expired))
+	done, err := repo.MarkLevelDeletionPurged(ctx, expired)
+	require.NoError(t, err)
+	assert.Equal(t, domain.LevelDeletionPurged, done.Status)
+
+	got, _, err = repo.SweepLevelDeletions(ctx, 30*time.Minute)
+	require.NoError(t, err)
+	assert.Empty(t, got, "a purged batch is swept once")
 }
