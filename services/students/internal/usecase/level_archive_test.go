@@ -17,6 +17,7 @@ import (
 type fakeLevelArchive struct {
 	scope  levelarchive.Scope
 	batch  string
+	purged string
 	cutoff time.Time
 }
 
@@ -28,9 +29,13 @@ func (f *fakeLevelArchive) ArchiveLevel(_ context.Context, b string, s levelarch
 	f.batch, f.scope = b, s
 	return levelarchive.Counts{"enrollments": 2}, nil
 }
-func (f *fakeLevelArchive) RestoreLevelBatch(_ context.Context, b string) (levelarchive.Report, error) {
+func (f *fakeLevelArchive) RestoreLevelBatch(_ context.Context, b string) (ports.LevelRestore, error) {
 	f.batch = b
-	return levelarchive.NewReport(), nil
+	return ports.LevelRestore{Report: levelarchive.NewReport(), UnrestoredEnrollmentIDs: []string{"e1"}}, nil
+}
+func (f *fakeLevelArchive) PurgeLevelBatch(_ context.Context, b string) (int64, error) {
+	f.purged = b
+	return 5, nil
 }
 func (f *fakeLevelArchive) PurgeLevelArchives(_ context.Context, c time.Time) (int64, error) {
 	f.cutoff = c
@@ -103,4 +108,22 @@ func TestLevelArchiveServicePurgesPastTheRetention(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), n)
 	assert.Equal(t, now.Add(-7*24*time.Hour), repo.cutoff)
+}
+
+func TestLevelArchiveServicePurgesOneBatch(t *testing.T) {
+	repo := &fakeLevelArchive{}
+	svc := usecase.NewLevelArchiveService(repo, time.Now)
+	n, err := svc.PurgeLevelBatch(context.Background(), "BBBBBBBB-0000-0000-0000-000000000001")
+	require.NoError(t, err)
+	assert.Equal(t, int64(5), n)
+	assert.Equal(t, batchID, repo.purged, "canonicalized")
+	_, err = svc.PurgeLevelBatch(context.Background(), "nope")
+	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err))
+	assert.Equal(t, batchID, repo.purged, "a malformed id never reaches the repository")
+}
+
+func TestLevelArchiveServiceRestoreCarriesUnrestoredEnrollments(t *testing.T) {
+	res, err := usecase.NewLevelArchiveService(&fakeLevelArchive{}, time.Now).RestoreLevelBatch(context.Background(), batchID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"e1"}, res.UnrestoredEnrollmentIDs)
 }

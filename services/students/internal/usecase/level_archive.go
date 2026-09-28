@@ -45,13 +45,23 @@ func (s *LevelArchiveService) ArchiveLevel(ctx context.Context, batchID string, 
 	return s.repo.ArchiveLevel(ctx, batch, sc)
 }
 
-// RestoreLevelBatch puts a batch back, reporting what it skipped.
-func (s *LevelArchiveService) RestoreLevelBatch(ctx context.Context, batchID string) (levelarchive.Report, error) {
+// RestoreLevelBatch puts a batch back, reporting what it skipped and which of
+// its enrollments are still in the trash.
+func (s *LevelArchiveService) RestoreLevelBatch(ctx context.Context, batchID string) (ports.LevelRestore, error) {
 	batch, err := levelarchive.NormalizeBatchID(batchID)
 	if err != nil {
-		return levelarchive.Report{}, err
+		return ports.LevelRestore{}, err
 	}
 	return s.repo.RestoreLevelBatch(ctx, batch)
+}
+
+// PurgeLevelBatch drops one batch's archive (the gateway's retention sweep).
+func (s *LevelArchiveService) PurgeLevelBatch(ctx context.Context, batchID string) (int64, error) {
+	batch, err := levelarchive.NormalizeBatchID(batchID)
+	if err != nil {
+		return 0, err
+	}
+	return s.repo.PurgeLevelBatch(ctx, batch)
 }
 
 // PurgeLevelArchives drops the trash past levelarchive.Retention.

@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/pkg/levelarchive"
 )
 
@@ -138,10 +139,14 @@ func TestLevelDeletionArchiveKeepsPupilsAndRestoresThem(t *testing.T) {
 	require.NoError(t, err, "a retried step answers its first result")
 	assert.Equal(t, counts, again)
 
-	rep, err := repo.RestoreLevelBatch(ctx, batch)
+	res, err := repo.RestoreLevelBatch(ctx, batch)
 	require.NoError(t, err)
+	rep := res.Report
 	assert.Equal(t, wantPeopleCounts, rep.Restored)
 	assert.Empty(t, rep.Skipped)
+	assert.Empty(t, res.UnrestoredEnrollmentIDs)
+	assert.Zero(t, countL(t, "students_deletion_archive", "batch_id = ? AND table_name <> '_batch'", batch),
+		"everything went back, the pupils' snapshot included")
 	a = levelOf(t, ldStuA)
 	require.NotNil(t, a.LevelID)
 	assert.Equal(t, ldLevel, *a.LevelID)
@@ -152,7 +157,7 @@ func TestLevelDeletionArchiveKeepsPupilsAndRestoresThem(t *testing.T) {
 
 	rep2, err := repo.RestoreLevelBatch(ctx, batch)
 	require.NoError(t, err, "a retried restore answers its first report")
-	assert.Equal(t, rep.Restored, rep2.Restored)
+	assert.Equal(t, rep.Restored, rep2.Report.Restored)
 }
 
 func TestLevelDeletionRestoreKeepsWhatChangedMeanwhile(t *testing.T) {
@@ -169,8 +174,11 @@ func TestLevelDeletionRestoreKeepsWhatChangedMeanwhile(t *testing.T) {
 	require.NoError(t, superDB.Exec(`INSERT INTO enrollments (tenant_id, student_id, cycle_id, group_id) VALUES (?, ?, ?, ?)`,
 		tenantL, ldStuB, ldCycle, ldOther).Error)
 
-	rep, err := repo.RestoreLevelBatch(ctx, batch)
+	res, err := repo.RestoreLevelBatch(ctx, batch)
 	require.NoError(t, err)
+	rep := res.Report
+	assert.Equal(t, []string{ldEnrB}, res.UnrestoredEnrollmentIDs,
+		"grades and attendance must keep Beto's enrollment's rows archived")
 	assert.Equal(t, int64(1), rep.Restored["students"])
 	assert.Equal(t, int64(1), rep.Restored["enrollments"])
 	skipped := map[string]int64{}
@@ -181,6 +189,47 @@ func TestLevelDeletionRestoreKeepsWhatChangedMeanwhile(t *testing.T) {
 	assert.Equal(t, map[string]int64{"students": 1, "enrollments": 1}, skipped)
 	assert.Equal(t, "Secundaria", levelOf(t, ldStuA).LevelName, "the new level wins")
 	assert.Equal(t, int64(1), countL(t, "enrollments", "student_id = ? AND group_id = ?", ldStuB, ldOther), "the new enrollment wins")
+	assert.Equal(t, int64(1), countL(t, "students_deletion_archive", "batch_id = ? AND table_name = 'enrollments'", batch),
+		"the skipped enrollment stays in the trash")
+
+	// The pupils' snapshot is final ("keep the new value"): a retry never
+	// re-applies it, even to a pupil whose level was cleared again since.
+	require.NoError(t, superDB.Exec("UPDATE students SET level_id = NULL, level_name = '' WHERE id = ?", ldStuA).Error)
+	again, err := repo.RestoreLevelBatch(ctx, batch)
+	require.NoError(t, err)
+	assert.Nil(t, levelOf(t, ldStuA).LevelID, "the snapshot was consumed by the first restore")
+	assert.Equal(t, []string{ldEnrB}, again.UnrestoredEnrollmentIDs)
+
+	// Once the clash is gone, the retry brings Beto's enrollment back.
+	require.NoError(t, superDB.Exec("DELETE FROM enrollments WHERE student_id = ? AND group_id = ?", ldStuB, ldOther).Error)
+	last, err := repo.RestoreLevelBatch(ctx, batch)
+	require.NoError(t, err)
+	assert.Empty(t, last.UnrestoredEnrollmentIDs)
+	assert.Equal(t, int64(1), countL(t, "enrollments", "id = ?", ldEnrB))
+	assert.Zero(t, countL(t, "students_deletion_archive", "batch_id = ? AND table_name <> '_batch'", batch))
+}
+
+func TestLevelDeletionPurgeBatchTouchesOnlyThatBatch(t *testing.T) {
+	seedLevelPeople(t)
+	ctx := context.Background()
+	repo := appRepo(t, tenantL)
+	const doomed, kept = "e0000000-0000-0000-0000-00000000b006", "e0000000-0000-0000-0000-00000000b007"
+	_, err := repo.ArchiveLevel(ctx, doomed, ldScope())
+	require.NoError(t, err)
+	_, err = repo.ArchiveLevel(ctx, kept, levelarchive.Scope{LevelID: ldNewLvl, GroupIDs: []string{ldOther}})
+	require.NoError(t, err)
+
+	n, err := repo.PurgeLevelBatch(ctx, doomed)
+	require.NoError(t, err)
+	assert.Positive(t, n)
+	assert.Zero(t, countL(t, "students_deletion_archive", "batch_id = ?", doomed))
+	assert.Positive(t, countL(t, "students_deletion_archive", "batch_id = ?", kept))
+
+	_, err = repo.RestoreLevelBatch(ctx, doomed)
+	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err), "a purged batch is NotFound, never an empty success")
+	n, err = repo.PurgeLevelBatch(ctx, doomed)
+	require.NoError(t, err)
+	assert.Zero(t, n, "purging twice is harmless")
 }
 
 func TestLevelDeletionPurgeHonoursTheRetention(t *testing.T) {
@@ -211,9 +260,8 @@ func TestLevelDeletionTrashIsTenantIsolated(t *testing.T) {
 	require.NoError(t, err)
 
 	repoB := appRepo(t, tenantB)
-	rep, err := repoB.RestoreLevelBatch(ctx, batch)
-	require.NoError(t, err)
-	assert.Empty(t, rep.Restored, "B cannot restore L's batch: to B it does not exist")
+	_, err = repoB.RestoreLevelBatch(ctx, batch)
+	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err), "B cannot restore L's batch: to B it does not exist")
 	assert.Nil(t, levelOf(t, ldStuA).LevelID, "L's pupil is still cleared")
 
 	counts, err := repoB.ArchiveLevel(ctx, "e0000000-0000-0000-0000-00000000b005", levelarchive.Scope{LevelID: ldNewLvl, GroupIDs: []string{ldOther}})

@@ -275,12 +275,24 @@ type LevelPeople struct {
 //     transfers) and clears the level of its pupils, in ONE transaction; a
 //     retry of the same batch answers the first counts.
 //   - RestoreLevelBatch puts them back; a pupil given another level meanwhile
-//     keeps it, and an enrollment that now conflicts is skipped — both
-//     reported. An unknown batch restores nothing.
+//     keeps it (the pupils' snapshot is consumed: final), and an enrollment
+//     that now conflicts is skipped and STAYS archived — reported, and named
+//     in UnrestoredEnrollmentIDs so grades and attendance keep its rows
+//     archived too. A retry tries what is still archived. A batch with no
+//     archive here is levelarchive.ErrBatchNotFound.
+//   - PurgeLevelBatch drops one batch's archive (the gateway's sweep).
 //   - PurgeLevelArchives drops archives filed before cutoff.
 type LevelArchiveRepository interface {
 	PreviewLevelDeletion(ctx context.Context, scope levelarchive.Scope) (LevelPeople, error)
 	ArchiveLevel(ctx context.Context, batchID string, scope levelarchive.Scope) (levelarchive.Counts, error)
-	RestoreLevelBatch(ctx context.Context, batchID string) (levelarchive.Report, error)
+	RestoreLevelBatch(ctx context.Context, batchID string) (LevelRestore, error)
+	PurgeLevelBatch(ctx context.Context, batchID string) (int64, error)
 	PurgeLevelArchives(ctx context.Context, cutoff time.Time) (int64, error)
+}
+
+// LevelRestore is what students' restore did: the report, and the batch's
+// enrollments still in the trash after it (they conflicted).
+type LevelRestore struct {
+	Report                  levelarchive.Report
+	UnrestoredEnrollmentIDs []string
 }

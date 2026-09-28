@@ -16,7 +16,11 @@ import (
 	"github.com/garcia-lorca/services/students/internal/usecase"
 )
 
-type stubLevelArchive struct{ scope levelarchive.Scope }
+type stubLevelArchive struct {
+	scope  levelarchive.Scope
+	purged string
+	missed bool
+}
 
 func (s *stubLevelArchive) PreviewLevelDeletion(_ context.Context, sc levelarchive.Scope) (ports.LevelPeople, error) {
 	s.scope = sc
@@ -30,10 +34,17 @@ func (s *stubLevelArchive) ArchiveLevel(_ context.Context, _ string, sc levelarc
 	s.scope = sc
 	return levelarchive.Counts{"students": 2, "enrollments": 1}, nil
 }
-func (s *stubLevelArchive) RestoreLevelBatch(context.Context, string) (levelarchive.Report, error) {
+func (s *stubLevelArchive) RestoreLevelBatch(context.Context, string) (ports.LevelRestore, error) {
+	if s.missed {
+		return ports.LevelRestore{}, levelarchive.ErrBatchNotFound
+	}
 	rep := levelarchive.NewReport()
 	rep.Record("students", 1, 1, "el alumno ya tiene otro nivel")
-	return rep, nil
+	return ports.LevelRestore{Report: rep, UnrestoredEnrollmentIDs: []string{haGroup}}, nil
+}
+func (s *stubLevelArchive) PurgeLevelBatch(_ context.Context, b string) (int64, error) {
+	s.purged = b
+	return 6, nil
 }
 func (s *stubLevelArchive) PurgeLevelArchives(context.Context, time.Time) (int64, error) {
 	return 4, nil
@@ -73,6 +84,12 @@ func TestLevelArchiveRPCsMapTheWire(t *testing.T) {
 	require.Len(t, rest.Msg.GetSkipped(), 1)
 	assert.Equal(t, "el alumno ya tiene otro nivel", rest.Msg.GetSkipped()[0].GetReason())
 	assert.Equal(t, int64(1), rest.Msg.GetRestored()[0].GetCount())
+	assert.Equal(t, []string{haGroup}, rest.Msg.GetUnrestoredEnrollmentIds())
+
+	one, err := h.PurgeLevelBatch(ctx, connect.NewRequest(&studentsv1.PurgeLevelBatchRequest{BatchId: haBatch}))
+	require.NoError(t, err)
+	assert.Equal(t, int64(6), one.Msg.GetPurgedRows())
+	assert.Equal(t, haBatch, stub.purged)
 
 	purge, err := h.PurgeLevelArchives(ctx, connect.NewRequest(&studentsv1.PurgeLevelArchivesRequest{}))
 	require.NoError(t, err)
@@ -110,4 +127,10 @@ func TestLevelArchiveRPCsWithoutTheServiceAreUnimplemented(t *testing.T) {
 	h := grpcadapter.NewStudentsHandler(nil, nil, nil, usecase.NewHealthService("students"))
 	_, err := h.PurgeLevelArchives(context.Background(), connect.NewRequest(&studentsv1.PurgeLevelArchivesRequest{}))
 	assert.Equal(t, connect.CodeUnimplemented, connect.CodeOf(err))
+}
+
+func TestLevelArchiveRestoreOfAMissingBatchIsNotFound(t *testing.T) {
+	h := newLevelArchiveHandler(&stubLevelArchive{missed: true})
+	_, err := h.RestoreLevelBatch(context.Background(), connect.NewRequest(&studentsv1.RestoreLevelBatchRequest{BatchId: haBatch}))
+	assert.Equal(t, connect.CodeNotFound, connect.CodeOf(err), "never a silent success")
 }

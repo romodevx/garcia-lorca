@@ -116,17 +116,47 @@ func archivePeople(tx *gorm.DB, batchID string, scope levelarchive.Scope) (level
 }
 
 // RestoreLevelBatch puts the batch back: pupils' level first, then their
-// enrollments, then the enrollments' transfer history.
-func (r *Repository) RestoreLevelBatch(ctx context.Context, batchID string) (levelarchive.Report, error) {
-	var rep levelarchive.Report
+// enrollments, then the enrollments' transfer history. It answers, from the
+// same transaction, the batch's enrollments still archived afterwards.
+func (r *Repository) RestoreLevelBatch(ctx context.Context, batchID string) (ports.LevelRestore, error) {
+	var out ports.LevelRestore
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var err error
-		rep, err = levelTrash.RestoreBatch(tx, batchID, func(tx *gorm.DB) (levelarchive.Report, error) {
+		out.Report, err = levelTrash.RestoreBatch(tx, batchID, func(tx *gorm.DB) (levelarchive.Report, error) {
 			return restorePeople(tx, batchID)
 		})
+		if err != nil {
+			return err
+		}
+		out.UnrestoredEnrollmentIDs, err = unrestoredEnrollments(tx, batchID)
 		return err
 	})
-	return rep, err
+	return out, err
+}
+
+// unrestoredEnrollments lists the ids of the batch's enrollments still in the
+// trash, in id order.
+func unrestoredEnrollments(tx *gorm.DB, batchID string) ([]string, error) {
+	ids := []string{}
+	err := tx.Raw(`SELECT a."row"->>'id' FROM `+levelTrash.Table()+
+		` a WHERE a.batch_id = ? AND a.table_name = 'enrollments' ORDER BY 1`, batchID).Scan(&ids).Error
+	if err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "listing the enrollments still in the trash", err)
+	}
+	return ids, nil
+}
+
+// PurgeLevelBatch drops one batch's archive, marker included.
+func (r *Repository) PurgeLevelBatch(ctx context.Context, batchID string) (int64, error) {
+	var n int64
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var err error
+		if n, err = levelTrash.PurgeBatch(tx, batchID); err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "purging a batch of the trash", err)
+		}
+		return nil
+	})
+	return n, err
 }
 
 func restorePeople(tx *gorm.DB, batchID string) (levelarchive.Report, error) {
@@ -147,6 +177,11 @@ func restorePeople(tx *gorm.DB, batchID string) (levelarchive.Report, error) {
 		return rep, glerrors.Wrap(glerrors.KindInternal, "restoring the pupils' level", res.Error)
 	}
 	rep.Record(kindStudents, res.RowsAffected, filed-res.RowsAffected, reasonNewLevel)
+	// The snapshot is consumed: a pupil given a level meanwhile keeps it for
+	// good, and a retry must neither re-apply it nor count it as pending.
+	if err := levelTrash.Clear(tx, batchID, studentLevelSnapshot); err != nil {
+		return rep, glerrors.Wrap(glerrors.KindInternal, "consuming the pupils' level", err)
+	}
 
 	restored, skipped, err := levelTrash.Reinsert(tx, batchID, "enrollments",
 		gormarchive.Parent{Column: "student_id", Table: "students"})

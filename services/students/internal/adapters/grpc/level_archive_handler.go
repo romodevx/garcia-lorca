@@ -51,17 +51,31 @@ func (h *StudentsHandler) RestoreLevelBatch(ctx context.Context, req *connect.Re
 	if h.levels == nil {
 		return nil, errLevelArchiveNotServed
 	}
-	rep, err := h.levels.RestoreLevelBatch(ctx, req.Msg.GetBatchId())
+	res, err := h.levels.RestoreLevelBatch(ctx, req.Msg.GetBatchId())
 	if err != nil {
 		return nil, connectErr(err)
 	}
+	rep := res.Report
 	skipped := make([]*studentsv1.LevelRestoreSkip, 0, len(rep.Skipped))
 	for _, s := range rep.Skipped {
 		skipped = append(skipped, &studentsv1.LevelRestoreSkip{Kind: s.Kind, Count: s.Count, Reason: s.Reason})
 	}
 	return connect.NewResponse(&studentsv1.RestoreLevelBatchResponse{
 		Restored: toProtoLevelCounts(rep.Restored), Skipped: skipped,
+		UnrestoredEnrollmentIds: res.UnrestoredEnrollmentIDs,
 	}), nil
+}
+
+// PurgeLevelBatch drops one batch's archive (the gateway's retention sweep).
+func (h *StudentsHandler) PurgeLevelBatch(ctx context.Context, req *connect.Request[studentsv1.PurgeLevelBatchRequest]) (*connect.Response[studentsv1.PurgeLevelBatchResponse], error) {
+	if h.levels == nil {
+		return nil, errLevelArchiveNotServed
+	}
+	n, err := h.levels.PurgeLevelBatch(ctx, req.Msg.GetBatchId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.PurgeLevelBatchResponse{PurgedRows: n}), nil
 }
 
 func (h *StudentsHandler) PurgeLevelArchives(ctx context.Context, _ *connect.Request[studentsv1.PurgeLevelArchivesRequest]) (*connect.Response[studentsv1.PurgeLevelArchivesResponse], error) {
