@@ -2,6 +2,7 @@ package grpcadapter_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 
 	studentsv1 "github.com/garcia-lorca/gen/go/garcialorca/students/v1"
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/levelarchive"
 	grpcadapter "github.com/garcia-lorca/services/students/internal/adapters/grpc"
 	"github.com/garcia-lorca/services/students/internal/domain"
 	"github.com/garcia-lorca/services/students/internal/ports"
@@ -127,6 +129,7 @@ type fakeCatalogValidator struct {
 	gradeGroups []ports.GroupSeats
 	groups      map[string]ports.GroupRef
 	terms       map[string]ports.TermRef
+	deleting    bool // the pupils' level is being deleted (ADR 0021)
 }
 
 func (c *fakeCatalogValidator) GroupByID(_ context.Context, id string) (ports.GroupRef, error) {
@@ -153,6 +156,13 @@ func enrollmentHandler(t *testing.T) (*grpcadapter.StudentsHandler, string) {
 // enrollmentHandlerWith is enrollmentHandler over a given enrollment repo.
 func enrollmentHandlerWith(t *testing.T, enrollments *fakeEnrollmentRepo) (*grpcadapter.StudentsHandler, string) {
 	t.Helper()
+	return enrollmentHandlerOver(t, enrollments, false)
+}
+
+// enrollmentHandlerOver is enrollmentHandlerWith with the pupils' level being
+// deleted or not.
+func enrollmentHandlerOver(t *testing.T, enrollments *fakeEnrollmentRepo, deleting bool) (*grpcadapter.StudentsHandler, string) {
+	t.Helper()
 	studentRepo := newFakeRepo()
 	student := seedApplicant(t, studentRepo)
 	catalog := &fakeCatalogValidator{
@@ -160,7 +170,8 @@ func enrollmentHandlerWith(t *testing.T, enrollments *fakeEnrollmentRepo) (*grpc
 			enrollGroup: {ID: enrollGroup, CycleID: enrollCycle},
 			otherGroup:  {ID: otherGroup, CycleID: enrollCycle},
 		},
-		terms: map[string]ports.TermRef{},
+		terms:    map[string]ports.TermRef{},
+		deleting: deleting,
 	}
 	ids := 0
 	newID := func() string { ids++; return "enr-1" }
@@ -354,6 +365,9 @@ func (f *fakeEnrollmentRepo) CreateEnrollmentInFirstFreeGroup(
 
 // LevelOfGrade places every grade in the level the handler tests' pupils are in.
 func (f *fakeCatalogValidator) LevelOfGrade(_ context.Context, _ string) (string, error) {
+	if f.deleting {
+		return "", levelarchive.LevelBeingDeleted()
+	}
 	return "e1000000-0000-0000-0000-000000000001", nil
 }
 
@@ -446,5 +460,23 @@ func TestListTransfersIntoGroup(t *testing.T) {
 		if _, err := h.ListTransfers(context.Background(), connect.NewRequest(req)); connect.CodeOf(err) != connect.CodeInvalidArgument {
 			t.Errorf("%s: code = %v, want InvalidArgument", name, connect.CodeOf(err))
 		}
+	}
+}
+
+// A placement into a level being deleted is a 409 the gateway forwards with
+// its machine code, so the screen can say so without parsing Spanish.
+func TestEnrollIntoALevelBeingDeletedCarriesItsCode(t *testing.T) {
+	h, studentID := enrollmentHandlerOver(t, newFakeEnrollmentRepo(), true)
+	_, err := h.Enroll(context.Background(), connect.NewRequest(&studentsv1.EnrollRequest{StudentId: studentID, GroupId: enrollGroup}))
+	assertCode(t, err, connect.CodeAlreadyExists)
+	var ce *connect.Error
+	if !errors.As(err, &ce) {
+		t.Fatalf("not a connect error: %v", err)
+	}
+	if got := ce.Meta().Get("X-Error-Code"); got != levelarchive.CodeLevelBeingDeleted {
+		t.Errorf("X-Error-Code = %q, want %s", got, levelarchive.CodeLevelBeingDeleted)
+	}
+	if ce.Message() != "Este nivel se está eliminando" {
+		t.Errorf("message = %q", ce.Message())
 	}
 }
