@@ -157,6 +157,29 @@ service ConfigService {
   // keeping the assignment id. NotFound if the assignment does not exist;
   // InvalidArgument if the teacher does not.
   rpc ReassignTeachingAssignment(ReassignTeachingAssignmentRequest) returns (ReassignTeachingAssignmentResponse);
+
+  // --- level deletion (ADR 0021) ---
+  // PreviewLevelDeletion resolves a level's structure across ALL cycles (the
+  // ids the other services need) and counts what config would archive.
+  rpc PreviewLevelDeletion(PreviewLevelDeletionRequest) returns (PreviewLevelDeletionResponse);
+  // ArchiveLevel moves the level and its structure into config's deletion
+  // archive and records the batch in level_deletions, in ONE transaction. It is
+  // the saga's LAST step. Idempotent per batch_id.
+  rpc ArchiveLevel(ArchiveLevelRequest) returns (ArchiveLevelResponse);
+  // RestoreLevelBatch puts the structure back (the saga's FIRST restore step).
+  // A level whose name is taken now is refused whole: AlreadyExists with
+  // X-Error-Code LEVEL_NAME_TAKEN, nothing restored.
+  rpc RestoreLevelBatch(RestoreLevelBatchRequest) returns (RestoreLevelBatchResponse);
+  // MarkLevelDeletionRestored closes a batch once every service restored it.
+  rpc MarkLevelDeletionRestored(MarkLevelDeletionRestoredRequest) returns (MarkLevelDeletionRestoredResponse);
+  // ListLevelDeletions lists the trash: batches still deleted (not restored,
+  // not purged), newest first.
+  rpc ListLevelDeletions(ListLevelDeletionsRequest) returns (ListLevelDeletionsResponse);
+  // GetLevelDeletion fetches one batch. NotFound if unknown.
+  rpc GetLevelDeletion(GetLevelDeletionRequest) returns (GetLevelDeletionResponse);
+  // PurgeLevelArchives hard-deletes archives past the 7-day retention and marks
+  // their batches purged.
+  rpc PurgeLevelArchives(PurgeLevelArchivesRequest) returns (PurgeLevelArchivesResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -849,4 +872,100 @@ message SetSchoolProfileRequest {
 
 message SetSchoolProfileResponse {
   SchoolProfile profile = 1;
+}
+
+// --- level deletion (ADR 0021) ---------------------------------------------
+
+// LevelArchiveCount is how many rows of one kind a level deletion touches.
+message LevelArchiveCount {
+  string kind = 1;
+  int64 count = 2;
+}
+
+// LevelRestoreSkip is rows of one kind a restore could not put back, and why.
+message LevelRestoreSkip {
+  string kind = 1;
+  int64 count = 2;
+  string reason = 3;
+}
+
+// LevelDeletion is one batch in the trash. status is deleted | restored |
+// purged; restorable_until is deleted_at + 7 days.
+message LevelDeletion {
+  string batch_id = 1;
+  string level_id = 2;
+  string level_name = 3;
+  repeated LevelArchiveCount counts = 4;
+  string deleted_by = 5;
+  string deleted_by_name = 6;
+  google.protobuf.Timestamp deleted_at = 7;
+  google.protobuf.Timestamp restorable_until = 8;
+  string status = 9;
+}
+
+message PreviewLevelDeletionRequest {
+  string level_id = 1;
+}
+
+message PreviewLevelDeletionResponse {
+  string level_id = 1;
+  string level_name = 2;
+  repeated LevelArchiveCount counts = 3;
+  repeated string grade_level_ids = 4;
+  repeated string group_ids = 5;
+  repeated string subject_ids = 6;
+  repeated string term_ids = 7;
+}
+
+message ArchiveLevelRequest {
+  string batch_id = 1;
+  string level_id = 2;
+  // deleted_by / deleted_by_name are the verified principal (never the body).
+  string deleted_by = 3;
+  string deleted_by_name = 4;
+  // summary is what the other services archived; config adds its own counts
+  // and records the total in level_deletions.
+  repeated LevelArchiveCount summary = 5;
+}
+
+message ArchiveLevelResponse {
+  repeated LevelArchiveCount counts = 1;
+  LevelDeletion deletion = 2;
+}
+
+message RestoreLevelBatchRequest {
+  string batch_id = 1;
+}
+
+message RestoreLevelBatchResponse {
+  repeated LevelArchiveCount restored = 1;
+  repeated LevelRestoreSkip skipped = 2;
+}
+
+message MarkLevelDeletionRestoredRequest {
+  string batch_id = 1;
+}
+
+message MarkLevelDeletionRestoredResponse {
+  LevelDeletion deletion = 1;
+}
+
+message ListLevelDeletionsRequest {}
+
+message ListLevelDeletionsResponse {
+  repeated LevelDeletion deletions = 1;
+}
+
+message GetLevelDeletionRequest {
+  string batch_id = 1;
+}
+
+message GetLevelDeletionResponse {
+  LevelDeletion deletion = 1;
+}
+
+message PurgeLevelArchivesRequest {}
+
+message PurgeLevelArchivesResponse {
+  int64 purged_rows = 1;
 }

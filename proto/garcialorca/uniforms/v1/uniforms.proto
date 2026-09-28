@@ -99,6 +99,25 @@ service UniformsService {
 
   rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
   rpc UpdateSettings(UpdateSettingsRequest) returns (UpdateSettingsResponse);
+
+  // --- level deletion (ADR 0021) ---
+  // PreviewLevelDeletion counts what deleting a level would archive in this
+  // service, without changing anything. The scope comes from config (structure
+  // ids) and students (enrollment/student ids); each service uses the ids it
+  // owns data for.
+  rpc PreviewLevelDeletion(PreviewLevelDeletionRequest) returns (PreviewLevelDeletionResponse);
+  // ArchiveLevel moves this service's rows of the level into its deletion
+  // archive (a JSONB copy, then DELETE) inside ONE tenant-bound transaction.
+  // Idempotent per batch_id: a repeated call answers the first call's counts.
+  rpc ArchiveLevel(ArchiveLevelRequest) returns (ArchiveLevelResponse);
+  // RestoreLevelBatch puts a batch back in dependency order inside ONE
+  // transaction, skipping rows that now conflict and reporting them.
+  // Idempotent: an unknown batch restores nothing, a restored one answers the
+  // first report.
+  rpc RestoreLevelBatch(RestoreLevelBatchRequest) returns (RestoreLevelBatchResponse);
+  // PurgeLevelArchives hard-deletes archives past the 7-day retention. The
+  // retention is fixed server-side: no caller can purge fresh trash.
+  rpc PurgeLevelArchives(PurgeLevelArchivesRequest) returns (PurgeLevelArchivesResponse);
 }
 
 message HealthRequest {}
@@ -649,4 +668,65 @@ message UniformFulfillmentExpired {
   string tenant_id = 4;
   string folio = 5;
   google.protobuf.Timestamp expired_at = 6;
+}
+
+// --- level deletion (ADR 0021) ---------------------------------------------
+
+// LevelScope is everything a level deletion reaches, resolved by the gateway
+// from config (structure) and students (people). Every id is a uuid; a service
+// reads only the fields it owns data for.
+message LevelScope {
+  string level_id = 1;
+  repeated string grade_level_ids = 2;
+  repeated string group_ids = 3;
+  repeated string subject_ids = 4;
+  repeated string term_ids = 5;
+  repeated string enrollment_ids = 6;
+  repeated string student_ids = 7;
+}
+
+// LevelArchiveCount is how many rows of one kind a level deletion touches.
+message LevelArchiveCount {
+  string kind = 1;
+  int64 count = 2;
+}
+
+// LevelRestoreSkip is rows of one kind a restore could not put back, and why.
+message LevelRestoreSkip {
+  string kind = 1;
+  int64 count = 2;
+  string reason = 3;
+}
+
+message PreviewLevelDeletionRequest {
+  LevelScope scope = 1;
+}
+
+message PreviewLevelDeletionResponse {
+  repeated LevelArchiveCount counts = 1;
+}
+
+message ArchiveLevelRequest {
+  // batch_id is the saga's idempotency key (a uuid minted by the gateway).
+  string batch_id = 1;
+  LevelScope scope = 2;
+}
+
+message ArchiveLevelResponse {
+  repeated LevelArchiveCount counts = 1;
+}
+
+message RestoreLevelBatchRequest {
+  string batch_id = 1;
+}
+
+message RestoreLevelBatchResponse {
+  repeated LevelArchiveCount restored = 1;
+  repeated LevelRestoreSkip skipped = 2;
+}
+
+message PurgeLevelArchivesRequest {}
+
+message PurgeLevelArchivesResponse {
+  int64 purged_rows = 1;
 }

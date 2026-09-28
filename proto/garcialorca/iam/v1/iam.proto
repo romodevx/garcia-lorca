@@ -132,6 +132,13 @@ service IamService {
   // SetRolePermissions replaces a role's full permission set (not an additive
   // merge). Callers send the desired final list.
   rpc SetRolePermissions(SetRolePermissionsRequest) returns (SetRolePermissionsResponse);
+
+  // VerifyPassword re-checks the principal's password for a destructive action
+  // (ADR 0021), the SAME way sign-in checks it in the active auth mode: the
+  // local bcrypt hash in password mode, Identity Platform's signInWithPassword
+  // when the provider owns credentials. A wrong password is Unauthenticated.
+  // The subject comes from the verified access token, never the request.
+  rpc VerifyPassword(VerifyPasswordRequest) returns (VerifyPasswordResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -482,3 +489,12 @@ message CycleRolled {
   string new_cycle_id = 1;
   string tenant_id = 2;
 }
+
+// --- re-authentication (ADR 0021) --------------------------------------------
+
+message VerifyPasswordRequest {
+  string access_token = 1;
+  string password = 2;
+}
+
+message VerifyPasswordResponse {}
