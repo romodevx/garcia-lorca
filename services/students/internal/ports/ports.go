@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/services/students/internal/domain"
 )
 
@@ -255,4 +256,31 @@ type CardRepository interface {
 	EverIssued(ctx context.Context, studentID string) (bool, error)
 	// FindCard returns the card carrying a token, active or not, or KindNotFound.
 	FindCard(ctx context.Context, token string) (domain.CardToken, error)
+}
+
+// LevelPeople is what deleting a level reaches in students (ADR 0021): the
+// pupils placed in it (kept, with the level cleared), the enrollments in its
+// groups (archived) and the counts by kind.
+type LevelPeople struct {
+	Counts        levelarchive.Counts
+	StudentIDs    []string
+	EnrollmentIDs []string
+}
+
+// LevelArchiveRepository moves students' part of a level into the trash and
+// back (ADR 0021).
+//
+//   - PreviewLevelDeletion changes nothing.
+//   - ArchiveLevel archives the enrollments in the scope's groups (and their
+//     transfers) and clears the level of its pupils, in ONE transaction; a
+//     retry of the same batch answers the first counts.
+//   - RestoreLevelBatch puts them back; a pupil given another level meanwhile
+//     keeps it, and an enrollment that now conflicts is skipped — both
+//     reported. An unknown batch restores nothing.
+//   - PurgeLevelArchives drops archives filed before cutoff.
+type LevelArchiveRepository interface {
+	PreviewLevelDeletion(ctx context.Context, scope levelarchive.Scope) (LevelPeople, error)
+	ArchiveLevel(ctx context.Context, batchID string, scope levelarchive.Scope) (levelarchive.Counts, error)
+	RestoreLevelBatch(ctx context.Context, batchID string) (levelarchive.Report, error)
+	PurgeLevelArchives(ctx context.Context, cutoff time.Time) (int64, error)
 }

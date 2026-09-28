@@ -34,6 +34,7 @@ import (
 	"github.com/garcia-lorca/pkg/dbdsn"
 	"github.com/garcia-lorca/pkg/dbpool"
 	"github.com/garcia-lorca/pkg/gcpauth"
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/pkg/logger"
 	"golang.org/x/sync/errgroup"
 
@@ -252,7 +253,13 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	notes := usecase.NewNoteService(repo, repo, tenantID, newID, time.Now)
 	// The virtual card's codes: 128 bits from the operating system's source.
 	cards := usecase.NewCardService(repo, repo, tenantID, newID, cardRandom, time.Now)
-	handler := grpcadapter.NewStudentsHandler(svc, enroll, guardians, health).WithNotes(notes).WithCards(cards)
+	// Students' step of a level deletion (ADR 0021), and the hourly sweep that
+	// drops its trash past the 7-day retention. The sweep runs on the process's
+	// own context, detached from any request.
+	levels := usecase.NewLevelArchiveService(repo, time.Now)
+	levelarchive.StartPurger(context.WithoutCancel(ctx), levels.PurgeLevelArchives, log)
+	handler := grpcadapter.NewStudentsHandler(svc, enroll, guardians, health).
+		WithNotes(notes).WithCards(cards).WithLevelArchive(levels)
 
 	mux := http.NewServeMux()
 	path, h := studentsv1connect.NewStudentsServiceHandler(handler, connect.WithRecover(recoverFn))

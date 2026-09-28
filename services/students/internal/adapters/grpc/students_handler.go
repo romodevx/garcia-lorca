@@ -31,6 +31,7 @@ type StudentsHandler struct {
 	health   *usecase.HealthService
 	notes    *usecase.NoteService
 	cards    *usecase.CardService
+	levels   *usecase.LevelArchiveService
 }
 
 // NewStudentsHandler wires the handler to the student, enrollment, guardian, and
