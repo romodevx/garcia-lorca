@@ -26,6 +26,7 @@ import (
 	"github.com/garcia-lorca/gen/go/garcialorca/config/v1/configv1connect"
 	"github.com/garcia-lorca/pkg/dbdsn"
 	"github.com/garcia-lorca/pkg/dbpool"
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/pkg/logger"
 	grpcadapter "github.com/garcia-lorca/services/config/internal/adapters/grpc"
 	pgadapter "github.com/garcia-lorca/services/config/internal/adapters/postgres"
@@ -71,7 +72,7 @@ func main() {
 
 // buildMux is the composition root: config → adapters → use case → Connect
 // handler, returning the mounted routes.
-func buildMux(_ *slog.Logger) (*http.ServeMux, error) {
+func buildMux(log *slog.Logger) (*http.ServeMux, error) {
 	// M04 is single-tenant: the tenant is fixed here (not derived from the
 	// caller), so RLS binds this one tenant for every request. When multi-tenant
 	// lands, the gateway must forward the authenticated principal's TenantID and
@@ -86,7 +87,11 @@ func buildMux(_ *slog.Logger) (*http.ServeMux, error) {
 	repo := pgadapter.NewRepository(db, tenantID)
 	catalog := usecase.NewCatalogService(repo, tenantID, func() string { return uuid.NewString() })
 	health := usecase.NewHealthService(serviceName)
-	handler := grpcadapter.NewConfigHandler(catalog, health)
+	// The level trash (ADR 0021) and its hourly retention sweep, on the
+	// process's own context: the sweep outlives every request.
+	trash := usecase.NewLevelDeletionService(repo, time.Now)
+	levelarchive.StartPurger(context.Background(), trash.PurgeLevelArchives, log)
+	handler := grpcadapter.NewConfigHandler(catalog, health).WithLevelDeletion(trash)
 
 	mux := http.NewServeMux()
 	path, h := configv1connect.NewConfigServiceHandler(handler, connect.WithRecover(recoverFn))

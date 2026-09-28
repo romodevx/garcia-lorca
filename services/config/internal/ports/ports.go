@@ -2,7 +2,9 @@ package ports
 
 import (
 	"context"
+	"time"
 
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/services/config/internal/domain"
 )
 
@@ -216,4 +218,49 @@ type TeachingLoadWrite struct {
 type LevelPatch struct {
 	AttendanceMode *domain.AttendanceMode
 	Grading        *domain.GradingScale
+}
+
+// LevelStructure is a level's whole structure across every cycle, as deleting
+// it would reach it (ADR 0021): the ids the other services need, and config's
+// own counts by kind.
+type LevelStructure struct {
+	LevelID       string
+	LevelName     string
+	GradeLevelIDs []string
+	GroupIDs      []string
+	SubjectIDs    []string
+	TermIDs       []string
+	Counts        levelarchive.Counts
+}
+
+// ArchiveLevelInput is one saga's config step: the batch, the level, who
+// deleted it, what the other services archived (Summary) and when.
+type ArchiveLevelInput struct {
+	BatchID       string
+	LevelID       string
+	DeletedBy     string
+	DeletedByName string
+	Summary       levelarchive.Counts
+	At            time.Time
+}
+
+// LevelDeletionRepository moves a level's structure into config's trash and
+// back, and keeps the trash's ledger (level_deletions).
+//
+//   - PreviewLevelDeletion changes nothing; KindNotFound for an unknown level.
+//   - ArchiveLevel archives and records the batch in ONE transaction; a retry of
+//     the same batch answers the first result. KindNotFound for an unknown level.
+//   - RestoreLevelBatch refuses a batch not in the trash (KindNotFound), past its
+//     window (TRASH_EXPIRED) or whose level name is taken (LEVEL_NAME_TAKEN,
+//     nothing restored); anything else that conflicts is skipped and reported.
+//   - PurgeLevelArchives drops archives filed before cutoff and marks their
+//     batches purged.
+type LevelDeletionRepository interface {
+	PreviewLevelDeletion(ctx context.Context, levelID string) (LevelStructure, error)
+	ArchiveLevel(ctx context.Context, in ArchiveLevelInput) (levelarchive.Counts, domain.LevelDeletion, error)
+	RestoreLevelBatch(ctx context.Context, batchID string, now time.Time) (levelarchive.Report, error)
+	MarkLevelDeletionRestored(ctx context.Context, batchID string) (domain.LevelDeletion, error)
+	ListLevelDeletions(ctx context.Context) ([]domain.LevelDeletion, error)
+	GetLevelDeletion(ctx context.Context, batchID string) (domain.LevelDeletion, error)
+	PurgeLevelArchives(ctx context.Context, cutoff time.Time) (int64, error)
 }

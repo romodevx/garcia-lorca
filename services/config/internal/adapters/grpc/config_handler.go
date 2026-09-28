@@ -26,6 +26,14 @@ var _ configv1connect.ConfigServiceHandler = (*ConfigHandler)(nil)
 type ConfigHandler struct {
 	catalog *usecase.CatalogService
 	health  *usecase.HealthService
+	trash   *usecase.LevelDeletionService
+}
+
+// WithLevelDeletion wires the level trash (ADR 0021). The composition root
+// always wires it.
+func (h *ConfigHandler) WithLevelDeletion(trash *usecase.LevelDeletionService) *ConfigHandler {
+	h.trash = trash
+	return h
 }
 
 // NewConfigHandler wires the handler to the catalog + health use cases.
