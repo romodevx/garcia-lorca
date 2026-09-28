@@ -17,6 +17,7 @@ import (
 	financev1 "github.com/garcia-lorca/gen/go/garcialorca/finance/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/finance/v1/financev1connect"
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/services/finance/internal/domain"
 	"github.com/garcia-lorca/services/finance/internal/ports"
 	"github.com/garcia-lorca/services/finance/internal/usecase"
@@ -552,6 +553,18 @@ func toProtoPayment(p domain.Payment) *financev1.Payment {
 // the error straight to connect.NewError shipped Postgres constraint names and
 // SQLSTATEs — and on some constraints the conflicting value — to whoever called.
 func connectErr(err error) *connect.Error {
+	ce := connectErrForKind(err)
+	if code := levelarchive.CodeOf(err); code != "" {
+		ce.Meta().Set(errorCodeMeta, code)
+	}
+	return ce
+}
+
+// errorCodeMeta is the error-metadata key a refusal's machine code rides in
+// (e.g. LEVEL_BEING_DELETED); the gateway forwards it as X-Error-Code.
+const errorCodeMeta = "X-Error-Code"
+
+func connectErrForKind(err error) *connect.Error {
 	safe := errors.New(glerrors.SafeMessage(err))
 
 	switch glerrors.KindOf(err) {

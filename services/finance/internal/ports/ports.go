@@ -135,6 +135,9 @@ type ChargeSettledEvent struct {
 type LevelRef struct {
 	ID   string
 	Name string
+	// Deleting is true while the level's deletion runs (ADR 0021): a tuition
+	// plan of it is refused with LEVEL_BEING_DELETED.
+	Deleting bool
 }
 
 // GroupLevel maps a group of a cycle to the level it belongs to. It is the join

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/pkg/schoolcal"
 	"github.com/garcia-lorca/services/finance/internal/domain"
 	"github.com/garcia-lorca/services/finance/internal/ports"
@@ -105,6 +106,9 @@ func (s *FinanceService) UpsertTuitionPlan(ctx context.Context, in TuitionPlanIn
 	if err := s.requireCycle(ctx, in.CycleID); err != nil {
 		return domain.TuitionPlan{}, err
 	}
+	if err := s.refuseDeletingLevel(ctx, in.LevelID); err != nil {
+		return domain.TuitionPlan{}, err
+	}
 	plan, err := domain.NewTuitionPlan(domain.TuitionPlanSpec{
 		ID: s.newID(), TenantID: s.tenantID, CycleID: in.CycleID, LevelID: in.LevelID,
 		EnrollmentCents: in.EnrollmentCents, MonthlyCents: in.MonthlyCents,
@@ -121,6 +125,23 @@ func (s *FinanceService) UpsertTuitionPlan(ctx context.Context, in TuitionPlanIn
 		return domain.TuitionPlan{}, err
 	}
 	return s.repo.UpsertTuitionPlan(ctx, plan)
+}
+
+// refuseDeletingLevel refuses a plan for a level whose deletion runs
+// (LEVEL_BEING_DELETED, ADR 0021). It reads config's level list — the one
+// level lookup finance makes; a level the list does not name is left to the
+// plan's own validation, as before.
+func (s *FinanceService) refuseDeletingLevel(ctx context.Context, levelID string) error {
+	levels, err := s.catalog.ListLevels(ctx)
+	if err != nil {
+		return err
+	}
+	for _, l := range levels {
+		if l.ID == levelID && l.Deleting {
+			return levelarchive.LevelBeingDeleted()
+		}
+	}
+	return nil
 }
 
 // ListTuitionPlans returns the tuition table of a cycle.

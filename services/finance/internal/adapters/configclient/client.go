@@ -70,7 +70,10 @@ func (c *Client) ListLevels(ctx context.Context) ([]ports.LevelRef, error) {
 	}
 	out := make([]ports.LevelRef, 0, len(res.Msg.GetLevels()))
 	for _, l := range res.Msg.GetLevels() {
-		out = append(out, ports.LevelRef{ID: l.GetId(), Name: l.GetName()})
+		out = append(out, ports.LevelRef{
+			ID: l.GetId(), Name: l.GetName(),
+			Deleting: l.GetStatus() == configv1.LevelStatus_LEVEL_STATUS_DELETING,
+		})
 	}
 	return out, nil
 }
