@@ -1,6 +1,7 @@
 package handler_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -53,4 +54,24 @@ func TestDeletionTokensFromAnotherKeyAreRefused(t *testing.T) {
 	b := handler.NewDeletionTokens([]byte("fedcba9876543210fedcba9876543210"), now)
 	tok, _ := a.Issue("t1", "lvl-1", client.LevelCounts{"groups": 1})
 	assert.False(t, b.Verify(tok, "t1", "lvl-1", client.LevelCounts{"groups": 1}))
+}
+
+// Review finding 5: a token opens one saga. Two previews of the same data in
+// the same second must still be two tokens, or a used token would stale an
+// honest new preview (config stores the hash and refuses a reuse).
+func TestDeletionTokensAreUniquePerPreview(t *testing.T) {
+	now := func() time.Time { return time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC) }
+	tokens := handler.NewDeletionTokens([]byte("0123456789abcdef0123456789abcdef"), now)
+	counts := client.LevelCounts{"groups": 1}
+	a, _ := tokens.Issue("t1", "lvl-1", counts)
+	b, _ := tokens.Issue("t1", "lvl-1", counts)
+	assert.NotEqual(t, a, b)
+	assert.True(t, tokens.Verify(a, "t1", "lvl-1", counts))
+	assert.True(t, tokens.Verify(b, "t1", "lvl-1", counts))
+	assert.Regexp(t, `^[0-9a-f]{64}$`, handler.TokenHash(a))
+	assert.NotEqual(t, handler.TokenHash(a), handler.TokenHash(b))
+
+	stamp, rest, _ := strings.Cut(a, ".")
+	_, sig, _ := strings.Cut(rest, ".")
+	assert.False(t, tokens.Verify(stamp+".AAAAAAAAAAAAAAAAAAAAAA."+sig, "t1", "lvl-1", counts), "the nonce is signed")
 }

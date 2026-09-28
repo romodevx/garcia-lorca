@@ -20,12 +20,41 @@ import (
 type stubLevelConfig struct {
 	configv1connect.UnimplementedConfigServiceHandler
 	gotSummary map[string]int64
+	gotBegin   *configv1.BeginLevelDeletionRequest
+	gotFail    *configv1.FailLevelDeletionRequest
+	gotPartial bool
+}
+
+func (s *stubLevelConfig) BeginLevelDeletion(_ context.Context, req *connect.Request[configv1.BeginLevelDeletionRequest]) (*connect.Response[configv1.BeginLevelDeletionResponse], error) {
+	s.gotBegin = req.Msg
+	return connect.NewResponse(&configv1.BeginLevelDeletionResponse{Deletion: &configv1.LevelDeletion{BatchId: req.Msg.GetBatchId(), Status: "deleting"}}), nil
+}
+
+func (s *stubLevelConfig) FailLevelDeletion(_ context.Context, req *connect.Request[configv1.FailLevelDeletionRequest]) (*connect.Response[configv1.FailLevelDeletionResponse], error) {
+	s.gotFail = req.Msg
+	return connect.NewResponse(&configv1.FailLevelDeletionResponse{Deletion: &configv1.LevelDeletion{
+		BatchId: req.Msg.GetBatchId(), Status: "failed_partial", PendingSteps: req.Msg.GetPendingSteps(), Skipped: req.Msg.GetSkipped(),
+	}}), nil
+}
+
+func (s *stubLevelConfig) MarkLevelDeletionRestored(_ context.Context, req *connect.Request[configv1.MarkLevelDeletionRestoredRequest]) (*connect.Response[configv1.MarkLevelDeletionRestoredResponse], error) {
+	s.gotPartial = req.Msg.GetPartial()
+	return connect.NewResponse(&configv1.MarkLevelDeletionRestoredResponse{Deletion: &configv1.LevelDeletion{Status: "restored_partial"}}), nil
+}
+
+func (s *stubLevelConfig) SweepLevelDeletions(context.Context, *connect.Request[configv1.SweepLevelDeletionsRequest]) (*connect.Response[configv1.SweepLevelDeletionsResponse], error) {
+	return connect.NewResponse(&configv1.SweepLevelDeletionsResponse{Expired: []*configv1.LevelDeletion{{BatchId: "old"}}, Stalled: 1}), nil
+}
+
+func (s *stubLevelConfig) PurgeLevelBatch(_ context.Context, req *connect.Request[configv1.PurgeLevelBatchRequest]) (*connect.Response[configv1.PurgeLevelBatchResponse], error) {
+	return connect.NewResponse(&configv1.PurgeLevelBatchResponse{PurgedRows: 4}), nil
 }
 
 func (s *stubLevelConfig) PreviewLevelDeletion(_ context.Context, req *connect.Request[configv1.PreviewLevelDeletionRequest]) (*connect.Response[configv1.PreviewLevelDeletionResponse], error) {
 	return connect.NewResponse(&configv1.PreviewLevelDeletionResponse{
 		LevelId: req.Msg.GetLevelId(), LevelName: "Primaria", GroupIds: []string{"g1"}, TermIds: []string{"t1"},
-		Counts: []*configv1.LevelArchiveCount{{Kind: "groups", Count: 1}, {Kind: "terms", Count: 2}},
+		LevelStatus: configv1.LevelStatus_LEVEL_STATUS_DELETING,
+		Counts:      []*configv1.LevelArchiveCount{{Kind: "groups", Count: 1}, {Kind: "terms", Count: 2}},
 	}), nil
 }
 
@@ -47,6 +76,10 @@ func (s *stubLevelConfig) RestoreLevelBatch(context.Context, *connect.Request[co
 type stubLevelStudents struct {
 	studentsv1connect.UnimplementedStudentsServiceHandler
 	gotScope *studentsv1.LevelScope
+}
+
+func (s *stubLevelStudents) RestoreLevelBatch(context.Context, *connect.Request[studentsv1.RestoreLevelBatchRequest]) (*connect.Response[studentsv1.RestoreLevelBatchResponse], error) {
+	return connect.NewResponse(&studentsv1.RestoreLevelBatchResponse{UnrestoredEnrollmentIds: []string{"e9"}}), nil
 }
 
 func (s *stubLevelStudents) PreviewLevelDeletion(_ context.Context, req *connect.Request[studentsv1.PreviewLevelDeletionRequest]) (*connect.Response[studentsv1.PreviewLevelDeletionResponse], error) {
@@ -99,4 +132,45 @@ func TestLevelDeletionWireRoundTrip(t *testing.T) {
 	assert.Equal(t, int64(1), rep.Restored["groups"])
 	require.Len(t, rep.Skipped, 1)
 	assert.Equal(t, "docente ya no existe", rep.Skipped[0].Reason)
+}
+
+// Review fixes: the lock, the single-use token, the ledger, the restore's
+// enrollments hand-off and the sweep cross the wire whole.
+func TestLevelDeletionSagaLedgerWire(t *testing.T) {
+	ctx := context.Background()
+	cfgStub := &stubLevelConfig{}
+	cfg := client.NewConfigClient(serve(t)(configv1connect.NewConfigServiceHandler(cfgStub)), nil)
+	stu := client.NewStudentsClient(serve(t)(studentsv1connect.NewStudentsServiceHandler(&stubLevelStudents{})), nil)
+
+	st, err := cfg.PreviewLevelDeletion(ctx, "lvl-1")
+	require.NoError(t, err)
+	assert.True(t, st.Deleting)
+
+	rec, err := cfg.BeginLevelDeletion(ctx, client.BeginLevelDeletionRecord{BatchID: "b1", LevelID: "lvl-1", TokenHash: "h", DeletedBy: "u", DeletedByName: "Laura"})
+	require.NoError(t, err)
+	assert.Equal(t, "deleting", rec.Status)
+	assert.Equal(t, "h", cfgStub.gotBegin.GetTokenHash())
+	assert.Equal(t, "Laura", cfgStub.gotBegin.GetDeletedByName())
+
+	failed, err := cfg.FailLevelDeletion(ctx, "b1", []string{"grades"}, []client.LevelRestoreSkip{{Kind: "enrollments", Count: 2, Reason: "r"}})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"grades"}, failed.PendingSteps)
+	require.Len(t, failed.Skipped, 1)
+	assert.Equal(t, int64(2), failed.Skipped[0].Count)
+
+	_, err = cfg.MarkLevelDeletionRestored(ctx, "b1", true)
+	require.NoError(t, err)
+	assert.True(t, cfgStub.gotPartial)
+
+	expired, stalled, err := cfg.SweepLevelDeletions(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), stalled)
+	require.Len(t, expired, 1)
+	n, err := cfg.PurgeLevelBatch(ctx, "old")
+	require.NoError(t, err)
+	assert.Equal(t, int64(4), n)
+
+	rep, err := stu.RestoreLevelBatch(ctx, "b1")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"e9"}, rep.Unrestored, "grades and attendance get these as skip ids")
 }

@@ -40,19 +40,39 @@ type fakeLevelConfig struct {
 	log          *sagaLog
 	structure    client.LevelStructure
 	previewErr   error
+	beginErr     error
+	begun        client.BeginLevelDeletionRecord
 	archiveErr   error
 	restoreErr   error
 	summary      client.LevelCounts
-	archivedBy   string
-	archivedName string
 	deletion     client.LevelDeletion
 	getErr       error
 	levels       []client.LevelResult
 	marked       bool
+	markedPart   bool
+	cancelled    bool
+	failed       bool
+	failPending  []string
+	failSkipped  []client.LevelRestoreSkip
+	failErr      error
+	sweeps       int
+	expired      []client.LevelDeletion
+	purgedMarked []string
+	restoreSkips []client.LevelRestoreSkip
 }
 
 func (f *fakeLevelConfig) PreviewLevelDeletion(context.Context, string) (client.LevelStructure, error) {
 	return f.structure, f.previewErr
+}
+
+func (f *fakeLevelConfig) BeginLevelDeletion(_ context.Context, in client.BeginLevelDeletionRecord) (client.LevelDeletion, error) {
+	f.log.add("begin:config")
+	f.begun = in
+	if f.beginErr != nil {
+		return client.LevelDeletion{}, f.beginErr
+	}
+	return client.LevelDeletion{BatchID: in.BatchID, LevelID: in.LevelID, Status: "deleting",
+		DeletedAt: delNow, RestorableUntil: delNow.Add(7 * 24 * time.Hour)}, nil
 }
 
 func (f *fakeLevelConfig) ArchiveLevel(_ context.Context, in client.ArchiveLevelRecord) (client.LevelCounts, client.LevelDeletion, error) {
@@ -60,7 +80,7 @@ func (f *fakeLevelConfig) ArchiveLevel(_ context.Context, in client.ArchiveLevel
 	if f.archiveErr != nil {
 		return nil, client.LevelDeletion{}, f.archiveErr
 	}
-	f.summary, f.archivedBy, f.archivedName = in.Summary, in.DeletedBy, in.DeletedByName
+	f.summary = in.Summary
 	total := client.LevelCounts{}
 	total.Add(in.Summary)
 	total.Add(f.structure.Counts)
@@ -70,18 +90,45 @@ func (f *fakeLevelConfig) ArchiveLevel(_ context.Context, in client.ArchiveLevel
 	}, nil
 }
 
-func (f *fakeLevelConfig) RestoreLevelBatch(context.Context, string) (client.LevelRestoreReport, error) {
-	f.log.add("restore:config")
+func (f *fakeLevelConfig) RestoreLevelBatch(ctx context.Context, _ string) (client.LevelRestoreReport, error) {
+	f.log.add("restore:config" + ctxMark(ctx))
 	if f.restoreErr != nil {
 		return client.LevelRestoreReport{}, f.restoreErr
 	}
-	return client.LevelRestoreReport{Restored: client.LevelCounts{"levels": 1, "groups": 2}}, nil
+	return client.LevelRestoreReport{Restored: client.LevelCounts{"levels": 1, "groups": 2}, Skipped: f.restoreSkips}, nil
 }
 
-func (f *fakeLevelConfig) MarkLevelDeletionRestored(context.Context, string) (client.LevelDeletion, error) {
+func (f *fakeLevelConfig) MarkLevelDeletionRestored(_ context.Context, _ string, partial bool) (client.LevelDeletion, error) {
 	f.log.add("mark:config")
-	f.marked = true
+	f.marked, f.markedPart = true, partial
 	return client.LevelDeletion{Status: "restored"}, nil
+}
+
+func (f *fakeLevelConfig) CancelLevelDeletion(context.Context, string) (client.LevelDeletion, error) {
+	f.log.add("cancel:config")
+	f.cancelled = true
+	return client.LevelDeletion{Status: "cancelled"}, nil
+}
+
+func (f *fakeLevelConfig) FailLevelDeletion(_ context.Context, _ string, pending []string, skipped []client.LevelRestoreSkip) (client.LevelDeletion, error) {
+	f.log.add("fail:config")
+	f.failed, f.failPending, f.failSkipped = true, pending, skipped
+	return client.LevelDeletion{Status: "failed_partial"}, f.failErr
+}
+
+func (f *fakeLevelConfig) SweepLevelDeletions(context.Context) ([]client.LevelDeletion, int64, error) {
+	f.sweeps++
+	return f.expired, 0, nil
+}
+
+func (f *fakeLevelConfig) MarkLevelDeletionPurged(_ context.Context, batchID string) (client.LevelDeletion, error) {
+	f.purgedMarked = append(f.purgedMarked, batchID)
+	return client.LevelDeletion{BatchID: batchID, Status: "purged"}, nil
+}
+
+func (f *fakeLevelConfig) PurgeLevelBatch(_ context.Context, batchID string) (int64, error) {
+	f.log.add("purge:config:" + batchID)
+	return 1, nil
 }
 
 func (f *fakeLevelConfig) ListLevelDeletions(context.Context) ([]client.LevelDeletion, error) {
@@ -96,6 +143,15 @@ func (f *fakeLevelConfig) ListLevels(context.Context) ([]client.LevelResult, err
 	return f.levels, nil
 }
 
+// ctxMark tags a call made on a dead context, so a test can prove the
+// compensation never runs on the expired saga context.
+func ctxMark(ctx context.Context) string {
+	if ctx.Err() != nil {
+		return "(dead ctx)"
+	}
+	return ""
+}
+
 // fakeLevelPeople is students' side.
 type fakeLevelPeople struct {
 	log        *sagaLog
@@ -103,6 +159,7 @@ type fakeLevelPeople struct {
 	archiveErr error
 	restoreErr error
 	skipped    []client.LevelRestoreSkip
+	unrestored []string
 	scope      client.LevelScope
 }
 
@@ -116,9 +173,14 @@ func (f *fakeLevelPeople) ArchiveLevel(context.Context, string, client.LevelScop
 	return f.preview.Counts, f.archiveErr
 }
 
-func (f *fakeLevelPeople) RestoreLevelBatch(context.Context, string) (client.LevelRestoreReport, error) {
-	f.log.add("restore:students")
-	return client.LevelRestoreReport{Restored: client.LevelCounts{"students": 1}, Skipped: f.skipped}, f.restoreErr
+func (f *fakeLevelPeople) RestoreLevelBatch(ctx context.Context, _ string) (client.LevelRestoreReport, error) {
+	f.log.add("restore:students" + ctxMark(ctx))
+	return client.LevelRestoreReport{Restored: client.LevelCounts{"students": 1}, Skipped: f.skipped, Unrestored: f.unrestored}, f.restoreErr
+}
+
+func (f *fakeLevelPeople) PurgeLevelBatch(_ context.Context, batchID string) (int64, error) {
+	f.log.add("purge:students:" + batchID)
+	return 1, nil
 }
 
 // fakeLevelData is one of grades/attendance/finance/uniforms.
@@ -127,7 +189,11 @@ type fakeLevelData struct {
 	log        *sagaLog
 	counts     client.LevelCounts
 	archiveErr error
+	blockUntil bool // ArchiveLevel waits for its context to end (a hung service)
 	restoreErr error
+	skipped    []client.LevelRestoreSkip
+	skipIDs    []string
+	purgeErr   error
 	scope      client.LevelScope
 }
 
@@ -136,15 +202,25 @@ func (f *fakeLevelData) PreviewLevelDeletion(_ context.Context, s client.LevelSc
 	return f.counts, nil
 }
 
-func (f *fakeLevelData) ArchiveLevel(_ context.Context, _ string, s client.LevelScope) (client.LevelCounts, error) {
+func (f *fakeLevelData) ArchiveLevel(ctx context.Context, _ string, s client.LevelScope) (client.LevelCounts, error) {
 	f.log.add("archive:" + f.name)
 	f.scope = s
+	if f.blockUntil {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	return f.counts, f.archiveErr
 }
 
-func (f *fakeLevelData) RestoreLevelBatch(context.Context, string) (client.LevelRestoreReport, error) {
-	f.log.add("restore:" + f.name)
-	return client.LevelRestoreReport{Restored: client.LevelCounts{}}, f.restoreErr
+func (f *fakeLevelData) RestoreLevelBatch(ctx context.Context, _ string, skip []string) (client.LevelRestoreReport, error) {
+	f.log.add("restore:" + f.name + ctxMark(ctx))
+	f.skipIDs = skip
+	return client.LevelRestoreReport{Restored: client.LevelCounts{}, Skipped: f.skipped}, f.restoreErr
+}
+
+func (f *fakeLevelData) PurgeLevelBatch(_ context.Context, batchID string) (int64, error) {
+	f.log.add("purge:" + f.name + ":" + batchID)
+	return 1, f.purgeErr
 }
 
 type fakePasswords struct {
@@ -166,16 +242,31 @@ func (deleterNamer) GetUser(context.Context, string) (client.User, error) {
 }
 
 type levelDeletionRig struct {
-	log        *sagaLog
-	cfg        *fakeLevelConfig
-	people     *fakeLevelPeople
-	grades     *fakeLevelData
-	attendance *fakeLevelData
-	finance    *fakeLevelData
-	uniforms   *fakeLevelData
-	passwords  *fakePasswords
-	now        time.Time
-	h          *handler.LevelDeletionHandler
+	log         *sagaLog
+	cfg         *fakeLevelConfig
+	people      *fakeLevelPeople
+	grades      *fakeLevelData
+	attendance  *fakeLevelData
+	finance     *fakeLevelData
+	uniforms    *fakeLevelData
+	passwords   *fakePasswords
+	now         time.Time
+	sagaTimeout time.Duration
+	h           *handler.LevelDeletionHandler
+}
+
+// rebuild re-wires the handler after a test changed the rig's knobs.
+func (rig *levelDeletionRig) rebuild() {
+	rig.h = handler.NewLevelDeletionHandler(handler.LevelDeletionDeps{
+		Config: rig.cfg, Students: rig.people,
+		Grades: rig.grades, Attendance: rig.attendance, Finance: rig.finance, Uniforms: rig.uniforms,
+		Passwords: rig.passwords, Users: deleterNamer{},
+		Tokens:      handler.NewDeletionTokens([]byte("0123456789abcdef0123456789abcdef"), func() time.Time { return rig.now }),
+		Now:         func() time.Time { return rig.now },
+		NewID:       func() string { return delBatch },
+		Log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		SagaTimeout: rig.sagaTimeout,
+	})
 }
 
 func newLevelDeletionRig(withData bool) *levelDeletionRig {
@@ -208,15 +299,7 @@ func newLevelDeletionRig(withData bool) *levelDeletionRig {
 	rig.finance = &fakeLevelData{name: "finance", log: log, counts: client.LevelCounts{"tuitionPlans": 1, "charges": 20, "payments": 12}}
 	rig.uniforms = &fakeLevelData{name: "uniforms", log: log, counts: client.LevelCounts{"uniformItems": 3}}
 	rig.passwords = &fakePasswords{}
-	rig.h = handler.NewLevelDeletionHandler(handler.LevelDeletionDeps{
-		Config: rig.cfg, Students: rig.people,
-		Grades: rig.grades, Attendance: rig.attendance, Finance: rig.finance, Uniforms: rig.uniforms,
-		Passwords: rig.passwords, Users: deleterNamer{},
-		Tokens: handler.NewDeletionTokens([]byte("0123456789abcdef0123456789abcdef"), func() time.Time { return rig.now }),
-		Now:    func() time.Time { return rig.now },
-		NewID:  func() string { return delBatch },
-		Log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
-	})
+	rig.rebuild()
 	return rig
 }
 
@@ -363,17 +446,21 @@ func TestLevelDeletionPasswordIsCheckedWithTheCallersOwnToken(t *testing.T) {
 
 func TestLevelDeletionRunsTheSagaInOrder(t *testing.T) {
 	rig := newLevelDeletionRig(true)
-	w := rig.delete(t, deleteBody(rig.preview(t).Token, "Primaria", "pw"))
+	token := rig.preview(t).Token
+	w := rig.delete(t, deleteBody(token, "Primaria", "pw"))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, handler.TokenHash(token), rig.cfg.begun.TokenHash, "config marks the token used")
 
 	assert.Equal(t, []string{
+		"begin:config",
 		"archive:grades", "archive:attendance", "archive:finance", "archive:uniforms", "archive:students", "archive:config",
-	}, rig.log.calls, "dependents first, the structure (and the level) last")
+	}, rig.log.calls, "the lock first; then dependents first, the structure (and the level) last")
 	assert.Equal(t, int64(40), rig.cfg.summary["monthlyGrades"], "config records what the others archived")
 	assert.Equal(t, int64(2), rig.cfg.summary["students"])
 	assert.NotContains(t, rig.cfg.summary, "charges", "kept money is not a deletion count")
-	assert.Equal(t, "Laura Díaz", rig.cfg.archivedName)
-	assert.Equal(t, "cccccccc-0000-0000-0000-0000000000c1", rig.cfg.archivedBy)
+	assert.Equal(t, "Laura Díaz", rig.cfg.begun.DeletedByName)
+	assert.Equal(t, "cccccccc-0000-0000-0000-0000000000c1", rig.cfg.begun.DeletedBy)
+	assert.Equal(t, delLevel, rig.cfg.begun.LevelID)
 
 	var body struct {
 		BatchID         string           `json:"batchId"`
@@ -394,18 +481,22 @@ func TestLevelDeletionCompensatesAMidSagaFailure(t *testing.T) {
 		wants []string
 	}{
 		{"students fails", func(rig *levelDeletionRig) { rig.people.archiveErr = errors.New("boom") }, []string{
+			"begin:config",
 			"archive:grades", "archive:attendance", "archive:finance", "archive:uniforms", "archive:students",
 			"restore:students", "restore:uniforms", "restore:finance", "restore:attendance", "restore:grades",
+			"cancel:config",
 		}},
 		{"config fails last", func(rig *levelDeletionRig) {
 			rig.cfg.archiveErr = errors.New("boom")
 			rig.cfg.restoreErr = connect.NewError(connect.CodeNotFound, errors.New("no such batch"))
 		}, []string{
+			"begin:config",
 			"archive:grades", "archive:attendance", "archive:finance", "archive:uniforms", "archive:students", "archive:config",
-			"restore:config", "mark:config", "restore:students", "restore:uniforms", "restore:finance", "restore:attendance", "restore:grades",
+			"restore:config", "restore:students", "restore:uniforms", "restore:finance", "restore:attendance", "restore:grades",
+			"cancel:config",
 		}},
 		{"the first step fails", func(rig *levelDeletionRig) { rig.grades.archiveErr = errors.New("boom") }, []string{
-			"archive:grades", "restore:grades",
+			"begin:config", "archive:grades", "restore:grades", "cancel:config",
 		}},
 	}
 	for _, tc := range cases {
@@ -416,19 +507,91 @@ func TestLevelDeletionCompensatesAMidSagaFailure(t *testing.T) {
 			w := rig.delete(t, deleteBody(token, "Primaria", "pw"))
 			assert.Equal(t, http.StatusInternalServerError, w.Code)
 			assert.Contains(t, w.Body.String(), "no se borró nada")
-			assert.Equal(t, tc.wants, rig.log.calls, "every step that ran (or may have) is put back, newest first")
+			assert.Equal(t, tc.wants, rig.log.calls, "every step that ran (or may have) is put back, newest first, then the lock is released")
+			assert.False(t, rig.cfg.failed)
 		})
 	}
 }
 
-func TestLevelDeletionSaysSoWhenTheCompensationFailsToo(t *testing.T) {
+// Review finding 1: when the compensation fails too, the batch is recorded as
+// failed_partial (the trash lists it, Restaurar recovers it), the answer names
+// the folio, and it never claims nothing was deleted.
+func TestLevelDeletionRecordsAFailedCompensation(t *testing.T) {
 	rig := newLevelDeletionRig(true)
 	token := rig.preview(t).Token
 	rig.people.archiveErr = errors.New("boom")
 	rig.finance.restoreErr = errors.New("still down")
+	rig.grades.skipped = []client.LevelRestoreSkip{{Kind: "monthlyGrades", Count: 2, Reason: "ya existe otra captura"}}
 	w := rig.delete(t, deleteBody(token, "Primaria", "pw"))
+
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), delBatch, "support gets the batch to finish the restore by hand")
+	assert.Equal(t, "DELETION_INCOMPLETE", w.Header().Get("X-Error-Code"))
+	assert.Contains(t, w.Body.String(), delBatch, "the folio")
+	assert.NotContains(t, w.Body.String(), "no se borró nada")
+	assert.True(t, rig.cfg.failed)
+	assert.False(t, rig.cfg.cancelled)
+	assert.ElementsMatch(t, []string{"finance", "grades"}, rig.cfg.failPending,
+		"the step that could not restore, and the one whose skipped rows stay archived")
+	assert.Equal(t, rig.grades.skipped, rig.cfg.failSkipped, "the skipped rows are recorded with the batch")
+}
+
+// Review finding 1: a saga that ran out of time is compensated on a fresh,
+// detached context — never the expired one.
+func TestLevelDeletionCompensatesOnADetachedContext(t *testing.T) {
+	rig := newLevelDeletionRig(true)
+	token := rig.preview(t).Token
+	rig.uniforms.blockUntil = true
+	rig.sagaTimeout = 20 * time.Millisecond
+	rig.rebuild()
+	w := rig.delete(t, deleteBody(token, "Primaria", "pw"))
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Contains(t, w.Body.String(), "no se borró nada")
+	for _, c := range rig.log.calls {
+		assert.NotContains(t, c, "dead ctx", "compensation must not run on the expired saga context")
+	}
+	assert.Contains(t, rig.log.calls, "restore:uniforms", "the step that timed out is undone too")
+	assert.True(t, rig.cfg.cancelled)
+}
+
+// Review finding 5: a double click. The second request finds the level
+// being deleted and never starts a second saga.
+func TestLevelDeletionRefusesASecondDeletionWhileOneRuns(t *testing.T) {
+	t.Run("seen in the preview", func(t *testing.T) {
+		rig := newLevelDeletionRig(true)
+		token := rig.preview(t).Token
+		rig.cfg.structure.Deleting = true
+		w := rig.delete(t, deleteBody(token, "Primaria", "pw"))
+		assert.Equal(t, http.StatusConflict, w.Code)
+		assert.Equal(t, "DELETION_IN_PROGRESS", w.Header().Get("X-Error-Code"))
+		assert.Contains(t, w.Body.String(), "Papelera")
+		assert.Empty(t, rig.log.calls, "no lock taken, nothing archived")
+		assert.Zero(t, rig.passwords.calls, "not even the password is asked")
+	})
+	t.Run("lost the race for the lock", func(t *testing.T) {
+		rig := newLevelDeletionRig(true)
+		token := rig.preview(t).Token
+		rig.cfg.beginErr = codedConnectErr(connect.CodeAlreadyExists, "DELETION_IN_PROGRESS", "Ya se está eliminando este nivel")
+		w := rig.delete(t, deleteBody(token, "Primaria", "pw"))
+		assert.Equal(t, http.StatusConflict, w.Code)
+		assert.Equal(t, "DELETION_IN_PROGRESS", w.Header().Get("X-Error-Code"))
+		assert.Equal(t, []string{"begin:config"}, rig.log.calls, "no step ran")
+	})
+	t.Run("the token was already used", func(t *testing.T) {
+		rig := newLevelDeletionRig(true)
+		token := rig.preview(t).Token
+		rig.cfg.beginErr = codedConnectErr(connect.CodeAlreadyExists, "PREVIEW_STALE", "Los datos cambiaron")
+		w := rig.delete(t, deleteBody(token, "Primaria", "pw"))
+		assert.Equal(t, http.StatusConflict, w.Code)
+		assert.Equal(t, "PREVIEW_STALE", w.Header().Get("X-Error-Code"))
+		assert.Equal(t, []string{"begin:config"}, rig.log.calls)
+	})
+}
+
+func codedConnectErr(code connect.Code, errorCode, msg string) error {
+	ce := connect.NewError(code, errors.New(msg))
+	ce.Meta().Set("X-Error-Code", errorCode)
+	return ce
 }
 
 func (rig *levelDeletionRig) restore(t *testing.T) *httptest.ResponseRecorder {
@@ -449,6 +612,8 @@ func TestLevelRestore(t *testing.T) {
 		assert.Equal(t, []string{
 			"restore:config", "restore:students", "restore:uniforms", "restore:finance", "restore:attendance", "restore:grades", "mark:config",
 		}, rig.log.calls)
+		assert.True(t, rig.cfg.markedPart, "a skip keeps the batch in the trash as restored_partial")
+		assert.Positive(t, rig.cfg.sweeps, "the sweep runs lazily first")
 		var body struct {
 			Restored map[string]int64 `json:"restored"`
 			Skipped  []struct {
@@ -470,7 +635,6 @@ func TestLevelRestore(t *testing.T) {
 		wantStatus int
 		wantCode   string
 	}{
-		{"past seven days", func(rig *levelDeletionRig) { rig.now = rig.cfg.deletion.RestorableUntil.Add(time.Second) }, http.StatusGone, "TRASH_EXPIRED"},
 		{"already purged", func(rig *levelDeletionRig) { rig.cfg.deletion.Status = "purged" }, http.StatusGone, "TRASH_EXPIRED"},
 		{"already restored", func(rig *levelDeletionRig) { rig.cfg.deletion.Status = "restored" }, http.StatusNotFound, ""},
 		{"unknown batch", func(rig *levelDeletionRig) {
@@ -490,6 +654,54 @@ func TestLevelRestore(t *testing.T) {
 			assert.Empty(t, rig.log.calls, "nothing is touched")
 		})
 	}
+
+	t.Run("past seven days on the database's clock", func(t *testing.T) {
+		rig := newLevelDeletionRig(true)
+		rig.cfg.restoreErr = codedConnectErr(connect.CodePermissionDenied, "TRASH_EXPIRED", "Pasaron más de 7 días")
+		w := rig.restore(t)
+		assert.Equal(t, http.StatusGone, w.Code)
+		assert.Equal(t, "TRASH_EXPIRED", w.Header().Get("X-Error-Code"))
+		assert.Equal(t, []string{"restore:config"}, rig.log.calls)
+		assert.False(t, rig.cfg.marked)
+	})
+
+	t.Run("its own level, back from a partial restore, is not a name clash", func(t *testing.T) {
+		rig := newLevelDeletionRig(true)
+		rig.cfg.levels = []client.LevelResult{{ID: delLevel, Name: "Primaria"}}
+		w := rig.restore(t)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		assert.True(t, rig.cfg.marked)
+		assert.False(t, rig.cfg.markedPart, "nothing skipped: fully restored")
+	})
+
+	t.Run("enrollments students could not restore keep their grades and marks archived", func(t *testing.T) {
+		rig := newLevelDeletionRig(true)
+		rig.people.unrestored = []string{"en-2"}
+		w := rig.restore(t)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		assert.Equal(t, []string{"en-2"}, rig.grades.skipIDs)
+		assert.Equal(t, []string{"en-2"}, rig.attendance.skipIDs)
+	})
+
+	t.Run("a missing archive is never a silent success", func(t *testing.T) {
+		rig := newLevelDeletionRig(true)
+		rig.finance.restoreErr = connect.NewError(connect.CodeNotFound, errors.New("no archive"))
+		w := rig.restore(t)
+		assert.Equal(t, http.StatusGone, w.Code)
+		assert.Equal(t, "TRASH_EXPIRED", w.Header().Get("X-Error-Code"))
+		assert.Contains(t, w.Body.String(), "finance")
+		assert.False(t, rig.cfg.marked)
+	})
+
+	t.Run("a failed_partial batch restores only its pending steps; a step that never archived is fine", func(t *testing.T) {
+		rig := newLevelDeletionRig(true)
+		rig.cfg.deletion.Status = "failed_partial"
+		rig.cfg.deletion.PendingSteps = []string{"students", "grades", "attendance"}
+		rig.grades.restoreErr = connect.NewError(connect.CodeNotFound, errors.New("never archived"))
+		w := rig.restore(t)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		assert.Equal(t, []string{"restore:students", "restore:attendance", "restore:grades", "mark:config"}, rig.log.calls)
+	})
 
 	t.Run("a service failing midway leaves the batch in the trash to retry", func(t *testing.T) {
 		rig := newLevelDeletionRig(true)
@@ -516,6 +728,7 @@ func TestLevelTrashLists(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	require.Len(t, body.Items, 1)
+	assert.Positive(t, rig.cfg.sweeps, "the sweep runs lazily first")
 	assert.Equal(t, delBatch, body.Items[0].BatchID)
 	assert.Equal(t, "Laura Díaz", body.Items[0].DeletedByName)
 	assert.Equal(t, "deleted", body.Items[0].Status)
@@ -551,4 +764,52 @@ func TestLevelDeletionContractDocumentsPlainTextErrors(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, string(raw), code)
 	}
+}
+
+func TestLevelTrashListsIncompleteDeletions(t *testing.T) {
+	for _, status := range []string{"failed_partial", "restored_partial"} {
+		t.Run(status, func(t *testing.T) {
+			rig := newLevelDeletionRig(true)
+			rig.cfg.deletion.Status = status
+			w := httptest.NewRecorder()
+			rig.h.Trash(w, ownerRequest(http.MethodGet, "/api/v1/config/level-trash", ""))
+			require.Equal(t, http.StatusOK, w.Code)
+			assert.Contains(t, w.Body.String(), `"status":"`+status+`"`)
+		})
+	}
+}
+
+// Review finding 8: the gateway (always warm) sweeps on config's clock:
+// every service purges each expired batch, then config closes it. A batch a
+// service could not purge stays open for the next run.
+func TestLevelTrashSweep(t *testing.T) {
+	rig := newLevelDeletionRig(true)
+	rig.cfg.expired = []client.LevelDeletion{{BatchID: "old-1"}, {BatchID: "old-2"}}
+	rig.uniforms.purgeErr = nil
+	n, err := rig.h.Sweep(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), n)
+	assert.Equal(t, []string{"old-1", "old-2"}, rig.cfg.purgedMarked)
+	for _, svc := range []string{"grades", "attendance", "finance", "uniforms", "students", "config"} {
+		assert.Contains(t, rig.log.calls, "purge:"+svc+":old-1")
+	}
+
+	rig = newLevelDeletionRig(true)
+	rig.cfg.expired = []client.LevelDeletion{{BatchID: "old-1"}}
+	rig.finance.purgeErr = errors.New("down")
+	n, err = rig.h.Sweep(context.Background())
+	assert.Error(t, err)
+	assert.Zero(t, n)
+	assert.Empty(t, rig.cfg.purgedMarked, "not closed: the next run retries it")
+}
+
+func TestLevelDeletionPreviewOfALevelBeingDeletedIs409(t *testing.T) {
+	rig := newLevelDeletionRig(true)
+	rig.cfg.structure.Deleting = true
+	r := ownerRequest(http.MethodGet, "/x", "")
+	r.SetPathValue("id", delLevel)
+	w := httptest.NewRecorder()
+	rig.h.Preview(w, r)
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Equal(t, "DELETION_IN_PROGRESS", w.Header().Get("X-Error-Code"))
 }

@@ -52,6 +52,16 @@ func (stubConfig) PreviewLevelDeletion(_ context.Context, req *connect.Request[c
 	}), nil
 }
 
+func (stubConfig) BeginLevelDeletion(_ context.Context, req *connect.Request[configv1.BeginLevelDeletionRequest]) (*connect.Response[configv1.BeginLevelDeletionResponse], error) {
+	d := routeDeletion()
+	d.Status = "deleting"
+	return connect.NewResponse(&configv1.BeginLevelDeletionResponse{Deletion: d}), nil
+}
+
+func (stubConfig) SweepLevelDeletions(context.Context, *connect.Request[configv1.SweepLevelDeletionsRequest]) (*connect.Response[configv1.SweepLevelDeletionsResponse], error) {
+	return connect.NewResponse(&configv1.SweepLevelDeletionsResponse{}), nil
+}
+
 func (stubConfig) ArchiveLevel(context.Context, *connect.Request[configv1.ArchiveLevelRequest]) (*connect.Response[configv1.ArchiveLevelResponse], error) {
 	return connect.NewResponse(&configv1.ArchiveLevelResponse{Deletion: routeDeletion()}), nil
 }

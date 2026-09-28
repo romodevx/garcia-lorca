@@ -23,6 +23,7 @@ import (
 
 	"github.com/garcia-lorca/pkg/featureflag"
 	"github.com/garcia-lorca/pkg/gcpauth"
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/pkg/logger"
 )
 
@@ -112,6 +113,17 @@ func main() {
 	deletionKey := config.ParseDeletionTokenKey(os.Getenv, log)
 
 	mux := newMux(iamHealth, authClient, studentsClient, configClient, gradesClient, financeClient, attendanceClient, commsClient, uniformsClient, flags, loginLimiter, inviteLimiter, reauthLimiter, deletionKey)
+
+	// ADR 0021: the level trash's retention sweep lives HERE, in the one
+	// always-warm service (min-instances=1) — the data services scale to zero
+	// and cannot be trusted to wake up on the hour. Hourly, on the process's
+	// own context (the school is this deployment's tenant), logged each run.
+	trashSweeper := handler.NewLevelDeletionHandler(handler.LevelDeletionDeps{
+		Config: configClient, Students: studentsClient,
+		Grades: gradesClient, Attendance: attendanceClient, Finance: financeClient, Uniforms: uniformsClient,
+		Log: log,
+	})
+	levelarchive.StartPurger(context.Background(), trashSweeper.Sweep, log)
 
 	log.Info("gateway starting",
 		slog.String("addr", addr),

@@ -1792,6 +1792,14 @@ paths:
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: '`DELETION_IN_PROGRESS`: this level is already being deleted, or its deletion failed half-way and waits in the trash.'
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: Ya se está eliminando este nivel; espera un momento y revisa la Papelera.
 
   /api/v1/config/levels/{id}/delete:
     parameters:
@@ -1812,8 +1820,14 @@ paths:
         (429). Then a saga moves every service's rows into its own archive —
         grades, attendance, finance (tuition plans only), uniforms, students
         (enrollments; pupils kept with no level), config (structure, level last)
-        — and records the batch. If any step fails, the steps already done are
-        restored and the answer is 500 with nothing deleted. Charges, payments,
+        — and records the batch. The saga's first step locks the level in
+        config: while it runs, every write that resolves the level answers 409
+        `LEVEL_BEING_DELETED`, a second deletion answers 409
+        `DELETION_IN_PROGRESS`, and the confirm token cannot open another saga
+        (single use). If any step fails, the steps already done are restored on
+        a fresh context; when that fully succeeds the answer is 500 with nothing
+        deleted, otherwise 500 `DELETION_INCOMPLETE` naming the batch (folio),
+        which then shows in the trash as `failed_partial`. Charges, payments,
         deposits, receipts and concepts are never touched. Requires
         `levels:delete` (owner only); `module_config`.
       operationId: deleteLevel
@@ -1855,8 +1869,11 @@ paths:
         '404': { $ref: '#/components/responses/PlainNotFound' }
         '409':
           description: >
-            `PREVIEW_STALE`: the data changed since the preview, or the preview
-            expired (10 minutes). Preview again.
+            `PREVIEW_STALE`: the data changed since the preview, the preview
+            expired (10 minutes), or its token already opened a deletion.
+            Preview again. `DELETION_IN_PROGRESS`: this level is already being
+            deleted (a double click), or its deletion failed half-way and waits
+            in the trash.
           headers:
             X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
           content:
@@ -1871,9 +1888,13 @@ paths:
               example: too many requests
         '500':
           description: >
-            A service failed mid-way; everything already archived was restored
-            and nothing is deleted. If even that failed, the sentence carries the
-            batch id for support.
+            A service failed mid-way. Without a code: everything already
+            archived was restored and nothing is deleted. `DELETION_INCOMPLETE`:
+            the undo did not fully succeed; the sentence names the folio and the
+            batch is in the trash as `failed_partial` — restoring it recovers
+            what was deleted.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
           content:
             text/plain:
               schema: { type: string }
@@ -1884,9 +1905,12 @@ paths:
       tags: [config-levels]
       summary: The deleted levels still in the trash
       description: >
-        Batches deleted and neither restored nor purged, newest first. A batch
-        past `restorableUntil` stays listed until the hourly sweep purges it,
-        and restoring it answers 410. Requires `levels:delete` (owner only);
+        Batches in the trash, newest first: `deleted`, `failed_partial` (a
+        deletion that failed and could not be fully undone — restoring it
+        recovers what was deleted) and `restored_partial` (restored, but some
+        rows did not fit; they stay here and a retry tries them again). The
+        gateway sweeps the trash hourly and before this listing, on config's
+        `restorableUntil` (the database's clock). Requires `levels:delete` (owner only);
         `module_config`.
       operationId: listLevelTrash
       security: [{ sessionCookie: [] }]
@@ -1921,8 +1945,13 @@ paths:
         each in one transaction. Rows that now conflict are skipped and reported
         in `skipped`, never forced: a pupil re-enrolled elsewhere in that cycle
         keeps the new enrollment, a pupil given another level keeps it, a
-        garment re-scoped keeps its new level. Idempotent: a retry after a
-        partial failure (500) restores only what is missing. Requires
+        garment re-scoped keeps its new level. Skipped rows stay in the trash
+        (`restored_partial`) until the window closes, so a retry after fixing
+        the clash brings them back; grades and attendance of enrollments that
+        could not come back stay archived too. Idempotent: a retry after a
+        partial failure (500) restores only what is missing. A
+        `failed_partial` batch restores only the services its deletion
+        reached. Requires
         `levels:delete` (owner only); `module_config`.
       operationId: restoreLevel
       security: [{ sessionCookie: [] }]
@@ -1948,7 +1977,10 @@ paths:
               schema: { type: string }
               example: Ya existe un nivel con ese nombre; renómbralo antes de restaurar
         '410':
-          description: '`TRASH_EXPIRED`: more than 7 days passed, or the batch was purged.'
+          description: >
+            `TRASH_EXPIRED`: more than 7 days passed, the batch was purged, or
+            a service no longer holds its part of the batch (the sentence names
+            it; whatever did come back stays restored).
           headers:
             X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
           content:
@@ -3418,7 +3450,10 @@ components:
         TERM_WITHOUT_MONTHS, ALREADY_CLOSED, ALREADY_OPEN, LEVEL_NOT_GRADED.
         Term months (T7): MONTH_INVALID (400), MONTH_OUTSIDE_CYCLE (400),
         TERM_TOO_LONG (400, more than six months), MONTH_IN_OTHER_TERM (409),
-        TERM_CLOSED (409, the term is a closed period).
+        TERM_CLOSED (409, the term is a closed period). Level deletion (ADR
+        0021): LEVEL_BEING_DELETED (409) on ANY write that resolves a level
+        whose deletion is running (grades capture, attendance lists, enrolling
+        or transferring a pupil, the level's structure in config).
         Absent on a refusal without a code.
       schema:
         type: string
@@ -5184,7 +5219,7 @@ components:
         restorableUntil: { type: string, format: date-time }
         deletedByName: { type: string }
         counts: { $ref: '#/components/schemas/LevelDeletionCounts' }
-        status: { type: string, enum: [deleted] }
+        status: { type: string, enum: [deleted, failed_partial, restored_partial] }
     LevelRestoreResult:
       type: object
       required: [restored, skipped]

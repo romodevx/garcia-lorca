@@ -50,15 +50,19 @@ type LevelRestoreSkip struct {
 }
 
 // LevelRestoreReport is what one service put back and what it skipped.
+// Unrestored (students only) names the batch's enrollments still in the trash:
+// grades and attendance keep those enrollments' rows archived too.
 type LevelRestoreReport struct {
-	Restored LevelCounts
-	Skipped  []LevelRestoreSkip
+	Restored   LevelCounts
+	Skipped    []LevelRestoreSkip
+	Unrestored []string
 }
 
 // LevelStructure is config's preview: the level and its structure's ids.
 type LevelStructure struct {
 	LevelID       string
 	LevelName     string
+	Deleting      bool
 	GradeLevelIDs []string
 	GroupIDs      []string
 	SubjectIDs    []string
@@ -85,15 +89,24 @@ type LevelDeletion struct {
 	DeletedAt       time.Time
 	RestorableUntil time.Time
 	Status          string
+	PendingSteps    []string
+	Skipped         []LevelRestoreSkip
 }
 
 // ArchiveLevelRecord is config's archive step input.
 type ArchiveLevelRecord struct {
+	BatchID string
+	LevelID string
+	Summary LevelCounts
+}
+
+// BeginLevelDeletionRecord opens a saga in config (its lock).
+type BeginLevelDeletionRecord struct {
 	BatchID       string
 	LevelID       string
+	TokenHash     string
 	DeletedBy     string
 	DeletedByName string
-	Summary       LevelCounts
 }
 
 type kindCount interface {
@@ -133,19 +146,32 @@ func (c *ConfigClient) PreviewLevelDeletion(ctx context.Context, levelID string)
 	m := res.Msg
 	return LevelStructure{
 		LevelID: m.GetLevelId(), LevelName: m.GetLevelName(), Counts: countsOf(m.GetCounts()),
+		Deleting:      m.GetLevelStatus() == configv1.LevelStatus_LEVEL_STATUS_DELETING,
 		GradeLevelIDs: m.GetGradeLevelIds(), GroupIDs: m.GetGroupIds(), SubjectIDs: m.GetSubjectIds(), TermIDs: m.GetTermIds(),
 	}, nil
 }
 
+// BeginLevelDeletion is the saga's first step and its lock.
+func (c *ConfigClient) BeginLevelDeletion(ctx context.Context, in BeginLevelDeletionRecord) (LevelDeletion, error) {
+	res, err := c.rpc.BeginLevelDeletion(ctx, connect.NewRequest(&configv1.BeginLevelDeletionRequest{
+		BatchId: in.BatchID, LevelId: in.LevelID, TokenHash: in.TokenHash,
+		DeletedBy: in.DeletedBy, DeletedByName: in.DeletedByName,
+	}))
+	if err != nil {
+		return LevelDeletion{}, err
+	}
+	return levelDeletionOf(res.Msg.GetDeletion()), nil
+}
+
 // ArchiveLevel is the saga's last step: the structure into the trash and the
-// batch into the ledger.
+// begun batch completed.
 func (c *ConfigClient) ArchiveLevel(ctx context.Context, in ArchiveLevelRecord) (LevelCounts, LevelDeletion, error) {
 	summary := make([]*configv1.LevelArchiveCount, 0, len(in.Summary))
 	for k, v := range in.Summary {
 		summary = append(summary, &configv1.LevelArchiveCount{Kind: k, Count: v})
 	}
 	res, err := c.rpc.ArchiveLevel(ctx, connect.NewRequest(&configv1.ArchiveLevelRequest{
-		BatchId: in.BatchID, LevelId: in.LevelID, DeletedBy: in.DeletedBy, DeletedByName: in.DeletedByName, Summary: summary,
+		BatchId: in.BatchID, LevelId: in.LevelID, Summary: summary,
 	}))
 	if err != nil {
 		return nil, LevelDeletion{}, err
@@ -162,13 +188,69 @@ func (c *ConfigClient) RestoreLevelBatch(ctx context.Context, batchID string) (L
 	return reportOf(res.Msg.GetRestored(), res.Msg.GetSkipped()), nil
 }
 
-// MarkLevelDeletionRestored closes a batch every service restored.
-func (c *ConfigClient) MarkLevelDeletionRestored(ctx context.Context, batchID string) (LevelDeletion, error) {
-	res, err := c.rpc.MarkLevelDeletionRestored(ctx, connect.NewRequest(&configv1.MarkLevelDeletionRestoredRequest{BatchId: batchID}))
+// MarkLevelDeletionRestored closes a batch every service restored (partial:
+// some rows did not fit, it stays in the trash as restored_partial).
+func (c *ConfigClient) MarkLevelDeletionRestored(ctx context.Context, batchID string, partial bool) (LevelDeletion, error) {
+	res, err := c.rpc.MarkLevelDeletionRestored(ctx, connect.NewRequest(&configv1.MarkLevelDeletionRestoredRequest{BatchId: batchID, Partial: partial}))
 	if err != nil {
 		return LevelDeletion{}, err
 	}
 	return levelDeletionOf(res.Msg.GetDeletion()), nil
+}
+
+// CancelLevelDeletion closes a fully compensated saga.
+func (c *ConfigClient) CancelLevelDeletion(ctx context.Context, batchID string) (LevelDeletion, error) {
+	res, err := c.rpc.CancelLevelDeletion(ctx, connect.NewRequest(&configv1.CancelLevelDeletionRequest{BatchId: batchID}))
+	if err != nil {
+		return LevelDeletion{}, err
+	}
+	return levelDeletionOf(res.Msg.GetDeletion()), nil
+}
+
+// FailLevelDeletion records a saga its compensation could not fully undo.
+func (c *ConfigClient) FailLevelDeletion(ctx context.Context, batchID string, pending []string, skipped []LevelRestoreSkip) (LevelDeletion, error) {
+	skips := make([]*configv1.LevelRestoreSkip, 0, len(skipped))
+	for _, s := range skipped {
+		skips = append(skips, &configv1.LevelRestoreSkip{Kind: s.Kind, Count: s.Count, Reason: s.Reason})
+	}
+	res, err := c.rpc.FailLevelDeletion(ctx, connect.NewRequest(&configv1.FailLevelDeletionRequest{
+		BatchId: batchID, PendingSteps: pending, Skipped: skips,
+	}))
+	if err != nil {
+		return LevelDeletion{}, err
+	}
+	return levelDeletionOf(res.Msg.GetDeletion()), nil
+}
+
+// SweepLevelDeletions unsticks dead sagas and lists the expired batches.
+func (c *ConfigClient) SweepLevelDeletions(ctx context.Context) ([]LevelDeletion, int64, error) {
+	res, err := c.rpc.SweepLevelDeletions(ctx, connect.NewRequest(&configv1.SweepLevelDeletionsRequest{}))
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]LevelDeletion, 0, len(res.Msg.GetExpired()))
+	for _, d := range res.Msg.GetExpired() {
+		out = append(out, levelDeletionOf(d))
+	}
+	return out, res.Msg.GetStalled(), nil
+}
+
+// MarkLevelDeletionPurged closes a batch every service purged.
+func (c *ConfigClient) MarkLevelDeletionPurged(ctx context.Context, batchID string) (LevelDeletion, error) {
+	res, err := c.rpc.MarkLevelDeletionPurged(ctx, connect.NewRequest(&configv1.MarkLevelDeletionPurgedRequest{BatchId: batchID}))
+	if err != nil {
+		return LevelDeletion{}, err
+	}
+	return levelDeletionOf(res.Msg.GetDeletion()), nil
+}
+
+// PurgeLevelBatch drops config's archive of one batch.
+func (c *ConfigClient) PurgeLevelBatch(ctx context.Context, batchID string) (int64, error) {
+	res, err := c.rpc.PurgeLevelBatch(ctx, connect.NewRequest(&configv1.PurgeLevelBatchRequest{BatchId: batchID}))
+	if err != nil {
+		return 0, err
+	}
+	return res.Msg.GetPurgedRows(), nil
 }
 
 // ListLevelDeletions is the trash.
@@ -201,6 +283,7 @@ func levelDeletionOf(d *configv1.LevelDeletion) LevelDeletion {
 		BatchID: d.GetBatchId(), LevelID: d.GetLevelId(), LevelName: d.GetLevelName(), Counts: countsOf(d.GetCounts()),
 		DeletedBy: d.GetDeletedBy(), DeletedByName: d.GetDeletedByName(),
 		DeletedAt: d.GetDeletedAt().AsTime(), RestorableUntil: d.GetRestorableUntil().AsTime(), Status: d.GetStatus(),
+		PendingSteps: d.GetPendingSteps(), Skipped: reportOf([]*configv1.LevelArchiveCount{}, d.GetSkipped()).Skipped,
 	}
 }
 
@@ -236,7 +319,18 @@ func (c *StudentsClient) RestoreLevelBatch(ctx context.Context, batchID string) 
 	if err != nil {
 		return LevelRestoreReport{}, err
 	}
-	return reportOf(res.Msg.GetRestored(), res.Msg.GetSkipped()), nil
+	rep := reportOf(res.Msg.GetRestored(), res.Msg.GetSkipped())
+	rep.Unrestored = res.Msg.GetUnrestoredEnrollmentIds()
+	return rep, nil
+}
+
+// PurgeLevelBatch drops students' archive of one batch.
+func (c *StudentsClient) PurgeLevelBatch(ctx context.Context, batchID string) (int64, error) {
+	res, err := c.rpc.PurgeLevelBatch(ctx, connect.NewRequest(&studentsv1.PurgeLevelBatchRequest{BatchId: batchID}))
+	if err != nil {
+		return 0, err
+	}
+	return res.Msg.GetPurgedRows(), nil
 }
 
 // --- attendance -----------------------------------------------------------------
@@ -264,13 +358,23 @@ func (c *AttendanceClient) ArchiveLevel(ctx context.Context, batchID string, sco
 	return countsOf(res.Msg.GetCounts()), nil
 }
 
-// RestoreLevelBatch puts the batch back.
-func (c *AttendanceClient) RestoreLevelBatch(ctx context.Context, batchID string) (LevelRestoreReport, error) {
-	res, err := c.rpc.RestoreLevelBatch(ctx, connect.NewRequest(&attendancev1.RestoreLevelBatchRequest{BatchId: batchID}))
+// RestoreLevelBatch puts the batch back; rows of skipEnrollmentIDs (the
+// enrollments students could not restore) stay archived.
+func (c *AttendanceClient) RestoreLevelBatch(ctx context.Context, batchID string, skipEnrollmentIDs []string) (LevelRestoreReport, error) {
+	res, err := c.rpc.RestoreLevelBatch(ctx, connect.NewRequest(&attendancev1.RestoreLevelBatchRequest{BatchId: batchID, SkipEnrollmentIds: skipEnrollmentIDs}))
 	if err != nil {
 		return LevelRestoreReport{}, err
 	}
 	return reportOf(res.Msg.GetRestored(), res.Msg.GetSkipped()), nil
+}
+
+// PurgeLevelBatch drops this service's archive of one batch.
+func (c *AttendanceClient) PurgeLevelBatch(ctx context.Context, batchID string) (int64, error) {
+	res, err := c.rpc.PurgeLevelBatch(ctx, connect.NewRequest(&attendancev1.PurgeLevelBatchRequest{BatchId: batchID}))
+	if err != nil {
+		return 0, err
+	}
+	return res.Msg.GetPurgedRows(), nil
 }
 
 // --- grades ---------------------------------------------------------------------
@@ -298,13 +402,23 @@ func (c *GradesClient) ArchiveLevel(ctx context.Context, batchID string, scope L
 	return countsOf(res.Msg.GetCounts()), nil
 }
 
-// RestoreLevelBatch puts the batch back.
-func (c *GradesClient) RestoreLevelBatch(ctx context.Context, batchID string) (LevelRestoreReport, error) {
-	res, err := c.rpc.RestoreLevelBatch(ctx, connect.NewRequest(&gradesv1.RestoreLevelBatchRequest{BatchId: batchID}))
+// RestoreLevelBatch puts the batch back; rows of skipEnrollmentIDs (the
+// enrollments students could not restore) stay archived.
+func (c *GradesClient) RestoreLevelBatch(ctx context.Context, batchID string, skipEnrollmentIDs []string) (LevelRestoreReport, error) {
+	res, err := c.rpc.RestoreLevelBatch(ctx, connect.NewRequest(&gradesv1.RestoreLevelBatchRequest{BatchId: batchID, SkipEnrollmentIds: skipEnrollmentIDs}))
 	if err != nil {
 		return LevelRestoreReport{}, err
 	}
 	return reportOf(res.Msg.GetRestored(), res.Msg.GetSkipped()), nil
+}
+
+// PurgeLevelBatch drops this service's archive of one batch.
+func (c *GradesClient) PurgeLevelBatch(ctx context.Context, batchID string) (int64, error) {
+	res, err := c.rpc.PurgeLevelBatch(ctx, connect.NewRequest(&gradesv1.PurgeLevelBatchRequest{BatchId: batchID}))
+	if err != nil {
+		return 0, err
+	}
+	return res.Msg.GetPurgedRows(), nil
 }
 
 // --- finance --------------------------------------------------------------------
@@ -332,13 +446,23 @@ func (c *FinanceClient) ArchiveLevel(ctx context.Context, batchID string, scope 
 	return countsOf(res.Msg.GetCounts()), nil
 }
 
-// RestoreLevelBatch puts the batch back.
-func (c *FinanceClient) RestoreLevelBatch(ctx context.Context, batchID string) (LevelRestoreReport, error) {
+// RestoreLevelBatch puts the batch back. Nothing here hangs off an
+// enrollment, so skipEnrollmentIDs is unused.
+func (c *FinanceClient) RestoreLevelBatch(ctx context.Context, batchID string, _ []string) (LevelRestoreReport, error) {
 	res, err := c.rpc.RestoreLevelBatch(ctx, connect.NewRequest(&financev1.RestoreLevelBatchRequest{BatchId: batchID}))
 	if err != nil {
 		return LevelRestoreReport{}, err
 	}
 	return reportOf(res.Msg.GetRestored(), res.Msg.GetSkipped()), nil
+}
+
+// PurgeLevelBatch drops this service's archive of one batch.
+func (c *FinanceClient) PurgeLevelBatch(ctx context.Context, batchID string) (int64, error) {
+	res, err := c.rpc.PurgeLevelBatch(ctx, connect.NewRequest(&financev1.PurgeLevelBatchRequest{BatchId: batchID}))
+	if err != nil {
+		return 0, err
+	}
+	return res.Msg.GetPurgedRows(), nil
 }
 
 // --- uniforms -------------------------------------------------------------------
@@ -366,13 +490,23 @@ func (c *UniformsClient) ArchiveLevel(ctx context.Context, batchID string, scope
 	return countsOf(res.Msg.GetCounts()), nil
 }
 
-// RestoreLevelBatch puts the batch back.
-func (c *UniformsClient) RestoreLevelBatch(ctx context.Context, batchID string) (LevelRestoreReport, error) {
+// RestoreLevelBatch puts the batch back. Nothing here hangs off an
+// enrollment, so skipEnrollmentIDs is unused.
+func (c *UniformsClient) RestoreLevelBatch(ctx context.Context, batchID string, _ []string) (LevelRestoreReport, error) {
 	res, err := c.rpc.RestoreLevelBatch(ctx, connect.NewRequest(&uniformsv1.RestoreLevelBatchRequest{BatchId: batchID}))
 	if err != nil {
 		return LevelRestoreReport{}, err
 	}
 	return reportOf(res.Msg.GetRestored(), res.Msg.GetSkipped()), nil
+}
+
+// PurgeLevelBatch drops this service's archive of one batch.
+func (c *UniformsClient) PurgeLevelBatch(ctx context.Context, batchID string) (int64, error) {
+	res, err := c.rpc.PurgeLevelBatch(ctx, connect.NewRequest(&uniformsv1.PurgeLevelBatchRequest{BatchId: batchID}))
+	if err != nil {
+		return 0, err
+	}
+	return res.Msg.GetPurgedRows(), nil
 }
 
 // --- iam ------------------------------------------------------------------------

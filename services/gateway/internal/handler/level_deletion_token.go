@@ -2,8 +2,11 @@ package handler
 
 import (
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,22 +37,43 @@ func NewDeletionTokens(key []byte, now func() time.Time) *DeletionTokens {
 	return &DeletionTokens{key: key, now: now}
 }
 
-// Issue signs a preview; it answers the token and when it expires.
+// tokenNonceBytes makes every issued token unique, so its hash can mark it used.
+const tokenNonceBytes = 16
+
+// Issue signs a preview; it answers the token (<exp>.<nonce>.<mac>) and when
+// it expires. The nonce makes every token unique: config stores TokenHash of
+// the one that opened a saga and refuses it again (single use).
 func (t *DeletionTokens) Issue(tenantID, levelID string, counts client.LevelCounts) (string, time.Time) {
 	exp := t.now().UTC().Add(deletionTokenTTL).Truncate(time.Second)
-	stamp := strconv.FormatInt(exp.Unix(), 10)
+	var n [tokenNonceBytes]byte
+	if _, err := rand.Read(n[:]); err != nil {
+		panic(fmt.Sprintf("level deletion: no randomness for a token nonce: %v", err))
+	}
+	stamp := strconv.FormatInt(exp.Unix(), 10) + "." + base64.RawURLEncoding.EncodeToString(n[:])
 	mac := t.sign(tenantID, levelID, counts, stamp)
 	return stamp + "." + base64.RawURLEncoding.EncodeToString(mac), exp
+}
+
+// TokenHash is the SHA-256 (hex) of a confirm token: what config stores to
+// make the token single-use. The token itself never leaves the gateway.
+func TokenHash(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }
 
 // Verify reports whether token signs exactly this tenant, level and counts and
 // has not expired. The last second of the window still counts.
 func (t *DeletionTokens) Verify(token, tenantID, levelID string, counts client.LevelCounts) bool {
-	stamp, sig, ok := strings.Cut(token, ".")
+	cut := strings.LastIndex(token, ".")
+	if cut < 0 {
+		return false
+	}
+	stamp, sig := token[:cut], token[cut+1:]
+	expPart, _, ok := strings.Cut(stamp, ".")
 	if !ok {
 		return false
 	}
-	exp, err := strconv.ParseInt(stamp, 10, 64)
+	exp, err := strconv.ParseInt(expPart, 10, 64)
 	if err != nil || t.now().UTC().After(time.Unix(exp, 0)) {
 		return false
 	}
@@ -69,7 +93,7 @@ func (t *DeletionTokens) sign(tenantID, levelID string, counts client.LevelCount
 	}
 	sort.Strings(kinds)
 	var b strings.Builder
-	b.WriteString("level-deletion/v1\n" + tenantID + "\n" + levelID + "\n" + stamp + "\n")
+	b.WriteString("level-deletion/v2\n" + tenantID + "\n" + levelID + "\n" + stamp + "\n")
 	for _, k := range kinds {
 		b.WriteString(k + "=" + strconv.FormatInt(counts[k], 10) + "\n")
 	}
