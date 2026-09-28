@@ -27,7 +27,8 @@ const statusServing = "SERVING"
 // service. It only translates: proto messages ↔ service calls and error Kinds ↔
 // Connect codes. Validation and logic live in the service layer.
 type AttendanceHandler struct {
-	svc *service.AttendanceService
+	svc   *service.AttendanceService
+	trash *service.LevelArchiveService
 }
 
 // NewAttendanceHandler wires the handler to the attendance service.

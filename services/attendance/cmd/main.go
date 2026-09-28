@@ -34,6 +34,7 @@ import (
 	"github.com/garcia-lorca/pkg/dbdsn"
 	"github.com/garcia-lorca/pkg/dbpool"
 	"github.com/garcia-lorca/pkg/gcpauth"
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/pkg/logger"
 	"github.com/garcia-lorca/pkg/pubsub"
 	"github.com/garcia-lorca/pkg/pubsub/gcp"
@@ -134,7 +135,12 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 
 	newID := func() string { return uuid.NewString() }
 	svc := service.NewAttendanceService(repo, enrollments, groups, publisher, tenantID, newID, log)
-	h := handler.NewAttendanceHandler(svc)
+	// The level-deletion trash (ADR 0021): the gateway's saga archives and
+	// restores through it; an hourly sweep on a detached context drops what is
+	// past the 7-day retention.
+	trash := service.NewLevelArchiveService(repo, time.Now)
+	levelarchive.StartPurger(context.Background(), trash.PurgeLevelArchives, log)
+	h := handler.NewAttendanceHandler(svc).WithLevelArchive(trash)
 
 	mux := http.NewServeMux()
 	path, connectHandler := attendancev1connect.NewAttendanceServiceHandler(h, connect.WithRecover(recoverFn))
