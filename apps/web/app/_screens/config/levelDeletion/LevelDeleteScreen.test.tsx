@@ -154,7 +154,8 @@ describe("step 3 — the password", () => {
     await toPasswordStep(user);
     await submitPassword(user);
 
-    expect(api.deleteLevel).toHaveBeenCalledWith(expect.any(String), "l1", { confirmName: "PRIMARIA", confirmToken: "tok-1", password: "secreto" });
+    // The server verifies what the human typed (trimmed), not the summary's copy.
+    expect(api.deleteLevel).toHaveBeenCalledWith(expect.any(String), "l1", { confirmName: "primaria", confirmToken: "tok-1", password: "secreto" });
     await waitFor(() =>
       expect(onDeleted).toHaveBeenCalledWith("Nivel eliminado. Puedes restaurarlo desde la Papelera hasta el 5 de octubre de 2026."),
     );

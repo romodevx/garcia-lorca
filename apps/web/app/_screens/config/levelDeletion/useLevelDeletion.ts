@@ -119,8 +119,8 @@ export function useLevelDeletion(levelId: string, onDeleted: (message: string) =
     setSubmitting(true);
     setSubmitError(undefined);
     try {
-      // The canonical name: the director already typed it (checked above, any case).
-      const done = await deleteLevel(API_URL, levelId, { confirmName: load.preview.levelName, confirmToken: load.preview.confirmToken, password });
+      // What the director TYPED: the server verifies it too (trimmed, any case).
+      const done = await deleteLevel(API_URL, levelId, { confirmName: name.trim(), confirmToken: load.preview.confirmToken, password });
       onDeleted(`Nivel eliminado. Puedes restaurarlo desde la Papelera hasta el ${longDay(done.restorableUntil)}.`);
     } catch (err) {
       refuse(err);
