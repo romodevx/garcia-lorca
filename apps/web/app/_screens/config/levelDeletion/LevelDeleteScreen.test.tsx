@@ -92,6 +92,14 @@ describe("step 1 — the summary", () => {
     expect(api.deleteLevel).not.toHaveBeenCalled();
   });
 
+  it("a level that no longer exists says so and points at the trash (QA, deferred)", async () => {
+    api.getLevelDeletionPreview.mockRejectedValueOnce(new ConfigError(404, "not found"));
+    renderScreen();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Este nivel ya no existe (puede estar en la Papelera).");
+    expect(screen.queryByText(/No se pudo cargar/)).not.toBeInTheDocument();
+  });
+
   it("a failed summary offers a retry", async () => {
     api.getLevelDeletionPreview.mockRejectedValueOnce(new TypeError("offline"));
     const { user } = renderScreen();

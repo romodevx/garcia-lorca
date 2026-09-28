@@ -42,6 +42,15 @@ export interface LevelDeletion {
   submit: () => Promise<void>;
 }
 
+const LEVEL_GONE = "Este nivel ya no existe (puede estar en la Papelera).";
+
+/** The sentence a refused summary shows; undefined keeps the generic one. */
+function previewRefusal(err: unknown): string | undefined {
+  if (isCode(err, "DELETION_IN_PROGRESS")) return DELETION_IN_PROGRESS;
+  if (err instanceof ConfigError && err.status === 404) return LEVEL_GONE;
+  return undefined;
+}
+
 function isCode(err: unknown, code: string): boolean {
   return err instanceof ConfigError && err.code === code;
 }
@@ -69,9 +78,7 @@ export function useLevelDeletion(levelId: string, onDeleted: (message: string) =
     setLoad({ kind: "loading" });
     getLevelDeletionPreview(API_URL, levelId)
       .then((preview) => setLoad({ kind: "ready", preview }))
-      .catch((err: unknown) =>
-        setLoad(isCode(err, "DELETION_IN_PROGRESS") ? { kind: "failed", message: DELETION_IN_PROGRESS } : { kind: "failed" }),
-      );
+      .catch((err: unknown) => setLoad({ kind: "failed", message: previewRefusal(err) }));
   }, [levelId]);
 
   useEffect(fetchPreview, [fetchPreview]);

@@ -404,6 +404,11 @@ export interface LevelDeletionCounts {
   tuitionPlans: number;
   uniformItems: number;
   schoolEvents: number;
+  /** Newer kinds (ADR 0021, confirmation review): absent from an older server. */
+  enrollmentTransfers?: number;
+  attendanceSessions?: number;
+  gradeEntries?: number;
+  periodClosures?: number;
 }
 
 /**

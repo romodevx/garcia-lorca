@@ -14,6 +14,17 @@ describe("deletedLines", () => {
     expect(lines).toEqual(["6 grados", "1 grupo", "2 inscripciones a grupos", "120 boletas"]);
   });
 
+  it("names the kinds a director recognises beyond the headline ones (QA, deferred)", () => {
+    const lines = deletedLines({ ...ZERO, enrollmentTransfers: 2, attendanceSessions: 1, gradeEntries: 3, periodClosures: 1 });
+    expect(lines).toEqual([
+      "2 cambios de grupo", "1 lista de asistencia", "3 calificaciones por periodo", "1 periodo cerrado",
+    ]);
+  });
+
+  it("reads an older server's counts, without the newer kinds", () => {
+    expect(deletedLines({ ...ZERO, groups: 1 })).toEqual(["1 grupo"]);
+  });
+
   it("never lists what is kept: pupils and uniform items", () => {
     expect(deletedLines({ ...ZERO, students: 40, uniformItems: 3 })).toEqual([]);
   });
@@ -90,6 +101,7 @@ describe("trashStatusLine", () => {
   it("names the incomplete states and nothing else", () => {
     expect(trashStatusLine("failed_partial")).toBe("Eliminación incompleta — Restaurar para recuperar lo que se alcanzó a borrar");
     expect(trashStatusLine("restored_partial")).toMatch(/^Restaurado en parte/);
+    expect(trashStatusLine("restoring")).toBe("Restaurando… espera un momento y vuelve a abrir la Papelera");
     expect(trashStatusLine("deleted")).toBeUndefined();
   });
 });

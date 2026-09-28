@@ -16,8 +16,12 @@ const DELETED: ReadonlyArray<readonly [keyof LevelDeletionCounts, Noun]> = [
   ["terms", ["trimestre", "trimestres"]],
   ["teachingAssignments", ["asignación de carga académica", "asignaciones de carga académica"]],
   ["enrollments", ["inscripción a grupo", "inscripciones a grupos"]],
+  ["enrollmentTransfers", ["cambio de grupo", "cambios de grupo"]],
+  ["attendanceSessions", ["lista de asistencia", "listas de asistencia"]],
   ["attendanceMarks", ["registro de asistencia", "registros de asistencia"]],
   ["monthlyGrades", ["calificación", "calificaciones"]],
+  ["gradeEntries", ["calificación por periodo", "calificaciones por periodo"]],
+  ["periodClosures", ["periodo cerrado", "periodos cerrados"]],
   ["reportCards", ["boleta", "boletas"]],
   ["tuitionPlans", ["tabulador de colegiaturas", "tabuladores de colegiaturas"]],
   ["schoolEvents", ["evento del nivel", "eventos del nivel"]],
@@ -41,7 +45,7 @@ function nounOf(kind: string): Noun {
 
 /** "6 grados", "1 grupo"… — only what the delete takes away, zeros hidden. */
 export function deletedLines(counts: LevelDeletionCounts): string[] {
-  return DELETED.filter(([key]) => counts[key] > 0).map(([key, noun]) => counted(counts[key], noun));
+  return DELETED.filter(([key]) => (counts[key] ?? 0) > 0).map(([key, noun]) => counted(counts[key] ?? 0, noun));
 }
 
 /** What survives the delete: the money, the pupils and the uniform stock. */
@@ -106,5 +110,6 @@ export const DELETION_IN_PROGRESS = "Ya se está eliminando este nivel; espera u
 export function trashStatusLine(status: string): string | undefined {
   if (status === "failed_partial") return "Eliminación incompleta — Restaurar para recuperar lo que se alcanzó a borrar";
   if (status === "restored_partial") return "Restaurado en parte — lo que no cupo sigue aquí; Restaurar lo intenta de nuevo";
+  if (status === "restoring") return "Restaurando… espera un momento y vuelve a abrir la Papelera";
   return undefined;
 }
