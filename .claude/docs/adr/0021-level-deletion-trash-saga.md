@@ -201,13 +201,79 @@ flags it with `empty: true`.
   needs no client-side re-sign-in flow, and cannot be satisfied by a token
   minted for another purpose. No key in this mode fails closed (500).
 
+### Confirmation-review fixes (2026-09-28)
+
+- **One owner per freeze** (config migration 0013). `levels.deleting_batch_id`
+  names the batch that froze the level; `BeginLevelDeletion` sets it, and the
+  level goes back to `active` only by compare-and-set on that id
+  (`releaseFreeze`). Closing an OLD batch — a restore retried on a
+  `restored_partial`, a purge — never lifts the freeze a NEWER deletion holds.
+  `FailLevelDeletion` claims the freeze only for an active level or one it (or
+  nobody) owns. A frozen level with no owner (a pre-0013 freeze no batch
+  claims; the migration backfills every one it can) may be lifted by any of
+  its batches once no OTHER batch of it is `deleting`/`failed_partial`. The
+  level's update trigger now allows changing only the owner while
+  `deleting`. Rejected: counting other batches at release time only — it
+  cannot tell which batch the freeze belongs to after a restore/re-delete.
+- **An expired batch never freezes forever.** When a batch is purged
+  (`MarkLevelDeletionPurged`), or a restore answers `TRASH_EXPIRED` (config's
+  restore step or the restore's start), the level it still froze — a
+  `failed_partial` whose config structure was never archived — goes back to
+  `active` in a committed transaction before the refusal. Consequence: that
+  level's structure (grades levels, groups, terms…) stays; what the OTHER
+  services had archived (grades, attendance, enrollments…) is purged with the
+  batch and is gone. The alternative (keep it frozen) left a level nobody
+  could ever edit or delete again.
+- **`restoring` ledger status.** A restore first calls config
+  `BeginLevelRestore`: compare-and-set under the batch's row lock from
+  `deleted` | `failed_partial` | `restored_partial` to `restoring`
+  (`restoring_from`, `restoring_since` on the database clock), with the window
+  re-checked there — so a restore can only start inside the window, and the
+  sweep, which lists only non-running batches past the window, can never purge
+  one mid-way. A second restore is 409 `RESTORE_IN_PROGRESS`. The gateway picks
+  the steps from `restoring_from` (not from its earlier read). The batch
+  closes from `restoring` (`MarkLevelDeletionRestored`); any other end calls
+  `AbandonLevelRestore` (back to `restoring_from`); if even that fails, the
+  sweep's watchdog does it after 30 minutes (`RestoreStallAfter`, far beyond a
+  restore's 5-minute budget). The trash lists `restoring` batches ("Restaurando…").
+  The sweep still closes `restored`/`cancelled` batches past the window
+  (their leftover archive markers); it never touches `deleting` or `restoring`,
+  and the gateway skips them defensively too.
+- **Freeze first, then verify.** Delete now checks what needs no lock (level
+  exists and is not deleting, token well-formed and unexpired, name,
+  password), THEN takes the freeze, THEN resolves the scope and compares its
+  counts with the token's under the freeze. Moved counts cancel the batch
+  (freeze released, token spent) and answer 409 `PREVIEW_STALE`; a resolve
+  failure also cancels. This closes the window where a grade captured between
+  the check and the lock slipped past the confirmed preview.
+- **Freeze gaps closed.** grades: closing and reopening a period refuse a
+  deleting level (the level catalog now carries config's status). finance:
+  `UpsertTuitionPlan` reads config's level list (the one level lookup it has)
+  and refuses a deleting level; its `connectErr` now forwards the code as
+  `X-Error-Code`. uniforms never resolves a level (a garment's level is an id it
+  only shape-checks), so the gateway — the only caller that writes garments —
+  makes the one lookup (`GetLevel`) on create/update and answers 409
+  `LEVEL_BEING_DELETED`. Rejected: a config client inside uniforms just for
+  this (new dependency, env and deploy wiring for one check).
+- **Preview counts.** The preview and trash now also show
+  `enrollmentTransfers` (cambios de grupo), `attendanceSessions` (listas de
+  asistencia), `gradeEntries` (calificaciones por periodo) and
+  `periodClosures` (periodos cerrados) — optional in the contract (additive).
+  Still hidden: `levels`, `termMonths`, `reportCardLines`, `gradesOutbox`
+  (they mean nothing to a director; they remain signed and recorded).
+- **Web.** The delete page of a level that no longer exists (404) says "Este
+  nivel ya no existe (puede estar en la Papelera)."
+
 ## Consequences
 
 - Saga steps call every data service regardless of that module's flag: a
   disabled module's rows still belong to the level. A service that is down
   makes the deletion fail cleanly (compensated), not partial.
 - New migration: config/0012 (`levels.status`, the ledger's lifecycle,
-  token hash, pending steps, skips, `purged_at`, the freeze triggers).
+  token hash, pending steps, skips, `purged_at`, the freeze triggers), and
+  config/0013 (`levels.deleting_batch_id`, `restoring` + `restoring_from` /
+  `restoring_since`). New config RPCs `BeginLevelRestore` /
+  `AbandonLevelRestore` and `LevelDeletion.restoring_from` (additive proto).
 - Pupils come out "sin nivel, grado ni grupo" and keep their admission status;
   the office reassigns them. Finance history stays intact and reconciles.
 - Restore is best-effort by design: what now conflicts stays as it is and is
