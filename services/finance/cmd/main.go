@@ -37,6 +37,7 @@ import (
 	"github.com/garcia-lorca/pkg/dbdsn"
 	"github.com/garcia-lorca/pkg/dbpool"
 	"github.com/garcia-lorca/pkg/gcpauth"
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/pkg/logger"
 	"golang.org/x/sync/errgroup"
 
@@ -244,7 +245,12 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	svc := usecase.NewFinanceService(repo, studentsClient, cyclesClient, studentsClient, cyclesClient,
 		configclient.NewCachedCalendar(cyclesClient, calendarTTL, calendarTimeout), publisher, tenantID, newID, time.Now)
 	health := usecase.NewHealthService(serviceName)
-	handler := grpcadapter.NewFinanceHandler(svc, health)
+	// Level deletion (ADR 0021): finance's step of the gateway's saga (tuition
+	// plans only; money is never touched), plus the hourly sweep that drops
+	// archives past the 7-day retention, on the process's context.
+	levels := usecase.NewLevelArchiveService(repo, time.Now)
+	levelarchive.StartPurger(ctx, levels.PurgeLevelArchives, log)
+	handler := grpcadapter.NewFinanceHandler(svc, health).WithLevelArchive(levels)
 	consumer := pubsubadapter.NewConsumer(svc, log)
 
 	mux := http.NewServeMux()

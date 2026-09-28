@@ -33,6 +33,7 @@ const dueDateLayout = "2006-01-02"
 type FinanceHandler struct {
 	finance *usecase.FinanceService
 	health  *usecase.HealthService
+	levels  *usecase.LevelArchiveService
 }
 
 // NewFinanceHandler wires the handler to the finance + health use cases.
