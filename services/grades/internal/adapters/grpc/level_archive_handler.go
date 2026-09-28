@@ -37,7 +37,7 @@ func (h *GradesHandler) ArchiveLevel(ctx context.Context, req *connect.Request[g
 
 // RestoreLevelBatch puts a batch back and reports what it skipped.
 func (h *GradesHandler) RestoreLevelBatch(ctx context.Context, req *connect.Request[gradesv1.RestoreLevelBatchRequest]) (*connect.Response[gradesv1.RestoreLevelBatchResponse], error) {
-	rep, err := h.levels.RestoreLevelBatch(ctx, req.Msg.GetBatchId())
+	rep, err := h.levels.RestoreLevelBatch(ctx, req.Msg.GetBatchId(), req.Msg.GetSkipEnrollmentIds())
 	if err != nil {
 		return nil, connectErr(err)
 	}
@@ -55,6 +55,15 @@ func (h *GradesHandler) PurgeLevelArchives(ctx context.Context, _ *connect.Reque
 		return nil, connectErr(err)
 	}
 	return connect.NewResponse(&gradesv1.PurgeLevelArchivesResponse{PurgedRows: n}), nil
+}
+
+// PurgeLevelBatch drops one batch's archive (the gateway's retention sweep).
+func (h *GradesHandler) PurgeLevelBatch(ctx context.Context, req *connect.Request[gradesv1.PurgeLevelBatchRequest]) (*connect.Response[gradesv1.PurgeLevelBatchResponse], error) {
+	n, err := h.levels.PurgeLevelBatch(ctx, req.Msg.GetBatchId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&gradesv1.PurgeLevelBatchResponse{PurgedRows: n}), nil
 }
 
 // toLevelScope reads the wire scope; a missing scope is an empty one, which

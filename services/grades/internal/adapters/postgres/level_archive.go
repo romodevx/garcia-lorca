@@ -56,17 +56,34 @@ func levelSteps(s levelarchive.Scope) []gormarchive.Step {
 
 // levelRestore is the way back, parents first. Only the lines have a parent
 // in this service; every other conflict is a unique key taken meanwhile.
-var levelRestore = []struct {
-	kind    string
-	table   string
-	parents []gormarchive.Parent
-}{
-	{kindPeriodClosures, "period_closures", nil},
-	{kindReportCards, "report_cards", nil},
-	{kindReportCardLines, "report_card_lines", []gormarchive.Parent{{Column: "report_card_id", Table: "report_cards"}}},
-	{kindMonthlyGrades, "monthly_grades", nil},
-	{kindGradeEntries, "grade_entries", nil},
-	{kindGradesOutbox, "grades_outbox", nil},
+// A line has no enrollment of its own: it follows its report card through the
+// parent guard, so a card kept archived keeps its lines archived too.
+var levelRestore = []restoreStep{
+	{kindPeriodClosures, "period_closures", nil, gormarchive.Exclude{}},
+	{kindReportCards, "report_cards", nil, gormarchive.Exclude{Column: "enrollment_id"}},
+	{kindReportCardLines, "report_card_lines", []gormarchive.Parent{{Column: "report_card_id", Table: "report_cards"}}, gormarchive.Exclude{}},
+	{kindMonthlyGrades, "monthly_grades", nil, gormarchive.Exclude{Column: "enrollment_id"}},
+	{kindGradeEntries, "grade_entries", nil, gormarchive.Exclude{Column: "enrollment_id"}},
+	{kindGradesOutbox, "grades_outbox", nil, gormarchive.Exclude{Column: "payload", JSONKey: "enrollmentId"}},
+}
+
+// restoreStep is one table's way back: the parents it must still find and how
+// its rows name an enrollment (to keep an unrestored enrollment's rows out).
+type restoreStep struct {
+	kind       string
+	table      string
+	parents    []gormarchive.Parent
+	enrollment gormarchive.Exclude
+}
+
+// exclude names the enrollments whose rows stay archived at this step.
+func (s restoreStep) exclude(enrollmentIDs []string) gormarchive.Exclude {
+	if s.enrollment.Column == "" {
+		return gormarchive.Exclude{}
+	}
+	ex := s.enrollment
+	ex.Values = enrollmentIDs
+	return ex
 }
 
 // restoreSkipReason is the one sentence a skipped grades row gets.
@@ -111,14 +128,15 @@ func (r *Repository) ArchiveLevel(ctx context.Context, batchID string, scope lev
 }
 
 // RestoreLevelBatch puts a batch back, parents first, in one transaction.
-func (r *Repository) RestoreLevelBatch(ctx context.Context, batchID string) (levelarchive.Report, error) {
+// Rows of skipEnrollmentIDs, and rows that no longer fit, stay archived.
+func (r *Repository) RestoreLevelBatch(ctx context.Context, batchID string, skipEnrollmentIDs []string) (levelarchive.Report, error) {
 	var rep levelarchive.Report
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var err error
 		rep, err = levelTrash.RestoreBatch(tx, batchID, func(tx *gorm.DB) (levelarchive.Report, error) {
 			out := levelarchive.NewReport()
 			for _, s := range levelRestore {
-				restored, skipped, err := levelTrash.Reinsert(tx, batchID, s.table, s.parents...)
+				restored, skipped, err := levelTrash.ReinsertExcept(tx, batchID, s.table, s.exclude(skipEnrollmentIDs), s.parents...)
 				if err != nil {
 					return out, glerrors.Wrap(glerrors.KindInternal, "restoring the level's grades", err)
 				}
@@ -129,6 +147,19 @@ func (r *Repository) RestoreLevelBatch(ctx context.Context, batchID string) (lev
 		return err
 	})
 	return rep, err
+}
+
+// PurgeLevelBatch drops one batch's archive, marker included.
+func (r *Repository) PurgeLevelBatch(ctx context.Context, batchID string) (int64, error) {
+	var n int64
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var err error
+		if n, err = levelTrash.PurgeBatch(tx, batchID); err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "purging a batch of the grades trash", err)
+		}
+		return nil
+	})
+	return n, err
 }
 
 // PurgeLevelArchives drops the archives filed before cutoff.

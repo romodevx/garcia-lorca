@@ -22,6 +22,8 @@ const (
 type fakeLevelArchive struct {
 	scope  levelarchive.Scope
 	batch  string
+	skip   []string
+	purged string
 	cutoff time.Time
 }
 
@@ -35,9 +37,14 @@ func (f *fakeLevelArchive) ArchiveLevel(_ context.Context, batch string, s level
 	return levelarchive.Counts{"monthlyGrades": 3}, nil
 }
 
-func (f *fakeLevelArchive) RestoreLevelBatch(_ context.Context, batch string) (levelarchive.Report, error) {
-	f.batch = batch
+func (f *fakeLevelArchive) RestoreLevelBatch(_ context.Context, batch string, skip []string) (levelarchive.Report, error) {
+	f.batch, f.skip = batch, skip
 	return levelarchive.NewReport(), nil
+}
+
+func (f *fakeLevelArchive) PurgeLevelBatch(_ context.Context, batch string) (int64, error) {
+	f.purged = batch
+	return 4, nil
 }
 
 func (f *fakeLevelArchive) PurgeLevelArchives(_ context.Context, cutoff time.Time) (int64, error) {
@@ -69,7 +76,15 @@ func TestLevelArchiveServiceValidatesAtTheBoundary(t *testing.T) {
 			return err
 		}, true},
 		{"restore malformed batch", func(s *usecase.LevelArchiveService) error {
-			_, err := s.RestoreLevelBatch(context.Background(), "nope")
+			_, err := s.RestoreLevelBatch(context.Background(), "nope", nil)
+			return err
+		}, true},
+		{"restore malformed skipped enrollment", func(s *usecase.LevelArchiveService) error {
+			_, err := s.RestoreLevelBatch(context.Background(), laBatch, []string{"x"})
+			return err
+		}, true},
+		{"purge malformed batch", func(s *usecase.LevelArchiveService) error {
+			_, err := s.PurgeLevelBatch(context.Background(), "nope")
 			return err
 		}, true},
 	}
@@ -103,4 +118,21 @@ func TestLevelArchiveServicePurgesPastTheRetention(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(7), n)
 	assert.Equal(t, now.Add(-7*24*time.Hour), repo.cutoff)
+}
+
+func TestLevelArchiveServiceRestoreCanonicalizesSkippedEnrollments(t *testing.T) {
+	const enrol = "cccccccc-0000-0000-0000-000000000001"
+	repo := &fakeLevelArchive{}
+	_, err := usecase.NewLevelArchiveService(repo, time.Now).
+		RestoreLevelBatch(context.Background(), laBatch, []string{"CCCCCCCC-0000-0000-0000-000000000001", enrol})
+	require.NoError(t, err)
+	assert.Equal(t, []string{enrol}, repo.skip, "lowercased and deduplicated")
+}
+
+func TestLevelArchiveServicePurgesOneBatch(t *testing.T) {
+	repo := &fakeLevelArchive{}
+	n, err := usecase.NewLevelArchiveService(repo, time.Now).PurgeLevelBatch(context.Background(), " BBBBBBBB-0000-0000-0000-000000000001")
+	require.NoError(t, err)
+	assert.Equal(t, int64(4), n)
+	assert.Equal(t, laBatch, repo.purged)
 }

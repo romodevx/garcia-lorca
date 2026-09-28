@@ -51,12 +51,12 @@ func (f *fakeCatalog) LevelCatalog(_ context.Context, _, levelID string) (ports.
 	return c, nil
 }
 
-func (f *fakeCatalog) LevelIDOfGroup(_ context.Context, groupID string) (string, error) {
+func (f *fakeCatalog) LevelIDOfGroup(_ context.Context, groupID string) (ports.LevelKey, error) {
 	l, ok := f.levelByGroup[groupID]
 	if !ok {
-		return "", glerrors.ErrNotFound
+		return ports.LevelKey{}, glerrors.ErrNotFound
 	}
-	return l.ID, nil
+	return ports.LevelKey{ID: l.ID, Deleting: l.Deleting}, nil
 }
 
 func (f *fakeCatalog) ActiveCycle(_ context.Context) (ports.CycleRef, bool, error) {

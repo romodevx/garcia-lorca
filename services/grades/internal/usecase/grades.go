@@ -6,6 +6,7 @@ import (
 	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/services/grades/internal/domain"
 	"github.com/garcia-lorca/services/grades/internal/ports"
 )
@@ -98,8 +99,12 @@ func (s *GradesService) CaptureGrade(ctx context.Context, assignmentID, enrollme
 		return domain.GradeEntry{}, glerrors.New(glerrors.KindInvalid, "enrollment is not in the assignment's cycle")
 	}
 
-	if err := s.requireTermOfAssignment(ctx, termID, asg); err != nil {
+	level, err := s.requireTermOfAssignment(ctx, termID, asg)
+	if err != nil {
 		return domain.GradeEntry{}, err
+	}
+	if level.Deleting {
+		return domain.GradeEntry{}, levelarchive.LevelBeingDeleted()
 	}
 
 	// subject_id and teacher_id are DERIVED from the assignment, never client input.
@@ -118,7 +123,7 @@ func (s *GradesService) Roster(ctx context.Context, assignmentID, termID string)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.requireTermOfAssignment(ctx, termID, asg); err != nil {
+	if _, err := s.requireTermOfAssignment(ctx, termID, asg); err != nil {
 		return nil, err
 	}
 
@@ -180,24 +185,25 @@ func (s *GradesService) requireAssignment(ctx context.Context, assignmentID stri
 // requireTermOfAssignment loads a term and asserts it belongs to the
 // assignment's cycle AND to its group's level — a term is per cycle and per
 // level, so a Secundaria term must never grade a Primaria group. A missing term
-// and either mismatch are KindInvalid.
-func (s *GradesService) requireTermOfAssignment(ctx context.Context, termID string, asg ports.AssignmentRef) error {
+// and either mismatch are KindInvalid. It answers the group's level, so a write
+// can refuse one whose deletion runs.
+func (s *GradesService) requireTermOfAssignment(ctx context.Context, termID string, asg ports.AssignmentRef) (ports.LevelKey, error) {
 	term, err := s.assignments.TermByID(ctx, termID)
 	if err != nil {
 		if glerrors.KindOf(err) == glerrors.KindNotFound {
-			return glerrors.New(glerrors.KindInvalid, "term not found")
+			return ports.LevelKey{}, glerrors.New(glerrors.KindInvalid, "term not found")
 		}
-		return err
+		return ports.LevelKey{}, err
 	}
 	if term.CycleID != asg.CycleID {
-		return glerrors.New(glerrors.KindInvalid, "term does not belong to the assignment's cycle")
+		return ports.LevelKey{}, glerrors.New(glerrors.KindInvalid, "term does not belong to the assignment's cycle")
 	}
-	levelID, err := s.catalog.LevelIDOfGroup(ctx, asg.GroupID)
+	level, err := s.catalog.LevelIDOfGroup(ctx, asg.GroupID)
 	if err != nil {
-		return err
+		return ports.LevelKey{}, err
 	}
-	if term.LevelID != levelID {
-		return glerrors.New(glerrors.KindInvalid, "El periodo no corresponde al nivel del grupo")
+	if term.LevelID != level.ID {
+		return ports.LevelKey{}, glerrors.New(glerrors.KindInvalid, "El periodo no corresponde al nivel del grupo")
 	}
-	return nil
+	return level, nil
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/pkg/levelarchive"
 )
 
@@ -139,13 +140,13 @@ func TestGradesLevelArchiveRestoreRoundTrip(t *testing.T) {
 	assert.Equal(t, after["monthly_grades"]+1, gradesSnapshot(t)["monthly_grades"])
 	require.NoError(t, superDB.Exec("DELETE FROM monthly_grades WHERE tenant_id = ? AND month = '2026-10-01'", tenantG).Error)
 
-	rep, err := repo.RestoreLevelBatch(ctx, batch)
+	rep, err := repo.RestoreLevelBatch(ctx, batch, nil)
 	require.NoError(t, err)
 	assert.Equal(t, wantGradesCounts, rep.Restored)
 	assert.Empty(t, rep.Skipped)
 	assert.Equal(t, before, gradesSnapshot(t))
 
-	rep2, err := repo.RestoreLevelBatch(ctx, batch)
+	rep2, err := repo.RestoreLevelBatch(ctx, batch, nil)
 	require.NoError(t, err, "a retried restore answers its first report")
 	assert.Equal(t, rep.Restored, rep2.Restored)
 	assert.Equal(t, before, gradesSnapshot(t))
@@ -163,7 +164,7 @@ func TestGradesLevelRestoreSkipsAndReportsConflicts(t *testing.T) {
 	require.NoError(t, superDB.Exec(`INSERT INTO monthly_grades (tenant_id, enrollment_id, subject_id, teacher_id, month, value, captured_by)
 		VALUES (?, ?, ?, ?, '2026-09-01', 6, ?)`, tenantG, laEnrollment, laSubject, laPerson, laPerson).Error)
 
-	rep, err := repo.RestoreLevelBatch(ctx, batch)
+	rep, err := repo.RestoreLevelBatch(ctx, batch, nil)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), rep.Restored["monthlyGrades"])
 	require.Len(t, rep.Skipped, 1)
@@ -197,6 +198,9 @@ func TestGradesLevelPurgeHonoursTheRetention(t *testing.T) {
 	var left int64
 	require.NoError(t, superDB.Raw("SELECT count(*) FROM grades_deletion_archive WHERE batch_id = ?", batch).Scan(&left).Error)
 	assert.Zero(t, left)
+
+	_, err = repo.RestoreLevelBatch(ctx, batch, nil)
+	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err), "a purged batch is NotFound, never a silent success")
 }
 
 func TestGradesLevelTrashIsTenantIsolated(t *testing.T) {
@@ -213,9 +217,8 @@ func TestGradesLevelTrashIsTenantIsolated(t *testing.T) {
 	for kind, n := range counts {
 		assert.Zero(t, n, "tenant B sees none of G's %s", kind)
 	}
-	rep, err := other.RestoreLevelBatch(ctx, batch)
-	require.NoError(t, err)
-	assert.Empty(t, rep.Restored, "B cannot restore G's batch")
+	_, err = other.RestoreLevelBatch(ctx, batch, nil)
+	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err), "B cannot even see G's batch")
 	assert.Equal(t, afterArchive, gradesSnapshot(t))
 
 	db, err := open(appDSN)
@@ -233,4 +236,97 @@ func TestGradesLevelTrashIsTenantIsolated(t *testing.T) {
 		return tx.Raw("SELECT count(*) FROM grades_deletion_archive").Scan(&visible).Error
 	}))
 	assert.Zero(t, visible, "RLS hides G's archive rows from B")
+}
+
+// archivedG counts a batch's archived rows of one table (the marker aside).
+func archivedG(t *testing.T, batch, table string) int64 {
+	t.Helper()
+	var n int64
+	require.NoError(t, superDB.Raw("SELECT count(*) FROM grades_deletion_archive WHERE batch_id = ? AND table_name = ?",
+		batch, table).Scan(&n).Error)
+	return n
+}
+
+// Review finding 3: what did not fit stays archived, and a retry after the
+// clash is cleared brings exactly that back.
+func TestGradesLevelSkippedRowsStayArchivedUntilARetryFits(t *testing.T) {
+	seedGradesLevel(t)
+	ctx := context.Background()
+	repo := appRepo(t, tenantG)
+	const batch = "c0000000-0000-0000-0000-00000000f005"
+	before := gradesSnapshot(t)
+	_, err := repo.ArchiveLevel(ctx, batch, laScope)
+	require.NoError(t, err)
+	require.NoError(t, superDB.Exec(`INSERT INTO monthly_grades (tenant_id, enrollment_id, subject_id, teacher_id, month, value, captured_by)
+		VALUES (?, ?, ?, ?, '2026-09-01', 6, ?)`, tenantG, laEnrollment, laSubject, laPerson, laPerson).Error)
+
+	rep, err := repo.RestoreLevelBatch(ctx, batch, nil)
+	require.NoError(t, err)
+	require.Len(t, rep.Skipped, 1)
+	assert.Equal(t, int64(1), archivedG(t, batch, "monthly_grades"), "the skipped grade stays in the trash")
+	assert.Zero(t, archivedG(t, batch, "report_cards"), "what went back left the trash")
+
+	require.NoError(t, superDB.Exec("DELETE FROM monthly_grades WHERE tenant_id = ? AND enrollment_id = ? AND value = 6",
+		tenantG, laEnrollment).Error)
+	again, err := repo.RestoreLevelBatch(ctx, batch, nil)
+	require.NoError(t, err)
+	assert.Empty(t, again.Skipped)
+	assert.Equal(t, wantGradesCounts, again.Restored, "the report accumulates across retries")
+	assert.Zero(t, archivedG(t, batch, "monthly_grades"))
+	assert.Equal(t, before, gradesSnapshot(t))
+}
+
+// Review finding 6: grades of an enrollment students could not restore stay in
+// the trash and are reported; the rest of the level comes back.
+func TestGradesLevelRestoreKeepsUnrestoredEnrollmentsArchived(t *testing.T) {
+	seedGradesLevel(t)
+	ctx := context.Background()
+	repo := appRepo(t, tenantG)
+	const batch = "c0000000-0000-0000-0000-00000000f006"
+	_, err := repo.ArchiveLevel(ctx, batch, laScope)
+	require.NoError(t, err)
+
+	rep, err := repo.RestoreLevelBatch(ctx, batch, []string{laEnrollment})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), rep.Restored["periodClosures"], "the term's closure is not the enrollment's")
+	skipped := map[string]int64{}
+	for _, sk := range rep.Skipped {
+		skipped[sk.Kind] = sk.Count
+		assert.NotEmpty(t, sk.Reason)
+	}
+	assert.Equal(t, map[string]int64{
+		"monthlyGrades": 1, "gradeEntries": 1, "reportCards": 1, "reportCardLines": 1, "gradesOutbox": 1,
+	}, skipped)
+	for _, table := range []string{"monthly_grades", "grade_entries", "report_cards", "report_card_lines", "grades_outbox"} {
+		assert.Equal(t, int64(1), archivedG(t, batch, table), "%s of the unrestored enrollment stays archived", table)
+	}
+	var live int64
+	require.NoError(t, superDB.Raw("SELECT count(*) FROM monthly_grades WHERE tenant_id = ? AND enrollment_id = ?",
+		tenantG, laEnrollment).Scan(&live).Error)
+	assert.Zero(t, live)
+}
+
+// Review finding 8: the gateway purges one batch at a time.
+func TestGradesLevelPurgeBatchTouchesOnlyThatBatch(t *testing.T) {
+	seedGradesLevel(t)
+	ctx := context.Background()
+	repo := appRepo(t, tenantG)
+	const doomed, kept = "c0000000-0000-0000-0000-00000000f007", "c0000000-0000-0000-0000-00000000f008"
+	_, err := repo.ArchiveLevel(ctx, doomed, laScope)
+	require.NoError(t, err)
+	_, err = repo.ArchiveLevel(ctx, kept, levelarchive.Scope{LevelID: byLevel, TermIDs: []string{byTerm}})
+	require.NoError(t, err)
+
+	n, err := repo.PurgeLevelBatch(ctx, doomed)
+	require.NoError(t, err)
+	assert.Equal(t, int64(7), n, "six data rows and the marker")
+	var left, keptRows int64
+	require.NoError(t, superDB.Raw("SELECT count(*) FROM grades_deletion_archive WHERE batch_id = ?", doomed).Scan(&left).Error)
+	require.NoError(t, superDB.Raw("SELECT count(*) FROM grades_deletion_archive WHERE batch_id = ?", kept).Scan(&keptRows).Error)
+	assert.Zero(t, left)
+	assert.Positive(t, keptRows)
+
+	n, err = repo.PurgeLevelBatch(ctx, doomed)
+	require.NoError(t, err)
+	assert.Zero(t, n, "purging twice is harmless")
 }

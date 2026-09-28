@@ -22,7 +22,12 @@ const (
 )
 
 // stubLevelArchive is the repository behind a real LevelArchiveService.
-type stubLevelArchive struct{ scope levelarchive.Scope }
+type stubLevelArchive struct {
+	scope  levelarchive.Scope
+	skip   []string
+	batch  string
+	missed bool
+}
 
 func (s *stubLevelArchive) PreviewLevelDeletion(_ context.Context, sc levelarchive.Scope) (levelarchive.Counts, error) {
 	s.scope = sc
@@ -32,13 +37,21 @@ func (s *stubLevelArchive) ArchiveLevel(_ context.Context, _ string, sc levelarc
 	s.scope = sc
 	return levelarchive.Counts{"monthlyGrades": 5}, nil
 }
-func (s *stubLevelArchive) RestoreLevelBatch(context.Context, string) (levelarchive.Report, error) {
+func (s *stubLevelArchive) RestoreLevelBatch(_ context.Context, _ string, skip []string) (levelarchive.Report, error) {
+	s.skip = skip
+	if s.missed {
+		return levelarchive.Report{}, levelarchive.ErrBatchNotFound
+	}
 	rep := levelarchive.NewReport()
 	rep.Record("monthlyGrades", 4, 1, "ya existe")
 	return rep, nil
 }
 func (s *stubLevelArchive) PurgeLevelArchives(context.Context, time.Time) (int64, error) {
 	return 9, nil
+}
+func (s *stubLevelArchive) PurgeLevelBatch(_ context.Context, batch string) (int64, error) {
+	s.batch = batch
+	return 3, nil
 }
 
 func levelArchiveHandler(repo *stubLevelArchive) *grpcadapter.GradesHandler {
@@ -66,8 +79,9 @@ func TestLevelArchiveHandlerWireMapping(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(5), arch.Msg.GetCounts()[0].GetCount())
 
-	rest, err := h.RestoreLevelBatch(ctx, connect.NewRequest(&gradesv1.RestoreLevelBatchRequest{BatchId: hBatch}))
+	rest, err := h.RestoreLevelBatch(ctx, connect.NewRequest(&gradesv1.RestoreLevelBatchRequest{BatchId: hBatch, SkipEnrollmentIds: []string{hEnrol}}))
 	require.NoError(t, err)
+	assert.Equal(t, []string{hEnrol}, repo.skip, "the enrollments students could not restore reach the repository")
 	assert.Equal(t, int64(4), rest.Msg.GetRestored()[0].GetCount())
 	require.Len(t, rest.Msg.GetSkipped(), 1)
 	assert.Equal(t, "ya existe", rest.Msg.GetSkipped()[0].GetReason())
@@ -75,6 +89,17 @@ func TestLevelArchiveHandlerWireMapping(t *testing.T) {
 	purge, err := h.PurgeLevelArchives(ctx, connect.NewRequest(&gradesv1.PurgeLevelArchivesRequest{}))
 	require.NoError(t, err)
 	assert.Equal(t, int64(9), purge.Msg.GetPurgedRows())
+
+	one, err := h.PurgeLevelBatch(ctx, connect.NewRequest(&gradesv1.PurgeLevelBatchRequest{BatchId: hBatch}))
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), one.Msg.GetPurgedRows())
+	assert.Equal(t, hBatch, repo.batch)
+}
+
+func TestLevelArchiveHandlerMissingArchiveIsNotFound(t *testing.T) {
+	h := levelArchiveHandler(&stubLevelArchive{missed: true})
+	_, err := h.RestoreLevelBatch(context.Background(), connect.NewRequest(&gradesv1.RestoreLevelBatchRequest{BatchId: hBatch}))
+	assert.Equal(t, connect.CodeNotFound, connect.CodeOf(err), "never a silent success")
 }
 
 func TestLevelArchiveHandlerRefusesAMalformedScope(t *testing.T) {

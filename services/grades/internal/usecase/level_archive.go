@@ -43,13 +43,28 @@ func (s *LevelArchiveService) ArchiveLevel(ctx context.Context, batchID string, 
 	return s.repo.ArchiveLevel(ctx, batch, scope)
 }
 
-// RestoreLevelBatch puts a batch back, reporting what it skipped.
-func (s *LevelArchiveService) RestoreLevelBatch(ctx context.Context, batchID string) (levelarchive.Report, error) {
+// RestoreLevelBatch puts a batch back, reporting what it skipped. Grades of
+// skipEnrollmentIDs (enrollments students could not restore) stay archived.
+func (s *LevelArchiveService) RestoreLevelBatch(ctx context.Context, batchID string, skipEnrollmentIDs []string) (levelarchive.Report, error) {
 	batch, err := levelarchive.NormalizeBatchID(batchID)
 	if err != nil {
 		return levelarchive.Report{}, err
 	}
-	return s.repo.RestoreLevelBatch(ctx, batch)
+	skip, err := levelarchive.NormalizeIDs(skipEnrollmentIDs, "skipped enrollment ids")
+	if err != nil {
+		return levelarchive.Report{}, err
+	}
+	return s.repo.RestoreLevelBatch(ctx, batch, skip)
+}
+
+// PurgeLevelBatch drops one batch's archive (the gateway's retention sweep, on
+// config's clock).
+func (s *LevelArchiveService) PurgeLevelBatch(ctx context.Context, batchID string) (int64, error) {
+	batch, err := levelarchive.NormalizeBatchID(batchID)
+	if err != nil {
+		return 0, err
+	}
+	return s.repo.PurgeLevelBatch(ctx, batch)
 }
 
 // PurgeLevelArchives drops the archives past the retention.

@@ -119,6 +119,16 @@ type LevelRef struct {
 	ID             string
 	GradingEnabled bool
 	Scale          domain.GradingScale
+	// Deleting is true while the level's deletion runs (ADR 0021): writes
+	// that resolve it are refused with levelarchive.LevelBeingDeleted.
+	Deleting bool
+}
+
+// LevelKey is a group's level identity without its scale: its id and whether
+// its deletion is running.
+type LevelKey struct {
+	ID       string
+	Deleting bool
 }
 
 // CycleRef is the grades-owned view of a config cycle: its name and the dates
@@ -138,7 +148,7 @@ type CatalogReader interface {
 	LevelOfGroup(ctx context.Context, groupID string) (LevelRef, error)
 	// LevelIDOfGroup resolves group → grade level → level id only, for checks
 	// that must not depend on the scale (the legacy term check).
-	LevelIDOfGroup(ctx context.Context, groupID string) (string, error)
+	LevelIDOfGroup(ctx context.Context, groupID string) (LevelKey, error)
 	// ActiveCycle is the school's active cycle; false when none is active.
 	ActiveCycle(ctx context.Context) (CycleRef, bool, error)
 	// GroupsOfLevel lists the ids of the groups of a level in a cycle.
@@ -313,10 +323,13 @@ type ReportCardPublisher interface {
 // LevelArchiveRepository moves grades' rows of a deleted level into the
 // service's deletion archive and back (ADR 0021). Archive and restore each run
 // in ONE tenant-bound transaction and are idempotent per batch id; a restore
-// skips — and reports — rows that now conflict.
+// skips — and reports — rows that now conflict, and rows of skipEnrollmentIDs
+// (enrollments students could not restore); skipped rows stay archived. A
+// batch with no archive here is levelarchive.ErrBatchNotFound.
 type LevelArchiveRepository interface {
 	PreviewLevelDeletion(ctx context.Context, scope levelarchive.Scope) (levelarchive.Counts, error)
 	ArchiveLevel(ctx context.Context, batchID string, scope levelarchive.Scope) (levelarchive.Counts, error)
-	RestoreLevelBatch(ctx context.Context, batchID string) (levelarchive.Report, error)
+	RestoreLevelBatch(ctx context.Context, batchID string, skipEnrollmentIDs []string) (levelarchive.Report, error)
 	PurgeLevelArchives(ctx context.Context, cutoff time.Time) (int64, error)
+	PurgeLevelBatch(ctx context.Context, batchID string) (int64, error)
 }
