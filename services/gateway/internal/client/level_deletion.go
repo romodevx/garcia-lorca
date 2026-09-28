@@ -91,6 +91,8 @@ type LevelDeletion struct {
 	Status          string
 	PendingSteps    []string
 	Skipped         []LevelRestoreSkip
+	// RestoringFrom (status restoring) is where the running restore began.
+	RestoringFrom string
 }
 
 // ArchiveLevelRecord is config's archive step input.
@@ -198,6 +200,25 @@ func (c *ConfigClient) MarkLevelDeletionRestored(ctx context.Context, batchID st
 	return levelDeletionOf(res.Msg.GetDeletion()), nil
 }
 
+// BeginLevelRestore marks a trash batch restoring before a restore's first
+// step, so the sweep leaves it alone (ADR 0021).
+func (c *ConfigClient) BeginLevelRestore(ctx context.Context, batchID string) (LevelDeletion, error) {
+	res, err := c.rpc.BeginLevelRestore(ctx, connect.NewRequest(&configv1.BeginLevelRestoreRequest{BatchId: batchID}))
+	if err != nil {
+		return LevelDeletion{}, err
+	}
+	return levelDeletionOf(res.Msg.GetDeletion()), nil
+}
+
+// AbandonLevelRestore puts a batch whose restore failed back where it was.
+func (c *ConfigClient) AbandonLevelRestore(ctx context.Context, batchID string) (LevelDeletion, error) {
+	res, err := c.rpc.AbandonLevelRestore(ctx, connect.NewRequest(&configv1.AbandonLevelRestoreRequest{BatchId: batchID}))
+	if err != nil {
+		return LevelDeletion{}, err
+	}
+	return levelDeletionOf(res.Msg.GetDeletion()), nil
+}
+
 // CancelLevelDeletion closes a fully compensated saga.
 func (c *ConfigClient) CancelLevelDeletion(ctx context.Context, batchID string) (LevelDeletion, error) {
 	res, err := c.rpc.CancelLevelDeletion(ctx, connect.NewRequest(&configv1.CancelLevelDeletionRequest{BatchId: batchID}))
@@ -284,6 +305,7 @@ func levelDeletionOf(d *configv1.LevelDeletion) LevelDeletion {
 		DeletedBy: d.GetDeletedBy(), DeletedByName: d.GetDeletedByName(),
 		DeletedAt: d.GetDeletedAt().AsTime(), RestorableUntil: d.GetRestorableUntil().AsTime(), Status: d.GetStatus(),
 		PendingSteps: d.GetPendingSteps(), Skipped: reportOf([]*configv1.LevelArchiveCount{}, d.GetSkipped()).Skipped,
+		RestoringFrom: d.GetRestoringFrom(),
 	}
 }
 

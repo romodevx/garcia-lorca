@@ -1812,13 +1812,16 @@ paths:
       tags: [config-levels]
       summary: Delete a level into the 7-day trash (steps 2 and 3 of 3)
       description: >
-        Three checks on the server, in this order: the preview token still
-        signs what would be deleted now (409 `PREVIEW_STALE`), `confirmName` is
-        the level's name, trimmed and case-insensitive (400 `NAME_MISMATCH`),
-        and `password` is the caller's, verified by iam exactly as sign-in
-        verifies it in the active mode — the local hash, or Identity Platform
-        when it owns credentials (401 `REAUTH_FAILED`). Throttled like a login
-        (429). Then a saga moves every service's rows into its own archive —
+        Checks on the server, in this order: the preview token is well-formed
+        and unexpired (409 `PREVIEW_STALE`), `confirmName` is the level's name,
+        trimmed and case-insensitive (400 `NAME_MISMATCH`), and `password` is
+        the caller's, verified by iam exactly as sign-in verifies it in the
+        active mode — the local hash, or Identity Platform when it owns
+        credentials (401 `REAUTH_FAILED`). Throttled like a login (429). Then
+        the level is locked FIRST and, under the lock, the token must still
+        sign what would be deleted now; if anything changed the lock is
+        released and the answer is 409 `PREVIEW_STALE` (the token is spent).
+        Then a saga moves every service's rows into its own archive —
         grades, attendance, finance (tuition plans only), uniforms, students
         (enrollments; pupils kept with no level), config (structure, level last)
         — and records the batch. The saga's first step locks the level in
@@ -1908,8 +1911,9 @@ paths:
       description: >
         Batches in the trash, newest first: `deleted`, `failed_partial` (a
         deletion that failed and could not be fully undone — restoring it
-        recovers what was deleted) and `restored_partial` (restored, but some
-        rows did not fit; they stay here and a retry tries them again). The
+        recovers what was deleted), `restored_partial` (restored, but some
+        rows did not fit; they stay here and a retry tries them again) and
+        `restoring` (a restore is running; it is never swept meanwhile). The
         gateway sweeps the trash hourly and before this listing, on config's
         `restorableUntil` (the database's clock). Requires `levels:delete` (owner only);
         `module_config`.
@@ -1952,7 +1956,9 @@ paths:
         could not come back stay archived too. Idempotent: a retry after a
         partial failure (500) restores only what is missing. A
         `failed_partial` batch restores only the services its deletion
-        reached. Requires
+        reached. The batch is marked `restoring` before the first step, so the
+        retention sweep never purges it mid-way; a restore that fails puts it
+        back where it was. Requires
         `levels:delete` (owner only); `module_config`.
       operationId: restoreLevel
       security: [{ sessionCookie: [] }]
@@ -1970,7 +1976,8 @@ paths:
         '409':
           description: >
             `LEVEL_NAME_TAKEN`: another level now has this name. Nothing was
-            restored.
+            restored. `RESTORE_IN_PROGRESS`: another restore of this batch is
+            running.
           headers:
             X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
           content:
@@ -5188,6 +5195,10 @@ components:
         tuitionPlans: { type: integer, format: int64, minimum: 0 }
         uniformItems: { type: integer, format: int64, minimum: 0, description: 'Garments KEPT, left with no level (unresolved).' }
         schoolEvents: { type: integer, format: int64, minimum: 0 }
+        enrollmentTransfers: { type: integer, format: int64, minimum: 0, description: Group changes of the level's enrollments. }
+        attendanceSessions: { type: integer, format: int64, minimum: 0, description: Attendance lists taken. }
+        gradeEntries: { type: integer, format: int64, minimum: 0, description: Per-term grades (the legacy capture). }
+        periodClosures: { type: integer, format: int64, minimum: 0, description: Closed periods. }
       example: { gradeLevels: 3, groups: 6, subjects: 24, terms: 3, teachingAssignments: 24, students: 58, enrollments: 58, attendanceMarks: 4120, monthlyGrades: 1392, reportCards: 58, tuitionPlans: 1, uniformItems: 2, schoolEvents: 1 }
     LevelDeletionPreview:
       type: object
@@ -5245,7 +5256,7 @@ components:
         restorableUntil: { type: string, format: date-time }
         deletedByName: { type: string }
         counts: { $ref: '#/components/schemas/LevelDeletionCounts' }
-        status: { type: string, enum: [deleted, failed_partial, restored_partial] }
+        status: { type: string, enum: [deleted, failed_partial, restored_partial, restoring] }
     LevelRestoreResult:
       type: object
       required: [restored, skipped]

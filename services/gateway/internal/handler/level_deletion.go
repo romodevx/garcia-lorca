@@ -49,6 +49,8 @@ type LevelStructureService interface {
 	ListLevelDeletions(ctx context.Context) ([]client.LevelDeletion, error)
 	GetLevelDeletion(ctx context.Context, batchID string) (client.LevelDeletion, error)
 	ListLevels(ctx context.Context) ([]client.LevelResult, error)
+	BeginLevelRestore(ctx context.Context, batchID string) (client.LevelDeletion, error)
+	AbandonLevelRestore(ctx context.Context, batchID string) (client.LevelDeletion, error)
 }
 
 // LevelPeopleService is students' side: its preview also names the people, and
@@ -135,6 +137,8 @@ const (
 	msgDeletionInProgress  = "Ya se está eliminando este nivel; espera un momento y revisa la Papelera."
 	codeDeletionIncomplete = "DELETION_INCOMPLETE"
 	codeRestoreIncomplete  = "RESTORE_INCOMPLETE"
+	codeRestoreInProgress  = "RESTORE_IN_PROGRESS"
+	msgRestoreInProgress   = "Ya se está restaurando este nivel; espera un momento y revisa la Papelera."
 )
 
 // Batch states, as config's ledger names them.
@@ -142,6 +146,8 @@ const (
 	deletionStatusDeleted         = "deleted"
 	deletionStatusFailedPartial   = "failed_partial"
 	deletionStatusRestoredPartial = "restored_partial"
+	deletionStatusRestoring       = "restoring"
+	deletionStatusDeleting        = "deleting"
 	deletionStatusPurged          = "purged"
 )
 
@@ -175,12 +181,14 @@ const (
 // what hangs off them. It is the deletion order reversed.
 var restoreOrder = []string{stepConfig, stepStudents, stepUniforms, stepFinance, stepAttendance, stepGrades}
 
-// The kinds the preview and the trash show. Services report more (term months,
-// transfers, report card lines…); those are signed into the token and recorded,
-// but these are what a person reads.
+// The kinds the preview and the trash show: every kind a service archives that
+// a director would recognise. The rest (the level itself, term months, report
+// card lines, grades' outbox) are signed into the token and recorded, but mean
+// nothing to a person.
 var shownKinds = []string{
 	"gradeLevels", "groups", "subjects", "terms", "teachingAssignments", "students", "enrollments",
-	"attendanceMarks", "monthlyGrades", "reportCards", "tuitionPlans", "uniformItems", "schoolEvents",
+	"enrollmentTransfers", "attendanceSessions", "attendanceMarks", "monthlyGrades", "gradeEntries",
+	"periodClosures", "reportCards", "tuitionPlans", "uniformItems", "schoolEvents",
 }
 
 // keptKinds are finance's rows that STAY: reported, never archived.
@@ -312,11 +320,14 @@ type deleteLevelResponse struct {
 
 // Delete: POST /api/v1/config/levels/{id}/delete
 //
-// Three checks, all here on the server, in this order: the preview the
-// director confirmed is still what would be deleted (409 PREVIEW_STALE), the
-// typed name is the level's (400 NAME_MISMATCH), and the password is theirs
-// (401 REAUTH_FAILED, checked by iam in whichever mode sign-in runs). Only then
-// the saga.
+// The checks, all here on the server: the level is not already being deleted
+// (409 DELETION_IN_PROGRESS), the confirm token is live (409 PREVIEW_STALE),
+// the typed name is the level's (400 NAME_MISMATCH) and the password is theirs
+// (401 REAUTH_FAILED, checked by iam in whichever mode sign-in runs). Then the
+// freeze (BeginLevelDeletion) FIRST, and only under it the scope is resolved
+// and its counts compared with the token's: a grade captured between a check
+// and the lock would otherwise slip past the preview. Counts that moved let
+// the freeze go and answer 409 PREVIEW_STALE. Only then the saga.
 func (h *LevelDeletionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	p, ok := middleware.PrincipalFrom(r.Context())
 	if !ok {
@@ -329,29 +340,8 @@ func (h *LevelDeletionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.sweepLazily(r.Context())
-	plan, err := h.resolve(r.Context(), r.PathValue("id"))
-	if err != nil {
-		writeConnectError(w, err)
-		return
-	}
-	if plan.deleting {
-		writeCodedError(w, http.StatusConflict, codeDeletionInProgress, msgDeletionInProgress)
-		return
-	}
-	if !h.d.Tokens.Verify(req.ConfirmToken, p.TenantID, plan.scope.LevelID, plan.counts) {
-		writeCodedError(w, http.StatusConflict, codePreviewStale, msgPreviewStale)
-		return
-	}
-	if !strings.EqualFold(strings.TrimSpace(req.ConfirmName), strings.TrimSpace(plan.name)) {
-		writeCodedError(w, http.StatusBadRequest, codeNameMismatch, msgNameMismatch)
-		return
-	}
-	if err := h.d.Passwords.VerifyPassword(r.Context(), middleware.TokenFrom(r), req.Password); err != nil {
-		if connect.CodeOf(err) == connect.CodeUnauthenticated {
-			writeCodedError(w, http.StatusUnauthorized, codeReauthFailed, msgReauthFailed)
-			return
-		}
-		writeConnectError(w, err)
+	st, ok := h.confirmable(w, r, req)
+	if !ok {
 		return
 	}
 
@@ -363,10 +353,21 @@ func (h *LevelDeletionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	// The lock: one saga per level, one saga per token. A double click's second
 	// request stops here (DELETION_IN_PROGRESS), before any step runs.
 	if _, err := h.d.Config.BeginLevelDeletion(ctx, client.BeginLevelDeletionRecord{
-		BatchID: batch, LevelID: plan.scope.LevelID, TokenHash: TokenHash(req.ConfirmToken),
+		BatchID: batch, LevelID: st.LevelID, TokenHash: TokenHash(req.ConfirmToken),
 		DeletedBy: p.UserID, DeletedByName: takerName(ctx, h.d.Users, p),
 	}); err != nil {
 		writeConnectError(w, err)
+		return
+	}
+	plan, err := h.resolve(ctx, st.LevelID)
+	if err != nil {
+		h.letGo(detached, batch)
+		writeConnectError(w, err)
+		return
+	}
+	if !h.d.Tokens.Verify(req.ConfirmToken, p.TenantID, plan.scope.LevelID, plan.counts) {
+		h.letGo(detached, batch)
+		writeCodedError(w, http.StatusConflict, codePreviewStale, msgPreviewStale)
 		return
 	}
 	rec, err := h.runSaga(ctx, batch, plan)
@@ -380,6 +381,48 @@ func (h *LevelDeletionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		BatchID: batch, DeletedAt: rec.deletion.DeletedAt, RestorableUntil: rec.deletion.RestorableUntil,
 		Counts: shown(rec.deletion.Counts),
 	})
+}
+
+// confirmable runs the checks that need no lock: the level exists and is not
+// being deleted, the token is live, the name is the level's and the password
+// the caller's. It writes the refusal and answers false on any of them.
+func (h *LevelDeletionHandler) confirmable(w http.ResponseWriter, r *http.Request, req deleteLevelRequest) (client.LevelStructure, bool) {
+	st, err := h.d.Config.PreviewLevelDeletion(r.Context(), r.PathValue("id"))
+	switch {
+	case err != nil:
+		writeConnectError(w, err)
+		return st, false
+	case st.Deleting:
+		writeCodedError(w, http.StatusConflict, codeDeletionInProgress, msgDeletionInProgress)
+		return st, false
+	case !h.d.Tokens.Live(req.ConfirmToken):
+		writeCodedError(w, http.StatusConflict, codePreviewStale, msgPreviewStale)
+		return st, false
+	case !strings.EqualFold(strings.TrimSpace(req.ConfirmName), strings.TrimSpace(st.LevelName)):
+		writeCodedError(w, http.StatusBadRequest, codeNameMismatch, msgNameMismatch)
+		return st, false
+	}
+	if err := h.d.Passwords.VerifyPassword(r.Context(), middleware.TokenFrom(r), req.Password); err != nil {
+		if connect.CodeOf(err) == connect.CodeUnauthenticated {
+			writeCodedError(w, http.StatusUnauthorized, codeReauthFailed, msgReauthFailed)
+			return st, false
+		}
+		writeConnectError(w, err)
+		return st, false
+	}
+	return st, true
+}
+
+// letGo releases a freeze taken for a deletion that never started (nothing
+// was archived): the batch is cancelled. A failure only lingers until the
+// sweep takes the batch for dead.
+func (h *LevelDeletionHandler) letGo(detached context.Context, batch string) {
+	ctx, cancel := context.WithTimeout(detached, compensationTimeout)
+	defer cancel()
+	if _, err := h.d.Config.CancelLevelDeletion(ctx, batch); err != nil {
+		h.d.Log.ErrorContext(ctx, "level deletion freeze was not released",
+			slog.String("batch", batch), slog.Any("error", err))
+	}
 }
 
 // sagaStep is one service's archive.
@@ -451,7 +494,12 @@ func (o restoreOutcome) clean() bool {
 // "missing" otherwise. stopOnError stops at the first failure (a restore must
 // not bring back rows whose structure did not come back); a compensation keeps
 // going to undo as much as it can.
-func (h *LevelDeletionHandler) restoreSteps(ctx context.Context, batch string, steps []string, tolerateMissing, stopOnError bool) restoreOutcome {
+func (h *LevelDeletionHandler) restoreSteps(ctx context.Context, batch string, plan restorePlan) restoreOutcome {
+	return h.runRestoreSteps(ctx, batch, plan.steps, plan.tolerate, true)
+}
+
+// runRestoreSteps is restoreSteps with the compensation's knobs.
+func (h *LevelDeletionHandler) runRestoreSteps(ctx context.Context, batch string, steps []string, tolerateMissing, stopOnError bool) restoreOutcome {
 	want := make(map[string]bool, len(steps))
 	for _, s := range steps {
 		want[s] = true
@@ -525,7 +573,7 @@ func (h *LevelDeletionHandler) failDeletion(detached context.Context, w http.Res
 	defer cancel()
 	h.d.Log.ErrorContext(ctx, "level deletion failed; compensating",
 		slog.String("batch", batch), slog.String("level", levelID), slog.Any("error", cause))
-	out := h.restoreSteps(ctx, batch, run.ran, true, false)
+	out := h.runRestoreSteps(ctx, batch, run.ran, true, false)
 	if out.clean() {
 		if _, err := h.d.Config.CancelLevelDeletion(ctx, batch); err != nil {
 			// Everything came back; only the lock lingers until the sweep
@@ -563,8 +611,8 @@ type trashItem struct {
 
 // Trash: GET /api/v1/config/level-trash — the batches still restorable or
 // awaiting the sweep, newest first: deleted, failed_partial (a deletion that
-// failed and could not be fully undone) and restored_partial (rows that did
-// not fit stay here for a retry).
+// failed and could not be fully undone), restored_partial (rows that did not
+// fit stay here for a retry) and restoring (a restore running right now).
 func (h *LevelDeletionHandler) Trash(w http.ResponseWriter, r *http.Request) {
 	h.sweepLazily(r.Context())
 	recs, err := h.d.Config.ListLevelDeletions(r.Context())
@@ -574,7 +622,7 @@ func (h *LevelDeletionHandler) Trash(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]trashItem, 0, len(recs))
 	for _, d := range recs {
-		if !inTrash(d.Status) {
+		if !inTrash(d.Status) && d.Status != deletionStatusRestoring {
 			continue
 		}
 		items = append(items, trashItem{
@@ -598,15 +646,19 @@ type restoreResponse struct {
 
 // Restore: POST /api/v1/config/level-trash/{batchId}/restore
 //
-// Config first (its restore also judges the 7-day window, on the database's
-// clock), then students, whose unrestored enrollments grades and attendance
-// then keep archived. A deleted batch asks every step and a missing archive is
-// an error (410 TRASH_EXPIRED when nothing came back, 500 RESTORE_INCOMPLETE
-// naming the missing part otherwise), never a silent
-// success; a failed_partial batch asks only its pending steps, and a step that
-// never archived is fine. Every step converges on retry. Only when every step
-// answers is the batch closed: restored, or restored_partial if something did
-// not fit (it stays in the trash).
+// Config first marks the batch restoring (compare-and-set, the 7-day window
+// judged on the database's clock): the sweep never purges a restoring batch,
+// and a second restore is refused (409 RESTORE_IN_PROGRESS). The steps follow
+// the status the restore started from. Config's structure comes back first,
+// then students, whose unrestored enrollments grades and attendance then keep
+// archived. A deleted batch asks every step and a missing archive is an error
+// (410 TRASH_EXPIRED when nothing came back, 500 RESTORE_INCOMPLETE naming the
+// missing part otherwise), never a silent success; a failed_partial batch asks
+// only its pending steps, and a step that never archived is fine. Every step
+// converges on retry. Only when every step answers is the batch closed:
+// restored, or restored_partial if something did not fit (it stays in the
+// trash). Any other end puts the batch back where it was (AbandonLevelRestore;
+// config's watchdog does it after 30 minutes if even that fails).
 func (h *LevelDeletionHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	batch := r.PathValue("batchId")
 	h.sweepLazily(r.Context())
@@ -621,33 +673,23 @@ func (h *LevelDeletionHandler) Restore(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), compensationTimeout)
 	defer cancel()
-	steps, tolerate := restoreOrder, false
-	if rec.Status == deletionStatusFailedPartial {
-		steps, tolerate = rec.PendingSteps, true
+	begun, err := h.d.Config.BeginLevelRestore(ctx, batch)
+	if err != nil {
+		if connectErrorCode(err) == codeTrashExpired {
+			writeCodedError(w, http.StatusGone, codeTrashExpired, msgTrashExpired)
+			return
+		}
+		writeConnectError(w, err)
+		return
 	}
-	if rec.Status == deletionStatusRestoredPartial {
-		tolerate = true
-	}
-	out := h.restoreSteps(ctx, batch, steps, tolerate, true)
-	switch {
-	case connectErrorCode(out.err) == codeTrashExpired:
-		writeCodedError(w, http.StatusGone, codeTrashExpired, msgTrashExpired)
-		return
-	case len(out.failed) > 0 && len(out.reports) == 0 && connectErrorCode(out.err) != "":
-		// A coded refusal before anything came back (config's exact name clash).
-		writeConnectError(w, out.err)
-		return
-	case len(out.failed) > 0:
-		http.Error(w, msgRestoreHalfway, http.StatusInternalServerError)
-		return
-	case len(out.missing) > 0 && len(out.reports) == 0:
-		writeCodedError(w, http.StatusGone, codeTrashExpired, msgTrashExpired)
-		return
-	case len(out.missing) > 0:
-		h.d.Log.ErrorContext(ctx, "level restore found archives missing",
-			slog.String("batch", batch), slog.Any("missing", out.missing))
-		writeCodedError(w, http.StatusInternalServerError, codeRestoreIncomplete, fmt.Sprintf(
-			"Parte de este nivel ya no estaba en la papelera (%s); lo demás se restauró", strings.Join(out.missing, ", ")))
+	closed := false
+	defer func() {
+		if !closed {
+			h.abandonRestore(ctx, batch)
+		}
+	}()
+	out := h.restoreSteps(ctx, batch, restoreStepsFrom(begun))
+	if !h.restoreAnswered(ctx, w, batch, out) {
 		return
 	}
 	partial := len(out.skipped) > 0
@@ -655,9 +697,63 @@ func (h *LevelDeletionHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, err)
 		return
 	}
+	closed = true
 	h.d.Log.InfoContext(ctx, "level restored from the trash",
 		slog.String("batch", batch), slog.String("level", rec.LevelID), slog.Bool("partial", partial))
 	writeJSON(w, http.StatusOK, mergeReports(out.reports))
+}
+
+// restorePlan is which steps a restore asks and whether a step with no
+// archive is fine.
+type restorePlan struct {
+	steps    []string
+	tolerate bool
+}
+
+// restoreStepsFrom picks the steps by the status the restore started from: a
+// failed_partial batch asks only its pending steps; a restored_partial one
+// tolerates the steps already done.
+func restoreStepsFrom(begun client.LevelDeletion) restorePlan {
+	switch begun.RestoringFrom {
+	case deletionStatusFailedPartial:
+		return restorePlan{steps: begun.PendingSteps, tolerate: true}
+	case deletionStatusRestoredPartial:
+		return restorePlan{steps: restoreOrder, tolerate: true}
+	}
+	return restorePlan{steps: restoreOrder}
+}
+
+// restoreAnswered writes the refusal of a restore that did not fully answer
+// and reports false; true lets the batch close.
+func (h *LevelDeletionHandler) restoreAnswered(ctx context.Context, w http.ResponseWriter, batch string, out restoreOutcome) bool {
+	switch {
+	case connectErrorCode(out.err) == codeTrashExpired:
+		writeCodedError(w, http.StatusGone, codeTrashExpired, msgTrashExpired)
+	case len(out.failed) > 0 && len(out.reports) == 0 && connectErrorCode(out.err) != "":
+		// A coded refusal before anything came back (config's exact name clash).
+		writeConnectError(w, out.err)
+	case len(out.failed) > 0:
+		http.Error(w, msgRestoreHalfway, http.StatusInternalServerError)
+	case len(out.missing) > 0 && len(out.reports) == 0:
+		writeCodedError(w, http.StatusGone, codeTrashExpired, msgTrashExpired)
+	case len(out.missing) > 0:
+		h.d.Log.ErrorContext(ctx, "level restore found archives missing",
+			slog.String("batch", batch), slog.Any("missing", out.missing))
+		writeCodedError(w, http.StatusInternalServerError, codeRestoreIncomplete, fmt.Sprintf(
+			"Parte de este nivel ya no estaba en la papelera (%s); lo demás se restauró", strings.Join(out.missing, ", ")))
+	default:
+		return true
+	}
+	return false
+}
+
+// abandonRestore puts a batch whose restore did not close back where it was.
+// A failure is logged: config's watchdog does the same after 30 minutes.
+func (h *LevelDeletionHandler) abandonRestore(ctx context.Context, batch string) {
+	if _, err := h.d.Config.AbandonLevelRestore(ctx, batch); err != nil {
+		h.d.Log.ErrorContext(ctx, "level restore could not fall back; the watchdog will",
+			slog.String("batch", batch), slog.Any("error", err))
+	}
 }
 
 // restorable refuses a batch that is gone (404), purged (410), or whose level
@@ -666,6 +762,9 @@ func (h *LevelDeletionHandler) Restore(w http.ResponseWriter, r *http.Request) {
 // config's to judge, on the database's clock.
 func (h *LevelDeletionHandler) restorable(ctx context.Context, w http.ResponseWriter, rec client.LevelDeletion) bool {
 	switch {
+	case rec.Status == deletionStatusRestoring:
+		writeCodedError(w, http.StatusConflict, codeRestoreInProgress, msgRestoreInProgress)
+		return false
 	case rec.Status == deletionStatusPurged:
 		writeCodedError(w, http.StatusGone, codeTrashExpired, msgTrashExpired)
 		return false
@@ -758,6 +857,10 @@ func (h *LevelDeletionHandler) Sweep(ctx context.Context) (int64, error) {
 		firstErr error
 	)
 	for _, rec := range expired {
+		if rec.Status == deletionStatusRestoring || rec.Status == deletionStatusDeleting {
+			// Config never lists a running batch; an older config might.
+			continue
+		}
 		if err := h.purgeBatch(ctx, rec.BatchID); err != nil {
 			h.d.Log.ErrorContext(ctx, "level trash purge failed; retried on the next sweep",
 				slog.String("batch", rec.BatchID), slog.Any("error", err))

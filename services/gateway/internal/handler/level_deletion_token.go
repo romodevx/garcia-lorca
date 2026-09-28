@@ -84,6 +84,25 @@ func (t *DeletionTokens) Verify(token, tenantID, levelID string, counts client.L
 	return hmac.Equal(got, t.sign(tenantID, levelID, counts, stamp))
 }
 
+// Live reports whether token is well-formed and unexpired, without its
+// signature: the delete checks it before taking the freeze, then compares the
+// counts (Verify) under the freeze.
+func (t *DeletionTokens) Live(token string) bool {
+	parts := strings.Split(token, ".")
+	if len(parts) != tokenParts {
+		return false
+	}
+	exp, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || t.now().UTC().After(time.Unix(exp, 0)) {
+		return false
+	}
+	_, err = base64.RawURLEncoding.DecodeString(parts[2])
+	return err == nil
+}
+
+// tokenParts is <exp>.<nonce>.<mac>.
+const tokenParts = 3
+
 func (t *DeletionTokens) sign(tenantID, levelID string, counts client.LevelCounts, stamp string) []byte {
 	kinds := make([]string, 0, len(counts))
 	for k, v := range counts {

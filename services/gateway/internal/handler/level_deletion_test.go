@@ -59,6 +59,32 @@ type fakeLevelConfig struct {
 	expired      []client.LevelDeletion
 	purgedMarked []string
 	restoreSkips []client.LevelRestoreSkip
+	// restoreStartErr refuses BeginLevelRestore; restoringFrom overrides the
+	// status the restore starts from (default: the Get's status).
+	restoreStartErr error
+	restoringFrom   string
+	abandoned       bool
+	markErr         error
+}
+
+func (f *fakeLevelConfig) BeginLevelRestore(context.Context, string) (client.LevelDeletion, error) {
+	f.log.add("restore-start:config")
+	if f.restoreStartErr != nil {
+		return client.LevelDeletion{}, f.restoreStartErr
+	}
+	rec := f.deletion
+	rec.RestoringFrom = rec.Status
+	if f.restoringFrom != "" {
+		rec.RestoringFrom = f.restoringFrom
+	}
+	rec.Status = "restoring"
+	return rec, nil
+}
+
+func (f *fakeLevelConfig) AbandonLevelRestore(context.Context, string) (client.LevelDeletion, error) {
+	f.log.add("restore-abandon:config")
+	f.abandoned = true
+	return f.deletion, nil
 }
 
 func (f *fakeLevelConfig) PreviewLevelDeletion(context.Context, string) (client.LevelStructure, error) {
@@ -100,6 +126,9 @@ func (f *fakeLevelConfig) RestoreLevelBatch(ctx context.Context, _ string) (clie
 
 func (f *fakeLevelConfig) MarkLevelDeletionRestored(_ context.Context, _ string, partial bool) (client.LevelDeletion, error) {
 	f.log.add("mark:config")
+	if f.markErr != nil {
+		return client.LevelDeletion{}, f.markErr
+	}
 	f.marked, f.markedPart = true, partial
 	return client.LevelDeletion{Status: "restored"}, nil
 }
@@ -161,11 +190,12 @@ type fakeLevelPeople struct {
 	skipped    []client.LevelRestoreSkip
 	unrestored []string
 	scope      client.LevelScope
+	previewErr error
 }
 
 func (f *fakeLevelPeople) PreviewLevelDeletion(_ context.Context, s client.LevelScope) (client.StudentsLevelPreview, error) {
 	f.scope = s
-	return f.preview, nil
+	return f.preview, f.previewErr
 }
 
 func (f *fakeLevelPeople) ArchiveLevel(context.Context, string, client.LevelScope) (client.LevelCounts, error) {
@@ -195,10 +225,14 @@ type fakeLevelData struct {
 	skipIDs    []string
 	purgeErr   error
 	scope      client.LevelScope
+	onPreview  func() // observes when the preview runs (e.g. under the freeze)
 }
 
 func (f *fakeLevelData) PreviewLevelDeletion(_ context.Context, s client.LevelScope) (client.LevelCounts, error) {
 	f.scope = s
+	if f.onPreview != nil {
+		f.onPreview()
+	}
 	return f.counts, nil
 }
 
@@ -404,15 +438,18 @@ func TestLevelDeletionTripleValidation(t *testing.T) {
 		passwordOK bool
 		wantStatus int
 		wantCode   string
+		// froze: the refusal came from the counts, compared under the freeze
+		// (taken, then let go); every other refusal takes no lock at all.
+		froze bool
 	}{
 		{"stale: the data changed since the preview", func(rig *levelDeletionRig) { rig.grades.counts["monthlyGrades"]++ },
-			nil, "Primaria", true, http.StatusConflict, "PREVIEW_STALE"},
+			nil, "Primaria", true, http.StatusConflict, "PREVIEW_STALE", true},
 		{"stale: the preview expired", func(rig *levelDeletionRig) { rig.now = rig.now.Add(11 * time.Minute) },
-			nil, "Primaria", true, http.StatusConflict, "PREVIEW_STALE"},
-		{"stale: no token", nil, func(string) string { return "" }, "Primaria", true, http.StatusConflict, "PREVIEW_STALE"},
-		{"the typed name does not match", nil, nil, "Secundaria", true, http.StatusBadRequest, "NAME_MISMATCH"},
-		{"wrong password", nil, nil, "Primaria", false, http.StatusUnauthorized, "REAUTH_FAILED"},
-		{"name is trimmed and case-insensitive", nil, nil, "  pRIMARIA ", true, http.StatusOK, ""},
+			nil, "Primaria", true, http.StatusConflict, "PREVIEW_STALE", false},
+		{"stale: no token", nil, func(string) string { return "" }, "Primaria", true, http.StatusConflict, "PREVIEW_STALE", false},
+		{"the typed name does not match", nil, nil, "Secundaria", true, http.StatusBadRequest, "NAME_MISMATCH", false},
+		{"wrong password", nil, nil, "Primaria", false, http.StatusUnauthorized, "REAUTH_FAILED", false},
+		{"name is trimmed and case-insensitive", nil, nil, "  pRIMARIA ", true, http.StatusOK, "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -430,8 +467,12 @@ func TestLevelDeletionTripleValidation(t *testing.T) {
 			w := rig.delete(t, deleteBody(token, tc.confirm, "pw"))
 			assert.Equal(t, tc.wantStatus, w.Code, w.Body.String())
 			assert.Equal(t, tc.wantCode, w.Header().Get("X-Error-Code"))
-			if tc.wantStatus != http.StatusOK {
-				assert.Empty(t, rig.log.calls, "a refused deletion archives nothing")
+			switch {
+			case tc.froze:
+				assert.Equal(t, []string{"begin:config", "cancel:config"}, rig.log.calls,
+					"the counts are compared under the freeze; a stale preview lets it go and archives nothing")
+			case tc.wantStatus != http.StatusOK:
+				assert.Empty(t, rig.log.calls, "a refused deletion takes no lock and archives nothing")
 			}
 		})
 	}
@@ -610,8 +651,9 @@ func TestLevelRestore(t *testing.T) {
 		w := rig.restore(t)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		assert.Equal(t, []string{
+			"restore-start:config",
 			"restore:config", "restore:students", "restore:uniforms", "restore:finance", "restore:attendance", "restore:grades", "mark:config",
-		}, rig.log.calls)
+		}, rig.log.calls, "the batch is marked restoring before the first step")
 		assert.True(t, rig.cfg.markedPart, "a skip keeps the batch in the trash as restored_partial")
 		assert.Positive(t, rig.cfg.sweeps, "the sweep runs lazily first")
 		var body struct {
@@ -661,7 +703,7 @@ func TestLevelRestore(t *testing.T) {
 		w := rig.restore(t)
 		assert.Equal(t, http.StatusGone, w.Code)
 		assert.Equal(t, "TRASH_EXPIRED", w.Header().Get("X-Error-Code"))
-		assert.Equal(t, []string{"restore:config"}, rig.log.calls)
+		assert.Equal(t, []string{"restore-start:config", "restore:config", "restore-abandon:config"}, rig.log.calls)
 		assert.False(t, rig.cfg.marked)
 	})
 
@@ -691,6 +733,7 @@ func TestLevelRestore(t *testing.T) {
 		assert.Equal(t, "RESTORE_INCOMPLETE", w.Header().Get("X-Error-Code"))
 		assert.Contains(t, w.Body.String(), "finance")
 		assert.False(t, rig.cfg.marked)
+		assert.True(t, rig.cfg.abandoned, "the batch falls back from restoring")
 	})
 
 	t.Run("a failed_partial batch restores only its pending steps; a step that never archived is fine", func(t *testing.T) {
@@ -700,7 +743,7 @@ func TestLevelRestore(t *testing.T) {
 		rig.grades.restoreErr = connect.NewError(connect.CodeNotFound, errors.New("never archived"))
 		w := rig.restore(t)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-		assert.Equal(t, []string{"restore:students", "restore:attendance", "restore:grades", "mark:config"}, rig.log.calls)
+		assert.Equal(t, []string{"restore-start:config", "restore:students", "restore:attendance", "restore:grades", "mark:config"}, rig.log.calls)
 	})
 
 	t.Run("nothing found at all is an expired batch", func(t *testing.T) {
@@ -718,6 +761,7 @@ func TestLevelRestore(t *testing.T) {
 		w := rig.restore(t)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 		assert.False(t, rig.cfg.marked, "not closed: a retry finishes it")
+		assert.True(t, rig.cfg.abandoned, "back where it was, so the next restore may start")
 	})
 }
 
@@ -776,7 +820,7 @@ func TestLevelDeletionContractDocumentsPlainTextErrors(t *testing.T) {
 }
 
 func TestLevelTrashListsIncompleteDeletions(t *testing.T) {
-	for _, status := range []string{"failed_partial", "restored_partial"} {
+	for _, status := range []string{"failed_partial", "restored_partial", "restoring"} {
 		t.Run(status, func(t *testing.T) {
 			rig := newLevelDeletionRig(true)
 			rig.cfg.deletion.Status = status
@@ -821,4 +865,131 @@ func TestLevelDeletionPreviewOfALevelBeingDeletedIs409(t *testing.T) {
 	rig.h.Preview(w, r)
 	assert.Equal(t, http.StatusConflict, w.Code)
 	assert.Equal(t, "DELETION_IN_PROGRESS", w.Header().Get("X-Error-Code"))
+}
+
+// Confirmation review (gap 4): a restore marks its batch restoring in config
+// first (compare-and-set), so the sweep cannot purge it mid-way; the steps it
+// runs follow the status the restore started from; a failure puts the batch
+// back where it was.
+func TestLevelRestoreRunsUnderTheRestoringMark(t *testing.T) {
+	cases := []struct {
+		name       string
+		mutate     func(rig *levelDeletionRig)
+		wantStatus int
+		wantCode   string
+		wantLog    []string
+	}{
+		{"another restore runs", func(rig *levelDeletionRig) {
+			rig.cfg.restoreStartErr = codedConnectErr(connect.CodeAlreadyExists, "RESTORE_IN_PROGRESS", "Ya se está restaurando")
+		}, http.StatusConflict, "RESTORE_IN_PROGRESS", []string{"restore-start:config"}},
+		{"the window closed as it started", func(rig *levelDeletionRig) {
+			rig.cfg.restoreStartErr = codedConnectErr(connect.CodePermissionDenied, "TRASH_EXPIRED", "Pasaron más de 7 días")
+		}, http.StatusGone, "TRASH_EXPIRED", []string{"restore-start:config"}},
+		{"the trash already shows it restoring", func(rig *levelDeletionRig) {
+			rig.cfg.deletion.Status = "restoring"
+		}, http.StatusConflict, "RESTORE_IN_PROGRESS", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newLevelDeletionRig(true)
+			tc.mutate(rig)
+			w := rig.restore(t)
+			assert.Equal(t, tc.wantStatus, w.Code, w.Body.String())
+			assert.Equal(t, tc.wantCode, w.Header().Get("X-Error-Code"))
+			assert.Equal(t, tc.wantLog, rig.log.calls, "no step runs")
+			assert.False(t, rig.cfg.abandoned, "a restore that never started has nothing to put back")
+		})
+	}
+
+	t.Run("the steps follow the status the restore started from", func(t *testing.T) {
+		rig := newLevelDeletionRig(true)
+		rig.cfg.deletion.PendingSteps = []string{"grades"}
+		rig.cfg.restoringFrom = "failed_partial" // it failed half-way between the read and the start
+		w := rig.restore(t)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		assert.Equal(t, []string{"restore-start:config", "restore:grades", "mark:config"}, rig.log.calls)
+	})
+
+	t.Run("closing the batch fails: it falls back and the error is answered", func(t *testing.T) {
+		rig := newLevelDeletionRig(true)
+		rig.cfg.markErr = errors.New("config down")
+		w := rig.restore(t)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.True(t, rig.cfg.abandoned)
+	})
+}
+
+// Confirmation review (gap 4): the sweep never purges a batch config answers as
+// running, even if a config that predates the restoring mark listed it.
+func TestLevelTrashSweepSkipsRunningBatches(t *testing.T) {
+	rig := newLevelDeletionRig(true)
+	rig.cfg.expired = []client.LevelDeletion{
+		{BatchID: "restoring-1", Status: "restoring"}, {BatchID: "deleting-1", Status: "deleting"}, {BatchID: "old-1", Status: "deleted"},
+	}
+	n, err := rig.h.Sweep(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), n)
+	assert.Equal(t, []string{"old-1"}, rig.cfg.purgedMarked)
+	for _, c := range rig.log.calls {
+		assert.NotContains(t, c, "restoring-1")
+		assert.NotContains(t, c, "deleting-1")
+	}
+}
+
+// Confirmation review (gap 5): the freeze comes FIRST — the scope is resolved
+// and its counts compared with the token's while nothing of the level can be
+// written, so a grade captured between the check and the lock cannot slip in.
+func TestLevelDeletionResolvesTheScopeUnderTheFreeze(t *testing.T) {
+	t.Run("the scope is resolved under the freeze", func(t *testing.T) {
+		rig := newLevelDeletionRig(true)
+		token := rig.preview(t).Token
+		var frozenAtPreview []bool
+		rig.grades.onPreview = func() { frozenAtPreview = append(frozenAtPreview, rig.cfg.begun.BatchID != "") }
+		w := rig.delete(t, deleteBody(token, "Primaria", "pw"))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.NotEmpty(t, frozenAtPreview)
+		for _, frozen := range frozenAtPreview {
+			assert.True(t, frozen, "every count the token is checked against was read under the freeze")
+		}
+	})
+
+	t.Run("a count that moved before the freeze lets it go: PREVIEW_STALE", func(t *testing.T) {
+		rig := newLevelDeletionRig(true)
+		token := rig.preview(t).Token
+		rig.grades.onPreview = func() {
+			if rig.cfg.begun.BatchID != "" {
+				rig.grades.counts["monthlyGrades"] = 41 // captured just before the lock
+			}
+		}
+		w := rig.delete(t, deleteBody(token, "Primaria", "pw"))
+		assert.Equal(t, http.StatusConflict, w.Code)
+		assert.Equal(t, "PREVIEW_STALE", w.Header().Get("X-Error-Code"))
+		assert.Equal(t, []string{"begin:config", "cancel:config"}, rig.log.calls, "released, nothing archived")
+	})
+
+	t.Run("resolving under the freeze fails: it is let go", func(t *testing.T) {
+		rig := newLevelDeletionRig(true)
+		token := rig.preview(t).Token
+		rig.people.previewErr = errors.New("students down")
+		w := rig.delete(t, deleteBody(token, "Primaria", "pw"))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Equal(t, []string{"begin:config", "cancel:config"}, rig.log.calls)
+	})
+}
+
+// QA (deferred): the preview counts every kind a director would recognise,
+// not only the headline ones.
+func TestLevelDeletionPreviewCountsEveryKindADirectorReads(t *testing.T) {
+	rig := newLevelDeletionRig(true)
+	rig.grades.counts = client.LevelCounts{"monthlyGrades": 40, "reportCards": 4, "gradeEntries": 7, "periodClosures": 2,
+		"reportCardLines": 90, "gradesOutbox": 1}
+	rig.attendance.counts = client.LevelCounts{"attendanceMarks": 100, "attendanceSessions": 12}
+	rig.people.preview.Counts["enrollmentTransfers"] = 1
+	body := rig.preview(t)
+	for kind, want := range map[string]int64{"gradeEntries": 7, "periodClosures": 2, "attendanceSessions": 12, "enrollmentTransfers": 1} {
+		assert.Equal(t, want, body.Counts[kind], kind)
+	}
+	for _, internal := range []string{"reportCardLines", "gradesOutbox", "termMonths", "levels"} {
+		assert.NotContains(t, body.Counts, internal, "%s means nothing to a director", internal)
+	}
 }

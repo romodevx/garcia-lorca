@@ -75,3 +75,19 @@ func TestDeletionTokensAreUniquePerPreview(t *testing.T) {
 	_, sig, _ := strings.Cut(rest, ".")
 	assert.False(t, tokens.Verify(stamp+".AAAAAAAAAAAAAAAAAAAAAA."+sig, "t1", "lvl-1", counts), "the nonce is signed")
 }
+
+// Confirmation review (gap 5): before the freeze, a token is only checked for
+// being well-formed and unexpired — its counts are compared under the freeze.
+func TestDeletionTokensLive(t *testing.T) {
+	at := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
+	now := at
+	tokens := handler.NewDeletionTokens([]byte("0123456789abcdef0123456789abcdef"), func() time.Time { return now })
+	tok, _ := tokens.Issue("t1", "lvl-1", client.LevelCounts{"groups": 2})
+
+	assert.True(t, tokens.Live(tok))
+	for _, bad := range []string{"", "nope", "x.y", "abc.def.ghi"} {
+		assert.False(t, tokens.Live(bad), bad)
+	}
+	now = at.Add(10*time.Minute + time.Second)
+	assert.False(t, tokens.Live(tok), "expired")
+}

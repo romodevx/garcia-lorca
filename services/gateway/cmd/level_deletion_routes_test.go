@@ -76,6 +76,12 @@ func (stubConfig) MarkLevelDeletionRestored(context.Context, *connect.Request[co
 	return connect.NewResponse(&configv1.MarkLevelDeletionRestoredResponse{Deletion: d}), nil
 }
 
+func (stubConfig) BeginLevelRestore(context.Context, *connect.Request[configv1.BeginLevelRestoreRequest]) (*connect.Response[configv1.BeginLevelRestoreResponse], error) {
+	d := routeDeletion()
+	d.RestoringFrom, d.Status = d.Status, "restoring"
+	return connect.NewResponse(&configv1.BeginLevelRestoreResponse{Deletion: d}), nil
+}
+
 func (stubConfig) ListLevelDeletions(context.Context, *connect.Request[configv1.ListLevelDeletionsRequest]) (*connect.Response[configv1.ListLevelDeletionsResponse], error) {
 	return connect.NewResponse(&configv1.ListLevelDeletionsResponse{Deletions: []*configv1.LevelDeletion{routeDeletion()}}), nil
 }

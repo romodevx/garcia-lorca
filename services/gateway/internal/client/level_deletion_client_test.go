@@ -23,6 +23,7 @@ type stubLevelConfig struct {
 	gotBegin   *configv1.BeginLevelDeletionRequest
 	gotFail    *configv1.FailLevelDeletionRequest
 	gotPartial bool
+	gotAbandon string
 }
 
 func (s *stubLevelConfig) BeginLevelDeletion(_ context.Context, req *connect.Request[configv1.BeginLevelDeletionRequest]) (*connect.Response[configv1.BeginLevelDeletionResponse], error) {
@@ -40,6 +41,19 @@ func (s *stubLevelConfig) FailLevelDeletion(_ context.Context, req *connect.Requ
 func (s *stubLevelConfig) MarkLevelDeletionRestored(_ context.Context, req *connect.Request[configv1.MarkLevelDeletionRestoredRequest]) (*connect.Response[configv1.MarkLevelDeletionRestoredResponse], error) {
 	s.gotPartial = req.Msg.GetPartial()
 	return connect.NewResponse(&configv1.MarkLevelDeletionRestoredResponse{Deletion: &configv1.LevelDeletion{Status: "restored_partial"}}), nil
+}
+
+func (s *stubLevelConfig) BeginLevelRestore(_ context.Context, req *connect.Request[configv1.BeginLevelRestoreRequest]) (*connect.Response[configv1.BeginLevelRestoreResponse], error) {
+	return connect.NewResponse(&configv1.BeginLevelRestoreResponse{Deletion: &configv1.LevelDeletion{
+		BatchId: req.Msg.GetBatchId(), Status: "restoring", RestoringFrom: "failed_partial", PendingSteps: []string{"grades"},
+	}}), nil
+}
+
+func (s *stubLevelConfig) AbandonLevelRestore(_ context.Context, req *connect.Request[configv1.AbandonLevelRestoreRequest]) (*connect.Response[configv1.AbandonLevelRestoreResponse], error) {
+	s.gotAbandon = req.Msg.GetBatchId()
+	return connect.NewResponse(&configv1.AbandonLevelRestoreResponse{Deletion: &configv1.LevelDeletion{
+		BatchId: req.Msg.GetBatchId(), Status: "failed_partial",
+	}}), nil
 }
 
 func (s *stubLevelConfig) SweepLevelDeletions(context.Context, *connect.Request[configv1.SweepLevelDeletionsRequest]) (*connect.Response[configv1.SweepLevelDeletionsResponse], error) {
@@ -173,4 +187,23 @@ func TestLevelDeletionSagaLedgerWire(t *testing.T) {
 	rep, err := stu.RestoreLevelBatch(ctx, "b1")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"e9"}, rep.Unrestored, "grades and attendance get these as skip ids")
+}
+
+// Confirmation review (gap 4): the restore's start and fall-back reach config,
+// and restoring_from comes back.
+func TestLevelRestoreStartWire(t *testing.T) {
+	ctx := context.Background()
+	stub := &stubLevelConfig{}
+	cfg := client.NewConfigClient(serve(t)(configv1connect.NewConfigServiceHandler(stub)), nil)
+
+	begun, err := cfg.BeginLevelRestore(ctx, "b1")
+	require.NoError(t, err)
+	assert.Equal(t, "restoring", begun.Status)
+	assert.Equal(t, "failed_partial", begun.RestoringFrom)
+	assert.Equal(t, []string{"grades"}, begun.PendingSteps)
+
+	back, err := cfg.AbandonLevelRestore(ctx, "b1")
+	require.NoError(t, err)
+	assert.Equal(t, "failed_partial", back.Status)
+	assert.Equal(t, "b1", stub.gotAbandon)
 }
