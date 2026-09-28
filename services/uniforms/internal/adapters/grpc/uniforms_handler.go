@@ -29,6 +29,7 @@ const dateLayout = "2006-01-02"
 type UniformsHandler struct {
 	shop   *usecase.Service
 	health *usecase.HealthService
+	trash  *usecase.LevelArchiveService
 }
 
 // NewUniformsHandler wires the handler to the shop and health use cases.

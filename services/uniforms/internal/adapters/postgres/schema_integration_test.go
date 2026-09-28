@@ -194,6 +194,7 @@ func TestRLSIsolatesEveryTable(t *testing.T) {
 		"uniform_items", "uniform_stock", "uniform_stock_moves",
 		"uniform_folio_counters", "uniform_orders", "uniform_fulfillments",
 		"uniform_order_lines", "uniform_settings", "uniform_sale_keys",
+		"uniforms_deletion_archive",
 	}
 
 	// Seed one row per table as tenant A, using the owner connection so the seed
@@ -274,6 +275,8 @@ func ownerSeed(t *testing.T) string {
 	exec(`INSERT INTO uniform_settings (tenant_id) VALUES (?)`, tenantA)
 	exec(`INSERT INTO uniform_sale_keys (tenant_id, idempotency_key, order_id)
 	      VALUES (?, 'seed-key', ?)`, tenantA, orderID)
+	exec(`INSERT INTO uniforms_deletion_archive (tenant_id, batch_id, table_name, "row", "position")
+	      VALUES (?, gen_random_uuid(), 'uniform_items#level', '{}'::jsonb, 0)`, tenantA)
 	return itemID
 }
 
