@@ -17,6 +17,7 @@ import { UniformsScreen } from "./_screens/uniforms/UniformsScreen";
 import { FinanceScreen } from "./_screens/finance/FinanceScreen";
 import { Catalog } from "./_screens/config/Catalog";
 import { LevelDeleteScreen } from "./_screens/config/levelDeletion/LevelDeleteScreen";
+import { clearLevelNotice, leaveLevelNotice, peekLevelNotice } from "./_screens/config/levelDeletion/pendingNotice";
 import { canDeleteLevels } from "./config/permissions";
 import { AdminScreen } from "./_screens/admin/AdminScreen";
 import { StudentEditScreen } from "./_screens/students/StudentEditScreen";
@@ -428,12 +429,18 @@ export function AppShell(): ReactElement {
   const mayDeleteLevels = canDeleteLevels(principal?.permissions);
   const openLevelDelete = (levelId: string): void => go({ screen: "levelDelete", levelId });
   // What a finished deletion tells Configuración; it belongs to that one visit.
-  const [configNotice, setConfigNotice] = useState<string | undefined>(undefined);
+  // Next remounts this shell on the route change, so the sentence travels in
+  // pendingNotice (module scope) and the new shell picks it up once.
+  const [configNotice, setConfigNotice] = useState<string | undefined>(peekLevelNotice);
+  useEffect(() => {
+    if (peekLevelNotice() !== undefined) clearLevelNotice();
+  }, []);
   const onConfigScreens = view.screen === "config" || view.screen === "levelDelete";
   useEffect(() => {
     if (!onConfigScreens) setConfigNotice(undefined);
   }, [onConfigScreens]);
   const finishLevelDelete = (message: string): void => {
+    leaveLevelNotice(message);
     setConfigNotice(message);
     go({ screen: "config" });
   };
