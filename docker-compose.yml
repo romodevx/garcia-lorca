@@ -123,6 +123,9 @@ services:
       # Browser origin(s) allowed to call the gateway cross-origin with cookies.
       # Tracks WEB_HOST_PORT so a remapped web port stays permitted.
       WEB_ORIGIN: "http://localhost:${WEB_HOST_PORT:-3000}"
+      # Level-deletion preview HMAC key (ADR 0021). Fixed, NON-secret dev value
+      # so previews survive a gateway restart; shared envs use Secret Manager.
+      LEVEL_DELETION_TOKEN_KEY: "${LEVEL_DELETION_TOKEN_KEY:-local-dev-level-deletion-key-not-a-secret-0021}"
     ports: ["8080:8080"]
     depends_on:
       postgres:

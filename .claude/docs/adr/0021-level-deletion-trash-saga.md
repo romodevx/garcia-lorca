@@ -129,5 +129,28 @@ flags it with `empty: true`.
 - Restore is best-effort by design: what now conflicts stays as it is and is
   reported (re-enrolled pupil, pupil with a new level, re-scoped garment,
   teacher who left, a cycle deleted meanwhile).
-- `LEVEL_DELETION_TOKEN_KEY` should be set in shared environments (Secret
-  Manager) before scaling the gateway past one instance.
+- `LEVEL_DELETION_TOKEN_KEY` must be shared by every gateway instance (see
+  Deploy notes); without it previews go randomly stale behind Cloud Run.
+
+## Deploy notes
+
+- **Gateway `LEVEL_DELETION_TOKEN_KEY`** (HMAC key, >= 32 bytes). Terraform
+  generates it (`random_password.level_deletion_token_key`, 64 chars) into the
+  Secret Manager secret `garcia-lorca-level-deletion-token-key-<env>`
+  (`deploy/terraform/secrets.tf`) and Cloud Run injects it via
+  `local.gateway_secret_env` (`deploy/terraform/services.tf`); the gateway
+  module depends on the secret version so the first revision never boots
+  without it. The runtime SA already holds `secretmanager.secretAccessor`.
+  `ignore_changes = [secret_data]`: rotate deliberately with
+  `terraform apply -replace=random_password.level_deletion_token_key` — the
+  only cost is that previews in flight return PREVIEW_STALE once.
+- **Local:** `docker-compose.yml` gives the gateway a fixed, non-secret dev
+  value (overridable from `.env`), so previews survive a gateway restart.
+- **iam `IDENTITY_PLATFORM_API_KEY`** needs no new wiring: terraform already
+  passes `var.identity_platform_api_key` to iam when
+  `enable_identity_platform = true`, and compose reads it from `.env` (the same
+  variable the web gets as `NEXT_PUBLIC_FIREBASE_API_KEY`). An environment that
+  enables Identity Platform but leaves the key empty makes level deletion fail
+  closed (500) at the re-authentication step.
+- Rollout: the first `terraform apply` after this change creates the secret
+  and a new gateway revision; no manual step.
