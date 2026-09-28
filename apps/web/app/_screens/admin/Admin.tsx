@@ -119,7 +119,7 @@ export function Admin({ onBack }: AdminProps): ReactElement {
         <p role="alert" className="fade-up" style={{ color: "var(--bad-fg)", fontSize: 15 }}>{loadError}</p>
       ) : (
         <div className="fade-up" style={{ display: "grid", gap: 18 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 18 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(340px, 100%), 1fr))", gap: 18 }}>
             <RolesPanel roles={roles} onCreate={handleCreateRole} onSetPermissions={handleSetPermissions} />
             <UsersPanel
               users={users}

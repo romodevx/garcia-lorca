@@ -93,6 +93,7 @@ export function useTeacherLoadData(teacherId: string): TeacherLoadData {
   }, [sharedAttempt]);
 
   const grades = shared?.grades;
+  const levels = shared?.levels;
   useEffect(() => {
     if (cycleId === "" || grades === undefined) return;
     let active = true;
@@ -100,7 +101,7 @@ export function useTeacherLoadData(teacherId: string): TeacherLoadData {
     setCycleFailed(false);
     Promise.all([listGroups(API_URL, cycleId), listTeachingAssignments(API_URL, { cycleId })])
       .then(async ([rawGroups, assignments]) => {
-        const groups = labelGroups(rawGroups, grades);
+        const groups = labelGroups(rawGroups, grades, levels);
         const subjects = await subjectsOf(groups);
         if (active) setOfCycle({ cycleId, groups, subjects, assignments });
       })
@@ -108,7 +109,7 @@ export function useTeacherLoadData(teacherId: string): TeacherLoadData {
     return () => {
       active = false;
     };
-  }, [cycleId, grades, cycleAttempt]);
+  }, [cycleId, grades, levels, cycleAttempt]);
 
   const retry = useCallback((): void => {
     if (shared === undefined) setSharedAttempt((n) => n + 1);

@@ -148,72 +148,74 @@ export function TuitionPanel({
       {levels.length === 0 ? (
         <EmptyHint>Registra los niveles del colegio para poder ponerles precio.</EmptyHint>
       ) : (
-        <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 16 }}>
-          <thead>
-            <tr style={{ textAlign: "left", fontSize: 12.5, color: "var(--text-muted)" }}>
-              <th style={cell}>Nivel</th>
-              <th style={cell}>Inscripción</th>
-              <th style={cell}>Mensualidad</th>
-              <th style={cell}>Mensualidades</th>
-              <th style={cell}>Día límite</th>
-              <th style={cell}>Recargo</th>
-              <th style={cell} />
-            </tr>
-          </thead>
-          <tbody>
-            {levels.map((level) => {
-              const plan = planFor(level.id);
-              return (
-                <tr key={level.id} style={{ borderTop: "1px solid var(--border)", fontSize: 14 }}>
-                  <td style={{ ...cell, fontWeight: 600 }}>{level.name}</td>
-                  {plan === undefined ? (
-                    <td style={{ ...cell, color: "var(--text-faint)" }} colSpan={5}>
-                      {loaded ? "Sin tabulador · este nivel no se cobra" : "Cargando…"}
+        <div style={{ overflowX: "auto", contain: "inline-size", marginBottom: 16 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ textAlign: "left", fontSize: 12.5, color: "var(--text-muted)" }}>
+                <th style={cell}>Nivel</th>
+                <th style={cell}>Inscripción</th>
+                <th style={cell}>Mensualidad</th>
+                <th style={cell}>Mensualidades</th>
+                <th style={cell}>Día límite</th>
+                <th style={cell}>Recargo</th>
+                <th style={cell} />
+              </tr>
+            </thead>
+            <tbody>
+              {levels.map((level) => {
+                const plan = planFor(level.id);
+                return (
+                  <tr key={level.id} style={{ borderTop: "1px solid var(--border)", fontSize: 14 }}>
+                    <td style={{ ...cell, fontWeight: 600 }}>{level.name}</td>
+                    {plan === undefined ? (
+                      <td style={{ ...cell, color: "var(--text-faint)" }} colSpan={5}>
+                        {loaded ? "Sin tabulador · este nivel no se cobra" : "Cargando…"}
+                      </td>
+                    ) : (
+                      <>
+                        {/*
+                          Los conceptos SI los hay; si no, el monto único.
+                          
+                          Las dos formas existen y ninguna se puede ignorar. Un plan
+                          nuevo (ADR 0011) guarda `enrollmentCents` en cero y el
+                          dinero en los tramos de cada concepto: leer el campo
+                          anunciaba como gratis una inscripción de miles. Pero un
+                          plan escrito ANTES guarda lo contrario —el monto único y
+                          ninguna lista— y leer sólo los conceptos anuncia gratis
+                          exactamente los mismos miles. Los cuatro tabuladores del
+                          colegio sembrado son de ese segundo tipo.
+                          
+                          De los conceptos se toma el PRIMER escalón: lo que paga
+                          quien se inscribe en cuanto abre el periodo, que es el
+                          número que el colegio publica.
+                        */}
+                        <td style={cell}>${centsToPesos(inscriptionShown(plan))}</td>
+                        <td style={cell}>${centsToPesos(plan.monthlyCents)}</td>
+                        <td style={cell}>
+                          {plan.months} desde {MONTH_NAMES[plan.firstBilledMonth - 1]}
+                        </td>
+                        <td style={cell}>día {plan.dueDay}</td>
+                        <td style={cell}>
+                          {plan.policy.dailyMode
+                            ? `$${centsToPesos(plan.policy.lateFeeDailyCents)} / día`
+                            : plan.lateFeeCents === 0 ? "—" : `$${centsToPesos(plan.lateFeeCents)}`}
+                        </td>
+                      </>
+                    )}
+                    <td style={cell}>
+                      <button
+                        onClick={() => onPrice?.(level.id)}
+                        style={{ fontSize: 13.5, fontWeight: 600, color: "var(--forest)", textDecoration: "underline" }}
+                      >
+                        {plan === undefined ? "Definir" : "Editar"}
+                      </button>
                     </td>
-                  ) : (
-                    <>
-                      {/*
-                        Los conceptos SI los hay; si no, el monto único.
-                        
-                        Las dos formas existen y ninguna se puede ignorar. Un plan
-                        nuevo (ADR 0011) guarda `enrollmentCents` en cero y el
-                        dinero en los tramos de cada concepto: leer el campo
-                        anunciaba como gratis una inscripción de miles. Pero un
-                        plan escrito ANTES guarda lo contrario —el monto único y
-                        ninguna lista— y leer sólo los conceptos anuncia gratis
-                        exactamente los mismos miles. Los cuatro tabuladores del
-                        colegio sembrado son de ese segundo tipo.
-                        
-                        De los conceptos se toma el PRIMER escalón: lo que paga
-                        quien se inscribe en cuanto abre el periodo, que es el
-                        número que el colegio publica.
-                      */}
-                      <td style={cell}>${centsToPesos(inscriptionShown(plan))}</td>
-                      <td style={cell}>${centsToPesos(plan.monthlyCents)}</td>
-                      <td style={cell}>
-                        {plan.months} desde {MONTH_NAMES[plan.firstBilledMonth - 1]}
-                      </td>
-                      <td style={cell}>día {plan.dueDay}</td>
-                      <td style={cell}>
-                        {plan.policy.dailyMode
-                          ? `$${centsToPesos(plan.policy.lateFeeDailyCents)} / día`
-                          : plan.lateFeeCents === 0 ? "—" : `$${centsToPesos(plan.lateFeeCents)}`}
-                      </td>
-                    </>
-                  )}
-                  <td style={cell}>
-                    <button
-                      onClick={() => onPrice?.(level.id)}
-                      style={{ fontSize: 13.5, fontWeight: 600, color: "var(--forest)", textDecoration: "underline" }}
-                    >
-                      {plan === undefined ? "Definir" : "Editar"}
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>

@@ -154,7 +154,7 @@ export function TeachersScreen({ onBack, onOpenLoad, canGrantAccess = false, can
         </Note>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 18 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(340px, 100%), 1fr))", gap: 18 }}>
         {/* The load page names groups and subjects from Configuración: without it, only bare ids. */}
         <TeachersPanel
           teachers={teachers}
