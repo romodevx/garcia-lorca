@@ -99,6 +99,25 @@ func (s *LevelDeletionService) RestoreLevelBatch(ctx context.Context, batchID st
 	return s.repo.RestoreLevelBatch(ctx, batch)
 }
 
+// BeginLevelRestore marks a trash batch restoring before a restore's first
+// step, so the sweep leaves it alone.
+func (s *LevelDeletionService) BeginLevelRestore(ctx context.Context, batchID string) (domain.LevelDeletion, error) {
+	batch, err := levelarchive.NormalizeBatchID(batchID)
+	if err != nil {
+		return domain.LevelDeletion{}, err
+	}
+	return s.repo.BeginLevelRestore(ctx, batch)
+}
+
+// AbandonLevelRestore puts a batch whose restore failed back where it was.
+func (s *LevelDeletionService) AbandonLevelRestore(ctx context.Context, batchID string) (domain.LevelDeletion, error) {
+	batch, err := levelarchive.NormalizeBatchID(batchID)
+	if err != nil {
+		return domain.LevelDeletion{}, err
+	}
+	return s.repo.AbandonLevelRestore(ctx, batch)
+}
+
 // MarkLevelDeletionRestored closes a restored batch (partial: some rows did
 // not fit, it stays in the trash).
 func (s *LevelDeletionService) MarkLevelDeletionRestored(ctx context.Context, batchID string, partial bool) (domain.LevelDeletion, error) {

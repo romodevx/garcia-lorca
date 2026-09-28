@@ -210,6 +210,18 @@ service ConfigService {
   // PurgeLevelBatch hard-deletes config's archive rows of one batch.
   // Idempotent: an unknown or already purged batch purges nothing.
   rpc PurgeLevelBatch(PurgeLevelBatchRequest) returns (PurgeLevelBatchResponse);
+  // BeginLevelRestore marks a batch RESTORING before a restore's first step —
+  // compare-and-set from deleted | failed_partial | restored_partial, window
+  // judged on the database's clock — so the sweep never purges it mid-way.
+  // Refusals: NotFound (not in the trash), AlreadyExists + X-Error-Code
+  // RESTORE_IN_PROGRESS, PermissionDenied + TRASH_EXPIRED (the level a
+  // failed_partial batch still froze is let go). The answer's restoring_from is
+  // the status the restore started from.
+  rpc BeginLevelRestore(BeginLevelRestoreRequest) returns (BeginLevelRestoreResponse);
+  // AbandonLevelRestore puts a batch whose restore failed back to its
+  // restoring_from. A batch not restoring is answered as is. The sweep does
+  // the same to a batch restoring for longer than 30 minutes.
+  rpc AbandonLevelRestore(AbandonLevelRestoreRequest) returns (AbandonLevelRestoreResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -932,7 +944,8 @@ message LevelRestoreSkip {
 // LevelDeletion is one batch in the trash. status is deleting (saga in
 // flight) | deleted | failed_partial (the deletion failed and could not be fully
 // undone) | restored_partial (restored, but some rows did not fit and stay in
-// the trash) | restored | cancelled (failed and fully undone) | purged.
+// the trash) | restoring (a restore in flight) | restored | cancelled (failed
+// and fully undone) | purged.
 // restorable_until is deleted_at + 7 days, on the database's clock.
 message LevelDeletion {
   string batch_id = 1;
@@ -949,6 +962,9 @@ message LevelDeletion {
   repeated string pending_steps = 10;
   // skipped is what a compensation or a restore could not put back.
   repeated LevelRestoreSkip skipped = 11;
+  // restoring_from (status restoring only) is where the running restore began
+  // and where a failed one falls back to.
+  string restoring_from = 12;
 }
 
 message PreviewLevelDeletionRequest {
@@ -1076,4 +1092,20 @@ message PurgeLevelBatchRequest {
 
 message PurgeLevelBatchResponse {
   int64 purged_rows = 1;
+}
+
+message BeginLevelRestoreRequest {
+  string batch_id = 1;
+}
+
+message BeginLevelRestoreResponse {
+  LevelDeletion deletion = 1;
+}
+
+message AbandonLevelRestoreRequest {
+  string batch_id = 1;
+}
+
+message AbandonLevelRestoreResponse {
+  LevelDeletion deletion = 1;
 }

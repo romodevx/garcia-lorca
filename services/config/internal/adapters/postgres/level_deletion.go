@@ -116,6 +116,7 @@ type levelDeletionModel struct {
 	Status          string    `gorm:"column:status"`
 	PendingSteps    string    `gorm:"column:pending_steps;->"` // text[] read as its literal
 	Skipped         string    `gorm:"column:skipped;->"`
+	RestoringFrom   *string   `gorm:"column:restoring_from;->"`
 }
 
 func (levelDeletionModel) TableName() string { return "level_deletions" }
@@ -131,12 +132,16 @@ func toDomainLevelDeletion(m levelDeletionModel) (domain.LevelDeletion, error) {
 			return domain.LevelDeletion{}, glerrors.Wrap(glerrors.KindInternal, "decoding a deletion's skips", err)
 		}
 	}
-	return domain.LevelDeletion{
+	d := domain.LevelDeletion{
 		BatchID: m.BatchID, LevelID: m.LevelID, LevelName: m.LevelName, Counts: counts,
 		DeletedBy: m.DeletedBy, DeletedByName: m.DeletedByName,
 		DeletedAt: m.DeletedAt.UTC(), RestorableUntil: m.RestorableUntil.UTC(),
 		Status: domain.LevelDeletionStatus(m.Status), PendingSteps: parseTextArray(m.PendingSteps), Skipped: skipped,
-	}, nil
+	}
+	if m.RestoringFrom != nil {
+		d.RestoringFrom = domain.LevelDeletionStatus(*m.RestoringFrom)
+	}
+	return d, nil
 }
 
 // parseTextArray reads a Postgres text[] literal of plain words ({a,b}); the
@@ -242,7 +247,9 @@ func (r *Repository) BeginLevelDeletion(ctx context.Context, in ports.BeginLevel
 		if err != nil {
 			return err
 		}
-		if err := tx.Exec("UPDATE levels SET status = ?, updated_at = now() WHERE id = ?", levelStatusDeleting, in.LevelID).Error; err != nil {
+		err = tx.Exec("UPDATE levels SET status = ?, deleting_batch_id = ?, updated_at = now() WHERE id = ?",
+			levelStatusDeleting, d.BatchID, in.LevelID).Error
+		if err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "freezing the level", err)
 		}
 		err = tx.Exec(`INSERT INTO level_deletions (batch_id, tenant_id, level_id, level_name, counts, deleted_by,
@@ -330,8 +337,13 @@ func dbNow(tx *gorm.DB) (time.Time, error) {
 
 // RestoreLevelBatch puts the structure back, parents first, in one
 // transaction. The window is judged on the database's clock.
+// A batch past its window is refused TRASH_EXPIRED — and the level it froze,
+// if still in place, is let go in the same breath (see releaseIfExpired).
 func (r *Repository) RestoreLevelBatch(ctx context.Context, batchID string) (levelarchive.Report, error) {
-	var rep levelarchive.Report
+	var (
+		rep     levelarchive.Report
+		expired bool
+	)
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		rec, err := getLevelDeletion(tx, batchID)
 		if err != nil {
@@ -339,6 +351,9 @@ func (r *Repository) RestoreLevelBatch(ctx context.Context, batchID string) (lev
 		}
 		now, err := dbNow(tx)
 		if err != nil {
+			return err
+		}
+		if expired, err = releaseIfExpired(tx, rec, now); err != nil || expired {
 			return err
 		}
 		if err := rec.CheckRestorable(now); err != nil {
@@ -349,14 +364,131 @@ func (r *Repository) RestoreLevelBatch(ctx context.Context, batchID string) (lev
 		})
 		return err
 	})
+	if err == nil && expired {
+		err = domain.TrashExpired()
+	}
 	return rep, err
+}
+
+// releaseIfExpired answers whether a restorable batch's window has closed and,
+// when it has, lets go of the level it froze (a failed_partial batch whose
+// level config never archived). The caller commits and then refuses with
+// TRASH_EXPIRED: the release must outlive the refusal. What the other services
+// archived goes with the purge; config's structure never left.
+func releaseIfExpired(tx *gorm.DB, rec domain.LevelDeletion, now time.Time) (bool, error) {
+	if !rec.Expired(now) || !(rec.Status.InTrash() || rec.Status == domain.LevelDeletionRestoring) {
+		return false, nil
+	}
+	return true, releaseFreeze(tx, rec.LevelID, rec.BatchID)
+}
+
+// frozenByOther matches a level none of whose OTHER batches is running or
+// failed half-way — the fallback for a freeze no batch owns (pre-0013).
+const frozenByOther = `NOT EXISTS (SELECT 1 FROM level_deletions o WHERE o.level_id = levels.id AND o.batch_id <> ?
+	AND (o.status IN ('deleting', 'failed_partial') OR o.restoring_from = 'failed_partial'))`
+
+// releaseFreeze puts a level back to active only if batchID owns its freeze
+// (compare-and-set on levels.deleting_batch_id): an old batch closing never
+// lifts the freeze of a newer deletion. A level gone (archived) is a no-op.
+func releaseFreeze(tx *gorm.DB, levelID, batchID string) error {
+	err := tx.Exec(`UPDATE levels SET status = ?, deleting_batch_id = NULL, updated_at = now()
+		WHERE id = ? AND status = ? AND (deleting_batch_id = ? OR (deleting_batch_id IS NULL AND `+frozenByOther+`))`,
+		levelStatusActive, levelID, levelStatusDeleting, batchID, batchID).Error
+	if err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "unfreezing the level", err)
+	}
+	return nil
+}
+
+// claimFreeze (re)freezes a level for batchID: an active level, or one whose
+// freeze batchID already owns or nobody owns. A freeze another batch holds is
+// left alone.
+func claimFreeze(tx *gorm.DB, levelID, batchID string) error {
+	err := tx.Exec(`UPDATE levels SET status = ?, deleting_batch_id = ?, updated_at = now()
+		WHERE id = ? AND (status = ? OR deleting_batch_id IS NULL) AND deleting_batch_id IS DISTINCT FROM ?`,
+		levelStatusDeleting, batchID, levelID, levelStatusActive, batchID).Error
+	if err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "freezing the level", err)
+	}
+	return nil
+}
+
+// BeginLevelRestore marks a batch `restoring` before a restore's first step —
+// compare-and-set from deleted, failed_partial or restored_partial, under the
+// batch's row lock, on the database's clock — so the sweep never purges it
+// mid-way. A batch already restoring is RESTORE_IN_PROGRESS; one past its
+// window is TRASH_EXPIRED (and lets its level go, see releaseIfExpired).
+func (r *Repository) BeginLevelRestore(ctx context.Context, batchID string) (domain.LevelDeletion, error) {
+	var (
+		rec     domain.LevelDeletion
+		expired bool
+	)
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		cur, err := lockLevelDeletion(tx, batchID)
+		if err != nil {
+			return err
+		}
+		now, err := dbNow(tx)
+		if err != nil {
+			return err
+		}
+		if cur.Status.InTrash() {
+			if expired, err = releaseIfExpired(tx, cur, now); err != nil || expired {
+				return err
+			}
+		}
+		if err := cur.CheckRestoreStart(now); err != nil {
+			return err
+		}
+		err = tx.Exec(`UPDATE level_deletions SET restoring_from = status, status = ?, restoring_since = now(), updated_at = now()
+			WHERE batch_id = ?`, string(domain.LevelDeletionRestoring), batchID).Error
+		if err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "starting the restore", err)
+		}
+		rec, err = getLevelDeletion(tx, batchID)
+		return err
+	})
+	if err == nil && expired {
+		err = domain.TrashExpired()
+	}
+	return rec, err
+}
+
+// AbandonLevelRestore puts a batch whose restore failed back where it was
+// (restoring_from). A batch not restoring is answered as is.
+func (r *Repository) AbandonLevelRestore(ctx context.Context, batchID string) (domain.LevelDeletion, error) {
+	var rec domain.LevelDeletion
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		err := tx.Exec(`UPDATE level_deletions SET status = restoring_from, restoring_from = NULL, restoring_since = NULL,
+				updated_at = now()
+			WHERE batch_id = ? AND status = ?`, batchID, string(domain.LevelDeletionRestoring)).Error
+		if err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "abandoning the restore", err)
+		}
+		rec, err = getLevelDeletion(tx, batchID)
+		return err
+	})
+	return rec, err
+}
+
+// lockLevelDeletion reads a batch under its row lock.
+func lockLevelDeletion(tx *gorm.DB, batchID string) (domain.LevelDeletion, error) {
+	var m levelDeletionModel
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("batch_id = ?", batchID).First(&m).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return domain.LevelDeletion{}, glerrors.ErrNotFound
+	}
+	if err != nil {
+		return domain.LevelDeletion{}, glerrors.Wrap(glerrors.KindInternal, "reading the deletion", err)
+	}
+	return toDomainLevelDeletion(m)
 }
 
 func restoreStructure(tx *gorm.DB, batchID string) (levelarchive.Report, error) {
 	rep := levelarchive.NewReport()
 	// The level was filed while its deletion held it (status deleting); it comes
 	// back writable. Rows filed before migration 0012 had no status at all.
-	err := tx.Exec(`UPDATE `+levelTrash.Table()+` SET "row" = "row" || jsonb_build_object('status', ?::text)
+	err := tx.Exec(`UPDATE `+levelTrash.Table()+` SET "row" = "row" || jsonb_build_object('status', ?::text, 'deleting_batch_id', NULL)
 		WHERE batch_id = ? AND table_name = 'levels'`, levelStatusActive, batchID).Error
 	if err != nil {
 		return rep, glerrors.Wrap(glerrors.KindInternal, "unfreezing the archived level", err)
@@ -384,13 +516,14 @@ func restoreStructure(tx *gorm.DB, batchID string) (levelarchive.Report, error) 
 
 // MarkLevelDeletionRestored closes a batch every service has restored:
 // restored, or restored_partial when some rows did not fit (it stays in the
-// trash for a retry). Either way the level is writable again.
+// trash for a retry). Either way the level is writable again — unless a newer
+// deletion owns its freeze.
 func (r *Repository) MarkLevelDeletionRestored(ctx context.Context, batchID string, partial bool) (domain.LevelDeletion, error) {
 	to := domain.LevelDeletionRestored
 	if partial {
 		to = domain.LevelDeletionRestoredPartial
 	}
-	return r.moveDeletion(ctx, batchID, to, levelStatusActive, nil,
+	return r.moveDeletion(ctx, batchID, to, levelStatusActive, nil, domain.LevelDeletionRestoring,
 		domain.LevelDeletionDeleted, domain.LevelDeletionFailedPartial, domain.LevelDeletionRestoredPartial)
 }
 
@@ -419,11 +552,20 @@ func (r *Repository) FailLevelDeletion(ctx context.Context, batchID string, pend
 
 // MarkLevelDeletionPurged closes a batch every service has purged. A batch
 // still in the trash becomes purged; one already restored or cancelled keeps
-// its outcome. Both leave the sweep.
+// its outcome. Both leave the sweep. A level the batch still froze (a
+// failed_partial whose config structure never left) is let go: what the other
+// services archived is gone, the structure stays.
 func (r *Repository) MarkLevelDeletionPurged(ctx context.Context, batchID string) (domain.LevelDeletion, error) {
 	var rec domain.LevelDeletion
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		err := tx.Exec(`UPDATE level_deletions SET purged_at = now(), updated_at = now(),
+		cur, err := getLevelDeletion(tx, batchID)
+		if err != nil {
+			return err
+		}
+		if err := releaseFreeze(tx, cur.LevelID, batchID); err != nil {
+			return err
+		}
+		err = tx.Exec(`UPDATE level_deletions SET purged_at = now(), updated_at = now(),
 				status = CASE WHEN status IN ?  THEN ? ELSE status END
 			WHERE batch_id = ? AND purged_at IS NULL`,
 			[]string{string(domain.LevelDeletionDeleted), string(domain.LevelDeletionFailedPartial), string(domain.LevelDeletionRestoredPartial)},
@@ -439,8 +581,10 @@ func (r *Repository) MarkLevelDeletionPurged(ctx context.Context, batchID string
 
 // SweepLevelDeletions first turns every batch stuck in `deleting` for longer
 // than stalledAfter (a gateway that died mid-saga) into failed_partial with
-// every step pending — restorable from the trash — then lists the batches past
-// restorable_until whose archives were not purged yet. Database clock.
+// every step pending — restorable from the trash — and every batch stuck in
+// `restoring` longer than domain.RestoreStallAfter back to where its restore
+// began; then lists the batches past restorable_until whose archives were not
+// purged yet, never one running (deleting or restoring). Database clock.
 func (r *Repository) SweepLevelDeletions(ctx context.Context, stalledAfter time.Duration) ([]domain.LevelDeletion, int64, error) {
 	var (
 		out     []domain.LevelDeletion
@@ -455,8 +599,16 @@ func (r *Repository) SweepLevelDeletions(ctx context.Context, stalledAfter time.
 			return glerrors.Wrap(glerrors.KindInternal, "unsticking dead deletions", res.Error)
 		}
 		stalled = res.RowsAffected
+		err := tx.Exec(`UPDATE level_deletions SET status = restoring_from, restoring_from = NULL, restoring_since = NULL,
+				updated_at = now()
+			WHERE status = ? AND restoring_since < now() - make_interval(secs => ?)`,
+			string(domain.LevelDeletionRestoring), domain.RestoreStallAfter.Seconds()).Error
+		if err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "unsticking dead restores", err)
+		}
 		var rows []levelDeletionModel
-		err := tx.Where("purged_at IS NULL AND status <> ? AND restorable_until < now()", string(domain.LevelDeletionDeleting)).
+		running := []string{string(domain.LevelDeletionDeleting), string(domain.LevelDeletionRestoring)}
+		err = tx.Where("purged_at IS NULL AND status NOT IN ? AND restorable_until < now()", running).
 			Order("restorable_until").Limit(maxListRows).Find(&rows).Error
 		if err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "listing expired deletions", err)
@@ -481,11 +633,16 @@ func (r *Repository) PurgeLevelBatch(ctx context.Context, batchID string) (int64
 }
 
 // moveDeletion moves a batch to status `to` when it is in one of `from`, sets
-// the level's status (if the level exists) and answers the record. A batch in
+// the level's status (if the level exists) — compare-and-set on the batch that
+// owns the freeze (releaseFreeze / claimFreeze) — and answers the record. A batch in
 // no `from` state is left as is and answered (a retry of the same move is
 // harmless; the caller reads the status).
 func (r *Repository) moveDeletion(ctx context.Context, batchID string, to domain.LevelDeletionStatus, levelStatus string,
 	extra map[string]any, from ...domain.LevelDeletionStatus) (domain.LevelDeletion, error) {
+	lifecycle := releaseFreeze
+	if levelStatus == levelStatusDeleting {
+		lifecycle = claimFreeze
+	}
 	var rec domain.LevelDeletion
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		cur, err := getLevelDeletion(tx, batchID)
@@ -496,7 +653,8 @@ func (r *Repository) moveDeletion(ctx context.Context, batchID string, to domain
 			rec = cur
 			return nil
 		}
-		set := map[string]any{"status": string(to), "updated_at": gorm.Expr("now()")}
+		set := map[string]any{"status": string(to), "updated_at": gorm.Expr("now()"),
+			"restoring_from": nil, "restoring_since": nil}
 		for k, v := range extra {
 			set[k] = v
 		}
@@ -504,10 +662,8 @@ func (r *Repository) moveDeletion(ctx context.Context, batchID string, to domain
 		if err := tx.Table("level_deletions").Where("batch_id = ?", batchID).Updates(set).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "moving the deletion", err)
 		}
-		err = tx.Exec("UPDATE levels SET status = ?, updated_at = now() WHERE id = ? AND status <> ?",
-			levelStatus, cur.LevelID, levelStatus).Error
-		if err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "setting the level's status", err)
+		if err := lifecycle(tx, cur.LevelID, batchID); err != nil {
+			return err
 		}
 		rec, err = getLevelDeletion(tx, batchID)
 		return err
@@ -540,12 +696,13 @@ func toDomainLevelDeletions(rows []levelDeletionModel) ([]domain.LevelDeletion, 
 }
 
 // ListLevelDeletions is the trash: deleted, failed_partial and
-// restored_partial batches, newest first.
+// restored_partial batches — and any being restored right now — newest first.
 func (r *Repository) ListLevelDeletions(ctx context.Context) ([]domain.LevelDeletion, error) {
 	var out []domain.LevelDeletion
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var rows []levelDeletionModel
-		inTrash := []string{string(domain.LevelDeletionDeleted), string(domain.LevelDeletionFailedPartial), string(domain.LevelDeletionRestoredPartial)}
+		inTrash := []string{string(domain.LevelDeletionDeleted), string(domain.LevelDeletionFailedPartial),
+			string(domain.LevelDeletionRestoredPartial), string(domain.LevelDeletionRestoring)}
 		if err := tx.Where("status IN ?", inTrash).
 			Order("deleted_at DESC").Limit(maxListRows).Find(&rows).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "listing the trash", err)

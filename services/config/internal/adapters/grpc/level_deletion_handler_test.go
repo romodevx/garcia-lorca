@@ -29,13 +29,15 @@ var hAt = time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
 // stubTrash answers fixed results, or restoreErr from a restore / beginErr
 // from a begin.
 type stubTrash struct {
-	restoreErr error
-	beginErr   error
-	summary    levelarchive.Counts
-	begun      ports.BeginLevelDeletionInput
-	partial    bool
-	pending    []string
-	skipped    []levelarchive.Skip
+	restoreErr      error
+	beginErr        error
+	restoreStartErr error
+	abandoned       string
+	summary         levelarchive.Counts
+	begun           ports.BeginLevelDeletionInput
+	partial         bool
+	pending         []string
+	skipped         []levelarchive.Skip
 }
 
 func (s *stubTrash) PreviewLevelDeletion(_ context.Context, levelID string) (ports.LevelStructure, error) {
@@ -102,6 +104,19 @@ func (s *stubTrash) ListLevelDeletions(context.Context) ([]domain.LevelDeletion,
 
 func (s *stubTrash) GetLevelDeletion(context.Context, string) (domain.LevelDeletion, error) {
 	return domain.LevelDeletion{}, glerrors.ErrNotFound
+}
+
+func (s *stubTrash) BeginLevelRestore(_ context.Context, batchID string) (domain.LevelDeletion, error) {
+	if s.restoreStartErr != nil {
+		return domain.LevelDeletion{}, s.restoreStartErr
+	}
+	return domain.LevelDeletion{BatchID: batchID, Status: domain.LevelDeletionRestoring,
+		RestoringFrom: domain.LevelDeletionFailedPartial, DeletedAt: hAt, RestorableUntil: hAt}, nil
+}
+
+func (s *stubTrash) AbandonLevelRestore(_ context.Context, batchID string) (domain.LevelDeletion, error) {
+	s.abandoned = batchID
+	return domain.LevelDeletion{BatchID: batchID, Status: domain.LevelDeletionFailedPartial, DeletedAt: hAt, RestorableUntil: hAt}, nil
 }
 
 func (s *stubTrash) PurgeLevelArchives(context.Context, time.Time) (int64, error) { return 7, nil }
@@ -270,4 +285,41 @@ func TestSagaLedgerWire(t *testing.T) {
 	m, err := h.MarkLevelDeletionPurged(ctx, connect.NewRequest(&configv1.MarkLevelDeletionPurgedRequest{BatchId: hBatch}))
 	require.NoError(t, err)
 	assert.Equal(t, "purged", m.Msg.GetDeletion().GetStatus())
+}
+
+// Confirmation review (gap 4): the restore's start and fall-back travel the
+// wire; restoring_from says where the restore began; its refusals keep their
+// codes.
+func TestLevelRestoreLifecycleWire(t *testing.T) {
+	stub := &stubTrash{}
+	h := trashHandler(stub)
+	ctx := context.Background()
+
+	b, err := h.BeginLevelRestore(ctx, connect.NewRequest(&configv1.BeginLevelRestoreRequest{BatchId: hBatch}))
+	require.NoError(t, err)
+	assert.Equal(t, "restoring", b.Msg.GetDeletion().GetStatus())
+	assert.Equal(t, "failed_partial", b.Msg.GetDeletion().GetRestoringFrom())
+
+	a, err := h.AbandonLevelRestore(ctx, connect.NewRequest(&configv1.AbandonLevelRestoreRequest{BatchId: hBatch}))
+	require.NoError(t, err)
+	assert.Equal(t, "failed_partial", a.Msg.GetDeletion().GetStatus())
+	assert.Equal(t, hBatch, stub.abandoned)
+
+	for _, tc := range []struct {
+		err  error
+		code connect.Code
+		meta string
+	}{
+		{domain.RestoreInProgress(), connect.CodeAlreadyExists, "RESTORE_IN_PROGRESS"},
+		{domain.TrashExpired(), connect.CodePermissionDenied, "TRASH_EXPIRED"},
+	} {
+		_, err := trashHandler(&stubTrash{restoreStartErr: tc.err}).BeginLevelRestore(ctx,
+			connect.NewRequest(&configv1.BeginLevelRestoreRequest{BatchId: hBatch}))
+		var ce *connect.Error
+		require.ErrorAs(t, err, &ce)
+		assert.Equal(t, tc.code, ce.Code())
+		assert.Equal(t, tc.meta, ce.Meta().Get(grpcadapter.ErrorCodeMeta))
+	}
+	_, err = h.BeginLevelRestore(ctx, connect.NewRequest(&configv1.BeginLevelRestoreRequest{BatchId: "nope"}))
+	assert.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
 }

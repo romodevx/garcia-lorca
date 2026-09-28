@@ -268,8 +268,16 @@ type ArchiveLevelInput struct {
 //     nothing restored); a batch with no archive here is KindNotFound; what
 //     conflicts is skipped, reported and kept archived for a retry.
 //   - Cancel/Fail/MarkRestored/MarkPurged move the ledger and the level's
-//     status; SweepLevelDeletions unsticks dead sagas and lists expired batches.
+//     status — compare-and-set on the batch that owns the level's freeze, so
+//     an old batch never lifts a newer one's; a purged or expired batch lets go
+//     of the level it still froze. SweepLevelDeletions unsticks dead sagas and
+//     dead restores and lists expired batches, never a running one.
+//   - BeginLevelRestore marks a trash batch restoring (RESTORE_IN_PROGRESS if
+//     it already is, TRASH_EXPIRED past its window); AbandonLevelRestore puts
+//     it back where it was.
 type LevelDeletionRepository interface {
+	BeginLevelRestore(ctx context.Context, batchID string) (domain.LevelDeletion, error)
+	AbandonLevelRestore(ctx context.Context, batchID string) (domain.LevelDeletion, error)
 	PreviewLevelDeletion(ctx context.Context, levelID string) (LevelStructure, error)
 	BeginLevelDeletion(ctx context.Context, in BeginLevelDeletionInput) (domain.LevelDeletion, error)
 	ArchiveLevel(ctx context.Context, in ArchiveLevelInput) (levelarchive.Counts, domain.LevelDeletion, error)

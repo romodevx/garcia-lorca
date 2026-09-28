@@ -84,6 +84,7 @@ func TestLevelDeletionRestorableStatuses(t *testing.T) {
 		{domain.LevelDeletionDeleted, true, true},
 		{domain.LevelDeletionFailedPartial, true, true},
 		{domain.LevelDeletionRestoredPartial, true, true}, // a retry finishes it
+		{domain.LevelDeletionRestoring, true, false},      // its own restore's steps
 		{domain.LevelDeletionRestored, false, false},
 		{domain.LevelDeletionCancelled, false, false},
 		{domain.LevelDeletionPurged, false, false},
@@ -111,6 +112,7 @@ func TestLevelDeletionRefusalsAreCodedConflicts(t *testing.T) {
 	}{
 		{domain.DeletionInProgress(), domain.CodeDeletionInProgress},
 		{domain.PreviewTokenUsed(), domain.CodePreviewStale},
+		{domain.RestoreInProgress(), domain.CodeRestoreInProgress},
 	} {
 		assert.Equal(t, glerrors.KindConflict, glerrors.KindOf(tc.err))
 		assert.Equal(t, tc.code, domain.RefusalCodeOf(tc.err))
@@ -120,4 +122,38 @@ func TestLevelDeletionRefusalsAreCodedConflicts(t *testing.T) {
 
 func TestLevelDeletionStepsAreEverySagaStep(t *testing.T) {
 	assert.Equal(t, []string{"grades", "attendance", "finance", "uniforms", "students", "config"}, domain.LevelDeletionSteps)
+}
+
+// Confirmation review (gap 4): a restore starts only on a batch in the trash,
+// inside its window, and not already restoring.
+func TestLevelDeletionRestoreStart(t *testing.T) {
+	at := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
+	d, err := domain.NewLevelDeletion(batch, level, "Primaria", user, "Laura", nil, at)
+	require.NoError(t, err)
+	cases := []struct {
+		status domain.LevelDeletionStatus
+		now    time.Time
+		kind   glerrors.Kind
+		code   domain.RefusalCode
+	}{
+		{domain.LevelDeletionDeleted, at, glerrors.KindUnknown, ""},
+		{domain.LevelDeletionFailedPartial, d.RestorableUntil, glerrors.KindUnknown, ""}, // the last instant counts
+		{domain.LevelDeletionRestoredPartial, at, glerrors.KindUnknown, ""},
+		{domain.LevelDeletionRestoring, at, glerrors.KindConflict, domain.CodeRestoreInProgress},
+		{domain.LevelDeletionDeleting, at, glerrors.KindNotFound, ""},
+		{domain.LevelDeletionRestored, at, glerrors.KindNotFound, ""},
+		{domain.LevelDeletionDeleted, d.RestorableUntil.Add(time.Second), glerrors.KindForbidden, domain.CodeTrashExpired},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.status), func(t *testing.T) {
+			d.Status = tc.status
+			err := d.CheckRestoreStart(tc.now)
+			if tc.kind == glerrors.KindUnknown {
+				assert.NoError(t, err)
+				return
+			}
+			assert.Equal(t, tc.kind, glerrors.KindOf(err))
+			assert.Equal(t, tc.code, domain.RefusalCodeOf(err))
+		})
+	}
 }

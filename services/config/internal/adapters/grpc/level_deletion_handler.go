@@ -104,6 +104,24 @@ func (h *ConfigHandler) PurgeLevelArchives(ctx context.Context, _ *connect.Reque
 	return connect.NewResponse(&configv1.PurgeLevelArchivesResponse{PurgedRows: n}), nil
 }
 
+// BeginLevelRestore marks a trash batch restoring (ADR 0021).
+func (h *ConfigHandler) BeginLevelRestore(ctx context.Context, req *connect.Request[configv1.BeginLevelRestoreRequest]) (*connect.Response[configv1.BeginLevelRestoreResponse], error) {
+	rec, err := h.trash.BeginLevelRestore(ctx, req.Msg.GetBatchId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.BeginLevelRestoreResponse{Deletion: toProtoLevelDeletion(rec)}), nil
+}
+
+// AbandonLevelRestore puts a batch whose restore failed back where it was.
+func (h *ConfigHandler) AbandonLevelRestore(ctx context.Context, req *connect.Request[configv1.AbandonLevelRestoreRequest]) (*connect.Response[configv1.AbandonLevelRestoreResponse], error) {
+	rec, err := h.trash.AbandonLevelRestore(ctx, req.Msg.GetBatchId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.AbandonLevelRestoreResponse{Deletion: toProtoLevelDeletion(rec)}), nil
+}
+
 // CancelLevelDeletion closes a fully compensated saga.
 func (h *ConfigHandler) CancelLevelDeletion(ctx context.Context, req *connect.Request[configv1.CancelLevelDeletionRequest]) (*connect.Response[configv1.CancelLevelDeletionResponse], error) {
 	rec, err := h.trash.CancelLevelDeletion(ctx, req.Msg.GetBatchId())
@@ -192,5 +210,6 @@ func toProtoLevelDeletion(d domain.LevelDeletion) *configv1.LevelDeletion {
 		DeletedBy: d.DeletedBy, DeletedByName: d.DeletedByName,
 		DeletedAt: timestamppb.New(d.DeletedAt), RestorableUntil: timestamppb.New(d.RestorableUntil),
 		Status: string(d.Status), PendingSteps: d.PendingSteps, Skipped: toProtoSkips(d.Skipped),
+		RestoringFrom: string(d.RestoringFrom),
 	}
 }

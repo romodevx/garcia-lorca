@@ -27,6 +27,17 @@ type fakeTrash struct {
 	stallAfter  time.Duration
 	purgedBatch string
 	purgeCutoff time.Time
+	restoreRun  []string
+}
+
+func (f *fakeTrash) BeginLevelRestore(_ context.Context, batchID string) (domain.LevelDeletion, error) {
+	f.restoreRun = append(f.restoreRun, "begin "+batchID)
+	return domain.LevelDeletion{BatchID: batchID, Status: domain.LevelDeletionRestoring}, nil
+}
+
+func (f *fakeTrash) AbandonLevelRestore(_ context.Context, batchID string) (domain.LevelDeletion, error) {
+	f.restoreRun = append(f.restoreRun, "abandon "+batchID)
+	return domain.LevelDeletion{BatchID: batchID, Status: domain.LevelDeletionDeleted}, nil
 }
 
 func (f *fakeTrash) PreviewLevelDeletion(_ context.Context, levelID string) (ports.LevelStructure, error) {
@@ -134,6 +145,8 @@ func TestLevelDeletionServiceRefusesMalformedIDs(t *testing.T) {
 		{"purged", func() error { _, err := svc.MarkLevelDeletionPurged(ctx, "x"); return err }},
 		{"purge batch", func() error { _, err := svc.PurgeLevelBatch(ctx, "x"); return err }},
 		{"get", func() error { _, err := svc.GetLevelDeletion(ctx, "x"); return err }},
+		{"restore start", func() error { _, err := svc.BeginLevelRestore(ctx, "x"); return err }},
+		{"restore abandon", func() error { _, err := svc.AbandonLevelRestore(ctx, "x"); return err }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -193,4 +206,16 @@ func TestLevelDeletionServiceCanonicalizes(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), n)
 	assert.Equal(t, trashNow.Add(-levelarchive.Retention), f.purgeCutoff)
+}
+
+// Confirmation review (gap 4): the restore's start and fall-back canonicalize
+// the batch id before the repository compares it.
+func TestLevelRestoreStartAndAbandonCanonicalize(t *testing.T) {
+	svc, f := newTrash()
+	ctx := context.Background()
+	_, err := svc.BeginLevelRestore(ctx, " AAAAAAAA-0000-0000-0000-00000000000B")
+	require.NoError(t, err)
+	_, err = svc.AbandonLevelRestore(ctx, "AAAAAAAA-0000-0000-0000-00000000000B")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"begin " + okBatch, "abandon " + okBatch}, f.restoreRun)
 }
