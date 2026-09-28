@@ -8,21 +8,19 @@
 # there watching the stream. CI is the gate; deploy-dev.yml refuses to submit a
 # build unless CI is green on that exact SHA. The rollout lives on the runner.
 #
-# Step order: lint -> generate -> images, in THREE LANES of one image at a time:
-#   A: gateway -> config -> uniforms
-#   B: iam -> students -> finance
-#   C: grades -> attendance -> comms -> web
-# All ten used to start together on the default e2-medium (2 vCPU, 4 GB). That
-# box is CPU-bound either way — each image took ~20 min because ten builds
-# shared two cores — so lanes cost little wall-clock time, but ten concurrent
-# BuildKit builds plus the web's Next build ran the machine out of memory: on
-# 2026-09-28 the gateway step died twice at the same point with only
-# "unexpected EOF" from the Docker daemon, while the identical build (same code,
-# same --cache-from) passed locally. Three at a time keeps peak memory at about
-# a third. Lanes are balanced by count. Cloud Build only lets a step wait for a
-# step DEFINED ABOVE it (anything else is rejected at submit as "has not been
-# defined"), so each lane's order follows the order of the steps in this file —
-# which is why the web, defined last, closes lane C instead of opening it.
+# Step order: lint -> generate -> images ONE AT A TIME, in file order
+# (gateway, iam, students, config, finance, grades, attendance, comms, uniforms,
+# web). Cloud Build only lets a step wait for a step defined above it.
+#
+# Why sequential (2026-09-28, three failed deploys): every image step shares the
+# build VM's single Docker daemon. When two or more builds pull and extract the
+# golang base image at the same moment, the daemon drops the connection and the
+# step fails with nothing but "unexpected EOF" — with ten, then with three at a
+# time. The same image built ALONE on Cloud Build succeeds (gateway: 2 min,
+# compile included), and so does the same build locally. The e2-medium has two
+# vCPUs, so ten parallel builds were already CPU-bound (~20 min each); one at a
+# time costs about the same wall-clock and never races the daemon. Do not
+# parallelise these again without re-testing that failure mode.
 #
 # Trigger substitutions (set on the trigger):
 #   _REGION       deployment region                (e.g. us-central1)
@@ -136,7 +134,7 @@ steps:
         # Moving the :cache tag is what makes the NEXT build fast. Pushed after
         # the real tag so a failure here never loses the deployable image.
         docker push "$$CACHE"
-    waitFor: ["buf-generate"]
+    waitFor: ["image-gateway"]
 
   - id: image-students
     name: gcr.io/cloud-builders/docker
@@ -196,7 +194,7 @@ steps:
         # Moving the :cache tag is what makes the NEXT build fast. Pushed after
         # the real tag so a failure here never loses the deployable image.
         docker push "$$CACHE"
-    waitFor: ["image-gateway"]
+    waitFor: ["image-students"]
 
   - id: image-finance
     name: gcr.io/cloud-builders/docker
@@ -226,7 +224,7 @@ steps:
         # Moving the :cache tag is what makes the NEXT build fast. Pushed after
         # the real tag so a failure here never loses the deployable image.
         docker push "$$CACHE"
-    waitFor: ["image-students"]
+    waitFor: ["image-config"]
 
   - id: image-grades
     name: gcr.io/cloud-builders/docker
@@ -256,7 +254,7 @@ steps:
         # Moving the :cache tag is what makes the NEXT build fast. Pushed after
         # the real tag so a failure here never loses the deployable image.
         docker push "$$CACHE"
-    waitFor: ["buf-generate"]
+    waitFor: ["image-finance"]
 
   - id: image-attendance
     name: gcr.io/cloud-builders/docker
@@ -346,7 +344,7 @@ steps:
         # Moving the :cache tag is what makes the NEXT build fast. Pushed after
         # the real tag so a failure here never loses the deployable image.
         docker push "$$CACHE"
-    waitFor: ["image-config"]
+    waitFor: ["image-comms"]
 
   # The web image builds from the repo root like the Go services, but the root
   # .dockerignore excludes apps/ and packages/ for them — so this relies on
@@ -380,7 +378,7 @@ steps:
           -t "$$IMG" -t "$$CACHE" .
         docker push "$$IMG"
         docker push "$$CACHE"
-    waitFor: ["image-comms"]
+    waitFor: ["image-uniforms"]
 
 # The rollout is NOT here.
 #
