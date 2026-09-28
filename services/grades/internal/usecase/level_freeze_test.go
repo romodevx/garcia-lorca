@@ -71,3 +71,35 @@ func TestLegacyCaptureRefusesALevelBeingDeleted(t *testing.T) {
 }
 
 func fixedLegacyNow() time.Time { return time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC) }
+
+// Confirmation review (gap 3): closing or reopening a period writes its
+// closure and report cards under the level; while the level's deletion runs
+// both are refused with LEVEL_BEING_DELETED and nothing is written.
+func TestPeriodWritesRefuseALevelBeingDeleted(t *testing.T) {
+	freeze := func(f periodsFixture) {
+		c := f.catalog.levelCatalogs[levelPrimaria]
+		c.Deleting = true
+		f.catalog.levelCatalogs[levelPrimaria] = c
+	}
+
+	t.Run("close", func(t *testing.T) {
+		f := newPeriodsFixture(t)
+		f.captureAll(t)
+		freeze(f)
+		_, err := f.svc.Close(context.Background(), firstTermID, true, dirActor)
+		assert.Equal(t, levelarchive.CodeLevelBeingDeleted, levelarchive.CodeOf(err), "err = %v", err)
+		assert.False(t, f.grades.closures[firstTermID].IsClosed(), "no closure is written")
+		assert.Empty(t, f.periods.cards, "no report card is issued")
+	})
+
+	t.Run("reopen", func(t *testing.T) {
+		f := newPeriodsFixture(t)
+		f.captureAll(t)
+		_, err := f.svc.Close(context.Background(), firstTermID, false, dirActor)
+		require.NoError(t, err)
+		freeze(f)
+		_, err = f.svc.Reopen(context.Background(), firstTermID, director)
+		assert.Equal(t, levelarchive.CodeLevelBeingDeleted, levelarchive.CodeOf(err), "err = %v", err)
+		assert.True(t, f.grades.closures[firstTermID].IsClosed(), "the period stays closed")
+	})
+}

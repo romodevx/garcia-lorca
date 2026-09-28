@@ -335,6 +335,10 @@ func TestLevelLookupsCarryTheDeletingStatus(t *testing.T) {
 			key, err := c.LevelIDOfGroup(context.Background(), "grp-1")
 			require.NoError(t, err)
 			assert.Equal(t, ports.LevelKey{ID: "lvl-1", Deleting: want}, key)
+
+			catalog, err := c.LevelCatalog(context.Background(), "cyc-1", "lvl-1")
+			require.NoError(t, err)
+			assert.Equal(t, want, catalog.Deleting, "a period's close/reopen reads it here")
 		})
 	}
 }

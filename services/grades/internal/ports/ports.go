@@ -179,6 +179,9 @@ type LevelCatalog struct {
 	Assignments    []AssignmentRef
 	SubjectNames   map[string]string
 	TeacherNames   map[string]string
+	// Deleting is true while the level's deletion runs (ADR 0021): a period
+	// of it can be neither closed nor reopened.
+	Deleting bool
 }
 
 // StudentRef is the grades-owned view of a pupil for a report card: the full
