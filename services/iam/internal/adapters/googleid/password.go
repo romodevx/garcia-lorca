@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -64,16 +66,18 @@ func (c *PasswordChecker) CheckPassword(ctx context.Context, email, password str
 	if err != nil {
 		return glerrors.Wrap(glerrors.KindInternal, "encoding the password check", err)
 	}
-	endpoint := c.baseURL + "/v1/accounts:signInWithPassword?key=" + url.QueryEscape(c.apiKey)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	// The key rides in a header, never in the URL: URLs end up in proxy and
+	// access logs, and in every *url.Error the transport returns.
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/accounts:signInWithPassword", bytes.NewReader(body))
 	if err != nil {
-		return glerrors.Wrap(glerrors.KindInternal, "building the password check", err)
+		return glerrors.Wrap(glerrors.KindInternal, "building the password check", withoutURL(err))
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(apiKeyHeader, c.apiKey)
 
 	res, err := c.client.Do(req)
 	if err != nil {
-		return glerrors.Wrap(glerrors.KindInternal, "asking the provider", err)
+		return glerrors.Wrap(glerrors.KindInternal, "asking the provider", withoutURL(err))
 	}
 	defer func() { _ = res.Body.Close() }()
 
@@ -95,6 +99,19 @@ func (c *PasswordChecker) CheckPassword(ctx context.Context, email, password str
 		return errUnauthorized()
 	}
 	return glerrors.New(glerrors.KindInternal, "el proveedor no pudo verificar la contraseña")
+}
+
+// apiKeyHeader is how Google APIs accept an API key outside the URL.
+const apiKeyHeader = "X-Goog-Api-Key"
+
+// withoutURL drops the request URL a *url.Error carries, keeping only the
+// operation and its cause: nothing about the endpoint reaches an error chain.
+func withoutURL(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return fmt.Errorf("%s: %w", ue.Op, ue.Err)
+	}
+	return err
 }
 
 func isCredentialRefusal(msg string) bool {

@@ -16,11 +16,12 @@ import (
 )
 
 // fakeToolkit answers accounts:signInWithPassword like Identity Platform does.
-func fakeToolkit(t *testing.T, status int, body string, seen *map[string]any, query *string) *httptest.Server {
+func fakeToolkit(t *testing.T, status int, body string, seen *map[string]any, query, apiKey *string) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/v1/accounts:signInWithPassword", r.URL.Path)
 		*query = r.URL.RawQuery
+		*apiKey = r.Header.Get("X-Goog-Api-Key")
 		raw, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(raw, seen)
 		w.WriteHeader(status)
@@ -49,8 +50,8 @@ func TestPasswordCheckerAsksTheProvider(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var seen map[string]any
-			var query string
-			srv := fakeToolkit(t, tc.status, tc.body, &seen, &query)
+			var query, apiKey string
+			srv := fakeToolkit(t, tc.status, tc.body, &seen, &query, &apiKey)
 			c := googleid.NewPasswordChecker("web-key", srv.URL, srv.Client())
 
 			err := c.CheckPassword(context.Background(), "owner@example.com", "s3cret")
@@ -59,7 +60,11 @@ func TestPasswordCheckerAsksTheProvider(t *testing.T) {
 			} else {
 				assert.Equal(t, tc.wantKind, glerrors.KindOf(err), "err = %v", err)
 			}
-			assert.Equal(t, "key=web-key", query)
+			assert.Empty(t, query, "the key never rides in the URL (proxies and logs keep URLs)")
+			assert.Equal(t, "web-key", apiKey, "the key travels in the X-Goog-Api-Key header")
+			if err != nil {
+				assert.NotContains(t, err.Error(), "web-key")
+			}
 			assert.Equal(t, "owner@example.com", seen["email"])
 			assert.Equal(t, "s3cret", seen["password"])
 			assert.Equal(t, false, seen["returnSecureToken"], "no session is minted for a re-check")
@@ -70,4 +75,15 @@ func TestPasswordCheckerAsksTheProvider(t *testing.T) {
 func TestPasswordCheckerWithoutAKeyFailsClosed(t *testing.T) {
 	err := googleid.NewPasswordChecker("", "http://127.0.0.1:1", nil).CheckPassword(context.Background(), "a@b.mx", "x")
 	assert.Equal(t, glerrors.KindInternal, glerrors.KindOf(err))
+}
+
+// A transport failure (http.Client.Do's *url.Error embeds the request URL) must
+// never carry the key into an error, a log line or a response.
+func TestPasswordCheckerTransportErrorNeverCarriesTheKey(t *testing.T) {
+	const key = "AIzaSECRET-web-key"
+	err := googleid.NewPasswordChecker(key, "http://127.0.0.1:1", nil).CheckPassword(context.Background(), "a@b.mx", "x")
+	require.Error(t, err)
+	assert.Equal(t, glerrors.KindInternal, glerrors.KindOf(err))
+	assert.NotContains(t, err.Error(), key)
+	assert.NotContains(t, glerrors.SafeMessage(err), key)
 }

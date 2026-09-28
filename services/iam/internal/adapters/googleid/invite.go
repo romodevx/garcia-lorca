@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/url"
 	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -68,16 +67,16 @@ func (i *Inviter) SendPasswordSetupEmail(ctx context.Context, email string) erro
 	if err != nil {
 		return glerrors.Wrap(glerrors.KindInternal, "encoding the invitation request", err)
 	}
-	endpoint := i.baseURL + "/v1/accounts:sendOobCode?key=" + url.QueryEscape(i.apiKey)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, i.baseURL+"/v1/accounts:sendOobCode", bytes.NewReader(body))
 	if err != nil {
-		return glerrors.Wrap(glerrors.KindInternal, "building the invitation request", err)
+		return glerrors.Wrap(glerrors.KindInternal, "building the invitation request", withoutURL(err))
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(apiKeyHeader, i.apiKey)
 
 	res, err := i.client.Do(req)
 	if err != nil {
-		return glerrors.Wrap(glerrors.KindInternal, "sending the invitation", err)
+		return glerrors.Wrap(glerrors.KindInternal, "sending the invitation", withoutURL(err))
 	}
 	defer func() { _ = res.Body.Close() }()
 
