@@ -82,3 +82,38 @@ describe("LevelsPanel — grading", () => {
     expect(screen.queryByRole("checkbox", { name: "Lleva calificación numérica" })).toBeNull();
   });
 });
+
+describe("LevelsPanel — deleting a level (owner only)", () => {
+  function renderWith(onDelete: ((id: string) => void) | undefined, selected: string | undefined) {
+    render(
+      <LevelsPanel
+        levels={[primaria, secundaria]}
+        selectedLevelId={selected}
+        onSelect={() => {}}
+        onCreate={vi.fn()}
+        onSetAttendanceMode={vi.fn()}
+        onSetGrading={vi.fn()}
+        onDelete={onDelete}
+      />,
+    );
+  }
+
+  it("offers 'Eliminar nivel' on the selected level to whoever may delete", async () => {
+    const onDelete = vi.fn();
+    renderWith(onDelete, "l1");
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Eliminar nivel PRIMARIA" }));
+
+    expect(onDelete).toHaveBeenCalledWith("l1");
+  });
+
+  it("offers nothing without the permission", () => {
+    renderWith(undefined, "l1");
+    expect(screen.queryByRole("button", { name: /Eliminar nivel/ })).toBeNull();
+  });
+
+  it("offers nothing until a level is chosen", () => {
+    renderWith(vi.fn(), undefined);
+    expect(screen.queryByRole("button", { name: /Eliminar nivel/ })).toBeNull();
+  });
+});

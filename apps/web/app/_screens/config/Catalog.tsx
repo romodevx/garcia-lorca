@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
+import { Toast } from "../../_design/Toast";
 import type { AttendanceMode } from "../../attendance/sheet";
 import {
   createCycle,
@@ -38,6 +39,7 @@ import { GradeLevelsPanel } from "./GradeLevelsPanel";
 import { GroupsPanel } from "./GroupsPanel";
 import { LevelsPanel } from "./LevelsPanel";
 import { TuitionPanel } from "./TuitionPanel";
+import { LevelTrashPanel } from "./levelDeletion/LevelTrashPanel";
 import { CalendarPanel } from "./CalendarPanel";
 import { SchoolProfilePanel } from "./SchoolProfilePanel";
 import { SubjectsPanel } from "./SubjectsPanel";
@@ -49,8 +51,17 @@ import { API_URL } from "../../api-url";
 
 // Gateway base URL for the browser (public env; matches AppShell/compose).
 
+/** How long a notice left by another screen stays up. */
+const NOTICE_MS = 8_000;
+
 export interface CatalogProps {
   onBack: () => void;
+  /** Owner-only (levels:delete): the delete action on a level and the Papelera. */
+  canDeleteLevels?: boolean;
+  /** Opens the three-step deletion page of one level. */
+  onDeleteLevel?: (levelId: string) => void;
+  /** A message another screen left for this one (a finished deletion). */
+  notice?: string;
 }
 
 /**
@@ -61,7 +72,7 @@ export interface CatalogProps {
  * gateway (behind the flag + config:read/write) is the security boundary; this
  * screen is UX only.
  */
-export function Catalog({ onBack }: CatalogProps): ReactElement {
+export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice }: CatalogProps): ReactElement {
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
   const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
@@ -178,6 +189,20 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
     setGroups((prev) => [...prev, created]);
   }, []);
 
+  // The notice (≥ 8 s, like an undo toast) leaves on its own instead of pinning over the page.
+  const [noticeShown, setNoticeShown] = useState(notice !== undefined);
+  useEffect(() => {
+    if (notice === undefined) return;
+    setNoticeShown(true);
+    const timer = setTimeout(() => setNoticeShown(false), NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  // A level restored from the Papelera is back: re-read the list it belongs to.
+  const reloadLevels = useCallback((): void => {
+    listLevels(API_URL).then(setLevels).catch(() => {});
+  }, []);
+
   const handleCopyTermMonths = useCallback((input: CopyTermMonthsInput): Promise<Term[]> => copyTermMonths(API_URL, input), []);
 
 
@@ -289,7 +314,15 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
 
           {!pricing && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(340px, 100%), 1fr))", gap: 18 }}>
-            <LevelsPanel levels={levels} selectedLevelId={selectedLevelId} onSelect={setSelectedLevelId} onCreate={handleCreateLevel} onSetAttendanceMode={handleSetAttendanceMode} onSetGrading={handleSetGrading} />
+            <LevelsPanel
+              levels={levels}
+              selectedLevelId={selectedLevelId}
+              onSelect={setSelectedLevelId}
+              onCreate={handleCreateLevel}
+              onSetAttendanceMode={handleSetAttendanceMode}
+              onSetGrading={handleSetGrading}
+              onDelete={canDeleteLevels ? onDeleteLevel : undefined}
+            />
 
             {selectedLevel !== undefined && (
               <GradeLevelsPanel
@@ -337,8 +370,11 @@ export function Catalog({ onBack }: CatalogProps): ReactElement {
             )}
           </div>
           )}
+
+          {!pricing && canDeleteLevels && <LevelTrashPanel onRestored={reloadLevels} />}
         </div>
       )}
+      {noticeShown && notice !== undefined && <Toast>{notice}</Toast>}
     </Page>
   );
 }

@@ -387,6 +387,107 @@ export function updateLevelGrading(baseURL: string, id: string, grading: LevelGr
   return patchLevel(baseURL, id, { grading });
 }
 
+// --- level deletion + trash -------------------------------------------------
+
+/** How much hangs off a level — what deleting it takes away (or brought back). */
+export interface LevelDeletionCounts {
+  gradeLevels: number;
+  groups: number;
+  subjects: number;
+  terms: number;
+  teachingAssignments: number;
+  students: number;
+  enrollments: number;
+  attendanceMarks: number;
+  monthlyGrades: number;
+  reportCards: number;
+  tuitionPlans: number;
+  uniformItems: number;
+  schoolEvents: number;
+}
+
+/**
+ * What deleting a level would do, and the token that proves the director read
+ * THIS summary: if anything changes before the delete, the server answers
+ * PREVIEW_STALE instead of deleting what nobody saw.
+ */
+export interface LevelDeletionPreview {
+  levelId: string;
+  levelName: string;
+  /** No grades and no pupils: the level goes entirely. */
+  empty: boolean;
+  counts: LevelDeletionCounts;
+  /** Money is never deleted with a level. */
+  keeps: { charges: number; payments: number };
+  confirmToken: string;
+  expiresAt: string;
+}
+
+export interface DeleteLevelInput {
+  confirmName: string;
+  confirmToken: string;
+  password: string;
+}
+
+export interface LevelDeletionResult {
+  batchId: string;
+  deletedAt: string;
+  restorableUntil: string;
+  counts: LevelDeletionCounts;
+}
+
+/** One deleted level waiting in the trash for its 7 days. */
+export interface LevelTrashItem {
+  batchId: string;
+  levelId: string;
+  levelName: string;
+  deletedAt: string;
+  restorableUntil: string;
+  deletedByName: string;
+  counts: LevelDeletionCounts;
+  status: string;
+}
+
+/** Rows the restore could not bring back, and why (a pupil already re-enrolled…). */
+export interface RestoreSkipped {
+  kind: string;
+  count: number;
+  reason: string;
+}
+
+export interface LevelRestoreResult {
+  restored: Partial<LevelDeletionCounts>;
+  skipped: RestoreSkipped[];
+}
+
+/** GET /levels/{id}/deletion-preview — the summary the director confirms. */
+export async function getLevelDeletionPreview(baseURL: string, levelId: string): Promise<LevelDeletionPreview> {
+  const res = await authFetch(url(baseURL, `${BASE_PATH}/levels/${encodeURIComponent(levelId)}/deletion-preview`), { credentials: "include" });
+  if (!res.ok) {
+    throw await configFailure(res);
+  }
+  return (await res.json()) as LevelDeletionPreview;
+}
+
+/**
+ * POST /levels/{id}/delete. Refusals carry their code: PREVIEW_STALE (409),
+ * NAME_MISMATCH (400), REAUTH_FAILED (401 — the password, not the session).
+ */
+export function deleteLevel(baseURL: string, levelId: string, input: DeleteLevelInput): Promise<LevelDeletionResult> {
+  return postJSON<LevelDeletionResult>(baseURL, `/levels/${encodeURIComponent(levelId)}/delete`, input);
+}
+
+/** GET /level-trash — deleted levels still inside their restore window. */
+export function listLevelTrash(baseURL: string): Promise<LevelTrashItem[]> {
+  return getList<LevelTrashItem>(baseURL, "/level-trash", "items");
+}
+
+/** POST /level-trash/{batchId}/restore. LEVEL_NAME_TAKEN (409) and TRASH_EXPIRED (410) refuse. */
+export async function restoreLevel(baseURL: string, batchId: string): Promise<LevelRestoreResult> {
+  const out = await postJSON<Partial<LevelRestoreResult>>(baseURL, `/level-trash/${encodeURIComponent(batchId)}/restore`, {});
+  return { restored: out.restored ?? {}, skipped: out.skipped ?? [] };
+}
+
 // --- grade levels ---------------------------------------------------------
 
 export function createGradeLevel(baseURL: string, input: CreateGradeLevelInput): Promise<GradeLevel> {

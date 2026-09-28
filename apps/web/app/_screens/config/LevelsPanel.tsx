@@ -2,6 +2,7 @@
 
 import { useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
+import { Icon } from "../../_design/Icon";
 import { SlideOver } from "../../_design/SlideOver";
 import type { AttendanceMode } from "../../attendance/sheet";
 import type { CreateLevelInput, EnrollmentGranularity, Level, LevelGrading } from "../../config/api";
@@ -19,6 +20,8 @@ export interface LevelsPanelProps {
   onSetAttendanceMode: (levelId: string, mode: AttendanceMode) => Promise<void>;
   /** Saves whether and how the level grades (scale, decimals, passing mark). */
   onSetGrading: (levelId: string, grading: LevelGrading) => Promise<void>;
+  /** Opens the deletion of a level. Absent = the principal may not (levels:delete). */
+  onDelete?: (levelId: string) => void;
 }
 
 const GRANULARITY_OPTIONS = [
@@ -36,7 +39,7 @@ const GRANULARITY_LABEL: Record<string, string> = { cycle: "por ciclo", term: "p
  * Now the panel is the list, and creating opens the same drawer a new pupil
  * does.
  */
-export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSetAttendanceMode, onSetGrading }: LevelsPanelProps): ReactElement {
+export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSetAttendanceMode, onSetGrading, onDelete }: LevelsPanelProps): ReactElement {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [sepCode, setSepCode] = useState("");
@@ -105,6 +108,7 @@ export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSet
         <>
           <AttendanceModeControl key={selectedLevel.id} level={selectedLevel} onChange={onSetAttendanceMode} />
           <GradingControl key={`grading-${selectedLevel.id}`} level={selectedLevel} onChange={onSetGrading} />
+          {onDelete !== undefined && <DeleteLevelButton level={selectedLevel} onDelete={onDelete} />}
         </>
       )}
 
@@ -134,5 +138,28 @@ export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSet
         </SlideOver>
       )}
     </Section>
+  );
+}
+
+/**
+ * A secondary action in the danger colour — never the screen's primary. It only
+ * opens the three-step page; nothing is deleted from here.
+ */
+function DeleteLevelButton({ level, onDelete }: { level: Level; onDelete: (levelId: string) => void }): ReactElement {
+  return (
+    <div style={{ margin: "4px 0 16px" }}>
+      <button
+        type="button"
+        onClick={() => onDelete(level.id)}
+        aria-label={`Eliminar nivel ${level.name}`}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 8, minHeight: 44, padding: "0 16px", borderRadius: "var(--r-pill)",
+          border: "1.5px solid var(--red)", background: "transparent", color: "var(--bad-fg)", fontWeight: 600, fontSize: 14.5,
+        }}
+      >
+        <Icon name="warning" size={18} />
+        Eliminar nivel
+      </button>
+    </div>
   );
 }

@@ -24,7 +24,8 @@ export type View =
   | { screen: "admin" }
   | { screen: "module"; moduleId: string }
   | { screen: "studentEdit"; studentId: string }
-  | { screen: "teacherLoad"; teacherId: string };
+  | { screen: "teacherLoad"; teacherId: string }
+  | { screen: "levelDelete"; levelId: string };
 
 /** El prefijo de un módulo que aún no tiene pantalla propia. */
 const MODULE_PREFIX = "/modulo/";
@@ -32,6 +33,8 @@ const MODULE_PREFIX = "/modulo/";
 const STUDENT_EDIT = /^\/alumnos\/([^/]+)\/editar$/;
 /** /docentes/{id}/carga — one teacher's teaching load (carga académica). */
 const TEACHER_LOAD = /^\/docentes\/([^/]+)\/carga$/;
+/** /configuracion/niveles/{id}/eliminar — the three-step deletion of one level. */
+const LEVEL_DELETE = /^\/configuracion\/niveles\/([^/]+)\/eliminar$/;
 
 /**
  * Las pantallas de una sola pieza. Los módulos sin backend van por
@@ -51,7 +54,7 @@ const BY_SCREEN = {
   teachers: "/docentes",
   uniforms: "/uniformes",
   admin: "/administracion",
-} as const satisfies Record<Exclude<View["screen"], "module" | "studentEdit" | "teacherLoad">, string>;
+} as const satisfies Record<Exclude<View["screen"], "module" | "studentEdit" | "teacherLoad" | "levelDelete">, string>;
 
 const BY_PATH: ReadonlyMap<string, View> = new Map(
   Object.entries(BY_SCREEN).map(([screen, path]) => [path, { screen } as View]),
@@ -67,6 +70,9 @@ export function viewToPath(view: View): string {
   }
   if (view.screen === "teacherLoad") {
     return `/docentes/${encodeURIComponent(view.teacherId)}/carga`;
+  }
+  if (view.screen === "levelDelete") {
+    return `/configuracion/niveles/${encodeURIComponent(view.levelId)}/eliminar`;
   }
   return BY_SCREEN[view.screen];
 }
@@ -106,6 +112,12 @@ export function pathToView(pathname: string): View {
   const teacherId = load?.[1] === undefined ? undefined : safeDecode(load[1]);
   if (teacherId !== undefined) {
     return { screen: "teacherLoad", teacherId };
+  }
+
+  const del = LEVEL_DELETE.exec(clean);
+  const levelId = del?.[1] === undefined ? undefined : safeDecode(del[1]);
+  if (levelId !== undefined) {
+    return { screen: "levelDelete", levelId };
   }
 
   return { screen: "dashboard" };
