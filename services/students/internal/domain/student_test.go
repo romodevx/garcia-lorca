@@ -21,14 +21,16 @@ func newApplicant(t *testing.T) *domain.Student {
 	t.Helper()
 	curp, _ := domain.NewCURP("HEGA050312MDFRNN08")
 	s, err := domain.NewApplicant(domain.NewApplicantParams{
-		ID:           "s1",
-		TenantID:     "t1",
-		CURP:         curp,
-		FirstName:    "Ana",
-		LastName:     "Hernández",
-		Level:        primaria(t),
-		GradeGroup:   "4° A",
-		GuardianName: "Marisol Ríos",
+		ID:        "s1",
+		TenantID:  "t1",
+		CURP:      curp,
+		FirstName: "Ana",
+		LastName:  "Hernández",
+		// Padded on purpose: the entity trims what it is given.
+		MaternalLastName: " Ríos ",
+		Level:            primaria(t),
+		GradeGroup:       "4° A",
+		GuardianName:     "Marisol Ríos",
 	})
 	if err != nil {
 		t.Fatalf("NewApplicant: %v", err)
@@ -43,6 +45,9 @@ func TestNewApplicantStartsPending(t *testing.T) {
 	}
 	if s.ID() != "s1" || s.CURP().String() != "HEGA050312MDFRNN08" || s.Level() != primaria(t) {
 		t.Errorf("accessors mismatch: %+v", s)
+	}
+	if s.LastName() != "Hernández" || s.MaternalLastName() != "Ríos" {
+		t.Errorf("surnames = %q %q, want Hernández Ríos", s.LastName(), s.MaternalLastName())
 	}
 }
 

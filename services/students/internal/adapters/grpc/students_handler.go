@@ -73,12 +73,13 @@ func (h *StudentsHandler) Health(ctx context.Context, _ *connect.Request[student
 func (h *StudentsHandler) CreateApplicant(ctx context.Context, req *connect.Request[studentsv1.CreateApplicantRequest]) (*connect.Response[studentsv1.CreateApplicantResponse], error) {
 	m := req.Msg
 	student, err := h.svc.CreateApplicant(ctx, usecase.CreateApplicantInput{
-		CURP:         m.GetCurp(),
-		FirstName:    m.GetFirstName(),
-		LastName:     m.GetLastName(),
-		LevelID:      m.GetLevelId(),
-		GradeGroup:   m.GetGradeGroup(),
-		GuardianName: m.GetGuardianName(),
+		CURP:             m.GetCurp(),
+		FirstName:        m.GetFirstName(),
+		LastName:         m.GetLastName(),
+		MaternalLastName: m.GetMaternalLastName(),
+		LevelID:          m.GetLevelId(),
+		GradeGroup:       m.GetGradeGroup(),
+		GuardianName:     m.GetGuardianName(),
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -90,11 +91,12 @@ func (h *StudentsHandler) CreateApplicant(ctx context.Context, req *connect.Requ
 func (h *StudentsHandler) UpdateStudent(ctx context.Context, req *connect.Request[studentsv1.UpdateStudentRequest]) (*connect.Response[studentsv1.UpdateStudentResponse], error) {
 	m := req.Msg
 	student, err := h.svc.UpdateDetails(ctx, usecase.UpdateDetailsInput{
-		ID:        m.GetId(),
-		FirstName: m.GetFirstName(),
-		LastName:  m.GetLastName(),
-		CURP:      m.GetCurp(),
-		Profile:   toDomainProfileInput(m.GetProfile()),
+		ID:               m.GetId(),
+		FirstName:        m.GetFirstName(),
+		LastName:         m.GetLastName(),
+		MaternalLastName: m.GetMaternalLastName(),
+		CURP:             m.GetCurp(),
+		Profile:          toDomainProfileInput(m.GetProfile()),
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -409,6 +411,7 @@ func toProtoStudent(s *domain.Student) *studentsv1.Student {
 		Curp:             s.CURP().String(),
 		FirstName:        s.FirstName(),
 		LastName:         s.LastName(),
+		MaternalLastName: s.MaternalLastName(),
 		LevelId:          s.Level().ID(),
 		LevelName:        s.Level().Name(),
 		GradeGroup:       s.GradeGroup(),

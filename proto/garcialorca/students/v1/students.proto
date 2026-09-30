@@ -61,7 +61,9 @@ service StudentsService {
   // code, INVALID_ARGUMENT.
   rpc VerifyCard(VerifyCardRequest) returns (VerifyCardResponse);
 
-  // ListStudents lists students, optionally filtered by level/group/status.
+  // ListStudents lists students, optionally filtered by level/group/status,
+  // ordered by surname (paternal, maternal) then first name in Spanish
+  // collation, id as the tie-break.
   rpc ListStudents(ListStudentsRequest) returns (ListStudentsResponse);
 
   // ChangeAdmissionStatus advances the admission state machine (accept, reject,
@@ -226,6 +228,11 @@ message Student {
   StudentProfile profile = 14;
   // enrollment_number is the matrícula, <year>-<five digits> (task 13).
   string enrollment_number = 15;
+  // last_name is the PATERNAL surname; maternal_last_name the maternal one,
+  // empty when not captured (T3). A pupil captured before this field existed may
+  // still carry both surnames in last_name. Display order is always
+  // "last_name maternal_last_name first_name".
+  string maternal_last_name = 16;
 }
 
 // StudentProfile is what the office keeps up to date by hand.
@@ -258,6 +265,7 @@ message UpdateStudentRequest {
   string last_name = 3;
   string curp = 4;
   StudentProfile profile = 5;
+  string maternal_last_name = 6;  // optional; see Student.maternal_last_name
 }
 
 message UpdateStudentResponse {
@@ -371,6 +379,7 @@ message CreateApplicantRequest {
   string grade_group = 5;
   string guardian_name = 6;
   string level_id = 7;  // a config.v1.Level id; required
+  string maternal_last_name = 8;  // optional; see Student.maternal_last_name
 }
 
 message CreateApplicantResponse {

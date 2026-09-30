@@ -126,6 +126,7 @@ func (r *Repository) UpdateDetails(ctx context.Context, s *domain.Student) error
 	}
 	cols["first_name"] = s.FirstName()
 	cols["last_name"] = s.LastName()
+	cols["maternal_last_name"] = nullableText(s.MaternalLastName())
 	cols["curp"] = s.CURP().String()
 	cols["updated_at"] = gorm.Expr("now()")
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
@@ -168,8 +169,19 @@ func (r *Repository) FindByID(ctx context.Context, id string) (*domain.Student, 
 	return out, nil
 }
 
-// List returns students matching the filter, keyset-paginated by id. The next
-// page token is the last returned id ("" when the last page is reached).
+// surnameOrder is how every list reads (T3): paternal surname, maternal
+// surname, first name — in es_primary, where accents and case do not move a
+// pupil — and id as the tie-break that makes the order total. It must match the
+// expressions of idx_students_surname_order (migration 0017).
+const surnameOrder = "last_name COLLATE es_primary, COALESCE(maternal_last_name, '') COLLATE es_primary, first_name COLLATE es_primary, id"
+
+// afterCursor keeps the keyset past the cursor pupil in surnameOrder. The token
+// stays the last returned id; its sort key is read back in the same statement,
+// so a page token issued before the order changed still means "after this pupil".
+const afterCursor = "(" + surnameOrder + ") > (SELECT last_name, COALESCE(maternal_last_name, ''), first_name, id FROM students WHERE id = ?)"
+
+// List returns students matching the filter in surnameOrder, keyset-paginated.
+// The next page token is the last returned id ("" when the last page is reached).
 func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]*domain.Student, string, error) {
 	size := f.PageSize
 	if size <= 0 {
@@ -184,7 +196,7 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]*domain.St
 		next     string
 	)
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		q := tx.Model(&studentModel{}).Order("id ASC").Limit(size + 1)
+		q := tx.Model(&studentModel{}).Order(surnameOrder).Limit(size + 1)
 		if f.LevelID != "" {
 			q = q.Where("level_id = ?", f.LevelID)
 		}
@@ -198,7 +210,7 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]*domain.St
 			q = q.Where("id IN ?", f.IDs)
 		}
 		if f.PageToken != "" {
-			q = q.Where("id > ?", f.PageToken)
+			q = q.Where(afterCursor, f.PageToken)
 		}
 
 		var rows []studentModel

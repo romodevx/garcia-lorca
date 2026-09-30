@@ -584,3 +584,56 @@ func TestTransferIntoAnUnsizedGroupSaysSo(t *testing.T) {
 		t.Fatalf("want a KindConflict naming the unset size, got %v", err)
 	}
 }
+
+// T3: the school reads its lists by surname — paternal, maternal, then first
+// name — in Spanish (accents and case do not move a pupil; ñ after n), and the
+// order holds across pages.
+func TestListOrdersBySurnameAcrossPages(t *testing.T) {
+	const tenantC = "5a5a5a5a-3333-3333-3333-333333333333"
+	repo := appRepo(t, tenantC)
+	ctx := context.Background()
+	seed := []struct{ first, paternal, maternal, curp string }{
+		{"Zoe", "Ñuñez", "", "ZAZA090303HDFRNN01"},
+		{"Beto", "álvarez", "Ruiz", "ZAZB090303HDFRNN02"},
+		{"Eva", "Oropeza", "", "ZAZC090303HDFRNN03"},
+		{"Ana", "Alvarez", "Ruiz", "ZAZD090303HDFRNN04"},
+		{"Carla", "Nuñez", "", "ZAZE090303HDFRNN05"},
+		{"Dora", "Álvarez", "López", "ZAZF090303HDFRNN06"},
+	}
+	for i, p := range seed {
+		s, err := domain.NewApplicant(domain.NewApplicantParams{
+			ID: fmt.Sprintf("cccccccc-0000-0000-0000-00000000000%d", i+1), TenantID: tenantC,
+			CURP: mustCURP(t, p.curp), FirstName: p.first, LastName: p.paternal, MaternalLastName: p.maternal,
+			Level: domain.RestoreLevel(primariaLevelID, "Primaria"),
+		})
+		if err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+		if err := repo.Create(ctx, s); err != nil {
+			t.Fatalf("create %d: %v", i, err)
+		}
+	}
+
+	var got []string
+	token := ""
+	for pages := 0; pages < 10; pages++ {
+		page, next, err := repo.List(ctx, ports.ListFilter{PageSize: 2, PageToken: token})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		for _, s := range page {
+			got = append(got, strings.TrimSpace(s.LastName()+" "+s.MaternalLastName()+" "+s.FirstName()))
+		}
+		if next == "" {
+			break
+		}
+		token = next
+	}
+	want := []string{
+		"Álvarez López Dora", "Alvarez Ruiz Ana", "álvarez Ruiz Beto",
+		"Nuñez  Carla", "Ñuñez  Zoe", "Oropeza  Eva",
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("order =\n  %v\nwant\n  %v", got, want)
+	}
+}

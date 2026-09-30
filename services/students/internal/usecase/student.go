@@ -160,9 +160,11 @@ func (s *StudentService) DeletePhoto(ctx context.Context, studentID string) erro
 type UpdateDetailsInput struct {
 	ID        string
 	FirstName string
-	LastName  string
-	CURP      string
-	Profile   domain.ProfileInput
+	LastName  string // the paternal surname
+	// MaternalLastName is optional (T3).
+	MaternalLastName string
+	CURP             string
+	Profile          domain.ProfileInput
 }
 
 // UpdateDetails validates and persists a correction of the pupil's file. A CURP
@@ -180,7 +182,7 @@ func (s *StudentService) UpdateDetails(ctx context.Context, in UpdateDetailsInpu
 	if err != nil {
 		return nil, err
 	}
-	if err := student.UpdateDetails(in.FirstName, in.LastName, curp, profile); err != nil {
+	if err := student.UpdateDetails(in.FirstName, in.LastName, in.MaternalLastName, curp, profile); err != nil {
 		return nil, err
 	}
 	if err := s.repo.UpdateDetails(ctx, student); err != nil {
@@ -193,12 +195,14 @@ func (s *StudentService) UpdateDetails(ctx context.Context, in UpdateDetailsInpu
 // here; LevelID is resolved against config's catalog, which also supplies the
 // level's name — the caller never names the level itself.
 type CreateApplicantInput struct {
-	CURP         string
-	FirstName    string
-	LastName     string
-	LevelID      string
-	GradeGroup   string
-	GuardianName string
+	CURP      string
+	FirstName string
+	LastName  string // the paternal surname
+	// MaternalLastName is optional (T3).
+	MaternalLastName string
+	LevelID          string
+	GradeGroup       string
+	GuardianName     string
 }
 
 // CreateApplicant validates the input, builds a pending applicant, and persists
@@ -213,14 +217,15 @@ func (s *StudentService) CreateApplicant(ctx context.Context, in CreateApplicant
 		return nil, err
 	}
 	student, err := domain.NewApplicant(domain.NewApplicantParams{
-		ID:           s.newID(),
-		TenantID:     s.tenant,
-		CURP:         curp,
-		FirstName:    in.FirstName,
-		LastName:     in.LastName,
-		Level:        level,
-		GradeGroup:   in.GradeGroup,
-		GuardianName: in.GuardianName,
+		ID:               s.newID(),
+		TenantID:         s.tenant,
+		CURP:             curp,
+		FirstName:        in.FirstName,
+		LastName:         in.LastName,
+		MaternalLastName: in.MaternalLastName,
+		Level:            level,
+		GradeGroup:       in.GradeGroup,
+		GuardianName:     in.GuardianName,
 	})
 	if err != nil {
 		return nil, err
