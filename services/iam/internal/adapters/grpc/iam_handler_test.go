@@ -113,7 +113,7 @@ func (f *fakeUsers) SetUserRoles(_ context.Context, userID string, roleIDs []str
 }
 
 func (f *fakeUsers) SoftDelete(context.Context, string, string, string) error { return nil }
-func (f *fakeUsers) Restore(context.Context, string, string) error            { return nil }
+func (f *fakeUsers) Restore(context.Context, string, string, []string) error  { return nil }
 
 type fakeRoles struct {
 	known string

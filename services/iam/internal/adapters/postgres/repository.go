@@ -23,6 +23,9 @@ const (
 	uniqueViolation     = "23505"
 	foreignKeyViolation = "23503"
 	checkViolation      = "23514"
+	// invalidTextRepresentation is a value the column type cannot read, e.g.
+	// "not-a-uuid" compared with a uuid column.
+	invalidTextRepresentation = "22P02"
 	// emailNormalizedCheck is the CHECK the email migration adds. It is the one
 	// CHECK an API client can trip (a raw email that bypassed the domain, e.g.
 	// against the previous revision mid-deploy), so it alone maps to KindInvalid;
@@ -327,9 +330,12 @@ func guardLastActiveHolder(tx *gorm.DB, userID, roleID string) error {
 	return nil
 }
 
-// Restore brings a deleted account back as `invited` under displayName and
-// clears its deletion stamp. Anything but a deleted id is KindNotFound.
-func (r *UserRepo) Restore(ctx context.Context, userID, displayName string) error {
+// Restore brings a deleted account back as `invited` under displayName,
+// clears its deletion stamp and replaces its roles with roleIDs — all in ONE
+// transaction, so a failure anywhere leaves it deleted rather than restored
+// with the roles it held before (a former owner would come back an owner).
+// Anything but a deleted id is KindNotFound.
+func (r *UserRepo) Restore(ctx context.Context, userID, displayName string, roleIDs []string) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
 		res := tx.Model(&userModel{}).
 			Where("id = ? AND status = ?", userID, statusDeleted).
@@ -345,7 +351,7 @@ func (r *UserRepo) Restore(ctx context.Context, userID, displayName string) erro
 		if res.RowsAffected == 0 {
 			return glerrors.ErrNotFound
 		}
-		return nil
+		return replaceRoles(tx, r.tenantID, userID, roleIDs)
 	})
 }
 
@@ -354,18 +360,23 @@ func (r *UserRepo) Restore(ctx context.Context, userID, displayName string) erro
 // failure rolls both back). A role id that violates the FK is KindInvalid.
 func (r *UserRepo) SetUserRoles(ctx context.Context, userID string, roleIDs []string) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		if err := tx.Where("user_id = ?", userID).Delete(&userRoleModel{}).Error; err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "clearing user roles", err)
-		}
-		if len(roleIDs) == 0 {
-			return nil
-		}
-		rows := make([]userRoleModel, 0, len(roleIDs))
-		for _, roleID := range roleIDs {
-			rows = append(rows, userRoleModel{UserID: userID, RoleID: roleID, TenantID: r.tenantID})
-		}
-		return translateCreateErr(tx.Create(&rows).Error, "assigning user roles", "role already assigned")
+		return replaceRoles(tx, r.tenantID, userID, roleIDs)
 	})
+}
+
+// replaceRoles swaps the user's whole role set inside the caller's transaction.
+func replaceRoles(tx *gorm.DB, tenantID, userID string, roleIDs []string) error {
+	if err := tx.Where("user_id = ?", userID).Delete(&userRoleModel{}).Error; err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "clearing user roles", err)
+	}
+	if len(roleIDs) == 0 {
+		return nil
+	}
+	rows := make([]userRoleModel, 0, len(roleIDs))
+	for _, roleID := range roleIDs {
+		rows = append(rows, userRoleModel{UserID: userID, RoleID: roleID, TenantID: tenantID})
+	}
+	return translateCreateErr(tx.Create(&rows).Error, "assigning user roles", "role already assigned")
 }
 
 // --- roles ----------------------------------------------------------------
@@ -497,7 +508,8 @@ func loadRoles(tx *gorm.DB, userID string) ([]roleModel, error) {
 }
 
 func translateFindErr(err error) error {
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	// A malformed id (22P02) names no row: "not found", not a failure of ours.
+	if errors.Is(err, gorm.ErrRecordNotFound) || pgCode(err) == invalidTextRepresentation {
 		return glerrors.ErrNotFound
 	}
 	return glerrors.Wrap(glerrors.KindInternal, "query failed", err)

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"net/url"
 	"strings"
 	"time"
@@ -211,18 +212,21 @@ func (s *AdminService) InviteUser(ctx context.Context, rawEmail, displayName str
 // invitation — the SAME row, so the payments it registered and the grades it
 // captured stay attached to the person (owner answer 3).
 //
-// The roles are the ones this invitation asks for, not the ones it had: the
-// director is deciding what this person does now. The provider account is
-// switched back on, or created if it never existed there (an account from the
-// local-password era).
+// It is exactly as strong as inviting a new address, and no stronger: the
+// roles are the ones this invitation asks for (the gateway only lets a caller
+// assign what it holds), every old link dies first, and at the provider the old
+// password is replaced by one nobody knows — so the account opens only from
+// the new link, by whoever reads that mailbox.
 func (s *AdminService) reactivate(ctx context.Context, user domain.User, displayName string, roleIDs []string, assigned []domain.Role) (Invitation, error) {
-	if err := s.enableAtProvider(ctx, user.Email().String(), displayName); err != nil {
+	if s.invitations != nil {
+		if err := s.invitations.Revoke(ctx, user.ID()); err != nil {
+			return Invitation{}, err
+		}
+	}
+	if err := s.reenableAtProvider(ctx, user.Email().String(), displayName); err != nil {
 		return Invitation{}, err
 	}
-	if err := s.users.Restore(ctx, user.ID(), displayName); err != nil {
-		return Invitation{}, err
-	}
-	if err := s.users.SetUserRoles(ctx, user.ID(), roleIDs); err != nil {
+	if err := s.users.Restore(ctx, user.ID(), displayName, roleIDs); err != nil {
 		return Invitation{}, err
 	}
 	// What was just written, built in memory like InviteUser does: same id,
@@ -239,13 +243,14 @@ func (s *AdminService) reactivate(ctx context.Context, user domain.User, display
 	return out, nil
 }
 
-// enableAtProvider re-enables the provider account, creating it when the
-// provider has none. No provider configured: nothing to do.
-func (s *AdminService) enableAtProvider(ctx context.Context, email, displayName string) error {
+// reenableAtProvider switches the provider account back on with a fresh,
+// unknown credential, creating the account when the provider has none. No
+// provider configured: nothing to do.
+func (s *AdminService) reenableAtProvider(ctx context.Context, email, displayName string) error {
 	if s.provisioner == nil {
 		return nil
 	}
-	err := s.provisioner.SetDisabled(ctx, email, false)
+	err := s.provisioner.Reenable(ctx, email)
 	if glerrors.KindOf(err) == glerrors.KindNotFound {
 		return s.provisioner.CreateAccount(ctx, email, displayName)
 	}
@@ -262,38 +267,50 @@ func (s *AdminService) enableAtProvider(ctx context.Context, email, displayName 
 // only one that knows who the caller is right now rather than when their token
 // was minted:
 //
-//   - nobody deletes themself — the director who does it by accident has no
-//     way back in;
+//   - nobody deletes themself — compared on the LOADED rows, because the
+//     database reads a uuid in any case or shape and the raw strings do not;
 //   - the caller must be active and hold users:delete (owner-only);
 //   - the last active owner cannot go (enforced atomically by the repository).
 //
-// Deleting kills every session (the refresh floor moves), every pending link,
-// and the provider account. Calling it again on an already-deleted account only
-// retries the provider half, which is how a director recovers from a provider
-// that was down the first time.
+// ORDER IS LOAD-BEARING: everything reversible first, the row last. Pending
+// links die, then the provider account is disabled, then the row is deleted.
+// A provider that fails therefore deletes nothing, so "no se pudo eliminar" is
+// the truth and the person is still on the list to try again; a row the
+// repository refuses (the last owner) switches the provider back on.
 func (s *AdminService) DeleteUser(ctx context.Context, actorID, targetID string) error {
-	if strings.TrimSpace(actorID) == strings.TrimSpace(targetID) {
-		return glerrors.New(glerrors.KindForbidden, "no puedes eliminar tu propia cuenta")
-	}
-	if err := s.requireDeleter(ctx, actorID); err != nil {
+	actor, err := s.requireDeleter(ctx, actorID)
+	if err != nil {
 		return err
 	}
 	target, err := s.users.FindByID(ctx, targetID)
 	if err != nil {
 		return err
 	}
-	if target.IsDeleted() {
-		return s.disableAtProvider(ctx, target.Email().String())
+	if target.ID() == actor.ID() {
+		return glerrors.New(glerrors.KindForbidden, "no puedes eliminar tu propia cuenta")
 	}
-	if err := s.users.SoftDelete(ctx, target.ID(), actorID, domain.OwnerRoleID); err != nil {
+	if target.IsDeleted() {
+		return glerrors.ErrNotFound
+	}
+	if s.invitations != nil {
+		if err := s.invitations.Revoke(ctx, target.ID()); err != nil {
+			return err
+		}
+	}
+	email := target.Email().String()
+	disabled, err := s.disableAtProvider(ctx, email)
+	if err != nil {
 		return err
 	}
-	// Best effort, and safe to be: AcceptInvitation refuses a deleted account
-	// on its own, so a link that survives this line still opens nothing.
-	if s.invitations != nil {
-		_ = s.invitations.Revoke(ctx, target.ID())
+	if err := s.users.SoftDelete(ctx, target.ID(), actor.ID(), domain.OwnerRoleID); err != nil {
+		if disabled {
+			if undo := s.provisioner.SetDisabled(ctx, email, false); undo != nil {
+				return errors.Join(err, undo)
+			}
+		}
+		return err
 	}
-	return s.disableAtProvider(ctx, target.Email().String())
+	return nil
 }
 
 // permUsersDelete is the permission DeleteUser demands of its caller.
@@ -301,39 +318,40 @@ const permUsersDelete = "users:delete"
 
 // requireDeleter loads the caller as they are NOW and demands an active
 // account holding users:delete. Any failure to establish that is a refusal.
-func (s *AdminService) requireDeleter(ctx context.Context, actorID string) error {
+func (s *AdminService) requireDeleter(ctx context.Context, actorID string) (domain.User, error) {
 	refused := glerrors.New(glerrors.KindForbidden, "no tienes permiso para eliminar usuarios")
 	actor, err := s.users.FindByID(ctx, actorID)
 	if glerrors.KindOf(err) == glerrors.KindNotFound {
-		return refused
+		return domain.User{}, refused
 	}
 	if err != nil {
-		return err
+		return domain.User{}, err
 	}
 	want, err := domain.NewPermission(permUsersDelete)
 	if err != nil {
-		return err
+		return domain.User{}, err
 	}
 	if !actor.CanAuthenticate() || !actor.HasPermission(want) {
-		return refused
+		return domain.User{}, refused
 	}
-	return nil
+	return actor, nil
 }
 
-// disableAtProvider switches sign-in off at the identity provider. An address
-// with no account there (created while passwords were local) has nothing to
-// switch off. Any other failure is reported: the row is already deleted and
-// every sign-in path here refuses it, but the director is owed the truth.
-func (s *AdminService) disableAtProvider(ctx context.Context, email string) error {
+// disableAtProvider switches sign-in off at the identity provider and reports
+// whether it did. An address with no account there (created while passwords
+// were local) has nothing to switch off; no provider configured, likewise.
+func (s *AdminService) disableAtProvider(ctx context.Context, email string) (bool, error) {
 	if s.provisioner == nil {
-		return nil
+		return false, nil
 	}
 	err := s.provisioner.SetDisabled(ctx, email, true)
-	if err == nil || glerrors.KindOf(err) == glerrors.KindNotFound {
-		return nil
+	if glerrors.KindOf(err) == glerrors.KindNotFound {
+		return false, nil
 	}
-	return glerrors.Wrap(glerrors.KindInternal,
-		"la cuenta quedó eliminada, pero el proveedor de identidad no respondió; vuelve a intentarlo", err)
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // ResendInvitation mints a FRESH token for somebody who has not walked through
@@ -708,6 +726,14 @@ func (s *AdminService) CreateUser(ctx context.Context, rawEmail, displayName, te
 	assigned, err := s.resolveRoles(ctx, roleIDs)
 	if err != nil {
 		return domain.User{}, err
+	}
+
+	// A deleted address is not "already taken" as far as the director can
+	// see — the list hides it. This route cannot restore anybody (it would
+	// hand a known password to an account with history); inviting does.
+	if existing, _, err := s.users.FindAuthByEmail(ctx, s.tenantID, email); err == nil && existing.IsDeleted() {
+		return domain.User{}, glerrors.New(glerrors.KindConflict,
+			"ese correo es de un usuario eliminado; invítalo para recuperar su cuenta")
 	}
 
 	hash, err := s.hasher.Hash(tempPassword)

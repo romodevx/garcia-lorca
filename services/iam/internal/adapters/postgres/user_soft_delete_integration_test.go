@@ -101,13 +101,26 @@ func TestRestoreBringsADeletedUserBackAsInvited(t *testing.T) {
 	seedUser(t, uid, tenantA, "back@garcialorca.mx", "x", "active")
 	repo := pgadapter.NewUserRepo(appDB(t), tenantA)
 
-	if err := repo.Restore(ctx, uid, "Vuelve"); glerrors.KindOf(err) != glerrors.KindNotFound {
+	oldRole := "d3d3d3d3-0000-0000-0000-0000000000c1"
+	newRole := "d3d3d3d3-0000-0000-0000-0000000000c2"
+	seedRole(t, oldRole, tenantA, "RestoreOld", []string{"users:delete"})
+	seedRole(t, newRole, tenantA, "RestoreNew", []string{"grades:read"})
+	assign(t, uid, oldRole, tenantA)
+	if err := repo.Restore(ctx, uid, "Vuelve", []string{newRole}); glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Fatalf("Restore on a live account = %v, want KindNotFound", err)
 	}
-	if err := repo.SoftDelete(ctx, uid, uid, "d3d3d3d3-0000-0000-0000-0000000000c1"); err != nil {
+	if err := repo.SoftDelete(ctx, uid, uid, "d3d3d3d3-0000-0000-0000-0000000000ff"); err != nil {
 		t.Fatalf("SoftDelete: %v", err)
 	}
-	if err := repo.Restore(ctx, uid, "Vuelve"); err != nil {
+	// A bad role id rolls the WHOLE restore back: the account stays deleted
+	// rather than coming back with the roles it had.
+	if err := repo.Restore(ctx, uid, "Vuelve", []string{"d3d3d3d3-0000-0000-0000-00000000dead"}); err == nil {
+		t.Fatal("Restore with an unknown role succeeded")
+	}
+	if got, _ := repo.FindByID(ctx, uid); !got.IsDeleted() {
+		t.Fatal("a failed restore left the account restored")
+	}
+	if err := repo.Restore(ctx, uid, "Vuelve", []string{newRole}); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -117,6 +130,9 @@ func TestRestoreBringsADeletedUserBackAsInvited(t *testing.T) {
 	}
 	if got.Status() != domain.StatusInvited || got.DisplayName() != "Vuelve" {
 		t.Errorf("restored = (%v, %q), want (invited, Vuelve)", got.Status(), got.DisplayName())
+	}
+	if ids := got.RoleIDs(); len(ids) != 1 || ids[0] != newRole {
+		t.Errorf("roles = %v, want only the new invitation's role", ids)
 	}
 	var stamped int64
 	if err := superDB.Raw(`SELECT count(*) FROM users WHERE id = ? AND (deleted_at IS NOT NULL OR deleted_by IS NOT NULL)`, uid).Scan(&stamped).Error; err != nil {
@@ -137,5 +153,35 @@ func TestDeletedStatusAndStampAreConsistent(t *testing.T) {
 	}
 	if err := superDB.Exec(`UPDATE users SET deleted_at = now() WHERE id = ?`, uid).Error; err == nil {
 		t.Error("a deletion stamp on an active account was accepted")
+	}
+}
+
+// RLS: tenant B's repository cannot delete, restore or even find tenant A's
+// account.
+func TestSoftDeleteAndRestoreAreTenantIsolated(t *testing.T) {
+	ctx := context.Background()
+	uid := "d5d5d5d5-0000-0000-0000-000000000001"
+	seedUser(t, uid, tenantA, "isolated@garcialorca.mx", "x", "active")
+	other := pgadapter.NewUserRepo(appDB(t), tenantB)
+
+	if err := other.SoftDelete(ctx, uid, uid, "d5d5d5d5-0000-0000-0000-0000000000c1"); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("tenant B SoftDelete = %v, want KindNotFound", err)
+	}
+	if got, _ := pgadapter.NewUserRepo(appDB(t), tenantA).FindByID(ctx, uid); got.IsDeleted() {
+		t.Fatal("tenant B deleted tenant A's account")
+	}
+	if err := pgadapter.NewUserRepo(appDB(t), tenantA).SoftDelete(ctx, uid, uid, "d5d5d5d5-0000-0000-0000-0000000000c1"); err != nil {
+		t.Fatalf("SoftDelete: %v", err)
+	}
+	if err := other.Restore(ctx, uid, "Robada", nil); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("tenant B Restore = %v, want KindNotFound", err)
+	}
+}
+
+// A malformed id is "no such user", not a database failure.
+func TestMalformedUserIDIsNotFound(t *testing.T) {
+	repo := pgadapter.NewUserRepo(appDB(t), tenantA)
+	if _, err := repo.FindByID(context.Background(), "not-a-uuid"); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("FindByID(not-a-uuid) = %v, want KindNotFound", err)
 	}
 }

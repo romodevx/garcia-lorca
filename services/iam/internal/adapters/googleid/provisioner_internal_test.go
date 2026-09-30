@@ -83,3 +83,34 @@ func TestSetDisabledErrors(t *testing.T) {
 		})
 	}
 }
+
+// Re-enabling an account that was deleted must not bring its old password
+// back: the credential is replaced with a random one nobody is told, so the
+// account opens only from the new invitation.
+func TestReenableTurnsSignInOnWithAFreshUnknownPassword(t *testing.T) {
+	sdk := &fakeSDK{byEmail: map[string]string{"ana@gl.mx": "uid-ana"}}
+	p := newTestProvisioner(sdk)
+	p.randomPassword = func() (string, error) { return "random-credential", nil }
+
+	if err := p.Reenable(context.Background(), "ana@gl.mx"); err != nil {
+		t.Fatalf("Reenable: %v", err)
+	}
+	want := (&firebaseauth.UserToUpdate{}).Disabled(false).Password("random-credential")
+	if got := sdk.updated["uid-ana"]; !reflect.DeepEqual(got, want) {
+		t.Errorf("Reenable sent %+v, want Disabled(false) and a fresh password", got)
+	}
+	if err := newTestProvisioner(&fakeSDK{}).Reenable(context.Background(), "x@gl.mx"); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("no provider account = %v, want KindNotFound", err)
+	}
+}
+
+func TestRandomPasswordIsLongAndUnique(t *testing.T) {
+	a, err := randomPassword()
+	if err != nil {
+		t.Fatalf("randomPassword: %v", err)
+	}
+	b, _ := randomPassword()
+	if len(a) < 32 || a == b {
+		t.Errorf("randomPassword gave %q and %q, want two different values of at least 32 chars", a, b)
+	}
+}

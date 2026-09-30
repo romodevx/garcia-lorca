@@ -139,17 +139,3 @@ func TestDeletedUserCannotAuthenticate(t *testing.T) {
 		t.Error("IsDeleted() = false for a deleted user")
 	}
 }
-
-func TestUserHoldsRole(t *testing.T) {
-	owner := mustRole(t, domain.OwnerRoleID, "owner", []string{"users:delete"})
-	u, err := domain.NewUser("u1", "t1", mustEmail(t, "dir@garcialorca.mx"), "Dir", domain.StatusActive, false, []domain.Role{owner})
-	if err != nil {
-		t.Fatalf("NewUser: %v", err)
-	}
-	if !u.HoldsRole(domain.OwnerRoleID) {
-		t.Error("HoldsRole(owner) = false, want true")
-	}
-	if u.HoldsRole("someone-else") {
-		t.Error("HoldsRole(other) = true, want false")
-	}
-}

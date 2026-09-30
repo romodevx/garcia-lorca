@@ -2,6 +2,8 @@ package googleid
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 
 	firebaseauth "firebase.google.com/go/v4/auth"
 
@@ -33,6 +35,9 @@ type Provisioner struct {
 	// userNotFound recognizes the SDK's "no such account" answer. A field only
 	// so a test can stand in for an error the SDK does not let anyone build.
 	userNotFound func(error) bool
+	// randomPassword mints the credential Reenable writes. A field for the
+	// same reason: so a test can see what was sent.
+	randomPassword func() (string, error)
 }
 
 // SetPassword writes the credential its owner just chose and marks the address
@@ -77,6 +82,40 @@ func (p *Provisioner) SetDisabled(ctx context.Context, email string, disabled bo
 	return nil
 }
 
+// Reenable switches sign-in back on for an account invited again after it was
+// deleted (T2), and replaces its password with 32 random bytes nobody is told.
+//
+// Without the second half, re-enabling revived the OLD password: whoever still
+// knew it could sign in and — since provider sign-in activates an invited
+// account — walk past the new invitation entirely. Now the account opens only
+// from the new link, by whoever reads that mailbox. The verified flag is left
+// alone; the link is what re-proves the address.
+func (p *Provisioner) Reenable(ctx context.Context, email string) error {
+	uid, err := p.uidOf(ctx, email)
+	if err != nil {
+		return err
+	}
+	fresh, err := p.randomPassword()
+	if err != nil {
+		return err
+	}
+	params := (&firebaseauth.UserToUpdate{}).Disabled(false).Password(fresh)
+	if _, err := p.sdk.UpdateUser(ctx, uid, params); err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "re-enabling the provider account", err)
+	}
+	return nil
+}
+
+// randomPassword is 32 bytes of cryptographic randomness, base64url: a
+// credential that exists only to replace one, and is never shown or stored.
+func randomPassword() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", glerrors.Wrap(glerrors.KindInternal, "minting a replacement credential", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
 // uidOf resolves the provider's id for an address. No account there is
 // KindNotFound; anything else is KindInternal.
 func (p *Provisioner) uidOf(ctx context.Context, email string) (string, error) {
@@ -102,7 +141,7 @@ func (p *Provisioner) SendPasswordSetupEmail(ctx context.Context, email string) 
 
 // NewProvisioner wraps an SDK client.
 func NewProvisioner(sdk accountCreator, inviter *Inviter) *Provisioner {
-	return &Provisioner{sdk: sdk, inviter: inviter, userNotFound: firebaseauth.IsUserNotFound}
+	return &Provisioner{sdk: sdk, inviter: inviter, userNotFound: firebaseauth.IsUserNotFound, randomPassword: randomPassword}
 }
 
 // CreateAccount creates the account WITHOUT a password and WITHOUT marking the

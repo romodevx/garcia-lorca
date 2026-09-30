@@ -56,8 +56,9 @@ type UserRepository interface {
 	ListUsers(ctx context.Context) ([]domain.User, error)
 
 	// SetStatus changes a user's lifecycle status (activate/suspend). A deleted
-	// account is KindNotFound: only SoftDelete and Restore move it, so a
-	// users:write holder cannot undo an owner-only deletion.
+	// account is KindNotFound: only SoftDelete and Restore move it. (Restore is
+	// reached by inviting the address again, which puts the account back to
+	// `invited` — it still has to be opened from the new link.)
 	SetStatus(ctx context.Context, userID string, status domain.Status) error
 
 	// SoftDelete marks the account deleted, stamping who did it and when, and
@@ -72,8 +73,10 @@ type UserRepository interface {
 	SoftDelete(ctx context.Context, userID, deletedBy, keepActiveHolderOf string) error
 
 	// Restore brings a deleted account back as `invited` under displayName,
-	// clearing the deletion stamp. Anything but a deleted id is KindNotFound.
-	Restore(ctx context.Context, userID, displayName string) error
+	// clearing the deletion stamp and REPLACING its roles with roleIDs in the
+	// same transaction — a restored account never comes back holding what it
+	// held before. Anything but a deleted id is KindNotFound.
+	Restore(ctx context.Context, userID, displayName string, roleIDs []string) error
 
 	// SetUserRoles replaces the user's entire role set with roleIDs.
 	SetUserRoles(ctx context.Context, userID string, roleIDs []string) error
@@ -204,6 +207,12 @@ type IdentityProvisioner interface {
 	// (the same address invited again). An address with no account there is
 	// KindNotFound.
 	SetDisabled(ctx context.Context, email string, disabled bool) error
+
+	// Reenable turns sign-in back on for an address invited again after it
+	// was deleted, and REPLACES its credential with one nobody knows: the old
+	// password must not work again, the person chooses a new one from the
+	// link. An address with no account there is KindNotFound.
+	Reenable(ctx context.Context, email string) error
 }
 
 // InvitationRepository stores the single-use tokens that let somebody set a

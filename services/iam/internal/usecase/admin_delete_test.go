@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -106,6 +107,15 @@ func TestDeleteUserRefusals(t *testing.T) {
 			wantKind: glerrors.KindForbidden,
 		},
 		{
+			// Postgres reads a uuid in any case or shape, so comparing the
+			// raw strings let a director delete themself by upper-casing
+			// their own id. The guard compares the loaded rows.
+			name:     "a user cannot delete themself under another spelling of their id",
+			actor:    directorID,
+			target:   strings.ToUpper(directorID),
+			wantKind: glerrors.KindForbidden,
+		},
+		{
 			name:     "a caller without users:delete is refused",
 			actor:    teacherID,
 			target:   directorID,
@@ -144,12 +154,20 @@ func TestDeleteUserRefusals(t *testing.T) {
 			if glerrors.KindOf(err) != tc.wantKind {
 				t.Fatalf("err = %v (kind %v), want kind %v", err, glerrors.KindOf(err), tc.wantKind)
 			}
-			if len(f.users.deletedBy) != 0 || len(f.prov.disabled) != 0 || len(f.inv.revoked) != 0 {
-				t.Errorf("a refused deletion touched something: deleted=%v provider=%v revoked=%v",
-					f.users.deletedBy, f.prov.disabled, f.inv.revoked)
+			if len(f.users.deletedBy) != 0 {
+				t.Errorf("a refused deletion was written: %v", f.users.deletedBy)
+			}
+			if !providerLeftEnabled(f.prov.disabled) {
+				t.Errorf("a refused deletion left the provider account disabled: %v", f.prov.disabled)
 			}
 		})
 	}
+}
+
+// providerLeftEnabled reports whether the provider account ends enabled: never
+// touched, or disabled and then switched back on.
+func providerLeftEnabled(calls []string) bool {
+	return len(calls) == 0 || strings.HasSuffix(calls[len(calls)-1], ":false")
 }
 
 func TestDeleteUserAnotherOwnerWhileOneRemains(t *testing.T) {
@@ -176,8 +194,9 @@ func TestDeleteUserProviderOutcomes(t *testing.T) {
 			prov: &fakeProvisioner{disabledErr: glerrors.New(glerrors.KindNotFound, "no account")},
 		},
 		{
-			// The row is deleted either way (every sign-in path refuses it);
-			// the director still hears that the provider half failed.
+			// The provider goes FIRST, so a failure there deletes nothing and
+			// "no se pudo eliminar" is the truth; the row is still listed
+			// and the director can simply try again.
 			name:    "provider unavailable",
 			prov:    &fakeProvisioner{disabledErr: glerrors.New(glerrors.KindInternal, "503")},
 			wantErr: true,
@@ -193,26 +212,25 @@ func TestDeleteUserProviderOutcomes(t *testing.T) {
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
 			}
-			if f.users.deletedBy[teacherID] != directorID {
-				t.Errorf("the row must be deleted regardless of the provider: %v", f.users.deletedBy)
+			deleted := f.users.deletedBy[teacherID] == directorID
+			if deleted == tc.wantErr {
+				t.Errorf("deleted = %v with provider error = %v: the row goes only after the provider", deleted, tc.wantErr)
 			}
 		})
 	}
 }
 
-// Deleting twice is how a director retries after the provider half failed: the
-// second call finds the row already deleted and only re-attempts the provider.
-func TestDeleteUserAlreadyDeletedRetriesOnlyTheProvider(t *testing.T) {
+// Deleting twice finds nothing: the account already left the list.
+func TestDeleteUserAlreadyDeletedIsNotFound(t *testing.T) {
 	f := newDeleteFixture(t, mustUserUC(t, "u-gone", "gone@gl.mx", domain.StatusDeleted, teacherRole(t)))
 
-	if err := f.service(t).DeleteUser(context.Background(), directorID, "u-gone"); err != nil {
-		t.Fatalf("DeleteUser: %v", err)
+	err := f.service(t).DeleteUser(context.Background(), directorID, "u-gone")
+
+	if glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("err = %v, want KindNotFound", err)
 	}
-	if len(f.users.deletedBy) != 0 {
-		t.Errorf("an already-deleted row was written again: %v", f.users.deletedBy)
-	}
-	if len(f.prov.disabled) != 1 || f.prov.disabled[0] != "gone@gl.mx:true" {
-		t.Errorf("provider calls %v, want one disable", f.prov.disabled)
+	if len(f.prov.disabled) != 0 || len(f.users.deletedBy) != 0 {
+		t.Errorf("an already-deleted account was touched: provider=%v deleted=%v", f.prov.disabled, f.users.deletedBy)
 	}
 }
 
@@ -265,11 +283,18 @@ func TestInviteDeletedEmailReactivatesTheSameAccount(t *testing.T) {
 	if f.users.restored["u-gone"] != "Vuelve" {
 		t.Errorf("restored = %v, want u-gone restored with the new display name", f.users.restored)
 	}
-	if roles := f.users.rolesSet["u-gone"]; len(roles) != 1 || roles[0] != "r1" {
-		t.Errorf("roles = %v, want the roles of this invitation", roles)
+	// The roles are replaced in the SAME write that restores the row: a
+	// restored account must never come back holding what it held before.
+	if roles := f.users.restoredRole["u-gone"]; len(roles) != 1 || roles[0] != "r1" {
+		t.Errorf("roles = %v, want the roles of this invitation, set by Restore itself", roles)
 	}
-	if len(f.prov.disabled) != 1 || f.prov.disabled[0] != "gone@gl.mx:false" {
-		t.Errorf("provider calls %v, want the provider account re-enabled", f.prov.disabled)
+	// Re-enabled WITHOUT its old password: whoever knew it must not walk
+	// back in past the invitation.
+	if len(f.prov.disabled) != 1 || f.prov.disabled[0] != "gone@gl.mx:reenabled" {
+		t.Errorf("provider calls %v, want the account re-enabled with its credential replaced", f.prov.disabled)
+	}
+	if len(f.inv.revoked) != 1 || f.inv.revoked[0] != "u-gone" {
+		t.Errorf("revoked %v, want every old link of u-gone dead before the new one", f.inv.revoked)
 	}
 	if len(f.prov.created) != 0 {
 		t.Errorf("a second provider account was created: %v", f.prov.created)
@@ -281,7 +306,7 @@ func TestInviteDeletedEmailReactivatesTheSameAccount(t *testing.T) {
 
 func TestInviteDeletedEmailWithNoProviderAccountCreatesOne(t *testing.T) {
 	f := newDeleteFixture(t, mustUserUC(t, "u-gone", "gone@gl.mx", domain.StatusDeleted, teacherRole(t)))
-	f.prov.disabledErr = glerrors.New(glerrors.KindNotFound, "no account")
+	f.prov.reenableErr = glerrors.New(glerrors.KindNotFound, "no account")
 
 	if _, err := f.service(t).InviteUser(context.Background(), "gone@gl.mx", "Vuelve", []string{"r1"}); err != nil {
 		t.Fatalf("InviteUser: %v", err)
@@ -301,5 +326,18 @@ func TestInviteActiveEmailIsStillAConflict(t *testing.T) {
 	}
 	if len(f.users.restored) != 0 {
 		t.Errorf("a live account was restored: %v", f.users.restored)
+	}
+}
+
+// The temporary-password route cannot restore anybody; it says where to go
+// instead of "already exists" about a user nobody can see in the list.
+func TestCreateUserOnADeletedAddressPointsToInviting(t *testing.T) {
+	f := newDeleteFixture(t, mustUserUC(t, "u-gone", "gone@gl.mx", domain.StatusDeleted, teacherRole(t)))
+	svc := newInviteService(t, f.users, nil, f.inv, &fakeMailer{})
+
+	_, err := svc.CreateUser(context.Background(), "gone@gl.mx", "Vuelve", "temporal-123", nil)
+
+	if glerrors.KindOf(err) != glerrors.KindConflict || !strings.Contains(glerrors.SafeMessage(err), "invít") {
+		t.Errorf("err = %v, want a conflict that says to invite the address", err)
 	}
 }

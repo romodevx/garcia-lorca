@@ -49,7 +49,7 @@ func (f *cpUsers) ListUsers(context.Context) ([]domain.User, error)         { re
 func (f *cpUsers) SetStatus(context.Context, string, domain.Status) error   { return nil }
 func (f *cpUsers) SetUserRoles(context.Context, string, []string) error     { return nil }
 func (f *cpUsers) SoftDelete(context.Context, string, string, string) error { return nil }
-func (f *cpUsers) Restore(context.Context, string, string) error            { return nil }
+func (f *cpUsers) Restore(context.Context, string, string, []string) error  { return nil }
 
 // hasher fake: "H:"+plain is the "hash"; Verify matches that shape.
 type cpHasher struct{}

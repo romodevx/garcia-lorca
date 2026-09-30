@@ -102,16 +102,6 @@ func (u User) CanAuthenticate() bool { return u.status == StatusActive }
 // IsDeleted reports whether the account was removed (soft delete).
 func (u User) IsDeleted() bool { return u.status == StatusDeleted }
 
-// HoldsRole reports whether roleID is among the user's assigned roles.
-func (u User) HoldsRole(roleID string) bool {
-	for _, role := range u.roles {
-		if role.ID() == roleID {
-			return true
-		}
-	}
-	return false
-}
-
 // MustChangePassword reports whether the account still holds a temporary
 // password and must rotate it before doing anything else.
 func (u User) MustChangePassword() bool { return u.mustChangePassword }

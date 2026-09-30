@@ -1437,11 +1437,12 @@ paths:
         at once; an access token already issued lives out its short life), its
         pending invitation and reset links are revoked, and it is disabled at
         the identity provider. Refused: deleting your own account (403) and the
-        last active account holding the owner role (409). Deleting an account
-        that is already deleted only retries the identity-provider step (204).
-        Inviting the same address again (`POST /api/v1/users/invite`) restores
-        THIS account as `invited`, history attached, with the roles of the new
-        invitation. Requires `users:delete` (owner only), checked by the gateway
+        last active account holding the owner role (409). An account already
+        deleted, or an id that names none, is 404. Inviting the same address
+        again (`POST /api/v1/users/invite`) restores THIS account as `invited`,
+        history attached, with only the roles of the new invitation and a
+        fresh credential at the identity provider — the old password does not
+        work again; the account opens from the new link. Requires `users:delete` (owner only), checked by the gateway
         and again by iam against the caller as they are now; `module_iam`.
       operationId: deleteUser
       security: [{ sessionCookie: [] }]
@@ -1467,9 +1468,8 @@ paths:
               example: no se puede eliminar al último director activo
         '500':
           description: >
-            The account is deleted, but the identity provider could not be
-            reached to disable it. Every sign-in path already refuses it;
-            repeating the request retries the provider.
+            The identity provider could not be reached to disable the account.
+            Nothing was deleted (the provider goes first); try again.
           content:
             text/plain:
               schema: { type: string }

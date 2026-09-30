@@ -2,6 +2,8 @@ package usecase_test
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,6 +45,7 @@ type fakeUsers struct {
 	rolesSet     map[string][]string      // SetUserRoles calls
 	deletedBy    map[string]string        // SoftDelete calls: target -> actor
 	restored     map[string]string        // Restore calls: user -> display name
+	restoredRole map[string][]string      // Restore calls: user -> roles set atomically
 }
 
 func (f *fakeUsers) FindAuthByEmail(_ context.Context, _ string, email domain.Email) (domain.User, string, error) {
@@ -58,6 +61,11 @@ func (f *fakeUsers) FindByID(_ context.Context, userID string) (domain.User, err
 		return domain.User{}, f.findByIDErr
 	}
 	u, ok := f.byID[userID]
+	if !ok {
+		// Postgres reads a uuid in any case; so does this double, so a test
+		// can send another spelling of the same id.
+		u, ok = f.byID[strings.ToLower(userID)]
+	}
 	if !ok {
 		return domain.User{}, glerrors.ErrNotFound
 	}
@@ -151,7 +159,7 @@ func (f *fakeUsers) SoftDelete(_ context.Context, userID, deletedBy, keepActiveH
 	if !ok || target.IsDeleted() {
 		return glerrors.ErrNotFound
 	}
-	if target.Status() == domain.StatusActive && target.HoldsRole(keepActiveHolderOf) && !f.otherActiveHolder(userID, keepActiveHolderOf) {
+	if target.Status() == domain.StatusActive && slices.Contains(target.RoleIDs(), keepActiveHolderOf) && !f.otherActiveHolder(userID, keepActiveHolderOf) {
 		return domain.ErrLastOwner
 	}
 	if f.deletedBy == nil {
@@ -163,22 +171,24 @@ func (f *fakeUsers) SoftDelete(_ context.Context, userID, deletedBy, keepActiveH
 
 func (f *fakeUsers) otherActiveHolder(userID, roleID string) bool {
 	for id, u := range f.byID {
-		if id != userID && u.Status() == domain.StatusActive && u.HoldsRole(roleID) {
+		if id != userID && u.Status() == domain.StatusActive && slices.Contains(u.RoleIDs(), roleID) {
 			return true
 		}
 	}
 	return false
 }
 
-func (f *fakeUsers) Restore(_ context.Context, userID, displayName string) error {
+func (f *fakeUsers) Restore(_ context.Context, userID, displayName string, roleIDs []string) error {
 	u, ok := f.byID[userID]
 	if !ok || !u.IsDeleted() {
 		return glerrors.ErrNotFound
 	}
 	if f.restored == nil {
 		f.restored = map[string]string{}
+		f.restoredRole = map[string][]string{}
 	}
 	f.restored[userID] = displayName
+	f.restoredRole[userID] = roleIDs
 	return nil
 }
 

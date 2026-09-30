@@ -42,6 +42,7 @@ func (p *recordingProvisioner) CreateAccount(_ context.Context, email, _ string)
 }
 
 func (p *recordingProvisioner) SetDisabled(context.Context, string, bool) error { return nil }
+func (p *recordingProvisioner) Reenable(context.Context, string) error          { return nil }
 
 // providerSent records the temporary road where the provider mails its own
 // link — a different outcome from our own message going out, and the director

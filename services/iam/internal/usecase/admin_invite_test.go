@@ -55,6 +55,16 @@ type fakeProvisioner struct {
 	// disabled records SetDisabled calls as "<email>:<true|false>".
 	disabled    []string
 	disabledErr error
+	reenableErr error
+}
+
+// Reenable records "<email>:reenabled": sign-in back on, old credential gone.
+func (f *fakeProvisioner) Reenable(_ context.Context, email string) error {
+	if f.reenableErr != nil {
+		return f.reenableErr
+	}
+	f.disabled = append(f.disabled, email+":reenabled")
+	return nil
 }
 
 func (f *fakeProvisioner) SetDisabled(_ context.Context, email string, disabled bool) error {
