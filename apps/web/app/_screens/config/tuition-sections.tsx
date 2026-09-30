@@ -15,6 +15,7 @@ import {
   ladderProblem,
   monthlyTotals,
   pesosToCents,
+  sameLineName,
 } from "./tuition-math";
 
 /**
@@ -96,8 +97,7 @@ export function InscriptionSection({ concepts, onChange, onError, draftRef }: In
       onError("Escribe el nombre del concepto.");
       return;
     }
-    const slug = slugOf(name);
-    if (concepts.some((c) => slugOf(c.name) === slug)) {
+    if (concepts.some((c) => sameLineName(c.name, name))) {
       onError(`Ya existe un renglón que se llama casi igual que "${name.trim()}".`);
       return;
     }
@@ -179,11 +179,6 @@ export function InscriptionSection({ concepts, onChange, onError, draftRef }: In
       )}
     </div>
   );
-}
-
-/** Compared the way the server builds the charge's reference. */
-function slugOf(raw: string): string {
-  return raw.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 /**
@@ -330,7 +325,7 @@ export function FeesSection({
   monthlyCents: number;
   fees: Fee[];
   onChange: (fees: Fee[]) => void;
-  onError: (message: string) => void;
+  onError: (message: string | undefined) => void;
   /** Dónde dejar la comprobación de lo escrito y sin agregar. */
   draftRef?: { current: DraftCheck } | undefined;
 }): ReactElement {
@@ -363,6 +358,13 @@ export function FeesSection({
       onError("Una cuota necesita nombre y monto.");
       return;
     }
+    if (fees.some((f) => sameLineName(f.name, name) && f.months.some((m) => picked.includes(m)))) {
+      // In a shared month they would bill as ONE fee and the second would never
+      // reach the statement (the month is part of a fee's identity server-side,
+      // so the same name in other months is fine). See sameLineName.
+      onError(`Ya existe una cuota que se llama casi igual que "${name.trim()}".`);
+      return;
+    }
     if (picked.length === 0) {
       onError("Elige en qué meses se cobra la cuota.");
       return;
@@ -373,6 +375,8 @@ export function FeesSection({
       onError("La cuota es muy chica para partirla entre esos meses.");
       return;
     }
+    // Accepted: whatever this form refused a moment ago no longer applies.
+    onError(undefined);
     // Kept in the order the year collects them, not the order they were
     // clicked: the parts are numbered "1 de 2" on the family's statement, and
     // part 1 falling after part 2 is a support call.

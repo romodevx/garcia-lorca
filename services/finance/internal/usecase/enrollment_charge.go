@@ -89,6 +89,16 @@ func (s *FinanceService) EnsureEnrollmentCharge(ctx context.Context, cycleID, st
 	if err != nil {
 		return false, err
 	}
+	// The same recognition the run applies: a line this pupil already owes
+	// under an older reference is not issued a second time (issuedLines).
+	issuedRows, err := s.repo.ListIssuedLines(ctx, cycleID, studentID)
+	if err != nil {
+		return false, err
+	}
+	charges, _, err = newIssuedLines(issuedRows).adoptAll(charges)
+	if err != nil {
+		return false, err
+	}
 	written, err := s.repo.CreateChargesBulk(ctx, charges)
 	if err != nil {
 		return false, err

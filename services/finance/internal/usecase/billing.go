@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -122,6 +123,9 @@ func (s *FinanceService) UpsertTuitionPlan(ctx context.Context, in TuitionPlanIn
 		EnrollmentConcepts:   in.EnrollmentConcepts,
 	})
 	if err != nil {
+		return domain.TuitionPlan{}, err
+	}
+	if err := plan.SharedLineName(); err != nil {
 		return domain.TuitionPlan{}, err
 	}
 	return s.repo.UpsertTuitionPlan(ctx, plan)
@@ -300,7 +304,7 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 				description: feeDescription(item),
 				amount:      item.AmountCents,
 				due:         calendar.NextWorkingDay(item.DueOn),
-				ref: fmt.Sprintf("fee:%s:%s:%s:%s", cycleID, enr.StudentID,
+				ref: fmt.Sprintf("%s%s:%s:%s:%s", domain.FeeRefPrefix, cycleID, enr.StudentID,
 					feeSlug(item.Name), item.DueOn.Format("2006-01")),
 			})
 			if err != nil {
@@ -308,6 +312,21 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 			}
 			wantedFees = append(wantedFees, charge)
 		}
+	}
+
+	// What the ledger already holds under another reference is issued under
+	// THAT reference — see issuedLines. One read for the whole cycle.
+	issuedRows, err := s.repo.ListIssuedLines(ctx, cycleID, "")
+	if err != nil {
+		return BillingResult{}, err
+	}
+	issued := newIssuedLines(issuedRows)
+	wantedEnrollment, priceableEnrollment, err := issued.adoptAll(wantedEnrollment)
+	if err != nil {
+		return BillingResult{}, err
+	}
+	if wantedFees, _, err = issued.adoptAll(wantedFees); err != nil {
+		return BillingResult{}, err
 	}
 
 	enrollmentCreated, err := s.repo.CreateChargesBulk(ctx, wantedEnrollment)
@@ -334,7 +353,7 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 	// than left derived, so the database agrees with what the family is shown and
 	// no report quotes a price nobody is charging. Only the unpaid and
 	// un-negotiated ones move — see repriceable below.
-	enrollmentRepriced, err := s.repo.RepriceUnpaid(ctx, repriceable(wantedEnrollment))
+	enrollmentRepriced, err := s.repo.RepriceUnpaid(ctx, repriceable(priceableEnrollment))
 	if err != nil {
 		return BillingResult{}, err
 	}
@@ -564,7 +583,7 @@ func (s *FinanceService) enrollmentCharges(
 	lines := plan.EnrollmentLinesOn(asOf)
 	out := make([]domain.Charge, 0, len(lines))
 	for _, line := range lines {
-		description, ref := enrollmentConceptName, fmt.Sprintf("enrollment:%s:%s", cycleID, studentID)
+		description, ref := enrollmentConceptName, fmt.Sprintf("%s%s:%s", domain.EnrollmentRefPrefix, cycleID, studentID)
 		if line.Name != "" {
 			description = line.Name
 			// The fallback Slugify's own doc says the caller supplies. A name of
@@ -574,7 +593,7 @@ func (s *FinanceService) enrollmentCharges(
 			if slug == "" {
 				slug = "concepto"
 			}
-			ref = fmt.Sprintf("enrollment:%s:%s:%s", cycleID, studentID, slug)
+			ref = fmt.Sprintf("%s%s:%s:%s", domain.EnrollmentRefPrefix, cycleID, studentID, slug)
 		}
 		charge, err := s.buildCharge(chargeSpec{
 			studentID: studentID, cycleID: cycleID, conceptID: conceptID,
@@ -642,7 +661,20 @@ func feeDescription(i domain.FeeInstallment) string {
 	if i.Of <= 1 {
 		return i.Name
 	}
-	return fmt.Sprintf("%s (%d de %d)", i.Name, i.Part, i.Of)
+	return fmt.Sprintf(feePartFormat, i.Name, i.Part, i.Of)
+}
+
+// feePartFormat is how feeDescription names a share of a split fee, and
+// feePartSuffix reads it back. Kept side by side because feeNameOf depends on
+// the wording: if it drifts, re-spelled fees are issued twice again
+// (TestRespellingAFeeDoesNotIssueItAgain splits its fee to guard exactly that).
+const feePartFormat = "%s (%d de %d)"
+
+var feePartSuffix = regexp.MustCompile(`\s*\(\d+ de \d+\)$`)
+
+// feeNameOf is the fee's name inside a description feeDescription wrote.
+func feeNameOf(description string) string {
+	return feePartSuffix.ReplaceAllString(description, "")
 }
 
 // feeSlug is the fee's stable identity inside a charge ref.

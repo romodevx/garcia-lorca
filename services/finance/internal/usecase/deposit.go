@@ -665,11 +665,23 @@ func rungOn(c ports.ChargeWithPaid, plan domain.TuitionPlan, enrolmentConceptID 
 		// what the family reads. A plan with no concepts yields one unnamed line
 		// and matches nothing here, so a school that never adopted the ladder is
 		// untouched.
-		if line.Name != "" && line.Name == c.Charge.Description() {
+		if line.Name != "" && isLineOf(line.Name, c.Charge) {
 			return line.AmountCents, true
 		}
 	}
 	return 0, false
+}
+
+// isLineOf reports whether an issued inscription charge is the plan line of
+// that name — by the same identity, and under the same rule, the run re-prices
+// by (issuedLines), or the counter would show one number and collect another.
+//
+// A line whose name was RE-SPELLED after it was issued ("Inscripción" →
+// "INSCRIPCION") is the same line. A single-amount inscription is not a rung
+// of anybody's ladder, even when a concept carries its exact name: the run does
+// not re-price it, so neither does the counter.
+func isLineOf(name string, c domain.Charge) bool {
+	return isConceptRef(c.ExternalRef()) && domain.LineKey(name) == domain.LineKey(c.Description())
 }
 
 // priceChange is what settling an inscription at its payment date does to it.

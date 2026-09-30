@@ -530,6 +530,40 @@ func (r *Repository) ListCharges(ctx context.Context, studentID, cycleID string)
 	return out, nil
 }
 
+// ListIssuedLines returns the generated inscription and fee lines of a cycle,
+// optionally for one student. See ports.FinanceRepository.
+//
+// Served by idx_charges_cycle (tenant_id, cycle_id); the prefix filter runs on
+// the cycle's rows. Uncapped on purpose: the run reads the whole cycle, and a
+// capped read would re-issue every line past the cap.
+func (r *Repository) ListIssuedLines(ctx context.Context, cycleID, studentID string) ([]ports.IssuedLine, error) {
+	var rows []chargeModel
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		q := tx.Model(&chargeModel{}).
+			Select("student_id", "external_ref", "description").
+			Where("cycle_id = ?", cycleID).
+			Where("(external_ref LIKE ? OR external_ref LIKE ?)",
+				domain.EnrollmentRefPrefix+"%", domain.FeeRefPrefix+"%").
+			Where("status <> ?", domain.StatusCancelled).
+			Order("student_id ASC, external_ref ASC")
+		if studentID != "" {
+			q = q.Where("student_id = ?", studentID)
+		}
+		if err := q.Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing issued lines", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ports.IssuedLine, 0, len(rows))
+	for _, m := range rows {
+		out = append(out, ports.IssuedLine{StudentID: m.StudentID, ExternalRef: m.ExternalRef, Description: m.Description})
+	}
+	return out, nil
+}
+
 // SaveCharge persists the mutable part of an existing charge (its discount and
 // derived status), as left by ApplyDiscount or CancelCharge, and returns the
 // stored row. An unknown id is glerrors.ErrNotFound.

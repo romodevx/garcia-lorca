@@ -13,6 +13,13 @@ const (
 	// LateFeeRefPrefix: a monthly surcharge the billing run issued,
 	// "latefee:<chargeID>:<YYYY-MM>".
 	LateFeeRefPrefix = "latefee:"
+	// EnrollmentRefPrefix: an inscription line the billing run issued,
+	// "enrollment:<cycle>:<student>" (single amount) or
+	// "enrollment:<cycle>:<student>:<slug>" (one concept).
+	EnrollmentRefPrefix = "enrollment:"
+	// FeeRefPrefix: a share of a plan's fee the billing run issued,
+	// "fee:<cycle>:<student>:<slug>:<YYYY-MM>".
+	FeeRefPrefix = "fee:"
 )
 
 // IsFeeRef reports whether a charge's ref names a late fee, daily or monthly.

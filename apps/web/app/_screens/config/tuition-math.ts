@@ -164,6 +164,31 @@ function amountOn(concept: EnrollmentConcept, on: string): number {
 }
 
 /**
+ * Whether two names are ONE line for the server — the rule it refuses a plan
+ * by, in the browser.
+ *
+ * Two reductions, because the server holds both. The charge's reference is
+ * built from the name's letters and digits with every other character DROPPED
+ * ("Inscripción" → "inscripcin"), and the billing run recognises a line it
+ * already issued by the name with its accents taken OFF ("inscripcion") — so
+ * "INSCRIPCION" is the "Inscripción" a family already owes (T1, revisión
+ * 2026-09-30). Two names equal under either are refused.
+ */
+export function sameLineName(a: string, b: string): boolean {
+  return slugOf(a) === slugOf(b) || lineKey(a) === lineKey(b);
+}
+
+/** What the charge's reference is built from (the server's `Slugify`). */
+function slugOf(raw: string): string {
+  return raw.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/** The name without accents, case or punctuation (the server's `LineKey`). */
+export function lineKey(raw: string): string {
+  return raw.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
  * What the server would refuse, said here first.
  *
  * Every rule below is one the domain enforces (ADR 0011). Repeating them costs a
@@ -172,19 +197,17 @@ function amountOn(concept: EnrollmentConcept, on: string): number {
  * the trip.
  */
 export function ladderProblem(concepts: readonly EnrollmentConcept[]): string {
-  const seen = new Set<string>();
+  const seen: string[] = [];
   for (const concept of concepts) {
     if (concept.name.trim() === "") {
       return "Cada renglón de la inscripción necesita un nombre.";
     }
-    // Compared as the SLUG, because that is what the charge's reference is built
-    // from: "Cuota APF" and "Cuota A.P.F." are two names for a person and ONE
-    // charge for the ledger, and the second line would never be issued.
-    const slug = concept.name.toLowerCase().replace(/[^a-z0-9]/g, "");
-    if (seen.has(slug)) {
+    // "Cuota APF" and "Cuota A.P.F." are two names to a person and ONE charge
+    // to the ledger: the second line would never be issued. See sameLineName.
+    if (seen.some((name) => sameLineName(name, concept.name))) {
       return `Dos renglones se llaman casi igual ("${concept.name}"). Ponles nombres que se distingan.`;
     }
-    seen.add(slug);
+    seen.push(concept.name);
 
     if (concept.tiers.length === 0) {
       return `Falta decir cuánto cuesta "${concept.name}", y desde cuándo.`;
