@@ -6,6 +6,7 @@ import {
   formatStudentName,
   sortStudents,
   studentInitials,
+  studentNameSearchKeys,
   studentShortName,
 } from "./studentName";
 
@@ -73,5 +74,14 @@ describe("short forms", () => {
 
   it("studentInitials is the monogram: first name, then paternal surname", () => {
     expect(studentInitials({ firstName: "ana", lastName: "Pérez", maternalLastName: "Núñez" })).toBe("AP");
+  });
+});
+
+describe("studentNameSearchKeys", () => {
+  it("offers the name in both orders, so the office finds a pupil however it types", () => {
+    expect(studentNameSearchKeys({ firstName: "Ana", lastName: "Pérez", maternalLastName: "López" })).toEqual([
+      "Pérez López Ana",
+      "Ana Pérez López",
+    ]);
   });
 });

@@ -2,7 +2,10 @@ package postgres
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
@@ -175,13 +178,52 @@ func (r *Repository) FindByID(ctx context.Context, id string) (*domain.Student, 
 // expressions of idx_students_surname_order (migration 0017).
 const surnameOrder = "last_name COLLATE es_primary, COALESCE(maternal_last_name, '') COLLATE es_primary, first_name COLLATE es_primary, id"
 
-// afterCursor keeps the keyset past the cursor pupil in surnameOrder. The token
-// stays the last returned id; its sort key is read back in the same statement,
-// so a page token issued before the order changed still means "after this pupil".
-const afterCursor = "(" + surnameOrder + ") > (SELECT last_name, COALESCE(maternal_last_name, ''), first_name, id FROM students WHERE id = ?)"
+// afterKey keeps the keyset past a sort key carried by the page token, so a
+// walk neither stops nor skips when the cursor pupil is renamed or leaves the
+// list between two page reads.
+const afterKey = "(" + surnameOrder + ") > (?, ?, ?, ?::uuid)"
+
+// afterLegacyID serves a token issued before T3 (a bare id): the cursor pupil's
+// key is read back in the same statement.
+const afterLegacyID = "(" + surnameOrder + ") > (SELECT last_name, COALESCE(maternal_last_name, ''), first_name, id FROM students WHERE id = ?)"
+
+// cursorPrefix marks a page token that carries the sort key (T3).
+const cursorPrefix = "k1."
+
+// pageCursor is the sort key of the last pupil a page returned.
+type pageCursor struct {
+	Last     string `json:"l"`
+	Maternal string `json:"m"`
+	First    string `json:"f"`
+	ID       string `json:"i"`
+}
+
+// encodeCursor turns the last row of a page into its opaque next-page token.
+func encodeCursor(m studentModel) string {
+	raw, _ := json.Marshal(pageCursor{Last: m.LastName, Maternal: derefOrEmpty(m.MaternalLastName), First: m.FirstName, ID: m.ID})
+	return cursorPrefix + base64.RawURLEncoding.EncodeToString(raw)
+}
+
+// afterToken narrows q to the pupils after the token's cursor. A token that is
+// not ours is the caller's mistake (KindInvalid).
+func afterToken(q *gorm.DB, token string) (*gorm.DB, error) {
+	encoded, ok := strings.CutPrefix(token, cursorPrefix)
+	if !ok {
+		return q.Where(afterLegacyID, token), nil
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInvalid, "malformed page token", err)
+	}
+	var c pageCursor
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInvalid, "malformed page token", err)
+	}
+	return q.Where(afterKey, c.Last, c.Maternal, c.First, c.ID), nil
+}
 
 // List returns students matching the filter in surnameOrder, keyset-paginated.
-// The next page token is the last returned id ("" when the last page is reached).
+// The next page token is opaque ("" when the last page is reached).
 func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]*domain.Student, string, error) {
 	size := f.PageSize
 	if size <= 0 {
@@ -210,7 +252,10 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]*domain.St
 			q = q.Where("id IN ?", f.IDs)
 		}
 		if f.PageToken != "" {
-			q = q.Where(afterCursor, f.PageToken)
+			var err error
+			if q, err = afterToken(q, f.PageToken); err != nil {
+				return err
+			}
 		}
 
 		var rows []studentModel
@@ -220,7 +265,7 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]*domain.St
 		// A (size+1)th row signals there is a next page; drop it and expose its
 		// predecessor's id as the cursor.
 		if len(rows) > size {
-			next = rows[size-1].ID
+			next = encodeCursor(rows[size-1])
 			rows = rows[:size]
 		}
 		for _, m := range rows {

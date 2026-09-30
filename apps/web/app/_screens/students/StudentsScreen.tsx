@@ -27,7 +27,7 @@ import { API_URL } from "../../api-url";
 import { csvName, downloadCsv, toCsv, type CsvColumn } from "../../_lib/csv";
 import { ContactsPanel } from "./ContactsPanel";
 import { matchesSearch } from "../../_design/textSearch";
-import { compareStudents, formatStudentName } from "../../_design/students/studentName";
+import { compareStudents, formatStudentName, studentNameSearchKeys } from "../../_design/students/studentName";
 
 /** The floating "Nuevo alumno": its height, its distance from the bottom, and
  * the breathing room the page leaves above it. */
@@ -731,7 +731,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
   const filtered = useMemo(() => {
     return students
       .filter((s) => (tab === "all" || statusOf(s.admissionStatus).tab === tab) && (level === "Todos" || levelOf(s) === level) &&
-        matchesSearch(q, formatStudentName(s), s.curp, s.guardianName))
+        matchesSearch(q, ...studentNameSearchKeys(s), s.curp, s.guardianName))
       .sort(compareStudents);
   }, [students, tab, level, q]);
 

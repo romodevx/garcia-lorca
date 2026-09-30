@@ -22,6 +22,15 @@ export function formatStudentName(s: StudentNameParts): string {
   return [clean(s.lastName), clean(s.maternalLastName), clean(s.firstName)].filter((p) => p !== "").join(" ");
 }
 
+/**
+ * The texts a search box matches a pupil against: the list's own order and the
+ * spoken one ("Ana Pérez"), so the office finds a pupil however it types.
+ */
+export function studentNameSearchKeys(s: StudentNameParts): [string, string] {
+  const spoken = [clean(s.firstName), clean(s.lastName), clean(s.maternalLastName)].filter((p) => p !== "").join(" ");
+  return [formatStudentName(s), spoken];
+}
+
 /** Where space is tight (the families' app header): "Paterno PrimerNombre". */
 export function studentShortName(s: StudentNameParts): string {
   const firstGiven = clean(s.firstName).split(/\s+/)[0] ?? "";

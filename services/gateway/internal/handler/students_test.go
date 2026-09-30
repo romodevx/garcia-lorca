@@ -563,3 +563,21 @@ func TestStudentsForwardAndAnswerTheMaternalSurname(t *testing.T) {
 		t.Errorf("update forwarded maternal = %q, want Cruz", svc.gotUpdate.MaternalLastName)
 	}
 }
+
+// Review of T3: a caller that does not know the maternal field yet (an older
+// cached web page, a script) must not erase the one already on file.
+func TestUpdateStudentWithoutTheMaternalFieldKeepsIt(t *testing.T) {
+	svc := &fakeCreator{res: client.StudentResult{ID: "stu-1", FirstName: "Ana", LastName: "Herrera", MaternalLastName: "Ríos"}}
+	h := handler.NewStudentsHandler(svc)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/students/stu-1", strings.NewReader(
+		`{"firstName":"Ana","lastName":"Herrera","curp":"HEGA050312MDFRNN08","profile":{}}`))
+	req.SetPathValue("id", "stu-1")
+	rec := httptest.NewRecorder()
+	h.Update(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if svc.gotGetID != "stu-1" || svc.gotUpdate.MaternalLastName != "Ríos" {
+		t.Errorf("forwarded maternal = %q (read %q), want the stored Ríos", svc.gotUpdate.MaternalLastName, svc.gotGetID)
+	}
+}

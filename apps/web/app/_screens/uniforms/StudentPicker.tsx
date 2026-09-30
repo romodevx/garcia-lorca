@@ -6,7 +6,7 @@ import { field } from "./parts";
 
 import { API_URL } from "../../api-url";
 import { matchesSearch } from "../../_design/textSearch";
-import { formatStudentName, sortStudents } from "../../_design/students/studentName";
+import { formatStudentName, sortStudents, studentNameSearchKeys } from "../../_design/students/studentName";
 
 
 /**
@@ -52,7 +52,7 @@ export function StudentPicker({
 
   const matches = useMemo(() => {
     if (term.trim() === "" || students === null) return [];
-    return sortStudents(students.filter((s) => matchesSearch(term, formatStudentName(s), s.curp))).slice(0, 6);
+    return sortStudents(students.filter((s) => matchesSearch(term, ...studentNameSearchKeys(s), s.curp))).slice(0, 6);
   }, [students, term]);
 
   if (value !== null) {

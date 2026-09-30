@@ -108,6 +108,18 @@ describe("StudentsScreen", () => {
     expect(screen.queryByText("Cruz Valentina")).not.toBeInTheDocument();
   });
 
+  // Review of T3: the list reads surname first, but the office still types
+  // names the way it says them ("mateo sánchez").
+  it("finds a pupil typed first name first, too", async () => {
+    const user = userEvent.setup();
+    render(<StudentsScreen onBack={() => {}} />);
+    await screen.findByText("Cruz Valentina");
+
+    await user.type(screen.getByLabelText("Buscar"), "mateo sanchez");
+    expect(screen.getByText("Sánchez Mateo")).toBeInTheDocument();
+    expect(screen.queryByText("Cruz Valentina")).not.toBeInTheDocument();
+  });
+
   it("shows each pupil surname first and sorts by surname, accents aside (T3)", async () => {
     students.listStudents.mockResolvedValue([
       { ...mk("1", "Zoe", "Ñuñez", "enrolled") },

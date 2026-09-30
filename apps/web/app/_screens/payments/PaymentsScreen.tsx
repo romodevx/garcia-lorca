@@ -12,7 +12,7 @@ import { formatCents } from "../../_lib/money";
 import { CashUpDrawer } from "../finance/CashUpDrawer";
 import { CollectDrawer, type CollectStudent } from "../finance/CollectDrawer";
 import { matchesSearch } from "../../_design/textSearch";
-import { formatStudentName, sortStudents } from "../../_design/students/studentName";
+import { formatStudentName, sortStudents, studentNameSearchKeys } from "../../_design/students/studentName";
 
 const search: CSSProperties = {
   width: "100%", height: 60, paddingLeft: 52, paddingRight: 18,
@@ -67,7 +67,7 @@ export function PaymentsScreen({ onBack, canGrantDiscounts = false }: PaymentsSc
     if (q.trim() === "") {
       return [];
     }
-    return sortStudents(students.filter((s) => matchesSearch(q, formatStudentName(s), s.curp))).slice(0, MAX_RESULTS);
+    return sortStudents(students.filter((s) => matchesSearch(q, ...studentNameSearchKeys(s), s.curp))).slice(0, MAX_RESULTS);
   }, [students, q]);
 
   // What each visible pupil owes today, so the cashier sees it before opening

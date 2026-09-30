@@ -85,9 +85,11 @@ func toStudentSummary(s client.StudentResult) studentResponse {
 }
 
 type updateStudentRequest struct {
-	FirstName        string                `json:"firstName"`
-	LastName         string                `json:"lastName"`
-	MaternalLastName string                `json:"maternalLastName"`
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"`
+	// MaternalLastName is a pointer: absent (a client that predates T3) keeps
+	// the surname on file instead of erasing it.
+	MaternalLastName *string               `json:"maternalLastName"`
 	CURP             string                `json:"curp"`
 	Profile          client.StudentProfile `json:"profile"`
 }
@@ -101,15 +103,33 @@ func (h *StudentsHandler) Update(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
+	maternal, err := h.maternalOrStored(r.Context(), r.PathValue("id"), req.MaternalLastName)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
 	res, err := h.svc.UpdateStudent(r.Context(), client.UpdateStudentInput{
 		ID: r.PathValue("id"), FirstName: req.FirstName, LastName: req.LastName,
-		MaternalLastName: req.MaternalLastName, CURP: req.CURP, Profile: req.Profile,
+		MaternalLastName: maternal, CURP: req.CURP, Profile: req.Profile,
 	})
 	if err != nil {
 		writeConnectError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toStudentResponse(res))
+}
+
+// maternalOrStored is the maternal surname an update sends, or — when the
+// request does not carry the field at all — the one already on file.
+func (h *StudentsHandler) maternalOrStored(ctx context.Context, id string, sent *string) (string, error) {
+	if sent != nil {
+		return *sent, nil
+	}
+	stored, err := h.svc.GetStudent(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	return stored.MaternalLastName, nil
 }
 
 // Create handles POST /api/v1/students: registers a new applicant (pending).

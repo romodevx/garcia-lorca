@@ -10,6 +10,7 @@ export {
   formatStudentName,
   sortStudents,
   studentInitials,
+  studentNameSearchKeys,
   studentShortName,
   type StudentNameParts,
 } from "@garcia-lorca/domain/student-name";
