@@ -32,11 +32,12 @@ const (
 	StatusDeleted
 )
 
-// ErrProviderPending marks a deletion whose row is done — nobody can sign in
-// here any more — but whose identity-provider half failed. Deleting the same
-// account again retries only that half. The transport gives it its own code so
+// ErrDeletionPending marks a deletion whose row is done — nobody can sign in
+// here any more — but whose closing steps (revoking pending links, disabling
+// the identity-provider account) did not all finish. Deleting the same account
+// again retries only those steps. The transport gives it its own code so
 // the screen can say exactly this instead of "it did not work".
-var ErrProviderPending = errors.New("user deleted; identity provider not yet disabled")
+var ErrDeletionPending = errors.New("user deleted; closing steps pending")
 
 // ErrLastOwner is the refusal to delete the only active account that holds the
 // owner role: without one, nobody could administer the school again.

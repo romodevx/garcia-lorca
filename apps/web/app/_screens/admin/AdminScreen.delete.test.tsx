@@ -136,7 +136,7 @@ describe("AdminScreen · eliminar usuario", () => {
   // repeats the provider half.
   it("says the account is closed but the provider is pending, and retries", async () => {
     const user = userEvent.setup();
-    admin.deleteUser.mockRejectedValueOnce(new adminApi.AdminError(500, "internal error", "PROVIDER_PENDING"));
+    admin.deleteUser.mockRejectedValueOnce(new adminApi.AdminError(500, "internal error", "DELETION_PENDING"));
     admin.deleteUser.mockResolvedValueOnce(undefined);
     renderAsOwner();
     await screen.findByText("Maestra Rojas");

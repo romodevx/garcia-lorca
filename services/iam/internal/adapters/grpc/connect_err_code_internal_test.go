@@ -14,10 +14,10 @@ import (
 // the screen can say "ya no puede entrar; falta el proveedor" and offer the
 // retry instead of claiming nothing happened.
 func TestProviderPendingCarriesItsCode(t *testing.T) {
-	err := connectErr(glerrors.Wrap(glerrors.KindInternal, "x", errors.Join(domain.ErrProviderPending, errors.New("503"))))
+	err := connectErr(glerrors.Wrap(glerrors.KindInternal, "x", errors.Join(domain.ErrDeletionPending, errors.New("503"))))
 
-	if got := err.Meta().Get(errorCodeMeta); got != "PROVIDER_PENDING" {
-		t.Errorf("X-Error-Code = %q, want PROVIDER_PENDING", got)
+	if got := err.Meta().Get(errorCodeMeta); got != "DELETION_PENDING" {
+		t.Errorf("X-Error-Code = %q, want DELETION_PENDING", got)
 	}
 	if connect.CodeOf(err) != connect.CodeInternal {
 		t.Errorf("code = %v, want Internal", connect.CodeOf(err))

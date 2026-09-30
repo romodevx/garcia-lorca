@@ -275,7 +275,7 @@ func (s *AdminService) reenableAtProvider(ctx context.Context, email, displayNam
 // ORDER IS LOAD-BEARING: the row first, because it is what every sign-in path
 // here checks and because the repository is where the refusals live — a
 // refused deletion touches nothing else. Then the links, then the provider.
-// If either of those fails the answer carries ErrProviderPending, the account
+// If either of those fails the answer carries ErrDeletionPending, the account
 // already cannot sign in, and deleting it again finishes the job: an
 // already-deleted account only repeats those two idempotent steps.
 func (s *AdminService) DeleteUser(ctx context.Context, actorID, targetID string) error {
@@ -297,8 +297,8 @@ func (s *AdminService) DeleteUser(ctx context.Context, actorID, targetID string)
 	}
 	if err := s.finishDeletion(ctx, target); err != nil {
 		return glerrors.Wrap(glerrors.KindInternal,
-			"la cuenta ya no puede entrar, pero falta deshabilitarla en el proveedor; vuelve a intentarlo",
-			errors.Join(domain.ErrProviderPending, err))
+			"la cuenta ya no puede entrar, pero no se terminó de cerrar (enlaces pendientes o proveedor de identidad); vuelve a intentarlo",
+			errors.Join(domain.ErrDeletionPending, err))
 	}
 	return nil
 }
@@ -315,7 +315,7 @@ func (s *AdminService) finishDeletion(ctx context.Context, target domain.User) e
 	if s.provisioner == nil {
 		return nil
 	}
-	err := s.provisioner.SetDisabled(ctx, target.Email().String(), true)
+	err := s.provisioner.Disable(ctx, target.Email().String())
 	if glerrors.KindOf(err) == glerrors.KindNotFound {
 		// Created while passwords were local: nothing there to switch off.
 		return nil

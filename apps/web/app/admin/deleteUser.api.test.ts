@@ -36,11 +36,11 @@ describe("deleteUser", () => {
   it("carries the refusal's machine code (X-Error-Code)", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(new Response("internal error", { status: 500, headers: { "X-Error-Code": "PROVIDER_PENDING" } })),
+      vi.fn().mockResolvedValue(new Response("internal error", { status: 500, headers: { "X-Error-Code": "DELETION_PENDING" } })),
     );
 
     const err = await deleteUser("http://gw", "u2").catch((e: unknown) => e);
 
-    expect((err as AdminError).code).toBe("PROVIDER_PENDING");
+    expect((err as AdminError).code).toBe("DELETION_PENDING");
   });
 });

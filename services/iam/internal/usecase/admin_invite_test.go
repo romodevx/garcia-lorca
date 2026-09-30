@@ -52,7 +52,8 @@ type fakeProvisioner struct {
 	// send its own" — two outcomes the director experiences very differently.
 	providerSent    []string
 	providerSendErr error
-	// disabled records SetDisabled calls as "<email>:<true|false>".
+	// disabled records provider calls: "<email>:true" for Disable,
+	// "<email>:reenabled" for Reenable.
 	disabled    []string
 	disabledErr error
 	reenableErr error
@@ -67,15 +68,11 @@ func (f *fakeProvisioner) Reenable(_ context.Context, email string) error {
 	return nil
 }
 
-func (f *fakeProvisioner) SetDisabled(_ context.Context, email string, disabled bool) error {
+func (f *fakeProvisioner) Disable(_ context.Context, email string) error {
 	if f.disabledErr != nil {
 		return f.disabledErr
 	}
-	state := "false"
-	if disabled {
-		state = "true"
-	}
-	f.disabled = append(f.disabled, email+":"+state)
+	f.disabled = append(f.disabled, email+":true")
 	return nil
 }
 

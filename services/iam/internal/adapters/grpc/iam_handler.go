@@ -377,8 +377,8 @@ func fromProtoStatus(s iamv1.UserStatus) (domain.Status, error) {
 // SQLSTATEs — and on some constraints the conflicting value — to whoever called.
 func connectErr(err error) *connect.Error {
 	ce := connectErrForKind(err)
-	if errors.Is(err, domain.ErrProviderPending) {
-		ce.Meta().Set(errorCodeMeta, "PROVIDER_PENDING")
+	if errors.Is(err, domain.ErrDeletionPending) {
+		ce.Meta().Set(errorCodeMeta, "DELETION_PENDING")
 	}
 	return ce
 }

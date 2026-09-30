@@ -208,8 +208,8 @@ func TestDeleteUserProviderOutcomes(t *testing.T) {
 			if f.users.deletedBy[teacherID] != directorID {
 				t.Errorf("the row must be deleted whatever the provider says: %v", f.users.deletedBy)
 			}
-			if tc.wantErr && !errors.Is(err, domain.ErrProviderPending) {
-				t.Errorf("err = %v, want it marked ErrProviderPending", err)
+			if tc.wantErr && !errors.Is(err, domain.ErrDeletionPending) {
+				t.Errorf("err = %v, want it marked ErrDeletionPending", err)
 			}
 		})
 	}

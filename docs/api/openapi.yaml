@@ -1440,7 +1440,7 @@ paths:
         last active account holding the owner role (409). An id that is not a
         uuid or names no account is 404. Deleting an account that is already
         deleted repeats only the link-revocation and identity-provider steps
-        (204) — that is the retry after a `PROVIDER_PENDING`. Inviting the same address
+        (204) — that is the retry after a `DELETION_PENDING`. Inviting the same address
         again (`POST /api/v1/users/invite`) restores THIS account as `invited`,
         history attached, with only the roles of the new invitation and a
         fresh credential at the identity provider — the old password does not
@@ -1470,10 +1470,12 @@ paths:
               example: no se puede eliminar al último director activo
         '500':
           description: >
-            With `PROVIDER_PENDING`: the account is deleted and can no longer
-            sign in here, but the identity provider could not be reached to
-            disable it (or its links could not be revoked). Repeat the request
-            to finish. Without a code: nothing was deleted.
+            With `DELETION_PENDING`: the account is deleted and can no longer
+            sign in here, but its pending links could not be revoked or the
+            identity provider could not be reached to disable it. Repeat the
+            request to finish. Without a code the deletion may or may not have
+            happened (e.g. a connection cut after the row was written):
+            repeating the request is always safe.
           headers:
             X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
           content:
@@ -3534,7 +3536,9 @@ components:
         whose deletion is running (grades capture, closing or reopening a
         period, attendance lists, enrolling or transferring a pupil, a tuition
         plan, a garment scoped to it, the level's structure in config).
-        Absent on a refusal without a code.
+        User deletion (T2): DELETION_PENDING (500, the account is deleted but
+        its links or identity-provider account are not yet closed; repeat the
+        DELETE). Absent on a refusal without a code.
       schema:
         type: string
         pattern: '^[A-Z][A-Z0-9_]{0,63}$'

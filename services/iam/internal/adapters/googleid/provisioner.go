@@ -69,24 +69,21 @@ func (p *Provisioner) SetPassword(ctx context.Context, email, password string) e
 	return nil
 }
 
-// SetDisabled switches sign-in at the provider off or on, and touches nothing
-// else about the account: its password and verified address survive, so a
-// person invited back after being deleted (T2) keeps the credential they had.
+// Disable switches sign-in at the provider off for a deleted account (T2) and
+// ends every provider session it had. Nothing else about the account changes;
+// if the address is invited again, Reenable replaces the credential.
 //
-// UpdateUser is one of the three calls this adapter is allowed, so this needs
-// no new grant on the runtime service account.
-func (p *Provisioner) SetDisabled(ctx context.Context, email string, disabled bool) error {
+// Both calls ride on firebaseauth.users.update, so this needs no new grant on
+// the runtime service account.
+func (p *Provisioner) Disable(ctx context.Context, email string) error {
 	uid, err := p.uidOf(ctx, email)
 	if err != nil {
 		return err
 	}
-	if _, err := p.sdk.UpdateUser(ctx, uid, (&firebaseauth.UserToUpdate{}).Disabled(disabled)); err != nil {
-		return glerrors.Wrap(glerrors.KindInternal, "changing sign-in at the identity provider", err)
+	if _, err := p.sdk.UpdateUser(ctx, uid, (&firebaseauth.UserToUpdate{}).Disabled(true)); err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "disabling sign-in at the identity provider", err)
 	}
-	if disabled {
-		return p.endSessions(ctx, uid)
-	}
-	return nil
+	return p.endSessions(ctx, uid)
 }
 
 // endSessions revokes every provider refresh token of the account. A live one
@@ -117,10 +114,12 @@ func (p *Provisioner) Reenable(ctx context.Context, email string) error {
 		return err
 	}
 	params := (&firebaseauth.UserToUpdate{}).Disabled(false).Password(fresh)
+	// Changing the password already invalidates every provider refresh token
+	// of the account, so no separate revocation is needed here.
 	if _, err := p.sdk.UpdateUser(ctx, uid, params); err != nil {
 		return glerrors.Wrap(glerrors.KindInternal, "re-enabling the provider account", err)
 	}
-	return p.endSessions(ctx, uid)
+	return nil
 }
 
 // randomPassword is 32 bytes of cryptographic randomness, base64url: a

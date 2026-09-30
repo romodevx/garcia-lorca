@@ -203,10 +203,10 @@ type IdentityProvisioner interface {
 	// It is the LAST fallback: a configured mailer always wins.
 	SendPasswordSetupEmail(ctx context.Context, email string) error
 
-	// SetDisabled turns sign-in at the provider off (a deleted user) or back on
-	// (the same address invited again). An address with no account there is
-	// KindNotFound.
-	SetDisabled(ctx context.Context, email string, disabled bool) error
+	// Disable turns sign-in at the provider off for a deleted user and ends
+	// every provider session it had. Idempotent. An address with no account
+	// there is KindNotFound.
+	Disable(ctx context.Context, email string) error
 
 	// Reenable turns sign-in back on for an address invited again after it
 	// was deleted, and REPLACES its credential with one nobody knows: the old

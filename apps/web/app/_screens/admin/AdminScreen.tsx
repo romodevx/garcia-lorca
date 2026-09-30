@@ -452,10 +452,11 @@ function DeleteUserDialog({ user, onClose, onConfirm }: { user: AdminUser; onClo
 function deleteRefusal(e: unknown, name: string): string {
   const status = e instanceof AdminError ? e.status : 0;
   const detail = e instanceof AdminError ? e.detail : "";
-  // The account is already closed; only the identity provider is missing, and
-  // pressing the button again finishes exactly that.
-  if (e instanceof AdminError && e.code === "PROVIDER_PENDING") {
-    return `${name} ya no puede entrar al sistema, pero falta deshabilitar su cuenta en el proveedor de identidad. Pulsa «Eliminar usuario» otra vez.`;
+  // The account already cannot sign in; its links or the provider account are
+  // still open, and pressing the button again finishes exactly that. Once the
+  // dialog closes the row is gone from the list, so the retry lives here.
+  if (e instanceof AdminError && e.code === "DELETION_PENDING") {
+    return `${name} ya no puede entrar al sistema, pero su acceso no se terminó de cerrar (enlaces pendientes o proveedor de identidad). Pulsa «Eliminar usuario» otra vez, antes de cerrar esta ventana.`;
   }
   if (status === 409) return "No se puede eliminar al último director activo.";
   if (status === 403) return detail.includes("propia") ? "No puedes eliminar tu propia cuenta." : "No tienes permiso para eliminar usuarios.";

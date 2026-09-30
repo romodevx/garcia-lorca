@@ -57,21 +57,22 @@ func newTestProvisioner(sdk *fakeSDK) *Provisioner {
 	return p
 }
 
-func TestSetDisabledTogglesOnlyTheDisabledFlag(t *testing.T) {
-	for _, disabled := range []bool{true, false} {
-		sdk := &fakeSDK{byEmail: map[string]string{"ana@gl.mx": "uid-ana"}}
+func TestDisableTurnsSignInOffAndEndsSessions(t *testing.T) {
+	sdk := &fakeSDK{byEmail: map[string]string{"ana@gl.mx": "uid-ana"}}
 
-		if err := newTestProvisioner(sdk).SetDisabled(context.Background(), "ana@gl.mx", disabled); err != nil {
-			t.Fatalf("SetDisabled(%v): %v", disabled, err)
-		}
-		want := (&firebaseauth.UserToUpdate{}).Disabled(disabled)
-		if got := sdk.updated["uid-ana"]; !reflect.DeepEqual(got, want) {
-			t.Errorf("SetDisabled(%v) sent %+v, want only Disabled(%v) — nothing else about the account changes", disabled, got, disabled)
-		}
+	if err := newTestProvisioner(sdk).Disable(context.Background(), "ana@gl.mx"); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+	want := (&firebaseauth.UserToUpdate{}).Disabled(true)
+	if got := sdk.updated["uid-ana"]; !reflect.DeepEqual(got, want) {
+		t.Errorf("Disable sent %+v, want only Disabled(true)", got)
+	}
+	if len(sdk.revoked) != 1 || sdk.revoked[0] != "uid-ana" {
+		t.Errorf("revoked sessions %v, want uid-ana's", sdk.revoked)
 	}
 }
 
-func TestSetDisabledErrors(t *testing.T) {
+func TestDisableErrors(t *testing.T) {
 	cases := []struct {
 		name     string
 		sdk      *fakeSDK
@@ -82,7 +83,7 @@ func TestSetDisabledErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := newTestProvisioner(tc.sdk).SetDisabled(context.Background(), "ana@gl.mx", true)
+			err := newTestProvisioner(tc.sdk).Disable(context.Background(), "ana@gl.mx")
 			if glerrors.KindOf(err) != tc.wantKind {
 				t.Errorf("err = %v, want kind %v", err, tc.wantKind)
 			}
@@ -118,23 +119,5 @@ func TestRandomPasswordIsLongAndUnique(t *testing.T) {
 	b, _ := randomPassword()
 	if len(a) < 32 || a == b {
 		t.Errorf("randomPassword gave %q and %q, want two different values of at least 32 chars", a, b)
-	}
-}
-
-// Switching an account off or back on also ends every provider session it
-// had: a provider refresh token kept minting ID tokens otherwise, and an ID
-// token is enough to activate an invited account.
-func TestDisableAndReenableRevokeProviderSessions(t *testing.T) {
-	sdk := &fakeSDK{byEmail: map[string]string{"ana@gl.mx": "uid-ana"}}
-	p := newTestProvisioner(sdk)
-
-	if err := p.SetDisabled(context.Background(), "ana@gl.mx", true); err != nil {
-		t.Fatalf("SetDisabled: %v", err)
-	}
-	if err := p.Reenable(context.Background(), "ana@gl.mx"); err != nil {
-		t.Fatalf("Reenable: %v", err)
-	}
-	if len(sdk.revoked) != 2 {
-		t.Errorf("revoked sessions %v, want once on disable and once on re-enable", sdk.revoked)
 	}
 }
