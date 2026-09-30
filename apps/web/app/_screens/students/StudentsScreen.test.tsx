@@ -227,6 +227,9 @@ describe("StudentsScreen — por salón", () => {
   // group. It follows the filters, because that is the count they mean.
   it("counts pupils per classroom, and follows the filter", async () => {
     const user = userEvent.setup();
+    // The classroom comes from this cycle's enrolment (T4), not the file's letter.
+    config.listLabelledGroups.mockResolvedValue([{ id: "g1a", cycleId: "c1", gradeLevelId: "gl-1", name: "A", capacity: 25, label: "1° A" }]);
+    students.listEnrollments.mockResolvedValue(["1", "2"].map((id) => ({ id: `e${id}`, studentId: id, cycleId: "c1", groupId: "g1a", termId: "", status: "active" as const, enrolledAt: "2026-08-20" })));
     render(<StudentsScreen onBack={() => {}} />);
     await screen.findByText("Cruz Valentina");
 

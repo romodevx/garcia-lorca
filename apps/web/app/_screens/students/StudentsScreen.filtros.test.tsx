@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as studentsApi from "../../students/api";
 import * as configApi from "../../config/api";
 import * as csv from "../../_lib/csv";
-import { StudentsScreen } from "./StudentsScreen";
+import { StudentsScreen, startFreshStudentsVisit, studentsListPath } from "./StudentsScreen";
 
 // T4: level → grade → group chips, chained, over the pupils' ACTIVE enrolment
 // of the cycle; the view lives in the URL; "Seleccionar todos" over the result.
@@ -38,7 +38,7 @@ const active = (studentId: string, groupId: string): studentsApi.Enrollment => (
 });
 const group = (id: string, gradeLevelId: string, name: string, label: string): configApi.LabelledGroup => ({
   id, cycleId: "c1", gradeLevelId, name, capacity: 25, label,
-} as configApi.LabelledGroup);
+});
 
 beforeEach(() => {
   window.history.replaceState(null, "", "/alumnos");
@@ -147,5 +147,82 @@ describe("StudentsScreen — filtros encadenados (T4)", () => {
 
     await user.click(screen.getByRole("button", { name: "Limpiar" }));
     expect(rows()).toHaveLength(5);
+  });
+});
+
+describe("StudentsScreen — filtros cuando algo falta (revisión T4)", () => {
+  it("files a legacy pupil with only a level NAME under that level's chip", async () => {
+    const user = userEvent.setup();
+    students.listStudents.mockResolvedValue([pupil("9", "Luna", "Leo", "", "PREESCOLAR", "")]);
+    render(<StudentsScreen onBack={() => {}} />);
+    await screen.findByText("Luna Leo");
+
+    await user.click(chipIn("Nivel", /^Preescolar/));
+    expect(rows()).toEqual(["Luna Leo"]);
+  });
+
+  it("still offers the levels on the roll when the school's levels cannot be read", async () => {
+    config.listLevels.mockRejectedValue(new Error("config down"));
+    render(<StudentsScreen onBack={() => {}} />);
+    await screen.findByText("Arce Ana");
+    expect(chipIn("Nivel", /^Primaria/)).toBeInTheDocument();
+  });
+
+  it("offers no grade row, and says why, when the cycle's enrolments cannot be read", async () => {
+    const user = userEvent.setup();
+    students.listEnrollments.mockRejectedValue(new Error("students down"));
+    render(<StudentsScreen onBack={() => {}} />);
+    await screen.findByText("Arce Ana");
+    expect(await screen.findByText(/No pudimos leer los grupos de este ciclo/)).toBeInTheDocument();
+
+    await user.click(chipIn("Nivel", /^Preescolar/));
+    expect(screen.queryByRole("group", { name: "Grado" })).toBeNull();
+    expect(rows()).toHaveLength(4);
+  });
+
+  it("waits for the enrolments before judging a grade from the URL (no false 'Sin alumnos')", async () => {
+    window.history.replaceState(null, "", "/alumnos?nivel=pre&grado=pre-1");
+    students.listEnrollments.mockReturnValue(new Promise(() => {}));
+    render(<StudentsScreen onBack={() => {}} />);
+    await waitFor(() => expect(students.listEnrollments).toHaveBeenCalled());
+    expect(screen.queryByText("Sin alumnos en esta vista")).toBeNull();
+    expect(screen.getByText("Cargando…")).toBeInTheDocument();
+  });
+
+  it("names the classroom 'Sin grupo' for a pupil not enrolled this cycle, not the old letter", async () => {
+    students.listStudents.mockResolvedValue([pupil("1", "Arce", "Ana", "pre", "Preescolar", "A"), pupil("8", "Gil", "Gus", "pre", "Preescolar", "A")]);
+    render(<StudentsScreen onBack={() => {}} />);
+    await screen.findByText("Arce Ana");
+    await waitFor(() => expect(screen.getByTestId("per-group")).toHaveTextContent("Sin grupo"));
+    expect(screen.getByTestId("per-group")).not.toHaveTextContent(/^A$/);
+  });
+
+  it("shows and exports the level of the group the pupil sits in", async () => {
+    const user = userEvent.setup();
+    students.listStudents.mockResolvedValue([pupil("4", "Duarte", "Dani", "pre", "Preescolar", "B")]);
+    render(<StudentsScreen onBack={() => {}} />);
+    await screen.findByText("Duarte Dani");
+    await user.click(chipIn("Nivel", /^Primaria/));
+    expect(rows()).toEqual(["Duarte Dani"]);
+    expect(screen.queryByText("Preescolar", { selector: "div" })).toBeNull();
+  });
+
+  it("remembers the view, so the edit page's own Back returns to it", async () => {
+    const user = userEvent.setup();
+    render(<StudentsScreen onBack={() => {}} />);
+    await screen.findByText("Arce Ana");
+    await user.click(chipIn("Nivel", /^Primaria/));
+    expect(studentsListPath()).toBe("/alumnos?nivel=pri");
+  });
+});
+
+describe("StudentsScreen — visita deliberada (revisión T4)", () => {
+  it("opens clean when Estudiantes is chosen on purpose, even if the address still has filters", async () => {
+    window.history.replaceState(null, "", "/alumnos?nivel=pre");
+    startFreshStudentsVisit();
+    render(<StudentsScreen onBack={() => {}} />);
+    await screen.findByText("Arce Ana");
+    expect(rows()).toHaveLength(5);
+    expect(window.location.search).toBe("");
   });
 });

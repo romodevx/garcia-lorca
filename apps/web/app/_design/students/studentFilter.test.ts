@@ -134,7 +134,7 @@ describe("studentFacets", () => {
     expect(f.grades).toEqual([
       { id: "pre-1", label: "1°", count: 2 },
       { id: "pre-2", label: "2°", count: 1 },
-      { id: NONE, label: "Sin grupo", count: 1 },
+      { id: NONE, label: "Sin grado", count: 1 },
     ]);
     expect(f.groups).toEqual([]);
   });
@@ -145,6 +145,21 @@ describe("studentFacets", () => {
       { id: "pre-1-a", label: "A", count: 1 },
       { id: "pre-1-b", label: "B", count: 1 },
     ]);
+  });
+
+  it("offers no grade row for a level the school gave no grades (not a lone 'Sin grado')", () => {
+    const f = studentFacets(roll, { ...catalog, grades: [] }, chooseLevel(EMPTY_FILTER, "pre"));
+    expect(f.grades).toEqual([]);
+  });
+
+  it("keeps the chosen chip visible even when the search empties it, so it can be turned off", () => {
+    const f = studentFacets(roll, catalog, { ...chooseLevel(EMPTY_FILTER, NONE), q: "perez" });
+    expect(f.levels.at(-1)).toEqual({ id: NONE, label: "Sin nivel", count: 0 });
+  });
+
+  it("shows a chosen id the catalog no longer has (an old link), so it can be turned off", () => {
+    const f = studentFacets(roll, catalog, chooseLevel(EMPTY_FILTER, "gone"));
+    expect(f.levels.at(-1)).toEqual({ id: "gone", label: "(ya no existe)", count: 0 });
   });
 
   it("counts under the search, so the numbers match what a click will show", () => {

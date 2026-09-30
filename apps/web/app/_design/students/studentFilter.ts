@@ -58,7 +58,10 @@ export interface StudentFacets {
 }
 
 const NO_LEVEL_LABEL = "Sin nivel";
+const NO_GRADE_LABEL = "Sin grado";
 const NO_GROUP_LABEL = "Sin grupo";
+/** A chosen id the catalog no longer has: an old link, a deleted group. */
+const GONE_LABEL = "(ya no existe)";
 
 /** Choosing a level forgets grade and group; choosing it again turns it off. */
 export function chooseLevel(f: StudentFilterState, levelId: string): StudentFilterState {
@@ -100,15 +103,29 @@ export function applyStudentFilter<T extends FilterableStudent>(items: readonly 
 
 function countBy(items: readonly FilterableStudent[], key: (s: FilterableStudent) => string): Map<string, number> {
   const counted = new Map<string, number>();
-  for (const s of items) counted.set(key(s), (counted.get(key(s)) ?? 0) + 1);
+  for (const s of items) {
+    const k = key(s);
+    counted.set(k, (counted.get(k) ?? 0) + 1);
+  }
   return counted;
 }
 
-/** The configured options with their counts, and "sin …" only when it holds somebody. */
-function facet(options: readonly { id: string; label: string }[], counted: Map<string, number>, noneLabel: string): FacetOption[] {
+/**
+ * The configured options with their counts, and "sin …" only when it holds
+ * somebody. The CHOSEN chip always shows, even at zero or unknown: a filter
+ * that is on must keep a pressed chip to turn it off.
+ */
+function facet(
+  options: readonly { id: string; label: string }[],
+  counted: Map<string, number>,
+  noneLabel: string,
+  chosen: string,
+): FacetOption[] {
   const out = options.map((o) => ({ id: o.id, label: o.label, count: counted.get(o.id) ?? 0 }));
   const none = counted.get("") ?? 0;
-  return none > 0 ? [...out, { id: NONE, label: noneLabel, count: none }] : out;
+  if (none > 0 || chosen === NONE) out.push({ id: NONE, label: noneLabel, count: none });
+  if (chosen !== "" && !out.some((o) => o.id === chosen)) out.push({ id: chosen, label: GONE_LABEL, count: 0 });
+  return out;
 }
 
 /**
@@ -117,7 +134,7 @@ function facet(options: readonly { id: string; label: string }[], counted: Map<s
  */
 export function studentFacets(items: readonly FilterableStudent[], catalog: FilterCatalog, f: StudentFilterState): StudentFacets {
   const searched = items.filter((s) => matchesQuery(s, f.q));
-  const levels = facet(catalog.levels.map((l) => ({ id: l.id, label: l.name })), countBy(searched, (s) => s.levelId), NO_LEVEL_LABEL);
+  const levels = facet(catalog.levels.map((l) => ({ id: l.id, label: l.name })), countBy(searched, (s) => s.levelId), NO_LEVEL_LABEL, f.levelId);
   if (f.levelId === "" || f.levelId === NONE) return { levels, grades: [], groups: [] };
 
   const inLevel = searched.filter((s) => s.levelId === f.levelId);
@@ -125,7 +142,9 @@ export function studentFacets(items: readonly FilterableStudent[], catalog: Filt
     .filter((g) => g.levelId === f.levelId)
     .sort((a, b) => a.ordinal - b.ordinal)
     .map((g) => ({ id: g.id, label: g.name }));
-  const grades = facet(gradeOptions, countBy(inLevel, (s) => s.gradeLevelId), NO_GROUP_LABEL);
+  // A level with no grades configured has nothing to choose: no row at all.
+  if (gradeOptions.length === 0) return { levels, grades: [], groups: [] };
+  const grades = facet(gradeOptions, countBy(inLevel, (s) => s.gradeLevelId), NO_GRADE_LABEL, f.gradeId);
   if (f.gradeId === "" || f.gradeId === NONE) return { levels, grades, groups: [] };
 
   const inGrade = inLevel.filter((s) => s.gradeLevelId === f.gradeId);
@@ -133,7 +152,8 @@ export function studentFacets(items: readonly FilterableStudent[], catalog: Filt
     .filter((g) => g.gradeLevelId === f.gradeId)
     .map((g) => ({ id: g.id, label: g.name }))
     .sort((a, b) => a.label.localeCompare(b.label, "es"));
-  return { levels, grades, groups: facet(groupOptions, countBy(inGrade, (s) => s.groupId), NO_GROUP_LABEL) };
+  if (groupOptions.length === 0) return { levels, grades, groups: [] };
+  return { levels, grades, groups: facet(groupOptions, countBy(inGrade, (s) => s.groupId), NO_GROUP_LABEL, f.groupId) };
 }
 
 /** The address-bar keys, in Spanish like the paths. */

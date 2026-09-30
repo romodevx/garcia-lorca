@@ -31,6 +31,7 @@ import { Checkmark, StudentFilters, StudentSelectionBand } from "../../_design/s
 import { useStudentFilter } from "../../_design/students/useStudentFilter";
 import { EMPTY_FILTER, filterFromParams, filterToParams, type FilterableStudent, type StudentFilterState } from "../../_design/students/studentFilter";
 import { placeStudents } from "../../_design/students/placement";
+import { fold } from "@garcia-lorca/ui/command-core";
 
 /** The floating "Nuevo alumno": its height, its distance from the bottom, and
  * the breathing room the page leaves above it. */
@@ -74,13 +75,39 @@ const TAB_KEY = "estado";
 /** A row of the list: the pupil, where they sit this cycle, and their classroom's name. */
 interface Row extends FilterableStudent {
   student: Student;
+  /** The level the chips file the pupil under, by name ("Sin nivel" when none). */
+  levelName: string;
   /** "1° PREESCOLAR · B" when the cycle's group is known; else the file's letter. */
   room: string;
 }
 
+/** Whether the cycle's groups and enrolments were read: grades and groups hang on it. */
+type PlacementState = "loading" | "ok" | "failed";
+
+/** The list's address as last written, so the edit page's own Back returns to it. */
+let lastListPath = "";
+
+/** Set by a deliberate visit to Estudiantes (the palette, a menu): open clean. */
+let freshVisit = false;
+
+/**
+ * The next list opens with no filters, whatever the address bar still says:
+ * the shell calls it when somebody chooses Estudiantes on purpose. Browser
+ * Back and the edit page's Back do not, so they keep the view.
+ */
+export function startFreshStudentsVisit(): void {
+  freshVisit = true;
+}
+
+/** Where "Volver" from a pupil's page goes: the list as it was left, filters included. */
+export function studentsListPath(): string {
+  return lastListPath === "" ? "/alumnos" : lastListPath;
+}
+
 /** The view the address bar names: Back from a pupil's page lands on it again. */
 function readView(): { filter: StudentFilterState; tab: StatusTab } {
-  if (typeof window === "undefined") return { filter: EMPTY_FILTER, tab: "all" };
+  // The flag is spent after mount, not here: StrictMode runs this twice.
+  if (typeof window === "undefined" || freshVisit) return { filter: EMPTY_FILTER, tab: "all" };
   const params = new URLSearchParams(window.location.search);
   const tab = STATUS_TABS.find((t) => t === params.get(TAB_KEY)) ?? "all";
   return { filter: filterFromParams(params), tab };
@@ -93,6 +120,7 @@ function writeView(filter: StudentFilterState, tab: StatusTab): void {
   else base.set(TAB_KEY, tab);
   const query = filterToParams(filter, base).toString();
   const next = `${window.location.pathname}${query === "" ? "" : `?${query}`}`;
+  lastListPath = next;
   if (next !== `${window.location.pathname}${window.location.search}`) {
     window.history.replaceState(window.history.state, "", next);
   }
@@ -683,7 +711,7 @@ const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
   { label: "Apellido materno", value: (r) => r.student.maternalLastName ?? "" },
   { label: "Nombre(s)", value: (r) => r.student.firstName },
   { label: "CURP", value: (r) => r.student.curp },
-  { label: "Nivel", value: (r) => r.student.level },
+  { label: "Nivel", value: (r) => r.levelName },
   { label: "Grado y grupo", value: (r) => r.room },
   { label: "Tutor", value: (r) => r.student.guardianName },
   { label: "Estado", value: (r) => statusOf(r.student.admissionStatus).label },
@@ -703,9 +731,11 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [initialView] = useState(readView);
+  useEffect(() => { freshVisit = false; }, []);
   const [tab, setTab] = useState<StatusTab>(initialView.tab);
   // The cycle's enrolments place each pupil in a grade and a group (T4).
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
+  const [placement, setPlacement] = useState<PlacementState>("loading");
   const [rollVersion, setRollVersion] = useState(0);
   const [add, setAdd] = useState(false);
   const [sheet, setSheet] = useState<Student | null>(null);
@@ -743,21 +773,24 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
     listCycles(API_URL).then((cs) => {
       setCycles(cs);
       const active = cs.find((c) => c.status === "active") ?? cs[0];
-      if (active !== undefined) {
-        setGroupsCycleId(active.id);
-        listLabelledGroups(API_URL, active.id).then(setGroups).catch(() => {});
-      }
-    }).catch(() => {});
+      if (active !== undefined) setGroupsCycleId(active.id);
+      else setPlacement("failed");
+    }).catch(() => setPlacement("failed"));
   }, [reload]);
 
-  // One read for the whole cycle, again whenever the roll is re-read (a pupil
-  // placed or moved). Unreadable: the chips offer levels only, never a lie.
+  // The cycle's groups and ONE read of its enrolments, again whenever the roll
+  // is re-read (a pupil placed or moved). Unreadable: the chips offer levels
+  // only and say why — never a grade row where everybody counts as "Sin grado".
   useEffect(() => {
     if (groupsCycleId === "") return;
     let alive = true;
-    listEnrollments(API_URL, { cycleId: groupsCycleId })
-      .then((es) => { if (alive) setEnrollments(es); })
-      .catch(() => { if (alive) setEnrollments([]); });
+    void Promise.allSettled([listLabelledGroups(API_URL, groupsCycleId), listEnrollments(API_URL, { cycleId: groupsCycleId })])
+      .then(([gs, es]) => {
+        if (!alive) return;
+        if (gs.status === "fulfilled") setGroups(gs.value);
+        if (es.status === "fulfilled") setEnrollments(es.value);
+        setPlacement(gs.status === "fulfilled" && es.status === "fulfilled" ? "ok" : "failed");
+      });
     return () => { alive = false; };
   }, [groupsCycleId, rollVersion]);
 
@@ -770,30 +803,62 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
   const levelsPresent = useMemo(() => Array.from(new Set(students.map(levelOf))), [students]);
 
 
-  const catalog = useMemo(() => ({ levels, grades: gradeLevels, groups }), [levels, gradeLevels, groups]);
-  const rows = useMemo((): Row[] => {
-    const placed = placeStudents(students, { enrollments, groups, grades: gradeLevels });
+  // The school's levels; when they cannot be read, the ones on the roll, so
+  // the level chips never vanish over a failed call.
+  const catalogLevels = useMemo(() => {
+    if (levels.length > 0) return levels;
+    const onRoll = new Map<string, string>();
+    for (const s of students) if (s.levelId !== "") onRoll.set(s.levelId, s.level);
+    return [...onRoll].map(([id, name]) => ({ id, name }));
+  }, [levels, students]);
+  const placementReady = placement === "ok" && !gradeLevelsFailed;
+  // Until the cycle is placed there are no grade or group chips to offer.
+  const catalog = useMemo(
+    () => ({ levels: catalogLevels, grades: placementReady ? gradeLevels : [], groups: placementReady ? groups : [] }),
+    [catalogLevels, gradeLevels, groups, placementReady],
+  );
+
+  // Every pupil placed once per data change, not per tab click.
+  const placedRows = useMemo((): Row[] => {
+    // A pupil from before level ids carries only the NAME; match it (ADR 0014).
+    const idOfName = new Map(catalogLevels.map((l) => [fold(l.name), l.id]));
+    const nameOf = new Map(catalogLevels.map((l) => [l.id, l.name]));
+    const files = students.map((s) => ({ id: s.id, levelId: s.levelId !== "" ? s.levelId : (idOfName.get(fold(s.level)) ?? "") }));
+    const placed = placeStudents(files, { enrollments: placementReady ? enrollments : [], groups, grades: gradeLevels });
     const labelOf = new Map(groups.map((g) => [g.id, g.label]));
-    return students
-      .filter((s) => tab === "all" || statusOf(s.admissionStatus).tab === tab)
-      .map((s) => {
-        const p = placed.get(s.id) ?? { levelId: s.levelId, gradeLevelId: "", groupId: "" };
-        return {
-          id: s.id,
-          firstName: s.firstName,
-          lastName: s.lastName,
-          maternalLastName: s.maternalLastName,
-          ...p,
-          student: s,
-          searchText: [s.curp, s.guardianName],
-          room: labelOf.get(p.groupId) ?? groupOf(s),
-        };
-      });
-  }, [students, enrollments, groups, gradeLevels, tab]);
+    return students.map((s) => {
+      const p = placed.get(s.id) ?? { levelId: s.levelId, gradeLevelId: "", groupId: "" };
+      return {
+        id: s.id,
+        firstName: s.firstName,
+        lastName: s.lastName,
+        maternalLastName: s.maternalLastName,
+        ...p,
+        student: s,
+        searchText: [s.curp, s.guardianName],
+        levelName: nameOf.get(p.levelId) ?? levelOf(s),
+        // Placed: this cycle's classroom, or honestly none. Not yet known: the file's letter.
+        room: placementReady ? (labelOf.get(p.groupId) ?? NO_GROUP) : groupOf(s),
+      };
+    });
+  }, [students, enrollments, groups, gradeLevels, catalogLevels, placementReady]);
+  const rows = useMemo(
+    () => placedRows.filter((r) => tab === "all" || statusOf(r.student.admissionStatus).tab === tab),
+    [placedRows, tab],
+  );
   const filter = useStudentFilter(rows, catalog, initialView.filter);
   const filtered = filter.filtered;
 
   useEffect(() => { writeView(filter.state, tab); }, [filter.state, tab]);
+
+  // A grade or group from the URL cannot be honoured without the cycle's
+  // enrolments: drop it (the level stays) rather than show an empty list.
+  const { chooseGrade } = filter;
+  const urlGrade = filter.state.gradeId;
+  useEffect(() => {
+    if (placement === "failed" && urlGrade !== "") chooseGrade(urlGrade);
+  }, [placement, urlGrade, chooseGrade]);
+  const waitingForPlacement = placement === "loading" && (filter.state.gradeId !== "" || filter.state.groupId !== "");
 
   // The padrón as it is on screen: the tab, the chips and the search. A file
   // that quietly held every pupil would look right and be wrong.
@@ -920,6 +985,11 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
             </div>
           }
         />
+        {placement === "failed" && (
+          <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 13.5, margin: "10px 0 0" }}>
+            No pudimos leer los grupos de este ciclo: por ahora sólo se filtra por nivel. Recarga la página en un momento.
+          </p>
+        )}
       </div>
 
       {/* How many sit in each classroom, under whatever filter is on. It is the
@@ -948,7 +1018,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
           <div style={{ width: CHECK_CELL }} /><div>Alumno</div><div className="students-col-wide">Nivel</div><div className="students-col-wide">Tutor</div><div className="students-col-wide">Estado</div><div style={{ width: 84 }} />
         </div>
         <div style={{ padding: 8 }}>
-          {loading ? (
+          {loading || waitingForPlacement ? (
             <div style={{ padding: "56px", textAlign: "center", color: "var(--text-muted)" }}>Cargando…</div>
           ) : loadFailed ? (
             <div role="alert" style={{ padding: "56px 20px", textAlign: "center" }}>
@@ -975,6 +1045,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
                 key={row.id}
                 st={row.student}
                 room={row.room}
+                levelName={row.levelName}
                 i={i}
                 selected={filter.selected.has(row.id)}
                 onToggle={() => filter.toggle(row.id)}
@@ -1099,9 +1170,10 @@ const ROW_COLUMNS = "auto 2.4fr 1.1fr 1.6fr 1fr auto";
 /** The checkbox cell: a 44 px target. */
 const CHECK_CELL = 44;
 
-function StuRow({ st, room, i, selected, onToggle, onOpen, onEdit }: {
+function StuRow({ st, room, levelName, i, selected, onToggle, onOpen, onEdit }: {
   st: Student;
   room: string;
+  levelName: string;
   i: number;
   selected: boolean;
   onToggle: () => void;
@@ -1132,7 +1204,7 @@ function StuRow({ st, room, i, selected, onToggle, onOpen, onEdit }: {
           <div className="students-room-inline" style={{ fontSize: 12.5, color: "var(--text-muted)" }}>{room} · {s.label}</div>
         </div>
       </div>
-      <div className="students-col-wide" style={{ fontSize: 14, color: "var(--text-muted)", textTransform: "capitalize" }}>{levelOf(st)}<div style={{ fontSize: 12.5, color: "var(--text-faint)", textTransform: "none" }}>{room}</div></div>
+      <div className="students-col-wide" style={{ fontSize: 14, color: "var(--text-muted)", textTransform: "capitalize" }}>{levelName}<div style={{ fontSize: 12.5, color: "var(--text-faint)", textTransform: "none" }}>{room}</div></div>
       <div className="students-col-wide" style={{ minWidth: 0, fontSize: 14, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{st.guardianName}</div>
       <div className="students-col-wide"><StatusPill status={st.admissionStatus} /></div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, width: 84 }}>
