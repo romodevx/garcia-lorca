@@ -4,7 +4,8 @@ import { isQualitativeLevel, toChildView } from "./childView";
 const student: FamilyStudent = {
   id: "s1",
   firstName: "Mateo",
-  lastName: "Herrera Díaz",
+  lastName: "Herrera",
+  maternalLastName: "Díaz",
   level: "Primaria",
   levelId: "lvl-pri",
   gradeGroup: "3° A",
@@ -15,13 +16,22 @@ describe("toChildView", () => {
     const view = toChildView(student);
     expect(view).toMatchObject({
       present: true,
-      fullName: "Mateo Herrera Díaz",
+      // T3: surnames first, as the school writes every list.
+      fullName: "Herrera Díaz Mateo",
+      // The greeting and the chip keep the first name alone: a salutation.
       short: "Mateo",
+      // The header has room for two words: paternal surname + first name.
+      headerName: "Herrera Mateo",
       initials: "MH",
       group: "3° A",
       levelLabel: "Primaria",
       qualitative: false,
     });
+  });
+
+  it("shows a pupil captured before the maternal field as written (T3)", () => {
+    const view = toChildView({ ...student, lastName: "Herrera Díaz", maternalLastName: undefined });
+    expect(view.fullName).toBe("Herrera Díaz Mateo");
   });
 
   it("marks a kínder child as qualitative", () => {
@@ -41,6 +51,7 @@ describe("toChildView", () => {
     const view = toChildView(null);
     expect(view.present).toBe(false);
     expect(view.fullName).toBe("");
+    expect(view.headerName).toBe("");
     expect(view.initials).toBe("");
   });
 });

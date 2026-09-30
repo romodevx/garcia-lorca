@@ -47,6 +47,7 @@ import { resizeToJpeg } from "../../students/photoResize";
 import { birthDateError, MEXICAN_STATES, phoneDigits, phoneError, postalCodeError } from "../../students/profileRules";
 import { ContactsPanel } from "./ContactsPanel";
 import { NotesPanel } from "./NotesPanel";
+import { formatStudentName } from "../../_design/students/studentName";
 
 /**
  * The whole file of one pupil, corrected on its own page (`/alumnos/{id}/editar`).
@@ -67,7 +68,7 @@ export interface StudentEditScreenProps {
 }
 
 const MAX_PHONES = 3;
-const REQUIRED = ["firstName", "lastName", "curp"] as const;
+const REQUIRED = ["lastName", "firstName", "curp"] as const;
 const ACCEPTED_PHOTO_TYPES = ["image/jpeg", "image/png"];
 const BLOOD_TYPES = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"] as const;
 
@@ -134,6 +135,7 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, toda
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+  const [maternalLastName, setMaternalLastName] = useState("");
   const [curp, setCurp] = useState("");
   const [birthDate, setBirthDate] = useState("");
   const [sex, setSex] = useState<Sex>("");
@@ -178,6 +180,7 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, toda
         setStudent(st);
         setFirstName(st.firstName);
         setLastName(st.lastName);
+        setMaternalLastName(st.maternalLastName ?? "");
         setCurp(st.curp);
         setBirthDate(p?.birthDate ?? "");
         setSex(p?.sex ?? "");
@@ -237,6 +240,7 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, toda
       const updated = await updateStudent(API_URL, studentId, {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
+        maternalLastName: maternalLastName.trim(),
         curp: curp.trim(),
         profile: {
           birthDate,
@@ -295,12 +299,12 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, toda
     return <p style={{ padding: 26, color: "var(--text-muted)" }}>Cargando la ficha…</p>;
   }
 
-  const fullName = `${firstName} ${lastName}`.trim();
+  const fullName = formatStudentName({ firstName, lastName, maternalLastName });
   const shownPhoto = photoChange.kind === "replace" ? photoChange.image : photoChange.kind === "remove" ? null : savedPhoto;
 
   return (
     <CreatePage
-      breadcrumb={["Alumnos", `${student.firstName} ${student.lastName}`]}
+      breadcrumb={["Alumnos", formatStudentName(student)]}
       title="Editar ficha"
       aside={<SectionIndex showMedical={canReadMedical} />}
       footer={
@@ -328,8 +332,12 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, toda
         style={{ display: "flex", flexDirection: "column", gap: 16 }}
       >
         <Section id="ficha-generales" title="Datos generales">
+          {/* Surnames first, as the school reads its lists (T3). A pupil
+              captured before the maternal field existed may carry both
+              surnames in "Apellido paterno": move the second one down here. */}
+          <TextField label="Apellido paterno" value={lastName} onChange={setLastName} uppercase required error={required.errors.lastName} onClearError={() => required.clear("lastName")} help="El primer apellido, el del padre. Si aquí aparecen los dos, deja sólo el paterno y pasa el otro a «Apellido materno»." />
+          <TextField label="Apellido materno" value={maternalLastName} onChange={setMaternalLastName} uppercase help="El segundo apellido, el de la madre. Déjalo vacío si el acta no lo trae." />
           <TextField label="Nombre(s)" value={firstName} onChange={setFirstName} uppercase required error={required.errors.firstName} onClearError={() => required.clear("firstName")} />
-          <TextField label="Apellidos" value={lastName} onChange={setLastName} uppercase required error={required.errors.lastName} onClearError={() => required.clear("lastName")} help="Paterno y materno, en ese orden." />
           <TextField label="CURP" value={curp} onChange={setCurp} uppercase required error={required.errors.curp} onClearError={() => required.clear("curp")} help="Los 18 caracteres de la CURP del alumno." />
           <DateField
             label="Fecha de nacimiento"

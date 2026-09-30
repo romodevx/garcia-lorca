@@ -9,6 +9,7 @@ import { announce, type AnnouncementScope } from "../../comms/api";
 import { listCycles, listLabelledGroups, listLevels, type Cycle, type LabelledGroup, type Level } from "../../config/api";
 import { listStudents, type Student } from "../../students/api";
 import { API_URL } from "../../api-url";
+import { formatStudentName, sortStudents } from "../../_design/students/studentName";
 
 /** One key per attempt: a retry must not buzz four hundred phones twice. */
 function newAttemptKey(): string {
@@ -113,7 +114,7 @@ export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): React
   const targets = scope === "level"
     ? levels.map((l) => ({ id: l.id, name: l.name }))
     : scope === "student"
-      ? students.map((s) => ({ id: s.id, name: `${s.firstName} ${s.lastName}` }))
+      ? sortStudents(students).map((s) => ({ id: s.id, name: formatStudentName(s) }))
       : groups.map((g) => ({ id: g.id, name: g.label }));
 
   const toggle = (id: string): void => {

@@ -8,3 +8,4 @@
  */
 export * from "./src/ids";
 export * from "./src/pagination";
+export * from "./src/studentName";

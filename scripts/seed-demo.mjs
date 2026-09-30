@@ -347,7 +347,9 @@ async function seedStudents(levels) {
       planned.push({
         curp: curpFor(serial, birth, female ? "M" : "H"),
         firstName: first,
-        lastName: `${paternal} ${maternal}`,
+        // Two fields since T3: the paternal surname, then the maternal one.
+        lastName: paternal,
+        maternalLastName: maternal,
         // A pupil points at the config level itself (ADR 0014).
         levelId: level.id,
         gradeGroup: group.name,
@@ -368,6 +370,7 @@ async function seedStudents(levels) {
       curp: p.curp,
       firstName: p.firstName,
       lastName: p.lastName,
+      maternalLastName: p.maternalLastName,
       levelId: p.levelId,
       gradeGroup: p.gradeGroup,
       guardianName: p.guardianName,

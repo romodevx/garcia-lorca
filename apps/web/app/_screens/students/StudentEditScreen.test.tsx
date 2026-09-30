@@ -84,7 +84,10 @@ describe("StudentEditScreen", () => {
     renderScreen();
 
     expect(await screen.findByLabelText("Nombre(s)")).toHaveValue("ADA");
-    expect(screen.getByLabelText("Apellidos")).toHaveValue("LOVELACE BYRON");
+    // A pupil captured before T3 keeps both surnames in the paternal field,
+    // untouched; the office moves the second one down by editing.
+    expect(screen.getByLabelText("Apellido paterno")).toHaveValue("LOVELACE BYRON");
+    expect(screen.getByLabelText("Apellido materno")).toHaveValue("");
     expect(screen.getByLabelText("CURP")).toHaveValue("LOAA190312MDFVDA01");
     // Task 13: the matrícula is shown, never edited.
     expect(screen.getByText("2026-00042")).toBeInTheDocument();
@@ -96,6 +99,24 @@ describe("StudentEditScreen", () => {
     expect(screen.getByLabelText("Estado")).toHaveValue("Ciudad de México");
     expect(screen.getByText("Primaria · 4° A")).toBeInTheDocument();
     expect(screen.queryByLabelText("Nivel")).not.toBeInTheDocument();
+  });
+
+  it("asks for the surnames before the first name, and splits a legacy double surname (T3)", async () => {
+    const user = userEvent.setup();
+    renderScreen();
+    const paterno = await screen.findByLabelText("Apellido paterno");
+    const materno = screen.getByLabelText("Apellido materno");
+    const nombre = screen.getByLabelText("Nombre(s)");
+    expect(paterno.compareDocumentPosition(materno) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(materno.compareDocumentPosition(nombre) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    await user.clear(paterno);
+    await user.type(paterno, "lovelace");
+    await user.type(materno, "byron");
+    await user.click(screen.getByRole("button", { name: "Guardar ficha" }));
+
+    await waitFor(() => expect(api.updateStudent).toHaveBeenCalled());
+    expect(api.updateStudent.mock.calls[0]?.[2]).toMatchObject({ lastName: "LOVELACE", maternalLastName: "BYRON", firstName: "ADA" });
   });
 
   it("saves names, CURP and profile in one request", async () => {
@@ -115,6 +136,7 @@ describe("StudentEditScreen", () => {
     expect(input).toEqual({
       firstName: "ADA",
       lastName: "LOVELACE BYRON",
+      maternalLastName: "",
       curp: "LOAA190312MDFVDA01",
       profile: {
         ...student.profile,
@@ -244,7 +266,7 @@ describe("StudentEditScreen", () => {
       const file = new File(["png"], "foto.png", { type: "image/png" });
       await user.upload(await screen.findByLabelText("Subir foto"), file);
 
-      expect(await screen.findByRole("img", { name: "Foto de ADA LOVELACE BYRON" })).toBeInTheDocument();
+      expect(await screen.findByRole("img", { name: "Foto de LOVELACE BYRON ADA" })).toBeInTheDocument();
       expect(api.uploadPhoto).not.toHaveBeenCalled();
       await user.click(screen.getByRole("button", { name: "Guardar ficha" }));
       await waitFor(() => expect(api.uploadPhoto).toHaveBeenCalledWith(expect.any(String), "st1", small));

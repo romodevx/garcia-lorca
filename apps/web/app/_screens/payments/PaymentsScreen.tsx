@@ -12,6 +12,7 @@ import { formatCents } from "../../_lib/money";
 import { CashUpDrawer } from "../finance/CashUpDrawer";
 import { CollectDrawer, type CollectStudent } from "../finance/CollectDrawer";
 import { matchesSearch } from "../../_design/textSearch";
+import { formatStudentName, sortStudents } from "../../_design/students/studentName";
 
 const search: CSSProperties = {
   width: "100%", height: 60, paddingLeft: 52, paddingRight: 18,
@@ -66,9 +67,7 @@ export function PaymentsScreen({ onBack, canGrantDiscounts = false }: PaymentsSc
     if (q.trim() === "") {
       return [];
     }
-    return students
-      .filter((s) => matchesSearch(q, `${s.firstName} ${s.lastName}`, s.curp))
-      .slice(0, MAX_RESULTS);
+    return sortStudents(students.filter((s) => matchesSearch(q, formatStudentName(s), s.curp))).slice(0, MAX_RESULTS);
   }, [students, q]);
 
   // What each visible pupil owes today, so the cashier sees it before opening
@@ -156,11 +155,11 @@ export function PaymentsScreen({ onBack, canGrantDiscounts = false }: PaymentsSc
           return (
             <button
               key={s.id}
-              onClick={() => setCollecting({ id: s.id, firstName: s.firstName, lastName: s.lastName, gradeGroup: s.gradeGroup })}
+              onClick={() => setCollecting({ id: s.id, firstName: s.firstName, lastName: s.lastName, maternalLastName: s.maternalLastName, gradeGroup: s.gradeGroup })}
               style={{ display: "flex", width: "100%", alignItems: "center", gap: 14, padding: "14px 20px", background: "transparent", border: "none", borderTop: "1px solid var(--border)", cursor: "pointer", textAlign: "left" }}>
-              <Avatar name={`${s.firstName} ${s.lastName}`} color="forest" size={42} />
+              <Avatar name={formatStudentName(s)} color="forest" size={42} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 15.5, fontWeight: 600, color: "var(--text)" }}>{s.firstName} {s.lastName}</div>
+                <div style={{ fontSize: 15.5, fontWeight: 600, color: "var(--text)" }}>{formatStudentName(s)}</div>
                 <div style={{ fontSize: 13.5, color: "var(--text-muted)" }}>{s.level} · {s.gradeGroup}</div>
               </div>
               <div style={{ textAlign: "right" }}>

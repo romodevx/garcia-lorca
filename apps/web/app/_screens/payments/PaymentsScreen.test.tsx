@@ -40,7 +40,7 @@ describe("PaymentsScreen", () => {
     expect(await screen.findByLabelText("Buscar alumno")).toBeInTheDocument();
     expect(screen.getByText(/Escribe el nombre del alumno/)).toBeInTheDocument();
     // No list until somebody types: four hundred names is not a starting point.
-    expect(screen.queryByText("Valentina Cruz")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cruz Valentina")).not.toBeInTheDocument();
   });
 
   it("shows what each match owes today, before opening anything", async () => {
@@ -50,9 +50,9 @@ describe("PaymentsScreen", () => {
 
     await user.type(screen.getByLabelText("Buscar alumno"), "Valen");
 
-    expect(await screen.findByText("Valentina Cruz")).toBeInTheDocument();
+    expect(await screen.findByText("Cruz Valentina")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("$6,700.00")).toBeInTheDocument());
-    expect(screen.queryByText("Mateo Sánchez")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sánchez Mateo")).not.toBeInTheDocument();
   });
 
   it("opens the counter on the pupil picked", async () => {
@@ -61,7 +61,7 @@ describe("PaymentsScreen", () => {
     await screen.findByLabelText("Buscar alumno");
 
     await user.type(screen.getByLabelText("Buscar alumno"), "Valen");
-    await user.click(await screen.findByRole("button", { name: /Valentina Cruz/ }));
+    await user.click(await screen.findByRole("button", { name: /Cruz Valentina/ }));
 
     expect(await screen.findByRole("dialog", { name: /^Cobrar/ })).toBeInTheDocument();
   });
@@ -96,7 +96,7 @@ describe("PaymentsScreen", () => {
     await user.click(screen.getByRole("button", { name: /Reintentar/ }));
 
     await user.type(screen.getByLabelText("Buscar alumno"), "Valen");
-    expect(await screen.findByText("Valentina Cruz")).toBeInTheDocument();
+    expect(await screen.findByText("Cruz Valentina")).toBeInTheDocument();
   });
 
   // What each pupil owes is asked ONCE. The first version listed `owed` among

@@ -8,6 +8,7 @@ import type { Student } from "../../students/api";
 import { ACTION_COL_WIDTH, CHARGE_GRID, ChargeRow } from "./ChargeRow";
 import { SelectField } from "../../_design/form";
 import { AllClear, ErrorAlert, TabBar } from "./parts";
+import { formatStudentName, sortStudents } from "../../_design/students/studentName";
 
 /** Which charges the table shows: the collection queue, or everything filtered. */
 export type ChargeFilter = "overdue" | "all";
@@ -81,7 +82,7 @@ export function ChargesPanel({
           <SelectField
             label={t("field.student")}
             value={studentId}
-            options={students.map((s) => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
+            options={sortStudents(students).map((s) => ({ value: s.id, label: formatStudentName(s) }))}
             onChange={onStudentChange}
             help={t("help.student")}
             disabled={filter === "overdue"}

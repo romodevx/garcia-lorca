@@ -8,6 +8,7 @@ import type { Student } from "../../students/api";
 import { formatCents } from "../../_lib/money";
 import { SelectField } from "../../_design/form";
 import { EmptyHint, ErrorAlert, Section } from "./parts";
+import { formatStudentName, sortStudents } from "../../_design/students/studentName";
 
 export interface AccountPanelProps {
   students: readonly Student[];
@@ -57,7 +58,7 @@ export function AccountPanel({ students, onLoad }: AccountPanelProps): ReactElem
             <SelectField
               label={t("field.student")}
               value={studentId}
-              options={students.map((student) => ({ value: student.id, label: `${student.firstName} ${student.lastName}` }))}
+              options={sortStudents(students).map((student) => ({ value: student.id, label: formatStudentName(student) }))}
               onChange={setStudentId}
               help={t("help.student")}
             />

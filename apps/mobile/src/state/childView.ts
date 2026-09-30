@@ -1,3 +1,5 @@
+import { formatStudentName, studentInitials, studentShortName } from "@garcia-lorca/domain/student-name";
+
 import type { FamilyStudent } from "../api";
 
 /**
@@ -10,10 +12,15 @@ import type { FamilyStudent } from "../api";
 export interface ChildView {
   /** False when there is no selected child (loading / no links). */
   present: boolean;
-  /** "Mateo Herrera Díaz". */
+  /** "Herrera Díaz Mateo": surnames first, as every school list (T3). */
   fullName: string;
-  /** First name, used where space is tight. */
+  /**
+   * The first name alone. Kept on purpose for salutations ("Hola, familia
+   * Mateo") and the name chip — a greeting is not a list.
+   */
   short: string;
+  /** Where two words fit (the app header): "Herrera Mateo". */
+  headerName: string;
   /** Two-letter monogram for the avatar. */
   initials: string;
   /** Grade + group label, e.g. "3° A". */
@@ -28,6 +35,7 @@ const EMPTY_VIEW: ChildView = {
   present: false,
   fullName: "",
   short: "",
+  headerName: "",
   initials: "",
   group: "",
   levelLabel: "",
@@ -47,12 +55,6 @@ export function isQualitativeLevel(level: string): boolean {
   return QUALITATIVE_LEVELS.has(folded);
 }
 
-function initialsOf(firstName: string, lastName: string): string {
-  const first = firstName.trim().charAt(0);
-  const last = lastName.trim().charAt(0);
-  return `${first}${last}`.toUpperCase();
-}
-
 /** Projects a family student (or null) into the null-safe display view-model. */
 export function toChildView(student: FamilyStudent | null): ChildView {
   if (student === null) {
@@ -60,9 +62,10 @@ export function toChildView(student: FamilyStudent | null): ChildView {
   }
   return {
     present: true,
-    fullName: `${student.firstName} ${student.lastName}`.trim(),
+    fullName: formatStudentName(student),
     short: student.firstName,
-    initials: initialsOf(student.firstName, student.lastName),
+    headerName: studentShortName(student),
+    initials: studentInitials(student),
     group: student.gradeGroup,
     levelLabel: student.level,
     qualitative: isQualitativeLevel(student.level),

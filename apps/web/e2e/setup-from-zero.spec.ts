@@ -187,8 +187,9 @@ test.describe.serial("setting up a school from zero", () => {
     // Sin el " *": el asterisco es hermano del <label>, no su hijo, para que el
     // nombre accesible del campo siga siendo "CURP" y no "CURP *".
     await drawer.getByRole("textbox", { name: "CURP" }).fill(curpFor(tag));
-    await drawer.getByRole("textbox", { name: "Nombre" }).fill("Zoe");
-    await drawer.getByRole("textbox", { name: "Apellidos" }).fill(`Villalobos ${tag}`);
+    // Surnames first (T3), the way the school reads its lists.
+    await drawer.getByRole("textbox", { name: "Apellido paterno" }).fill(`Villalobos ${tag}`);
+    await drawer.getByRole("textbox", { name: "Nombre(s)" }).fill("Zoe");
     // Level and grade are cascading selects, and the GROUP is never asked for:
     // it is chosen by whichever one still has a seat.
     await drawer.getByRole("combobox", { name: "Nivel" }).selectOption({ label: comoSeGuarda(level) });
@@ -296,7 +297,7 @@ test.describe.serial("setting up a school from zero", () => {
     await openModule(page, "Inventario");
 
     await addToBasket(page, garment, "M");
-    await pickStudent(page, `Zoe Villalobos ${tag}`);
+    await pickStudent(page, `Villalobos ${tag} Zoe`);
     await page.getByRole("button", { name: /Cobrar y entregar/ }).click();
 
     // The folio is the only handle on the sale afterwards, so it is what the
@@ -323,7 +324,7 @@ test.describe.serial("setting up a school from zero", () => {
     for (let i = 0; i < 3; i++) {
       await addToBasket(page, garment, "G");
     }
-    await pickStudent(page, `Zoe Villalobos ${tag}`);
+    await pickStudent(page, `Villalobos ${tag} Zoe`);
     await page.getByRole("button", { name: /Cobrar y entregar/ }).click();
 
     // Next paints an empty route-announcer with role=alert, so the till's own

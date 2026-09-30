@@ -108,7 +108,7 @@ describe("Enrollment — roster", () => {
 
     await waitFor(() => expect(students.listEnrollments).toHaveBeenCalledWith(expect.any(String), { groupId: "grp1" }));
     const list = await screen.findByRole("list", { name: "Alumnos inscritos" });
-    expect(within(list).getByText(/Ada Lovelace/)).toBeInTheDocument();
+    expect(within(list).getByText(/Lovelace Ada/)).toBeInTheDocument();
   });
 });
 
@@ -125,7 +125,7 @@ describe("Enrollment — transfer", () => {
     await within(groupSelect).findByRole("option", { name: "A" }); // wait for the cycle's groups to load
     await user.selectOptions(groupSelect, "grp1");
     const list = await screen.findByRole("list", { name: "Alumnos inscritos" });
-    await within(list).findByText(/Ada Lovelace/);
+    await within(list).findByText(/Lovelace Ada/);
 
     const transferForm = await screen.findByRole("form", { name: "Trasladar alumno" });
     // The transfer button is disabled until a target group AND a reason are set.
@@ -158,7 +158,7 @@ describe("Enrollment — transfer", () => {
     await within(groupSelect).findByRole("option", { name: "A" }); // wait for the cycle's groups to load
     await user.selectOptions(groupSelect, "grp1");
     const list = await screen.findByRole("list", { name: "Alumnos inscritos" });
-    await within(list).findByText(/Ada Lovelace/);
+    await within(list).findByText(/Lovelace Ada/);
 
     await user.click(screen.getByRole("button", { name: "Dar de baja" }));
 

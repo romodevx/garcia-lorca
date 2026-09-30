@@ -24,6 +24,7 @@ import { CashUpDrawer } from "./CashUpDrawer";
 import { IncomePanel } from "./IncomePanel";
 import { csvName, downloadCsv, toCsv, type CsvColumn } from "../../_lib/csv";
 import { matchesSearch } from "../../_design/textSearch";
+import { compareStudentNames, formatStudentName } from "../../_design/students/studentName";
 
 /** One key per payment attempt. Mirrors PaymentPanel, which had it right. */
 function newAttemptKey(): string {
@@ -282,7 +283,7 @@ export function FinanceScreen({ onBack, today: officeDay }: FinanceScreenProps):
 
   const rows: Row[] = useMemo(() => charges.map((c) => {
     const s = studentMap.get(c.studentId);
-    return { charge: c, name: s !== undefined ? `${s.firstName} ${s.lastName}` : c.studentId, level: s?.level ?? "", grade: s?.gradeGroup ?? "", visual: visual(c) };
+    return { charge: c, name: s !== undefined ? formatStudentName(s) : c.studentId, level: s?.level ?? "", grade: s?.gradeGroup ?? "", visual: visual(c) };
   }), [charges, studentMap, visual]);
 
   const counts = useMemo(() => ({
@@ -308,7 +309,7 @@ export function FinanceScreen({ onBack, today: officeDay }: FinanceScreenProps):
       .filter((r) => (tab === "all" || r.visual === tab)
         && (month === "todos" || r.charge.dueDate.startsWith(month))
         && matchesSearch(q, r.name, r.charge.description))
-      .sort((a, b) => a.name.localeCompare(b.name, "es"));
+      .sort((a, b) => compareStudentNames(a.name, b.name));
   }, [rows, tab, month, q]);
 
   useEffect(() => { setPage(0); }, [tab, month, q, pageSize]);
