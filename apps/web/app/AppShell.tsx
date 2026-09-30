@@ -19,6 +19,7 @@ import { Catalog } from "./_screens/config/Catalog";
 import { LevelDeleteScreen } from "./_screens/config/levelDeletion/LevelDeleteScreen";
 import { clearLevelNotice, leaveLevelNotice, peekLevelNotice } from "./_screens/config/levelDeletion/pendingNotice";
 import { canDeleteLevels } from "./config/permissions";
+import { canDeleteUsers } from "./admin/permissions";
 import { AdminScreen } from "./_screens/admin/AdminScreen";
 import { StudentEditScreen } from "./_screens/students/StudentEditScreen";
 import { StudentsScreen } from "./_screens/students/StudentsScreen";
@@ -670,7 +671,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "admin" &&
         (adminEnabled ? (
-          <AdminScreen onBack={home} />
+          <AdminScreen onBack={home} canDeleteUsers={canDeleteUsers(principal?.permissions)} currentUserId={principal?.userId} />
         ) : (
           // Flag OFF: never render the admin surface; show the friendly stub so
           // navigation never dead-ends. (Backend 404 is authoritative.)

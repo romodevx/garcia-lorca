@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/lib/pq"
@@ -220,7 +221,9 @@ func (r *UserRepo) ListUsers(ctx context.Context) ([]domain.User, error) {
 	var out []domain.User
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var ums []userModel
-		if err := tx.Order("email").Find(&ums).Error; err != nil {
+		// A deleted account leaves every listing (T2); its row stays for the
+		// history that references it, reachable by id.
+		if err := tx.Where("status <> ?", statusDeleted).Order("email").Find(&ums).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "listing users", err)
 		}
 		ids := make([]string, 0, len(ums))
@@ -255,7 +258,7 @@ func (r *UserRepo) SetStatus(ctx context.Context, userID string, status domain.S
 		return err
 	}
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		res := tx.Model(&userModel{}).Where("id = ?", userID).Update("status", text)
+		res := tx.Model(&userModel{}).Where("id = ? AND status <> ?", userID, statusDeleted).Update("status", text)
 		if res.Error != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "updating user status", res.Error)
 		}
@@ -266,23 +269,115 @@ func (r *UserRepo) SetStatus(ctx context.Context, userID string, status domain.S
 	})
 }
 
+// statusDeleted is the status column's value for a soft-deleted account.
+const statusDeleted = "deleted"
+
+// SoftDelete marks the account deleted and stamps who and when, in ONE
+// tenant-bound transaction with the last-holder rule.
+//
+// The rule is checked under row locks, not just read: every ACTIVE holder of
+// keepActiveHolderOf is locked FOR UPDATE before counting. Two directors
+// deleting each other at the same instant then serialize — the second one's
+// lock waits, re-reads the first one's row as deleted, counts itself alone and
+// is refused. A plain read would let both pass and leave the school with no
+// director at all.
+//
+// password_changed_at moves with it: RefreshToken refuses any token minted
+// before that instant (ADR 0005), so every session the account held dies here
+// rather than when its tokens happen to expire.
+func (r *UserRepo) SoftDelete(ctx context.Context, userID, deletedBy, keepActiveHolderOf string) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := guardLastActiveHolder(tx, userID, keepActiveHolderOf); err != nil {
+			return err
+		}
+		res := tx.Model(&userModel{}).
+			Where("id = ? AND status <> ?", userID, statusDeleted).
+			Updates(map[string]any{
+				"status":              statusDeleted,
+				"deleted_at":          gorm.Expr("now()"),
+				"deleted_by":          deletedBy,
+				"password_changed_at": gorm.Expr("now()"),
+			})
+		if res.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "deleting user", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return glerrors.ErrNotFound
+		}
+		return nil
+	})
+}
+
+// guardLastActiveHolder refuses when userID is the only ACTIVE holder of
+// roleID. The holders are locked first (see SoftDelete); a target that is not
+// an active holder has nothing to guard.
+func guardLastActiveHolder(tx *gorm.DB, userID, roleID string) error {
+	var holders []string
+	err := tx.Raw(`SELECT u.id::text FROM users u
+		JOIN user_roles ur ON ur.user_id = u.id
+		WHERE ur.role_id = ? AND u.status = 'active'
+		ORDER BY u.id
+		FOR UPDATE OF u`, roleID).Scan(&holders).Error
+	if err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "locking the role's holders", err)
+	}
+	if slices.Contains(holders, userID) && len(holders) == 1 {
+		return domain.ErrLastOwner
+	}
+	return nil
+}
+
+// Restore brings a deleted account back as `invited` under displayName,
+// clears its deletion stamp and replaces its roles with roleIDs — all in ONE
+// transaction, so a failure anywhere leaves it deleted rather than restored
+// with the roles it held before (a former owner would come back an owner).
+// Anything but a deleted id is KindNotFound.
+func (r *UserRepo) Restore(ctx context.Context, userID, displayName string, roleIDs []string) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Model(&userModel{}).
+			Where("id = ? AND status = ?", userID, statusDeleted).
+			Updates(map[string]any{
+				"status":       "invited",
+				"display_name": displayName,
+				"deleted_at":   nil,
+				"deleted_by":   nil,
+				// No old credential survives: the account opens only from
+				// the new link, which writes the password its owner chooses.
+				"password_hash":        "",
+				"must_change_password": false,
+			})
+		if res.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "restoring user", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return glerrors.ErrNotFound
+		}
+		return replaceRoles(tx, r.tenantID, userID, roleIDs)
+	})
+}
+
 // SetUserRoles replaces the user's entire role set with roleIDs. The delete and
 // the inserts run in ONE tenant-bound transaction so the swap is atomic (a
 // failure rolls both back). A role id that violates the FK is KindInvalid.
 func (r *UserRepo) SetUserRoles(ctx context.Context, userID string, roleIDs []string) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		if err := tx.Where("user_id = ?", userID).Delete(&userRoleModel{}).Error; err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "clearing user roles", err)
-		}
-		if len(roleIDs) == 0 {
-			return nil
-		}
-		rows := make([]userRoleModel, 0, len(roleIDs))
-		for _, roleID := range roleIDs {
-			rows = append(rows, userRoleModel{UserID: userID, RoleID: roleID, TenantID: r.tenantID})
-		}
-		return translateCreateErr(tx.Create(&rows).Error, "assigning user roles", "role already assigned")
+		return replaceRoles(tx, r.tenantID, userID, roleIDs)
 	})
+}
+
+// replaceRoles swaps the user's whole role set inside the caller's transaction.
+func replaceRoles(tx *gorm.DB, tenantID, userID string, roleIDs []string) error {
+	if err := tx.Where("user_id = ?", userID).Delete(&userRoleModel{}).Error; err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "clearing user roles", err)
+	}
+	if len(roleIDs) == 0 {
+		return nil
+	}
+	rows := make([]userRoleModel, 0, len(roleIDs))
+	for _, roleID := range roleIDs {
+		rows = append(rows, userRoleModel{UserID: userID, RoleID: roleID, TenantID: tenantID})
+	}
+	return translateCreateErr(tx.Create(&rows).Error, "assigning user roles", "role already assigned")
 }
 
 // --- roles ----------------------------------------------------------------

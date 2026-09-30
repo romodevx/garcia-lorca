@@ -117,6 +117,15 @@ service IamService {
   // in; reactivating restores ACTIVE.
   rpc SetUserStatus(SetUserStatusRequest) returns (SetUserStatusResponse);
 
+  // DeleteUser soft-deletes an account (T2): it can no longer sign in by any
+  // road and leaves ListUsers, while its row stays for the history that names
+  // it. The caller is the subject of access_token (never a request field) and
+  // must be active and hold users:delete (owner-only). Refused: deleting
+  // yourself (PermissionDenied) and the last active owner (AlreadyExists).
+  // Revokes the account's sessions and pending links and disables it at the
+  // identity provider. Inviting the same address later restores this account.
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+
   // --- Role admin (admin operations, permission-gated) ---
 
   // CreateRole defines a named bundle of permissions. The name is unique per
@@ -163,6 +172,9 @@ enum UserStatus {
   // to say before — so a mistyped address became a working account nobody could
   // reach, and the resend button had no state to key on.
   USER_STATUS_INVITED = 3;
+  // Removed by the director (T2). Cannot log in and is left out of
+  // ListUsers; GetUser still answers it, because history references its id.
+  USER_STATUS_DELETED = 4;
 }
 
 // User is the IAM principal. `email` is unique per tenant. `tenant_id` is
@@ -435,6 +447,16 @@ message SetUserStatusRequest {
 message SetUserStatusResponse {
   User user = 1;
 }
+
+// DeleteUserRequest names the account to delete. access_token identifies the
+// caller: the self-deletion guard and the permission check read it, never a
+// caller-supplied id.
+message DeleteUserRequest {
+  string access_token = 1;
+  string user_id = 2;
+}
+
+message DeleteUserResponse {}
 
 // --- Role admin -----------------------------------------------------------
 

@@ -27,7 +27,7 @@ openapi: 3.1.0
 
 info:
   title: García Lorca API
-  version: 0.16.0
+  version: 0.17.0
   license:
     name: Proprietary
     url: https://garcialorca.edu.mx/legal
@@ -56,6 +56,11 @@ tags:
     description: >
       Staff roster and who teaches what ("carga académica"). Behind
       `module_teachers`; writes require `teachers:write`.
+  - name: iam-users
+    description: >
+      Login accounts. Behind `module_iam`. Only the deletion route is described
+      here so far (T2); the rest of the user and role admin predates the
+      contract and is tracked with the other undescribed routes.
   - name: config-levels
     description: >
       The school's levels (Preescolar, Primaria…). Behind `module_config`;
@@ -1414,6 +1419,69 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
+
+  /api/v1/users/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      tags: [iam-users]
+      summary: Delete a login account (soft delete)
+      description: >
+        The account can no longer sign in by any road (password, identity
+        provider, refresh) and leaves `GET /api/v1/users`; its row stays,
+        because payments, grades and the audit trail reference it by id and a
+        name snapshot. Every session it held is revoked (its refresh tokens die
+        at once; an access token already issued lives out its short life), its
+        pending invitation and reset links are revoked, and it is disabled at
+        the identity provider. Refused: deleting your own account (403) and the
+        last active account holding the owner role (409). An id that is not a
+        uuid or names no account is 404. Deleting an account that is already
+        deleted repeats only the link-revocation and identity-provider steps
+        (204) — that is the retry after a `DELETION_PENDING`. Inviting the same address
+        again (`POST /api/v1/users/invite`) restores THIS account as `invited`,
+        history attached, with only the roles of the new invitation and a
+        fresh credential at the identity provider — the old password does not
+        work again; the account opens from the new link. Requires `users:delete` (owner only), checked by the gateway
+        and again by iam against the caller as they are now; `module_iam`.
+      operationId: deleteUser
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      responses:
+        '204':
+          description: Deleted. Nothing to return.
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403':
+          description: >
+            The caller lacks `users:delete`, is not active, or is deleting their
+            own account.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: no puedes eliminar tu propia cuenta
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: The account is the last active one holding the owner role.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: no se puede eliminar al último director activo
+        '500':
+          description: >
+            With `DELETION_PENDING`: the account is deleted and can no longer
+            sign in here, but its pending links could not be revoked or the
+            identity provider could not be reached to disable it. Repeat the
+            request to finish. Without a code the deletion may or may not have
+            happened (e.g. a connection cut after the row was written):
+            repeating the request is always safe.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: internal error
 
   /api/v1/teachers/{id}/access:
     post:
@@ -3468,7 +3536,9 @@ components:
         whose deletion is running (grades capture, closing or reopening a
         period, attendance lists, enrolling or transferring a pupil, a tuition
         plan, a garment scoped to it, the level's structure in config).
-        Absent on a refusal without a code.
+        User deletion (T2): DELETION_PENDING (500, the account is deleted but
+        its links or identity-provider account are not yet closed; repeat the
+        DELETE). Absent on a refusal without a code.
       schema:
         type: string
         pattern: '^[A-Z][A-Z0-9_]{0,63}$'

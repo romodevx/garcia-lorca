@@ -151,6 +151,17 @@ func (c *AuthClient) SetUserStatus(ctx context.Context, userID, status string) (
 	return toUser(res.Msg.GetUser()), nil
 }
 
+// DeleteUser soft-deletes an account (T2). accessToken is the CALLER's own:
+// iam derives who is asking from it — the self-deletion guard and the
+// users:delete check read the verified subject, never a request field.
+func (c *AuthClient) DeleteUser(ctx context.Context, accessToken, userID string) error {
+	_, err := c.rpc.DeleteUser(ctx, connect.NewRequest(&iamv1.DeleteUserRequest{
+		AccessToken: accessToken,
+		UserId:      userID,
+	}))
+	return err
+}
+
 // AssignRole grants a role to a user. Used by the handler to add a role while
 // editing an existing user's role set (paired with RevokeRole).
 func (c *AuthClient) AssignRole(ctx context.Context, userID, roleID string) error {
@@ -246,6 +257,7 @@ var userStatusNames = map[iamv1.UserStatus]string{
 	iamv1.UserStatus_USER_STATUS_ACTIVE:    "active",
 	iamv1.UserStatus_USER_STATUS_SUSPENDED: "suspended",
 	iamv1.UserStatus_USER_STATUS_INVITED:   "invited",
+	iamv1.UserStatus_USER_STATUS_DELETED:   "deleted",
 }
 
 // userStatusName never returns the empty string, and that is the whole reason

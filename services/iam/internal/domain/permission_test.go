@@ -128,6 +128,10 @@ func TestIsOwnerOnly(t *testing.T) {
 		// (grades, attendance, enrollments) school-wide. The director alone.
 		{"levels:delete", true},
 		{" LEVELS:DELETE ", true},
+		// T2: deleting a user account is the director's decision alone (owner
+		// answer 4). users:write (create, suspend, edit roles) stays delegable.
+		{"users:delete", true},
+		{"users:write", false},
 		{"config:write", false},
 		// Task 9: the counter's permissions are the Cobranza role's, so they
 		// must be grantable; finance:read stays owner-only.

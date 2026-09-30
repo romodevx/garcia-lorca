@@ -45,7 +45,17 @@ type fakeTeacherIAM struct {
 }
 
 func (f *fakeTeacherIAM) ListRoles(context.Context) ([]client.Role, error) { return f.roles, nil }
-func (f *fakeTeacherIAM) ListUsers(context.Context) ([]client.User, error) { return f.users, nil }
+
+// ListUsers leaves deleted accounts out, as iam does (T2).
+func (f *fakeTeacherIAM) ListUsers(context.Context) ([]client.User, error) {
+	out := make([]client.User, 0, len(f.users))
+	for _, u := range f.users {
+		if u.Status != "deleted" {
+			out = append(out, u)
+		}
+	}
+	return out, nil
+}
 
 func (f *fakeTeacherIAM) GetUser(_ context.Context, id string) (client.User, error) {
 	if f.getUserErr != nil {
@@ -402,6 +412,25 @@ func TestTeacherAccessStaleLinkReusesTheAccountByEmail(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.Zero(t, iam.writes())
 	assert.Equal(t, "usr-m", cfg.linkedUserID)
+}
+
+// T2: a teacher linked to a DELETED account is given access by inviting the
+// address again — which, in iam, brings that same account back (owner answer
+// 3). Adding the maestro role to a deleted account would change nothing: it
+// still could not sign in.
+func TestTeacherAccessLinkedToADeletedAccountInvitesItBack(t *testing.T) {
+	linked := unlinkedTeacher()
+	linked.UserID = "usr-del"
+	iam, cfg := teacherIAM(), teacherConfig(linked)
+	iam.users = []client.User{{ID: "usr-del", Email: "gabriela@example.com", Status: "deleted", RoleIDs: []string{maestroRoleID}}}
+	iam.invitedUser = client.User{ID: "usr-del", Email: "gabriela@example.com", Status: "invited", RoleIDs: []string{maestroRoleID}}
+	rec := doTeacherAccess(t, handler.NewTeacherAccessHandler(iam, cfg), "tch-1", ownerCaller)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, 1, iam.inviteCalls, "the address is invited again")
+	assert.Equal(t, "gabriela@example.com", iam.invitedEmail)
+	assert.Zero(t, iam.assignCalls, "no role is added to a deleted account")
+	assert.Equal(t, "usr-del", cfg.linkedUserID, "the teacher keeps the same account")
 }
 
 // Only NotFound means "no such account". iam being down is an error, never a

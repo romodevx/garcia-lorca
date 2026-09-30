@@ -630,6 +630,8 @@ func TestSeededRolesHoldTheirPermissions(t *testing.T) {
 			"grades:close",
 			// ADR 0021: deleting a level is the director's alone (0024).
 			"levels:delete",
+			// T2: deleting a user account is the director's alone (0025).
+			"users:delete",
 		}},
 		// Task 9: the cashier. Reads the counter, takes money, finds pupils.
 		{"cobranza", []string{"students:read", "students:list", "collections:read", "payments:write"}},

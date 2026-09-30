@@ -55,6 +55,8 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"config-reader": {"config:read"},
 		// ADR 0021: deleting a level is the owner's alone (iam 0024).
 		"level-deleter": {"levels:delete"},
+		// T2: deleting a user is the owner's alone (iam 0025).
+		"user-deleter": {"users:delete", "users:read"},
 		// M13: the staff roster left Configuración, so it answers to its own
 		// permission. A config holder must NOT reach it any more — that split is
 		// the whole point of the move.

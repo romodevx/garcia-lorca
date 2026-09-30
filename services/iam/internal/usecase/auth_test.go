@@ -2,6 +2,8 @@ package usecase_test
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,6 +35,8 @@ type fakeUsers struct {
 	// is a different answer from "there is no such user" and must stay so all
 	// the way out of the service.
 	findByIDErr error
+	// findByEmailErr, when set, is what FindAuthByEmail fails with.
+	findByEmailErr error
 
 	// admin-surface recording
 	created      []createdUser            // CreateUser calls
@@ -41,9 +45,15 @@ type fakeUsers struct {
 	passwordsSet map[string]string        // UpdatePassword calls
 	rotated      map[string]bool          // TouchPasswordChangedAt calls
 	rolesSet     map[string][]string      // SetUserRoles calls
+	deletedBy    map[string]string        // SoftDelete calls: target -> actor
+	restored     map[string]string        // Restore calls: user -> display name
+	restoredRole map[string][]string      // Restore calls: user -> roles set atomically
 }
 
 func (f *fakeUsers) FindAuthByEmail(_ context.Context, _ string, email domain.Email) (domain.User, string, error) {
+	if f.findByEmailErr != nil {
+		return domain.User{}, "", f.findByEmailErr
+	}
 	rec, ok := f.byEmail[email]
 	if !ok {
 		return domain.User{}, "", glerrors.ErrNotFound
@@ -56,6 +66,11 @@ func (f *fakeUsers) FindByID(_ context.Context, userID string) (domain.User, err
 		return domain.User{}, f.findByIDErr
 	}
 	u, ok := f.byID[userID]
+	if !ok {
+		// Postgres reads a uuid in any case; so does this double, so a test
+		// can send another spelling of the same id.
+		u, ok = f.byID[strings.ToLower(userID)]
+	}
 	if !ok {
 		return domain.User{}, glerrors.ErrNotFound
 	}
@@ -130,10 +145,55 @@ func (f *fakeUsers) ListUsers(_ context.Context) ([]domain.User, error) {
 }
 
 func (f *fakeUsers) SetStatus(_ context.Context, userID string, status domain.Status) error {
+	// A deleted row is out of reach of a plain status change, as in the
+	// repository: only Restore brings it back.
+	if u, ok := f.byID[userID]; ok && u.IsDeleted() {
+		return glerrors.ErrNotFound
+	}
 	if f.statusSet == nil {
 		f.statusSet = map[string]domain.Status{}
 	}
 	f.statusSet[userID] = status
+	return nil
+}
+
+// SoftDelete emulates the repository's atomic rule: the only ACTIVE holder of
+// keepActiveHolderOf cannot be deleted.
+func (f *fakeUsers) SoftDelete(_ context.Context, userID, deletedBy, keepActiveHolderOf string) error {
+	target, ok := f.byID[userID]
+	if !ok || target.IsDeleted() {
+		return glerrors.ErrNotFound
+	}
+	if target.Status() == domain.StatusActive && slices.Contains(target.RoleIDs(), keepActiveHolderOf) && !f.otherActiveHolder(userID, keepActiveHolderOf) {
+		return domain.ErrLastOwner
+	}
+	if f.deletedBy == nil {
+		f.deletedBy = map[string]string{}
+	}
+	f.deletedBy[userID] = deletedBy
+	return nil
+}
+
+func (f *fakeUsers) otherActiveHolder(userID, roleID string) bool {
+	for id, u := range f.byID {
+		if id != userID && u.Status() == domain.StatusActive && slices.Contains(u.RoleIDs(), roleID) {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *fakeUsers) Restore(_ context.Context, userID, displayName string, roleIDs []string) error {
+	u, ok := f.byID[userID]
+	if !ok || !u.IsDeleted() {
+		return glerrors.ErrNotFound
+	}
+	if f.restored == nil {
+		f.restored = map[string]string{}
+		f.restoredRole = map[string][]string{}
+	}
+	f.restored[userID] = displayName
+	f.restoredRole[userID] = roleIDs
 	return nil
 }
 

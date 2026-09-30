@@ -51,6 +51,14 @@ type fakeAdmin struct {
 
 	err        error
 	getUserErr error
+
+	deleteToken, deleteUserID string
+	deleteErr                 error
+}
+
+func (f *fakeAdmin) DeleteUser(_ context.Context, accessToken, userID string) error {
+	f.deleteToken, f.deleteUserID = accessToken, userID
+	return f.deleteErr
 }
 
 func (f *fakeAdmin) CreateUser(_ context.Context, email, displayName, tempPassword string, roleIDs []string) (client.User, error) {

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"net/url"
 	"strings"
 	"time"
@@ -148,6 +149,20 @@ func (s *AdminService) InviteUser(ctx context.Context, rawEmail, displayName str
 		return Invitation{}, err
 	}
 
+	// An address already on file is either a deleted account — which comes
+	// back, history and all (owner answer 3) — or a live one, which is the
+	// duplicate it always was. Asked before the provider, so a duplicate no
+	// longer costs a round trip to find out.
+	existing, _, err := s.users.FindAuthByEmail(ctx, s.tenantID, email)
+	switch {
+	case err == nil && existing.IsDeleted():
+		return s.reactivate(ctx, existing, displayName, roleIDs, assigned)
+	case err == nil:
+		return Invitation{}, glerrors.New(glerrors.KindConflict, "a user with this email already exists")
+	case glerrors.KindOf(err) != glerrors.KindNotFound:
+		return Invitation{}, err
+	}
+
 	// A provider is OPTIONAL now, and this used to be a hard refusal.
 	//
 	// It was right to refuse when the provider was also the thing that mailed
@@ -191,6 +206,145 @@ func (s *AdminService) InviteUser(ctx context.Context, rawEmail, displayName str
 	}
 	out.User = user
 	return out, nil
+}
+
+// reactivate brings a deleted account back as `invited` and sends it a fresh
+// invitation — the SAME row, so the payments it registered and the grades it
+// captured stay attached to the person (owner answer 3).
+//
+// It is exactly as strong as inviting a new address, and no stronger: the
+// roles are the ones this invitation asks for (the gateway only lets a caller
+// assign what it holds), every old link dies first, and at the provider the old
+// password is replaced by one nobody knows — so the account opens only from
+// the new link, by whoever reads that mailbox.
+func (s *AdminService) reactivate(ctx context.Context, user domain.User, displayName string, roleIDs []string, assigned []domain.Role) (Invitation, error) {
+	if s.invitations != nil {
+		if err := s.invitations.Revoke(ctx, user.ID()); err != nil {
+			return Invitation{}, err
+		}
+	}
+	if err := s.reenableAtProvider(ctx, user.Email().String(), displayName); err != nil {
+		return Invitation{}, err
+	}
+	if err := s.users.Restore(ctx, user.ID(), displayName, roleIDs); err != nil {
+		return Invitation{}, err
+	}
+	// What was just written, built in memory like InviteUser does: same id,
+	// same address, the new name and roles, waiting on its link.
+	restored, err := domain.NewUser(user.ID(), user.TenantID(), user.Email(), displayName, domain.StatusInvited, false, assigned)
+	if err != nil {
+		return Invitation{}, err
+	}
+	out, err := s.issueAndSend(ctx, restored, domain.PurposeInvitation, domain.InvitationLifetime)
+	if err != nil {
+		return Invitation{}, err
+	}
+	out.User = restored
+	return out, nil
+}
+
+// reenableAtProvider switches the provider account back on with a fresh,
+// unknown credential, creating the account when the provider has none. No
+// provider configured: nothing to do.
+func (s *AdminService) reenableAtProvider(ctx context.Context, email, displayName string) error {
+	if s.provisioner == nil {
+		return nil
+	}
+	err := s.provisioner.Reenable(ctx, email)
+	if glerrors.KindOf(err) == glerrors.KindNotFound {
+		return s.provisioner.CreateAccount(ctx, email, displayName)
+	}
+	return err
+}
+
+// DeleteUser removes an account the way the school can live with: a soft
+// delete (T2). The person can no longer sign in by any road and leaves every
+// listing; the row stays, because payments, grades and the audit trail name it
+// by id and a hard delete would orphan the school's history.
+//
+// actorID is the verified caller (from the access token, never the request).
+// The gateway already demanded users:delete; this is the second lock, and the
+// only one that knows who the caller is right now rather than when their token
+// was minted:
+//
+//   - nobody deletes themself — compared on the LOADED rows, not on the raw
+//     strings the request carried;
+//   - the caller must be active and hold users:delete (owner-only);
+//   - the last active owner cannot go (enforced atomically by the repository).
+//
+// ORDER IS LOAD-BEARING: the row first, because it is what every sign-in path
+// here checks and because the repository is where the refusals live — a
+// refused deletion touches nothing else. Then the links, then the provider.
+// If either of those fails the answer carries ErrDeletionPending, the account
+// already cannot sign in, and deleting it again finishes the job: an
+// already-deleted account only repeats those two idempotent steps.
+func (s *AdminService) DeleteUser(ctx context.Context, actorID, targetID string) error {
+	actor, err := s.requireDeleter(ctx, actorID)
+	if err != nil {
+		return err
+	}
+	target, err := s.users.FindByID(ctx, targetID)
+	if err != nil {
+		return err
+	}
+	if target.ID() == actor.ID() {
+		return glerrors.New(glerrors.KindForbidden, "no puedes eliminar tu propia cuenta")
+	}
+	if !target.IsDeleted() {
+		if err := s.users.SoftDelete(ctx, target.ID(), actor.ID(), domain.OwnerRoleID); err != nil {
+			return err
+		}
+	}
+	if err := s.finishDeletion(ctx, target); err != nil {
+		return glerrors.Wrap(glerrors.KindInternal,
+			"la cuenta ya no puede entrar, pero no se terminó de cerrar (enlaces pendientes o proveedor de identidad); vuelve a intentarlo",
+			errors.Join(domain.ErrDeletionPending, err))
+	}
+	return nil
+}
+
+// finishDeletion kills the account's pending links and switches it off at the
+// identity provider. Both steps are idempotent, which is what makes a retry of
+// DeleteUser safe.
+func (s *AdminService) finishDeletion(ctx context.Context, target domain.User) error {
+	if s.invitations != nil {
+		if err := s.invitations.Revoke(ctx, target.ID()); err != nil {
+			return err
+		}
+	}
+	if s.provisioner == nil {
+		return nil
+	}
+	err := s.provisioner.Disable(ctx, target.Email().String())
+	if glerrors.KindOf(err) == glerrors.KindNotFound {
+		// Created while passwords were local: nothing there to switch off.
+		return nil
+	}
+	return err
+}
+
+// permUsersDelete is the permission DeleteUser demands of its caller.
+const permUsersDelete = "users:delete"
+
+// requireDeleter loads the caller as they are NOW and demands an active
+// account holding users:delete. Any failure to establish that is a refusal.
+func (s *AdminService) requireDeleter(ctx context.Context, actorID string) (domain.User, error) {
+	refused := glerrors.New(glerrors.KindForbidden, "no tienes permiso para eliminar usuarios")
+	actor, err := s.users.FindByID(ctx, actorID)
+	if glerrors.KindOf(err) == glerrors.KindNotFound {
+		return domain.User{}, refused
+	}
+	if err != nil {
+		return domain.User{}, err
+	}
+	want, err := domain.NewPermission(permUsersDelete)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if !actor.CanAuthenticate() || !actor.HasPermission(want) {
+		return domain.User{}, refused
+	}
+	return actor, nil
 }
 
 // ResendInvitation mints a FRESH token for somebody who has not walked through
@@ -316,6 +470,11 @@ func (s *AdminService) AcceptInvitation(ctx context.Context, token, password str
 	// token: telling the holder "that account is suspended" would leak the
 	// account's state to whoever is holding the link.
 	if inv.ActivatesAccount() && user.Status() != domain.StatusInvited {
+		return errInvitationDead()
+	}
+	// A reset leaves the status alone, so it needs its own lock: a deleted
+	// account has no password worth writing.
+	if user.IsDeleted() {
 		return errInvitationDead()
 	}
 	if err := s.setCredential(ctx, user, password); err != nil {
@@ -559,6 +718,18 @@ func (s *AdminService) CreateUser(ctx context.Context, rawEmail, displayName, te
 
 	assigned, err := s.resolveRoles(ctx, roleIDs)
 	if err != nil {
+		return domain.User{}, err
+	}
+
+	// A deleted address is not "already taken" as far as the director can
+	// see — the list hides it. This route cannot restore anybody (it would
+	// hand a known password to an account with history); inviting does.
+	existing, _, err := s.users.FindAuthByEmail(ctx, s.tenantID, email)
+	switch {
+	case err == nil && existing.IsDeleted():
+		return domain.User{}, glerrors.New(glerrors.KindConflict,
+			"ese correo es de un usuario eliminado; invítalo para recuperar su cuenta")
+	case err != nil && glerrors.KindOf(err) != glerrors.KindNotFound:
 		return domain.User{}, err
 	}
 

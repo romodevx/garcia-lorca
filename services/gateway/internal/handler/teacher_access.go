@@ -26,6 +26,10 @@ const maestroRoleName = "maestro"
 // chosen a password.
 const userStatusInvited = "invited"
 
+// userStatusDeleted is a soft-deleted account (T2): it cannot sign in and iam
+// leaves it out of ListUsers.
+const userStatusDeleted = "deleted"
+
 // errTeacherHasNoEmail is the refusal a teacher with no address gets: there is
 // nowhere to send the invitation, and the account is keyed by email.
 const errTeacherHasNoEmail = "El docente no tiene correo"
@@ -225,6 +229,12 @@ func (h *TeacherAccessHandler) linkedAccount(ctx context.Context, teacher client
 	}
 	if err != nil {
 		return client.User{}, false, err
+	}
+	// A deleted account (T2) is a link to nobody who can sign in. Treated as
+	// no link, the address is invited again, and iam brings THAT account back
+	// (owner answer 3) — the teacher keeps the same id and its history.
+	if user.Status == userStatusDeleted {
+		return client.User{}, false, nil
 	}
 	return user, true, nil
 }

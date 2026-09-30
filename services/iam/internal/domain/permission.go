@@ -67,6 +67,10 @@ var ownerOnlyPermissions = map[string]struct{}{
 	// grades, attendance, enrollments, report cards — school-wide, behind a
 	// 7-day trash. The director's decision alone, re-authenticated each time.
 	"levels:delete": {},
+	// Deleting a user account (T2) takes a person out of the school's system
+	// for good as far as the UI goes. Owner answer 4: the director alone.
+	// users:write — creating, suspending, editing roles — stays delegable.
+	"users:delete": {},
 }
 
 // IsOwnerOnly reports whether raw is a tenant-wide sensitive read that only the
