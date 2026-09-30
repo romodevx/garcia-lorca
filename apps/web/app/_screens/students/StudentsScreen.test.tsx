@@ -16,6 +16,7 @@ beforeEach(() => {
 vi.mock("../../students/api", async (importOriginal) => ({
   ...(await importOriginal<typeof studentsApi>()),
   listStudents: vi.fn(),
+  listEnrollments: vi.fn(),
   createStudent: vi.fn(),
   enroll: vi.fn(),
   enrollIntoGrade: vi.fn(),
@@ -43,6 +44,9 @@ const mk = (id: string, first: string, last: string, status: studentsApi.Admissi
 });
 
 beforeEach(() => {
+  // The list keeps its view in the URL (T4): every test starts from a clean one.
+  window.history.replaceState(null, "", "/alumnos");
+  students.listEnrollments.mockResolvedValue([]);
   students.listStudents.mockResolvedValue([mk("1", "Valentina", "Cruz", "enrolled"), mk("2", "Mateo", "Sánchez", "pending")]);
   config.listCycles.mockResolvedValue([{ id: "c1", name: "2026-2027", status: "active", startsOn: "2026-08-01", endsOn: "2027-06-30" }]);
   config.listGroups.mockResolvedValue([]);
@@ -104,8 +108,8 @@ describe("StudentsScreen", () => {
     await screen.findByText("Cruz Valentina");
 
     await user.type(screen.getByLabelText("Buscar"), "mateo");
+    await waitFor(() => expect(screen.queryByText("Cruz Valentina")).not.toBeInTheDocument());
     expect(screen.getByText("Sánchez Mateo")).toBeInTheDocument();
-    expect(screen.queryByText("Cruz Valentina")).not.toBeInTheDocument();
   });
 
   // Review of T3: the list reads surname first, but the office still types
@@ -116,8 +120,8 @@ describe("StudentsScreen", () => {
     await screen.findByText("Cruz Valentina");
 
     await user.type(screen.getByLabelText("Buscar"), "mateo sanchez");
+    await waitFor(() => expect(screen.queryByText("Cruz Valentina")).not.toBeInTheDocument());
     expect(screen.getByText("Sánchez Mateo")).toBeInTheDocument();
-    expect(screen.queryByText("Cruz Valentina")).not.toBeInTheDocument();
   });
 
   it("shows each pupil surname first and sorts by surname, accents aside (T3)", async () => {
