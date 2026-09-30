@@ -20,6 +20,12 @@ type fakeSDK struct {
 	byEmail   map[string]string // email -> uid
 	updated   map[string]*firebaseauth.UserToUpdate
 	updateErr error
+	revoked   []string // uids whose provider refresh tokens were revoked
+}
+
+func (f *fakeSDK) RevokeRefreshTokens(_ context.Context, uid string) error {
+	f.revoked = append(f.revoked, uid)
+	return nil
 }
 
 func (f *fakeSDK) CreateUser(context.Context, *firebaseauth.UserToCreate) (*firebaseauth.UserRecord, error) {
@@ -112,5 +118,23 @@ func TestRandomPasswordIsLongAndUnique(t *testing.T) {
 	b, _ := randomPassword()
 	if len(a) < 32 || a == b {
 		t.Errorf("randomPassword gave %q and %q, want two different values of at least 32 chars", a, b)
+	}
+}
+
+// Switching an account off or back on also ends every provider session it
+// had: a provider refresh token kept minting ID tokens otherwise, and an ID
+// token is enough to activate an invited account.
+func TestDisableAndReenableRevokeProviderSessions(t *testing.T) {
+	sdk := &fakeSDK{byEmail: map[string]string{"ana@gl.mx": "uid-ana"}}
+	p := newTestProvisioner(sdk)
+
+	if err := p.SetDisabled(context.Background(), "ana@gl.mx", true); err != nil {
+		t.Fatalf("SetDisabled: %v", err)
+	}
+	if err := p.Reenable(context.Background(), "ana@gl.mx"); err != nil {
+		t.Fatalf("Reenable: %v", err)
+	}
+	if len(sdk.revoked) != 2 {
+		t.Errorf("revoked sessions %v, want once on disable and once on re-enable", sdk.revoked)
 	}
 }

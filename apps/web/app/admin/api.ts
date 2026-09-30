@@ -196,12 +196,15 @@ export class AdminError extends Error {
   readonly status: number;
   /** The server's own words, trimmed; "" when it sent none. */
   readonly detail: string;
+  /** The refusal's machine code (`X-Error-Code`), e.g. PROVIDER_PENDING. */
+  readonly code: string | undefined;
 
-  constructor(status: number, detail: string) {
+  constructor(status: number, detail: string, code?: string) {
     super(detail !== "" ? detail : `HTTP ${status}`);
     this.name = "AdminError";
     this.status = status;
     this.detail = detail;
+    this.code = code;
   }
 }
 
@@ -218,7 +221,7 @@ export async function deleteUser(baseURL: string, id: string): Promise<void> {
     credentials: "include",
   });
   if (!res.ok) {
-    throw new AdminError(res.status, (await res.text()).trim());
+    throw new AdminError(res.status, (await res.text()).trim(), res.headers.get("X-Error-Code") ?? undefined);
   }
 }
 

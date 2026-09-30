@@ -1437,8 +1437,10 @@ paths:
         at once; an access token already issued lives out its short life), its
         pending invitation and reset links are revoked, and it is disabled at
         the identity provider. Refused: deleting your own account (403) and the
-        last active account holding the owner role (409). An account already
-        deleted, or an id that names none, is 404. Inviting the same address
+        last active account holding the owner role (409). An id that is not a
+        uuid or names no account is 404. Deleting an account that is already
+        deleted repeats only the link-revocation and identity-provider steps
+        (204) — that is the retry after a `PROVIDER_PENDING`. Inviting the same address
         again (`POST /api/v1/users/invite`) restores THIS account as `invited`,
         history attached, with only the roles of the new invitation and a
         fresh credential at the identity provider — the old password does not
@@ -1468,8 +1470,12 @@ paths:
               example: no se puede eliminar al último director activo
         '500':
           description: >
-            The identity provider could not be reached to disable the account.
-            Nothing was deleted (the provider goes first); try again.
+            With `PROVIDER_PENDING`: the account is deleted and can no longer
+            sign in here, but the identity provider could not be reached to
+            disable it (or its links could not be revoked). Repeat the request
+            to finish. Without a code: nothing was deleted.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
           content:
             text/plain:
               schema: { type: string }

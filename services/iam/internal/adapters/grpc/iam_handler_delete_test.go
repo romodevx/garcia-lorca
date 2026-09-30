@@ -19,14 +19,16 @@ import (
 // T2 — DeleteUser at the wire: the caller comes from the access token, never
 // from a request field, and the refusals map to the codes the gateway forwards.
 
-// deleterHandler seeds u1 with the given permissions and logs it in.
+const selfID = "0b8a1c0e-0000-4000-8000-000000000001"
+
+// deleterHandler seeds the caller with the given permissions and logs it in.
 func deleterHandler(t *testing.T, perms ...string) (*grpcadapter.IAMHandler, string) {
 	t.Helper()
 	hasher := bcrypt.NewHasher(4)
 	hash, _ := hasher.Hash("test-owner-pw")
 	email, _ := domain.NewEmail("ana@garcialorca.mx")
 	role, _ := domain.NewRole("r1", "Rol", perms)
-	user, _ := domain.NewUser("u1", "t1", email, "Ana", domain.StatusActive, false, []domain.Role{role})
+	user, _ := domain.NewUser(selfID, "t1", email, "Ana", domain.StatusActive, false, []domain.Role{role})
 	users := &fakeUsers{user: user, hash: hash}
 	roles := &fakeRoles{known: "r1"}
 	tokens := jwt.NewHMAC([]byte(strings.Repeat("gl-key-", 6)), "garcia-lorca", time.Hour, time.Now)
@@ -44,10 +46,14 @@ func TestDeleteUserCodes(t *testing.T) {
 		target string
 		want   connect.Code
 	}{
-		{"no valid token", []string{"users:delete"}, func(string) string { return "garbage" }, "u2", connect.CodeUnauthenticated},
-		{"caller lacks users:delete", []string{"users:write"}, func(r string) string { return r }, "u2", connect.CodePermissionDenied},
-		{"caller deletes themself", []string{"users:delete"}, func(r string) string { return r }, "u1", connect.CodePermissionDenied},
-		{"unknown target", []string{"users:delete"}, func(r string) string { return r }, "u2", connect.CodeNotFound},
+		{"no valid token", []string{"users:delete"}, func(string) string { return "garbage" }, "0b8a1c0e-0000-4000-8000-000000000002", connect.CodeUnauthenticated},
+		{"caller lacks users:delete", []string{"users:write"}, func(r string) string { return r }, "0b8a1c0e-0000-4000-8000-000000000002", connect.CodePermissionDenied},
+		{"caller deletes themself", []string{"users:delete"}, func(r string) string { return r }, "0b8a1c0e-0000-4000-8000-000000000001", connect.CodePermissionDenied},
+		// Another spelling of the caller's own uuid is still the caller.
+		{"caller deletes themself in capitals", []string{"users:delete"}, func(r string) string { return r }, "0B8A1C0E-0000-4000-8000-000000000001", connect.CodePermissionDenied},
+		{"unknown target", []string{"users:delete"}, func(r string) string { return r }, "0b8a1c0e-0000-4000-8000-000000000002", connect.CodeNotFound},
+		// Validated at the boundary: a malformed id names no account.
+		{"malformed target id", []string{"users:delete"}, func(r string) string { return r }, "not-a-uuid", connect.CodeNotFound},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

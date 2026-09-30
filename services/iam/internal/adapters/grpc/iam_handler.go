@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	connect "connectrpc.com/connect"
+	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	iamv1 "github.com/garcia-lorca/gen/go/garcialorca/iam/v1"
@@ -242,7 +243,13 @@ func (h *IAMHandler) DeleteUser(ctx context.Context, req *connect.Request[iamv1.
 	if err != nil {
 		return nil, connectErr(err)
 	}
-	if err := h.admin.DeleteUser(ctx, claims.Subject, req.Msg.GetUserId()); err != nil {
+	// Validated here, at the boundary: an id that is not a uuid names no
+	// account, and parsing it also gives the ONE spelling the rest compares.
+	target, err := uuid.Parse(req.Msg.GetUserId())
+	if err != nil {
+		return nil, connectErr(glerrors.ErrNotFound)
+	}
+	if err := h.admin.DeleteUser(ctx, claims.Subject, target.String()); err != nil {
 		return nil, connectErr(err)
 	}
 	return connect.NewResponse(&iamv1.DeleteUserResponse{}), nil
@@ -369,6 +376,18 @@ func fromProtoStatus(s iamv1.UserStatus) (domain.Status, error) {
 // the error straight to connect.NewError shipped Postgres constraint names and
 // SQLSTATEs — and on some constraints the conflicting value — to whoever called.
 func connectErr(err error) *connect.Error {
+	ce := connectErrForKind(err)
+	if errors.Is(err, domain.ErrProviderPending) {
+		ce.Meta().Set(errorCodeMeta, "PROVIDER_PENDING")
+	}
+	return ce
+}
+
+// errorCodeMeta is the error-metadata key a refusal's machine code rides in;
+// the gateway forwards it as the X-Error-Code response header.
+const errorCodeMeta = "X-Error-Code"
+
+func connectErrForKind(err error) *connect.Error {
 	safe := errors.New(glerrors.SafeMessage(err))
 
 	switch glerrors.KindOf(err) {

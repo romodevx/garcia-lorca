@@ -23,9 +23,6 @@ const (
 	uniqueViolation     = "23505"
 	foreignKeyViolation = "23503"
 	checkViolation      = "23514"
-	// invalidTextRepresentation is a value the column type cannot read, e.g.
-	// "not-a-uuid" compared with a uuid column.
-	invalidTextRepresentation = "22P02"
 	// emailNormalizedCheck is the CHECK the email migration adds. It is the one
 	// CHECK an API client can trip (a raw email that bypassed the domain, e.g.
 	// against the previous revision mid-deploy), so it alone maps to KindInvalid;
@@ -344,6 +341,10 @@ func (r *UserRepo) Restore(ctx context.Context, userID, displayName string, role
 				"display_name": displayName,
 				"deleted_at":   nil,
 				"deleted_by":   nil,
+				// No old credential survives: the account opens only from
+				// the new link, which writes the password its owner chooses.
+				"password_hash":        "",
+				"must_change_password": false,
 			})
 		if res.Error != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "restoring user", res.Error)
@@ -508,8 +509,7 @@ func loadRoles(tx *gorm.DB, userID string) ([]roleModel, error) {
 }
 
 func translateFindErr(err error) error {
-	// A malformed id (22P02) names no row: "not found", not a failure of ours.
-	if errors.Is(err, gorm.ErrRecordNotFound) || pgCode(err) == invalidTextRepresentation {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return glerrors.ErrNotFound
 	}
 	return glerrors.Wrap(glerrors.KindInternal, "query failed", err)

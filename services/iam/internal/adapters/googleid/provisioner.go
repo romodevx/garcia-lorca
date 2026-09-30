@@ -14,15 +14,19 @@ import (
 // accountCreator is the slice of the Admin SDK this adapter needs, declared
 // where it is consumed so the mapping is testable without a project.
 //
-// Three methods, and no more. The Admin SDK surface is wide enough to delete
+// Four methods, and no more. The Admin SDK surface is wide enough to delete
 // accounts and rewrite the project's auth configuration, and the runtime
 // service account is granted exactly the permissions these three need
-// (deploy/terraform/identity_platform.tf) — so this interface is also the
+// (deploy/terraform/identity_platform.tf; RevokeRefreshTokens rides on
+// users.update) — so this interface is also the
 // written form of what iam is allowed to do.
 type accountCreator interface {
 	CreateUser(ctx context.Context, user *firebaseauth.UserToCreate) (*firebaseauth.UserRecord, error)
 	GetUserByEmail(ctx context.Context, email string) (*firebaseauth.UserRecord, error)
 	UpdateUser(ctx context.Context, uid string, user *firebaseauth.UserToUpdate) (*firebaseauth.UserRecord, error)
+	// RevokeRefreshTokens ends every provider session of an account. Same
+	// grant as UpdateUser (firebaseauth.users.update).
+	RevokeRefreshTokens(ctx context.Context, uid string) error
 }
 
 // Provisioner implements ports.IdentityProvisioner over Identity Platform.
@@ -79,6 +83,19 @@ func (p *Provisioner) SetDisabled(ctx context.Context, email string, disabled bo
 	if _, err := p.sdk.UpdateUser(ctx, uid, (&firebaseauth.UserToUpdate{}).Disabled(disabled)); err != nil {
 		return glerrors.Wrap(glerrors.KindInternal, "changing sign-in at the identity provider", err)
 	}
+	if disabled {
+		return p.endSessions(ctx, uid)
+	}
+	return nil
+}
+
+// endSessions revokes every provider refresh token of the account. A live one
+// keeps minting ID tokens, and an ID token is enough to sign in here — or to
+// activate an account invited again.
+func (p *Provisioner) endSessions(ctx context.Context, uid string) error {
+	if err := p.sdk.RevokeRefreshTokens(ctx, uid); err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "ending the provider sessions", err)
+	}
 	return nil
 }
 
@@ -103,7 +120,7 @@ func (p *Provisioner) Reenable(ctx context.Context, email string) error {
 	if _, err := p.sdk.UpdateUser(ctx, uid, params); err != nil {
 		return glerrors.Wrap(glerrors.KindInternal, "re-enabling the provider account", err)
 	}
-	return nil
+	return p.endSessions(ctx, uid)
 }
 
 // randomPassword is 32 bytes of cryptographic randomness, base64url: a

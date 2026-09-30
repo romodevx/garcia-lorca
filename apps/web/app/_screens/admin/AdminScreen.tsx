@@ -432,13 +432,13 @@ function DeleteUserDialog({ user, onClose, onConfirm }: { user: AdminUser; onClo
     try {
       await onConfirm();
     } catch (e) {
-      setErr(deleteRefusal(e));
+      setErr(deleteRefusal(e, user.displayName));
       setPending(false);
     }
   };
   return (
     <DrawerShell title="Eliminar usuario" subtitle={user.email} icon="warning" size="sm" onClose={onClose} onSubmit={() => void confirm()}
-      footer={<><Btn kind="ghost" onClick={onClose}>Cancelar</Btn><div style={{ flex: 1 }} /><Btn type="submit" danger icon="check" style={{ height: 52 }}>{pending ? "Eliminando…" : "Eliminar usuario"}</Btn></>}>
+      footer={<><Btn kind="ghost" onClick={onClose}>Cancelar</Btn><div style={{ flex: 1 }} /><Btn type="submit" danger icon="trash" style={{ height: 52 }}>{pending ? "Eliminando…" : "Eliminar usuario"}</Btn></>}>
       <div style={{ display: "grid", gap: 14, fontSize: 15, lineHeight: 1.55, color: "var(--text)" }}>
         <p style={{ margin: 0 }}><b>{user.displayName}</b> ya no podrá entrar al sistema y dejará de aparecer en esta lista.</p>
         <p style={{ margin: 0, color: "var(--text-muted)" }}>Su historial se conserva: los pagos que registró, las calificaciones que capturó y todo lo que quedó a su nombre. Si más adelante vuelves a invitar su correo, recupera esta misma cuenta.</p>
@@ -449,9 +449,14 @@ function DeleteUserDialog({ user, onClose, onConfirm }: { user: AdminUser; onClo
 }
 
 /** The refusal in words the director can act on. */
-function deleteRefusal(e: unknown): string {
+function deleteRefusal(e: unknown, name: string): string {
   const status = e instanceof AdminError ? e.status : 0;
   const detail = e instanceof AdminError ? e.detail : "";
+  // The account is already closed; only the identity provider is missing, and
+  // pressing the button again finishes exactly that.
+  if (e instanceof AdminError && e.code === "PROVIDER_PENDING") {
+    return `${name} ya no puede entrar al sistema, pero falta deshabilitar su cuenta en el proveedor de identidad. Pulsa «Eliminar usuario» otra vez.`;
+  }
   if (status === 409) return "No se puede eliminar al último director activo.";
   if (status === 403) return detail.includes("propia") ? "No puedes eliminar tu propia cuenta." : "No tienes permiso para eliminar usuarios.";
   if (status === 404) return "Este usuario ya no existe. Recarga la lista.";

@@ -134,6 +134,15 @@ func TestRestoreBringsADeletedUserBackAsInvited(t *testing.T) {
 	if ids := got.RoleIDs(); len(ids) != 1 || ids[0] != newRole {
 		t.Errorf("roles = %v, want only the new invitation's role", ids)
 	}
+	// No credential survives: where passwords are local, the old hash would
+	// otherwise sign in again the moment the account became active.
+	var hash string
+	if err := superDB.Raw(`SELECT password_hash FROM users WHERE id = ?`, uid).Scan(&hash).Error; err != nil {
+		t.Fatalf("read hash: %v", err)
+	}
+	if hash != "" {
+		t.Error("the old password hash survived the restore")
+	}
 	var stamped int64
 	if err := superDB.Raw(`SELECT count(*) FROM users WHERE id = ? AND (deleted_at IS NOT NULL OR deleted_by IS NOT NULL)`, uid).Scan(&stamped).Error; err != nil {
 		t.Fatalf("read stamp: %v", err)
@@ -175,13 +184,5 @@ func TestSoftDeleteAndRestoreAreTenantIsolated(t *testing.T) {
 	}
 	if err := other.Restore(ctx, uid, "Robada", nil); glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Errorf("tenant B Restore = %v, want KindNotFound", err)
-	}
-}
-
-// A malformed id is "no such user", not a database failure.
-func TestMalformedUserIDIsNotFound(t *testing.T) {
-	repo := pgadapter.NewUserRepo(appDB(t), tenantA)
-	if _, err := repo.FindByID(context.Background(), "not-a-uuid"); glerrors.KindOf(err) != glerrors.KindNotFound {
-		t.Errorf("FindByID(not-a-uuid) = %v, want KindNotFound", err)
 	}
 }

@@ -35,6 +35,8 @@ type fakeUsers struct {
 	// is a different answer from "there is no such user" and must stay so all
 	// the way out of the service.
 	findByIDErr error
+	// findByEmailErr, when set, is what FindAuthByEmail fails with.
+	findByEmailErr error
 
 	// admin-surface recording
 	created      []createdUser            // CreateUser calls
@@ -49,6 +51,9 @@ type fakeUsers struct {
 }
 
 func (f *fakeUsers) FindAuthByEmail(_ context.Context, _ string, email domain.Email) (domain.User, string, error) {
+	if f.findByEmailErr != nil {
+		return domain.User{}, "", f.findByEmailErr
+	}
 	rec, ok := f.byEmail[email]
 	if !ok {
 		return domain.User{}, "", glerrors.ErrNotFound

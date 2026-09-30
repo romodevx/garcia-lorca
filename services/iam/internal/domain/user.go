@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"errors"
 	"strings"
 	"time"
 
@@ -30,6 +31,12 @@ const (
 	// again brings THIS account back, history included (owner answer 3).
 	StatusDeleted
 )
+
+// ErrProviderPending marks a deletion whose row is done — nobody can sign in
+// here any more — but whose identity-provider half failed. Deleting the same
+// account again retries only that half. The transport gives it its own code so
+// the screen can say exactly this instead of "it did not work".
+var ErrProviderPending = errors.New("user deleted; identity provider not yet disabled")
 
 // ErrLastOwner is the refusal to delete the only active account that holds the
 // owner role: without one, nobody could administer the school again.

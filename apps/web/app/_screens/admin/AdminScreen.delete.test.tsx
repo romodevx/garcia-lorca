@@ -130,4 +130,24 @@ describe("AdminScreen · eliminar usuario", () => {
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("No se puede eliminar al último director activo.");
     expect(screen.getByRole("dialog", { name: "Eliminar usuario" })).toBeInTheDocument();
   });
+
+  // The row is gone (nobody can sign in) but the identity provider did not
+  // answer: say exactly that and keep the button for the retry, which only
+  // repeats the provider half.
+  it("says the account is closed but the provider is pending, and retries", async () => {
+    const user = userEvent.setup();
+    admin.deleteUser.mockRejectedValueOnce(new adminApi.AdminError(500, "internal error", "PROVIDER_PENDING"));
+    admin.deleteUser.mockResolvedValueOnce(undefined);
+    renderAsOwner();
+    await screen.findByText("Maestra Rojas");
+
+    await user.click(screen.getByRole("button", { name: "Eliminar a Maestra Rojas" }));
+    const dialog = await screen.findByRole("dialog", { name: "Eliminar usuario" });
+    await user.click(within(dialog).getByRole("button", { name: "Eliminar usuario" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(/ya no puede entrar.*proveedor/);
+
+    await user.click(within(dialog).getByRole("button", { name: "Eliminar usuario" }));
+    expect(admin.deleteUser).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText(/Usuario eliminado · Maestra Rojas/)).toBeInTheDocument();
+  });
 });
