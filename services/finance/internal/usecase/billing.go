@@ -124,6 +124,9 @@ func (s *FinanceService) UpsertTuitionPlan(ctx context.Context, in TuitionPlanIn
 	if err != nil {
 		return domain.TuitionPlan{}, err
 	}
+	if err := plan.SharedLineName(); err != nil {
+		return domain.TuitionPlan{}, err
+	}
 	return s.repo.UpsertTuitionPlan(ctx, plan)
 }
 
@@ -310,6 +313,21 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 		}
 	}
 
+	// What the ledger already holds under another reference is issued under
+	// THAT reference — see issuedLines. One read for the whole cycle.
+	issuedRows, err := s.repo.ListIssuedLines(ctx, cycleID, "")
+	if err != nil {
+		return BillingResult{}, err
+	}
+	issued := newIssuedLines(issuedRows)
+	wantedEnrollment, priceableEnrollment, err := issued.adoptAll(wantedEnrollment)
+	if err != nil {
+		return BillingResult{}, err
+	}
+	if wantedFees, _, err = issued.adoptAll(wantedFees); err != nil {
+		return BillingResult{}, err
+	}
+
 	enrollmentCreated, err := s.repo.CreateChargesBulk(ctx, wantedEnrollment)
 	if err != nil {
 		return BillingResult{}, err
@@ -334,7 +352,7 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 	// than left derived, so the database agrees with what the family is shown and
 	// no report quotes a price nobody is charging. Only the unpaid and
 	// un-negotiated ones move — see repriceable below.
-	enrollmentRepriced, err := s.repo.RepriceUnpaid(ctx, repriceable(wantedEnrollment))
+	enrollmentRepriced, err := s.repo.RepriceUnpaid(ctx, repriceable(priceableEnrollment))
 	if err != nil {
 		return BillingResult{}, err
 	}

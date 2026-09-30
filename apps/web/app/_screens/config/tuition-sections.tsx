@@ -15,6 +15,7 @@ import {
   ladderProblem,
   monthlyTotals,
   pesosToCents,
+  sameLineName,
 } from "./tuition-math";
 
 /**
@@ -96,8 +97,7 @@ export function InscriptionSection({ concepts, onChange, onError, draftRef }: In
       onError("Escribe el nombre del concepto.");
       return;
     }
-    const slug = slugOf(name);
-    if (concepts.some((c) => slugOf(c.name) === slug)) {
+    if (concepts.some((c) => sameLineName(c.name, name))) {
       onError(`Ya existe un renglón que se llama casi igual que "${name.trim()}".`);
       return;
     }
@@ -179,11 +179,6 @@ export function InscriptionSection({ concepts, onChange, onError, draftRef }: In
       )}
     </div>
   );
-}
-
-/** Compared the way the server builds the charge's reference. */
-function slugOf(raw: string): string {
-  return raw.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 /**
@@ -361,6 +356,12 @@ export function FeesSection({
     const cents = pesosToCents(amount);
     if (name.trim() === "" || cents === null || cents <= 0) {
       onError("Una cuota necesita nombre y monto.");
+      return;
+    }
+    if (fees.some((f) => sameLineName(f.name, name))) {
+      // Se cobrarían como UNA cuota: la segunda nunca llegaría al estado de
+      // cuenta. Ver `sameLineName`.
+      onError(`Ya existe una cuota que se llama casi igual que "${name.trim()}".`);
       return;
     }
     if (picked.length === 0) {

@@ -170,6 +170,18 @@ func appRepo(t *testing.T, tenant string) *pgadapter.Repository {
 	if err != nil {
 		t.Fatalf("open app db: %v", err)
 	}
+	// Closed with the test. Every call opens a pool, and the suite used to keep
+	// them all until the process ended — one test more ran the container out of
+	// connection slots ("remaining connection slots are reserved").
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("app db handle: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := sqlDB.Close(); err != nil {
+			t.Errorf("close app db: %v", err)
+		}
+	})
 	return pgadapter.NewRepository(db, tenant)
 }
 

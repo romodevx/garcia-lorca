@@ -317,6 +317,23 @@ func (f *fakeRepo) GetCharge(_ context.Context, id string) (ports.ChargeWithPaid
 	return ports.ChargeWithPaid{Charge: c, PaidCents: f.paidFor(id)}, nil
 }
 
+// The fake reads what the real repository reads: generated inscription and fee
+// lines of one cycle, in any status.
+func (f *fakeRepo) ListIssuedLines(_ context.Context, cycleID, studentID string) ([]ports.IssuedLine, error) {
+	var out []ports.IssuedLine
+	for _, c := range f.charges {
+		ref := c.ExternalRef()
+		if c.CycleID() != cycleID || (studentID != "" && c.StudentID() != studentID) {
+			continue
+		}
+		if !strings.HasPrefix(ref, "enrollment:") && !strings.HasPrefix(ref, "fee:") {
+			continue
+		}
+		out = append(out, ports.IssuedLine{StudentID: c.StudentID(), ExternalRef: ref, Description: c.Description()})
+	}
+	return out, nil
+}
+
 func (f *fakeRepo) ListCharges(_ context.Context, studentID, cycleID string) ([]ports.ChargeWithPaid, error) {
 	var out []ports.ChargeWithPaid
 	for _, c := range f.charges {
@@ -925,3 +942,14 @@ func (f *fakeCatalog) GroupLevels(_ context.Context, _ string) ([]ports.GroupLev
 // clearPlans hands back an empty tuition table, for the tests about a school that
 // has not priced a level.
 func clearPlans() map[string]domain.TuitionPlan { return map[string]domain.TuitionPlan{} }
+
+// conceptOfKind is the id of the system concept of a kind, if the service has
+// created it yet.
+func (f *fakeRepo) conceptOfKind(kind string) (string, bool) {
+	for _, c := range f.concepts {
+		if c.Kind() == kind {
+			return c.ID(), true
+		}
+	}
+	return "", false
+}

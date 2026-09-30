@@ -334,3 +334,40 @@ describe("plegar una sección después de escribir en ella", () => {
     expect(finance.upsertTuitionPlan).toHaveBeenCalled();
   });
 });
+
+/**
+ * T1 (revisión 2026-09-30): el cobro reconoce un renglón por su nombre SIN
+ * acentos ni mayúsculas, así que "INSCRIPCION" e "INSCRIPCIÓN" son el mismo
+ * renglón. La forma lo tiene que decir antes del servidor, que lo rechaza.
+ */
+describe("dos renglones que sólo difieren en acentos", () => {
+  it("no deja agregar un concepto que ya existe con otro acento", async () => {
+    const user = userEvent.setup();
+    open();
+    await user.type(screen.getByLabelText("Nuevo concepto"), "INSCRIPCIÓN");
+    await user.click(screen.getByRole("button", { name: /Agregar concepto/ }));
+    await user.type(screen.getByLabelText("Nuevo concepto"), "INSCRIPCION");
+    await user.click(screen.getByRole("button", { name: /Agregar concepto/ }));
+
+    // El concepto aún sin monto trae su propio aviso; basta con que uno diga cuál.
+    expect(screen.getAllByRole("alert").map((a) => a.textContent).join(" ")).toMatch(/casi igual.*INSCRIPCION/);
+    expect(screen.getAllByRole("button", { name: /^Quitar INSCRIPCI/ })).toHaveLength(1);
+  });
+
+  it("no deja agregar una cuota que ya existe con otro acento", async () => {
+    const user = userEvent.setup();
+    open();
+    await user.click(screen.getByRole("button", { name: /Cuotas/ }));
+    const addFee = async (name: string): Promise<void> => {
+      await user.type(screen.getByLabelText("Nombre de la cuota"), name);
+      await user.type(screen.getByLabelText("Monto total"), "1600");
+      await user.click(screen.getAllByRole("button", { pressed: false })[0]!);
+      await user.click(screen.getByRole("button", { name: /Agregar cuota/ }));
+    };
+    await addFee("GRADUACIÓN");
+    await addFee("GRADUACION");
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/GRADUACION/);
+    expect(screen.getAllByRole("button", { name: /^Quitar GRADUACI/ })).toHaveLength(1);
+  });
+});

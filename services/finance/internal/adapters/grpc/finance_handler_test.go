@@ -823,6 +823,10 @@ func (f *fakeRepo) RepriceUnpaid(_ context.Context, _ []ports.ChargeReprice) (in
 	return 0, nil
 }
 
+func (f *fakeRepo) ListIssuedLines(_ context.Context, _, _ string) ([]ports.IssuedLine, error) {
+	return nil, nil
+}
+
 func (f *fakeRepo) RescheduleUnpaid(_ context.Context, _ []ports.ChargeReschedule) (int, error) {
 	return 0, nil
 }

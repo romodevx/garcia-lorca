@@ -68,6 +68,17 @@ ledger operations run in a single transaction (Unit of Work).
   COMPLETED overdue month**. Idempotent through `external_ref`
   (`tuition:<cycle>:<student>:<YYYY-MM>`, `enrollment:<cycle>:<student>`,
   `latefee:<charge>:<YYYY-MM>`), so a button and a scheduler may both call it.
+- **A line already issued is recognised by WHAT it is, not only by its ref**
+  (T1, `usecase/line_identity.go`). Inscription and fee refs are built from the
+  plan's shape and from `Slugify(name)`, which drops accented letters; converting
+  a single-amount plan to concepts, or re-spelling a line, minted a second ref and
+  billed the line twice. Before inserting, the run and the enrolment consumer read
+  `ListIssuedLines` and issue a line under the ref it ALREADY has when its
+  `domain.LineKey` (name without accents/case/punctuation, from the charge's
+  description; plus the month for fees) matches. Issued refs are never rewritten.
+  A single-amount inscription adopted by a concept line is NOT re-priced by that
+  concept's ladder. `TuitionPlan.SharedLineName` refuses, on save only, two
+  concepts or two fees that reduce to one key.
 - Surcharges are separate charges and are **excluded from their own input**: a
   fee that earned fees would turn a fixed monthly charge into compound interest.
 - A level with no table is **reported by name**, never billed at zero.

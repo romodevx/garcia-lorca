@@ -544,6 +544,12 @@ describe("la escalera de la inscripción", () => {
       { name: "Cuota A.P.F.", tiers: [{ effectiveFrom: "2027-01-01", effectiveTo: "", amountCents: 85000 }] },
     ];
     expect(ladderProblem(twins)).toMatch(/nombre/i);
+    // T1: sin acento es el MISMO renglón para el cobro.
+    const accents: EnrollmentConcept[] = [
+      { name: "INSCRIPCIÓN", tiers: [{ effectiveFrom: "2027-01-01", effectiveTo: "", amountCents: 85000 }] },
+      { name: "INSCRIPCION", tiers: [{ effectiveFrom: "2027-01-01", effectiveTo: "", amountCents: 85000 }] },
+    ];
+    expect(ladderProblem(accents)).toMatch(/nombre/i);
   });
 
   it("avisa cuando un escalón no tiene fecha o no tiene monto", () => {

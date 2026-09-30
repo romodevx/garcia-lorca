@@ -338,6 +338,17 @@ type FinanceRepository interface {
 	// tenant-bound query rather than a payment lookup per charge (no N+1). An
 	// empty studentID or cycleID skips that filter.
 	ListCharges(ctx context.Context, studentID, cycleID string) ([]ChargeWithPaid, error)
+	// ListIssuedLines returns the inscription and fee lines the billing run has
+	// already issued in a cycle (refs `enrollment:` and `fee:`), in any status,
+	// for one student or — with an empty studentID — for the whole cycle.
+	//
+	// It is what lets the run recognise a line it issued under an older
+	// reference: a plan converted from one amount to concepts, or a line whose
+	// name was re-spelled, mints a new ref for a line the family already owes.
+	// Narrow on purpose (three columns, no paid totals) and NOT capped at
+	// maxListLimit: a cycle holds a few thousand of these, and a capped read
+	// would re-issue every line past the cap.
+	ListIssuedLines(ctx context.Context, cycleID, studentID string) ([]IssuedLine, error)
 	// RegisterDeposit stores money as it arrived and the payments it splits
 	// into, in ONE transaction. plan is run inside that transaction with the
 	// student's open charges locked and their collected totals already summed,
@@ -483,6 +494,14 @@ type OverdueCursor struct {
 
 // IsZero reports the start-from-the-beginning position.
 func (c OverdueCursor) IsZero() bool { return c.ID == "" && c.DueDate.IsZero() }
+
+// IssuedLine is one generated line already in the ledger, as the billing run
+// needs it to tell whether a line it wants to issue exists under another ref.
+type IssuedLine struct {
+	StudentID   string
+	ExternalRef string
+	Description string
+}
 
 // ChargeReprice is one charge's new amount, named by its external ref.
 type ChargeReprice struct {
