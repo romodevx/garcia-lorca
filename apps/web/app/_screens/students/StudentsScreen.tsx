@@ -907,7 +907,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
           extraActive={tab !== "all"}
           onClear={() => setTab("all")}
           leading={
-        <div style={{ display: "flex", gap: 6, padding: 5, background: "var(--surface-3)", borderRadius: "var(--r-pill)", border: "1px solid var(--border)" }}>
+            <div style={{ display: "flex", gap: 6, padding: 5, maxWidth: "100%", overflowX: "auto", background: "var(--surface-3)", borderRadius: "var(--r-pill)", border: "1px solid var(--border)" }}>
               {tabs.map(([id, label]) => {
                 const on = tab === id;
                 return (
@@ -944,8 +944,8 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
       </div>
 
       <div className="fade-up" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-xl)", boxShadow: "var(--shadow-card)", overflow: "hidden" }}>
-        <div style={{ display: "grid", gridTemplateColumns: ROW_COLUMNS, gap: 16, padding: "14px 24px 12px", borderBottom: "1px solid var(--border)", fontSize: 12.5, fontWeight: 700, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: ".04em" }}>
-          <div style={{ width: CHECK_CELL }} /><div>Alumno</div><div>Nivel</div><div>Tutor</div><div>Estado</div><div style={{ width: 84 }} />
+        <div className="students-grid" style={{ display: "grid", gridTemplateColumns: ROW_COLUMNS, gap: 16, padding: "14px 24px 12px", borderBottom: "1px solid var(--border)", fontSize: 12.5, fontWeight: 700, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: ".04em" }}>
+          <div style={{ width: CHECK_CELL }} /><div>Alumno</div><div className="students-col-wide">Nivel</div><div className="students-col-wide">Tutor</div><div className="students-col-wide">Estado</div><div style={{ width: 84 }} />
         </div>
         <div style={{ padding: 8 }}>
           {loading ? (
@@ -1111,7 +1111,7 @@ function StuRow({ st, room, i, selected, onToggle, onOpen, onEdit }: {
   const [hov, setHov] = useState(false);
   const s = statusOf(st.admissionStatus);
   return (
-    <div onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)} onClick={onOpen} style={{ display: "grid", gridTemplateColumns: ROW_COLUMNS, alignItems: "center", gap: 16, padding: "13px 24px", borderRadius: "var(--r-md)", position: "relative", cursor: "pointer", background: selected ? "color-mix(in oklab, var(--lime) 10%, var(--surface))" : hov ? "var(--surface-2)" : "transparent", transition: "background .15s var(--ease)" }}>
+    <div onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)} onClick={onOpen} className="students-grid" style={{ display: "grid", gridTemplateColumns: ROW_COLUMNS, alignItems: "center", gap: 16, padding: "13px 24px", borderRadius: "var(--r-md)", position: "relative", cursor: "pointer", background: selected ? "color-mix(in oklab, var(--lime) 10%, var(--surface))" : hov ? "var(--surface-2)" : "transparent", transition: "background .15s var(--ease)" }}>
       <span style={{ position: "absolute", left: 4, top: 10, bottom: 10, width: 4, borderRadius: 99, background: s.dot }} />
       <button
         type="button"
@@ -1126,13 +1126,15 @@ function StuRow({ st, room, i, selected, onToggle, onOpen, onEdit }: {
       <div style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0, paddingLeft: 8 }}>
         <Avatar name={formatStudentName(st)} color={AV[i % AV.length]} size={42} />
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 600, fontSize: 15.5, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{formatStudentName(st)}</div>
+          <div className="students-name" style={{ fontWeight: 600, fontSize: 15.5, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{formatStudentName(st)}</div>
           <div style={{ fontSize: 12.5, color: "var(--text-faint)", fontFamily: "monospace" }}>{st.curp}</div>
+          {/* On a phone the level, tutor and status columns fold away; the classroom stays under the name. */}
+          <div className="students-room-inline" style={{ fontSize: 12.5, color: "var(--text-muted)" }}>{room} · {s.label}</div>
         </div>
       </div>
-      <div style={{ fontSize: 14, color: "var(--text-muted)", textTransform: "capitalize" }}>{levelOf(st)}<div style={{ fontSize: 12.5, color: "var(--text-faint)", textTransform: "none" }}>{room}</div></div>
-      <div style={{ minWidth: 0, fontSize: 14, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{st.guardianName}</div>
-      <div><StatusPill status={st.admissionStatus} /></div>
+      <div className="students-col-wide" style={{ fontSize: 14, color: "var(--text-muted)", textTransform: "capitalize" }}>{levelOf(st)}<div style={{ fontSize: 12.5, color: "var(--text-faint)", textTransform: "none" }}>{room}</div></div>
+      <div className="students-col-wide" style={{ minWidth: 0, fontSize: 14, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{st.guardianName}</div>
+      <div className="students-col-wide"><StatusPill status={st.admissionStatus} /></div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, width: 84 }}>
         {onEdit !== undefined && (
           <button onClick={(ev) => { ev.stopPropagation(); onEdit(); }} title="Editar ficha" aria-label={`Editar ficha de ${formatStudentName(st)}`} style={qb}><Icon name="user" size={18} /></button>

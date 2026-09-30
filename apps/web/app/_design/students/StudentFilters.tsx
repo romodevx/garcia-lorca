@@ -86,7 +86,8 @@ export function StudentFilters<T extends FilterableStudent>({
   };
 
   return (
-    <div style={{ display: "grid", gap: 12 }}>
+    // minmax(0, 1fr): a row wider than a phone scrolls inside itself, never the page.
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
         {leading}
         <div style={{ position: "relative", flex: "1 1 230px", minWidth: 0, maxWidth: 420 }}>
