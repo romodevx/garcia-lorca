@@ -382,8 +382,15 @@ describe("dos renglones que sólo difieren en acentos", () => {
       await user.click(screen.getByRole("button", { name: /Agregar cuota/ }));
     };
     await addFee("MATERIAL", 0);
-    await addFee("MATERIAL", 3);
+    await addFee("MATERIAL", 0); // refused: same month
+    await user.click(screen.getByRole("button", { name: /septiembre/ }));
+    await user.click(screen.getByRole("button", { name: /diciembre/ }));
+    await user.click(screen.getByRole("button", { name: /Agregar cuota/ }));
 
     expect(screen.getAllByRole("button", { name: /^Quitar MATERIAL/ })).toHaveLength(2);
+    // Regression: ISSUE-001 — the refusal stayed on screen after the fee was accepted
+    // Found by /qa on 2026-09-30
+    // Report: .gstack/qa-reports/run-20260930T170040Z/qa-report-localhost-2026-09-30.md
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

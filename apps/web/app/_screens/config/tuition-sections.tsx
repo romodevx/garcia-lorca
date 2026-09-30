@@ -325,7 +325,7 @@ export function FeesSection({
   monthlyCents: number;
   fees: Fee[];
   onChange: (fees: Fee[]) => void;
-  onError: (message: string) => void;
+  onError: (message: string | undefined) => void;
   /** Dónde dejar la comprobación de lo escrito y sin agregar. */
   draftRef?: { current: DraftCheck } | undefined;
 }): ReactElement {
@@ -375,6 +375,8 @@ export function FeesSection({
       onError("La cuota es muy chica para partirla entre esos meses.");
       return;
     }
+    // Accepted: whatever this form refused a moment ago no longer applies.
+    onError(undefined);
     // Kept in the order the year collects them, not the order they were
     // clicked: the parts are numbered "1 de 2" on the family's statement, and
     // part 1 falling after part 2 is a support call.
