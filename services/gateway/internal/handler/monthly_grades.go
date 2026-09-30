@@ -4,13 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
-	"golang.org/x/text/collate"
-	"golang.org/x/text/language"
-
+	"github.com/garcia-lorca/pkg/studentname"
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
 )
@@ -294,7 +291,7 @@ func (h *MonthlyGradesHandler) toSheetResponse(ctx context.Context, s client.Mon
 		}
 		rows = append(rows, out)
 	}
-	sortByLastName(rows, students)
+	sortBySurname(students, rows, func(r monthlySheetRowResponse) string { return r.StudentID })
 	months := s.Months
 	if months == nil {
 		months = []string{}
@@ -310,20 +307,14 @@ func (h *MonthlyGradesHandler) toSheetResponse(ctx context.Context, s client.Mon
 // studentDirectory is the id → student map a sheet's names come from.
 type studentDirectory map[string]client.StudentResult
 
-func (d studentDirectory) name(id string) string {
-	s := d[id]
-	return joinName(s.FirstName, s.LastName)
-}
+// name is the pupil as lists show them, "Paterno Materno Nombre(s)"; empty for
+// a pupil the directory does not know.
+func (d studentDirectory) name(id string) string { return d[id].FullName() }
 
-func joinName(first, last string) string {
-	switch {
-	case first == "":
-		return last
-	case last == "":
-		return first
-	default:
-		return first + " " + last
-	}
+// sortBySurname orders rows by their pupil's surnames then first name, in
+// Spanish (pkg/studentname); rows with the same name keep their order.
+func sortBySurname[T any](d studentDirectory, rows []T, studentID func(T) string) {
+	studentname.Sort(rows, func(r T) studentname.Parts { return d[studentID(r)].NameParts() })
 }
 
 // studentsByID names the sheet's own pupils in ONE read by id (never the whole
@@ -346,19 +337,6 @@ func studentsByID(ctx context.Context, students StudentNamesReader, rows []clien
 		out[s.ID] = s
 	}
 	return out
-}
-
-// sortByLastName orders rows by last name, then first name, in Spanish
-// collation (accents fold, ñ sorts after n); ties keep enrollment-id order.
-func sortByLastName(rows []monthlySheetRowResponse, students studentDirectory) {
-	col := collate.New(language.Spanish)
-	sort.SliceStable(rows, func(i, j int) bool {
-		a, b := students[rows[i].StudentID], students[rows[j].StudentID]
-		if c := col.CompareString(a.LastName, b.LastName); c != 0 {
-			return c < 0
-		}
-		return col.CompareString(a.FirstName, b.FirstName) < 0
-	})
 }
 
 func rfc3339OrNil(t time.Time) *string {

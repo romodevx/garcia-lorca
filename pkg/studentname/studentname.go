@@ -36,7 +36,8 @@ func Format(p Parts) string {
 
 // Sort orders items by paternal surname, then maternal, then first name, in
 // Spanish collation that ignores accents and case. Items with the same name
-// keep their order. A collator is not safe for concurrent use, so each call
+// keep their order; an item with no name at all (a pupil the caller could not
+// resolve) goes last. A collator is not safe for concurrent use, so each call
 // builds its own.
 func Sort[T any](items []T, parts func(T) Parts) {
 	col := collate.New(language.Spanish, collate.Loose)
@@ -46,6 +47,12 @@ func Sort[T any](items []T, parts func(T) Parts) {
 }
 
 func compare(col *collate.Collator, a, b Parts) int {
+	if an, bn := Format(a) == "", Format(b) == ""; an != bn {
+		if an {
+			return 1
+		}
+		return -1
+	}
 	if c := col.CompareString(strings.TrimSpace(a.Paternal), strings.TrimSpace(b.Paternal)); c != 0 {
 		return c
 	}
@@ -53,4 +60,18 @@ func compare(col *collate.Collator, a, b Parts) int {
 		return c
 	}
 	return col.CompareString(strings.TrimSpace(a.First), strings.TrimSpace(b.First))
+}
+
+// SortByDisplayName orders items by an already formatted name — a snapshot
+// stored with a document, say — with the same Spanish collation as Sort. Empty
+// names go last; equal names keep their order.
+func SortByDisplayName[T any](items []T, name func(T) string) {
+	col := collate.New(language.Spanish, collate.Loose)
+	sort.SliceStable(items, func(i, j int) bool {
+		a, b := strings.TrimSpace(name(items[i])), strings.TrimSpace(name(items[j]))
+		if (a == "") != (b == "") {
+			return b == ""
+		}
+		return col.CompareString(a, b) < 0
+	})
 }

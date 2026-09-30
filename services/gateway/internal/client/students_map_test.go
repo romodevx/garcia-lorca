@@ -15,6 +15,17 @@ func TestStudentResultCarriesTheCatalogLevel(t *testing.T) {
 	}
 }
 
+// T3: the maternal surname travels, and the display name reads surname first.
+func TestStudentResultCarriesTheMaternalSurnameAndNamesSurnameFirst(t *testing.T) {
+	got := toStudentResult(&studentsv1.Student{Id: "stu-1", FirstName: "Ana Sofía", LastName: "Pérez", MaternalLastName: "Núñez"})
+	if got.MaternalLastName != "Núñez" {
+		t.Errorf("maternal = %q, want Núñez", got.MaternalLastName)
+	}
+	if got.FullName() != "Pérez Núñez Ana Sofía" {
+		t.Errorf("FullName() = %q, want Pérez Núñez Ana Sofía", got.FullName())
+	}
+}
+
 func TestStudentResultCarriesTheProfile(t *testing.T) {
 	got := toStudentResult(&studentsv1.Student{Id: "stu-1", Profile: &studentsv1.StudentProfile{
 		BirthDate: "2019-03-12", Sex: "F", Email: "ana@correo.mx",

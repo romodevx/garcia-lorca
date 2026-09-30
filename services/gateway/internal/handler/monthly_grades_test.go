@@ -141,10 +141,10 @@ func TestMonthlySheetShapeAndSpanishOrder(t *testing.T) {
 		"scale": {"min":5,"max":10,"decimals":1,"passing":6},
 		"gradingEnabled": true, "currentMonth": "2026-09", "editable": true, "closedMonths": [], "unmappedMonths": [],
 		"rows": [
-			{"enrollmentId":"enr-a","studentId":"stu-a","name":"Ana Ávila","value":9.5,"updatedAt":"2026-09-03T15:04:05Z","rowEditable":true},
-			{"enrollmentId":"enr-n","studentId":"stu-n","name":"Nico Núñez","value":null,"updatedAt":null,"rowEditable":false,
+			{"enrollmentId":"enr-a","studentId":"stu-a","name":"Ávila Ana","value":9.5,"updatedAt":"2026-09-03T15:04:05Z","rowEditable":true},
+			{"enrollmentId":"enr-n","studentId":"stu-n","name":"Núñez Nico","value":null,"updatedAt":null,"rowEditable":false,
 			 "rowReadOnlyReason":"Ese mes corresponde al grupo anterior del alumno"},
-			{"enrollmentId":"enr-z","studentId":"stu-z","name":"Zoe Zúñiga","value":null,"updatedAt":null,"rowEditable":true}
+			{"enrollmentId":"enr-z","studentId":"stu-z","name":"Zúñiga Zoe","value":null,"updatedAt":null,"rowEditable":true}
 		]}`, rec.Body.String(), "rows sorted by last name, Spanish collation (Á with A, Ñ after N)")
 	assert.True(t, grades.gotSheetQ.SchoolWide, "the director's sheet is school-wide")
 }

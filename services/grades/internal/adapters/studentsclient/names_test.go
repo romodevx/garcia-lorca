@@ -34,7 +34,7 @@ func (s *directoryStub) ListStudents(_ context.Context, r *connect.Request[stude
 		if id == "ghost" {
 			continue
 		}
-		out = append(out, &studentsv1.Student{Id: id, FirstName: "Ana", LastName: "López " + id, EnrollmentNumber: "2026-" + id})
+		out = append(out, &studentsv1.Student{Id: id, FirstName: "Ana", LastName: "López", MaternalLastName: id, EnrollmentNumber: "2026-" + id})
 	}
 	return connect.NewResponse(&studentsv1.ListStudentsResponse{Students: out}), nil
 }
@@ -63,7 +63,7 @@ func TestStudentsByIDsPagesBy200(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, stub.pages, 3, "450 ids = 3 reads")
 	assert.Len(t, got, 449)
-	assert.Equal(t, "Ana López s007", got["s007"].Name)
+	assert.Equal(t, "López s007 Ana", got["s007"].Name, "surnames first (T3)")
 	assert.Equal(t, "2026-s007", got["s007"].EnrollmentNumber)
 	_, ok := got["ghost"]
 	assert.False(t, ok)

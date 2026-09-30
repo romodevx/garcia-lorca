@@ -74,7 +74,7 @@ func TestAPaymentReceipt(t *testing.T) {
 	if got.Folio != "P-2026-000042" || got.School.Name != "COLEGIO GARCÍA LORCA" || got.Kind != receipt.KindPayment {
 		t.Errorf("head = %q %q %q", got.Folio, got.School.Name, got.Kind)
 	}
-	if got.Buyer != "Camila Zamora Sánchez" || got.BuyerDetail != "1° A" {
+	if got.Buyer != "Zamora Sánchez Camila" || got.BuyerDetail != "1° A" {
 		t.Errorf("buyer = %q (%q)", got.Buyer, got.BuyerDetail)
 	}
 	if got.PaidOn != "2026-10-10" || got.Method != "Tarjeta de débito" || got.Reference != "1234" || got.ReceivedBy != "Laura Caja" {

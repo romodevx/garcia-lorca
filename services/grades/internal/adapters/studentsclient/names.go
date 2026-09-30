@@ -6,6 +6,7 @@ import (
 	connect "connectrpc.com/connect"
 
 	studentsv1 "github.com/garcia-lorca/gen/go/garcialorca/students/v1"
+	"github.com/garcia-lorca/pkg/studentname"
 	"github.com/garcia-lorca/services/grades/internal/ports"
 )
 
@@ -28,19 +29,16 @@ func (c *Client) StudentsByIDs(ctx context.Context, ids []string) (map[string]po
 			return nil, mapStudentsErr(err, "students")
 		}
 		for _, s := range res.Msg.GetStudents() {
-			out[s.GetId()] = ports.StudentRef{ID: s.GetId(), Name: fullName(s.GetFirstName(), s.GetLastName()), EnrollmentNumber: s.GetEnrollmentNumber()}
+			out[s.GetId()] = ports.StudentRef{ID: s.GetId(), Name: nameOf(s), EnrollmentNumber: s.GetEnrollmentNumber()}
 		}
 	}
 	return out, nil
 }
 
-func fullName(first, last string) string {
-	switch {
-	case first == "":
-		return last
-	case last == "":
-		return first
-	default:
-		return first + " " + last
-	}
+// nameOf is the pupil as a report card prints them, surnames first (T3). New
+// snapshots take this form; snapshots already stored keep what they were.
+func nameOf(s *studentsv1.Student) string {
+	return studentname.Format(studentname.Parts{
+		First: s.GetFirstName(), Paternal: s.GetLastName(), Maternal: s.GetMaternalLastName(),
+	})
 }

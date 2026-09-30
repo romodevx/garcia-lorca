@@ -870,7 +870,8 @@ paths:
               required: [firstName, lastName, curp, profile]
               properties:
                 firstName: { type: string, minLength: 1, example: "ADA" }
-                lastName: { type: string, minLength: 1, example: "LOVELACE BYRON" }
+                lastName: { type: string, minLength: 1, example: "LOVELACE", description: "Paternal surname." }
+                maternalLastName: { type: string, example: "BYRON", description: "Maternal surname; optional (empty = not captured)." }
                 curp: { type: string, minLength: 18, maxLength: 18, example: "LOAA190312MDFVDA01" }
                 profile: { $ref: '#/components/schemas/StudentProfile' }
       responses:
@@ -4289,7 +4290,8 @@ components:
         id: { type: string, format: uuid }
         curp: { type: string }
         firstName: { type: string }
-        lastName: { type: string }
+        lastName: { type: string, description: "Paternal surname. A pupil captured before maternalLastName existed may hold both surnames here." }
+        maternalLastName: { type: string, description: "Maternal surname; empty when not captured. Display order is lastName maternalLastName firstName." }
         level: { type: string, example: "Primaria" }
         levelId: { $ref: '#/components/schemas/LevelId' }
         gradeGroup: { type: string, example: "4° A" }

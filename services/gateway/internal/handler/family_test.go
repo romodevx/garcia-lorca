@@ -619,7 +619,7 @@ func TestFamilyAccountUnlinkedChildIs404AndDoesNotRead(t *testing.T) {
 func TestFamilyProfileOwnedChildReturnsCoreFields(t *testing.T) {
 	students := oneChild()
 	students.student = client.StudentResult{
-		ID: "stu-1", FirstName: "Ana", LastName: "García", Level: "primaria", GradeGroup: "3A",
+		ID: "stu-1", FirstName: "Ana", LastName: "García", MaternalLastName: "Ruiz", Level: "primaria", GradeGroup: "3A",
 	}
 	students.enrollments = []client.Enrollment{
 		{ID: "enr-1", StudentID: "stu-1", CycleID: "cyc-1", GroupID: "grp-1", TermID: "trm-1", Status: "active"},
@@ -639,6 +639,7 @@ func TestFamilyProfileOwnedChildReturnsCoreFields(t *testing.T) {
 		ID                string          `json:"id"`
 		FirstName         string          `json:"firstName"`
 		LastName          string          `json:"lastName"`
+		MaternalLastName  string          `json:"maternalLastName"`
 		Level             string          `json:"level"`
 		GradeGroup        string          `json:"gradeGroup"`
 		CurrentEnrollment *map[string]any `json:"currentEnrollment"`
@@ -646,7 +647,7 @@ func TestFamilyProfileOwnedChildReturnsCoreFields(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if out.ID != "stu-1" || out.FirstName != "Ana" || out.LastName != "García" ||
+	if out.ID != "stu-1" || out.FirstName != "Ana" || out.LastName != "García" || out.MaternalLastName != "Ruiz" ||
 		out.Level != "primaria" || out.GradeGroup != "3A" {
 		t.Errorf("profile = %+v, want the child core fields", out)
 	}

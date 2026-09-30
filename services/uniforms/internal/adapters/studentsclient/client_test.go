@@ -52,7 +52,7 @@ func clientFor(t *testing.T, stub *stubStudents) *studentsclient.Client {
 
 func aStudent() *studentsv1.Student {
 	return &studentsv1.Student{
-		Id: "stu-1", FirstName: " Zoe ", LastName: " Villalobos ",
+		Id: "stu-1", FirstName: " Zoe ", LastName: " Villalobos ", MaternalLastName: " Ríos ",
 		LevelId: "c1000000-0000-0000-0000-000000000002", LevelName: "Primaria", GradeGroup: "3 B",
 		AdmissionStatus: studentsv1.AdmissionStatus_ADMISSION_STATUS_ENROLLED,
 	}
@@ -73,8 +73,8 @@ func TestByIDProjectsWhatTheOrderSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ByID: %v", err)
 	}
-	if got.FullName != "Zoe Villalobos" {
-		t.Errorf("name = %q; the two halves are joined once, here", got.FullName)
+	if got.FullName != "Villalobos Ríos Zoe" {
+		t.Errorf("name = %q; the name is joined once, here, surnames first (T3)", got.FullName)
 	}
 	if got.Level != domain.Level("c1000000-0000-0000-0000-000000000002") || got.LevelName != "Primaria" || got.GradeGroup != "3 B" {
 		t.Errorf("level %q, group %q", got.Level, got.GradeGroup)

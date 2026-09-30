@@ -530,3 +530,36 @@ func TestUpdateStudentInvalidIs400(t *testing.T) {
 		t.Errorf("status = %d, want 400", rec.Code)
 	}
 }
+
+// T3: the maternal surname is captured on create and on edit, and answered back.
+func TestStudentsForwardAndAnswerTheMaternalSurname(t *testing.T) {
+	svc := &fakeCreator{res: client.StudentResult{ID: "stu-1", FirstName: "Ana", LastName: "Herrera", MaternalLastName: "Ríos"}}
+	h := handler.NewStudentsHandler(svc)
+
+	rec := postStudents(t, h, `{"curp":"HEGA050312MDFRNN08","firstName":"Ana","lastName":"Herrera","maternalLastName":"Ríos","levelId":"lvl-9"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d", rec.Code)
+	}
+	if svc.got.MaternalLastName != "Ríos" {
+		t.Errorf("create forwarded maternal = %q, want Ríos", svc.got.MaternalLastName)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out["maternalLastName"] != "Ríos" {
+		t.Errorf("body maternalLastName = %v, want Ríos", out["maternalLastName"])
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/students/stu-1", strings.NewReader(
+		`{"firstName":"Ana","lastName":"Herrera","maternalLastName":"Cruz","curp":"HEGA050312MDFRNN08","profile":{}}`))
+	req.SetPathValue("id", "stu-1")
+	up := httptest.NewRecorder()
+	h.Update(up, req)
+	if up.Code != http.StatusOK {
+		t.Fatalf("update status = %d", up.Code)
+	}
+	if svc.gotUpdate.MaternalLastName != "Cruz" {
+		t.Errorf("update forwarded maternal = %q, want Cruz", svc.gotUpdate.MaternalLastName)
+	}
+}

@@ -16,13 +16,13 @@ package studentsclient
 import (
 	"context"
 	"net/http"
-	"strings"
 
 	connect "connectrpc.com/connect"
 
 	studentsv1 "github.com/garcia-lorca/gen/go/garcialorca/students/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/students/v1/studentsv1connect"
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/studentname"
 	"github.com/garcia-lorca/services/uniforms/internal/domain"
 	"github.com/garcia-lorca/services/uniforms/internal/ports"
 )
@@ -65,7 +65,9 @@ func (c *Client) ByID(ctx context.Context, id string) (ports.StudentRef, error) 
 	}
 	return ports.StudentRef{
 		ID:       s.GetId(),
-		FullName: fullName(s.GetFirstName(), s.GetLastName()),
+		FullName: studentname.Format(studentname.Parts{
+			First: s.GetFirstName(), Paternal: s.GetLastName(), Maternal: s.GetMaternalLastName(),
+		}),
 		// A pupil with no level id (a legacy row the level migration could not
 		// link) is LevelAny, which for a PUPIL means "unknown" rather than "all".
 		Level:      domain.Level(s.GetLevelId()),
@@ -97,10 +99,6 @@ func (c *Client) liveCycle(ctx context.Context, studentID string) (string, error
 
 // fullName joins the two halves the students service keeps apart. The panel
 // shows one string, so the join happens once, here, rather than in every caller.
-func fullName(first, last string) string {
-	return strings.TrimSpace(strings.TrimSpace(first) + " " + strings.TrimSpace(last))
-}
-
 var admissionStatuses = map[studentsv1.AdmissionStatus]string{
 	studentsv1.AdmissionStatus_ADMISSION_STATUS_PENDING:   "pending",
 	studentsv1.AdmissionStatus_ADMISSION_STATUS_ACCEPTED:  "accepted",

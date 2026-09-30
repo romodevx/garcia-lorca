@@ -32,24 +32,28 @@ func NewStudentsHandler(svc StudentsService) *StudentsHandler {
 }
 
 type createStudentRequest struct {
-	CURP         string `json:"curp"`
-	FirstName    string `json:"firstName"`
-	LastName     string `json:"lastName"`
-	LevelID      string `json:"levelId"`
-	GradeGroup   string `json:"gradeGroup"`
-	GuardianName string `json:"guardianName"`
+	CURP      string `json:"curp"`
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"` // the paternal surname
+	// MaternalLastName is optional (T3).
+	MaternalLastName string `json:"maternalLastName"`
+	LevelID          string `json:"levelId"`
+	GradeGroup       string `json:"gradeGroup"`
+	GuardianName     string `json:"guardianName"`
 }
 
 type studentResponse struct {
-	ID              string `json:"id"`
-	CURP            string `json:"curp"`
-	FirstName       string `json:"firstName"`
-	LastName        string `json:"lastName"`
-	Level           string `json:"level"`   // the school's name for the level
-	LevelID         string `json:"levelId"` // the config level id
-	GradeGroup      string `json:"gradeGroup"`
-	GuardianName    string `json:"guardianName"`
-	AdmissionStatus string `json:"admissionStatus"`
+	ID        string `json:"id"`
+	CURP      string `json:"curp"`
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"` // the paternal surname
+	// MaternalLastName is empty when not captured (T3).
+	MaternalLastName string `json:"maternalLastName"`
+	Level            string `json:"level"`   // the school's name for the level
+	LevelID          string `json:"levelId"` // the config level id
+	GradeGroup       string `json:"gradeGroup"`
+	GuardianName     string `json:"guardianName"`
+	AdmissionStatus  string `json:"admissionStatus"`
 	// EnrollmentNumber is the matrícula (task 13).
 	EnrollmentNumber string `json:"enrollmentNumber,omitempty"`
 	// Nil in lists: a picker needs names, not every pupil's address and phones.
@@ -62,6 +66,7 @@ func toStudentResponse(s client.StudentResult) studentResponse {
 		CURP:             s.CURP,
 		FirstName:        s.FirstName,
 		LastName:         s.LastName,
+		MaternalLastName: s.MaternalLastName,
 		Level:            s.Level,
 		LevelID:          s.LevelID,
 		GradeGroup:       s.GradeGroup,
@@ -80,10 +85,11 @@ func toStudentSummary(s client.StudentResult) studentResponse {
 }
 
 type updateStudentRequest struct {
-	FirstName string                `json:"firstName"`
-	LastName  string                `json:"lastName"`
-	CURP      string                `json:"curp"`
-	Profile   client.StudentProfile `json:"profile"`
+	FirstName        string                `json:"firstName"`
+	LastName         string                `json:"lastName"`
+	MaternalLastName string                `json:"maternalLastName"`
+	CURP             string                `json:"curp"`
+	Profile          client.StudentProfile `json:"profile"`
 }
 
 // Update handles PUT /api/v1/students/{id}: corrects the pupil's file (names,
@@ -97,7 +103,7 @@ func (h *StudentsHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := h.svc.UpdateStudent(r.Context(), client.UpdateStudentInput{
 		ID: r.PathValue("id"), FirstName: req.FirstName, LastName: req.LastName,
-		CURP: req.CURP, Profile: req.Profile,
+		MaternalLastName: req.MaternalLastName, CURP: req.CURP, Profile: req.Profile,
 	})
 	if err != nil {
 		writeConnectError(w, err)
@@ -114,12 +120,13 @@ func (h *StudentsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := h.svc.CreateApplicant(r.Context(), client.CreateApplicantInput{
-		CURP:         req.CURP,
-		FirstName:    req.FirstName,
-		LastName:     req.LastName,
-		LevelID:      req.LevelID,
-		GradeGroup:   req.GradeGroup,
-		GuardianName: req.GuardianName,
+		CURP:             req.CURP,
+		FirstName:        req.FirstName,
+		LastName:         req.LastName,
+		MaternalLastName: req.MaternalLastName,
+		LevelID:          req.LevelID,
+		GradeGroup:       req.GradeGroup,
+		GuardianName:     req.GuardianName,
 	})
 	if err != nil {
 		writeConnectError(w, err)

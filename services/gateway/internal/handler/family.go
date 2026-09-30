@@ -389,22 +389,25 @@ func (h *FamilyHandler) Account(w http.ResponseWriter, r *http.Request) {
 // list and the profile: the fields a parent needs to identify and place a child,
 // with the wire enums already flattened to their canonical names.
 type familyStudentResponse struct {
-	ID         string `json:"id"`
-	FirstName  string `json:"firstName"`
-	LastName   string `json:"lastName"`
-	Level      string `json:"level"`   // the school's name for the level
-	LevelID    string `json:"levelId"` // the config level id
-	GradeGroup string `json:"gradeGroup"`
+	ID        string `json:"id"`
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"` // the paternal surname
+	// MaternalLastName is empty when not captured (T3).
+	MaternalLastName string `json:"maternalLastName"`
+	Level            string `json:"level"`   // the school's name for the level
+	LevelID          string `json:"levelId"` // the config level id
+	GradeGroup       string `json:"gradeGroup"`
 }
 
 func toFamilyStudentResponse(s client.StudentResult) familyStudentResponse {
 	return familyStudentResponse{
-		ID:         s.ID,
-		FirstName:  s.FirstName,
-		LastName:   s.LastName,
-		Level:      s.Level,
-		LevelID:    s.LevelID,
-		GradeGroup: s.GradeGroup,
+		ID:               s.ID,
+		FirstName:        s.FirstName,
+		LastName:         s.LastName,
+		MaternalLastName: s.MaternalLastName,
+		Level:            s.Level,
+		LevelID:          s.LevelID,
+		GradeGroup:       s.GradeGroup,
 	}
 }
 

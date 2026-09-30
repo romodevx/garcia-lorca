@@ -696,11 +696,11 @@ func TestTeachingRosterOwnedAssignmentReads(t *testing.T) {
 		byEnr[row["enrollmentId"].(string)] = row
 	}
 	// Existing fields kept AND the readable name added.
-	if byEnr["enr-1"]["studentId"] != "stu-1" || byEnr["enr-1"]["studentName"] != "Ana García" ||
+	if byEnr["enr-1"]["studentId"] != "stu-1" || byEnr["enr-1"]["studentName"] != "García Ana" ||
 		byEnr["enr-1"]["hasValue"] != true {
 		t.Errorf("enr-1 = %v, want fields kept and studentName enriched", byEnr["enr-1"])
 	}
-	if byEnr["enr-2"]["studentName"] != "Luis Pérez" || byEnr["enr-2"]["hasValue"] != false {
+	if byEnr["enr-2"]["studentName"] != "Pérez Luis" || byEnr["enr-2"]["hasValue"] != false {
 		t.Errorf("enr-2 = %v, want Luis Pérez / hasValue false", byEnr["enr-2"])
 	}
 }
@@ -859,5 +859,32 @@ func TestTeachingCaptureInvalidBodyIs400(t *testing.T) {
 	h.CaptureGrade(rec, teacherPOST("/api/v1/teaching/grades", "usr-t", `{not json`))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+// T3: the teacher's grade roster reads in surname order too.
+func TestTeachingRosterIsOrderedBySurname(t *testing.T) {
+	grades := &fakeTeachingGrades{roster: []client.RosterRow{
+		{EnrollmentID: "enr-2", StudentID: "stu-2"},
+		{EnrollmentID: "enr-1", StudentID: "stu-1"},
+	}}
+	students := &fakeTeachingStudents{students: []client.StudentResult{
+		{ID: "stu-1", FirstName: "Ana", LastName: "García"},
+		{ID: "stu-2", FirstName: "Luis", LastName: "Pérez"},
+	}}
+	h := handler.NewTeachingHandler(oneTeacher(), grades, students)
+	rec := httptest.NewRecorder()
+	h.Roster(rec, teacherGET("/api/v1/teaching/roster?assignmentId=asg-1&termId=trm-1", "usr-t"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var out struct {
+		Roster []map[string]any `json:"roster"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Roster) != 2 || out.Roster[0]["studentName"] != "García Ana" || out.Roster[1]["studentName"] != "Pérez Luis" {
+		t.Errorf("roster = %v, want García Ana then Pérez Luis", out.Roster)
 	}
 }

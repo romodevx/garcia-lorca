@@ -68,3 +68,24 @@ func TestSortIsStableOnIdenticalNames(t *testing.T) {
 		t.Errorf("identical names must keep their order, got %s,%s", rows[0].id, rows[1].id)
 	}
 }
+
+// A row whose pupil could not be named goes to the end, not the top.
+func TestSortPutsUnnamedLast(t *testing.T) {
+	pupils := []studentname.Parts{{}, {First: "Ana", Paternal: "Ruiz"}}
+	studentname.Sort(pupils, func(p studentname.Parts) studentname.Parts { return p })
+	if studentname.Format(pupils[0]) != "Ruiz Ana" || studentname.Format(pupils[1]) != "" {
+		t.Errorf("order = %q, %q; want the named pupil first", studentname.Format(pupils[0]), studentname.Format(pupils[1]))
+	}
+}
+
+// A stored snapshot is only a display string; it still sorts in Spanish.
+func TestSortByDisplayNameOrdersSnapshotsInSpanish(t *testing.T) {
+	names := []string{"Zúñiga Zoe", "Ñuñez Ana", "Ávila Luis", "Nuñez Eva", ""}
+	studentname.SortByDisplayName(names, func(s string) string { return s })
+	want := []string{"Ávila Luis", "Nuñez Eva", "Ñuñez Ana", "Zúñiga Zoe", ""}
+	for i := range want {
+		if names[i] != want[i] {
+			t.Fatalf("order = %q, want %q", names, want)
+		}
+	}
+}
