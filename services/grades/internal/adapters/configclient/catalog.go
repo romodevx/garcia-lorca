@@ -34,30 +34,38 @@ func (c *Client) LevelOfGroup(ctx context.Context, groupID string) (ports.LevelR
 	return toLevelRef(l)
 }
 
-// toLevelRef projects a level and its grading scale (see LevelOfGroup).
+// toLevelRef projects a level, its grading scale and whether it is being
+// deleted (see LevelOfGroup).
 func toLevelRef(l *configv1.Level) (ports.LevelRef, error) {
 	g := l.GetGrading()
 	if g == nil {
 		return ports.LevelRef{}, domain.Refusal(domain.CodeLevelScaleUnavailable, msgScaleNotConfigured)
 	}
+	deleting := isDeleting(l)
 	if !g.GetEnabled() {
-		return ports.LevelRef{ID: l.GetId(), GradingEnabled: false}, nil
+		return ports.LevelRef{ID: l.GetId(), GradingEnabled: false, Deleting: deleting}, nil
 	}
 	scale, err := domain.NewGradingScale(int(g.GetMinHundredths()), int(g.GetMaxHundredths()), int(g.GetPassingHundredths()), int(g.GetDecimals()))
 	if err != nil {
 		return ports.LevelRef{}, domain.Refusal(domain.CodeLevelScaleUnavailable, msgScaleNotConfigured)
 	}
-	return ports.LevelRef{ID: l.GetId(), GradingEnabled: true, Scale: scale}, nil
+	return ports.LevelRef{ID: l.GetId(), GradingEnabled: true, Scale: scale, Deleting: deleting}, nil
 }
 
-// LevelIDOfGroup resolves group → grade level → level id, whatever the level's
-// scale says.
-func (c *Client) LevelIDOfGroup(ctx context.Context, groupID string) (string, error) {
+// isDeleting reads config's level status (ADR 0021). An older config that
+// sends none leaves the level writable.
+func isDeleting(l *configv1.Level) bool {
+	return l.GetStatus() == configv1.LevelStatus_LEVEL_STATUS_DELETING
+}
+
+// LevelIDOfGroup resolves group → grade level → level id and deletion state,
+// whatever the level's scale says.
+func (c *Client) LevelIDOfGroup(ctx context.Context, groupID string) (ports.LevelKey, error) {
 	l, err := c.levelOfGroup(ctx, groupID)
 	if err != nil {
-		return "", err
+		return ports.LevelKey{}, err
 	}
-	return l.GetId(), nil
+	return ports.LevelKey{ID: l.GetId(), Deleting: isDeleting(l)}, nil
 }
 
 func (c *Client) levelOfGroup(ctx context.Context, groupID string) (*configv1.Level, error) {

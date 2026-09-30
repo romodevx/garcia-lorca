@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/services/uniforms/internal/domain"
 )
 
@@ -200,4 +201,17 @@ type Event struct {
 	Type     string
 	TenantID string
 	Payload  any
+}
+
+// LevelArchiveRepository is uniforms' half of the level-deletion trash (ADR
+// 0021). A garment scoped to a deleted level is KEPT: its level is snapshotted
+// in the archive and the garment is left unresolved (offered to nobody) until
+// the level is restored or staff re-scope it. Every method runs in ONE
+// tenant-bound transaction; archive and restore are idempotent per batch.
+type LevelArchiveRepository interface {
+	PreviewLevelDeletion(ctx context.Context, scope levelarchive.Scope) (levelarchive.Counts, error)
+	ArchiveLevel(ctx context.Context, batchID string, scope levelarchive.Scope) (levelarchive.Counts, error)
+	RestoreLevelBatch(ctx context.Context, batchID string) (levelarchive.Report, error)
+	PurgeLevelArchives(ctx context.Context, cutoff time.Time) (int64, error)
+	PurgeLevelBatch(ctx context.Context, batchID string) (int64, error)
 }

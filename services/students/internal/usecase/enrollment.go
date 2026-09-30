@@ -261,13 +261,12 @@ func (s *EnrollmentService) Transfer(ctx context.Context, enrollmentID, toGroupI
 
 // requireSameLevel refuses a grade outside the pupil's level. Four groups can
 // all be called "1° A" — one per level — and a pupil placed in the wrong one is
-// billed, graded and listed as another level's. A legacy pupil with no level id
-// (migration 0007 could not link it) has nothing to compare against and passes.
+// billed, graded and listed as another level's. The grade's level is ALWAYS
+// resolved, because the lookup also refuses a level whose deletion is running
+// (LEVEL_BEING_DELETED, ADR 0021) — for every pupil. A legacy pupil with no
+// level id (migration 0007 could not link it) has nothing to compare against
+// and otherwise passes.
 func (s *EnrollmentService) requireSameLevel(ctx context.Context, student *domain.Student, gradeLevelID string) error {
-	want := student.Level().ID()
-	if want == "" {
-		return nil
-	}
 	got, err := s.catalog.LevelOfGrade(ctx, gradeLevelID)
 	if err != nil {
 		if glerrors.KindOf(err) == glerrors.KindNotFound {
@@ -275,7 +274,8 @@ func (s *EnrollmentService) requireSameLevel(ctx context.Context, student *domai
 		}
 		return err
 	}
-	if got != want {
+	want := student.Level().ID()
+	if want != "" && got != want {
 		return glerrors.New(glerrors.KindInvalid,
 			"ese grupo es de otro nivel: el alumno está en "+student.Level().Name())
 	}

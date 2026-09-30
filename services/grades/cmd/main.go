@@ -154,7 +154,11 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 		NewID: newID, Now: time.Now, Log: log,
 	})
 	health := usecase.NewHealthService(serviceName)
-	handler := grpcadapter.NewGradesHandler(svc, monthly, periods, health)
+	// Level deletion (ADR 0021): grades' step of the gateway's saga. The
+	// gateway's hourly sweep (always warm, unlike this scale-to-zero service)
+	// purges each batch past config's restorable_until via PurgeLevelBatch.
+	levels := usecase.NewLevelArchiveService(repo, time.Now)
+	handler := grpcadapter.NewGradesHandler(svc, monthly, periods, health).WithLevelArchive(levels)
 
 	mux := http.NewServeMux()
 	path, h := gradesv1connect.NewGradesServiceHandler(handler, connect.WithRecover(recoverFn))

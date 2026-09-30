@@ -124,6 +124,15 @@ func (h *IAMHandler) ChangePassword(ctx context.Context, req *connect.Request[ia
 	return connect.NewResponse(&iamv1.ChangePasswordResponse{}), nil
 }
 
+// VerifyPassword re-checks the principal's password before a destructive
+// action (ADR 0021), in whichever mode sign-in runs.
+func (h *IAMHandler) VerifyPassword(ctx context.Context, req *connect.Request[iamv1.VerifyPasswordRequest]) (*connect.Response[iamv1.VerifyPasswordResponse], error) {
+	if err := h.auth.VerifyPassword(ctx, req.Msg.GetAccessToken(), req.Msg.GetPassword()); err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&iamv1.VerifyPasswordResponse{}), nil
+}
+
 // --- admin surface (user/role CRUD) ----------------------------------------
 
 // InviteUser provisions a principal with no password and mails them the link

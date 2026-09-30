@@ -134,7 +134,12 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 
 	newID := func() string { return uuid.NewString() }
 	svc := service.NewAttendanceService(repo, enrollments, groups, publisher, tenantID, newID, log)
-	h := handler.NewAttendanceHandler(svc)
+	// The level-deletion trash (ADR 0021): the gateway's saga archives and
+	// restores through it, and the gateway's hourly sweep (always warm, unlike
+	// this scale-to-zero service) purges each batch past config's
+	// restorable_until through PurgeLevelBatch.
+	trash := service.NewLevelArchiveService(repo, time.Now)
+	h := handler.NewAttendanceHandler(svc).WithLevelArchive(trash)
 
 	mux := http.NewServeMux()
 	path, connectHandler := attendancev1connect.NewAttendanceServiceHandler(h, connect.WithRecover(recoverFn))

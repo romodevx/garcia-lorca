@@ -134,6 +134,15 @@ type IDTokenVerifier interface {
 	Verify(ctx context.Context, idToken string) (VerifiedIdentity, error)
 }
 
+// ProviderPasswordChecker re-checks a password at the external identity
+// provider, for the re-authentication a destructive action demands (ADR 0021).
+// A wrong password, an unknown or disabled account and a throttled attempt are
+// all KindUnauthorized; a provider that cannot be asked (network, bad key) is
+// KindInternal — never a silent pass.
+type ProviderPasswordChecker interface {
+	CheckPassword(ctx context.Context, email, password string) error
+}
+
 // IdentityProvisioner creates accounts at the external identity provider.
 //
 // Deliberately NO password parameter. An account is created without one and its

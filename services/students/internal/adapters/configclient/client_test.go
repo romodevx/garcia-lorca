@@ -11,6 +11,7 @@ import (
 	configv1 "github.com/garcia-lorca/gen/go/garcialorca/config/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/config/v1/configv1connect"
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/services/students/internal/adapters/configclient"
 )
 
@@ -147,7 +148,7 @@ func TestLevelOfGrade_MapsFieldsAndNotFound(t *testing.T) {
 	const gradeID, levelID = "90000000-0000-0000-0000-000000000001", "10000000-0000-0000-0000-000000000001"
 
 	t.Run("found returns the grade's level", func(t *testing.T) {
-		c := newClient(t, &stubConfigService{grade: &configv1.GradeLevel{Id: gradeID, LevelId: levelID}})
+		c := newClient(t, &stubConfigService{grade: &configv1.GradeLevel{Id: gradeID, LevelId: levelID}, level: &configv1.Level{Id: levelID}})
 		got, err := c.LevelOfGrade(context.Background(), gradeID)
 		if err != nil || got != levelID {
 			t.Fatalf("LevelOfGrade = (%q, %v)", got, err)
@@ -160,4 +161,40 @@ func TestLevelOfGrade_MapsFieldsAndNotFound(t *testing.T) {
 			t.Errorf("want KindNotFound, got %v", err)
 		}
 	})
+}
+
+// Review finding 4: a level whose deletion is running refuses every placement
+// that resolves it — through its id or through one of its grades.
+func TestLevelLookupsRefuseALevelBeingDeleted(t *testing.T) {
+	const gradeID, levelID = "90000000-0000-0000-0000-000000000001", "10000000-0000-0000-0000-000000000001"
+	cases := []struct {
+		name    string
+		status  configv1.LevelStatus
+		refused bool
+	}{
+		{"active", configv1.LevelStatus_LEVEL_STATUS_ACTIVE, false},
+		{"unspecified (an older config) is active", configv1.LevelStatus_LEVEL_STATUS_UNSPECIFIED, false},
+		{"deleting", configv1.LevelStatus_LEVEL_STATUS_DELETING, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newClient(t, &stubConfigService{
+				grade: &configv1.GradeLevel{Id: gradeID, LevelId: levelID},
+				level: &configv1.Level{Id: levelID, Name: "Kinder", Status: tc.status},
+			})
+			_, byID := c.LevelByID(context.Background(), levelID)
+			_, byGrade := c.LevelOfGrade(context.Background(), gradeID)
+			for _, err := range []error{byID, byGrade} {
+				if !tc.refused {
+					if err != nil {
+						t.Fatalf("unexpected refusal: %v", err)
+					}
+					continue
+				}
+				if levelarchive.CodeOf(err) != levelarchive.CodeLevelBeingDeleted || glerrors.KindOf(err) != glerrors.KindConflict {
+					t.Errorf("want LEVEL_BEING_DELETED conflict, got %v", err)
+				}
+			}
+		})
+	}
 }

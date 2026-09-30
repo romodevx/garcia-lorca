@@ -47,6 +47,7 @@ var migrationFiles = []string{
 	"../../../../migrations/attendance/0002_per_class_and_sessions.sql",
 	"../../../../migrations/attendance/0003_mark_revision.sql",
 	"../../../../migrations/attendance/0004_mark_group.sql",
+	"../../../../migrations/attendance/0005_level_deletion_archive.sql",
 }
 
 var (

@@ -53,6 +53,7 @@ type Level struct {
 	granularity EnrollmentGranularity
 	attendance  AttendanceMode
 	grading     GradingScale
+	deleting    bool
 }
 
 // NewLevel constructs a level. `id`, `tenantID`, and `name` are required, and
@@ -100,6 +101,17 @@ func (l Level) Granularity() EnrollmentGranularity { return l.granularity }
 
 // AttendanceMode returns how the level's groups take attendance.
 func (l Level) AttendanceMode() AttendanceMode { return l.attendance }
+
+// Deleting reports whether a level deletion's saga holds the level (ADR 0021):
+// writes that resolve it are refused with LEVEL_BEING_DELETED meanwhile.
+func (l Level) Deleting() bool { return l.deleting }
+
+// WithDeleting carries the stored lifecycle; only BeginLevelDeletion and its
+// compensation or restore change it, never a catalog edit.
+func (l Level) WithDeleting(deleting bool) Level {
+	l.deleting = deleting
+	return l
+}
 
 // WithAttendanceMode returns a copy of the level taking attendance in mode. An
 // unknown mode is KindInvalid; the receiver is never modified.

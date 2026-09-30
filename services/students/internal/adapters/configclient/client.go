@@ -20,6 +20,7 @@ import (
 	configv1 "github.com/garcia-lorca/gen/go/garcialorca/config/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/config/v1/configv1connect"
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/services/students/internal/domain"
 	"github.com/garcia-lorca/services/students/internal/ports"
 )
@@ -48,24 +49,43 @@ func New(baseURL string, httpClient connect.HTTPClient) *Client {
 }
 
 // LevelByID fetches a level from the school's catalog. A missing level is
-// glerrors.ErrNotFound.
+// glerrors.ErrNotFound; a level whose deletion is running is
+// levelarchive.LevelBeingDeleted (every caller is a write placing a pupil).
 func (c *Client) LevelByID(ctx context.Context, id string) (domain.Level, error) {
-	res, err := c.rpc.GetLevel(ctx, connect.NewRequest(&configv1.GetLevelRequest{Id: id}))
+	l, err := c.writableLevel(ctx, id)
 	if err != nil {
-		return domain.Level{}, mapCatalogErr(err, "level")
+		return domain.Level{}, err
 	}
-	l := res.Msg.GetLevel()
 	return domain.NewLevel(l.GetId(), l.GetName())
 }
 
 // LevelOfGrade returns the config level a grade belongs to. A missing grade is
-// glerrors.ErrNotFound.
+// glerrors.ErrNotFound. It is the lookup every placement (enroll, enroll into a
+// grade, transfer) resolves the level through, so it also refuses a level
+// whose deletion is running (levelarchive.LevelBeingDeleted, ADR 0021).
 func (c *Client) LevelOfGrade(ctx context.Context, gradeLevelID string) (string, error) {
 	res, err := c.rpc.GetGradeLevel(ctx, connect.NewRequest(&configv1.GetGradeLevelRequest{Id: gradeLevelID}))
 	if err != nil {
 		return "", mapCatalogErr(err, "grade level")
 	}
-	return res.Msg.GetGradeLevel().GetLevelId(), nil
+	l, err := c.writableLevel(ctx, res.Msg.GetGradeLevel().GetLevelId())
+	if err != nil {
+		return "", err
+	}
+	return l.GetId(), nil
+}
+
+// writableLevel fetches a level and refuses it while its deletion runs.
+func (c *Client) writableLevel(ctx context.Context, id string) (*configv1.Level, error) {
+	res, err := c.rpc.GetLevel(ctx, connect.NewRequest(&configv1.GetLevelRequest{Id: id}))
+	if err != nil {
+		return nil, mapCatalogErr(err, "level")
+	}
+	l := res.Msg.GetLevel()
+	if l.GetStatus() == configv1.LevelStatus_LEVEL_STATUS_DELETING {
+		return nil, levelarchive.LevelBeingDeleted()
+	}
+	return l, nil
 }
 
 // GroupByID fetches a group by id and projects it to the students-owned view

@@ -74,6 +74,15 @@ locals {
     }
   })
 
+  # gateway additionally needs the level-deletion preview key (ADR 0021): one
+  # key shared by every instance, or previews go randomly stale across them.
+  gateway_secret_env = merge(local.common_secret_env, {
+    LEVEL_DELETION_TOKEN_KEY = {
+      secret_id = google_secret_manager_secret.level_deletion_token_key.secret_id
+      version   = "latest"
+    }
+  })
+
   # Gateway → internal service wiring. ENABLED_MODULES is the authoritative
   # module-visibility list the gateway enforces (default-deny); each *_BASE_URL
   # points at the internal service's Cloud Run URL. Mirrors docker-compose.yml
@@ -246,9 +255,10 @@ module "gateway" {
   cloudsql_instances = local.cloudsql_instances
   # gateway_env adds ENABLED_MODULES + one *_BASE_URL per internal service.
   env        = local.gateway_env
-  secret_env = local.common_secret_env
+  secret_env = local.gateway_secret_env
 
-  depends_on = [google_project_service.apis]
+  # A secret with no version yet fails the revision at "latest".
+  depends_on = [google_project_service.apis, google_secret_manager_secret_version.level_deletion_token_key]
 }
 
 # ---- iam: auth/identity, ALWAYS WARM --------------------------------------

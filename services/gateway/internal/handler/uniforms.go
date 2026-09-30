@@ -46,12 +46,55 @@ type UniformsService interface {
 // RequireAllPermissions so the refusal names the missing permission — otherwise a
 // cashier keys in six lines with a parent waiting and eats a bare 403.
 type UniformsHandler struct {
-	svc UniformsService
+	svc    UniformsService
+	levels LevelReader
+}
+
+// LevelReader reads one config level, with its deletion status.
+type LevelReader interface {
+	GetLevel(ctx context.Context, id string) (client.LevelResult, error)
 }
 
 // NewUniformsHandler wires the handler to a uniforms service.
 func NewUniformsHandler(svc UniformsService) *UniformsHandler {
 	return &UniformsHandler{svc: svc}
+}
+
+// WithLevelGuard makes garment writes refuse a level whose deletion runs (409
+// LEVEL_BEING_DELETED, ADR 0021). uniforms never looks a level up itself — a
+// garment's level is an id it only shape-checks — so this edge, the only
+// caller that writes garments, makes the one lookup.
+func (h *UniformsHandler) WithLevelGuard(levels LevelReader) *UniformsHandler {
+	h.levels = levels
+	return h
+}
+
+// The freeze refusal, as the uniforms envelope carries it.
+const (
+	codeLevelBeingDeleted = "LEVEL_BEING_DELETED"
+	msgLevelBeingDeleted  = "Este nivel se está eliminando; espera a que termine o restáuralo desde la Papelera"
+)
+
+// levelWritable answers false (having written the refusal) when levelID names
+// a level being deleted. No level, an unknown one (uniforms judges it) or a
+// guard not wired pass.
+func (h *UniformsHandler) levelWritable(w http.ResponseWriter, r *http.Request, levelID string) bool {
+	if h.levels == nil || strings.TrimSpace(levelID) == "" {
+		return true
+	}
+	level, err := h.levels.GetLevel(r.Context(), levelID)
+	switch {
+	case err != nil && connect.CodeOf(err) == connect.CodeNotFound:
+		return true
+	case err != nil:
+		writeUniformsError(w, err)
+		return false
+	case level.Deleting:
+		w.Header().Set(errorCodeHeader, codeLevelBeingDeleted)
+		middleware.WriteError(w, http.StatusConflict, codeLevelBeingDeleted, msgLevelBeingDeleted, nil)
+		return false
+	}
+	return true
 }
 
 // --- catalogue ---------------------------------------------------------------
@@ -85,7 +128,7 @@ type createItemRequest struct {
 // CreateItem: POST /api/v1/uniforms/items
 func (h *UniformsHandler) CreateItem(w http.ResponseWriter, r *http.Request) {
 	var body createItemRequest
-	if !decodeBody(w, r, &body) {
+	if !decodeBody(w, r, &body) || !h.levelWritable(w, r, body.LevelID) {
 		return
 	}
 	item, err := h.svc.CreateItem(r.Context(), client.CreateItemInput{
@@ -111,7 +154,7 @@ type updateItemRequest struct {
 // UpdateItem: PUT /api/v1/uniforms/items/{id}
 func (h *UniformsHandler) UpdateItem(w http.ResponseWriter, r *http.Request) {
 	var body updateItemRequest
-	if !decodeBody(w, r, &body) {
+	if !decodeBody(w, r, &body) || !h.levelWritable(w, r, body.LevelID) {
 		return
 	}
 	item, err := h.svc.UpdateItem(r.Context(), client.UpdateItemInput{

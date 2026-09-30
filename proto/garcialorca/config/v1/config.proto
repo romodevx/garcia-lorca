@@ -157,6 +157,71 @@ service ConfigService {
   // keeping the assignment id. NotFound if the assignment does not exist;
   // InvalidArgument if the teacher does not.
   rpc ReassignTeachingAssignment(ReassignTeachingAssignmentRequest) returns (ReassignTeachingAssignmentResponse);
+
+  // --- level deletion (ADR 0021) ---
+  // PreviewLevelDeletion resolves a level's structure across ALL cycles (the
+  // ids the other services need) and counts what config would archive.
+  rpc PreviewLevelDeletion(PreviewLevelDeletionRequest) returns (PreviewLevelDeletionResponse);
+  // ArchiveLevel moves the level and its structure into config's deletion
+  // archive and records the batch in level_deletions, in ONE transaction. It is
+  // the saga's LAST step. Idempotent per batch_id.
+  rpc ArchiveLevel(ArchiveLevelRequest) returns (ArchiveLevelResponse);
+  // RestoreLevelBatch puts the structure back (the saga's FIRST restore step).
+  // A level whose name is taken now is refused whole: AlreadyExists with
+  // X-Error-Code LEVEL_NAME_TAKEN, nothing restored.
+  rpc RestoreLevelBatch(RestoreLevelBatchRequest) returns (RestoreLevelBatchResponse);
+  // MarkLevelDeletionRestored closes a batch once every service restored it.
+  rpc MarkLevelDeletionRestored(MarkLevelDeletionRestoredRequest) returns (MarkLevelDeletionRestoredResponse);
+  // ListLevelDeletions lists the trash: batches still deleted (not restored,
+  // not purged), newest first.
+  rpc ListLevelDeletions(ListLevelDeletionsRequest) returns (ListLevelDeletionsResponse);
+  // GetLevelDeletion fetches one batch. NotFound if unknown.
+  rpc GetLevelDeletion(GetLevelDeletionRequest) returns (GetLevelDeletionResponse);
+  // PurgeLevelArchives hard-deletes archives past the 7-day retention and marks
+  // their batches purged. Superseded by the gateway's sweep (SweepLevelDeletions
+  // + PurgeLevelBatch + MarkLevelDeletionPurged); kept for compatibility.
+  rpc PurgeLevelArchives(PurgeLevelArchivesRequest) returns (PurgeLevelArchivesResponse);
+  // BeginLevelDeletion is the saga's FIRST step and its lock: it sets the
+  // level's status to DELETING (every write that resolves the level is then
+  // refused with LEVEL_BEING_DELETED) and records the batch in level_deletions
+  // (status deleting) with restorable_until = the database's now() + 7 days —
+  // the one clock of the trash. The confirm token is single-use: its hash is
+  // stored and a reuse is refused. Refusals: NotFound (unknown level),
+  // AlreadyExists + X-Error-Code DELETION_IN_PROGRESS (the level is already
+  // being deleted), AlreadyExists + PREVIEW_STALE (the token was used).
+  // Idempotent per batch_id.
+  rpc BeginLevelDeletion(BeginLevelDeletionRequest) returns (BeginLevelDeletionResponse);
+  // CancelLevelDeletion closes a batch whose compensation FULLY succeeded:
+  // nothing was deleted. The level (if it exists) goes back to ACTIVE.
+  rpc CancelLevelDeletion(CancelLevelDeletionRequest) returns (CancelLevelDeletionResponse);
+  // FailLevelDeletion records a batch whose compensation did NOT fully succeed
+  // as failed_partial, naming the steps whose archives may still hold rows and
+  // what was skipped. The trash lists it; restoring it recovers what was
+  // deleted. The level (if it exists) stays DELETING until then.
+  rpc FailLevelDeletion(FailLevelDeletionRequest) returns (FailLevelDeletionResponse);
+  // SweepLevelDeletions is the retention sweep's question. It first turns every
+  // batch stuck in `deleting` for longer than a saga can last (a gateway that
+  // died mid-saga) into failed_partial with every step pending, then answers
+  // the batches whose restorable_until has passed (database clock) and are not
+  // purged yet.
+  rpc SweepLevelDeletions(SweepLevelDeletionsRequest) returns (SweepLevelDeletionsResponse);
+  // MarkLevelDeletionPurged closes a batch every service has purged.
+  rpc MarkLevelDeletionPurged(MarkLevelDeletionPurgedRequest) returns (MarkLevelDeletionPurgedResponse);
+  // PurgeLevelBatch hard-deletes config's archive rows of one batch.
+  // Idempotent: an unknown or already purged batch purges nothing.
+  rpc PurgeLevelBatch(PurgeLevelBatchRequest) returns (PurgeLevelBatchResponse);
+  // BeginLevelRestore marks a batch RESTORING before a restore's first step —
+  // compare-and-set from deleted | failed_partial | restored_partial, window
+  // judged on the database's clock — so the sweep never purges it mid-way.
+  // Refusals: NotFound (not in the trash), AlreadyExists + X-Error-Code
+  // RESTORE_IN_PROGRESS, PermissionDenied + TRASH_EXPIRED (the level a
+  // failed_partial batch still froze is let go). The answer's restoring_from is
+  // the status the restore started from.
+  rpc BeginLevelRestore(BeginLevelRestoreRequest) returns (BeginLevelRestoreResponse);
+  // AbandonLevelRestore puts a batch whose restore failed back to its
+  // restoring_from. A batch not restoring is answered as is. The sweep does
+  // the same to a batch restoring for longer than 30 minutes.
+  rpc AbandonLevelRestore(AbandonLevelRestoreRequest) returns (AbandonLevelRestoreResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -212,6 +277,16 @@ message Level {
   AttendanceMode attendance_mode = 8;
   // grading is the level's numeric grading scale (T6).
   GradingScale grading = 9;
+  // status is DELETING while a level deletion's saga runs (ADR 0021): writes
+  // that resolve the level are refused with LEVEL_BEING_DELETED.
+  LevelStatus status = 10;
+}
+
+// LevelStatus is a level's lifecycle (ADR 0021).
+enum LevelStatus {
+  LEVEL_STATUS_UNSPECIFIED = 0;
+  LEVEL_STATUS_ACTIVE = 1;
+  LEVEL_STATUS_DELETING = 2;
 }
 
 // GradingScale is how a level grades numerically. Marks are exact hundredths
@@ -849,4 +924,188 @@ message SetSchoolProfileRequest {
 
 message SetSchoolProfileResponse {
   SchoolProfile profile = 1;
+}
+
+// --- level deletion (ADR 0021) ---------------------------------------------
+
+// LevelArchiveCount is how many rows of one kind a level deletion touches.
+message LevelArchiveCount {
+  string kind = 1;
+  int64 count = 2;
+}
+
+// LevelRestoreSkip is rows of one kind a restore could not put back, and why.
+message LevelRestoreSkip {
+  string kind = 1;
+  int64 count = 2;
+  string reason = 3;
+}
+
+// LevelDeletion is one batch in the trash. status is deleting (saga in
+// flight) | deleted | failed_partial (the deletion failed and could not be fully
+// undone) | restored_partial (restored, but some rows did not fit and stay in
+// the trash) | restoring (a restore in flight) | restored | cancelled (failed
+// and fully undone) | purged.
+// restorable_until is deleted_at + 7 days, on the database's clock.
+message LevelDeletion {
+  string batch_id = 1;
+  string level_id = 2;
+  string level_name = 3;
+  repeated LevelArchiveCount counts = 4;
+  string deleted_by = 5;
+  string deleted_by_name = 6;
+  google.protobuf.Timestamp deleted_at = 7;
+  google.protobuf.Timestamp restorable_until = 8;
+  string status = 9;
+  // pending_steps (failed_partial only) are the services whose archives may
+  // still hold rows of this batch; a restore asks exactly these.
+  repeated string pending_steps = 10;
+  // skipped is what a compensation or a restore could not put back.
+  repeated LevelRestoreSkip skipped = 11;
+  // restoring_from (status restoring only) is where the running restore began
+  // and where a failed one falls back to.
+  string restoring_from = 12;
+}
+
+message PreviewLevelDeletionRequest {
+  string level_id = 1;
+}
+
+message PreviewLevelDeletionResponse {
+  string level_id = 1;
+  string level_name = 2;
+  repeated LevelArchiveCount counts = 3;
+  repeated string grade_level_ids = 4;
+  repeated string group_ids = 5;
+  repeated string subject_ids = 6;
+  repeated string term_ids = 7;
+  // level_status is DELETING while another deletion of it runs.
+  LevelStatus level_status = 8;
+}
+
+message ArchiveLevelRequest {
+  string batch_id = 1;
+  string level_id = 2;
+  // deleted_by / deleted_by_name are the verified principal (never the body).
+  string deleted_by = 3;
+  string deleted_by_name = 4;
+  // summary is what the other services archived; config adds its own counts
+  // and records the total in level_deletions.
+  repeated LevelArchiveCount summary = 5;
+}
+
+message ArchiveLevelResponse {
+  repeated LevelArchiveCount counts = 1;
+  LevelDeletion deletion = 2;
+}
+
+message RestoreLevelBatchRequest {
+  string batch_id = 1;
+}
+
+message RestoreLevelBatchResponse {
+  repeated LevelArchiveCount restored = 1;
+  repeated LevelRestoreSkip skipped = 2;
+}
+
+message MarkLevelDeletionRestoredRequest {
+  string batch_id = 1;
+  // partial: every service answered, but some rows did not fit; the batch
+  // stays in the trash as restored_partial so a retry can finish it.
+  bool partial = 2;
+}
+
+message MarkLevelDeletionRestoredResponse {
+  LevelDeletion deletion = 1;
+}
+
+message ListLevelDeletionsRequest {}
+
+message ListLevelDeletionsResponse {
+  repeated LevelDeletion deletions = 1;
+}
+
+message GetLevelDeletionRequest {
+  string batch_id = 1;
+}
+
+message GetLevelDeletionResponse {
+  LevelDeletion deletion = 1;
+}
+
+message PurgeLevelArchivesRequest {}
+
+message PurgeLevelArchivesResponse {
+  int64 purged_rows = 1;
+}
+
+message BeginLevelDeletionRequest {
+  string batch_id = 1;
+  string level_id = 2;
+  // token_hash is the SHA-256 (hex) of the confirm token: single use.
+  string token_hash = 3;
+  // deleted_by / deleted_by_name are the verified principal (never the body).
+  string deleted_by = 4;
+  string deleted_by_name = 5;
+}
+
+message BeginLevelDeletionResponse {
+  LevelDeletion deletion = 1;
+}
+
+message CancelLevelDeletionRequest {
+  string batch_id = 1;
+}
+
+message CancelLevelDeletionResponse {
+  LevelDeletion deletion = 1;
+}
+
+message FailLevelDeletionRequest {
+  string batch_id = 1;
+  repeated string pending_steps = 2;
+  repeated LevelRestoreSkip skipped = 3;
+}
+
+message FailLevelDeletionResponse {
+  LevelDeletion deletion = 1;
+}
+
+message SweepLevelDeletionsRequest {}
+
+message SweepLevelDeletionsResponse {
+  repeated LevelDeletion expired = 1;
+  int64 stalled = 2;
+}
+
+message MarkLevelDeletionPurgedRequest {
+  string batch_id = 1;
+}
+
+message MarkLevelDeletionPurgedResponse {
+  LevelDeletion deletion = 1;
+}
+
+message PurgeLevelBatchRequest {
+  string batch_id = 1;
+}
+
+message PurgeLevelBatchResponse {
+  int64 purged_rows = 1;
+}
+
+message BeginLevelRestoreRequest {
+  string batch_id = 1;
+}
+
+message BeginLevelRestoreResponse {
+  LevelDeletion deletion = 1;
+}
+
+message AbandonLevelRestoreRequest {
+  string batch_id = 1;
+}
+
+message AbandonLevelRestoreResponse {
+  LevelDeletion deletion = 1;
 }

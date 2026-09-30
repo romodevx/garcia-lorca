@@ -14,6 +14,7 @@ import (
 	gradesv1 "github.com/garcia-lorca/gen/go/garcialorca/grades/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/grades/v1/gradesv1connect"
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/services/grades/internal/domain"
 	"github.com/garcia-lorca/services/grades/internal/usecase"
 )
@@ -27,6 +28,7 @@ type GradesHandler struct {
 	monthly *usecase.MonthlyGradesService
 	periods PeriodsUseCase
 	health  *usecase.HealthService
+	levels  *usecase.LevelArchiveService
 }
 
 // NewGradesHandler wires the handler to the term grades, monthly grades,
@@ -117,6 +119,8 @@ func connectErr(err error) *connect.Error {
 	ce := connectErrForKind(err)
 	if code := domain.RefusalCodeOf(err); code != "" {
 		ce.Meta().Set(ErrorCodeMeta, string(code))
+	} else if code := levelarchive.CodeOf(err); code != "" {
+		ce.Meta().Set(ErrorCodeMeta, code)
 	}
 	return ce
 }

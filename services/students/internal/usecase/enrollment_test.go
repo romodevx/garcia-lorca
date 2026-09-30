@@ -7,6 +7,7 @@ import (
 	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/services/students/internal/domain"
 	"github.com/garcia-lorca/services/students/internal/ports"
 	"github.com/garcia-lorca/services/students/internal/usecase"
@@ -165,6 +166,8 @@ type fakeCatalog struct {
 	gradeGroups map[string][]ports.GroupSeats
 	// gradeLevels maps a grade to the config level it belongs to.
 	gradeLevels map[string]string
+	// deleting marks config levels whose deletion is in flight (ADR 0021).
+	deleting map[string]bool
 }
 
 // Config level ids the fixtures use: seedStudent places pupils in primaria.
@@ -184,6 +187,9 @@ func newCatalog() *fakeCatalog {
 
 func (c *fakeCatalog) LevelOfGrade(_ context.Context, gradeLevelID string) (string, error) {
 	if l, ok := c.gradeLevels[gradeLevelID]; ok {
+		if c.deleting[l] {
+			return "", levelarchive.LevelBeingDeleted()
+		}
 		return l, nil
 	}
 	return "", glerrors.ErrNotFound
@@ -743,5 +749,70 @@ func TestEnrollIntoGradeRecordsTheGroupWithoutEnrolling(t *testing.T) {
 	// full or one that had never been created.
 	if saved.GradeGroup() != "1° B" {
 		t.Errorf("persisted grade group = %q, want 1° B — the record must say where they landed", saved.GradeGroup())
+	}
+}
+
+// --- a level being deleted (ADR 0021) --------------------------------------
+
+// Review finding 4: while a level's deletion runs, no path may place a pupil in
+// one of its groups — the saga already archived (or is about to archive) its
+// enrollments, and a new one would be left pointing at a deleted group. The
+// refusal holds for a legacy pupil with no level too.
+func TestPlacementsIntoALevelBeingDeletedAreRefused(t *testing.T) {
+	cases := []struct {
+		name   string
+		legacy bool
+		run    func(svc *usecase.EnrollmentService, e domain.Enrollment) error
+	}{
+		{"enroll", false, func(svc *usecase.EnrollmentService, _ domain.Enrollment) error {
+			_, err := svc.Enroll(context.Background(), "stu-2", "grp-2", "")
+			return err
+		}},
+		{"enroll a legacy pupil", true, func(svc *usecase.EnrollmentService, _ domain.Enrollment) error {
+			_, err := svc.Enroll(context.Background(), "stu-2", "grp-2", "")
+			return err
+		}},
+		{"enroll into grade", false, func(svc *usecase.EnrollmentService, _ domain.Enrollment) error {
+			_, err := svc.EnrollIntoGrade(context.Background(), "stu-2", "gl-k")
+			return err
+		}},
+		{"transfer", false, func(svc *usecase.EnrollmentService, e domain.Enrollment) error {
+			_, err := svc.Transfer(context.Background(), e.ID(), "grp-3", "x")
+			return err
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, students, enrolls, catalog, pub := newEnrollService(t)
+			e := enrolledStudent(t, svc, students, catalog)
+			catalog.gradeLevels["gl-doomed"] = primariaLevel
+			catalog.groups["grp-2"] = groupRef{ID: "grp-2", CycleID: "cyc-98", GradeLevelID: "gl-k"}
+			catalog.groups["grp-3"] = groupRef{ID: "grp-3", CycleID: "cyc-99", GradeLevelID: "gl-doomed", Capacity: 30}
+			catalog.gradeGroups["gl-k"] = []ports.GroupSeats{{ID: "grp-2", Name: "1° A", CycleID: "cyc-98", Capacity: 30}}
+			seedStudent(t, students, "stu-2")
+			if tc.legacy {
+				students.byID["stu-2"] = domain.Rehydrate(domain.NewApplicantParams{
+					ID: "stu-2", TenantID: tenant, FirstName: "Beto", LastName: "Legado",
+				}, domain.AdmissionAccepted)
+			} else {
+				students.byID["stu-2"] = domain.Rehydrate(domain.NewApplicantParams{
+					ID: "stu-2", TenantID: tenant, FirstName: "Beto", LastName: "K",
+					Level: domain.RestoreLevel(kinderLevel, "Kinder"),
+				}, domain.AdmissionAccepted)
+			}
+			catalog.deleting = map[string]bool{kinderLevel: true, primariaLevel: tc.name == "transfer"}
+			created, published := len(enrolls.createSeen), len(pub.enrolled)
+
+			err := tc.run(svc, e)
+			if got := levelarchive.CodeOf(err); got != levelarchive.CodeLevelBeingDeleted {
+				t.Fatalf("code = %q (err %v), want %s", got, err, levelarchive.CodeLevelBeingDeleted)
+			}
+			if glerrors.KindOf(err) != glerrors.KindConflict {
+				t.Errorf("kind = %v, want conflict (409)", glerrors.KindOf(err))
+			}
+			if len(enrolls.createSeen) != created || len(pub.enrolled) != published || len(enrolls.transfers) != 0 {
+				t.Error("nothing may be written or published into a level being deleted")
+			}
+		})
 	}
 }

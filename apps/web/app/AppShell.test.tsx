@@ -52,6 +52,14 @@ vi.mock("./config/api", async (importOriginal) => ({
   listLabelledGroups: vi.fn().mockResolvedValue([]),
   listLevels: vi.fn().mockResolvedValue([]),
   listGradeLevels: vi.fn().mockResolvedValue([]),
+  getSchoolProfile: vi.fn().mockResolvedValue({ profile: { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "" }, found: false }),
+  listLevelTrash: vi.fn().mockResolvedValue([]),
+  getLevelDeletionPreview: vi.fn().mockResolvedValue({
+    levelId: "l1", levelName: "PRIMARIA", empty: true, confirmToken: "tok", expiresAt: "2026-09-28T18:00:00Z",
+    counts: { gradeLevels: 0, groups: 0, subjects: 0, terms: 0, teachingAssignments: 0, students: 0, enrollments: 0, attendanceMarks: 0, monthlyGrades: 0, reportCards: 0, tuitionPlans: 0, uniformItems: 0, schoolEvents: 0 },
+    keeps: { charges: 0, payments: 0 },
+  }),
+  deleteLevel: vi.fn().mockResolvedValue({ batchId: "b1", deletedAt: "2026-09-28T17:00:00Z", restorableUntil: "2026-10-05T17:00:00Z", counts: {} }),
 }));
 
 vi.mock("./teachers/api", () => ({
@@ -731,5 +739,55 @@ describe("la guardia de módulos", () => {
 
     expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
     expect(fakePath()).toBe(path);
+  });
+});
+
+describe("eliminar un nivel", () => {
+  const DIRECTOR_ME = { ...OWNER_ME, permissions: [...OWNER_ME.permissions, "config:write", "levels:delete"] };
+
+  it("tiene su propia dirección, sólo para quien puede eliminar", async () => {
+    resetFakeRouter("/configuracion/niveles/l1/eliminar");
+    mockMe.mockResolvedValue(DIRECTOR_ME);
+    render(
+      <Providers flags={{ module_config: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    expect(await screen.findByRole("heading", { name: "Eliminar nivel PRIMARIA" })).toBeInTheDocument();
+  });
+
+  it("sin levels:delete, la dirección pinta Configuración y no el borrado", async () => {
+    resetFakeRouter("/configuracion/niveles/l1/eliminar");
+    mockMe.mockResolvedValue(OWNER_ME);
+    render(
+      <Providers flags={{ module_config: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    expect(await screen.findByRole("heading", { name: "Configuración académica" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Eliminar nivel/ })).toBeNull();
+  });
+
+  it("al terminar vuelve a Configuración con el aviso de la Papelera", async () => {
+    resetFakeRouter("/configuracion/niveles/l1/eliminar");
+    mockMe.mockResolvedValue(DIRECTOR_ME);
+    const user = userEvent.setup();
+    render(
+      <Providers flags={{ module_config: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Continuar" }));
+    await user.type(screen.getByLabelText("Escribe el nombre del nivel para confirmar: PRIMARIA"), "primaria");
+    await user.click(screen.getByRole("button", { name: "Continuar" }));
+    await user.type(screen.getByLabelText("Tu contraseña de director"), "secreto");
+    await user.click(screen.getByRole("button", { name: "Eliminar nivel PRIMARIA" }));
+
+    expect(await screen.findByRole("heading", { name: "Configuración académica" })).toBeInTheDocument();
+    expect(fakePath()).toBe("/configuracion");
+    expect(screen.getByText("Nivel eliminado. Puedes restaurarlo desde la Papelera hasta el 5 de octubre de 2026.")).toBeInTheDocument();
   });
 });

@@ -66,6 +66,31 @@ service AttendanceService {
   // "present" from "nobody took the list"). Both bounds are required and span at
   // most 62 days; at most 20 group ids per call. Newest first, at most 2000 rows.
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+
+  // --- level deletion (ADR 0021) ---
+  // PreviewLevelDeletion counts what deleting a level would archive in this
+  // service, without changing anything. The scope comes from config (structure
+  // ids) and students (enrollment/student ids); each service uses the ids it
+  // owns data for.
+  rpc PreviewLevelDeletion(PreviewLevelDeletionRequest) returns (PreviewLevelDeletionResponse);
+  // ArchiveLevel moves this service's rows of the level into its deletion
+  // archive (a JSONB copy, then DELETE) inside ONE tenant-bound transaction.
+  // Idempotent per batch_id: a repeated call answers the first call's counts.
+  rpc ArchiveLevel(ArchiveLevelRequest) returns (ArchiveLevelResponse);
+  // RestoreLevelBatch puts a batch back in dependency order inside ONE
+  // transaction, skipping rows that now conflict and reporting them.
+  // Converges on retry: rows put back leave the archive, rows that do not fit
+  // stay archived (until the purge) and a retry tries them again; a batch with
+  // nothing left answers its last report. NotFound when this service holds no
+  // archive for the batch (never archived, or purged) — never a silent success.
+  rpc RestoreLevelBatch(RestoreLevelBatchRequest) returns (RestoreLevelBatchResponse);
+  // PurgeLevelArchives hard-deletes archives past the 7-day retention. The
+  // retention is fixed server-side: no caller can purge fresh trash.
+  rpc PurgeLevelArchives(PurgeLevelArchivesRequest) returns (PurgeLevelArchivesResponse);
+  // PurgeLevelBatch hard-deletes this service's archive rows of one batch, when
+  // the gateway's sweep finds the batch past its restorable_until (config's
+  // clock, ADR 0021). Idempotent: an unknown batch purges nothing.
+  rpc PurgeLevelBatch(PurgeLevelBatchRequest) returns (PurgeLevelBatchResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -257,4 +282,76 @@ message AbsenceRecorded {
   string subject_name = 8;
   // previous_status: see AttendanceMarked.previous_status (late → absent).
   string previous_status = 9;
+}
+
+// --- level deletion (ADR 0021) ---------------------------------------------
+
+// LevelScope is everything a level deletion reaches, resolved by the gateway
+// from config (structure) and students (people). Every id is a uuid; a service
+// reads only the fields it owns data for.
+message LevelScope {
+  string level_id = 1;
+  repeated string grade_level_ids = 2;
+  repeated string group_ids = 3;
+  repeated string subject_ids = 4;
+  repeated string term_ids = 5;
+  repeated string enrollment_ids = 6;
+  repeated string student_ids = 7;
+}
+
+// LevelArchiveCount is how many rows of one kind a level deletion touches.
+message LevelArchiveCount {
+  string kind = 1;
+  int64 count = 2;
+}
+
+// LevelRestoreSkip is rows of one kind a restore could not put back, and why.
+message LevelRestoreSkip {
+  string kind = 1;
+  int64 count = 2;
+  string reason = 3;
+}
+
+message PreviewLevelDeletionRequest {
+  LevelScope scope = 1;
+}
+
+message PreviewLevelDeletionResponse {
+  repeated LevelArchiveCount counts = 1;
+}
+
+message ArchiveLevelRequest {
+  // batch_id is the saga's idempotency key (a uuid minted by the gateway).
+  string batch_id = 1;
+  LevelScope scope = 2;
+}
+
+message ArchiveLevelResponse {
+  repeated LevelArchiveCount counts = 1;
+}
+
+message RestoreLevelBatchRequest {
+  string batch_id = 1;
+  // skip_enrollment_ids are enrollments students could NOT restore: their rows
+  // stay archived (reported as skipped) instead of coming back orphaned.
+  repeated string skip_enrollment_ids = 2;
+}
+
+message RestoreLevelBatchResponse {
+  repeated LevelArchiveCount restored = 1;
+  repeated LevelRestoreSkip skipped = 2;
+}
+
+message PurgeLevelArchivesRequest {}
+
+message PurgeLevelArchivesResponse {
+  int64 purged_rows = 1;
+}
+
+message PurgeLevelBatchRequest {
+  string batch_id = 1;
+}
+
+message PurgeLevelBatchResponse {
+  int64 purged_rows = 1;
 }

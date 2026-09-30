@@ -153,3 +153,24 @@ describe("when the refresh merely FAILS", () => {
     stop();
   });
 });
+
+describe("a refused re-entered password is not a dead session", () => {
+  // Deleting a level asks for the director's password again. A wrong one comes
+  // back as 401 + X-Error-Code: REAUTH_FAILED. Treating that as an expired
+  // token rotated the session and replayed the delete — a second wrong-password
+  // attempt nobody typed.
+  it("hands REAUTH_FAILED back without refreshing or retrying", async () => {
+    const lost = vi.fn();
+    const off = onSessionLost(lost);
+    const fetchMock = vi.fn().mockResolvedValue(new Response("Contraseña incorrecta", { status: 401, headers: { "X-Error-Code": "REAUTH_FAILED" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const out = await authFetch("http://localhost:8080/api/v1/config/levels/l1/delete", { method: "POST" });
+
+    expect(out.status).toBe(401);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(lost).not.toHaveBeenCalled();
+    off();
+    vi.unstubAllGlobals();
+  });
+});

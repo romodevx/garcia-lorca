@@ -13,6 +13,7 @@ import (
 	"golang.org/x/text/language"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/services/grades/internal/domain"
 	"github.com/garcia-lorca/services/grades/internal/ports"
 )
@@ -285,6 +286,9 @@ func (s *PeriodsService) Close(ctx context.Context, termID string, force bool, a
 	if err != nil {
 		return CloseResult{}, err
 	}
+	if view.catalog.Deleting {
+		return CloseResult{}, levelarchive.LevelBeingDeleted()
+	}
 	if !view.catalog.GradingEnabled {
 		return CloseResult{}, domain.Conflict(domain.CodeLevelNotGraded, msgGradingDisabled)
 	}
@@ -348,6 +352,9 @@ func (s *PeriodsService) Reopen(ctx context.Context, termID, actorID string) (do
 	if err != nil {
 		return "", err
 	}
+	if err := s.refuseDeletingLevel(ctx, term); err != nil {
+		return "", err
+	}
 	var reopened domain.PeriodClosure
 	err = s.periods.WithPeriodLock(ctx, termID, func(ctx context.Context, tx ports.PeriodTx) error {
 		current, found, err := tx.Closure(ctx)
@@ -370,6 +377,20 @@ func (s *PeriodsService) Reopen(ctx context.Context, termID, actorID string) (do
 		slog.String("actor_id", actorID),
 		slog.Int("version", reopened.Version()))
 	return reopened.Status(), nil
+}
+
+// refuseDeletingLevel refuses a write on a period whose level is being
+// deleted (LEVEL_BEING_DELETED, ADR 0021): the level's catalog carries
+// config's status.
+func (s *PeriodsService) refuseDeletingLevel(ctx context.Context, term ports.TermRef) error {
+	catalog, err := s.catalog.LevelCatalog(ctx, term.CycleID, term.LevelID)
+	if err != nil {
+		return err
+	}
+	if catalog.Deleting {
+		return levelarchive.LevelBeingDeleted()
+	}
+	return nil
 }
 
 // refuseClosed answers ALREADY_CLOSED before any RPC is spent on a period

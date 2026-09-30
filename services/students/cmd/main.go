@@ -252,7 +252,12 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	notes := usecase.NewNoteService(repo, repo, tenantID, newID, time.Now)
 	// The virtual card's codes: 128 bits from the operating system's source.
 	cards := usecase.NewCardService(repo, repo, tenantID, newID, cardRandom, time.Now)
-	handler := grpcadapter.NewStudentsHandler(svc, enroll, guardians, health).WithNotes(notes).WithCards(cards)
+	// Students' step of a level deletion (ADR 0021). Its trash is purged by
+	// the gateway's hourly sweep (always warm, unlike this scale-to-zero
+	// service) through PurgeLevelBatch, on config's restorable_until.
+	levels := usecase.NewLevelArchiveService(repo, time.Now)
+	handler := grpcadapter.NewStudentsHandler(svc, enroll, guardians, health).
+		WithNotes(notes).WithCards(cards).WithLevelArchive(levels)
 
 	mux := http.NewServeMux()
 	path, h := studentsv1connect.NewStudentsServiceHandler(handler, connect.WithRecover(recoverFn))

@@ -16,6 +16,9 @@ import { canEditTeachingLoad, canGrantTeacherAccess, canListUsers } from "./teac
 import { UniformsScreen } from "./_screens/uniforms/UniformsScreen";
 import { FinanceScreen } from "./_screens/finance/FinanceScreen";
 import { Catalog } from "./_screens/config/Catalog";
+import { LevelDeleteScreen } from "./_screens/config/levelDeletion/LevelDeleteScreen";
+import { clearLevelNotice, leaveLevelNotice, peekLevelNotice } from "./_screens/config/levelDeletion/pendingNotice";
+import { canDeleteLevels } from "./config/permissions";
 import { AdminScreen } from "./_screens/admin/AdminScreen";
 import { StudentEditScreen } from "./_screens/students/StudentEditScreen";
 import { StudentsScreen } from "./_screens/students/StudentsScreen";
@@ -422,6 +425,25 @@ export function AppShell(): ReactElement {
   const canEditStudents = principal?.permissions?.includes("students:update") === true;
   const editStudent = (studentId: string): void => go({ screen: "studentEdit", studentId });
   const openTeacherLoad = (teacherId: string): void => go({ screen: "teacherLoad", teacherId });
+  // Owner-only (levels:delete). UX only: the gateway refuses the delete without it.
+  const mayDeleteLevels = canDeleteLevels(principal?.permissions);
+  const openLevelDelete = (levelId: string): void => go({ screen: "levelDelete", levelId });
+  // What a finished deletion tells Configuración; it belongs to that one visit.
+  // Next remounts this shell on the route change, so the sentence travels in
+  // pendingNotice (module scope) and the new shell picks it up once.
+  const [configNotice, setConfigNotice] = useState<string | undefined>(peekLevelNotice);
+  useEffect(() => {
+    if (peekLevelNotice() !== undefined) clearLevelNotice();
+  }, []);
+  const onConfigScreens = view.screen === "config" || view.screen === "levelDelete";
+  useEffect(() => {
+    if (!onConfigScreens) setConfigNotice(undefined);
+  }, [onConfigScreens]);
+  const finishLevelDelete = (message: string): void => {
+    leaveLevelNotice(message);
+    setConfigNotice(message);
+    go({ screen: "config" });
+  };
   const open = useCallback((id: string, _intent?: string): void => {
     if (id === "finance") {
       go({ screen: "finance" });
@@ -568,9 +590,12 @@ export function AppShell(): ReactElement {
           // navigation from dead-ending. (Backend 404 is authoritative.)
           <ModulePlaceholder m={MODULES.find((m) => m.id === "announcements") as ModuleDef} onBack={home} />
         ))}
-      {view.screen === "config" &&
+      {view.screen === "levelDelete" && configEnabled && mayDeleteLevels && (
+        <LevelDeleteScreen key={view.levelId} levelId={view.levelId} onBack={() => go({ screen: "config" })} onDeleted={finishLevelDelete} />
+      )}
+      {(view.screen === "config" || (view.screen === "levelDelete" && !(configEnabled && mayDeleteLevels))) &&
         (configEnabled ? (
-          <Catalog onBack={home} />
+          <Catalog onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} notice={configNotice} />
         ) : (
           // Flag OFF: never render the catalog; show the friendly stub so
           // navigation never dead-ends. (Backend 404 is authoritative.)

@@ -53,6 +53,8 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"no-perm":       {"students:read"},
 		"config-writer": {"config:write", "config:read"},
 		"config-reader": {"config:read"},
+		// ADR 0021: deleting a level is the owner's alone (iam 0024).
+		"level-deleter": {"levels:delete"},
 		// M13: the staff roster left Configuración, so it answers to its own
 		// permission. A config holder must NOT reach it any more — that split is
 		// the whole point of the move.
@@ -622,6 +624,13 @@ func connectServer(t *testing.T, path string, handler http.Handler) *httptest.Se
 // flag map (keyed by full flag key, e.g. "module_students").
 func newTestGateway(t *testing.T, flags map[string]bool) *httptest.Server {
 	t.Helper()
+	return newTestGatewayWithReauth(t, flags, nil)
+}
+
+// newTestGatewayWithReauth is newTestGateway with the re-authentication
+// limiter under the test's control (nil: the same generous one as login).
+func newTestGatewayWithReauth(t *testing.T, flags map[string]bool, reauthLimiter *middleware.RateLimiter) *httptest.Server {
+	t.Helper()
 	iamPath, iamHandler := iamv1connect.NewIamServiceHandler(stubIAM{})
 	iamSrv := connectServer(t, iamPath, iamHandler)
 	stuPath, stuHandler := studentsv1connect.NewStudentsServiceHandler(stubStudents{})
@@ -642,6 +651,9 @@ func newTestGateway(t *testing.T, flags map[string]bool) *httptest.Server {
 	// A generous burst keeps the limiter out of the way of these route tests;
 	// rate-limit behavior is covered directly in the middleware package.
 	loginLimiter := middleware.NewRateLimiter(1000, 1000, time.Now)
+	if reauthLimiter == nil {
+		reauthLimiter = loginLimiter
+	}
 	mux := newMux(
 		client.NewIAMClient(iamSrv.URL, iamSrv.Client()),
 		client.NewAuthClient(iamSrv.URL, iamSrv.Client()),
@@ -658,6 +670,8 @@ func newTestGateway(t *testing.T, flags map[string]bool) *httptest.Server {
 		// harness passes the same instance because none of these tests probe
 		// rate limiting, and sharing keeps the fixture honest about that.
 		loginLimiter,
+		reauthLimiter,
+		[]byte("test-deletion-key-0123456789abcdef"),
 	)
 	gw := httptest.NewServer(mux)
 	t.Cleanup(gw.Close)

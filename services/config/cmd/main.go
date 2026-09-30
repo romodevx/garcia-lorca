@@ -71,7 +71,7 @@ func main() {
 
 // buildMux is the composition root: config → adapters → use case → Connect
 // handler, returning the mounted routes.
-func buildMux(_ *slog.Logger) (*http.ServeMux, error) {
+func buildMux(log *slog.Logger) (*http.ServeMux, error) {
 	// M04 is single-tenant: the tenant is fixed here (not derived from the
 	// caller), so RLS binds this one tenant for every request. When multi-tenant
 	// lands, the gateway must forward the authenticated principal's TenantID and
@@ -86,7 +86,11 @@ func buildMux(_ *slog.Logger) (*http.ServeMux, error) {
 	repo := pgadapter.NewRepository(db, tenantID)
 	catalog := usecase.NewCatalogService(repo, tenantID, func() string { return uuid.NewString() })
 	health := usecase.NewHealthService(serviceName)
-	handler := grpcadapter.NewConfigHandler(catalog, health)
+	// The level trash (ADR 0021). Its retention sweep runs in the gateway
+	// (always warm), batch by batch on restorable_until; this scale-to-zero
+	// service keeps no ticker of its own.
+	trash := usecase.NewLevelDeletionService(repo, time.Now)
+	handler := grpcadapter.NewConfigHandler(catalog, health).WithLevelDeletion(trash)
 
 	mux := http.NewServeMux()
 	path, h := configv1connect.NewConfigServiceHandler(handler, connect.WithRecover(recoverFn))

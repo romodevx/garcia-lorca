@@ -188,9 +188,9 @@ func TestLevelOfGroupToleratesAnUnusedScale(t *testing.T) {
 func TestLevelIDOfGroupIgnoresTheScale(t *testing.T) {
 	stub := catalogStub()
 	stub.levels["lvl-1"].Grading = nil
-	id, err := newCatalogClient(t, stub).LevelIDOfGroup(context.Background(), "grp-1")
+	key, err := newCatalogClient(t, stub).LevelIDOfGroup(context.Background(), "grp-1")
 	require.NoError(t, err)
-	assert.Equal(t, "lvl-1", id)
+	assert.Equal(t, "lvl-1", key.ID)
 	_, err = newCatalogClient(t, stub).LevelIDOfGroup(context.Background(), "ghost")
 	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err))
 }
@@ -312,4 +312,33 @@ func TestListTermsProjectsMonths(t *testing.T) {
 	stub.terms = []*configv1.Term{{Id: "bad", Months: []string{"sept"}}}
 	_, err = newCatalogClient(t, stub).ListTerms(context.Background(), "cyc-1", "")
 	assert.Equal(t, glerrors.KindInternal, glerrors.KindOf(err), "a malformed month from config is not silently dropped")
+}
+
+// Review finding 4: config's level status travels with the lookup every write
+// path already makes, through both projections.
+func TestLevelLookupsCarryTheDeletingStatus(t *testing.T) {
+	for name, status := range map[string]configv1.LevelStatus{
+		"deleting": configv1.LevelStatus_LEVEL_STATUS_DELETING,
+		"active":   configv1.LevelStatus_LEVEL_STATUS_ACTIVE,
+		"unset":    configv1.LevelStatus_LEVEL_STATUS_UNSPECIFIED,
+	} {
+		t.Run(name, func(t *testing.T) {
+			stub := catalogStub()
+			stub.levels["lvl-1"].Status = status
+			c := newCatalogClient(t, stub)
+			want := status == configv1.LevelStatus_LEVEL_STATUS_DELETING
+
+			ref, err := c.LevelOfGroup(context.Background(), "grp-1")
+			require.NoError(t, err)
+			assert.Equal(t, want, ref.Deleting)
+
+			key, err := c.LevelIDOfGroup(context.Background(), "grp-1")
+			require.NoError(t, err)
+			assert.Equal(t, ports.LevelKey{ID: "lvl-1", Deleting: want}, key)
+
+			catalog, err := c.LevelCatalog(context.Background(), "cyc-1", "lvl-1")
+			require.NoError(t, err)
+			assert.Equal(t, want, catalog.Deleting, "a period's close/reopen reads it here")
+		})
+	}
 }

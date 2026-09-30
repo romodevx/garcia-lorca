@@ -212,3 +212,38 @@ resource "google_secret_manager_secret" "expo_access_token" {
 
   depends_on = [google_project_service.apis]
 }
+
+# ---- Level-deletion token key (gateway, ADR 0021) --------------------------
+# HMAC key that signs the level-deletion preview token. It MUST be the same on
+# every gateway instance: without it each instance falls back to a per-process
+# random key, so a preview issued by one instance reads as PREVIEW_STALE on
+# another — random, unreproducible failures behind Cloud Run load balancing.
+# services/gateway/internal/config/deletion_key.go (>= 32 bytes).
+resource "google_secret_manager_secret" "level_deletion_token_key" {
+  project   = var.project_id
+  secret_id = "garcia-lorca-level-deletion-token-key-${var.env}"
+  labels    = local.labels
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "random_password" "level_deletion_token_key" {
+  length  = 64
+  special = false
+}
+
+resource "google_secret_manager_secret_version" "level_deletion_token_key" {
+  secret      = google_secret_manager_secret.level_deletion_token_key.id
+  secret_data = random_password.level_deletion_token_key.result
+
+  lifecycle {
+    # Rotating only invalidates previews in flight (the director re-opens the
+    # dialog), but keep it deliberate:
+    # terraform apply -replace=random_password.level_deletion_token_key
+    ignore_changes = [secret_data]
+  }
+}

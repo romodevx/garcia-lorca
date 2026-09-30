@@ -278,6 +278,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
+        '409': { $ref: '#/components/responses/LevelBeingDeleted' }
 
   /api/v1/uniforms/items/{id}/sizes:
     post:
@@ -1758,6 +1759,255 @@ paths:
               schema: { type: string }
               example: Ya hay calificaciones capturadas en este ciclo que no cumplirían la nueva escala
 
+  /api/v1/config/levels/{id}/deletion-preview:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [config-levels]
+      summary: What deleting a level would reach (step 1 of 3)
+      description: >
+        Resolves the level across EVERY cycle and every service (ADR 0021):
+        its structure (grade levels, groups, subjects, terms, teaching
+        assignments, school events aimed at it or its groups), its pupils (kept,
+        their level cleared), their enrollments in its groups, attendance,
+        monthly grades and report cards, the level's tuition plans and the
+        garments scoped to it (kept, left unresolved). `keeps` is the money that
+        STAYS untouched: charges and payments of those pupils. `empty` is true
+        when nothing academic hangs off the level (no grade levels, no pupils,
+        no enrollments). `confirmToken` signs exactly these counts for this
+        school and level for ten minutes; the delete refuses it once anything
+        changed. Changes nothing. Requires `levels:delete` (owner only);
+        `module_config`.
+      operationId: previewLevelDeletion
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The counts and the token to confirm them.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LevelDeletionPreview' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: '`DELETION_IN_PROGRESS`: this level is already being deleted, or its deletion failed half-way and waits in the trash.'
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: Ya se está eliminando este nivel; espera un momento y revisa la Papelera.
+
+  /api/v1/config/levels/{id}/delete:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [config-levels]
+      summary: Delete a level into the 7-day trash (steps 2 and 3 of 3)
+      description: >
+        Checks on the server, in this order: the preview token is well-formed
+        and unexpired (409 `PREVIEW_STALE`), `confirmName` is the level's name,
+        trimmed and case-insensitive (400 `NAME_MISMATCH`), and `password` is
+        the caller's, verified by iam exactly as sign-in verifies it in the
+        active mode — the local hash, or Identity Platform when it owns
+        credentials (401 `REAUTH_FAILED`). Throttled like a login (429). Then
+        the level is locked FIRST and, under the lock, the token must still
+        sign what would be deleted now; if anything changed the lock is
+        released and the answer is 409 `PREVIEW_STALE` (the token is spent).
+        Then a saga moves every service's rows into its own archive —
+        grades, attendance, finance (tuition plans only), uniforms, students
+        (enrollments; pupils kept with no level), config (structure, level last)
+        — and records the batch. The saga's first step locks the level in
+        config: while it runs, every write that resolves the level answers 409
+        `LEVEL_BEING_DELETED`, a second deletion answers 409
+        `DELETION_IN_PROGRESS`, and the confirm token cannot open another saga
+        (single use). If any step fails, the steps already done are restored on
+        a fresh context; when that fully succeeds the answer is 500 with nothing
+        deleted, otherwise 500 `DELETION_INCOMPLETE` naming the batch (folio),
+        which then shows in the trash as `failed_partial`. Charges, payments,
+        deposits, receipts and concepts are never touched. Requires
+        `levels:delete` (owner only); `module_config`.
+      operationId: deleteLevel
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeleteLevelRequest' }
+            example: { confirmName: Maternal, confirmToken: '1790000000.q1w2e3r4t5y6', password: '••••••••' }
+      responses:
+        '200':
+          description: Deleted into the trash; restorable until `restorableUntil`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LevelDeletionResult' }
+        '400':
+          description: >
+            `NAME_MISMATCH` when the typed name is not the level's; a malformed
+            body or id otherwise.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: El nombre no coincide con el del nivel
+        '401':
+          description: >
+            `REAUTH_FAILED`: the password is not the caller's. Without the
+            header, the session itself is missing or expired.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: La contraseña no es correcta
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: >
+            `PREVIEW_STALE`: the data changed since the preview, the preview
+            expired (10 minutes), or its token already opened a deletion.
+            Preview again. `DELETION_IN_PROGRESS`: this level is already being
+            deleted (a double click), or its deletion failed half-way and waits
+            in the trash.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: Los datos cambiaron; revisa el resumen de nuevo
+        '429':
+          description: Too many attempts; wait before trying again.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: too many requests
+        '500':
+          description: >
+            A service failed mid-way. Without a code: everything already
+            archived was restored and nothing is deleted. `DELETION_INCOMPLETE`:
+            the undo did not fully succeed; the sentence names the folio and the
+            batch is in the trash as `failed_partial` — restoring it recovers
+            what was deleted.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: No se pudo eliminar el nivel; no se borró nada. Intenta de nuevo
+
+  /api/v1/config/level-trash:
+    get:
+      tags: [config-levels]
+      summary: The deleted levels still in the trash
+      description: >
+        Batches in the trash, newest first: `deleted`, `failed_partial` (a
+        deletion that failed and could not be fully undone — restoring it
+        recovers what was deleted), `restored_partial` (restored, but some
+        rows did not fit; they stay here and a retry tries them again) and
+        `restoring` (a restore is running; it is never swept meanwhile). The
+        gateway sweeps the trash hourly and before this listing, on config's
+        `restorableUntil` (the database's clock). Requires `levels:delete` (owner only);
+        `module_config`.
+      operationId: listLevelTrash
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The trash.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/LevelTrashItem' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/config/level-trash/{batchId}/restore:
+    parameters:
+      - name: batchId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [config-levels]
+      summary: Bring a deleted level back
+      description: >
+        Restores config first (the structure must exist before anything that
+        points at it), then students, uniforms, finance, attendance and grades,
+        each in one transaction. Rows that now conflict are skipped and reported
+        in `skipped`, never forced: a pupil re-enrolled elsewhere in that cycle
+        keeps the new enrollment, a pupil given another level keeps it, a
+        garment re-scoped keeps its new level. Skipped rows stay in the trash
+        (`restored_partial`) until the window closes, so a retry after fixing
+        the clash brings them back; grades and attendance of enrollments that
+        could not come back stay archived too. Idempotent: a retry after a
+        partial failure (500) restores only what is missing. A
+        `failed_partial` batch restores only the services its deletion
+        reached. The batch is marked `restoring` before the first step, so the
+        retention sweep never purges it mid-way; a restore that fails puts it
+        back where it was. Requires
+        `levels:delete` (owner only); `module_config`.
+      operationId: restoreLevel
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      responses:
+        '200':
+          description: What came back and what was skipped, with why.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LevelRestoreResult' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: >
+            `LEVEL_NAME_TAKEN`: another level now has this name. Nothing was
+            restored. `RESTORE_IN_PROGRESS`: another restore of this batch is
+            running.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: Ya existe un nivel con ese nombre; renómbralo antes de restaurar
+        '410':
+          description: >
+            `TRASH_EXPIRED`: more than 7 days passed, or the batch was purged
+            (no service holds it any more).
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: Pasaron más de 7 días; este nivel ya no se puede restaurar
+        '500':
+          description: >
+            A service failed mid-way; the batch stays in the trash and a retry
+            finishes it without duplicating what already came back.
+            `RESTORE_INCOMPLETE`: a service no longer holds its part of the
+            batch — never a silent success; the sentence names it and what did
+            come back stays restored.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: 'La restauración quedó a medias; vuelve a intentarlo: lo ya restaurado no se duplica'
+
   /api/v1/config/terms:
     get:
       tags: [config-terms]
@@ -2248,6 +2498,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
+        '409': { $ref: '#/components/responses/PlainLevelBeingDeleted' }
 
   /api/v1/finance/deposits:
     post:
@@ -3212,7 +3463,11 @@ components:
         TERM_WITHOUT_MONTHS, ALREADY_CLOSED, ALREADY_OPEN, LEVEL_NOT_GRADED.
         Term months (T7): MONTH_INVALID (400), MONTH_OUTSIDE_CYCLE (400),
         TERM_TOO_LONG (400, more than six months), MONTH_IN_OTHER_TERM (409),
-        TERM_CLOSED (409, the term is a closed period).
+        TERM_CLOSED (409, the term is a closed period). Level deletion (ADR
+        0021): LEVEL_BEING_DELETED (409) on ANY write that resolves a level
+        whose deletion is running (grades capture, closing or reopening a
+        period, attendance lists, enrolling or transferring a pupil, a tuition
+        plan, a garment scoped to it, the level's structure in config).
         Absent on a refusal without a code.
       schema:
         type: string
@@ -3493,6 +3748,15 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    LevelBeingDeleted:
+      description: |
+        The garment's level is being deleted (ADR 0021): X-Error-Code and the
+        envelope's code are LEVEL_BEING_DELETED. Retry once the deletion ends.
+      headers:
+        X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
     ModuleDisabled:
       description: |
         `module_uniforms` is off. A disabled module answers 404 because it must be
@@ -3505,6 +3769,16 @@ components:
     # The text/plain answers of the gateway's older handlers (see ERRORS at the
     # top): the body is one sentence — the service's own when it gave one, safe
     # to show — or the bare status text.
+    PlainLevelBeingDeleted:
+      description: |
+        The level is being deleted (ADR 0021): X-Error-Code LEVEL_BEING_DELETED.
+        Retry once the deletion ends.
+      headers:
+        X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+      content:
+        text/plain:
+          schema: { type: string }
+          example: Este nivel se está eliminando
     PlainBadRequest:
       description: The request did not satisfy the contract; the body says which field.
       content:
@@ -4903,3 +5177,97 @@ components:
             How many times one line may be reserved and let lapse before it stops
             being reservable. Without a ceiling, a family can hold the last unit
             of a size indefinitely, for free, by never coming to pay.
+    LevelDeletionCounts:
+      type: object
+      description: Rows a level deletion reaches, by kind (ADR 0021).
+      required: [gradeLevels, groups, subjects, terms, teachingAssignments, students, enrollments, attendanceMarks, monthlyGrades, reportCards, tuitionPlans, uniformItems, schoolEvents]
+      properties:
+        gradeLevels: { type: integer, format: int64, minimum: 0 }
+        groups: { type: integer, format: int64, minimum: 0 }
+        subjects: { type: integer, format: int64, minimum: 0 }
+        terms: { type: integer, format: int64, minimum: 0 }
+        teachingAssignments: { type: integer, format: int64, minimum: 0 }
+        students: { type: integer, format: int64, minimum: 0, description: Pupils KEPT with their level cleared. }
+        enrollments: { type: integer, format: int64, minimum: 0 }
+        attendanceMarks: { type: integer, format: int64, minimum: 0 }
+        monthlyGrades: { type: integer, format: int64, minimum: 0 }
+        reportCards: { type: integer, format: int64, minimum: 0 }
+        tuitionPlans: { type: integer, format: int64, minimum: 0 }
+        uniformItems: { type: integer, format: int64, minimum: 0, description: 'Garments KEPT, left with no level (unresolved).' }
+        schoolEvents: { type: integer, format: int64, minimum: 0 }
+        enrollmentTransfers: { type: integer, format: int64, minimum: 0, description: Group changes of the level's enrollments. }
+        attendanceSessions: { type: integer, format: int64, minimum: 0, description: Attendance lists taken. }
+        gradeEntries: { type: integer, format: int64, minimum: 0, description: Per-term grades (the legacy capture). }
+        periodClosures: { type: integer, format: int64, minimum: 0, description: Closed periods. }
+      example: { gradeLevels: 3, groups: 6, subjects: 24, terms: 3, teachingAssignments: 24, students: 58, enrollments: 58, attendanceMarks: 4120, monthlyGrades: 1392, reportCards: 58, tuitionPlans: 1, uniformItems: 2, schoolEvents: 1 }
+    LevelDeletionPreview:
+      type: object
+      required: [levelId, levelName, empty, counts, keeps, confirmToken, expiresAt]
+      properties:
+        levelId: { type: string, format: uuid }
+        levelName: { type: string }
+        empty: { type: boolean, description: 'No grade levels, no pupils and no enrollments.' }
+        counts: { $ref: '#/components/schemas/LevelDeletionCounts' }
+        keeps:
+          type: object
+          description: The money that stays untouched.
+          required: [charges, payments]
+          properties:
+            charges: { type: integer, format: int64, minimum: 0 }
+            payments: { type: integer, format: int64, minimum: 0 }
+        confirmToken: { type: string, description: 'Signs these counts for this school and level; valid ten minutes.' }
+        expiresAt: { type: string, format: date-time }
+      example:
+        levelId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301
+        levelName: Maternal
+        empty: false
+        counts: { gradeLevels: 1, groups: 1, subjects: 0, terms: 3, teachingAssignments: 0, students: 12, enrollments: 12, attendanceMarks: 800, monthlyGrades: 0, reportCards: 0, tuitionPlans: 1, uniformItems: 0, schoolEvents: 0 }
+        keeps: { charges: 120, payments: 96 }
+        confirmToken: '1790000000.q1w2e3r4t5y6'
+        expiresAt: '2026-09-28T10:10:00Z'
+    DeleteLevelRequest:
+      type: object
+      required: [confirmName, confirmToken, password]
+      properties:
+        confirmName: { type: string, description: The level's name as typed by the director. }
+        confirmToken: { type: string }
+        password: { type: string, format: password, writeOnly: true }
+    LevelDeletionResult:
+      type: object
+      required: [batchId, deletedAt, restorableUntil, counts]
+      properties:
+        batchId: { type: string, format: uuid }
+        deletedAt: { type: string, format: date-time }
+        restorableUntil: { type: string, format: date-time }
+        counts: { $ref: '#/components/schemas/LevelDeletionCounts' }
+      example:
+        batchId: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+        deletedAt: '2026-09-28T10:05:00Z'
+        restorableUntil: '2026-10-05T10:05:00Z'
+        counts: { gradeLevels: 1, groups: 1, subjects: 0, terms: 3, teachingAssignments: 0, students: 12, enrollments: 12, attendanceMarks: 800, monthlyGrades: 0, reportCards: 0, tuitionPlans: 1, uniformItems: 0, schoolEvents: 0 }
+    LevelTrashItem:
+      type: object
+      required: [batchId, levelId, levelName, deletedAt, restorableUntil, deletedByName, counts, status]
+      properties:
+        batchId: { type: string, format: uuid }
+        levelId: { type: string, format: uuid }
+        levelName: { type: string }
+        deletedAt: { type: string, format: date-time }
+        restorableUntil: { type: string, format: date-time }
+        deletedByName: { type: string }
+        counts: { $ref: '#/components/schemas/LevelDeletionCounts' }
+        status: { type: string, enum: [deleted, failed_partial, restored_partial, restoring] }
+    LevelRestoreResult:
+      type: object
+      required: [restored, skipped]
+      properties:
+        restored: { $ref: '#/components/schemas/LevelDeletionCounts' }
+        skipped:
+          type: array
+          items:
+            type: object
+            required: [kind, count, reason]
+            properties:
+              kind: { type: string, example: enrollments }
+              count: { type: integer, format: int64, minimum: 1 }
+              reason: { type: string, example: el alumno ya está inscrito en otro grupo de ese ciclo }

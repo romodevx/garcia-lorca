@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/services/finance/internal/domain"
 )
 
@@ -134,6 +135,9 @@ type ChargeSettledEvent struct {
 type LevelRef struct {
 	ID   string
 	Name string
+	// Deleting is true while the level's deletion runs (ADR 0021): a tuition
+	// plan of it is refused with LEVEL_BEING_DELETED.
+	Deleting bool
 }
 
 // GroupLevel maps a group of a cycle to the level it belongs to. It is the join
@@ -490,4 +494,19 @@ type ChargeReprice struct {
 type ChargeReschedule struct {
 	ExternalRef string
 	DueOn       time.Time
+}
+
+// LevelArchiveRepository moves finance's rows of a deleted level — its tuition
+// plans, and nothing else — into the service's deletion archive and back
+// (ADR 0021). Money is never archived or altered: the preview COUNTS the
+// level's pupils' charges and payments only so the director sees what stays.
+// Archive and restore each run in ONE tenant-bound transaction and are
+// idempotent per batch id; a restore skips — and reports — rows that now
+// conflict.
+type LevelArchiveRepository interface {
+	PreviewLevelDeletion(ctx context.Context, scope levelarchive.Scope) (levelarchive.Counts, error)
+	ArchiveLevel(ctx context.Context, batchID string, scope levelarchive.Scope) (levelarchive.Counts, error)
+	RestoreLevelBatch(ctx context.Context, batchID string) (levelarchive.Report, error)
+	PurgeLevelArchives(ctx context.Context, cutoff time.Time) (int64, error)
+	PurgeLevelBatch(ctx context.Context, batchID string) (int64, error)
 }

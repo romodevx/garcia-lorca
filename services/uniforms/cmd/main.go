@@ -66,7 +66,7 @@ func main() {
 // run is the process lifecycle: build the composition root and serve until the
 // listener stops.
 func run(ctx context.Context, log *slog.Logger) error {
-	mux, err := buildMux(ctx)
+	mux, err := buildMux(ctx, log)
 	if err != nil {
 		return err
 	}
@@ -91,7 +91,7 @@ func run(ctx context.Context, log *slog.Logger) error {
 // buildMux is the composition root: config → adapters → use case → Connect
 // handler. Dependencies are assembled here and nowhere else, so every layer
 // below takes what it needs as an interface and can be tested without any of it.
-func buildMux(ctx context.Context) (*http.ServeMux, error) {
+func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, error) {
 	// Single-tenant for this phase: the tenant is fixed HERE rather than derived
 	// from the caller, so RLS binds this one school for every request, and a
 	// request cannot talk its way into another's data by claiming one (ADR 0001).
@@ -116,7 +116,12 @@ func buildMux(ctx context.Context) (*http.ServeMux, error) {
 	// a nil seam is honest about that.
 	shop := usecase.NewService(repo, students, finance, nil, tenantID,
 		func() string { return uuid.NewString() }, now)
-	handler := grpcadapter.NewUniformsHandler(shop, usecase.NewHealthService(serviceName))
+	// The level-deletion trash (ADR 0021): the gateway's saga archives and
+	// restores through it, and the gateway's hourly sweep (always warm, unlike
+	// this scale-to-zero service) purges each batch past config's
+	// restorable_until through PurgeLevelBatch.
+	trash := usecase.NewLevelArchiveService(repo, now)
+	handler := grpcadapter.NewUniformsHandler(shop, usecase.NewHealthService(serviceName)).WithLevelArchive(trash)
 
 	mux := http.NewServeMux()
 	path, connectHandler := uniformsv1connect.NewUniformsServiceHandler(handler, connect.WithRecover(recoverFn))

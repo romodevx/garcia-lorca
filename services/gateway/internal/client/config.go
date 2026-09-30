@@ -70,6 +70,8 @@ type LevelResult struct {
 	AttendanceMode string
 	// Grading is the level's numeric grading scale (T6).
 	Grading LevelGrading
+	// Deleting is true while the level's deletion runs (ADR 0021).
+	Deleting bool
 }
 
 // GradeScale is a numeric grading scale in exact hundredths (5.00 = 500).
@@ -742,6 +744,7 @@ func toLevelResult(l *configv1.Level) LevelResult {
 		// An unknown enum value reads as "" (the map's zero value).
 		AttendanceMode: attendanceModeNames[l.GetAttendanceMode()],
 		Grading:        toLevelGrading(l.GetGrading()),
+		Deleting:       l.GetStatus() == configv1.LevelStatus_LEVEL_STATUS_DELETING,
 	}
 }
 

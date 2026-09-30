@@ -244,7 +244,12 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	svc := usecase.NewFinanceService(repo, studentsClient, cyclesClient, studentsClient, cyclesClient,
 		configclient.NewCachedCalendar(cyclesClient, calendarTTL, calendarTimeout), publisher, tenantID, newID, time.Now)
 	health := usecase.NewHealthService(serviceName)
-	handler := grpcadapter.NewFinanceHandler(svc, health)
+	// Level deletion (ADR 0021): finance's step of the gateway's saga (tuition
+	// plans only; money is never touched). The gateway's hourly sweep (always
+	// warm, unlike this scale-to-zero service) purges each batch past config's
+	// restorable_until through PurgeLevelBatch.
+	levels := usecase.NewLevelArchiveService(repo, time.Now)
+	handler := grpcadapter.NewFinanceHandler(svc, health).WithLevelArchive(levels)
 	consumer := pubsubadapter.NewConsumer(svc, log)
 
 	mux := http.NewServeMux()

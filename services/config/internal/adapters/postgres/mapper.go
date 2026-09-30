@@ -87,7 +87,10 @@ func toDomainLevel(m levelModel) (domain.Level, error) {
 	if l, err = l.WithAttendanceMode(mode); err != nil {
 		return domain.Level{}, err
 	}
-	return l.WithGrading(scale)
+	if l, err = l.WithGrading(scale); err != nil {
+		return domain.Level{}, err
+	}
+	return l.WithDeleting(m.Status == levelStatusDeleting), nil
 }
 
 // --- grade levels ---------------------------------------------------------

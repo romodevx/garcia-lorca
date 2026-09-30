@@ -46,6 +46,7 @@ var migrationFiles = []string{
 	"../../../../../migrations/grades/0004_period_closure_months.sql",
 	"../../../../../migrations/grades/0005_outbox.sql",
 	"../../../../../migrations/grades/0006_report_card_term_ordinal.sql",
+	"../../../../../migrations/grades/0007_level_deletion_archive.sql",
 }
 
 var (

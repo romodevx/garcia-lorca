@@ -11,6 +11,13 @@ const REFRESH_PATH = "/api/v1/auth/refresh";
 const LOGIN_PATH = "/api/v1/auth/login";
 
 /**
+ * A 401 that refuses a RE-ENTERED password (deleting a level asks for the
+ * director's again), not the session's token. Refreshing and replaying it would
+ * file a second wrong-password attempt nobody typed.
+ */
+const REAUTH_FAILED = "REAUTH_FAILED";
+
+/**
  * Subscribers told that the session is gone for good.
  *
  * A REFUSED REFRESH is the one unambiguous "you are signed out" moment there
@@ -91,6 +98,7 @@ export async function authFetch(input: string, init?: RequestInit): Promise<Resp
   if (res.status !== 401) return res;
   // Never try to refresh the auth calls themselves — that would recurse.
   if (input.includes(REFRESH_PATH) || input.includes(LOGIN_PATH)) return res;
+  if (res.headers.get("X-Error-Code") === REAUTH_FAILED) return res;
 
   const origin = new URL(input, globalThis.location?.href ?? "http://localhost").origin;
   const outcome = await refreshOnce(origin);

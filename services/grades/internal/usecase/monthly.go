@@ -6,6 +6,7 @@ import (
 	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/services/grades/internal/domain"
 	"github.com/garcia-lorca/services/grades/internal/ports"
 )
@@ -373,6 +374,9 @@ func (s *MonthlyGradesService) authorizeWrite(ctx context.Context, scope Capture
 	ac, err := s.resolveAssignment(ctx, assignmentID)
 	if err != nil {
 		return assignmentContext{}, domain.Month{}, err
+	}
+	if ac.level.Deleting {
+		return assignmentContext{}, domain.Month{}, levelarchive.LevelBeingDeleted()
 	}
 	if !ac.level.GradingEnabled {
 		return assignmentContext{}, domain.Month{}, domain.Refusal(domain.CodeLevelNotGraded, msgGradingDisabled)

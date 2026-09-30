@@ -42,9 +42,9 @@ func (f *fakeCatalog) LevelOfGroup(_ context.Context, g string) (ports.LevelRef,
 	return f.level, nil
 }
 
-func (f *fakeCatalog) LevelIDOfGroup(ctx context.Context, g string) (string, error) {
+func (f *fakeCatalog) LevelIDOfGroup(ctx context.Context, g string) (ports.LevelKey, error) {
 	l, err := f.LevelOfGroup(ctx, g)
-	return l.ID, err
+	return ports.LevelKey{ID: l.ID, Deleting: l.Deleting}, err
 }
 
 func (f *fakeCatalog) ActiveCycle(_ context.Context) (ports.CycleRef, bool, error) {
