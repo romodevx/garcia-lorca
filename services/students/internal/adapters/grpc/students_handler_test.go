@@ -559,3 +559,29 @@ func TestCardRPCs(t *testing.T) {
 		t.Errorf("not a code: %v, want InvalidArgument", connect.CodeOf(err))
 	}
 }
+
+// T3: the maternal surname travels in both directions — captured on create,
+// corrected on update, returned on every read.
+func TestTheMaternalSurnameRoundTrips(t *testing.T) {
+	h, _ := newHandler(t)
+	res, err := h.CreateApplicant(context.Background(), connect.NewRequest(&studentsv1.CreateApplicantRequest{
+		Curp: validCURP, FirstName: "Ana", LastName: "Herrera", MaternalLastName: "Ríos",
+		LevelId: "e1000000-0000-0000-0000-000000000001",
+	}))
+	if err != nil {
+		t.Fatalf("CreateApplicant: %v", err)
+	}
+	if got := res.Msg.GetStudent().GetMaternalLastName(); got != "Ríos" {
+		t.Errorf("created maternal_last_name = %q, want Ríos", got)
+	}
+	up, err := h.UpdateStudent(context.Background(), connect.NewRequest(&studentsv1.UpdateStudentRequest{
+		Id: "stu-1", FirstName: "Ana", LastName: "Herrera", MaternalLastName: "Cruz", Curp: validCURP,
+		Profile: &studentsv1.StudentProfile{},
+	}))
+	if err != nil {
+		t.Fatalf("UpdateStudent: %v", err)
+	}
+	if got := up.Msg.GetStudent().GetMaternalLastName(); got != "Cruz" {
+		t.Errorf("updated maternal_last_name = %q, want Cruz", got)
+	}
+}

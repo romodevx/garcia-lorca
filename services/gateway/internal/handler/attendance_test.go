@@ -101,7 +101,7 @@ func TestAttendanceGetRoster(t *testing.T) {
 			assert.Equal(t, 7, out.WindowDays)
 			assert.Equal(t, tt.wantSubject, att.gotRosterSubjectID)
 			require.Len(t, out.Rows, 1)
-			assert.Equal(t, "Ana García", out.Rows[0].Name)
+			assert.Equal(t, "García Ana", out.Rows[0].Name)
 			assert.Equal(t, "8:15", out.Rows[0].Note)
 		})
 	}
@@ -211,4 +211,30 @@ func TestAttendanceListUpstreamErrors(t *testing.T) {
 		newDirectorAttendance(att).ListAttendance(rec, directorReq(http.MethodGet, "/api/v1/attendance?enrollmentId=ghost", ""))
 		assert.Equal(t, want, rec.Code, code.String())
 	}
+}
+
+// T3: a roster reads surname first and in alphabetical order by surname,
+// whatever order the attendance service returned it in.
+func TestAttendanceRosterIsOrderedBySurname(t *testing.T) {
+	att := &fakeAttendance{}
+	att.roster = []client.AttendanceRosterRow{
+		{EnrollmentID: "enr-z", StudentID: "stu-z", Status: "present"},
+		{EnrollmentID: "enr-a", StudentID: "stu-a", Status: "present"},
+		{EnrollmentID: "enr-n", StudentID: "stu-n", Status: "present"},
+	}
+	students := &fakeTeachingStudents{students: []client.StudentResult{
+		{ID: "stu-z", FirstName: "Zoe", LastName: "Zúñiga"},
+		{ID: "stu-a", FirstName: "Ana", LastName: "Ávila", MaternalLastName: "Ruiz"},
+		{ID: "stu-n", FirstName: "Nico", LastName: "Núñez"},
+	}}
+	h := handler.NewAttendanceHandler(att, listTeacher(), students, directorUsers)
+	rec := httptest.NewRecorder()
+	h.GetRoster(rec, directorReq(http.MethodGet, "/api/v1/attendance/roster?groupId=grp-prim&date=2026-09-15", ""))
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	out := decodeAttendanceList(t, rec)
+	require.Len(t, out.Rows, 3)
+	assert.Equal(t, "Ávila Ruiz Ana", out.Rows[0].Name)
+	assert.Equal(t, "Núñez Nico", out.Rows[1].Name)
+	assert.Equal(t, "Zúñiga Zoe", out.Rows[2].Name)
 }

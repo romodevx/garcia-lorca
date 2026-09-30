@@ -104,7 +104,7 @@ describe("Finance — adeudos", () => {
     expect(screen.getAllByText("$1,850.00").length).toBeGreaterThan(0);
     expect(screen.queryByText("185000")).not.toBeInTheDocument();
     // The student id is resolved to a readable name in the row (not just in the filter).
-    const nameCells = screen.getAllByText("Ada Lovelace").filter((element) => element.tagName !== "OPTION");
+    const nameCells = screen.getAllByText("Lovelace Ada").filter((element) => element.tagName !== "OPTION");
     expect(nameCells).toHaveLength(1);
     expect(screen.getByText("Pendiente")).toBeInTheDocument();
   });

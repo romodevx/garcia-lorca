@@ -16,7 +16,10 @@ import { ApiError } from "./errors";
 export interface FamilyStudent {
   id: string;
   firstName: string;
+  /** The PATERNAL surname (a child captured before T3 may carry both here). */
   lastName: string;
+  /** The maternal surname; empty or absent when not captured (T3). */
+  maternalLastName?: string;
   /** The level's name as the school wrote it in Configuración ("Preescolar"). */
   level: string;
   /** The config level id. */

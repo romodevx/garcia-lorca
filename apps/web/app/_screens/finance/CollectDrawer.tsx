@@ -26,6 +26,7 @@ import { localISODate, shortDayLabel } from "../../_lib/localDate";
 import { DebtList } from "./DebtList";
 import { ReceiptActions } from "../receipts/ReceiptActions";
 import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
+import { formatStudentName } from "../../_design/students/studentName";
 
 /**
  * What is missing, or over, against what should have been paid. Zero when the
@@ -63,6 +64,7 @@ export interface CollectStudent {
   id: string;
   firstName: string;
   lastName: string;
+  maternalLastName?: string;
   gradeGroup?: string;
 }
 
@@ -159,7 +161,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   const [attemptKey] = useState(newAttemptKey);
   const describe = useRef<Map<string, string>>(new Map());
 
-  const name = `${student.firstName} ${student.lastName}`;
+  const name = formatStudentName(student);
   const cents = pesosToCents(amount);
   const lines = expected?.lines ?? [];
   const choice = choiceOf(lines, chosen);

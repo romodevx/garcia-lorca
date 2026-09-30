@@ -5,6 +5,7 @@ import type { AdmissionStatus, Student } from "../../students/api";
 import { TextField } from "../../_design/form";
 import { EmptyHint, Section } from "../config/parts";
 import { matchesSearch } from "../../_design/textSearch";
+import { formatStudentName, sortStudents, studentNameSearchKeys } from "../../_design/students/studentName";
 
 const STATUS_LABEL: Record<AdmissionStatus, string> = {
   pending: "Pendiente",
@@ -37,10 +38,7 @@ export function StudentDirectoryPanel({ students }: StudentDirectoryPanelProps):
   const [query, setQuery] = useState("");
 
   const rows = useMemo(() => {
-    const sorted = [...students].sort((a, b) =>
-      `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`, "es"),
-    );
-    return sorted.filter((s) => matchesSearch(query, `${s.firstName} ${s.lastName}`, s.curp, s.gradeGroup, s.guardianName));
+    return sortStudents(students).filter((s) => matchesSearch(query, ...studentNameSearchKeys(s), s.curp, s.gradeGroup, s.guardianName));
   }, [students, query]);
 
   const th: React.CSSProperties = { textAlign: "left", padding: "8px 10px", color: "var(--text-muted)", fontSize: 12.5, fontWeight: 600, borderBottom: "1px solid var(--border)" };
@@ -69,7 +67,7 @@ export function StudentDirectoryPanel({ students }: StudentDirectoryPanelProps):
             <tbody>
               {rows.map((s) => (
                 <tr key={s.id}>
-                  <td style={{ ...td, fontWeight: 600 }}>{s.firstName} {s.lastName}</td>
+                  <td style={{ ...td, fontWeight: 600 }}>{formatStudentName(s)}</td>
                   <td style={{ ...td, textTransform: "capitalize" }}>{s.level}</td>
                   <td style={td}>{s.gradeGroup}</td>
                   <td style={{ ...td, color: "var(--text-muted)" }}>{s.guardianName}</td>

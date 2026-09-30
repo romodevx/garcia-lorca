@@ -27,6 +27,7 @@ import type { ChargeFilter } from "./ChargesPanel";
 import { formatCents } from "../../_lib/money";
 
 import { API_URL } from "../../api-url";
+import { formatStudentName } from "../../_design/students/studentName";
 
 // Gateway base URL for the browser (public env; matches AppShell/compose).
 const TOAST_MS = 2600;
@@ -201,7 +202,7 @@ export function useFinance(initialSection: FinanceSection): FinanceState {
   const studentName = useCallback(
     (id: string): string => {
       const student = students.find((candidate) => candidate.id === id);
-      return student !== undefined ? `${student.firstName} ${student.lastName}` : id;
+      return student !== undefined ? formatStudentName(student) : id;
     },
     [students],
   );

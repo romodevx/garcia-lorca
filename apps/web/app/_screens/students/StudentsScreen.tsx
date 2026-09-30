@@ -27,6 +27,7 @@ import { API_URL } from "../../api-url";
 import { csvName, downloadCsv, toCsv, type CsvColumn } from "../../_lib/csv";
 import { ContactsPanel } from "./ContactsPanel";
 import { matchesSearch } from "../../_design/textSearch";
+import { compareStudents, formatStudentName, studentNameSearchKeys } from "../../_design/students/studentName";
 
 /** The floating "Nuevo alumno": its height, its distance from the bottom, and
  * the breathing room the page leaves above it. */
@@ -106,6 +107,7 @@ const NOTE_LOST = "La nota no se guardó: agrégala en su ficha.";
 export interface QuickAddDraft {
   curp: string;
   firstName: string;
+  /** The paternal surname. The maternal one is optional and never "missing". */
   lastName: string;
   guardianName: string;
   /** The config grade the pupil joins. The GROUP is chosen by capacity, not here. */
@@ -150,8 +152,9 @@ export function missingFields(draft: QuickAddDraft): Record<string, string> {
   } else if (curp.length !== CURP_LENGTH) {
     found.curp = `El CURP debe tener ${CURP_LENGTH} caracteres; llevas ${curp.length}.`;
   }
+  // Surname before first name: the order the form asks for them (T3).
+  if (draft.lastName.trim().length < 2) found.lastName = "Escribe el apellido paterno del alumno.";
   if (draft.firstName.trim().length < 2) found.firstName = "Escribe el nombre del alumno.";
-  if (draft.lastName.trim().length < 2) found.lastName = "Escribe los apellidos del alumno.";
   if (draft.guardianName.trim().length < 3) found.guardianName = "Escribe el nombre del tutor.";
   if (draft.gradeLevelId !== undefined && draft.gradeLevelId === "") {
     found.gradeLevelId = "Elige el nivel y el grado al que entra.";
@@ -207,6 +210,7 @@ function QuickAdd({
   const [curp, setCurp] = useState("");
   const [firstName, setFirst] = useState("");
   const [lastName, setLast] = useState("");
+  const [maternalLastName, setMaternal] = useState("");
   const [levelId, setLevelId] = useState("");
   const [gradeLevelId, setGradeLevelId] = useState("");
   const [grades, setGrades] = useState<GradeLevel[]>([]);
@@ -272,6 +276,7 @@ function QuickAdd({
           curp: curp.trim().toUpperCase(),
           firstName: firstName.trim(),
           lastName: lastName.trim(),
+          maternalLastName: maternalLastName.trim(),
           levelId: chosenLevel.id,
           // Left empty on purpose: the server writes it when capacity picks the
           // group, so the record cannot claim a group the pupil is not in.
@@ -321,28 +326,37 @@ function QuickAdd({
             error={fieldErrors.curp}
             onClearError={() => clearField("curp")}
           />
+          {/* Surnames first, as the school reads its lists (T3). The two
+              surnames are one logical entity, so they may sit side by side. */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
             <TextField
-              label="Nombre"
-              value={firstName}
-              onChange={setFirst}
-              uppercase
-              required
-              help="Sólo los nombres de pila, sin apellidos."
-              error={fieldErrors.firstName}
-              onClearError={() => clearField("firstName")}
-            />
-            <TextField
-              label="Apellidos"
+              label="Apellido paterno"
               value={lastName}
               onChange={setLast}
               uppercase
               required
-              help="Los dos apellidos: primero el paterno, luego el materno."
+              help="El primer apellido del alumno, el del padre."
               error={fieldErrors.lastName}
               onClearError={() => clearField("lastName")}
             />
+            <TextField
+              label="Apellido materno"
+              value={maternalLastName}
+              onChange={setMaternal}
+              uppercase
+              help="El segundo apellido, el de la madre. Déjalo vacío si el acta no lo trae."
+            />
           </div>
+          <TextField
+            label="Nombre(s)"
+            value={firstName}
+            onChange={setFirst}
+            uppercase
+            required
+            help="Sólo los nombres de pila, sin apellidos."
+            error={fieldErrors.firstName}
+            onClearError={() => clearField("firstName")}
+          />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
             <SelectField
               label="Nivel"
@@ -533,9 +547,9 @@ function StudentSheet({
       onClose={onClose}
       header={
         <div style={{ padding: "26px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 16 }}>
-          <Avatar name={`${st.firstName} ${st.lastName}`} color="forest" size={62} />
+          <Avatar name={formatStudentName(st)} color="forest" size={62} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <h2 style={{ fontSize: 20, fontWeight: 700, color: "var(--text)" }}>{st.firstName} {st.lastName}</h2>
+            <h2 style={{ fontSize: 20, fontWeight: 700, color: "var(--text)" }}>{formatStudentName(st)}</h2>
             <div style={{ marginTop: 6 }}><StatusPill status={st.admissionStatus} /></div>
           </div>
           <button type="button" onClick={onClose} aria-label="Cerrar" style={{ width: 40, height: 40, borderRadius: "50%", display: "grid", placeItems: "center", background: "var(--surface-3)", border: "1px solid var(--border)", color: "var(--text-muted)", cursor: "pointer" }}><Icon name="close" size={19} /></button>
@@ -630,8 +644,9 @@ export interface StudentsScreenProps {
 
 /** What the school reads in Excel, in the order the table shows it. */
 const EXPORT_COLUMNS: readonly CsvColumn<Student>[] = [
-  { label: "Apellidos", value: (s) => s.lastName },
-  { label: "Nombre", value: (s) => s.firstName },
+  { label: "Apellido paterno", value: (s) => s.lastName },
+  { label: "Apellido materno", value: (s) => s.maternalLastName ?? "" },
+  { label: "Nombre(s)", value: (s) => s.firstName },
   { label: "CURP", value: (s) => s.curp },
   { label: "Nivel", value: (s) => s.level },
   { label: "Grado y grupo", value: (s) => s.gradeGroup },
@@ -716,8 +731,8 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
   const filtered = useMemo(() => {
     return students
       .filter((s) => (tab === "all" || statusOf(s.admissionStatus).tab === tab) && (level === "Todos" || levelOf(s) === level) &&
-        matchesSearch(q, `${s.firstName} ${s.lastName}`, s.curp, s.guardianName))
-      .sort((a, b) => `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`, "es"));
+        matchesSearch(q, ...studentNameSearchKeys(s), s.curp, s.guardianName))
+      .sort(compareStudents);
   }, [students, tab, level, q]);
 
   // How many pupils sit in each classroom, over whatever filter is on. The
@@ -765,8 +780,8 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
     reload();
     say(
       noteFailed
-        ? `Alumno creado · ${input.firstName} quedó en ${placement.groupName}, pero la nota no se guardó: agrégala en su ficha`
-        : `Alumno creado · ${input.firstName} quedó en ${placement.groupName}`,
+        ? `Alumno creado · ${formatStudentName(input)} quedó en ${placement.groupName}, pero la nota no se guardó: agrégala en su ficha`
+        : `Alumno creado · ${formatStudentName(input)} quedó en ${placement.groupName}`,
     );
   };
   const onPlaced = (message: string): void => {
@@ -1004,9 +1019,9 @@ function StuRow({ st, i, onOpen, onEdit }: { st: Student; i: number; onOpen: () 
     <div onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)} onClick={onOpen} style={{ display: "grid", gridTemplateColumns: "2.4fr 1.1fr 1.6fr 1fr auto", alignItems: "center", gap: 16, padding: "13px 24px", borderRadius: "var(--r-md)", position: "relative", cursor: "pointer", background: hov ? "var(--surface-2)" : "transparent", transition: "background .15s var(--ease)" }}>
       <span style={{ position: "absolute", left: 4, top: 10, bottom: 10, width: 4, borderRadius: 99, background: s.dot }} />
       <div style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0, paddingLeft: 8 }}>
-        <Avatar name={`${st.firstName} ${st.lastName}`} color={AV[i % AV.length]} size={42} />
+        <Avatar name={formatStudentName(st)} color={AV[i % AV.length]} size={42} />
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 600, fontSize: 15.5, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{st.firstName} {st.lastName}</div>
+          <div style={{ fontWeight: 600, fontSize: 15.5, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{formatStudentName(st)}</div>
           <div style={{ fontSize: 12.5, color: "var(--text-faint)", fontFamily: "monospace" }}>{st.curp}</div>
         </div>
       </div>
@@ -1015,9 +1030,9 @@ function StuRow({ st, i, onOpen, onEdit }: { st: Student; i: number; onOpen: () 
       <div><StatusPill status={st.admissionStatus} /></div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, width: 84 }}>
         {onEdit !== undefined && (
-          <button onClick={(ev) => { ev.stopPropagation(); onEdit(); }} title="Editar ficha" aria-label={`Editar ficha de ${st.firstName} ${st.lastName}`} style={qb}><Icon name="user" size={18} /></button>
+          <button onClick={(ev) => { ev.stopPropagation(); onEdit(); }} title="Editar ficha" aria-label={`Editar ficha de ${formatStudentName(st)}`} style={qb}><Icon name="user" size={18} /></button>
         )}
-        <button onClick={(ev) => { ev.stopPropagation(); onOpen(); }} title="Ver ficha" aria-label={`Ver ficha de ${st.firstName} ${st.lastName}`} style={qb}><Icon name="chevron" size={18} /></button>
+        <button onClick={(ev) => { ev.stopPropagation(); onOpen(); }} title="Ver ficha" aria-label={`Ver ficha de ${formatStudentName(st)}`} style={qb}><Icon name="chevron" size={18} /></button>
       </div>
     </div>
   );

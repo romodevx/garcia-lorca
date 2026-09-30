@@ -8,13 +8,15 @@ import "time"
 
 // studentModel is the GORM row for `students`.
 type studentModel struct {
-	ID        string  `gorm:"column:id;primaryKey"`
-	TenantID  string  `gorm:"column:tenant_id"`
-	CURP      string  `gorm:"column:curp"`
-	FirstName string  `gorm:"column:first_name"`
-	LastName  string  `gorm:"column:last_name"`
-	LevelID   *string `gorm:"column:level_id"`
-	LevelName string  `gorm:"column:level_name"`
+	ID        string `gorm:"column:id;primaryKey"`
+	TenantID  string `gorm:"column:tenant_id"`
+	CURP      string `gorm:"column:curp"`
+	FirstName string `gorm:"column:first_name"`
+	LastName  string `gorm:"column:last_name"` // the paternal surname
+	// MaternalLastName is NULL when not captured (migration 0017, T3).
+	MaternalLastName *string `gorm:"column:maternal_last_name"`
+	LevelID          *string `gorm:"column:level_id"`
+	LevelName        string  `gorm:"column:level_name"`
 	// LegacyLevel is the pre-0007 SEP key, read (never written) so a row the
 	// previous revision wrote mid-deploy still shows a level.
 	LegacyLevel     *string `gorm:"column:level;<-:false"`

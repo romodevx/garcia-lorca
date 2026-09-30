@@ -108,7 +108,7 @@ func (b *Builder) Payment(ctx context.Context, depositID string) (Receipt, error
 	d := got.Deposit
 	r := Receipt{
 		Kind: KindPayment, Folio: d.Folio, School: school, PaidOn: dateOf(d.PaidAt),
-		Buyer:       strings.TrimSpace(pupil.FirstName + " " + pupil.LastName),
+		Buyer:       pupil.FullName(),
 		BuyerDetail: pupil.GradeGroup,
 		Lines:       make([]Line, 0, len(got.Lines)),
 		CreditCents: got.UnallocatedCents, TotalCents: d.AmountCents,

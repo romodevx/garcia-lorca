@@ -119,8 +119,8 @@ const (
 	wantInvalid   = "Código no válido\n"
 	wantSuspended = "Credencial suspendida\n"
 	wantForeign   = "Este alumno no pertenece a este grupo\n"
-	wantAnaJSON   = `{"enrollmentId":"enr-1","studentId":"stu-1","name":"Ana García"}`
-	wantEvaJSON   = `{"enrollmentId":"enr-3","studentId":"stu-3","name":"Eva Ruiz"}`
+	wantAnaJSON   = `{"enrollmentId":"enr-1","studentId":"stu-1","name":"García Ana"}`
+	wantEvaJSON   = `{"enrollmentId":"enr-3","studentId":"stu-3","name":"Ruiz Eva"}`
 	wantBadDate   = "La fecha debe tener el formato AAAA-MM-DD\n"
 	wantFuture    = "No puedes registrar una fecha futura\n"
 	wantWindow    = "Solo puedes corregir hasta 7 días atrás\n"

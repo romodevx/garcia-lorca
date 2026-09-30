@@ -117,7 +117,7 @@ describe("AnnouncementsScreen", () => {
     await screen.findByRole("button", { name: "1° A" });
 
     await user.click(screen.getByRole("button", { name: "Un alumno" }));
-    await user.click(await screen.findByRole("button", { name: "Valentina Cruz" }));
+    await user.click(await screen.findByRole("button", { name: "Cruz Valentina" }));
     await user.type(screen.getByLabelText("Título"), "Recordatorio");
     await user.type(screen.getByLabelText("Mensaje"), "Traer uniforme");
     await user.click(screen.getByRole("button", { name: /Enviar aviso/ }));

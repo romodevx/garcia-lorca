@@ -56,7 +56,7 @@ afterEach(() => vi.clearAllMocks());
 describe("StudentsScreen — alumnos sin nivel (nivel eliminado)", () => {
   it("names them 'Sin nivel' / 'Sin grupo' instead of leaving the cells blank", async () => {
     render(<StudentsScreen onBack={() => {}} />);
-    await screen.findByText("Diego Prueba");
+    await screen.findByText("Prueba Diego");
 
     expect(screen.getByRole("button", { name: "Sin nivel" })).toBeInTheDocument();
     expect(screen.getByTestId("per-group")).toHaveTextContent("Sin grupo");
@@ -66,18 +66,18 @@ describe("StudentsScreen — alumnos sin nivel (nivel eliminado)", () => {
   it("filters them with the 'Sin nivel' chip, so the office can find whom to reassign", async () => {
     const user = userEvent.setup();
     render(<StudentsScreen onBack={() => {}} />);
-    await screen.findByText("Diego Prueba");
+    await screen.findByText("Prueba Diego");
 
     await user.click(screen.getByRole("button", { name: "Sin nivel" }));
 
-    expect(screen.getByText("Diego Prueba")).toBeInTheDocument();
-    expect(screen.getByText("Emilia Prueba")).toBeInTheDocument();
-    expect(screen.queryByText("Regina Prueba")).toBeNull();
+    expect(screen.getByText("Prueba Diego")).toBeInTheDocument();
+    expect(screen.getByText("Prueba Emilia")).toBeInTheDocument();
+    expect(screen.queryByText("Prueba Regina")).toBeNull();
   });
 
   it("does not count 'Sin nivel' as a level in the Niveles card", async () => {
     render(<StudentsScreen onBack={() => {}} />);
-    await screen.findByText("Diego Prueba");
+    await screen.findByText("Prueba Diego");
 
     const card = screen.getByText("Niveles").parentElement as HTMLElement;
     expect(within(card).getByText("1")).toBeInTheDocument();

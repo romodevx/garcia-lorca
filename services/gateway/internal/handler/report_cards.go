@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/garcia-lorca/pkg/studentname"
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
 	"github.com/garcia-lorca/services/gateway/internal/reportcard"
@@ -122,6 +123,7 @@ func (h *ReportCardsHandler) List(w http.ResponseWriter, r *http.Request) {
 			GeneralAverage: numberOrNil(c.GeneralAverage), HasGrades: summaryHasGrades(c),
 		})
 	}
+	studentname.SortByDisplayName(out, func(c reportCardSummaryResponse) string { return c.StudentName })
 	writePrivateJSON(w, map[string][]reportCardSummaryResponse{"reportCards": out})
 }
 

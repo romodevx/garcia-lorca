@@ -454,20 +454,21 @@ func (h *TeachingHandler) Roster(w http.ResponseWriter, r *http.Request) {
 		out = append(out, teachingRosterRowResponse{
 			EnrollmentID: row.EnrollmentID,
 			StudentID:    row.StudentID,
-			StudentName:  studentNames[row.StudentID],
+			StudentName:  studentNames.name(row.StudentID),
 			Value:        row.Value,
 			HasValue:     row.HasValue,
 		})
 	}
+	sortBySurname(studentNames, out, func(r teachingRosterRowResponse) string { return r.StudentID })
 	writeJSON(w, http.StatusOK, map[string]any{"roster": out})
 }
 
-// studentNames builds the studentId→"First Last" map used to enrich a roster. It
+// studentNames builds the studentId→pupil directory used to name and order a roster. It
 // is best-effort by design: no rows to enrich or a failed list read each yields
 // an empty map, and the caller reads a missing id as "" — a display gap, never a
 // failed read. A non-nil map is always returned, so lookups never panic. The map
 // is built from ONE list read, not one GetStudent per row.
-func (h *TeachingHandler) studentNames(ctx context.Context, enrich bool) map[string]string {
+func (h *TeachingHandler) studentNames(ctx context.Context, enrich bool) studentDirectory {
 	return studentNamesFrom(ctx, h.students, enrich)
 }
 

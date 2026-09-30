@@ -77,17 +77,21 @@ func TestUpdateDetailsCorrectsNamesCURPAndProfile(t *testing.T) {
 	s := newApplicant(t)
 	curp, _ := domain.NewCURP("HEGA050312MDFRNN09")
 	profile, _ := domain.NewProfile(validProfile(), today)
-	if err := s.UpdateDetails(" Ana María ", " Hernández ", curp, profile); err != nil {
+	if err := s.UpdateDetails(" Ana María ", " Hernández ", " Ríos ", curp, profile); err != nil {
 		t.Fatalf("UpdateDetails: %v", err)
 	}
-	if s.FirstName() != "Ana María" || s.LastName() != "Hernández" || s.CURP().String() != "HEGA050312MDFRNN09" {
-		t.Errorf("identity = %q %q %q", s.FirstName(), s.LastName(), s.CURP())
+	if s.FirstName() != "Ana María" || s.LastName() != "Hernández" || s.MaternalLastName() != "Ríos" || s.CURP().String() != "HEGA050312MDFRNN09" {
+		t.Errorf("identity = %q %q %q %q", s.FirstName(), s.LastName(), s.MaternalLastName(), s.CURP())
 	}
 	if s.Profile().Email() != "ana.cruz@correo.mx" {
 		t.Errorf("profile not attached")
 	}
-	if err := s.UpdateDetails(" ", "X", curp, profile); glerrors.KindOf(err) != glerrors.KindInvalid {
+	if err := s.UpdateDetails(" ", "X", "", curp, profile); glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("a blank first name must be refused, got %v", err)
+	}
+	// The maternal surname is optional: not every pupil has one on file.
+	if err := s.UpdateDetails("Ana", "Hernández", "  ", curp, profile); err != nil || s.MaternalLastName() != "" {
+		t.Errorf("a blank maternal surname is allowed and stored empty, got %v / %q", err, s.MaternalLastName())
 	}
 }
 

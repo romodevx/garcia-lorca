@@ -57,8 +57,8 @@ describe("FinanceScreen", () => {
   it("resolves student names and shows charge status", async () => {
     render(<FinanceScreen onBack={() => {}} />);
     expect(await screen.findByRole("heading", { name: "Finanzas" })).toBeInTheDocument();
-    expect(await screen.findByText("Valentina Cruz")).toBeInTheDocument();
-    expect(screen.getByText("Mateo Sánchez")).toBeInTheDocument();
+    expect(await screen.findByText("Cruz Valentina")).toBeInTheDocument();
+    expect(screen.getByText("Sánchez Mateo")).toBeInTheDocument();
     // ch2 is fully paid → "Al corriente"; ch1 has a balance → a "Registrar pago" action
     expect(screen.getByText("Al corriente")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /Registrar pago/ }).length).toBeGreaterThan(0);
@@ -68,7 +68,7 @@ describe("FinanceScreen", () => {
     const user = userEvent.setup();
     finance.registerPayment.mockResolvedValue({} as financeApi.PaymentResult);
     render(<FinanceScreen onBack={() => {}} />);
-    await screen.findByText("Valentina Cruz");
+    await screen.findByText("Cruz Valentina");
 
     await user.click(screen.getAllByRole("button", { name: /Registrar pago/ })[0] as HTMLElement);
     const dialog = await screen.findByRole("dialog", { name: "Registrar pago" });
@@ -144,7 +144,7 @@ describe("PayDrawer — money safety", () => {
     const user = userEvent.setup();
     finance.registerPayment.mockResolvedValue({} as financeApi.PaymentResult);
     render(<FinanceScreen onBack={() => {}} today="2026-10-12" />);
-    await screen.findByText("Valentina Cruz");
+    await screen.findByText("Cruz Valentina");
     await user.click(screen.getAllByRole("button", { name: /Registrar pago/ })[0] as HTMLElement);
     const dialog = await screen.findByRole("dialog", { name: "Registrar pago" });
 
@@ -191,7 +191,7 @@ describe("FinanceScreen — corte de caja", () => {
       deposits: [], cancelled: [], payments: [], cashCents: 320000, cardCents: 0, transferCents: 150000, totalCents: 470000,
     });
     render(<FinanceScreen onBack={() => {}} />);
-    await screen.findByText("Valentina Cruz");
+    await screen.findByText("Cruz Valentina");
 
     await user.click(screen.getByRole("button", { name: /Corte de caja/ }));
 
@@ -209,7 +209,7 @@ describe("FinanceScreen — el corte de otro día (tarea 7)", () => {
       deposits: [], cancelled: [], payments: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0,
     });
     render(<FinanceScreen onBack={() => {}} today="2026-10-12" />);
-    await screen.findByText("Valentina Cruz");
+    await screen.findByText("Cruz Valentina");
     await user.click(screen.getByRole("button", { name: /Corte de caja/ }));
     await screen.findByTestId("cash-up-total");
     expect(finance.getCashUp).toHaveBeenLastCalledWith(expect.any(String), "");
@@ -235,7 +235,7 @@ describe("FinanceScreen — exportar", () => {
   it("exports the rows on screen, not the whole ledger", async () => {
     const user = userEvent.setup();
     render(<FinanceScreen onBack={() => {}} />);
-    await screen.findByText("Valentina Cruz");
+    await screen.findByText("Cruz Valentina");
     await user.type(screen.getByLabelText("Buscar"), "Valentina");
 
     // The spy goes on AFTER the render: React creates elements too, and a
@@ -270,11 +270,11 @@ describe("FinanceScreen — filtro por mes", () => {
       { ...charge("ch2", "s2", 100000), dueDate: "2026-10-10", description: "Colegiatura 2026-10" },
     ]);
     render(<FinanceScreen onBack={() => {}} />);
-    await screen.findByText("Valentina Cruz");
+    await screen.findByText("Cruz Valentina");
 
     await user.selectOptions(screen.getByLabelText("Mes"), "2026-10");
 
-    expect(await screen.findByText("Mateo Sánchez")).toBeInTheDocument();
-    expect(screen.queryByText("Valentina Cruz")).not.toBeInTheDocument();
+    expect(await screen.findByText("Sánchez Mateo")).toBeInTheDocument();
+    expect(screen.queryByText("Cruz Valentina")).not.toBeInTheDocument();
   });
 });

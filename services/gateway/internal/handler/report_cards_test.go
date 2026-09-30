@@ -3,6 +3,7 @@ package handler_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -112,6 +113,25 @@ func TestDirectorListsTheLatestReportCards(t *testing.T) {
 		h.List(rec, closerReq(http.MethodGet, "/api/v1/grades/report-cards"+bad, ""))
 		assert.Equal(t, http.StatusBadRequest, rec.Code, bad)
 	}
+}
+
+// T3: the director's list reads alphabetically in Spanish, whatever order the
+// stored name snapshots come back in.
+func TestDirectorReportCardListIsAlphabetical(t *testing.T) {
+	f := &fakeReportCards{list: []client.ReportCardSummary{
+		{ID: "rc-z", StudentName: "Zúñiga Zoe"}, {ID: "rc-a", StudentName: "Ávila Luis"}, {ID: "rc-n", StudentName: "Núñez Eva"},
+	}}
+	rec := httptest.NewRecorder()
+	newReportCardsHandler(f).List(rec, closerReq(http.MethodGet, "/api/v1/grades/report-cards?termId="+pTerm, ""))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var out struct {
+		ReportCards []struct {
+			ID string `json:"id"`
+		} `json:"reportCards"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+	require.Len(t, out.ReportCards, 3)
+	assert.Equal(t, []string{"rc-a", "rc-n", "rc-z"}, []string{out.ReportCards[0].ID, out.ReportCards[1].ID, out.ReportCards[2].ID})
 }
 
 func TestDirectorReadsAReportCard(t *testing.T) {

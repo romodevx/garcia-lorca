@@ -54,7 +54,7 @@ describe("CollectDrawer", () => {
 
     expect(await screen.findByTestId("amount-expected")).toHaveTextContent("6,700");
     expect(screen.getByTestId("amount-owed")).toHaveTextContent("6,400");
-    expect(screen.getByRole("heading", { name: /Valentina Cruz/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Cruz Valentina/ })).toBeInTheDocument();
   });
 
   // Zero means "paid exactly right" — the only value the office wants to see.

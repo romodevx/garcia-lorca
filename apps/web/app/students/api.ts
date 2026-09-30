@@ -26,7 +26,10 @@ export interface Student {
   id: string;
   curp: string;
   firstName: string;
+  /** The PATERNAL surname (a pupil captured before T3 may hold both here). */
   lastName: string;
+  /** The maternal surname; "" or absent when not captured (T3). */
+  maternalLastName?: string;
   /** The level's name as the school wrote it ("Preescolar"). */
   level: string;
   /** The config level id ("" only for a legacy pupil no level matched). */
@@ -210,7 +213,10 @@ export function getStudent(baseURL: string, id: string): Promise<Student> {
 export interface CreateStudentInput {
   curp: string;
   firstName: string;
+  /** The paternal surname. */
   lastName: string;
+  /** The maternal surname; optional. */
+  maternalLastName?: string;
   /** A config level id: the school's own levels, not a fixed SEP list. */
   levelId: string;
   gradeGroup: string;
@@ -389,7 +395,10 @@ export async function addContact(baseURL: string, input: AddContactInput): Promi
 
 export interface UpdateStudentInput {
   firstName: string;
+  /** The paternal surname. */
   lastName: string;
+  /** The maternal surname; optional. */
+  maternalLastName?: string;
   curp: string;
   profile: StudentProfile;
 }

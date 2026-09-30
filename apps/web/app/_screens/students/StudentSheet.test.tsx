@@ -61,7 +61,7 @@ afterEach(() => vi.clearAllMocks());
 
 async function openSheet(user: ReturnType<typeof userEvent.setup>, props: { canRevokeCard?: boolean } = {}): Promise<HTMLElement> {
   render(<StudentsScreen onBack={() => {}} {...props} />);
-  await user.click(await screen.findByRole("button", { name: "Ver ficha de Ana Cruz" }));
+  await user.click(await screen.findByRole("button", { name: "Ver ficha de Cruz Ana" }));
   return screen.getByRole("dialog", { name: "Ficha del alumno" });
 }
 
@@ -273,7 +273,7 @@ describe("verificar credencial (tarea 13)", () => {
   it("abre la verificación desde Alumnos, sólo con el módulo encendido", async () => {
     const user = userEvent.setup();
     const { unmount } = render(<StudentsScreen onBack={() => {}} />);
-    await screen.findByRole("button", { name: "Ver ficha de Ana Cruz" });
+    await screen.findByRole("button", { name: "Ver ficha de Cruz Ana" });
     expect(screen.queryByRole("button", { name: "Verificar credencial" })).toBeNull();
     unmount();
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
@@ -212,6 +211,4 @@ func (h *CardHandler) activeCycle(ctx context.Context) (string, error) {
 	return "", nil
 }
 
-func fullName(s client.StudentResult) string {
-	return strings.TrimSpace(s.FirstName + " " + s.LastName)
-}
+func fullName(s client.StudentResult) string { return s.FullName() }

@@ -34,15 +34,16 @@ func toDomain(m studentModel) (*domain.Student, error) {
 		return nil, err
 	}
 	s := domain.Rehydrate(domain.NewApplicantParams{
-		ID:           m.ID,
-		TenantID:     m.TenantID,
-		CURP:         curp,
-		FirstName:    m.FirstName,
-		LastName:     m.LastName,
-		Level:        level,
-		GradeGroup:   m.GradeGroup,
-		GuardianName: m.GuardianName,
-		Profile:      profile,
+		ID:               m.ID,
+		TenantID:         m.TenantID,
+		CURP:             curp,
+		FirstName:        m.FirstName,
+		LastName:         m.LastName,
+		MaternalLastName: derefOrEmpty(m.MaternalLastName),
+		Level:            level,
+		GradeGroup:       m.GradeGroup,
+		GuardianName:     m.GuardianName,
+		Profile:          profile,
 	}, status)
 	s.AssignEnrollmentNumber(m.EnrollmentNumber)
 	return s, nil
@@ -104,17 +105,18 @@ func profileColumns(p domain.Profile) (map[string]any, error) {
 // fromDomain projects a domain Student into its GORM row (for insert/update).
 func fromDomain(s *domain.Student) studentModel {
 	return studentModel{
-		ID:              s.ID(),
-		TenantID:        s.TenantID(),
-		CURP:            s.CURP().String(),
-		FirstName:       s.FirstName(),
-		LastName:        s.LastName(),
-		LevelID:         nullableID(s.Level().ID()),
-		LevelName:       s.Level().Name(),
-		GradeGroup:      s.GradeGroup(),
-		GuardianName:    s.GuardianName(),
-		AdmissionStatus: s.Status().String(),
-		Phones:          "[]",
+		ID:               s.ID(),
+		TenantID:         s.TenantID(),
+		CURP:             s.CURP().String(),
+		FirstName:        s.FirstName(),
+		LastName:         s.LastName(),
+		MaternalLastName: nullableText(s.MaternalLastName()),
+		LevelID:          nullableID(s.Level().ID()),
+		LevelName:        s.Level().Name(),
+		GradeGroup:       s.GradeGroup(),
+		GuardianName:     s.GuardianName(),
+		AdmissionStatus:  s.Status().String(),
+		Phones:           "[]",
 	}
 }
 
@@ -233,4 +235,20 @@ func levelName(m studentModel) string {
 	}
 	key := *m.LegacyLevel
 	return strings.ToUpper(key[:1]) + key[1:]
+}
+
+// nullableText maps the domain's "not captured" (empty) to SQL NULL.
+func nullableText(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+// derefOrEmpty maps SQL NULL back to the domain's empty string.
+func derefOrEmpty(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

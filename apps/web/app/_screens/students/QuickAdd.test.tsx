@@ -61,7 +61,7 @@ afterEach(() => vi.clearAllMocks());
 const FULL = {
   curp: "ROQA930615HDFMRN08",
   firstName: "Andrés",
-  lastName: "Romo Quiroz",
+  lastName: "Romo",
   guardianName: "María Quiroz",
 };
 
@@ -73,7 +73,9 @@ describe("what the form is still waiting for", () => {
     expect(missingFieldMessage({ ...FULL, curp: "" })).toMatch(/CURP/);
     expect(missingFieldMessage({ ...FULL, curp: "ROQA930615HDFMRN0" })).toMatch(/18 caracteres.*17/);
     expect(missingFieldMessage({ ...FULL, firstName: "" })).toMatch(/nombre/i);
-    expect(missingFieldMessage({ ...FULL, lastName: "" })).toMatch(/apellidos/i);
+    expect(missingFieldMessage({ ...FULL, lastName: "" })).toMatch(/apellido paterno/i);
+    // T3: the surname is read before the first name, so it is asked for first.
+    expect(missingFieldMessage({ ...FULL, firstName: "", lastName: "" })).toMatch(/apellido paterno/i);
     // The one nobody guesses: a tutor of two letters silently failed the check.
     expect(missingFieldMessage({ ...FULL, guardianName: "Jo" })).toMatch(/tutor/i);
     expect(missingFieldMessage(FULL)).toBeUndefined();
@@ -97,8 +99,8 @@ describe("the quick-add drawer", () => {
 
     const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
     await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
-    await user.type(within(drawer).getByLabelText(/Nombre/, CAMPO), FULL.firstName);
-    await user.type(within(drawer).getByLabelText(/Apellidos/, CAMPO), FULL.lastName);
+    await user.type(within(drawer).getByLabelText(/Nombre\(s\)/, CAMPO), FULL.firstName);
+    await user.type(within(drawer).getByLabelText(/Apellido paterno/, CAMPO), FULL.lastName);
     // Tutor deliberately left blank.
 
     await user.click(within(drawer).getByRole("button", { name: "Crear alumno" }));
@@ -160,8 +162,8 @@ describe("the quick-add drawer", () => {
 
     const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
     await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
-    await user.type(within(drawer).getByLabelText(/Nombre/, CAMPO), FULL.firstName);
-    await user.type(within(drawer).getByLabelText(/Apellidos/, CAMPO), FULL.lastName);
+    await user.type(within(drawer).getByLabelText(/Nombre\(s\)/, CAMPO), FULL.firstName);
+    await user.type(within(drawer).getByLabelText(/Apellido paterno/, CAMPO), FULL.lastName);
     await user.type(within(drawer).getByLabelText(/Tutor/, CAMPO), FULL.guardianName);
     await user.selectOptions(within(drawer).getByLabelText("Nivel"), "lv-k");
     await user.selectOptions(await within(drawer).findByLabelText("Grado"), "gl-k1");
@@ -169,6 +171,30 @@ describe("the quick-add drawer", () => {
 
     await waitFor(() => expect(students.createStudent).toHaveBeenCalled());
     expect(students.createStudent.mock.calls[0]?.[1]).toMatchObject({ curp: FULL.curp });
+  });
+
+  it("sends the maternal surname on its own (T3)", async () => {
+    const user = userEvent.setup();
+    students.createStudent.mockResolvedValue({
+      id: "s1", curp: FULL.curp, firstName: FULL.firstName, lastName: FULL.lastName, maternalLastName: "Quiroz",
+      level: "primaria", levelId: "", gradeGroup: "1° A", guardianName: FULL.guardianName,
+      admissionStatus: "pending",
+    });
+    render(<StudentsScreen onBack={() => {}} />);
+    await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
+
+    const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
+    await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
+    await user.type(within(drawer).getByLabelText(/Apellido paterno/, CAMPO), FULL.lastName);
+    await user.type(within(drawer).getByLabelText(/Apellido materno/, CAMPO), "Quiroz");
+    await user.type(within(drawer).getByLabelText(/Nombre\(s\)/, CAMPO), FULL.firstName);
+    await user.type(within(drawer).getByLabelText(/Tutor/, CAMPO), FULL.guardianName);
+    await user.selectOptions(within(drawer).getByLabelText("Nivel"), "lv-k");
+    await user.selectOptions(await within(drawer).findByLabelText("Grado"), "gl-k1");
+    await user.click(within(drawer).getByRole("button", { name: "Crear alumno" }));
+
+    await waitFor(() => expect(students.createStudent).toHaveBeenCalled());
+    expect(students.createStudent.mock.calls[0]?.[1]).toMatchObject({ lastName: "ROMO", maternalLastName: "QUIROZ", firstName: "ANDRÉS" });
   });
 
   // The fixed SEP list is gone (task 2): any level the school created in
@@ -185,8 +211,8 @@ describe("the quick-add drawer", () => {
 
     const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
     await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
-    await user.type(within(drawer).getByLabelText(/Nombre/, CAMPO), FULL.firstName);
-    await user.type(within(drawer).getByLabelText(/Apellidos/, CAMPO), FULL.lastName);
+    await user.type(within(drawer).getByLabelText(/Nombre\(s\)/, CAMPO), FULL.firstName);
+    await user.type(within(drawer).getByLabelText(/Apellido paterno/, CAMPO), FULL.lastName);
     await user.type(within(drawer).getByLabelText(/Tutor/, CAMPO), FULL.guardianName);
     await user.selectOptions(within(drawer).getByLabelText("Nivel"), "lv-pre");
     await user.selectOptions(await within(drawer).findByLabelText("Grado"), "gl-k1");
@@ -205,8 +231,8 @@ describe("the quick-add drawer", () => {
 
     const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
     await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
-    await user.type(within(drawer).getByLabelText(/Nombre/, CAMPO), FULL.firstName);
-    await user.type(within(drawer).getByLabelText(/Apellidos/, CAMPO), FULL.lastName);
+    await user.type(within(drawer).getByLabelText(/Nombre\(s\)/, CAMPO), FULL.firstName);
+    await user.type(within(drawer).getByLabelText(/Apellido paterno/, CAMPO), FULL.lastName);
     await user.type(within(drawer).getByLabelText(/Tutor/, CAMPO), FULL.guardianName);
     await user.selectOptions(within(drawer).getByLabelText("Nivel"), "lv-k");
     await user.selectOptions(await within(drawer).findByLabelText("Grado"), "gl-k1");
@@ -225,8 +251,8 @@ describe("choosing where the pupil goes", () => {
 
   const fillIdentity = async (user: ReturnType<typeof userEvent.setup>, drawer: HTMLElement) => {
     await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
-    await user.type(within(drawer).getByLabelText(/Nombre/, CAMPO), FULL.firstName);
-    await user.type(within(drawer).getByLabelText(/Apellidos/, CAMPO), FULL.lastName);
+    await user.type(within(drawer).getByLabelText(/Nombre\(s\)/, CAMPO), FULL.firstName);
+    await user.type(within(drawer).getByLabelText(/Apellido paterno/, CAMPO), FULL.lastName);
     await user.type(within(drawer).getByLabelText(/Tutor/, CAMPO), FULL.guardianName);
   };
 
@@ -329,8 +355,8 @@ describe("any level the school defined", () => {
 
     const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
     await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
-    await user.type(within(drawer).getByLabelText(/Nombre/, CAMPO), FULL.firstName);
-    await user.type(within(drawer).getByLabelText(/Apellidos/, CAMPO), FULL.lastName);
+    await user.type(within(drawer).getByLabelText(/Nombre\(s\)/, CAMPO), FULL.firstName);
+    await user.type(within(drawer).getByLabelText(/Apellido paterno/, CAMPO), FULL.lastName);
     await user.type(within(drawer).getByLabelText(/Tutor/, CAMPO), FULL.guardianName);
     await user.selectOptions(within(drawer).getByLabelText("Nivel"), "lv-m");
     await user.selectOptions(await within(drawer).findByLabelText("Grado"), "gl-m1");
@@ -354,13 +380,29 @@ describe("la captura del alta de alumno", () => {
     const user = userEvent.setup();
     const alta = await abrirAlta(user);
 
-    await user.type(within(alta).getByLabelText("Nombre"), "ana sofía");
-    await user.type(within(alta).getByLabelText("Apellidos"), "ruiz márquez");
+    await user.type(within(alta).getByLabelText("Nombre(s)"), "ana sofía");
+    await user.type(within(alta).getByLabelText("Apellido paterno"), "ruiz");
+    await user.type(within(alta).getByLabelText("Apellido materno"), "márquez");
     await user.type(within(alta).getByLabelText("Tutor"), "josé ruiz");
 
-    expect(within(alta).getByLabelText("Nombre")).toHaveValue("ANA SOFÍA");
-    expect(within(alta).getByLabelText("Apellidos")).toHaveValue("RUIZ MÁRQUEZ");
+    expect(within(alta).getByLabelText("Nombre(s)")).toHaveValue("ANA SOFÍA");
+    expect(within(alta).getByLabelText("Apellido paterno")).toHaveValue("RUIZ");
+    expect(within(alta).getByLabelText("Apellido materno")).toHaveValue("MÁRQUEZ");
     expect(within(alta).getByLabelText("Tutor")).toHaveValue("JOSÉ RUIZ");
+  });
+
+  it("pide los apellidos ANTES que el nombre (T3)", async () => {
+    const user = userEvent.setup();
+    const alta = await abrirAlta(user);
+    const paterno = within(alta).getByLabelText("Apellido paterno");
+    const materno = within(alta).getByLabelText("Apellido materno");
+    const nombre = within(alta).getByLabelText("Nombre(s)");
+    const follows = (a: Element, b: Element): boolean => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    expect(follows(paterno, materno)).toBe(true);
+    expect(follows(materno, nombre)).toBe(true);
+    // The maternal surname is optional: not every pupil has one on file.
+    await user.click(within(alta).getByRole("button", { name: "Crear alumno" }));
+    expect(materno).not.toHaveAttribute("aria-invalid", "true");
   });
 
   it("guardar en blanco marca CADA campo que falta, no uno solo", async () => {
@@ -372,8 +414,8 @@ describe("la captura del alta de alumno", () => {
     await user.click(within(alta).getByRole("button", { name: "Crear alumno" }));
 
     expect(within(alta).getByLabelText("CURP")).toHaveAttribute("aria-invalid", "true");
-    expect(within(alta).getByLabelText("Nombre")).toHaveAttribute("aria-invalid", "true");
-    expect(within(alta).getByLabelText("Apellidos")).toHaveAttribute("aria-invalid", "true");
+    expect(within(alta).getByLabelText("Nombre(s)")).toHaveAttribute("aria-invalid", "true");
+    expect(within(alta).getByLabelText("Apellido paterno")).toHaveAttribute("aria-invalid", "true");
     expect(within(alta).getByLabelText("Tutor")).toHaveAttribute("aria-invalid", "true");
     expect(students.createStudent).not.toHaveBeenCalled();
   });
@@ -383,9 +425,9 @@ describe("la captura del alta de alumno", () => {
     const alta = await abrirAlta(user);
     await user.click(within(alta).getByRole("button", { name: "Crear alumno" }));
 
-    await user.type(within(alta).getByLabelText("Nombre"), "A");
+    await user.type(within(alta).getByLabelText("Nombre(s)"), "A");
 
-    expect(within(alta).getByLabelText("Nombre")).not.toHaveAttribute("aria-invalid", "true");
+    expect(within(alta).getByLabelText("Nombre(s)")).not.toHaveAttribute("aria-invalid", "true");
     expect(within(alta).getByLabelText("CURP")).toHaveAttribute("aria-invalid", "true");
   });
 
@@ -413,8 +455,8 @@ describe("QuickAdd · una nota al dar de alta (tarea 6)", () => {
     await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
     const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
     await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
-    await user.type(within(drawer).getByLabelText(/Nombre/, CAMPO), FULL.firstName);
-    await user.type(within(drawer).getByLabelText(/Apellidos/, CAMPO), FULL.lastName);
+    await user.type(within(drawer).getByLabelText(/Nombre\(s\)/, CAMPO), FULL.firstName);
+    await user.type(within(drawer).getByLabelText(/Apellido paterno/, CAMPO), FULL.lastName);
     await user.type(within(drawer).getByLabelText(/Tutor/, CAMPO), FULL.guardianName);
     await user.selectOptions(within(drawer).getByLabelText("Nivel"), "lv-k");
     await user.selectOptions(await within(drawer).findByLabelText("Grado"), "gl-k2");

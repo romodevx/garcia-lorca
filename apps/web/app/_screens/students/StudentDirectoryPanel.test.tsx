@@ -25,8 +25,8 @@ describe("StudentDirectoryPanel", () => {
 
   it("lists every student with its count", () => {
     render(<StudentDirectoryPanel students={students} />);
-    expect(screen.getByText("Valentina Gutiérrez")).toBeInTheDocument();
-    expect(screen.getByText("Mateo Sánchez")).toBeInTheDocument();
+    expect(screen.getByText("Gutiérrez Valentina")).toBeInTheDocument();
+    expect(screen.getByText("Sánchez Mateo")).toBeInTheDocument();
     expect(screen.getByText(/2 alumnos/)).toBeInTheDocument();
   });
 
@@ -35,8 +35,8 @@ describe("StudentDirectoryPanel", () => {
     render(<StudentDirectoryPanel students={students} />);
 
     await user.type(screen.getByLabelText("Buscar"), "mateo");
-    expect(screen.getByText("Mateo Sánchez")).toBeInTheDocument();
-    expect(screen.queryByText("Valentina Gutiérrez")).not.toBeInTheDocument();
+    expect(screen.getByText("Sánchez Mateo")).toBeInTheDocument();
+    expect(screen.queryByText("Gutiérrez Valentina")).not.toBeInTheDocument();
   });
 
   it("shows an empty hint when nothing matches", async () => {

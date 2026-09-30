@@ -91,7 +91,7 @@ func TestAFamilyReadsItsChildsCard(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	for key, want := range map[string]string{
-		"name": "Zoe Villalobos", "gradeGroup": "1° A", "level": "Primaria", "cycle": "2026-2027",
+		"name": "Villalobos Zoe", "gradeGroup": "1° A", "level": "Primaria", "cycle": "2026-2027",
 		"enrollmentNumber": "2026-00042", "qr": "GLCARD:AQAAAAAAAAAAAAAAAAAAAA",
 	} {
 		if got[key] != want {
@@ -134,7 +134,7 @@ func TestStaffVerifyACard(t *testing.T) {
 	f := &fakeCards{verified: client.StudentResult{ID: "stu-1", FirstName: "Zoe", LastName: "Villalobos", GradeGroup: "1° A", EnrollmentNumber: "2026-00042", AdmissionStatus: "enrolled"}, valid: true}
 	rec := httptest.NewRecorder()
 	cardHandler(f).Verify(rec, httptest.NewRequest(http.MethodPost, "/api/v1/students/card/verify", strings.NewReader(`{"code":"GLCARD:AQAAAAAAAAAAAAAAAAAAAA"}`)))
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"valid":true`) || !strings.Contains(rec.Body.String(), `"name":"Zoe Villalobos"`) {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"valid":true`) || !strings.Contains(rec.Body.String(), `"name":"Villalobos Zoe"`) {
 		t.Errorf("verify: %d %s", rec.Code, rec.Body.String())
 	}
 

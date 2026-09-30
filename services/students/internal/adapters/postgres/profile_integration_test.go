@@ -32,7 +32,7 @@ func TestUpdateDetailsRoundTrips(t *testing.T) {
 		t.Fatalf("NewProfile: %v", err)
 	}
 	curp, _ := domain.NewCURP("PEAA050312MDFRNN02")
-	if err := stored.UpdateDetails("Ana María", "Pérez", curp, profile); err != nil {
+	if err := stored.UpdateDetails("Ana María", "Pérez", "López", curp, profile); err != nil {
 		t.Fatalf("UpdateDetails: %v", err)
 	}
 	if err := repo.UpdateDetails(ctx, stored); err != nil {
@@ -46,6 +46,9 @@ func TestUpdateDetailsRoundTrips(t *testing.T) {
 	p := got.Profile()
 	if got.FirstName() != "Ana María" || got.CURP().String() != "PEAA050312MDFRNN02" {
 		t.Errorf("identity = %q %q", got.FirstName(), got.CURP())
+	}
+	if got.LastName() != "Pérez" || got.MaternalLastName() != "López" {
+		t.Errorf("surnames = %q %q, want Pérez López", got.LastName(), got.MaternalLastName())
 	}
 	if p.BirthDate().Format("2006-01-02") != "2019-03-12" || p.Sex() != domain.SexFemale || p.Email() != "ana@correo.mx" {
 		t.Errorf("profile = %v %q %q", p.BirthDate(), p.Sex(), p.Email())

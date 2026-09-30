@@ -80,7 +80,7 @@ test.describe("dar acceso a la app", () => {
 
     // --- lo que se prueba: la secretaria lo hace desde el panel -------------
     await signIn(page);
-    await openStudentFile(page, `${pupilName} Contreras Rojas`);
+    await openStudentFile(page, `Contreras Rojas ${pupilName}`);
 
     await expect(page.getByText(motherName).first()).toBeVisible();
     const give = page.getByRole("button", { name: /Dar acceso a la app/ });
@@ -136,7 +136,7 @@ test.describe("dar acceso a la app", () => {
     });
 
     await signIn(page);
-    await openStudentFile(page, `${pupilName} Salazar Martínez`);
+    await openStudentFile(page, `Salazar Martínez ${pupilName}`);
 
     await expect(page.getByText(grandmother).first()).toBeVisible();
     // Una acción que no puede tener éxito no debe poder apretarse — y decir por

@@ -6,6 +6,7 @@ import type { Enrollment, Student, TransferInput } from "../../students/api";
 import { SelectField, type SelectOption } from "../../_design/form";
 import { EmptyHint, ErrorAlert, Section } from "../config/parts";
 import { EnrollmentRow } from "./EnrollmentRow";
+import { compareStudentNames, formatStudentName } from "../../_design/students/studentName";
 
 export interface RosterPanelProps {
   students: readonly Student[];
@@ -90,7 +91,7 @@ export function RosterPanel({ students, cycles, loadGroups, loadEnrollments, onT
 
   const studentName = (id: string): string => {
     const s = students.find((x) => x.id === id);
-    return s !== undefined ? `${s.firstName} ${s.lastName}` : id;
+    return s !== undefined ? formatStudentName(s) : id;
   };
 
   const cycleOptions: SelectOption[] = cycles.map((c) => ({ value: c.id, label: c.name }));
@@ -118,7 +119,7 @@ export function RosterPanel({ students, cycles, loadGroups, loadEnrollments, onT
         <EmptyHint>Este grupo aún no tiene alumnos inscritos.</EmptyHint>
       ) : (
         <ul aria-label="Alumnos inscritos" style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 10 }}>
-          {enrollments.map((e) => (
+          {[...enrollments].sort((a, b) => compareStudentNames(studentName(a.studentId), studentName(b.studentId))).map((e) => (
             <EnrollmentRow
               key={e.id}
               enrollment={e}

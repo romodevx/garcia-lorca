@@ -584,3 +584,100 @@ func TestTransferIntoAnUnsizedGroupSaysSo(t *testing.T) {
 		t.Fatalf("want a KindConflict naming the unset size, got %v", err)
 	}
 }
+
+// T3: the school reads its lists by surname — paternal, maternal, then first
+// name — in Spanish (accents and case do not move a pupil; ñ after n), and the
+// order holds across pages.
+func TestListOrdersBySurnameAcrossPages(t *testing.T) {
+	const tenantC = "5a5a5a5a-3333-3333-3333-333333333333"
+	repo := appRepo(t, tenantC)
+	ctx := context.Background()
+	seed := []struct{ first, paternal, maternal, curp string }{
+		{"Zoe", "Ñuñez", "", "ZAZA090303HDFRNN01"},
+		{"Beto", "álvarez", "Ruiz", "ZAZB090303HDFRNN02"},
+		{"Eva", "Oropeza", "", "ZAZC090303HDFRNN03"},
+		{"Ana", "Alvarez", "Ruiz", "ZAZD090303HDFRNN04"},
+		{"Carla", "Nuñez", "", "ZAZE090303HDFRNN05"},
+		{"Dora", "Álvarez", "López", "ZAZF090303HDFRNN06"},
+	}
+	for i, p := range seed {
+		s, err := domain.NewApplicant(domain.NewApplicantParams{
+			ID: fmt.Sprintf("cccccccc-0000-0000-0000-00000000000%d", i+1), TenantID: tenantC,
+			CURP: mustCURP(t, p.curp), FirstName: p.first, LastName: p.paternal, MaternalLastName: p.maternal,
+			Level: domain.RestoreLevel(primariaLevelID, "Primaria"),
+		})
+		if err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+		if err := repo.Create(ctx, s); err != nil {
+			t.Fatalf("create %d: %v", i, err)
+		}
+	}
+
+	var got []string
+	token := ""
+	for pages := 0; pages < 10; pages++ {
+		page, next, err := repo.List(ctx, ports.ListFilter{PageSize: 2, PageToken: token})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		for _, s := range page {
+			got = append(got, strings.TrimSpace(s.LastName()+" "+s.MaternalLastName()+" "+s.FirstName()))
+		}
+		if next == "" {
+			break
+		}
+		token = next
+	}
+	want := []string{
+		"Álvarez López Dora", "Alvarez Ruiz Ana", "álvarez Ruiz Beto",
+		"Nuñez  Carla", "Ñuñez  Zoe", "Oropeza  Eva",
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("order =\n  %v\nwant\n  %v", got, want)
+	}
+}
+
+// Review of T3: the page token carries the cursor pupil's sort key, so a page
+// walk neither stops early nor skips pupils when that pupil is renamed (or
+// disappears) between two page reads.
+func TestListPageTokenSurvivesARenamedCursorPupil(t *testing.T) {
+	const tenantD = "5d5d5d5d-4444-4444-4444-444444444444"
+	repo := appRepo(t, tenantD)
+	ctx := context.Background()
+	for i, p := range []struct{ last, curp string }{
+		{"Arce", "ZEZA090303HDFRNN01"}, {"Bravo", "ZEZB090303HDFRNN02"},
+		{"Cano", "ZEZC090303HDFRNN03"}, {"Duarte", "ZEZD090303HDFRNN04"},
+	} {
+		s, err := domain.NewApplicant(domain.NewApplicantParams{
+			ID: fmt.Sprintf("dddddddd-0000-0000-0000-00000000000%d", i+1), TenantID: tenantD,
+			CURP: mustCURP(t, p.curp), FirstName: "Ana", LastName: p.last,
+			Level: domain.RestoreLevel(primariaLevelID, "Primaria"),
+		})
+		if err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+		if err := repo.Create(ctx, s); err != nil {
+			t.Fatalf("create %d: %v", i, err)
+		}
+	}
+	page1, next, err := repo.List(ctx, ports.ListFilter{PageSize: 2})
+	if err != nil || len(page1) != 2 || next == "" {
+		t.Fatalf("page1 = %d rows, next %q, err %v", len(page1), next, err)
+	}
+	// The cursor pupil (Bravo) is renamed to sort last before page 2 is read.
+	if err := superDB.Exec("UPDATE students SET last_name = 'Zapata' WHERE id = ?", page1[1].ID()).Error; err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	page2, _, err := repo.List(ctx, ports.ListFilter{PageSize: 2, PageToken: next})
+	if err != nil {
+		t.Fatalf("page2: %v", err)
+	}
+	var got []string
+	for _, s := range page2 {
+		got = append(got, s.LastName())
+	}
+	if strings.Join(got, ",") != "Cano,Duarte" {
+		t.Errorf("page2 = %v, want Cano,Duarte (continue after where page 1 ended)", got)
+	}
+}

@@ -444,7 +444,7 @@ type attendanceListRow struct {
 	Note         string `json:"note"`
 }
 
-func toAttendanceListResponse(view listView, roster client.AttendanceRoster, names map[string]string) attendanceListResponse {
+func toAttendanceListResponse(view listView, roster client.AttendanceRoster, students studentDirectory) attendanceListResponse {
 	out := attendanceListResponse{
 		Mode:           view.Mode,
 		Date:           view.Date,
@@ -461,29 +461,30 @@ func toAttendanceListResponse(view listView, roster client.AttendanceRoster, nam
 		out.Rows = append(out.Rows, attendanceListRow{
 			EnrollmentID: r.EnrollmentID,
 			StudentID:    r.StudentID,
-			Name:         names[r.StudentID],
+			Name:         students.name(r.StudentID),
 			Status:       r.Status,
 			Note:         r.Note,
 		})
 	}
+	sortBySurname(students, out.Rows, func(r attendanceListRow) string { return r.StudentID })
 	return out
 }
 
-// studentNamesFrom builds the studentId→"First Last" map from ONE list read,
-// best-effort: no rows to enrich or a failed read yields an empty map.
-func studentNamesFrom(ctx context.Context, students TeachingStudentReader, enrich bool) map[string]string {
-	names := map[string]string{}
+// studentNamesFrom builds the studentId→pupil directory from ONE list read,
+// best-effort: no rows to enrich or a failed read yields an empty directory.
+func studentNamesFrom(ctx context.Context, students TeachingStudentReader, enrich bool) studentDirectory {
+	dir := studentDirectory{}
 	if !enrich || students == nil {
-		return names
+		return dir
 	}
 	list, err := students.ListStudents(ctx, "")
 	if err != nil {
-		return names
+		return dir
 	}
 	for _, s := range list {
-		names[s.ID] = strings.TrimSpace(s.FirstName + " " + s.LastName)
+		dir[s.ID] = s
 	}
-	return names
+	return dir
 }
 
 // writeBadRequest answers a 400 with a sentence for the user.

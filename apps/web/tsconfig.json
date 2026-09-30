@@ -13,6 +13,7 @@
       "@garcia-lorca/ui": ["../../packages/ui/index.ts"],
       "@garcia-lorca/ui/flags": ["../../packages/ui/src/flags/index.ts"],
       "@garcia-lorca/domain": ["../../packages/domain/index.ts"],
+      "@garcia-lorca/domain/student-name": ["../../packages/domain/src/studentName.ts"],
       "@garcia-lorca/api-client": ["../../packages/api-client/index.ts"]
     }
   },

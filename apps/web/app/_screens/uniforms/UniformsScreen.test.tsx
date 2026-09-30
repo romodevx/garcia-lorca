@@ -81,7 +81,7 @@ function stubCatalogue(items: UniformItem[]): ReturnType<typeof vi.fn> {
  */
 async function chooseZoe(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   await user.type(screen.getByLabelText("Alumno"), "Zoe");
-  await user.click(await screen.findByRole("button", { name: /Zoe Villalobos/ }));
+  await user.click(await screen.findByRole("button", { name: /Villalobos Zoe/ }));
 }
 
 /**
@@ -395,7 +395,7 @@ describe("toRows", () => {
   const order: UniformOrder = {
     id: "ord-1",
     folio: "U-2026-000123",
-    studentName: "Zoe Villalobos",
+    studentName: "Villalobos Zoe",
     studentLevel: "primaria",
     source: "family",
     label: "partial",

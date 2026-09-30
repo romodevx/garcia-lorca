@@ -10,6 +10,7 @@ import (
 
 	studentsv1 "github.com/garcia-lorca/gen/go/garcialorca/students/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/students/v1/studentsv1connect"
+	"github.com/garcia-lorca/pkg/studentname"
 )
 
 // StudentsClient is the gateway's typed client for the students service over the
@@ -23,30 +24,43 @@ type StudentsClient struct {
 // a config level id; the students service resolves it against config and
 // supplies the level's name (ADR 0014).
 type CreateApplicantInput struct {
-	CURP         string
-	FirstName    string
-	LastName     string
-	LevelID      string // a config level id; the service resolves its name
-	GradeGroup   string
-	GuardianName string
+	CURP      string
+	FirstName string
+	LastName  string // the paternal surname
+	// MaternalLastName is optional (T3).
+	MaternalLastName string
+	LevelID          string // a config level id; the service resolves its name
+	GradeGroup       string
+	GuardianName     string
 }
 
 // StudentResult is the edge's view of a student, with enums flattened to their
 // canonical lowercase names for JSON.
 type StudentResult struct {
-	ID              string
-	CURP            string
-	FirstName       string
-	LastName        string
-	Level           string // the level's name as the school wrote it
-	LevelID         string // the config level id
-	GradeGroup      string
-	GuardianName    string
-	AdmissionStatus string
-	Profile         StudentProfile
+	ID        string
+	CURP      string
+	FirstName string
+	LastName  string // the paternal surname (legacy rows may hold both)
+	// MaternalLastName is empty when not captured (T3).
+	MaternalLastName string
+	Level            string // the level's name as the school wrote it
+	LevelID          string // the config level id
+	GradeGroup       string
+	GuardianName     string
+	AdmissionStatus  string
+	Profile          StudentProfile
 	// EnrollmentNumber is the matrícula, <year>-<five digits> (task 13).
 	EnrollmentNumber string
 }
+
+// NameParts are the pieces studentname orders by.
+func (s StudentResult) NameParts() studentname.Parts {
+	return studentname.Parts{First: s.FirstName, Paternal: s.LastName, Maternal: s.MaternalLastName}
+}
+
+// FullName is the pupil as every list and document shows them:
+// "Paterno Materno Nombre(s)" (T3).
+func (s StudentResult) FullName() string { return studentname.Format(s.NameParts()) }
 
 // StudentProfile is the editable half of a pupil's file, as the edge speaks it.
 type StudentProfile struct {
@@ -78,9 +92,11 @@ type StudentAddress struct {
 type UpdateStudentInput struct {
 	ID        string
 	FirstName string
-	LastName  string
-	CURP      string
-	Profile   StudentProfile
+	LastName  string // the paternal surname
+	// MaternalLastName is optional (T3).
+	MaternalLastName string
+	CURP             string
+	Profile          StudentProfile
 }
 
 // Enrollment is the edge's view of a student's placement in a group of a cycle,
@@ -126,12 +142,13 @@ func NewStudentsClient(baseURL string, httpClient connect.HTTPClient) *StudentsC
 // bad input) so the handler maps them to HTTP status.
 func (c *StudentsClient) CreateApplicant(ctx context.Context, in CreateApplicantInput) (StudentResult, error) {
 	res, err := c.rpc.CreateApplicant(ctx, connect.NewRequest(&studentsv1.CreateApplicantRequest{
-		Curp:         in.CURP,
-		FirstName:    in.FirstName,
-		LastName:     in.LastName,
-		LevelId:      in.LevelID,
-		GradeGroup:   in.GradeGroup,
-		GuardianName: in.GuardianName,
+		Curp:             in.CURP,
+		FirstName:        in.FirstName,
+		LastName:         in.LastName,
+		MaternalLastName: in.MaternalLastName,
+		LevelId:          in.LevelID,
+		GradeGroup:       in.GradeGroup,
+		GuardianName:     in.GuardianName,
 	}))
 	if err != nil {
 		return StudentResult{}, err
@@ -554,6 +571,7 @@ func toStudentResult(s *studentsv1.Student) StudentResult {
 		CURP:             s.GetCurp(),
 		FirstName:        s.GetFirstName(),
 		LastName:         s.GetLastName(),
+		MaternalLastName: s.GetMaternalLastName(),
 		Level:            s.GetLevelName(),
 		LevelID:          s.GetLevelId(),
 		GradeGroup:       s.GetGradeGroup(),
@@ -657,7 +675,7 @@ func (c *StudentsClient) DeleteStudentPhoto(ctx context.Context, studentID strin
 // and AlreadyExists (a CURP another pupil holds) propagate for the handler.
 func (c *StudentsClient) UpdateStudent(ctx context.Context, in UpdateStudentInput) (StudentResult, error) {
 	res, err := c.rpc.UpdateStudent(ctx, connect.NewRequest(&studentsv1.UpdateStudentRequest{
-		Id: in.ID, FirstName: in.FirstName, LastName: in.LastName, Curp: in.CURP,
+		Id: in.ID, FirstName: in.FirstName, LastName: in.LastName, MaternalLastName: in.MaternalLastName, Curp: in.CURP,
 		Profile: toProtoProfile(in.Profile),
 	}))
 	if err != nil {

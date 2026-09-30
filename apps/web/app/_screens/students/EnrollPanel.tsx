@@ -6,6 +6,7 @@ import type { Cycle, Group } from "../../config/api";
 import type { EnrollInput, Student } from "../../students/api";
 import { SelectField, type SelectOption } from "../../_design/form";
 import { EmptyHint, ErrorAlert, Section } from "../config/parts";
+import { formatStudentName, sortStudents } from "../../_design/students/studentName";
 
 export interface EnrollPanelProps {
   students: readonly Student[];
@@ -75,7 +76,7 @@ export function EnrollPanel({ students, cycles, loadGroups, onEnroll }: EnrollPa
     );
   }
 
-  const studentOptions: SelectOption[] = students.map((s) => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }));
+  const studentOptions: SelectOption[] = sortStudents(students).map((s) => ({ value: s.id, label: formatStudentName(s) }));
   const cycleOptions: SelectOption[] = cycles.map((c) => ({ value: c.id, label: c.name }));
   const groupOptions: SelectOption[] = groups.map((g) => ({ value: g.id, label: g.name }));
 

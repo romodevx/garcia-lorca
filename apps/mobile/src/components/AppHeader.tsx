@@ -38,7 +38,7 @@ export function AppHeader(): ReactElement {
             style={[styles.name, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}
             numberOfLines={1}
           >
-            {view.present ? view.fullName.split(" ").slice(0, 2).join(" ") : "Portal de familias"}
+            {view.present ? view.headerName : "Portal de familias"}
           </Text>
         </View>
       </View>

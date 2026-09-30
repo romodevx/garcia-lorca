@@ -209,10 +209,10 @@ func TestTeachingAttendanceRoster(t *testing.T) {
 			assert.Equal(t, tt.wantSubject, att.gotRosterSubjectID)
 			assert.Nil(t, out.Session)
 			require.Len(t, out.Rows, 2)
-			assert.Equal(t, "Ana García", out.Rows[0].Name)
+			assert.Equal(t, "García Ana", out.Rows[0].Name)
 			assert.Equal(t, "excused", out.Rows[0].Status)
 			assert.Equal(t, "cita médica", out.Rows[0].Note)
-			assert.Equal(t, "Luis Pérez", out.Rows[1].Name)
+			assert.Equal(t, "Pérez Luis", out.Rows[1].Name)
 		})
 	}
 }

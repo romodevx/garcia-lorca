@@ -6,6 +6,7 @@ import { field } from "./parts";
 
 import { API_URL } from "../../api-url";
 import { matchesSearch } from "../../_design/textSearch";
+import { formatStudentName, sortStudents, studentNameSearchKeys } from "../../_design/students/studentName";
 
 
 /**
@@ -51,16 +52,14 @@ export function StudentPicker({
 
   const matches = useMemo(() => {
     if (term.trim() === "" || students === null) return [];
-    return students
-      .filter((s) => matchesSearch(term, fullName(s), s.curp))
-      .slice(0, 6);
+    return sortStudents(students.filter((s) => matchesSearch(term, ...studentNameSearchKeys(s), s.curp))).slice(0, 6);
   }, [students, term]);
 
   if (value !== null) {
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontWeight: 700, fontSize: 15 }}>{fullName(value)}</p>
+          <p style={{ fontWeight: 700, fontSize: 15 }}>{formatStudentName(value)}</p>
           <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
             {value.gradeGroup !== "" ? value.gradeGroup : value.level}
           </p>
@@ -115,7 +114,7 @@ export function StudentPicker({
                   background: "var(--surface)",
                 }}
               >
-                <span style={{ fontWeight: 600, fontSize: 14.5 }}>{fullName(student)}</span>
+                <span style={{ fontWeight: 600, fontSize: 14.5 }}>{formatStudentName(student)}</span>
                 <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
                   {" · "}
                   {student.gradeGroup !== "" ? student.gradeGroup : student.level}
@@ -130,7 +129,3 @@ export function StudentPicker({
 }
 
 const hint = { fontSize: 12.5, color: "var(--text-faint)", marginTop: 6 } as const;
-
-export function fullName(student: Student): string {
-  return `${student.firstName} ${student.lastName}`.trim();
-}

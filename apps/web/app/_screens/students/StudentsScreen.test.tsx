@@ -63,8 +63,8 @@ describe("StudentsScreen", () => {
 
     expect(await screen.findByRole("heading", { name: "Estudiantes" })).toBeInTheDocument();
     // both students listed by name
-    expect(await screen.findByText("Valentina Cruz")).toBeInTheDocument();
-    expect(screen.getByText("Mateo Sánchez")).toBeInTheDocument();
+    expect(await screen.findByText("Cruz Valentina")).toBeInTheDocument();
+    expect(screen.getByText("Sánchez Mateo")).toBeInTheDocument();
     // status pills reflect admission status ("Inscrito" pill is unique; "Trámite"
     // also names a tab, so assert at least one pill exists).
     expect(screen.getByText("Inscrito")).toBeInTheDocument();
@@ -76,7 +76,7 @@ describe("StudentsScreen", () => {
   // and the pager scroll clear of the button.
   it("leaves room under the table for the floating button", async () => {
     render(<StudentsScreen onBack={() => {}} />);
-    await screen.findByText("Valentina Cruz");
+    await screen.findByText("Cruz Valentina");
 
     const fab = screen.getByTitle("Nuevo alumno");
     const room = screen.getByTestId("fab-clearance");
@@ -87,25 +87,55 @@ describe("StudentsScreen", () => {
   it("names each row's open button after the pupil it opens", async () => {
     const user = userEvent.setup();
     render(<StudentsScreen onBack={() => {}} />);
-    await screen.findByText("Valentina Cruz");
+    await screen.findByText("Cruz Valentina");
 
     // Every row used to offer an identically-named "Ver ficha": a screen reader
     // announced the same thing five times over, and nothing could address one
     // row in particular. The pupil's name is what tells them apart.
-    await user.click(screen.getByRole("button", { name: "Ver ficha de Mateo Sánchez" }));
+    await user.click(screen.getByRole("button", { name: "Ver ficha de Sánchez Mateo" }));
 
     const card = await screen.findByRole("dialog", { name: "Ficha del alumno" });
-    expect(within(card).getByText("Mateo Sánchez")).toBeInTheDocument();
+    expect(within(card).getByText("Sánchez Mateo")).toBeInTheDocument();
   });
 
   it("filters by the search box", async () => {
     const user = userEvent.setup();
     render(<StudentsScreen onBack={() => {}} />);
-    await screen.findByText("Valentina Cruz");
+    await screen.findByText("Cruz Valentina");
 
     await user.type(screen.getByLabelText("Buscar"), "mateo");
-    expect(screen.getByText("Mateo Sánchez")).toBeInTheDocument();
-    expect(screen.queryByText("Valentina Cruz")).not.toBeInTheDocument();
+    expect(screen.getByText("Sánchez Mateo")).toBeInTheDocument();
+    expect(screen.queryByText("Cruz Valentina")).not.toBeInTheDocument();
+  });
+
+  // Review of T3: the list reads surname first, but the office still types
+  // names the way it says them ("mateo sánchez").
+  it("finds a pupil typed first name first, too", async () => {
+    const user = userEvent.setup();
+    render(<StudentsScreen onBack={() => {}} />);
+    await screen.findByText("Cruz Valentina");
+
+    await user.type(screen.getByLabelText("Buscar"), "mateo sanchez");
+    expect(screen.getByText("Sánchez Mateo")).toBeInTheDocument();
+    expect(screen.queryByText("Cruz Valentina")).not.toBeInTheDocument();
+  });
+
+  it("shows each pupil surname first and sorts by surname, accents aside (T3)", async () => {
+    students.listStudents.mockResolvedValue([
+      { ...mk("1", "Zoe", "Ñuñez", "enrolled") },
+      { ...mk("2", "Beto", "Ávila", "enrolled"), maternalLastName: "Ruiz" },
+      { ...mk("3", "Ana", "avila", "enrolled"), maternalLastName: "López" },
+      { ...mk("4", "Carla", "Nuñez", "enrolled") },
+    ]);
+    render(<StudentsScreen onBack={() => {}} />);
+    await screen.findByText("Ávila Ruiz Beto");
+    const opens = screen.getAllByRole("button", { name: /^Ver ficha de / }).map((b) => b.getAttribute("aria-label"));
+    expect(opens).toEqual([
+      "Ver ficha de avila López Ana",
+      "Ver ficha de Ávila Ruiz Beto",
+      "Ver ficha de Nuñez Carla",
+      "Ver ficha de Ñuñez Zoe",
+    ]);
   });
 
   it("paginates the table: 20 per page, Siguiente reveals the rest, page size changes it", async () => {
@@ -113,23 +143,23 @@ describe("StudentsScreen", () => {
     const many = Array.from({ length: 25 }, (_, i) => mk(String(i + 10), `Nom${i}`, `Ape${String(i).padStart(2, "0")}`, "enrolled"));
     students.listStudents.mockResolvedValue(many);
     render(<StudentsScreen onBack={() => {}} />);
-    await screen.findByText("Nom0 Ape00");
+    await screen.findByText("Ape00 Nom0");
 
     // Sorted by surname Ape00..Ape24 → the last one is on page 2, hidden at first.
-    expect(screen.queryByText("Nom24 Ape24")).not.toBeInTheDocument();
+    expect(screen.queryByText("Ape24 Nom24")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Siguiente" }));
-    expect(await screen.findByText("Nom24 Ape24")).toBeInTheDocument();
+    expect(await screen.findByText("Ape24 Nom24")).toBeInTheDocument();
 
     // Page size 50 → all 25 on one page.
     await user.click(screen.getByRole("button", { name: "50" }));
-    expect(screen.getByText("Nom24 Ape24")).toBeInTheDocument();
+    expect(screen.getByText("Ape24 Nom24")).toBeInTheDocument();
   });
 
   it("opens the quick-add drawer and creates a student in one panel", async () => {
     const user = userEvent.setup();
     students.createStudent.mockResolvedValue(mk("9", "Nuevo", "Alumno", "pending"));
     render(<StudentsScreen onBack={() => {}} />);
-    await screen.findByText("Valentina Cruz");
+    await screen.findByText("Cruz Valentina");
 
     // "Nuevo alumno" is both the header button and the FAB — either opens the drawer.
     const openButtons = screen.getAllByRole("button", { name: /Nuevo alumno/ });
@@ -138,8 +168,8 @@ describe("StudentsScreen", () => {
     // Por etiqueta y no por placeholder: el texto de reposo es decoración y
     // cambia con el diseño; la etiqueta es lo que nombra al campo.
     await user.type(within(dialog).getByLabelText("CURP"), "HEGA050312MDFRNN08");
-    await user.type(within(dialog).getByLabelText("Nombre"), "Nuevo");
-    await user.type(within(dialog).getByLabelText("Apellidos"), "Alumno");
+    await user.type(within(dialog).getByLabelText("Apellido paterno"), "Alumno");
+    await user.type(within(dialog).getByLabelText("Nombre(s)"), "Nuevo");
     await user.type(within(dialog).getByLabelText("Tutor"), "Tutor Nuevo");
     await user.selectOptions(within(dialog).getByLabelText("Nivel"), "lv-p");
     await user.selectOptions(await within(dialog).findByLabelText("Grado"), "gl-1");
@@ -153,6 +183,7 @@ describe("StudentsScreen", () => {
         curp: "HEGA050312MDFRNN08",
         firstName: "NUEVO",
         lastName: "ALUMNO",
+        maternalLastName: "",
         levelId: "lv-p",
         gradeGroup: "",
         guardianName: "TUTOR NUEVO",
@@ -166,7 +197,7 @@ describe("StudentsScreen — editar la ficha (T5)", () => {
     const user = userEvent.setup();
     const onEdit = vi.fn();
     render(<StudentsScreen onBack={() => {}} onEdit={onEdit} />);
-    await user.click(await screen.findByRole("button", { name: "Editar ficha de Mateo Sánchez" }));
+    await user.click(await screen.findByRole("button", { name: "Editar ficha de Sánchez Mateo" }));
     expect(onEdit).toHaveBeenCalledWith("2");
   });
 
@@ -174,7 +205,7 @@ describe("StudentsScreen — editar la ficha (T5)", () => {
     const user = userEvent.setup();
     const onEdit = vi.fn();
     render(<StudentsScreen onBack={() => {}} onEdit={onEdit} />);
-    await user.click(await screen.findByRole("button", { name: "Ver ficha de Valentina Cruz" }));
+    await user.click(await screen.findByRole("button", { name: "Ver ficha de Cruz Valentina" }));
     const card = await screen.findByRole("dialog", { name: "Ficha del alumno" });
     await user.click(within(card).getByRole("button", { name: "Editar ficha" }));
     expect(onEdit).toHaveBeenCalledWith("1");
@@ -182,8 +213,8 @@ describe("StudentsScreen — editar la ficha (T5)", () => {
 
   it("offers no edit button when nobody can edit", async () => {
     render(<StudentsScreen onBack={() => {}} />);
-    await screen.findByText("Valentina Cruz");
-    expect(screen.queryByRole("button", { name: "Editar ficha de Valentina Cruz" })).not.toBeInTheDocument();
+    await screen.findByText("Cruz Valentina");
+    expect(screen.queryByRole("button", { name: "Editar ficha de Cruz Valentina" })).not.toBeInTheDocument();
   });
 });
 
@@ -193,7 +224,7 @@ describe("StudentsScreen — por salón", () => {
   it("counts pupils per classroom, and follows the filter", async () => {
     const user = userEvent.setup();
     render(<StudentsScreen onBack={() => {}} />);
-    await screen.findByText("Valentina Cruz");
+    await screen.findByText("Cruz Valentina");
 
     const perGroup = await screen.findByTestId("per-group");
     expect(perGroup).toHaveTextContent("1° A");
@@ -227,6 +258,6 @@ describe("StudentsScreen — la lista que no cargó", () => {
     students.listStudents.mockResolvedValue([mk("1", "Valentina", "Cruz", "enrolled")]);
     await user.click(screen.getByRole("button", { name: /Reintentar/ }));
 
-    expect(await screen.findByText("Valentina Cruz")).toBeInTheDocument();
+    expect(await screen.findByText("Cruz Valentina")).toBeInTheDocument();
   });
 });

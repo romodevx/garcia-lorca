@@ -153,7 +153,7 @@ func newService(t *testing.T) (*usecase.StudentService, *fakeRepo, *fakePub) {
 
 func validInput() usecase.CreateApplicantInput {
 	return usecase.CreateApplicantInput{
-		CURP: "HEGA050312MDFRNN08", FirstName: "Ana", LastName: "Hernández",
+		CURP: "HEGA050312MDFRNN08", FirstName: "Ana", LastName: "Hernández", MaternalLastName: "Ríos",
 		LevelID: "e1000000-0000-0000-0000-000000000001", GradeGroup: "4° A", GuardianName: "Marisol",
 	}
 }
@@ -168,6 +168,9 @@ func TestCreateApplicant(t *testing.T) {
 	}
 	if s.Status() != domain.AdmissionPending || s.TenantID() != tenant || s.ID() == "" {
 		t.Errorf("applicant wrong: %+v", s)
+	}
+	if s.LastName() != "Hernández" || s.MaternalLastName() != "Ríos" {
+		t.Errorf("surnames = %q %q, want Hernández Ríos", s.LastName(), s.MaternalLastName())
 	}
 	if len(repo.created) != 1 {
 		t.Errorf("expected 1 created, got %d", len(repo.created))
@@ -388,12 +391,15 @@ func TestUpdateDetailsCorrectsTheFile(t *testing.T) {
 	}
 
 	updated, err := svc.UpdateDetails(context.Background(), usecase.UpdateDetailsInput{
-		ID: created.ID(), FirstName: "Ana María", LastName: "Hernández", CURP: "HEGA050312MDFRNN09",
+		ID: created.ID(), FirstName: "Ana María", LastName: "Hernández", MaternalLastName: "Cruz", CURP: "HEGA050312MDFRNN09",
 		Profile: domain.ProfileInput{BirthDate: "2019-03-12", Sex: "F", Email: "Ana@Correo.mx",
 			Phones: []domain.Phone{{Kind: "celular", Number: "5512345678"}}},
 	})
 	if err != nil {
 		t.Fatalf("UpdateDetails: %v", err)
+	}
+	if updated.MaternalLastName() != "Cruz" {
+		t.Errorf("maternal surname = %q, want Cruz", updated.MaternalLastName())
 	}
 	if updated.FirstName() != "Ana María" || updated.CURP().String() != "HEGA050312MDFRNN09" || updated.Profile().Email() != "ana@correo.mx" {
 		t.Errorf("updated = %q %q %q", updated.FirstName(), updated.CURP(), updated.Profile().Email())

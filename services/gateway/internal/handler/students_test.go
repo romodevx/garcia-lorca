@@ -530,3 +530,54 @@ func TestUpdateStudentInvalidIs400(t *testing.T) {
 		t.Errorf("status = %d, want 400", rec.Code)
 	}
 }
+
+// T3: the maternal surname is captured on create and on edit, and answered back.
+func TestStudentsForwardAndAnswerTheMaternalSurname(t *testing.T) {
+	svc := &fakeCreator{res: client.StudentResult{ID: "stu-1", FirstName: "Ana", LastName: "Herrera", MaternalLastName: "Ríos"}}
+	h := handler.NewStudentsHandler(svc)
+
+	rec := postStudents(t, h, `{"curp":"HEGA050312MDFRNN08","firstName":"Ana","lastName":"Herrera","maternalLastName":"Ríos","levelId":"lvl-9"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d", rec.Code)
+	}
+	if svc.got.MaternalLastName != "Ríos" {
+		t.Errorf("create forwarded maternal = %q, want Ríos", svc.got.MaternalLastName)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out["maternalLastName"] != "Ríos" {
+		t.Errorf("body maternalLastName = %v, want Ríos", out["maternalLastName"])
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/students/stu-1", strings.NewReader(
+		`{"firstName":"Ana","lastName":"Herrera","maternalLastName":"Cruz","curp":"HEGA050312MDFRNN08","profile":{}}`))
+	req.SetPathValue("id", "stu-1")
+	up := httptest.NewRecorder()
+	h.Update(up, req)
+	if up.Code != http.StatusOK {
+		t.Fatalf("update status = %d", up.Code)
+	}
+	if svc.gotUpdate.MaternalLastName != "Cruz" {
+		t.Errorf("update forwarded maternal = %q, want Cruz", svc.gotUpdate.MaternalLastName)
+	}
+}
+
+// Review of T3: a caller that does not know the maternal field yet (an older
+// cached web page, a script) must not erase the one already on file.
+func TestUpdateStudentWithoutTheMaternalFieldKeepsIt(t *testing.T) {
+	svc := &fakeCreator{res: client.StudentResult{ID: "stu-1", FirstName: "Ana", LastName: "Herrera", MaternalLastName: "Ríos"}}
+	h := handler.NewStudentsHandler(svc)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/students/stu-1", strings.NewReader(
+		`{"firstName":"Ana","lastName":"Herrera","curp":"HEGA050312MDFRNN08","profile":{}}`))
+	req.SetPathValue("id", "stu-1")
+	rec := httptest.NewRecorder()
+	h.Update(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if svc.gotGetID != "stu-1" || svc.gotUpdate.MaternalLastName != "Ríos" {
+		t.Errorf("forwarded maternal = %q (read %q), want the stored Ríos", svc.gotUpdate.MaternalLastName, svc.gotGetID)
+	}
+}
