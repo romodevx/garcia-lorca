@@ -1842,7 +1842,7 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/DeleteLevelRequest' }
-            example: { confirmName: Maternal, confirmToken: '1790000000.q1w2e3r4t5y6', password: '••••••••' }
+            example: { confirmName: Maternal, confirmToken: '<token-del-resumen>', password: '••••••••' }
       responses:
         '200':
           description: Deleted into the trash; restorable until `restorableUntil`.
@@ -5223,7 +5223,7 @@ components:
         empty: false
         counts: { gradeLevels: 1, groups: 1, subjects: 0, terms: 3, teachingAssignments: 0, students: 12, enrollments: 12, attendanceMarks: 800, monthlyGrades: 0, reportCards: 0, tuitionPlans: 1, uniformItems: 0, schoolEvents: 0 }
         keeps: { charges: 120, payments: 96 }
-        confirmToken: '1790000000.q1w2e3r4t5y6'
+        confirmToken: '<token-del-resumen>'
         expiresAt: '2026-09-28T10:10:00Z'
     DeleteLevelRequest:
       type: object
