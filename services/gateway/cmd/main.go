@@ -875,6 +875,9 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/users", iamAdmin("users:read", adminH.ListUsers))
 	mux.Handle("GET /api/v1/users/{id}", iamAdmin("users:read", adminH.GetUser))
 	mux.Handle("POST /api/v1/users/{id}/status", iamAdmin("users:write", adminH.SetUserStatus))
+	// T2: deleting is users:delete, owner-only (iam 0025) — users:write is not
+	// enough. iam re-checks against the caller's own token.
+	mux.Handle("DELETE /api/v1/users/{id}", iamAdmin("users:delete", adminH.DeleteUser))
 	mux.Handle("POST /api/v1/users/{id}/roles", iamAdmin("users:write", adminH.SetUserRoles))
 	mux.Handle("POST /api/v1/roles", iamAdmin("roles:write", adminH.CreateRole))
 	mux.Handle("GET /api/v1/roles", iamAdmin("roles:read", adminH.ListRoles))

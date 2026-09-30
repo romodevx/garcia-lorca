@@ -55,8 +55,25 @@ type UserRepository interface {
 	// ListUsers returns every principal in the tenant with its roles resolved.
 	ListUsers(ctx context.Context) ([]domain.User, error)
 
-	// SetStatus changes a user's lifecycle status (activate/suspend).
+	// SetStatus changes a user's lifecycle status (activate/suspend). A deleted
+	// account is KindNotFound: only SoftDelete and Restore move it, so a
+	// users:write holder cannot undo an owner-only deletion.
 	SetStatus(ctx context.Context, userID string, status domain.Status) error
+
+	// SoftDelete marks the account deleted, stamping who did it and when, and
+	// moves the refresh-token floor (password_changed_at) so every session it
+	// held dies with it (ADR 0005). The row stays: history references it by id.
+	//
+	// It refuses with domain.ErrLastOwner when the account is ACTIVE, holds
+	// keepActiveHolderOf, and no other active account does — checked and
+	// written atomically, so two directors deleting each other at the same
+	// instant cannot leave the school with none. An unknown or already-deleted
+	// id is KindNotFound.
+	SoftDelete(ctx context.Context, userID, deletedBy, keepActiveHolderOf string) error
+
+	// Restore brings a deleted account back as `invited` under displayName,
+	// clearing the deletion stamp. Anything but a deleted id is KindNotFound.
+	Restore(ctx context.Context, userID, displayName string) error
 
 	// SetUserRoles replaces the user's entire role set with roleIDs.
 	SetUserRoles(ctx context.Context, userID string, roleIDs []string) error
@@ -182,6 +199,11 @@ type IdentityProvisioner interface {
 	//
 	// It is the LAST fallback: a configured mailer always wins.
 	SendPasswordSetupEmail(ctx context.Context, email string) error
+
+	// SetDisabled turns sign-in at the provider off (a deleted user) or back on
+	// (the same address invited again). An address with no account there is
+	// KindNotFound.
+	SetDisabled(ctx context.Context, email string, disabled bool) error
 }
 
 // InvitationRepository stores the single-use tokens that let somebody set a

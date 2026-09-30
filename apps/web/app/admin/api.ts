@@ -37,7 +37,7 @@ import { authFetch } from "../auth/authFetch";
  * recognise. It exists because the gateway used to answer "" and the UI drew
  * those users as suspended: a plausible screen telling a lie.
  */
-export type UserStatus = "active" | "suspended" | "invited" | "unknown";
+export type UserStatus = "active" | "suspended" | "invited" | "deleted" | "unknown";
 
 export interface AdminUser {
   id: string;
@@ -183,6 +183,43 @@ export async function resendInvitation(baseURL: string, id: string): Promise<Inv
 
 export function setUserStatus(baseURL: string, id: string, status: UserStatus): Promise<AdminUser> {
   return postJSON<AdminUser>(baseURL, `/users/${id}/status`, { status });
+}
+
+/**
+ * A refusal from the admin surface, with the server's own sentence.
+ *
+ * iam words its refusals for a person ("no se puede eliminar al último
+ * director activo"), and the gateway forwards them as text. Throwing a bare
+ * "HTTP 409" would make the screen guess what went wrong.
+ */
+export class AdminError extends Error {
+  readonly status: number;
+  /** The server's own words, trimmed; "" when it sent none. */
+  readonly detail: string;
+
+  constructor(status: number, detail: string) {
+    super(detail !== "" ? detail : `HTTP ${status}`);
+    this.name = "AdminError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+/**
+ * Delete an account (T2) — a soft delete: the person can no longer sign in
+ * and leaves this list, while what they did stays in the school's history.
+ * Owner-only (`users:delete`); iam also refuses deleting yourself (403) and
+ * the last active director (409). Inviting the same address again brings the
+ * same account back.
+ */
+export async function deleteUser(baseURL: string, id: string): Promise<void> {
+  const res = await authFetch(url(baseURL, `${BASE_PATH}/users/${encodeURIComponent(id)}`), {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw new AdminError(res.status, (await res.text()).trim());
+  }
 }
 
 export function setUserRoles(baseURL: string, id: string, roleIds: string[]): Promise<AdminUser> {

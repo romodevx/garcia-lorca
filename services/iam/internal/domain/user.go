@@ -23,7 +23,18 @@ const (
 	// difference between "created" and "usable" — before it existed, a mistyped
 	// address became a working account nobody could reach.
 	StatusInvited
+	// StatusDeleted: the account was removed by the director (T2). It cannot
+	// log in and it leaves every listing, but the row stays: payments it
+	// registered, grades it captured and the audit trail name it by id, so a
+	// hard delete would orphan the school's history. Inviting the same address
+	// again brings THIS account back, history included (owner answer 3).
+	StatusDeleted
 )
+
+// ErrLastOwner is the refusal to delete the only active account that holds the
+// owner role: without one, nobody could administer the school again.
+var ErrLastOwner = glerrors.New(glerrors.KindConflict,
+	"no se puede eliminar al último director activo")
 
 // User is the IAM principal: a stable identity with an email (unique per
 // tenant), a lifecycle status, and a set of assigned roles. Authorization is
@@ -87,6 +98,19 @@ func (u User) Status() Status { return u.status }
 
 // CanAuthenticate reports whether the account may log in (active only).
 func (u User) CanAuthenticate() bool { return u.status == StatusActive }
+
+// IsDeleted reports whether the account was removed (soft delete).
+func (u User) IsDeleted() bool { return u.status == StatusDeleted }
+
+// HoldsRole reports whether roleID is among the user's assigned roles.
+func (u User) HoldsRole(roleID string) bool {
+	for _, role := range u.roles {
+		if role.ID() == roleID {
+			return true
+		}
+	}
+	return false
+}
 
 // MustChangePassword reports whether the account still holds a temporary
 // password and must rotate it before doing anything else.

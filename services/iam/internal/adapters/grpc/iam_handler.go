@@ -234,6 +234,20 @@ func (h *IAMHandler) SetUserStatus(ctx context.Context, req *connect.Request[iam
 	return connect.NewResponse(&iamv1.SetUserStatusResponse{User: toProtoUser(user)}), nil
 }
 
+// DeleteUser soft-deletes an account. The caller is the verified subject of
+// the access token — the self-deletion guard and the permission check must not
+// trust anything the request says about who is asking.
+func (h *IAMHandler) DeleteUser(ctx context.Context, req *connect.Request[iamv1.DeleteUserRequest]) (*connect.Response[iamv1.DeleteUserResponse], error) {
+	claims, err := h.auth.ValidateToken(ctx, req.Msg.GetAccessToken())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	if err := h.admin.DeleteUser(ctx, claims.Subject, req.Msg.GetUserId()); err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&iamv1.DeleteUserResponse{}), nil
+}
+
 func (h *IAMHandler) CreateRole(ctx context.Context, req *connect.Request[iamv1.CreateRoleRequest]) (*connect.Response[iamv1.CreateRoleResponse], error) {
 	role, err := h.admin.CreateRole(ctx, req.Msg.GetName(), req.Msg.GetPermissions())
 	if err != nil {
@@ -319,6 +333,8 @@ func toProtoStatus(s domain.Status) iamv1.UserStatus {
 		return iamv1.UserStatus_USER_STATUS_SUSPENDED
 	case domain.StatusInvited:
 		return iamv1.UserStatus_USER_STATUS_INVITED
+	case domain.StatusDeleted:
+		return iamv1.UserStatus_USER_STATUS_DELETED
 	default:
 		return iamv1.UserStatus_USER_STATUS_UNSPECIFIED
 	}
@@ -337,7 +353,8 @@ func fromProtoStatus(s iamv1.UserStatus) (domain.Status, error) {
 	// oversight. This function feeds SetUserStatus, so accepting it would let
 	// anyone holding users:write push a working account into a state that
 	// cannot log in and has no way out through the UI. Only accepting an
-	// invitation, or issuing one, may write `invited`.
+	// invitation, or issuing one, may write `invited`. DELETED is absent for
+	// the same reason: DeleteUser is the only road there, with its guards.
 	default:
 		return domain.StatusUnspecified, glerrors.New(glerrors.KindInvalid, "user status is required")
 	}

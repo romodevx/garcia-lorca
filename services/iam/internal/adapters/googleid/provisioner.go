@@ -30,6 +30,9 @@ type Provisioner struct {
 	// NIL when no web api key is configured, which makes SendPasswordSetupEmail
 	// refuse with a message naming what is missing.
 	inviter *Inviter
+	// userNotFound recognizes the SDK's "no such account" answer. A field only
+	// so a test can stand in for an error the SDK does not let anyone build.
+	userNotFound func(error) bool
 }
 
 // SetPassword writes the credential its owner just chose and marks the address
@@ -46,18 +49,45 @@ type Provisioner struct {
 // did not happen. Delivery moved to a mailer we can hold accountable; the
 // provider is left holding the credential, which it does well.
 func (p *Provisioner) SetPassword(ctx context.Context, email, password string) error {
-	rec, err := p.sdk.GetUserByEmail(ctx, email)
+	uid, err := p.uidOf(ctx, email)
 	if err != nil {
-		if firebaseauth.IsUserNotFound(err) {
-			return glerrors.New(glerrors.KindNotFound, "that account does not exist at the identity provider")
-		}
-		return glerrors.Wrap(glerrors.KindInternal, "looking up the provider account", err)
+		return err
 	}
 	params := (&firebaseauth.UserToUpdate{}).Password(password).EmailVerified(true)
-	if _, err := p.sdk.UpdateUser(ctx, rec.UID, params); err != nil {
+	if _, err := p.sdk.UpdateUser(ctx, uid, params); err != nil {
 		return glerrors.Wrap(glerrors.KindInternal, "writing the password at the identity provider", err)
 	}
 	return nil
+}
+
+// SetDisabled switches sign-in at the provider off or on, and touches nothing
+// else about the account: its password and verified address survive, so a
+// person invited back after being deleted (T2) keeps the credential they had.
+//
+// UpdateUser is one of the three calls this adapter is allowed, so this needs
+// no new grant on the runtime service account.
+func (p *Provisioner) SetDisabled(ctx context.Context, email string, disabled bool) error {
+	uid, err := p.uidOf(ctx, email)
+	if err != nil {
+		return err
+	}
+	if _, err := p.sdk.UpdateUser(ctx, uid, (&firebaseauth.UserToUpdate{}).Disabled(disabled)); err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "changing sign-in at the identity provider", err)
+	}
+	return nil
+}
+
+// uidOf resolves the provider's id for an address. No account there is
+// KindNotFound; anything else is KindInternal.
+func (p *Provisioner) uidOf(ctx context.Context, email string) (string, error) {
+	rec, err := p.sdk.GetUserByEmail(ctx, email)
+	if err != nil {
+		if p.userNotFound(err) {
+			return "", glerrors.New(glerrors.KindNotFound, "that account does not exist at the identity provider")
+		}
+		return "", glerrors.Wrap(glerrors.KindInternal, "looking up the provider account", err)
+	}
+	return rec.UID, nil
 }
 
 // SendPasswordSetupEmail delegates to the Inviter. See its doc for what this
@@ -72,7 +102,7 @@ func (p *Provisioner) SendPasswordSetupEmail(ctx context.Context, email string) 
 
 // NewProvisioner wraps an SDK client.
 func NewProvisioner(sdk accountCreator, inviter *Inviter) *Provisioner {
-	return &Provisioner{sdk: sdk, inviter: inviter}
+	return &Provisioner{sdk: sdk, inviter: inviter, userNotFound: firebaseauth.IsUserNotFound}
 }
 
 // CreateAccount creates the account WITHOUT a password and WITHOUT marking the

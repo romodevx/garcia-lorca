@@ -35,6 +35,8 @@ export const PERMISSION_CATALOG: readonly PermissionGroup[] = [
     permissions: [
       { value: "users:read", label: "Ver usuarios" },
       { value: "users:write", label: "Crear y editar usuarios" },
+      // T2: deleting an account is the director's alone (iam owner-only).
+      { value: "users:delete", label: "Eliminar usuarios", ownerOnly: true },
     ],
   },
   {

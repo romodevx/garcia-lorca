@@ -124,3 +124,32 @@ func TestUserAccessorsAreStable(t *testing.T) {
 		t.Errorf("accessors mismatch: %q/%q/%q/%q", u.ID(), u.TenantID(), u.Email(), u.DisplayName())
 	}
 }
+
+// A deleted account is gone for every authentication path: login, provider
+// sign-in, refresh and re-authentication all ask CanAuthenticate.
+func TestDeletedUserCannotAuthenticate(t *testing.T) {
+	u, err := domain.NewUser("u1", "t1", mustEmail(t, "ex@garcialorca.mx"), "Ex", domain.StatusDeleted, false, nil)
+	if err != nil {
+		t.Fatalf("NewUser: %v", err)
+	}
+	if u.CanAuthenticate() {
+		t.Error("a deleted user must not authenticate")
+	}
+	if !u.IsDeleted() {
+		t.Error("IsDeleted() = false for a deleted user")
+	}
+}
+
+func TestUserHoldsRole(t *testing.T) {
+	owner := mustRole(t, domain.OwnerRoleID, "owner", []string{"users:delete"})
+	u, err := domain.NewUser("u1", "t1", mustEmail(t, "dir@garcialorca.mx"), "Dir", domain.StatusActive, false, []domain.Role{owner})
+	if err != nil {
+		t.Fatalf("NewUser: %v", err)
+	}
+	if !u.HoldsRole(domain.OwnerRoleID) {
+		t.Error("HoldsRole(owner) = false, want true")
+	}
+	if u.HoldsRole("someone-else") {
+		t.Error("HoldsRole(other) = true, want false")
+	}
+}

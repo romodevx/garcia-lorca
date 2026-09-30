@@ -199,6 +199,13 @@ const ICON_PATHS = {
     </g>
   ),
   close: <path d="M6 6l12 12M18 6 6 18" />,
+  trash: (
+    <g>
+      <path d="M4 7h16M10 7V4.5h4V7" />
+      <path d="M6 7l1 13h10l1-13" />
+      <path d="M10 11v5.5M14 11v5.5" />
+    </g>
+  ),
   qrScan: (
     <g>
       <path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16" />

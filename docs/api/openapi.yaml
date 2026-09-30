@@ -27,7 +27,7 @@ openapi: 3.1.0
 
 info:
   title: García Lorca API
-  version: 0.16.0
+  version: 0.17.0
   license:
     name: Proprietary
     url: https://garcialorca.edu.mx/legal
@@ -56,6 +56,11 @@ tags:
     description: >
       Staff roster and who teaches what ("carga académica"). Behind
       `module_teachers`; writes require `teachers:write`.
+  - name: iam-users
+    description: >
+      Login accounts. Behind `module_iam`. Only the deletion route is described
+      here so far (T2); the rest of the user and role admin predates the
+      contract and is tracked with the other undescribed routes.
   - name: config-levels
     description: >
       The school's levels (Preescolar, Primaria…). Behind `module_config`;
@@ -1414,6 +1419,61 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
+
+  /api/v1/users/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      tags: [iam-users]
+      summary: Delete a login account (soft delete)
+      description: >
+        The account can no longer sign in by any road (password, identity
+        provider, refresh) and leaves `GET /api/v1/users`; its row stays,
+        because payments, grades and the audit trail reference it by id and a
+        name snapshot. Every session it held is revoked (its refresh tokens die
+        at once; an access token already issued lives out its short life), its
+        pending invitation and reset links are revoked, and it is disabled at
+        the identity provider. Refused: deleting your own account (403) and the
+        last active account holding the owner role (409). Deleting an account
+        that is already deleted only retries the identity-provider step (204).
+        Inviting the same address again (`POST /api/v1/users/invite`) restores
+        THIS account as `invited`, history attached, with the roles of the new
+        invitation. Requires `users:delete` (owner only), checked by the gateway
+        and again by iam against the caller as they are now; `module_iam`.
+      operationId: deleteUser
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      responses:
+        '204':
+          description: Deleted. Nothing to return.
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403':
+          description: >
+            The caller lacks `users:delete`, is not active, or is deleting their
+            own account.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: no puedes eliminar tu propia cuenta
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: The account is the last active one holding the owner role.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: no se puede eliminar al último director activo
+        '500':
+          description: >
+            The account is deleted, but the identity provider could not be
+            reached to disable it. Every sign-in path already refuses it;
+            repeating the request retries the provider.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: internal error
 
   /api/v1/teachers/{id}/access:
     post:

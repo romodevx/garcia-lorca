@@ -21,6 +21,7 @@ type AdminService interface {
 	GetUser(ctx context.Context, id string) (client.User, error)
 	ListUsers(ctx context.Context) ([]client.User, error)
 	SetUserStatus(ctx context.Context, userID, status string) (client.User, error)
+	DeleteUser(ctx context.Context, accessToken, userID string) error
 	AssignRole(ctx context.Context, userID, roleID string) error
 	RevokeRole(ctx context.Context, userID, roleID string) error
 	CreateRole(ctx context.Context, name string, perms []string) (client.Role, error)
@@ -369,6 +370,24 @@ func (h *AdminHandler) SetUserStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, toUserResponse(res))
+}
+
+// DeleteUser handles DELETE /api/v1/users/{id}: a soft delete (T2).
+//
+// The caller's OWN token goes to iam, which is where the rules live: nobody
+// deletes themself, the caller must hold users:delete as they are now (not as
+// their token was minted), and the last active owner stays. The route already
+// demanded users:delete; iam asks again.
+//
+// No caller-subset check here, unlike resend: deleting reaches nobody's
+// access — it takes it away — and users:delete is owner-only, so its holder
+// already holds every permission a target could carry.
+func (h *AdminHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
+	if err := h.svc.DeleteUser(r.Context(), middleware.TokenFrom(r), r.PathValue("id")); err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type setUserRolesRequest struct {

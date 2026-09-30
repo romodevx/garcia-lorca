@@ -9,8 +9,10 @@ import { Icon, type IconName } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import type { ColorKey } from "../../_design/colors";
 import {
+  AdminError,
   createRole,
   createUser,
+  deleteUser,
   listRoles,
   listUsers,
   setRolePermissions,
@@ -48,6 +50,9 @@ const PILL = {
   active: { label: "Activo", bg: "var(--ok-bg)", fg: "var(--ok-fg)", dot: "var(--forest)" },
   invited: { label: "Invitado", bg: "var(--warn-bg)", fg: "var(--warn-fg)", dot: "var(--yellow)" },
   suspended: { label: "Suspendido", bg: "var(--bad-bg)", fg: "var(--bad-fg)", dot: "var(--red)" },
+  // Never in the list (iam leaves deleted accounts out); named so a stray one
+  // reads as what it is rather than "Desconocido".
+  deleted: { label: "Eliminado", bg: "var(--bad-bg)", fg: "var(--bad-fg)", dot: "var(--red)" },
   unknown: { label: "Desconocido", bg: "var(--bad-bg)", fg: "var(--bad-fg)", dot: "var(--red)" },
 } as const;
 
@@ -93,6 +98,13 @@ function labelField(label: string, node: ReactElement, req?: boolean, help?: str
 
 export interface AdminScreenProps {
   onBack: () => void;
+  /**
+   * Whether the caller holds users:delete (owner-only). UX only: the gateway
+   * and iam refuse anybody else.
+   */
+  canDeleteUsers?: boolean;
+  /** The caller's own id: nobody is offered to delete their own account. */
+  currentUserId?: string;
 }
 
 /** Written and shaped like an address: what the drawers need to be ready. */
@@ -100,7 +112,7 @@ function hasEmailShape(email: string): boolean {
   return email.trim() !== "" && emailShapeError(email) === undefined;
 }
 
-export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
+export function AdminScreen({ onBack, canDeleteUsers = false, currentUserId }: AdminScreenProps): ReactElement {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
@@ -125,6 +137,7 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
   const [addRole, setAddRole] = useState(false);
   const [editRoles, setEditRoles] = useState<AdminUser | null>(null);
   const [editPerms, setEditPerms] = useState<Role | null>(null);
+  const [deleting, setDeleting] = useState<AdminUser | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [handover, setHandover] = useState<{ user: AdminUser; invitation: Invitation } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -185,6 +198,13 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
       const dead = e instanceof Error && e.message.includes("401");
       say(dead ? "Tu sesión caducó. Vuelve a entrar." : "No se pudo generar la invitación");
     }
+  };
+  // Throws on refusal so the dialog can stay open and say why.
+  const onDeleteUser = async (u: AdminUser): Promise<void> => {
+    await deleteUser(API_URL, u.id);
+    setDeleting(null);
+    reload();
+    say(`Usuario eliminado · ${u.displayName}`);
   };
   const onSaveUserRoles = async (u: AdminUser, roleIds: string[]): Promise<void> => { try { await setUserRoles(API_URL, u.id, roleIds); setEditRoles(null); reload(); say("Roles actualizados"); } catch { say("No se pudieron guardar los roles"); } };
   const onSavePerms = async (r: Role, permissions: string[]): Promise<void> => { try { await setRolePermissions(API_URL, r.id, permissions); setEditPerms(null); reload(); say("Permisos actualizados"); } catch { say("No se pudieron guardar los permisos"); } };
@@ -265,6 +285,11 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
                   {(u.status === "active" || u.status === "suspended") && (
                     <button onClick={() => void onSuspend(u)} style={{ height: 38, padding: "0 14px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, color: u.status === "active" ? "var(--bad-fg)" : "var(--forest)", background: "var(--surface-3)", border: "1px solid var(--border)", cursor: "pointer" }}>{u.status === "active" ? "Suspender" : "Reactivar"}</button>
                   )}
+                  {/* Owner-only, and never on your own row: iam refuses both
+                      anyway — this is the courtesy, that is the rule. */}
+                  {canDeleteUsers && u.id !== currentUserId && (
+                    <button onClick={() => setDeleting(u)} aria-label={`Eliminar a ${u.displayName}`} style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 38, padding: "0 14px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, color: "var(--bad-fg)", background: "var(--surface-3)", border: "1px solid var(--border)", cursor: "pointer" }}><Icon name="trash" size={16} />Eliminar</button>
+                  )}
                 </div>
               </div>
             ))}
@@ -288,6 +313,7 @@ export function AdminScreen({ onBack }: AdminScreenProps): ReactElement {
       {addRole && <CreateRoleDrawer onClose={() => setAddRole(false)} onSave={onCreateRole} />}
       {editRoles !== null && <EditRolesDrawer user={editRoles} roles={roles} onClose={() => setEditRoles(null)} onSave={(ids) => onSaveUserRoles(editRoles, ids)} />}
       {editPerms !== null && <EditPermsDrawer role={editPerms} onClose={() => setEditPerms(null)} onSave={(ps) => onSavePerms(editPerms, ps)} />}
+      {deleting !== null && <DeleteUserDialog user={deleting} onClose={() => setDeleting(null)} onConfirm={() => onDeleteUser(deleting)} />}
       {handover !== null && (
         <HandoverDrawer
           user={handover.user}
@@ -383,6 +409,54 @@ function InviteUserDrawer({ roles, onClose, onSave }: { roles: readonly Role[]; 
       </>
     </Drawer>
   );
+}
+
+/**
+ * Asking before deleting an account (T2).
+ *
+ * A dialog and not an undo toast, because from this screen it cannot be undone:
+ * the way back is inviting the address again. It says what the director needs
+ * to decide — the person loses access, and nothing they did is lost — and on a
+ * refusal it stays open with iam's reason instead of pretending it worked.
+ *
+ * The shell is the APG dialog every drawer uses: focus in, trapped, Esc out,
+ * and back to the row's button on close.
+ */
+function DeleteUserDialog({ user, onClose, onConfirm }: { user: AdminUser; onClose: () => void; onConfirm: () => Promise<void> }): ReactElement {
+  const [err, setErr] = useState<string | undefined>(undefined);
+  const [pending, setPending] = useState(false);
+  const confirm = async (): Promise<void> => {
+    if (pending) return;
+    setPending(true);
+    setErr(undefined);
+    try {
+      await onConfirm();
+    } catch (e) {
+      setErr(deleteRefusal(e));
+      setPending(false);
+    }
+  };
+  return (
+    <DrawerShell title="Eliminar usuario" subtitle={user.email} icon="warning" size="sm" onClose={onClose} onSubmit={() => void confirm()}
+      footer={<><Btn kind="ghost" onClick={onClose}>Cancelar</Btn><div style={{ flex: 1 }} /><Btn type="submit" danger icon="check" style={{ height: 52 }}>{pending ? "Eliminando…" : "Eliminar usuario"}</Btn></>}>
+      <div style={{ display: "grid", gap: 14, fontSize: 15, lineHeight: 1.55, color: "var(--text)" }}>
+        <p style={{ margin: 0 }}><b>{user.displayName}</b> ya no podrá entrar al sistema y dejará de aparecer en esta lista.</p>
+        <p style={{ margin: 0, color: "var(--text-muted)" }}>Su historial se conserva: los pagos que registró, las calificaciones que capturó y todo lo que quedó a su nombre. Si más adelante vuelves a invitar su correo, recupera esta misma cuenta.</p>
+        {err !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{err}</p>}
+      </div>
+    </DrawerShell>
+  );
+}
+
+/** The refusal in words the director can act on. */
+function deleteRefusal(e: unknown): string {
+  const status = e instanceof AdminError ? e.status : 0;
+  const detail = e instanceof AdminError ? e.detail : "";
+  if (status === 409) return "No se puede eliminar al último director activo.";
+  if (status === 403) return detail.includes("propia") ? "No puedes eliminar tu propia cuenta." : "No tienes permiso para eliminar usuarios.";
+  if (status === 404) return "Este usuario ya no existe. Recarga la lista.";
+  if (status === 401) return "Tu sesión caducó. Vuelve a entrar.";
+  return "No se pudo eliminar el usuario. Intenta de nuevo.";
 }
 
 function CreateRoleDrawer({ onClose, onSave }: { onClose: () => void; onSave: (i: CreateRoleInput) => Promise<void> }): ReactElement {

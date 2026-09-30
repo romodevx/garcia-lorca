@@ -54,3 +54,16 @@ describe("PERMISSION_CATALOG — cerrar periodos (tarea 7)", () => {
     expect(GRANTABLE_PERMISSIONS).toContain("grades:write");
   });
 });
+
+describe("PERMISSION_CATALOG — eliminar usuarios (T2)", () => {
+  // Deleting an account is the director's alone (owner answer 4): listed so
+  // it can be seen, marked owner-only so no role is ever offered it.
+  it("lists users:delete under Usuarios, marked owner-only and not grantable", () => {
+    const group = PERMISSION_CATALOG.find((g) => g.resource === "Usuarios");
+    const del = group?.permissions.find((p) => p.value === "users:delete");
+    expect(del?.label).toBe("Eliminar usuarios");
+    expect(del?.ownerOnly).toBe(true);
+    expect(GRANTABLE_PERMISSIONS).not.toContain("users:delete");
+    expect(GRANTABLE_PERMISSIONS).toContain("users:write");
+  });
+});
