@@ -318,15 +318,16 @@ func (f *fakeRepo) GetCharge(_ context.Context, id string) (ports.ChargeWithPaid
 }
 
 // The fake reads what the real repository reads: generated inscription and fee
-// lines of one cycle, in any status.
+// lines of one cycle that are not cancelled.
 func (f *fakeRepo) ListIssuedLines(_ context.Context, cycleID, studentID string) ([]ports.IssuedLine, error) {
 	var out []ports.IssuedLine
 	for _, c := range f.charges {
 		ref := c.ExternalRef()
-		if c.CycleID() != cycleID || (studentID != "" && c.StudentID() != studentID) {
+		if c.CycleID() != cycleID || (studentID != "" && c.StudentID() != studentID) ||
+			c.Status() == domain.StatusCancelled {
 			continue
 		}
-		if !strings.HasPrefix(ref, "enrollment:") && !strings.HasPrefix(ref, "fee:") {
+		if !strings.HasPrefix(ref, domain.EnrollmentRefPrefix) && !strings.HasPrefix(ref, domain.FeeRefPrefix) {
 			continue
 		}
 		out = append(out, ports.IssuedLine{StudentID: c.StudentID(), ExternalRef: ref, Description: c.Description()})

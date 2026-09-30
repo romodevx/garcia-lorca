@@ -358,9 +358,10 @@ export function FeesSection({
       onError("Una cuota necesita nombre y monto.");
       return;
     }
-    if (fees.some((f) => sameLineName(f.name, name))) {
-      // Se cobrarían como UNA cuota: la segunda nunca llegaría al estado de
-      // cuenta. Ver `sameLineName`.
+    if (fees.some((f) => sameLineName(f.name, name) && f.months.some((m) => picked.includes(m)))) {
+      // In a shared month they would bill as ONE fee and the second would never
+      // reach the statement (the month is part of a fee's identity server-side,
+      // so the same name in other months is fine). See sameLineName.
       onError(`Ya existe una cuota que se llama casi igual que "${name.trim()}".`);
       return;
     }

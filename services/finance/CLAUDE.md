@@ -76,9 +76,11 @@ ledger operations run in a single transaction (Unit of Work).
   `ListIssuedLines` and issue a line under the ref it ALREADY has when its
   `domain.LineKey` (name without accents/case/punctuation, from the charge's
   description; plus the month for fees) matches. Issued refs are never rewritten.
-  A single-amount inscription adopted by a concept line is NOT re-priced by that
-  concept's ladder. `TuitionPlan.SharedLineName` refuses, on save only, two
-  concepts or two fees that reduce to one key.
+  Cancelled lines are ignored (they owe nothing). When a line exists in both
+  shapes the ref of the wanted line's own shape wins. A single-amount inscription
+  is NOT priced by any concept's ladder — neither by the run nor at the counter.
+  `TuitionPlan.SharedLineName` refuses, on save only, two concepts that reduce to
+  one key, or two such fees sharing a month.
 - Surcharges are separate charges and are **excluded from their own input**: a
   fee that earned fees would turn a fixed monthly charge into compound interest.
 - A level with no table is **reported by name**, never billed at zero.

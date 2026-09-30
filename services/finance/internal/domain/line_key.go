@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"strings"
 	"unicode"
 
@@ -38,10 +39,12 @@ func LineKey(name string) string {
 }
 
 // SharedLineName reports two lines of the plan that would bill as ONE: two
-// inscription concepts, or two fees, whose names reduce to the same LineKey.
+// inscription concepts whose names reduce to the same LineKey, or two fees that
+// do and share a month (a fee's month is part of its identity, so the same
+// name in different months is two lines).
 //
-// The billing run recognises an issued line by that key, so the second of such
-// a pair would be taken for the first and never issued — under-billing the
+// The billing run recognises an issued line by that identity, so the second of
+// such a pair would be taken for the first and never issued — under-billing the
 // family all year without a word. Refusing it when the table is saved is the
 // only moment a person is there to rename it.
 //
@@ -50,34 +53,40 @@ func LineKey(name string) string {
 // saved table unreadable — the billing run would stop for the whole level.
 // The write path calls it; the read path does not.
 func (p TuitionPlan) SharedLineName() error {
-	concepts := make([]string, 0, len(p.enrollmentConcepts))
+	seen := make(map[string]bool, len(p.enrollmentConcepts))
 	for _, c := range p.enrollmentConcepts {
-		concepts = append(concepts, c.Name)
+		k := LineKey(c.Name)
+		if seen[k] {
+			return glerrors.New(glerrors.KindInvalid,
+				"two lines of the inscription differ only in accents, case or punctuation")
+		}
+		seen[k] = true
 	}
-	if repeatedKey(concepts) {
-		return glerrors.New(glerrors.KindInvalid,
-			"dos conceptos de la inscripción se llaman igual salvo por acentos o mayúsculas")
-	}
-	fees := make([]string, 0, len(p.fees))
+	feeMonths := map[string]bool{}
 	for _, f := range p.fees {
-		fees = append(fees, f.Name)
-	}
-	if repeatedKey(fees) {
-		return glerrors.New(glerrors.KindInvalid,
-			"dos cuotas se llaman igual salvo por acentos o mayúsculas")
+		k := LineKey(f.Name)
+		for _, m := range uniqueMonths(f.Months) {
+			id := fmt.Sprintf("%s|%d", k, m)
+			if feeMonths[id] {
+				return glerrors.New(glerrors.KindInvalid,
+					"two fees collected in the same month differ only in accents, case or punctuation")
+			}
+			feeMonths[id] = true
+		}
 	}
 	return nil
 }
 
-// repeatedKey reports whether two names reduce to one LineKey.
-func repeatedKey(names []string) bool {
-	seen := make(map[string]bool, len(names))
-	for _, n := range names {
-		k := LineKey(n)
-		if seen[k] {
-			return true
+// uniqueMonths drops a month listed twice within ONE fee: that is the fee's
+// own shape (validated elsewhere), not a clash with another fee.
+func uniqueMonths(months []int) []int {
+	seen := make(map[int]bool, len(months))
+	out := make([]int, 0, len(months))
+	for _, m := range months {
+		if !seen[m] {
+			seen[m] = true
+			out = append(out, m)
 		}
-		seen[k] = true
 	}
-	return false
+	return out
 }

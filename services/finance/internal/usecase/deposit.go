@@ -673,18 +673,14 @@ func rungOn(c ports.ChargeWithPaid, plan domain.TuitionPlan, enrolmentConceptID 
 }
 
 // isLineOf reports whether an issued inscription charge is the plan line of
-// that name.
+// that name — by the same identity, and under the same rule, the run re-prices
+// by (issuedLines), or the counter would show one number and collect another.
 //
-// The exact description always matched. A line whose name was RE-SPELLED after
-// it was issued ("Inscripción" → "INSCRIPCION") is the same line too, and the
-// run re-prices it by the ladder (issuedLines), so the counter must quote it
-// by the same ladder or it would show one number and collect another. That
-// wider match is kept to charges issued AS a concept line: a single-amount
-// inscription is not a rung of anybody's ladder (see issuedLines.adopt).
+// A line whose name was RE-SPELLED after it was issued ("Inscripción" →
+// "INSCRIPCION") is the same line. A single-amount inscription is not a rung
+// of anybody's ladder, even when a concept carries its exact name: the run does
+// not re-price it, so neither does the counter.
 func isLineOf(name string, c domain.Charge) bool {
-	if name == c.Description() {
-		return true
-	}
 	return isConceptRef(c.ExternalRef()) && domain.LineKey(name) == domain.LineKey(c.Description())
 }
 

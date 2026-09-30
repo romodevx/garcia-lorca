@@ -542,7 +542,9 @@ func (r *Repository) ListIssuedLines(ctx context.Context, cycleID, studentID str
 		q := tx.Model(&chargeModel{}).
 			Select("student_id", "external_ref", "description").
 			Where("cycle_id = ?", cycleID).
-			Where("(external_ref LIKE ? OR external_ref LIKE ?)", "enrollment:%", "fee:%").
+			Where("(external_ref LIKE ? OR external_ref LIKE ?)",
+				domain.EnrollmentRefPrefix+"%", domain.FeeRefPrefix+"%").
+			Where("status <> ?", domain.StatusCancelled).
 			Order("student_id ASC, external_ref ASC")
 		if studentID != "" {
 			q = q.Where("student_id = ?", studentID)

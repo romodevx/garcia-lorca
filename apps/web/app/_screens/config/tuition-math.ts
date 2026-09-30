@@ -202,8 +202,8 @@ export function ladderProblem(concepts: readonly EnrollmentConcept[]): string {
     if (concept.name.trim() === "") {
       return "Cada renglón de la inscripción necesita un nombre.";
     }
-    // "Cuota APF" y "Cuota A.P.F." son dos nombres para una persona y UN cargo
-    // para el cobro: el segundo renglón nunca se emitiría. Ver `sameLineName`.
+    // "Cuota APF" and "Cuota A.P.F." are two names to a person and ONE charge
+    // to the ledger: the second line would never be issued. See sameLineName.
     if (seen.some((name) => sameLineName(name, concept.name))) {
       return `Dos renglones se llaman casi igual ("${concept.name}"). Ponles nombres que se distingan.`;
     }

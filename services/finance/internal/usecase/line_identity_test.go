@@ -259,3 +259,98 @@ func feePlan(t *testing.T, f *fixture, name string) {
 		t.Fatalf("price the fee: %v", err)
 	}
 }
+
+// Review #1: the counter must agree with the run. The run does not re-price a
+// single-amount inscription by a concept's ladder, so the counter must not
+// quote it by one either — not even when the concept is named exactly like it.
+func TestTheCounterDoesNotPriceASingleAmountInscriptionByTheLadder(t *testing.T) {
+	f := billingFixture(t)
+	runOn(t, f, "2026-09-15")
+	conceptsPlan(t, f, "Inscripción")
+	runOn(t, f, "2026-09-16")
+	day := aug(2026, time.September, 20)
+	f.clock = day
+
+	got, err := f.svc.ExpectedToday(context.Background(), testStudent, day)
+	if err != nil {
+		t.Fatalf("ExpectedToday: %v", err)
+	}
+
+	for _, line := range got.Lines {
+		if line.Description == "Inscripción" && line.OwedCents != 50000 {
+			t.Errorf("the counter quotes %d for the single-amount inscription, want the 50000 issued", line.OwedCents)
+		}
+	}
+}
+
+// Review #2: a ledger that already holds the line in both shapes (the defect
+// this fixes, left in place) must keep re-pricing the CONCEPT charge after a
+// re-spelling — never adopt the single-amount one instead.
+func TestARespelledConceptAdoptsTheChargeOfItsOwnShape(t *testing.T) {
+	f := billingFixture(t)
+	runOn(t, f, "2026-09-15") // single amount: enrollment:<c>:<s>
+	respell(t, f, "Inscripción")
+	runOn(t, f, "2026-09-16") // adopts the single amount; issues the other two
+	// The pre-fix duplicate: the same line under its concept ref as well.
+	legacyDuplicate(t, f, "Inscripción", "inscripcin", 220000)
+	respell(t, f, "INSCRIPCION")
+
+	got := runOn(t, f, "2026-11-15")
+
+	if got.EnrollmentRepriced != 1 {
+		t.Fatalf("repriced = %d, want the concept charge moved to November's rung", got.EnrollmentRepriced)
+	}
+}
+
+// A charge somebody CANCELLED owes nothing, and cancelling is how an office
+// clears a wrong line so the run can issue the right one. Only a live line
+// stops a re-issue under another reference.
+func TestACancelledLineDoesNotBlockTheConvertedInscription(t *testing.T) {
+	f := billingFixture(t)
+	runOn(t, f, "2026-09-15")
+	old := chargeNamed(t, f, testStudent, "Inscripción")
+	if _, err := f.svc.CancelCharge(context.Background(), old.Charge.ID()); err != nil {
+		t.Fatalf("CancelCharge: %v", err)
+	}
+	conceptsPlan(t, f, "INSCRIPCION")
+
+	got := runOn(t, f, "2026-09-16")
+
+	if got.EnrollmentCreated != 3 {
+		t.Errorf("created %d lines, want all 3: the only one there was cancelled", got.EnrollmentCreated)
+	}
+}
+
+// Review #5: the month is part of a fee's identity, so two fees of one name in
+// DIFFERENT months are two lines and a plan may keep them.
+func TestTwoFeesOfOneNameInDifferentMonthsAreAllowed(t *testing.T) {
+	f := billingFixture(t)
+	if _, err := f.svc.UpsertTuitionPlan(context.Background(), usecase.TuitionPlanInput{
+		CycleID: testCycle, LevelID: testLevel,
+		EnrollmentCents: 50000, MonthlyCents: 320000,
+		Months: 10, FirstBilledMonth: 9, DueDay: 10, Active: true,
+		Fees: []domain.Fee{
+			{Name: "Material", AmountCents: 1000, Months: []int{9}},
+			{Name: "MATERIAL", AmountCents: 1000, Months: []int{2}},
+		},
+	}); err != nil {
+		t.Fatalf("a plan with the same fee in two different months was refused: %v", err)
+	}
+}
+
+// legacyDuplicate plants a concept-shaped inscription next to what the run
+// issued, as the pre-fix run left it.
+func legacyDuplicate(t *testing.T, f *fixture, name, slug string, cents int64) {
+	t.Helper()
+	enrolment, _ := f.repo.conceptOfKind(domain.KindEnrollment)
+	c, err := domain.NewCharge("dup-"+slug, testTenant, testStudent, testCycle, enrolment, name, cents, 0,
+		aug(2026, time.August, 10))
+	if err != nil {
+		t.Fatalf("new charge: %v", err)
+	}
+	c, err = c.WithExternalRef("enrollment:" + testCycle + ":" + testStudent + ":" + slug)
+	if err != nil {
+		t.Fatalf("ref: %v", err)
+	}
+	f.repo.charges[c.ID()] = c
+}

@@ -339,8 +339,10 @@ type FinanceRepository interface {
 	// empty studentID or cycleID skips that filter.
 	ListCharges(ctx context.Context, studentID, cycleID string) ([]ChargeWithPaid, error)
 	// ListIssuedLines returns the inscription and fee lines the billing run has
-	// already issued in a cycle (refs `enrollment:` and `fee:`), in any status,
-	// for one student or — with an empty studentID — for the whole cycle.
+	// already issued in a cycle (refs `enrollment:` and `fee:`) and not
+	// cancelled, for one student or — with an empty studentID — for the whole
+	// cycle. A cancelled line owes nothing and must not stop the right line
+	// being issued in its place (an exact ref still conflicts in the index).
 	//
 	// It is what lets the run recognise a line it issued under an older
 	// reference: a plan converted from one amount to concepts, or a line whose

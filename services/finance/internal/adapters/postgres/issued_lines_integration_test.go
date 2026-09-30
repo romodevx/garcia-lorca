@@ -18,7 +18,7 @@ import (
 
 // issuedFixture stores, for one school, the lines the run reads and the ones it
 // must not: a legacy and a concept inscription, a fee share, a tuition month, a
-// hand-made charge and a line of another cycle.
+// hand-made charge, a cancelled line and a line of another cycle.
 func issuedFixture(t *testing.T, tenant, hex string) (cycle, student string) {
 	t.Helper()
 	ctx := context.Background()
@@ -44,9 +44,14 @@ func issuedFixture(t *testing.T, tenant, hex string) (cycle, student string) {
 		charge("f03", cycle, "fee:"+cycle+":"+student+":graduacin:2026-09"),
 		charge("f04", cycle, "tuition:"+cycle+":"+student+":2026-09"),
 		charge("f05", other, "enrollment:"+other+":"+student),
+		charge("f07", cycle, "enrollment:"+cycle+":"+student+":cancelada"),
 	}
 	if _, err := repo.CreateChargesBulk(ctx, rows); err != nil {
 		t.Fatalf("create charges: %v", err)
+	}
+	// A cancelled line owes nothing: it must not stop the right one being issued.
+	if _, err := repo.CancelChargeIfUnpaid(ctx, id("f07")); err != nil {
+		t.Fatalf("cancel: %v", err)
 	}
 	// A charge typed by hand carries no ref; it is not the run's to recognise.
 	if _, err := repo.CreateCharge(ctx, charge("f06", cycle, "")); err != nil {

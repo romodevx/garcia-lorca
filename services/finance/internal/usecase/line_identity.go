@@ -1,24 +1,12 @@
 package usecase
 
 import (
-	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/garcia-lorca/services/finance/internal/domain"
 	"github.com/garcia-lorca/services/finance/internal/ports"
 )
-
-// The prefixes of the lines whose reference is built from a NAME the school
-// typed. Tuition and surcharges are named by month and by charge id, which
-// nobody re-spells, so they are not here.
-const (
-	enrollmentRefPrefix = "enrollment:"
-	feeRefPrefix        = "fee:"
-)
-
-// feePartSuffix is what feeDescription appends to a split fee, "(1 de 2)".
-var feePartSuffix = regexp.MustCompile(`\s*\(\d+ de \d+\)$`)
 
 // issuedLines is what the billing run has already issued in a cycle, indexed by
 // what each line IS rather than by the reference it happens to carry.
@@ -50,7 +38,7 @@ func newIssuedLines(lines []ports.IssuedLine) issuedLines {
 	}
 	for _, refs := range out {
 		// Deterministic choice when a ledger already holds the same line twice:
-		// the same reference on every run.
+		// the same reference on every run (see adopt for which one wins).
 		sort.Strings(refs)
 	}
 	return out
@@ -75,16 +63,26 @@ func (ix issuedLines) adopt(c domain.Charge) (adopted domain.Charge, priceable b
 	if len(refs) == 0 {
 		return c, true, nil
 	}
+	chosen := refs[0]
 	for _, existing := range refs {
 		if existing == ref {
 			return c, true, nil
 		}
 	}
-	adopted, err = c.WithExternalRef(refs[0])
+	for _, existing := range refs {
+		// A ledger that already holds the line in BOTH shapes (the defect this
+		// fixes, left in place) must keep answering to the charge of the
+		// wanted line's own shape: that is the one its ladder re-prices.
+		if sameShape(ref, existing) {
+			chosen = existing
+			break
+		}
+	}
+	adopted, err = c.WithExternalRef(chosen)
 	if err != nil {
 		return domain.Charge{}, false, err
 	}
-	return adopted, sameShape(ref, refs[0]), nil
+	return adopted, sameShape(ref, chosen), nil
 }
 
 // adoptAll applies adopt to every line, returning the lines to issue and the
@@ -116,21 +114,19 @@ func (ix issuedLines) adoptAll(lines []domain.Charge) (issue, priceable []domain
 // name "Inscripción" — which is exactly the concept a converted plan seeds.
 func lineIdentity(studentID, ref, description string) (string, bool) {
 	switch {
-	case strings.HasPrefix(ref, enrollmentRefPrefix):
+	case strings.HasPrefix(ref, domain.EnrollmentRefPrefix):
 		return studentID + "|enrollment|" + domain.LineKey(description), true
-	case strings.HasPrefix(ref, feeRefPrefix):
+	case strings.HasPrefix(ref, domain.FeeRefPrefix):
 		month := ref[strings.LastIndex(ref, ":")+1:]
-		name := feePartSuffix.ReplaceAllString(description, "")
-		return studentID + "|fee|" + domain.LineKey(name) + "|" + month, true
+		return studentID + "|fee|" + domain.LineKey(feeNameOf(description)) + "|" + month, true
 	}
 	return "", false
 }
 
-// sameShape reports whether two references were minted by the same kind of
-// plan: a single-amount inscription has one segment fewer than a concept line.
-// Cycle and student ids are UUIDs, so the colons counted are the separators.
+// sameShape reports whether two inscription references were minted by the same
+// kind of plan: both from a concept, or both from a single amount.
 func sameShape(a, b string) bool {
-	return strings.Count(a, ":") == strings.Count(b, ":")
+	return isConceptRef(a) == isConceptRef(b)
 }
 
 // conceptRefSeparators is how many colons an inscription minted from a concept
@@ -139,6 +135,7 @@ const conceptRefSeparators = 3
 
 // isConceptRef reports whether a reference is an inscription line minted from a
 // concept, as opposed to the single-amount `enrollment:<cycle>:<student>`.
+// Cycle and student ids are UUIDs, so the colons counted are the separators.
 func isConceptRef(ref string) bool {
-	return strings.HasPrefix(ref, enrollmentRefPrefix) && strings.Count(ref, ":") == conceptRefSeparators
+	return strings.HasPrefix(ref, domain.EnrollmentRefPrefix) && strings.Count(ref, ":") == conceptRefSeparators
 }

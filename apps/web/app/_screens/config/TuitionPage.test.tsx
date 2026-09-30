@@ -349,7 +349,7 @@ describe("dos renglones que sólo difieren en acentos", () => {
     await user.type(screen.getByLabelText("Nuevo concepto"), "INSCRIPCION");
     await user.click(screen.getByRole("button", { name: /Agregar concepto/ }));
 
-    // El concepto aún sin monto trae su propio aviso; basta con que uno diga cuál.
+    // The concept still has no price and raises its own alert; one of them must name it.
     expect(screen.getAllByRole("alert").map((a) => a.textContent).join(" ")).toMatch(/casi igual.*INSCRIPCION/);
     expect(screen.getAllByRole("button", { name: /^Quitar INSCRIPCI/ })).toHaveLength(1);
   });
@@ -369,5 +369,21 @@ describe("dos renglones que sólo difieren en acentos", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent(/GRADUACION/);
     expect(screen.getAllByRole("button", { name: /^Quitar GRADUACI/ })).toHaveLength(1);
+  });
+
+  it("sí deja la misma cuota en otro mes", async () => {
+    const user = userEvent.setup();
+    open();
+    await user.click(screen.getByRole("button", { name: /Cuotas/ }));
+    const addFee = async (name: string, monthIndex: number): Promise<void> => {
+      await user.type(screen.getByLabelText("Nombre de la cuota"), name);
+      await user.type(screen.getByLabelText("Monto total"), "1600");
+      await user.click(screen.getAllByRole("button", { pressed: false })[monthIndex]!);
+      await user.click(screen.getByRole("button", { name: /Agregar cuota/ }));
+    };
+    await addFee("MATERIAL", 0);
+    await addFee("MATERIAL", 3);
+
+    expect(screen.getAllByRole("button", { name: /^Quitar MATERIAL/ })).toHaveLength(2);
   });
 });
