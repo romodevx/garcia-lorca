@@ -43,10 +43,12 @@ import (
 	"github.com/garcia-lorca/pkg/pubsub"
 	"github.com/garcia-lorca/pkg/pubsub/gcp"
 	"github.com/garcia-lorca/services/finance/internal/adapters/configclient"
+	"github.com/garcia-lorca/services/finance/internal/adapters/gcsreceipts"
 	grpcadapter "github.com/garcia-lorca/services/finance/internal/adapters/grpc"
 	pgadapter "github.com/garcia-lorca/services/finance/internal/adapters/postgres"
 	pubsubadapter "github.com/garcia-lorca/services/finance/internal/adapters/pubsub"
 	"github.com/garcia-lorca/services/finance/internal/adapters/studentsclient"
+	"github.com/garcia-lorca/services/finance/internal/ports"
 	"github.com/garcia-lorca/services/finance/internal/usecase"
 )
 
@@ -249,7 +251,14 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	// warm, unlike this scale-to-zero service) purges each batch past config's
 	// restorable_until through PurgeLevelBatch.
 	levels := usecase.NewLevelArchiveService(repo, time.Now)
-	handler := grpcadapter.NewFinanceHandler(svc, health).WithLevelArchive(levels)
+	// T10: expenses and the cash cut. Receipts live in a private bucket; with
+	// EXPENSE_RECEIPTS_BUCKET unset, expenses work and receipts are off.
+	receipts, err := openReceiptStore(ctx, log)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	expenses := usecase.NewExpenseService(repo, svc, receipts, newID, time.Now)
+	handler := grpcadapter.NewFinanceHandler(svc, health).WithLevelArchive(levels).WithExpenses(expenses)
 	consumer := pubsubadapter.NewConsumer(svc, log)
 
 	mux := http.NewServeMux()
@@ -290,6 +299,29 @@ func openDB() (*gorm.DB, error) {
 
 func recoverFn(_ context.Context, _ connect.Spec, _ http.Header, _ any) error {
 	return connect.NewError(connect.CodeInternal, errors.New("internal error"))
+}
+
+// openReceiptStore opens the private bucket that keeps expense receipts (T10)
+// — the mechanism of the pupils' photos. EXPENSE_RECEIPTS_BUCKET unset means
+// receipts are off (nil store). Against the local emulator the bucket is
+// created on start; in the cloud it is Terraform's.
+func openReceiptStore(ctx context.Context, log *slog.Logger) (ports.ReceiptStore, error) {
+	bucket := os.Getenv("EXPENSE_RECEIPTS_BUCKET")
+	if bucket == "" {
+		log.Warn("EXPENSE_RECEIPTS_BUCKET not set; expense receipts are disabled")
+		return nil, nil
+	}
+	store, err := gcsreceipts.New(ctx, bucket)
+	if err != nil {
+		return nil, err
+	}
+	if os.Getenv("STORAGE_EMULATOR_HOST") != "" {
+		if err := store.EnsureBucket(ctx, envOr("GOOGLE_CLOUD_PROJECT", "local")); err != nil {
+			return nil, err
+		}
+	}
+	log.Info("finance receipt store ready", slog.String("bucket", bucket))
+	return store, nil
 }
 
 func envOr(key, fallback string) string {

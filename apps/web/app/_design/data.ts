@@ -53,6 +53,9 @@ export const MODULES: readonly ModuleDef[] = [
   // "Registro de Pagos" until the palette's own copy disagreed with it.
   { id: "payments", label: "Registro de pagos", icon: "card", color: "forest", desc: "Cobrar en ventanilla", badge: null, flag: "module_finance", perm: [["collections:read", "payments:write"], ["finance:read", "finance:write"]] },
   { id: "finance", label: "Finanzas", icon: "finance", color: "orange", desc: "Ingresos y adeudos", badge: null, flag: "module_finance", perm: "finance:read" },
+  // T10: what goes out, the balance and the reports. Its own permission
+  // (expenses:read, delegable) — finance:read stays owner-only.
+  { id: "expenses", label: "Egresos", icon: "trend", color: "red", desc: "Gastos, balance y reportes", badge: null, flag: "module_expenses", perm: "expenses:read" },
   // QR capture is deferred; the module ships as the daily pass list.
   // Any-of: directors/admins pass lists via attendance:read; teachers use their
   // self-scoped attendance_own:read surface. Either permission reveals the tile.

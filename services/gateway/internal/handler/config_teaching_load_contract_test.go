@@ -96,3 +96,32 @@ func TestTeachingLoadErrorsAreTextPlain(t *testing.T) {
 	assert.True(t, strings.HasPrefix(upstream.Header().Get("Content-Type"), "text/plain"))
 	assert.Equal(t, configSays, strings.TrimSpace(upstream.Body.String()))
 }
+
+// T10: the Egresos routes answer their failures as text/plain too
+// (http.Error and WriteConnectError), and the contract says so.
+func TestExpensesContractDocumentsPlainTextErrors(t *testing.T) {
+	doc := loadOpenAPI(t)
+	operations := []struct{ path, method string }{
+		{"/api/v1/expenses", "get"}, {"/api/v1/expenses", "post"},
+		{"/api/v1/expenses/{id}", "get"}, {"/api/v1/expenses/{id}", "put"},
+		{"/api/v1/expenses/{id}/cancel", "post"},
+		{"/api/v1/expenses/{id}/receipt", "get"}, {"/api/v1/expenses/{id}/receipt", "put"}, {"/api/v1/expenses/{id}/receipt", "delete"},
+		{"/api/v1/expense-categories", "get"}, {"/api/v1/expense-categories", "post"}, {"/api/v1/expense-categories/{id}", "put"},
+		{"/api/v1/expenses/summary", "get"}, {"/api/v1/expenses/reports", "get"},
+		{"/api/v1/expenses/reports/pdf", "get"}, {"/api/v1/expenses/reports/xlsx", "get"},
+		{"/api/v1/finance/cash-up/close", "post"}, {"/api/v1/finance/cash-up/reopen", "post"},
+	}
+	for _, op := range operations {
+		node, ok := doc.Paths[op.path][op.method]
+		require.True(t, ok, "%s %s is documented", op.method, op.path)
+		var operation openAPIOperation
+		require.NoError(t, node.Decode(&operation))
+		for status, response := range operation.Responses {
+			if !strings.HasPrefix(status, "4") || status == "413" {
+				continue
+			}
+			content := doc.resolve(t, response).Content
+			assert.Contains(t, content, "text/plain", "%s %s %s", op.method, op.path, status)
+		}
+	}
+}

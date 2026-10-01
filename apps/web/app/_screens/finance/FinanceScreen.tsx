@@ -20,6 +20,7 @@ import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 import { listStudents, type Student } from "../../students/api";
 
 import { API_URL } from "../../api-url";
+import type { CutAccess } from "./CashCutClosing";
 import { CashUpDrawer } from "./CashUpDrawer";
 import { IncomePanel } from "./IncomePanel";
 import { csvName, downloadCsv, toCsv, type CsvColumn } from "../../_lib/csv";
@@ -237,9 +238,11 @@ export interface FinanceScreenProps {
   notes?: NotesAccess;
   /** payments:edit: may correct a registered payment from the day's cut (T9). */
   canCorrectPayments?: boolean;
+  /** T10: expenses and closing the day in the cut. Absent: module_expenses is off. */
+  cutAccess?: CutAccess;
 }
 
-export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayments = false }: FinanceScreenProps): ReactElement {
+export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayments = false, cutAccess }: FinanceScreenProps): ReactElement {
   const [charges, setCharges] = useState<Charge[]>([]);
   const [overdueIds, setOverdueIds] = useState<Set<string>>(new Set());
   const [studentMap, setStudentMap] = useState<Map<string, Student>>(new Map());
@@ -469,7 +472,7 @@ export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayme
       </div>
 
       {pay !== null && <PayDrawer charge={pay.charge} name={pay.name} today={officeDay} notes={notes} onClose={() => setPay(null)} onPaid={onPaid} />}
-      {cashUp && <CashUpDrawer today={officeDay} canCorrect={canCorrectPayments} onClose={() => setCashUp(false)} />}
+      {cashUp && <CashUpDrawer today={officeDay} canCorrect={canCorrectPayments} cutAccess={cutAccess} onClose={() => setCashUp(false)} />}
       {toast !== null && (
         <div role="status" style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>
           <Icon name="check" size={20} stroke={2.6} />{toast}

@@ -589,6 +589,20 @@ type CashUp struct {
 	// Payments taken outside a deposit (a counter sale's). The totals count
 	// them: the money is in the drawer.
 	Payments []CashUpPayment `json:"payments"`
+	// T10: the day's expenses (cancelled ones listed, not counted), what they
+	// took out by method, and the cash the drawer should hold.
+	Expenses          []Expense    `json:"expenses"`
+	ExpensesByMethod  MethodTotals `json:"expensesByMethod"`
+	ExpectedCashCents int64        `json:"expectedCashCents"`
+	// Closure is the day's live closure; absent while the day is open.
+	Closure *CashCutClosure `json:"closure,omitempty"`
+	// ModifiedAfterClose: a movement of the day changed after it was closed.
+	ModifiedAfterClose bool `json:"modifiedAfterClose"`
+	// Reopened are the day's earlier, reopened closures, newest first.
+	Reopened []CashCutClosure `json:"reopened"`
+	// Day is the day this cut is (YYYY-MM-DD): the server's day when none
+	// was asked for. Closing sends it back, so the day on screen is closed.
+	Day string `json:"day"`
 }
 
 // CashUpPayment is a payment taken outside a deposit, with what it paid for.
@@ -631,7 +645,31 @@ func toCashUp(m *financev1.DailyCashUpResponse) CashUp {
 		TotalCents:      m.GetTotalCents(),
 		Payments:        payments,
 		CreditNoteCents: m.GetCreditNoteCents(),
+		// T10
+		Expenses:           toExpenses(m.GetExpenses()),
+		ExpensesByMethod:   toMethodTotals(m.GetExpensesByMethod()),
+		ExpectedCashCents:  m.GetExpectedCashCents(),
+		Closure:            optionalClosure(m.GetClosure()),
+		ModifiedAfterClose: m.GetModifiedAfterClose(),
+		Reopened:           toClosures(m.GetReopened()),
+		Day:                m.GetDay(),
 	}
+}
+
+func optionalClosure(c *financev1.CashCutClosure) *CashCutClosure {
+	if c == nil {
+		return nil
+	}
+	out := toCashCutClosure(c)
+	return &out
+}
+
+func toClosures(cs []*financev1.CashCutClosure) []CashCutClosure {
+	out := make([]CashCutClosure, 0, len(cs))
+	for _, c := range cs {
+		out = append(out, toCashCutClosure(c))
+	}
+	return out
 }
 
 func toDeposits(ds []*financev1.Deposit) []Deposit {

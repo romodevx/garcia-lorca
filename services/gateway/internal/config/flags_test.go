@@ -37,11 +37,11 @@ func TestParseEnabledModulesAcceptsFullKeys(t *testing.T) {
 }
 
 func TestAllModuleFlagsCoversRegistry(t *testing.T) {
-	// FLAGS.md registers 15 module flags; the enumeration must match so
+	// FLAGS.md registers 16 module flags; the enumeration must match so
 	// GET /features reports every module. (M14 added module_teachers; task 13,
-	// module_student_card.)
-	if len(config.AllModuleFlags) != 15 {
-		t.Errorf("AllModuleFlags has %d entries, want 15", len(config.AllModuleFlags))
+	// module_student_card; T10, module_expenses.)
+	if len(config.AllModuleFlags) != 16 {
+		t.Errorf("AllModuleFlags has %d entries, want 16", len(config.AllModuleFlags))
 	}
 	seen := map[string]bool{}
 	for _, k := range config.AllModuleFlags {

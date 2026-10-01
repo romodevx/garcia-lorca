@@ -152,6 +152,8 @@ describe("every live module's permission is one somebody can hold", () => {
     "teachers:read", "teachers:write",
     // Task 9: the counter's own permissions (iam 0021).
     "collections:read", "payments:write",
+    // T10: the Egresos module (iam 0027).
+    "expenses:read", "expenses:write",
   ]);
   // These carry a permission nobody is granted ON PURPOSE, so the tile hides
   // itself until the module exists.
@@ -184,5 +186,21 @@ describe("Registro de pagos is the counter (tarea 9)", () => {
     expect(isModuleVisible(byId("payments"), ["payments:write"])).toBe(false);
     expect(isModuleVisible(byId("payments"), ["collections:read"])).toBe(false);
     expect(isModuleVisible(byId("payments"), ["finance:write"])).toBe(false);
+  });
+});
+
+describe("Egresos (T10)", () => {
+  const egresos = MODULES.find((m) => m.id === "expenses") as ModuleDef;
+
+  it("is gated by its own flag and permission", () => {
+    expect(egresos.flag).toBe("module_expenses");
+    expect(isModuleVisible(egresos, ["expenses:read"])).toBe(true);
+  });
+
+  // finance:read is the owner's whole ledger; it does not open Egresos, and
+  // expenses:read does not open Finanzas.
+  it("does not ride on finance:read", () => {
+    expect(isModuleVisible(egresos, ["finance:read", "finance:write"])).toBe(false);
+    expect(isModuleVisible(MODULES.find((m) => m.id === "finance") as ModuleDef, ["expenses:read"])).toBe(false);
   });
 });

@@ -8,12 +8,15 @@ import { localISODate, shortDayLabel } from "../../_lib/localDate";
 import { ticketPath } from "../../receipts/api";
 import { formatCents } from "../../_lib/money";
 import { tenderLabel, tenderSummary } from "../../_design/payments/tenders";
+import { CashCutClosing, type CutAccess } from "./CashCutClosing";
 
 export interface CashUpPanelProps {
   /** The day the money changed hands, "2026-10-10". Empty means today. */
   day: string;
   /** Opens the correction of a receipt (T9). Absent: the caller may not correct (payments:edit). */
   onCorrect?: (deposit: Deposit) => void;
+  /** T10: expenses, expected cash and closing the day. Absent: module_expenses is off. */
+  access?: CutAccess;
 }
 
 /**
@@ -26,9 +29,11 @@ export interface CashUpPanelProps {
  * Cancelled deposits are shown, counted as nothing. Hiding them would leave a
  * gap between the receipts and the drawer that nobody could account for.
  */
-export function CashUpPanel({ day, onCorrect }: CashUpPanelProps): ReactElement {
+export function CashUpPanel({ day, onCorrect, access }: CashUpPanelProps): ReactElement {
   const [cut, setCut] = useState<CashUp | null>(null);
   const [failed, setFailed] = useState(false);
+  // Bumped after closing or reopening: the cut is read again, as the server has it.
+  const [reads, setReads] = useState(0);
 
   useEffect(() => {
     let live = true;
@@ -36,7 +41,7 @@ export function CashUpPanel({ day, onCorrect }: CashUpPanelProps): ReactElement 
       .then((c) => { if (live) { setCut(c); } })
       .catch(() => { if (live) { setFailed(true); } });
     return () => { live = false; };
-  }, [day]);
+  }, [day, reads]);
 
   if (failed) {
     return <p style={{ color: "var(--text-muted)", fontSize: 15 }}>No se pudo leer el corte del día.</p>;
@@ -77,6 +82,10 @@ export function CashUpPanel({ day, onCorrect }: CashUpPanelProps): ReactElement 
           </div>
         )}
       </div>
+
+      {access?.expenses === true && (
+        <CashCutClosing cut={cut} day={day} access={access} onChanged={() => setReads((n) => n + 1)} />
+      )}
 
       {cut.deposits.length === 0 && cut.cancelled.length === 0 && cut.superseded.length === 0 && cut.payments.length === 0 && (
         <p style={{ color: "var(--text-muted)", fontSize: 15, margin: 0 }}>No se recibió nada este día.</p>

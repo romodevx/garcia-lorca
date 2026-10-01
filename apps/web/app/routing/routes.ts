@@ -13,6 +13,7 @@ export type View =
   | { screen: "changePassword" }
   | { screen: "dashboard" }
   | { screen: "finance" }
+  | { screen: "expenses" }
   | { screen: "announcements" }
   | { screen: "payments" }
   | { screen: "config" }
@@ -45,6 +46,7 @@ const BY_SCREEN = {
   changePassword: "/cambiar-contrasena",
   dashboard: "/",
   finance: "/finanzas",
+  expenses: "/egresos",
   announcements: "/avisos",
   payments: "/pagos",
   config: "/configuracion",

@@ -17,6 +17,7 @@ import (
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/config"
+	"github.com/garcia-lorca/services/gateway/internal/expensereport"
 	"github.com/garcia-lorca/services/gateway/internal/handler"
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
 	"github.com/garcia-lorca/services/gateway/internal/receipt"
@@ -597,7 +598,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// (/charges/generate, /charges/{id}/discount, /charges/{id}/cancel) win over
 	// /charges under ServeMux's specificity rule.
 	// Who takes the money is named from iam's directory (task 7).
-	financeH := handler.NewFinanceHandler(financeClient, handler.WithNames(authClient))
+	financeH := handler.NewFinanceHandler(financeClient, handler.WithNames(authClient), handler.WithCutExtras(flags))
 	financeWrite := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("finance", requireAuthChanged(middleware.RequirePermission("finance:write")(http.HandlerFunc(h))))
 	}
@@ -665,6 +666,40 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// The overdue list is school-wide on purpose: it is the counter's own report
 	// (who to call), which the owner approved for this role (ADR 0015).
 	mux.Handle("GET /api/v1/finance/overdue", collectionsRead(http.HandlerFunc(financeH.ListOverdue)))
+
+	// T10 — Egresos: expenses, their categories and receipts, the period's
+	// income/expenses/balance and its reports (JSON, PDF, Excel), and closing
+	// the day's cash cut. The data lives in finance, so every route needs
+	// module_finance AND module_expenses (default OFF). Reads answer to
+	// expenses:read, writes and closing the cut to expenses:write (iam 0027:
+	// the owner's by default, delegable). Reopening a closed cut is the
+	// director's: finance:write. Reports carry aggregates only — no family is
+	// named — which is why expenses:read may be delegated while finance:read
+	// stays owner-only.
+	expenseReports := expensereport.NewBuilder(financeClient, configClient)
+	expensesH := handler.NewExpensesHandler(financeClient, expenseReports, authClient, time.Now)
+	expensesModule := func(perm string, h http.HandlerFunc) http.Handler {
+		return guard.Protect("finance", guard.Protect("expenses", requireAuthChanged(middleware.RequirePermission(perm)(h))))
+	}
+	expensesRead := func(h http.HandlerFunc) http.Handler { return expensesModule("expenses:read", h) }
+	expensesWrite := func(h http.HandlerFunc) http.Handler { return expensesModule("expenses:write", h) }
+	mux.Handle("GET /api/v1/expense-categories", expensesRead(expensesH.ListCategories))
+	mux.Handle("POST /api/v1/expense-categories", expensesWrite(expensesH.CreateCategory))
+	mux.Handle("PUT /api/v1/expense-categories/{id}", expensesWrite(expensesH.UpdateCategory))
+	mux.Handle("GET /api/v1/expenses/summary", expensesRead(expensesH.Summary))
+	mux.Handle("GET /api/v1/expenses/reports", expensesRead(expensesH.Report))
+	mux.Handle("GET /api/v1/expenses/reports/pdf", expensesRead(expensesH.ReportPDF))
+	mux.Handle("GET /api/v1/expenses/reports/xlsx", expensesRead(expensesH.ReportXLSX))
+	mux.Handle("GET /api/v1/expenses", expensesRead(expensesH.ListExpenses))
+	mux.Handle("POST /api/v1/expenses", expensesWrite(expensesH.CreateExpense))
+	mux.Handle("GET /api/v1/expenses/{id}", expensesRead(expensesH.GetExpense))
+	mux.Handle("PUT /api/v1/expenses/{id}", expensesWrite(expensesH.UpdateExpense))
+	mux.Handle("POST /api/v1/expenses/{id}/cancel", expensesWrite(expensesH.CancelExpense))
+	mux.Handle("PUT /api/v1/expenses/{id}/receipt", expensesWrite(expensesH.PutReceipt))
+	mux.Handle("GET /api/v1/expenses/{id}/receipt", expensesRead(expensesH.GetReceipt))
+	mux.Handle("DELETE /api/v1/expenses/{id}/receipt", expensesWrite(expensesH.DeleteReceipt))
+	mux.Handle("POST /api/v1/finance/cash-up/close", expensesWrite(expensesH.CloseCashCut))
+	mux.Handle("POST /api/v1/finance/cash-up/reopen", expensesModule("finance:write", expensesH.ReopenCashCut))
 
 	// M06 attendance (daily pass list): flag-guarded, authenticated + rotation-
 	// enforced, permission-gated. Saving a group·day is the only write

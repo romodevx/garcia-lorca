@@ -133,6 +133,9 @@ func TestIsOwnerOnly(t *testing.T) {
 		{"users:delete", true},
 		// T9 (owner answer 6): correcting payments is delegable.
 		{"payments:edit", false},
+		// T10 (owner answer 7): the Egresos module is delegable.
+		{"expenses:read", false},
+		{"expenses:write", false},
 		{"users:write", false},
 		{"config:write", false},
 		// Task 9: the counter's permissions are the Cobranza role's, so they

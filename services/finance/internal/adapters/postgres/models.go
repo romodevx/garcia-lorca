@@ -224,3 +224,82 @@ type outboxModel struct {
 }
 
 func (outboxModel) TableName() string { return "finance_outbox" }
+
+// --- T10: expenses and the cash cut (migration 0024) ------------------------
+
+// expenseCategoryModel is the GORM row for `expense_categories`.
+type expenseCategoryModel struct {
+	ID        string    `gorm:"column:id;primaryKey"`
+	TenantID  string    `gorm:"column:tenant_id"`
+	Name      string    `gorm:"column:name"`
+	Active    bool      `gorm:"column:active"`
+	CreatedAt time.Time `gorm:"column:created_at;default:now()"`
+	UpdatedAt time.Time `gorm:"column:updated_at;default:now()"`
+}
+
+func (expenseCategoryModel) TableName() string { return "expense_categories" }
+
+// expenseModel is the GORM row for `expenses`. SpentOn maps a `date`.
+type expenseModel struct {
+	ID                 string     `gorm:"column:id;primaryKey"`
+	TenantID           string     `gorm:"column:tenant_id"`
+	SpentOn            time.Time  `gorm:"column:spent_on"`
+	CategoryID         string     `gorm:"column:category_id"`
+	AmountCents        int64      `gorm:"column:amount_cents"`
+	Method             string     `gorm:"column:method"`
+	Description        string     `gorm:"column:description"`
+	Status             string     `gorm:"column:status"`
+	CancelReason       string     `gorm:"column:cancel_reason"`
+	CancelledAt        *time.Time `gorm:"column:cancelled_at"`
+	ReceiptKey         *string    `gorm:"column:receipt_key"`
+	ReceiptContentType *string    `gorm:"column:receipt_content_type"`
+	ReceiptSizeBytes   *int       `gorm:"column:receipt_size_bytes"`
+	CreatedBy          *string    `gorm:"column:created_by"`
+	CreatedByName      string     `gorm:"column:created_by_name"`
+	CreatedAt          time.Time  `gorm:"column:created_at;default:now()"`
+	UpdatedAt          time.Time  `gorm:"column:updated_at;default:now()"`
+	// CategoryName is read with the expense (a join), never written.
+	CategoryName string `gorm:"column:category_name;->"`
+}
+
+func (expenseModel) TableName() string { return "expenses" }
+
+// expenseEventModel is the GORM row for `expense_events`: one change of an
+// expense, before and after as JSON.
+type expenseEventModel struct {
+	ID              string    `gorm:"column:id;primaryKey"`
+	TenantID        string    `gorm:"column:tenant_id"`
+	ExpenseID       string    `gorm:"column:expense_id"`
+	Kind            string    `gorm:"column:kind"`
+	Before          []byte    `gorm:"column:before;type:jsonb"`
+	After           []byte    `gorm:"column:after;type:jsonb"`
+	Reason          string    `gorm:"column:reason"`
+	SpentOn         time.Time `gorm:"column:spent_on"`
+	PreviousSpentOn time.Time `gorm:"column:previous_spent_on"`
+	ActorID         *string   `gorm:"column:actor_id"`
+	ActorName       string    `gorm:"column:actor_name"`
+	At              time.Time `gorm:"column:at"`
+}
+
+func (expenseEventModel) TableName() string { return "expense_events" }
+
+// cashCutClosureModel is the GORM row for `cash_cut_closures`.
+type cashCutClosureModel struct {
+	ID                string     `gorm:"column:id;primaryKey"`
+	TenantID          string     `gorm:"column:tenant_id"`
+	Day               time.Time  `gorm:"column:day"`
+	ExpectedCashCents int64      `gorm:"column:expected_cash_cents"`
+	CountedCashCents  int64      `gorm:"column:counted_cash_cents"`
+	DifferenceCents   int64      `gorm:"column:difference_cents"`
+	Snapshot          []byte     `gorm:"column:snapshot;type:jsonb"`
+	Note              string     `gorm:"column:note"`
+	ClosedBy          *string    `gorm:"column:closed_by"`
+	ClosedByName      string     `gorm:"column:closed_by_name"`
+	ClosedAt          time.Time  `gorm:"column:closed_at"`
+	ReopenedAt        *time.Time `gorm:"column:reopened_at"`
+	ReopenedBy        *string    `gorm:"column:reopened_by"`
+	ReopenedByName    string     `gorm:"column:reopened_by_name"`
+	ReopenReason      string     `gorm:"column:reopen_reason"`
+}
+
+func (cashCutClosureModel) TableName() string { return "cash_cut_closures" }
