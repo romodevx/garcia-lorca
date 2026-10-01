@@ -64,17 +64,22 @@ func (s *FinanceService) CorrectDeposit(ctx context.Context, in CorrectionInput)
 	if paidAt.IsZero() {
 		paidAt = original.PaidAt()
 	}
+	chosen, err := s.withoutRidingFees(ctx, original.StudentID(), in.ChargeIDs)
+	if err != nil {
+		return CorrectionResult{}, err
+	}
 	deposit, planner, err := s.prepareDeposit(ctx, DepositInput{
 		StudentID: original.StudentID(), AmountCents: in.AmountCents, PaidAt: paidAt,
-		IdempotencyKey: in.IdempotencyKey, ChargeIDs: in.ChargeIDs,
+		IdempotencyKey: in.IdempotencyKey, ChargeIDs: chosen,
 		Receiver: original.ReceivedBy(), Tenders: in.Tenders,
 	})
 	if err != nil {
 		return CorrectionResult{}, err
 	}
 	record, replayed, err := s.repo.CorrectDeposit(ctx, ports.DepositCorrectionWrite{
-		OriginalID:   original.ID(),
-		Corrected:    deposit.WithCorrects(original.ID(), original.Folio()),
+		OriginalID: original.ID(),
+		// The link to the original is the repository's to write, under its lock.
+		Corrected:    deposit,
 		CorrectionID: s.newID(),
 		Reason:       in.Reason,
 		By:           in.By,
@@ -98,6 +103,34 @@ func (s *FinanceService) CorrectDeposit(ctx context.Context, in CorrectionInput)
 		Correction: record.Correction,
 		Replayed:   replayed,
 	}, nil
+}
+
+// withoutRidingFees drops, from the office's choice, the surcharges that ride
+// on a month: they are paid with their month (the planner never takes them as
+// debts of their own), and the one the original wrote is cancelled when it is
+// released. A receipt that paid a late month names both, and correcting it
+// must not be refused for that.
+func (s *FinanceService) withoutRidingFees(ctx context.Context, studentID string, ids []string) ([]string, error) {
+	if len(ids) == 0 {
+		return ids, nil
+	}
+	charges, err := s.repo.ListCharges(ctx, studentID, "")
+	if err != nil {
+		return nil, err
+	}
+	riding := make(map[string]bool, len(charges))
+	for _, c := range charges {
+		if _, ok := feeParent(c.Charge.ExternalRef()); ok {
+			riding[c.Charge.ID()] = true
+		}
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if !riding[id] {
+			out = append(out, id)
+		}
+	}
+	return out, nil
 }
 
 // correctionEvents is what a correction announces, queued inside its
@@ -151,6 +184,11 @@ func (s *FinanceService) DepositCorrections(ctx context.Context, depositID strin
 	if err != nil {
 		return CorrectionHistory{}, err
 	}
+	chain := chainOf(depositID, all)
+	if len(chain) == 0 {
+		// The ordinary case: never corrected, nothing to name.
+		return CorrectionHistory{Corrections: chain}, nil
+	}
 	charges, err := s.repo.ListCharges(ctx, d.StudentID(), "")
 	if err != nil {
 		return CorrectionHistory{}, err
@@ -159,7 +197,7 @@ func (s *FinanceService) DepositCorrections(ctx context.Context, depositID strin
 	for _, c := range charges {
 		descriptions[c.Charge.ID()] = c.Charge.Description()
 	}
-	return CorrectionHistory{Corrections: chainOf(depositID, all), Descriptions: descriptions}, nil
+	return CorrectionHistory{Corrections: chain, Descriptions: descriptions}, nil
 }
 
 // chainOf keeps the corrections linked to depositID through any number of

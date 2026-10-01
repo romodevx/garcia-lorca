@@ -1101,3 +1101,17 @@ func (f *fakeRepo) ListDepositCorrections(_ context.Context, studentID string) (
 	}
 	return out, nil
 }
+
+// setFolio stamps a folio on a stored deposit (the fake allocates none).
+func (f *fakeRepo) setFolio(id, folio string) {
+	for i, d := range f.deposits {
+		if d.ID() == id {
+			f.deposits[i] = d.WithFolio(folio)
+		}
+	}
+	for i, d := range f.deposits {
+		if d.Corrects() == id {
+			f.deposits[i] = d.WithCorrects(id, folio)
+		}
+	}
+}

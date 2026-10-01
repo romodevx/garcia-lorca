@@ -1789,6 +1789,12 @@ func (r *Repository) ListLoosePaymentsOn(ctx context.Context, day time.Time) ([]
 // a cashier keyed $67,000 instead of $6,700.
 func (r *Repository) VoidDeposit(ctx context.Context, d domain.Deposit) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		// The deposit row first, as CorrectDeposit takes it: a void and a
+		// correction of the same receipt queue on it instead of deadlocking
+		// over its payments and charges.
+		if _, err := lockedDeposit(tx, d.ID()); err != nil {
+			return err
+		}
 		if _, err := releaseDeposit(tx, d, false); err != nil {
 			return err
 		}
@@ -2070,19 +2076,21 @@ func storedCorrection(tx *gorm.DB, corrected domain.Deposit) (ports.CorrectionRe
 	return ports.CorrectionRecord{Original: originals[0], Corrected: stored, Correction: correction}, nil
 }
 
-// ListDepositCorrections returns every correction of a student's deposits,
-// oldest first (served by idx_deposit_corrections_student).
+// ListDepositCorrections returns a student's corrections, oldest first
+// (served by idx_deposit_corrections_student). Capped at maxListLimit, the
+// NEWEST kept: past the cap it is the oldest history that drops, never the
+// corrections that stand now.
 func (r *Repository) ListDepositCorrections(ctx context.Context, studentID string) ([]domain.DepositCorrection, error) {
 	var out []domain.DepositCorrection
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var rows []depositCorrectionModel
-		if err := tx.Where("student_id = ?", studentID).Order("corrected_at, id").
+		if err := tx.Where("student_id = ?", studentID).Order("corrected_at DESC, id DESC").
 			Limit(maxListLimit).Find(&rows).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "listing corrections", err)
 		}
 		out = make([]domain.DepositCorrection, 0, len(rows))
-		for _, m := range rows {
-			c, err := toDomainCorrection(m)
+		for i := len(rows) - 1; i >= 0; i-- {
+			c, err := toDomainCorrection(rows[i])
 			if err != nil {
 				return err
 			}

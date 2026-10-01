@@ -95,7 +95,8 @@ describe("CorrectPaymentDrawer (T9)", () => {
     const [, id, input] = api.correctDeposit.mock.calls[0] ?? [];
     expect(id).toBe(DEP);
     expect(input).toMatchObject({
-      amountCents: 100000, paidAt: "2026-09-09", reason: "Se capturó $500 y fueron $1,000",
+      // The day was not touched: the original's instant is kept (review T9).
+      amountCents: 100000, paidAt: "", reason: "Se capturó $500 y fueron $1,000",
       tenders: [{ method: "cash", amountCents: 100000 }], chargeIds: ["ch-sep"],
     });
     expect(input?.idempotencyKey).not.toBe("");
@@ -138,5 +139,32 @@ describe("CorrectPaymentDrawer (T9)", () => {
 
     expect(await within(dialog).findByText(/ya fue corregido por P-2026-000009/)).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "Guardar corrección" })).toBeNull();
+  });
+
+  it("sends the day only when it was changed", async () => {
+    const user = userEvent.setup();
+    const dialog = await open();
+    const day = within(dialog).getByLabelText(/Fecha de pago/);
+
+    await user.clear(day);
+    await user.type(day, "2026-09-05");
+    await user.type(within(dialog).getByRole("textbox", { name: /Motivo de la corrección/ }), "fecha");
+    await user.click(within(dialog).getByRole("button", { name: "Guardar corrección" }));
+
+    await waitFor(() => expect(api.correctDeposit).toHaveBeenCalledTimes(1));
+    expect(api.correctDeposit.mock.calls[0]?.[2]).toMatchObject({ paidAt: "2026-09-05" });
+  });
+
+  // Review T9: a payment taken after 18:00 local is stored on the next UTC
+  // day; opening it the same evening must not call its own day "future".
+  it("does not refuse the recorded day as future", async () => {
+    const user = userEvent.setup();
+    api.listDeposits.mockResolvedValue([{ ...deposit, paidAt: "2026-10-02T01:30:00Z" }]);
+    const dialog = await open();
+
+    await user.type(within(dialog).getByRole("textbox", { name: /Motivo de la corrección/ }), "monto");
+    await user.click(within(dialog).getByRole("button", { name: "Guardar corrección" }));
+
+    await waitFor(() => expect(api.correctDeposit).toHaveBeenCalledTimes(1));
   });
 });

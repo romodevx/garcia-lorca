@@ -306,3 +306,56 @@ func TestCorrectingAnUnknownDepositIsNotFound(t *testing.T) {
 		t.Errorf("err = %v, want not found", err)
 	}
 }
+
+// Review T9: a late receipt paid its month AND the surcharge riding on it; the
+// office's default choice sends both. The surcharge goes with its month, so the
+// correction is not refused for naming it.
+func TestACorrectionChoosingAMonthsSurchargeIsNotRefused(t *testing.T) {
+	f := depositFixture(t)
+	f.clock = time.Date(2026, time.October, 20, 12, 0, 0, 0, time.UTC)
+	late := deposit(t, f, 320000, "2026-10-20")
+	if len(late.Surcharges) != 1 {
+		t.Fatalf("surcharges = %d, want 1", len(late.Surcharges))
+	}
+	chosen := []string{}
+	for _, a := range late.Allocations {
+		chosen = append(chosen, a.ChargeID())
+	}
+	chosen = append(chosen, late.Surcharges[0].ID())
+
+	_, err := f.svc.CorrectDeposit(context.Background(), usecase.CorrectionInput{
+		DepositID: late.Deposit.ID(), AmountCents: 320000, Tenders: cashTender(320000), ChargeIDs: chosen,
+		PaidAt: time.Date(2026, time.October, 10, 0, 0, 0, 0, time.UTC), Reason: "fecha", By: director, IdempotencyKey: "corr-fee",
+	})
+	if err != nil {
+		t.Fatalf("CorrectDeposit: %v", err)
+	}
+}
+
+// Review T9: the family's ledger does not name a receipt it is never shown.
+func TestTheFamilyIsNotToldWhichReceiptWasReplaced(t *testing.T) {
+	f := depositFixture(t)
+	wrong := deposit(t, f, 50000, "2026-10-10")
+	got := correct(t, f, wrong.Deposit.ID(), 320000, "", "corr-family")
+	f.repo.setFolio(wrong.Deposit.ID(), "P-2026-000001")
+	family, err := f.svc.GetFamilyStatement(context.Background(), testStudent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range family.Movements {
+		if m.DepositID == got.Corrected.Deposit.ID() && m.CorrectsFolio != "" {
+			t.Errorf("family line names %q", m.CorrectsFolio)
+		}
+	}
+}
+
+// Review T9: a receipt never corrected has no history, and no charge is read
+// to name nothing.
+func TestAReceiptWithNoCorrectionsHasNoHistory(t *testing.T) {
+	f := depositFixture(t)
+	d := deposit(t, f, 50000, "2026-10-10")
+	got, err := f.svc.DepositCorrections(context.Background(), d.Deposit.ID())
+	if err != nil || len(got.Corrections) != 0 || got.Descriptions != nil {
+		t.Errorf("history = %+v (%v)", got, err)
+	}
+}

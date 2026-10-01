@@ -166,6 +166,12 @@ func depositMovements(deposits []domain.Deposit, family bool) []domain.Movement 
 		if !d.Counts() && family {
 			continue
 		}
+		corrects := d.CorrectsFolio()
+		if family {
+			// The family never sees the receipt it replaced; naming it would
+			// point at a folio missing from their own ledger.
+			corrects = ""
+		}
 		for _, t := range d.Tenders() {
 			out = append(out, domain.Movement{
 				Kind: tenderKind(t.Method()), Date: d.PaidAt(), Description: tenderDescription(t.Method()),
@@ -173,7 +179,7 @@ func depositMovements(deposits []domain.Deposit, family bool) []domain.Movement 
 				Method: t.Method(), CardType: t.CardType(), Reference: t.Reference(), Folio: d.Folio(),
 				Voided: d.Voided(), VoidReason: d.VoidReason(),
 				Superseded: d.Superseded(), SupersededByFolio: d.SupersededByFolio(),
-				CorrectsFolio: d.CorrectsFolio(),
+				CorrectsFolio: corrects,
 			})
 		}
 	}

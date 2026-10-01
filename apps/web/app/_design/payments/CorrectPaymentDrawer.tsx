@@ -115,7 +115,11 @@ function CorrectionForm({ data, today, onClose }: { data: Loaded; today: string;
   const { deposit } = data;
   const title = `Corregir pago ${deposit.folio ?? ""}`.trim();
   const [amount, setAmount] = useState(centsToPesosInput(deposit.amountCents));
-  const [paidAt, setPaidAt] = useState(deposit.paidAt.slice(0, 10));
+  // The recorded day as stored (the school's day is the UTC day). Untouched, it
+  // is not sent: the server keeps the original's instant, and a payment taken
+  // late in the evening is not refused as "future" by the office's clock.
+  const recordedDay = deposit.paidAt.slice(0, 10);
+  const [paidAt, setPaidAt] = useState(recordedDay);
   const [chosen, setChosen] = useState<readonly string[]>(data.paid);
   const [reason, setReason] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
@@ -145,6 +149,7 @@ function CorrectionForm({ data, today, onClose }: { data: Loaded; today: string;
     Number.isFinite(totalCents) && totalCents > 0 ? undefined : "Escribe el monto que la familia entregó.";
   const paidAtError = (): string | undefined => {
     if (paidAt === "") return "Elige el día del pago.";
+    if (paidAt === recordedDay) return undefined;
     return paidAt > today ? "La fecha del pago no puede estar en el futuro." : undefined;
   };
   const reasonError = (): string | undefined => {
@@ -167,7 +172,7 @@ function CorrectionForm({ data, today, onClose }: { data: Loaded; today: string;
     try {
       const result = await correctDeposit(API_URL, deposit.id, {
         amountCents: totalCents,
-        paidAt,
+        paidAt: paidAt === recordedDay ? "" : paidAt,
         tenders: tenders.toTenders(),
         chargeIds: [...chosen],
         reason: reason.trim(),
@@ -239,7 +244,7 @@ function CorrectionForm({ data, today, onClose }: { data: Loaded; today: string;
           label="Fecha de pago"
           required
           value={paidAt}
-          max={today}
+          max={recordedDay > today ? recordedDay : today}
           onChange={setPaidAt}
           error={errors.paidAt}
           onClearError={() => setErrors((e) => ({ ...e, paidAt: undefined }))}
